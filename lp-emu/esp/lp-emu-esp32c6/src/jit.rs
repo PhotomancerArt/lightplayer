@@ -32,20 +32,24 @@
 //! Nothing is copied and nothing about the guest's view of memory changes.
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::path::PathBuf;
 
 use lp_emu_core::{Bus, CycleModel};
 use lp_emu_esp_common::bus::{PERM_NONE, PERM_READ, PERM_READ_WRITE, PERMISSION_PAGE_LEN, SocBus};
 use lp_emu_jit::blocks::BlockSet;
 use lp_emu_jit::discover::{DiscoverStats, discover};
+use lp_emu_jit::dispatch::{BODY_BUDGET, emit_module, target_table_bytes, write_target_tables};
 use lp_emu_jit::host::{
     self, EXCHANGE_LEN, FLAG_AFTER_STORE, FLAG_SLICE_ENDED, HostOps, MMIO_LEAVE_AFTER, MMIO_OK,
     MMIO_PENDING, MMIO_REFUSED, MmioLoad, MmioStore, PERM_ENTRIES, PERM_SHIFT, STEP_CONTINUE,
     STEP_SLICE_ENDED, StepOne, load_kind, store_kind,
 };
 use lp_emu_jit::host_wasmtime::WasmtimeCore;
-use lp_emu_jit::translate::{Emit, Emitted, Layout, emit};
+use lp_emu_jit::translate::{Emit, Emitted, Layout};
 use lp_riscv_emu::mach::translated::{RunOutcome, TranslatedCore};
 use lp_riscv_emu::mach::{MachineHart, SliceEnd};
+
+use crate::jit_record::{CallRec, EntryRec, Recorder};
 
 /// Read the guest word at `pc` out of the arena, without touching the bus.
 ///
@@ -138,8 +142,10 @@ pub fn install(
     bus: &mut SocBus,
     seeds: &[u32],
     max_blocks: usize,
+    fn_blocks: usize,
     model: CycleModel,
     policy: Emit,
+    record: Option<&RecordRequest>,
 ) -> Result<BuildReport, String> {
     let walk = |bus: &SocBus, budget: usize| {
         let spans = bus.region_spans();
@@ -166,31 +172,160 @@ pub fn install(
         discover_us,
     };
 
-    let mut budget = whole.set.blocks.len().min(max_blocks);
-    let mut found = if budget < whole.set.blocks.len() {
+    let budget = whole.set.blocks.len().min(max_blocks);
+    let found = if budget < whole.set.blocks.len() {
         walk(bus, budget).0
     } else {
         whole
     };
+
+    // What halves now is the **per-function** budget, not the block set. P4
+    // halved the set, because one function was all there was and a refusal
+    // left no other lever; that cost coverage, which is the whole thing P5
+    // exists to stop paying. A module that will not build is now a module
+    // whose functions are too big, and the fix does not drop a block.
+    let mut per_fn = fn_blocks.max(MIN_BLOCKS);
     loop {
-        match JitCore::build(bus, &found.set, model, policy, discovery) {
+        match JitCore::build(bus, &found.set, model, policy, discovery, per_fn, record) {
             Ok(core) => {
                 let report = core.build_report();
+                if let Some(r) = record {
+                    emit_sizes(bus, &found.set, model, policy, r);
+                }
                 let entries = found.set.entries().to_vec();
                 hart.set_translated_core(Box::new(core), &entries);
                 return Ok(report);
             }
-            Err(e) if budget > MIN_BLOCKS => {
-                budget /= 2;
-                log::warn!("jit: {e}; retrying with {budget} blocks");
-                found = walk(bus, budget).0;
-                if found.set.is_empty() {
-                    return Err(e);
-                }
+            Err(e) if per_fn > MIN_BLOCKS => {
+                per_fn = (per_fn / 2).max(MIN_BLOCKS);
+                log::warn!("jit: {e}; retrying with {per_fn} blocks per function");
             }
             Err(e) => return Err(e),
         }
     }
+}
+
+/// Emit `set` at each of `record.sizes` and write the modules out beside the
+/// recording, so JD26's sizing table is five modules of one block set rather
+/// than five walks.
+///
+/// Best effort and loud about it: a size that will not emit is a finding for
+/// the table, not a reason to abandon a run that has a working core.
+fn emit_sizes(
+    bus: &mut SocBus,
+    set: &BlockSet,
+    model: CycleModel,
+    policy: Emit,
+    record: &RecordRequest,
+) {
+    if record.sizes.is_empty() {
+        return;
+    }
+    let Ok(at) = areas(bus, set) else { return };
+    let layout = Layout {
+        memory_pages: at.pages,
+        guest_base: bus.guest_arena_base(),
+        arena_offset: 0,
+        perm_offset: at.perm_at,
+        exchange_offset: at.exchange_at,
+        indirect: Some(at.indirect_at),
+    };
+    if let Err(e) = std::fs::create_dir_all(&record.dir) {
+        log::error!("jit: {}: {e}", record.dir.display());
+        return;
+    }
+    for &size in &record.sizes {
+        let started = std::time::Instant::now();
+        let emitted = emit_module(set, model, layout, policy, size);
+        let emit_us = started.elapsed().as_micros();
+        let path = record.dir.join(format!("size-{size}.wasm"));
+        match std::fs::write(&path, &emitted.wasm) {
+            Ok(()) => eprintln!(
+                "jit: size {size}: {} blocks in {} fn, {} B, largest body {} B ({} the \
+                 {}-byte budget), emitted in {:.1} ms -> {}",
+                set.blocks.len(),
+                emitted.functions,
+                emitted.wasm.len(),
+                emitted.max_body_bytes,
+                if emitted.max_body_bytes <= BODY_BUDGET {
+                    "under"
+                } else {
+                    "OVER"
+                },
+                BODY_BUDGET,
+                emit_us as f64 / 1000.0,
+                path.display(),
+            ),
+            Err(e) => log::error!("jit: {}: {e}", path.display()),
+        }
+    }
+}
+
+/// Discover the image, emit the module for it, and write it out — without
+/// asking any engine to compile it.
+///
+/// The JD26 sizing sweep's other half. A global block index does not depend on
+/// how the module is split, so the *recording* is taken once, under cranelift,
+/// and every other size is emitted by this and replayed against that same
+/// recording in `bun` and in `node`. Cranelift is then off the sizing loop
+/// entirely, which matters: it takes two minutes over the whole image and the
+/// engines take seconds.
+///
+/// # Errors
+///
+/// Nothing translatable, an arena with no room for the tables, or a path the
+/// filesystem refuses.
+pub fn emit_only(
+    bus: &mut SocBus,
+    seeds: &[u32],
+    fn_blocks: usize,
+    model: CycleModel,
+    policy: Emit,
+    path: &std::path::Path,
+) -> Result<String, String> {
+    let spans = bus.region_spans();
+    let base = bus.guest_arena_base();
+    let started = std::time::Instant::now();
+    let found = {
+        let arena = bus.guest_arena();
+        discover(seeds, usize::MAX, &mut |pc| {
+            arena_word(arena, base, &spans, pc)
+        })
+    };
+    let discover_us = started.elapsed().as_micros();
+    if found.set.is_empty() {
+        return Err("nothing translatable is reachable".to_string());
+    }
+    let at = areas(bus, &found.set)?;
+    write_permission_table(bus, at);
+    write_target_tables(bus.guest_arena_mut(), at.indirect_at, &found.set);
+    let layout = Layout {
+        memory_pages: at.pages,
+        guest_base: base,
+        arena_offset: 0,
+        perm_offset: at.perm_at,
+        exchange_offset: at.exchange_at,
+        indirect: Some(at.indirect_at),
+    };
+    let started = std::time::Instant::now();
+    let emitted = emit_module(&found.set, model, layout, policy, fn_blocks);
+    let emit_us = started.elapsed().as_micros();
+    std::fs::write(path, &emitted.wasm).map_err(|e| format!("{}: {e}", path.display()))?;
+    Ok(format!(
+        "emit-only: discovered {} blocks / {} instr in {:.1} ms; emitted {} B in {:.1} ms in \
+         {} fn x {} blocks (largest {} B, targets {} B, budget {}) -> {}",
+        found.stats.blocks,
+        found.stats.insts,
+        discover_us as f64 / 1000.0,
+        emitted.wasm.len(),
+        emit_us as f64 / 1000.0,
+        emitted.functions,
+        fn_blocks.min(found.set.blocks.len()),
+        emitted.max_body_bytes,
+        at.indirect_len,
+        BODY_BUDGET,
+        path.display(),
+    ))
 }
 
 /// The two permission encodings are separate constants in separate crates
@@ -232,6 +367,69 @@ pub struct JitStats {
     pub escape_hatch: u64,
     /// Guest instructions retired inside translated code, escapes included.
     pub retired: u64,
+    /// Times control left one sub-dispatcher for another (JD8). The number
+    /// the split's cost is read off; a high one against `retired` says the
+    /// per-function budget is too small for this image's call graph.
+    pub cross: u64,
+    /// Indirect jumps the target table could not resolve, so the stay left.
+    /// Every one of these is a host round trip P5 wanted to delete.
+    pub indirect_miss: u64,
+
+    // --- where the stays end, which is where the coverage goes -------------
+    //
+    // Installed coverage is not the same question as found coverage, and P5
+    // is where the difference stops being academic: with the whole image
+    // installed, every instruction the interpreter still retires is one that
+    // ran *between* stays. These say why the stays ended and how much the
+    // interpreter did before the next one began, so a shortfall names its own
+    // cause instead of being attributed by argument.
+    /// Exits whose pc is not a block this module holds. The stay could not be
+    /// resumed and the interpreter had to find its own way back.
+    pub exit_unknown_pc: u64,
+    /// Exits at a pc this module does hold — a budget, an after-store poll,
+    /// or a block whose own end left the set at a pc that happens to be a
+    /// start.
+    pub exit_known_pc: u64,
+    /// Exits carrying `FLAG_AFTER_STORE`: polling point (c), byte for byte
+    /// what an interpreted store does.
+    pub exit_after_store: u64,
+    /// Exits carrying `FLAG_SLICE_ENDED`.
+    pub exit_slice_ended: u64,
+    /// Entries that retired nothing: the first block did not fit the
+    /// remaining budget, so the hart's no-progress guard interprets it.
+    pub exit_no_progress: u64,
+    /// Guest instructions retired **between** stays, by the interpreter.
+    pub interpreted_between: u64,
+    /// Exits and the instructions the interpreter then retired, per
+    /// [`lp_emu_jit::host::why`] code. Indexed by the code itself, so a new
+    /// one shows up without this needing to know about it.
+    pub why: [(u64, u64); WHY_CODES],
+}
+
+/// How many [`lp_emu_jit::host::why`] codes there are, plus one for the zero
+/// slot no exit uses.
+pub const WHY_CODES: usize = 16;
+
+/// A `why` code's name, for the report.
+#[must_use]
+pub fn why_name(code: usize) -> &'static str {
+    match code as i32 {
+        host::why::BUDGET => "budget",
+        host::why::EDGE_OUT => "edge-out-of-set",
+        host::why::AFTER_STORE => "after-store",
+        host::why::INDIRECT_MISS => "indirect-miss",
+        host::why::INDIRECT_NO_TABLE => "indirect-no-table",
+        host::why::LOAD_REFUSED => "load-refused",
+        host::why::LOAD_STRADDLE => "load-straddle",
+        host::why::STORE_PERM => "store-perm",
+        host::why::STORE_REFUSED => "store-refused",
+        host::why::STORE_STRADDLE => "store-straddle",
+        host::why::UNDECODABLE => "undecodable",
+        host::why::ESCAPE_DIVERGED => "escape-diverged",
+        host::why::ESCAPE_TARGET => "escape-target",
+        host::why::SLICE_ENDED => "slice-ended",
+        _ => "unset",
+    }
 }
 
 /// What the walk found, before any host ceiling was applied.
@@ -239,6 +437,28 @@ pub struct JitStats {
 pub struct Discovery {
     pub stats: DiscoverStats,
     pub discover_us: u128,
+}
+
+/// Ask a core to record its own work for another engine to replay.
+///
+/// See [`crate::jit_record`]. Armed at every translation event and taken up
+/// by whichever core is alive when the run passes `after_cycles`, which is how
+/// a recording lands on the module JD5's *last* event installed rather than on
+/// one a `fence.i` has since replaced.
+#[derive(Clone, Debug)]
+pub struct RecordRequest {
+    pub dir: PathBuf,
+    pub after_cycles: u64,
+    pub entries: usize,
+    /// Extra blocks-per-function sizes to emit **the same block set** at,
+    /// beside the module the core itself is built from.
+    ///
+    /// This is what makes JD26's sizing table one recording rather than five.
+    /// A global block index does not depend on the split, so a module emitted
+    /// at any size answers the same recording — but only if it is emitted from
+    /// the *same* block set, and a second run's walk is not the same walk: the
+    /// guest publishes code, and what it published depends on what ran.
+    pub sizes: Vec<usize>,
 }
 
 /// What the machine asked for, so a report can say what it got.
@@ -254,6 +474,16 @@ pub struct BuildReport {
     pub emit_us: u128,
     pub compile_us: u128,
     pub instantiate_us: u128,
+    /// Sub-dispatchers in the module, not counting the outer selector.
+    pub functions: usize,
+    /// The largest sub-dispatcher body, in bytes.
+    pub max_body_bytes: usize,
+    /// The per-function block budget the module was actually emitted at,
+    /// which is not what the caller asked for when the caller asked for more
+    /// blocks than there are.
+    pub fn_blocks: usize,
+    /// What the indirect-target page map and its slot arrays took.
+    pub indirect_bytes: u32,
 }
 
 impl BuildReport {
@@ -269,7 +499,8 @@ impl BuildReport {
         let ms = |us: u128| us as f64 / 1000.0;
         format!(
             "{event}: discovered {} blocks / {} instr in {:.1} ms; installed {} blocks / {} instr; \
-             emitted {} B in {:.1} ms; compiled in {:.1} ms; instantiated in {:.2} ms",
+             emitted {} B in {:.1} ms in {} fn x {} blocks (largest {} B, targets {} B); \
+             compiled in {:.1} ms; instantiated in {:.2} ms",
             d.stats.blocks,
             d.stats.insts,
             ms(d.discover_us),
@@ -277,6 +508,10 @@ impl BuildReport {
             self.insts,
             self.module_bytes,
             ms(self.emit_us),
+            self.functions,
+            self.fn_blocks,
+            self.max_body_bytes,
+            self.indirect_bytes,
             ms(self.compile_us),
             ms(self.instantiate_us),
         )
@@ -298,6 +533,10 @@ pub struct C6Ops {
     /// The slice end the escape hatch reported, if any.
     slice_end: Option<SliceEnd>,
     escape_hatch: u64,
+    /// Every import call this entry made, in call order, while a recording is
+    /// running. Empty and never touched otherwise.
+    calls: Vec<CallRec>,
+    recording: bool,
 }
 
 // SAFETY: the pointers are only dereferenced from inside a `WasmtimeCore::enter`
@@ -334,7 +573,7 @@ impl HostOps for C6Ops {
             load_kind::W => bus.read_word(address),
             other => unreachable!("the translator emits no load kind {other}"),
         };
-        match read {
+        let out = match read {
             Ok(value) => MmioLoad {
                 // A load never makes the hart poll — the interpreter looks
                 // after a store, not after a load — but a peripheral's `read`
@@ -354,7 +593,19 @@ impl HostOps for C6Ops {
                 status: MMIO_REFUSED,
                 value: 0,
             },
+        };
+        if self.recording {
+            self.calls.push(CallRec {
+                kind: 0,
+                pc,
+                cycle,
+                address,
+                access: kind,
+                value: 0,
+                result: (u64::from(out.status) << 32) | u64::from(out.value),
+            });
         }
+        out
     }
 
     fn mmio_store(
@@ -374,7 +625,7 @@ impl HostOps for C6Ops {
             store_kind::W => bus.write_word(address, value as i32),
             other => unreachable!("the translator emits no store kind {other}"),
         };
-        match written {
+        let out = match written {
             Ok(()) => {
                 if bus.sideband_or_yield_pending() {
                     MMIO_LEAVE_AFTER
@@ -383,7 +634,19 @@ impl HostOps for C6Ops {
                 }
             }
             Err(_) => MMIO_REFUSED,
+        };
+        if self.recording {
+            self.calls.push(CallRec {
+                kind: 1,
+                pc,
+                cycle,
+                address,
+                access: kind,
+                value,
+                result: u64::from(out),
+            });
         }
+        out
     }
 
     fn step_one(&mut self, pc: u32, cycle: u64, instret: u64, regs: &mut [i32; 32]) -> StepOne {
@@ -443,46 +706,69 @@ pub struct JitCore {
     /// Something the core cannot recover from: a trap out of translated code,
     /// or a cost model that changed under the module. It stops being entered.
     dead: bool,
+    /// The pc and instruction count the last stay left at, so the next entry
+    /// can say how much the interpreter did in between.
+    last_exit: Option<(u32, u64, usize)>,
+    /// Exit pc to `(exits, instructions the interpreter then retired)`, kept
+    /// only under `LP_EMU_JIT_EXITS`. A coverage shortfall is a list of
+    /// addresses, and this is the list.
+    exit_sites: Option<BTreeMap<(u32, u32), (u64, u64)>>,
     /// Guest bytes this module was translated from have changed. Like
     /// [`dead`](Self::dead) it stops the core being entered, but it is not a
     /// bug — it is the module waiting to be replaced at the next translation
     /// event (JD5).
     stale: bool,
+    /// A recording in progress, and the cycle count it starts at.
+    recorder: Option<(Recorder, u64)>,
+    /// The module's own bytes, kept only while a recording wants them.
+    wasm: Option<Vec<u8>>,
+    /// Where the tables ended up, so a recording can say what a replay has to
+    /// reproduce.
+    at: Areas,
 }
 
-/// Where a translated module's three areas sit in the arena.
+/// Where a translated module's tables sit in the arena.
 #[derive(Clone, Copy, Debug)]
 struct Areas {
     perm_at: u32,
     exchange_at: u32,
+    /// The indirect-target page map; the slot arrays follow it.
+    indirect_at: u32,
+    /// What the page map and its slot arrays take, together.
+    indirect_len: u32,
     pages: u64,
 }
 
 /// Place the permission table and the exchange area in the arena's largest
 /// gap, and say how much of the arena a wasm memory can cover.
-fn areas(bus: &SocBus) -> Result<Areas, String> {
+fn areas(bus: &SocBus, set: &BlockSet) -> Result<Areas, String> {
     let arena_len = bus.guest_arena().len();
     let pages = (arena_len / 65536) as u64;
     if pages == 0 {
         return Err("the guest arena is smaller than one wasm page".into());
     }
-    let need = PERM_ENTRIES + EXCHANGE_LEN;
+    let indirect_len = u32::try_from(target_table_bytes(set))
+        .map_err(|_| "the indirect-target tables do not fit a 32-bit offset".to_string())?;
+    let need = u64::from(PERM_ENTRIES) + u64::from(EXCHANGE_LEN) + u64::from(indirect_len);
     let (gap_base, gap_len) = bus
         .largest_arena_gap()
         .ok_or_else(|| "the guest arena has no gap for the translator's tables".to_string())?;
-    if gap_len < need {
+    if u64::from(gap_len) < need {
         return Err(format!(
             "the arena's largest gap is {gap_len} bytes and the translator's tables need {need}"
         ));
     }
     let perm_at = gap_base - bus.guest_arena_base();
     let exchange_at = perm_at + PERM_ENTRIES;
-    if u64::from(exchange_at) + u64::from(EXCHANGE_LEN) > pages * 65536 {
+    let indirect_at = exchange_at + EXCHANGE_LEN;
+    if u64::from(indirect_at) + u64::from(indirect_len) > pages * 65536 {
         return Err("the translator's tables fall outside the wasm memory".into());
     }
     Ok(Areas {
         perm_at,
         exchange_at,
+        indirect_at,
+        indirect_len,
         pages,
     })
 }
@@ -536,9 +822,12 @@ impl JitCore {
         model: CycleModel,
         policy: Emit,
         discovery: Discovery,
+        fn_blocks: usize,
+        record: Option<&RecordRequest>,
     ) -> Result<Self, String> {
-        let at = areas(bus)?;
+        let at = areas(bus, set)?;
         write_permission_table(bus, at);
+        write_target_tables(bus.guest_arena_mut(), at.indirect_at, set);
 
         let layout = Layout {
             memory_pages: at.pages,
@@ -549,24 +838,22 @@ impl JitCore {
             arena_offset: 0,
             perm_offset: at.perm_at,
             exchange_offset: at.exchange_at,
+            indirect: Some(at.indirect_at),
         };
 
         let started = std::time::Instant::now();
-        let emitted: Emitted = emit(set, model, layout, policy);
+        let emitted: Emitted = emit_module(set, model, layout, policy, fn_blocks);
         let emit_us = started.elapsed().as_micros();
-        // wasm's implementation limit on a single function body, and this
-        // translator emits one function for the whole block set. Checked here
-        // rather than left to the engine, because every engine reports it
-        // differently and none of them say what to do about it. Two-level
-        // dispatch is P5's (JD8); until then the answer is a smaller set.
-        const MAX_FUNCTION_BODY: usize = 7_654_321;
-        if emitted.wasm.len() >= MAX_FUNCTION_BODY {
+        // wasm's implementation limit applies per **function**, not per
+        // module, and the split is what keeps every function under it.
+        // Checked here rather than left to the engine, because every engine
+        // reports it differently, none of them say what to do about it, and
+        // the answer — a smaller `fn_blocks` — is one the caller can act on.
+        if emitted.max_body_bytes > BODY_BUDGET {
             return Err(format!(
-                "{} blocks emit a {}-byte module and wasm caps one function body at \
-                 {MAX_FUNCTION_BODY} bytes; translate fewer blocks (--jit-blocks) until P5 \
-                 splits the module",
-                set.blocks.len(),
-                emitted.wasm.len(),
+                "at {fn_blocks} blocks per function the largest sub-dispatcher is {} bytes, \
+                 over the {BODY_BUDGET}-byte budget; use fewer (--jit-fn-blocks)",
+                emitted.max_body_bytes,
             ));
         }
 
@@ -595,6 +882,7 @@ impl JitCore {
         };
 
         let arena_len = bus.guest_arena().len();
+        let spans = bus.region_spans();
         // Straight from the arena, never a constant: this is what decides
         // whether the engine may elide its bounds checks, and only the
         // allocation knows whether there is really a guard behind it.
@@ -607,6 +895,8 @@ impl JitCore {
             exchange,
             slice_end: None,
             escape_hatch: 0,
+            calls: Vec::new(),
+            recording: false,
         };
         // SAFETY: `arena_base` is the bus's own arena, allocated once during
         // construction from the chip's declared memory map and documented as
@@ -622,6 +912,31 @@ impl JitCore {
                 .map_err(|e| format!("the translated module did not build: {e:?}"))?;
         let (compile_us, instantiate_us) = (core.compile_us(), core.instantiate_us());
 
+        // What a replay has to reproduce: the guest's own regions and the
+        // translator's tables, and never the ~200 MiB the arena spans between
+        // them — nothing reads it, and reading it would commit it.
+        let recorder = record.map(|r| {
+            // Clipped to the wasm memory, which is whole pages of the arena
+            // and so stops short of its tail — on the C6 that tail is all
+            // 16 KiB of LP SRAM, and a replay has no memory to put it in.
+            let reachable = (at.pages * 65536) as u32;
+            let mut live: Vec<(u32, u32, bool)> = spans
+                .iter()
+                .map(|&(base, len, _)| (base - arena_base, len, true))
+                .filter(|&(off, _, _)| off < reachable)
+                .map(|(off, len, v)| (off, len.min(reachable - off), v))
+                .collect();
+            live.push((at.perm_at, PERM_ENTRIES, false));
+            live.push((at.exchange_at, EXCHANGE_LEN, false));
+            live.push((at.indirect_at, at.indirect_len, false));
+            live.sort_unstable();
+            (
+                Recorder::new(r.dir.clone(), live, r.entries),
+                r.after_cycles,
+            )
+        });
+        let wasm = record.map(|_| emitted.wasm.clone());
+
         Ok(Self {
             core,
             index,
@@ -631,6 +946,11 @@ impl JitCore {
             verify_pending: false,
             dead: false,
             stale: false,
+            recorder,
+            wasm,
+            at,
+            last_exit: None,
+            exit_sites: std::env::var_os("LP_EMU_JIT_EXITS").map(|_| BTreeMap::new()),
             report: BuildReport {
                 discovery,
                 blocks: set.blocks.len(),
@@ -641,6 +961,10 @@ impl JitCore {
                 emit_us,
                 compile_us,
                 instantiate_us,
+                functions: emitted.functions,
+                max_body_bytes: emitted.max_body_bytes,
+                fn_blocks: fn_blocks.min(set.blocks.len()),
+                indirect_bytes: at.indirect_len,
             },
         })
     }
@@ -695,6 +1019,68 @@ impl JitCore {
                  the module is stale until the next translation event"
             );
         }
+    }
+
+    /// Write the recording out beside the module it is of, and say so.
+    ///
+    /// Called the moment the last entry lands rather than at the end of the
+    /// run, because this is where the arena and the module bytes are both in
+    /// hand and neither has to be kept alive for a caller that may never come.
+    fn finish_recording(&mut self, bus: &SocBus) {
+        let Some((r, _)) = self.recorder.as_ref() else {
+            return;
+        };
+        if r.escaped {
+            log::error!(
+                "jit: the escape hatch fired inside a recorded entry; \
+                 `crate::jit_record` does not carry that case, so no recording was written"
+            );
+            self.recorder = None;
+            self.wasm = None;
+            return;
+        }
+        let wasm = self.wasm.take().unwrap_or_default();
+        let out = r.finish(
+            &wasm,
+            bus.guest_arena(),
+            self.at.pages,
+            self.at.exchange_at,
+            self.report.fn_blocks,
+            self.report.blocks,
+        );
+        match out {
+            Ok(()) => eprintln!(
+                "jit: recorded {} entries into translated code to {}",
+                r.len(),
+                r.dir().display()
+            ),
+            Err(e) => log::error!("jit: the recording could not be written: {e}"),
+        }
+        self.recorder = None;
+    }
+
+    /// Whether this module could have been entered at `pc` — and if not, how
+    /// near it came.
+    ///
+    /// The distinction P5 measured and P4's census cannot make: the walk
+    /// reports the instructions it **found**, and a module can only be entered
+    /// at a block **start**. An indirect call into the middle of a block that
+    /// discovery found perfectly well is a pc this module has no label for, so
+    /// the stay leaves and the interpreter runs the whole function. "found"
+    /// and "enterable" are two different numbers, and only one of them is
+    /// coverage.
+    fn where_is(&self, pc: u32) -> String {
+        if self.index.contains_key(&pc) {
+            return "a block start".to_string();
+        }
+        let at = self.code.partition_point(|(start, _)| *start <= pc);
+        if at > 0 {
+            let (start, bytes) = &self.code[at - 1];
+            if pc < start.wrapping_add(bytes.len() as u32) {
+                return format!("inside the block at {start:#010x}");
+            }
+        }
+        "not discovered".to_string()
     }
 
     #[must_use]
@@ -776,8 +1162,35 @@ impl TranslatedCore<SocBus> for JitCore {
 
         self.stats.entries += 1;
         let (cycle, instret) = (hart.cycle_count(), hart.instruction_count());
+        if let Some((from, at_instret, why)) = self.last_exit.take() {
+            let gap = instret.saturating_sub(at_instret);
+            self.stats.interpreted_between += gap;
+            self.stats.why[why].1 += gap;
+            if let Some(sites) = self.exit_sites.as_mut() {
+                let slot = sites.entry((from, why as u32)).or_default();
+                slot.0 += 1;
+                slot.1 += gap;
+            }
+        }
+        // Arm the recording once the run is past the point the caller asked
+        // for, which is how it lands on the module the *last* translation
+        // event installed rather than one a `fence.i` has since replaced.
+        let delta = match &mut self.recorder {
+            Some((r, after)) if cycle >= *after && r.wants_more() => {
+                Some(r.before_entry(bus.guest_arena()))
+            }
+            _ => None,
+        };
+        let recording = delta.is_some();
+        let watch_in = watch;
+        let mut regs_in = [0i32; 31];
+        if recording {
+            regs_in.copy_from_slice(&hart.regs()[1..]);
+        }
         {
             let ops = self.core.ops_mut();
+            ops.recording = recording;
+            ops.calls.clear();
             let x = ops.exchange();
             for (i, r) in hart.regs().iter().enumerate() {
                 x[4 * i..][..4].copy_from_slice(&r.to_le_bytes());
@@ -790,6 +1203,8 @@ impl TranslatedCore<SocBus> for JitCore {
         let ops = self.core.ops_mut();
         ops.hart = core::ptr::null_mut();
         ops.bus = core::ptr::null_mut();
+        ops.recording = false;
+        let calls = core::mem::take(&mut ops.calls);
         let escaped = core::mem::take(&mut ops.escape_hatch);
         self.stats.escape_hatch += escaped;
         let slice_end = ops.slice_end.take();
@@ -809,6 +1224,7 @@ impl TranslatedCore<SocBus> for JitCore {
 
         // The module leaves the hart's own pc and counters where the exchange
         // area says, so the outcome and the hart agree.
+        let exit_why;
         let mut regs = *hart.regs();
         {
             let x = self.core.ops_mut().exchange();
@@ -825,12 +1241,76 @@ impl TranslatedCore<SocBus> for JitCore {
                     .try_into()
                     .expect("eight bytes"),
             );
+            self.stats.cross += u64::from_le_bytes(
+                x[host::EXCHANGE_CROSS as usize..][..8]
+                    .try_into()
+                    .expect("eight bytes"),
+            );
+            self.stats.indirect_miss += u64::from_le_bytes(
+                x[host::EXCHANGE_INDIRECT_MISS as usize..][..8]
+                    .try_into()
+                    .expect("eight bytes"),
+            );
+            exit_why = i32::from_le_bytes(
+                x[host::EXCHANGE_EXIT_WHY as usize..][..4]
+                    .try_into()
+                    .expect("four bytes"),
+            );
             regs[0] = 0;
             *hart.regs_mut() = regs;
             hart.set_pc(exit.pc);
             hart.set_counters(cycle_count, instruction_count);
             self.stats.retired += instruction_count.saturating_sub(instret);
         }
+
+        if let Some(delta) = delta {
+            let escaped_here = escaped > 0;
+            let regs = hart.regs();
+            let mut regs_out = [0i32; 31];
+            regs_out.copy_from_slice(&regs[1..]);
+            let rec = EntryRec {
+                entry,
+                cycle_in: cycle,
+                instret_in: instret,
+                end,
+                watch_lo: watch_in.0,
+                watch_hi: watch_in.1,
+                regs_in,
+                delta,
+                calls,
+                exit_pc: exit.pc,
+                flags: exit.flags,
+                cycle_out: hart.cycle_count(),
+                instret_out: hart.instruction_count(),
+                regs_out,
+            };
+            let (r, _) = self.recorder.as_mut().expect("armed above");
+            if escaped_here {
+                r.escaped = true;
+            }
+            r.after_entry(bus.guest_arena(), rec);
+            if r.done {
+                self.finish_recording(bus);
+            }
+        }
+
+        if exit.flags & FLAG_AFTER_STORE != 0 {
+            self.stats.exit_after_store += 1;
+        }
+        if exit.flags & FLAG_SLICE_ENDED != 0 {
+            self.stats.exit_slice_ended += 1;
+        }
+        if hart.instruction_count() == instret {
+            self.stats.exit_no_progress += 1;
+        }
+        if self.index.contains_key(&exit.pc) {
+            self.stats.exit_known_pc += 1;
+        } else {
+            self.stats.exit_unknown_pc += 1;
+        }
+        let why = (exit_why as usize).min(WHY_CODES - 1);
+        self.stats.why[why].0 += 1;
+        self.last_exit = Some((exit.pc, hart.instruction_count(), why));
 
         if exit.flags & FLAG_SLICE_ENDED != 0 {
             let end = slice_end.unwrap_or_else(|| {
@@ -869,6 +1349,31 @@ impl TranslatedCore<SocBus> for JitCore {
     }
 
     fn report(&self) -> String {
+        for (code, &(exits, gap)) in self.stats.why.iter().enumerate() {
+            if exits == 0 && gap == 0 {
+                continue;
+            }
+            eprintln!(
+                "jit: exits by reason: {:<18} {exits:>10} exit(s), {gap:>12} instructions \
+                 interpreted after",
+                why_name(code)
+            );
+        }
+        if let Some(sites) = self.exit_sites.as_ref() {
+            let mut top: Vec<(u32, u32, u64, u64)> = sites
+                .iter()
+                .map(|(&(pc, why), &(n, gap))| (pc, why, n, gap))
+                .collect();
+            top.sort_unstable_by(|a, b| b.3.cmp(&a.3));
+            for (pc, why, n, gap) in top.iter().take(24) {
+                eprintln!(
+                    "jit: exit {pc:#010x} ({}, {}): {n} time(s), {gap} instructions \
+                     interpreted after",
+                    why_name(*why as usize),
+                    self.where_is(*pc)
+                );
+            }
+        }
         let r = self.report;
         let s = self.stats;
         let d = r.discovery.stats;
@@ -876,9 +1381,12 @@ impl TranslatedCore<SocBus> for JitCore {
             "discovered {} blocks / {} instr from {} seeds ({} starts, {} ended undecodable, \
              {} named no code{}); \
              installed {} blocks / {} instr ({} emitted, {} escaped, {:.1} % static escape); \
-             module {} B, discover {:.2} ms, emit {:.2} ms, compile {:.2} ms, \
+             module {} B in {} fn x {} blocks (largest body {} B, target tables {} B), \
+             discover {:.2} ms, emit {:.2} ms, compile {:.2} ms, \
              instantiate {:.2} ms; \
-             entries {}, retired {}, escape_hatch {}, \
+             entries {}, retired {}, escape_hatch {}, cross {}, indirect_miss {}, \
+             interpreted_between {}, exits known/unknown {}/{}, after_store {}, \
+             slice_ended {}, no_progress {}, \
              invalidations {} (dropped {} blocks), \
              refused_pending {}, refused_watch {}, refused_no_entry {}, refused_impure {}, \
              refused_stale {}",
@@ -903,6 +1411,10 @@ impl TranslatedCore<SocBus> for JitCore {
                 100.0 * r.escaped_insts as f64 / r.insts as f64
             },
             r.module_bytes,
+            r.functions,
+            r.fn_blocks,
+            r.max_body_bytes,
+            r.indirect_bytes,
             r.discovery.discover_us as f64 / 1000.0,
             r.emit_us as f64 / 1000.0,
             r.compile_us as f64 / 1000.0,
@@ -910,6 +1422,14 @@ impl TranslatedCore<SocBus> for JitCore {
             s.entries,
             s.retired,
             s.escape_hatch,
+            s.cross,
+            s.indirect_miss,
+            s.interpreted_between,
+            s.exit_known_pc,
+            s.exit_unknown_pc,
+            s.exit_after_store,
+            s.exit_slice_ended,
+            s.exit_no_progress,
             s.invalidations,
             s.dropped_blocks,
             s.refused_pending,

@@ -57,6 +57,8 @@
 
 extern crate alloc;
 
+use alloc::collections::BTreeMap;
+
 use alloc::boxed::Box;
 use alloc::string::String;
 use alloc::vec::Vec;
@@ -146,41 +148,105 @@ pub trait TranslatedCore<B: Bus> {
     fn retired(&self) -> u64;
 }
 
-/// `log2` of the hart's entry table, which is direct-mapped by `pc >> 1`
-/// (RVC means block starts are 2-byte aligned, and 48.99 % of them sit at
-/// 2 mod 4 — indexing by `pc >> 2` would collide half the image with itself).
-///
-/// 16 bits is 64 K slots against the ~37,600 distinct block starts a render
-/// image executes. The table is a filter, not a map: a slot holds the one pc
-/// that claimed it, so a hit means "ask the core", a miss means "do not", and
-/// a collision costs an interpreted block rather than a wrong answer.
-pub const ENTRY_TABLE_BITS: u32 = 16;
-
-/// The number of slots in the entry table.
-pub const ENTRY_TABLE_SLOTS: usize = 1 << ENTRY_TABLE_BITS;
-
 /// A boxed [`TranslatedCore`].
 pub type BoxedCore<B> = Box<dyn TranslatedCore<B>>;
 
-/// The slot `pc` maps to.
-#[inline(always)]
-pub const fn entry_slot(pc: u32) -> usize {
-    (pc >> 1) as usize & (ENTRY_TABLE_SLOTS - 1)
+/// `log2` of the granularity the entry index's page map works at: one entry
+/// per 16 KiB of guest address space, the same page as the translator's
+/// permission table, so one shift serves both.
+pub const ENTRY_PAGE_SHIFT: u32 = 14;
+/// Entries in the page map: the whole 32-bit space, so a wild pc needs no
+/// bounds compare.
+pub const ENTRY_PAGES: usize = 1 << (32 - ENTRY_PAGE_SHIFT);
+/// `u64` words per page: one bit per 2-byte-aligned address in it.
+const WORDS_PER_PAGE: usize = (1 << ENTRY_PAGE_SHIFT) / 2 / 64;
+
+/// "May the hart enter translated code at this pc?", answered **exactly**, in
+/// two loads.
+///
+/// # Why this is not a filter any more
+///
+/// It was one: 64 K slots, direct-mapped by `pc >> 1`, first claim wins,
+/// sized in M7 P4 against the ~37,600 distinct block starts a render image
+/// executes. A collision cost an interpreted block, which was a fair trade
+/// while a module held two thousand of them.
+///
+/// P5 installs the **whole image** — 155,608 blocks on `render-basic` — and
+/// 155,608 pcs into 65,536 slots is not a filter, it is a 2.4× oversubscribed
+/// one that leaves under two fifths of the module's blocks reachable at all.
+/// Coverage measured 58.87 % with every block installed, and the exit census
+/// said why: the hart kept leaving translated code at a pc that *was* a block
+/// start and then could not get back in. So the index is exact.
+///
+/// # The shape
+///
+/// A page map over the whole 32-bit space at [`ENTRY_PAGE_SHIFT`], holding
+/// the word offset of that page's bitmap; a bitmap per 16 KiB page that holds
+/// at least one entry, one bit per 2-byte-aligned address; and **one shared
+/// all-zero bitmap** every other page points at, so a pc anywhere in the 4 GiB
+/// space is answered by the same two loads with no bounds check and no branch
+/// of its own.
+///
+/// 1 MiB for the page map plus 1 KiB per populated page — about 1.6 MiB for a
+/// render image, against 16 MiB for the 4-byte-per-slot table that would
+/// answer the same question directly.
+///
+/// Two-byte granularity is not an economy: **48.99 % of real block starts sit
+/// at 2 mod 4**, so a four-byte index would collide half the image with
+/// itself.
+#[derive(Clone, Debug, Default)]
+pub struct EntryIndex {
+    /// Word offset into [`Self::bits`] of each page's bitmap.
+    pages: Vec<u32>,
+    bits: Vec<u64>,
 }
 
-/// Build the hart's entry table from a core's entry pcs.
-///
-/// `0` means "no entry": pc 0 is not a legal entry on any machine this hart
-/// runs, so it costs nothing to spend it as the empty marker. First claim
-/// wins on a collision.
-#[must_use]
-pub fn entry_table(entries: &[u32]) -> Vec<u32> {
-    let mut table = alloc::vec![0u32; ENTRY_TABLE_SLOTS];
-    for &pc in entries {
-        let slot = entry_slot(pc);
-        if table[slot] == 0 {
-            table[slot] = pc;
+impl EntryIndex {
+    /// Build the index from a core's entry pcs.
+    #[must_use]
+    pub fn build(entries: &[u32]) -> Self {
+        let mut pages = alloc::vec![0u32; ENTRY_PAGES];
+        // Word 0 is the shared "nothing starts on this page" bitmap, so every
+        // page map entry has something valid to point at before any page is
+        // placed.
+        let mut bits = alloc::vec![0u64; WORDS_PER_PAGE];
+        let mut placed: BTreeMap<u32, u32> = BTreeMap::new();
+        for &pc in entries {
+            let page = pc >> ENTRY_PAGE_SHIFT;
+            let at = *placed.entry(page).or_insert_with(|| {
+                let at = bits.len() as u32;
+                bits.resize(bits.len() + WORDS_PER_PAGE, 0);
+                pages[page as usize] = at;
+                at
+            }) as usize;
+            let bit = ((pc & ((1 << ENTRY_PAGE_SHIFT) - 1)) >> 1) as usize;
+            bits[at + (bit >> 6)] |= 1u64 << (bit & 63);
         }
+        Self { pages, bits }
     }
-    table
+
+    /// Whether the hart may enter at `pc`. Exact: no false positives and no
+    /// false negatives.
+    #[inline(always)]
+    #[must_use]
+    pub fn contains(&self, pc: u32) -> bool {
+        if self.pages.is_empty() {
+            return false;
+        }
+        let at = self.pages[(pc >> ENTRY_PAGE_SHIFT) as usize] as usize;
+        let bit = ((pc & ((1 << ENTRY_PAGE_SHIFT) - 1)) >> 1) as usize;
+        self.bits[at + (bit >> 6)] >> (bit & 63) & 1 != 0
+    }
+
+    /// What the index costs, in bytes. Reported, because it is per machine and
+    /// a phone pays it.
+    #[must_use]
+    pub fn bytes(&self) -> usize {
+        self.pages.len() * 4 + self.bits.len() * 8
+    }
+
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.pages.is_empty()
+    }
 }

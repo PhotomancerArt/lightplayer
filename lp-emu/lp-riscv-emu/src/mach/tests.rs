@@ -1598,23 +1598,37 @@ fn a_cloned_hart_has_no_translated_core() {
     assert!(!rig.hart.clone().has_translated_core());
 }
 
-/// The entry table is direct-mapped by `pc >> 1`, because RVC puts 48.99 % of
-/// real block starts at 2 mod 4 — indexing by `pc >> 2` would fold half the
-/// image onto the other half.
+/// The entry index answers by halfword, because RVC puts 48.99 % of real
+/// block starts at 2 mod 4 — indexing by `pc >> 2` would fold half the image
+/// onto the other half — and it answers **exactly**, at every size. P4's
+/// 64 K-slot direct-mapped filter left under two fifths of a whole-image
+/// module's blocks reachable (M7 P5).
 #[test]
-fn the_entry_table_indexes_by_halfword() {
-    use super::translated::{entry_slot, entry_table};
-    assert_ne!(
-        entry_slot(RAM_BASE),
-        entry_slot(RAM_BASE + 2),
-        "two-byte-apart entries must not collide"
-    );
-    let table = entry_table(&[RAM_BASE, RAM_BASE + 2]);
-    assert_eq!(table[entry_slot(RAM_BASE)], RAM_BASE);
-    assert_eq!(table[entry_slot(RAM_BASE + 2)], RAM_BASE + 2);
-    // First claim wins on a collision; the loser costs an interpreted block,
-    // never a wrong answer.
-    let far = RAM_BASE + (1 << (super::translated::ENTRY_TABLE_BITS + 1));
-    assert_eq!(entry_slot(far), entry_slot(RAM_BASE));
-    assert_eq!(entry_table(&[RAM_BASE, far])[entry_slot(far)], RAM_BASE);
+fn the_entry_index_is_exact_at_every_size() {
+    use super::translated::EntryIndex;
+    let index = EntryIndex::build(&[RAM_BASE, RAM_BASE + 2]);
+    assert!(index.contains(RAM_BASE));
+    assert!(index.contains(RAM_BASE + 2));
+    assert!(!index.contains(RAM_BASE + 4), "nothing starts there");
+
+    // The addresses P4's table folded onto each other: one page apart, one
+    // table apart, and a whole region apart.
+    let far = [
+        RAM_BASE + (1 << 15),
+        RAM_BASE + (1 << 17),
+        RAM_BASE ^ 0x0200_0000,
+    ];
+    let mut all = alloc::vec![RAM_BASE];
+    all.extend_from_slice(&far);
+    let index = EntryIndex::build(&all);
+    for pc in all {
+        assert!(index.contains(pc), "{pc:#010x} is an entry");
+    }
+    // A pc nothing claimed, anywhere in the 4 GiB space, needs no bounds
+    // check of its own.
+    for pc in [0u32, 2, 0x2000_0000, 0xffff_fffe] {
+        assert!(!index.contains(pc), "{pc:#010x} starts nothing");
+    }
+    assert!(EntryIndex::default().is_empty());
+    assert!(!EntryIndex::default().contains(RAM_BASE));
 }

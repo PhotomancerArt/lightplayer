@@ -1562,7 +1562,39 @@ lp-emu-esp32c6 --elf <app.elf> [--rom <path>] [--time-grade t1|t2|t3]
     [--strict-grade modeled|documented|measured]
     [--strict-grade-blocks NAME[,NAME…]]
     [--probe <symbol>@<ms>] [--break-at <symbol>] [--hooks] [--map]
+    [--interpreter] [--jit] [--jit-report] [--blockprof]
+    [--jit-escape-all] [--jit-blocks <N>] [--jit-fn-blocks <N>]
+    [--jit-seeds all-symbols|entry-reachable]
+    [--jit-emit-only <path>]
+    [--jit-record <dir>] [--jit-record-after <cycles>]
+    [--jit-record-entries <n>] [--jit-record-sizes <a,b,…>]
 ```
+
+### The translated core (M7)
+
+`--jit` needs a build with `--features jit`; `wasmtime` is optional and never
+a default (JD18). `--interpreter` turns translation off entirely and must
+print an identical everything — it is the free oracle, and it costs nothing to
+run.
+
+| flag | what it does |
+|---|---|
+| `--jit` | translate the image to wasm at boot and at each guest `fence.i`, and run that instead of interpreting |
+| `--interpreter` | the free oracle: no translated core at all |
+| `--jit-report` | the boot-cost line per translation event (JD20), the coverage line, and the exit census — how many stays ended for each reason and how many instructions the interpreter then retired |
+| `--jit-escape-all` | emit no guest semantics at all; every instruction through the escape hatch. Complete, correct, slow, and the proof that a partial translator can only be slow and never wrong |
+| `--jit-blocks <N>` | a bound on how many discovered blocks are installed. **Unbounded by default since P5** — the whole image installs — and kept only for asking what a smaller set costs |
+| `--jit-fn-blocks <N>` | guest blocks per wasm sub-dispatcher. wasm caps a function body at 7,654,321 bytes, so the module is a selector over as many functions as the image needs; this sizes one. Default **256**, chosen by measurement in both engines — `lp-emu-jit/README.md` has the table. A module the host refuses halves this and retries, and never drops a block |
+| `--jit-seeds <scope>` | `all-symbols` (default) or `entry-reachable`. The second finds one block at boot and 7.7 % of the instructions at a `fence.i`; it exists so the table in `lp-emu-jit/README.md` is a measurement rather than an assumption |
+| `--jit-emit-only <path>` | emit the module and write it out instead of installing it, then carry on interpreted. No engine compiles anything, which is what makes a size sweep seconds rather than minutes |
+| `--jit-record <dir>` | record entries into translated code — the arguments, every import answer in call order, what changed in guest memory between them, and what each entry produced — so `scripts/emu/jit-image-bench.mjs` can replay the same module in `bun` and `node` (JD26) |
+| `--jit-record-after <cycles>` | start recording once the run has charged this many guest cycles, so the recording lands on the module the **last** translation event installed (default 700,000,000, past both `fence.i`) |
+| `--jit-record-entries <n>` | how many entries to record (default 20,000) |
+| `--jit-record-sizes <a,b,…>` | also emit **the same block set** at each of these blocks-per-function, beside the recording. One walk, one recording, every size |
+
+`LP_EMU_JIT_EXITS=1` adds the twenty-four exit sites that cost the most, each
+with why the stay ended there and whether the module could have been entered
+at that pc at all.
 
 `--exit-on` stops at the **end of the line** the match is on, not at the
 match, and it watches **both** consoles — UART0 and the USB link — because

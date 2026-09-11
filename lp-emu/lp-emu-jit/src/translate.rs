@@ -50,17 +50,15 @@ use alloc::borrow::Cow;
 use alloc::vec::Vec;
 
 use lp_emu_core::{CycleModel, InstClass};
-use wasm_encoder::{
-    BlockType, CodeSection, EntityType, ExportKind, ExportSection, Function, FunctionSection,
-    ImportSection, Instruction as I, MemArg, MemoryType, Module, TypeSection, ValType,
-};
+use wasm_encoder::{BlockType, Function, Instruction as I, MemArg, ValType};
 
 use crate::blocks::{Block, BlockEnd, BlockSet};
 use crate::decode::{Cond, Decoded, Inst, LoadKind, Op, OpI, StoreKind};
 use crate::host::{
-    EXCHANGE_CYCLE, EXCHANGE_FLAGS, EXCHANGE_INSTRET, EXCHANGE_REGS, EXCHANGE_STATUS,
-    FLAG_AFTER_STORE, FLAG_SLICE_ENDED, MMIO_LEAVE_AFTER, MMIO_PENDING, MMIO_REFUSED,
-    PERM_READ_WRITE, PERM_SHIFT, load_kind, store_kind,
+    EXCHANGE_CYCLE, EXCHANGE_EXIT_WHY, EXCHANGE_FLAGS, EXCHANGE_INDIRECT_MISS, EXCHANGE_INSTRET,
+    EXCHANGE_REGS, EXCHANGE_STATUS, FLAG_AFTER_STORE, FLAG_PENDING, FLAG_SLICE_ENDED,
+    MMIO_LEAVE_AFTER, MMIO_PENDING, MMIO_REFUSED, PERM_READ_WRITE, PERM_SHIFT, load_kind,
+    store_kind, why,
 };
 
 /// The module the host imports `memory` from, and the module the three
@@ -99,6 +97,15 @@ pub struct Layout {
     pub perm_offset: u32,
     /// Where the exchange area starts. See [`crate::host`].
     pub exchange_offset: u32,
+    /// Where the indirect-target page map starts, when the host built one.
+    ///
+    /// This is what makes `jalr` — every guest **return** — an in-module
+    /// branch instead of an exit (P5). See [`crate::dispatch`] for the two
+    /// tables' shape and for why they are two. `None` emits P3's behaviour:
+    /// every indirect jump leaves. A host that passes `Some` is promising the
+    /// page map is fully initialised, because a partly-written one would read
+    /// guest data as a block id.
+    pub indirect: Option<u32>,
 }
 
 /// Which instruction classes the translator emits itself. Everything else goes
@@ -130,7 +137,7 @@ impl Emit {
     };
 }
 
-/// What one call to [`emit`] produced.
+/// What one call to [`emit`](crate::dispatch::emit_module) produced.
 #[derive(Clone, Debug)]
 pub struct Emitted {
     pub wasm: Vec<u8>,
@@ -138,6 +145,12 @@ pub struct Emitted {
     pub native_insts: usize,
     /// Instructions the module hands to `step_one`.
     pub escaped_insts: usize,
+    /// Sub-dispatchers, not counting the outer selector.
+    pub functions: usize,
+    /// The largest sub-dispatcher body, in bytes. The number the wasm
+    /// function-size limit applies to, and the reason a module is sized by
+    /// blocks-per-function rather than by blocks (JD8, JD26).
+    pub max_body_bytes: usize,
 }
 
 impl Emitted {
@@ -183,11 +196,35 @@ const L_PERM_HI: u32 = 45;
 const L_STATUS: u32 = 46;
 const L_T64: u32 = 47;
 const L_T: u32 = 48;
+/// Set when the value in [`L_EXIT_PC`] is a **global block index** to continue
+/// at in another sub-dispatcher, rather than a guest pc to leave at (P5).
+const L_CROSS: u32 = 49;
+/// The global block index an indirect jump's target lookup produced, or `-1`.
+const L_GID: u32 = 50;
+/// Why the stay is ending. Reported at the exit, never acted on.
+const L_WHY: u32 = 51;
 
-const F_MMIO_LOAD: u32 = 0;
-const F_MMIO_STORE: u32 = 1;
-const F_STEP_ONE: u32 = 2;
-const F_RUN: u32 = 3;
+/// The locals every sub-dispatcher declares, past its six parameters.
+///
+/// One list, in one place, because the indices above are hand-assigned and a
+/// mismatch is a validation error a hundred kilobytes into a function body.
+fn body_locals() -> Vec<(u32, ValType)> {
+    alloc::vec![
+        (31, ValType::I32), // x1..x31
+        (2, ValType::I64),  // cycle, instret
+        (8, ValType::I32),  // exit pc, flags, next, pending, address, perm x2, status
+        (1, ValType::I64),  // the 64-bit scratch an mmio load returns into
+        (1, ValType::I32),  // the 32-bit scratch a divide needs
+        (3, ValType::I32),  // the cross-function flag, the resolved block id, the exit reason
+    ]
+}
+
+pub(crate) const F_MMIO_LOAD: u32 = 0;
+pub(crate) const F_MMIO_STORE: u32 = 1;
+pub(crate) const F_STEP_ONE: u32 = 2;
+/// The first function index a sub-dispatcher can have: the three imports come
+/// first, and the module defines everything after them.
+pub(crate) const F_FIRST_BODY: u32 = 3;
 
 fn memarg(offset: u64) -> MemArg {
     MemArg {
@@ -206,7 +243,12 @@ struct Emitter<'a> {
     layout: Layout,
     policy: Emit,
     live: &'a [u8],
-    /// The index of the last block, so branch depths can be computed.
+    /// The global index of this sub-dispatcher's first block. Every `k` in
+    /// this emitter is **chunk-relative**; every index in `set.index` and in
+    /// the target table is global, and `lo` is the one place the two meet.
+    lo: usize,
+    /// The index of the last block *in this chunk*, so branch depths can be
+    /// computed.
     last: usize,
     /// Nesting added by `if`s inside the current block body.
     extra: u32,
@@ -279,7 +321,9 @@ impl Emitter<'_> {
 
     /// Leave the stay at `pc` — or at the address in [`L_ADDR`] when `None` —
     /// after charging `cycles` and retiring `retired`.
-    fn exit(&mut self, k: usize, pc: Option<u32>, cycles: u64, retired: u32, flags: i32) {
+    fn exit(&mut self, k: usize, pc: Option<u32>, cycles: u64, retired: u32, flags: i32, why: i32) {
+        self.i(I::I32Const(why));
+        self.i(I::LocalSet(L_WHY));
         self.add_cycles(cycles);
         self.add_retired(retired);
         match pc {
@@ -294,25 +338,53 @@ impl Emitter<'_> {
         self.i(I::Br(self.exit_depth(k)));
     }
 
-    /// Continue at `target`, wherever it is. Counters are already charged.
-    fn goto(&mut self, k: usize, target: u32) {
-        match self.set.index.get(&target).copied() {
+    /// Leave for the block whose **global** index is `g`, which this
+    /// sub-dispatcher does not hold: hand it to the outer selector (JD8).
+    ///
+    /// Everything a stay carries is flushed by the same epilogue an exit uses
+    /// — the counters, the live registers and the pending-yield obligation —
+    /// and the next sub-dispatcher's prologue reloads exactly the same things
+    /// (JD17). The one difference is the return value: `L_CROSS` says the
+    /// `i32` is a block index rather than a guest pc.
+    fn cross(&mut self, k: usize, g: usize) {
+        self.i(I::I32Const(g as i32));
+        self.i(I::LocalSet(L_EXIT_PC));
+        self.i(I::I32Const(1));
+        self.i(I::LocalSet(L_CROSS));
+        self.i(I::Br(self.exit_depth(k)));
+    }
+
+    /// Continue at the block whose global index is `g`, wherever it lives.
+    fn goto_index(&mut self, k: usize, g: usize) {
+        let local = g.checked_sub(self.lo).filter(|&j| j <= self.last);
+        match local {
             // A forward edge branches straight to the target's label.
             Some(j) if j > k => self.i(I::Br(self.body_depth(k, j))),
-            // A back edge goes through the dispatcher.
+            // A back edge goes through this function's own dispatcher.
             Some(j) => {
                 self.i(I::I32Const(j as i32));
                 self.i(I::LocalSet(L_NEXT));
                 self.i(I::Br(self.dispatch_depth(k)));
             }
-            None => self.exit(k, Some(target), 0, 0, 0),
+            None => self.cross(k, g),
+        }
+    }
+
+    /// Continue at `target`, wherever it is. Counters are already charged.
+    fn goto(&mut self, k: usize, target: u32) {
+        match self.set.index.get(&target).copied() {
+            Some(g) => self.goto_index(k, g),
+            None => self.exit(k, Some(target), 0, 0, 0, why::EDGE_OUT),
         }
     }
 
     /// Continue at `pc`, which costs nothing at all when it is the block laid
-    /// out next — control simply falls out of this body into that one.
+    /// out next **in this function** — control simply falls out of this body
+    /// into that one. The block after the chunk's last is another function's,
+    /// so there is nothing to fall into and the edge goes through the
+    /// selector like any other.
     fn fall_through(&mut self, k: usize, pc: u32) {
-        if self.set.blocks.get(k + 1).is_some_and(|b| b.pc == pc) {
+        if k < self.last && self.set.blocks[self.lo + k + 1].pc == pc {
             return;
         }
         self.goto(k, pc);
@@ -377,6 +449,8 @@ impl Emitter<'_> {
         self.i(I::LocalSet(L_EXIT_PC));
         self.i(I::I32Const(FLAG_SLICE_ENDED));
         self.i(I::LocalSet(L_FLAGS));
+        self.i(I::I32Const(why::SLICE_ENDED));
+        self.i(I::LocalSet(L_WHY));
         self.i(I::Br(self.exit_depth(k)));
         self.extra -= 1;
         self.i(I::End);
@@ -392,7 +466,7 @@ impl Emitter<'_> {
         self.i(I::I32Ne);
         self.i(I::If(BlockType::Empty));
         self.extra += 1;
-        self.exit(k, None, 0, 0, 0);
+        self.exit(k, None, 0, 0, 0, why::ESCAPE_DIVERGED);
         self.extra -= 1;
         self.i(I::End);
     }
@@ -425,7 +499,91 @@ impl Emitter<'_> {
             self.extra -= 1;
             self.i(I::End);
         }
-        self.exit(k, None, 0, 0, 0);
+        self.exit(k, None, 0, 0, 0, why::ESCAPE_TARGET);
+    }
+
+    // --- indirect jumps -----------------------------------------------------
+
+    /// Continue at the address in [`L_ADDR`], resolved through the target
+    /// table (P5): two loads, no search, no host call.
+    ///
+    /// `jalr` is every guest **return**, so P3's "an indirect jump always
+    /// leaves" put a host round trip on the most common control transfer in
+    /// the program and capped what installing more blocks could ever buy.
+    /// The table answers "does a block start at this pc, and which one" in
+    /// O(1) for every executable address, and the answer is a *global* block
+    /// index, so a return into another sub-dispatcher is a cross-function
+    /// edge rather than an exit.
+    ///
+    /// Counters are charged before the lookup, so every path out of here —
+    /// resolved, cross, or missed — leaves them exactly where an exit would
+    /// (JD17).
+    fn indirect(&mut self, k: usize, cycles: u64, retired: u32) {
+        self.add_cycles(cycles);
+        self.add_retired(retired);
+        let Some(pagemap) = self.layout.indirect else {
+            // No table: P3's behaviour, and the shape every test that does
+            // not build one still gets.
+            self.exit(k, None, 0, 0, 0, why::INDIRECT_NO_TABLE);
+            return;
+        };
+
+        // slots = pagemap[addr >> PERM_SHIFT]; gid = slots[(addr & mask) >> 1]
+        self.i(I::LocalGet(L_ADDR));
+        self.i(I::I32Const(PERM_SHIFT as i32));
+        self.i(I::I32ShrU);
+        self.i(I::I32Const(2));
+        self.i(I::I32Shl);
+        self.i(I::I32Load(memarg(u64::from(pagemap))));
+        self.i(I::LocalGet(L_ADDR));
+        self.i(I::I32Const(((1u32 << PERM_SHIFT) - 1) as i32));
+        self.i(I::I32And);
+        // The pc has already had its low bit cleared, so halving the offset
+        // and scaling by the four-byte slot is one left shift.
+        self.i(I::I32Const(1));
+        self.i(I::I32Shl);
+        self.i(I::I32Add);
+        self.i(I::I32Load(memarg(0)));
+        self.i(I::LocalTee(L_GID));
+
+        // Miss: no block starts there. Count it and leave.
+        self.i(I::I32Const(-1));
+        self.i(I::I32Eq);
+        self.i(I::If(BlockType::Empty));
+        self.extra += 1;
+        let miss_at = self.exchange(EXCHANGE_INDIRECT_MISS);
+        self.i(I::I32Const(0));
+        self.i(I::I32Const(0));
+        self.i(I::I64Load(miss_at));
+        self.i(I::I64Const(1));
+        self.i(I::I64Add);
+        self.i(I::I64Store(miss_at));
+        self.exit(k, None, 0, 0, 0, why::INDIRECT_MISS);
+        self.extra -= 1;
+        self.i(I::End);
+
+        // In this function: straight into the dispatcher. `lo` is folded in,
+        // so this is one subtract and one unsigned compare.
+        self.i(I::LocalGet(L_GID));
+        self.i(I::I32Const(self.lo as i32));
+        self.i(I::I32Sub);
+        self.i(I::LocalTee(L_T));
+        self.i(I::I32Const(self.last as i32 + 1));
+        self.i(I::I32LtU);
+        self.i(I::If(BlockType::Empty));
+        self.extra += 1;
+        self.i(I::LocalGet(L_T));
+        self.i(I::LocalSet(L_NEXT));
+        self.i(I::Br(self.dispatch_depth(k)));
+        self.extra -= 1;
+        self.i(I::End);
+
+        // Somewhere else in the module.
+        self.i(I::LocalGet(L_GID));
+        self.i(I::LocalSet(L_EXIT_PC));
+        self.i(I::I32Const(1));
+        self.i(I::LocalSet(L_CROSS));
+        self.i(I::Br(self.exit_depth(k)));
     }
 
     // --- memory -------------------------------------------------------------
@@ -543,7 +701,7 @@ impl Emitter<'_> {
         self.extra += 1;
         // The access did not happen. Leave at this instruction, having
         // retired nothing of it, and let the interpreter take the trap.
-        self.exit(k, Some(pc), cycles, retired, 0);
+        self.exit(k, Some(pc), cycles, retired, 0, why::LOAD_REFUSED);
         self.extra -= 1;
         self.i(I::End);
         self.i(I::LocalGet(L_T64));
@@ -551,7 +709,7 @@ impl Emitter<'_> {
         self.i(I::Else);
         // Straddling a RAM page and a non-RAM page: one guest access the bus
         // would serve as one and this cannot. Leave and let it.
-        self.exit(k, Some(pc), cycles, retired, 0);
+        self.exit(k, Some(pc), cycles, retired, 0, why::LOAD_STRADDLE);
         self.i(I::I32Const(0));
         self.i(I::End);
         self.extra -= 1;
@@ -619,7 +777,7 @@ impl Emitter<'_> {
         self.i(I::I32And);
         self.i(I::If(BlockType::Empty));
         self.extra += 1;
-        self.exit(k, Some(pc), cycles, retired, 0);
+        self.exit(k, Some(pc), cycles, retired, 0, why::STORE_PERM);
         self.extra -= 1;
         self.i(I::End);
 
@@ -663,12 +821,12 @@ impl Emitter<'_> {
         self.i(I::I32Eq);
         self.i(I::If(BlockType::Empty));
         self.extra += 1;
-        self.exit(k, Some(pc), cycles, retired, 0);
+        self.exit(k, Some(pc), cycles, retired, 0, why::STORE_REFUSED);
         self.extra -= 1;
         self.i(I::End);
         self.i(I::Else);
         // Read-only RAM, or an access straddling two kinds of page.
-        self.exit(k, Some(pc), cycles, retired, 0);
+        self.exit(k, Some(pc), cycles, retired, 0, why::STORE_STRADDLE);
         self.i(I::End);
         self.extra -= 1;
         self.i(I::End);
@@ -688,6 +846,7 @@ impl Emitter<'_> {
             cycles + cost,
             retired + 1,
             FLAG_AFTER_STORE,
+            why::AFTER_STORE,
         );
         self.extra -= 1;
         self.i(I::End);
@@ -828,7 +987,7 @@ impl Emitter<'_> {
     }
 
     fn block(&mut self, k: usize) {
-        let b: &Block = &self.set.blocks[k];
+        let b: &Block = &self.set.blocks[self.lo + k];
         let block_pc = b.pc;
         let pcs: Vec<(u32, Decoded)> = b.insts.clone();
         let end = b.end;
@@ -845,7 +1004,7 @@ impl Emitter<'_> {
         self.i(I::I64GtU);
         self.i(I::If(BlockType::Empty));
         self.extra += 1;
-        self.exit(k, Some(block_pc), 0, 0, 0);
+        self.exit(k, Some(block_pc), 0, 0, 0, why::BUDGET);
         self.extra -= 1;
         self.i(I::End);
 
@@ -948,10 +1107,7 @@ impl Emitter<'_> {
                         self.i(I::I32Const(next_pc as i32));
                         self.set(rd);
                     }
-                    // P3 has no observed-target list to dispatch against, so
-                    // every indirect jump leaves. P4's discovery and P5's
-                    // two-level dispatch are where that stops being true.
-                    self.exit(k, None, cycles + cost, retired + 1, 0);
+                    self.indirect(k, cycles + cost, retired + 1);
                     return;
                 }
             }
@@ -966,7 +1122,7 @@ impl Emitter<'_> {
                 unreachable!("a block ending in a terminator returns from the loop above")
             }
             BlockEnd::Fall(pc) => self.fall_through(k, pc),
-            BlockEnd::Undecodable(pc) => self.exit(k, Some(pc), 0, 0, 0),
+            BlockEnd::Undecodable(pc) => self.exit(k, Some(pc), 0, 0, 0, why::UNDECODABLE),
         }
     }
 }
@@ -976,9 +1132,9 @@ impl Emitter<'_> {
 /// The prologue loads exactly these and the epilogue stores exactly these;
 /// everything else stays in the exchange area untouched, which is what makes
 /// the escape hatch see a complete register file for free.
-fn live_regs(set: &BlockSet) -> Vec<u8> {
+fn live_regs(blocks: &[Block]) -> Vec<u8> {
     let mut live = [false; 32];
-    for b in &set.blocks {
+    for b in blocks {
         for (_, d) in &b.insts {
             let mut mark = |r: u8| live[r as usize] = true;
             match d.inst {
@@ -1007,95 +1163,72 @@ fn live_regs(set: &BlockSet) -> Vec<u8> {
     (1u8..32).filter(|&r| live[r as usize]).collect()
 }
 
-/// Emit the module for `set`.
+/// Emit the whole module for `set` in **one** sub-dispatcher.
+///
+/// The shape P3 shipped, kept as the name every test and the replay harness
+/// already use. It is [`crate::dispatch::emit_module`] with no per-function
+/// budget, so it is exactly what a block set small enough to fit one function
+/// produced before the split — an outer selector over one sub-dispatcher — and
+/// it is refused by the same body budget as any other module.
+#[must_use]
+pub fn emit(set: &BlockSet, model: CycleModel, layout: Layout, policy: Emit) -> Emitted {
+    crate::dispatch::emit_module(set, model, layout, policy, usize::MAX)
+}
+
+/// The registers a chunk of `set` reads or writes.
+///
+/// Per sub-dispatcher rather than per module, so a small function flushes a
+/// small set. A register live in one function and not in another is still
+/// correct: the exchange area holds every register the module is not
+/// currently carrying in a local, and a function that never names one never
+/// writes it back over the value that is there.
+#[must_use]
+pub fn live_regs_in(set: &BlockSet, lo: usize, len: usize) -> Vec<u8> {
+    live_regs(&set.blocks[lo..lo + len])
+}
+
+/// Emit one **sub-dispatcher**: the wasm function holding `set`'s blocks
+/// `lo..lo + len`.
+///
+/// Its shape is P3's whole-module shape — a `loop` over a `br_table`, one
+/// `block` per guest block, forward edges to labels and back edges through
+/// the table — with two things added by the split (JD8):
+///
+/// - an edge to a block this function does not hold returns to the outer
+///   selector with the target's **global** index, and
+/// - the pending-yield obligation crosses that boundary through
+///   [`FLAG_PENDING`] rather than dying with the function's locals.
+///
+/// The signature is `(entry_local, cycle, instret, end, watch_lo, watch_hi)
+/// -> i64`, and the result is `(cross << 32) | value`: with `cross` clear the
+/// value is the guest pc to leave at, and with it set the value is the global
+/// block index to continue at.
 ///
 /// # Panics
 ///
-/// Panics on an empty block set — there is nothing to emit and the dispatcher
-/// would have no arms. Callers ask [`BlockSet::is_empty`] first.
+/// Panics on an empty chunk — there is nothing to emit and the dispatcher
+/// would have no arms.
 #[must_use]
-pub fn emit(set: &BlockSet, model: CycleModel, layout: Layout, policy: Emit) -> Emitted {
-    assert!(!set.is_empty(), "an empty block set has nothing to emit");
-    let last = set.blocks.len() - 1;
-    let live = live_regs(set);
+pub fn emit_body(
+    set: &BlockSet,
+    lo: usize,
+    len: usize,
+    model: CycleModel,
+    layout: Layout,
+    policy: Emit,
+) -> (Function, usize, usize) {
+    assert!(len > 0, "an empty chunk has nothing to emit");
+    let last = len - 1;
+    let live = live_regs_in(set, lo, len);
 
-    let mut module = Module::new();
-
-    let mut types = TypeSection::new();
-    // 0: mmio_load(pc, cycle, address, kind) -> (status << 32) | value
-    types.ty().function(
-        [ValType::I32, ValType::I64, ValType::I32, ValType::I32],
-        [ValType::I64],
-    );
-    // 1: mmio_store(pc, cycle, address, kind, value) -> status
-    types.ty().function(
-        [
-            ValType::I32,
-            ValType::I64,
-            ValType::I32,
-            ValType::I32,
-            ValType::I32,
-        ],
-        [ValType::I32],
-    );
-    // 2: step_one(pc) -> pc
-    types.ty().function([ValType::I32], [ValType::I32]);
-    // 3: run(entry, cycle, instret, end, watch_lo, watch_hi) -> exit pc
-    types.ty().function(
-        [
-            ValType::I32,
-            ValType::I64,
-            ValType::I64,
-            ValType::I64,
-            ValType::I64,
-            ValType::I64,
-        ],
-        [ValType::I32],
-    );
-    module.section(&types);
-
-    let mut imports = ImportSection::new();
-    imports.import(IMPORT_MODULE, "mmio_load", EntityType::Function(0));
-    imports.import(IMPORT_MODULE, "mmio_store", EntityType::Function(1));
-    imports.import(IMPORT_MODULE, "step_one", EntityType::Function(2));
-    imports.import(
-        IMPORT_MODULE,
-        "memory",
-        EntityType::Memory(MemoryType {
-            minimum: layout.memory_pages,
-            // Deliberately unbounded: in the browser this imports the
-            // emulator's own memory, which is larger than the arena and may
-            // grow. A declared maximum would refuse it.
-            maximum: None,
-            memory64: false,
-            shared: false,
-            page_size_log2: None,
-        }),
-    );
-    module.section(&imports);
-
-    let mut funcs = FunctionSection::new();
-    funcs.function(3);
-    module.section(&funcs);
-
-    let mut exports = ExportSection::new();
-    exports.export(ENTRY_FUNC, ExportKind::Func, F_RUN);
-    module.section(&exports);
-
-    let locals = alloc::vec![
-        (31, ValType::I32), // x1..x31
-        (2, ValType::I64),  // cycle, instret
-        (8, ValType::I32),  // exit pc, flags, next, pending, address, perm x2, status
-        (1, ValType::I64),  // the 64-bit scratch an mmio load returns into
-        (1, ValType::I32),  // the 32-bit scratch a divide needs
-    ];
     let mut e = Emitter {
-        f: Function::new(locals),
+        f: Function::new(body_locals()),
         set,
         model,
         layout,
         policy,
         live: &live,
+        lo,
         last,
         extra: 0,
         native_insts: 0,
@@ -1112,6 +1245,12 @@ pub fn emit(set: &BlockSet, model: CycleModel, layout: Layout, policy: Emit) -> 
         e.i(I::I32Load(e.exchange(EXCHANGE_REGS + 4 * u64::from(r))));
         e.i(I::LocalSet(reg_local(r)));
     }
+    // The obligation an earlier sub-dispatcher's MMIO load may have left.
+    e.i(I::I32Const(0));
+    e.i(I::I32Load(e.exchange(EXCHANGE_FLAGS)));
+    e.i(I::I32Const(FLAG_PENDING));
+    e.i(I::I32And);
+    e.i(I::LocalSet(L_PENDING));
     e.i(I::LocalGet(P_ENTRY));
     e.i(I::LocalSet(L_NEXT));
 
@@ -1138,7 +1277,8 @@ pub fn emit(set: &BlockSet, model: CycleModel, layout: Layout, policy: Emit) -> 
     e.i(I::End);
     e.i(I::End);
 
-    // Epilogue.
+    // Epilogue: everything the stay carries goes back where the next reader
+    // of it looks — the host at an exit, the next sub-dispatcher at a cross.
     for &r in &live {
         e.i(I::I32Const(0));
         e.i(I::LocalGet(reg_local(r)));
@@ -1152,18 +1292,21 @@ pub fn emit(set: &BlockSet, model: CycleModel, layout: Layout, policy: Emit) -> 
     e.i(I::I64Store(e.exchange(EXCHANGE_INSTRET)));
     e.i(I::I32Const(0));
     e.i(I::LocalGet(L_FLAGS));
+    e.i(I::LocalGet(L_PENDING));
+    e.i(I::I32Or);
     e.i(I::I32Store(e.exchange(EXCHANGE_FLAGS)));
+    e.i(I::I32Const(0));
+    e.i(I::LocalGet(L_WHY));
+    e.i(I::I32Store(e.exchange(EXCHANGE_EXIT_WHY)));
+    // `(cross << 32) | value`.
     e.i(I::LocalGet(L_EXIT_PC));
+    e.i(I::I64ExtendI32U);
+    e.i(I::LocalGet(L_CROSS));
+    e.i(I::I64ExtendI32U);
+    e.i(I::I64Const(32));
+    e.i(I::I64Shl);
+    e.i(I::I64Or);
     e.i(I::End);
 
-    let (native_insts, escaped_insts) = (e.native_insts, e.escaped_insts);
-    let mut codes = CodeSection::new();
-    codes.function(&e.f);
-    module.section(&codes);
-
-    Emitted {
-        wasm: module.finish(),
-        native_insts,
-        escaped_insts,
-    }
+    (e.f, e.native_insts, e.escaped_insts)
 }
