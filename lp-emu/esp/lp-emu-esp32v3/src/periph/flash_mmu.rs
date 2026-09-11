@@ -67,9 +67,18 @@ impl Peripheral for FlashMmuView {
         let mut c = self.cache.lock().expect("cache poisoned");
         let old = c.mmu.entry(core, index);
         let next = merge_lane(old, off, width, value);
-        if next == old {
-            return;
-        }
+        // ⚠️ **A write that does not change the entry still maps the page.**
+        // The classic's entry carries no valid bit, so `0` is not "unmapped",
+        // it is *flash page 0* — and `cache_flash_mmu_set(…, vaddr =
+        // 0x3F40_0000, paddr = 0, …)` stores exactly `0` over the `0`
+        // `mmu_init`'s memset left. An earlier version of this file skipped
+        // the store when the value was unchanged, which was cheap and wrong:
+        // the mask ROM mapped the image's first page, this view remembered
+        // nothing, the fill never ran, and the ROM read its own bootloader
+        // header out of an unfilled window and printed `invalid header:
+        // 0x00000000` for ever. The dirty mark is unconditional;
+        // [`crate::cache::fill`] is what makes it cheap, by remembering which
+        // flash page each window page already holds.
         c.mmu.set_entry(core, index, next);
         drop(c);
         // An entry write changes what an address means. P7's fill runs at the

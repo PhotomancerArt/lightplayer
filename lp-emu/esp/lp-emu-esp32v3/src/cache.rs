@@ -157,6 +157,7 @@ use std::sync::{Arc, Mutex};
 
 use lp_emu_core::cycle_model::MemoryCost;
 use lp_emu_core::sched::Cycles;
+use lp_emu_esp_common::SocBus;
 
 use crate::memmap;
 
@@ -277,10 +278,24 @@ pub struct CacheOffAccess {
     pub disabled_by: Option<u32>,
 }
 
+/// The virtual base each of [`FLASH_WINDOWS`]' index bases counts from.
+///
+/// The ROM's index arithmetic is `(vaddr & mask) >> shift`, which is
+/// `0x40_0000`-relative — so window 1's entry 64 is virtual `0x4000_0000`
+/// even though the routine refuses anything below `0x400D_0000`. These are
+/// the four bases that arithmetic implies, and [`FlashMmu::entry_vaddr`]
+/// inverts through them and then **checks the round trip**, so an index with
+/// no reachable virtual address (64..=76, which would otherwise land inside
+/// SRAM0) answers `None` rather than a plausible address.
+pub const WINDOW_VBASE: [u32; 4] = [memmap::DROM_BASE, 0x4000_0000, 0x4040_0000, 0x4080_0000];
+
 /// The classic's flash MMU page tables — one per core, 2048 entries.
 #[derive(Clone)]
 pub struct FlashMmu {
     tables: [[u32; MMU_ENTRIES]; CORES],
+    /// `(core, index)` pairs whose backing bytes have not been copied into
+    /// the window since the entry last moved. The fill drains it.
+    dirty: Vec<(usize, u32)>,
 }
 
 impl Default for FlashMmu {
@@ -297,6 +312,7 @@ impl FlashMmu {
     pub fn new() -> Self {
         Self {
             tables: [[0; MMU_ENTRIES]; CORES],
+            dirty: Vec::new(),
         }
     }
 
@@ -311,6 +327,60 @@ impl FlashMmu {
     pub fn set_entry(&mut self, core: usize, index: usize, value: u32) {
         if let Some(slot) = self.tables.get_mut(core).and_then(|t| t.get_mut(index)) {
             *slot = value;
+        }
+        self.mark_dirty(core, index as u32);
+    }
+
+    /// This entry's page has to be copied out of the chip again.
+    pub fn mark_dirty(&mut self, core: usize, index: u32) {
+        if index >= FLASH_MMU_ENTRIES {
+            // Above the flash half is `cache_sram_mmu_set`'s territory,
+            // which this machine does not model and does not fill.
+            return;
+        }
+        if !self.dirty.contains(&(core, index)) {
+            self.dirty.push((core, index));
+        }
+    }
+
+    pub fn has_dirty(&self) -> bool {
+        !self.dirty.is_empty()
+    }
+
+    /// The entries needing a refill, and clear the list.
+    pub fn take_dirty(&mut self) -> Vec<(usize, u32)> {
+        core::mem::take(&mut self.dirty)
+    }
+
+    /// Mark every entry that maps the flash page `flash_offset` falls in —
+    /// what a flash write under the window means.
+    ///
+    /// Returns the entry indices it marked, so the caller can forget what
+    /// those window pages were holding — the bytes under them moved.
+    pub fn invalidate_page_at(&mut self, flash_offset: u32, page_mode: u8) -> Vec<u32> {
+        let page = flash_offset >> Self::shift(page_mode);
+        let mut hits = Vec::new();
+        for core in 0..CORES {
+            for index in 0..FLASH_MMU_ENTRIES {
+                if self.entry(core, index as usize) == page {
+                    hits.push((core, index));
+                }
+            }
+        }
+        for (core, index) in &hits {
+            self.mark_dirty(*core, *index);
+        }
+        hits.into_iter().map(|(_, index)| index).collect()
+    }
+
+    /// Every entry in the flash half of both tables, marked for a refill.
+    /// What a snapshot restore and a page-mode change both mean: whatever
+    /// the window holds now, the table just changed under it.
+    pub fn mark_all_dirty(&mut self) {
+        for core in 0..CORES {
+            for index in 0..FLASH_MMU_ENTRIES {
+                self.mark_dirty(core, index);
+            }
         }
     }
 
@@ -335,6 +405,28 @@ impl FlashMmu {
             if vaddr >= lo && vaddr < hi {
                 return Some(((vaddr & mask) >> shift) + base);
             }
+        }
+        None
+    }
+
+    /// The inverse of [`entry_index`](Self::entry_index): the virtual base
+    /// address an entry serves, or `None` when it serves none.
+    ///
+    /// The round trip is checked rather than assumed. Entries **64..=76**
+    /// have no reachable virtual address — the ROM refuses anything at or
+    /// below `0x400C_FFFF` before it reaches the second window's arithmetic
+    /// — and the addresses they would otherwise name (`0x4000_0000`…
+    /// `0x400C_0000`) run straight through SRAM0, which is real, executable
+    /// guest memory holding the vectors and the IDF bootloader. A fill that
+    /// wrote there would overwrite the code it was running.
+    pub fn entry_vaddr(index: u32, page_mode: u8) -> Option<u32> {
+        let page_len = Self::page_len(page_mode);
+        for (k, (_, _, base)) in FLASH_WINDOWS.iter().enumerate() {
+            if index < *base || index >= base + 64 {
+                continue;
+            }
+            let vaddr = WINDOW_VBASE[k].checked_add((index - base).checked_mul(page_len)?)?;
+            return (Self::entry_index(vaddr, page_mode) == Some(index)).then_some(vaddr);
         }
         None
     }
@@ -371,6 +463,14 @@ pub struct ClassicCache {
     disabled_at: [Cycles; CORES],
     disabled_by: [Option<u32>; CORES],
     policy: CacheOffPolicy,
+    /// Which flash page each **PRO-core** window page already holds, or
+    /// `None` when it has never been filled. The dirty mark is unconditional
+    /// — a write that does not change an entry still maps the page, because
+    /// the classic's entry has no valid bit — and this is what keeps the
+    /// *copy* from being unconditional too: `mmu_init` clears 2048 entries,
+    /// and re-copying a hundred-odd 64 KiB pages that already hold the right
+    /// bytes would be seven megabytes of memcpy per call for no change.
+    filled: [Option<u32>; FLASH_MMU_ENTRIES as usize],
     /// The first offence since the machine last took one.
     offence: Option<CacheOffAccess>,
     /// Set around a host-side peek or poke, which goes through the bus's
@@ -405,6 +505,7 @@ impl ClassicCache {
             disabled_at: [0; CORES],
             disabled_by: [None; CORES],
             policy: CacheOffPolicy::default(),
+            filled: [None; FLASH_MMU_ENTRIES as usize],
             offence: None,
             host_access: false,
         }
@@ -456,10 +557,19 @@ impl ClassicCache {
         }
     }
 
-    /// Write `*_cache_ctrl1`.
+    /// Write `*_cache_ctrl1`. A change to the page-mode field
+    /// ([`FLASH_PAGE_MODE_MASK`]) re-points every entry, so it marks the
+    /// whole flash half of that core's table for a refill.
     pub fn write_ctrl1(&mut self, core: usize, value: u32) {
+        let was = self.ctrl1(core);
         if let Some(slot) = self.ctrl1.get_mut(core) {
             *slot = value;
+        }
+        if (was ^ value) & FLASH_PAGE_MODE_MASK != 0 {
+            // Every entry means something else now, and every window page
+            // holds bytes from the old page size.
+            self.forget_fills();
+            self.mmu.mark_all_dirty();
         }
     }
 
@@ -499,6 +609,36 @@ impl ClassicCache {
     /// See [`ClassicCache`]'s `host_access`.
     pub fn set_host_access(&mut self, on: bool) {
         self.host_access = on;
+    }
+
+    /// Does the PRO core's window page `index` already hold flash page
+    /// `entry`? See [`ClassicCache`]'s `filled`.
+    pub fn already_filled(&self, index: u32, entry: u32) -> bool {
+        self.filled
+            .get(index as usize)
+            .copied()
+            .flatten()
+            .is_some_and(|held| held == entry)
+    }
+
+    /// Record that it does now.
+    pub fn note_filled(&mut self, index: u32, entry: u32) {
+        if let Some(slot) = self.filled.get_mut(index as usize) {
+            *slot = Some(entry);
+        }
+    }
+
+    /// Forget what one window page holds — the bytes under it moved.
+    pub fn forget_fill(&mut self, index: u32) {
+        if let Some(slot) = self.filled.get_mut(index as usize) {
+            *slot = None;
+        }
+    }
+
+    /// Forget what every window page holds — a snapshot restore, or anything
+    /// that changed the bytes under the whole table.
+    pub fn forget_fills(&mut self) {
+        self.filled = [None; FLASH_MMU_ENTRIES as usize];
     }
 
     /// The watch's entry point: one guest access, from the core whose slices
@@ -571,7 +711,125 @@ impl ClassicCache {
                 self.mmu.tables[core][i] = u32::from_le_bytes(entry.try_into().expect("4 bytes"));
             }
         }
+        // Whatever the window holds now, the table just changed under it.
+        self.forget_fills();
+        self.mmu.mark_all_dirty();
     }
+}
+
+/// **The fill.** Copy every page the table marked dirty out of the flash
+/// chip and into the RAM region behind its window. Returns how many pages
+/// were copied.
+///
+/// Called once by the builder after a direct load programs the table, and
+/// from the machine's slice loop whenever the table, the page mode or the
+/// flash under a mapped page moved.
+///
+/// # Why the window is a fill and not a per-access translation
+///
+/// Instruction fetch stays a plain RAM read, which is what keeps this
+/// machine fast enough to be used. The consequence is that the model is
+/// **stricter than silicon about staleness**: a real cache serves stale
+/// lines until it is flushed, and this one never does. Stated, not hidden.
+///
+/// # What an entry with no valid bit means here
+///
+/// The classic's entry is a bare physical page number — `cache_flash_mmu_set`
+/// sets no marker and tests none, and `mmu_init` clears the table to zero
+/// (the module docs carry both disassemblies). So a zeroed entry means
+/// **flash page 0**, and this fill serves it: refusing would be inventing a
+/// valid bit the silicon does not have. What keeps `mmu_init`'s 8 KiB
+/// `memset` from costing 2048 page copies is that
+/// [`crate::periph::flash_mmu::FlashMmuView`] only marks an entry dirty when
+/// the write **changes** it, so zeros over zeros mark nothing.
+///
+/// A dirty entry whose window is not backed by a RAM region on this machine
+/// — the two windows above `0x4040_0000`, which `memmap` does not map — is
+/// logged and skipped, as is one naming a flash page past the end of the
+/// chip.
+pub fn fill(bus: &mut SocBus, flash: &crate::flash::FlashHandle, cache: &CacheHandle) -> usize {
+    // `(core, entry index, the page number stored there, that core's page
+    // mode)`, gathered before the flash lock is taken so the two are never
+    // held at once.
+    let work: Vec<(usize, u32, u32, u8)> = {
+        let mut c = cache.lock().expect("cache poisoned");
+        let dirty = c.mmu.take_dirty();
+        if dirty.is_empty() {
+            return 0;
+        }
+        dirty
+            .into_iter()
+            .map(|(core, index)| {
+                (
+                    core,
+                    index,
+                    c.mmu.entry(core, index as usize),
+                    c.page_mode(core),
+                )
+            })
+            .collect()
+    };
+
+    let flash = flash.lock().expect("flash poisoned");
+    let mut filled = 0;
+    for (core, index, entry, page_mode) in work {
+        // ⚠️ **One window, one memory.** `SocBus` holds the flash windows in
+        // a single arena, so there is no per-core copy for the APP core's
+        // table to fill: a fill from core 1 would overwrite core 0's view of
+        // the same address. M3 runs core 0 only (Q5), so the fill is core
+        // 0's — and a core-1 entry that *disagrees* with core 0's is said
+        // out loud, because that is the case a per-core window would be
+        // needed for and M4 is where it would land.
+        if core != 0 {
+            let pro = cache
+                .lock()
+                .expect("cache poisoned")
+                .mmu
+                .entry(0, index as usize);
+            if pro != entry {
+                log::warn!(
+                    "cache: the APP core's entry {index} maps flash page {entry:#x} where the \
+                     PRO core's maps {pro:#x}; this machine has one window behind both tables \
+                     and serves the PRO core's. See crate::cache::fill."
+                );
+            }
+            continue;
+        }
+        let page_len = FlashMmu::page_len(page_mode);
+        let Some(vaddr) = FlashMmu::entry_vaddr(index, page_mode) else {
+            log::debug!(
+                "cache: core {core} entry {index} names no virtual address on this chip                  (the ROM refuses the second window below 0x400d0000); not filled"
+            );
+            continue;
+        };
+        if cache
+            .lock()
+            .expect("cache poisoned")
+            .already_filled(index, entry)
+        {
+            continue;
+        }
+        let paddr = entry << FlashMmu::shift(page_mode);
+        let Some(bytes) = flash.peek(paddr, page_len) else {
+            log::warn!(
+                "cache: core {core} entry {index} ({vaddr:#010x}) maps flash {paddr:#010x},                  past the {:#x}-byte chip; the page is left as it was",
+                flash.len()
+            );
+            continue;
+        };
+        if let Err(e) = bus.load_image(vaddr, bytes) {
+            log::debug!(
+                "cache: core {core} entry {index} ({vaddr:#010x}) has no RAM region behind it                  on this machine; not filled ({e:?})"
+            );
+            continue;
+        }
+        cache
+            .lock()
+            .expect("cache poisoned")
+            .note_filled(index, entry);
+        filled += 1;
+    }
+    filled
 }
 
 /// D4's watch: a [`MemoryCost`] that charges nothing and reports the first

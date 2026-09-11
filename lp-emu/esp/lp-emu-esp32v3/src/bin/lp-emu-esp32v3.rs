@@ -9,12 +9,13 @@
 //! codes are a contract (0 / 2 / 3 / 4 / 5), and the error text is part of
 //! what a bring-up session reads.
 //!
-//! **An unrecognised flag is an error.** The one door P7 still owes
-//! (`--flash`) is deliberately *not* stubbed with a no-op, so the phase that
-//! adds it is visible in the diff instead of silently changing what an old
-//! command line meant. `--cache-off-fetch` arrived with P4 and D4; P6 added
-//! the six the console and the cable need: `--uart0`, `--uart0-script`,
-//! `--uart0-baud`, `--control`, `--control-script` and `--exit-on`.
+//! **An unrecognised flag is an error.** A door a phase has not opened is
+//! deliberately *not* stubbed with a no-op, so the phase that adds one is
+//! visible in the diff instead of silently changing what an old command line
+//! meant. `--cache-off-fetch` arrived with P4 and D4; P6 added the six the
+//! console and the cable need (`--uart0`, `--uart0-script`, `--uart0-baud`,
+//! `--control`, `--control-script`, `--exit-on`); P7 added the four the flash
+//! chip needs (`--flash`, `--flash-copy`, `--merged`, `--flash-len`).
 
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -22,6 +23,7 @@ use std::time::Duration;
 
 use lp_emu_esp32v3::cache::CacheOffPolicy;
 use lp_emu_esp32v3::control;
+use lp_emu_esp32v3::flash::FlashBacking;
 use lp_emu_esp32v3::loader::EfuseIdentity;
 use lp_emu_esp32v3::machine::{
     AppSource, BootMode, Esp32V3Builder, Machine, Outcome, RomSource, StopCondition, TimeGrade,
@@ -65,6 +67,16 @@ OPTIONS:
                             the stall duration, not that silicon would crash,
                             not that the access is a bug. `permit` does not
                             check at all, and continues [stop]
+    --flash <path>          back the flash chip with this file: it is read at
+                            start and written back when the run ends. A file
+                            that does not exist is created blank
+    --flash-copy <path>     read the file once and never write it back — a
+                            scratch copy of a known image
+    --merged <path>         --flash-copy, spelled for what a ROM-up boot
+                            wants: the whole 4 MiB `espflash save-image
+                            --chip esp32 --merge` chip. The chip's length is
+                            taken from the file
+    --flash-len <bytes>     the chip's size [4194304, the desk board's 4 MB]
     --time-grade t1         t1 = cycles are instructions. The only grade this
                             machine defines; see --help output for why [t1]
     --timeout <5s|1500ms|900us>
@@ -152,6 +164,8 @@ struct Args {
     exit_on: Option<String>,
     seed: u64,
     efuse: EfuseIdentity,
+    flash: Option<FlashBacking>,
+    flash_len: Option<u32>,
     hooks: bool,
     map: bool,
     help: bool,
@@ -212,6 +226,21 @@ fn run() -> Result<ExitCode, String> {
         println!("control script: {} commands", script.len());
         builder = builder.control_script(script);
     }
+    if let Some(backing) = args.flash.clone() {
+        // A merged image says how big the part it was built for is; taking
+        // the length from the file rather than from a flag is what stops a
+        // `--merged` run from silently truncating one.
+        if args.flash_len.is_none()
+            && let FlashBacking::File(p) | FlashBacking::Copy(p) = &backing
+            && let Ok(meta) = std::fs::metadata(p)
+        {
+            builder = builder.flash_len(meta.len() as u32);
+        }
+        builder = builder.flash(backing);
+    }
+    if let Some(len) = args.flash_len {
+        builder = builder.flash_len(len);
+    }
     if let Some(path) = args.rom {
         builder = builder.rom(RomSource::Path(path));
     }
@@ -254,6 +283,15 @@ fn run() -> Result<ExitCode, String> {
     let outcome = machine.run_until(&stop);
     machine.bus_mut().host.flush_all();
     print_outcome(&mut machine, &outcome);
+    {
+        let chip = machine.flash().lock().expect("flash poisoned");
+        println!("flash: {}", chip.command_census());
+    }
+    match machine.flush_flash() {
+        Ok(true) => println!("flash: written back"),
+        Ok(false) => {}
+        Err(e) => eprintln!("lp-emu-esp32v3: writing the flash image back: {e}"),
+    }
     Ok(ExitCode::from(outcome.exit_code() as u8))
 }
 
@@ -354,6 +392,23 @@ fn print_build_report(machine: &Machine, boot_mode: BootMode) {
                 seed.chip_size >> 20
             );
         }
+        let staging = machine.flash_staging();
+        if !staging.pages.is_empty() {
+            let first = staging.pages.first().expect("non-empty");
+            let last = staging.pages.last().expect("non-empty");
+            println!(
+                "flash staging: {} pages, {} B, factory {:#010x}..{:#010x}; \
+                 {:#010x}->{:#010x} .. {:#010x}->{:#010x}",
+                staging.pages.len(),
+                staging.bytes,
+                first.paddr,
+                last.paddr + 0x1_0000,
+                first.vaddr,
+                first.paddr,
+                last.vaddr,
+                last.paddr,
+            );
+        }
         if let Some(frame) = machine.boot_frame() {
             println!(
                 "boot frame: a1={:#010x}, save area [a1-16..a1) = {:#010x} {:#010x} {:#010x} {:#010x}",
@@ -364,6 +419,17 @@ fn print_build_report(machine: &Machine, boot_mode: BootMode) {
                 frame.save_area[3]
             );
         }
+    }
+    {
+        let chip = machine.flash().lock().expect("flash poisoned");
+        println!(
+            "flash: {} B ({} MiB), backing {:?}, jedec {:#010x}; cache fills {}",
+            chip.len(),
+            chip.len() >> 20,
+            chip.backing(),
+            chip.jedec_id(),
+            machine.cache_fills(),
+        );
     }
     println!(
         "time grade: {} ({})",
@@ -415,6 +481,25 @@ fn print_outcome(machine: &mut Machine, outcome: &Outcome) {
         Outcome::Fault { pc, fault, .. } => {
             let sym = machine.symbolize(*pc).unwrap_or_else(|| "?".into());
             println!("FAULT pc={pc:#010x} ({sym}) cycle={cycle}: {fault:?}");
+            // The exception registers, because a fault *inside a vector* says
+            // nothing about what asked for it. The classic's mask ROM ends
+            // its debug vector in `simcall`, so a guest that double-faults
+            // reports an unsupported opcode at `_DebugExceptionVector+0x5`
+            // and the useful address is `EPC1` (`m3/notes.md`: the earliest
+            // cause is the root).
+            let sr = machine.harts[0].sr();
+            let name = |at: u32| match machine.symbolize(at) {
+                Some(n) => format!(" ({n})"),
+                None => String::new(),
+            };
+            println!(
+                "  EXCCAUSE={} EXCVADDR={:#010x} EPC1={:#010x}{} PS={:#010x}",
+                sr.exccause,
+                sr.excvaddr,
+                sr.epc[1],
+                name(sr.epc[1]),
+                machine.harts[0].ps(),
+            );
         }
         Outcome::StrictBus { violation } => {
             let sym = machine
@@ -492,6 +577,19 @@ fn parse(argv: Vec<String>) -> Result<Args, String> {
                     .map_err(|_| format!("--probe {v}: `{cycle}` is not a cycle count"))?;
                 args.probes.push((cycle, name.to_string()));
             }
+            "--flash" => args.flash = Some(FlashBacking::File(PathBuf::from(value()?))),
+            "--flash-copy" | "--merged" => {
+                args.flash = Some(FlashBacking::Copy(PathBuf::from(value()?)))
+            }
+            "--flash-len" => {
+                let v = value()?;
+                let n = v
+                    .strip_prefix("0x")
+                    .map(|h| u32::from_str_radix(h, 16))
+                    .unwrap_or_else(|| v.parse())
+                    .map_err(|_| format!("--flash-len {v}: not a byte count"))?;
+                args.flash_len = Some(n);
+            }
             "--trace" => args.trace = Some(value()?),
             "--uart0" => {
                 let v = value()?;
@@ -545,9 +643,9 @@ fn parse(argv: Vec<String>) -> Result<Args, String> {
             }
             other => {
                 return Err(format!(
-                    "unrecognised flag `{other}`. The doors P7 and P8 still owe (--flash, \
-                     --cache-off-fetch) are absent rather than accepted-and-ignored, so the \
-                     phase that adds one is visible in the diff. `--help` lists what exists."
+                    "unrecognised flag `{other}`. A door a later phase adds is absent rather \
+                     than accepted-and-ignored, so the phase that adds one is visible in the \
+                     diff. `--help` lists what exists."
                 ));
             }
         }

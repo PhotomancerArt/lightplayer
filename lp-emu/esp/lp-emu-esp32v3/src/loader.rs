@@ -165,6 +165,8 @@
 
 use lp_emu_esp_common::{ElfImage, SocBus};
 
+use crate::cache::{CacheHandle, FlashMmu};
+use crate::flash::{FACTORY_LEN, FACTORY_OFFSET, FlashHandle};
 use crate::machine::BootFrame;
 use crate::memmap;
 use crate::rom::{self, RomError, place_spanning};
@@ -530,6 +532,195 @@ pub fn seed_rom_flash_chip(
         previous,
         chip_size,
     })
+}
+
+// ---------------------------------------------------------------------------
+// Staging the image in the chip, and mapping it back — loader item 2
+// ---------------------------------------------------------------------------
+
+/// One page a direct load put in the chip and mapped: where it is in the
+/// flash window and where its bytes are on the part.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct StagedPage {
+    pub vaddr: u32,
+    pub paddr: u32,
+}
+
+/// What [`stage_image_in_flash`] did.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct FlashStaging {
+    /// Every page, in ascending virtual address — which is also ascending
+    /// flash offset, because that is the packing rule.
+    pub pages: Vec<StagedPage>,
+    /// How many image bytes were written into the chip.
+    pub bytes: u32,
+    /// The chip's own length, for the run report.
+    pub chip_len: u32,
+}
+
+impl FlashStaging {
+    /// The flash offset a staged virtual address lives at, or `None` when
+    /// the address is in no staged page.
+    pub fn paddr_of(&self, vaddr: u32, page_len: u32) -> Option<u32> {
+        let base = vaddr & !(page_len - 1);
+        self.pages
+            .iter()
+            .find(|p| p.vaddr == base)
+            .map(|p| p.paddr + (vaddr - base))
+    }
+}
+
+/// Put the application's **flash-resident** segments into the flash chip and
+/// program the MMU so the two windows are served through the table.
+///
+/// # Why this exists at all
+///
+/// Until P7 the direct load placed the flash windows as plain RAM holding
+/// the ELF's bytes and left the MMU empty (the module docs, item 2). That
+/// works right up until something asks the flash *chip* a question, and this
+/// milestone's firmware does: littlefs mounts `lpfs` at `0x0031_0000`
+/// through esp-storage's copy of `esp_rom_spiflash_read`, which reads the
+/// same part the app's `.text` lives in. So the chip has to hold the app
+/// too, or the two halves of the address space would be describing
+/// different boards.
+///
+/// # The mapping, and why it is this one
+///
+/// The classic has **two** flash windows — DROM at `0x3F40_0000` and IROM at
+/// `0x400D_0000` — where the C6 has one, and the ROM's index arithmetic
+/// gives them different index bases (0 and 64) inside one table. There is no
+/// single `factory + (vaddr - base)` that serves both without the two
+/// windows colliding in the chip. The rule here is instead:
+///
+/// > every 64 KiB virtual page the image touches, in **ascending virtual
+/// > address**, gets the next 64 KiB of the `factory` partition.
+///
+/// [`FACTORY_OFFSET`] is a whole number of pages and every page maps
+/// page-to-page, so `paddr % page == vaddr % page` holds for all of them —
+/// which is the constraint `cache_flash_mmu_set` enforces (`bnez a8 →
+/// return 1, misaligned`) and the reason esp-hal can link at `0x400D_0020`.
+///
+/// It is **not** what an `esptool` image would produce: a real flashed image
+/// has a header and per-segment headers, and its offsets fall where those
+/// leave them. This is the direct-load equivalent of what a flasher did —
+/// the bytes are in `factory`, at page-consistent offsets, and the table
+/// says where. `tests/rom_up_boot.rs` boots a real merged image through the
+/// real bootloader and gets the real offsets; **that** is the cross-check,
+/// and this function is one of the things it checks.
+///
+/// # Both cores' tables
+///
+/// The ESP-IDF bootloader maps the app for **both** cores
+/// (`cache_flash_mmu_set(0, …)` and `cache_flash_mmu_set(1, …)` in
+/// `set_cache_and_start_app`), so this writes both — otherwise the
+/// cross-check would find a table the two paths disagree about for a reason
+/// that is the loader's and not the chip's. The *fill* still serves the PRO
+/// core's table only, because this machine has one window behind both
+/// (see [`crate::cache::fill`]).
+pub fn stage_image_in_flash(
+    flash: &FlashHandle,
+    cache: &CacheHandle,
+    app: &ElfImage,
+) -> FlashStaging {
+    let page_mode = cache.lock().expect("cache poisoned").page_mode(0);
+    let page_len = FlashMmu::page_len(page_mode);
+    let mut staging = FlashStaging::default();
+
+    // 1. Which virtual pages the image touches, ascending.
+    let mut pages: Vec<u32> = Vec::new();
+    for seg in &app.segments {
+        if seg.memsz == 0 || flash_window_of(seg.vaddr).is_none() {
+            continue;
+        }
+        let first = seg.vaddr & !(page_len - 1);
+        let last = (seg.vaddr + seg.memsz - 1) & !(page_len - 1);
+        let mut at = first;
+        loop {
+            if !pages.contains(&at) {
+                pages.push(at);
+            }
+            if at == last {
+                break;
+            }
+            at += page_len;
+        }
+    }
+    pages.sort_unstable();
+
+    // 2. The next page of `factory` for each, in that order.
+    for (i, vaddr) in pages.iter().enumerate() {
+        let paddr = FACTORY_OFFSET + (i as u32) * page_len;
+        if paddr - FACTORY_OFFSET >= FACTORY_LEN {
+            log::warn!(
+                "loader: staging {vaddr:#010x} would run past the {FACTORY_LEN:#x}-byte factory \
+                 partition; the image does not fit in this chip and the page is not mapped"
+            );
+            break;
+        }
+        staging.pages.push(StagedPage {
+            vaddr: *vaddr,
+            paddr,
+        });
+    }
+
+    // 3. The bytes, then the `memsz - filesz` tail as zeros — the window
+    //    zeroes it, so the chip must too: erased flash is `0xff`, and a
+    //    `.bss` that read as ones would not be a `.bss`.
+    {
+        let mut chip = flash.lock().expect("flash poisoned");
+        for seg in &app.segments {
+            if seg.memsz == 0 || flash_window_of(seg.vaddr).is_none() {
+                continue;
+            }
+            let tail = seg.memsz.saturating_sub(seg.data.len() as u32);
+            let zeros = vec![0u8; tail as usize];
+            for (at, bytes) in [
+                (seg.vaddr, seg.data.as_slice()),
+                (seg.vaddr + seg.data.len() as u32, zeros.as_slice()),
+            ] {
+                let mut written = 0u32;
+                while written < bytes.len() as u32 {
+                    let vaddr = at + written;
+                    let Some(paddr) = staging.paddr_of(vaddr, page_len) else {
+                        break;
+                    };
+                    let in_page = page_len - (vaddr & (page_len - 1));
+                    let n = in_page.min(bytes.len() as u32 - written);
+                    let slice = &bytes[written as usize..(written + n) as usize];
+                    if chip.stage(paddr, slice) && at == seg.vaddr {
+                        staging.bytes += n;
+                    }
+                    written += n;
+                }
+            }
+        }
+        staging.chip_len = chip.len();
+    }
+
+    // 4. The table, both cores.
+    let mut c = cache.lock().expect("cache poisoned");
+    for page in &staging.pages {
+        let Some(index) = FlashMmu::entry_index(page.vaddr, page_mode) else {
+            log::warn!("loader: {:#010x} is in no flash window", page.vaddr);
+            continue;
+        };
+        let entry = page.paddr >> FlashMmu::shift(page_mode);
+        for core in 0..crate::cache::CORES {
+            c.mmu.set_entry(core, index as usize, entry);
+        }
+    }
+    staging
+}
+
+/// Which flash window an address is in, as `(name, base)`, or `None`.
+pub fn flash_window_of(vaddr: u32) -> Option<(&'static str, u32)> {
+    if (memmap::DROM_BASE..memmap::DROM_BASE + memmap::DROM_LEN).contains(&vaddr) {
+        return Some(("drom", memmap::DROM_BASE));
+    }
+    if (memmap::IROM_BASE..memmap::IROM_BASE + memmap::IROM_LEN).contains(&vaddr) {
+        return Some(("irom", memmap::IROM_BASE));
+    }
+    None
 }
 
 /// Read one little-endian word out of a RAM region from the host side, or

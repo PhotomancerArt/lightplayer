@@ -136,6 +136,8 @@ pub const PERIPHERAL_REGISTRATION_ORDER: &[&str] = &[
     // ROM-up, stop 1: `_ResetHandler_efuse_check_patch` reads its own
     // fuses seven instructions after the reset vector.
     "EFUSE",
+    // ROM-up, cycle 7,430: `gpio_pad_unhold` reads `RTC_IO.dig_pad_hold`.
+    "RTC_IO",
     // ROM-up, in `main`: `uartAttach` (`0x4000_9013`) touches `UART1 +0x10`
     // as well as UART0's, at cycle 30,992 — before `mmu_init` below. The
     // application never opens it, so this is the first place in the boot that
@@ -145,6 +147,20 @@ pub const PERIPHERAL_REGISTRATION_ORDER: &[&str] = &[
     // and `cache_flash_mmu_set` fills them (P4). The direct load never
     // reaches them, so this is where the boot meets them — last.
     "FLASH_MMU",
+    // ROM-up, last of all: the ESP-IDF second-stage bootloader hashes the
+    // application image before it will run it, through the mask ROM's
+    // `ets_sha_*` family. Nothing earlier on either path touches it — the
+    // direct load has no bootloader, and the mask ROM's own reset path does
+    // not hash anything.
+    // ROM-up, cycle 9,284,455: the IDF bootloader's RNG early entropy
+    // source reads `SENS.sar_read_ctrl2`.
+    "SENS",
+    // ROM-up, 112 cycles later: the same step reads the SAR through I2S0.
+    "I2S0",
+    // ROM-up, cycle 22,247,148: `bootloader_fill_random()` reads
+    // `WDEV_RND_REG` on the AHB bus (ruling R4).
+    "RNG",
+    "SHA",
 ];
 
 /// How far back [`Machine::symbolize`] will look for a name when no symbol's
@@ -629,7 +645,8 @@ pub struct Esp32V3Builder {
     strict: bool,
     strict_unsupported: bool,
     boot_frame: Option<BootFrame>,
-    flash_size: u32,
+    flash_backing: crate::flash::FlashBacking,
+    flash_len: u32,
     reset_cause: loader::ResetCause,
     efuse: loader::EfuseIdentity,
     cache_off: crate::cache::CacheOffPolicy,
@@ -656,7 +673,8 @@ impl Default for Esp32V3Builder {
             strict: false,
             strict_unsupported: true,
             boot_frame: None,
-            flash_size: loader::DEFAULT_FLASH_SIZE,
+            flash_backing: crate::flash::FlashBacking::default(),
+            flash_len: crate::flash::DEFAULT_FLASH_LEN,
             reset_cause: loader::ResetCause::default(),
             efuse: loader::EfuseIdentity::default(),
             cache_off: crate::cache::CacheOffPolicy::default(),
@@ -689,7 +707,8 @@ impl fmt::Debug for Esp32V3Builder {
             .field("strict", &self.strict)
             .field("strict_unsupported", &self.strict_unsupported)
             .field("boot_frame", &self.boot_frame)
-            .field("flash_size", &self.flash_size)
+            .field("flash_backing", &self.flash_backing)
+            .field("flash_len", &self.flash_len)
             .field("reset_cause", &self.reset_cause)
             .field("efuse", &self.efuse)
             .field("cache_off", &self.cache_off)
@@ -755,11 +774,21 @@ impl Esp32V3Builder {
         self
     }
 
-    /// The flash chip's size, written into the ROM's chip description by a
-    /// direct load ([`loader::seed_rom_flash_chip`]). Default
-    /// [`loader::DEFAULT_FLASH_SIZE`], the desk board's 4 MiB.
-    pub fn flash_size(mut self, bytes: u32) -> Self {
-        self.flash_size = bytes;
+    /// Where the flash chip's bytes come from and whether they go back:
+    /// `--flash <path>` is read-write, `--flash-copy <path>` reads once and
+    /// never writes, and the default is a blank chip that lives and dies
+    /// with the process ([`crate::flash`]).
+    pub fn flash(mut self, backing: crate::flash::FlashBacking) -> Self {
+        self.flash_backing = backing;
+        self
+    }
+
+    /// The flash chip's size. This is the number the JEDEC capacity byte and
+    /// the ROM's `chip_size` word are both derived from
+    /// ([`loader::seed_rom_flash_chip`]); default
+    /// [`crate::flash::DEFAULT_FLASH_LEN`], the desk board's 4 MiB.
+    pub fn flash_len(mut self, bytes: u32) -> Self {
+        self.flash_len = bytes;
         self
     }
 
@@ -963,6 +992,13 @@ impl Esp32V3Builder {
             None => None,
         };
 
+        // The flash chip is shared state, not a peripheral: SPI1 executes
+        // commands against it and the cache fill reads through it.
+        let flash: crate::flash::FlashHandle = std::sync::Arc::new(std::sync::Mutex::new(
+            crate::flash::FlashImage::open(self.flash_backing, self.flash_len)
+                .map_err(|e| BuildError::Io(format!("opening the flash image: {e}")))?,
+        ));
+
         let mut peripheral_map = Vec::new();
         let mut alias_map = Vec::new();
         if self.boot_set {
@@ -973,6 +1009,8 @@ impl Esp32V3Builder {
                 cache.clone(),
                 appcpu.clone(),
                 Some(uart0_stream),
+                flash.clone(),
+                self.seed,
             );
             check_registration_order(&set)?;
             for (base, len, periph) in set {
@@ -994,7 +1032,11 @@ impl Esp32V3Builder {
         // The ROM first, always (PD7), and its non-alloc data with it.
         let rom_segments = rom::load(&mut bus, &rom_image)?;
         let rom_data = rom::seed_data(&mut bus, &rom_image)?;
-        let rom_data_image = rom::seed_data_image(&rom_data);
+        // …and the ROM's own copy of those bytes at the source addresses its
+        // unpack table names, so that the reset vector's `unpcopy` — which a
+        // ROM-up boot really runs — copies them rather than the zeros the
+        // ELF leaves at their source addresses (`rom`'s module docs).
+        let rom_data_image = rom::seed_data_image(&mut bus, &rom_image, &rom_data)?;
 
         let app_image = match &self.app {
             AppSource::None => None,
@@ -1028,6 +1070,9 @@ impl Esp32V3Builder {
             harts,
             cache,
             appcpu,
+            flash,
+            cache_fills: 0,
+            staging: loader::FlashStaging::default(),
             cache_watch_armed: false,
             // M3 never runs core 1 (Q5). `core_stalled` ORs this field with
             // `stall_key` (RTC_CNTL's two halves, P5) and with DPORT's
@@ -1069,7 +1114,7 @@ impl Esp32V3Builder {
 
         if self.boot_mode == BootMode::Direct {
             let frame = self.boot_frame.unwrap_or_else(BootFrame::idf_bootloader);
-            machine.direct_load(frame, self.flash_size)?;
+            machine.direct_load(frame)?;
         }
 
         // Before the power-on snapshot, so a reboot restores the stated rate
@@ -1124,6 +1169,12 @@ pub struct Machine {
     cache: crate::cache::CacheHandle,
     /// `appcpu_ctrl_*`, shared with the DPORT view.
     appcpu: crate::periph::dport::AppCoreHandle,
+    /// The flash chip, shared with SPI1 and read by the cache fill.
+    flash: crate::flash::FlashHandle,
+    /// How many window pages the fill has copied out of the chip.
+    cache_fills: u64,
+    /// What a direct load staged in the chip and mapped ([`loader`]).
+    staging: loader::FlashStaging,
     /// Whether D4's watch is installed on the bus right now.
     cache_watch_armed: bool,
     rom: ElfImage,
@@ -1176,7 +1227,7 @@ impl Machine {
     /// Segments, the ROM's flash chip description, then the hart — entry,
     /// [`PS_BOOT`] and the [`BootFrame`]. What a direct load does *not*
     /// reproduce is the eleven-item list in the loader's module docs.
-    fn direct_load(&mut self, frame: BootFrame, flash_size: u32) -> Result<(), BuildError> {
+    fn direct_load(&mut self, frame: BootFrame) -> Result<(), BuildError> {
         let Some(app) = self.app.as_ref() else {
             return Err(BuildError::App(
                 "--boot-mode direct needs an --elf to load".into(),
@@ -1187,16 +1238,99 @@ impl Machine {
         // ~2 MiB; it is placed once, at build.
         let app = app.clone();
         self.app_segments = loader::load_app(&mut self.bus, &app)?;
+        // Item 2, since P7: what the second-stage bootloader would have done
+        // — the flash-resident half of the image into the chip, and the MMU
+        // programmed for it.
+        self.staging = loader::stage_image_in_flash(&self.flash, &self.cache, &app);
+        let chip_len = self.staging.chip_len;
         self.flash_seed = Some(loader::seed_rom_flash_chip(
             &mut self.bus,
             &self.rom,
-            flash_size,
+            chip_len,
         )?);
         // Item 11: the bootloader hands the app a core whose read cache is
         // on, and a direct load runs no bootloader.
         loader::seed_cache_enabled(&self.cache);
+        // Everything staged was already placed into the window by
+        // `load_app`; filling now proves the table and the placement agree,
+        // and is what serves the window from here on.
+        self.cache_fills = self.refill_now();
+        // The staging is what a flasher left behind, not a guest write: the
+        // window has just been filled from it, so nothing is stale.
+        self.flash
+            .lock()
+            .expect("flash poisoned")
+            .take_written_blocks();
         self.seed_boot_state(app.entry, frame)?;
         Ok(())
+    }
+
+    /// Fill every page the table marked dirty, with the accesses marked as
+    /// the emulator's so D4's watch does not arm on them ([`crate::cache`]).
+    fn refill_now(&mut self) -> u64 {
+        self.set_host_access(true);
+        let filled = crate::cache::fill(&mut self.bus, &self.flash, &self.cache) as u64;
+        self.set_host_access(false);
+        filled
+    }
+
+    /// Refill any window page whose mapping or backing bytes moved.
+    ///
+    /// Called once per slice. Almost always a flash-block check and a `bool`
+    /// and nothing else: only an MMU entry write, a page-mode change or a
+    /// flash write under a mapped page puts anything in the list.
+    fn refill_cache(&mut self) {
+        let written = self
+            .flash
+            .lock()
+            .expect("flash poisoned")
+            .take_written_blocks();
+        if !written.is_empty() {
+            let mut c = self.cache.lock().expect("cache poisoned");
+            let page_mode = c.page_mode(0);
+            let page_len = crate::cache::FlashMmu::page_len(page_mode);
+            let mut moved: Vec<u32> = Vec::new();
+            for block in written {
+                // A 64 KiB flash block can hold several pages at a finer
+                // page mode; mark each.
+                let base = block * crate::flash::BLOCK_LEN;
+                let mut at = base;
+                while at < base + crate::flash::BLOCK_LEN {
+                    moved.extend(c.mmu.invalidate_page_at(at, page_mode));
+                    at += page_len;
+                }
+            }
+            // The bytes under those window pages moved, so what they hold is
+            // no longer what the fill last put there.
+            for index in moved {
+                c.forget_fill(index);
+            }
+        }
+        if !self.cache.lock().expect("cache poisoned").mmu.has_dirty() {
+            return;
+        }
+        self.cache_fills += self.refill_now();
+    }
+
+    /// The flash chip, for a test and for the run report.
+    pub fn flash(&self) -> &crate::flash::FlashHandle {
+        &self.flash
+    }
+
+    /// Write the flash image back if its backing says to.
+    pub fn flush_flash(&mut self) -> std::io::Result<bool> {
+        self.flash.lock().expect("flash poisoned").flush()
+    }
+
+    /// What a direct load staged in the chip and mapped; empty on a rom-up
+    /// machine, where the bootloader does it.
+    pub fn flash_staging(&self) -> &loader::FlashStaging {
+        &self.staging
+    }
+
+    /// How many window pages the fill has copied out of the chip.
+    pub fn cache_fills(&self) -> u64 {
+        self.cache_fills
     }
 
     /// Put hart 0 into the state a bootloader's `callx8` into `entry` leaves.
@@ -1562,6 +1696,17 @@ impl Machine {
         self.peek_word(address).map(|v| (address, v))
     }
 
+    /// Stop the run the first time `address` is reached.
+    ///
+    /// The address form of [`break_at`](Self::break_at), for a caller that
+    /// already has one — the application's `e_entry`, say, whose symbol name
+    /// (`_start`) the **mask ROM** also uses, so resolving it by name finds
+    /// the wrong one on a machine that has both loaded.
+    pub fn break_at_address(&mut self, address: u32) -> Result<u32, RomError> {
+        self.hooks
+            .install_at(&mut self.bus, address, "break-at", |_| HookResult::Stop)
+    }
+
     /// Stop the run the first time `symbol` is reached. Installs a hook that
     /// returns [`HookResult::Stop`].
     pub fn break_at(&mut self, symbol: &str) -> Result<u32, RomError> {
@@ -1711,6 +1856,11 @@ impl Machine {
             let external = self.bus.pending_cpu_interrupt_mask();
             self.harts[0].set_external_mask(external);
             self.harts[0].poll_interrupts();
+            // The window is a fill, so a table write or a flash write under
+            // a mapped page has to reach the RAM behind it before the guest
+            // runs again. Before the code-write drain below, because a fill
+            // into an executable region *is* a code write.
+            self.refill_cache();
             if self.bus.code_writes_pending() {
                 for (lo, hi) in self.bus.take_code_writes() {
                     self.harts[0].invalidate_block_range(lo, hi);
@@ -2219,6 +2369,20 @@ impl Machine {
     /// architectural breakpoint.
     fn serve_breakpoint(&mut self, pc: u32) -> bool {
         let Some(hook) = self.hooks.get(pc) else {
+            // The guest executed a `break` nothing claims. It gets the
+            // architectural debug exception, which on this chip's mask ROM
+            // is three instructions ending in `simcall` — so what a reader
+            // sees is an unsupported opcode inside
+            // `_DebugExceptionVector`, a long way from the pc that asked for
+            // it. Name the real one here, once per address.
+            log::warn!(
+                "break at {pc:#010x}{} with no hook: the guest takes the \
+                 architectural debug exception",
+                match self.symbolize(pc) {
+                    Some(name) => format!(" ({name})"),
+                    None => String::new(),
+                }
+            );
             return false;
         };
         self.hook_calls += 1;

@@ -273,15 +273,26 @@ placing the DRAM segment at its vaddr is what makes the copy a no-op.
 
 **The eleven things a direct load does not reproduce**, numbered in the
 loader's module doc so P7's cross-check can cite them: (1) no partition
-table or image validation; (2) no flash MMU programming — in P3 the flash
-windows are plain RAM with no chip behind them; (3) the ROM console never
-initialised; (4) no ROM banner, no bootloader log; (5) no early RNG entropy;
-(6) eFuse asserted, not read; (7) the reset cause asserted as POWERON; (8)
-`.data` placed rather than copied; (9) core 1 stalled by assertion, not by
-the ROM's `sw_stall` path; (10) `chip_size` written by the loader in place
-of `esp_rom_spiflash_config_param`; (11) the cache MMU "left enabled" by
-there being no cache model at all — the state D4's stop (P4) is defined
-against.
+table or image validation; (2) the flash MMU is programmed by the **loader**
+— since P7 `stage_image_in_flash` puts the image's flash-resident pages into
+`factory` and maps them, so the windows really are served through the table,
+but the offsets are the loader's arithmetic and not an `esptool` image's
+layout; (3) the ROM console never initialised; (4) no ROM banner, no
+bootloader log; (5) no early RNG entropy; (6) eFuse asserted, not read; (7)
+the reset cause asserted as POWERON; (8) `.data` placed rather than copied;
+(9) core 1 stalled by assertion, not by the ROM's `sw_stall` path; (10)
+`chip_size` written by the loader in place of
+`esp_rom_spiflash_config_param`; (11) the cache left enabled, as the
+bootloader's `Cache_Read_Enable` leaves it — the state D4's stop (P4) is
+defined against.
+
+**What is behind SPI1 matters to what the boot prints.** A direct load with
+no `--flash` gets a *blank* part: there is no partition table at `0x8000`, so
+the firmware's `lpfs` lookup fails and it says so and falls back to its
+memory filesystem. With the merged image behind it (`--flash-copy`, or
+`--merged`) the mount succeeds and the chain ends `[INIT] flash filesystem
+mounted`. Both readings are pinned in `tests/boot.rs`, each as a whole byte
+stream with its own sha.
 
 `just test-emu-esp32v3-boot` builds the shipped image and runs the
 direct-load tests against the file it built (`LP_EMU_ESP32V3_ELF`; see
@@ -290,15 +301,97 @@ from inside a test).
 
 ## Booting from the reset vector
 
-*P5 opened it; P7 finishes it.* P3 left a `--boot-mode rom-up --strict-bus`
-run spinning seven instructions after the reset vector, inside the ROM's
-anti-glitch check on its own fuses. With `periph::efuse` making the read
-command a completion the check passes, the ROM walks into `main`, and the run
-now stops at `uartAttach+0x43` (`0x4000_9013`) writing `UART1 +0x10` at cycle
-9,488 — the block P3's §4.3 named next.
+```bash
+just build-fw-esp32v3
+espflash save-image --chip esp32 --merge \
+    --partition-table lp-fw/fw-esp32v3/partitions.csv --flash-size 4mb \
+    target/xtensa-esp32-none-elf/release-esp32v3/fw-esp32v3 chip.bin
+cargo run -p lp-emu-esp32v3 --release -- \
+    --boot-mode rom-up --merged chip.bin --strict-bus --timeout 2s --uart0 -
+```
 
-*P7.* The mask ROM boots the espflash-merged image through the real IDF
-bootloader, and the boot log is compared line for line against silicon.
+The hart starts at `0x4000_0400` with the architectural reset state and the
+machine seeds **nothing**: the flash chip holds a whole 4 MiB image and every
+step after that is real. The mask ROM checks its own fuses, reads the
+strapping pins, attaches the flash, programs the MMU, reads the second-stage
+bootloader out of the chip and jumps to it; the bootloader reads the partition
+table, verifies and hashes the app, and maps it.
+
+**Nothing is vendored** (DD25). `espflash save-image --chip esp32 --merge`
+bundles the exact ESP-IDF `v5.1-beta1-378-gea5e0ff298-dirt` second-stage
+bootloader the desk board runs (`../bench.md`), so the merged image *is* the
+provenance; a checked-in copy plus a sidecar would be a second one that could
+drift. `tests/rom_up_boot.rs` asserts the version string, the compile time and
+the multicore banner it finds **inside the image it was handed**. ⚠️ Never
+hand-write a bootloader stand-in: the boot log is the real bootloader's output
+or it is fiction.
+
+### What comes out, and what it is compared against
+
+Twenty-six lines, and they fall into three kinds:
+
+| lines | compared against | why |
+|---|---|---|
+| the eleven ROM banner lines (`ets Jul 29 2019 12:21:46` … `entry 0x4008064c`) | **literally**, against L0's own capture | the mask ROM is a fixed binary and the values are this machine's inputs (the reset cause, the strapping pins) or the image's header |
+| the bootloader's fifteen (version, compile time, `Multicore bootloader`, `chip revision: v3.1`, SPI 40MHz/DIO/4MB, the RNG entropy line, the four partition rows) | **literally**, against a table in the test | espflash bundles a fixed binary, so these are the same on any host and for any build of the application |
+| the seven `esp_image: segment N:` lines | against the **merged image**, parsed independently by `image.rs` | gating those on a transcript would gate on the linker: a different build has different segment sizes, and the desk board runs a different commit (ruling R7) |
+
+The `I (NNN)` millisecond stamps are **masked**, and that is the only field
+that is. They are `CCOUNT / (g_ticks_per_us * 1000)` — milliseconds of CPU
+time — and this machine's time base is grade `t1`, cycles counted as
+instructions, so the numbers are a count of the bootloader's own instructions
+rather than a clock. There is no calibration in this repository that would
+make them silicon's.
+
+### ⚠️ Where it stops: one instruction
+
+The run reaches the last `esp_image: segment` line and stops **one
+instruction short** of `Loaded app from partition at offset 0x10000`, in the
+bootloader's own `esp_cpu_dbgr_is_attached()`:
+
+```text
+4007a523:  l32r  a14, (0x0010200c)    ; XDM_OCD_DCR_SET
+4007a526:  rer   a14, a14             ; ← lp-xt-inst does not decode this
+```
+
+`rer` reads an *external* register over the OCD bus, and the only thing
+either boot path uses it for is "is a debugger attached?" — whose answer here
+is a flat **no**. The direct load meets the same instruction from the other
+side, at `0x4010_01bd`, through `esp_hal::debugger::debugger_connected()`
+inside `CpuControl::start_app_core`.
+
+It is **not** a two-line addition to the hart: `rer`/`wer` are absent from
+`lp-xt-inst`'s `Inst` altogether, so landing them touches the decoder, the
+encoder, the disassembler, the executor and the translator's coverage in the
+**Xtensa ISA crate the shader backend also uses**. M3's own concurrency rules
+put that crate out of this milestone's reach and call a hart change a finding
+for the director, so it is pinned exactly — by pc and by word, in
+`tests/boot.rs` and `tests/rom_up_boot.rs` — rather than fixed here.
+
+Two things wait behind it, and both are written out in full so that landing
+`rer` turns them on rather than leaving a puzzle: the direct load's idle
+heartbeat, and **the direct-load ↔ ROM-up cross-check**
+(`rom_up_and_direct_load_agree_on_what_the_app_sees`), which compares every
+byte of guest memory at the application's entry, the hart's `PS` and `a1`,
+and the four save-area words the direct load seeds. That test skips today
+with a notice naming this instruction.
+
+### The two findings a ROM-up boot is the only way to make
+
+Both are in the commit history and both were invisible to a direct load:
+
+1. **`seed_data_image` is not optional on the classic.** The reset vector's
+   `unpcopy` (`0x4000_0501`) copies each `.data_*` section from a **source**
+   address past the end of `.text`. P2 placed the destinations and concluded
+   no source image was needed; a ROM-up boot copied zeros over every one of
+   them, `g_ticks_per_us` went 13 → 0, and the bootloader's log timestamp
+   divided by zero four million cycles later. `rom::seed_data_image` now
+   places the ROM's own copy at the addresses the ROM's own table names.
+2. **A write that does not change an MMU entry still maps the page.** The
+   classic's entry carries no valid bit, so `cache_flash_mmu_set` storing `0`
+   over `mmu_init`'s `0` *is* a mapping of flash page 0 — and a fill that
+   skipped it left the ROM reading its own bootloader header out of an
+   unfilled window, printing `invalid header: 0x00000000` for ever.
 
 ## The CH340 cable
 
@@ -446,9 +539,79 @@ The four windows and their index bases, from the ROM:
 | `0x4040_0000..0x4080_0000` | 128..191 |
 | `0x4080_0000..0x40C0_0000` | 192..255 |
 
-The window itself is served as a **cache fill**, not per-access translation
-(P7): instruction fetch stays a RAM read, which is what keeps the machine
-usable, and the model is stricter than silicon about staleness.
+### The chip, and where its bytes come from
+
+`src/flash.rs` holds this board's numbers — 4 MiB (the desk board), the
+bootloader at **`0x1000`** (⚠️ *not* the C6's `0x0`), the partition table at
+`0x8000`, `factory` at `0x10000` and `lpfs` at `0x310000` — over the chip
+model in `lp_emu_esp_common::engine::spi_flash`. Program is an `&=`, erase is
+the only way back to `0xff`, and the JEDEC capacity byte and the ROM's
+`chip_size` word are derived from the same length, so `esp_storage`'s
+`flash_rdid` decode and the ROM's own bounds check describe one part.
+
+Three backings, and `tests/flash_persistence.rs` is the proof:
+
+| flag | what it does |
+|---|---|
+| *(none)* | a blank chip that lives and dies with the process |
+| `--flash <path>` | read at start, written back at the end of the run; a path that does not exist is created blank |
+| `--flash-copy <path>` / `--merged <path>` | read once, never written — a scratch copy of a known image |
+
+### ⚠️ `SPI1.addr` is packed two ways, and the trigger says which
+
+The generic `usr` engine shifts its address phase out of `addr` **MSB-first**
+for `user1.usr_addr_bitlen` bits, so a 24-bit flash address sits
+**left-justified in bits 31:8**. The dedicated `flash_pp` / `flash_se` /
+`flash_read` triggers take the address from bits **23:0** with the byte count
+in bits 31:24 — the mask ROM says so in one instruction
+(`SPI_page_program` `0x4006_2368`: `slli a10, a5, 24` / `and a9, a3,
+0xffffff` / `or` / `s32i` to `SPI1+0x04`).
+
+The C6 has only the second convention. Carrying it across reads the right
+register and asks for an address 256 times too big, which the first run of
+this block did:
+
+```text
+W4 SPI1+0x02c miso_dlen = 0x000001ff
+W4 SPI1+0x004 addr      = 0x00800000
+SPI1 read 64 bytes at 0x00800000 leaves the 0x400000-byte chip
+```
+
+— the partition table at `0x8000`, refused as past the end of the part, 64
+bytes of `0xff` handed back, and the firmware printing `[ERROR] no lpfs
+partition in the flashed table`. A plausible failure a long way from its
+cause, which is what this convention costs when it is got wrong.
+
+### The fill
+
+The window is served as a **cache fill**, not per-access translation:
+`cache::fill` copies a whole page out of the chip into the RAM behind its
+window whenever an MMU entry moves, the page mode changes, or the flash under
+a mapped page is written. Instruction fetch stays a plain RAM read, which is
+what keeps this machine fast enough to be used, and the price is stated
+rather than hidden: **this model is stricter than silicon about staleness** —
+a real cache serves stale lines until it is flushed, and this one never does.
+
+Two consequences of the missing valid bit, both in `cache::fill`'s own words:
+
+- a zeroed entry means flash page 0 and is **served**, because refusing would
+  be inventing a bit the silicon does not have. `mmu_init`'s 8 KiB `memset`
+  costs nothing anyway, because the MMU view only marks an entry dirty when
+  the write *changes* it;
+- entries **64..=76** name virtual addresses inside SRAM0, where the vectors
+  and the IDF bootloader live. `FlashMmu::entry_vaddr` checks the round trip
+  through `entry_index` and answers `None` for them, so a fill can never
+  overwrite the code it is running.
+
+And one this machine's shape forces: `SocBus` holds the two windows in a
+single arena, so there is no per-core copy for the APP core's table to fill.
+The fill serves the **PRO** core's table and says so out loud when core 1's
+table disagrees — which is the case a per-core window would be needed for,
+and M4's to answer.
+
+The host-side fill never arms D4's check: it goes through
+`SocBus::load_image`, and the machine marks the window around it with
+`ClassicCache::set_host_access`.
 
 ### The cache-off fetch stop
 
@@ -513,11 +676,12 @@ PAC and each carries its reason beside it.
 | `GPIO` | `0x3FF4_4000` | `0x600` | accept | direct #7, cycle 3,564,113 | the matrix routing U0RXD; `strap` reads the PAC's 0 | P8 |
 | `UART0` | `0x3FF4_0000` | `0x80` | **view** | direct #8, cycle 3,564,269 | the FIFO pair on `engine::uart`, the shifter draining at the programmed baud in emulated time, `status.txfifo_cnt` counting down (the bit the ROM spins on), the thresholds, the receive timeout, the interrupt quad, `mem_rx_status`'s address pair (the RX-count errata), the auto-baud counters, and the host stream | P6 |
 | `IO_MUX` | `0x3FF4_9000` | `0x94` | accept | direct #9, cycle 3,568,671 | the U0TXD pad | P8 |
-| `SPI1` | `0x3FF4_2000` | `0x400` | accept | direct #10, cycle 3,644,210 | esp-storage's flash read; **the run spins on `cmd.flash_rdsr`** | P7 |
-| `SPI0` | `0x3FF4_3000` | `0x400` | accept | direct #11, cycle 3,644,282 | the ROM's idle wait on `ext2.st` | P7 |
+| `SPI1` | `0x3FF4_2000` | `0x400` | **view** | direct #10, cycle 3,644,210 | the flash controller over `engine::spi_flash`: the `usr` engine and the dedicated triggers, the WIP/WEL latch the ROM spins on, the JEDEC id `esp_storage` decodes, and the two `addr` packings | P7 |
+| `SPI0` | `0x3FF4_3000` | `0x400` | accept + refusal | direct #11, cycle 3,644,282 | the ROM's idle wait on `ext2.st`, `cache_fctrl` bit 0 (`Cache_Read_Enable`'s other half), and `spi_flash_attach`'s eight writes. A `cmd` trigger here **refuses** rather than inventing a JEDEC id | P7 |
 | `EFUSE` | `0x3FF5_A000` | `0x200` | **view** | rom-up #1, cycle 7 | the fuse array, the read-data registers, and the read command as a **completion**; the MAC and chip revision | P5 |
 | `UART1` | `0x3FF5_0000` | `0x80` | **view** | rom-up, cycle 30,992 | the same model at its own base and its own interrupt source (35). The ROM's `uartAttach` touches `+0x10` on every boot; the application never opens it, so it has no host stream and its bytes go nowhere | P6 |
-| `FLASH_MMU` | `0x3FF1_0000` | `0x4000` | not reached by P3 | **view** | the two flash MMU page tables, written by the ROM's `mmu_init` and `cache_flash_mmu_set`; the fill is P7's | P4 / P7 |
+| `FLASH_MMU` | `0x3FF1_0000` | `0x4000` | **view** | not reached by P3 | the two flash MMU page tables, written by the ROM's `mmu_init` and `cache_flash_mmu_set`; an entry write marks its page for P7's fill | P4 / P7 |
+| `SHA` | `0x3FF0_3000` | `0xc0` | **view** | not reached by P3 | the `TEXT` window (message **and** digest read-back) and the four per-family strobe quads over `engine::sha`, including the **`load`** step the C6 has no equivalent for. SHA-1 and SHA-256 compute; SHA-384/512 refuse. The ESP-IDF bootloader's image hash is the only caller | P7 |
 
 The two deviations from the PAC, both inputs to the run rather than
 properties of the part:
@@ -643,6 +807,13 @@ door; the recipe exists from P1 so the door has one name for its whole life.
 --exit-on <line>        stop at a COMPLETE line of UART0's output; exits 0
 --efuse-mac <a:b:c:d:e:f>     the MAC the eFuse block answers [30:76:f5:ec:f6:34]
 --efuse-rev <major.minor>     the chip revision it answers [3.1]
+--flash <path>          back the flash chip with this file; written back at
+                        the end of the run, and created blank if absent
+--flash-copy <path>     read it once and never write it back
+--merged <path>         --flash-copy, spelled for what a ROM-up boot wants:
+                        the whole `espflash save-image --merge` chip. The
+                        chip's length is taken from the file
+--flash-len <bytes>     the chip's size [4194304, the desk board's 4 MB]
 --seed <n>   --hooks   --map   --help
 ```
 
@@ -668,11 +839,11 @@ starts a comment.
 ⚠️ `--timeout` is **emulated** time (PD9): no host gate runs on emulated
 microseconds, and `--wall-timeout` is the separate wall-clock end.
 
-⚠️ **An unrecognised flag is an error.** The one door P7 still owes
-(`--flash`) is deliberately *not* stubbed with a no-op, so the phase that
-adds it is visible in the diff instead of silently changing what an old
-command line meant. `--cache-off-fetch` arrived with P4; the six above it
-with P6.
+⚠️ **An unrecognised flag is an error.** A door a phase has not opened is
+deliberately *not* stubbed with a no-op, so the phase that adds it is visible
+in the diff instead of silently changing what an old command line meant.
+`--cache-off-fetch` arrived with P4; the six console-and-cable doors with P6;
+`--flash`, `--flash-copy`, `--merged` and `--flash-len` with P7.
 
 Exit codes are the C6's contract: 0 deadline **or an `--exit-on` match**,
 2 fault **or a cable reset without `--reboot-on-reset`**, 3 strict-bus

@@ -399,6 +399,12 @@ pub mod periph {
     /// `:584`.
     pub const IO_MUX: u32 = 0x3FF4_9000;
     /// `:809`.
+    /// I2S0 — ⚠️ on the boot path as the **RNG's entropy source**, not as
+    /// an audio block: the ESP-IDF second-stage bootloader's
+    /// `bootloader_random_enable()` drives its ADC-sampling mode to stir the
+    /// hardware RNG (`esp32-0.40.2/src/lib.rs`, `Periph<i2s0::RegisterBlock,
+    /// 0x3ff4_f000>`).
+    pub const I2S0: u32 = 0x3FF4_F000;
     pub const UART1: u32 = 0x3FF5_0000;
     /// `:638`. The block's pulse RAM is at `0x3FF5_6800` (M4).
     pub const RMT: u32 = 0x3FF5_6000;

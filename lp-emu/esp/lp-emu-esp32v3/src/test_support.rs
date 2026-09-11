@@ -35,6 +35,19 @@ use std::path::PathBuf;
 /// The environment variable naming the built `fw-esp32v3` ELF.
 pub const IMAGE_ENV: &str = "LP_EMU_ESP32V3_ELF";
 
+/// The environment variable naming the **merged chip image** —
+/// `espflash save-image --chip esp32 --merge`'s 4 MiB output, which holds
+/// the second-stage bootloader espflash bundles, the partition table, the
+/// app and the empty `lpfs`.
+///
+/// Same rule as [`IMAGE_ENV`] and for the same reason, with one addition
+/// that matters: **the merged image must be built from the same ELF**
+/// [`fw_esp32v3_image`] answers with, or the ROM-up and direct-load halves
+/// of `tests/rom_up_boot.rs` would be comparing two builds. `just
+/// test-emu-esp32v3-boot` runs `espflash` on the ELF it just built and sets
+/// both variables, so they agree by construction.
+pub const MERGED_ENV: &str = "LP_EMU_ESP32V3_MERGED";
+
 /// The profile and target `fw-esp32v3` is built with (`justfile`:
 /// `build-fw-esp32v3`), for the notice a skipped test prints.
 pub const FW_TARGET: &str = "xtensa-esp32-none-elf";
@@ -71,6 +84,46 @@ pub fn fw_esp32v3_image() -> Result<PathBuf, String> {
             "{IMAGE_ENV} is not set. `just test-emu-esp32v3-boot` builds the shipped image \
              (`just build-fw-esp32v3`, target/{FW_TARGET}/{FW_PROFILE}/fw-esp32v3) and sets \
              it; a bare `cargo test` skips every test that needs one"
+        )),
+    }
+}
+
+/// The merged chip image, if the caller has one. [`MERGED_ENV`]'s rules are
+/// [`fw_esp32v3_image`]'s: `Ok` when it names a file, `Err(reason)` when it
+/// is unset, and a **panic** when it names a file that is not there.
+///
+/// ⚠️ **Never built here, and never vendored either.** DD25: the second-stage
+/// bootloader is not checked into this repository — `espflash save-image
+/// --chip esp32 --merge` bundles the exact ESP-IDF
+/// `v5.1-beta1-378-gea5e0ff298-dirt` build the desk board runs
+/// (`../bench.md`), so the merged image *is* the provenance and a vendored
+/// copy would be a second one that could drift. `tests/rom_up_boot.rs`
+/// asserts the version string it finds inside the image, which is the check a
+/// vendored file plus a sidecar was meant to give.
+pub fn merged_chip_image() -> Result<PathBuf, String> {
+    match std::env::var_os(MERGED_ENV) {
+        Some(path) => {
+            let mut path = PathBuf::from(path);
+            if path.is_relative()
+                && !path.is_file()
+                && let Some(root) = workspace_root()
+            {
+                path = root.join(&path);
+            }
+            assert!(
+                path.is_file(),
+                "{MERGED_ENV}={} names a file that does not exist; `just \
+                 test-emu-esp32v3-boot` writes it with `espflash save-image --chip esp32 \
+                 --merge`",
+                path.display()
+            );
+            Ok(path)
+        }
+        None => Err(format!(
+            "{MERGED_ENV} is not set. `just test-emu-esp32v3-boot` builds the shipped image, \
+             runs `espflash save-image --chip esp32 --merge --partition-table \
+             lp-fw/fw-esp32v3/partitions.csv --flash-size 4mb` on it, and sets this; a bare \
+             `cargo test` skips every test that needs one"
         )),
     }
 }
