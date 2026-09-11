@@ -326,8 +326,11 @@ mod tests {
     #[test]
     fn discovery_and_routing_are_three_way_with_an_emu() {
         let calls = Rc::new(RefCell::new(Vec::new()));
-        let transport = composite(&calls, true)
-            .with_emu(Rc::new(SpyTransport::new("emu", &calls, &["emu:dev2"])));
+        let transport = composite(&calls, true).with_emu(Rc::new(SpyTransport::new(
+            "emu",
+            &calls,
+            &["emu:dev2"],
+        )));
 
         let granted = block_on(transport.discover_granted()).expect("all three answered");
 
