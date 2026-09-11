@@ -5109,7 +5109,13 @@ impl ProjectController {
             // stops answering heartbeats (round-2 M5 re-arms this).
             ProjectProductSubscriptionIntent::Default => match self.lens_transport {
                 Some(crate::LinkTransport::Sim) => !node.state().collapsed,
-                Some(crate::LinkTransport::Serial) | None => self.is_focused_node(node),
+                // An EMU is on the device side of this fork: its wire is an
+                // emulated USB-Serial-JTAG FIFO the guest drains at its own
+                // modelled rate, so every-expanded-node pulls starve its
+                // heartbeats exactly the way they starve a board's.
+                Some(crate::LinkTransport::Emu | crate::LinkTransport::Serial) | None => {
+                    self.is_focused_node(node)
+                }
             },
             ProjectProductSubscriptionIntent::Subscribed => true,
             ProjectProductSubscriptionIntent::Unsubscribed => false,
@@ -5348,7 +5354,11 @@ impl ProjectController {
     /// used the default; a detached mirror is not probing at all).
     fn visual_preview_frame(&self) -> crate::UiProductPreviewFrame {
         match self.lens_transport {
-            Some(crate::LinkTransport::Serial) => crate::UiProductPreviewFrame::VISUAL_DEVICE,
+            // The emu runs the DEVICE's own firmware over a wire with the
+            // device's bandwidth, so it takes the device tier too.
+            Some(crate::LinkTransport::Emu | crate::LinkTransport::Serial) => {
+                crate::UiProductPreviewFrame::VISUAL_DEVICE
+            }
             Some(crate::LinkTransport::Sim) | None => crate::UiProductPreviewFrame::VISUAL_DEFAULT,
         }
     }
