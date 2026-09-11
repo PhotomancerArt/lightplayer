@@ -35,6 +35,15 @@ export { deleteFlash };
 /** The synthetic origin the port builds its channel URLs from. */
 const TAB_ORIGIN = "http://tab.emu.invalid/";
 
+/**
+ * How long a request may go unanswered before it is rejected by name.
+ *
+ * Generous on purpose: one guest slice can hold the worker for ~100 ms, and
+ * a hidden tab stretches that by a factor of forty (measured). This is the
+ * line between "slow" and "never", and nothing reads it as a duration.
+ */
+const REQUEST_DEADLINE_MS = 30_000;
+
 /** `WebSocket.OPEN` / `CLOSED`, spelled out as `emulator_port.js` does. */
 const SOCKET_OPEN = 1;
 const SOCKET_CLOSED = 3;
@@ -184,13 +193,52 @@ class TabHub {
     }
   }
 
-  /** Send a message that expects one reply, and wait for it. */
+  /**
+   * Send a message that expects one reply, and wait for it.
+   *
+   * A reply that never comes is the worst failure this seam has: the caller
+   * is usually the device stack, and a `setSignals()` that never resolves is
+   * a flasher that hangs rather than one that reports. So every request
+   * carries what it was and a deadline, and a request the worker does not
+   * answer inside it is rejected **by name**.
+   *
+   * The deadline is wall time on the HOST's side of the wall, which is where
+   * wall time belongs: it bounds nothing the guest does, and it never enters
+   * the machine. It is a wedged-run guard, never a measurement — a slice can
+   * legitimately hold the worker for a hundred milliseconds, and a hidden tab
+   * can stretch that to seconds, so it is set far above either.
+   */
   request(message, transfer) {
     const id = this.nextId++;
     return new Promise((resolve, reject) => {
-      this.pending.set(id, { resolve, reject });
+      const timer = setTimeout(() => {
+        if (!this.pending.has(id)) return;
+        this.pending.delete(id);
+        reject(
+          new Error(
+            `the emulator worker did not answer \`${message.type}\` (request ${id}) ` +
+              `within ${REQUEST_DEADLINE_MS / 1000} s`,
+          ),
+        );
+      }, REQUEST_DEADLINE_MS);
+      this.pending.set(id, {
+        what: message.type,
+        resolve: (value) => {
+          clearTimeout(timer);
+          resolve(value);
+        },
+        reject: (error) => {
+          clearTimeout(timer);
+          reject(error);
+        },
+      });
       this.worker.postMessage({ ...message, id }, transfer ?? []);
     });
+  }
+
+  /** What the worker has been asked and has not answered, for a diagnostic. */
+  outstanding() {
+    return [...this.pending.entries()].map(([id, p]) => `${id}:${p.what}`);
   }
 
   /** Fire and forget — bytes on the wire have no reply. */
