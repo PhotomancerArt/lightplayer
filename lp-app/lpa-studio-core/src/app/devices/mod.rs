@@ -59,6 +59,7 @@ pub mod device_records;
 pub mod device_roster;
 pub mod device_transport;
 pub mod devices_op;
+pub mod emu_transport;
 pub mod runtime_backing;
 pub mod runtime_band;
 pub mod shared_link_client_io;
@@ -113,6 +114,9 @@ pub use device_transport::{
     DeviceTransportFuture, GrantedLink, LensLineTap, LensTapEvent,
 };
 pub use devices_op::{DeviceFace, DevicesOp};
+pub use emu_transport::{
+    EmuBacking, EmuDeviceTransport, EmuLinkSource, EmuRuntimeControl, EmuSession,
+};
 pub use runtime_backing::{Backing, EMULATED_TARGETS, backing_for};
 pub use runtime_band::UiRuntimeBand;
 pub use shared_link_client_io::{ConversationInbox, SharedLinkClientIo};
