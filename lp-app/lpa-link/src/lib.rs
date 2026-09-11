@@ -10,7 +10,9 @@ pub mod registry;
 #[cfg(any(
     feature = "host-process",
     feature = "host-serial-esp32",
-    feature = "fake-device"
+    feature = "fake-device",
+    // The tab emulator implements the same seam in a browser.
+    feature = "emulator-tab"
 ))]
 pub mod stream;
 
