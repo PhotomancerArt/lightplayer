@@ -62,7 +62,11 @@
 #![cfg_attr(
     any(
         all(feature = "server", not(feature = "radio_ram_probe"), not(fw_harness)),
-        feature = "test_sram0_exec"
+        feature = "test_sram0_exec",
+        // The APP-core canary rig calls the product's `start_app_core_isr`,
+        // and everything core 1 runs (`wire_pusher::idle_once`'s
+        // `rsil`/`waiti`) comes with it.
+        feature = "test_appcore_rom_path"
     ),
     feature(asm_experimental_arch)
 )]
@@ -74,7 +78,11 @@
 // The server path is the whole LightPlayer stack. The hello and probe
 // entrypoints install the allocator but never name `alloc` themselves, and
 // `unused_extern_crates` is deny-by-default in this workspace's lint table.
-#[cfg(all(feature = "server", not(feature = "radio_ram_probe"), not(fw_harness)))]
+#[cfg(any(
+    all(feature = "server", not(feature = "radio_ram_probe"), not(fw_harness)),
+    // The canary rig allocates — that is its whole instrument.
+    feature = "test_appcore_rom_path"
+))]
 extern crate alloc;
 
 // The build's self-description, embedded as a scannable blob (extracted by
@@ -113,11 +121,40 @@ mod tests;
 // The hello/probe entrypoint at the bottom of this file keeps its own inline
 // init on purpose: it needs the `WIFI` peripheral that `init_board` does not
 // hand back, and it is M2-P3's measured code, worth preserving byte for byte.
-#[cfg(all(feature = "server", not(feature = "radio_ram_probe"), not(fw_harness)))]
+//
+// ⚠️ `board` and `output` are the two the `test_appcore_rom_path` rig also
+// compiles — it calls the product's `init_board` and its real
+// `start_app_core_isr`, because a discriminator that reimplemented either
+// would be measuring itself. They are the S3's "harness needs an app module"
+// exception, earned rather than copied: the `allow(dead_code)` is for the app
+// surface the rig does not reach.
+#[cfg_attr(
+    fw_harness,
+    allow(
+        dead_code,
+        unused_imports,
+        reason = "the canary rig reaches only `init_board` and `start_app_core_isr`; the rest of the app surface these modules carry is unreachable from a harness entrypoint"
+    )
+)]
+#[cfg(any(
+    all(feature = "server", not(feature = "radio_ram_probe"), not(fw_harness)),
+    feature = "test_appcore_rom_path"
+))]
 mod board;
 #[cfg(all(feature = "server", not(feature = "radio_ram_probe"), not(fw_harness)))]
 mod flash_storage;
-#[cfg(all(feature = "server", not(feature = "radio_ram_probe"), not(fw_harness)))]
+#[cfg_attr(
+    fw_harness,
+    allow(
+        dead_code,
+        unused_imports,
+        reason = "the canary rig reaches only `init_board` and `start_app_core_isr`; the rest of the app surface these modules carry is unreachable from a harness entrypoint"
+    )
+)]
+#[cfg(any(
+    all(feature = "server", not(feature = "radio_ram_probe"), not(fw_harness)),
+    feature = "test_appcore_rom_path"
+))]
 mod output;
 #[cfg(all(feature = "server", not(feature = "radio_ram_probe"), not(fw_harness)))]
 mod recovery;
@@ -205,7 +242,14 @@ esp_bootloader_esp_idf::esp_app_desc!();
 /// sizes only the `dram_seg` arena, which is the one in zero-sum competition
 /// with `.stack`; the other three cost `.stack` nothing, which is exactly why
 /// they were worth reclaiming. Total heap is `HEAP_SIZE + 128,912`.
-#[cfg(all(feature = "server", not(feature = "radio_ram_probe"), not(fw_harness)))]
+//
+// The canary rig takes the same constant: it carves the same arena in the same
+// order, so that the region it watches is the product's region 0 and not a
+// rig-shaped approximation of it.
+#[cfg(any(
+    all(feature = "server", not(feature = "radio_ram_probe"), not(fw_harness)),
+    feature = "test_appcore_rom_path"
+))]
 const HEAP_SIZE: usize = 110 * 1024;
 
 /// Bare hello build (`--no-default-features --features esp32`): M2-P1's
@@ -522,7 +566,10 @@ fn esp32_memory_stats() -> Option<(u32, u32)> {
 /// The span is `'static` (a fixed hardware address), exclusively the
 /// allocator's (the code region is the only other claimant on SRAM1, and the
 /// const-asserts prove they abut without overlap), and non-empty.
-#[cfg(all(feature = "server", not(feature = "radio_ram_probe"), not(fw_harness)))]
+#[cfg(any(
+    all(feature = "server", not(feature = "radio_ram_probe"), not(fw_harness)),
+    feature = "test_appcore_rom_path"
+))]
 fn add_sram1_heap_region() -> usize {
     let (base, len) = lpvm_native::codemem_esp32::CodeRegion::ESP32_DEFAULT.reclaimable_heap_span();
     unsafe {
@@ -561,7 +608,10 @@ fn add_sram1_heap_region() -> usize {
 /// esp-hal's reservation is precisely what keeps the linker away), and
 /// non-empty. The const-asserts in `codemem_esp32` pin it against the ROM data
 /// blocks either side.
-#[cfg(all(feature = "server", not(feature = "radio_ram_probe"), not(fw_harness)))]
+#[cfg(any(
+    all(feature = "server", not(feature = "radio_ram_probe"), not(fw_harness)),
+    feature = "test_appcore_rom_path"
+))]
 fn add_rom_pro_stack_region() -> usize {
     let (base, len) = lpvm_native::codemem_esp32::SRAM1_ROM_PRO_STACK_SPAN;
     unsafe {
@@ -1095,7 +1145,21 @@ async fn main(spawner: embassy_executor::Spawner) {
     tests::interrupt_executor::run(spawner).await
 }
 
-#[cfg(all(fw_harness, not(feature = "test_interrupt_executor")))]
+/// The APP-core ROM-path canary rig. Its own entrypoint because it takes the
+/// peripheral singleton through the product's `init_board` — the same call the
+/// app makes, and taking it twice panics, so it cannot share the generic
+/// harness `main` above.
+#[cfg(all(fw_harness, feature = "test_appcore_rom_path"))]
+#[esp_hal::main]
+fn main() -> ! {
+    tests::appcore_rom_path::run()
+}
+
+#[cfg(all(
+    fw_harness,
+    not(feature = "test_interrupt_executor"),
+    not(feature = "test_appcore_rom_path")
+))]
 #[esp_hal::main]
 fn main() -> ! {
     let peripherals =

@@ -1033,7 +1033,7 @@ clippy-fw-esp32v3:
     # whole app path out, so linting the defaults leaves harness code completely
     # uncovered. That is exactly how 13 fw-esp32 harnesses once rotted
     # uncompiled. Add new `test_*` features to this list.
-    for feat in test_xt_fp_conformance test_interrupt_executor test_sram0_exec; do
+    for feat in test_xt_fp_conformance test_interrupt_executor test_sram0_exec test_appcore_rom_path; do
       echo "clippy: --features $feat"
       cargo clippy --profile release-esp32v3 --features "$feat" -- --no-deps -D warnings
     done
@@ -1504,6 +1504,64 @@ fwtest-sram0-esp32v3 port="":
     kill "$watcher" 2>/dev/null || true
     echo "--- [SRAM0] lines ---"
     grep -a 'SRAM0\|Exception\|PANIC\|msg:' "$out" || echo "NO SRAM0 OUTPUT (see $out)"
+
+# APP-core ROM-path canary on the classic (lab task L2, plan
+# `2026-09-10-0021-xtensa-emulator`): flashes the `test_appcore_rom_path`
+# harness and captures its `[APPCORE-CANARY]` lines.
+#
+# The rig fills the head of heap region 0 (`0x3ffe0440+`) with `0xA5`, calls
+# the PRODUCT's `start_app_core_isr`, and reports which bytes the mask ROM
+# rewrote — `verdict=A` if the APP core re-ran the ROM's unpack/bss tables over
+# live heap, `verdict=B` if only ROM `main`'s seven exception-handler pairs
+# changed. One boot, no fault, no reset: read the tail.
+#
+# ⚠️ The classic's console is 921600 and its bridge is a CH340**K** whose macOS
+# dext ignores single-bit `TIOCMBIS`/`TIOCMBIC` — `espflash --monitor` is fine
+# (it does not touch the lines after `--after hard-reset`), but a *separate*
+# reader has to pulse `TIOCMSET` whole-status to reset the board. See
+# `scripts/emu/classic-reset-and-capture.py` where it exists, or the plan's
+# `bench.md`. This recipe uses the monitor, like its SRAM0 sibling.
+#
+# ⚠️ Flashing this image REPLACES the app. Reflash the reference image
+# afterwards (`scripts/emu/build-reference-image.sh`) — this is a rig, not a
+# firmware.
+fwtest-appcore-rom-path-esp32v3 port="":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    GCC_BIN="$(just _xt-gcc-dir xtensa-esp32-elf-gcc)"
+    if [[ -n "$GCC_BIN" ]]; then
+      export PATH="$GCC_BIN:$PATH"
+    fi
+    mkdir -p target/fp-capture
+    out="target/fp-capture/appcore-v3-$(date +%Y%m%d-%H%M%S).txt"
+    (cd {{ fw_esp32v3_dir }} && touch src/main.rs && \
+      cargo build --profile release-esp32v3 --features test_appcore_rom_path)
+    args=(--chip esp32 --partition-table {{ fw_esp32v3_dir }}/partitions.csv --flash-size {{ v3_flash_size }} --monitor --monitor-baud 921600 --after hard-reset)
+    if [[ -n "{{ port }}" ]]; then
+      args+=(--port "{{ port }}")
+    fi
+    echo "capturing to $out"
+    : > "$out"
+    # Port-scoped SIGINT, the rule the two parallel classic lanes of
+    # 2026-09-05 taught: an unscoped `pkill -f 'espflash flash'` takes out the
+    # other board's mid-write flash.
+    if [[ -n "{{ port }}" ]]; then
+      pkill_pattern='espflash flash.*--port {{ port }}'
+    else
+      pkill_pattern='espflash flash.*--chip esp32'
+    fi
+    (
+      for _ in $(seq 1 120); do
+        if grep -q 'APPCORE-CANARY. done' "$out" 2>/dev/null; then break; fi
+        sleep 1
+      done
+      pkill -INT -f "$pkill_pattern" || true
+    ) &
+    watcher=$!
+    script -q "$out" espflash flash "${args[@]}" {{ fw_esp32v3_elf }} || true
+    kill "$watcher" 2>/dev/null || true
+    echo "--- [APPCORE-CANARY] lines ---"
+    grep -a 'APPCORE-CANARY\|PANIC\|msg:' "$out" || echo "NO APPCORE-CANARY OUTPUT (see $out)"
 
 fwtest-xt-fp-esp32v3 port="" family="" limit="0":
     #!/usr/bin/env bash

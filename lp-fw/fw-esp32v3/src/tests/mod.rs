@@ -31,3 +31,9 @@ pub mod interrupt_executor;
 /// docs.
 #[cfg(feature = "test_sram0_exec")]
 pub mod sram0_exec;
+
+/// Silicon discriminator for the APP core's ROM reset path: does starting
+/// core 1 re-run the mask ROM's unpack/bss tables over heap region 0? See the
+/// module docs.
+#[cfg(feature = "test_appcore_rom_path")]
+pub mod appcore_rom_path;
