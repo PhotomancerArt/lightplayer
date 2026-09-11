@@ -109,6 +109,22 @@ impl Scheduler {
             .min()
     }
 
+    /// The earliest live deadline **and the event that owns it**, in the
+    /// order [`pop_due`](Self::pop_due) would return them: ties break FIFO by
+    /// schedule order, so this names the event that would actually fire.
+    ///
+    /// A diagnostic — M7b P4's slice census asks "which event bounded this
+    /// slice?" and nothing in a run loop needs the id. The run loop asks
+    /// [`next_deadline`](Self::next_deadline), which does not pay for the
+    /// tie-break.
+    pub fn next_event(&self) -> Option<(Cycles, EventId)> {
+        self.heap
+            .iter()
+            .filter(|Reverse(e)| self.is_live(e))
+            .min_by_key(|Reverse(e)| (e.at, e.seq))
+            .map(|Reverse(e)| (e.at, e.id))
+    }
+
     /// Pop the earliest event due at or before `now`, or `None`.
     ///
     /// Ties break FIFO by schedule order. Cancelled entries are discarded on

@@ -1265,6 +1265,12 @@ fn report(machine: &mut Esp32C6Machine, outcome: &Outcome) {
     if let Some(census) = machine.jit_mmio_census() {
         eprint!("{census}");
     }
+    // M7b P4: the slice census, when `LP_EMU_SLICE_CENSUS` asked for it.
+    // Independent of `--jit-report` for the same reason, and of `--jit`
+    // entirely: the slice loop is the same loop with `--interpreter`.
+    if let Some(census) = machine.slice_census() {
+        eprint!("{census}");
+    }
     // Independent of `--jit-report`: the census answers "where did the rest
     // go", and a run may want it with no core installed at all.
     if let Some(lines) = machine.blockprof_report(20) {

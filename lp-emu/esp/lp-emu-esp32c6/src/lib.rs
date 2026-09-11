@@ -71,6 +71,7 @@ pub mod periph;
 pub mod pinscript;
 pub mod regs;
 pub mod rom;
+pub mod slice_census;
 pub mod snapshot;
 pub mod test_support;
 

@@ -83,6 +83,7 @@ use crate::periph::uart::LIVE_POLL_CYCLES;
 use crate::periph::usb_sj::UsbSerialJtag;
 use crate::pinscript::PinScript;
 use crate::rom::{self, HookResult, HookTable, PlacedSegment, RomError};
+use crate::slice_census;
 use crate::snapshot::Snapshot;
 
 /// The largest slice the machine ever asks for: 8,192 cycles, 51 µs.
@@ -2539,6 +2540,16 @@ impl Esp32C6Machine {
         None
     }
 
+    /// M7b P4's slice census, when `LP_EMU_SLICE_CENSUS` asked for it.
+    ///
+    /// Unlike the MMIO census this is not a translated-code diagnostic: the
+    /// slice loop is the same loop with `--interpreter`, so the census
+    /// answers for either.
+    #[must_use]
+    pub fn slice_census(&self) -> Option<String> {
+        slice_census::report(&self.bus)
+    }
+
     /// Hold the hart to this machine's translation policy.
     ///
     /// With `--interpreter` there must be no core installed, whatever else
@@ -3662,7 +3673,9 @@ impl Esp32C6Machine {
     /// stamped slightly ahead of the boundary (the RMT emits a word's two
     /// halves at the fetch, each at the cycle it starts); that is a timestamp
     /// the decoder reads, never a reordering.
-    fn drain_pins(&mut self) {
+    ///
+    /// Returns how many edges it drained, for M7b P4's slice census.
+    fn drain_pins(&mut self) -> usize {
         let epoch = self.bus.pins.route_epoch();
         if epoch != self.pins.epoch {
             self.pins.epoch = epoch;
@@ -3686,8 +3699,9 @@ impl Esp32C6Machine {
         }
         let edges = self.bus.pins.take_edges();
         if edges.is_empty() {
-            return;
+            return 0;
         }
+        let drained = edges.len();
         // The GPIO block reads the same stream the pin log and the decoders
         // do, so `status` latches exactly the edges that were on the wire —
         // including two in one slice.
@@ -3719,6 +3733,7 @@ impl Esp32C6Machine {
             };
             self.record_frame(pad, frame);
         }
+        drained
     }
 
     /// The radio TX log: the frames the WiFi blob handed the MAC, as bytes.
@@ -4384,6 +4399,9 @@ impl Esp32C6Machine {
         let mut next_probe = 0usize;
         // One search anchor per console: UART0, then the USB link.
         let mut matched = [0usize; 2];
+        // M7b P4's census asks whether a boundary changed anything; the
+        // external interrupt number is one of the things it can change.
+        let mut last_external = self.bus.pending_cpu_interrupt();
 
         loop {
             let now = self.cycles();
@@ -4397,20 +4415,51 @@ impl Esp32C6Machine {
                 return Outcome::Deadline { cycle: now };
             }
 
-            let mut deadline = stop_cycle.min(now.saturating_add(MAX_SLICE_CYCLES));
+            // The deadline, and — for M7b P4's slice census — which term of
+            // the `min` achieved it. `if x < deadline` is the same value
+            // `deadline.min(x)` is; a tie is credited to the earlier term,
+            // which is the order the chain of `min` calls already had.
+            let cap = now.saturating_add(MAX_SLICE_CYCLES);
+            let mut bound = if stop_cycle < cap {
+                slice_census::Bound::StopCycle
+            } else {
+                slice_census::Bound::Cap
+            };
+            let mut deadline = stop_cycle.min(cap);
             if let Some(event) = self.bus.sched.next_deadline() {
-                deadline = deadline.min(event.max(now + 1));
+                let at = event.max(now + 1);
+                if at < deadline {
+                    deadline = at;
+                    bound = slice_census::Bound::Scheduler;
+                }
             }
             if let Some((at, _)) = probes.get(next_probe) {
-                deadline = deadline.min((*at).max(now + 1));
+                let at = (*at).max(now + 1);
+                if at < deadline {
+                    deadline = at;
+                    bound = slice_census::Bound::Probe;
+                }
             }
             if let Some(at) = self.next_host_service(now) {
-                deadline = deadline.min(at.max(now + 1));
+                let at = at.max(now + 1);
+                if at < deadline {
+                    deadline = at;
+                    bound = slice_census::Bound::HostService;
+                }
             }
             if self.bus.strict() {
-                deadline = deadline.min(now + STRICT_SLICE_CYCLES);
+                let at = now + STRICT_SLICE_CYCLES;
+                if at < deadline {
+                    deadline = at;
+                    bound = slice_census::Bound::Strict;
+                }
             }
             let budget = deadline.saturating_sub(now).max(1);
+            // Only the census wants the event's identity, and finding it is a
+            // second scan with a tie-break `next_deadline` does not pay for.
+            let census_event = (slice_census::on() && bound == slice_census::Bound::Scheduler)
+                .then(|| self.bus.sched.next_event().map(|(_, id)| id))
+                .flatten();
 
             self.bus.set_time(now);
             let end = self.harts[0].run_slice(&mut self.bus, budget);
@@ -4426,6 +4475,14 @@ impl Esp32C6Machine {
             // the `fence.i` and here are interpreted, exactly as they would
             // have been with no core at all.
             self.translate_if_code_was_published();
+
+            let census_end = match end {
+                SliceEnd::BudgetExhausted => slice_census::End::BudgetExhausted,
+                SliceEnd::BusYield => slice_census::End::BusYield,
+                SliceEnd::Wfi => slice_census::End::Wfi,
+                SliceEnd::Ebreak { .. } => slice_census::End::Ebreak,
+                SliceEnd::Fault(_) => slice_census::End::Fault,
+            };
 
             match end {
                 SliceEnd::BudgetExhausted => {}
@@ -4476,23 +4533,25 @@ impl Esp32C6Machine {
             // event may have raised a line, and only the machine can tell
             // the hart about one that happened between slices.
             let at = self.cycles();
-            self.bus.run_due_events(at);
+            let due_events = self.bus.run_due_events(at);
             // The pads: whatever the slice put on the wire, in cycle order.
-            self.drain_pins();
+            let pin_edges = self.drain_pins();
             // The radio: any frame the blob armed during the slice, read out
             // of guest RAM now that a peripheral's borrow has ended.
             self.drain_tx_log();
             // The host's side, at a slice boundary and never inside one: a
             // scripted command due by now, then — on the poll cadence — the
             // byte socket's client edge and the control channel's lines.
-            self.service_host(at);
+            let host_service = self.service_host(at);
             let external = self.bus.pending_cpu_interrupt();
+            let external_changed = external != last_external;
+            last_external = external;
             self.harts[0].set_external(external);
             self.harts[0].poll_interrupts();
             // A peripheral's event may also have written a register the
             // hart's side-band would have reported; consume it so the next
             // slice's entry poll is not answering a stale flag.
-            let _ = self.bus.take_sideband();
+            let sideband = self.bus.take_sideband();
             self.refill_cache();
             // The block cache's emulator-side funnel, drained where the
             // window refill it usually follows already is. Everything that
@@ -4502,10 +4561,30 @@ impl Esp32C6Machine {
             // a guest `fence.i`, because none of it is the guest. Almost
             // every slice this is one `is_empty` test: P1 counted 98 cache
             // refills across a whole render run.
-            if self.bus.code_writes_pending() {
+            let code_write = self.bus.code_writes_pending();
+            if code_write {
                 for (lo, hi) in self.bus.take_code_writes() {
                     self.harts[0].invalidate_block_range(lo, hi);
                 }
+            }
+
+            // M7b P4: one line of census per slice, after the boundary work
+            // so it can say whether any of it did anything. A `Fault` slice
+            // is the exception — that arm returns above, and it is the run's
+            // last slice.
+            if slice_census::on() {
+                slice_census::note(&slice_census::Slice {
+                    bound,
+                    event: census_event,
+                    length: at.saturating_sub(now),
+                    end: census_end,
+                    due_events,
+                    pin_edges: u32::try_from(pin_edges).unwrap_or(u32::MAX),
+                    host_service,
+                    code_write,
+                    external_changed,
+                    sideband,
+                });
             }
 
             if let Some(violation) = self.bus.first_strict_violation() {
@@ -4572,9 +4651,13 @@ impl Esp32C6Machine {
     /// lines. Called only at a slice boundary, so a command never lands
     /// between two instructions of one slice, and the reply names the cycle
     /// it was drained at.
-    fn service_host(&mut self, now: Cycles) {
-        self.service_pins(now);
+    ///
+    /// Returns whether it did anything at all — for M7b P4's slice census,
+    /// which asks how many slice boundaries were pure overhead.
+    fn service_host(&mut self, now: Cycles) -> bool {
+        let mut did = self.service_pins(now);
         while self.script.front().is_some_and(|(at, _)| *at <= now) {
+            did = true;
             let (_, command) = self.script.pop_front().expect("checked");
             let reply = self.apply_control(&command, now);
             if let ControlReply::Err(reason) = &reply {
@@ -4583,10 +4666,10 @@ impl Esp32C6Machine {
         }
 
         if self.control.is_none() && self.usb_sj_tcp.is_none() {
-            return;
+            return did;
         }
         if now < self.next_host_poll {
-            return;
+            return did;
         }
         self.next_host_poll = now.saturating_add(LIVE_POLL_CYCLES);
 
@@ -4610,6 +4693,7 @@ impl Esp32C6Machine {
         }
 
         self.service_control(now);
+        true
     }
 
     /// Drive every pad a `--pin-script` line is due for, then hand the
@@ -4618,14 +4702,16 @@ impl Esp32C6Machine {
     /// The drain is repeated here rather than left to the next slice
     /// boundary: an edge a script caused at cycle N should raise the GPIO
     /// interrupt at cycle N, not one slice later.
-    fn service_pins(&mut self, now: Cycles) {
+    ///
+    /// Returns whether it drove anything (M7b P4's slice census).
+    fn service_pins(&mut self, now: Cycles) -> bool {
         if self.pin_script.is_empty() {
-            return;
+            return false;
         }
         self.next_pin_poll = now.saturating_add(LIVE_POLL_CYCLES);
         let due = self.pin_script.take_due(now);
         if due.is_empty() {
-            return;
+            return false;
         }
         // The edge is stamped with the SCRIPT's cycle, not the boundary the
         // machine noticed it at: the file's times are the contract, and a
@@ -4636,6 +4722,7 @@ impl Esp32C6Machine {
         }
         self.bus.set_time(now);
         self.drain_pins();
+        true
     }
 
     /// Both sides of every pad the machine has anything to say about — what
