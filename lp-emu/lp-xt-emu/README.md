@@ -50,9 +50,9 @@ src/
                  mod (the slice loop, exception/interrupt entry) · sr (the SR/UR
                  file) · trap (causes, vector table, core-config constants) ·
                  window (WindowCheck, RETW/MOVSP checks, the policy enum) ·
-                 interrupt · timer · breakpoint · mac16 · exec (the hart-owned
-                 instruction semantics) · translated (the translator seam,
-                 idle) · tests
+                 interrupt · timer · breakpoint · mac16 · extreg (what
+                 `rer`/`wer` reach) · exec (the hart-owned instruction
+                 semantics) · translated (the translator seam, idle) · tests
 ```
 
 Decoding is delegated to [`lp-xt-inst`](../lp-xt-inst); this crate never
@@ -147,6 +147,20 @@ three `CCOMPARE` timers; two `DBREAK` slots mirrored onto
 `Bus::set_watchpoint` and two `IBREAK`s; zero-overhead loops with the RM's
 loop-back rule; `s32c1i`; MAC16; the Boolean ops, `clamps`, `l32e`/`s32e`,
 `rotw`; region-protection TLB ops accepted and remembered.
+
+**External registers (`rer`/`wer`) reach a store, not a model**
+(`src/mach/extreg.rs`): an address nobody has written reads **0** and a `wer`
+is remembered, which is enough because the only external register the classic's
+firmware touches is `XDM_OCD_DCR_SET` — read by
+`xtensa_lx::is_debugger_attached` and so by `esp-hal`'s `debugger_connected()`
+and the IDF bootloader's `esp_cpu_dbgr_is_attached()` — where bit 0 clear
+**is** the answer "no debugger attached", the same answer the C6 machine gives
+on the RISC-V side by forcing `ASSIST_DEBUG.debug_module_active` to 0. Every
+access emits a `TraceEvent::ExtRegAccess` (`rer ext[0x0010200c] -> 0x00000000`)
+so a guest spinning on a debug register is diagnosable instead of silent, and a
+machine that has something real on the ERI window seeds it through
+`XtHart::external_regs_mut`. The user-mode `Emulator` is unchanged: there
+`rer`/`wer` are still machine-mode-only and trap.
 
 **The policy enum.** `mach::window::WindowPolicy { Direct, Exception }` is
 what the executors' `Exec` view carries. The user-mode `Emulator` passes
