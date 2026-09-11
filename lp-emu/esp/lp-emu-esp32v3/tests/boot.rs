@@ -1044,6 +1044,20 @@ fn direct_traced(micros: u64) -> Option<(Machine, Outcome, String)> {
     direct_traced_on(micros, lp_emu_esp32v3::flash::FlashBacking::Blank)
 }
 
+fn merged_chip() -> Option<lp_emu_esp32v3::flash::FlashBacking> {
+    match lp_emu_esp32v3::test_support::merged_chip_image() {
+        Ok(p) => Some(lp_emu_esp32v3::flash::FlashBacking::Copy(p)),
+        Err(reason) => {
+            skip_notice("the merged chip image", &reason);
+            None
+        }
+    }
+}
+
+/// The line each chip's chain ends on.
+const BLANK_LAST_LINE: &str = "using memory FS";
+const MOUNTED_LINE: &str = "[INIT] flash filesystem mounted";
+
 /// **Where the direct load stands at the end of P7**, and it is one
 /// instruction short of the idle heartbeat.
 ///
@@ -1076,6 +1090,37 @@ fn is_the_rer_stop(outcome: &Outcome) -> bool {
     )
 }
 
+/// **The `rer` wall.** Run past the mount and the boot meets one instruction
+/// this machine's hart does not decode. Pinned exactly, so a later phase that
+/// lands `rer` deletes this test rather than editing it, and so a *different*
+/// unsupported opcode is a different finding.
+#[test]
+#[ignore = "needs the shipped image and espflash; run through `just test-emu-esp32v3-boot`"]
+fn past_the_filesystem_the_boot_meets_the_one_opcode_this_hart_lacks() {
+    let Some(chip) = merged_chip() else { return };
+    let Some((machine, outcome, trace)) = direct_traced_on(300_000, chip) else {
+        return;
+    };
+    assert!(
+        is_the_rer_stop(&outcome),
+        "the direct load's end of the line is `rer`, and nothing before it: {outcome:?}"
+    );
+    assert!(
+        machine.first_strict_violation().is_none(),
+        "no strict refusal behind it"
+    );
+    assert_eq!(
+        machine.bus().unmapped_reads() + machine.bus().unmapped_writes(),
+        0,
+        "and zero unmapped accesses on the way"
+    );
+    let written = String::from_utf8_lossy(&uart0_fifo_bytes(&trace)).into_owned();
+    assert!(
+        written.contains(MOUNTED_LINE),
+        "it got there with the filesystem mounted:\n{written}"
+    );
+}
+
 /// **The flash controller answers, and a blank chip has no partition table.**
 ///
 /// P3 left the direct load spinning here: esp-storage's
@@ -1095,10 +1140,14 @@ fn is_the_rer_stop(outcome: &Outcome) -> bool {
 /// so `esp-bootloader-esp-idf`'s lookup fails and the firmware takes its own
 /// documented fallback. The merged-image reading is the test below.
 ///
-/// The hello was **P6's**, and it landed: the bytes below left the chip
-/// through UART0's shifter at 921,600 baud and are read back off the host
-/// stream. `fifo` reads the **receive** side on the read path, and an empty
-/// receive FIFO reads zero.
+/// ⚠️ **The bytes are read out of the FIFO trace, not off the wire, and that
+/// is deliberate.** UART0's shifter carries bytes at the programmed baud in
+/// emulated time (P6), and this run ends on a fault a few thousand cycles
+/// after the last line is *printed*, so the tail of it is still in the
+/// transmit FIFO. What the guest wrote is a property of the boot; how much of
+/// it the wire had carried when the run stopped is a property of where the
+/// run stopped — which is the `rer` wall above, and which moves when `rer`
+/// lands. The relationship between the two is asserted rather than assumed.
 #[test]
 #[ignore = "needs the shipped image; run through `just test-emu-esp32v3-boot`"]
 fn the_flash_status_spin_ends_and_a_blank_chip_has_no_partition_table() {
@@ -1120,33 +1169,40 @@ fn the_flash_status_spin_ends_and_a_blank_chip_has_no_partition_table() {
         "the status read the spin was waiting on really ran: {census}"
     );
 
-    let text = String::from_utf8_lossy(&uart0_fifo_bytes(&trace)).into_owned();
+    let written = uart0_fifo_bytes(&trace);
+    let text = String::from_utf8_lossy(&written).into_owned();
     assert!(
         text.starts_with("[INIT] fw-esp32v3 boot\n"),
         "the first line the boot prints: {text:?}"
     );
     assert!(
-        text.contains("partition in the flashed table"),
+        text.contains(BLANK_LAST_LINE),
         "a blank chip has no partition table; the firmware says so:\n{text}"
     );
     assert!(
-        !text.contains("flash filesystem mounted"),
+        !text.contains(MOUNTED_LINE),
         "and does not claim to have mounted one:\n{text}"
     );
-    // And the block holds none of it: `fifo` is the receive side on the read
+    // What the wire carried is a **prefix** of what the guest wrote, and the
+    // difference is the shifter's in-flight tail at the moment of the fault.
+    let carried = machine.uart0().bytes();
+    assert!(
+        written.starts_with(&carried),
+        "the wire carried something the guest did not write"
+    );
+    assert!(
+        carried.len() > 543,
+        "and it carried the whole P3 prefix and more: {} bytes",
+        carried.len()
+    );
+    // The block holds none of it: `fifo` is the receive side on the read
     // path, the host sent nothing, and an empty receive FIFO reads zero.
-    // Every byte above left the chip through the shifter at 921,600 baud.
     assert_eq!(
         machine
             .peek_word(memmap::periph::UART0)
             .map(|w| (w & 0xff) as u8),
         Some(0),
         "the view's `fifo` read is a receive pop, not the last thing written"
-    );
-    assert_eq!(
-        machine.uart0().len(),
-        text.len(),
-        "and what the wire carried is what the guest wrote, byte for byte"
     );
 }
 
@@ -1156,16 +1212,8 @@ fn the_flash_status_spin_ends_and_a_blank_chip_has_no_partition_table() {
 #[test]
 #[ignore = "needs the shipped image and espflash; run through `just test-emu-esp32v3-boot`"]
 fn the_direct_load_mounts_the_flash_filesystem() {
-    let merged = match lp_emu_esp32v3::test_support::merged_chip_image() {
-        Ok(p) => p,
-        Err(reason) => {
-            skip_notice("the_direct_load_mounts_the_flash_filesystem", &reason);
-            return;
-        }
-    };
-    let Some((machine, outcome, trace)) =
-        direct_traced_on(300_000, lp_emu_esp32v3::flash::FlashBacking::Copy(merged))
-    else {
+    let Some(chip) = merged_chip() else { return };
+    let Some((machine, outcome, trace)) = direct_traced_on(300_000, chip) else {
         return;
     };
     assert!(is_the_rer_stop(&outcome), "{outcome:?}");
@@ -1194,19 +1242,19 @@ fn the_direct_load_mounts_the_flash_filesystem() {
 /// widened**: each golden is a whole byte stream with a sha, and the cause of
 /// the change is the line that follows `I/O task spawned` in each.
 ///
-/// A blank chip: 543 bytes plus the `[ERROR] no lpfs partition …` fallback.
-///
 /// Both are properties of **this image**, not of the machine: the desk board
 /// runs a different commit (ruling R7), and a firmware change moves them. A
 /// failure means "the boot printed something else", and the text the test
 /// prints is what says whether that is a regression or a rebuild.
+///
+/// A blank chip: 543 bytes plus the `[ERROR] no lpfs partition …` fallback.
 const INIT_CHAIN_BLANK_SHA256: &str =
     "bfb8d720edc298a3d902860525be2fa05fe701202babeb8e9b0cfee10d2aa40a";
 const INIT_CHAIN_BLANK_LEN: usize = 676;
 
-/// The merged image: 543 bytes plus `[INIT] flash filesystem mounted`, and
-/// **fewer** bytes than the blank-chip chain because the error line it
-/// replaces is longer than the success line.
+/// The merged image: the same 543 bytes plus `[INIT] flash filesystem
+/// mounted`, and **fewer** bytes than the blank-chip chain, because the error
+/// line it replaces is longer than the success line.
 const INIT_CHAIN_MERGED_SHA256: &str =
     "87fb3c418b9c2755d5e465dca1906e9f1d4ee64c96b53d1121f7fa23bbf3b373";
 const INIT_CHAIN_MERGED_LEN: usize = 575;
@@ -1230,16 +1278,8 @@ fn the_init_chain_is_the_golden_bytes() {
         "the chain is:\n{text}"
     );
 
-    let merged = match lp_emu_esp32v3::test_support::merged_chip_image() {
-        Ok(p) => p,
-        Err(reason) => {
-            skip_notice("the_init_chain_is_the_golden_bytes (merged half)", &reason);
-            return;
-        }
-    };
-    let Some((_, outcome, trace)) =
-        direct_traced_on(300_000, lp_emu_esp32v3::flash::FlashBacking::Copy(merged))
-    else {
+    let Some(chip) = merged_chip() else { return };
+    let Some((_, outcome, trace)) = direct_traced_on(300_000, chip) else {
         return;
     };
     assert!(is_the_rer_stop(&outcome), "{outcome:?}");

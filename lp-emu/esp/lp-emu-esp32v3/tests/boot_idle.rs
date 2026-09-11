@@ -177,12 +177,23 @@ fn exit_on_stops_at_a_complete_line() {
     );
 }
 
-/// Where the direct load now stands: not on a strict stop, but on the flash
-/// controller's command word — P7's, and P3's reading unchanged except that
-/// the boot got there having actually transmitted its console.
+/// Where the direct load now stands.
+///
+/// P6 left this run spinning on the flash controller's command word, with the
+/// whole console out on the wire and nothing left in the FIFO. **P7 gave the
+/// machine a flash chip**, so the spin ends on its first pass and the boot
+/// carries on — past the mount and into `CpuControl::start_app_core`, where it
+/// meets `rer`, the one instruction this hart does not decode
+/// (`tests/boot.rs`, `past_the_filesystem_the_boot_meets_the_one_opcode_this_hart_lacks`,
+/// has the pin and the reason it is an ISA-crate follow-up).
+///
+/// What this test keeps from P6 is the console: the first
+/// [`PREFIX_BYTES`] bytes on the wire are still byte-for-byte the golden, and
+/// the wire carried more of them than P6 could — which is the phase, in one
+/// figure.
 #[test]
 #[ignore = "needs the shipped image; run through `just test-emu-esp32v3-boot`"]
-fn past_the_hello_the_run_stands_at_the_flash_until_p7() {
+fn past_the_hello_the_run_reaches_the_flash_and_goes_through_it() {
     let Some(elf) = image() else { return };
     let mut machine = Esp32V3Builder::new()
         .boot_mode(BootMode::Direct)
@@ -192,16 +203,29 @@ fn past_the_hello_the_run_stands_at_the_flash_until_p7() {
         .expect("builds");
     let outcome = machine.run_until(&StopCondition::after_micros(80_000));
     assert!(
-        matches!(outcome, Outcome::Deadline { .. }),
-        "no strict stop and no fault: {outcome:?}"
+        matches!(outcome, Outcome::Fault { .. }),
+        "the flash no longer holds it; the `rer` wall does: {outcome:?}"
     );
-    let pc = machine.harts[0].pc();
-    let sym = machine.symbolize(pc).unwrap_or_default();
     assert!(
-        sym.starts_with("esp_rom_spiflash_read_status"),
-        "spinning on the flash status command, got pc={pc:#010x} ({sym})"
+        machine.first_strict_violation().is_none(),
+        "and no strict refusal behind it"
     );
-    // Everything the console had to say is out, and nothing is still in the
-    // FIFO waiting for a shifter that stopped.
-    assert_eq!(machine.uart0().len(), PREFIX_BYTES);
+    // The flash controller really moved bytes rather than being spun on.
+    let census = machine.flash().lock().expect("flash").command_census();
+    assert!(census.reads > 0, "the flash was read: {census}");
+
+    // The console: the golden prefix, unchanged, and more of it on the wire
+    // than the run that stopped at the flash could carry.
+    let bytes = machine.uart0().bytes();
+    assert!(
+        bytes.len() > PREFIX_BYTES,
+        "the boot printed past `{LAST_LINE}`: {} bytes",
+        bytes.len()
+    );
+    assert_eq!(
+        hex(&Sha256::digest(&bytes[..PREFIX_BYTES])),
+        PREFIX_SHA256,
+        "the golden prefix moved:\n{}",
+        String::from_utf8_lossy(&bytes)
+    );
 }

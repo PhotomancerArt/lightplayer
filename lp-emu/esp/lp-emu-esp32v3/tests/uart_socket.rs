@@ -311,8 +311,19 @@ fn a_cable_reset_reboots_the_running_app_and_the_log_has_both_boots() {
             return;
         }
     };
-    // 20 ms in, well past the first boot's `[INIT] I/O task spawned` at
-    // 13,521 us; released one emulated millisecond later.
+    // ⚠️ **P7 moved this window.** P6 pulled EN at 20 ms, well past the first
+    // boot's `[INIT] I/O task spawned` at 13,521 us, because the boot then sat
+    // on the flash controller's command word for ever. With a flash chip
+    // behind SPI1 it does not sit anywhere: it runs on to
+    // `CpuControl::start_app_core` and meets `rer` at **14,539 us**
+    // (`tests/boot.rs`), which is before P6's 20 ms — so a reset scheduled
+    // there would never be delivered and this test would be asserting that
+    // the cable works while the cable was never used.
+    //
+    // 12 ms is past `[RECOVERY] boot: cause=power-on` on the wire and inside
+    // the first boot's life. It is a narrow window and a deterministic one:
+    // the same run every time, and a firmware change that moves the console
+    // moves this test rather than silently hollowing it out.
     let ms = 1_000 * memmap::CYCLES_PER_US;
     let mut machine = Esp32V3Builder::new()
         .boot_mode(BootMode::Direct)
@@ -323,14 +334,14 @@ fn a_cable_reset_reboots_the_running_app_and_the_log_has_both_boots() {
             (0, ControlCommand::Attach),
             (0, ControlCommand::Open),
             (
-                20 * ms,
+                12 * ms,
                 ControlCommand::Signals {
                     dtr: Some(false),
                     rts: Some(true),
                 },
             ),
             (
-                21 * ms,
+                13 * ms,
                 ControlCommand::Signals {
                     dtr: Some(false),
                     rts: Some(false),
@@ -341,9 +352,32 @@ fn a_cable_reset_reboots_the_running_app_and_the_log_has_both_boots() {
         .expect("builds");
 
     let outcome = machine.run_until(&StopCondition::after_micros(45_000));
+    // ⚠️ **P7 moved this.** P6 read a `Deadline` here, because the first boot
+    // spun on the flash controller and never got past it. With a flash chip
+    // behind SPI1 the boot goes through, so the *second* boot runs on into
+    // `CpuControl::start_app_core` and meets `rer` — the one instruction this
+    // hart does not decode (`tests/boot.rs`'s
+    // `past_the_filesystem_the_boot_meets_the_one_opcode_this_hart_lacks`).
+    // Which is still "no strict stop across the reset", and is asserted as
+    // such rather than by widening the outcome match.
     assert!(
-        matches!(outcome, Outcome::Deadline { .. }),
-        "no strict stop across the reset: {outcome:?}"
+        machine.first_strict_violation().is_none(),
+        "no strict refusal across the reset: {outcome:?}"
+    );
+    assert!(
+        matches!(
+            outcome,
+            Outcome::Deadline { .. }
+                | Outcome::Fault {
+                    pc: 0x4010_01bd,
+                    fault: lp_xt_emu::mach::HartFault::UnsupportedInstruction {
+                        word: 0x0040_6890,
+                        ..
+                    },
+                    ..
+                }
+        ),
+        "the deadline, or the `rer` wall of the second boot: {outcome:?}"
     );
     assert_eq!(machine.reboots(), 1, "one release of EN, one boot");
     assert_eq!(machine.cable_report().reboots, 1);
