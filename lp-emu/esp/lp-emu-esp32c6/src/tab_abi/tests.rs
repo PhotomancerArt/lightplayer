@@ -119,7 +119,7 @@ grade=t2
 flash_len=4194304
 strict=1
 reboot_on_reset=0
-usb_host=attached-open   # a cable AND an open port
+usb_host=attached   # a cable AND an open port, as the CLI means it
 strap=download
 reset_cause=usb-uart-hpsys
 ",
@@ -135,10 +135,18 @@ reset_cause=usb-uart-hpsys
     assert_eq!(cfg.strap, Strap::Download);
     assert_eq!(cfg.reset_cause, ResetCause::UsbUartHpSys);
 
+    // The machine's own three words, and not a second spelling of them:
+    // `attached` is the cable in with the port OPEN, `attached-idle` is the
+    // cable in with it closed. Asserted here because inverting the pair is
+    // silent — the board builds either way and then says nothing.
     assert_eq!(
-        Config::parse("usb_host=attached").unwrap().usb_host,
+        Config::parse("usb_host=attached-idle").unwrap().usb_host,
         UsbHost::Attached { draining: false },
         "a cable is not a port open"
+    );
+    assert_eq!(
+        Config::parse("usb_host=absent").unwrap().usb_host,
+        UsbHost::Absent
     );
     assert_eq!(Config::parse("boot=direct").unwrap().boot, BootMode::Direct);
 }
