@@ -44,6 +44,9 @@ const TAB_ORIGIN = "http://tab.emu.invalid/";
  */
 const REQUEST_DEADLINE_MS = 30_000;
 
+/** How many control lines the hub keeps for a diagnostic. */
+const CONTROL_LOG_MAX = 400;
+
 /** `WebSocket.OPEN` / `CLOSED`, spelled out as `emulator_port.js` does. */
 const SOCKET_OPEN = 1;
 const SOCKET_CLOSED = 3;
@@ -93,6 +96,16 @@ class TabHub {
     this.row = { ...board, flash: "blank", state: "starting", reboots: 0, dilation: null };
     this.ready = null;
     this.lastError = null;
+    /**
+     * The last control lines and their replies, newest last.
+     *
+     * The scripted door has had one of these since the conformance suite was
+     * written, and for the same reason: when a flasher fails against an
+     * emulated board, the question is always "what did the host actually
+     * say, and what did the machine answer" — and neither side of that is
+     * visible from the card. Bounded, so a long session cannot grow it.
+     */
+    this.controlLog = [];
   }
 
   start() {
@@ -247,8 +260,22 @@ class TabHub {
   }
 
   async control(line) {
-    const reply = await this.request({ type: "control", line });
+    let reply;
+    try {
+      reply = await this.request({ type: "control", line });
+    } catch (error) {
+      this._note(line, `THREW ${error?.message ?? error}`);
+      throw error;
+    }
+    this._note(line, reply.line);
     return reply.line;
+  }
+
+  _note(line, reply) {
+    this.controlLog.push(`${Math.round(performance.now())} ${line} -> ${reply}`);
+    if (this.controlLog.length > CONTROL_LOG_MAX) {
+      this.controlLog.splice(0, this.controlLog.length - CONTROL_LOG_MAX);
+    }
   }
 
   onBytes(listener) {
