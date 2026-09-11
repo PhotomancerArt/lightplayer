@@ -1696,10 +1696,21 @@ the same run rather than paying for two more, and say so.
 `lp-emu/transcripts/esp32v3/rmt-chase/lp-emu-esp32v3-t1-2026-09-11-dc2df69d4.txt`
 — the console — beside its `.pins.jsonl` (transcript **shape B**: one
 `ws281x-frame` record per frame) and a sidecar naming the image commit and
-sha256, the features, the grade (`t1`), the **core quantum** (256), the boot
-path (direct) and the command that produced them. Hand-run and flagged as
-such: `lp-cli validate` has no `rmt-chase` arm for this chip, because the
-registry and the configuration are **M5's**.
+sha256, the features, the pin companion and the command that produced them.
+Hand-run and flagged as such: `lp-cli validate` has no `rmt-chase` arm for
+this chip, because the registry and the configuration are **M5's**.
+
+⚠️ **The facts about the run itself are in the sidecar's `note`, not in
+fields of their own.** The grade (`t1`), the **core quantum** (256), the boot
+path (direct), the core count and the run's counters — cycles, instructions,
+frames, edges, refills — are one labelled line each in the last paragraph of
+`note`, under `boot path:`, `time grade:`, `core quantum:`, `cores:` and
+`run:`. `TranscriptHeader` is `deny_unknown_fields` (M5 ruling R3), so a
+sidecar that spelled them as top-level keys is *refused*, loudly, by
+`every_committed_transcript_is_filed_where_its_header_says`. Widening the
+header is the contract's business and belongs to **M5 P6**, the replay
+phase; this phase records an artefact. When M5 P6 promotes them to fields it
+can lift them straight out of those lines.
 
 **Never edit a transcript.** A mismatch is a regression or a re-capture.
 
