@@ -375,7 +375,8 @@ mod tests {
         sb.write(&mut w, WDTCONFIG0, WDT_EN | (STG_INTERRUPT << STG0_SHIFT));
         sb.write(&mut w, WDTWPROTECT, 0);
         sb.write(&mut w, INT_ENA, 1);
-        sb.run_to(&mut w, sb.sched.next_deadline().unwrap());
+        let due = sb.sched.next_deadline().unwrap();
+        sb.run_to(&mut w, due);
         assert!(sb.irq.level(source::LP_WDT));
         assert_eq!(sb.read(&mut w, INT_ST), 1);
         assert!(sb.request.is_none());

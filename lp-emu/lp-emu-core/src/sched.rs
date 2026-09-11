@@ -24,9 +24,24 @@
 //! [`Scheduler::cancel`] is lazy: it bumps a per-id epoch, and entries whose
 //! epoch is stale are dropped when [`Scheduler::pop_due`] reaches them. That
 //! makes cancel `O(log n)` instead of a heap rebuild, at the price of
-//! [`Scheduler::next_deadline`] having to look past tombstones — which it
-//! does by scanning, because the pending set is a handful of alarms, not a
-//! data structure worth optimizing.
+//! [`Scheduler::next_deadline`] having to look past tombstones.
+//!
+//! It looks past them **by peeling them off the top**, the way
+//! [`Scheduler::pop_due`] already does, and not by scanning. Until M7b P4 it
+//! scanned the whole heap with a liveness filter, on the stated ground that
+//! "the pending set is a handful of alarms". The C6's slice census measured
+//! that claim and it is false: on `render-basic` t2 the scan looked at **130.5
+//! entries per slice to find 2.0 live ones**, 355 at the worst slice, because
+//! a peripheral that re-arms an alarm on every pad edge leaves one tombstone
+//! per cancel sitting at its own future deadline. At 1.53 M slices that scan —
+//! one `BTreeMap` lookup per entry — was 390 ms of a 6.4 s run.
+//!
+//! Peeling is exact for the same reason the scan was: the heap is ordered by
+//! `(at, seq)`, so the top entry is the earliest of **all** of them; if it is
+//! live it is also the earliest live one, and if it is dead nothing can ever
+//! make it live again (epochs only rise), so discarding it is what `pop_due`
+//! would have done when it came due. Tombstones deeper in the heap are never
+//! consulted, which is why the answer costs one liveness test instead of 130.
 //!
 //! Note the semantics this gives: `cancel(id)` cancels **every** pending
 //! occurrence of `id`, which is what a peripheral wants ("stop my alarm"),
@@ -98,10 +113,34 @@ impl Scheduler {
 
     /// The earliest live deadline, or `None` when nothing is pending.
     ///
-    /// Exact, not "the top of the heap": a cancelled entry at the front
-    /// would otherwise make a `wfi` wake up for nothing. `O(pending)` with
-    /// a pending set of a few alarms.
-    pub fn next_deadline(&self) -> Option<Cycles> {
+    /// Exact, not "the top of the heap as it stands": a cancelled entry at
+    /// the front would otherwise make a `wfi` wake up for nothing. It is the
+    /// top of the heap **once the dead entries in front of it are gone**,
+    /// which is why this takes `&mut self` — it discards them, exactly as
+    /// [`pop_due`](Self::pop_due) does on the way past, rather than stepping
+    /// over them again on every call.
+    ///
+    /// `O(1)` amortized: each tombstone is discarded once, and it would have
+    /// been discarded by `pop_due` anyway. The module docs have the
+    /// measurement that made this worth writing down.
+    pub fn next_deadline(&mut self) -> Option<Cycles> {
+        while let Some(&Reverse(top)) = self.heap.peek() {
+            if self.is_live(&top) {
+                return Some(top.at);
+            }
+            self.heap.pop();
+        }
+        None
+    }
+
+    /// The earliest live deadline without touching the heap.
+    ///
+    /// The `&self` form, for a caller that only has a shared borrow — a
+    /// snapshot, an assertion, a report. It pays the whole-heap scan
+    /// [`next_deadline`](Self::next_deadline) used to, so nothing on a run
+    /// loop's path should call it.
+    #[must_use]
+    pub fn peek_deadline(&self) -> Option<Cycles> {
         self.heap
             .iter()
             .filter(|Reverse(e)| self.is_live(e))
@@ -306,11 +345,55 @@ mod tests {
         s.schedule_at(10, EventId(1));
         s.schedule_at(40, EventId(2));
         s.cancel(EventId(1));
-        // The cancelled entry is still at the front of the heap; a `wfi`
-        // that trusted the raw top would wake at 10 for nothing.
+        // The cancelled entry is at the front of the heap; a `wfi` that
+        // trusted the raw top would wake at 10 for nothing.
         assert_eq!(s.next_deadline(), Some(40));
         assert_eq!(s.live(), 1);
+        // M7b P4: and it is gone afterwards. `next_deadline` discards the
+        // dead entries it steps over rather than stepping over them again on
+        // the next call — the same discard `pop_due` would have made when
+        // cycle 10 came round. `peek_deadline` is the `&self` form that
+        // leaves them where they are.
+        assert_eq!(s.pending(), 1);
+        assert_eq!(s.next_deadline(), Some(40));
+        assert_eq!(s.pending(), 1);
+    }
+
+    #[test]
+    fn next_deadline_leaves_a_tombstone_that_is_not_in_front_alone() {
+        // The invariant the peeling shape rests on: only the entries in
+        // FRONT of the answer are ever looked at. A tombstone behind the
+        // earliest live deadline costs nothing and stays in the heap until
+        // `pop_due` reaches it — and the answer is the same one the old
+        // whole-heap scan gave.
+        let mut s = Scheduler::new();
+        s.schedule_at(10, EventId(1));
+        s.schedule_at(40, EventId(2));
+        s.cancel(EventId(2));
+        assert_eq!(s.next_deadline(), Some(10));
+        assert_eq!(s.pending(), 2, "the dead entry at 40 was never reached");
+        assert_eq!(s.peek_deadline(), Some(10), "and the scan agrees");
+        // Once the live one is gone, the dead one is peeled and the answer
+        // is `None` rather than 40.
+        assert_eq!(s.pop_due(10), Some(EventId(1)));
+        assert_eq!(s.next_deadline(), None);
+        assert_eq!(s.pending(), 0);
+    }
+
+    #[test]
+    fn peek_deadline_is_the_shared_borrow_form_of_the_same_answer() {
+        let mut s = Scheduler::new();
+        s.schedule_at(10, EventId(1));
+        s.schedule_at(40, EventId(2));
+        s.cancel(EventId(1));
+        // The `&self` form does not touch the heap…
+        assert_eq!(s.peek_deadline(), Some(40));
         assert_eq!(s.pending(), 2);
+        // …and gives the same answer the `&mut self` one does.
+        let peeled = s.next_deadline();
+        assert_eq!(peeled, Some(40));
+        assert_eq!(s.peek_deadline(), peeled);
+        assert_eq!(s.pending(), 1, "and this one did clear the tombstone");
     }
 
     #[test]

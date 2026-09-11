@@ -2394,15 +2394,23 @@ impl TranslatedCore<SocBus> for JitCore {
         if hart.instruction_count() == instret {
             self.stats.exit_no_progress += 1;
         }
-        let t_index2 = inner.map(|_| std::time::Instant::now());
-        let known = self.index.contains_key(&exit.pc);
-        if let Some(t) = t_index2 {
-            self.timing.index_ns += t.elapsed().as_nanos() as u64;
-        }
-        if known {
-            self.stats.exit_known_pc += 1;
-        } else {
-            self.stats.exit_unknown_pc += 1;
+        // M7b P4 / plan.md BD5. This `BTreeMap` lookup answers nothing the
+        // stay needs — the module has already left, and its only consumers
+        // are the two counters below. It is how a coverage shortfall names
+        // itself, so it gets the same `LP_EMU_JIT_EXITS` switch `exit_sites`
+        // has rather than a deletion: with the switch off, `exit_known_pc`
+        // and `exit_unknown_pc` stay zero and the report line says so.
+        if self.exit_sites.is_some() {
+            let t_index2 = inner.map(|_| std::time::Instant::now());
+            let known = self.index.contains_key(&exit.pc);
+            if let Some(t) = t_index2 {
+                self.timing.index_ns += t.elapsed().as_nanos() as u64;
+            }
+            if known {
+                self.stats.exit_known_pc += 1;
+            } else {
+                self.stats.exit_unknown_pc += 1;
+            }
         }
         let why = (exit_why as usize).min(WHY_CODES - 1);
         self.stats.why[why].0 += 1;
@@ -2530,7 +2538,7 @@ impl TranslatedCore<SocBus> for JitCore {
              discover {:.2} ms, emit {:.2} ms, compile {:.2} ms, \
              instantiate {:.2} ms; \
              entries {}, retired {}, escape_hatch {}, cross {}, indirect_miss {}, \
-             interpreted_between {}, exits known/unknown {}/{}, after_store {}, \
+             interpreted_between {}, exits known/unknown {}, after_store {}, \
              pending_out {}, \
              polls {} ({} left the stay), \
              systimer_fast {} read(s) served (armed {}, disarmed {}), \
@@ -2574,8 +2582,15 @@ impl TranslatedCore<SocBus> for JitCore {
             s.cross,
             s.indirect_miss,
             s.interpreted_between,
-            s.exit_known_pc,
-            s.exit_unknown_pc,
+            // BD5: the two counters cost a `BTreeMap` lookup per exit, so
+            // they are kept only under `LP_EMU_JIT_EXITS`. Say which it is,
+            // rather than printing `0/0` and letting it read as "every exit
+            // was at a known pc, none unknown".
+            if self.exit_sites.is_some() {
+                format!("{}/{}", s.exit_known_pc, s.exit_unknown_pc)
+            } else {
+                "not counted (set LP_EMU_JIT_EXITS)".to_string()
+            },
             s.exit_after_store,
             s.exit_pending,
             s.polls,

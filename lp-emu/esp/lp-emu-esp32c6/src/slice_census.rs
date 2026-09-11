@@ -181,6 +181,13 @@ struct Census {
     /// Total events dispatched by `run_due_events`, and total pin edges.
     due_events: u64,
     pin_edges: u64,
+    /// The scheduler's heap, as `next_deadline` sees it: how many entries it
+    /// scans, and how many of those are live. The gap between the two is the
+    /// tombstone load, which is what decides whether the scan is long or
+    /// merely expensive per entry.
+    heap_entries: u64,
+    heap_live: u64,
+    heap_entries_max: u64,
 }
 
 thread_local! {
@@ -211,6 +218,10 @@ pub struct Slice {
     pub code_write: bool,
     pub external_changed: bool,
     pub sideband: bool,
+    /// `Scheduler::pending()` and `Scheduler::live()` at the moment
+    /// `next_deadline` was asked.
+    pub heap_entries: u32,
+    pub heap_live: u32,
 }
 
 /// Record one slice. Cheap enough to call unconditionally; it tests [`on`]
@@ -249,6 +260,9 @@ pub fn note(s: &Slice) {
         if !any {
             c.idle_boundaries += 1;
         }
+        c.heap_entries += u64::from(s.heap_entries);
+        c.heap_live += u64::from(s.heap_live);
+        c.heap_entries_max = c.heap_entries_max.max(u64::from(s.heap_entries));
     });
 }
 
@@ -338,6 +352,13 @@ pub fn report(bus: &SocBus) -> Option<String> {
         out.push_str(&format!(
             "slice census: {} event(s) dispatched and {} pin edge(s) drained in total\n",
             c.due_events, c.pin_edges,
+        ));
+        out.push_str(&format!(
+            "slice census: scheduler heap: {:.2} entrie(s) scanned per slice, {:.2} of them \
+             live, {} at the worst slice\n",
+            c.heap_entries as f64 / n as f64,
+            c.heap_live as f64 / n as f64,
+            c.heap_entries_max,
         ));
         Some(out)
     })

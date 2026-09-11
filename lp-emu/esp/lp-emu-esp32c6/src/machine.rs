@@ -4460,6 +4460,12 @@ impl Esp32C6Machine {
             let census_event = (slice_census::on() && bound == slice_census::Bound::Scheduler)
                 .then(|| self.bus.sched.next_event().map(|(_, id)| id))
                 .flatten();
+            let census_heap = slice_census::on().then(|| {
+                (
+                    u32::try_from(self.bus.sched.pending()).unwrap_or(u32::MAX),
+                    u32::try_from(self.bus.sched.live()).unwrap_or(u32::MAX),
+                )
+            });
 
             self.bus.set_time(now);
             let end = self.harts[0].run_slice(&mut self.bus, budget);
@@ -4584,6 +4590,8 @@ impl Esp32C6Machine {
                     code_write,
                     external_changed,
                     sideband,
+                    heap_entries: census_heap.map_or(0, |(p, _)| p),
+                    heap_live: census_heap.map_or(0, |(_, l)| l),
                 });
             }
 
