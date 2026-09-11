@@ -144,6 +144,33 @@ pub trait Bus {
         None
     }
 
+    /// Every CPU interrupt this bus's matrix asserts *right now* for the
+    /// hart that is executing, as a bitmask over lines 0..32 — the form a
+    /// hart whose enable mask and priorities are **its own registers**
+    /// consumes.
+    ///
+    /// [`pending_cpu_interrupt`](Self::pending_cpu_interrupt) is the RV32
+    /// form: the matrix owns the enables and priorities, so it can name the
+    /// one line to take. An Xtensa matrix cannot — `INTENABLE` and
+    /// `PS.INTLEVEL` are CPU registers it never sees — so it answers `None`
+    /// there and the whole asserted set here, and the hart resolves it.
+    ///
+    /// Same side-band contract as the single-line form, and the same
+    /// **replaces** semantics: after a side-band the Xtensa stepper swaps
+    /// its asserted-line mask for this value and polls. The default is the
+    /// single-line answer widened to a mask, so a bus that only ever
+    /// implemented `pending_cpu_interrupt` keeps exactly the behaviour it
+    /// had; a bus with a real matrix overrides it. **A bus that raises the
+    /// side-band under an Xtensa hart must implement this method** — the
+    /// default would answer 0 and drop every line the machine had fed at
+    /// the slice boundary, which is how a software interrupt the guest
+    /// raised from a critical section went missing on the ESP32 classic
+    /// (M4 P3b, R6).
+    #[inline(always)]
+    fn pending_cpu_interrupt_mask(&self) -> u32 {
+        self.pending_cpu_interrupt().map_or(0, |n| 1u32 << (n & 31))
+    }
+
     /// Extra cycles this bus's memory system charged for the accesses made
     /// since the last call, and clear the total.
     ///
