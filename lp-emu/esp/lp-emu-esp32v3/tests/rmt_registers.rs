@@ -753,3 +753,207 @@ fn the_apb_fifo_is_not_modelled_and_the_ram_is_live() {
     assert_eq!(sb.read(&mut r, ram(10)), word(false, 5, true, 5));
     assert_eq!(r.ram()[10], word(false, 5, true, 5));
 }
+
+// ---- a frame, end to end ------------------------------------------------
+
+// WS2812 timing at the classic's RMT clock, restated inside the emulator's
+// fence (`just lint-emu-fence`: nothing under `lp-emu/` imports a product
+// crate). These are `lp_ws281x::ChannelTiming::WS2812` — 400/850 ns for a
+// zero, 800/450 for a one, a 300 µs latch — through `ns_to_ticks` at
+// `PulseCodes::DEFAULT_CLOCK_HZ` = 80 MHz, which is the rate
+// `shared_driver::RMT_CLOCK` asks for and the only one esp-hal's classic
+// `validate_clock` accepts (`lp-fw/lp-ws281x/src/timing.rs:117-123, 268`).
+const T0H: u16 = 32;
+const T0L: u16 = 68;
+const T1H: u16 = 64;
+const T1L: u16 = 36;
+const LATCH: u16 = 24_000;
+
+/// One WS2812 bit as an RMT word: high then low, MSB first.
+fn bit_word(one: bool) -> u32 {
+    if one {
+        word(true, T1H, false, T1L)
+    } else {
+        word(true, T0H, false, T0L)
+    }
+}
+
+/// The word stream for `bytes`: one word per bit, MSB first, then the latch
+/// and the all-zero end marker — what `lp_ws281x`'s bit cursor writes into
+/// the window.
+fn frame_words(bytes: &[u8]) -> Vec<u32> {
+    let mut out: Vec<u32> = bytes
+        .iter()
+        .flat_map(|b| (0..8).rev().map(move |i| bit_word(b & (1 << i) != 0)))
+        .collect();
+    out.push(word(false, LATCH, false, 0));
+    out.push(DATA);
+    out
+}
+
+/// **A whole frame off the block, word for word, driven by the register
+/// sequence the shipped firmware issues.**
+///
+/// Every value below was read out of a `--trace-block RMT` run of the
+/// shipped `fw-esp32v3` image on this machine (M4 P2's own bring-up run), so
+/// this is the product path's geometry and not an invented one:
+///
+/// ```text
+/// cyc=3493389 W4 RMT+0x0f0 apb_conf  = 0x00000001   esp-hal Rmt::new, apb_fifo_mask
+/// cyc=3493310 W4 RMT+0x024 ch0conf1  = 0x00020f20   configure_clock: ref_always_on = APB
+/// cyc=3513251 W4 RMT+0x020 ch0conf0  = 0x31100001   div_cnt 1
+/// cyc=3513271 W4 RMT+0x020 ch0conf0  = 0x01100001   carrier off
+/// cyc=3513285 W4 RMT+0x024 ch0conf1  = 0x000a0f20   idle_out_en, idle_out_lv low
+/// cyc=3513295 W4 RMT+0x020 ch0conf0  = 0x02100001   mem_size 2 — the five-wire plan
+/// cyc=3513340 W4 RMT+0x0a8 int_ena   = 0x01000005   ch0 tx_end | err | tx_thr_event
+/// cyc=3521693 W4 RMT+0x0f0 apb_conf  = 0x00000003   init_tx: the GLOBAL wrap bit
+/// ```
+///
+/// Eight LEDs is 192 bit words against a 128-word window, so the frame
+/// cannot fit and the ping-pong refill is exercised — the race the whole
+/// block plan exists for. The assertion is the strong one: the pulses that
+/// reached the pad decode back to the bytes that went in.
+#[test]
+fn a_ws281x_frame_goes_out_word_for_word_and_decodes_back() {
+    const GPIO18: u32 = 18;
+    let bytes: Vec<u8> = (0..24u8).map(|i| i.wrapping_mul(11) ^ 0x5a).collect();
+    let stream = frame_words(&bytes);
+    assert_eq!(stream.len(), 194, "192 bit words, a latch and an end marker");
+
+    let mut sb = Sandbox::new();
+    let mut g = Gpio::new(0);
+    let mut r = Rmt::new();
+    r.set_keep_logs(true);
+
+    // The pad, as `v3_rmt::route_rmt_to_gpio` leaves it.
+    sb.write(&mut g, off(&regs::GPIO, "enable_w1ts"), 1 << GPIO18);
+    sb.write(
+        &mut g,
+        off(&regs::GPIO, "func18_out_sel_cfg"),
+        u32::from(rmt::RMT_SIG_0),
+    );
+
+    // The block, as the trace above has it.
+    sb.write(&mut r, rmt_off("apb_conf"), 0x0000_0001);
+    sb.write(&mut r, conf1(0), 0x0002_0f20);
+    sb.write(&mut r, conf0(0), 0x0210_0001);
+    sb.write(&mut r, conf1(0), 0x000a_0f20);
+    sb.write(&mut r, rmt_off("int_ena"), 0x0100_0005);
+    sb.write(&mut r, rmt_off("apb_conf"), 0x0000_0003);
+    assert_eq!(
+        sb.read(&mut r, rmt_off("apb_conf")) & 2,
+        2,
+        "the global wrap bit, without which the window does not wrap"
+    );
+
+    // `start_frame`: both halves filled, the threshold armed at the half,
+    // then `start_tx`.
+    const WINDOW: usize = 128;
+    const HALF: usize = 64;
+    for (w, v) in stream.iter().take(WINDOW).enumerate() {
+        sb.write(&mut r, ram(w as u32), *v);
+    }
+    sb.write(&mut r, tx_lim(0), HALF as u32);
+    sb.write(&mut r, conf1(0), 0x000a_0f20 | CONF1_TX_START);
+
+    // The ISR, as `lp_ws281x`'s `refill` performs it: flip the threshold
+    // first, then refill the half the transmitter has just left.
+    let mut next = WINDOW;
+    let mut refills = 0usize;
+    let mut half = 0usize;
+    for _ in 0..4_000 {
+        if int_raw(&mut sb, &mut r) & rmt::int_tx_end_bit(0) != 0 {
+            break;
+        }
+        if int_raw(&mut sb, &mut r) & rmt::int_thr_bit(0) != 0 {
+            sb.write(&mut r, rmt_off("int_clr"), rmt::int_thr_bit(0));
+            sb.write(&mut r, tx_lim(0), HALF as u32);
+            for k in 0..HALF {
+                let v = stream.get(next + k).copied().unwrap_or(DATA);
+                sb.write(&mut r, ram((half * HALF + k) as u32), v);
+            }
+            next += HALF;
+            half ^= 1;
+            refills += 1;
+        }
+        let Some(at) = sb.sched.next_deadline() else {
+            break;
+        };
+        sb.run_to(&mut r, at);
+    }
+
+    assert!(refills >= 2, "the ping-pong refill ran ({refills} refills)");
+    assert_ne!(
+        int_raw(&mut sb, &mut r) & rmt::int_tx_end_bit(0),
+        0,
+        "the frame ended on its end marker"
+    );
+    assert_eq!(r.frames_ended(0), 1);
+    assert_eq!(
+        int_raw(&mut sb, &mut r) & rmt::int_err_bit(0),
+        0,
+        "and never ran off the end of its window"
+    );
+
+    // The words the engine fetched are the stream that went in, in order,
+    // and each one's cycle is its absolute tick position — no per-word
+    // rounding across 193 words.
+    //
+    // 193, not 194: the **latch** word is `(low, 24000) (–, 0)`, and a zero
+    // second half emits half one and then ends the transmission. So the
+    // all-zero STOP word behind it is the driver's guard and is never
+    // reached — which is the behaviour `stop_tx` relies on, and the reason
+    // a frame that overruns its window lands on a guard instead of on
+    // whatever was there before.
+    let fetched = r.words(0);
+    assert_eq!(fetched.len(), stream.len() - 1, "every word but the guard");
+    assert_eq!(
+        fetched.last().map(|(_, w)| *w),
+        Some(word(false, LATCH, false, 0)),
+        "the frame ended on the latch"
+    );
+    let mut ticks = 0u64;
+    for (i, (at, w)) in fetched.iter().enumerate() {
+        assert_eq!(*w, stream[i], "word {i}");
+        assert_eq!(*at, ticks * CYCLES_PER_TICK, "word {i}'s start cycle");
+        ticks += u64::from(w & 0x7fff) + u64::from((w >> 16) & 0x7fff);
+    }
+
+    // And the pulses that reached the pad decode back to the bytes. A high
+    // run longer than the midpoint between T0H and T1H is a one — the same
+    // rule `Ws281xDecoder` applies in M4 P3.
+    let edges = sb.pins.take_edges();
+    assert_eq!(
+        edges.len(),
+        2 * (bytes.len() * 8),
+        "two edges a bit, and the latch adds none — it holds the low the          last bit already left on the wire, which is what a latch is"
+    );
+    let mid = u64::from(T0H + T1H) / 2 * CYCLES_PER_TICK;
+    let mut bits = Vec::new();
+    for pair in edges.chunks_exact(2) {
+        assert!(pair[0].level, "a bit starts high");
+        assert!(!pair[1].level);
+        assert_eq!(pair[0].pad, PadId(GPIO18 as u8));
+        bits.push(pair[1].at - pair[0].at > mid);
+    }
+    let decoded: Vec<u8> = bits
+        .chunks_exact(8)
+        .map(|b| b.iter().fold(0u8, |acc, &one| (acc << 1) | u8::from(one)))
+        .collect();
+    assert_eq!(
+        decoded, bytes,
+        "the frame off the pad is the frame that went in"
+    );
+
+    // The refill telemetry saw the same race from the other side: one
+    // measurement per threshold, every one of them answered, and the last
+    // closed by the end of the frame rather than by the next threshold.
+    let s = r.refill_stats(0);
+    assert_eq!(s.refills as usize, refills, "one measurement per refill");
+    assert_eq!(s.unanswered, 0, "the ISR answered every threshold");
+    assert_eq!(s.half_words, HALF as u32);
+    // The emulated ISR here is instant, so the entry half is the floor the
+    // block's doc comment promises rather than a prediction of silicon's
+    // 20–29 words. Reported, never gated.
+    assert_eq!(s.entry_max, 0);
+}

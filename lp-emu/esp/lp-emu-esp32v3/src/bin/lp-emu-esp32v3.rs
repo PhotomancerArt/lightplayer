@@ -59,6 +59,12 @@ OPTIONS:
                             reaches its first spin on a register only a
                             model can answer — see the phase report for
                             which phase owns which
+    --rmt-logs              keep the RMT's per-channel pulse and fetched-word
+                            logs. Off by default: a 300-LED frame is 7,201
+                            words and 14,402 pulses, and a run that only
+                            wants a boot has no use for them. The refill-lag
+                            summary below the run report is collected either
+                            way — it is REPORTED, never gated (D13/PD9)
     --cache-off-fetch stop|permit
                             D4. `stop` (the default, and what every gate run
                             uses) ends the run the first time a core reaches
@@ -171,6 +177,7 @@ struct Args {
     cache_off: CacheOffPolicy,
     mmu_divergence: MmuDivergencePolicy,
     core_quantum: Option<u64>,
+    rmt_logs: bool,
     time_grade: TimeGrade,
     timeout: Option<Duration>,
     wall_timeout: Option<Duration>,
@@ -221,6 +228,7 @@ fn run() -> Result<ExitCode, String> {
         .cache_off_fetch(args.cache_off)
         .app_mmu_divergence(args.mmu_divergence)
         .core_quantum(args.core_quantum.unwrap_or(CORE_QUANTUM_DEFAULT))
+        .rmt_logs(args.rmt_logs)
         .seed(args.seed)
         .efuse(args.efuse)
         .uart0(args.uart0.clone())
@@ -309,6 +317,7 @@ fn run() -> Result<ExitCode, String> {
     machine.bus_mut().host.flush_all();
     print_outcome(&mut machine, &outcome);
     print_run_summary(&machine);
+    print_refill_lag(&machine);
     {
         let chip = machine.flash().lock().expect("flash poisoned");
         println!("flash: {}", chip.command_census());
@@ -364,6 +373,44 @@ fn print_run_summary(machine: &Machine) {
         bus.missing_fence_reports(),
         machine.core_quantum(),
     );
+}
+
+/// The RMT's own reading of the refill race, per channel, at exit.
+///
+/// Two histograms in the shape the guest's `[WS281X]` telemetry line prints
+/// its own -- nine buckets, eighths of a half-window, the last one ">= half"
+/// -- so the two can be read side by side. **Reported, never gated**
+/// (D13/PD9): the entry half is a floor, because the emulated ISR path is
+/// RAM-resident and the machine has no flash-miss cost, and silicon's own
+/// entry delay is mostly those misses.
+///
+/// Silent for a run whose guest never started a channel, which is every run
+/// that does not load a project or drive a strip.
+fn print_refill_lag(machine: &Machine) {
+    use lp_emu_esp32v3::periph::rmt::{RefillStats, TX_CHANNELS};
+    for ch in 0..TX_CHANNELS {
+        let s = machine.rmt_refill_stats(ch);
+        if s.refills == 0 && s.unanswered == 0 {
+            continue;
+        }
+        eprintln!(
+            "rmt refill ch{ch}: {} measured, half={} words; entry max {} hist {}; \
+             fill max {} hist {}{}",
+            s.refills,
+            s.half_words,
+            s.entry_max,
+            RefillStats::hist_string(&s.entry_hist),
+            s.fill_max,
+            RefillStats::hist_string(&s.fill_hist),
+            match s.unanswered {
+                0 => String::new(),
+                n => format!(
+                    "; {n} threshold(s) the guest never answered before the frame ended \
+                     (the last one of a frame is `finish`'s, not `refill`'s)"
+                ),
+            }
+        );
+    }
 }
 
 /// `--timeout` is emulated time: `micros * 240`.
@@ -662,6 +709,7 @@ fn parse(argv: Vec<String>) -> Result<Args, String> {
             "--map" => args.map = true,
             "--hooks" => args.hooks = true,
             "--strict-bus" => args.strict = true,
+            "--rmt-logs" => args.rmt_logs = true,
             "--cache-off-fetch" => args.cache_off = CacheOffPolicy::parse(&value()?)?,
             "--app-mmu-divergence" => args.mmu_divergence = MmuDivergencePolicy::parse(&value()?)?,
             "--core-quantum" => {

@@ -666,23 +666,185 @@ is taken from `esp-hal-1.1.1`'s `gpio_intr_enable` (bit 0 = APP, bit 2 = PRO,
 so `pin[n]` bits 13 and 15) rather than from the PAC's own prose, which skips
 a bit and runs past the width of the field it describes.
 
-### What the pin class is trusted for: **nothing, yet**
+### What the pin class is trusted for: a waveform, not yet a frame
 
 The routing is modelled. `IO_MUX`'s `fun_ie` reaches the fabric. `GPIO.enable`
-decides which routed pads drive. **No waveform is produced and none is
-decoded** — `RMT` is an accept block until M4, so no `RMT_SIG_n` is ever
-driven and every routed peripheral pad sits low.
+decides which routed pads drive. Through all of M3 **no waveform was produced
+and none was decoded** — `RMT` was an accept block, so no `RMT_SIG_n` was
+ever driven and every routed peripheral pad sat low.
 
-That is asserted rather than left as an absence nobody checked:
+**M4 P2 changed the first half of that.** The RMT view's symbol pump drives
+`RMT_SIG_0 + n` at every pulse edge, so a pad whose `func_out_sel_cfg` names
+that signal now carries the waveform, and the machine drains the fabric's
+edges at every window boundary and hands them to `GPIO` — the same stream M4
+P3 hangs the strip decoders and the `.pins.jsonl` log off, which is what
+guarantees a decoder, a pin log and the GPIO input latch can never disagree
+about what was on the wire.
+
 `Gpio::peripheral_driven_pads` lists the pads that are output-enabled **and**
-routed to a peripheral signal rather than to `GPIO_OUT`, and M3's gate says
-it is empty. The same call is the list a strip decoder should be watching the
-moment M4 makes it non-empty.
+routed to a peripheral signal rather than to `GPIO_OUT`. M3's gate asserted it
+was empty; from P2 it is the list a strip decoder should be watching, and
+`tests/rmt_registers.rs` asserts a routed pad carries both edges of every bit
+of a whole WS2812 frame. **Nothing decodes it yet** — that is P3, and no
+frame claim is made here.
 
 Not modelled, and each of these is an electrical fact a logic analyser on the
 pin header would not show you either: drive strength, the *value* of a pull-up
 or pull-down (an undriven pad reads low, not "pulled high"), open-drain, pad
 filters, the input synchroniser, and analog anything.
+
+## RMT on the classic
+
+*M4 P2. `periph/rmt.rs`; every offset out of `regs::RMT` (62 registers, esp32
+PAC 0.40.2), every bit position out of that PAC's field docs.*
+
+Eight channels, each TX-or-RX — there is no fixed split on this part — over a
+**512-word RAM at `0x3FF5_6800`** (`+0x800`, eight 64-word blocks). The clock
+is APB at 80 MHz with a per-channel `div_cnt`, so one tick at `div_cnt = 1` is
+12.5 ns and, at a 240 MHz CPU, exactly three cycles; the model computes that
+from `memmap::CPU_HZ` and `APB_HZ` rather than writing a 3. `int_st` is
+`int_raw & int_ena` and the line goes out on **source 47**.
+
+Whether the block transmits is the driver's business, and the shipped image
+does not until a project's output opens: a boot configures four two-block
+slots (the DOM-Z-102's five-wire plan, `[2, 0, 2, 0, 2, 0, 2, 0]`), arms their
+interrupts, clears all 512 RAM words and stops there.
+
+### The five quirks, three of them inverted relative to the C6
+
+A reader who knows `lp-emu-esp32c6`'s block is the reader most likely to be
+wrong here, so those three come first. Borrowing the C6's **tick arithmetic**
+is right — it is arithmetic, not layout. Borrowing its semantics is a frame
+that truncates and a model that passes every register test anyway.
+
+1. **`tx_lim` is a repeating count of words *sent*, and it re-arms itself.**
+   PAC `rmt/ch_tx_lim.rs`: *“When channel0 sends more than reg_rmt_tx_lim_ch0
+   datas then channel0 produce the relative interrupt.”* One programmed value
+   fires every `tx_lim` words for the whole frame. **The C6's names a word
+   offset in the window.** The firmware knows, and clamps the driver core's
+   alternating half/window request down to a fixed period because of it
+   (`v3_rmt.rs`, with the measurement that proved it: `guard_trips` exactly
+   equal to `frames` on every channel whose frame outgrew one window).
+2. **`apb_conf.mem_tx_wrap_en` is global** — one bit (bit 1) for all eight
+   channels, not a per-channel bit in `chNconf0`. Without it the transmitter
+   runs off the end of the window instead of wrapping onto the half the driver
+   has just refilled, and ping-pong refill does not work at all. The boot
+   trace has `init_tx` setting it: `apb_conf 0x00000001 -> 0x00000003`.
+3. **There is no `conf_update`.** esp-hal's `update()` is a literal no-op on
+   this chip, and the write that carries `tx_start` starts the channel then
+   and there. The C6 model's “pulses take effect at `conf_update`” rule is not
+   carried over.
+4. **There is no `tx_stop` bit.** A stop is the channel's whole window filled
+   with end markers; the transmitter halts at the next word boundary and
+   raises `tx_end`.
+5. **The read pointer is absolute** — ten bits over all 512 words, so a
+   channel's window begins at `64 × first_block` and the driver subtracts it.
+
+### ⚠️ Where the read pointer actually lives
+
+The PAC puts `MEM_WADDR_EX` at **bits 0:9** and `MEM_RADDR_EX` at **bits
+12:21** (`esp32-0.40.2/src/rmt/chstatus.rs`) — the opposite of the layout M4's
+planning notes carried, and the SVD's own field *descriptions* are swapped on
+top of that (`MEM_WADDR_EX` is documented as *“The current memory read
+address”*).
+
+What settles it is that `v3_rmt::read_pos` and esp-hal's `hw_offset` both read
+the pointer through the **accessor named `mem_raddr_ex`**, which is bits
+12:21. That is where this view publishes it. A model that had followed the
+notes would have handed `read_pos` a constant zero, and every refill would
+have filled the half the transmitter was standing in — a frame that
+truncates, from a block whose every register test passes.
+
+### Two more the firmware's cross-core design depends on
+
+- `int_clr` is **write-only and W1C**: each write clears exactly the bits it
+  names, which is what makes it race-free with the RMT ISR on core 1 and
+  thread context on core 0 both writing it.
+- `mem_owner` (`chNconf1` bit 5) is cleared by `start_tx` for the channel
+  **and every extra block its window extends into**. It is recorded and never
+  enforced, and `chNstatus.mem_owner_err` never rises: this model has one RAM
+  and no arbiter.
+
+### What the bits are, as the shipped driver writes them
+
+The interrupt bits are the thing a reader gets wrong first, so here they are
+against a real boot. `ch<N>_tx_end` is bit `3N`, `ch<N>_rx_end` bit `3N+1`,
+`ch<N>_err` bit `3N+2` (a **combined** TX/RX error — there is no separate
+`tx_err`), and `ch<N>_tx_thr_event` bit `24+N`. All 32 bits are defined, so
+nothing is masked away. The driver arming its four slots walks `int_ena`
+through exactly that layout:
+
+```text
+cyc=3513340 W4 RMT+0x0a8 int_ena = 0x01000005   ch0: tx_end | err | tx_thr_event
+cyc=3515483 W4 RMT+0x0a8 int_ena = 0x05000145   + ch2
+cyc=3517629 W4 RMT+0x0a8 int_ena = 0x15005145   + ch4
+cyc=3519776 W4 RMT+0x0a8 int_ena = 0x55145145   + ch6
+```
+
+### The engine, and what is live
+
+One word is two pulses of `(dur1, level1)` / `(dur2, level2)`, `dur` in
+channel ticks, level in bits 15 and 31. The next word is due at
+`start_cycle + cycles_for(ticks_since_start)` — integer arithmetic over the
+**absolute** tick count since `tx_start`, never accumulated per word and never
+taken from the dispatch cycle, so nothing rounds across a 3,600-word frame.
+An end marker (a zero first duration) ends the transmission before it; a zero
+second half emits half one and then ends it.
+
+The RAM is **live**: the engine reads `ram[raddr]` when it fetches, so a
+refill overwrites what the consumer has not fetched yet. That is what a
+single-ported RAM does and it is what the driver's guard word exists for.
+
+### The refill telemetry
+
+For every `tx_thr_event` the block counts the words the transmitter consumes
+before the guest's next `chN_tx_lim` write (the **entry** delay) and then
+before the last RAM write of that refill (the **fill**), in the same units
+`lp-ws281x` measures them in. Nine buckets, eighths of a half-window, the same
+edges the guest's `[WS281X]` line uses, so the two can be printed side by side
+and read as one shape. The CLI prints it under the run summary.
+
+**Reported, never gated** (D13/PD9), and the reason is in the numbers rather
+than in the policy: the emulated ISR path is RAM-resident by construction and
+this machine has no flash-miss cost, so the entry half is a floor rather than
+a prediction of silicon's 20–29 words. What it is good for is the shape — a
+fill that grows, or a bucket that starts landing at “≥ half”, is the model or
+the driver getting slower at the deadline.
+
+### What is not here
+
+- **RX.** The classic firmware never sets `rx_en`. The bits are accepted and
+  remembered; `rx_en` on a channel is a `log::warn!` naming it, not a model.
+- **Carrier** modulation: `chNconf0.carrier_en` and `chNcarrier_duty` are
+  accepted with one note. The driver turns it off.
+- **The APB FIFO** (`chNdata`, `chNaddr`): `apb_conf.apb_fifo_mask` is what
+  esp-hal's `Rmt::new` sets, and direct RAM access is the only path this
+  firmware uses.
+- **`ref_always_on = 0` (REF_TICK).** The PAC's reset for `chNconf1` leaves
+  bit 17 clear, so an *unconfigured* channel selects `clk_ref`; esp-hal's
+  `configure_clock` writes it to 1 for every channel before anything
+  transmits. A channel started on REF_TICK is **refused** — a `log::warn!`
+  and no waveform — rather than clocked at an invented rate, the way the C6
+  refuses `sclk_sel = 2`.
+- **The decoder and any frame claim**: M4 P3 and P4.
+
+### Grades
+
+`int_raw`, `int_st`, `int_ena`, `int_clr`, `ch*conf0`, `ch*conf1`,
+`ch*status`, `ch*_tx_lim` and `apb_conf` are **`documented`** — the PAC's bit
+map read out loud. `ch*data`, `ch*addr`, `ch*carrier_duty` and `date` are
+**`modeled`**: accept-and-remember at the PAC's reset. Nothing is `measured`,
+and nothing will be from a waveform — a frame off a pad is not a register's
+bit map.
+
+### For M8, not for now
+
+Three things in `periph/rmt.rs` are the C6's file's too and would survive an
+extraction into `lp-emu-esp-common` once a third chip asks: the tick
+arithmetic over absolute ticks, the pulse and word observation logs, and
+`RefillStats` with its buckets. **Nothing is extracted** (decision D2, M4
+ruling R8) — the layouts differ in every register and three of the semantics
+are inverted, and one running example is not a generalisation.
 
 ## Flash, and the cache window
 
@@ -857,7 +1019,7 @@ PAC and each carries its reason beside it.
 | `UART1` | `0x3FF5_0000` | `0x80` | **view** | rom-up, cycle 30,992 | the same model at its own base and its own interrupt source (35). The ROM's `uartAttach` touches `+0x10` on every boot; the application never opens it, so it has no host stream and its bytes go nowhere | P6 |
 | `FLASH_MMU` | `0x3FF1_0000` | `0x4000` | **view** | not reached by P3 | the two flash MMU page tables, written by the ROM's `mmu_init` and `cache_flash_mmu_set`; an entry write marks its page for P7's fill | P4 / P7 |
 | `SHA` | `0x3FF0_3000` | `0xc0` | **view** | not reached by P3 | the `TEXT` window (message **and** digest read-back) and the four per-family strobe quads over `engine::sha`, including the **`load`** step the C6 has no equivalent for. SHA-1 and SHA-256 compute; SHA-384/512 refuse. The ESP-IDF bootloader's image hash is the only caller | P7 |
-| `RMT` | `0x3FF5_6000` | `0x1000` | accept | **both paths, last**: direct cycle 5,640,047 / rom-up 65,360,003 | `init_board`'s `Channel::new` read-modify-writes `ch0conf1`, and the PAC's resets are the part's own (`chNconf0` `0x3110_0002`, `chNconf1` `0x0000_0f20`). The aperture covers the channel RAM at `+0x800`. **No waveform is produced and none is decoded** | M4 |
+| `RMT` | `0x3FF5_6000` | `0x1000` | **view** | **both paths, last**: direct cycle 5,640,047 / rom-up 65,360,003 | eight TX engines over the **512-word RAM at `+0x800`**, the interleaved interrupt bits on source 47, and the symbol pump driving `RMT_SIG_0 + n` (output signal **87 + n**) into the fabric. Five quirks the C6's block does not share — see “RMT on the classic” below. Refill-lag telemetry, reported and never gated | M4 P2 |
 
 The three deviations from the PAC, every one of them an input to the run
 rather than a property of the part, and every one a builder parameter:
@@ -1139,8 +1301,10 @@ spinning on `SPI1.cmd.flash_rdsr` (P7's) with the ROM path on
 `EFUSE.cmd.read_cmd` (P5's). The last of them was **RMT**, met by both paths
 one line after `[INIT] flash filesystem mounted` — `init_board`'s
 `Channel::new` reading `ch0conf1` at cycle 5,640,047 on the direct load and
-65,360,003 on the ROM-up walk. It is an accept block and M4 owns it; behind
-it, both paths idle. The full ledger, with every pin's citation and the order
+65,360,003 on the ROM-up walk. It was an accept block through M3; **M4 P2
+replaced it with the view** (“RMT on the classic” above), and behind it both
+paths still idle — the shipped image configures its four slots and transmits
+nothing until a project's output opens. The full ledger, with every pin's citation and the order
 it fixed for P4–P8, is
 `docs/reports/2026-09-10-esp32v3-strict-boot-inventory.md`.
 
@@ -1157,6 +1321,7 @@ it fixed for P4–P8, is
 | `src/periph/*.rs` (unit) | every accept block reads the PAC's resets except the listed deviation, and every listed deviation is real and has a reason; the eFuse read command reading set exactly once and then clearing itself, and three reloads comparing equal; RTC_CNTL's stall pair, its RWDT gate and its reported-not-performed software reset; the analog master answering the register asked for rather than the last one written |
 
 | `tests/boot_idle.rs` | **The hello, and G2 (a).** With the image: the `[INIT]` chain comes out of the **host stream** — 543 bytes, sha256 `ea8bae30…`, the same count and the same digest P3 measured going *into* the accept block — with zero unmapped accesses and no strict stop; the line order held against L0's capture; `--exit-on` stopping at a complete line. And both boot paths run to the **idle heartbeat**: the `[stack] heartbeat:`/`[MEM]`/`[JIT]` triple, the Q5 fallback line, the unsolicited wire hello, the answer to a scripted request, and `unmapped = 0` on each — plus the two paths' memory figures asserted equal to **each other** (not to silicon: different image bytes, ruling R7) |
+| `tests/rmt_registers.rs` | **M4 P2's gates.** Every offset looked up **by name** in `regs::RMT` rather than transcribed, and the resets asserted against that table's own `resets`. One test per quirk, each of which fails without it: `tx_lim` a repeating count that re-arms itself (one write, a 256-word transmission, four events 64 words apart — the C6's position semantics fire once); a `ch_tx_lim` write changing the period and not the count; the **global** wrap bit, and the same register serving channel 7; `tx_start` acted on with no `conf_update`; a window of end markers stopping the transmitter at the next word boundary; `mem_raddr_ex` absolute **and at bits 12:21**, with the APB write pointer at 0:9. Plus: a whole **WS2812 frame** — 8 LEDs, 194 words, a 128-word window, three ping-pong refills — driven by the register sequence the shipped image's own `--trace-block RMT` run issues, whose fetched words are the stream that went in, whose word start cycles are exact absolute tick positions, and whose edges off **gpio18** decode back to the bytes; `Gpio::peripheral_driven_pads` non-empty for the first time; the refill telemetry's entry and fill in words; `int_clr`'s W1C and the line on source 47; REF_TICK refused rather than guessed at; a byte-identical snapshot round trip; and **no register in the block graded `measured`** |
 | `tests/determinism.rs` | The plan's inviolable invariant. Two runs of each boot path agree on the UART sha, the byte count, the **cycle count**, the **instruction count**, the pc and the idle skips; a snapshot taken mid-run and restored into a **fresh** machine produces the same second half as the run that was never interrupted; and the state that is not a register — the flash MMU tables, the cache-enable bit, both halves of the stall key, the interrupt matrix, core 1's hold, the DBREAK slots — comes back through the struct. **M4 P1**: the single-core prefix run's three counters pinned to `origin/main`'s; two dual-core runs at quantum 256 and two at 64 each one run (both harts' counters, both pcs, the parks, a memory fingerprint); the two quanta's consoles equal byte for byte except the stack high-water figure, which the test names as interrupt timing |
 | `tests/dual_core.rs` | **M4 P1's gates.** A hand-built fixture with no firmware: core 0 performs esp-hal's `start_core1` DPORT sequence, core 1 comes up **through the mask ROM's own reset path and wait loop** (its two reads of `appcpu_boot_addr` read out of the bus trace), routes the doorbell into its own matrix and parks in `waiti` — costing nothing while parked — and core 0's `cpu_intr_from_cpu_1` wakes it into `_Level2InterruptVector` with `EPC2` naming the instruction after the `waiti`; the release is a reset (`CPENABLE = 0xff`, counters from the clock). Ruling R4 on a synthetic table disagreement: the stop names entry, page and both mappings, exits 7, and `permit` continues. **With the image**: `[INIT] RMT ISR on APP core` on both boot paths with `unmapped = 0`, the binds read back out of `core_1_intr_map` with `core_0_intr_map[RMT] = 16`, the pusher parked in `idle_once` — **red on the shipped image until the open defect below is fixed** |
 | `src/periph/gpio.rs`, `src/periph/io_mux.rs` (unit) | A plain `Output` pin drive reaching a pad and `enable` taking it back off the wire; `256` being the GPIO selector and `128` an ordinary signal; bank 1 carrying pads 32..39; the input matrix routing `U0RXD_IN` and refusing the two constants by name; `in_` served only through `fun_ie`; the PRO core's enable at `pin[n]` bit 15 and the APP core's at 13; **no peripheral signal reaching a pad**; the IO_MUX pad map walked against the generated table's own names, and asserted *not* to be in pad order |
