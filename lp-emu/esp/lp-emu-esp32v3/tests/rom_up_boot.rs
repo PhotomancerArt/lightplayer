@@ -643,7 +643,10 @@ fn the_rom_up_boot_log_is_the_desks_line_for_line() {
         .cloned()
         .chain(std::iter::once((*last).to_string()))
         .collect();
-    assert_eq!(ours, want, "the bootloader's log is not the desk board's:\n{text}");
+    assert_eq!(
+        ours, want,
+        "the bootloader's log is not the desk board's:\n{text}"
+    );
 
     // 4. And it does not stop: M1 P6 landed `rer`/`wer`, so the bootloader's
     // `esp_cpu_dbgr_is_attached()` — `rer a14, a14` at `0x4007_a526`, where
