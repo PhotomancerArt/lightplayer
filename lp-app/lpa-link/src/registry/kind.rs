@@ -39,6 +39,9 @@ pub enum LinkProviderKind {
     BrowserWorker,
     /// Browser Web Serial provider for ESP32 hardware and flashing.
     BrowserSerialEsp32,
+    /// An ESP32-C6 emulated in this tab's own Worker, running the shipped
+    /// firmware image over an emulated USB-Serial-JTAG link.
+    EmulatorTab,
 }
 
 impl LinkProviderKind {
@@ -65,6 +68,7 @@ impl LinkProviderKind {
             Self::HostSerialEsp32 => "Host serial ESP32",
             Self::BrowserWorker => "Browser worker",
             Self::BrowserSerialEsp32 => "Browser serial ESP32",
+            Self::EmulatorTab => "Emulated board in this tab",
         }
     }
 
@@ -74,13 +78,16 @@ impl LinkProviderKind {
     /// anything else, and a device backed by the browser worker is a **sim**
     /// — a device whose transport is a worker rather than a wire. `Fake` is
     /// the test double for serial hardware, so it wears the serial label and
-    /// fixtures render like production. Future device classes (websocket,
-    /// network) name themselves here, which is why the answer stays
-    /// optional.
+    /// fixtures render like production. An emulated board is an **emu**: it
+    /// runs the target's own firmware image rather than the desktop one, so
+    /// calling it a sim would claim the wrong thing about what it is. Future
+    /// device classes (websocket, network) name themselves here, which is
+    /// why the answer stays optional.
     pub fn transport_label(self) -> Option<&'static str> {
         match self {
             Self::HostSerialEsp32 | Self::BrowserSerialEsp32 | Self::Fake => Some("USB"),
             Self::BrowserWorker => Some("sim"),
+            Self::EmulatorTab => Some("emu"),
             Self::HostProcess => Some("host"),
         }
     }
@@ -98,6 +105,12 @@ impl LinkProviderKind {
                 .with_flash()
                 .with_device_erase(),
             Self::BrowserSerialEsp32 => LinkCapabilities::esp32_serial_base().with_flash(),
+            // Flash and erase are served in-process (the chip is a byte
+            // array the page can address), the way the native serial
+            // provider serves them — no ROM downloader in the middle.
+            Self::EmulatorTab => LinkCapabilities::esp32_serial_base()
+                .with_flash()
+                .with_device_erase(),
         }
     }
 
