@@ -27,6 +27,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, anyhow};
+use lp_emu_esp32c6::flash::ESP_IMAGE_MAGIC;
 use lp_emu_esp32c6::loader::EfuseIdentity;
 use lp_emu_esp32c6::machine::{
     Esp32C6Builder, Outcome, StopCondition, TimeGrade, UsbHost, UsbSjDrain, UsbSjSink,
@@ -383,15 +384,10 @@ fn flush(
 ) {
     // Asked of the CHIP rather than of the file, and on every flush rather
     // than once: this is what turns `blank → flash → loaded` into a sequence
-    // a page can watch. `peek` does not count as a flash read.
-    if let Ok(flash) = machine.flash().lock() {
-        has_image.store(
-            flash
-                .peek(0, 1)
-                .is_some_and(|head| head[0] == ESP_IMAGE_MAGIC),
-            Ordering::SeqCst,
-        );
-    }
+    // a page can watch. The machine answers it (C6-in-tab P1), so the door
+    // here and the tab host's `loaded` face are one function rather than two
+    // copies of a magic byte.
+    has_image.store(machine.has_image_at_reset_vector(), Ordering::SeqCst);
     match machine.flush_flash() {
         Ok(true) => {
             if let Some(durable) = &spec.flash
@@ -422,17 +418,16 @@ fn flush(
     }
 }
 
-/// `esp_image_header_t.magic` — the byte the mask ROM looks for at the reset
-/// vector, and the one it complains about as `invalid header: 0xffffffff`
-/// when a chip is erased. It is the whole difference between `blank` and
-/// `loaded`, so it is asked rather than guessed from a file's length.
-const ESP_IMAGE_MAGIC: u8 = 0xe9;
-
 /// Does `path`'s first byte say there is a bootable image there?
 ///
-/// Cheap on purpose: one byte, before the machine exists. A 4 MiB file of
-/// `0xff` is a chip with nothing on it, and the old "the file has bytes"
-/// test called that `loaded`.
+/// Cheap on purpose: one byte, before the machine exists — once it does,
+/// [`Esp32C6Machine::has_image_at_reset_vector`] asks the chip instead. A
+/// 4 MiB file of `0xff` is a chip with nothing on it, and the old "the file
+/// has bytes" test called that `loaded`.
+///
+/// `ESP_IMAGE_MAGIC` is `esp_image_header_t.magic`: the byte the mask ROM
+/// looks for at the reset vector, and the one it complains about as
+/// `invalid header: 0xffffffff` when a chip is erased.
 fn file_starts_with_an_image(path: &std::path::Path) -> bool {
     use std::io::Read;
     let mut head = [0u8; 1];
