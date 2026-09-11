@@ -86,7 +86,11 @@
 #   open                      an application opened the tty
 #   …the upload…
 #   close / detach / state    and the last reply is ASSERTED: `port=closed`,
-#                             `cable=detached`, `dtr=0 rts=0`, `reboots=1`
+#                             `cable=absent`, `dtr=0 rts=0`, `reboots=1`
+#
+# The console then holds TWO boots — the ROM banner the reset cut mid-line and
+# the whole boot after it — which is what a reset board's transcript looks
+# like and is the twin's own evidence that the cable did something.
 #
 # ⚠️ **What the reset does NOT buy is a second boot.** A reboot restores the
 # power-on snapshot, and on this machine that snapshot includes the flash
@@ -414,7 +418,9 @@ if [[ "$CABLE" != 0 ]]; then
     cable state
     released="$CABLE_REPLY"
     exec 4<&- || true
-    for want in "port=closed" "cable=detached" "dtr=0" "rts=0" "reboots=1"; do
+    # `cable=absent`, which is the machine's own word for a detached cable
+    # (`ControlReply::State`), not "detached".
+    for want in "port=closed" "cable=absent" "dtr=0" "rts=0" "reboots=1"; do
         if [[ "$released" != *"$want"* ]]; then
             echo "FAIL: the cable's final state has no '$want':"
             echo "  $released"
@@ -450,8 +456,14 @@ echo "===== DEVICE ====="
 # `grep -m 40`, not `| head -40`: under `pipefail` a `head` that closes the pipe
 # kills `grep` with SIGPIPE and the whole pipeline reports 141, so the walk
 # would die HERE, at a progress print, on a run that was going perfectly.
+#
+# `cut -c1-600` because `Project` is in the filter and the upload's own
+# `projectRead` reply is a single ~30,000-character line of wire JSON: without
+# it one line buries the section. 600 keeps an `[OUT] dump` whole — its
+# prefix is ~100 characters and its `rgb=` is 384 — which is the one line here
+# that has to survive intact.
 grep -m 40 -aE "boot:|ESP-ROM|INIT|RECOVERY|Project|compilation|\[OUT\]|ERROR|does not produce" \
-    "$console" || true
+    "$console" | cut -c1-600 || true
 
 echo
 echo "===== ORACLE ====="
