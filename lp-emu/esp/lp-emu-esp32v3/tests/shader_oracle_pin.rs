@@ -77,7 +77,7 @@
 //! whole lines, including reading (a)'s 384 hex characters, which a split
 //! would otherwise truncate into a silent near-miss.
 //!
-//! # The two tests
+//! # The two claims, and the one run they read
 //!
 //! Everything that can be read off the pad is
 //! [`the_first_lit_frame_off_io18_is_the_host_oracles_frame`]; everything
@@ -87,9 +87,18 @@
 //! [`the_firmwares_own_dump_is_the_same_frame_and_the_run_reaches_its_deadline`].
 //! Until M4 **P4b** (PR #711) both stopped short: loading any project killed
 //! the guest in a ROM window handler. That is fixed — `CALL0`/`CALLX0` no
-//! longer zero `PS.CALLINC` — and both tests run every assertion.
+//! longer zero `PS.CALLINC` — and both run every assertion.
 //!
-//! Both are `#[ignore]`d for `test_support`'s usual reason: a plain `cargo
+//! ⚠️ Both are **functions, not `#[test]`s**, and
+//! [`the_frame_dump_walk_pins_the_oracle_and_the_firmwares_own_dump`] is the
+//! one test that runs the walk once and hands the run to each. They were two
+//! tests until M5 P6, and the two runs were identical — same ELF, same
+//! script, same quantum — so the second bought no evidence and cost a third
+//! of this file's CI time. Nothing was dropped: every assertion is still
+//! made, under a function whose name a panic still prints, and the
+//! determinism half still takes its genuine second run.
+//!
+//! It is `#[ignore]`d for `test_support`'s usual reason: a plain `cargo
 //! test --workspace` must never start a cross-target firmware build. `just
 //! test-emu-esp32v3-boot` builds the `frame-dump` image, names the file it
 //! built, and runs these.
@@ -322,18 +331,33 @@ fn last_dump_rgb(text: &str) -> Option<String> {
 // The reachable half
 // ---------------------------------------------------------------------------
 
-/// **Reading (b) is reading (c)**: the first lit frame off IO18 is the host
-/// oracle's frame, byte for byte, and every later frame this run got to is
-/// the same frame.
+/// **The frame-dump walk, run once, read both ways.**
+///
+/// The two claims below used to build their own machine each — same ELF, same
+/// script, same quantum 256 — and then read different things out of two
+/// identical runs. One run answers both, so there is one run.
+///
+/// **Nothing is dropped**: every assertion both tests made is still made, in
+/// the same order, under its own function, whose name a panic still prints.
+/// The determinism half needs a genuine second run and still takes one.
 #[test]
 #[ignore = "needs the fw-esp32v3 frame-dump ELF; run through `just test-emu-esp32v3-boot`"]
-fn the_first_lit_frame_off_io18_is_the_host_oracles_frame() {
+fn the_frame_dump_walk_pins_the_oracle_and_the_firmwares_own_dump() {
     let elf = match fw_esp32v3_frame_dump_image() {
         Ok(path) => path,
         Err(reason) => return skip_notice("shader_oracle_pin", &reason),
     };
     let dir = scratch("t1");
     let r = run(&elf, 256, &dir);
+    the_first_lit_frame_off_io18_is_the_host_oracles_frame(&r);
+    the_firmwares_own_dump_is_the_same_frame_and_the_run_reaches_its_deadline(&elf, &dir, &r);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// **Reading (b) is reading (c)**: the first lit frame off IO18 is the host
+/// oracle's frame, byte for byte, and every later frame this run got to is
+/// the same frame.
+fn the_first_lit_frame_off_io18_is_the_host_oracles_frame(r: &Run) {
     // The shape of the run, before any assertion — so a failure below is read
     // beside what the machine actually did rather than instead of it.
     println!(
@@ -479,7 +503,6 @@ fn the_first_lit_frame_off_io18_is_the_host_oracles_frame() {
         "only {later} frames after the first lit one — too few for \"every later frame is \
          the same frame\" to mean anything"
     );
-    let _ = std::fs::remove_dir_all(&dir);
 }
 
 // ---------------------------------------------------------------------------
@@ -492,16 +515,14 @@ fn the_first_lit_frame_off_io18_is_the_host_oracles_frame() {
 /// Everything here needs the guest to survive past the first lit frame: the
 /// firmware's own dump is *deferred* `LIT_DUMP_DELAY_FRAMES = 30` frames
 /// (`frame_dump.rs`), and until M4 P4b (#711) the guest died before it.
-#[test]
-#[ignore = "needs the fw-esp32v3 frame-dump ELF; run through `just test-emu-esp32v3-boot`"]
-fn the_firmwares_own_dump_is_the_same_frame_and_the_run_reaches_its_deadline() {
-    let elf = match fw_esp32v3_frame_dump_image() {
-        Ok(path) => path,
-        Err(reason) => return skip_notice("shader_oracle_pin", &reason),
-    };
-    let (da, db) = (scratch("a"), scratch("b"));
-    let a = run(&elf, 256, &da);
-
+/// `a` is the caller's run; `b` below is this claim's own second one, built
+/// the same way from the same ELF at the same quantum — which is exactly what
+/// the determinism half is about.
+fn the_firmwares_own_dump_is_the_same_frame_and_the_run_reaches_its_deadline(
+    elf: &Path,
+    dir: &Path,
+    a: &Run,
+) {
     assert!(
         matches!(a.outcome, Outcome::Deadline { .. }),
         "the run should end at its deadline: {:?}\n{}",
@@ -545,8 +566,12 @@ fn the_firmwares_own_dump_is_the_same_frame_and_the_run_reaches_its_deadline() {
          [ORACLE]:   {ORACLE_RGB}"
     );
 
-    // Two runs write byte-identical `--dump-frames` files.
-    let b = run(&elf, 256, &db);
+    // Two runs write byte-identical `--dump-frames` files. Its own directory
+    // under the caller's, because `run` names the dump after the quantum and
+    // the two runs share one.
+    let db = dir.join("second");
+    std::fs::create_dir_all(&db).expect("scratch dir");
+    let b = run(elf, 256, &db);
     assert_eq!(a.outcome, b.outcome);
     assert_eq!(a.m.cycles(), b.m.cycles());
     assert_eq!(a.m.instructions(), b.m.instructions());
@@ -558,8 +583,6 @@ fn the_firmwares_own_dump_is_the_same_frame_and_the_run_reaches_its_deadline() {
         a.frames.len()
     );
     assert_eq!(sa, sb, "the two dump files differ");
-    let _ = std::fs::remove_dir_all(&da);
-    let _ = std::fs::remove_dir_all(&db);
 }
 
 // ---------------------------------------------------------------------------

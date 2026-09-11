@@ -1358,7 +1358,13 @@ jobs:
       - name: Install espflash (prebuilt — the merged image's bootloader)
         run: cargo binstall --no-confirm --locked espflash@3.3.0
 
-      - name: Emulator ESP32v3 gate (both boot paths, the reference image)
+      # Since M5 P6 the recipe also runs the two host test commands: `cargo
+      # test -p lp-emu-validate` (which owns `tests/v3_replays.rs`, the four
+      # committed transcript pairs) and `cargo test -p lp-cli --test
+      # validate_registry_parity`. They are IN THE RECIPE rather than extra
+      # steps here, so that the gate a human runs and the gate CI runs stay
+      # one thing.
+      - name: Emulator ESP32v3 gate (both boot paths, the replays, the reference image)
         run: cd lp2025 && just test-emu-esp32v3-gate
 
       # The classic's half of the heap-budget record's chip section (M5 P5).

@@ -42,7 +42,7 @@
 //! built on: a split one would parse as a different number rather than as a
 //! missing line.
 //!
-//! # The three tests
+//! # The three claims, and the one run they read
 //!
 //! The **routing** is [`five_wires_share_four_slots_and_the_fifth_re_muxes_a_signal`],
 //! the **determinism** is
@@ -56,7 +56,17 @@
 //! guest in a ROM window handler. That is fixed and all three run every
 //! assertion.
 //!
-//! All are `#[ignore]`d for `test_support`'s usual reason: a plain `cargo
+//! ⚠️ All three are **functions, not `#[test]`s**, and
+//! [`the_five_wire_walk_holds_on_routing_checksums_and_determinism`] is the
+//! one test that runs the walk once and hands the run to each of them. They
+//! were three tests until M5 P6, and three identical machine runs — same ELF,
+//! same script, same quantum — read three different ways was the most
+//! expensive third of the emulator's CI job for no extra evidence. Nothing
+//! was dropped in the merge: every assertion is still made, under a function
+//! whose name a panic still prints. The determinism claim's *extra* runs (a
+//! second at quantum 256, a third at 64) are real and still happen.
+//!
+//! The test is `#[ignore]`d for `test_support`'s usual reason: a plain `cargo
 //! test --workspace` must never start a cross-target firmware build. `just
 //! test-emu-esp32v3-boot` builds the `frame-dump` image, names the file it
 //! built, and runs these.
@@ -320,21 +330,45 @@ fn run(elf: &Path, quantum: u64, dir: &Path) -> Run {
 // The reachable half
 // ---------------------------------------------------------------------------
 
+/// **The five-wire walk, run once, read three ways.**
+///
+/// Three claims used to run this walk three times over — the routing, the
+/// checksums and the determinism baseline all built their own machine from
+/// the same ELF, with the same script, at the same quantum, and then read
+/// different things out of identical runs. That is three copies of the most
+/// expensive thing in the emulator's CI job for one run's worth of evidence.
+///
+/// So the run happens here, once, and each claim below is a function that
+/// reads it. **Nothing is dropped**: every assertion the three tests made is
+/// still made, in the same order, under its own name — which is still the
+/// name that appears in a failure, because a panic names the function it came
+/// from. What is gone is two machine runs, and only that.
+///
+/// The determinism claim genuinely needs more than one run (a second at the
+/// same quantum, a third at 64), and it still takes them; it simply takes
+/// this one as its first.
+#[test]
+#[ignore = "needs the fw-esp32v3 frame-dump ELF; run through `just test-emu-esp32v3-boot`"]
+fn the_five_wire_walk_holds_on_routing_checksums_and_determinism() {
+    let elf = match fw_esp32v3_frame_dump_image() {
+        Ok(path) => path,
+        Err(reason) => return skip_notice("five_wires", &reason),
+    };
+    let dir = scratch("five-wires");
+    let r = run(&elf, 256, &dir);
+    five_wires_share_four_slots_and_the_fifth_re_muxes_a_signal(&r);
+    every_wire_checksum_equals_the_guests_own_summary_line(&r);
+    the_second_wave_decodes_the_same_frames_across_two_runs_and_two_quanta(&elf, &dir, &r);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 /// **Five wires, four slots, and the mux between waves.**
 ///
 /// Five pads are routed; four of them carry a pooled slot's own RMT signal;
 /// and at least one signal drives a **second** pad later in the run, with a
 /// park to `GPIO_OUT` in between. That is the second wave, read off the
 /// fabric rather than inferred from the firmware.
-#[test]
-#[ignore = "needs the fw-esp32v3 frame-dump ELF; run through `just test-emu-esp32v3-boot`"]
-fn five_wires_share_four_slots_and_the_fifth_re_muxes_a_signal() {
-    let elf = match fw_esp32v3_frame_dump_image() {
-        Ok(path) => path,
-        Err(reason) => return skip_notice("five_wires", &reason),
-    };
-    let dir = scratch("routing");
-    let r = run(&elf, 256, &dir);
+fn five_wires_share_four_slots_and_the_fifth_re_muxes_a_signal(r: &Run) {
     println!(
         "five_wires: outcome {:?}, {} us emulated, {} instructions ({} on core 1)",
         r.outcome,
@@ -457,7 +491,6 @@ fn five_wires_share_four_slots_and_the_fifth_re_muxes_a_signal() {
             frames.iter().filter(|f| f.is_complete()).count()
         );
     }
-    let _ = std::fs::remove_dir_all(&dir);
 }
 
 /// **The hardest thing in the milestone to keep deterministic, twice over**:
@@ -466,16 +499,17 @@ fn five_wires_share_four_slots_and_the_fifth_re_muxes_a_signal() {
 /// The second wave is a cross-core handover — the pusher on core 1 takes its
 /// work from the PRO core's mailbox — so a scheduler interleaving that leaked
 /// into the waveform would show up here and nowhere else.
-#[test]
-#[ignore = "needs the fw-esp32v3 frame-dump ELF; run through `just test-emu-esp32v3-boot`"]
-fn the_second_wave_decodes_the_same_frames_across_two_runs_and_two_quanta() {
-    let elf = match fw_esp32v3_frame_dump_image() {
-        Ok(path) => path,
-        Err(reason) => return skip_notice("five_wires", &reason),
-    };
-    let dir = scratch("determinism");
-    let a = run(&elf, 256, &dir);
-    let b = run(&elf, 256, &dir);
+///
+/// `a` is the caller's run and `b` is this claim's own second one. They are
+/// built the same way from the same ELF at the same quantum, which is exactly
+/// what the claim is about — a run that was somehow special would prove
+/// nothing here.
+fn the_second_wave_decodes_the_same_frames_across_two_runs_and_two_quanta(
+    elf: &Path,
+    dir: &Path,
+    a: &Run,
+) {
+    let b = run(elf, 256, dir);
     assert_eq!(a.outcome, b.outcome, "two identical runs diverged");
     assert_eq!(a.m.cycles(), b.m.cycles());
     assert_eq!(a.m.instructions(), b.m.instructions());
@@ -506,7 +540,7 @@ fn the_second_wave_decodes_the_same_frames_across_two_runs_and_two_quanta() {
     // including their times; it can, because its waveform is driven from the
     // host on one core. This one cannot, and that difference is the second
     // wave's signature rather than a flaw in either.
-    let c = run(&elf, 64, &dir);
+    let c = run(elf, 64, dir);
     let (q256, q64) = (shapes(&a.frames), shapes(&c.frames));
     assert_eq!(q256.len(), q64.len(), "a pad went missing at quantum 64");
     for ((pad, fa), (_, fc)) in q256.iter().zip(q64.iter()) {
@@ -537,7 +571,6 @@ fn the_second_wave_decodes_the_same_frames_across_two_runs_and_two_quanta() {
             fc.len(),
         );
     }
-    let _ = std::fs::remove_dir_all(&dir);
 }
 
 // ---------------------------------------------------------------------------
@@ -554,15 +587,7 @@ fn the_second_wave_decodes_the_same_frames_across_two_runs_and_two_quanta() {
 /// All of it needs the render to survive: the summary lines are printed once
 /// every `REPORT_EVERY_FRAMES = 60` frames, and until M4 P4b (#711) the guest
 /// died long before the sixtieth.
-#[test]
-#[ignore = "needs the fw-esp32v3 frame-dump ELF; run through `just test-emu-esp32v3-boot`"]
-fn every_wire_checksum_equals_the_guests_own_summary_line() {
-    let elf = match fw_esp32v3_frame_dump_image() {
-        Ok(path) => path,
-        Err(reason) => return skip_notice("five_wires", &reason),
-    };
-    let dir = scratch("checksums");
-    let r = run(&elf, 256, &dir);
+fn every_wire_checksum_equals_the_guests_own_summary_line(r: &Run) {
     println!(
         "five_wires: outcome {:?}, {} us emulated, unmapped {}",
         r.outcome,
@@ -688,7 +713,6 @@ fn every_wire_checksum_equals_the_guests_own_summary_line() {
              deadline can fall inside, so summary lines are being lost"
         );
     }
-    let _ = std::fs::remove_dir_all(&dir);
 }
 
 // ---------------------------------------------------------------------------
