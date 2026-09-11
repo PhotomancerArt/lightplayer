@@ -24,10 +24,17 @@
 //!   same bytes dual-core and runs fine, which is the evidence for this
 //!   reading.
 //!
-//! Under **both** readings ROM `main` on the APP core writes seven
+//! Both readings were expected to predict ROM `main`'s seven
 //! `_xtos_set_exception_handler` pairs at `0x3ffe0448 + 4n` and
-//! `0x3ffe0548 + 4n` (n ∈ {0, 2, 3, 8, 9, 28, 29}), so those words alone
-//! discriminate nothing — the zeroed `.bss_xtos_pro` span does.
+//! `0x3ffe0548 + 4n` (n ∈ {0, 2, 3, 8, 9, 28, 29}) on the APP core, so those
+//! words alone were never the discriminator — the zeroed `.bss_xtos_pro` span
+//! is.
+//!
+//! ⚠️ **The bench refuted even that shared prediction.** On the DOM-Z-102
+//! (2026-09-11, two boots) the start rewrote **no byte** of
+//! `0x3ffe0440..0x3ffe1440`: the handler pairs stayed `0xA5A5A5A5`, so ROM
+//! `main` did not re-run on the APP core either. Whatever the `ctrl_d` write
+//! releases, it is not a core that walks the ROM's reset path again.
 //!
 //! ## What this rig does
 //!
