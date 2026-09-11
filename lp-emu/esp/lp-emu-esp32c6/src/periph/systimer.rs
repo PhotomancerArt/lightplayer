@@ -52,14 +52,18 @@ const PERIOD_MASK: u32 = 0x3FF_FFFF;
 const CONF_RESET: u32 = 0x4600_0000;
 const UNIT_WORK_EN: [u32; 2] = [1 << 30, 1 << 29];
 const TARGET_WORK_EN: [u32; 3] = [1 << 24, 1 << 23, 1 << 22];
-const OP_VALUE_VALID: u32 = 1 << 29;
+/// `unit_op.value_valid` — the bit [`Systimer::read_word`] answers a
+/// `unit_op` read with, and nothing else. A constant, which is why a
+/// translated core may serve that read without the bus (M7b P3).
+pub const OP_VALUE_VALID: u32 = 1 << 29;
 const OP_UPDATE: u32 = 1 << 30;
 const TC_PERIOD_MODE: u32 = 1 << 30;
 const TC_UNIT_SEL: u32 = 1 << 31;
 
 // Offsets (`regs::SYSTIMER`).
 const CONF: u32 = 0x00;
-const UNIT0_OP: u32 = 0x04;
+/// `unit0_op`: written to latch the count, and read for `value_valid`.
+pub const UNIT0_OP: u32 = 0x04;
 const UNIT1_OP: u32 = 0x08;
 const UNIT0_LOAD_HI: u32 = 0x0c;
 const UNIT1_LOAD_LO: u32 = 0x18;
@@ -67,7 +71,11 @@ const TRGT0_HI: u32 = 0x1c;
 const TRGT2_LO: u32 = 0x30;
 const TARGET0_CONF: u32 = 0x34;
 const TARGET2_CONF: u32 = 0x3c;
-const UNIT0_VALUE_HI: u32 = 0x40;
+/// `unit0_value.hi`. Public because a translated core publishes this
+/// register's two halves (M7b P3).
+pub const UNIT0_VALUE_HI: u32 = 0x40;
+/// `unit0_value.lo`.
+pub const UNIT0_VALUE_LO: u32 = 0x44;
 const UNIT1_VALUE_LO: u32 = 0x4c;
 const COMP0_LOAD: u32 = 0x50;
 const COMP2_LOAD: u32 = 0x58;
@@ -144,6 +152,24 @@ impl Systimer {
     /// The committed target of comparator `n`.
     pub fn real_target(&self, n: usize) -> u64 {
         self.real_target[n]
+    }
+
+    /// The two words `unitNvalue.{lo,hi}` read for unit `u`, in that order.
+    ///
+    /// The **same expressions** [`Systimer::read_word`]'s
+    /// `UNIT0_VALUE_HI..=UNIT1_VALUE_LO` arm answers with, because that arm
+    /// calls this: a translated core publishes these two words and serves the
+    /// reads inline (M7b P3), and one copy of the arithmetic is what stops the
+    /// two from drifting.
+    ///
+    /// They are a **latched** value, not a live count: the latch moves only in
+    /// [`Systimer::write_word`]'s `unit_op` arm, which is the one event a
+    /// publisher has to watch for.
+    pub fn value_words(&self, u: usize) -> [u32; 2] {
+        [
+            self.latched[u] as u32,
+            (self.latched[u] >> 32) as u32 & MASK20,
+        ]
     }
 
     fn unit_of(&self, n: usize) -> usize {
@@ -230,11 +256,8 @@ impl Systimer {
             UNIT0_VALUE_HI..=UNIT1_VALUE_LO => {
                 let i = (off - UNIT0_VALUE_HI) / 4;
                 let u = (i / 2) as usize;
-                if i % 2 == 0 {
-                    (self.latched[u] >> 32) as u32 & MASK20
-                } else {
-                    self.latched[u] as u32
-                }
+                // `hi` first in the register block, `lo` first in the pair.
+                self.value_words(u)[usize::from(i % 2 == 0)]
             }
             COMP0_LOAD..=UNIT1_LOAD => 0,
             INT_ENA => self.int_ena,
@@ -341,6 +364,16 @@ impl Peripheral for Systimer {
 
     fn attached(&mut self, index: usize) {
         self.index = index;
+    }
+
+    /// So the machine can read [`Systimer::value_words`] back (M7b P3).
+    ///
+    /// A translated core publishes this block's latched word and serves
+    /// `unit0_value.{lo,hi}` from it without reaching the bus; the publisher
+    /// needs the model's own value, and this is the seam it gets it through.
+    /// Read-only: nothing outside the bus drives this block.
+    fn as_any_mut(&mut self) -> Option<&mut dyn core::any::Any> {
+        Some(self)
     }
 
     fn read(&mut self, off: u32, width: Width, cx: &mut BusCx<'_>) -> u32 {

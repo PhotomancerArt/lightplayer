@@ -82,7 +82,10 @@ use crate::host::{
     EXCHANGE_CROSS, EXCHANGE_CYCLE, EXCHANGE_FLAGS, EXCHANGE_INDIRECT_MISS, EXCHANGE_INSTRET,
     PERM_SHIFT,
 };
-use crate::translate::{ENTRY_FUNC, Emit, Emitted, F_FIRST_BODY, IMPORT_MODULE, Layout, emit_body};
+use crate::translate::{
+    ENTRY_FUNC, Emit, Emitted, F_FIRST_BODY, F_MMIO_LOAD, IMPORT_MODULE, Layout, emit_body,
+    fast_load,
+};
 
 /// wasm's implementation limit on a single function body, in bytes.
 ///
@@ -302,12 +305,21 @@ pub fn emit_module(
     let chunk = fn_blocks.min(total);
     let count = total.div_ceil(chunk);
 
+    // `$fast_load` — the machine's published MMIO word reads (M7b P3) — is the
+    // module's **last** function, past the selector, so every index a
+    // sub-dispatcher, the element segment and the export already use is
+    // exactly what it was. An MMIO load calls it instead of the import when
+    // the machine published any; the two have the same signature, so the call
+    // site is byte-for-byte unchanged either way.
+    let fast_func = layout.fast_reads.map(|_| F_FIRST_BODY + count as u32 + 1);
+    let load_func = fast_func.unwrap_or(F_MMIO_LOAD);
+
     let mut bodies = Vec::with_capacity(count);
     let (mut native_insts, mut escaped_insts) = (0usize, 0usize);
     for c in 0..count {
         let lo = c * chunk;
         let len = chunk.min(total - lo);
-        let (f, native, escaped) = emit_body(set, lo, len, model, layout, policy);
+        let (f, native, escaped) = emit_body(set, lo, len, model, layout, policy, load_func);
         native_insts += native;
         escaped_insts += escaped;
         bodies.push(f);
@@ -319,9 +331,11 @@ pub fn emit_module(
     // the budget check below had a blind spot at exactly the sizes where the
     // selector is the largest function in the module.
     let sel = selector(count, chunk, layout, policy.selector);
+    let fast = layout.fast_reads.map(fast_load);
     let max_sub_body_bytes = bodies.iter().map(Function::byte_len).max().unwrap_or(0);
     let selector_bytes = sel.byte_len();
-    let max_body_bytes = max_sub_body_bytes.max(selector_bytes);
+    let fast_bytes = fast.as_ref().map_or(0, Function::byte_len);
+    let max_body_bytes = max_sub_body_bytes.max(selector_bytes).max(fast_bytes);
 
     let mut module = Module::new();
 
@@ -395,6 +409,10 @@ pub fn emit_module(
         funcs.function(4);
     }
     funcs.function(5);
+    if fast.is_some() {
+        // Type 0 is `mmio_load`'s, which is the signature `$fast_load` has.
+        funcs.function(0);
+    }
     module.section(&funcs);
 
     // The flat selector's own table: one funcref per sub-dispatcher, in
@@ -439,6 +457,9 @@ pub fn emit_module(
         codes.function(f);
     }
     codes.function(&sel);
+    if let Some(f) = &fast {
+        codes.function(f);
+    }
     module.section(&codes);
 
     Emitted {
@@ -687,6 +708,7 @@ mod tests {
             perm_offset: 0,
             exchange_offset: 0,
             indirect: None,
+            fast_reads: None,
         }
     }
 

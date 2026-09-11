@@ -20,19 +20,21 @@ use lp_emu_jit::discover::discover;
 use lp_emu_jit::dispatch::{Selector, emit_module, target_table_bytes, write_target_tables};
 use lp_emu_jit::host::{
     self, EXCHANGE_CROSS, EXCHANGE_CYCLE, EXCHANGE_INDIRECT_MISS, EXCHANGE_INSTRET, EXCHANGE_LEN,
-    EXCHANGE_REGS, HostOps, MMIO_LEAVE_AFTER, MMIO_OK, MMIO_PENDING, MMIO_SLICE_ENDED, MmioLoad,
-    MmioStore, PERM_ENTRIES, PERM_NONE, PERM_READ_WRITE, PERM_SHIFT, Polled, STEP_CONTINUE,
-    StepOne,
+    EXCHANGE_REGS, FAST_ARMED, FAST_SERVED, FAST_WORDS, HostOps, MMIO_LEAVE_AFTER, MMIO_OK,
+    MMIO_PENDING, MMIO_SLICE_ENDED, MmioLoad, MmioStore, PERM_ENTRIES, PERM_NONE, PERM_READ_WRITE,
+    PERM_SHIFT, Polled, STEP_CONTINUE, StepOne,
 };
 use lp_emu_jit::host_wasmtime::WasmtimeCore;
 use lp_emu_jit::replay::GRANULE_BYTES;
-use lp_emu_jit::translate::{Emit, Layout};
+use lp_emu_jit::translate::{Emit, FastRead, FastReads, FastSource, Layout};
 
 // The test memory: exchange, then the permission table, then 64 KiB of guest
 // RAM at `GUEST_BASE`. Six wasm pages, so the whole thing is one allocation
 // the emitted module addresses with folded constants exactly as the real one
 // does.
 const EXCHANGE_AT: u32 = 0;
+/// The published-read block (M7b P3), past the exchange area.
+const FAST_AT: u32 = 0x100;
 const PERM_AT: u32 = 0x1000;
 const ARENA_AT: u32 = PERM_AT + PERM_ENTRIES;
 const ARENA_LEN: u32 = 0x1_0000;
@@ -375,11 +377,29 @@ struct Rig {
     poll_answer: Option<Polled>,
     /// Whether an `mmio_load` leaves a yield on the fake bus.
     load_leaves_yield: bool,
+    /// The published MMIO word reads this rig folds into the module (M7b P3).
+    fast_reads: Option<FastReads>,
 }
 
 impl Rig {
     fn mem_len(&self) -> usize {
         (self.pages as usize) * 65536
+    }
+
+    /// Fill the published-read block the way a machine's host does (M7b P3):
+    /// the two published words, and `armed`.
+    fn publish(&mut self, armed: bool, words: [u32; 2]) {
+        let at = FAST_AT as usize;
+        self.mem[at + FAST_ARMED as usize..][..4].copy_from_slice(&i32::from(armed).to_le_bytes());
+        for (i, w) in words.iter().enumerate() {
+            self.mem[at + FAST_WORDS as usize + 4 * i..][..4].copy_from_slice(&w.to_le_bytes());
+        }
+    }
+
+    /// Reads translated code served from the published block.
+    fn fast_served(&self) -> u64 {
+        let at = FAST_AT as usize + FAST_SERVED as usize;
+        u64::from_le_bytes(self.mem[at..at + 8].try_into().unwrap())
     }
 
     fn layout(&self) -> Layout {
@@ -390,6 +410,7 @@ impl Rig {
             perm_offset: PERM_AT,
             exchange_offset: EXCHANGE_AT,
             indirect: self.indirect.then_some(IND_AT),
+            fast_reads: self.fast_reads,
         }
     }
 
@@ -425,6 +446,7 @@ impl Rig {
             store_answer: None,
             poll_answer: None,
             load_leaves_yield: false,
+            fast_reads: None,
         }
     }
 
@@ -1498,4 +1520,113 @@ fn an_inline_ram_store_with_nothing_pending_calls_no_host_at_all() {
     assert!(out.stores.is_empty());
     assert!(out.loads.is_empty());
     assert_eq!(out.instret, 4);
+}
+
+// --- the published MMIO word reads (M7b P3) --------------------------------
+
+/// `0x6000_0000` is published from slot 0, `0x6000_0004` reads a constant, and
+/// `0x6000_0008` is published by nobody.
+fn published_reads() -> FastReads {
+    FastReads {
+        offset: FAST_AT,
+        reads: [
+            Some(FastRead {
+                address: 0x6000_0000,
+                source: FastSource::Published(0),
+            }),
+            Some(FastRead {
+                address: 0x6000_0004,
+                source: FastSource::Constant(0x1234),
+            }),
+            None,
+            None,
+        ],
+    }
+}
+
+/// `lui a1, 0x60000` / four loads off it / `jal x0, +4`.
+///
+/// A published word, a published constant, an address nobody published, and a
+/// **byte** load of a published address.
+fn four_mmio_loads() -> Vec<(u32, u32)> {
+    vec![
+        (GUEST_BASE, 0x6000_05b7),
+        (GUEST_BASE + 4, 0x0005_a603),
+        (GUEST_BASE + 8, 0x0045_a683),
+        (GUEST_BASE + 12, 0x0085_a703),
+        (GUEST_BASE + 16, 0x0005_c783),
+        (GUEST_BASE + 20, 0x0040_006f),
+    ]
+}
+
+/// **M7b P3.** An armed block serves the two published **word** reads inside
+/// the module and crosses to the import for everything else — an address
+/// nobody published, and a narrower access to one that was.
+#[test]
+fn a_published_word_read_is_served_without_a_host_call() {
+    let program = four_mmio_loads();
+    let mut rig = Rig::new(&program);
+    rig.fast_reads = Some(published_reads());
+    rig.publish(true, [0x00c0_ffee, 0]);
+    let set = set_of(&rig, GUEST_BASE);
+    let out = rig.run_named("fast-armed", &set, Emit::EVERYTHING, [0; 32], u64::MAX);
+
+    assert_eq!(out.regs[12] as u32, 0x00c0_ffee, "the published word");
+    assert_eq!(out.regs[13], 0x1234, "the published constant");
+    assert_eq!(out.regs[14] as u32, 0xab08, "nobody published this one");
+    assert_eq!(
+        out.regs[15] as u32, 0xab00,
+        "a byte load is not a word load"
+    );
+    // The cycles are the interpreter's, not "the cycles of the loads that
+    // crossed": a read the block served still charges its own cost, so the
+    // third load is `lui + 2 x load` and the fourth is `lui + 3 x load`. That
+    // is the property JD17 is about, and it is why this asserts the numbers
+    // rather than the count.
+    let model = CycleModel::Esp32C6;
+    let lui = u64::from(model.cycles_for(lp_emu_core::InstClass::Lui));
+    let load = u64::from(model.cycles_for(lp_emu_core::InstClass::Load));
+    assert_eq!(
+        out.loads,
+        vec![
+            (GUEST_BASE + 12, lui + 2 * load, 0x6000_0008, 2),
+            (GUEST_BASE + 16, lui + 3 * load, 0x6000_0000, 4),
+        ],
+        "exactly the two the block does not serve reached the import"
+    );
+    assert_eq!(rig.fast_served(), 2, "and exactly two did not");
+}
+
+/// The same module, the same reads, `armed` clear: **every** one of them goes
+/// out. Disarming is always safe, which is why it is what the machine does
+/// whenever anything it published could have gone stale.
+#[test]
+fn a_disarmed_block_serves_nothing_at_all() {
+    let program = four_mmio_loads();
+    let mut rig = Rig::new(&program);
+    rig.fast_reads = Some(published_reads());
+    rig.publish(false, [0x00c0_ffee, 0]);
+    let set = set_of(&rig, GUEST_BASE);
+    let out = rig.run_named("fast-disarmed", &set, Emit::EVERYTHING, [0; 32], u64::MAX);
+
+    assert_eq!(out.regs[12] as u32, 0xab00, "the bus served it");
+    assert_eq!(out.regs[13] as u32, 0xab04);
+    assert_eq!(out.regs[14] as u32, 0xab08);
+    assert_eq!(out.regs[15] as u32, 0xab00);
+    assert_eq!(out.loads.len(), 4, "all four crossed");
+    assert_eq!(rig.fast_served(), 0);
+}
+
+/// A module with no published reads at all is the M7b P2 module: the import is
+/// the callee and there is no extra function in it.
+#[test]
+fn a_module_that_publishes_nothing_calls_the_import_as_before() {
+    let program = four_mmio_loads();
+    let mut rig = Rig::new(&program);
+    rig.publish(true, [0x00c0_ffee, 0]);
+    let set = set_of(&rig, GUEST_BASE);
+    let out = rig.run_named("fast-absent", &set, Emit::EVERYTHING, [0; 32], u64::MAX);
+    assert_eq!(out.loads.len(), 4);
+    assert_eq!(out.regs[12] as u32, 0xab00);
+    assert_eq!(rig.fast_served(), 0, "nothing wrote the counter");
 }

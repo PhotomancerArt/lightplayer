@@ -61,8 +61,9 @@ use crate::blocks::{Block, BlockEnd, BlockSet};
 use crate::decode::{Cond, Decoded, Inst, LoadKind, Op, OpI, StoreKind};
 use crate::host::{
     EXCHANGE_CYCLE, EXCHANGE_EXIT_WHY, EXCHANGE_FLAGS, EXCHANGE_INDIRECT_MISS, EXCHANGE_INSTRET,
-    EXCHANGE_REGS, EXCHANGE_STATUS, FLAG_PENDING, FLAG_SLICE_ENDED, MMIO_PENDING, MMIO_REFUSED,
-    MMIO_SLICE_ENDED, PERM_READ_WRITE, PERM_SHIFT, load_kind, store_kind, why,
+    EXCHANGE_REGS, EXCHANGE_STATUS, FAST_ARMED, FAST_SERVED, FAST_WORDS, FLAG_PENDING,
+    FLAG_SLICE_ENDED, MMIO_PENDING, MMIO_REFUSED, MMIO_SLICE_ENDED, PERM_READ_WRITE, PERM_SHIFT,
+    load_kind, store_kind, why,
 };
 
 /// The module the host imports `memory` from, and the module the four
@@ -110,6 +111,41 @@ pub struct Layout {
     /// page map is fully initialised, because a partly-written one would read
     /// guest data as a block id.
     pub indirect: Option<u32>,
+    /// The published MMIO word reads this machine guarantees, if any (M7b P3).
+    ///
+    /// `None` emits M7b P2's behaviour: every MMIO load crosses to the host.
+    pub fast_reads: Option<FastReads>,
+}
+
+/// Where a published MMIO word read gets its value.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FastSource {
+    /// The register reads as this constant, whatever the machine is doing.
+    Constant(i32),
+    /// The register reads the published word in this slot of the block, which
+    /// the machine republishes whenever its model's own value moves.
+    Published(u32),
+}
+
+/// One published MMIO word read: a guest **word** address and where its value
+/// comes from.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct FastRead {
+    pub address: u32,
+    pub source: FastSource,
+}
+
+/// The published-read table folded into a module at emission time.
+///
+/// See [`crate::host`] for the block's layout and for why `armed` is the whole
+/// correctness story.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct FastReads {
+    /// Where the published-read block sits in the imported memory.
+    pub offset: u32,
+    /// The addresses served. Order is the order they are compared in, so the
+    /// machine puts its busiest register first.
+    pub reads: [Option<FastRead>; crate::host::FAST_MAX_READS],
 }
 
 /// Which instruction classes the translator emits itself. Everything else goes
@@ -281,6 +317,10 @@ struct Emitter<'a> {
     layout: Layout,
     policy: Emit,
     live: &'a [u8],
+    /// What an MMIO load calls: the import, or the module's own `$fast_load`
+    /// when the machine published reads (M7b P3). The two have the same
+    /// signature, so choosing between them costs the call site nothing.
+    mmio_load_func: u32,
     /// The global index of this sub-dispatcher's first block. Every `k` in
     /// this emitter is **chunk-relative**; every index in `set.index` and in
     /// the target table is global, and `lo` is the one place the two meet.
@@ -725,7 +765,7 @@ impl<'a> Emitter<'a> {
         self.i(I::I64Add);
         self.i(I::LocalGet(L_ADDR));
         self.i(I::I32Const(kind_code as i32));
-        self.i(I::Call(F_MMIO_LOAD));
+        self.i(I::Call(self.mmio_load_func));
         self.i(I::LocalSet(L_T64));
         self.i(I::LocalGet(L_T64));
         self.i(I::I64Const(32));
@@ -1304,6 +1344,80 @@ fn live_regs(blocks: &[Block]) -> Vec<u8> {
     (1u8..32).filter(|&r| live[r as usize]).collect()
 }
 
+/// `$fast_load`'s parameters: [`crate::host::HostOps::mmio_load`]'s own.
+const F_ARG_PC: u32 = 0;
+const F_ARG_CYCLE: u32 = 1;
+const F_ARG_ADDRESS: u32 = 2;
+const F_ARG_KIND: u32 = 3;
+
+/// The module's own `$fast_load`: the published MMIO word reads, and the
+/// import for everything else (M7b P3).
+///
+/// It has [`crate::host::HostOps::mmio_load`]'s exact signature, so every
+/// emitted load site is byte-for-byte what it was — only the callee index
+/// changed. That is deliberate: [`crate::dispatch::BODY_BUDGET`] is 80 % of
+/// wasm's function limit, and an arm at every memory instruction across
+/// 200,000 blocks is exactly the pressure M7 P6c relieved. The whole decision
+/// lives here, once.
+///
+/// **The refusals are the design.** Anything that is not a *word* load of a
+/// published address, and anything at all while `armed` is clear, falls
+/// through to the import and is served by the bus exactly as it always was —
+/// with its trace line, its grade check, its census note and its watchpoints.
+#[must_use]
+pub(crate) fn fast_load(fast: FastReads) -> Function {
+    let mut f = Function::new(alloc::vec![]);
+    let mut e = |ins: I<'static>| {
+        f.instruction(&ins);
+    };
+    let at = |field: u64| memarg(u64::from(fast.offset) + field);
+
+    // One guard for the whole table: the machine says the published words are
+    // current, and this is a word load. Everything else is the import's.
+    e(I::I32Const(0));
+    e(I::I32Load(at(FAST_ARMED)));
+    e(I::LocalGet(F_ARG_KIND));
+    e(I::I32Const(load_kind::W as i32));
+    e(I::I32Eq);
+    e(I::I32And);
+    e(I::If(BlockType::Empty));
+    for read in fast.reads.iter().flatten() {
+        e(I::LocalGet(F_ARG_ADDRESS));
+        e(I::I32Const(read.address as i32));
+        e(I::I32Eq);
+        e(I::If(BlockType::Empty));
+        // The served counter. The host's MMIO census counts what reached the
+        // bus, so this is the only place a read that never did can be counted
+        // at all — which is why it is permanent rather than a debug build's.
+        e(I::I32Const(0));
+        e(I::I32Const(0));
+        e(I::I64Load(at(FAST_SERVED)));
+        e(I::I64Const(1));
+        e(I::I64Add);
+        e(I::I64Store(at(FAST_SERVED)));
+        match read.source {
+            FastSource::Constant(v) => e(I::I32Const(v)),
+            FastSource::Published(slot) => {
+                e(I::I32Const(0));
+                e(I::I32Load(at(FAST_WORDS + 4 * u64::from(slot))));
+            }
+        }
+        // `MMIO_OK` is zero, so the answer is the value alone.
+        e(I::I64ExtendI32U);
+        e(I::Return);
+        e(I::End);
+    }
+    e(I::End);
+
+    e(I::LocalGet(F_ARG_PC));
+    e(I::LocalGet(F_ARG_CYCLE));
+    e(I::LocalGet(F_ARG_ADDRESS));
+    e(I::LocalGet(F_ARG_KIND));
+    e(I::Call(F_MMIO_LOAD));
+    e(I::End);
+    f
+}
+
 /// Emit the whole module for `set` in **one** sub-dispatcher.
 ///
 /// The shape P3 shipped, kept as the name every test and the replay harness
@@ -1357,6 +1471,7 @@ pub fn emit_body(
     model: CycleModel,
     layout: Layout,
     policy: Emit,
+    mmio_load_func: u32,
 ) -> (Function, usize, usize) {
     assert!(len > 0, "an empty chunk has nothing to emit");
     let last = len - 1;
@@ -1369,6 +1484,7 @@ pub fn emit_body(
         layout,
         policy,
         live: &live,
+        mmio_load_func,
         lo,
         last,
         extra: 0,
