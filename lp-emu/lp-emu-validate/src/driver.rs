@@ -2352,7 +2352,9 @@ mod tests {
     #[test]
     fn a_second_boot_payload_runs_the_machine_twice_over_a_writable_part() {
         let mut req = request("lp-emu:esp32v3:t1", "boot-idle", None);
-        req.image = Some(PathBuf::from("target/emu-ref/c976f17a9-boot-idle/fw-esp32v3"));
+        req.image = Some(PathBuf::from(
+            "target/emu-ref/c976f17a9-boot-idle/fw-esp32v3",
+        ));
         let plan = LpEmuDriver.plan(&req).unwrap();
         let rendered = plan.render();
 
@@ -2402,7 +2404,10 @@ mod tests {
             !runs[0].command.iter().any(|a| a == "--reset-cause"),
             "{rendered}"
         );
-        assert!(!runs[0].command.iter().any(|a| a == "--strap"), "{rendered}");
+        assert!(
+            !runs[0].command.iter().any(|a| a == "--strap"),
+            "{rendered}"
+        );
         assert!(rendered.contains("takes no flag for either"), "{rendered}");
     }
 
