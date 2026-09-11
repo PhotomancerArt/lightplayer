@@ -352,10 +352,9 @@ pub fn emit_module(
     // 2: step_one(pc) -> pc
     types.ty().function([ValType::I32], [ValType::I32]);
     // 3: poll(pc, cycle, instret) -> (status << 32) | pc
-    types.ty().function(
-        [ValType::I32, ValType::I64, ValType::I64],
-        [ValType::I64],
-    );
+    types
+        .ty()
+        .function([ValType::I32, ValType::I64, ValType::I64], [ValType::I64]);
     let stay = [
         ValType::I32,
         ValType::I64,

@@ -104,10 +104,9 @@ fn guard_probe(access: Access) -> Vec<u8> {
         [ValType::I64],
     );
     types.ty().function([ValType::I32], [ValType::I32]);
-    types.ty().function(
-        [ValType::I32, ValType::I64, ValType::I64],
-        [ValType::I64],
-    );
+    types
+        .ty()
+        .function([ValType::I32, ValType::I64, ValType::I64], [ValType::I64]);
     types.ty().function(
         [
             ValType::I32,
