@@ -1,0 +1,50 @@
+{
+  "schema": 1,
+  "payload": "boot-idle",
+  "chip": "esp32v3",
+  "configuration": "silicon:esp32v3",
+  "date": "2026-09-11",
+  "board": "domraem/dom-z-102",
+  "mac": "30:76:f5:ec:f6:34",
+  "silicon_rev": "v3.1",
+  "baud": 115200,
+  "firmware_commit": "c976f17a9a1e",
+  "firmware_features": ["esp32", "server", "float-f32"],
+  "firmware_dirty": false,
+  "firmware_sha256": "670b7bf1b5bcc161772bb9c5fc2354f497522b890ee2910e6f1e80920419a1f9",
+  "source": "M5 P4, the classic's desk sitting, 2026-09-11 05:06-05:12 (local), first of the sitting's four payloads. Image provenance: `scripts/emu/build-reference-image.sh --chip esp32 esp32,server,float-f32 c976f17a9 none` -> target/emu-ref/c976f17a9-boot-idle/fw-esp32v3, ELF 2,985,952 B sha256 670b7bf1b5bcc161772bb9c5fc2354f497522b890ee2910e6f1e80920419a1f9. c976f17a9 is the pin `just test-emu-esp32v3-gate` names (`git rev-parse --short HEAD` on origin/main at the sitting), so the emulated twin P6 records is built from these bytes. Written with `PORT_DEV=/dev/cu.wchusbserial11330 scripts/emu/desk-flash-no-monitor.sh -- flash --chip esp32 --port /dev/cu.wchusbserial11330 --partition-table lp-fw/fw-esp32v3/partitions.csv --flash-size 4mb --after hard-reset target/emu-ref/c976f17a9-boot-idle/fw-esp32v3` (espflash 3.3.0 in the foreground under script(1); 1283 chunks at 0x10000, 2 min 27 s).",
+  "capture": "python3 scripts/emu/classic-reset-and-capture.py --baud 115200 --seconds 8 --out boot-idle-115200-a.bin --decoded boot-idle-115200-a.txt (port resolved by USB identity: CH340K 1a86:7522 at locationID 0x1133000). Reset by whole-status TIOCMSET, 0x4 -> 0x0, the only reset this cable answers.",
+  "tools": {
+    "capture": "scripts/emu/classic-reset-and-capture.py (M5 P3, PR #694) — this is the script's FIRST LIVE RUN; its --self-test passed 25 checks beforehand and every capture in this sitting came from it",
+    "port": "/dev/cu.wchusbserial11330 (CH340K 1a86:7522, no USB serial number, locationID 0x1133000, port 3 of hub 0x1130000; the C6 A0:F2:62:87:B4:8C on port 2 of the same hub was not touched, not probed, not listed)",
+    "flasher": "espflash 3.3.0"
+  },
+  "note": "THE ROM AND THE SECOND-STAGE BOOTLOADER HALF of one image's two transcripts. `board::esp32v3::init` reprograms clkdiv mid-stream, so the ROM and the ESP-IDF bootloader talk at 115200 and the application at 921600; this capture is the first rate and `silicon-esp32v3-2026-09-11-c976f17a9-921600.txt` is the second. Neither can read the other's bytes.\n\nEVERY CAPTURE IS A SECOND BOOT. espflash hard-resets after writing, so the boot that formatted `lpfs` in the freshly written image had already happened before this reader opened the port; the emulated twin needs a two-run recipe (`second_boot` on the classic's `boot-idle` arm) to reach the same state, or it reports the first boot's `largest_free=106494`, 2032 B short, for a reason that has nothing to do with the model.\n\nTHE COMMITTED .txt IS BYTES [0, 2268) of the 2531-byte raw read at `raw/silicon-esp32v3-2026-09-11-c976f17a9-115200.raw.bin`, which is preserved whole and untouched. The 263 trimmed bytes are the tail: the application reprogramming clkdiv to 921600 and printing its `[INIT]` chain into a reader still shifting at 115200, which is not decodable text. Every byte kept is unchanged from the wire, in the same order.\n\nWHAT IS IN IT, AND WHAT A ROM-UP TWIN MUST REPRODUCE: the mask ROM banner `ets Jul 29 2019 12:21:46`, `rst:0x1 (POWERON_RESET),boot:0x13 (SPI_FAST_FLASH_BOOT)`, `configsip: 0, SPIWP:0xee`, `mode:DIO, clock div:2`, the three `load:`/`entry` lines, the ESP-IDF `v5.1-beta1-378-gea5e0ff298-dirt 2nd stage bootloader` (espflash's bundled one) with `chip revision: v3.1`, the partition table, SEVEN `esp_image: segment` lines (0-6), `Loaded app from partition at offset 0x10000`, and the benign `E boot: Image contains multiple DROM segments. Only the last one will be mapped.` — printed on every boot of this image, and a ROM-up twin that does not print it is not this image's twin.\n\nTHREE SAMPLES WERE TAKEN AT THIS BAUD (a, b, c; this file is a). The decodable span was 2268 bytes in all three and the three bodies are IDENTICAL byte for byte from `ets Jul 29 2019` onward. The only difference is what sat in the bridge's buffer at the instant of reset: samples b and c open on a fragment of the previous run's 921600 traffic (`[INFO] fw_esp32_common::server_` misread at 115200) where sample a opens on a fragment of the ROM banner itself. Nothing in the bootloader's own output drifts — every `I (NN)` timestamp, every segment length, every address is the same in all three.\n\nHAND-FILED, NOT RUNNER-WRITTEN, AND THE REASON IS A FINDING. `lp-cli validate record v3-boot --config silicon:esp32v3` was run first (its --dry-run plan is in the PR body) and REFUSED to record: the classic's `boot-idle` sentinel `[stack] heartbeat: high-water` is ELICITED — `esp32_memory_stats` prints the triple only when a host asks — and the silicon driver has no sender. `host_script` (`lp-emu/lp-emu-validate/walks/v3-stop-all.script`) is passed to `--uart0-script` on the emulated plan only, so on silicon the stimulus never goes out and the sentinel never arrives. The runner's plan also SIGINTed espflash mid-write at its default `--timeout-secs 120`: the classic's 4 MB write alone takes 2 min 27 s over this cable, and the sentinel clock covers the flash. Both are M5 P6/P7 items; this sidecar is d-desk-batch.md's §6 fallback and says so rather than passing itself off as the runner's.",
+  "trust": [
+    {
+      "class": "memory",
+      "grade": "measured",
+      "because": "the board is the ground truth; nothing models it"
+    },
+    {
+      "class": "timing",
+      "grade": "measured",
+      "because": "a real clock on real flash with real wait states"
+    },
+    {
+      "class": "boot-log",
+      "grade": "measured",
+      "because": "the real mask ROM and the real ESP-IDF bootloader printed these bytes over the real cable"
+    },
+    {
+      "class": "wire",
+      "grade": "measured",
+      "because": "real bytes over a real CH340K"
+    },
+    {
+      "class": "pin",
+      "grade": "modeled",
+      "because": "no instrument was on a pad in this capture"
+    }
+  ]
+}

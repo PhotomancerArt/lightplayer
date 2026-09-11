@@ -1,0 +1,50 @@
+{
+  "schema": 1,
+  "payload": "boot-idle",
+  "chip": "esp32v3",
+  "configuration": "silicon:esp32v3",
+  "date": "2026-09-11",
+  "board": "domraem/dom-z-102",
+  "mac": "30:76:f5:ec:f6:34",
+  "silicon_rev": "v3.1",
+  "baud": 921600,
+  "firmware_commit": "c976f17a9a1e",
+  "firmware_features": ["esp32", "server", "float-f32"],
+  "firmware_dirty": false,
+  "firmware_sha256": "670b7bf1b5bcc161772bb9c5fc2354f497522b890ee2910e6f1e80920419a1f9",
+  "source": "M5 P4, the classic's desk sitting, 2026-09-11 05:06-05:12 (local), the application half of the same image as `silicon-esp32v3-2026-09-11-c976f17a9-115200.txt`. Image provenance: `scripts/emu/build-reference-image.sh --chip esp32 esp32,server,float-f32 c976f17a9 none` -> target/emu-ref/c976f17a9-boot-idle/fw-esp32v3, ELF 2,985,952 B sha256 670b7bf1b5bcc161772bb9c5fc2354f497522b890ee2910e6f1e80920419a1f9. c976f17a9 is the pin `just test-emu-esp32v3-gate` names, so P6's emulated twin is built from these bytes. Written with `PORT_DEV=/dev/cu.wchusbserial11330 scripts/emu/desk-flash-no-monitor.sh -- flash --chip esp32 --port /dev/cu.wchusbserial11330 --partition-table lp-fw/fw-esp32v3/partitions.csv --flash-size 4mb --after hard-reset target/emu-ref/c976f17a9-boot-idle/fw-esp32v3` (espflash 3.3.0 in the foreground under script(1)). The board's own hello confirms the bytes: `proto=20 commit=c976f17a9a1e dirty=false`.",
+  "capture": "python3 scripts/emu/classic-reset-and-capture.py --baud 921600 --seconds 16 --out boot-idle-921600-a.bin --decoded boot-idle-921600-a.txt --expect-mac 30:76:f5:ec:f6:34 --send-after '[INIT] I/O task spawned:1:M!{\"id\":1,\"msg\":\"stopAllProjects\"}' --send-at '8.0:M!{\"id\":2,\"msg\":\"stopAllProjects\"}'. Reset by whole-status TIOCMSET, 0x4 -> 0x0. The board confirmed itself: --expect-mac found 30:76:f5:ec:f6:34 in the capture.",
+  "tools": {
+    "capture": "scripts/emu/classic-reset-and-capture.py (M5 P3, PR #694) — the script's first live run; --self-test green (25 checks) beforehand, --send-after fired at 0.973 s and --send-at at 8.002 s, no NEVER FIRED warning, port closed with the lines deasserted",
+    "port": "/dev/cu.wchusbserial11330 (CH340K 1a86:7522, no USB serial number, locationID 0x1133000, port 3 of hub 0x1130000; the C6 A0:F2:62:87:B4:8C on port 2 of the same hub was not touched)",
+    "flasher": "espflash 3.3.0"
+  },
+  "note": "THE HEARTBEAT TRIPLE IS ELICITED, NOT IDLE-EMITTED. `[stack] heartbeat:` / `[MEM]` / `[JIT]` come from `esp32_memory_stats` (lp-fw/fw-esp32v3/src/main.rs), which `lpa_server` calls on a project load/unload/stop-all or a client `runtime_status` — never from the five-second server heartbeat. This board's lpfs has no project to auto-load, so a boot with nobody talking prints no triple at all. The stimulus here is exactly the emulator gate's: `M!{\"id\":1,\"msg\":\"stopAllProjects\"}` + newline, fired on the appearance of `[INIT] I/O task spawned` — the same bytes on the same trigger as `lp-emu/lp-emu-validate/walks/v3-stop-all.script`, so silicon and the twin are one stimulus as well as one image. The gate's send lands 1 ms of emulated time after the trigger; this host's reader polls at 50 ms and the send went out 0.973 s after the reset. That is host latency, and it is why nothing in the `timing` class is compared here. A second, identical request was sent at 8.0 s so drift within one boot is on the record.\n\nEVERY CAPTURE IS A SECOND BOOT. espflash hard-resets after writing, so the boot that formatted `lpfs` happened before this reader opened the port. The emulated twin must boot once, flush the chip and read its figures off the boot after it (`second_boot` on the classic's `boot-idle` arm) or it reports the first boot's `largest_free=106494`, 2032 B short.\n\nTHE COMMITTED .txt IS BYTES [6454, 11204) of the 11204-byte raw read at `raw/silicon-esp32v3-2026-09-11-c976f17a9-921600.raw.bin`, which is preserved whole and untouched. Bytes [0, 6454) are the ROM and the second-stage bootloader still printing at 115200 into a port open at 921600 — one shifter destuffing 115200-baud bit times as if they were 921600 ones — which is not valid UTF-8 and is not something the device said in any readable sense. The boundary kept is the first byte of `[INIT] fw-esp32v3 boot`, where the two ends agree on a rate again. Every byte kept is unchanged from the wire, in the same order; the interleaving inside it (`[MEM]` lines cutting through `[INFO]` lines mid-word) is real and is on the wire — `esp_println` writes the triple straight into the FIFO while the log lines travel through the io_task's queue, two console paths with different latencies.\n\nTHREE SAMPLES WERE TAKEN AT THIS BAUD (a, b, c; this file is a), each its own reset and its own capture. WHAT DOES NOT DRIFT: the whole `[INIT]` chain, including `heap=15072+112640+98304+15536=241552`, `[INIT] main stack 45280 B`, the JIT region `sram0 ibus 0x40088000..0x40098000 (64 KiB, placed, rwtext_end=0x40083f78)`, and `[INIT] RMT ISR on APP core`; and — the figures this payload exists for — the FIRST stop-all's pair, byte-identical in all three: `[stack] heartbeat: high-water 16972 B of 45280 B (28308 B headroom)`, `[MEM] free=223352 used=18200 largest_free=108526 retry_saves=0`, `[JIT] used=0 peak=0 cap=65536 spans=0 peak_spans=0 allocs=0 frees=0 fails=0 largest_free=65536`, then the post-stop `[MEM] free=223248 used=18304 largest_free=108543`. Each request logs memory TWICE (`log_memory` before and after the stop), and the emulator gate's `--exit-on '[JIT] used='` stops on the first `[JIT]` line of the first pair. WHAT DRIFTS: the SECOND request's pre-stop line, `[MEM] free=223784 used=17768 largest_free=108535` in sample a against `free=223848 used=17704 largest_free=108535` in b and c — 64 B — while its post-stop line is `free=223744 used=17808 largest_free=108525` in all three; the wire heartbeat's own memory object, `freeBytes 224648 / usedBytes 16904 / largestFreeBlock 108524` in a and b and `224776 / 16776 / 108531` in c's second heartbeat; and the frame counters (`frame=9163 fps=915` in a, 9164 in b, 9160 in c at the same 5000 ms). `[stack] heartbeat:` prints only when the high-water moves, which is why the later requests carry no stack line: 16972 B was still the high-water at 8 s. A single sample cannot tell a real difference from a transient of this size, which is why there are three.\n\nHAND-FILED, NOT RUNNER-WRITTEN, AND THE REASON IS A FINDING. `lp-cli validate record v3-boot --config silicon:esp32v3 --port … --image …` was run first and refused: `capture … never reached payload 'boot-idle''s sentinel '[stack] heartbeat: high-water'`. The classic's sentinel is elicited and the silicon driver has no sender — the arm's `host_script` is handed to `--uart0-script` on the EMULATED plan only (`driver.rs`), so on a board the request never goes out. The same run also SIGINTed espflash mid-write (1024 of 1283 chunks) at the default `--timeout-secs 120`, because the classic's 4 MB write alone takes 2 min 27 s over this cable and the sentinel clock starts at the flash; the image was re-written whole with `desk-flash-no-monitor.sh` before these captures. Both are items for M5 P6/P7. This sidecar is `d-desk-batch.md` §6's hand-filed fallback and is flagged as such rather than passed off as the runner's own.",
+  "trust": [
+    {
+      "class": "memory",
+      "grade": "measured",
+      "because": "the board is the ground truth; nothing models it"
+    },
+    {
+      "class": "timing",
+      "grade": "measured",
+      "because": "a real clock on real flash with real wait states"
+    },
+    {
+      "class": "boot-log",
+      "grade": "measured",
+      "because": "the real application printed these bytes over the real cable"
+    },
+    {
+      "class": "wire",
+      "grade": "measured",
+      "because": "real bytes over a real CH340K"
+    },
+    {
+      "class": "pin",
+      "grade": "modeled",
+      "because": "no instrument was on a pad in this capture"
+    }
+  ]
+}
