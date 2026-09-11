@@ -131,7 +131,10 @@ async function sha256(bytes) {
 /// `compiled` is an already-compiled `WebAssembly.Module` of the emulator;
 /// `elfBytes` are the staged firmware image's. Everything else is the row.
 export async function runOnce(o) {
-  const wasi = makeWasi(argsFor(o), o.image.elf, o.elfBytes);
+  // `o.env` is P6c's way to reach the emulator's environment-gated
+  // diagnostics from a wasm row (`LP_EMU_JIT_MMIO_CENSUS` and the rest).
+  // Absent on every row the page takes.
+  const wasi = makeWasi(argsFor(o), o.image.elf, o.elfBytes, o.env ?? {});
   const host = makeJitHost();
 
   const t0 = performance.now();
@@ -173,6 +176,10 @@ export async function runOnce(o) {
     framesSha256: await sha256(wasi.bytesAt(o.image.slug + '.jsonl')),
     uartBytes: wasi.bytesAt(o.image.slug + '.uart').length,
     tail: text.trim().split('\n').slice(-8).join('\n'),
+    // The whole of stdout+stderr, only when the caller asked for it (M7 P6c's
+    // `--dump`). Eight lines of tail is the right size for a bench table and
+    // the wrong size for a census the run printed 60 lines of.
+    fullText: o.keepText ? text : undefined,
   };
   if (r.instr) {
     r.ips = r.instr / (wallMs / 1000);

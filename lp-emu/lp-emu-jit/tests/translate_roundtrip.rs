@@ -17,7 +17,7 @@ use lp_emu_core::CycleModel;
 use lp_emu_core::arena::GuestArena;
 use lp_emu_jit::blocks::BlockSet;
 use lp_emu_jit::discover::discover;
-use lp_emu_jit::dispatch::{emit_module, target_table_bytes, write_target_tables};
+use lp_emu_jit::dispatch::{Selector, emit_module, target_table_bytes, write_target_tables};
 use lp_emu_jit::host::{
     self, EXCHANGE_CROSS, EXCHANGE_CYCLE, EXCHANGE_INDIRECT_MISS, EXCHANGE_INSTRET, EXCHANGE_LEN,
     EXCHANGE_REGS, HostOps, MMIO_OK, MmioLoad, MmioStore, PERM_ENTRIES, PERM_NONE, PERM_READ_WRITE,
@@ -1147,4 +1147,104 @@ fn one_ring(name: &str, regs: u32) {
 
 fn alloc_name(ring: &str, split: &str) -> String {
     format!("p6b-hop-{ring}-{split}")
+}
+
+/// **M7 P6c Q5: the two selector shapes retire identically.**
+///
+/// The outer selector is the one exported function and the only thing that
+/// knows a global block index is a `(sub-dispatcher, local index)` pair.
+/// [`Selector::Nested`] writes that as `count` nested blocks around a
+/// `br_table`, one direct `call` per arm — `O(count)` bytes, and at 8 blocks a
+/// function on `render-basic` t2 that is a 730,452-byte function which V8's
+/// optimizing tier answers with a fatal `Zone` OOM (P6b H5).
+/// [`Selector::Flat`] writes it as one `call_indirect` through a function
+/// table — `O(1)`, whatever the size knob says.
+///
+/// A shape change to the one function every cross-function edge routes
+/// through is only safe if the two forms are the same program. So: the same
+/// ring, the same block set, the same sizes, emitted both ways and run in
+/// wasmtime — same registers, same instructions retired, same cycles charged,
+/// same exit pc, same crosses, same imports called in the same order.
+///
+/// One block a function is in the list on purpose: that is where the two
+/// selectors are furthest apart in bytes (64 arms against one
+/// `call_indirect`) and where every single edge goes through the selector.
+#[test]
+fn the_two_selector_shapes_retire_identically() {
+    const N: u32 = 64;
+    const END: u64 = 400_000;
+    let program = hop_ring(N, 31);
+
+    for fn_blocks in [1usize, 8, 64] {
+        let mut nested_rig = Rig::new(&program);
+        let set = ring_set(&nested_rig, N);
+        let nested = nested_rig.run_split(
+            &format!("p6c-selector-nested-{fn_blocks}"),
+            &set,
+            Emit {
+                selector: Selector::Nested,
+                ..Emit::EVERYTHING
+            },
+            [0; 32],
+            END,
+            fn_blocks,
+        );
+
+        let mut flat_rig = Rig::new(&program);
+        let flat = flat_rig.run_split(
+            &format!("p6c-selector-flat-{fn_blocks}"),
+            &set,
+            Emit {
+                selector: Selector::Flat,
+                ..Emit::EVERYTHING
+            },
+            [0; 32],
+            END,
+            fn_blocks,
+        );
+
+        assert_eq!(
+            nested.regs, flat.regs,
+            "at {fn_blocks} blocks a function the two selectors compute different registers"
+        );
+        assert_eq!(
+            nested.instret, flat.instret,
+            "at {fn_blocks} blocks a function they retire different instruction counts"
+        );
+        assert_eq!(nested.cycle, flat.cycle, "at {fn_blocks}: different cycles");
+        assert_eq!(nested.pc, flat.pc, "at {fn_blocks}: different exit pc");
+        assert_eq!(nested.flags, flat.flags, "at {fn_blocks}: different flags");
+        assert_eq!(
+            nested.cross, flat.cross,
+            "at {fn_blocks}: the selector routes a different number of cross-function edges"
+        );
+        assert_eq!(
+            nested.indirect_miss, flat.indirect_miss,
+            "at {fn_blocks}: different indirect misses"
+        );
+        assert_eq!(nested.loads, flat.loads, "at {fn_blocks}: different loads");
+        assert_eq!(
+            nested.stores, flat.stores,
+            "at {fn_blocks}: different stores"
+        );
+        assert_eq!(
+            nested.escapes, flat.escapes,
+            "at {fn_blocks}: different escapes"
+        );
+        assert!(
+            nested.instret > 10_000,
+            "the stay has to be long enough to be worth comparing: {} instructions",
+            nested.instret
+        );
+        // At one block a function every edge in the ring is a cross, which is
+        // what makes this the selector's own test rather than a test of the
+        // sub-dispatchers' `br_table`.
+        if fn_blocks == 1 {
+            assert!(
+                flat.cross > 10_000,
+                "one block a function should cross on every edge: {} crosses",
+                flat.cross
+            );
+        }
+    }
 }

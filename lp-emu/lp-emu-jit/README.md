@@ -445,6 +445,230 @@ translated instruction in V8 — and a real run in which the module's time scale
 with instructions and not with entries, and in which the emulator's own wasm,
 not the translator's output, is the larger half.
 
+### The other half — where the emulator's own wasm goes (P6c)
+
+P6b established that the larger half of a translated run is **the emulator's
+own wasm**, and that nothing in the translator can move it. P6c profiled that
+half by Rust function. `render-basic` t2, node/V8, 5,500 ms emulated, 32 blocks
+a function, `scripts/emu/p6c-prof.mjs` (the `wasm32-wasip1` build's name
+section demangled through `rustfilt`, and every sample classified by its
+ancestry as well as its leaf, so the run's own translation work is not
+attributed to the bus):
+
+| bucket | ms | % run | % of the emulator's wasm |
+|---|---:|---:|---:|
+| **translation (emit/compile/install)** | 1,759.7 | 22.03 | 36.05 |
+| hart slice loop (`Esp32C6Machine::run_until`) | 798.7 | 10.00 | 16.36 |
+| entry path (`JitCore::run`) | 439.2 | 5.50 | 9.00 |
+| scheduler (`Scheduler::next_deadline`) | 351.1 | 4.40 | 7.19 |
+| MMIO dispatch (bus routing) | 301.7 | 3.78 | 6.18 |
+| pin fabric + LED strip | 212.5 | 2.66 | 4.35 |
+| interpreter (the 6.54 % remainder) | 165.2 | 2.07 | 3.38 |
+| entry index (two `BTreeMap` lookups) | 144.3 | 1.81 | 2.96 |
+| MMIO dispatch (host callback) | 134.6 | 1.69 | 2.76 |
+| other (emulator wasm) | 120.4 | 1.51 | 2.47 |
+| peripheral: RMT | 104.6 | 1.31 | 2.14 |
+| allocator + runtime | 86.3 | 1.08 | 1.77 |
+| translation (emit, off `install`'s stack) | 83.6 | 1.05 | 1.71 |
+| peripheral: SYSTIMER | 57.3 | 0.72 | 1.17 |
+| peripheral: GPIO/IO_MUX | 55.5 | 0.70 | 1.14 |
+| peripheral: INTMTX/INTPRI | 51.5 | 0.64 | 1.05 |
+| WASI I/O | 10.6 | 0.13 | 0.22 |
+| peripheral: other / TIMG / UART0 | 5.9 | 0.07 | 0.12 |
+| **total** | **4,881.3** | **61.11** | **100.00** |
+
+**Two things this overturns.** The peripherals are not the story — every
+peripheral model together is 275 ms, 3.4 % of the run. And **22 % of a
+`render-basic` run is the emulator translating itself**: three translation
+events, `wasm_encoder::Instruction::encode` the second-hottest function in the
+process. That is JD20's boot cost, and it is the single largest bucket in the
+emulator's half.
+
+### The MMIO census: it is SYSTIMER, and nothing else is close
+
+`LP_EMU_JIT_MMIO_CENSUS=1` counts every MMIO operation translated code issues,
+by peripheral, register and guest pc. `render-basic` t2, 32 blocks a function:
+**14,663,423 operations** (10,390,586 loads, 4,272,837 stores) over 1,046
+distinct registers and 794 distinct guest pcs — one MMIO operation per 34.6
+translated instructions.
+
+| peripheral | operations | share |
+|---|---:|---:|
+| **SYSTIMER** | **11,626,419** | **79.29 %** |
+| RMT | 1,808,592 | 12.33 % |
+| PLIC_MX | 440,006 | 3.00 % |
+| INTERRUPT_CORE0 | 251,535 | 1.72 % |
+| TIMG0 | 210,714 | 1.44 % |
+| (unmapped) | 158,016 | 1.08 % |
+| USB_DEVICE | 51,079 | 0.35 % |
+| everything else together | 117,062 | 0.80 % |
+
+and three registers are 79.3 % of the whole census:
+
+| register | operations | share |
+|---|---:|---:|
+| `SYSTIMER+0x0044 unit0_value.lo` | 4,704,617 | 32.08 % |
+| `SYSTIMER+0x0004 unit0_op` | 4,599,074 | 31.36 % |
+| `SYSTIMER+0x0040 unit0_value.hi` | 2,322,728 | 15.84 % |
+
+with five consecutive guest pcs — `0x420804d6`, `0x420804d8`, `0x420804e0`,
+`0x420804e4`, `0x420804e6` — issuing 79.3 % of all MMIO between them. That is
+one `SystemTimer::now()` sequence: latch `unit0_op`, read `hi`, read `lo`.
+
+**The ladder's two named suspects are not it.** The RMT refill is 12.33 % and
+the UART0 TX-FIFO poll is **0.06 %** (8,254 operations in a whole run).
+
+### The module's time in a real run, against the same module replayed
+
+P6b measured 1.35 ns per translated instruction replaying windows, and 9.96 ns
+in a real run at 64 blocks a function — a 7× gap nobody had explained. It is
+not a constant: it is a **function of how big the emitted functions are**.
+Four `node --cpu-prof` runs of the same image, same stage, same bound:
+
+| blocks/fn | largest body | the module's ms | ns per translated instruction | warm replay, same sizes | ratio |
+|---:|---:|---:|---:|---:|---:|
+| 8 | 40,685 B | 2,301.9 | **4.54** | 2.004 | 2.26× |
+| 16 | 52,098 B | 2,259.9 | **4.45** | 1.811 | 2.46× |
+| 32 | 74,598 B | 2,608.2 | **5.14** | 1.626 | 3.16× |
+| 64 | 140,530 B | 3,432.4 | **6.76** | 1.698 | 3.98× |
+
+and the emulator's own wasm is **flat at 5.17–5.22 s** across all four, which
+is the control: the size knob moves the module's time and nothing else's.
+
+The cold-against-warm test says the same thing from the other side.
+`jit-image-bench.mjs` replays one recording and reports the first pass beside
+the steady state:
+
+| blocks/fn | first pass (cold) | steady (warm) | cold ÷ warm |
+|---:|---:|---:|---:|
+| 8 | 2.370 | 2.004 | 1.18× |
+| 16 | 2.440 | 1.811 | 1.35× |
+| 32 | 3.448 | 1.626 | 2.12× |
+| 64 | 8.976 | 1.698 | **5.29×** |
+
+**So the gap is the working set, and it is bounded by the function size.** A
+window replay runs the same few thousand entries over and over: one small,
+hot, fully-tiered slice of a 65 MB module. A real run walks 201,244 blocks
+across the whole of it. Both halves of the gap shrink together as the
+functions shrink — which is the same direction DD20 moved the default for
+entirely separate reasons — and about **2.3× of it survives at 8 blocks a
+function**, unexplained by size.
+
+### What a module-side entry is made of (P6c Q4)
+
+`scripts/emu/p6c-jsc-entry.mjs` is a ladder of five modules, each the previous
+one plus one thing, all exporting the real selector's signature:
+
+| rung | node/V8 ns | bun/JSC ns |
+|---|---:|---:|
+| A the JS→wasm call boundary | 2.09 | 4.35 |
+| B + the selector's six locals | 25.13 | 7.18 |
+| C + the exchange prologue | 25.24 | 8.07 |
+| D + `call_indirect` into a 46-local body | 24.90 | 9.41 |
+| E + the 31-register reload and write-back | **24.95** | **11.28** |
+
+Rung E is a whole entry that retires no guest instruction, so it is the floor
+under every real entry. **In JSC that floor is 11.28 ns against a measured
+module-side entry of 329 ns** — the entry protocol is 3.4 % of it. The
+selector's prologue, the locals and the register traffic together cost 6.9 ns
+in JSC and 0.2 ns in V8, and none of them is the lever the brief expected.
+
+What the 318 ns remainder *is* tracks the module, not the protocol: on one
+recording, `p6b-entry-split.mjs` in bun reads **385.4 ns per entry at 64
+blocks a function and 196.4 ns at 8** (56.3 ns of harness in both, measured
+with `P6B_NO_RUN=1`) — the same entries, the same guest work, the same import
+answers, halved by the size knob alone.
+
+(V8's rung A is 2.09 ns because V8 inlines a small wasm body into optimized
+JS. Every rung carries one memory load so that no rung is a constant; without
+it the bare rung read 4.6 ns against 60 ns for every rung above it.)
+
+### The selector's shape, and V8's low-end wall (P6c Q5)
+
+P5's selector is `count` nested `block`s around a `br_table`, one direct
+`call` per arm — **O(count)** bytes, and `count` is `blocks / fn_blocks`, so
+the selector grows as the size knob shrinks. At 8 blocks a function on
+`render-basic` t2 that is a **730,452-byte function**, and V8's optimizing
+tier answers it with `FatalProcessOutOfMemory: Zone` in `WasmLoweringPhase`,
+from a background compile job no `install` retry can catch.
+
+`Selector::Flat` is one `call_indirect` through a function table with one
+entry per sub-dispatcher. In the same block set it is **152 bytes at every
+size**:
+
+| blocks/fn | sub-dispatchers | largest sub-dispatcher | nested selector (P6b) | flat selector |
+|---:|---:|---:|---:|---:|
+| 8 | 19,318 | 40,685 B | 730,452 B | **152 B** |
+| 16 | 9,659 | 52,098 B | 351,947 B | **152 B** |
+| 32 | 4,830 | 74,598 B | 175,855 B | **152 B** |
+| 64 | 2,415 | 140,530 B | 87,823 B | **152 B** |
+
+**It removes the wall outright.** V8 runs 8 and 16 blocks a function, which it
+could not before, and 16 is where it is fastest.
+
+`Emitted` now reports `max_sub_body_bytes` and `selector_bytes` beside a
+`max_body_bytes` that is the larger of the two, so `BODY_BUDGET` — the check
+that lets `install` refuse a module and retry smaller — sees the selector. It
+did not before, and below 64 blocks a function the selector was the module's
+largest function.
+
+### Where 3× would have to come from
+
+The milestone asks for **3× real time**: 5,500 ms emulated in **1,833 ms** of
+wall clock. The best this desk has produced is **7.64 s (0.720×)** —
+`render-basic` t2, node/V8, 16 blocks a function, flat selector, best of three
+interleaved repeats at load 10.7–14.8. The decomposition below is the profiled
+run of that same configuration (8,056.2 ms attributed, load 11.7), which is
+4.40× off the target.
+
+| where the wall clock goes | ms | % run | ÷4.40 (its share of 1,833 ms) | the lever, if there is one |
+|---|---:|---:|---:|---|
+| **the translated modules** | 2,259.9 | 28.05 | 514 | smaller functions (4.45 ns/instr at 16 against 6.76 at 64); the 2.3× that survives is unexplained |
+| **translation (emit + install)** | 2,058.4 | 25.55 | 468 | JD20. Three events a run; incremental `fence.i` translation is M7b's |
+| hart slice loop (`run_until`) | 744.8 | 9.25 | 169 | the slice cap is 8,192 cycles and 34.4 % of exits are budget exits |
+| entry path (`JitCore::run`) | 438.0 | 5.44 | 100 | 7,865,280 entries; `after_store` alone is 53.2 % of exits |
+| scheduler (`next_deadline`) | 426.2 | 5.29 | 97 | called per slice, not per entry |
+| MMIO dispatch (routing + callback) | 405.7 | 5.04 | 92 | 14.66 M operations, 79.3 % of them SYSTIMER |
+| the JavaScript rig (host, WASI shim) | 374.8 | 4.65 | 85 | the import boundary |
+| peripherals, all of them together | 277.0 | 3.44 | 63 | **not a lever** — 3.4 % of the run |
+| pin fabric + LED strip | 222.8 | 2.77 | 51 | per RMT refill |
+| entry index (two `BTreeMap` lookups) | 201.5 | 2.50 | 46 | one of the two exists only to feed a counter (P6b) |
+| garbage collector | 189.0 | 2.35 | 43 | the 65 MB module byte vectors |
+| interpreter (the 6.54 % remainder) | 161.7 | 2.01 | 37 | coverage is 93.46 % |
+| other (emulator wasm) | 152.8 | 1.90 | 35 | — |
+| allocator + runtime | 118.5 | 1.47 | 27 | — |
+| WASI I/O, idle, program | 25.2 | 0.31 | 6 | — |
+| **total** | **8,056.2** | **100** | **1,833** | |
+
+**What the arithmetic says, before any lever is argued.**
+
+1. **No single bucket reaches it.** Delete *all* translation — a perfect
+   incremental `fence.i`, boot for free — and the run is 5,997.8 ms, **0.917×**.
+2. **Nor do the two largest together.** Delete translation *and* every
+   instruction of translated code, and the run is 3,737.9 ms, **1.47×**.
+3. **The emulator's own steady-state wasm is the binding constraint.** With
+   translation taken out it is 3,251.8 ms. Even at zero module, zero rig, zero
+   GC, that alone is **1.69×**. So the emulator's own non-translation wasm has
+   to fall by **1.78×** before 3× is arithmetically reachable at all, whatever
+   happens to the translator.
+4. **The peripherals are not where to look.** Every peripheral model together
+   is 277 ms, 3.4 % of the run — and the SYSTIMER that answers 79.3 % of all
+   MMIO is 80.1 ms of it.
+
+**So 3× is a whole-machine number, not a translator number.** The four
+candidates it would have to be assembled from, in the order their measured
+size puts them:
+
+| candidate | what it is worth here | measured by |
+|---|---:|---|
+| incremental `fence.i` translation | up to 2,058 ms (25.6 %) | this table; JD20 |
+| the module's remaining 2.3× over a warm replay | up to ~1,250 ms (15.5 %) | the cold/warm table above |
+| the exit rules (`after_store` is 53.2 % of exits, buying 0.68 instructions each) | up to ~830 ms of entry path + hart loop | P6b's census |
+| the slice loop and the scheduler, which run per slice and not per entry | 1,171 ms (14.5 %) | this table |
+
+All four, taken in full, are 5,309 ms of 8,056 — **2.94×**, and every one of
+them is an upper bound that assumes the work disappears rather than shrinks.
+
 ### Indirect targets, in O(1), across functions
 
 Every guest **return** is a `jalr`, and P3 left the module at every one of

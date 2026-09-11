@@ -72,8 +72,9 @@ use alloc::vec::Vec;
 
 use lp_emu_core::CycleModel;
 use wasm_encoder::{
-    BlockType, CodeSection, EntityType, ExportKind, ExportSection, Function, FunctionSection,
-    ImportSection, Instruction as I, MemArg, MemoryType, Module, TypeSection, ValType,
+    BlockType, CodeSection, ConstExpr, ElementSection, Elements, EntityType, ExportKind,
+    ExportSection, Function, FunctionSection, ImportSection, Instruction as I, MemArg, MemoryType,
+    Module, RefType, TableSection, TableType, TypeSection, ValType,
 };
 
 use crate::blocks::BlockSet;
@@ -102,6 +103,49 @@ pub const MAX_FUNCTION_BODY: usize = 7_654_321;
 /// per block — and an engine's refusal arrives as a compile error a hundred
 /// kilobytes into a body rather than as a number anybody can plan against.
 pub const BODY_BUDGET: usize = MAX_FUNCTION_BODY / 5 * 4;
+
+/// The outer selector's shape. M7 P6c Q5.
+///
+/// The selector is the one exported function and the only thing that knows a
+/// global block index is a `(sub-dispatcher, local index)` pair. There are two
+/// ways to write "call sub-dispatcher number `fidx`" in WebAssembly, and until
+/// P6c only one of them had been measured.
+///
+/// [`Nested`](Self::Nested) is P5's: a `br_table` inside `count` nested
+/// `block`s, each arm computing the local index and making a **direct** call.
+/// Every arm is about 20 bytes and there is one per sub-dispatcher, so the
+/// selector is **O(count)** — and `count` is `blocks / fn_blocks`, so the
+/// selector grows as the size knob shrinks. At 8 blocks a function on
+/// `render-basic` t2 that is **730,452 bytes and 25,156 nested blocks**, and
+/// V8's optimizing tier answers it with `Fatal process out of memory: Zone`
+/// in `WasmLoweringPhase`, from a background compile job no `install` retry
+/// can catch (P6b H5). It is the reason V8's usable window has a floor at all.
+///
+/// [`Flat`](Self::Flat) is one `call_indirect` through a function table with
+/// one entry per sub-dispatcher: **O(1)** in `count`, whatever the size knob
+/// says. It costs a table section, an element segment, and an engine-side
+/// signature check on every cross-function edge the selector routes.
+///
+/// Both produce the same guest behaviour by construction — the same arguments
+/// reach the same function, and `tests/translate_roundtrip.rs` asserts the two
+/// forms retire identically under wasmtime.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Selector {
+    /// `count` nested blocks and a direct call. O(count) bytes.
+    Nested,
+    /// One `call_indirect` through a function table. O(1) bytes.
+    Flat,
+}
+
+impl Selector {
+    /// What [`Emit::EVERYTHING`](crate::translate::Emit::EVERYTHING) uses.
+    ///
+    /// **[`Flat`](Self::Flat) since M7 P6c**, on the measurement in that
+    /// phase's report: it removes V8's low-end wall outright (the selector
+    /// stops being the module's largest function at any size) and it is not
+    /// slower than the nested form in either engine at the sizes both can run.
+    pub const DEFAULT: Self = Self::Flat;
+}
 
 /// One `i32` per 16 KiB page of the whole 32-bit guest space.
 pub const PAGEMAP_ENTRIES: u32 = 1 << (32 - PERM_SHIFT);
@@ -268,7 +312,16 @@ pub fn emit_module(
         escaped_insts += escaped;
         bodies.push(f);
     }
-    let max_body_bytes = bodies.iter().map(Function::byte_len).max().unwrap_or(0);
+    // The selector is built here rather than at the code section, because it
+    // is a function body like any other and `max_body_bytes` has to be able to
+    // see it. M7 P6b found that it could not: `emit_module` measured the
+    // sub-dispatchers and not the one function that grows as they shrink, so
+    // the budget check below had a blind spot at exactly the sizes where the
+    // selector is the largest function in the module.
+    let sel = selector(count, chunk, layout, policy.selector);
+    let max_sub_body_bytes = bodies.iter().map(Function::byte_len).max().unwrap_or(0);
+    let selector_bytes = sel.byte_len();
+    let max_body_bytes = max_sub_body_bytes.max(selector_bytes);
 
     let mut module = Module::new();
 
@@ -332,16 +385,48 @@ pub fn emit_module(
     funcs.function(4);
     module.section(&funcs);
 
+    // The flat selector's own table: one funcref per sub-dispatcher, in
+    // sub-dispatcher order, so the table index IS the function index the
+    // nested form branches on. Declared with its maximum pinned to its
+    // initial size — nothing grows it, and an engine that knows the bound can
+    // fold the bounds check.
+    //
+    // Note it is table **0** of this module and has nothing to do with the
+    // emulator's own `__indirect_function_table`: an emitted module has no
+    // tables at all otherwise, and imports none.
+    if policy.selector == Selector::Flat {
+        let mut tables = TableSection::new();
+        tables.table(TableType {
+            element_type: RefType::FUNCREF,
+            minimum: count as u64,
+            maximum: Some(count as u64),
+            table64: false,
+            shared: false,
+        });
+        module.section(&tables);
+    }
+
     let selector_index = F_FIRST_BODY + count as u32;
     let mut exports = ExportSection::new();
     exports.export(ENTRY_FUNC, ExportKind::Func, selector_index);
     module.section(&exports);
 
+    if policy.selector == Selector::Flat {
+        let mut elements = ElementSection::new();
+        let fns: Vec<u32> = (0..count as u32).map(|j| F_FIRST_BODY + j).collect();
+        elements.active(
+            Some(0),
+            &ConstExpr::i32_const(0),
+            Elements::Functions(Cow::Owned(fns)),
+        );
+        module.section(&elements);
+    }
+
     let mut codes = CodeSection::new();
     for f in &bodies {
         codes.function(f);
     }
-    codes.function(&selector(count, chunk, layout));
+    codes.function(&sel);
     module.section(&codes);
 
     Emitted {
@@ -350,12 +435,14 @@ pub fn emit_module(
         escaped_insts,
         functions: count,
         max_body_bytes,
+        max_sub_body_bytes,
+        selector_bytes,
     }
 }
 
 /// The outer selector: the one export, and the only thing that knows a global
 /// block index is a `(function, local index)` pair.
-fn selector(count: usize, chunk: usize, layout: Layout) -> Function {
+fn selector(count: usize, chunk: usize, layout: Layout, shape: Selector) -> Function {
     let locals = alloc::vec![
         (1, ValType::I32), // next
         (1, ValType::I64), // the sub-dispatcher's result
@@ -410,21 +497,9 @@ fn selector(count: usize, chunk: usize, layout: Layout) -> Function {
     }
     e(I::LocalSet(S_FIDX));
 
-    e(I::Block(BlockType::Empty)); // $sel
-    for _ in 0..=last {
-        e(I::Block(BlockType::Empty));
-    }
-    e(I::Block(BlockType::Empty)); // $tbl
-    e(I::LocalGet(S_FIDX));
-    let table: Vec<u32> = (1..=(last as u32 + 1)).collect();
-    e(I::BrTable(Cow::Owned(table), 0));
-    e(I::End);
-    // A function index the host invented. Unreachable by construction — the
-    // index came out of this very block set — and said so rather than papered
-    // over, exactly as the inner dispatcher's default arm is.
-    e(I::Unreachable);
-    for j in 0..=last {
-        e(I::End);
+    // The local index and the five stay arguments, which both shapes push in
+    // the same order onto the same six-parameter signature (type 3).
+    let args = |e: &mut dyn FnMut(I<'static>)| {
         // local = next % chunk
         e(I::LocalGet(S_NEXT));
         if pow2 {
@@ -439,11 +514,47 @@ fn selector(count: usize, chunk: usize, layout: Layout) -> Function {
         e(I::LocalGet(P_END));
         e(I::LocalGet(P_WATCH_LO));
         e(I::LocalGet(P_WATCH_HI));
-        e(I::Call(F_FIRST_BODY + j as u32));
-        e(I::LocalSet(S_RET));
-        e(I::Br((last - j) as u32));
+    };
+
+    match shape {
+        // O(1) in `count`: the function index is a table index, and one
+        // `call_indirect` is the whole dispatch. No `$sel` block, no per-arm
+        // block, no `br_table`.
+        Selector::Flat => {
+            args(&mut e);
+            e(I::LocalGet(S_FIDX));
+            e(I::CallIndirect {
+                type_index: 3,
+                table_index: 0,
+            });
+            e(I::LocalSet(S_RET));
+        }
+        // O(count): one nested block and one direct call per sub-dispatcher.
+        Selector::Nested => {
+            e(I::Block(BlockType::Empty)); // $sel
+            for _ in 0..=last {
+                e(I::Block(BlockType::Empty));
+            }
+            e(I::Block(BlockType::Empty)); // $tbl
+            e(I::LocalGet(S_FIDX));
+            let table: Vec<u32> = (1..=(last as u32 + 1)).collect();
+            e(I::BrTable(Cow::Owned(table), 0));
+            e(I::End);
+            // A function index the host invented. Unreachable by construction
+            // — the index came out of this very block set — and said so rather
+            // than papered over, exactly as the inner dispatcher's default arm
+            // is.
+            e(I::Unreachable);
+            for j in 0..=last {
+                e(I::End);
+                args(&mut e);
+                e(I::Call(F_FIRST_BODY + j as u32));
+                e(I::LocalSet(S_RET));
+                e(I::Br((last - j) as u32));
+            }
+            e(I::End); // $sel
+        }
     }
-    e(I::End); // $sel
 
     // The counters come back the way they go out at an exit (JD17): through
     // the exchange area, which the sub-dispatcher's epilogue has just
@@ -609,6 +720,111 @@ mod tests {
             );
             assert_eq!(split.native_insts, one.native_insts);
             assert_eq!(split.escaped_insts, one.escaped_insts);
+        }
+    }
+
+    /// **The budget's other end** (M7 P6b finding 2, landed in P6c).
+    ///
+    /// `BODY_BUDGET` exists so `install` can refuse a module and retry at a
+    /// smaller size. It is checked against `Emitted::max_body_bytes`, and
+    /// until P6c that number was the largest *sub-dispatcher* — which is the
+    /// module's largest function only while the sub-dispatchers are big. Make
+    /// them small enough and the **selector** takes over: P6b measured
+    /// 730,452 B of selector against a 40,244 B largest sub-dispatcher at 8
+    /// blocks a function on `render-basic` t2, and the check saw the 40,244.
+    ///
+    /// So: at one block per function on a ladder big enough to matter, assert
+    /// the two numbers have crossed, and that `max_body_bytes` is the
+    /// selector rather than the sub-dispatcher. Without the fix this test
+    /// fails on its last assertion — `max_body_bytes` would be the small
+    /// number.
+    #[test]
+    fn the_body_budget_counts_the_selector_too() {
+        let set = ladder(0x4200_0000, 8_000);
+
+        let nested = emit_module(
+            &set,
+            CycleModel::Esp32C6,
+            layout(),
+            Emit {
+                selector: Selector::Nested,
+                ..Emit::EVERYTHING
+            },
+            1,
+        );
+        assert_eq!(nested.functions, 8_000);
+        assert!(
+            nested.selector_bytes > nested.max_sub_body_bytes,
+            "at one block a function the nested selector ({} B) was supposed to be larger than \
+             the largest sub-dispatcher ({} B) — if it is not, this test has stopped testing \
+             anything",
+            nested.selector_bytes,
+            nested.max_sub_body_bytes
+        );
+        assert_eq!(
+            nested.max_body_bytes, nested.selector_bytes,
+            "`max_body_bytes` has to be the largest body in the module, and here that is the \
+             selector ({} B), not the largest sub-dispatcher ({} B)",
+            nested.selector_bytes, nested.max_sub_body_bytes
+        );
+
+        // And the flat selector is the reason the low end is usable at all:
+        // one `call_indirect` is the same handful of bytes whether it routes
+        // to eight functions or to eight thousand.
+        let flat = emit_module(
+            &set,
+            CycleModel::Esp32C6,
+            layout(),
+            Emit {
+                selector: Selector::Flat,
+                ..Emit::EVERYTHING
+            },
+            1,
+        );
+        assert_eq!(flat.functions, nested.functions);
+        assert_eq!(flat.max_sub_body_bytes, nested.max_sub_body_bytes);
+        assert!(
+            flat.selector_bytes < nested.selector_bytes / 100,
+            "the flat selector is O(1) in the function count and the nested one is O(count); at \
+             8,000 functions they were {} B and {} B",
+            flat.selector_bytes,
+            nested.selector_bytes
+        );
+        assert_eq!(
+            flat.max_body_bytes, flat.max_sub_body_bytes,
+            "with the flat selector the largest body is a sub-dispatcher again"
+        );
+    }
+
+    /// The two selector shapes emit the same guest work at every size — same
+    /// sub-dispatchers, same instruction counts — and differ only in the one
+    /// function that routes between them.
+    ///
+    /// That the flat form *runs* is
+    /// `tests/translate_roundtrip.rs::the_two_selector_shapes_retire_identically`,
+    /// which needs an engine and so cannot live here.
+    #[test]
+    fn the_two_selector_shapes_differ_only_in_the_selector() {
+        let set = ladder(0x4200_0000, 600);
+        for fn_blocks in [1usize, 8, 32, 600] {
+            let [nested, flat] = [Selector::Nested, Selector::Flat].map(|selector| {
+                emit_module(
+                    &set,
+                    CycleModel::Esp32C6,
+                    layout(),
+                    Emit {
+                        selector,
+                        ..Emit::EVERYTHING
+                    },
+                    fn_blocks,
+                )
+            });
+            assert_eq!(flat.functions, 600usize.div_ceil(fn_blocks));
+            assert_eq!(flat.functions, nested.functions);
+            assert_eq!(flat.native_insts, nested.native_insts);
+            assert_eq!(flat.escaped_insts, nested.escaped_insts);
+            assert_eq!(flat.max_sub_body_bytes, nested.max_sub_body_bytes);
+            assert!(flat.native_insts > 0);
         }
     }
 

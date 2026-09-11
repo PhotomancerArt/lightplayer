@@ -244,14 +244,22 @@ build_obj="$(jq -n --arg sha "$build_sha" --arg short "$build_short" --arg branc
 # in #678 and #680 was taken at, and 20 s is the longer bound a lazily tiering
 # engine's steady state needs to show.
 #
-# `fnBlocksChoices` stops at 256 deliberately: V8's optimizing tier dies with
-# `Fatal process out of memory: Zone` in `WasmLoweringPhase` at 512 blocks a
-# function and every size above, AFTER the module compiles and instantiates
-# (#680). 256 is the largest size every engine measured runs optimized.
+# `fnBlocksChoices` is bounded at BOTH ends by the same fatal V8 OOM, and the
+# reasons are mirror images of each other. Above 256: `Fatal process out of
+# memory: Zone` in `WasmLoweringPhase` at 512 blocks a function and every size
+# above, AFTER the module compiles and instantiates (#680) — the largest
+# function there is a sub-dispatcher. Below 32: the same OOM, from a background
+# compile job, because the largest function there is the outer SELECTOR
+# (730 KB and 25,156 nested blocks at 8, against 176 KB at 32) — P6b. A browser
+# tab cannot catch either one, so neither end is offered here.
+#
+# `defaults.fnBlocks` is 32 because `DEFAULT_JIT_FN_BLOCKS` is (DD20, P6c): the
+# page's default and the emulator's default are the same number or the page
+# lies about what a default run does.
 jq -n --argjson images "$manifest_images" --argjson build "$build_obj" \
     '{images: $images, grades: ["t1", "t2"], repeats: 1, build: $build,
-      defaults: {mode: "jit", fnBlocks: 256, timeout: "5500ms", wallTimeout: 600, exitOn: false},
-      fnBlocksChoices: [64, 128, 256],
+      defaults: {mode: "jit", fnBlocks: 32, timeout: "5500ms", wallTimeout: 600, exitOn: false},
+      fnBlocksChoices: [32, 64, 128, 256],
       timeoutChoices: ["5500ms", "20s"],
       modeChoices: ["jit", "interp"]}' >"$stage_dir/manifest.json"
 

@@ -119,6 +119,13 @@ pub struct Emit {
     pub memory: bool,
     /// `jal`, `jalr` and the conditional branches.
     pub control: bool,
+    /// The outer selector's shape — see [`crate::dispatch::Selector`].
+    ///
+    /// Not an instruction class, and on this struct anyway because `Emit` is
+    /// already the emission policy every caller threads through
+    /// [`crate::dispatch::emit_module`], and a second parameter would be a
+    /// signature change at six call sites to carry one bool.
+    pub selector: crate::dispatch::Selector,
 }
 
 impl Emit {
@@ -128,12 +135,14 @@ impl Emit {
         alu: false,
         memory: false,
         control: false,
+        selector: crate::dispatch::Selector::DEFAULT,
     };
     /// Everything the translator knows how to emit.
     pub const EVERYTHING: Self = Self {
         alu: true,
         memory: true,
         control: true,
+        selector: crate::dispatch::Selector::DEFAULT,
     };
 }
 
@@ -147,10 +156,33 @@ pub struct Emitted {
     pub escaped_insts: usize,
     /// Sub-dispatchers, not counting the outer selector.
     pub functions: usize,
-    /// The largest sub-dispatcher body, in bytes. The number the wasm
-    /// function-size limit applies to, and the reason a module is sized by
-    /// blocks-per-function rather than by blocks (JD8, JD26).
+    /// The largest body in the module, in bytes — **the selector included**.
+    /// The number the wasm function-size limit applies to, and the reason a
+    /// module is sized by blocks-per-function rather than by blocks (JD8,
+    /// JD26).
+    ///
+    /// Until M7 P6c this was the largest *sub-dispatcher*, which is the same
+    /// number only when the sub-dispatchers are the big functions. Below 64
+    /// blocks a function they are not: P6b measured the nested selector at
+    /// 730,452 B against a largest sub-dispatcher of 40,244 B at 8 blocks a
+    /// function, so [`crate::dispatch::BODY_BUDGET`] — the check that lets
+    /// `install` refuse a module and retry smaller — had a blind spot at
+    /// exactly the sizes where the selector is the module's largest function.
     pub max_body_bytes: usize,
+    /// The largest **sub-dispatcher** body, in bytes — what `max_body_bytes`
+    /// alone used to mean. Kept because the two numbers diverging is the
+    /// signal that the selector has taken over as the module's largest
+    /// function, and a report that prints only the maximum cannot say which
+    /// of the two it is.
+    pub max_sub_body_bytes: usize,
+    /// The outer selector's own body, in bytes.
+    ///
+    /// `O(count)` with [`crate::dispatch::Selector::Nested`] and `O(1)` with
+    /// [`crate::dispatch::Selector::Flat`], and `count` is
+    /// `blocks / fn_blocks` — so with the nested form this grows as the size
+    /// knob shrinks, in the opposite direction to
+    /// [`max_sub_body_bytes`](Self::max_sub_body_bytes).
+    pub selector_bytes: usize,
 }
 
 impl Emitted {
