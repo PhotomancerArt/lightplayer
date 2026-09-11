@@ -29,10 +29,20 @@ the build's tests rather than a boot at cycle 400,000.
 |---|---|---|---|
 | `esp32c6_rev0_rom.elf` | ESP32-C6, revision 0 | 489,768 | 3,876 symbol-table entries; the only chip plan one needs |
 | `esp32_rev300_rom.elf` | Classic ESP32, revision 3 | 857,500 | `EM_XTENSA`, `ET_EXEC`, entry `0x4000_0400`; 39 `PT_LOAD`s, one per vector |
+| `esp32s3_rev0_rom.elf` | ESP32-S3, revision 0 | 949,552 | `EM_XTENSA`, `ET_EXEC`, entry `0x4000_0400`, `e_flags = 0x300`; 44 `PT_LOAD`s, 7,404 symbol-table entries. Vendored by plan three's M6 P01 |
 
-The S3 arrives with plan three's M6; the release tarball carries seventeen
-chips and we vendor only what code loads. Adding one is one line in `WANTED`
-in the fetch script, then re-running it.
+The release tarball carries seventeen chips and we vendor only what code
+loads. Adding one is one line in `WANTED` in the fetch script, then re-running
+it.
+
+**The S3 is here before its machine is.** M6 P01 vendors it so the milestone's
+one unanswerable question — the S3's flash-MMU table address, entry count and
+page-size encoding, which is in no PAC and in no metadata crate — can be read
+out of the ROM's own `Cache_*` disassembly rather than guessed from the
+classic's or from a datasheet paragraph
+(`docs/reports/2026-09-11-esp32s3-firmware-inventory.md` §8). The in-process
+digest test arrives with the machine crate's own `tests/rom_vendoring.rs`;
+until then `--check` is the assertion.
 
 **The classic is here at one revision.** `esp32_rev0_rom.elf` is in the same
 tarball and is deliberately not vendored (plan three, decision Q2): the desk
