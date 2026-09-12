@@ -447,8 +447,23 @@
                                     "run `just studio-emu-sidecar`)",
                             );
                         }
+                        // The module imports `emu_host`: since M7 P7 the wasm
+                        // build installs a translated core by default, so the
+                        // Worker needs the JS host too or the instance does
+                        // not link. It is hashed separately from the module
+                        // (different bytes, different cadence), so the
+                        // manifest names both and neither is derived from the
+                        // other.
+                        const jitHostUrl = assets?.emu_jit_host_js;
+                        if (!jitHostUrl) {
+                            throw new Error(
+                                "this build ships an emulator module with no JS host " +
+                                    "(pkg/engine-manifest.json has no emu_jit_host_js; " +
+                                    "run `just studio-emu-sidecar`)",
+                            );
+                        }
                         const tab = await import("/lpa-link/emulator_tab.js");
-                        tabBacking = tab.tabBacking({ moduleUrl });
+                        tabBacking = tab.tabBacking({ moduleUrl, jitHostUrl });
                         options.backing = tabBacking;
                     }
                     const bus = await shim.createBus(httpBase, options);
