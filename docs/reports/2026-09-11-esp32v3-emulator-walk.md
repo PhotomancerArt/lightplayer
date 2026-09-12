@@ -196,6 +196,12 @@ The replay's own verdict, which is a failure **on purpose**:
     memory field stack-heartbeat[45280].headroom differs: 28788 vs 28308
 ```
 
+⚠️ Read that "memory 2 compared" carefully: the replay comparator's series for
+this payload are the stack pair, so **the +84 B is not the replay's to fail
+on**. It is pinned by `v3_replays.rs`'s own field-by-field test, which parses
+both `[MEM]` lines and asserts `used` is exactly 18,284 against 18,200 and
+`free` moves exactly 84 the other way. Two mechanisms, both exact.
+
 Nothing is masked and no threshold is widened. Both gaps are pinned to their
 exact values and **a move in either direction fails**, including a move that
 closes one: a gap that closed is a finding to be re-read, not a test that
@@ -278,23 +284,41 @@ cost model: it is DD40's gap, where before the app reprograms the PLL the
 guest's notion of the clock rate and ours differ — visible in the bootloader's
 timings and in nothing after them.
 
-### CCOUNT is recorded, and gated by nothing at all
+### How wrong it is, in the two places that measured it
 
-The `cycle-probe` payload reads the classic's CCOUNT across four kernels. Its
-160 figures are **recorded in the transcript and compared by no gate**: they
-are the future grade's input, not a claim about milliseconds. What the desk
-sitting did establish about them is worth writing down, because it is a
-silicon fact rather than a model's: **240 cycles per microsecond**, and
-`iram_loop == flash_loop` on silicon — the flash cache hides the difference on
-a hot loop.
+`lp-cli validate replay`, emulated against silicon, same commit, same bytes:
+
+| | emulator (`t1`) | silicon | ratio |
+|---|---:|---:|---:|
+| `shader-compile-stress` total `build_us` | 70,979 | 272,835 | **0.26×** |
+| its worst single slice, `worst_slice_us` | 2,304 | 20,626 | **0.11×** |
+| `cycle-probe[0].cycles` (the first sample) | 18 | 2,910 | **0.01×** |
+| `cycle-probe[1..4].cycles` (steady state) | 18 | 33 | **0.55×** |
+
+Read the sign before the size. **On the classic the emulator reports fewer
+microseconds than silicon takes**, which is the opposite direction from the
+C6's record — there, `t1` spent about 4.2× silicon's cycles. Two chips, two
+signs, one grade name. Anybody building a budget on either number is building
+it on the wrong thing.
+
+`cycle-probe` also shows exactly *what* is unmodelled at `t1`: the first
+sample costs silicon 2,910 cycles and the next four cost 33, because the first
+one pays the flash cache's cold fill. The emulator charges 18 for all five.
+And what the desk sitting established about the counter itself is worth
+keeping, because it is a silicon fact rather than a model's: **240 cycles per
+microsecond**, and `iram_loop == flash_loop` once the loop is hot.
+
+Those 160 CCOUNT figures are **recorded in the transcript and compared by no
+gate**. They are the future grade's input, not a claim about milliseconds.
 
 ### And the memory columns are identical
 
 `shader-compile-stress` carries both halves in one file: **188 timing
-comparisons differ and 372 memory comparisons are equal, all of them.** One
-transcript, one pair of columns — the memory is silicon's and the clock is
-not. That is the whole argument for where the gates were moved and where they
-were not.
+comparisons differ and 372 memory comparisons are equal, all of them** —
+`mem_before_free`, `mem_before_used`, `mem_after_free` and `mem_after_used`,
+92 samples each, ratio 1.00× on every one. One transcript, one pair of
+columns: the memory is silicon's and the clock is not. That is the whole
+argument for where the gates were moved and where they were not.
 
 
 ## 4. The heap gates now read from the emulator
