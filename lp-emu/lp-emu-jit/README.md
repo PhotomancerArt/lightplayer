@@ -267,7 +267,14 @@ every call a translated module makes is wasm→wasm with no JS frame on it.
 | `jit_mmio_load`, `jit_mmio_store`, `jit_step_one` | exports of the emulator's wasip1 module (`host_browser`) |
 | `jit_table_probe`, `jit_table_selftest` | the entry-encoding round trip, run once at wiring time |
 | `emu_host.jit_compile`, `emu_host.jit_release` | the **only** two JS imports, called once per translation event |
-| `scripts/emu/bench-web/jit-host.js` | the JS half, as one importable ES module |
+| `js/jit-host.js` (in this crate) | the JS half, as one importable ES module |
+
+**Where it lives (M7 P9, DD63).** `lp-emu/lp-emu-jit/js/jit-host.js` — beside
+the translator that emits what it runs, not in `scripts/emu/bench-web/`, where
+it sat while the bench rig was its only consumer. It is the **single source**:
+`scripts/emu/bench-web.sh` stages a copy into the rig directory, and the
+emulator-in-a-tab lane syncs its own copy under a content hash. Neither copy is
+the original.
 
 **How a second Worker uses it.** `jit-host.js` exports `makeJitHost()` and
 nothing else it needs to be told about. Instantiate the emulator with
@@ -1547,6 +1554,14 @@ Everything under `lp-emu/` is **MIT** (`../LICENSE-MIT`) while the rest of the
 repository is AGPL-3.0-or-later, and `just lint-emu-fence` is what keeps the
 boundary real. See `docs/adr/2026-09-06-lp-emu-home-and-mit-fence.md`.
 
+- **`js/jit-host.js` is MIT too, and its own header says so.**
+  `just lint-emu-fence` polices the *crate graph* — what a `Cargo.toml` inside
+  the fence may depend on — so a loose `.js` file is invisible to it. A file
+  inside `lp-emu-jit/` carries the crate's MIT posture, and the way that is
+  made real for a file the linter cannot see is a licence line in the file's
+  own header. DD63 moved it here from `scripts/emu/bench-web/`, where the
+  surrounding tree is AGPL, for exactly this reason as well as for
+  single-sourcing.
 - The only default dependency outside the fence is **`wasm-encoder`**
   (Apache-2.0 WITH LLVM-exception) — a permissive byte emitter, not a compiler.
 - **`wasmtime`** is optional, behind the `host-wasmtime` feature, never a
