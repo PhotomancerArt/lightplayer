@@ -392,11 +392,52 @@ party that knows what wall time is, and it converts on its own side of the
 wall. A tab that was hidden and throttled therefore falls *behind* — which is
 honest, and reportable as a number — rather than resuming with a sprint.
 
-The module declares eighteen `wasi_snapshot_preview1` imports and, on this
+The module declares nineteen `wasi_snapshot_preview1` imports and, on this
 path, **calls exactly one**: `clock_time_get`, which is `run_until`'s
 unconditional `Instant::now()`. It cannot influence a slice that carries no
 wall timeout. The rest are there because the binary also has a `_start` that
-reads files and arguments, and the host stubs them.
+reads files and arguments, and the host stubs them. The nineteenth,
+`path_create_directory`, arrived with the translated-core default below: a
+profile session calls `create_dir_all`, and only a `--jit-record` or
+`--profile` command line reaches one.
+
+#### The JIT seam: `emu_host`, and which core a board runs
+
+The wasm build installs a **translated core by default**
+(`machine::TRANSLATED_BY_DEFAULT = cfg!(target_family = "wasm")`), so the
+module declares two more imports, in the namespace **`emu_host`** —
+`jit_compile(ptr, len, base, timings) -> i32` and `jit_release(idx)` — and
+**an instantiation that does not supply them fails at link time**. There is no
+config key that vetoes the core: `--interpreter` is a CLI flag, and the tab
+ABI's grammar above has no equivalent (asking for one would be a new lp-emu
+seam, not a host-side choice).
+
+So the host is attached, unconditionally, and the pieces are:
+
+- `makeJitHost()` from `jit-host.js` supplies the two imports; everything
+  else on the seam is wasm→wasm, against this module's own `jit_mmio_load`,
+  `jit_mmio_store`, `jit_step_one`, `jit_poll` and its linear memory.
+- `host.attach(instance)` runs **before `emu_create`** — the tab never calls
+  `_start`, so that is the moment "before anything drives the machine". It
+  grows the module's exported `__indirect_function_table`, writes
+  `jit_table_probe` into a slot, and asks `jit_table_selftest` to reach it by
+  index. A wrong answer throws there rather than trapping later inside a
+  64 MB module.
+- the build therefore links with `--export-table` and `--growable-table`, and
+  `scripts/emu/build-tab-wasm.sh` verifies the table and the six `jit_*`
+  exports by name.
+
+**Which core a board actually runs is decided by `boot`.** A translated core
+is installed at build time only for `boot=direct`; `boot=rom-up` keeps
+translation off, because the mask ROM and the second-stage bootloader copy
+code into RAM and jump into it without ever emitting a `fence.i`, so neither
+translation event can see what they published. A rom-up board interprets for
+its whole life and its host serves zero translation events. That is worth
+knowing before reading a `dilation` number off one: measured in node on this
+desk (2026-09-11, `scripts/emu/tab-dilation.mjs`), the mask ROM's boot runs at
+**0.48×** real time interpreted and the same code **0.24×** translated, and a
+blank chip's `invalid header` spin at **0.36×** interpreted. Neither number is
+a constant and nothing asserts one.
 
 #### Why no `_initialize`
 
@@ -423,6 +464,14 @@ console without a firmware image.
 `lp_emu_esp32c6-<hash>.wasm`, naming it in `pkg/engine-manifest.json` under
 `emu_esp32c6_wasm`. Its **absence is not an error**: no key, and a Studio
 build that never ran `just emu-c6-wasm` serves normally without an emulator.
+
+It travels with its JS host: the same script copies `jit-host.js` beside it as
+`jit-host-<hash>.js` under the key `emu_jit_host_js`, and the two keys appear
+and disappear together — a served module with no host is a board that cannot
+instantiate. The host is never hand-copied into `public/lpa-link/`;
+`scripts/emu/jit-host-source.sh` is the one place that knows where the file
+lives, and it refuses a re-export shim (the file is moving, and a shim's
+relative import would point at nothing once copied).
 
 The consumer is `lp-app/lpa-studio-web/public/lpa-link/emulator_worker.js`,
 which is AGPL and on the other side of the MIT fence — it reaches this module
