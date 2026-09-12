@@ -289,10 +289,18 @@ export async function runOnce(o) {
 
   // Before `_start`, and it throws rather than returns: an engine whose table
   // entry mechanism does not hold must not be measured, it must be reported.
+  //
+  // UNCONDITIONAL since M7 P7 (fixed here, P9). The wasm build's core IS the
+  // translator now — `lp-emu-jit` is a non-optional dependency of the
+  // `wasm32-wasip1` target — so every instance needs a host, including an
+  // `interp` row: that row passes `--interpreter`, which vetoes the translated
+  // core from inside the emulator, and it is the ARGUMENT that selects the
+  // interpreter, never the absence of a seam. Gating this on `mode === 'jit'`
+  // left an interp row holding an instance whose `jit_compile` import was
+  // never wired, which is a trap waiting on any build that decides to
+  // translate anyway.
   let selftest = null, selftestError = null;
-  if (o.mode === 'jit') {
-    try { selftest = host.attach(inst); } catch (e) { selftestError = String((e && e.message) || e); }
-  }
+  try { selftest = host.attach(inst); } catch (e) { selftestError = String((e && e.message) || e); }
   const t1 = performance.now();
 
   let exit = 0, trap = null;

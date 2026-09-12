@@ -1590,10 +1590,40 @@ depends on this binary starting fast.
 an identical everything — it is the free oracle, it costs nothing to run, and
 it is the way back from the flip.
 
+**ROM-up boots do not translate, and that is not a detail** (DD19,
+`tests/jit_default.rs` rule 4). `BootMode::RomUp` — the mask ROM and the
+second-stage bootloader out of a merged flash image, which is the closer twin
+of flashing and resetting a board — keeps translation **off entirely**, because
+that path publishes code without ever emitting a `fence.i` and there is
+nothing to hang the invalidation rule on. So an embedding whose boards are all
+ROM-up **still interprets after the flip**, and the default change buys it
+nothing: every emulated board in Studio-in-a-tab is ROM-up today. ROM-up
+translation is its own piece of work and it is last (DD19); it belongs to the
+emulator-loop milestone, not to M7.
+
+### Embedding the wasm module
+
 An embedder of the wasm module that never calls `jitHost.attach(instance)` now
 fails at boot with `no JS host is wired to this instance` rather than quietly
 interpreting, and that is deliberate: after the flip, a silently interpreted
 run is a measurement nobody can tell apart from the control.
+
+The module imports **two namespaces**:
+
+- `wasi_snapshot_preview1` — **19 functions** as of M7 P7, which is one more
+  than before it: `path_create_directory` joined the list. An embedder's shim
+  must implement exactly what the module declares, so a shim written against
+  the old list fails to instantiate with a `LinkError` naming the one missing
+  function. The full set is `args_get`, `args_sizes_get`, `clock_time_get`,
+  `environ_get`, `environ_sizes_get`, `fd_close`, `fd_fdstat_get`,
+  `fd_fdstat_set_flags`, `fd_filestat_get`, `fd_prestat_dir_name`,
+  `fd_prestat_get`, `fd_read`, `fd_write`, `path_create_directory`,
+  `path_filestat_get`, `path_open`, `proc_exit`, `random_get`, `sock_accept`.
+  `scripts/emu/bench-web/wasi-shim.js` is a working one.
+- `emu_host` — exactly **two**: `jit_compile` and `jit_release`, called once
+  per translation event and never on a hot path.
+  `lp-emu/lp-emu-jit/js/jit-host.js` provides both, and it is the single
+  source every embedding copies from.
 
 | flag | what it does |
 |---|---|
@@ -1648,7 +1678,6 @@ rest of the run reports:
 | `LP_EMU_JIT_SPLIT_CENSUS=1` | with `--interpreter --blockprof`: what an incremental module would hold at each `fence.i`, and how often the run's control flow would cross the boundary that creates (M7b P1) |
 | `LP_EMU_JIT_SPLIT_CENSUS=writable` | the same census against the **writable/read-only** boundary, which is the one the shipped split actually draws |
 | `LP_EMU_SLICE_CENSUS=1` | what bounds each hart slice and what its boundary does (M7b P4). Not a translated-code diagnostic: the slice loop is the same loop with `--interpreter`, and the census answers for either |
-| `LP_EMU_JIT_BLOCK_ORDER=adjacency` | lay the block set out by a depth-first trace of its own edges instead of by guest address, so the two layouts can be A/B'd on one image and one recording (M7b P5). **Exact either way** — a global block index is a position in the set and nothing the guest can see is a function of it — and asserted so under wasmtime |
 | `LP_EMU_JIT_EMIT_DIAG=no-perm,no-budget` | ⚠️ **emit a deliberately WRONG translation** so that what it left out can be priced (M7b P5, BD7). `no-perm` replaces the two permission-table byte loads at every load and store with the constant `PERM_READ_WRITE`, so every access takes the RAM path — MMIO included. `no-budget` drops the per-block cycle-budget check, so a stay runs past the end of its slice. A run that sets either prints a banner saying its transcript is not the guest's. Nothing it produces is evidence of anything but speed |
 
 `--exit-on` stops at the **end of the line** the match is on, not at the

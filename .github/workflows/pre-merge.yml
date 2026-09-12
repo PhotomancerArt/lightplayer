@@ -1234,6 +1234,53 @@ jobs:
       - name: Emulator C6 boot tests + replays
         run: cd lp2025 && just test-emu-c6-boot
 
+      # **The differential oracle, tier (b)** (M7 JD14, ruled by JD23): the
+      # same binary, the same pinned image, `--jit` against `--interpreter`,
+      # and five readings compared byte for byte — UART0, the `stopped after`
+      # line, a 20 ms MMIO+interrupt trace, stdout, and stderr with the
+      # interpreter's own block-cache counters masked (they MUST differ, and
+      # the raw diff is printed rather than tolerated).
+      #
+      # **BOUNDED, and the bound is a decision rather than a trim.** One
+      # image, one grade, a 20 ms `--trace` window — the shape the M7 director
+      # pre-ruled. The cost is almost entirely cranelift: on an M2 Max the
+      # whole cell is 32.9 s wall of which 29.9 s is compiling the emitted
+      # module, so a shorter window saves nothing and a second cell costs
+      # another whole compile. The `harness` image is the cell because its ELF
+      # is 1.1 MB against the render pair's 9.2 MB — 47 k blocks rather than
+      # 184 k, ~30 s of cranelift rather than ~110 s — while still covering
+      # BOTH translation events, the incremental `fence.i` retranslation,
+      # 95.31 % coverage and a 201,545-line trace.
+      #
+      # What it does not cover, said plainly here so nobody reads more into a
+      # green: the render loop, the RMT, and therefore the frame path. Those
+      # are `scripts/emu/jit-identity-image.sh render-basic t2 5500ms` and
+      # `scripts/emu/oracle-sweep.sh` locally; at ~110 s of cranelift per
+      # translation event neither fits this job's budget beside everything
+      # else it already builds.
+      #
+      # The release build with `--features jit` is the other half of the cost
+      # and it is new to this job: wasmtime and cranelift are an optional
+      # dependency that nothing else in CI compiles (which is also why the
+      # Lint job now runs `clippy-emu-jit`). sccache covers it after the first
+      # run on main.
+      #
+      # **MEASURED on this runner, 2026-09-12** (PR #729, head 62ab9403e,
+      # against main c74d2429d's own run): this step is **185 s**, build
+      # included, and the job went 15m21s -> 16m32s against a 35-minute
+      # budget. (The other two steps happened to come in faster on this run —
+      # `--verify` 108 -> 91 s and the boot suite 715 -> 674 s — so the job's
+      # +71 s understates the step; 185 s is the number to plan against.)
+      # Note also that main's own emu-c6 run is 15m21s rather than the ~12 min
+      # the 2026-09-08 split predicted; the budget is still headroom, but less
+      # of it than the comment above assumes.
+      #
+      # It never skips. A binary built without the feature refuses `--jit`
+      # outright, and the script turns that into a named failure — a
+      # self-comparison would pass and prove nothing.
+      - name: Translated vs interpreted, one pinned image (differential oracle)
+        run: cd lp2025 && just test-emu-jit-image harness t2 20ms
+
       - name: sccache stats
         if: always()
         shell: bash

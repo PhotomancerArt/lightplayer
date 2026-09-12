@@ -267,7 +267,14 @@ every call a translated module makes is wasm→wasm with no JS frame on it.
 | `jit_mmio_load`, `jit_mmio_store`, `jit_step_one` | exports of the emulator's wasip1 module (`host_browser`) |
 | `jit_table_probe`, `jit_table_selftest` | the entry-encoding round trip, run once at wiring time |
 | `emu_host.jit_compile`, `emu_host.jit_release` | the **only** two JS imports, called once per translation event |
-| `scripts/emu/bench-web/jit-host.js` | the JS half, as one importable ES module |
+| `js/jit-host.js` (in this crate) | the JS half, as one importable ES module |
+
+**Where it lives (M7 P9, DD63).** `lp-emu/lp-emu-jit/js/jit-host.js` — beside
+the translator that emits what it runs, not in `scripts/emu/bench-web/`, where
+it sat while the bench rig was its only consumer. It is the **single source**:
+`scripts/emu/bench-web.sh` stages a copy into the rig directory, and the
+emulator-in-a-tab lane syncs its own copy under a content hash. Neither copy is
+the original.
 
 **How a second Worker uses it.** `jit-host.js` exports `makeJitHost()` and
 nothing else it needs to be told about. Instantiate the emulator with
@@ -954,12 +961,14 @@ used to say "layout beyond that ordering is deliberately not optimised: no
 measurement yet says it matters". It does not matter, and now that is a
 measurement.
 
-`blocks::adjacency_order` is a depth-first trace layout: each block followed
-by the successor it runs into (fall-through, then the taken branch, then a
-call's own body), a new trace started only when the current one meets a block
-already placed. `LP_EMU_JIT_BLOCK_ORDER=adjacency` selects it.
-`render-basic` t2, 5,500 ms, `p6b-rows.mjs`, interleaved, best-of-3, **one
-invocation per engine**, UART0 `2407828f80684331` on all twenty-four rows:
+The candidate was a depth-first **trace layout**: each block followed by the
+successor it runs into (fall-through, then the taken branch, then a call's own
+body), a new trace started only when the current one meets a block already
+placed. M7b P5 implemented it behind `LP_EMU_JIT_BLOCK_ORDER=adjacency`,
+measured it, and **M7 P9 removed it and its plumbing (DD58)** — the numbers
+below are why, and they are what is kept. `render-basic` t2, 5,500 ms,
+`p6b-rows.mjs`, interleaved, best-of-3, **one invocation per engine**, UART0
+`2407828f80684331` on all twenty-four rows:
 
 | engine | blocks/fn | address | trace layout | change |
 |---|---:|---:|---:|---:|
@@ -985,14 +994,22 @@ literally nothing. A depth-first walk that also chases `jal` targets pulls
 callees out of their address neighbourhood and breaks those runs up. **A
 layout policy has nothing to win here and 6.2 % of crosses to lose.**
 
-The switch is kept, off, because the answer is worth more than the code costs
-(one environment read per install, three installs a run) and because deleting
-it would leave only a sentence where there is now a number. Every exit-census
-row is identical between the two layouts, the eight-cell free oracle is `same`
-on all five readings under the trace layout, and
-`translate_roundtrip.rs::a_trace_layout_retires_identically_to_address_order`
-asserts it under wasmtime at 1, 8 and 64 blocks a function: **a layout is a
-permutation of the set and nothing else the guest can see.**
+**The switch is gone (M7 P9, DD58).** P5 kept it off-by-default on the
+argument that the answer was worth the code; P9 took the opposite view, which
+is the standing one for a measured-and-rejected candidate: the number belongs
+in this file, the losing implementation does not belong in the emitter. What
+came out is `blocks::adjacency_order`, its `successors` walk, `BlockOrder`,
+`BlockSet::permuted`, the `LP_EMU_JIT_BLOCK_ORDER` reader and the three
+install sites that consulted it — about 400 lines. The block set is the order
+`discover` produces, which is guest address order, and nothing chooses.
+
+While it existed it was proved exact, and that is worth recording because it
+is what makes the verdict a verdict and not a suspicion: every exit-census row
+was identical between the two layouts, the eight-cell free oracle read `same`
+on all five readings under the trace layout, and a round-trip test asserted
+the two retire identically under wasmtime at 1, 8 and 64 blocks a function.
+**A layout is a permutation of the set and nothing else the guest can see** —
+the trace layout was not wrong, it was slower.
 
 ### What the replay harness was getting wrong (P5)
 
@@ -1512,6 +1529,70 @@ import and an exactness argument the size of P2's. Not built.
   goes through the configured allocator, so the host instantiates a one-memory
   shim and imports that.
 
+## What the milestone measured, and how to take a row
+
+**M7 closed at the floor**, by Yona's ruling at G-M7B. The bar was 1× real
+time as a floor, **1.5× to pass and 3× as the target**, at `render-basic` t2
+on an iPhone 16 Pro Max.
+
+**The phone**, 5.5 s emulated, 8 blocks a function, on the M7b P4 head (M7 P7
+measured neutral, so this is the closing number):
+
+| row | the three presses | best |
+|---|---|---:|
+| translated, 8/fn | 0.851 / 0.972 / 1.025 | **1.025×** |
+| translated, 16/fn | 0.882 / 0.918 / 0.943 | 0.943× |
+| `--interpreter` | 0.589 / 0.611 / 0.586 | 0.611× |
+| same-press translated ÷ interpreter | 1.44 / 1.59 / 1.75 | **1.75×** |
+
+So **about 1.0× of real time and about 1.75× of the emulator's own
+interpreter**. The pass bar is not met; the target is not met. The desk on the
+same head reads ≈0.98–1.00× in node/V8 at 16 blocks a function and
+≈0.79–0.82× in bun/JSC at 8. The ladder on the desk in V8 at 16/fn across
+M7b: 0.720 → 0.842 (P1) → 0.854 (P2) → 0.902 (P3) → 0.971 (P4) → ≈0.98 (P5).
+
+Why 3× was not reachable from here, in one line: with translation removed
+entirely the emulator's **own** steady-state wasm is 1.69× on its own, so the
+emulator's loop would have to get 1.78× faster before 3× is arithmetically
+possible. That is the next milestone's brief, not this crate's.
+
+And per image — because `render-basic` is not the whole story (node/V8, 16/fn,
+5,500 ms, one invocation per image, best of three, t2):
+
+| image | translated | `--interpreter` | ratio | mean stay |
+|---|---:|---:|---:|---:|
+| `harness` | 3.062× | 1.143× | **2.68×** | 1354.0 |
+| `boot-idle-memfs` | 2.808× | 5.293× | **0.53×** | 43.7 |
+| `render-basic` | 0.990× | 0.557× | 1.78× | 68.9 |
+| `render-rocaille` | 1.166× | 0.673× | 1.73× | 30.0 |
+
+**A translated core wins where stays are long and loses where they are short
+or where the run is too small to amortize its own translation.** That is the
+77-instruction measurement at the top of this file, showing up as a whole
+image rather than as a region.
+
+### Taking a phone row (DD41)
+
+The phone moved ±10 % on its translated rows and **25 %** on its interpreter
+row within one afternoon on one device — warm-up in one direction, thermal
+throttling in the other. So a row is only a row if it is taken this way:
+
+1. **Best of at least three presses, spaced by minutes.** Presses taken within
+   a minute of each other fall across the board, the interpreter included,
+   which is the device and not the code.
+2. **Quote the sequence, not only the best.** A best-of with no spread beside
+   it hides the thing that matters most about it.
+3. **The cross-session number is the same-press ratio** — translated ÷
+   interpreter from the *same* press — because it divides the thermal state
+   out. Quote it beside the absolute.
+4. **A phase's bar is the desk proxy, not the phone** (Q4 at G-M7B): `bun` at
+   8 blocks a function and `node` at 16, interleaved, **one invocation**, best
+   of N, load average quoted. The phone confirms direction, not the third
+   decimal.
+5. **Check the build stamp.** `bench-web.sh` refuses to stage an `emu.wasm`
+   older than HEAD, because the manifest stamps HEAD's sha at staging time and
+   M7b P5 lost an A/B to two "different" builds that were the same bytes.
+
 ## What this crate is not
 
 Not an emulator, not a host, and not a policy. It owns no bus, no machine and no
@@ -1547,6 +1628,14 @@ Everything under `lp-emu/` is **MIT** (`../LICENSE-MIT`) while the rest of the
 repository is AGPL-3.0-or-later, and `just lint-emu-fence` is what keeps the
 boundary real. See `docs/adr/2026-09-06-lp-emu-home-and-mit-fence.md`.
 
+- **`js/jit-host.js` is MIT too, and its own header says so.**
+  `just lint-emu-fence` polices the *crate graph* — what a `Cargo.toml` inside
+  the fence may depend on — so a loose `.js` file is invisible to it. A file
+  inside `lp-emu-jit/` carries the crate's MIT posture, and the way that is
+  made real for a file the linter cannot see is a licence line in the file's
+  own header. DD63 moved it here from `scripts/emu/bench-web/`, where the
+  surrounding tree is AGPL, for exactly this reason as well as for
+  single-sourcing.
 - The only default dependency outside the fence is **`wasm-encoder`**
   (Apache-2.0 WITH LLVM-exception) — a permissive byte emitter, not a compiler.
 - **`wasmtime`** is optional, behind the `host-wasmtime` feature, never a

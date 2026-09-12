@@ -2178,6 +2178,31 @@ fmt-check:
 clippy-host:
     cargo clippy --workspace --exclude lps-builtins-emu-app --exclude fw-esp32c6 --exclude fw-esp32s3 --exclude fw-esp32v3 --exclude fw-emu --exclude lp-riscv-emu-guest-test-app --exclude lp-riscv-emu-guest --exclude lp-xt-fp-harness --exclude lp-gfx-wgpu --exclude fw-browser --exclude naga-wasm-poc -- --no-deps -D warnings
 
+# `lp-emu-esp32c6` with the `jit` feature on — the native translated build.
+#
+# `clippy-host`'s `--workspace` compiles every member at its DEFAULT features,
+# and `jit` is not one: it is off natively (JD9/JD24 — the interpreter is the
+# native default, because wasmtime pays 130-220 s of cranelift over these
+# images and every CI job depends on the native binary starting fast). So the
+# whole `--features jit` half of `lp-emu-esp32c6` — `jit.rs`, the wasmtime
+# host, `jit_record`, the `--jit*` arm of the CLI — was invisible to the lint
+# gate. It sat RED for about a month before M7 P4 tripped over it by hand, and
+# M7b F4 made it green again; this is what stops the third time.
+#
+# `--all-targets`, so the crate's own tests and benches are linted under the
+# feature too, which is where the first red was.
+#
+# It costs the Lint job a cranelift build. That is the price of the feature
+# being lintable at all: nothing else in CI compiles it, and a feature no gate
+# compiles is a feature that rots. See G-M7B' Q3.
+#
+# **MEASURED, 2026-09-12**: the `Lint` step (`just check-lint`) went 304 s on
+# main c74d2429d to 405 s on PR #729 — **+101 s** — and the Lint job 5m47s to
+# 7m19s against its 25-minute budget. Locally it is 40.5 s wall / 261 s user
+# on an M2 Max at load 2.78.
+clippy-emu-jit:
+    cargo clippy -p lp-emu-esp32c6 --features jit --all-targets -- --no-deps -D warnings
+
 # The wgpu-tree workspace members excluded from clippy-host.
 clippy-gfx:
     cargo clippy -p lp-gfx-wgpu -p fw-browser -p naga-wasm-poc -- --no-deps -D warnings
@@ -2285,7 +2310,7 @@ check-studio-core-minimal:
 clippy-rv32-emu-guest-test-app: install-rv32-target
     cd lp-emu/lp-riscv-emu-guest-test-app && cargo clippy --target {{ rv32_target }} --release -- --no-deps -D warnings
 
-clippy: clippy-host clippy-rv32
+clippy: clippy-host clippy-emu-jit clippy-rv32
 
 clippy-fix:
     cargo clippy --fix --allow-dirty --allow-staged
@@ -2838,6 +2863,63 @@ test-emu-jit-engines:
         --features host-wasmtime --test translate_roundtrip
     node scripts/emu/jit-engine-check.mjs target/jit-cases
     bun scripts/emu/jit-engine-check.mjs target/jit-cases
+
+# **The differential oracle, tier (a)** — M7 JD14, as a TOOL rather than a gate
+# (JD23). The front door P9's brief names; `test-emu-jit-engines` is its
+# engine half and stays runnable on its own.
+#
+# What it proves: the SAME module bytes, run against the SAME recorded import
+# answers, produce the same thing in three engines — wasmtime (which asserted
+# them), V8 and JavaScriptCore, the phone's family. Per case that is the exit
+# pc, both counters, the flags the host reads, every architectural register,
+# the import call order, and the memory granules an escaped instruction's
+# interpreter wrote between entries. The granule diff is not an optimisation:
+# without it a replay runs translated code against memory the real run never
+# had, and the spike's first replay diverged at entry 21 for exactly that
+# reason and not because anything was wrong.
+#
+# It also runs the crate's whole suite under `host-wasmtime`, which is the
+# only way the guard-trap suite runs at all. `cargo test --workspace` at
+# default features compiles both engine suites to NOTHING — see
+# `tests/engine_suites_present.rs`, which is in the default path and says so
+# by name rather than letting a green run be read as an engine agreeing.
+#
+# ⚠️ **The image-scale form of this is not here, and the reason is measured.**
+# `--jit-record` + `scripts/emu/jit-image-bench.mjs --check-only` is the same
+# per-entry comparison over a whole-image module, and M7 P9 could not make it
+# a committed fixture or a recipe: a `render-basic` recording is a 76 MB
+# `module.wasm` and a 24 MB `memory.bin` beside 67 KB of entries, so it cannot
+# be checked in; and a recording can only be taken AFTER the `fence.i` (no
+# entry into translated code happens before it on these images), by which time
+# the published-read fast path is armed and the replay diverges on its first
+# pass — the limit M7b P5 documented, follow-up F5. The `--check-only` flag is
+# in place for the day F5 lands.
+test-emu-jit-identity: test-emu-jit-engines
+    cargo test -p lp-emu-jit --features host-wasmtime
+
+# **The differential oracle, tier (b)** — the CI gate (JD23): one binary, one
+# pinned image, `--jit` against `--interpreter`, five readings compared byte
+# for byte.
+#
+# Bounded on purpose to ONE image, ONE grade and a 20 ms `--trace` window, and
+# the bound is the whole cost question: cranelift is 97 % of the wall time
+# here (29.9 s of 32.9 s on an M2 Max for the `harness` image), so a shorter
+# window buys nothing and a second cell costs another whole compile. The
+# `harness` image is the cell because its ELF is 1.1 MB against the render
+# pair's 9.2 MB — 47 k blocks instead of 184 k, so ~30 s of cranelift instead
+# of ~110 s — and it still covers BOTH translation events, the incremental
+# `fence.i` retranslation, 95 % coverage and a 200 k-line trace.
+#
+# What it does NOT cover, said plainly: the render loop, the RMT and therefore
+# the frame path. Those are `just test-emu-jit-image render-basic t2 5500ms`
+# locally and `scripts/emu/oracle-sweep.sh` across two binaries; neither is
+# affordable in the `emu-c6` job's budget.
+#
+# Needs `--features jit` (wasmtime). It never skips: a binary without the
+# feature refuses `--jit` and the script says which build is missing.
+test-emu-jit-image slug="harness" grade="t2" window="20ms":
+    cargo build --release -p lp-emu-esp32c6 --features jit
+    ./scripts/emu/jit-identity-image.sh {{ slug }} {{ grade }} {{ window }}
 
 # `lp-cli emu serve`'s WebSocket door: the registry, the two endpoints, the
 # coupling rule, `reset`, and the upload walk over `serial:ws://…` landing

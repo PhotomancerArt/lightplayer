@@ -1,6 +1,19 @@
 // The JS half of the browser seam: what an emulator instance needs so the
 // translator inside it can run its own output in the engine hosting it.
 //
+// **Lives at `lp-emu/lp-emu-jit/js/jit-host.js`** (M7 P9, DD63), beside the
+// crate that emits the modules it runs — not in `scripts/emu/bench-web/`,
+// where it sat while the bench rig was its only consumer. It is the SINGLE
+// SOURCE: the bench rig stages a copy (`scripts/emu/bench-web.sh`) and the
+// emulator-in-a-tab lane syncs a copy under a content hash. Neither is the
+// original; edit this file.
+//
+// **Licence: MIT**, as a unit with the rest of `lp-emu/`
+// (`lp-emu/LICENSE-MIT`), and NOT the workspace's AGPL-3.0-or-later.
+// `just lint-emu-fence` polices the crate graph rather than loose files, so
+// this line is what carries the posture for a `.js` file inside the fence.
+// See `docs/adr/2026-09-06-lp-emu-home-and-mit-fence.md`.
+//
 // **This module is the product, not the rig.** JD25 makes Studio's `?on=emu`
 // worker import exactly this file, so it knows nothing about the bench page,
 // takes no options it does not need, and does no I/O. Using it is three steps:
