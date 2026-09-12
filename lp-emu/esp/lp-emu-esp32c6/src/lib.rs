@@ -57,11 +57,11 @@ pub mod image;
 pub mod intmatrix;
 /// The translated core, behind the optional `jit` feature. See its own docs
 /// for why the glue lives here and not in `lp-emu-jit`.
-#[cfg(feature = "jit")]
+#[cfg(any(feature = "jit", target_family = "wasm"))]
 pub mod jit;
 /// Recording a translated core's own work, so another wasm engine can replay
 /// it — the shape JD26's sizing numbers are measured through.
-#[cfg(feature = "jit")]
+#[cfg(any(feature = "jit", target_family = "wasm"))]
 pub mod jit_record;
 pub mod loader;
 pub mod lockstep;

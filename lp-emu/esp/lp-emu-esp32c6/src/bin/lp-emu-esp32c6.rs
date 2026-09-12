@@ -211,12 +211,21 @@ OPTIONS:
                             instruction. The translator's identity oracle,
                             and the same promise --no-block-cache makes:
                             every byte of every transcript must be the same
-                            either way
+                            either way. In a wasm build this is how you get
+                            the interpreter at all; it is supported forever
+                            and is the way back from the default (M7 JD15)
     --jit                   discover the whole image, translate it, and run
                             it through the host's wasm engine. Translation
                             happens at exactly two events: image load and
-                            each guest `fence.i`. Needs a build with
-                            `--features jit`; off by default (M7 JD18)
+                            each guest `fence.i`.
+                            **In a wasm build this is the default and the
+                            flag is a no-op alias** (M7 P7): the browser's
+                            own engine is the core, and --interpreter is the
+                            way back. NATIVELY the interpreter is still the
+                            default (JD9) and this is the opt-in; it needs a
+                            build with `--features jit`, because wasmtime
+                            costs minutes of cranelift over these images and
+                            is never a default dependency (JD18)
     --jit-escape-all        with --jit: emit NO guest semantics at all and
                             hand every instruction to the interpreter through
                             the escape hatch. Complete, correct and slow, and
@@ -418,7 +427,6 @@ fn run() -> Result<ExitCode, String> {
         .translate(!args.interpreter)
         .jit_report(args.jit_report)
         .blockprof(args.blockprof)
-        .jit(args.jit)
         .jit_escape_all(args.jit_escape_all)
         .strict_grade(args.strict_grade)
         .strict_grade_blocks(args.strict_grade_blocks.clone())
@@ -438,6 +446,15 @@ fn run() -> Result<ExitCode, String> {
         .tx_log(args.tx_log.clone())
         .strip(args.strip.order, args.strip.timing);
 
+    // `--jit` only ever turns translation ON. The builder's own default is
+    // `TRANSLATED_BY_DEFAULT` — a core in the wasm build, the interpreter
+    // natively (M7 P7) — so `.jit(args.jit)` would have *cleared* the wasm
+    // default on every run that did not repeat the flag. On wasm this branch
+    // is therefore a no-op and `--jit` is the documented alias; natively it is
+    // still the opt-in that JD9 leaves it as.
+    if args.jit {
+        builder = builder.jit(true);
+    }
     if let Some(blocks) = args.jit_blocks {
         builder = builder.jit_blocks(blocks);
     }
@@ -1230,11 +1247,27 @@ fn report(machine: &mut Esp32C6Machine, outcome: &Outcome) {
             machine.fence_i_count(),
         ),
     }
+    // M7 P7: a run that asked for nothing still says what ran it.
+    //
+    // The wasm build's core is the translator now, so a default run is the
+    // product run — and JD20 ("the boot cost is a product number, reported not
+    // buried") and JD10 ("the escape hatch is not allowed to be unmeasured")
+    // are claims about *that* run, not about an opted-in diagnostic. One line,
+    // the same counters `--jit-report` prints in full, and silence when there
+    // is no core: `--interpreter`, a `rom-up` boot, or a native build.
+    //
+    // Not a second report path, and not printed twice: a run that asked for
+    // `--jit-report` gets the long form below **instead** of this.
+    if !machine.jit_report()
+        && let Some(line) = machine.translated_core_summary()
+    {
+        eprintln!("jit: {line}");
+    }
     if machine.jit_report() {
         // One line, on every `--jit-report` run, whether or not a core ran
         // (M7 JD20 wants the boot cost and the escape-hatch rate reported,
-        // not buried). Nothing installs a core before M7 P3, so today this
-        // says so rather than printing nothing at all.
+        // not buried). A run with no core says so rather than printing
+        // nothing at all.
         match machine.translated_core_report() {
             Some(line) => eprintln!("jit: {line}"),
             None => eprintln!(
