@@ -1028,6 +1028,13 @@ clippy-fw-esp32v3:
     # mismatch — precisely the moment a rotted diagnostic costs the most.
     echo "clippy: --features frame-dump"
     cargo clippy --profile release-esp32v3 --features frame-dump -- --no-deps -D warnings
+    # `bench_render_loop` is additive too — the shipped boot with a seeded
+    # filesystem and a bounded loop (`src/bench/`). Linted here rather than in
+    # the harness loop below because it is deliberately NOT a `test_*` feature:
+    # it decorates the app path, so `fw_harness` is not set and the whole
+    # server stack compiles with it.
+    echo "clippy: --features bench_render_loop"
+    cargo clippy --profile release-esp32v3 --features bench_render_loop -- --no-deps -D warnings
     # Every harness, individually — the same loop fw-esp32s3 carries, and for
     # the same reason: a `test_*` feature sets `fw_harness`, which cfg's the
     # whole app path out, so linting the defaults leaves harness code completely
