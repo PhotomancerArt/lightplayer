@@ -73,10 +73,12 @@ This explains every observation at once:
    the new scratches: they grow through `try_reserve`
    (`lpc-engine::node::ensure_scratch_len`), so an allocation failure
    skips the frame with a `NodeError` instead of staging a reset.
-   Remaining exposure: the fixture 1D/TextureArea path still
+   ~~Remaining exposure: the fixture 1D/TextureArea path still
    materializes an owned `TextureData` per frame via `read_back` (not
    on zook's Direct path); same treatment needs a `read_back_into`
-   contract.
+   contract.~~ **DONE** (PR #475): `LpGraphics::read_back_into` fills a
+   persistent `FixtureNode` scratch sized via the same fallible
+   `ensure_scratch_len`; both TextureArea paths use it.
 3. ~~`set_oom_context` on tick/render entry~~ **DONE**: `Engine::tick`
    and `render_texture_product` set a context on entry, so a tick OOM
    attributes to the tick rather than the last-set request scope.
