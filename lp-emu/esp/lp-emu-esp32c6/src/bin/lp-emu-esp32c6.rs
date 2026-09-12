@@ -232,8 +232,11 @@ OPTIONS:
                             over as many functions as the image needs; this
                             is the size of one, and a module the engine
                             refuses halves it and retries (M7 JD26).
-                            Default 32 since M7 P6c (DD20): V8's optimum on
-                            a real run, and 3x better than 64 in JSC
+                            Default 8 since M7b P5 (BD6/DD32): the iPhone's
+                            own rows, which prefer 8 to 16 in five of seven
+                            same-session pairs and hold the best row taken
+                            on it. V8 is within 4 % across 8/16/32; JSC is
+                            1.81x faster at 8 than at 32
     --jit-seeds <scope>     with --jit: where discovery starts.
                             `all-symbols` (default) seeds from every symbol
                             in an executable region, of the app and of the

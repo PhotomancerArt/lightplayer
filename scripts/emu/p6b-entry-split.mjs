@@ -108,7 +108,12 @@ function nextCall(kind, pc, address) {
 const imports = { emu: {
   memory,
   mmio_load: (pc, _c, address) => current.calls.getBigUint64(nextCall(0, pc, address) + 32, true),
-  mmio_store: (pc, _c, address) => Number(current.calls.getBigUint64(nextCall(1, pc, address) + 32, true) & 0xffffffffn),
+  // i64 since M7b P2 gave the store its own status word; a bare pc makes V8
+  // answer `TypeError: Cannot convert <pc> to a BigInt` from inside the module.
+  mmio_store: (pc, _c, address) => current.calls.getBigUint64(nextCall(1, pc, address) + 32, true),
+  // M7b P2's fourth import. Recorded with `address` zero, answering
+  // `(status << 32) | pc` exactly as a store does.
+  poll: (pc) => current.calls.getBigUint64(nextCall(2, pc, 0) + 32, true),
   step_one: (pc) => { throw new Error(`the escape hatch fired at pc ${(pc >>> 0).toString(16)}`); },
 } };
 

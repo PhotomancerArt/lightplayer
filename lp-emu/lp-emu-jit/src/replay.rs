@@ -25,8 +25,18 @@
 //! the replay applies it before running the entry, standing in for the
 //! interpreter. Diffing at [`GRANULE_BYTES`] granularity rather than
 //! byte-by-byte is what keeps that affordable: it cost ~180 bytes per entry on
-//! `render-rocaille`. Applying the diff is not part of what a replay times —
-//! only the entry itself is.
+//! `render-rocaille`.
+//!
+//! ⚠️ **Applying the diff IS inside what a replay times**, and this paragraph
+//! used to say the opposite. `scripts/emu/jit-image-bench.mjs` brackets the
+//! whole per-entry loop — delta, register file, exchange stores and the call —
+//! because the delta has to land immediately before the entry it belongs to
+//! and cannot be hoisted out. On a boot recording that is 256 bytes an entry
+//! and invisible; on a render-loop one it is **69,120 bytes an entry**, which
+//! is larger than the entry. M7b P5 found it by taking a recording of the
+//! render loop for the first time. The harness now measures its own floor —
+//! the same loop with the call removed — and reports `steadyNsPerInstrNet`
+//! beside the gross figure; **a residual is read off the net one.**
 
 use alloc::vec::Vec;
 

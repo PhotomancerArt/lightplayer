@@ -5,7 +5,9 @@
 //                                         [--engines node,bun] [--seconds N]
 //
 // P6's `jit-image-bench.mjs` replays ONE module against a recording and times
-// only the `run` calls. This drives it once per (engine, size) from a single
+// the per-entry loop — the module's `run` call AND the between-entries memory
+// delta the replay stands the interpreter in with, which cannot be hoisted out
+// of it. This drives it once per (engine, size) from a single
 // parent invocation, so every row is taken back to back under the same desk
 // load — the comparability rule G-M7P states — and prints them as one table
 // with the two numbers P6b is after beside the two the bench reports:
@@ -53,10 +55,14 @@ console.log(`           ${meta.entries} entries, ${meta.retired} instructions re
             `${perEntry.toFixed(2)} per entry, ${meta.blocks} blocks`);
 console.log('');
 
+// `ns/instr` is gross — it includes the harness's own per-entry work, of
+// which the between-entries memory delta is by far the largest part (M7b P5).
+// `harness` is that floor, measured by the same loop with the module call
+// removed, and `net` is what the module cost. **Read a residual off `net`.**
 const head = split
   ? ['engine', 'blocks/fn', 'fns', 'module MB', 'compile ms', 'E ns/entry', 'T ns/instr', 'flat ns/e', 'flat ns/i', 'cross/entry', 'load']
-  : ['engine', 'blocks/fn', 'fns', 'module MB', 'compile ms', 'ns/instr 1st', 'ns/instr', 'ns/entry', 'cross/entry', 'load'];
-const w = split ? [7, 9, 7, 9, 10, 11, 11, 10, 10, 11, 6] : [7, 9, 7, 9, 10, 12, 9, 9, 11, 6];
+  : ['engine', 'blocks/fn', 'fns', 'module MB', 'compile ms', 'ns/instr 1st', 'ns/instr', 'harness', 'net', 'ns/entry', 'cross/entry', 'load'];
+const w = split ? [7, 9, 7, 9, 10, 11, 11, 10, 10, 11, 6] : [7, 9, 7, 9, 10, 12, 9, 8, 8, 9, 11, 6];
 const line = (cells) => cells.map((c, i) => String(c).padStart(w[i])).join('  ');
 console.log(line(head));
 console.log(w.map((n) => '-'.repeat(n)).join('  '));
@@ -66,7 +72,7 @@ for (const engine of engines) {
   for (const size of sizes) {
     const wasm = join(dir, `size-${size}.wasm`);
     if (!existsSync(wasm)) {
-      console.log(line([engine, size, '-', '-', '-', '-', '-', '-', '-', loadavg()[0].toFixed(1)]) + '   (no module)');
+      console.log(line([engine, size, '-', '-', '-', '-', '-', '-', '-', '-', '-', loadavg()[0].toFixed(1)]) + '   (no module)');
       continue;
     }
     const r = spawnSync(engine, [split ? 'scripts/emu/p6b-entry-split.mjs' : 'scripts/emu/jit-image-bench.mjs', dir, wasm, String(seconds)], {
@@ -75,11 +81,13 @@ for (const engine of engines) {
     const last = (r.stdout || '').trim().split('\n').pop();
     let j;
     try { j = JSON.parse(last); } catch {
-      console.log(line([engine, size, '-', '-', '-', '-', 'FAILED', '-', '-', loadavg()[0].toFixed(1)]));
+      console.log(line([engine, size, '-', '-', '-', '-', 'FAILED', '-', '-', '-', '-', loadavg()[0].toFixed(1)]));
       console.log('  !! ' + ((r.stderr || last || '').trim().split('\n')[0] || 'no output'));
       continue;
     }
-    const nsPerEntry = split ? j.nsPerEntryFlat : j.steadyNsPerInstr * perEntry;
+    const nsPerEntry = split
+      ? j.nsPerEntryFlat
+      : (j.steadyNsPerInstrNet ?? j.steadyNsPerInstr) * perEntry;
     const crossPerEntry = split ? j.crossPerEntry : j.crossesPerIteration / meta.entries;
     j.nsPerEntry = nsPerEntry;
     j.crossPerEntry = crossPerEntry;
@@ -95,6 +103,7 @@ for (const engine of engines) {
       engine, size, Math.ceil(meta.blocks / size),
       (j.moduleBytes / 1e6).toFixed(1), j.compileMs.toFixed(0),
       j.firstSecondNsPerInstr.toFixed(3), j.steadyNsPerInstr.toFixed(3),
+      (j.harnessNsPerInstr ?? 0).toFixed(3), (j.steadyNsPerInstrNet ?? j.steadyNsPerInstr).toFixed(3),
       nsPerEntry.toFixed(1), crossPerEntry.toFixed(2), j.loadavg.toFixed(1),
     ]));
   }

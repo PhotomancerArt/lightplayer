@@ -201,8 +201,23 @@ const imports = {
     mmio_load(pc, _cycle, address, _kind) {
       return current.calls.getBigUint64(nextCall(0, pc, address) + 32, true);
     },
+    // `(status << 32) | pc`, an **i64** since M7b P2 gave the store its own
+    // status word and its three post-store polling-point arguments. It used
+    // to answer a bare `i32` pc and this harness still masked it down to one,
+    // which V8 answers with `TypeError: Cannot convert <pc> to a BigInt` from
+    // inside the module. The recording holds the whole 64-bit answer.
     mmio_store(pc, _cycle, address, _kind, _value) {
-      return Number(current.calls.getBigUint64(nextCall(1, pc, address) + 32, true) & 0xffffffffn);
+      return current.calls.getBigUint64(nextCall(1, pc, address) + 32, true);
+    },
+    // M7b P2's fourth import. A poll is recorded with `address` zero
+    // (`jit.rs`'s `CallRec { kind: 2, address: 0, .. }`) and answers
+    // `(status << 32) | pc`, exactly as a store does — both of them answer a
+    // polling point. Without this the module does not even instantiate:
+    // `LinkError: Import #3 "emu" "poll": function import requires a
+    // callable`, which is what this harness did on `main` from #713 until
+    // M7b P5 found it.
+    poll(pc, _cycle, _instret) {
+      return current.calls.getBigUint64(nextCall(2, pc, 0) + 32, true);
     },
     step_one(pc) {
       throw new Error(
@@ -229,7 +244,21 @@ const run = instance.exports.run;
 
 let crosses = 0n;
 
-function iteration(check) {
+// M7b P5: the harness's own per-iteration cost, measured rather than assumed.
+//
+// A timed iteration is not only the module: it is also the between-entries
+// memory delta, the 31-register write and four `DataView` stores, PER ENTRY.
+// This file's own module docs used to claim the delta was outside what a
+// replay times. It never was — it is the first thing inside the loop
+// `measure()` brackets — and on a boot recording that did not matter
+// (256 bytes an entry) while on a render-loop one it is 69,120 bytes an entry
+// and would swamp the number outright.
+//
+// So the same loop is run once with `run` skipped, and the difference is what
+// the module cost. `steadyNsPerInstrNet` is the corrected rate and is the one
+// a residual should be read off; `steadyNsPerInstr` stays as it was so older
+// rows remain comparable with themselves.
+function iteration(check, noRun = false) {
   let retired = 0n;
   for (const e of entries) {
     for (const d of e.delta) bytes.set(d.bytes, d.offset);
@@ -239,6 +268,10 @@ function iteration(check) {
     view.setBigUint64(X + EXCHANGE_INSTRET, e.instretIn, true);
     current = e;
     cursor = 0;
+    if (noRun) {
+      retired += e.instretOut - e.instretIn;
+      continue;
+    }
     const pc = run(e.entry, e.cycleIn, e.instretIn, e.end, e.watchLo, e.watchHi);
     if (check) {
       if ((pc >>> 0) !== e.exitPc) {
@@ -298,7 +331,7 @@ if (checked !== BigInt(meta.retired)) {
 
 // ---- the rate, first second against steady state --------------------------
 
-function measure(budgetMs) {
+function measure(budgetMs, noRun = false) {
   let ns = 0;
   let instructions = 0n;
   let iterations = 0;
@@ -306,7 +339,7 @@ function measure(budgetMs) {
   while (performance.now() - started < budgetMs) {
     restore();
     const t = performance.now();
-    instructions += iteration(false);
+    instructions += iteration(false, noRun);
     ns += (performance.now() - t) * 1e6;
     iterations++;
   }
@@ -315,6 +348,9 @@ function measure(budgetMs) {
 
 const first = measure(1000);
 const steady = measure(seconds * 1000);
+// The floor, taken last and at the same tier the steady measurement reached,
+// so it is the same JavaScript running the same shapes with one call removed.
+const floor = measure(1000, true);
 
 const engine = typeof Bun !== "undefined" ? "bun (JavaScriptCore)" : "node (V8)";
 console.log(
@@ -330,6 +366,10 @@ console.log(
     instantiateMs: Number(instantiateMs.toFixed(2)),
     firstSecondNsPerInstr: Number(first.nsPerInstr.toFixed(3)),
     steadyNsPerInstr: Number(steady.nsPerInstr.toFixed(3)),
+    harnessNsPerInstr: Number(floor.nsPerInstr.toFixed(3)),
+    steadyNsPerInstrNet: Number((steady.nsPerInstr - floor.nsPerInstr).toFixed(3)),
+    deltaBytesPerEntry: meta.deltaBytes,
+    instrPerEntry: Number((meta.retired / meta.entries).toFixed(2)),
     crossesPerIteration: Number(crossesPerIteration),
     crossPerThousandInstr: Number(
       ((crossesPerIteration * 1000n) / BigInt(meta.retired)).toString(),

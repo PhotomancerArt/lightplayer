@@ -132,4 +132,180 @@ impl BlockSet {
             entries,
         }
     }
+
+    /// The same blocks in a different **order**, with the index rebuilt to
+    /// match.
+    ///
+    /// A global block index is a position in [`BlockSet::blocks`] and nothing
+    /// else: the emitter chunks that vector, the selector divides by the chunk
+    /// size, an edge looks its target up in [`BlockSet::index`], and the
+    /// indirect page map is written from the same enumeration. So permuting
+    /// the vector and rebuilding the index permutes **every** one of them
+    /// together, and the guest cannot tell: no transcript, no counter and no
+    /// exit pc is a function of where a block sits.
+    ///
+    /// `order[j]` is the block that should end up at position `j`. It must be
+    /// a permutation of `0..blocks.len()`; anything else is a caller's bug.
+    ///
+    /// # Panics
+    ///
+    /// Panics when `order` is not a permutation of this set's positions.
+    #[must_use]
+    pub fn permuted(&self, order: &[usize]) -> Self {
+        assert_eq!(
+            order.len(),
+            self.blocks.len(),
+            "a layout order names every block exactly once"
+        );
+        let mut seen = alloc::vec![false; self.blocks.len()];
+        for &from in order {
+            assert!(
+                !core::mem::replace(&mut seen[from], true),
+                "a layout order names block {from} twice"
+            );
+        }
+        let blocks: Vec<Block> = order
+            .iter()
+            .map(|&from| self.blocks[from].clone())
+            .collect();
+        let index = blocks
+            .iter()
+            .enumerate()
+            .map(|(i, b)| (b.pc, i))
+            .collect::<BTreeMap<_, _>>();
+        // `entries` is the set of pcs a hart may enter at. It is a SET: the
+        // order it is in is not part of what it means, and the hart sorts its
+        // own table anyway. Kept as the blocks now stand so that two sets that
+        // differ only in layout have the same `entries` contents.
+        let entries = blocks.iter().map(|b| b.pc).collect();
+        Self {
+            blocks,
+            index,
+            entries,
+        }
+    }
+}
+
+/// How the emitter orders the block set before it chunks it into functions.
+///
+/// The chunks are contiguous runs of this vector, so the order is what decides
+/// **which blocks share a wasm function** — and therefore which guest edges
+/// are a branch inside one body and which are a cross through the selector.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum BlockOrder {
+    /// Guest address order, which is what [`crate::discover`] produces.
+    #[default]
+    Address,
+    /// A depth-first trace layout: each block followed by the successor it
+    /// most often runs into, and a call's body placed next to its call site.
+    /// See [`adjacency_order`].
+    Adjacency,
+}
+
+/// A block's successors, most-likely first, as guest pcs.
+///
+/// Derived from the same three things the emitter emits from — the block end,
+/// and for a terminator the last instruction — so a successor here is an edge
+/// the emitted code really has. An indirect jump has no static successor and
+/// contributes none.
+fn successors(b: &Block) -> impl Iterator<Item = u32> + use<'_> {
+    let mut out = [None; 2];
+    match b.end {
+        BlockEnd::Fall(pc) => out[0] = Some(pc),
+        BlockEnd::Undecodable(_) => {}
+        BlockEnd::Term => {
+            if let Some(&(pc, d)) = b.insts.last() {
+                match d.inst {
+                    // The not-taken edge first: the emitter falls straight
+                    // into the block laid out next, for free, and a taken
+                    // branch is a `br` whatever the layout.
+                    crate::decode::Inst::Branch { imm, .. } => {
+                        out[0] = Some(pc.wrapping_add(u32::from(d.width)));
+                        out[1] = Some(pc.wrapping_add(imm as u32));
+                    }
+                    crate::decode::Inst::Jal { rd, imm } => {
+                        out[0] = Some(pc.wrapping_add(imm as u32) & !1);
+                        // A linking `jal` is a call, so the instruction after
+                        // it is where control comes back to. Laying the callee
+                        // next and the return site after it is what puts a
+                        // call and its body in one wasm function.
+                        if rd != 0 {
+                            out[1] = Some(pc.wrapping_add(u32::from(d.width)));
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+    }
+    out.into_iter().flatten()
+}
+
+/// A trace layout of `set`: the order a walk of its own edges lays it out in.
+///
+/// Address order is what a walk produces and it is not what a run executes.
+/// This follows each block into the successor it most often runs into —
+/// fall-through, then the taken branch, then a call's own body — and only
+/// starts a new trace when the current one runs into a block already placed.
+/// Unplaced blocks are picked up afterwards in address order, so the result is
+/// a permutation of the whole set and is **deterministic**: the same block set
+/// lays out the same way on every host and in every engine, which is what lets
+/// it be an identity oracle rather than a source of drift.
+///
+/// It is a layout and nothing else. Every block in, every block out, the same
+/// bytes translated the same way — see [`BlockSet::permuted`] for why the
+/// guest cannot tell.
+#[must_use]
+pub fn adjacency_order(set: &BlockSet) -> Vec<usize> {
+    let n = set.blocks.len();
+    let mut placed = alloc::vec![false; n];
+    let mut out = Vec::with_capacity(n);
+    // Seeds waiting for a trace of their own, most recent first, so a callee
+    // is laid out immediately after the trace that called it.
+    let mut pending: Vec<usize> = Vec::new();
+    for seed in 0..n {
+        if placed[seed] {
+            continue;
+        }
+        pending.push(seed);
+        while let Some(start) = pending.pop() {
+            let mut at = start;
+            loop {
+                if placed[at] {
+                    break;
+                }
+                placed[at] = true;
+                out.push(at);
+                let mut next = None;
+                // Walked in reverse so that the *first* successor is the one
+                // the trace continues into and the rest are picked up in
+                // order after it.
+                for pc in successors(&set.blocks[at])
+                    .collect::<Vec<_>>()
+                    .into_iter()
+                    .rev()
+                {
+                    let Some(&j) = set.index.get(&pc) else {
+                        continue;
+                    };
+                    if placed[j] {
+                        continue;
+                    }
+                    if let Some(prev) = next.replace(j) {
+                        pending.push(prev);
+                    }
+                }
+                match next {
+                    Some(j) => at = j,
+                    None => break,
+                }
+            }
+        }
+    }
+    debug_assert_eq!(
+        out.len(),
+        n,
+        "a layout order names every block exactly once"
+    );
+    out
 }

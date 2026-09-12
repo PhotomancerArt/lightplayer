@@ -168,11 +168,47 @@ pub const DEFAULT_JIT_BLOCKS: usize = usize::MAX;
 /// survives, 32. JSC keeps getting faster all the way down to the
 /// [`crate::jit`] floor of 8, and 32 is three times better to it than 64.
 ///
-/// So 32 is the size that serves both engines: V8's optimum, and within a
+/// So 32 was the size that served both engines: V8's optimum, and within a
 /// factor of JSC's without asking for a size V8 cannot compile. It is a
 /// *default* — `--jit-fn-blocks` still takes anything from the floor up, and
 /// a caller that knows its engine should say so.
-pub const DEFAULT_JIT_FN_BLOCKS: usize = 32;
+///
+/// # 8 since M7b P5 (BD6 / DD32), and the phone picked it
+///
+/// BD6 reserves this constant for one phase and one kind of evidence: **a
+/// phone row.** M7b's P1–P4 heads produced six sessions of them, `render-basic`
+/// t2 through the staged rig (`m7b/phone-rows/*.json`, `G-M7P-gate.md`
+/// readings 3–8), each session pressing 8 and 16 blocks a function
+/// back to back so the pair is same-session and the thermal state is shared:
+///
+/// | head | 8 blocks/fn | 16 blocks/fn | 8 wins |
+/// |---|---:|---:|:--:|
+/// | pre-P3 | 0.904× | 0.793× | yes |
+/// | P3 | 0.863× | 0.889× | no |
+/// | P3 | 0.945× | 0.888× | yes |
+/// | P3 | **1.008×** | 0.926× | yes |
+/// | P3 | 0.921× | 0.780× | yes |
+/// | P3 | 0.818× | 0.761× | yes |
+/// | P4 (press 1, cold) | 0.851× | 0.882× | no |
+///
+/// **8 wins five of seven same-session pairs and holds the best row ever
+/// taken on this phone, 1.008×.** The desk agrees for JSC and disagrees for
+/// V8, which is the same split P6c found and is why the phone is the one that
+/// decides: `render-basic` t2, 5,500 ms, `p6b-rows.mjs`, interleaved,
+/// best-of-3, one invocation per engine, on P5's own head —
+///
+/// | `--jit-fn-blocks` | node/V8 | bun/JavaScriptCore |
+/// |---:|---:|---:|
+/// | 8 | 0.917× | **0.769×** |
+/// | 16 | **0.955×** | 0.659× |
+/// | 32 | 0.933× | 0.425× |
+/// | 64 | 0.758× | 0.259× |
+///
+/// — V8 is within 4 % across 8/16/32 and JSC is **1.81× faster at 8 than at
+/// 32**. So the size the phone wants costs V8 almost nothing and the size V8
+/// wants costs the phone a third of its number. `scripts/emu/bench-web.sh`'s
+/// `defaults.fnBlocks` mirrors this constant and moves with it.
+pub const DEFAULT_JIT_FN_BLOCKS: usize = 8;
 
 /// The same for `--jit-escape-all`, where a block emits several times the
 /// wasm: a register flush, a call and a reload per instruction instead of a
@@ -2606,11 +2642,11 @@ impl Esp32C6Machine {
         fn_blocks: usize,
         event: &str,
     ) -> Result<(), BuildError> {
-        let policy = if escape_all {
+        let policy = crate::jit::emission_diagnostics(if escape_all {
             lp_emu_jit::translate::Emit::NOTHING
         } else {
             lp_emu_jit::translate::Emit::EVERYTHING
-        };
+        });
         let model = self.time_grade.cycle_model();
         let seeds = self.translation_seeds(entry);
         if let Some(path) = self.jit_emit_only.clone() {
@@ -3192,11 +3228,11 @@ impl Esp32C6Machine {
         // is no core to add to and the whole-image path is the only one that
         // means anything.
         if self.jit_emit_only.is_none() {
-            let policy = if escape_all {
+            let policy = crate::jit::emission_diagnostics(if escape_all {
                 lp_emu_jit::translate::Emit::NOTHING
             } else {
                 lp_emu_jit::translate::Emit::EVERYTHING
-            };
+            });
             let model = self.time_grade.cycle_model();
             let seeds = self.translation_seeds(entry);
             match crate::jit::install_incremental(
