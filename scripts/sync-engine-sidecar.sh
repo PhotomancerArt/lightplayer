@@ -29,7 +29,9 @@
 # the standalone smoke pages do not need it, and a tree that has never run
 # `just emu-c6-wasm` still serves Studio. Missing means no key in the
 # manifest, which is exactly what the emu row's "only when a module exists"
-# rule (D21) reads.
+# rule (D21) reads. Since M7 P7 the module travels with `jit-host.js` — it
+# imports `emu_host` and does not link without it — so the two keys appear and
+# disappear together.
 #
 # NO HASHING WHEN NOTHING MOVED. The once-a-second caller is the reason the
 # script keeps a stamp (`.engine-sidecar.stamp`, beside the manifest): one
@@ -57,6 +59,27 @@ if [[ ! -f "${js_src}" || ! -f "${wasm_src}" ]]; then
     exit 1
 fi
 
+# ---- the emulator's JS host -------------------------------------------------
+#
+# The emulator module imports the namespace `emu_host` — since M7 P7 the wasm
+# build installs a translated core by default — and cannot be instantiated
+# without it, so the module and `jit-host.js` travel as a PAIR: a served
+# `emu_esp32c6_wasm` with no `emu_jit_host_js` beside it is a board that cannot
+# boot. Hashed for the same reason as the rest, and read straight out of the
+# repo rather than out of the sidecar dir, because it is source and nothing
+# builds it.
+#
+# Never a hand copy under `public/lpa-link/`: it is M7's file, it is MOVING
+# (P9 relocates it to `lp-emu/lp-emu-jit/js/` and leaves a re-export shim at
+# the old path), and a shim copied here would import a path that does not
+# exist next to it. `jit-host-source.sh` is the one resolver and it refuses a
+# shim; this script only asks.
+repo="$(cd "$(dirname "$0")/.." && pwd)"
+host_src=""
+if [[ -f "${emu_src}" ]]; then
+    host_src="$("${repo}/scripts/emu/jit-host-source.sh")"
+fi
+
 manifest="${out_pkg_dir}/engine-manifest.json"
 stamp="${out_pkg_dir}/.engine-sidecar.stamp"
 
@@ -81,6 +104,11 @@ js_fp="$(fingerprint "${js_src}")"
 wasm_fp="$(fingerprint "${wasm_src}")"
 emu_fp="absent"
 [[ -f "${emu_src}" ]] && emu_fp="$(fingerprint "${emu_src}")"
+# A fourth line, on the same rule as the third: `absent` whenever there is no
+# module to pair it with, so an emulator that has come or gone takes its host
+# with it.
+host_fp="absent"
+[[ -n "${host_src}" ]] && host_fp="$(fingerprint "${host_src}")"
 
 if [[ -f "${stamp}" && -f "${manifest}" ]]; then
     current=1
@@ -91,6 +119,7 @@ if [[ -f "${stamp}" && -f "${manifest}" ]]; then
             1) want="${js_fp}" ;;
             2) want="${wasm_fp}" ;;
             3) want="${emu_fp}" ;;
+            4) want="${host_fp}" ;;
             *) current=0; break ;;
         esac
         if [[ "${want}" == "absent" ]]; then
@@ -111,7 +140,7 @@ if [[ -f "${stamp}" && -f "${manifest}" ]]; then
             current=0
         fi
     done < "${stamp}"
-    if [[ "${current}" == 1 && "${lines}" == 3 ]]; then
+    if [[ "${current}" == 1 && "${lines}" == 4 ]]; then
         exit 0
     fi
 fi
@@ -169,17 +198,22 @@ js_name="fw_browser-${js_hash}.js"
 wasm_name="fw_browser_bg-${wasm_hash}.wasm"
 
 emu_name=""
+host_name=""
 if [[ "${emu_fp}" != "absent" ]]; then
     emu_name="lp_emu_esp32c6-$(content_hash "${emu_src}").wasm"
+    host_name="jit-host-$(content_hash "${host_src}").js"
 fi
 
 # Written last, after everything it vouches for is on disk — so a run killed
 # half way leaves no stamp, and the next tick does the whole job again.
 write_stamp() {
     local emu_line="absent"
+    local host_line="absent"
     [[ -n "${emu_name}" ]] && emu_line="${emu_fp} ${emu_name}"
-    printf '%s %s\n%s %s\n%s\n' \
-        "${js_fp}" "${js_name}" "${wasm_fp}" "${wasm_name}" "${emu_line}" \
+    [[ -n "${host_name}" ]] && host_line="${host_fp} ${host_name}"
+    printf '%s %s\n%s %s\n%s\n%s\n' \
+        "${js_fp}" "${js_name}" "${wasm_fp}" "${wasm_name}" \
+        "${emu_line}" "${host_line}" \
         > "${stamp}"
 }
 
@@ -190,10 +224,13 @@ write_stamp() {
 # in — only a stamp to refresh so the next tick is a fast one again.
 emu_is_current=1
 if [[ -n "${emu_name}" ]]; then
-    [[ -f "${out_pkg_dir}/${emu_name}" ]] \
+    # The PAIR, both times: a module whose host is missing from the served dir
+    # or from the manifest is a module nothing can instantiate.
+    [[ -f "${out_pkg_dir}/${emu_name}" && -f "${out_pkg_dir}/${host_name}" ]] \
         && grep -q "${emu_name}" "${manifest}" 2>/dev/null \
+        && grep -q "${host_name}" "${manifest}" 2>/dev/null \
         || emu_is_current=0
-elif grep -q "emu_esp32c6_wasm" "${manifest}" 2>/dev/null; then
+elif grep -q "emu_esp32c6_wasm\|emu_jit_host_js" "${manifest}" 2>/dev/null; then
     # The module has GONE since the manifest was written: "missing means no
     # key" has to hold on the way out as well as on the way in.
     emu_is_current=0
@@ -216,11 +253,13 @@ cp "${wasm_src}" "${out_pkg_dir}/${wasm_name}"
 # rebuilt module gets a new hash, and `studio-dev` runs this every second
 # for the life of the server. Swept whether or not a module is there now — a
 # copy of one that has gone is exactly the stale file this sweep exists for.
-rm -f "${out_pkg_dir}"/lp_emu_esp32c6-*.wasm
+rm -f "${out_pkg_dir}"/lp_emu_esp32c6-*.wasm "${out_pkg_dir}"/jit-host-*.js
 emu_key=""
 if [[ -n "${emu_name}" ]]; then
     cp "${emu_src}" "${out_pkg_dir}/${emu_name}"
+    cp "${host_src}" "${out_pkg_dir}/${host_name}"
     emu_key=",\"emu_esp32c6_wasm\":\"/pkg/${emu_name}\",\"emu_wasm_bytes\":$(wc -c < "${emu_src}" | tr -d '[:space:]')"
+    emu_key="${emu_key},\"emu_jit_host_js\":\"/pkg/${host_name}\""
 fi
 
 # Plain byte count: this is the raw .wasm on disk, before any gzip/brotli
