@@ -628,9 +628,20 @@ pub fn emit_only(
     if found.set.is_empty() {
         return Err("nothing translatable is reachable".to_string());
     }
-    let at = areas(bus, &found.set, 0)?;
+    // The same layout `Module::build` would install (M7b P5) — `--jit-emit-only`
+    // exists so a size sweep needs no engine, and a sweep of a module the
+    // installer would not have built is a sweep of nothing.
+    let ordered;
+    let set = match block_order() {
+        BlockOrder::Address => &found.set,
+        BlockOrder::Adjacency => {
+            ordered = found.set.permuted(&lp_emu_jit::blocks::adjacency_order(&found.set));
+            &ordered
+        }
+    };
+    let at = areas(bus, set, 0)?;
     write_permission_table(bus, at);
-    write_target_tables(bus.guest_arena_mut(), 0, at.indirect_at, &found.set);
+    write_target_tables(bus.guest_arena_mut(), 0, at.indirect_at, set);
     let layout = Layout {
         memory_pages: at.pages,
         guest_base: base,
@@ -641,7 +652,7 @@ pub fn emit_only(
         fast_reads: systimer_fast_reads(bus, at.fast_at),
     };
     let started = std::time::Instant::now();
-    let emitted = emit_module(&found.set, model, layout, policy, fn_blocks);
+    let emitted = emit_module(set, model, layout, policy, fn_blocks);
     let emit_us = started.elapsed().as_micros();
     std::fs::write(path, &emitted.wasm).map_err(|e| format!("{}: {e}", path.display()))?;
     Ok(format!(
@@ -653,7 +664,7 @@ pub fn emit_only(
         emitted.wasm.len(),
         emit_us as f64 / 1000.0,
         emitted.functions,
-        fn_blocks.min(found.set.blocks.len()),
+        fn_blocks.min(set.blocks.len()),
         emitted.max_body_bytes,
         at.indirect_len,
         BODY_BUDGET,
