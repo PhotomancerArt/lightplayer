@@ -306,8 +306,8 @@ exists for a gate held before the PR merges; the re-install from the
 primary checkout is then a post-merge step.
 
 **The domain.** `config.json`'s `domain` is the ngrok static domain (free
-tier: one per account, assigned as `<adj>-<noun>-<noun>.ngrok-free.app`,
-claimed once in the ngrok dashboard under Domains → New Domain). With it,
+tier: one per account, assigned as `<adj>-<noun>-<noun>.ngrok-free.dev` or
+`.app`, claimed once in the ngrok dashboard under Domains → New Domain). With it,
 the tunnel starts as `ngrok http 41111 --url https://<domain>` and the
 bookmark never changes. Without it the tunnel takes a random URL that
 changes on every restart; `lab.sh url` reads the live one off ngrok's local

@@ -181,8 +181,12 @@ cmd_install() {
         echo "lab: something else is listening on :$(port) (a hand-run server?) — stop it first" >&2; exit 1
     fi
     for l in "$label_server" "$label_tunnel"; do
+        # bootout returns before the label is gone; a bootstrap in that window
+        # fails with "5: Input/output error". Wait for it to clear, then retry
+        # once — a re-install is the one time this runs, so a second is fine.
         launchctl bootout "gui/$(id -u)/$l" >/dev/null 2>&1 || true
-        launchctl bootstrap "gui/$(id -u)" "$agents_dir/$l.plist"
+        for _ in 1 2 3 4 5 6 7 8 9 10; do launchctl print "gui/$(id -u)/$l" >/dev/null 2>&1 || break; sleep 0.5; done
+        launchctl bootstrap "gui/$(id -u)" "$agents_dir/$l.plist" 2>/dev/null || { sleep 2; launchctl bootstrap "gui/$(id -u)" "$agents_dir/$l.plist"; }
     done
     sleep 2
     for l in "$label_server" "$label_tunnel"; do
