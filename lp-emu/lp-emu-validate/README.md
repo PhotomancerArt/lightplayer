@@ -166,6 +166,15 @@ evidence is now large (372 memory values byte-equal on the compile harness,
 360 structural values on the cycle kernels). Evidence goes in the `because`; a
 promotion is the director's.
 
+`records_pins` is the one classic flag that **did** move: `true` on
+`lp-emu:esp32v3:t1` since M5 P7 (DD72), because M4 P3 gave the classic binary
+`--dump-frames` and M4 P5 committed the first `.pins.jsonl` beside a classic
+transcript. It is a **capability**, not a grade — `pin` stays `modeled`,
+since the waveform is a modelled RMT's and the decoder reading it back is ours
+— and `silicon:esp32v3` still records none, so a classic replay reports
+`silicon:esp32v3 records none` rather than comparing two pads. The walk record
+says in as many words what has been on a classic pad: nothing.
+
 It also has **one** time grade, and that is a statement rather than an
 omission: `TimeGrade` on `lp-emu-esp32v3` has one arm, there is no measured
 LX6 per-class cost model, and a `t2` that was `t1` under another name would be

@@ -33,7 +33,8 @@ Under that, `lp-emu-core`'s guest memory, scheduler and cycle model.
 | | `lp-emu-esp32c6` | `lp-emu-esp32v3` |
 |---|---|---|
 | hart | `lp-riscv-emu`, RV32IMAC | `lp-xt-emu`, Xtensa LX6 — register windows, a vector table, `PS` instead of `mstatus` |
-| cores | one | **two slots**, core 1 held by a three-part stall key (M3 runs single-core) |
+| cores | one | **two**, since M4: core 1 is held by a three-part stall key until DPORT releases it, and from there the two harts run a deterministic quantum interleave on one clock (`--core-quantum`, default 256). The shipped image binds its RMT ISR on the APP core and the wire pusher runs there |
+| the time grades | `t1`, `t2`, `t3` — the last `documented` inside a band | **`t1` alone**, and stated rather than omitted: no measured LX6 per-class cost model exists, so a `t2` would be `t1` renamed (M5 ruling R1, Yona's E1). Named future work, and the walk record and the SoC ADR's Xtensa section both say so |
 | register layouts | the `esp32c6` PAC | the `esp32` PAC. Almost nothing lines up: 40 pads in two banks against 31 in one, 256 input signals against 128, a `TEXT` window that is both message and digest, `LACT` as a clock |
 | the boot path | ROM → app | ROM → **the real ESP-IDF second-stage bootloader** out of a merged image → app, and the log is compared line for line against silicon |
 | the host link | a USB-Serial-JTAG peripheral *inside* the SoC — a client connecting **is** the port opening | a **CH340 bridge chip on the board**. Opening the port moves no chip state; what resets the chip is the auto-reset circuit driven by the modem lines, and the truth table is the board's |
@@ -44,7 +45,15 @@ Both machines carry that payload's gate — `lp-emu-esp32c6/tests/rmt_chase_repl
 and `lp-emu-esp32v3/tests/rmt_chase.rs` — and both say the same thing about
 768 frames: the guest's own FNV-1a of the buffer it handed the driver equals
 the decoder's FNV-1a of the bytes the pad carried. **On both chips, today,
-both readings are ours**; the silicon twin of the classic's transcript is M5's.
+both readings are ours** — `rmt-chase` has no silicon twin on either chip, and
+the classic's `pin` class is `modeled` for that reason.
+
+Both machines now answer their chip's **routine hardware walk** without a
+board — `just walk-esp32c6-emu` and `just walk-esp32v3-emu` — and each has its
+record: `docs/reports/2026-09-08-esp32c6-emulator-walk.md` and
+`docs/reports/2026-09-11-esp32v3-emulator-walk.md`. Read each record's "what
+this does not cover" before quoting a figure out of it; the two lists are not
+the same list, because the two machines are not wrong about the same things.
 
 A change to anything in the first list is a change to both machines, which is
 why CI's `emu_c6` and `emu_esp32v3` path filters both fire on `lp-emu/**`. A

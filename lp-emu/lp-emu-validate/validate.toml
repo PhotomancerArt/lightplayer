@@ -420,24 +420,24 @@ chip = "esp32v3"
 mac = "30:76:f5:ec:f6:34"
 silicon_rev = "v3.1"
 board = "domraem/dom-z-102"
-# ⚠️ **STALE, and deliberately not flipped by M5 P6.** The condition this
-# comment named is now met: M4 P3 landed `--dump-frames` on the classic
-# binary and M4 P5 (#702) committed the first `.pins.jsonl` beside a classic
-# transcript (`transcripts/esp32v3/rmt-chase/lp-emu-esp32v3-t1-2026-09-11-
-# dc2df69d4.txt.pins.jsonl`). So this machine CAN decode a pad and this line
-# understates it.
+# Flipped by M5 P7 (DD72), and it is a **capability** claim rather than a
+# grade: this machine drives a pad off its own signal fabric and decodes it
+# back, which M4 P3 landed (`--dump-frames` on the classic binary) and M4 P5
+# (#702) committed the first evidence of — the `.pins.jsonl` beside
+# `transcripts/esp32v3/rmt-chase/lp-emu-esp32v3-t1-2026-09-11-dc2df69d4.txt`.
+# M5 P6 left the flip to the director because a capability claim changes what
+# every replay of this configuration REPORTS about the pin class; the walk
+# record's "what this does not cover" is where the flip's companion sentence
+# now lives, and it says plainly that nothing has been on a classic pad — no
+# logic analyser, no scope.
 #
-# P6 left the flip alone all the same, and the reason is the phase's own
-# rule rather than doubt about the fact: a capability claim on a
-# configuration changes what every replay of that configuration reports
-# about the pin class, no payload in P6's four pairs declares a pin capture,
-# and the classic's `rmt-chase` has no silicon twin for a flipped flag to be
-# checked against. It is the director's to flip, with the walk record's §9
-# sentence about what has and has not been on a classic pad (nothing: no
-# logic analyser, no scope) written at the same time. Stated rather than
+# What this does NOT do is promote the `pin` grade, which is still `modeled`
+# below for exactly that reason. And `silicon:esp32v3` still records none: a
+# real pad needs an instrument, and a `true` there would be the claim this
+# field exists to keep anyone from making by accident. Stated rather than
 # inferred, for the reason `ConfigurationEntry::records_pins` gives: silence
 # is not a capability — and neither is a stale `false`.
-records_pins = false
+records_pins = true
 
 [[configuration.trust]]
 class = "memory"
@@ -462,4 +462,4 @@ because = "the bytes are the guest's own, drained through the UART0 model at the
 [[configuration.trust]]
 class = "pin"
 grade = "modeled"
-because = "the waveform is a modelled RMT's, driven into the bus's signal fabric and decoded back by our own decoder (M4 P2/P3). NO INSTRUMENT HAS BEEN ON A CLASSIC PAD — not a logic analyser, not a scope — so both readings of the pad are ours, and the walk record says so in as many words. The two MODEM lines are the exception and they are not a pad: EN and IO0 were driven on the real cable and their effect read off the ROM's own banner, which is a measurement of the cable, recorded in the `wire` row above. `records_pins` is `false` on this configuration until the classic binary has `--dump-frames` (M4 P3), so no classic transcript claims a pin capture it does not have"
+because = "the waveform is a modelled RMT's, driven into the bus's signal fabric and decoded back by our own decoder (M4 P2/P3). NO INSTRUMENT HAS BEEN ON A CLASSIC PAD — not a logic analyser, not a scope — so both readings of the pad are ours, and the walk record says so in as many words. The two MODEM lines are the exception and they are not a pad: EN and IO0 were driven on the real cable and their effect read off the ROM's own banner, which is a measurement of the cable, recorded in the `wire` row above. `records_pins` is `true` on this configuration since M5 P7 (DD72) — `--dump-frames` landed in M4 P3 and the first classic `.pins.jsonl` in M4 P5 — and that is a statement about what this machine CAN record, not about what the recording is worth: the grade is still `modeled` and the reason is the sentence above it. `silicon:esp32v3` still records none, so a replay of an emulated classic transcript against a silicon one reports `silicon:esp32v3 records none` rather than comparing pads and calling the silence agreement"
