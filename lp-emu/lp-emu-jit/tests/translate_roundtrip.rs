@@ -207,6 +207,11 @@ impl HostOps for FakeHost {
                     regs[rd as usize] = value as i32;
                 }
             }
+            Kind::System { rd } => {
+                if rd != 0 {
+                    regs[rd as usize] = 0x5a5a;
+                }
+            }
             Kind::Jal { rd, imm } => {
                 if rd != 0 {
                     regs[rd as usize] = next as i32;
@@ -263,6 +268,8 @@ enum Kind {
     Lw { rd: u8, rs1: u8, imm: i32 },
     Jal { rd: u8, imm: i32 },
     Bne { rs1: u8, rs2: u8, imm: i32 },
+    /// Any `SYSTEM` word. The fake interpreter writes a marker to `rd`.
+    System { rd: u8 },
 }
 
 struct Tiny {
@@ -349,6 +356,13 @@ fn tiny_decode(w: u32) -> Tiny {
                 cy(lp_emu_core::InstClass::BranchTaken),
             )
         }
+        // `SYSTEM` (M7b P6). `lp_emu_jit::decode` refuses the whole opcode, so
+        // a block ends before one and the emitted code hands it to
+        // `step_one`. The fake interpreter writes a marker into `rd` so a
+        // test can see that the *interpreter* ran it and the emitted code did
+        // not, and charges an ALU cycle so the counter arithmetic is
+        // checkable.
+        0x73 => (Kind::System { rd }, cy(lp_emu_core::InstClass::Alu)),
         other => panic!("the fake step_one does not know opcode {other:#x}"),
     };
     Tiny {
@@ -1958,4 +1972,131 @@ fn a_module_that_publishes_nothing_calls_the_import_as_before() {
     assert_eq!(out.loads.len(), 4);
     assert_eq!(out.regs[12] as u32, 0xab00);
     assert_eq!(rig.fast_served(), 0, "nothing wrote the counter");
+}
+
+// --- the undecodable block end (M7b P6) -------------------------------------
+
+/// A word `lp_emu_jit::decode` refuses — the whole `SYSTEM` opcode is outside
+/// what it recognises — followed by more of the block set.
+///
+/// `addi a0, x0, 5` / `<SYSTEM>` / `addi a1, x0, 7` / `jal x0, +4` (out).
+/// The walk seeds the address after a refused word as a block start, so the
+/// pc `step_one` reports is one the target table holds.
+fn a_system_in_the_middle(word: u32) -> Vec<(u32, u32)> {
+    vec![
+        (GUEST_BASE, 0x0050_0513),
+        (GUEST_BASE + 4, word),
+        (GUEST_BASE + 8, 0x0070_0593),
+        (GUEST_BASE + 12, 0x0040_006f),
+    ]
+}
+
+/// `csrrs x28, mstatus, x0` — a `SYSTEM` word, refused by `decode` and run by
+/// the fake interpreter as a marker write.
+const SYSTEM_WORD: u32 = 0x3000_2e73;
+/// `fence.i`. The whole encoding is fixed (`mach/mod.rs::FENCE_I`).
+const FENCE_I_WORD: u32 = 0x0000_100f;
+
+#[test]
+fn a_block_that_ends_undecodable_steps_it_and_carries_on() {
+    let program = a_system_in_the_middle(SYSTEM_WORD);
+
+    // Without the tables there is nowhere to resolve the reported pc, so this
+    // arm keeps the shape it has always had: the stay leaves at the refused
+    // word having retired only what came before it.
+    let mut plain = Rig::new(&program);
+    let set = set_of(&plain, GUEST_BASE);
+    assert_eq!(set.blocks.len(), 2, "the refused word cuts the set in two");
+    let out = plain.run_named("undec-no-table", &set, Emit::EVERYTHING, [0; 32], u64::MAX);
+    assert_eq!(out.pc, GUEST_BASE + 4, "it left at the word it refused");
+    assert_eq!(out.instret, 1);
+    assert!(out.escapes.is_empty(), "and nothing was stepped");
+    assert_eq!(out.regs[11], 0, "the second block never ran");
+
+    // With them: `step_one` runs the one word, and the pc it reports resolves
+    // through the table into the block that starts there.
+    let mut rig = Rig::with_indirect(&program);
+    let set = set_of(&rig, GUEST_BASE);
+    let fast = rig.run_named("undec-table", &set, Emit::EVERYTHING, [0; 32], u64::MAX);
+    assert_eq!(
+        fast.escapes,
+        vec![GUEST_BASE + 4],
+        "exactly the refused word went to `step_one`"
+    );
+    assert_eq!(fast.pc, GUEST_BASE + 16, "the `jal` out of the set");
+    assert_eq!(
+        fast.instret, 4,
+        "the two `addi`s, the stepped word and the `jal`"
+    );
+    assert_eq!(fast.regs[10], 5, "the first block ran");
+    assert_eq!(fast.regs[28], 0x5a5a, "the interpreter ran the refused word");
+    assert_eq!(fast.regs[11], 7, "and the stay carried on into the next block");
+    assert_eq!(fast.indirect_miss, 0, "the resolve hit");
+    assert_eq!(
+        fast.escaped_insts, 0,
+        "no instruction *in* the set was escaped: the word is past the last one"
+    );
+}
+
+/// The counters an escaped word is handed and hands back are the interpreter's
+/// own, at the right instruction (JD17).
+#[test]
+fn an_undecodable_block_end_hands_step_one_the_pc_the_block_reached() {
+    let program = a_system_in_the_middle(SYSTEM_WORD);
+    let mut rig = Rig::with_indirect(&program);
+    let set = set_of(&rig, GUEST_BASE);
+    let out = rig.run_named("undec-counters", &set, Emit::EVERYTHING, [0; 32], u64::MAX);
+    let cost = |c| u64::from(CycleModel::Esp32C6.cycles_for(c));
+    assert_eq!(
+        out.cycle,
+        3 * cost(lp_emu_core::InstClass::Alu) + cost(lp_emu_core::InstClass::JalTail),
+        "the stepped word charged the same class the fake interpreter charges, \
+         once, and the counters came back through the exchange area"
+    );
+}
+
+/// **The exclusion.** `fence.i` — and the whole `MISC-MEM` opcode it lives in
+/// — still ends the stay, because the flush it asks for lands on a block cache
+/// and a translated core that are lifted out of the hart for the length of a
+/// stay. Stepping it inside one would leave the stay running the bytes it was
+/// translated from.
+#[test]
+fn a_fence_i_at_a_block_end_still_leaves_the_stay() {
+    let program = a_system_in_the_middle(FENCE_I_WORD);
+    let mut rig = Rig::with_indirect(&program);
+    let set = set_of(&rig, GUEST_BASE);
+    assert!(
+        matches!(
+            set.blocks[0].end,
+            lp_emu_jit::blocks::BlockEnd::Undecodable(_, lp_emu_jit::blocks::Unknown::Leave)
+        ),
+        "the walk marked it as the machine's own: {:?}",
+        set.blocks[0].end
+    );
+    let out = rig.run_named("fence-i-end", &set, Emit::EVERYTHING, [0; 32], u64::MAX);
+    assert_eq!(out.pc, GUEST_BASE + 4, "the stay left at the `fence.i`");
+    assert_eq!(out.instret, 1);
+    assert!(out.escapes.is_empty(), "and it was not stepped");
+    assert_eq!(out.regs[11], 0, "the next block did not run inside the stay");
+}
+
+/// The budget check that comes with the step. The end of a block is a
+/// `run_blocks` loop top, and the interpreter checks `cycle_count >= end`
+/// there — so a stay whose block charged its whole budget must leave rather
+/// than retire one more instruction.
+#[test]
+fn an_undecodable_block_end_past_the_budget_leaves_instead_of_stepping() {
+    let program = a_system_in_the_middle(SYSTEM_WORD);
+    let mut rig = Rig::with_indirect(&program);
+    let set = set_of(&rig, GUEST_BASE);
+    // Exactly the first block's cost: its budget check passes, and it leaves
+    // the stay sitting on the end with nothing left to spend.
+    let end = u64::from(CycleModel::Esp32C6.cycles_for(lp_emu_core::InstClass::Alu));
+    let out = rig.run_named("undec-budget", &set, Emit::EVERYTHING, [0; 32], end);
+    assert_eq!(out.instret, 1, "the block ran and the word did not");
+    assert_eq!(out.pc, GUEST_BASE + 4, "it left at the word");
+    assert!(
+        out.escapes.is_empty(),
+        "the slice was over before the word could be stepped"
+    );
 }

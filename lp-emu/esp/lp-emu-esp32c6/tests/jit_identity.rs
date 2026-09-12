@@ -878,3 +878,264 @@ fn the_all_escape_build_carries_the_same_obligation() {
     let (escaped, _, _) = run_pending_exit(Some(Emit::NOTHING));
     assert_eq!(escaped, interpreted);
 }
+
+// --- the undecodable block end (M7b P6) ------------------------------------
+//
+// A word `lp_emu_jit::decode` refuses used to end the stay. It is now handed
+// to `step_one` — the interpreter's own `step_once` — and the pc it reports is
+// resolved through the indirect-target table, so the stay carries on.
+//
+// The first pair of runs uses `Esp32C6Builder::new()`, not `bare()`, for the
+// same reason the doorbell's do: the interrupt matrix has to be the real one
+// or the CSR write under test would enable delivery of nothing.
+
+/// `csrrs rd, csr, rs1` — the CSR instruction the guest sets `MIE` with.
+fn csrrs(rd: u32, csr: u32, rs1: u32) -> u32 {
+    (csr << 20) | (rs1 << 15) | (0x2 << 12) | (rd << 7) | 0x73
+}
+/// `wfi`. The whole encoding is fixed.
+const WFI: u32 = 0x1050_0073;
+/// `mstatus.MIE`, the global enable polling point (b) watches.
+const MSTATUS_MIE: u32 = 1 << 3;
+
+/// A guest that rings the doorbell with delivery **off**, and then turns it on
+/// with a `csrrs` at the end of a block.
+///
+/// The `csrrs` is the last instruction of its block precisely because
+/// `lp_emu_jit::decode` refuses the whole `SYSTEM` opcode: the block ends
+/// before it, and this is the arm M7b P6 changed. Returns the program and the
+/// pc of the instruction after the `csrrs`, which is what `mepc` has to be.
+fn enable_guest() -> (Vec<u32>, u32) {
+    let mut p = Vec::new();
+    // Route source 22 to CPU interrupt 7, priority 2, enabled — and `mie`
+    // set, but `mstatus.MIE` clear (`run_enable` seeds it that way), so the
+    // line goes up and stays undeliverable.
+    p.extend(li(8, ROUTE_FROM_CPU0));
+    p.push(addi(5, 0, CPU_INT as i32));
+    p.push(sw(5, 8, 0));
+    p.extend(li(8, PLIC_PRI7));
+    p.push(addi(5, 0, 2));
+    p.push(sw(5, 8, 0));
+    p.extend(li(8, PLIC_ENABLE));
+    p.push(addi(5, 0, 1 << CPU_INT));
+    p.push(sw(5, 8, 0));
+    p.extend(li(9, DOORBELL));
+    p.push(addi(6, 0, 1));
+    p.push(sw(6, 9, 0)); // the line goes up here and stays up
+    p.push(addi(28, 0, 0));
+    p.push(addi(29, 0, 0));
+    p.extend(li(10, MSTATUS_MIE));
+    let enable = p.len();
+    p.push(csrrs(0, u32::from(lp_riscv_emu::mach::csr::MSTATUS), 10));
+    p.push(addi(28, 28, 7)); // t3 — must NOT have run when the trap is taken
+    p.push(addi(29, 29, 9)); // t4 — likewise
+    p.push(EBREAK);
+    let after_enable = CODE + 4 * (enable as u32 + 1);
+    (p, after_enable)
+}
+
+/// Run `enable_guest`, seeding the walk with the handler as well so the trap
+/// vector's block is one the target table holds.
+fn run_enable(policy: Option<Emit>) -> (Trapped, u32, Option<String>) {
+    let mut m = Esp32C6Builder::new().build().unwrap();
+    let (program, after_enable) = enable_guest();
+    place(&mut m, CODE, &program);
+    place(&mut m, HANDLER, &[addi(30, 0, 0x55), jal(0, 0)]);
+    m.harts[0].set_pc(CODE);
+    // `MPP = 3` and `MPIE`, but **not** `MIE`: the guest turns that on itself,
+    // which is the whole point of the test.
+    let boot = lp_riscv_emu::mach::csr::MSTATUS_BOOT & !MSTATUS_MIE;
+    assert!(m.harts[0].set_csr_raw(lp_riscv_emu::mach::csr::MSTATUS, boot));
+    assert!(m.harts[0].set_csr_raw(lp_riscv_emu::mach::csr::MTVEC, HANDLER));
+    assert!(m.harts[0].set_csr_raw(lp_riscv_emu::mach::csr::MIE, 1 << CPU_INT));
+
+    if let Some(policy) = policy {
+        let model = m.harts[0].cycle_model();
+        let report = lp_emu_esp32c6::jit::install(
+            &mut m.harts[0],
+            &mut m.bus,
+            &[CODE, HANDLER],
+            256,
+            256,
+            model,
+            policy,
+            None,
+        )
+        .expect("the guest translates");
+        assert!(report.blocks > 0, "something was translated");
+    }
+    m.run_until(&StopCondition::after_micros(200));
+    let hart = &m.harts[0];
+    let out = Trapped {
+        regs: *hart.regs(),
+        pc: hart.pc(),
+        cycles: hart.cycle_count(),
+        retired: hart.instruction_count(),
+        mepc: hart.csr().mepc,
+        mcause: hart.csr().mcause,
+    };
+    (out, after_enable, m.harts[0].translated_core_report())
+}
+
+/// **Test 1 (M7b P6).** A block that ends on a `csrrs` to `mstatus` with an
+/// interrupt already pending takes the trap at exactly the instruction the
+/// interpreter takes it at, with the same `mepc` — and the stay carries on
+/// into the vector's block rather than leaving.
+///
+/// This is the one that proves polling point (b) still fires where the
+/// interpreter's does: it runs *inside* `step_once`'s `SYSTEM` handling, and
+/// `step_one` is that same `step_once`.
+#[test]
+fn a_csrrs_that_enables_interrupts_traps_where_the_interpreter_traps() {
+    let (interpreted, after_enable, none) = run_enable(None);
+    assert!(none.is_none(), "no core, no report");
+    assert_eq!(
+        interpreted.mepc, after_enable,
+        "the `csrrs` retired and polling point (b) delivered before the next \
+         instruction: {interpreted:?}"
+    );
+    assert_eq!(
+        interpreted.mcause,
+        0x8000_0000 | CPU_INT,
+        "an interrupt, not an exception: {interpreted:?}"
+    );
+    assert_eq!(
+        (interpreted.regs[28], interpreted.regs[29]),
+        (0, 0),
+        "the two instructions after the `csrrs` did not retire: {interpreted:?}"
+    );
+    assert_eq!(interpreted.regs[30], 0x55, "the handler ran");
+
+    let (translated, _, report) = run_enable(Some(Emit::EVERYTHING));
+    assert_eq!(
+        translated, interpreted,
+        "the stepped `csrrs` delivers at the same instruction, with the same mepc"
+    );
+    let report = report.expect("--jit-report has something to print");
+    // The `csrrs` went through the escape hatch — and it is the only thing
+    // that did, because every other instruction here is one the module emits.
+    assert!(
+        report.contains("escape_hatch 1,"),
+        "exactly one instruction reached `step_one`: {report}"
+    );
+    // And the stay did not end there: the trap vector's block is one the
+    // table holds, so the resolve hit and the stay carried straight on.
+    assert!(
+        report.contains("indirect_miss 0,"),
+        "the pc `step_one` reported resolved through the target table: {report}"
+    );
+}
+
+/// The all-escape build has to agree: there the `csrrs` is escaped the way
+/// every other instruction is, from the middle of a block rather than its end.
+#[test]
+fn the_all_escape_build_takes_the_same_enable() {
+    let (interpreted, _, _) = run_enable(None);
+    let (escaped, _, _) = run_enable(Some(Emit::NOTHING));
+    assert_eq!(escaped, interpreted);
+}
+
+/// A guest whose block ends on a `wfi`, with an arithmetic tail after it that
+/// only runs if something wakes the hart.
+///
+/// Nothing does: a `bare()` machine has no peripheral to schedule an event, so
+/// the idle skip runs guest time straight to the stop and the tail never
+/// retires. That is what makes `t1 == 0` at the end evidence rather than
+/// noise — **the park was real** — and it is why the comparison below is of
+/// the whole `Parked`, the machine's `idle_skips` included.
+fn wfi_guest() -> Vec<u32> {
+    vec![
+        addi(5, 0, 3),    // t0 = 3
+        add(5, 5, 5),     // t0 = 6
+        WFI,              // the block ends here
+        addi(6, 0, 0x21), // t1 — only if something wakes us
+        EBREAK,
+    ]
+}
+
+/// What a `wfi` run left behind, including the machine's own count of the
+/// deterministic idle skip — which is the externally visible thing a
+/// `SliceEnd::Wfi` produces.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct Parked {
+    regs: [i32; 32],
+    pc: u32,
+    cycles: u64,
+    retired: u64,
+    idle_skips: u64,
+}
+
+fn run_wfi(policy: Option<Emit>) -> (Parked, Option<String>) {
+    let mut m = Esp32C6Builder::bare().build().unwrap();
+    place(&mut m, CODE, &wfi_guest());
+    m.harts[0].set_pc(CODE);
+    if let Some(policy) = policy {
+        let model = m.harts[0].cycle_model();
+        let report = lp_emu_esp32c6::jit::install(
+            &mut m.harts[0],
+            &mut m.bus,
+            &[CODE],
+            256,
+            256,
+            model,
+            policy,
+            None,
+        )
+        .expect("the guest translates");
+        assert!(report.blocks > 0, "something was translated");
+    }
+    m.run_until(&StopCondition::after_micros(200));
+    let hart = &m.harts[0];
+    let out = Parked {
+        regs: *hart.regs(),
+        pc: hart.pc(),
+        cycles: hart.cycle_count(),
+        retired: hart.instruction_count(),
+        idle_skips: m.idle_skips(),
+    };
+    (out, m.harts[0].translated_core_report())
+}
+
+/// **Test 2 (M7b P6).** A block that ends on a `wfi` hands the machine a
+/// `SliceEnd::Wfi` unchanged.
+///
+/// `step_one` reports `STEP_SLICE_ENDED` and the host is holding the reason,
+/// so the stay leaves at once with `FLAG_SLICE_ENDED` and the machine's idle
+/// skip runs exactly as it does on the interpreted path. Without that arm the
+/// stay would swallow the park and the machine would never move guest time.
+#[test]
+fn a_wfi_at_the_end_of_a_block_still_parks_the_hart() {
+    let (interpreted, none) = run_wfi(None);
+    assert!(none.is_none(), "no core, no report");
+    assert!(
+        interpreted.idle_skips > 0,
+        "the interpreter really did park and the machine really did skip: \
+         {interpreted:?}"
+    );
+    assert_eq!(interpreted.regs[5], 6, "the two instructions before it ran");
+    assert_eq!(
+        interpreted.retired, 3,
+        "the `wfi` retired and nothing after it did: {interpreted:?}"
+    );
+    assert_eq!(
+        interpreted.pc,
+        CODE + 12,
+        "and the hart is parked past the `wfi`: {interpreted:?}"
+    );
+    assert_eq!(interpreted.regs[6], 0, "nothing woke it: {interpreted:?}");
+
+    let (translated, report) = run_wfi(Some(Emit::EVERYTHING));
+    assert_eq!(
+        translated, interpreted,
+        "`SliceEnd::Wfi` reaches the machine unchanged from inside a stay"
+    );
+    let report = report.expect("--jit-report has something to print");
+    assert!(
+        !report.contains("slice_ended 0,"),
+        "a stay left carrying the slice's end: {report}"
+    );
+    assert!(
+        report.contains("escape_hatch 1,"),
+        "and the `wfi` is the one instruction that reached `step_one`: {report}"
+    );
+}
