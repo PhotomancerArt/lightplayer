@@ -2660,11 +2660,26 @@ test-emu-esp32v3:
 #      SECOND image (`--features esp32,test_rmt`) run to its own done marker,
 #      768 frames off IO18 checksum-equal to the guest's own records.
 #   2. the two lints that cover both chips.
-#   3. the **reference image**, `--verify` — two builds in two cold
+#   3. the **replays** (M5 P6) — `cargo test -p lp-emu-validate`, which owns
+#      `tests/v3_replays.rs`: the committed `lp-emu:esp32v3:t1` transcript of
+#      each of the four payloads the desk sitting captured, set against the
+#      silicon capture of the SAME image bytes. It needs no board, no cable
+#      and no espflash, which is the whole point — it turns "we ran it once at
+#      the desk" into a claim the tree makes on every PR. The two memory gaps
+#      it pins (`[MEM] used` +84 B, `[stack]` high-water −480 B on the ROM-up
+#      path) are REPORTED there, never masked, and a move in either direction
+#      fails. `cargo test -p lp-cli --test validate_registry_parity` goes with
+#      it: the registry the replays read is also the registry `fw-checks`
+#      declares against, and a row that drifts makes both wrong.
+#   4. the **reference image**, `--verify` — two builds in two cold
 #      worktrees at two different paths, one sha256. It is last because it is
 #      the slow half (two full Xtensa firmware builds, ~2 minutes each cold on
 #      an M2 Max) and because a failure there is a claim about the *recipe*
 #      rather than about the machine.
+#
+# Parts 3 and 4 are here rather than as extra steps in the CI job on purpose:
+# the gate a human runs and the gate CI runs are one thing, and a step that
+# exists only in a workflow file is a step nobody can reproduce locally.
 #
 # The pinned commit is `origin/main` at the time of the run rather than a
 # frozen one, and that is deliberate: the classic has no historical commit
@@ -2672,11 +2687,18 @@ test-emu-esp32v3:
 # **dirty** `2e21b6226bcd` (ruling R7) — so there is nothing to freeze to
 # until L1 captures from a clean pin. `--verify` is still the whole claim it
 # is on the C6: this recipe gives the same image twice on this host.
+#
+# The walk twin (`just walk-esp32v3-emu`) stays OUT: it costs a release
+# `lp-cli` build plus the oracle, its claim is a gate artefact rather than a
+# per-PR gate, and the C6's `walk-esp32c6-emu` is not in CI either (M5 ruling
+# R6).
 test-emu-esp32v3-gate: test-emu-esp32v3-boot
     #!/usr/bin/env bash
     set -euo pipefail
     just lint-emu-fence
     just lint-emu-regnames
+    cargo test -p lp-emu-validate
+    cargo test -p lp-cli --test validate_registry_parity
     commit="$(git rev-parse --short HEAD)"
     scripts/emu/build-reference-image.sh --verify --chip esp32 \
         esp32,server,float-f32 "$commit" none

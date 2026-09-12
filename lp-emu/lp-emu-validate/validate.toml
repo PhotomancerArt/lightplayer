@@ -420,16 +420,29 @@ chip = "esp32v3"
 mac = "30:76:f5:ec:f6:34"
 silicon_rev = "v3.1"
 board = "domraem/dom-z-102"
-# The classic binary has no `--dump-frames` yet: M4 P3 adds it, and M5 P5 or
-# P6 flips this to `true` with the first committed `.pins.jsonl` beside a
-# classic transcript. Stated rather than inferred, for the reason
-# `ConfigurationEntry::records_pins` gives: silence is not a capability.
+# ⚠️ **STALE, and deliberately not flipped by M5 P6.** The condition this
+# comment named is now met: M4 P3 landed `--dump-frames` on the classic
+# binary and M4 P5 (#702) committed the first `.pins.jsonl` beside a classic
+# transcript (`transcripts/esp32v3/rmt-chase/lp-emu-esp32v3-t1-2026-09-11-
+# dc2df69d4.txt.pins.jsonl`). So this machine CAN decode a pad and this line
+# understates it.
+#
+# P6 left the flip alone all the same, and the reason is the phase's own
+# rule rather than doubt about the fact: a capability claim on a
+# configuration changes what every replay of that configuration reports
+# about the pin class, no payload in P6's four pairs declares a pin capture,
+# and the classic's `rmt-chase` has no silicon twin for a flipped flag to be
+# checked against. It is the director's to flip, with the walk record's §9
+# sentence about what has and has not been on a classic pad (nothing: no
+# logic analyser, no scope) written at the same time. Stated rather than
+# inferred, for the reason `ConfigurationEntry::records_pins` gives: silence
+# is not a capability — and neither is a stale `false`.
 records_pins = false
 
 [[configuration.trust]]
 class = "memory"
 grade = "modeled"
-because = "the allocator is the guest's own and the RAM model is byte-exact, and on the shipped image against the desk board — same commit 75486b114208, same ELF sha256 fb5e548982f2…, same merged.bin — G2's field-by-field read is SEVEN of nine memory-class fields equal to the byte: the boot heap arithmetic `heap=15072+112640+98304+15536=241552`, `[INIT] main stack 45280 B`, the whole `[JIT]` census (`used=0 peak=0 cap=65536 spans=0 peak_spans=0 allocs=0 frees=0 fails=0 largest_free=65536`), `[MEM] largest_free 108526`, `retry_saves 0`, the heap total, and the JIT region line `sram0 ibus 0x40088000..0x40098000 (64 KiB, placed, rwtext_end=0x40083f78)`. TWO ARE NOT EQUAL AND BOTH ARE NAMED HERE: `[MEM] used` is +84 B on this machine and the `[stack]` high-water is -960 B, and neither is sampling — both repeat deterministically on both sides, which is what refuted the sampling explanation that would have made them go away. DD48 carried them to M4 P1 (two cores) rather than to a tuning knob; whichever way that lands, this row says what it found and the replay REPORTS the two differences rather than masking them. A further trap that is not a model difference at all: espflash hard-resets after writing, so every silicon capture is a SECOND boot, while a machine handed a fresh flash copy is on its first and reports `largest_free=106494` — 2032 B short — because the `lpfs` format is still live. The arm's `second_boot` is that fact. Never tuned toward any of it"
+because = "the allocator is the guest's own and the RAM model is byte-exact, and the comparison behind this row is now a COMMITTED PAIR rather than a sitting: `lp-emu/transcripts/esp32v3/boot-idle/lp-emu-esp32v3-t1-2026-09-11-c976f17a9.txt` against `silicon-esp32v3-2026-09-11-c976f17a9-921600.txt`, replayed by `lp-emu-validate/tests/v3_replays.rs` on every run of the gate. Same commit c976f17a9a1e, same ELF sha256 670b7bf1b5bcc161772bb9c5fc2354f497522b890ee2910e6f1e80920419a1f9 stated by BOTH sidecars, same merged.bin, same ROM-up boot path, same elicited stimulus (`walks/v3-stop-all.script`), and both sides a SECOND boot. SEVEN of the nine memory-class figures in the heartbeat triple are equal to the byte: the boot heap arithmetic `heap=15072+112640+98304+15536=241552`, `[INIT] main stack 45280 B`, the whole `[JIT]` census (`used=0 peak=0 cap=65536 spans=0 peak_spans=0 allocs=0 frees=0 fails=0 largest_free=65536`), `[MEM] largest_free 108526`, `retry_saves 0`, the heap total, and the JIT region line `sram0 ibus 0x40088000..0x40098000 (64 KiB, placed, rwtext_end=0x40083f78)`. TWO ARE NOT EQUAL AND BOTH ARE NAMED HERE: `[MEM] used` is +84 B on this machine (silicon 18200, here 18284, with `free` moving the same 84 the other way — 223352 against 223268 — so it is one arena partitioned differently rather than two arenas), and the `[stack]` high-water is -480 B (silicon 16972, here 16492). Neither is sampling: both repeat deterministically on both sides, which is what refuted the sampling explanation that would have made them go away, and M4 P1's two cores did not close either — DD48's carry is spent. ⚠️ The stack figure is -480 and not the -640 `lp-emu-esp32v3/tests/boot_idle.rs` pins, and the two do not conflict: that constant is the DIRECT-load path, this is the ROM-up path, and the cross-path difference is that file's own +160 (16332 + 160 = 16492). On a board every boot is a ROM-up boot, so -480 is the LIKE-FOR-LIKE figure. Both gaps are pinned exactly in `v3_replays.rs` — a move in either direction fails — and the replay REPORTS them rather than masking them; no mask-set entry hides a memory-class field and no threshold is widened. E2 is open with Yona. A further trap that is not a model difference at all: espflash hard-resets after writing, so every silicon capture is a SECOND boot, while a machine handed a fresh flash copy is on its first and reports `largest_free=106494` — 2032 B short — because the `lpfs` format is still live. The arm's `second_boot` is that fact, the runner acts on it, and `largest_free` is equal to the byte because it does. BETWEEN TWO HOSTS: this desk and the CI runner build the same commit into ELFs 500 bytes apart (2,985,952 against 2,986,452 at 111976fc0) and produce IDENTICAL memory figures — stackHighWater 16,060 and usedBytes 17,044 on both — which is `scripts/heap-budget-record.json`'s `host_band`. Never tuned toward any of it"
 
 [[configuration.trust]]
 class = "timing"

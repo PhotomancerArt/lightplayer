@@ -139,10 +139,32 @@ not a licence for the pin class.
 `lp-emu:esp32v3:t1` is the same rule applied to the classic, and its `memory`
 row is the register for how a `because` is written: it names the **seven**
 memory-class fields that are equal to the byte against the desk board on the
-same bytes, **and the two that are not** — `[MEM] used` +84 B and the
-`[stack]` high-water −960 B, both deterministic on both sides, with DD48's
-carry to M4 P1 named. A `because` that listed only the wins is the thing this
-table exists to prevent.
+same bytes, **and the two that are not** — `[MEM] used` +84 B (silicon 18200,
+ours 18284) and the `[stack]` high-water −480 B (16972 against 16492), both
+deterministic on both sides. A `because` that listed only the wins is the
+thing this table exists to prevent.
+
+Since M5 P6 that row is a claim about **committed transcripts** rather than
+about a sitting: `tests/v3_replays.rs` replays the emulated twin of each of
+the four payloads the desk captured against silicon's own capture of the same
+ELF — the two sidecars state the same `firmware_sha256`, and the test asserts
+they do — and the gate recipe runs it, so the numbers above are re-checked on
+every PR that touches the classic. **The two gaps are pinned exactly there and
+a move in either direction fails**, including a move that closes one: masking
+a memory-class field or widening its threshold is the lie this table exists to
+remove, and a gap that closed is a finding to be re-read rather than a test
+that quietly goes green. E2 is open with Yona.
+
+⚠️ The stack figure is **−480 B and not the −640 B** `lp-emu-esp32v3/tests/
+boot_idle.rs` pins, and the two do not conflict: that constant is measured on
+a **direct load** and this is the **ROM-up** path, whose own cross-path gap in
+the same file is +160 B (16332 + 160 = 16492). Silicon has no direct load — on
+a board every boot is a ROM-up boot — so −480 B is the like-for-like number.
+
+Every classic class is still **`modeled`**, including the two where the
+evidence is now large (372 memory values byte-equal on the compile harness,
+360 structural values on the cycle kernels). Evidence goes in the `because`; a
+promotion is the director's.
 
 It also has **one** time grade, and that is a statement rather than an
 omission: `TimeGrade` on `lp-emu-esp32v3` has one arm, there is no measured
@@ -387,6 +409,28 @@ copy is on its **first** boot and reports `largest_free=106494` — 2032 bytes
 short — for a reason that has nothing to do with the model. (The C6's
 `fresh_chip` says very nearly the opposite thing, and the two are not
 interchangeable.)
+
+Since M5 P6 the **runner acts on it**. A `second_boot` payload's plan copies
+the merged image onto a **writable** part — `--flash`, not `--merged`, which
+is `--flash-copy` and never writes back — and runs the machine over it twice,
+with the same command line both times. The first run formats and flushes; the
+second is the one the transcript is of, because the machine *creates* its
+capture file rather than appending to it. The copy happens on every run, so a
+part left behind by an earlier recording cannot turn the first boot into a
+second one. `largest_free` is equal to the byte in the committed pair because
+of this; it was 2032 B short before.
+
+The other arm field M5 P6 added is **`sentinel`**, an override for where a
+capture of this payload *on this chip* stops. It exists for one payload and
+one reason: the classic's heartbeat triple is elicited, so `[stack] heartbeat:
+high-water` is the triple's **first** line there where on the C6 it is the
+five-second heartbeat's own, and `[MEM]` and `[JIT]` — the two the memory
+comparison is made of — arrive after it. The classic's `boot-idle` arm stops
+on `[JIT] used=` instead: a later marker on the same stimulus, never a looser
+one, and a run that does not reach it is still refused. `Payload::
+sentinel_for(chip)` and `Transcript::sentinel_marker()` are the accessors; the
+C6's synthesised arm carries no override, so every committed C6 transcript
+means exactly what it meant.
 
 ### `Link::Uart0` is not `Link::Uart0Spike`
 

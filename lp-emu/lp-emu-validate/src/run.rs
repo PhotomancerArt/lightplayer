@@ -614,7 +614,7 @@ pub fn record_set(
                 "capture {} never reached payload `{}`'s sentinel `{}`; not recording it",
                 capture.display(),
                 payload.name,
-                payload.sentinel.marker()
+                parsed.sentinel_marker()
             );
         }
         if let Some(parent) = dest.parent() {

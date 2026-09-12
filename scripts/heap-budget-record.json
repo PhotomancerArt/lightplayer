@@ -256,7 +256,7 @@
       "image": "esp32,server,float-f32",
       "configuration": "lp-emu:esp32v3:t1",
       "sample": "the FIRST heartbeat triple, elicited by one `stopAllProjects` on `[INIT] I/O task spawned` +1 ms; the run ends on the first `[JIT] used=` at 119,041 us of emulated time",
-      "stack_band_note": "MEASURED ON ONE HOST ONLY, and that is a named gap for M5 P6. 16,060 B on an M2 Max at 376ebd220, twice, byte-identical; the band is that \u00b1500 B rounded outward, which is the C6's rule (DD45's measured host-to-host spread was 128 B there) and not a fitted number. What the band exists for is that a differently laid-out image has a different deepest point: the reference image a CI runner builds is the same 2,985,952 bytes as this host's and a different sha256. Nobody has yet read this figure off a runner. P6 measures it there and either confirms the band or replaces it with the two numbers.",
+      "stack_band_note": "MEASURED ON TWO HOSTS (M5 P6), and they AGREE TO THE BYTE. This desk (M2 Max, aarch64-apple-darwin) and the `Emulator ESP32v3 (x64)` runner (ubuntu-24.04, x86_64-unknown-linux-gnu) each produce stackHighWater 16,060 B and usedBytes 17,044 B \u2014 see `host_band` below for the run the runner's figures come from. The band stays \u00b1500 B rounded outward, which is the C6's rule (DD45's measured host-to-host spread was 128 B there) and is not a fitted number: two hosts agreeing once is not a proof that a third will, and a band dropped on the strength of one agreement is a band that fails the first time a runner image is laid out differently.",
       "silicon_reference": {
         "commit": "c976f17a9",
         "transcript": "lp-emu/transcripts/esp32v3/boot-idle/silicon-esp32v3-2026-09-11-c976f17a9-921600.txt",
@@ -270,6 +270,31 @@
         },
         "gap_note": "largestFreeBlock, totalBytes and stackTotal are EQUAL to the byte (108526 / 241552 / 45280). usedBytes is 1,156 B lower here and stackHighWater 912 B lower, and NEITHER number is attributable yet: two confounders sit on top of them. (1) The silicon capture is a SECOND boot of a flash-backed lpfs (espflash hard-resets after writing); this run direct-loads with no flash chip at all and the firmware falls back to the memory FS, which is a different allocator load. (2) It is a different build \u2014 c976f17a9 in a cold worktree, sha256 670b7bf1\u2026, against this tree's 22ef9067\u2026 at the same 2,985,952 bytes. The same-image, same-flash comparison is M5 P6's emulated twin, and E2's pinned +84 B `[MEM] used` claim is a statement about THAT comparison, not about these two rows.",
         "not_a_gate": "A different image at a different commit on a different boot shape. Read it as the two rows it is, and gate on `measured`."
+      },
+      "host_band": {
+        "comment": "The BETWEEN-HOST figure (M5 P6; DD24 R6 / DD45's shape). `build-reference-image.sh --verify` already proves ONE host's reproducibility \u2014 two cold worktrees, two paths, one sha256. This is the other question: does the same commit give the same image, and the same memory figures, on two DIFFERENT hosts? The answer on the classic is no to the first and yes to the second, which is the C6's answer too (docs/reports/2026-09-08-esp32c6-emulator-walk.md \u00a77.2: ~4.7 KB of drift from the rustc binary's own host build; memory-class figures survive it, layout-dependent figures do not).",
+        "commit": "111976fc0",
+        "image": "esp32,server,float-f32",
+        "hosts": [
+          {
+            "host": "this desk \u2014 M2 Max, aarch64-apple-darwin",
+            "elf_bytes": 2985952,
+            "elf_sha256": "758bfc4fd542523b07ef9a341c6e9b7b9b0481e1313b7d584dbe1bf8fef1781f",
+            "stackHighWater": 16060,
+            "usedBytes": 17044,
+            "source": "scripts/emu/build-reference-image.sh --chip esp32 esp32,server,float-f32 111976fc0 none, and `just heap-budget-check-chips-v3` in the same tree, 2026-09-11"
+          },
+          {
+            "host": "GitHub Actions ubuntu-24.04, x86_64-unknown-linux-gnu",
+            "elf_bytes": 2986452,
+            "elf_sha256": "56abdef081bfa71b3a3020ddf1c44965482b2b0ccdfccef22a5b6ada09b24fdc",
+            "stackHighWater": 16060,
+            "usedBytes": 17044,
+            "source": "run 34655730090, job `Emulator ESP32v3 (x64)` (103447610351) on main at 111976fc0: `build-reference-image: sha256 56abdef0\u2026` and `file size 2986452` from the gate step, the two memory figures from the `Heap budget ratchet` step"
+          }
+        ],
+        "finding": "The two ELFs DIFFER: 500 bytes, 0.017 %, at the same commit with the same Xtensa toolchain (espup 1.95.0.0) and the same host rustc version (1.97.0-nightly ca9a134e0, LLVM 22.1.2). What differs is the host triple the compiler binary itself was built for, which is the C6's \u00a77.2 attribution and the debt note it cites. P5's own `stack_band_note` predicted 'the same 2,985,952 bytes as this host's and a different sha256'; the size half of that is CORRECTED here \u2014 it is not the same size.\n\nAnd the figures the gate reads are IDENTICAL on both hosts, byte for byte: stackHighWater 16,060, usedBytes 17,044, and (from the same runs) freeBytes 224,508, largestFreeBlock 108,526, totalBytes 241,552, stackTotal 45,280. That is the finding, and it is the classic's version of 'memory-class figures survive the drift'. It is not a licence to drop the band: nothing here makes 500 B of layout drift SAFE, it only shows that this particular 500 B did not move the deepest point of the main stack.",
+        "not_a_gate": "Nothing is gated on these two rows. They are the band's evidence, and the walk record's \u00a77.2 quotes them."
       }
     }
   }
