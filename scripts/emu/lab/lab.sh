@@ -11,6 +11,8 @@
 #   lab.sh report ID                               # cat report.md
 #   lab.sh jobs                                    # table of jobs and states
 #   lab.sh cancel ID
+#   lab.sh collect                                 # bench-web.sh --collect over the lab's results/ (every press, every manual run)
+#   lab.sh stage <sha>                             # build that commit in a throwaway worktree and put it in the store; prints the build id
 #   lab.sh home | token | curl /status [curl args] # LAB_HOME; the token FILE's path; authenticated passthrough
 #   lab.sh install [--force]                       # the server agent + the exposure (config.json "exposure": tailscale | ngrok); prints the bookmark
 #   lab.sh uninstall | restart [server|tunnel]     # bootout both / kickstart one or both
@@ -32,7 +34,7 @@ set -euo pipefail
 
 home="${LAB_HOME:-$HOME/.photomancer/emu-lab}"
 
-usage() { sed -n '2,29p' "$0"; }
+usage() { sed -n '2,20p' "$0"; }
 
 need_home() {
     [[ -f "$home/config.json" && -f "$home/token" ]] || {
@@ -265,8 +267,48 @@ cmd_logs() {
     tail -n "$n" "$home/log/$which.log"
 }
 
+# Build a commit and put it in the store, from a throwaway detached worktree
+# of the PRIMARY checkout (worktrees of worktrees are a mess). The tree's own
+# bench-web.sh builds and stages (every head has --no-serve); THIS tree's
+# script imports the stage (--from-stage exists only from this plan on). The
+# pinned reference ELFs are identical across heads, so an existing store copy
+# is pointed at instead of rebuilding them.
+cmd_stage() {
+    local sha="${1:?lab stage needs a commit}"
+    need_home
+    local primary; primary="$(git -C "$repo" worktree list --porcelain | head -1 | sed 's/^worktree //')"
+    local full; full="$(git -C "$primary" rev-parse --verify "$sha^{commit}" 2>/dev/null)" || { echo "lab: $sha is not a commit in $primary" >&2; exit 1; }
+    local short="${full:0:7}"
+    if [[ "$full" == "$(git -C "$primary" rev-parse HEAD)" && -n "$(git -C "$primary" status --porcelain)" ]]; then
+        echo "lab: $short is the primary checkout's HEAD and that tree is dirty; the store would hold the commit, not what you are looking at. Commit first, or stage from that tree with bench-web.sh --stage-into." >&2
+        exit 1
+    fi
+    local wt="$home/.stage/$short"
+    git -C "$primary" worktree remove --force "$wt" >/dev/null 2>&1 || true
+    rm -rf "$wt"
+    git -C "$primary" worktree add --detach "$wt" "$full" >&2
+    # Point the tree at the store's ELFs by slug when a build already holds them.
+    local env=() b m slug var
+    b="$(ls -d "$home"/builds/*/ 2>/dev/null | head -1)"
+    if [[ -n "$b" && -f "$b/manifest.json" ]]; then
+        for m in $(jq -r '.images[] | "\(.slug)=\(.elf)"' "$b/manifest.json"); do
+            slug="${m%%=*}"
+            var="LP_EMU_C6_REF_$(tr 'a-z-' 'A-Z_' <<<"$slug")"
+            [[ -f "$b/${m#*=}" ]] && env+=("$var=$(cd "$b" && realpath "${m#*=}")")
+        done
+    fi
+    echo "lab: building $short in $wt (minutes on a cold tree)" >&2
+    ( cd "$wt" && env "${env[@]}" scripts/emu/bench-web.sh --no-serve >&2 ) || { echo "lab: build failed in $wt (left in place for a look)" >&2; exit 1; }
+    local id
+    id="$("$here/../bench-web.sh" --stage-into "$home" --from-stage "$wt/target/emu-bench-web")"
+    git -C "$primary" worktree remove --force "$wt" >&2
+    echo "$id"
+}
+
 cmd="${1:-}"; [[ $# -gt 0 ]] && shift
 case "$cmd" in
+    collect) need_home; "$here/../bench-web.sh" --collect "$home/results" ;;
+    stage) cmd_stage "$@" ;;
     install) cmd_install "$@" ;;
     uninstall) cmd_uninstall ;;
     restart) cmd_restart "$@" ;;

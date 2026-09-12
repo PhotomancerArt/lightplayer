@@ -858,9 +858,30 @@ just clippy-emu-jit                             # the `jit` feature's own lint s
 just bench-emu-c6-pgo                           # PGO recipe on top of the probe (opt-in, never a default build)
 just bench-emu-web                              # the same probe in a browser, TRANSLATED core by default (wasip1 + JS WASI shim, LAN-served)
 bun target/emu-bench-web/bench-cli.mjs --stage target/emu-bench-web   # the desk-engine half of that rig (node too)
+just emu-lab status|queue|wait|report           # the perf lab: the phone joins once, the director queues the presses (below)
 just bench-emu-xt                               # the Xtensa core's probe (same rules)
 cargo run -p lp-cli -- validate run emu-m3 --config lp-emu:esp32c6:t1 --dry-run
 ```
+
+#### The perf lab: the phone joins once, the director queues the presses
+
+`scripts/emu/lab/` is a job queue with presence over the bench rig above
+(ADR `2026-09-12-emulator-perf-lab-job-queue-with-presence`). A device opens
+one bookmarked tab and taps Join; a launchd-run server on the desk holds its
+presence over SSE, owns the queue, and enforces the DD41 protocol (presses
+spaced by minutes from the END of the previous one, interleaved A/B on one
+device, the interpreter row as the thermal control) and computes the
+best-of-N + same-press-ratio table itself. The director drives it with
+`just emu-lab queue --ab <idA> <idB> --rows gate-rows --repeats 5 --spacing 3m`,
+ONE background `just emu-lab wait --job <id>` (never a poll), and
+`just emu-lab report <id>`; builds go into the store per sha with
+`just emu-lab stage <sha>` or `scripts/emu/bench-web.sh --stage-into
+~/.photomancer/emu-lab`. Results land in `~/.photomancer/emu-lab/results/`
+(the rig's own `result-*.json` shape, `bench-web.sh --collect <dir>`).
+**Agents never open the lab page themselves**: a hidden tab is refused by
+design, and a headless browser's number is a desk number. Phone numbers
+confirm direction (DD43); the desk proxy stays the phase bar. Runbook:
+`scripts/emu/lab/README.md`.
 
 #### Which reference image you quote decides what you have measured
 

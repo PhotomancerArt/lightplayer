@@ -3,6 +3,7 @@
 #
 #   just bench-emu-web              # build, stage, serve on the LAN
 #   just bench-emu-web --collect    # print every uploaded result-*.json as a table
+#   scripts/emu/bench-web.sh --collect ~/.photomancer/emu-lab/results   # …over any directory of them (the perf lab's)
 #   scripts/emu/bench-web.sh --no-build       # skip the wasip1 rebuild
 #   scripts/emu/bench-web.sh --no-serve       # build and stage only
 #   scripts/emu/bench-web.sh --port 12345     # serve on a specific port instead
@@ -64,16 +65,21 @@ do_serve=1
 port=""
 stage_into=""
 from_stage=""
+collect_dir=""
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        --collect) do_collect=1; shift ;;
+        --collect)
+            do_collect=1; shift
+            # An optional directory: the perf lab keeps the same result-*.json
+            # shape under ~/.photomancer/emu-lab/results (D12), one per press.
+            if [[ $# -gt 0 && "$1" != --* ]]; then collect_dir="$1"; shift; fi ;;
         --no-build) do_build=0; shift ;;
         --no-serve) do_serve=0; shift ;;
         --port) port="${2:?--port needs a number}"; shift 2 ;;
         --stage-into) stage_into="${2:?--stage-into needs the lab home}"; shift 2 ;;
         --from-stage) from_stage="${2:?--from-stage needs a staged directory}"; shift 2 ;;
-        -h|--help) sed -n '2,24p' "$0"; exit 0 ;;
+        -h|--help) sed -n '2,25p' "$0"; exit 0 ;;
         *) echo "bench-web: unknown option $1" >&2; exit 2 ;;
     esac
 done
@@ -95,11 +101,12 @@ fi
 
 # --- --collect: print every uploaded result as a table, no build/serve -----
 if [[ $do_collect -eq 1 ]]; then
+    collect_dir="${collect_dir:-$stage_dir}"
     shopt -s nullglob
-    files=("$stage_dir"/result-*.json)
+    files=("$collect_dir"/result-*.json)
     shopt -u nullglob
     if [[ ${#files[@]} -eq 0 ]]; then
-        echo "bench-web: no result-*.json in $stage_dir yet (run the page first)" >&2
+        echo "bench-web: no result-*.json in $collect_dir yet (run the page first)" >&2
         exit 1
     fi
     printf '%-13s %-15s %-16s %-4s %-6s %4s %8s %9s %9s %7s\n' \
@@ -117,6 +124,10 @@ if [[ $do_collect -eq 1 ]]; then
             *Macintosh*) device="Mac" ;;
             *Android*) device="Android" ;;
         esac
+        # A lab result names its device (the name Yona typed at Join); the UA
+        # guess is for the rig's own uploads, which carry none.
+        named="$(jq -r '.deviceName // empty' "$f")"
+        [[ -z "$named" ]] || device="${named:0:11}"
         case "$ua" in
             *CriOS*|*Chrome/*) engine="V8" ;;
             *Firefox/*|*FxiOS*) engine="SpiderMonkey" ;;

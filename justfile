@@ -2376,7 +2376,7 @@ test: build-rv32-builtins build-xt-builtins build-xt-fixtures _test-parallel
 
 [parallel]
 [private]
-_test-parallel: test-rust test-filetests
+_test-parallel: test-rust test-filetests test-emu-lab
 
 test-rust-core:
     cargo test
@@ -3114,7 +3114,7 @@ emu-lab *args:
 # The lab's own tests: the real server on port 0 in a temp home, a fake page
 # client driving the queue at test speed. Dependency-free (`node --test`).
 test-emu-lab:
-    node --test 'scripts/emu/lab/test/*.test.mjs'
+    node --test scripts/emu/lab/test/*.test.mjs
 
 # The Xtensa core's speed probe: the `bench_loop` fixture at a round count
 # that retires >=100 M instructions in ONE run, reported as user seconds,

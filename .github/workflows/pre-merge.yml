@@ -1234,6 +1234,18 @@ jobs:
       - name: Emulator C6 boot tests + replays
         run: cd lp2025 && just test-emu-c6-boot
 
+      # The emulator perf lab's own tests (scripts/emu/lab/, `node --test`):
+      # the real lab server on port 0 in a temp home, a fake page client
+      # driving the queue at test speed, the DD41 report against the G-M7B
+      # numbers. Dependency-free; node is on the runner already. Lives here
+      # because scripts/emu/** is this job's path filter and the lab is the
+      # C6 bench rig's front end.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Lab tests
+        run: cd lp2025 && just test-emu-lab
+
       # **The differential oracle, tier (b)** (M7 JD14, ruled by JD23): the
       # same binary, the same pinned image, `--jit` against `--interpreter`,
       # and five readings compared byte for byte — UART0, the `stopped after`

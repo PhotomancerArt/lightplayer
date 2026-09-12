@@ -73,11 +73,13 @@ home. Re-staging an id replaces the directory in one rename.
 
 `--from-stage` imports a directory *another* checkout's own
 `bench-web.sh --no-serve` produced, which is how a head older than this flag
-gets into the store: `git worktree add --detach /tmp/lab-<sha> <sha>`, run
-that tree's script `--no-serve`, then this tree's `--stage-into … --from-stage
-/tmp/lab-<sha>/target/emu-bench-web`, then `git worktree remove /tmp/lab-<sha>`.
-(The reference ELFs are pinned images, identical across heads; point
-`LP_EMU_C6_REF_*` at an existing stage's ELFs to skip rebuilding them.)
+gets into the store. `lab.sh stage <sha>` does the whole dance: a detached
+throwaway worktree of the primary checkout under `$LAB_HOME/.stage/<sha>`,
+that tree's own `--no-serve` (with `LP_EMU_C6_REF_*` pointed at the store's
+existing ELFs so the pinned reference images are not rebuilt), this tree's
+`--stage-into --from-stage`, and the worktree removed. It refuses the
+primary checkout's HEAD while that tree is dirty — the store would hold the
+commit, not what you are looking at.
 
 The rig's desk-engine half runs off a store build unchanged, symlinked ELFs
 and all:
@@ -201,7 +203,8 @@ A job is `jobs/<id>.json`; its presses land in `jobs/<id>/presses/<n>.json`
 (the page's payload) and, when the last press is terminal, `report.json` and
 `report.md` beside them. Every press also writes a legacy
 `results/result-<ISO>.json` with `job`, `press`, `buildId`, `device` added
-(D12).
+(D12); `lab.sh collect` (= `bench-web.sh --collect ~/.photomancer/emu-lab/results`)
+prints them all as the rig's table, device column from the lab's name.
 
 ```json
 {
@@ -272,7 +275,9 @@ five-press table, generated.
 ## `lab.sh`
 
 ```bash
-lab.sh status | devices | jobs | report <id> | cancel <id> | home | token | curl <path> [curl args]
+lab.sh status | devices | jobs | report <id> | cancel <id> | collect | home | token | curl <path> [curl args]
+lab.sh stage <sha>                      # build that commit in a throwaway worktree of the primary checkout, put it in the store
+lab.sh install [--force] | uninstall | restart [server|tunnel] | url | logs [-n N] [server|tunnel]
 lab.sh queue --build 23a3d3c --rows gate-rows --repeats 3 --spacing 3m [--device NAME] [--ttl 24h] [--note …]
 lab.sh queue --ab 86cb2e0 23a3d3c --rows gate-rows --repeats 5 --spacing 3m
 lab.sh queue --build X --row render-basic:t2:jit:8 --row render-basic:t2:interp
@@ -363,7 +368,7 @@ number:
 ## Tests
 
 ```bash
-just test-emu-lab        # node --test scripts/emu/lab/test/*.test.mjs
+just test-emu-lab        # node --test scripts/emu/lab/test/*.test.mjs — also inside `just test`, and the emu_c6 CI job's "Lab tests" step
 ```
 
 The tests spawn the real `server.mjs` on port 0 in a temp home
