@@ -88,9 +88,17 @@ adds a module rather than re-emitting the image, which took the boot cost from
 three whole-image emits to one plus two increments (1,806 ms → 869 ms of
 emit).
 
-`BootMode::RomUp` keeps translation off entirely: the mask ROM and the
-second-stage bootloader publish code without ever emitting a `fence.i`, so
-there is nothing to hang the invalidation rule on.
+`BootMode::RomUp` keeps translation off entirely (**DD19**, asserted as rule 4
+of `tests/jit_default.rs`): the mask ROM and the second-stage bootloader
+publish code without ever emitting a `fence.i`, so there is nothing to hang
+the invalidation rule on.
+
+**That has a consequence worth stating where nobody can miss it: a ROM-up
+board does not get any of this.** Every emulated board in Studio-in-a-tab is
+ROM-up today — it is the closer twin of flashing and resetting a real board —
+so the default flip of §2 changes nothing for them; they still interpret.
+ROM-up translation is its own piece of work, it is deliberately **last**
+(DD19), and it belongs to the emulator-loop milestone rather than to M7.
 
 ### 2. The translated core is the wasm build's core; the interpreter is the oracle and a library (R9, JD9)
 
@@ -424,6 +432,55 @@ P4 head; M7 P7 measured neutral, so this is M7's closing phone number):
 interpreter on the same device and the same press. The pass bar of 1.5× against
 real time is not met. The target of 3× is not met.**
 
+### Per image, and where the translated core is SLOWER
+
+`render-basic` is the image the whole ladder is quoted on, and quoting only
+`render-basic` hides something real. node/V8, 16 blocks a function, a 5,500 ms
+emulated bound, one invocation per image running both legs back to back,
+best of three invocations, load 2.6–4.3 throughout, UART0 sha identical
+between the two legs of every image:
+
+| image | grade | translated | `--interpreter` | translated ÷ interpreter | mean stay | coverage |
+|---|---|---:|---:|---:|---:|---:|
+| `harness` | t2 | **3.062×** | 1.143× | **2.68×** | 1354.0 | 99.63 % |
+| `boot-idle-memfs` | t2 | 2.808× | **5.293×** | **0.53×** | 43.7 | 97.82 % |
+| `render-basic` | t2 | 0.990× | 0.557× | 1.78× | 68.9 | 97.94 % |
+| `render-rocaille` | t2 | 1.166× | 0.673× | 1.73× | 30.0 | 99.30 % |
+
+**On `boot-idle-memfs` the translated core is a little under half the speed of
+its own interpreter.** That is not a defect and it is not noise; it is the
+design's cost model meeting a workload the design is not for, and the
+mechanism is arithmetic:
+
+- The run is **sparse**. It retires 51.0 M instructions in 5.5 emulated
+  seconds, against `render-basic`'s 542.9 M — the guest boots and then idles.
+  The interpreter does the whole thing in 1.04 s of wall (5.29× real time).
+- The **translation cost is fixed and is paid anyway**: discover 144 ms +
+  emit 892 ms + compile 41 ms ≈ **1.08 s**, which is most of the translated
+  leg's 1.96 s. Translating 184,890 blocks for a run that executes a small
+  fraction of them is the whole loss.
+- What is left over — about 0.88 s of steady state against the interpreter's
+  1.04 s — is only a ~1.2× win, because a boot/idle workload is **short-stay
+  and exit-heavy**: mean stay 43.7 instructions, 1.14 M entries, 626 k
+  indirect-misses, 1.11 M instructions interpreted between stays. Every one of
+  those is an entry protocol paid to retire a handful of instructions, which is
+  §1's 77-instruction measurement showing up as a whole image rather than as a
+  region.
+
+The general rule, stated so it does not have to be rediscovered: **a translated
+core wins where stays are long and loses where they are short or where the run
+is too small to amortize its own translation.** `harness` is the far end of
+that — 1,354-instruction stays and 2.68× over its interpreter; the in-tab lane
+measured the other far end, a mask-ROM ELF direct-booted into an MMIO-poll-bound
+loop, at 0.24× translated against 0.48× interpreted in node.
+
+**This ADR does not change the default over it.** The default is the wasm
+build's, it is reversible with `--interpreter`, and `render-basic` and
+`render-rocaille` — the images the product's own workload looks like — both
+gain. Whether a per-image or per-workload policy is worth having is a ruling
+for the director and a candidate for the emulator-loop milestone, not
+something to decide from four rows.
+
 **The desk proxy** on `main` at M7's close, one invocation per engine,
 interleaved, best-of-N, load quoted in each PR body, UART0
 `2407828f80684331` on every leg: **node/V8 at 16 blocks/fn ≈ 0.98–1.00×**,
@@ -502,6 +559,13 @@ it will find.
 - **A wasm embedder that never calls `jitHost.attach(instance)` now fails at
   boot** instead of quietly interpreting. That is deliberate: a silently
   interpreting wasm build would be a wrong *number* rather than a loud error.
+- **A ROM-up board still interprets.** The flip is a wasm-target default, and
+  ROM-up boots refuse translation (DD19), so Studio-in-a-tab's emulated boards
+  are unaffected until ROM-up translation is done.
+- **On a sparse, short-stay image the translated core is slower than the
+  interpreter** — `boot-idle-memfs` at 0.53× of its own interpreter. The
+  default is kept and the number is on record; a per-workload policy is a
+  ruling nobody has been asked for yet.
 - **M7 is closed at ~1.0× real time and ~1.75× over the emulator's own
   interpreter on the phone**, below the 1.5× pass bar. The work is reversible
   at the flip of `--interpreter`, and the evidence for the next milestone is
@@ -564,6 +628,11 @@ it will find.
   is a 76 MB `module.wasm` and a 24 MB `memory.bin` beside 67 KB of entries.
 - **The boot cost on the phone**, re-measured against JD20's 0.4–0.7 s budget
   on a head that has M7b P1's incremental `fence.i`.
+- **ROM-up translation** (DD19, last) — without it no in-tab emulated board
+  runs translated code at all.
+- **Whether the default should be per-workload**, given `boot-idle-memfs` at
+  0.53× of its own interpreter. A director's ruling, with the emulator-loop
+  milestone as its natural home.
 - **M7b P6** (PR #726) removes the undecodable exit class entirely (710,536 →
   1, coverage 97.94 % → 98.07 %, mean stay 68.9 → 75.2) and reads **−1 %** at
   the 5.5 s bar because 15,896 escape sites cost 328 B each. Held unmerged

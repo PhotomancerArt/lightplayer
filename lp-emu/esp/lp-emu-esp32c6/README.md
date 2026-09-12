@@ -1590,10 +1590,40 @@ depends on this binary starting fast.
 an identical everything — it is the free oracle, it costs nothing to run, and
 it is the way back from the flip.
 
+**ROM-up boots do not translate, and that is not a detail** (DD19,
+`tests/jit_default.rs` rule 4). `BootMode::RomUp` — the mask ROM and the
+second-stage bootloader out of a merged flash image, which is the closer twin
+of flashing and resetting a board — keeps translation **off entirely**, because
+that path publishes code without ever emitting a `fence.i` and there is
+nothing to hang the invalidation rule on. So an embedding whose boards are all
+ROM-up **still interprets after the flip**, and the default change buys it
+nothing: every emulated board in Studio-in-a-tab is ROM-up today. ROM-up
+translation is its own piece of work and it is last (DD19); it belongs to the
+emulator-loop milestone, not to M7.
+
+### Embedding the wasm module
+
 An embedder of the wasm module that never calls `jitHost.attach(instance)` now
 fails at boot with `no JS host is wired to this instance` rather than quietly
 interpreting, and that is deliberate: after the flip, a silently interpreted
 run is a measurement nobody can tell apart from the control.
+
+The module imports **two namespaces**:
+
+- `wasi_snapshot_preview1` — **19 functions** as of M7 P7, which is one more
+  than before it: `path_create_directory` joined the list. An embedder's shim
+  must implement exactly what the module declares, so a shim written against
+  the old list fails to instantiate with a `LinkError` naming the one missing
+  function. The full set is `args_get`, `args_sizes_get`, `clock_time_get`,
+  `environ_get`, `environ_sizes_get`, `fd_close`, `fd_fdstat_get`,
+  `fd_fdstat_set_flags`, `fd_filestat_get`, `fd_prestat_dir_name`,
+  `fd_prestat_get`, `fd_read`, `fd_write`, `path_create_directory`,
+  `path_filestat_get`, `path_open`, `proc_exit`, `random_get`, `sock_accept`.
+  `scripts/emu/bench-web/wasi-shim.js` is a working one.
+- `emu_host` — exactly **two**: `jit_compile` and `jit_release`, called once
+  per translation event and never on a hot path.
+  `lp-emu/lp-emu-jit/js/jit-host.js` provides both, and it is the single
+  source every embedding copies from.
 
 | flag | what it does |
 |---|---|
