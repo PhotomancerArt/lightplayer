@@ -212,8 +212,8 @@ The other three payloads of the same sitting, same-bytes pairs, same replay:
 | payload | verdict |
 |---|---|
 | `shader-compile-stress` | **REPLAY OK** — **372 memory comparisons, all equal**; 190 structural, all equal; 188 timing differ and are not gated |
-| `gpio-calibrate` | **REPLAY OK** — header and `CAL READY target=esp32v3` on both |
-| `cycle-probe` | **REPLAY OK** — 360 structural, all equal; 160 CCOUNT figures recorded and gated nowhere |
+| `gpio-calibrate` | **REPLAY OK — and it compares nothing.** ⚠️ The class table is empty: the payload's whole output is its `[fw-checks-header]` and `CAL READY target=esp32v3`, so what agrees is two lines of text and **no typed field at all**. A green here is evidence that the same image reached the same readiness line on both machines, and evidence about the GPIO path of exactly nothing. Named because a row of OKs invites the opposite reading |
+| `cycle-probe` | **REPLAY OK** — 360 structural, all equal; 160 CCOUNT figures recorded and gated nowhere (§3) |
 
 ### What this walk's tree measures, beside silicon's capture
 
@@ -521,6 +521,10 @@ still owed and stated as owed.
   classic binary (§6).
 - **A second oracle for the frame.** The host oracle is two independent
   engines and it is met; no third machine was asked.
+- **Any comparison of a GPIO *value* between the two machines.** The
+  `gpio-calibrate` pair agrees on two lines of text and no typed field (§2).
+  The C6's `gpio-input` payload — contact bounce, a debouncer, a quadrature
+  encoder through a both-edge interrupt — has no classic twin.
 - **Speed numbers.** `just bench-emu-esp32v3` is M7's, and this plan's rule is
   that speed is measured, never promised.
 
