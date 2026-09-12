@@ -961,12 +961,14 @@ used to say "layout beyond that ordering is deliberately not optimised: no
 measurement yet says it matters". It does not matter, and now that is a
 measurement.
 
-`blocks::adjacency_order` is a depth-first trace layout: each block followed
-by the successor it runs into (fall-through, then the taken branch, then a
-call's own body), a new trace started only when the current one meets a block
-already placed. `LP_EMU_JIT_BLOCK_ORDER=adjacency` selects it.
-`render-basic` t2, 5,500 ms, `p6b-rows.mjs`, interleaved, best-of-3, **one
-invocation per engine**, UART0 `2407828f80684331` on all twenty-four rows:
+The candidate was a depth-first **trace layout**: each block followed by the
+successor it runs into (fall-through, then the taken branch, then a call's own
+body), a new trace started only when the current one meets a block already
+placed. M7b P5 implemented it behind `LP_EMU_JIT_BLOCK_ORDER=adjacency`,
+measured it, and **M7 P9 removed it and its plumbing (DD58)** — the numbers
+below are why, and they are what is kept. `render-basic` t2, 5,500 ms,
+`p6b-rows.mjs`, interleaved, best-of-3, **one invocation per engine**, UART0
+`2407828f80684331` on all twenty-four rows:
 
 | engine | blocks/fn | address | trace layout | change |
 |---|---:|---:|---:|---:|
@@ -992,14 +994,22 @@ literally nothing. A depth-first walk that also chases `jal` targets pulls
 callees out of their address neighbourhood and breaks those runs up. **A
 layout policy has nothing to win here and 6.2 % of crosses to lose.**
 
-The switch is kept, off, because the answer is worth more than the code costs
-(one environment read per install, three installs a run) and because deleting
-it would leave only a sentence where there is now a number. Every exit-census
-row is identical between the two layouts, the eight-cell free oracle is `same`
-on all five readings under the trace layout, and
-`translate_roundtrip.rs::a_trace_layout_retires_identically_to_address_order`
-asserts it under wasmtime at 1, 8 and 64 blocks a function: **a layout is a
-permutation of the set and nothing else the guest can see.**
+**The switch is gone (M7 P9, DD58).** P5 kept it off-by-default on the
+argument that the answer was worth the code; P9 took the opposite view, which
+is the standing one for a measured-and-rejected candidate: the number belongs
+in this file, the losing implementation does not belong in the emitter. What
+came out is `blocks::adjacency_order`, its `successors` walk, `BlockOrder`,
+`BlockSet::permuted`, the `LP_EMU_JIT_BLOCK_ORDER` reader and the three
+install sites that consulted it — about 400 lines. The block set is the order
+`discover` produces, which is guest address order, and nothing chooses.
+
+While it existed it was proved exact, and that is worth recording because it
+is what makes the verdict a verdict and not a suspicion: every exit-census row
+was identical between the two layouts, the eight-cell free oracle read `same`
+on all five readings under the trace layout, and a round-trip test asserted
+the two retire identically under wasmtime at 1, 8 and 64 blocks a function.
+**A layout is a permutation of the set and nothing else the guest can see** —
+the trace layout was not wrong, it was slower.
 
 ### What the replay harness was getting wrong (P5)
 

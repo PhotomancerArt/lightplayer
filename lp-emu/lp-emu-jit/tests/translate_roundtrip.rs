@@ -15,7 +15,7 @@
 
 use lp_emu_core::CycleModel;
 use lp_emu_core::arena::GuestArena;
-use lp_emu_jit::blocks::{BlockSet, adjacency_order};
+use lp_emu_jit::blocks::BlockSet;
 use lp_emu_jit::discover::discover;
 use lp_emu_jit::dispatch::{Selector, emit_module, target_table_bytes, write_target_tables};
 use lp_emu_jit::host::{
@@ -1144,47 +1144,6 @@ fn hop_ring(n: u32, regs: u32) -> Vec<(u32, u32)> {
     out
 }
 
-/// The same ring, hopping by `stride` instead of by one (M7b P5).
-///
-/// `hop_ring`'s successor is the block laid out next, so a trace layout of it
-/// IS address order and a layout test built on it tests nothing. A stride
-/// coprime with `n` visits every block exactly once in an order the addresses
-/// do not predict, which is the fixture a layout has to survive.
-fn scatter_ring(n: u32, regs: u32, stride: u32) -> Vec<(u32, u32)> {
-    assert_eq!(
-        gcd(stride, n),
-        1,
-        "a stride that shares a factor with the ring does not reach every block"
-    );
-    fn gcd(a: u32, b: u32) -> u32 {
-        if b == 0 { a } else { gcd(b, a % b) }
-    }
-    fn addi(rd: u32, rs1: u32, imm: i32) -> u32 {
-        ((imm as u32 & 0xfff) << 20) | (rs1 << 15) | (rd << 7) | 0x13
-    }
-    fn jal(rd: u32, offset: i32) -> u32 {
-        let o = offset as u32;
-        (((o >> 20) & 1) << 31)
-            | (((o >> 1) & 0x3ff) << 21)
-            | (((o >> 11) & 1) << 20)
-            | (((o >> 12) & 0xff) << 12)
-            | (rd << 7)
-            | 0x6f
-    }
-    let step = 4 * (regs + 1);
-    let mut out = Vec::with_capacity(((regs + 1) * n) as usize);
-    for i in 0..n {
-        let pc = GUEST_BASE + step * i;
-        let next = GUEST_BASE + step * ((i + stride) % n);
-        for r in 0..regs {
-            out.push((pc + 4 * r, addi(1 + r, 1 + r, 1)));
-        }
-        let at = pc + 4 * regs;
-        out.push((at, jal(0, next.wrapping_sub(at) as i32)));
-    }
-    out
-}
-
 /// The ring's whole block set, however many blocks that is.
 fn ring_set(rig: &Rig, n: u32) -> BlockSet {
     discover(&[GUEST_BASE], n as usize + 8, &mut |pc| {
@@ -1375,108 +1334,6 @@ fn the_two_selector_shapes_retire_identically() {
                 flat.cross
             );
         }
-    }
-}
-
-// --- M7b P5: the layout is a permutation and nothing else -------------------
-
-/// **A layout policy is exact by construction, and here is the engine saying
-/// so.** M7b P5.
-///
-/// A global block index is a position in `BlockSet::blocks`, and four
-/// different things read that position: the chunk a block is emitted into,
-/// the selector's `index / chunk`, an edge's lookup in `BlockSet::index`, and
-/// the indirect page map's enumeration. `BlockSet::permuted` moves all four
-/// together, so the guest cannot tell — which is an argument, and this is the
-/// measurement.
-///
-/// Run at three sizes, and one block a function is in the list on purpose:
-/// there every edge goes through the selector, so a layout that got the index
-/// arithmetic wrong could not hide inside a `br_table`.
-#[test]
-fn a_trace_layout_retires_identically_to_address_order() {
-    const N: u32 = 64;
-    const END: u64 = 400_000;
-    // A ring that hops by 7 rather than by 1. `hop_ring`'s own ring runs
-    // `i -> i + 1`, which is already the order a trace lays out, so it would
-    // compare a set with itself; 7 is coprime with 64, so the trace visits
-    // every block once in an order that is nothing like the addresses'.
-    let program = scatter_ring(N, 31, 7);
-
-    for fn_blocks in [1usize, 8, 64] {
-        let mut address_rig = Rig::new(&program);
-        let set = ring_set(&address_rig, N);
-        let traced = set.permuted(&adjacency_order(&set));
-
-        // The fixture has to be one the layout actually moves, or the test
-        // passes by comparing a set with itself.
-        assert_ne!(
-            set.blocks.iter().map(|b| b.pc).collect::<Vec<_>>(),
-            traced.blocks.iter().map(|b| b.pc).collect::<Vec<_>>(),
-            "the trace layout left this ring in address order; the fixture is not exercising it"
-        );
-        assert_eq!(traced.blocks.len(), set.blocks.len());
-
-        let address = address_rig.run_split(
-            &format!("p5-layout-address-{fn_blocks}"),
-            &set,
-            Emit::EVERYTHING,
-            [0; 32],
-            END,
-            fn_blocks,
-        );
-
-        let mut traced_rig = Rig::new(&program);
-        let adjacency = traced_rig.run_split(
-            &format!("p5-layout-adjacency-{fn_blocks}"),
-            &traced,
-            Emit::EVERYTHING,
-            [0; 32],
-            END,
-            fn_blocks,
-        );
-
-        assert_eq!(
-            address.regs, adjacency.regs,
-            "at {fn_blocks} blocks a function the two layouts compute different registers"
-        );
-        assert_eq!(
-            address.instret, adjacency.instret,
-            "at {fn_blocks}: different instruction counts"
-        );
-        assert_eq!(
-            address.cycle, adjacency.cycle,
-            "at {fn_blocks}: different cycles"
-        );
-        assert_eq!(
-            address.pc, adjacency.pc,
-            "at {fn_blocks}: different exit pc"
-        );
-        assert_eq!(
-            address.flags, adjacency.flags,
-            "at {fn_blocks}: different flags"
-        );
-        assert_eq!(
-            address.indirect_miss, adjacency.indirect_miss,
-            "at {fn_blocks}: different indirect misses"
-        );
-        assert_eq!(
-            address.loads, adjacency.loads,
-            "at {fn_blocks}: different loads"
-        );
-        assert_eq!(
-            address.stores, adjacency.stores,
-            "at {fn_blocks}: different stores"
-        );
-        assert_eq!(
-            address.escapes, adjacency.escapes,
-            "at {fn_blocks}: different escapes"
-        );
-        assert!(
-            address.instret > 10_000,
-            "the stay has to be long enough to be worth comparing: {} instructions",
-            address.instret
-        );
     }
 }
 
