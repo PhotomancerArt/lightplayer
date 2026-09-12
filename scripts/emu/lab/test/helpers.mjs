@@ -25,9 +25,12 @@ export function startServer(home, env = {}) {
       const m = /listening on (http:\/\/[^\s]+)/.exec(out);
       if (m) {
         const token = fs.readFileSync(path.join(home, 'token'), 'utf8').trim();
+        const exited = new Promise((r) => child.on('exit', r));
         resolve({
           url: m[1], token, home, child,
-          stop() { child.kill('SIGTERM'); },
+          /// Resolves once the child is gone — a test that edits the home or
+          /// restarts on it must not race the old process's last tick.
+          stop() { child.kill('SIGTERM'); return exited; },
           stderr() { return err; },
         });
       }
@@ -70,8 +73,9 @@ export async function readSse(url, signal, headers = {}) {
           else queue.push(ev);
         }
       }
-    } catch (e) {
-      if (!(e && e.name === 'AbortError')) throw e;
+    } catch {
+      // Aborted by the test, or the server went away under it: either way
+      // the stream is over, and `done` below says so.
     } finally {
       done = true;
       for (const w of waiters) w.reject(new Error('stream closed before ' + w.name));

@@ -21,6 +21,11 @@
 //   POST /devices/<id>/state                  {name, ua, cores, deviceMemory, visibility, hasFocus, wakeLock}
 //   POST /results/manual?device=<id>          a hand-taken run, the legacy result shape + manual:true (D12)
 //   GET  /status                              devices, builds, job counts, result count
+//   POST /jobs                                queue a bench job (single build or an A/B pair)
+//   GET  /jobs   GET /jobs/<id>   DELETE /jobs/<id>
+//   POST /jobs/<id>/presses/<n>/result        the page's press result (legacy shape + taint fields)
+//   POST /jobs/<id>/presses/<n>/deferred      the page received the press hidden; it will run when visible
+//   GET  /wait?job=<id>|device=any|<name>|queue=idle [&timeout=3600]   ONE blocking call (D10)
 //
 // The token is the guard, not the interface: the server binds 0.0.0.0 because
 // the LAN and the tunnel both reach it, and every write and the presence
@@ -40,6 +45,8 @@ import crypto from 'node:crypto';
 import os from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { execFileSync } from 'node:child_process';
+
+import { computeReport, renderReportMd } from './report.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const HOME = path.resolve(process.env.LAB_HOME || path.join(os.homedir(), '.photomancer', 'emu-lab'));
@@ -346,19 +353,360 @@ function status() {
     devices: allDevices().map((d) => ({ id: d.id, name: d.name, present: isPresent(d), streams: (streams.get(d.id) || new Set()).size, lastSeen: d.lastSeen, lastState: d.lastState, ua: d.ua, cores: d.cores, lastPressEndAt: d.lastPressEndAt })),
     builds: listBuilds(),
     jobs: hooks.jobCounts(),
+    tokenFailures,
     results: fs.readdirSync(path.join(HOME, 'results')).filter((f) => f.startsWith('result-') && f.endsWith('.json')).length,
   };
 }
 
-// --- the seam the queue (P3) plugs into --------------------------------------
+// --- the queue (D3, D5, D19, D20, D23) ----------------------------------------
+//
+// Jobs are files under jobs/<id>.json; presses land in jobs/<id>/presses/<n>.json
+// and the report beside them. Everything below is rebuilt from those files on
+// start, so a kill -9 loses nothing but the in-flight press, which is re-sent
+// once (a `sent` press with no result is `lost`).
 
-/// P1 ships presence and results; the scheduler arrives in P3 and replaces
-/// these. Keeping the seam explicit is what lets `status` report zeros
-/// honestly today rather than a shape that changes later.
+const TICK_MS = Number(process.env.LAB_TICK_MS || 1000);
+const COOLDOWN_MS = process.env.LAB_COOLDOWN_MS !== undefined ? Number(process.env.LAB_COOLDOWN_MS) : config.cooldownMs;
+// A press with no result after wallTimeout × rows + 120 s is lost. Tests
+// shrink it; the build's manifest sets it in life.
+const LOST_MS_OVERRIDE = process.env.LAB_LOST_MS !== undefined ? Number(process.env.LAB_LOST_MS) : null;
+const MAX_WAIT_S = 3600;
+
+const jobs = new Map(); // id -> job (the file's contents)
+
+function jobPath(id) { return path.join(HOME, 'jobs', id + '.json'); }
+function jobDir(id) { return path.join(HOME, 'jobs', id); }
+function saveJob(j) { writeJsonFile(jobPath(j.id), j); return j; }
+
+for (const f of fs.readdirSync(path.join(HOME, 'jobs')).filter((f) => f.endsWith('.json')).sort()) {
+  const j = readJsonFile(path.join(HOME, 'jobs', f));
+  if (!j || !j.id) continue;
+  // Restart: a press we sent and never heard back from is lost; give it its
+  // one re-send. A device that reconnects will get it again, once.
+  for (const p of j.presses) if (p.state === 'sent' || p.state === 'deferred') markLost(j, p, 'server restarted');
+  jobs.set(j.id, j);
+}
+if (jobs.size) log('loaded ' + jobs.size + ' job(s) from ' + path.join(HOME, 'jobs'));
+
+function newJobId() {
+  const d = new Date();
+  const pad = (n) => String(n).padStart(2, '0');
+  return 'j-' + d.getUTCFullYear() + pad(d.getUTCMonth() + 1) + pad(d.getUTCDate()) + '-' + pad(d.getUTCHours()) + pad(d.getUTCMinutes()) + '-' + crypto.randomBytes(2).toString('hex');
+}
+
+const TERMINAL = new Set(['done', 'expired', 'failed', 'cancelled']);
+const PRESS_TERMINAL = new Set(['done', 'failed']);
+const KNOWN_MODES = new Set(['jit', 'interp']);
+
+/// Validate a job request and expand its presses A1 B1 A2 B2 … (D5). Only
+/// `kind: bench` exists; the field is reserved so the shape does not forbid
+/// another kind later (Q6).
+function makeJob(body) {
+  const bad = (m) => { throw Object.assign(new Error(m), { status: 400 }); };
+  if (body.kind !== undefined && body.kind !== 'bench') bad('kind must be "bench"');
+  const builds = Array.isArray(body.builds) ? body.builds : (body.build ? [body.build] : []);
+  if (builds.length < 1 || builds.length > 2) bad('builds must name one build or an A/B pair');
+  for (const b of builds) if (!hasBuild(b)) bad('unknown build ' + b + ' (stage it: bench-web.sh --stage-into ' + HOME + ')');
+  if (builds.length === 2 && builds[0] === builds[1]) bad('an A/B pair needs two different builds');
+  let rows = body.rows ?? 'gate-rows';
+  if (rows !== 'gate-rows') {
+    if (!Array.isArray(rows) || !rows.length) bad('rows must be "gate-rows" or a non-empty list');
+    const slugs = new Set();
+    for (const b of builds) for (const im of (readJsonFile(path.join(HOME, 'builds', b, 'manifest.json')).images || [])) slugs.add(im.slug);
+    rows = rows.map((r) => {
+      if (!r || !slugs.has(r.slug)) bad('unknown image slug ' + (r && r.slug));
+      if (!KNOWN_MODES.has(r.mode)) bad('mode must be jit or interp');
+      if (!['t1', 't2'].includes(r.grade)) bad('grade must be t1 or t2');
+      return { slug: r.slug, grade: r.grade, mode: r.mode, fnBlocks: r.mode === 'jit' ? (Number(r.fnBlocks) || 32) : null, timeout: r.timeout || '5500ms' };
+    });
+  }
+  const repeats = Number(body.repeats ?? 1);
+  if (!Number.isInteger(repeats) || repeats < 1 || repeats > 20) bad('repeats must be 1–20');
+  const spacingMs = Number(body.spacingMs ?? 0);
+  if (!Number.isFinite(spacingMs) || spacingMs < 0) bad('spacingMs must be ≥ 0');
+  const ttlMs = Number(body.ttlMs ?? 86400000);
+  if (!Number.isFinite(ttlMs) || ttlMs < 60000) bad('ttlMs must be ≥ 60 s');
+  const retryTainted = Number(body.retryTainted ?? 1);
+  if (!Number.isInteger(retryTainted) || retryTainted < 0 || retryTainted > 5) bad('retryTainted must be 0–5');
+  const device = typeof body.device === 'string' && body.device ? body.device : 'any';
+  const presses = [];
+  for (let r = 0; r < repeats; r++) for (const b of builds) presses.push({ n: presses.length + 1, build: b, state: 'pending', sentAt: null, deferredAt: null, resultAt: null, resends: 0, tainted: false, taintReasons: [] });
+  return {
+    id: newJobId(), kind: 'bench', builds, rows, repeats, spacingMs, device, ttlMs, retryTainted,
+    note: typeof body.note === 'string' ? body.note.slice(0, 200) : null,
+    createdAt: new Date().toISOString(), state: 'queued', boundDevice: null, boundDeviceName: null, boundDeviceUa: null,
+    presses, lastPressEndAt: null, reportAt: null, retriesUsed: 0, error: null,
+  };
+}
+
+function jobRowCount(j) { return j.rows === 'gate-rows' ? 4 : j.rows.length; }
+
+function lostMs(j) {
+  if (LOST_MS_OVERRIDE !== null) return LOST_MS_OVERRIDE;
+  let wall = 600;
+  for (const b of j.builds) {
+    const m = readJsonFile(path.join(HOME, 'builds', b, 'manifest.json'));
+    if (m && m.defaults && m.defaults.wallTimeout) wall = Math.max(wall, Number(m.defaults.wallTimeout));
+  }
+  return (wall * jobRowCount(j) + 120) * 1000;
+}
+
+function markLost(j, p, why) {
+  if (p.resends < 1) {
+    p.resends++; p.state = 'pending'; p.sentAt = null; p.deferredAt = null;
+    log('job ' + j.id + ' press ' + p.n + ' lost (' + why + '); will re-send once');
+  } else {
+    p.state = 'failed'; p.error = 'lost twice (' + why + ')';
+    log('job ' + j.id + ' press ' + p.n + ' lost twice (' + why + '); failed');
+  }
+}
+
+/// The one view the page shows: this device's jobs. Sent whenever it changes.
+const lastQueueSent = new Map();
+function queueViewFor(deviceId) {
+  return Array.from(jobs.values())
+    .filter((j) => !TERMINAL.has(j.state) || (j.reportAt && Date.now() - Date.parse(j.reportAt) < 3600000))
+    .filter((j) => (j.device === 'any' || j.device === deviceId || deviceNameMatches(j.device, deviceId)) && (!j.boundDevice || j.boundDevice === deviceId))
+    .map((j) => ({ id: j.id, state: j.state, builds: j.builds, presses: { done: j.presses.filter((p) => PRESS_TERMINAL.has(p.state)).length, total: j.presses.length }, note: j.note }));
+}
+function pushQueueViews() {
+  for (const id of streams.keys()) {
+    const v = JSON.stringify(queueViewFor(id));
+    if (lastQueueSent.get(id) !== v) { lastQueueSent.set(id, v); sendToDevice(id, 'queue', { jobs: JSON.parse(v) }); }
+  }
+}
+
+function deviceNameMatches(want, deviceId) {
+  if (want === 'any') return true;
+  if (want === deviceId) return true;
+  const d = readDevice(deviceId);
+  return !!(d && d.name && d.name === want);
+}
+
+function inFlightOn(deviceId) {
+  for (const j of jobs.values()) if (j.boundDevice === deviceId) for (const p of j.presses) if (p.state === 'sent' || p.state === 'deferred') return { j, p };
+  return null;
+}
+
+function finalize(j, state) {
+  j.state = state;
+  const presses = j.presses.map((p) => {
+    const file = readJsonFile(path.join(jobDir(j.id), 'presses', p.n + '.json')) || {};
+    return { n: p.n, build: p.build, state: p.state, tainted: p.tainted, taintReasons: p.taintReasons, resultAt: p.resultAt, results: file.results || [] };
+  });
+  const report = computeReport(j, presses);
+  fs.mkdirSync(jobDir(j.id), { recursive: true });
+  writeJsonFile(path.join(jobDir(j.id), 'report.json'), report);
+  fs.writeFileSync(path.join(jobDir(j.id), 'report.md'), renderReportMd(report) + '\n');
+  j.reportAt = new Date().toISOString();
+  saveJob(j);
+  log('job ' + j.id + ' ' + state + '; report at ' + path.join(jobDir(j.id), 'report.md'));
+}
+
+const lastCooldownSent = new Map();
+
+/// One pass of the scheduler: expire, detect lost presses, then for every
+/// present device with nothing in flight send at most one press — the first
+/// pending press of the first job that passes the four conditions (D3,
+/// D19, D20) — or tell the device when its next press is due.
+function tick() {
+  const now = Date.now();
+  for (const j of jobs.values()) {
+    if (TERMINAL.has(j.state)) continue;
+    const inFlight = j.presses.some((p) => p.state === 'sent' || p.state === 'deferred');
+    if (!inFlight && now - Date.parse(j.createdAt) > j.ttlMs) { finalize(j, 'expired'); continue; }
+    let changed = false;
+    for (const p of j.presses) {
+      if (p.state === 'sent' && now - Date.parse(p.sentAt) > lostMs(j)) { markLost(j, p, 'no result in ' + Math.round(lostMs(j) / 1000) + ' s'); changed = true; }
+      if (p.state === 'deferred' && now - Date.parse(p.deferredAt) > lostMs(j)) { markLost(j, p, 'deferred too long'); changed = true; }
+    }
+    if (j.presses.every((p) => PRESS_TERMINAL.has(p.state))) { finalize(j, 'done'); continue; }
+    if (changed) saveJob(j);
+  }
+  for (const d of present()) {
+    if (inFlightOn(d.id)) continue;
+    const cooldownEnd = d.lastPressEndAt ? Date.parse(d.lastPressEndAt) + COOLDOWN_MS : 0;
+    let nextAt = null, nextJob = null;
+    for (const j of Array.from(jobs.values()).sort((a, b) => a.id.localeCompare(b.id))) {
+      if (TERMINAL.has(j.state)) continue;
+      if (!deviceNameMatches(j.device, d.id)) continue;
+      if (j.boundDevice && j.boundDevice !== d.id) continue;
+      const press = j.presses.find((p) => p.state === 'pending');
+      if (!press) continue;
+      const spacingEnd = j.lastPressEndAt ? Date.parse(j.lastPressEndAt) + j.spacingMs : 0;
+      const due = Math.max(cooldownEnd, spacingEnd);
+      if (due > now) { if (nextAt === null || due < nextAt) { nextAt = due; nextJob = j.id; } continue; }
+      // Send it. Binding happens on the first press a device takes (D20).
+      press.state = 'sent'; press.sentAt = new Date().toISOString();
+      if (!j.boundDevice) { j.boundDevice = d.id; j.boundDeviceName = d.name; j.boundDeviceUa = d.ua; }
+      j.state = 'running';
+      saveJob(j);
+      sendToDevice(d.id, 'press', { job: j.id, press: press.n, of: j.presses.length, build: press.build, rows: j.rows, nextPressAt: null });
+      lastCooldownSent.delete(d.id);
+      log('job ' + j.id + ' press ' + press.n + ' (' + press.build + ') -> ' + d.id + (press.resends ? ' (re-send)' : ''));
+      nextAt = null;
+      break;
+    }
+    const key = nextAt === null ? '' : nextJob + '@' + nextAt;
+    if (lastCooldownSent.get(d.id) !== key) {
+      lastCooldownSent.set(d.id, key);
+      sendToDevice(d.id, 'cooldown', nextAt === null ? { job: null, nextPressAt: null } : { job: nextJob, nextPressAt: new Date(nextAt).toISOString() });
+    }
+  }
+  pushQueueViews();
+  releaseWaits();
+}
+setInterval(tick, TICK_MS).unref();
+
+function jobCounts() {
+  const c = { queued: 0, running: 0, done: 0 };
+  for (const j of jobs.values()) { if (j.state === 'queued') c.queued++; else if (j.state === 'running') c.running++; else c.done++; }
+  return c;
+}
+
+function jobSummary(j) {
+  return { id: j.id, state: j.state, builds: j.builds, rows: j.rows, repeats: j.repeats, spacingMs: j.spacingMs, device: j.device, boundDevice: j.boundDevice, boundDeviceName: j.boundDeviceName,
+    note: j.note, createdAt: j.createdAt, reportAt: j.reportAt, presses: { done: j.presses.filter((p) => PRESS_TERMINAL.has(p.state)).length, total: j.presses.length, tainted: j.presses.filter((p) => p.tainted).length, failed: j.presses.filter((p) => p.state === 'failed').length } };
+}
+
+async function postJob(req, res) {
+  const body = await readJson(req, 64 * 1024);
+  const j = makeJob(body);
+  jobs.set(j.id, j);
+  fs.mkdirSync(path.join(jobDir(j.id), 'presses'), { recursive: true });
+  saveJob(j);
+  log('job ' + j.id + ' queued: ' + j.builds.join(' vs ') + ' × ' + j.repeats + ', spacing ' + j.spacingMs + ' ms, device ' + j.device + (j.note ? ' — ' + j.note : ''));
+  send(res, 201, j);
+  tick();
+}
+
+function findPress(id, n) {
+  const j = jobs.get(id);
+  if (!j) throw Object.assign(new Error('no job ' + id), { status: 404 });
+  const p = j.presses.find((x) => x.n === Number(n));
+  if (!p) throw Object.assign(new Error('no press ' + n), { status: 404 });
+  return { j, p };
+}
+
+/// Ingest one press: the press file, the legacy result file (D12), the job's
+/// and the device's `lastPressEndAt` (D19), a retry press when tainted (D23),
+/// the report when the job is complete.
+async function postPressResult(req, res, id, n) {
+  const { j, p } = findPress(id, n);
+  if (PRESS_TERMINAL.has(p.state)) return send(res, 409, { error: 'press ' + n + ' already ' + p.state });
+  const body = await readJson(req, config.maxResultBytes);
+  checkResultPayload(body);
+  const device = body.device || j.boundDevice;
+  const at = new Date().toISOString();
+  const payload = { ...body, job: j.id, press: p.n, buildId: p.build, device, receivedAt: at, manual: false };
+  writeJsonFile(path.join(jobDir(j.id), 'presses', p.n + '.json'), payload);
+  const file = writeResult(payload);
+  p.resultAt = at; p.file = 'results/' + file;
+  p.tainted = !!body.tainted; p.taintReasons = Array.isArray(body.taintReasons) ? body.taintReasons : [];
+  if (body.failed || !body.results.length) { p.state = 'failed'; p.error = String(body.failed || 'no rows'); }
+  else p.state = 'done';
+  j.lastPressEndAt = at;
+  if (isId(device)) touchDevice(device, { lastPressEndAt: at });
+  if (p.state === 'done' && p.tainted && j.retriesUsed < j.retryTainted) {
+    j.retriesUsed++;
+    j.presses.push({ n: j.presses.length + 1, build: p.build, state: 'pending', sentAt: null, deferredAt: null, resultAt: null, resends: 0, tainted: false, taintReasons: [], retryOf: p.n });
+    log('job ' + j.id + ' press ' + p.n + ' tainted (' + p.taintReasons.join(',') + '); press ' + j.presses.length + ' appended');
+  }
+  saveJob(j);
+  log('job ' + j.id + ' press ' + p.n + ' ' + p.state + (p.tainted ? ' TAINTED' : '') + ' from ' + device + ' -> ' + p.file);
+  send(res, 200, { ok: true, file: p.file, press: p.n, state: p.state });
+  tick();
+}
+
+async function postPressDeferred(req, res, id, n) {
+  const { j, p } = findPress(id, n);
+  await readJson(req, 4096).catch(() => ({}));
+  if (p.state === 'sent') { p.state = 'deferred'; p.deferredAt = new Date().toISOString(); saveJob(j); log('job ' + j.id + ' press ' + p.n + ' deferred (page hidden)'); }
+  send(res, 200, { ok: true, state: p.state });
+}
+
+function cancelJob(res, id) {
+  const j = jobs.get(id);
+  if (!j) return send(res, 404, { error: 'no job ' + id });
+  if (TERMINAL.has(j.state)) return send(res, 200, jobSummary(j));
+  finalize(j, 'cancelled');
+  send(res, 200, jobSummary(j));
+  tick();
+}
+
+// --- waits (D10, T7): one blocking GET, answered when the condition holds ---
+
+const waiters = [];
+
+function waitCheck(w) {
+  const q = w.q;
+  if (q.job) {
+    const j = jobs.get(q.job);
+    if (!j) return { status: 404, body: { error: 'no job ' + q.job } };
+    if (TERMINAL.has(j.state)) return { status: 200, body: { job: jobSummary(j), report: readJsonFile(path.join(jobDir(j.id), 'report.json')), reportMd: path.join(jobDir(j.id), 'report.md') } };
+    return null;
+  }
+  if (q.device) {
+    const d = present().find((x) => q.device === 'any' || x.id === q.device || x.name === q.device);
+    return d ? { status: 200, body: { device: { id: d.id, name: d.name, ua: d.ua, cores: d.cores, lastState: d.lastState } } } : null;
+  }
+  if (q.queue === 'idle') {
+    const busy = Array.from(jobs.values()).filter((j) => !TERMINAL.has(j.state));
+    return busy.length ? null : { status: 200, body: { idle: true, jobs: jobCounts() } };
+  }
+  return { status: 400, body: { error: 'wait needs ?job=<id>, ?device=any|<name>, or ?queue=idle' } };
+}
+
+function releaseWaits() {
+  for (let i = waiters.length - 1; i >= 0; i--) {
+    const w = waiters[i];
+    const r = waitCheck(w);
+    if (r) { waiters.splice(i, 1); clearTimeout(w.timer); send(w.res, r.status, r.body); }
+  }
+}
+
+function openWait(req, res, url) {
+  const q = { job: url.searchParams.get('job'), device: url.searchParams.get('device'), queue: url.searchParams.get('queue') };
+  const timeoutS = Math.min(MAX_WAIT_S, Math.max(1, Number(url.searchParams.get('timeout') || MAX_WAIT_S)));
+  const w = { q, res, timer: null };
+  const r = waitCheck(w);
+  if (r) return send(res, r.status, r.body);
+  // No keep-alive bytes: the body is JSON and one chunk. The socket stays
+  // open for the whole wait; the director passes --max-time on its side.
+  res.socket.setTimeout(0);
+  w.timer = setTimeout(() => {
+    const i = waiters.indexOf(w);
+    if (i >= 0) waiters.splice(i, 1);
+    const j = q.job ? jobs.get(q.job) : null;
+    send(res, 408, { timeout: true, state: j ? j.state : null, presses: j ? jobSummary(j).presses : null });
+  }, timeoutS * 1000);
+  res.on('close', () => { const i = waiters.indexOf(w); if (i >= 0) { waiters.splice(i, 1); clearTimeout(w.timer); } });
+  waiters.push(w);
+}
+
 const hooks = {
-  onPresenceChange(_id) {},
-  jobCounts() { return { queued: 0, running: 0, done: 0 }; },
-  route(_req, _res, _url) { return false; },
+  onPresenceChange(_id) { tick(); },
+  jobCounts,
+  async route(req, res, url) {
+    const p = url.pathname, m = req.method;
+    let mm;
+    if (m === 'GET' && p === '/wait') { openWait(req, res, url); return true; }
+    if (m === 'POST' && p === '/jobs') { await postJob(req, res); return true; }
+    if (m === 'GET' && p === '/jobs') { send(res, 200, { jobs: Array.from(jobs.values()).sort((a, b) => a.id.localeCompare(b.id)).map(jobSummary) }); return true; }
+    if ((mm = /^\/jobs\/([^/]+)$/.exec(p))) {
+      if (m === 'GET') { const j = jobs.get(mm[1]); if (!j) send(res, 404, { error: 'no job ' + mm[1] }); else send(res, 200, j); return true; }
+      if (m === 'DELETE') { cancelJob(res, mm[1]); return true; }
+    }
+    if (m === 'POST' && (mm = /^\/jobs\/([^/]+)\/presses\/(\d+)\/result$/.exec(p))) { await postPressResult(req, res, mm[1], mm[2]); return true; }
+    if (m === 'POST' && (mm = /^\/jobs\/([^/]+)\/presses\/(\d+)\/deferred$/.exec(p))) { await postPressDeferred(req, res, mm[1], mm[2]); return true; }
+    if (m === 'GET' && (mm = /^\/jobs\/([^/]+)\/report\.(json|md)$/.exec(p))) {
+      const f = path.join(jobDir(mm[1]), 'report.' + mm[2]);
+      if (!jobs.has(mm[1]) || !fs.existsSync(f)) send(res, 404, { error: 'no report yet' });
+      else send(res, 200, mm[2] === 'md' ? fs.readFileSync(f, 'utf8') : readJsonFile(f));
+      return true;
+    }
+    return false;
+  },
 };
 
 // --- the router --------------------------------------------------------------
@@ -403,14 +751,13 @@ server.requestTimeout = 0;
 server.headersTimeout = 60000;
 server.keepAliveTimeout = 65000;
 
-export { HOME, config, TOKEN, hooks, log, present, allDevices, readDevice, touchDevice, isPresent, sendToDevice, streams, writeResult, checkResultPayload, readJson, readJsonFile, writeJsonFile, hasBuild, listBuilds, send, isId };
-
 server.listen(PORT, '0.0.0.0', () => {
   const port = server.address().port;
   // stdout carries exactly one line, for the test that spawns us and for a
   // launchd log a human reads; the rest goes to stderr and log/server.log.
   process.stdout.write('emu-lab: listening on http://127.0.0.1:' + port + '\n');
-  log('started, home ' + HOME + ', port ' + port + ', build ' + (SERVER_BUILD || '?') + ', token failures reset');
+  log('started, home ' + HOME + ', port ' + port + ', build ' + (SERVER_BUILD || '?') + ', cooldown ' + COOLDOWN_MS + ' ms');
+  tick();
 });
 
 process.on('SIGTERM', () => { log('SIGTERM'); server.close(); process.exit(0); });

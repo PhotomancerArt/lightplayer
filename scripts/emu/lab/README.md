@@ -119,11 +119,185 @@ the token is the guard, not the interface. There is no general upload: a
 result is written only through the routes above, named by the server's
 clock, into `results/`.
 
+## The page: what Join does and what it refuses
+
+One page at `/`, the rig's own look, for the phone and for any desk browser
+Yona is in front of (Q5). On load it moves `#t=<token>` from the bookmark
+into `localStorage` and strips the hash; with no token it shows "Open the
+bookmark the director gave you" and nothing else works.
+
+**Join** is one tap, and the tap is what makes the wake lock legal on iOS
+(T6): it requests `navigator.wakeLock('screen')`, opens the `EventSource`,
+posts the device's state, and turns the page into a status board. After
+Join the page runs any press it receives with no second tap (Q2). A reload
+re-joins on its own — everything but the lock, which needs a gesture, so
+the board shows "Keep the screen on" and rows run either way with
+`wakeLock: 'none'`.
+
+**Every row records** `visibilityAtStart/End`, `sawHidden`,
+`hasFocusAtStart/End`, `wakeLock` (`active | released | none | unsupported |
+denied`), `tainted`, `taintReasons` (D8). A row is tainted when the tab was
+hidden at any point or a held lock was released under it; a lock never held
+is recorded, not a taint. A press is tainted if any row is; the server lists
+it as an exclusion and re-queues it once (D23).
+
+**What the page refuses:** it never starts a row while
+`document.visibilityState` is hidden. A `press` received hidden is held, the
+server is told (`deferred`), and it starts on the next `visible`. That is
+also why an agent-driven tab cannot produce a number here: the harness pane
+is hidden, so its press is deferred, correctly.
+
+**Q8, the ngrok interstitial:** every `fetch` sends
+`ngrok-skip-browser-warning: 1`; `EventSource` cannot. If a reconnect lands
+on the interstitial the stream closes twice in a row and the board says
+"Reload the tab once". Observed at the gates, settled at G2.
+
+**Manual Run** keeps the rig's controls over a build picked from the store
+and posts to `POST /results/manual?device=<id>` with `manual: true`.
+
+## Protocol (the seam between the page and the queue)
+
+Server → page, over SSE:
+
+```text
+event: hello    {serverTime, config:{cooldownMs}, device}
+event: press    {job, press, of, build, rows: 'gate-rows' | [{slug,grade,mode,fnBlocks,timeout}], nextPressAt: null}
+event: cooldown {job, nextPressAt}          // the countdown the page shows; null clears it
+event: queue    {jobs:[{id, state, builds, presses:{done,total}, note}]}   // this device's view
+```
+
+Page → server:
+
+```text
+POST /devices/<id>/state                {name, ua, cores, deviceMemory, visibility, hasFocus, wakeLock}
+POST /jobs/<job>/presses/<n>/result     the legacy payload + {device, deviceName, job, press, buildId, manual:false,
+                                         visibility, hasFocus, wakeLock, tainted, taintReasons, deferredMs, failed?}
+POST /jobs/<job>/presses/<n>/deferred   {reason:'hidden'}   // received hidden; will run when visible
+POST /results/manual?device=<id>        the legacy payload + {manual:true, ...the same taint fields}
+```
+
+The page passes `rows: 'gate-rows'` through to the build's own worker as
+`preset: 'gate-rows'` (D22) — one definition of the gate rows per build; an
+explicit list becomes a `plan` built the way the rig's `buildPlan` does.
+
+## Jobs
+
+A job is `jobs/<id>.json`; its presses land in `jobs/<id>/presses/<n>.json`
+(the page's payload) and, when the last press is terminal, `report.json` and
+`report.md` beside them. Every press also writes a legacy
+`results/result-<ISO>.json` with `job`, `press`, `buildId`, `device` added
+(D12).
+
+```json
+{
+  "id": "j-20260912-0130-a1b2", "kind": "bench",
+  "builds": ["86cb2e0", "23a3d3c"],            // one entry = a single build
+  "rows": "gate-rows",                           // or [{slug,grade,mode,fnBlocks,timeout}]
+  "repeats": 5, "spacingMs": 180000, "device": "any", "ttlMs": 86400000, "retryTainted": 1,
+  "note": "P4 vs P3 head", "createdAt": "…", "state": "queued",
+  "boundDevice": null, "presses": [{"n": 1, "build": "86cb2e0", "state": "pending"}, …],
+  "lastPressEndAt": null, "reportAt": null
+}
+```
+
+States: `queued → running → done | expired | failed | cancelled`. Press
+states: `pending → sent → (deferred) → done | failed`; a `sent` press with no
+result after `wallTimeout × rows + 120 s` is lost and re-sent once. Only
+`kind: bench` exists; the field is reserved (Q6). `POST /jobs` validates
+(1–2 builds that exist in the store, `repeats` 1–20, `ttlMs` ≥ 60 s) and
+expands an A/B into `A1 B1 A2 B2 …` (D5).
+
+**The scheduler** ticks every second and on every event. For each present
+device with no press in flight, in job order, it sends the first pending
+press of the first job that passes four conditions:
+
+1. the job's device filter matches (`any`, the id, or the name);
+2. the job is not bound to another device — an A/B job binds to the first
+   device that takes its first press and stays there (D20);
+3. the device's cooldown has elapsed: `now − device.lastPressEndAt ≥
+   config.cooldownMs` (60 s; applies between jobs too);
+4. the job's spacing has elapsed: `now − job.lastPressEndAt ≥ spacingMs`,
+   measured from the **end** of the previous press (D19) — DD41's "spaced
+   by minutes" is thermal recovery.
+
+One press at a time per device. While a device waits on spacing the page
+gets a `cooldown` event with `nextPressAt` for its countdown. A tainted
+press appends one more press of the same build at the end of the queue
+(D23, `retryTainted`, default 1). On restart the server rebuilds everything
+from `jobs/` and treats in-flight presses as lost (one re-send).
+
+## Waiting (the dont-poll rule made concrete)
+
+```bash
+scripts/emu/lab/lab.sh wait --job <id> [--max-time 3600]   # run_in_background; exits when the report exists
+scripts/emu/lab/lab.sh wait --device any | --device <name>
+scripts/emu/lab/lab.sh wait --queue-idle
+```
+
+`GET /wait?job=|device=|queue=idle&timeout=` is **one blocking GET**, held
+up to `timeout` seconds (capped at 3600), answered `200` with the object when
+the condition holds and `408 {timeout:true, state}` otherwise. The server
+sends no keep-alive bytes (the body is JSON); `lab.sh` passes `--max-time`
+a little past the timeout so the 408 is the server's. One background call
+per wait; never a loop.
+
+## The report (D5)
+
+`report.mjs` computes it when the last press lands: per build × row key
+(`render-basic/t2/jit/8`, `render-basic/t2/interp`), the values in press
+order (`null` for excluded presses), `best` with its press, `median`,
+`spreadPct = (max − min) / max × 100`; the **same-press ratio** translated ÷
+interpreter per press (only when that press has an interpreter row for the
+same slug/grade) with its best and median; byte-identity across the build's
+rows (`uartSha256`; null = unknown, DD46); for an A/B, `best(B)/best(A) − 1`,
+the same for medians, and for the ratio medians. Tainted and failed presses
+are listed under `excluded` and never counted. `report.md` is the G-M7B
+five-press table, generated.
+
+## `lab.sh`
+
+```bash
+lab.sh status | devices | jobs | report <id> | cancel <id> | home | token | curl <path> [curl args]
+lab.sh queue --build 23a3d3c --rows gate-rows --repeats 3 --spacing 3m [--device NAME] [--ttl 24h] [--note …]
+lab.sh queue --ab 86cb2e0 23a3d3c --rows gate-rows --repeats 5 --spacing 3m
+lab.sh queue --build X --row render-basic:t2:jit:8 --row render-basic:t2:interp
+lab.sh wait --job <id> [--max-time 3600] | --device any|NAME | --queue-idle
+```
+
+`queue` prints the job id on stdout; `wait --job` prints the path of
+`report.md`; `--spacing`/`--ttl` take `90s`, `3m`, `24h`.
+
+## Verifying the page without opening it as a device
+
+Agents never open a lab tab as a device (the headless rule; hidden tabs are
+throttled and lie about timing). Three proofs, and only the third is a
+number:
+
+1. **Refusal** — the harness Browser pane is hidden, so a press sent to it is
+   `deferred` and the board says so.
+2. **Protocol** — `just test-emu-lab` drives the queue with a fake page
+   client in-process.
+3. **A real press** in headless Chrome (`--headless=new` reports `visible`;
+   no wake lock, so rows carry `wakeLock: unsupported|denied`):
+   ```bash
+   /Applications/Google\ Chrome.app/Contents/MacOS/Google\ Chrome --headless=new --remote-debugging-port=9333 \
+     --user-data-dir=/tmp/lab-chrome 'http://127.0.0.1:41111/#t=<token>' &
+   node scripts/emu/lab/test/cdp-join.mjs 9333 desk-chrome      # types the name, clicks Join over CDP
+   scripts/emu/lab/lab.sh queue --build <id> --rows gate-rows --repeats 1 --spacing 0
+   scripts/emu/lab/lab.sh wait --job <id>
+   ```
+   A desk-Chrome number is a V8 number under whatever load the desk is
+   carrying; it proves the path, not the phone.
+
 ## Tests
 
 ```bash
 just test-emu-lab        # node --test scripts/emu/lab/test/*.test.mjs
 ```
 
-The tests spawn the real `server.mjs` on port 0 in a temp home. Nothing here
-needs a package.json, and nothing may gain one.
+The tests spawn the real `server.mjs` on port 0 in a temp home
+(`test/helpers.mjs`); `test/fake-device.mjs` is a page client that answers
+presses from a table of numbers at test speed (`LAB_TICK_MS`,
+`LAB_COOLDOWN_MS`, `LAB_LOST_MS`); `report.test.mjs` reproduces the G-M7B
+five-press table exactly. Nothing here needs a package.json, and nothing
+may gain one.
