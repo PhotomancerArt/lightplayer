@@ -5,7 +5,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { newRowRecord, noteVisibility, noteLockRelease, finishRow, buildPayload, planFromRows } from '../lab-page.js';
+import { newRowRecord, noteVisibility, noteLockRelease, finishRow, buildPayload, planFromRows, defaultDeviceName, boardState } from '../lab-page.js';
 
 const visible = { visibility: 'visible', hasFocus: true, wakeLock: 'active' };
 
@@ -94,4 +94,33 @@ test('an explicit row list becomes a plan the way the rig builds one', () => {
   ]);
   assert.equal(planFromRows([{ slug: 'x', grade: 't1', mode: 'jit' }], {})[0].fnBlocks, 32);
   assert.equal(planFromRows([{ slug: 'x', grade: 't1', mode: 'jit' }], {})[0].timeout, '5500ms');
+});
+
+test('the default device name comes from the UA, not from a placeholder', () => {
+  assert.equal(defaultDeviceName('Mozilla/5.0 (iPhone; CPU iPhone OS 18_7 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.6.1 Mobile/15E148 Safari/604.1'), 'iPhone');
+  assert.equal(defaultDeviceName('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.0 Safari/605.1.15'), 'Mac Safari');
+  assert.equal(defaultDeviceName('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/152.0.0.0 Safari/537.36'), 'Mac Chrome');
+  assert.equal(defaultDeviceName('Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 Chrome/128.0 Mobile Safari/537.36'), 'Android');
+  assert.equal(defaultDeviceName(''), 'browser');
+});
+
+test('the board leads with one state: refused > reconnecting > running > cooldown > waiting > done > idle', () => {
+  const base = { joined: true, connected: true, pendingHidden: null, running: null, cooldown: null, queued: 0, lastHeadline: null, now: 0 };
+  assert.equal(boardState({ ...base, joined: false }).kind, 'off');
+  assert.equal(boardState(base).kind, 'idle');
+  assert.equal(boardState({ ...base, lastHeadline: '0.988× real time' }).kind, 'done');
+  assert.equal(boardState({ ...base, queued: 3 }).kind, 'waiting');
+  assert.match(boardState({ ...base, queued: 3 }).text, /3 presses queued/);
+  const cd = boardState({ ...base, queued: 3, cooldown: { job: 'j-1', nextPressAt: new Date(161000).toISOString() } });
+  assert.equal(cd.kind, 'cooldown');
+  assert.match(cd.text, /next press in 2:41/);
+  const run = boardState({ ...base, queued: 3, cooldown: { nextPressAt: 'x' }, running: { press: 4, of: 10, build: '23a3d3c', row: { i: 2, n: 4, what: 'render-basic t2 translated fn 16' } } });
+  assert.equal(run.kind, 'running');
+  assert.match(run.text, /Running press 4 of 10 · 23a3d3c · row 2 of 4/);
+  assert.equal(run.progress, 0.25);
+  assert.equal(boardState({ ...base, running: { manual: true, build: 'x', row: null } }).text, 'Running manual · x · loading the build');
+  assert.equal(boardState({ ...base, connected: false, running: { press: 1, of: 1, build: 'x' } }).kind, 'off');
+  const ref = boardState({ ...base, connected: false, pendingHidden: { press: 2 } });
+  assert.equal(ref.kind, 'refused');
+  assert.match(ref.text, /press 2 received while the tab is hidden/);
 });

@@ -157,6 +157,16 @@ is hidden, so its press is deferred, correctly.
 on the interstitial the stream closes twice in a row and the board says
 "Reload the tab once". Observed at the gates, settled at G2.
 
+**The board leads with one state line**, coloured: Idle (joined, nothing
+queued) · Waiting (presses queued for this device) · Running press n of N ·
+build · row i of k, with a bar · Cooling down, next press in m:ss · Done,
+with the last press's best line · Refused (a press arrived while hidden) ·
+Reconnecting. Under it, one card per job with a tick per press (✓ done, ⚠
+tainted, ✗ failed, ● in flight, ○ pending) so an A/B's interleave is visible,
+then the current press line, the countdown, the previous press's headline,
+and this press's table. The device name field is pre-filled from the UA
+(`iPhone`, `Mac Safari`), editable, never a placeholder.
+
 **Manual Run** keeps the rig's controls over a build picked from the store
 and posts to `POST /results/manual?device=<id>` with `manual: true`.
 
@@ -168,7 +178,7 @@ Server → page, over SSE:
 event: hello    {serverTime, config:{cooldownMs}, device}
 event: press    {job, press, of, build, rows: 'gate-rows' | [{slug,grade,mode,fnBlocks,timeout}], nextPressAt: null}
 event: cooldown {job, nextPressAt}          // the countdown the page shows; null clears it
-event: queue    {jobs:[{id, state, builds, presses:{done,total}, note}]}   // this device's view
+event: queue    {jobs:[{id, state, builds, presses:{done,total}, pressStates:[{n,build,state,tainted}], note}]}   // this device's view
 ```
 
 Page → server:

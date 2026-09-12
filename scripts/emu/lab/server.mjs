@@ -467,7 +467,12 @@ function queueViewFor(deviceId) {
   return Array.from(jobs.values())
     .filter((j) => !TERMINAL.has(j.state) || (j.reportAt && Date.now() - Date.parse(j.reportAt) < 3600000))
     .filter((j) => (j.device === 'any' || j.device === deviceId || deviceNameMatches(j.device, deviceId)) && (!j.boundDevice || j.boundDevice === deviceId))
-    .map((j) => ({ id: j.id, state: j.state, builds: j.builds, presses: { done: j.presses.filter((p) => PRESS_TERMINAL.has(p.state)).length, total: j.presses.length }, note: j.note }));
+    .map((j) => ({
+      id: j.id, state: j.state, builds: j.builds, note: j.note,
+      presses: { done: j.presses.filter((p) => PRESS_TERMINAL.has(p.state)).length, total: j.presses.length },
+      // One entry per press so the page can draw the interleave as ticks.
+      pressStates: j.presses.map((p) => ({ n: p.n, build: p.build, state: p.state, tainted: !!p.tainted })),
+    }));
 }
 function pushQueueViews() {
   for (const id of streams.keys()) {

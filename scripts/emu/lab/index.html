@@ -38,6 +38,23 @@
   #jobs { font-size: 14px; opacity: .85; }
   .wrap { overflow-x: auto; }
   .note { font-size: 13px; opacity: .75; }
+  /* The banner: one line that says what the lab is doing, coloured by state,
+     readable from across a room on a phone left face-up. */
+  .state { font-size: 20px; font-weight: 700; margin: 12px 0 6px; padding: 12px 14px; border-radius: 8px; border-left: 6px solid #888; background: rgba(128,128,128,.12); }
+  .state.idle { border-color: #888; }
+  .state.waiting { border-color: #b7791f; background: rgba(183,121,31,.12); }
+  .state.running { border-color: #0e6e6a; background: rgba(14,110,106,.14); color: #0e6e6a; }
+  .state.cooldown { border-color: #2b6cb0; background: rgba(43,108,176,.12); }
+  .state.done { border-color: #2f855a; background: rgba(47,133,90,.12); }
+  .state.refused, .state.off { border-color: #b3261e; background: rgba(179,38,30,.12); color: #b3261e; }
+  @media (prefers-color-scheme: dark) { .state.running { color: #4fb8b2; } .state.refused, .state.off { color: #f2b8b5; } }
+  #bar { height: 6px; border-radius: 3px; background: rgba(128,128,128,.25); overflow: hidden; margin: 0 0 10px; }
+  #bar > div { height: 100%; width: 0; background: #0e6e6a; transition: width .3s; }
+  .job { border: 1px solid rgba(128,128,128,.35); border-radius: 8px; padding: 8px 12px; margin: 6px 0; }
+  .job.running { border-color: #0e6e6a; }
+  .ticks { font-size: 22px; letter-spacing: 4px; line-height: 1.2; margin: 4px 0; }
+  .tick.ok { color: #2f855a; } .tick.now { color: #0e6e6a; } .tick.tainted { color: #b7791f; } .tick.fail { color: #b3261e; } .tick.todo { opacity: .45; }
+  #last { font-size: 14px; opacity: .8; }
 </style>
 </head>
 <body>
@@ -50,13 +67,15 @@
 
 <div id="join" hidden>
   <p>Name this device once, tap <b>Join</b>, then leave it face-up and plugged in. The director queues what it measures; you do nothing else.</p>
-  <label>device name <input type="text" id="name" placeholder="yona-iphone" autocomplete="off"></label>
+  <label>device name <input type="text" id="name" autocomplete="off"></label>
   <br>
   <button id="joinBtn">Join</button>
   <p class="note">Join is the tap that lets the page keep the screen on. A row taken through a hidden tab or after the screen locks is marked tainted and never quoted (D8).</p>
 </div>
 
 <div id="board" hidden>
+  <div id="state" class="state idle">Idle</div>
+  <div id="bar" hidden><div></div></div>
   <div id="presence"></div>
   <button id="lockBtn" class="quiet" hidden>Keep the screen on</button>
   <h2>jobs for this device</h2>
@@ -64,6 +83,7 @@
   <h2>now</h2>
   <div id="press">Waiting for the director.</div>
   <div id="countdown"></div>
+  <div id="last"></div>
   <div id="status"></div>
   <div id="headlines"></div>
   <div class="wrap">

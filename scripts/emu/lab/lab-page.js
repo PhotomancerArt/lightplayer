@@ -81,6 +81,41 @@ export function buildPayload(o) {
   return payload;
 }
 
+/// A real default for the device name, derived from the UA — a placeholder
+/// reads like a filled-in value on a phone, so the field is pre-filled with
+/// something true and editable instead (G1 finding).
+export function defaultDeviceName(ua) {
+  ua = ua || '';
+  if (/iPhone/.test(ua)) return 'iPhone';
+  if (/iPad/.test(ua)) return 'iPad';
+  if (/Android/.test(ua)) return 'Android';
+  const browser = /CriOS|Chrome\//.test(ua) ? 'Chrome' : /Firefox\/|FxiOS/.test(ua) ? 'Firefox' : /Safari\//.test(ua) ? 'Safari' : 'browser';
+  if (/Macintosh/.test(ua)) return 'Mac ' + browser;
+  if (/Windows/.test(ua)) return 'Windows ' + browser;
+  if (/Linux/.test(ua)) return 'Linux ' + browser;
+  return browser;
+}
+
+/// The one line the board leads with. Pure so the state machine is testable:
+/// `s` is `{joined, connected, pendingHidden, running, cooldown, queued, lastHeadline}`.
+export function boardState(s) {
+  if (!s.joined) return { kind: 'off', text: 'Not joined' };
+  if (s.pendingHidden) return { kind: 'refused', text: 'Refused — press ' + s.pendingHidden.press + ' received while the tab is hidden; it runs when the tab is visible' };
+  if (!s.connected) return { kind: 'off', text: 'Reconnecting to the lab…' };
+  if (s.running) {
+    const r = s.running;
+    const where = r.row ? ' · row ' + r.row.i + ' of ' + r.row.n + ' · ' + r.row.what : ' · loading the build';
+    return { kind: 'running', text: (r.manual ? 'Running manual' : 'Running press ' + r.press + ' of ' + r.of) + ' · ' + r.build + where, progress: r.row ? (r.row.i - 1) / r.row.n : 0 };
+  }
+  if (s.cooldown && s.cooldown.nextPressAt) {
+    const left = Math.max(0, Math.round((new Date(s.cooldown.nextPressAt).getTime() - s.now) / 1000));
+    return { kind: 'cooldown', text: 'Cooling down · next press in ' + Math.floor(left / 60) + ':' + String(left % 60).padStart(2, '0') + (s.cooldown.job ? ' · ' + s.cooldown.job : '') };
+  }
+  if (s.queued > 0) return { kind: 'waiting', text: 'Waiting · ' + s.queued + ' press' + (s.queued === 1 ? '' : 'es') + ' queued for this device' };
+  if (s.lastHeadline) return { kind: 'done', text: 'Done · ' + s.lastHeadline + ' · nothing queued' };
+  return { kind: 'idle', text: 'Idle · joined, nothing queued' };
+}
+
 /// Build a plan from an explicit row list the way the rig's `buildPlan` does,
 /// with the wall guard and the exit policy from the build's own defaults.
 export function planFromRows(rows, defaults) {
@@ -101,6 +136,7 @@ export function main() {
   const els = {
     ua: $('ua'), noToken: $('noToken'), join: $('join'), joinBtn: $('joinBtn'), name: $('name'),
     board: $('board'), presence: $('presence'), lockBtn: $('lockBtn'), jobs: $('jobs'), press: $('press'),
+    state: $('state'), bar: $('bar'), last: $('last'),
     countdown: $('countdown'), status: $('status'), headlines: $('headlines'), table: $('results'),
     tbody: document.querySelector('#results tbody'), boot: $('boot'), tail: $('tail'),
     manual: $('manual'), build: $('build'), run: $('run'), runGate: $('runGate'),
@@ -121,7 +157,7 @@ export function main() {
     (navigator.deviceMemory ? ' · mem ' + navigator.deviceMemory + ' GB' : '') + ' · id ' + deviceId.slice(0, 8);
   if (!token) { els.noToken.hidden = false; return; }
   els.join.hidden = false;
-  if (localStorage.labName) els.name.value = localStorage.labName;
+  els.name.value = localStorage.labName || defaultDeviceName(navigator.userAgent);
 
   // Every fetch carries the token and the ngrok skip header; EventSource can
   // carry only the token, which is why Q8 is a gate question and not a fix.
@@ -142,8 +178,26 @@ export function main() {
   let pending = null;       // a press received hidden, waiting for visible
   let cooldownTimer = null;
   let lastQueue = [];
+  let cooldown = null;      // {job, nextPressAt} from the server
+  let rowNow = null;        // {i, n, what} while a row runs
+  let lastHeadline = null;  // the previous press's best line, kept between presses
 
   const state = () => ({ visibility: document.visibilityState, hasFocus: document.hasFocus(), wakeLock: lockState });
+
+  /// The banner: one line and a colour that say what the lab is doing.
+  function renderState() {
+    const queued = lastQueue.reduce((a, j) => a + (j.pressStates || []).filter((p) => p.state === 'pending').length, 0);
+    const st = boardState({
+      joined, connected: !!(es && es.readyState === 1), pendingHidden: pending && document.visibilityState !== 'visible' ? pending : null,
+      running: running ? { manual: !!running.manual, press: running.press, of: running.of, build: running.build, row: rowNow } : null,
+      cooldown, queued, lastHeadline, now: Date.now(),
+    });
+    els.state.textContent = st.text;
+    els.state.className = 'state ' + st.kind;
+    els.bar.hidden = st.kind !== 'running';
+    if (st.kind === 'running') els.bar.firstElementChild.style.width = Math.round((st.progress || 0) * 100) + '%';
+  }
+  setInterval(renderState, 1000);
 
   function renderPresence() {
     const s = state();
@@ -151,6 +205,7 @@ export function main() {
     els.presence.innerHTML = (joined ? (es && es.readyState === 1 ? 'joined' : 'reconnecting…') : 'not joined') +
       ' · ' + s.visibility + (s.hasFocus ? ' · focused' : ' · unfocused') + ' · ' + (lockState === 'released' ? '<span class="bad">' + lockWord + '</span>' : lockWord);
     els.lockBtn.hidden = !(joined && lockState !== 'active' && lockState !== 'unsupported');
+    renderState();
   }
 
   async function requestLock() {
@@ -196,7 +251,7 @@ export function main() {
   function openStream() {
     if (es) es.close();
     es = new EventSource('/events?device=' + encodeURIComponent(deviceId) + '&t=' + encodeURIComponent(token));
-    es.onopen = () => { closedInARow = 0; renderPresence(); postState(); };
+    es.onopen = () => { closedInARow = 0; renderPresence(); postState(); renderState(); };
     es.onerror = () => {
       // EventSource reconnects on its own; two CLOSED in a row means the
       // reconnect got something that was not a stream — the ngrok
@@ -214,20 +269,36 @@ export function main() {
     es.addEventListener('queue', (ev) => { lastQueue = JSON.parse(ev.data).jobs || []; renderJobs(); });
   }
 
+  // A card per job with one tick per press: the interleave is visible, and
+  // a tainted or failed press shows as what it is rather than as a count.
   function renderJobs() {
-    if (!lastQueue.length) { els.jobs.textContent = 'No jobs for this device.'; return; }
-    els.jobs.innerHTML = lastQueue.map((j) => '<div>' + j.id + ' · ' + j.state + ' · ' + (j.builds || [j.build]).join(' vs ') +
-      ' · presses ' + j.presses.done + '/' + j.presses.total + (j.note ? ' · ' + j.note : '') + '</div>').join('');
+    if (!lastQueue.length) { els.jobs.textContent = 'No jobs for this device.'; renderState(); return; }
+    const glyph = (p) => {
+      if (p.state === 'done' && p.tainted) return { c: 'tainted', g: '⚠', t: 'tainted' };
+      if (p.state === 'done') return { c: 'ok', g: '✓', t: 'done' };
+      if (p.state === 'failed') return { c: 'fail', g: '✗', t: 'failed' };
+      if (p.state === 'sent' || p.state === 'deferred') return { c: 'now', g: '●', t: p.state };
+      return { c: 'todo', g: '○', t: 'pending' };
+    };
+    els.jobs.innerHTML = lastQueue.map((j) => {
+      const ticks = (j.pressStates || []).map((p) => { const g = glyph(p); return '<span class="tick ' + g.c + '" title="press ' + p.n + ' ' + p.build + ' ' + g.t + '">' + g.g + '</span>'; }).join('');
+      const legend = j.builds.length === 2 ? ' <span class="note">(A ' + j.builds[0] + ', B ' + j.builds[1] + ', alternating)</span>' : '';
+      return '<div class="job ' + j.state + '"><div><b>' + j.state + '</b> · ' + j.builds.join(' vs ') + ' · ' + j.presses.done + ' of ' + j.presses.total + ' presses' + legend + '</div>' +
+        '<div class="ticks">' + ticks + '</div><div class="note">' + j.id + (j.note ? ' — ' + j.note : '') + '</div></div>';
+    }).join('');
+    renderState();
   }
 
   function showCooldown(d) {
     clearInterval(cooldownTimer);
-    if (!d || !d.nextPressAt) { els.countdown.textContent = ''; return; }
+    cooldown = d && d.nextPressAt ? d : null;
+    if (!cooldown) { els.countdown.textContent = ''; renderState(); return; }
     const at = new Date(d.nextPressAt).getTime();
     const tick = () => {
       const left = Math.max(0, Math.round((at - Date.now()) / 1000));
-      els.countdown.textContent = (d.job ? d.job + ' · ' : '') + 'next press in ' + Math.floor(left / 60) + ':' + String(left % 60).padStart(2, '0');
-      if (left <= 0) { clearInterval(cooldownTimer); els.countdown.textContent = (d.job ? d.job + ' · ' : '') + 'next press due'; }
+      els.countdown.textContent = 'next press in ' + Math.floor(left / 60) + ':' + String(left % 60).padStart(2, '0') + (d.job ? ' · ' + d.job : '');
+      if (left <= 0) { clearInterval(cooldownTimer); els.countdown.textContent = 'next press due' + (d.job ? ' · ' + d.job : ''); }
+      renderState();
     };
     tick();
     cooldownTimer = setInterval(tick, 1000);
@@ -261,6 +332,7 @@ export function main() {
       deferredAt = Date.now();
       els.press.innerHTML = '<span class="bad">Press ' + p.press + ' received while hidden — waiting for the tab to be visible</span>';
       postJson('/jobs/' + p.job + '/presses/' + p.press + '/deferred', { reason: 'hidden' }).catch(() => {});
+      renderState();
       return;
     }
     runPress(p);
@@ -274,12 +346,17 @@ export function main() {
   /// Worker per press is what makes A/B presses comparable.
   async function runPress(p) {
     running = p;
+    rowNow = null;
     const deferredMs = deferredAt ? Date.now() - deferredAt : 0;
     deferredAt = null;
     showCooldown(null);
     setBusy(true);
     const results = [];
+    // The previous press's best line stays visible on the board while the
+    // next press runs; the table and the boot lines are this press's own.
+    if (lastHeadline) els.last.textContent = 'last press: ' + lastHeadline;
     els.tbody.innerHTML = ''; els.headlines.innerHTML = ''; els.boot.textContent = ''; els.tail.textContent = ''; els.table.hidden = true;
+    renderState();
     const who = p.manual ? 'manual' : 'press ' + p.press + (p.of ? ' of ' + p.of : '');
     els.press.textContent = who + ' · build ' + p.build + ' · loading…';
     let manifest = null, worker = null, failed = null;
@@ -295,8 +372,10 @@ export function main() {
           if (d.type === 'loaded') els.press.textContent = who + ' · build ' + p.build + ' · emu.wasm compiled in ' + d.compileMs.toFixed(0) + ' ms';
           if (d.type === 'progress') {
             current = newRowRecord(state());
-            els.press.textContent = who + ' · build ' + p.build + ' · row ' + (d.i + 1) + ' of ' + d.n + ' (' + d.step.slug + ' ' + d.step.grade + ' ' +
-              (d.step.mode === 'jit' ? 'translated fn ' + d.step.fnBlocks : '--interpreter') + ')… keep the screen on';
+            const what = d.step.slug + ' ' + d.step.grade + ' ' + (d.step.mode === 'jit' ? 'translated fn ' + d.step.fnBlocks : '--interpreter');
+            rowNow = { i: d.i + 1, n: d.n, what };
+            els.press.textContent = who + ' · build ' + p.build + ' · row ' + (d.i + 1) + ' of ' + d.n + ' (' + what + ')… keep the screen on';
+            renderState();
           }
           if (d.type === 'result') {
             const rec = finishRow(current || newRowRecord(state()), state());
@@ -314,6 +393,9 @@ export function main() {
     }
     if (worker) worker.terminate();
     current = null;
+    rowNow = null;
+    const bestRow = results.filter((r) => r.realtime && !r.tainted).reduce((a, b) => (!a || b.realtime > a.realtime ? b : a), null);
+    if (bestRow) lastHeadline = bestRow.realtime.toFixed(3) + '× real time · ' + bestRow.slug + ' ' + bestRow.grade + ' ' + (bestRow.mode === 'jit' ? bestRow.fnBlocks + '/fn' : 'interpreter') + ' · ' + p.build;
     const payload = buildPayload({
       ua: navigator.userAgent, cores: navigator.hardwareConcurrency, at: new Date().toISOString(), manifest,
       deviceMemory: navigator.deviceMemory, results, preset, device: deviceId, deviceName: localStorage.labName,
@@ -329,6 +411,7 @@ export function main() {
     els.press.textContent = who + ' · build ' + p.build + ' · finished';
     running = null;
     setBusy(false);
+    renderState();
     if (pending) { const n = pending; pending = null; onPress(n); }
   }
 
