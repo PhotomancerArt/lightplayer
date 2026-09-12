@@ -337,7 +337,9 @@ each keeping the `loop`/`br_table` shape inside. `dispatch`'s module docs have
 the shapes; what follows is the number the split is set to and how it was
 measured.
 
-**`--jit-fn-blocks` is the knob and 256 is the default.** JD26 says the size is
+**`--jit-fn-blocks` is the knob and 8 is the default** (M7b P5, BD6/DD32 — see
+"The default, and why the phone sets it", below; it was 256 when the table that
+follows was taken, then 32). JD26 says the size is
 chosen by measured steady-state throughput in JavaScriptCore, not by the limit.
 So it was: one native `--jit` run recorded 12,000 entries into translated code
 — every import answer in call order, the memory the interpreter changed between
@@ -393,6 +395,79 @@ else that could be measured, and costs one engine entirely.
 > JavaScriptCore's curve was still falling all the way down. See the next
 > section. Whether 256 stays the default is the G-M7P gate's decision, not
 > this file's.
+
+> **Settled by M7b P5.** The default is **8**, and the low-end wall the note
+> above warns about is gone with the flat selector (#697). See "The default,
+> and why the phone sets it".
+
+### The size sweep on the M7b head (P5)
+
+`render-basic` t2, 5,500 ms, `p6b-rows.mjs`, interleaved, best-of-3, **one
+invocation per engine**, UART0 `2407828f80684331` on every row. 64 is the
+control.
+
+| blocks/fn | node/V8 (load 8.5–10.5) | bun/JavaScriptCore (load 7.6–21.9) |
+|---:|---:|---:|
+| 8 | 6.00 s / 0.917× | **7.15 s / 0.769×** |
+| 16 | **5.76 s / 0.955×** | 8.35 s / 0.659× |
+| 32 | 5.90 s / 0.933× | 12.93 s / 0.425× |
+| 64 | 7.26 s / 0.758× | 21.21 s / 0.259× |
+| that engine's `--interpreter` | 13.51 s / 0.407× | 9.63 s / 0.571× |
+
+**V8 is within 4 % across 8/16/32 and JSC is 1.81× faster at 8 than at 32.**
+That asymmetry is the whole of the default's argument: the size the phone
+wants costs V8 almost nothing, and the size V8 wants costs the phone a third
+of its number.
+
+The module at each size, from `--jit-emit-only` on the whole `render-basic`
+image (201,243 blocks, the module the render loop actually runs; the outer
+selector is **152 B at every size** since the flat form landed):
+
+| blocks/fn | functions | module bytes | largest body | largest sub-dispatcher | selector |
+|---:|---:|---:|---:|---:|---:|
+| 8 | 25,156 | 79,141,219 | 49,005 | 49,005 | 152 |
+| 16 | 12,578 | 75,665,569 | 92,484 | 92,484 | 152 |
+| 32 | 6,289 | 73,642,052 | 107,930 | 107,930 | 152 |
+| 64 | 3,145 | 72,503,830 | 153,952 | 153,952 | 152 |
+
+Smaller functions cost **bytes** — 9.2 % more module at 8 than at 64 — and
+every one of those bytes is a duplicated prologue, epilogue and dispatcher
+arm. Nothing in the module is within two orders of magnitude of
+`BODY_BUDGET`'s 6,123,456 B at any of these sizes, which is why the halving
+path does not fire on this image at all.
+
+### The default, and why the phone sets it (BD6 / DD32)
+
+BD6 reserves this constant for one phase and one kind of evidence: a **phone**
+row. The desk cannot settle it, because the two desk engines disagree and
+disagree in opposite directions — and the product runs in the phone's engine
+family. Six sessions on the M7b heads, `render-basic` t2 through the staged
+rig, each pressing 8 and 16 back to back so the pair shares a thermal state:
+
+| head | 8 blocks/fn | 16 blocks/fn | 8 wins |
+|---|---:|---:|:--:|
+| pre-P3 | 0.904× | 0.793× | yes |
+| P3 | 0.863× | 0.889× | no |
+| P3 | 0.945× | 0.888× | yes |
+| P3 | **1.008×** | 0.926× | yes |
+| P3 | 0.921× | 0.780× | yes |
+| P3 | 0.818× | 0.761× | yes |
+| P4 (press 1, cold) | 0.851× | 0.882× | no |
+
+**8 wins five of seven and holds the best row ever taken on that phone.**
+`lp-emu-esp32c6`'s `DEFAULT_JIT_FN_BLOCKS` carries this table too, and
+`scripts/emu/bench-web.sh`'s `defaults.fnBlocks` mirrors it — the page's
+default and the emulator's default are the same number or the page lies about
+what a default run does.
+
+**Both ends of the size are still safe at 8.** V8's `Fatal process out of
+memory: Zone` bounded the size from above at ≥512 (#680) and from below at
+≤16 (#691, the **nested** selector's 730 KB at 8); the flat selector removed
+the low end (#697) and the rows above are both engines compiling and running
+8 without complaint. `install`'s halving path is untouched and still logs
+every step (`jit: …; retrying with N blocks per function`); it does not fire
+on this image, because the largest body at 8 is 49,005 B against a 6,123,456 B
+budget.
 
 **No sub-dispatcher may exceed 80 % of the limit** (`dispatch::BODY_BUDGET`,
 6,123,456 B). It is a test, not a habit: `no_sub_dispatcher_exceeds_the_body_budget`
@@ -766,6 +841,166 @@ across the whole of it. Both halves of the gap shrink together as the
 functions shrink — which is the same direction DD20 moved the default for
 entirely separate reasons — and about **2.3× of it survives at 8 blocks a
 function**, unexplained by size.
+
+### The residual, re-measured on the M7b head (P5)
+
+P6c's 2.3× was taken before P1–P4. On the P4 head it is **1.67× at 8 blocks
+a function**, and getting a number that means anything took fixing three
+things in the harness first — see "What the replay harness was getting
+wrong", below.
+
+Twelve `node --cpu-prof` runs, four sizes × three reps interleaved in one
+invocation, best of three by the module's own attributed time, loads 7.3–10.2,
+UART0 `2407828f80684331` on every one. **531,735,330 translated instructions
+on every row** (coverage 97.94 %):
+
+| blocks/fn | the module's ms | ns per translated instruction | replay at the run's own density | **residual** |
+|---:|---:|---:|---:|---:|
+| **8** | 2,086.0 | **3.923** | 2.345 | **1.67×** |
+| 16 | 1,980.5 | **3.724** | 2.303 | **1.62×** |
+| 32 | 2,093.0 | **3.936** | 2.147 | **1.83×** |
+| 64 | 2,726.4 | **5.127** | 2.264 | **2.27×** |
+
+The replay column is **not** the raw `ns/instr` a replay prints, and that
+matters. A replay's rate depends on the recording's **instructions per
+entry** — a boot recording is 84.09, a render-loop one is 234.09, and the
+real run averages 134.4 — because the per-entry half of the cost is divided
+by a different number in each. So the column above is
+`p6b-entry-split.mjs`'s fitted `E` and `T` (per entry and per instruction,
+least-squares over windows of 200 entries inside one recording) evaluated at
+**the run's own 134.4 instructions an entry**:
+
+| blocks/fn | E ns/entry (node/V8) | T ns/instr | E/134.4 + T |
+|---:|---:|---:|---:|
+| 8 | 38.8 | 2.056 | 2.345 |
+| 16 | 37.7 | 2.023 | 2.303 |
+| 32 | 32.7 | 1.904 | 2.147 |
+| 64 | 38.7 | 1.976 | 2.264 |
+
+Two things fall out of that table that the size sweep alone does not say:
+
+- **In V8 the module's per-instruction cost does not depend on the function
+  size at all** — 2.056 / 2.023 / 1.904 / 1.976 ns, flat — while the *real
+  run* at the same sizes is 3.923 / 3.724 / 3.936 / 5.127. So V8's size
+  sensitivity is **entirely** the working set; there is nothing intrinsic
+  about a bigger function that V8 runs more slowly once it is hot.
+- **In JSC it is not.** The same fit in bun reads 4.465 / 4.597 / 7.529 /
+  12.005 ns per instruction — the size curve is there in a warm replay of a
+  few thousand entries, with no working set to speak of. JSC pays for a big
+  function whether or not the run is cold. That is the same split the phone
+  and the desk keep producing, and it is the reason the default is the
+  phone's to set.
+
+### The four candidates for the residual, and what each is worth (P5)
+
+| candidate | worth | how it was measured |
+|---|---|---|
+| **cold code / the working set** | **1.67× at 8 blocks a function — 838 ms of a 2,086 ms module, 40 % of it** | the table above: a real run's 3.923 ns against 2.345 ns for the same module, the same guest work and the same entry density, warm |
+| **layout by execution adjacency** | **nothing — it is 2–5 % WORSE, and it buys 6.2 % MORE cross-function edges** | below |
+| **the permission-byte RAM path** | **5.29 % of the module's bytes** (3,783,944 B of 71,528,576). Its *time* is not measurable this way, and below says why | `--jit-emit-only` under `LP_EMU_JIT_EMIT_DIAG=no-perm` |
+| **the per-block budget check** | **5.40 % of the module's bytes** (3,863,931 B, 25.0 B a block over 154,544 blocks) | `LP_EMU_JIT_EMIT_DIAG=no-budget` |
+
+The two byte figures are **exactly additive** — removing both is 7,647,874 B
+against 3,783,944 + 3,863,931 = 7,647,875, one LEB byte apart — so neither
+check is hiding inside the other.
+
+**Why the two checks could not be priced in time, and what it would take.**
+The obvious diagnostic — emit the module without the check and time the run —
+does not price the check, because the run it produces is not the same run.
+With the permission check replaced by a constant, every MMIO access takes the
+RAM path and reads the arena, so the guest reads garbage where it expected the
+SYSTIMER and goes somewhere else entirely: `render-basic` t2 at a 500 ms bound
+came out **5.5× slower**, coverage fell from 97.94 % to 96.46 %, and the
+transcript was `0ccda7f466879e84` rather than `2407828f80684331`. A wall clock
+over different guest work is not a price. The same argument applies to the
+budget check: a stay that runs past the end of its slice services peripherals
+late, and the transcript moves. **Pricing them properly needs a fixture on
+which the diagnostic is behaviour-neutral** — an all-RAM block set whose
+budget never trips, emitted both ways and timed in both engines through
+`LP_EMU_JIT_ENGINE_CASE` the way `p6b-hop.mjs` times the hop. That is a
+half-day and it is not this phase's; what is recorded here is the byte price,
+which is exact, and the reason the cheap version does not work, so nobody pays
+for it twice.
+
+### Layout: address order is already the trace, and a trace layout is worse
+
+`emit_module` chunks `set.blocks` into functions, so the set's **order** is
+what decides which guest edges are a branch inside one wasm body and which are
+a cross through the selector. That order had never been measured — this file
+used to say "layout beyond that ordering is deliberately not optimised: no
+measurement yet says it matters". It does not matter, and now that is a
+measurement.
+
+`blocks::adjacency_order` is a depth-first trace layout: each block followed
+by the successor it runs into (fall-through, then the taken branch, then a
+call's own body), a new trace started only when the current one meets a block
+already placed. `LP_EMU_JIT_BLOCK_ORDER=adjacency` selects it.
+`render-basic` t2, 5,500 ms, `p6b-rows.mjs`, interleaved, best-of-3, **one
+invocation per engine**, UART0 `2407828f80684331` on all twenty-four rows:
+
+| engine | blocks/fn | address | trace layout | change |
+|---|---:|---:|---:|---:|
+| node/V8 (load 4.6–5.3) | 8 | **0.951×** | 0.932× | −1.9 % |
+| node/V8 | 16 | **0.989×** | 0.959× | −3.0 % |
+| bun/JSC (load 7.4–12.6) | 8 | **0.787×** | 0.762× | −3.1 % |
+| bun/JSC | 16 | **0.650×** | 0.618× | −4.9 % |
+
+and the mechanism, from `--jit-report` on two whole runs at 8 blocks a
+function:
+
+| | address | trace layout |
+|---|---:|---:|
+| cross-function edges taken | **52,960,867** | **56,232,840** (+6.2 %) |
+| module bytes | 79,726,810 | 79,752,572 (+0.03 %) |
+| every exit-census row | identical | identical |
+
+**The reason is that guest address order already IS the trace.** The firmware
+was laid out by a compiler that puts a basic block's hot successor next to it,
+so the address-ordered set already spends most of its edges falling straight
+into the block emitted next — which `Emitter::fall_through` makes cost
+literally nothing. A depth-first walk that also chases `jal` targets pulls
+callees out of their address neighbourhood and breaks those runs up. **A
+layout policy has nothing to win here and 6.2 % of crosses to lose.**
+
+The switch is kept, off, because the answer is worth more than the code costs
+(one environment read per install, three installs a run) and because deleting
+it would leave only a sentence where there is now a number. Every exit-census
+row is identical between the two layouts, the eight-cell free oracle is `same`
+on all five readings under the trace layout, and
+`translate_roundtrip.rs::a_trace_layout_retires_identically_to_address_order`
+asserts it under wasmtime at 1, 8 and 64 blocks a function: **a layout is a
+permutation of the set and nothing else the guest can see.**
+
+### What the replay harness was getting wrong (P5)
+
+Three things, and the first one meant no replay had run since M7b P2:
+
+1. **`jit-image-bench.mjs` had no `poll` import.** P2's fourth import made
+   every module refuse to instantiate — `LinkError: Import #3 "emu" "poll":
+   function import requires a callable` — and P2 also widened `mmio_store`'s
+   answer to an i64, which the harness masked back down to a bare pc and V8
+   answered with `TypeError: Cannot convert <pc> to a BigInt`. The recorder
+   had been writing poll calls all along; nothing read them.
+2. **The between-entries memory delta is inside what a replay times**, and
+   `replay.rs` said it was outside. It cannot be hoisted out — it stands in
+   for the interpreter immediately before the entry it belongs to. At 256
+   bytes an entry (boot) it is invisible; at **69,120 bytes an entry** (the
+   render loop) it is larger than the entry. The harness now measures its own
+   floor — the same loop with the call removed — and reports
+   `harnessNsPerInstr` and `steadyNsPerInstrNet`. **A residual is read off the
+   net one.**
+3. ⚠️ **A render-loop recording cannot be replayed at all since M7b P3.** The
+   published-read block is refreshed inside `mmio_store`'s own crossing
+   (`jit.rs::republish_systimer`), and a replay's imports are canned answers
+   that refresh nothing — so the module's in-module fast reads go stale within
+   an entry and it starts calling `mmio_load` for reads the recording never
+   recorded: `entry 104511: the module made more import calls than the
+   recording has`. The recorder also marks the block **non-volatile**, so the
+   between-entries delta does not carry it either. A boot recording is
+   unaffected, because the fast path is disarmed there — which is why this
+   went unnoticed, and why **every replay number in this ladder describes
+   boot-phase code**. Fixing it means recording the republished words beside
+   the store that caused them; it is not done here.
 
 ### What a module-side entry is made of (P6c Q4)
 
