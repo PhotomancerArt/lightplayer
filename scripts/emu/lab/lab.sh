@@ -276,7 +276,9 @@ cmd_logs() {
 cmd_stage() {
     local sha="${1:?lab stage needs a commit}"
     need_home
-    local primary; primary="$(git -C "$repo" worktree list --porcelain | head -1 | sed 's/^worktree //')"
+    # No `head` here: under pipefail a closed pipe makes git exit non-zero
+    # and `set -e` would leave silently.
+    local primary; primary="$(git -C "$repo" worktree list --porcelain | sed -n '1s/^worktree //p')"
     local full; full="$(git -C "$primary" rev-parse --verify "$sha^{commit}" 2>/dev/null)" || { echo "lab: $sha is not a commit in $primary" >&2; exit 1; }
     local short="${full:0:7}"
     if [[ "$full" == "$(git -C "$primary" rev-parse HEAD)" && -n "$(git -C "$primary" status --porcelain)" ]]; then
