@@ -5,15 +5,97 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Emulator Perf Lab</title>
 <style>
+  /* The rig's own visual language (scripts/emu/bench-web/index.html): this is
+     a tool page, not a product surface (T9). */
   :root { color-scheme: light dark; }
   body { margin: 0; padding: 20px; font: 16px/1.5 -apple-system, system-ui, sans-serif; background: #eef1f3; color: #1b2229; }
   @media (prefers-color-scheme: dark) { body { background: #151b20; color: #e6ecef; } }
   h1 { font-size: 22px; margin: 0 0 4px; }
-  .sub { opacity: .7; font-size: 13px; }
+  h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .06em; opacity: .7; margin: 18px 0 4px; }
+  .sub { opacity: .7; font-size: 13px; word-break: break-all; }
+  button { font: inherit; padding: 10px 18px; border-radius: 6px; border: 1px solid #0e6e6a; background: #0e6e6a; color: #fff; margin: 14px 8px 4px 0; }
+  button:disabled { opacity: .5; }
+  button.preset, button.quiet { background: transparent; color: #0e6e6a; border-width: 2px; font-weight: 600; }
+  @media (prefers-color-scheme: dark) { button.preset, button.quiet { color: #4fb8b2; border-color: #4fb8b2; } }
+  #joinBtn { font-size: 20px; padding: 14px 32px; }
+  input[type=text] { font: inherit; padding: 8px 10px; border-radius: 6px; border: 1px solid rgba(128,128,128,.5); background: transparent; color: inherit; }
+  fieldset { border: 1px solid rgba(128,128,128,.4); border-radius: 8px; margin: 14px 0 0; padding: 10px 14px; }
+  legend { font-size: 12px; text-transform: uppercase; letter-spacing: .06em; opacity: .7; }
+  label { font-size: 14px; margin-right: 18px; display: inline-block; }
+  select { font: inherit; padding: 4px 6px; }
+  table { border-collapse: collapse; width: 100%; font-variant-numeric: tabular-nums; font-size: 14px; margin-bottom: 10px; }
+  th, td { text-align: right; padding: 5px 6px; border-bottom: 1px solid rgba(128,128,128,.35); }
+  th:first-child, td:first-child { text-align: left; }
+  th:nth-child(2), td:nth-child(2), th:nth-child(3), td:nth-child(3) { text-align: left; }
+  .headline { margin: 4px 0 16px; }
+  .big { font-size: 24px; font-weight: 700; color: #0e6e6a; }
+  .bad { color: #b3261e; font-weight: 600; }
+  @media (prefers-color-scheme: dark) { .big { color: #4fb8b2; } .bad { color: #f2b8b5; } }
+  pre { font-size: 12px; white-space: pre-wrap; opacity: .8; overflow-x: auto; }
+  #status, #press, #countdown, #presence { min-height: 1.5em; }
+  #presence { font-size: 14px; }
+  #countdown { font-variant-numeric: tabular-nums; font-weight: 600; }
+  #jobs { font-size: 14px; opacity: .85; }
+  .wrap { overflow-x: auto; }
+  .note { font-size: 13px; opacity: .75; }
 </style>
 </head>
 <body>
 <h1>Emulator Perf Lab</h1>
-<div class="sub">The lab page lands in P2. The server, the build store and the presence endpoints are live.</div>
+<div class="sub" id="ua"></div>
+
+<div id="noToken" hidden>
+  <p><b>Open the bookmark the director gave you.</b> This page needs the lab token in the link (<code>#t=…</code>); nothing here works without it.</p>
+</div>
+
+<div id="join" hidden>
+  <p>Name this device once, tap <b>Join</b>, then leave it face-up and plugged in. The director queues what it measures; you do nothing else.</p>
+  <label>device name <input type="text" id="name" placeholder="yona-iphone" autocomplete="off"></label>
+  <br>
+  <button id="joinBtn">Join</button>
+  <p class="note">Join is the tap that lets the page keep the screen on. A row taken through a hidden tab or after the screen locks is marked tainted and never quoted (D8).</p>
+</div>
+
+<div id="board" hidden>
+  <div id="presence"></div>
+  <button id="lockBtn" class="quiet" hidden>Keep the screen on</button>
+  <h2>jobs for this device</h2>
+  <div id="jobs">No jobs yet.</div>
+  <h2>now</h2>
+  <div id="press">Waiting for the director.</div>
+  <div id="countdown"></div>
+  <div id="status"></div>
+  <div id="headlines"></div>
+  <div class="wrap">
+  <table id="results" hidden>
+    <thead><tr>
+      <th>row</th><th>image</th><th>mode</th><th>grade</th><th>fn</th>
+      <th>wall s</th><th>ns/instr</th><th>real time</th><th>cover %</th><th>boot ms</th><th>uart</th><th>taint</th>
+    </tr></thead>
+    <tbody></tbody>
+  </table>
+  </div>
+  <pre id="boot"></pre>
+  <pre id="tail"></pre>
+</div>
+
+<fieldset id="manual" hidden>
+  <legend>manual run (a hand-taken row, labelled manual)</legend>
+  <label>build <select id="build"></select></label>
+  <label>mode <select id="mode"></select></label>
+  <label>blocks/fn <select id="fnBlocks"></select></label>
+  <label>bound <select id="timeout"></select></label>
+  <label>grade <select id="grade"></select></label>
+  <label>image <select id="image"></select></label>
+  <label>repeats <select id="repeats"><option>1</option><option>2</option><option>3</option></select></label>
+  <br>
+  <button id="run">Run</button>
+  <button id="runGate" class="preset">Run the gate rows</button>
+</fieldset>
+
+<script type="module">
+  import { main } from './lab-page.js';
+  main();
+</script>
 </body>
 </html>
