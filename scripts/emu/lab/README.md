@@ -29,7 +29,8 @@ with one once. `LAB_HOME` overrides it (tests use a temp dir).
 ├── builds/<id>/     emu.wasm manifest.json worker.js bench-run.js wasi-shim.js jit-host.js bench-cli.mjs index.html
 │                    fw-<slug>.elf -> ../../images/<sha12>.elf       (one ELF copy shared by every build)
 ├── images/<sha12>.elf
-├── jobs/            (P3)
+├── jobs/<id>.json   queued → running → done | expired | failed | cancelled
+├── jobs/<id>/presses/<n>.json  report.json  report.md
 ├── results/result-<ISO>.json   the legacy bench-web shape, one per press or manual run
 ├── devices/<deviceId>.json     identity, last state, last seen
 └── log/server.log
@@ -104,7 +105,11 @@ and strips the hash (P2).
 | `GET /events?device=<id>` | yes | SSE presence stream; `hello` on open, a keepalive comment every 15 s |
 | `POST /devices/<id>/state` | yes | `{name, ua, cores, deviceMemory, visibility, hasFocus, wakeLock}` → the device file |
 | `POST /results/manual?device=<id>` | yes | a hand-taken run in the legacy shape; server names the file, caps the body (413), requires `results[]` (400), adds `manual: true` |
-| `GET /status` | yes | devices (with `present`), builds, job counts, result count |
+| `GET /status` | yes | devices (with `present`), builds, job counts, result count, bad-token count |
+| `POST /jobs`, `GET /jobs`, `GET /jobs/<id>`, `DELETE /jobs/<id>` | yes | queue / list / read / cancel a job (see "Jobs") |
+| `POST /jobs/<id>/presses/<n>/result`, `…/deferred` | yes | the page's press result / "received hidden" |
+| `GET /jobs/<id>/report.json`, `…/report.md` | yes | the computed report once the job is terminal |
+| `GET /wait?job=\|device=\|queue=idle&timeout=` | yes | one blocking call (see "Waiting") |
 
 Static paths are resolved with `realpath` and must stay inside the home (or
 the script directory for the page); `..`, dot-files and planted symlinks are

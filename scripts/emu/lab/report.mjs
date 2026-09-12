@@ -49,7 +49,12 @@ export function computeReport(job, presses) {
     const pb = perBuild[p.build];
     if (!pb) continue;
     const ok = p.state === 'done' && !p.tainted;
-    if (!ok) excluded.push({ press: p.n, build: p.build, reason: p.state === 'failed' ? ['failed'] : (p.taintReasons && p.taintReasons.length ? p.taintReasons : ['tainted']) });
+    if (!ok) {
+      const reason = p.state === 'failed' ? ['failed']
+        : p.state !== 'done' ? ['not taken (' + p.state + ')']
+          : (p.taintReasons && p.taintReasons.length ? p.taintReasons : ['tainted']);
+      excluded.push({ press: p.n, build: p.build, reason });
+    }
     pb.presses.push({ n: p.n, ok, results: ok ? (p.results || []) : [] });
   }
 
