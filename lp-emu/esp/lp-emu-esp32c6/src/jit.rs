@@ -36,7 +36,7 @@ use std::path::PathBuf;
 
 use lp_emu_core::{Bus, CycleModel};
 use lp_emu_esp_common::bus::{PERM_NONE, PERM_READ, PERM_READ_WRITE, PERMISSION_PAGE_LEN, SocBus};
-use lp_emu_jit::blocks::BlockSet;
+use lp_emu_jit::blocks::{BlockOrder, BlockSet};
 use lp_emu_jit::discover::{DiscoverStats, Discovered, discover, discover_from};
 use lp_emu_jit::dispatch::{BODY_BUDGET, emit_module, target_table_bytes, write_target_tables};
 use lp_emu_jit::host::{
@@ -535,6 +535,16 @@ fn emit_sizes(
     if record.sizes.is_empty() {
         return;
     }
+    // The same layout the installed core used, or the recording's global block
+    // indices would not be this module's (M7b P5).
+    let ordered;
+    let set = match block_order() {
+        BlockOrder::Address => set,
+        BlockOrder::Adjacency => {
+            ordered = set.permuted(&lp_emu_jit::blocks::adjacency_order(set));
+            &ordered
+        }
+    };
     let Ok(at) = areas(bus, set, 0) else { return };
     // Base zero, whatever host this build has: these bytes are for
     // `jit-image-bench.mjs`, which builds its own memory with the arena at
@@ -1571,6 +1581,19 @@ impl Module {
         gap_used: u32,
         read_only: bool,
     ) -> Result<(Self, Option<(Recorder, u64)>), String> {
+        // The layout, before anything reads a position out of the set. Every
+        // index this function goes on to build — the emitted chunks, the entry
+        // index, the invalidation `code` vector, the indirect page map — is a
+        // position in `set.blocks`, so the permutation has to happen here,
+        // once, above all four of them. See `blocks::adjacency_order`.
+        let ordered;
+        let set = match block_order() {
+            BlockOrder::Address => set,
+            BlockOrder::Adjacency => {
+                ordered = set.permuted(&lp_emu_jit::blocks::adjacency_order(set));
+                &ordered
+            }
+        };
         let at = areas(bus, set, gap_used)?;
         write_permission_table(bus, at);
 
@@ -2615,6 +2638,73 @@ impl TranslatedCore<SocBus> for JitCore {
             s.refused_impure,
             s.refused_stale,
         )
+    }
+}
+
+/// The emission diagnostics, off unless `LP_EMU_JIT_EMIT_DIAG` asks (M7b P5).
+///
+/// ⚠️ **Every one of these emits a translation that is WRONG.** They exist so
+/// the two things every emitted block pays for can be *priced* —
+/// [`Emit::perm_check`] and [`Emit::budget_check`] say what each one is and
+/// what removing it breaks. They are diagnostics under BD7: off by default,
+/// never a product path, and not a proposal to delete anything. A run that
+/// sets one gets a loud line on stderr saying its transcript is not the
+/// guest's, because the one way this could do harm is by being mistaken for a
+/// fast correct run.
+///
+/// The value is a comma-separated list of `no-perm` and `no-budget`.
+///
+/// # Panics
+///
+/// Panics on an unrecognised name — a typo in a measurement is not something
+/// to answer with the default.
+pub fn emission_diagnostics(mut policy: Emit) -> Emit {
+    let Ok(spec) = std::env::var("LP_EMU_JIT_EMIT_DIAG") else {
+        return policy;
+    };
+    for name in spec.split(',').map(str::trim).filter(|s| !s.is_empty()) {
+        match name {
+            "no-perm" => policy.perm_check = false,
+            "no-budget" => policy.budget_check = false,
+            other => panic!(
+                "LP_EMU_JIT_EMIT_DIAG names `{other}`; it takes `no-perm` and `no-budget`"
+            ),
+        }
+    }
+    if !policy.perm_check || !policy.budget_check {
+        eprintln!(
+            "jit: ⚠️  LP_EMU_JIT_EMIT_DIAG={spec}: THIS RUN'S TRANSCRIPT IS NOT THE GUEST'S. \
+             The emitted code is deliberately wrong so that what it left out can be priced \
+             (M7b P5, BD7). Nothing it prints is evidence of anything but speed."
+        );
+    }
+    policy
+}
+
+/// Which order the emitted module lays the block set out in (M7b P5).
+///
+/// **A diagnostic switch, not a product knob.** `LP_EMU_JIT_BLOCK_ORDER` takes
+/// `address` (the default, and what every run does) or `adjacency`, and exists
+/// so the two layouts can be A/B'd against one recording and one image — which
+/// is how P5 priced the layout candidate at all. Both orders are exact: a
+/// global block index is a position in the set and nothing the guest can
+/// observe is a function of it (`BlockSet::permuted`), and
+/// `tests/translate_roundtrip.rs` asserts the two retire identically under
+/// wasmtime.
+///
+/// An unrecognised value is a typo in a measurement, so it is refused loudly
+/// rather than silently answered with the default.
+///
+/// # Panics
+///
+/// Panics on a value that is neither `address` nor `adjacency`.
+fn block_order() -> BlockOrder {
+    match std::env::var("LP_EMU_JIT_BLOCK_ORDER").as_deref() {
+        Ok("adjacency") => BlockOrder::Adjacency,
+        Ok("address") | Err(_) => BlockOrder::Address,
+        Ok(other) => panic!(
+            "LP_EMU_JIT_BLOCK_ORDER is `{other}`; it takes `address` (the default) or `adjacency`"
+        ),
     }
 }
 

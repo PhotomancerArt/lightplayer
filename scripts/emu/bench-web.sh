@@ -286,13 +286,16 @@ build_obj="$(jq -n --arg sha "$build_sha" --arg short "$build_short" --arg branc
 # the tab dies with it and nothing uploads — which is that engine's answer to
 # the question the gate is asking.
 #
-# `defaults.fnBlocks` is 32 because `DEFAULT_JIT_FN_BLOCKS` is (DD20, P6c): the
-# page's default and the emulator's default are the same number or the page
-# lies about what a default run does. Widening the CHOICES does not touch it —
-# the default is M7b P5's to set, from a phone row (BD6).
+# `defaults.fnBlocks` is 8 because `DEFAULT_JIT_FN_BLOCKS` is (BD6/DD32, M7b
+# P5): the page's default and the emulator's default are the same number or the
+# page lies about what a default run does. It was 32 (DD20, P6c) until the
+# phone's six sessions settled it — 8 won five of seven same-session pairs
+# against 16 and holds the best row ever taken on that phone, 1.008x; the doc
+# comment on `DEFAULT_JIT_FN_BLOCKS` carries the rows. **The two move
+# together**: this line is the mirror and it has no independent reason.
 jq -n --argjson images "$manifest_images" --argjson build "$build_obj" \
     '{images: $images, grades: ["t1", "t2"], repeats: 1, build: $build,
-      defaults: {mode: "jit", fnBlocks: 32, timeout: "5500ms", wallTimeout: 600, exitOn: false},
+      defaults: {mode: "jit", fnBlocks: 8, timeout: "5500ms", wallTimeout: 600, exitOn: false},
       fnBlocksChoices: [8, 16, 32, 64, 128, 256],
       timeoutChoices: ["5500ms", "20s"],
       modeChoices: ["jit", "interp"]}' >"$stage_dir/manifest.json"
