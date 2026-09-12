@@ -2984,6 +2984,28 @@ bench-emu-c6-pgo:
 bench-emu-web *args:
     scripts/emu/bench-web.sh {{ args }}
 
+# The emulator perf lab: the phone joins once, the director queues the
+# presses (scripts/emu/lab/README.md). A dependency-free node server on the
+# pinned port 41111 (a machine-wide service — the one declared exception to
+# the never-pinned rule) holds device presence over SSE, owns a job queue, and
+# writes everything as files under ~/.photomancer/emu-lab. `lab.sh` is the
+# director's CLI over it.
+#
+#   just emu-lab status                       # devices, builds, job counts
+#   just emu-lab queue --ab A B --rows gate-rows --repeats 5 --spacing 3m
+#   just emu-lab wait --job <id>              # ONE blocking call, run in the background
+#   just bench-emu-web --stage-into ~/.photomancer/emu-lab   # put this tree's build in the store
+#
+# Numbers from the lab are the phone's; they confirm direction (DD43). The
+# desk proxy stays the phase bar.
+emu-lab *args:
+    scripts/emu/lab/lab.sh {{ args }}
+
+# The lab's own tests: the real server on port 0 in a temp home, a fake page
+# client driving the queue at test speed. Dependency-free (`node --test`).
+test-emu-lab:
+    node --test 'scripts/emu/lab/test/*.test.mjs'
+
 # The Xtensa core's speed probe: the `bench_loop` fixture at a round count
 # that retires >=100 M instructions in ONE run, reported as user seconds,
 # instructions/second and the load average, with a `cmp` of the guest output
