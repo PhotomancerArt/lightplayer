@@ -158,6 +158,24 @@ float-f32 = [
 #   cargo build --profile release-esp32v3 --features frame-dump
 frame-dump = []
 
+# The `render-loop` benchmark image — OFF by default, never shipped.
+#
+# The shipped boot with two differences and no third: the filesystem is not
+# empty (`projects/test/basic`, baked in and retargeted `D10` -> `IO18` by
+# `build.rs`), and the server loop stops at a frame count and prints a
+# summary. It is what `scripts/emu/bench-esp32v3.sh` measures the render loop
+# with, and it is the twin of fw-esp32c6's feature of the same name, so the
+# two chips' real-time ratios compare.
+#
+# Deliberately NOT a `test_*` feature, for the reason `frame-dump` above gives
+# and for one more: a harness build `cfg`s out `main` and the whole server
+# stack, so a render-loop image built that way would measure a
+# re-implementation of the render loop. See `src/bench/render_loop.rs`.
+#
+# Build (touch src/main.rs first if flipping features):
+#   cargo build --profile release-esp32v3 --features bench_render_loop
+bench_render_loop = ["dep:fw-checks", "fw-checks/check-render-loop"]
+
 # M2-P3 RAM probe: boot with the radio stack linked AND initialised, print
 # heap deltas at each stage. Build:
 #   cargo build --profile release-esp32v3 --no-default-features \

@@ -361,6 +361,70 @@ repeating a short program; it now runs the trip-counted `bench_loop` once
 instead.) `lp-emu/lp-xt-emu/README.md` has the rung-by-rung table and the
 generic-codegen trap that per-package `opt-level` overrides hide.
 
+**The classic ESP32 (v3) machine** has the C6's probe in its own shape:
+
+```bash
+just bench-emu-esp32v3                # three pinned images, t1, both cores
+just bench-emu-esp32v3 --json out.json
+scripts/emu/bench-esp32v3.sh --bin <saved-binary> --no-build --no-promote
+```
+
+Two things differ from the C6's, and both are the chip: **t1 is the only
+grade this machine has** (a cycle IS an instruction here), and
+instructions/second is reported **per hart** as well as in total, because the
+classic is dual core and the run loop hands each unheld core a window per
+iteration. The quantum is a run parameter — a number taken at another
+`--core-quantum` is not comparable with these.
+
+Three rows, and as on the C6 they are **not interchangeable**. `boot-idle`
+(the shipped image, no project, run to a fixed emulated deadline) and
+`shader-compile-stress` are an idle image and a compile harness;
+**`render-loop` is the row to quote** — the product's render loop, 241 lamps
+on IO18, the same project and the same pixels the C6's `render-basic` row
+renders, retargeted `D10` → `IO18` at firmware build time so the two chips'
+ratios compare. Measured 2026-09-11 on one loaded Mac (load 6.2–10.4), same
+window, four runs, every row's UART0 bytes unchanged:
+
+| image | user s | instr/s | core 0 | core 1 | rt(user) |
+|---|---:|---:|---:|---:|---:|
+| `boot-idle` | 0.79 | 32.6 M | 32.6 M | 0.0 M | 3.797× |
+| `shader-compile-stress` | 1.67 | 37.3 M | 37.3 M | 0.0 M | 0.155× |
+| **`render-loop`** | **16.33** | **32.4 M** | **26.6 M** | **5.9 M** | **0.130×** |
+
+The C6's `render-basic` row, measured the same day on the same desk (load 37,
+so a different window), reads 0.76× at t1 on **the same project** — so the
+classic is roughly **5.8× further from real time** and its interpreter
+retires **3.4× fewer** instructions a second. Two windows, not one: read that
+as an order, not a same-window pair.
+
+**Where the seconds go** is a different pair of instruments, both off by
+default and neither in a gate binary — and both **slower than the probe by
+construction**, so their seconds mean nothing and only their shares do:
+
+```bash
+# host time: an ITIMER_PROF pc sampler (macOS), symbolized with atos
+CARGO_PROFILE_RELEASE_DEBUG=1 cargo build -p lp-emu-esp32v3 --release \
+    --features selfprof --target-dir target/emu-prof-sp
+LP_EMU_SELFPROF=out.pcs LP_EMU_SELFPROF_US=250 \
+    target/emu-prof-sp/release/lp-emu-esp32v3 --elf <image> --time-grade t1 …
+scripts/emu/selfprof-buckets.py out.pcs --bin target/emu-prof-sp/release/lp-emu-esp32v3
+
+# guest side: counters on the bus and the interleave
+cargo build -p lp-emu-esp32v3 --release --features bench --target-dir target/emu-prof
+LP_EMU_V3_BENCHPROF=out.counts target/emu-prof/release/lp-emu-esp32v3 --elf <image> …
+scripts/emu/bench-esp32v3-counts.py out.counts --elf <image>
+```
+
+On the render loop, host time reads decode 27.5 %, execute 34.0 %, guest RAM
+12.8 %, fetch 7.1 %, the **window machinery 6.6 %**, MMIO 1.7 %. The guest
+side reads MMIO at 2.58 % of data accesses with **44 % of it one register**
+(UART0 `status`, the TX-FIFO poll), **865 window exceptions per million
+instructions** (98.9 % of them the 8-register form), a LOOP hotness of
+**essentially zero** — the LLVM Xtensa backend emits two zero-overhead loops
+in the whole image — and **6,397 core switches per million instructions**,
+one every 156 instructions. The full reading is the Xtensa plan's
+`m7/notes.md`.
+
 Evidence, and the rungs not yet climbed (poll-loop skip, block cache): the
 planning workspace's
 `2026-09-06-1001-esp-emulator/2026-09-07-speed-ladder-research.md` and its
