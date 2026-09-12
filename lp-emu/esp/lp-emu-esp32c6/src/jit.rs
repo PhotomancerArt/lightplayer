@@ -880,6 +880,9 @@ pub struct BuildReport {
     pub insts: usize,
     pub native_insts: usize,
     pub escaped_insts: usize,
+    /// Block ends that hand one refused word to `step_one` and resolve the pc
+    /// it reports through the target table (M7b P6).
+    pub stepped_ends: usize,
     pub module_bytes: usize,
     pub emit_us: u128,
     pub compile_us: u128,
@@ -1791,6 +1794,7 @@ impl Module {
                     insts: set.inst_count(),
                     native_insts: emitted.native_insts,
                     escaped_insts: emitted.escaped_insts,
+                    stepped_ends: emitted.stepped_ends,
                     module_bytes: emitted.wasm.len(),
                     emit_us,
                     compile_us,
@@ -2161,6 +2165,7 @@ impl JitCore {
             out.insts += r.insts;
             out.native_insts += r.native_insts;
             out.escaped_insts += r.escaped_insts;
+            out.stepped_ends += r.stepped_ends;
             out.module_bytes += r.module_bytes;
             out.emit_us += r.emit_us;
             out.compile_us += r.compile_us;
@@ -2630,7 +2635,8 @@ impl TranslatedCore<SocBus> for JitCore {
         format!(
             "discovered {} blocks / {} instr from {} seeds ({} starts, {} ended undecodable, \
              {} named no code{}); \
-             installed {} blocks / {} instr ({} emitted, {} escaped, {:.1} % static escape); \
+             installed {} blocks / {} instr ({} emitted, {} escaped, {:.1} % static escape, \
+             {} block end(s) stepped, {} left for the machine); \
              {} module(s), {} B in {} fn x {} blocks (largest body {} B, target tables {} B), \
              discover {:.2} ms, emit {:.2} ms, compile {:.2} ms, \
              instantiate {:.2} ms; \
@@ -2663,6 +2669,8 @@ impl TranslatedCore<SocBus> for JitCore {
             } else {
                 100.0 * r.escaped_insts as f64 / r.insts as f64
             },
+            r.stepped_ends,
+            d.undecodable_leave,
             self.mods.len(),
             r.module_bytes,
             r.functions,

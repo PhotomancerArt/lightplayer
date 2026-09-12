@@ -53,10 +53,37 @@ pub enum BlockEnd {
     /// Control falls into `pc` — another block's start, or wherever the
     /// instruction limit stopped the walk.
     Fall(u32),
-    /// The walk could not decode the word at `pc`, so the block ends before it
-    /// and translated code leaves for the interpreter there. The universal
-    /// escape (JD7).
-    Undecodable(u32),
+    /// The walk could not decode the word at `pc`, so the block ends before it.
+    /// The universal escape (JD7); [`Unknown`] says how translated code gets
+    /// past it.
+    Undecodable(u32, Unknown),
+}
+
+/// How translated code gets past a word [`crate::decode::decode`] refused.
+///
+/// Refusing to decode is never wrong (JD7), but it used to be expensive: the
+/// stay ended and the interpreter was re-entered for one instruction. M7b P6
+/// hands most of them to [`crate::host::HostOps::step_one`] instead — the
+/// interpreter's own `step_once`, at the same pc, with the register file and
+/// the counters flushed — and then resolves the pc it reports through the
+/// indirect-target table, exactly as a `jalr` does. What `step_one` cannot be
+/// asked for is named here rather than left to the emitter to work out.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Unknown {
+    /// `step_one` may run it and the stay may carry on at the pc it reports.
+    Step,
+    /// The stay must **end** before it and let the hart run it out in its own
+    /// loop.
+    ///
+    /// One encoding needs this and it is `fence.i`: it is the guest publishing
+    /// code, and the flush it asks for lands on a block cache and a translated
+    /// core that are **lifted out of the hart** for the length of a stay
+    /// (`mach/mod.rs::run_slice_cached`). The hart drains both immediately
+    /// after the uncacheable arm runs one; a stay would carry on running the
+    /// bytes it was translated from until it happened to end. The whole
+    /// `MISC-MEM` opcode takes this answer rather than the one encoding,
+    /// because leaving is always exact and the class costs one exit a run.
+    Leave,
 }
 
 /// One straight-line run of guest instructions.
@@ -212,7 +239,7 @@ fn successors(b: &Block) -> impl Iterator<Item = u32> + use<'_> {
     let mut out = [None; 2];
     match b.end {
         BlockEnd::Fall(pc) => out[0] = Some(pc),
-        BlockEnd::Undecodable(_) => {}
+        BlockEnd::Undecodable(..) => {}
         BlockEnd::Term => {
             if let Some(&(pc, d)) = b.insts.last() {
                 match d.inst {

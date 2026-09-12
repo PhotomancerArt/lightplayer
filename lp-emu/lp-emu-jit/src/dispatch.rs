@@ -329,13 +329,14 @@ pub fn emit_module(
     let load_func = fast_func.unwrap_or(F_MMIO_LOAD);
 
     let mut bodies = Vec::with_capacity(count);
-    let (mut native_insts, mut escaped_insts) = (0usize, 0usize);
+    let (mut native_insts, mut escaped_insts, mut stepped_ends) = (0usize, 0usize, 0usize);
     for c in 0..count {
         let lo = c * chunk;
         let len = chunk.min(total - lo);
-        let (f, native, escaped) = emit_body(set, lo, len, model, layout, policy, load_func);
+        let (f, native, escaped, stepped) = emit_body(set, lo, len, model, layout, policy, load_func);
         native_insts += native;
         escaped_insts += escaped;
+        stepped_ends += stepped;
         bodies.push(f);
     }
     // The selector is built here rather than at the code section, because it
@@ -480,6 +481,7 @@ pub fn emit_module(
         wasm: module.finish(),
         native_insts,
         escaped_insts,
+        stepped_ends,
         functions: count,
         max_body_bytes,
         max_sub_body_bytes,

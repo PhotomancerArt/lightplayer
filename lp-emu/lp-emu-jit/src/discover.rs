@@ -57,8 +57,8 @@ extern crate alloc;
 use alloc::collections::{BTreeMap, BTreeSet};
 use alloc::vec::Vec;
 
-use crate::blocks::{Block, BlockEnd, BlockSet, MAX_BLOCK_INSTS};
-use crate::decode::{Inst, decode};
+use crate::blocks::{Block, BlockEnd, BlockSet, MAX_BLOCK_INSTS, Unknown};
+use crate::decode::{Inst, decode, is_misc_mem};
 
 /// What a walk found, and what it had to give up on.
 ///
@@ -79,6 +79,11 @@ pub struct DiscoverStats {
     /// be fetched. Data-in-text, an unsupported extension, or a `SYSTEM`
     /// instruction — all of them the interpreter's (JD7).
     pub undecodable: usize,
+    /// Of [`undecodable`](Self::undecodable), the ones translated code must
+    /// **leave** for rather than step through — the `MISC-MEM` opcode, which
+    /// is where `fence.i` lives (M7b P6, [`crate::blocks::Unknown::Leave`]).
+    /// Two per `render-basic` run.
+    pub undecodable_leave: usize,
     /// Starts whose *first* word did not decode, so the block held nothing to
     /// run and was dropped. A symbol that names data lands here.
     pub empty_starts: usize,
@@ -354,11 +359,21 @@ fn build(
             {
                 break BlockEnd::Fall(at);
             }
+            // A fetch this walk cannot serve is still `step_one`'s to run:
+            // the interpreter fetches it for itself and takes whatever fault
+            // that produces, which is exactly what it would have done.
             let Some(word) = fetch(at) else {
-                break BlockEnd::Undecodable(at);
+                break BlockEnd::Undecodable(at, Unknown::Step);
             };
             let Some(d) = decode(word) else {
-                break BlockEnd::Undecodable(at);
+                break BlockEnd::Undecodable(
+                    at,
+                    if is_misc_mem(word) {
+                        Unknown::Leave
+                    } else {
+                        Unknown::Step
+                    },
+                );
             };
             insts.push((at, d));
             if d.is_control() {
@@ -380,8 +395,11 @@ fn build(
             stats.empty_starts += 1;
             continue;
         }
-        if matches!(end, BlockEnd::Undecodable(_)) {
+        if let BlockEnd::Undecodable(_, after) = end {
             stats.undecodable += 1;
+            if after == Unknown::Leave {
+                stats.undecodable_leave += 1;
+            }
         }
         blocks.push(Block { pc, insts, end });
     }
@@ -568,7 +586,7 @@ mod tests {
         assert_eq!(found.set.blocks[0].pc, 0x2000);
         assert_eq!(
             found.set.blocks[0].end,
-            BlockEnd::Undecodable(0x2004),
+            BlockEnd::Undecodable(0x2004, Unknown::Step),
             "the block ends before the literal and exits to the interpreter"
         );
         assert_eq!(found.stats.undecodable, 1);

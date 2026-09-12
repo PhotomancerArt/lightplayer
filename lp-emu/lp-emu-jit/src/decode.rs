@@ -267,6 +267,25 @@ fn creg(x: u32) -> u8 {
     8 + (x & 7) as u8
 }
 
+/// Is this word a `MISC-MEM` encoding — the opcode `fence.i` lives in?
+///
+/// [`decode`] recognises exactly one member of the class, the plain `fence`
+/// with `funct3 == 0`, so every other `MISC-MEM` word ends its block. One of
+/// them is `fence.i` (`0x0000_100f`), the guest publishing code it wrote, and
+/// the machine has to see that one **out in its own loop** rather than through
+/// the escape hatch inside a stay — see [`crate::blocks::Unknown::Leave`],
+/// which is what this predicate selects.
+///
+/// It names the whole opcode rather than the one encoding on purpose. Leaving
+/// is always exact and never a guess (JD7); the class is worth one exit a run
+/// on `render-basic`; and a reader checking this against the ISA has to check
+/// seven bits rather than reason about which reserved `MISC-MEM` words a
+/// future `fence` form might use.
+#[must_use]
+pub const fn is_misc_mem(word: u32) -> bool {
+    word & 0x7f == 0x0f
+}
+
 /// Decode the instruction at a word the bus fetched.
 ///
 /// A compressed instruction carries its 16 bits in the low half of `word`; the

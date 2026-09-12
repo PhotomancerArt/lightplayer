@@ -57,7 +57,7 @@ use alloc::vec::Vec;
 use lp_emu_core::{CycleModel, InstClass};
 use wasm_encoder::{BlockType, Function, Instruction as I, MemArg, ValType};
 
-use crate::blocks::{Block, BlockEnd, BlockSet};
+use crate::blocks::{Block, BlockEnd, BlockSet, Unknown};
 use crate::decode::{Cond, Decoded, Inst, LoadKind, Op, OpI, StoreKind};
 use crate::host::{
     EXCHANGE_CYCLE, EXCHANGE_EXIT_WHY, EXCHANGE_FLAGS, EXCHANGE_INDIRECT_MISS, EXCHANGE_INSTRET,
@@ -222,6 +222,16 @@ pub struct Emitted {
     pub native_insts: usize,
     /// Instructions the module hands to `step_one`.
     pub escaped_insts: usize,
+    /// Block ends that hand one word the decoder refused to `step_one` and
+    /// then resolve the pc it reports through the target table (M7b P6).
+    ///
+    /// Counted apart from [`escaped_insts`](Self::escaped_insts) because it is
+    /// not one of the block set's instructions — the word sits *past* the last
+    /// one — so folding it in would make
+    /// [`escape_share`](Self::escape_share)'s denominator stop being the block
+    /// set. The run-time figure for both is the hart's own `escape_hatch`
+    /// count.
+    pub stepped_ends: usize,
     /// Sub-dispatchers, not counting the outer selector.
     pub functions: usize,
     /// The largest body in the module, in bytes — **the selector included**.
@@ -360,6 +370,7 @@ struct Emitter<'a> {
     extra: u32,
     native_insts: usize,
     escaped_insts: usize,
+    stepped_ends: usize,
 }
 
 impl<'a> Emitter<'a> {
@@ -634,6 +645,90 @@ impl<'a> Emitter<'a> {
             self.i(I::End);
         }
         self.exit(k, None, 0, 0, 0, why::ESCAPE_TARGET);
+    }
+
+    /// A word the decoder refused, sitting at the **end** of a block (M7b P6).
+    ///
+    /// This used to be one line — `exit(pc, why::UNDECODABLE)` — and the
+    /// README said why: *"an encoding `decode` does not recognise cannot be
+    /// escaped that way, because its width is unknown and so the next pc is
+    /// unknown."* The width is indeed unknown. The **next pc** never had to
+    /// be: [`HostOps::step_one`](crate::host::HostOps::step_one) reports the
+    /// pc the interpreter left at, and the `jalr` emission already resolves an
+    /// arbitrary runtime pc through the indirect-target table in O(1). This is
+    /// those two halves put together:
+    ///
+    /// ```text
+    /// L_CYC >= P_END                →  exit at pc  (the slice is over)
+    /// step_one(pc)                  →  next_pc
+    ///   status == STEP_SLICE_ENDED  →  exit at next_pc with FLAG_SLICE_ENDED
+    /// resolve next_pc through the target table
+    ///   hit                         →  carry on, in this module
+    ///   miss                        →  exit at next_pc, why::INDIRECT_MISS
+    /// ```
+    ///
+    /// **It is exact because `step_one` *is* the interpreter's `step_once`**
+    /// (`mach/mod.rs`, *"not a second copy of it"*), so polling point (b) — the
+    /// one a CSR write to `mstatus`/`mie` or an `mret` runs — fires exactly
+    /// where it always did, a delivered interrupt comes back as `next_pc`, and
+    /// a `wfi`, an `ebreak`, a fault or a bus yield comes back as
+    /// [`STEP_SLICE_ENDED`](crate::host::STEP_SLICE_ENDED). [`Emitter::escape`]
+    /// flushes and reloads the register file and both counters around the call
+    /// (JD17) because the instruction is an arbitrary one.
+    ///
+    /// Three things it does **not** do, each for its own reason:
+    ///
+    /// - **`fence.i` — and the whole `MISC-MEM` opcode with it — still
+    ///   leaves.** See [`Unknown::Leave`]. One exit a run on `render-basic`.
+    /// - **It does not answer the poll question.** `escape` does not set
+    ///   [`L_PENDING`] and this does not either (M7b F1/F3): an obligation a
+    ///   Store-, Atomic- or System-class instruction leaves is taken by
+    ///   `step_once` itself, at that instruction, and one left anywhere else
+    ///   rides the bus out of the stay to the interpreter's own next store.
+    /// - **It refuses an odd pc** rather than masking one. The table's slot is
+    ///   `(pc & page_mask) * 2`, so an odd pc would read four bytes straddling
+    ///   two slots and could resolve to a block that is not there. A RISC-V
+    ///   hart cannot report one — every next pc and every trap vector is
+    ///   two-byte aligned — and this is three wasm instructions rather than an
+    ///   argument that has to stay true.
+    fn undecodable(&mut self, k: usize, pc: u32, after: Unknown) {
+        // No table, or a word the machine has to see for itself: the shape
+        // this arm has always had.
+        if after == Unknown::Leave || self.layout.indirect.is_none() {
+            self.exit(k, Some(pc), 0, 0, 0, why::UNDECODABLE);
+            return;
+        }
+
+        // **The slice's own budget.** `run_blocks` checks `cycle_count >= end`
+        // at the top of every iteration, and the end of a block is one of
+        // those tops: today's exit lands there and gets checked. Running
+        // `step_one` instead skips the check, and a block whose cost came out
+        // exactly at its budget — the check that let it run is
+        // `L_CYC + max <= P_END`, and a block that charges its full `max`
+        // leaves `L_CYC == P_END` — would retire one instruction the
+        // interpreter would not have. So the check comes with the instruction.
+        self.i(I::LocalGet(L_CYC));
+        self.i(I::LocalGet(P_END));
+        self.i(I::I64GeU);
+        self.i(I::If(BlockType::Empty));
+        self.extra += 1;
+        self.exit(k, Some(pc), 0, 0, 0, why::BUDGET);
+        self.extra -= 1;
+        self.i(I::End);
+
+        self.stepped_ends += 1;
+        self.escape(k, pc, 0, 0);
+
+        self.i(I::LocalGet(L_ADDR));
+        self.i(I::I32Const(1));
+        self.i(I::I32And);
+        self.i(I::If(BlockType::Empty));
+        self.extra += 1;
+        self.exit(k, None, 0, 0, 0, why::UNDECODABLE);
+        self.extra -= 1;
+        self.i(I::End);
+
+        self.indirect(k, 0, 0);
     }
 
     // --- indirect jumps -----------------------------------------------------
@@ -1381,7 +1476,7 @@ impl<'a> Emitter<'a> {
                 unreachable!("a block ending in a terminator returns from the loop above")
             }
             BlockEnd::Fall(pc) => self.fall_through(k, pc),
-            BlockEnd::Undecodable(pc) => self.exit(k, Some(pc), 0, 0, 0, why::UNDECODABLE),
+            BlockEnd::Undecodable(pc, after) => self.undecodable(k, pc, after),
         }
     }
 }
@@ -1550,7 +1645,7 @@ pub fn emit_body(
     layout: Layout,
     policy: Emit,
     mmio_load_func: u32,
-) -> (Function, usize, usize) {
+) -> (Function, usize, usize, usize) {
     assert!(len > 0, "an empty chunk has nothing to emit");
     let last = len - 1;
     let live = live_regs_in(set, lo, len);
@@ -1568,6 +1663,7 @@ pub fn emit_body(
         extra: 0,
         native_insts: 0,
         escaped_insts: 0,
+        stepped_ends: 0,
     };
 
     // Prologue.
@@ -1643,5 +1739,5 @@ pub fn emit_body(
     e.i(I::I64Or);
     e.i(I::End);
 
-    (e.f, e.native_insts, e.escaped_insts)
+    (e.f, e.native_insts, e.escaped_insts, e.stepped_ends)
 }
