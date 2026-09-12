@@ -1,0 +1,87 @@
+diff --git a/lp-emu/esp/lp-emu-esp-common/src/pins.rs b/lp-emu/esp/lp-emu-esp-common/src/pins.rs
+index 767ae79d3..4dbeb53f4 100644
+--- a/lp-emu/esp/lp-emu-esp-common/src/pins.rs
++++ b/lp-emu/esp/lp-emu-esp-common/src/pins.rs
+@@ -210,6 +210,9 @@ pub struct Fabric {
+     /// Conflicts logged since the fabric was built (module docs).
+     conflicts: u64,
+     edges: Vec<Edge>,
++    /// R1 TIER PROBE: edges tapped straight off `drive`, bypassing the
++    /// resolution machinery. Not a product field.
++    tap: Vec<Edge>,
+     /// Edges dropped because [`EDGE_CAP`] was reached.
+     dropped: u64,
+     /// Bumped whenever a pad's routing changed. A machine that watches the
+@@ -245,6 +248,7 @@ impl Fabric {
+             drivers: 0,
+             conflicts: 0,
+             edges: Vec::new(),
++            tap: Vec::new(),
+             dropped: 0,
+             epoch: 0,
+         }
+@@ -339,11 +343,31 @@ impl Fabric {
+                 self.routes[i].map(|r| r.source),
+                 Some(RouteSource::Signal(s, _)) if s == signal
+             ) {
+-                self.settle(i, at);
++                // ---- R1 TIER PROBE (scripts/emu/tier-probes) --------------
++                // The middle tier: the peripheral's edge is TAPPED instead of
++                // settled. `settle` → `resolve` → `apply` → the `edges` Vec
++                // and everything the machine does with it (the pin log, the
++                // GPIO input latch, the RMT receiver, the per-pad count) are
++                // all skipped; the decoder is fed from here instead.
++                //
++                // The signal-level de-dupe above has already run, and one
++                // signal drives one pad on this image, so `apply`'s own
++                // pad-level de-dupe is redundant and the edge stream is the
++                // same stream — which is why the frames come out identical.
++                self.tap.push(Edge {
++                    at,
++                    pad: PadId(i as u8),
++                    level,
++                });
+             }
+         }
+     }
+ 
++    /// R1 TIER PROBE: the tapped edges, taken.
++    pub fn take_tap(&mut self) -> Vec<Edge> {
++        core::mem::take(&mut self.tap)
++    }
++
+     /// The level a signal is being driven at (`false` if nothing drives it).
+     pub fn signal_level(&self, signal: SignalId) -> bool {
+         self.signals
+diff --git a/lp-emu/esp/lp-emu-esp32c6/src/machine.rs b/lp-emu/esp/lp-emu-esp32c6/src/machine.rs
+index af3961798..90288be73 100644
+--- a/lp-emu/esp/lp-emu-esp32c6/src/machine.rs
++++ b/lp-emu/esp/lp-emu-esp32c6/src/machine.rs
+@@ -3855,6 +3855,27 @@ impl Esp32C6Machine {
+                     .or_insert_with(|| Ws281xDecoder::new(pad, strip.timing(), cpu_hz));
+             }
+         }
++        // ---- R1 TIER PROBE (scripts/emu/tier-probes) ----------------------
++        // The middle tier: the RMT's edges arrive through the fabric's tap,
++        // never having been settled. They feed the WS281x decoder and
++        // nothing else — no pin log, no `Gpio::observe_edges`, no
++        // `Rmt::observe_edges`, no per-pad edge count. Frames still come out;
++        // the pin log does not.
++        let tapped = self.bus.pins.take_tap();
++        for edge in tapped {
++            let pad = edge.pad.0;
++            let Some(frame) = self
++                .pins
++                .state
++                .decoders
++                .get_mut(&pad)
++                .and_then(|d| d.feed(&edge))
++            else {
++                continue;
++            };
++            self.record_frame(pad, frame);
++        }
++
+         let edges = self.bus.pins.take_edges();
+         if edges.is_empty() {
+             return 0;
