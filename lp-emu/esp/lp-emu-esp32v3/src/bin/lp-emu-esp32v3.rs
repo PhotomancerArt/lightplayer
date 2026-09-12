@@ -187,6 +187,10 @@ fn main() -> ExitCode {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info"))
         .format_timestamp(None)
         .init();
+    // The host-time sampler, before anything else runs and only when
+    // `LP_EMU_SELFPROF` names a path. Never in a default build.
+    #[cfg(all(feature = "selfprof", target_os = "macos", target_arch = "aarch64"))]
+    lp_emu_esp32v3::selfprof::install();
     match run() {
         Ok(code) => code,
         Err(message) => {
@@ -364,6 +368,10 @@ fn run() -> Result<ExitCode, String> {
     // what the run actually saw.
     machine.flush_frames();
     print_pin_report(&machine);
+    // The guest-side counters, after the run and before the sinks are
+    // written: a file, never stdout — one line per distinct pc.
+    #[cfg(feature = "bench")]
+    lp_emu_esp32v3::benchdump::dump(&mut machine);
     {
         let chip = machine.flash().lock().expect("flash poisoned");
         println!("flash: {}", chip.command_census());

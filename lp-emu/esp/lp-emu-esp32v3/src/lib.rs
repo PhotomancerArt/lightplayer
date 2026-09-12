@@ -41,6 +41,10 @@
 //! ROM path. Which phase answers which is the P3 report
 //! (`docs/reports/2026-09-10-esp32v3-strict-boot-inventory.md`).
 
+/// The `bench` build's guest-side report (`--features bench`). Off in every
+/// default build, and never in a gate binary.
+#[cfg(feature = "bench")]
+pub mod benchdump;
 pub mod bus_setup;
 pub mod cache;
 pub mod control;
@@ -53,5 +57,9 @@ pub mod memmap;
 pub mod periph;
 pub mod regs;
 pub mod rom;
+/// The host-time pc sampler (`--features selfprof`, macOS). Off in every
+/// default build; see the module doc for why it is hand-rolled.
+#[cfg(all(feature = "selfprof", target_os = "macos", target_arch = "aarch64"))]
+pub mod selfprof;
 pub mod snapshot;
 pub mod test_support;

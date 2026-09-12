@@ -496,6 +496,10 @@ pub struct SocBus {
     pub sched: Scheduler,
     pub irq: IrqLines,
     pub trace: Trace,
+    /// The speed probes' guest-side counters (`--features bench`). Absent
+    /// from every default build; see [`crate::benchprof`].
+    #[cfg(feature = "bench")]
+    pub bench: crate::benchprof::BenchProf,
     pub host: HostSinks,
     /// Where a peripheral's output signal goes: the routing the chip's GPIO
     /// view writes and the levels its output blocks drive. See
@@ -532,6 +536,8 @@ pub const fn event_local(id: EventId) -> u16 {
 impl SocBus {
     pub fn new() -> Self {
         Self {
+            #[cfg(feature = "bench")]
+            bench: crate::benchprof::BenchProf::default(),
             arena: GuestArena::empty(),
             arena_base: 0,
             regions: Vec::new(),
@@ -1159,6 +1165,19 @@ impl SocBus {
     /// The guest address of `guest_arena()[0]`.
     pub fn guest_arena_base(&self) -> u32 {
         self.arena_base
+    }
+
+    /// `(block, register)` for an MMIO address, for the bench dump's "top
+    /// sites" table. A table walk per call — which is why the counters key on
+    /// the address and the names are resolved once, at the end of a run.
+    #[cfg(feature = "bench")]
+    pub fn bench_mmio_site(
+        &mut self,
+        address: u32,
+    ) -> Option<(&'static str, Option<&'static str>)> {
+        let (i, off, _alias) = self.mmio_index(address)?;
+        let p = &self.mmio[i].periph;
+        Some((p.name(), p.reg_name(off)))
     }
 
     /// The reservation and unmapped guard behind the arena, or `None` when
@@ -1904,6 +1923,10 @@ impl SocBus {
         }
 
         if let Some(i) = self.region_index(address) {
+            #[cfg(feature = "bench")]
+            {
+                self.bench.ram_reads += 1;
+            }
             // `region_index` guarantees `address` is inside the region and
             // updated its own cache, so all that is left is "does the *span*
             // fit". The arena is flat across region boundaries, so an access
@@ -1944,6 +1967,10 @@ impl SocBus {
     /// the RAM path stays small enough to inline into the executors.
     #[inline(never)]
     fn read_mmio(&mut self, address: u32, width: Width) -> Result<u32, MemoryError> {
+        #[cfg(feature = "bench")]
+        {
+            *self.bench.mmio_reads.entry(address).or_insert(0) += 1;
+        }
         if let Some((i, off, alias)) = self.mmio_index(address) {
             self.require_mmio_alignment(address, width)?;
             // Names are for the trace line only; `reg_name` is a table walk
@@ -2005,6 +2032,10 @@ impl SocBus {
         }
 
         if let Some(i) = self.region_index(address) {
+            #[cfg(feature = "bench")]
+            {
+                self.bench.ram_writes += 1;
+            }
             let fault = MemoryError::InvalidAccess {
                 address,
                 size: len as usize,
@@ -2051,6 +2082,10 @@ impl SocBus {
     /// [`read_mmio`](Self::read_mmio).
     #[inline(never)]
     fn write_mmio(&mut self, address: u32, width: Width, value: u32) -> Result<(), MemoryError> {
+        #[cfg(feature = "bench")]
+        {
+            *self.bench.mmio_writes.entry(address).or_insert(0) += 1;
+        }
         if let Some((i, off, alias)) = self.mmio_index(address) {
             self.require_mmio_alignment(address, width)?;
             let traced = self.trace.is_enabled();
@@ -2342,6 +2377,13 @@ impl Bus for SocBus {
     /// reason: fetch never routes to MMIO.
     #[inline]
     fn fetch_bytes(&mut self, pc: u32, out: &mut [u8; 3]) -> Result<usize, MemoryError> {
+        // One increment per retired Xtensa instruction: `XtHart::step` calls
+        // this exactly once per instruction and nothing caches in front of it.
+        #[cfg(feature = "bench")]
+        {
+            *self.bench.fetches.entry(pc).or_insert(0) += 1;
+            self.bench.fetch_total += 1;
+        }
         // Two, matching `fetch_instruction`, and deliberately not the byte
         // count: the watchpoint models a hardware fetch trigger, which watches
         // the instruction's *address*. Sizing the check by the bytes returned

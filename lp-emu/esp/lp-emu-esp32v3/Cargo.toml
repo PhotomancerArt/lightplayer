@@ -45,3 +45,20 @@ lp-xt-inst = { path = "../../../lp-xt/lp-xt-inst" }
 # than a boot; shelling out to `shasum` would make the assertion depend on
 # which host ran it.
 sha2 = "0.10"
+
+# The speed probe's two instruments, both OFF by default and neither in a gate
+# binary. `scripts/emu/bench-esp32v3.sh` builds the stock binary for the
+# seconds and these for the shares; `lp-emu/README.md`'s Speed section says
+# which number comes from which.
+#
+#   selfprof  an ITIMER_PROF pc sampler (macOS/arm64), for host-time buckets.
+#             Enabled at runtime by LP_EMU_SELFPROF=<path>; a `selfprof`
+#             binary with the variable unset runs the stock loop.
+#   bench     guest-side counters on the bus and the interleave, dumped by
+#             LP_EMU_V3_BENCHPROF=<path>. A hash lookup per fetch and per
+#             MMIO access, so this build's SECONDS mean nothing; its SHARES
+#             are the measurement.
+[features]
+default = []
+selfprof = []
+bench = ["lp-emu-esp-common/bench"]

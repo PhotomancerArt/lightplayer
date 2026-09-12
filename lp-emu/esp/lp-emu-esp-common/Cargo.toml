@@ -30,3 +30,11 @@ lp-ws281x = { path = "../../../lp-fw/lp-ws281x", default-features = false }
 
 [dev-dependencies]
 test-log = { workspace = true }
+
+# The speed probes' guest-side counters, OFF by default and never in a gate
+# binary: a per-fetch and per-MMIO-access hash lookup, which is several times
+# the interpreter's own work. `scripts/emu/bench-esp32v3.sh` takes the seconds
+# from a stock build and the shares from a `bench` one. See `src/benchprof.rs`.
+[features]
+default = []
+bench = []
