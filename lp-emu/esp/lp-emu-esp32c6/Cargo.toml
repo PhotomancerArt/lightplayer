@@ -49,8 +49,31 @@ path = "../../lp-emu-jit"
 features = ["host-wasmtime"]
 optional = true
 
+# **On a wasm target the translator is not optional — it is the core** (M7 P7,
+# R9). The wasm build is the product build: `scripts/emu/bench-web.sh`, the
+# phone rig and Studio-in-a-tab all run this binary under a WASI shim, and
+# since P7 it installs a translated core unless `--interpreter` says otherwise.
+# A build of the product that had to be asked for its own execution engine is
+# a build one forgotten flag away from silently measuring the interpreter, so
+# the dependency is unconditional here rather than behind the feature.
+#
+# It costs nothing that the optional entry above does not: `lp-emu-jit`
+# declares `wasmtime` only for `cfg(not(target_family = "wasm"))`, so this
+# brings the translator and `host_browser` — the product host (JD11-JD13) —
+# and no compiler. The code is gated on
+# `any(feature = "jit", target_family = "wasm")` for exactly this reason.
+#
+# Natively the interpreter is still the default (JD9; P8 is deferred by JD24),
+# so the optional entry above is what a native `--jit` reaches.
+[target.'cfg(target_family = "wasm")'.dependencies.lp-emu-jit]
+path = "../../lp-emu-jit"
+
 [features]
 # `--jit`: install a translated core. See the dependency above.
+#
+# On a wasm target this feature is redundant — the translator is there either
+# way — and `--jit` is a no-op alias for the default (M7 P7). Natively it is
+# what brings `wasmtime` in, and so what `--jit` needs.
 jit = ["dep:lp-emu-jit"]
 
 [dev-dependencies]

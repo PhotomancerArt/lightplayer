@@ -102,6 +102,31 @@ const LP_CLKRST_RESET_CAUSE: u32 = 0x010;
 
 pub const MAX_SLICE_CYCLES: u64 = 8_192;
 
+/// Does this build install a translated core when nothing on the command line
+/// asks either way? (M7 P7 — R9's translator-only core.)
+///
+/// **`true` on a wasm target, `false` natively**, and both halves are
+/// decisions rather than conveniences:
+///
+/// - The wasm build *is* the product build. It is what the phone rig, the
+///   browser bench and Studio-in-a-tab run, and since P7 its core is the
+///   translator: the guest's own program compiled to wasm and run by the same
+///   engine that runs the rest of the app. `--interpreter` is how you get the
+///   old one, and it stays forever (JD15) — as the free differential oracle
+///   and as the way back from this flip.
+/// - Natively the interpreter is still the default (JD9, and JD24 deferred P8
+///   that would change it): `wasmtime` needs 130–220 s of cranelift over these
+///   images, and every test and CI job depends on this binary starting fast.
+///   `--jit` on a build with `--features jit` is how a desk run gets a
+///   translated core, and that is what the identity oracle compares.
+///
+/// This is a *policy* constant and nothing more. What it selects — whether a
+/// core is installed — is not architectural state: `mach::translated`'s
+/// contract is that a run with a core and a run without one produce a
+/// byte-identical everything, which is what makes flipping a default a
+/// reversible act rather than a new behaviour.
+pub const TRANSLATED_BY_DEFAULT: bool = cfg!(target_family = "wasm");
+
 /// The default bound on how many discovered blocks are **installed**
 /// (`--jit-blocks`).
 ///
@@ -1070,7 +1095,9 @@ impl Esp32C6Builder {
             translate: true,
             jit_report: false,
             blockprof: false,
-            jit: false,
+            // M7 P7: the wasm build's core is the translator and the native
+            // build's is the interpreter. See [`TRANSLATED_BY_DEFAULT`].
+            jit: TRANSLATED_BY_DEFAULT,
             jit_escape_all: false,
             jit_blocks: None,
             jit_fn_blocks: None,
@@ -1213,9 +1240,13 @@ impl Esp32C6Builder {
     /// trace. That is what makes the interpreter this milestone's differential
     /// oracle (M7 JD15).
     ///
-    /// **Nothing installs a core yet.** M7's P1 lands the seam and this
-    /// switch; P3 is what first puts something behind it. Until then the flag
-    /// is honest and inert: it already turns off something that is not there.
+    /// Since M7 P7 this is the **veto**, not the switch: on a wasm target a
+    /// core is installed unless this says no, and `--interpreter` is the only
+    /// thing that says no. [`Esp32C6Builder::jit`] is the other half — whether
+    /// this build's default asks for a core at all — and
+    /// [`Esp32C6Machine::sync_translated_core`] is what enforces the veto
+    /// wherever a core could reappear (a restore, a reboot, a translation
+    /// event).
     pub fn translate(mut self, on: bool) -> Self {
         self.translate = on;
         self
@@ -1244,11 +1275,20 @@ impl Esp32C6Builder {
         self
     }
 
-    /// Build and install a translated core (`--jit`). Off by default.
+    /// Build and install a translated core. Defaults to
+    /// [`TRANSLATED_BY_DEFAULT`] — **on in the wasm build, off natively**
+    /// (M7 P7, JD9).
     ///
-    /// Needs the crate's `jit` feature; without it `build` fails rather than
-    /// quietly interpreting, because a run that asked to be translated and was
-    /// not is a measurement nobody can read.
+    /// `--jit` is what turns it on for a native build, and needs the crate's
+    /// `jit` feature; without it `build` fails rather than quietly
+    /// interpreting, because a run that asked to be translated and was not is
+    /// a measurement nobody can read. On a wasm target the translator is
+    /// unconditional and `--jit` is a no-op alias for the default.
+    ///
+    /// `false` here is not the same statement as `--interpreter`
+    /// ([`Esp32C6Builder::translate`]): this one says "do not build one at
+    /// boot", that one says "never have one at all", and only the second is
+    /// the oracle.
     pub fn jit(mut self, on: bool) -> Self {
         self.jit = on;
         self
@@ -1999,7 +2039,7 @@ impl Esp32C6Builder {
             jit_published_seeds: Vec::new(),
             jit_code_shadow: Vec::new(),
             jit_code_spans: Vec::new(),
-            #[cfg(feature = "jit")]
+            #[cfg(any(feature = "jit", target_family = "wasm"))]
             jit_installed_starts: BTreeSet::new(),
             jit_split_events: Vec::new(),
             power_on: None,
@@ -2124,7 +2164,7 @@ impl Esp32C6Builder {
         // M7b P1 step 1: the split census wants the boot walk's starts as its
         // stop set, and it is taken on a run with no core at all — so the walk
         // happens here, where a `--jit` run's boot event would have been.
-        #[cfg(feature = "jit")]
+        #[cfg(any(feature = "jit", target_family = "wasm"))]
         if !jit && blockprof && boot_mode != BootMode::RomUp && Esp32C6Machine::split_census_on() {
             // Not `jit_entry`: that field is what arms the *real* second
             // translation event, and a census run has no core to rebuild.
@@ -2351,7 +2391,7 @@ pub struct Esp32C6Machine {
     /// answers, so a second walk neither claims nor follows a start that is in
     /// here. It is rebuilt from scratch whenever a whole-module retire
     /// replaces everything, and grown by each incremental install.
-    #[cfg(feature = "jit")]
+    #[cfg(any(feature = "jit", target_family = "wasm"))]
     jit_installed_starts: BTreeSet<u32>,
     /// M7b P1 step 1, off unless `LP_EMU_JIT_SPLIT_CENSUS` is set: what the
     /// incremental walk **would** find at each `fence.i`, without emitting
@@ -2535,9 +2575,10 @@ impl Esp32C6Machine {
     /// binary, the same image, every instruction interpreted, and a
     /// transcript that must match byte for byte (M7 JD15).
     ///
-    /// Nothing installs a core yet — M7 P3 is what first does — so today this
-    /// reports the policy and [`Esp32C6Machine::sync_translated_core`]
-    /// enforces it.
+    /// This reports the policy; [`Esp32C6Machine::sync_translated_core`]
+    /// enforces it. Since P7 the policy's other half is
+    /// [`TRANSLATED_BY_DEFAULT`], which decides whether a run that said
+    /// nothing gets a core.
     pub fn translate(&self) -> bool {
         self.translate
     }
@@ -2562,7 +2603,7 @@ impl Esp32C6Machine {
     /// resolving an address to `PERIPHERAL+0xoff name` needs the bus, and a
     /// [`crate::jit::JitCore`] has no bus — and because the census outlives
     /// every core a run installs.
-    #[cfg(feature = "jit")]
+    #[cfg(any(feature = "jit", target_family = "wasm"))]
     #[must_use]
     pub fn jit_mmio_census(&self) -> Option<String> {
         crate::jit::mmio_census::report(&self.bus)
@@ -2570,7 +2611,7 @@ impl Esp32C6Machine {
 
     /// Without the `jit` feature there is no translated code and so no
     /// census — the same shape, so the CLI needs no `cfg` of its own.
-    #[cfg(not(feature = "jit"))]
+    #[cfg(not(any(feature = "jit", target_family = "wasm")))]
     #[must_use]
     pub fn jit_mmio_census(&self) -> Option<String> {
         None
@@ -2633,7 +2674,7 @@ impl Esp32C6Machine {
     /// and did not get it fails rather than interpreting quietly, because a
     /// measurement nobody can tell apart from the control is worse than no
     /// measurement.
-    #[cfg(feature = "jit")]
+    #[cfg(any(feature = "jit", target_family = "wasm"))]
     fn install_translated_core(
         &mut self,
         entry: u32,
@@ -2686,7 +2727,7 @@ impl Esp32C6Machine {
 
     /// The addresses discovery starts looking from. See
     /// [`Esp32C6::install_translated_core`] for why they are these.
-    #[cfg(feature = "jit")]
+    #[cfg(any(feature = "jit", target_family = "wasm"))]
     fn translation_seeds(&self, entry: u32) -> Vec<u32> {
         let all_symbols = self.jit_seed_scope == SeedScope::AllSymbols;
         let exec: Vec<(u32, u32)> = self
@@ -2923,13 +2964,13 @@ impl Esp32C6Machine {
 
     /// Every pc the whole-image walk finds an instruction at, or an empty set
     /// on a build without the `jit` feature, where there is no walk.
-    #[cfg(feature = "jit")]
+    #[cfg(any(feature = "jit", target_family = "wasm"))]
     fn discovered_pcs(&self) -> BTreeSet<u32> {
         let seeds = self.translation_seeds(self.boot_entry);
         crate::jit::discovered_instruction_pcs(&self.bus, &seeds)
     }
 
-    #[cfg(not(feature = "jit"))]
+    #[cfg(not(any(feature = "jit", target_family = "wasm")))]
     fn discovered_pcs(&self) -> BTreeSet<u32> {
         BTreeSet::new()
     }
@@ -3047,7 +3088,7 @@ impl Esp32C6Machine {
     /// fall-through from claimed code straight into unclaimed — is not
     /// counted. Every control transfer ends a block, so that is the only case,
     /// and it is bounded by the number of blocks that straddle the boundary.
-    #[cfg(feature = "jit")]
+    #[cfg(any(feature = "jit", target_family = "wasm"))]
     #[must_use]
     fn split_census_on() -> bool {
         static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
@@ -3056,7 +3097,7 @@ impl Esp32C6Machine {
 
     /// Claim the whole image the way a boot translation event would, without
     /// emitting anything, so the census has a stop set to work against.
-    #[cfg(feature = "jit")]
+    #[cfg(any(feature = "jit", target_family = "wasm"))]
     fn split_census_boot(&mut self, entry: u32) {
         let seeds = self.translation_seeds(entry);
         let (found, us) = crate::jit::walk(&self.bus, &seeds, usize::MAX, &BTreeSet::new());
@@ -3085,7 +3126,7 @@ impl Esp32C6Machine {
     }
 
     /// One `fence.i`'s worth of the census. See [`Self::split_census_on`].
-    #[cfg(feature = "jit")]
+    #[cfg(any(feature = "jit", target_family = "wasm"))]
     fn split_census_event(&mut self) {
         let entry = self.jit_entry.unwrap_or(self.boot_entry);
         let seeds = self.translation_seeds(entry);
@@ -3131,7 +3172,7 @@ impl Esp32C6Machine {
                 self.jit_published_seeds.push(base);
             }
         }
-        #[cfg(feature = "jit")]
+        #[cfg(any(feature = "jit", target_family = "wasm"))]
         if Self::split_census_on()
             && !std::env::var_os("LP_EMU_JIT_SPLIT_CENSUS").is_some_and(|v| v == "writable")
         {
@@ -3141,7 +3182,7 @@ impl Esp32C6Machine {
             return;
         }
         self.jit_retranslations += 1;
-        #[cfg(feature = "jit")]
+        #[cfg(any(feature = "jit", target_family = "wasm"))]
         self.retranslate_after_fence_i();
     }
 
@@ -3218,7 +3259,7 @@ impl Esp32C6Machine {
     /// hold and installs that beside them, and the whole-image path is what
     /// happens when it cannot: a module went stale, or the run is recording.
     /// See [`crate::jit::install_incremental`].
-    #[cfg(feature = "jit")]
+    #[cfg(any(feature = "jit", target_family = "wasm"))]
     fn retranslate_after_fence_i(&mut self) {
         let Some(entry) = self.jit_entry else { return };
         let escape_all = self.jit_escape_all;
@@ -3285,7 +3326,7 @@ impl Esp32C6Machine {
     }
 
     /// `--jit` on a build without the `jit` feature.
-    #[cfg(not(feature = "jit"))]
+    #[cfg(not(any(feature = "jit", target_family = "wasm")))]
     fn install_translated_core(
         &mut self,
         _entry: u32,

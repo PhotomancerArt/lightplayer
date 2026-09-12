@@ -211,12 +211,21 @@ OPTIONS:
                             instruction. The translator's identity oracle,
                             and the same promise --no-block-cache makes:
                             every byte of every transcript must be the same
-                            either way
+                            either way. In a wasm build this is how you get
+                            the interpreter at all; it is supported forever
+                            and is the way back from the default (M7 JD15)
     --jit                   discover the whole image, translate it, and run
                             it through the host's wasm engine. Translation
                             happens at exactly two events: image load and
-                            each guest `fence.i`. Needs a build with
-                            `--features jit`; off by default (M7 JD18)
+                            each guest `fence.i`.
+                            **In a wasm build this is the default and the
+                            flag is a no-op alias** (M7 P7): the browser's
+                            own engine is the core, and --interpreter is the
+                            way back. NATIVELY the interpreter is still the
+                            default (JD9) and this is the opt-in; it needs a
+                            build with `--features jit`, because wasmtime
+                            costs minutes of cranelift over these images and
+                            is never a default dependency (JD18)
     --jit-escape-all        with --jit: emit NO guest semantics at all and
                             hand every instruction to the interpreter through
                             the escape hatch. Complete, correct and slow, and
@@ -418,7 +427,6 @@ fn run() -> Result<ExitCode, String> {
         .translate(!args.interpreter)
         .jit_report(args.jit_report)
         .blockprof(args.blockprof)
-        .jit(args.jit)
         .jit_escape_all(args.jit_escape_all)
         .strict_grade(args.strict_grade)
         .strict_grade_blocks(args.strict_grade_blocks.clone())
@@ -438,6 +446,15 @@ fn run() -> Result<ExitCode, String> {
         .tx_log(args.tx_log.clone())
         .strip(args.strip.order, args.strip.timing);
 
+    // `--jit` only ever turns translation ON. The builder's own default is
+    // `TRANSLATED_BY_DEFAULT` — a core in the wasm build, the interpreter
+    // natively (M7 P7) — so `.jit(args.jit)` would have *cleared* the wasm
+    // default on every run that did not repeat the flag. On wasm this branch
+    // is therefore a no-op and `--jit` is the documented alias; natively it is
+    // still the opt-in that JD9 leaves it as.
+    if args.jit {
+        builder = builder.jit(true);
+    }
     if let Some(blocks) = args.jit_blocks {
         builder = builder.jit_blocks(blocks);
     }
