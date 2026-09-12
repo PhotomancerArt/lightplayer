@@ -182,11 +182,22 @@ case "$features" in
     esp32c6,server,radio,memory_fs) slug=boot-idle-memfs-usb ;;
     esp32c6,server,radio,spike_uart0_link,memory_fs,bench_render_loop) slug=render-basic ;;
     esp32c6,server,radio,spike_uart0_link,memory_fs,bench_project_rocaille) slug=render-rocaille ;;
-    # The classic's only slug: the SHIPPED default feature set, which is the
-    # image every M3 gate runs and the one a silicon capture is taken from.
-    # There is no memfs variant — the classic boots from a modelled flash
-    # chip with a real filesystem, which is what "memfs-free" means in G2.
+    # The classic's slugs. `boot-idle` is the SHIPPED default feature set,
+    # which is the image every M3 gate runs and the one a silicon capture is
+    # taken from. There is no memfs variant — the classic boots from a
+    # modelled flash chip with a real filesystem, which is what "memfs-free"
+    # means in G2, and the render-loop image seeds THAT filesystem rather
+    # than growing a second one.
+    #
+    # The other two are `scripts/emu/bench-esp32v3.sh`'s rows, and their
+    # names are `lp-emu-validate`'s payload names (`just _v3-payload-features`
+    # is the same table) so the probe and the registry cannot drift apart.
+    # ⚠️ `render-loop` cannot be pinned before the commit that adds
+    # `bench_render_loop` to fw-esp32v3, for the same reason the C6's two
+    # render rows carry their own pin.
     esp32,server,float-f32) slug=boot-idle ;;
+    esp32,test_shader_compile_incremental) slug=shader-compile-stress ;;
+    esp32,server,float-f32,bench_render_loop) slug=render-loop ;;
     *) slug="${features//,/+}" ;;
 esac
 

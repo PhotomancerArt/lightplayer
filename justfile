@@ -2960,6 +2960,27 @@ emu-c6 elf *args:
 bench-emu-c6 *args:
     scripts/emu/bench-c6.sh {{ args }}
 
+# The classic ESP32 (v3) machine's speed probe: three pinned reference images
+# at t1 — the only grade this machine has — both cores at the default
+# quantum, best of two runs, reported as user seconds, instructions/second in
+# total AND per hart, and a real-time ratio against the 240 MHz part, with the
+# load average and a `cmp` of the UART bytes against the previous run.
+#
+#   just bench-emu-esp32v3                              # table, promote to prev/
+#   just bench-emu-esp32v3 --json target/emu-bench-esp32v3/new.json
+#   scripts/emu/bench-esp32v3.sh --bin <saved> --no-build --no-promote   # the A/B half
+#
+# The `render-loop` row is the one to quote: it is the product's render loop,
+# 241 lamps on IO18, the same project and the same pixels the C6's
+# `render-basic` row renders. The other two rows are an idle image and a
+# compile-stress harness and neither is what the product does.
+#
+# It is an ORACLE, not a gate — no CI job runs it and no number it prints
+# gates anything (AGENTS.md "never gate on emulated microseconds"). Where the
+# seconds GO is a different pair of instruments; see the script's header.
+bench-emu-esp32v3 *args:
+    scripts/emu/bench-esp32v3.sh {{ args }}
+
 # PGO recipe for the C6 machine binary (D4): instrumented build, one training
 # run of each reference image, merge, optimized rebuild, then the probe on
 # the result. Opt-in — never a default build or CI step, and the target is
