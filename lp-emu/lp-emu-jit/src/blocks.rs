@@ -17,7 +17,9 @@
 //! Every way a walk can fail ends a block rather than guessing (JD7):
 //!
 //! - a word [`crate::decode::decode`] does not recognise ends the block
-//!   *before* it, as [`BlockEnd::Undecodable`], and the interpreter runs it;
+//!   *before* it, as [`BlockEnd::Undecodable`], and the interpreter runs it —
+//!   through `step_one` from inside the stay, or out in the hart's own loop
+//!   when [`Unknown::Leave`] says it must;
 //! - a fetch the caller cannot serve does the same;
 //! - running into another block's start ends the block as [`BlockEnd::Fall`];
 //! - reaching [`MAX_BLOCK_INSTS`] ends it the same way;

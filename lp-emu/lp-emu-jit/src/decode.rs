@@ -12,7 +12,9 @@
 //!
 //! [`decode`] returns [`None`] for anything it does not positively recognise,
 //! and `None` is the **universal escape**: the block ends before the word and
-//! the interpreter runs it. Every unknown goes out the same door — an
+//! the interpreter runs it — through [`crate::host::HostOps::step_one`]
+//! from inside the stay, or out in the hart's own loop for the `MISC-MEM`
+//! opcode ([`crate::blocks::Unknown`]). Every unknown goes out the same door — an
 //! unsupported extension, a block swept onto data-in-text, a guest that wrote
 //! something new. Refusing costs coverage; guessing costs correctness, and
 //! there is no third option that keeps byte-identity. P3's `BlockEnd`

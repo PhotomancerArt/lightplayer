@@ -261,15 +261,43 @@ impl HostOps for FakeHost {
 // --- the tiny decoder the fake `step_one` runs on ---------------------------
 
 enum Kind {
-    Lui { rd: u8, imm: i32 },
-    Addi { rd: u8, rs1: u8, imm: i32 },
-    Add { rd: u8, rs1: u8, rs2: u8 },
-    Sw { rs1: u8, rs2: u8, imm: i32 },
-    Lw { rd: u8, rs1: u8, imm: i32 },
-    Jal { rd: u8, imm: i32 },
-    Bne { rs1: u8, rs2: u8, imm: i32 },
+    Lui {
+        rd: u8,
+        imm: i32,
+    },
+    Addi {
+        rd: u8,
+        rs1: u8,
+        imm: i32,
+    },
+    Add {
+        rd: u8,
+        rs1: u8,
+        rs2: u8,
+    },
+    Sw {
+        rs1: u8,
+        rs2: u8,
+        imm: i32,
+    },
+    Lw {
+        rd: u8,
+        rs1: u8,
+        imm: i32,
+    },
+    Jal {
+        rd: u8,
+        imm: i32,
+    },
+    Bne {
+        rs1: u8,
+        rs2: u8,
+        imm: i32,
+    },
     /// Any `SYSTEM` word. The fake interpreter writes a marker to `rd`.
-    System { rd: u8 },
+    System {
+        rd: u8,
+    },
 }
 
 struct Tiny {
@@ -2029,8 +2057,14 @@ fn a_block_that_ends_undecodable_steps_it_and_carries_on() {
         "the two `addi`s, the stepped word and the `jal`"
     );
     assert_eq!(fast.regs[10], 5, "the first block ran");
-    assert_eq!(fast.regs[28], 0x5a5a, "the interpreter ran the refused word");
-    assert_eq!(fast.regs[11], 7, "and the stay carried on into the next block");
+    assert_eq!(
+        fast.regs[28], 0x5a5a,
+        "the interpreter ran the refused word"
+    );
+    assert_eq!(
+        fast.regs[11], 7,
+        "and the stay carried on into the next block"
+    );
     assert_eq!(fast.indirect_miss, 0, "the resolve hit");
     assert_eq!(
         fast.escaped_insts, 0,
@@ -2077,7 +2111,10 @@ fn a_fence_i_at_a_block_end_still_leaves_the_stay() {
     assert_eq!(out.pc, GUEST_BASE + 4, "the stay left at the `fence.i`");
     assert_eq!(out.instret, 1);
     assert!(out.escapes.is_empty(), "and it was not stepped");
-    assert_eq!(out.regs[11], 0, "the next block did not run inside the stay");
+    assert_eq!(
+        out.regs[11], 0,
+        "the next block did not run inside the stay"
+    );
 }
 
 /// The budget check that comes with the step. The end of a block is a

@@ -323,8 +323,17 @@ P3 measured it on all four pinned images at both grades, and on `render-basic`
 t2 with 34,189,069 guest instructions going out through the hatch — identical
 UART0 bytes, identical `stopped after` line, identical frames off the pad.
 
-An encoding `decode` does not recognise cannot be escaped that way, because its
-*width* is unknown and so the next pc is unknown. Those end the block instead.
+An encoding `decode` does not recognise has no known *width*, so the block ends
+before it. Until M7b P6 that was also the end of the **stay**: translated code
+left, the hart ran the one word out in `run_blocks`'s uncacheable arm, and the
+stay was re-entered. It no longer is. The width is still unknown; the **next
+pc** never had to be. `step_one` reports the pc the interpreter left at, and
+the `jalr` emission already resolves an arbitrary runtime pc through the
+indirect-target table in O(1) — so a block that ends on a `csrs mstatus`, an
+`amoadd.w` or an `mret` hands that one word to the interpreter and carries on
+where the answer says. See "The undecodable block end" below for the shape, the
+three refusals, and what it cost.
+
 Two escapes, one rule: never guess.
 
 ## Two-level dispatch, and the size it is set to (P5, JD8, JD26)
@@ -1459,6 +1468,172 @@ boundary does nothing at all — 3.60 % and 21.06 %. A poll that let every one o
 them run on would remove ~55 k boundaries of 1.53 M: about 20 ms, for a new
 import and an exactness argument the size of P2's. Not built.
 
+## The undecodable block end (M7b P6)
+
+`decode` refuses everything it does not positively recognise, and on
+`render-basic` t2 that refusal used to end **710,536 stays** to run **827,370**
+instructions — 1.17 instructions an exit. This is what it was, what it is, and
+what changing it cost.
+
+### The census: what actually ends those blocks
+
+`LP_EMU_JIT_EXITS=1`, `render-basic` t2, 8 blocks a function, every one of the
+141 exit sites decoded out of the pinned image with
+`riscv64-unknown-elf-objdump`. All 141 are accounted for:
+
+| class | exits | share | sites | what they are |
+|---|---:|---:|---:|---|
+| **atomics** | 377,404 | 53.1 % | 40 | `amoadd.w` (249,347), `amoadd.w.aqrl` (123,884), `amoadd.w.rl`, `amoand.w.aqrl`, `amoor.w.aqrl`, `sc.w`, `sc.w.rl` |
+| **CSR** | 268,928 | 37.8 % | 98 | `csrs mstatus` (129,836), `csrrci mstatus` (133,933), `csrw mstatus`/`mepc`, `csrr`, `csrc` |
+| **`mret`** | 64,203 | 9.0 % | 2 | the interrupt return |
+| **`fence.i`** | **1** | 0.0 % | 1 | `0x421e039c`, the one word this phase still leaves for |
+| **total** | **710,536** | | **141** | |
+
+No `wfi`, no `ecall`, no `ebreak`, no floating point in this transcript — the
+C6 has no FPU and the RTOS idles through a `wfi` the *interpreter* reaches, not
+a translated stay. The shape is the esp-rtos critical section (`csrrci
+mstatus, 8` to disable interrupts, `csrs mstatus` to restore) and the atomics
+underneath it.
+
+### The shape
+
+`Emitter::undecodable`, which is the `jalr` emission's second half reused:
+
+```text
+L_CYC >= P_END                →  exit at pc  (the slice is over)
+step_one(pc)                  →  next_pc
+  status == STEP_SLICE_ENDED  →  exit at next_pc with FLAG_SLICE_ENDED
+resolve next_pc through the target table
+  hit                         →  carry on, in this module
+  miss                        →  exit at next_pc, why::INDIRECT_MISS
+```
+
+**It is exact because `step_one` *is* `MachineHart::step_once`** — "the same
+`step_once` the single-stepping loop runs, not a second copy of it". So
+polling point (b), the one a CSR write to `mstatus`/`mie` or an `mret` runs,
+fires exactly where it always did; a delivered interrupt comes back as
+`next_pc` with the interpreter's own `mepc`; and a `wfi`, an `ebreak`, a fault
+or a bus yield comes back as `STEP_SLICE_ENDED` with the host holding the
+reason. `Emitter::escape` flushes and reloads the whole live register set and
+both counters around the call (JD17), because the instruction is an arbitrary
+one. The walk already seeds the address after a refused word as a block start,
+which is why **90.8 %** of the resolves hit.
+
+### Three refusals, each with its reason
+
+- **`fence.i` — and the whole `MISC-MEM` opcode with it — still leaves.** It is
+  the guest publishing code, and the flush it asks for lands on a block cache
+  and a translated core that are **lifted out of the hart** for the length of a
+  stay (`mach/mod.rs::run_slice_cached`). The hart drains both immediately
+  after its uncacheable arm runs one; a stay would carry on running the bytes
+  it was translated from until it happened to end. The predicate names the
+  opcode rather than the one encoding because leaving is always exact and the
+  class is worth **one exit a run**. `blocks::Unknown::Leave`.
+- **The slice's own budget is re-checked before the step.** `run_blocks` tests
+  `cycle_count >= end` at the top of every iteration and the end of a block is
+  one of those tops — today's exit lands there and gets checked. A block whose
+  cost came out exactly at its budget (the check that let it run is
+  `L_CYC + max <= P_END`, and a block that charges its full `max` leaves
+  `L_CYC == P_END`) would otherwise retire one instruction the interpreter
+  would not have. It is **not** dead code: it fires **33 times** per
+  `render-basic` t2 run.
+- **An odd reported pc is refused rather than masked.** The table's slot is
+  `(pc & page_mask) * 2`, so an odd pc would read four bytes straddling two
+  slots and could resolve to a block that is not there. A RISC-V hart cannot
+  report one — every next pc and every trap vector is two-byte aligned — and
+  three wasm instructions are cheaper than an argument that has to stay true.
+
+### What it did to the census
+
+`render-basic` t2, 8 blocks a function, `--jit --jit-report`, one invocation
+per stage:
+
+| why | before: exits | instr after | after: exits | instr after |
+|---|---:|---:|---:|---:|
+| indirect-miss | 3,993,292 | 2,468,874 | 4,058,496 | 2,585,702 |
+| budget | 2,834,596 | 7,689,411 | 2,834,960 | 7,689,450 |
+| **undecodable** | **710,536** | **827,370** | **1** | **1** |
+| edge-out-of-set | 183,783 | 185,369 | 183,783 | 185,369 |
+| after-store | 1 | 0 | 1 | 0 |
+| **total** | **7,722,208** | **11,171,024** | **7,077,241** | **10,460,522** |
+
+- **The class is gone: 710,536 → 1**, and the 1 is the `fence.i`.
+- **Total exits −644,967 (−8.4 %); mean stay 68.9 → 75.2** instructions.
+- **Coverage 97.94 % → 98.07 %** of retired instructions.
+- `indirect-miss` rises 65,204: that is the 9.2 % of stepped words whose next
+  pc is not a block start the module holds. The other 645,331 resolved.
+- The escape hatch is **non-zero for the first time on the product path**:
+  `escape_hatch 710,502`, which is **0.133 %** of retired instructions (JD10 —
+  it is allowed to be non-zero; it is not allowed to be unmeasured).
+
+### What it cost, and why the desk row went the wrong way
+
+**It is worth −1.0 % in node/V8 at 16 blocks a function and −1.1 % in bun/JSC
+at 8**, and the whole of that is the module getting bigger:
+
+| | before | after | Δ |
+|---|---:|---:|---:|
+| module bytes, 8/fn | 79,726,810 | 84,941,753 | **+6.5 %** |
+| module bytes, 16/fn | 85,343,576 | 91,792,313 | **+7.6 %** |
+| translation, 16/fn (emit+compile+instantiate) | 999.9 ms | 1,054.3 ms | **+54.4 ms** |
+| wall, 16/fn, best of 3 | 5.49 s | 5.54 s | **+50 ms** |
+
+**5,214,943 bytes over 15,896 stepped block ends is 328 bytes a site**, and
+~280 of those are the flush and reload of ~20 live registers at 14 bytes each.
+That is not reducible: `step_one` runs an arbitrary instruction, so every
+register the function is carrying in a local has to cross the seam and come
+back. Hoisting the sequence into one shared trailer per sub-dispatcher does not
+pay either — at 8 blocks a function roughly half of the 25,156 functions hold
+at least one site, so ~11,600 copies of a ~330-byte trailer costs about
+three-quarters of what the inline form costs.
+
+So the gain is **per exit removed** and the cost is **per site emitted**, and
+`render-basic` has 15,896 sites of which the top 24 do 90 % of the exiting. The
+5,500 ms desk row is the worst case for that trade, because a fifth of it is
+translation. At a longer bound it improves as the arithmetic says it must:
+
+| bound (emulated) | before, best wall | after, best wall | Δ |
+|---|---:|---:|---:|
+| 5,500 ms | 5.49 s | 5.54 s | +50 ms (**−1.0 %**) |
+| 20 s (the guest finishes at ~13 s) | 5.69 s | 5.71 s | +20 ms (**−0.35 %**) |
+
+Both rows node/V8, 16 blocks a function, interleaved best-of-3 in one
+invocation, UART0 `2407828f80684331` on every one.
+
+### The indirect-miss class, and why this phase built nothing for it
+
+The other half of P6's brief. The census answers it outright — the misses are
+**P1's module boundary** (DD30) and not a coverage problem:
+
+| | exits | share | instructions the interpreter then retired |
+|---|---:|---:|---:|
+| to a pc some module holds a block for | 3,638,480 | **91.1 %** | **283** |
+| to a pc no module holds | 354,812 | 8.9 % | 2,468,591 |
+
+**91.1 % of the misses retire 283 instructions between them**, which is another
+way of saying they retire none: the `jalr`'s target is in the *other* module,
+the slot holds `-1`, and the hart re-enters at once through the entry index.
+That is the boundary #700 predicted at 3,770,996 crossings, and taking it back
+means a cross-module direct transfer — a different mechanism, and not this
+phase's to build.
+
+The remaining 8.9 % are the real coverage gap and they carry 2.47 M interpreted
+instructions. The top targets, reported rather than acted on (JD6 — this phase
+does not widen `discover`'s rules):
+
+| target | exits | instructions after | where |
+|---|---:|---:|---|
+| `0x42120f9e` | 61,666 | 308,330 | flash, never walked |
+| `0x42120fae` | 61,664 | 431,648 | flash, never walked |
+| `0x42120f96` | 61,637 | 123,274 | flash, never walked |
+| `0x421c90a6` | 12,734 | 96,868 | flash, never walked |
+| `0x421c9346` | 11,471 | 84,140 | flash, never walked |
+| `0x40030e00` | 7,506 | 37,818 | **mask ROM** (DD19's territory) |
+| `0x40030df0` | 4,122 | 37,098 | **mask ROM** |
+
+Three addresses fourteen bytes apart account for 863 k of the 2.47 M — one
+routine the walk cannot reach, entered by an indirect jump three ways.
+
 ## Two more structural facts a reader will otherwise rediscover
 - **The hart's entry index has to be exact once the whole image is
   installed.** It was a 64 K-slot direct-mapped filter keyed by `pc >> 1`,
@@ -1497,9 +1672,11 @@ the module runs — the machine crates do that, installing a translated core
 through `lp-riscv-emu`'s seam.
 
 It also never guesses. An encoding `decode` does not recognise ends the block
-and goes back to the interpreter, so an unsupported extension, a block swept
-onto data-in-text and code the guest has not published yet all degrade to
-interpretation rather than to a wrong answer. That escape is the reason
+and the word is run by the interpreter — through `step_one` from inside the
+stay since M7b P6, or out in the hart's own loop for the `MISC-MEM` opcode —
+so an unsupported extension, a block swept onto data-in-text and code the guest
+has not published yet all degrade to interpretation rather than to a wrong
+answer. That escape is the reason
 byte-identity was reachable in a single spike, and it is deliberate rather than
 incidental.
 

@@ -333,7 +333,8 @@ pub fn emit_module(
     for c in 0..count {
         let lo = c * chunk;
         let len = chunk.min(total - lo);
-        let (f, native, escaped, stepped) = emit_body(set, lo, len, model, layout, policy, load_func);
+        let (f, native, escaped, stepped) =
+            emit_body(set, lo, len, model, layout, policy, load_func);
         native_insts += native;
         escaped_insts += escaped;
         stepped_ends += stepped;

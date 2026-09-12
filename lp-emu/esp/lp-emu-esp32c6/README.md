@@ -1581,7 +1581,7 @@ run.
 |---|---|
 | `--jit` | translate the image to wasm at boot and at each guest `fence.i`, and run that instead of interpreting |
 | `--interpreter` | the free oracle: no translated core at all |
-| `--jit-report` | the boot-cost line per translation event (JD20), the coverage line, and the exit census — how many stays ended for each reason and how many instructions the interpreter then retired. Since M7b P2 it also carries `polls N (M left the stay)`: polling point (c) run **inside** a stay, and how many of those ended it. `N − M` is the after-store exit that did not happen. Since M7b F3 it also carries `pending_out N`: stays that ended while an MMIO **load**'s side-band or yield was still unclaimed, which the interpreter then takes at its own next store rather than at the exit's pc. `N` is zero on this chip by construction — `sideband` is set by MMIO writes only and every `yield_to_machine` is inside a `write` — and the counter is there so the corner names itself if a bus ever reaches it. Since M7b P3 it also carries `systimer_fast N read(s) served (armed A, disarmed D)`: `unit0_value.{lo,hi}` and `unit0_op` reads translated code answered from the word the host publishes on the latch store's own crossing, instead of crossing to the bus. The MMIO census counts what reached the bus, so these are **not** in it — the census total falls by exactly `N`. `A` and `D` are how often the published words were armed and dropped; they are equal at the end of a run, and both are zero under `--trace`, `--strict-grade` or `--strict-bus`, where the path refuses |
+| `--jit-report` | the boot-cost line per translation event (JD20), the coverage line, and the exit census — how many stays ended for each reason and how many instructions the interpreter then retired. Since M7b P2 it also carries `polls N (M left the stay)`: polling point (c) run **inside** a stay, and how many of those ended it. `N − M` is the after-store exit that did not happen. Since M7b F3 it also carries `pending_out N`: stays that ended while an MMIO **load**'s side-band or yield was still unclaimed, which the interpreter then takes at its own next store rather than at the exit's pc. `N` is zero on this chip by construction — `sideband` is set by MMIO writes only and every `yield_to_machine` is inside a `write` — and the counter is there so the corner names itself if a bus ever reaches it. Since M7b P3 Since M7b P6 the install line carries `N block end(s) stepped, M left for the machine`: block ends whose refused word goes to `step_one` and whose reported pc is then resolved through the target table, against the `MISC-MEM` ones — `fence.i` lives there — that still end the stay. Those steps are what makes `escape_hatch` non-zero on the product path. Since M7b P3 it also carries `systimer_fast N read(s) served (armed A, disarmed D)`: `unit0_value.{lo,hi}` and `unit0_op` reads translated code answered from the word the host publishes on the latch store's own crossing, instead of crossing to the bus. The MMIO census counts what reached the bus, so these are **not** in it — the census total falls by exactly `N`. `A` and `D` are how often the published words were armed and dropped; they are equal at the end of a run, and both are zero under `--trace`, `--strict-grade` or `--strict-bus`, where the path refuses |
 | `--jit-escape-all` | emit no guest semantics at all; every instruction through the escape hatch. Complete, correct, slow, and the proof that a partial translator can only be slow and never wrong |
 | `--jit-blocks <N>` | a bound on how many discovered blocks are installed. **Unbounded by default since P5** — the whole image installs — and kept only for asking what a smaller set costs |
 | `--jit-fn-blocks <N>` | guest blocks per wasm sub-dispatcher. wasm caps a function body at 7,654,321 bytes, so the module is a selector over as many functions as the image needs; this sizes one. **Default 8 since M7b P5** (BD6/DD32) — set from the phone's own rows, which prefer 8 to 16 in five of seven same-session pairs and hold the best row ever taken on it (1.008x); on the desk V8 is within 4 % across 8/16/32 and JSC is 1.81x faster at 8 than at 32. It was 256 (JD26), then 32 (DD20/P6c). `lp-emu-jit/README.md` has the table. A module the host refuses halves this and retries, and never drops a block |
@@ -1594,7 +1594,16 @@ run.
 
 `LP_EMU_JIT_EXITS=1` adds the twenty-four exit sites that cost the most, each
 with why the stay ended there and whether the module could have been entered
-at that pc at all. **It also switches on `exits known/unknown`** in the report
+at that pc at all — and then, since M7b P6, **the same sites again per `why`**:
+one `exit class` line per reason giving how many distinct addresses it leaves
+at, how many of its exits name a pc some module already holds a block for
+against how many name one no module holds, and the instructions the
+interpreter retired after each half. That split is what decides whether a
+class is worth attacking: an exit to a pc a module holds costs one exit and one
+entry and nothing in between (for `indirect-miss` it is exactly P1's module
+boundary), while an exit to a pc no module holds is a coverage gap and carries
+the interpreted instructions with it. **It also switches on `exits
+known/unknown`** in the report
 line: those two counters cost a `BTreeMap` lookup per exit — 183 ms of a 6.4 s
 `render-basic` t2 run — and nothing but the counters consumes it (M7b P4,
 plan.md BD5). With the variable unset the line says `not counted (set
@@ -1607,7 +1616,7 @@ rest of the run reports:
 
 | variable | what it adds |
 |---|---|
-| `LP_EMU_JIT_EXITS=1` | the twenty-four costliest exit sites, above |
+| `LP_EMU_JIT_EXITS=1` | the twenty-four costliest exit sites and the per-`why` `exit class` lines, above |
 | `LP_EMU_JIT_ENTRY_TIME=<stride>` | where an entry's time goes, sampled one in `<stride>` (M7 P6b) |
 | `LP_EMU_JIT_MMIO_CENSUS=1` | every MMIO operation translated code issued, by peripheral, by register and by guest pc (M7 P6c) |
 | `LP_EMU_JIT_SPLIT_CENSUS=1` | with `--interpreter --blockprof`: what an incremental module would hold at each `fence.i`, and how often the run's control flow would cross the boundary that creates (M7b P1) |
