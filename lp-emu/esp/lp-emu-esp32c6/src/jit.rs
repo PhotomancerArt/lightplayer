@@ -368,7 +368,14 @@ fn split_by_writability(bus: &SocBus, set: &BlockSet) -> Vec<(BlockSet, bool)> {
 /// Halving is not a workaround, it is the honest shape: every engine refuses a
 /// large enough function and they refuse at wildly different sizes. See
 /// [`install`]'s own docs.
-#[allow(clippy::too_many_arguments)]
+#[allow(
+    clippy::too_many_arguments,
+    reason = "mirrors Module::build's own nine parameters one-for-one: this \
+              is a thin retry driver over that call, not an independent \
+              function, so bundling the args into a struct here would only \
+              relocate the coupling to Module::build's signature, not \
+              reduce it"
+)]
 fn build_with_halving(
     bus: &mut SocBus,
     set: &BlockSet,
