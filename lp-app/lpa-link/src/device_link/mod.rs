@@ -37,7 +37,11 @@ pub mod wire;
 #[cfg(any(
     feature = "host-process",
     feature = "host-serial-esp32",
-    feature = "fake-device"
+    feature = "fake-device",
+    // The tab emulator is the fourth byte pipe, and the first one in a
+    // browser: a board in a Worker is a byte stream with DTR/RTS, so it is
+    // hosted here rather than in a Link type of its own (D4).
+    feature = "emulator-tab"
 ))]
 pub mod byte_stream;
 

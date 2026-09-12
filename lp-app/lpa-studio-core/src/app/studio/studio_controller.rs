@@ -129,9 +129,16 @@ pub struct StudioController {
     /// rather than `dyn` because powering a sim on and off is not part of
     /// the `DeviceTransport` vocabulary and must not become part of it.
     sim_transport: Option<Rc<crate::SimDeviceTransport>>,
+    /// The transport that reaches EMULATED BOARDS, when this build ships an
+    /// emulator module. Concrete for the same reason the sim's is: powering
+    /// an emu on and off, and asking it how fast it is running, are not part
+    /// of the `DeviceTransport` vocabulary and must not become part of it.
+    emu_transport: Option<Rc<crate::EmuDeviceTransport>>,
     /// The `/device-sims/<uid>.json` sidecars, read off the library
-    /// snapshot at settle. The sole "this device is a sim" fact, cached so
-    /// powering one on does not read the store from inside a fold.
+    /// snapshot at settle. The sole "this device is a runtime" fact — for
+    /// BOTH kinds, keyed by uid, with the sidecar's own `kind` saying
+    /// which — cached so powering one on does not read the store from
+    /// inside a fold.
     device_sims: std::collections::BTreeMap<String, crate::SimRecord>,
     /// The runtime sessions the studio is attached to, plus the editor
     /// lens. Every network op resolves its wire client through the pool's
@@ -252,10 +259,15 @@ pub struct StudioController {
 /// different device than the one asked for.
 #[derive(Clone, Debug, Eq, PartialEq)]
 enum OpenOn {
-    /// A kind, or nothing at all: Studio resolves a sim of the project's
-    /// target and is free to reuse its own (D33) — the sim that last ran
-    /// this project, an idle one, else a fresh record.
-    Resolve,
+    /// A kind, or nothing at all: Studio resolves a runtime of the
+    /// project's target and is free to reuse its own (D33) — the one that
+    /// last ran this project, an idle one, else a fresh record.
+    Resolve {
+        /// The kind `?on=` asked for (D1), when it asked for one. `None`
+        /// is the address with no hint, and it resolves exactly as it
+        /// always has: a sim. No default flips.
+        prefer: Option<crate::RuntimeKind>,
+    },
     /// An INSTANCE, named by base MAC. Silicon or a sim; this device or
     /// none. It is the naming that makes the mismatch page's stop
     /// worthwhile (D50).
@@ -314,7 +326,10 @@ impl PendingOpen {
     fn retry_action(&self) -> UiAction {
         let op = match self {
             PendingOpen::Package { key, on } => match on {
-                OpenOn::Resolve => HomeOp::OpenPackage { key: key.clone() },
+                OpenOn::Resolve { prefer } => HomeOp::OpenPackage {
+                    key: key.clone(),
+                    prefer: *prefer,
+                },
                 OpenOn::Device {
                     base_mac,
                     over_running_project,
@@ -361,6 +376,7 @@ impl StudioController {
             device_sweep_pending: false,
             serial_transport: None,
             sim_transport: None,
+            emu_transport: None,
             device_sims: std::collections::BTreeMap::new(),
             pool: RuntimePool::new(),
             project: ProjectController::new(),
@@ -507,15 +523,35 @@ impl StudioController {
         self.install_device_transport();
     }
 
+    /// Install the transport that serves EMULATED BOARDS (D21). Install
+    /// before the actor takes ownership, beside the other two.
+    ///
+    /// A build that ships no emulator module simply never calls this, and
+    /// the composite answers an `emu:` endpoint with the reason rather than
+    /// silently routing it somewhere else.
+    pub fn set_emu_transport(&mut self, transport: Rc<crate::EmuDeviceTransport>) {
+        self.emu_transport = Some(transport);
+        self.install_device_transport();
+    }
+
     /// (Re)install whichever transport this build's halves add up to, and
     /// arm the first sweep: a page that CAN see devices should show what it
     /// already has, without the user asking twice.
     fn install_device_transport(&mut self) {
         let transport: Option<Rc<dyn crate::DeviceTransport>> = match &self.sim_transport {
-            Some(sim) => Some(Rc::new(crate::CompositeDeviceTransport::new(
-                self.serial_transport.clone(),
-                Rc::clone(sim) as Rc<dyn crate::DeviceTransport>,
-            ))),
+            Some(sim) => {
+                let composite = crate::CompositeDeviceTransport::new(
+                    self.serial_transport.clone(),
+                    Rc::clone(sim) as Rc<dyn crate::DeviceTransport>,
+                );
+                let composite = match &self.emu_transport {
+                    Some(emu) => {
+                        composite.with_emu(Rc::clone(emu) as Rc<dyn crate::DeviceTransport>)
+                    }
+                    None => composite,
+                };
+                Some(Rc::new(composite))
+            }
             None => self.serial_transport.clone(),
         };
         let Some(transport) = transport else {
@@ -525,27 +561,33 @@ impl StudioController {
         self.device_sweep_pending = true;
     }
 
-    /// Mint a sim of `target` and remember it: one registry row
-    /// (`transport: "sim"`, keyed on the derived uid) and one
+    /// Mint a runtime of `target` and remember it: one registry row
+    /// (`transport: "sim"` or `"emu"`, keyed on the derived uid) and one
     /// `/device-sims/<uid>.json` sidecar, written in a single library
-    /// settle so a half-created sim cannot exist.
+    /// settle so a half-created runtime cannot exist.
+    ///
+    /// `kind` is the caller's, never derived from the target: sim-vs-emu is
+    /// the user's choice (D1), and a board with an emulator can legitimately
+    /// be either.
     ///
     /// `random` is the caller's six bytes (the web shell's
     /// `crypto.getRandomValues`, a test's fixed bytes): minting decides
     /// identity, and where entropy comes from is the platform's business,
-    /// not the model's. Returns the uid the sim is remembered under.
+    /// not the model's. Returns the uid the runtime is remembered under.
     ///
-    /// The sim is NOT powered on. It loads as a detached record like any
-    /// remembered board, and `Action::Connect` is what starts it.
-    pub async fn create_sim_record(
+    /// It is NOT powered on. It loads as a detached record like any
+    /// remembered board, and `Action::Connect` is what starts it — which for
+    /// an emu is also what makes it born flashed (D22).
+    pub async fn create_runtime_record(
         &mut self,
         target: &str,
         name: Option<&str>,
         random: &[u8; 6],
+        kind: crate::RuntimeKind,
     ) -> Result<String, UiError> {
-        let minted = crate::new_sim_record(target, name, random, (self.now_secs)());
+        let minted = crate::new_sim_record(target, name, random, (self.now_secs)(), kind);
         let sidecar_bytes = serde_json::to_vec(&minted.sidecar).unwrap_or_default();
-        self.run_catalog_op(CatalogOp::CreateSimDevice {
+        self.run_catalog_op(CatalogOp::CreateRuntimeDevice {
             device: Box::new(minted.row.clone()),
             sidecar_bytes,
         })
@@ -555,17 +597,18 @@ impl StudioController {
         Ok(minted.uid)
     }
 
-    /// The sims remembered in this library, by uid.
+    /// The runtimes — sims and emus alike — remembered in this library, by
+    /// uid.
     pub fn device_sims(&self) -> &std::collections::BTreeMap<String, crate::SimRecord> {
         &self.device_sims
     }
 
-    /// Read every remembered sim's sidecar off the library snapshot.
+    /// Read every remembered runtime's sidecar off the library snapshot.
     ///
-    /// Only rows the registry already labels `sim` are looked at, so a
-    /// library full of boards reads nothing. Absence is the answer for
-    /// everything else — a board without a sidecar is not a sim, which is
-    /// every board in every existing library.
+    /// Only rows the registry already labels `sim` or `emu` are looked at,
+    /// so a library full of boards reads nothing. Absence is the answer for
+    /// everything else — a board without a sidecar is not a runtime, which
+    /// is every board in every existing library.
     fn seed_device_sim_records(&mut self, fs: &Rc<std::cell::RefCell<dyn lpfs::LpFs>>) {
         let Some(inputs) = self.home_inputs.as_ref() else {
             return;
@@ -573,17 +616,18 @@ impl StudioController {
         let uids: Vec<String> = inputs
             .registered
             .iter()
-            .filter(|row| row.transport == crate::SIM_TRANSPORT)
+            .filter(|row| is_runtime_transport(&row.transport))
             .map(|row| row.uid.clone())
             .collect();
         let fs = fs.borrow();
-        // A sidecar this snapshot cannot read does NOT unmake the sim: the
-        // row says it is one, and the record this tab already holds is the
-        // better answer than nothing. Dropping it here was an eternal
-        // "Opening…" — `sim_session_for` reads this map, so a sim without
-        // an entry cannot be powered on, and a held lens on it waits for a
-        // runtime nobody will ever start (2026-09-08 outage). The one thing
-        // that removes an entry is the row going away, which is Forget.
+        // A sidecar this snapshot cannot read does NOT unmake the runtime:
+        // the row says it is one, and the record this tab already holds is
+        // the better answer than nothing. Dropping it here was an eternal
+        // "Opening…" — `runtime_session_for` reads this map, so a runtime
+        // without an entry cannot be powered on, and a held lens on it
+        // waits for something nobody will ever start (2026-09-08 outage).
+        // The one thing that removes an entry is the row going away, which
+        // is Forget.
         let held = std::mem::take(&mut self.device_sims);
         self.device_sims = uids
             .into_iter()
@@ -595,10 +639,15 @@ impl StudioController {
             .collect();
     }
 
-    /// The session a sim device would run as, or `None` when this device is
-    /// not a sim (no sidecar, no `sim` registry row) or has no uid to be
-    /// keyed on.
-    fn sim_session_for(&self, device: crate::DeviceId) -> Option<crate::SimSession> {
+    /// The session a runtime device would run as, or `None` when this
+    /// device is not a runtime (no sidecar, no `sim`/`emu` registry row) or
+    /// has no uid to be keyed on.
+    ///
+    /// One lookup for both kinds, because everything it reads is the same
+    /// for both — the uid, the target, the minted MAC, the title. What the
+    /// kind decides is only which transport the answer is handed to, and
+    /// that is [`RuntimeSession`]'s whole job.
+    fn runtime_session_for(&self, device: crate::DeviceId) -> Option<RuntimeSession> {
         let entry = self
             .devices
             .roster()
@@ -611,132 +660,213 @@ impl StudioController {
             .as_ref()
             .map(|uid| uid.0.clone())
             .or_else(|| self.device_registry_key(device))?;
-        let (target, base_mac) = self.sim_backing_facts(&uid)?;
-        Some(crate::SimSession {
-            uid,
-            target,
-            display_name: entry.title(),
-            base_mac,
-            // PD12: a device asks for the GPU tier; the worker answers with
-            // what it granted, and the band says which.
-            tier: crate::SimTier::Gpu,
+        self.runtime_session_at(&uid, entry.title())
+    }
+
+    /// The same, for a uid the roster may not have adopted yet — the held
+    /// lens's wake path, where the row exists and the device may not.
+    fn runtime_session_at(&self, uid: &str, display_name: String) -> Option<RuntimeSession> {
+        let (kind, target, base_mac) = self.runtime_backing_facts(uid)?;
+        Some(match kind {
+            crate::RuntimeKind::Sim => RuntimeSession::Sim(crate::SimSession {
+                uid: uid.to_string(),
+                target,
+                display_name,
+                base_mac,
+                // PD12: a device asks for the GPU tier; the worker answers
+                // with what it granted, and the band says which.
+                tier: crate::SimTier::Gpu,
+            }),
+            crate::RuntimeKind::Emu => RuntimeSession::Emu(crate::EmuSession {
+                uid: uid.to_string(),
+                target,
+                display_name,
+                base_mac,
+            }),
         })
     }
 
-    /// What a sim's runtime has to be started with — the board it wears and
-    /// the minted MAC it reports — read from its sidecar, or rebuilt from
-    /// its registry row when the sidecar is unreadable.
+    /// What a runtime has to be started with — WHICH KIND it is, the board
+    /// it wears and the minted MAC it reports — read from its sidecar, or
+    /// rebuilt from its registry row when the sidecar is unreadable.
     ///
-    /// The row is not a second source of truth, it is the SAME two facts
-    /// written a second time: `new_sim_record` puts the target in
-    /// `board_id` and the minted MAC in `hardware_id`. Reading them back
-    /// costs nothing and is the difference between a sim that can be
-    /// powered on and one that can only be waited for.
-    fn sim_backing_facts(&self, uid: &str) -> Option<(String, String)> {
+    /// The row is not a second source of truth, it is the SAME three facts
+    /// written a second time: `new_sim_record` puts the kind in
+    /// `transport`, the target in `board_id` and the minted MAC in
+    /// `hardware_id`. Reading them back costs nothing and is the difference
+    /// between a runtime that can be powered on and one that can only be
+    /// waited for (the 2026-09-08 outage: dropping a record whose sidecar
+    /// this snapshot could not read left the card saying "Opening…" for as
+    /// long as anyone watched).
+    fn runtime_backing_facts(&self, uid: &str) -> Option<(crate::RuntimeKind, String, String)> {
         if let Some(sidecar) = self.device_sims.get(uid) {
-            return Some((sidecar.target.clone(), sidecar.base_mac.clone()));
+            return Some((
+                sidecar.kind()?,
+                sidecar.target.clone(),
+                sidecar.base_mac.clone(),
+            ));
         }
         let row = self
             .home_inputs
             .as_ref()?
             .registered
             .iter()
-            .find(|row| row.uid == uid && row.transport == crate::SIM_TRANSPORT)?;
+            .find(|row| row.uid == uid && is_runtime_transport(&row.transport))?;
+        let kind = match row.transport.as_str() {
+            crate::EMU_TRANSPORT => crate::RuntimeKind::Emu,
+            _ => crate::RuntimeKind::Sim,
+        };
         // `efuse:<the minted base MAC>` — the same text the sidecar holds,
         // validated rather than trusted so a hand-edited row cannot boot a
         // runtime claiming an identity that is not a MAC.
         let base_mac = row.hardware_id.as_deref()?.strip_prefix("efuse:")?;
         crate::app::places::HardwareId::from_base_mac(base_mac)?;
-        Some((row.board_id.clone()?, base_mac.to_ascii_lowercase()))
+        Some((kind, row.board_id.clone()?, base_mac.to_ascii_lowercase()))
     }
 
-    /// Whether the device remembered as `uid` is a SIM — a runtime this tab
-    /// starts — rather than silicon on a desk.
+    /// Whether the device remembered as `uid` is a RUNTIME — a sim or an
+    /// emu this tab starts — rather than silicon on a desk.
     ///
     /// Either witness is enough. The sidecar is the record; the registry
     /// row's `transport` is what survives a sidecar this tab could not read
     /// back, and reading only the sidecar meant an open skipped the
     /// power-on and then waited for it forever.
-    fn is_sim_device(&self, uid: &str) -> bool {
+    fn is_runtime_device(&self, uid: &str) -> bool {
         self.device_sims.contains_key(uid)
             || self.home_inputs.as_ref().is_some_and(|inputs| {
                 inputs
                     .registered
                     .iter()
-                    .any(|row| row.uid == uid && row.transport == crate::SIM_TRANSPORT)
+                    .any(|row| row.uid == uid && is_runtime_transport(&row.transport))
             })
     }
 
-    /// Power a sim on, if this gesture is a `Connect` at one.
+    /// Power a runtime on, if this gesture is a `Connect` at one.
     ///
     /// The EFFECTS layer starts the runtime, never the model: `Connect` on a
-    /// sim is `Connect` (PD8, Q15), and the sweep this arms is what attaches
-    /// the link the model then opens. The hello carries the uid, so the fold
-    /// adopts the link into this very record through its own identity join —
-    /// no new arm, no new event.
-    fn power_on_sim_for(&mut self, action: &crate::DeviceAction) {
+    /// runtime is `Connect` (PD8, Q15), and the sweep this arms is what
+    /// attaches the link the model then opens. The hello carries the uid, so
+    /// the fold adopts the link into this very record through its own
+    /// identity join — no new arm, no new event.
+    ///
+    /// For an emu this is also the moment it is **born flashed** (D22): the
+    /// transport's power-on hands the worker the manifest URL, and the
+    /// worker fetches, writes the image and boots into it.
+    fn power_on_runtime_for(&mut self, action: &crate::DeviceAction) {
         let crate::DeviceAction::Connect { device } = action else {
             return;
         };
-        let (Some(sim), Some(session)) =
-            (self.sim_transport.clone(), self.sim_session_for(*device))
-        else {
+        let Some(session) = self.runtime_session_for(*device) else {
             return;
         };
-        if sim.is_powered(&session.uid) {
-            return;
-        }
-        match sim.power_on(session) {
+        let started = match session {
+            RuntimeSession::Sim(session) => {
+                let Some(sim) = self.sim_transport.clone() else {
+                    return;
+                };
+                if sim.is_powered(&session.uid) {
+                    return;
+                }
+                sim.power_on(session)
+            }
+            RuntimeSession::Emu(session) => {
+                let Some(emu) = self.emu_transport.clone() else {
+                    return;
+                };
+                if emu.is_powered(&session.uid) {
+                    return;
+                }
+                emu.power_on(session)
+            }
+        };
+        match started {
             Ok(()) => self.device_sweep_pending = true,
-            Err(error) => log::warn!("the sim did not start: {error}"),
+            Err(error) => log::warn!("the runtime did not start: {error}"),
         }
     }
 
-    /// Power a sim off, if this gesture was a `Disconnect` (or a `Forget`)
-    /// at one.
-    ///
-    /// Runs AFTER the fold, which has already evicted and closed the link.
-    /// The detach has to be raised explicitly: `Disconnect` alone closes a
-    /// port and keeps the card attached, which is right for a board still
-    /// sitting on the desk and wrong for a runtime that no longer exists. A
-    /// powered-off sim leaves the roster the way an unplugged board does,
-    /// and its record stays on the remembered line (Q5).
-    fn power_off_sim_for(&mut self, action: &crate::DeviceAction) {
-        let uid = self.sim_uid_to_power_off(action);
-        self.power_off_sim(uid);
-    }
-
-    /// The uid a gesture will power off, read BEFORE the fold.
+    /// The runtime a gesture will power off, read BEFORE the fold.
     ///
     /// Before, because a `Forget` DELETES the device: read afterwards, the
-    /// roster no longer holds the entry the uid comes from, and the sim
+    /// roster no longer holds the entry the uid comes from, and the runtime
     /// would be forgotten while its worker kept running (`just test`, P3).
     /// `Disconnect` would survive either order; one rule for both is
     /// cheaper than remembering which.
-    fn sim_uid_to_power_off(&self, action: &crate::DeviceAction) -> Option<String> {
+    ///
+    /// The KIND rides along for the same reason the uid does: after a
+    /// `Forget` there is no record left to ask which transport owns it.
+    fn runtime_to_power_off(&self, action: &crate::DeviceAction) -> Option<PoweredRuntime> {
         match action {
             crate::DeviceAction::Disconnect { device } | crate::DeviceAction::Forget { device } => {
-                self.sim_session_for(*device).map(|session| session.uid)
+                self.runtime_session_for(*device).map(PoweredRuntime::from)
             }
             _ => None,
         }
     }
 
-    fn power_off_sim(&mut self, uid: Option<String>) {
-        let (Some(sim), Some(uid)) = (self.sim_transport.clone(), uid) else {
+    /// Power one runtime off and tell the fold its link is gone.
+    ///
+    /// Runs AFTER the fold, which has already evicted and closed the link.
+    /// The detach has to be raised explicitly: `Disconnect` alone closes a
+    /// port and keeps the card attached, which is right for a board still
+    /// sitting on the desk and wrong for a runtime that no longer exists. A
+    /// powered-off runtime leaves the roster the way an unplugged board
+    /// does, and its record stays on the remembered line (Q5).
+    fn power_off_runtime(&mut self, target: Option<PoweredRuntime>) {
+        let Some(target) = target else {
             return;
         };
-        let link = self
-            .devices
-            .effects()
-            .link_for_endpoint(&crate::sim_endpoint(&uid));
-        if !sim.power_off(&uid) {
+        let (endpoint, stopped) = match target.kind {
+            crate::RuntimeKind::Sim => {
+                let Some(sim) = self.sim_transport.clone() else {
+                    return;
+                };
+                (crate::sim_endpoint(&target.uid), sim.power_off(&target.uid))
+            }
+            crate::RuntimeKind::Emu => {
+                let Some(emu) = self.emu_transport.clone() else {
+                    return;
+                };
+                (crate::emu_endpoint(&target.uid), emu.power_off(&target.uid))
+            }
+        };
+        let link = self.devices.effects().link_for_endpoint(&endpoint);
+        if !stopped {
             return;
         }
         if let Some(link) = link {
             self.fold_device_input(crate::DeviceInput::Event(
                 lpa_devices::Event::LinkDetached { link },
             ));
+        }
+    }
+
+    /// Forget everything the PLATFORM persists for an emu (D15): its 4 MiB
+    /// flash image, which lives in a worker-owned OPFS directory rather
+    /// than in the library store and so is not reached by the sidecar
+    /// delete the catalog op does.
+    ///
+    /// A sim has nothing here — its worker keeps no image — and an emu this
+    /// build cannot reach has nothing to delete either.
+    ///
+    /// Awaited rather than spawned: a Forget that returned before the image
+    /// was gone would let the next mint of the same uid boot somebody
+    /// else's chip, and the delete is one OPFS call the browser resolves
+    /// without the actor's queue. A failure is logged and nothing else —
+    /// the record is already gone, and a user cannot act on an orphaned
+    /// image they cannot name.
+    async fn forget_emu_image(&mut self, target: Option<&PoweredRuntime>) {
+        let Some(target) = target.filter(|target| target.kind == crate::RuntimeKind::Emu) else {
+            return;
+        };
+        let Some(emu) = self.emu_transport.clone() else {
+            return;
+        };
+        if let Err(error) = emu.forget(&target.uid).await {
+            log::warn!(
+                "the emu's flash image for {} was not deleted: {error}",
+                target.uid
+            );
         }
     }
 
@@ -1012,10 +1142,16 @@ impl StudioController {
         view
     }
 
-    /// The runtime band for every SIM in the roster (PD11), joined here
-    /// because the model does not know a sim from silicon: the sidecar
-    /// says which devices are sims and what they wear, and the transport
-    /// says what tier their worker was granted.
+    /// The runtime band for every RUNTIME in the roster (PD11, D25), joined
+    /// here because the model does not know a runtime from silicon: the
+    /// sidecar says which devices are runtimes, of which kind, and what
+    /// they wear; the transport says what its worker reported.
+    ///
+    /// The last clause is the one place the two kinds differ. A sim's is
+    /// the shader TIER its worker granted (PD12); an emu's is its
+    /// DILATION — how fast the emulated board runs against wall time
+    /// (D8/D25) — because an emu grants no tier and the honest thing to put
+    /// where the tier went is the number that actually varies.
     fn runtime_bands(
         &self,
         view: &crate::DeviceRosterView,
@@ -1029,11 +1165,23 @@ impl StudioController {
             .filter_map(|card| {
                 let uid = view.open_addresses.get(&card.id.0)?;
                 let sidecar = self.device_sims.get(uid)?;
-                let tier = self
-                    .sim_transport
-                    .as_ref()
-                    .and_then(|transport| transport.granted_tier(uid));
-                Some((card.id, crate::UiRuntimeBand::sim(&sidecar.target, tier)))
+                let band = match sidecar.kind()? {
+                    crate::RuntimeKind::Sim => {
+                        let tier = self
+                            .sim_transport
+                            .as_ref()
+                            .and_then(|transport| transport.granted_tier(uid));
+                        crate::UiRuntimeBand::sim(&sidecar.target, tier)
+                    }
+                    crate::RuntimeKind::Emu => {
+                        let dilation = self
+                            .emu_transport
+                            .as_ref()
+                            .and_then(|transport| transport.dilation(uid));
+                        crate::UiRuntimeBand::emu(&sidecar.target, dilation)
+                    }
+                };
+                Some((card.id, band))
             })
             .collect()
     }
@@ -1735,7 +1883,12 @@ impl StudioController {
         Some(crate::UiChromeSessionControl {
             face: match attachment.transport {
                 crate::LinkTransport::Sim => crate::DeviceFace::Sim,
-                crate::LinkTransport::Serial => crate::DeviceFace::Wire,
+                // An emu wears the wire face: it runs the target's OWN
+                // firmware image, so the verbs whose words depend on the
+                // face ("flash", "erase") mean what they say on it — which
+                // is also what `DeviceFace::from_transport` already answers
+                // for an `emu` registry row.
+                crate::LinkTransport::Emu | crate::LinkTransport::Serial => crate::DeviceFace::Wire,
             },
             key: format!("device:{}", attachment.uid),
             device: Some(attachment.device),
@@ -2317,12 +2470,12 @@ impl StudioController {
 
     async fn execute_home_op(&mut self, op: HomeOp, updates: UxUpdateSink) -> UiResult {
         match op {
-            HomeOp::OpenPackage { key } => {
+            HomeOp::OpenPackage { key, prefer } => {
                 return self
                     .open_from_home(
                         PendingOpen::Package {
                             key,
-                            on: OpenOn::Resolve,
+                            on: OpenOn::Resolve { prefer },
                         },
                         updates,
                     )
@@ -2391,7 +2544,7 @@ impl StudioController {
                     .open_from_home(
                         PendingOpen::Package {
                             key: created.uid.to_string(),
-                            on: OpenOn::Resolve,
+                            on: OpenOn::Resolve { prefer: None },
                         },
                         updates,
                     )
@@ -2424,7 +2577,7 @@ impl StudioController {
                     .open_from_home(
                         PendingOpen::Package {
                             key: created.uid.to_string(),
-                            on: OpenOn::Resolve,
+                            on: OpenOn::Resolve { prefer: None },
                         },
                         updates,
                     )
@@ -2702,33 +2855,44 @@ impl StudioController {
                     None
                 }
             },
-            OpenOn::Resolve => None,
+            OpenOn::Resolve { .. } => None,
+        };
+        let prefer = match self.pending_open_on() {
+            OpenOn::Resolve { prefer } => prefer,
+            OpenOn::Device { .. } => None,
         };
         let uid = match named {
             Some(uid) => uid,
             None => {
-                // The tab's own sim already wears this target: reuse it
-                // outright. The first arm of the resolution (the device
-                // that last ran this project) and the second (an idle sim
-                // of the target) both land here, and there is nothing to
-                // power on or hand a wire to — the lens is already holding
-                // it.
-                if let Some(id) = self.lens_on_a_sim_wearing(&target) {
+                // The tab's own runtime already wears this target, and is
+                // the kind the address would settle for: reuse it outright.
+                // The first arm of the resolution (the device that last ran
+                // this project) and the second (an idle one of the target)
+                // both land here, and there is nothing to power on or hand
+                // a wire to — the lens is already holding it.
+                if let Some(id) = self.lens_on_a_sim_wearing(&target, prefer) {
                     return self.attach_lens(id, updates).await;
                 }
-                self.resolve_open_device(&target).await?
+                self.resolve_open_device(&target, prefer).await?
             }
         };
         // The open's own narration names the DEVICE it is starting, not
-        // "the simulator": there is one device per open and it has a board.
+        // "the simulator": there is one device per open, it has a board,
+        // and the parenthesis says which runtime is behind it — the same
+        // word the picker's row and the band wear.
+        let backing = self
+            .device_sims
+            .get(&uid)
+            .and_then(|record| record.kind())
+            .map_or(crate::Backing::Sim, crate::Backing::from);
         emit_activity(
             &updates,
             UxActivityTarget::pane(ProjectController::NODE_ID),
             "Starting the device",
             "Starting",
             &format!(
-                "Starting {} (sim)",
-                crate::board_display_name(target.board_id())
+                "Starting {}",
+                crate::sim_device_name(target.board_id(), backing)
             ),
         );
         // ONE DEVICE PER TAB (D37). The lens goes first — a lens on another
@@ -2744,21 +2908,23 @@ impl StudioController {
             // before this open takes it; the settle points run too late.
             self.project.release_closed_library_projects().await;
         }
-        self.power_off_other_sims(&uid);
+        self.power_off_other_runtimes(&uid);
         // Power on is `Connect` at the fold (PD8/Q15) — the same gesture
         // the card's own Power on raises, so nothing here is a second flow.
-        // A sim already on is a no-op at the transport, and the fold
+        // A runtime already on is a no-op at the transport, and the fold
         // re-opens a port it had closed.
         //
-        // **Sims only.** A board is not powered on by Studio: it is on a
-        // desk, reached over a port the browser already granted, and
+        // **Runtimes only.** A board is not powered on by Studio: it is on
+        // a desk, reached over a port the browser already granted, and
         // `Connect`ing it would close and reopen a wire that was working —
         // which drops the card back through Connecting and leaves the lens
         // held behind a board that was Ready a moment ago. Attach-or-
         // connect for silicon is `open_device_lens`'s own job, and it has
         // been doing it since the device route existed.
-        let is_sim = self.is_sim_device(&uid);
-        if is_sim && let Some(device) = self.devices.device_for_key(&uid).map(|device| device.id) {
+        let is_runtime = self.is_runtime_device(&uid);
+        if is_runtime
+            && let Some(device) = self.devices.device_for_key(&uid).map(|device| device.id)
+        {
             self.execute_devices_op(crate::DevicesOp::on_sim(crate::DeviceAction::Connect {
                 device,
             }))
@@ -2855,7 +3021,7 @@ impl StudioController {
     fn pending_open_on(&self) -> OpenOn {
         match &self.pending_open {
             Some(PendingOpen::Package { on, .. }) => on.clone(),
-            _ => OpenOn::Resolve,
+            _ => OpenOn::Resolve { prefer: None },
         }
     }
 
@@ -2940,35 +3106,60 @@ impl StudioController {
             .map(|card| card.uid.clone())
     }
 
-    /// The session the lens already holds, when it is a SIM wearing
-    /// `target` — the open can reuse it as-is.
+    /// The session the lens already holds, when it is a RUNTIME wearing
+    /// `target` that the open would settle for — the open can reuse it
+    /// as-is.
     ///
-    /// A sim is created wearing a board and cannot be re-dressed into
+    /// A runtime is created wearing a board and cannot be re-dressed into
     /// another, so the board has to match; a lens on silicon never
     /// matches, because opening a project must not touch a board (D33).
+    ///
+    /// `prefer` is the `?on=` kind, when the address named one (D1). A
+    /// preference that does NOT match what the lens holds is what makes
+    /// `?on=sim` switch a project off the emu it was on: the reuse is
+    /// declined here, and the resolution below finds or mints a sim.
     fn lens_on_a_sim_wearing(
         &self,
         target: &crate::app::library::ProjectTarget,
+        prefer: Option<crate::RuntimeKind>,
     ) -> Option<crate::RuntimeId> {
         let session = self.pool.lens_session()?;
         let attachment = session.attachment();
-        (attachment.transport == crate::LinkTransport::Sim
-            && attachment.board_id.as_deref() == Some(target.board_id()))
+        let held = match attachment.transport {
+            crate::LinkTransport::Sim => crate::RuntimeKind::Sim,
+            crate::LinkTransport::Emu => crate::RuntimeKind::Emu,
+            crate::LinkTransport::Serial => return None,
+        };
+        (attachment.board_id.as_deref() == Some(target.board_id())
+            && prefer.is_none_or(|wanted| wanted == held))
         .then(|| session.id())
     }
 
-    /// The device this open lands on (PD9, PD14's default arm): the sim
-    /// that last ran this project, else an idle sim of the same target,
-    /// else a freshly minted record.
+    /// The device this open lands on (PD9, PD14's default arm, D1).
+    ///
+    /// Three rungs, in order:
+    ///
+    /// 1. the record that **last ran this project** — any kind — when the
+    ///    address asked for no kind, or asked for the kind it already is;
+    /// 2. with a kind asked: an idle record of that kind and target, else a
+    ///    freshly minted one of that kind;
+    /// 3. with no kind asked and no history: exactly today's behaviour — an
+    ///    idle **sim** of the target, else a freshly minted **sim**.
+    ///
+    /// Rung 3 is the literal reading of D1's "no default flips": an open
+    /// with no hint and no history lands on a sim on a C6 exactly as it did
+    /// before this build could emulate one. Asking for an emu is something
+    /// a person does, never something Studio decides for them.
     ///
     /// Silicon is never resolved here (D33): putting a project on a board
     /// is that board's own card verb.
     async fn resolve_open_device(
         &mut self,
         target: &crate::app::library::ProjectTarget,
+        prefer: Option<crate::RuntimeKind>,
     ) -> Result<String, UiError> {
         let target_id = target.board_id().to_string();
-        // The remembered sims, READ FIRST. A cold page has an empty map
+        // The remembered runtimes, READ FIRST. A cold page has an empty map
         // until the first library settle fills it, and this resolution
         // reads "no sim of this target" off an empty map and mints one —
         // so every cold open left a second, third, fourth record behind
@@ -2978,15 +3169,20 @@ impl StudioController {
             self.request_library_refresh();
             self.settle_library().await;
         }
+        // Rung 3's kind, and rung 2's: absent means sim, which is the whole
+        // of "no default flips".
+        let wanted = prefer.unwrap_or(crate::RuntimeKind::Sim);
         let of_target: Vec<String> = self
             .device_sims
             .iter()
-            .filter(|(_, record)| record.target == target_id)
+            .filter(|(_, record)| record.target == target_id && record.kind() == Some(wanted))
             .map(|(uid, _)| uid.clone())
             .collect();
         // The one that LAST RAN this project, when the tab can tell: the
-        // lens is the only place that pairing is known before P4's `?on=`
-        // grammar, and it is the common case (reopening what you just had).
+        // lens is where that pairing is known, and it is the common case
+        // (reopening what you just had). ANY kind — a project last run on
+        // an emu reopens on that emu — unless the address asked for the
+        // other one, which is the switch.
         let pending_key = match &self.pending_open {
             Some(PendingOpen::Package { key, .. }) => Some(key.clone()),
             _ => None,
@@ -2994,21 +3190,30 @@ impl StudioController {
         if let Some(key) = pending_key
             && self.project.active_library_uid().as_deref() == Some(key.as_str())
             && let Some(session) = self.pool.lens_session()
-            && session.transport() == crate::LinkTransport::Sim
-            && of_target.contains(&session.attachment().uid)
+            && let Some(held) = match session.transport() {
+                crate::LinkTransport::Sim => Some(crate::RuntimeKind::Sim),
+                crate::LinkTransport::Emu => Some(crate::RuntimeKind::Emu),
+                crate::LinkTransport::Serial => None,
+            }
+            && prefer.is_none_or(|wanted| wanted == held)
+            && self
+                .device_sims
+                .get(&session.attachment().uid)
+                .is_some_and(|record| record.target == target_id)
         {
             return Ok(session.attachment().uid.clone());
         }
-        // Else an idle one of the same target: any remembered sim wearing
-        // it. A powered-off record is as good as a running one — powering
-        // it on is the next step either way.
+        // Else an idle one of the wanted kind and target: any remembered
+        // record wearing it. A powered-off record is as good as a running
+        // one — powering it on is the next step either way.
         if let Some(uid) = of_target.first() {
             return Ok(uid.clone());
         }
-        // Else make one. Until P5's picker, a board-target project mints
-        // its sim silently on open — which is D33.
+        // Else make one, of the kind that was asked for.
         let random = self.random_bytes6();
-        let uid = self.create_sim_record(&target_id, None, &random).await?;
+        let uid = self
+            .create_runtime_record(&target_id, None, &random, wanted)
+            .await?;
         // The record is in the LIBRARY; the roster learns it at the next
         // settle, and the power-on below needs a device to aim at. Settle
         // here rather than waiting for the dispatch's own settle point,
@@ -3017,44 +3222,63 @@ impl StudioController {
         Ok(uid)
     }
 
-    /// Power off every sim that is NOT the one this open lands on (D37,
-    /// silently). The record stays: a powered-off sim sits on the
-    /// remembered line with Power on (Q5).
-    fn power_off_other_sims(&mut self, keep_uid: &str) {
-        self.power_off_sims_except(Some(keep_uid));
+    /// Power off every runtime that is NOT the one this open lands on
+    /// (D37/D10, silently). The record stays: a powered-off runtime sits on
+    /// the remembered line with Power on (Q5).
+    ///
+    /// **Both kinds.** `SESSION_CAPACITY = 1` is a rule about this tab, not
+    /// about sims: an emu left running beside the sim the open landed on
+    /// would be a second Worker pacing a second SoC behind a card nobody is
+    /// looking at.
+    fn power_off_other_runtimes(&mut self, keep_uid: &str) {
+        self.power_off_runtimes_except(Some(keep_uid));
     }
 
-    /// Power every sim this tab runs off — the tab (or a docs host) going
-    /// away. A running sim is a worker, and a worker nobody terminates
-    /// outlives the page that started it.
+    /// Power every runtime this tab runs off — the tab (or a docs host)
+    /// going away. A running runtime is a worker, and a worker nobody
+    /// terminates outlives the page that started it.
     pub fn power_off_sims(&mut self) {
-        self.power_off_sims_except(None);
+        self.power_off_runtimes_except(None);
     }
 
-    fn power_off_sims_except(&mut self, keep_uid: Option<&str>) {
-        let Some(transport) = self.sim_transport.clone() else {
-            return;
-        };
-        let others: Vec<String> = transport
-            .powered_uids()
-            .into_iter()
-            .filter(|uid| Some(uid.as_str()) != keep_uid)
+    fn power_off_runtimes_except(&mut self, keep_uid: Option<&str>) {
+        let powered: Vec<PoweredRuntime> = self
+            .sim_transport
+            .iter()
+            .flat_map(|transport| transport.powered_uids())
+            .map(|uid| PoweredRuntime {
+                uid,
+                kind: crate::RuntimeKind::Sim,
+            })
+            .chain(
+                self.emu_transport
+                    .iter()
+                    .flat_map(|transport| transport.powered_uids())
+                    .map(|uid| PoweredRuntime {
+                        uid,
+                        kind: crate::RuntimeKind::Emu,
+                    }),
+            )
+            .filter(|running| Some(running.uid.as_str()) != keep_uid)
             .collect();
-        for uid in others {
-            // A sim with no roster device is one that never said hello:
+        for running in powered {
+            // A runtime with no roster device is one that never said hello:
             // the transport still holds its worker, and powering it off is
             // the whole of the teardown.
-            let Some(device) = self.lens_facts_at_address(&uid).map(|facts| facts.device) else {
-                transport.power_off(&uid);
+            let Some(device) = self
+                .lens_facts_at_address(&running.uid)
+                .map(|facts| facts.device)
+            else {
+                self.power_off_runtime(Some(running));
                 continue;
             };
             let action = crate::DeviceAction::Disconnect { device };
             self.fold_device_input(crate::DeviceInput::Action(action.clone()));
-            self.power_off_sim_for(&action);
+            self.power_off_runtime(Some(running));
         }
     }
 
-    /// Six bytes of the injected randomness, for a minted sim's MAC.
+    /// Six bytes of the injected randomness, for a minted runtime's MAC.
     fn random_bytes6(&self) -> [u8; 6] {
         let bytes = (self.random)();
         let mut six = [0u8; 6];
@@ -3223,31 +3447,42 @@ impl StudioController {
         if let Some(name_first) = self.derive_flash_name_action(op.action()) {
             self.fold_device_input(crate::DeviceInput::Action(name_first));
         }
-        // A sim's runtime is started HERE, before the fold, so the sweep the
+        // A runtime is started HERE, before the fold, so the sweep the
         // model's own `Connect` triggers finds a link to attach.
-        self.power_on_sim_for(op.action());
-        // …and the uid a power-off will need is read before it too: a
+        self.power_on_runtime_for(op.action());
+        // …and the runtime a power-off will need is read before it too: a
         // `Forget` takes the device with it, and the roster is where that
-        // uid comes from.
-        let power_off = self.sim_uid_to_power_off(op.action());
+        // uid — and the kind that says which transport owns it — comes
+        // from.
+        let power_off = self.runtime_to_power_off(op.action());
+        let forgetting = matches!(op.action(), crate::DeviceAction::Forget { .. });
         self.fold_device_input(crate::DeviceInput::Action(op.action.clone()));
-        self.power_off_sim(power_off);
+        self.power_off_runtime(power_off.clone());
+        // D15: an emu's 4 MiB flash image lives in a worker-owned OPFS
+        // directory, not in the library store, so the catalog op's sidecar
+        // delete does not reach it. Forget takes both or it is not Forget.
+        if forgetting {
+            self.forget_emu_image(power_off.as_ref()).await;
+        }
         self.settle_device_records().await;
         Ok(UiNotices::new())
     }
 
-    /// The picker's gesture (D44): mint a sim of the target and power it on.
+    /// The picker's gesture (D44): mint a runtime of the target — the kind
+    /// the picked ROW named (D1) — and power it on.
     ///
     /// Two steps that must not come apart. The record is LIBRARY work — a
     /// registry row and a sidecar in one settle — and the roster meets it
     /// as an ordinary device at the settle that follows; only then is there
-    /// a `DeviceId` for the `Connect` to aim at. A minted sim nobody
+    /// a `DeviceId` for the `Connect` to aim at. A minted runtime nobody
     /// powered on would land on the remembered line, which is the wrong
     /// answer to "start a board here".
     ///
     /// The power-on is the SAME `execute_devices_op` the card's own Power
     /// on runs, and the target is normalized through [`ProjectTarget`] so a
     /// picked "lightplayer/desktop" and an absent target are one target.
+    /// For an emu that ordinary power-on is also what makes it **born
+    /// flashed** (D22) — there is no extra step here, by design.
     ///
     /// [`ProjectTarget`]: crate::app::library::ProjectTarget
     async fn execute_sim_create_op(&mut self, op: crate::SimCreateOp) -> UiResult {
@@ -3261,17 +3496,33 @@ impl StudioController {
                 "no hardware profile is checked in for {target_id}, so it cannot be started here"
             )));
         }
+        let kind = match op.backing {
+            crate::Backing::Emu => {
+                // The emu row is only offered where D21's join holds, so an
+                // emu gesture at a target this build cannot emulate is a
+                // hand-made action — refused with the reason rather than
+                // quietly downgraded to a sim, which would be the one
+                // default flip D1 forbids.
+                if !crate::emu_offered_for(&target_id) {
+                    return Err(UiError::UnsupportedAction(format!(
+                        "this build has no emulator for {target_id}"
+                    )));
+                }
+                crate::RuntimeKind::Emu
+            }
+            crate::Backing::Sim => crate::RuntimeKind::Sim,
+        };
         let name = op
             .name
             .as_deref()
             .map(str::trim)
             .filter(|name| !name.is_empty())
             .map(str::to_string)
-            .unwrap_or_else(|| crate::sim_device_name(&target_id));
+            .unwrap_or_else(|| crate::sim_device_name(&target_id, op.backing));
 
         let random = self.random_bytes6();
         let uid = self
-            .create_sim_record(&target_id, Some(&name), &random)
+            .create_runtime_record(&target_id, Some(&name), &random, kind)
             .await?;
         // The roster learns the row at the next library settle, and the
         // power-on below needs a device to aim at.
@@ -3638,7 +3889,9 @@ impl StudioController {
             .map_err(UiError::MissingSession)?;
         let protocol = match attachment.transport {
             crate::LinkTransport::Sim => "browser-worker",
-            crate::LinkTransport::Serial => "usb-serial",
+            // The same `M!` line framing over the same serial-shaped wire;
+            // the only difference is which side of the USB the chip is on.
+            crate::LinkTransport::Emu | crate::LinkTransport::Serial => "usb-serial",
         };
         let client = crate::StudioServerClient::from_lens_io(io, deadline, protocol);
         let id = self.pool.install(crate::RuntimePayload::Device(attachment));
@@ -3950,7 +4203,7 @@ impl StudioController {
         }
     }
 
-    /// Start the sim a held lens is waiting on, if it is a sim and it is
+    /// Start the runtime a held lens is waiting on, if it is one and it is
     /// off.
     ///
     /// The power-on is the transport's, not the fold's, on purpose: the
@@ -3960,33 +4213,44 @@ impl StudioController {
     /// the link reaches the model exactly as it does from the card's own
     /// Power on.
     fn wake_held_sim(&mut self, uid: &str) -> SimWake {
-        let Some(sim) = self.sim_transport.clone() else {
-            return SimWake::NotOurs;
-        };
-        if !self.is_sim_device(uid) {
+        if !self.is_runtime_device(uid) {
             return SimWake::NotOurs;
         }
-        if sim.is_powered(uid) {
-            return SimWake::AlreadyRunning;
-        }
-        let Some((target, base_mac)) = self.sim_backing_facts(uid) else {
-            return SimWake::Refused(
-                "its record does not say what board it is or what identity it reports".to_string(),
-            );
-        };
         let display_name = self
             .devices
             .device_for_key(uid)
             .map(|device| device.title())
-            .unwrap_or_else(|| crate::sim_device_name(&target));
-        let session = crate::SimSession {
-            uid: uid.to_string(),
-            target,
-            display_name,
-            base_mac,
-            tier: crate::SimTier::Gpu,
+            .unwrap_or_else(|| {
+                self.runtime_backing_facts(uid)
+                    .map(|(kind, target, _)| crate::sim_device_name(&target, kind.into()))
+                    .unwrap_or_else(|| uid.to_string())
+            });
+        let Some(session) = self.runtime_session_at(uid, display_name) else {
+            return SimWake::Refused(
+                "its record does not say what board it is or what identity it reports".to_string(),
+            );
         };
-        match sim.power_on(session) {
+        let started = match session {
+            RuntimeSession::Sim(session) => {
+                let Some(sim) = self.sim_transport.clone() else {
+                    return SimWake::NotOurs;
+                };
+                if sim.is_powered(&session.uid) {
+                    return SimWake::AlreadyRunning;
+                }
+                sim.power_on(session)
+            }
+            RuntimeSession::Emu(session) => {
+                let Some(emu) = self.emu_transport.clone() else {
+                    return SimWake::NotOurs;
+                };
+                if emu.is_powered(&session.uid) {
+                    return SimWake::AlreadyRunning;
+                }
+                emu.power_on(session)
+            }
+        };
+        match started {
             Ok(()) => {
                 self.device_sweep_pending = true;
                 self.mark_dirty();
@@ -4016,18 +4280,37 @@ impl StudioController {
     /// re-asks twice more and stops, and the project card said "Opening…"
     /// for as long as anyone watched.
     fn sim_that_did_not_start(&self, uid: &str) -> Option<(String, String)> {
-        let sim = self.sim_transport.as_ref()?;
-        if !sim.is_powered(uid) || sim.is_starting(uid) {
+        // Which transport holds this uid, and therefore which endpoint the
+        // fold's evidence is filed under. An emu answers the same two
+        // questions — it has the same worker-and-cold-boot shape, only
+        // slower, which is exactly why `is_starting` exists on both.
+        let (powered, starting, endpoint) = match self.emu_transport.as_ref() {
+            Some(emu) if emu.is_powered(uid) || emu.is_starting(uid) => (
+                emu.is_powered(uid),
+                emu.is_starting(uid),
+                crate::emu_endpoint(uid),
+            ),
+            _ => {
+                let sim = self.sim_transport.as_ref()?;
+                (
+                    sim.is_powered(uid),
+                    sim.is_starting(uid),
+                    crate::sim_endpoint(uid),
+                )
+            }
+        };
+        if !powered || starting {
             // Off, or still coming up. The second matters: the fold's
             // identify deadline (5 s) is shorter than a cold worker boot,
             // and each eviction closes and re-opens the link — which
             // KILLS the worker and boots a fresh one — so at the retry
             // cap the last boot is still in flight while the link reads
             // "attached, idle, not open" below. Only the runtime knows it
-            // is starting, so it is asked first.
+            // is starting, so it is asked first. On an emu the gap is
+            // wider still: the module fetch, the package fetch and a cold
+            // ROM-up boot all happen behind that one flag (G1's Q3).
             return None;
         }
-        let endpoint = crate::sim_endpoint(uid);
         let roster = self.devices.roster();
         let (busy, presence, hello) = if let Some(pending) = roster
             .pending()
@@ -4093,7 +4376,14 @@ impl StudioController {
             UiLogOrigin::Studio,
             format!("{message}: {why} ({detail}); powered off"),
         ));
-        self.power_off_sim(Some(uid.to_string()));
+        let kind = self
+            .runtime_backing_facts(uid)
+            .map(|(kind, _, _)| kind)
+            .unwrap_or(crate::RuntimeKind::Sim);
+        self.power_off_runtime(Some(PoweredRuntime {
+            uid: uid.to_string(),
+            kind,
+        }));
         if let Some(pending) = self.pending_open.take() {
             crate::app::open_progress::note_open_failed(message, pending.retry_action());
         }
@@ -5391,6 +5681,64 @@ struct LensFacts {
     name: String,
     /// The endpoint rung, for the transport fork (`sim:` vs a port).
     endpoint: Option<String>,
+}
+
+/// Whether a registry row's `transport` column names a runtime this tab
+/// starts — a sim or an emu (D1/D6).
+///
+/// One predicate rather than two comparisons at each of the five places
+/// that ask: a place that learned about sims and not emus would skip the
+/// power-on and then wait for it forever, which is exactly the 2026-09-08
+/// outage's shape.
+fn is_runtime_transport(transport: &str) -> bool {
+    transport == crate::SIM_TRANSPORT || transport == crate::EMU_TRANSPORT
+}
+
+/// The session one runtime device would run as, by kind.
+///
+/// The fork exists in the CONTROLLER and nowhere below it: `lpa-devices`
+/// does not know a runtime from silicon, and the two transports have
+/// deliberately identical `DeviceTransport` surfaces. What differs is only
+/// the handful of verbs that are not part of that trait — power on, power
+/// off, dilation, forget — and this is what routes them.
+enum RuntimeSession {
+    Sim(crate::SimSession),
+    Emu(crate::EmuSession),
+}
+
+impl RuntimeSession {
+    fn kind(&self) -> crate::RuntimeKind {
+        match self {
+            Self::Sim(_) => crate::RuntimeKind::Sim,
+            Self::Emu(_) => crate::RuntimeKind::Emu,
+        }
+    }
+
+    fn uid(&self) -> &str {
+        match self {
+            Self::Sim(session) => &session.uid,
+            Self::Emu(session) => &session.uid,
+        }
+    }
+}
+
+/// A runtime named for a power-off: its uid and which transport owns it.
+///
+/// Both halves are read BEFORE the fold, because a `Forget` deletes the
+/// record the kind would otherwise be looked up in.
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct PoweredRuntime {
+    uid: String,
+    kind: crate::RuntimeKind,
+}
+
+impl From<RuntimeSession> for PoweredRuntime {
+    fn from(session: RuntimeSession) -> Self {
+        Self {
+            uid: session.uid().to_string(),
+            kind: session.kind(),
+        }
+    }
 }
 
 /// What [`StudioController::wake_held_sim`] did about the device a held

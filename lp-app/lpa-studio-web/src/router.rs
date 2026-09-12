@@ -814,13 +814,19 @@ pub(crate) fn lens_route(view: &UiStudioView) -> Option<StudioRoute> {
         base_mac,
         ..
     } = view.lens.as_ref()?;
-    // The hint names the resolved KIND for a sim and the INSTANCE for
-    // silicon (D43). A sim's instance is deliberately not pinned: a
-    // reload re-resolves to the sim that last ran this project, which is
-    // this one, and a sim whose record went away resolves to a fresh one
-    // instead of failing at an address.
+    // The hint names the resolved KIND for a runtime and the INSTANCE for
+    // silicon (D43). A runtime's instance is deliberately not pinned: a
+    // reload re-resolves to the one that last ran this project, which is
+    // this one, and a runtime whose record went away resolves to a fresh
+    // one instead of failing at an address.
+    //
+    // Both kinds write their word (D1/D14). That is what makes the choice
+    // STICKY per project without a second store: a project opened on an emu
+    // reloads onto an emu because its address says so, and the way to
+    // change your mind is to edit the one word — or to pick the other row.
     let on = match transport {
         lpa_studio_core::LinkTransport::Sim => Some(DeviceHint::Sim),
+        lpa_studio_core::LinkTransport::Emu => Some(DeviceHint::Emu),
         lpa_studio_core::LinkTransport::Serial => base_mac.clone().map(DeviceHint::Mac),
     };
     // A TRANSIENT view session binds its example's bare address (examples
@@ -2276,6 +2282,32 @@ mod tests {
         assert_eq!(
             lens_route(&view).map(|route| route.path()),
             Some(format!("/p/2026-07-09-1421-basic-{SHARE_UID}?on=sim"))
+        );
+    }
+
+    /// D1/D14: an emu lens writes `?on=emu` by the same rule, which is the
+    /// whole of "the choice sticks to the project" — a reload of this
+    /// address resolves an emu, and the way to change your mind is the one
+    /// word.
+    #[test]
+    fn lens_on_the_emu_writes_the_emu_hint_back() {
+        let view = editor_view(Some(UiLensRuntime::Device {
+            uid: "devemu".to_string(),
+            transport: lpa_studio_core::LinkTransport::Emu,
+            project_uid: Some(SHARE_UID.to_string()),
+            base_mac: None,
+        }))
+        .with_open_project(
+            Some(SHARE_UID.to_string()),
+            Some("2026-07-09-1421-basic".to_string()),
+        );
+        assert_eq!(
+            lens_route(&view).and_then(|route| route.device_hint().cloned()),
+            Some(DeviceHint::Emu)
+        );
+        assert_eq!(
+            lens_route(&view).map(|route| route.path()),
+            Some(format!("/p/2026-07-09-1421-basic-{SHARE_UID}?on=emu"))
         );
     }
 

@@ -62,13 +62,17 @@
 //! `--flash <file>` is read-write (the board's flash, surviving a run),
 //! `--flash-copy <file>` reads once and never writes (a scratch copy of a
 //! known image), and the default is a blank chip that lives and dies with
-//! the process.
+//! the process. [`FlashBacking::Bytes`] is the fourth: a chip whose starting
+//! bytes the **host handed over** rather than named a path for, and whose
+//! persistence is the host's own — a wasm build has no filesystem to flush
+//! to, so it reads the image back out through [`FlashImage::bytes`] and
+//! stores it wherever it keeps things.
 
 use alloc::format;
 use alloc::vec;
 use alloc::vec::Vec;
 use std::io;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use crate::periph::BusCx;
@@ -94,6 +98,14 @@ pub enum FlashBacking {
     File(PathBuf),
     /// `--flash-copy <file>`: read at start, never written.
     Copy(PathBuf),
+    /// Bytes the host handed over: read at start, **never written back** by
+    /// [`flush`](FlashImage::flush). The host owns the persistence and reads
+    /// the chip out with [`bytes`](FlashImage::bytes) when it wants to keep
+    /// it — which is the only shape available to a build with no filesystem.
+    ///
+    /// Short bytes are padded with `0xff` and long bytes are refused, the
+    /// same length rule [`FlashImage::open`] holds a file to.
+    Bytes(Vec<u8>),
 }
 
 /// The chip's bytes.
@@ -150,28 +162,51 @@ impl FlashImage {
     /// be a step with no meaning.
     pub fn open(backing: FlashBacking, len: u32) -> io::Result<Self> {
         let mut image = Self::blank(len);
-        let path: Option<&Path> = match &backing {
-            FlashBacking::Blank => None,
-            FlashBacking::File(p) | FlashBacking::Copy(p) => Some(p.as_path()),
-        };
-        if let Some(path) = path
-            && path.exists()
-        {
-            let bytes = std::fs::read(path)?;
-            if bytes.len() > len as usize {
-                return Err(io::Error::new(
-                    io::ErrorKind::InvalidData,
-                    format!(
-                        "{} is {} bytes, larger than the {len}-byte chip this machine models",
-                        path.display(),
-                        bytes.len()
-                    ),
-                ));
+        match &backing {
+            FlashBacking::Blank => {}
+            FlashBacking::File(p) | FlashBacking::Copy(p) => {
+                if p.exists() {
+                    let bytes = std::fs::read(p.as_path())?;
+                    image.place_initial(&bytes, &p.display().to_string())?;
+                }
             }
-            image.bytes[..bytes.len()].copy_from_slice(&bytes);
+            // No file to miss, so no "create it blank" case: an empty slice
+            // IS the blank chip the host asked for.
+            FlashBacking::Bytes(bytes) => {
+                image.place_initial(bytes, "the bytes the host handed over")?;
+            }
         }
         image.backing = backing;
         Ok(image)
+    }
+
+    /// Lay a starting image into a blank chip, refusing one that is longer
+    /// than the chip. One function so a file and a host's bytes are held to
+    /// the same length rule and answer with the same sentence.
+    fn place_initial(&mut self, bytes: &[u8], source: &str) -> io::Result<()> {
+        let len = self.len();
+        if bytes.len() > len as usize {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!(
+                    "{source} is {} bytes, larger than the {len}-byte chip this machine models",
+                    bytes.len()
+                ),
+            ));
+        }
+        self.bytes[..bytes.len()].copy_from_slice(bytes);
+        Ok(())
+    }
+
+    /// The whole chip, for a host that keeps the bytes itself.
+    ///
+    /// The read half of [`FlashBacking::Bytes`]: a wasm host has no
+    /// `flush` to call, so it copies the image out on its own cadence and
+    /// writes it wherever it persists things. Cheap and non-counting, like
+    /// [`peek`](Self::peek) — reading the chip out is the host's business,
+    /// not a flash command the guest issued.
+    pub fn bytes(&self) -> &[u8] {
+        &self.bytes
     }
 
     pub fn len(&self) -> u32 {
@@ -288,6 +323,12 @@ impl FlashImage {
 
     /// Write the image back if the backing says to and anything changed.
     /// Returns `true` if a file was written.
+    ///
+    /// `Blank`, `Copy` and `Bytes` all return `Ok(false)` and leave `dirty`
+    /// standing: a `Bytes` chip's persistence belongs to the host, which
+    /// watches [`dirty`](Self::dirty) and copies [`bytes`](Self::bytes) out
+    /// on its own cadence, so clearing the flag here would drop a write the
+    /// host had not saved yet.
     pub fn flush(&mut self) -> io::Result<bool> {
         let FlashBacking::File(path) = &self.backing else {
             return Ok(false);
@@ -298,6 +339,18 @@ impl FlashImage {
         std::fs::write(path, &self.bytes)?;
         self.dirty = false;
         Ok(true)
+    }
+
+    /// The host has persisted the current bytes: clear `dirty`.
+    ///
+    /// [`flush`](Self::flush)'s counterpart for a [`Bytes`](FlashBacking::Bytes)
+    /// chip, whose bytes go somewhere this crate cannot name — an OPFS file
+    /// in a Worker, say. The host asks [`dirty`](Self::dirty), copies
+    /// [`bytes`](Self::bytes) out, saves them, and says so here; nothing
+    /// clears the flag on its behalf, because a host that never saved must
+    /// not look saved.
+    pub fn mark_saved(&mut self) {
+        self.dirty = false;
     }
 
     /// Place bytes without going through a flash command — what a loader
@@ -935,6 +988,59 @@ mod tests {
         assert_eq!(
             flash.lock().unwrap().command_census(),
             FlashCensus::default()
+        );
+    }
+
+    /// The tab host's whole persistence contract in one test: bytes in,
+    /// guest writes, bytes out, and no file anywhere.
+    #[test]
+    fn a_bytes_backed_chip_round_trips_through_the_host() {
+        let mut start = vec![0xffu8; SECTOR_LEN as usize];
+        start[..8].copy_from_slice(b"\xe9boot!!!");
+        let mut image =
+            FlashImage::open(FlashBacking::Bytes(start.clone()), SECTOR_LEN * 2).unwrap();
+
+        // Read at start, padded to the chip's length rather than to the
+        // slice's.
+        assert_eq!(image.len(), SECTOR_LEN * 2);
+        assert_eq!(&image.bytes()[..8], b"\xe9boot!!!");
+        assert!(
+            image.bytes()[SECTOR_LEN as usize..]
+                .iter()
+                .all(|b| *b == 0xff),
+            "the tail past the handed-over bytes is erased flash"
+        );
+        assert!(!image.dirty(), "reading a chip in is not a write");
+
+        // Guest writes reach the same bytes the host reads back.
+        assert!(image.erase(SECTOR_LEN, SECTOR_LEN));
+        assert!(image.program(SECTOR_LEN, b"second"));
+        assert_eq!(&image.bytes()[SECTOR_LEN as usize..][..6], b"second");
+        assert!(image.dirty());
+
+        // ...and none of them reach a file: flush is a no-op that keeps the
+        // flag standing, because the host has not saved anything yet.
+        assert!(!image.flush().unwrap(), "a bytes chip has no file to write");
+        assert!(image.dirty(), "flush did not pretend the host had saved");
+        image.mark_saved();
+        assert!(!image.dirty());
+
+        // An empty slice is the blank chip, not a refusal.
+        let blank = FlashImage::open(FlashBacking::Bytes(Vec::new()), SECTOR_LEN).unwrap();
+        assert!(blank.bytes().iter().all(|b| *b == 0xff));
+    }
+
+    #[test]
+    fn bytes_longer_than_the_chip_are_refused_the_way_a_long_file_is() {
+        let err = FlashImage::open(
+            FlashBacking::Bytes(vec![0u8; SECTOR_LEN as usize + 1]),
+            SECTOR_LEN,
+        )
+        .expect_err("a 4097-byte image does not fit a 4096-byte chip");
+        assert_eq!(err.kind(), std::io::ErrorKind::InvalidData);
+        assert!(
+            err.to_string().contains("larger than the 4096-byte chip"),
+            "{err}"
         );
     }
 

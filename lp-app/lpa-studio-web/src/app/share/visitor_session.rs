@@ -772,6 +772,7 @@ mod io {
                     lpa_studio_core::HOME_NODE_ID,
                     lpa_studio_core::HomeOp::OpenPackage {
                         key: new_uid.to_string(),
+                        prefer: None,
                     },
                 )));
             }
