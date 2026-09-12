@@ -1556,7 +1556,7 @@ lp-emu-esp32c6 --elf <app.elf> [--rom <path>] [--time-grade t1|t2|t3]
     [--usb-sj-tried stderr|memory|file:<path>]
     [--control tcp:<host:port>] [--usb-script <file>]
     [--pin-script <file>]... [--wire <a>:<b>]...
-    [--tx-log stderr|file:<path>]
+    [--tx-log stderr|file:<path>] [--trap-log stdout|file:<path>]
     [--efuse-mac a0:f2:62:87:b4:8c] [--efuse-rev 0.2] [--seed <u64>]
     [--trace [BLOCK,BLOCK…]] [--trace-file <path>] [--strict-bus]
     [--strict-grade modeled|documented|measured]
@@ -1569,6 +1569,40 @@ lp-emu-esp32c6 --elf <app.elf> [--rom <path>] [--time-grade t1|t2|t3]
     [--jit-record <dir>] [--jit-record-after <cycles>]
     [--jit-record-entries <n>] [--jit-record-sizes <a,b,…>]
 ```
+
+### `--trap-log`: every trap the hart took
+
+```text
+cyc=1988770 cause=0x80000001 epc=0x42076a3a
+cyc=3096237 cause=0x80000001 epc=0x420a026a
+```
+
+One line per trap the hart **takes** — `mcause` with its interrupt bit, and
+the `mepc` the delivery wrote — written where the hart sets those two CSRs
+(`lp-riscv-emu`'s `mach::trap::TrapLog`) and nowhere else. `stdout` or
+`file:<path>`; off by default, and off costs one `Option` test at each of the
+eight delivery sites.
+
+**One hook covers both cores.** Translated code never delivers a trap: it
+compares each block's worst-case cost against the deadline and leaves, and any
+fault it meets goes out through the escape hatch into `MachineHart::step_one`,
+which is the interpreter's own path. Nothing in `lp-emu-jit` writes `mcause`,
+`mepc` or `mtvec`.
+
+**What it is for.** `--trace` is the only other reading that says *when* an
+interrupt was delivered, and every fast path in the translated core refuses
+under `--trace` (M7 P3) — so the trace proves the slow path and the untraced
+runs proved the fast path only through what the guest went on to do. The trap
+log refuses nothing, is independent of peripheral emission order, and costs
+one line per trap: 2,757 of them on `render-basic` t2 at 500 ms against
+127,249 pin-log edges and 252,171 trace lines. It is the ninth column of
+`scripts/emu/p6-oracle.sh` and a sha on the browser rig's row.
+
+The lines are accumulated on the hart and written once, at the end of the run
+(`Esp32C6Machine::flush_trap_log`) — the hart is `no_std` and holds no sink,
+and the browser rig needs the same bytes as an in-memory buffer to sha256
+rather than as a stream. A snapshot does not carry them and a restore does not
+rewind them, so a `--reboot-on-reset` reboot goes on writing the same file.
 
 ### The translated core (M7)
 

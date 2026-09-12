@@ -21,8 +21,8 @@ use lp_emu_esp32c6::flash::FlashBacking;
 use lp_emu_esp32c6::loader::EfuseIdentity;
 use lp_emu_esp32c6::machine::{
     AppSource, BootMode, Esp32C6Builder, Esp32C6Machine, FrameSink, Outcome, PinLogSink, RomSource,
-    SeedScope, StopCondition, StripConfig, TimeGrade, TxLogSink, Uart0Sink, UsbHost, UsbSjDrain,
-    UsbSjSink,
+    SeedScope, StopCondition, StripConfig, TimeGrade, TrapLogSink, TxLogSink, Uart0Sink, UsbHost,
+    UsbSjDrain, UsbSjSink,
 };
 use lp_emu_esp32c6::memmap;
 use lp_emu_esp32c6::periph::rmt::RefillStats;
@@ -162,6 +162,17 @@ OPTIONS:
     --pin-log file:<path>   every edge on every routed pad: `<us> gpio18 0|1`.
                             12,288 lines per 256-LED frame — never a default,
                             capped at 2,000,000 lines
+    --trap-log stdout|file:<path>
+                            every trap the hart TAKES, one line each:
+                            `cyc=<n> cause=0x<8 hex> epc=0x<8 hex>`. Written
+                            by the hart wherever it sets mepc/mcause, so it
+                            covers both cores — translated code never
+                            delivers a trap itself, it leaves and the hart
+                            takes it. Independent of peripheral emission
+                            order, and thousands of lines rather than
+                            millions: an identity surface for interrupt
+                            CYCLES that, unlike --trace, does not turn the
+                            translated core's fast paths off
     --pin-script <file>     scripted host input on the PADS, deterministic:
                             `<us> pin <n> <0|1>` at absolute guest time, plus
                             --usb-script's walk forms `after \"<line>\" pin …`
@@ -408,6 +419,7 @@ struct Args {
     map: bool,
     dump_frames: FrameSink,
     pin_log: PinLogSink,
+    trap_log: TrapLogSink,
     tx_log: TxLogSink,
     strip: StripConfig,
 }
@@ -443,6 +455,7 @@ fn run() -> Result<ExitCode, String> {
         .usb_sj_drain(args.usb_sj_drain)
         .dump_frames(args.dump_frames.clone())
         .pin_log(args.pin_log.clone())
+        .trap_log(args.trap_log.clone())
         .tx_log(args.tx_log.clone())
         .strip(args.strip.order, args.strip.timing);
 
@@ -645,6 +658,7 @@ fn run() -> Result<ExitCode, String> {
     // The run is over: a frame still open on a pad is reported as
     // incomplete rather than silently dropped.
     machine.flush_frames();
+    machine.flush_trap_log();
     report(&mut machine, &outcome);
     Ok(ExitCode::from(outcome.exit_code() as u8))
 }
@@ -790,6 +804,7 @@ fn parse(argv: Vec<String>) -> Result<Args, String> {
             }
             "--dump-frames" => args.dump_frames = parse_dump_frames(&value("--dump-frames")?)?,
             "--pin-log" => args.pin_log = parse_pin_log(&value("--pin-log")?)?,
+            "--trap-log" => args.trap_log = parse_trap_log(&value("--trap-log")?)?,
             "--tx-log" => args.tx_log = parse_tx_log(&value("--tx-log")?)?,
             "--strip-order" => {
                 let text = value("--strip-order")?;
@@ -964,6 +979,18 @@ fn parse_pin_log(text: &str) -> Result<PinLogSink, String> {
             "`{text}` is not a pin-log destination (file:<path>); the log is an edge per line \
              and never goes to a console"
         )),
+    }
+}
+
+fn parse_trap_log(text: &str) -> Result<TrapLogSink, String> {
+    match text {
+        "stdout" => Ok(TrapLogSink::Stdout),
+        other => match other.split_once(':') {
+            Some(("file", path)) => Ok(TrapLogSink::File(path.into())),
+            _ => Err(format!(
+                "`{other}` is not a trap-log destination (stdout, file:<path>)"
+            )),
+        },
     }
 }
 

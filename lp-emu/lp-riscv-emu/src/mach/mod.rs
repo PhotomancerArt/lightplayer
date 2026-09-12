@@ -257,6 +257,10 @@ pub struct MachineHart<B: Bus> {
     /// — is one `Option` test per block on the interpreted path and nothing
     /// at all on the translated one. See [`BlockProfile`].
     blockprof: Option<Box<BlockProfile>>,
+    /// The trap log, when a run asked for one. `None` — the default — is one
+    /// `Option` test at each of the eight places a trap is delivered, and
+    /// those are thousands of times a run, not millions. See [`trap::TrapLog`].
+    trap_log: Option<Box<trap::TrapLog>>,
     _bus: PhantomData<fn(&mut B)>,
 }
 
@@ -464,6 +468,14 @@ impl<B: Bus> Clone for MachineHart<B> {
             // A diagnostic, not architectural state: a clone starts with a
             // fresh census exactly as it starts with an empty block cache.
             blockprof: self.blockprof.as_ref().map(|_| Box::default()),
+            // A transcript, not architectural state: a snapshot does not
+            // carry the lines already written, and a *restore* does not
+            // rewind them either — the machine lifts the live log out around
+            // `clone_from` and hands it straight back
+            // ([`Self::take_trap_log`]), so a restored run goes on writing
+            // the same file. Cloning the text into every snapshot would be a
+            // second copy of a transcript that only ever grows.
+            trap_log: self.trap_log.as_ref().map(|_| Box::default()),
             _bus: PhantomData,
         }
     }
@@ -512,6 +524,7 @@ impl<B: Bus> MachineHart<B> {
             core_entries: translated::EntryIndex::default(),
             core_flush_pending: PendingInvalidate::None,
             blockprof: None,
+            trap_log: None,
             _bus: PhantomData,
         }
     }
@@ -703,6 +716,67 @@ impl<B: Bus> MachineHart<B> {
     #[inline]
     pub fn blockprof_mut(&mut self) -> Option<&mut BlockProfile> {
         self.blockprof.as_deref_mut()
+    }
+
+    // --- the trap log ------------------------------------------------------
+
+    /// Start (or stop, and discard) the trap log — [`trap::TrapLog`].
+    ///
+    /// Off by default. Turning it on when it is already on keeps what it has,
+    /// so a machine that sets it up at build and a caller that asks again do
+    /// not fight; turning it off discards the lines.
+    pub fn set_trap_log(&mut self, on: bool) {
+        match (on, self.trap_log.is_some()) {
+            (true, false) => self.trap_log = Some(Box::default()),
+            (false, true) => self.trap_log = None,
+            _ => {}
+        }
+    }
+
+    /// The trap log, or `None` when the run did not ask for one.
+    #[inline]
+    #[must_use]
+    pub fn trap_log(&self) -> Option<&trap::TrapLog> {
+        self.trap_log.as_deref()
+    }
+
+    /// Lift the trap log out of the hart, leaving it off.
+    ///
+    /// The machine's snapshot restore uses this: the hart is overwritten
+    /// wholesale by a clone of the snapshot's hart, and a transcript that
+    /// rewound with it would say the run took traps it did not. Lift, restore,
+    /// put back — the same shape the block cache's deferred flush uses, for
+    /// the same reason.
+    pub fn take_trap_log(&mut self) -> Option<Box<trap::TrapLog>> {
+        self.trap_log.take()
+    }
+
+    /// Put a lifted log back. Whatever the hart is holding is dropped.
+    pub fn restore_trap_log(&mut self, log: Option<Box<trap::TrapLog>>) {
+        self.trap_log = log;
+    }
+
+    /// One line for the trap the hart has just delivered, read back off the
+    /// CSRs the delivery wrote so there is one description of a trap and not
+    /// two that can drift.
+    ///
+    /// Called immediately after every `trap::deliver_*` on this hart. When no
+    /// log was asked for this is one `Option` test.
+    #[inline]
+    fn note_trap(&mut self) {
+        if self.trap_log.is_none() {
+            return;
+        }
+        self.note_trap_cold();
+    }
+
+    #[cold]
+    #[inline(never)]
+    fn note_trap_cold(&mut self) {
+        let (cycle, cause, epc) = (self.cycle_count, self.csr.mcause, self.csr.mepc);
+        if let Some(log) = self.trap_log.as_mut() {
+            log.push(cycle, cause, epc);
+        }
     }
 
     /// The trap vector the hart would jump to, base only.
@@ -955,6 +1029,7 @@ impl<B: Bus> MachineHart<B> {
             return false;
         }
         self.pc = trap::deliver_interrupt(&mut self.csr, n, self.pc);
+        self.note_trap();
         true
     }
 
@@ -964,6 +1039,7 @@ impl<B: Bus> MachineHart<B> {
     /// the exception, and `ebreak` does not advance past itself).
     pub fn deliver_breakpoint(&mut self, pc: u32) {
         self.pc = trap::deliver_exception(&mut self.csr, Exception::Breakpoint, 0, pc);
+        self.note_trap();
     }
 
     // --- the slice loop ----------------------------------------------------
@@ -1497,6 +1573,7 @@ impl<B: Bus> MachineHart<B> {
                     // `mtval` is 0 for an environment call (spec §3.1.16).
                     self.pc =
                         trap::deliver_exception(&mut self.csr, Exception::MachineEnvCall, 0, pc);
+                    self.note_trap();
                     StepOutcome::Continue
                 }
                 // Deliberately *not* charged and `pc` deliberately not
@@ -1720,6 +1797,7 @@ impl<B: Bus> MachineHart<B> {
         // `mtval` carries the faulting instruction word (spec §3.1.16).
         self.pc =
             trap::deliver_exception(&mut self.csr, Exception::IllegalInstruction, inst_word, pc);
+        self.note_trap();
     }
 
     /// Turn a failed instruction fetch into a trap, or into a
@@ -1749,6 +1827,7 @@ impl<B: Bus> MachineHart<B> {
         }
 
         self.pc = trap::deliver_exception(&mut self.csr, exception, tval, pc);
+        self.note_trap();
         Ok(())
     }
 
@@ -1770,6 +1849,7 @@ impl<B: Bus> MachineHart<B> {
                     MemoryAccessKind::InstructionFetch => Exception::InstructionAccessFault,
                 };
                 self.pc = trap::deliver_exception(&mut self.csr, exception, address, pc);
+                self.note_trap();
             }
             EmulatorError::UnalignedAccess { address, .. } => {
                 if self.allow_unaligned {
@@ -1786,6 +1866,7 @@ impl<B: Bus> MachineHart<B> {
                     Exception::LoadAddressMisaligned
                 };
                 self.pc = trap::deliver_exception(&mut self.csr, exception, address, pc);
+                self.note_trap();
             }
             EmulatorError::Watchpoint { address, slot, .. } => {
                 // The bus reports the watchpoint *instead of* performing the
@@ -1794,6 +1875,7 @@ impl<B: Bus> MachineHart<B> {
                 self.triggers.set_hit(usize::from(slot));
                 self.pc =
                     trap::deliver_exception(&mut self.csr, Exception::Breakpoint, address, pc);
+                self.note_trap();
             }
             other => {
                 log::error!("mach: no architectural mapping for executor error: {other}");

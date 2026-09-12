@@ -809,6 +809,37 @@ with `--trace`, so in those four cells the path never arms and what they prove
 is the *refusal*. The path itself is proved by four more cells at a 500 ms
 window without a trace, and by the 5,500 ms browser identity rows.
 
+#### The trap log, and the hole it closes (emu-loop-redesign P1, D5)
+
+Those four untraced cells prove the armed path only through what the guest
+went on to *do* — the UART bytes, the frames, the pin log. None of them says
+at which cycle an interrupt was delivered, and the one reading that does
+(`--trace`) is exactly the reading that disarms every fast path. A milestone
+that moves *where* the boundary work runs has to prove interrupt cycles with
+the fast paths on.
+
+`--trap-log stdout|file:<path>` is that reading. One line per trap the hart
+**takes**, written where the hart sets `mepc` and `mcause`:
+
+```text
+cyc=1988770 cause=0x80000001 epc=0x42076a3a
+```
+
+One hook covers both cores, because translated code never delivers a trap:
+nothing in `translate.rs` or `jit.rs` writes `mcause`, `mepc` or `mtvec`, an
+interrupt is only ever delivered at one of the hart's four polling points, and
+a fault inside a stay leaves through the escape hatch into
+`MachineHart::step_one`, which is the interpreter's own delivery path. Off by
+default it is one `Option` test at each of the eight delivery sites, and on it
+costs one line per trap — 2,757 on `render-basic` t2 at 500 ms, against 127,249
+pin-log edges and 252,171 trace lines.
+
+It is the ninth column of `scripts/emu/p6-oracle.sh` (all eight cells `same`),
+an opt-in column of `oracle-sweep.sh` behind `LP_EMU_ORACLE_TRAP_LOG=1`, a
+reading in `scripts/emu/loop-identity.sh`'s pair protocol, and `trapSha256` on
+every browser-rig row — `51ddaf56c96b77d3` on `render-basic` t2 at 5,500 ms in
+**both** node/V8 and bun/JSC, beside UART0's `2407828f80684331`.
+
 #### What it was worth
 
 `render-basic` t2, `LP_EMU_JIT_MMIO_CENSUS=1`, 16 blocks a function:
@@ -1465,6 +1496,84 @@ names itself.
 | entry path (`JitCore::run`) | 644.6 | **460.7** |
 | hart slice loop (`run_until`) | 611.5 | 585.0 |
 | the run, attributed | 6,406.1 | 5,899.5 |
+
+### What a slice boundary costs, item by item (emu-loop-redesign P1)
+
+P4 said a boundary costs 373 ns of `run_until` self time and that its callees
+already early-out. It did not say what the 373 ns *is*. This does, on a **live**
+run of `render-basic` t2 at 5,500 ms — never a replay, which since P3 covers
+boot-phase code only (DD59) — with one item timed per sampled slice, cycling,
+so a sampled slice pays two extra `Instant::now()` calls and not thirty. Slot 0
+and slot 3 are the clock pair around nothing: their mean is the pair's own cost
+and every other item is corrected by it. Stride 8, 9,575 samples an item,
+1,531,924 slices. **The probes are not committed.**
+
+The instrument's own accuracy: the *whole boundary* is also bracketed as two
+contiguous items (the head, and everything after `run_slice` returns), so the
+sum of the parts and the whole are measured the same way. They agree to 1 % in
+V8 and to 3 % in JSC.
+
+**node/V8, 16 blocks a function** — `run_until` wall 4,509 ms, `loadavg 3.1`:
+
+| item | ns/slice | ms/run | % of the `run_until` wall |
+|---|---:|---:|---:|
+| `run_due_events` | 192.9 | 295.5 | 6.55 |
+| **`wall_timeout` → `started.elapsed()`** | **148.3** | **227.2** | **5.04** |
+| `drain_pins` | 117.3 | 179.7 | 3.99 |
+| `pending_cpu_interrupt` + `set_external` + `poll_interrupts` | 32.5 | 49.8 | 1.10 |
+| the six-term deadline + `next_deadline` + the census gates | 26.6 | 40.8 | 0.90 |
+| the other eleven items, together | ≈ 13.7 | ≈ 21 | ≈ 0.5 |
+| **the boundary, bracketed** | **531.3** | **814.0** | **18.05** |
+| `hart.run_slice` (the hart, the core and the module) | 1,955.6 | 2,995.8 | 66.44 |
+
+**bun/JSC, 8 blocks a function** — `run_until` wall 5,734 ms, `loadavg 0.0`:
+
+| item | ns/slice | ms/run | % of the `run_until` wall |
+|---|---:|---:|---:|
+| `run_due_events` | 234.9 | 359.8 | 6.28 |
+| **`wall_timeout` → `started.elapsed()`** | **139.5** | **213.7** | **3.73** |
+| `drain_pins` | 117.4 | 179.9 | 3.14 |
+| the six-term deadline + `next_deadline` + the census gates | 29.0 | 44.4 | 0.77 |
+| `pending_cpu_interrupt` + `set_external` + `poll_interrupts` | 27.4 | 42.0 | 0.73 |
+| the other eleven items, together | ≤ ~16 (over-attributed by 178 ns; see below) | | |
+| **the boundary, bracketed** | **531.9** | **814.8** | **14.21** |
+| `hart.run_slice` (the hart, the core and the module) | 2,761.0 | 4,229.6 | 73.77 |
+
+The eleven small items — `bus.set_time`, `translate_if_code_was_published`,
+`drain_tx_log`, `service_host`, `take_sideband`, `refill_cache`,
+`code_writes_pending`, the census `note`, `first_strict_violation` +
+`stop_at.take` + `take_request` + `exit_on_match`, the loop head, and the
+`SliceEnd` match — are **all together** worth about 14 ns a slice in V8. They
+are below the instrument's floor individually: the clock pair costs 128 ns in
+V8 and 106 ns in JSC and its own estimate moves ±15 ns between runs, which is
+±15 ns on every item and ±240 ns once sixteen of them are summed. In JSC that
+error runs the wrong way and the eleven sum to 178 ns more than the bracket
+allows. The five items above the floor are the ones that reproduce the bracket.
+
+**Three things this says.**
+
+1. **`started.elapsed()` is the second-largest item in the boundary, and it is
+   pure plumbing.** In wasm `Instant::now()` is `clock_time_get`, a host call
+   through the WASI shim — 128 ns in V8, 106 in JSC — and `run_until` makes one
+   **per slice** to ask whether `--wall-timeout` has expired. 227 ms of a 4.5 s
+   V8 run; 214 ms of a 5.7 s JSC run. Nothing about the guest depends on it.
+2. **The boundary is 531 ns a slice in both engines** — the same wasm doing the
+   same work — against P4's 373 ns of `run_until` *self*. The difference is the
+   two callees a profiler buckets elsewhere: `run_due_events` (the peripherals)
+   and `drain_pins` (the fabric).
+3. **`run_slice` is two thirds of the loop and the boundary is a sixth**, so
+   the whole of this milestone's lever is that sixth plus whatever the entry
+   path inside `run_slice` gives up.
+
+Inside `run_slice`, `LP_EMU_JIT_ENTRY_TIME=64` prices an entry (7,722,208 of
+them, **5.04 per slice**) at **522.8 ns in V8** and **684.7 ns in JSC**,
+unclocked-inside; the breakdown's shares are `enter` 28.4 % / `index` 10.5 % /
+`regs` 16.6 % in V8 and 32.9 / 10.2 / 14.8 in JSC, and its absolute figures are
+inflated ~3× by its own six clocks. The module side's *floor* —
+`scripts/emu/p6c-jsc-entry.mjs`, five rungs, best-of-5 of 1 s each — is
+**24.10 ns a call in V8 and 10.79 ns in JSC** for the whole round trip
+including the 31-register reload and write-back, so at 5.04 entries a slice the
+module's own entry and exit are **121 ns a slice in V8 and 54 ns in JSC**.
 
 ### The two things that are NOT there, with the measurement that says so
 

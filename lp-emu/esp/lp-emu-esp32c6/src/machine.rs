@@ -581,6 +581,23 @@ pub enum PinLogSink {
 /// Lines the pin log writes before it stops, with a closing note.
 pub const PIN_LOG_LINE_CAP: u64 = 2_000_000;
 
+/// Where the hart's trap log goes (`--trap-log`): one line per trap the hart
+/// **took**, `cyc=<u64> cause=0x<8 hex> epc=0x<8 hex>`.
+///
+/// Off by default, like every transcript that is not the UART. See
+/// [`lp_riscv_emu::mach::trap::TrapLog`] for what the surface is for; this is
+/// only where the bytes end up. The log is accumulated by the hart and written
+/// out once, at [`Esp32C6Machine::flush_trap_log`] — a run that is killed
+/// leaves no trap log, which is the one way it differs from the pin log's
+/// stream.
+#[derive(Clone, Debug, Default)]
+pub enum TrapLogSink {
+    #[default]
+    Off,
+    Stdout,
+    File(PathBuf),
+}
+
 /// Where the radio TX log goes (`--tx-log`): one line per frame the WiFi
 /// blob handed the MAC.
 ///
@@ -1069,6 +1086,7 @@ pub struct Esp32C6Builder {
     peripherals: Vec<(u32, u32, BoxedPeripheral)>,
     dump_frames: FrameSink,
     pin_log: PinLogSink,
+    trap_log: TrapLogSink,
     tx_log: TxLogSink,
     strip: StripConfig,
     /// Keep the RMT's pulse and word logs (`Rmt::keep_logs`).
@@ -1132,6 +1150,7 @@ impl Esp32C6Builder {
             peripherals: Vec::new(),
             dump_frames: FrameSink::default(),
             pin_log: PinLogSink::default(),
+            trap_log: TrapLogSink::default(),
             tx_log: TxLogSink::default(),
             strip: StripConfig::default(),
             rmt_logs: false,
@@ -1522,6 +1541,12 @@ impl Esp32C6Builder {
         self
     }
 
+    /// Where the hart's trap log goes. Off by default.
+    pub fn trap_log(mut self, sink: TrapLogSink) -> Self {
+        self.trap_log = sink;
+        self
+    }
+
     /// How a routed pad is decoded: the wire timing and the byte order.
     pub fn strip(mut self, order: ColorOrder, timing: ChannelTiming) -> Self {
         self.strip = StripConfig { timing, order };
@@ -1648,6 +1673,7 @@ impl Esp32C6Builder {
             peripherals,
             dump_frames,
             pin_log,
+            trap_log,
             tx_log,
             strip,
             rmt_logs,
@@ -1915,6 +1941,11 @@ impl Esp32C6Builder {
             PinLogSink::Off => None,
             PinLogSink::File(path) => Some(open_write(path)?),
         };
+        let trap_log_sink: Option<Box<dyn std::io::Write + Send>> = match &trap_log {
+            TrapLogSink::Off => None,
+            TrapLogSink::Stdout => Some(Box::new(std::io::stdout())),
+            TrapLogSink::File(path) => Some(open_write(path)?),
+        };
         let tx_log_sink: Option<Box<dyn std::io::Write + Send>> = match &tx_log {
             TxLogSink::Off => None,
             TxLogSink::Stderr => Some(Box::new(std::io::stderr())),
@@ -1947,6 +1978,9 @@ impl Esp32C6Builder {
         // emit the `fence.i` the cache's invalidation rests on, and we own
         // neither, so the cache is off there.
         hart.set_block_cache(block_cache && boot_mode != BootMode::RomUp);
+        // The transcript surface, when a run asked for it: the hart writes
+        // one line per trap it takes, whichever core is running (D5/PD1).
+        hart.set_trap_log(!matches!(trap_log, TrapLogSink::Off));
         // The address's cost, if this grade charges one. Installed after the
         // loader has placed the app and filled the window: the cache starts
         // cold, as it is at reset, and the host's placement of segments
@@ -2094,6 +2128,7 @@ impl Esp32C6Builder {
                 pin_log_lines: 0,
                 pin_log_capped: false,
             },
+            trap_log: trap_log_sink,
         };
         // The state a reboot goes back to, taken before a single
         // instruction runs. Only when a run asked to perform resets: it is
@@ -2490,6 +2525,10 @@ pub struct Esp32C6Machine {
     cache_fills: u64,
     /// The pads: a decoder per routed pad, the frames, and the two sinks.
     pins: PinObserver,
+    /// Where the hart's trap log goes, when `--trap-log` asked for one. The
+    /// lines themselves live on the hart; this is only the sink, written once
+    /// by [`Esp32C6Machine::flush_trap_log`].
+    trap_log: Option<Box<dyn std::io::Write + Send>>,
 }
 
 impl Esp32C6Machine {
@@ -3757,6 +3796,32 @@ impl Esp32C6Machine {
         if let Some(w) = self.pins.pin_log.as_mut() {
             let _ = w.flush();
         }
+    }
+
+    /// Write the hart's trap log to wherever `--trap-log` pointed, once, at
+    /// the end of the run.
+    ///
+    /// The lines are accumulated on the hart (one per trap taken, whichever
+    /// core was running) and go out here rather than as they happen, for two
+    /// reasons: the hart is `no_std` and holds no sink, and the browser rig
+    /// needs the same bytes as an in-memory buffer to sha256 rather than as a
+    /// stream. A run with no `--trap-log` does nothing here.
+    ///
+    /// Returns how many lines were written, or `None` when no log was asked
+    /// for.
+    pub fn flush_trap_log(&mut self) -> Option<u64> {
+        let sink = self.trap_log.as_mut()?;
+        let log = self.harts[0].trap_log()?;
+        let lines = log.lines();
+        let _ = sink.write_all(log.text().as_bytes());
+        let _ = sink.flush();
+        Some(lines)
+    }
+
+    /// How many traps the hart has taken, when a run asked for the log.
+    #[must_use]
+    pub fn trap_log_lines(&self) -> Option<u64> {
+        self.harts[0].trap_log().map(|l| l.lines())
     }
 
     /// Take the slice's edges off the fabric and feed them to the pads'
@@ -5222,7 +5287,13 @@ impl Esp32C6Machine {
         // code compiled from guest bytes the restored regions are about to
         // replace. The bus's pending code writes go with it: they described
         // the machine that was.
+        // The trap log is a transcript, not state: it does not rewind with
+        // the machine. Lifted out before the harts are overwritten and handed
+        // straight back, so a restored run — a `--reboot-on-reset` reboot —
+        // goes on writing the same lines after the ones it already wrote.
+        let trap_log = self.harts[0].take_trap_log();
         self.harts.clone_from(&s.harts);
+        self.harts[0].restore_trap_log(trap_log);
         self.bus.restore_regions(&s.regions);
         let _ = self.bus.take_code_writes();
         self.bus.restore_peripherals(&s.periph);
