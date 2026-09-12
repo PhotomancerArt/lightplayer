@@ -1,0 +1,94 @@
+diff --git a/lp-emu/esp/lp-emu-esp32c6/src/periph/rmt.rs b/lp-emu/esp/lp-emu-esp32c6/src/periph/rmt.rs
+index 4968ead73..2f9abccbe 100644
+--- a/lp-emu/esp/lp-emu-esp32c6/src/periph/rmt.rs
++++ b/lp-emu/esp/lp-emu-esp32c6/src/periph/rmt.rs
+@@ -1183,7 +1183,52 @@ impl Rmt {
+         }
+     }
+ 
++    /// R2 TIER PROBE (scripts/emu/tier-probes): the bulk driver.
++    ///
++    /// Today one `EV_WORD` is scheduled per word, and 96 % of the run's
++    /// 1.53 M slices are bounded by it. This consumes a **run** of words in
++    /// one go — each pulse still stamped with its own true cycle — and
++    /// schedules one `EV_WORD` at the run's end.
++    ///
++    /// The run stops **before** the word that raises the threshold, so that
++    /// word is fetched on its own, at its own cycle, and raises the interrupt
++    /// inline exactly as it does today. That is what makes the interrupt's
++    /// cycle provably unmoved (BD4) without a predicted-threshold event: the
++    /// guest sees the same interrupt at the same cycle, runs the same ISR and
++    /// retires the same instructions, and the only thing that vanishes is the
++    /// return to the machine between the words.
++    ///
++    /// It also means the bulk never reads a word the guest has not written
++    /// yet: everything in the run was already in the RAM when the run began,
++    /// because the refill that fills the next half is the one this run stops
++    /// in front of.
+     fn fetch(&mut self, ch: usize, now: Cycles, cx: &mut BusCx<'_>) {
++        let mut at = now;
++        loop {
++            let Some(word_end) = self.fetch_one(ch, at, cx) else {
++                // Stalled, or the frame ended: `fetch_one` scheduled or
++                // cancelled whatever it needed to.
++                return;
++            };
++            let window_start = BLOCK_WORDS * ch as u32;
++            let next_pos = self.ch[ch].raddr - window_start;
++            let next_raises_threshold = next_pos + 1 == self.tx_lim(ch);
++            let e = &self.ch[ch];
++            if !e.running || e.stalled || e.ending != Ending::No || next_raises_threshold {
++                self.ch[ch].word_due = word_end;
++                cx.sched
++                    .schedule_at(word_end, event_id(self.index, EV_WORD + ch as u16));
++                return;
++            }
++            at = word_end;
++        }
++    }
++
++    /// R2 TIER PROBE: one word — today's `fetch` body, with the per-word
++    /// `EV_WORD` schedule lifted out into [`Self::fetch`]. Returns the cycle
++    /// the word's pulses end, or `None` when the engine stalled or the frame
++    /// ended (in which case nothing more is to be fetched).
++    fn fetch_one(&mut self, ch: usize, now: Cycles, cx: &mut BusCx<'_>) -> Option<Cycles> {
+         let raddr = self.ch[ch].raddr as usize;
+         let word = self.ram[raddr.min(RAM_WORDS - 1)];
+         let dur1 = word & 0x7fff;
+@@ -1195,7 +1240,7 @@ impl Rmt {
+             // the transmission ends before it — no clock needed.
+             self.log_word(ch, now, word, cx);
+             self.end_frame(ch, now, cx);
+-            return;
++            return None;
+         }
+ 
+         let clock = match self.clock() {
+@@ -1204,7 +1249,7 @@ impl Rmt {
+                 // Not fetched yet: the word is logged when it actually goes
+                 // out, on the resume.
+                 self.stall(ch, now, reason, cx);
+-                return;
++                return None;
+             }
+         };
+         self.log_word(ch, now, word, cx);
+@@ -1261,8 +1306,8 @@ impl Rmt {
+             e.ticks_since_start = t0 + u64::from(dur1) + u64::from(dur2);
+             e.word_due = word_end;
+         }
+-        cx.sched
+-            .schedule_at(word_end, event_id(self.index, EV_WORD + ch as u16));
++        // R2 TIER PROBE: the per-word `EV_WORD` is scheduled by the bulk
++        // driver at the END of the run, not here.
+ 
+         // Advance: the pointer now names the next word to fetch (§10.2).
+         let window_start = BLOCK_WORDS * ch as u32;
+@@ -1291,6 +1336,7 @@ impl Rmt {
+             }
+         }
+         self.update_lines(cx);
++        Some(word_end)
+     }
+ 
+     /// The current word's pulses ended.

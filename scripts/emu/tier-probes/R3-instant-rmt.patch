@@ -1,0 +1,97 @@
+diff --git a/lp-emu/esp/lp-emu-esp32c6/src/periph/rmt.rs b/lp-emu/esp/lp-emu-esp32c6/src/periph/rmt.rs
+index 4968ead73..3dca10f67 100644
+--- a/lp-emu/esp/lp-emu-esp32c6/src/periph/rmt.rs
++++ b/lp-emu/esp/lp-emu-esp32c6/src/periph/rmt.rs
+@@ -1183,7 +1183,92 @@ impl Rmt {
+         }
+     }
+ 
++    /// R3 TIER PROBE (scripts/emu/tier-probes): the full DD26 tier for the
++    /// RMT.
++    ///
++    /// The transmitter swallows the whole RAM window at the first start: no
++    /// pulses, no pin edges, no threshold interrupt — so the guest's refill
++    /// ISR never runs — and one `EV_WORD` at the end of the swallow, which
++    /// ends the frame.
++    ///
++    /// **The guest is expected to misbehave.** It writes a 5,784-word frame
++    /// through a 48-word window by refilling it 241 times; a transmitter that
++    /// never asks for a refill sees one window's worth of whatever happens to
++    /// be in the RAM and calls that the frame. The frames this rung produces
++    /// are not the pattern. The rung's job is to bound what the per-word
++    /// world costs, not to be a design.
++    ///
++    /// The `window_words` cap is what stops a wrapping window with no STOP
++    /// word in it from looping forever.
+     fn fetch(&mut self, ch: usize, now: Cycles, cx: &mut BusCx<'_>) {
++        let window_start = BLOCK_WORDS * ch as u32;
++        let window_words = self.ch[ch].window_words().max(1);
++        let clock = match self.clock() {
++            Ok(c) => c,
++            Err(reason) => {
++                self.stall(ch, now, reason, cx);
++                return;
++            }
++        };
++        {
++            let e = &mut self.ch[ch];
++            let t0 = e.ticks_since_start;
++            if e.stalled {
++                e.stalled = false;
++                e.stall_noted = false;
++                e.anchor_cycle = now;
++                e.anchor_ticks = t0;
++                e.anchor_clock = Some(clock);
++            } else if e.anchor_clock != Some(clock) {
++                e.anchor_cycle = now;
++                e.anchor_ticks = t0;
++                e.anchor_clock = Some(clock);
++            }
++        }
++        let mut t = self.ch[ch].ticks_since_start;
++        let mut swallowed = 0u32;
++        loop {
++            let raddr = self.ch[ch].raddr as usize;
++            let word = self.ram[raddr.min(RAM_WORDS - 1)];
++            let dur1 = word & 0x7fff;
++            let dur2 = (word >> 16) & 0x7fff;
++            self.log_word(ch, now, word, cx);
++            if dur1 == 0 {
++                // The STOP word: the frame ends before it, at the cycle the
++                // words so far actually reach.
++                break;
++            }
++            t += u64::from(dur1) + u64::from(dur2);
++            self.ch[ch].raddr += 1;
++            swallowed += 1;
++            if dur2 == 0 {
++                break;
++            }
++            let pos = self.ch[ch].raddr - window_start;
++            if pos >= window_words {
++                if self.ch[ch].wrap() {
++                    self.ch[ch].raddr = window_start;
++                } else {
++                    break;
++                }
++            }
++            if swallowed >= window_words {
++                break;
++            }
++        }
++        self.ch[ch].ticks_since_start = t;
++        let end = self.ch[ch].cycle_at(&clock, t);
++        self.ch[ch].word_due = end;
++        self.ch[ch].ending = Ending::HalfTwoZero;
++        cx.sched
++            .schedule_at(end, event_id(self.index, EV_WORD + ch as u16));
++        self.update_lines(cx);
++    }
++
++    /// The product path's per-word fetch, kept so the rung is a diff of the
++    /// driver and not a deletion of the model. Never called under R3.
++    #[allow(dead_code)]
++    fn fetch_per_word(&mut self, ch: usize, now: Cycles, cx: &mut BusCx<'_>) {
+         let raddr = self.ch[ch].raddr as usize;
+         let word = self.ram[raddr.min(RAM_WORDS - 1)];
+         let dur1 = word & 0x7fff;
