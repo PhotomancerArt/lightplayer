@@ -1448,7 +1448,10 @@ fn a_trace_layout_retires_identically_to_address_order() {
             address.cycle, adjacency.cycle,
             "at {fn_blocks}: different cycles"
         );
-        assert_eq!(address.pc, adjacency.pc, "at {fn_blocks}: different exit pc");
+        assert_eq!(
+            address.pc, adjacency.pc,
+            "at {fn_blocks}: different exit pc"
+        );
         assert_eq!(
             address.flags, adjacency.flags,
             "at {fn_blocks}: different flags"

@@ -635,7 +635,9 @@ pub fn emit_only(
     let set = match block_order() {
         BlockOrder::Address => &found.set,
         BlockOrder::Adjacency => {
-            ordered = found.set.permuted(&lp_emu_jit::blocks::adjacency_order(&found.set));
+            ordered = found
+                .set
+                .permuted(&lp_emu_jit::blocks::adjacency_order(&found.set));
             &ordered
         }
     };
@@ -2677,9 +2679,9 @@ pub fn emission_diagnostics(mut policy: Emit) -> Emit {
         match name {
             "no-perm" => policy.perm_check = false,
             "no-budget" => policy.budget_check = false,
-            other => panic!(
-                "LP_EMU_JIT_EMIT_DIAG names `{other}`; it takes `no-perm` and `no-budget`"
-            ),
+            other => {
+                panic!("LP_EMU_JIT_EMIT_DIAG names `{other}`; it takes `no-perm` and `no-budget`")
+            }
         }
     }
     if !policy.perm_check || !policy.budget_check {

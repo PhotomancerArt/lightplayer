@@ -164,7 +164,10 @@ impl BlockSet {
                 "a layout order names block {from} twice"
             );
         }
-        let blocks: Vec<Block> = order.iter().map(|&from| self.blocks[from].clone()).collect();
+        let blocks: Vec<Block> = order
+            .iter()
+            .map(|&from| self.blocks[from].clone())
+            .collect();
         let index = blocks
             .iter()
             .enumerate()
@@ -277,8 +280,14 @@ pub fn adjacency_order(set: &BlockSet) -> Vec<usize> {
                 // Walked in reverse so that the *first* successor is the one
                 // the trace continues into and the rest are picked up in
                 // order after it.
-                for pc in successors(&set.blocks[at]).collect::<Vec<_>>().into_iter().rev() {
-                    let Some(&j) = set.index.get(&pc) else { continue };
+                for pc in successors(&set.blocks[at])
+                    .collect::<Vec<_>>()
+                    .into_iter()
+                    .rev()
+                {
+                    let Some(&j) = set.index.get(&pc) else {
+                        continue;
+                    };
                     if placed[j] {
                         continue;
                     }
@@ -293,6 +302,10 @@ pub fn adjacency_order(set: &BlockSet) -> Vec<usize> {
             }
         }
     }
-    debug_assert_eq!(out.len(), n, "a layout order names every block exactly once");
+    debug_assert_eq!(
+        out.len(),
+        n,
+        "a layout order names every block exactly once"
+    );
     out
 }
