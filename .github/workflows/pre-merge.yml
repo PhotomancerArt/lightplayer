@@ -319,7 +319,9 @@ jobs:
               - 'lp-fw/fw-esp32c6/**'
               # The tab host's WASI shim, which `scripts/emu/tab-smoke.mjs`
               # IMPORTS rather than copies (C6-in-tab P2): a change to it
-              # changes what this job runs, so it must trigger this job.
+              # changes what this job runs, so it must trigger this job. Since
+              # P5b it is also where the JS host is attached, so the same
+              # applies twice over.
               - 'lp-app/lpa-studio-web/public/lpa-link/emulator_wasi.js'
               # The recipe that builds every image this job boots. It was
               # missing until L4, so a change to the reference build — the
@@ -1271,13 +1273,22 @@ jobs:
       # download` line, plus the flash word's blank → loaded → blank sequence
       # and a control reply carrying `cyc=`.
       #
+      # Since P5b it also proves the JIT SEAM, which is what makes it the gate
+      # that a module and its JS host have drifted apart: the module imports
+      # `emu_host` (the wasm build translates by default, M7 P7) and does not
+      # instantiate without a host, `attach`'s table round trip is checked in
+      # node's own engine, and a `boot=direct` board — the mask ROM's committed
+      # ELF, because `boot=rom-up` installs no translated core — hands the host
+      # real modules and produces the interpreter's transcript at the
+      # interpreter's cycle.
+      #
       # No browser, no firmware build, no network — which is the whole reason
       # it can be a CI step at all. The tab-backed conformance suite and
       # `just walk-no-board --tab` want Chrome and stay local recipes (PD9).
       #
-      # Cost, MEASURED (same run): **0.5 s** for all twenty-one claims, on a
-      # module the step above already built. The node setup beside it is the
-      # only part worth a second.
+      # Cost, MEASURED (desk, same module the step above built): **0.65 s** for
+      # all twenty-nine claims, of which the translated boot is ~0.2 s. The node
+      # setup beside it is the only part worth a second.
       - name: Set up node (the tab smoke)
         uses: actions/setup-node@v4
         with:
