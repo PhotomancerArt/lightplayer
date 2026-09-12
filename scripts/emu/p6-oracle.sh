@@ -5,9 +5,17 @@
 #   scripts/emu/p6-oracle.sh <out-dir> <image-slug> <grade> <window> [jit-flags...]
 #
 # Runs the SAME binary twice — `--jit <flags>` against `--interpreter` — on one
-# image at one grade to one emulated bound, and diffs the four readings the
-# oracle compares: the UART0 capture, the `stopped after` line, the frame dump
-# (or the trace, at a 20 ms window), and stdout/stderr.
+# image at one grade to one emulated bound, and diffs the readings the oracle
+# compares: the UART0 capture, the `stopped after` line, the frame dump (or the
+# trace, at a 20 ms window), stdout/stderr, and the TRAP LOG.
+#
+# The trap column (emu-loop-redesign P1, D5) is the one reading that covers
+# *when* a trap was taken with the translated core's fast paths still ON. Every
+# fast path refuses under `--trace` (M7 P3), so the 20 ms trace cells prove the
+# slow path and the 500 ms cells proved the fast path only through what the
+# guest went on to do afterwards. `--trap-log` is written by the hart at the
+# eight places it sets `mepc`/`mcause`, costs one line per trap, and refuses
+# nothing.
 #
 # Branch-scratch, not a product script: `oracle-sweep.sh` takes two BINARIES and
 # this needs two FLAG SETS of one, which is the same deviation #678 declared.
@@ -36,6 +44,7 @@ leg() {
     fi
     "$bin" --elf "$elf" --time-grade "$grade" --wall-timeout 1800 --timeout "$window" \
         --uart0 "file:$stem.uart" --dump-frames "file:$stem.jsonl" \
+        --trap-log "file:$stem.trap" \
         ${extra[@]+"${extra[@]}"} "$@" >"$stem.out" 2>"$stem.err"
 }
 
@@ -57,14 +66,15 @@ mask() { grep -v -e '^blocks: ' -e '^jit: ' "$1"; }
 mask "$a.err" >"$a.err.masked"
 mask "$b.err" >"$b.err.masked"
 
-printf '%-16s %-4s %-7s %7s %8s %8s %8s %9s\n' image grade window uart stopped frames stdout "stderr*"
-printf '%-16s %-4s %-7s %7s %8s %8s %8s %9s\n' "$slug" "$grade" "$window" \
+printf '%-16s %-4s %-7s %7s %8s %8s %8s %9s %7s\n' image grade window uart stopped frames stdout "stderr*" trap
+printf '%-16s %-4s %-7s %7s %8s %8s %8s %9s %7s\n' "$slug" "$grade" "$window" \
     "$(same "$a.uart" "$b.uart")" \
     "$(if [[ "$(grep -h 'stopped after' "$a.out" "$a.err" | head -1)" == "$(grep -h 'stopped after' "$b.out" "$b.err" | head -1)" ]]; then echo same; else echo DIFFERENT; fi)" \
     "$(if [[ "$window" == "20ms" ]]; then same "$a.trace" "$b.trace"; else same "$a.jsonl" "$b.jsonl"; fi)" \
     "$(same "$a.out" "$b.out")" \
-    "$(same "$a.err.masked" "$b.err.masked")"
-echo "n: $(if [[ "$window" == "20ms" ]]; then wc -l <"$a.trace" | tr -d ' '; echo -n ' trace lines'; else wc -l <"$a.jsonl" | tr -d ' '; echo -n ' frames'; fi)"
+    "$(same "$a.err.masked" "$b.err.masked")" \
+    "$(same "$a.trap" "$b.trap")"
+echo "n: $(if [[ "$window" == "20ms" ]]; then wc -l <"$a.trace" | tr -d ' '; echo -n ' trace lines'; else wc -l <"$a.jsonl" | tr -d ' '; echo -n ' frames'; fi), $(wc -l <"$a.trap" | tr -d ' ') traps"
 echo "stopped: $(grep -h 'stopped after' "$a.out" "$a.err" | head -1)"
 echo "--- the masked stderr line, raw ---"
 diff <(grep '^blocks: ' "$a.err") <(grep '^blocks: ' "$b.err") || true
