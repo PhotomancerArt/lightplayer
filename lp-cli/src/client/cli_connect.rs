@@ -17,8 +17,8 @@ use lpa_link::providers::host_serial_esp32::{
     HostSerialEsp32Options, HostSerialEsp32Provider, label_for_port,
 };
 use lpa_link::{
-    DeviceEvent, DeviceEventSink, DeviceLineOrigin, DeviceSession, DeviceState, DeviceTimers,
-    LinkConnector,
+    DeviceDeadlines, DeviceEvent, DeviceEventSink, DeviceLineOrigin, DeviceSession, DeviceState,
+    DeviceTimers, LinkConnector,
 };
 
 use crate::client::HostSpecifier;
@@ -68,36 +68,15 @@ pub async fn cli_connect(
     on_event: impl Fn(DeviceEvent) + 'static,
 ) -> Result<CliConnection> {
     match spec {
-        HostSpecifier::Serial { port, baud_rate } => {
-            let config = detect_serial_port(port.as_deref(), baud_rate)
-                .context("Failed to detect serial port")?;
-            let provider = HostSerialEsp32Provider::with_options(HostSerialEsp32Options {
-                baud_rate: Some(config.baud_rate),
-                reset_after_open: true,
-                ..HostSerialEsp32Options::default()
-            });
-            let endpoint_id =
-                provider.create_endpoint_for_port(&config.port, label_for_port(&config.port));
-            let connector = Rc::new(LinkConnector::HostSerialEsp32(provider));
-            let timers = DeviceTimers::new(|duration| Box::pin(tokio::time::sleep(duration)));
-            let session = DeviceSession::connect(
-                connector,
-                &endpoint_id,
-                timers,
-                DeviceEventSink::new(on_event),
+        HostSpecifier::Serial { port, baud_rate } => Ok(CliConnection::Device(
+            connect_serial_device(
+                port.as_deref(),
+                baud_rate,
+                DeviceDeadlines::default(),
+                on_event,
             )
-            .await
-            .map_err(|error| anyhow::anyhow!("failed to open device session: {error}"))?;
-            let state = session.wait_ready().await;
-            if !state.is_ready() {
-                let message = state
-                    .unavailable_message()
-                    .unwrap_or_else(|| format!("{state:?}"));
-                let _ = session.close().await;
-                anyhow::bail!("device did not become ready: {message}");
-            }
-            Ok(CliConnection::Device(session))
-        }
+            .await?,
+        )),
         HostSpecifier::WebSocket { url } => {
             let transport = WebSocketClientTransport::new(&url)
                 .await
@@ -112,6 +91,49 @@ pub async fn cli_connect(
             Ok(CliConnection::Transport(TokioClientIo::new(transport)))
         }
     }
+}
+
+/// Open a hardware serial [`DeviceSession`] and wait for readiness.
+///
+/// The serial half of [`cli_connect`], exposed so callers that need their own
+/// [`DeviceDeadlines`] (the soft-limit bench gives boot a long budget: after
+/// an OOM the device may auto-load the killer project again and take several
+/// boots to reach safe mode) get the same connect path rather than a second
+/// copy of it.
+pub async fn connect_serial_device(
+    port: Option<&str>,
+    baud_rate: Option<u32>,
+    deadlines: DeviceDeadlines,
+    on_event: impl Fn(DeviceEvent) + 'static,
+) -> Result<DeviceSession> {
+    let config = detect_serial_port(port, baud_rate).context("Failed to detect serial port")?;
+    let provider = HostSerialEsp32Provider::with_options(HostSerialEsp32Options {
+        baud_rate: Some(config.baud_rate),
+        reset_after_open: true,
+        ..HostSerialEsp32Options::default()
+    });
+    let endpoint_id = provider.create_endpoint_for_port(&config.port, label_for_port(&config.port));
+    let connector = Rc::new(LinkConnector::HostSerialEsp32(provider));
+    let timers = DeviceTimers::new(|duration| Box::pin(tokio::time::sleep(duration)))
+        .with_deadlines(deadlines);
+    let session = DeviceSession::connect(
+        connector,
+        &endpoint_id,
+        timers,
+        DeviceEventSink::new(on_event),
+    )
+    .await
+    .map_err(|error| anyhow::anyhow!("failed to open device session: {error}"))?;
+
+    let state = session.wait_ready().await;
+    if !state.is_ready() {
+        let message = state
+            .unavailable_message()
+            .unwrap_or_else(|| format!("{state:?}"));
+        let _ = session.close().await;
+        anyhow::bail!("device did not become ready: {message}");
+    }
+    Ok(session)
 }
 
 /// Route a [`DeviceEvent`] feed to stderr: device console lines when
