@@ -1,0 +1,956 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Wire chips at dome scale — design spike</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  /* ---- studio palette, verbatim from lp-app/lpa-studio-web/src/style.css ---- */
+  :root {
+    color-scheme: dark;
+    --bg: #101317;            --bg-wash: rgba(255,255,255,.04);
+    --card: #171b20;          --card-subtle: #14181d;
+    --card-muted: #11161b;    --raised: #20272e;   --raised-strong: #26313a;
+    --terminal: #0c1114;      --track: #10151a;
+
+    --border: #2a3138;        --border-muted: #252d34;
+    --border-subtle: #293039; --border-strong: #3e4852;
+
+    --text: #f2f0e8;   --strong: #fffaf0;  --muted: #c7cbd0;
+    --subtle: #99a2ad; --dim: #9ba4ad;
+    --heading: #94b8aa; --accent: #7be0b2; --accent-border: #65bd96;
+    --sel-border: #d6dae0; --sel-bg: rgba(214,218,224,.12);
+
+    --good-bg: #13241d;  --good-border: #365545;  --good-text: #7be0b2;
+    --live-bg: #142330;  --live-border: #3c5c78;  --live-text: #9cc8ee;
+    --warn-bg: #292614;  --warn-border: #796c33;  --warn-text: #f0dc7a;
+    --attn-bg: #291f14;  --attn-border: #795833;  --attn-text: #f0b97a;
+    --err-bg: #301b1d;   --err-border: #874b4b;   --err-text: #ffc7c7;
+    --bound-bg: #241a33; --bound-border: #5f4a85; --bound-text: #c9b1f5;
+
+    --sans: Inter, -apple-system, "Segoe UI", ui-sans-serif, sans-serif;
+    --mono: "JetBrains Mono", "SF Mono", ui-monospace, Menlo, monospace;
+    --r-xs: 4px; --r-sm: 6px; --r-md: 8px;
+  }
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  body {
+    margin: 0; padding: 26px 30px 140px;
+    background: linear-gradient(180deg, var(--bg-wash), transparent 240px), var(--bg);
+    color: var(--text);
+    font: 13.5px/1.45 var(--sans);
+  }
+  h1 { font-size: 13px; letter-spacing: .12em; color: var(--heading);
+       text-transform: uppercase; margin: 0 0 6px; }
+  p.hint { color: var(--dim); font-size: 12px; margin: 0 0 20px; max-width: 880px; }
+  p.hint b { color: var(--muted); }
+  h2 { font-size: 12px; letter-spacing: .1em; color: var(--heading);
+       text-transform: uppercase; margin: 42px 0 4px; }
+  p.thesis { color: var(--dim); font-size: 12px; margin: 0 0 14px; max-width: 880px; }
+  p.thesis b { color: var(--muted); }
+  code { font-family: var(--mono); font-size: .92em; color: var(--muted); }
+  .leannote { max-width: 880px; border: 1px solid var(--border); background: var(--card-muted);
+              border-radius: var(--r-md); padding: 10px 14px; font-size: 11.5px; color: var(--subtle);
+              margin: 26px 0 0; line-height: 1.55; }
+  .leannote b { color: var(--muted); }
+
+  /* ---- exploration controls ---- */
+  .xcontrols {
+    display: flex; gap: 18px; flex-wrap: wrap; align-items: center;
+    padding: 10px 14px; border: 1px dashed var(--border-strong);
+    border-radius: var(--r-md); color: var(--subtle); font-size: 12px;
+    position: sticky; top: 8px; z-index: 40;
+    background: color-mix(in srgb, var(--bg) 90%, transparent);
+    backdrop-filter: blur(6px);
+  }
+  .xcontrols .grp { display: inline-flex; gap: 8px; align-items: center; }
+  .xcontrols .grp > b { color: var(--muted); font-weight: 600; font-size: 11px;
+                        text-transform: uppercase; letter-spacing: .07em; }
+  .xcontrols button {
+    background: var(--card-muted); color: var(--muted); font: inherit; font-size: 12px;
+    border: 1px solid var(--border-subtle); border-radius: var(--r-xs);
+    padding: 3px 10px; cursor: pointer;
+  }
+  .xcontrols button:hover { color: var(--text); border-color: var(--border-strong); }
+  .xcontrols button.on { background: var(--good-bg); border-color: var(--good-border); color: var(--good-text); }
+
+  .row { display: flex; gap: 18px; flex-wrap: wrap; align-items: flex-start; }
+  .ccol { max-width: 100%; }
+  .ccol h3 { font-size: 11px; letter-spacing: .08em; text-transform: uppercase;
+             color: var(--muted); margin: 0 0 8px; }
+  .ccol h3 .lean { color: var(--good-text); font-size: 9.5px; margin-left: 6px; }
+  .ccol p.why { font-size: 11.5px; color: var(--dim); margin: 8px 0 0; line-height: 1.45;
+                max-width: var(--cardw, 380px); }
+
+  /* ---- node card chrome (mimics the studio node card) ---- */
+  .card { width: var(--cardw, 380px); max-width: 100%; border: 1px solid var(--border);
+          border-radius: var(--r-md); background: var(--card); overflow: hidden; }
+  .card .chead { display: flex; align-items: center; gap: 8px; min-height: 34px;
+    padding: 0 12px; background: var(--card-subtle); border-bottom: 1px solid var(--border-muted); }
+  .card .chead b { font-size: 12px; color: var(--strong); font-weight: 700; }
+  .card .chead .kind { font-size: 10.5px; color: var(--dim); text-transform: lowercase; }
+  .card .chead .sp { flex: 1; }
+  .csec { padding: 10px 14px 12px; }
+  .csec + .csec { border-top: 1px solid var(--border-muted); }
+  .csec .slabel { font-size: 9.5px; letter-spacing: .09em; text-transform: uppercase;
+                  color: var(--dim); margin: 0 0 7px; }
+  .cap { font-family: var(--mono); font-size: 9.6px; color: var(--subtle);
+         margin: 0 0 3px; display: flex; gap: 8px; align-items: baseline; }
+  .cap .r { margin-left: auto; }
+  .cap .attn { color: var(--attn-text); }
+  .cap .err { color: var(--err-text); }
+  .hero { height: 86px; border-radius: var(--r-sm); border: 1px solid var(--border-muted);
+          background: radial-gradient(ellipse at 50% 45%, rgba(255,255,255,.03), transparent 70%), var(--terminal);
+          margin-bottom: 8px; position: relative; overflow: hidden; }
+  .hero canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
+  .hero .tag { position: absolute; left: 8px; top: 6px; font-family: var(--mono);
+               font-size: 9px; color: var(--dim); }
+
+  /* ---- the track + cells (today's primitive, reproduced) ---- */
+  .track { position: relative; height: 32px; width: 100%; overflow: hidden;
+           border-radius: var(--r-xs); background: var(--track); }
+  .cell { position: absolute; top: 2px; bottom: 2px; overflow: hidden;
+          border-radius: var(--r-xs); border: 1px solid var(--border-strong);
+          background: var(--card-muted); }
+  .cell.contested { border-color: var(--err-border); }
+  .cell.lit { border-color: var(--border-strong); box-shadow: 0 0 0 1px var(--border-strong); background: var(--raised); }
+  .cell.sel { border-color: var(--sel-border); box-shadow: 0 0 0 1px var(--sel-border); }
+  .cell .px { height: 14px; width: 100%; image-rendering: pixelated; }
+  .cell .lb { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+              padding: 0 4px; font-family: var(--mono); font-size: 9.6px; line-height: 1.3;
+              color: var(--dim); }
+  .cell.contested .lb { color: var(--err-text); }
+
+  /* ---- shared readout line under interactive rows ---- */
+  .readout { font-family: var(--mono); font-size: 9.6px; color: var(--subtle);
+             min-height: 15px; margin-top: 4px; display: flex; gap: 8px; }
+  .readout .sel-mark { color: var(--sel-border); }
+  .readout .quiet { color: var(--dim); }
+
+  /* ---- concept A: source ribbon ---- */
+  .ribbon { position: relative; height: 40px; width: 100%; overflow: hidden;
+            border-radius: var(--r-xs); background: var(--track); }
+  .ribbon .pxband { position: absolute; left: 0; right: 0; top: 2px; height: 22px;
+                    border-radius: 3px; overflow: hidden; }
+  .ribbon .pxband > div { position: absolute; top: 0; bottom: 0; }
+  .ribbon .cut { position: absolute; top: 2px; height: 22px; width: 1px;
+                 background: rgba(12,17,20,.85); }
+  .ribbon .cut.port { top: 0; height: 26px; width: 1px; background: rgba(12,17,20,1); }
+  .destband { position: absolute; left: 0; right: 0; bottom: 3px; height: 8px; }
+  .destband > div { position: absolute; top: 0; bottom: 0; border-radius: 2px; }
+  .hit { position: absolute; top: 0; bottom: 0; }
+  .hit.lit { background: rgba(255,255,255,.10); box-shadow: inset 0 0 0 1px var(--border-strong); border-radius: 2px; }
+  .hit.sel { box-shadow: inset 0 0 0 1px var(--sel-border); background: var(--sel-bg); border-radius: 2px; }
+  .hit.contested { box-shadow: inset 0 0 0 1px var(--err-border);
+                   background: rgba(135,75,75,.28); border-radius: 2px; }
+  .legend { display: flex; gap: 10px; margin-top: 5px; font-family: var(--mono);
+            font-size: 9px; color: var(--dim); flex-wrap: wrap; }
+  .legend .sw { display: inline-block; width: 8px; height: 8px; border-radius: 2px;
+                vertical-align: -1px; margin-right: 4px; }
+
+  /* ---- concept B: wire-grouped strip + dive ---- */
+  .wiregroups { display: grid; gap: 4px; }
+  .boxlane { display: grid; gap: 2px; }
+  .boxlane .bcap { font-family: var(--mono); font-size: 9.6px; color: var(--subtle);
+                   display: flex; gap: 8px; }
+  .boxlane .bcap .r { margin-left: auto; color: var(--dim); }
+  .segrow { position: relative; height: 26px; border-radius: var(--r-xs);
+            background: var(--track); overflow: hidden; }
+  .seg { position: absolute; top: 2px; bottom: 2px; overflow: hidden; cursor: pointer;
+         border-radius: 3px; border: 1px solid var(--border-strong); background: var(--card-muted); }
+  .seg .px { height: 10px; width: 100%; }
+  .seg .lb { display: block; text-align: center; overflow: hidden; white-space: nowrap;
+             font-family: var(--mono); font-size: 8.6px; line-height: 1.2; color: var(--dim); }
+  .seg:hover { border-color: var(--border-strong); background: var(--raised); }
+  .seg.lit { background: var(--raised); box-shadow: 0 0 0 1px var(--border-strong); }
+  .seg.sel { border-color: var(--sel-border); box-shadow: 0 0 0 1px var(--sel-border); }
+  .seg.contested { border-color: var(--err-border); }
+  .seg.unlabeled .lb { display: none; }
+  .dive { border: 1px solid var(--border-muted); border-radius: var(--r-sm);
+          background: var(--card-subtle); padding: 7px 9px 9px; margin-top: 6px; }
+  .dive .dcap { display: flex; align-items: center; gap: 8px; font-family: var(--mono);
+                font-size: 9.6px; color: var(--subtle); margin-bottom: 5px; }
+  .dive .dcap .crumb b { color: var(--muted); }
+  .dive .dcap button { margin-left: auto; background: none; border: 1px solid var(--border-subtle);
+                       color: var(--subtle); border-radius: var(--r-xs); font: inherit;
+                       font-size: 9.6px; padding: 1px 7px; cursor: pointer; }
+  .dive .dcap button:hover { color: var(--text); border-color: var(--border-strong); }
+
+  /* ---- concept C: elide + lanes ---- */
+  .elide-rest { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+  .elide-rest .chipbtn { display: inline-flex; align-items: center; gap: 5px;
+    font-family: var(--mono); font-size: 9.6px; color: var(--subtle);
+    border: 1px solid var(--border-strong); background: var(--card-muted);
+    border-radius: 3px; padding: 2px 7px; cursor: pointer; }
+  .elide-rest .chipbtn:hover { color: var(--text); border-color: var(--border-strong); background: var(--raised); }
+  .elide-rest .chipbtn .mini { width: 26px; height: 8px; border-radius: 2px; }
+  .lanes { display: grid; gap: 3px; margin-top: 7px; }
+  .lanes .lanecap { font-family: var(--mono); font-size: 9px; color: var(--dim); margin-top: 4px; }
+
+  /* ---- output card pieces ---- */
+  .portrow { display: grid; gap: 2px; border: 1px solid var(--border-muted);
+             border-radius: var(--r-xs); background: var(--card-subtle);
+             padding: 5px 8px 6px; }
+  .portrow + .portrow, .portrow + .patchgrp, .patchgrp + .patchgrp { margin-top: 5px; }
+  .portrow .l1 { display: flex; align-items: center; gap: 8px; }
+  .chip { display: inline-flex; align-items: center; font-family: var(--mono);
+          font-size: 9.6px; font-weight: 700; border: 1px solid var(--border-strong);
+          border-radius: 3px; padding: 1px 6px; color: var(--muted); }
+  .chip.bound { border-color: var(--bound-border); background: var(--bound-bg); color: var(--bound-text); }
+  .pin { font-family: var(--mono); font-size: 10.5px; color: var(--bound-text);
+         border: 1px solid var(--bound-border); border-radius: 3px; padding: 1px 6px; }
+  .cnt { margin-left: auto; font-family: var(--mono); font-size: 10.5px; color: var(--muted); }
+  .portrow .l2 { font-family: var(--mono); font-size: 9px; color: var(--dim); }
+  .patchgrp { display: grid; gap: 2px; }
+  .patchgrp .pcap { font-family: var(--mono); font-size: 9px; color: var(--subtle); }
+  .minitrack { position: relative; height: 20px; border-radius: 3px; background: var(--track); overflow: hidden; }
+  .minitrack .cell { top: 1px; bottom: 1px; }
+  .minitrack .cell .px { height: 100%; }
+  .minitrack .cell .lb { display: none; }
+  .fold { font-family: var(--mono); font-size: 9.6px; color: var(--dim); padding: 2px 0; }
+</style>
+</head>
+<body>
+
+<h1>Wire chips at dome scale</h1>
+<p class="hint">
+  The patch bay draws one bordered <b>cell per run</b>, positioned as a percentage of its track.
+  At peach scale (3 runs) that reads beautifully; on the small dome the fixture row is
+  <b>5950 lamps · 50 runs</b> — a 7px-per-cell smear — and the big dome quintuples it.
+  This playground explores how the strip should <b>degrade with density</b> while keeping the
+  things that make it good: the track-shows-through-gaps idiom, per-run hover with twin
+  lighting on the other face, selection, and the small cases utterly unchanged.
+  Hover any run anywhere — every concept lights the same run everywhere (the twin-hover
+  contract). Click selects.
+</p>
+
+<div class="xcontrols">
+  <span class="grp"><b>data</b>
+    <button data-ds="peach">peach · 3 runs</button>
+    <button data-ds="dome">small dome · 50 runs</button>
+    <button data-ds="big">big dome · 260 runs</button>
+  </span>
+  <span class="grp"><b>card</b>
+    <button data-w="320">narrow</button>
+    <button data-w="380">default</button>
+    <button data-w="560">wide</button>
+  </span>
+  <span class="grp"><b>faults</b>
+    <button id="t-contested">contested run</button>
+  </span>
+  <span class="grp"><b>frame</b>
+    <button id="t-anim">animate</button>
+  </span>
+</div>
+
+<h2>1 · Today, faithfully</h2>
+<p class="thesis">
+  The production rendering: fixture rows ordered by the fixture's <b>own channel space</b>,
+  the output card one row per port. Judge what actually breaks — and notice the output
+  card's height as much as the fixture card's smear.
+</p>
+<div class="row" id="s1"></div>
+
+<h2>2 · Concept A — source ribbon, adaptive detail</h2>
+<p class="thesis">
+  Same ordering as today (the fixture's own space), but the row is <b>one continuous
+  pixel ribbon</b> — which is the honest picture, since the runs tile it edge to edge.
+  Run cuts become hairline ticks; a thin <b>destination band</b> underneath colours each
+  span by the box (and alternates shade per port) so wire structure is visible with zero
+  labels. When a cell would be wide enough to label (peach), it renders exactly today's
+  boxed cells — <b>one primitive, density decides</b>. Hover resolves the run under the
+  cursor into the readout line.
+</p>
+<div class="row" id="s2"></div>
+
+<h2>3 · Concept B — wire-grouped strip, dive to port</h2>
+<p class="thesis">
+  Reorder the strip by <b>where the lamps landed</b>: one lane per box, port segments left
+  to right. This is the grain that actually aggregates (source order scatters across ports,
+  wire order nests cleanly: box → port → run). Segments label themselves when they fit and
+  go quiet when they don't; <b>click a port to dive</b> — the studio's existing single-click
+  dive gesture — and its runs open full-width below, legible at any scale.
+</p>
+<div class="row" id="s3"></div>
+
+<h2>4 · Concept C — elide at rest, lanes on demand</h2>
+<p class="thesis">
+  Keep today's chips but refuse to draw 50 of them at 7px: at rest the row is a
+  <b>structural summary</b> (counts + a per-box mini swatch), and expanding wraps the full
+  run list into <b>lanes</b> — every chip at a legible width, grouped by box, however tall
+  that gets. Peach never elides, so the small case is today's row untouched.
+</p>
+<div class="row" id="s4"></div>
+
+<h2>5 · The output card at 13 ports</h2>
+<p class="thesis">
+  The output face stacks a <b>ports</b> section and a <b>patch</b> section — 26 rows for one
+  small-dome box, ×10 cards at big-dome scale. Left: today. Middle: <b>fused rows</b> — the
+  patch strip rides inside each port row (the caption line it already has), halving the card.
+  Right: <b>box ribbon</b> — the patch section becomes one wire-ordered ribbon with port
+  ticks (concept A's primitive on the output side), constant height at any port count.
+</p>
+<div class="row" id="s5"></div>
+
+<div class="leannote" id="leannote">
+  <b>Lean.</b> A + B are one system, not rivals: keep the fixture row <b>source-ordered</b>
+  and density-adaptive (concept A — it is today's row at small scale, and its destination
+  band answers "which box/port" without labels), and give the <b>output card</b> the fused
+  port rows (5-middle) with the box ribbon reserved for the patch summary. Concept B's
+  dive gesture then hangs off either row as the detail path. Concept C's lanes feel like a
+  spreadsheet answer — honest but joyless, and 44 lanes at big-dome scale convinces nobody.
+</div>
+
+<script>
+/* =============================== data =================================== */
+
+/* The real small-dome patch entries, verbatim from
+   examples/small-dome/dome/dome.patch.json (PR #460): [path, box, wireStart, rev]. */
+const DOME_ENTRIES = [
+  ["/rim-a/0",0,0,0],["/band-a/0",0,119,0],["/cap-c/0",0,238,0],["/cap-a/4",0,357,0],
+  ["/band-b/0",0,476,0],["/band-d/4",0,595,0],["/zenith/0",0,714,0],["/cap-b/0",0,833,0],
+  ["/rim-b/0",0,952,0],["/band-c/0",0,1071,0],["/band-c/4",0,1190,0],["/rim-b/4",0,1309,0],
+  ["/cap-b/4",0,1428,0],["/zenith/4",0,1547,0],["/band-d/0",0,1666,0],["/band-b/4",0,1785,0],
+  ["/cap-a/0",0,1904,0],["/cap-c/4",0,2023,0],["/band-a/4",0,2142,0],["/rim-a/4",0,2261,0],
+  ["/rim-a/1",0,2380,0],["/band-a/1",0,2499,0],["/cap-c/1",0,2618,0],["/cap-a/3",0,2737,0],
+  ["/band-b/1",0,2856,0],
+  ["/band-c/2",1,0,0],["/rim-b/2",1,119,0],["/cap-b/2",1,238,0],["/zenith/2",1,357,0],
+  ["/band-d/2",1,476,0],["/band-b/2",1,595,1],["/cap-a/2",1,714,0],["/cap-c/2",1,833,0],
+  ["/band-a/2",1,952,0],["/rim-a/3",1,1071,0],["/rim-a/2",1,1190,0],["/band-a/3",1,1309,0],
+  ["/cap-c/3",1,1428,0],["/cap-a/1",1,1547,0],["/band-b/3",1,1666,0],["/band-d/1",1,1785,0],
+  ["/zenith/3",1,1904,0],["/cap-b/3",1,2023,0],["/rim-b/3",1,2142,0],["/band-c/3",1,2261,0],
+  ["/band-c/1",1,2380,0],["/rim-b/1",1,2499,0],["/cap-b/1",1,2618,0],["/zenith/1",1,2737,0],
+  ["/band-d/3",1,2856,0]
+];
+const GROUPS = ["band-a","band-b","band-c","band-d","cap-a","cap-b","cap-c","rim-a","rim-b","zenith"];
+const RUN = 119, PORTN = 238;
+
+function portOf(box, wire) {
+  // ports 0..11 hold 238 each; the last port takes the remainder (479 on the dome).
+  const p = Math.floor(wire / PORTN);
+  return Math.min(p, 12);
+}
+function mkRun(fix, name, src, n, box, wire, rev) {
+  return { id: fix + ":" + name + ":" + wire, fix, name, src, n, box, wire,
+           port: null, rev: !!rev, contested: false };
+}
+
+function domeData(scale) {
+  // scale 1 = small dome (2 boxes, real entries); 5 = big dome (10 boxes, synthesized).
+  const boxes = [];
+  const runs = [];
+  if (scale === 1) {
+    const boxNames = ["1", "Box 2"];               // the real, awkward names
+    for (const [path, b, wire, rev] of DOME_ENTRIES) {
+      const [, g, i] = path.match(/^\/(.+)\/(\d+)$/);
+      const src = (GROUPS.indexOf(g) * 5 + (+i)) * RUN;
+      const r = mkRun("dome", g + "/" + i, src, RUN, b, wire, rev);
+      runs.push(r);
+    }
+    const door = mkRun("doors", "door", 0, 180, 0, 2975, 0);
+    const mk = (bi) => ({
+      name: boxNames[bi], pins: "A B".split(" ")[bi],
+      ports: Array.from({length: 13}, (_, p) => ({
+        key: p, name: (bi ? "B" : "A") + String(p + 1).padStart(2, "0"),
+        start: p * PORTN, count: p === 12 ? 479 : PORTN, cells: []
+      })),
+      lamps: 3335, unclaimed: bi === 0 ? 180 : 479
+    });
+    boxes.push(mk(0), mk(1));
+    return { runs, doorRun: door, boxes,
+      fixtures: [
+        { name: "dome", lamps: 5950, runs },
+        { name: "doors", lamps: 180, runs: [door] }
+      ] };
+  }
+  // Big dome: 10 boxes × 26 runs of 119, panels scrambled inside each box.
+  for (let b = 0; b < 10; b++) {
+    for (let k = 0; k < 26; k++) {
+      const p = b * 26 + ((k * 7) % 26);
+      runs.push(mkRun("dome", "panel-" + String(p + 1).padStart(3, "0"),
+                      p * RUN, RUN, b, k * RUN, (k % 9) === 5));
+    }
+  }
+  runs.sort((a, z) => a.src - z.src);
+  const boxes2 = Array.from({length: 10}, (_, bi) => ({
+    name: "Box " + (bi + 1), ports: Array.from({length: 13}, (_, p) => ({
+      key: p, name: "P" + String(p + 1).padStart(2, "0"),
+      start: p * PORTN, count: PORTN, cells: []
+    })), lamps: 13 * PORTN, unclaimed: 0
+  }));
+  return { runs, doorRun: null, boxes: boxes2,
+           fixtures: [{ name: "dome", lamps: 260 * RUN, runs }] };
+}
+
+function peachData() {
+  const body0 = mkRun("peach_body", "body", 0, 22, 0, 0, 0);
+  const leaf  = mkRun("peach_leaf", "leaf", 0, 12, 0, 22, 0);
+  const body1 = mkRun("peach_body", "body", 22, 22, 0, 34, 1);
+  return {
+    runs: [body0, body1, leaf], doorRun: null,
+    boxes: [{ name: "peach out", ports: [
+      { key: 0, name: "D10", start: 0, count: 56, cells: [] }
+    ], lamps: 56, unclaimed: 0 }],
+    fixtures: [
+      { name: "peach_body", lamps: 44, runs: [body0, body1] },
+      { name: "peach_leaf", lamps: 12, runs: [leaf] }
+    ]
+  };
+}
+
+function buildDataset(kind) {
+  const d = kind === "peach" ? peachData() : domeData(kind === "big" ? 5 : 1);
+  const all = d.doorRun ? [...d.runs, d.doorRun] : [...d.runs];
+  for (const r of all) r.port = d.boxes[r.box].ports[portOf(r.box, r.wire)];
+  for (const r of all) r.port.cells.push(r);
+  // Fixture rows read the fixture's OWN channel space: canonical source order.
+  for (const f of d.fixtures) f.runs.sort((a, z) => a.src - z.src);
+  for (const b of d.boxes) for (const p of b.ports) p.cells.sort((a, z) => a.wire - z.wire);
+  d.all = all;
+  return d;
+}
+
+/* =============================== state ================================== */
+
+const state = { ds: "dome", w: 380, contested: false, anim: false,
+                hover: null, sel: null, dive: null, expanded: false, phase: 0 };
+// Screenshot-harness hooks: ?ds=peach&w=560&contested=1&expanded=1&dive=0:4
+{
+  const q = new URLSearchParams(location.search);
+  if (q.get("ds")) state.ds = q.get("ds");
+  if (q.get("w")) state.w = +q.get("w");
+  if (q.get("contested")) state.contested = true;
+  if (q.get("expanded")) state.expanded = true;
+  if (q.get("dive")) state.dive = q.get("dive");
+  // ?only=s2 isolates one section (screenshot crops for the visual gate).
+  const only = q.get("only");
+  if (only) {
+    addEventListener("DOMContentLoaded", () => {
+      const keep = document.getElementById(only);
+      for (const el of document.querySelectorAll("h2, p.thesis, .row, .leannote, h1, p.hint, .xcontrols")) {
+        if (el === keep) continue;
+        if (el.tagName === "H2" && el.nextElementSibling &&
+            (el.nextElementSibling.nextElementSibling === keep || el.nextElementSibling === keep)) continue;
+        if (el.classList.contains("thesis") && el.nextElementSibling === keep) continue;
+        el.hidden = true;
+      }
+      document.body.style.paddingBottom = "20px";
+    });
+  }
+}
+let data = buildDataset(state.ds);
+
+function applyContested() {
+  for (const r of data.all) r.contested = false;
+  if (!state.contested) return;
+  // The real overlap risk: a run whose count was overridden (band-c/0 carries
+  // a 40-lamp override in the shipped patch file).
+  const victim = data.all.find(r => r.name === "band-c/0") ||
+                 data.all.find(r => r.name === "panel-002") || data.all[0];
+  victim.contested = true;
+}
+
+/* =============================== frames ================================= */
+
+const PALETTES = {
+  dome: [[.0,"#0d2b45"],[.22,"#1b6f8a"],[.42,"#35d0a0"],[.58,"#7be0b2"],[.74,"#4a7bd0"],[.9,"#7a5bc0"],[1,"#0d2b45"]],
+  doors: [[0,"#ffb35c"],[.5,"#ff7b39"],[1,"#ffd9a0"]],
+  peach_body: [[0,"#ff9a6b"],[.45,"#ff5e62"],[1,"#ffc371"]],
+  peach_leaf: [[0,"#4be08a"],[1,"#a3f7bf"]]
+};
+function palFor(fix) { return PALETTES[fix] || PALETTES.dome; }
+function lerp(a, b, t) { return a + (b - a) * t; }
+function hex2rgb(h) { return [1,3,5].map(i => parseInt(h.slice(i, i + 2), 16)); }
+function sample(pal, t) {
+  t = ((t % 1) + 1) % 1;
+  for (let i = 1; i < pal.length; i++) {
+    if (t <= pal[i][0]) {
+      const [t0, c0] = pal[i - 1], [t1, c1] = pal[i];
+      const f = (t - t0) / (t1 - t0 || 1);
+      const a = hex2rgb(c0), b = hex2rgb(c1);
+      return `rgb(${a.map((v, j) => Math.round(lerp(v, b[j], f))).join(",")})`;
+    }
+  }
+  return pal[pal.length - 1][1];
+}
+/* Gradient across a run's SOURCE span (flip = shown in wire order, reversed). */
+function runGrad(r, fixLamps, flip) {
+  const pal = palFor(r.fix);
+  const stops = [];
+  for (let i = 0; i <= 4; i++) {
+    const t = (r.src + r.n * (i / 4)) / Math.max(fixLamps, 1) + state.phase;
+    stops.push(sample(pal, t) + " " + (i * 25) + "%");
+  }
+  if (flip && r.rev) stops.reverse().forEach((s, i) => stops[i] = s.replace(/ \d+%/, " " + (i * 25) + "%"));
+  const dir = (flip && r.rev) ? "270deg" : "90deg";
+  return `linear-gradient(${dir}, ${stops.join(",")})`;
+}
+function fixtureOf(r) { return data.fixtures.find(f => f.name === r.fix); }
+
+/* Box tones for the destination band — blues/greys, never violet (bound). */
+function boxTone(bi, portKey) {
+  const hue = 208 - bi * 16;
+  const l = 34 + (portKey % 2) * 9;
+  return `hsl(${hue} 26% ${l}%)`;
+}
+
+/* =============================== labels ================================= */
+
+function fixtureSideLabel(r) {
+  const arrow = r.rev ? " ◀" : " ▶";
+  return `→ ${r.port.name} ch${r.wire}${arrow}`;
+}
+function wireSideLabel(r) {
+  const arrow = r.rev ? " ◀" : " ▶";
+  const end = r.n > 1 ? `${r.src}–${r.src + r.n - 1}` : String(r.src);
+  // The dome's runs are authored sectors — name the sector, the way the
+  // patch document does; single-run fixtures read their fixture name.
+  const who = r.fix === "dome" ? r.name : r.fix;
+  return `${who} ${end}${arrow}`;
+}
+function runTitle(r) {
+  const who = r.fix === "dome" ? `dome ${r.name}` : r.fix;
+  return `${who} lamps ${r.src}–${r.src + r.n - 1} → ` +
+         `${data.boxes[r.box].name} ${r.port.name} ch${r.wire}` +
+         (r.rev ? " (end-first)" : "") + (r.contested ? " · CONTESTED" : "");
+}
+function fixtureCaption(f) {
+  if (f.runs.length === 1) return `${f.lamps} lamps · one run`;
+  return `${f.lamps} lamps · ${f.runs.length} runs`;
+}
+function structureCaption(f) {
+  const ports = new Set(f.runs.map(r => r.box + ":" + r.port.key));
+  const boxes = new Set(f.runs.map(r => r.box));
+  if (f.runs.length === 1) return `${f.lamps} lamps · one run`;
+  return `${f.lamps} lamps · ${f.runs.length} runs · ` +
+         `${ports.size} ports on ${boxes.size} ${boxes.size === 1 ? "box" : "boxes"}`;
+}
+
+/* =============================== rendering ============================== */
+
+const $ = (s, el) => (el || document).querySelector(s);
+const $$ = (s, el) => [...(el || document).querySelectorAll(s)];
+
+function runAttrs(r) {
+  return `data-run="${r.id}" title="${runTitle(r)}"`;
+}
+function runClasses(base, r) {
+  let c = base;
+  if (r.contested) c += " contested";
+  if (state.hover === r.id) c += " lit";
+  if (state.sel === r.id) c += " sel";
+  return c;
+}
+function pct(v, total) { return (v / Math.max(total, 1) * 100).toFixed(4) + "%"; }
+
+function cardShell(name, kind, inner) {
+  return `<div class="card" style="--cardw:${state.w}px">
+    <div class="chead"><b>${name}</b><span class="kind">${kind}</span><span class="sp"></span></div>
+    ${inner}</div>`;
+}
+function heroFor(f) {
+  return `<div class="hero"><canvas data-hero="${f.name}"></canvas>
+          <span class="tag">${f.name} · live</span></div>`;
+}
+
+/* ---- section 1: today ---- */
+
+function todayFixtureRow(f) {
+  const cells = f.runs.map(r => {
+    const left = pct(r.src, f.lamps), width = pct(r.n, f.lamps);
+    return `<div class="${runClasses("cell", r)}" ${runAttrs(r)}
+              style="left:${left};width:calc(${width} - 1px)">
+        <div class="px" data-grad="fs:${r.id}" style="background:${runGrad(r, f.lamps, false)}"></div>
+        <span class="lb">${fixtureSideLabel(r)}</span></div>`;
+  }).join("");
+  return `<p class="cap">${fixtureCaption(f)}</p><div class="track">${cells}</div>`;
+}
+
+function todayOutputCard(box, opts) {
+  const o = opts || {};
+  const rows = box.ports.map(p => `
+    <div class="portrow">
+      <div class="l1"><span class="chip bound">ch${p.key}</span>
+        <span class="pin">${p.name}</span><span class="cnt">${p.count}</span></div>
+      <div class="l2">lamps ${p.start}–${p.start + p.count - 1} · gpio ${10 + p.key}</div>
+    </div>`).join("");
+  const patch = box.ports.map(p => {
+    const cells = p.cells.map(r => {
+      const left = pct(r.wire - p.start, p.count), width = pct(r.n, p.count);
+      return `<div class="${runClasses("cell", r)}" ${runAttrs(r)}
+                style="left:${left};width:calc(${width} - 1px)">
+          <div class="px" data-grad="ws:${p.name}:${r.id}" style="background:${runGrad(r, fixtureOf(r).lamps, true)}"></div>
+          <span class="lb">${wireSideLabel(r)}</span></div>`;
+    }).join("");
+    return `<div class="patchgrp"><span class="pcap">ch${p.key} · ${p.name} · channels ${p.start}–${p.start + p.count - 1}</span>
+      <div class="track">${cells}</div></div>`;
+  }).join("");
+  const summary = box.unclaimed
+    ? `<span class="attn">${box.ports.reduce((n, p) => n + p.cells.length, 0)} cells · ${box.unclaimed} unclaimed</span>`
+    : `${box.ports.reduce((n, p) => n + p.cells.length, 0)} cells`;
+  return cardShell(box.name, "output", `
+    <div class="csec"><p class="slabel">ports</p>
+      <p class="cap">${box.ports.length} ${box.ports.length === 1 ? "wire" : "wires"} · ${box.lamps} lamps</p>${rows}</div>
+    ${o.noPatch ? "" : `<div class="csec"><p class="slabel">patch</p>
+      <p class="cap">${summary}</p>${patch}</div>`}`);
+}
+
+function renderS1() {
+  const fixCards = data.fixtures.map(f => `<div class="ccol">
+    ${cardShell(f.name, "fixture", `<div class="csec"><p class="slabel">output</p>
+      ${heroFor(f)}${todayFixtureRow(f)}</div>`)}
+  </div>`).join("");
+  const box = data.boxes[0];
+  const more = data.boxes.length > 1
+    ? `<p class="why">…and ${data.boxes.length - 1} more ${data.boxes.length === 2 ? "card like this" : "cards like this"} (${data.boxes.map(b => b.name).join(", ")}).</p>` : "";
+  $("#s1").innerHTML = fixCards +
+    `<div class="ccol"><h3>output card, in full</h3>${todayOutputCard(box)}${more}</div>`;
+}
+
+/* ---- section 2: concept A — source ribbon, adaptive ---- */
+
+function ribbonRow(f, innerW) {
+  const runPx = innerW * (RUN / Math.max(f.lamps, 1));
+  const boxed = f.runs.every(r => innerW * (r.n / f.lamps) >= 46);
+  if (boxed) return todayFixtureRow(f);   // density decides: small stays today
+  const px = f.runs.map(r => {
+    const left = pct(r.src, f.lamps), width = pct(r.n, f.lamps);
+    return `<div data-grad="rb:${r.id}" style="left:${left};width:${width};
+             background:${runGrad(r, f.lamps, false)}"></div>`;
+  }).join("");
+  const cuts = f.runs.slice(1).map(r =>
+    `<div class="cut${r.port.cells[0] === r ? " port" : ""}" style="left:${pct(r.src, f.lamps)}"></div>`).join("");
+  const dest = f.runs.map(r =>
+    `<div style="left:${pct(r.src, f.lamps)};width:calc(${pct(r.n, f.lamps)} - 1px);
+      background:${boxTone(r.box, r.port.key)}"></div>`).join("");
+  const hits = f.runs.map(r =>
+    `<div class="${runClasses("hit", r)}" ${runAttrs(r)}
+      style="left:${pct(r.src, f.lamps)};width:${pct(r.n, f.lamps)}"></div>`).join("");
+  const boxes = [...new Set(f.runs.map(r => r.box))];
+  const legend = boxes.map(bi =>
+    `<span><span class="sw" style="background:${boxTone(bi, 0)}"></span>${data.boxes[bi].name}</span>`).join("") +
+    `<span class="quiet">· shade alternates per port · ticks = run cuts</span>`;
+  return `<p class="cap">${structureCaption(f)}</p>
+    <div class="ribbon"><div class="pxband">${px}</div>${cuts}
+      <div class="destband">${dest}</div>${hits}</div>
+    <div class="legend">${legend}</div>`;
+}
+
+function renderS2() {
+  const innerW = state.w - 2 * 14 - 2;
+  $("#s2").innerHTML = data.fixtures.map(f => `<div class="ccol">
+    ${cardShell(f.name, "fixture", `<div class="csec"><p class="slabel">output</p>
+      ${heroFor(f)}${ribbonRow(f, innerW)}
+      <div class="readout" data-readout></div></div>`)}
+    </div>`).join("") +
+    `<div class="ccol"><p class="why"><b>Readout line</b> under the row is the label's new
+     home: hovering resolves the exact run (name, span, destination) that a 7px cell could
+     never say. Selection pins it. The peach card is pixel-identical to section 1 —
+     adaptivity means the small case never pays.</p></div>`;
+}
+
+/* ---- section 3: concept B — wire-grouped, dive ---- */
+
+function renderS3() {
+  const cols = data.fixtures.map(f => {
+    const boxes = [...new Set(f.runs.map(r => r.box))];
+    const lanes = boxes.map(bi => {
+      const box = data.boxes[bi];
+      const runs = f.runs.filter(r => r.box === bi);
+      const ports = [...new Set(runs.map(r => r.port))];
+      const span = box.lamps;
+      const innerW = state.w - 2 * 14 - 2;
+      const segs = ports.map(p => {
+        const mine = runs.filter(r => r.port === p);
+        const segPx = innerW * (p.count / span);
+        const labeled = segPx >= 34;
+        const lit = mine.some(r => state.hover === r.id);
+        const sel = mine.some(r => state.sel === r.id);
+        const con = mine.some(r => r.contested);
+        const grads = mine.map(r =>
+          `<div data-grad="wg:${r.id}" style="position:absolute;top:0;bottom:0;
+            left:${pct(r.wire - p.start, p.count)};width:${pct(r.n, p.count)};
+            background:${runGrad(r, fixtureOf(r).lamps, true)}"></div>`).join("");
+        let cls = "seg" + (labeled ? "" : " unlabeled");
+        if (lit) cls += " lit"; if (sel) cls += " sel"; if (con) cls += " contested";
+        return `<div class="${cls}" data-dive="${bi}:${p.key}"
+            title="${box.name} ${p.name} · ${mine.length} run${mine.length === 1 ? "" : "s"} · click to dive"
+            style="left:${pct(p.start, span)};width:calc(${pct(p.count, span)} - 1px)">
+          <div class="px" style="position:relative">${grads}</div>
+          <span class="lb">${p.name}</span></div>`;
+      }).join("");
+      const laneLamps = runs.reduce((n, r) => n + r.n, 0);
+      return `<div class="boxlane"><span class="bcap">${box.name}
+          <span class="r">${runs.length} ${runs.length === 1 ? "run" : "runs"} · ${laneLamps} lamps</span></span>
+        <div class="segrow">${segs}</div></div>`;
+    }).join("");
+    let dive = "";
+    if (state.dive) {
+      const [bi, pk] = state.dive.split(":").map(Number);
+      const box = data.boxes[bi], p = box.ports[pk];
+      if (p && f.runs.some(r => r.port === p)) {
+        const cells = p.cells.map(r => {
+          const left = pct(r.wire - p.start, p.count), width = pct(r.n, p.count);
+          return `<div class="${runClasses("cell", r)}" ${runAttrs(r)}
+              style="left:${left};width:calc(${width} - 1px)">
+            <div class="px" data-grad="dv:${r.id}" style="background:${runGrad(r, fixtureOf(r).lamps, true)}"></div>
+            <span class="lb">${wireSideLabel(r)}</span></div>`;
+        }).join("");
+        dive = `<div class="dive"><div class="dcap"><span class="crumb">${f.name} ▸
+            <b>${box.name} · ${p.name}</b> · channels ${p.start}–${p.start + p.count - 1}</span>
+            <button data-undive>back</button></div>
+          <div class="track">${cells}</div></div>`;
+      }
+    }
+    return `<div class="ccol">${cardShell(f.name, "fixture",
+      `<div class="csec"><p class="slabel">output</p>${heroFor(f)}
+        <p class="cap">${structureCaption(f)}</p>
+        <div class="wiregroups">${lanes}</div>${dive}
+        <div class="readout" data-readout></div></div>`)}</div>`;
+  }).join("");
+  $("#s3").innerHTML = cols +
+    `<div class="ccol"><p class="why"><b>The trade:</b> this row no longer shows the
+     fixture's own continuity — a body split across two stretches of strand reads as two
+     lanes here, not one unbroken row. What it buys is a grain that nests: box → port
+     → run, each level legible, and the dive is the existing single-click gesture.</p></div>`;
+}
+
+/* ---- section 4: concept C — elide + lanes ---- */
+
+function renderS4() {
+  const cols = data.fixtures.map(f => {
+    const innerW = state.w - 2 * 14 - 2;
+    const fits = f.runs.every(r => innerW * (r.n / f.lamps) >= 46);
+    let body;
+    if (fits && !state.expanded) {
+      body = todayFixtureRow(f);
+    } else if (!state.expanded) {
+      const boxes = [...new Set(f.runs.map(r => r.box))];
+      const chips = boxes.map(bi => {
+        const runs = f.runs.filter(r => r.box === bi);
+        const g = `linear-gradient(90deg, ${[0,.25,.5,.75,1].map(t =>
+          sample(palFor(f.runs[0].fix), t + state.phase) + " " + t * 100 + "%").join(",")})`;
+        return `<button class="chipbtn" data-expand>
+            <span class="mini" style="background:${g}"></span>
+            ${data.boxes[bi].name} · ${runs.length}×${RUN}</button>`;
+      }).join("");
+      body = `<p class="cap">${structureCaption(f)}</p>
+        <div class="elide-rest">${chips}
+          <button class="chipbtn" data-expand>show all ${f.runs.length} runs ↓</button></div>`;
+    } else {
+      // lanes: wrap the source-ordered chips so each is >= ~56px wide.
+      const perLane = Math.max(1, Math.floor(innerW / 70));
+      const lanes = [];
+      for (let i = 0; i < f.runs.length; i += perLane) {
+        const slice = f.runs.slice(i, i + perLane);
+        const span = slice.reduce((n, r) => n + r.n, 0);
+        let off = 0;
+        const cells = slice.map(r => {
+          const left = pct(off, span), width = pct(r.n, span);
+          off += r.n;
+          return `<div class="${runClasses("cell", r)}" ${runAttrs(r)}
+              style="left:${left};width:calc(${width} - 1px)">
+            <div class="px" data-grad="ln:${r.id}" style="background:${runGrad(r, f.lamps, false)}"></div>
+            <span class="lb">${fixtureSideLabel(r)}</span></div>`;
+        }).join("");
+        lanes.push(`<span class="lanecap">lamps ${slice[0].src}–${slice[slice.length - 1].src + slice[slice.length - 1].n - 1}</span>
+          <div class="track">${cells}</div>`);
+      }
+      body = `<p class="cap">${structureCaption(f)}
+          <span class="r"><button class="chipbtn" data-collapse>collapse ↑</button></span></p>
+        <div class="lanes">${lanes.join("")}</div>`;
+    }
+    return `<div class="ccol">${cardShell(f.name, "fixture",
+      `<div class="csec"><p class="slabel">output</p>${heroFor(f)}${body}
+       <div class="readout" data-readout></div></div>`)}</div>`;
+  }).join("");
+  $("#s4").innerHTML = cols +
+    `<div class="ccol"><p class="why"><b>Cost:</b> at rest the card says structure but
+     shows no geography — you cannot see <i>where</i> a run sits without expanding. And at
+     big-dome scale the expansion is ${Math.ceil(260 / Math.max(1, Math.floor((state.w - 30) / 58)))} lanes tall.</p></div>`;
+}
+
+/* ---- section 5: output card concepts ---- */
+
+function fusedOutputCard(box) {
+  const rows = box.ports.map(p => {
+    const cells = p.cells.map(r => {
+      const left = pct(r.wire - p.start, p.count), width = pct(r.n, p.count);
+      return `<div class="${runClasses("cell", r)}" ${runAttrs(r)}
+          style="left:${left};width:calc(${width} - 1px)">
+        <div class="px" data-grad="fu:${p.name}:${r.id}" style="background:${runGrad(r, fixtureOf(r).lamps, true)}"></div></div>`;
+    }).join("");
+    return `<div class="portrow">
+      <div class="l1"><span class="chip bound">ch${p.key}</span>
+        <span class="pin">${p.name}</span><span class="cnt">${p.count}</span></div>
+      <div class="minitrack">${cells}</div>
+      <div class="l2">lamps ${p.start}–${p.start + p.count - 1} · gpio ${10 + p.key}</div>
+    </div>`;
+  }).join("");
+  return cardShell(box.name, "output", `<div class="csec"><p class="slabel">ports</p>
+    <p class="cap">${box.ports.length} ${box.ports.length === 1 ? "wire" : "wires"} · ${box.lamps} lamps</p>${rows}</div>`);
+}
+
+function ribbonOutputCard(box) {
+  const span = box.lamps;
+  const runs = box.ports.flatMap(p => p.cells);
+  const px = runs.map(r =>
+    `<div data-grad="rc:${r.id}" style="position:absolute;top:0;bottom:0;
+      left:${pct(r.wire, span)};width:${pct(r.n, span)};
+      background:${runGrad(r, fixtureOf(r).lamps, true)}"></div>`).join("");
+  const cuts = box.ports.slice(1).map(p =>
+    `<div class="cut port" style="left:${pct(p.start, span)}"></div>`).join("");
+  const hits = runs.map(r =>
+    `<div class="${runClasses("hit", r)}" ${runAttrs(r)}
+      style="left:${pct(r.wire, span)};width:${pct(r.n, span)}"></div>`).join("");
+  const portRows = box.ports.slice(0, 3).map(p => `
+    <div class="portrow">
+      <div class="l1"><span class="chip bound">ch${p.key}</span>
+        <span class="pin">${p.name}</span><span class="cnt">${p.count}</span></div>
+    </div>`).join("");
+  const folded = box.ports.length > 3
+    ? `<div class="fold">… ${box.ports.length - 3} more wires (A04–A13) · all 238 · expand ↓</div>` : "";
+  const cellCount = runs.length;
+  return cardShell(box.name, "output", `
+    <div class="csec"><p class="slabel">ports</p>
+      <p class="cap">${box.ports.length} ${box.ports.length === 1 ? "wire" : "wires"} · ${box.lamps} lamps</p>${portRows}${folded}</div>
+    <div class="csec"><p class="slabel">patch</p>
+      <p class="cap">${cellCount} cells${box.unclaimed ? ` · <span class="attn">${box.unclaimed} unclaimed</span>` : ""}</p>
+      <div class="ribbon"><div class="pxband">${px}</div>${cuts}${hits}</div>
+      <div class="legend"><span class="quiet">ticks = port boundaries · track showing through = unclaimed</span></div>
+      <div class="readout" data-readout></div></div>`);
+}
+
+function renderS5() {
+  const box = data.boxes[0];
+  $("#s5").innerHTML = `
+    <div class="ccol"><h3>today · ports + patch</h3>${todayOutputCard(box)}</div>
+    <div class="ccol"><h3>fused rows <span class="lean">◂ lean</span></h3>${fusedOutputCard(box)}
+      <p class="why">The strip replaces nothing — it rides between the two lines each row
+      already has. Cell labels retire to hover/readout; the row's own chrome (ch chip, pin,
+      count) already names the wire.</p></div>
+    <div class="ccol"><h3>box ribbon</h3>${ribbonOutputCard(box)}
+      <p class="why">Constant height at any port count — the honest overview for ten
+      boxes — but it needs the folded port list, and folding wires hides the pin
+      pickers the card exists to offer.</p></div>`;
+}
+
+/* =============================== heroes ================================= */
+
+function paintHeroes() {
+  for (const cv of $$("canvas[data-hero]")) {
+    const f = data.fixtures.find(x => x.name === cv.dataset.hero);
+    if (!f) continue;
+    const w = cv.width = cv.clientWidth * devicePixelRatio;
+    const h = cv.height = cv.clientHeight * devicePixelRatio;
+    const ctx = cv.getContext("2d");
+    ctx.clearRect(0, 0, w, h);
+    const pal = palFor(f.runs[0].fix);
+    const n = Math.min(f.lamps, 900);
+    const cols = Math.ceil(Math.sqrt(n * (w / h)));
+    const rows = Math.ceil(n / cols);
+    const dx = w / cols, dy = h / rows;
+    const rad = Math.max(1.2 * devicePixelRatio, Math.min(dx, dy) * 0.32);
+    for (let i = 0; i < n; i++) {
+      const t = i / n + state.phase;
+      ctx.fillStyle = sample(pal, t);
+      const cx = (i % cols + 0.5) * dx;
+      const cy = (Math.floor(i / cols) + 0.5) * dy + Math.sin(i * 0.7) * dy * 0.18;
+      ctx.beginPath(); ctx.arc(cx, cy, rad, 0, 7); ctx.fill();
+    }
+  }
+}
+
+/* =============================== wiring ================================= */
+
+function renderAll() {
+  applyContested();
+  renderS1(); renderS2(); renderS3(); renderS4(); renderS5();
+  paintHeroes();
+  syncReadouts();
+  for (const b of $$("[data-ds]")) b.classList.toggle("on", b.dataset.ds === state.ds);
+  for (const b of $$("[data-w]")) b.classList.toggle("on", +b.dataset.w === state.w);
+  $("#t-contested").classList.toggle("on", state.contested);
+  $("#t-anim").classList.toggle("on", state.anim);
+}
+
+function runById(id) { return data.all.find(r => r.id === id); }
+
+function readoutText() {
+  const r = runById(state.hover) || runById(state.sel);
+  if (!r) return `<span class="quiet">hover a run · click to select</span>`;
+  const mark = state.sel === r.id && state.hover !== r.id ? `<span class="sel-mark">■ selected</span> ` : "";
+  return mark + runTitle(r).replace(" · CONTESTED", ` · <span style="color:var(--err-text)">contested</span>`);
+}
+function syncReadouts() {
+  for (const el of $$("[data-readout]")) el.innerHTML = readoutText();
+}
+
+/* Light/unlight without re-rendering: toggle classes on matching nodes. */
+function syncHover(prev) {
+  for (const id of [prev, state.hover]) {
+    if (!id) continue;
+    for (const el of $$(`[data-run="${CSS.escape(id)}"]`))
+      el.classList.toggle("lit", state.hover === id);
+  }
+  // concept B segments light when any of their runs is hovered
+  for (const el of $$("[data-dive]")) {
+    const [bi, pk] = el.dataset.dive.split(":").map(Number);
+    const p = data.boxes[bi] && data.boxes[bi].ports[pk];
+    el.classList.toggle("lit", !!p && p.cells.some(r => r.id === state.hover));
+  }
+  syncReadouts();
+}
+
+document.body.addEventListener("mouseover", e => {
+  const el = e.target.closest("[data-run]");
+  if (!el || el.dataset.run === state.hover) return;
+  const prev = state.hover; state.hover = el.dataset.run; syncHover(prev);
+});
+document.body.addEventListener("mouseout", e => {
+  const el = e.target.closest("[data-run]");
+  if (!el || state.hover !== el.dataset.run) return;
+  const prev = state.hover; state.hover = null; syncHover(prev);
+});
+document.body.addEventListener("click", e => {
+  const dive = e.target.closest("[data-dive]");
+  if (dive) { state.dive = dive.dataset.dive; renderAll(); return; }
+  if (e.target.closest("[data-undive]")) { state.dive = null; renderAll(); return; }
+  if (e.target.closest("[data-expand]")) { state.expanded = true; renderAll(); return; }
+  if (e.target.closest("[data-collapse]")) { state.expanded = false; renderAll(); return; }
+  const el = e.target.closest("[data-run]");
+  if (el) { state.sel = state.sel === el.dataset.run ? null : el.dataset.run; renderAll(); }
+});
+
+for (const b of $$("[data-ds]")) b.onclick = () => {
+  state.ds = b.dataset.ds; state.dive = null; state.expanded = false;
+  state.sel = state.hover = null;
+  data = buildDataset(state.ds); renderAll();
+};
+for (const b of $$("[data-w]")) b.onclick = () => { state.w = +b.dataset.w; renderAll(); };
+$("#t-contested").onclick = () => { state.contested = !state.contested; renderAll(); };
+$("#t-anim").onclick = () => { state.anim = !state.anim; if (state.anim) tick(); renderAll(); };
+
+let last = 0;
+function tick(ts) {
+  if (!state.anim) return;
+  requestAnimationFrame(tick);
+  if (ts - last < 50) return;
+  last = ts;
+  state.phase = (state.phase + 0.004) % 1;
+  for (const el of $$("[data-grad]")) {
+    const id = el.dataset.grad.split(":").pop();
+    const parts = el.dataset.grad.split(":");
+    const rid = parts.slice(parts[0] === "fu" || parts[0] === "ws" ? 2 : 1).join(":");
+    const r = runById(rid);
+    if (!r) continue;
+    const flip = ["ws", "wg", "dv", "fu", "rc"].includes(parts[0]);
+    el.style.background = runGrad(r, fixtureOf(r).lamps, flip);
+  }
+  paintHeroes();
+}
+
+renderAll();
+</script>
+</body>
+</html>
