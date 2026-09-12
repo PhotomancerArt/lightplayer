@@ -2178,6 +2178,26 @@ fmt-check:
 clippy-host:
     cargo clippy --workspace --exclude lps-builtins-emu-app --exclude fw-esp32c6 --exclude fw-esp32s3 --exclude fw-esp32v3 --exclude fw-emu --exclude lp-riscv-emu-guest-test-app --exclude lp-riscv-emu-guest --exclude lp-xt-fp-harness --exclude lp-gfx-wgpu --exclude fw-browser --exclude naga-wasm-poc -- --no-deps -D warnings
 
+# `lp-emu-esp32c6` with the `jit` feature on — the native translated build.
+#
+# `clippy-host`'s `--workspace` compiles every member at its DEFAULT features,
+# and `jit` is not one: it is off natively (JD9/JD24 — the interpreter is the
+# native default, because wasmtime pays 130-220 s of cranelift over these
+# images and every CI job depends on the native binary starting fast). So the
+# whole `--features jit` half of `lp-emu-esp32c6` — `jit.rs`, the wasmtime
+# host, `jit_record`, the `--jit*` arm of the CLI — was invisible to the lint
+# gate. It sat RED for about a month before M7 P4 tripped over it by hand, and
+# M7b F4 made it green again; this is what stops the third time.
+#
+# `--all-targets`, so the crate's own tests and benches are linted under the
+# feature too, which is where the first red was.
+#
+# It costs the Lint job a cranelift build. That is the price of the feature
+# being lintable at all: nothing else in CI compiles it, and a feature no gate
+# compiles is a feature that rots. See G-M7B' Q3.
+clippy-emu-jit:
+    cargo clippy -p lp-emu-esp32c6 --features jit --all-targets -- --no-deps -D warnings
+
 # The wgpu-tree workspace members excluded from clippy-host.
 clippy-gfx:
     cargo clippy -p lp-gfx-wgpu -p fw-browser -p naga-wasm-poc -- --no-deps -D warnings
@@ -2285,7 +2305,7 @@ check-studio-core-minimal:
 clippy-rv32-emu-guest-test-app: install-rv32-target
     cd lp-emu/lp-riscv-emu-guest-test-app && cargo clippy --target {{ rv32_target }} --release -- --no-deps -D warnings
 
-clippy: clippy-host clippy-rv32
+clippy: clippy-host clippy-emu-jit clippy-rv32
 
 clippy-fix:
     cargo clippy --fix --allow-dirty --allow-staged
