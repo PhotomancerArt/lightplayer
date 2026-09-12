@@ -95,8 +95,8 @@ console.log('');
 // number without one is not comparable to any other wall-clock number. Rows
 // taken in ONE invocation are comparable to each other whatever the load;
 // rows from two invocations are not, unless the loads match.
-const head = ['image', 'grade', 'mode', 'fn', 'wall s', 'ns/instr', 'real time', 'cover %', 'stay', 'esc %', 'load', 'uart sha256'];
-const w = [16, 5, 6, 5, 9, 9, 10, 8, 8, 7, 6, 18];
+const head = ['image', 'grade', 'mode', 'fn', 'wall s', 'ns/instr', 'real time', 'cover %', 'stay', 'esc %', 'load', 'uart sha256', 'trap sha256'];
+const w = [16, 5, 6, 5, 9, 9, 10, 8, 8, 7, 6, 18, 18];
 const row = (cells) => cells.map((c, i) => String(c).padStart(i === 0 ? -w[i] : w[i]).slice(0, Math.max(w[i], String(c).length))).join(' ');
 console.log(head.map((h, i) => (i === 0 ? h.padEnd(w[i]) : h.padStart(w[i]))).join(' '));
 console.log(head.map((_, i) => '-'.repeat(w[i])).join(' '));
@@ -137,6 +137,7 @@ for (const slug of o.images) {
           (r.escapeRate !== undefined ? (100 * r.escapeRate).toFixed(3) : '-').padStart(w[9]),
           r.loadavg.toFixed(1).padStart(w[10]),
           (r.uartSha256 || '-').slice(0, 16).padStart(w[11]),
+          (r.trapSha256 || '-').slice(0, 16).padStart(w[12]),
         ].join(' '));
         if (r.selftestError) console.log('  !! table selftest: ' + r.selftestError);
         if (r.trap) console.log('  !! trap: ' + r.trap.split('\n')[0]);

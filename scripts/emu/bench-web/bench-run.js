@@ -86,6 +86,12 @@ export function argsFor(o) {
     '--wall-timeout', String(o.wallTimeout ?? 600),
     '--uart0', 'file:/w/' + o.image.slug + '.uart',
     '--dump-frames', 'file:/w/' + o.image.slug + '.jsonl',
+    // The trap log (emu-loop-redesign P1, D5): every trap the hart TOOK, as
+    // `cyc=<n> cause=0x<8 hex> epc=0x<8 hex>`. Unconditional, like the UART
+    // capture and the frame dump, because it is a transcript surface every
+    // row of the invariant's third leg has to carry — and, like them, it
+    // lands in the memfs and is sha256'd in place. Never a download.
+    '--trap-log', 'file:/w/' + o.image.slug + '.trap',
     '--time-grade', o.grade,
   ];
   if (o.mode === 'jit') {
@@ -252,6 +258,15 @@ function sha256Js(bytes) {
   return out;
 }
 
+/// Newlines in a memfs buffer, so a row can say how many traps it saw without
+/// decoding 200 KB of text into a `String` to `split` it.
+function countLines(bytes) {
+  if (!bytes) return 0;
+  let n = 0;
+  for (let i = 0; i < bytes.length; i++) if (bytes[i] === 10) n++;
+  return n;
+}
+
 async function sha256(bytes) {
   if (!bytes || bytes.length === 0) return null;
   const sub = globalThis.crypto && globalThis.crypto.subtle;
@@ -328,6 +343,8 @@ export async function runOnce(o) {
     jsEvents: host.events,
     uartSha256: await sha256(wasi.bytesAt(o.image.slug + '.uart')),
     framesSha256: await sha256(wasi.bytesAt(o.image.slug + '.jsonl')),
+    trapSha256: await sha256(wasi.bytesAt(o.image.slug + '.trap')),
+    trapLines: countLines(wasi.bytesAt(o.image.slug + '.trap')),
     uartBytes: wasi.bytesAt(o.image.slug + '.uart').length,
     tail: text.trim().split('\n').slice(-8).join('\n'),
     // The whole of stdout+stderr, only when the caller asked for it (M7 P6c's

@@ -59,7 +59,7 @@
   <thead><tr>
     <th>run</th><th>image</th><th>mode</th><th>grade</th><th>fn</th>
     <th>wall s</th><th>ns/instr</th><th>real time</th><th>cover %</th>
-    <th>stay</th><th>esc %</th><th>boot ms</th><th>uart</th>
+    <th>stay</th><th>esc %</th><th>boot ms</th><th>uart</th><th>trap</th>
   </tr></thead>
   <tbody></tbody>
 </table>
@@ -203,6 +203,7 @@
       r.escapeRate !== undefined ? (100 * r.escapeRate).toFixed(3) : '–',
       bootMs ? bootMs.toFixed(0) : '–',
       r.uartSha256 ? r.uartSha256.slice(0, 8) : '–',
+      r.trapSha256 ? r.trapSha256.slice(0, 8) : '–',
     ];
     tr.innerHTML = cells.map((c) => '<td>' + c + '</td>').join('');
     if (r.failed || r.trap || r.selftestError) tr.classList.add('bad');
