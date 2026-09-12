@@ -317,6 +317,12 @@ jobs:
             emu_c6:
               - 'lp-emu/**'
               - 'lp-fw/fw-esp32c6/**'
+              # The tab host's WASI shim, which `scripts/emu/tab-smoke.mjs`
+              # IMPORTS rather than copies (C6-in-tab P2): a change to it
+              # changes what this job runs, so it must trigger this job. Since
+              # P5b it is also where the JS host is attached, so the same
+              # applies twice over.
+              - 'lp-app/lpa-studio-web/public/lpa-link/emulator_wasi.js'
               # The recipe that builds every image this job boots. It was
               # missing until L4, so a change to the reference build — the
               # thing that decides WHICH BYTES the gates run against — ran no
@@ -423,6 +429,7 @@ jobs:
 
       - name: Install RISC-V target
         run: rustup target add ${{ env.RISC_V_TARGET }}
+
 
       - name: Run sccache
         uses: mozilla/sccache-action@v0.0.10
@@ -1233,6 +1240,62 @@ jobs:
 
       - name: Emulator C6 boot tests + replays
         run: cd lp2025 && just test-emu-c6-boot
+
+      # The tab module: a release build of the machine for wasm32-wasip1,
+      # whose script FAILS if any `emu_*` export is missing from the linked
+      # module. That is the gate — the export list in
+      # scripts/emu/build-tab-wasm.sh and the ABI in
+      # lp-emu-esp32c6/src/tab_abi/ drifting apart is the failure it exists
+      # to catch, and it is invisible to every native test.
+      #
+      # Cost, MEASURED on this runner (2026-09-11, run 34555276339): the
+      # target install plus the build plus the export gate is **45 s**, cold
+      # sccache. 29 s of that is the same build on an M2 Max, so the runner is
+      # barely slower here — the wasip1 tree is small and sccache is
+      # content-addressed and target-triple aware. The 35-minute budget above
+      # is headroom rather than a ceiling (see its own comment), which is why
+      # this rides here rather than becoming a fourth job for one
+      # `cargo build`.
+      #
+      # `just emu-c6-wasm` installs the target itself if it is missing; it is
+      # named on its own step anyway, so the toolchain this job needs is
+      # readable in one place, beside the RISC-V target above.
+      - name: Install wasip1 target (the tab module)
+        run: rustup target add wasm32-wasip1
+
+      - name: Tab module (wasm32-wasip1) + export gate
+        run: cd lp2025 && just emu-c6-wasm
+
+      # The tab host's hermetic smoke (C6-in-tab D18): the module just built,
+      # under the PAGE'S OWN WASI shim (it imports
+      # `public/lpa-link/emulator_wasi.js`, it does not copy it), driving the
+      # real mask ROM to its `ESP-ROM:esp32c6` banner and its `waiting for
+      # download` line, plus the flash word's blank → loaded → blank sequence
+      # and a control reply carrying `cyc=`.
+      #
+      # Since P5b it also proves the JIT SEAM, which is what makes it the gate
+      # that a module and its JS host have drifted apart: the module imports
+      # `emu_host` (the wasm build translates by default, M7 P7) and does not
+      # instantiate without a host, `attach`'s table round trip is checked in
+      # node's own engine, and a `boot=direct` board — the mask ROM's committed
+      # ELF, because `boot=rom-up` installs no translated core — hands the host
+      # real modules and produces the interpreter's transcript at the
+      # interpreter's cycle.
+      #
+      # No browser, no firmware build, no network — which is the whole reason
+      # it can be a CI step at all. The tab-backed conformance suite and
+      # `just walk-no-board --tab` want Chrome and stay local recipes (PD9).
+      #
+      # Cost, MEASURED (desk, same module the step above built): **0.65 s** for
+      # all twenty-nine claims, of which the translated boot is ~0.2 s. The node
+      # setup beside it is the only part worth a second.
+      - name: Set up node (the tab smoke)
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Tab host smoke (node + the page's WASI shim)
+        run: cd lp2025 && node scripts/emu/tab-smoke.mjs
 
       - name: sccache stats
         if: always()

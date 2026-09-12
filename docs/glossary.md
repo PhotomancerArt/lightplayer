@@ -193,6 +193,15 @@ of implementation — code can lag these names during the transition.
   nodes); identical across real, emu, and sim via `lpa-server`.
 - **Sim / device parity** — the requirement that a sim and a real device
   run the same load path, so model semantics behave identically.
+- **Dilation** — guest microseconds advanced per wall microsecond elapsed,
+  over a sliding window: how far behind real time an emulated board is
+  running. `0.4×` means four hundred milliseconds of chip for every second of
+  clock. It is always a **measurement**, never a bound — a property of the
+  host, the workload *and* which core the machine installed (the wasm build
+  translates by default, but a `boot=rom-up` board interprets, so the same
+  code can be quoted at two rates). Nothing asserts one: a test that compared
+  a wall duration would be measuring the machine it ran on. An absent number
+  is reported as absent rather than guessed.
 - **Probe** — a read-only wire query of runtime state (e.g. the
   binding-graph probe feeding bus views).
 - **Story** — a captured Studio component state used for visual baselines

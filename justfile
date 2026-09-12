@@ -99,6 +99,21 @@ install-wasm32-target:
         echo "Target {{ wasm32_target }} already installed"; \
     fi
 
+# The emulator's target, which is NOT wasm32-unknown-unknown: the C6 machine
+# is a `std` binary with a WASI preview1 shim over it (no wasm-bindgen, no
+# entry point of its own), so the tab module and the bench rig both build for
+# wasip1. See scripts/emu/build-tab-wasm.sh.
+
+wasip1_target := "wasm32-wasip1"
+
+install-wasip1-target:
+    @if ! rustup target list --installed | grep -q "^{{ wasip1_target }}$"; then \
+        echo "Installing target {{ wasip1_target }}..."; \
+        rustup target add {{ wasip1_target }}; \
+    else \
+        echo "Target {{ wasip1_target }} already installed"; \
+    fi
+
 # ============================================================================
 # Web demo (GLSL compiler in browser)
 # ============================================================================
@@ -265,6 +280,34 @@ lpa-link-browser-test: install-wasm32-target
         cargo test -p lpa-link --target wasm32-unknown-unknown \
             --features browser-serial-esp32 --test browser_serial_conformance
 
+# The SAME assertions against boards hosted IN THE TAB — one Worker per
+# board, each holding the emulator's own wasm, and no server anywhere
+# (C6-in-tab P2).
+#
+# The third backing the suite can run over, after the scripted door (CI) and
+# the live socket below. It is the strongest single proof the tab backing has:
+# every claim about the shipped `browser_serial.js`, the device controller,
+# the polyfill and `EmulatorPort` — made against a real emulated C6 that is
+# running inside the page under test.
+#
+# Local only, like the live half (plan two PD9): it wants Chrome and a
+# multi-MB wasm build. Any claim that fails ONLY here is a real divergence
+# between the door's coupling and the tab's — report it, do not patch it.
+lpa-link-browser-test-tab: install-wasm32-target install-wasip1-target
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if ! command -v wasm-bindgen-test-runner >/dev/null 2>&1; then
+        echo "wasm-bindgen-test-runner not found. Install: cargo install wasm-bindgen-cli --version 0.2.114"
+        exit 1
+    fi
+    # The runner copies this into its served root; the suite fetches it from
+    # the path below. Built first so a stale module cannot be what ran.
+    just emu-c6-wasm
+    LP_EMU_TAB_MODULE="/pkg/lp_emu_esp32c6.wasm" \
+    CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUNNER="$PWD/scripts/wasm-serial-test-runner.sh" \
+        cargo test -p lpa-link --target wasm32-unknown-unknown \
+            --features browser-serial-esp32 --test browser_serial_conformance
+
 # The SAME assertions against a live `lp-cli emu serve` holding a real
 # emulated C6 — the other half of M2's conformance suite.
 #
@@ -315,6 +358,28 @@ studio-codemirror-bundle:
     cd lp-app/lpa-studio-web/vendor-src/codemirror
     npm ci
     npm run build
+
+# The ESP32-C6 machine as the module a Studio tab hosts: the wasip1 CLI
+# binary with the `emu_*` slice ABI added to its export list at link time.
+# The script verifies every export and fails the build if one is missing.
+emu-c6-wasm *args: install-wasip1-target
+    ./scripts/emu/build-tab-wasm.sh {{ args }}
+
+# Lay the emulator module down beside the fw-browser pair, the way
+# `studio-fw-browser-sidecar` lays its own artifacts down. Called by every
+# recipe that calls that one; `sync-engine-sidecar.sh` is what content-hashes
+# it into a served pkg/ and names it in engine-manifest.json.
+studio-emu-sidecar profile="debug": install-wasip1-target
+    #!/usr/bin/env bash
+    set -euo pipefail
+    just emu-c6-wasm
+    out_dir="{{ studio_assets_dir }}/{{ profile }}/pkg"
+    mkdir -p "${out_dir}"
+    # One artifact for every profile (D17): the module is a release build
+    # whatever Studio itself is built as — a debug emulator would be too slow
+    # to be a board, and this is the SAME bytes the deploy ships.
+    cp target/wasm32-wasip1/release/lp-emu-esp32c6.wasm "${out_dir}/lp_emu_esp32c6.wasm"
+    echo "Artifacts: ${out_dir}/lp_emu_esp32c6.wasm"
 
 studio-fw-browser-sidecar profile="debug": install-wasm32-target
     #!/usr/bin/env bash
@@ -383,6 +448,7 @@ studio-web-dev-build: install-wasm32-target studio-firmware-package-served
     #!/usr/bin/env bash
     set -euo pipefail
     just studio-fw-browser-sidecar debug
+    just studio-emu-sidecar debug
     echo "Building lpa-studio-web with dx for wasm32 debug with stories..."
     rm -rf target/dx/lpa-studio-web/debug/web/public
     dx build --web -p lpa-studio-web --features stories --debug-symbols false
@@ -393,6 +459,7 @@ studio-web-story-build: install-wasm32-target
     #!/usr/bin/env bash
     set -euo pipefail
     just studio-fw-browser-sidecar debug
+    just studio-emu-sidecar debug
     echo "Building lpa-studio-web with dx for story capture..."
     rm -rf target/dx/lpa-studio-web/release/web/public
     dx build --web -p lpa-studio-web --features stories --release --debug-symbols false
@@ -583,6 +650,7 @@ studio-dev: install-wasm32-target studio-firmware-package-served
     #!/usr/bin/env bash
     set -euo pipefail
     just studio-fw-browser-sidecar debug
+    just studio-emu-sidecar debug
     # STUDIO_BENCH=1 (via `just studio-dev-bench`) serves from the reserved
     # bench block so the standing WebSerial grant covers the origin — see
     # the serial-grant recipe. Hardware walks only; ordinary dev hashes.
@@ -701,6 +769,7 @@ studio-web-build: install-wasm32-target studio-firmware-package-served
     #!/usr/bin/env bash
     set -euo pipefail
     just studio-fw-browser-sidecar release
+    just studio-emu-sidecar release
     echo "Building lpa-studio-web with dx for wasm32 release (stories bundled for the in-app design library)..."
     rm -rf target/dx/lpa-studio-web/release/web/public
     dx build --web -p lpa-studio-web --features stories --release --debug-symbols false
