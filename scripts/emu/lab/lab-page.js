@@ -237,7 +237,7 @@ export function main() {
 
   // --- Join (T6, Q2): the tap is the gesture that makes the lock legal ---
   async function join() {
-    localStorage.labName = els.name.value.trim() || localStorage.labName || 'unnamed';
+    localStorage.labName = els.name.value.trim() || localStorage.labName || defaultDeviceName(navigator.userAgent);
     els.name.value = localStorage.labName;
     joined = true;
     localStorage.labJoined = '1';
@@ -480,7 +480,9 @@ export function main() {
   renderPresence();
   // A reload re-joins on its own (Q2) — everything but the lock, which needs
   // a tap; the board shows the button for it and rows run either way.
-  if (localStorage.labJoined === '1' && localStorage.labName) {
+  // A device that joined as "unnamed" (the placeholder era) gets the join
+  // card again, pre-filled, so one tap fixes its name.
+  if (localStorage.labJoined === '1' && localStorage.labName && localStorage.labName !== 'unnamed') {
     joined = true;
     els.join.hidden = true; els.board.hidden = false; els.manual.hidden = false;
     openStream(); postState(); renderPresence();
