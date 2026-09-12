@@ -31,8 +31,21 @@ let engine = 'node', reps = 3, image = 'render-basic',
 // legs are the cross product of the stages and the sizes, interleaved
 // together like every other leg. M7b P1 is the first phase that needs it.
 const stages = [];
+// `--env <label>=<NAME=value>[,<NAME=value>…]` is the same idea as `--stage`
+// and for the same reason (M7b P5): a phase whose A/B is an ENVIRONMENT rather
+// than a build — a layout policy, an emission diagnostic — still has to take
+// both halves in ONE invocation, or the two numbers are not comparable. With
+// none given there is a single unlabelled leg that sets nothing, which is what
+// every earlier invocation did.
+const envs = [];
 for (let i = 0; i < args.length; i++) {
   if (args[i] === '--engine') engine = args[++i];
+  else if (args[i] === '--env') {
+    const v = args[++i];
+    const eq = v.indexOf('=');
+    if (eq < 0) throw new Error('--env takes <label>=<NAME=value>[,…]');
+    envs.push({ label: v.slice(0, eq), vars: v.slice(eq + 1).split(',').filter(Boolean) });
+  }
   else if (args[i] === '--stage') {
     const v = args[++i];
     const eq = v.indexOf('=');
@@ -47,18 +60,24 @@ for (let i = 0; i < args.length; i++) {
   else throw new Error('unknown option ' + args[i]);
 }
 if (!stages.length) stages.push({ label: '', dir: 'target/emu-bench-web' });
+if (!envs.length) envs.push({ label: '', vars: [] });
 
 const legs = [];
 for (const st of stages) {
-  const tag = st.label ? st.label + ' ' : '';
-  for (const s of sizes) {
-    legs.push({ name: `${tag}jit ${s}`, dir: st.dir, args: ['--mode', 'jit', '--fn-blocks', String(s)] });
+  for (const ev of envs) {
+    const tag = [st.label, ev.label].filter(Boolean).join(' ');
+    const pre = tag ? tag + ' ' : '';
+    const env = ev.vars.flatMap((v) => ['--env', v]);
+    for (const s of sizes) {
+      legs.push({ name: `${pre}jit ${s}`, dir: st.dir, args: ['--mode', 'jit', '--fn-blocks', String(s), ...env] });
+    }
+    if (interp) legs.push({ name: `${pre}--interpreter`, dir: st.dir, args: ['--mode', 'interp', ...env] });
   }
-  if (interp) legs.push({ name: `${tag}--interpreter`, dir: st.dir, args: ['--mode', 'interp'] });
 }
 
 console.log(`${engine}  ${image} ${grade}  ${timeout}  ${reps} rep(s), interleaved`);
 for (const st of stages) console.log(`stage ${st.label || '(default)'}: ${st.dir}`);
+for (const ev of envs) if (ev.vars.length) console.log(`env ${ev.label}: ${ev.vars.join(' ')}`);
 console.log('');
 console.log(['leg', 'rep', 'wall s', 'ns/instr', 'real time', 'cover %', 'stay', 'sys load', 'uart'].join('\t'));
 
@@ -93,13 +112,24 @@ for (const leg of legs) {
 for (const [name, b] of best) {
   // Each leg is compared to its OWN stage's interpreter row: an interpreter
   // that got faster between two builds would otherwise flatter the newer one.
-  const tag = name.includes(' ') && stages.length > 1 ? name.slice(0, name.indexOf(' ') + 1) : '';
+  const tag = stages.length > 1 || envs.length > 1
+    ? name.slice(0, name.lastIndexOf(name.startsWith('--interpreter') ? '--interpreter' : 'jit '))
+    : '';
   const ref = best.get(`${tag}--interpreter`) || best.get('--interpreter');
   const speedup = ref ? (ref.wall / b.wall).toFixed(3) + 'x' : '-';
   console.log([name, b.wall.toFixed(2), b.ns.toFixed(2), b.real, speedup].join('\t'));
 }
 const uarts = new Set(rows.map((x) => x.uart));
 console.log('');
-console.log(uarts.size === 1
-  ? `identity: every row's UART0 sha256 is ${[...uarts][0]}`
-  : `identity: ROWS DISAGREE — ${[...uarts].join(', ')}`);
+if (uarts.size === 1) {
+  console.log(`identity: every row's UART0 sha256 is ${[...uarts][0]}`);
+} else {
+  // Which legs disagree, not only that some do: under `--env` a leg may be a
+  // deliberately wrong emission diagnostic (M7b P5, BD7), and "ROWS DISAGREE"
+  // alone cannot tell that apart from a translator bug.
+  console.log('identity: ROWS DISAGREE — per leg:');
+  for (const leg of legs) {
+    const mine = new Set(rows.filter((x) => x.leg === leg.name).map((x) => x.uart));
+    if (mine.size) console.log(`  ${leg.name}\t${[...mine].join(', ')}`);
+  }
+}

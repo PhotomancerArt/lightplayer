@@ -13,6 +13,19 @@
 #   frames   the WS281x frames decoded off the PAD from `--dump-frames` — what
 #            the wire carried
 #
+# and, when `LP_EMU_ORACLE_TRAP_LOG=1` asks for it, a fourth:
+#
+#   trap     the hart's trap log from `--trap-log` — every trap TAKEN, as
+#            `cyc=<n> cause=0x<8 hex> epc=0x<8 hex>`, which is the only
+#            reading that covers interrupt *cycles* with the translated
+#            core's fast paths still on (emu-loop-redesign D5/Q6)
+#
+# ⚠️ **Off unless asked.** This sweep is CI's (M7 P9) and the trap column is
+# new in emu-loop-redesign P1; whether CI turns it on is G-LOOP0's question 3,
+# not this script's. A binary that predates `--trap-log` refuses the flag, so
+# turning it on against an older `<binary-a>` is a run that fails to start
+# rather than a column that lies.
+#
 # The speed work must not change one byte of any of them (PD5, ADR
 # 2026-09-06). A `DIFFER` in any column is a stop, not a note.
 #
@@ -72,6 +85,11 @@ images=(
 # every cell in the same shape rather than inventing a shorter bar.
 only="${LP_EMU_ORACLE_IMAGES:-}"
 
+# The trap column, off unless asked (see the header). `1` is the only value
+# that turns it on, so a stray `LP_EMU_ORACLE_TRAP_LOG=0` in an environment
+# reads as "no" rather than as "any non-empty string is yes".
+trap_log="${LP_EMU_ORACLE_TRAP_LOG:-0}"
+
 resolve_image() {
     local slug="$1" var="$2" features="$3" commit="$4" spike="$5" path
     path="${!var:-}"
@@ -95,6 +113,7 @@ run_leg() {
                 --uart0 "file:$stem.uart" --dump-frames "file:$stem.jsonl"
                 --time-grade "$grade")
     [[ -n "$exit_on" ]] && args+=(--exit-on "$exit_on")
+    [[ "$trap_log" == "1" ]] && args+=(--trap-log "file:$stem.trap")
     # stderr carries the `stopped after` line; stdout is the run report.
     "$bin" "${args[@]}" >"$stem.out" 2>"$stem.err" || {
         echo "oracle-sweep: $leg $slug $grade exited non-zero" >&2
@@ -117,8 +136,10 @@ for spec in "${images[@]}"; do
         run_leg "$bin_a" "$elf" "$slug" "$grade" "$timeout" "$exit_on" a
         run_leg "$bin_b" "$elf" "$slug" "$grade" "$timeout" "$exit_on" b
 
+        readings=(uart line jsonl)
+        [[ "$trap_log" == "1" ]] && readings+=(trap)
         verdict=()
-        for what in uart line jsonl; do
+        for what in "${readings[@]}"; do
             if cmp -s "$out/a-$slug-$grade.$what" "$out/b-$slug-$grade.$what"; then
                 verdict+=("same")
             else
@@ -127,8 +148,9 @@ for spec in "${images[@]}"; do
             fi
         done
         frames="$(wc -l < "$out/a-$slug-$grade.jsonl" | tr -d ' ')"
-        rows+=("$(printf '%-16s %-5s %8s %9s %8s %8s' \
-            "$slug" "$grade" "${verdict[0]}" "${verdict[1]}" "${verdict[2]}" "$frames")")
+        rows+=("$(printf '%-16s %-5s %8s %9s %8s %8s %8s' \
+            "$slug" "$grade" "${verdict[0]}" "${verdict[1]}" "${verdict[2]}" "$frames" \
+            "${verdict[3]:-—}")")
     done
 done
 
@@ -147,8 +169,8 @@ if (( ${#rows[@]} == 0 )); then
 fi
 
 echo
-printf '%-16s %-5s %8s %9s %8s %8s\n' image grade uart stopped frames "n"
-printf '%-16s %-5s %8s %9s %8s %8s\n' ---------------- ----- -------- --------- -------- --------
+printf '%-16s %-5s %8s %9s %8s %8s %8s\n' image grade uart stopped frames "n" trap
+printf '%-16s %-5s %8s %9s %8s %8s %8s\n' ---------------- ----- -------- --------- -------- -------- --------
 for row in "${rows[@]}"; do echo "$row"; done
 echo
 echo "a: $bin_a"
@@ -161,4 +183,8 @@ if (( fail )); then
     exit 1
 fi
 echo
-echo "oracle-sweep: identical on every image, both grades, all three readings."
+if [[ "$trap_log" == "1" ]]; then
+    echo "oracle-sweep: identical on every image, both grades, all four readings (trap log included)."
+else
+    echo "oracle-sweep: identical on every image, both grades, all three readings."
+fi

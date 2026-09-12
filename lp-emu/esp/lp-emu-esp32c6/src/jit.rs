@@ -618,9 +618,10 @@ pub fn emit_only(
     if found.set.is_empty() {
         return Err("nothing translatable is reachable".to_string());
     }
-    let at = areas(bus, &found.set, 0)?;
+    let set = &found.set;
+    let at = areas(bus, set, 0)?;
     write_permission_table(bus, at);
-    write_target_tables(bus.guest_arena_mut(), 0, at.indirect_at, &found.set);
+    write_target_tables(bus.guest_arena_mut(), 0, at.indirect_at, set);
     let layout = Layout {
         memory_pages: at.pages,
         guest_base: base,
@@ -631,7 +632,7 @@ pub fn emit_only(
         fast_reads: systimer_fast_reads(bus, at.fast_at),
     };
     let started = std::time::Instant::now();
-    let emitted = emit_module(&found.set, model, layout, policy, fn_blocks);
+    let emitted = emit_module(set, model, layout, policy, fn_blocks);
     let emit_us = started.elapsed().as_micros();
     std::fs::write(path, &emitted.wasm).map_err(|e| format!("{}: {e}", path.display()))?;
     Ok(format!(
@@ -643,7 +644,7 @@ pub fn emit_only(
         emitted.wasm.len(),
         emit_us as f64 / 1000.0,
         emitted.functions,
-        fn_blocks.min(found.set.blocks.len()),
+        fn_blocks.min(set.blocks.len()),
         emitted.max_body_bytes,
         at.indirect_len,
         BODY_BUDGET,
@@ -2475,6 +2476,10 @@ impl TranslatedCore<SocBus> for JitCore {
         Some(self)
     }
 
+    fn summary(&self, retired_total: u64) -> Option<String> {
+        Some(self.summary_line(Some(retired_total)))
+    }
+
     fn report(&self) -> String {
         for (code, &(exits, gap)) in self.stats.why.iter().enumerate() {
             if exits == 0 && gap == 0 {
@@ -2499,6 +2504,60 @@ impl TranslatedCore<SocBus> for JitCore {
                     why_name(*why as usize),
                     self.where_is(*pc)
                 );
+            }
+            // The same sites again, **per reason** (M7b P6). The list above is
+            // sorted across every class at once, so the small classes are
+            // buried under the budget exits that dominate the whole, and a
+            // phase that wants to take one back cannot see it.
+            //
+            // The split that matters is **where the exit pc goes**. An exit to
+            // a pc some module already holds a block for costs one exit and
+            // one entry and nothing else — the hart re-enters at once and the
+            // interpreter retires nothing in between. For `indirect-miss` that
+            // is exactly P1's module boundary (DD30): a `jalr` whose target is
+            // in the other module resolves to `-1` here and is re-entered
+            // there. An exit to a pc **no** module holds is a coverage gap:
+            // the interpreter runs from there until it reaches a block start
+            // again, and the instructions it retires are the second column.
+            for code in 0..WHY_CODES {
+                let mut mine: Vec<(u32, u64, u64)> = top
+                    .iter()
+                    .filter(|(_, why, _, _)| *why as usize == code)
+                    .map(|&(pc, _, n, gap)| (pc, n, gap))
+                    .collect();
+                if mine.is_empty() {
+                    continue;
+                }
+                mine.sort_unstable_by(|a, b| b.1.cmp(&a.1));
+                let held = |pc: u32| self.index.contains_key(&pc);
+                let total: u64 = mine.iter().map(|&(_, n, _)| n).sum();
+                let known: u64 = mine
+                    .iter()
+                    .filter(|&&(pc, _, _)| held(pc))
+                    .map(|&(_, n, _)| n)
+                    .sum();
+                let known_gap: u64 = mine
+                    .iter()
+                    .filter(|&&(pc, _, _)| held(pc))
+                    .map(|&(_, _, gap)| gap)
+                    .sum();
+                let gap: u64 = mine.iter().map(|&(_, _, g)| g).sum();
+                eprintln!(
+                    "jit: exit class {:<18} {:>8} site(s), {total:>10} exit(s); \
+                     {known} to a pc a module holds ({known_gap} instr after) / \
+                     {} to one no module holds ({} instr after)",
+                    why_name(code),
+                    mine.len(),
+                    total - known,
+                    gap - known_gap,
+                );
+                for (pc, n, gap) in mine.iter().take(24) {
+                    eprintln!(
+                        "jit:   {:<18} {pc:#010x} ({}): {n} time(s), {gap} instructions after",
+                        why_name(code),
+                        self.where_is(*pc)
+                    );
+                }
             }
         }
         // M7 P6b H3: where an entry's time goes, on its own line so nothing
@@ -2616,6 +2675,121 @@ impl TranslatedCore<SocBus> for JitCore {
             s.refused_stale,
         )
     }
+}
+
+impl JitCore {
+    /// The one line a run that asked for nothing prints (M7 P7).
+    ///
+    /// Since the wasm build's core is the translator, the default run is the
+    /// product run, and JD20's "reported, not buried" now has to hold for a
+    /// user who passed no flags at all. Four facts, in the order they are
+    /// asked about:
+    ///
+    /// 1. **what got built and what it cost** — blocks, module bytes and the
+    ///    boot cost, which is the half-second G-M7D's Q1 budgeted;
+    /// 2. **how much of the run ran inside it** — the coverage share, against
+    ///    the hart's own `minstret`, which the machine supplies because only
+    ///    it knows the denominator;
+    /// 3. **why the stays ended**, largest cause first — the census the exit
+    ///    table holds, summarised to the three that matter;
+    /// 4. **the escape hatch** (JD10), which is allowed to be non-zero and is
+    ///    not allowed to be unmeasured.
+    ///
+    /// Every number here is read off [`JitStats`] and [`Totals`] — the same
+    /// fields [`JitCore::report`] prints in full. There is one metrics path
+    /// and this is its short form; `--jit-report` is the long one, and a run
+    /// that asks for it gets that instead of this rather than as well.
+    fn summary_line(&self, retired_total: Option<u64>) -> String {
+        let r = self.totals();
+        let s = self.stats;
+        let boot_ms =
+            (r.discovery.discover_us + r.emit_us + r.compile_us + r.instantiate_us) as f64 / 1000.0;
+        // Largest first, and only the ones that fired: an exit class printed
+        // as `0` reads as a class that was measured and found empty, which is
+        // a different claim from one that never arose.
+        let mut causes: Vec<(usize, u64, u64)> = self
+            .stats
+            .why
+            .iter()
+            .enumerate()
+            .filter(|&(_, &(exits, _))| exits > 0)
+            .map(|(code, &(exits, gap))| (code, exits, gap))
+            .collect();
+        causes.sort_unstable_by(|a, b| b.2.cmp(&a.2).then(b.1.cmp(&a.1)));
+        let exits: u64 = causes.iter().map(|&(_, n, _)| n).sum();
+        let why = if causes.is_empty() {
+            "never".to_string()
+        } else {
+            causes
+                .iter()
+                .take(3)
+                .map(|&(code, n, gap)| format!("{} {n} (+{gap} interpreted)", why_name(code)))
+                .collect::<Vec<_>>()
+                .join(", ")
+        };
+        let coverage = match retired_total {
+            Some(total) if total > 0 => format!(
+                "{:.2} % of the run's {total} retired instructions ran translated",
+                100.0 * s.retired as f64 / total as f64
+            ),
+            _ => format!("{} instructions retired translated", s.retired),
+        };
+        format!(
+            "translated core: {} block(s) in {} module(s), {} B, built in {boot_ms:.0} ms \
+             (discover {:.0} + emit {:.0} + compile {:.0} + instantiate {:.0}); \
+             {coverage}; left it {exits} time(s) — {why}; \
+             escape hatch {} instruction(s); `--jit-report` for the rest, \
+             `--interpreter` for the oracle",
+            r.blocks,
+            self.mods.len(),
+            r.module_bytes,
+            r.discovery.discover_us as f64 / 1000.0,
+            r.emit_us as f64 / 1000.0,
+            r.compile_us as f64 / 1000.0,
+            r.instantiate_us as f64 / 1000.0,
+            s.escape_hatch,
+        )
+    }
+}
+
+/// The emission diagnostics, off unless `LP_EMU_JIT_EMIT_DIAG` asks (M7b P5).
+///
+/// ⚠️ **Every one of these emits a translation that is WRONG.** They exist so
+/// the two things every emitted block pays for can be *priced* —
+/// [`Emit::perm_check`] and [`Emit::budget_check`] say what each one is and
+/// what removing it breaks. They are diagnostics under BD7: off by default,
+/// never a product path, and not a proposal to delete anything. A run that
+/// sets one gets a loud line on stderr saying its transcript is not the
+/// guest's, because the one way this could do harm is by being mistaken for a
+/// fast correct run.
+///
+/// The value is a comma-separated list of `no-perm` and `no-budget`.
+///
+/// # Panics
+///
+/// Panics on an unrecognised name — a typo in a measurement is not something
+/// to answer with the default.
+pub fn emission_diagnostics(mut policy: Emit) -> Emit {
+    let Ok(spec) = std::env::var("LP_EMU_JIT_EMIT_DIAG") else {
+        return policy;
+    };
+    for name in spec.split(',').map(str::trim).filter(|s| !s.is_empty()) {
+        match name {
+            "no-perm" => policy.perm_check = false,
+            "no-budget" => policy.budget_check = false,
+            other => {
+                panic!("LP_EMU_JIT_EMIT_DIAG names `{other}`; it takes `no-perm` and `no-budget`")
+            }
+        }
+    }
+    if !policy.perm_check || !policy.budget_check {
+        eprintln!(
+            "jit: ⚠️  LP_EMU_JIT_EMIT_DIAG={spec}: THIS RUN'S TRANSCRIPT IS NOT THE GUEST'S. \
+             The emitted code is deliberately wrong so that what it left out can be priced \
+             (M7b P5, BD7). Nothing it prints is evidence of anything but speed."
+        );
+    }
+    policy
 }
 
 /// M7 P6c (Q2): a census of every MMIO operation translated code performs.

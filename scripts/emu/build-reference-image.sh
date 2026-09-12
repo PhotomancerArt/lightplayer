@@ -185,7 +185,24 @@ case "$features" in
     # The classic's only slug: the SHIPPED default feature set, which is the
     # image every M3 gate runs and the one a silicon capture is taken from.
     # There is no memfs variant — the classic boots from a modelled flash
-    # chip with a real filesystem, which is what "memfs-free" means in G2.
+    # chip with a real filesystem, which is what "memfs-free" means in G2,
+    # and `bench-esp32v3.sh`'s render-loop image seeds THAT filesystem rather
+    # than growing a second one.
+    #
+    # ⚠️ **A short slug here is a TWO-file change.** `reference_image_slug`
+    # in `lp-emu/lp-emu-validate/src/driver.rs` mirrors this `case`, and
+    # `every_short_slug_in_the_script_is_in_the_slug_table` fails the moment
+    # the two disagree — a silicon `--image` is checked against that table,
+    # so a missing arm refuses a legitimate image. The C6's two render slugs
+    # drifted exactly this way once.
+    #
+    # `bench-esp32v3.sh`'s other two rows therefore take the LONG fallback
+    # name below (`esp32+test_shader_compile_incremental`,
+    # `esp32+server+float-f32+bench_render_loop`) rather than short ones:
+    # M7 P1b was scoped to leave `lp-emu-validate` alone during the G-classic
+    # hold, and a short slug for either would have meant editing it. Giving
+    # them short names is a two-line follow-up (this `case` plus that table)
+    # whenever the hold lifts.
     esp32,server,float-f32) slug=boot-idle ;;
     *) slug="${features//,/+}" ;;
 esac

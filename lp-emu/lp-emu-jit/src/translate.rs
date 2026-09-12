@@ -166,6 +166,30 @@ pub struct Emit {
     /// [`crate::dispatch::emit_module`], and a second parameter would be a
     /// signature change at six call sites to carry one bool.
     pub selector: crate::dispatch::Selector,
+    /// **Diagnostic only (M7b BD7). `false` emits a translation that is
+    /// WRONG** and exists so the permission check can be priced.
+    ///
+    /// Every emitted load and store reads two bytes out of the 256 KiB
+    /// permission table and compares them ([`Emitter::perm_check`]); the table
+    /// is touched at a stride the guest picks, so it is a plausible cache
+    /// resident and P5 was asked what it costs. With this `false` the two
+    /// bytes are replaced by the constant [`PERM_READ_WRITE`] — so every
+    /// access takes the RAM fast path, **MMIO included**, and the run's
+    /// transcript is not the guest's.
+    ///
+    /// It is never a product path and it never defaults off: both constants
+    /// below set it `true`, and the only thing that clears it is an explicit
+    /// diagnostic switch in a measurement.
+    pub perm_check: bool,
+    /// **Diagnostic only (M7b BD7). `false` emits a translation that is
+    /// WRONG** and exists so the per-block budget check can be priced.
+    ///
+    /// [`Emitter::block`] opens every block with a `local.get` / `i64.add` /
+    /// `local.get` / `i64.gt_u` / `if` against the slice's cycle bound —
+    /// 201,243 of them on `render-basic` t2. With this `false` they are not
+    /// emitted, so a stay runs past the end of its slice and the machine's
+    /// cadence is not the guest's.
+    pub budget_check: bool,
 }
 
 impl Emit {
@@ -176,6 +200,8 @@ impl Emit {
         memory: false,
         control: false,
         selector: crate::dispatch::Selector::DEFAULT,
+        perm_check: true,
+        budget_check: true,
     };
     /// Everything the translator knows how to emit.
     pub const EVERYTHING: Self = Self {
@@ -183,6 +209,8 @@ impl Emit {
         memory: true,
         control: true,
         selector: crate::dispatch::Selector::DEFAULT,
+        perm_check: true,
+        budget_check: true,
     };
 }
 
@@ -696,6 +724,17 @@ impl<'a> Emitter<'a> {
 
     /// `perm_lo = perm[addr >> 14]`, `perm_hi = perm[(addr + width - 1) >> 14]`.
     fn perm_check(&mut self, width: u32) {
+        // The diagnostic (M7b P5, BD7): the table is not read at all and both
+        // ends answer "plain read-write RAM". Wrong by construction — an MMIO
+        // access takes the RAM path and reads the arena — and priced rather
+        // than proposed.
+        if !self.policy.perm_check {
+            self.i(I::I32Const(i32::from(PERM_READ_WRITE)));
+            self.i(I::LocalSet(L_PERM_LO));
+            self.i(I::I32Const(i32::from(PERM_READ_WRITE)));
+            self.i(I::LocalSet(L_PERM_HI));
+            return;
+        }
         self.i(I::LocalGet(L_ADDR));
         self.i(I::I32Const(PERM_SHIFT as i32));
         self.i(I::I32ShrU);
@@ -1212,16 +1251,21 @@ impl<'a> Emitter<'a> {
         // One that does not fit is handed back, and the interpreter runs it
         // with the per-instruction compare it already has.
         let max: u64 = pcs.iter().map(|(_, d)| self.cost(d.class)).sum();
-        self.i(I::LocalGet(L_CYC));
-        self.i(I::I64Const(max as i64));
-        self.i(I::I64Add);
-        self.i(I::LocalGet(P_END));
-        self.i(I::I64GtU);
-        self.i(I::If(BlockType::Empty));
-        self.extra += 1;
-        self.exit(k, Some(block_pc), 0, 0, 0, why::BUDGET);
-        self.extra -= 1;
-        self.i(I::End);
+        // The diagnostic (M7b P5, BD7) drops the five opcodes above every one
+        // of the block set's blocks. Wrong by construction — the stay runs
+        // past the end of its slice — and priced rather than proposed.
+        if self.policy.budget_check {
+            self.i(I::LocalGet(L_CYC));
+            self.i(I::I64Const(max as i64));
+            self.i(I::I64Add);
+            self.i(I::LocalGet(P_END));
+            self.i(I::I64GtU);
+            self.i(I::If(BlockType::Empty));
+            self.extra += 1;
+            self.exit(k, Some(block_pc), 0, 0, 0, why::BUDGET);
+            self.extra -= 1;
+            self.i(I::End);
+        }
 
         let mut cycles = 0u64;
         let mut retired = 0u32;

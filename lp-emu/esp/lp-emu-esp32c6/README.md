@@ -1556,7 +1556,7 @@ lp-emu-esp32c6 --elf <app.elf> [--rom <path>] [--time-grade t1|t2|t3]
     [--usb-sj-tried stderr|memory|file:<path>]
     [--control tcp:<host:port>] [--usb-script <file>]
     [--pin-script <file>]... [--wire <a>:<b>]...
-    [--tx-log stderr|file:<path>]
+    [--tx-log stderr|file:<path>] [--trap-log stdout|file:<path>]
     [--efuse-mac a0:f2:62:87:b4:8c] [--efuse-rev 0.2] [--seed <u64>]
     [--trace [BLOCK,BLOCK…]] [--trace-file <path>] [--strict-bus]
     [--strict-grade modeled|documented|measured]
@@ -1570,27 +1570,126 @@ lp-emu-esp32c6 --elf <app.elf> [--rom <path>] [--time-grade t1|t2|t3]
     [--jit-record-entries <n>] [--jit-record-sizes <a,b,…>]
 ```
 
+### `--trap-log`: every trap the hart took
+
+```text
+cyc=1988770 cause=0x80000001 epc=0x42076a3a
+cyc=3096237 cause=0x80000001 epc=0x420a026a
+```
+
+One line per trap the hart **takes** — `mcause` with its interrupt bit, and
+the `mepc` the delivery wrote — written where the hart sets those two CSRs
+(`lp-riscv-emu`'s `mach::trap::TrapLog`) and nowhere else. `stdout` or
+`file:<path>`; off by default, and off costs one `Option` test at each of the
+eight delivery sites.
+
+**One hook covers both cores.** Translated code never delivers a trap: it
+compares each block's worst-case cost against the deadline and leaves, and any
+fault it meets goes out through the escape hatch into `MachineHart::step_one`,
+which is the interpreter's own path. Nothing in `lp-emu-jit` writes `mcause`,
+`mepc` or `mtvec`.
+
+**What it is for.** `--trace` is the only other reading that says *when* an
+interrupt was delivered, and every fast path in the translated core refuses
+under `--trace` (M7 P3) — so the trace proves the slow path and the untraced
+runs proved the fast path only through what the guest went on to do. The trap
+log refuses nothing, is independent of peripheral emission order, and costs
+one line per trap: 2,757 of them on `render-basic` t2 at 500 ms against
+127,249 pin-log edges and 252,171 trace lines. It is the ninth column of
+`scripts/emu/p6-oracle.sh` and a sha on the browser rig's row.
+
+The lines are accumulated on the hart and written once, at the end of the run
+(`Esp32C6Machine::flush_trap_log`) — the hart is `no_std` and holds no sink,
+and the browser rig needs the same bytes as an in-memory buffer to sha256
+rather than as a stream. A snapshot does not carry them and a restore does not
+rewind them, so a `--reboot-on-reset` reboot goes on writing the same file.
+
 ### The translated core (M7)
 
-`--jit` needs a build with `--features jit`; `wasmtime` is optional and never
-a default (JD18). `--interpreter` turns translation off entirely and must
-print an identical everything — it is the free oracle, and it costs nothing to
-run.
+**Since M7 P7 the wasm build's core IS the translator.** A `wasm32-wasip1`
+build of this binary — the one the browser rig, the phone and Studio-in-a-tab
+run — discovers and translates the image at boot and at each guest `fence.i`
+and runs that, with no flag and no cargo feature asked for: `lp-emu-jit` is an
+unconditional dependency there, and it brings no `wasmtime` with it. `--jit`
+on that build is a **no-op alias** for what already happened, kept because
+every script and every rig row already says it.
+
+**Natively the interpreter is still the default** (JD9; JD24 deferred the P8
+that would revisit it), and `--jit` is the opt-in that turns translation on. It
+needs a build with `--features jit`, because `wasmtime` is optional and never a
+default: cranelift needs 130–220 s over these images and every test and CI job
+depends on this binary starting fast.
+
+`--interpreter` turns translation off entirely, on either build, and must print
+an identical everything — it is the free oracle, it costs nothing to run, and
+it is the way back from the flip.
+
+**ROM-up boots do not translate, and that is not a detail** (DD19,
+`tests/jit_default.rs` rule 4). `BootMode::RomUp` — the mask ROM and the
+second-stage bootloader out of a merged flash image, which is the closer twin
+of flashing and resetting a board — keeps translation **off entirely**, because
+that path publishes code without ever emitting a `fence.i` and there is
+nothing to hang the invalidation rule on. So an embedding whose boards are all
+ROM-up **still interprets after the flip**, and the default change buys it
+nothing: every emulated board in Studio-in-a-tab is ROM-up today. ROM-up
+translation is its own piece of work and it is last (DD19); it belongs to the
+emulator-loop milestone, not to M7.
+
+### Embedding the wasm module
+
+An embedder of the wasm module that never calls `jitHost.attach(instance)` now
+fails at boot with `no JS host is wired to this instance` rather than quietly
+interpreting, and that is deliberate: after the flip, a silently interpreted
+run is a measurement nobody can tell apart from the control.
+
+The module imports **two namespaces**:
+
+- `wasi_snapshot_preview1` — **19 functions** as of M7 P7, which is one more
+  than before it: `path_create_directory` joined the list. An embedder's shim
+  must implement exactly what the module declares, so a shim written against
+  the old list fails to instantiate with a `LinkError` naming the one missing
+  function. The full set is `args_get`, `args_sizes_get`, `clock_time_get`,
+  `environ_get`, `environ_sizes_get`, `fd_close`, `fd_fdstat_get`,
+  `fd_fdstat_set_flags`, `fd_filestat_get`, `fd_prestat_dir_name`,
+  `fd_prestat_get`, `fd_read`, `fd_write`, `path_create_directory`,
+  `path_filestat_get`, `path_open`, `proc_exit`, `random_get`, `sock_accept`.
+  `scripts/emu/bench-web/wasi-shim.js` is a working one.
+- `emu_host` — exactly **two**: `jit_compile` and `jit_release`, called once
+  per translation event and never on a hot path.
+  `lp-emu/lp-emu-jit/js/jit-host.js` provides both, and it is the single
+  source every embedding copies from.
 
 | flag | what it does |
 |---|---|
-| `--jit` | translate the image to wasm at boot and at each guest `fence.i`, and run that instead of interpreting |
-| `--interpreter` | the free oracle: no translated core at all |
+| `--jit` | translate the image to wasm at boot and at each guest `fence.i`, and run that instead of interpreting. **The default in the wasm build, where this flag is an alias**; the opt-in natively |
+| `--interpreter` | the free oracle: no translated core at all, on any build. It beats the default rather than coexisting with it |
 | `--jit-report` | the boot-cost line per translation event (JD20), the coverage line, and the exit census — how many stays ended for each reason and how many instructions the interpreter then retired. Since M7b P2 it also carries `polls N (M left the stay)`: polling point (c) run **inside** a stay, and how many of those ended it. `N − M` is the after-store exit that did not happen. Since M7b F3 it also carries `pending_out N`: stays that ended while an MMIO **load**'s side-band or yield was still unclaimed, which the interpreter then takes at its own next store rather than at the exit's pc. `N` is zero on this chip by construction — `sideband` is set by MMIO writes only and every `yield_to_machine` is inside a `write` — and the counter is there so the corner names itself if a bus ever reaches it. Since M7b P3 it also carries `systimer_fast N read(s) served (armed A, disarmed D)`: `unit0_value.{lo,hi}` and `unit0_op` reads translated code answered from the word the host publishes on the latch store's own crossing, instead of crossing to the bus. The MMIO census counts what reached the bus, so these are **not** in it — the census total falls by exactly `N`. `A` and `D` are how often the published words were armed and dropped; they are equal at the end of a run, and both are zero under `--trace`, `--strict-grade` or `--strict-bus`, where the path refuses |
 | `--jit-escape-all` | emit no guest semantics at all; every instruction through the escape hatch. Complete, correct, slow, and the proof that a partial translator can only be slow and never wrong |
 | `--jit-blocks <N>` | a bound on how many discovered blocks are installed. **Unbounded by default since P5** — the whole image installs — and kept only for asking what a smaller set costs |
-| `--jit-fn-blocks <N>` | guest blocks per wasm sub-dispatcher. wasm caps a function body at 7,654,321 bytes, so the module is a selector over as many functions as the image needs; this sizes one. Default **256**, chosen by measurement in both engines — `lp-emu-jit/README.md` has the table. A module the host refuses halves this and retries, and never drops a block |
+| `--jit-fn-blocks <N>` | guest blocks per wasm sub-dispatcher. wasm caps a function body at 7,654,321 bytes, so the module is a selector over as many functions as the image needs; this sizes one. **Default 8 since M7b P5** (BD6/DD32) — set from the phone's own rows, which prefer 8 to 16 in five of seven same-session pairs and hold the best row ever taken on it (1.008x); on the desk V8 is within 4 % across 8/16/32 and JSC is 1.81x faster at 8 than at 32. It was 256 (JD26), then 32 (DD20/P6c). `lp-emu-jit/README.md` has the table. A module the host refuses halves this and retries, and never drops a block |
 | `--jit-seeds <scope>` | `all-symbols` (default) or `entry-reachable`. The second finds one block at boot and 7.7 % of the instructions at a `fence.i`; it exists so the table in `lp-emu-jit/README.md` is a measurement rather than an assumption |
 | `--jit-emit-only <path>` | emit the module and write it out instead of installing it, then carry on interpreted. No engine compiles anything, which is what makes a size sweep seconds rather than minutes |
 | `--jit-record <dir>` | record entries into translated code — the arguments, every import answer in call order, what changed in guest memory between them, and what each entry produced — so `scripts/emu/jit-image-bench.mjs` can replay the same module in `bun` and `node` (JD26) |
 | `--jit-record-after <cycles>` | start recording once the run has charged this many guest cycles, so the recording lands on the module the **last** translation event installed (default 700,000,000, past both `fence.i`) |
 | `--jit-record-entries <n>` | how many entries to record (default 20,000) |
 | `--jit-record-sizes <a,b,…>` | also emit **the same block set** at each of these blocks-per-function, beside the recording. One walk, one recording, every size |
+
+A run that installed a core and did **not** ask for `--jit-report` prints one
+line instead of thirty (M7 P7) — what got built and what it cost, the coverage
+share, the three exit classes that cost the most, and the escape-hatch count.
+It is a view of the same counters, not a second report, and `--jit-report`
+replaces it rather than adding to it:
+
+```
+jit: translated core: 201244 block(s) in 2 module(s), 79726810 B, built in 1193 ms
+     (discover 188 + emit 956 + compile 48 + instantiate 1);
+     97.94 % of the run's 542906355 retired instructions ran translated;
+     left it 7722208 time(s) — budget 2834596 (+7689411 interpreted),
+     indirect-miss 3993292 (+2468874 interpreted),
+     undecodable 710536 (+827370 interpreted);
+     escape hatch 0 instruction(s);
+     `--jit-report` for the rest, `--interpreter` for the oracle
+```
 
 `LP_EMU_JIT_EXITS=1` adds the twenty-four exit sites that cost the most, each
 with why the stay ended there and whether the module could have been entered
@@ -1613,6 +1712,7 @@ rest of the run reports:
 | `LP_EMU_JIT_SPLIT_CENSUS=1` | with `--interpreter --blockprof`: what an incremental module would hold at each `fence.i`, and how often the run's control flow would cross the boundary that creates (M7b P1) |
 | `LP_EMU_JIT_SPLIT_CENSUS=writable` | the same census against the **writable/read-only** boundary, which is the one the shipped split actually draws |
 | `LP_EMU_SLICE_CENSUS=1` | what bounds each hart slice and what its boundary does (M7b P4). Not a translated-code diagnostic: the slice loop is the same loop with `--interpreter`, and the census answers for either |
+| `LP_EMU_JIT_EMIT_DIAG=no-perm,no-budget` | ⚠️ **emit a deliberately WRONG translation** so that what it left out can be priced (M7b P5, BD7). `no-perm` replaces the two permission-table byte loads at every load and store with the constant `PERM_READ_WRITE`, so every access takes the RAM path — MMIO included. `no-budget` drops the per-block cycle-budget check, so a stay runs past the end of its slice. A run that sets either prints a banner saying its transcript is not the guest's. Nothing it produces is evidence of anything but speed |
 
 `--exit-on` stops at the **end of the line** the match is on, not at the
 match, and it watches **both** consoles — UART0 and the USB link — because

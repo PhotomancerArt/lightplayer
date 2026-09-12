@@ -86,6 +86,12 @@ export function argsFor(o) {
     '--wall-timeout', String(o.wallTimeout ?? 600),
     '--uart0', 'file:/w/' + o.image.slug + '.uart',
     '--dump-frames', 'file:/w/' + o.image.slug + '.jsonl',
+    // The trap log (emu-loop-redesign P1, D5): every trap the hart TOOK, as
+    // `cyc=<n> cause=0x<8 hex> epc=0x<8 hex>`. Unconditional, like the UART
+    // capture and the frame dump, because it is a transcript surface every
+    // row of the invariant's third leg has to carry — and, like them, it
+    // lands in the memfs and is sha256'd in place. Never a download.
+    '--trap-log', 'file:/w/' + o.image.slug + '.trap',
     '--time-grade', o.grade,
   ];
   if (o.mode === 'jit') {
@@ -178,14 +184,106 @@ export function readouts(text) {
   return r;
 }
 
+/// SHA-256 in plain JavaScript, for the context `crypto.subtle` is not in.
+///
+/// ⚠️ **This is not belt-and-braces, it is the only path a phone on the LAN
+/// takes.** `crypto.subtle` exists only in a *secure context*, and the rig is
+/// served over plain `http://` to an IP address — which is not one. So every
+/// row a phone uploaded over the LAN carried `uartSha256: null` and
+/// `framesSha256: null`, and the identity column of the gate table was blank
+/// for exactly the device the gate is about. Over the ngrok `https://` tunnel
+/// the same page filled them in, which is what made it look like a rig quirk
+/// rather than a hole. M7b P5.
+///
+/// FIPS 180-4, the short way: 64 rounds over a 16-word schedule, everything in
+/// `>>> 0` unsigned arithmetic. It is a few dozen lines and no dependency,
+/// which is the point — a dependency here would be a second thing to stamp,
+/// cache and get stale (DD33).
+const K256 = new Uint32Array([
+  0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
+  0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174,
+  0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da,
+  0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7, 0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967,
+  0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13, 0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85,
+  0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070,
+  0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
+  0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2,
+]);
+
+function sha256Js(bytes) {
+  const h = new Uint32Array([
+    0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19,
+  ]);
+  // The padded message: the bytes, an 0x80, zeroes, and the bit length as a
+  // big-endian u64. The length is written as two u32s because a JS number
+  // stops being exact at 2^53 and a byte count times 8 is what would overflow.
+  const n = bytes.length;
+  const blocks = Math.ceil((n + 9) / 64);
+  const m = new Uint8Array(blocks * 64);
+  m.set(bytes);
+  m[n] = 0x80;
+  const view = new DataView(m.buffer);
+  view.setUint32(m.length - 8, Math.floor(n / 0x20000000), false);
+  view.setUint32(m.length - 4, (n << 3) >>> 0, false);
+
+  const w = new Uint32Array(64);
+  const rotr = (x, k) => ((x >>> k) | (x << (32 - k))) >>> 0;
+  for (let b = 0; b < blocks; b++) {
+    for (let t = 0; t < 16; t++) w[t] = view.getUint32(b * 64 + t * 4, false);
+    for (let t = 16; t < 64; t++) {
+      const s0 = (rotr(w[t - 15], 7) ^ rotr(w[t - 15], 18) ^ (w[t - 15] >>> 3)) >>> 0;
+      const s1 = (rotr(w[t - 2], 17) ^ rotr(w[t - 2], 19) ^ (w[t - 2] >>> 10)) >>> 0;
+      w[t] = (w[t - 16] + s0 + w[t - 7] + s1) >>> 0;
+    }
+    let [a, bb, c, d, e, f, g, hh] = h;
+    for (let t = 0; t < 64; t++) {
+      const S1 = (rotr(e, 6) ^ rotr(e, 11) ^ rotr(e, 25)) >>> 0;
+      const ch = ((e & f) ^ (~e & g)) >>> 0;
+      const t1 = (hh + S1 + ch + K256[t] + w[t]) >>> 0;
+      const S0 = (rotr(a, 2) ^ rotr(a, 13) ^ rotr(a, 22)) >>> 0;
+      const maj = ((a & bb) ^ (a & c) ^ (bb & c)) >>> 0;
+      const t2 = (S0 + maj) >>> 0;
+      hh = g; g = f; f = e;
+      e = (d + t1) >>> 0;
+      d = c; c = bb; bb = a;
+      a = (t1 + t2) >>> 0;
+    }
+    h[0] = (h[0] + a) >>> 0; h[1] = (h[1] + bb) >>> 0;
+    h[2] = (h[2] + c) >>> 0; h[3] = (h[3] + d) >>> 0;
+    h[4] = (h[4] + e) >>> 0; h[5] = (h[5] + f) >>> 0;
+    h[6] = (h[6] + g) >>> 0; h[7] = (h[7] + hh) >>> 0;
+  }
+  let out = '';
+  for (const x of h) out += x.toString(16).padStart(8, '0');
+  return out;
+}
+
+/// Newlines in a memfs buffer, so a row can say how many traps it saw without
+/// decoding 200 KB of text into a `String` to `split` it.
+function countLines(bytes) {
+  if (!bytes) return 0;
+  let n = 0;
+  for (let i = 0; i < bytes.length; i++) if (bytes[i] === 10) n++;
+  return n;
+}
+
 async function sha256(bytes) {
   if (!bytes || bytes.length === 0) return null;
   const sub = globalThis.crypto && globalThis.crypto.subtle;
-  if (!sub) return null;
   // A copy, because `digest` is async and the bytes it is handed must not be a
   // view into a linear memory that can grow under it.
-  const d = await sub.digest('SHA-256', bytes.slice().buffer);
-  return Array.from(new Uint8Array(d)).map((b) => b.toString(16).padStart(2, '0')).join('');
+  const copy = bytes.slice();
+  if (sub) {
+    try {
+      const d = await sub.digest('SHA-256', copy.buffer);
+      return Array.from(new Uint8Array(d)).map((b) => b.toString(16).padStart(2, '0')).join('');
+    } catch {
+      // Falls through: some engines expose `crypto.subtle` in an insecure
+      // context and then reject the call. Either way the answer is the same
+      // digest, so there is nothing to report and nothing to choose.
+    }
+  }
+  return sha256Js(copy);
 }
 
 /// Run one row and return everything the gate table and the uploaded JSON need.
@@ -206,10 +304,18 @@ export async function runOnce(o) {
 
   // Before `_start`, and it throws rather than returns: an engine whose table
   // entry mechanism does not hold must not be measured, it must be reported.
+  //
+  // UNCONDITIONAL since M7 P7 (fixed here, P9). The wasm build's core IS the
+  // translator now — `lp-emu-jit` is a non-optional dependency of the
+  // `wasm32-wasip1` target — so every instance needs a host, including an
+  // `interp` row: that row passes `--interpreter`, which vetoes the translated
+  // core from inside the emulator, and it is the ARGUMENT that selects the
+  // interpreter, never the absence of a seam. Gating this on `mode === 'jit'`
+  // left an interp row holding an instance whose `jit_compile` import was
+  // never wired, which is a trap waiting on any build that decides to
+  // translate anyway.
   let selftest = null, selftestError = null;
-  if (o.mode === 'jit') {
-    try { selftest = host.attach(inst); } catch (e) { selftestError = String((e && e.message) || e); }
-  }
+  try { selftest = host.attach(inst); } catch (e) { selftestError = String((e && e.message) || e); }
   const t1 = performance.now();
 
   let exit = 0, trap = null;
@@ -237,6 +343,8 @@ export async function runOnce(o) {
     jsEvents: host.events,
     uartSha256: await sha256(wasi.bytesAt(o.image.slug + '.uart')),
     framesSha256: await sha256(wasi.bytesAt(o.image.slug + '.jsonl')),
+    trapSha256: await sha256(wasi.bytesAt(o.image.slug + '.trap')),
+    trapLines: countLines(wasi.bytesAt(o.image.slug + '.trap')),
     uartBytes: wasi.bytesAt(o.image.slug + '.uart').length,
     tail: text.trim().split('\n').slice(-8).join('\n'),
     // The whole of stdout+stderr, only when the caller asked for it (M7 P6c's

@@ -216,6 +216,77 @@ The payload itself is `fw-checks`' `uart-bridge` (see that crate's README); the
 fixture and its current blocker are
 `docs/defects/2026-09-06-c6-analog-master-wedges-the-bootloader.md`.
 
+## Translation
+
+**In the wasm build there is no interpreter on the path.** Since M7 P7 a
+`wasm32-wasip1` build of `lp-emu-esp32c6` — what the browser rig, the phone and
+Studio-in-a-tab run — turns the guest's own program into WebAssembly at two
+events (the image at boot, and each guest `fence.i`) and lets the browser's
+engine run it. `lp-emu-jit` is an unconditional dependency of that target and
+brings no compiler with it; `--jit` there is a no-op alias for what already
+happened. **Natively the interpreter is still the default** (JD9, and JD24
+deferred the phase that would revisit it): `wasmtime` needs 130–220 s of
+cranelift over these images, and every test and CI job depends on the native
+binary starting fast, so translation there is `--features jit` plus `--jit`.
+
+The interpreter did not go away — it took three other jobs, and each one is why
+the flip is safe:
+
+- **The free differential oracle.** `--interpreter` on the same binary, the
+  same image and the same flags must print a byte-identical everything: the
+  `stopped after` line, the UART0 bytes, the frames decoded off the pad, stdout
+  and a 20 ms `--trace`. Two independent runs compared byte for byte, with no
+  runtime coordination between them — `scripts/emu/p6-oracle.sh` for a cell,
+  `scripts/emu/oracle-sweep.sh` for the whole pinned set.
+- **The escape hatch, as a library.** Translated code that meets an encoding
+  the translator does not emit calls `MachineHart::step_one` for that one
+  instruction and carries on. It is a function call, not a tier: nothing
+  decides between two engines at runtime, and the rate is reported on every
+  run. That is what makes bring-up incremental — a module that escaped on 90 %
+  of its instructions would be slow and still exactly right.
+- **The way back.** A default is reversible; that is the point of flipping one.
+
+What keeps it honest is the same thing that kept the block cache honest:
+**translated code is not architectural state.** It is absent from snapshots, a
+restore invalidates, a reboot invalidates, every emulator-side code-writing
+funnel invalidates, and `BootMode::RomUp` — where the mask ROM and the
+second-stage bootloader publish code without ever emitting a `fence.i` — keeps
+translation off entirely.
+
+**A ROM-up boot does not translate** (DD19). `BootMode::RomUp` — the mask ROM
+and the second-stage bootloader out of a merged flash image — keeps
+translation off entirely, because that path publishes code without ever
+emitting a `fence.i`. Every emulated board in Studio-in-a-tab boots that way
+today, so the default flip changes nothing for them until ROM-up translation
+is done, which is deliberately last.
+
+### What it is worth, per image
+
+`render-basic` is the image the ladder is quoted on, and it is not the whole
+story. 2026-09-11, node/V8 at 16 blocks a function, 5,500 ms emulated, one
+invocation per image running both legs back to back, best of three, t2:
+
+| image | translated | `--interpreter` | ratio | mean stay |
+|---|---:|---:|---:|---:|
+| `harness` | 3.062× | 1.143× | **2.68×** | 1354.0 |
+| `boot-idle-memfs` | 2.808× | 5.293× | **0.53×** | 43.7 |
+| `render-basic` | 0.990× | 0.557× | 1.78× | 68.9 |
+| `render-rocaille` | 1.166× | 0.673× | 1.73× | 30.0 |
+
+**A translated core wins where stays are long and loses where they are short
+or where the run is too small to amortize its own translation.**
+`boot-idle-memfs` retires 51 M instructions in 5.5 emulated seconds against
+`render-basic`'s 543 M, so the fixed ~1.1 s of discover + emit + compile is
+most of its wall clock — and what is left is a 43.7-instruction mean stay,
+which is the entry protocol being paid over and over. The default is kept
+anyway: the images the product's own workload looks like both gain, and
+`--interpreter` is one flag away. The number is on record so nobody has to
+rediscover it.
+
+`lp-emu-jit/README.md` is the translator; `lp-emu-esp32c6/README.md`'s flag
+table is the switches; `docs/adr/2026-09-11-emulator-wasm-translator.md` is
+the argument, the licence posture and the ladder's honest history.
+
 ## Speed
 
 The interpreter's throughput is a product concern, not a curiosity: the
@@ -361,11 +432,100 @@ repeating a short program; it now runs the trip-counted `bench_loop` once
 instead.) `lp-emu/lp-xt-emu/README.md` has the rung-by-rung table and the
 generic-codegen trap that per-package `opt-level` overrides hide.
 
+**The classic ESP32 (v3) machine** has the C6's probe in its own shape:
+
+```bash
+just bench-emu-esp32v3                # three pinned images, t1, both cores
+just bench-emu-esp32v3 --json out.json
+scripts/emu/bench-esp32v3.sh --bin <saved-binary> --no-build --no-promote
+```
+
+Two things differ from the C6's, and both are the chip: **t1 is the only
+grade this machine has** (a cycle IS an instruction here), and
+instructions/second is reported **per hart** as well as in total, because the
+classic is dual core and the run loop hands each unheld core a window per
+iteration. The quantum is a run parameter — a number taken at another
+`--core-quantum` is not comparable with these.
+
+Three rows, and as on the C6 they are **not interchangeable**. `boot-idle`
+(the shipped image, no project, run to a fixed emulated deadline) and
+`shader-compile-stress` are an idle image and a compile harness;
+**`render-loop` is the row to quote** — the product's render loop, 241 lamps
+on IO18, the same project and the same pixels the C6's `render-basic` row
+renders, retargeted `D10` → `IO18` at firmware build time so the two chips'
+ratios compare. Measured 2026-09-11 on one loaded Mac (load 6.2–10.4), same
+window, four runs, every row's UART0 bytes unchanged:
+
+| image | user s | instr/s | core 0 | core 1 | rt(user) |
+|---|---:|---:|---:|---:|---:|
+| `boot-idle` | 0.79 | 32.6 M | 32.6 M | 0.0 M | 3.797× |
+| `shader-compile-stress` | 1.67 | 37.3 M | 37.3 M | 0.0 M | 0.155× |
+| **`render-loop`** | **16.33** | **32.4 M** | **26.6 M** | **5.9 M** | **0.130×** |
+
+The C6's `render-basic` row, measured the same day on the same desk (load 37,
+so a different window), reads 0.76× at t1 on **the same project** — so the
+classic is roughly **5.8× further from real time** and its interpreter
+retires **3.4× fewer** instructions a second. Two windows, not one: read that
+as an order, not a same-window pair.
+
+**Where the seconds go** is a different pair of instruments, both off by
+default and neither in a gate binary — and both **slower than the probe by
+construction**, so their seconds mean nothing and only their shares do:
+
+```bash
+# host time: an ITIMER_PROF pc sampler (macOS), symbolized with atos
+CARGO_PROFILE_RELEASE_DEBUG=1 cargo build -p lp-emu-esp32v3 --release \
+    --features selfprof --target-dir target/emu-prof-sp
+LP_EMU_SELFPROF=out.pcs LP_EMU_SELFPROF_US=250 \
+    target/emu-prof-sp/release/lp-emu-esp32v3 --elf <image> --time-grade t1 …
+scripts/emu/selfprof-buckets.py out.pcs --bin target/emu-prof-sp/release/lp-emu-esp32v3
+
+# guest side: counters on the bus and the interleave
+cargo build -p lp-emu-esp32v3 --release --features bench --target-dir target/emu-prof
+LP_EMU_V3_BENCHPROF=out.counts target/emu-prof/release/lp-emu-esp32v3 --elf <image> …
+scripts/emu/bench-esp32v3-counts.py out.counts --elf <image>
+```
+
+On the render loop, host time reads decode 27.5 %, execute 34.0 %, guest RAM
+12.8 %, fetch 7.1 %, the **window machinery 6.6 %**, MMIO 1.7 %. The guest
+side reads MMIO at 2.58 % of data accesses with **44 % of it one register**
+(UART0 `status`, the TX-FIFO poll), **865 window exceptions per million
+instructions** (98.9 % of them the 8-register form), a LOOP hotness of
+**essentially zero** — the LLVM Xtensa backend emits two zero-overhead loops
+in the whole image — and **6,397 core switches per million instructions**,
+one every 156 instructions. The full reading is the Xtensa plan's
+`m7/notes.md`.
+
 Evidence, and the rungs not yet climbed (poll-loop skip, block cache): the
 planning workspace's
 `2026-09-06-1001-esp-emulator/2026-09-07-speed-ladder-research.md` and its
 `speed-research/` directory, executed by the `2026-09-07-0827-emu-speed-ladder`
 plan.
+
+### Where the ladder stopped, and what is next
+
+**The interpreter levers ran out, and translation did not close the gap
+either.** The release-profile overrides above were a real 2.3x; every
+independent interpreter lever after them measured between 1.00x and 1.14x in
+the engine that matters, and one — the poll-loop skip — was implemented,
+proved byte-exact and then rejected because its bookkeeping cost more
+everywhere than it won. Translating the whole image to wasm (M7, above) took
+the phone from 0.514x to **1.025x** of real time and to **1.75x** of the
+emulator's own interpreter on the same press, against a **1.5x pass bar and a
+3x target**. Neither is met, and M7 was closed at that number rather than
+chased further.
+
+The arithmetic that says why, and it is the next milestone's brief: with
+translation removed entirely, **the emulator's own steady-state wasm is 1.69x
+on its own** — 3,251.8 ms of a 5,500 ms emulated run. 61 % of a translated run
+is the emulator rather than the guest, and every peripheral model together is
+3.4 % of it. So the loop itself — slices, scheduler, bus routing, the
+per-slice machinery — has to fall by 1.78x before 3x is even arithmetically
+possible. That is its own milestone, planned at
+`lp2025/2026-09-11-1731-emu-loop-redesign/`.
+
+`docs/adr/2026-09-11-emulator-wasm-translator.md` has the whole argument and
+the per-milestone history.
 
 ## Roadmap
 

@@ -7,6 +7,13 @@
 //! Delivery lives here rather than on the hart so the whole `mstatus` dance
 //! is one readable function that a test can drive without a bus.
 
+// As in `mach::translated`: `alloc` is linked at the crate root only when the
+// `std` feature is off, so a module that needs it says so itself.
+extern crate alloc;
+
+use alloc::string::String;
+use core::fmt::Write as _;
+
 use super::csr::{CsrFile, MSTATUS_MIE, MSTATUS_MPIE, MSTATUS_MPP};
 
 /// The synchronous exception codes this hart can raise (`mcause` with bit 31
@@ -105,6 +112,61 @@ pub fn deliver_interrupt(csr: &mut CsrFile, n: u8, epc: u32) -> u32 {
         epc,
         Some(u32::from(n)),
     )
+}
+
+/// Every trap the hart **took**, one line each — a transcript surface, like
+/// the UART capture and the pin log (emu-loop-redesign D5/PD1).
+///
+/// ```text
+/// cyc=<u64> cause=0x<8 hex> epc=0x<8 hex>
+/// ```
+///
+/// # Why it exists
+///
+/// The trace (`--trace`) is the only reading that covers *when* an interrupt
+/// was delivered, and every fast path in the translated core refuses under
+/// `--trace` (M7 P3). So the trace proves the slow path, and the no-trace
+/// cells prove the fast path only through what the guest went on to do — the
+/// UART bytes, the frames, the pin log. The trap log closes that gap: it is
+/// written by the hart wherever the hart sets `mepc`/`mcause`, regardless of
+/// which core was running, and it is independent of peripheral emission
+/// order. One line per trap is thousands per run, not millions.
+///
+/// # Why the hart holds it rather than writing it
+///
+/// The hart is `no_std` and has no sink. It accumulates the text and the
+/// machine above it decides where the bytes go — which is also what the
+/// browser rig needs, where "the file" is a memfs buffer that is sha256'd
+/// and never downloaded.
+#[derive(Clone, Debug, Default)]
+pub struct TrapLog {
+    text: String,
+    lines: u64,
+}
+
+impl TrapLog {
+    /// One trap, from the CSRs the delivery just wrote.
+    ///
+    /// Called from the hart's `note_trap`, which is behind an `Option` test
+    /// so a run that did not ask for a log pays exactly that test.
+    pub fn push(&mut self, cycle: u64, cause: u32, epc: u32) {
+        // `write!` into a `String` cannot fail; the `Result` is discarded the
+        // way `core::fmt` documents.
+        let _ = writeln!(self.text, "cyc={cycle} cause={cause:#010x} epc={epc:#010x}");
+        self.lines += 1;
+    }
+
+    /// The log so far, as the bytes a sink writes and a sha256 covers.
+    #[must_use]
+    pub fn text(&self) -> &str {
+        &self.text
+    }
+
+    /// How many traps have been logged.
+    #[must_use]
+    pub const fn lines(&self) -> u64 {
+        self.lines
+    }
 }
 
 /// `mret` (spec §3.3.2): `pc ← mepc`, `MIE ← MPIE`, `MPIE ← 1`, and

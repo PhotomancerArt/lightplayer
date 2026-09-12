@@ -21,8 +21,8 @@ use lp_emu_esp32c6::flash::FlashBacking;
 use lp_emu_esp32c6::loader::EfuseIdentity;
 use lp_emu_esp32c6::machine::{
     AppSource, BootMode, Esp32C6Builder, Esp32C6Machine, FrameSink, Outcome, PinLogSink, RomSource,
-    SeedScope, StopCondition, StripConfig, TimeGrade, TxLogSink, Uart0Sink, UsbHost, UsbSjDrain,
-    UsbSjSink,
+    SeedScope, StopCondition, StripConfig, TimeGrade, TrapLogSink, TxLogSink, Uart0Sink, UsbHost,
+    UsbSjDrain, UsbSjSink,
 };
 use lp_emu_esp32c6::memmap;
 use lp_emu_esp32c6::periph::rmt::RefillStats;
@@ -162,6 +162,17 @@ OPTIONS:
     --pin-log file:<path>   every edge on every routed pad: `<us> gpio18 0|1`.
                             12,288 lines per 256-LED frame — never a default,
                             capped at 2,000,000 lines
+    --trap-log stdout|file:<path>
+                            every trap the hart TAKES, one line each:
+                            `cyc=<n> cause=0x<8 hex> epc=0x<8 hex>`. Written
+                            by the hart wherever it sets mepc/mcause, so it
+                            covers both cores — translated code never
+                            delivers a trap itself, it leaves and the hart
+                            takes it. Independent of peripheral emission
+                            order, and thousands of lines rather than
+                            millions: an identity surface for interrupt
+                            CYCLES that, unlike --trace, does not turn the
+                            translated core's fast paths off
     --pin-script <file>     scripted host input on the PADS, deterministic:
                             `<us> pin <n> <0|1>` at absolute guest time, plus
                             --usb-script's walk forms `after \"<line>\" pin …`
@@ -211,12 +222,21 @@ OPTIONS:
                             instruction. The translator's identity oracle,
                             and the same promise --no-block-cache makes:
                             every byte of every transcript must be the same
-                            either way
+                            either way. In a wasm build this is how you get
+                            the interpreter at all; it is supported forever
+                            and is the way back from the default (M7 JD15)
     --jit                   discover the whole image, translate it, and run
                             it through the host's wasm engine. Translation
                             happens at exactly two events: image load and
-                            each guest `fence.i`. Needs a build with
-                            `--features jit`; off by default (M7 JD18)
+                            each guest `fence.i`.
+                            **In a wasm build this is the default and the
+                            flag is a no-op alias** (M7 P7): the browser's
+                            own engine is the core, and --interpreter is the
+                            way back. NATIVELY the interpreter is still the
+                            default (JD9) and this is the opt-in; it needs a
+                            build with `--features jit`, because wasmtime
+                            costs minutes of cranelift over these images and
+                            is never a default dependency (JD18)
     --jit-escape-all        with --jit: emit NO guest semantics at all and
                             hand every instruction to the interpreter through
                             the escape hatch. Complete, correct and slow, and
@@ -232,8 +252,11 @@ OPTIONS:
                             over as many functions as the image needs; this
                             is the size of one, and a module the engine
                             refuses halves it and retries (M7 JD26).
-                            Default 32 since M7 P6c (DD20): V8's optimum on
-                            a real run, and 3x better than 64 in JSC
+                            Default 8 since M7b P5 (BD6/DD32): the iPhone's
+                            own rows, which prefer 8 to 16 in five of seven
+                            same-session pairs and hold the best row taken
+                            on it. V8 is within 4 % across 8/16/32; JSC is
+                            1.81x faster at 8 than at 32
     --jit-seeds <scope>     with --jit: where discovery starts.
                             `all-symbols` (default) seeds from every symbol
                             in an executable region, of the app and of the
@@ -396,6 +419,7 @@ struct Args {
     map: bool,
     dump_frames: FrameSink,
     pin_log: PinLogSink,
+    trap_log: TrapLogSink,
     tx_log: TxLogSink,
     strip: StripConfig,
 }
@@ -415,7 +439,6 @@ fn run() -> Result<ExitCode, String> {
         .translate(!args.interpreter)
         .jit_report(args.jit_report)
         .blockprof(args.blockprof)
-        .jit(args.jit)
         .jit_escape_all(args.jit_escape_all)
         .strict_grade(args.strict_grade)
         .strict_grade_blocks(args.strict_grade_blocks.clone())
@@ -432,9 +455,19 @@ fn run() -> Result<ExitCode, String> {
         .usb_sj_drain(args.usb_sj_drain)
         .dump_frames(args.dump_frames.clone())
         .pin_log(args.pin_log.clone())
+        .trap_log(args.trap_log.clone())
         .tx_log(args.tx_log.clone())
         .strip(args.strip.order, args.strip.timing);
 
+    // `--jit` only ever turns translation ON. The builder's own default is
+    // `TRANSLATED_BY_DEFAULT` — a core in the wasm build, the interpreter
+    // natively (M7 P7) — so `.jit(args.jit)` would have *cleared* the wasm
+    // default on every run that did not repeat the flag. On wasm this branch
+    // is therefore a no-op and `--jit` is the documented alias; natively it is
+    // still the opt-in that JD9 leaves it as.
+    if args.jit {
+        builder = builder.jit(true);
+    }
     if let Some(blocks) = args.jit_blocks {
         builder = builder.jit_blocks(blocks);
     }
@@ -625,6 +658,7 @@ fn run() -> Result<ExitCode, String> {
     // The run is over: a frame still open on a pad is reported as
     // incomplete rather than silently dropped.
     machine.flush_frames();
+    machine.flush_trap_log();
     report(&mut machine, &outcome);
     Ok(ExitCode::from(outcome.exit_code() as u8))
 }
@@ -770,6 +804,7 @@ fn parse(argv: Vec<String>) -> Result<Args, String> {
             }
             "--dump-frames" => args.dump_frames = parse_dump_frames(&value("--dump-frames")?)?,
             "--pin-log" => args.pin_log = parse_pin_log(&value("--pin-log")?)?,
+            "--trap-log" => args.trap_log = parse_trap_log(&value("--trap-log")?)?,
             "--tx-log" => args.tx_log = parse_tx_log(&value("--tx-log")?)?,
             "--strip-order" => {
                 let text = value("--strip-order")?;
@@ -944,6 +979,18 @@ fn parse_pin_log(text: &str) -> Result<PinLogSink, String> {
             "`{text}` is not a pin-log destination (file:<path>); the log is an edge per line \
              and never goes to a console"
         )),
+    }
+}
+
+fn parse_trap_log(text: &str) -> Result<TrapLogSink, String> {
+    match text {
+        "stdout" => Ok(TrapLogSink::Stdout),
+        other => match other.split_once(':') {
+            Some(("file", path)) => Ok(TrapLogSink::File(path.into())),
+            _ => Err(format!(
+                "`{other}` is not a trap-log destination (stdout, file:<path>)"
+            )),
+        },
     }
 }
 
@@ -1227,11 +1274,27 @@ fn report(machine: &mut Esp32C6Machine, outcome: &Outcome) {
             machine.fence_i_count(),
         ),
     }
+    // M7 P7: a run that asked for nothing still says what ran it.
+    //
+    // The wasm build's core is the translator now, so a default run is the
+    // product run — and JD20 ("the boot cost is a product number, reported not
+    // buried") and JD10 ("the escape hatch is not allowed to be unmeasured")
+    // are claims about *that* run, not about an opted-in diagnostic. One line,
+    // the same counters `--jit-report` prints in full, and silence when there
+    // is no core: `--interpreter`, a `rom-up` boot, or a native build.
+    //
+    // Not a second report path, and not printed twice: a run that asked for
+    // `--jit-report` gets the long form below **instead** of this.
+    if !machine.jit_report()
+        && let Some(line) = machine.translated_core_summary()
+    {
+        eprintln!("jit: {line}");
+    }
     if machine.jit_report() {
         // One line, on every `--jit-report` run, whether or not a core ran
         // (M7 JD20 wants the boot cost and the escape-hatch rate reported,
-        // not buried). Nothing installs a core before M7 P3, so today this
-        // says so rather than printing nothing at all.
+        // not buried). A run with no core says so rather than printing
+        // nothing at all.
         match machine.translated_core_report() {
             Some(line) => eprintln!("jit: {line}"),
             None => eprintln!(

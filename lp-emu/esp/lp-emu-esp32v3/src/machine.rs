@@ -1557,6 +1557,8 @@ impl Esp32V3Builder {
             stalled: [false, true],
             core_quantum: self.core_quantum,
             wfi_ends: [0; CORES],
+            #[cfg(feature = "bench")]
+            bench_windows: [0; CORES],
             strict_unsupported: self.strict_unsupported,
             pending_breaks: Vec::new(),
             stall_key,
@@ -1781,6 +1783,12 @@ pub struct Machine {
     /// How many windows each core has ended in `waiti` — the observable a
     /// test uses to say "the pusher parked on core 1".
     wfi_ends: [u64; CORES],
+    /// How many windows each core was *given* (`--features bench` only): the
+    /// denominator of "instructions per window", and with it the interleave's
+    /// switch rate. Not a default-build field — the speed probe's question,
+    /// not the machine's.
+    #[cfg(feature = "bench")]
+    bench_windows: [u64; CORES],
     /// The builder's unsupported-opcode policy, kept so a core reset
     /// (`service_app_core_start`) builds the new hart the same way.
     strict_unsupported: bool,
@@ -2195,6 +2203,15 @@ impl Machine {
     /// How many windows `core` has ended in `waiti`.
     pub fn wfi_ends(&self, core: usize) -> u64 {
         self.wfi_ends.get(core).copied().unwrap_or(0)
+    }
+
+    /// How many windows `core` was given (`--features bench`). One
+    /// `run_slice` call each, so `core_instructions(core) /
+    /// bench_windows(core)` is what a window really bought and the sum over
+    /// cores is the interleave's switch count.
+    #[cfg(feature = "bench")]
+    pub fn bench_windows(&self, core: usize) -> u64 {
+        self.bench_windows.get(core).copied().unwrap_or(0)
     }
 
     /// Is `core` parked in `waiti` — not held, and waiting for an interrupt
@@ -2785,6 +2802,10 @@ impl Machine {
                 };
                 let issuing_pc = self.harts[core].pc();
 
+                #[cfg(feature = "bench")]
+                {
+                    self.bench_windows[core] += 1;
+                }
                 self.bus.set_time(now);
                 self.bus.set_hart(core);
                 let end = self.harts[core].run_slice(&mut self.bus, budget);

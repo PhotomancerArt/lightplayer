@@ -850,9 +850,13 @@ just test-emu-c6                                # its gates (builds firmware)
 just heap-budget-check-chips                    # the firmware's own heap ledger, ratcheted
 just emu-c6 <elf> --strict-bus --timeout 6s     # the workshop binary, thirty flags
 just bench-emu-c6                               # its speed probe (an oracle, never a gate)
-scripts/emu/oracle-sweep.sh <bin-a> <bin-b>     # the identity oracle: uart + cycles + decoded FRAMES
+scripts/emu/oracle-sweep.sh <bin-a> <bin-b>     # the identity oracle ACROSS BINARIES: uart + cycles + decoded FRAMES
+just test-emu-jit-image                         # the identity oracle WITHIN one binary: --jit vs --interpreter (CI runs this cell)
+just test-emu-jit-identity                      # the same module bytes agreeing in wasmtime, V8 and JSC
+just test-emu-jit                               # the translator's decoder-agreement corpus (builds two images)
+just clippy-emu-jit                             # the `jit` feature's own lint seat (in `just check`)
 just bench-emu-c6-pgo                           # PGO recipe on top of the probe (opt-in, never a default build)
-just bench-emu-web                              # the same probe in a browser, TRANSLATED core selectable (wasip1 + JS WASI shim, LAN-served)
+just bench-emu-web                              # the same probe in a browser, TRANSLATED core by default (wasip1 + JS WASI shim, LAN-served)
 bun target/emu-bench-web/bench-cli.mjs --stage target/emu-bench-web   # the desk-engine half of that rig (node too)
 just bench-emu-xt                               # the Xtensa core's probe (same rules)
 cargo run -p lp-cli -- validate run emu-m3 --config lp-emu:esp32c6:t1 --dry-run
@@ -861,21 +865,64 @@ cargo run -p lp-cli -- validate run emu-m3 --config lp-emu:esp32c6:t1 --dry-run
 #### Which reference image you quote decides what you have measured
 
 `bench-emu-c6` runs four pinned images and they are **not** interchangeable.
-Same window, one loaded Mac, 2026-09-08, real time at t1:
+Taken together, 2026-09-11, on the `77384a894` pin at the close of the speed
+ladder's M7 — native on an M2 Max (`just bench-emu-c6`, best of 2, USER
+seconds, load 3.1–4.0) and in both wasm engines off the same staged module
+(`bench-cli.mjs`, 5,500 ms emulated, one invocation per image running both
+legs back to back, node best of three, load 2.6–4.3). Real time at **t2**:
 
-| image | rt | what it actually does |
-|---|---|---|
-| `boot-idle-memfs` | 6.0× | `wfi` with an EMPTY filesystem — no project, no shader |
-| `harness` | 0.6× (3.2× under M4's poll skip) | a shader COMPILE, and console-bound |
-| `render-basic` | 0.47× | the product's render loop: a real project, JIT'd shader per frame, RMT out |
-| `render-rocaille` | 0.53× | the same loop with four times the shader per frame |
+| image | native | node/V8 translated | node/V8 `--interpreter` | bun/JSC translated | bun/JSC `--interpreter` | mean stay | what it actually does |
+|---|---:|---:|---:|---:|---:|---:|---|
+| `boot-idle-memfs` | 10.00× | 2.808× | **5.293×** | 2.355× | **5.633×** | 43.7 | `wfi` with an EMPTY filesystem — no project, no shader |
+| `harness` | 1.25× | **3.062×** | 1.143× | **2.700×** | 1.189× | 1354.0 | a shader COMPILE, and console-bound |
+| `render-basic` | 1.03× | **0.990×** | 0.557× | **0.816×** | 0.605× | 68.9 | the product's render loop: a real project, JIT'd shader per frame, RMT out |
+| `render-rocaille` | 1.30× | **1.166×** | 0.673× | **1.080×** | 0.720× | 30.0 | the same loop with four times the shader per frame |
 
-**Quote the render rows.** The ladder's headline numbers were taken on the
-other two for four milestones, and the render loop turns out to be about
-**twelve times slower** than the `boot-idle` image those numbers came from.
-The M4 poll skip is worth 5.6× on the harness and nothing — very slightly
-negative — on the render loop, which is the difference between accelerating
-the emulator and accelerating its logging.
+node/V8 at 16 blocks a function, bun/JSC at 8 — the sizes each engine's own
+rows prefer. The wasm rows are the **default** core (translated) against
+`--interpreter` on the same module; the UART0 sha256 is identical between the
+two legs of every image, which is the whole point.
+
+Three things to read off it, and each has bitten someone:
+
+- **Quote the render rows.** The ladder's headline numbers were taken on the
+  other two for four milestones, and the render loop is about twelve times
+  slower than the `boot-idle` image those numbers came from.
+- **The translated core is not uniformly faster than the interpreter.** On
+  `boot-idle-memfs` it is **0.53× of its own interpreter in V8 and 0.42× in
+  JSC** — the run retires 51 M instructions where `render-basic` retires
+  543 M, so a fixed ~1.1 s of discover+emit+compile is most of the wall, and
+  what is left is short-stay and exit-heavy. A translated core wins where
+  stays are long and loses where they are short or the run is too small to
+  amortize its own translation. `harness`, at 1,354-instruction stays, is the
+  other end: 2.7–3.1× over its interpreter.
+- **A ROM-up board does not translate at all** (DD19). Every emulated board in
+  Studio-in-a-tab boots ROM-up, so none of the wasm columns applies to one
+  yet.
+
+The full argument, the ladder's history and the phone's numbers are in
+`docs/adr/2026-09-11-emulator-wasm-translator.md`; the translator's own page
+is `lp-emu/lp-emu-jit/README.md`.
+
+#### Taking a phone row (DD41)
+
+The phone is the ladder's bar and it is **noisy**: one afternoon on one device
+moved the translated rows ±10 % and the interpreter row 25 %, warm-up in one
+direction and thermal throttling in the other. So:
+
+- **Best of at least three presses, spaced by minutes.** Presses taken within
+  a minute of each other fall across the board — the interpreter included —
+  and that is the device, not the code. Quote the sequence, not just the best.
+- **The cross-session number is the same-press ratio**, translated ÷
+  interpreter from the *same* press, because it divides the thermal state out.
+  Quote it beside the absolute.
+- **A phase's bar is the desk proxy, not the phone** (Q4 at G-M7B): `bun` at
+  8 blocks a function and `node` at 16, interleaved, one invocation, best-of-N,
+  with the load average quoted. The phone confirms direction, not the third
+  decimal.
+- Never compare a phone row against a desk row taken at a different time, and
+  never against a row whose build stamp you cannot see — `bench-web.sh`
+  refuses to stage a module older than HEAD for exactly that reason.
 
 #### The walk, and what still needs a board
 

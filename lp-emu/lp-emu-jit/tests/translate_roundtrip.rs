@@ -1676,9 +1676,7 @@ fn an_escape_between_a_pending_load_and_a_ram_store_keeps_the_poll() {
     let set = set_of(&rig, GUEST_BASE);
     let memory_only = Emit {
         alu: false,
-        memory: true,
-        control: true,
-        selector: Selector::DEFAULT,
+        ..Emit::EVERYTHING
     };
     let out = rig.run_named(
         "pending-across-an-escape",

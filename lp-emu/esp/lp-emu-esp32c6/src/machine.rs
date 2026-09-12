@@ -102,6 +102,31 @@ const LP_CLKRST_RESET_CAUSE: u32 = 0x010;
 
 pub const MAX_SLICE_CYCLES: u64 = 8_192;
 
+/// Does this build install a translated core when nothing on the command line
+/// asks either way? (M7 P7 — R9's translator-only core.)
+///
+/// **`true` on a wasm target, `false` natively**, and both halves are
+/// decisions rather than conveniences:
+///
+/// - The wasm build *is* the product build. It is what the phone rig, the
+///   browser bench and Studio-in-a-tab run, and since P7 its core is the
+///   translator: the guest's own program compiled to wasm and run by the same
+///   engine that runs the rest of the app. `--interpreter` is how you get the
+///   old one, and it stays forever (JD15) — as the free differential oracle
+///   and as the way back from this flip.
+/// - Natively the interpreter is still the default (JD9, and JD24 deferred P8
+///   that would change it): `wasmtime` needs 130–220 s of cranelift over these
+///   images, and every test and CI job depends on this binary starting fast.
+///   `--jit` on a build with `--features jit` is how a desk run gets a
+///   translated core, and that is what the identity oracle compares.
+///
+/// This is a *policy* constant and nothing more. What it selects — whether a
+/// core is installed — is not architectural state: `mach::translated`'s
+/// contract is that a run with a core and a run without one produce a
+/// byte-identical everything, which is what makes flipping a default a
+/// reversible act rather than a new behaviour.
+pub const TRANSLATED_BY_DEFAULT: bool = cfg!(target_family = "wasm");
+
 /// The default bound on how many discovered blocks are **installed**
 /// (`--jit-blocks`).
 ///
@@ -168,11 +193,47 @@ pub const DEFAULT_JIT_BLOCKS: usize = usize::MAX;
 /// survives, 32. JSC keeps getting faster all the way down to the
 /// [`crate::jit`] floor of 8, and 32 is three times better to it than 64.
 ///
-/// So 32 is the size that serves both engines: V8's optimum, and within a
+/// So 32 was the size that served both engines: V8's optimum, and within a
 /// factor of JSC's without asking for a size V8 cannot compile. It is a
 /// *default* — `--jit-fn-blocks` still takes anything from the floor up, and
 /// a caller that knows its engine should say so.
-pub const DEFAULT_JIT_FN_BLOCKS: usize = 32;
+///
+/// # 8 since M7b P5 (BD6 / DD32), and the phone picked it
+///
+/// BD6 reserves this constant for one phase and one kind of evidence: **a
+/// phone row.** M7b's P1–P4 heads produced six sessions of them, `render-basic`
+/// t2 through the staged rig (`m7b/phone-rows/*.json`, `G-M7P-gate.md`
+/// readings 3–8), each session pressing 8 and 16 blocks a function
+/// back to back so the pair is same-session and the thermal state is shared:
+///
+/// | head | 8 blocks/fn | 16 blocks/fn | 8 wins |
+/// |---|---:|---:|:--:|
+/// | pre-P3 | 0.904× | 0.793× | yes |
+/// | P3 | 0.863× | 0.889× | no |
+/// | P3 | 0.945× | 0.888× | yes |
+/// | P3 | **1.008×** | 0.926× | yes |
+/// | P3 | 0.921× | 0.780× | yes |
+/// | P3 | 0.818× | 0.761× | yes |
+/// | P4 (press 1, cold) | 0.851× | 0.882× | no |
+///
+/// **8 wins five of seven same-session pairs and holds the best row ever
+/// taken on this phone, 1.008×.** The desk agrees for JSC and disagrees for
+/// V8, which is the same split P6c found and is why the phone is the one that
+/// decides: `render-basic` t2, 5,500 ms, `p6b-rows.mjs`, interleaved,
+/// best-of-3, one invocation per engine, on P5's own head —
+///
+/// | `--jit-fn-blocks` | node/V8 | bun/JavaScriptCore |
+/// |---:|---:|---:|
+/// | 8 | 0.917× | **0.769×** |
+/// | 16 | **0.955×** | 0.659× |
+/// | 32 | 0.933× | 0.425× |
+/// | 64 | 0.758× | 0.259× |
+///
+/// — V8 is within 4 % across 8/16/32 and JSC is **1.81× faster at 8 than at
+/// 32**. So the size the phone wants costs V8 almost nothing and the size V8
+/// wants costs the phone a third of its number. `scripts/emu/bench-web.sh`'s
+/// `defaults.fnBlocks` mirrors this constant and moves with it.
+pub const DEFAULT_JIT_FN_BLOCKS: usize = 8;
 
 /// The same for `--jit-escape-all`, where a block emits several times the
 /// wasm: a register flush, a call and a reload per instruction instead of a
@@ -519,6 +580,23 @@ pub enum PinLogSink {
 
 /// Lines the pin log writes before it stops, with a closing note.
 pub const PIN_LOG_LINE_CAP: u64 = 2_000_000;
+
+/// Where the hart's trap log goes (`--trap-log`): one line per trap the hart
+/// **took**, `cyc=<u64> cause=0x<8 hex> epc=0x<8 hex>`.
+///
+/// Off by default, like every transcript that is not the UART. See
+/// [`lp_riscv_emu::mach::trap::TrapLog`] for what the surface is for; this is
+/// only where the bytes end up. The log is accumulated by the hart and written
+/// out once, at [`Esp32C6Machine::flush_trap_log`] — a run that is killed
+/// leaves no trap log, which is the one way it differs from the pin log's
+/// stream.
+#[derive(Clone, Debug, Default)]
+pub enum TrapLogSink {
+    #[default]
+    Off,
+    Stdout,
+    File(PathBuf),
+}
 
 /// Where the radio TX log goes (`--tx-log`): one line per frame the WiFi
 /// blob handed the MAC.
@@ -1008,6 +1086,7 @@ pub struct Esp32C6Builder {
     peripherals: Vec<(u32, u32, BoxedPeripheral)>,
     dump_frames: FrameSink,
     pin_log: PinLogSink,
+    trap_log: TrapLogSink,
     tx_log: TxLogSink,
     strip: StripConfig,
     /// Keep the RMT's pulse and word logs (`Rmt::keep_logs`).
@@ -1034,7 +1113,9 @@ impl Esp32C6Builder {
             translate: true,
             jit_report: false,
             blockprof: false,
-            jit: false,
+            // M7 P7: the wasm build's core is the translator and the native
+            // build's is the interpreter. See [`TRANSLATED_BY_DEFAULT`].
+            jit: TRANSLATED_BY_DEFAULT,
             jit_escape_all: false,
             jit_blocks: None,
             jit_fn_blocks: None,
@@ -1069,6 +1150,7 @@ impl Esp32C6Builder {
             peripherals: Vec::new(),
             dump_frames: FrameSink::default(),
             pin_log: PinLogSink::default(),
+            trap_log: TrapLogSink::default(),
             tx_log: TxLogSink::default(),
             strip: StripConfig::default(),
             rmt_logs: false,
@@ -1177,9 +1259,13 @@ impl Esp32C6Builder {
     /// trace. That is what makes the interpreter this milestone's differential
     /// oracle (M7 JD15).
     ///
-    /// **Nothing installs a core yet.** M7's P1 lands the seam and this
-    /// switch; P3 is what first puts something behind it. Until then the flag
-    /// is honest and inert: it already turns off something that is not there.
+    /// Since M7 P7 this is the **veto**, not the switch: on a wasm target a
+    /// core is installed unless this says no, and `--interpreter` is the only
+    /// thing that says no. [`Esp32C6Builder::jit`] is the other half — whether
+    /// this build's default asks for a core at all — and
+    /// [`Esp32C6Machine::sync_translated_core`] is what enforces the veto
+    /// wherever a core could reappear (a restore, a reboot, a translation
+    /// event).
     pub fn translate(mut self, on: bool) -> Self {
         self.translate = on;
         self
@@ -1208,11 +1294,20 @@ impl Esp32C6Builder {
         self
     }
 
-    /// Build and install a translated core (`--jit`). Off by default.
+    /// Build and install a translated core. Defaults to
+    /// [`TRANSLATED_BY_DEFAULT`] — **on in the wasm build, off natively**
+    /// (M7 P7, JD9).
     ///
-    /// Needs the crate's `jit` feature; without it `build` fails rather than
-    /// quietly interpreting, because a run that asked to be translated and was
-    /// not is a measurement nobody can read.
+    /// `--jit` is what turns it on for a native build, and needs the crate's
+    /// `jit` feature; without it `build` fails rather than quietly
+    /// interpreting, because a run that asked to be translated and was not is
+    /// a measurement nobody can read. On a wasm target the translator is
+    /// unconditional and `--jit` is a no-op alias for the default.
+    ///
+    /// `false` here is not the same statement as `--interpreter`
+    /// ([`Esp32C6Builder::translate`]): this one says "do not build one at
+    /// boot", that one says "never have one at all", and only the second is
+    /// the oracle.
     pub fn jit(mut self, on: bool) -> Self {
         self.jit = on;
         self
@@ -1446,6 +1541,12 @@ impl Esp32C6Builder {
         self
     }
 
+    /// Where the hart's trap log goes. Off by default.
+    pub fn trap_log(mut self, sink: TrapLogSink) -> Self {
+        self.trap_log = sink;
+        self
+    }
+
     /// How a routed pad is decoded: the wire timing and the byte order.
     pub fn strip(mut self, order: ColorOrder, timing: ChannelTiming) -> Self {
         self.strip = StripConfig { timing, order };
@@ -1572,6 +1673,7 @@ impl Esp32C6Builder {
             peripherals,
             dump_frames,
             pin_log,
+            trap_log,
             tx_log,
             strip,
             rmt_logs,
@@ -1839,6 +1941,11 @@ impl Esp32C6Builder {
             PinLogSink::Off => None,
             PinLogSink::File(path) => Some(open_write(path)?),
         };
+        let trap_log_sink: Option<Box<dyn std::io::Write + Send>> = match &trap_log {
+            TrapLogSink::Off => None,
+            TrapLogSink::Stdout => Some(Box::new(std::io::stdout())),
+            TrapLogSink::File(path) => Some(open_write(path)?),
+        };
         let tx_log_sink: Option<Box<dyn std::io::Write + Send>> = match &tx_log {
             TxLogSink::Off => None,
             TxLogSink::Stderr => Some(Box::new(std::io::stderr())),
@@ -1871,6 +1978,9 @@ impl Esp32C6Builder {
         // emit the `fence.i` the cache's invalidation rests on, and we own
         // neither, so the cache is off there.
         hart.set_block_cache(block_cache && boot_mode != BootMode::RomUp);
+        // The transcript surface, when a run asked for it: the hart writes
+        // one line per trap it takes, whichever core is running (D5/PD1).
+        hart.set_trap_log(!matches!(trap_log, TrapLogSink::Off));
         // The address's cost, if this grade charges one. Installed after the
         // loader has placed the app and filled the window: the cache starts
         // cold, as it is at reset, and the host's placement of segments
@@ -1963,7 +2073,7 @@ impl Esp32C6Builder {
             jit_published_seeds: Vec::new(),
             jit_code_shadow: Vec::new(),
             jit_code_spans: Vec::new(),
-            #[cfg(feature = "jit")]
+            #[cfg(any(feature = "jit", target_family = "wasm"))]
             jit_installed_starts: BTreeSet::new(),
             jit_split_events: Vec::new(),
             power_on: None,
@@ -2018,6 +2128,7 @@ impl Esp32C6Builder {
                 pin_log_lines: 0,
                 pin_log_capped: false,
             },
+            trap_log: trap_log_sink,
         };
         // The state a reboot goes back to, taken before a single
         // instruction runs. Only when a run asked to perform resets: it is
@@ -2088,7 +2199,7 @@ impl Esp32C6Builder {
         // M7b P1 step 1: the split census wants the boot walk's starts as its
         // stop set, and it is taken on a run with no core at all — so the walk
         // happens here, where a `--jit` run's boot event would have been.
-        #[cfg(feature = "jit")]
+        #[cfg(any(feature = "jit", target_family = "wasm"))]
         if !jit && blockprof && boot_mode != BootMode::RomUp && Esp32C6Machine::split_census_on() {
             // Not `jit_entry`: that field is what arms the *real* second
             // translation event, and a census run has no core to rebuild.
@@ -2315,7 +2426,7 @@ pub struct Esp32C6Machine {
     /// answers, so a second walk neither claims nor follows a start that is in
     /// here. It is rebuilt from scratch whenever a whole-module retire
     /// replaces everything, and grown by each incremental install.
-    #[cfg(feature = "jit")]
+    #[cfg(any(feature = "jit", target_family = "wasm"))]
     jit_installed_starts: BTreeSet<u32>,
     /// M7b P1 step 1, off unless `LP_EMU_JIT_SPLIT_CENSUS` is set: what the
     /// incremental walk **would** find at each `fence.i`, without emitting
@@ -2414,6 +2525,10 @@ pub struct Esp32C6Machine {
     cache_fills: u64,
     /// The pads: a decoder per routed pad, the frames, and the two sinks.
     pins: PinObserver,
+    /// Where the hart's trap log goes, when `--trap-log` asked for one. The
+    /// lines themselves live on the hart; this is only the sink, written once
+    /// by [`Esp32C6Machine::flush_trap_log`].
+    trap_log: Option<Box<dyn std::io::Write + Send>>,
 }
 
 impl Esp32C6Machine {
@@ -2499,9 +2614,10 @@ impl Esp32C6Machine {
     /// binary, the same image, every instruction interpreted, and a
     /// transcript that must match byte for byte (M7 JD15).
     ///
-    /// Nothing installs a core yet — M7 P3 is what first does — so today this
-    /// reports the policy and [`Esp32C6Machine::sync_translated_core`]
-    /// enforces it.
+    /// This reports the policy; [`Esp32C6Machine::sync_translated_core`]
+    /// enforces it. Since P7 the policy's other half is
+    /// [`TRANSLATED_BY_DEFAULT`], which decides whether a run that said
+    /// nothing gets a core.
     pub fn translate(&self) -> bool {
         self.translate
     }
@@ -2520,13 +2636,29 @@ impl Esp32C6Machine {
             .flatten()
     }
 
+    /// The installed core's **one-line** summary — what a run that passed no
+    /// flags at all prints (M7 P7).
+    ///
+    /// Unlike [`Esp32C6Machine::translated_core_report`] this is not gated on
+    /// `--jit-report`, because since P7 the wasm build's core is the
+    /// translator and a default run is the product run: JD20's "the boot cost
+    /// is a product number, reported not buried" and JD10's "the escape hatch
+    /// is not allowed to be unmeasured" both have to hold for a user who asked
+    /// for nothing. `None` when no core is installed — `--interpreter`, a
+    /// `rom-up` boot, or a native build — which is exactly when there is
+    /// nothing to say.
+    #[must_use]
+    pub fn translated_core_summary(&self) -> Option<String> {
+        self.harts[0].translated_core_summary()
+    }
+
     /// M7 P6c (Q2): the MMIO census, if `LP_EMU_JIT_MMIO_CENSUS` turned it on.
     ///
     /// Reported from here rather than from the core's own `report()` because
     /// resolving an address to `PERIPHERAL+0xoff name` needs the bus, and a
     /// [`crate::jit::JitCore`] has no bus — and because the census outlives
     /// every core a run installs.
-    #[cfg(feature = "jit")]
+    #[cfg(any(feature = "jit", target_family = "wasm"))]
     #[must_use]
     pub fn jit_mmio_census(&self) -> Option<String> {
         crate::jit::mmio_census::report(&self.bus)
@@ -2534,7 +2666,7 @@ impl Esp32C6Machine {
 
     /// Without the `jit` feature there is no translated code and so no
     /// census — the same shape, so the CLI needs no `cfg` of its own.
-    #[cfg(not(feature = "jit"))]
+    #[cfg(not(any(feature = "jit", target_family = "wasm")))]
     #[must_use]
     pub fn jit_mmio_census(&self) -> Option<String> {
         None
@@ -2597,7 +2729,7 @@ impl Esp32C6Machine {
     /// and did not get it fails rather than interpreting quietly, because a
     /// measurement nobody can tell apart from the control is worse than no
     /// measurement.
-    #[cfg(feature = "jit")]
+    #[cfg(any(feature = "jit", target_family = "wasm"))]
     fn install_translated_core(
         &mut self,
         entry: u32,
@@ -2606,11 +2738,11 @@ impl Esp32C6Machine {
         fn_blocks: usize,
         event: &str,
     ) -> Result<(), BuildError> {
-        let policy = if escape_all {
+        let policy = crate::jit::emission_diagnostics(if escape_all {
             lp_emu_jit::translate::Emit::NOTHING
         } else {
             lp_emu_jit::translate::Emit::EVERYTHING
-        };
+        });
         let model = self.time_grade.cycle_model();
         let seeds = self.translation_seeds(entry);
         if let Some(path) = self.jit_emit_only.clone() {
@@ -2650,7 +2782,7 @@ impl Esp32C6Machine {
 
     /// The addresses discovery starts looking from. See
     /// [`Esp32C6::install_translated_core`] for why they are these.
-    #[cfg(feature = "jit")]
+    #[cfg(any(feature = "jit", target_family = "wasm"))]
     fn translation_seeds(&self, entry: u32) -> Vec<u32> {
         let all_symbols = self.jit_seed_scope == SeedScope::AllSymbols;
         let exec: Vec<(u32, u32)> = self
@@ -2887,13 +3019,13 @@ impl Esp32C6Machine {
 
     /// Every pc the whole-image walk finds an instruction at, or an empty set
     /// on a build without the `jit` feature, where there is no walk.
-    #[cfg(feature = "jit")]
+    #[cfg(any(feature = "jit", target_family = "wasm"))]
     fn discovered_pcs(&self) -> BTreeSet<u32> {
         let seeds = self.translation_seeds(self.boot_entry);
         crate::jit::discovered_instruction_pcs(&self.bus, &seeds)
     }
 
-    #[cfg(not(feature = "jit"))]
+    #[cfg(not(any(feature = "jit", target_family = "wasm")))]
     fn discovered_pcs(&self) -> BTreeSet<u32> {
         BTreeSet::new()
     }
@@ -3011,7 +3143,7 @@ impl Esp32C6Machine {
     /// fall-through from claimed code straight into unclaimed — is not
     /// counted. Every control transfer ends a block, so that is the only case,
     /// and it is bounded by the number of blocks that straddle the boundary.
-    #[cfg(feature = "jit")]
+    #[cfg(any(feature = "jit", target_family = "wasm"))]
     #[must_use]
     fn split_census_on() -> bool {
         static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
@@ -3020,7 +3152,7 @@ impl Esp32C6Machine {
 
     /// Claim the whole image the way a boot translation event would, without
     /// emitting anything, so the census has a stop set to work against.
-    #[cfg(feature = "jit")]
+    #[cfg(any(feature = "jit", target_family = "wasm"))]
     fn split_census_boot(&mut self, entry: u32) {
         let seeds = self.translation_seeds(entry);
         let (found, us) = crate::jit::walk(&self.bus, &seeds, usize::MAX, &BTreeSet::new());
@@ -3049,7 +3181,7 @@ impl Esp32C6Machine {
     }
 
     /// One `fence.i`'s worth of the census. See [`Self::split_census_on`].
-    #[cfg(feature = "jit")]
+    #[cfg(any(feature = "jit", target_family = "wasm"))]
     fn split_census_event(&mut self) {
         let entry = self.jit_entry.unwrap_or(self.boot_entry);
         let seeds = self.translation_seeds(entry);
@@ -3095,7 +3227,7 @@ impl Esp32C6Machine {
                 self.jit_published_seeds.push(base);
             }
         }
-        #[cfg(feature = "jit")]
+        #[cfg(any(feature = "jit", target_family = "wasm"))]
         if Self::split_census_on()
             && !std::env::var_os("LP_EMU_JIT_SPLIT_CENSUS").is_some_and(|v| v == "writable")
         {
@@ -3105,7 +3237,7 @@ impl Esp32C6Machine {
             return;
         }
         self.jit_retranslations += 1;
-        #[cfg(feature = "jit")]
+        #[cfg(any(feature = "jit", target_family = "wasm"))]
         self.retranslate_after_fence_i();
     }
 
@@ -3182,7 +3314,7 @@ impl Esp32C6Machine {
     /// hold and installs that beside them, and the whole-image path is what
     /// happens when it cannot: a module went stale, or the run is recording.
     /// See [`crate::jit::install_incremental`].
-    #[cfg(feature = "jit")]
+    #[cfg(any(feature = "jit", target_family = "wasm"))]
     fn retranslate_after_fence_i(&mut self) {
         let Some(entry) = self.jit_entry else { return };
         let escape_all = self.jit_escape_all;
@@ -3192,11 +3324,11 @@ impl Esp32C6Machine {
         // is no core to add to and the whole-image path is the only one that
         // means anything.
         if self.jit_emit_only.is_none() {
-            let policy = if escape_all {
+            let policy = crate::jit::emission_diagnostics(if escape_all {
                 lp_emu_jit::translate::Emit::NOTHING
             } else {
                 lp_emu_jit::translate::Emit::EVERYTHING
-            };
+            });
             let model = self.time_grade.cycle_model();
             let seeds = self.translation_seeds(entry);
             match crate::jit::install_incremental(
@@ -3249,7 +3381,7 @@ impl Esp32C6Machine {
     }
 
     /// `--jit` on a build without the `jit` feature.
-    #[cfg(not(feature = "jit"))]
+    #[cfg(not(any(feature = "jit", target_family = "wasm")))]
     fn install_translated_core(
         &mut self,
         _entry: u32,
@@ -3664,6 +3796,32 @@ impl Esp32C6Machine {
         if let Some(w) = self.pins.pin_log.as_mut() {
             let _ = w.flush();
         }
+    }
+
+    /// Write the hart's trap log to wherever `--trap-log` pointed, once, at
+    /// the end of the run.
+    ///
+    /// The lines are accumulated on the hart (one per trap taken, whichever
+    /// core was running) and go out here rather than as they happen, for two
+    /// reasons: the hart is `no_std` and holds no sink, and the browser rig
+    /// needs the same bytes as an in-memory buffer to sha256 rather than as a
+    /// stream. A run with no `--trap-log` does nothing here.
+    ///
+    /// Returns how many lines were written, or `None` when no log was asked
+    /// for.
+    pub fn flush_trap_log(&mut self) -> Option<u64> {
+        let sink = self.trap_log.as_mut()?;
+        let log = self.harts[0].trap_log()?;
+        let lines = log.lines();
+        let _ = sink.write_all(log.text().as_bytes());
+        let _ = sink.flush();
+        Some(lines)
+    }
+
+    /// How many traps the hart has taken, when a run asked for the log.
+    #[must_use]
+    pub fn trap_log_lines(&self) -> Option<u64> {
+        self.harts[0].trap_log().map(|l| l.lines())
     }
 
     /// Take the slice's edges off the fabric and feed them to the pads'
@@ -5129,7 +5287,13 @@ impl Esp32C6Machine {
         // code compiled from guest bytes the restored regions are about to
         // replace. The bus's pending code writes go with it: they described
         // the machine that was.
+        // The trap log is a transcript, not state: it does not rewind with
+        // the machine. Lifted out before the harts are overwritten and handed
+        // straight back, so a restored run — a `--reboot-on-reset` reboot —
+        // goes on writing the same lines after the ones it already wrote.
+        let trap_log = self.harts[0].take_trap_log();
         self.harts.clone_from(&s.harts);
+        self.harts[0].restore_trap_log(trap_log);
         self.bus.restore_regions(&s.regions);
         let _ = self.bus.take_code_writes();
         self.bus.restore_peripherals(&s.periph);
@@ -5174,6 +5338,21 @@ mod tests {
         assert!(m.harts[0].allow_unaligned() && m.bus.allow_unaligned());
         assert_eq!(m.cycles(), 0);
         assert!(m.hooks().is_empty(), "the table ships empty");
+    }
+
+    /// M7 P7. The builder — not just the CLI — carries the flip, because
+    /// Studio's in-tab emulator and the bench rig build machines through it
+    /// and neither passes `--jit`. `bare()` inherits it, which is what makes
+    /// the two constructors one policy rather than two.
+    #[test]
+    fn the_builders_default_is_the_build_wide_translation_policy() {
+        assert_eq!(Esp32C6Builder::new().jit, TRANSLATED_BY_DEFAULT);
+        assert_eq!(Esp32C6Builder::bare().jit, TRANSLATED_BY_DEFAULT);
+        assert!(
+            Esp32C6Builder::new().translate,
+            "and `--interpreter` is off by default, because it is the veto and \
+             not the switch"
+        );
     }
 
     #[test]

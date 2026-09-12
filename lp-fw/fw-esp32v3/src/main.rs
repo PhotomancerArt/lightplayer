@@ -180,6 +180,15 @@ mod flash_storage;
     feature = "test_rmt"
 ))]
 mod output;
+// The benchmark images (`bench_render_loop`): the shipped boot with a seeded
+// filesystem and a bounded loop. Not under `src/tests/` — see `bench/mod.rs`.
+#[cfg(all(
+    feature = "bench_render_loop",
+    feature = "server",
+    not(feature = "radio_ram_probe"),
+    not(fw_harness)
+))]
+mod bench;
 #[cfg(all(feature = "server", not(feature = "radio_ram_probe"), not(fw_harness)))]
 mod recovery;
 #[cfg(all(feature = "server", not(feature = "radio_ram_probe"), not(fw_harness)))]
@@ -194,7 +203,6 @@ use {
     core::cell::RefCell,
     flash_storage::{LpFlashStorage, LpfsPartition, lpfs_config},
     fw_esp32_common::hardware::manifest_loader::load_hardware_manifest,
-    fw_esp32_common::server_loop::run_server_loop,
     fw_esp32_common::time::Esp32TimeProvider,
     fw_esp32_common::{boot, logger, lp_fs, transport},
     lp_gfx_lpvm::TargetLpvmGraphics,
@@ -206,6 +214,16 @@ use {
     output::{Esp32OutputProvider, Esp32V3RmtWs281xDriver},
     serial::io_task,
 };
+
+// The unbounded loop is the product's entry point; the benchmark image calls
+// `run_server_loop_bounded` instead and would carry this as an unused import.
+#[cfg(all(
+    feature = "server",
+    not(feature = "bench_render_loop"),
+    not(feature = "radio_ram_probe"),
+    not(fw_harness)
+))]
+use fw_esp32_common::server_loop::run_server_loop;
 
 esp_bootloader_esp_idf::esp_app_desc!();
 
@@ -760,6 +778,10 @@ struct FirmwareApp {
     server: LpServer,
     transport: transport::StreamingMessageRouterTransport,
     time_provider: Esp32TimeProvider,
+    /// What `auto_load_project` cost, in cycles. See the bracket in
+    /// [`boot_firmware`].
+    #[cfg(feature = "bench_render_loop")]
+    load_cycles: u32,
 }
 
 #[cfg(all(feature = "server", not(feature = "radio_ram_probe"), not(fw_harness)))]
@@ -875,12 +897,25 @@ fn boot_firmware() -> FirmwareApp {
     // `esp_println!` lines above are the pre-transport ones.
     logger::init(serial::io_task::log_write_to_outgoing);
 
+    // The transcript header, before any record and as early as the logger
+    // allows — the same sink-agnostic entry point every other classic payload
+    // uses.
+    #[cfg(feature = "bench_render_loop")]
+    bench::render_loop::write_header();
+
     let (incoming, _) = serial::io_task::get_message_channels();
     let (write_request, write_result) = serial::io_task::get_server_write_channels();
     let transport =
         transport::StreamingMessageRouterTransport::new(incoming, write_request, write_result);
 
     let base_fs = mount_filesystem(flash);
+
+    // The render-loop benchmark's whole firmware difference, part one: the
+    // filesystem is not empty. Everything after this line — the manifest, the
+    // server, `auto_load_project`, the RMT open, the render — is the shipped
+    // boot finding a project where a flashed board would have one.
+    #[cfg(feature = "bench_render_loop")]
+    bench::render_loop::seed(base_fs.as_ref());
 
     // The compiled-in fallback is the DOM-Z-102 profile — the desk board and
     // the roadmap's WLED-class exemplar. An `/hardware.json` on the device
@@ -1074,6 +1109,8 @@ fn boot_firmware() -> FirmwareApp {
     // stayed up long enough to accept a delete, and clearing it meant erasing
     // the lpfs partition with espflash. Safe mode is what turns that into a
     // board you can talk to.
+    #[cfg(feature = "bench_render_loop")]
+    let load_from = bench::render_loop::read_cycles();
     if boot_assessment.safe_mode {
         let incomplete_boots = lp_recovery::snapshot()
             .map(|s| s.consecutive_incomplete_boots)
@@ -1084,6 +1121,11 @@ fn boot_firmware() -> FirmwareApp {
     } else {
         boot::auto_load_project(&mut server);
     }
+    // What `auto_load_project` cost, in cycles — parse, resolve, map and
+    // above all the shader compile. The one part of the run that does not
+    // repeat, so the benchmark reports it apart from the frames.
+    #[cfg(feature = "bench_render_loop")]
+    let load_cycles = bench::render_loop::read_cycles().wrapping_sub(load_from);
 
     // Boot frame ends here. The boot-complete milestone is NOT marked here: the
     // server loop marks it after the first successfully served frame, which is
@@ -1094,6 +1136,8 @@ fn boot_firmware() -> FirmwareApp {
         server,
         transport,
         time_provider: Esp32TimeProvider::new(),
+        #[cfg(feature = "bench_render_loop")]
+        load_cycles,
     }
 }
 
@@ -1145,6 +1189,7 @@ async fn main(_spawner: embassy_executor::Spawner) {
     // The watchdog feed is a no-op: no RWDT is armed (see the module docs),
     // and the server loop takes the feeder as a closure precisely so a chip
     // without one pays nothing.
+    #[cfg(not(feature = "bench_render_loop"))]
     run_server_loop(
         app.server,
         app.transport,
@@ -1153,6 +1198,49 @@ async fn main(_spawner: embassy_executor::Spawner) {
         |_now_ms| {},
     )
     .await;
+
+    // The render-loop benchmark's whole firmware difference, part two: the
+    // same loop, with an end. `run_server_loop` is the same body with
+    // `FrameBudget::UNBOUNDED` — the frames below are the product's frames,
+    // not a re-implementation of them.
+    #[cfg(feature = "bench_render_loop")]
+    {
+        use fw_checks::checks::render_loop::{FrameStats, cycles_to_us};
+
+        let heap_after_load = esp32_memory_stats().unwrap_or((0, 0));
+        let load_us = cycles_to_us(app.load_cycles as u64, bench::render_loop::CPU_HZ);
+        let mut stats = FrameStats::new();
+        // The guest's own clock, bracketing the loop: `Esp32TimeProvider`
+        // measures from its own construction and is about to be moved into
+        // the loop, so the bracket is taken on `Instant` directly.
+        let started = embassy_time::Instant::now();
+
+        let server = fw_esp32_common::server_loop::run_server_loop_bounded(
+            app.server,
+            app.transport,
+            app.time_provider,
+            heartbeat_memory_stats,
+            |_now_ms| {},
+            bench::render_loop::budget(),
+            |cycles| stats.record(cycles),
+        )
+        .await;
+
+        let uptime_us = started.elapsed().as_micros();
+        // Report BEFORE the server is dropped: the summary's heap figures are
+        // meant to describe a machine with the project loaded, and dropping
+        // it first would report one that had just unloaded.
+        bench::render_loop::report(&stats, load_us, uptime_us, heap_after_load);
+        drop(server);
+
+        // Idle, yielding, so the I/O task drains the records and the marker
+        // to the host link. `--exit-on` fires on those bytes; a loop that
+        // stopped yielding here would print the sentinel into a queue nobody
+        // pumps.
+        loop {
+            embassy_time::Timer::after(embassy_time::Duration::from_millis(100)).await;
+        }
+    }
 }
 
 /// Harness entrypoint. Replaces the app entirely — a `test_*` build is a rig,

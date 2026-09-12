@@ -9,6 +9,11 @@
 #   scripts/emu/bench-web.sh --stage-into ~/.photomancer/emu-lab              # build, then stage into the perf lab's store, no serve
 #   scripts/emu/bench-web.sh --stage-into ~/.photomancer/emu-lab --from-stage <dir>   # import another tree's staged dir instead
 #
+# A stage REFUSES an `emu.wasm` older than HEAD's commit (M7 P9): the manifest
+# stamps HEAD's sha at staging time, so an older module would be published
+# under a commit that never built it. `LP_EMU_BENCH_WEB_STALE_OK=1` stages it
+# anyway and records `build.stale: true` in the manifest.
+#
 # The desk-engine half of the same rig, off the same stage directory:
 #
 #   bun  target/emu-bench-web/bench-cli.mjs --stage target/emu-bench-web
@@ -50,6 +55,9 @@ cd "$repo"
 
 stage_dir="target/emu-bench-web"
 rig_dir="scripts/emu/bench-web"
+# The product half of the browser seam, which the rig only stages a copy of
+# (M7 P9, DD63). Its home is the translator crate.
+host_js="lp-emu/lp-emu-jit/js/jit-host.js"
 do_build=1
 do_collect=0
 do_serve=1
@@ -65,7 +73,7 @@ while [[ $# -gt 0 ]]; do
         --port) port="${2:?--port needs a number}"; shift 2 ;;
         --stage-into) stage_into="${2:?--stage-into needs the lab home}"; shift 2 ;;
         --from-stage) from_stage="${2:?--from-stage needs a staged directory}"; shift 2 ;;
-        -h|--help) sed -n '2,28p' "$0"; exit 0 ;;
+        -h|--help) sed -n '2,24p' "$0"; exit 0 ;;
         *) echo "bench-web: unknown option $1" >&2; exit 2 ;;
     esac
 done
@@ -181,6 +189,47 @@ fi
 do_stage="${do_stage:-1}"
 [[ $do_stage -eq 0 ]] || [[ -f "$wasm_bin" ]] || { echo "bench-web: $wasm_bin missing (run without --no-build first)" >&2; exit 1; }
 
+# --- the staleness guard (M7 P9) ---------------------------------------------
+#
+# The stage stamps `manifest.json`'s `build.sha` from `git rev-parse HEAD` at
+# STAGING time, not at BUILD time. So `--no-build` (or `--no-serve` used as a
+# stage-only step) on a tree whose HEAD has moved since the last wasm build
+# publishes an OLD module under a NEW sha — and every row measured off it is
+# attributed to a commit that never produced it. M7b P5 lost an A/B to exactly
+# that: two "different" builds that were the same bytes, and the difference it
+# measured was noise wearing a commit's name.
+#
+# The guard is a timestamp comparison, not a content one, because there is
+# nothing to compare against: the module of a given commit is not reproducible
+# byte-for-byte here and hashing it says nothing about which source made it.
+# `emu.wasm` older than HEAD's commit is the one case that cannot be innocent.
+#
+# `LP_EMU_BENCH_WEB_STALE_OK=1` is the escape hatch and it does NOT silence the
+# fact: it lets the stage proceed and records `build.stale: true` plus the
+# module's own mtime in the manifest, so every uploaded result still says the
+# module predates the commit it is filed under. An override that only removed
+# the error would rebuild the defect.
+if [[ $do_stage -eq 1 ]]; then
+    head_epoch="$(git log -1 --format=%ct)"
+    if [[ "$(uname -s)" == "Darwin" ]]; then
+        wasm_epoch="$(stat -f %m "$wasm_bin")"
+    else
+        wasm_epoch="$(stat -c %Y "$wasm_bin")"
+    fi
+    build_stale=false
+    if (( wasm_epoch < head_epoch )); then
+        build_stale=true
+        echo "bench-web: STALE MODULE — $wasm_bin was built $(( (head_epoch - wasm_epoch) / 60 )) minute(s) BEFORE HEAD ($(git rev-parse --short HEAD)) was committed." >&2
+        echo "bench-web:   staging it would publish it under HEAD's sha, and every row off it would name a commit that did not build it." >&2
+        if [[ "${LP_EMU_BENCH_WEB_STALE_OK:-0}" != "1" ]]; then
+            echo "bench-web:   rebuild (drop --no-build), or set LP_EMU_BENCH_WEB_STALE_OK=1 to stage it anyway with build.stale recorded in the manifest." >&2
+            exit 1
+        fi
+        echo "bench-web:   LP_EMU_BENCH_WEB_STALE_OK=1 — staging anyway, with build.stale: true in the manifest." >&2
+    fi
+fi
+build_stale="${build_stale:-false}"
+
 # The pinned reference images `bench-emu-c6` uses (same rows, same feature
 # lists, same pins) — built once and cached under target/emu-ref/, arch-neutral
 # (riscv32imac-unknown-none-elf) so the host running this script does not
@@ -236,8 +285,14 @@ cp "$wasm_bin" "$stage_dir/emu.wasm"
 # Studio's own worker will import unchanged, so it cannot be inlined here.
 # `bench-cli.mjs` is staged too, so the directory a phone loads and the
 # directory `bun`/`node` measure are the same directory.
-cp "$rig_dir/index.html" "$rig_dir/worker.js" "$rig_dir/jit-host.js" \
+#
+# `jit-host.js` comes from the CRATE, not from this directory (M7 P9, DD63):
+# it is the product half of the browser seam and lives beside the translator
+# that emits what it runs. The rig stages a copy; the emulator-in-a-tab lane
+# syncs its own copy under a content hash. Both read `$host_js`.
+cp "$rig_dir/index.html" "$rig_dir/worker.js" \
    "$rig_dir/wasi-shim.js" "$rig_dir/bench-run.js" "$rig_dir/bench-cli.mjs" "$stage_dir/"
+cp "$host_js" "$stage_dir/jit-host.js"
 
 manifest_images="[]"
 for spec in "${images[@]}"; do
@@ -281,10 +336,15 @@ if [[ -n "$(git status --porcelain)" ]]; then build_dirty=true; else build_dirty
 build_built_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 wasm_sha256="$(sha256 "$stage_dir/emu.wasm")"
 wasm_bytes="$(wc -c <"$stage_dir/emu.wasm" | tr -d ' ')"
+# `stale` and `wasm_built_at` are the staleness guard's record (M7 P9): a
+# module older than the commit it is being filed under can only be staged
+# under `LP_EMU_BENCH_WEB_STALE_OK=1`, and when it is, it says so here and in
+# every result uploaded off it.
+wasm_built_at="$(date -u -r "$wasm_epoch" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -d "@$wasm_epoch" +%Y-%m-%dT%H:%M:%SZ)"
 build_obj="$(jq -n --arg sha "$build_sha" --arg short "$build_short" --arg branch "$build_branch" \
     --argjson dirty "$build_dirty" --arg builtAt "$build_built_at" --arg wasmSha "$wasm_sha256" \
-    --argjson wasmBytes "$wasm_bytes" \
-    '{sha: $sha, short: $short, branch: $branch, dirty: $dirty, built_at: $builtAt, wasm_sha256: $wasmSha, wasm_bytes: $wasmBytes}')"
+    --argjson wasmBytes "$wasm_bytes" --argjson stale "$build_stale" --arg wasmBuiltAt "$wasm_built_at" \
+    '{sha: $sha, short: $short, branch: $branch, dirty: $dirty, built_at: $builtAt, wasm_sha256: $wasmSha, wasm_bytes: $wasmBytes, stale: $stale, wasm_built_at: $wasmBuiltAt}')"
 
 # `defaults` is what the page starts its controls at, and every one of them is
 # selectable there without a rebuild (P6): the mode (translated against
@@ -315,13 +375,16 @@ build_obj="$(jq -n --arg sha "$build_sha" --arg short "$build_short" --arg branc
 # the tab dies with it and nothing uploads — which is that engine's answer to
 # the question the gate is asking.
 #
-# `defaults.fnBlocks` is 32 because `DEFAULT_JIT_FN_BLOCKS` is (DD20, P6c): the
-# page's default and the emulator's default are the same number or the page
-# lies about what a default run does. Widening the CHOICES does not touch it —
-# the default is M7b P5's to set, from a phone row (BD6).
+# `defaults.fnBlocks` is 8 because `DEFAULT_JIT_FN_BLOCKS` is (BD6/DD32, M7b
+# P5): the page's default and the emulator's default are the same number or the
+# page lies about what a default run does. It was 32 (DD20, P6c) until the
+# phone's six sessions settled it — 8 won five of seven same-session pairs
+# against 16 and holds the best row ever taken on that phone, 1.008x; the doc
+# comment on `DEFAULT_JIT_FN_BLOCKS` carries the rows. **The two move
+# together**: this line is the mirror and it has no independent reason.
 jq -n --argjson images "$manifest_images" --argjson build "$build_obj" \
     '{images: $images, grades: ["t1", "t2"], repeats: 1, build: $build,
-      defaults: {mode: "jit", fnBlocks: 32, timeout: "5500ms", wallTimeout: 600, exitOn: false},
+      defaults: {mode: "jit", fnBlocks: 8, timeout: "5500ms", wallTimeout: 600, exitOn: false},
       fnBlocksChoices: [8, 16, 32, 64, 128, 256],
       timeoutChoices: ["5500ms", "20s"],
       modeChoices: ["jit", "interp"]}' >"$stage_dir/manifest.json"

@@ -267,7 +267,14 @@ every call a translated module makes is wasm→wasm with no JS frame on it.
 | `jit_mmio_load`, `jit_mmio_store`, `jit_step_one` | exports of the emulator's wasip1 module (`host_browser`) |
 | `jit_table_probe`, `jit_table_selftest` | the entry-encoding round trip, run once at wiring time |
 | `emu_host.jit_compile`, `emu_host.jit_release` | the **only** two JS imports, called once per translation event |
-| `scripts/emu/bench-web/jit-host.js` | the JS half, as one importable ES module |
+| `js/jit-host.js` (in this crate) | the JS half, as one importable ES module |
+
+**Where it lives (M7 P9, DD63).** `lp-emu/lp-emu-jit/js/jit-host.js` — beside
+the translator that emits what it runs, not in `scripts/emu/bench-web/`, where
+it sat while the bench rig was its only consumer. It is the **single source**:
+`scripts/emu/bench-web.sh` stages a copy into the rig directory, and the
+emulator-in-a-tab lane syncs its own copy under a content hash. Neither copy is
+the original.
 
 **How a second Worker uses it.** `jit-host.js` exports `makeJitHost()` and
 nothing else it needs to be told about. Instantiate the emulator with
@@ -327,6 +334,29 @@ An encoding `decode` does not recognise cannot be escaped that way, because its
 *width* is unknown and so the next pc is unknown. Those end the block instead.
 Two escapes, one rule: never guess.
 
+### It is a library call, not a tier (M7 P7)
+
+Since P7 the wasm build's core **is** this translator, so it is worth being
+precise about what the interpreter underneath it is. It is not a second engine
+that something arbitrates between, and there is no counter, threshold or
+warm-up anywhere: translation happens at two events and covers the whole image.
+The interpreter is reached in exactly three ways, and none of them is a tier —
+
+- `MachineHart::step_one`, called **from inside** translated code, for one
+  instruction, and then the stay continues. A function call.
+- The block cache under the seam, which runs from wherever a stay ended until
+  the next pc the core holds.
+- With no core installed at all — `--interpreter`, a native build, a `rom-up`
+  boot — as the whole machine, unchanged. That is the free differential oracle,
+  and it works because the two runs share no state: two independent runs,
+  compared byte for byte.
+
+On the product path today the `step_one` count is **0** on `render-basic` t2:
+what the translator does not emit ends a block, and those instructions are
+retired by the interpreter *between* stays rather than through the hatch. The
+run still reports both, because a rate that is allowed to be non-zero (JD10)
+is not allowed to be unmeasured.
+
 ## Two-level dispatch, and the size it is set to (P5, JD8, JD26)
 
 wasm caps **one function body at 7,654,321 bytes**, and a whole-image walk of
@@ -337,7 +367,9 @@ each keeping the `loop`/`br_table` shape inside. `dispatch`'s module docs have
 the shapes; what follows is the number the split is set to and how it was
 measured.
 
-**`--jit-fn-blocks` is the knob and 256 is the default.** JD26 says the size is
+**`--jit-fn-blocks` is the knob and 8 is the default** (M7b P5, BD6/DD32 — see
+"The default, and why the phone sets it", below; it was 256 when the table that
+follows was taken, then 32). JD26 says the size is
 chosen by measured steady-state throughput in JavaScriptCore, not by the limit.
 So it was: one native `--jit` run recorded 12,000 entries into translated code
 — every import answer in call order, the memory the interpreter changed between
@@ -393,6 +425,79 @@ else that could be measured, and costs one engine entirely.
 > JavaScriptCore's curve was still falling all the way down. See the next
 > section. Whether 256 stays the default is the G-M7P gate's decision, not
 > this file's.
+
+> **Settled by M7b P5.** The default is **8**, and the low-end wall the note
+> above warns about is gone with the flat selector (#697). See "The default,
+> and why the phone sets it".
+
+### The size sweep on the M7b head (P5)
+
+`render-basic` t2, 5,500 ms, `p6b-rows.mjs`, interleaved, best-of-3, **one
+invocation per engine**, UART0 `2407828f80684331` on every row. 64 is the
+control.
+
+| blocks/fn | node/V8 (load 8.5–10.5) | bun/JavaScriptCore (load 7.6–21.9) |
+|---:|---:|---:|
+| 8 | 6.00 s / 0.917× | **7.15 s / 0.769×** |
+| 16 | **5.76 s / 0.955×** | 8.35 s / 0.659× |
+| 32 | 5.90 s / 0.933× | 12.93 s / 0.425× |
+| 64 | 7.26 s / 0.758× | 21.21 s / 0.259× |
+| that engine's `--interpreter` | 13.51 s / 0.407× | 9.63 s / 0.571× |
+
+**V8 is within 4 % across 8/16/32 and JSC is 1.81× faster at 8 than at 32.**
+That asymmetry is the whole of the default's argument: the size the phone
+wants costs V8 almost nothing, and the size V8 wants costs the phone a third
+of its number.
+
+The module at each size, from `--jit-emit-only` on the whole `render-basic`
+image (201,243 blocks, the module the render loop actually runs; the outer
+selector is **152 B at every size** since the flat form landed):
+
+| blocks/fn | functions | module bytes | largest body | largest sub-dispatcher | selector |
+|---:|---:|---:|---:|---:|---:|
+| 8 | 25,156 | 79,141,219 | 49,005 | 49,005 | 152 |
+| 16 | 12,578 | 75,665,569 | 92,484 | 92,484 | 152 |
+| 32 | 6,289 | 73,642,052 | 107,930 | 107,930 | 152 |
+| 64 | 3,145 | 72,503,830 | 153,952 | 153,952 | 152 |
+
+Smaller functions cost **bytes** — 9.2 % more module at 8 than at 64 — and
+every one of those bytes is a duplicated prologue, epilogue and dispatcher
+arm. Nothing in the module is within two orders of magnitude of
+`BODY_BUDGET`'s 6,123,456 B at any of these sizes, which is why the halving
+path does not fire on this image at all.
+
+### The default, and why the phone sets it (BD6 / DD32)
+
+BD6 reserves this constant for one phase and one kind of evidence: a **phone**
+row. The desk cannot settle it, because the two desk engines disagree and
+disagree in opposite directions — and the product runs in the phone's engine
+family. Six sessions on the M7b heads, `render-basic` t2 through the staged
+rig, each pressing 8 and 16 back to back so the pair shares a thermal state:
+
+| head | 8 blocks/fn | 16 blocks/fn | 8 wins |
+|---|---:|---:|:--:|
+| pre-P3 | 0.904× | 0.793× | yes |
+| P3 | 0.863× | 0.889× | no |
+| P3 | 0.945× | 0.888× | yes |
+| P3 | **1.008×** | 0.926× | yes |
+| P3 | 0.921× | 0.780× | yes |
+| P3 | 0.818× | 0.761× | yes |
+| P4 (press 1, cold) | 0.851× | 0.882× | no |
+
+**8 wins five of seven and holds the best row ever taken on that phone.**
+`lp-emu-esp32c6`'s `DEFAULT_JIT_FN_BLOCKS` carries this table too, and
+`scripts/emu/bench-web.sh`'s `defaults.fnBlocks` mirrors it — the page's
+default and the emulator's default are the same number or the page lies about
+what a default run does.
+
+**Both ends of the size are still safe at 8.** V8's `Fatal process out of
+memory: Zone` bounded the size from above at ≥512 (#680) and from below at
+≤16 (#691, the **nested** selector's 730 KB at 8); the flat selector removed
+the low end (#697) and the rows above are both engines compiling and running
+8 without complaint. `install`'s halving path is untouched and still logs
+every step (`jit: …; retrying with N blocks per function`); it does not fire
+on this image, because the largest body at 8 is 49,005 B against a 6,123,456 B
+budget.
 
 **No sub-dispatcher may exceed 80 % of the limit** (`dispatch::BODY_BUDGET`,
 6,123,456 B). It is a test, not a habit: `no_sub_dispatcher_exceeds_the_body_budget`
@@ -704,6 +809,37 @@ with `--trace`, so in those four cells the path never arms and what they prove
 is the *refusal*. The path itself is proved by four more cells at a 500 ms
 window without a trace, and by the 5,500 ms browser identity rows.
 
+#### The trap log, and the hole it closes (emu-loop-redesign P1, D5)
+
+Those four untraced cells prove the armed path only through what the guest
+went on to *do* — the UART bytes, the frames, the pin log. None of them says
+at which cycle an interrupt was delivered, and the one reading that does
+(`--trace`) is exactly the reading that disarms every fast path. A milestone
+that moves *where* the boundary work runs has to prove interrupt cycles with
+the fast paths on.
+
+`--trap-log stdout|file:<path>` is that reading. One line per trap the hart
+**takes**, written where the hart sets `mepc` and `mcause`:
+
+```text
+cyc=1988770 cause=0x80000001 epc=0x42076a3a
+```
+
+One hook covers both cores, because translated code never delivers a trap:
+nothing in `translate.rs` or `jit.rs` writes `mcause`, `mepc` or `mtvec`, an
+interrupt is only ever delivered at one of the hart's four polling points, and
+a fault inside a stay leaves through the escape hatch into
+`MachineHart::step_one`, which is the interpreter's own delivery path. Off by
+default it is one `Option` test at each of the eight delivery sites, and on it
+costs one line per trap — 2,757 on `render-basic` t2 at 500 ms, against 127,249
+pin-log edges and 252,171 trace lines.
+
+It is the ninth column of `scripts/emu/p6-oracle.sh` (all eight cells `same`),
+an opt-in column of `oracle-sweep.sh` behind `LP_EMU_ORACLE_TRAP_LOG=1`, a
+reading in `scripts/emu/loop-identity.sh`'s pair protocol, and `trapSha256` on
+every browser-rig row — `51ddaf56c96b77d3` on `render-basic` t2 at 5,500 ms in
+**both** node/V8 and bun/JSC, beside UART0's `2407828f80684331`.
+
 #### What it was worth
 
 `render-basic` t2, `LP_EMU_JIT_MMIO_CENSUS=1`, 16 blocks a function:
@@ -766,6 +902,176 @@ across the whole of it. Both halves of the gap shrink together as the
 functions shrink — which is the same direction DD20 moved the default for
 entirely separate reasons — and about **2.3× of it survives at 8 blocks a
 function**, unexplained by size.
+
+### The residual, re-measured on the M7b head (P5)
+
+P6c's 2.3× was taken before P1–P4. On the P4 head it is **1.67× at 8 blocks
+a function**, and getting a number that means anything took fixing three
+things in the harness first — see "What the replay harness was getting
+wrong", below.
+
+Twelve `node --cpu-prof` runs, four sizes × three reps interleaved in one
+invocation, best of three by the module's own attributed time, loads 7.3–10.2,
+UART0 `2407828f80684331` on every one. **531,735,330 translated instructions
+on every row** (coverage 97.94 %):
+
+| blocks/fn | the module's ms | ns per translated instruction | replay at the run's own density | **residual** |
+|---:|---:|---:|---:|---:|
+| **8** | 2,086.0 | **3.923** | 2.345 | **1.67×** |
+| 16 | 1,980.5 | **3.724** | 2.303 | **1.62×** |
+| 32 | 2,093.0 | **3.936** | 2.147 | **1.83×** |
+| 64 | 2,726.4 | **5.127** | 2.264 | **2.27×** |
+
+The replay column is **not** the raw `ns/instr` a replay prints, and that
+matters. A replay's rate depends on the recording's **instructions per
+entry** — a boot recording is 84.09, a render-loop one is 234.09, and the
+real run averages 134.4 — because the per-entry half of the cost is divided
+by a different number in each. So the column above is
+`p6b-entry-split.mjs`'s fitted `E` and `T` (per entry and per instruction,
+least-squares over windows of 200 entries inside one recording) evaluated at
+**the run's own 134.4 instructions an entry**:
+
+| blocks/fn | E ns/entry (node/V8) | T ns/instr | E/134.4 + T |
+|---:|---:|---:|---:|
+| 8 | 38.8 | 2.056 | 2.345 |
+| 16 | 37.7 | 2.023 | 2.303 |
+| 32 | 32.7 | 1.904 | 2.147 |
+| 64 | 38.7 | 1.976 | 2.264 |
+
+Two things fall out of that table that the size sweep alone does not say:
+
+- **In V8 the module's per-instruction cost does not depend on the function
+  size at all** — 2.056 / 2.023 / 1.904 / 1.976 ns, flat — while the *real
+  run* at the same sizes is 3.923 / 3.724 / 3.936 / 5.127. So V8's size
+  sensitivity is **entirely** the working set; there is nothing intrinsic
+  about a bigger function that V8 runs more slowly once it is hot.
+- **In JSC it is not.** The same fit in bun reads 4.465 / 4.597 / 7.529 /
+  12.005 ns per instruction — the size curve is there in a warm replay of a
+  few thousand entries, with no working set to speak of. JSC pays for a big
+  function whether or not the run is cold. That is the same split the phone
+  and the desk keep producing, and it is the reason the default is the
+  phone's to set.
+
+### The four candidates for the residual, and what each is worth (P5)
+
+| candidate | worth | how it was measured |
+|---|---|---|
+| **cold code / the working set** | **1.67× at 8 blocks a function — 838 ms of a 2,086 ms module, 40 % of it** | the table above: a real run's 3.923 ns against 2.345 ns for the same module, the same guest work and the same entry density, warm |
+| **layout by execution adjacency** | **nothing — it is 2–5 % WORSE, and it buys 6.2 % MORE cross-function edges** | below |
+| **the permission-byte RAM path** | **5.29 % of the module's bytes** (3,783,944 B of 71,528,576). Its *time* is not measurable this way, and below says why | `--jit-emit-only` under `LP_EMU_JIT_EMIT_DIAG=no-perm` |
+| **the per-block budget check** | **5.40 % of the module's bytes** (3,863,931 B, 25.0 B a block over 154,544 blocks) | `LP_EMU_JIT_EMIT_DIAG=no-budget` |
+
+The two byte figures are **exactly additive** — removing both is 7,647,874 B
+against 3,783,944 + 3,863,931 = 7,647,875, one LEB byte apart — so neither
+check is hiding inside the other.
+
+**Why the two checks could not be priced in time, and what it would take.**
+The obvious diagnostic — emit the module without the check and time the run —
+does not price the check, because the run it produces is not the same run.
+With the permission check replaced by a constant, every MMIO access takes the
+RAM path and reads the arena, so the guest reads garbage where it expected the
+SYSTIMER and goes somewhere else entirely: `render-basic` t2 at a 500 ms bound
+came out **5.5× slower**, coverage fell from 97.94 % to 96.46 %, and the
+transcript was `0ccda7f466879e84` rather than `2407828f80684331`. A wall clock
+over different guest work is not a price. The same argument applies to the
+budget check: a stay that runs past the end of its slice services peripherals
+late, and the transcript moves. **Pricing them properly needs a fixture on
+which the diagnostic is behaviour-neutral** — an all-RAM block set whose
+budget never trips, emitted both ways and timed in both engines through
+`LP_EMU_JIT_ENGINE_CASE` the way `p6b-hop.mjs` times the hop. That is a
+half-day and it is not this phase's; what is recorded here is the byte price,
+which is exact, and the reason the cheap version does not work, so nobody pays
+for it twice.
+
+### Layout: address order is already the trace, and a trace layout is worse
+
+`emit_module` chunks `set.blocks` into functions, so the set's **order** is
+what decides which guest edges are a branch inside one wasm body and which are
+a cross through the selector. That order had never been measured — this file
+used to say "layout beyond that ordering is deliberately not optimised: no
+measurement yet says it matters". It does not matter, and now that is a
+measurement.
+
+The candidate was a depth-first **trace layout**: each block followed by the
+successor it runs into (fall-through, then the taken branch, then a call's own
+body), a new trace started only when the current one meets a block already
+placed. M7b P5 implemented it behind `LP_EMU_JIT_BLOCK_ORDER=adjacency`,
+measured it, and **M7 P9 removed it and its plumbing (DD58)** — the numbers
+below are why, and they are what is kept. `render-basic` t2, 5,500 ms,
+`p6b-rows.mjs`, interleaved, best-of-3, **one invocation per engine**, UART0
+`2407828f80684331` on all twenty-four rows:
+
+| engine | blocks/fn | address | trace layout | change |
+|---|---:|---:|---:|---:|
+| node/V8 (load 4.6–5.3) | 8 | **0.951×** | 0.932× | −1.9 % |
+| node/V8 | 16 | **0.989×** | 0.959× | −3.0 % |
+| bun/JSC (load 7.4–12.6) | 8 | **0.787×** | 0.762× | −3.1 % |
+| bun/JSC | 16 | **0.650×** | 0.618× | −4.9 % |
+
+and the mechanism, from `--jit-report` on two whole runs at 8 blocks a
+function:
+
+| | address | trace layout |
+|---|---:|---:|
+| cross-function edges taken | **52,960,867** | **56,232,840** (+6.2 %) |
+| module bytes | 79,726,810 | 79,752,572 (+0.03 %) |
+| every exit-census row | identical | identical |
+
+**The reason is that guest address order already IS the trace.** The firmware
+was laid out by a compiler that puts a basic block's hot successor next to it,
+so the address-ordered set already spends most of its edges falling straight
+into the block emitted next — which `Emitter::fall_through` makes cost
+literally nothing. A depth-first walk that also chases `jal` targets pulls
+callees out of their address neighbourhood and breaks those runs up. **A
+layout policy has nothing to win here and 6.2 % of crosses to lose.**
+
+**The switch is gone (M7 P9, DD58).** P5 kept it off-by-default on the
+argument that the answer was worth the code; P9 took the opposite view, which
+is the standing one for a measured-and-rejected candidate: the number belongs
+in this file, the losing implementation does not belong in the emitter. What
+came out is `blocks::adjacency_order`, its `successors` walk, `BlockOrder`,
+`BlockSet::permuted`, the `LP_EMU_JIT_BLOCK_ORDER` reader and the three
+install sites that consulted it — about 400 lines. The block set is the order
+`discover` produces, which is guest address order, and nothing chooses.
+
+While it existed it was proved exact, and that is worth recording because it
+is what makes the verdict a verdict and not a suspicion: every exit-census row
+was identical between the two layouts, the eight-cell free oracle read `same`
+on all five readings under the trace layout, and a round-trip test asserted
+the two retire identically under wasmtime at 1, 8 and 64 blocks a function.
+**A layout is a permutation of the set and nothing else the guest can see** —
+the trace layout was not wrong, it was slower.
+
+### What the replay harness was getting wrong (P5)
+
+Three things, and the first one meant no replay had run since M7b P2:
+
+1. **`jit-image-bench.mjs` had no `poll` import.** P2's fourth import made
+   every module refuse to instantiate — `LinkError: Import #3 "emu" "poll":
+   function import requires a callable` — and P2 also widened `mmio_store`'s
+   answer to an i64, which the harness masked back down to a bare pc and V8
+   answered with `TypeError: Cannot convert <pc> to a BigInt`. The recorder
+   had been writing poll calls all along; nothing read them.
+2. **The between-entries memory delta is inside what a replay times**, and
+   `replay.rs` said it was outside. It cannot be hoisted out — it stands in
+   for the interpreter immediately before the entry it belongs to. At 256
+   bytes an entry (boot) it is invisible; at **69,120 bytes an entry** (the
+   render loop) it is larger than the entry. The harness now measures its own
+   floor — the same loop with the call removed — and reports
+   `harnessNsPerInstr` and `steadyNsPerInstrNet`. **A residual is read off the
+   net one.**
+3. ⚠️ **A render-loop recording cannot be replayed at all since M7b P3.** The
+   published-read block is refreshed inside `mmio_store`'s own crossing
+   (`jit.rs::republish_systimer`), and a replay's imports are canned answers
+   that refresh nothing — so the module's in-module fast reads go stale within
+   an entry and it starts calling `mmio_load` for reads the recording never
+   recorded: `entry 104511: the module made more import calls than the
+   recording has`. The recorder also marks the block **non-volatile**, so the
+   between-entries delta does not carry it either. A boot recording is
+   unaffected, because the fast path is disarmed there — which is why this
+   went unnoticed, and why **every replay number in this ladder describes
+   boot-phase code**. Fixing it means recording the republished words beside
+   the store that caused them; it is not done here.
 
 ### What a module-side entry is made of (P6c Q4)
 
@@ -1084,6 +1390,37 @@ SYSTIMER stayed at 11,626,424 through this phase and was the whole of the next
 one — see "The published-read path" above, which takes the census to
 5,881,883.
 
+## What removing the undecodable class was worth (M7b P6, reverted)
+
+`LP_EMU_JIT_EXITS`'s per-`why` split (M7b F6) named the class before anything
+was built for it: **710,536 exits, 141 sites**, all of it atomics (53 %) and
+the CSR pair a critical section writes to `mstatus`/`mepc` (38 %), plus `mret`
+(9 %) — no `wfi` in the transcript at all. M7b P6 built the obvious next step
+— hand an undecodable block end to `step_one` (the interpreter's own
+`step_once`) and resolve where it lands, instead of leaving the stay —
+and it worked exactly: **710,536 → 1** exit, mean stay 68.9 → 75.2
+instructions, all eight free-oracle cells and all 24 browser identity rows
+byte-identical.
+
+**And it was worth −1.0 % in node/V8 and −1.1 % in bun/JSC at the milestone's
+5.5 s bar.** Every exit removed costs one site's worth of module: 15,896
+sites × 328 bytes (≈280 of it the flush and reload of ~20 live registers
+`step_one` needs, since it runs an arbitrary instruction) is +6.5 % of the
+module, +54 ms of translation — paid once, on the wrong side of a 5.5 s
+bound. The crossover where the mechanism starts paying for itself is
+somewhere around 15–20 emulated seconds; this milestone's bar is 5.5.
+**Reverted on Yona's ruling (E10)** — the census, the tests that hold against
+main, and this paragraph are what stayed. See #726 and #730, and the ADR's
+decisions/history section.
+
+The indirect-miss half of the same census needed no new mechanism: 91 % of
+misses are P1's own module boundary (DD30) — a `jalr` into the other module,
+an immediate re-entry, 283 instructions retired between them, i.e.
+effectively none. The remaining 9 % are a real coverage gap the walk never
+reached (2.47 M interpreted instructions), with three addresses fourteen
+bytes apart — `0x42120f96`/`…f9e`/`…fae` — accounting for 863 k of it on
+their own. Reported, not acted on; a seeding question for whoever owns JD6.
+
 ## What bounds a slice, and what a slice boundary costs (M7b P4)
 
 `Esp32C6Machine::run_until` runs the hart in slices. A slice's length is the
@@ -1159,6 +1496,84 @@ names itself.
 | entry path (`JitCore::run`) | 644.6 | **460.7** |
 | hart slice loop (`run_until`) | 611.5 | 585.0 |
 | the run, attributed | 6,406.1 | 5,899.5 |
+
+### What a slice boundary costs, item by item (emu-loop-redesign P1)
+
+P4 said a boundary costs 373 ns of `run_until` self time and that its callees
+already early-out. It did not say what the 373 ns *is*. This does, on a **live**
+run of `render-basic` t2 at 5,500 ms — never a replay, which since P3 covers
+boot-phase code only (DD59) — with one item timed per sampled slice, cycling,
+so a sampled slice pays two extra `Instant::now()` calls and not thirty. Slot 0
+and slot 3 are the clock pair around nothing: their mean is the pair's own cost
+and every other item is corrected by it. Stride 8, 9,575 samples an item,
+1,531,924 slices. **The probes are not committed.**
+
+The instrument's own accuracy: the *whole boundary* is also bracketed as two
+contiguous items (the head, and everything after `run_slice` returns), so the
+sum of the parts and the whole are measured the same way. They agree to 1 % in
+V8 and to 3 % in JSC.
+
+**node/V8, 16 blocks a function** — `run_until` wall 4,509 ms, `loadavg 3.1`:
+
+| item | ns/slice | ms/run | % of the `run_until` wall |
+|---|---:|---:|---:|
+| `run_due_events` | 192.9 | 295.5 | 6.55 |
+| **`wall_timeout` → `started.elapsed()`** | **148.3** | **227.2** | **5.04** |
+| `drain_pins` | 117.3 | 179.7 | 3.99 |
+| `pending_cpu_interrupt` + `set_external` + `poll_interrupts` | 32.5 | 49.8 | 1.10 |
+| the six-term deadline + `next_deadline` + the census gates | 26.6 | 40.8 | 0.90 |
+| the other eleven items, together | ≈ 13.7 | ≈ 21 | ≈ 0.5 |
+| **the boundary, bracketed** | **531.3** | **814.0** | **18.05** |
+| `hart.run_slice` (the hart, the core and the module) | 1,955.6 | 2,995.8 | 66.44 |
+
+**bun/JSC, 8 blocks a function** — `run_until` wall 5,734 ms, `loadavg 0.0`:
+
+| item | ns/slice | ms/run | % of the `run_until` wall |
+|---|---:|---:|---:|
+| `run_due_events` | 234.9 | 359.8 | 6.28 |
+| **`wall_timeout` → `started.elapsed()`** | **139.5** | **213.7** | **3.73** |
+| `drain_pins` | 117.4 | 179.9 | 3.14 |
+| the six-term deadline + `next_deadline` + the census gates | 29.0 | 44.4 | 0.77 |
+| `pending_cpu_interrupt` + `set_external` + `poll_interrupts` | 27.4 | 42.0 | 0.73 |
+| the other eleven items, together | ≤ ~16 (over-attributed by 178 ns; see below) | | |
+| **the boundary, bracketed** | **531.9** | **814.8** | **14.21** |
+| `hart.run_slice` (the hart, the core and the module) | 2,761.0 | 4,229.6 | 73.77 |
+
+The eleven small items — `bus.set_time`, `translate_if_code_was_published`,
+`drain_tx_log`, `service_host`, `take_sideband`, `refill_cache`,
+`code_writes_pending`, the census `note`, `first_strict_violation` +
+`stop_at.take` + `take_request` + `exit_on_match`, the loop head, and the
+`SliceEnd` match — are **all together** worth about 14 ns a slice in V8. They
+are below the instrument's floor individually: the clock pair costs 128 ns in
+V8 and 106 ns in JSC and its own estimate moves ±15 ns between runs, which is
+±15 ns on every item and ±240 ns once sixteen of them are summed. In JSC that
+error runs the wrong way and the eleven sum to 178 ns more than the bracket
+allows. The five items above the floor are the ones that reproduce the bracket.
+
+**Three things this says.**
+
+1. **`started.elapsed()` is the second-largest item in the boundary, and it is
+   pure plumbing.** In wasm `Instant::now()` is `clock_time_get`, a host call
+   through the WASI shim — 128 ns in V8, 106 in JSC — and `run_until` makes one
+   **per slice** to ask whether `--wall-timeout` has expired. 227 ms of a 4.5 s
+   V8 run; 214 ms of a 5.7 s JSC run. Nothing about the guest depends on it.
+2. **The boundary is 531 ns a slice in both engines** — the same wasm doing the
+   same work — against P4's 373 ns of `run_until` *self*. The difference is the
+   two callees a profiler buckets elsewhere: `run_due_events` (the peripherals)
+   and `drain_pins` (the fabric).
+3. **`run_slice` is two thirds of the loop and the boundary is a sixth**, so
+   the whole of this milestone's lever is that sixth plus whatever the entry
+   path inside `run_slice` gives up.
+
+Inside `run_slice`, `LP_EMU_JIT_ENTRY_TIME=64` prices an entry (7,722,208 of
+them, **5.04 per slice**) at **522.8 ns in V8** and **684.7 ns in JSC**,
+unclocked-inside; the breakdown's shares are `enter` 28.4 % / `index` 10.5 % /
+`regs` 16.6 % in V8 and 32.9 / 10.2 / 14.8 in JSC, and its absolute figures are
+inflated ~3× by its own six clocks. The module side's *floor* —
+`scripts/emu/p6c-jsc-entry.mjs`, five rungs, best-of-5 of 1 s each — is
+**24.10 ns a call in V8 and 10.79 ns in JSC** for the whole round trip
+including the 31-register reload and write-back, so at 5.04 entries a slice the
+module's own entry and exit are **121 ns a slice in V8 and 54 ns in JSC**.
 
 ### The two things that are NOT there, with the measurement that says so
 
@@ -1254,6 +1669,70 @@ import and an exactness argument the size of P2's. Not built.
   goes through the configured allocator, so the host instantiates a one-memory
   shim and imports that.
 
+## What the milestone measured, and how to take a row
+
+**M7 closed at the floor**, by Yona's ruling at G-M7B. The bar was 1× real
+time as a floor, **1.5× to pass and 3× as the target**, at `render-basic` t2
+on an iPhone 16 Pro Max.
+
+**The phone**, 5.5 s emulated, 8 blocks a function, on the M7b P4 head (M7 P7
+measured neutral, so this is the closing number):
+
+| row | the three presses | best |
+|---|---|---:|
+| translated, 8/fn | 0.851 / 0.972 / 1.025 | **1.025×** |
+| translated, 16/fn | 0.882 / 0.918 / 0.943 | 0.943× |
+| `--interpreter` | 0.589 / 0.611 / 0.586 | 0.611× |
+| same-press translated ÷ interpreter | 1.44 / 1.59 / 1.75 | **1.75×** |
+
+So **about 1.0× of real time and about 1.75× of the emulator's own
+interpreter**. The pass bar is not met; the target is not met. The desk on the
+same head reads ≈0.98–1.00× in node/V8 at 16 blocks a function and
+≈0.79–0.82× in bun/JSC at 8. The ladder on the desk in V8 at 16/fn across
+M7b: 0.720 → 0.842 (P1) → 0.854 (P2) → 0.902 (P3) → 0.971 (P4) → ≈0.98 (P5).
+
+Why 3× was not reachable from here, in one line: with translation removed
+entirely the emulator's **own** steady-state wasm is 1.69× on its own, so the
+emulator's loop would have to get 1.78× faster before 3× is arithmetically
+possible. That is the next milestone's brief, not this crate's.
+
+And per image — because `render-basic` is not the whole story (node/V8, 16/fn,
+5,500 ms, one invocation per image, best of three, t2):
+
+| image | translated | `--interpreter` | ratio | mean stay |
+|---|---:|---:|---:|---:|
+| `harness` | 3.062× | 1.143× | **2.68×** | 1354.0 |
+| `boot-idle-memfs` | 2.808× | 5.293× | **0.53×** | 43.7 |
+| `render-basic` | 0.990× | 0.557× | 1.78× | 68.9 |
+| `render-rocaille` | 1.166× | 0.673× | 1.73× | 30.0 |
+
+**A translated core wins where stays are long and loses where they are short
+or where the run is too small to amortize its own translation.** That is the
+77-instruction measurement at the top of this file, showing up as a whole
+image rather than as a region.
+
+### Taking a phone row (DD41)
+
+The phone moved ±10 % on its translated rows and **25 %** on its interpreter
+row within one afternoon on one device — warm-up in one direction, thermal
+throttling in the other. So a row is only a row if it is taken this way:
+
+1. **Best of at least three presses, spaced by minutes.** Presses taken within
+   a minute of each other fall across the board, the interpreter included,
+   which is the device and not the code.
+2. **Quote the sequence, not only the best.** A best-of with no spread beside
+   it hides the thing that matters most about it.
+3. **The cross-session number is the same-press ratio** — translated ÷
+   interpreter from the *same* press — because it divides the thermal state
+   out. Quote it beside the absolute.
+4. **A phase's bar is the desk proxy, not the phone** (Q4 at G-M7B): `bun` at
+   8 blocks a function and `node` at 16, interleaved, **one invocation**, best
+   of N, load average quoted. The phone confirms direction, not the third
+   decimal.
+5. **Check the build stamp.** `bench-web.sh` refuses to stage an `emu.wasm`
+   older than HEAD, because the manifest stamps HEAD's sha at staging time and
+   M7b P5 lost an A/B to two "different" builds that were the same bytes.
+
 ## What this crate is not
 
 Not an emulator, not a host, and not a policy. It owns no bus, no machine and no
@@ -1289,6 +1768,14 @@ Everything under `lp-emu/` is **MIT** (`../LICENSE-MIT`) while the rest of the
 repository is AGPL-3.0-or-later, and `just lint-emu-fence` is what keeps the
 boundary real. See `docs/adr/2026-09-06-lp-emu-home-and-mit-fence.md`.
 
+- **`js/jit-host.js` is MIT too, and its own header says so.**
+  `just lint-emu-fence` polices the *crate graph* — what a `Cargo.toml` inside
+  the fence may depend on — so a loose `.js` file is invisible to it. A file
+  inside `lp-emu-jit/` carries the crate's MIT posture, and the way that is
+  made real for a file the linter cannot see is a licence line in the file's
+  own header. DD63 moved it here from `scripts/emu/bench-web/`, where the
+  surrounding tree is AGPL, for exactly this reason as well as for
+  single-sourcing.
 - The only default dependency outside the fence is **`wasm-encoder`**
   (Apache-2.0 WITH LLVM-exception) — a permissive byte emitter, not a compiler.
 - **`wasmtime`** is optional, behind the `host-wasmtime` feature, never a

@@ -32,6 +32,7 @@ fn main() {
     emit_build_provenance();
     emit_partition_facts();
     emit_linker_search_path();
+    emit_bench_project();
 
     println!("cargo::rustc-check-cfg=cfg(fw_harness)");
     let harness = std::env::vars().any(|(k, _)| k.starts_with("CARGO_FEATURE_TEST_"));
@@ -206,3 +207,87 @@ fn parse_partition_size(s: &str) -> u64 {
         s.parse().expect("partition size")
     }
 }
+
+/// Stage the `bench_render_loop` image's project, **retargeted to a pad this
+/// board has**, into `OUT_DIR` for `src/bench/render_loop.rs` to
+/// `include_bytes!`.
+///
+/// # Why a rewrite and not a second copy of the project
+///
+/// The benchmark's whole point is that the classic and the C6 render the same
+/// pixels, so the ratio between the two machines is a ratio and not a
+/// comparison of two workloads. `projects/test/basic` is the C6's image
+/// (`lp-fw/fw-esp32c6/src/bench/render_loop.rs`), and its output addresses
+/// `ws281x:local:D10` — the XIAO's silkscreen for the very same gpio18 the
+/// DOM-Z-102 calls `IO18`. The classic's endpoint table is built from
+/// `display_label` alone (`esp32v3_rmt_ws281x_driver`), so `D10` resolves to
+/// nothing here and the image would render in silence.
+///
+/// So the bytes are rewritten at build time, exactly as
+/// `scripts/m4-hardware-walk.sh`'s `prepare_project` and
+/// `scripts/emu/m4-walk-esp32v3.sh` rewrite them before an upload: one plain
+/// substitution, in `output.json` alone, `"ws281x:local:D10"` ->
+/// `"ws281x:local:IO18"`. A **forked copy** of the project under some
+/// classic-only path would be the other option and it is the wrong one: two
+/// files that must stay identical except for one label is a drift waiting to
+/// happen, and the first person to edit the shader on one side would make the
+/// two chips' numbers incomparable without anything failing.
+///
+/// The substitution count is asserted, mirroring the scripts' own `grep -q`
+/// guard: a project that stopped naming `D10` must fail the build rather than
+/// bake an endpoint this board does not have.
+fn emit_bench_project() {
+    if std::env::var_os("CARGO_FEATURE_BENCH_RENDER_LOOP").is_none() {
+        return;
+    }
+    let manifest = PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR"));
+    let src = manifest.join("../../projects/test/basic");
+    let out = PathBuf::from(std::env::var("OUT_DIR").expect("OUT_DIR")).join("bench-project");
+    std::fs::create_dir_all(&out).expect("create OUT_DIR/bench-project");
+
+    // The source project is outside CARGO_MANIFEST_DIR, so the package-wide
+    // `rerun-if-changed` above does not cover it.
+    println!("cargo:rerun-if-changed={}", src.display());
+
+    for name in BENCH_PROJECT_FILES {
+        let from = src.join(name);
+        let bytes =
+            std::fs::read(&from).unwrap_or_else(|e| panic!("reading {}: {e}", from.display()));
+        let bytes = if *name == "output.json" {
+            let text = String::from_utf8(bytes).expect("output.json is UTF-8");
+            let hits = text.matches(BENCH_PAD_FROM).count();
+            assert_eq!(
+                hits,
+                1,
+                "{} names {BENCH_PAD_FROM} {hits} times, expected exactly 1 — the classic's \
+                 bench image retargets it to {BENCH_PAD_TO} and cannot guess what to do with \
+                 none or several",
+                from.display()
+            );
+            text.replace(BENCH_PAD_FROM, BENCH_PAD_TO).into_bytes()
+        } else {
+            bytes
+        };
+        std::fs::write(out.join(name), bytes)
+            .unwrap_or_else(|e| panic!("writing {}: {e}", out.join(name).display()));
+    }
+}
+
+/// The eight files of `projects/test/basic`, in the order the C6's bench seeds
+/// them. Named rather than globbed: a project that grew a ninth file should
+/// fail the seed loudly in review, not silently change what is measured.
+const BENCH_PROJECT_FILES: &[&str] = &[
+    "project.json",
+    "module.json",
+    "clock.json",
+    "shader.json",
+    "shader.glsl",
+    "fixture.json",
+    "fixture.map2d.json",
+    "output.json",
+];
+
+/// The XIAO ESP32-C6's silkscreen for gpio18 …
+const BENCH_PAD_FROM: &str = "ws281x:local:D10";
+/// … and the DOM-Z-102's, for the same physical pin.
+const BENCH_PAD_TO: &str = "ws281x:local:IO18";

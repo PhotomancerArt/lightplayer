@@ -40,6 +40,10 @@
 //! with the same scripted host input are byte-identical.
 
 pub mod air;
+/// Guest-side counters for the speed probes (`--features bench`). Off in
+/// every default build; see the module doc for what it costs.
+#[cfg(feature = "bench")]
+pub mod benchprof;
 pub mod bus;
 pub mod elf;
 pub mod engine;

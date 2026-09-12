@@ -162,6 +162,13 @@ pub const SLOT_ARRAY_BYTES: u32 = SLOTS_PER_PAGE * 4;
 /// The 16 KiB pages of the guest space that hold at least one block start.
 fn target_pages(set: &BlockSet) -> Vec<u32> {
     let mut pages: Vec<u32> = set.blocks.iter().map(|b| b.pc >> PERM_SHIFT).collect();
+    // Sorted before the dedup, because `dedup` only drops **adjacent**
+    // duplicates and this function does not assume the block set is in
+    // address order. Without the sort a page whose blocks are not consecutive
+    // here gets two slot arrays, the page map ends up pointing at whichever
+    // was written last, and the blocks that landed in the other one become
+    // unreachable by `jalr` — a silent coverage loss, not a crash. M7b P5.
+    pages.sort_unstable();
     pages.dedup();
     pages
 }
@@ -280,11 +287,18 @@ fn memarg(offset: u64) -> MemArg {
 /// Emit the whole module for `set`, with at most `fn_blocks` guest blocks in
 /// each sub-dispatcher.
 ///
-/// The chunks are contiguous runs of `set.blocks`, which is address-ordered,
-/// so a global block index is `chunk * fn_blocks + local` and the selector
-/// needs one divide (one shift, when `fn_blocks` is a power of two) rather
-/// than a table of its own. Layout beyond that ordering is deliberately not
-/// optimised: no measurement yet says it matters.
+/// The chunks are contiguous runs of `set.blocks`, so a global block index is
+/// `chunk * fn_blocks + local` and the selector needs one divide (one shift,
+/// when `fn_blocks` is a power of two) rather than a table of its own.
+///
+/// **Which blocks share a function is therefore the block set's own order** —
+/// the guest address order [`crate::discover`] produces. M7b P5 measured the
+/// alternative — a depth-first trace layout, each block followed by the
+/// successor it runs into — against address order on one recording and one
+/// image, in both engines, and it lost (DD58). The measurement is in
+/// `lp-emu-jit/README.md`; the emitter itself was indifferent either way,
+/// because a layout is a permutation of the set and not a change to what is
+/// emitted.
 ///
 /// # Panics
 ///
