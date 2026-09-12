@@ -876,9 +876,8 @@ GPIO — stayed noes when the classic's own RMT was written (M4 ruling R8).
 #### The interleave (D3)
 
 Two harts, **one clock**. Each core runs a fixed, deterministic quantum and
-the machine advances to the next; the quantum is `--core-quantum`, its default
-is **256** (DD45 R2), and it is recorded in **every transcript sidecar**,
-because a run's schedule is part of what produced its numbers. A stalled core
+the machine advances to the next; the quantum is `--core-quantum` and its
+default is **256** (DD45 R2). A stalled core
 and a core in `waiti` cost nothing at all — they are skipped, not simulated —
 and each core's architectural state lives in its own hart, so nothing is
 shared that silicon does not share. `instructions()` is the sum over cores,
@@ -888,6 +887,16 @@ with the per-core counts reported beside it (DD45 R10).
 measurement.** A store by one core is visible to the other at the next
 instruction it executes; there is no store buffer, no write posting, no cache
 coherence protocol.
+
+⚠️ **A run's schedule is part of what produced its numbers, and the sidecar
+does not carry it yet.** M5's brief specified a `quantum` field on the
+transcript header and **there is none**: `TranscriptHeader` has no such key and
+no classic sidecar states one. What a reader can recover today is the
+`source` field's exact command line — no `--core-quantum` in it means the
+binary's default, 256 — and the machine's own run summary (`quantum=256`),
+which goes to the run log rather than into the transcript. Named here as the
+gap it is; adding the field is a schema change and belongs to whoever next
+touches the header.
 
 So, plainly: **this schedule cannot show a store-buffer race, and it cannot
 show any ordering silicon permits that this one interleave never exercises**
