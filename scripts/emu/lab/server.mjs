@@ -737,7 +737,8 @@ async function handle(req, res) {
     // The only thing a 401 leaves behind is a count and, through the
     // tunnel, who: ngrok sets X-Forwarded-For. Nothing is written.
     tokenFailures++;
-    const who = req.headers['x-forwarded-for'] || req.socket.remoteAddress;
+    // ngrok sets X-Forwarded-For; Tailscale Serve sets Tailscale-User-Login.
+    const who = req.headers['tailscale-user-login'] || req.headers['x-forwarded-for'] || req.socket.remoteAddress;
     if (tokenFailures <= 100 || tokenFailures % 100 === 0) log('401 #' + tokenFailures + ' ' + m + ' ' + p + ' from ' + who);
     return send(res, 401, { error: 'token' });
   }

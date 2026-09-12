@@ -12,9 +12,9 @@
 #   lab.sh jobs                                    # table of jobs and states
 #   lab.sh cancel ID
 #   lab.sh home | token | curl /status [curl args] # LAB_HOME; the token FILE's path; authenticated passthrough
-#   lab.sh install [--force]                       # the two launchd agents (server + tunnel); prints the bookmark
+#   lab.sh install [--force]                       # the server agent + the exposure (config.json "exposure": tailscale | ngrok); prints the bookmark
 #   lab.sh uninstall | restart [server|tunnel]     # bootout both / kickstart one or both
-#   lab.sh url                                     # the bookmark: the static domain from config.json, else the live random URL
+#   lab.sh url                                     # the bookmark: the tailnet name, or the ngrok domain from config.json, else the live random URL
 #   lab.sh logs [-n 100] [server|tunnel]           # tail the logs
 #
 # Talks to http://127.0.0.1:<port> — the director is on the desk, never through
@@ -137,11 +137,22 @@ label_server="com.yona.emu-lab"
 label_tunnel="com.yona.emu-lab-tunnel"
 
 domain() { jq -r '.domain // empty' "$home/config.json"; }
+exposure() { jq -r '.exposure // "ngrok"' "$home/config.json"; }
+TS=/usr/local/bin/tailscale
+
+# The desk's own tailnet name (`<host>.<tailnet>.ts.net`), or nothing when
+# Tailscale is not logged in.
+ts_name() { "$TS" status --json 2>/dev/null | jq -r '.Self.DNSName // empty' | sed 's/\.$//'; }
 
 # The bookmark, with the token in the fragment (D17). The static domain from
 # config.json when there is one; otherwise the live random URL off ngrok's
 # local API (4040), which changes every time the tunnel restarts.
 bookmark() {
+    if [[ "$(exposure)" == tailscale ]]; then
+        local n; n="$(ts_name)"
+        [[ -n "$n" ]] || { echo "lab: exposure is tailscale but the desk is not logged in (tailscale status)" >&2; return 1; }
+        echo "https://$n/#t=$(token)"; return
+    fi
     local d; d="$(domain)"
     if [[ -n "$d" ]]; then echo "https://$d/#t=$(token)"; return; fi
     local u
@@ -170,17 +181,33 @@ cmd_install() {
         exit 2
     fi
     command -v /opt/homebrew/bin/node >/dev/null || { echo "lab: /opt/homebrew/bin/node missing (D13)" >&2; exit 1; }
-    command -v /opt/homebrew/bin/ngrok >/dev/null || { echo "lab: /opt/homebrew/bin/ngrok missing" >&2; exit 1; }
-    /opt/homebrew/bin/ngrok config check >/dev/null 2>&1 || { echo "lab: ngrok config check failed (no authtoken? run: ngrok config add-authtoken …)" >&2; exit 1; }
+    local exp; exp="$(exposure)"
+    local labels=("$label_server")
     mkdir -p "$agents_dir" "$home/log"
     render "$here/launchd/$label_server.plist.tmpl" >"$agents_dir/$label_server.plist"
-    render "$here/launchd/$label_tunnel.plist.tmpl" >"$agents_dir/$label_tunnel.plist"
-    plutil -lint "$agents_dir/$label_server.plist" "$agents_dir/$label_tunnel.plist" >/dev/null
+    case "$exp" in
+        ngrok)
+            command -v /opt/homebrew/bin/ngrok >/dev/null || { echo "lab: /opt/homebrew/bin/ngrok missing" >&2; exit 1; }
+            /opt/homebrew/bin/ngrok config check >/dev/null 2>&1 || { echo "lab: ngrok config check failed (no authtoken? run: ngrok config add-authtoken …)" >&2; exit 1; }
+            render "$here/launchd/$label_tunnel.plist.tmpl" >"$agents_dir/$label_tunnel.plist"
+            labels+=("$label_tunnel") ;;
+        tailscale)
+            # No tunnel agent: `tailscale serve --bg` is a setting tailscaled
+            # keeps across reboots, and the tailnet is private — the token
+            # becomes the second belt rather than the only one.
+            [[ -x "$TS" ]] || { echo "lab: $TS missing (install the Tailscale app)" >&2; exit 1; }
+            [[ -n "$(ts_name)" ]] || { echo "lab: Tailscale is not logged in on the desk (menu bar → Log in), so there is no tailnet name to serve on" >&2; exit 1; }
+            # A leftover ngrok agent would keep a second, public door open.
+            launchctl bootout "gui/$(id -u)/$label_tunnel" >/dev/null 2>&1 && echo "lab: ngrok tunnel agent stopped (exposure is tailscale now)" >&2 || true
+            rm -f "$agents_dir/$label_tunnel.plist" ;;
+        *) echo "lab: config.json exposure must be tailscale or ngrok, not '$exp'" >&2; exit 2 ;;
+    esac
+    plutil -lint "${labels[@]/#/$agents_dir/}" >/dev/null 2>&1 || plutil -lint "$agents_dir/$label_server.plist" >/dev/null
     # A hand-run server on the port would keep the agent crash-looping.
     if lsof -nP -iTCP:"$(port)" -sTCP:LISTEN >/dev/null 2>&1 && ! launchctl print "gui/$(id -u)/$label_server" >/dev/null 2>&1; then
         echo "lab: something else is listening on :$(port) (a hand-run server?) — stop it first" >&2; exit 1
     fi
-    for l in "$label_server" "$label_tunnel"; do
+    for l in "${labels[@]}"; do
         # bootout returns before the label is gone; a bootstrap in that window
         # fails with "5: Input/output error". Wait for it to clear, then retry
         # once — a re-install is the one time this runs, so a second is fine.
@@ -189,12 +216,26 @@ cmd_install() {
         launchctl bootstrap "gui/$(id -u)" "$agents_dir/$l.plist" 2>/dev/null || { sleep 2; launchctl bootstrap "gui/$(id -u)" "$agents_dir/$l.plist"; }
     done
     sleep 2
-    for l in "$label_server" "$label_tunnel"; do
+    for l in "${labels[@]}"; do
         launchctl print "gui/$(id -u)/$l" | grep -E "^\s+(state|pid) " | tr -s ' ' | sed "s|^|lab: $l|" >&2
     done
     curl -sf "http://127.0.0.1:$(port)/healthz" >/dev/null || { echo "lab: server agent is not answering /healthz yet (lab.sh logs server)" >&2; exit 1; }
-    echo "lab: installed $agents_dir/$label_server.plist and $label_tunnel.plist (repo $repo$([[ $force -eq 1 ]] && echo ', --force'))" >&2
-    [[ -n "$(domain)" ]] || echo "lab: no static domain in $home/config.json — the tunnel URL is random and changes on restart; claim one in the ngrok dashboard (Domains → New Domain), put it in config.json as \"domain\", and re-run install" >&2
+    echo "lab: installed ${labels[*]} (repo $repo$([[ $force -eq 1 ]] && echo ', --force'), exposure $exp)" >&2
+    if [[ "$exp" == tailscale ]]; then
+        # Serve the lab on the tailnet over https. Needs MagicDNS + HTTPS
+        # certificates enabled for the tailnet (admin console → DNS); the
+        # command says so itself when they are not.
+        # `serve` prints an enable link and then WAITS for the click when
+        # Serve is off for the tailnet; a bounded run turns that into a
+        # message. HTTPS certificates (admin console → DNS) are the other
+        # switch it needs.
+        if ! timeout 20 "$TS" serve --bg "$(port)" >&2; then
+            echo "lab: tailscale serve did not come up — enable Serve (the link above) and HTTPS certificates (admin console → DNS) for the tailnet, then re-run install" >&2
+            exit 1
+        fi
+    else
+        [[ -n "$(domain)" ]] || echo "lab: no static domain in $home/config.json — the tunnel URL is random and changes on restart; claim one in the ngrok dashboard (Domains → New Domain), put it in config.json as \"domain\", and re-run install" >&2
+    fi
     sleep 2
     echo "lab: bookmark this (the token is in the fragment; do not paste it into logs that persist):" >&2
     bookmark
@@ -205,6 +246,7 @@ cmd_uninstall() {
         launchctl bootout "gui/$(id -u)/$l" >/dev/null 2>&1 && echo "lab: $l stopped" >&2 || true
         rm -f "$agents_dir/$l.plist"
     done
+    [[ -x "$TS" ]] && "$TS" serve --https=443 off >/dev/null 2>&1 && echo "lab: tailscale serve cleared" >&2 || true
     echo "lab: agents removed; $home left alone" >&2
 }
 

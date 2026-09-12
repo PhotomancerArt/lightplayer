@@ -24,7 +24,7 @@ with one once. `LAB_HOME` overrides it (tests use a temp dir).
 
 ```text
 ~/.photomancer/emu-lab/
-├── config.json      {port: 41111, domain: null, cooldownMs: 60000, maxResultBytes: 2000000}
+├── config.json      {port: 41111, exposure: "tailscale" | "ngrok", domain: null, cooldownMs: 60000, maxResultBytes: 2000000}
 ├── token            32 hex, 0600, generated on first start
 ├── builds/<id>/     emu.wasm manifest.json worker.js bench-run.js wasi-shim.js jit-host.js bench-cli.mjs index.html
 │                    fw-<slug>.elf -> ../../images/<sha12>.elf       (one ELF copy shared by every build)
@@ -305,7 +305,18 @@ harness. `lab.sh install` refuses a worktree path unless `--force`, which
 exists for a gate held before the PR merges; the re-install from the
 primary checkout is then a post-merge step.
 
-**The domain.** `config.json`'s `domain` is the ngrok static domain (free
+**Exposure** is `config.json`'s `exposure`: `tailscale` (the lean, once the
+desk and the phone run the Tailscale app) or `ngrok` (the default until
+then). With `tailscale`, `install` runs `tailscale serve --bg 41111` — a
+setting `tailscaled` keeps across reboots, so there is no tunnel agent —
+and the bookmark is `https://<desk>.<tailnet>.ts.net/#t=…`: a private
+name, real https, no interstitial (Q8 gone), reachable only from devices on
+the tailnet. The token stays as the second belt. The tailnet needs MagicDNS
+and HTTPS certificates enabled (admin console → DNS); `tailscale serve`
+says so if not. `install` also stops a leftover ngrok agent, so one door is
+open at a time.
+
+**The ngrok domain.** With `exposure: ngrok`, `domain` is the static domain (free
 tier: one per account, assigned as `<adj>-<noun>-<noun>.ngrok-free.dev` or
 `.app`, claimed once in the ngrok dashboard under Domains → New Domain). With it,
 the tunnel starts as `ngrok http 41111 --url https://<domain>` and the
