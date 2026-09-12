@@ -104,7 +104,7 @@ done
 mkdir -p "$bench_dir"
 
 # --- the reference images ---------------------------------------------------
-# slug|env var|features|emulated timeout|--exit-on substring (empty = none)|commit
+# row|env var|features|emulated timeout|--exit-on substring (empty = none)|commit|reference dir
 #
 # Every row names its own commit, because there is no historical pin a clean
 # tree can reproduce for this chip (build-reference-image.sh's ruling R7) and
@@ -112,25 +112,34 @@ mkdir -p "$bench_dir"
 # classic takes no `spike_uart0_link` cherry-pick — its host link IS UART0 —
 # so unlike the C6's table there is no spike column.
 #
+# ⚠️ **The row name and the reference directory are two columns, not one.**
+# `build-reference-image.sh` gives the classic exactly ONE short slug
+# (`boot-idle`), because its `case` is mirrored by `reference_image_slug` in
+# `lp-emu/lp-emu-validate/src/driver.rs` and a new short name there is a
+# two-file change that M7 P1b was scoped out of. So the other two rows read
+# their images from the long fallback directory and are still called what
+# `lp-emu-validate`'s payload registry calls them in this table and in the
+# printed table — which is the name a reader needs.
+#
 # `boot-idle` runs to a fixed emulated deadline rather than to its sentinel:
 # an idle image's sentinel arrives in the first few hundred milliseconds and
 # the rest of the row would be measuring the idle skip. A fixed span is the
 # same span every run.
 images=(
-    "boot-idle|LP_EMU_ESP32V3_REF_BOOT_IDLE|esp32,server,float-f32|3s||0773c3fbd"
-    "shader-compile-stress|LP_EMU_ESP32V3_REF_SHADER_COMPILE_STRESS|esp32,test_shader_compile_incremental|60s|[inc-shader-compile] === DONE ===|0773c3fbd"
-    "render-loop|LP_EMU_ESP32V3_REF_RENDER_LOOP|esp32,server,float-f32,bench_render_loop|20s|[render-loop] === DONE ===|0773c3fbd"
+    "boot-idle|LP_EMU_ESP32V3_REF_BOOT_IDLE|esp32,server,float-f32|3s||0773c3fbd|boot-idle"
+    "shader-compile-stress|LP_EMU_ESP32V3_REF_SHADER_COMPILE_STRESS|esp32,test_shader_compile_incremental|60s|[inc-shader-compile] === DONE ===|0773c3fbd|esp32+test_shader_compile_incremental"
+    "render-loop|LP_EMU_ESP32V3_REF_RENDER_LOOP|esp32,server,float-f32,bench_render_loop|20s|[render-loop] === DONE ===|0773c3fbd|esp32+server+float-f32+bench_render_loop"
 )
 
 resolve_image() {
-    local slug="$1" var="$2" features="$3" commit="$4" path
+    local slug="$1" var="$2" features="$3" commit="$4" refdir="$5" path
     path="${!var:-}"
     if [[ -n "$path" ]]; then
         [[ -f "$path" ]] || { echo "bench-esp32v3: $var points at $path, which is not a file" >&2; exit 1; }
         echo "$path"
         return
     fi
-    path="target/emu-ref/$commit-$slug/fw-esp32v3"
+    path="target/emu-ref/$commit-$refdir/fw-esp32v3"
     if [[ ! -f "$path" ]]; then
         echo "bench-esp32v3: building the $slug reference image" >&2
         scripts/emu/build-reference-image.sh --chip esp32 "$features" "$commit" none >&2
@@ -152,8 +161,8 @@ lines=()
 json_rows=()
 
 for spec in "${images[@]}"; do
-    IFS='|' read -r slug var features timeout exit_on commit <<<"$spec"
-    elf="$(resolve_image "$slug" "$var" "$features" "$commit")"
+    IFS='|' read -r slug var features timeout exit_on commit refdir <<<"$spec"
+    elf="$(resolve_image "$slug" "$var" "$features" "$commit" "$refdir")"
 
     uart="$bench_dir/$slug-$grade.txt"
     best_user=""
@@ -255,7 +264,7 @@ fi
 if [[ $do_promote -eq 1 ]]; then
     mkdir -p "$prev_dir"
     for spec in "${images[@]}"; do
-        IFS='|' read -r slug _ _ _ _ _ <<<"$spec"
+        IFS='|' read -r slug _ _ _ _ _ _ <<<"$spec"
         cp "$bench_dir/$slug-$grade.txt" "$prev_dir/$slug-$grade.txt"
     done
     echo "promoted this run's UART output to $prev_dir/ (the next run compares against it)"

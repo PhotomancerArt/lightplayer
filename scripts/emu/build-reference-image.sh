@@ -182,22 +182,28 @@ case "$features" in
     esp32c6,server,radio,memory_fs) slug=boot-idle-memfs-usb ;;
     esp32c6,server,radio,spike_uart0_link,memory_fs,bench_render_loop) slug=render-basic ;;
     esp32c6,server,radio,spike_uart0_link,memory_fs,bench_project_rocaille) slug=render-rocaille ;;
-    # The classic's slugs. `boot-idle` is the SHIPPED default feature set,
-    # which is the image every M3 gate runs and the one a silicon capture is
-    # taken from. There is no memfs variant — the classic boots from a
-    # modelled flash chip with a real filesystem, which is what "memfs-free"
-    # means in G2, and the render-loop image seeds THAT filesystem rather
+    # The classic's only slug: the SHIPPED default feature set, which is the
+    # image every M3 gate runs and the one a silicon capture is taken from.
+    # There is no memfs variant — the classic boots from a modelled flash
+    # chip with a real filesystem, which is what "memfs-free" means in G2,
+    # and `bench-esp32v3.sh`'s render-loop image seeds THAT filesystem rather
     # than growing a second one.
     #
-    # The other two are `scripts/emu/bench-esp32v3.sh`'s rows, and their
-    # names are `lp-emu-validate`'s payload names (`just _v3-payload-features`
-    # is the same table) so the probe and the registry cannot drift apart.
-    # ⚠️ `render-loop` cannot be pinned before the commit that adds
-    # `bench_render_loop` to fw-esp32v3, for the same reason the C6's two
-    # render rows carry their own pin.
+    # ⚠️ **A short slug here is a TWO-file change.** `reference_image_slug`
+    # in `lp-emu/lp-emu-validate/src/driver.rs` mirrors this `case`, and
+    # `every_short_slug_in_the_script_is_in_the_slug_table` fails the moment
+    # the two disagree — a silicon `--image` is checked against that table,
+    # so a missing arm refuses a legitimate image. The C6's two render slugs
+    # drifted exactly this way once.
+    #
+    # `bench-esp32v3.sh`'s other two rows therefore take the LONG fallback
+    # name below (`esp32+test_shader_compile_incremental`,
+    # `esp32+server+float-f32+bench_render_loop`) rather than short ones:
+    # M7 P1b was scoped to leave `lp-emu-validate` alone during the G-classic
+    # hold, and a short slug for either would have meant editing it. Giving
+    # them short names is a two-line follow-up (this `case` plus that table)
+    # whenever the hold lifts.
     esp32,server,float-f32) slug=boot-idle ;;
-    esp32,test_shader_compile_incremental) slug=shader-compile-stress ;;
-    esp32,server,float-f32,bench_render_loop) slug=render-loop ;;
     *) slug="${features//,/+}" ;;
 esac
 
