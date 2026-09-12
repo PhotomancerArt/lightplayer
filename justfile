@@ -2195,6 +2195,11 @@ clippy-host:
 # It costs the Lint job a cranelift build. That is the price of the feature
 # being lintable at all: nothing else in CI compiles it, and a feature no gate
 # compiles is a feature that rots. See G-M7B' Q3.
+#
+# **MEASURED, 2026-09-12**: the `Lint` step (`just check-lint`) went 304 s on
+# main c74d2429d to 405 s on PR #729 — **+101 s** — and the Lint job 5m47s to
+# 7m19s against its 25-minute budget. Locally it is 40.5 s wall / 261 s user
+# on an M2 Max at load 2.78.
 clippy-emu-jit:
     cargo clippy -p lp-emu-esp32c6 --features jit --all-targets -- --no-deps -D warnings
 

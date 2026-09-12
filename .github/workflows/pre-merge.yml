@@ -1265,6 +1265,16 @@ jobs:
       # Lint job now runs `clippy-emu-jit`). sccache covers it after the first
       # run on main.
       #
+      # **MEASURED on this runner, 2026-09-12** (PR #729, head 62ab9403e,
+      # against main c74d2429d's own run): this step is **185 s**, build
+      # included, and the job went 15m21s -> 16m32s against a 35-minute
+      # budget. (The other two steps happened to come in faster on this run —
+      # `--verify` 108 -> 91 s and the boot suite 715 -> 674 s — so the job's
+      # +71 s understates the step; 185 s is the number to plan against.)
+      # Note also that main's own emu-c6 run is 15m21s rather than the ~12 min
+      # the 2026-09-08 split predicted; the budget is still headroom, but less
+      # of it than the comment above assumes.
+      #
       # It never skips. A binary built without the feature refuses `--jit`
       # outright, and the script turns that into a named failure — a
       # self-comparison would pass and prove nothing.
