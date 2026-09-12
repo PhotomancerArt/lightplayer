@@ -2505,6 +2505,60 @@ impl TranslatedCore<SocBus> for JitCore {
                     self.where_is(*pc)
                 );
             }
+            // The same sites again, **per reason** (M7b P6). The list above is
+            // sorted across every class at once, so the small classes are
+            // buried under the budget exits that dominate the whole, and a
+            // phase that wants to take one back cannot see it.
+            //
+            // The split that matters is **where the exit pc goes**. An exit to
+            // a pc some module already holds a block for costs one exit and
+            // one entry and nothing else — the hart re-enters at once and the
+            // interpreter retires nothing in between. For `indirect-miss` that
+            // is exactly P1's module boundary (DD30): a `jalr` whose target is
+            // in the other module resolves to `-1` here and is re-entered
+            // there. An exit to a pc **no** module holds is a coverage gap:
+            // the interpreter runs from there until it reaches a block start
+            // again, and the instructions it retires are the second column.
+            for code in 0..WHY_CODES {
+                let mut mine: Vec<(u32, u64, u64)> = top
+                    .iter()
+                    .filter(|(_, why, _, _)| *why as usize == code)
+                    .map(|&(pc, _, n, gap)| (pc, n, gap))
+                    .collect();
+                if mine.is_empty() {
+                    continue;
+                }
+                mine.sort_unstable_by(|a, b| b.1.cmp(&a.1));
+                let held = |pc: u32| self.index.contains_key(&pc);
+                let total: u64 = mine.iter().map(|&(_, n, _)| n).sum();
+                let known: u64 = mine
+                    .iter()
+                    .filter(|&&(pc, _, _)| held(pc))
+                    .map(|&(_, n, _)| n)
+                    .sum();
+                let known_gap: u64 = mine
+                    .iter()
+                    .filter(|&&(pc, _, _)| held(pc))
+                    .map(|&(_, _, gap)| gap)
+                    .sum();
+                let gap: u64 = mine.iter().map(|&(_, _, g)| g).sum();
+                eprintln!(
+                    "jit: exit class {:<18} {:>8} site(s), {total:>10} exit(s); \
+                     {known} to a pc a module holds ({known_gap} instr after) / \
+                     {} to one no module holds ({} instr after)",
+                    why_name(code),
+                    mine.len(),
+                    total - known,
+                    gap - known_gap,
+                );
+                for (pc, n, gap) in mine.iter().take(24) {
+                    eprintln!(
+                        "jit:   {:<18} {pc:#010x} ({}): {n} time(s), {gap} instructions after",
+                        why_name(code),
+                        self.where_is(*pc)
+                    );
+                }
+            }
         }
         // M7 P6b H3: where an entry's time goes, on its own line so nothing
         // that parses the report line has to know about it and so it is
