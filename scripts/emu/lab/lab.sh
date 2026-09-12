@@ -12,6 +12,10 @@
 #   lab.sh jobs                                    # table of jobs and states
 #   lab.sh cancel ID
 #   lab.sh home | token | curl /status [curl args] # LAB_HOME; the token FILE's path; authenticated passthrough
+#   lab.sh install [--force]                       # the two launchd agents (server + tunnel); prints the bookmark
+#   lab.sh uninstall | restart [server|tunnel]     # bootout both / kickstart one or both
+#   lab.sh url                                     # the bookmark: the static domain from config.json, else the live random URL
+#   lab.sh logs [-n 100] [server|tunnel]           # tail the logs
 #
 # Talks to http://127.0.0.1:<port> — the director is on the desk, never through
 # the tunnel. The port comes from $LAB_HOME/config.json, the token from
@@ -28,7 +32,7 @@ set -euo pipefail
 
 home="${LAB_HOME:-$HOME/.photomancer/emu-lab}"
 
-usage() { sed -n '2,25p' "$0"; }
+usage() { sed -n '2,29p' "$0"; }
 
 need_home() {
     [[ -f "$home/config.json" && -f "$home/token" ]] || {
@@ -125,8 +129,103 @@ cmd_wait() {
     esac
 }
 
+# --- the standing service (D7, T8): two launchd user agents ---------------------
+here="$(cd "$(dirname "$0")" && pwd)"
+repo="$(cd "$here/../../.." && pwd)"
+agents_dir="$HOME/Library/LaunchAgents"
+label_server="com.yona.emu-lab"
+label_tunnel="com.yona.emu-lab-tunnel"
+
+domain() { jq -r '.domain // empty' "$home/config.json"; }
+
+# The bookmark, with the token in the fragment (D17). The static domain from
+# config.json when there is one; otherwise the live random URL off ngrok's
+# local API (4040), which changes every time the tunnel restarts.
+bookmark() {
+    local d; d="$(domain)"
+    if [[ -n "$d" ]]; then echo "https://$d/#t=$(token)"; return; fi
+    local u
+    u="$(curl -s http://127.0.0.1:4040/api/tunnels | jq -r '.tunnels[] | select(.proto == "https") | .public_url' 2>/dev/null | head -1 || true)"
+    [[ -n "$u" ]] || { echo "lab: no static domain in $home/config.json and no tunnel answering on :4040 (is the tunnel agent running? lab.sh logs tunnel)" >&2; return 1; }
+    echo "$u/#t=$(token)"
+}
+
+render() {
+    local tmpl="$1" urlargs=""
+    local d; d="$(domain)"
+    [[ -z "$d" ]] || urlargs="<string>--url</string><string>https://$d</string>"
+    sed -e "s|@HOME@|$HOME|g" -e "s|@REPO@|$repo|g" -e "s|@PORT@|$(port)|g" -e "s|@URLARGS@|$urlargs|g" "$tmpl"
+}
+
+cmd_install() {
+    local force=0
+    [[ "${1:-}" == --force ]] && force=1
+    need_home
+    # @REPO@ is a trap: a worktree is harness-pruned, and an agent pointing
+    # at one dies with it (T3 all over again). Install from the primary
+    # checkout; --force is for a gate held before the PR merges.
+    if [[ "$repo" == */.claude/worktrees/* && $force -eq 0 ]]; then
+        echo "lab: refusing to install from a worktree ($repo): the agent would die when the harness prunes it." >&2
+        echo "lab: run this from the primary checkout (/Users/yona/dev/photomancer/lp2025), or --force for a gate and re-install after the merge." >&2
+        exit 2
+    fi
+    command -v /opt/homebrew/bin/node >/dev/null || { echo "lab: /opt/homebrew/bin/node missing (D13)" >&2; exit 1; }
+    command -v /opt/homebrew/bin/ngrok >/dev/null || { echo "lab: /opt/homebrew/bin/ngrok missing" >&2; exit 1; }
+    /opt/homebrew/bin/ngrok config check >/dev/null 2>&1 || { echo "lab: ngrok config check failed (no authtoken? run: ngrok config add-authtoken …)" >&2; exit 1; }
+    mkdir -p "$agents_dir" "$home/log"
+    render "$here/launchd/$label_server.plist.tmpl" >"$agents_dir/$label_server.plist"
+    render "$here/launchd/$label_tunnel.plist.tmpl" >"$agents_dir/$label_tunnel.plist"
+    plutil -lint "$agents_dir/$label_server.plist" "$agents_dir/$label_tunnel.plist" >/dev/null
+    # A hand-run server on the port would keep the agent crash-looping.
+    if lsof -nP -iTCP:"$(port)" -sTCP:LISTEN >/dev/null 2>&1 && ! launchctl print "gui/$(id -u)/$label_server" >/dev/null 2>&1; then
+        echo "lab: something else is listening on :$(port) (a hand-run server?) — stop it first" >&2; exit 1
+    fi
+    for l in "$label_server" "$label_tunnel"; do
+        launchctl bootout "gui/$(id -u)/$l" >/dev/null 2>&1 || true
+        launchctl bootstrap "gui/$(id -u)" "$agents_dir/$l.plist"
+    done
+    sleep 2
+    for l in "$label_server" "$label_tunnel"; do
+        launchctl print "gui/$(id -u)/$l" | grep -E "^\s+(state|pid) " | tr -s ' ' | sed "s|^|lab: $l|" >&2
+    done
+    curl -sf "http://127.0.0.1:$(port)/healthz" >/dev/null || { echo "lab: server agent is not answering /healthz yet (lab.sh logs server)" >&2; exit 1; }
+    echo "lab: installed $agents_dir/$label_server.plist and $label_tunnel.plist (repo $repo$([[ $force -eq 1 ]] && echo ', --force'))" >&2
+    [[ -n "$(domain)" ]] || echo "lab: no static domain in $home/config.json — the tunnel URL is random and changes on restart; claim one in the ngrok dashboard (Domains → New Domain), put it in config.json as \"domain\", and re-run install" >&2
+    sleep 2
+    echo "lab: bookmark this (the token is in the fragment; do not paste it into logs that persist):" >&2
+    bookmark
+}
+
+cmd_uninstall() {
+    for l in "$label_server" "$label_tunnel"; do
+        launchctl bootout "gui/$(id -u)/$l" >/dev/null 2>&1 && echo "lab: $l stopped" >&2 || true
+        rm -f "$agents_dir/$l.plist"
+    done
+    echo "lab: agents removed; $home left alone" >&2
+}
+
+cmd_restart() {
+    local which="${1:-both}"
+    for l in "$label_server" "$label_tunnel"; do
+        case "$which:$l" in both:*|server:$label_server|tunnel:$label_tunnel) launchctl kickstart -k "gui/$(id -u)/$l" && echo "lab: $l restarted" >&2 ;; esac
+    done
+}
+
+cmd_logs() {
+    local n=100 which=server
+    while [[ $# -gt 0 ]]; do
+        case "$1" in -n) n="$2"; shift 2 ;; server|tunnel) which="$1"; shift ;; *) echo "lab: logs: unknown $1" >&2; exit 2 ;; esac
+    done
+    tail -n "$n" "$home/log/$which.log"
+}
+
 cmd="${1:-}"; [[ $# -gt 0 ]] && shift
 case "$cmd" in
+    install) cmd_install "$@" ;;
+    uninstall) cmd_uninstall ;;
+    restart) cmd_restart "$@" ;;
+    url) need_home; bookmark ;;
+    logs) need_home; cmd_logs "$@" ;;
     home) echo "$home" ;;
     token) need_home; echo "$home/token" ;;
     status)

@@ -84,6 +84,8 @@ if (fs.existsSync(tokenPath)) {
 const TOKEN_BUF = Buffer.from(TOKEN);
 
 const logPath = path.join(HOME, 'log', 'server.log');
+// Append-only, one generation: past 50 MB on start it becomes server.log.1.
+try { if (fs.statSync(logPath).size > 50 * 1024 * 1024) fs.renameSync(logPath, logPath + '.1'); } catch { /* no log yet */ }
 function log(line) {
   const l = new Date().toISOString() + ' ' + line;
   try { fs.appendFileSync(logPath, l + '\n'); } catch { /* the log is a courtesy, never a failure */ }
@@ -726,9 +728,16 @@ async function handle(req, res) {
   if ((m === 'GET' || m === 'HEAD') && p.startsWith('/') && PAGE_FILES.has(p.slice(1))) return serveFile(req, res, HERE_REAL, p.slice(1), url);
   if ((m === 'GET' || m === 'HEAD') && p.startsWith('/builds/')) return serveFile(req, res, HOME_REAL, p.slice(1), url);
   if ((m === 'GET' || m === 'HEAD') && p.startsWith('/images/')) return serveFile(req, res, HOME_REAL, p.slice(1), url);
-  if (m === 'GET' && p === '/healthz') return send(res, 200, { ok: true, build: SERVER_BUILD, uptimeS: Math.round((Date.now() - STARTED) / 1000) });
+  if (m === 'GET' && p === '/healthz') return send(res, 200, { ok: true, build: SERVER_BUILD, uptimeS: Math.round((Date.now() - STARTED) / 1000), pid: process.pid, startedAt: new Date(STARTED).toISOString(), home: HOME, port: PORT, domain: config.domain });
 
-  if (!authed(req, url)) { tokenFailures++; return send(res, 401, { error: 'token' }); }
+  if (!authed(req, url)) {
+    // The only thing a 401 leaves behind is a count and, through the
+    // tunnel, who: ngrok sets X-Forwarded-For. Nothing is written.
+    tokenFailures++;
+    const who = req.headers['x-forwarded-for'] || req.socket.remoteAddress;
+    if (tokenFailures <= 100 || tokenFailures % 100 === 0) log('401 #' + tokenFailures + ' ' + m + ' ' + p + ' from ' + who);
+    return send(res, 401, { error: 'token' });
+  }
 
   if (m === 'GET' && p === '/events') return openEvents(req, res, url);
   if (m === 'GET' && p === '/status') return send(res, 200, status());
@@ -765,5 +774,17 @@ server.listen(PORT, '0.0.0.0', () => {
   tick();
 });
 
-process.on('SIGTERM', () => { log('SIGTERM'); server.close(); process.exit(0); });
-process.on('SIGINT', () => { log('SIGINT'); server.close(); process.exit(0); });
+// launchd's stop is SIGTERM: end every stream so the pages reconnect at
+// once rather than after a keepalive gap, answer the held waits so no
+// director's curl is left hanging on a dead socket, then exit 0. Every job
+// write is already on disk (writeJsonFile is rename-atomic), so there is
+// nothing to flush.
+function shutdown(sig) {
+  log(sig + ': closing ' + streams.size + ' device stream(s) and ' + waiters.length + ' wait(s)');
+  for (const set of streams.values()) for (const res of set) { try { res.end(); } catch { /* gone */ } }
+  for (const w of waiters.splice(0)) { clearTimeout(w.timer); try { send(w.res, 503, { error: 'server stopping', retry: true }); } catch { /* gone */ } }
+  server.close();
+  setTimeout(() => process.exit(0), 200).unref();
+}
+process.on('SIGTERM', () => shutdown('SIGTERM'));
+process.on('SIGINT', () => shutdown('SIGINT'));

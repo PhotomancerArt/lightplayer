@@ -282,6 +282,51 @@ lab.sh wait --job <id> [--max-time 3600] | --device any|NAME | --queue-idle
 `queue` prints the job id on stdout; `wait --job` prints the path of
 `report.md`; `--spacing`/`--ttl` take `90s`, `3m`, `24h`.
 
+## Standing service (D7, T8): two launchd agents
+
+The server and the tunnel run as launchd user agents with `KeepAlive`, so a
+`kill -9`, a crash, or a logout/login brings them back on their own, and no
+agent session owns the rig's lifetime (three rigs died with their sessions
+before this).
+
+```bash
+scripts/emu/lab/lab.sh install            # renders launchd/*.plist.tmpl into ~/Library/LaunchAgents, bootstraps both, prints the bookmark
+scripts/emu/lab/lab.sh url                # the bookmark again (static domain from config.json, else the live random URL)
+scripts/emu/lab/lab.sh restart [server|tunnel]
+scripts/emu/lab/lab.sh logs [-n 100] [server|tunnel]
+scripts/emu/lab/lab.sh uninstall          # bootout both, remove the plists; the home is left alone
+launchctl print gui/$UID/com.yona.emu-lab | head
+```
+
+**Install from the primary checkout** (`/Users/yona/dev/photomancer/lp2025`),
+never from a `.claude/worktrees/…` path: the agent's `ProgramArguments`
+point at `server.mjs` in that checkout, and a worktree is pruned by the
+harness. `lab.sh install` refuses a worktree path unless `--force`, which
+exists for a gate held before the PR merges; the re-install from the
+primary checkout is then a post-merge step.
+
+**The domain.** `config.json`'s `domain` is the ngrok static domain (free
+tier: one per account, assigned as `<adj>-<noun>-<noun>.ngrok-free.app`,
+claimed once in the ngrok dashboard under Domains → New Domain). With it,
+the tunnel starts as `ngrok http 41111 --url https://<domain>` and the
+bookmark never changes. Without it the tunnel takes a random URL that
+changes on every restart; `lab.sh url` reads the live one off ngrok's local
+API on :4040, and the bookmark has to be re-sent. Put the name in
+`config.json` and re-run `lab.sh install`.
+
+Logs: `log/server.log` (the server's own, append-only; rotated once to
+`.1` past 50 MB on start), `log/tunnel.log` (ngrok's JSON), and the two
+`*.stdout.log` files launchd captures. A 401 through the tunnel logs its
+`X-Forwarded-For`; nothing else about it is kept.
+
+**The interstitial** (Q1/Q8): `fetch` sends `ngrok-skip-browser-warning`,
+`EventSource` cannot, so a stream reconnect may land on the interstitial
+HTML — the page detects two closes in a row and says "Reload the tab once".
+**Tailscale** is the named upgrade if the lab becomes a fixture: a private
+stable name and no interstitial, at the cost of an app on the phone and the
+desk; the server would then bind the tailnet address and the tunnel agent
+would go.
+
 ## Verifying the page without opening it as a device
 
 Agents never open a lab tab as a device (the headless rule; hidden tabs are

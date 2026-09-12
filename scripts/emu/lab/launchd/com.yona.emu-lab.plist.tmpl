@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- The emulator perf lab's server as a launchd user agent (D7): KeepAlive,
+     so a kill -9, a crash or a logout/login brings it back on its own, and no
+     agent session ever owns the rig's lifetime again. Rendered by
+     `scripts/emu/lab/lab.sh install`; the @TOKENS@ are filled by sed.
+
+     launchd sources no rc file, so the interpreter is an absolute path (D13)
+     and PATH is spelled out. @REPO@ must be a checkout that outlives
+     worktrees — the primary checkout, never .claude/worktrees/… -->
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>com.yona.emu-lab</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/opt/homebrew/bin/node</string>
+    <string>@REPO@/scripts/emu/lab/server.mjs</string>
+  </array>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>LAB_HOME</key><string>@HOME@/.photomancer/emu-lab</string>
+    <key>LAB_QUIET</key><string>1</string>
+    <key>PATH</key><string>/opt/homebrew/bin:/usr/bin:/bin</string>
+  </dict>
+  <key>WorkingDirectory</key><string>@HOME@/.photomancer/emu-lab</string>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+  <key>ThrottleInterval</key><integer>5</integer>
+  <key>StandardOutPath</key><string>@HOME@/.photomancer/emu-lab/log/server.stdout.log</string>
+  <key>StandardErrorPath</key><string>@HOME@/.photomancer/emu-lab/log/server.stdout.log</string>
+</dict>
+</plist>
