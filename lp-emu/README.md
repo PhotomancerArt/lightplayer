@@ -216,6 +216,46 @@ The payload itself is `fw-checks`' `uart-bridge` (see that crate's README); the
 fixture and its current blocker are
 `docs/defects/2026-09-06-c6-analog-master-wedges-the-bootloader.md`.
 
+## Translation
+
+**In the wasm build there is no interpreter on the path.** Since M7 P7 a
+`wasm32-wasip1` build of `lp-emu-esp32c6` — what the browser rig, the phone and
+Studio-in-a-tab run — turns the guest's own program into WebAssembly at two
+events (the image at boot, and each guest `fence.i`) and lets the browser's
+engine run it. `lp-emu-jit` is an unconditional dependency of that target and
+brings no compiler with it; `--jit` there is a no-op alias for what already
+happened. **Natively the interpreter is still the default** (JD9, and JD24
+deferred the phase that would revisit it): `wasmtime` needs 130–220 s of
+cranelift over these images, and every test and CI job depends on the native
+binary starting fast, so translation there is `--features jit` plus `--jit`.
+
+The interpreter did not go away — it took three other jobs, and each one is why
+the flip is safe:
+
+- **The free differential oracle.** `--interpreter` on the same binary, the
+  same image and the same flags must print a byte-identical everything: the
+  `stopped after` line, the UART0 bytes, the frames decoded off the pad, stdout
+  and a 20 ms `--trace`. Two independent runs compared byte for byte, with no
+  runtime coordination between them — `scripts/emu/p6-oracle.sh` for a cell,
+  `scripts/emu/oracle-sweep.sh` for the whole pinned set.
+- **The escape hatch, as a library.** Translated code that meets an encoding
+  the translator does not emit calls `MachineHart::step_one` for that one
+  instruction and carries on. It is a function call, not a tier: nothing
+  decides between two engines at runtime, and the rate is reported on every
+  run. That is what makes bring-up incremental — a module that escaped on 90 %
+  of its instructions would be slow and still exactly right.
+- **The way back.** A default is reversible; that is the point of flipping one.
+
+What keeps it honest is the same thing that kept the block cache honest:
+**translated code is not architectural state.** It is absent from snapshots, a
+restore invalidates, a reboot invalidates, every emulator-side code-writing
+funnel invalidates, and `BootMode::RomUp` — where the mask ROM and the
+second-stage bootloader publish code without ever emitting a `fence.i` — keeps
+translation off entirely.
+
+`lp-emu-jit/README.md` is the translator; `lp-emu-esp32c6/README.md`'s flag
+table is the switches.
+
 ## Speed
 
 The interpreter's throughput is a product concern, not a curiosity: the

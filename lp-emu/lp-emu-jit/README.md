@@ -327,6 +327,29 @@ An encoding `decode` does not recognise cannot be escaped that way, because its
 *width* is unknown and so the next pc is unknown. Those end the block instead.
 Two escapes, one rule: never guess.
 
+### It is a library call, not a tier (M7 P7)
+
+Since P7 the wasm build's core **is** this translator, so it is worth being
+precise about what the interpreter underneath it is. It is not a second engine
+that something arbitrates between, and there is no counter, threshold or
+warm-up anywhere: translation happens at two events and covers the whole image.
+The interpreter is reached in exactly three ways, and none of them is a tier —
+
+- `MachineHart::step_one`, called **from inside** translated code, for one
+  instruction, and then the stay continues. A function call.
+- The block cache under the seam, which runs from wherever a stay ended until
+  the next pc the core holds.
+- With no core installed at all — `--interpreter`, a native build, a `rom-up`
+  boot — as the whole machine, unchanged. That is the free differential oracle,
+  and it works because the two runs share no state: two independent runs,
+  compared byte for byte.
+
+On the product path today the `step_one` count is **0** on `render-basic` t2:
+what the translator does not emit ends a block, and those instructions are
+retired by the interpreter *between* stays rather than through the hatch. The
+run still reports both, because a rate that is allowed to be non-zero (JD10)
+is not allowed to be unmeasured.
+
 ## Two-level dispatch, and the size it is set to (P5, JD8, JD26)
 
 wasm caps **one function body at 7,654,321 bytes**, and a whole-image walk of

@@ -1572,15 +1572,33 @@ lp-emu-esp32c6 --elf <app.elf> [--rom <path>] [--time-grade t1|t2|t3]
 
 ### The translated core (M7)
 
-`--jit` needs a build with `--features jit`; `wasmtime` is optional and never
-a default (JD18). `--interpreter` turns translation off entirely and must
-print an identical everything — it is the free oracle, and it costs nothing to
-run.
+**Since M7 P7 the wasm build's core IS the translator.** A `wasm32-wasip1`
+build of this binary — the one the browser rig, the phone and Studio-in-a-tab
+run — discovers and translates the image at boot and at each guest `fence.i`
+and runs that, with no flag and no cargo feature asked for: `lp-emu-jit` is an
+unconditional dependency there, and it brings no `wasmtime` with it. `--jit`
+on that build is a **no-op alias** for what already happened, kept because
+every script and every rig row already says it.
+
+**Natively the interpreter is still the default** (JD9; JD24 deferred the P8
+that would revisit it), and `--jit` is the opt-in that turns translation on. It
+needs a build with `--features jit`, because `wasmtime` is optional and never a
+default: cranelift needs 130–220 s over these images and every test and CI job
+depends on this binary starting fast.
+
+`--interpreter` turns translation off entirely, on either build, and must print
+an identical everything — it is the free oracle, it costs nothing to run, and
+it is the way back from the flip.
+
+An embedder of the wasm module that never calls `jitHost.attach(instance)` now
+fails at boot with `no JS host is wired to this instance` rather than quietly
+interpreting, and that is deliberate: after the flip, a silently interpreted
+run is a measurement nobody can tell apart from the control.
 
 | flag | what it does |
 |---|---|
-| `--jit` | translate the image to wasm at boot and at each guest `fence.i`, and run that instead of interpreting |
-| `--interpreter` | the free oracle: no translated core at all |
+| `--jit` | translate the image to wasm at boot and at each guest `fence.i`, and run that instead of interpreting. **The default in the wasm build, where this flag is an alias**; the opt-in natively |
+| `--interpreter` | the free oracle: no translated core at all, on any build. It beats the default rather than coexisting with it |
 | `--jit-report` | the boot-cost line per translation event (JD20), the coverage line, and the exit census — how many stays ended for each reason and how many instructions the interpreter then retired. Since M7b P2 it also carries `polls N (M left the stay)`: polling point (c) run **inside** a stay, and how many of those ended it. `N − M` is the after-store exit that did not happen. Since M7b F3 it also carries `pending_out N`: stays that ended while an MMIO **load**'s side-band or yield was still unclaimed, which the interpreter then takes at its own next store rather than at the exit's pc. `N` is zero on this chip by construction — `sideband` is set by MMIO writes only and every `yield_to_machine` is inside a `write` — and the counter is there so the corner names itself if a bus ever reaches it. Since M7b P3 it also carries `systimer_fast N read(s) served (armed A, disarmed D)`: `unit0_value.{lo,hi}` and `unit0_op` reads translated code answered from the word the host publishes on the latch store's own crossing, instead of crossing to the bus. The MMIO census counts what reached the bus, so these are **not** in it — the census total falls by exactly `N`. `A` and `D` are how often the published words were armed and dropped; they are equal at the end of a run, and both are zero under `--trace`, `--strict-grade` or `--strict-bus`, where the path refuses |
 | `--jit-escape-all` | emit no guest semantics at all; every instruction through the escape hatch. Complete, correct, slow, and the proof that a partial translator can only be slow and never wrong |
 | `--jit-blocks <N>` | a bound on how many discovered blocks are installed. **Unbounded by default since P5** — the whole image installs — and kept only for asking what a smaller set costs |
@@ -1591,6 +1609,23 @@ run.
 | `--jit-record-after <cycles>` | start recording once the run has charged this many guest cycles, so the recording lands on the module the **last** translation event installed (default 700,000,000, past both `fence.i`) |
 | `--jit-record-entries <n>` | how many entries to record (default 20,000) |
 | `--jit-record-sizes <a,b,…>` | also emit **the same block set** at each of these blocks-per-function, beside the recording. One walk, one recording, every size |
+
+A run that installed a core and did **not** ask for `--jit-report` prints one
+line instead of thirty (M7 P7) — what got built and what it cost, the coverage
+share, the three exit classes that cost the most, and the escape-hatch count.
+It is a view of the same counters, not a second report, and `--jit-report`
+replaces it rather than adding to it:
+
+```
+jit: translated core: 201244 block(s) in 2 module(s), 79726810 B, built in 1193 ms
+     (discover 188 + emit 956 + compile 48 + instantiate 1);
+     97.94 % of the run's 542906355 retired instructions ran translated;
+     left it 7722208 time(s) — budget 2834596 (+7689411 interpreted),
+     indirect-miss 3993292 (+2468874 interpreted),
+     undecodable 710536 (+827370 interpreted);
+     escape hatch 0 instruction(s);
+     `--jit-report` for the rest, `--interpreter` for the oracle
+```
 
 `LP_EMU_JIT_EXITS=1` adds the twenty-four exit sites that cost the most, each
 with why the stay ended there and whether the module could have been entered

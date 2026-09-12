@@ -140,7 +140,16 @@ fn compile_error_name(code: i32) -> &'static str {
         compile_error::INSTANTIATE => "the engine refused to instantiate the module",
         compile_error::NO_ENTRY => "the module has no `run` export",
         compile_error::TABLE => "the indirect function table could not be grown or written",
-        compile_error::NO_HOST => "no JS host is wired to this instance",
+        // Since M7 P7 the wasm build translates by DEFAULT, so this is what an
+        // embedder that instantiated the module and never called
+        // `jitHost.attach(instance)` now meets at boot — where before the flip
+        // it would only meet it if it passed `--jit`. Say what to do about it:
+        // the two ways out are wiring the host and asking for the interpreter,
+        // and quietly interpreting is deliberately not one of them.
+        compile_error::NO_HOST => {
+            "no JS host is wired to this instance — call `jitHost.attach(instance)` \
+             before `_start`, or run with `--interpreter`"
+        }
         _ => "an error the JS host did not name",
     }
 }
