@@ -4,6 +4,10 @@
 //
 //   node scripts/emu/jit-image-bench.mjs <recording-dir> <module.wasm> [seconds]
 //   bun  scripts/emu/jit-image-bench.mjs <recording-dir> <module.wasm> [seconds]
+//   node scripts/emu/jit-image-bench.mjs <recording-dir> <module.wasm> --check-only
+//
+// `--check-only` is the identity pass alone — one walk of the recording with
+// every field compared, no stopwatch. `just test-emu-jit-identity` runs it.
 //
 // `node` is V8 and `bun` is JavaScriptCore, which is the phone's engine
 // family. JD19: a single-engine wasm number is not a wasm number.
@@ -40,11 +44,26 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
-const dir = process.argv[2];
-const modulePath = process.argv[3];
-const seconds = Number(process.argv[4] ?? 6);
+const argv = process.argv.slice(2);
+// `--check-only` is the identity half without the stopwatch (M7 P9): one full
+// pass over the recording, every field compared, then stop. That is what
+// `just test-emu-jit-identity` runs, and it is deliberately NOT the same call
+// as a bench row.
+//
+// It exists because the timing loop replays the recording over and over, and
+// a SECOND pass is not a replay of the same thing: the module's published-read
+// block (M7b P3) is refreshed inside `mmio_store`'s own crossing, which canned
+// answers do not perform, so from the second iteration on the module can ask
+// for a read the recording never recorded. The first pass is unaffected and is
+// the whole of the identity claim. See the crate README, "What the replay
+// harness was getting wrong (P5)", and follow-up F5.
+const checkOnly = argv.includes("--check-only");
+const positional = argv.filter((a) => !a.startsWith("--"));
+const dir = positional[0];
+const modulePath = positional[1];
+const seconds = Number(positional[2] ?? 6);
 if (!dir || !modulePath) {
-  console.error("usage: jit-image-bench.mjs <recording-dir> <module.wasm> [seconds]");
+  console.error("usage: jit-image-bench.mjs <recording-dir> <module.wasm> [seconds] [--check-only]");
   process.exit(2);
 }
 
@@ -344,6 +363,16 @@ function measure(budgetMs, noRun = false) {
     iterations++;
   }
   return { nsPerInstr: ns / Number(instructions), iterations };
+}
+
+if (checkOnly) {
+  const engine = typeof Bun !== "undefined" ? "bun (JavaScriptCore)" : "node (V8)";
+  console.log(
+    `${engine}: identity OK — ${meta.entries} entries, ${meta.retired} instructions, ` +
+      `exit pc + cycle + instret + flags + x1..x31 + import call count on every one ` +
+      `(${modulePath}, ${wasm.length} B, ${meta.fnBlocks} blocks/fn)`,
+  );
+  process.exit(0);
 }
 
 const first = measure(1000);
