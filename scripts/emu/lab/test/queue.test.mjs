@@ -212,6 +212,25 @@ test('lost: a sent press with no result is re-sent once, then failed', async () 
   await dev.stop().catch(() => {});
 });
 
+test('a device that reconnects gets the queue view again even though nothing changed', async () => {
+  // A device that never answers, so the job stays in its view across the reload.
+  const quiet = { beforeAnswer: async () => { throw new Error('never answers'); } };
+  const dev = await fakeDevice(lab, { name: 'reloader', pressMs: 5, ...quiet });
+  const { body: j } = await queue({ builds: ['aaa1111'], repeats: 1, spacingMs: 0, ttlMs: 60000, device: 'reloader' });
+  // The stream's first queue event is the one sent at open, before this
+  // job existed; the job's own event follows.
+  let first;
+  for (let i = 0; i < 5; i++) { first = await dev.sse.next('queue', 3000).catch((e) => { throw new Error('phase 1, event ' + i + ': ' + e.message + ' (seen: ' + dev.sse.events().join(',') + ')'); }); if (first.jobs.some((x) => x.id === j.id)) break; }
+  assert.ok(first.jobs.some((x) => x.id === j.id), 'the view lists the job');
+  assert.ok(Array.isArray(first.jobs.find((x) => x.id === j.id).pressStates), 'per-press states ride along');
+  await dev.stop();
+  const again = await fakeDevice(lab, { id: dev.id, name: 'reloader', pressMs: 5, ...quiet });
+  const second = await again.sse.next('queue', 3000).catch((e) => { throw new Error('phase 2: ' + e.message + ' (seen: ' + again.sse.events().join(',') + ')'); });
+  assert.ok(second.jobs.some((x) => x.id === j.id), 'the reloaded page is told about the job again');
+  await again.stop();
+  await api('/jobs/' + j.id, { method: 'DELETE' });
+});
+
 test('POST /jobs: 401 without the token creates no file; unknown build, bad rows, bad repeats are 400', async () => {
   const before = fs.readdirSync(path.join(home, 'jobs')).length;
   const r = await fetch(lab.url + '/jobs', { method: 'POST', body: JSON.stringify({ builds: ['aaa1111'] }) });

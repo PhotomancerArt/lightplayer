@@ -273,7 +273,9 @@ function openEvents(req, res, url) {
     hooks.onPresenceChange(id);
   };
   res.on('close', close);
-  hooks.onPresenceChange(id);
+  // A fresh stream needs the queue view even if nothing changed: the page
+  // behind it may have just reloaded and knows nothing.
+  hooks.onStreamOpen(id);
 }
 
 async function postState(req, res, id) {
@@ -693,6 +695,7 @@ function openWait(req, res, url) {
 
 const hooks = {
   onPresenceChange(_id) { tick(); },
+  onStreamOpen(id) { lastQueueSent.delete(id); lastCooldownSent.delete(id); tick(); },
   jobCounts,
   async route(req, res, url) {
     const p = url.pathname, m = req.method;
