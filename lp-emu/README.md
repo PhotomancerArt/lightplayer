@@ -253,8 +253,39 @@ funnel invalidates, and `BootMode::RomUp` — where the mask ROM and the
 second-stage bootloader publish code without ever emitting a `fence.i` — keeps
 translation off entirely.
 
+**A ROM-up boot does not translate** (DD19). `BootMode::RomUp` — the mask ROM
+and the second-stage bootloader out of a merged flash image — keeps
+translation off entirely, because that path publishes code without ever
+emitting a `fence.i`. Every emulated board in Studio-in-a-tab boots that way
+today, so the default flip changes nothing for them until ROM-up translation
+is done, which is deliberately last.
+
+### What it is worth, per image
+
+`render-basic` is the image the ladder is quoted on, and it is not the whole
+story. 2026-09-11, node/V8 at 16 blocks a function, 5,500 ms emulated, one
+invocation per image running both legs back to back, best of three, t2:
+
+| image | translated | `--interpreter` | ratio | mean stay |
+|---|---:|---:|---:|---:|
+| `harness` | 3.062× | 1.143× | **2.68×** | 1354.0 |
+| `boot-idle-memfs` | 2.808× | 5.293× | **0.53×** | 43.7 |
+| `render-basic` | 0.990× | 0.557× | 1.78× | 68.9 |
+| `render-rocaille` | 1.166× | 0.673× | 1.73× | 30.0 |
+
+**A translated core wins where stays are long and loses where they are short
+or where the run is too small to amortize its own translation.**
+`boot-idle-memfs` retires 51 M instructions in 5.5 emulated seconds against
+`render-basic`'s 543 M, so the fixed ~1.1 s of discover + emit + compile is
+most of its wall clock — and what is left is a 43.7-instruction mean stay,
+which is the entry protocol being paid over and over. The default is kept
+anyway: the images the product's own workload looks like both gain, and
+`--interpreter` is one flag away. The number is on record so nobody has to
+rediscover it.
+
 `lp-emu-jit/README.md` is the translator; `lp-emu-esp32c6/README.md`'s flag
-table is the switches.
+table is the switches; `docs/adr/2026-09-11-emulator-wasm-translator.md` is
+the argument, the licence posture and the ladder's honest history.
 
 ## Speed
 
@@ -470,6 +501,31 @@ planning workspace's
 `2026-09-06-1001-esp-emulator/2026-09-07-speed-ladder-research.md` and its
 `speed-research/` directory, executed by the `2026-09-07-0827-emu-speed-ladder`
 plan.
+
+### Where the ladder stopped, and what is next
+
+**The interpreter levers ran out, and translation did not close the gap
+either.** The release-profile overrides above were a real 2.3x; every
+independent interpreter lever after them measured between 1.00x and 1.14x in
+the engine that matters, and one — the poll-loop skip — was implemented,
+proved byte-exact and then rejected because its bookkeeping cost more
+everywhere than it won. Translating the whole image to wasm (M7, above) took
+the phone from 0.514x to **1.025x** of real time and to **1.75x** of the
+emulator's own interpreter on the same press, against a **1.5x pass bar and a
+3x target**. Neither is met, and M7 was closed at that number rather than
+chased further.
+
+The arithmetic that says why, and it is the next milestone's brief: with
+translation removed entirely, **the emulator's own steady-state wasm is 1.69x
+on its own** — 3,251.8 ms of a 5,500 ms emulated run. 61 % of a translated run
+is the emulator rather than the guest, and every peripheral model together is
+3.4 % of it. So the loop itself — slices, scheduler, bus routing, the
+per-slice machinery — has to fall by 1.78x before 3x is even arithmetically
+possible. That is its own milestone, planned at
+`lp2025/2026-09-11-1731-emu-loop-redesign/`.
+
+`docs/adr/2026-09-11-emulator-wasm-translator.md` has the whole argument and
+the per-milestone history.
 
 ## Roadmap
 
