@@ -1132,9 +1132,18 @@ impl<B: Bus> MachineHart<B> {
                 return SliceEnd::BudgetExhausted;
             }
             let pc = self.pc;
-            // The translated-core entry, ahead of the block cache: one table
-            // read and one compare when no core is installed, which is what
-            // keeps this free on the interpreted path.
+            // **The normal case, where a core is installed** (M7 P7). Not a
+            // tier and not a fast path the interpreter opts into: the entry
+            // filter asks whether this pc is one the core holds, and on a
+            // build whose core is the translator the answer is yes for ~98 %
+            // of the instructions the run retires. What follows below — the
+            // block cache, and `step_once` under it — is what serves the pcs
+            // the core does *not* hold, which is how a stay resumes and how a
+            // partial translator stays correct.
+            //
+            // On a run with no core (`--interpreter`, a native default, a
+            // `rom-up` boot) it is one table read and one compare, which is
+            // what keeps the interpreted path free of it.
             if let Some(core) = core.as_mut()
                 && self.core_entries.contains(pc)
             {

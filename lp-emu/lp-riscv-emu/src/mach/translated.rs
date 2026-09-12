@@ -25,6 +25,31 @@
 //! the block cache, so a translated entry costs one table read and one
 //! compare on the interpreted path and nothing else.
 //!
+//! # This is not a tier (M7 P7)
+//!
+//! Read the seam as "the interpreter calls into translated code at known entry
+//! pcs" and everything downstream of it reads wrong. There is no counter, no
+//! threshold and no warm-up anywhere in it — translation happens at two events
+//! and covers the whole image (M7 JD5/JD6) — and in the build this seam was
+//! built for, the wasm one, **the core is what runs the guest**: the entry
+//! filter answers yes for the overwhelming majority of retired instructions,
+//! and the interpreter under it is reached in exactly two ways.
+//!
+//! - **As a library.** [`MachineHart::step_one`](super::MachineHart::step_one)
+//!   is called *from inside* translated code, for one instruction, whenever
+//!   the translator meets something it does not emit (JD10). Nothing
+//!   coordinates that: it is a function call, and its rate is a reported
+//!   metric that shrinks as coverage grows.
+//! - **As the thing that gets the guest back to an entry pc.** A stay ends at
+//!   a pc the core does not hold; the block cache and `step_once` run from
+//!   there until one it does.
+//!
+//! And with no core installed — `--interpreter`, a native build, a `rom-up`
+//! boot — the interpreter is the whole machine, unchanged, which is the third
+//! job: the free differential oracle every change here is judged against
+//! (JD15). Two runs, compared byte for byte, with no runtime coordination
+//! between them at all.
+//!
 //! The four polling points in this crate's module docs do not move because a
 //! core is installed. A core leaves at exactly the boundaries the interpreter
 //! would have stopped at, and reports an after-store exit so the hart can

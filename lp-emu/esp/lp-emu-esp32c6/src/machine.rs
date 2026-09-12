@@ -5269,6 +5269,21 @@ mod tests {
         assert!(m.hooks().is_empty(), "the table ships empty");
     }
 
+    /// M7 P7. The builder — not just the CLI — carries the flip, because
+    /// Studio's in-tab emulator and the bench rig build machines through it
+    /// and neither passes `--jit`. `bare()` inherits it, which is what makes
+    /// the two constructors one policy rather than two.
+    #[test]
+    fn the_builders_default_is_the_build_wide_translation_policy() {
+        assert_eq!(Esp32C6Builder::new().jit, TRANSLATED_BY_DEFAULT);
+        assert_eq!(Esp32C6Builder::bare().jit, TRANSLATED_BY_DEFAULT);
+        assert!(
+            Esp32C6Builder::new().translate,
+            "and `--interpreter` is off by default, because it is the veto and \
+             not the switch"
+        );
+    }
+
     #[test]
     fn the_time_grades_are_the_three_cycle_models_and_their_configuration_names() {
         assert_eq!(TimeGrade::T1.cycle_model(), CycleModel::InstructionCount);
