@@ -391,7 +391,13 @@ export async function installTab(moduleUrl, boardIds) {
       cfg: ["boot=rom-up", "strap=app", "usb_host=attached", `mac=${mac}`, ""].join("\n"),
     };
   });
-  tab = tabBacking({ moduleUrl, boards });
+  // The JS host, beside the module. `wasm-serial-test-runner.sh` stages the
+  // pair into the runner's served root under fixed names — unlike Studio,
+  // which takes both from `engine-manifest.json` under content-hashed ones —
+  // so here the host is the module's sibling and is resolved as one rather
+  // than passed in through the Rust harness.
+  const jitHostUrl = new URL("jit-host.js", new URL(moduleUrl, location.href)).toString();
+  tab = tabBacking({ moduleUrl, jitHostUrl, boards });
   await install("http://tab.emu.invalid/", { backing: tab });
   await watchReboots();
 }

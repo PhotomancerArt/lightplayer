@@ -10,6 +10,14 @@
 // also why the machine can be driven with no locking at all: this file has
 // the only reference, and the guest only runs inside `emu_run`.
 //
+// ONE HOST PER BOARD, TOO (P5b). The module imports `emu_host` — since M7 P7
+// the wasm build installs a translated core by default — so the Worker builds
+// `makeJitHost()` from M7's `jit-host.js` and attaches it before `emu_create`.
+// `jit-host.js` requires a dedicated Worker (its compiles are synchronous, at
+// up to 64 MB), which this is; the host's table slots belong to this Worker's
+// one module instance, which is why it is built here and not shared. The URL
+// arrives on the `create` message, content-hashed, the way the module's does.
+//
 // ============================ THE PACING RULE ============================
 //
 // Guest time is a budget the host hands out; it is never a clock the guest
@@ -282,14 +290,17 @@ async function fetchPackage(manifestUrl) {
 
 async function create(message) {
   if (emu) throw new Error("this worker already holds a board");
-  if (message.jit) {
-    // The seam M7 P6's translated core lands in (D11/D26). Refused rather
-    // than ignored: a caller that asked for the JIT and silently got the
-    // interpreter would be measuring the wrong thing.
-    //
-    // When `scripts/emu/bench-web/jit-host.js` is on main, this is where it
-    // is imported and its two `emu_host` imports are supplied.
-    throw new Error("jit: the translated core is not wired into the tab host yet");
+  if (!message.jitHostUrl) {
+    // Not optional, and not defaulted to a path in this directory. Since M7
+    // P7 the module imports `emu_host` and cannot be instantiated without a
+    // host; the URL is the content-hashed sidecar copy of M7's `jit-host.js`
+    // that `engine-manifest.json` names, and a board created without it is a
+    // board that would fail three lines later with the engine's own
+    // unreadable link error.
+    throw new Error(
+      "create: no jitHostUrl — the emulator module imports `emu_host` and needs " +
+        "the JS host (engine-manifest.json's `emu_jit_host_js`)",
+    );
   }
 
   // `force-cache`: the URL is content-hashed, so a second Worker on the same
@@ -308,7 +319,10 @@ async function create(message) {
   } catch {
     module = await WebAssembly.compile(await moduleResponse.arrayBuffer());
   }
-  emu = await instantiateEmu(module);
+  // The host is attached inside `instantiateEmu`, before `emu_create` — and
+  // ONE HOST PER WORKER, because one Worker holds one machine (D10) and the
+  // host's table slots belong to that machine's module instance.
+  emu = await instantiateEmu(module, { jitHostUrl: message.jitHostUrl });
 
   // The chip, in priority order: what this board already has, then the
   // package it was born with, then nothing (which IS a blank chip).
@@ -369,6 +383,11 @@ async function create(message) {
     flash: emu.flashHasImage() ? "loaded" : "blank",
     source,
     abi: EMU_ABI,
+    // What `host.attach` proved in THIS engine, before the board existed: the
+    // module's function table grew and a funcref in a slot answered a
+    // `call_indirect` by index. A board reports it once; `stats` reports what
+    // the seam has since carried.
+    jitSeam: emu.jitSelftest?.ok === true,
   });
   running = true;
   void pace();
@@ -534,6 +553,34 @@ function dilation() {
   return guest <= 0 ? 0 : guest / wallUs;
 }
 
+/**
+ * The translation events this board's host has served, for the `stats` line.
+ *
+ * **Dilation's witness.** A board's dilation is the host's and the workload's
+ * together, and since M7 P7 it is also the CORE's: the wasm build installs a
+ * translated core by default, so a number that moved could be the tab being
+ * throttled or the machine having stopped interpreting, and those want
+ * different answers. `events` says which — one entry per translation event,
+ * with the engine's own compile and instantiate milliseconds in it.
+ *
+ * On every board the tab creates today it stays at zero, because they are all
+ * `boot=rom-up` and a rom-up machine installs no translated core (M7's
+ * `jit_default.rs` rule 4). That is worth REPORTING rather than assuming: the
+ * day a tab board direct-boots, this is the line that says so.
+ *
+ * Milliseconds here are observations, like dilation. Nothing compares them to
+ * anything.
+ */
+function translation() {
+  const events = emu?.host?.events ?? [];
+  const last = events[events.length - 1];
+  return {
+    translationEvents: events.length,
+    translationLastMs: last ? last.compileMs + last.instantiateMs : null,
+    translationLastBytes: last ? last.bytes : null,
+  };
+}
+
 function maybeReport(wallAt) {
   if (wallAt - lastStatsAt < STATS_EVERY_MS) return;
   lastStatsAt = wallAt;
@@ -545,6 +592,7 @@ function maybeReport(wallAt) {
     dilation: dilation(),
     flash: emu.flashHasImage() ? "loaded" : "blank",
     state: stopped === null ? "running" : (OUTCOMES[stopped] ?? "stopped"),
+    ...translation(),
   });
 }
 

@@ -93,8 +93,15 @@ const liveHubs = new Set();
  * to whoever is listening.
  */
 class TabHub {
-  constructor(moduleUrl, board) {
+  constructor(moduleUrl, jitHostUrl, board) {
     this.moduleUrl = moduleUrl;
+    /**
+     * Where the Worker imports `makeJitHost` from — M7's `jit-host.js`, as the
+     * content-hashed sidecar copy `engine-manifest.json` names. Carried rather
+     * than derived: the module and the host are hashed separately, so their
+     * names do not predict each other.
+     */
+    this.jitHostUrl = jitHostUrl;
     this.board = board;
     this.worker = null;
     this.nextId = 1;
@@ -137,6 +144,7 @@ class TabHub {
       this.worker.postMessage({
         type: "create",
         moduleUrl: this.moduleUrl,
+        jitHostUrl: this.jitHostUrl,
         cfg: this.board.cfg ?? "",
         persistKey: this.board.persistKey ?? null,
         manifestUrl: this.board.manifestUrl ?? null,
@@ -151,6 +159,7 @@ class TabHub {
         this.row.mac = message.mac ?? this.row.mac;
         this.row.flash = message.flash;
         this.row.state = "running";
+        this.row.jitSeam = message.jitSeam === true;
         resolveReady(this.row);
         return;
 
@@ -161,6 +170,12 @@ class TabHub {
         this.row.dilation = message.dilation;
         this.row.cycles = message.cycles;
         this.row.micros = message.micros;
+        // Dilation's witness: which core the number above was measured on.
+        // Zero on every board today (they are all `boot=rom-up`, which
+        // installs no translated core) and reported anyway, because a
+        // dilation that moved is a different question depending on it.
+        this.row.translationEvents = message.translationEvents ?? 0;
+        this.row.translationLastMs = message.translationLastMs ?? null;
         for (const listener of this.statsListeners) listener(message);
         return;
 
@@ -563,12 +578,12 @@ export class TabEmulatorPort extends EmulatorPort {
  * A `{ describe, listBoards, connect }` backing over boards hosted in this
  * tab — the same triple `nativeBacking` answers, and what `createBus` takes.
  */
-export function tabBacking({ moduleUrl, boards = [TAB_BOARD] }) {
+export function tabBacking({ moduleUrl, jitHostUrl, boards = [TAB_BOARD] }) {
   const hubs = new Map();
   const hubFor = (board) => {
     let hub = hubs.get(board.id);
     if (!hub) {
-      hub = new TabHub(moduleUrl, board);
+      hub = new TabHub(moduleUrl, jitHostUrl, board);
       hubs.set(board.id, hub);
     }
     return hub;
@@ -599,6 +614,11 @@ export function tabBacking({ moduleUrl, boards = [TAB_BOARD] }) {
           // the row because it is the tab's own honest fact, and because the
           // walk and anyone at a console read this shape.
           dilation: row.dilation ?? null,
+          // …and the two facts that say what that dilation was measured ON:
+          // whether the JS host's seam was proved for this board, and how many
+          // translated modules it has since compiled.
+          jitSeam: row.jitSeam ?? null,
+          translationEvents: row.translationEvents ?? 0,
         };
       });
     },
