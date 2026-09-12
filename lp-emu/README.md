@@ -293,6 +293,13 @@ The interpreter's throughput is a product concern, not a curiosity: the
 emulator is on its way to being a *device* in Studio, and a machine that runs
 at a fifth of real time cannot stand in for a board someone is watching.
 
+> **The ledger.** [`docs/emulator-perf-ledger.md`](../docs/emulator-perf-ledger.md)
+> is the living record of what has been tried, what it measured, what was
+> rejected and why, and the menu of what is left. **Read it before proposing a
+> performance change** — several attractive-looking levers are already on it
+> with a measured verdict, and its §1 is the protocol a number has to be taken
+> under to be comparable to anything already there.
+
 **The opt-level rule.** The workspace `[profile.release]` is `opt-level = "z"`,
 chosen for firmware flash, and a size-optimizing pass is exactly what an
 interpreter loop cannot afford — it cost 2.3x here. The root `Cargo.toml`

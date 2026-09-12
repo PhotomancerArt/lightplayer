@@ -122,6 +122,63 @@ Rungs staged into the perf lab (`~/.photomancer/emu-lab`) get an id of
 Two rungs at the same HEAD therefore get distinct ids only when their wasm
 actually differs — a collision with R0's id means the rung changed no code.
 
-| lab build id | rung | patch |
-|---|---|---|
-| see `G-LOOP0b-gate.md` | | |
+| lab build id | rung | patch | `emu.wasm` sha256[:12] |
+|---|---|---|---|
+| `f8c44c2-dirty-d65f8c` | R0 | — (base) | `d65f8c6b9594` |
+| `f8c44c2-dirty-15a80d` | R1 | `R1-pins-off.patch` | `15a80dce7b6d` |
+| not staged | R2 | `R2-coalesced-words.patch` | `3fdbbbd6aa80` |
+| not staged | R3 | `R3-instant-rmt.patch` | `3dfc03bd94d2` |
+
+`f8c44c2` is this branch's first commit, which is what both stages' manifests
+carried; the six hex that follow are the wasm's own sha, so R0 and R1 are
+distinguishable by id. Only R0 and R1 were staged into the lab: R2 and R3 do
+not run the guest (see below), so a phone row for them would compare two
+different programs.
+
+## What the rungs measured
+
+`render-basic` t2, 5,500 ms, best of 5, interleaved, one invocation per
+engine. Base `38b12c848`.
+
+| rung | V8 16/fn | × vs R0 | JSC 8/fn | × vs R0 | retired instr | frames | uart | frames sha | trap |
+|---|---:|---:|---:|---:|---:|---:|---|---|---|
+| R0 | 5.24 s | 1.000 | 6.35 s | 1.000 | 542,906,355 | 256 × 241 LED | ref | ref | ref |
+| **R1** | **5.10 s** | **1.027** | **6.28 s** | **1.010** | 542,906,355 | 256 × 241 LED | **same** | **same** | **same** |
+| R2 | 3.51 s | 1.491 | 4.38 s | 1.447 | 337,590,617 | 256 × **4** LED | CHANGED | CHANGED | CHANGED |
+| R3 | 3.53 s | 1.483 | 4.38 s | 1.447 | 336,797,583 | **none** | CHANGED | CHANGED | CHANGED |
+
+**R1 is exact.** Same retired instructions, same frames byte for byte, same
+trap log, same UART. The only surface it loses is the **pin log** (127,249
+lines → 1). It is the one tier lever that leaves the guest's own numbers —
+fps, cycles, memory — untouched.
+
+**R2 and R3 do not run the guest**, and their wall times are therefore not
+speed numbers: per retired instruction the emulator was *slower* under both.
+Their value is the slice count, which is exact:
+
+| | slices | bound by the RMT's per-word event | pin edges drained |
+|---|---:|---:|---:|
+| R0 / R1 | 1,531,923 | 1,471,630 (96.06 %) | 2,961,409 / **1** |
+| R2 | 61,168 | 265 (0.43 %) | 49,153 |
+| R3 | 61,155 | 256 (0.42 %) | 1 |
+
+1,531,923 − 61,168 = **1,470,755 slices**, at P1's measured 531 ns a slice =
+**781 ms of a 5,500 ms run**. That, and not R2's stopwatch, is what the
+per-word cadence is worth.
+
+### Why R2 raced — the finding
+
+`vision.md` §2 expected the obstacle to coalescing to be the pin log's
+`(at, seq)` ordering. It is not. **A bulk fetch reads RMT RAM ahead of the
+guest that writes it.** The transmitter runs at the leading edge of the
+schedule, so every word it takes in bulk has a cycle the CPU has not reached
+— and the refill ISR that fills that word runs in the cycles in between. R2
+deliberately stopped its bulk *before* the threshold word so the interrupt's
+cycle could not move, and it raced anyway: the refill took 47 words to be
+answered where the product path takes 15, refills fell from 2,651 to 18 on
+the 500 ms cell, and the frames came out 4 LEDs long instead of 241.
+
+The one shape that might be correct is a **write-watermark bulk** — the RMT
+already tracks the guest's last RAM write (`refill_wrote`,
+`RefillProbe::Filling { last_write }`), so a transmitter could bulk only as
+far as the guest has actually written. **NEVER MEASURED.**

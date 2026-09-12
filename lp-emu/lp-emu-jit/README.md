@@ -1133,6 +1133,21 @@ largest function.
 
 ### Where 3× would have to come from
 
+> ⚠️ **The target in this section's title is superseded (2026-09-12).** Yona
+> reset it: *"'as fast as we can' should really just be 'as close to 1x speed'
+> as possible. Running faster isn't needed."* The **numbers below stand** —
+> they are the best whole-machine decomposition there is — but read them as
+> "where the time goes", not as "how far from 3×". The bar is **1× real time,
+> held** across spaced presses on a throttling phone.
+>
+> The living record of what has been tried against that bar, with the menu of
+> what is left and each lever's cost in both the correctness lane and the
+> user-facing numbers, is
+> [`docs/emulator-perf-ledger.md`](../../docs/emulator-perf-ledger.md).
+> Its §3 also supersedes DD27's ruling on the fidelity tier: the 3.4 % that
+> retired the tier was the peripheral models' *self* time, and the tier's
+> actual prize is the **96 % of slices** the RMT's per-word event creates.
+
 The milestone asks for **3× real time**: 5,500 ms emulated in **1,833 ms** of
 wall clock. The best this desk has produced is **7.64 s (0.720×)** —
 `render-basic` t2, node/V8, 16 blocks a function, flat selector, best of three
