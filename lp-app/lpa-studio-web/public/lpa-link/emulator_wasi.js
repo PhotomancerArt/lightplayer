@@ -14,14 +14,52 @@
 // ENOENT for everything, and that is a complete implementation rather than a
 // stub: there is no file for the guest to want.
 //
-// The imports are the eighteen the module actually declares
-// (`wasm-tools print … | grep import`). On the export path exactly ONE of
-// them is ever called — `clock_time_get`, which is `run_until`'s
-// unconditional `Instant::now()` and cannot influence a slice that carries no
-// wall timeout. The rest exist because the binary also has a `_start`.
+// The WASI imports are the nineteen the module actually declares
+// (`WebAssembly.Module.imports` on it, which is what the smoke checks). On the
+// export path exactly ONE of them is ever called — `clock_time_get`, which is
+// `run_until`'s unconditional `Instant::now()` and cannot influence a slice
+// that carries no wall timeout. The rest exist because the binary also has a
+// `_start`: the nineteenth, `path_create_directory`, arrived with M7 P7 —
+// a translated core by default links `ProfileSession::new`'s
+// `create_dir_all`, which only a `--jit-record`/`--profile` command line can
+// reach, and this module never gets one.
+//
+// ========================= THE JIT HOST (P5b) =========================
+//
+// WASI is no longer the whole import object. Since M7 P7 (#727) the wasm
+// build installs a **translated core by default** — `TRANSLATED_BY_DEFAULT =
+// cfg!(target_family = "wasm")` is the builder's `jit` default, and the tab
+// ABI's config grammar has no key that vetoes it — so the module declares two
+// more imports, in the namespace `emu_host`, and **an instantiation without
+// them fails at link time**:
+//
+//     TypeError: WebAssembly.instantiate(): Import #2 "emu_host":
+//     module is not an object or function
+//
+// `jit-host.js` (M7's file, imported here by URL and never copied) supplies
+// them, and `host.attach(instance)` proves the seam — the module's exported
+// `__indirect_function_table` really grows, and a funcref written into a slot
+// really answers a `call_indirect` by index — BEFORE anything drives the
+// machine, which for us is before `emu_create`. Everything else on that seam
+// is wasm→wasm against this module's own exports, so no JS frame sits on a
+// path the guest runs through.
+//
+// WHAT A ROM-UP BOARD ACTUALLY DOES WITH IT: nothing, today. A translated
+// core is only installed at build time for `boot=direct`
+// (`machine.rs`: `if jit && machine.translate && boot_mode != BootMode::RomUp`
+// — M7's `jit_default.rs` rule 4, because the mask ROM and the second-stage
+// bootloader copy code into RAM and jump into it without ever emitting a
+// `fence.i`, so neither of JD5's two translation events can see it), and every
+// board the tab creates is `boot=rom-up`. So the host is attached
+// unconditionally and its self-test runs, while `host.events` stays empty
+// until a tab board direct-boots an app. That is a fact about the machine, not
+// a state this file chooses: the alternative — stub imports and no attach —
+// would instantiate today and meet `COMPILE_ERROR.NO_HOST` on the first board
+// that did not.
 //
 // Runnable under node as well as in a Worker: no DOM, no `self`, no
-// `postMessage`. `scripts/emu/tab-smoke.mjs` is the node caller.
+// `postMessage`, and the host arrives as a URL `import()` resolves in either.
+// `scripts/emu/tab-smoke.mjs` is the node caller.
 
 /** WASI preview1 errno values this shim answers with. */
 const EBADF = 8;
@@ -133,6 +171,14 @@ export function makeWasi() {
     },
     path_filestat_get() {
       return ENOENT;
+    },
+    // No preopen, so no fd a path could be resolved against, so nothing to
+    // create a directory in. Declared since M7 P7 because a translated core
+    // links the profile session's `create_dir_all`; only a `--jit-record` or
+    // `--profile` command line calls it, and the tab supplies no command line
+    // at all.
+    path_create_directory() {
+      return ENOTSUP;
     },
 
     fd_fdstat_get(fd, buf) {
@@ -353,13 +399,70 @@ export function bindEmu(instance) {
 
 /**
  * Instantiate `module` (a compiled `WebAssembly.Module`) and hand back the
- * bound ABI. `_start` is never called; see this file's header.
+ * bound ABI, with the JIT host attached. `_start` is never called; see this
+ * file's header.
+ *
+ * `jitHostUrl` is where `makeJitHost` is imported from — a URL, not a path and
+ * not a copy. In Studio it is the content-hashed sidecar copy the manifest
+ * names (`emu_jit_host_js`); in node it is a `file://` URL of the source. The
+ * import is dynamic because the URL is only known at run time, and because
+ * this file is served as a static asset with no bundler to resolve it.
+ *
+ * It is REQUIRED, and the error says why rather than letting the engine's own
+ * link failure be the whole explanation: a caller that instantiates this
+ * module without a host has no board, not a slower one.
+ *
+ * What comes back carries two extra fields: `host` (whose `events` is one
+ * entry per translation event) and `jitSelftest` (what `attach` proved). Both
+ * are observations — nothing asserts a duration anywhere on this path.
  */
-export async function instantiateEmu(module) {
+export async function instantiateEmu(module, { jitHostUrl } = {}) {
+  if (!jitHostUrl) {
+    throw new Error(
+      "instantiateEmu needs a jitHostUrl: this module imports `emu_host` " +
+        "(it installs a translated core by default) and cannot be instantiated " +
+        "without a JS host. Studio takes the URL from engine-manifest.json's " +
+        "`emu_jit_host_js`.",
+    );
+  }
+  const hostModule = await import(jitHostUrl);
+  if (typeof hostModule.makeJitHost !== "function") {
+    throw new Error(`${jitHostUrl} exports no \`makeJitHost\``);
+  }
   const wasi = makeWasi();
-  const instance = await WebAssembly.instantiate(module, wasi.imports);
+  const host = hostModule.makeJitHost();
+  const imports = { ...wasi.imports, ...host.imports };
+  let instance;
+  try {
+    instance = await WebAssembly.instantiate(module, imports);
+  } catch (error) {
+    // A link failure here means this file and the module have drifted apart —
+    // a build, not a bug — and the engine's own message ("Import #17 …:
+    // function import requires a callable") names one import and no cause.
+    // So the unsatisfied names are listed, all of them, in the module's own
+    // words. Both namespaces can drift: the module grew a WASI import (M7 P7
+    // added `path_create_directory`), or it grew an `emu_host` one and the
+    // host in this tree is older than the module.
+    const unsatisfied = WebAssembly.Module.imports(module)
+      .filter(({ module: ns, name }) => typeof imports[ns]?.[name] !== "function")
+      .map(({ module: ns, name }) => `${ns}.${name}`);
+    throw new Error(
+      `the emulator module declares ${unsatisfied.length} import(s) nothing here ` +
+        `satisfies: ${unsatisfied.join(", ") || "(none — the engine refused for another reason)"}` +
+        `. Rebuild it with \`just emu-c6-wasm\`; the \`emu_host\` pair comes from ` +
+        `${jitHostUrl}. The engine said: ${error?.message ?? error}`,
+    );
+  }
   wasi.setMemory(instance.exports.memory);
+  // BEFORE any machine exists. `attach` grows the module's own function table
+  // and calls `jit_table_probe` through it by index; if that round trip does
+  // not hold in this engine it throws here, rather than trapping later inside
+  // a 64 MB translated module. It also throws when the module was built
+  // without `--export-table` / `--growable-table` and says which.
+  const jitSelftest = host.attach(instance);
   const emu = bindEmu(instance);
   emu.stdText = wasi.stdText;
+  emu.host = host;
+  emu.jitSelftest = jitSelftest;
   return emu;
 }

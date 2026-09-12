@@ -26,10 +26,22 @@
 //   6. the run is DETERMINISTIC in guest time — the same slices twice give
 //      the same cycle count and the same console. No wall duration is
 //      asserted anywhere (`lp-emu/esp/README.md` §Determinism)
+//   7. the JIT HOST is attached, and its table round trip holds in node:
+//      `__indirect_function_table` grows, a funcref written into a slot
+//      answers a `call_indirect` by index. Since M7 P7 the module imports
+//      `emu_host` and cannot be instantiated without a host at all, so claim
+//      2 could not be reached without this — and the self-test is what turns
+//      "it linked" into "the entry mechanism works here"
+//   8. and the seam CARRIES A CORE: a `boot=direct` machine (the only kind
+//      that installs one) hands the host modules to compile, runs through
+//      them, and produces the interpreter's transcript at the interpreter's
+//      cycle. Everything above it runs interpreted, because `boot=rom-up`
+//      keeps translation off — which is what every board the tab creates is
 //
 // Exits non-zero on the first miss, with what it wanted and what it got.
 
 import { readFileSync, existsSync } from "node:fs";
+import { execFileSync } from "node:child_process";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { dirname, resolve } from "node:path";
 
@@ -38,6 +50,20 @@ const repo = resolve(here, "..", "..");
 
 const DEFAULT_MODULE = resolve(repo, "target/wasm32-wasip1/release/lp-emu-esp32c6.wasm");
 const SHIM = resolve(repo, "lp-app/lpa-studio-web/public/lpa-link/emulator_wasi.js");
+/**
+ * `makeJitHost`'s home in this tree — asked of the one resolver, never
+ * guessed and never copied: the file is M7's, it is moving (P9), and the
+ * resolver is what refuses a re-export shim.
+ */
+const JIT_HOST = execFileSync(resolve(repo, "scripts/emu/jit-host-source.sh"), {
+  encoding: "utf8",
+}).trim();
+/**
+ * The mask ROM's own ELF — committed, and the one ELF here that is not a
+ * firmware build. Claim 8 direct-boots it so a translated core is installed at
+ * all; see there for why that also makes an identity claim.
+ */
+const ROM_ELF = resolve(repo, "lp-emu/esp/roms/esp32c6_rev0_rom.elf");
 
 /** esptool's SYNC, SLIP-framed — `lp-emu-esp32c6/scripts/rom-download-sync.usb`. */
 const SYNC = Uint8Array.from([
@@ -131,8 +157,10 @@ async function main() {
     process.exit(2);
   }
   const { instantiateEmu, EMU_ABI } = await import(pathToFileURL(SHIM).href);
+  const jitHostUrl = pathToFileURL(JIT_HOST).href;
 
   console.log(`tab-smoke: ${modulePath}`);
+  console.log(`tab-smoke: jit host ${JIT_HOST.replace(`${repo}/`, "")}`);
   const bytes = readFileSync(modulePath);
   const module = await WebAssembly.compile(bytes);
 
@@ -143,9 +171,34 @@ async function main() {
     "it exports no _initialize (a command binary, not a reactor)",
     !exportNames.has("_initialize"),
   );
+  check(
+    "it imports the `emu_host` seam (it translates by default — M7 P7)",
+    WebAssembly.Module.imports(module).filter((x) => x.module === "emu_host").length === 2,
+    WebAssembly.Module.imports(module)
+      .filter((x) => x.module === "emu_host")
+      .map((x) => x.name)
+      .join(" ") || "no emu_host imports",
+  );
+  check(
+    "…and exports the function table the host writes into",
+    exportNames.has("__indirect_function_table"),
+    "build it with -C link-arg=--export-table",
+  );
 
-  const emu = await instantiateEmu(module);
+  const emu = await instantiateEmu(module, { jitHostUrl });
   check(`it speaks emu_abi=${EMU_ABI}`, emu.abiVersion === EMU_ABI, `got ${emu.abiVersion}`);
+
+  // --- 7. the jit host is attached, and the entry mechanism holds here -----
+  //
+  // `instantiateEmu` calls `host.attach` before any machine exists and it
+  // THROWS rather than returning on a bad seam, so reaching this line is
+  // already most of the claim; the self-test's own numbers are what say the
+  // round trip happened rather than that nothing was checked.
+  check(
+    "the jit host's table round trip holds in this engine",
+    emu.jitSelftest?.ok === true && emu.jitSelftest.got === emu.jitSelftest.want,
+    JSON.stringify(emu.jitSelftest),
+  );
 
   // --- 2. the real mask ROM boots, with _start never called ---------------
   //
@@ -224,7 +277,7 @@ async function main() {
   // A second machine, the same config, the same slices: the same cycle count
   // and the same console. Nothing here times anything — a wall duration is
   // never a claim (README §Determinism).
-  const second = await instantiateEmu(module);
+  const second = await instantiateEmu(module, { jitHostUrl });
   second.create(config);
   const again = runUntil(second, (s) => s.console.includes("waiting for download"));
   check(
@@ -234,6 +287,58 @@ async function main() {
   );
   check("…with a byte-identical console", again.console === boot.console);
   second.destroy();
+
+  // --- 8. the translated core, through the host, on the same code ---------
+  //
+  // Everything above ran INTERPRETED, and that is not an accident of this
+  // script: a `boot=rom-up` machine never installs a translated core
+  // (`machine.rs`, and M7's `jit_default.rs` rule 4 — the mask ROM and the
+  // second-stage bootloader copy code into RAM and jump into it without ever
+  // emitting a `fence.i`, so neither of JD5's two translation events can see
+  // what they publish), and every board the tab creates is `boot=rom-up`. So
+  // the attach above is proved and the SEAM is not: nothing has yet asked the
+  // host to compile anything.
+  //
+  // A `boot=direct` machine does, at create time. The app it needs is an ELF,
+  // and the only ELF in this tree that is not a firmware build is the mask
+  // ROM's own — which makes this both hermetic and an unusually strong claim,
+  // because the interpreted run above executed THE SAME CODE. If the
+  // translated core were unfaithful, the two transcripts would disagree.
+  const romElf = new Uint8Array(readFileSync(ROM_ELF));
+  const direct = await instantiateEmu(module, { jitHostUrl });
+  direct.create(config.replace("boot=rom-up", "boot=direct"), new Uint8Array(0), romElf);
+  const events = direct.host.events;
+  check(
+    "a direct boot installs a translated core — the host compiled its modules",
+    events.length >= 1,
+    `translationEvents ${events.length}`,
+  );
+  check(
+    "…every event took a table slot and none carried an error",
+    events.every((event) => event.slot >= 0 && event.error === null),
+    JSON.stringify(events.map((e) => ({ bytes: e.bytes, slot: e.slot, error: e.error }))),
+  );
+  const translated = runUntil(direct, (s) => s.console.includes("waiting for download"));
+  check(
+    "…the guest ran through it to the same boot line",
+    translated.console.includes("waiting for download"),
+    JSON.stringify(translated.console.slice(0, 400)),
+  );
+  // The identity oracle, in whatever engine is running this: translated and
+  // interpreted agree on the transcript AND on the cycle it was reached at.
+  // #727 proved this natively over the pinned images (8 cells, 3 readings);
+  // this is the tab's own engine saying the same thing about the mask ROM.
+  check(
+    "…and its transcript is the interpreter's, byte for byte",
+    translated.console === boot.console,
+    `${JSON.stringify(translated.console.slice(0, 200))}\n       vs ${JSON.stringify(boot.console.slice(0, 200))}`,
+  );
+  check(
+    "…at the same guest cycle",
+    translated.cycles === boot.cycles,
+    `${boot.cycles} interpreted vs ${translated.cycles} translated`,
+  );
+  direct.destroy();
 
   if (failures > 0) {
     console.error(`\ntab-smoke: ${failures} claim(s) failed`);
