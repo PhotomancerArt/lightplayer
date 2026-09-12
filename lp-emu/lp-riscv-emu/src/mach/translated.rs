@@ -147,6 +147,29 @@ pub trait TranslatedCore<B: Bus> {
     /// run it covered, and how often it left for the interpreter.
     fn report(&self) -> String;
 
+    /// The **short** form of the same numbers, for a run that asked for
+    /// nothing (M7 P7).
+    ///
+    /// Since the wasm build's core *is* the translator, a default run is no
+    /// longer an experiment somebody opted into and can be expected to read a
+    /// 30-field diagnostic. What it needs is one line: what got built, what
+    /// share of the run ran inside it, and how often it left — because an
+    /// escape hatch that is allowed to be non-zero (JD10) is not allowed to be
+    /// unmeasured.
+    ///
+    /// It is a *view* of [`TranslatedCore::report`]'s own fields and not a
+    /// second set of counters — there is one metrics path and this is its
+    /// summary. `None`, the default, means "nothing worth a line", which is
+    /// every test double in this crate.
+    ///
+    /// `retired_total` is the hart's own `minstret`, handed in for the same
+    /// reason [`TranslatedCore::retired`] is a bare number: the coverage share
+    /// is a fraction whose denominator the core does not have.
+    fn summary(&self, retired_total: u64) -> Option<String> {
+        let _ = retired_total;
+        None
+    }
+
     /// Guest instructions retired **inside** translated code.
     ///
     /// The numerator of the coverage number M7's P4 has a bar under (JD6);

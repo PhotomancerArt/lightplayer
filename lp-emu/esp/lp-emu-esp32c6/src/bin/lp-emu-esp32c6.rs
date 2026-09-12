@@ -1247,11 +1247,27 @@ fn report(machine: &mut Esp32C6Machine, outcome: &Outcome) {
             machine.fence_i_count(),
         ),
     }
+    // M7 P7: a run that asked for nothing still says what ran it.
+    //
+    // The wasm build's core is the translator now, so a default run is the
+    // product run — and JD20 ("the boot cost is a product number, reported not
+    // buried") and JD10 ("the escape hatch is not allowed to be unmeasured")
+    // are claims about *that* run, not about an opted-in diagnostic. One line,
+    // the same counters `--jit-report` prints in full, and silence when there
+    // is no core: `--interpreter`, a `rom-up` boot, or a native build.
+    //
+    // Not a second report path, and not printed twice: a run that asked for
+    // `--jit-report` gets the long form below **instead** of this.
+    if !machine.jit_report()
+        && let Some(line) = machine.translated_core_summary()
+    {
+        eprintln!("jit: {line}");
+    }
     if machine.jit_report() {
         // One line, on every `--jit-report` run, whether or not a core ran
         // (M7 JD20 wants the boot cost and the escape-hatch rate reported,
-        // not buried). Nothing installs a core before M7 P3, so today this
-        // says so rather than printing nothing at all.
+        // not buried). A run with no core says so rather than printing
+        // nothing at all.
         match machine.translated_core_report() {
             Some(line) => eprintln!("jit: {line}"),
             None => eprintln!(

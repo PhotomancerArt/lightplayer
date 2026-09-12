@@ -2597,6 +2597,22 @@ impl Esp32C6Machine {
             .flatten()
     }
 
+    /// The installed core's **one-line** summary — what a run that passed no
+    /// flags at all prints (M7 P7).
+    ///
+    /// Unlike [`Esp32C6Machine::translated_core_report`] this is not gated on
+    /// `--jit-report`, because since P7 the wasm build's core is the
+    /// translator and a default run is the product run: JD20's "the boot cost
+    /// is a product number, reported not buried" and JD10's "the escape hatch
+    /// is not allowed to be unmeasured" both have to hold for a user who asked
+    /// for nothing. `None` when no core is installed — `--interpreter`, a
+    /// `rom-up` boot, or a native build — which is exactly when there is
+    /// nothing to say.
+    #[must_use]
+    pub fn translated_core_summary(&self) -> Option<String> {
+        self.harts[0].translated_core_summary()
+    }
+
     /// M7 P6c (Q2): the MMIO census, if `LP_EMU_JIT_MMIO_CENSUS` turned it on.
     ///
     /// Reported from here rather than from the core's own `report()` because

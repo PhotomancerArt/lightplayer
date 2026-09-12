@@ -573,6 +573,15 @@ impl<B: Bus> MachineHart<B> {
         self.core.as_ref().map(|c| c.report())
     }
 
+    /// The installed core's one-line summary, if it has one — what a run that
+    /// asked for no diagnostics prints (M7 P7).
+    #[must_use]
+    pub fn translated_core_summary(&self) -> Option<String> {
+        self.core
+            .as_ref()
+            .and_then(|c| c.summary(self.instruction_count))
+    }
+
     /// Guest instructions retired inside translated code, or `None` when no
     /// core is installed. The numerator of the coverage number (JD6).
     #[must_use]

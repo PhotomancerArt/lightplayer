@@ -2511,6 +2511,10 @@ impl TranslatedCore<SocBus> for JitCore {
         Some(self)
     }
 
+    fn summary(&self, retired_total: u64) -> Option<String> {
+        Some(self.summary_line(Some(retired_total)))
+    }
+
     fn report(&self) -> String {
         for (code, &(exits, gap)) in self.stats.why.iter().enumerate() {
             if exits == 0 && gap == 0 {
@@ -2650,6 +2654,81 @@ impl TranslatedCore<SocBus> for JitCore {
             s.refused_no_entry,
             s.refused_impure,
             s.refused_stale,
+        )
+    }
+}
+
+impl JitCore {
+    /// The one line a run that asked for nothing prints (M7 P7).
+    ///
+    /// Since the wasm build's core is the translator, the default run is the
+    /// product run, and JD20's "reported, not buried" now has to hold for a
+    /// user who passed no flags at all. Four facts, in the order they are
+    /// asked about:
+    ///
+    /// 1. **what got built and what it cost** — blocks, module bytes and the
+    ///    boot cost, which is the half-second G-M7D's Q1 budgeted;
+    /// 2. **how much of the run ran inside it** — the coverage share, against
+    ///    the hart's own `minstret`, which the machine supplies because only
+    ///    it knows the denominator;
+    /// 3. **why the stays ended**, largest cause first — the census the exit
+    ///    table holds, summarised to the three that matter;
+    /// 4. **the escape hatch** (JD10), which is allowed to be non-zero and is
+    ///    not allowed to be unmeasured.
+    ///
+    /// Every number here is read off [`JitStats`] and [`Totals`] — the same
+    /// fields [`JitCore::report`] prints in full. There is one metrics path
+    /// and this is its short form; `--jit-report` is the long one, and a run
+    /// that asks for it gets that instead of this rather than as well.
+    fn summary_line(&self, retired_total: Option<u64>) -> String {
+        let r = self.totals();
+        let s = self.stats;
+        let boot_ms =
+            (r.discovery.discover_us + r.emit_us + r.compile_us + r.instantiate_us) as f64 / 1000.0;
+        // Largest first, and only the ones that fired: an exit class printed
+        // as `0` reads as a class that was measured and found empty, which is
+        // a different claim from one that never arose.
+        let mut causes: Vec<(usize, u64, u64)> = self
+            .stats
+            .why
+            .iter()
+            .enumerate()
+            .filter(|&(_, &(exits, _))| exits > 0)
+            .map(|(code, &(exits, gap))| (code, exits, gap))
+            .collect();
+        causes.sort_unstable_by(|a, b| b.2.cmp(&a.2).then(b.1.cmp(&a.1)));
+        let exits: u64 = causes.iter().map(|&(_, n, _)| n).sum();
+        let why = if causes.is_empty() {
+            "never".to_string()
+        } else {
+            causes
+                .iter()
+                .take(3)
+                .map(|&(code, n, gap)| format!("{} {n} (+{gap} interpreted)", why_name(code)))
+                .collect::<Vec<_>>()
+                .join(", ")
+        };
+        let coverage = match retired_total {
+            Some(total) if total > 0 => format!(
+                "{:.2} % of the run's {total} retired instructions ran translated",
+                100.0 * s.retired as f64 / total as f64
+            ),
+            _ => format!("{} instructions retired translated", s.retired),
+        };
+        format!(
+            "translated core: {} block(s) in {} module(s), {} B, built in {boot_ms:.0} ms \
+             (discover {:.0} + emit {:.0} + compile {:.0} + instantiate {:.0}); \
+             {coverage}; left it {exits} time(s) — {why}; \
+             escape hatch {} instruction(s); `--jit-report` for the rest, \
+             `--interpreter` for the oracle",
+            r.blocks,
+            self.mods.len(),
+            r.module_bytes,
+            r.discovery.discover_us as f64 / 1000.0,
+            r.emit_us as f64 / 1000.0,
+            r.compile_us as f64 / 1000.0,
+            r.instantiate_us as f64 / 1000.0,
+            s.escape_hatch,
         )
     }
 }
