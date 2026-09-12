@@ -112,6 +112,14 @@ mkdir -p "$bench_dir"
 # classic takes no `spike_uart0_link` cherry-pick — its host link IS UART0 —
 # so unlike the C6's table there is no spike column.
 #
+# ⚠️ **The pin is a branch commit and a squash merge can orphan it.**
+# `0773c3fbd` is the commit on `claude/xt-m7-p1b-classic-numbers` that added
+# `bench_render_loop`; `git worktree add` needs that object to still be in
+# this repository. If the PR lands squashed and the branch is deleted, repin
+# this table to the merge commit — the feature set is unchanged, so the image
+# is the same image, and the only thing that moves is which commit `build.rs`
+# stamps into it. The C6's table has the same property and the same fix.
+#
 # ⚠️ **The row name and the reference directory are two columns, not one.**
 # `build-reference-image.sh` gives the classic exactly ONE short slug
 # (`boot-idle`), because its `case` is mirrored by `reference_image_slug` in

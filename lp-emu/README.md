@@ -391,6 +391,12 @@ window, four runs, every row's UART0 bytes unchanged:
 | `shader-compile-stress` | 1.67 | 37.3 M | 37.3 M | 0.0 M | 0.155× |
 | **`render-loop`** | **16.33** | **32.4 M** | **26.6 M** | **5.9 M** | **0.130×** |
 
+The C6's `render-basic` row, measured the same day on the same desk (load 37,
+so a different window), reads 0.76× at t1 on **the same project** — so the
+classic is roughly **5.8× further from real time** and its interpreter
+retires **3.4× fewer** instructions a second. Two windows, not one: read that
+as an order, not a same-window pair.
+
 **Where the seconds go** is a different pair of instruments, both off by
 default and neither in a gate binary — and both **slower than the probe by
 construction**, so their seconds mean nothing and only their shares do:
