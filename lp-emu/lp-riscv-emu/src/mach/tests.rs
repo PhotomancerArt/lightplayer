@@ -1693,3 +1693,80 @@ fn a_core_that_cannot_poll_gets_polling_point_c_run_for_it() {
         "the hart took the side-band exactly once"
     );
 }
+
+// --- the trap log (emu-loop-redesign P1, D5) ---------------------------------
+
+#[test]
+fn the_trap_log_is_off_by_default_and_records_the_traps_the_hart_takes() {
+    let mut rig = Rig::new();
+    assert!(rig.hart.trap_log().is_none(), "off by default");
+
+    // Off: a trap the hart takes writes nothing anywhere.
+    rig.hart.deliver_breakpoint(RAM_BASE);
+    assert!(rig.hart.trap_log().is_none());
+
+    rig.hart.set_trap_log(true);
+    assert_eq!(rig.hart.trap_log().expect("on").lines(), 0);
+
+    // An exception: `mcause` is the code, `mepc` is the faulting instruction.
+    rig.hart.set_counters(1_234, 0);
+    rig.hart.deliver_breakpoint(RAM_BASE);
+
+    // An interrupt: `mcause` carries bit 31, `mepc` is the next instruction.
+    assert!(rig.hart.set_csr_raw(MTVEC, VEC));
+    assert!(rig.hart.set_csr_raw(MSTATUS, MSTATUS_BOOT));
+    assert!(rig.hart.set_csr_raw(MIE, 1 << 5));
+    rig.hart.set_pc(RAM_BASE + 8);
+    rig.hart.set_counters(5_678, 0);
+    rig.hart.set_external(Some(5));
+    assert!(rig.hart.poll_interrupts(), "a trap was taken");
+
+    let log = rig.hart.trap_log().expect("on");
+    assert_eq!(log.lines(), 2, "one line per trap TAKEN, and no more");
+    assert_eq!(
+        log.text(),
+        "cyc=1234 cause=0x00000003 epc=0x40800000\n\
+         cyc=5678 cause=0x80000005 epc=0x40800008\n",
+        "the format is fixed: cyc=<u64> cause=0x<8 hex> epc=0x<8 hex>"
+    );
+}
+
+#[test]
+fn a_poll_that_delivers_nothing_writes_no_trap_line() {
+    let mut rig = Rig::new();
+    rig.hart.set_trap_log(true);
+    // MIE clear: the interrupt wakes but is not delivered (spec §3.3.3).
+    assert!(rig.hart.set_csr_raw(MSTATUS, MSTATUS_MPP | MSTATUS_MPIE));
+    assert!(rig.hart.set_csr_raw(MIE, 1 << 5));
+    rig.hart.set_external(Some(5));
+    assert!(!rig.hart.poll_interrupts());
+    assert_eq!(rig.hart.trap_log().expect("on").lines(), 0);
+}
+
+#[test]
+fn a_lifted_trap_log_survives_the_clone_a_snapshot_restore_is_made_of() {
+    let mut rig = Rig::new();
+    rig.hart.set_trap_log(true);
+    rig.hart.set_counters(7, 0);
+    rig.hart.deliver_breakpoint(RAM_BASE);
+
+    // What `Esp32C6Machine::snapshot` does: a clone carries no lines.
+    let snapshot = rig.hart.clone();
+    assert_eq!(snapshot.trap_log().expect("on").lines(), 0);
+
+    // What `Esp32C6Machine::restore` does: lift the live log out, overwrite
+    // the hart wholesale, hand the log back. The transcript does not rewind.
+    let lifted = rig.hart.take_trap_log();
+    rig.hart = snapshot;
+    rig.hart.restore_trap_log(lifted);
+    assert_eq!(rig.hart.trap_log().expect("on").lines(), 1);
+
+    rig.hart.set_counters(9, 0);
+    rig.hart.deliver_breakpoint(RAM_BASE);
+    assert_eq!(
+        rig.hart.trap_log().expect("on").text(),
+        "cyc=7 cause=0x00000003 epc=0x40800000\n\
+         cyc=9 cause=0x00000003 epc=0x40800000\n",
+        "a restored run goes on writing the same file"
+    );
+}
