@@ -27,6 +27,28 @@
 # `lp_emu_esp32c6::tab_abi::ABI_VERSION` (returned by `emu_abi_version`) is
 # the version both sides assert. Adding a name here without adding it there
 # is the failure this script's verification step exists to catch early.
+#
+# THE JIT SEAM (P5b). Since M7 P7 the wasm build installs a TRANSLATED core
+# by default (`machine::TRANSLATED_BY_DEFAULT = cfg!(target_family =
+# "wasm")`), so this module imports the namespace `emu_host` — two functions,
+# `jit_compile` and `jit_release` — and cannot be instantiated without them.
+# `jit-host.js` supplies them, and everything else on that seam is wasm→wasm
+# against THIS module's own exports and its function table. Two link flags are
+# what make that reachable from JavaScript:
+#
+#   --export-table    exports `__indirect_function_table`, which is the slot
+#                     `jit_compile` writes a translated module's `run` into;
+#                     without it `jit_compile` fails with COMPILE_ERROR.TABLE
+#                     and the host's `attach` says so by name.
+#   --growable-table  removes the maximum wasm-ld otherwise pins to the
+#                     table's initial size, so `table.grow(1)` can happen at
+#                     all.
+#
+# The six `jit_*` exports the seam needs are `#[unsafe(no_mangle)] pub extern
+# "C"` in `lp-emu-jit`'s `host_browser`, so the link already keeps them; they
+# are in `required` below rather than in `exports` because they need no
+# `--undefined` root — but a build that stopped exporting one would break the
+# host's self-test, so the verify step names them.
 set -euo pipefail
 
 repo="$(cd "$(dirname "$0")/../.." && pwd)"
@@ -68,6 +90,23 @@ exports=(
     emu_flash_has_image
 )
 
+# Verified but NOT link-arg'd: these come out of the link on their own, and
+# `--undefined=__indirect_function_table` would be asking the linker to root a
+# symbol that is not one. Verifying them is the point — the export section is
+# where the jit seam is either present or silently gone.
+required=(
+    # the table `jit_compile` writes a translated module's `run` into
+    __indirect_function_table
+    # what a translated module imports back, bound wasm→wasm by the host
+    jit_mmio_load
+    jit_mmio_store
+    jit_step_one
+    jit_poll
+    # the round trip `jitHost.attach` proves before anything depends on it
+    jit_table_probe
+    jit_table_selftest
+)
+
 wasm_bin="target/wasm32-wasip1/release/lp-emu-esp32c6.wasm"
 do_build=1
 
@@ -85,7 +124,8 @@ if [[ $do_build -eq 1 ]]; then
         rustup target add wasm32-wasip1
     fi
 
-    link_args=()
+    # The jit seam's two flags; see THE JIT SEAM in this file's header.
+    link_args=("-C" "link-arg=--export-table" "-C" "link-arg=--growable-table")
     for name in "${exports[@]}"; do
         link_args+=("-C" "link-arg=--undefined=${name}")
         link_args+=("-C" "link-arg=--export=${name}")
@@ -93,6 +133,7 @@ if [[ $do_build -eq 1 ]]; then
 
     echo "build-tab-wasm: cargo build -p lp-emu-esp32c6 --release --target wasm32-wasip1" >&2
     echo "build-tab-wasm:   +bulk-memory,+simd128,+nontrapping-fptoint, ${#exports[@]} exports (emu_abi=${EMU_ABI})" >&2
+    echo "build-tab-wasm:   --export-table --growable-table, ${#required[@]} jit-seam names verified" >&2
     CARGO_TARGET_WASM32_WASIP1_RUSTFLAGS="-C target-feature=+bulk-memory,+simd128,+nontrapping-fptoint ${link_args[*]}" \
         cargo build -p lp-emu-esp32c6 --bin lp-emu-esp32c6 --release --target wasm32-wasip1
 fi
@@ -110,7 +151,10 @@ fi
 # section is section 7, a vector of (name, kind, index) — a dozen lines of
 # LEB128, and no tool to install. For a human reading the module by hand,
 # `wasm-objdump -x "$wasm_bin" | grep -A40 Export` says the same thing.
-missing="$(python3 - "$wasm_bin" "${exports[@]}" <<'PY'
+# The names are checked by NAME and not by kind: `__indirect_function_table`
+# is a table export and the rest are functions, and the one thing that matters
+# for both is that a JavaScript host can reach them at all.
+missing="$(python3 - "$wasm_bin" "${exports[@]}" "${required[@]}" <<'PY'
 import sys
 
 path, wanted = sys.argv[1], sys.argv[2:]
@@ -154,10 +198,13 @@ if [[ -n "$missing" ]]; then
     for name in $missing; do echo "    $name" >&2; done
     echo "build-tab-wasm: the export list in this script and lp-emu-esp32c6/src/tab_abi/" >&2
     echo "build-tab-wasm: have drifted apart, or the link dropped the archive member." >&2
+    echo "build-tab-wasm: a missing __indirect_function_table means --export-table" >&2
+    echo "build-tab-wasm: did not reach the link; a missing jit_* name means the jit" >&2
+    echo "build-tab-wasm: seam went out of the build (see THE JIT SEAM above)." >&2
     exit 1
 fi
 
 bytes="$(wc -c < "$wasm_bin" | tr -d '[:space:]')"
-printf 'build-tab-wasm: %s — %d exports (emu_abi=%d), %s MiB\n' \
-    "$wasm_bin" "${#exports[@]}" "$EMU_ABI" \
+printf 'build-tab-wasm: %s — %d exports + %d jit-seam names (emu_abi=%d), %s MiB\n' \
+    "$wasm_bin" "${#exports[@]}" "${#required[@]}" "$EMU_ABI" \
     "$(awk -v b="$bytes" 'BEGIN{printf "%.1f", b/1048576}')"
