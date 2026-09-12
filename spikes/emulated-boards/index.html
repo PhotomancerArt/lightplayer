@@ -1,0 +1,936 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Emulated boards — target · real · emu · sim · spike</title>
+<style>
+/* =====================================================================
+   Studio runs real boards, emulated boards, and a desktop simulator.
+   Vision 2026-09-07-0118-studio-emulated-boards (D1–D21 ratified).
+
+   THESIS. D6 says an emulated board IS a device: same card, same zones,
+   same verbs. The risk (T7) is that a viewer mistakes the emulated card
+   for the desk — or reads a twin as a duplicate of its original. So the
+   question this spike asks is narrow: how little dress makes "emulated"
+   unmistakable at a glance, without turning the card into something
+   other than a device card. Three surfaces:
+     1. the emulated card's dress, beside the real card it must not be
+        confused with (D6, D17), and the speed chip (D8);
+     2. the roster: "+ emulated board" at the insertion point and the
+        twin verb "Emulate this board" on a real card (D18);
+     3. the target moment — a board-targeted project Run with no such
+        board attached, and the "different board attached" face (D7);
+     4. the Desktop simulator's renamed chrome, no "as <board>" (D11, D17).
+
+   Palette: src/style.css :root, verbatim (via spikes/device-card-identity-line).
+   Card metrics: device_roster_card.rs, faithful (ADR 2026-09-03 height table:
+   header 90 · Project 220 · Firmware+Terminal 252 · Device 80 = 644px).
+   Conventions honoured: add buttons at the insertion point; bound = violet,
+   never green; identity as two fixed mono rows; pasteable text stays
+   pasteable (no click-to-expand, no tooltip-only facts).
+   ===================================================================== */
+html.no-anim *, html.no-anim *::before, html.no-anim *::after { transition:none !important; animation:none !important; }
+:root {
+  color-scheme: dark;
+  --font: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --mono: "JetBrains Mono", ui-monospace, Menlo, monospace;
+
+  --bg:#0d0d13; --surface:#14141c; --panel:#17171f; --raised:#1d1d28;
+  --raised-strong:#252532; --terminal:#09090e;
+  --bd:#343444; --bd-mut:#2b2b39; --bd-strong:#4a4a5e;
+  --tx:#f2f0e8; --strong:#fffaf0; --muted:#c9c9d2; --subtle:#9c9cab; --dim:#9ea0ac;
+
+  --sel-bd:#d6dae0; --sel-bg:rgba(214,218,224,.12);
+  --focus:#a5b8ff;
+  --violet:#a58af7;
+  --spectrum:#5fe08b, #53c6f2, #a58af7, #ff5d5d, #ffab4a, #f5e04e;
+
+  --st-good-bg:#13241d;      --st-good-bd:#365545;      --st-good-tx:#7be0b2;
+  --st-neutral-bg:#12171c;   --st-neutral-bd:#3a444c;   --st-neutral-tx:#d9e2df;
+  --st-working-bg:#24230f;   --st-working-bd:#706730;   --st-working-tx:#f2e6a2;
+  --st-live-bg:#142330;      --st-live-bd:#3c5c78;      --st-live-tx:#9cc8ee;
+  --st-warning-bg:#292614;   --st-warning-bd:#796c33;   --st-warning-tx:#f0dc7a;
+  --st-attention-bg:#291f14; --st-attention-bd:#795833; --st-attention-tx:#f0b97a;
+  --st-error-bg:#301b1d;     --st-error-bd:#874b4b;     --st-error-tx:#ffc7c7;
+  /* bound / bus-linked = the sim's own family (style.css: "violet = the
+     sim's own family: a re-simulated picture must never wear the green a
+     device's frames earn") */
+  --st-bound-bg:#241a33;     --st-bound-bd:#5f4a85;     --st-bound-tx:#c9b1f5;
+
+  --shell-bg:#0b0c0e; --shell-mut:#9a978f; --shell-dim:#6f6d66;
+  --shell-bd:#262a31; --shell-bd-strong:#3a3f48; --shell-tx:#e8e6e1;
+
+  --w: 400px;
+  --term-h: 160px;
+}
+* { box-sizing: border-box; }
+body { margin:0; padding:28px 32px 160px; background:var(--shell-bg); color:var(--shell-tx); font:14px/1.45 var(--font); }
+h1 { font-size:13px; letter-spacing:.12em; color:var(--shell-mut); text-transform:uppercase; margin:0 0 6px; }
+p.hint { color:var(--shell-dim); font-size:12px; margin:0 0 18px; max-width:960px; }
+p.hint b { color:var(--shell-mut); font-weight:600; }
+h2 { font-size:12px; letter-spacing:.1em; color:var(--shell-mut); text-transform:uppercase; margin:48px 0 6px; }
+h2 .n { color:var(--shell-dim); margin-right:6px; }
+p.sub { color:var(--shell-dim); font-size:12px; margin:0 0 14px; max-width:960px; }
+p.sub b { color:var(--shell-mut); font-weight:600; }
+code { font-family:var(--mono); font-size:11px; color:var(--shell-mut); }
+
+/* ---- exploration controls ------------------------------------------ */
+.controls { display:flex; gap:14px; flex-wrap:wrap; align-items:center; padding:10px 14px;
+  border:1px dashed var(--shell-bd-strong); border-radius:8px; color:var(--shell-mut); font-size:12px;
+  position:sticky; top:8px; z-index:60; background:rgba(11,12,14,.94); backdrop-filter:blur(8px); }
+.controls b { color:var(--shell-tx); font-weight:600; }
+.controls button, .local button { appearance:none; font:inherit; cursor:pointer; background:#16181c; color:var(--shell-tx);
+  border:1px solid var(--shell-bd-strong); border-radius:6px; padding:3px 10px; font-size:12px; }
+.controls button:hover, .local button:hover { background:#1e2126; }
+.controls button.active, .local button.active { border-color:#7be0b2; color:#7be0b2; }
+.controls .grp, .local .grp { display:flex; gap:5px; align-items:center; flex-wrap:wrap; }
+.controls .sep { width:1px; height:18px; background:var(--shell-bd-strong); }
+.controls input[type=range] { width:120px; }
+.controls .mono { font-family:var(--mono); font-size:11px; }
+.local { display:flex; gap:14px; flex-wrap:wrap; align-items:center; margin:0 0 12px; font-size:12px; color:var(--shell-mut); }
+.local b { color:var(--shell-tx); font-weight:600; }
+
+/* ---- concept frames -------------------------------------------------- */
+.concepts { display:grid; grid-template-columns:repeat(auto-fill, var(--w)); gap:26px 22px; align-items:start; margin-top:14px; }
+.concept { display:grid; gap:8px; min-width:0; }
+.concept h3.c { margin:0; font-size:12px; color:var(--shell-tx); font-weight:600; }
+.concept h3.c .k { display:inline-block; min-width:18px; color:#7be0b2; font-family:var(--mono); font-size:11px; margin-right:6px; }
+.concept.lean h3.c .k { color:#f0dc7a; }
+.concept.ref h3.c .k { color:var(--shell-dim); }
+.concept p.cn { margin:0; font-size:11.5px; line-height:1.45; color:var(--shell-dim); }
+.concept p.cn b { color:var(--shell-mut); font-weight:600; }
+.concept .ruler { font:10.5px var(--mono); color:var(--shell-dim); margin:0; display:flex; gap:10px; flex-wrap:wrap; }
+.concept .ruler .ok { color:#7be0b2; }
+.concept .ruler .warn { color:#f0dc7a; }
+.wide { grid-template-columns:repeat(auto-fill, minmax(520px, 1fr)); }
+
+.rejected { border:1px dashed var(--shell-bd); border-radius:8px; padding:10px 14px; margin-top:26px; font-size:11.5px; color:var(--shell-dim); max-width:960px; }
+.rejected b { color:var(--shell-mut); font-weight:600; }
+.rejected ul { margin:6px 0 0; padding-left:18px; }
+.rejected li { margin:4px 0; }
+
+/* =====================================================================
+   The Studio page ground (the roster lives on the Aurora ground, not the
+   spike shell) — one wrapper so the cards read against their own bg.
+   ===================================================================== */
+.ground { max-width:1320px; background:linear-gradient(180deg, rgba(255,255,255,.04), transparent 240px), var(--bg); color:var(--tx);
+  border:1px solid var(--shell-bd); border-radius:10px; padding:22px 22px 24px; }
+.ground h4 { margin:0 0 12px; font-size:12px; font-weight:800; text-transform:uppercase; line-height:1; color:var(--strong); letter-spacing:.02em; }
+.roster { display:grid; grid-template-columns:repeat(auto-fill, minmax(320px, 1fr)); gap:14px; grid-auto-rows:minmax(300px, auto); }
+.remline { margin:14px 0 0; display:grid; gap:12px; }
+.remline p { margin:0; display:flex; gap:8px; align-items:center; font-size:12px; color:var(--dim); flex-wrap:wrap; }
+.remline .tog { appearance:none; background:transparent; border:0; color:var(--subtle); font:inherit; font-size:12px; cursor:pointer; padding:0; text-decoration:underline dotted; }
+
+/* =====================================================================
+   Card grammar — device_roster_card.rs, faithful
+   header (px-4 pt-4 pb-3, gap-2 · gap-1.5 · title 20 · identity 2×16)
+   zones (px-4 py-3, gap-2; border-t border-strong)
+   Project: preview 120 · info 17 · bar 4 · verbs 30
+   Firmware: info 17 · bar 4 · verbs 30 · terminal (h-40 = 160) flush
+   Device (mt-auto): info 17 · verbs 30
+   ===================================================================== */
+.card { position:relative; display:flex; flex-direction:column; border-radius:6px; border:1px solid var(--bd); background:var(--panel); min-width:0; color:var(--tx); }
+.card header { display:grid; gap:8px; min-width:0; padding:16px 16px 12px; }
+.card header .id { display:grid; gap:6px; min-width:0; }
+.card .head { display:flex; align-items:flex-start; justify-content:space-between; gap:12px; min-width:0; }
+.card h3 { margin:0; flex:1; min-width:0; font-size:14px; line-height:20px; font-weight:700; color:var(--strong);
+  overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.card h3 .pre { color:var(--st-bound-tx); }
+.card .chips { display:inline-flex; gap:6px; flex:none; align-items:flex-start; }
+.chip { flex:none; display:inline-flex; align-items:center; gap:5px; min-height:24px; padding:0 8px; border-radius:999px; border:1px solid;
+  font-size:12px; font-weight:700; line-height:1; white-space:nowrap; }
+.chip.good      { background:var(--st-good-bg);      border-color:var(--st-good-bd);      color:var(--st-good-tx); }
+.chip.neutral   { background:var(--st-neutral-bg);   border-color:var(--st-neutral-bd);   color:var(--st-neutral-tx); }
+.chip.working   { background:var(--st-working-bg);   border-color:var(--st-working-bd);   color:var(--st-working-tx); }
+.chip.warning   { background:var(--st-warning-bg);   border-color:var(--st-warning-bd);   color:var(--st-warning-tx); }
+.chip.attention { background:var(--st-attention-bg); border-color:var(--st-attention-bd); color:var(--st-attention-tx); }
+.chip.bound     { background:var(--st-bound-bg);     border-color:var(--st-bound-bd);     color:var(--st-bound-tx); }
+.chip.speed { font-family:var(--mono); font-weight:600; font-size:11px; padding:0 7px; }
+.chip svg { width:11px; height:11px; }
+
+.rows { display:grid; gap:0; min-width:0; height:32px; }
+.mono-line { margin:0; min-width:0; font-family:var(--mono); font-size:0.68rem; line-height:16px; color:var(--subtle);
+  overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.mono-line .mem { color:var(--dim); }
+.mono-line .emu { color:var(--st-bound-tx); }
+
+.zone { display:grid; gap:8px; min-width:0; border-top:1px solid var(--bd-strong); padding:12px 16px; }
+.zone.combined { padding:0; gap:0; }
+.zone.combined .zrows { display:grid; gap:8px; min-width:0; padding:12px 16px; }
+.zone.device { margin-top:auto; }
+.info { margin:0; height:17px; font-size:12px; line-height:17px; color:var(--subtle); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.info.fault { color:var(--st-attention-tx); font-weight:600; }
+.info.bound { color:var(--st-bound-tx); }
+.bar { height:4px; border-radius:2px; background:transparent; overflow:hidden; }
+.bar.lit { background:var(--raised-strong); }
+.bar.lit i { display:block; height:100%; border-radius:2px; background:var(--st-working-tx); }
+.bar.lit.sweep i { width:35%; animation:sweep 1.2s ease-in-out infinite; }
+@keyframes sweep { 0%{transform:translateX(-100%)} 100%{transform:translateX(300%)} }
+.verbs { display:flex; gap:6px; align-items:center; height:30px; min-width:0; white-space:nowrap; overflow:hidden; }
+.verbs .sp { flex:1; min-width:0; }
+.verb { display:inline-flex; align-items:center; gap:6px; height:26px; padding:0 10px; border-radius:6px; border:1px solid var(--bd-strong);
+  background:var(--raised); color:var(--tx); font-size:12px; font-weight:600; flex:none; cursor:default; }
+.verb.twin { border-color:var(--st-bound-bd); color:var(--st-bound-tx); }
+.verb.disabled { opacity:.6; border-color:var(--bd); background:transparent; color:var(--subtle); }
+.verb svg { width:12px; height:12px; }
+/* row_cta_class: ux-spectrum-cta — transparent, text-strong bold, conic ring at .62 */
+.cta { position:relative; display:inline-flex; align-items:center; height:26px; padding:0 12px; border-radius:6px; border:1px solid transparent;
+  background:transparent; color:var(--strong); font-size:12px; font-weight:700; flex:none; cursor:default; }
+.cta::before { content:""; position:absolute; inset:-1px; border-radius:inherit; padding:1px;
+  background:conic-gradient(from 20deg, var(--spectrum), #5fe08b);
+  -webkit-mask:linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); -webkit-mask-composite:xor;
+  mask:linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); mask-composite:exclude; opacity:.62; pointer-events:none; }
+.cta.violet::before { background:conic-gradient(from 20deg, #a58af7, #c9b1f5, #7a63c9, #a58af7); }
+
+/* the preview slot: ux-play-frame ux-play-frame-slot (120px, near-black) */
+.play { position:relative; width:100%; height:120px; overflow:hidden; border-radius:7px; background:#07080a; border:1px solid var(--bd); }
+.play.dimmed svg { filter:saturate(.45) brightness(.55); }
+.play svg { position:absolute; inset:0; width:100%; height:100%; }
+.play .empty { position:absolute; inset:0; display:grid; align-content:center; justify-items:center; padding:0 14px; color:var(--dim);
+  font-size:11.5px; line-height:1.4; text-align:center; }
+.play .empty p { margin:0; }
+.pill { position:absolute; top:6px; right:6px; display:inline-flex; align-items:center; gap:5px; padding:1px 6px; border:1px solid var(--bd); border-radius:4px;
+  background:color-mix(in srgb, var(--terminal) 78%, transparent); font-family:var(--mono); font-size:9.5px; letter-spacing:.02em; }
+.pill .dot { width:5px; height:5px; border-radius:50%; background:currentColor; }
+.pill.live { color:var(--st-good-tx); } .pill.live .dot { animation:blink 2s ease-in-out infinite; }
+.pill.emu { color:var(--st-bound-tx); } .pill.emu .dot { animation:blink 2s ease-in-out infinite; }
+.pill.stale { color:var(--st-attention-tx); }
+.pill.off { color:var(--st-neutral-tx); }
+@keyframes blink { 50% { opacity:.35; } }
+
+/* terminal: flush, terminal bg, mono 11px */
+.term { height:var(--term-h); overflow:hidden; background:var(--terminal); border-top:1px solid var(--bd-mut); padding:8px 16px; font-family:var(--mono); font-size:11px; line-height:16px; color:var(--dim); }
+.term div { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.term .hi { color:var(--muted); }
+.term .rom { color:var(--subtle); }
+.term .em { color:var(--st-bound-tx); }
+
+/* ---- the dress hooks (concepts) ------------------------------------- */
+/* B · violet left edge: the sim card's ux-device-edge, in the bound family, FIXED (never state-toned):
+   "runs in this tab" is a kind, not a state */
+.card.edge { border-left:3px solid var(--st-bound-tx); }
+/* D · ghost frame */
+.card.ghost { border:1px dashed var(--st-bound-bd); background:color-mix(in srgb, var(--panel) 82%, transparent); }
+.card.ghost .term { background:color-mix(in srgb, var(--terminal) 70%, #241a33 30%); }
+/* E · the runtime band: a 24px zone between the header and Project */
+.band { display:flex; align-items:center; gap:8px; height:24px; padding:0 16px; background:var(--st-bound-bg); border-top:1px solid var(--st-bound-bd); border-bottom:1px solid var(--st-bound-bd);
+  color:var(--st-bound-tx); font-size:11px; font-weight:600; white-space:nowrap; overflow:hidden; }
+.band .sp { flex:1; }
+.band .m { font-family:var(--mono); font-weight:500; color:var(--st-bound-tx); opacity:.9; }
+.band svg { width:12px; height:12px; flex:none; }
+
+/* ---- the roster's add slot (AddDeviceCard, faithful) ---------------- */
+.addslot { display:flex; min-height:160px; flex-direction:column; align-items:center; justify-content:center; gap:12px; border-radius:6px;
+  border:1px dashed var(--bd-strong); background:transparent; padding:24px 20px; text-align:center; position:relative; }
+.addslot p { margin:0; max-width:224px; font-size:12px; line-height:1.6; color:var(--muted); }
+.addslot .two { display:flex; gap:8px; flex-wrap:wrap; justify-content:center; }
+.addslot.split { min-height:120px; }
+.addslot .or { font-size:11px; color:var(--dim); }
+.addslot .ctaBig { height:30px; padding:0 14px; font-size:12.5px; }
+.addslot .quiet { color:var(--subtle); font-size:12px; text-decoration:underline dotted; text-underline-offset:3px; }
+.addslot .quiet.violet { color:var(--st-bound-tx); }
+
+/* remembered tile (RememberedTile, faithful-ish) */
+.rem { display:flex; flex-direction:column; gap:8px; min-width:0; border-radius:6px; border:1px solid var(--bd); background:color-mix(in srgb, var(--panel) 70%, transparent); padding:12px 16px; }
+.rem .head { display:flex; align-items:flex-start; justify-content:space-between; gap:12px; min-width:0; }
+.rem h3 { margin:0; flex:1; min-width:0; font-size:14px; line-height:20px; font-weight:700; color:var(--strong); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.rem.edge { border-left:3px solid var(--st-bound-tx); }
+.rem .verbs { margin-top:auto; }
+.rem .outline { border-color:var(--sel-bd); background:transparent; }
+
+/* ---- the creation picker (BoardPickPopover grammar, inverted) ---------- */
+.pop { position:absolute; left:50%; bottom:calc(100% - 44px); transform:translateX(-50%); width:392px; z-index:20; border-radius:8px; border:1px solid var(--bd-strong);
+  background:var(--raised); box-shadow:0 18px 44px rgba(0,0,0,.55); text-align:left; overflow:hidden; }
+.pop .top { display:grid; gap:4px; padding:10px 12px 8px; border-bottom:1px solid var(--bd-mut); }
+.pop .top p { margin:0; font-size:11.5px; color:var(--subtle); }
+.pop .top p b { color:var(--tx); font-weight:600; }
+.pop .top p.why { color:var(--dim); font-size:11px; }
+.pop .tiles { display:grid; grid-template-columns:repeat(3, 1fr); gap:8px; padding:10px 12px; }
+.tile { position:relative; display:grid; gap:4px; padding:8px; border-radius:6px; border:1px solid var(--bd); background:var(--panel); text-align:left; }
+.tile.picked { border-color:var(--sel-bd); background:var(--sel-bg); }
+.tile .sil { height:56px; border-radius:4px; background:var(--terminal); position:relative; overflow:hidden; border:1px solid var(--bd-mut); }
+.tile .sil::before { content:""; position:absolute; left:14%; right:14%; top:22%; bottom:22%; border-radius:6px; border:1.5px solid var(--bd-strong); background:#12121a; }
+.tile .sil::after { content:""; position:absolute; left:24%; right:24%; top:36%; bottom:36%; border-radius:2px; background:repeating-linear-gradient(90deg, var(--bd-strong) 0 3px, transparent 3px 7px); opacity:.7; }
+.tile .sil.c6::before { top:30%; bottom:30%; }
+.tile .sil.long::before { left:6%; right:6%; }
+.tile .t { font-size:11.5px; font-weight:600; color:var(--tx); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.tile .s { font-family:var(--mono); font-size:10px; color:var(--dim); }
+.tile .ck { position:absolute; top:6px; right:6px; width:14px; height:14px; border-radius:50%; background:var(--st-good-tx); color:#0b0c0e; font-size:10px; display:grid; place-items:center; font-weight:800; }
+.pop .foot { display:flex; align-items:center; gap:10px; padding:8px 12px 10px; border-top:1px solid var(--bd-mut); }
+.pop .foot p { margin:0; flex:1; font-size:11px; color:var(--dim); line-height:1.4; }
+
+/* the ⋯ card menu (naming PR #553's header menu) */
+.menu { position:absolute; right:12px; top:44px; z-index:20; width:230px; border-radius:8px; border:1px solid var(--bd-strong); background:var(--raised); box-shadow:0 18px 44px rgba(0,0,0,.55); padding:6px; display:grid; gap:2px; }
+.menu .mi { display:flex; align-items:center; gap:8px; padding:6px 8px; border-radius:5px; font-size:12px; color:var(--tx); }
+.menu .mi.hov { background:rgba(255,255,255,.06); }
+.menu .mi.twin { color:var(--st-bound-tx); }
+.menu .mi.danger { color:var(--st-error-tx); }
+.menu .mi svg { width:13px; height:13px; }
+.menu .hr { height:1px; background:var(--bd-mut); margin:3px 4px; }
+.dots { width:24px; height:24px; border-radius:5px; display:grid; place-items:center; color:var(--dim); font-weight:800; letter-spacing:1px; flex:none; }
+.dots.open { background:rgba(255,255,255,.1); color:var(--strong); }
+
+/* =====================================================================
+   Section 3 — the target moment
+   ===================================================================== */
+.frame3 { display:grid; gap:0; border:1px solid var(--shell-bd); border-radius:10px; overflow:hidden; background:var(--bg); color:var(--tx); }
+.frame3 .chrome { display:flex; align-items:center; gap:10px; height:38px; padding:0 14px; background:var(--terminal); border-bottom:1px solid var(--bd); font-size:12px; color:var(--dim); }
+.frame3 .chrome .wm { font-weight:800; letter-spacing:.06em; color:var(--muted); font-size:11px; }
+.frame3 .chrome .crumb { font-family:var(--mono); font-size:11px; color:var(--subtle); }
+.frame3 .body { padding:18px 20px 22px; display:grid; gap:14px; }
+.prompt { display:grid; gap:10px; max-width:560px; padding:14px 16px; border-radius:8px; border:1px solid var(--st-bound-bd); background:var(--st-bound-bg); }
+.prompt.plain { border-color:var(--bd-strong); background:var(--raised); }
+.prompt h5 { margin:0; font-size:13.5px; font-weight:700; color:var(--strong); line-height:1.35; }
+.prompt p { margin:0; font-size:12px; line-height:1.5; color:var(--muted); }
+.prompt p.once { color:var(--dim); font-size:11.5px; }
+.prompt .verbs { height:auto; flex-wrap:wrap; white-space:normal; overflow:visible; gap:8px; }
+.prompt .verb.outline { background:transparent; border-color:var(--sel-bd); }
+.prompt .link { font-size:12px; color:var(--subtle); text-decoration:underline dotted; text-underline-offset:3px; }
+.stage { display:flex; align-items:center; gap:12px; }
+.stage .dot { width:10px; height:10px; border-radius:50%; background:var(--st-working-tx); animation:blink 1.6s ease-in-out infinite; }
+.stage p { margin:0; font-size:14px; font-weight:600; color:var(--muted); }
+.stage.bound .dot { background:var(--st-bound-tx); }
+.progress { height:4px; width:100%; max-width:420px; border-radius:2px; background:var(--raised-strong); overflow:hidden; }
+.progress i { display:block; height:100%; width:38%; background:linear-gradient(90deg, var(--spectrum), #5fe08b); background-size:300% 100%; }
+.skel { display:grid; grid-template-columns:minmax(200px,260px) minmax(0,1fr) minmax(220px,300px); gap:14px; animation:pulse 2s ease-in-out infinite; }
+.skel > div { display:grid; gap:14px; }
+.skel .b { border-radius:8px; background:var(--raised); border:1px solid var(--bd-mut); }
+@keyframes pulse { 50% { opacity:.55; } }
+
+/* package card (gallery, "Your projects") with the D41 sheet */
+.pkg { position:relative; width:280px; border-radius:8px; border:1px solid var(--bd); background:var(--panel); overflow:hidden; }
+.pkg .thumb { height:132px; background:radial-gradient(120px 60px at 30% 45%, #4d2d55, transparent 70%), radial-gradient(160px 70px at 75% 60%, #1f3a2e, transparent 70%), #0a0a10; }
+.pkg .meta { padding:10px 12px 12px; display:grid; gap:3px; }
+.pkg .meta h5 { margin:0; font-size:13.5px; font-weight:700; color:var(--strong); }
+.pkg .meta p { margin:0; font-size:12px; color:var(--muted); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.pkg .meta p.dim { color:var(--dim); }
+.pkg .meta p.good { color:var(--st-good-tx); }
+.pkg .meta p.bound { color:var(--st-bound-tx); }
+.sheet { position:absolute; inset:0; background:color-mix(in srgb, var(--panel) 97%, transparent); backdrop-filter:blur(3px); display:grid; align-content:center; gap:10px; padding:16px 14px; }
+.sheet h5 { margin:0; font-size:13px; font-weight:700; color:var(--strong); }
+.sheet p { margin:0; font-size:11.5px; line-height:1.45; color:var(--muted); }
+.sheet .btns { display:grid; gap:6px; }
+.sheet .btn { display:flex; align-items:center; justify-content:center; height:28px; border-radius:6px; border:1px solid var(--bd-strong); background:var(--raised); font-size:12px; font-weight:600; color:var(--tx); }
+.sheet .btn.primary { border-color:var(--st-bound-bd); color:var(--st-bound-tx); background:var(--st-bound-bg); }
+.sheet .btn.cancel { border-color:transparent; background:transparent; color:var(--subtle); }
+
+/* editor mock for 3C */
+.editor { display:grid; grid-template-columns:minmax(0,1fr) 300px; min-height:220px; }
+.editor .work { padding:14px; display:grid; gap:10px; align-content:start; border-right:1px solid var(--bd); }
+.editor .work .l { height:12px; border-radius:3px; background:var(--raised); }
+.editor .pane { display:flex; flex-direction:column; background:var(--panel); }
+.banner { margin:10px; padding:10px 12px; border-radius:6px; border:1px solid var(--st-bound-bd); background:var(--st-bound-bg); display:grid; gap:8px; }
+.banner p { margin:0; font-size:11.5px; line-height:1.45; color:var(--muted); }
+.banner p b { color:var(--st-bound-tx); font-weight:700; }
+.banner .verbs { height:auto; }
+.banner .verb { height:24px; font-size:11.5px; }
+
+/* settings rows (project_settings_section.rs grammar) */
+.settings { display:grid; gap:0; width:380px; border:1px solid var(--bd); border-radius:8px; background:var(--panel); overflow:visible; position:relative; }
+.settings .row { display:grid; grid-template-columns:76px minmax(0,1fr); gap:10px; align-items:center; padding:8px 12px; border-top:1px solid var(--bd-mut); font-size:12px; }
+.settings .row:first-child { border-top:0; }
+.settings .row dt { font-size:10.5px; font-weight:800; text-transform:uppercase; letter-spacing:.06em; color:var(--subtle); }
+.settings .row dd { margin:0; min-width:0; font-family:var(--mono); font-size:11.5px; color:var(--muted); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; display:flex; align-items:center; gap:8px; }
+.settings .sel { display:inline-flex; align-items:center; gap:8px; height:26px; padding:0 8px 0 10px; border-radius:6px; border:1px solid var(--bd-strong); background:var(--raised); font-family:var(--font); font-size:12px; font-weight:600; color:var(--tx); }
+.settings .sel .sw { width:10px; height:10px; border-radius:2px; background:var(--st-bound-tx); }
+.settings .sel .sw.board { background:var(--st-neutral-tx); }
+.settings .hintline { grid-column:1 / -1; margin:0; font-size:11px; color:var(--dim); line-height:1.45; }
+.tmenu { position:relative; margin:-4px 12px 12px 96px; width:260px; z-index:20; border-radius:8px; border:1px solid var(--bd-strong); background:var(--raised); box-shadow:0 18px 44px rgba(0,0,0,.55); padding:6px; display:grid; gap:2px; }
+.tmenu .mi { display:flex; align-items:center; gap:8px; padding:6px 8px; border-radius:5px; font-size:12px; color:var(--tx); }
+.tmenu .mi .sw { width:10px; height:10px; border-radius:2px; background:var(--st-neutral-tx); flex:none; }
+.tmenu .mi .sw.v { background:var(--st-bound-tx); }
+.tmenu .mi.hov { background:rgba(255,255,255,.06); }
+.tmenu .mi .s { margin-left:auto; font-family:var(--mono); font-size:10px; color:var(--dim); }
+.tmenu .hd { padding:4px 8px 2px; font-size:10px; font-weight:800; text-transform:uppercase; letter-spacing:.06em; color:var(--dim); }
+
+/* =====================================================================
+   Section 4 — the sim card (sim_card.rs, faithful): tint edge, title
+   bar with glyph · name · transport label · grow, icon tabs, body
+   ===================================================================== */
+.simcard { position:relative; display:flex; flex-direction:column; border-radius:6px; border:1px solid var(--bd); background:var(--panel); overflow:hidden; min-width:0; color:var(--tx);
+  border-left:3px solid var(--edge, var(--st-good-tx)); }
+.simcard .tb { display:flex; align-items:center; gap:8px; min-height:36px; padding:6px 6px 6px 12px; background:var(--terminal); border-bottom:1px solid var(--bd); }
+.simcard .tb .g { display:inline-flex; color:var(--muted); }
+.simcard .tb .g svg { width:14px; height:14px; }
+.simcard .tb .g.v { color:var(--st-bound-tx); }
+.simcard .tb p { margin:0; min-width:0; font-size:14px; font-weight:600; color:var(--strong); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.simcard .tb .lab { margin-left:auto; flex:none; font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:.06em; color:var(--dim); }
+.simcard .tb .lab.v { color:var(--st-bound-tx); }
+.simcard .tb .grow { width:28px; height:24px; display:grid; place-items:center; color:var(--dim); }
+.simcard .tabs { display:flex; gap:2px; padding:4px 6px; background:var(--terminal); border-bottom:1px solid var(--bd); }
+.simcard .tab { flex:1; height:24px; display:grid; place-items:center; border-radius:6px; color:var(--dim); }
+.simcard .tab svg { width:14px; height:14px; }
+.simcard .tab.on { background:color-mix(in oklab, var(--edge, var(--st-good-tx)) 12%, transparent); color:var(--edge, var(--st-good-tx)); }
+.simcard .tab.danger.on { background:color-mix(in oklab, var(--st-error-tx) 12%, transparent); color:var(--st-error-tx); }
+.simcard .body { display:grid; gap:6px; padding:12px; align-content:start; }
+.simcard .sec { display:grid; gap:4px; padding:8px 10px; border-radius:6px; border:1px solid var(--bd-mut); background:var(--surface); }
+.simcard .sec .st { display:flex; align-items:center; gap:8px; }
+.simcard .sec .st h6 { margin:0; font-size:11px; font-weight:800; text-transform:uppercase; letter-spacing:.06em; color:var(--subtle); flex:1; }
+.simcard .kv { display:grid; grid-template-columns:72px minmax(0,1fr); gap:6px 8px; font-size:12px; }
+.simcard .kv dt { font-size:10.5px; font-weight:800; text-transform:uppercase; color:var(--subtle); letter-spacing:.04em; }
+.simcard .kv dd { margin:0; font-family:var(--mono); font-size:11.5px; color:var(--muted); overflow-wrap:anywhere; }
+.simcard .kv dd.gone { color:var(--st-error-tx); text-decoration:line-through; opacity:.7; }
+.simcard .kv dd.new { color:var(--st-bound-tx); }
+.simcard .sec.danger { border-color:color-mix(in srgb, var(--st-error-bd) 60%, transparent); }
+.simcard .sec .row { display:flex; align-items:center; gap:8px; }
+.simcard .sec .row p { margin:0; flex:1; font-size:12px; color:var(--muted); }
+.simcard .verb.red { color:var(--st-error-tx); }
+.simcard .play { height:150px; }
+.simcard .playmeta { display:flex; align-items:center; gap:8px; font-size:11.5px; color:var(--subtle); }
+.simcard .playmeta .sw { width:12px; height:12px; border-radius:3px; background:linear-gradient(135deg,#5a3c48,#303a2c); }
+.simcard .playmeta .sp { flex:1; }
+.strip { display:grid; gap:8px; grid-template-columns:repeat(auto-fill, minmax(260px,1fr)); margin-top:14px; }
+.strip .w { border:1px solid var(--shell-bd); border-radius:8px; padding:10px 12px; background:var(--bg); display:grid; gap:6px; }
+.strip .w .lab { font-size:10.5px; font-weight:800; text-transform:uppercase; letter-spacing:.06em; color:var(--shell-dim); }
+.strip .w p { margin:0; font-size:12px; color:var(--muted); }
+.strip .w p.b { color:var(--st-bound-tx); }
+.strip .w p.g { color:var(--st-good-tx); }
+.strip .w .was { font-size:11px; color:var(--dim); text-decoration:line-through; }
+.strip .w .mi { display:flex; align-items:center; gap:8px; padding:5px 8px; border-radius:5px; font-size:12px; color:var(--tx); border:1px solid var(--bd-mut); background:var(--raised); }
+.strip .w .mi .sw { width:10px; height:10px; border-radius:2px; background:var(--st-bound-tx); }
+</style>
+<style>
+/* round 2 (D30–D38): the band is the one bound-family element; Desktop is a device card */
+.band.desk { background:var(--st-bound-bg); }
+.band .as { color:var(--st-bound-tx); opacity:.85; }
+.band .as::before { content:"·"; margin:0 6px 0 0; opacity:.6; }
+.url { display:grid; gap:4px; margin:6px 0 0; }
+.url .u { font-family:var(--mono); font-size:11px; color:var(--subtle); word-break:break-all; }
+.url .u b { color:var(--strong); font-weight:600; }
+.url .u i { color:var(--st-bound-tx); font-style:normal; }
+.url p { margin:0; font-size:11px; color:var(--dim); }
+.strip .w p.q { color:#f0dc7a; }
+.ruled { border:1px solid var(--shell-bd-strong); border-radius:8px; padding:10px 14px; margin:14px 0 0; font-size:12px; color:var(--shell-mut); max-width:960px; background:#121316; }
+.ruled b { color:var(--shell-tx); }
+</style>
+</head>
+<body>
+
+<h1>Emulated boards — target · real · emu · sim</h1>
+<p class="hint">
+  Vision <code>2026-09-07-0118-studio-emulated-boards</code>, D1–D21 + D30–D38 + the third sitting's <b>D40–D49</b>. Round 3 of this spike
+  draws the model Yona converged on: <b>projects declare the hardware they run on</b> (a target: a board or Desktop); a device is <b>real</b>,
+  <b>emu</b> (the real binary in lp-emu — boards only) or <b>sim</b> (the desktop firmware running in the browser, wearing the target's manifest —
+  any target); emu and sim are devices in the Devices tab; Desktop is a target, never a device; the project is the thing in the URL and
+  <code>?on=</code> says which device. The real card at the left of section 1 is <b>production, faithful</b> (device_roster_card.rs, 644px at
+  the 400px column); every other card is that card plus the band (D38/D49). Add buttons at the insertion point; identity as two fixed mono
+  rows; pasteable text stays pasteable.
+</p>
+<div class="ruled"><b>Ruled (Yona, 2026-09-07):</b> the band, kind-first wording (W1) · no "Emulated" title prefix · no violet beyond the band ·
+  no twin verb ("I could imagine having a way to add an emulated device on the device page but that's all") · the settings row lists boards, not
+  "emulated" ("a board is just a board") · <code>?on=emu | sim | mac:… | ws:…</code>. <b>Still open:</b> the kind words on the band (section 1:
+  Emu/Sim vs Emulated/Simulated), the picker's row shape (2b), the add-slot layout (2a), the strip's wording (4).</div>
+
+<div class="controls" id="ctl">
+  <span><b>Emu card</b></span>
+  <span class="grp" id="c-state"></span>
+  <span class="sep"></span>
+  <span><b>Speed</b></span>
+  <span class="grp" id="c-speed"></span>
+  <span class="sep"></span>
+  <span class="grp">
+    <button id="b-synth">mark MAC synthetic</button>
+    <button id="b-term">compact terminal</button>
+    <button id="b-anim">no animation</button>
+  </span>
+  <span class="sep"></span>
+  <span><b>Width</b></span>
+  <input type="range" id="w" min="320" max="520" step="4" value="400"><span class="mono" id="wv">400px</span>
+</div>
+
+<!-- ================================================================= -->
+<h2><span class="n">1</span>One card, four bands: real · emu · sim of a board · sim of Desktop</h2>
+<p class="sub">
+  <b>R</b> is the desk: Porch sign, a XIAO ESP32-C6, Ready, running <i>Luna's porch sign</i> — no band. <b>E</b> an emu of the same board:
+  the shipped fw-esp32c6 image in lp-emu, exact, the band carries the speed and guest clock (D8). <b>S1</b> a sim of the same board: the
+  desktop firmware in the browser wearing the XIAO's manifest — fast, not exact, GPU tier. <b>S2</b> the sim of Desktop: the same firmware
+  wearing the desktop manifest. Titles are the board's or the target's name; the band is the whole difference. Pick the <b>Kind words</b>.
+</p>
+<div class="local"><span><b>Kind words</b></span><span class="grp" id="c-kind"></span></div>
+<div class="concepts" id="s1"></div>
+<h2 style="margin-top:34px"><span class="n">1b</span>The emu card across every face, and the two powered-off records</h2>
+<p class="sub">Born by open (D10/D33, first face = Ready), Flashing (sub-second, same activity and journal), a slow boot at 0.3× (D8), Ready at 0.6×;
+  then the powered-off emu (D9: image kept) beside the powered-off sim (D46: a thin record — nothing to keep, the card says so).</p>
+<div class="concepts" id="s1b"></div>
+
+<!-- ================================================================= -->
+<h2><span class="n">2</span>The Devices tab: the picker is the one way to make a device</h2>
+<p class="sub">
+  The production grid (<code>minmax(320px,1fr)</code>): the real Porch sign, an emu C6 that open created, a sim C6, the Desktop sim, a
+  powered-off emu, and the add slot. <b>D44</b>: "It's connected" stays the CTA; a dropdown lists every supported board plus Desktop, each row
+  tagged <b>emu</b> or <b>sim</b> by what this build can do — emu is the default where both exist, with a quiet "simulate instead". No twin verb.
+</p>
+<div class="local">
+  <span><b>Add slot</b></span><span class="grp" id="c-add"></span>
+  <span class="sep"></span>
+  <span><b>Row tag</b></span><span class="grp" id="c-tag"></span>
+  <span class="sep"></span>
+  <span><b>Powered off</b></span><span class="grp" id="c-off"></span>
+</div>
+<div class="ground" id="s2"></div>
+<div class="concepts" id="s2notes" style="margin-top:14px"></div>
+
+<!-- ================================================================= -->
+<h2><span class="n">3</span>The project is the URL; <code>?on=</code> says which device (D43)</h2>
+<p class="sub">
+  Opening a project always needs a device and never touches silicon by itself (D33). <code>?on=emu</code> and <code>?on=sim</code> name a
+  <b>kind</b> and resolve to the device of that kind for the project's target (the one that last ran it, else an idle one, else create);
+  <code>?on=mac:…</code> names a board by identity (silicon, or an emu by its synthetic MAC); <code>?on=ws:host:port</code> names a device over
+  WebSocket (a real desktop server, or a native emu backing). No <code>?on=</code> → emu if a module exists, else sim. The opening frame narrates
+  the device. Cycle <b>Face</b>.
+</p>
+<div class="local">
+  <span><b>Face</b></span><span class="grp" id="c-face"></span>
+</div>
+<div class="concepts wide" id="s3"></div>
+
+<!-- ================================================================= -->
+<h2><span class="n">4</span>Desktop is a target, not a device — and every other place the words appear</h2>
+<p class="sub">
+  There is no desktop emu; there is a desktop sim (S2 above, repeated at the left) and there are <b>real</b> desktop devices: a LightPlayer
+  server on the network, reached over <code>ws:</code> — a real card with a where instead of a MAC, no band. The strip is every other place
+  the words real / emu / sim / target now appear.
+</p>
+<div class="concepts" id="s4"></div>
+<div class="strip" id="s4strip"></div>
+
+<div class="rejected" id="rej">
+  <b>Rejected, and why.</b>
+  <ul>
+    <li><b>The twin verb ("Emulate this board")</b> on a real card, in the device zone or the ⋯ menu. Yona: "not sure I understand why … I could
+      imagine having a way to add an emulated device on the device page but that's all." D2's "emulate that actual board" is an emu of the
+      same kind plus Push — two verbs that exist.</li>
+    <li><b>"Emulated" on the project's board rows</b> (round 2's settings row). "emulated is something that a device is, a board is just a board."</li>
+    <li><b>Desktop as a device record, and the "costume"</b> (round 2's D31/D34). Desktop is a target; a sim of a board is a sim, first-class,
+      not Desktop in disguise. The band says <i>Sim · XIAO ESP32-C6</i> and that is the whole truth.</li>
+    <li><b>Today's sim card as the "what leaves" reference</b> (round 2, section 4 S). It was the OLD device-card anatomy (tint edge, title bar,
+      icon tabs), not the current roster card; its removal is chipped as its own cleanup task.</li>
+    <li><b>Dress A (words only), B (violet left edge), C (kind chip), D (ghost frame)</b> — round 1. The band says it; a second dress calls it
+      out harder than needed.</li>
+    <li><b>The "Emulated" title prefix, the violet ▶ pill.</b> The title is the board's or target's name; the pill reads <i>live</i> on every card
+      (the frames are honestly that device's); the band is the one bound-family element.</li>
+    <li><b>3B the package-card sheet, 3C the never-block banner, "twin standing by".</b> There is no ask on open (D33).</li>
+    <li><b>The emulated board or the sim wearing a different anatomy</b> (title bar + icon tabs). They are devices — the four zones, the same
+      verbs, the same fold. There is no runtime that is not a device (D30).</li>
+    <li><b>A separate "Emulated"/"Simulated" section in the roster.</b> One roster; grouping is a sort, later.</li>
+    <li><b>"Emulator" / "Simulator" as card titles.</b> Reserved words for the things, not names for a device; the card names its target.</li>
+    <li><b>A fake board photo on the card.</b> A product shot of hardware the user does not have — the opposite of T7.</li>
+    <li><b>The device in the address path</b> (<code>/device/&lt;uid&gt;</code> as the lens address). The identity is the project; the device is a hint.</li>
+  </ul>
+</div>
+
+<script>
+/* ---------------------------------------------------------------------
+   Data — modelled on the catalog (lp-core/lpc-hardware/boards) and the
+   firmware-faces fixtures (home_gallery_stories.rs)
+   --------------------------------------------------------------------- */
+const esc = s => String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const SEP = ' · ';
+const BOARDS = {
+  'seeed/xiao-esp32-c6':          { name:'XIAO ESP32-C6',                  chip:'esp32c6', fw:'fw-esp32c6 e1f2a3b', emu:true },
+  'seeed/xiao-esp32-s3-plus':     { name:'XIAO ESP32-S3 Plus',             chip:'esp32s3', fw:'fw-esp32s3 9b1c0de', emu:true },
+  'espressif/esp32-c6-devkitc-1': { name:'ESP32-C6-DevKitC-1',             chip:'esp32c6', fw:'fw-esp32c6 e1f2a3b', emu:true },
+  'espressif/esp32-s3-devkitc-1': { name:'ESP32-S3-DevKitC-1',             chip:'esp32s3', fw:'fw-esp32s3 9b1c0de', emu:true },
+  'quinled/dig-uno':              { name:'QuinLED-Dig-Uno',                chip:'esp32',   fw:'fw-esp32v3 7c80a27', emu:false },
+  'domraem/dom-z-102':            { name:'WLED LAN 4-Channel (DOM-Z-102)', chip:'esp32',   fw:'fw-esp32v3 7c80a27', emu:false },
+};
+const C6 = BOARDS['seeed/xiao-esp32-c6'];
+const REAL = { title:'Porch sign', board:C6, mac:'60:55:f9:0a:0b:0c', project:"Luna's porch sign" };
+const SYNTH_MAC = '02:1e:6d:3a:9c:01';   // an emu's locally-administered MAC (D9)
+const SIM_MAC   = '02:5c:1e:00:00:07';   // a sim's synthetic identity (D46)
+const DESK_MAC  = '02:5c:1e:00:00:01';
+const FWB = 'fw-browser 4c7e912';
+const PRJ = { slug:'lunas-porch-sign', uid:'prj7f3a9c2e41c1', name:"Luna's porch sign" };
+const WS = '192.168.0.21:1234';
+
+const state = { emu:'ready', speed:1, synth:false, term:false, kind:'K1', add:'closed', tag:'word', off:'grid', face:'emu' };
+
+/* ---------------------------------------------------------------------
+   Small parts
+   --------------------------------------------------------------------- */
+const ICON = {
+  chipglyph: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="5" width="14" height="14" rx="2"/><path d="M9 2v3M15 2v3M9 19v3M15 19v3M2 9h3M2 15h3M19 9h3M19 15h3"/><rect x="9" y="9" width="6" height="6" rx="1"/></svg>',
+  monitorplay: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 7.75a.75.75 0 0 1 1.142-.638l3.664 2.249a.75.75 0 0 1 0 1.278l-3.664 2.25a.75.75 0 0 1-1.142-.64z"/><path d="M12 17v4M8 21h8"/><rect x="2" y="3" width="20" height="14" rx="2"/></svg>',
+  lan: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="14" width="20" height="6" rx="1"/><path d="M6 17h.01M10 17h.01M12 14V9M8 9h8"/></svg>',
+  copy: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>',
+};
+const chip = (kind, text, cls='') => `<span class="chip ${kind} ${cls}">${text}</span>`;
+const speedText = s => `${s.toFixed(1)}×`;
+const verb = (t, cls='') => `<span class="verb ${cls}">${t}</span>`;
+const cta  = (t, cls='') => `<span class="cta ${cls}">${esc(t)}</span>`;
+const sp = '<span class="sp"></span>';
+
+function lamps(phase=0) {
+  const cols=14, rows=3, W=400, H=120, r=4.2;
+  const dx = W/(cols+1), dy = H/(rows+1);
+  let out='';
+  for (let y=0;y<rows;y++) for (let x=0;x<cols;x++) {
+    const i = y*cols + (y%2 ? cols-1-x : x);
+    const h = (i*11 + phase) % 360;
+    const l = 46 + 12*Math.sin((i+phase/20)*.8);
+    out += `<circle cx="${(dx*(x+1)).toFixed(1)}" cy="${(dy*(y+1)).toFixed(1)}" r="${r}" fill="hsl(${h} 78% ${l}%)"/>`;
+  }
+  return `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="xMidYMid meet">${out}</svg>`;
+}
+function pill(kind, text) { return `<span class="pill ${kind}"><span class="dot"></span>${esc(text)}</span>`; }
+
+/* ---------------------------------------------------------------------
+   The band — the ONE bound-family element (D38); words per D49
+   backing: 'emu' | 'sim' ; target: a name
+   --------------------------------------------------------------------- */
+const KIND = {
+  K1: { name:'Emu / Sim', emu:'Emu', sim:'Sim', note:'The short forms — the same words the URL uses (<code>?on=emu</code>, <code>?on=sim</code>) and the picker rows show. Terse in a 24px band; reads as a label, which it is.' },
+  K2: { name:'Emulated / Simulated', emu:'Emulated', sim:'Simulated', note:'The prose forms. Kinder on first read, longer in the band, and they drift from the URL word — the docs would have to teach both.' },
+};
+function band(backing, target, face, speed) {
+  const K = KIND[state.kind];
+  const glyph = backing === 'emu' ? ICON.chipglyph : ICON.monitorplay;
+  const tail = backing === 'emu'
+    ? `${face.dilated || speed !== 1 ? `<span class="m">${speedText(speed)}</span>` : ''}<span class="m">guest ${face.guest}</span>`
+    : `<span class="m">GPU</span>`;
+  return `<div class="band ${backing === 'sim' ? 'desk' : ''}">${glyph}<span>${esc(K[backing])}</span><span class="as">${esc(target)}</span><span class="as">in this tab</span><span class="sp"></span>${tail}</div>`;
+}
+
+/* ---------------------------------------------------------------------
+   Faces
+   --------------------------------------------------------------------- */
+function emuFace() {
+  const s = state.emu, sp_ = state.speed;
+  const dilated = sp_ < 0.95;
+  const guest = '00:42.1';
+  const f = {
+    status:{kind:'good', label:'Ready'}, preview:'frames', projectLine: REAL.project,
+    projectVerbs: [cta('Open in editor'), sp, verb('Remove')],
+    fwLine:`${C6.fw} · ${C6.name}`, fwBar:null, fwVerbs:[verb('Update firmware'), sp, verb('Factory reset')],
+    deviceLine: dilated ? `Last heard 1 s ago · running at ${speedText(sp_)}` : `Last heard 1 s ago`,
+    deviceVerbs:[verb('Reset'), verb('Power off'), sp, verb('Forget')],
+    term:[['rom','ESP-ROM:esp32c6-20220919'],['rom','Build:Sep 19 2022'],['rom','rst:0x1 (POWERON),boot:0x6c (SPI_FAST_FLASH_BOOT)'],['','lp: fw-esp32c6 e1f2a3b · heap 361,120 B free'],['hi','hello · seeed/xiao-esp32-c6 · 02:1e:6d:3a:9c:01'],['','project: Luna\'s porch sign · 42 lamps · 31 fps'],['','heartbeat · frame 1,284 · rmt ch0 ok'],['','heartbeat · frame 1,346 · rmt ch0 ok']],
+    guest, dilated,
+  };
+  if (s === 'created') {
+    f.deviceLine = 'Created by open just now · flashed fw-esp32c6 e1f2a3b';
+    f.term = [['rom','ESP-ROM:esp32c6-20220919'],['rom','rst:0x1 (POWERON),boot:0x6c (SPI_FAST_FLASH_BOOT)'],['','lp: fw-esp32c6 e1f2a3b · heap 361,120 B free'],['hi','hello · seeed/xiao-esp32-c6 · 02:1e:6d:3a:9c:01'],['','manifest: seeed/xiao-esp32-c6 stamped'],['','project: Luna\'s porch sign · 42 lamps · 31 fps']];
+  }
+  if (s === 'flashing') {
+    f.status = {kind:'working', label:'Flashing'};
+    f.fwLine = 'Writing the image into flash… 100%'; f.fwBar = 100; f.fwVerbs = [verb('Cancel'), sp];
+    f.preview = 'sentence'; f.previewText = 'The picture is gone while the board is flashed.';
+    f.projectVerbs = [sp]; f.deviceVerbs = [sp, verb('Forget')];
+    f.term = [['','flash: bootloader @ 0x0 · 22,144 B'],['','flash: partitions @ 0x8000 · 3,072 B'],['','flash: app @ 0x10000 · 1,412,096 B'],['em','image written (0.31 s) · reset']];
+    f.deviceLine = 'Resetting…';
+  }
+  if (s === 'booting') {
+    f.status = {kind:'working', label:'Identifying'};
+    f.preview = 'sentence'; f.previewText = 'No picture yet — the board is starting.';
+    f.projectVerbs = [sp]; f.fwVerbs = [sp]; f.deviceVerbs = [sp, verb('Forget')];
+    f.deviceLine = dilated ? `Identifying… boot at ${speedText(sp_)} — up to ${Math.round(5/sp_)} s` : 'Identifying…';
+    f.term = [['rom','ESP-ROM:esp32c6-20220919'],['rom','Build:Sep 19 2022'],['rom','rst:0x1 (POWERON),boot:0x6c (SPI_FAST_FLASH_BOOT)'],['rom','load:0x40875720,len:0x1ef8'],['','lp: fw-esp32c6 e1f2a3b · heap 361,120 B free']];
+  }
+  return f;
+}
+function realFace() {
+  return {
+    status:{kind:'good', label:'Ready'}, preview:'frames', projectLine:REAL.project,
+    projectVerbs:[cta('Open in editor'), sp, verb('Remove')],
+    fwLine:`${C6.fw} · ${C6.name}`, fwBar:null, fwVerbs:[verb('Update firmware'), sp, verb('Factory reset')],
+    deviceLine:'Last heard 1 s ago', deviceVerbs:[verb('Reset'), verb('Disconnect'), sp, verb('Forget')],
+    term:[['rom','ESP-ROM:esp32c6-20220919'],['rom','Build:Sep 19 2022'],['rom','rst:0x1 (POWERON),boot:0x6c (SPI_FAST_FLASH_BOOT)'],['','lp: fw-esp32c6 e1f2a3b · heap 361,120 B free'],['hi','hello · seeed/xiao-esp32-c6 · 60:55:f9:0a:0b:0c'],['','project: Luna\'s porch sign · 42 lamps · 31 fps'],['','heartbeat · frame 9,812 · rmt ch0 ok'],['','heartbeat · frame 9,874 · rmt ch0 ok']],
+    guest:null, dilated:false,
+  };
+}
+/* a sim: the desktop firmware in the browser, wearing a target's manifest (D42/D46/D47) */
+function simFace(target) {
+  const board = target !== 'desktop';
+  return {
+    status:{kind:'good', label:'Ready'}, preview:'frames', projectLine: REAL.project,
+    projectVerbs:[cta('Open in editor'), sp, verb('Remove')],
+    fwLine: board ? `${FWB} · ${C6.name} manifest` : `${FWB} · desktop manifest`, fwBar:null, fwVerbs:[sp],
+    deviceLine:'Last heard 1 s ago · GPU tier',
+    deviceVerbs:[verb('Reset'), verb('Power off'), sp, verb('Forget')],
+    term: board
+      ? [['','lp: fw-browser 4c7e912 · desktop firmware, in the browser'],['hi',`hello · seeed/xiao-esp32-c6 (sim) · ${SIM_MAC}`],['','manifest: seeed/xiao-esp32-c6 · 4 ports · pin scarcity as the board'],['','tier: GPU (granted)'],['','project: Luna\'s porch sign · 42 lamps · 60 fps'],['','heartbeat · frame 4,012 · gpu ok']]
+      : [['','lp: fw-browser 4c7e912 · desktop firmware, in the browser'],['hi',`hello · lightplayer/desktop (sim) · ${DESK_MAC}`],['','manifest: desktop · ports unlimited'],['','tier: GPU (granted)'],['','project: Luna\'s porch sign · 42 lamps · 60 fps'],['','heartbeat · frame 4,012 · gpu ok']],
+    guest:null, dilated:false,
+  };
+}
+/* a REAL desktop device: a LightPlayer server on the network (D43 ws:) */
+function serverFace() {
+  return {
+    status:{kind:'good', label:'Ready'}, preview:'frames', projectLine: REAL.project,
+    projectVerbs:[cta('Open in editor'), sp, verb('Remove')],
+    fwLine:`fw-host 4c7e912 · Desktop`, fwBar:null, fwVerbs:[verb('Update firmware'), sp],
+    deviceLine:'Last heard 1 s ago · 12 ms', deviceVerbs:[verb('Reset'), verb('Disconnect'), sp, verb('Forget')],
+    term:[['','lp: fw-host 4c7e912 · desktop manifest · Mac mini'],['hi',`hello · lightplayer/desktop · ws:${WS}`],['','tier: GPU (granted) · outputs: 2 network'],['','project: Luna\'s porch sign · 42 lamps · 60 fps'],['','heartbeat · frame 4,012 · gpu ok'],['','heartbeat · frame 4,072 · gpu ok']],
+    guest:null, dilated:false,
+  };
+}
+
+/* ---------------------------------------------------------------------
+   The device card — one renderer; the band is the only hook
+   --------------------------------------------------------------------- */
+function deviceCard(opts) {
+  const { backing, target, title, row1, row2, speed, face, menu } = opts;
+  const status = opts.status || face.status;
+  const chips = chip(status.kind, esc(status.label)) + '<span class="dots">···</span>';
+  const r2 = row2 + (backing !== 'real' && state.synth ? `${SEP}<span class="mem">synthetic</span>` : '');
+  const identity = `<div class="rows"><p class="mono-line">${row1}</p><p class="mono-line">${r2}</p></div>`;
+  const preview = face.preview === 'frames'
+    ? `<div class="play">${lamps(40)}${pill('live', 'live')}</div>`
+    : `<div class="play"><div class="empty"><p>${esc(face.previewText)}</p></div></div>`;
+  const projectZone = `<section class="zone">${preview}
+      <p class="info">${esc(face.projectLine)}</p><div class="bar"></div>
+      <div class="verbs">${face.projectVerbs.join('')}</div></section>`;
+  const bar = face.fwBar == null ? '<div class="bar"></div>' : `<div class="bar lit"><i style="width:${face.fwBar}%"></i></div>`;
+  const term = `<div class="term">${face.term.map(([c,t]) => `<div class="${c}">${esc(t)}</div>`).join('')}</div>`;
+  const fwZone = `<section class="zone combined"><div class="zrows"><p class="info">${esc(face.fwLine)}</p>${bar}<div class="verbs">${face.fwVerbs.join('')}</div></div>${term}</section>`;
+  const deviceZone = `<footer class="zone device"><p class="info">${esc(face.deviceLine)}</p><div class="verbs">${face.deviceVerbs.join('')}</div></footer>`;
+  const bandHtml = backing === 'real' ? '' : band(backing, target, face, speed);
+  return `<article class="card" data-kind="${backing}">
+    <header><div class="id"><div class="head"><h3>${esc(title)}</h3><span class="chips">${chips}</span></div>${identity}</div></header>
+    ${bandHtml}${projectZone}${fwZone}${deviceZone}${menu || ''}
+  </article>`;
+}
+const fwl = t => `<span class="fwl">${esc(t)}</span>`;
+function realCard() {
+  return deviceCard({ backing:'real', title:REAL.title, row1:[C6.name, C6.chip].join(SEP), row2:[REAL.mac, fwl(C6.fw)].join(SEP), face:realFace(), speed:1 });
+}
+function emuCard() {
+  const face = emuFace();
+  return deviceCard({ backing:'emu', target:C6.name, title:C6.name, row1:[C6.name, C6.chip].join(SEP), row2:[SYNTH_MAC, fwl(C6.fw)].join(SEP), status:face.status, face, speed:state.speed });
+}
+function simBoardCard() {
+  return deviceCard({ backing:'sim', target:C6.name, title:C6.name, row1:[C6.name, C6.chip].join(SEP), row2:[SIM_MAC, fwl(FWB)].join(SEP), face:simFace('board'), speed:1 });
+}
+function simDeskCard() {
+  return deviceCard({ backing:'sim', target:'Desktop', title:'Desktop', row1:['Desktop', 'fw-browser'].join(SEP), row2:[DESK_MAC, fwl(FWB)].join(SEP), face:simFace('desktop'), speed:1 });
+}
+function serverCard() {
+  return deviceCard({ backing:'real', title:'Studio on the Mac mini', row1:['Desktop', 'fw-host'].join(SEP), row2:[`ws:${WS}`, fwl('fw-host 4c7e912')].join(SEP), face:serverFace(), speed:1 });
+}
+
+/* powered-off records */
+function offTile(kind) {
+  if (kind === 'sim') return `<div class="rem edge">
+    <div class="head"><h3>${C6.name}</h3><span class="chips">${chip('neutral','Powered off')}</span></div>
+    <div class="play"><div class="empty"><p>Powered off — a sim keeps nothing but its name; Power on starts it fresh.</p></div></div>
+    <p class="mono-line">${KIND[state.kind].sim}${SEP}${C6.name}${SEP}${SIM_MAC}</p>
+    <div class="verbs">${verb('Power on','outline')}${sp}${verb('Forget')}</div></div>`;
+  return `<div class="rem edge">
+    <div class="head"><h3>${C6.name}</h3><span class="chips">${chip('neutral','Powered off')}</span></div>
+    <div class="play"><div class="empty"><p>Powered off — the flash image is kept (4 MiB), so the board comes back as it was.</p></div></div>
+    <p class="mono-line">${KIND[state.kind].emu}${SEP}${C6.name}${SEP}${SYNTH_MAC}${SEP}ran 4 min ago</p>
+    <div class="verbs">${verb('Power on','outline')}${sp}${verb('Forget')}</div></div>`;
+}
+
+/* ---------------------------------------------------------------------
+   Section 1
+   --------------------------------------------------------------------- */
+function ruler(root) {
+  root.querySelectorAll('.concept').forEach(el => {
+    const a = el.querySelector('article, .rem'); if (!a) return; const r = el.querySelector('.ruler'); if (!r) return;
+    const h = Math.round(a.getBoundingClientRect().height);
+    const hd = a.querySelector('header') ? Math.round(a.querySelector('header').getBoundingClientRect().height) : 0;
+    const over = [...a.querySelectorAll('.mono-line, .info, .band')].some(l => l.scrollWidth > l.clientWidth + 1);
+    r.innerHTML = `<span>card <b>${h}px</b></span>${hd ? `<span>header ${hd}px</span>` : ''}` + (over ? '<span class="warn">a line clips at this width</span>' : '<span class="ok">nothing clipped</span>');
+  });
+}
+function renderS1() {
+  const root = document.getElementById('s1');
+  const K = KIND[state.kind];
+  const saved = state.emu; state.emu = 'ready';
+  root.innerHTML = `
+    <div class="concept ref"><h3 class="c"><span class="k">R</span>Real — production, faithful</h3>${realCard()}
+      <p class="ruler"></p><p class="cn">device_roster_card.rs at the 400px column: header 90 · Project 220 · Firmware+Terminal 252 · Device 80. No band: real needs no explaining.</p></div>
+    <div class="concept lean"><h3 class="c"><span class="k">E</span>Emu of the board <span style="color:#f0dc7a;font-weight:500">· ruled shape</span></h3>${emuCard()}
+      <p class="ruler"></p><p class="cn">The shipped fw-esp32c6 image in lp-emu. Same title as a real XIAO would auto-name to; the band carries kind · target · where, then speed and guest clock (D8). Costs one height-table row (644 → 668px).</p></div>
+    <div class="concept"><h3 class="c"><span class="k">S1</span>Sim of the board (D42)</h3>${simBoardCard()}
+      <p class="ruler"></p><p class="cn">The desktop firmware in the browser wearing the XIAO's manifest: pin scarcity and ports as the board, no flash, no bootloader, GPU tier. Row 2 says fw-browser — that is the honesty; the band says Sim. This is what you get for a board with no emulator module yet, and what <code>?on=sim</code> asks for on purpose (faster, less exact).</p></div>
+    <div class="concept"><h3 class="c"><span class="k">S2</span>Sim of Desktop</h3>${simDeskCard()}
+      <p class="ruler"></p><p class="cn">Today's simulator, as a device: the same firmware wearing the desktop manifest (ports unlimited, D11), GPU tier. Desktop is the target; the sim is the device. "Stop simulator" is Power off.</p></div>
+    <div class="concept" style="grid-column:1/-1"><p class="cn"><b>${esc(K.name)}</b> — ${K.note}</p></div>`;
+  state.emu = saved;
+  ruler(root);
+}
+function renderS1b() {
+  const saved = { emu:state.emu, speed:state.speed };
+  const faces = [
+    ['Born by open (D10, D33)', {emu:'created', speed:1}], ['Flashing (sub-second)', {emu:'flashing', speed:1}],
+    ['Slow boot · 0.3× (D8)', {emu:'booting', speed:0.3}], ['Ready · 0.6× (D8)', {emu:'ready', speed:0.6}],
+  ];
+  let html = faces.map(([lab, st]) => { Object.assign(state, st); return `<div class="concept"><h3 class="c"><span class="k">E</span>${esc(lab)}</h3>${emuCard()}<p class="ruler"></p></div>`; }).join('');
+  Object.assign(state, saved);
+  html += `<div class="concept"><h3 class="c"><span class="k">E</span>Powered off emu (D9)</h3>${offTile('emu')}<p class="ruler"></p></div>`;
+  html += `<div class="concept"><h3 class="c"><span class="k">S1</span>Powered off sim (D46)</h3>${offTile('sim')}<p class="ruler"></p></div>`;
+  const root = document.getElementById('s1b'); root.innerHTML = html; ruler(root);
+}
+
+/* ---------------------------------------------------------------------
+   Section 2 — the Devices tab and its picker
+   --------------------------------------------------------------------- */
+const ADD = { closed:'slot, dropdown closed', open:'dropdown open' };
+const TAG = { word:'a word', chip:'a chip', sentence:'a sentence' };
+const OFF = { grid:'a tile in the grid', remembered:'the remembered line' };
+
+function tag(kind) {
+  const K = KIND[state.kind];
+  const word = kind === 'emu' ? K.emu.toLowerCase() : K.sim.toLowerCase();
+  if (state.tag === 'chip') return chip('bound', esc(kind === 'emu' ? K.emu : K.sim), 'speed');
+  if (state.tag === 'sentence') return `<span class="s">${kind === 'emu' ? 'we\'ll emulate it' : 'we\'ll simulate it'}</span>`;
+  return `<span class="s" style="color:var(--st-bound-tx)">${esc(word)}</span>`;
+}
+function dropdown() {
+  const rows = [['Desktop', 'sim', true]].concat(Object.values(BOARDS).map(b => [b.name, b.emu ? 'emu' : 'sim', false]));
+  const K = KIND[state.kind];
+  return `<div class="tmenu" style="position:static;margin-top:8px;width:100%">
+    <div class="hd">Desktop</div>
+    ${rows.slice(0,1).map(([n,k]) => `<div class="mi"><span class="sw v"></span>${esc(n)}${tag(k)}</div>`).join('')}
+    <div class="hd">Boards</div>
+    ${rows.slice(1).map(([n,k], i) => `<div class="mi ${i===0?'hov':''}"><span class="sw"></span>${esc(n)}${tag(k)}</div>`).join('')}
+    <p class="hintline" style="margin:8px 10px 6px">${K.emu} runs the board's real firmware; ${K.sim.toLowerCase()} runs the desktop firmware wearing the board — faster, less exact. Boards without an emulator yet get a sim. <span style="color:var(--st-bound-tx)">Hold ⌥ to simulate instead.</span></p>
+  </div>`;
+}
+function addSlot(mode) {
+  return `<div class="addslot"><p>Connect a LightPlayer board to control&nbsp;it.</p>
+    <div class="two">${cta("It's connected")}</div>
+    <span class="or">or</span>
+    <span class="quiet">start a board here ▾</span>${mode === 'open' ? dropdown() : ''}</div>`;
+}
+function renderS2() {
+  const saved = state.emu;
+  state.emu = 'ready'; const emu = emuCard(); state.emu = saved;
+  const offInGrid = state.off === 'grid' ? offTile('emu') : '';
+  const rem = state.off === 'remembered'
+    ? `<div class="remline"><p><button class="tog">Hide 2 boards Studio remembers but cannot see</button><span class="sp"></span><span>Studio keeps their names; Forget lives here.</span></p>
+        <div class="roster">${offTile('emu')}
+          <div class="rem"><div class="head"><h3>Bench classic</h3><span class="chips">${chip('neutral','Not connected')}</span></div>
+            <div class="play"><div class="empty"><p>Not connected — last heard 2 h ago.</p></div></div>
+            <p class="mono-line">QuinLED-Dig-Uno${SEP}esp32${SEP}30:76:f5:ec:f6:34${SEP}last heard 2 h ago</p>
+            <div class="verbs">${verb('Reconnect','outline')}${sp}${verb('Forget')}</div></div>
+        </div></div>`
+    : '';
+  document.getElementById('s2').innerHTML = `<h4>Devices</h4><div class="roster">${realCard()}${emu}${simBoardCard()}${simDeskCard()}${offInGrid}${addSlot(state.add)}</div>${rem}`;
+  document.getElementById('s2notes').innerHTML = `
+    <div class="concept"><h3 class="c"><span class="k">2a</span>The add slot</h3><p class="cn">
+      The house rule literally: the slot where the next card appears offers both ways a card can appear. "It's connected" stays the spectrum CTA
+      (the common case); "start a board here ▾" is the quiet second verb that opens the dropdown. Under D33 most emu/sim devices are born by
+      <i>open</i>; this slot is for "a board I want before I have a project for it" and for choosing sim over emu on purpose.</p></div>
+    <div class="concept"><h3 class="c"><span class="k">2b</span>The row tag: what you'll get</h3><p class="cn">
+      Every supported board plus Desktop; the tag says what this build does for it. <b>a word</b> (emu / sim, bound-toned): the same word the band
+      and the URL use. <b>a chip</b>: louder, costs row height. <b>a sentence</b> ("we'll emulate it"): Yona's phrasing, kind on first read, wide.
+      Emu is the default where both exist; simulate-instead is a modifier, not a second row per board — two rows per board would double the list.</p></div>
+    <div class="concept"><h3 class="c"><span class="k">2c</span>Where a powered-off device waits</h3><p class="cn">
+      <b>a tile in the grid</b> keeps it one Power-on away, wearing the band's edge; <b>the remembered line</b> treats power-off like unplug —
+      consistent, hidden by default. Under D37 opening another project in this tab is what powers a device off. The sim's tile says it keeps nothing (D46).</p></div>`;
+}
+
+/* ---------------------------------------------------------------------
+   Section 3 — the URL and the opening frame
+   --------------------------------------------------------------------- */
+const FACES = { emu:'?on=emu', sim:'?on=sim', mac:'?on=mac:… (the real Porch sign)', ws:'?on=ws:… (a desktop server)', none:'no ?on=' };
+function chrome(url) { return `<div class="chrome"><span class="wm">LIGHTPLAYER</span><span class="crumb">${url}</span></div>`; }
+const P = `/p/<b>${PRJ.slug}-${PRJ.uid}</b>`;
+const URLS = {
+  emu:  `${P}<i>?on=emu</i>`, sim: `${P}<i>?on=sim</i>`, mac: `${P}<i>?on=mac:60:55:f9:0a:0b:0c</i>`, ws: `${P}<i>?on=ws:${WS}</i>`, none: P,
+};
+const STAGE = {
+  emu:  ['Starting XIAO ESP32-C6 (emu)… resuming a snapshot', 62, 'A kind, resolved: the emu of this project\'s target that last ran it, else an idle one, else a new one born flashed with the project (D10). The frame says which; the card in Devices is the record.'],
+  sim:  ['Starting XIAO ESP32-C6 (sim)…', 80, 'Asked for on purpose — faster, less exact — or what you get for a board with no emulator module yet. The desktop firmware boots wearing the board\'s manifest.'],
+  mac:  ['Opening on Porch sign…', 90, 'An instance: the real board on the desk, by identity. The editor becomes a lens on it (as today) — this is the only way open reaches silicon, and only because the link says so.'],
+  ws:   [`Connecting to ${WS}…`, 30, 'An instance over WebSocket: a real LightPlayer server on the network (target desktop), or a native emu backing during development.'],
+  none: ['Starting XIAO ESP32-C6 (emu)…', 62, 'No hint: emu if a module exists for the target, else sim. The share link is this exact address — the part in bold is the whole identity.'],
+};
+function openingFrame(face) {
+  const [label, pct, sub] = STAGE[face];
+  return `<div class="frame3">${chrome(URLS[face])}<div class="body">
+      <div class="stage bound"><span class="dot"></span><p>${esc(label)}</p></div><div class="progress"><i style="width:${pct}%"></i></div>
+      <div class="skel"><div><div class="b" style="height:150px"></div></div><div><div class="b" style="height:100px"></div><div class="b" style="height:120px"></div></div><div><div class="b" style="height:150px"></div></div></div>
+    </div></div><p class="cn" style="margin-top:8px">${sub}</p>`;
+}
+function settingsRows() {
+  return `<div class="settings">
+    <div class="row"><dt>Name</dt><dd>${PRJ.name}</dd></div>
+    <div class="row"><dt>Format</dt><dd>4</dd></div>
+    <div class="row"><dt>UID</dt><dd>7f3a9c2e…41c1 <span style="color:var(--dim)">${ICON.copy.replace('<svg','<svg width="12" height="12"')}</span></dd></div>
+    <div class="row"><dt>Nodes</dt><dd>7 nodes</dd></div>
+    <div class="row"><dt>Hardware</dt><dd><span class="sel"><span class="sw board"></span>XIAO ESP32-C6 <span style="color:var(--dim)">▾</span></span></dd>
+      <p class="hintline">The hardware this project runs on. Open starts an emu of it in this tab (a sim when no emulator exists yet); to put it on a real board, use that board's card.</p></div>
+    <div class="tmenu">
+      <div class="hd">Desktop</div>
+      <div class="mi"><span class="sw v"></span>Desktop<span class="s">lightplayer/desktop</span></div>
+      <div class="hd">Boards</div>
+      ${Object.entries(BOARDS).map(([id, b], i) => `<div class="mi ${i===0?'hov':''}"><span class="sw"></span>${esc(b.name)}<span class="s">${esc(id)}</span></div>`).join('')}
+    </div>
+  </div>`;
+}
+function renderS3() {
+  const f = state.face;
+  document.getElementById('s3').innerHTML = `
+    <div class="concept lean"><h3 class="c"><span class="k">3A</span>The opening frame names the device <span style="color:#f0dc7a;font-weight:500">· lean</span></h3>${openingFrame(f)}
+      <div class="url"><p class="u">${URLS[f]}</p><p>The bold part is the identity and the share link; the violet tail is the hint. Was: <span style="text-decoration:line-through">/device/dev02f1e6d3a9c01</span> after a flash.</p></div></div>
+    <div class="concept"><h3 class="c"><span class="k">3D</span>The project declares its hardware: the settings row (D41)</h3>${settingsRows()}
+      <p class="cn">Project settings today are read-only rows (Name · Format · UID · Nodes). <b>Hardware</b> becomes the one editable row: Desktop, or a board — <b>plain</b>.
+      Nothing here says emu or sim: "emulated is something that a device is, a board is just a board." The hint under the row says what open will do.
+      Round 2 called this row Target and Device; "Hardware" is Yona's word ("projects declare the hardware they run on") — the manifest field stays <code>target</code>.</p></div>`;
+}
+
+/* ---------------------------------------------------------------------
+   Section 4 — Desktop is a target; the strip
+   --------------------------------------------------------------------- */
+function renderS4() {
+  const root = document.getElementById('s4');
+  const K = KIND[state.kind];
+  root.innerHTML = `
+    <div class="concept"><h3 class="c"><span class="k">S2</span>Sim of Desktop — in this tab</h3>${simDeskCard()}<p class="ruler"></p>
+      <p class="cn">Today's simulator, as a device (D42, D47): the desktop firmware in the browser wearing the desktop manifest. Born Ready, GPU tier, ports unlimited. One per browser is the natural count, but nothing enforces it — it is a device like any other.</p></div>
+    <div class="concept"><h3 class="c"><span class="k">R2</span>Real Desktop — a server on the network (D43 ws:)</h3>${serverCard()}<p class="ruler"></p>
+      <p class="cn">A real device whose target is Desktop: fw-host on a Mac mini, reached over <code>ws:${WS}</code>. Its name is the machine's, row 2 says the address instead of a MAC, it updates its own firmware, Disconnect instead of Power off, no band. The same card, a different where. Not v1 scope; shown to test that the model holds.</p></div>`;
+  ruler(root);
+  const e = K.emu.toLowerCase(), s_ = K.sim.toLowerCase();
+  document.getElementById('s4strip').innerHTML = `
+    <div class="w"><span class="lab">The terms (D40)</span><p><b>target</b> — a board or Desktop: what a project declares, what a device acts as</p><p><b>real</b> — silicon, or a desktop server on the network</p><p><b>${e}</b> — the real binary for the target's chip in lp-emu (boards only)</p><p><b>${s_}</b> — the desktop firmware in the browser wearing the target's manifest (any target)</p><p><b>preview</b> — the sim engine used internally; never a device</p></div>
+    <div class="w"><span class="lab">Package card presence line (D28)</span><span class="was">Running in simulator</span><p class="b">Running on XIAO ESP32-C6 (${e})</p><p class="b">Running on XIAO ESP32-C6 (${s_})</p><p class="b">Running on Desktop (${s_})</p><p class="g">On Porch sign ✓</p></div>
+    <div class="w"><span class="lab">Opening-frame stage labels</span><span class="was">Starting the simulator…</span><p>Starting XIAO ESP32-C6 (${e})…</p><p>Starting XIAO ESP32-C6 (${s_})…</p><p>Starting Desktop (${s_})…</p><p>Opening on Porch sign…</p><p>Connecting to ${WS}…</p></div>
+    <div class="w"><span class="lab">?on= grammar (D43)</span><p style="font-family:var(--mono);font-size:11px"><span class="b">emu</span> · <span class="b">sim</span> — a kind, resolved for the project's hardware</p><p style="font-family:var(--mono);font-size:11px"><span class="b">mac:</span>60:55:f9:0a:0b:0c — a board by identity (silicon or an ${e})</p><p style="font-family:var(--mono);font-size:11px"><span class="b">ws:</span>${WS} — a device over WebSocket (a desktop server, or a native ${e} backing)</p><p style="font-family:var(--mono);font-size:11px">(none) — ${e} if a module exists, else ${s_}</p></div>
+    <div class="w"><span class="lab">Package card ⋯ menu</span><span class="was">Open in sim · Open on Porch sign</span><div class="mi"><span class="sw"></span>Open</div><p>One verb (D33): open starts the project's device. Putting it on Porch sign is that card's Push.</p></div>
+    <div class="w"><span class="lab">Power off (was Stop simulator)</span><p>${K.emu}: <b>Power off</b> — image kept (D9).</p><p>${K.sim}: <b>Power off</b> — the record stays, nothing else (D46).</p><p>Real: <b>Disconnect</b>, as today.</p></div>
+    <div class="w"><span class="lab">New-project hardware default (D32)</span><p>From the library: <b style="color:var(--st-bound-tx)">Desktop</b></p><p>From a board (device-first ADR): <b>that board's kind</b></p><p>Required — no project without hardware.</p></div>
+    <div class="w"><span class="lab">Manifest</span><p style="font-family:var(--mono);font-size:11px">target: "lightplayer/desktop"</p><p style="font-family:var(--mono);font-size:11px">target: "seeed/xiao-esp32-c6"</p><p>Field name unchanged; the settings row calls it Hardware.</p></div>
+    <div class="w"><span class="lab">What ships first (D48)</span><p>The model needs no emulator: the always-a-device refactor, the ${s_} as a device, the board-manifest ${s_}, <code>?on=</code>, the picker.</p><p>${K.emu} arrives later as a third backing behind the same card.</p></div>`;
+}
+
+/* ---------------------------------------------------------------------
+   Controls
+   --------------------------------------------------------------------- */
+function seg(id, items, key, after) {
+  const el = document.getElementById(id);
+  el.innerHTML = Object.entries(items).map(([k, label]) => `<button data-k="${k}" class="${state[key] === k ? 'active' : ''}">${esc(label)}</button>`).join('');
+  el.querySelectorAll('button').forEach(b => b.addEventListener('click', () => { state[key] = b.dataset.k; seg(id, items, key, after); after(); }));
+}
+const STATES = { ready:'Ready', created:'born by open', flashing:'Flashing', booting:'slow boot' };
+seg('c-state', STATES, 'emu', renderAll);
+const SPEEDS = { '1':'1.0×', '0.6':'0.6×', '0.3':'0.3×' };
+(function () {
+  const el = document.getElementById('c-speed');
+  const draw = () => { el.innerHTML = Object.entries(SPEEDS).map(([k,l]) => `<button data-k="${k}" class="${state.speed === Number(k) ? 'active' : ''}">${l}</button>`).join('');
+    el.querySelectorAll('button').forEach(b => b.addEventListener('click', () => { state.speed = Number(b.dataset.k); draw(); renderAll(); })); };
+  draw();
+})();
+document.getElementById('b-synth').addEventListener('click', e => { state.synth = !state.synth; e.target.classList.toggle('active', state.synth); renderAll(); });
+document.getElementById('b-term').addEventListener('click', e => { state.term = !state.term; e.target.classList.toggle('active', state.term); document.documentElement.style.setProperty('--term-h', state.term ? '56px' : '160px'); renderAll(); });
+document.getElementById('b-anim').addEventListener('click', e => { document.documentElement.classList.toggle('no-anim'); e.target.classList.toggle('active'); });
+document.getElementById('w').addEventListener('input', e => { document.documentElement.style.setProperty('--w', e.target.value + 'px'); document.getElementById('wv').textContent = e.target.value + 'px'; renderS1(); renderS1b(); renderS4(); });
+
+const KINDPICK = Object.fromEntries(Object.entries(KIND).map(([k, K]) => [k, `${k} · ${K.name}`]));
+seg('c-kind', KINDPICK, 'kind', renderAll);
+seg('c-add', ADD, 'add', renderS2);
+seg('c-tag', TAG, 'tag', renderS2);
+seg('c-off', OFF, 'off', renderS2);
+seg('c-face', FACES, 'face', renderS3);
+
+function renderAll() { renderS1(); renderS1b(); renderS2(); renderS3(); renderS4(); }
+renderAll();
+if (new URLSearchParams(location.search).has('noanim')) document.documentElement.classList.add('no-anim');
+</script>
+</body>
+</html>
