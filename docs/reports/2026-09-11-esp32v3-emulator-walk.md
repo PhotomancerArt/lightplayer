@@ -45,8 +45,13 @@ two agreeing with each other and with the oracle.**
 
 ### The run
 
-`just walk-esp32v3-emu --keep`, 2026-09-11, on the tree at `095d46b90`,
-ROM-up from a merged 4 MiB image with sha256
+`just walk-esp32v3-emu --keep`, 2026-09-11, on the tree at `095d46b90` — this
+branch, with every commit after that one being documentation. The commit id is
+linked **into** the firmware, so a run on a later commit is a different
+instruction stream and reaches a different frame count in the same 10 s of
+emulated time. **The bytes of the frame do not move**: the same 384 hex
+characters came off IO18 at `e201a2160` (2,437 lit frames), at `9fcbe87fa`
+(3,728) and here (3,772). ROM-up from a merged 4 MiB image with sha256
 `a9f9882dbb30f886818e78f16ea63b5ea532761e031d98888838104c42c39b9a`
 (espflash 3.3.0), quantum 256. The firmware says which tree it is out of its
 own mouth: `commit=095d46b90fe7 dirty=false`.
