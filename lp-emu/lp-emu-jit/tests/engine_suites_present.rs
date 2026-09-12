@@ -80,7 +80,8 @@ fn the_engine_suite_list_is_the_engine_suites() {
     named.sort();
 
     assert_eq!(
-        gated, named,
+        gated,
+        named,
         "the engine-suite list in this file and the `host-wasmtime`-gated files \
          in {} have drifted. Add the new suite (with a line saying what it \
          checks) or fix the name here — the point of the list is that a reader \

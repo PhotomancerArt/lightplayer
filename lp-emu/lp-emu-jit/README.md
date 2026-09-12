@@ -1529,6 +1529,70 @@ import and an exactness argument the size of P2's. Not built.
   goes through the configured allocator, so the host instantiates a one-memory
   shim and imports that.
 
+## What the milestone measured, and how to take a row
+
+**M7 closed at the floor**, by Yona's ruling at G-M7B. The bar was 1× real
+time as a floor, **1.5× to pass and 3× as the target**, at `render-basic` t2
+on an iPhone 16 Pro Max.
+
+**The phone**, 5.5 s emulated, 8 blocks a function, on the M7b P4 head (M7 P7
+measured neutral, so this is the closing number):
+
+| row | the three presses | best |
+|---|---|---:|
+| translated, 8/fn | 0.851 / 0.972 / 1.025 | **1.025×** |
+| translated, 16/fn | 0.882 / 0.918 / 0.943 | 0.943× |
+| `--interpreter` | 0.589 / 0.611 / 0.586 | 0.611× |
+| same-press translated ÷ interpreter | 1.44 / 1.59 / 1.75 | **1.75×** |
+
+So **about 1.0× of real time and about 1.75× of the emulator's own
+interpreter**. The pass bar is not met; the target is not met. The desk on the
+same head reads ≈0.98–1.00× in node/V8 at 16 blocks a function and
+≈0.79–0.82× in bun/JSC at 8. The ladder on the desk in V8 at 16/fn across
+M7b: 0.720 → 0.842 (P1) → 0.854 (P2) → 0.902 (P3) → 0.971 (P4) → ≈0.98 (P5).
+
+Why 3× was not reachable from here, in one line: with translation removed
+entirely the emulator's **own** steady-state wasm is 1.69× on its own, so the
+emulator's loop would have to get 1.78× faster before 3× is arithmetically
+possible. That is the next milestone's brief, not this crate's.
+
+And per image — because `render-basic` is not the whole story (node/V8, 16/fn,
+5,500 ms, one invocation per image, best of three, t2):
+
+| image | translated | `--interpreter` | ratio | mean stay |
+|---|---:|---:|---:|---:|
+| `harness` | 3.062× | 1.143× | **2.68×** | 1354.0 |
+| `boot-idle-memfs` | 2.808× | 5.293× | **0.53×** | 43.7 |
+| `render-basic` | 0.990× | 0.557× | 1.78× | 68.9 |
+| `render-rocaille` | 1.166× | 0.673× | 1.73× | 30.0 |
+
+**A translated core wins where stays are long and loses where they are short
+or where the run is too small to amortize its own translation.** That is the
+77-instruction measurement at the top of this file, showing up as a whole
+image rather than as a region.
+
+### Taking a phone row (DD41)
+
+The phone moved ±10 % on its translated rows and **25 %** on its interpreter
+row within one afternoon on one device — warm-up in one direction, thermal
+throttling in the other. So a row is only a row if it is taken this way:
+
+1. **Best of at least three presses, spaced by minutes.** Presses taken within
+   a minute of each other fall across the board, the interpreter included,
+   which is the device and not the code.
+2. **Quote the sequence, not only the best.** A best-of with no spread beside
+   it hides the thing that matters most about it.
+3. **The cross-session number is the same-press ratio** — translated ÷
+   interpreter from the *same* press — because it divides the thermal state
+   out. Quote it beside the absolute.
+4. **A phase's bar is the desk proxy, not the phone** (Q4 at G-M7B): `bun` at
+   8 blocks a function and `node` at 16, interleaved, **one invocation**, best
+   of N, load average quoted. The phone confirms direction, not the third
+   decimal.
+5. **Check the build stamp.** `bench-web.sh` refuses to stage an `emu.wasm`
+   older than HEAD, because the manifest stamps HEAD's sha at staging time and
+   M7b P5 lost an A/B to two "different" builds that were the same bytes.
+
 ## What this crate is not
 
 Not an emulator, not a host, and not a policy. It owns no bus, no machine and no
