@@ -1359,6 +1359,37 @@ SYSTIMER stayed at 11,626,424 through this phase and was the whole of the next
 one — see "The published-read path" above, which takes the census to
 5,881,883.
 
+## What removing the undecodable class was worth (M7b P6, reverted)
+
+`LP_EMU_JIT_EXITS`'s per-`why` split (M7b F6) named the class before anything
+was built for it: **710,536 exits, 141 sites**, all of it atomics (53 %) and
+the CSR pair a critical section writes to `mstatus`/`mepc` (38 %), plus `mret`
+(9 %) — no `wfi` in the transcript at all. M7b P6 built the obvious next step
+— hand an undecodable block end to `step_one` (the interpreter's own
+`step_once`) and resolve where it lands, instead of leaving the stay —
+and it worked exactly: **710,536 → 1** exit, mean stay 68.9 → 75.2
+instructions, all eight free-oracle cells and all 24 browser identity rows
+byte-identical.
+
+**And it was worth −1.0 % in node/V8 and −1.1 % in bun/JSC at the milestone's
+5.5 s bar.** Every exit removed costs one site's worth of module: 15,896
+sites × 328 bytes (≈280 of it the flush and reload of ~20 live registers
+`step_one` needs, since it runs an arbitrary instruction) is +6.5 % of the
+module, +54 ms of translation — paid once, on the wrong side of a 5.5 s
+bound. The crossover where the mechanism starts paying for itself is
+somewhere around 15–20 emulated seconds; this milestone's bar is 5.5.
+**Reverted on Yona's ruling (E10)** — the census, the tests that hold against
+main, and this paragraph are what stayed. See #726 and #730, and the ADR's
+decisions/history section.
+
+The indirect-miss half of the same census needed no new mechanism: 91 % of
+misses are P1's own module boundary (DD30) — a `jalr` into the other module,
+an immediate re-entry, 283 instructions retired between them, i.e.
+effectively none. The remaining 9 % are a real coverage gap the walk never
+reached (2.47 M interpreted instructions), with three addresses fourteen
+bytes apart — `0x42120f96`/`…f9e`/`…fae` — accounting for 863 k of it on
+their own. Reported, not acted on; a seeding question for whoever owns JD6.
+
 ## What bounds a slice, and what a slice boundary costs (M7b P4)
 
 `Esp32C6Machine::run_until` runs the hart in slices. A slice's length is the

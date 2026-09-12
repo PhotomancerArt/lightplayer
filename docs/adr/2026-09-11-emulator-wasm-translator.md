@@ -584,6 +584,20 @@ it will find.
   worse and 6.2 % more crosses, because guest address order already is the
   trace. The number is kept in `lp-emu-jit/README.md`; the implementation is
   not.
+- **Handing an undecodable block end to `step_one` instead of leaving the
+  stay** (M7b P6, #726). Implemented, measured, reverted. The exit class it
+  targeted (atomics and the `mstatus`/`mepc` CSR pair a critical section
+  writes, no `wfi`) is 710,536 exits removed to exactly one, and the removal
+  is exact by construction — 8/8 free-oracle cells byte-identical — but each
+  removed exit costs one site's worth of module (15,896 sites × 328 bytes,
+  +6.5 %), and on the milestone's 5.5 s desk bar that is **−1.0 % in node/V8
+  and −1.1 % in bun/JSC**: the phase bar is a fixed emulated duration, and the
+  phone pays the bytes on every run whether or not the run is long enough to
+  earn them back. The crossover where the extra module size stops costing
+  more than the removed exits save is around 15–20 emulated seconds. Reverted
+  on Yona's ruling; the census diagnostic and the number are kept (M7b F6,
+  #730) because the loop-redesign milestone may find the trade looks
+  different once its own bound is not 5.5 s.
 - **One host import per entry point** instead of a shared function table.
   Rejected: the table works in every target engine and is the same shape
   natively. §6.
