@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# Copy the fw-browser engine sidecar into a served pkg/ dir under
-# CONTENT-HASHED names, and (re)write pkg/engine-manifest.json pointing at
-# them.
+# Copy the fw-browser engine sidecar — and the ESP32-C6 emulator module
+# beside it, when there is one — into a served pkg/ dir under CONTENT-HASHED
+# names, and (re)write pkg/engine-manifest.json pointing at them.
 #
 # `just studio-fw-browser-sidecar` (wasm-bindgen) always emits UNHASHED
 # names — fw_browser.js / fw_browser_bg.wasm — into its own sidecar dir;
@@ -22,6 +22,14 @@
 # public dir — a sidecar rebuild mid-serve gets a NEW hash, so old hashed
 # copies are removed first, or they would accumulate one stale pair per
 # rebuild for the life of the server.
+#
+# The emulator module (`lp_emu_esp32c6.wasm`, laid down by `just
+# studio-emu-sidecar`) rides the same hashing for the same reason — it is
+# multi-MB and immutable. Its ABSENCE is not an error: the story build and
+# the standalone smoke pages do not need it, and a tree that has never run
+# `just emu-c6-wasm` still serves Studio. Missing means no key in the
+# manifest, which is exactly what the emu row's "only when a module exists"
+# rule (D21) reads.
 #
 # Usage: scripts/sync-engine-sidecar.sh <sidecar_dir> <out_pkg_dir>
 set -euo pipefail
@@ -81,14 +89,27 @@ wasm_hash="$(content_hash "${wasm_src}")"
 js_name="fw_browser-${js_hash}.js"
 wasm_name="fw_browser_bg-${wasm_hash}.wasm"
 
+emu_src="${sidecar_dir}/lp_emu_esp32c6.wasm"
+emu_name=""
+if [[ -f "${emu_src}" ]]; then
+    emu_name="lp_emu_esp32c6-$(content_hash "${emu_src}").wasm"
+fi
+
 # Idempotence first: the `studio-dev` loop calls this every second, and on
 # the 3599 seconds out of 3600 when nothing was rebuilt it must not touch
 # the served dir at all — the sweep below opens a brief no-file window that
 # a page fetch could land in, and re-copying an 8 MB wasm every second is
 # pure churn besides.
+emu_is_current=1
+if [[ -n "${emu_name}" ]]; then
+    [[ -f "${out_pkg_dir}/${emu_name}" ]] \
+        && grep -q "${emu_name}" "${out_pkg_dir}/engine-manifest.json" 2>/dev/null \
+        || emu_is_current=0
+fi
 if [[ -f "${out_pkg_dir}/${js_name}" && -f "${out_pkg_dir}/${wasm_name}" ]] \
     && grep -q "${wasm_name}" "${out_pkg_dir}/engine-manifest.json" 2>/dev/null \
-    && grep -q "${js_name}" "${out_pkg_dir}/engine-manifest.json" 2>/dev/null; then
+    && grep -q "${js_name}" "${out_pkg_dir}/engine-manifest.json" 2>/dev/null \
+    && [[ "${emu_is_current}" == 1 ]]; then
     exit 0
 fi
 
@@ -98,10 +119,20 @@ rm -f "${out_pkg_dir}"/fw_browser-*.js "${out_pkg_dir}"/fw_browser_bg-*.wasm
 cp "${js_src}" "${out_pkg_dir}/${js_name}"
 cp "${wasm_src}" "${out_pkg_dir}/${wasm_name}"
 
+emu_key=""
+if [[ -n "${emu_name}" ]]; then
+    # Swept on the same rule and for the same reason as the pair above: a
+    # rebuilt module gets a new hash, and `studio-dev` runs this every
+    # second for the life of the server.
+    rm -f "${out_pkg_dir}"/lp_emu_esp32c6-*.wasm
+    cp "${emu_src}" "${out_pkg_dir}/${emu_name}"
+    emu_key=",\"emu_esp32c6_wasm\":\"/pkg/${emu_name}\",\"emu_wasm_bytes\":$(wc -c < "${emu_src}" | tr -d '[:space:]')"
+fi
+
 # Plain byte count: this is the raw .wasm on disk, before any gzip/brotli
 # precompression (owned elsewhere) — the number the shell loader's progress
 # bar wants is what a streaming fetch actually receives before decoding.
 wasm_bytes="$(wc -c < "${wasm_src}" | tr -d '[:space:]')"
 cat > "${out_pkg_dir}/engine-manifest.json" <<EOF
-{"fw_browser_js":"/pkg/${js_name}","fw_browser_wasm":"/pkg/${wasm_name}","wasm_bytes":${wasm_bytes}}
+{"fw_browser_js":"/pkg/${js_name}","fw_browser_wasm":"/pkg/${wasm_name}","wasm_bytes":${wasm_bytes}${emu_key}}
 EOF

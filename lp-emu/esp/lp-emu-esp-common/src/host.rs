@@ -276,6 +276,84 @@ impl ByteSource for NullSource {
     }
 }
 
+/// The host side of a [`QueueSource`]: push bytes in from wherever the host
+/// lives, at whatever moment it has them.
+///
+/// Cloneable and `Send`, so the pusher and the machine can be different
+/// threads — or, in a wasm build, the same one either side of an exported
+/// call.
+#[derive(Clone, Debug, Default)]
+pub struct QueueHandle(Arc<Mutex<VecDeque<u8>>>);
+
+impl QueueHandle {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Host → device. The bytes are delivered to the guest at whichever
+    /// slice boundary the peripheral next polls its source at.
+    pub fn push(&self, bytes: &[u8]) {
+        self.0
+            .lock()
+            .expect("host queue poisoned")
+            .extend(bytes.iter().copied());
+    }
+
+    /// How many bytes the guest has not taken yet.
+    pub fn pending(&self) -> usize {
+        self.0.lock().expect("host queue poisoned").len()
+    }
+
+    /// Drop everything undelivered — a host that detached the cable is not
+    /// still holding bytes for the port it just closed.
+    pub fn clear(&self) {
+        self.0.lock().expect("host queue poisoned").clear();
+    }
+}
+
+/// A **live** in-process source: [`TcpHost`]'s inbound half with the socket
+/// cut off.
+///
+/// It exists for a host that is in the same process as the machine and has
+/// no socket to be on — the wasm tab host, which pushes bytes between
+/// [`run_until`] slices through a [`QueueHandle`]. `is_live()` is `true`
+/// and `next_ready()` is `None` for exactly the reason
+/// [`ByteSource::is_live`] documents: nothing here can say ahead of guest
+/// time when a byte will arrive, so the peripheral that owns it has to keep
+/// its own poll schedule. A [`ScriptedSource`] could not stand in: a script
+/// answers `is_live() == false`, and the USB block would then believe every
+/// byte it will ever see is already on a timeline.
+///
+/// Determinism is unchanged by this type and not provided by it: a run fed
+/// from outside guest time is a run whose ordering is the host's, exactly
+/// as a socket run is (`lp-emu/esp/README.md` §Determinism).
+pub struct QueueSource(QueueHandle);
+
+impl QueueSource {
+    /// The pair: the source to install on the machine, and the handle the
+    /// host keeps.
+    pub fn new() -> (Self, QueueHandle) {
+        let handle = QueueHandle::new();
+        (Self(handle.clone()), handle)
+    }
+
+    /// A source over a handle the caller already has — a second consumer of
+    /// one queue, or a handle restored from somewhere.
+    pub fn over(handle: QueueHandle) -> Self {
+        Self(handle)
+    }
+}
+
+impl ByteSource for QueueSource {
+    fn next_byte(&mut self, _now: Cycles) -> Option<u8> {
+        self.0.0.lock().expect("host queue poisoned").pop_front()
+    }
+
+    fn is_live(&self) -> bool {
+        true
+    }
+}
+
 /// One step of a [`ScriptedSource`].
 #[derive(Clone, Debug)]
 enum Step {
@@ -795,6 +873,32 @@ impl ByteSource for TcpSource {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The live in-process source delivers in order and keeps delivering
+    /// after the machine has already read it dry — which is the whole
+    /// difference between it and a script.
+    #[test]
+    fn a_queue_source_is_live_and_takes_bytes_pushed_between_reads() {
+        let (mut source, handle) = QueueSource::new();
+        assert!(source.is_live(), "the USB block must keep polling this one");
+        assert_eq!(source.next_ready(), None, "nothing is on a timeline");
+        assert_eq!(source.next_byte(0), None, "an empty queue has no byte");
+
+        handle.push(b"AB");
+        assert_eq!(handle.pending(), 2);
+        assert_eq!(source.next_byte(10), Some(b'A'));
+        // Pushed between two reads, at no cycle in particular: still in
+        // order behind what is already queued.
+        handle.push(b"C");
+        assert_eq!(source.next_byte(20), Some(b'B'));
+        assert_eq!(source.next_byte(30), Some(b'C'));
+        assert_eq!(source.next_byte(40), None);
+
+        handle.push(b"dropped");
+        handle.clear();
+        assert_eq!(handle.pending(), 0);
+        assert_eq!(source.next_byte(50), None, "a cleared queue has nothing");
+    }
 
     #[test]
     fn a_tcp_host_replays_its_backlog_and_reads_what_the_client_sends() {

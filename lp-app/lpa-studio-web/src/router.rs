@@ -821,6 +821,12 @@ pub(crate) fn lens_route(view: &UiStudioView) -> Option<StudioRoute> {
     // instead of failing at an address.
     let on = match transport {
         lpa_studio_core::LinkTransport::Sim => Some(DeviceHint::Sim),
+        // No hint yet. `?on=emu` is the emu's kind hint under the same rule
+        // as the sim's (D1/D14), and it lands with the picker row that can
+        // produce an emu lens in the first place — until then an emu lens
+        // cannot be reached, so writing a hint nothing resolves would put a
+        // dead address in the URL.
+        lpa_studio_core::LinkTransport::Emu => None,
         lpa_studio_core::LinkTransport::Serial => base_mac.clone().map(DeviceHint::Mac),
     };
     // A TRANSIENT view session binds its example's bare address (examples

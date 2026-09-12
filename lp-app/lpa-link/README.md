@@ -257,8 +257,9 @@ Two adapter limits worth knowing:
 
 A worker link's provider kind names itself `sim` through
 `LinkProviderKind::transport_label()` (host process: `host`, the serial kinds
-and the fake: `USB`). Nothing is "not a device" there any more — a runtime is
-reached over a channel like anything else.
+and the fake: `USB`, an emulated board in this tab: `emu`). Nothing is "not a
+device" there any more — a runtime is reached over a channel like anything
+else.
 
 End-to-end host coverage lives in `device_link::tests`: a real `Roster` driven
 through a real `Link` over the scripted fake device, including the mid-stream

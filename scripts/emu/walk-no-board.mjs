@@ -15,6 +15,13 @@
 // wants Chrome, a dev server, a packaged firmware and an emulator. It is a
 // recipe an agent runs.
 //
+// TWO BACKINGS, ONE WALK. By default the board is held by a native `lp-cli
+// emu serve` on a socket. With `--tab` (or `WALK_BACKING=tab`) it is held by
+// a Worker inside the page, and NO SERVER IS STARTED AT ALL — same six
+// steps, same page, same assertions, one less process on the desk. That is
+// the whole claim of the tab backing, so it is worth being able to run the
+// same instrument both ways and compare the two reports face for face.
+//
 // The board starts `kind=rom-up` with an empty flash file — the mask ROM
 // finds no image at the reset vector, which is a blank chip, and it is the
 // only board kind Studio's esptool-js flow can actually write (DD30/DD34).
@@ -33,7 +40,7 @@ import process from "node:process";
 import { execSync } from "node:child_process";
 
 import { StudioDriver } from "./studio-driver.mjs";
-import { boardRegistry, startDoor, stopDoor, studioUrlFor } from "./emulated-lane.mjs";
+import { liveRegistry, startDoor, stopDoor, studioUrlFor } from "./emulated-lane.mjs";
 
 const ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), "../..");
 
@@ -57,20 +64,45 @@ const BOARD_MODEL = process.env.WALK_BOARD_MODEL ?? "XIAO ESP32-C6";
 /// through the ROM's own download console and then the guest boots it.
 const FLASH_DEADLINE_MS = 900_000;
 const STEP_DEADLINE_MS = 180_000;
+/// How long Studio itself may take to arrive, which is a fact about a
+/// hundred-megabyte debug bundle and NOT about the board.
+///
+/// It is separate from `STEP_DEADLINE_MS` because conflating them makes a
+/// slow download look like a board that never answered: the first step's
+/// deadline was spent watching a progress bar, the screenshot said `Loading
+/// Studio…`, and the verdict said the card never offered `It's connected`
+/// (measured 2026-09-10 on the tab lane, with the machine otherwise busy).
+/// Wait for the app to exist, then start timing the board.
+const STUDIO_LOAD_DEADLINE_MS = 420_000;
 
 function args() {
-  const out = { shots: null, out: null, keepOpen: false, board: "c6-a" };
+  const tabByDefault = (process.env.WALK_BACKING ?? "") === "tab";
+  const out = {
+    shots: null,
+    out: null,
+    keepOpen: false,
+    board: tabByDefault ? "tab-c6" : "c6-a",
+    tab: tabByDefault,
+  };
+  let boardNamed = false;
   const argv = process.argv.slice(2);
   for (let i = 0; i < argv.length; i += 1) {
     if (argv[i] === "--shots") out.shots = argv[++i];
     else if (argv[i] === "--out") out.out = argv[++i];
     else if (argv[i] === "--keep-open") out.keepOpen = true;
-    else if (argv[i] === "--board") out.board = argv[++i];
-    else {
-      console.error(`usage: node scripts/emu/walk-no-board.mjs [--shots <dir>] [--out <dir>] [--keep-open]`);
+    else if (argv[i] === "--tab") out.tab = true;
+    else if (argv[i] === "--board") {
+      out.board = argv[++i];
+      boardNamed = true;
+    } else {
+      console.error(
+        `usage: node scripts/emu/walk-no-board.mjs [--tab] [--shots <dir>] [--out <dir>] [--keep-open]`,
+      );
       process.exit(2);
     }
   }
+  // The tab backing hosts D20's one board, and its id is not the door's.
+  if (out.tab && !boardNamed) out.board = "tab-c6";
   out.shots ??= path.join(ROOT, "target", "walk-no-board", "shots");
   out.out ??= path.join(ROOT, "target", "walk-no-board");
   return out;
@@ -176,25 +208,33 @@ async function main() {
   }
 
   const stateDir = path.join(options.out, "state");
-  const door = await startDoor({
-    root: ROOT,
-    id: "walk",
-    boards: [`${options.board}=blank,kind=rom-up`],
-    stateDir,
-    consoleDir: path.join(options.out, "console"),
-    logFile: path.join(options.out, "serve.log"),
-    fresh: true,
-  });
+  // With `--tab` there is no door: the board is a Worker in the page, and
+  // the point of the lane is that nothing else is running.
+  const door = options.tab
+    ? null
+    : await startDoor({
+        root: ROOT,
+        id: "walk",
+        boards: [`${options.board}=blank,kind=rom-up`],
+        stateDir,
+        consoleDir: path.join(options.out, "console"),
+        logFile: path.join(options.out, "serve.log"),
+        fresh: true,
+      });
 
   const sink = startSink();
   await new Promise((resolve) => sink.server.listen(0, "127.0.0.1", resolve));
   const sinkUrl = `http://127.0.0.1:${sink.server.address().port}/ingest`;
-  const url = studioUrlFor({ studioPort: port, doorAddr: door.addr, sinkUrl });
+  const url = studioUrlFor({ studioPort: port, doorAddr: door?.addr ?? null, sinkUrl });
 
   console.log("");
   console.log("THE WALK WITH NO BOARD");
   console.log(`  emulated board   ${options.board}=blank,kind=rom-up  (nothing is plugged into anything)`);
-  console.log(`  door             http://${door.addr}/boards   (pid ${door.pid})`);
+  console.log(
+    door
+      ? `  door             http://${door.addr}/boards   (pid ${door.pid})`
+      : `  backing          a Worker in the page (?emu=tab) — no server anywhere`,
+  );
   console.log(`  studio           http://localhost:${port}/`);
   console.log(`  capture sink     ${sinkUrl}`);
   console.log(`  the page         ${url}`);
@@ -234,7 +274,28 @@ async function main() {
   try {
     await driver.navigate(url);
     const boards = await driver.awaitShim();
-    console.log(`  shim installed over ${boards.length} board(s): ${boards.map((b) => `${b.boardId} (${b.mac})`).join(", ")}\n`);
+    console.log(`  shim installed over ${boards.length} board(s): ${boards.map((b) => `${b.boardId} (${b.mac})`).join(", ")}`);
+
+    // The shim installs from an inline script, long before the app's wasm has
+    // finished downloading — so this is where Studio's own arrival is waited
+    // for, under its own deadline. Everything after it is about the board.
+    const appUp = await driver.waitFor(
+      `(document.querySelector('#main')?.innerText || '').length > 0`,
+      { timeoutMs: STUDIO_LOAD_DEADLINE_MS, what: "Studio to finish loading" },
+    );
+    if (!appUp) {
+      throw new Error(
+        `Studio did not finish loading within ${STUDIO_LOAD_DEADLINE_MS / 1000} s ` +
+          `— the page is still on the shell loader, which is a bundle problem and not a board one`,
+      );
+    }
+    // An instrument that lies about its own conditions is worse than none:
+    // a hidden page throttles its timers and its Workers, so a walk run in
+    // one measures the throttle. Say which it was, every time.
+    const visibility = await driver.evaluate(
+      `JSON.stringify({ hidden: document.hidden, state: document.visibilityState })`,
+    );
+    console.log(`  studio is up — page visibility: ${visibility}\n`);
 
     // 1. FLASH — Studio's own esptool-js flow, into a chip with nothing on it.
     await step("flash", "Studio flashes the packaged firmware into a blank board", async () => {
@@ -264,15 +325,17 @@ async function main() {
                   return !t.includes('Flashing firmware') && !t.includes('needs firmware'); })()`,
         { timeoutMs: FLASH_DEADLINE_MS, what: "the flash to finish" },
       );
-      // …and then the DOOR, which is the only party that can see the reset
-      // vector. `flash` answers "does an image magic sit there", recomputed
-      // per flush (DD34), so `loaded` means what Studio wrote is what the ROM
-      // will jump to.
-      const after = await boardRegistry(door.addr);
+      // …and then the BACKING, which is the only party that can see the
+      // reset vector. `flash` answers "does an image magic sit there",
+      // recomputed rather than cached (DD34), so `loaded` means what Studio
+      // wrote is what the ROM will jump to. The door recomputes it per
+      // flush; the tab's worker recomputes it per `stats`.
+      const where = door ? "door" : "tab";
+      const after = await liveRegistry({ doorAddr: door?.addr ?? null, driver });
       const board = after.find((b) => b.id === options.board);
-      console.log(`  door: ${board.id} flash=${board.flash} boot=${board.boot} reboots=${board.reboots}`);
+      console.log(`  ${where}: ${board.id} flash=${board.flash} boot=${board.boot} reboots=${board.reboots}`);
       if (board.flash !== "loaded") {
-        throw new Error(`the flash flow finished but the door still reports flash=${board.flash}`);
+        throw new Error(`the flash flow finished but the ${where} still reports flash=${board.flash}`);
       }
     });
 
@@ -396,7 +459,7 @@ async function main() {
     fatal = error;
   }
 
-  const registry = await boardRegistry(door.addr).catch(() => null);
+  const registry = await liveRegistry({ doorAddr: door?.addr ?? null, driver }).catch(() => null);
   const consoleErrors = driver.consoleLines().filter((l) => l.startsWith("[error]") || l.startsWith("[exception]"));
 
   // The trace, and a per-step index into it.
@@ -406,7 +469,8 @@ async function main() {
     JSON.stringify(
       {
         board: options.board,
-        door: door.addr,
+        backing: door ? "door" : "tab",
+        door: door?.addr ?? null,
         url,
         project: WALK_PROJECT,
         model: BOARD_MODEL,
@@ -433,7 +497,7 @@ async function main() {
     console.log(`  ${s.ok ? "✓" : "✗"} ${s.name.padEnd(9)} ${s.recordCount ?? s.records.length} record(s)   ${path.basename(s.shot)}`);
   }
   if (registry) {
-    console.log(`\n  door's live registry: ${registry.map((b) => `${b.id} flash=${b.flash} boot=${b.boot} reboots=${b.reboots} state=${b.state}`).join(" · ")}`);
+    console.log(`\n  the ${door ? "door" : "tab"}'s live registry: ${registry.map((b) => `${b.id} flash=${b.flash} boot=${b.boot} reboots=${b.reboots} state=${b.state}`).join(" · ")}`);
   }
   if (consoleErrors.length) {
     console.log("\n  page console errors:");
@@ -441,21 +505,28 @@ async function main() {
   }
   console.log(`\n  trace  → ${path.join(options.out, "walk.jsonl")}  (${sink.records.length} records)`);
   console.log(`  steps  → ${path.join(options.out, "walk-steps.json")}`);
-  console.log(`  board console → ${path.join(options.out, "console", `${options.board}.console.log`)}`);
+  if (door) {
+    console.log(`  board console → ${path.join(options.out, "console", `${options.board}.console.log`)}`);
+  }
 
   if (!options.keepOpen) {
     await driver.close();
-    stopDoor(door);
+    if (door) stopDoor(door);
     sink.server.close();
-  } else {
+  } else if (door) {
     console.log(`\n  --keep-open: the door (pid ${door.pid}) is still up; the browser is still attached.`);
+  } else {
+    console.log(`\n  --keep-open: the browser is still attached, and the board is still in it.`);
   }
 
   if (fatal) {
     console.error(`\nThe walk did not finish: ${fatal.message}`);
     process.exit(1);
   }
-  console.log("\n✓ the walk finished: flash → connect → identify → upload → detach → re-attach, with no board.");
+  console.log(
+    `\n✓ the walk finished: flash → connect → identify → upload → detach → re-attach, ` +
+      `with no board${door ? "" : " and no server"}.`,
+  );
 }
 
 await main();

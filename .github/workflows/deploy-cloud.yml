@@ -143,6 +143,12 @@ jobs:
         run: |
           rustup target add wasm32-unknown-unknown
           rustup target add ${{ env.RISC_V_TARGET }}
+          # wasm32-wasip1 is the ESP32-C6 emulator module Studio now ships
+          # as a sidecar (`just studio-emu-sidecar`, called by
+          # `studio-web-build`). The recipe installs it itself if it is
+          # missing; it is named here beside the others so the toolchain
+          # this job needs is readable in one place.
+          rustup target add wasm32-wasip1
 
       # The bundle ships a firmware image per chip (lp-fw/builds/served.json)
       # and two of the three are Xtensa, so both build targets are named
