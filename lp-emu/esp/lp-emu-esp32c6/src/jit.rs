@@ -40,10 +40,10 @@ use lp_emu_jit::blocks::BlockSet;
 use lp_emu_jit::discover::{DiscoverStats, Discovered, discover, discover_from};
 use lp_emu_jit::dispatch::{BODY_BUDGET, emit_module, target_table_bytes, write_target_tables};
 use lp_emu_jit::host::{
-    self, EXCHANGE_LEN, FAST_ARMED, FAST_LEN, FAST_SERVED, FAST_WORDS, FLAG_AFTER_STORE,
-    FLAG_PENDING, FLAG_SLICE_ENDED, HostOps, MMIO_LEAVE_AFTER, MMIO_OK, MMIO_PENDING, MMIO_REFUSED,
-    MMIO_SLICE_ENDED, MmioLoad, MmioStore, PERM_ENTRIES, PERM_SHIFT, Polled, STEP_CONTINUE,
-    STEP_SLICE_ENDED, StepOne, load_kind, store_kind,
+    self, EXCHANGE_LEN, FAST_ARMED, FAST_LEN, FAST_MAX_READS, FAST_SERVED, FAST_WORDS,
+    FLAG_AFTER_STORE, FLAG_PENDING, FLAG_SLICE_ENDED, HostOps, MMIO_LEAVE_AFTER, MMIO_OK,
+    MMIO_PENDING, MMIO_REFUSED, MMIO_SLICE_ENDED, MmioLoad, MmioStore, PERM_ENTRIES, PERM_SHIFT,
+    Polled, STEP_CONTINUE, STEP_SLICE_ENDED, StepOne, load_kind, store_kind,
 };
 use lp_emu_jit::translate::{Emit, Emitted, FastRead, FastReads, FastSource, Layout};
 
@@ -83,7 +83,7 @@ use crate::memmap;
 use crate::periph::systimer::{self, Systimer};
 use lp_riscv_emu::mach::{MachineHart, SliceEnd};
 
-use crate::jit_record::{CallRec, EntryRec, Recorder};
+use crate::jit_record::{CallRec, EntryRec, FastAfter, Recorder};
 
 /// Read the guest word at `pc` out of the arena, without touching the bus.
 ///
@@ -1096,9 +1096,13 @@ impl C6Ops {
     /// unit or a `unit0_load` that moves it changes nothing this path
     /// believes. The latch moves in exactly one place — `write_word`'s
     /// `unit_op` arm — and only a store reaches it.
-    fn republish_systimer(&mut self) {
+    ///
+    /// It answers what it did, because a recording has to carry it: the block
+    /// is host-maintained state that translated code reads, and a replay's
+    /// canned import answers maintain nothing (F5, `jit_record`'s own docs).
+    fn republish_systimer(&mut self) -> FastAfter {
         if self.fast.is_null() {
-            return;
+            return FastAfter::LeftAlone;
         }
         let index = self.systimer_index;
         let words = {
@@ -1112,7 +1116,7 @@ impl C6Ops {
         };
         let Some(words) = words else {
             self.set_fast_armed(false);
-            return;
+            return FastAfter::Disarmed;
         };
         for (i, w) in words.iter().enumerate() {
             // SAFETY: see `set_fast_armed` — the same `FAST_LEN` bytes.
@@ -1124,6 +1128,29 @@ impl C6Ops {
             }
         }
         self.set_fast_armed(true);
+        FastAfter::Armed(self.fast_words())
+    }
+
+    /// The published words as they now stand, read back out of the block
+    /// rather than re-derived from what was just written.
+    ///
+    /// Read back, and all [`FAST_MAX_READS`] of them, because what a replay
+    /// owes the module is **the bytes the module reads** — including any slot
+    /// this chip's [`systimer_reads_at`] table does not publish, which stays
+    /// at whatever the arena held and which a re-derivation would invent.
+    fn fast_words(&self) -> [u32; FAST_MAX_READS] {
+        let mut out = [0u32; FAST_MAX_READS];
+        for (i, w) in out.iter_mut().enumerate() {
+            // SAFETY: see `set_fast_armed` — the same `FAST_LEN` bytes, of
+            // which `FAST_WORDS + 4 * FAST_MAX_READS` is within.
+            *w = unsafe {
+                self.fast
+                    .add(FAST_WORDS as usize + 4 * i)
+                    .cast::<u32>()
+                    .read_unaligned()
+            };
+        }
+        out
     }
 
     /// Reads the published words have served since the machine was built.
@@ -1255,6 +1282,9 @@ impl HostOps for C6Ops {
                 access: kind,
                 value: 0,
                 result: (u64::from(out.status) << 32) | u64::from(out.value),
+                // A load never republishes: the latch the block mirrors moves
+                // in `write_word`'s `unit_op` arm, which only a store reaches.
+                fast: FastAfter::LeftAlone,
             });
         }
         out
@@ -1288,9 +1318,11 @@ impl HostOps for C6Ops {
         // Republishing on every store the block sees, rather than only on
         // `unit0_op`, costs one compare and removes a case analysis from the
         // correctness argument (M7b P3).
-        if address.wrapping_sub(self.systimer_window.0) < self.systimer_window.1 {
-            self.republish_systimer();
-        }
+        let fast = if address.wrapping_sub(self.systimer_window.0) < self.systimer_window.1 {
+            self.republish_systimer()
+        } else {
+            FastAfter::LeftAlone
+        };
         let out = match written {
             // The store retired, so the hart polls — here, in the same
             // crossing, rather than by ending the stay (M7b P2).
@@ -1312,6 +1344,7 @@ impl HostOps for C6Ops {
                 access: kind,
                 value,
                 result: (u64::from(out.status) << 32) | u64::from(out.pc),
+                fast,
             });
         }
         out
@@ -1328,6 +1361,9 @@ impl HostOps for C6Ops {
                 access: 0,
                 value: 0,
                 result: (u64::from(out.status) << 32) | u64::from(out.pc),
+                // A poll runs the interpreter's three lines and nothing else;
+                // it cannot reach the block.
+                fast: FastAfter::LeftAlone,
             });
         }
         out
@@ -2045,11 +2081,18 @@ impl JitCore {
         // never takes the incremental path (`install_incremental`).
         let m = &mut self.mods[0];
         let wasm = m.wasm.take().unwrap_or_default();
+        // `None` when this machine published nothing, which is what a null
+        // `C6Ops::fast` says: the module holds no `FastReads` table and never
+        // reads the block, so a replay has nothing to reproduce (F5). The
+        // offset is the arena's own, and on a native host the arena starts at
+        // wasm offset zero — the same reason `exchange_at` is passed bare.
+        let fast_at = (!m.core.ops_mut().fast.is_null()).then_some(m.at.fast_at);
         let out = r.finish(
             &wasm,
             bus.guest_arena(),
             m.at.pages,
             m.at.exchange_at,
+            fast_at,
             m.report.fn_blocks,
             m.report.blocks,
         );
