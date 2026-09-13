@@ -99,6 +99,21 @@ install-wasm32-target:
         echo "Target {{ wasm32_target }} already installed"; \
     fi
 
+# The emulator's target, which is NOT wasm32-unknown-unknown: the C6 machine
+# is a `std` binary with a WASI preview1 shim over it (no wasm-bindgen, no
+# entry point of its own), so the tab module and the bench rig both build for
+# wasip1. See scripts/emu/build-tab-wasm.sh.
+
+wasip1_target := "wasm32-wasip1"
+
+install-wasip1-target:
+    @if ! rustup target list --installed | grep -q "^{{ wasip1_target }}$"; then \
+        echo "Installing target {{ wasip1_target }}..."; \
+        rustup target add {{ wasip1_target }}; \
+    else \
+        echo "Target {{ wasip1_target }} already installed"; \
+    fi
+
 # ============================================================================
 # Web demo (GLSL compiler in browser)
 # ============================================================================
@@ -316,6 +331,28 @@ studio-codemirror-bundle:
     npm ci
     npm run build
 
+# The ESP32-C6 machine as the module a Studio tab hosts: the wasip1 CLI
+# binary with the `emu_*` slice ABI added to its export list at link time.
+# The script verifies every export and fails the build if one is missing.
+emu-c6-wasm *args: install-wasip1-target
+    ./scripts/emu/build-tab-wasm.sh {{ args }}
+
+# Lay the emulator module down beside the fw-browser pair, the way
+# `studio-fw-browser-sidecar` lays its own artifacts down. Called by every
+# recipe that calls that one; `sync-engine-sidecar.sh` is what content-hashes
+# it into a served pkg/ and names it in engine-manifest.json.
+studio-emu-sidecar profile="debug": install-wasip1-target
+    #!/usr/bin/env bash
+    set -euo pipefail
+    just emu-c6-wasm
+    out_dir="{{ studio_assets_dir }}/{{ profile }}/pkg"
+    mkdir -p "${out_dir}"
+    # One artifact for every profile (D17): the module is a release build
+    # whatever Studio itself is built as — a debug emulator would be too slow
+    # to be a board, and this is the SAME bytes the deploy ships.
+    cp target/wasm32-wasip1/release/lp-emu-esp32c6.wasm "${out_dir}/lp_emu_esp32c6.wasm"
+    echo "Artifacts: ${out_dir}/lp_emu_esp32c6.wasm"
+
 studio-fw-browser-sidecar profile="debug": install-wasm32-target
     #!/usr/bin/env bash
     set -euo pipefail
@@ -383,6 +420,7 @@ studio-web-dev-build: install-wasm32-target studio-firmware-package-served
     #!/usr/bin/env bash
     set -euo pipefail
     just studio-fw-browser-sidecar debug
+    just studio-emu-sidecar debug
     echo "Building lpa-studio-web with dx for wasm32 debug with stories..."
     rm -rf target/dx/lpa-studio-web/debug/web/public
     dx build --web -p lpa-studio-web --features stories --debug-symbols false
@@ -393,6 +431,7 @@ studio-web-story-build: install-wasm32-target
     #!/usr/bin/env bash
     set -euo pipefail
     just studio-fw-browser-sidecar debug
+    just studio-emu-sidecar debug
     echo "Building lpa-studio-web with dx for story capture..."
     rm -rf target/dx/lpa-studio-web/release/web/public
     dx build --web -p lpa-studio-web --features stories --release --debug-symbols false
@@ -583,6 +622,7 @@ studio-dev: install-wasm32-target studio-firmware-package-served
     #!/usr/bin/env bash
     set -euo pipefail
     just studio-fw-browser-sidecar debug
+    just studio-emu-sidecar debug
     # STUDIO_BENCH=1 (via `just studio-dev-bench`) serves from the reserved
     # bench block so the standing WebSerial grant covers the origin — see
     # the serial-grant recipe. Hardware walks only; ordinary dev hashes.
@@ -701,6 +741,7 @@ studio-web-build: install-wasm32-target studio-firmware-package-served
     #!/usr/bin/env bash
     set -euo pipefail
     just studio-fw-browser-sidecar release
+    just studio-emu-sidecar release
     echo "Building lpa-studio-web with dx for wasm32 release (stories bundled for the in-app design library)..."
     rm -rf target/dx/lpa-studio-web/release/web/public
     dx build --web -p lpa-studio-web --features stories --release --debug-symbols false

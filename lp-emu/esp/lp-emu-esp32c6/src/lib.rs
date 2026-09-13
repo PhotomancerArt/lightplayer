@@ -73,6 +73,10 @@ pub mod regs;
 pub mod rom;
 pub mod slice_census;
 pub mod snapshot;
+/// The `emu_*` slice ABI a JavaScript host drives the machine through, one
+/// guest slice at a time. Its `extern "C"` half is `wasm32` only; its config
+/// grammar and outcome numbering compile and are tested everywhere.
+pub mod tab_abi;
 pub mod test_support;
 
 pub use cache::CacheMmu;
