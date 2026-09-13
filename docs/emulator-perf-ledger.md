@@ -216,21 +216,43 @@ Updated 2026-09-13 with the **phone margin sweep**, lab job
 two *images* — `2407828f80684331` for `render-basic`, `a570b6597cc0fc31` for
 `render-rocaille` — not a defect in the rows.
 
-| device | image | grade | best | the spread across spaced presses | shortfall to hold 1× | source |
-|---|---|---|---:|---|---:|---|
-| phone (JSC) | render-basic | t2 8/fn | **1.063×** (median 1.008, spread 14.5 %) | 1.008 / 0.909 / 1.042 / 1.063 / 0.995 | **up to 9 %** | lab `j-20260913-0726-c5bb` |
-| phone (JSC) | **render-rocaille** | t2 8/fn | **1.414×** (median 1.382, spread 5.2 %) | 1.391 / 1.382 / 1.414 / 1.341 / 1.364 | **holds** | lab `j-20260913-0726-c5bb` |
-| phone (JSC) | render-basic | t2 interpreter | 0.678× (median 0.644) | 0.644 / 0.638 / 0.678 / 0.624 / 0.647 | 36 % | same job — the thermal control |
-| phone (JSC) | render-rocaille | t2 interpreter | 0.766× (median 0.753) | 0.714 / 0.751 / 0.766 / 0.759 / 0.753 | 25 % | same job — the thermal control |
-| phone (JSC) | render-basic | same-press 8/fn ÷ interp | **1.70×** (median 1.54) | 1.56 / 1.42 / 1.53 / 1.70 / 1.54 | — | same job |
-| phone (JSC) | render-rocaille | same-press 8/fn ÷ interp | **1.95×** (median 1.84) | 1.95 / 1.84 / 1.85 / 1.77 / 1.81 | — | same job |
-| phone (JSC) | render-basic | t2 8/fn (older) | 1.025× | 0.863 / 0.945 / 1.008 / 0.921 / 0.818 — thermal | up to 18 % | M7 director log E7 |
-| phone | harness, boot-idle-memfs | — | **NEVER MEASURED** | — | — | the phone rig defines no rows for these two images (DD18) |
-| desk V8 16/fn | render-basic | t2 | 1.051× | — (best of 5, one invocation) | holds | P1b |
-| desk JSC 8/fn | render-basic | t2 | 0.867× | — | **13 %** | P1b |
-| desk | render-rocaille | t2 | 1.73× | — | holds | P9 |
-| desk | harness | — | 2.68× | — | holds | P9 |
-| desk | boot-idle-memfs | — | **0.53×** | — | **47 %** | P9 — ~1.08 s of fixed translation on a 2 s run |
+| device | image | grade | best (of real time) | the spread across spaced presses | shortfall to hold 1× | ÷ its own interpreter | source |
+|---|---|---|---:|---|---:|---:|---|
+| phone (JSC) | render-basic | t2 8/fn | **1.063×** (median 1.008, spread 14.5 %) | 1.008 / 0.909 / 1.042 / 1.063 / 0.995 | **up to 9 %** | — | lab `j-20260913-0726-c5bb` |
+| phone (JSC) | **render-rocaille** | t2 8/fn | **1.414×** (median 1.382, spread 5.2 %) | 1.391 / 1.382 / 1.414 / 1.341 / 1.364 | **holds** | — | lab `j-20260913-0726-c5bb` |
+| phone (JSC) | render-basic | t2 interpreter | 0.678× (median 0.644) | 0.644 / 0.638 / 0.678 / 0.624 / 0.647 | 36 % | — | same job — the thermal control |
+| phone (JSC) | render-rocaille | t2 interpreter | 0.766× (median 0.753) | 0.714 / 0.751 / 0.766 / 0.759 / 0.753 | 25 % | — | same job — the thermal control |
+| phone (JSC) | render-basic | same-press 8/fn ÷ interp | — | 1.56 / 1.42 / 1.53 / 1.70 / 1.54 | — | **1.70×** (median 1.54) | same job |
+| phone (JSC) | render-rocaille | same-press 8/fn ÷ interp | — | 1.95 / 1.84 / 1.85 / 1.77 / 1.81 | — | **1.95×** (median 1.84) | same job |
+| phone (JSC) | render-basic | t2 8/fn (older) | 1.025× | 0.863 / 0.945 / 1.008 / 0.921 / 0.818 — thermal | up to 18 % | — | M7 director log E7 |
+| phone | harness, boot-idle-memfs | — | **NEVER MEASURED** | — | — | — | the rig now defines the rows (translator-quality P1); lab `j-20260913-1702-102a` is in flight on `c66d8ac` (3 presses) with no press completed yet |
+| desk V8 16/fn | render-basic | t2 | 1.051× | — (best of 5, one invocation) | holds | — | P1b |
+| desk JSC 8/fn | render-basic | t2 | 0.867× | — | **13 %** | — | P1b |
+| desk V8 16/fn | render-rocaille | t2 | **1.166×** | — (best of 3, one invocation per image) | holds | 1.73× | P9 — corrected 2026-09-13, see below |
+| desk V8 16/fn | harness | t2 | **3.062×** | — (best of 3, one invocation per image) | holds | 2.68× | P9 — corrected 2026-09-13, see below |
+| desk V8 16/fn | boot-idle-memfs | t2 | **2.808×** | — (best of 3, one invocation per image) | holds | **0.53×** — the one image where the translated core LOSES | P9 — corrected 2026-09-13, see below |
+
+**Correction, 2026-09-13 (translator-quality P1).** The last three desk rows
+carried the wrong column. Until today they read `render-rocaille` 1.73×,
+`harness` 2.68× and `boot-idle-memfs` **0.53× / 47 % short of 1×** — and those
+three figures are the **`translated ÷ interpreter`** column of
+`docs/adr/2026-09-11-emulator-wasm-translator.md` §"Per image, and where the
+translated core is SLOWER" (the table at `:443-447`), not its `translated`
+column. The ADR's own rows are 1.166× / 3.062× / 2.808× of **real time**, at
+16 blocks a function, a 5,500 ms emulated bound, one invocation per image with
+both legs back to back, best of three, load 2.6–4.3.
+
+So **every product image holds 1× on the desk**, `boot-idle-memfs` included at
+2.808×; what is true of `boot-idle-memfs` is the *other* column — it is the one
+product image where the translated core is a **net loss against its own
+interpreter** (0.53×), because ~1.08 s of fixed translation (discover 144 ms +
+emit 892 ms + compile 41 ms) sits on a run that retires 51.0 M instructions
+with a 43.7-instruction mean stay, and the wasm build translates by default
+since #727. That is a translation-cost finding, not a margin finding. Both
+columns are carried here now so the next reader cannot take one for the other.
+
+No row was deleted, per §1's rule. Whether the correction re-ranks the
+milestone is **open**, and this document does not answer it.
 
 **The sweep moved the phone's number and narrowed the band.** `render-basic`
 best 1.063× with a 14.5 % spread and a median of 1.008 — so the worst spaced
@@ -241,11 +263,16 @@ image for the emulator, because more guest work per emulated microsecond means
 the fixed per-slice cost is amortised further. The image that needs the margin
 is the light one.
 
-**Three shortfalls, three causes.** The phone's ~9 % on `render-basic` is
-thermal throttling of steady-state work. `boot-idle-memfs`'s 47 % is a *fixed*
-translation cost amortised over a short run, and no steady-state lever touches
-it. And `harness` / `boot-idle-memfs` have **no phone row at all** — the rig
-defines none — so their phone margin is unknown, not good.
+**One shortfall, one unknown** (rewritten 2026-09-13 with the correction
+above). The phone's ~9 % on `render-basic` is thermal throttling of
+steady-state work, and it is the **only** measured shortfall against 1× left
+in this table: `render-rocaille` holds on both devices, and all four images
+hold on the desk. What is *unknown* is `harness` and `boot-idle-memfs` on a
+phone — **no phone row exists for either**. The rig defines the rows as of
+translator-quality P1 and `j-20260913-1702-102a` is in flight; until presses land,
+their phone margin is unknown, not good. `boot-idle-memfs`'s 0.53× is a
+different question in a different column — fixed translation cost against its
+own interpreter, which no steady-state loop lever touches.
 
 ---
 
@@ -281,6 +308,7 @@ named and deliberately not pursued) or **candidate**.
 | 2026-09-13 | **P1b R0 vs R1 on the phone** (the job G-LOOP0b could not run) | lab `j-20260912-1718-5940` (`f8c44c2-dirty-d65f8c` vs `-15a80d`, 5+5) | R1 over R0 best **+0.1 %**, median +6.3 % (inside the noise band), **same-press ratio identical (1.55 both)** | **candidate, unchanged** — the phone agrees with the desk that the middle tier is worth 1–3 % |
 | 2026-09-13 | **P1d — the write-watermark bulk** (R5 / R5a) | `G-LOOP0c-gate.md`; `scripts/emu/tier-probes/README.md` §P1d; `R5-write-watermark.patch`, `R5a-watermark-plus-guard.patch` | **the guest breaks on every surface.** UART, frames, pin log and trap log all `DIFF`; frames truncate at 73 words. Two independent causes, both quoted from the trace: the driver's **STOP guard** is a write the watermark cannot read, and **`mem_raddr_ex`** (read twice per threshold, 5,302 times over 2,651 refills) is what the ISR uses to choose *which half to refill* | **rejected as built** — and see the cadence row in §4, now closed |
 | 2026-09-13 | **P1d R5c — the shadow census** (no behaviour change; byte-identical on all five identity readings) | `R5c-shadow-census.patch` | a watermark+guard bulk would absorb **95.80 %** of word fetches on **both** `render-basic` (63,646 → 2,673 events) and `render-rocaille` (17,358 → 729), run length exactly the 24-word half. Scaled to the 5,500 ms cell: **1,409,821 slices × 531 ns ≈ 749 ms ≈ 13.6 %**. And the watermark itself **never binds**: `unwritten 0` on both images; the threshold ends every run | **measured** — the size of the prize, on the healthy cadence |
+| 2026-09-13 | **translator-quality P1 — the gate preset grows to all four product images**, and §2's three desk rows are corrected | `scripts/emu/bench-web/bench-run.js` (`GATE_ROWS`); §2's margin table and its correction note; lab `j-20260913-1702-102a` | **no code under `lp-emu/`.** The desk proof that the two new rows are real, node/V8 25.2.1 at 8/fn on build `c66d8ac`, one invocation, both legs per image: every row stops at **exactly 5,500,000 us emulated (880,000,000 cycles)** — the emulated bound, not `harness`'s `--exit-on` marker and not the wall guard — and the two legs of each image agree byte for byte on UART (`harness` `b6da0bd777529664…`, `boot-idle-memfs` `17a0a1a3869073fe…`), on the trap log and on retired instructions (289,953,877 and 51,052,668). Coverage and mean stay reproduce the ADR exactly (99.63 % / 1354.0 and 97.82 % / 43.7). **The wall times are NOT margin numbers — loadavg was 181–186** (53 concurrent `rustc`); the same-invocation *ratios* still land near the ADR's, 2.46× and 0.514× against 2.68× and 0.53×. **No phone row yet**: the job was still on its first press when this row was written | **measured** (rig + doc only) |
 
 ### The P1c note: what the stride removed, and what three instruments said
 
@@ -402,7 +430,7 @@ headroom against the **1×-held** bar, not by distance to 3×.
 | ~~**`wall_timeout` → `started.elapsed()`**~~ **— SHIPPED 2026-09-13, P1c (#736)** | **227 ms ≈ 4.1 %** predicted, one hunk | none | none | **xs** — one hunk | **taken.** The check strides: the clock is read every 64th slice, so the net may fire up to 63 × `MAX_SLICE_CYCLES` emulated cycles late. Yona ruled the granularity acceptable at `G-LOOP0b`. See §3's dated row for what it measured |
 | **the published-register table** (P3 generalised) | NEVER MEASURED. SYSTIMER is 47.05 % of crossings and 2,322,975 of its 2,767,705 are *stores* to `unit0_op` — the published-read side addresses the 444,730 loads | none if the disarm rules hold (trace / strict / after an escape) | none | md | the store side stays: the interpreter polls after *every* MMIO store |
 | **per-tick work** (P4's phase) | NEVER MEASURED as a phase. `run_due_events` 295 ms + `drain_pins` 180 ms = 475 ms is the target, and `tick` relocates it rather than removing it | none | none | md | |
-| **translator quality** | **4.5 ns per translated instruction at 8/fn against ~2 warm**; the cold-code 2.3× residual is unexplained | none | none | **lg** | the one lever that is pure win in both lanes. It is also the only lever that touches `boot-idle-memfs`'s 47 % shortfall, which is fixed translation cost |
+| **translator quality** | **4.5 ns per translated instruction at 8/fn against ~2 warm**; the cold-code 2.3× residual is unexplained | none | none | **lg** | the one lever that is pure win in both lanes. It is also the only lever that reaches **`boot-idle-memfs`'s 0.53× against its own interpreter** — ~1.08 s of *fixed translation* on a 5.5 s run, which no steady-state loop lever touches. (That image holds 1× of real time at 2.808×; the 0.53× is the ratio column, corrected in §2 on 2026-09-13) |
 | **PGO** | **+1.45×** measured, 2026-09-06 | none | none | md (build) | the build-side cost has to be worth carrying |
 | **a lazy / coalesced RMT transmitter** | ~45 ms of crossings | the pin log's `(at, seq)` interleaving | — | md | **superseded by P1b and closed by P1d**: the ordering trap is not the binding constraint, and neither is the RAM read-ahead race. The binding constraint is that the guest's driver *reads the read pointer* and branches on it. P1d also found that the ordering trap could not be tested at all — `render-basic` and `render-rocaille` both drive exactly **one** TX channel, so two channels' edges never interleave. `Fabric::push` appends in call order, `Edge` carries no sequence number: the trap is real for a two-channel image and stays **NEVER MEASURED** |
 
@@ -424,10 +452,12 @@ The phone's shortfall on `render-basic` is now **~9 %** (worst spaced press
   moves the pointer early can be exact, and only a virtualised read pointer
   (a redesign of the RMT engine, not a patch) could collect it. The full tier
   (R3) reports an fps the hardware will not deliver.
-- **Untouched by all of it:** `boot-idle-memfs` at 0.53× on the desk and
-  **no phone row at all**, which is translation cost, not loop cost. It is
-  still the worst number in this document and the only one no loop lever
-  reaches.
+- **Untouched by all of it:** `boot-idle-memfs` at **0.53× of its own
+  interpreter** — a *fixed* translation cost, not loop cost, and the only
+  number in this document no loop lever reaches. It is **not** a margin
+  shortfall: that image runs at 2.808× of real time on the desk and holds 1×
+  with room (§2's correction, 2026-09-13). And `harness` and `boot-idle-memfs`
+  still have **no phone row at all**, so the desk is all either of them has.
 
 ---
 
