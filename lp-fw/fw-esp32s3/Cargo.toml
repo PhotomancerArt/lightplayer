@@ -158,6 +158,14 @@ log = { workspace = true, default-features = false }
 lp-recovery = { path = "../../lp-base/lp-recovery", default-features = false }
 lpc-shared = { path = "../../lp-core/lpc-shared", default-features = false }
 
+# Direct dep for `stack_probe::paint`, which masks interrupts while it writes
+# the paint pattern into the unused main stack. The implementation comes from
+# esp-hal (already in the tree, and already selected by esp-storage's
+# `critical-section` feature below); this is only the trait crate, so it adds
+# no code to the image. Mirrors fw-esp32v3, whose probe this one is ported
+# from.
+critical-section = "1"
+
 # Async runtime for `serial::io_task`. Mirrors fw-esp32c6's set; the S3 runs the
 # same embassy executor through esp-rtos.
 embassy-executor = "0.10.0"
