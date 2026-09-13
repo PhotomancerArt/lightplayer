@@ -456,6 +456,7 @@ a fifth still lands somewhere the new `Fault` status and pattern don't reach.
 | shared-namespace-collision | 2026-09-08 | [a-stray-hello-answered-a-request-that-never-asked](2026-09-08-a-stray-hello-answered-a-request-that-never-asked.md) | fixed | lpa-client protocol_session/client/tokio_client/project_read_stream (correlation) |
 | lifecycle-ownership | 2026-09-08 | [serial-close-leaks-the-port-on-a-wedged-device](2026-09-08-serial-close-leaks-the-port-on-a-wedged-device.md) | fixed | lpa-client stream/serialport_stream + transport_serial framing thread/close; lpa-link host_serial_esp32 provider + DeviceSession::release_link |
 | bound-in-a-foreign-unit | 2026-09-13 | [the-dilation-window-drains-one-shift-at-a-time](2026-09-13-the-dilation-window-drains-one-shift-at-a-time.md) | fixed | lpa-studio-web `public/lpa-link/emulator_worker.js` (the tab backing's pacing loop) |
+| lifecycle-ownership | 2026-09-13 | [a-stabilization-timer-outlived-the-popover](2026-09-13-a-stabilization-timer-outlived-the-popover.md) | fixed | lpa-studio-web `base/popover.rs`: a `forget()`-ed `setTimeout` (plus the fonts-ready future and an already-queued observer rAF) measured into signals the popover's scope had dropped — twelve panics under a green walk |
 
 ## Predecessor: `docs/bugs/`
 
