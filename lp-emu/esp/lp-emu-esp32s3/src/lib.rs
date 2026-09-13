@@ -37,4 +37,6 @@
 //!   the D-bus view and fetches it through the I-bus alias `+0x6F_0000`. The
 //!   report's §5 is the evidence and the one-sentence ruling.
 
+pub mod bus_setup;
+pub mod memmap;
 pub mod regs;
