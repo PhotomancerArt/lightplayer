@@ -99,8 +99,8 @@ Before and after, the same script on the same machine, one bounded run each:
 | `origin/main` `77e172c3f` | 30.5 s | **not settled in 120 s** | 39 470 ms | 10 389 ms |
 | " | 28.1 s | **not settled in 120 s** | 27 706 ms | 20 226 ms |
 | " | 29.2 s | **not settled in 120 s** | 41 445 ms | 9 338 ms |
-| " | 28.6 s | 49.8 s | 41 445 ms | 21 246 ms |
-| " | 29.2 s | **not settled in 120 s** | 16 484 ms | 13 884 ms |
+| " | 28.6 s | 49.8 s | 21 246 ms | 21 246 ms |
+| " | 29.2 s | **not settled in 120 s** | 16 912 ms | 13 884 ms |
 | with this change | 30.2 s | **30.0 s**, the card reads `Ready` / `fw-esp32c6 77e172c3fb62` | **none ≥ 2 s** | **none ≥ 1 s** |
 
 `just walk-no-board --tab` on the same worktree: **1 pass / 2 failures at
