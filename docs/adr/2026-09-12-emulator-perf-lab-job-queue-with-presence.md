@@ -126,8 +126,17 @@ relays, the agent drives over HTTP.
 - Job kinds beyond `bench` (the field is reserved; vision Q6): the C6-in-tab
   boot-to-hello, Studio walks.
 - Other emulator targets as builds in the same store (vision Q7).
-- A stability-based stopping rule for A/B once enough sessions exist to
-  size it (vision Q4).
+- ~~A stability-based stopping rule for A/B once enough sessions exist to
+  size it (vision Q4).~~ **Done** (2026-09-13): opt-in `stopWhenStable` on a
+  job stops a **build** once its control row's last `minPresses` counted
+  presses are within `pct` of each other; `repeats` stays the hard cap and an
+  A/B stops per build. Sized from the eleven real runs the lab had by then
+  (kept as `test/fixtures/real-runs.json`): the interpreter control row's
+  best settles within 5 % by press 3 on every one of them, so the default is
+  `{row: 'interp', pct: 5, minPresses: 3}`. **The rule is not for a gate** —
+  the interpreter row flattens before the translated row does, and on the
+  P1b R0/R1 job the default would have quoted a `jit/8` best 8.6 % low. The
+  README says so beside the table.
 - ~~Auto-restaging `main` into the store on merge.~~ **Done**
   (2026-09-13): `scripts/emu/lab/restage-main.sh` under a third launchd
   agent, `com.yona.emu-lab-restage`, on a ten-minute `StartInterval`; a

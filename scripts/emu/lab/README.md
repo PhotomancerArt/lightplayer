@@ -317,18 +317,20 @@ prints them all as the rig's table, device column from the lab's name.
   "builds": ["86cb2e0", "23a3d3c"],            // one entry = a single build
   "rows": "gate-rows",                           // or [{slug,grade,mode,fnBlocks,timeout}]
   "repeats": 5, "spacingMs": 180000, "device": "any", "ttlMs": 86400000, "retryTainted": 1,
+  "stopWhenStable": null,                        // or {"row":"interp","pct":5,"minPresses":3} — see below
   "note": "P4 vs P3 head", "createdAt": "…", "state": "queued",
   "boundDevice": null, "presses": [{"n": 1, "build": "86cb2e0", "state": "pending"}, …],
-  "lastPressEndAt": null, "reportAt": null
+  "stoppedEarly": [], "lastPressEndAt": null, "reportAt": null
 }
 ```
 
 States: `queued → running → done | expired | failed | cancelled`. Press
-states: `pending → sent → (deferred) → done | failed`; a `sent` press with no
-result after `wallTimeout × rows + 120 s` is lost and re-sent once. Only
-`kind: bench` exists; the field is reserved (Q6). `POST /jobs` validates
-(1–2 builds that exist in the store, `repeats` 1–20, `ttlMs` ≥ 60 s) and
-expands an A/B into `A1 B1 A2 B2 …` (D5).
+states: `pending → sent → (deferred) → done | failed | skipped`; a `sent`
+press with no result after `wallTimeout × rows + 120 s` is lost and re-sent
+once, and `skipped` is a press the stopping rule stood down before it was
+ever sent. Only `kind: bench` exists; the field is reserved (Q6).
+`POST /jobs` validates (1–2 builds that exist in the store, `repeats` 1–20,
+`ttlMs` ≥ 60 s) and expands an A/B into `A1 B1 A2 B2 …` (D5).
 
 **The scheduler** ticks every second and on every event. For each present
 device with no press in flight, in job order, it sends the first pending
@@ -348,6 +350,104 @@ gets a `cooldown` event with `nextPressAt` for its countdown. A tainted
 press appends one more press of the same build at the end of the queue
 (D23, `retryTainted`, default 1). On restart the server rebuilds everything
 from `jobs/` and treats in-flight presses as lost (one re-send).
+
+## Stopping early when a build has settled (opt-in)
+
+A ten-press A/B on a phone is half an hour of Yona's device. Often the
+numbers stop moving well before the tenth press. `stopWhenStable` lets a job
+say so:
+
+```jsonc
+"stopWhenStable": { "row": "interp", "pct": 5, "minPresses": 3 }
+```
+
+```bash
+lab.sh queue --ab A B --repeats 8 --spacing 3m --stop-when-stable        # the default above
+lab.sh queue --build X --repeats 10 --stop-when-stable 3                 # tighter
+lab.sh queue --ab A B --repeats 8 --stop-when-stable 3 --stable-row all --stable-min 4
+```
+
+**The rule.** A build stops when its **control row's** last `minPresses`
+**counted** values are within `pct` of each other — the same
+`(max − min) / max × 100` the report already prints, read off the report's
+own sequence rather than computed a second time. `row` is `interp` (every
+interpreter row the build produced — all of them must settle), `all` (every
+row), or one exact key like `render-basic/t2/jit/8`.
+
+- **`repeats` stays the hard cap.** The rule only stands presses down; it
+  never adds one.
+- **An A/B stops per build.** The interleave keeps going for whichever build
+  is still moving; the A/B arithmetic is unchanged, one side just has fewer
+  presses.
+- **Excluded presses never count.** A tainted or failed press is `null` in
+  the sequence and is filtered out before the window is taken, so the window
+  is the last `minPresses` *counted* values, not the last `minPresses`
+  presses. A tainted press can never be the one that declares a build stable.
+- A press stood down is `skipped`: it reaches `report.presses` but it is not
+  an **exclusion** — it was never taken, so it is not a hole in the sequence.
+  `report.json` carries `stopWhenStable` and `stoppedEarly: [{build,
+  afterPress, why, skipped, …}]`, and `report.md` prints a
+  **stopped early: … after press 3 of 8** line with the window that closed it.
+- With the field absent nothing changes: every press of `repeats` is taken,
+  and `stoppedEarly` is `null` in the report.
+
+### How the default was sized
+
+From every A/B and repeat job the lab had run by 2026-09-13 — eleven
+build-runs, twelve interpreter control rows, kept verbatim in
+`test/fixtures/real-runs.json` and asserted in `test/stability.test.mjs`.
+
+**After how many presses does the control row's best stop moving by more
+than x %?** (the smallest press whose running best is within x % of the
+run's final best):
+
+| within | every control row settles by |
+|---|---:|
+| 3 % | press 3 |
+| 5 % | press 3 |
+| 10 % | press 2 |
+
+Hence `minPresses: 3`. **Where the window rule then stops each real run**
+(`row: interp`, `minPresses: 3`; `–` = never settles, the job runs to
+`repeats`):
+
+| run | control row | 3 % | 5 % | 10 % |
+|---|---|---:|---:|---:|
+| G1 `86cb2e0` (P3 head) | 0.586 0.534 0.527 0.476 0.519 | – | – | p5 |
+| G1 `23a3d3c` (P4 head) | 0.611 0.603 0.581 0.519 0.452 | – | p3 | p3 |
+| G2 `23a3d3c` (2 presses) | 0.608 0.599 | – | – | – |
+| P1b R0 `…d65f8c` | 0.648 0.627 0.646 0.666 0.668 | – | p3 | p3 |
+| P1b R1 `…15a80d` | 0.649 0.654 0.672 0.636 0.686 | – | p3 | p3 |
+| margin sweep `9f67d78` (2 slugs) | basic + rocaille | – | – | p3 |
+| spacing S1 `9f67d78` (3 m, 10 presses) | 0.677 0.680 0.676 … | p3 | p3 | p3 |
+| spacing S2 `9f67d78` (back-to-back, 10) | 0.600 0.665 0.686 … | – | p4 | p4 |
+| P1c `9f67d78` | 0.681 0.619 0.682 0.668 0.683 | p5 | p5 | p3 |
+| P1c `0adccaa` | 0.708 0.673 0.723 0.726 0.735 | p5 | p5 | p3 |
+| G-M7B `86cb2e0` | 0.618 0.626 0.613 0.585 0.500 | p3 | p3 | p3 |
+
+`pct: 5` is the default: it stops seven of the eleven, and it clears the
+plan's acceptance number — **on G1 it does not stop the P3 head before press
+3**; in fact it never stops it at all (the tightest window that run offers is
+9.7 % apart). `pct: 10` would stop it, at press 5.
+
+### What this rule cannot see, and why it is not for a gate
+
+**A settled control row is not a settled translated row.** The interpreter
+row is the *quiet* row — no translation, no warm-up — so it flattens long
+before the row whose number gets quoted. On the P1b R0-vs-R1 job, the
+decision that turned on 1–2.7 %, the default rule stops `…d65f8c` at press 3
+with the interpreter at 0.648 0.627 0.646 (3.2 % apart) while `jit/8` is
+still climbing: 0.939 0.972 0.973 → **1.064** on press 4. The quoted best
+would have been **8.6 % low**. `row: 'all'` does not save that case either —
+three flat presses at the bottom of a ramp look exactly like three flat
+presses on a plateau. `minPresses: 4` does (it never fires there), and so
+does `pct: 3`.
+
+So: **leave the rule off for a job whose number decides something** (that is
+the default — the field is opt-in), and reach for it on exploratory sweeps
+where five presses you did not need cost more than a percent you did not
+measure. If you want it on a job that matters, `--stable-row all
+--stable-min 4` is the setting the evidence supports.
 
 ## Waiting (the dont-poll rule made concrete)
 
@@ -374,8 +474,10 @@ interpreter per press (only when that press has an interpreter row for the
 same slug/grade) with its best and median; byte-identity across the build's
 rows (`uartSha256`; null = unknown, DD46); for an A/B, `best(B)/best(A) − 1`,
 the same for medians, and for the ratio medians. Tainted and failed presses
-are listed under `excluded` and never counted. `report.md` is the G-M7B
-five-press table, generated.
+are listed under `excluded` and never counted; a `skipped` press (the
+stopping rule stood it down) is in `presses` but in neither the sequences nor
+`excluded`. `report.md` is the G-M7B five-press table, generated, plus the
+`stopping rule` / `stopped early` lines when the job used one.
 
 ## `lab.sh`
 
@@ -387,11 +489,14 @@ lab.sh notify status | test             # the "jobs waiting, no device" ping: it
 lab.sh queue --build 23a3d3c --rows gate-rows --repeats 3 --spacing 3m [--device NAME] [--ttl 24h] [--note …]
 lab.sh queue --ab 86cb2e0 23a3d3c --rows gate-rows --repeats 5 --spacing 3m
 lab.sh queue --build X --row render-basic:t2:jit:8 --row render-basic:t2:interp
+lab.sh queue --ab A B --repeats 8 --stop-when-stable [PCT] [--stable-row interp|all|KEY] [--stable-min N]
 lab.sh wait --job <id> [--max-time 3600] | --device any|NAME | --queue-idle
 ```
 
 `queue` prints the job id on stdout; `wait --job` prints the path of
 `report.md`; `--spacing`/`--ttl` take `90s`, `3m`, `24h`.
+`--stop-when-stable`'s percentage is optional (5 % when omitted); see
+[Stopping early](#stopping-early-when-a-build-has-settled-opt-in).
 
 ## Standing service (D7, T8): the launchd agents
 
@@ -495,5 +600,11 @@ spawn the real `server.mjs` on port 0 in a temp home
 (`test/helpers.mjs`); `test/fake-device.mjs` is a page client that answers
 presses from a table of numbers at test speed (`LAB_TICK_MS`,
 `LAB_COOLDOWN_MS`, `LAB_LOST_MS`); `report.test.mjs` reproduces the G-M7B
-five-press table exactly. Nothing here needs a package.json, and nothing
-may gain one.
+five-press table exactly. `stability.test.mjs` is the F3 half, in two
+sections: the arithmetic against `fixtures/real-runs.json` — every A/B and
+repeat job the lab had produced by 2026-09-13, anonymised to the report's own
+press sequences, which is where the sizing table above comes from and what
+keeps it from drifting — and then the scheduler against the fake device (a
+flat table stops at press 3, a wandering one runs to `repeats`, an A/B stops
+per build, a tainted press cannot close the window). Nothing here needs a
+package.json, and nothing may gain one.
