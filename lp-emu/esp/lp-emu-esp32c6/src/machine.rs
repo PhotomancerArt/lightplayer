@@ -4582,7 +4582,9 @@ impl Esp32C6Machine {
     /// Run until `stop` says otherwise. See the module docs for the loop.
     pub fn run_until(&mut self, stop: &StopCondition) -> Outcome {
         let started = Instant::now();
-        let stop_cycle = stop.stop_cycle.unwrap_or(u64::MAX);
+        // ABSOLUTE, and therefore rebased across a reboot — see the reset
+        // arm at the bottom of the loop.
+        let mut stop_cycle = stop.stop_cycle.unwrap_or(u64::MAX);
         let mut probes = stop.probes.clone();
         probes.sort_by(|a, b| a.0.cmp(&b.0));
         let mut next_probe = 0usize;
@@ -4796,8 +4798,28 @@ impl Esp32C6Machine {
             if let Some(lp_emu_esp_common::MachineRequest::Reset { source, at, strap }) =
                 self.bus.take_request()
             {
+                // `stop_cycle` is an absolute guest cycle and a reboot moves
+                // what zero means: `restore(power_on)` puts the clock back.
+                // So read what is LEFT of the budget while the old origin
+                // still stands, and rebase the bound onto the new one — the
+                // same class of bug, one layer up, as the two host-poll
+                // deadlines `reboot` itself zeroes. Without the rebase the
+                // loop `continue`s against a bound the board's whole prior
+                // lifetime away and replays it inside this one slice, which
+                // is `docs/defects/2026-09-11-a-reset-replays-the-boards-lifetime.md`:
+                // measured at exactly `old + budget`, so a board minutes old
+                // freezes its host for minutes.
+                //
+                // A run with no stop at all keeps having none; only a stated
+                // budget is rebased.
+                let remaining = stop
+                    .stop_cycle
+                    .map(|_| stop_cycle.saturating_sub(self.cycles()));
                 if self.reboot_on_reset && self.reboot(strap) {
                     log::info!("machine: {source} at cycle {at} — rebooting into strap {strap}");
+                    if let Some(remaining) = remaining {
+                        stop_cycle = self.cycles().saturating_add(remaining);
+                    }
                     matched = [0usize; 2];
                     continue;
                 }
@@ -5647,6 +5669,65 @@ mod tests {
                 }
             ),
             "{out:?}"
+        );
+    }
+
+    /// A reboot moves the clock's origin, and `run_until`'s stop is an
+    /// ABSOLUTE guest cycle fixed before its loop. If the bound is not
+    /// rebased, the slice that carries a reboot runs the board's whole prior
+    /// lifetime over again before it reaches a cycle count it has already
+    /// passed once — silently, with the host frozen for the duration.
+    /// `docs/defects/2026-09-11-a-reset-replays-the-boards-lifetime.md`.
+    ///
+    /// The measurement is in cycles and only in cycles: the age and the
+    /// budget are guest quantities, and nothing here reads a clock.
+    #[test]
+    fn a_reboot_inside_a_slice_consumes_the_budget_and_not_the_boards_lifetime() {
+        // 100 ms of guest time, then one 1 ms slice — the tab's pacing slice,
+        // and a hundredth of the age, so the two answers cannot be confused.
+        const AGE: Cycles = 100 * 1_000 * memmap::CYCLES_PER_US;
+        const BUDGET: Cycles = 1_000 * memmap::CYCLES_PER_US;
+
+        let mut m = Esp32C6Builder::new()
+            .reboot_on_reset(true)
+            // The reset lands INSIDE the second slice, not on its boundary.
+            .usb_script(vec![(AGE + BUDGET / 4, ControlCommand::Reset)])
+            .build()
+            .unwrap();
+        // `j .` in HP SRAM: guest time passes and nothing else happens, so
+        // the age is the only thing the first run produces.
+        m.bus
+            .load_image(memmap::HP_SRAM_BASE, &0x0000_006fu32.to_le_bytes())
+            .unwrap();
+        m.harts[0].set_pc(memmap::HP_SRAM_BASE);
+
+        // Age the board.
+        let out = m.run_until(&StopCondition {
+            stop_cycle: Some(AGE),
+            ..Default::default()
+        });
+        assert!(matches!(out, Outcome::Deadline { .. }), "{out:?}");
+        assert_eq!(m.reboots(), 0, "nothing has reset it yet");
+        let aged = m.cycles();
+        assert!(aged >= AGE, "the board is {aged} cycles old");
+
+        // One slice, sized in the host's terms: an absolute bound one budget
+        // past where the board already is.
+        let out = m.run_until(&StopCondition {
+            stop_cycle: Some(aged + BUDGET),
+            ..Default::default()
+        });
+        assert_eq!(m.reboots(), 1, "the slice carried exactly one reboot");
+        assert!(
+            matches!(out, Outcome::Deadline { .. }),
+            "the slice still ends at its deadline: {out:?}"
+        );
+        let consumed = m.cycles();
+        assert!(
+            consumed <= BUDGET,
+            "a reboot inside the slice must cost at most the slice's budget \
+             ({BUDGET} cycles); it consumed {consumed}, which is the board's \
+             {aged}-cycle lifetime replayed on top of it"
         );
     }
 
