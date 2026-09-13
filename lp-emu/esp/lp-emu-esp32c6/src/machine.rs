@@ -4582,7 +4582,9 @@ impl Esp32C6Machine {
     /// Run until `stop` says otherwise. See the module docs for the loop.
     pub fn run_until(&mut self, stop: &StopCondition) -> Outcome {
         let started = Instant::now();
-        let stop_cycle = stop.stop_cycle.unwrap_or(u64::MAX);
+        // ABSOLUTE, and therefore rebased across a reboot — see the reset
+        // arm at the bottom of the loop.
+        let mut stop_cycle = stop.stop_cycle.unwrap_or(u64::MAX);
         let mut probes = stop.probes.clone();
         probes.sort_by(|a, b| a.0.cmp(&b.0));
         let mut next_probe = 0usize;
@@ -4796,8 +4798,28 @@ impl Esp32C6Machine {
             if let Some(lp_emu_esp_common::MachineRequest::Reset { source, at, strap }) =
                 self.bus.take_request()
             {
+                // `stop_cycle` is an absolute guest cycle and a reboot moves
+                // what zero means: `restore(power_on)` puts the clock back.
+                // So read what is LEFT of the budget while the old origin
+                // still stands, and rebase the bound onto the new one — the
+                // same class of bug, one layer up, as the two host-poll
+                // deadlines `reboot` itself zeroes. Without the rebase the
+                // loop `continue`s against a bound the board's whole prior
+                // lifetime away and replays it inside this one slice, which
+                // is `docs/defects/2026-09-11-a-reset-replays-the-boards-lifetime.md`:
+                // measured at exactly `old + budget`, so a board minutes old
+                // freezes its host for minutes.
+                //
+                // A run with no stop at all keeps having none; only a stated
+                // budget is rebased.
+                let remaining = stop
+                    .stop_cycle
+                    .map(|_| stop_cycle.saturating_sub(self.cycles()));
                 if self.reboot_on_reset && self.reboot(strap) {
                     log::info!("machine: {source} at cycle {at} — rebooting into strap {strap}");
+                    if let Some(remaining) = remaining {
+                        stop_cycle = self.cycles().saturating_add(remaining);
+                    }
                     matched = [0usize; 2];
                     continue;
                 }
