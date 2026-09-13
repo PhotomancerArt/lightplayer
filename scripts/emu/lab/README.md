@@ -24,7 +24,7 @@ with one once. `LAB_HOME` overrides it (tests use a temp dir).
 
 ```text
 ~/.photomancer/emu-lab/
-├── config.json      {port: 41111, exposure: "tailscale" | "ngrok", domain: null, cooldownMs: 60000, maxResultBytes: 2000000, notify: …}
+├── config.json      {port: 41111, exposure: "tailscale" | "ngrok", domain: null, cooldownMs: 60000, dropLostMs: null, maxResultBytes: 2000000, notify: …}
 ├── notify.json      armed? when did the "jobs waiting, no device" ping last fire (a restart must not re-send)
 ├── token            32 hex, 0600, generated on first start
 ├── builds/<id>/     emu.wasm manifest.json worker.js bench-run.js wasi-shim.js jit-host.js bench-cli.mjs index.html
@@ -33,7 +33,7 @@ with one once. `LAB_HOME` overrides it (tests use a temp dir).
 ├── jobs/<id>.json   queued → running → done | expired | failed | cancelled
 ├── jobs/<id>/presses/<n>.json  report.json  report.md
 ├── results/result-<ISO>.json   the legacy bench-web shape, one per press or manual run
-├── devices/<deviceId>.json     identity, last state, last seen
+├── devices/<deviceId>.json     identity, last state, last seen, last press end, last stream close
 ├── .stage/lock                 one stage at a time: the pid + sha building right now
 ├── log/server.log              the server's own, append-only
 └── log/restage.log             one line per restage run (skips included)
@@ -326,9 +326,9 @@ prints them all as the rig's table, device column from the lab's name.
 
 States: `queued → running → done | expired | failed | cancelled`. Press
 states: `pending → sent → (deferred) → done | failed | skipped`; a `sent`
-press with no result after `wallTimeout × rows + 120 s` is lost and re-sent
-once, and `skipped` is a press the stopping rule stood down before it was
-ever sent. Only `kind: bench` exists; the field is reserved (Q6).
+press that will never answer is **lost** and re-sent once (see below), and
+`skipped` is a press the stopping rule stood down before it was ever sent.
+Only `kind: bench` exists; the field is reserved (Q6).
 `POST /jobs` validates (1–2 builds that exist in the store, `repeats` 1–20,
 `ttlMs` ≥ 60 s) and expands an A/B into `A1 B1 A2 B2 …` (D5).
 
@@ -340,7 +340,8 @@ press of the first job that passes four conditions:
 2. the job is not bound to another device — an A/B job binds to the first
    device that takes its first press and stays there (D20);
 3. the device's cooldown has elapsed: `now − device.lastPressEndAt ≥
-   config.cooldownMs` (60 s; applies between jobs too);
+   config.cooldownMs` (60 s; applies between jobs too, and sizes the drop
+   window below unless `dropLostMs` says otherwise);
 4. the job's spacing has elapsed: `now − job.lastPressEndAt ≥ spacingMs`,
    measured from the **end** of the previous press (D19) — DD41's "spaced
    by minutes" is thermal recovery.
@@ -357,8 +358,31 @@ translated median of **1.046× vs 1.053×** and an interpreter **0.677 vs
 One press at a time per device. While a device waits on spacing the page
 gets a `cooldown` event with `nextPressAt` for its countdown. A tainted
 press appends one more press of the same build at the end of the queue
-(D23, `retryTainted`, default 1). On restart the server rebuilds everything
-from `jobs/` and treats in-flight presses as lost (one re-send).
+(D23, `retryTainted`, default 1).
+
+**A lost press.** A `sent` press is declared lost, and re-sent once (a
+second loss fails it), when any of three things is true:
+
+1. **its device went away** — the bound device has had no `/events` stream
+   for `dropLostMs`, and no result arrived. A page with no stream cannot
+   have been sent anything and cannot post a result, so it is not running
+   the press. The window defaults to the device cooldown, floored at 60 s,
+   and `config.json`'s `dropLostMs` (or `LAB_DROP_LOST_MS`) moves it; it
+   only has to outlast an SSE reconnect, which is why a flicker — a stream
+   that closes and reopens inside the window — leaves the press `sent`.
+   The close time lives on the device file as `lastStreamClosedAt`, so a
+   restart does not forget it;
+2. **the wall bound ran out** — no result in `wallTimeout × rows + 120 s`,
+   for the device that is still connected and silent;
+3. **the server restarted** under it: on start the server rebuilds
+   everything from `jobs/` and treats `sent` and `deferred` presses as lost.
+
+A `deferred` press (the page said it is hidden and will run when visible)
+is on a connected page by construction, so only the wall bound retires it.
+*History:* before the drop rule (2026-09-13) only the wall bound could
+retire a `sent` press, so a phone whose tab closed seconds after press 1
+came back to a job that would not offer it anything for another 40 minutes
+(`j-20260913-1702-102a`, wall bound 3120 s).
 
 ## Stopping early when a build has settled (opt-in)
 
