@@ -543,6 +543,10 @@ scripts/emu/lab/lab.sh uninstall          # bootout all three, remove the plists
 launchctl print gui/$UID/com.yona.emu-lab | head
 ```
 
+`install` waits for the server agent: it polls `/healthz` every 0.5 s for up
+to 10 s and prints `lab: server answered /healthz after 2.5 s`. The server
+boots in ~2.3 s, so the single shot this replaced failed healthy installs.
+
 **Install from the primary checkout** (`/Users/yona/dev/photomancer/lp2025`),
 never from a `.claude/worktrees/…` path: the agent's `ProgramArguments`
 point at `server.mjs` in that checkout, and a worktree is pruned by the

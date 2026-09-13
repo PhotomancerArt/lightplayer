@@ -259,7 +259,20 @@ cmd_install() {
         # empty grep must not take the install down with it.
         launchctl print "gui/$(id -u)/$l" | grep -E "^\s+(state|pid) " | tr -s ' ' | sed "s|^|lab: $l|" >&2 || true
     done
-    curl -sf "http://127.0.0.1:$(port)/healthz" >/dev/null || { echo "lab: server agent is not answering /healthz yet (lab.sh logs server)" >&2; exit 1; }
+    # The server boots in ~2.3 s, so the old single shot after `sleep 2` failed
+    # a healthy install (twice on 2026-09-13). Poll every 0.5 s for up to 10 s
+    # and say how long it took — a slow boot is worth seeing, not worth failing.
+    local health_url waited=0 healthy=0
+    health_url="http://127.0.0.1:$(port)/healthz"
+    for _ in $(seq 1 20); do
+        if curl -sf "$health_url" >/dev/null; then healthy=1; break; fi
+        sleep 0.5
+        waited=$(( waited + 5 ))
+    done
+    [[ $healthy -eq 1 ]] || { echo "lab: server agent is not answering /healthz yet (lab.sh logs server)" >&2; exit 1; }
+    # `waited` counts tenths of a second so the message can print one decimal
+    # without bc; the 2 s sleep above is part of the boot the director waited on.
+    printf 'lab: server answered /healthz after %d.%d s\n' $(( (20 + waited) / 10 )) $(( (20 + waited) % 10 )) >&2
     echo "lab: installed ${labels[*]} (repo $repo$([[ $force -eq 1 ]] && echo ', --force'), exposure $exp)" >&2
     if [[ "$exp" == tailscale ]]; then
         # Serve the lab on the tailnet over https. Needs MagicDNS + HTTPS
