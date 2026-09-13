@@ -102,6 +102,8 @@ mod output;
 mod recovery;
 #[cfg(not(fw_harness))]
 mod serial;
+#[cfg(not(fw_harness))]
+mod stack_probe;
 #[cfg(fw_harness)]
 mod tests;
 
@@ -236,13 +238,76 @@ fn boot() -> ! {
     }
 }
 
-/// Heap free/used for the heartbeat. A chip fact `fw-esp32-common` must not
-/// know, so it is injected.
+/// Heap free/used, and the board's three-line memory ledger. A chip fact
+/// `fw-esp32-common` must not know, so it is injected.
+///
+/// **The ledger is elicited, never periodic.** The server calls this injected
+/// probe on a project load, a project unload, a stop-all and a client
+/// `runtime_status` — and nowhere else. The five-second heartbeat takes
+/// [`heartbeat_memory_stats`] instead, which reads the same counters and
+/// prints nothing. That split is the classic's
+/// (`fw-esp32v3/src/main.rs`), and it is deliberate: a periodic printer floods
+/// the very USB-Serial-JTAG link the transport runs on, while an elicited one
+/// brackets the events whose memory cost anyone wants to read.
+///
+/// The three lines are the classic's, field for field and in its order, so
+/// that one replay comparator reads all three chips' transcripts:
+///
+/// ```text
+/// [stack] heartbeat: high-water <used> B of <total> B (<headroom> B headroom)
+/// [MEM] free=<free> used=<used> largest_free=<largest> retry_saves=<n>
+/// [JIT] used=… peak=… cap=… spans=… peak_spans=… allocs=… frees=… fails=… largest_free=…
+/// ```
+///
+/// Two fields on this chip are **structural**: they hold the line shape and
+/// carry no counter, because this image has nothing that could fill them
+/// honestly. Neither is invented, and neither may be "improved" by finding
+/// something nearby to print.
+///
+/// - **`retry_saves` is always `0`.** The classic has an OOM retry allocator
+///   (`OOM_RETRY_SAVES`, incremented in its `handle_alloc_error` wrapper when
+///   a retry rescues a failed allocation). This image has no such wrapper, so
+///   there is no retry and nothing to count — `0` is the true number of saves,
+///   not a missing one.
+/// - **The whole `[JIT]` line is zeros.** The classic JITs into a *fixed SRAM0
+///   code region* (`lpvm_native::codemem_esp32::CodeRegion::ESP32_DEFAULT`)
+///   with its own arena and residency counters, reached through the
+///   `xt-placed-code` feature. This chip does not enable that feature and does
+///   not have a region: the S3's SRAM1 is dual-mapped, so a heap buffer is
+///   executable through its I-bus alias (`lpvm_native::exec_addr`'s
+///   `+0x6F_0000`) and the JIT allocates code straight from the `esp_alloc`
+///   heap. Its residency is therefore already inside the `[MEM]` line's
+///   `used`, and `cap=0` says exactly what is true — there is no reserved
+///   region. Filling these from a global stats surface would mean adding one
+///   to `lpvm-native`, which is a separate decision and not this phase's.
 #[cfg(not(fw_harness))]
 fn esp32_memory_stats() -> Option<(u32, u32)> {
+    // One scan of the main stack per elicitation, a log line only when the
+    // mark grows. On this chip `.stack` is the residual of `dram_seg` after
+    // `HEAP_SIZE`, so its high-water mark is what sizes the heap — see
+    // `stack_probe`.
+    stack_probe::log_if_grown("heartbeat");
+    let free = esp_alloc::HEAP.free();
+    let used = esp_alloc::HEAP.used();
+    let largest = recovery::panic_path::largest_free_block();
+    // Structural — see this function's doc comment. No OOM retry allocator on
+    // this chip, so the honest count of retries that saved an allocation is 0.
+    let retry_saves = 0u32;
+    esp_println::println!(
+        "[MEM] free={free} used={used} largest_free={largest} retry_saves={retry_saves}"
+    );
+    // Structural — see this function's doc comment. The S3 JITs into the heap,
+    // not into a reserved code region, so there is no arena to report and the
+    // residency these fields would carry is already in `used` above. Printed
+    // anyway, and unconditionally, because the triple is the unit the replay
+    // comparator reads: a chip that prints two lines where another prints
+    // three is a diff in the transcript, not a gap in the data.
+    esp_println::println!(
+        "[JIT] used=0 peak=0 cap=0 spans=0 peak_spans=0 allocs=0 frees=0 fails=0 largest_free=0"
+    );
     Some((
-        esp_alloc::HEAP.free().min(u32::MAX as usize) as u32,
-        esp_alloc::HEAP.used().min(u32::MAX as usize) as u32,
+        free.min(u32::MAX as usize) as u32,
+        used.min(u32::MAX as usize) as u32,
     ))
 }
 
@@ -260,15 +325,30 @@ fn reboot_now() {
     esp_hal::system::software_reset()
 }
 
-/// Heartbeat memory report. This chip has no largest-free-block probe yet
-/// (no recovery/panic_path port), so the fragmentation fields stay absent.
+/// Heartbeat memory report: free/used plus the fragmentation evidence
+/// (largest allocatable block) that previously reached nothing at all.
+///
+/// ⚠️ Reads the counters itself rather than calling [`esp32_memory_stats`],
+/// and that is load-bearing, not duplication: this runs on the five-second
+/// heartbeat, and the other function *prints*. Routing this through it would
+/// put the three-line ledger on a periodic and flood the serial link — see
+/// [`esp32_memory_stats`] for why the ledger is elicited only.
+///
+/// `oom_retry_saves` stays `None` — this chip has no retry allocator, and
+/// `None` is the wire's way of saying "no such counter here" (the printed
+/// `[MEM]` line has no `None`, so it says `retry_saves=0` instead; both are
+/// structural, neither is invented).
 #[cfg(not(fw_harness))]
 fn heartbeat_memory_stats() -> Option<lpc_wire::server::MemoryStats> {
-    esp32_memory_stats().map(|(free_bytes, used_bytes)| lpc_wire::server::MemoryStats {
-        free_bytes,
-        used_bytes,
-        total_bytes: used_bytes.saturating_add(free_bytes),
-        largest_free_block: None,
+    let free = esp_alloc::HEAP.free().min(u32::MAX as usize) as u32;
+    let used = esp_alloc::HEAP.used().min(u32::MAX as usize) as u32;
+    Some(lpc_wire::server::MemoryStats {
+        free_bytes: free,
+        used_bytes: used,
+        total_bytes: used.saturating_add(free),
+        largest_free_block: Some(
+            recovery::panic_path::largest_free_block().min(u32::MAX as usize) as u32,
+        ),
         oom_retry_saves: None,
     })
 }
@@ -295,6 +375,11 @@ fn boot_firmware(spawner: embassy_executor::Spawner) -> FirmwareApp {
     // not allocate it (unlike the C6's). Recovery leaks its instance into a
     // `&'static mut`, so it cannot run before this line.
     esp_alloc::heap_allocator!(size: HEAP_SIZE);
+    // Paint the main stack before anything deep runs, so the high-water report
+    // measures the whole app (see `stack_probe`). After the arena is carved,
+    // because the paint runs on the main stack and the arena is `.bss`, not
+    // stack. Mirrors the classic's placement exactly.
+    stack_probe::paint();
     esp_println::println!("[INIT] fw-esp32s3 boot");
     esp_println::println!("[INIT] chip=esp32s3 arch=xtensa heap={HEAP_SIZE}");
 
