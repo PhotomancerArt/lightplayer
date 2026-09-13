@@ -50,7 +50,7 @@ function loadTabModule() {
 }
 
 /**
- * Where this page serves the emulator module.
+ * Where this page serves the emulator module AND its JS host.
  *
  * Resolved at POWER-ON, not when the source was built, and for the reason
  * the sim's `discovered()` records at length: a served Studio build carries
@@ -59,20 +59,36 @@ function loadTabModule() {
  * power-on — which can be the page's first action. A snapshot taken any
  * earlier is the unhashed fallback, which 404s.
  *
+ * Two URLs, not one, and both required: since M7 P7 the module imports
+ * `emu_host` and cannot be instantiated without the JS host, so the pair
+ * travels together (`sync-engine-sidecar.sh` copies and names both, and
+ * `emulator_worker.js`'s `create` refuses a board without the host). The
+ * host is hashed separately — different bytes, different cadence — so
+ * neither URL is derived from the other.
+ *
  * Absent key = this build serves no module (D21), and saying so by name
- * beats a fetch failure on a URL nobody chose.
+ * beats a fetch failure on a URL nobody chose. A module with no host beside
+ * it is not "served" either: it is a board that cannot boot, so it is
+ * refused here by the missing key's own name rather than three layers down
+ * in the worker.
  */
-async function resolveModuleUrl(pinned) {
-  if (pinned) return pinned;
+async function resolveUrls(pinnedModuleUrl) {
   const assets = await globalThis.__lpEngineAssets;
-  const url = assets?.emu_esp32c6_wasm;
-  if (!url) {
+  const moduleUrl = pinnedModuleUrl || assets?.emu_esp32c6_wasm;
+  if (!moduleUrl) {
     throw new Error(
       "this build ships no emulator module " +
         "(pkg/engine-manifest.json has no emu_esp32c6_wasm)",
     );
   }
-  return url;
+  const jitHostUrl = assets?.emu_jit_host_js;
+  if (!jitHostUrl) {
+    throw new Error(
+      "this build ships an emulator module with no JS host " +
+        "(pkg/engine-manifest.json has no emu_jit_host_js)",
+    );
+  }
+  return { moduleUrl, jitHostUrl };
 }
 
 function entry(id) {
@@ -125,7 +141,8 @@ function drain(e) {
  * reported by `takeError`, which the link turns into an error event.
  *
  * `moduleUrl` is optional — absent means "ask the page at power-on", which
- * is the only honest moment (see `resolveModuleUrl`).
+ * is the only honest moment (see `resolveUrls`). The module's JS host is
+ * never pinned: it is always the page's, read from the same manifest.
  */
 export function openEmuPort({ uid, mac, moduleUrl, manifestUrl, persistKey }) {
   const id = nextId++;
@@ -158,9 +175,13 @@ export function openEmuPort({ uid, mac, moduleUrl, manifestUrl, persistKey }) {
   };
   ports.set(id, e);
   e.ready = (async () => {
-    const resolved = await resolveModuleUrl(moduleUrl);
+    const resolved = await resolveUrls(moduleUrl);
     const { tabBacking } = await loadTabModule();
-    e.backing = tabBacking({ moduleUrl: resolved, boards: [board] });
+    e.backing = tabBacking({
+      moduleUrl: resolved.moduleUrl,
+      jitHostUrl: resolved.jitHostUrl,
+      boards: [board],
+    });
     const port = await e.backing.connect(board.id);
     port.onBytes((bytes) => e.chunks.push(bytes));
     port.onStats((stats) => {

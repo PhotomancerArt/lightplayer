@@ -26,6 +26,14 @@
 //! ships no emulator module"), which the link reports as an error event —
 //! `open` here is synchronous, as the sim's is, and has nothing to await.
 //!
+//! It resolves TWO keys, and a missing either one fails the board the same
+//! way: since M7 P7 the module imports `emu_host`, so `emu_esp32c6_wasm`
+//! and `emu_jit_host_js` are a pair, and a module served without its JS
+//! host is a board that cannot boot ("this build ships an emulator module
+//! with no JS host"). The host is not pinnable —
+//! [`BrowserEmuLinkSource::pinned`] pins the module only, and the host is
+//! always the page's.
+//!
 //! ⚠️ **wasm-only, so `just test` never sees it.** The model half it plugs
 //! into is host-covered through `emu_transport.rs`'s counting source.
 
