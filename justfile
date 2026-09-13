@@ -2945,7 +2945,7 @@ test-emu-esp32s3-boot: build-fw-esp32s3
     export LP_EMU_ESP32S3_ELF="$shipped"
     if command -v espflash >/dev/null 2>&1; then
       espflash save-image --chip esp32s3 --merge \
-          --partition-table {{ fw_esp32s3_dir }}/partitions.csv \
+          --partition-table lp-fw/fw-esp32s3/partitions.csv \
           --flash-size {{ s3_flash_size }} "$shipped" "$merged"
       export LP_EMU_ESP32S3_MERGED="$merged"
       echo "images: shipped=$shipped merged=$merged"
