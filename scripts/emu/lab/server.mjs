@@ -454,15 +454,31 @@ function makeJob(body) {
   const retryTainted = Number(body.retryTainted ?? 1);
   if (!Number.isInteger(retryTainted) || retryTainted < 0 || retryTainted > 5) bad('retryTainted must be 0–5');
   const device = typeof body.device === 'string' && body.device ? body.device : 'any';
+  const by = makeBy(body.by, bad);
   const stopWhenStable = makeStopWhenStable(body.stopWhenStable, { bad, rows, repeats });
   const presses = [];
   for (let r = 0; r < repeats; r++) for (const b of builds) presses.push({ n: presses.length + 1, build: b, state: 'pending', sentAt: null, deferredAt: null, resultAt: null, resends: 0, tainted: false, taintReasons: [] });
   return {
-    id: newJobId(), kind: 'bench', builds, rows, repeats, spacingMs, device, ttlMs, retryTainted, stopWhenStable,
+    id: newJobId(), kind: 'bench', builds, rows, repeats, spacingMs, device, ttlMs, retryTainted, stopWhenStable, by,
     note: typeof body.note === 'string' ? body.note.slice(0, 200) : null,
     createdAt: new Date().toISOString(), state: 'queued', boundDevice: null, boundDeviceName: null, boundDeviceUa: null,
     presses, stoppedEarly: [], lastPressEndAt: null, reportAt: null, retriesUsed: 0, error: null,
   };
+}
+
+/// Who queued the job (D-by): a short name carried on the record so `jobs`,
+/// the page and the report can say whose job is holding the device. The
+/// server never invents one — an absent or blank `by` stays null and the
+/// caller (`lab.sh`) is the only thing that defaults it, so a job queued by
+/// hand over `curl` is honestly anonymous rather than attributed to the desk.
+/// Too long is a refusal, not a silent truncation: a name the director does
+/// not recognise is worse than an error at the queue.
+function makeBy(v, bad) {
+  if (v === undefined || v === null) return null;
+  if (typeof v !== 'string') bad('by must be a string (a short name: who queued this)');
+  const by = v.trim();
+  if (by.length > 64) bad('by must be ≤ 64 characters (got ' + by.length + ')');
+  return by || null;
 }
 
 /// Validate the opt-in stability field (F3). Absent or null means the rule is
@@ -524,7 +540,7 @@ function queueViewFor(deviceId) {
     .filter((j) => !TERMINAL.has(j.state) || (j.reportAt && Date.now() - Date.parse(j.reportAt) < 3600000))
     .filter((j) => (j.device === 'any' || j.device === deviceId || deviceNameMatches(j.device, deviceId)) && (!j.boundDevice || j.boundDevice === deviceId))
     .map((j) => ({
-      id: j.id, state: j.state, builds: j.builds, note: j.note,
+      id: j.id, state: j.state, builds: j.builds, by: j.by ?? null, note: j.note,
       presses: { done: j.presses.filter((p) => PRESS_TAKEN.has(p.state)).length, total: j.presses.length },
       // One entry per press so the page can draw the interleave as ticks.
       pressStates: j.presses.map((p) => ({ n: p.n, build: p.build, state: p.state, tainted: !!p.tainted })),
@@ -687,7 +703,7 @@ function jobCounts() {
 
 function jobSummary(j) {
   return { id: j.id, state: j.state, builds: j.builds, rows: j.rows, repeats: j.repeats, spacingMs: j.spacingMs, device: j.device, boundDevice: j.boundDevice, boundDeviceName: j.boundDeviceName,
-    note: j.note, createdAt: j.createdAt, reportAt: j.reportAt,
+    by: j.by ?? null, note: j.note, createdAt: j.createdAt, reportAt: j.reportAt,
     stopWhenStable: j.stopWhenStable ?? null, stoppedEarly: (j.stoppedEarly && j.stoppedEarly.length) ? j.stoppedEarly : null,
     presses: { done: j.presses.filter((p) => PRESS_TAKEN.has(p.state)).length, total: j.presses.length, tainted: j.presses.filter((p) => p.tainted).length, failed: j.presses.filter((p) => p.state === 'failed').length, skipped: j.presses.filter((p) => p.state === 'skipped').length } };
 }
@@ -698,7 +714,7 @@ async function postJob(req, res) {
   jobs.set(j.id, j);
   fs.mkdirSync(path.join(jobDir(j.id), 'presses'), { recursive: true });
   saveJob(j);
-  log('job ' + j.id + ' queued: ' + j.builds.join(' vs ') + ' × ' + j.repeats + ', spacing ' + j.spacingMs + ' ms, device ' + j.device + (j.note ? ' — ' + j.note : ''));
+  log('job ' + j.id + ' queued' + (j.by ? ' by ' + j.by : '') + ': ' + j.builds.join(' vs ') + ' × ' + j.repeats + ', spacing ' + j.spacingMs + ' ms, device ' + j.device + (j.note ? ' — ' + j.note : ''));
   send(res, 201, j);
   tick();
 }

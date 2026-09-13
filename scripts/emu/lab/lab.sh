@@ -3,7 +3,7 @@
 #
 #   lab.sh status                                  # devices, builds, job counts
 #   lab.sh devices                                 # the device table
-#   lab.sh queue --build 23a3d3c --rows gate-rows --repeats 3 [--spacing 90s] [--device NAME] [--ttl 24h] [--note ...]
+#   lab.sh queue --build 23a3d3c --rows gate-rows --repeats 3 [--spacing 90s] [--device NAME] [--ttl 24h] [--by NAME] [--note ...]
 #   lab.sh queue --ab 86cb2e0 23a3d3c --rows gate-rows --repeats 5     # A1 B1 A2 B2 … on one device
 #   lab.sh queue --build X --row render-basic:t2:jit:8 --row render-basic:t2:interp  # explicit rows
 #   lab.sh queue --ab A B --repeats 8 --stop-when-stable [PCT] [--stable-row interp|all|KEY] [--stable-min N]  # stop a build once its control row settles
@@ -78,7 +78,13 @@ cmd_queue() {
     # (j-20260913-0755-1213) against back-to-back (j-20260913-0755-14e2) gave a
     # translated median of 1.046× vs 1.053× and an interpreter 0.677 vs 0.669.
     # `--spacing 0` is still allowed and still means back-to-back.
+    # Who queued it: --by wins, then $LAB_BY, then the shell's own identity.
+    # An agent session has no short name in its environment (the harness gives
+    # it only CLAUDE_CODE_SESSION_ID, a uuid), so an agent passes its own name
+    # from ListAgents: --by "emu-lab-polish-d1a04a-bb", or `export LAB_BY=...`
+    # once at the top of the session. Never derived, always declared.
     local builds='[]' rows='"gate-rows"' rowlist='[]' repeats=1 spacing=60000 device=any ttl=86400000 retry=1 note=null
+    local by="${LAB_BY:-${USER:-$(id -un)}@$(hostname -s)}"
     local stable=null stable_pct=5 stable_row=interp stable_min=4
     while [[ $# -gt 0 ]]; do
         case "$1" in
@@ -97,6 +103,7 @@ cmd_queue() {
             --ttl) ttl="$(dur_ms "$2")"; shift 2 ;;
             --retry-tainted) retry="$2"; shift 2 ;;
             --note) note="$(jq -cn --arg n "$2" '$n')"; shift 2 ;;
+            --by) by="$2"; shift 2 ;;
             # The percentage is optional: `--stop-when-stable` alone is the
             # sized default (interp, 5 %, last 4), `--stop-when-stable 3` is
             # tighter. Only a bare number is eaten as the argument.
@@ -117,13 +124,13 @@ cmd_queue() {
     fi
     local body
     body="$(jq -cn --argjson builds "$builds" --argjson rows "$rows" --argjson repeats "$repeats" --argjson spacingMs "$spacing" \
-        --arg device "$device" --argjson ttlMs "$ttl" --argjson retryTainted "$retry" --argjson note "$note" --argjson stopWhenStable "$sws" \
-        '{kind: "bench", builds: $builds, rows: $rows, repeats: $repeats, spacingMs: $spacingMs, device: $device, ttlMs: $ttlMs, retryTainted: $retryTainted, note: $note, stopWhenStable: $stopWhenStable}')"
+        --arg device "$device" --argjson ttlMs "$ttl" --argjson retryTainted "$retry" --argjson note "$note" --argjson stopWhenStable "$sws" --arg by "$by" \
+        '{kind: "bench", builds: $builds, rows: $rows, repeats: $repeats, spacingMs: $spacingMs, device: $device, ttlMs: $ttlMs, retryTainted: $retryTainted, note: $note, stopWhenStable: $stopWhenStable, by: (($by | sub("^\\s+";"") | sub("\\s+$";"")) | if . == "" then null else . end)}')"
     local resp
     resp="$(api /jobs -H 'Content-Type: application/json' -w '\n%{http_code}' -d "$body")"
     local code="${resp##*$'\n'}"; resp="${resp%$'\n'*}"
     if [[ "$code" != 201 ]]; then echo "lab: queue refused ($code): $(jq -r '.error // .' <<<"$resp")" >&2; exit 1; fi
-    jq -r '"lab: queued \(.id): \(.builds|join(" vs ")) × \(.repeats) (\(.presses|length) presses), spacing \(.spacingMs/1000)s, device \(.device), ttl \(.ttlMs/3600000)h\(if .stopWhenStable then ", stop when \(.stopWhenStable.row) last \(.stopWhenStable.minPresses) within \(.stopWhenStable.pct)%" else "" end)\(if .note then " — " + .note else "" end)"' <<<"$resp" >&2
+    jq -r '"lab: queued \(.id): \(.builds|join(" vs ")) × \(.repeats) (\(.presses|length) presses), spacing \(.spacingMs/1000)s, device \(.device), ttl \(.ttlMs/3600000)h\(if .stopWhenStable then ", stop when \(.stopWhenStable.row) last \(.stopWhenStable.minPresses) within \(.stopWhenStable.pct)%" else "" end)\(if .by then ", by " + .by else "" end)\(if .note then " — " + .note else "" end)"' <<<"$resp" >&2
     jq -r .id <<<"$resp"
 }
 
@@ -453,8 +460,8 @@ case "$cmd" in
     jobs)
         need_home
         api /jobs | jq -r '
-            ["id","state","builds","presses","tainted","failed","skipped","device","note"],
-            (.jobs[] | [.id, .state, (.builds|join(" vs ")), "\(.presses.done)/\(.presses.total)", (.presses.tainted|tostring), (.presses.failed|tostring), ((.presses.skipped // 0)|tostring), (.boundDeviceName // .boundDevice // .device), (.note // "")]) | @tsv' | column -t -s $'\t' ;;
+            ["id","state","builds","presses","tainted","failed","skipped","device","by","note"],
+            (.jobs[] | [.id, .state, (.builds|join(" vs ")), "\(.presses.done)/\(.presses.total)", (.presses.tainted|tostring), (.presses.failed|tostring), ((.presses.skipped // 0)|tostring), (.boundDeviceName // .boundDevice // .device), (.by // "-"), (.note // "")]) | @tsv' | column -t -s $'\t' ;;
     cancel)
         need_home
         id="${1:?lab cancel needs a job id}"

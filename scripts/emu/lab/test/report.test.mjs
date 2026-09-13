@@ -135,3 +135,16 @@ test('identity: one image drifting is inconsistent while the other image stays c
   assert.equal(id['render-basic'].consistent, false);
   assert.equal(id['render-rocaille'].consistent, true);
 });
+
+// D: the header says who queued the job, beside its id and note, so a report
+// read weeks later names its author.
+test('the report header carries `by` when the job has one, and is unchanged when it does not', () => {
+  const rows = { 'render-basic/t2/jit/8': [0.863, 0.945], 'render-basic/t2/interp': [0.618, 0.626] };
+  const base = { id: 'j-by', builds: ['A'], rows: 'gate-rows', repeats: 2, spacingMs: 0, state: 'done' };
+  const rep = computeReport({ ...base, note: 'P4 vs P3 head', by: 'emu-lab-polish-d1a04a-bb' }, pressesFor('A', rows, 2));
+  assert.equal(rep.by, 'emu-lab-polish-d1a04a-bb');
+  assert.match(renderReportMd(rep), /^# Lab report — job j-by — P4 vs P3 head — queued by emu-lab-polish-d1a04a-bb$/m);
+  const anon = computeReport(base, pressesFor('A', rows, 2));
+  assert.equal(anon.by, null);
+  assert.match(renderReportMd(anon), /^# Lab report — job j-by$/m);
+});

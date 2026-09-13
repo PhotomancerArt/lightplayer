@@ -318,6 +318,7 @@ prints them all as the rig's table, device column from the lab's name.
   "rows": "gate-rows",                           // or [{slug,grade,mode,fnBlocks,timeout}]
   "repeats": 5, "spacingMs": 60000, "device": "any", "ttlMs": 86400000, "retryTainted": 1,
   "stopWhenStable": null,                        // or {"row":"interp","pct":5,"minPresses":4} — see below
+  "by": "emu-lab-polish-d1a04a-bb",               // who queued it — `lab.sh --by`; null when nothing said
   "note": "P4 vs P3 head", "createdAt": "…", "state": "queued",
   "boundDevice": null, "presses": [{"n": 1, "build": "86cb2e0", "state": "pending"}, …],
   "stoppedEarly": [], "lastPressEndAt": null, "reportAt": null
@@ -510,7 +511,7 @@ lab.sh status | devices | jobs | report <id> | cancel <id> | collect | home | to
 lab.sh stage <sha>                      # build that commit in a throwaway worktree of the primary checkout, put it in the store
 lab.sh install [--force] | uninstall | restart [server|tunnel|restage] | url | logs [-n N] [server|tunnel|restage]
 lab.sh notify status | test             # the "jobs waiting, no device" ping: its state, or one send now
-lab.sh queue --build 23a3d3c --rows gate-rows --repeats 3 [--spacing 90s] [--device NAME] [--ttl 24h] [--note …]
+lab.sh queue --build 23a3d3c --rows gate-rows --repeats 3 [--spacing 90s] [--device NAME] [--ttl 24h] [--by NAME] [--note …]
 lab.sh queue --ab 86cb2e0 23a3d3c --rows gate-rows --repeats 5
 lab.sh queue --build X --row render-basic:t2:jit:8 --row render-basic:t2:interp
 lab.sh queue --ab A B --repeats 8 --stop-when-stable [PCT] [--stable-row interp|all|KEY] [--stable-min N]
@@ -522,6 +523,32 @@ lab.sh wait --job <id> [--max-time 3600] | --device any|NAME | --queue-idle
 to `60s` (see [Jobs](#jobs)); `--spacing 0` is back-to-back.
 `--stop-when-stable`'s percentage is optional (5 % when omitted); see
 [Stopping early](#stopping-early-when-a-build-has-settled-opt-in).
+
+### Who queued it (`--by`)
+
+Every job records **who queued it**, and `lab.sh jobs`, the page's job card,
+the report header and the "jobs waiting" push all say it, so a queue with two
+directors in it reads as two directors rather than as one anonymous pile.
+
+`--by NAME` sets it; without the flag `lab.sh` sends `$LAB_BY`, and without
+that `$USER@<short hostname>` — the desk, which is the honest answer for a
+command a human typed. The server never invents one: a job posted straight to
+`POST /jobs` with no `by` stays `null`. A name is trimmed and must be ≤ 64
+characters (longer is a 400, not a silent truncation).
+
+**An agent queues under its own session name.** The harness exposes only
+`CLAUDE_CODE_SESSION_ID` (a uuid) — the short name a session answers to is
+what `ListAgents` prints ("This session is emu-lab-polish-d1a04a-bb"), and
+nothing in the environment carries it. So pass it, once per command or once
+per session:
+
+```bash
+scripts/emu/lab/lab.sh queue --ab A B --repeats 5 --by "emu-lab-polish-d1a04a-bb"
+export LAB_BY="emu-lab-polish-d1a04a-bb"      # …or say it once and forget it
+```
+
+Do not try to derive the name: a uuid on a job card tells the director
+nothing, and a guess tells it something false.
 
 ## Standing service (D7, T8): the launchd agents
 

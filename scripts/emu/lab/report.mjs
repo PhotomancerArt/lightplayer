@@ -132,7 +132,7 @@ export function computeReport(job, presses) {
 
   const device = job.boundDevice ? { id: job.boundDevice, name: job.boundDeviceName ?? null, ua: job.boundDeviceUa ?? null } : null;
   return {
-    job: job.id, note: job.note ?? null, builds, rows: job.rows, repeats: job.repeats, spacingMs: job.spacingMs,
+    job: job.id, by: job.by ?? null, note: job.note ?? null, builds, rows: job.rows, repeats: job.repeats, spacingMs: job.spacingMs,
     device, state: job.state, computedAt: new Date().toISOString(),
     stopWhenStable: job.stopWhenStable ?? null,
     stoppedEarly: Array.isArray(job.stoppedEarly) && job.stoppedEarly.length ? job.stoppedEarly : null,
@@ -210,7 +210,7 @@ const pct = (x) => (x === null || x === undefined ? '–' : Number(x).toFixed(1)
 /// presses; then an A/B section. Three decimals, percentages to one.
 export function renderReportMd(rep) {
   const out = [];
-  out.push('# Lab report — job ' + rep.job + (rep.note ? ' — ' + rep.note : ''));
+  out.push('# Lab report — job ' + rep.job + (rep.note ? ' — ' + rep.note : '') + (rep.by ? ' — queued by ' + rep.by : ''));
   out.push('');
   out.push('- builds: ' + rep.builds.join(' vs ') + ' · rows: ' + (Array.isArray(rep.rows) ? rep.rows.map(rowKey).join(', ') : rep.rows) +
     ' · repeats: ' + rep.repeats + ' · spacing: ' + Math.round(rep.spacingMs / 1000) + ' s');

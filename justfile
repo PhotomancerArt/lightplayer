@@ -3279,6 +3279,12 @@ bench-emu-web *args:
 #   just emu-lab wait --job <id>              # ONE blocking call, run in the background
 #   just bench-emu-web --stage-into ~/.photomancer/emu-lab   # put this tree's build in the store
 #
+# Every job records who queued it. An agent session has no short name in its
+# environment (only CLAUDE_CODE_SESSION_ID, a uuid), so pass the name
+# `ListAgents` prints for you — `--by "emu-lab-polish-d1a04a-bb"` on the queue,
+# or `export LAB_BY=…` once per session. Never derive it. Without either, the
+# job is queued as $USER@<host>.
+#
 # Numbers from the lab are the phone's; they confirm direction (DD43). The
 # desk proxy stays the phase bar.
 emu-lab *args:

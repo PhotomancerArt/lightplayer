@@ -285,7 +285,7 @@ export function main() {
       const ticks = (j.pressStates || []).map((p) => { const g = glyph(p); return '<span class="tick ' + g.c + '" title="press ' + p.n + ' ' + p.build + ' ' + g.t + '">' + g.g + '</span>'; }).join('');
       const legend = j.builds.length === 2 ? ' <span class="note">(A ' + j.builds[0] + ', B ' + j.builds[1] + ', alternating)</span>' : '';
       return '<div class="job ' + j.state + '"><div><b>' + j.state + '</b> · ' + j.builds.join(' vs ') + ' · ' + j.presses.done + ' of ' + j.presses.total + ' presses' + legend + '</div>' +
-        '<div class="ticks">' + ticks + '</div><div class="note">' + j.id + (j.note ? ' — ' + j.note : '') + '</div></div>';
+        '<div class="ticks">' + ticks + '</div><div class="note">' + j.id + (j.by ? ' · queued by ' + j.by : '') + (j.note ? ' — ' + j.note : '') + '</div></div>';
     }).join('');
     renderState();
   }

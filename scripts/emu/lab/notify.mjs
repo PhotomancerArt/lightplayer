@@ -169,6 +169,17 @@ export function createNotifier({ home, configPath, log, now = () => Date.now() }
     };
   }
 
+  /// D-by: the names on the waiting jobs, as one appended clause. A job
+  /// queued over `curl` carries no name and simply contributes nothing; with
+  /// no names at all the body is unchanged. Three names, then a count — the
+  /// push is a nudge, not a manifest.
+  function queuedByClause(waiting) {
+    const names = [];
+    for (const j of waiting) if (j.by && !names.includes(j.by)) names.push(j.by);
+    if (!names.length) return '';
+    return ' — queued by ' + names.slice(0, 3).join(', ') + (names.length > 3 ? ' +' + (names.length - 3) + ' more' : '');
+  }
+
   async function deliver(c, title, body) {
     const cmd = process.env.LAB_NOTIFY_CMD;
     if (cmd) return runCmd(cmd, { LAB_NOTIFY_TITLE: title, LAB_NOTIFY_BODY: body, LAB_NOTIFY_KIND: c.kind, LAB_NOTIFY_TARGET: c.target });
@@ -227,7 +238,9 @@ export function createNotifier({ home, configPath, log, now = () => Date.now() }
       st.notifiedAt = new Date(t).toISOString();
       save();
       const { title, body } = compose(waiting);
-      send(c, title, body, 'queue waiting, no device').catch(() => { /* recorded in state */ });
+      // Who queued them, appended as its own clause so the body above stays
+      // whatever it says (D-by).
+      send(c, title, body + queuedByClause(waiting), 'queue waiting, no device').catch(() => { /* recorded in state */ });
     },
 
     /// `lab.sh notify test`: one send now, whatever the gate thinks. It does
