@@ -62,6 +62,8 @@ pub struct Snapshot {
     pub core_quantum: u64,
     /// Everything the console had said at this cycle.
     pub console: Vec<u8>,
+    /// Everything the mask ROM's UART0 console had put on the wire (P06).
+    pub uart0: Vec<u8>,
 }
 
 impl Snapshot {

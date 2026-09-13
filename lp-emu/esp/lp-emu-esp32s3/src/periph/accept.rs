@@ -26,9 +26,14 @@
 //! # Which phase owns which block
 //!
 //! Every block here is a probe. The phase that gives it behaviour is named
-//! on the block; `SPI0`/`SPI1` and `EXTMEM` are **P06**'s, the four RF
-//! blocks are nobody's (nothing on this chip's radio is modelled and nothing
-//! here suggests it is).
+//! on the block. Since **P06** `SPI1`, `SPI0` and `EXTMEM` are views
+//! ([`super::spi1`], [`super::spi0`], [`super::extmem`]) built *over* the
+//! register files this module still constructs — so the reset sweep and
+//! the override ledger below still cover every offset they answer at. `GPIO`
+//! and `IO_MUX` are **P07**'s, accept-and-remember here because the mask
+//! ROM's boot path reads the strapping register and configures the SPI pads
+//! before it can load anything; the four RF blocks are nobody's (nothing on
+//! this chip's radio is modelled and nothing here suggests it is).
 
 use lp_emu_esp_common::RegFile;
 
@@ -188,8 +193,9 @@ pub fn apb_ctrl() -> RegFile {
 /// (`date`).
 pub const SPI_LEN: u32 = 0x400;
 
-/// `SPI0` at `0x6000_3000` — the cache's own flash port; **P06's block**,
-/// accept-and-remember here. `esp_hal::init` writes `clock_gate` (`+0xe8`)
+/// `SPI0` at `0x6000_3000` — the cache's own flash port. The register file
+/// behind [`super::spi0::Spi0`] (P06), which refuses `cmd` triggers and
+/// remembers everything else; `esp_hal::init` writes `clock_gate` (`+0xe8`)
 /// once and reads nothing back.
 ///
 /// ⚠️ **SPI0 and SPI1 are separate PAC modules on this chip** with separate
@@ -201,18 +207,224 @@ pub fn spi0() -> RegFile {
         .with_pac_grades()
 }
 
-/// `SPI1` at `0x6000_2000` — the flash controller `esp_storage` drives;
-/// **P06's block**, accept-and-remember here. `esp_hal::init` touches
-/// `cmd` (`+0x00`), `w0` (`+0x58`) and `clock_gate` (`+0xe8`).
+/// `SPI1` at `0x6000_2000` — the flash controller `esp_storage` drives. The
+/// register file behind [`super::spi1::Spi1`] (P06), whose `cmd` runs the
+/// flash engine; `esp_hal::init` touches `cmd` (`+0x00`), `w0` (`+0x58`)
+/// and `clock_gate` (`+0xe8`).
 ///
 /// No exception is carried, and none could be: a flash read sets `cmd.usr`
 /// (`+0x00`, bit 18) and spins until hardware clears it when the transfer
-/// is done, and a block that remembers holds it set forever. That spin is
-/// **P06**'s stop, on `engine::spi_flash`, and the classic's P3 ledger
-/// carries the same sentence for the same reason.
+/// is done, and a block that remembers holds it set forever. That spin was
+/// P05's stop and is P06's view, on `engine::spi_flash`.
 pub fn spi1() -> RegFile {
     RegFile::new("SPI1", SPI_LEN)
         .with_names(regs::SPI1)
+        .with_pac_grades()
+}
+
+/// `GPIO`'s aperture: the generated table runs to `+0x6fc` (`reg_date`).
+pub const GPIO_LEN: u32 = 0x700;
+
+/// `GPIO.strap` (`+0x038`): "pad strapping register", bits 15:0, read-only
+/// in the PAC.
+pub const GPIO_STRAP: u32 = 0x038;
+
+/// The strapping word a **flash boot** needs, as the mask ROM decodes it —
+/// **from the ROM's own branches, not from a board**, because no S3 board's
+/// banner has been captured yet (P09).
+///
+/// `boot_prepare` (`0x4004_378c`) reads `0x6000_4038` and picks the name it
+/// prints after `boot:0x%x (` by the low nibble:
+///
+/// ```text
+/// 400437dd:  extui a8, a8, 0, 4 ; bnei a8, 7  → "UART0_BOOT" when 7
+/// 400437ef:  bany  a8, 12 …     ; neither bit 3 nor bit 2 → "DOWNLOAD(USB/UART0)"
+/// 400437fe:  bbsi  a5, 3, +     ; bit 3 set …
+/// 4004380a:  bnei  a9, 4, …     ;   … or nibble 4
+/// 40043816:  bbsi  a5, 3, +     ;   bit 3 → "SPI_FAST_FLASH_BOOT", else "SPI_FLASH_BOOT"
+/// 40043827:  bnei  a8, 6        ; 6 → "SPI_DOWNLOAD_BOOT"; 5 → fatal
+/// ```
+///
+/// and `main` (`0x4004_3a2c`) takes the flash-boot path on the same test
+/// (`40043a9d: bbsi a4, 3` / `40043aa9: bnei a2, 4`) and the download path
+/// otherwise. So **`0x8`** — bit 3 set, nothing else — is the smallest word
+/// the ROM's own decode calls `SPI_FAST_FLASH_BOOT`, and it is what
+/// `GPIO.strap` reads on a machine given no `--strap`. The bits above the
+/// nibble are pad levels the ROM prints and does not decide by; a board's
+/// real word (P09) may carry more of them, and `--strap` takes it.
+pub const GPIO_STRAP_SPI_FAST_FLASH_BOOT: u32 = 0x8;
+
+/// The strapping word the ROM's own decode calls `DOWNLOAD(USB/UART0)`:
+/// nibble `0` — bit 3 clear, and none of 4, 5, 6, 7 (`boot_prepare`
+/// `400437ef: bany a8, 12 → skip` leaves the download name; `main`
+/// `40043acc..` then runs the download-mode checks). What
+/// [`lp_emu_esp_common::Strap::Download`] latches on a reboot.
+pub const GPIO_STRAP_DOWNLOAD: u32 = 0x0;
+
+/// `GPIO` at `0x6000_4000` — **P07's block**, accept-and-remember here, with
+/// one read override: `strap` reads the word the pads were latched into at
+/// reset, whatever the guest writes (the PAC calls it read-only).
+///
+/// The ROM's boot path reads `strap` in `boot_prepare` and `main`
+/// ([`GPIO_STRAP_SPI_FAST_FLASH_BOOT`]) and writes the matrix through
+/// `gpio_matrix_out` (`0x4005_0044`: `func_out_sel_cfg` at `+0x554..`,
+/// `enable_w1ts` `+0x24`) and `gpio_output_disable` (`0x4005_00c8`:
+/// `enable_w1tc` `+0x2c`) while attaching the flash pads; all of that lands
+/// here and moves no pin until P07 gives the block a fabric.
+pub fn gpio(strap: u32) -> RegFile {
+    RegFile::new("GPIO", GPIO_LEN)
+        .with_names(regs::GPIO)
+        .with_read_override(GPIO_STRAP, 0xffff_ffff, strap)
+        .with_pac_grades()
+}
+
+/// [`gpio`] as a peripheral the machine can reach after registration: a
+/// reboot re-latches the strapping word ([`GpioBlock::set_strap`]), which
+/// needs a downcast a bare [`RegFile`] does not offer. Everything else is
+/// the register file's.
+pub struct GpioBlock(pub RegFile);
+
+impl GpioBlock {
+    pub fn new(strap: u32) -> Self {
+        Self(gpio(strap))
+    }
+
+    /// Re-latch the strapping pins, as a chip reset does.
+    pub fn set_strap(&mut self, strap: u32) {
+        self.0.set_read_override(GPIO_STRAP, 0xffff_ffff, strap);
+    }
+}
+
+impl lp_emu_esp_common::Peripheral for GpioBlock {
+    fn name(&self) -> &'static str {
+        "GPIO"
+    }
+
+    fn read(
+        &mut self,
+        off: u32,
+        width: lp_emu_esp_common::Width,
+        cx: &mut lp_emu_esp_common::BusCx<'_>,
+    ) -> u32 {
+        self.0.read(off, width, cx)
+    }
+
+    fn write(
+        &mut self,
+        off: u32,
+        width: lp_emu_esp_common::Width,
+        value: u32,
+        cx: &mut lp_emu_esp_common::BusCx<'_>,
+    ) {
+        self.0.write(off, width, value, cx);
+    }
+
+    fn reg_name(&self, off: u32) -> Option<&'static str> {
+        self.0.reg_name(off)
+    }
+
+    fn reg_grade(&self, off: u32) -> Option<lp_emu_esp_common::periph::RegGrade> {
+        self.0.reg_grade(off)
+    }
+
+    fn save_state(&self) -> Vec<u8> {
+        self.0.save_state()
+    }
+
+    fn load_state(&mut self, bytes: &[u8]) {
+        self.0.load_state(bytes);
+    }
+
+    fn as_any_mut(&mut self) -> Option<&mut dyn std::any::Any> {
+        Some(self)
+    }
+}
+
+/// `RMT`'s register aperture: the generated table's last register is
+/// `date` at `+0xcc`. ⚠️ The pulse memory at `+0x800` is **not** in this
+/// aperture: P07 owns it, and a guest write there is a strict stop that
+/// names it rather than a write into a table nothing reads back.
+pub const RMT_LEN: u32 = 0x100;
+
+/// `RMT` at `0x6001_6000` — **P07's block**, accept-and-remember here.
+///
+/// The shipped image's `init_board` reaches it between `[INIT] flash
+/// filesystem mounted` and `[INIT] fw-esp32 initialized, starting server
+/// loop`: `RmtClockGuard::new` reads `sys_conf` (`+0xc0`) at cycle 3,072,844
+/// (`pc=0x420a5381`), the direct load's first strict stop once the flash
+/// was behind it (P06). The server loop, the wire and the elicited ledger
+/// are P06's deliverables and sit behind that read, so the block is a table
+/// here — the classic's P8 shape, before its M4 waveform — and the strip it
+/// would drive is P07's.
+pub fn rmt() -> RegFile {
+    RegFile::new("RMT", RMT_LEN)
+        .with_names(regs::RMT)
+        .with_pac_grades()
+}
+
+/// `ASSIST_DEBUG`'s aperture: the generated table runs to `+0x150`.
+pub const ASSIST_DEBUG_LEN: u32 = 0x200;
+
+/// `ASSIST_DEBUG` at `0x600C_E000` — the debug assist block, which nothing
+/// on the application path names. The mask ROM's `boot_prepare`
+/// (`0x4004_378c`) reads `core_0_debug_mode` (`+0x5c`,
+/// `40043883: l32r a2, 600ce05c`) on every boot to decide whether to print
+/// the `Saved PC` line, after `assist_debug_clock_enable` (`0x4004_36c0`)
+/// gated its clock through `SYSTEM`; `assist_debug_record_enable`
+/// (`0x4004_36f4`) then writes `+0x48`/`+0x4c`. The S3's first ROM-up boot
+/// stopped on that read at cycle 21,846 (P06). Accept-and-remember at the
+/// PAC's resets: `core_0_debug_mode` reads 0, so no debugger is attached
+/// and no `Saved PC` is printed, which is the power-on truth.
+pub fn assist_debug() -> RegFile {
+    RegFile::new("ASSIST_DEBUG", ASSIST_DEBUG_LEN)
+        .with_names(regs::ASSIST_DEBUG)
+        .with_pac_grades()
+}
+
+/// `APB_SARADC`'s aperture: the generated table runs to `+0x78`; `+0x3fc`
+/// is `apb_ctrl_date`.
+pub const APB_SARADC_LEN: u32 = 0x400;
+
+/// `APB_SARADC` at `0x6004_0000` — the SAR ADC controller, which nothing on
+/// the application path names. The ESP-IDF second-stage bootloader's
+/// `bootloader_random_enable` stirs the ADC into the RNG (*"Enabling RNG
+/// early entropy source"*) and reads `+0x70` — the S3's second ROM-up
+/// strict stop, cycle 12,482,844, bootloader `0x403c_9c84` (P06);
+/// `bootloader_random_disable` undoes it before the app. Accept-and-remember
+/// at the PAC's resets: the entropy it would add is what
+/// [`super::rng`] replaces with a seeded generator (ruling R4).
+pub fn apb_saradc() -> RegFile {
+    RegFile::new("APB_SARADC", APB_SARADC_LEN)
+        .with_names(regs::APB_SARADC)
+        .with_pac_grades()
+}
+
+/// `SENS`'s aperture: the generated table runs to `+0x110`.
+pub const SENS_LEN: u32 = 0x200;
+
+/// `SENS` at `0x6000_8800` — the sensor controller, the other half of the
+/// bootloader's RNG early entropy source (`sar_meas1_ctrl2`,
+/// `sar_meas2_ctrl2`, `sar_power_xpd_sar` and friends). Accept-and-remember
+/// at the PAC's resets, for the reason [`apb_saradc`] gives.
+pub fn sens() -> RegFile {
+    RegFile::new("SENS", SENS_LEN)
+        .with_names(regs::SENS)
+        .with_pac_grades()
+}
+
+/// `IO_MUX`'s aperture: `pin_ctrl` and the 49 pad words the PAC names, the
+/// last at `+0xc4` (`gpio48`).
+pub const IO_MUX_LEN: u32 = 0xc8;
+
+/// `IO_MUX` at `0x6000_9000` — **P07's block**, accept-and-remember here.
+/// The mask ROM's `SelectSpiFunction` (`0x4004_974c`) writes the six SPI
+/// pads' words (`+0x70..+0x84`) and `Uart_Init` the two UART0 pads'
+/// (`600090b0`/`600090b4`) on every ROM-up boot; the PAC's resets are the
+/// pads' power-on state and nothing reads them back for a decision this
+/// machine makes.
+pub fn io_mux() -> RegFile {
+    RegFile::new("IO_MUX", IO_MUX_LEN)
+        .with_names(regs::IO_MUX)
         .with_pac_grades()
 }
 
@@ -333,6 +545,16 @@ pub const READ_OVERRIDES: &[(&str, u32, u32, u32, &str)] = &[
          cache with no operation in flight is idle; this is the one deviation from a PAC reset \
          in this file",
     ),
+    (
+        "GPIO",
+        GPIO_STRAP,
+        0xffff_ffff,
+        GPIO_STRAP_SPI_FAST_FLASH_BOOT,
+        "strap — 'pad strapping register' (PAC, read-only): the pads as latched at reset, an \
+         INPUT to the run (`--strap`), not a reset value. The default is the smallest word the \
+         ROM's own decode calls SPI_FAST_FLASH_BOOT: boot_prepare 400437fe `bbsi a5, 3` and \
+         main 40043a9d `bbsi a4, 3`. No S3 board's word has been captured (P09)",
+    ),
 ];
 
 /// Every bit an accept block in this file answers as a **mirror** of
@@ -382,7 +604,33 @@ mod tests {
             (nrx(), regs::NRX),
             (fe(), regs::FE),
             (fe2(), regs::FE2),
+            (gpio(GPIO_STRAP_SPI_FAST_FLASH_BOOT), regs::GPIO),
+            (io_mux(), regs::IO_MUX),
+            (rmt(), regs::RMT),
+            (assist_debug(), regs::ASSIST_DEBUG),
+            (apb_saradc(), regs::APB_SARADC),
+            (sens(), regs::SENS),
         ]
+    }
+
+    /// The strap is an input, not a register: it reads what the run said,
+    /// whatever the guest writes, and the ROM's decode of the default is a
+    /// flash boot.
+    #[test]
+    fn the_strap_reads_the_runs_word_and_the_default_is_a_flash_boot() {
+        let mut sb = Sandbox::new();
+        let mut g = gpio(GPIO_STRAP_SPI_FAST_FLASH_BOOT);
+        assert_eq!(g.reg_name(GPIO_STRAP), Some("strap"));
+        assert_eq!(sb.read(&mut g, GPIO_STRAP), 0x8);
+        // `boot_prepare` 400437fe / `main` 40043a9d: bit 3 → the flash path.
+        assert_ne!(GPIO_STRAP_SPI_FAST_FLASH_BOOT & (1 << 3), 0);
+        assert_ne!(GPIO_STRAP_SPI_FAST_FLASH_BOOT & 0xf, 7, "7 is UART0_BOOT");
+        // Download: nibble 0, so neither bit 3 nor bit 2 (`bany a8, 12`).
+        assert_eq!(GPIO_STRAP_DOWNLOAD & 0xc, 0);
+        sb.write(&mut g, GPIO_STRAP, 0);
+        assert_eq!(sb.read(&mut g, GPIO_STRAP), 0x8, "read-only, and an input");
+        let mut d = gpio(GPIO_STRAP_DOWNLOAD);
+        assert_eq!(sb.read(&mut d, GPIO_STRAP), 0);
     }
 
     /// No accept block in this file carries a `with_reset`: every stored

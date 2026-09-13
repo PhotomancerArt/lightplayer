@@ -46,18 +46,42 @@
 //! exactly one user — `--break-at`, which installs a stop at an address the
 //! caller named.
 //!
+//! # The unpack table, and why the ROM's data image is seeded too (P06)
+//!
+//! [`seed_data`] places the non-alloc `.data_*` and `.data.interface.*`
+//! sections at their RAM addresses, which is the half a direct load needs.
+//! A ROM-up boot runs the reset handler's own copy loop first:
+//!
+//! ```text
+//! 40000505:  l32r  a4, (0x40057354)      ; _data_start — the table
+//! 40000508:  l32r  a5, (0x400575c4)      ; _data_end
+//! 4000050b <unpackloop>:
+//! 4000050b:  l32i.n a6, a4, 0            ; dst
+//! 4000050d:  l32i.n a7, a4, 4            ; dst_end
+//! 4000050f:  l32i.n a8, a4, 8            ; src
+//! 40000511:  l32i.n a2, a4, 12           ; flag: 1 = every core, else PRO only
+//! 40000513:  beq   a6, a7, dontunpack
+//! 40000522 <alwaysunpack>:
+//! 40000522:  l32i.n a2, a8, 0 ; s32i.n a2, a6, 0 ; addi.n a6/a8, 4 ; bltu a6, a7
+//! 4000052d:  addi  a4, a4, 16            ; 16-byte entries
+//! ```
+//!
+//! The sources are the ROM's **data image**, past the end of `.text` at
+//! `0x4005_77A8..0x4005_8190` — which the ELF only carries as the `paddr`
+//! of its `.data` `PT_LOAD`s. P03 mapped the ROM through `0x4005_77A8` and
+//! the first ROM-up boot stopped at `unpcopy` (`0x4000_0522`) reading that
+//! very address at cycle 162, the classic's finding one chip over.
+//! [`seed_data_image`] places the ROM's own copy of the seeded bytes at the
+//! source addresses the table names, so the copy loop moves the ELF's bytes
+//! rather than zeros; [`crate::memmap::ROM_MASK_LEN`] runs to the table's
+//! highest source.
+//!
 //! # What is NOT here, and which phase owns it
 //!
-//! - **The ROM's own unpack/bss tables.** The classic seeds the source
-//!   addresses its `_ResetVector`'s `unpcopy` reads, because a ROM-up boot
-//!   really runs that copy. The S3 has no ROM-up path until **P06**, and
-//!   seeding a table nothing reads would be a claim about a path this phase
-//!   has not walked. [`seed_data`] places the non-alloc `.data_*` sections a
-//!   *running* image reads, which is the half a direct load needs.
-//! - **The flash chip description.** The classic tells the ROM how big the
-//!   chip is before `esp_rom_spiflash_*` runs. That is **P06**'s, with the
-//!   cache MMU; this phase's direct load reaches its first MMIO stop long
-//!   before any flash routine.
+//! - **The flash chip description.** The loader tells the ROM how big the
+//!   chip is before `esp_rom_spiflash_*` runs on a direct load
+//!   ([`crate::loader::seed_rom_flash_chip`], P06); a ROM-up boot's
+//!   bootloader does it itself.
 
 use std::collections::BTreeMap;
 use std::fmt;
@@ -449,6 +473,109 @@ pub fn seed_data(bus: &mut SocBus, rom: &ElfImage) -> Result<Vec<SeededSection>,
         });
     }
     Ok(seeded)
+}
+
+/// The unpack table's two ends, as the reset handler's literals name them
+/// (`40000505: l32r a4, (0x40057354)` / `40000508: l32r a5, (0x400575c4)`);
+/// resolved from the ELF's symbol table, never hardcoded.
+pub const UNPACK_TABLE_START: &str = "_data_start";
+pub const UNPACK_TABLE_END: &str = "_data_end";
+
+/// One entry is four words: `dst`, `dst_end`, `src`, `flag`
+/// (`4000052d: addi a4, a4, 16`).
+pub const UNPACK_ENTRY_LEN: u32 = 16;
+
+/// One row of the reset handler's unpack table.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct UnpackRange {
+    pub dst: u32,
+    pub end: u32,
+    pub src: u32,
+    /// `1`: unpacked on every core; anything else: on the PRO core only
+    /// (`40000516: beqi a2, 1, alwaysunpack` / `4000051f: beq prid, abab,
+    /// dontunpack`).
+    pub flag: u32,
+}
+
+impl UnpackRange {
+    pub const fn len(&self) -> u32 {
+        self.end.saturating_sub(self.dst)
+    }
+
+    pub const fn is_empty(&self) -> bool {
+        self.end <= self.dst
+    }
+}
+
+/// The reset handler's unpack table, read out of the bus after [`load`]
+/// placed the ROM's `.text` (the table is data inside it). An ELF with no
+/// `_data_start`/`_data_end` (a `--rom` override without symbols) yields an
+/// empty list and no placement.
+pub fn unpack_table(bus: &SocBus, rom: &ElfImage) -> Vec<UnpackRange> {
+    let (Some(start), Some(end)) = (
+        rom.symbol(UNPACK_TABLE_START).map(|s| s.address),
+        rom.symbol(UNPACK_TABLE_END).map(|s| s.address),
+    ) else {
+        log::warn!(
+            "rom: no `{UNPACK_TABLE_START}`/`{UNPACK_TABLE_END}` in this ROM ELF; the reset \
+             handler's unpack loop will copy whatever is at its source addresses"
+        );
+        return Vec::new();
+    };
+    let mut out = Vec::new();
+    let mut at = start;
+    while at + UNPACK_ENTRY_LEN <= end {
+        let word = |i: u32| crate::loader::read_word(bus, at + 4 * i);
+        match (word(0), word(1), word(2), word(3)) {
+            (Some(dst), Some(end_), Some(src), Some(flag)) => out.push(UnpackRange {
+                dst,
+                end: end_,
+                src,
+                flag,
+            }),
+            _ => break,
+        }
+        at += UNPACK_ENTRY_LEN;
+    }
+    out
+}
+
+/// Place the ROM's own copy of the seeded data at the **source** addresses
+/// its unpack table names (module docs). The bytes come from the
+/// destinations [`seed_data`] has already filled, so the copy loop a ROM-up
+/// boot really runs moves the ELF's bytes rather than zeros; a destination
+/// the ELF left empty is copied as it is, because an invented source would
+/// be worse than an honest zero. Returns how many entries were seeded.
+pub fn seed_data_image(bus: &mut SocBus, rom: &ElfImage) -> Result<usize, RomError> {
+    let mut seeded = 0;
+    for range in unpack_table(bus, rom) {
+        if range.is_empty() || range.src == range.dst {
+            continue;
+        }
+        let len = range.len();
+        let Some(bytes) = read_span(bus, range.dst, len) else {
+            log::warn!(
+                "rom: the unpack table's destination {:#010x}+{len} is in no region; its \
+                 source at {:#010x} is left as it is",
+                range.dst,
+                range.src
+            );
+            continue;
+        };
+        place_spanning(bus, range.src, &bytes, len)?;
+        seeded += 1;
+    }
+    Ok(seeded)
+}
+
+/// `len` bytes at `address` out of whichever region holds them.
+fn read_span(bus: &SocBus, address: u32, len: u32) -> Option<Vec<u8>> {
+    let region = bus
+        .regions()
+        .iter()
+        .find(|r| r.contains(address) && r.contains(address + len - 1))?;
+    let at = (address - region.base) as usize;
+    Some(bus.region_bytes(region)[at..at + len as usize].to_vec())
 }
 
 /// Place `data` (then zero-fill to `memsz`) from `address`, across as many

@@ -1,5 +1,6 @@
 //! The S3's peripheral set — **the blocks before the console** (M6 P04),
-//! **and the console** (M6 P05).
+//! **the console** (M6 P05), and **the flash, the cache and the mask ROM's
+//! console** (M6 P06).
 //!
 //! Every block here is one of three things, and each file says which:
 //!
@@ -10,14 +11,20 @@
 //!   RTC calibration, the MWDT gate), [`systimer`] (the S3's
 //!   `Instant::now()`), [`efuse`] (the MAC and the wafer version),
 //!   [`i2c_ana_mst`] (the analog master as a `{block, register}` store),
-//!   [`usb_sj`] (**the link, and the console on it**), and the two halves of
-//!   the interrupt matrix ([`crate::intmatrix`]);
+//!   [`usb_sj`] (**the link, and the console on it**), the two halves of
+//!   the interrupt matrix ([`crate::intmatrix`]), and since P06 [`spi1`]
+//!   (the flash controller on `engine::spi_flash`), [`spi0`] (the cache's
+//!   port, which refuses), [`extmem`] (the cache controller, whose enable
+//!   bits reach [`crate::cache`]), [`flash_mmu`] (the page table at
+//!   `0x600C_5000`), [`sha`] (the C6's IP on `engine::sha`) and [`uart`]
+//!   (the mask ROM's console on `engine::uart`);
 //! - **accept-and-remember** — a [`lp_emu_esp_common::RegFile`] seeded from
 //!   the PAC's resets, with the bits something spins on pinned to a cited
-//!   value ([`accept`]): `SENSITIVE`, `EXTMEM`'s boot registers, `SPI0`,
-//!   `SPI1`, `APB_CTRL`, `BB`, `NRX`, `FE`, `FE2`;
+//!   value ([`accept`]): `SENSITIVE`, `APB_CTRL`, `BB`, `NRX`, `FE`, `FE2`,
+//!   and — P07's blocks, here because the ROM-up boot meets them — `GPIO`
+//!   (with the strapping word) and `IO_MUX`;
 //! - **not modelled** — left unmapped on purpose, so a strict run stops on
-//!   them: the flash cache and SHA (P06), the pad fabric and RMT (P07).
+//!   them: the pad fabric and RMT (P07).
 //!
 //! ⚠️ [`usb_sj`] is the one block here that is **not** the S3's own file: it
 //! is the C6's view, moved to [`lp_emu_esp_common::ip::usb_sj`] and
@@ -33,10 +40,13 @@
 //!
 //! The S3 takes two views from each sibling and the wrong parent is
 //! silently wrong (`m6/notes.md` §3): [`rtc_cntl`] and the matrix are the
-//! **classic's**, copied with an offset table; [`timg`], [`systimer`] and
-//! [`efuse`] are the **C6's**, copied with a counter count, a base and the
-//! S3's own wafer-version words. [`system`] is fresh — three chips, three
-//! unrelated layouts. The copies live here rather than parameterising the
+//! **classic's**, copied with an offset table; [`timg`], [`systimer`],
+//! [`efuse`], [`spi1`] and [`sha`] are the **C6's**, copied with a counter
+//! count, a base, the S3's own wafer-version words, and — for SHA — the
+//! wider `h_mem`. [`system`] and [`uart`] are fresh — three chips, three
+//! unrelated layouts. [`spi0`] and [`extmem`] are the *classic's* shape
+//! (a refusing cache port; a split-cache block with a table beside it) at
+//! the S3's numbers. The copies live here rather than parameterising the
 //! siblings' files because the plan's invariant is that the C6 and the
 //! classic do not move by a byte; the extraction into `lp-emu-esp-common`
 //! is M8's, and each file names what it would extract.
@@ -56,19 +66,31 @@
 //! thing reached. Putting the console in the boot's order would move
 //! `SYSTIMER`'s index — which is the thing this rule exists to prevent — so
 //! the index contract wins and the list's comment carries the narrative.
+//! P06's six new blocks follow it for the same reason: every one of them is
+//! met by the **ROM-up** boot before `SENSITIVE`, and re-sorting the list to
+//! that boot's order would move every index P04 and P05 pinned.
 
 pub mod accept;
 pub mod efuse;
+pub mod extmem;
+pub mod flash_mmu;
 pub mod i2c_ana_mst;
+pub mod rng;
 pub mod rtc_cntl;
+pub mod sha;
+pub mod spi0;
+pub mod spi1;
 pub mod system;
 pub mod systimer;
 pub mod timg;
+pub mod uart;
 pub mod usb_sj;
 
 use lp_emu_esp_common::StreamId;
 use lp_emu_esp_common::periph::BoxedPeripheral;
 
+use crate::cache::CacheHandle;
+use crate::flash::FlashHandle;
 use crate::intmatrix::InterruptCoreView;
 use crate::loader::{EfuseIdentity, ResetCause};
 use crate::machine::CoreOneHandle;
@@ -107,17 +129,34 @@ pub const WDT_WKEY: u32 = 0x50D8_3AA1;
 /// so the SWD too is unlocked at power-on.
 pub const SWD_WKEY: u32 = 0x8F1D_312A;
 
-/// The host byte streams a block writes to and reads from. One block has
-/// any: the link ([`usb_sj`]).
+/// The host byte streams a block writes to and reads from.
 ///
 /// `usb_sj` is what a host **received** from the IN endpoint and what it
 /// **sent** on the OUT path; `usb_sj_tried` is the observation stream — bytes
-/// the guest handed over that no host took. Both are `None` on a machine
-/// built with no host side at all, which is what a unit test wants.
+/// the guest handed over that no host took. `uart0` is the mask ROM's
+/// console (P06): what left UART0's shifter, and what a host on that wire
+/// sent. All are `None` on a machine built with no host side at all, which
+/// is what a unit test wants.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct HostStreams {
     pub usb_sj: Option<StreamId>,
     pub usb_sj_tried: Option<StreamId>,
+    pub uart0: Option<StreamId>,
+}
+
+/// The shared state the flash-era blocks hold between them (P06): the
+/// chip, the cache model, and the strapping word.
+pub struct FlashSet {
+    /// The flash chip — SPI1 executes commands against it and the cache
+    /// fill reads through it.
+    pub flash: FlashHandle,
+    /// The cache-enable bits, the MMU table and D4's watch slot, shared
+    /// between `EXTMEM`, `FLASH_MMU` and the machine.
+    pub cache: CacheHandle,
+    /// What `GPIO.strap` reads — the pads as latched at reset (`--strap`).
+    pub strap: u32,
+    /// The machine's `--seed`, for the RNG the bootloader reads.
+    pub seed: u64,
 }
 
 /// The whole boot set, in [`crate::machine::PERIPHERAL_REGISTRATION_ORDER`].
@@ -129,7 +168,7 @@ pub struct HostStreams {
 /// `SYSTEM.core_1_control_0`, the register the machine's hold on slot 1
 /// already reads, now shared with the view that lets a guest write it;
 /// `streams` and `usb_host` are the link's (M6 P05) — where its bytes go,
-/// and whether a cable is in at power-on.
+/// and whether a cable is in at power-on; `flash` is P06's shared state.
 pub fn boot_set(
     reset_cause: ResetCause,
     identity: EfuseIdentity,
@@ -137,6 +176,7 @@ pub fn boot_set(
     core1: CoreOneHandle,
     streams: HostStreams,
     usb_host: usb_sj::HostState,
+    flash: &FlashSet,
 ) -> Vec<(u32, u32, BoxedPeripheral)> {
     vec![
         (
@@ -144,7 +184,11 @@ pub fn boot_set(
             accept::SENSITIVE_LEN,
             Box::new(accept::sensitive()) as BoxedPeripheral,
         ),
-        (base::EXTMEM, accept::EXTMEM_LEN, Box::new(accept::extmem())),
+        (
+            base::EXTMEM,
+            accept::EXTMEM_LEN,
+            Box::new(extmem::Extmem::new(flash.cache.clone())),
+        ),
         (
             base::INTERRUPT_CORE1,
             crate::intmatrix::VIEW_LEN,
@@ -181,8 +225,12 @@ pub fn boot_set(
             accept::APB_CTRL_LEN,
             Box::new(accept::apb_ctrl()),
         ),
-        (base::SPI0, accept::SPI_LEN, Box::new(accept::spi0())),
-        (base::SPI1, accept::SPI_LEN, Box::new(accept::spi1())),
+        (base::SPI0, accept::SPI_LEN, Box::new(spi0::Spi0::new())),
+        (
+            base::SPI1,
+            accept::SPI_LEN,
+            Box::new(spi1::Spi1::new(flash.flash.clone())),
+        ),
         (base::BB, accept::RF_LEN, Box::new(accept::bb())),
         (base::NRX, accept::RF_LEN, Box::new(accept::nrx())),
         (base::FE, accept::RF_LEN, Box::new(accept::fe())),
@@ -198,5 +246,41 @@ pub fn boot_set(
             usb_sj::USB_DEVICE_LEN,
             Box::new(usb_sj::new(streams.usb_sj, streams.usb_sj_tried, usb_host)),
         ),
+        // ---- P06: the ROM-up boot's blocks, appended (module docs) ----
+        (
+            base::FLASH_MMU,
+            flash_mmu::LEN,
+            Box::new(flash_mmu::FlashMmuView::new(flash.cache.clone())),
+        ),
+        (base::SHA, sha::LEN, Box::new(sha::Sha::new())),
+        (
+            base::UART0,
+            uart::UART_LEN,
+            Box::new(uart::Uart::uart0(streams.uart0)),
+        ),
+        (
+            base::UART1,
+            uart::UART_LEN,
+            Box::new(uart::Uart::uart1(None)),
+        ),
+        (
+            base::GPIO,
+            accept::GPIO_LEN,
+            Box::new(accept::GpioBlock::new(flash.strap)),
+        ),
+        (base::IO_MUX, accept::IO_MUX_LEN, Box::new(accept::io_mux())),
+        (base::RMT, accept::RMT_LEN, Box::new(accept::rmt())),
+        (
+            base::ASSIST_DEBUG,
+            accept::ASSIST_DEBUG_LEN,
+            Box::new(accept::assist_debug()),
+        ),
+        (
+            base::APB_SARADC,
+            accept::APB_SARADC_LEN,
+            Box::new(accept::apb_saradc()),
+        ),
+        (base::SENS, accept::SENS_LEN, Box::new(accept::sens())),
+        (base::RNG, rng::LEN, Box::new(rng::Rng::new(flash.seed))),
     ]
 }
