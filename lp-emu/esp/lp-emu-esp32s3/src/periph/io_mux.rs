@@ -202,7 +202,10 @@ mod tests {
         let m = IoMux::new();
         assert_eq!(m.pad_config(9) & FUN_IE, FUN_IE, "fun_ie is set at reset");
         for pad in 0..PAD_COUNT {
-            assert!(!sb.pins.pad_input_enable(PadId(pad as u8)), "before seeding");
+            assert!(
+                !sb.pins.pad_input_enable(PadId(pad as u8)),
+                "before seeding"
+            );
         }
         seed_input_enables(&mut sb.pins);
         for pad in 0..PAD_COUNT {

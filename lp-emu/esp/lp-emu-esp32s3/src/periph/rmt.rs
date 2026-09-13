@@ -70,10 +70,10 @@
 //! | `modeled` | `ch0data`…`ch7data` (the APB FIFO, not modelled), `ch0carrier_duty`…`ch3carrier_duty`, `ch0_rx_carrier_rm`…`ch3_rx_carrier_rm` (carrier modulation and demodulation, not modelled), `tx_sim`, `ref_cnt_rst`, `date`. Accept-and-remember, at the PAC's reset value. |
 
 use lp_emu_esp_common::SignalId;
-use lp_emu_esp_common::ip::rmt::{ClockLine, Config, Dir, IntKind};
 pub use lp_emu_esp_common::ip::rmt::{
     Clock, LAG_BUCKETS, PULSE_LOG_CAP, Pulse, RefillStats, Rmt, TxState, WORD_LOG_CAP, lag_bucket,
 };
+use lp_emu_esp_common::ip::rmt::{ClockLine, Config, Dir, IntKind};
 
 use crate::memmap;
 use crate::regs;
@@ -393,9 +393,8 @@ mod tests {
             CONF_APB_MEM_RST, CONF_CONF_UPDATE, CONF_DIV_CNT_SHIFT, CONF_MEM_RD_RST,
             CONF_MEM_TX_WRAP_EN, CONF_TX_START,
         };
-        let conf = (1 << CONF_DIV_CNT_SHIFT)
-            | (mem_size << CONF_MEM_SIZE_SHIFT)
-            | CONF_MEM_TX_WRAP_EN;
+        let conf =
+            (1 << CONF_DIV_CNT_SHIFT) | (mem_size << CONF_MEM_SIZE_SHIFT) | CONF_MEM_TX_WRAP_EN;
         sb.write(r, CH_TX_CONF0[ch], conf);
         sb.write(r, CH_TX_CONF0[ch], conf | CONF_CONF_UPDATE);
         sb.write(
@@ -521,8 +520,8 @@ mod tests {
         assert_eq!(c.hz(), 40_000_000, "div_num 1 halves the 80 MHz source");
         assert_eq!(c.cycles_for(100, 1), 600);
         // XTAL is source 3, RC_FAST (2) is refused rather than guessed.
-        let c = decode_sys_conf(SYS_SCLK_ACTIVE | (3 << SYS_SCLK_SEL_SHIFT), memmap::CPU_HZ)
-            .unwrap();
+        let c =
+            decode_sys_conf(SYS_SCLK_ACTIVE | (3 << SYS_SCLK_SEL_SHIFT), memmap::CPU_HZ).unwrap();
         assert_eq!(c.hz(), 40_000_000);
         assert!(decode_sys_conf(SYS_SCLK_ACTIVE | (2 << SYS_SCLK_SEL_SHIFT), 1).is_err());
         assert!(decode_sys_conf(SYS_SCLK_ACTIVE, 1).is_err(), "sel 0");
@@ -635,7 +634,9 @@ mod tests {
     /// status still reads its own window.
     #[test]
     fn rx_en_is_accepted_and_writes_no_words() {
-        use lp_emu_esp_common::ip::rmt::{RX_CONF1_CONF_UPDATE, RX_CONF1_MEM_OWNER, RX_CONF1_RX_EN};
+        use lp_emu_esp_common::ip::rmt::{
+            RX_CONF1_CONF_UPDATE, RX_CONF1_MEM_OWNER, RX_CONF1_RX_EN,
+        };
         let (mut sb, mut r) = rig();
         sb.write(
             &mut r,
@@ -650,7 +651,10 @@ mod tests {
             0,
             "the strobe reads zero"
         );
-        assert_eq!(sb.read(&mut r, CH_RX_CONF1[0]) & RX_CONF1_RX_EN, RX_CONF1_RX_EN);
+        assert_eq!(
+            sb.read(&mut r, CH_RX_CONF1[0]) & RX_CONF1_RX_EN,
+            RX_CONF1_RX_EN
+        );
         assert_eq!(
             sb.read(&mut r, CH_RX_STATUS[0]) & RX_STATUS_WADDR_MASK,
             BLOCK_WORDS * RX_CH_BASE as u32,

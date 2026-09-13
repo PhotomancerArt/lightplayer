@@ -3587,9 +3587,7 @@ impl Machine {
         };
         if let Some(index) = self.gpio_index {
             self.bus
-                .with_peripheral::<crate::periph::gpio::Gpio, _>(index, |g, _| {
-                    g.set_strap(word)
-                });
+                .with_peripheral::<crate::periph::gpio::Gpio, _>(index, |g, _| g.set_strap(word));
         }
 
         let usb_host = self.usb_host;
@@ -3681,6 +3679,7 @@ impl Machine {
             core_quantum: self.core_quantum,
             console: self.usb_sj_log.bytes(),
             uart0: self.uart0_log.bytes(),
+            pins: self.pins.state.clone(),
         }
     }
 
@@ -3702,6 +3701,12 @@ impl Machine {
         self.wfi_ends = snap.wfi_ends;
         self.usb_sj_log.replace(&snap.console);
         self.uart0_log.replace(&snap.uart0);
+        // The decoders are state: one caught mid-frame and restored without
+        // its half-shifted bits would resume a frame that never existed. The
+        // route epoch is deliberately **not** restored — the fabric's own
+        // epoch came back with `restore_scalars`, and leaving the observer's
+        // stale forces one re-read of the routing at the next boundary.
+        self.pins.state = snap.pins.clone();
         // The restore put the peripherals' blobs back, the MMU table with
         // them (it rides in `EXTMEM`'s), and marked every entry dirty; the
         // watch is re-armed from the restored enable bits at the next window.

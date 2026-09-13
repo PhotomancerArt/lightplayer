@@ -761,9 +761,15 @@ mod tests {
             decode_pcr(0, 0x0050_0000, memmap::CPU_HZ),
             Err("PCR rmt_conf.clk_en = 0")
         );
-        assert!(decode_pcr(1, 0x0060_0000, memmap::CPU_HZ).is_err(), "FOSC refused");
+        assert!(
+            decode_pcr(1, 0x0060_0000, memmap::CPU_HZ).is_err(),
+            "FOSC refused"
+        );
         assert!(decode_pcr(1, 0x0040_0000, memmap::CPU_HZ).is_err(), "sel 0");
-        assert!(decode_pcr(1, 0x0010_0000, memmap::CPU_HZ).is_err(), "sclk_en 0");
+        assert!(
+            decode_pcr(1, 0x0010_0000, memmap::CPU_HZ).is_err(),
+            "sclk_en 0"
+        );
     }
 
     /// (f) `save_state`/`load_state` round trip mid-word.

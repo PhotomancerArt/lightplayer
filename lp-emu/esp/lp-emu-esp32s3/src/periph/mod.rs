@@ -267,7 +267,11 @@ pub fn boot_set(
             Box::new(uart::Uart::uart1(None)),
         ),
         // ---- P07: the pads and the RMT, where the accept blocks were ----
-        (base::GPIO, gpio::LEN, Box::new(gpio::Gpio::new(flash.strap))),
+        (
+            base::GPIO,
+            gpio::LEN,
+            Box::new(gpio::Gpio::new(flash.strap)),
+        ),
         (base::IO_MUX, io_mux::LEN, Box::new(io_mux::IoMux::new())),
         // Registers, the gap, and the RAM at `+0x800..+0xe00` — P06's accept
         // block was `0x100` long and left the RAM unmapped on purpose.

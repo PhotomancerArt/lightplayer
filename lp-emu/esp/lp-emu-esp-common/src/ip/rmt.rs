@@ -923,8 +923,12 @@ impl Rmt {
             grades: Self::grades(cfg),
             ram: vec![0u32; cfg.ram_words].into_boxed_slice(),
             clock,
-            ch: (0..cfg.tx_channels).map(|c| TxEngine::new(c, cfg)).collect(),
-            rx: (0..cfg.rx_channels).map(|r| RxEngine::new(r, cfg)).collect(),
+            ch: (0..cfg.tx_channels)
+                .map(|c| TxEngine::new(c, cfg))
+                .collect(),
+            rx: (0..cfg.rx_channels)
+                .map(|r| RxEngine::new(r, cfg))
+                .collect(),
             sticky: 0,
             poll_armed: false,
             warned_fifo: false,
@@ -1300,8 +1304,7 @@ impl Rmt {
     /// next word is fetched at this one's end), which is all a decoder or a
     /// pin log needs.
     fn push_pulse(&mut self, ch: usize, pulse: Pulse, cx: &mut BusCx<'_>) {
-        cx.pins
-            .drive(self.cfg.signal_of(ch), pulse.level, pulse.at);
+        cx.pins.drive(self.cfg.signal_of(ch), pulse.level, pulse.at);
         if !self.keep_logs {
             return;
         }
@@ -1640,8 +1643,10 @@ impl Rmt {
         // fires at the next dispatch, which is a guest cycle like any other.
         let due = due.max(cx.now);
         self.rx[rxi].idle_due = due;
-        cx.sched
-            .schedule_at(due, event_id(self.index, self.cfg.ev_rx_idle() + rxi as u16));
+        cx.sched.schedule_at(
+            due,
+            event_id(self.index, self.cfg.ev_rx_idle() + rxi as u16),
+        );
     }
 
     /// The machine's slice drain hands every pad edge to the block; a running
