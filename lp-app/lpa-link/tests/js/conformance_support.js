@@ -33,6 +33,10 @@ const CYCLES_PER_US = 160;
 const CYCLES_PER_COMMAND = 16_000;
 
 let door = null;
+/// The tab backing, when the suite is running over Workers. Held so
+/// `uninstallShim` can end them: a Worker is not garbage-collected by
+/// dropping the port that was talking to it.
+let tab = null;
 let modules = null;
 
 /// Load the shipped JS once, over HTTP, and hand every wrapper below the same
@@ -361,6 +365,43 @@ function nativeBackingOverScript() {
   };
 }
 
+/// Install the polyfill over boards hosted **in this tab** — one Worker per
+/// board, each holding the emulator's own wasm (`?emu=tab`'s backing).
+///
+/// The third backing, and the third way to run the SAME assertions: scripted
+/// (CI), live over a socket, and now in-page over `postMessage`. A claim that
+/// fails only here is a real divergence between the door's coupling and the
+/// tab's — a finding, not something to patch around.
+///
+/// Boards are synthesized from the ids the suite asked for so the assertions
+/// keep their own names. Each gets its own MAC and its own Worker, because
+/// the module holds one machine.
+export async function installTab(moduleUrl, boardIds) {
+  door = null;
+  const { install } = await polyfill();
+  const { tabBacking } = await import("/lpa-link/emulator_tab.js");
+  const boards = boardIds.map((id, index) => {
+    const mac = `02:c6:7a:b0:00:${(index + 1).toString(16).padStart(2, "0")}`;
+    return {
+      id,
+      mac,
+      chip: "esp32c6",
+      boot: "rom-up",
+      link: "usb-serial-jtag",
+      cfg: ["boot=rom-up", "strap=app", "usb_host=attached", `mac=${mac}`, ""].join("\n"),
+    };
+  });
+  // The JS host, beside the module. `wasm-serial-test-runner.sh` stages the
+  // pair into the runner's served root under fixed names — unlike Studio,
+  // which takes both from `engine-manifest.json` under content-hashed ones —
+  // so here the host is the module's sibling and is resolved as one rather
+  // than passed in through the Rust harness.
+  const jitHostUrl = new URL("jit-host.js", new URL(moduleUrl, location.href)).toString();
+  tab = tabBacking({ moduleUrl, jitHostUrl, boards });
+  await install("http://tab.emu.invalid/", { backing: tab });
+  await watchReboots();
+}
+
 /// Install the polyfill over a REAL `lp-cli emu serve` at `baseUrl` — the
 /// live half of the suite, run by a `just` recipe and never in CI.
 export async function installLive(baseUrl, boardIds) {
@@ -378,6 +419,12 @@ export async function uninstallShim() {
   const { uninstall } = await polyfill();
   await uninstall();
   door = null;
+  // A Worker outlives the bus that was holding its port, and a suite that
+  // left one per install would end with a thread per test.
+  if (tab) {
+    await tab.dispose().catch(() => {});
+    tab = null;
+  }
 }
 
 /// Board ids the installed bus is holding, in enumeration order.

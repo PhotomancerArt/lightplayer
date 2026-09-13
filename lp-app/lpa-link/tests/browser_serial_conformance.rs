@@ -105,6 +105,9 @@ extern "C" {
     #[wasm_bindgen(js_name = installLive)]
     fn js_install_live(base_url: &str, board_ids: &Array) -> Promise;
 
+    #[wasm_bindgen(js_name = installTab)]
+    fn js_install_tab(module_url: &str, board_ids: &Array) -> Promise;
+
     #[wasm_bindgen(js_name = uninstallShim)]
     fn js_uninstall_shim() -> Promise;
 
@@ -184,27 +187,37 @@ async fn drain_sessions() {
     }
 }
 
-/// Install the shim over a scripted door holding `boards`. The live half of
-/// the suite (a `just` recipe, never CI) points the same assertions at a real
-/// `lp-cli emu serve` through `LP_EMU_SERVE_URL`.
+/// Install the shim over a scripted door holding `boards`.
+///
+/// **Three backings, one set of assertions.** The default is the scripted
+/// door — hermetic, and what CI runs. `LP_EMU_SERVE_URL` points the same
+/// claims at a real `lp-cli emu serve` over a socket
+/// (`just lpa-link-browser-test-live`). `LP_EMU_TAB_MODULE` points them at
+/// the tab backing: one Worker per board, holding the emulator's own wasm,
+/// with no server anywhere (`just lpa-link-browser-test-tab`). Both of the
+/// latter are local recipes and never CI (plan two PD9).
 async fn shim_over(boards: &[&str]) {
     drain_sessions().await;
     let _ = JsFuture::from(js_uninstall_shim()).await;
-    match option_env!("LP_EMU_SERVE_URL") {
-        Some(url) if !url.is_empty() => {
-            let ids = Array::new();
-            for board in boards {
-                ids.push(&JsValue::from_str(board));
-            }
+    let ids = Array::new();
+    for board in boards {
+        ids.push(&JsValue::from_str(board));
+    }
+    match (
+        option_env!("LP_EMU_SERVE_URL"),
+        option_env!("LP_EMU_TAB_MODULE"),
+    ) {
+        (Some(url), _) if !url.is_empty() => {
             JsFuture::from(js_install_live(url, &ids))
                 .await
                 .expect("install the shim over a live `lp-cli emu serve`");
         }
+        (_, Some(module)) if !module.is_empty() => {
+            JsFuture::from(js_install_tab(module, &ids))
+                .await
+                .expect("install the shim over boards hosted in this tab");
+        }
         _ => {
-            let ids = Array::new();
-            for board in boards {
-                ids.push(&JsValue::from_str(board));
-            }
             JsFuture::from(js_install_scripted(&ids))
                 .await
                 .expect("install the shim over the scripted door");
@@ -277,11 +290,44 @@ async fn open_port(id: u32, reset: bool) -> Result<JsValue, JsValue> {
 }
 
 /// Whether this build points at a live `lp-cli emu serve` rather than the
-/// scripted door. Set by `scripts/emu/browser-conformance-live.sh`; a few
-/// claims can only be made against the scripted door (they need to reach
-/// inside it) and say so in the log rather than pretending to have run.
+/// scripted door. Set by `scripts/emu/browser-conformance-live.sh`.
 fn live_backing() -> bool {
     option_env!("LP_EMU_SERVE_URL").is_some_and(|url| !url.is_empty())
+}
+
+/// Whether this build points at boards hosted in this tab. Set by
+/// `just lpa-link-browser-test-tab`.
+fn tab_backing() -> bool {
+    option_env!("LP_EMU_TAB_MODULE").is_some_and(|url| !url.is_empty())
+}
+
+/// Whether the board on the other end is a REAL emulator rather than the
+/// scripted door.
+///
+/// A few claims can only be made against the scripted door — they reach
+/// inside it, or they pin a mechanism a real machine decides for itself —
+/// and they say so in the log rather than pretending to have run. The list
+/// is the same for both real backings by construction: a claim the tab
+/// skipped and the live door did not would be a divergence worth reporting,
+/// which is why this is one predicate and not two.
+fn real_backing() -> bool {
+    live_backing() || tab_backing()
+}
+
+/// What to call the backing in a skip line.
+fn backing_name() -> &'static str {
+    if live_backing() {
+        "the live door"
+    } else {
+        "the tab backing"
+    }
+}
+
+/// Say a claim was skipped, and against what. Named so a reader scanning the
+/// log can count skips without reading four different sentences, and so
+/// adding a fifth skip is visibly adding a skip.
+fn log_skip(why: &str) {
+    log(&format!("SKIPPED against {} ({why})", backing_name()));
 }
 
 async fn boolean(promise: Promise) -> bool {
@@ -497,8 +543,8 @@ async fn session_ids_are_stable_across_a_re_enumeration() {
 /// available.
 #[wasm_bindgen_test]
 async fn a_reboot_behind_our_back_is_noticed_and_does_not_re_enumerate() {
-    if live_backing() {
-        log("SKIPPED against the live door (this claim is pinned by the scripted half)");
+    if real_backing() {
+        log_skip("this claim is pinned by the scripted half");
         // The live door decides its own cycle counter; the scripted half is
         // where this mechanism is pinned deterministically.
         return;
@@ -636,8 +682,8 @@ async fn a_closed_port_keeps_its_session_and_a_forgotten_one_does_not() {
 /// does not wedge — a subsequent `openProtocol` succeeds and reads again.
 #[wasm_bindgen_test]
 async fn the_read_pump_reports_a_lost_device_and_the_port_reopens() {
-    if live_backing() {
-        log("SKIPPED against the live door (this claim is pinned by the scripted half)");
+    if real_backing() {
+        log_skip("this claim is pinned by the scripted half");
         // Killing a live board's byte channel from the browser would need the
         // server to cooperate; the scripted half pins the pump's error path.
         return;
@@ -808,8 +854,8 @@ async fn openness_is_readable_or_writable() {
 /// `download-mode`, no dance the shim recognised and shortcut.
 #[wasm_bindgen_test]
 async fn the_signal_lines_pass_through_undecoded() {
-    if live_backing() {
-        log("SKIPPED against the live door (this claim is pinned by the scripted half)");
+    if real_backing() {
+        log_skip("this claim is pinned by the scripted half");
         // The live door keeps no log the browser can read; the scripted half
         // is where the exact lines are pinned.
         return;
@@ -935,8 +981,8 @@ async fn hotplug_edges_arrive_from_a_re_enumeration() {
 /// lines.
 #[wasm_bindgen_test]
 async fn bytes_travel_both_ways_through_the_controller() {
-    if live_backing() {
-        log("SKIPPED against the live door (this claim is pinned by the scripted half)");
+    if real_backing() {
+        log_skip("this claim is pinned by the scripted half");
         return;
     }
     shim_over(&["c6-a"]).await;

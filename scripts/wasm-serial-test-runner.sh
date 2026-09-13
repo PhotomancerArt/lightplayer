@@ -60,6 +60,26 @@ mkdir -p "$root/lpa-link" "$root/provider"
 cp "$public"/*.js "$root/lpa-link/"
 cp "$provider"/*.js "$root/provider/"
 
+# The emulator module, for the TAB half of the suite (`just
+# lpa-link-browser-test-tab`), served at the path `LP_EMU_TAB_MODULE` names.
+# Copied whenever it exists and never required: the scripted half — which is
+# what CI runs — needs no emulator at all, and a tree that has never built
+# one must still be able to run it.
+#
+# The JS host goes with it, as its SIBLING: the module imports `emu_host`
+# (since M7 P7 the wasm build installs a translated core by default) and does
+# not link without it, and `conformance_support.js` resolves it as
+# `jit-host.js` next to the module rather than being handed a second path
+# through the Rust harness. `jit-host-source.sh` is what knows where the real
+# file is in this tree — it is M7's, it is moving, and a re-export shim must
+# never be the thing copied.
+emu_wasm="$repo_root/target/wasm32-wasip1/release/lp-emu-esp32c6.wasm"
+if [ -f "$emu_wasm" ]; then
+    mkdir -p "$root/pkg"
+    cp "$emu_wasm" "$root/pkg/lp_emu_esp32c6.wasm"
+    cp "$("$repo_root/scripts/emu/jit-host-source.sh")" "$root/pkg/jit-host.js"
+fi
+
 # `wasm-bindgen-test-runner` reads `webdriver.json` from its CWD and nowhere
 # else (measured 2026-09-09: one in the repo root reads "Not found"), and its
 # CWD is the root built above. `LP_WEBDRIVER_JSON` puts a capabilities file

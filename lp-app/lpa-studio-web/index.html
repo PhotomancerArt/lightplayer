@@ -375,16 +375,29 @@
                 // No flag, no fetch.
                 if (raw === null) return;
                 const backing = raw.trim();
-                if (!/^wss?:\/\/\S+$/.test(backing)) {
-                    console.warn(`emu ignored (not ws/wss): ${raw}`);
+                // TWO SPELLINGS, TWO BACKINGS. `ws://host:port` is a native
+                // `lp-cli emu serve` on the other side of a socket; `tab` is
+                // a Worker in this page holding the emulator's own wasm.
+                // Everything above this seam — the polyfill, the port, the
+                // flasher, Studio — is the same code either way.
+                const isTab = backing === "tab";
+                if (!isTab && !/^wss?:\/\/\S+$/.test(backing)) {
+                    console.warn(`emu ignored (not \`tab\` and not ws/wss): ${raw}`);
                     return;
                 }
                 // The flag is spelled `ws://` because what it installs is a
                 // virtual USB bus, and that is the scheme its two endpoints
                 // speak. `EmulatorPort`'s base is the door's HTTP origin
                 // (`GET /boards`) and it derives the `ws://` URLs from it, so
-                // the one translation between the two spellings is here.
-                const httpBase = backing.replace(/^ws/, "http");
+                // the one translation between the two spellings is here. The
+                // tab backing has no origin at all, so it is handed a
+                // synthetic one the port only ever builds strings from.
+                const httpBase = isTab
+                    ? "http://tab.emu.invalid/"
+                    : backing.replace(/^ws/, "http");
+                // What the picker and the banner call this backing. A URL
+                // for the door; a place for the tab.
+                const label = isTab ? "in this tab" : backing;
 
                 class LpEmuSerialFacade extends EventTarget {
                     async requestPort(options) {
@@ -407,14 +420,53 @@
                     else document.addEventListener("DOMContentLoaded", run, { once: true });
                 };
 
+                // The tab backing owns Workers, and they outlive a bus
+                // that is merely disposed; `pagehide` ends both.
+                let tabBacking = null;
+
                 const ready = (async () => {
                     const [shim, chrome] = await Promise.all([
                         import("/lpa-link/virtual_serial.js"),
                         import("/lpa-link/emulator_picker.js"),
                     ]);
-                    const bus = await shim.createBus(httpBase, {
-                        picker: chrome.createPicker({ backingUrl: backing }),
-                    });
+                    const options = {
+                        picker: chrome.createPicker({ backingUrl: label }),
+                    };
+                    if (isTab) {
+                        // The module is a content-hashed sidecar, so its URL
+                        // comes from the manifest this page already fetched.
+                        // Absent means a build that never ran
+                        // `just studio-emu-sidecar` — which is a legitimate
+                        // build, so say so rather than 404 in a Worker.
+                        const assets = await window.__lpEngineAssets;
+                        const moduleUrl = assets?.emu_esp32c6_wasm;
+                        if (!moduleUrl) {
+                            throw new Error(
+                                "this build ships no emulator module " +
+                                    "(pkg/engine-manifest.json has no emu_esp32c6_wasm; " +
+                                    "run `just studio-emu-sidecar`)",
+                            );
+                        }
+                        // The module imports `emu_host`: since M7 P7 the wasm
+                        // build installs a translated core by default, so the
+                        // Worker needs the JS host too or the instance does
+                        // not link. It is hashed separately from the module
+                        // (different bytes, different cadence), so the
+                        // manifest names both and neither is derived from the
+                        // other.
+                        const jitHostUrl = assets?.emu_jit_host_js;
+                        if (!jitHostUrl) {
+                            throw new Error(
+                                "this build ships an emulator module with no JS host " +
+                                    "(pkg/engine-manifest.json has no emu_jit_host_js; " +
+                                    "run `just studio-emu-sidecar`)",
+                            );
+                        }
+                        const tab = await import("/lpa-link/emulator_tab.js");
+                        tabBacking = tab.tabBacking({ moduleUrl, jitHostUrl });
+                        options.backing = tabBacking;
+                    }
+                    const bus = await shim.createBus(httpBase, options);
                     // The bus is where a re-enumeration and the banner's
                     // cable buttons raise their edges; the façade is what
                     // Studio listened to. Forward, one for one.
@@ -426,18 +478,29 @@
                     // A page-internal contract, like `__lpShell`: the dev
                     // banner's controls, and an agent at the console, reach
                     // the boards through this. Studio never touches it.
-                    window.__lpEmuSerial = { bus, facade, backing, base: httpBase };
+                    // `tabBacking` is on here for the same reason the bus
+                    // is: `just walk-no-board --tab` has no `GET /boards` to
+                    // ask, and `describeBoards()` is a page-load cache that
+                    // goes stale after a flash. `listBoards()` reads the
+                    // worker's live row, so it is the tab's registry.
+                    window.__lpEmuSerial = {
+                        bus,
+                        facade,
+                        backing,
+                        base: httpBase,
+                        tabBacking,
+                    };
                     whenBody(() =>
-                        chrome.installDevBanner({ bus, backingUrl: backing, facade }),
+                        chrome.installDevBanner({ bus, backingUrl: label, facade }),
                     );
                     console.info(
-                        `[emu] navigator.serial is a shim over ${backing} ` +
+                        `[emu] navigator.serial is a shim over ${label} ` +
                             `(${bus.describeBoards().length} board(s))`,
                     );
                     return bus;
                 })();
                 ready.catch((error) => {
-                    console.error(`[emu] the shim over ${backing} did not install:`, error);
+                    console.error(`[emu] the shim over ${label} did not install:`, error);
                 });
 
                 // Hand the boards back when this page goes away. The door
@@ -452,6 +515,10 @@
                 // instead and let the seam install cleanly.
                 window.addEventListener("pagehide", () => {
                     ready.then((bus) => bus.dispose()).catch(() => {});
+                    // A Worker is not a socket: disposing the bus drops the
+                    // port objects, and the thread holding the machine (and
+                    // its OPFS handle) would otherwise still be running.
+                    tabBacking?.dispose().catch(() => {});
                 });
                 window.addEventListener("pageshow", (event) => {
                     if (event.persisted) window.location.reload();

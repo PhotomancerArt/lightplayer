@@ -190,6 +190,13 @@ export class StudioDriver {
     await cdp.send("Runtime.enable", {}, sessionId);
     await cdp.send("Log.enable", {}, sessionId).catch(() => {});
     await cdp.send("Page.addScriptToEvaluateOnNewDocument", { source: WAIT_HELPER }, sessionId);
+    // A headless target Chrome considers unfocused is throttled the way a
+    // background tab is, and the command-line flags above do not reach it —
+    // they are about backgrounded WINDOWS. This is the one that reaches a
+    // CDP-created target, and it matters far more now that the page may be
+    // hosting an emulator: a throttled Worker runs the guest at a fraction
+    // of a per cent of real time, which reads as a board that never answered.
+    await cdp.send("Emulation.setFocusEmulationEnabled", { enabled: true }, sessionId).catch(() => {});
     return new StudioDriver({ cdp, sessionId, child, exited, userDataDir });
   }
 
@@ -211,13 +218,22 @@ export class StudioDriver {
     });
   }
 
-  async navigate(url) {
+  /// `loadTimeoutMs` bounds the wait for the page's `load` event, and it is a
+  /// wedged-run guard rather than a measurement. It is NOT the CDP default of
+  /// 30 s: Studio's `<script type="module">` glue holds `load` back until the
+  /// ~105 MB debug wasm has been fetched and compiled, and on a desk where
+  /// sibling worktrees are building that alone has taken longer than 30 s —
+  /// which then read as "CDP Runtime.evaluate timed out" before the walk had
+  /// touched the board at all (measured 2026-09-11, tab lane). The walk gives
+  /// Studio's arrival its own deadline for the same reason; this is the same
+  /// deadline applied one step earlier.
+  async navigate(url, { loadTimeoutMs = 420_000 } = {}) {
     await this.cdp.send("Page.navigate", { url }, this.sessionId);
     // The load event, not a sleep: `Page.navigate` resolves on commit.
     await this.evaluate(
       `new Promise((r) => document.readyState === "complete"
          ? r(true) : window.addEventListener("load", () => r(true), { once: true }))`,
-      { awaitPromise: true },
+      { awaitPromise: true, timeoutMs: loadTimeoutMs },
     );
     await this.evaluate(WAIT_HELPER);
   }
