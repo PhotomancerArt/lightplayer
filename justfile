@@ -3013,18 +3013,47 @@ test-emu-jit-engines:
 # `tests/engine_suites_present.rs`, which is in the default path and says so
 # by name rather than letting a green run be read as an engine agreeing.
 #
-# ⚠️ **The image-scale form of this is not here, and the reason is measured.**
-# `--jit-record` + `scripts/emu/jit-image-bench.mjs --check-only` is the same
-# per-entry comparison over a whole-image module, and M7 P9 could not make it
-# a committed fixture or a recipe: a `render-basic` recording is a 76 MB
-# `module.wasm` and a 24 MB `memory.bin` beside 67 KB of entries, so it cannot
-# be checked in; and a recording can only be taken AFTER the `fence.i` (no
-# entry into translated code happens before it on these images), by which time
-# the published-read fast path is armed and the replay diverges on its first
-# pass — the limit M7b P5 documented, follow-up F5. The `--check-only` flag is
-# in place for the day F5 lands.
+# The image-scale form of this is `test-emu-jit-replay`, below. It is a
+# separate recipe and not a dependency of this one for a measured reason: it
+# translates a whole image twice under cranelift, which is minutes, while this
+# recipe is a handful of hand-built cases and is meant to stay cheap enough to
+# run on a whim.
+#
+# ⚠️ It is also still not a committed fixture and never will be — a
+# `render-basic` recording is a 76 MB `module.wasm` and a 24 MB `memory.bin`
+# beside 67 KB of entries. It takes its own recording instead. (Follow-up F5
+# closed the other half of M7b P5's limit: a recording can only be taken AFTER
+# the `fence.i`, by which time the published-read fast path is armed, and the
+# recording now carries that block's state so a replay can reproduce it.)
 test-emu-jit-identity: test-emu-jit-engines
     cargo test -p lp-emu-jit --features host-wasmtime
+
+# **The differential oracle at IMAGE scale** — M7 follow-up F5, the recipe
+# `--check-only` was put in place for.
+#
+# `test-emu-jit-identity` is a handful of hand-built cases. This is the real
+# thing: the whole pinned `harness` image in ONE translated module, recorded
+# under wasmtime — every entry's arguments, every import answer in call order,
+# the guest memory the interpreter wrote between entries, the published-read
+# block's state beside the call that set it — and replayed in node (V8) and
+# bun (JavaScriptCore, the phone's engine family) with every field compared on
+# every entry. A divergence is the emitter or the engine and cannot be a
+# second host disagreeing with the first.
+#
+# **What it costs, and why that keeps it out of CI.** A recording pays
+# cranelift TWICE: a recording run refuses the incremental `fence.i` path,
+# because a recording is of ONE module and two live modules would be a
+# recording of neither. On an M2 Max that is ~1 minute for `harness` (47 k
+# blocks) against ~13 for the render pair (154 k) — which is why `harness` is
+# the cell here exactly as it is for `test-emu-jit-image`.
+#
+# It never passes vacuously: the identity pass reports how many import calls
+# armed the published-read block, and the script fails when that is zero —
+# a window that never arms it would replay green while proving none of what
+# F5 fixed. A missing `node` or `bun` is a failure too, not a skip (JD19).
+test-emu-jit-replay slug="harness" grade="t2" window="100ms" after="3200000" entries="200":
+    cargo build --release -p lp-emu-esp32c6 --features jit
+    ./scripts/emu/jit-replay-identity.sh {{ slug }} {{ grade }} {{ window }} {{ after }} {{ entries }}
 
 # **The differential oracle, tier (b)** — the CI gate (JD23): one binary, one
 # pinned image, `--jit` against `--interpreter`, five readings compared byte
