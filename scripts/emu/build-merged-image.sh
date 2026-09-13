@@ -1,16 +1,25 @@
 #!/usr/bin/env bash
 # Build the MERGED flash image a ROM-up boot needs: the IDF second-stage
 # bootloader at 0x0, the partition table at 0x8000, and the app at 0x10000,
-# in one 4 MiB file that is the whole chip.
+# in one file that is the whole chip — 4 MiB on the C6 and the classic, 8 MiB
+# on the S3 (see the flash-size note below).
 #
-#   scripts/emu/build-merged-image.sh [--chip esp32c6|esp32] <app.elf> [<out.bin>]
+#   scripts/emu/build-merged-image.sh [--chip esp32c6|esp32|esp32s3] <app.elf> [<out.bin>]
 #   → <out.bin>   (default: <app.elf dir>/merged.bin; sha256 written beside it)
 #
 # `--chip` is additive and defaults to `esp32c6`, which is what every caller
 # written before M5 asks for by saying nothing. The classic ESP32 names itself
 # (`--chip esp32`, espflash's own spelling — we record the revision as
 # `esp32v3`, espflash does not know it) and takes `lp-fw/fw-esp32v3`'s
-# partition table with it.
+# partition table with it. `--chip esp32s3` (M6 P08) takes
+# `lp-fw/fw-esp32s3`'s.
+#
+# ⚠️ **The flash size is a per-chip value, not a constant.** Both the C6 and
+# the classic are 4 MB; the S3's partition table does not fit a 4 MB part and
+# deliberately does not try to (`docs/adr/2026-07-30-esp32s3-partition-floor.md`
+# — factory 6 MB at 0x010000, `lpfs` 1.5 MB at 0x610000), so its merged image
+# is **8 MB**. A merged image built at the wrong size is not a smaller chip;
+# it is a file whose partition table points past its own end.
 #
 # Direct load (M3/M4) puts the app's segments straight into memory and stages
 # the flash-resident half at offsets the loader computes. A ROM-up boot reads
@@ -41,21 +50,37 @@ set -euo pipefail
 
 chip=esp32c6
 if [[ "${1:-}" == "--chip" ]]; then
-    chip="${2:?--chip needs a value: esp32c6 or esp32}"
+    chip="${2:?--chip needs a value: esp32c6, esp32 or esp32s3}"
     shift 2
 fi
 # `esp32v3` is our name for the part; espflash does not know it.
 [[ "$chip" == "esp32v3" ]] && chip=esp32
 
-elf="${1:?usage: build-merged-image.sh [--chip esp32c6|esp32] <app.elf> [<out.bin>]}"
+elf="${1:?usage: build-merged-image.sh [--chip esp32c6|esp32|esp32s3] <app.elf> [<out.bin>]}"
 out="${2:-$(dirname "$elf")/merged.bin}"
 
 repo="$(cd "$(dirname "$0")/../.." && pwd)"
+# The partition table and the part's SIZE together: the two facts a merged
+# image is wrong about in the same way if either comes from the wrong chip.
+# `flash_size` mirrors `ChipSpec::flash_size` in
+# `lp-emu/lp-emu-validate/src/driver.rs`, the runner's copy of the same table.
 case "$chip" in
-    esp32c6) partitions="$repo/lp-fw/fw-esp32c6/partitions.csv" ;;
-    esp32)   partitions="$repo/lp-fw/fw-esp32v3/partitions.csv" ;;
+    esp32c6)
+        partitions="$repo/lp-fw/fw-esp32c6/partitions.csv"
+        flash_size=4mb
+        ;;
+    esp32)
+        partitions="$repo/lp-fw/fw-esp32v3/partitions.csv"
+        flash_size=4mb
+        ;;
+    esp32s3)
+        partitions="$repo/lp-fw/fw-esp32s3/partitions.csv"
+        # EIGHT megabytes — see the header. `lp-fw/builds/esp32s3-8mb.json`'s
+        # `flashSizeMb` is the canonical source; this is one of its mirrors.
+        flash_size=8mb
+        ;;
     *)
-        echo "build-merged-image: --chip $chip: known chips are esp32c6 and esp32 (alias esp32v3)" >&2
+        echo "build-merged-image: --chip $chip: known chips are esp32c6, esp32 (alias esp32v3) and esp32s3" >&2
         exit 2
         ;;
 esac
@@ -107,13 +132,13 @@ espflash save-image \
     --chip "$chip" \
     --merge \
     --partition-table "$partitions" \
-    --flash-size 4mb \
+    --flash-size "$flash_size" \
     --flash-mode dio \
     --flash-freq 40mhz \
     "$elf" "$staging"
 
 shasum -a 256 "$staging" | sed "s|$staging|$(basename "$out")|" > "$out.sha256"
-echo "chip=$chip elf=$elf espflash=$have_espflash partitions=$partitions" > "$out.provenance"
+echo "chip=$chip elf=$elf espflash=$have_espflash partitions=$partitions flash_size=$flash_size" > "$out.provenance"
 mv "$staging" "$out"
 echo "build-merged-image: done → $out"
 cat "$out.sha256"

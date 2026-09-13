@@ -108,6 +108,46 @@ test_xt_jit_corpus = [
     "dep:lps-builtins",
 ]
 
+# The `shader-compile-stress` validation payload (M6 P08, D7 (b)): the stepped
+# `lps-glsl` + `lpvm-native` compile pipeline run tick by tick on THIS chip's
+# own JIT, with the heap either side of every slice. The corpus, the per-tick
+# line and the two summary records are the chip half; `fw-checks`'s
+# `check-shader-compile` carries the record shapes the host parses, and
+# `lp-emu-validate`'s registry is the host's half of the same payload.
+#
+# ⚠️ **`cfg`'d out of the default image, and that is checked rather than
+# asserted.** This is a `test_*` feature, so `build.rs` sets `fw_harness` and
+# the whole app path is cfg'd out — a harness build REPLACES the firmware
+# rather than decorating it, and an image built without this feature is
+# unchanged to the byte. P04b quoted the same before/after for the ledger
+# lines; P08's PR body quotes it for this.
+#
+# The JIT half already existed here — `server` pulls `lpvm-native` (with
+# `isa-xt`) and `lp-gfx-lpvm` — so what this adds is `lp-shader`'s stepped
+# frontend, the corpus's `lpir`/`lps-shared` types and the builtin table.
+# Build (touch src/main.rs first when flipping features):
+#   cargo build --profile release-esp32s3 --features esp32s3,test_shader_compile_incremental
+#
+# ⚠️ This payload is also the one in M6 that drives the S3's write→execute
+# rule on a DYNAMIC allocation: this chip has no reserved code region, so the
+# JIT takes its buffer out of the ordinary `esp_alloc` heap, stores the code
+# through the D-bus view and patches every intra-module relocation with that
+# buffer's I-bus alias (`lpvm_native::exec_addr`'s S3 arm, `+0x6F_0000`) — a
+# machine modelling the two views as two memories emits branch targets the
+# fetch path cannot reach. Stated no wider than it is: the harness compiles
+# and DROPS, it does not render, so the fetch side of the alias is exercised
+# by this firmware's own `.rwtext`/vectors (which live in the I-bus view on
+# every boot) rather than by the shader compiled here.
+test_shader_compile_incremental = [
+    "dep:fw-checks",
+    "fw-checks/check-shader-compile",
+    "dep:lp-shader",
+    "dep:lpvm-native",
+    "dep:lpir",
+    "dep:lps-shared",
+    "dep:lps-builtins",
+]
+
 # The M6 FP conformance rig: runs the `lp-xt-fp-vectors` corpus on the FPU and
 # prints `(result, FSR)` per vector for the host to diff against predictions
 # committed before any board ran. Also carries the estimate-table sweep
@@ -283,6 +323,20 @@ lpvm = { path = "../../lp-shader/lpvm", default-features = false, optional = tru
 lpir = { path = "../../lp-shader/lpir", default-features = false, optional = true }
 lps-shared = { path = "../../lp-shader/lps-shared", default-features = false, optional = true }
 lps-builtins = { path = "../../lp-shader/lps-builtins", default-features = false, optional = true }
+
+# The payload harnesses' shared half (M6 P08), and the fence it sits on: this
+# crate MIRRORS `fw-checks` and never imports an `fw-esp32c6` module. Each
+# `test_*` payload feature turns on exactly the `check-*` feature its own
+# harness needs, so a build links one payload's shared code and no more.
+# `default-features = false` keeps `std` off — it is a `no_std` crate here.
+fw-checks = { path = "../fw-checks", default-features = false, optional = true }
+
+# `test_shader_compile_incremental` only: the stepped compile pipeline. Already
+# in this firmware's dependency graph through `server` -> `lp-gfx-lpvm` ->
+# `lpvm-native`; naming it here is what makes it reachable from a harness
+# module, and `optional` is what keeps a build that does not want the harness
+# from linking it directly.
+lp-shader = { path = "../../lp-shader/lp-shader", default-features = false, optional = true }
 
 # The M6 FP conformance corpus generator. Harness-only, `no_std`, no
 # dependencies of its own, and float-free by a checked property — it must be,

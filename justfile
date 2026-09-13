@@ -1012,7 +1012,13 @@ clippy-fw-esp32s3:
     # so linting only the default features would leave it completely uncovered
     # — which is exactly how 13 fw-esp32 harnesses rotted uncompiled in this
     # repo. Add new `test_*` features to this list.
-    for feat in test_xt_jit_corpus test_backtrace_oracle test_loopback test_xt_fp_conformance test_button; do
+    #
+    # `test_shader_compile_incremental` (M6 P08) is in this list for that
+    # reason and one more, the classic's: it is the chip half of a `fw-checks`
+    # payload, so a lint failure here is the first place a drift between the
+    # two crates shows up without a board or a machine.
+    for feat in test_xt_jit_corpus test_backtrace_oracle test_loopback test_xt_fp_conformance \
+                test_button test_shader_compile_incremental; do
       echo "clippy: --features $feat"
       cargo clippy --release --features "$feat" -- --no-deps -D warnings
     done
@@ -1241,6 +1247,83 @@ _v3-payload-sentinel payload:
       gpio-calibrate)        echo "CAL READY target=" ;;
       cycle-probe)           echo "[cycle-probe] === DONE ===" ;;
       *) echo "unknown classic payload '{{ payload }}'" >&2; exit 2 ;;
+    esac
+
+# Build one ESP32-S3 validation payload's image (M6 P08).
+#
+# The classic's two recipes above, on the third chip, and deliberately BESIDE
+# them rather than beside the S3 machine recipes: the payload NAME is the
+# argument, not the cargo feature — `boot-idle` and `shader-compile-stress`
+# are what `lp-emu-validate`'s registry, the transcripts and the desk batch
+# all call them, and the feature is an implementation detail this recipe owns.
+# The mapping mirrors the `ChipArm`s in
+# `lp-emu/lp-emu-validate/src/payload.rs`; if you add a payload there, add it
+# here.
+#
+# ⚠️ Deliberately NOT a `fwtest-*-esp32s3` recipe. Those flash a board and open
+# a monitor; a payload is recorded through `lp-cli validate run --config
+# silicon:esp32s3` (which resolves the port, pins the image and writes the
+# sidecar), so a second, hand-rolled flashing path would be a second way to
+# produce a transcript nobody checked. This builds; the runner flashes.
+#
+#   just build-fw-esp32s3-payload shader-compile-stress
+#   just emu-fw-esp32s3-payload   shader-compile-stress    # …and run it
+build-fw-esp32s3-payload payload:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    just build-fw-esp32s3 "$(just _s3-payload-features {{ payload }})"
+
+# Run an S3 payload's image on our own machine, to its sentinel, under
+# `--strict-bus`. The cheapest proof an image is not merely linkable — and a
+# strict-bus stop here is a real finding (an address the machine does not
+# model), never something to pass `--strict-bus permit` around.
+#
+# ⚠️ `--usb-host attached` is not decoration on this chip. The S3's only link
+# is USB-Serial-JTAG, and a link nobody drains is not a smaller run: the guest
+# writes into an endpoint that is never emptied, nothing reaches the host, and
+# the sentinel never arrives.
+#
+# ⚠️ `boot-idle` does NOT reach its sentinel here until M6 P06. The shipped
+# image mounts `lpfs` through SPI1 after `[INIT] I/O task spawned`, SPI1 is an
+# accept block on this machine today, and the run spins there
+# (`lp-emu-esp32s3/tests/boot_idle.rs::the_boot_stops_where_p06_begins`). Run
+# `shader-compile-stress` for a payload that completes today; the sentinel
+# below is not weakened to make the other one pass.
+emu-fw-esp32s3-payload payload:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    just build-fw-esp32s3-payload {{ payload }}
+    cargo run -q --release -p lp-emu-esp32s3 -- \
+        --elf {{ fw_esp32s3_elf }} \
+        --usb-sj - --usb-host attached --time-grade t1 --timeout 60s --strict-bus \
+        --exit-on "$(just _s3-payload-sentinel {{ payload }})"
+
+# payload name -> the cargo features `build-fw-esp32s3` is given. Private: the
+# two recipes above are the front door.
+_s3-payload-features payload:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    case "{{ payload }}" in
+      # The shipped image. Named for completeness — `boot-idle` IS the
+      # product build, which is why it has no `test_*` feature at all.
+      boot-idle)             echo "esp32s3,server,float-f32" ;;
+      shader-compile-stress) echo "esp32s3,test_shader_compile_incremental" ;;
+      *) echo "unknown S3 payload '{{ payload }}' (boot-idle, shader-compile-stress)" >&2; exit 2 ;;
+    esac
+
+# payload name -> the line a run stops on. Mirrors the `esp32s3` ARMS in
+# `lp-emu/lp-emu-validate/src/payload.rs` — the registry is the original, and
+# on this chip `boot-idle`'s arm overrides the payload's own marker: the
+# ledger triple is elicited here as it is on the classic, `[stack] heartbeat:`
+# is its FIRST line and `[JIT] used=` its last, so a run that stopped on the
+# C6's marker would record neither of the two lines the payload exists for.
+_s3-payload-sentinel payload:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    case "{{ payload }}" in
+      boot-idle)             echo "[JIT] used=" ;;
+      shader-compile-stress) echo "[inc-shader-compile] === DONE ===" ;;
+      *) echo "unknown S3 payload '{{ payload }}'" >&2; exit 2 ;;
     esac
 
 # Flash fw-esp32v3 to a connected classic ESP32 and open the serial monitor.

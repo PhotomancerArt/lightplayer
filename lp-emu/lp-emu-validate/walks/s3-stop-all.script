@@ -1,0 +1,46 @@
+# The S3's `boot-idle` heartbeat triple is ELICITED, exactly as the classic's
+# is — and this file is the asking, byte for byte the same asking.
+#
+# `esp32_memory_stats` (`lp-fw/fw-esp32s3/src/main.rs`, added to this image by
+# M6 P04b / PR #742) is what prints `[stack] heartbeat:` / `[MEM] free=` /
+# `[JIT] used=`, and `lpa_server` calls it on a project load, a project
+# unload, a stop-all, a client `runtime_status`, or either side of a shader
+# compile — NEVER from the five-second server heartbeat, which takes
+# `heartbeat_memory_stats` instead and prints nothing at all. That split is
+# the classic's and it is deliberate: a periodic printer would flood the very
+# USB-Serial-JTAG link the transport runs on.
+#
+# ⚠️ This is the one thing about this payload a reader is most likely to get
+# wrong from the C6's shape, because the C6 is the exception: there
+# `[stack] heartbeat: high-water` IS the five-second heartbeat's own line, so
+# a boot with nobody talking prints the whole sample. On the S3 — as on the
+# classic — a boot with nobody talking prints no `[MEM]`, no `[JIT]` and no
+# `[stack]` line at all, and a `boot-idle` arm without this file records a
+# transcript with nothing in it that the payload exists for.
+#
+# `stopAllProjects` is the smallest request that reaches the call site
+# (`handlers::handle_stop_all_projects` calls `log_memory` whether or not a
+# project is loaded), and it is the SAME bytes on the same trigger line as
+# `walks/v3-stop-all.script` — `the_s3_stop_all_script_is_the_classics_
+# stimulus` checks the two files against each other rather than trusting the
+# eye. One stimulus over three chips is what makes one payload name mean one
+# question.
+#
+# The trigger is `[INIT] I/O task spawned`, which is the last line of this
+# image's `[INIT]` chain before it reaches for the filesystem — pinned as part
+# of `HELLO` in `lp-emu/esp/lp-emu-esp32s3/tests/boot_idle.rs`.
+#
+# ⚠️ **Until M6 P06 this arm's run cannot complete, and the sentinel is not to
+# be weakened to make it.** After `[INIT] I/O task spawned` the shipped image
+# calls `mount_filesystem(flash)`, which sets `SPI1.cmd`'s `usr` bit and spins
+# until hardware clears it; `SPI1` is an accept block on this machine today,
+# so the spin never ends and the server loop the wire needs never runs
+# (`lp-emu-esp32s3/tests/boot_idle.rs`'s
+# `the_boot_stops_where_p06_begins`). P06 lands the flash controller and the
+# ROM-up path; this file is written for the image after it.
+#
+# The known, unwidened gap, the classic's: this send lands 1 ms of emulated
+# time after the trigger, where a desk host's select loop polls at 50 ms.
+# That is host latency, and it is why nothing in the `timing` class is
+# compared for this payload.
+after "[INIT] I/O task spawned" +1 "M!{\"id\":1,\"msg\":\"stopAllProjects\"}\n"
