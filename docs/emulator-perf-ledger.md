@@ -114,7 +114,7 @@ wall). The five items above the instrument's floor:
 | item | ns/slice | ms/run |
 |---|---:|---:|
 | `run_due_events` | 192.9 | 295.5 |
-| `wall_timeout` → `started.elapsed()` | 148.3 | 227.2 |
+| `wall_timeout` → `started.elapsed()` — **taken 2026-09-13 (P1c)** | 148.3 | 227.2 |
 | `drain_pins` | 117.3 | 179.7 |
 | `pending_cpu_interrupt` + `set_external` + `poll_interrupts` | 32.5 | 49.8 |
 | the six-term deadline + `next_deadline` + census gates | 26.6 | 40.8 |
@@ -223,6 +223,61 @@ named and deliberately not pursued) or **candidate**.
 | 2026-09-12 | **P1b R3 — instant RMT** (the full DD26 tier) | `scripts/emu/tier-probes/R3-instant-rmt.patch` | slices → 61,155; **zero frames**; the guest never renders | **rejected as built** |
 | 2026-09-12 | **P1b R4 — the UART tap** | §2's MMIO census | **not taken**: UART0 is 0.14 % of crossings on `render-basic`, a hundredth of the 2 % floor the phase set | **rejected — wrong image**. It remains a *harness*-image lever |
 | 2026-09-12 | **P1b R3′ — the firmware's own "no real output under emulation" switch** | `lp-fw/fw-esp32c6/src/` | **does not exist**. `bench/render_loop.rs` mentions emulation only to pick a shorter run; the RMT driver is unconditional | **registered** — an unbuilt firmware-side lever |
+| 2026-09-13 | **P1c — the `wall_timeout` check strides** (`WALL_TIMEOUT_SLICE_STRIDE = 64` in `machine.rs`) | this document §3's note below; PR #736 | **desk, best of 11 in one invocation per engine, `render-basic` t2 5,500 ms: V8 16/fn 5.15 s → 4.89 s (−260 ms, −5.0 %, 1.055×) at loadavg 5.8–7.1; JSC 8/fn 6.33 s → 6.13 s (−200 ms, −3.2 %, 1.031×)**. **Phone (lab `j-20260913-0758-2bb9`, iPhone, 5 spaced presses each): translated 8/fn median 1.049× → 1.091× (+4.0 %), best 1.100× → 1.129×; the interpreter row +6.2 % median.** Predicted 227/214 ms. Every identity leg `same` | **shipped** |
+
+### The P1c note: what the stride removed, and what three instruments said
+
+The lever is one hunk. `run_until` asked `started.elapsed()` at every slice
+boundary to see whether `--wall-timeout` had expired; it now asks on the first
+slice of a run and every 64th after. The net is a **diagnostic** stop (exit
+code 4) and no guest state depends on it, so the only thing the stride costs is
+*when* it fires: up to 63 × `MAX_SLICE_CYCLES` = 516,096 emulated cycles late,
+≈ 3 ms of wall at 1×. Yona ruled that acceptable at `G-LOOP0b`.
+
+**The load-independent number is the computed one.** A `render-basic` t2 run
+makes 1,531,923 slices, so the stride removes 1,508,000 of its 1,531,923 clock
+reads; at P1's measured 148.3 ns (V8) and 139.5 ns (JSC) that is **224 ms and
+210 ms**. Nothing else on the loop path reads a host clock: after P1c the only
+unconditional `Instant::now()` in `run_until` is the one at entry, and every
+read in `jit.rs` is behind `LP_EMU_JIT_ENTRY_TIME` or one-shot at translation.
+
+**And the desk agrees.** Best of 11, interleaved `BEFORE, AFTER, …` in one
+invocation per engine, base `8ee2e1510`, on a quiet desk:
+
+| engine | before | after | delta | × | loadavg | P1b's baseline |
+|---|---:|---:|---:|---:|---:|---:|
+| node/V8 25.2.1, 16/fn | 5.15 s (1.067×) | **4.89 s (1.125×)** | **−260 ms (−5.0 %)** | **1.055×** | 5.8–7.1 | 5.24 s |
+| bun/JSC 1.1.18, 8/fn | 6.33 s (0.869×) | **6.13 s (0.897×)** | **−200 ms (−3.2 %)** | **1.031×** | 9.6 (from `node`) | 6.35 s |
+
+The before rows reproduce P1b's clean baselines (5.24 s / 6.35 s), and the
+deltas land on the computed prize from the other side: −260 against 224
+predicted in V8, −200 against 210 in JSC. Every one of the 44 rows is
+byte-identical — UART0 `2407828f80684331`, frames `830bcc3f3088d4ac`, trap
+`51ddaf56c96b77d3`, 542,906,355 retired instructions, 256 frames.
+
+**The phone says the same** — lab job `j-20260913-0758-2bb9`, an iPhone, five
+spaced presses per build, base `9f67d78` against that base plus this hunk:
+
+| row | before, best / median | after, best / median | median Δ |
+|---|---:|---:|---:|
+| `render-basic` t2 8/fn | 1.100× / 1.049× | **1.129× / 1.091×** | **+4.0 %** |
+| `render-basic` t2 interpreter | 0.683× / 0.681× | 0.735× / 0.723× | +6.2 % |
+
+UART0 `2407828f80684331` on every phone row of both builds. The interpreter
+row moves too, and slightly more, which is what a lever in `run_until` — the
+loop both cores share — should do; it is also why the same-press translated ÷
+interpreter ratio reads −1.9 %, which is not a regression in the translated
+core.
+
+⚠️ **A bun row's `loadavg` is a fiction.** `rung-rows.mjs` records
+`os.loadavg()[0]`, and **bun's `node:os.loadavg()` returns ~0 unconditionally**
+(measured 2026-09-13: `1.8e-10, 0, 2.8e-12` against node's `70.8, 83.2, 63.8`
+on the same desk in the same second). Every JSC row this runner has printed
+therefore reads `loadavg 0.0` whatever the desk was doing — including §2's and
+`G-LOOP0b`'s "loadavg 0.0" JSC tables, whose load is **unknown, not zero**.
+§1's law that "a wall-clock number with no `loadavg` beside it is not a row"
+is not satisfied by a bun row today. Take the load from `node` or `uptime`
+beside the invocation until the runner is fixed.
 
 ### The P1b finding that matters most
 
@@ -287,7 +342,7 @@ headroom against the **1×-held** bar, not by distance to 3×.
 | **R4 — the UART TX-FIFO tap** | on `render-basic`: **~0.14 % ceiling**, i.e. nothing. On the **harness** image M4 measured 86 % of MMIO as TX-FIFO poll | the UART0 byte transcript — the primary identity surface | the console text a user reads | sm | someone is optimising the *harness* image. For product images this lever is dead |
 | **R3′ — the firmware turns real output off under emulation** | not measurable: the switch does not exist | the pin log and everything downstream of the wire | **the guest's own ISR stops running**, so the reported fps is one the hardware will not deliver. This is exactly the trade §0 forbids in the user lane | md (firmware) | it would have to report fps from a *modelled* refill cost rather than a real one, which is a cycle-model change, not a switch |
 | **`tick`** — the boundary as an import the stay calls | **≈ 376 ms ≈ 6.8 %** (P1, measured) | none — P1 proved the trap hook is in exactly one place and translated code never writes `mcause`/`mepc`/`mtvec` | none | **lg** | shelved at G-LOOP0 as a *milestone*; it re-enters here as **headroom**. Against a 10–18 % thermal shortfall, 6.8 % is a third to two thirds of the gap |
-| **`wall_timeout` → `started.elapsed()`** | **227 ms ≈ 4.1 %**, one hunk | none | none | **xs** — one hunk | it changes the timeout path's *granularity*: the wall check would stride instead of running per slice. That is a behaviour change on a diagnostic path only. **60 % of `tick`'s whole payoff for one hunk** |
+| ~~**`wall_timeout` → `started.elapsed()`**~~ **— SHIPPED 2026-09-13, P1c (#736)** | **227 ms ≈ 4.1 %** predicted, one hunk | none | none | **xs** — one hunk | **taken.** The check strides: the clock is read every 64th slice, so the net may fire up to 63 × `MAX_SLICE_CYCLES` emulated cycles late. Yona ruled the granularity acceptable at `G-LOOP0b`. See §3's dated row for what it measured |
 | **the published-register table** (P3 generalised) | NEVER MEASURED. SYSTIMER is 47.05 % of crossings and 2,322,975 of its 2,767,705 are *stores* to `unit0_op` — the published-read side addresses the 444,730 loads | none if the disarm rules hold (trace / strict / after an escape) | none | md | the store side stays: the interpreter polls after *every* MMIO store |
 | **per-tick work** (P4's phase) | NEVER MEASURED as a phase. `run_due_events` 295 ms + `drain_pins` 180 ms = 475 ms is the target, and `tick` relocates it rather than removing it | none | none | md | |
 | **translator quality** | **4.5 ns per translated instruction at 8/fn against ~2 warm**; the cold-code 2.3× residual is unexplained | none | none | **lg** | the one lever that is pure win in both lanes. It is also the only lever that touches `boot-idle-memfs`'s 47 % shortfall, which is fixed translation cost |
@@ -302,7 +357,8 @@ closes it alone, and the two biggest entries are unavailable:
 - **Available and exact in the user lane:** R1 (1–2.7 %) + `wall_timeout`
   (4.1 %) + `tick` (6.8 %) ≈ **12 %** — which does reach the bottom of the
   band, and every one of those three leaves the guest's instret, frames and
-  fps untouched.
+  fps untouched. **`wall_timeout` was taken on 2026-09-13 (P1c, #736)**, so
+  what is left of that 12 % is R1 and `tick`.
 - **Unavailable:** the per-word cadence (14 %) has no correct shape; the full
   tier (R3) reports an fps the hardware will not deliver.
 - **Untouched by all of it:** `boot-idle-memfs` at 0.53×, which is translation

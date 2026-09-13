@@ -2,7 +2,11 @@
 //!
 //! Every timeout is **emulated** time, so a run is the same run on a laptop
 //! and on a loaded CI box. `--wall-timeout` is the single wall-clock input
-//! and it is a safety net: it can end a run, never change one.
+//! and it is a safety net: it can end a run, never change one. The loop
+//! samples it **every 64th slice** rather than every slice (reading the host
+//! clock is a WASI import call in the wasm build and cost 227 ms of a 5.5 s
+//! render run), so the net fires up to a stride late — at most 63 × 8,192
+//! emulated cycles, ≈ 3 ms of wall at 1×. Do not use it as a stopwatch.
 //!
 //! The argument parser is written out by hand rather than pulled from a
 //! crate. The flag list is fixed and small, the exit codes are a contract
@@ -64,7 +68,8 @@ OPTIONS:
                             t3 = the measured class costs plus cache and bus [t1]
     --timeout <5s|1500ms|900us>
                             EMULATED time to run for [100ms]
-    --wall-timeout <s>      host-clock safety net; exits 4
+    --wall-timeout <s>      host-clock safety net; exits 4. Sampled every 64th
+                            slice, so it can fire up to ~3 ms late
     --exit-on <substr>      stop at the end of the line this appears on, on
                             EITHER console (UART0 or the USB link — the
                             shipped image's console is the USB one)
