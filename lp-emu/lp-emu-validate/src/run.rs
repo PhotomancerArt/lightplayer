@@ -570,6 +570,15 @@ pub fn record_set(
                 ConfigurationKind::Silicon => plan.chip.monitor_baud,
                 _ => None,
             },
+            // The core quantum a dual-core run used (`ChipSpec::core_quantum`,
+            // `TranscriptHeader::quantum`'s doc). Real hardware has no
+            // software-selectable quantum to record, so this is `LpEmu`
+            // only — which for the C6 is `None` anyway, since its machine is
+            // single-core.
+            quantum: match config.kind {
+                ConfigurationKind::LpEmu => plan.chip.core_quantum,
+                _ => None,
+            },
             trust: entry.trust.clone(),
         };
         let mut header = header;
@@ -781,6 +790,7 @@ mod tests {
             pins: None,
             machine: None,
             baud: None,
+            quantum: None,
             trust: Default::default(),
         };
         header.pins = Some(header.pins_file_name().unwrap());
