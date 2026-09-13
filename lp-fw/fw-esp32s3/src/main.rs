@@ -242,8 +242,10 @@ fn boot() -> ! {
 /// `fw-esp32-common` must not know, so it is injected.
 ///
 /// **The ledger is elicited, never periodic.** The server calls this injected
-/// probe on a project load, a project unload, a stop-all and a client
-/// `runtime_status` — and nowhere else. The five-second heartbeat takes
+/// probe on a project load, a project unload, a stop-all, a client
+/// `runtime_status`, and either side of a shader compile (through
+/// `lpc_shared::memory`'s global, which `LpServer::new_*` installs from this
+/// same function pointer) — and nowhere else. The five-second heartbeat takes
 /// [`heartbeat_memory_stats`] instead, which reads the same counters and
 /// prints nothing. That split is the classic's
 /// (`fw-esp32v3/src/main.rs`), and it is deliberate: a periodic printer floods
