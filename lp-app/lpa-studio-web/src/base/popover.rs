@@ -936,6 +936,14 @@ fn spawn_measure_trigger_element(
     placement: PopoverPlacement,
     attempt: u8,
 ) {
+    // Retries hop frames, so this can land after the scope is gone even
+    // though [`measure_trigger_once`] checked before the first attempt. A
+    // missing element is NOT that check: in anchored mode the measured
+    // element belongs to a component that outlives this popover, so the rect
+    // still resolves and the writes below would land on dropped signals.
+    if trigger_rect.try_peek().is_err() {
+        return;
+    }
     let Some(anchor) = trigger_rect_by_id(&trigger_id) else {
         if attempt < MEASURE_RETRY_LIMIT {
             schedule_measure_trigger_element(
