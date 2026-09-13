@@ -30,7 +30,9 @@
 //       wallUs   = (now() - origin) * 1000
 //       guestUs  = micros() - guestOrigin
 //       deficit  = wallUs - guestUs
-//       if deficit <= 0:  await tick(); continue      // ahead: wait
+//       if deficit < MIN_BUDGET_US:                   // ahead: WAIT, for real
+//           wait = min(MIN_BUDGET_US - deficit, WAIT_CAP_MS) of WALL
+//           await sleep(wait); await tick(); continue
 //       budget   = min(deficit, SLICE_US) as cycles   // never more than one slice
 //       outcome  = emu_run(budget)
 //       drain: USB bytes to the page NOW; console text into a buffer
@@ -53,6 +55,23 @@
 // applied BETWEEN slices (the machine's own rule — a control line never
 // lands between two instructions), so a loop that never yielded would never
 // read its inbox.
+//
+// **The first branch is a WAIT, and there are two floors in it, not one.**
+// `MIN_BUDGET_US` is how much the guest must be owed before a slice is worth
+// taking, and `WAIT_CAP_MS` is how long the loop may stop watching the wall.
+// Until W8 that branch said `await tick(); continue` and was never reached at
+// all: a tick returns in ~16 µs, so the deficit was 16 µs, so the loop handed
+// the guest 2.6 cycles and asked again, 62 500 times a second, and an idle
+// flashed board — the normal state of a board that has been flashed — burnt
+// 100 % of a core to advance its guest in microseconds
+// (`docs/defects/2026-09-13-the-dilation-window-drains-one-shift-at-a-time.md`).
+// A `sleep` and not a tick, because a tick is a yield that comes back
+// immediately and that is the opposite of waiting; the inbox lands during
+// either, which is what `tick()` was there for.
+//
+// The floor is not a second ceiling. `SLICE_US` still bounds what one slice
+// may hand out, `MIN_BUDGET_US` bounds what is worth handing out at all, and
+// they are a factor of ten apart.
 //
 // ========================== THE CONSOLE CADENCE ==========================
 //
@@ -621,10 +640,11 @@ function flushConsole(final = false) {
  * One sample into the dilation window, and the expired prefix out.
  *
  * The prefix leaves in ONE `splice`, and that is the whole point of the
- * shape. A guest that is AHEAD of the wall gets no cycles (the pacing rule's
- * first branch), so this loop does nothing but `tick()` — and a flashed board
- * idling in `wfi`, whose guest clock the machine fast-forwards, is ahead
- * almost all the time. Measured 2026-09-13 on a `?emu=tab` board: **193 858
+ * shape. The loop used to turn as fast as a `MessageChannel` tick could
+ * return, feeding this window every time round: on a flashed board idling in
+ * `wfi`, whose guest clock the machine fast-forwards, the deficit was never
+ * more than a tick's worth of wall, so the loop handed out microseconds and
+ * came straight back. Measured 2026-09-13 on a `?emu=tab` board: **193 858
  * samples inside one 1 000 ms window**. Retiring that prefix one `shift()` at
  * a time is quadratic; it held this thread — and so its inbox, and so every
  * control line a flasher was waiting on — for up to 21 s in a single call,

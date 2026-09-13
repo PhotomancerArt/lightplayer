@@ -126,6 +126,27 @@ cause of the volume and it burns a core for nothing. Fixing it means changing
 what "ahead: wait" means — a decision about the pacing rule (PD5/D13), not a
 bug in it — so it is recorded here rather than legislated in this PR.
 
+**The spin is closed by W8** (2026-09-13, `emulator_worker.js`, the same
+file) — and the paragraph above has the mechanism wrong, which is worth
+keeping rather than editing away. The loop was *not* in the ahead branch:
+instrumented on this commit's own worker, `deficit <= 0` was reached **zero
+times in 10 s**, and all **625 000** turns were runs with a mean budget of
+**0.016 ms of guest — 2.6 cycles**. A `tick()` returns in ~16 µs, so the wall
+had moved 16 µs, so that is what `min(deficit, SLICE_US)` handed out. The core
+went on work that was real but microscopic: of the 100.0 % it burnt, `emu_run`
+itself was 23.6 points and the rest was the turn, paid 62 500 times a second.
+W8's wait is therefore keyed on being *owed a slice worth running*
+(`MIN_BUDGET_US`, a tenth of a slice) rather than on being ahead — the ahead
+case is the same line with a negative deficit — and it waits on a `setTimeout`
+rather than a tick, since the inbox lands during either. Measured on the same
+rig: **100.0 % of one core → 19.2 %** (of which `emu_run`'s own 18.7), 625 000
+turns → 4 904, dilation 1.000 both sides, and the idle `state` round trip
+**median 12.4 ms → 1.2 ms** (max 43.4 → 3.3) because the thread is no longer
+saturated. D13 is untouched: the ceiling is still one slice and the deficit is
+still dropped, never repaid. A **stopped** board still spins — its guest clock
+has stopped while the wall has not, so the deficit says nothing about how long
+to wait — and that is a question about what a stopped board owes its page.
+
 **Lesson** — a sliding window bounded in one unit is only bounded if the thing
 that feeds it is bounded in that unit too. Here the bound was wall time and the
 feed was loop iterations, and the two were held together by nothing but the
