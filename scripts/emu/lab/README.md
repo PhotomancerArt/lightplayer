@@ -481,8 +481,13 @@ per wait; never a loop.
 order (`null` for excluded presses), `best` with its press, `median`,
 `spreadPct = (max − min) / max × 100`; the **same-press ratio** translated ÷
 interpreter per press (only when that press has an interpreter row for the
-same slug/grade) with its best and median; byte-identity across the build's
-rows (`uartSha256`; null = unknown, DD46); for an A/B, `best(B)/best(A) − 1`,
+same slug/grade) with its best and median; byte-identity **per image** —
+`identity: {<slug>: {uartSha256, consistent, shas}}`, one entry per image the
+build produced a non-failed row for, so a job whose rows span `render-basic`
+and `render-rocaille` is asked the identity question once per image instead
+of being pooled into a false `INCONSISTENT` (null sha = unknown, DD46), and
+`report.md` prints one `byte-identity <slug>:` line per image; for an A/B,
+`best(B)/best(A) − 1`,
 the same for medians, and for the ratio medians. Tainted and failed presses
 are listed under `excluded` and never counted; a `skipped` press (the
 stopping rule stood it down) is in `presses` but in neither the sequences nor

@@ -20,7 +20,7 @@ function pressesFor(build, table, n = 5, opts = {}) {
   for (let i = 0; i < n; i++) {
     const results = Object.entries(table).map(([key, seq]) => {
       const [slug, grade, mode, fn] = key.split('/');
-      return { slug, grade, mode, fnBlocks: mode === 'jit' ? Number(fn) : null, realtime: seq[i], nsPerInstr: 10, uartSha256: opts.sha ? opts.sha(i) : '2407828f80684331' };
+      return { slug, grade, mode, fnBlocks: mode === 'jit' ? Number(fn) : null, realtime: seq[i], nsPerInstr: 10, uartSha256: opts.sha ? opts.sha(i, slug) : '2407828f80684331' };
     });
     out.push({ n: i + 1, build, state: opts.failOn?.has(i + 1) ? 'failed' : 'done', tainted: !!opts.taintOn?.has(i + 1), taintReasons: opts.taintOn?.has(i + 1) ? ['hidden'] : [], results });
   }
@@ -46,14 +46,15 @@ test('the G-M7B five presses reproduce best 1.008 (press 3), spread 18.8 %, rati
   assert.equal(ratio.best, 1.64);
   assert.equal(ratio.median, 1.57);
   assert.equal(rep.perBuild['86cb2e0'].ratio['render-basic/t2/interp'], undefined, 'no ratio for the interpreter itself');
-  assert.equal(rep.perBuild['86cb2e0'].identity.consistent, true);
-  assert.equal(rep.perBuild['86cb2e0'].identity.uartSha256, '2407828f80684331');
+  assert.deepEqual(Object.keys(rep.perBuild['86cb2e0'].identity), ['render-basic']);
+  assert.equal(rep.perBuild['86cb2e0'].identity['render-basic'].consistent, true);
+  assert.equal(rep.perBuild['86cb2e0'].identity['render-basic'].uartSha256, '2407828f80684331');
   assert.deepEqual(rep.excluded, []);
   assert.equal(rep.ab, null);
   const md = renderReportMd(rep);
   assert.match(md, /\| render-basic t2 8\/fn \| 0\.863 \| 0\.945 \| 1\.008 \| 0\.921 \| 0\.818 \| \*\*1\.008×\*\* \(p3\) \| 0\.921 \| 18\.8 % \|/);
   assert.match(md, /÷ interpreter, same press\*\* \| 1\.40 \| 1\.51 \| 1\.64 \| 1\.57 \| 1\.64 \| \*\*1\.64×\*\*/);
-  assert.match(md, /UART `2407828f80684331`/);
+  assert.match(md, /- byte-identity render-basic: UART `2407828f80684331` on every row/);
 });
 
 test('a tainted press is excluded: null in seq, listed, best over the rest', () => {
@@ -88,11 +89,49 @@ test('an A/B report interleaves presses per build and reports best/median/ratio 
   assert.match(renderReportMd(rep), /\| render-basic t2 8\/fn \| \+20\.0 % \| \+15\.0 % \| \+15\.0 % \|/);
 });
 
-test('identity: two different uart shas across a build is inconsistent; null is unknown', () => {
+test('identity: two different uart shas for ONE image is inconsistent; null is unknown', () => {
   const job = { id: 'j', builds: ['A'], rows: 'gate-rows', repeats: 2, spacingMs: 0, state: 'done' };
   const bad = computeReport(job, pressesFor('A', G_M7B, 2, { sha: (i) => (i === 0 ? 'aaaa' : 'bbbb') }));
-  assert.equal(bad.perBuild.A.identity.consistent, false);
-  assert.match(renderReportMd(bad), /INCONSISTENT/);
+  assert.equal(bad.perBuild.A.identity['render-basic'].consistent, false);
+  assert.deepEqual(bad.perBuild.A.identity['render-basic'].shas, ['aaaa', 'bbbb']);
+  assert.match(renderReportMd(bad), /- byte-identity render-basic: \*\*INCONSISTENT\*\* — aaaa, bbbb/);
   const unknown = computeReport(job, pressesFor('A', G_M7B, 2, { sha: (i) => (i === 0 ? 'aaaa' : null) }));
-  assert.equal(unknown.perBuild.A.identity.consistent, true);
+  assert.equal(unknown.perBuild.A.identity['render-basic'].consistent, true);
+});
+
+// The bug this shape fixes: lab job j-20260913-0726-c5bb ran render-basic and
+// render-rocaille in every press. Pooled across the build its two (correct)
+// shas printed `byte-identity: INCONSISTENT — 2407828f…, a570b659…`.
+test('identity is per image: two images with two shas are each consistent', () => {
+  const job = { id: 'j', builds: ['A'], rows: 'gate-rows', repeats: 3, spacingMs: 0, state: 'done' };
+  const TWO = {
+    'render-basic/t2/jit/8': [0.863, 0.945, 1.008],
+    'render-basic/t2/interp': [0.618, 0.626, 0.613],
+    'render-rocaille/t2/jit/8': [0.712, 0.730, 0.741],
+    'render-rocaille/t2/interp': [0.501, 0.510, 0.505],
+  };
+  const shaOf = (_i, slug) => (slug === 'render-basic' ? '2407828f80684331' : 'a570b6597cc0fc31');
+  const rep = computeReport(job, pressesFor('A', TWO, 3, { sha: shaOf }));
+  const id = rep.perBuild.A.identity;
+  assert.deepEqual(Object.keys(id), ['render-basic', 'render-rocaille']);
+  assert.equal(id['render-basic'].consistent, true);
+  assert.equal(id['render-basic'].uartSha256, '2407828f80684331');
+  assert.equal(id['render-rocaille'].consistent, true);
+  assert.equal(id['render-rocaille'].uartSha256, 'a570b6597cc0fc31');
+  const md = renderReportMd(rep);
+  assert.match(md, /- byte-identity render-basic: UART `2407828f80684331` on every row/);
+  assert.match(md, /- byte-identity render-rocaille: UART `a570b6597cc0fc31` on every row/);
+  assert.doesNotMatch(md, /INCONSISTENT/);
+});
+
+test('identity: one image drifting is inconsistent while the other image stays clean', () => {
+  const job = { id: 'j', builds: ['A'], rows: 'gate-rows', repeats: 2, spacingMs: 0, state: 'done' };
+  const TWO = {
+    'render-basic/t2/interp': [0.618, 0.626],
+    'render-rocaille/t2/interp': [0.501, 0.510],
+  };
+  const shaOf = (i, slug) => (slug === 'render-basic' ? (i === 0 ? 'aaaa' : 'bbbb') : 'cccc');
+  const id = computeReport(job, pressesFor('A', TWO, 2, { sha: shaOf })).perBuild.A.identity;
+  assert.equal(id['render-basic'].consistent, false);
+  assert.equal(id['render-rocaille'].consistent, true);
 });
