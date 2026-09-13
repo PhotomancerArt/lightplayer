@@ -23,8 +23,20 @@
 //! touching (`docs/reports/2026-09-11-esp32s3-firmware-inventory.md` §6),
 //! plus the two the ROM-up path reaches that the application never does —
 //! [`UART0`] for the mask ROM's own console and [`SHA`] for the IDF
-//! second-stage bootloader's image hash. A table nothing reads is cheap; a
-//! missing one is a phase blocked on a regenerate.
+//! second-stage bootloader's image hash — plus, from M6 P04, [`SENSITIVE`]:
+//! the block the **mask ROM's** cache setup reads thirty-six cycles into a
+//! direct load (`Cache_Occupy_ICache_MEMORY+0xc`, P03's first strict stop),
+//! which a census of the application's own literals could not see. A table
+//! nothing reads is cheap; a missing one is a phase blocked on a regenerate.
+//!
+//! # The interrupt-source table is generated too
+//!
+//! [`INTERRUPT_SOURCES`] and [`source`] come out of the PAC's own `Interrupt`
+//! enum, which `esp32s3-0.35.2` keeps in `src/lib.rs` rather than in the
+//! `src/interrupt.rs` the C6's PAC uses; the generator's `sources_file`
+//! field is the one-line difference (M6 P04). Ninety-four named sources over
+//! the number range `0..=98`, with gaps — which is why the matrix has 99 map
+//! entries and this table has 94 rows, and neither number is the other.
 //!
 //! # Two tables serve more than one peripheral
 //!
@@ -76,10 +88,12 @@ mod gpio;
 mod i2c_ana_mst;
 mod interrupt_core0;
 mod interrupt_core1;
+mod interrupt_sources;
 mod io_mux;
 mod nrx;
 mod rmt;
 mod rtc_cntl;
+mod sensitive;
 mod sha;
 mod spi0;
 mod spi1;
@@ -99,10 +113,12 @@ pub use gpio::GPIO;
 pub use i2c_ana_mst::I2C_ANA_MST;
 pub use interrupt_core0::INTERRUPT_CORE0;
 pub use interrupt_core1::INTERRUPT_CORE1;
+pub use interrupt_sources::{INTERRUPT_SOURCES, source};
 pub use io_mux::IO_MUX;
 pub use nrx::NRX;
 pub use rmt::RMT;
 pub use rtc_cntl::RTC_CNTL;
+pub use sensitive::SENSITIVE;
 pub use sha::SHA;
 pub use spi0::SPI0;
 pub use spi1::SPI1;
@@ -128,6 +144,7 @@ pub const ALL: &[&lp_emu_esp_common::RegNames] = &[
     &NRX,
     &RMT,
     &RTC_CNTL,
+    &SENSITIVE,
     &SHA,
     &SPI0,
     &SPI1,
@@ -170,6 +187,7 @@ mod tests {
             "nrx",
             "rmt",
             "rtc_cntl",
+            "sensitive",
             "sha",
             "spi0",
             "spi1",
@@ -181,7 +199,42 @@ mod tests {
         ] {
             assert!(blocks.contains(&expected), "`{expected}` has no table");
         }
-        assert_eq!(blocks.len(), 22);
+        assert_eq!(blocks.len(), 23);
+    }
+
+    /// The PAC numbers 94 sources over `0..=98`; the numbers M6 notes §3.3
+    /// wrote down ahead of the table are the table's, and the four software
+    /// interrupts are where the matrix expects them.
+    #[test]
+    fn the_interrupt_sources_are_the_94_the_pac_declares_over_a_range_of_99() {
+        assert_eq!(INTERRUPT_SOURCES.len(), 94);
+        assert_eq!(INTERRUPT_SOURCES.first().map(|(n, _)| *n), Some(0));
+        assert_eq!(INTERRUPT_SOURCES.last().map(|(n, _)| *n), Some(98));
+        assert!(
+            INTERRUPT_SOURCES.windows(2).all(|w| w[0].0 < w[1].0),
+            "sorted, with gaps"
+        );
+        assert_eq!(source::RMT, 40);
+        assert_eq!(source::TG0_T0_LEVEL, 50);
+        assert_eq!(source::SYSTIMER_TARGET0, 57);
+        assert_eq!(source::SYSTIMER_TARGET2, 59);
+        assert_eq!(source::USB_DEVICE, 96);
+        assert_eq!(source::FROM_CPU_INTR0, 79);
+        assert_eq!(source::FROM_CPU_INTR3, 82);
+        assert_eq!(source::RTC_CORE, 39);
+    }
+
+    /// The mask ROM's cache setup reaches two words of `SENSITIVE` before the
+    /// application has run an instruction of its own: `+0x04` and `+0x14`,
+    /// both read-modify-written by `Cache_Occupy_ICache_MEMORY`
+    /// (`0x4004_F664`). The table names both and carries the PAC's resets.
+    #[test]
+    fn sensitive_names_the_two_words_the_roms_cache_occupy_touches() {
+        assert_eq!(SENSITIVE.name(0x004), Some("cache_dataarray_connect_1"));
+        assert_eq!(SENSITIVE.name(0x014), Some("internal_sram_usage_1"));
+        assert_eq!(SENSITIVE.reset(0x004), Some(0x0000_00ff));
+        assert_eq!(SENSITIVE.reset(0x014), Some(0x0000_07ff));
+        assert_eq!(SENSITIVE.name(0xffc), Some("date"));
     }
 
     /// The four RF-adjacent blocks `esp_hal::init` touches inline are one

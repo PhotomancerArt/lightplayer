@@ -36,18 +36,19 @@
 //! are esp-hal's per-core-*generic* code — `interrupt::mapped_to_raw` and
 //! friends indexing a table by `raw_core()` — not a second core starting.
 //!
-//! [`Machine::core_stalled`] is the OR of two inputs today and will be three:
+//! [`Machine::core_stalled`] is the OR of three inputs:
 //!
 //! - the machine's own `stalled` flag, set for slot 1 at build and cleared by
-//!   nothing in P03;
+//!   nothing in M6;
 //! - **`SYSTEM.core_1_control_0`** ([`CoreOneControl`]), whose PAC reset value
 //!   is `0x04` — `reseting = 1`, `clkgate_en = 0` — i.e. held from the first
 //!   cycle by the chip's own reset state, which is why the field's default is
-//!   not a choice this file made;
+//!   not a choice this file made. P04's `SYSTEM` view
+//!   ([`crate::periph::system`]) is the door a guest writes it through;
 //! - RTC_CNTL's `sw_stall_appcpu_c0`/`sw_stall_appcpu_c1` pair, which stalls
 //!   only when the two read `0x86` (`third_party/esp-hal/src/soc/esp32s3/
-//!   cpu_control.rs:55-77`). **P04's registers**, and the seam is named here
-//!   so P04 adds an input rather than reshaping this function.
+//!   cpu_control.rs:55-77`) — [`crate::periph::rtc_cntl::StallKey`], P04's
+//!   third input, published by the RTC_CNTL view and read here.
 //!
 //! ⚠️ **This machine does not implement a core-1 release, and the classic's
 //! must not be copied.** DD53's model — core 1 begins at `appcpu_ctrl_d`'s
@@ -71,6 +72,17 @@
 //! ROM code rather than merely having it mapped. A machine that cannot
 //! execute ROM `memcpy` never reaches a peripheral.
 //!
+//! # Peripherals: the blocks before the console, in the order the boot met them
+//!
+//! P03 registered **no** peripheral, so a `--strict-bus` run stopped at the
+//! first MMIO access of the boot. P04 ran that loop and registers, in
+//! [`PERIPHERAL_REGISTRATION_ORDER`], every block the boot touches before it
+//! needs the console — each a view or an accept block from
+//! [`crate::periph`], each a probe that let the *next* stop become visible.
+//! The order is the ledger, and it is a contract: the bus packs a
+//! peripheral's index into every scheduler event id, so a block a later
+//! phase adds goes in its place in the list, never on the end.
+//!
 //! # The bring-up loop
 //!
 //! 1. Run `--strict-bus --trace`.
@@ -81,8 +93,7 @@
 //!    disassembly, a linker-script constant. Never "what the boot needed".
 //! 4. Run again.
 //!
-//! P03 stops at step 2 on purpose: **no peripheral is registered**, so the
-//! first stop is the deliverable and P04's ledger starts from it.
+//! After P04 the loop stands at the console (`USB_DEVICE`), which is P05's.
 //!
 //! # Candidates for M8's extraction, noted and not taken
 //!
@@ -99,7 +110,7 @@ use std::time::{Duration, Instant};
 use lp_emu_core::Bus;
 use lp_emu_core::sched::Cycles;
 use lp_emu_esp_common::bus::StrictViolation;
-use lp_emu_esp_common::{ByteLog, ElfImage, SocBus};
+use lp_emu_esp_common::{ByteLog, ElfImage, MachineRequest, SocBus, Strap};
 
 use lp_xt_emu::mach::interrupt::{IntKind, IntLine};
 use lp_xt_emu::mach::sr::PS_BOOT;
@@ -107,8 +118,9 @@ use lp_xt_emu::mach::trap::NUM_INTERRUPTS;
 use lp_xt_emu::mach::{CoreConfig, HartFault, SliceEnd, XtHart};
 
 pub use crate::loader::PlacedAppSegment;
-use crate::loader::{self, LoadError};
+use crate::loader::{self, EfuseIdentity, LoadError, ResetCause};
 use crate::memmap;
+use crate::periph::rtc_cntl::StallKey;
 use crate::rom::{self, DataImage, HookResult, HookTable, PlacedSegment, RomError, SeededSection};
 use crate::snapshot::Snapshot;
 
@@ -135,6 +147,66 @@ pub const CORE_QUANTUM_DEFAULT: u64 = 256;
 
 /// The number of cores the S3 has. Both are constructed; slot 1 is held.
 pub const CORES: usize = 2;
+
+/// The order the S3's peripheral blocks are registered in. See the module
+/// docs for why this is a contract.
+///
+/// The list is the blocks the P04 strict runs reached, **in the order the
+/// direct load met them**, with the cycle of each block's first access on
+/// the shipped image beside it. A block a later phase needs is added in its
+/// place in this list, never appended for convenience.
+/// [`crate::periph::boot_set`] registers exactly this order.
+pub const PERIPHERAL_REGISTRATION_ORDER: &[&str] = &[
+    // Cycle 36: the mask ROM's `Cache_Occupy_ICache_MEMORY+0xc` reads
+    // `cache_dataarray_connect_1` on `rom_config_instruction_cache_mode`'s
+    // path — P03's first strict stop.
+    "SENSITIVE",
+    // Cycle 71: `Cache_Set_ICache_Mode` reads `icache_ctrl`; the
+    // invalidate, freeze and preload polls follow inside the same routine.
+    "EXTMEM",
+    // Cycle 403: `esp32_init` → `setup_interrupts` clears the maps, and
+    // esp-hal does the *other* core's first (`Cpu::other()`), so core 1's
+    // half is reached four cycles before core 0's.
+    "INTERRUPT_CORE1",
+    // Cycle 407: core 0's half of the same block.
+    "INTERRUPT_CORE0",
+    // Cycle 205,054: the ROM's `rtc_get_reset_reason` reads `reset_state`
+    // for `lp_recovery`'s reset-cause map.
+    "RTC_CNTL",
+    // Cycle 206,309: `system::disable_peripherals` read-modify-writes
+    // `perip_clk_en1`.
+    "SYSTEM",
+    // Cycle 207,842: `pvt_supported` reads `BLK_VERSION`
+    // (`rd_sys_part1_data4`).
+    "EFUSE",
+    // Cycle 207,952: `ensure_voltage_raised`'s `regi2c` writes through the
+    // ROM's `rom_chip_i2c_writeReg`, which reads `ana_config2` first.
+    "I2C_ANA_MST",
+    // Cycle 288,925: `calibrate_rtc_slow_clock` reads `rtccalicfg`; the
+    // 1024-cycle measurement that follows is the 7.5 ms gap before the next
+    // block.
+    "TIMG0",
+    // Cycle 2,097,791: `esp_hal::init`'s inlined clock-gate writes, in the
+    // order the census predicted — `APB_CTRL.clkgate_force_on`, then the
+    // two SPI `clock_gate`s, then the four RF blocks' one register each.
+    "APB_CTRL",
+    "SPI0",
+    "SPI1",
+    "BB",
+    "NRX",
+    "FE",
+    "FE2",
+    // Cycle 2,098,065: `Wdt::<TIMG1>::new().disable()` — the second group
+    // is met only for its watchdog.
+    "TIMG1",
+    // ⚠️ Not reached before the console. `time_init` on this chip is
+    // `init_timestamp_scaler`, which computes from the clock tree and
+    // touches no register; the first `Instant::now()` in the shipped image
+    // comes after `esp_println`'s first write, which is P05's stop. It is
+    // registered here — last, where the boot will meet it — because it is
+    // the S3's clock and `tests/clock.rs` pins its derivation.
+    "SYSTIMER",
+];
 
 /// How far back [`Machine::symbolize`] will look for a name when no symbol's
 /// size covers the address. Four kilobytes: further than any routine in this
@@ -438,15 +510,24 @@ pub enum Outcome {
     /// the symbol's first instruction with every register as the caller left
     /// it.
     Breakpoint { core: usize, cycle: Cycles, pc: u32 },
+    /// A peripheral asked for a chip reset — the RWDT's stage 0 expired —
+    /// and this machine has no boot chain to restart until P06, so the run
+    /// ends here and says who asked. Exit code 2, the classic's code for the
+    /// same outcome.
+    Reset {
+        cycle: Cycles,
+        source: &'static str,
+        strap: Strap,
+    },
 }
 
 impl Outcome {
     /// The CLI's exit code for this outcome.
     ///
     /// **A cross-machine contract**, so a script that drives all three
-    /// machines reads one table: 0 deadline or `--exit-on`, 2 fault, 3
-    /// strict-bus refusal, 4 wall timeout, 5 `--break-at`, 6 cache-off fetch,
-    /// 7 MMU divergence.
+    /// machines reads one table: 0 deadline or `--exit-on`, 2 fault or a
+    /// reset the machine could not perform, 3 strict-bus refusal, 4 wall
+    /// timeout, 5 `--break-at`, 6 cache-off fetch, 7 MMU divergence.
     ///
     /// Two of those cannot arise here, and saying so is cheaper than leaving
     /// a reader to wonder:
@@ -462,7 +543,7 @@ impl Outcome {
     pub const fn exit_code(&self) -> i32 {
         match self {
             Outcome::Deadline { .. } => 0,
-            Outcome::Fault { .. } => 2,
+            Outcome::Fault { .. } | Outcome::Reset { .. } => 2,
             Outcome::StrictBus { .. } => 3,
             Outcome::WallTimeout { .. } => 4,
             Outcome::Breakpoint { .. } => 5,
@@ -474,7 +555,8 @@ impl Outcome {
             Outcome::Deadline { cycle }
             | Outcome::Fault { cycle, .. }
             | Outcome::WallTimeout { cycle }
-            | Outcome::Breakpoint { cycle, .. } => *cycle,
+            | Outcome::Breakpoint { cycle, .. }
+            | Outcome::Reset { cycle, .. } => *cycle,
             Outcome::StrictBus { violation } => violation.cycle,
         }
     }
@@ -513,6 +595,15 @@ pub enum BuildError {
     Load(LoadError),
     App(String),
     Io(String),
+    /// A peripheral was registered out of [`PERIPHERAL_REGISTRATION_ORDER`].
+    RegistrationOrder {
+        name: String,
+        after: String,
+    },
+    /// A peripheral name that is not in the declared order at all.
+    UndeclaredPeripheral {
+        name: String,
+    },
 }
 
 impl fmt::Display for BuildError {
@@ -522,8 +613,49 @@ impl fmt::Display for BuildError {
             BuildError::Load(e) => write!(f, "{e}"),
             BuildError::App(m) => write!(f, "application image: {m}"),
             BuildError::Io(m) => write!(f, "{m}"),
+            BuildError::RegistrationOrder { name, after } => write!(
+                f,
+                "peripheral `{name}` was registered after `{after}`, which contradicts \
+                 PERIPHERAL_REGISTRATION_ORDER. Peripheral indices are packed into scheduler \
+                 event ids; re-ordering them re-points already-scheduled events. Register in \
+                 the declared order, or move the entry in that list."
+            ),
+            BuildError::UndeclaredPeripheral { name } => write!(
+                f,
+                "peripheral `{name}` is not in PERIPHERAL_REGISTRATION_ORDER — add it in the \
+                 place the boot meets it, not at the end"
+            ),
         }
     }
+}
+
+/// Hold [`PERIPHERAL_REGISTRATION_ORDER`]: every block in the set is in the
+/// list, and the set is in the list's order.
+fn check_registration_order(
+    set: &[(u32, u32, lp_emu_esp_common::periph::BoxedPeripheral)],
+) -> Result<(), BuildError> {
+    let mut last: Option<(usize, &str)> = None;
+    for (_, _, periph) in set {
+        let name = periph.name();
+        let Some(pos) = PERIPHERAL_REGISTRATION_ORDER
+            .iter()
+            .position(|n| *n == name)
+        else {
+            return Err(BuildError::UndeclaredPeripheral {
+                name: name.to_string(),
+            });
+        };
+        if let Some((prev, prev_name)) = last
+            && pos < prev
+        {
+            return Err(BuildError::RegistrationOrder {
+                name: name.to_string(),
+                after: prev_name.to_string(),
+            });
+        }
+        last = Some((pos, name));
+    }
+    Ok(())
 }
 
 impl std::error::Error for BuildError {}
@@ -554,6 +686,8 @@ pub struct Esp32S3Builder {
     trace: Option<TraceSink>,
     trace_blocks: Vec<String>,
     seed: u64,
+    reset_cause: ResetCause,
+    efuse: EfuseIdentity,
 }
 
 /// A trace destination, kept out of [`Esp32S3Builder`]'s `Debug` by being its
@@ -645,6 +779,20 @@ impl Esp32S3Builder {
         self
     }
 
+    /// What `RTC_CNTL.reset_state` reports (loader item 6). One variant
+    /// today; see [`ResetCause`].
+    pub fn reset_cause(mut self, cause: ResetCause) -> Self {
+        self.reset_cause = cause;
+        self
+    }
+
+    /// The part this run claims to be: the MAC and the wafer version the
+    /// eFuse block answers (loader item 7; `--efuse-mac`, `--efuse-rev`).
+    pub fn efuse(mut self, identity: EfuseIdentity) -> Self {
+        self.efuse = identity;
+        self
+    }
+
     pub fn build(self) -> Result<Machine, BuildError> {
         let rom_image = match &self.rom {
             RomSource::Vendored => rom::vendored()?,
@@ -658,10 +806,32 @@ impl Esp32S3Builder {
                 lp_emu_esp_common::Trace::to_sink(sink).with_block_filter(self.trace_blocks);
         }
 
-        // No peripheral is registered, and no interrupt matrix is installed:
-        // the shared bus's default answers "nothing asserted", which is the
-        // right answer for a chip whose matrix does not exist yet. P04 owns
-        // both. See the module docs for why a bare MMIO window is the point.
+        // The chip's interrupt matrix, before any peripheral: the two
+        // INTERRUPT_CORE views downcast to it on their first store, and
+        // `esp32_init`'s `setup_interrupts` performs that store a few
+        // hundred cycles in. **The mask form, and nothing else** — see
+        // `crate::intmatrix`'s module docs for X43.
+        bus.set_matrix(Box::new(crate::intmatrix::Esp32S3IntMatrix::new()));
+
+        // RTC_CNTL publishes its half of the CPU stall key through this
+        // handle and the machine reads it; SYSTEM's `core_1_control_0` is
+        // the other chip-side input and rides in `core_1_control` below.
+        let stall_key = StallKey::new();
+        let core_1_control: CoreOneHandle = Arc::new(Mutex::new(CoreOneControl::reset()));
+
+        // The peripherals, in the declared order, before any memory is
+        // placed: a block's index is fixed at registration and the schedule
+        // is empty until `start_peripherals`.
+        let set = crate::periph::boot_set(
+            self.reset_cause,
+            self.efuse,
+            stall_key.clone(),
+            Arc::clone(&core_1_control),
+        );
+        check_registration_order(&set)?;
+        for (base, len, periph) in set {
+            bus.add_peripheral(base, len, periph);
+        }
 
         // The ROM first, always (PD7), and its non-alloc data with it.
         let rom_segments = rom::load(&mut bus, &rom_image)?;
@@ -692,7 +862,10 @@ impl Esp32S3Builder {
             // Slot 1 is held by the machine as well as by the chip's own
             // reset state, and nothing in M6 P03 clears either.
             stalled: [false, true],
-            core_1_control: Arc::new(Mutex::new(CoreOneControl::reset())),
+            core_1_control,
+            stall_key,
+            reset_cause: self.reset_cause,
+            efuse: self.efuse,
             core_quantum: self.core_quantum.unwrap_or(CORE_QUANTUM_DEFAULT),
             wfi_ends: [0; CORES],
             strict_unsupported,
@@ -722,8 +895,6 @@ impl Esp32S3Builder {
 
         // Guest time is zero and everything is placed: the one moment a
         // peripheral may schedule something before the guest touches it.
-        // There is no peripheral in P03; the call stays because P04's first
-        // block must not have to add it.
         machine.bus.start_peripherals();
 
         Ok(machine)
@@ -787,8 +958,13 @@ pub struct Machine {
     /// docs.
     pub harts: Vec<XtHart<SocBus>>,
     stalled: [bool; CORES],
-    /// `SYSTEM.core_1_control_0`, shared with P04's view of it.
+    /// `SYSTEM.core_1_control_0`, shared with the `SYSTEM` view.
     core_1_control: CoreOneHandle,
+    /// RTC_CNTL's two-register stall key, published by its view.
+    stall_key: StallKey,
+    /// The builder's two loader inputs, kept for the run report.
+    reset_cause: ResetCause,
+    efuse: EfuseIdentity,
     /// The upper bound on one core's window, in cycles (`--core-quantum`).
     core_quantum: u64,
     /// How many windows each core has ended in `waiti`.
@@ -937,22 +1113,39 @@ impl Machine {
         *self.core_1_control.lock().expect("core_1_control poisoned")
     }
 
-    /// The handle itself, for P04's `SYSTEM` block.
+    /// The handle itself, shared with the `SYSTEM` view.
     pub fn core_1_control_handle(&self) -> CoreOneHandle {
         Arc::clone(&self.core_1_control)
     }
 
+    /// RTC_CNTL's stall key, as its view last published it.
+    pub fn stall_key(&self) -> &StallKey {
+        &self.stall_key
+    }
+
+    /// What `RTC_CNTL.reset_state` was seeded with.
+    pub fn reset_cause(&self) -> ResetCause {
+        self.reset_cause
+    }
+
+    /// The identity the eFuse block answers.
+    pub fn efuse(&self) -> EfuseIdentity {
+        self.efuse
+    }
+
     /// Is `core` held?
     ///
-    /// The OR of the inputs named in the module docs, in the order they are
-    /// consulted. RTC_CNTL's `0x86` stall key is the third and is **P04's**;
-    /// this function is the seam it plugs into, so P04 adds an input rather
-    /// than reshaping anything.
+    /// The OR of the three inputs named in the module docs, in the order
+    /// they are consulted: the machine's own flag, `SYSTEM.core_1_control_0`,
+    /// and RTC_CNTL's `0x86` stall key.
     pub fn core_stalled(&self, core: usize) -> bool {
         if self.stalled.get(core).copied().unwrap_or(true) {
             return true;
         }
-        core == 1 && self.core_1_control().holds_core1()
+        if core == 1 && self.core_1_control().holds_core1() {
+            return true;
+        }
+        self.stall_key.stalled(core)
     }
 
     /// Which inputs hold `core` right now, by name, in the order
@@ -961,7 +1154,7 @@ impl Machine {
     pub fn stall_inputs(&self, core: usize) -> Vec<&'static str> {
         let mut held = Vec::new();
         if self.stalled.get(core).copied().unwrap_or(true) {
-            held.push("machine (M6 P03 releases no core; there is no S3 measurement of where a released core starts)");
+            held.push("machine (M6 releases no core; there is no S3 measurement of where a released core starts)");
         }
         if core == 1 {
             let c = self.core_1_control();
@@ -974,6 +1167,9 @@ impl Machine {
             if !c.clkgate_en {
                 held.push("SYSTEM.core_1_control_0.!clkgate_en");
             }
+        }
+        if self.stall_key.stalled(core) {
+            held.push("RTC_CNTL sw_stall_*_c1:c0 == 0x86");
         }
         held
     }
@@ -1390,6 +1586,17 @@ impl Machine {
                     pc,
                 };
             }
+            // A peripheral asked for a reset — the RWDT's stage 0 expired.
+            // This machine has no boot chain to restart until P06, so the
+            // run ends here and names who asked; performing it is P06's.
+            if let Some(MachineRequest::Reset { source, at, strap }) = self.bus.take_request() {
+                log::info!("machine: {source} at cycle {at}; the reset is reported, not performed");
+                return Outcome::Reset {
+                    cycle: at,
+                    source,
+                    strap,
+                };
+            }
             if let Some(limit) = stop.wall_timeout
                 && started.elapsed() >= limit
             {
@@ -1462,6 +1669,7 @@ impl Machine {
             core_1_control: self.core_1_control(),
             regions: self.bus.save_regions(),
             periph: self.bus.save_peripherals(),
+            matrix: self.bus.matrix().save_state(),
             scalars: self.bus.save_scalars(),
             sched: self.bus.sched.save(),
             rng: self.rng,
@@ -1481,6 +1689,7 @@ impl Machine {
         *self.core_1_control.lock().expect("core_1_control poisoned") = snap.core_1_control;
         self.bus.restore_regions(&snap.regions);
         self.bus.restore_peripherals(&snap.periph);
+        self.bus.matrix_mut().load_state(&snap.matrix);
         self.bus.restore_scalars(&snap.scalars);
         self.bus.sched.restore(&snap.sched);
         self.rearm_watchpoints();

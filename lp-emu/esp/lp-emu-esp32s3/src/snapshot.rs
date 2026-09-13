@@ -9,9 +9,10 @@
 //! |---|---|
 //! | `harts` | `XtHart` is `Clone`, and the clone *is* the architectural state — the AR file, `WindowBase`/`WindowStart`, `PS`, the special registers, the interrupt unit, the timers, the DBREAK slots and the counters |
 //! | `stalled` | which cores the **machine** holds. Machine state, not hart state, and a restore that forgot it could resume with core 1 running |
-//! | `core_1_control` | which cores the **chip** holds (`SYSTEM.core_1_control_0`). A second input to the same question, and it lives behind an `Arc` the peripheral view will share, so it cannot ride in `periph` until P04 exists |
+//! | `core_1_control` | which cores the **chip** holds (`SYSTEM.core_1_control_0`). A second input to the same question, and it lives behind an `Arc` the `SYSTEM` view shares with the machine, so it rides here rather than in that view's blob |
+//! | `matrix` | the interrupt matrix's routing (`CpuIntMatrix::save_state`). It lives on the bus, not on either `INTERRUPT_CORE` view, so it is carried as its own field — the classic's snapshot does the same |
 //! | `regions` | guest RAM, the mask ROM and the flash windows, byte for byte |
-//! | `periph` | each peripheral's own blob, named, in registration order. **Empty in P03**, and the field is here anyway so P04's first block does not change the struct |
+//! | `periph` | each peripheral's own blob, named, in registration order |
 //! | `scalars` | the bus's clock, issuing PC, side-band and the unmapped counters — a restored run that reported different totals would not be the same run |
 //! | `sched` | the live event queue, with the sequence numbers that break ties |
 //! | `rng` | the seeded PRNG's position |
@@ -48,6 +49,8 @@ pub struct Snapshot {
     pub core_1_control: CoreOneControl,
     pub regions: Vec<Vec<u8>>,
     pub periph: Vec<(String, Vec<u8>)>,
+    /// The interrupt matrix's routing — see the module docs.
+    pub matrix: Vec<u8>,
     pub scalars: BusScalars,
     pub sched: Vec<(Cycles, u64, EventId)>,
     pub rng: u64,
