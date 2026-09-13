@@ -501,12 +501,13 @@ function makeJob(body) {
   }
   const repeats = Number(body.repeats ?? 1);
   if (!Number.isInteger(repeats) || repeats < 1 || repeats > 20) bad('repeats must be 1–20');
-  // 60 s by default — the device cooldown, which is what actually gated
-  // presses while this default was 0, so the job record now says what happens.
-  // 3 m bought nothing (build 9f67d78, 10 presses each: 3 m spacing gave a
-  // translated median 1.046× / interpreter 0.677, back-to-back 1.053× / 0.669).
-  // 0 is still accepted and still means back-to-back.
-  const spacingMs = Number(body.spacingMs ?? 60000);
+  // 0 by default — cooldown-governed. Spacing is for a job deliberately slower
+  // than the thermal rule needs; the cooldown IS the thermal rule, and since
+  // it is now sized by each press's own burn (DD5/DD6) a flat spacing default
+  // could only make a job longer than the device asked for. 3 m bought nothing
+  // either (build 9f67d78, 10 presses each: 3 m spacing gave a translated
+  // median 1.046× / interpreter 0.677, back-to-back 1.053× / 0.669).
+  const spacingMs = Number(body.spacingMs ?? 0);
   if (!Number.isFinite(spacingMs) || spacingMs < 0) bad('spacingMs must be ≥ 0');
   const ttlMs = Number(body.ttlMs ?? 86400000);
   if (!Number.isFinite(ttlMs) || ttlMs < 60000) bad('ttlMs must be ≥ 60 s');
