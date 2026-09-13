@@ -159,13 +159,22 @@ export function createNotifier({ home, configPath, log, now = () => Date.now() }
     } catch (e) { log('notify: could not write ' + statePath + ': ' + e.message); }
   }
 
+  /// The tail is instructions for the phone that is about to be picked up,
+  /// and it has to match what that phone will actually show. A device that
+  /// has joined before keeps its token and id in `localStorage`, so opening
+  /// the tab (or tapping this notification through) re-joins on its own and
+  /// there is NO Join button anywhere on the page — only "Keep the screen
+  /// on", and only while the lock is not held. Telling a returning phone to
+  /// tap Join sent Yona hunting for a button that was not there (2026-09-13).
+  /// Join is named second and scoped to the one visit that has it.
   function compose(waiting) {
     const presses = waiting.reduce((n, j) => n + j.presses.filter((p) => p.state !== 'done' && p.state !== 'failed').length, 0);
     const ids = waiting.slice(0, 3).map((j) => j.id);
     const more = waiting.length > 3 ? ' +' + (waiting.length - 3) + ' more' : '';
     return {
       title: 'emu-lab: ' + waiting.length + ' job' + (waiting.length === 1 ? '' : 's') + ' waiting',
-      body: 'No device present. ' + presses + ' press' + (presses === 1 ? '' : 'es') + ' pending: ' + ids.join(', ') + more + '. Open the lab tab and tap Join.',
+      body: 'No device present. ' + presses + ' press' + (presses === 1 ? '' : 'es') + ' pending: ' + ids.join(', ') + more
+        + '. Open the lab tab; it re-joins on its own, then tap "Keep the screen on" if that button is showing. (A device that has never joined asks for a name and a Join first.)',
     };
   }
 

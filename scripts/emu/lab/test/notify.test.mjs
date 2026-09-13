@@ -65,6 +65,12 @@ test('a job queued with no device present sends exactly one notification, and sa
     assert.equal(title, 'emu-lab: 1 job waiting');
     assert.match(body, /No device present\. 1 press pending: /);
     assert.ok(body.includes(j.id), 'the body names the job: ' + body);
+    // The tail is instructions for a phone that has joined before, and that
+    // phone has NO Join button: it re-joins from localStorage and shows only
+    // "Keep the screen on". Saying Join here cost Yona a hunt on 2026-09-13.
+    assert.ok(body.includes('Keep the screen on'), 'the body names the button the returning phone has: ' + body);
+    assert.ok(!/tap Join/.test(body), 'the body never tells the phone to tap Join: ' + body);
+    assert.match(body, /never joined asks for a name and a Join/, 'Join is scoped to a first visit: ' + body);
     // Disarmed and recorded, so a restart does not repeat it.
     const st = JSON.parse(fs.readFileSync(path.join(home, 'notify.json'), 'utf8'));
     assert.equal(st.armed, false);
