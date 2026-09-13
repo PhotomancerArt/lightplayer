@@ -120,14 +120,13 @@ mkdir -p "$bench_dir"
 # is the same image, and the only thing that moves is which commit `build.rs`
 # stamps into it. The C6's table has the same property and the same fix.
 #
-# ⚠️ **The row name and the reference directory are two columns, not one.**
-# `build-reference-image.sh` gives the classic exactly ONE short slug
-# (`boot-idle`), because its `case` is mirrored by `reference_image_slug` in
-# `lp-emu/lp-emu-validate/src/driver.rs` and a new short name there is a
-# two-file change that M7 P1b was scoped out of. So the other two rows read
-# their images from the long fallback directory and are still called what
-# `lp-emu-validate`'s payload registry calls them in this table and in the
-# printed table — which is the name a reader needs.
+# ⚠️ **The row name and the reference directory are two columns, not one**
+# — even though all three now agree. `build-reference-image.sh` gives all
+# three classic rows short slugs (M5 follow-ups, PR #724 deviation 3's
+# two-line follow-up: this table plus `reference_image_slug` in
+# `lp-emu/lp-emu-validate/src/driver.rs`), and each short slug happens to
+# match the row name `lp-emu-validate`'s payload registry already uses in
+# this table and the printed table.
 #
 # `boot-idle` runs to a fixed emulated deadline rather than to its sentinel:
 # an idle image's sentinel arrives in the first few hundred milliseconds and
@@ -135,8 +134,8 @@ mkdir -p "$bench_dir"
 # same span every run.
 images=(
     "boot-idle|LP_EMU_ESP32V3_REF_BOOT_IDLE|esp32,server,float-f32|3s||0773c3fbd|boot-idle"
-    "shader-compile-stress|LP_EMU_ESP32V3_REF_SHADER_COMPILE_STRESS|esp32,test_shader_compile_incremental|60s|[inc-shader-compile] === DONE ===|0773c3fbd|esp32+test_shader_compile_incremental"
-    "render-loop|LP_EMU_ESP32V3_REF_RENDER_LOOP|esp32,server,float-f32,bench_render_loop|20s|[render-loop] === DONE ===|0773c3fbd|esp32+server+float-f32+bench_render_loop"
+    "shader-compile-stress|LP_EMU_ESP32V3_REF_SHADER_COMPILE_STRESS|esp32,test_shader_compile_incremental|60s|[inc-shader-compile] === DONE ===|0773c3fbd|shader-compile-stress"
+    "render-loop|LP_EMU_ESP32V3_REF_RENDER_LOOP|esp32,server,float-f32,bench_render_loop|20s|[render-loop] === DONE ===|0773c3fbd|render-loop"
 )
 
 resolve_image() {

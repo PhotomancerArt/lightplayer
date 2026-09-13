@@ -1609,12 +1609,16 @@ pub fn reference_image_slug(features: &[&str]) -> String {
         "esp32c6,server,radio,spike_uart0_link,memory_fs,bench_project_rocaille" => {
             "render-rocaille".to_string()
         }
-        // The classic's only short name, `build-reference-image.sh:189`: the
-        // SHIPPED default feature set, which is the image every M3 gate runs
-        // and the one a silicon capture is taken from. There is no memfs
-        // variant — the classic boots from a modelled flash chip with a real
-        // filesystem.
+        // The classic's default short name: the SHIPPED default feature set,
+        // which is the image every M3 gate runs and the one a silicon
+        // capture is taken from. There is no memfs variant — the classic
+        // boots from a modelled flash chip with a real filesystem.
         "esp32,server,float-f32" => "boot-idle".to_string(),
+        // The classic's other two bench rows (M7 P1b, PR #724 deviation 3;
+        // given short names in the M5 follow-ups), matching the names
+        // `bench-esp32v3.sh` already prints for them.
+        "esp32,test_shader_compile_incremental" => "shader-compile-stress".to_string(),
+        "esp32,server,float-f32,bench_render_loop" => "render-loop".to_string(),
         other => other.replace(',', "+"),
     }
 }
