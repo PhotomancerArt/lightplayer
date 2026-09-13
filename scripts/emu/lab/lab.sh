@@ -73,7 +73,7 @@ dur_ms() {
 
 cmd_queue() {
     local builds='[]' rows='"gate-rows"' rowlist='[]' repeats=1 spacing=0 device=any ttl=86400000 retry=1 note=null
-    local stable=null stable_pct=5 stable_row=interp stable_min=3
+    local stable=null stable_pct=5 stable_row=interp stable_min=4
     while [[ $# -gt 0 ]]; do
         case "$1" in
             --build) builds="$(jq -cn --arg b "$2" '[$b]')"; shift 2 ;;
@@ -92,7 +92,7 @@ cmd_queue() {
             --retry-tainted) retry="$2"; shift 2 ;;
             --note) note="$(jq -cn --arg n "$2" '$n')"; shift 2 ;;
             # The percentage is optional: `--stop-when-stable` alone is the
-            # sized default (interp, 5 %, last 3), `--stop-when-stable 3` is
+            # sized default (interp, 5 %, last 4), `--stop-when-stable 3` is
             # tighter. Only a bare number is eaten as the argument.
             --stop-when-stable)
                 stable=on

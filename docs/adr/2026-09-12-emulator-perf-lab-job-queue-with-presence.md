@@ -132,11 +132,14 @@ relays, the agent drives over HTTP.
   presses are within `pct` of each other; `repeats` stays the hard cap and an
   A/B stops per build. Sized from the eleven real runs the lab had by then
   (kept as `test/fixtures/real-runs.json`): the interpreter control row's
-  best settles within 5 % by press 3 on every one of them, so the default is
-  `{row: 'interp', pct: 5, minPresses: 3}`. **The rule is not for a gate** —
-  the interpreter row flattens before the translated row does, and on the
-  P1b R0/R1 job the default would have quoted a `jit/8` best 8.6 % low. The
-  README says so beside the table.
+  best settles within 5 % by press 3 on every one of them — but the default
+  is `{row: 'interp', pct: 5, minPresses: **4**}`, ruled by the director on
+  2026-09-13, because a settled control row is not a settled translated row:
+  a three-press window stops the P1b R0/R1 job with its `jit/8` row still
+  climbing and quotes a best **8.6 % low**. A four-press window never fires
+  there; the price is reach (it fires on 2 of the 11 runs against 8 for a
+  three-press window). **Still not for a gate** — on one of those two runs it
+  is 5.9 % low. The README carries both tables and says so.
 - ~~Auto-restaging `main` into the store on merge.~~ **Done**
   (2026-09-13): `scripts/emu/lab/restage-main.sh` under a third launchd
   agent, `com.yona.emu-lab-restage`, on a ten-minute `StartInterval`; a

@@ -137,7 +137,14 @@ export function computeReport(job, presses) {
 
 /// The shape `makeJob` fills in for `stopWhenStable: {}` and the shape
 /// `lab.sh queue --stop-when-stable` sends with no arguments.
-export const DEFAULT_STOP_WHEN_STABLE = { row: 'interp', pct: 5, minPresses: 3 };
+///
+/// `minPresses` is **4**, not the 3 the control row's own settling suggests.
+/// Director's ruling, 2026-09-13, from `j-20260912-1718-5940` — the one job in
+/// the sizing data where a real decision turned on the number: a window of 3
+/// would have stopped that build with its `jit/8` row still climbing and
+/// quoted a best 8.6 % low. A window of 4 fires on 2 of the 11 real runs
+/// rather than 8, and that is the trade the lab wants.
+export const DEFAULT_STOP_WHEN_STABLE = { row: 'interp', pct: 5, minPresses: 4 };
 
 /// Which of a build's rows the rule watches. `'interp'` is every interpreter
 /// row the build has produced (the control rows); `'all'` is every row;

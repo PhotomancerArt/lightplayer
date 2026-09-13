@@ -895,9 +895,10 @@ queueing the current head takes no staging step at all. Results land in `~/.phot
 (the rig's own `result-*.json` shape, `bench-web.sh --collect <dir>`).
 An exploratory sweep can add `--stop-when-stable` to give the phone back the
 presses it did not need (a build stops once its interpreter control row's
-last three counted presses are within 5 %); **leave it off for a number that
-decides something** — the control row flattens before the translated row
-does, and the README has the measured cost.
+last **four** counted presses are within 5 %); **leave it off for a number
+that decides something** — the control row flattens before the translated row
+does, and even at a four-press window the README has a measured 5.9 %
+under-quote.
 **Agents never open the lab page themselves**: a hidden tab is refused by
 design, and a headless browser's number is a desk number. Phone numbers
 confirm direction (DD43); the desk proxy stays the phase bar. Runbook:

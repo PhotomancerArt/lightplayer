@@ -317,7 +317,7 @@ prints them all as the rig's table, device column from the lab's name.
   "builds": ["86cb2e0", "23a3d3c"],            // one entry = a single build
   "rows": "gate-rows",                           // or [{slug,grade,mode,fnBlocks,timeout}]
   "repeats": 5, "spacingMs": 180000, "device": "any", "ttlMs": 86400000, "retryTainted": 1,
-  "stopWhenStable": null,                        // or {"row":"interp","pct":5,"minPresses":3} — see below
+  "stopWhenStable": null,                        // or {"row":"interp","pct":5,"minPresses":4} — see below
   "note": "P4 vs P3 head", "createdAt": "…", "state": "queued",
   "boundDevice": null, "presses": [{"n": 1, "build": "86cb2e0", "state": "pending"}, …],
   "stoppedEarly": [], "lastPressEndAt": null, "reportAt": null
@@ -358,7 +358,7 @@ numbers stop moving well before the tenth press. `stopWhenStable` lets a job
 say so:
 
 ```jsonc
-"stopWhenStable": { "row": "interp", "pct": 5, "minPresses": 3 }
+"stopWhenStable": { "row": "interp", "pct": 5, "minPresses": 4 }
 ```
 
 ```bash
@@ -387,7 +387,7 @@ row), or one exact key like `render-basic/t2/jit/8`.
   an **exclusion** — it was never taken, so it is not a hole in the sequence.
   `report.json` carries `stopWhenStable` and `stoppedEarly: [{build,
   afterPress, why, skipped, …}]`, and `report.md` prints a
-  **stopped early: … after press 3 of 8** line with the window that closed it.
+  **stopped early: … after press 4 of 8** line with the window that closed it.
 - With the field absent nothing changes: every press of `repeats` is taken,
   and `stoppedEarly` is `null` in the report.
 
@@ -407,47 +407,57 @@ run's final best):
 | 5 % | press 3 |
 | 10 % | press 2 |
 
-Hence `minPresses: 3`. **Where the window rule then stops each real run**
-(`row: interp`, `minPresses: 3`; `–` = never settles, the job runs to
+That table says `minPresses: 3`. **The default is 4 anyway** — see the
+ruling below. `pct: 5` is the middle column and is the default.
+
+**Where the window rule stops each real run at the shipped
+`minPresses: 4`** (`row: interp`; `–` = never settles, the job runs to
 `repeats`):
 
 | run | control row | 3 % | 5 % | 10 % |
 |---|---|---:|---:|---:|
-| G1 `86cb2e0` (P3 head) | 0.586 0.534 0.527 0.476 0.519 | – | – | p5 |
-| G1 `23a3d3c` (P4 head) | 0.611 0.603 0.581 0.519 0.452 | – | p3 | p3 |
+| G1 `86cb2e0` (P3 head) | 0.586 0.534 0.527 0.476 0.519 | – | – | – |
+| G1 `23a3d3c` (P4 head) | 0.611 0.603 0.581 0.519 0.452 | – | – | – |
 | G2 `23a3d3c` (2 presses) | 0.608 0.599 | – | – | – |
-| P1b R0 `…d65f8c` | 0.648 0.627 0.646 0.666 0.668 | – | p3 | p3 |
-| P1b R1 `…15a80d` | 0.649 0.654 0.672 0.636 0.686 | – | p3 | p3 |
-| margin sweep `9f67d78` (2 slugs) | basic + rocaille | – | – | p3 |
-| spacing S1 `9f67d78` (3 m, 10 presses) | 0.677 0.680 0.676 … | p3 | p3 | p3 |
-| spacing S2 `9f67d78` (back-to-back, 10) | 0.600 0.665 0.686 … | – | p4 | p4 |
-| P1c `9f67d78` | 0.681 0.619 0.682 0.668 0.683 | p5 | p5 | p3 |
-| P1c `0adccaa` | 0.708 0.673 0.723 0.726 0.735 | p5 | p5 | p3 |
-| G-M7B `86cb2e0` | 0.618 0.626 0.613 0.585 0.500 | p3 | p3 | p3 |
+| P1b R0 `…d65f8c` | 0.648 0.627 0.646 0.666 0.668 | – | – | p4 |
+| P1b R1 `…15a80d` | 0.649 0.654 0.672 0.636 0.686 | – | – | p4 |
+| margin sweep `9f67d78` (2 slugs) | basic + rocaille | – | – | p4 |
+| spacing S1 `9f67d78` (3 m, 10 presses) | 0.677 0.680 0.676 0.670 … | p4 | **p4** | p4 |
+| spacing S2 `9f67d78` (back-to-back, 10) | 0.600 0.665 0.686 0.673 … | – | **p5** | p5 |
+| P1c `9f67d78` | 0.681 0.619 0.682 0.668 0.683 | – | – | p4 |
+| P1c `0adccaa` | 0.708 0.673 0.723 0.726 0.735 | – | – | p4 |
+| G-M7B `86cb2e0` | 0.618 0.626 0.613 0.585 0.500 | – | – | p4 |
 
-`pct: 5` is the default: it stops seven of the eleven, and it clears the
+At the default the rule fires on **2 of the 11** runs, and it clears the
 plan's acceptance number — **on G1 it does not stop the P3 head before press
-3**; in fact it never stops it at all (the tightest window that run offers is
-9.7 % apart). `pct: 10` would stop it, at press 5.
+3**; in fact it never stops it at all (the tightest four-press window that
+run offers is 10.9 % apart).
 
-### What this rule cannot see, and why it is not for a gate
+### The ruling: why the default window is 4, not 3
 
 **A settled control row is not a settled translated row.** The interpreter
 row is the *quiet* row — no translation, no warm-up — so it flattens long
 before the row whose number gets quoted. On the P1b R0-vs-R1 job, the
-decision that turned on 1–2.7 %, the default rule stops `…d65f8c` at press 3
-with the interpreter at 0.648 0.627 0.646 (3.2 % apart) while `jit/8` is
-still climbing: 0.939 0.972 0.973 → **1.064** on press 4. The quoted best
+decision that turned on 1–2.7 %, a **three**-press window stops `…d65f8c` at
+press 3 with the interpreter at 0.648 0.627 0.646 (3.2 % apart) while `jit/8`
+is still climbing: 0.939 0.972 0.973 → **1.064** on press 4. The quoted best
 would have been **8.6 % low**. `row: 'all'` does not save that case either —
 three flat presses at the bottom of a ramp look exactly like three flat
-presses on a plateau. `minPresses: 4` does (it never fires there), and so
-does `pct: 3`.
+presses on a plateau.
 
-So: **leave the rule off for a job whose number decides something** (that is
-the default — the field is opt-in), and reach for it on exploratory sweeps
-where five presses you did not need cost more than a percent you did not
-measure. If you want it on a job that matters, `--stable-row all
---stable-min 4` is the setting the evidence supports.
+So the director ruled the default window to **4** (2026-09-13): it never
+fires on that run at all. The cost is reach — a window of 3 fires on 8 of the
+11 runs, a window of 4 on 2 — and that is the trade the lab wants, because a
+number quoted 8.6 % low is worse than four presses not saved.
+
+**The 4-press window shrinks the worst under-quote; it does not remove it.**
+Of the two runs it still fires on, spacing S1 stops at press 4 with `jit/8`
+at 1.041 against **1.106** on press 9 of 10 — **5.9 % low**. So the older
+advice stands unchanged: **leave the rule off for a job whose number decides
+something** (that is the default — the field is opt-in), and reach for it on
+exploratory sweeps where presses you did not need cost more than a percent
+you did not measure. `--stable-row all --stable-min 4` is the tightest
+setting the evidence supports, and even it is not a gate.
 
 ## Waiting (the dont-poll rule made concrete)
 
@@ -605,6 +615,6 @@ sections: the arithmetic against `fixtures/real-runs.json` — every A/B and
 repeat job the lab had produced by 2026-09-13, anonymised to the report's own
 press sequences, which is where the sizing table above comes from and what
 keeps it from drifting — and then the scheduler against the fake device (a
-flat table stops at press 3, a wandering one runs to `repeats`, an A/B stops
+flat table stops at press 4, a wandering one runs to `repeats`, an A/B stops
 per build, a tainted press cannot close the window). Nothing here needs a
 package.json, and nothing may gain one.
