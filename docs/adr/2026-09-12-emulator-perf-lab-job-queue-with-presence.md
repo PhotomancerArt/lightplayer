@@ -125,4 +125,8 @@ relays, the agent drives over HTTP.
 - Other emulator targets as builds in the same store (vision Q7).
 - A stability-based stopping rule for A/B once enough sessions exist to
   size it (vision Q4).
-- Auto-restaging `main` into the store on merge.
+- ~~Auto-restaging `main` into the store on merge.~~ **Done**
+  (2026-09-13): `scripts/emu/lab/restage-main.sh` under a third launchd
+  agent, `com.yona.emu-lab-restage`, on a ten-minute `StartInterval`; a
+  stage now takes a lock so the timer and a hand-run `lab.sh stage` never
+  overlap.

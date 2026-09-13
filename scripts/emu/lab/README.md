@@ -33,7 +33,9 @@ with one once. `LAB_HOME` overrides it (tests use a temp dir).
 ├── jobs/<id>/presses/<n>.json  report.json  report.md
 ├── results/result-<ISO>.json   the legacy bench-web shape, one per press or manual run
 ├── devices/<deviceId>.json     identity, last state, last seen
-└── log/server.log
+├── .stage/lock                 one stage at a time: the pid + sha building right now
+├── log/server.log              the server's own, append-only
+└── log/restage.log             one line per restage run (skips included)
 ```
 
 **The port is pinned at 41111.** The lab is a machine-wide service, not a
@@ -80,6 +82,42 @@ existing ELFs so the pinned reference images are not rebuilt), this tree's
 `--stage-into --from-stage`, and the worktree removed. It refuses the
 primary checkout's HEAD while that tree is dirty — the store would hold the
 commit, not what you are looking at.
+
+**One stage at a time.** A stage takes `$LAB_HOME/.stage/lock` (`mkdir` for
+the atomic part, the pid and the sha inside it) and releases it on any exit;
+a second one refuses with **exit 3**, naming the pid and what it is building,
+before it touches git or the store. A lock whose pid is gone — a `kill -9`
+mid-stage — is cleared by the next stage rather than blocking forever. That
+lock is the whole overlap story between the timer below and a director's own
+`lab.sh stage`.
+
+## The newest `main` stages itself
+
+`scripts/emu/lab/restage-main.sh`, run by `com.yona.emu-lab-restage` every
+ten minutes: fetch `origin main` into the primary checkout's object store (a
+fetch, never a checkout — no working tree is touched), and when that head has
+no `builds/<short>/`, hand it to `lab.sh stage`. So `just emu-lab queue
+--build <newest main short sha>` works without staging anything first.
+
+```bash
+scripts/emu/lab/lab.sh logs restage        # one line per run
+scripts/emu/lab/lab.sh restart restage     # run one NOW instead of waiting
+scripts/emu/lab/restage-main.sh            # …or by hand, same thing
+```
+
+`log/restage.log` is **one line per run**, skips included:
+
+```text
+2026-09-13T07:10:04Z 9f67d78 already in the store
+2026-09-13T07:20:31Z staged 3f1a2b4 as 3f1a2b4 in 486s
+2026-09-13T07:30:02Z busy: a stage is already running (pid 41231, 3f1a2b4…)
+```
+
+A build takes minutes and the timer keeps firing under it: a fire that lands
+on a running stage (a hand-run one included) logs `busy` and exits 0. The
+dirty-HEAD refusal above is a skip line here too, and clears itself when the
+primary checkout is committed. The build's own chatter — cargo, bench-web —
+is launchd's `log/restage.stdout.log`, not this file.
 
 The rig's desk-engine half runs off a store build unchanged, symlinked ELFs
 and all:
@@ -277,7 +315,7 @@ five-press table, generated.
 ```bash
 lab.sh status | devices | jobs | report <id> | cancel <id> | collect | home | token | curl <path> [curl args]
 lab.sh stage <sha>                      # build that commit in a throwaway worktree of the primary checkout, put it in the store
-lab.sh install [--force] | uninstall | restart [server|tunnel] | url | logs [-n N] [server|tunnel]
+lab.sh install [--force] | uninstall | restart [server|tunnel|restage] | url | logs [-n N] [server|tunnel|restage]
 lab.sh queue --build 23a3d3c --rows gate-rows --repeats 3 --spacing 3m [--device NAME] [--ttl 24h] [--note …]
 lab.sh queue --ab 86cb2e0 23a3d3c --rows gate-rows --repeats 5 --spacing 3m
 lab.sh queue --build X --row render-basic:t2:jit:8 --row render-basic:t2:interp
@@ -287,19 +325,23 @@ lab.sh wait --job <id> [--max-time 3600] | --device any|NAME | --queue-idle
 `queue` prints the job id on stdout; `wait --job` prints the path of
 `report.md`; `--spacing`/`--ttl` take `90s`, `3m`, `24h`.
 
-## Standing service (D7, T8): two launchd agents
+## Standing service (D7, T8): the launchd agents
 
 The server and the tunnel run as launchd user agents with `KeepAlive`, so a
 `kill -9`, a crash, or a logout/login brings them back on their own, and no
 agent session owns the rig's lifetime (three rigs died with their sessions
-before this).
+before this). **`com.yona.emu-lab-restage` is the third**, and the one that
+is not a service: a `StartInterval` timer, no `KeepAlive`, `RunAtLoad` false
+— it runs `restage-main.sh` every ten minutes, writes its line, and exits
+(see "The newest `main` stages itself"). Its `PATH` carries `~/.cargo/bin`,
+because the stage it may start builds the wasip1 module with cargo.
 
 ```bash
-scripts/emu/lab/lab.sh install            # renders launchd/*.plist.tmpl into ~/Library/LaunchAgents, bootstraps both, prints the bookmark
+scripts/emu/lab/lab.sh install            # renders launchd/*.plist.tmpl into ~/Library/LaunchAgents, bootstraps them, prints the bookmark
 scripts/emu/lab/lab.sh url                # the bookmark again (static domain from config.json, else the live random URL)
-scripts/emu/lab/lab.sh restart [server|tunnel]
-scripts/emu/lab/lab.sh logs [-n 100] [server|tunnel]
-scripts/emu/lab/lab.sh uninstall          # bootout both, remove the plists; the home is left alone
+scripts/emu/lab/lab.sh restart [server|tunnel|restage]   # a plain `restart` leaves the restage timer alone: it is a build, not a service
+scripts/emu/lab/lab.sh logs [-n 100] [server|tunnel|restage]
+scripts/emu/lab/lab.sh uninstall          # bootout all three, remove the plists; the home is left alone
 launchctl print gui/$UID/com.yona.emu-lab | head
 ```
 
@@ -331,8 +373,10 @@ API on :4040, and the bookmark has to be re-sent. Put the name in
 `config.json` and re-run `lab.sh install`.
 
 Logs: `log/server.log` (the server's own, append-only; rotated once to
-`.1` past 50 MB on start), `log/tunnel.log` (ngrok's JSON), and the two
-`*.stdout.log` files launchd captures. A 401 through the tunnel logs its
+`.1` past 50 MB on start), `log/tunnel.log` (ngrok's JSON),
+`log/restage.log` (one line per restage run), and the `*.stdout.log` files
+launchd captures — `restage.stdout.log` is where a build's own minutes of
+cargo output go. A 401 through the tunnel logs its
 `X-Forwarded-For`; nothing else about it is kept.
 
 **The interstitial** (Q1/Q8): `fetch` sends `ngrok-skip-browser-warning`,
@@ -371,7 +415,10 @@ number:
 just test-emu-lab        # node --test scripts/emu/lab/test/*.test.mjs — also inside `just test`, and the emu_c6 CI job's "Lab tests" step
 ```
 
-The tests spawn the real `server.mjs` on port 0 in a temp home
+`restage.test.mjs` is the shell half: it takes the stage lock by hand (the
+runner's own pid is the live holder) and checks both sides of it — the
+refusal and the stale-lock recovery — with no network and no cargo. The rest
+spawn the real `server.mjs` on port 0 in a temp home
 (`test/helpers.mjs`); `test/fake-device.mjs` is a page client that answers
 presses from a table of numbers at test speed (`LAB_TICK_MS`,
 `LAB_COOLDOWN_MS`, `LAB_LOST_MS`); `report.test.mjs` reproduces the G-M7B

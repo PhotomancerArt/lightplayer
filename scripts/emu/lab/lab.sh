@@ -13,11 +13,12 @@
 #   lab.sh cancel ID
 #   lab.sh collect                                 # bench-web.sh --collect over the lab's results/ (every press, every manual run)
 #   lab.sh stage <sha>                             # build that commit in a throwaway worktree and put it in the store; prints the build id
+#     …and the newest origin/main stages itself every 10 min (restage-main.sh, com.yona.emu-lab-restage)
 #   lab.sh home | token | curl /status [curl args] # LAB_HOME; the token FILE's path; authenticated passthrough
-#   lab.sh install [--force]                       # the server agent + the exposure (config.json "exposure": tailscale | ngrok); prints the bookmark
-#   lab.sh uninstall | restart [server|tunnel]     # bootout both / kickstart one or both
+#   lab.sh install [--force]                       # the server agent + the exposure (config.json "exposure": tailscale | ngrok) + the restage timer; prints the bookmark
+#   lab.sh uninstall | restart [server|tunnel|restage]   # bootout all / kickstart one or all
 #   lab.sh url                                     # the bookmark: the tailnet name, or the ngrok domain from config.json, else the live random URL
-#   lab.sh logs [-n 100] [server|tunnel]           # tail the logs
+#   lab.sh logs [-n 100] [server|tunnel|restage]   # tail the logs
 #
 # Talks to http://127.0.0.1:<port> — the director is on the desk, never through
 # the tunnel. The port comes from $LAB_HOME/config.json, the token from
@@ -33,8 +34,11 @@
 set -euo pipefail
 
 home="${LAB_HOME:-$HOME/.photomancer/emu-lab}"
+# Held for the length of a `stage` (see stage_lock); restage-main.sh peeks at
+# it before it does any work of its own.
+stage_lock_dir="$home/.stage/lock"
 
-usage() { sed -n '2,20p' "$0"; }
+usage() { sed -n '2,21p' "$0"; }
 
 need_home() {
     [[ -f "$home/config.json" && -f "$home/token" ]] || {
@@ -131,12 +135,13 @@ cmd_wait() {
     esac
 }
 
-# --- the standing service (D7, T8): two launchd user agents ---------------------
+# --- the standing service (D7, T8): the launchd user agents ---------------------
 here="$(cd "$(dirname "$0")" && pwd)"
 repo="$(cd "$here/../../.." && pwd)"
 agents_dir="$HOME/Library/LaunchAgents"
 label_server="com.yona.emu-lab"
 label_tunnel="com.yona.emu-lab-tunnel"
+label_restage="com.yona.emu-lab-restage"
 
 domain() { jq -r '.domain // empty' "$home/config.json"; }
 exposure() { jq -r '.exposure // "ngrok"' "$home/config.json"; }
@@ -184,9 +189,13 @@ cmd_install() {
     fi
     command -v /opt/homebrew/bin/node >/dev/null || { echo "lab: /opt/homebrew/bin/node missing (D13)" >&2; exit 1; }
     local exp; exp="$(exposure)"
-    local labels=("$label_server")
+    # The restage timer beside the server: `origin main` reaches the store with
+    # no session in the loop (restage-main.sh). It is a timer, not a service —
+    # no KeepAlive, and a fire during a build sees the stage lock.
+    local labels=("$label_server" "$label_restage")
     mkdir -p "$agents_dir" "$home/log"
     render "$here/launchd/$label_server.plist.tmpl" >"$agents_dir/$label_server.plist"
+    render "$here/launchd/$label_restage.plist.tmpl" >"$agents_dir/$label_restage.plist"
     case "$exp" in
         ngrok)
             command -v /opt/homebrew/bin/ngrok >/dev/null || { echo "lab: /opt/homebrew/bin/ngrok missing" >&2; exit 1; }
@@ -204,7 +213,12 @@ cmd_install() {
             rm -f "$agents_dir/$label_tunnel.plist" ;;
         *) echo "lab: config.json exposure must be tailscale or ngrok, not '$exp'" >&2; exit 2 ;;
     esac
-    plutil -lint "${labels[@]/#/$agents_dir/}" >/dev/null 2>&1 || plutil -lint "$agents_dir/$label_server.plist" >/dev/null
+    # Lint every plist this install rendered, by its real path — the old
+    # prefix-expansion left the `.plist` off, so only the server's was ever
+    # checked.
+    local plists=()
+    for l in "${labels[@]}"; do plists+=("$agents_dir/$l.plist"); done
+    plutil -lint "${plists[@]}" >/dev/null
     # A hand-run server on the port would keep the agent crash-looping.
     if lsof -nP -iTCP:"$(port)" -sTCP:LISTEN >/dev/null 2>&1 && ! launchctl print "gui/$(id -u)/$label_server" >/dev/null 2>&1; then
         echo "lab: something else is listening on :$(port) (a hand-run server?) — stop it first" >&2; exit 1
@@ -219,7 +233,9 @@ cmd_install() {
     done
     sleep 2
     for l in "${labels[@]}"; do
-        launchctl print "gui/$(id -u)/$l" | grep -E "^\s+(state|pid) " | tr -s ' ' | sed "s|^|lab: $l|" >&2
+        # `|| true`: a timer agent between fires prints no `pid` line, and an
+        # empty grep must not take the install down with it.
+        launchctl print "gui/$(id -u)/$l" | grep -E "^\s+(state|pid) " | tr -s ' ' | sed "s|^|lab: $l|" >&2 || true
     done
     curl -sf "http://127.0.0.1:$(port)/healthz" >/dev/null || { echo "lab: server agent is not answering /healthz yet (lab.sh logs server)" >&2; exit 1; }
     echo "lab: installed ${labels[*]} (repo $repo$([[ $force -eq 1 ]] && echo ', --force'), exposure $exp)" >&2
@@ -244,7 +260,7 @@ cmd_install() {
 }
 
 cmd_uninstall() {
-    for l in "$label_server" "$label_tunnel"; do
+    for l in "$label_server" "$label_tunnel" "$label_restage"; do
         launchctl bootout "gui/$(id -u)/$l" >/dev/null 2>&1 && echo "lab: $l stopped" >&2 || true
         rm -f "$agents_dir/$l.plist"
     done
@@ -254,17 +270,50 @@ cmd_uninstall() {
 
 cmd_restart() {
     local which="${1:-both}"
-    for l in "$label_server" "$label_tunnel"; do
-        case "$which:$l" in both:*|server:$label_server|tunnel:$label_tunnel) launchctl kickstart -k "gui/$(id -u)/$l" && echo "lab: $l restarted" >&2 ;; esac
+    # `restart restage` kickstarts the timer's job, which is how you make a
+    # restage run NOW instead of waiting for the next fire.
+    for l in "$label_server" "$label_tunnel" "$label_restage"; do
+        case "$which:$l" in
+            # A restage is minutes of cargo; it is never a side effect of a
+            # plain `lab.sh restart`.
+            both:$label_restage) ;;
+            both:*|server:$label_server|tunnel:$label_tunnel|restage:$label_restage)
+                launchctl kickstart -k "gui/$(id -u)/$l" && echo "lab: $l restarted" >&2 ;;
+        esac
     done
 }
 
 cmd_logs() {
     local n=100 which=server
     while [[ $# -gt 0 ]]; do
-        case "$1" in -n) n="$2"; shift 2 ;; server|tunnel) which="$1"; shift ;; *) echo "lab: logs: unknown $1" >&2; exit 2 ;; esac
+        case "$1" in -n) n="$2"; shift 2 ;; server|tunnel|restage) which="$1"; shift ;; *) echo "lab: logs: unknown $1" >&2; exit 2 ;; esac
     done
     tail -n "$n" "$home/log/$which.log"
+}
+
+# One stage at a time, hand-run or timer-run (restage-main.sh). `mkdir` is the
+# atomic part; the pid inside is what makes a lock left by a `kill -9`
+# recoverable instead of permanent. Exit 3 means "held" and nothing was
+# touched — restage-main.sh reads that as a skip, not a failure.
+stage_lock() {
+    local what="$1" pid
+    mkdir -p "$home/.stage"
+    if ! mkdir "$stage_lock_dir" 2>/dev/null; then
+        pid="$(cat "$stage_lock_dir/pid" 2>/dev/null || true)"
+        # `kill -0` answers for THIS user's processes: another user's pid reads
+        # as gone (EPERM). Every stage here runs as the desk's own user, so
+        # that is the right answer and not a hole.
+        if [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null; then
+            echo "lab: a stage is already running (pid $pid, $(cat "$stage_lock_dir/what" 2>/dev/null || echo '?')) — try again when it is done" >&2
+            exit 3
+        fi
+        echo "lab: clearing a stale stage lock (pid ${pid:-?} is gone)" >&2
+        rm -rf "$stage_lock_dir"
+        mkdir "$stage_lock_dir" 2>/dev/null || { echo "lab: could not take the stage lock ($stage_lock_dir)" >&2; exit 3; }
+    fi
+    echo $$ >"$stage_lock_dir/pid"
+    echo "$what" >"$stage_lock_dir/what"
+    trap 'rm -rf "$stage_lock_dir"' EXIT
 }
 
 # Build a commit and put it in the store, from a throwaway detached worktree
@@ -276,6 +325,7 @@ cmd_logs() {
 cmd_stage() {
     local sha="${1:?lab stage needs a commit}"
     need_home
+    stage_lock "$sha"
     # No `head` here: under pipefail a closed pipe makes git exit non-zero
     # and `set -e` would leave silently.
     local primary; primary="$(git -C "$repo" worktree list --porcelain | sed -n '1s/^worktree //p')"

@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- The newest `main` in the store with nobody in the loop: every ten minutes
+     `restage-main.sh` fetches `origin main` and stages that head if the store
+     has no build for it. Rendered by `scripts/emu/lab/lab.sh install`.
+
+     NO KeepAlive — this one is a timer, not a service: it runs, says one line
+     in log/restage.log, and exits. RunAtLoad is false so a re-install does not
+     start minutes of cargo under the director's feet; the first fire is within
+     the interval. A fire that lands on a running stage sees the lock under
+     .stage/ and exits 0, so the 10-minute timer and a build that takes 20
+     never overlap.
+
+     launchd sources no rc file, so PATH is spelled out and carries
+     ~/.cargo/bin — the stage builds the wasip1 module with cargo. Nice 5:
+     this is background work on Yona's own desk. @REPO@ must be a checkout
+     that outlives worktrees — the primary checkout, never .claude/worktrees/… -->
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>com.yona.emu-lab-restage</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/bash</string>
+    <string>@REPO@/scripts/emu/lab/restage-main.sh</string>
+  </array>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>HOME</key><string>@HOME@</string>
+    <key>LAB_HOME</key><string>@HOME@/.photomancer/emu-lab</string>
+    <key>PATH</key><string>@HOME@/.cargo/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+  </dict>
+  <key>WorkingDirectory</key><string>@HOME@/.photomancer/emu-lab</string>
+  <key>RunAtLoad</key><false/>
+  <key>StartInterval</key><integer>600</integer>
+  <key>Nice</key><integer>5</integer>
+  <key>StandardOutPath</key><string>@HOME@/.photomancer/emu-lab/log/restage.stdout.log</string>
+  <key>StandardErrorPath</key><string>@HOME@/.photomancer/emu-lab/log/restage.stdout.log</string>
+</dict>
+</plist>
