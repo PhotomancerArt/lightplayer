@@ -2916,20 +2916,43 @@ test-emu-esp32s3:
 # exists to prevent it. M6 P03 has one image; the copy is here from the first
 # recipe so the phase that adds a second does not have to remember why.
 #
-# ⚠️ **No merged chip image, and no `espflash`.** The classic's recipe builds
-# one because its ROM-up boot needs the second-stage bootloader the flasher
-# bundles. The S3 has no ROM-up path until **P06**, which is the phase that
-# adds `--merged` and the espflash step.
+# **The merged chip image** (M6 P06): `espflash save-image --chip esp32s3
+# --merge` bundles the ESP-IDF second-stage bootloader with this
+# firmware's partition table and the app into one 8 MiB chip
+# (`{{ s3_flash_size }}`, the same mirror `flash-fw-esp32s3` flashes with),
+# which the ROM-up boot (`--boot-mode rom-up --merged`) and the
+# direct-load tests that need a flashed `lpfs` read. Built **inline**, as
+# the classic's recipe builds its own — not through
+# `scripts/emu/build-merged-image.sh`, which is the validate runner's
+# (P08) and has its own cache and naming; the two must not depend on each
+# other's shape. Same image from the same ELF either way.
+#
+# ⚠️ `espflash` is therefore a **CI dependency** of this recipe, as it is of
+# the classic's (`cargo install espflash` or the release tarball). With it
+# absent the merged image is not built, `LP_EMU_ESP32S3_MERGED` is not set,
+# and the tests that need one print a SKIP notice rather than failing —
+# which, since P06, is every test in `tests/boot_idle.rs` and most of
+# `tests/rom_up_boot.rs`.
 test-emu-esp32s3-boot: build-fw-esp32s3
     #!/usr/bin/env bash
     set -euo pipefail
     built={{ justfile_directory() }}/target/xtensa-esp32s3-none-elf/release-esp32s3/fw-esp32s3
     out={{ justfile_directory() }}/target/lp-emu-esp32s3
+    merged="$out/merged.bin"
     mkdir -p "$out"
     shipped="$out/fw-esp32s3-shipped.elf"
     cp "$built" "$shipped"
     export LP_EMU_ESP32S3_ELF="$shipped"
-    echo "image: shipped=$shipped"
+    if command -v espflash >/dev/null 2>&1; then
+      espflash save-image --chip esp32s3 --merge \
+          --partition-table {{ fw_esp32s3_dir }}/partitions.csv \
+          --flash-size {{ s3_flash_size }} "$shipped" "$merged"
+      export LP_EMU_ESP32S3_MERGED="$merged"
+      echo "images: shipped=$shipped merged=$merged"
+    else
+      echo "espflash is not on PATH: the merged-image tests will SKIP" >&2
+      echo "image: shipped=$shipped"
+    fi
     cargo test -p lp-emu-esp32s3 -- --include-ignored
 
 # **M6's gate so far.** What the `Emulator ESP32-S3 (x64)` job will run.
