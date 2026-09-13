@@ -102,6 +102,26 @@ const LP_CLKRST_RESET_CAUSE: u32 = 0x010;
 
 pub const MAX_SLICE_CYCLES: u64 = 8_192;
 
+/// How many slice boundaries `run_until` lets pass between two reads of the
+/// host clock for [`StopCondition::wall_timeout`] (P1c).
+///
+/// The wall net is a **diagnostic** stop — exit code 4 — and nothing the guest
+/// can observe depends on when it fires, which is why it may be sampled
+/// coarsely when every other term of the boundary may not. In the wasm build
+/// `Instant::now()` is a host call through the WASI clock import: P1's
+/// decomposition measured it at 148 ns a slice, 227 ms of a 5,500 ms
+/// `render-basic` t2 run (5.0 % of the `run_until` wall) in node/V8 and 214 ms
+/// in bun/JavaScriptCore, on a run that made 1,531,923 of them.
+///
+/// The price of the stride is lateness: the timeout can fire up to one stride
+/// of slices after the limit, so at most `(STRIDE - 1) × MAX_SLICE_CYCLES`
+/// emulated cycles — 516,096, ≈ 3 ms of wall at 1× — later than an unstrided
+/// check would have. Ruled acceptable at `G-LOOP0b` (Yona, 2026-09-13: "it
+/// doesn't have to be that perfect"). The one caller that uses the net as an
+/// ordinary return rather than as a net is `lp-cli`'s `emu serve` board loop,
+/// whose slice is 40 ms of wall — a stride is ≈ 0.2 ms of that.
+const WALL_TIMEOUT_SLICE_STRIDE: u32 = 64;
+
 /// Does this build install a translated core when nothing on the command line
 /// asks either way? (M7 P7 — R9's translator-only core.)
 ///
@@ -4560,6 +4580,11 @@ impl Esp32C6Machine {
         // M7b P4's census asks whether a boundary changed anything; the
         // external interrupt number is one of the things it can change.
         let mut last_external = self.bus.pending_cpu_interrupt();
+        // P1c: slices left before the wall net looks at the host clock
+        // again. Zero means "this slice" — the first slice of every run
+        // reads it, so a run that is already over the limit when it starts
+        // still stops at once.
+        let mut wall_countdown = 0u32;
 
         loop {
             let now = self.cycles();
@@ -4781,12 +4806,28 @@ impl Esp32C6Machine {
             {
                 return Outcome::ExitMatched { cycle };
             }
-            if let Some(limit) = stop.wall_timeout
-                && started.elapsed() >= limit
-            {
-                return Outcome::WallTimeout {
-                    cycle: self.cycles(),
-                };
+            // The wall net, strided (P1c). In the wasm build `Instant::now()`
+            // is a host call through the WASI clock import, and P1's
+            // decomposition priced this one line at 148 ns a slice —
+            // 227 ms of a 5,500 ms `render-basic` t2 run, 5.0 % of the
+            // `run_until` wall — because the loop asked for the time
+            // 1,531,923 times. It is a diagnostic stop (exit code 4) and no
+            // guest state depends on it, so it is read once every
+            // `WALL_TIMEOUT_SLICE_STRIDE` slices instead. The timeout may
+            // therefore fire up to a stride late: at most 63 ×
+            // `MAX_SLICE_CYCLES` emulated cycles, ≈ 3 ms of wall at 1×.
+            // The check keeps its place in the boundary's order.
+            if let Some(limit) = stop.wall_timeout {
+                if wall_countdown == 0 {
+                    wall_countdown = WALL_TIMEOUT_SLICE_STRIDE - 1;
+                    if started.elapsed() >= limit {
+                        return Outcome::WallTimeout {
+                            cycle: self.cycles(),
+                        };
+                    }
+                } else {
+                    wall_countdown -= 1;
+                }
             }
         }
     }
@@ -5737,6 +5778,31 @@ mod tests {
         assert!(
             host.attached && host.draining,
             "the script attached and opened while the guest idled"
+        );
+    }
+
+    /// P1c. The wall net still stops the run, and the stride bounds how much
+    /// guest time it may cost to notice: the clock is read on the first slice
+    /// of a run and then every `WALL_TIMEOUT_SLICE_STRIDE`, so a limit that
+    /// is already past cannot buy the guest more than one stride of slices.
+    #[test]
+    fn a_wall_timeout_that_has_already_passed_stops_within_one_stride_of_slices() {
+        let mut m = idle_machine();
+        let out = m.run_until(&StopCondition {
+            stop_cycle: None,
+            exit_on: None,
+            wall_timeout: Some(Duration::ZERO),
+            probes: Vec::new(),
+        });
+        assert!(
+            matches!(out, Outcome::WallTimeout { .. }),
+            "the net is the only thing that can end this run: {out:?}"
+        );
+        let budget = u64::from(WALL_TIMEOUT_SLICE_STRIDE) * MAX_SLICE_CYCLES;
+        assert!(
+            m.cycles() <= budget,
+            "the stride cost {} cycles, more than the {budget} it may",
+            m.cycles()
         );
     }
 

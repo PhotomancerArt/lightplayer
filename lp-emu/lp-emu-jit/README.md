@@ -1572,6 +1572,12 @@ allows. The five items above the floor are the ones that reproduce the bracket.
    through the WASI shim — 128 ns in V8, 106 in JSC — and `run_until` makes one
    **per slice** to ask whether `--wall-timeout` has expired. 227 ms of a 4.5 s
    V8 run; 214 ms of a 5.7 s JSC run. Nothing about the guest depends on it.
+   **Taken, 2026-09-13 (P1c):** the C6 loop now reads that clock every 64th
+   slice (`WALL_TIMEOUT_SLICE_STRIDE`), so the net can fire up to 63 ×
+   `MAX_SLICE_CYCLES` emulated cycles late and costs a sixty-fourth of the
+   above. The measured rows are in `docs/emulator-perf-ledger.md` §3. The
+   figures in these two tables are the pre-P1c decomposition and stand as
+   taken.
 2. **The boundary is 531 ns a slice in both engines** — the same wasm doing the
    same work — against P4's 373 ns of `run_until` *self*. The difference is the
    two callees a profiler buckets elsewhere: `run_due_events` (the peripherals)
