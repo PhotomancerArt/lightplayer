@@ -644,10 +644,15 @@ it will find.
   bytes and `meta.json` gained `fast` and `callBytes`.
   `just test-emu-jit-replay` is the recipe: it records and replays the
   `harness` image in **node (V8) and bun (JavaScriptCore)**, every field
-  compared on every entry. Still true, and still why this is not a committed
-  fixture: a `render-basic` recording is a 76 MB `module.wasm` and a 24 MB
-  `memory.bin` beside 67 KB of entries — the recipe takes its own recording
-  instead.
+  compared on every entry, in 3m56s on an M2 Max. Still true, and still why
+  this is not a committed fixture: a `render-basic` recording is a 76 MB
+  `module.wasm` and a 24 MB `memory.bin` beside 67 KB of entries — the recipe
+  takes its own recording instead.
+  Two traps found while wiring it, both now named where they bite:
+  `--jit-record-after 0` means UNSET and so means the 700 M-cycle default, not
+  "from the first entry"; and a window can end so soon after the `fence.i`
+  that the module it installs is never entered (`harness` at 100 ms reports
+  `entries 0`, coverage 0.00 %).
 - **The boot cost on the phone**, re-measured against JD20's 0.4–0.7 s budget
   on a head that has M7b P1's incremental `fence.i`.
 - **ROM-up translation** (DD19, last) — without it no in-tab emulated board

@@ -282,7 +282,10 @@ OPTIONS:
                             has charged <n> guest cycles, so the recording
                             lands on the module the LAST translation event
                             installed (default 700000000, past both
-                            `fence.i`)
+                            `fence.i`). ⚠️ <n> = 0 means UNSET, and so means
+                            that default — NOT `record from the first entry`.
+                            A window shorter than the default records nothing
+                            and says so
     --jit-record-entries <n>  with --jit-record: how many entries to record
                             (default 20000)
     --jit-record-sizes <a,b>  with --jit-record: also emit THE SAME block set
@@ -488,6 +491,15 @@ fn run() -> Result<ExitCode, String> {
     if let Some(dir) = args.jit_record.clone() {
         // Past both `fence.i` on the render images, so the recording is of
         // the module JD5's LAST translation event installed.
+        //
+        // ⚠️ Zero is the "unset" sentinel here and NOT a request to record
+        // from the first entry, which is a trap worth naming because the two
+        // readings look identical from the outside: an image run for 400 ms
+        // charges ~64 M cycles, a recording asked for at "0" waits for 700 M,
+        // and the run ends having entered translated code 11,672 times with
+        // nothing written. The help text says so, and
+        // `scripts/emu/jit-replay-identity.sh` refuses a zero rather than
+        // spending two cranelift passes to find out.
         let after = if args.jit_record_after == 0 {
             700_000_000
         } else {

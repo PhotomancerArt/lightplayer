@@ -5,7 +5,7 @@
 # produced.
 #
 #   scripts/emu/jit-replay-identity.sh [slug] [grade] [window] [after] [entries]
-#   scripts/emu/jit-replay-identity.sh harness t2 100ms 3200000 200
+#   scripts/emu/jit-replay-identity.sh harness t2 400ms 16000000 200
 #
 # `just test-emu-jit-identity` is the CRATE-scale form of this — a handful of
 # hand-built cases through `jit-engine-check.mjs`. This one is the real image:
@@ -24,8 +24,19 @@
 # The cost is cranelift's, and a recording pays it TWICE: a run that records
 # refuses the incremental `fence.i` path (a recording is of ONE module, and two
 # live modules would be a recording of neither), so the whole image is
-# translated again after the fence. That is why the `harness` image is the cell
-# and the render pair is not.
+# translated again after the fence. Measured end to end on an M2 Max: 3m56s
+# for `harness` against ~13 minutes for the render pair. That is why the
+# `harness` image is the cell and the render pair is not.
+#
+# # Picking a window and an `after`
+#
+# The recording has to land past the `fence.i` — nothing enters translated
+# code before it on these images — and inside the run. Both halves bite:
+# `harness` at 100 ms ends so soon after the fence that the module it installs
+# is never entered (`entries 0`), and an `after` past the run's own cycle
+# count arms nothing. 400 ms charges 64 M cycles and enters 11,672 times, so
+# 16 M sits comfortably between the two. When neither holds, the failure path
+# below reads the run's own two numbers back and says which knob was wrong.
 #
 # # Why it refuses a recording that never armed the published-read fast path
 #
@@ -45,6 +56,17 @@ window="${3:-100ms}"
 after="${4:-3200000}"
 entries="${5:-200}"
 out="${6:-target/jit-replay-identity/$slug}"
+
+# ⚠️ Zero is the emulator's "unset" sentinel for `--jit-record-after`, not a
+# request to record from the first entry: it means the 700 M-cycle default,
+# which is past the end of every window this script runs. Refuse it here
+# rather than spending two cranelift passes to discover it.
+if [[ "$after" == "0" ]]; then
+    echo "jit-replay-identity: --after 0 means UNSET to the emulator, and so means its" >&2
+    echo "  700000000-cycle default — past the end of this window. Pass a cycle count" >&2
+    echo "  inside the run and past the fence.i (16000000 for harness at 400ms)." >&2
+    exit 2
+fi
 
 bin="${LP_EMU_JIT_IDENTITY_BIN:-target/release/lp-emu-esp32c6}"
 [[ -x "$bin" ]] || {
@@ -72,13 +94,25 @@ if ! "$bin" --elf "$elf" --time-grade "$grade" --timeout "$window" --wall-timeou
 fi
 
 # A run that recorded nothing writes no directory at all, and a silent skip is
-# exactly what this gate must not be: say which knob is wrong.
+# exactly what this gate must not be. There are two ways to get here and they
+# want opposite fixes, so the run's own two numbers say which one it was.
 if [[ ! -f "$out/meta.json" ]]; then
+    charged="$(sed -n 's/^stopped after \([0-9]*\) cycles.*/\1/p' "$out.err" "$out.out" | tail -1)"
+    entered="$(sed -n 's/.*; entries \([0-9]*\),.*/\1/p' "$out.err" | tail -1)"
     echo "jit-replay-identity: no recording was written to $out." >&2
-    echo "  Nothing entered translated code after $after cycles in $window of $slug." >&2
-    echo "  The window is entirely after the fence.i on these images, so --after has to" >&2
-    echo "  land inside it: raise the timeout, or lower --after." >&2
-    grep -h '^jit: ' "$out.err" | tail -3 >&2 || true
+    if [[ -n "$charged" && "$after" -ge "$charged" ]]; then
+        echo "  --after is $after and the whole run charged only $charged cycles, so the" >&2
+        echo "  recorder never armed. Lower --after, or lengthen the window past it." >&2
+    elif [[ "$entered" == "0" ]]; then
+        echo "  Nothing entered translated code at all in $window of $slug (entries 0)." >&2
+        echo "  On these images the fence.i can land near the end of a short window, and" >&2
+        echo "  the module it installs is then never entered. Lengthen the window." >&2
+    else
+        echo "  The run charged $charged cycles and entered translated code $entered time(s)," >&2
+        echo "  so --after $after fell somewhere the recorder could not fill $entries entries." >&2
+        echo "  Lower --after, lengthen the window, or ask for fewer entries." >&2
+    fi
+    grep -h '^jit: coverage' "$out.err" | tail -1 >&2 || true
     exit 1
 fi
 

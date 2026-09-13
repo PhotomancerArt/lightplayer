@@ -3043,15 +3043,30 @@ test-emu-jit-identity: test-emu-jit-engines
 # **What it costs, and why that keeps it out of CI.** A recording pays
 # cranelift TWICE: a recording run refuses the incremental `fence.i` path,
 # because a recording is of ONE module and two live modules would be a
-# recording of neither. On an M2 Max that is ~1 minute for `harness` (47 k
-# blocks) against ~13 for the render pair (154 k) — which is why `harness` is
-# the cell here exactly as it is for `test-emu-jit-image`.
+# recording of neither. Measured end to end on an M2 Max: **3m56s** for
+# `harness` (47 k blocks) against ~13 minutes for the render pair (154 k) —
+# which is why `harness` is the cell here exactly as it is for
+# `test-emu-jit-image`.
+#
+# **Why the window and the `after` are what they are.** The recording has to
+# land past the `fence.i`, because nothing enters translated code before it on
+# these images — and on `harness` a 100 ms window ends so soon after the fence
+# that the module it installs is never entered at all (`entries 0`, coverage
+# 0.00 %). 400 ms charges 64 M cycles and enters 11,672 times, and 16 M is
+# comfortably past the fence and inside the run.
+#
+# ⚠️ `after=0` is NOT "from the first entry": zero is the emulator's "unset"
+# sentinel and means its 700 M-cycle default, past the end of every window
+# here. The script refuses a zero rather than spending two cranelift passes to
+# find out, and the emulator's own `--help` now says so.
 #
 # It never passes vacuously: the identity pass reports how many import calls
 # armed the published-read block, and the script fails when that is zero —
 # a window that never arms it would replay green while proving none of what
-# F5 fixed. A missing `node` or `bun` is a failure too, not a skip (JD19).
-test-emu-jit-replay slug="harness" grade="t2" window="100ms" after="3200000" entries="200":
+# F5 fixed. A missing `node` or `bun` is a failure too, not a skip (JD19). A
+# run that recorded nothing reads back its own two numbers — cycles charged
+# and entries made — and says which of the three knobs is wrong.
+test-emu-jit-replay slug="harness" grade="t2" window="400ms" after="16000000" entries="200":
     cargo build --release -p lp-emu-esp32c6 --features jit
     ./scripts/emu/jit-replay-identity.sh {{ slug }} {{ grade }} {{ window }} {{ after }} {{ entries }}
 
