@@ -11,6 +11,12 @@
 //! P3 does that — but the shape lands now so P3 does not invent it under time
 //! pressure, and because one field of it was learned the hard way.
 //!
+//! The whole-image recorder (`lp-emu-esp32c6`'s `jit_record`) writes the
+//! on-disk form and `scripts/emu/jit-image-bench.mjs` reads it. What they must
+//! agree on lives here: [`GRANULE_BYTES`], [`RECORDED_REGS`], [`Published`] —
+//! and [`RECORD_FORMAT`], which is the number a reader checks before it
+//! believes any of the rest.
+//!
 //! # Why the memory-granule diff exists
 //!
 //! **A replay without it silently lies.** Translated code does not cover the
@@ -39,6 +45,124 @@
 //! beside the gross figure; **a residual is read off the net one.**
 
 use alloc::vec::Vec;
+
+use crate::host::{FAST_ARMED, FAST_MAX_READS, FAST_WORDS};
+
+/// The version of the on-disk recording shape, written into a recording's
+/// `meta.json` and checked by everything that reads one.
+///
+/// **This is a format, not a tuning knob.** A recorder and a replay have to
+/// agree on every field's meaning, and the only thing worse than a reader that
+/// refuses an old recording is one that reads it as if it were new: the
+/// numbers come out, they are wrong, and nothing says so. So a reader compares
+/// this and names the mismatch.
+///
+/// - **1** — M7 P9's shape: an initial image, per-entry register files, a
+///   between-entries memory-granule delta and a flat array of import calls.
+/// - **2** — F5. An entry also carries the **published words** each of its
+///   import crossings republished ([`Published`]), because the host refreshes
+///   them inside `mmio_store`'s own crossing and a canned answer refreshes
+///   nothing. Without them a render-loop recording cannot replay at all; see
+///   [`Published`] and `lp-emu-jit/README.md`.
+pub const RECORD_FORMAT: u32 = 2;
+
+/// The published words one import crossing republished, and whether it left
+/// the published-read block armed (format 2).
+///
+/// # Why a recording has to carry this
+///
+/// Translated code serves a machine's published MMIO word reads straight out
+/// of the imported memory, without an import call at all (the C6's SYSTIMER
+/// `unit0_value.{lo,hi}`; see [`crate::host`]'s published-read block). The
+/// host keeps those words current from **inside** an import crossing — on the
+/// C6, `jit.rs::republish_systimer`, on the `mmio_store` that could have moved
+/// the latch they mirror.
+///
+/// A replay answers that store from a recording and performs none of the
+/// host's work, so it refreshes nothing: the module then reads stale published
+/// words, and either diverges outright or — the symptom F5 was filed for —
+/// asks for a read the recording never recorded, because the words it read
+/// were not the ones the recorded run read. A boot recording is unaffected
+/// only because the path is disarmed there.
+///
+/// So the record carries what the crossing published, and the replay applies
+/// it to the module's own published slots at the same point, before handing
+/// back the canned answer.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Published {
+    /// Did the crossing leave the block armed? A machine that refuses the path
+    /// — a trace is running, a strict grade, `--strict-bus` — publishes
+    /// nothing and disarms instead, and that is as much a part of the record
+    /// as the words are.
+    pub armed: bool,
+    /// How many of [`Self::words`] the crossing wrote. Slot `i` is the `i`th
+    /// published read in the machine's own [`crate::translate::FastReads`]
+    /// table, which is what the emitted code indexes.
+    pub count: u8,
+    /// The new values of slots `0..count`. Slots past `count` are untouched by
+    /// this crossing and keep whatever an earlier one left.
+    pub words: [u32; FAST_MAX_READS],
+}
+
+impl Published {
+    /// Apply this crossing's republish to a replay host's copy of the
+    /// published-read block — the [`crate::host::FAST_LEN`] bytes at the
+    /// machine's `fast` offset.
+    ///
+    /// The order is the host's own: the words first, the armed flag last, so
+    /// the block is never armed over words that have not landed.
+    ///
+    /// # Errors
+    ///
+    /// A `count` past [`FAST_MAX_READS`], or a block shorter than the slots it
+    /// names — a corrupt recording rather than a divergence, so a caller must
+    /// not report it as one.
+    pub fn apply(&self, fast: &mut [u8]) -> Result<(), PublishError> {
+        let count = usize::from(self.count);
+        let need = FAST_WORDS as usize + 4 * count;
+        if count > FAST_MAX_READS || fast.len() < need {
+            return Err(PublishError::OutOfRange {
+                count: self.count,
+                block: fast.len(),
+            });
+        }
+        for (i, w) in self.words[..count].iter().enumerate() {
+            fast[FAST_WORDS as usize + 4 * i..][..4].copy_from_slice(&w.to_le_bytes());
+        }
+        let armed = i32::from(self.armed);
+        fast[FAST_ARMED as usize..][..4].copy_from_slice(&armed.to_le_bytes());
+        Ok(())
+    }
+
+    /// What every entry starts from, whatever the previous one left behind.
+    ///
+    /// A stay only ever trusts a word it saw published **inside itself**, so
+    /// the host disarms the block at every entry into translated code. A
+    /// replay that skipped this would enter its first entry — and, between
+    /// timing iterations, every entry — with an armed block the recorded run
+    /// did not have.
+    ///
+    /// # Errors
+    ///
+    /// A block too short to hold the armed flag.
+    pub fn disarm(fast: &mut [u8]) -> Result<(), PublishError> {
+        let need = FAST_ARMED as usize + 4;
+        if fast.len() < need {
+            return Err(PublishError::OutOfRange {
+                count: 0,
+                block: fast.len(),
+            });
+        }
+        fast[FAST_ARMED as usize..][..4].copy_from_slice(&0i32.to_le_bytes());
+        Ok(())
+    }
+}
+
+/// A published-word record that cannot be applied to the block it names.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PublishError {
+    OutOfRange { count: u8, block: usize },
+}
 
 /// The unit the between-entries memory diff is taken in.
 ///
@@ -409,6 +533,91 @@ mod tests {
         assert_eq!(arena[2 * GRANULE_BYTES], 0xab);
         assert_eq!(arena[2 * GRANULE_BYTES - 1], 0);
         assert_eq!(arena[3 * GRANULE_BYTES], 0);
+    }
+
+    #[test]
+    fn a_republish_lands_the_words_then_arms_the_block() {
+        let mut fast = vec![0u8; crate::host::FAST_LEN as usize];
+        let p = Published {
+            armed: true,
+            count: 2,
+            words: [0xdead_beef, 0x000f_1234, 0, 0],
+        };
+        p.apply(&mut fast).expect("the C6's own block");
+        assert_eq!(
+            i32::from_le_bytes(fast[FAST_ARMED as usize..][..4].try_into().unwrap()),
+            1,
+            "the crossing armed the block"
+        );
+        assert_eq!(
+            u32::from_le_bytes(fast[FAST_WORDS as usize..][..4].try_into().unwrap()),
+            0xdead_beef
+        );
+        assert_eq!(
+            u32::from_le_bytes(fast[FAST_WORDS as usize + 4..][..4].try_into().unwrap()),
+            0x000f_1234
+        );
+        assert_eq!(
+            u32::from_le_bytes(fast[FAST_WORDS as usize + 8..][..4].try_into().unwrap()),
+            0,
+            "a slot past `count` is left as it was"
+        );
+
+        // A machine that refuses the path disarms and publishes nothing, and a
+        // replay has to reproduce the refusal as faithfully as the words.
+        let refused = Published {
+            armed: false,
+            count: 0,
+            words: [0; FAST_MAX_READS],
+        };
+        refused.apply(&mut fast).expect("the C6's own block");
+        assert_eq!(
+            i32::from_le_bytes(fast[FAST_ARMED as usize..][..4].try_into().unwrap()),
+            0
+        );
+        assert_eq!(
+            u32::from_le_bytes(fast[FAST_WORDS as usize..][..4].try_into().unwrap()),
+            0xdead_beef,
+            "a disarm leaves the words alone — `armed` is the whole correctness story"
+        );
+
+        Published::disarm(&mut fast).expect("the C6's own block");
+        assert_eq!(
+            i32::from_le_bytes(fast[FAST_ARMED as usize..][..4].try_into().unwrap()),
+            0,
+            "every entry starts from a disarmed block"
+        );
+    }
+
+    #[test]
+    fn a_republish_past_the_block_is_a_corrupt_recording_not_a_divergence() {
+        let mut fast = vec![0u8; crate::host::FAST_LEN as usize];
+        let too_many = Published {
+            armed: true,
+            count: (FAST_MAX_READS + 1) as u8,
+            words: [0; FAST_MAX_READS],
+        };
+        assert_eq!(
+            too_many.apply(&mut fast),
+            Err(PublishError::OutOfRange {
+                count: (FAST_MAX_READS + 1) as u8,
+                block: crate::host::FAST_LEN as usize,
+            })
+        );
+
+        let mut stub = vec![0u8; 8];
+        assert_eq!(
+            Published {
+                armed: true,
+                count: 1,
+                words: [0; FAST_MAX_READS],
+            }
+            .apply(&mut stub),
+            Err(PublishError::OutOfRange {
+                count: 1,
+                block: 8
+            })
+        );
     }
 
     #[test]

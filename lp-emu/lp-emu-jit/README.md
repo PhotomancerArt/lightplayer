@@ -1060,18 +1060,39 @@ Three things, and the first one meant no replay had run since M7b P2:
    floor — the same loop with the call removed — and reports
    `harnessNsPerInstr` and `steadyNsPerInstrNet`. **A residual is read off the
    net one.**
-3. ⚠️ **A render-loop recording cannot be replayed at all since M7b P3.** The
-   published-read block is refreshed inside `mmio_store`'s own crossing
-   (`jit.rs::republish_systimer`), and a replay's imports are canned answers
-   that refresh nothing — so the module's in-module fast reads go stale within
-   an entry and it starts calling `mmio_load` for reads the recording never
-   recorded: `entry 104511: the module made more import calls than the
-   recording has`. The recorder also marks the block **non-volatile**, so the
-   between-entries delta does not carry it either. A boot recording is
-   unaffected, because the fast path is disarmed there — which is why this
-   went unnoticed, and why **every replay number in this ladder describes
-   boot-phase code**. Fixing it means recording the republished words beside
-   the store that caused them; it is not done here.
+3. ⚠️ **A render-loop recording could not be replayed at all between M7b P3
+   and F5** — ~~superseded, see below~~. The published-read block is refreshed
+   inside `mmio_store`'s own crossing (`jit.rs::republish_systimer`), and a
+   replay's imports are canned answers that refresh nothing — so the module's
+   in-module fast reads went stale within an entry and it started calling
+   `mmio_load` for reads the recording never recorded: `entry 104511: the
+   module made more import calls than the recording has`. The recorder also
+   marks the block **non-volatile**, so the between-entries delta did not
+   carry it either. A boot recording was unaffected, because the fast path is
+   disarmed there — which is why this went unnoticed, and why **every replay
+   number in this ladder up to P9 describes boot-phase code**.
+
+### Recordings cover the render loop again (F5)
+
+The caveat above is **superseded**. A recording is now format 2
+(`lp_emu_jit::replay::RECORD_FORMAT`, written into `meta.json` and checked by
+every reader): each entry carries, beside its import calls, what every
+republishing crossing put in the published-read block —
+`replay::Published`, an `armed` flag and the words with the slots they land in
+— and a call points at its own republish with `CallRec::publish`. The replay
+applies it at the same point the host does, before handing back the canned
+answer, and **disarms the block at every entry** exactly as `JitCore::run`
+does.
+
+Two things follow. A render-loop recording of `render-basic` replays
+`--check-only` clean in node and in bun, so replay numbers are no longer
+boot-only. And every timing iteration is now the same replay as the first,
+which is what the harness's own note about a second pass was warning about.
+
+The index is carried rather than the words: only a store inside the machine's
+published window ever republishes, so paying 24 bytes on every load to hold a
+slot that is always empty would grow both the recording and the replay's hot
+stride by more than half for nothing.
 
 ### What a module-side entry is made of (P6c Q4)
 

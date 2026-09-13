@@ -40,11 +40,13 @@ use lp_emu_jit::blocks::BlockSet;
 use lp_emu_jit::discover::{DiscoverStats, Discovered, discover, discover_from};
 use lp_emu_jit::dispatch::{BODY_BUDGET, emit_module, target_table_bytes, write_target_tables};
 use lp_emu_jit::host::{
-    self, EXCHANGE_LEN, FAST_ARMED, FAST_LEN, FAST_SERVED, FAST_WORDS, FLAG_AFTER_STORE,
+    self, EXCHANGE_LEN, FAST_ARMED, FAST_LEN, FAST_MAX_READS, FAST_SERVED, FAST_WORDS,
+    FLAG_AFTER_STORE,
     FLAG_PENDING, FLAG_SLICE_ENDED, HostOps, MMIO_LEAVE_AFTER, MMIO_OK, MMIO_PENDING, MMIO_REFUSED,
     MMIO_SLICE_ENDED, MmioLoad, MmioStore, PERM_ENTRIES, PERM_SHIFT, Polled, STEP_CONTINUE,
     STEP_SLICE_ENDED, StepOne, load_kind, store_kind,
 };
+use lp_emu_jit::replay::Published;
 use lp_emu_jit::translate::{Emit, Emitted, FastRead, FastReads, FastSource, Layout};
 
 /// The exit flag that leaves the hart owing polling point (c) **at the pc the
@@ -1003,6 +1005,12 @@ pub struct C6Ops {
     /// Every import call this entry made, in call order, while a recording is
     /// running. Empty and never touched otherwise.
     calls: Vec<CallRec>,
+    /// What each republishing crossing put in the published-read block, in the
+    /// order the crossings happened, while a recording is running (F5). A
+    /// replay refreshes nothing of its own, so a record that did not carry
+    /// these could not be replayed past the first published read — see
+    /// [`crate::jit_record`]. Empty and never touched otherwise.
+    publishes: Vec<Published>,
     recording: bool,
 
     // --- the SYSTIMER's published reads (M7b P3) --------------------------
@@ -1096,9 +1104,16 @@ impl C6Ops {
     /// unit or a `unit0_load` that moves it changes nothing this path
     /// believes. The latch moves in exactly one place — `write_word`'s
     /// `unit_op` arm — and only a store reaches it.
-    fn republish_systimer(&mut self) {
+    ///
+    /// Returns what [`CallRec::publish`] should carry: `1 + index` into
+    /// [`Self::publishes`] while a recording is running, and `0` otherwise.
+    /// **This is the only place the published words move inside an entry**, so
+    /// it is the only place a recording has to note them (F5) — and the note
+    /// is taken here rather than in `mmio_store` precisely so that a fourth
+    /// refusal added to the list above cannot be forgotten by the recorder.
+    fn republish_systimer(&mut self) -> u32 {
         if self.fast.is_null() {
-            return;
+            return 0;
         }
         let index = self.systimer_index;
         let words = {
@@ -1112,7 +1127,11 @@ impl C6Ops {
         };
         let Some(words) = words else {
             self.set_fast_armed(false);
-            return;
+            return self.note_publish(Published {
+                armed: false,
+                count: 0,
+                words: [0; FAST_MAX_READS],
+            });
         };
         for (i, w) in words.iter().enumerate() {
             // SAFETY: see `set_fast_armed` — the same `FAST_LEN` bytes.
@@ -1124,6 +1143,36 @@ impl C6Ops {
             }
         }
         self.set_fast_armed(true);
+        let mut carried = [0u32; FAST_MAX_READS];
+        carried[..words.len()].copy_from_slice(&words);
+        self.note_publish(Published {
+            armed: true,
+            count: words.len() as u8,
+            words: carried,
+        })
+    }
+
+    /// Keep a republish for the recording, and say where it landed.
+    ///
+    /// Zero — "nothing to apply" — whenever no recording is running, which is
+    /// the product path and every run that is not `--jit-record`.
+    #[inline]
+    fn note_publish(&mut self, p: Published) -> u32 {
+        if !self.recording {
+            return 0;
+        }
+        self.publishes.push(p);
+        self.publishes.len() as u32
+    }
+
+    /// Where the published-read block is, or `None` when this machine
+    /// published nothing and translated code has no such block to read.
+    ///
+    /// The caller supplies the offset because only the module's `Areas` knows
+    /// it; this answers whether there is one at all, which is the question
+    /// only the ops can settle.
+    fn fast_offset(&self, at: u32) -> Option<u32> {
+        (!self.fast.is_null()).then_some(at)
     }
 
     /// Reads the published words have served since the machine was built.
@@ -1254,6 +1303,9 @@ impl HostOps for C6Ops {
                 address,
                 access: kind,
                 value: 0,
+                // A load never republishes: the latch the published words
+                // mirror moves only on a store (F5).
+                publish: 0,
                 result: (u64::from(out.status) << 32) | u64::from(out.value),
             });
         }
@@ -1288,9 +1340,11 @@ impl HostOps for C6Ops {
         // Republishing on every store the block sees, rather than only on
         // `unit0_op`, costs one compare and removes a case analysis from the
         // correctness argument (M7b P3).
-        if address.wrapping_sub(self.systimer_window.0) < self.systimer_window.1 {
-            self.republish_systimer();
-        }
+        let publish = if address.wrapping_sub(self.systimer_window.0) < self.systimer_window.1 {
+            self.republish_systimer()
+        } else {
+            0
+        };
         let out = match written {
             // The store retired, so the hart polls — here, in the same
             // crossing, rather than by ending the stay (M7b P2).
@@ -1311,6 +1365,7 @@ impl HostOps for C6Ops {
                 address,
                 access: kind,
                 value,
+                publish,
                 result: (u64::from(out.status) << 32) | u64::from(out.pc),
             });
         }
@@ -1327,6 +1382,8 @@ impl HostOps for C6Ops {
                 address: 0,
                 access: 0,
                 value: 0,
+                // A poll performs no access at all, so it publishes nothing.
+                publish: 0,
                 result: (u64::from(out.status) << 32) | u64::from(out.pc),
             });
         }
@@ -1695,6 +1752,7 @@ impl Module {
             polls_left: 0,
             escape_hatch: 0,
             calls: Vec::new(),
+            publishes: Vec::new(),
             recording: false,
             fast,
             systimer_window: systimer.1,
@@ -2043,6 +2101,13 @@ impl JitCore {
         }
         // A recording is of ONE module, which is why a run that asked for one
         // never takes the incremental path (`install_incremental`).
+        //
+        // `None` when this machine published nothing, so a replay knows there
+        // is no published-read block to disarm rather than guessing at an
+        // offset (F5). Taken from the ops the module was built with, which is
+        // the same test `build` made.
+        let at_fast = self.mods[0].at.fast_at;
+        let fast_at = self.mods[0].core.ops_mut().fast_offset(at_fast);
         let m = &mut self.mods[0];
         let wasm = m.wasm.take().unwrap_or_default();
         let out = r.finish(
@@ -2050,6 +2115,7 @@ impl JitCore {
             bus.guest_arena(),
             m.at.pages,
             m.at.exchange_at,
+            fast_at,
             m.report.fn_blocks,
             m.report.blocks,
         );
@@ -2258,6 +2324,7 @@ impl TranslatedCore<SocBus> for JitCore {
             let ops = self.mods[module].core.ops_mut();
             ops.recording = recording;
             ops.calls.clear();
+            ops.publishes.clear();
             let x = ops.exchange();
             for (i, r) in hart.regs().iter().enumerate() {
                 x[4 * i..][..4].copy_from_slice(&r.to_le_bytes());
@@ -2285,6 +2352,7 @@ impl TranslatedCore<SocBus> for JitCore {
         ops.bus = core::ptr::null_mut();
         ops.recording = false;
         let calls = core::mem::take(&mut ops.calls);
+        let publishes = core::mem::take(&mut ops.publishes);
         let escaped = core::mem::take(&mut ops.escape_hatch);
         self.stats.escape_hatch += escaped;
         self.stats.polls += core::mem::take(&mut ops.polls);
@@ -2369,6 +2437,7 @@ impl TranslatedCore<SocBus> for JitCore {
                 regs_in,
                 delta,
                 calls,
+                publishes,
                 exit_pc: exit.pc,
                 flags: exit.flags,
                 cycle_out: hart.cycle_count(),

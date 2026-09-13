@@ -39,6 +39,29 @@
 //! delta holds the interpreter's writes and never the module's own — those the
 //! replay is supposed to reproduce for itself.
 //!
+//! # The published words, and why a render-loop replay needed them (F5)
+//!
+//! An import call's answer is not all a crossing produces. Since M7b P3 the
+//! host also refreshes the **published-read block** from inside
+//! [`crate::jit::C6Ops::mmio_store`]'s own crossing — `republish_systimer`,
+//! on any store that could have moved the latch the SYSTIMER's
+//! `unit0_value.{lo,hi}` mirror — and translated code then serves those two
+//! reads out of memory with no call at all.
+//!
+//! A replay hands back canned answers and performs none of that, so before F5
+//! it refreshed nothing: the module read stale published words and, within one
+//! entry, started asking for reads the recorded run never made
+//! (`entry 104511: the module made more import calls than the recording has`).
+//! Boot recordings were unaffected — the path is disarmed through boot — which
+//! is why every replay number in the ladder before F5 describes boot-phase
+//! code.
+//!
+//! So a record carries [`Published`] beside the call that caused it, and the
+//! replay applies it to the module's own slots at the same point, before
+//! returning the answer. The block is also **disarmed at every entry**, in the
+//! replay as in [`crate::jit::JitCore::run`], because a stay only ever trusts a
+//! word it saw published inside itself.
+//!
 //! # What it refuses to record
 //!
 //! A `step_one` call. The escape hatch hands an arbitrary guest instruction to
@@ -51,6 +74,9 @@
 use std::fs;
 use std::io::{BufWriter, Write};
 use std::path::{Path, PathBuf};
+
+use lp_emu_jit::host::FAST_MAX_READS;
+use lp_emu_jit::replay::{Published, RECORD_FORMAT};
 
 /// The unit the between-entries memory diff is taken in, matching
 /// [`lp_emu_jit::replay::GRANULE_BYTES`] so the two formats can be read by one
@@ -72,6 +98,16 @@ pub struct CallRec {
     pub access: u32,
     /// The value a store carried; zero for a load.
     pub value: u32,
+    /// `1 + index` into this entry's [`EntryRec::publishes`] when the crossing
+    /// republished the published-read block, and `0` when it did not
+    /// (format 2; the word was a reserved zero in format 1).
+    ///
+    /// An **index** rather than the words themselves, because the words are
+    /// 24 bytes and a call is 40: only a store inside the machine's published
+    /// window ever republishes, and paying 24 bytes on every load to hold a
+    /// slot that is always empty would grow the recording — and the replay's
+    /// hot stride — by more than half for nothing.
+    pub publish: u32,
     /// `(status << 32) | value` for a load; `(status << 32) | pc` for a store
     /// or a poll, because both of those answer a polling point.
     pub result: u64,
@@ -85,9 +121,26 @@ impl CallRec {
         out.write_all(&self.address.to_le_bytes())?;
         out.write_all(&self.access.to_le_bytes())?;
         out.write_all(&self.value.to_le_bytes())?;
-        out.write_all(&0u32.to_le_bytes())?;
+        out.write_all(&self.publish.to_le_bytes())?;
         out.write_all(&self.result.to_le_bytes())
     }
+}
+
+/// One crossing's republish, on disk: `armed`, `count`, then
+/// [`FAST_MAX_READS`] words, all little-endian `u32`.
+///
+/// Fixed width so the replay can index the array rather than walk it, and
+/// wider than any machine currently publishes so a second published register
+/// does not change the format again.
+pub const PUBLISH_BYTES: usize = 8 + 4 * FAST_MAX_READS;
+
+fn write_publish(p: &Published, out: &mut impl Write) -> std::io::Result<()> {
+    out.write_all(&u32::from(p.armed).to_le_bytes())?;
+    out.write_all(&u32::from(p.count).to_le_bytes())?;
+    for w in p.words {
+        out.write_all(&w.to_le_bytes())?;
+    }
+    Ok(())
 }
 
 /// What one entry into translated code was handed and what it produced.
@@ -106,6 +159,9 @@ pub struct EntryRec {
     /// Guest memory the interpreter changed since the previous entry ended.
     pub delta: Vec<(u32, Vec<u8>)>,
     pub calls: Vec<CallRec>,
+    /// What each republishing crossing put in the published-read block, in the
+    /// order the crossings happened. [`CallRec::publish`] points into this.
+    pub publishes: Vec<Published>,
     pub exit_pc: u32,
     pub flags: i32,
     pub cycle_out: u64,
@@ -241,6 +297,7 @@ impl Recorder {
         mem: &[u8],
         pages: u64,
         exchange_offset: u32,
+        fast_offset: Option<u32>,
         fn_blocks: usize,
         blocks: usize,
     ) -> std::io::Result<()> {
@@ -282,6 +339,10 @@ impl Recorder {
             for c in &e.calls {
                 c.write(&mut entries)?;
             }
+            entries.write_all(&(e.publishes.len() as u32).to_le_bytes())?;
+            for p in &e.publishes {
+                write_publish(p, &mut entries)?;
+            }
             entries.write_all(&e.exit_pc.to_le_bytes())?;
             entries.write_all(&e.flags.to_le_bytes())?;
             entries.write_all(&e.cycle_out.to_le_bytes())?;
@@ -298,15 +359,22 @@ impl Recorder {
             .map(|e| e.instret_out.saturating_sub(e.instret_in))
             .sum();
         let calls: usize = self.entries.iter().map(|e| e.calls.len()).sum();
+        let publishes: usize = self.entries.iter().map(|e| e.publishes.len()).sum();
         let delta_bytes: usize = self
             .entries
             .iter()
             .flat_map(|e| e.delta.iter())
             .map(|(_, b)| b.len())
             .sum();
+        // `null` when this machine published nothing: the replay then has no
+        // block to disarm and a record that claims a republish is a corrupt
+        // recording, which is a thing the reader should be able to say.
+        let fast = fast_offset.map_or_else(|| "null".to_string(), |at| at.to_string());
         let meta = format!(
-            "{{\n  \"pages\": {pages},\n  \"exchange\": {exchange_offset},\n  \
+            "{{\n  \"format\": {RECORD_FORMAT},\n  \"pages\": {pages},\n  \
+             \"exchange\": {exchange_offset},\n  \"fast\": {fast},\n  \
              \"entries\": {},\n  \"retired\": {retired},\n  \"calls\": {calls},\n  \
+             \"publishes\": {publishes},\n  \
              \"deltaBytes\": {delta_bytes},\n  \"fnBlocks\": {fn_blocks},\n  \
              \"blocks\": {blocks},\n  \"moduleBytes\": {}\n}}\n",
             self.entries.len(),

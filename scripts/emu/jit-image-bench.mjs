@@ -50,13 +50,17 @@ const argv = process.argv.slice(2);
 // `just test-emu-jit-identity` runs, and it is deliberately NOT the same call
 // as a bench row.
 //
-// It exists because the timing loop replays the recording over and over, and
-// a SECOND pass is not a replay of the same thing: the module's published-read
-// block (M7b P3) is refreshed inside `mmio_store`'s own crossing, which canned
-// answers do not perform, so from the second iteration on the module can ask
-// for a read the recording never recorded. The first pass is unaffected and is
-// the whole of the identity claim. See the crate README, "What the replay
-// harness was getting wrong (P5)", and follow-up F5.
+// It was added because a replay could not survive its own second pass: the
+// module's published-read block (M7b P3) is refreshed inside `mmio_store`'s
+// own crossing, canned answers performed none of that, and from the second
+// iteration on the module asked for reads the recording never recorded. A
+// render-loop recording did not survive the FIRST pass either — it is taken
+// after the `fence.i`, by which time the block is armed. **F5 fixed both**:
+// format 2 carries what each crossing republished, and this harness applies it
+// at the same point and disarms the block at every entry, exactly as
+// `jit.rs::JitCore::run` does. Every pass is now the same replay, and
+// `--check-only` stays because a bench row and an identity pass are still two
+// different calls.
 const checkOnly = argv.includes("--check-only");
 const positional = argv.filter((a) => !a.startsWith("--"));
 const dir = positional[0];
@@ -68,6 +72,22 @@ if (!dir || !modulePath) {
 }
 
 const meta = JSON.parse(readFileSync(join(dir, "meta.json"), "utf8"));
+
+// `lp_emu_jit::replay::RECORD_FORMAT`. A recorder and a reader have to agree
+// on every field's meaning, and the only thing worse than refusing an old
+// recording is reading it as if it were new: the numbers come out, they are
+// wrong, and nothing says so. Format 1 predates F5 and has no `format` key at
+// all.
+const RECORD_FORMAT = 2;
+const format = meta.format ?? 1;
+if (format !== RECORD_FORMAT) {
+  console.error(
+    `${dir} is a format ${format} recording and this harness reads format ${RECORD_FORMAT}; ` +
+      "retake it with `--jit-record` on this head",
+  );
+  process.exit(2);
+}
+
 const wasm = readFileSync(modulePath);
 
 // ---- the recording --------------------------------------------------------
@@ -88,6 +108,9 @@ function readImage() {
 }
 
 const CALL_BYTES = 40;
+// `jit_record.rs::PUBLISH_BYTES`: armed, count, then four published words.
+const PUBLISH_BYTES = 24;
+const FAST_MAX_READS = 4;
 
 function readEntries() {
   const buf = readFileSync(join(dir, "entries.bin"));
@@ -132,6 +155,12 @@ function readEntries() {
     // a million calls, and a quarter of a million objects is the benchmark.
     const calls = new DataView(buf.buffer, buf.byteOffset + at, callCount * CALL_BYTES);
     at += callCount * CALL_BYTES;
+    // What each republishing crossing put in the published-read block, in the
+    // order the crossings happened (format 2). A call points into this with
+    // `1 + index`; see the `mmio_store` import below.
+    const publishCount = u32();
+    const publishes = new DataView(buf.buffer, buf.byteOffset + at, publishCount * PUBLISH_BYTES);
+    at += publishCount * PUBLISH_BYTES;
     const exitPc = u32();
     const flags = i32();
     const cycleOut = u64();
@@ -149,6 +178,8 @@ function readEntries() {
       delta,
       calls,
       callCount,
+      publishes,
+      publishCount,
       exitPc,
       flags,
       cycleOut,
@@ -171,6 +202,19 @@ const EXCHANGE_FLAGS = 144;
 const EXCHANGE_CROSS = 152;
 const X = meta.exchange;
 
+// ---- the published-read block, as `host`'s M7b P3 layout has it -----------
+//
+// Translated code serves the machine's published MMIO word reads straight out
+// of here, with no import call at all. The host keeps it current from inside
+// `mmio_store`'s own crossing and **disarms it at every entry** — a stay only
+// ever trusts a word it saw published inside itself — and a replay has to do
+// both or the module reads words the recorded run never read (F5).
+const FAST_ARMED = 0;
+const FAST_WORDS = 16;
+// `null` when the machine published nothing; the recording then carries no
+// republish either, and a record that claims one is corrupt.
+const F = meta.fast ?? null;
+
 const memory = new WebAssembly.Memory({ initial: meta.pages });
 const bytes = new Uint8Array(memory.buffer);
 const view = new DataView(memory.buffer);
@@ -188,6 +232,35 @@ function restore() {
 
 let current = null;
 let cursor = 0;
+
+/** Put back what one crossing republished: the words first, then `armed`. */
+function applyPublish(index) {
+  if (F === null) {
+    throw new Error(
+      `entry ${current.entry}: a call republishes the published-read block, but the recording ` +
+        "says this machine published nothing — the recording is corrupt",
+    );
+  }
+  if (index >= current.publishCount) {
+    throw new Error(
+      `entry ${current.entry}: a call points at republish ${index}, the entry has ` +
+        `${current.publishCount} — the recording is corrupt`,
+    );
+  }
+  const at = index * PUBLISH_BYTES;
+  const p = current.publishes;
+  const count = p.getUint32(at + 4, true);
+  if (count > FAST_MAX_READS) {
+    throw new Error(
+      `entry ${current.entry}: republish ${index} names ${count} published words, the block ` +
+        `holds ${FAST_MAX_READS} — the recording is corrupt`,
+    );
+  }
+  for (let w = 0; w < count; w++) {
+    view.setUint32(F + FAST_WORDS + 4 * w, p.getUint32(at + 8 + 4 * w, true), true);
+  }
+  view.setInt32(F + FAST_ARMED, p.getUint32(at, true), true);
+}
 
 function nextCall(kind, pc, address) {
   if (cursor >= current.callCount) {
@@ -225,8 +298,17 @@ const imports = {
     // to answer a bare `i32` pc and this harness still masked it down to one,
     // which V8 answers with `TypeError: Cannot convert <pc> to a BigInt` from
     // inside the module. The recording holds the whole 64-bit answer.
+    //
+    // A store is also the only crossing that republishes (F5): the latch the
+    // C6's published `unit0_value.{lo,hi}` mirror moves in one place and only
+    // a store reaches it. The words land BEFORE the answer goes back, which is
+    // where the host puts them — `republish_systimer` runs before
+    // `mmio_store` returns — so the module's next in-module read sees them.
     mmio_store(pc, _cycle, address, _kind, _value) {
-      return current.calls.getBigUint64(nextCall(1, pc, address) + 32, true);
+      const at = nextCall(1, pc, address);
+      const publish = current.calls.getUint32(at + 28, true);
+      if (publish !== 0) applyPublish(publish - 1);
+      return current.calls.getBigUint64(at + 32, true);
     },
     // M7b P2's fourth import. A poll is recorded with `address` zero
     // (`jit.rs`'s `CallRec { kind: 2, address: 0, .. }`) and answers
@@ -285,6 +367,11 @@ function iteration(check, noRun = false) {
     regFile[0] = 0;
     view.setBigUint64(X + EXCHANGE_CYCLE, e.cycleIn, true);
     view.setBigUint64(X + EXCHANGE_INSTRET, e.instretIn, true);
+    // Whatever the block holds was published in some earlier stay, and the
+    // interpreter has run since: `JitCore::run` drops it at every entry and so
+    // does this. Cheap, unconditional and the reason a second iteration is now
+    // the same replay as the first (F5).
+    if (F !== null) view.setInt32(F + FAST_ARMED, 0, true);
     current = e;
     cursor = 0;
     if (noRun) {
@@ -370,7 +457,8 @@ if (checkOnly) {
   console.log(
     `${engine}: identity OK — ${meta.entries} entries, ${meta.retired} instructions, ` +
       `exit pc + cycle + instret + flags + x1..x31 + import call count on every one ` +
-      `(${modulePath}, ${wasm.length} B, ${meta.fnBlocks} blocks/fn)`,
+      `(${modulePath}, ${wasm.length} B, ${meta.fnBlocks} blocks/fn, format ${format}, ` +
+      `${meta.publishes ?? 0} republished crossings)`,
   );
   process.exit(0);
 }
