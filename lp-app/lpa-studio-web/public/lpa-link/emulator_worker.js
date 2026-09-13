@@ -30,7 +30,9 @@
 //       wallUs   = (now() - origin) * 1000
 //       guestUs  = micros() - guestOrigin
 //       deficit  = wallUs - guestUs
-//       if deficit <= 0:  await tick(); continue      // ahead: wait
+//       if deficit < MIN_BUDGET_US:                   // ahead: WAIT, for real
+//           wait = min(MIN_BUDGET_US - deficit, WAIT_CAP_MS) of WALL
+//           await sleep(wait); await tick(); continue
 //       budget   = min(deficit, SLICE_US) as cycles   // never more than one slice
 //       outcome  = emu_run(budget)
 //       drain: USB bytes to the page NOW; console text into a buffer
@@ -53,6 +55,23 @@
 // applied BETWEEN slices (the machine's own rule — a control line never
 // lands between two instructions), so a loop that never yielded would never
 // read its inbox.
+//
+// **The first branch is a WAIT, and there are two floors in it, not one.**
+// `MIN_BUDGET_US` is how much the guest must be owed before a slice is worth
+// taking, and `WAIT_CAP_MS` is how long the loop may stop watching the wall.
+// Until W8 that branch said `await tick(); continue` and was never reached at
+// all: a tick returns in ~16 µs, so the deficit was 16 µs, so the loop handed
+// the guest 2.6 cycles and asked again, 62 500 times a second, and an idle
+// flashed board — the normal state of a board that has been flashed — burnt
+// 100 % of a core to advance its guest in microseconds
+// (`docs/defects/2026-09-13-the-dilation-window-drains-one-shift-at-a-time.md`).
+// A `sleep` and not a tick, because a tick is a yield that comes back
+// immediately and that is the opposite of waiting; the inbox lands during
+// either, which is what `tick()` was there for.
+//
+// The floor is not a second ceiling. `SLICE_US` still bounds what one slice
+// may hand out, `MIN_BUDGET_US` bounds what is worth handing out at all, and
+// they are a factor of ten apart.
 //
 // ========================== THE CONSOLE CADENCE ==========================
 //
@@ -94,6 +113,35 @@ const DILATION_WINDOW_MS = 1_000;
 const PERSIST_EVERY_MS = 2_000;
 /** Read buffer for each drain. One USB packet is 64 bytes; this is generous. */
 const READ_CAP = 1 << 16;
+/**
+ * The smallest deficit worth a slice, in guest µs. See THE PACING RULE.
+ *
+ * A tenth of a slice, and the number is the browser's as much as it is ours:
+ * a `setTimeout` called from inside a timer callback — which every wait below
+ * is — is clamped to **4 ms** once the nesting level passes five, so a wait
+ * shorter than this is a wait no browser will grant. Asking for the floor the
+ * platform already has costs nothing and makes the loop's cadence something
+ * that can be reasoned about rather than discovered.
+ *
+ * It is also a budget worth its own turn. A turn of this loop costs ~16 µs of
+ * wall in overhead alone (measured 2026-09-13); 4 ms of guest on an idle
+ * board costs ~0.8 ms of wall to execute, so the turn's own cost is ~2 % of
+ * the work it does. At 0.016 ms — what the loop was actually handing out —
+ * it was ~100× the work it did.
+ */
+const MIN_BUDGET_US = SLICE_US / 10;
+/**
+ * The ceiling on the wait, in wall ms. See THE PACING RULE.
+ *
+ * Half a slice. The run branch never hands out more than `SLICE_US` at a
+ * time, so re-checking the wall at least twice per slice is what keeps a
+ * wait from ever making the next slice more than half a slice late — and it
+ * bounds the one case where the guest is ahead by more than a hair: a `wfi`
+ * the machine fast-forwards past the budget it was given can leave the guest
+ * ahead by far more than one slice, and the loop should not then be blind to
+ * the wall for that whole stretch.
+ */
+const WAIT_CAP_MS = SLICE_US / 1000 / 2;
 /** How long console text may wait in the worker before it is posted, in wall ms. */
 const CONSOLE_EVERY_MS = 100;
 /** …or how much of it may wait, whichever comes first. See THE CONSOLE CADENCE. */
@@ -136,6 +184,26 @@ function tick() {
     channel.port2.postMessage(0);
   });
 }
+
+/**
+ * A wall wait, for the loop's AHEAD branch and nothing else.
+ *
+ * `setTimeout` and not `tick()`, and the two are not interchangeable: a tick
+ * is a yield that comes back immediately, which is what the loop wants
+ * BETWEEN slices (the inbox has to land) and exactly what it must not do
+ * when there is nothing yet to run. The inbox still lands during this wait —
+ * a message event is dispatched by the event loop, not by a timer, so a
+ * control line arriving mid-wait is applied at once and the wait is not on
+ * its path.
+ *
+ * What a hidden tab's clamp does to it is the honest cost: the browser may
+ * stretch this timer to its own minimum (a second, in a backgrounded tab),
+ * and the guest then paces at that minimum instead of at the cap. It falls
+ * behind, the pacing rule drops the deficit, and `dilation` says so — which
+ * is D13 already, and is what a hidden tab has always been promised. The
+ * INBOX is what tick() was protecting and the inbox is untouched.
+ */
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 const now = () => performance.now();
 
@@ -424,8 +492,10 @@ async function step() {
   const wallUs = (wallNow - origin) * 1000;
   const guestUs = Number(emu.micros()) - guestOrigin;
   let deficit = wallUs - guestUs;
+  /** How much wall this step owes before the next one is worth taking. */
+  let waitMs = 0;
 
-  if (deficit > 0 && stopped === null) {
+  if (deficit >= MIN_BUDGET_US && stopped === null) {
     const budgetUs = Math.min(deficit, SLICE_US);
     const outcome = emu.run(Math.max(1, Math.round(budgetUs * CYCLES_PER_US)));
     if (outcome !== 0) {
@@ -454,14 +524,51 @@ async function step() {
       reanchor(now(), Number(emu.micros()));
     }
   } else {
-    // Ahead of the wall, or stopped. Either way the guest gets no cycles;
+    // Not owed a slice yet, or stopped. Either way the guest gets no cycles;
     // the drain still runs so a last line reaches the page.
     drain();
+    // AHEAD MEANS WAIT, and until W8 it did not.
+    //
+    // The rule's own words were "if deficit <= 0: await tick(); continue",
+    // and the branch was never reached: `tick()` returns in ~16 µs, so the
+    // wall moved 16 µs, so the deficit was 16 µs, so the loop handed the
+    // guest 2.6 CYCLES and asked again. Measured 2026-09-13 in node, driving
+    // this file with the shipped firmware on the chip: **625 000 turns in
+    // 10 s, every one of them a run, mean budget 0.016 ms of guest**, and of
+    // the 100.0 % of one core it burnt, `emu_run` itself accounted for 23.6
+    // points. The rest was the turn — the tick, two `emu_*` reads, the
+    // sample — paid 62 500 times a second to advance the guest by a
+    // microsecond at a time. An idle flashed board does this all day
+    // (`docs/defects/2026-09-13-the-dilation-window-drains-one-shift-at-a-time.md`).
+    //
+    // So the wait is not "when the guest is ahead" but "until the guest is
+    // owed something worth running": `MIN_BUDGET_US`. Being AHEAD is the same
+    // condition with a negative deficit and falls out of the same line.
+    //
+    // **D13 is untouched.** Behind by more than a slice still means run one
+    // slice and DROP the rest; the guest still never sprints; the ceiling is
+    // still `SLICE_US`. What changes is the FLOOR — the loop stops paying a
+    // turn's overhead for a microsecond of guest — so the guest advances in
+    // 4 ms steps instead of 16 µs ones, which is still 25× finer than the
+    // console's own flush cadence and a tenth of the slice the rule already
+    // allows it to be behind by.
+    //
+    // `stopped` is deliberately not this case: the guest's clock has stopped
+    // while the wall has not, so `deficit` there is positive and growing and
+    // says nothing about how long to wait. That loop still spins; closing it
+    // is a decision about what a stopped board owes its page, not this one.
+    if (stopped === null) {
+      waitMs = Math.min((MIN_BUDGET_US - deficit) / 1000, WAIT_CAP_MS);
+    }
   }
 
   sample(now());
   maybeReport(now());
   maybePersist(now());
+
+  // Last, so the sample, the `stats` line and the persist tick all keep the
+  // cadence they had: what waits is the next slice, which is owed nothing.
+  if (waitMs > 0) await sleep(waitMs);
 }
 
 function reanchor(wallAt, micros) {
@@ -533,10 +640,11 @@ function flushConsole(final = false) {
  * One sample into the dilation window, and the expired prefix out.
  *
  * The prefix leaves in ONE `splice`, and that is the whole point of the
- * shape. A guest that is AHEAD of the wall gets no cycles (the pacing rule's
- * first branch), so this loop does nothing but `tick()` — and a flashed board
- * idling in `wfi`, whose guest clock the machine fast-forwards, is ahead
- * almost all the time. Measured 2026-09-13 on a `?emu=tab` board: **193 858
+ * shape. The loop used to turn as fast as a `MessageChannel` tick could
+ * return, feeding this window every time round: on a flashed board idling in
+ * `wfi`, whose guest clock the machine fast-forwards, the deficit was never
+ * more than a tick's worth of wall, so the loop handed out microseconds and
+ * came straight back. Measured 2026-09-13 on a `?emu=tab` board: **193 858
  * samples inside one 1 000 ms window**. Retiring that prefix one `shift()` at
  * a time is quadratic; it held this thread — and so its inbox, and so every
  * control line a flasher was waiting on — for up to 21 s in a single call,
