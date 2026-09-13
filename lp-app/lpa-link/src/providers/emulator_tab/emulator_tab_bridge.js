@@ -91,6 +91,37 @@ async function resolveUrls(pinnedModuleUrl) {
   return { moduleUrl, jitHostUrl };
 }
 
+/**
+ * The base a relative package URL is resolved against when the page has no
+ * origin of its own (a node harness, a worker with no location). Never
+ * fetched: a board in such a context has no packaged firmware to download,
+ * and a URL that says where it came from beats a throw about a missing base.
+ */
+const SITE_ROOT_FALLBACK = "http://tab.emu.invalid/";
+
+/**
+ * A packaged-firmware manifest URL, absolute, resolved against the SITE ROOT.
+ *
+ * The transport hands this in relative (`./firmware/<build>/manifest.json` —
+ * `BrowserSerialEsp32Options::firmware_manifest_path`, reused by both the
+ * serial and the emu path rather than re-derived) because it is sans-IO and
+ * has no origin to resolve against. JS owns URL resolution, so the crossing
+ * is resolved HERE, once, at the bridge's boundary: both the fetch in this
+ * file and the worker's own `new URL(image.path, manifestUrl)` then have an
+ * absolute base, and a relative one throws `Invalid base URL` in neither.
+ *
+ * Against the site ROOT, not the current page: `/devices` and `/p/<slug>`
+ * would disagree about where `./firmware` is, and the firmware tree is
+ * published at the site root by `lp-cli firmware package`. An input that is
+ * already absolute passes through unchanged, so a caller on either side of
+ * this cannot get it wrong.
+ */
+function packageUrl(manifestUrl) {
+  if (!manifestUrl) return null;
+  const siteRoot = globalThis.location?.origin ?? SITE_ROOT_FALLBACK;
+  return new URL(manifestUrl, siteRoot).toString();
+}
+
 function entry(id) {
   const found = ports.get(id);
   if (!found) throw new Error(`no emulated board with handle ${id}`);
@@ -153,7 +184,9 @@ export function openEmuPort({ uid, mac, moduleUrl, manifestUrl, persistKey }) {
     boot: "rom-up",
     link: "usb-serial-jtag",
     persistKey: persistKey ?? uid,
-    manifestUrl: manifestUrl ?? null,
+    // Absolute from here on: the worker resolves the image against this base
+    // (see `packageUrl`).
+    manifestUrl: packageUrl(manifestUrl),
     // The board's own config text, the CLI's words. `usb_host=attached` is
     // the cable in with the port open from power-on — a board whose port
     // started closed comes back from every reset with nothing draining
@@ -351,11 +384,17 @@ export async function eraseEmuFlash(id) {
  *
  * The board is reset afterwards, so the card sees the boot the new image
  * produces rather than the one the old image is still running.
+ *
+ * `requestedUrl` may be relative (it is, from the transport) — it is resolved
+ * against the site root before anything is fetched; see `packageUrl`.
  */
-export async function flashEmuPackage(id, manifestUrl) {
+export async function flashEmuPackage(id, requestedUrl) {
   const e = entry(id);
   await e.queue;
   const port = await e.ready;
+
+  const manifestUrl = packageUrl(requestedUrl);
+  if (!manifestUrl) throw new Error("flash was asked for with no manifest URL");
 
   const manifestResponse = await fetch(manifestUrl, { cache: "no-store" });
   if (!manifestResponse.ok) {
