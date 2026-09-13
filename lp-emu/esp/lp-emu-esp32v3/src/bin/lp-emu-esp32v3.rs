@@ -167,6 +167,13 @@ OPTIONS:
                             taken at build time
     --exit-on <line>        stop when this appears on a COMPLETE line of
                             UART0's output; exits 0
+    --no-block-cache        do not pre-decode blocks of instructions. Slower,
+                            and the identity oracle: every byte of every
+                            transcript must be the same either way
+                            (scripts/emu/v3-oracle.sh). The cache stays ON
+                            under --boot-mode rom-up, unlike the C6's, because
+                            this chip's invalidation contract is the store
+                            address and not a guest barrier
     --seed <n>              the machine's PRNG seed [0]
     --efuse-mac <a:b:..>    the MAC the eFuse block answers [30:76:f5:ec:f6:34, the desk board]
     --efuse-rev <maj.min>   the chip revision it answers [3.1, the desk board]
@@ -206,6 +213,9 @@ struct Args {
     rom: Option<PathBuf>,
     boot_mode: Option<BootMode>,
     strict: bool,
+    /// `--no-block-cache`. The cache is ON by default, so the flag is held as
+    /// its negation and `Default` gives the default behaviour.
+    no_block_cache: bool,
     cache_off: CacheOffPolicy,
     mmu_divergence: MmuDivergencePolicy,
     core_quantum: Option<u64>,
@@ -264,6 +274,7 @@ fn run() -> Result<ExitCode, String> {
         .boot_mode(boot_mode)
         .time_grade(args.time_grade)
         .strict(args.strict)
+        .block_cache(!args.no_block_cache)
         .cache_off_fetch(args.cache_off)
         .app_mmu_divergence(args.mmu_divergence)
         .core_quantum(args.core_quantum.unwrap_or(CORE_QUANTUM_DEFAULT))
@@ -362,6 +373,7 @@ fn run() -> Result<ExitCode, String> {
     machine.bus_mut().host.flush_all();
     print_outcome(&mut machine, &outcome);
     print_run_summary(&machine);
+    print_block_report(&machine);
     print_refill_lag(&machine);
     // The pads, last: a frame still in flight when the deadline hit is
     // closed here as INCOMPLETE rather than dropped, so the summary counts
@@ -437,6 +449,53 @@ fn print_run_summary(machine: &Machine) {
         bus.missing_fence_reports(),
         machine.core_quantum(),
     );
+}
+
+/// What the block cache did, per hart — **never part of a compared
+/// transcript**.
+///
+/// The oracle (`scripts/emu/v3-oracle.sh`) compares the UART0 bytes, the
+/// `run:` line, the decoded frames, stdout and the trace; this line is none of
+/// those, and the oracle masks it. It is here because it is the only way a run
+/// says whether the cache was reached at all, how long its blocks realised,
+/// and — through `range` — how often the guest published code the
+/// store-address contract had to invalidate for (M7 XD3).
+///
+/// `isync` is the Xtensa `fence.i` count, and a **small number here is the
+/// expected reading on this chip**: the firmware publishes JIT'd code into
+/// SRAM0 with no barrier at all, which is exactly why the contract is the
+/// store address and not the barrier.
+fn print_block_report(machine: &Machine) {
+    for core in 0..CORES {
+        match machine.block_stats(core) {
+            Some(stats) => eprintln!(
+                "blocks: core{core} decodes={} hits={} ({:.2}% of {} entries) slots={} \
+                 mean={:.2} flushes={} capacity_flushes={} range={} (dropping {} entries) \
+                 collisions={}; {} isync",
+                stats.decodes,
+                stats.hits,
+                stats.hit_rate() * 100.0,
+                stats.decodes + stats.hits,
+                stats.slots_run,
+                stats.mean_block_len(),
+                stats.flushes,
+                stats.capacity_flushes,
+                stats.range_invalidations,
+                stats.range_entries_dropped,
+                stats.collisions,
+                machine.isync_count(core),
+            ),
+            None => eprintln!(
+                "blocks: core{core} no cache ({}); {} isync",
+                if machine.block_cache() {
+                    "never needed one"
+                } else {
+                    "--no-block-cache"
+                },
+                machine.isync_count(core),
+            ),
+        }
+    }
 }
 
 /// One line per routed pad at exit: what the strip decoders read off the
@@ -787,6 +846,7 @@ fn parse(argv: Vec<String>) -> Result<Args, String> {
             "--map" => args.map = true,
             "--hooks" => args.hooks = true,
             "--strict-bus" => args.strict = true,
+            "--no-block-cache" => args.no_block_cache = true,
             "--rmt-logs" => args.rmt_logs = true,
             "--dump-frames" => {
                 let spec = value()?;

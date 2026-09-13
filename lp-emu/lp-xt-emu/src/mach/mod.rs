@@ -54,6 +54,45 @@
 //!
 //! Nothing else in the slice loop looks at interrupt state.
 //!
+//! # The block cache, and how it is invalidated on this chip
+//!
+//! The hart runs out of a pre-decoded [`BlockCache`] by default
+//! ([`XtHart::set_block_cache`], `--no-block-cache` to turn it off). A block
+//! is a run of at most 64 slots ending at a control transfer or at anything
+//! that changes what the next instruction means; the classification is in
+//! [`block`], the budget rule and the arena are `lp_emu_core`'s, and the
+//! executor is [`XtHart::step`] with the fetch and the decode elided.
+//!
+//! **Invalidation is store-address driven and exact at the store** (M7 XD3),
+//! and that is the one real difference from the RV32 hart. RV32's contract is
+//! the guest's `fence.i`; the classic's firmware deliberately publishes JIT'd
+//! code into SRAM0 with **no** barrier at all
+//! (`lp-shader/lpvm-native/src/codemem_esp32.rs:545` — "internal SRAM is
+//! uncached on this chip and silicon says freshly written code executes with
+//! no barriers at all"), so there is no fence to hang invalidation on. The bus
+//! raises [`Bus::code_dirty`] when the guest stores into an executable region,
+//! and the hart drains it at polling point (c) — the point it already visits
+//! after every Store-, Atomic- or System-class instruction — into
+//! [`XtHart::invalidate_block_range`], **before the next fetch**. That is what
+//! makes a plain store safe inside a block.
+//!
+//! Two harts share one bus on the classic, so the record is per hart: the hart
+//! that stored drains at its own (c), and the other hart drains on entry to
+//! its next slice — the first moment it could execute anything. `isync` and a
+//! `wsr`/`xsr` to `LBEG`/`LEND`/`LCOUNT` stay whole-cache flushes, and the
+//! host-side funnels (a flash-cache refill, a ROM-hook patch, an image load, a
+//! restore) reach the hart through the machine's own
+//! [`XtHart::invalidate_block_range`] calls. `memw` is never an event (it is
+//! hot — the idle loop is `memw; l32i; beqz`) and `LOOP` is never an event
+//! (the seam's ruling); both are covered by the store contract and by `LEND`
+//! respectively.
+//!
+//! Because the contract is the store and not a fence, the cache stays **on**
+//! under `BootMode::RomUp` (XD4): the mask ROM's and the second-stage
+//! bootloader's copies are guest stores into executable regions and are caught
+//! by the same drain. The C6's exclusion (M5 MD13) is a consequence of *its*
+//! fence contract and does not transfer.
+//!
 //! # The reset-state contract
 //!
 //! [`XtHart::new`] leaves **`PS = 0x0000_001F`** — `INTLEVEL = 15`,
@@ -92,10 +131,6 @@
 //! - **Rings.** `PS.RING` is stored and ignored: `CRING` is always 0, so no
 //!   `PrivilegedCause` (8) is ever raised and every privileged instruction
 //!   runs. The firmware never leaves ring 0.
-//! - **The block cache.** [`XtHart::invalidate_block_range`] and
-//!   [`XtHart::invalidate_blocks`] exist for the contract and reach only the
-//!   translated seam ([`translated`]) today; the pre-decoded cache itself is
-//!   the speed ladder's.
 //! - **A translator.** [`translated`] is the seam one would plug into and
 //!   nothing is plugged into it: with no core installed the hart runs the loop
 //!   it has always run, and everything observable is byte-identical.
@@ -109,6 +144,7 @@
 //! touches — `XDM_OCD_DCR_SET`, whose bit 0 asks "is a debugger attached?" —
 //! and the store, not a model of the debug module, is what this hart claims.
 
+mod block;
 pub mod breakpoint;
 mod exec;
 pub mod extreg;
@@ -122,15 +158,18 @@ pub mod window;
 
 use core::marker::PhantomData;
 
+use lp_emu_core::block::{BlockCache, BlockStats};
 use lp_emu_core::{Bus, CycleModel, InstClass, MemoryAccessKind, MemoryError};
 use lp_xt_inst::{AluRs, DecodeError, Inst, NullaryNarrowOp, NullaryOp};
 
+use crate::block::XtSlot;
 use crate::cpu::Cpu;
 use crate::emu::Flow;
 use crate::error::{TRAP_CAUSE_WATCHPOINT, Trap, TrapKind};
 use crate::executor::Exec;
 use crate::fp_policy::FpPolicy;
 use crate::trace::{NoopTracer, TraceEvent, Tracer};
+use block::MAX_BLOCK_SLOTS;
 use breakpoint::BreakUnit;
 use extreg::ExternalRegs;
 use interrupt::{IntLine, InterruptUnit, Take};
@@ -196,6 +235,14 @@ pub enum HartFault {
     /// for M5's ADR.
     UnsupportedInstruction { pc: u32, word: u32, len: u8 },
 }
+
+/// The most bytes one cached block can span: [`block::MAX_BLOCK_SLOTS`] slots
+/// of at most three bytes each.
+///
+/// What [`XtHart::apply_pending_blocks`] compares against, so that "could a
+/// block starting here have reached into the span the guest just wrote?" is
+/// one add and two compares rather than a walk of the table.
+const MAX_BLOCK_BYTES: u32 = MAX_BLOCK_SLOTS as u32 * 3;
 
 /// What one instruction did to the slice loop.
 enum StepOutcome {
@@ -267,6 +314,29 @@ pub struct XtHart<B: Bus> {
     /// published code and shows a zero here has a fence that is not reaching
     /// the machine.
     isync_count: u64,
+    /// The pre-decoded block cache, built on first use.
+    ///
+    /// **Not architectural state.** Nothing observable may depend on a hit or
+    /// a miss; it is absent from a snapshot, a clone starts empty, and
+    /// `--no-block-cache` must produce a byte-identical everything. See
+    /// [`lp_emu_core::block`].
+    cache: Option<Box<BlockCache<XtSlot>>>,
+    /// Configuration, not state: whether this hart may use a block cache at
+    /// all ([`XtHart::set_block_cache`]). Default **on**.
+    block_cache: bool,
+    /// An invalidation asked for while the cache was lifted out of the hart —
+    /// see [`XtHart::drain_block_flush`]. The store-address drain at polling
+    /// point (c) and `isync` are why it exists, and the block executor reads
+    /// "not `None`" as "leave this block".
+    ///
+    /// A [`PendingInvalidate`] rather than a `bool`, and the reason is
+    /// measured: on this chip the whole of SRAM0 is one executable region, so
+    /// a guest store into IRAM *data* raises the store-address side-band
+    /// exactly as a code publish does, about 800 times an emulated second on
+    /// the render loop. A `bool` would turn each of those into a 2 MiB
+    /// `memset` of the table and throw the warm cache away; a range keeps
+    /// everything the write did not touch.
+    block_flush_pending: PendingInvalidate,
     /// The installed translated core, if any, and the entry table that says
     /// where it may be entered (direct-mapped **by byte**, `0` = no entry).
     ///
@@ -334,6 +404,14 @@ impl<B: Bus> Clone for XtHart<B> {
             pending_break: self.pending_break,
             strict_unsupported: self.strict_unsupported,
             isync_count: self.isync_count,
+            // The block cache is NOT copied. It is not architectural state,
+            // so a cloned hart — the snapshot path — starts with an empty one
+            // and re-decodes what it needs. Copying it would be a correctness
+            // hazard rather than an optimisation: the clone's bus may hold
+            // different bytes at the same addresses.
+            cache: None,
+            block_cache: self.block_cache,
+            block_flush_pending: PendingInvalidate::None,
             // Not copied: a translated core is not architectural state, and
             // it holds host code for guest bytes that the clone's bus may not
             // have. The snapshot path is exactly the case that matters.
@@ -399,6 +477,9 @@ impl<B: Bus> XtHart<B> {
             pending_break: None,
             strict_unsupported: false,
             isync_count: 0,
+            cache: None,
+            block_cache: true,
+            block_flush_pending: PendingInvalidate::None,
             core: None,
             core_entries: Vec::new(),
             core_flush_pending: PendingInvalidate::None,
@@ -556,9 +637,58 @@ impl<B: Bus> XtHart<B> {
         self.cycle_model
     }
 
+    /// Change the per-instruction cost model.
+    ///
+    /// Invalidates the block cache: a cached block carries the most cycles it
+    /// can charge *under the model it was built against*
+    /// ([`lp_emu_core::block::Block::max_cycles`]), and that bound is what
+    /// lets a block run whole with no per-instruction deadline compare. A
+    /// stale bound would let a block run past a deadline it should have
+    /// stopped inside. Only a model that actually changes invalidates, so the
+    /// machine's build-time call on a fresh hart does not start the run with a
+    /// flush in its report line.
     #[inline]
     pub fn set_cycle_model(&mut self, model: CycleModel) {
+        if self.cycle_model == model {
+            return;
+        }
         self.cycle_model = model;
+        self.invalidate_blocks();
+    }
+
+    // --- the block cache ---------------------------------------------------
+
+    /// Turn the pre-decoded block cache on or off. Default: on.
+    ///
+    /// Off is `--no-block-cache`: the bring-up tool, the bisection tool, and
+    /// the identity oracle this milestone leans on hardest — the same binary
+    /// with the cache off must print an identical everything.
+    ///
+    /// Unlike the C6 (M5 MD13) there is **no architectural exclusion here**:
+    /// the cache stays on under `BootMode::RomUp` on both Xtensa machines
+    /// (M7 XD4), because the mask ROM's and the bootloader's copies are guest
+    /// stores into executable regions and the store-address contract (XD3)
+    /// catches them. The C6 has to turn it off there because its contract is
+    /// the guest's `fence.i` and it owns neither of those programs.
+    #[inline]
+    pub fn set_block_cache(&mut self, on: bool) {
+        self.block_cache = on;
+        if !on {
+            self.cache = None;
+        }
+    }
+
+    #[inline]
+    #[must_use]
+    pub const fn block_cache(&self) -> bool {
+        self.block_cache
+    }
+
+    /// What the cache did, or `None` when it was never built.
+    #[inline]
+    #[must_use]
+    pub fn block_stats(&self) -> Option<BlockStats> {
+        self.cache.as_ref().map(|c| c.stats())
     }
 
     /// Replace the FP policy (the machine hands the hart the constants P6
@@ -606,15 +736,28 @@ impl<B: Bus> XtHart<B> {
 
     /// Forget whatever has been pre-decoded or translated for `[lo, hi)`.
     ///
-    /// There is no pre-decoded block cache on this hart yet — that is the
-    /// speed ladder's — so this reaches only the translated core. A caller
-    /// that writes guest code from the host side calls it; so does the hart
-    /// itself, from the three invalidation events [`translated`] documents.
+    /// Both seams: the pre-decoded block cache and the translated core. A
+    /// caller that writes guest code from the host side calls it (the
+    /// machine's per-hart drain of `take_code_writes`); so does the hart
+    /// itself, from the store-address drain at polling point (c) — the
+    /// classic's own invalidation contract, M7 XD3.
+    ///
+    /// Called at a slice boundary, where both are back in the hart. Asked for
+    /// from **inside** a slice it degrades to a whole flush, which is
+    /// conservative in the safe direction, and the pending flag is what the
+    /// block executor reads as "leave this block".
     #[inline]
     pub fn invalidate_block_range(&mut self, lo: u32, hi: u32) {
         match self.core.as_mut() {
             Some(core) => core.invalidate(Some((lo, hi))),
             None => self.core_flush_pending = self.core_flush_pending.add(Some((lo, hi))),
+        }
+        match self.cache.as_mut() {
+            Some(cache) => cache.invalidate_range(lo, hi),
+            // The cache is lifted out of `self` for the whole of a slice (see
+            // [`XtHart::run_slice_cached`]), so an invalidation asked for from
+            // inside one is recorded and applied where the cache is.
+            None => self.note_block_pending(Some((lo, hi))),
         }
     }
 
@@ -627,6 +770,33 @@ impl<B: Bus> XtHart<B> {
     /// is the one that has to hear it.
     #[inline]
     pub fn invalidate_blocks(&mut self) {
+        self.invalidate_translated();
+        match self.cache.as_mut() {
+            Some(cache) => cache.invalidate_all(),
+            None => self.note_block_pending(None),
+        }
+    }
+
+    /// Forget everything the **translator** holds, and nothing the block cache
+    /// holds.
+    ///
+    /// One event uses this rather than [`XtHart::invalidate_blocks`]: a
+    /// `wsr`/`xsr` to `LBEG`, `LEND` or `LCOUNT`. A translated block may have
+    /// inlined the `LEND` it saw, so the core has to hear about it. **A
+    /// cached block cannot have**, because an [`XtSlot`] holds a decoded
+    /// instruction and its width and nothing else: the loop-back test in
+    /// [`XtHart::step`] reads `LEND` and `LCOUNT` out of the special-register
+    /// file live, on every instruction. No slot goes stale when a loop
+    /// register moves.
+    ///
+    /// That distinction is worth a method because `restore_context` rewrites
+    /// all three on **every context switch** (xtensa-lx-rt 0.22.0,
+    /// `src/exception/asm.rs`), and a whole-cache flush is a 2 MiB `memset`
+    /// of the table. Measured on `boot-idle` at 100 ms: **545 whole flushes
+    /// before this split, 3 after** — and those three are the `isync`es, which
+    /// are the real thing.
+    #[inline]
+    pub fn invalidate_translated(&mut self) {
         match self.core.as_mut() {
             Some(core) => core.invalidate(None),
             None => self.core_flush_pending = self.core_flush_pending.add(None),
@@ -640,6 +810,98 @@ impl<B: Bus> XtHart<B> {
     /// [`XtHart::step_one`], the instruction it ran was an `isync` or a `wsr`
     /// to `LEND`, and the core that has to forget what it translated was in
     /// the caller's hand at the time.
+    /// Record an invalidation the cache cannot be given yet, **merging two
+    /// ranges into the span that covers both**.
+    ///
+    /// This is where the cache's accumulator differs from the translated
+    /// core's ([`PendingInvalidate::add`], which widens a second range to
+    /// `All`), and the difference is the whole of the store-address
+    /// contract's cost. A guest publishing 1,606 consecutive words raises
+    /// 1,606 four-byte ranges; widening to `All` at the second one throws the
+    /// warm cache away and then does it again at every block lookup for the
+    /// rest of the copy — **measured on `render-loop` as 720 whole flushes**.
+    /// The hull of two ranges invalidates a superset of what either does, so
+    /// it is conservative in the **safe** direction, and the copy collapses to
+    /// one range applied once, when the guest finally jumps into what it
+    /// wrote.
+    #[inline]
+    fn note_block_pending(&mut self, range: Option<(u32, u32)>) {
+        self.block_flush_pending = match (self.block_flush_pending, range) {
+            (PendingInvalidate::All, _) | (_, None) => PendingInvalidate::All,
+            (PendingInvalidate::None, Some((lo, hi))) => PendingInvalidate::Range(lo, hi),
+            (PendingInvalidate::Range(lo, hi), Some((a, b))) => {
+                PendingInvalidate::Range(lo.min(a), hi.max(b))
+            }
+        };
+    }
+
+    /// Apply a recorded invalidation **only if it could reach a block
+    /// starting at `pc`** — the lazy half of [`XtHart::drain_block_flush`],
+    /// and the reason the store-address contract is affordable.
+    ///
+    /// The guest publishes its shader by storing 1,606 consecutive words into
+    /// SRAM0, and polling point (c) sees every one of them. Applying each
+    /// store to the cache means 1,606 walks of a 2^18-entry table for one
+    /// copy — measured on `render-loop` as **+1.1 user seconds out of 9.6**,
+    /// to drop 21 entries in total. So the request is *recorded* and the walk
+    /// is deferred until the hart is about to look up a block the write could
+    /// have touched: a cached block is at most
+    /// [`block::MAX_BLOCK_SLOTS`] × 3 bytes long, so a block starting at `pc`
+    /// overlaps `[lo, hi)` only when `pc < hi && pc + 192 > lo`. Anything
+    /// outside that window is served from a cache the write cannot have
+    /// staled, and the walk happens once, when the guest finally jumps into
+    /// what it wrote.
+    ///
+    /// Exact, and the reason is that the pending record is only ever *cleared*
+    /// by an apply: it survives a block, a slice and a stepping window, and
+    /// every path that consults the cache goes through here or through
+    /// [`XtHart::drain_block_flush`] first.
+    #[inline]
+    fn apply_pending_blocks(&mut self, cache: &mut BlockCache<XtSlot>, pc: u32) {
+        match self.block_flush_pending {
+            PendingInvalidate::None => {}
+            PendingInvalidate::Range(lo, hi) => {
+                if pc < hi && pc.wrapping_add(MAX_BLOCK_BYTES) > lo {
+                    self.block_flush_pending = PendingInvalidate::None;
+                    cache.invalidate_range(lo, hi);
+                }
+            }
+            PendingInvalidate::All => {
+                self.block_flush_pending = PendingInvalidate::None;
+                cache.invalidate_all();
+            }
+        }
+    }
+
+    /// Apply an invalidation that was asked for while the cache was lifted out
+    /// of the hart, whatever it names. The store-address drain at polling
+    /// point (c) and `isync` are the reasons this exists;
+    /// [`XtHart::apply_pending_blocks`] is the form the hot path uses.
+    #[inline]
+    fn drain_block_flush(&mut self, cache: &mut BlockCache<XtSlot>) {
+        match core::mem::replace(&mut self.block_flush_pending, PendingInvalidate::None) {
+            PendingInvalidate::None => {}
+            PendingInvalidate::Range(lo, hi) => cache.invalidate_range(lo, hi),
+            PendingInvalidate::All => cache.invalidate_all(),
+        }
+    }
+
+    /// Polling point (c), the Xtensa half of the block cache's invalidation
+    /// contract (M7 XD3): the guest has stored into executable memory, so
+    /// everything pre-decoded or translated for those spans is suspect.
+    ///
+    /// Drained **before the next fetch** — the instruction boundary
+    /// immediately after the store — which is what makes a plain store safe
+    /// inside a block. `#[cold]`: on the render loop the guest publishes one
+    /// JIT buffer per project load and executes it 62.9 M times.
+    #[cold]
+    #[inline(never)]
+    fn drain_code_dirty(&mut self, bus: &mut B) {
+        for (lo, hi) in bus.take_code_dirty() {
+            self.invalidate_block_range(lo, hi);
+        }
+    }
+
     fn drain_core_flush(&mut self, core: &mut translated::BoxedCore<B>) {
         match core::mem::replace(&mut self.core_flush_pending, PendingInvalidate::None) {
             PendingInvalidate::None => {}
@@ -803,11 +1065,38 @@ impl<B: Bus> XtHart<B> {
         // The deadline as an absolute cycle; `saturating_add` keeps a
         // `u64::MAX` budget meaning "never".
         let end = self.cycle_count.saturating_add(budget);
-        // One branch per slice, not per instruction: a hart with no
-        // translated core runs the loop it has always run, and the seam costs
-        // it nothing. See [`translated`].
-        if self.core.is_some() {
-            self.run_slice_cored(bus, end, tracer)
+
+        // A block cache decodes ahead and then executes without fetching
+        // again, so it may only run over a bus whose fetches have no
+        // consequence beyond returning the bytes — see [`Bus::fetch_is_pure`].
+        // Read once per slice, and re-read whenever an instruction that could
+        // have changed the answer runs.
+        let cached = self.block_cache && bus.fetch_is_pure();
+
+        // The store-address invalidation contract (M7 XD3), both halves, once
+        // per slice:
+        //
+        // - **arm** the bus's recorder. Sticky on the bus, because the
+        //   classic has two harts sharing one and a hart that does not need
+        //   the record must not switch it off for the one that does. A
+        //   `--no-block-cache` run with no core never arms it, which is what
+        //   keeps the identity leg free of the whole mechanism.
+        // - **drain** whatever the *other* hart published while this one was
+        //   not running. Its own polling point (c) is exact inside its own
+        //   slice; this is the first moment this hart could execute anything
+        //   the other one wrote, so draining here is exact for the pair.
+        if self.block_cache || self.core.is_some() {
+            bus.watch_code_stores(true);
+            if bus.code_dirty() {
+                self.drain_code_dirty(bus);
+            }
+        }
+
+        // One branch per slice, not per instruction: a hart with no cache and
+        // no translated core runs the loop it has always run, and neither
+        // seam costs it anything. See [`translated`] and [`lp_emu_core::block`].
+        if cached || self.core.is_some() {
+            self.run_slice_cached(bus, end, tracer, cached)
         } else {
             self.run_slice_stepping(bus, end, tracer)
         }
@@ -831,39 +1120,64 @@ impl<B: Bus> XtHart<B> {
         }
     }
 
-    /// The same slice with a translated core installed.
+    /// The same slice, run out of pre-decoded blocks and/or a translated core.
     ///
-    /// The core is **lifted out of `self`** for the whole slice, so the core
-    /// and the hart's registers are two disjoint borrows rather than one and a
-    /// core can be handed the hart it lives on (see [`translated`]'s module
-    /// docs). It goes back on every exit path. An invalidation asked for while
-    /// it was out is drained into it on the way in and on the way out.
-    fn run_slice_cored<T: Tracer + ?Sized>(
+    /// The cache **and the core** are lifted out of `self` for the whole
+    /// slice, so the arena and the hart's registers are two disjoint borrows
+    /// rather than one, and so a core can be handed the hart it lives on (see
+    /// [`translated`]'s module docs). Both go back on every exit path —
+    /// including the one where [`run_blocks`](Self::run_blocks) gives up and
+    /// finishes the slice by single-stepping. An invalidation asked for while
+    /// either was out is drained into it on the way in and on the way out.
+    ///
+    /// `cached` is false when the cache is off (`--no-block-cache`) or the bus
+    /// is not currently safe to decode ahead of ([`Bus::fetch_is_pure`]); the
+    /// translated seam still runs, because the two are independent.
+    fn run_slice_cached<T: Tracer + ?Sized>(
         &mut self,
         bus: &mut B,
         end: u64,
         tracer: &mut T,
+        cached: bool,
     ) -> SliceEnd {
+        let mut cache = cached.then(|| {
+            self.cache
+                .take()
+                // Byte-indexed, not `pc >> 1`: Xtensa instructions are 2 or
+                // 3 bytes, so block starts land on every residue and bit 0 of
+                // a `pc` carries real information. See
+                // [`BlockCache::with_pc_shift`].
+                .unwrap_or_else(|| Box::new(BlockCache::with_defaults_byte_indexed()))
+        });
         let mut core = self.core.take();
+        if let Some(cache) = cache.as_mut() {
+            self.drain_block_flush(cache);
+        }
         if let Some(core) = core.as_mut() {
             self.drain_core_flush(core);
         }
-        let out = self.run_entries(core.as_mut(), bus, end, tracer);
+        let out = self.run_blocks(cache.as_deref_mut(), core.as_mut(), bus, end, tracer);
         if let Some(core) = core.as_mut() {
             self.drain_core_flush(core);
         }
         self.core = core;
+        if let Some(cache) = cache {
+            self.cache = Some(cache);
+        }
         out
     }
 
-    /// The slice loop with the translated-core entry check at its top.
+    /// The slice loop with the translated-core entry check at its top and the
+    /// block-cache lookup under it.
     ///
-    /// Structurally the RV32 hart's `run_blocks` with the block-cache half
-    /// removed: there is no pre-decoded cache on this hart, so a pc the core
-    /// does not claim falls through to exactly the `step_once` the
-    /// single-stepping loop runs.
-    fn run_entries<T: Tracer + ?Sized>(
+    /// RV32's `run_blocks`, in this hart's shape. The order is the design: a
+    /// pc the core claims is a translated stay; a pc it does not is looked up
+    /// in the cache; an address the decoder refuses falls through to exactly
+    /// the [`step_once`](Self::step_once) the single-stepping loop runs. One
+    /// copy of the per-instruction path, three ways of reaching it.
+    fn run_blocks<T: Tracer + ?Sized>(
         &mut self,
+        mut cache: Option<&mut BlockCache<XtSlot>>,
         mut core: Option<&mut translated::BoxedCore<B>>,
         bus: &mut B,
         end: u64,
@@ -884,10 +1198,14 @@ impl<B: Bus> XtHart<B> {
                 // still hold the entry counter by the time the core returns.
                 let entry_instret = self.instruction_count;
                 let outcome = core.run(self, bus, end);
-                // The escape hatch can have retired an `isync` or a `wsr` to
-                // `LEND`, and the core it wanted invalidated was out here
-                // rather than in the hart. Drain before it is consulted again.
+                // The escape hatch can have retired an `isync`, a `wsr` to
+                // `LEND` or a store that published code, and both the core and
+                // the cache it wanted invalidated were out here rather than in
+                // the hart. Drain before either is consulted again.
                 self.drain_core_flush(core);
+                if let Some(cache) = cache.as_mut() {
+                    self.drain_block_flush(cache);
+                }
                 // The escape hatch ran something that ended the slice — a
                 // `waiti`, a `break`, a bus yield, a fault. The interpreter's
                 // own answer, handed straight back: a translated stay does not
@@ -928,6 +1246,12 @@ impl<B: Bus> XtHart<B> {
                         if bus.take_sideband() {
                             self.resample_external(bus);
                         }
+                        if bus.code_dirty() {
+                            self.drain_code_dirty(bus);
+                            if let Some(cache) = cache.as_mut() {
+                                self.drain_block_flush(cache);
+                            }
+                        }
                         if bus.take_yield() {
                             return SliceEnd::BusYield;
                         }
@@ -940,14 +1264,191 @@ impl<B: Bus> XtHart<B> {
                     self.tick_timers();
                     progressed = true;
                 }
+                // The escape hatch runs arbitrary guest instructions, so it
+                // may also have armed an execute watchpoint or a memory-cost
+                // model — the one thing that makes decoding ahead unsafe in
+                // the middle of a slice. Checked after the outcome is applied,
+                // so the hart resumes at the pc the core reported.
+                if cache.is_some() && !bus.fetch_is_pure() {
+                    return self.finish_by_stepping(cache, bus, end, tracer);
+                }
                 if progressed {
                     continue;
                 }
             }
+
+            // The block cache. **IBREAK refuses the whole mechanism rather
+            // than being re-tested per slot** (the simpler of the two exact
+            // answers the phase allows): `step_once` tests `ibreak_hit(pc)`
+            // before its fetch, and a block has no per-slot fetch. While
+            // `IBREAKENABLE` is zero no slot in any block can raise one, and
+            // the only instructions that can make it non-zero are `wsr`/`xsr`,
+            // which are block terminators — so the test is re-made at the next
+            // block entry, which is the next instruction.
+            if let Some(cache) = cache.as_mut()
+                && self.breaks.ibreakenable == 0
+            {
+                self.apply_pending_blocks(cache, pc);
+                let block = match cache.lookup(pc) {
+                    Some(block) => Some(block),
+                    None => {
+                        let model = self.cycle_model;
+                        cache.build(pc, model, |out| block::decode_block(bus, pc, out))
+                    }
+                };
+                if let Some(block) = block {
+                    // `--strict-bus` only: these instructions are about to run
+                    // without the bus seeing a fetch for them, so the
+                    // missing-fence checker is told directly.
+                    bus.note_cached_execute(block.pc, block.bytes);
+
+                    // The budget rule (M5 MD3). `max_cycles` is what the block
+                    // can charge at most, so a block that fits leaves every
+                    // interior instruction boundary strictly below `end` and
+                    // needs no per-instruction compare; one that does not fit
+                    // runs with the compare the single-stepping loop uses.
+                    let whole = self.cycle_count.saturating_add(u64::from(block.max_cycles)) <= end;
+                    // The slot arena is borrowed for the length of the block
+                    // so the inner loop reads a slice rather than
+                    // bounds-checking per instruction; the counter the borrow
+                    // would conflict with is updated out here.
+                    let (out, ran) = {
+                        let slots = cache.slots_of(&block);
+                        self.run_block(slots, bus, block.pc, whole, end, tracer)
+                    };
+                    cache.note_slots_run(ran);
+                    if let Some(over) = out {
+                        self.drain_block_flush(cache);
+                        if let Some(core) = core.as_mut() {
+                            self.drain_core_flush(core);
+                        }
+                        return over;
+                    }
+                    // The block may have left because something inside it
+                    // published code or retired an `isync`. The request is
+                    // recorded, and `apply_pending_blocks` above applies it at
+                    // the top of the next iteration — but only if the next pc
+                    // is one the write could have reached.
+                    if let Some(core) = core.as_mut() {
+                        self.drain_core_flush(core);
+                    }
+                    if !bus.fetch_is_pure() {
+                        return self.finish_by_stepping(Some(cache), bus, end, tracer);
+                    }
+                    continue;
+                }
+            }
+
+            // Nothing cacheable starts here — a `break`, a `syscall`, an
+            // atomic, a window spill, an unmodelled family, an encoding the
+            // decoder refuses, or a fetch that faults — or there is no cache
+            // at all. Run exactly one instruction the way the single-stepping
+            // loop always has.
             if let Some(over) = self.step_once(bus, tracer) {
+                if let Some(cache) = cache.as_mut() {
+                    self.drain_block_flush(cache);
+                }
+                if let Some(core) = core.as_mut() {
+                    self.drain_core_flush(core);
+                }
                 return over;
             }
+            // That instruction may have been an `isync` or a store that
+            // published code, and the core that wanted invalidating is out
+            // here rather than in the hart. The cache's own request is
+            // recorded and applied by `apply_pending_blocks` at the next
+            // lookup it could reach.
+            if let Some(core) = core.as_mut() {
+                self.drain_core_flush(core);
+            }
+            // It may also have been the write that arms an execute watchpoint
+            // or installs a memory-cost model, which is the one thing that can
+            // make decoding ahead unsafe in the middle of a slice.
+            if cache.is_some() && !bus.fetch_is_pure() {
+                return self.finish_by_stepping(cache, bus, end, tracer);
+            }
         }
+    }
+
+    /// Decoding ahead stopped being safe in the middle of a slice (the D4
+    /// cache-off watch installs a `MemoryCost`; a guest `wsr` can arm an
+    /// execute `DBREAK`). Forget everything pre-decoded and finish the slice
+    /// one instruction at a time.
+    fn finish_by_stepping<T: Tracer + ?Sized>(
+        &mut self,
+        cache: Option<&mut BlockCache<XtSlot>>,
+        bus: &mut B,
+        end: u64,
+        tracer: &mut T,
+    ) -> SliceEnd {
+        if let Some(cache) = cache {
+            cache.invalidate_all();
+        }
+        self.run_slice_stepping(bus, end, tracer)
+    }
+
+    /// Run one block's slots.
+    ///
+    /// Every per-instruction hook [`XtHart::step_once`] runs today runs here,
+    /// at the same point and in the same order — `set_issuing`, the trace
+    /// event, [`XtHart::step`] itself, then the memory charge. The only thing
+    /// that changed is that the instruction was fetched and decoded earlier.
+    ///
+    /// It **leaves the block** the moment the retire put the `pc` somewhere
+    /// other than straight on: a taken branch, a jump, a trap, a window
+    /// exception, an interrupt delivered at polling point (b)/(c)/(e), or a
+    /// loop-back. And it leaves when something asked the cache to forget —
+    /// the store-address drain, an `isync`, a `wsr` to a loop register — so
+    /// the next `pc` is looked up against a cache that has heard about it.
+    ///
+    /// In a correct build the pc test fires exactly at a taken terminator; it
+    /// is there so a classification mistake is a slower block, never a wrong
+    /// one.
+    ///
+    /// `None` means the block ended normally and the outer loop should look up
+    /// the next one. The second element is how many slots were stepped, for
+    /// [`lp_emu_core::block::BlockStats::mean_block_len`] — a diagnostic, and
+    /// it counts a slot that trapped without retiring, exactly as the RV32
+    /// side does.
+    fn run_block<T: Tracer + ?Sized>(
+        &mut self,
+        slots: &[XtSlot],
+        bus: &mut B,
+        block_pc: u32,
+        whole: bool,
+        end: u64,
+        tracer: &mut T,
+    ) -> (Option<SliceEnd>, u32) {
+        let mut pc = block_pc;
+        let mut ran = 0u32;
+        for slot in slots {
+            if !whole && self.cycle_count >= end {
+                return (Some(SliceEnd::BudgetExhausted), ran);
+            }
+            // Per slot, not per block: a trap in the middle of a block would
+            // otherwise report the block's first `pc` to the bus's trace and
+            // to its unmapped-site dedup, which is keyed on `(pc, address)`.
+            bus.set_issuing(pc, self.cycle_count);
+            let out = self.step_decoded(bus, pc, &slot.inst, u32::from(slot.len), tracer);
+            ran += 1;
+            if let Some(over) = out {
+                return (Some(over), ran);
+            }
+            let straight_on = pc.wrapping_add(u32::from(slot.len));
+            if self.cpu.pc != straight_on {
+                return (None, ran);
+            }
+            // The store-address contract (XD3): the slot just run published
+            // code, and the cache is out of the hart, so the request is
+            // recorded rather than applied. Leave the block — a leave, not a
+            // slice end — so the next pc is looked up against a cache that has
+            // heard about it.
+            if self.block_flush_pending != PendingInvalidate::None {
+                return (None, ran);
+            }
+            pc = straight_on;
+        }
+        (None, ran)
     }
 
     /// Run **exactly one** guest instruction at [`pc`](Self::pc), the way the
@@ -1046,13 +1547,33 @@ impl<B: Bus> XtHart<B> {
                 );
             }
         };
+        self.step_decoded(bus, pc, &inst, len as u32, tracer)
+    }
+
+    /// One **already-decoded** instruction: trace it, run it, charge what the
+    /// bus billed.
+    ///
+    /// [`step_once`](Self::step_once) is this with a fetch and a decode in
+    /// front of it, and the block executor is this with the fetch and the
+    /// decode elided -- one copy of the per-instruction path rather than two
+    /// that can drift. The caller names the instruction to the bus
+    /// (`set_issuing`) before calling, because `step_once` has to do that
+    /// before its fetch and a cached slot has no fetch.
+    #[inline(always)]
+    fn step_decoded<T: Tracer + ?Sized>(
+        &mut self,
+        bus: &mut B,
+        pc: u32,
+        inst: &Inst,
+        len: u32,
+        tracer: &mut T,
+    ) -> Option<SliceEnd> {
         tracer.event(TraceEvent::Inst {
             pc,
-            len,
-            inst: &inst,
+            len: len as usize,
+            inst,
         });
-
-        let outcome = self.step(bus, pc, &inst, len as u32, tracer);
+        let outcome = self.step(bus, pc, inst, len, tracer);
         // Drained after the instruction, so the fetch and any load or store
         // it made are charged together, once.
         self.charge_memory(bus);
@@ -1192,6 +1713,18 @@ impl<B: Bus> XtHart<B> {
         ) {
             if bus.take_sideband() {
                 self.resample_external(bus);
+            }
+            // (c) **the store-address invalidation contract** (M7 XD3). The
+            // guest may have stored into executable memory, and on this chip
+            // that store is the publish: the classic's firmware deliberately
+            // emits no barrier after writing JIT'd code into SRAM0, so there
+            // is no `isync` to hang invalidation on and the store itself is
+            // the event. Drained here -- after the instruction that made it
+            // and before the next fetch -- so a pre-decoded block is never run
+            // from bytes the guest has already replaced, and the block
+            // executor leaves the block it is in.
+            if bus.code_dirty() {
+                self.drain_code_dirty(bus);
             }
             if bus.take_yield() {
                 return StepOutcome::End(SliceEnd::BusYield);

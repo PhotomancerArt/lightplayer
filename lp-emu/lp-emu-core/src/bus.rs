@@ -9,6 +9,10 @@
 //! the privileged hart) attaches it at its error boundary, same as
 //! [`crate::MemoryError`] does today.
 
+extern crate alloc;
+
+use alloc::vec::Vec;
+
 use crate::memory::MemoryError;
 
 /// What an instruction stream reads and writes.
@@ -237,6 +241,58 @@ pub trait Bus {
     /// publish. The default is empty.
     #[inline(always)]
     fn note_fence_i(&mut self) {}
+
+    // ---- the store-address invalidation contract (Xtensa, XD3) -----------
+    //
+    // RV32's contract is the guest's `fence.i`. The classic ESP32's firmware
+    // deliberately emits **no** barrier after publishing JIT'd code into
+    // SRAM0 (`lp-shader/lpvm-native/src/codemem_esp32.rs:545` — "internal
+    // SRAM is uncached on this chip and silicon says freshly written code
+    // executes with no barriers at all"), so on that chip there is no fence
+    // to hang invalidation on and the *store itself* has to be the event.
+    // These two methods are how a bus says so.
+
+    /// A hart that pre-decodes or translates ahead of the guest is running on
+    /// this bus, so guest stores into executable memory have to be recorded.
+    ///
+    /// Called once per slice by every hart whose block cache or translated
+    /// core is on — never by a hart that interprets every instruction from a
+    /// fresh fetch, which is what keeps `--no-block-cache` free of it. A bus
+    /// that implements it should treat the request as **sticky**: two harts
+    /// share one bus, and one of them saying "I do not need this" must not
+    /// stop recording for the other.
+    ///
+    /// The default is empty and inlines away.
+    #[inline(always)]
+    fn watch_code_stores(&mut self, _on: bool) {}
+
+    /// Has the **guest** stored into executable memory since the hart last
+    /// asked?
+    ///
+    /// A peek: nothing is consumed. Read at polling point (c) — the point the
+    /// hart already visits after every Store-, Atomic- or System-class
+    /// instruction — so the answer is known *before the next fetch* and a
+    /// pre-decoded block that has just been rewritten is never run from its
+    /// old bytes.
+    ///
+    /// The default is `false`: a bus opts in. Getting this wrong would run
+    /// stale code, so the fail-safe direction is "nothing to invalidate,
+    /// because this bus never says there is".
+    #[inline(always)]
+    fn code_dirty(&self) -> bool {
+        false
+    }
+
+    /// The spans of executable guest memory the guest has stored into since
+    /// the last call, and start recording again from empty.
+    ///
+    /// Only ever called when [`Bus::code_dirty`] said `true`, so the default
+    /// — an empty `Vec`, which allocates nothing — is never reached on a bus
+    /// that does not implement the pair.
+    #[inline(always)]
+    fn take_code_dirty(&mut self) -> Vec<(u32, u32)> {
+        Vec::new()
+    }
 
     // ---- what a translated core needs to peek at before it runs ----------
     //

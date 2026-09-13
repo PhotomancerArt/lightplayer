@@ -44,7 +44,7 @@
 //! is the entry.
 
 use lp_emu_core::Bus;
-use lp_emu_esp32v3::cache::MmuDivergencePolicy;
+use lp_emu_esp32v3::cache::{CacheOffPolicy as MmuOrCachePolicy, MmuDivergencePolicy};
 use lp_emu_esp32v3::flash::FlashBacking;
 use lp_emu_esp32v3::machine::{
     AppSource, BootFrame, BootMode, Esp32V3Builder, Machine, Outcome, StopCondition,
@@ -989,4 +989,186 @@ fn the_pusher_parks_in_waiti_on_core_one() {
         sym.contains("idle_once"),
         "the park is the pusher's idle: pc={pc:#010x} ({sym})"
     );
+}
+
+// ---------------------------------------------------------------------------
+// Two harts, one bus: the store-address invalidation contract (M7 P01, XD3)
+// ---------------------------------------------------------------------------
+//
+// The classic's harts share one `SocBus`, so a store by core 0 into code core
+// 1 has cached has to reach core 1's block cache as well as core 0's. Core 0
+// drains at its own polling point (c), inside its own slice; core 1 drains on
+// entry to its next slice, which is the first moment it could execute
+// anything. This fixture is that sentence as a program.
+
+/// The second fixture's literals: `&DPORT`, core 1's entry, the delay count,
+/// the address core 0 republishes and the word it writes there.
+const PUB_LIT: u32 = 0x4008_9200;
+/// Core 0's program for the publish fixture.
+const PUB_CODE0: u32 = 0x4008_9240;
+/// Core 1's entry **and** the two-instruction stub core 0 rewrites under it.
+const PUB_STUB: u32 = 0x4008_9300;
+/// Turns of core 0's delay loop before it publishes. Long enough that core 1
+/// has spun through the stub thousands of times and cached it.
+const PUB_DELAY: u32 = 20_000;
+
+/// Core 1's whole program: a stub that loads a marker and jumps back to
+/// itself. Two instructions, six bytes, one aligned word plus one — which is
+/// why the publish below has to carry the `j`'s first byte with it.
+fn pub_stub(marker: i32) -> Vec<Inst> {
+    vec![
+        Inst::Movi(reg(4), marker),
+        // target = pc + 4 + offset, and the `j` sits three bytes in.
+        Inst::J(-7),
+    ]
+}
+
+/// The one aligned word that turns `movi a4, 111` into `movi a4, 222` and
+/// leaves the `j` behind it intact. SRAM0 takes word stores only from the
+/// guest (`memmap::SRAM0_WORD_ONLY`), so this is the shape a publish has.
+fn pub_word() -> u32 {
+    let new = lp_xt_inst::encode(&Inst::Movi(reg(4), 222));
+    let j = lp_xt_inst::encode(&Inst::J(-7));
+    assert_eq!(new.len(), 3);
+    u32::from_le_bytes([new[0], new[1], new[2], j[0]])
+}
+
+/// Core 0: esp-hal's `start_core1` on DPORT, a delay long enough for core 1 to
+/// have cached the stub, then **one word store** into core 1's code and a
+/// `memw`. No barrier of any kind, because the classic's firmware emits none.
+fn pub_program0() -> Vec<(u32, Inst)> {
+    let (a2, a3, a4, a5, a6) = (reg(2), reg(3), reg(4), reg(5), reg(6));
+    let store = |rt: Reg, rs: Reg, off: u32| Inst::Store(StoreOp::S32i, rt, rs, off);
+    let mut insts: Vec<Inst> = Vec::new();
+    let at = |insts: &Vec<Inst>| {
+        PUB_CODE0
+            + insts
+                .iter()
+                .map(|i| lp_xt_inst::encode(i).len() as u32)
+                .sum::<u32>()
+    };
+
+    insts.push(Inst::L32r(a2, l32r_field(at(&insts), PUB_LIT)));
+    insts.push(Inst::L32r(a3, l32r_field(at(&insts), PUB_LIT + 4)));
+    insts.push(store(a3, a2, APPCPU_CTRL_D));
+    insts.push(Inst::MoviN(a3, 1));
+    insts.push(store(a3, a2, APPCPU_CTRL_B));
+    insts.push(Inst::MoviN(a3, 0));
+    insts.push(store(a3, a2, APPCPU_CTRL_C));
+    insts.push(Inst::MoviN(a3, 1));
+    insts.push(store(a3, a2, APPCPU_CTRL_A));
+    insts.push(Inst::MoviN(a3, 0));
+    insts.push(store(a3, a2, APPCPU_CTRL_A));
+
+    insts.push(Inst::L32r(a4, l32r_field(at(&insts), PUB_LIT + 8)));
+    let delay_pc = at(&insts);
+    insts.push(Inst::Addi(a4, a4, -1));
+    let bnez_pc = at(&insts);
+    insts.push(Inst::BranchZ(
+        BrZ::Bnez,
+        a4,
+        delay_pc as i32 - (bnez_pc as i32 + 4),
+    ));
+
+    insts.push(Inst::L32r(a5, l32r_field(at(&insts), PUB_LIT + 12)));
+    insts.push(Inst::L32r(a6, l32r_field(at(&insts), PUB_LIT + 16)));
+    insts.push(store(a6, a5, 0));
+    insts.push(Inst::Nullary(NullaryOp::Memw));
+    insts.push(Inst::J(-4));
+    assemble(PUB_CODE0, &insts)
+}
+
+/// The publish fixture, with the block cache on or off.
+fn pub_fixture(block_cache: bool) -> Machine {
+    let mut machine = Esp32V3Builder::new()
+        .boot_mode(BootMode::RomUp)
+        .block_cache(block_cache)
+        // The flash caches are off in this fixture — nothing enables them —
+        // and the D4 cache-off watch installs a `MemoryCost`, which makes
+        // `Bus::fetch_is_pure` false and bypasses the block cache entirely.
+        // `Permit` is what puts the thing under test back in the run.
+        .cache_off_fetch(MmuOrCachePolicy::Permit)
+        .build()
+        .expect("a machine with no app still has a bus and a ROM");
+
+    let bus = machine.bus_mut();
+    let word = |bus: &mut lp_emu_esp_common::SocBus, at: u32, v: u32| {
+        bus.load_image(at, &v.to_le_bytes())
+            .expect("SRAM0 holds a literal");
+    };
+    word(bus, PUB_LIT, memmap::periph::DPORT);
+    word(bus, PUB_LIT + 4, PUB_STUB);
+    word(bus, PUB_LIT + 8, PUB_DELAY);
+    word(bus, PUB_LIT + 12, PUB_STUB);
+    word(bus, PUB_LIT + 16, pub_word());
+    for (at, inst) in pub_program0() {
+        bus.load_image(at, &lp_xt_inst::encode(&inst))
+            .expect("SRAM0 holds core 0's code");
+    }
+    let mut at = PUB_STUB;
+    for inst in pub_stub(111) {
+        let bytes = lp_xt_inst::encode(&inst);
+        bus.load_image(at, &bytes).expect("SRAM0 holds the stub");
+        at += bytes.len() as u32;
+    }
+    machine
+        .seed_boot_state(PUB_CODE0, BootFrame::at(memmap::ROM_PRO_STACK_TOP))
+        .expect("seeded");
+    machine
+}
+
+/// **Core 0 writes code core 1 has cached, and core 1's next window runs the
+/// new bytes** — with no `isync`, no `fence`, and nothing but the store
+/// itself (M7 XD3).
+///
+/// Core 1 spins through a two-instruction stub in SRAM0, so its block cache
+/// holds that stub thousands of times over. Core 0 then publishes one aligned
+/// word over it. If the record were per bus rather than per hart, core 0's own
+/// drain at polling point (c) would consume the span and core 1 would keep
+/// running the bytes it cached — forever, because the stub jumps to itself.
+///
+/// Run with the cache on **and** off: both legs must reach the same answer,
+/// and the off leg is what says the fixture is a real test rather than a
+/// tautology.
+#[test]
+fn core_zero_writes_code_core_one_has_cached() {
+    for block_cache in [true, false] {
+        let mut m = pub_fixture(block_cache);
+        run_until_state(&mut m, "core 1 reaches the stub", |m| {
+            m.harts[1].cpu().a(4) == 111
+        });
+        let old = lp_xt_inst::encode(&Inst::Movi(reg(4), 111));
+        let old_word =
+            u32::from_le_bytes([old[0], old[1], old[2], lp_xt_inst::encode(&Inst::J(-7))[0]]);
+        assert_eq!(
+            m.bus_mut().read_word(PUB_STUB).unwrap() as u32,
+            old_word,
+            "block_cache={block_cache}: core 0 has not published yet, so the \
+             fixture is testing what it says it is"
+        );
+
+        // ⚠️ **The guard against a vacuous test.** The D4 cache-off watch
+        // installs a `MemoryCost` while a core's flash cache is off, which
+        // makes `Bus::fetch_is_pure` false and bypasses the block cache
+        // entirely — so without `cache_off_fetch(Permit)` above this fixture
+        // proved nothing at all, and said so by passing. Core 1 must have
+        // served the stub from the cache many times over before the publish.
+        if block_cache {
+            let stats = m
+                .block_stats(1)
+                .expect("core 1 built a cache, or this test is not testing the cache");
+            assert!(
+                stats.hits > 100,
+                "core 1 must have run the stub out of the cache: {stats:?}"
+            );
+        }
+        run_until_state(&mut m, "core 1 runs the published bytes", |m| {
+            m.harts[1].cpu().a(4) == 222
+        });
+        assert_eq!(
+            m.bus_mut().read_word(PUB_STUB).unwrap() as u32,
+            pub_word(),
+            "block_cache={block_cache}: and it is the published word that did it"
+        );
+    }
 }

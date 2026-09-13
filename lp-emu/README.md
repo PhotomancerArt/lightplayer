@@ -85,10 +85,12 @@ directories are allowed to assume MMIO at all.
   window exceptions vectoring through VECBASE, interrupt level selection,
   CCOMPARE timers, DBREAK/IBREAK — the twin of `lp-riscv-emu::mach`, which a
   classic-ESP32 machine will drive. It carries the twin of that hart's
-  **translated-core seam** too (`mach::translated`) and the block cache's
-  Xtensa slot type (`block::XtSlot`); both are shape only — there is no Xtensa
-  translator and no block cache wired in, and with no core installed the hart
-  produces a byte-identical everything.
+  **translated-core seam** too (`mach::translated`) and, since M7 P01, the
+  **block cache** (`mach::block`, `block::XtSlot`): the hart pre-decodes runs
+  of up to 64 instructions and runs them without fetching again, and
+  `--no-block-cache` turns it off and must print an identical everything. The
+  translator seam is still shape only — there is no Xtensa translator — and
+  with no core installed the hart produces a byte-identical everything.
 
 - **`lp-xt-emu-guest`** — the `no_std` Xtensa guest runtime. A DEVICE-target
   crate: excluded from the host workspace and built as a member of the
@@ -513,6 +515,41 @@ a miss — that is the invariant the design hangs on — so `--no-block-cache` i
 free identity oracle and the bisection tool when a transcript moves.
 `docs/adr/2026-09-09-emulator-block-cache.md` is the argument;
 `lp-emu-core/src/block.rs`'s module docs are the mechanism.
+
+**The first rung, climbed** (M7 P01): the block cache on the Xtensa machine
+hart. `render-loop` at t1, both cores at `--core-quantum 256`, the same binary
+with the cache on against `--no-block-cache`, interleaved on this desk:
+
+| image | cache off, user s | cache on, user s | speedup | mean block (core 0) | hit rate (core 0) |
+|---|---:|---:|---:|---:|---:|
+| `render-loop` | 16.07 | 9.38 | **1.71×** | 4.26 | 99.85 % |
+| `shader-compile-stress` | 1.65 | 0.94 | **1.76×** | 3.63 | 99.90 % |
+| `boot-idle` | 0.77 | 0.43 | **1.79×** | 3.62 | 99.91 % |
+
+Best of three interleaved pairs on this desk at load 3.8–5.5; `rt(user)` on
+`render-loop` goes 0.132× → 0.229× against the 240 MHz part.
+
+Every column of `scripts/emu/v3-oracle.sh` reads `same` on all three pinned
+images, which is the claim that matters: a cache hit is not architectural
+state, and the ladder is only worth climbing while that stays true. The
+C6's ADR above is the argument this hart inherits — its follow-up *"the
+Xtensa core never joined the cache"* is what this rung closes.
+
+⚠️ **Invalidation on this chip is the store address, not a barrier** (M7 XD3).
+The C6 hangs its cache's invalidation on the guest's `fence.i`; the classic's
+firmware deliberately publishes JIT'd code into SRAM0 with *no* barrier at all
+(`lp-shader/lpvm-native/src/codemem_esp32.rs:545` — silicon says freshly
+written internal SRAM executes with no barriers, measured over 1,000
+rewrite-then-call iterations). So the bus raises a side-band on a guest store
+into an executable region and the hart drains it at polling point (c), before
+the next fetch. Two consequences: the cache stays **on** under `--boot-mode
+rom-up`, where the C6's is off (M5 MD13) — the ROM's and the bootloader's
+copies are guest stores — and the record is **per hart**, because the classic
+has two harts on one bus.
+
+The rung not yet climbed on this chip (poll-loop skip) is **out** by
+measurement rather than pending: MMIO is 1.7 % of host time here, so a perfect
+skip buys at most that.
 
 Evidence, and the rung that was measured and **rejected** (the poll-loop skip):
 the planning workspace's

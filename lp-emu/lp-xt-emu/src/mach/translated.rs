@@ -74,10 +74,11 @@
 //! same reason. It goes back on every exit path. An invalidation asked for
 //! while a core is lifted out is recorded and applied when it goes back.
 //!
-//! # The three invalidation events
+//! # The four invalidation events
 //!
 //! RV32's design is two-event translation: boot, and `fence.i`. **Xtensa needs
-//! three.**
+//! four**, and the fourth — the store path — is the one that carries the
+//! product's own workload.
 //!
 //! 1. **Boot** — nothing is translated until something translates it.
 //! 2. **`isync`**, the Xtensa analogue of `fence.i`: the guest has published
@@ -92,18 +93,27 @@
 //!    therefore invalidates on any `wsr`/`xsr` to those three registers. The
 //!    mechanism is cheap and the failure it prevents is silent.
 //!
-//! Two things are deliberately **left to whoever wires the cache**, and are
-//! named here so they are decisions rather than omissions:
+//! 4. **A guest store into executable memory** — **decided, and it is the
+//!    contract** (M7 XD3). RV32 gets its correctness from the guest's own
+//!    fence; the classic's firmware deliberately emits none, because silicon
+//!    says freshly written SRAM0 code executes with no barrier
+//!    (`lp-shader/lpvm-native/src/codemem_esp32.rs:545`, 1,000
+//!    rewrite-then-call iterations with 0 stale). So the **store is the
+//!    event**: the bus raises [`Bus::code_dirty`] on a guest store into an
+//!    executable region and the hart drains it at polling point (c), into
+//!    [`XtHart::invalidate_block_range`](super::XtHart::invalidate_block_range),
+//!    before the next fetch. On the render loop 11.86 % of retired
+//!    instructions are code the guest wrote itself, in 5 KiB of SRAM0 with no
+//!    symbols, and nothing else would have found it.
 //!
-//! - **The `LOOP` instruction** also writes all three registers, and it is
-//!   hot. Invalidating on every `loop` would be correct and slow. A translator
-//!   that inlines a loop-back sees the `loop` in its own block and can account
-//!   for it; the `wsr` case is the one it cannot see.
-//! - **The store path.** RV32 gets its correctness from the guest's own fence;
-//!   the classic's JIT writes code into a fixed SRAM0 region and was measured
-//!   on silicon to need no barrier at all. Whether Xtensa also needs
-//!   store-address invalidation is the speed ladder's question, not this
-//!   phase's.
+//! One thing is deliberately **not** an event, and it is a decision rather
+//! than an omission:
+//!
+//! - **The `LOOP` instruction** also writes all three loop registers, and it
+//!   is hot. Invalidating on every `loop` would be correct and slow. A
+//!   translator that inlines a loop-back sees the `loop` in its own block and
+//!   can account for it; the `wsr` case is the one it cannot see. (`memw` is
+//!   never an event for the same reason: the idle loop is `memw; l32i; beqz`.)
 //!
 //! # Timers, and the one Xtensa polling point a core cannot take
 //!

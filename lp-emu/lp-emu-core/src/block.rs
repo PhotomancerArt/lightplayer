@@ -234,6 +234,12 @@ pub struct BlockCache<S: Slot> {
     /// `32 - table_bits`: the shift that turns [`BlockCache::index_of`]'s
     /// multiply into a table index.
     index_shift: u32,
+    /// How many low `pc` bits carry no information on this architecture, and
+    /// are therefore shifted out before the multiply — see
+    /// [`BlockCache::index_of`]. 1 on RISC-V (RVC makes every `pc` 2-aligned);
+    /// 0 on Xtensa, whose 2- and 3-byte instructions put block starts at every
+    /// residue.
+    pc_shift: u32,
     blocks: Vec<Block>,
     block_cap: usize,
     arena: Vec<S>,
@@ -253,14 +259,37 @@ impl<S: Slot> BlockCache<S> {
     /// configuration mistake rather than a tuning choice.
     #[must_use]
     pub fn new(table_bits: u32, arena_cap: usize, block_cap: usize) -> Self {
+        Self::with_pc_shift(table_bits, arena_cap, block_cap, 1)
+    }
+
+    /// As [`BlockCache::new`], choosing how many low `pc` bits to discard
+    /// before the index mix.
+    ///
+    /// `pc_shift = 1` is the RISC-V answer and the default: RVC makes every
+    /// `pc` 2-aligned, so bit 0 carries no information. `pc_shift = 0` is the
+    /// Xtensa answer: its instructions are 2 or 3 bytes, so block starts land
+    /// on every residue and bit 0 is real.
+    ///
+    /// # Panics
+    /// If `table_bits` is 0 or above 24 — a table outside that range is a
+    /// configuration mistake rather than a tuning choice.
+    #[must_use]
+    pub fn with_pc_shift(
+        table_bits: u32,
+        arena_cap: usize,
+        block_cap: usize,
+        pc_shift: u32,
+    ) -> Self {
         assert!(
             (1..=24).contains(&table_bits),
             "BlockCache: table_bits {table_bits} is outside 1..=24"
         );
+        assert!(pc_shift <= 2, "BlockCache: pc_shift {pc_shift} is above 2");
         let entries = 1usize << table_bits;
         Self {
             table: vec![EMPTY_ENTRY; entries].into_boxed_slice(),
             index_shift: 32 - table_bits,
+            pc_shift,
             blocks: Vec::new(),
             block_cap,
             arena: Vec::new(),
@@ -274,6 +303,19 @@ impl<S: Slot> BlockCache<S> {
     #[must_use]
     pub fn with_defaults() -> Self {
         Self::new(DEFAULT_TABLE_BITS, DEFAULT_ARENA_SLOTS, DEFAULT_BLOCK_CAP)
+    }
+
+    /// The same sizes, indexed by the **whole** `pc` — the answer for an
+    /// architecture whose block starts are not 2-aligned. See
+    /// [`BlockCache::with_pc_shift`].
+    #[must_use]
+    pub fn with_defaults_byte_indexed() -> Self {
+        Self::with_pc_shift(
+            DEFAULT_TABLE_BITS,
+            DEFAULT_ARENA_SLOTS,
+            DEFAULT_BLOCK_CAP,
+            0,
+        )
     }
 
     #[inline]
@@ -302,7 +344,7 @@ impl<S: Slot> BlockCache<S> {
     /// spread the whole address, and the tag still decides.
     #[inline]
     fn index_of(&self, pc: u32) -> usize {
-        ((pc >> 1).wrapping_mul(0x9E37_79B1) >> self.index_shift) as usize
+        ((pc >> self.pc_shift).wrapping_mul(0x9E37_79B1) >> self.index_shift) as usize
     }
 
     /// The block starting at `pc`, if one is cached.

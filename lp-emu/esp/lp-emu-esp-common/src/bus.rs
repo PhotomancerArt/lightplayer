@@ -319,6 +319,23 @@ const CODE_PAGE_LEN: u32 = 4096;
 /// publishes one JIT buffer, so this is slack rather than a budget.
 const MAX_GUEST_CODE_SPANS: usize = 256;
 
+/// How many harts the store-address dirty record keeps separate spans for
+/// ([`SocBus::code_dirty`]). Every chip in this repository has one or two;
+/// four is slack. A hart index past the end shares the last slot, which is
+/// why [`SocBus::code_dirty_slot`] debug-asserts rather than silently
+/// clamping in a test build.
+const MAX_CODE_DIRTY_HARTS: usize = 4;
+
+/// How many spans one hart's dirty record holds before the whole list is
+/// collapsed into the one span that covers them all.
+///
+/// Collapsing is conservative in the safe direction — a wider span
+/// invalidates more blocks, never fewer — and it bounds the record for a hart
+/// that is held in reset while the other one publishes code, which is exactly
+/// what a `rom-up` boot does: the second-stage bootloader copies the
+/// application's IRAM segment while the APP core is still stalled.
+const MAX_CODE_DIRTY_SPANS: usize = 64;
+
 /// The page granularity of [`SocBus::permission_table`]. 16 KiB is the
 /// spike's, and the size the 0.849 ns/instruction phone reading was taken
 /// with: small enough that a region boundary costs at most one page, large
@@ -489,6 +506,54 @@ pub struct SocBus {
     /// installed, so an interpreted run pays one `bool` test per guest store.
     watch_guest_code: bool,
 
+    /// Spans of **executable** guest memory the guest has stored into since
+    /// the hart last drained them ([`SocBus::take_code_dirty`]).
+    ///
+    /// The Xtensa machines' invalidation contract (M7 XD3). Where the C6
+    /// hangs block-cache invalidation on the guest's `fence.i`, the classic's
+    /// firmware deliberately publishes JIT'd code into SRAM0 with **no**
+    /// barrier at all (`lp-shader/lpvm-native/src/codemem_esp32.rs:545`), so
+    /// there is no fence to hang it on and the store itself is the event.
+    /// The hart reads [`SocBus::code_dirty`] at polling point (c) — the point
+    /// it already visits after every Store-, Atomic- or System-class
+    /// instruction — and drains this before its next fetch.
+    ///
+    /// Distinct from [`guest_code_writes`](Self::guest_code_writes) above,
+    /// which is the *translator's* seed recorder: that one is a ring of the
+    /// eight most recent spans and deliberately forgets, because a seed list
+    /// wants the newest publish; this one must never forget a span before the
+    /// hart has invalidated it.
+    /// **Per hart**, because a store by core 0 into code core 1 has cached
+    /// has to reach core 1's cache as well as core 0's, and the first drain
+    /// must not hide the write from the second hart. Indexed by
+    /// [`code_dirty_slot`](Self::code_dirty_slot).
+    ///
+    /// **Behind a `Box`, and allocated only when a hart arms the record**, so
+    /// a bus that never wants it — every C6 run — carries one pointer rather
+    /// than four `Vec` headers. That is not tidiness: `SocBus` is the hot
+    /// struct on every chip, and 96 bytes of unused fields inside it read as
+    /// **+1.2 % on the C6's `render-basic`** (measured, tight interleave,
+    /// five pairs), which is a tenth of what that chip's own block cache
+    /// bought.
+    code_dirty: Option<Box<[Vec<(u32, u32)>; MAX_CODE_DIRTY_HARTS]>>,
+    /// Whether to record the above at all. Off until a hart whose block cache
+    /// or translated core is on asks for it ([`Bus::watch_code_stores`]), and
+    /// **sticky** thereafter: two harts share one bus, so one of them saying
+    /// "I do not need this" must never stop recording for the other. A
+    /// `--no-block-cache` run with no core never arms it and pays nothing at
+    /// all, because it is not the flag the store path tests — see
+    /// [`watch_code_any`](Self::watch_code_any).
+    watch_code_stores: bool,
+    /// `watch_guest_code || watch_code_stores`, maintained by both setters.
+    ///
+    /// The **one** flag the guest store path reads. Testing the two
+    /// separately there costs a second load on every guest store, which is
+    /// the hottest branch in the bus; this keeps that path exactly the one
+    /// `bool` test it was before the store-address contract existed, and the
+    /// two-way split happens inside the cold arm that has already decided the
+    /// store landed in executable memory and changed it.
+    watch_code_any: bool,
+
     /// `--strict-bus` only: the 4 KiB pages the guest has fetched
     /// instructions from.
     ///
@@ -619,6 +684,9 @@ impl SocBus {
             guest_code_head: 0,
             guest_code_len: 0,
             watch_guest_code: false,
+            code_dirty: None,
+            watch_code_stores: false,
+            watch_code_any: false,
             matrix: Box::new(NoCpuInterrupts),
             request: None,
             memory_cost: None,
@@ -1603,6 +1671,19 @@ impl SocBus {
             // drains this at the slice boundary and invalidates.
             self.code_writes
                 .push((address, address + bytes.len() as u32));
+            // …and the **store-address record** as well, for a hart that
+            // pre-decodes (M7 XD3). The two are not redundant: `code_writes`
+            // needs a machine to drain it into the harts, and a hart is
+            // perfectly capable of running with no machine around it — a
+            // fixture that places a program, runs a slice, places a second
+            // program over it and runs another one would otherwise execute
+            // the first program's cached blocks. `lp-emu-esp32s3`'s
+            // `tests/isa_gaps.rs` is exactly that shape, and it is what found
+            // this. Recorded per hart, drained by each hart on entry to its
+            // next slice, and off entirely until a hart asks.
+            if self.watch_code_stores {
+                self.note_code_dirty(address, bytes.len() as u32);
+            }
         }
         Ok(())
     }
@@ -1687,12 +1768,82 @@ impl SocBus {
         out
     }
 
+    /// Which hart's dirty record [`SocBus::code_dirty`] and
+    /// [`SocBus::take_code_dirty`] speak for: the hart the machine last named
+    /// with [`SocBus::set_hart`], which is the hart that is executing.
+    #[inline]
+    fn code_dirty_slot(&self) -> usize {
+        debug_assert!(
+            self.hart < MAX_CODE_DIRTY_HARTS,
+            "SocBus: hart {} is past the store-address dirty record's {MAX_CODE_DIRTY_HARTS} \
+             slots; two harts would share one and the second would never hear about the first's \
+             code writes",
+            self.hart
+        );
+        self.hart.min(MAX_CODE_DIRTY_HARTS - 1)
+    }
+
+    /// Record a guest store into an executable region for **every** hart.
+    ///
+    /// The Xtensa machines' invalidation contract (M7 XD3). Off the fast
+    /// path: the caller's two `bool` tests and the region's `exec` flag are
+    /// what an interpreted run pays.
+    ///
+    /// Contiguous stores extend the newest span — a code copy is contiguous,
+    /// so one `memcpy` of a JIT buffer is one span rather than a thousand —
+    /// and a list that grows past [`MAX_CODE_DIRTY_SPANS`] collapses to the
+    /// one span covering all of them, which invalidates a superset and is
+    /// therefore always correct.
+    #[inline(never)]
+    fn note_code_dirty(&mut self, address: u32, len: u32) {
+        let end = address.saturating_add(len);
+        let lists = self
+            .code_dirty
+            .get_or_insert_with(|| Box::new([const { Vec::new() }; MAX_CODE_DIRTY_HARTS]));
+        for list in lists.iter_mut() {
+            match list.last_mut() {
+                Some(span) if address <= span.1 && end >= span.0 => {
+                    span.0 = span.0.min(address);
+                    span.1 = span.1.max(end);
+                }
+                _ => {
+                    list.push((address, end));
+                    if list.len() > MAX_CODE_DIRTY_SPANS {
+                        let lo = list.iter().map(|s| s.0).min().unwrap_or(address);
+                        let hi = list.iter().map(|s| s.1).max().unwrap_or(end);
+                        list.clear();
+                        list.push((lo, hi));
+                    }
+                }
+            }
+        }
+    }
+
+    /// Has the guest stored into executable memory since the executing hart
+    /// last drained? See [`Bus::code_dirty`].
+    #[inline]
+    pub fn code_dirty_pending(&self) -> bool {
+        let slot = self.code_dirty_slot();
+        self.code_dirty
+            .as_ref()
+            .is_some_and(|lists| !lists[slot].is_empty())
+    }
+
+    /// Whether the store-address record is armed — what a run report and a
+    /// test read to say the contract is live. See [`Bus::watch_code_stores`].
+    #[inline]
+    #[must_use]
+    pub fn code_stores_watched(&self) -> bool {
+        self.watch_code_stores
+    }
+
     /// Record guest writes to executable regions, or stop.
     ///
     /// The machine turns this on when it installs a translated core and
     /// leaves it off otherwise, so nothing but a `--jit` run pays for it.
     pub fn watch_guest_code(&mut self, on: bool) {
         self.watch_guest_code = on;
+        self.watch_code_any = self.watch_guest_code || self.watch_code_stores;
         if !on {
             self.guest_code_head = 0;
             self.guest_code_len = 0;
@@ -2421,11 +2572,24 @@ impl SocBus {
             if self.strict {
                 self.note_guest_code_write(off, address, len, value);
             }
-            if self.watch_guest_code
+            // **One** test against a `bool` the branch predictor owns — not
+            // two, which is why `watch_code_any` exists — then the region's
+            // own `exec` flag, then, only for a store that lands in
+            // executable memory, the four-byte compare that tells "the guest
+            // published something here" from "the guest wrote what was
+            // already here". On the classic the only writable executable
+            // region is SRAM0, so the second test is false for every stack
+            // push and every `.bss` word.
+            if self.watch_code_any
                 && self.regions[i].exec
                 && self.arena[off..off + len as usize] != value.to_le_bytes()[..len as usize]
             {
-                self.note_guest_code_span(address, len);
+                if self.watch_guest_code {
+                    self.note_guest_code_span(address, len);
+                }
+                if self.watch_code_stores {
+                    self.note_code_dirty(address, len);
+                }
             }
             let data = &mut self.arena;
             let stored = match width {
@@ -2974,6 +3138,29 @@ impl Bus for SocBus {
     /// The guest retired a `fence.i`: everything it has written is published.
     fn note_fence_i(&mut self) {
         self.unpublished_code_words.clear();
+    }
+
+    /// An Xtensa hart with a block cache or a translated core is running on
+    /// this bus, so guest stores into executable memory have to be recorded
+    /// (M7 XD3). **Sticky**: the classic has two harts on one bus and one of
+    /// them saying "off" must not stop recording for the other.
+    #[inline]
+    fn watch_code_stores(&mut self, on: bool) {
+        self.watch_code_stores |= on;
+        self.watch_code_any = self.watch_guest_code || self.watch_code_stores;
+    }
+
+    #[inline]
+    fn code_dirty(&self) -> bool {
+        SocBus::code_dirty_pending(self)
+    }
+
+    fn take_code_dirty(&mut self) -> Vec<(u32, u32)> {
+        let slot = self.code_dirty_slot();
+        match self.code_dirty.as_mut() {
+            Some(lists) => core::mem::take(&mut lists[slot]),
+            None => Vec::new(),
+        }
     }
 
     fn sideband_or_yield_pending(&self) -> bool {
@@ -4673,5 +4860,182 @@ mod tests {
             bus.load_watchpoints_armed(),
             "translated code does loads the bus never sees, so it refuses"
         );
+    }
+    // --- the store-address invalidation contract (M7 XD3) -------------------
+
+    /// Nothing is recorded until a hart asks. An interpreted run with no block
+    /// cache and no translated core — the identity leg — pays one `bool` test
+    /// per guest store and nothing else, and this is what says so.
+    #[test]
+    fn nothing_is_recorded_until_a_hart_asks() {
+        let mut bus = bus_with_ram();
+        assert!(!bus.code_stores_watched());
+        bus.write_word(0x4080_0010, 0x1234_5678).unwrap();
+        assert!(!bus.code_dirty(), "the recorder is off");
+        assert!(bus.take_code_dirty().is_empty());
+    }
+
+    /// A guest store into an **executable** region is a publish; a store into
+    /// a data region is not.
+    #[test]
+    fn only_a_store_into_executable_memory_is_a_publish() {
+        let mut bus = bus_with_ram();
+        bus.watch_code_stores(true);
+
+        bus.write_word(0x5000_0010, 0x0bad_c0de).unwrap();
+        assert!(
+            !bus.code_dirty(),
+            "`lp-ram` is not executable, so a store into it publishes nothing"
+        );
+
+        bus.write_word(0x4080_0010, 0x1234_5678).unwrap();
+        assert!(bus.code_dirty());
+        assert_eq!(
+            bus.take_code_dirty(),
+            alloc::vec![(0x4080_0010, 0x4080_0014)]
+        );
+        assert!(!bus.code_dirty(), "and the drain empties it");
+    }
+
+    /// A store that writes back the bytes that were already there publishes
+    /// nothing. The classic's `.bss` zeroing marches over SRAM0 writing zeros
+    /// onto zeros, and every one of those would otherwise be an invalidation.
+    #[test]
+    fn a_store_that_changes_nothing_is_not_a_publish() {
+        let mut bus = bus_with_ram();
+        bus.watch_code_stores(true);
+        bus.write_word(0x4080_0010, 0x1234_5678).unwrap();
+        assert_eq!(bus.take_code_dirty().len(), 1);
+        bus.write_word(0x4080_0010, 0x1234_5678).unwrap();
+        assert!(
+            !bus.code_dirty(),
+            "the same bytes again publish nothing new"
+        );
+    }
+
+    /// Contiguous stores coalesce into one span. A code copy is contiguous, so
+    /// a 6 KiB publish is one span the hart invalidates once rather than
+    /// 1,606 the hart invalidates 1,606 times.
+    #[test]
+    fn contiguous_stores_coalesce_into_one_span() {
+        let mut bus = bus_with_ram();
+        bus.watch_code_stores(true);
+        for i in 0..16u32 {
+            bus.write_word(0x4080_0100 + 4 * i, 0x1000 + i as i32)
+                .unwrap();
+        }
+        assert_eq!(
+            bus.take_code_dirty(),
+            alloc::vec![(0x4080_0100, 0x4080_0140)]
+        );
+    }
+
+    /// A store far from the last one starts a new span rather than widening
+    /// the old one into a range that is mostly untouched.
+    #[test]
+    fn a_distant_store_starts_a_new_span() {
+        let mut bus = bus_with_ram();
+        bus.watch_code_stores(true);
+        bus.write_word(0x4080_0100, 1).unwrap();
+        bus.write_word(0x4080_0800, 2).unwrap();
+        assert_eq!(
+            bus.take_code_dirty(),
+            alloc::vec![(0x4080_0100, 0x4080_0104), (0x4080_0800, 0x4080_0804)]
+        );
+    }
+
+    /// A **host-side** write of guest code — an image load, a flash-cache
+    /// refill, a ROM-hook patch — raises the record too.
+    ///
+    /// `take_code_writes` is the funnel a *machine* drains into its harts, and
+    /// a hart does not need a machine to be correct: a fixture that places a
+    /// program, runs a slice, places a second one over it and runs again would
+    /// otherwise run the first program out of the cache.
+    #[test]
+    fn a_host_side_code_write_raises_the_record_too() {
+        let mut bus = bus_with_ram();
+        bus.watch_code_stores(true);
+        bus.load_image(0x4080_0040, &[0u8; 8]).expect("placed");
+        assert!(bus.code_dirty());
+        assert_eq!(
+            bus.take_code_dirty(),
+            alloc::vec![(0x4080_0040, 0x4080_0048)]
+        );
+
+        bus.load_image(0x5000_0040, &[0u8; 8]).expect("placed");
+        assert!(
+            !bus.code_dirty(),
+            "`lp-ram` is not executable, so placing bytes in it publishes nothing"
+        );
+    }
+
+    /// **Two harts, one bus.** A store by core 0 into code core 1 has cached
+    /// has to reach core 1's cache as well as core 0's, so the record is per
+    /// hart and the first drain must not hide the write from the second.
+    ///
+    /// Core 0 drains at its own polling point (c), inside its own slice; core
+    /// 1 drains on entry to its next slice, which is the first moment it could
+    /// execute anything.
+    #[test]
+    fn each_hart_hears_about_the_other_harts_code_write() {
+        let mut bus = bus_with_ram();
+        bus.watch_code_stores(true);
+
+        bus.set_hart(0);
+        bus.write_word(0x4080_0010, 0x1234_5678).unwrap();
+        assert!(bus.code_dirty(), "core 0 sees its own publish");
+        assert_eq!(
+            bus.take_code_dirty(),
+            alloc::vec![(0x4080_0010, 0x4080_0014)]
+        );
+        assert!(!bus.code_dirty());
+
+        bus.set_hart(1);
+        assert!(
+            bus.code_dirty(),
+            "core 1 must still hear about it — core 0's drain is not core 1's"
+        );
+        assert_eq!(
+            bus.take_code_dirty(),
+            alloc::vec![(0x4080_0010, 0x4080_0014)]
+        );
+        assert!(!bus.code_dirty());
+    }
+
+    /// The arming request is **sticky**: one hart saying "I do not need this"
+    /// must not stop recording for the other hart on the same bus.
+    #[test]
+    fn arming_the_recorder_is_sticky() {
+        let mut bus = bus_with_ram();
+        bus.watch_code_stores(true);
+        bus.watch_code_stores(false);
+        assert!(bus.code_stores_watched());
+        bus.write_word(0x4080_0010, 0x1234_5678).unwrap();
+        assert!(bus.code_dirty());
+    }
+
+    /// A hart that is held in reset while the other publishes cannot drain, so
+    /// its record is bounded: past the cap the whole list collapses into the
+    /// one span that covers it, which invalidates a superset and is therefore
+    /// always correct.
+    #[test]
+    fn an_undrained_record_collapses_rather_than_growing_without_bound() {
+        let mut bus = bus_with_ram();
+        bus.watch_code_stores(true);
+        // Stores 16 bytes apart never coalesce, so each one is its own span.
+        for i in 0..(MAX_CODE_DIRTY_SPANS as u32 + 8) {
+            bus.write_word(0x4080_0000 + 16 * i, 0x1000 + i as i32)
+                .unwrap();
+        }
+        let spans = bus.take_code_dirty();
+        assert!(
+            spans.len() <= MAX_CODE_DIRTY_SPANS,
+            "the record is bounded, got {} spans",
+            spans.len()
+        );
+        let lo = spans.iter().map(|s| s.0).min().unwrap();
+        let hi = spans.iter().map(|s| s.1).max().unwrap();
+        assert_eq!(lo, 0x4080_0000, "and it still covers everything written");
+        assert_eq!(hi, 0x4080_0000 + 16 * (MAX_CODE_DIRTY_SPANS as u32 + 7) + 4);
     }
 }

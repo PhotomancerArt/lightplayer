@@ -514,6 +514,50 @@ raise it well above the fuel tank so fuel traps fire first and the budget stays
 a backstop for fuel-off compiles; `DEFAULT_STEP_BUDGET` is sized for the fixture
 corpus, not for real shaders.
 
+## Machine mode: the block cache
+
+`XtHart` — the privileged hart the classic ESP32 and ESP32-S3 machines drive —
+runs out of a **pre-decoded block cache** by default (M7 P01). A block is a run
+of at most 64 instructions ending at a control transfer or at anything that
+changes what the next instruction means; the slot (`block::XtSlot`) caches the
+decoded `Inst` and its width, so a hit skips `lp_xt_inst::decode` outright. On
+the classic's render loop that is worth **1.71×** (`render-loop` at t1, both
+cores, 16.07 → 9.38 user seconds, best of three interleaved pairs of one
+binary), because fetch and decode were 34.6 % of host time and nothing cached
+either.
+
+Three things to know about it:
+
+- **It is not architectural state.** A hit and a miss produce the same cycle
+  count, the same instruction count, the same transcript and the same waveform.
+  `set_block_cache(false)` — the machines' `--no-block-cache` — must print an
+  identical everything, and `scripts/emu/v3-oracle.sh` is what says so.
+- **Invalidation is the store address, not a barrier** (M7 XD3). RV32's
+  contract is the guest's `fence.i`; the classic's firmware deliberately
+  publishes JIT'd code into SRAM0 with none, because silicon says freshly
+  written internal SRAM executes with no barriers at all. So `Bus::code_dirty`
+  is raised by a guest store into an executable region and the hart drains it
+  at **polling point (c)** — after the instruction that made it, before the
+  next fetch — into `invalidate_block_range`, and the block executor leaves the
+  block. `isync` stays a whole-image flush. A `wsr`/`xsr` to `LBEG`/`LEND`/
+  `LCOUNT` reaches the **translated core only** (`invalidate_translated`): a
+  slot holds a decoded instruction and the loop-back test reads those registers
+  live, so no slot can go stale, and `restore_context` rewrites all three on
+  every context switch.
+- **Two harts share one bus**, so `Bus::take_code_dirty` answers per hart. The
+  hart that stored drains inside its own slice; the other drains on entry to
+  its next slice, which is the first moment it could execute anything.
+
+The block executor is `XtHart::step` with the fetch and the decode elided —
+one copy of the per-instruction path, not two that can drift — and it leaves
+the block the moment the retire puts the pc somewhere other than straight on.
+A trap, a window exception, an interrupt taken at a polling point and a
+loop-back all do that, so a classification mistake can only make a block
+shorter, never wrong.
+
+The user-mode `Emulator` below is **untouched** by all of this: it is the FP
+and JIT oracle and its replays stay byte-identical.
+
 ## Speed
 
 ```bash
