@@ -631,15 +631,28 @@ it will find.
 - **The native host policy (deferred P8, JD24):** cached compiled modules
   keyed by image hash, Winch, and JD21's `mmap`-with-guard-region arena.
   None measured.
-- **F5 — the image-scale replay differential.** A `--jit-record` recording can
-  only be taken after the `fence.i` (nothing enters translated code before it
-  on these images), and by then the published-read fast path is armed; a
-  replay's canned import answers do not refresh the published SYSTIMER words,
-  so the module asks for reads the recording never recorded. Fixing it means
-  recording the republished words beside the store that caused them.
-  `scripts/emu/jit-image-bench.mjs --check-only` is the shape that will run it.
-  Separately, such a recording cannot be a committed fixture: `render-basic`
-  is a 76 MB `module.wasm` and a 24 MB `memory.bin` beside 67 KB of entries.
+- ~~**F5 — the image-scale replay differential.**~~ **CLOSED.** A
+  `--jit-record` recording can only be taken after the `fence.i` (nothing
+  enters translated code before it on these images), and by then the
+  published-read fast path is armed; a replay's canned import answers
+  maintained none of the block the fast path reads, so the module asked for
+  reads the recording never recorded. A `CallRec` now carries the block as the
+  call left it — the tag and the republished words, read back out of the block
+  — and the replay writes that back after answering, at the same point in the
+  same crossing; the per-entry disarm is unconditional in `JitCore::run` and so
+  is performed unconditionally rather than recorded. One call grew 40 → 56
+  bytes and `meta.json` gained `fast` and `callBytes`.
+  `just test-emu-jit-replay` is the recipe: it records and replays the
+  `harness` image in **node (V8) and bun (JavaScriptCore)**, every field
+  compared on every entry, in 2m52s on an M2 Max. Still true, and still why
+  this is not a committed fixture: a `render-basic` recording is a 76 MB
+  `module.wasm` and a 24 MB `memory.bin` beside 67 KB of entries — the recipe
+  takes its own recording instead.
+  Two traps found while wiring it, both now named where they bite:
+  `--jit-record-after 0` means UNSET and so means the 700 M-cycle default, not
+  "from the first entry"; and a window can end so soon after the `fence.i`
+  that the module it installs is never entered (`harness` at 100 ms reports
+  `entries 0`, coverage 0.00 %).
 - **The boot cost on the phone**, re-measured against JD20's 0.4–0.7 s budget
   on a head that has M7b P1's incremental `fence.i`.
 - **ROM-up translation** (DD19, last) — without it no in-tab emulated board

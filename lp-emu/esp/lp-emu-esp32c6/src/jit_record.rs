@@ -39,6 +39,30 @@
 //! delta holds the interpreter's writes and never the module's own — those the
 //! replay is supposed to reproduce for itself.
 //!
+//! # The published-read block, and why a store carries it
+//!
+//! Since M7b P3 the translated module answers the SYSTIMER's
+//! `unit0_value.{lo,hi}` and `unit0_op` reads from a small published-read
+//! block in the arena rather than by crossing to the bus, and what keeps that
+//! block honest is the **host**: `jit.rs`'s `republish_systimer` refreshes it
+//! inside `mmio_store`'s own crossing, and `JitCore::run` disarms it before
+//! every entry. A replay has no host — its imports are canned answers — so
+//! unless the recording carries those two effects the module's fast reads are
+//! disarmed where the real run's were armed, and it starts calling
+//! `mmio_load` for reads the recording never recorded. That is a harness bug
+//! that reads exactly like a translator bug, and it was follow-up **F5**.
+//!
+//! So a [`CallRec`] carries the block **as the call left it** — armed or not,
+//! and the published words — and the replay writes that back after answering.
+//! The per-entry disarm is unconditional in `JitCore::run`, so a replay
+//! performs it unconditionally too and nothing has to be recorded for it.
+//!
+//! Both effects are writes to bytes the module reads, so they belong beside
+//! the call that made them and **not** in the between-entries delta: they
+//! happen *inside* an entry, which is exactly what a delta cannot express.
+//! The block stays non-volatile in [`Recorder::live`] for that reason, not by
+//! oversight.
+//!
 //! # What it refuses to record
 //!
 //! A `step_one` call. The escape hatch hands an arbitrary guest instruction to
@@ -52,6 +76,8 @@ use std::fs;
 use std::io::{BufWriter, Write};
 use std::path::{Path, PathBuf};
 
+use lp_emu_jit::host::FAST_MAX_READS;
+
 /// The unit the between-entries memory diff is taken in, matching
 /// [`lp_emu_jit::replay::GRANULE_BYTES`] so the two formats can be read by one
 /// reader.
@@ -60,6 +86,35 @@ pub const GRANULE: usize = 64;
 /// The coarse pass's unit: one `memcmp` decides whether 4 KiB of guest memory
 /// needs looking at granule by granule.
 const CHUNK: usize = 4096;
+
+/// The published-read block as one import call left it (M7b P3, F5).
+///
+/// [`Self::LeftAlone`] rather than "disarmed" for a call that never reached
+/// the block: the two are different histories, and a replay that confused them
+/// would disarm a path the real run had left armed.
+#[derive(Clone, Copy, Debug)]
+pub enum FastAfter {
+    /// The call did not touch the block: every load, every poll, and every
+    /// store outside the SYSTIMER's window.
+    LeftAlone,
+    /// The call left the block disarmed, because this run's configuration
+    /// forbids the path or the peripheral was not there to publish.
+    Disarmed,
+    /// The call republished the words and armed the block.
+    Armed([u32; FAST_MAX_READS]),
+}
+
+impl FastAfter {
+    /// The tag the recording carries, read back by
+    /// `scripts/emu/jit-image-bench.mjs`.
+    fn tag(self) -> u32 {
+        match self {
+            Self::LeftAlone => 0,
+            Self::Disarmed => 1,
+            Self::Armed(_) => 2,
+        }
+    }
+}
 
 /// One import call, as the replay hands it back.
 #[derive(Clone, Copy, Debug)]
@@ -75,7 +130,15 @@ pub struct CallRec {
     /// `(status << 32) | value` for a load; `(status << 32) | pc` for a store
     /// or a poll, because both of those answer a polling point.
     pub result: u64,
+    /// What this call did to the published-read block — a thing only the host
+    /// does, so a replay has to be told it (F5).
+    pub fast: FastAfter,
 }
+
+/// One [`CallRec`] on disk. It was 40 bytes before F5 appended [`FastAfter`];
+/// `scripts/emu/jit-image-bench.mjs`'s `CALL_BYTES` is the other half of this
+/// number and the two move together.
+pub const CALL_BYTES: usize = 56;
 
 impl CallRec {
     fn write(&self, out: &mut impl Write) -> std::io::Result<()> {
@@ -85,8 +148,17 @@ impl CallRec {
         out.write_all(&self.address.to_le_bytes())?;
         out.write_all(&self.access.to_le_bytes())?;
         out.write_all(&self.value.to_le_bytes())?;
-        out.write_all(&0u32.to_le_bytes())?;
-        out.write_all(&self.result.to_le_bytes())
+        // The four bytes a bare `0u32` padded before F5.
+        out.write_all(&self.fast.tag().to_le_bytes())?;
+        out.write_all(&self.result.to_le_bytes())?;
+        let words = match self.fast {
+            FastAfter::Armed(w) => w,
+            FastAfter::LeftAlone | FastAfter::Disarmed => [0; FAST_MAX_READS],
+        };
+        for w in words {
+            out.write_all(&w.to_le_bytes())?;
+        }
+        Ok(())
     }
 }
 
@@ -241,6 +313,7 @@ impl Recorder {
         mem: &[u8],
         pages: u64,
         exchange_offset: u32,
+        fast_offset: Option<u32>,
         fn_blocks: usize,
         blocks: usize,
     ) -> std::io::Result<()> {
@@ -304,8 +377,13 @@ impl Recorder {
             .flat_map(|e| e.delta.iter())
             .map(|(_, b)| b.len())
             .sum();
+        // `null` when this machine published nothing — no `FastReads` table
+        // was folded in, so the module never reads the block and a replay has
+        // nothing to reproduce (F5).
+        let fast = fast_offset.map_or_else(|| "null".to_string(), |o| o.to_string());
         let meta = format!(
             "{{\n  \"pages\": {pages},\n  \"exchange\": {exchange_offset},\n  \
+             \"fast\": {fast},\n  \"callBytes\": {CALL_BYTES},\n  \
              \"entries\": {},\n  \"retired\": {retired},\n  \"calls\": {calls},\n  \
              \"deltaBytes\": {delta_bytes},\n  \"fnBlocks\": {fn_blocks},\n  \
              \"blocks\": {blocks},\n  \"moduleBytes\": {}\n}}\n",

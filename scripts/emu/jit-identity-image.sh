@@ -50,40 +50,10 @@ out="${4:-target/jit-identity}"
 
 bin="${LP_EMU_JIT_IDENTITY_BIN:-target/release/lp-emu-esp32c6}"
 
-# The same rows `oracle-sweep.sh` and `bench-web.sh` carry, in the same shape
-# and with the same pins. A copy rather than a source, for the reason
-# `oracle-sweep.sh` gives: those files run things when sourced.
-#
-# slug|env var|features|commit|spike
-images=(
-    "harness|LP_EMU_C6_REF_HARNESS|test_shader_compile_incremental,esp32c6,spike_uart0_link|d6cfaa205|e8d64eeff"
-    "boot-idle-memfs|LP_EMU_C6_REF_BOOT_IDLE_MEMFS|esp32c6,server,radio,spike_uart0_link,memory_fs|d6cfaa205|e8d64eeff"
-    "render-basic|LP_EMU_C6_REF_RENDER_BASIC|esp32c6,server,radio,spike_uart0_link,memory_fs,bench_render_loop|77384a894|none"
-    "render-rocaille|LP_EMU_C6_REF_RENDER_ROCAILLE|esp32c6,server,radio,spike_uart0_link,memory_fs,bench_project_rocaille|77384a894|none"
-)
-
-elf=""
-for spec in "${images[@]}"; do
-    IFS='|' read -r s var features commit spike <<<"$spec"
-    [[ "$s" == "$slug" ]] || continue
-    path="${!var:-}"
-    if [[ -n "$path" ]]; then
-        [[ -f "$path" ]] || { echo "jit-identity-image: $var points at $path, which is not a file" >&2; exit 1; }
-        elf="$path"
-    else
-        path="target/emu-ref/$commit-$slug/fw-esp32c6"
-        if [[ ! -f "$path" ]]; then
-            echo "jit-identity-image: building the $slug reference image" >&2
-            scripts/emu/build-reference-image.sh "$features" "$commit" "$spike" >&2
-        fi
-        elf="$path"
-    fi
-done
-if [[ -z "$elf" ]]; then
-    echo "jit-identity-image: no pinned image called \"$slug\". Known slugs:" >&2
-    for spec in "${images[@]}"; do IFS='|' read -r s _ <<<"$spec"; echo "    $s" >&2; done
-    exit 2
-fi
+# The pins live in `ref-image.sh`, which resolves a slug to an ELF and builds
+# it if it is not there. It used to be this table, inline; `jit-replay-identity.sh`
+# wants the same resolution and one copy of the pins is worth more than two.
+elf="$(scripts/emu/ref-image.sh "$slug")"
 
 [[ -x "$bin" ]] || {
     echo "jit-identity-image: $bin is not an executable." >&2

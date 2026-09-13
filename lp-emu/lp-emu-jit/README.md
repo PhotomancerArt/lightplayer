@@ -1044,7 +1044,8 @@ the trace layout was not wrong, it was slower.
 
 ### What the replay harness was getting wrong (P5)
 
-Three things, and the first one meant no replay had run since M7b P2:
+Three things, and the first one meant no replay had run since M7b P2. The
+third outlived P5 and was closed by follow-up F5:
 
 1. **`jit-image-bench.mjs` had no `poll` import.** P2's fourth import made
    every module refuse to instantiate — `LinkError: Import #3 "emu" "poll":
@@ -1060,18 +1061,32 @@ Three things, and the first one meant no replay had run since M7b P2:
    floor — the same loop with the call removed — and reports
    `harnessNsPerInstr` and `steadyNsPerInstrNet`. **A residual is read off the
    net one.**
-3. ⚠️ **A render-loop recording cannot be replayed at all since M7b P3.** The
-   published-read block is refreshed inside `mmio_store`'s own crossing
-   (`jit.rs::republish_systimer`), and a replay's imports are canned answers
-   that refresh nothing — so the module's in-module fast reads go stale within
-   an entry and it starts calling `mmio_load` for reads the recording never
-   recorded: `entry 104511: the module made more import calls than the
-   recording has`. The recorder also marks the block **non-volatile**, so the
-   between-entries delta does not carry it either. A boot recording is
-   unaffected, because the fast path is disarmed there — which is why this
-   went unnoticed, and why **every replay number in this ladder describes
-   boot-phase code**. Fixing it means recording the republished words beside
-   the store that caused them; it is not done here.
+3. **The published-read block is host state, and the recording did not carry
+   it** — so no recording taken after M7b P3 armed the fast path could be
+   replayed at all. The block is refreshed inside `mmio_store`'s own crossing
+   (`jit.rs::republish_systimer`) and disarmed before every entry
+   (`JitCore::run`); a replay's imports are canned answers that do neither, so
+   the module's in-module fast reads sat disarmed where the real run's were
+   armed and it called `mmio_load` for reads the recording never recorded:
+   `entry 87698, call 1: the module asked for kind 0 where the recording has
+   1`. The delta could not carry it either, and not because the block is
+   marked **non-volatile**: the two effects happen *inside* an entry, which is
+   exactly what a between-entries delta cannot express.
+
+   **Fixed by follow-up F5.** A `CallRec` now carries the block as the call
+   left it — `LeftAlone`, `Disarmed`, or `Armed` with the published words read
+   back out of the block — and the replay writes that back after answering,
+   at the same point in the same crossing. The per-entry disarm is
+   unconditional in `JitCore::run`, so the replay performs it unconditionally
+   and nothing is recorded for it. One import call grew from 40 bytes to 56;
+   `meta.json` gained `fast` (the block's offset, or `null` when the machine
+   published nothing) and `callBytes`, and the harness refuses a recording
+   written without them rather than misreading it. `just test-emu-jit-replay`
+   is the recipe, and it passes in **both** engines.
+
+   The reason this went unnoticed for two phases is worth keeping: a recording
+   whose window never arms the fast path is unaffected, so **every replay
+   number in this ladder before F5 describes code that was not using it**.
 
 ### What a module-side entry is made of (P6c Q4)
 
