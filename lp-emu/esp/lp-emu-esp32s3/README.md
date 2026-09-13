@@ -355,12 +355,148 @@ P06 appended three more, in this order, behind the flash:
 | 21 | `SHA` | the C6's block with `h_mem` sixteen words long; SHA-1/224/256 compute, SHA-384/512 refuse; the IDF bootloader's image hash on the ROM-up path is its only caller | the C6's `sha.rs`, parameterised |
 | 22 | `UART0` | the mask ROM's console on `engine::uart`: the reset banner and the bootloader's log on a ROM-up boot, `--uart0`; the app never touches it | the classic's view, on the S3's registers |
 
-…and, because the ROM-up chain touches what a direct load never did,
-accept blocks for `GPIO` (whose `strap` reads `--strap`'s word — the ROM's
-`boot:0x8 (SPI_FAST_FLASH_BOOT)` is its first reader), `IO_MUX`, `RMT`,
-`ASSIST_DEBUG`, `APB_SARADC` and `SENS`, plus a seeded PRNG behind
+…and, because the ROM-up chain touches what a direct load never did, accept
+blocks for `ASSIST_DEBUG`, `APB_SARADC` and `SENS`, plus a seeded PRNG behind
 `WDEV_RND_REG` for the bootloader's *"Enabling RNG early entropy source"*
 step, so two ROM-up runs are the same run.
+
+P07 turned three of P06's accept blocks into views, in the place the boot
+already met them:
+
+| # | block | what it is | source |
+|---|---|---|---|
+| 23 | `GPIO` | the matrix as a routing **view**: `func_out_sel_cfg[n]` (54 slots over 49 pads), `out`/`enable` and their bank-1 twins, `func_in_sel_cfg[s]` over 256 signals, and the input side — `in_`/`in1`, `pin[n].int_type`, the sticky `status` latch and `pcpu_int` on source 16. `strap` is still a read override; the ROM's `boot:0x8 (SPI_FAST_FLASH_BOOT)` is its first reader | **fresh** — see below |
+| 24 | `IO_MUX` | one field pushed into the fabric: `gpio[n].fun_ie`, the pad's input enable. Everything else is accept-and-remember | the C6's `io_mux.rs` |
+| 25 | `RMT` | four TX engines on the scheduler consuming words at `sys_conf`'s clock, the 384-word RAM at `+0x800`, and the symbol pump onto `RMT_SIG_0 + n`. RX is accept-and-warn | the C6's view, **moved** to `lp-emu-esp-common/src/ip/rmt.rs` and parameterised |
+
+### ⚠️ Neither sibling is the parent of this chip's `GPIO`
+
+`notes.md` §3.5 measured the S3's fixed registers against the C6's and found
+every one at the same offset. That is true, and it is why the offsets are the
+C6's. But the **bitfields and the banks are the classic's**, and a view that
+took either parent whole would be wrong:
+
+| | S3 | C6 | classic |
+|---|---|---|---|
+| `out_sel` | bits **0:8** | 0:7 | 0:8 |
+| `inv_sel` / `oen_sel` / `oen_inv_sel` | **9 / 10 / 11** | 8 / 9 / — | 9 / 10 / 11 |
+| "follow `GPIO_OUT`" | **256** | 128 | 256 |
+| `func_in_sel_cfg[n]` | **256** | 128 | 256 |
+| `out1` / `enable1` / `in1` / `status1` | **live** (pads 32..48) | padding | live (pads 32..39) |
+| interrupt outputs | `pcpu_*` only | `pcpu_*` only | `pcpu_*` **and** `acpu_*` |
+| `in_sel` constants | `0x38` high / `0x3c` low | the same | 56 high / 48 low |
+
+So the S3 is the C6's offsets, the classic's field widths and banks, and the
+C6's single interrupt output — a third combination, at the chip's own
+numbers, with that table in the file's own module docs. `OUT_SEL_GPIO = 256`
+is **established, not guessed**: the PAC's field doc, that register's reset
+value `0x0100`, and `OutputSignal::GPIO = 256` in the metadata all say so, and
+all three citations are on the constant. A view that reused the C6's 128
+would route every plain output pad to a real peripheral signal that nothing
+drives, and it would look like it worked.
+
+⚠️ **`IO_MUX.gpio[n]` resets with `fun_ie` set on this chip** (`0x0b00`) where
+the C6's has it clear (`0x0800`), so the machine seeds the fabric from the
+reset word before the guest runs — otherwise the block and its own registers
+disagree from cycle zero. And the S3's pad map is **in pad order**, unlike the
+classic's (`+0x004` is `gpio36` there): the indirection is not ported, and a
+test asserts the order against the generated table's own names.
+
+### The RMT: the C6's IP, five deltas, and one re-derived constant
+
+The S3's RMT **is** the C6's block — `ch_tx_conf0`, `ch_rx_conf0/1`,
+`ch_tx_status`, `ch_rx_status`, `ch_tx_lim`, `ch_rx_lim`,
+`ch_rx_carrier_rm`, `sys_conf`, `tx_sim` and `ref_cnt_rst` exist on both by
+name with the same fields in the same order, and none of them exists on the
+classic. So the view **moved** into `lp-emu-esp-common/src/ip/rmt.rs` (ruling
+D4/DD64) and every number that differs is a `Config` field. Five of them each
+pass every register test and fail the first frame, and each has a test of its
+own in `src/periph/rmt.rs`:
+
+1. **The interrupt bits are grouped by event here** — `chN_tx_end` 0–3,
+   `tx_err` 4–7, `tx_thr_event` 8–11, `tx_loop` 12–15, `rx_end` 16–19,
+   `rx_err` 20–23, `rx_thr_event` 24–27 — and share a nibble on the C6,
+   whose RX channels *are* channels 2 and 3. The PAC accessors have the same
+   names on both chips, which is why it is easy to miss, so the mapper is a
+   **function per chip**.
+2. **`sys_conf` carries the clock divider** (`sclk_div_num` 4:11, `sclk_div_a`
+   12:17, `sclk_div_b` 18:23, `sclk_sel` 24:25, `sclk_active` 26). The C6
+   reads `PCR.rmt_sclk_conf`. ⚠️ The gate is `sclk_active`, **not** `clk_en`
+   (bit 31): esp-hal's `configure_clock` clears `clk_en` on this chip.
+3. **`ch_tx_conf0.mem_size` is bits 16:19**, eight blocks against four.
+4. **`ch_rx_conf0.mem_size` is bits 24:27** against the C6's 23:25 — not in
+   the phase brief's list of three, found by reading both PACs field for
+   field, and the reason the two chips' reset values differ (`0x317f_ff02`
+   against `0x30ff_ff02`) at the same `mem_size = 1`.
+5. **The status words differ.** `mem_raddr_ex` / `mem_waddr_ex` are bits
+   **0:9** here — ten bits, absolute over the whole 384-word RAM — `state` is
+   22:24 and `mem_empty` is 25; the C6's are 0:8, 9:11 and 22.
+
+⚠️ **The RAM is at `+0x800`, and two sources disagreed.** The metadata's
+`rmt.ram_start` is `1610704896`; `0x6000_0000` is 1,610,612,736 and the
+difference is `92_160 = 0x1_6800`, so `ram_start = 0x6001_6800` and the block
+base is `0x6001_6000` — offset `0x800`. The planning pass converted the same
+decimal to `0x6001_6400`. **The C6's is `+0x400`**, which here is the gap
+between the register file and the RAM: a run that used it would transmit
+whatever the register file happened to hold, and the block drops writes there
+with a note rather than storing them.
+
+**RX is accepted, not modelled.** `CH0..=CH3` transmit and `CH4..=CH7`
+receive, and the shipped firmware uses no receiver — so every RX register
+answers and is graded, and `rx_en` on a channel is a `log::warn!` naming the
+channel. The C6's receivers still work; the shared view keeps both behaviours
+and each chip's table chooses.
+
+## The pad, and the frame
+
+The waveform reaches a pad through the signal fabric
+(`lp-emu-esp-common/src/pins.rs`), the same one both siblings use: the RMT
+drives `RMT_SIG_0 + ch`, `GPIO.func_out_sel_cfg[pad].out_sel` says which pad
+follows it, and `GPIO.enable` says whether that pad drives the wire at all.
+One `Ws281xDecoder` per routed pad reads the edges back at
+**`memmap::CPU_HZ` = 240 MHz** — the classic's rate, not the C6's 160 — and
+every threshold follows from that number rather than from a ratio.
+
+⚠️ **No project retarget on this chip.** `projects/test/shader-oracle` names
+`ws281x:local:D10`, and **D10 is this board's own pad**: the checked-in
+`seeed/xiao-esp32-s3-plus` profile maps it to `/gpio/9`. The classic needed a
+scratch copy of the project (`D10 → IO18`) because the DOM-Z-102 has no D10;
+the S3 renders the committed project unmodified. A reader coming from M4 will
+look for the rewrite, so: there is none.
+
+Four flags read the pads, and none of them gates anything:
+
+- `--dump-frames <-|stdout|file:path>` — one `ws281x-frame` JSON line per
+  frame as it is decoded, carrying **both** the wire bytes and the `rgb`
+  unpermutation, so a wrong order assumption is a visible difference between
+  two fields rather than a silent one inside `rgb`. Frames are kept in memory
+  either way (`Machine::frames`).
+- `--pin-log <path>` — `<us> <pad> <level> cyc=<cycle>`, one line per edge,
+  with a `# route` note whenever the matrix moves a pad. The microseconds are
+  for a human; the **cycle** is the number anything may compute with.
+- `--strip-timing ws2812|ws2811` and `--strip-order rgb|…|bgr` — how each
+  routed pad is decoded, `ws2812`/`grb` by default.
+- `--rmt-logs` — the RMT's own per-channel pulse and word logs, the
+  word-level oracle a test compares the decoder against. Off by default.
+
+The refill-lag summary under the run report is collected either way. It is
+**reported, never gated** (PD9): the emulated ISR path is RAM-resident and
+this machine has no flash-miss cost, so its entry half is a floor rather than
+a prediction of silicon's 20–29 words.
+
+⚠️ **A frame is not closed until something follows its latch.** Call
+`Machine::flush_frames` before reading the last one; it reports an open frame
+*incomplete* rather than inventing a reset gap. The CLI calls it before its
+summary.
+
+⚠️ **Do not assert `routed_pads()`'s length.** A boot routes pads this
+machine has no interest in. The assertion a test wants is that the strip's
+pad is present and carries `RMT_SIG_0`.
+
+**Determinism.** The pusher runs on core 0 only — slot 1 is held — so unlike
+the classic there is no cross-core frame-start jitter here: two runs at
+different `--core-quantum` values give byte-identical frames **and identical
+frame-start cycles**. `tests/pin_frames.rs` asserts both.
 
 Which parent each block came from matters, and the wrong one is silently
 wrong (`m6/notes.md` §3): `RTC_CNTL`, `I2C_ANA_MST` and the matrix are the
