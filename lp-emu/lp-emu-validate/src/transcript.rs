@@ -319,6 +319,7 @@ mod tests {
             pins: None,
             machine: None,
             baud: None,
+            quantum: None,
             trust: Default::default(),
         }
     }
