@@ -276,10 +276,19 @@ The base row reproduces P1's pair row exactly, which is the check that the
 baseline is the baseline.
 
 **The `trace` column is `same` on every row and is not evidence here.**
-`loop-identity.sh`'s trace leg is a 20 ms window, and on `render-basic` the
+`loop-identity.sh`'s trace leg was a 20 ms window, and on `render-basic` the
 WS281x transmitter has not started a frame by 20 ms — the first `RMT ch0
 start` is at cycle 36,188,821, which is 452 ms in. Anyone reading a `trace
 same` on an RMT change is reading a run that never touched the RMT.
+
+> **Fixed 2026-09-13 (close-out B1).** The trace leg's window is now **500 ms**,
+> the same window as the other four readings, and the script prints its own
+> liveness line (`trace reaches the RMT: 11 'RMT ch0 start' lines in the
+> after-trace`). The leg costs 22 s wall / 5.3 s CPU per binary. **The `trace`
+> shas in the table above are 20 ms shas and are superseded** — a 500 ms
+> main-vs-main pair reads `350476ce3357c307`, with the other four shas and the
+> retired-instruction count unchanged. The rungs were never re-run at 500 ms:
+> what is known is that their `same` was boot-only, not that they are `DIFF`.
 
 ### R5c — the size of the prize, on the healthy cadence
 
@@ -337,3 +346,41 @@ differently once each channel emits a run at once — could not be tested here:
 (`rmt refill ch0` only; ch1 is configured and never started). `Fabric::push`
 appends in call order with no sort and `Edge` carries no sequence number, so
 the trap is real for a two-channel image and remains **NEVER MEASURED**.
+
+#### It fires, and it is bigger than a same-cycle tie (close-out B2, 2026-09-13)
+
+No image exercises it, so it was constructed instead:
+`lp-emu-esp32c6` `src/periph/rmt.rs`
+`tests::two_tx_channels_put_the_pin_log_in_dispatch_order_not_at_order` — two
+TX channels sending the same word at the same cycles, on two routed pads,
+started in either order. **Test-only; `rmt.rs`'s behaviour is untouched.**
+
+The assumption the trap named was that identical-cycle edges from two channels
+would tie and be broken by dispatch order. What is measured is stronger:
+`push_pulse` emits **both halves of a word at the fetch**, each stamped with
+its own true cycle, so the second channel's word is appended *behind* the
+first channel's already-future edge. The combined `at` column is not monotone
+at any point of a two-channel transmission:
+
+```
+at=0   pad=8 level=true      ← ch0's word
+at=64  pad=8 level=false
+at=0   pad=9 level=true      ← ch1's same word, back-dated behind it
+at=64  pad=9 level=false
+at=200 pad=8 level=true
+…
+```
+
+Start ch1 first and the **wire is byte-identical while the log's order flips**
+(sort both by `(at, pad)` and they are equal), which pins the order to the
+scheduler's `(at, seq)` dispatch order and nothing else. `Machine::drain_pins`
+writes `Fabric::take_edges` straight into `--pin-log` with no sort, so the
+file inherits it.
+
+**What saves the product path**, and the reason this is a registered trap and
+not a defect: every consumer is **per pad** — each pad's own edges are
+strictly increasing (asserted), and `drain_pins` keeps one `Ws281xDecoder` per
+pad. The exposure is a reader who treats the combined `--pin-log` as a
+time-ordered stream, and a byte-identity comparison of two runs that dispatch
+the two channels in different orders. Both runs are deterministic, which is
+asserted twice over.

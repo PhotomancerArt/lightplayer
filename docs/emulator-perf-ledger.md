@@ -113,6 +113,26 @@ other way is not comparable to anything in §2 or §3.
   *images* reports two shas and calls them inconsistent
   (`2407828f80684331` is `render-basic`, `a570b6597cc0fc31` is
   `render-rocaille`). Read it per image.
+- **The pair protocol's trace leg is a 500 ms window** (close-out B1,
+  2026-09-13), the same window as its other four readings.
+  `scripts/emu/loop-identity.sh` takes five sha256 readings per binary — pin
+  log, frames, UART, trap log, and a second run with `--trace` — and until
+  2026-09-13 that second run was **20 ms**. On `render-basic` t2 the WS281x
+  transmitter has not started a frame by then: the first `RMT ch0 start` is at
+  cycle **36,188,821 ≈ 452 ms**, so the trace column read `same` on P1d's
+  R5/R5a rungs while UART, frames, pin log and trap log all read `DIFF`. **A
+  `trace same` taken before 2026-09-13 is a boot-only reading and is not
+  evidence about any peripheral** — every such row in §3 and in
+  `scripts/emu/tier-probes/README.md` stands superseded on that column alone.
+  At 500 ms the leg contains all 11 `RMT ch0 start` lines of the cell, costs
+  **22 s of wall and 5.3 s of CPU per binary** (measured at loadavg 231; a
+  quiet desk is faster) and writes a **66 MB** `.trace` per side. The script
+  prints its own liveness line — `trace reaches the RMT: N 'RMT ch0 start'
+  lines in the after-trace` — and an `N` of 0 means the column is boot-only
+  again. Widening changes the trace sha and nothing else: a main-vs-main pair
+  reads `pin f23626cda3afd779 · frames ea2745af0a1e3c23 · uart 0ccda7f466879e84
+  · trap f06a3513191d759e`, the same four P1 took, with `trace
+  350476ce3357c307` in place of the 20 ms `6c21134c626f2af1`.
 - **A replay recording covers boot-phase code only** since P3 (DD59): the
   republished SYSTIMER words are not refreshed by canned imports. Any
   measurement of steady state must be a **live** run.
@@ -309,6 +329,8 @@ named and deliberately not pursued) or **candidate**.
 | 2026-09-13 | **P1d — the write-watermark bulk** (R5 / R5a) | `G-LOOP0c-gate.md`; `scripts/emu/tier-probes/README.md` §P1d; `R5-write-watermark.patch`, `R5a-watermark-plus-guard.patch` | **the guest breaks on every surface.** UART, frames, pin log and trap log all `DIFF`; frames truncate at 73 words. Two independent causes, both quoted from the trace: the driver's **STOP guard** is a write the watermark cannot read, and **`mem_raddr_ex`** (read twice per threshold, 5,302 times over 2,651 refills) is what the ISR uses to choose *which half to refill* | **rejected as built** — and see the cadence row in §4, now closed |
 | 2026-09-13 | **P1d R5c — the shadow census** (no behaviour change; byte-identical on all five identity readings) | `R5c-shadow-census.patch` | a watermark+guard bulk would absorb **95.80 %** of word fetches on **both** `render-basic` (63,646 → 2,673 events) and `render-rocaille` (17,358 → 729), run length exactly the 24-word half. Scaled to the 5,500 ms cell: **1,409,821 slices × 531 ns ≈ 749 ms ≈ 13.6 %**. And the watermark itself **never binds**: `unwritten 0` on both images; the threshold ends every run | **measured** — the size of the prize, on the healthy cadence |
 | 2026-09-13 | **translator-quality P1 — the gate preset grows to all four product images**, and §2's three desk rows are corrected | `scripts/emu/bench-web/bench-run.js` (`GATE_ROWS`); §2's margin table and its correction note; lab `j-20260913-1702-102a` | **no code under `lp-emu/`.** The desk proof that the two new rows are real, node/V8 25.2.1 at 8/fn on build `c66d8ac`, one invocation, both legs per image: every row stops at **exactly 5,500,000 us emulated (880,000,000 cycles)** — the emulated bound, not `harness`'s `--exit-on` marker and not the wall guard — and the two legs of each image agree byte for byte on UART (`harness` `b6da0bd777529664…`, `boot-idle-memfs` `17a0a1a3869073fe…`), on the trap log and on retired instructions (289,953,877 and 51,052,668). Coverage and mean stay reproduce the ADR exactly (99.63 % / 1354.0 and 97.82 % / 43.7). **The wall times are NOT margin numbers — loadavg was 181–186** (53 concurrent `rustc`); the same-invocation *ratios* still land near the ADR's, 2.46× and 0.514× against 2.68× and 0.53×. **No phone row yet**: the job was still on its first press when this row was written | **measured** (rig + doc only) |
+| 2026-09-13 | **the two-channel `(at, seq)` pin-log ordering trap** (`vision.md` §2, registered since the tier work began) | `scripts/emu/tier-probes/README.md` §"It fires, and it is bigger than a same-cycle tie"; `lp-emu-esp32c6` `rmt.rs` `tests::two_tx_channels_put_the_pin_log_in_dispatch_order_not_at_order` | **the assumption had NEVER RUN** — no product image drives two TX channels (`render-basic` and `render-rocaille` start ch0 only; ch1 is configured and never started), so it was constructed. It **fires, and wider than registered**: `push_pulse` emits both halves of a word at the fetch, so a second channel's word lands *behind* the first's already-future edge and the combined `at` column is not monotone at any point — `0, 64, 0, 64, 200, 264, …`. Start ch1 first and the wire is byte-identical while the log's order flips; `Machine::drain_pins` writes `Fabric::take_edges` into `--pin-log` with no sort. **Not a defect on the product path**: every consumer is per pad, each pad's own edges are strictly increasing, and there is one `Ws281xDecoder` per pad | **registered — now tested, not merely named.** The exposure is a reader who treats the combined pin log as a time-ordered stream, and a byte-identity comparison of two runs that dispatch the channels in different orders |
+| 2026-09-13 | **Xtensa #735, `SocBus::add_ram_alias`** — one `bool` test (`has_ram_alias`) per memory access on the C6's hot path (E5) | PR #735, merged 2026-09-13 09:39Z; the A/B is in that PR's own body, `scripts/emu/bench-c6.sh --no-build --no-promote`, stock vs branch back to back | **quoting #735's pair 3** (post-rebase binaries, best of 3, load 4.2–5.1 on 12 cores, user seconds): `render-basic` t1 5.55 → 5.46 (**−1.6 %**), t2 5.00 → 4.94 (**−1.2 %**); `render-rocaille` t1 4.48 → 4.42 (−1.3 %), t2 4.49 → 4.45 (−0.9 %); `harness` t1/t2 **+0.9 %** each; `boot-idle-memfs` t1 0, t2 −3 %. Their words: "every render-loop row is within ±2 %, both signs — inside the bench's own run-to-run noise." Binary text +8.9 KB (2,034,850 → 2,043,774). **Not re-measured here** — the row quotes theirs | **shipped (theirs)** — no measurable C6 cost, inside the bench's noise. The C6 registers no alias, so the cost is the `bool` and nothing else |
 
 ### The P1c note: what the stride removed, and what three instruments said
 
