@@ -180,6 +180,49 @@ verb text a serial device's does (`Disconnect`) at the session-control
 surface, while the card itself calls the same action `Power off` — an open
 G2 question, named in Follow-ups, not resolved here.
 
+### 8. Amended 2026-09-13 (P5b, #728) — the tab attaches the JS host unconditionally; `boot` decides which core actually runs
+
+M7's default flip (#727) made the wasip1 module install a translated core by
+default (`machine::TRANSLATED_BY_DEFAULT = cfg!(target_family = "wasm")`), so
+the module now imports the namespace `emu_host` and **cannot instantiate
+without a JS host** — attaching one, which used to be optional (the deferred
+M7 hook, S1), is now required for the module to link at all.
+`emulator_worker.js` attaches M7's `jit-host.js` before every `emu_create`,
+unconditionally, precisely because the wasm module links only with it.
+
+Attaching the host is not the same as running translated. **Which core a
+board runs is decided by `boot`**, and every board the tab creates —
+`TAB_BOARD`, the conformance suite's synthesized boards, the walk's board —
+is `boot=rom-up`. A `boot=rom-up` machine never installs a translated core
+(`machine.rs` arms translation only for `boot_mode != BootMode::RomUp`; the
+mask ROM and the second-stage bootloader copy code into RAM and jump into it
+without ever emitting a `fence.i`, so neither of the module's translation
+events can see what they'd publish — `tests/jit_default.rs` rule 4). So the
+tab interprets today, and rule 2's dilation numbers are unchanged by this
+amendment: re-measured in node on 2026-09-11
+(`scripts/emu/tab-dilation.mjs`), the mask ROM's boot reads **0.48×**
+interpreted and a blank chip's `invalid header` spin reads **0.36×**
+interpreted — consistent with G1's 0.45×/0.34× within run-to-run noise, not a
+regression.
+
+The same ROM code direct-booted (`boot=direct`) and translated measured
+**0.24×** in the same session — about half the interpreted rate, because
+this workload (the mask ROM's download-wait loop) is MMIO-poll-bound, the
+worst case for the seam. **This is a data point, not a claim**: it says
+nothing about firmware workloads (M7's own benchmarks are the claim there)
+and nothing about a tab speed-up, because no tab board direct-boots today.
+
+There is no way to ask the tab for the interpreter on a board that would
+otherwise translate: `--interpreter` is a CLI flag and
+`Esp32C6Builder::jit(false)` is the library lever, and neither is reachable
+from `tab_abi`'s grammar. An `interpreter` config key in `tab_abi` would be a
+future lp-emu seam (not built here — see Follow-ups).
+
+Source: PR #728's body, "For the ADR"; measurements: PR #728's dilation
+table, corroborated by `lp-emu/esp/README.md`'s "The JIT seam: `emu_host`,
+and which core a board runs" section (both landed on `main` at #728's merge,
+`0560344fa`).
+
 ## Consequences
 
 - **Two "refused" rows close.** Against the eight-point contract in the
@@ -244,6 +287,13 @@ G2 question, named in Follow-ups, not resolved here.
   director deferred S1 to a follow-on phase once that stack lands; the seam
   documented at P2 (a named import slot, `?emujit=1` for mode B) is
   unchanged and still where it lands.
+
+  > **Amended 2026-09-13.** Landed, but not as the optional hook this
+  > bullet describes: M7's default flip (#727) made attaching the host
+  > *mandatory* for the module to instantiate at all, so P5b (#728) wired
+  > it unconditionally rather than behind `?emujit=1`. See rule 8 above.
+  > The `?emujit=1` mode-B flag never shipped and is superseded by rule 8's
+  > unconditional attach; nothing reads it.
 - **Reset replays the board's lifetime** — `Esp32C6Machine::run_until`
   (`lp-emu/esp/lp-emu-esp32c6/src/machine.rs`) fixes `stop_cycle` once, as an
   absolute guest cycle, before its loop; a reset inside the slice zeroes the
