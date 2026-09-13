@@ -41,8 +41,11 @@ use crate::payload::{BootPath, Capture, ChipArm, HostPlan, Link, Payload, Sentin
 /// Build constants, kept equal to the `justfile`'s variables of the same name.
 pub const RV32_TARGET: &str = "riscv32imac-unknown-none-elf";
 pub const XTENSA_V3_TARGET: &str = "xtensa-esp32-none-elf";
+/// `justfile`'s `xt_s3_target` (`justfile:15`).
+pub const XTENSA_S3_TARGET: &str = "xtensa-esp32s3-none-elf";
 pub const FW_ESP32C6_PROFILE: &str = "release-esp32";
 pub const FW_ESP32V3_PROFILE: &str = "release-esp32v3";
+pub const FW_ESP32S3_PROFILE: &str = "release-esp32s3";
 pub const C6_FLASH_SIZE: &str = "4mb";
 pub const C6_PARTITIONS: &str = "lp-fw/fw-esp32c6/partitions.csv";
 /// The firmware package's directory, and the only place its build may run
@@ -57,6 +60,7 @@ pub const C6_PARTITIONS: &str = "lp-fw/fw-esp32c6/partitions.csv";
 /// the runner's plans. Found at G3 sitting 1, 2026-09-07.
 pub const FW_ESP32C6_DIR: &str = "lp-fw/fw-esp32c6";
 pub const FW_ESP32V3_DIR: &str = "lp-fw/fw-esp32v3";
+pub const FW_ESP32S3_DIR: &str = "lp-fw/fw-esp32s3";
 pub const DESK_STEP_SCRIPT: &str = "scripts/emu/desk-espflash-step.sh";
 
 /// Every build fact that differs between the chips this runner drives.
@@ -192,8 +196,76 @@ pub const ESP32V3: ChipSpec = ChipSpec {
     core_quantum: Some(ESP32V3_CORE_QUANTUM_DEFAULT),
 };
 
+/// Mirrors `CORE_QUANTUM_DEFAULT` in `lp-emu/esp/lp-emu-esp32s3/src/machine.rs`
+/// — the classic's number and the classic's argument, which port because the
+/// clock does. Checked by `the_s3_core_quantum_mirrors_the_machines_default`
+/// for the reason [`ESP32V3_CORE_QUANTUM_DEFAULT`] is checked: a mirror
+/// nobody checks is a lie waiting to be written into a sidecar.
+pub const ESP32S3_CORE_QUANTUM_DEFAULT: u32 = 256;
+
+/// The ESP32-S3 (Xtensa LX7), the desk's XIAO ESP32-S3 (M6).
+///
+/// ⚠️ **`port_prefix` is not enough to identify a board on this chip, and the
+/// code has to say so.** An S3 and a C6 both enumerate as `303a:1001` and
+/// both get a `/dev/cu.usbmodem…` node, so the prefix cannot tell them apart
+/// — it is a "some board of this kind is held" check
+/// ([`ensure_port_free`]) and never a way to *choose* a port.
+/// `scripts/emu/board-port.py` resolves a board by its USB **serial number,
+/// which is the MAC**, opening nothing and resetting nothing. Wherever a
+/// silicon plan names a port it names a MAC and resolves it; "the first
+/// matching port" is how another session's board gets flashed.
+pub const ESP32S3: ChipSpec = ChipSpec {
+    chip: "esp32s3",
+    // Unlike the classic, ours and espflash's names agree: the S3 has no
+    // revision in its configuration name, so `chip == espflash_chip` here and
+    // the classic is the odd one out (M6 notes Q1).
+    espflash_chip: "esp32s3",
+    feature: "esp32s3",
+    target: XTENSA_S3_TARGET,
+    profile: FW_ESP32S3_PROFILE,
+    fw_dir: FW_ESP32S3_DIR,
+    fw_binary: "fw-esp32s3",
+    partitions: "lp-fw/fw-esp32s3/partitions.csv",
+    // ⚠️ EIGHT megabytes. Both other chips are 4 MB and this table does not
+    // fit a 4 MB board, deliberately —
+    // `docs/adr/2026-07-30-esp32s3-partition-floor.md`. The canonical source
+    // is `lp-fw/builds/esp32s3-8mb.json`'s `flashSizeMb`; `justfile`'s
+    // `s3_flash_size` (`:29`) and `lp-fw/fw-esp32s3/.cargo/config.toml` are
+    // its other two mirrors, and `scripts/emu/build-merged-image.sh` reads
+    // this one rather than carrying a third literal.
+    flash_size: "8mb",
+    emu_package: "lp-emu-esp32s3",
+    rom_elf: "esp32s3_rev0_rom.elf",
+    // Native USB-Serial-JTAG: one link, one rate, nothing to get wrong. The
+    // classic's 921_600 exists because `board::esp32v3::init` reprograms
+    // `clkdiv` mid-stream; this chip has no such seam, and its console is
+    // `jtag-serial` (`lp-fw/fw-esp32s3/Cargo.toml`'s `esp-println`).
+    monitor_baud: None,
+    port_prefix: "cu.usbmodem",
+    // Q2, and E1's ruling for the classic applies unchanged: there is no
+    // measured LX7 per-instruction-class table, so a `t2` would be `t1` under
+    // another name. `CCOUNT` is recorded by a future `cycle-probe` arm and
+    // gated by nothing. The inconsistency with the C6's three grades is
+    // stated in the walk record and the ADR (P11), not papered over here.
+    time_grades: &["t1"],
+    // The S3's machine takes neither flag: `loader::ResetCause` has one arm
+    // (`PowerOn`) and the boot latches `Strap::App`, which are exactly the
+    // two values `boot-idle` asks for — so a door P06 may add is absent
+    // rather than accepted-and-ignored, and passing the flags anyway would
+    // be a hard refusal rather than a no-op. This flips only if the S3's
+    // binary grows a choice to state.
+    takes_reset_cause: false,
+    // Dual-core silicon with slot 1 **permanently held** (M6 notes Q4), so
+    // core 0 is the only one that takes a window — but the window is still a
+    // parameter of the run, the binary still has `--core-quantum`, and the
+    // machine still defaults to 256. Recorded in the header's `quantum` for
+    // the same reason the classic's is: a parameter nobody wrote down is a
+    // run nobody can reproduce.
+    core_quantum: Some(ESP32S3_CORE_QUANTUM_DEFAULT),
+};
+
 /// Every chip this runner drives, in the order they were taught to it.
-pub const CHIPS: &[&ChipSpec] = &[&ESP32C6, &ESP32V3];
+pub const CHIPS: &[&ChipSpec] = &[&ESP32C6, &ESP32V3, &ESP32S3];
 
 /// The row for a chip name, or a refusal that names what there is.
 pub fn chip_spec(chip: &str) -> Result<&'static ChipSpec> {
@@ -1637,6 +1709,12 @@ pub fn reference_image_slug(features: &[&str]) -> String {
         // `bench-esp32v3.sh` already prints for them.
         "esp32,test_shader_compile_incremental" => "shader-compile-stress".to_string(),
         "esp32,server,float-f32,bench_render_loop" => "render-loop".to_string(),
+        // The S3's two (M6 P08). The shipped default feature set is this
+        // chip's `boot-idle` image, and there is no `memory_fs` variant to
+        // name: `fw-esp32s3` has no such feature — it mounts `lpfs` from a
+        // modelled flash chip or it falls back on its own.
+        "esp32s3,server,float-f32" => "boot-idle".to_string(),
+        "esp32s3,test_shader_compile_incremental" => "shader-compile-stress".to_string(),
         other => other.replace(',', "+"),
     }
 }
@@ -1942,6 +2020,36 @@ mod tests {
             "the classic's `core_quantum` no longer mirrors the machine's default",
         );
         assert_eq!(ESP32V3.core_quantum, Some(want));
+    }
+
+    /// The same mirror, on the S3's machine (M6 P08).
+    ///
+    /// A separate test rather than a loop over [`CHIPS`], because the fact
+    /// being checked is per-chip: the C6's machine has no `--core-quantum`
+    /// at all and has no constant to read, so "every chip's quantum mirrors
+    /// its machine" is not a statement this table can make.
+    #[test]
+    fn the_s3_core_quantum_mirrors_the_machines_default() {
+        let machine =
+            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../esp/lp-emu-esp32s3/src/machine.rs");
+        let source = std::fs::read_to_string(&machine).unwrap();
+        let line = source
+            .lines()
+            .find_map(|l| {
+                l.trim()
+                    .strip_prefix("pub const CORE_QUANTUM_DEFAULT: u64 = ")
+            })
+            .expect("`CORE_QUANTUM_DEFAULT` is declared in the machine");
+        let want: u32 = line
+            .trim_end_matches(';')
+            .trim()
+            .parse()
+            .expect("the machine's default is a number");
+        assert_eq!(
+            ESP32S3_CORE_QUANTUM_DEFAULT, want,
+            "the S3's `core_quantum` no longer mirrors the machine's default",
+        );
+        assert_eq!(ESP32S3.core_quantum, Some(want));
     }
 
     fn request(config: &str, payload: &str, port: Option<&str>) -> RunRequest {

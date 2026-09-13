@@ -9,7 +9,11 @@
 # builds `fw-esp32c6` for riscv32. `--chip esp32` — `esp32v3` is accepted as
 # the same thing, because that is what the emulator crate is called — builds
 # `fw-esp32v3` for **Xtensa**, on Espressif's Rust fork, through
-# `xtensa-esp32-elf-gcc`. M3 P8 added it; M6 adds the S3 by adding a case.
+# `xtensa-esp32-elf-gcc`. M3 P8 added it; M6 P08 added `--chip esp32s3`, which
+# builds `fw-esp32s3` for Xtensa through `xtensa-esp32s3-elf-gcc` — a different
+# binutils prefix, which is why the toolchain lookup is a per-chip value rather
+# than one `if`. The S3 takes no spike either, and for a stronger reason than
+# the classic's: the feature does not exist on that crate at all.
 #
 # ⚠️ **THE CLASSIC HAS NO SPIKE FEATURE, AND THAT IS THE POINT.** The C6's
 # reference images cherry-pick `spike_uart0_link` because the C6's own host
@@ -88,6 +92,8 @@
 #   boot-idle (esp32)             = esp32,server,float-f32
 #   shader-compile-stress (esp32) = esp32,test_shader_compile_incremental
 #   render-loop (esp32)           = esp32,server,float-f32,bench_render_loop
+#   boot-idle (esp32s3)             = esp32s3,server,float-f32
+#   shader-compile-stress (esp32s3) = esp32s3,test_shader_compile_incremental
 #
 # ⚠️ The two render-loop images are pinned at a DIFFERENT commit from the other
 # three, and must be: `bench_render_loop` does not exist at d6cfaa205. They also
@@ -135,6 +141,8 @@ case "$chip" in
         arch_cfg='cfg(target_arch = "riscv32")'
         default_commit="d6cfaa205"
         default_spike="e8d64eeff"
+        gcc="" # the C6 is RISC-V: rustc links it, no GNU toolchain lookup
+        no_spike_reason=""
         ;;
     esp32)
         crate="lp-fw/fw-esp32v3"
@@ -147,9 +155,33 @@ case "$chip" in
         # recorded at that a clean tree can reproduce (R7, the header).
         default_commit=""
         default_spike="none"
+        gcc="xtensa-esp32-elf-gcc"
+        no_spike_reason="the classic's host link IS UART0, so there is nothing to cherry-pick"
+        ;;
+    esp32s3)
+        crate="lp-fw/fw-esp32s3"
+        binary="fw-esp32s3"
+        target="xtensa-esp32s3-none-elf"
+        profile="release-esp32s3"
+        arch_cfg='cfg(target_arch = "xtensa")'
+        # No default, for the classic's reason: no historical commit of this
+        # chip's transcripts exists to reproduce — M6 P09 takes the first
+        # silicon capture, and it will name its own commit.
+        default_commit=""
+        # ⚠️ **Spike: `none`, and there is nothing to pass instead.** There is
+        # no `spike_uart0_link` on this chip and the firmware says so itself
+        # (`board/esp32s3/usb_connection.rs`: "The S3 has no
+        # `spike_uart0_link` build, so its link is always the real USB one").
+        # So the tree stays clean and `dirty: false` is the honest stamp —
+        # the same stamp a silicon flash of that commit carries.
+        default_spike="none"
+        # `just _xt-gcc-dir`'s own default binary; the classic is the one
+        # that has to name its prefix.
+        gcc="xtensa-esp32s3-elf-gcc"
+        no_spike_reason="this chip has no spike_uart0_link feature at all — its link is always the real USB-Serial-JTAG one"
         ;;
     *)
-        echo "build-reference-image: --chip $chip: known chips are esp32c6 and esp32 (alias esp32v3)" >&2
+        echo "build-reference-image: --chip $chip: known chips are esp32c6, esp32 (alias esp32v3) and esp32s3" >&2
         exit 2
         ;;
 esac
@@ -164,15 +196,16 @@ if [[ -z "$commit" ]]; then
     exit 2
 fi
 if [[ "$chip" != esp32c6 && "$spike" != none ]]; then
-    echo "build-reference-image: --chip $chip takes no spike ($spike): the classic's host link IS UART0, so there is nothing to cherry-pick" >&2
+    echo "build-reference-image: --chip $chip takes no spike ($spike): $no_spike_reason" >&2
     exit 2
 fi
 
-# The Xtensa link goes through xtensa-esp32-elf-gcc, which lives in the esp
-# toolchain rather than on a stock PATH (`just _xt-gcc-dir` is the same
-# lookup `build-fw-esp32v3` does).
-if [[ "$chip" == esp32 ]]; then
-    gcc_bin="$(just --justfile "$repo/justfile" _xt-gcc-dir xtensa-esp32-elf-gcc 2>/dev/null || true)"
+# The Xtensa link goes through the chip's own GNU binutils prefix, which lives
+# in the esp toolchain rather than on a stock PATH (`just _xt-gcc-dir` is the
+# same lookup `build-fw-esp32v3` / `build-fw-esp32s3` do — and the two chips
+# have different prefixes, `xtensa-esp32-elf-` against `xtensa-esp32s3-elf-`).
+if [[ -n "$gcc" ]]; then
+    gcc_bin="$(just --justfile "$repo/justfile" _xt-gcc-dir "$gcc" 2>/dev/null || true)"
     if [[ -n "$gcc_bin" ]]; then
         export PATH="$gcc_bin:$PATH"
     fi
@@ -205,6 +238,12 @@ case "$features" in
     # names they already print.
     esp32,test_shader_compile_incremental) slug=shader-compile-stress ;;
     esp32,server,float-f32,bench_render_loop) slug=render-loop ;;
+    # The S3's two (M6 P08), and the same two-file rule as the classic's above
+    # — `reference_image_slug` mirrors this `case`. The shipped default set is
+    # this chip's `boot-idle` image; there is no memfs variant, because
+    # `fw-esp32s3` declares no `memory_fs` feature.
+    esp32s3,server,float-f32) slug=boot-idle ;;
+    esp32s3,test_shader_compile_incremental) slug=shader-compile-stress ;;
     *) slug="${features//,/+}" ;;
 esac
 
@@ -475,9 +514,10 @@ image_drift() {
         || echo "the app descriptor is not stamped at SOURCE_DATE_EPOCH"
     # The `.rodata_merge` race is `fw-esp32c6/build.rs`'s: it patches esp-hal's
     # generated `rodata.x` and had no ordering edge against esp-hal's own
-    # script. `fw-esp32v3/build.rs` patches no linker script at all, so there
-    # is nothing to race and nothing to heal — asking for the section on an
-    # image that never has one would fail every classic build.
+    # script. `fw-esp32v3/build.rs` and `fw-esp32s3/build.rs` patch no linker
+    # script at all, so there is nothing to race and nothing to heal — asking
+    # for the section on an image that never has one would fail every Xtensa
+    # build.
     if [[ "$chip" == esp32c6 ]]; then
         ! LC_ALL=C grep -aq '\.rodata_merge' "$elf" \
             || echo "esp-hal's pristine rodata.x won the link (build.rs's patch missed the first build)"
