@@ -48,15 +48,8 @@ const argv = process.argv.slice(2);
 // `--check-only` is the identity half without the stopwatch (M7 P9): one full
 // pass over the recording, every field compared, then stop. That is what
 // `just test-emu-jit-identity` runs, and it is deliberately NOT the same call
-// as a bench row.
-//
-// It exists because the timing loop replays the recording over and over, and
-// a SECOND pass is not a replay of the same thing: the module's published-read
-// block (M7b P3) is refreshed inside `mmio_store`'s own crossing, which canned
-// answers do not perform, so from the second iteration on the module can ask
-// for a read the recording never recorded. The first pass is unaffected and is
-// the whole of the identity claim. See the crate README, "What the replay
-// harness was getting wrong (P5)", and follow-up F5.
+// as a bench row — a bench row's first pass checks the same things, and then
+// spends seconds not checking them.
 const checkOnly = argv.includes("--check-only");
 const positional = argv.filter((a) => !a.startsWith("--"));
 const dir = positional[0];
@@ -69,6 +62,17 @@ if (!dir || !modulePath) {
 
 const meta = JSON.parse(readFileSync(join(dir, "meta.json"), "utf8"));
 const wasm = readFileSync(modulePath);
+
+// A recording taken before F5 has 40-byte calls and no published-read state,
+// and reading it with this file's layout would compare the wrong bytes and
+// blame the module. Refuse it by name instead.
+if (meta.callBytes === undefined || meta.fast === undefined) {
+  console.error(
+    `${dir} was written before follow-up F5 and does not carry the published-read ` +
+      "block's state; re-record it with a current --jit-record build.",
+  );
+  process.exit(2);
+}
 
 // ---- the recording --------------------------------------------------------
 
@@ -87,7 +91,25 @@ function readImage() {
   return out;
 }
 
-const CALL_BYTES = 40;
+// One `CallRec` on disk. `jit_record.rs`'s `CALL_BYTES` is the other half of
+// this number; `meta.callBytes` carries what the recording was actually
+// written with, so a stale recording says so instead of being misread.
+const CALL_BYTES = 56;
+// Where inside one what F5 appended lives: the tag that says what the call did
+// to the published-read block, and the words it published. `jit_record.rs`'s
+// `FastAfter` is the same three cases by name.
+const CALL_FAST = 28;
+const CALL_FAST_WORDS = 40;
+const TAG_LEFT_ALONE = 0;
+const TAG_DISARMED = 1;
+const TAG_ARMED = 2;
+
+if (meta.callBytes !== CALL_BYTES) {
+  console.error(
+    `${dir} has ${meta.callBytes}-byte import calls, this harness reads ${CALL_BYTES}-byte ones`,
+  );
+  process.exit(2);
+}
 
 function readEntries() {
   const buf = readFileSync(join(dir, "entries.bin"));
@@ -171,6 +193,24 @@ const EXCHANGE_FLAGS = 144;
 const EXCHANGE_CROSS = 152;
 const X = meta.exchange;
 
+// ---- the published-read block, as the host maintains it (M7b P3, F5) ------
+//
+// The module answers some SYSTIMER word reads out of a small block in the
+// arena instead of crossing to `mmio_load`, and the block is **host** state:
+// `jit.rs` disarms it before every entry and republishes it inside
+// `mmio_store`'s own crossing. A replay has no host, so without reproducing
+// both the module's fast reads sit disarmed where the real run's were armed
+// and it calls `mmio_load` for reads the recording never recorded —
+// `entry N, call M: the module asked for kind 0 where the recording has 1`.
+// That was follow-up F5, and it is why a recording carries the block's state
+// beside the call that set it.
+//
+// `null` when this machine published nothing: no table was folded into the
+// module, so the block is never read and there is nothing to reproduce.
+const FAST_ARMED = 0;
+const FAST_WORDS = 16;
+const F = meta.fast ?? null;
+
 const memory = new WebAssembly.Memory({ initial: meta.pages });
 const bytes = new Uint8Array(memory.buffer);
 const view = new DataView(memory.buffer);
@@ -211,7 +251,42 @@ function nextCall(kind, pc, address) {
         `${c.getUint32(at + 4, true).toString(16)} / ${c.getUint32(at + 16, true).toString(16)}`,
     );
   }
+  applyFast(at);
   return at;
+}
+
+// Put the published-read block where the call left it in the real run.
+//
+// Called from `nextCall`, once the record is known to be the right one and
+// before its answer is read: a store's own republish then lands exactly where
+// `jit.rs`'s `mmio_store` put it — after the bus wrote, and before translated
+// code runs another instruction.
+//
+// The counters are so `--check-only` can SAY whether the recording exercised
+// the path at all. A window that never arms it replays fine and proves
+// nothing about F5, and `jit-replay-identity.sh` refuses such a run rather
+// than reporting a green that covers nothing.
+let fastArmedCalls = 0;
+let fastDisarmedCalls = 0;
+
+function applyFast(at) {
+  if (F === null) return;
+  const c = current.calls;
+  const tag = c.getUint32(at + CALL_FAST, true);
+  if (tag === TAG_LEFT_ALONE) return;
+  if (tag === TAG_DISARMED) {
+    fastDisarmedCalls++;
+    view.setInt32(F + FAST_ARMED, 0, true);
+    return;
+  }
+  if (tag !== TAG_ARMED) {
+    throw new Error(`entry ${current.entry}, call ${cursor - 1}: unknown published-read tag ${tag}`);
+  }
+  for (let i = 0; i < 4; i++) {
+    view.setUint32(F + FAST_WORDS + 4 * i, c.getUint32(at + CALL_FAST_WORDS + 4 * i, true), true);
+  }
+  fastArmedCalls++;
+  view.setInt32(F + FAST_ARMED, 1, true);
 }
 
 const imports = {
@@ -281,6 +356,12 @@ function iteration(check, noRun = false) {
   let retired = 0n;
   for (const e of entries) {
     for (const d of e.delta) bytes.set(d.bytes, d.offset);
+    // What `JitCore::run` does to the published-read block before every
+    // entry, unconditionally: whatever it holds was published in an earlier
+    // stay and the interpreter has run since, so a stay only ever trusts a
+    // word it saw published inside itself (M7b P3). Unconditional there is
+    // why nothing has to be recorded for it here.
+    if (F !== null) view.setInt32(F + FAST_ARMED, 0, true);
     regFile.set(e.regsIn, 1);
     regFile[0] = 0;
     view.setBigUint64(X + EXCHANGE_CYCLE, e.cycleIn, true);
@@ -342,7 +423,10 @@ function iteration(check, noRun = false) {
 // import call count. A fast wrong number is worse than no number.
 restore();
 crosses = 0n;
+fastArmedCalls = 0;
+fastDisarmedCalls = 0;
 const checked = iteration(true);
+const fastPass = { armed: fastArmedCalls, disarmed: fastDisarmedCalls };
 const crossesPerIteration = crosses;
 if (checked !== BigInt(meta.retired)) {
   throw new Error(`the recording says ${meta.retired} instructions, the replay retired ${checked}`);
@@ -370,7 +454,8 @@ if (checkOnly) {
   console.log(
     `${engine}: identity OK — ${meta.entries} entries, ${meta.retired} instructions, ` +
       `exit pc + cycle + instret + flags + x1..x31 + import call count on every one ` +
-      `(${modulePath}, ${wasm.length} B, ${meta.fnBlocks} blocks/fn)`,
+      `(${modulePath}, ${wasm.length} B, ${meta.fnBlocks} blocks/fn); ` +
+      `published-read block armed ${fastPass.armed}, disarmed ${fastPass.disarmed}`,
   );
   process.exit(0);
 }
@@ -403,6 +488,8 @@ console.log(
     crossPerThousandInstr: Number(
       ((crossesPerIteration * 1000n) / BigInt(meta.retired)).toString(),
     ),
+    fastArmedPerIteration: fastPass.armed,
+    fastDisarmedPerIteration: fastPass.disarmed,
     firstSecondIterations: first.iterations,
     steadyIterations: steady.iterations,
     identity: "checked",

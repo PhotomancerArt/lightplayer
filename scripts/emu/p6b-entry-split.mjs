@@ -57,7 +57,25 @@ function readImage() {
   return out;
 }
 
-const CALL_BYTES = 40;
+// One `CallRec` on disk: 40 bytes before follow-up F5 appended the
+// published-read block's state, 56 after. `meta.callBytes` says which, and a
+// recording without it would be misread rather than refused.
+const CALL_BYTES = 56;
+const CALL_FAST = 28;
+const CALL_FAST_WORDS = 40;
+if (meta.callBytes !== CALL_BYTES) {
+  console.error(`${dir} has ${meta.callBytes ?? 40}-byte import calls, this harness reads ${CALL_BYTES}-byte ones; re-record it`);
+  process.exit(2);
+}
+
+// The published-read block (M7b P3) is HOST state that translated code reads:
+// `jit.rs` disarms it before every entry and republishes it inside
+// `mmio_store`'s own crossing. A replay has no host, so the recording carries
+// what each call did to it and this puts that back — without which the module
+// asks for reads the recording never recorded. See `jit-image-bench.mjs`,
+// which explains it at length, and follow-up F5.
+const FAST_ARMED = 0, FAST_WORDS = 16;
+const F = meta.fast ?? null;
 
 function readEntries() {
   const buf = readFileSync(join(dir, 'entries.bin'));
@@ -103,7 +121,18 @@ function nextCall(kind, pc, address) {
   if (c.getUint8(at) !== kind || c.getUint32(at + 4, true) !== (pc >>> 0) || c.getUint32(at + 16, true) !== (address >>> 0)) {
     throw new Error(`entry ${current.entry}, call ${cursor - 1}: the module and the recording disagree`);
   }
+  applyFast(at);
   return at;
+}
+function applyFast(at) {
+  if (F === null) return;
+  const tag = current.calls.getUint32(at + CALL_FAST, true);
+  if (tag === 0) return;
+  if (tag === 1) { view.setInt32(F + FAST_ARMED, 0, true); return; }
+  for (let i = 0; i < 4; i++) {
+    view.setUint32(F + FAST_WORDS + 4 * i, current.calls.getUint32(at + CALL_FAST_WORDS + 4 * i, true), true);
+  }
+  view.setInt32(F + FAST_ARMED, 1, true);
 }
 const imports = { emu: {
   memory,
@@ -126,6 +155,8 @@ const run = instance.exports.run;
 /** One entry, exactly as `jit-image-bench.mjs` runs it. */
 function one(e) {
   for (const d of e.delta) bytes.set(d.bytes, d.offset);
+  // What `JitCore::run` does before every entry, unconditionally (M7b P3).
+  if (F !== null) view.setInt32(F + FAST_ARMED, 0, true);
   regFile.set(e.regsIn, 1);
   regFile[0] = 0;
   view.setBigUint64(X + EXCHANGE_CYCLE, e.cycleIn, true);
@@ -144,6 +175,8 @@ function one(e) {
 const noRun = process.env.P6B_NO_RUN === '1';
 function onePrep(e) {
   for (const d of e.delta) bytes.set(d.bytes, d.offset);
+  // What `JitCore::run` does before every entry, unconditionally (M7b P3).
+  if (F !== null) view.setInt32(F + FAST_ARMED, 0, true);
   regFile.set(e.regsIn, 1);
   regFile[0] = 0;
   view.setBigUint64(X + EXCHANGE_CYCLE, e.cycleIn, true);
