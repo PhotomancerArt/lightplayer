@@ -9,22 +9,25 @@ run loop, and the result takes a `fw-esp32s3` binary.
 It is `lp-emu-esp32v3`'s twin — same hart, same shape, same module names — and
 `lp-emu-esp32c6`'s where the peripherals are concerned.
 
-> **M6 P04. The blocks before the console answer, and a strict run of the
-> shipped image gets past `esp_hal::init` and stops at the console.**
+> **M6 P05. The link works: the shipped image prints its `[INIT]` chain out
+> of USB-Serial-JTAG, to a host a script or a socket can plug in and unplug.**
 >
 > **What exists:** the memory map ([`src/memmap.rs`](src/memmap.rs)), the bus
 > it builds ([`src/bus_setup.rs`](src/bus_setup.rs)) **with SRAM1's I-bus view
 > as a RAM alias**, the mask-ROM loader ([`src/rom.rs`](src/rom.rs)), the
 > direct load ([`src/loader.rs`](src/loader.rs)), two hart slots and the
 > quantum run loop ([`src/machine.rs`](src/machine.rs)), the snapshot, the
-> generated register tables, a binary — `just emu-esp32s3 <elf>` — and, from
-> P04, **every peripheral block the boot touches before it needs the
-> console** ([`src/periph/`](src/periph/), [`src/intmatrix.rs`](src/intmatrix.rs);
-> the table below), including **the RWDT that really runs**.
+> generated register tables, a binary — `just emu-esp32s3 <elf>` — **every
+> peripheral block the boot touches before it needs the console**
+> ([`src/periph/`](src/periph/), [`src/intmatrix.rs`](src/intmatrix.rs); the
+> table below) including **the RWDT that really runs**, and — from P05 — **the
+> console and the host's side of its cable**
+> ([`src/periph/usb_sj.rs`](src/periph/usb_sj.rs),
+> [`src/control.rs`](src/control.rs)).
 >
-> **What does not exist:** the console and the link (`USB_DEVICE`, P05) —
-> which is where a strict run now stops — the flash cache and the ROM-up
-> boot (P06), and the pad fabric and RMT (P07).
+> **What does not exist:** the flash controller, the cache MMU, SHA and the
+> ROM-up boot (P06) — which is where the boot now stops — and the pad fabric
+> and RMT (P07).
 
 ## Running it
 
@@ -48,28 +51,48 @@ must be visible in that phase's diff. `--help` lists what exists.
    disassembly, a linker-script constant. Never "what the boot needed".
 4. Run again.
 
-P04's run of the shipped image stops here — **past `esp_hal::init`, at the
-console**, which is P05's:
+P04's run stopped at the console — `0x6003_8004`, `USB_DEVICE.ep1_conf`, at
+cycle 2,137,399, `esp_println`'s `jtag-serial` writer asking whether the IN
+endpoint had room for the first byte of `[INIT]`. P05 models that block, so
+**a strict run of the shipped image now refuses nothing**: it reaches its
+deadline with `unmapped = 0`, and the whole `[INIT]` chain comes out of the
+link.
 
 ```text
-STRICT BUS STOP
-  pc      = 0x420a5a91 (esp_println::Printer::write_bytes+0x9)
-  cycle   = 2137399 (8905 us emulated)
-  access  = Read Word at 0x60038004
-  where   = inside the declared peripheral window — an UNMODELLED BLOCK
+$ just emu-esp32s3 …/fw-esp32s3 --strict-bus --usb-host attached --timeout 2s
+[INIT] fw-esp32s3 boot
+[INIT] chip=esp32s3 arch=xtensa heap=245760
+[RECOVERY] boot: cause=power-on level=green safe_mode=false prior_boot_complete=true
+[RECOVERY] RWDT armed: boot 30000 ms, runtime 8000 ms
+[INIT] runtime started
+[INIT] I/O task spawned
+usb-sj: host attached at power-on; 253 bytes reached the host; 0 bytes were merely tried
+run: cycles=480000000 … unmapped=0 (reads 0, writes 0, 0 sites) …
 ```
 
-(On the image before P04b's heap-ledger lines the same stop was at cycle
-2,098,417; the eighteen first-touch cycles in the table below did not move,
-because every one of them is before the code that changed.)
+⚠️ **Where it stops now is P06's, and it is a spin rather than a refusal.**
+After `[INIT] I/O task spawned` the image mounts its filesystem, which is a
+flash read: `esp_storage` sets `SPI1.cmd` bit 28 (`usr`) and spins until
+hardware clears it. `SPI1` is an accept block, so the bit stays set — exactly
+what [`periph::accept::spi1`](src/periph/accept.rs)'s own doc predicted in
+P04. So the `lpfs` mount failure, the memory-filesystem fallback and
+`[INIT] fw-esp32 initialized, starting server loop` are **P06's** readings,
+not P05's, and `tests/boot_idle.rs` pins their absence with the register the
+run is spinning on. The heap-ledger triple (`[stack]`, `[MEM]`, `[JIT]`) is
+behind the same door: it is **elicited** by a request, and a request is
+answered by the server loop.
 
-`0x6003_8004` is `USB_DEVICE.ep1_conf`: `esp-println`'s `jtag-serial` writer
-checking whether the IN endpoint has room for the first byte of `[INIT]`.
-Every block before it answered, in the order below. P03's stop — `SENSITIVE +
-0x04` from the mask ROM's `Cache_Occupy_ICache_MEMORY+0xc` at cycle 36 — is
-now the first line of the trace, and `tests/boot.rs` asserts that line's pc is
-mask-ROM code, because on this chip the ROM really executing is not a
-formality (§2.5: `memcpy` alone is 4,769 call sites).
+⚠️ **The heap line is a single number**, `heap=245760` (`HEAP_SIZE = 240 *
+1024`), where the classic prints a four-region sum. Anything comparing the two
+chips' boot captures must not expect the same line. There is no
+`[INIT] main stack <N> B` line either; the S3's 37,280 B total appears in
+every `[stack]` line's `of <total> B`.
+
+P03's stop — `SENSITIVE + 0x04` from the mask ROM's
+`Cache_Occupy_ICache_MEMORY+0xc` at cycle 36 — is now the first line of the
+trace, and `tests/boot.rs` asserts that line's pc is mask-ROM code, because on
+this chip the ROM really executing is not a formality (§2.5: `memcpy` alone is
+4,769 call sites).
 
 ## The peripherals, in the order the boot met them
 
@@ -101,6 +124,7 @@ otherwise; **nothing is `measured`** — no S3 silicon has been read yet.
 | 16 | `FE2` | 2,097,917 | accept, one register (`tx_interp_ctrl`) | fresh |
 | 17 | `TIMG1` | 2,098,065 | the same view; met only for its watchdog disable | the C6's |
 | 18 | `SYSTIMER` | — | **the S3's `Instant::now()`**: Unit0 at XTAL/2.5 = 16 MHz, one tick per 15 cycles, `micros = ticks >> 4`; three comparators. ⚠️ Not reached before the console — `time_init` on this chip touches no register — but registered, and `tests/clock.rs` pins the derivation | the C6's `systimer.rs`, verbatim |
+| 19 | `USB_DEVICE` | 2,137,399 | **the link, and the console on it** — the host's three states and the transitions between them, source 96. ⚠️ **Appended, not inserted**: the boot meets it *before* `SYSTIMER`, but re-sorting the pair would move `SYSTIMER`'s index and the bus packs that index into every scheduler event id | the C6's view, **moved** to `lp-emu-esp-common/src/ip/usb_sj.rs` and parameterised |
 
 Which parent each block came from matters, and the wrong one is silently
 wrong (`m6/notes.md` §3): `RTC_CNTL`, `I2C_ANA_MST` and the matrix are the
@@ -145,6 +169,74 @@ through `SYSTEM.cpu_intr_from_cpu0` with `INTENABLE` still 0, performs one
 more MMIO store — the store that zeroed the mask under X43 — then enables the
 line, and asserts the take followed within a few instructions (CCOUNT 12 →
 20) rather than at the next 256-cycle window boundary. Never single-stepped.
+
+## The link, and what a host can and cannot do to this chip through it
+
+The console **is** the link: `esp-println` with the `jtag-serial` feature
+writes `ep1` by raw MMIO, and there is no `spike_uart0_link` build of this
+firmware — its own module says so, *"The S3 has no `spike_uart0_link` build,
+so its link is always the real USB one and SOF always gates writes"*. One
+image, one link, no cherry-pick. `--console <path>` therefore writes the
+`usb-sj` stream.
+
+The model is the C6's, **moved** rather than copied (ruling D1 (b) / DD64):
+`lp-emu-esp-common/src/ip/usb_sj.rs` holds the view and this crate's
+[`src/periph/usb_sj.rs`](src/periph/usb_sj.rs) holds the S3's parameters. The
+host has three states and the transitions between them are the product:
+
+| state | `--usb-host` | `int_raw.sof` | what the guest sees |
+|---|---|---|---|
+| no cable | `absent` | never | the first packet commits and `free` never comes back; esp-println latches `TIMED_OUT` and the console falls silent |
+| cable in, port closed | `attached-idle` | every 1 ms | the packet is **held**, not dropped; an `open` delivers it |
+| cable in, application draining | `attached` | every 1 ms | packets cross after 100 us (*modeled*) |
+
+Two sockets drive it, and they are different things. `--usb-sj tcp:<addr>`
+carries **bytes** — `lp-cli … serial:tcp://` connects to it unchanged — and a
+client connecting **is** an application opening the port (`--usb-sj-drain
+manual` decouples them). `--control tcp:<addr>` carries the **cable**, one
+line per command and one reply per command: `attach`, `detach`, `open`,
+`close`, `dtr`, `rts`, `signals`, `reset`, `download-mode`, `state`,
+`usb-write`. `attach` and `detach` are never implied by a socket: a cable is
+not a port open, and the whole reason to model a host is that the two come
+apart. `--usb-script <file>` is the deterministic twin — declared **emulated**
+times, plus `after "<line>"` and `then +<ms>` — and two runs of one script
+deliver identical bytes at identical cycles; a socket is host time and is
+only auditable.
+
+### ⚠️ Three things a reader who knows the C6 will look for and not find
+
+1. **No `chip_rst`, so a serial-channel reset is unconditional and the guest
+   has no say.** `0x4c`…`0x7c` is reserved on this part
+   (`esp32s3-0.35.2/src/usb_device.rs:22`): there is no
+   `disable_usb_serial_chip_reset` bit for a guest to set, so `reset` and
+   `download-mode` always take effect, and the C6's `err` reply naming that
+   bit has no counterpart here. (`bus_reset_st` is missing for the same
+   reason, so a bus reset releases nothing.) With `--reboot-on-reset` the
+   machine goes back to its power-on state and runs again; without it the run
+   ends and names who asked, exit code 2.
+2. **The shipped image never reads DTR or RTS.**
+   `UsbConnectionMonitor::poll` reads `int_raw.sof` and clears it and does
+   nothing else, and `int_raw` bits 12–15 are not declared on this part at
+   all. The `dtr` / `rts` / `signals` verbs stay because a host really does
+   assert those lines — esptool's dances are made of them, and P06's flasher
+   path needs them — they simply reach no guest-visible register.
+3. **No `pin` / `pins`, and no CH340 truth table.** The pad verbs are the
+   fabric's and the fabric is P07's, so the parser refuses them **by name**
+   with the phase that owns them rather than as a typo. And the classic's
+   auto-reset truth table is about a wire between a USB-serial bridge and two
+   pins of the chip; this link *is* the chip, which is why an S3 can be
+   flashed over Web Serial at all, and why **a reset does not re-enumerate
+   the port** — only `detach` then `attach` mints a new one.
+
+### Grades: every register of this block is `modeled`
+
+⚠️ **A transcript recorded on a C6 is a measurement of a C6.** The six
+`measured` grades the C6's block carries were bought by four committed
+transcripts under `lp-emu/transcripts/esp32c6/`, replayed against silicon
+captures of *that* chip. No S3 silicon has been read (P09 owns that), so this
+chip's grade table is **empty** and every register answers `modeled` — the
+data path included. A run under `--strict-grade documented` stops at the first
+register the console touches, which is correct and is what the flag is for.
 
 ## Three things about this machine that its siblings do not have
 

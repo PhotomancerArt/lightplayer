@@ -349,6 +349,98 @@ fn the_boot_stops_where_p06_begins() {
     );
 }
 
+/// **G5-6 — the scripted host, and its determinism.**
+///
+/// `--usb-script` is the deterministic twin of the two sockets: the cable
+/// schedule and the host's bytes are in a file, at declared **emulated**
+/// times, so two runs of one script deliver identical bytes at identical
+/// cycle counts. A socket is host time and is only auditable; a script is
+/// guest time and reproduces.
+///
+/// The script here exercises both walk forms. `after "<line>"` waits on what
+/// the **device said on this link** — the same log a host on the socket would
+/// have read, which is what lets one walk file replay over either link — and
+/// `then +<ms>` paces the host after its own last chunk.
+#[test]
+#[ignore = "needs LP_EMU_ESP32S3_ELF; run through `just test-emu-esp32s3-boot`"]
+fn a_usb_script_resolves_its_walk_forms_and_two_runs_are_the_same_run() {
+    let Ok(elf) = test_support::fw_esp32s3_image() else {
+        test_support::skip_notice(
+            "a_usb_script_resolves_its_walk_forms_and_two_runs_are_the_same_run",
+            "no image",
+        );
+        return;
+    };
+    // The cable goes in at 1 ms and the port opens at 2 ms — so the first
+    // line is printed into an endpoint with nobody there, and the transition
+    // is what delivers it. Then the host answers the boot: one chunk when the
+    // device says it spawned its io task, a second 2 ms after the first.
+    const SCRIPT: &str = "\
+1   attach
+2   open
+after \"[INIT] I/O task spawned\" +1ms \"M!{\\\"id\\\":1}\\n\"
+then +2ms 4d 21 0a
+";
+    let build = || {
+        let script = lp_emu_esp32s3::control::parse_usb_script(SCRIPT).expect("the script parses");
+        assert_eq!(script.commands.len(), 2, "attach and open");
+        let mut machine = Esp32S3Builder::new()
+            .app(AppSource::Path(elf.clone()))
+            .strict(true)
+            .usb_host(UsbHost::Absent)
+            .usb_script(script.commands)
+            .usb_script_source(script.bytes)
+            .build()
+            .expect("the shipped image direct-loads");
+        let outcome = machine.run_until(&StopCondition {
+            stop_cycle: Some(GATE_US * memmap::CYCLES_PER_US),
+            ..Default::default()
+        });
+        (machine, outcome)
+    };
+
+    let (mut a, outcome) = build();
+    assert!(matches!(outcome, Outcome::Deadline { .. }), "{outcome:?}");
+    assert_eq!(a.control_lines(), 2, "both cable commands applied");
+    assert_eq!(a.scripted_commands_left(), 0, "and both came due");
+    // The cable is in and the port open by 2 ms, and the firmware's first
+    // line is not printed until ~8.7 ms, so a draining host takes the whole
+    // chain: the script's timing is the reason nothing is merely tried.
+    assert_eq!(
+        String::from_utf8_lossy(&a.usb_sj()),
+        HELLO,
+        "the whole chain, delivered to a host the script plugged in"
+    );
+    assert!(a.usb_sj_tried().is_empty());
+    assert_eq!(a.usb_host_now(), Some(UsbHost::Attached { draining: true }));
+
+    // **Both walk forms resolved.** The `after` step waited on a line the
+    // device printed on this link and the `then` step on its own predecessor,
+    // so 11 + 3 host bytes crossed; the guest is spinning on P06's flash read
+    // and never reads them, which is why they are still queued.
+    let reply = a.apply_control_now(&lp_emu_esp32s3::control::ControlCommand::State);
+    let lp_emu_esp32s3::control::ControlReply::State { host, .. } = reply else {
+        panic!("`state` answers a HostReport: {reply}");
+    };
+    assert!(host.attached && host.draining && host.sof);
+    assert_eq!(
+        host.out_queued, 14,
+        "`after \"…\"` delivered 11 bytes and `then +2ms` three more"
+    );
+
+    let (b, _) = build();
+    assert_eq!(a.usb_sj(), b.usb_sj(), "identical bytes");
+    assert_eq!(a.cycles(), b.cycles(), "at identical cycles");
+    assert_eq!(a.usb_sj_tried(), b.usb_sj_tried());
+    println!(
+        "USB SCRIPT: {} delivered, {} tried, {} commands, {} cycles — twice",
+        a.usb_sj().len(),
+        a.usb_sj_tried().len(),
+        a.control_lines(),
+        a.cycles()
+    );
+}
+
 /// **The ledger triple, and why it is not here.**
 ///
 /// P04b (PR #742) gave this image the classic's `[stack]` / `[MEM]` / `[JIT]`

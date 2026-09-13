@@ -258,7 +258,17 @@ fn shipped(strict: bool) -> Option<Machine> {
     )
 }
 
-/// Two runs of the shipped image are the same run, down to the strict stop.
+/// Two runs of the shipped image are the same run.
+///
+/// ⚠️ **The assertion about the stop inverted in M6 P05**: P04's version
+/// asserted `first_violation.is_some()`, because the console was the one
+/// block nothing modelled and its refusal was that phase's deliverable. P05
+/// models the console, so a strict run of this image now refuses nothing —
+/// it runs to the deadline, spinning on `SPI1.cmd.usr`, which is **P06's**
+/// stop and not a bus refusal at all (`tests/boot_idle.rs` pins it).
+///
+/// The console sha is the load-bearing half either way, and it is now a sha
+/// of something: P04's console was empty, and P05 gives it 253 bytes.
 #[test]
 #[ignore = "needs LP_EMU_ESP32S3_ELF; run through `just test-emu-esp32s3-boot`"]
 fn two_runs_of_the_shipped_image_agree_on_everything() {
@@ -274,8 +284,10 @@ fn two_runs_of_the_shipped_image_agree_on_everything() {
     let b = run_and_observe(&mut second, deadline);
     assert_eq!(a, b);
     assert!(
-        a.first_violation.is_some(),
-        "the strict run stopped, and the stop is the deliverable"
+        a.first_violation.is_none(),
+        "P04's stop was the console and P05 models it: nothing is refused any more, and a \
+         refusal here is a block a later phase has to name — got {:?}",
+        a.first_violation
     );
     println!(
         "SHIPPED DETERMINISM: console sha {} ({} B), {} cycles, {} instructions, stop {}",

@@ -1,4 +1,5 @@
-//! The S3's peripheral set — **the blocks before the console** (M6 P04).
+//! The S3's peripheral set — **the blocks before the console** (M6 P04),
+//! **and the console** (M6 P05).
 //!
 //! Every block here is one of three things, and each file says which:
 //!
@@ -8,15 +9,22 @@
 //!   runs**, the super-watchdog), [`timg`] (two counters per group, the
 //!   RTC calibration, the MWDT gate), [`systimer`] (the S3's
 //!   `Instant::now()`), [`efuse`] (the MAC and the wafer version),
-//!   [`i2c_ana_mst`] (the analog master as a `{block, register}` store), and
-//!   the two halves of the interrupt matrix ([`crate::intmatrix`]);
+//!   [`i2c_ana_mst`] (the analog master as a `{block, register}` store),
+//!   [`usb_sj`] (**the link, and the console on it**), and the two halves of
+//!   the interrupt matrix ([`crate::intmatrix`]);
 //! - **accept-and-remember** — a [`lp_emu_esp_common::RegFile`] seeded from
 //!   the PAC's resets, with the bits something spins on pinned to a cited
 //!   value ([`accept`]): `SENSITIVE`, `EXTMEM`'s boot registers, `SPI0`,
 //!   `SPI1`, `APB_CTRL`, `BB`, `NRX`, `FE`, `FE2`;
 //! - **not modelled** — left unmapped on purpose, so a strict run stops on
-//!   them: the console (`USB_DEVICE`, P05), the flash cache and SHA (P06),
-//!   the pad fabric and RMT (P07).
+//!   them: the flash cache and SHA (P06), the pad fabric and RMT (P07).
+//!
+//! ⚠️ [`usb_sj`] is the one block here that is **not** the S3's own file: it
+//! is the C6's view, moved to [`lp_emu_esp_common::ip::usb_sj`] and
+//! parameterised (ruling D1 (b) / DD64), because the two chips' PACs agree on
+//! that layout offset-for-offset. The S3's file is the chip's parameters and
+//! nothing else — and the two registers this part does not have sit behind a
+//! capability it withholds.
 //!
 //! Every constant that is a *guess* is marked `modeled` where it is defined;
 //! nothing here is `measured` — no S3 silicon has been read yet.
@@ -41,6 +49,13 @@
 //! list re-points already-scheduled events; a block a later phase adds goes
 //! **in its place in the list** — where the boot meets it — never appended
 //! for convenience.
+//!
+//! ⚠️ **`USB_DEVICE` is the exception, and it is appended.** The boot meets
+//! the console a few hundred cycles *before* it meets `SYSTIMER`, which P04
+//! registered last on the expectation that `Instant::now()` would be the last
+//! thing reached. Putting the console in the boot's order would move
+//! `SYSTIMER`'s index — which is the thing this rule exists to prevent — so
+//! the index contract wins and the list's comment carries the narrative.
 
 pub mod accept;
 pub mod efuse;
