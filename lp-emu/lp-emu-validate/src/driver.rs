@@ -1922,12 +1922,15 @@ mod tests {
     /// lies is worse than one that is absent.
     #[test]
     fn the_classic_core_quantum_mirrors_the_machines_default() {
-        let machine = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("../esp/lp-emu-esp32v3/src/machine.rs");
+        let machine =
+            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../esp/lp-emu-esp32v3/src/machine.rs");
         let source = std::fs::read_to_string(&machine).unwrap();
         let line = source
             .lines()
-            .find_map(|l| l.trim().strip_prefix("pub const CORE_QUANTUM_DEFAULT: u64 = "))
+            .find_map(|l| {
+                l.trim()
+                    .strip_prefix("pub const CORE_QUANTUM_DEFAULT: u64 = ")
+            })
             .expect("`CORE_QUANTUM_DEFAULT` is declared in the machine");
         let want: u32 = line
             .trim_end_matches(';')
