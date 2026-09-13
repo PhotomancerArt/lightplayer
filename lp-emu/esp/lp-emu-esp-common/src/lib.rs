@@ -48,6 +48,7 @@ pub mod bus;
 pub mod elf;
 pub mod engine;
 pub mod host;
+pub mod ip;
 pub mod periph;
 pub mod pins;
 pub mod regfile;
