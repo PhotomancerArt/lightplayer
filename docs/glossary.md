@@ -178,14 +178,23 @@ of implementation — code can lag these names during the transition.
 - **real** — silicon on the desk, or a real desktop LightPlayer server on
   the network. See [the device ADR](adr/2026-09-07-always-a-device-target-real-emu-sim.md).
 - **emu** — the real firmware binary for the target's chip, running in
-  `lp-emu` (boards only — there is no desktop emu). Exact; slower. See
-  [the device ADR](adr/2026-09-07-always-a-device-target-real-emu-sim.md).
+  `lp-emu` (boards only — there is no desktop emu) — in a Worker in the
+  tab (mode A), or behind the native door for the agent walk (mode B).
+  Exact; slower. See
+  [the device ADR](adr/2026-09-07-always-a-device-target-real-emu-sim.md)
+  and [the tab ADR](adr/2026-09-10-the-c6-emulator-runs-in-the-tab.md).
 - **sim** — the desktop firmware (`fw-browser` = fw-desktop running in
   the browser) wearing the target's manifest — any target. Fast; not
   exact. The desktop sim wears the desktop manifest; a board sim wears
   that board's. See [the device ADR](adr/2026-09-07-always-a-device-target-real-emu-sim.md).
 - **preview** — the sim engine used internally for gallery previews.
   Never a device. See [the device ADR](adr/2026-09-07-always-a-device-target-real-emu-sim.md).
+- **tab backing** — the wasm backing of `EmulatorPort`: one dedicated Web
+  Worker holding an `lp-emu-esp32c6` wasip1 module, driven one guest slice
+  at a time. A `ByteStreamLink` (mode A, the user's emu device) and the
+  `navigator.serial` polyfill (mode B, `?emu=tab`, the server-less walk)
+  are its two consumers; neither learns the other exists. See
+  [the tab ADR](adr/2026-09-10-the-c6-emulator-runs-in-the-tab.md).
 - **Emulator / simulator** — the things, never devices: an emulator runs
   the real binary; the simulator is the desktop firmware running in the
   browser (`fw-browser`).
@@ -195,13 +204,17 @@ of implementation — code can lag these names during the transition.
   run the same load path, so model semantics behave identically.
 - **Dilation** — guest microseconds advanced per wall microsecond elapsed,
   over a sliding window: how far behind real time an emulated board is
-  running. `0.4×` means four hundred milliseconds of chip for every second of
-  clock. It is always a **measurement**, never a bound — a property of the
-  host, the workload *and* which core the machine installed (the wasm build
+  running; the tab worker's own measure, and the band's speed word (`0.4×`,
+  four hundred milliseconds of chip for every second of clock). It is
+  always a **measurement**, never a bound — a property of the host, the
+  workload *and* which core the machine installed (the wasm build
   translates by default, but a `boot=rom-up` board interprets, so the same
-  code can be quoted at two rates). Nothing asserts one: a test that compared
-  a wall duration would be measuring the machine it ran on. An absent number
-  is reported as absent rather than guessed.
+  code can be quoted at two rates). Reported, never built around: a slow or
+  hidden tab drops its deficit and re-anchors to now rather than sprinting
+  to catch up. `None` until the first measurement exists, and nothing
+  asserts one — a test that compared a wall duration would be measuring
+  the machine it ran on. See
+  [the tab ADR](adr/2026-09-10-the-c6-emulator-runs-in-the-tab.md).
 - **Probe** — a read-only wire query of runtime state (e.g. the
   binding-graph probe feeding bus views).
 - **Story** — a captured Studio component state used for visual baselines

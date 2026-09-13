@@ -8,6 +8,11 @@
 // `/lpa-link/emulator_tab.js` rather than by a bundler edge — the same shape
 // `browser_serial.js` uses for the device controller it loads.
 //
+// `EmulatorTabStream` / `EmulatorTabControl` (`mod.rs` in this directory) are
+// the Rust side of this handle; `docs/adr/2026-09-10-the-c6-emulator-runs-in-the-tab.md`
+// is the decision record for the shape (rule 1 and its Consequences on why a
+// handle rather than the port object).
+//
 // # Why a numeric handle and not the port object
 //
 // `DeviceByteStream` (lpa-client) is `Send` and synchronous. A Rust struct

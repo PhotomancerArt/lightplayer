@@ -114,3 +114,14 @@ unfaithful in the one dimension the plan's own anti-oracle warned about from
 the other side: *a socket is not deterministic, assert outcomes not cycles* —
 and here an outcome (the watchdog) turned out to be a function of cycles after
 all, because the firmware's own watchdog reads the guest clock.
+
+**2026-09-11 — the tab form reproduces it the same way.** The C6-in-tab plan
+(`lp2025/2026-09-10-1707-c6-emulator-in-tab`) hosts the identical
+`lp-emu-esp32c6` machine inside a Studio tab's Worker, driven one guest slice
+at a time instead of over a socket. This is the same instruction-level model
+executing the same firmware, so a push heavy enough to trip this defect
+natively trips it in the tab exactly the same way — the mechanism is a
+property of the machine, not of what is hosting it. Not this plan's to fix
+(vision.md Q4): the card's existing push face is judged sufficient for the
+wait, and the tab-hosted walk uses `peach-1d`, like the native walk, for
+exactly the reason above.
