@@ -1,12 +1,20 @@
 //! The Xtensa block-cache slot: one pre-decoded instruction.
 //!
-//! This module defines the **type** [`lp_emu_core::block::BlockCache`] would
-//! be parameterised by on this core, and nothing else. Wiring the cache into
-//! [`crate::Emulator::run_loop`] — the table, the arena, invalidation through
-//! `Memory`'s write path, the A/B — belongs to the speed ladder's "the Xtensa
-//! core joins the block cache" phase, and this file exists so that phase and
-//! the Xtensa emulator plan's translator seam name **one** slot rather than
-//! two (ruling R2; this plan opened its PR first, so the type lives here).
+//! This module defines the **type** [`lp_emu_core::block::BlockCache`] is
+//! parameterised by on this core, and nothing else. The wiring — the table,
+//! the arena, the classification, invalidation and the block executor — lives
+//! in [`crate::mach::block`] and [`crate::mach::XtHart`], and this file exists
+//! so the cache and the Xtensa emulator plan's translator seam name **one**
+//! slot rather than two (ruling R2; this plan opened its PR first, so the type
+//! lives here).
+//!
+//! ⚠️ **Where the wiring went, corrected** (M7 XD2). This doc used to say the
+//! cache would be wired into `crate::Emulator::run_loop` — the user-mode
+//! runner. It is not: plan three's Q3 keeps that runner untouched, because it
+//! is the FP and JIT oracle and its replays have to stay byte-identical. The
+//! machine path, [`crate::mach::XtHart::run_slice`], is where the cache went,
+//! mirroring the RV32 hart's `run_blocks` with the translated-core entry check
+//! above the lookup.
 //!
 //! # Why the slot caches a decoded `Inst`
 //!

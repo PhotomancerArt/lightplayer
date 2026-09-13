@@ -93,6 +93,20 @@ struct TestBus {
     /// When clear, an MMIO access raises no side-band even though it may
     /// have raised `pending` — the negative poll-point test.
     sideband_enabled: bool,
+    /// The fixture's stand-in for an **executable and writable** region: the
+    /// classic has exactly one (SRAM0), and this is it. A guest store inside
+    /// it that changes bytes raises [`Bus::code_dirty`], which is the block
+    /// cache's whole invalidation contract on this chip (M7 XD3).
+    ///
+    /// `None` — the default — is the fixture saying "nothing here is code the
+    /// guest writes", which is what every test that is not about
+    /// self-modifying code wants: a stack push is not a publish.
+    code_span: Option<(u32, u32)>,
+    /// Armed by a hart whose block cache or translated core is on
+    /// ([`Bus::watch_code_stores`]), and sticky, exactly as `SocBus` is.
+    watch_code_stores: bool,
+    /// Spans the guest has stored into `code_span` since the hart drained.
+    code_dirty: Vec<(u32, u32)>,
 }
 
 impl TestBus {
@@ -105,7 +119,17 @@ impl TestBus {
             pending_mask: None,
             raise_on_mmio: None,
             sideband_enabled: true,
+            code_span: None,
+            watch_code_stores: false,
+            code_dirty: Vec::new(),
         }
+    }
+
+    /// Declare `[lo, hi)` executable-and-writable: a guest store inside it
+    /// that changes bytes is a code publish. See [`TestBus::code_span`].
+    fn with_code_span(mut self, lo: u32, hi: u32) -> Self {
+        self.code_span = Some((lo, hi));
+        self
     }
 
     fn offset(
@@ -199,6 +223,17 @@ impl TestBus {
         let i = self.offset(address, size, MemoryAccessKind::Write)?;
         self.check(address, size, MemoryAccessKind::Write)?;
         self.note_access(address);
+        // The store-address contract (M7 XD3), in the shape `SocBus`
+        // implements it: armed by the hart, inside an executable region, and
+        // only when the bytes actually change.
+        if self.watch_code_stores
+            && let Some((lo, hi)) = self.code_span
+            && address < hi
+            && address + size > lo
+            && (0..size as usize).any(|k| self.ram[i + k] != (v >> (8 * k)) as u8)
+        {
+            self.code_dirty.push((address, address + size));
+        }
         for k in 0..size as usize {
             self.ram[i + k] = (v >> (8 * k)) as u8;
         }
@@ -250,6 +285,22 @@ impl Bus for TestBus {
     fn pending_cpu_interrupt_mask(&self) -> u32 {
         self.pending_mask
             .unwrap_or_else(|| self.pending.map_or(0, |n| 1 << (n & 31)))
+    }
+    /// This fixture charges nothing for a fetch and arms no execute
+    /// watchpoint of its own, so decoding ahead is exact — which is what puts
+    /// **every test in this file** through the block cache by default, and
+    /// makes the whole file the cache's own differential.
+    fn fetch_is_pure(&self) -> bool {
+        true
+    }
+    fn watch_code_stores(&mut self, on: bool) {
+        self.watch_code_stores |= on;
+    }
+    fn code_dirty(&self) -> bool {
+        !self.code_dirty.is_empty()
+    }
+    fn take_code_dirty(&mut self) -> Vec<(u32, u32)> {
+        core::mem::take(&mut self.code_dirty)
     }
 }
 
@@ -2257,8 +2308,12 @@ fn isync_invalidates() {
 #[test]
 fn invalidation_survives_the_lift() {
     let (mut hart, mut bus) = fresh();
-    // Two events in one slice collapse to one whole-image invalidation —
-    // `PendingInvalidate` widens rather than losing precision unsafely.
+    // Two events in one slice, each applied at the instruction that raised
+    // it. The slice loop drains after **every** instruction the core did not
+    // run, not once at the end: a core that kept running the bytes it was
+    // translated from for the rest of the slice is exactly the defect the
+    // RV32 hart's `run_blocks` drains for, and M7 P01 gave this hart the same
+    // shape when it wired the block cache in beside the core.
     asm(
         &mut bus,
         CODE,
@@ -2266,12 +2321,12 @@ fn invalidation_survives_the_lift() {
     );
     let log = StubCore::install(&mut hart, &[], Answer::Refuse);
     hart.run_slice(&mut bus, 2);
-    assert_eq!(log.borrow().invalidations.as_slice(), &[None]);
+    assert_eq!(log.borrow().invalidations.as_slice(), &[None, None]);
     // A range asked for with the core in the hart reaches it directly.
     hart.invalidate_block_range(CODE, CODE + 8);
     assert_eq!(
         log.borrow().invalidations.as_slice(),
-        &[None, Some((CODE, CODE + 8))]
+        &[None, None, Some((CODE, CODE + 8))]
     );
 }
 
