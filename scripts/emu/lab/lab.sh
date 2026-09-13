@@ -442,7 +442,7 @@ case "$cmd" in
     status)
         need_home
         api /status | jq -r '
-            "lab \(.home) :\(.port) up \(.uptimeS)s · cooldown \(.config.cooldownMs/1000)s · builds \(.builds|length) · jobs queued \(.jobs.queued) running \(.jobs.running) done \(.jobs.done) · results \(.results) · bad tokens \(.tokenFailures)",
+            "lab \(.home) :\(.port) up \(.uptimeS)s · cooldown \(if .config.cooldownMs > 0 then "\(.config.cooldownFactor)× press (\(.config.cooldownFloorMs/1000)–\(.config.cooldownMs/1000)s)" else "off" end) · builds \(.builds|length) · jobs queued \(.jobs.queued) running \(.jobs.running) done \(.jobs.done) · results \(.results) · bad tokens \(.tokenFailures)",
             (.devices[] | "device \(.id) \(.name // "-")  \(if .present then "PRESENT" else "away" end)  vis=\(.lastState.visibility // "?") lock=\(.lastState.wakeLock // "?")  seen \(.lastSeen // "-")"),
             (.builds[] | "build  \(.id)  \(.branch)\(if .dirty then " (dirty)" else "" end)  built \(.built_at)")' ;;
     devices)
