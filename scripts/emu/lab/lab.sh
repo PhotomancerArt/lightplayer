@@ -72,18 +72,20 @@ dur_ms() {
 }
 
 cmd_queue() {
-    # `spacing` defaults to 60000 — the same 60 s as the device cooldown, which
-    # is what gated presses anyway while this said 0. 3 m was the old advice and
-    # bought nothing: on build 9f67d78, 10 presses each, 3 m spacing
-    # (j-20260913-0755-1213) against back-to-back (j-20260913-0755-14e2) gave a
-    # translated median of 1.046× vs 1.053× and an interpreter 0.677 vs 0.669.
-    # `--spacing 0` is still allowed and still means back-to-back.
+    # `spacing` defaults to 0 — cooldown-governed. The device cooldown is the
+    # thermal rule and it is sized by each press's own burn (1× the press,
+    # 5–60 s); spacing is for a job you want deliberately SLOWER than that, so
+    # a flat default here could only stretch a job past what the device asked
+    # for. `--spacing 3m` was the old advice and bought nothing either: on
+    # build 9f67d78, 10 presses each, 3 m spacing (j-20260913-0755-1213)
+    # against back-to-back (j-20260913-0755-14e2) gave a translated median of
+    # 1.046× vs 1.053× and an interpreter 0.677 vs 0.669.
     # Who queued it: --by wins, then $LAB_BY, then the shell's own identity.
     # An agent session has no short name in its environment (the harness gives
     # it only CLAUDE_CODE_SESSION_ID, a uuid), so an agent passes its own name
     # from ListAgents: --by "emu-lab-polish-d1a04a-bb", or `export LAB_BY=...`
     # once at the top of the session. Never derived, always declared.
-    local builds='[]' rows='"gate-rows"' rowlist='[]' repeats=1 spacing=60000 device=any ttl=86400000 retry=1 note=null
+    local builds='[]' rows='"gate-rows"' rowlist='[]' repeats=1 spacing=0 device=any ttl=86400000 retry=1 note=null
     local by="${LAB_BY:-${USER:-$(id -un)}@$(hostname -s)}"
     local stable=null stable_pct=5 stable_row=interp stable_min=4
     while [[ $# -gt 0 ]]; do
@@ -442,7 +444,7 @@ case "$cmd" in
     status)
         need_home
         api /status | jq -r '
-            "lab \(.home) :\(.port) up \(.uptimeS)s · cooldown \(.config.cooldownMs/1000)s · builds \(.builds|length) · jobs queued \(.jobs.queued) running \(.jobs.running) done \(.jobs.done) · results \(.results) · bad tokens \(.tokenFailures)",
+            "lab \(.home) :\(.port) up \(.uptimeS)s · cooldown \(if .config.cooldownMs > 0 then "\(.config.cooldownFactor)× press (\(.config.cooldownFloorMs/1000)–\(.config.cooldownMs/1000)s)" else "off" end) · builds \(.builds|length) · jobs queued \(.jobs.queued) running \(.jobs.running) done \(.jobs.done) · results \(.results) · bad tokens \(.tokenFailures)",
             (.devices[] | "device \(.id) \(.name // "-")  \(if .present then "PRESENT" else "away" end)  vis=\(.lastState.visibility // "?") lock=\(.lastState.wakeLock // "?")  seen \(.lastSeen // "-")"),
             (.builds[] | "build  \(.id)  \(.branch)\(if .dirty then " (dirty)" else "" end)  built \(.built_at)")' ;;
     devices)

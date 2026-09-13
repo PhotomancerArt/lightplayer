@@ -24,7 +24,8 @@ with one once. `LAB_HOME` overrides it (tests use a temp dir).
 
 ```text
 ~/.photomancer/emu-lab/
-├── config.json      {port: 41111, exposure: "tailscale" | "ngrok", domain: null, cooldownMs: 60000, dropLostMs: null, maxResultBytes: 2000000, notify: …}
+├── config.json      {port: 41111, exposure: "tailscale" | "ngrok", domain: null, cooldownMs: 60000, cooldownFactor: 1, cooldownFloorMs: 5000, dropLostMs: null, maxResultBytes: 2000000, notify: …}
+│                    cooldownMs is the cooldown CEILING (and its fallback), not a flat wait — see "Why the cooldown is sized by the burn"
 ├── notify.json      armed? when did the "jobs waiting, no device" ping last fire (a restart must not re-send)
 ├── token            32 hex, 0600, generated on first start
 ├── builds/<id>/     emu.wasm manifest.json worker.js bench-run.js wasi-shim.js jit-host.js bench-cli.mjs index.html
@@ -33,7 +34,7 @@ with one once. `LAB_HOME` overrides it (tests use a temp dir).
 ├── jobs/<id>.json   queued → running → done | expired | failed | cancelled
 ├── jobs/<id>/presses/<n>.json  report.json  report.md
 ├── results/result-<ISO>.json   the legacy bench-web shape, one per press or manual run
-├── devices/<deviceId>.json     identity, last state, last seen, last press end, last stream close
+├── devices/<deviceId>.json     identity, last state, last seen, last press end AND its duration (the cooldown's input), last stream close
 ├── .stage/lock                 one stage at a time: the pid + sha building right now
 ├── log/server.log              the server's own, append-only
 └── log/restage.log             one line per restage run (skips included)
@@ -298,7 +299,7 @@ and posts to `POST /results/manual?device=<id>` with `manual: true`.
 Server → page, over SSE:
 
 ```text
-event: hello    {serverTime, config:{cooldownMs}, device}
+event: hello    {serverTime, config:{cooldownMs, cooldown:{factor, floorMs, ceilMs}}, device}   // cooldownMs == ceilMs; 0 means the cooldown is off
 event: press    {job, press, of, build, rows: 'gate-rows' | [{slug,grade,mode,fnBlocks,timeout}], nextPressAt: null}
 event: cooldown {job, nextPressAt}          // the countdown the page shows; null clears it
 event: queue    {jobs:[{id, state, builds, presses:{done,total}, pressStates:[{n,build,state,tainted}], note}]}   // this device's view
@@ -332,7 +333,7 @@ prints them all as the rig's table, device column from the lab's name.
   "id": "j-20260912-0130-a1b2", "kind": "bench",
   "builds": ["86cb2e0", "23a3d3c"],            // one entry = a single build
   "rows": "gate-rows",                           // or [{slug,grade,mode,fnBlocks,timeout}]
-  "repeats": 5, "spacingMs": 60000, "device": "any", "ttlMs": 86400000, "retryTainted": 1,
+  "repeats": 5, "spacingMs": 0, "device": "any", "ttlMs": 86400000, "retryTainted": 1,
   "stopWhenStable": null,                        // or {"row":"interp","pct":5,"minPresses":4} — see below
   "by": "emu-lab-polish-d1a04a-bb",               // who queued it — `lab.sh --by`; null when nothing said
   "note": "P4 vs P3 head", "createdAt": "…", "state": "queued",
@@ -357,20 +358,53 @@ press of the first job that passes four conditions:
 2. the job is not bound to another device — an A/B job binds to the first
    device that takes its first press and stays there (D20);
 3. the device's cooldown has elapsed: `now − device.lastPressEndAt ≥
-   config.cooldownMs` (60 s; applies between jobs too, and sizes the drop
-   window below unless `dropLostMs` says otherwise);
+   cooldown`, where the cooldown is **`cooldownFactor` × the duration of
+   the press that just ended**, clamped to
+   `[cooldownFloorMs, cooldownMs]` — 1×, 5 s, 60 s by default. The
+   duration is `resultAt − sentAt` on the server's own clock (it includes
+   the page's overhead, so it errs long) and it rides the device record as
+   `lastPressDurationMs`, so a restart does not forget it. Applies between
+   jobs too. A device whose last burn is unknown — a record written before
+   this model, or a press that ended with no result — waits the
+   **ceiling**, and so does the drop window below unless `dropLostMs` says
+   otherwise. `cooldownMs: 0` (or `LAB_COOLDOWN_MS=0`) turns the cooldown
+   **off** entirely;
 4. the job's spacing has elapsed: `now − job.lastPressEndAt ≥ spacingMs`,
-   measured from the **end** of the previous press (D19) — DD41's "spaced
-   by minutes" is thermal recovery.
+   measured from the **end** of the previous press (D19).
 
-`spacingMs` defaults to **60000**, the same 60 s as the device cooldown, so
-the default job takes presses as fast as the cooldown allows and the job
-record says so. `--spacing 0` is still back-to-back. *History:* the lab used
-to recommend `--spacing 3m`; on build `9f67d78`, 10 presses each, 3 m spacing
-(`j-20260913-0755-1213`) against back-to-back (`j-20260913-0755-14e2`) gave a
-translated median of **1.046× vs 1.053×** and an interpreter **0.677 vs
-0.669** — no drift either way, so the recommendation was dropped
-(2026-09-13).
+`spacingMs` defaults to **0** — cooldown-governed. Spacing is for a job you
+want deliberately *slower* than the thermal rule; the cooldown *is* the
+thermal rule, and since it is sized by each press's own burn a flat spacing
+default could only stretch a job past what the device asked for.
+`--spacing 3m` still works and still buys nothing: on build `9f67d78`, 10
+presses each, 3 m spacing (`j-20260913-0755-1213`) against back-to-back
+(`j-20260913-0755-14e2`) gave a translated median of **1.046× vs 1.053×**
+and an interpreter **0.677 vs 0.669** — no drift either way, so the
+recommendation was dropped (2026-09-13).
+
+### Why the cooldown is sized by the burn
+
+The flat 60 s the lab shipped with was never measured — it was a guess, and
+a job of 10 presses spent more than half its wall clock idle because of it.
+Measured on 2026-09-13 on Yona's iPhone: one build (`9f67d78`), the same
+four `gate-rows` (jit/8, jit/16, jit/32, interp — about **30 s of burn per
+press**), 10 presses, spacing 0, three cooldowns:
+
+| job | cooldown | jit/8 median | spread | shape |
+|---|---|---:|---:|---|
+| `j-20260913-1937-3d3a` | 0 s | 0.757 | 41 % | monotone fall 1.044 → 0.61–0.68 by press 5 (thermal throttle) |
+| `j-20260913-1959-ba34` | 30 s ≈ **1× burn** | 0.941 | 5.3 % | flat |
+| `j-20260913-1944-055f` | 60 s ≈ 2× burn | 0.974 | 14.5 % | flat |
+
+Idle equal to the burn is enough, and was the *tightest* run of the three;
+no idle throttles about 35 % within ten presses; twice the burn bought
+nothing over 1×. Hence `cooldownFactor: 1`, with the old 60 s kept as the
+ceiling and as the fallback for an unknown burn.
+
+Absolute medians drifted down all afternoon at every cooldown (jit/8
+0.94–0.97 against the morning's 1.05; interp 0.52–0.57 against 0.67) —
+day-level drift, not the cooldown. The same-press translated ÷ interpreter
+ratio is the number to quote (DD41).
 
 One press at a time per device. While a device waits on spacing the page
 gets a `cooldown` event with `nextPressAt` for its countdown. A tainted
@@ -383,8 +417,10 @@ second loss fails it), when any of three things is true:
 1. **its device went away** — the bound device has had no `/events` stream
    for `dropLostMs`, and no result arrived. A page with no stream cannot
    have been sent anything and cannot post a result, so it is not running
-   the press. The window defaults to the device cooldown, floored at 60 s,
-   and `config.json`'s `dropLostMs` (or `LAB_DROP_LOST_MS`) moves it; it
+   the press. The window defaults to the cooldown **ceiling**
+   (`cooldownMs`), floored at 60 s — a dropped stream is not a thermal
+   question, so the per-press cooldown never moves it — and
+   `config.json`'s `dropLostMs` (or `LAB_DROP_LOST_MS`) does; it
    only has to outlast an SSE reconnect, which is why a flicker — a stream
    that closes and reopens inside the window — leaves the press `sent`.
    The close time lives on the device file as `lastStreamClosedAt`, so a
@@ -560,7 +596,8 @@ lab.sh wait --job <id> [--max-time 3600] | --device any|NAME | --queue-idle
 
 `queue` prints the job id on stdout; `wait --job` prints the path of
 `report.md`; `--spacing`/`--ttl` take `90s`, `3m`, `24h`. `--spacing` defaults
-to `60s` (see [Jobs](#jobs)); `--spacing 0` is back-to-back.
+to `0` — the device cooldown paces the job (see [Jobs](#jobs)) — and an
+explicit `--spacing` is for a job you want slower than that.
 `--stop-when-stable`'s percentage is optional (5 % when omitted); see
 [Stopping early](#stopping-early-when-a-build-has-settled-opt-in).
 
@@ -695,7 +732,10 @@ refusal and the stale-lock recovery — with no network and no cargo. The rest
 spawn the real `server.mjs` on port 0 in a temp home
 (`test/helpers.mjs`); `test/fake-device.mjs` is a page client that answers
 presses from a table of numbers at test speed (`LAB_TICK_MS`,
-`LAB_COOLDOWN_MS`, `LAB_LOST_MS`); `report.test.mjs` reproduces the G-M7B
+`LAB_COOLDOWN_MS` — the ceiling, and `0` for off — plus
+`LAB_COOLDOWN_FACTOR`, `LAB_COOLDOWN_FLOOR_MS`, `LAB_LOST_MS` and
+`LAB_DROP_LOST_MS`, which is how the cooldown tests pin a floor and a
+ceiling either side of one press); `report.test.mjs` reproduces the G-M7B
 five-press table exactly. `stability.test.mjs` is the F3 half, in two
 sections: the arithmetic against `fixtures/real-runs.json` — every A/B and
 repeat job the lab had produced by 2026-09-13, anonymised to the report's own

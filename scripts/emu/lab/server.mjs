@@ -60,7 +60,12 @@ for (const d of ['builds', 'images', 'jobs', 'results', 'devices', 'log']) {
   fs.mkdirSync(path.join(HOME, d), { recursive: true });
 }
 
-const DEFAULT_CONFIG = { port: 41111, domain: null, cooldownMs: 60000, dropLostMs: null, maxResultBytes: 2000000 };
+// `cooldownMs` is the cooldown CEILING (and the fallback when a device's last
+// burn is unknown), not a flat wait: the cooldown after a press is
+// `cooldownFactor × that press's own duration`, clamped to
+// [`cooldownFloorMs`, `cooldownMs`] (DD5/DD6, measured — see README, "Why the
+// cooldown is sized by the burn"). `cooldownMs: 0` still means OFF.
+const DEFAULT_CONFIG = { port: 41111, domain: null, cooldownMs: 60000, cooldownFactor: 1, cooldownFloorMs: 5000, dropLostMs: null, maxResultBytes: 2000000 };
 const configPath = path.join(HOME, 'config.json');
 let config = { ...DEFAULT_CONFIG };
 if (fs.existsSync(configPath)) {
@@ -213,7 +218,7 @@ function devicePath(id) { return path.join(HOME, 'devices', id + '.json'); }
 function readDevice(id) { return readJsonFile(devicePath(id)); }
 function saveDevice(d) { writeJsonFile(devicePath(d.id), d); return d; }
 function touchDevice(id, patch) {
-  const d = readDevice(id) || { id, name: null, ua: null, cores: null, deviceMemory: null, lastState: null, lastSeen: null, lastPressEndAt: null, lastStreamClosedAt: null };
+  const d = readDevice(id) || { id, name: null, ua: null, cores: null, deviceMemory: null, lastState: null, lastSeen: null, lastPressEndAt: null, lastPressDurationMs: null, lastStreamClosedAt: null };
   Object.assign(d, patch, { lastSeen: new Date().toISOString() });
   return saveDevice(d);
 }
@@ -264,7 +269,7 @@ function openEvents(req, res, url) {
   // clears it: the drop rule below never fires while one is open, and a
   // flicker (SSE reconnects constantly) leaves no stale timestamp behind.
   const d = touchDevice(id, { lastStreamClosedAt: null });
-  sseWrite(res, 'hello', { serverTime: new Date().toISOString(), config: { cooldownMs: config.cooldownMs }, device: d });
+  sseWrite(res, 'hello', { serverTime: new Date().toISOString(), config: { cooldownMs: COOLDOWN_MS, cooldown: { factor: COOLDOWN_FACTOR, floorMs: COOLDOWN_FLOOR_MS, ceilMs: COOLDOWN_MS } }, device: d });
   // ngrok and Safari both drop a silent stream; a comment every 15 s is the
   // cheapest thing that keeps both honest.
   const ka = setInterval(() => { try { res.write(': keepalive\n\n'); } catch { /* closing */ } }, 15000);
@@ -362,8 +367,11 @@ function status() {
     uptimeS: Math.round((Date.now() - STARTED) / 1000),
     home: HOME,
     port: PORT,
-    config: { cooldownMs: config.cooldownMs, dropLostMs: DROP_LOST_MS, domain: config.domain },
-    devices: allDevices().map((d) => ({ id: d.id, name: d.name, present: isPresent(d), streams: (streams.get(d.id) || new Set()).size, lastSeen: d.lastSeen, lastState: d.lastState, ua: d.ua, cores: d.cores, lastPressEndAt: d.lastPressEndAt, lastStreamClosedAt: d.lastStreamClosedAt ?? null })),
+    // The EFFECTIVE model, env overrides and all, the way `dropLostMs` already
+    // reads: `cooldownMs` is the ceiling, `cooldownFactor`/`cooldownFloorMs`
+    // the rest of the rule. `cooldownMs` in `config.json` still names it.
+    config: { cooldownMs: COOLDOWN_MS, cooldownFactor: COOLDOWN_FACTOR, cooldownFloorMs: COOLDOWN_FLOOR_MS, dropLostMs: DROP_LOST_MS, domain: config.domain },
+    devices: allDevices().map((d) => ({ id: d.id, name: d.name, present: isPresent(d), streams: (streams.get(d.id) || new Set()).size, lastSeen: d.lastSeen, lastState: d.lastState, ua: d.ua, cores: d.cores, lastPressEndAt: d.lastPressEndAt, lastPressDurationMs: d.lastPressDurationMs ?? null, cooldownMs: cooldownMsFor(d), lastStreamClosedAt: d.lastStreamClosedAt ?? null })),
     builds: listBuilds(),
     jobs: hooks.jobCounts(),
     notify: notifier.status(),
@@ -390,7 +398,38 @@ const notifier = createNotifier({ home: HOME, configPath, log });
 // stream went away and stayed away, or because the wall bound ran out).
 
 const TICK_MS = Number(process.env.LAB_TICK_MS || 1000);
+// The cooldown is sized by the burn, not flat (DD5/DD6): after a press the
+// device rests for `factor ×` that press's own duration, clamped to
+// [floor, ceiling]. `COOLDOWN_MS` is the ceiling and keeps its config name and
+// its env override; 0 still means the cooldown is OFF, which is what the
+// tests' FAST env relies on. The flat 60 s this replaces was never measured —
+// on 2026-09-13, 10 presses of the same 4 gate rows (≈ 30 s of burn) on the
+// same phone and build, no cooldown threw jit/8 41 % apart and falling
+// (j-20260913-1937-3d3a), 30 s ≈ 1× burn held it flat at 5.3 %
+// (j-20260913-1959-ba34), and 60 s ≈ 2× burn bought nothing over that
+// (j-20260913-1944-055f, 14.5 %). Idle equal to the burn is the rule.
 const COOLDOWN_MS = process.env.LAB_COOLDOWN_MS !== undefined ? Number(process.env.LAB_COOLDOWN_MS) : config.cooldownMs;
+const COOLDOWN_FACTOR = process.env.LAB_COOLDOWN_FACTOR !== undefined ? Number(process.env.LAB_COOLDOWN_FACTOR) : Number(config.cooldownFactor ?? DEFAULT_CONFIG.cooldownFactor);
+const COOLDOWN_FLOOR_MS = process.env.LAB_COOLDOWN_FLOOR_MS !== undefined ? Number(process.env.LAB_COOLDOWN_FLOOR_MS) : Number(config.cooldownFloorMs ?? DEFAULT_CONFIG.cooldownFloorMs);
+
+/// How long this device rests after the press it just finished. A device whose
+/// last burn is unknown — a record written before this model, or a press that
+/// ended with no result — waits the ceiling, which is the old behaviour and the
+/// conservative one. The ceiling wins over the floor if a config inverts them.
+function cooldownMsFor(d) {
+  if (!(COOLDOWN_MS > 0)) return 0;
+  const burn = Number(d && d.lastPressDurationMs);
+  if (!Number.isFinite(burn) || burn <= 0) return COOLDOWN_MS;
+  return Math.min(COOLDOWN_MS, Math.max(COOLDOWN_FLOOR_MS, Math.round(burn * COOLDOWN_FACTOR)));
+}
+
+const fmtMs = (ms) => (ms >= 1000 && ms % 1000 === 0 ? ms / 1000 + ' s' : ms + ' ms');
+/// The one-line model, for the startup log and anything else that says what
+/// the rule is rather than what one device owes.
+function cooldownModelText() {
+  if (!(COOLDOWN_MS > 0)) return 'off';
+  return COOLDOWN_FACTOR + '× press, ' + fmtMs(COOLDOWN_FLOOR_MS) + '–' + fmtMs(COOLDOWN_MS);
+}
 // A press with no result after wallTimeout × rows + 120 s is lost. Tests
 // shrink it; the build's manifest sets it in life.
 const LOST_MS_OVERRIDE = process.env.LAB_LOST_MS !== undefined ? Number(process.env.LAB_LOST_MS) : null;
@@ -399,9 +438,10 @@ const LOST_MS_OVERRIDE = process.env.LAB_LOST_MS !== undefined ? Number(process.
 // whose bound device has had no stream for this long is not running — it is
 // gone, and waiting out the wall bound (3120 s on a 5-row job) leaves a phone
 // that came back staring at "Waiting for the director" for the rest of it.
-// The window only has to outlast an SSE reconnect, so it is the device
-// cooldown, floored at the 60 s the cooldown shipped as: a cooldown of 0 (a
-// test, or a later model) must not mean a blink loses the press.
+// The window only has to outlast an SSE reconnect, so it is the cooldown
+// CEILING, floored at the 60 s the cooldown shipped as: a cooldown of 0 (a
+// test) must not mean a blink loses the press, and a dropped stream is not a
+// thermal question, so the per-press cooldown never moves this.
 const DROP_LOST_MS = process.env.LAB_DROP_LOST_MS !== undefined
   ? Number(process.env.LAB_DROP_LOST_MS)
   : (config.dropLostMs != null ? Number(config.dropLostMs) : (COOLDOWN_MS > 0 ? COOLDOWN_MS : DEFAULT_CONFIG.cooldownMs));
@@ -461,12 +501,13 @@ function makeJob(body) {
   }
   const repeats = Number(body.repeats ?? 1);
   if (!Number.isInteger(repeats) || repeats < 1 || repeats > 20) bad('repeats must be 1–20');
-  // 60 s by default — the device cooldown, which is what actually gated
-  // presses while this default was 0, so the job record now says what happens.
-  // 3 m bought nothing (build 9f67d78, 10 presses each: 3 m spacing gave a
-  // translated median 1.046× / interpreter 0.677, back-to-back 1.053× / 0.669).
-  // 0 is still accepted and still means back-to-back.
-  const spacingMs = Number(body.spacingMs ?? 60000);
+  // 0 by default — cooldown-governed. Spacing is for a job deliberately slower
+  // than the thermal rule needs; the cooldown IS the thermal rule, and since
+  // it is now sized by each press's own burn (DD5/DD6) a flat spacing default
+  // could only make a job longer than the device asked for. 3 m bought nothing
+  // either (build 9f67d78, 10 presses each: 3 m spacing gave a translated
+  // median 1.046× / interpreter 0.677, back-to-back 1.053× / 0.669).
+  const spacingMs = Number(body.spacingMs ?? 0);
   if (!Number.isFinite(spacingMs) || spacingMs < 0) bad('spacingMs must be ≥ 0');
   const ttlMs = Number(body.ttlMs ?? 86400000);
   if (!Number.isFinite(ttlMs) || ttlMs < 60000) bad('ttlMs must be ≥ 60 s');
@@ -476,7 +517,7 @@ function makeJob(body) {
   const by = makeBy(body.by, bad);
   const stopWhenStable = makeStopWhenStable(body.stopWhenStable, { bad, rows, repeats });
   const presses = [];
-  for (let r = 0; r < repeats; r++) for (const b of builds) presses.push({ n: presses.length + 1, build: b, state: 'pending', sentAt: null, deferredAt: null, resultAt: null, resends: 0, tainted: false, taintReasons: [] });
+  for (let r = 0; r < repeats; r++) for (const b of builds) presses.push({ n: presses.length + 1, build: b, state: 'pending', sentAt: null, deferredAt: null, resultAt: null, durationMs: null, resends: 0, tainted: false, taintReasons: [] });
   return {
     id: newJobId(), kind: 'bench', builds, rows, repeats, spacingMs, device, ttlMs, retryTainted, stopWhenStable, by,
     note: typeof body.note === 'string' ? body.note.slice(0, 200) : null,
@@ -701,7 +742,7 @@ function tick() {
   const here = present();
   for (const d of here) {
     if (inFlightOn(d.id)) continue;
-    const cooldownEnd = d.lastPressEndAt ? Date.parse(d.lastPressEndAt) + COOLDOWN_MS : 0;
+    const cooldownEnd = d.lastPressEndAt ? Date.parse(d.lastPressEndAt) + cooldownMsFor(d) : 0;
     let nextAt = null, nextJob = null;
     for (const j of Array.from(jobs.values()).sort((a, b) => a.id.localeCompare(b.id))) {
       if (TERMINAL.has(j.state)) continue;
@@ -787,10 +828,17 @@ async function postPressResult(req, res, id, n) {
   if (body.failed || !body.results.length) { p.state = 'failed'; p.error = String(body.failed || 'no rows'); }
   else p.state = 'done';
   j.lastPressEndAt = at;
-  if (isId(device)) touchDevice(device, { lastPressEndAt: at });
+  // The burn this press just cost the device, server-side end to end: it
+  // includes the page's own overhead, which makes the cooldown it buys
+  // conservative rather than short. Persisted on the device record beside
+  // `lastPressEndAt` so a restart does not forget what the device just did;
+  // null means unknown, and an unknown burn waits the ceiling.
+  const durationMs = p.sentAt ? Math.max(0, Date.parse(at) - Date.parse(p.sentAt)) : null;
+  p.durationMs = durationMs;
+  if (isId(device)) touchDevice(device, { lastPressEndAt: at, lastPressDurationMs: durationMs });
   if (p.state === 'done' && p.tainted && j.retriesUsed < j.retryTainted) {
     j.retriesUsed++;
-    j.presses.push({ n: j.presses.length + 1, build: p.build, state: 'pending', sentAt: null, deferredAt: null, resultAt: null, resends: 0, tainted: false, taintReasons: [], retryOf: p.n });
+    j.presses.push({ n: j.presses.length + 1, build: p.build, state: 'pending', sentAt: null, deferredAt: null, resultAt: null, durationMs: null, resends: 0, tainted: false, taintReasons: [], retryOf: p.n });
     log('job ' + j.id + ' press ' + p.n + ' tainted (' + p.taintReasons.join(',') + '); press ' + j.presses.length + ' appended');
   }
   // F3, after the press file is on disk and after the taint retry has been
@@ -954,7 +1002,7 @@ server.listen(PORT, '0.0.0.0', () => {
   // stdout carries exactly one line, for the test that spawns us and for a
   // launchd log a human reads; the rest goes to stderr and log/server.log.
   process.stdout.write('emu-lab: listening on http://127.0.0.1:' + port + '\n');
-  log('started, home ' + HOME + ', port ' + port + ', build ' + (SERVER_BUILD || '?') + ', cooldown ' + COOLDOWN_MS + ' ms, drop window ' + DROP_LOST_MS + ' ms');
+  log('started, home ' + HOME + ', port ' + port + ', build ' + (SERVER_BUILD || '?') + ', cooldown ' + cooldownModelText() + ', drop window ' + DROP_LOST_MS + ' ms');
   tick();
 });
 

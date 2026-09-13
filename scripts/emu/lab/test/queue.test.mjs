@@ -12,6 +12,9 @@ import path from 'node:path';
 import { startServer } from './helpers.mjs';
 import { fakeDevice } from './fake-device.mjs';
 
+// `LAB_COOLDOWN_MS: '0'` is the cooldown OFF — the ceiling of 0 short-circuits
+// the burn-proportional model (C), the way it short-circuited the flat wait
+// before it. Every timing assertion in this file below rests on that.
 const FAST = { LAB_TICK_MS: '20', LAB_COOLDOWN_MS: '0', LAB_LOST_MS: '400' };
 
 function stageFixture(home, ids) {
@@ -316,6 +319,123 @@ test('drop: a stream that stays open past the wall bound still hits the wall rul
   } finally { await l.stop(); }
 });
 
+// C: the cooldown is sized by the burn (DD5/DD6). Every test below pins the
+// floor and the ceiling apart from the press it uses, so the number the
+// scheduler actually waited names which of the three rules fired.
+const COOLDOWN_ENV = { LAB_TICK_MS: '20', LAB_LOST_MS: '60000' };
+/// The gap between the END of press n and the SEND of press n+1 — the wait the
+/// cooldown bought, measured the way the first test in this file measures
+/// spacing.
+const gapAfter = (dev, n) => dev.answered[n].sentAt - dev.answered[n - 1].answeredAt;
+
+test('cooldown: a press is followed by ~1× its own duration, not the ceiling and not the floor (C)', async () => {
+  // A 100 ms floor and a 4 s ceiling around a ~800 ms press: only the
+  // proportional rule can land in between.
+  const l = await ownLab({ ...COOLDOWN_ENV, LAB_COOLDOWN_MS: '4000', LAB_COOLDOWN_FLOOR_MS: '100' });
+  try {
+    const dev = await fakeDevice(l, { pressMs: 800 });
+    await l.queue({ builds: ['aaa1111'], repeats: 2, spacingMs: 0, ttlMs: 60000 });
+    await until('both presses answered', async () => dev.answered.length === 2, 20000);
+    const gap = gapAfter(dev, 1);
+    assert.ok(gap >= 700, 'press 2 waited about the 800 ms burn, not the 100 ms floor (waited ' + gap + ' ms)');
+    assert.ok(gap <= 2000, 'and nowhere near the 4 s ceiling (waited ' + gap + ' ms)');
+    const st = await apiOn(l, '/status').then((r) => r.json());
+    assert.equal(st.config.cooldownFactor, 1);
+    assert.equal(st.config.cooldownFloorMs, 100);
+    assert.equal(st.config.cooldownMs, 4000, 'cooldownMs is the ceiling');
+    const row = st.devices.find((x) => x.id === dev.id);
+    assert.ok(row.lastPressDurationMs >= 700 && row.lastPressDurationMs <= 2000, 'the burn is on the device record (' + row.lastPressDurationMs + ' ms)');
+    assert.equal(row.cooldownMs, Math.round(row.lastPressDurationMs), 'factor 1: the cooldown IS the burn');
+    await dev.stop();
+  } finally { await l.stop(); }
+});
+
+test('cooldown: a press shorter than the floor waits the floor (C)', async () => {
+  const l = await ownLab({ ...COOLDOWN_ENV, LAB_COOLDOWN_MS: '4000', LAB_COOLDOWN_FLOOR_MS: '600' });
+  try {
+    const dev = await fakeDevice(l, { pressMs: 5 });
+    await l.queue({ builds: ['aaa1111'], repeats: 2, spacingMs: 0, ttlMs: 60000 });
+    await until('both presses answered', async () => dev.answered.length === 2, 20000);
+    const gap = gapAfter(dev, 1);
+    assert.ok(gap >= 520, 'a 5 ms press still rests the 600 ms floor (waited ' + gap + ' ms)');
+    assert.ok(gap <= 1600, 'the floor, not the ceiling (waited ' + gap + ' ms)');
+    const st = await apiOn(l, '/status').then((r) => r.json());
+    assert.equal(st.devices.find((x) => x.id === dev.id).cooldownMs, 600);
+    await dev.stop();
+  } finally { await l.stop(); }
+});
+
+test('cooldown: a press longer than the ceiling waits the ceiling, not more (C)', async () => {
+  const l = await ownLab({ ...COOLDOWN_ENV, LAB_COOLDOWN_MS: '300', LAB_COOLDOWN_FLOOR_MS: '50' });
+  try {
+    const dev = await fakeDevice(l, { pressMs: 900 });
+    await l.queue({ builds: ['aaa1111'], repeats: 2, spacingMs: 0, ttlMs: 60000 });
+    await until('both presses answered', async () => dev.answered.length === 2, 20000);
+    const gap = gapAfter(dev, 1);
+    assert.ok(gap >= 250, 'the ceiling is still a wait (waited ' + gap + ' ms)');
+    assert.ok(gap <= 700, 'clamped to the 300 ms ceiling, not the ~900 ms burn (waited ' + gap + ' ms)');
+    const st = await apiOn(l, '/status').then((r) => r.json());
+    assert.equal(st.devices.find((x) => x.id === dev.id).cooldownMs, 300);
+    await dev.stop();
+  } finally { await l.stop(); }
+});
+
+// The whole FAST suite above runs on `LAB_COOLDOWN_MS: '0'` and would not
+// finish in its timeouts if 0 had stopped meaning OFF, but that is an
+// implication, so here it is said out loud.
+test('cooldown: LAB_COOLDOWN_MS=0 is still OFF — presses go back to back (C)', async () => {
+  const dev = await fakeDevice(lab, { name: 'no-cooldown', pressMs: 5 });
+  const { body: j } = await queue({ builds: ['aaa1111'], repeats: 3, spacingMs: 0, ttlMs: 60000, device: 'no-cooldown' });
+  const w = await waitJob(j.id);
+  assert.equal(w.body.job.state, 'done');
+  for (let i = 1; i < dev.answered.length; i++) {
+    assert.ok(gapAfter(dev, i) <= 400, 'press ' + (i + 1) + ' followed press ' + i + ' at once (' + gapAfter(dev, i) + ' ms)');
+  }
+  const st = await api('/status').then((r) => r.json());
+  assert.equal(st.config.cooldownMs, 0, '/status reports the effective ceiling, which is off');
+  assert.equal(st.devices.find((x) => x.id === dev.id).cooldownMs, 0);
+  await dev.stop();
+});
+
+test('cooldown: the burn survives a restart, so the next press still waits 1× it, not the ceiling (C)', async () => {
+  const env = { ...COOLDOWN_ENV, LAB_COOLDOWN_MS: '4000', LAB_COOLDOWN_FLOOR_MS: '100' };
+  const l = await ownLab(env);
+  let l2 = null;
+  try {
+    const dev = await fakeDevice(l, { pressMs: 800 });
+    await l.queue({ builds: ['aaa1111'], repeats: 1, spacingMs: 0, ttlMs: 60000 });
+    await until('the press to land', async () => dev.answered.length === 1, 20000);
+    await dev.stop();
+    const onDisk = JSON.parse(fs.readFileSync(path.join(l.home, 'devices', dev.id + '.json'), 'utf8'));
+    assert.ok(onDisk.lastPressDurationMs >= 700, 'the burn is on the device FILE (' + onDisk.lastPressDurationMs + ' ms)');
+    await l.stop();
+    l2 = await startServer(l.home, env);
+    const st = await apiOn(l2, '/status').then((r) => r.json());
+    const row = st.devices.find((x) => x.id === dev.id);
+    assert.equal(row.lastPressDurationMs, onDisk.lastPressDurationMs, 'the restarted server remembers it');
+    assert.equal(row.cooldownMs, Math.round(onDisk.lastPressDurationMs), 'and still owes 1× it, not the 4 s ceiling');
+  } finally { if (l2) await l2.stop(); await l.stop().catch(() => {}); }
+});
+
+// A device the lab has never watched finish a press — a record written before
+// this model, or one whose press was lost — has no burn to size a cooldown
+// from, so it waits the ceiling.
+test('cooldown: a device with no known burn waits the ceiling (C)', async () => {
+  const l = await ownLab({ ...COOLDOWN_ENV, LAB_COOLDOWN_MS: '4000', LAB_COOLDOWN_FLOOR_MS: '100' });
+  try {
+    const dev = await fakeDevice(l, { pressMs: 5 });
+    // The shape a pre-C server left behind: an end time, no duration.
+    const f = path.join(l.home, 'devices', dev.id + '.json');
+    const d = JSON.parse(fs.readFileSync(f, 'utf8'));
+    delete d.lastPressDurationMs;
+    d.lastPressEndAt = new Date().toISOString();
+    fs.writeFileSync(f, JSON.stringify(d));
+    const st = await apiOn(l, '/status').then((r) => r.json());
+    assert.equal(st.devices.find((x) => x.id === dev.id).cooldownMs, 4000, 'unknown burn falls back to the ceiling');
+    await dev.stop();
+  } finally { await l.stop(); }
+});
+
 test('a device that reconnects gets the queue view again even though nothing changed', async () => {
   // A device that never answers, so the job stays in its view across the reload.
   const quiet = { beforeAnswer: async () => { throw new Error('never answers'); } };
@@ -354,17 +474,19 @@ test('POST /jobs: 401 without the token creates no file; unknown build, bad rows
   await api('/jobs/' + ok.body.id, { method: 'DELETE' });
 });
 
-// The coded default is the 60 s device cooldown, not 0 — the cooldown gated
-// presses anyway, and now the job record says so. 0 stays an allowed override.
-test('POST /jobs: spacingMs defaults to 60 s; an explicit 0 is still back-to-back', async () => {
+// C: the coded default is 0 — cooldown-governed. The cooldown is the thermal
+// rule and it is sized by each press's own burn, so a flat spacing default
+// could only stretch a job past what the device asked for. An explicit
+// spacing is still for a job you want deliberately slower than that.
+test('POST /jobs: spacingMs defaults to 0 (cooldown-governed); an explicit spacing is still honoured', async () => {
   const dflt = await queue({ builds: ['aaa1111'], repeats: 1, ttlMs: 60000, device: 'nobody' });
   assert.equal(dflt.status, 201);
-  assert.equal(dflt.body.spacingMs, 60000);
-  const zero = await queue({ builds: ['aaa1111'], repeats: 1, ttlMs: 60000, device: 'nobody', spacingMs: 0 });
-  assert.equal(zero.status, 201);
-  assert.equal(zero.body.spacingMs, 0);
+  assert.equal(dflt.body.spacingMs, 0);
+  const slow = await queue({ builds: ['aaa1111'], repeats: 1, ttlMs: 60000, device: 'nobody', spacingMs: 180000 });
+  assert.equal(slow.status, 201);
+  assert.equal(slow.body.spacingMs, 180000);
   await api('/jobs/' + dflt.body.id, { method: 'DELETE' });
-  await api('/jobs/' + zero.body.id, { method: 'DELETE' });
+  await api('/jobs/' + slow.body.id, { method: 'DELETE' });
 });
 
 // D: a job says who queued it. `lab.sh` supplies the default (its own flag,
