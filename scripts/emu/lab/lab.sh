@@ -33,6 +33,9 @@
 set -euo pipefail
 
 home="${LAB_HOME:-$HOME/.photomancer/emu-lab}"
+# Held for the length of a `stage` (see stage_lock); restage-main.sh peeks at
+# it before it does any work of its own.
+stage_lock_dir="$home/.stage/lock"
 
 usage() { sed -n '2,20p' "$0"; }
 
@@ -267,6 +270,28 @@ cmd_logs() {
     tail -n "$n" "$home/log/$which.log"
 }
 
+# One stage at a time, hand-run or timer-run (restage-main.sh). `mkdir` is the
+# atomic part; the pid inside is what makes a lock left by a `kill -9`
+# recoverable instead of permanent. Exit 3 means "held" and nothing was
+# touched — restage-main.sh reads that as a skip, not a failure.
+stage_lock() {
+    local what="$1" pid
+    mkdir -p "$home/.stage"
+    if ! mkdir "$stage_lock_dir" 2>/dev/null; then
+        pid="$(cat "$stage_lock_dir/pid" 2>/dev/null || true)"
+        if [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null; then
+            echo "lab: a stage is already running (pid $pid, $(cat "$stage_lock_dir/what" 2>/dev/null || echo '?')) — try again when it is done" >&2
+            exit 3
+        fi
+        echo "lab: clearing a stale stage lock (pid ${pid:-?} is gone)" >&2
+        rm -rf "$stage_lock_dir"
+        mkdir "$stage_lock_dir" 2>/dev/null || { echo "lab: could not take the stage lock ($stage_lock_dir)" >&2; exit 3; }
+    fi
+    echo $$ >"$stage_lock_dir/pid"
+    echo "$what" >"$stage_lock_dir/what"
+    trap 'rm -rf "$stage_lock_dir"' EXIT
+}
+
 # Build a commit and put it in the store, from a throwaway detached worktree
 # of the PRIMARY checkout (worktrees of worktrees are a mess). The tree's own
 # bench-web.sh builds and stages (every head has --no-serve); THIS tree's
@@ -276,6 +301,7 @@ cmd_logs() {
 cmd_stage() {
     local sha="${1:?lab stage needs a commit}"
     need_home
+    stage_lock "$sha"
     # No `head` here: under pipefail a closed pipe makes git exit non-zero
     # and `set -e` would leave silently.
     local primary; primary="$(git -C "$repo" worktree list --porcelain | sed -n '1s/^worktree //p')"
