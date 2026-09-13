@@ -1,7 +1,7 @@
 ---
 status: fixed
 found: 2026-09-13      # how: hardware-walk (`just walk-no-board --tab`, page console)
-fixed: this change
+fixed: c7c971e8e + 444e67346 (merged 6c716f30e, PR #756)
 area: lpa-studio-web base/popover.rs (stabilization re-measure timers, fonts-ready future, observer rAF)
 class: lifecycle-ownership
 related:
