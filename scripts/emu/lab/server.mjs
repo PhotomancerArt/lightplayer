@@ -22,7 +22,7 @@
 //   POST /results/manual?device=<id>          a hand-taken run, the legacy result shape + manual:true (D12)
 //   GET  /status                              devices, builds, job counts, result count, notify state
 //   POST /notify/test                         one notification now, whatever the gate thinks (lab.sh notify test)
-//   POST /jobs                                queue a bench job (single build or an A/B pair)
+//   POST /jobs                                queue a bench job (single build or an A/B pair); `stopWhenStable` opts into the F3 rule
 //   GET  /jobs   GET /jobs/<id>   DELETE /jobs/<id>
 //   POST /jobs/<id>/presses/<n>/result        the page's press result (legacy shape + taint fields)
 //   POST /jobs/<id>/presses/<n>/deferred      the page received the press hidden; it will run when visible
@@ -47,7 +47,7 @@ import os from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { execFileSync } from 'node:child_process';
 
-import { computeReport, renderReportMd, stabilityVerdict, controlRowKeys, DEFAULT_STOP_WHEN_STABLE } from './report.mjs';
+import { computeReport, renderReportMd, stabilityVerdict, DEFAULT_STOP_WHEN_STABLE } from './report.mjs';
 import { createNotifier } from './notify.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -515,7 +515,7 @@ function queueViewFor(deviceId) {
     .filter((j) => (j.device === 'any' || j.device === deviceId || deviceNameMatches(j.device, deviceId)) && (!j.boundDevice || j.boundDevice === deviceId))
     .map((j) => ({
       id: j.id, state: j.state, builds: j.builds, note: j.note,
-      presses: { done: j.presses.filter((p) => PRESS_TERMINAL.has(p.state)).length, total: j.presses.length },
+      presses: { done: j.presses.filter((p) => PRESS_TAKEN.has(p.state)).length, total: j.presses.length },
       // One entry per press so the page can draw the interleave as ticks.
       pressStates: j.presses.map((p) => ({ n: p.n, build: p.build, state: p.state, tainted: !!p.tainted })),
     }));
@@ -679,7 +679,7 @@ function jobSummary(j) {
   return { id: j.id, state: j.state, builds: j.builds, rows: j.rows, repeats: j.repeats, spacingMs: j.spacingMs, device: j.device, boundDevice: j.boundDevice, boundDeviceName: j.boundDeviceName,
     note: j.note, createdAt: j.createdAt, reportAt: j.reportAt,
     stopWhenStable: j.stopWhenStable ?? null, stoppedEarly: (j.stoppedEarly && j.stoppedEarly.length) ? j.stoppedEarly : null,
-    presses: { done: j.presses.filter((p) => PRESS_TERMINAL.has(p.state)).length, total: j.presses.length, tainted: j.presses.filter((p) => p.tainted).length, failed: j.presses.filter((p) => p.state === 'failed').length, skipped: j.presses.filter((p) => p.state === 'skipped').length } };
+    presses: { done: j.presses.filter((p) => PRESS_TAKEN.has(p.state)).length, total: j.presses.length, tainted: j.presses.filter((p) => p.tainted).length, failed: j.presses.filter((p) => p.state === 'failed').length, skipped: j.presses.filter((p) => p.state === 'skipped').length } };
 }
 
 async function postJob(req, res) {
