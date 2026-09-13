@@ -20,7 +20,8 @@
 //   GET  /events?device=<id>                  SSE presence stream (hello, press, cooldown, queue events)
 //   POST /devices/<id>/state                  {name, ua, cores, deviceMemory, visibility, hasFocus, wakeLock}
 //   POST /results/manual?device=<id>          a hand-taken run, the legacy result shape + manual:true (D12)
-//   GET  /status                              devices, builds, job counts, result count
+//   GET  /status                              devices, builds, job counts, result count, notify state
+//   POST /notify/test                         one notification now, whatever the gate thinks (lab.sh notify test)
 //   POST /jobs                                queue a bench job (single build or an A/B pair)
 //   GET  /jobs   GET /jobs/<id>   DELETE /jobs/<id>
 //   POST /jobs/<id>/presses/<n>/result        the page's press result (legacy shape + taint fields)
@@ -47,6 +48,7 @@ import { fileURLToPath } from 'node:url';
 import { execFileSync } from 'node:child_process';
 
 import { computeReport, renderReportMd } from './report.mjs';
+import { createNotifier } from './notify.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const HOME = path.resolve(process.env.LAB_HOME || path.join(os.homedir(), '.photomancer', 'emu-lab'));
@@ -357,10 +359,20 @@ function status() {
     devices: allDevices().map((d) => ({ id: d.id, name: d.name, present: isPresent(d), streams: (streams.get(d.id) || new Set()).size, lastSeen: d.lastSeen, lastState: d.lastState, ua: d.ua, cores: d.cores, lastPressEndAt: d.lastPressEndAt })),
     builds: listBuilds(),
     jobs: hooks.jobCounts(),
+    notify: notifier.status(),
     tokenFailures,
     results: fs.readdirSync(path.join(HOME, 'results')).filter((f) => f.startsWith('result-') && f.endsWith('.json')).length,
   };
 }
+
+// --- notifications (F2) -------------------------------------------------------
+//
+// Off unless `config.json` carries a `notify` block, which is Yona's to write:
+// nothing in the repo names a topic or a URL. The gate itself lives in
+// notify.mjs; the tick below hands it the waiting jobs and the head count, and
+// the arm resets through `onPresenceChange` like everything else that cares
+// about presence.
+const notifier = createNotifier({ home: HOME, configPath, log });
 
 // --- the queue (D3, D5, D19, D20, D23) ----------------------------------------
 //
@@ -520,6 +532,7 @@ const lastCooldownSent = new Map();
 /// D19, D20) — or tell the device when its next press is due.
 function tick() {
   const now = Date.now();
+  const waiting = [];
   for (const j of jobs.values()) {
     if (TERMINAL.has(j.state)) continue;
     const inFlight = j.presses.some((p) => p.state === 'sent' || p.state === 'deferred');
@@ -531,8 +544,10 @@ function tick() {
     }
     if (j.presses.every((p) => PRESS_TERMINAL.has(p.state))) { finalize(j, 'done'); continue; }
     if (changed) saveJob(j);
+    waiting.push(j);
   }
-  for (const d of present()) {
+  const here = present();
+  for (const d of here) {
     if (inFlightOn(d.id)) continue;
     const cooldownEnd = d.lastPressEndAt ? Date.parse(d.lastPressEndAt) + COOLDOWN_MS : 0;
     let nextAt = null, nextJob = null;
@@ -564,6 +579,9 @@ function tick() {
   }
   pushQueueViews();
   releaseWaits();
+  // Last, and after the loop above may have bound and sent presses: what is
+  // still waiting with nobody to run it (F2).
+  notifier.check(waiting, here.length);
 }
 setInterval(tick, TICK_MS).unref();
 
@@ -745,6 +763,10 @@ async function handle(req, res) {
 
   if (m === 'GET' && p === '/events') return openEvents(req, res, url);
   if (m === 'GET' && p === '/status') return send(res, 200, status());
+  if (m === 'POST' && p === '/notify/test') {
+    const r = await notifier.sendTest();
+    return send(res, r.configured ? (r.ok ? 200 : 502) : 503, r);
+  }
   if (m === 'POST' && p === '/results/manual') return postManualResult(req, res, url);
   let mm;
   if (m === 'POST' && (mm = /^\/devices\/([^/]+)\/state$/.exec(p))) {

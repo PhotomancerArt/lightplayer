@@ -19,6 +19,7 @@
 #   lab.sh uninstall | restart [server|tunnel|restage]   # bootout all / kickstart one or all
 #   lab.sh url                                     # the bookmark: the tailnet name, or the ngrok domain from config.json, else the live random URL
 #   lab.sh logs [-n 100] [server|tunnel|restage]   # tail the logs
+#   lab.sh notify status | test                    # the "jobs waiting, no device" notification: its state, or one send now
 #
 # Talks to http://127.0.0.1:<port> — the director is on the desk, never through
 # the tunnel. The port comes from $LAB_HOME/config.json, the token from
@@ -38,7 +39,7 @@ home="${LAB_HOME:-$HOME/.photomancer/emu-lab}"
 # it before it does any work of its own.
 stage_lock_dir="$home/.stage/lock"
 
-usage() { sed -n '2,21p' "$0"; }
+usage() { sed -n '2,22p' "$0"; }
 
 need_home() {
     [[ -f "$home/config.json" && -f "$home/token" ]] || {
@@ -283,6 +284,34 @@ cmd_restart() {
     done
 }
 
+# The notification that fires when jobs wait with no device (F2). `status`
+# never prints the topic or the URL — it is the address AND the secret, and it
+# stays in config.json. `test` sends one now and does NOT consume the arm.
+cmd_notify() {
+    case "${1:-status}" in
+        status)
+            api /status | jq -r '.notify |
+                if .configured then
+                    "notify \(.kind)  armed=\(.armed)  grace \(.graceMs/1000)s  floor \(.minIntervalMs/60000)m",
+                    "  last sent  \(.notifiedAt // "-")",
+                    "  waiting since \(.waitingSince // "-")",
+                    "  last result  \(.lastResult // .lastError // "-")"
+                else
+                    "notify OFF — no usable \"notify\" block in config.json\(if .why then ": " + .why else "" end)",
+                    "  add e.g. \"notify\": {\"kind\": \"ntfy\", \"topic\": \"<something unguessable>\"} and it is picked up within a tick"
+                end' ;;
+        test)
+            local resp code
+            resp="$(api /notify/test -X POST -w '\n%{http_code}' -d '')"
+            code="${resp##*$'\n'}"; resp="${resp%$'\n'*}"
+            case "$code" in
+                200) jq -r '"lab: notification sent (\(.kind)): \(.result)"' <<<"$resp" >&2 ;;
+                *) echo "lab: notify test failed ($code): $(jq -r '.error // .' <<<"$resp")" >&2; exit 1 ;;
+            esac ;;
+        *) echo "lab: notify: unknown '$1' (status | test)" >&2; exit 2 ;;
+    esac
+}
+
 cmd_logs() {
     local n=100 which=server
     while [[ $# -gt 0 ]]; do
@@ -366,6 +395,7 @@ case "$cmd" in
     restart) cmd_restart "$@" ;;
     url) need_home; bookmark ;;
     logs) need_home; cmd_logs "$@" ;;
+    notify) need_home; cmd_notify "$@" ;;
     home) echo "$home" ;;
     token) need_home; echo "$home/token" ;;
     status)

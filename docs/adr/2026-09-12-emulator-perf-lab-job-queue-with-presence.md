@@ -118,8 +118,11 @@ relays, the agent drives over HTTP.
 
 ## Follow-ups
 
-- Push notifications to the phone when jobs wait with no device (vision
-  Q3).
+- ~~Push notifications to the phone when jobs wait with no device (vision
+  Q3).~~ **Done** (2026-09-13): `scripts/emu/lab/notify.mjs` sends one
+  notification per episode when jobs are waiting and nothing is present,
+  over ntfy (or any https webhook) named only in `config.json` — the repo
+  ships no topic and no URL, so an unconfigured lab notifies nobody.
 - Job kinds beyond `bench` (the field is reserved; vision Q6): the C6-in-tab
   boot-to-hello, Studio walks.
 - Other emulator targets as builds in the same store (vision Q7).

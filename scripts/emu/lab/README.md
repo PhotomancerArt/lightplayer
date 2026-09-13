@@ -24,7 +24,8 @@ with one once. `LAB_HOME` overrides it (tests use a temp dir).
 
 ```text
 ~/.photomancer/emu-lab/
-├── config.json      {port: 41111, exposure: "tailscale" | "ngrok", domain: null, cooldownMs: 60000, maxResultBytes: 2000000}
+├── config.json      {port: 41111, exposure: "tailscale" | "ngrok", domain: null, cooldownMs: 60000, maxResultBytes: 2000000, notify: …}
+├── notify.json      armed? when did the "jobs waiting, no device" ping last fire (a restart must not re-send)
 ├── token            32 hex, 0600, generated on first start
 ├── builds/<id>/     emu.wasm manifest.json worker.js bench-run.js wasi-shim.js jit-host.js bench-cli.mjs index.html
 │                    fw-<slug>.elf -> ../../images/<sha12>.elf       (one ELF copy shared by every build)
@@ -125,6 +126,72 @@ and all:
 ```bash
 node ~/.photomancer/emu-lab/builds/<id>/bench-cli.mjs --stage ~/.photomancer/emu-lab/builds/<id> --image render-basic --grade t2 --mode interp
 ```
+
+## Notifications: one ping when jobs wait with no device
+
+The other half of "nobody in the loop": a director queues an A/B pair, the
+phone is in another room with the tab closed, and without this nothing
+happens until somebody looks at `lab.sh status`. When jobs are waiting
+(`queued` or `running`) and **no device is present**, the lab sends **one**
+notification.
+
+**Nothing ships configured.** There is no default topic, URL or account
+anywhere in the repo: with no `notify` block in `config.json` the feature is
+off and `lab.sh notify status` says so. The outward reach is Yona's to grant,
+in her own file.
+
+```jsonc
+// ~/.photomancer/emu-lab/config.json
+"notify": {
+  "kind": "ntfy",
+  "topic": "<something long and unguessable>",   // this IS the address: anyone who knows it can read and write it
+  "server": "https://ntfy.sh",                   // optional; a self-hosted ntfy works the same
+  "clickUrl": null,                              // optional https link to open — NEVER the bookmark: the token would pass through someone else's server
+  "graceMs": 30000,                              // the condition must hold this long before the first send
+  "minIntervalMs": 600000                        // floor between two sends
+}
+```
+
+**Why ntfy and not Web Push.** The notification's whole job is to reach a
+phone whose lab tab is *closed*. Web Push from the lab page would need
+hand-written ES256 VAPID JWTs plus ECDH/HKDF/AES128GCM payload encryption
+(the lab may not take a dependency), a service worker, a manifest, a
+subscribe button and a stored subscription — and on iOS it does not exist at
+all until the page is added to the Home Screen, so the setup step never
+goes away. That is several hundred lines whose failure mode is a silent
+non-delivery. ntfy is one HTTPS POST and about twenty lines here; its cost is
+the free ntfy app on the phone, where the topic is subscribed once.
+`"kind": "webhook"` posts `{title, body, at, source}` as JSON to any other
+https URL with optional `headers` (Pushcut, a Shortcuts relay, anything), so
+a channel change after a hand test is a config edit rather than another PR.
+Both refuse a non-https URL outright: this is the one place the lab speaks
+outward, and it does that encrypted or not at all.
+
+**Three rules, not one**, because "jobs waiting and nothing present" is true
+far more often than it is interesting:
+
+| | |
+|---|---|
+| **the arm** | one send per episode. Sending disarms; only a device becoming present, or the queue draining, re-arms. Three jobs queued in a minute are one episode, so one notification — which names all three. |
+| **`graceMs`** (30 s) | the condition must hold *continuously*. A phone that blinks out of `visible` between two spaced presses is a transient, not an absence. |
+| **`minIntervalMs`** (10 min) | a floor between sends however the arming went. iOS hides a backgrounded tab and hidden is not present (T4), so a phone being picked up and put down would otherwise be a notification machine. |
+
+The state — armed, `notifiedAt`, since when — is `~/.photomancer/emu-lab/notify.json`,
+so a server restart does not re-send what it already sent. The `notify`
+block itself is re-read whenever `config.json`'s mtime moves, so setting or
+changing the topic needs no `restart server` (which would cut a press in
+flight); nothing else in the config reloads.
+
+```bash
+scripts/emu/lab/lab.sh notify status     # configured? armed? when did it last send, and what came back
+scripts/emu/lab/lab.sh notify test       # one send NOW — it does not spend the arm
+```
+
+`notify status` never prints the topic or the URL, and neither does
+`/status`: the topic is the address *and* the secret. `LAB_NOTIFY_CMD` (a
+shell command, with `LAB_NOTIFY_TITLE`/`LAB_NOTIFY_BODY`/`LAB_NOTIFY_KIND`/`LAB_NOTIFY_TARGET`
+in its environment) replaces the sender entirely — that is the seam the tests
+use, and nothing leaves the machine while it is set.
 
 ## Endpoints and the token
 
@@ -316,6 +383,7 @@ five-press table, generated.
 lab.sh status | devices | jobs | report <id> | cancel <id> | collect | home | token | curl <path> [curl args]
 lab.sh stage <sha>                      # build that commit in a throwaway worktree of the primary checkout, put it in the store
 lab.sh install [--force] | uninstall | restart [server|tunnel|restage] | url | logs [-n N] [server|tunnel|restage]
+lab.sh notify status | test             # the "jobs waiting, no device" ping: its state, or one send now
 lab.sh queue --build 23a3d3c --rows gate-rows --repeats 3 --spacing 3m [--device NAME] [--ttl 24h] [--note …]
 lab.sh queue --ab 86cb2e0 23a3d3c --rows gate-rows --repeats 5 --spacing 3m
 lab.sh queue --build X --row render-basic:t2:jit:8 --row render-basic:t2:interp
@@ -415,7 +483,12 @@ number:
 just test-emu-lab        # node --test scripts/emu/lab/test/*.test.mjs — also inside `just test`, and the emu_c6 CI job's "Lab tests" step
 ```
 
-`restage.test.mjs` is the shell half: it takes the stage lock by hand (the
+`notify.test.mjs` is the F2 half: `LAB_NOTIFY_CMD` is the channel for every
+case in it, appending a line to a file in the temp home, so "how many
+notifications" is "how many lines" — one for a job queued with no device,
+none while a device is present, one for a burst of three, none after a
+restart, and none at all with no `notify` block. Nothing in it reaches the
+network. `restage.test.mjs` is the shell half: it takes the stage lock by hand (the
 runner's own pid is the live holder) and checks both sides of it — the
 refusal and the stale-lock recovery — with no network and no cargo. The rest
 spawn the real `server.mjs` on port 0 in a temp home
