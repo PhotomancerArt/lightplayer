@@ -316,7 +316,7 @@ prints them all as the rig's table, device column from the lab's name.
   "id": "j-20260912-0130-a1b2", "kind": "bench",
   "builds": ["86cb2e0", "23a3d3c"],            // one entry = a single build
   "rows": "gate-rows",                           // or [{slug,grade,mode,fnBlocks,timeout}]
-  "repeats": 5, "spacingMs": 180000, "device": "any", "ttlMs": 86400000, "retryTainted": 1,
+  "repeats": 5, "spacingMs": 60000, "device": "any", "ttlMs": 86400000, "retryTainted": 1,
   "stopWhenStable": null,                        // or {"row":"interp","pct":5,"minPresses":4} — see below
   "note": "P4 vs P3 head", "createdAt": "…", "state": "queued",
   "boundDevice": null, "presses": [{"n": 1, "build": "86cb2e0", "state": "pending"}, …],
@@ -345,6 +345,15 @@ press of the first job that passes four conditions:
    measured from the **end** of the previous press (D19) — DD41's "spaced
    by minutes" is thermal recovery.
 
+`spacingMs` defaults to **60000**, the same 60 s as the device cooldown, so
+the default job takes presses as fast as the cooldown allows and the job
+record says so. `--spacing 0` is still back-to-back. *History:* the lab used
+to recommend `--spacing 3m`; on build `9f67d78`, 10 presses each, 3 m spacing
+(`j-20260913-0755-1213`) against back-to-back (`j-20260913-0755-14e2`) gave a
+translated median of **1.046× vs 1.053×** and an interpreter **0.677 vs
+0.669** — no drift either way, so the recommendation was dropped
+(2026-09-13).
+
 One press at a time per device. While a device waits on spacing the page
 gets a `cooldown` event with `nextPressAt` for its countdown. A tainted
 press appends one more press of the same build at the end of the queue
@@ -362,7 +371,7 @@ say so:
 ```
 
 ```bash
-lab.sh queue --ab A B --repeats 8 --spacing 3m --stop-when-stable        # the default above
+lab.sh queue --ab A B --repeats 8 --stop-when-stable                     # the default above
 lab.sh queue --build X --repeats 10 --stop-when-stable 3                 # tighter
 lab.sh queue --ab A B --repeats 8 --stop-when-stable 3 --stable-row all --stable-min 4
 ```
@@ -501,15 +510,16 @@ lab.sh status | devices | jobs | report <id> | cancel <id> | collect | home | to
 lab.sh stage <sha>                      # build that commit in a throwaway worktree of the primary checkout, put it in the store
 lab.sh install [--force] | uninstall | restart [server|tunnel|restage] | url | logs [-n N] [server|tunnel|restage]
 lab.sh notify status | test             # the "jobs waiting, no device" ping: its state, or one send now
-lab.sh queue --build 23a3d3c --rows gate-rows --repeats 3 --spacing 3m [--device NAME] [--ttl 24h] [--note …]
-lab.sh queue --ab 86cb2e0 23a3d3c --rows gate-rows --repeats 5 --spacing 3m
+lab.sh queue --build 23a3d3c --rows gate-rows --repeats 3 [--spacing 90s] [--device NAME] [--ttl 24h] [--note …]
+lab.sh queue --ab 86cb2e0 23a3d3c --rows gate-rows --repeats 5
 lab.sh queue --build X --row render-basic:t2:jit:8 --row render-basic:t2:interp
 lab.sh queue --ab A B --repeats 8 --stop-when-stable [PCT] [--stable-row interp|all|KEY] [--stable-min N]
 lab.sh wait --job <id> [--max-time 3600] | --device any|NAME | --queue-idle
 ```
 
 `queue` prints the job id on stdout; `wait --job` prints the path of
-`report.md`; `--spacing`/`--ttl` take `90s`, `3m`, `24h`.
+`report.md`; `--spacing`/`--ttl` take `90s`, `3m`, `24h`. `--spacing` defaults
+to `60s` (see [Jobs](#jobs)); `--spacing 0` is back-to-back.
 `--stop-when-stable`'s percentage is optional (5 % when omitted); see
 [Stopping early](#stopping-early-when-a-build-has-settled-opt-in).
 

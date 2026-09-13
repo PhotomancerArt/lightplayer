@@ -3,8 +3,8 @@
 #
 #   lab.sh status                                  # devices, builds, job counts
 #   lab.sh devices                                 # the device table
-#   lab.sh queue --build 23a3d3c --rows gate-rows --repeats 3 --spacing 3m [--device NAME] [--ttl 24h] [--note ...]
-#   lab.sh queue --ab 86cb2e0 23a3d3c --rows gate-rows --repeats 5 --spacing 3m     # A1 B1 A2 B2 … on one device
+#   lab.sh queue --build 23a3d3c --rows gate-rows --repeats 3 [--spacing 90s] [--device NAME] [--ttl 24h] [--note ...]
+#   lab.sh queue --ab 86cb2e0 23a3d3c --rows gate-rows --repeats 5     # A1 B1 A2 B2 … on one device
 #   lab.sh queue --build X --row render-basic:t2:jit:8 --row render-basic:t2:interp  # explicit rows
 #   lab.sh queue --ab A B --repeats 8 --stop-when-stable [PCT] [--stable-row interp|all|KEY] [--stable-min N]  # stop a build once its control row settles
 #   lab.sh wait --job ID [--max-time 3600]         # ONE blocking call; prints report.md's path on exit 0
@@ -72,7 +72,13 @@ dur_ms() {
 }
 
 cmd_queue() {
-    local builds='[]' rows='"gate-rows"' rowlist='[]' repeats=1 spacing=0 device=any ttl=86400000 retry=1 note=null
+    # `spacing` defaults to 60000 — the same 60 s as the device cooldown, which
+    # is what gated presses anyway while this said 0. 3 m was the old advice and
+    # bought nothing: on build 9f67d78, 10 presses each, 3 m spacing
+    # (j-20260913-0755-1213) against back-to-back (j-20260913-0755-14e2) gave a
+    # translated median of 1.046× vs 1.053× and an interpreter 0.677 vs 0.669.
+    # `--spacing 0` is still allowed and still means back-to-back.
+    local builds='[]' rows='"gate-rows"' rowlist='[]' repeats=1 spacing=60000 device=any ttl=86400000 retry=1 note=null
     local stable=null stable_pct=5 stable_row=interp stable_min=4
     while [[ $# -gt 0 ]]; do
         case "$1" in
