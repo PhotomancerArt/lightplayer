@@ -69,7 +69,8 @@ test('a job queued with no device present sends exactly one notification, and sa
     const st = JSON.parse(fs.readFileSync(path.join(home, 'notify.json'), 'utf8'));
     assert.equal(st.armed, false);
     assert.ok(st.notifiedAt, 'notifiedAt recorded');
-    assert.match(st.lastResult, /^queue waiting, no device: ntfy 0/);
+    // `cmd`, not `ntfy`: the stub stood in for the channel and the state says so.
+    assert.match(st.lastResult, /^queue waiting, no device: cmd 0/);
     // It keeps being true, tick after tick, and stays one notification.
     await TICKS(20);
     assert.equal(calls(home).length, 1);

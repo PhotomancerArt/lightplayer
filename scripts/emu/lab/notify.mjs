@@ -118,7 +118,7 @@ function runCmd(cmd, env) {
   return new Promise((resolve, reject) => {
     execFile('/bin/sh', ['-c', cmd], { env: { ...process.env, ...env }, timeout: 10000 }, (err, stdout, stderr) => {
       if (err) return reject(new Error(String(stderr || err.message).trim().slice(0, 300)));
-      resolve({ status: 0, body: String(stdout).trim().slice(0, 300) });
+      resolve({ via: 'cmd', status: 0, body: String(stdout).trim().slice(0, 300) });
     });
   });
 }
@@ -175,9 +175,9 @@ export function createNotifier({ home, configPath, log, now = () => Date.now() }
     if (c.kind === 'ntfy') {
       const headers = { 'Content-Type': 'text/plain; charset=utf-8', Title: ascii(title), Priority: ascii(c.priority), Tags: 'hourglass' };
       if (c.clickUrl) headers.Click = ascii(c.clickUrl);
-      return httpsPost(c.target, headers, body);
+      return { via: 'ntfy', ...await httpsPost(c.target, headers, body) };
     }
-    return httpsPost(c.target, { 'Content-Type': 'application/json', ...(c.headers || {}) }, JSON.stringify({ title, body, at: new Date(now()).toISOString(), source: 'emu-lab' }));
+    return { via: 'webhook', ...await httpsPost(c.target, { 'Content-Type': 'application/json', ...(c.headers || {}) }, JSON.stringify({ title, body, at: new Date(now()).toISOString(), source: 'emu-lab' })) };
   }
 
   /// Send, and record what happened either way. A dead endpoint is logged and
@@ -186,9 +186,11 @@ export function createNotifier({ home, configPath, log, now = () => Date.now() }
   async function send(c, title, body, why) {
     try {
       const r = await deliver(c, title, body);
-      st.lastResult = why + ': ' + c.kind + ' ' + r.status + (r.body ? ' ' + r.body : '');
+      // `via` is the path it actually took: `cmd` means LAB_NOTIFY_CMD stood
+      // in for the channel and nothing left the machine.
+      st.lastResult = why + ': ' + r.via + ' ' + r.status + (r.body ? ' ' + r.body : '');
       st.lastError = null;
-      log('notify: sent (' + why + ') ' + c.kind + ' -> ' + r.status + ' — ' + title);
+      log('notify: sent (' + why + ') via ' + r.via + ' -> ' + r.status + ' — ' + title);
     } catch (e) {
       st.lastError = why + ': ' + e.message;
       st.lastResult = null;
