@@ -252,6 +252,18 @@ pub struct BusScalars {
     /// bus's state, so a snapshot that forgot it would restore a machine
     /// whose pads had lost their routing.
     pub pins: Fabric,
+    /// The RAM alias table, `(base, len, target_base)` in address order
+    /// ([`SocBus::add_ram_alias`]). Construction-time state like the regions,
+    /// and carried for the same reason `restore_regions` counts them: a
+    /// snapshot from a machine with a dual-mapped window restored into one
+    /// without it would run until the first fetch through the missing door
+    /// and fault there with no diagnostic. [`SocBus::restore_scalars`]
+    /// refuses the mismatch instead.
+    pub ram_aliases: Vec<(u32, u32, u32)>,
+    /// The `(pc, kind)` sites the trace has already named as going through an
+    /// alias door. Diagnostic state, like the unmapped sites: a restored run
+    /// that re-announced every door would not write the same trace.
+    pub alias_sites: BTreeSet<(u32, u8)>,
 }
 
 /// One entry in the MMIO decode table.
@@ -1954,10 +1966,24 @@ impl SocBus {
             first_strict_violation: self.first_strict_violation,
             request: self.request,
             pins: self.pins.clone(),
+            ram_aliases: self.ram_aliases(),
+            alias_sites: self.alias_sites.clone(),
         }
     }
 
+    /// Put the scalars back. A snapshot whose RAM alias table is not this
+    /// bus's was taken from a differently built machine and is refused
+    /// loudly, as [`restore_regions`](Self::restore_regions) refuses one with
+    /// a different region count.
     pub fn restore_scalars(&mut self, s: &BusScalars) {
+        assert_eq!(
+            s.ram_aliases,
+            self.ram_aliases(),
+            "SocBus::restore_scalars: snapshot has RAM aliases {:x?}, this bus has {:x?}",
+            s.ram_aliases,
+            self.ram_aliases()
+        );
+        self.alias_sites = s.alias_sites.clone();
         self.now = s.now;
         self.pc = s.pc;
         self.hart = s.hart;
