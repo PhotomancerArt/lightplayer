@@ -317,6 +317,14 @@ jobs:
             emu_c6:
               - 'lp-emu/**'
               - 'lp-fw/fw-esp32c6/**'
+              # The server loop and wire code both chips' firmware share.
+              # Neither `emu_c6` nor `emu_esp32v3` covered it before, which
+              # meant a change here — including to the boot path both
+              # emulator boot-tests exercise — ran no emulator gate at all
+              # unless it happened to touch something else. Deliberately NOT
+              # `lp-core/**` (director ruling DD77): that closure is wider
+              # than what the two chips' `fw-esp32-common` actually shares.
+              - 'lp-fw/fw-esp32-common/**'
               # The recipe that builds every image this job boots. It was
               # missing until L4, so a change to the reference build — the
               # thing that decides WHICH BYTES the gates run against — ran no
@@ -343,6 +351,10 @@ jobs:
             emu_esp32v3:
               - 'lp-emu/**'
               - 'lp-fw/fw-esp32v3/**'
+              # The server loop and wire code both chips' firmware share —
+              # see `emu_c6`'s comment above for why it belongs here too and
+              # why it stops short of `lp-core/**` (DD77).
+              - 'lp-fw/fw-esp32-common/**'
               - 'scripts/emu/**'
               # Since M5 P5 this job also runs the classic's heap-budget
               # ratchet, so the gate has to fire when the gate's own script or
