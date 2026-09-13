@@ -186,6 +186,10 @@ export function createNotifier({ home, configPath, log, now = () => Date.now() }
   async function send(c, title, body, why) {
     try {
       const r = await deliver(c, title, body);
+      // A 404 from ntfy (a topic that is not what you think it is) is a
+      // failure, not a send: `notify test` has to be able to say so, because
+      // it is the only thing standing between a typo and months of silence.
+      if (r.status !== 0 && (r.status < 200 || r.status >= 300)) throw new Error(r.via + ' answered ' + r.status + (r.body ? ': ' + r.body : ''));
       // `via` is the path it actually took: `cmd` means LAB_NOTIFY_CMD stood
       // in for the channel and nothing left the machine.
       st.lastResult = why + ': ' + r.via + ' ' + r.status + (r.body ? ' ' + r.body : '');
