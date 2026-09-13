@@ -15,7 +15,8 @@
 ## Context
 
 Studio's device model shipped with an emulator-shaped hole in it
-(`vision.md` of this plan, grounded on `main` `20f5c152bea`… `20f6b5124`):
+(`vision.md` of this plan, grounded on `main` `20f7b5124`; re-grounded at
+the plan session, `f5c152bea`):
 `EMULATED_TARGETS` was `&[]`, so every C6 project resolved to a sim, and the
 only emulator Studio could reach at all was a **native process** behind a
 WebSocket (`lp-cli emu serve`) driven through a `navigator.serial` polyfill —
