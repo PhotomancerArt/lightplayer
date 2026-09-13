@@ -195,7 +195,7 @@ pub fn boot_set(
         // block was `0x400` long and left the RAM unmapped (M5 discovery C4;
         // M4's upload walk hit the other end of it, as a strict stop at
         // `0x6000_6400` from `Ws281xDriver::open`).
-        (base::RMT, rmt::LEN, Box::new(rmt::Rmt::new(rmt_clock))),
+        (base::RMT, rmt::LEN, Box::new(rmt::new(rmt_clock))),
         // The radio window, after RMT: `Rmt::new` runs before esp-radio's
         // init in `main`, so this is the order the boot meets them.
         (
