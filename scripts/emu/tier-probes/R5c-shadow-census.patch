@@ -1,0 +1,162 @@
+diff --git a/lp-emu/esp/lp-emu-esp32c6/src/bin/lp-emu-esp32c6.rs b/lp-emu/esp/lp-emu-esp32c6/src/bin/lp-emu-esp32c6.rs
+index 8dadb6731..83809d636 100644
+--- a/lp-emu/esp/lp-emu-esp32c6/src/bin/lp-emu-esp32c6.rs
++++ b/lp-emu/esp/lp-emu-esp32c6/src/bin/lp-emu-esp32c6.rs
+@@ -1203,6 +1203,8 @@ fn report_refill_lag(machine: &Esp32C6Machine) {
+             }
+         );
+     }
++    // R5c TIER PROBE (scripts/emu/tier-probes).
++    eprintln!("{}", lp_emu_esp32c6::periph::rmt::shadow::report());
+ }
+ 
+ fn report(machine: &mut Esp32C6Machine, outcome: &Outcome) {
+diff --git a/lp-emu/esp/lp-emu-esp32c6/src/periph/rmt.rs b/lp-emu/esp/lp-emu-esp32c6/src/periph/rmt.rs
+index 4968ead73..efbdf8247 100644
+--- a/lp-emu/esp/lp-emu-esp32c6/src/periph/rmt.rs
++++ b/lp-emu/esp/lp-emu-esp32c6/src/periph/rmt.rs
+@@ -788,6 +788,52 @@ pub struct Rmt {
+     /// test-emu-c6`'s gates turn them on through
+     /// [`crate::machine::Esp32C6Builder::rmt_logs`].
+     keep_logs: bool,
++    /// R5c TIER PROBE: the guest's write watermark, one bit per RAM word.
++    written: Box<[bool; RAM_WORDS]>,
++    /// R5c TIER PROBE: how long the run the shadow bulk is inside has got.
++    shadow_run: [u64; TX_CHANNELS],
++}
++
++// ---- R5c TIER PROBE (scripts/emu/tier-probes): the shadow census ----------
++//
++// No behaviour change: the transmitter fetches word by word exactly as it does
++// today. Alongside it, the same bounds R5a's bulk uses are evaluated at each
++// word, and the words a bulk WOULD have absorbed into the run it is already in
++// are counted. R5 and R5a do not run the guest, so their slice censuses are a
++// broken program's; this one is the healthy cadence's.
++pub mod shadow {
++    use core::sync::atomic::{AtomicU64, Ordering::Relaxed};
++    pub static WORDS: AtomicU64 = AtomicU64::new(0);
++    pub static ABSORBED: AtomicU64 = AtomicU64::new(0);
++    pub static STOP_STATE: AtomicU64 = AtomicU64::new(0);
++    pub static STOP_THR: AtomicU64 = AtomicU64::new(0);
++    pub static STOP_WRAP: AtomicU64 = AtomicU64::new(0);
++    pub static STOP_UNWRITTEN: AtomicU64 = AtomicU64::new(0);
++    pub static STOP_GUARD: AtomicU64 = AtomicU64::new(0);
++    pub static RUN_MAX: AtomicU64 = AtomicU64::new(0);
++
++    pub fn report() -> String {
++        let words = WORDS.load(Relaxed);
++        let absorbed = ABSORBED.load(Relaxed);
++        let runs = words - absorbed;
++        format!(
++            "rmt shadow census: {words} word fetches, {runs} runs (events a \
++             watermark+guard bulk would schedule), {absorbed} absorbed \
++             ({:.2} %), longest run {} words; run ends: state {} thr {} wrap \
++             {} unwritten {} guard {}",
++            if words == 0 {
++                0.0
++            } else {
++                100.0 * absorbed as f64 / words as f64
++            },
++            RUN_MAX.load(Relaxed),
++            STOP_STATE.load(Relaxed),
++            STOP_THR.load(Relaxed),
++            STOP_WRAP.load(Relaxed),
++            STOP_UNWRITTEN.load(Relaxed),
++            STOP_GUARD.load(Relaxed),
++        )
++    }
+ }
+ 
+ /// A trace note, formatted only when the trace is on.
+@@ -817,9 +863,21 @@ impl Rmt {
+             warned_ref_cnt: [false; 4],
+             warned_late_start: [false; TX_CHANNELS],
+             keep_logs: false,
++            // R5c TIER PROBE.
++            written: Box::new([false; RAM_WORDS]),
++            shadow_run: [0; TX_CHANNELS],
+         }
+     }
+ 
++    /// R5c TIER PROBE: the run the shadow bulk was inside ends here.
++    fn shadow_end(&mut self, ch: usize, which: &core::sync::atomic::AtomicU64) {
++        use core::sync::atomic::Ordering::Relaxed;
++        which.fetch_add(1, Relaxed);
++        let run = self.shadow_run[ch];
++        shadow::RUN_MAX.fetch_max(run, Relaxed);
++        self.shadow_run[ch] = 0;
++    }
++
+     /// The block's register grades (M2 P3 — the debt sweep graded the accept
+     /// blocks and left the modelled ones to their owners).
+     ///
+@@ -1194,6 +1252,11 @@ impl Rmt {
+             // The all-zero STOP word, or a zero first half (modeled, §10.4):
+             // the transmission ends before it — no clock needed.
+             self.log_word(ch, now, word, cx);
++            // R5c TIER PROBE: consumed, and the run ends on the frame.
++            self.written[raddr.min(RAM_WORDS - 1)] = false;
++            shadow::WORDS.fetch_add(1, core::sync::atomic::Ordering::Relaxed);
++            self.shadow_run[ch] += 1;
++            self.shadow_end(ch, &shadow::STOP_STATE);
+             self.end_frame(ch, now, cx);
+             return;
+         }
+@@ -1203,11 +1266,17 @@ impl Rmt {
+             Err(reason) => {
+                 // Not fetched yet: the word is logged when it actually goes
+                 // out, on the resume.
++                // R5c TIER PROBE: no word consumed; the run ends here too.
++                self.shadow_end(ch, &shadow::STOP_STATE);
+                 self.stall(ch, now, reason, cx);
+                 return;
+             }
+         };
+         self.log_word(ch, now, word, cx);
++        // R5c TIER PROBE: consumed.
++        self.written[raddr.min(RAM_WORDS - 1)] = false;
++        shadow::WORDS.fetch_add(1, core::sync::atomic::Ordering::Relaxed);
++        self.shadow_run[ch] += 1;
+         {
+             let e = &mut self.ch[ch];
+             let t0 = e.ticks_since_start;
+@@ -1291,6 +1360,30 @@ impl Rmt {
+             }
+         }
+         self.update_lines(cx);
++
++        // R5c TIER PROBE: R5a's four bounds, evaluated but not acted on. If
++        // they all pass, the next word's `EV_WORD` is one a bulk would not
++        // have scheduled — the run continues and that event is absorbed.
++        {
++            use core::sync::atomic::Ordering::Relaxed;
++            let e = &self.ch[ch];
++            let next = e.raddr;
++            let next_pos = next - window_start;
++            let idx = (next as usize).min(RAM_WORDS - 1);
++            if !e.running || e.stalled || e.ending != Ending::No {
++                self.shadow_end(ch, &shadow::STOP_STATE);
++            } else if next_pos + 1 == self.tx_lim(ch) {
++                self.shadow_end(ch, &shadow::STOP_THR);
++            } else if next_pos + 1 >= self.ch[ch].window_words() {
++                self.shadow_end(ch, &shadow::STOP_WRAP);
++            } else if !self.written[idx] {
++                self.shadow_end(ch, &shadow::STOP_UNWRITTEN);
++            } else if self.ram[idx] & 0x7fff == 0 {
++                self.shadow_end(ch, &shadow::STOP_GUARD);
++            } else {
++                shadow::ABSORBED.fetch_add(1, Relaxed);
++            }
++        }
+     }
+ 
+     /// The current word's pulses ended.
+@@ -1756,6 +1849,8 @@ impl Rmt {
+                 // Live: the engine reads this on its next fetch, refilled
+                 // or not.
+                 *slot = value;
++                // R5c TIER PROBE: the watermark.
++                self.written[i] = true;
+                 // …and it is the last word of a refill until another one
+                 // lands, which is how the fill half of the measurement is
+                 // read off the guest's own writes.

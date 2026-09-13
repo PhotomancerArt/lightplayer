@@ -23,9 +23,23 @@
 // is the USER-facing number: frames per emulated second is what "what fps
 // will this pattern get on hardware" means, and it must not move on a lever
 // that claims to keep the guest exact.
+import { execFileSync } from 'node:child_process';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { loadavg } from 'node:os';
 import { join } from 'node:path';
+
+// P1d: `bun`'s `os.loadavg()` returns [0, 0, 0] unconditionally, so every JSC
+// table this script has ever printed reads `loadavg 0.0` — a load that is
+// unknown, not zero (G-LOOP0b's JSC table and ledger §2's are both affected).
+// The kernel's own figure is one child process away and both engines can read
+// it. Falls back to `os.loadavg()` if the sysctl is not there (Linux CI).
+function loadOne() {
+  try {
+    const m = /([\d.]+)/.exec(execFileSync('sysctl', ['-n', 'vm.loadavg'], { encoding: 'utf8' }));
+    if (m) return Number(m[1]);
+  } catch { /* fall through */ }
+  return loadavg()[0];
+}
 
 function parseArgs(argv) {
   const o = {
@@ -110,7 +124,7 @@ for (let rep = 1; rep <= o.repeats; rep++) {
     delete r.fullText;
     r.rung = s.label;
     r.rep = rep;
-    r.loadavg = loadavg()[0];
+    r.loadavg = loadOne();
     rows.push(r);
     console.log([
       s.label.padEnd(w[0]),

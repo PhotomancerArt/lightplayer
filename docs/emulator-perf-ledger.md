@@ -70,7 +70,26 @@ other way is not comparable to anything in §2 or §3.
 - **Interleaved, best-of-N.** Repeats go `A, B, C, A, B, C, …`, never
   `A×5, B×5`. Best-of-5 on the desk, best of ≥3 spaced presses on the phone.
 - **The load average rides every row.** A wall-clock number with no `loadavg`
-  beside it is not a row.
+  beside it is not a row. **And refuse to quote a desk row taken above
+  loadavg ~8** — other agents' worktrees held this desk at 43–101 for two
+  hours during P1c, and a row taken there measures the desk, not the lever.
+  Read the load from `uptime` or `sysctl -n vm.loadavg`, and see the bun
+  warning below.
+- **`bun`'s `os.loadavg()` is a lie** (P1d, 2026-09-13). It returns
+  `[≈0, 0, 0]` unconditionally — measured at `2.1e-10` against the kernel's
+  `33.92` at the same instant. **Every JSC table this repo has ever printed
+  through `rung-rows.mjs` reads `loadavg 0.0`, and that load is unknown, not
+  zero** — including `G-LOOP0b`'s JSC rung table and §2's JSC rows below.
+  `rung-rows.mjs` now reads `sysctl -n vm.loadavg` and falls back to
+  `os.loadavg()`; rows printed before 2026-09-13 keep the false zero.
+- **Phone spacing: the lab's cooldown is enough** (P1d, 2026-09-13, from the
+  director's S1/S2 pair, §3). Ten presses at 3-minute spacing and ten
+  back-to-back on the same build gave translated medians **1.046× vs 1.053×**
+  and interpreter medians **0.677 vs 0.669** — **no thermal drift is visible
+  back-to-back**. The 3-minute spacing this protocol used is not supported by
+  measurement; the floor is the lab's own 60 s cooldown. DD41's "best of ≥3,
+  quote the sequence" and the same-press translated ÷ interpreter ratio as the
+  thermal control both stay.
 - **A UART0 sha256 on every row.** A speed number from a run that computed
   something else is not a speed number. `render-basic` t2 at 5,500 ms is
   `2407828f80684331`; the trap log is `51ddaf56c96b77d3`.
@@ -86,6 +105,14 @@ other way is not comparable to anything in §2 or §3.
   41111) automates that protocol. Rows taken with the page hidden or after a
   lost lock are tainted and the lab excludes them — never quote a tainted row.
   A desk-browser row through the lab is a desk number, not a phone number.
+  The lab auto-stages `origin/main` every ten minutes, so a base build id is
+  just main's short sha; only a dirty rung needs a hand stage. **Never restart
+  the lab server** — a restart answers every armed `wait` with a 503.
+- **A lab report's "byte-identity INCONSISTENT" line is not always a defect.**
+  It compares UART shas across every row in the job, so a job that runs two
+  *images* reports two shas and calls them inconsistent
+  (`2407828f80684331` is `render-basic`, `a570b6597cc0fc31` is
+  `render-rocaille`). Read it per image.
 - **A replay recording covers boot-phase code only** since P3 (DD59): the
   republished SYSTIMER words are not refreshed by canned imports. Any
   measurement of steady state must be a **live** run.
@@ -103,7 +130,11 @@ other way is not comparable to anything in §2 or §3.
 | engine | fn | best of 5 | real time | loadavg |
 |---|---:|---:|---:|---:|
 | node/V8 25.2.1 | 16 | 5.24 s | 1.051× | 3.1 → 4.9 |
-| bun/JSC 1.1.18 | 8 | 6.35 s | 0.867× | 0.0 |
+| bun/JSC 1.1.18 | 8 | 6.35 s | 0.867× | **not readable under bun** |
+
+⚠️ The JSC row's `loadavg 0.0` as originally printed was `bun`'s
+`os.loadavg()`, which returns ≈0 unconditionally (§1). The load that run met
+is **unknown**, not zero. `rung-rows.mjs` reads the sysctl from 2026-09-13.
 
 ### What a slice boundary costs (P1's decomposition, node/V8)
 
@@ -178,22 +209,43 @@ sixteen-bucket profile of an 8,056 ms run. Its **numbers stand**; its
 The bar is 1× **held**, so the number that matters is the worst spaced press,
 not the best.
 
+Updated 2026-09-13 with the **phone margin sweep**, lab job
+**`j-20260913-0726-c5bb`** (main `9f67d78`, iPhone, iOS 18.7 / Safari 26.6.1,
+5 presses at 3 m, every row untainted, UART sha on every row). Its report's
+"byte-identity **INCONSISTENT**" line is the lab comparing UART shas across
+two *images* — `2407828f80684331` for `render-basic`, `a570b6597cc0fc31` for
+`render-rocaille` — not a defect in the rows.
+
 | device | image | grade | best | the spread across spaced presses | shortfall to hold 1× | source |
 |---|---|---|---:|---|---:|---|
-| phone (JSC) | render-basic | t2 8/fn | **1.025×** | 0.863 / 0.945 / 1.008 / 0.921 / 0.818 — thermal | **up to 18 %** | M7 director log E7 |
-| phone | render-rocaille | t2 | NEVER MEASURED | NEVER MEASURED | — | — |
-| phone | harness | — | NEVER MEASURED | — | — | — |
-| phone | boot-idle-memfs | — | NEVER MEASURED | — | — | — |
-| desk V8 16/fn | render-basic | t2 | 1.051× | — (best of 5, one invocation) | holds | this phase |
-| desk JSC 8/fn | render-basic | t2 | 0.867× | — | **13 %** | this phase |
+| phone (JSC) | render-basic | t2 8/fn | **1.063×** (median 1.008, spread 14.5 %) | 1.008 / 0.909 / 1.042 / 1.063 / 0.995 | **up to 9 %** | lab `j-20260913-0726-c5bb` |
+| phone (JSC) | **render-rocaille** | t2 8/fn | **1.414×** (median 1.382, spread 5.2 %) | 1.391 / 1.382 / 1.414 / 1.341 / 1.364 | **holds** | lab `j-20260913-0726-c5bb` |
+| phone (JSC) | render-basic | t2 interpreter | 0.678× (median 0.644) | 0.644 / 0.638 / 0.678 / 0.624 / 0.647 | 36 % | same job — the thermal control |
+| phone (JSC) | render-rocaille | t2 interpreter | 0.766× (median 0.753) | 0.714 / 0.751 / 0.766 / 0.759 / 0.753 | 25 % | same job — the thermal control |
+| phone (JSC) | render-basic | same-press 8/fn ÷ interp | **1.70×** (median 1.54) | 1.56 / 1.42 / 1.53 / 1.70 / 1.54 | — | same job |
+| phone (JSC) | render-rocaille | same-press 8/fn ÷ interp | **1.95×** (median 1.84) | 1.95 / 1.84 / 1.85 / 1.77 / 1.81 | — | same job |
+| phone (JSC) | render-basic | t2 8/fn (older) | 1.025× | 0.863 / 0.945 / 1.008 / 0.921 / 0.818 — thermal | up to 18 % | M7 director log E7 |
+| phone | harness, boot-idle-memfs | — | **NEVER MEASURED** | — | — | the phone rig defines no rows for these two images (DD18) |
+| desk V8 16/fn | render-basic | t2 | 1.051× | — (best of 5, one invocation) | holds | P1b |
+| desk JSC 8/fn | render-basic | t2 | 0.867× | — | **13 %** | P1b |
 | desk | render-rocaille | t2 | 1.73× | — | holds | P9 |
 | desk | harness | — | 2.68× | — | holds | P9 |
 | desk | boot-idle-memfs | — | **0.53×** | — | **47 %** | P9 — ~1.08 s of fixed translation on a 2 s run |
 
-**Two shortfalls are real and they have different causes.** The phone's
-10–18 % is thermal throttling of steady-state work. `boot-idle-memfs`'s 47 %
-is a *fixed* translation cost amortised over a short run, and no steady-state
-lever touches it — it needs cheaper or cached translation, not a faster loop.
+**The sweep moved the phone's number and narrowed the band.** `render-basic`
+best 1.063× with a 14.5 % spread and a median of 1.008 — so the worst spaced
+press is 0.909, a **9 %** shortfall rather than E7's 18 %. And
+`render-rocaille`, never measured on the phone before, **holds 1× comfortably
+at 1.382× median with a 5.2 % spread**: the heavier shader is the *easier*
+image for the emulator, because more guest work per emulated microsecond means
+the fixed per-slice cost is amortised further. The image that needs the margin
+is the light one.
+
+**Three shortfalls, three causes.** The phone's ~9 % on `render-basic` is
+thermal throttling of steady-state work. `boot-idle-memfs`'s 47 % is a *fixed*
+translation cost amortised over a short run, and no steady-state lever touches
+it. And `harness` / `boot-idle-memfs` have **no phone row at all** — the rig
+defines none — so their phone margin is unknown, not good.
 
 ---
 
@@ -224,6 +276,11 @@ named and deliberately not pursued) or **candidate**.
 | 2026-09-12 | **P1b R4 — the UART tap** | §2's MMIO census | **not taken**: UART0 is 0.14 % of crossings on `render-basic`, a hundredth of the 2 % floor the phase set | **rejected — wrong image**. It remains a *harness*-image lever |
 | 2026-09-12 | **P1b R3′ — the firmware's own "no real output under emulation" switch** | `lp-fw/fw-esp32c6/src/` | **does not exist**. `bench/render_loop.rs` mentions emulation only to pick a shorter run; the RMT driver is unconditional | **registered** — an unbuilt firmware-side lever |
 | 2026-09-13 | **P1c — the `wall_timeout` check strides** (`WALL_TIMEOUT_SLICE_STRIDE = 64` in `machine.rs`) | this document §3's note below; PR #736 | **desk, best of 11 in one invocation per engine, `render-basic` t2 5,500 ms: V8 16/fn 5.15 s → 4.89 s (−260 ms, −5.0 %, 1.055×) at loadavg 5.8–7.1; JSC 8/fn 6.33 s → 6.13 s (−200 ms, −3.2 %, 1.031×)**. **Phone (lab `j-20260913-0758-2bb9`, iPhone, 5 spaced presses each): translated 8/fn median 1.049× → 1.091× (+4.0 %), best 1.100× → 1.129×; the interpreter row +6.2 % median.** Predicted 227/214 ms. Every identity leg `same` | **shipped** |
+| 2026-09-13 | **B — the phone margin sweep** | lab `j-20260913-0726-c5bb`; §2's margin table | `render-basic` t2 8/fn best **1.063×** median 1.008 spread 14.5 %; **`render-rocaille` t2 8/fn best 1.414× median 1.382 spread 5.2 %** — the heavier image *holds 1×*. Interpreter controls 0.678 / 0.766 | **measured** — no code |
+| 2026-09-13 | **the phone spacing experiment** (S1 3 m vs S2 back-to-back, same build, 10 presses each) | lab `j-20260913-0755-1213` and `j-20260913-0755-14e2` | translated median **1.046× vs 1.053×**, best 1.106 vs 1.070; interpreter median 0.677 vs 0.669, spread 3.6 % vs 12.6 % (S2's two low interpreter presses are p1 and p10 at 0.60 — the ends, not a drift). **No thermal drift is visible back-to-back** | **shipped into §1** — the protocol's spacing floor drops to the lab's 60 s cooldown |
+| 2026-09-13 | **P1b R0 vs R1 on the phone** (the job G-LOOP0b could not run) | lab `j-20260912-1718-5940` (`f8c44c2-dirty-d65f8c` vs `-15a80d`, 5+5) | R1 over R0 best **+0.1 %**, median +6.3 % (inside the noise band), **same-press ratio identical (1.55 both)** | **candidate, unchanged** — the phone agrees with the desk that the middle tier is worth 1–3 % |
+| 2026-09-13 | **P1d — the write-watermark bulk** (R5 / R5a) | `G-LOOP0c-gate.md`; `scripts/emu/tier-probes/README.md` §P1d; `R5-write-watermark.patch`, `R5a-watermark-plus-guard.patch` | **the guest breaks on every surface.** UART, frames, pin log and trap log all `DIFF`; frames truncate at 73 words. Two independent causes, both quoted from the trace: the driver's **STOP guard** is a write the watermark cannot read, and **`mem_raddr_ex`** (read twice per threshold, 5,302 times over 2,651 refills) is what the ISR uses to choose *which half to refill* | **rejected as built** — and see the cadence row in §4, now closed |
+| 2026-09-13 | **P1d R5c — the shadow census** (no behaviour change; byte-identical on all five identity readings) | `R5c-shadow-census.patch` | a watermark+guard bulk would absorb **95.80 %** of word fetches on **both** `render-basic` (63,646 → 2,673 events) and `render-rocaille` (17,358 → 729), run length exactly the 24-word half. Scaled to the 5,500 ms cell: **1,409,821 slices × 531 ns ≈ 749 ms ≈ 13.6 %**. And the watermark itself **never binds**: `unwritten 0` on both images; the threshold ends every run | **measured** — the size of the prize, on the healthy cadence |
 
 ### The P1c note: what the stride removed, and what three instruments said
 
@@ -338,7 +395,7 @@ headroom against the **1×-held** bar, not by distance to 3×.
 | lever | payoff | goal-1 cost (correctness lane) | goal-2 cost (the user's numbers) | size | what would have to be true |
 |---|---|---|---|---|---|
 | **R1 — the middle tier: pins off, frames from the RMT's words** | **measured: 1.027× V8, 1.010× JSC** (140 ms of a 5,240 ms run). Removes 2,961,409 pin edges | the **pin log** is gone; `Gpio::observe_edges` and `Rmt::observe_edges` stop seeing the wire, so the GPIO input latch and the RMT receiver are dark. UART, frames, trap log, `stopped after` all **byte-identical** | **none.** Retired instructions identical (542,906,355), frames identical (256 × 241 LEDs, same sha), fps identical at 46.5. This is the tier that answers "what fps / will it OOM / does it work" without changing any of the three answers | **sm** — a fabric tap and a decoder feed; the patch is 87 lines | it ships as a *mode*, not a default: the correctness lane keeps the fabric. A run that has ever had the tier on may never be compared against a board |
-| **the per-word slice cadence** (what R2/R3 tried to remove) | **computed: ~781 ms ≈ 14 %** (1,470,755 slices × 531 ns) | total in the pin lane | **fatal as attempted.** Both built rungs break the guest: no frames, wrong instret. The transmitter cannot read ahead of the CPU | **lg**, and **no known correct shape** | someone finds a shape that does not read RAM ahead of the guest. The one unexplored candidate is a **write-watermark bulk**: the RMT already tracks the guest's last RAM write (`refill_wrote`, `RefillProbe::Filling { last_write }`), so a transmitter could bulk only up to the highest word the guest has actually written. That bounds the bulk correctly and is **NEVER MEASURED** |
+| ~~**the per-word slice cadence**~~ **— CLOSED 2026-09-13 (P1d), unless the read pointer is virtualised** | **measured: 95.80 % of word fetches absorbable, ≈ 749 ms ≈ 13.6 %** of a 5,500 ms run (R5c's shadow census on the *healthy* cadence — 63,646 → 2,673 events on `render-basic`, the same 95.80 % on `render-rocaille`). Supersedes P1b's 781 ms computed from a broken guest's slice count | total in the pin lane | **fatal in every shape built.** R2 (threshold-bounded), R5 (+ the write watermark) and R5a (+ a guard bound) all break the guest on all four transcript surfaces | **lg**, and the only shape left is a redesign | **The write-watermark bulk is measured and closed.** Two causes, independent, each fatal on its own: (1) the driver plants a **STOP guard** in the half it just left and then overwrites it while refilling, so "the guest has written it" is a property the driver deliberately gives a word it means to withdraw — the bulk takes the guard 24 word-times early and every frame truncates at 73 words; (2) **`ch0_tx_status.mem_raddr_ex`** is read **twice per threshold** (5,302 reads over 2,651 refills, at 398 and 1,370 cycles into a 4,800-cycle half) and `in_second_half = pos_before >= half` is how the ISR chooses **which half to refill** — a bulk moves the pointer to the half's end at the half's *first* cycle, so the ISR refills the half the transmitter is standing in. And the watermark bound itself is **inert**: `unwritten 0` on both product images. What is left is not a bound at all — the read pointer would have to be **virtualised to the observation cycle** (lazy bookkeeping caught up on every RMT access, the threshold a scheduled event re-predicted when `tx_lim` moves). That is `tick`-style exactness applied to one peripheral: **designed at P1d, NOT BUILT** |
 | **R4 — the UART TX-FIFO tap** | on `render-basic`: **~0.14 % ceiling**, i.e. nothing. On the **harness** image M4 measured 86 % of MMIO as TX-FIFO poll | the UART0 byte transcript — the primary identity surface | the console text a user reads | sm | someone is optimising the *harness* image. For product images this lever is dead |
 | **R3′ — the firmware turns real output off under emulation** | not measurable: the switch does not exist | the pin log and everything downstream of the wire | **the guest's own ISR stops running**, so the reported fps is one the hardware will not deliver. This is exactly the trade §0 forbids in the user lane | md (firmware) | it would have to report fps from a *modelled* refill cost rather than a real one, which is a cycle-model change, not a switch |
 | **`tick`** — the boundary as an import the stay calls | **≈ 376 ms ≈ 6.8 %** (P1, measured) | none — P1 proved the trap hook is in exactly one place and translated code never writes `mcause`/`mepc`/`mtvec` | none | **lg** | shelved at G-LOOP0 as a *milestone*; it re-enters here as **headroom**. Against a 10–18 % thermal shortfall, 6.8 % is a third to two thirds of the gap |
@@ -347,22 +404,30 @@ headroom against the **1×-held** bar, not by distance to 3×.
 | **per-tick work** (P4's phase) | NEVER MEASURED as a phase. `run_due_events` 295 ms + `drain_pins` 180 ms = 475 ms is the target, and `tick` relocates it rather than removing it | none | none | md | |
 | **translator quality** | **4.5 ns per translated instruction at 8/fn against ~2 warm**; the cold-code 2.3× residual is unexplained | none | none | **lg** | the one lever that is pure win in both lanes. It is also the only lever that touches `boot-idle-memfs`'s 47 % shortfall, which is fixed translation cost |
 | **PGO** | **+1.45×** measured, 2026-09-06 | none | none | md (build) | the build-side cost has to be worth carrying |
-| **a lazy / coalesced RMT transmitter** | ~45 ms of crossings | the pin log's `(at, seq)` interleaving | — | md | **superseded by P1b**: the ordering trap is not the binding constraint; the RAM read-ahead race is |
+| **a lazy / coalesced RMT transmitter** | ~45 ms of crossings | the pin log's `(at, seq)` interleaving | — | md | **superseded by P1b and closed by P1d**: the ordering trap is not the binding constraint, and neither is the RAM read-ahead race. The binding constraint is that the guest's driver *reads the read pointer* and branches on it. P1d also found that the ordering trap could not be tested at all — `render-basic` and `render-rocaille` both drive exactly **one** TX channel, so two channels' edges never interleave. `Fabric::push` appends in call order, `Edge` carries no sequence number: the trap is real for a two-channel image and stays **NEVER MEASURED** |
 
 ### Reading the menu against 1×
 
-The phone's shortfall is **10–18 %** on `render-basic`. Nothing on this menu
-closes it alone, and the two biggest entries are unavailable:
+Rewritten 2026-09-13 after B's sweep and P1d.
 
-- **Available and exact in the user lane:** R1 (1–2.7 %) + `wall_timeout`
-  (4.1 %) + `tick` (6.8 %) ≈ **12 %** — which does reach the bottom of the
-  band, and every one of those three leaves the guest's instret, frames and
-  fps untouched. **`wall_timeout` was taken on 2026-09-13 (P1c, #736)**, so
-  what is left of that 12 % is R1 and `tick`.
-- **Unavailable:** the per-word cadence (14 %) has no correct shape; the full
-  tier (R3) reports an fps the hardware will not deliver.
-- **Untouched by all of it:** `boot-idle-memfs` at 0.53×, which is translation
-  cost, not loop cost.
+The phone's shortfall on `render-basic` is now **~9 %** (worst spaced press
+0.909 of five, best 1.063 — job `j-20260913-0726-c5bb`), not 10–18 %. And
+`render-rocaille`, the heavier image, **already holds 1×** at a 1.382× median.
+
+- **Available and exact in the user lane:** `wall_timeout` (4.1 %) **taken**
+  on 2026-09-13 (P1c, #736, phone +4.0 % median). What is left is R1
+  (1–2.7 % desk, +0.1 % best / +6.3 % median on the phone — inside the noise)
+  and `tick` (6.8 %). Together ≈ **8–9 %**, which now meets the band rather
+  than falling short of it — but `tick` is the large-engineering item in it.
+- **Unavailable:** the per-word cadence — **13.6 %, measured, and closed by
+  P1d**: the guest's driver branches on the read pointer, so no bulk that
+  moves the pointer early can be exact, and only a virtualised read pointer
+  (a redesign of the RMT engine, not a patch) could collect it. The full tier
+  (R3) reports an fps the hardware will not deliver.
+- **Untouched by all of it:** `boot-idle-memfs` at 0.53× on the desk and
+  **no phone row at all**, which is translation cost, not loop cost. It is
+  still the worst number in this document and the only one no loop lever
+  reaches.
 
 ---
 
