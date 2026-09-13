@@ -2891,6 +2891,66 @@ test-emu-esp32v3-boot: build-fw-esp32v3
 emu-esp32v3 elf *args:
     cargo run -p lp-emu-esp32v3 --release -- --elf {{ elf }} {{ args }}
 
+# ============================================================================
+# The ESP32-S3 machine (plan three, M6)
+# ============================================================================
+
+# The S3 machine's own suite.
+#
+# Nothing here builds firmware: a plain `cargo test --workspace` must never
+# start a cross-target firmware build. The tests that need the shipped image
+# are `#[ignore]`d and run through `test-emu-esp32s3-boot`, which builds it
+# first and names the file it built.
+test-emu-esp32s3:
+    cargo test -p lp-emu-esp32s3
+
+# The boot half: build the shipped `fw-esp32s3` image, then run the whole
+# suite with the direct-load tests included.
+#
+# The path is passed explicitly (`LP_EMU_ESP32S3_ELF`) rather than trusted by
+# convention, and the image is **copied out of the shared target path** as
+# soon as it is built — every feature set builds to the same
+# `target/xtensa-esp32s3-none-elf/release-esp32s3/fw-esp32s3`, so a test that
+# read whatever was there last would pass against the wrong image. That is the
+# trap the C6's P5 hit for real, and `lp-emu-esp32s3/src/test_support.rs`
+# exists to prevent it. M6 P03 has one image; the copy is here from the first
+# recipe so the phase that adds a second does not have to remember why.
+#
+# ⚠️ **No merged chip image, and no `espflash`.** The classic's recipe builds
+# one because its ROM-up boot needs the second-stage bootloader the flasher
+# bundles. The S3 has no ROM-up path until **P06**, which is the phase that
+# adds `--merged` and the espflash step.
+test-emu-esp32s3-boot: build-fw-esp32s3
+    #!/usr/bin/env bash
+    set -euo pipefail
+    built={{ justfile_directory() }}/target/xtensa-esp32s3-none-elf/release-esp32s3/fw-esp32s3
+    out={{ justfile_directory() }}/target/lp-emu-esp32s3
+    mkdir -p "$out"
+    shipped="$out/fw-esp32s3-shipped.elf"
+    cp "$built" "$shipped"
+    export LP_EMU_ESP32S3_ELF="$shipped"
+    echo "image: shipped=$shipped"
+    cargo test -p lp-emu-esp32s3 -- --include-ignored
+
+# **M6's gate so far.** What the `Emulator ESP32-S3 (x64)` job will run.
+#
+# ⚠️ **There is no such CI job yet — P08 adds it**, with its path filter
+# mirroring `emu_esp32v3` and including `lp-fw/fw-esp32-common/**` (E6). This
+# recipe is deliberately the whole of what that job will do, so the gate a
+# human runs and the gate CI runs stay one thing.
+#
+# The two lints cover all three chips, so a hand edit to the S3's generated
+# register tables fails the same lint a hand edit to the C6's does.
+test-emu-esp32s3-gate: test-emu-esp32s3-boot
+    #!/usr/bin/env bash
+    set -euo pipefail
+    just lint-emu-fence
+    just lint-emu-regnames
+
+# Run an image on the ESP32-S3 machine.
+emu-esp32s3 elf *args:
+    cargo run -p lp-emu-esp32s3 --release -- --elf {{ elf }} {{ args }}
+
 # The translator's decoder agreement test, corpus half included (M7 JD3).
 #
 # `lp-emu-jit` decodes independently of `lp-riscv-emu`'s executors, and

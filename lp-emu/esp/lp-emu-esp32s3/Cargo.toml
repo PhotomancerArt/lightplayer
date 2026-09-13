@@ -29,3 +29,16 @@ lp-xt-emu = { path = "../../lp-xt-emu" }
 lp-ws281x = { path = "../../../lp-fw/lp-ws281x", default-features = false }
 log = { workspace = true }
 env_logger = { workspace = true }
+
+[dev-dependencies]
+# The assembler, for `tests/isa_gaps.rs`. A **test** dependency: the machine
+# executes instructions and never encodes one. M0's `rev8` lesson and the
+# `lsi`→`ssai` misdecode are why every word a test runs is produced by
+# `lp_xt_inst::encode` and never written down as a hex literal — the classic's
+# manifest carries the same edge for the same reason.
+lp-xt-inst = { path = "../../../lp-xt/lp-xt-inst" }
+# The vendored ROM's checksum test. Re-deriving the digest in-process from the
+# bytes the machine will load is what makes a swapped ROM fail the tests rather
+# than a boot; shelling out to `shasum` would make the claim depend on which
+# host ran it.
+sha2 = "0.10"
