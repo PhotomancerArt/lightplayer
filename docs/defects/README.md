@@ -219,6 +219,15 @@ genuinely fits none of these, and define it here in one line.
   delete) lets the delete win over a persist for the identity the same
   batch just wrote — discarding a record the batch itself believed was
   current.
+- **`bound-in-a-foreign-unit`** — a collection is trimmed by a bound in one
+  unit (elapsed wall time, bytes) while it is appended in another (one entry
+  per loop iteration, per event), so its size is bounded only by the
+  incidental exchange rate between the two — and is unbounded the moment
+  they decouple. Presents as a cost that scales with a quantity nothing in
+  the code names, and is worst when the trim is written as a per-element
+  removal from the front: enforcing the bound is then O(n²) in exactly the
+  size nobody was watching. The fix shape is to make the feed and the bound
+  share a unit, or to retire the expired prefix in one operation.
 - **`open-path-wait-without-wakeup`** — a wait for a resource assumes its
   owner (the world, another process) will eventually supply the event
   that ends it, but the resource is actually owned by the waiting program
@@ -446,6 +455,7 @@ a fifth still lands somewhere the new `Fault` status and pattern don't reach.
 | untested-path | 2026-09-06 | [emu-transport-drops-unprefixed-client-lines](2026-09-06-emu-transport-drops-unprefixed-client-lines.md) | fixed | lpa-client transport_serial/emulator (async `M!` framing) + lp-cli `emu` host spec |
 | shared-namespace-collision | 2026-09-08 | [a-stray-hello-answered-a-request-that-never-asked](2026-09-08-a-stray-hello-answered-a-request-that-never-asked.md) | fixed | lpa-client protocol_session/client/tokio_client/project_read_stream (correlation) |
 | lifecycle-ownership | 2026-09-08 | [serial-close-leaks-the-port-on-a-wedged-device](2026-09-08-serial-close-leaks-the-port-on-a-wedged-device.md) | fixed | lpa-client stream/serialport_stream + transport_serial framing thread/close; lpa-link host_serial_esp32 provider + DeviceSession::release_link |
+| bound-in-a-foreign-unit | 2026-09-13 | [the-dilation-window-drains-one-shift-at-a-time](2026-09-13-the-dilation-window-drains-one-shift-at-a-time.md) | fixed | lpa-studio-web `public/lpa-link/emulator_worker.js` (the tab backing's pacing loop) |
 
 ## Predecessor: `docs/bugs/`
 
