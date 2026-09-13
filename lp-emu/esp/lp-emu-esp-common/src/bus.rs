@@ -252,6 +252,18 @@ pub struct BusScalars {
     /// bus's state, so a snapshot that forgot it would restore a machine
     /// whose pads had lost their routing.
     pub pins: Fabric,
+    /// The RAM alias table, `(base, len, target_base)` in address order
+    /// ([`SocBus::add_ram_alias`]). Construction-time state like the regions,
+    /// and carried for the same reason `restore_regions` counts them: a
+    /// snapshot from a machine with a dual-mapped window restored into one
+    /// without it would run until the first fetch through the missing door
+    /// and fault there with no diagnostic. [`SocBus::restore_scalars`]
+    /// refuses the mismatch instead.
+    pub ram_aliases: Vec<(u32, u32, u32)>,
+    /// The `(pc, kind)` sites the trace has already named as going through an
+    /// alias door. Diagnostic state, like the unmapped sites: a restored run
+    /// that re-announced every door would not write the same trace.
+    pub alias_sites: BTreeSet<(u32, u8)>,
 }
 
 /// One entry in the MMIO decode table.
@@ -272,6 +284,28 @@ struct MmioAlias {
     len: u32,
     /// The index [`SocBus::add_peripheral`] returned for the real block.
     target: usize,
+}
+
+/// A second address range a span of RAM answers at (M6 D2 / DD64).
+///
+/// A *translation* entry, not a region: `[base, base + len)` is answered by
+/// the bytes at `[target_base, target_base + len)`, which belong to exactly
+/// one registered [`RamRegion`]. See [`SocBus::add_ram_alias`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct RamAlias {
+    base: u32,
+    len: u32,
+    target_base: u32,
+}
+
+impl RamAlias {
+    fn end(&self) -> u64 {
+        u64::from(self.base) + u64::from(self.len)
+    }
+
+    fn target_end(&self) -> u64 {
+        u64::from(self.target_base) + u64::from(self.len)
+    }
 }
 
 /// The SoC bus.
@@ -358,6 +392,18 @@ pub struct SocBus {
     /// them. The chip crate registers these; the common crate has no
     /// addresses of its own.
     mmio_windows: Vec<(u32, u32)>,
+    /// Second address ranges that RAM answers at, sorted by base. See
+    /// [`SocBus::add_ram_alias`]. Empty on every chip that has no dual-mapped
+    /// memory, and then the field below is what every access tests.
+    ram_aliases: Vec<RamAlias>,
+    /// `!ram_aliases.is_empty()`, hoisted into one byte: the whole cost of
+    /// [`canonical`](Self::canonical) on a bus with no alias is this test.
+    has_ram_alias: bool,
+    /// `(pc, kind)` sites the trace has already named as going through an
+    /// alias door — one `ALIAS` line per site, never per access. Touched only
+    /// while the trace is on, and part of the snapshot so a restored run
+    /// writes the same trace the original would have.
+    alias_sites: BTreeSet<(u32, u8)>,
 
     strict: bool,
     /// `Some(level)`: an access to a register graded below `level` is
@@ -548,6 +594,9 @@ impl SocBus {
             mmio_aliases: Vec::new(),
             last_mmio: None,
             mmio_windows: Vec::new(),
+            ram_aliases: Vec::new(),
+            has_ram_alias: false,
+            alias_sites: BTreeSet::new(),
             strict: false,
             strict_grade: None,
             strict_grade_blocks: None,
@@ -603,6 +652,20 @@ impl SocBus {
                 r.name,
                 r.base,
                 r.end()
+            );
+        }
+        for a in &self.ram_aliases {
+            let overlaps =
+                u64::from(region.base) < a.end() && u64::from(a.base) < u64::from(region.end());
+            assert!(
+                !overlaps,
+                "SocBus: region `{}` (0x{:08x}..0x{:08x}) overlaps the RAM alias at \
+                 0x{:08x}..0x{:08x}",
+                region.name,
+                region.base,
+                region.end(),
+                a.base,
+                a.end()
             );
         }
         self.cover_in_arena(region.base, region.len);
@@ -699,6 +762,7 @@ impl SocBus {
                 a.base + a.len
             );
         }
+        self.refuse_ram_alias_overlap("peripheral", periph.name(), base, len);
         self.mmio.push(MmioRange { base, len, periph });
         let index = self.mmio.len() - 1;
         self.mmio_by_base.push(index);
@@ -769,6 +833,7 @@ impl SocBus {
                 a.base + a.len
             );
         }
+        self.refuse_ram_alias_overlap("alias of", self.mmio[index].periph.name(), base, len);
         self.mmio_aliases.push(MmioAlias {
             base,
             len,
@@ -802,6 +867,216 @@ impl SocBus {
             .iter()
             .map(|&i| (self.mmio[i].base, self.mmio[i].len, i))
             .collect()
+    }
+
+    /// Make `[base, base + len)` a second view of the bytes already mapped at
+    /// `[target_base, target_base + len)`.
+    ///
+    /// One store, two decodes — [`add_peripheral_alias`]'s rule for RAM. The
+    /// alias is an address **translation applied before the region lookup**,
+    /// so there is exactly one [`RamRegion`], exactly one arena span, and no
+    /// possibility of the two views disagreeing. `target_base` must already be
+    /// inside a registered region (the whole aliased span inside that *one*
+    /// region); `base` must be inside no region, no other alias, no peripheral
+    /// and no MMIO window at all.
+    ///
+    /// # Why this exists, and why it is not the default
+    ///
+    /// The classic's SRAM1 I-bus mirror and its RTC-fast I-bus view are
+    /// deliberately **unmapped** (DD3, DD24 R1, DD36): M0 measured zero
+    /// references to either in the shipped `fw-esp32v3` image and in the
+    /// classic mask ROM, and an alias with no user is a model nobody checks.
+    /// DD36's rule was "an alias region is built only when a strict stop names
+    /// a user." The C6 has no dual-mapped memory at all. Neither chip calls
+    /// this, and neither should until a strict stop says otherwise.
+    ///
+    /// The ESP32-S3 names one statically (M6 D2, answered "yes" as DD64).
+    /// `lpvm-native`'s write→execute rule
+    /// (`lp-shader/lpvm-native/src/exec_addr.rs:36-67`) stores JIT'd shader
+    /// code through the D-bus view of SRAM1 (`0x3FC8_8000..0x3FCF_0000`, where
+    /// `esp_alloc`'s heap lives) and fetches it at `write + 0x6F_0000`. The
+    /// firmware's heap is at `0x3FC9_12B1 + 0x3C000`, inside that window, and
+    /// `float-f32` is a default feature — so every shader compile on the
+    /// shipped image uses both views of the same bytes, and a machine that
+    /// mapped only the ELF's sections would boot perfectly and fault on the
+    /// first shader. (The numbers are the S3's; they live in its chip crate,
+    /// which is the only caller. This crate still holds none.)
+    ///
+    /// # The canonical address
+    ///
+    /// Translation happens once, at the top of the access path
+    /// ([`canonical`](Self::canonical)), and **everything downstream sees the
+    /// canonical (target) address**: the region lookup, the access rule, the
+    /// watchpoint check, the memory-cost model, the `bench` counters, the
+    /// strict-bus code-word checker, [`take_guest_code_writes`], the guest
+    /// arena's offset — and therefore any translated core holding that arena.
+    /// A translator asking "which guest address is this arena byte?" gets the
+    /// canonical one and never the alias; the alias window is a gap in the
+    /// arena with permission [`PERM_NONE`], so an inline access there goes out
+    /// through the bus and is translated like any other.
+    ///
+    /// Three consequences of the rule, stated so nobody infers them:
+    ///
+    /// - A **watchpoint** is armed at a canonical address and fires on an
+    ///   access through either door. One armed at an alias address never
+    ///   fires, because no access reaches the check with that address.
+    /// - A **fault** raised for an access through the alias (a straddle of
+    ///   the region's end, a refused width, a watchpoint) carries the
+    ///   canonical address, since it is raised downstream of the translation.
+    /// - The **trace** names the door: the first access from each `(pc,
+    ///   kind)` through an alias writes one `ALIAS` note line with both
+    ///   addresses. Once per site, not per access, because a JIT'd shader
+    ///   fetches through the door millions of times.
+    ///
+    /// # Cost
+    ///
+    /// On a bus with no alias — every chip today — every access pays one
+    /// `bool` test ([`has_ram_alias`](Self::has_ram_alias)) and nothing else;
+    /// the table walk is out of line. Measured as a same-window A/B of
+    /// `just bench-emu-c6` (M6 P02's PR body).
+    ///
+    /// # Panics
+    ///
+    /// In [`add_region`](Self::add_region)'s voice — a memory map that
+    /// contradicts itself is a build-time bug — when `len` is zero or either
+    /// span wraps the address space, when `[target_base, target_base + len)`
+    /// is not inside one registered region, when `[base, base + len)` overlaps
+    /// a region, another RAM alias, its own target, a peripheral or an MMIO
+    /// window. The MMIO refusals are what let a translated module's published
+    /// register window ([`peripheral_window`](Self::peripheral_window)) stay a
+    /// plain compare: a RAM alias can never reach MMIO, by construction.
+    ///
+    /// [`add_peripheral_alias`]: Self::add_peripheral_alias
+    /// [`take_guest_code_writes`]: Self::take_guest_code_writes
+    pub fn add_ram_alias(&mut self, base: u32, len: u32, target_base: u32) {
+        let alias = RamAlias {
+            base,
+            len,
+            target_base,
+        };
+        assert!(
+            len != 0,
+            "SocBus: RAM alias at 0x{base:08x} -> 0x{target_base:08x} has no length"
+        );
+        assert!(
+            alias.end() <= 1 << 32 && alias.target_end() <= 1 << 32,
+            "SocBus: RAM alias 0x{base:08x} (+0x{len:x}) -> 0x{target_base:08x} wraps the \
+             address space"
+        );
+        let target_region = self.regions.iter().find(|r| {
+            u64::from(r.base) <= u64::from(target_base) && alias.target_end() <= u64::from(r.end())
+        });
+        assert!(
+            target_region.is_some(),
+            "SocBus: RAM alias 0x{base:08x}..0x{:08x} targets 0x{target_base:08x}..0x{:08x}, which \
+             is not inside any one registered region",
+            alias.end(),
+            alias.target_end()
+        );
+        let self_overlap =
+            u64::from(base) < alias.target_end() && u64::from(target_base) < alias.end();
+        assert!(
+            !self_overlap,
+            "SocBus: RAM alias 0x{base:08x}..0x{:08x} overlaps its own target \
+             0x{target_base:08x}..0x{:08x}",
+            alias.end(),
+            alias.target_end()
+        );
+        for r in &self.regions {
+            let overlaps = u64::from(base) < u64::from(r.end()) && u64::from(r.base) < alias.end();
+            assert!(
+                !overlaps,
+                "SocBus: RAM alias 0x{base:08x}..0x{:08x} overlaps region `{}` \
+                 (0x{:08x}..0x{:08x}) — an alias is a second door onto bytes a region \
+                 already owns, never a region of its own",
+                alias.end(),
+                r.name,
+                r.base,
+                r.end()
+            );
+        }
+        for a in &self.ram_aliases {
+            let overlaps = u64::from(base) < a.end() && u64::from(a.base) < alias.end();
+            assert!(
+                !overlaps,
+                "SocBus: RAM alias 0x{base:08x}..0x{:08x} overlaps the RAM alias at \
+                 0x{:08x}..0x{:08x}",
+                alias.end(),
+                a.base,
+                a.end()
+            );
+        }
+        for r in &self.mmio {
+            let overlaps = u64::from(base) < u64::from(r.base) + u64::from(r.len)
+                && u64::from(r.base) < alias.end();
+            assert!(
+                !overlaps,
+                "SocBus: RAM alias 0x{base:08x}..0x{:08x} overlaps peripheral `{}` at \
+                 0x{:08x}..0x{:08x} — RAM never answers at an MMIO address",
+                alias.end(),
+                r.periph.name(),
+                r.base,
+                r.base + r.len
+            );
+        }
+        for a in &self.mmio_aliases {
+            let overlaps = u64::from(base) < u64::from(a.base) + u64::from(a.len)
+                && u64::from(a.base) < alias.end();
+            assert!(
+                !overlaps,
+                "SocBus: RAM alias 0x{base:08x}..0x{:08x} overlaps the alias of `{}` at \
+                 0x{:08x}..0x{:08x}",
+                alias.end(),
+                self.mmio[a.target].periph.name(),
+                a.base,
+                a.base + a.len
+            );
+        }
+        for &(wb, wl) in &self.mmio_windows {
+            let overlaps =
+                u64::from(base) < u64::from(wb) + u64::from(wl) && u64::from(wb) < alias.end();
+            assert!(
+                !overlaps,
+                "SocBus: RAM alias 0x{base:08x}..0x{:08x} overlaps the MMIO window at \
+                 0x{:08x}..0x{:08x}",
+                alias.end(),
+                wb,
+                u64::from(wb) + u64::from(wl)
+            );
+        }
+        self.ram_aliases.push(alias);
+        self.ram_aliases.sort_by_key(|a| a.base);
+        self.has_ram_alias = true;
+    }
+
+    /// Every RAM alias registered, as `(base, len, target_base)`, in address
+    /// order. What a `--map` report prints beside its regions, and what a
+    /// test asserts on. Empty on every chip without dual-mapped memory.
+    pub fn ram_aliases(&self) -> Vec<(u32, u32, u32)> {
+        self.ram_aliases
+            .iter()
+            .map(|a| (a.base, a.len, a.target_base))
+            .collect()
+    }
+
+    /// The MMIO side of the refusals [`add_ram_alias`](Self::add_ram_alias)
+    /// makes, for the registrations that come *after* an alias: a peripheral
+    /// or a peripheral alias landing on a RAM alias is the same build-time
+    /// bug from the other direction. A loop over an empty table on every chip
+    /// that registers no RAM alias.
+    fn refuse_ram_alias_overlap(&self, what: &str, name: &str, base: u32, len: u32) {
+        for a in &self.ram_aliases {
+            let overlaps =
+                u64::from(base) < a.end() && u64::from(a.base) < u64::from(base) + u64::from(len);
+            assert!(
+                !overlaps,
+                "SocBus: {what} `{name}` at 0x{base:08x}..0x{:08x} overlaps the RAM alias at \
+                 0x{:08x}..0x{:08x}",
+                u64::from(base) + u64::from(len),
+                a.base,
+                a.end()
+            );
+        }
     }
 
     /// Declare an address range as MMIO. Accesses inside a window that no
@@ -1298,6 +1573,10 @@ impl SocBus {
     /// the bootloader's leftovers. Ignores `writable` (this is not the guest
     /// storing) and fires no watchpoints.
     pub fn load_image(&mut self, address: u32, bytes: &[u8]) -> Result<(), MemoryError> {
+        // The host side goes through the same translation as the guest: an
+        // image segment addressed through an alias lands in the one region
+        // that owns the bytes, and the code-write record below names it there.
+        let address = self.canonical(address, None);
         let Some(i) = self.region_index(address) else {
             return Err(MemoryError::InvalidAccess {
                 address,
@@ -1687,10 +1966,24 @@ impl SocBus {
             first_strict_violation: self.first_strict_violation,
             request: self.request,
             pins: self.pins.clone(),
+            ram_aliases: self.ram_aliases(),
+            alias_sites: self.alias_sites.clone(),
         }
     }
 
+    /// Put the scalars back. A snapshot whose RAM alias table is not this
+    /// bus's was taken from a differently built machine and is refused
+    /// loudly, as [`restore_regions`](Self::restore_regions) refuses one with
+    /// a different region count.
     pub fn restore_scalars(&mut self, s: &BusScalars) {
+        assert_eq!(
+            s.ram_aliases,
+            self.ram_aliases(),
+            "SocBus::restore_scalars: snapshot has RAM aliases {:x?}, this bus has {:x?}",
+            s.ram_aliases,
+            self.ram_aliases()
+        );
+        self.alias_sites = s.alias_sites.clone();
         self.now = s.now;
         self.pc = s.pc;
         self.hart = s.hart;
@@ -1713,6 +2006,72 @@ impl SocBus {
     }
 
     // ---- decode -------------------------------------------------------
+
+    /// The canonical address of a guest address: itself, unless it falls in
+    /// a [RAM alias](Self::add_ram_alias), in which case the target's.
+    ///
+    /// **The one helper, called first by every entry point** — `read`,
+    /// `write`, `fetch_instruction`, `fetch_bytes` and `load_image` — before
+    /// the region lookup, the watchpoint check, the cost model, the `bench`
+    /// counters and the strict-bus checker see the address. A path that
+    /// forgot it would be a second store for whichever window it served; the
+    /// tests in `tests/ram_alias.rs` hold one per path.
+    ///
+    /// `kind` is `Some` for a guest access, which the trace may name, and
+    /// `None` for the host placing bytes, which it does not.
+    ///
+    /// On a bus with no alias this is one `bool` test and a return; the walk
+    /// and the trace note are out of line so the fast path stays the size the
+    /// executors inline.
+    #[inline(always)]
+    fn canonical(&mut self, address: u32, kind: Option<MemoryAccessKind>) -> u32 {
+        if !self.has_ram_alias {
+            return address;
+        }
+        self.canonical_slow(address, kind)
+    }
+
+    #[inline(never)]
+    fn canonical_slow(&mut self, address: u32, kind: Option<MemoryAccessKind>) -> u32 {
+        // A handful of entries at most (one on the S3), so a walk beats a
+        // binary search and needs no cache.
+        for a in &self.ram_aliases {
+            if address.wrapping_sub(a.base) < a.len {
+                let canonical = a.target_base.wrapping_add(address - a.base);
+                if let Some(kind) = kind
+                    && self.trace.is_enabled()
+                {
+                    self.note_alias_door(address, canonical, kind);
+                }
+                return canonical;
+            }
+        }
+        address
+    }
+
+    /// The trace's `ALIAS` line: the first access of each `(pc, kind)` that
+    /// goes through an alias door names both addresses, once. Per site rather
+    /// than per access — a JIT'd shader fetches through the door on every
+    /// instruction — and capped like the unmapped sites are, so a runaway
+    /// cannot eat the host's memory.
+    #[inline(never)]
+    fn note_alias_door(&mut self, door: u32, canonical: u32, kind: MemoryAccessKind) {
+        let site = (self.pc, kind_index(kind) as u8);
+        if self.alias_sites.len() >= UNMAPPED_SITES_CAP || !self.alias_sites.insert(site) {
+            return;
+        }
+        let line = alloc::format!(
+            "cyc={} pc=0x{:08x} ALIAS {} 0x{door:08x} -> 0x{canonical:08x}",
+            self.now,
+            self.pc,
+            match kind {
+                MemoryAccessKind::Read => "load",
+                MemoryAccessKind::Write => "store",
+                MemoryAccessKind::InstructionFetch => "fetch",
+            }
+        );
+        self.trace.note(&line);
+    }
 
     #[inline(always)]
     fn region_index(&mut self, address: u32) -> Option<usize> {
@@ -1916,6 +2275,8 @@ impl SocBus {
 
     #[inline]
     fn read(&mut self, address: u32, width: Width) -> Result<u32, MemoryError> {
+        // First, before anything keys on the address: see `canonical`.
+        let address = self.canonical(address, Some(MemoryAccessKind::Read));
         let len = width.bytes();
         self.check_watchpoints(address, len, MemoryAccessKind::Read)?;
         if let Some(cost) = self.memory_cost.as_mut() {
@@ -2025,6 +2386,10 @@ impl SocBus {
 
     #[inline]
     fn write(&mut self, address: u32, width: Width, value: u32) -> Result<(), MemoryError> {
+        // First, before anything keys on the address: see `canonical`. The
+        // guest-code span record and the strict-bus checker below therefore
+        // see the canonical address, which is what a translator seeds from.
+        let address = self.canonical(address, Some(MemoryAccessKind::Write));
         let len = width.bytes();
         self.check_store_watchpoint(address, len)?;
         if let Some(cost) = self.memory_cost.as_mut() {
@@ -2307,6 +2672,10 @@ fn watchpoint_span(wp: &Watchpoint) -> (u64, u64) {
 impl Bus for SocBus {
     #[inline]
     fn fetch_instruction(&mut self, address: u32) -> Result<u32, MemoryError> {
+        // First: the fetch path is the one a RAM alias exists for (the S3's
+        // JIT stores through one view and fetches through the other), and the
+        // one a translation that covered only data access would miss.
+        let address = self.canonical(address, Some(MemoryAccessKind::InstructionFetch));
         if address % 2 != 0 {
             return Err(MemoryError::Unaligned {
                 address,
@@ -2377,6 +2746,10 @@ impl Bus for SocBus {
     /// reason: fetch never routes to MMIO.
     #[inline]
     fn fetch_bytes(&mut self, pc: u32, out: &mut [u8; 3]) -> Result<usize, MemoryError> {
+        // First, and in particular before the `bench` counters below, so a
+        // fetch through an alias door is counted under the address the bytes
+        // actually live at. See `canonical`.
+        let pc = self.canonical(pc, Some(MemoryAccessKind::InstructionFetch));
         // One increment per retired Xtensa instruction: `XtHart::step` calls
         // this exactly once per instruction and nothing caches in front of it.
         #[cfg(feature = "bench")]
