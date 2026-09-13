@@ -56,7 +56,10 @@ fn a_blank_chip_is_erased_and_knows_its_own_capacity() {
     assert_eq!(capacity, 0x17);
     // And `lpfs` — the byte a 4 MiB part could not hold — is in range.
     assert!(chip.peek(LPFS_OFFSET, 4).is_some());
-    assert!(LPFS_OFFSET >= 4 * 1024 * 1024, "past the end of a 4 MiB part, on purpose");
+    assert!(
+        LPFS_OFFSET >= 4 * 1024 * 1024,
+        "past the end of a 4 MiB part, on purpose"
+    );
 }
 
 #[test]
@@ -68,7 +71,12 @@ fn a_file_backing_survives_the_run_and_a_copy_backing_does_not() {
     // and get a board with an empty chip" is the loop a second-boot gate
     // runs in.
     let mut m = machine(FlashBacking::File(path.clone()));
-    assert!(m.flash().lock().expect("flash").program(LPFS_OFFSET, b"lpfs"));
+    assert!(
+        m.flash()
+            .lock()
+            .expect("flash")
+            .program(LPFS_OFFSET, b"lpfs")
+    );
     assert!(m.flush_flash().expect("the write back"));
     assert_eq!(
         std::fs::metadata(&path).expect("the file").len(),
@@ -100,7 +108,11 @@ fn a_file_backing_survives_the_run_and_a_copy_backing_does_not() {
     assert!(!copy.flush_flash().expect("a copy never writes"));
     let on_disk = std::fs::read(&path).expect("the file");
     let at = LPFS_OFFSET as usize + 0x10;
-    assert_eq!(&on_disk[at..at + 7], &[0xff; 7], "the copy stayed in memory");
+    assert_eq!(
+        &on_disk[at..at + 7],
+        &[0xff; 7],
+        "the copy stayed in memory"
+    );
 
     let _ = std::fs::remove_dir_all(path.parent().expect("the scratch dir"));
 }

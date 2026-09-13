@@ -38,7 +38,9 @@
 //! the RAM alias M6 P02 exists for.
 
 use lp_emu_esp32s3::cache::{CACHE_ENABLE, CacheOffPolicy, Which, Window};
-use lp_emu_esp32s3::machine::{BootFrame, BootMode, Esp32S3Builder, Machine, Outcome, StopCondition};
+use lp_emu_esp32s3::machine::{
+    BootFrame, BootMode, Esp32S3Builder, Machine, Outcome, StopCondition,
+};
 use lp_emu_esp32s3::memmap;
 use lp_xt_inst::{AluRrr, Inst, NullaryOp, Reg};
 
@@ -221,27 +223,37 @@ fn a_fetch_through_the_irom_window_with_the_icache_off_is_a_stop() {
     let mut m = fixture(CacheOffPolicy::Stop, -2, Then::JumpIntoIrom);
     let outcome = run(&mut m);
     let Outcome::CacheOffFetch {
-        cycle,
-        pc,
-        access,
-        ..
+        cycle, pc, access, ..
     } = outcome.clone()
     else {
         panic!("expected D4's stop, got {outcome:?}");
     };
     assert_eq!(outcome.exit_code(), 6, "the cross-machine contract");
-    assert_eq!(pc, TARGET, "the instruction that made the access is the one at the target");
+    assert_eq!(
+        pc, TARGET,
+        "the instruction that made the access is the one at the target"
+    );
     assert_eq!(access.addr, TARGET);
     assert_eq!(access.window, Window::Irom);
-    assert_eq!(access.cache, Which::ICache, "the IROM window is the ICache's");
+    assert_eq!(
+        access.cache,
+        Which::ICache,
+        "the IROM window is the ICache's"
+    );
     assert!(access.fetch, "a fetch, not a data read");
     assert_eq!(
         access.disabled_by,
         Some(store_pc(-2, Then::JumpIntoIrom)),
         "the store that cleared the bit"
     );
-    assert!(access.disabled_at < cycle, "the cache went away before the fetch");
-    assert!(access.disabled_at > 0, "and not at reset: it was a transition");
+    assert!(
+        access.disabled_at < cycle,
+        "the cache went away before the fetch"
+    );
+    assert!(
+        access.disabled_at > 0,
+        "and not at reset: it was a transition"
+    );
 
     // The register and the model agree about the state the stop reports.
     assert!(!m.cache().lock().expect("cache").enabled(Which::ICache));
@@ -266,7 +278,10 @@ fn a_fetch_through_the_irom_window_with_the_icache_off_is_a_stop() {
     assert!(message.contains("fetch from IROM"));
     assert!(message.contains("served by the ICache"));
     assert!(message.contains("EXTMEM+0x060 (icache_ctrl.icache_enable <- 0)"));
-    assert!(message.contains(&format!("from pc={:#010x}", store_pc(-2, Then::JumpIntoIrom))));
+    assert!(message.contains(&format!(
+        "from pc={:#010x}",
+        store_pc(-2, Then::JumpIntoIrom)
+    )));
     assert!(message.contains("`--cache-off-fetch permit` continues"));
 }
 
@@ -281,13 +296,24 @@ fn a_read_from_the_drom_window_with_the_dcache_off_is_a_stop() {
         panic!("expected D4's stop, got {outcome:?}");
     };
     assert_eq!(outcome.exit_code(), 6);
-    assert_eq!(pc, access_pc(-2, Then::LoadFromDrom), "the load instruction");
+    assert_eq!(
+        pc,
+        access_pc(-2, Then::LoadFromDrom),
+        "the load instruction"
+    );
     assert_eq!(access.addr, DROM_TARGET);
     assert_eq!(access.window, Window::Drom);
-    assert_eq!(access.cache, Which::DCache, "the DROM window is the DCache's");
+    assert_eq!(
+        access.cache,
+        Which::DCache,
+        "the DROM window is the DCache's"
+    );
     assert!(!access.fetch, "a data read");
     assert_eq!(access.disabled_by, Some(store_pc(-2, Then::LoadFromDrom)));
-    assert!(m.cache().lock().expect("cache").enabled(Which::ICache), "untouched");
+    assert!(
+        m.cache().lock().expect("cache").enabled(Which::ICache),
+        "untouched"
+    );
     let message = m.cache_off_message(outcome.cycle(), pc, &access);
     assert!(message.contains("read from DROM"));
     assert!(message.contains("EXTMEM+0x000 (dcache_ctrl.dcache_enable <- 0)"));
@@ -313,7 +339,10 @@ fn the_stop_does_not_fire_while_the_cache_is_on() {
             CACHE_ENABLE,
             "icache_enable is still set: 1 means ON on this chip"
         );
-        assert_eq!(m.peek_word(DCACHE_CTRL).expect("mapped") & CACHE_ENABLE, CACHE_ENABLE);
+        assert_eq!(
+            m.peek_word(DCACHE_CTRL).expect("mapped") & CACHE_ENABLE,
+            CACHE_ENABLE
+        );
         let cache = m.cache().lock().expect("cache");
         assert!(cache.enabled(Which::ICache) && cache.enabled(Which::DCache));
         assert!(!cache.watch_wanted(), "nothing is off, so nothing is armed");
@@ -332,7 +361,11 @@ fn permit_continues_through_the_window_and_claims_nothing() {
         "permit does not check at all: {outcome:?}"
     );
     assert_eq!(outcome.exit_code(), 0);
-    assert_eq!(m.harts[0].pc(), TARGET, "spinning on the self-jump behind the window");
+    assert_eq!(
+        m.harts[0].pc(),
+        TARGET,
+        "spinning on the self-jump behind the window"
+    );
     assert!(
         !m.cache().lock().expect("cache").enabled(Which::ICache),
         "the cache really is off; permit just does not stop"
@@ -357,13 +390,19 @@ fn re_enabling_the_cache_disarms_the_watch() {
     });
     assert!(matches!(outcome, Outcome::Deadline { .. }), "{outcome:?}");
     assert!(m.harts[0].pc() > store, "past the store");
-    assert!(m.cache().lock().expect("cache").watch_wanted(), "armed while off");
+    assert!(
+        m.cache().lock().expect("cache").watch_wanted(),
+        "armed while off"
+    );
 
     // The guest turns it back on (here: the host writing through the same
     // register, as the ROM's `Cache_Enable_ICache` would).
     let word = m.peek_word(ICACHE_CTRL).expect("mapped");
     assert!(m.poke_word(ICACHE_CTRL, word | CACHE_ENABLE));
-    assert!(!m.cache().lock().expect("cache").watch_wanted(), "disarmed once on");
+    assert!(
+        !m.cache().lock().expect("cache").watch_wanted(),
+        "disarmed once on"
+    );
 
     let outcome = run(&mut m);
     assert!(

@@ -102,8 +102,7 @@ fn images() -> Option<(PathBuf, PathBuf)> {
 const GATE_US: u64 = 2_000_000;
 
 /// The defect entry for the link's dropped packet (module docs).
-const LINK_DEFECT: &str =
-    "docs/defects/2026-09-13-the-s3-link-drops-the-io-tasks-next-chunk-on-a-stale-serial-in-empty.md";
+const LINK_DEFECT: &str = "docs/defects/2026-09-13-the-s3-link-drops-the-io-tasks-next-chunk-on-a-stale-serial-in-empty.md";
 
 /// The three lines P05 pinned as absent and P06 delivers (DD86), plus the
 /// wire's own two.
@@ -364,7 +363,11 @@ fn an_attached_but_closed_port_holds_the_packet_until_an_application_opens_it() 
         !tried_text.contains("[INIT]"),
         "a held packet is not a lost one: {tried_text:?}"
     );
-    assert_eq!(tried.len(), 64 + 2, "the io_task's chunk and two probes: {tried_text:?}");
+    assert_eq!(
+        tried.len(),
+        64 + 2,
+        "the io_task's chunk and two probes: {tried_text:?}"
+    );
     assert!(tried_text.contains("M!{\"id\":0,\"msg\":{\"hello\""));
     assert_eq!(
         machine.usb_host_now(),
@@ -485,7 +488,10 @@ fn the_boot_goes_past_where_p05_stopped() {
     // And the chip saw the mount: a fresh copy is formatted (erases and
     // programs), then read.
     let census = machine.flash().lock().expect("flash").command_census();
-    assert!(census.reads > 0 && census.sector_erases > 0 && census.programs > 0, "{census}");
+    assert!(
+        census.reads > 0 && census.sector_erases > 0 && census.programs > 0,
+        "{census}"
+    );
     let pc = machine.harts[0].pc();
     println!(
         "PAST P05: pc={pc:#010x} ({}), SPI1.cmd={cmd:#010x} (usr clear), {census}, after {} \
@@ -652,7 +658,10 @@ fn the_ledger_triple_is_elicited_by_a_stop_all_on_the_wire() {
     const SCRIPT: &str = "after \"[INIT] I/O task spawned\" +1ms \
                           \"M!{\\\"id\\\":1,\\\"msg\\\":\\\"stopAllProjects\\\"}\\n\"\n";
     let script = lp_emu_esp32s3::control::parse_usb_script(SCRIPT).expect("the script parses");
-    assert!(script.commands.is_empty(), "bytes only: the host is attached from power-on");
+    assert!(
+        script.commands.is_empty(),
+        "bytes only: the host is attached from power-on"
+    );
     let mut machine = Esp32S3Builder::new()
         .app(AppSource::Path(elf))
         .flash(FlashBacking::Copy(merged))
@@ -684,20 +693,37 @@ fn the_ledger_triple_is_elicited_by_a_stop_all_on_the_wire() {
         .lines()
         .filter(|l| l.starts_with("[stack] heartbeat: high-water "))
         .collect();
-    let mem: Vec<&str> = text.lines().filter(|l| l.starts_with("[MEM] free=")).collect();
-    let jit: Vec<&str> = text.lines().filter(|l| l.starts_with("[JIT] used=")).collect();
+    let mem: Vec<&str> = text
+        .lines()
+        .filter(|l| l.starts_with("[MEM] free="))
+        .collect();
+    let jit: Vec<&str> = text
+        .lines()
+        .filter(|l| l.starts_with("[JIT] used="))
+        .collect();
     assert_eq!(stack.len(), 1, "one [stack] line per stop-all:\n{text}");
     assert_eq!(mem.len(), 2, "[MEM] before and after the stop:\n{text}");
     assert_eq!(jit.len(), 2, "[JIT] before and after the stop:\n{text}");
     // `[stack] heartbeat: high-water <used> B of 37280 B (<headroom> B headroom)`
     let words: Vec<&str> = stack[0].split_whitespace().collect();
     let used: u32 = words[3].parse().expect("high-water bytes");
-    assert_eq!(&words[4..7], &["B", "of", "37280"], "the S3's 37,280 B total: {}", stack[0]);
-    let headroom: u32 = words[8].trim_start_matches('(').parse().expect("headroom bytes");
+    assert_eq!(
+        &words[4..7],
+        &["B", "of", "37280"],
+        "the S3's 37,280 B total: {}",
+        stack[0]
+    );
+    let headroom: u32 = words[8]
+        .trim_start_matches('(')
+        .parse()
+        .expect("headroom bytes");
     assert_eq!(used + headroom, 37_280, "{}", stack[0]);
     assert!(used > 0 && used < 37_280, "{}", stack[0]);
     for line in &mem {
-        assert!(line.contains(" used=") && line.contains(" largest_free="), "{line}");
+        assert!(
+            line.contains(" used=") && line.contains(" largest_free="),
+            "{line}"
+        );
         assert!(
             line.ends_with(" retry_saves=0"),
             "structural: no OOM retry allocator in this image: {line}"

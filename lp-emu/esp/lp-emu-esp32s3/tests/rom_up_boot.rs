@@ -44,7 +44,9 @@
 //! build. `just test-emu-esp32s3-boot` builds the ELF, runs `espflash` on it
 //! and names both files.
 
-use lp_emu_esp32s3::flash::{BOOTLOADER_OFFSET, FACTORY_OFFSET, FlashBacking, PARTITION_TABLE_OFFSET};
+use lp_emu_esp32s3::flash::{
+    BOOTLOADER_OFFSET, FACTORY_OFFSET, FlashBacking, PARTITION_TABLE_OFFSET,
+};
 use lp_emu_esp32s3::image::{CHIP_ID_ESP32S3, EspImage, MergedImage};
 use lp_emu_esp32s3::loader::{
     BOOTLOADER_FRAME_CHAIN, BOOTLOADER_OWB, BOOTLOADER_SAVE_AREA, BOOTLOADER_SP_AT_APP_ENTRY,
@@ -163,7 +165,10 @@ fn the_merged_image_carries_a_bootloader_and_this_app() {
     let (elf, merged) = match images() {
         Ok(pair) => pair,
         Err(reason) => {
-            skip_notice("the_merged_image_carries_a_bootloader_and_this_app", &reason);
+            skip_notice(
+                "the_merged_image_carries_a_bootloader_and_this_app",
+                &reason,
+            );
             return;
         }
     };
@@ -176,7 +181,10 @@ fn the_merged_image_carries_a_bootloader_and_this_app() {
     let window = &bytes[BOOTLOADER_OFFSET as usize..PARTITION_TABLE_OFFSET as usize];
     let version = bootloader_version(window).expect("a version string in the bootloader");
     let compiled = string_after(window, "compile time ").expect("a compile-time string");
-    assert!(version.starts_with("v5."), "an ESP-IDF v5 bootloader: {version}");
+    assert!(
+        version.starts_with("v5."),
+        "an ESP-IDF v5 bootloader: {version}"
+    );
     assert!(compiled.len() > "compile time ".len(), "{compiled}");
     let has = |needle: &str| window.windows(needle.len()).any(|w| w == needle.as_bytes());
     assert!(has("ESP-IDF %s 2nd stage bootloader"));
@@ -188,13 +196,35 @@ fn the_merged_image_carries_a_bootloader_and_this_app() {
     println!("bootloader: `{version}`, `{compiled}`");
 
     let parsed = MergedImage::parse(&bytes).expect("the merged image parses");
-    assert_eq!(parsed.bootloader.offset, BOOTLOADER_OFFSET, "the S3's bootloader is at 0x0");
-    assert_eq!(bytes[0], lp_emu_esp32s3::image::IMAGE_MAGIC, "the chip's first byte is the 0xe9 magic");
+    assert_eq!(
+        parsed.bootloader.offset, BOOTLOADER_OFFSET,
+        "the S3's bootloader is at 0x0"
+    );
+    assert_eq!(
+        bytes[0],
+        lp_emu_esp32s3::image::IMAGE_MAGIC,
+        "the chip's first byte is the 0xe9 magic"
+    );
     assert_eq!(parsed.bootloader.chip_id, CHIP_ID_ESP32S3, "chip id 9");
-    assert_eq!(parsed.bootloader.wp_pin, 0xee, "the ROM prints `SPIWP:0xee`");
-    assert_eq!(parsed.bootloader.spi_mode_name(), "DIO", "the ROM prints `mode:DIO`");
-    assert_eq!(parsed.bootloader.clock_div(), 2, "the ROM prints `clock div:2`");
-    assert_eq!(parsed.bootloader.flash_size_bytes(), 8 * 1024 * 1024, "`SPI Flash Size : 8MB`");
+    assert_eq!(
+        parsed.bootloader.wp_pin, 0xee,
+        "the ROM prints `SPIWP:0xee`"
+    );
+    assert_eq!(
+        parsed.bootloader.spi_mode_name(),
+        "DIO",
+        "the ROM prints `mode:DIO`"
+    );
+    assert_eq!(
+        parsed.bootloader.clock_div(),
+        2,
+        "the ROM prints `clock div:2`"
+    );
+    assert_eq!(
+        parsed.bootloader.flash_size_bytes(),
+        8 * 1024 * 1024,
+        "`SPI Flash Size : 8MB`"
+    );
 
     // The partition table this firmware flashes: `lp-fw/fw-esp32s3/partitions.csv`.
     let rows: Vec<(&str, u32, u32)> = parsed
@@ -217,8 +247,12 @@ fn the_merged_image_carries_a_bootloader_and_this_app() {
     assert_eq!(app.chip_id, CHIP_ID_ESP32S3);
     // The app's entry is the ELF's own, read from the ELF rather than
     // remembered.
-    let app_elf = lp_emu_esp_common::ElfImage::parse(&std::fs::read(&elf).expect("the app ELF")).expect("the app ELF parses");
-    assert_eq!(app.entry, app_elf.entry, "the image's entry is the ELF's `Reset`");
+    let app_elf = lp_emu_esp_common::ElfImage::parse(&std::fs::read(&elf).expect("the app ELF"))
+        .expect("the app ELF parses");
+    assert_eq!(
+        app.entry, app_elf.entry,
+        "the image's entry is the ELF's `Reset`"
+    );
     assert_eq!(
         app.drom_segments(),
         2,
@@ -367,17 +401,29 @@ fn a_second_rom_up_boot_from_the_same_chip_mounts_rather_than_reformats() {
 
     let mut first = boot(&chip);
     let outcome = first.run_until(&until);
-    assert!(matches!(outcome, Outcome::ExitMatched { .. }), "{outcome:?}");
+    assert!(
+        matches!(outcome, Outcome::ExitMatched { .. }),
+        "{outcome:?}"
+    );
     let a = first.flash().lock().expect("flash").command_census();
-    assert!(a.sector_erases > 0 && a.programs > 0, "the first boot formats: {a}");
-    assert!(first.flush_flash().expect("the write back"), "the format is written back");
+    assert!(
+        a.sector_erases > 0 && a.programs > 0,
+        "the first boot formats: {a}"
+    );
+    assert!(
+        first.flush_flash().expect("the write back"),
+        "the format is written back"
+    );
     let after_first = std::fs::read(&chip).expect("the chip");
     let text = String::from_utf8_lossy(&first.usb_sj()).into_owned();
     assert!(text.contains("[INIT] flash filesystem mounted"), "{text}");
 
     let mut second = boot(&chip);
     let outcome = second.run_until(&until);
-    assert!(matches!(outcome, Outcome::ExitMatched { .. }), "{outcome:?}");
+    assert!(
+        matches!(outcome, Outcome::ExitMatched { .. }),
+        "{outcome:?}"
+    );
     let b = second.flash().lock().expect("flash").command_census();
     assert!(b.reads > 0, "the second boot still reads the chip: {b}");
     assert_eq!(
@@ -510,7 +556,10 @@ fn the_loaders_staged_pages_pack_factory_and_stay_page_congruent() {
     // every shadow's index is one a real page holds.
     assert!(!staging.shadows.is_empty(), "the .rotext_dummy pages");
     for (vaddr, index) in &staging.shadows {
-        assert!(*vaddr >= memmap::IROM_BASE, "a shadow is always the IROM side");
+        assert!(
+            *vaddr >= memmap::IROM_BASE,
+            "a shadow is always the IROM side"
+        );
         assert!(staging.pages.iter().any(|p| p.index == *index));
     }
     // And `lpfs` is untouched by the staging, which is what lets the second
@@ -765,7 +814,11 @@ fn the_rom_up_boot_log_is_the_roms_and_the_bootloaders_line_for_line() {
     ];
     want_rom.extend(expected_rom_loads(&image.bootloader));
     let rom_rest = &lines[ROM_BANNER_HEAD.len()..ROM_BANNER_HEAD.len() + want_rom.len()];
-    assert_eq!(rom_rest, want_rom.as_slice(), "the ROM banner's image-derived lines:\n{text}");
+    assert_eq!(
+        rom_rest,
+        want_rom.as_slice(),
+        "the ROM banner's image-derived lines:\n{text}"
+    );
     let banner_len = ROM_BANNER_HEAD.len() + want_rom.len();
     assert_eq!(banner_len, 10, "ten banner lines on this part");
 
@@ -781,7 +834,10 @@ fn the_rom_up_boot_log_is_the_roms_and_the_bootloaders_line_for_line() {
         .take_while(|l| l != last)
         .chain(std::iter::once(last.clone()))
         .collect();
-    assert_eq!(ours, want, "the bootloader's log is not the image's:\n{text}");
+    assert_eq!(
+        ours, want,
+        "the bootloader's log is not the image's:\n{text}"
+    );
     // …and that last line really was printed (the chain above would have
     // appended it regardless).
     assert!(
@@ -811,7 +867,10 @@ fn the_rom_up_boot_log_is_the_roms_and_the_bootloaders_line_for_line() {
         "[INIT] fw-esp32 initialized, starting server loop",
         "[RECOVERY] boot complete (first frame served)",
     ] {
-        assert!(usb.contains(line), "the app runs after the bootloader: `{line}`\n{usb}");
+        assert!(
+            usb.contains(line),
+            "the app runs after the bootloader: `{line}`\n{usb}"
+        );
     }
     println!(
         "ROM-UP: {} UART0 bytes ({} lines), {} USB bytes, {} instructions, {} cache fills\n{text}",
@@ -905,7 +964,11 @@ fn rom_up_and_direct_load_agree_on_what_the_app_sees() {
     // app-entry state, and running it would only move it past the
     // instruction the ROM-up side is stopped on.
     let direct = direct(&elf, FlashBacking::Copy(merged.clone()));
-    assert_eq!(direct.harts[0].pc(), entry, "the direct load starts at the app's entry");
+    assert_eq!(
+        direct.harts[0].pc(),
+        entry,
+        "the direct load starts at the app's entry"
+    );
     assert_eq!(direct.cycles(), 0);
     assert_eq!(
         read_span(&direct, entry, 3),
@@ -1001,7 +1064,10 @@ fn rom_up_and_direct_load_agree_on_what_the_app_sees() {
     println!(
         "ROM-up a0 {a0:#010x} (call site {:#010x}), save area at {sp:#010x}: {}, PS {:#010x} (OWB {})",
         (a0 & 0x3fff_ffff) | (entry & 0xc000_0000),
-        save.iter().map(|w| format!("{w:#010x}")).collect::<Vec<_>>().join(" "),
+        save.iter()
+            .map(|w| format!("{w:#010x}"))
+            .collect::<Vec<_>>()
+            .join(" "),
         rom_up.harts[0].ps(),
         (rom_up.harts[0].ps() >> 8) & 0xf
     );
@@ -1033,7 +1099,10 @@ fn rom_up_and_direct_load_agree_on_what_the_app_sees() {
             )
         })
         .collect();
-    println!("ROM-up save area at {sp:#010x}: {save:#010x?}, PS.OWB {}", (rom_up.harts[0].ps() >> 8) & 0xf);
+    println!(
+        "ROM-up save area at {sp:#010x}: {save:#010x?}, PS.OWB {}",
+        (rom_up.harts[0].ps() >> 8) & 0xf
+    );
     assert_eq!(
         save,
         BOOTLOADER_SAVE_AREA.to_vec(),
@@ -1066,7 +1135,11 @@ fn rom_up_and_direct_load_agree_on_what_the_app_sees() {
     //    DROM windows even contain.
     let mmu_rom_up = rom_up.flash_mmu_entries();
     let mmu_direct = direct.flash_mmu_entries();
-    assert_eq!(mmu_rom_up.len(), mmu_direct.len(), "both tables have the same shape");
+    assert_eq!(
+        mmu_rom_up.len(),
+        mmu_direct.len(),
+        "both tables have the same shape"
+    );
     assert_eq!(mmu_rom_up.len(), cache::MMU_ENTRIES);
     let first = mmu_rom_up
         .iter()
@@ -1083,10 +1156,16 @@ fn rom_up_and_direct_load_agree_on_what_the_app_sees() {
         .iter()
         .filter(|e| **e & cache::MMU_FLAG_MASK == 0)
         .count();
-    println!("flash MMU: {} entries agree; {mapped} mapped, the rest {:#x} (invalid)", mmu_rom_up.len(), cache::MMU_INVALID);
+    println!(
+        "flash MMU: {} entries agree; {mapped} mapped, the rest {:#x} (invalid)",
+        mmu_rom_up.len(),
+        cache::MMU_INVALID
+    );
     assert!(mapped > 30, "the shipped image maps over 2 MiB");
     assert!(
-        mmu_rom_up.iter().all(|e| *e == cache::MMU_INVALID || *e & cache::MMU_FLAG_MASK == 0),
+        mmu_rom_up
+            .iter()
+            .all(|e| *e == cache::MMU_INVALID || *e & cache::MMU_FLAG_MASK == 0),
         "every unmapped entry holds exactly what Cache_MMU_Init writes"
     );
 }
@@ -1228,7 +1307,11 @@ fn the_bootloader_sp_re_derives_from_the_entry_instructions_in_the_chain() {
     };
 
     let mut sp = memmap::ROM_PRO_STACK_TOP;
-    assert_eq!(rom.symbol("__stack").map(|s| s.address), Some(sp), "the ROM's __stack");
+    assert_eq!(
+        rom.symbol("__stack").map(|s| s.address),
+        Some(sp),
+        "the ROM's __stack"
+    );
     for (who, pc, frame) in BOOTLOADER_FRAME_CHAIN {
         let bytes = bytes_at(*pc);
         let (inst, len) = lp_xt_inst::decode(&bytes).expect("an instruction at the chain pc");
@@ -1244,7 +1327,10 @@ fn the_bootloader_sp_re_derives_from_the_entry_instructions_in_the_chain() {
         sp -= size;
         println!("{who:<52} {pc:#010x}  entry a1, {size:<4} → a1 = {sp:#010x}");
     }
-    assert_eq!(sp, BOOTLOADER_SP_AT_APP_ENTRY, "__stack minus the four frames");
+    assert_eq!(
+        sp, BOOTLOADER_SP_AT_APP_ENTRY,
+        "__stack minus the four frames"
+    );
     // And the IDF half of the chain starts at the bootloader image's own
     // entry, read from the merged image.
     let call_start_cpu0 = BOOTLOADER_FRAME_CHAIN
@@ -1262,5 +1348,8 @@ fn the_bootloader_sp_re_derives_from_the_entry_instructions_in_the_chain() {
         .symbol_at(0x4004_5C01)
         .map(|s| s.name.as_str())
         .unwrap_or("?");
-    assert_eq!(rom_caller, "ets_run_flash_bootloader", "the ROM's call into the bootloader");
+    assert_eq!(
+        rom_caller, "ets_run_flash_bootloader",
+        "the ROM's call into the bootloader"
+    );
 }
