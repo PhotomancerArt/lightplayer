@@ -77,14 +77,17 @@
 # patch -p1` (the hello's commit/dirty fields are masked by the replay either
 # way).
 #
-# Slugs: the two images the M3 gates use get short names, anything else is
-# the feature list with `,` → `+`.
+# Slugs: the images named below get short names, anything else is the
+# feature list with `,` → `+`.
 #
 #   harness   = test_shader_compile_incremental,esp32c6,spike_uart0_link
 #   boot-idle = esp32c6,server,radio,spike_uart0_link
 #   boot-idle-memfs = esp32c6,server,radio,spike_uart0_link,memory_fs   (the §5.4 diagnostic variant)
 #   render-basic    = …,memory_fs,bench_render_loop        (M5 P0: the render loop)
 #   render-rocaille = …,memory_fs,bench_project_rocaille   (M5 P0: the pressure test)
+#   boot-idle (esp32)             = esp32,server,float-f32
+#   shader-compile-stress (esp32) = esp32,test_shader_compile_incremental
+#   render-loop (esp32)           = esp32,server,float-f32,bench_render_loop
 #
 # ⚠️ The two render-loop images are pinned at a DIFFERENT commit from the other
 # three, and must be: `bench_render_loop` does not exist at d6cfaa205. They also
@@ -182,12 +185,12 @@ case "$features" in
     esp32c6,server,radio,memory_fs) slug=boot-idle-memfs-usb ;;
     esp32c6,server,radio,spike_uart0_link,memory_fs,bench_render_loop) slug=render-basic ;;
     esp32c6,server,radio,spike_uart0_link,memory_fs,bench_project_rocaille) slug=render-rocaille ;;
-    # The classic's only slug: the SHIPPED default feature set, which is the
-    # image every M3 gate runs and the one a silicon capture is taken from.
-    # There is no memfs variant — the classic boots from a modelled flash
-    # chip with a real filesystem, which is what "memfs-free" means in G2,
-    # and `bench-esp32v3.sh`'s render-loop image seeds THAT filesystem rather
-    # than growing a second one.
+    # The classic's default slug: the SHIPPED default feature set, which is
+    # the image every M3 gate runs and the one a silicon capture is taken
+    # from. There is no memfs variant — the classic boots from a modelled
+    # flash chip with a real filesystem, which is what "memfs-free" means in
+    # G2, and `bench-esp32v3.sh`'s render-loop image seeds THAT filesystem
+    # rather than growing a second one.
     #
     # ⚠️ **A short slug here is a TWO-file change.** `reference_image_slug`
     # in `lp-emu/lp-emu-validate/src/driver.rs` mirrors this `case`, and
@@ -195,15 +198,13 @@ case "$features" in
     # the two disagree — a silicon `--image` is checked against that table,
     # so a missing arm refuses a legitimate image. The C6's two render slugs
     # drifted exactly this way once.
-    #
-    # `bench-esp32v3.sh`'s other two rows therefore take the LONG fallback
-    # name below (`esp32+test_shader_compile_incremental`,
-    # `esp32+server+float-f32+bench_render_loop`) rather than short ones:
-    # M7 P1b was scoped to leave `lp-emu-validate` alone during the G-classic
-    # hold, and a short slug for either would have meant editing it. Giving
-    # them short names is a two-line follow-up (this `case` plus that table)
-    # whenever the hold lifts.
     esp32,server,float-f32) slug=boot-idle ;;
+    # `bench-esp32v3.sh`'s other two rows (M7 P1b, PR #724 deviation 3, given
+    # short names in the M5 follow-ups that lifted the G-classic hold): the
+    # shader-compile harness and the render loop, matching the bench row
+    # names they already print.
+    esp32,test_shader_compile_incremental) slug=shader-compile-stress ;;
+    esp32,server,float-f32,bench_render_loop) slug=render-loop ;;
     *) slug="${features//,/+}" ;;
 esac
 

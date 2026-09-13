@@ -188,6 +188,17 @@ pub struct TranscriptHeader {
     /// why every C6 transcript is untouched.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub baud: Option<u32>,
+    /// **The core quantum a dual-core run used**, in cycles per unheld core's
+    /// window (`--core-quantum` on the classic's binary; today's default is
+    /// 256).
+    ///
+    /// Additive and optional, so no schema bump by this file's own rule (see
+    /// [`HEADER_SCHEMA`]): a capture with no `quantum` is a single-core run,
+    /// or a dual-core run whose quantum nobody recorded before this field
+    /// existed. The four committed classic sidecars predate it and are
+    /// unchanged.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub quantum: Option<u32>,
     /// What this configuration is trusted for, per field class.
     #[serde(default)]
     pub trust: TrustTable,
@@ -432,6 +443,7 @@ mod tests {
             pins: None,
             machine: None,
             baud: None,
+            quantum: None,
             trust: TrustTable::default(),
         }
     }

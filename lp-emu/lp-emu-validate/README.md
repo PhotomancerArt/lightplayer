@@ -234,6 +234,17 @@ is *two* transcripts that differ only in the rate the port was opened at, and
 without a discriminator the second would overwrite the first. A capture with
 no `baud` files exactly where it always did.
 
+`quantum` (added by M5's follow-ups, additive in the same sense again) is the
+`--core-quantum` a **dual-core** run used, in cycles per unheld core's window
+(D3). Two quanta are two interleavings, so it is a fact about *which run this
+is* and not decoration — and the classic's four committed sidecars recorded it
+in prose, in the note, precisely because the header had no field for it. It is
+written for `lp-emu` runs only: silicon has no software-selectable quantum,
+and the C6's machine is single-core and has no such flag. Unlike `baud` it is
+**not** a filename discriminator — nothing in this crate varies it yet, so one
+image at one commit is still one transcript. Those four sidecars were not
+re-recorded and carry no `quantum`, which is what optional is for.
+
 **The header is `deny_unknown_fields`, and it was earned.** It used not to be,
 and four hand-written classic sidecars spelled three fields the way their
 author remembered them — `board_mac` for `mac`, `chip_revision` for
@@ -354,6 +365,7 @@ actually defines.
 | `--monitor-baud` | none | **921600, not optional** |
 | port | `cu.usbmodem…` (native USB) | `cu.wchusbserial…` (CH340K) |
 | time grades | `t1` `t2` `t3` | `t1` — and only `t1` |
+| `--core-quantum` | none — single-core | `256`, the machine's default (recorded as the header's `quantum`) |
 | product link | USB-Serial-JTAG | **UART0** (no USB-SJ peripheral) |
 
 **The table is a mirror, and the mirror is the contract.** Its values are the

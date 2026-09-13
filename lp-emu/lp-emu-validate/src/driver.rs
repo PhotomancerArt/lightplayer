@@ -131,7 +131,23 @@ pub struct ChipSpec {
     /// flags anyway is a hard refusal (exit 64) rather than a no-op — which is
     /// what this field is for.
     pub takes_reset_cause: bool,
+    /// This machine's default `--core-quantum`, when it has one to run at.
+    ///
+    /// `None` on the C6: its machine is single-core and the flag does not
+    /// exist there. The classic is dual-core (D3) and always runs at
+    /// [`ESP32V3_CORE_QUANTUM_DEFAULT`] unless a future phase adds a way to
+    /// override it: this crate's plans never pass `--core-quantum` today, so
+    /// the run this field describes is always the default one.
+    pub core_quantum: Option<u32>,
 }
+
+/// Mirrors `CORE_QUANTUM_DEFAULT` in `lp-emu/esp/lp-emu-esp32v3/src/machine.rs`
+/// (256 cycles per unheld core's window, D3). Not a dependency on that crate —
+/// `lp-emu-validate` shells out to that package rather than linking it — so
+/// this is a second place the same fact lives, and
+/// `the_classic_core_quantum_mirrors_the_machines_default` keeps the two
+/// honest the way the chip table's own mirror test does.
+pub const ESP32V3_CORE_QUANTUM_DEFAULT: u32 = 256;
 
 /// The C6: the chip every configuration in this crate was written for, and the
 /// oracle every later row is checked against.
@@ -151,6 +167,7 @@ pub const ESP32C6: ChipSpec = ChipSpec {
     port_prefix: "cu.usbmodem",
     time_grades: &["t1", "t2", "t3"],
     takes_reset_cause: true,
+    core_quantum: None,
 };
 
 /// The classic ESP32 (revision v3), the desk's `domraem/dom-z-102`.
@@ -172,6 +189,7 @@ pub const ESP32V3: ChipSpec = ChipSpec {
     port_prefix: "cu.wchusbserial",
     time_grades: &["t1"],
     takes_reset_cause: false,
+    core_quantum: Some(ESP32V3_CORE_QUANTUM_DEFAULT),
 };
 
 /// Every chip this runner drives, in the order they were taught to it.
@@ -1609,12 +1627,16 @@ pub fn reference_image_slug(features: &[&str]) -> String {
         "esp32c6,server,radio,spike_uart0_link,memory_fs,bench_project_rocaille" => {
             "render-rocaille".to_string()
         }
-        // The classic's only short name, `build-reference-image.sh:189`: the
-        // SHIPPED default feature set, which is the image every M3 gate runs
-        // and the one a silicon capture is taken from. There is no memfs
-        // variant — the classic boots from a modelled flash chip with a real
-        // filesystem.
+        // The classic's default short name: the SHIPPED default feature set,
+        // which is the image every M3 gate runs and the one a silicon
+        // capture is taken from. There is no memfs variant — the classic
+        // boots from a modelled flash chip with a real filesystem.
         "esp32,server,float-f32" => "boot-idle".to_string(),
+        // The classic's other two bench rows (M7 P1b, PR #724 deviation 3;
+        // given short names in the M5 follow-ups), matching the names
+        // `bench-esp32v3.sh` already prints for them.
+        "esp32,test_shader_compile_incremental" => "shader-compile-stress".to_string(),
+        "esp32,server,float-f32,bench_render_loop" => "render-loop".to_string(),
         other => other.replace(',', "+"),
     }
 }
@@ -1887,6 +1909,39 @@ mod tests {
             seen += 1;
         }
         assert!(seen >= 7, "expected the script's short slugs, found {seen}");
+    }
+
+    /// [`ESP32V3_CORE_QUANTUM_DEFAULT`] is a mirror too, and a mirror nobody
+    /// checks is a lie waiting to be written into a sidecar.
+    ///
+    /// This crate shells out to `lp-emu-esp32v3` rather than linking it, so
+    /// the constant cannot be imported; the machine's source is read instead,
+    /// the way the chip table reads `build-reference-image.sh`. If the
+    /// machine's default ever moves, the header would otherwise keep
+    /// recording 256 for runs that did not use it — a provenance field that
+    /// lies is worse than one that is absent.
+    #[test]
+    fn the_classic_core_quantum_mirrors_the_machines_default() {
+        let machine =
+            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../esp/lp-emu-esp32v3/src/machine.rs");
+        let source = std::fs::read_to_string(&machine).unwrap();
+        let line = source
+            .lines()
+            .find_map(|l| {
+                l.trim()
+                    .strip_prefix("pub const CORE_QUANTUM_DEFAULT: u64 = ")
+            })
+            .expect("`CORE_QUANTUM_DEFAULT` is declared in the machine");
+        let want: u32 = line
+            .trim_end_matches(';')
+            .trim()
+            .parse()
+            .expect("the machine's default is a number");
+        assert_eq!(
+            ESP32V3_CORE_QUANTUM_DEFAULT, want,
+            "the classic's `core_quantum` no longer mirrors the machine's default",
+        );
+        assert_eq!(ESP32V3.core_quantum, Some(want));
     }
 
     fn request(config: &str, payload: &str, port: Option<&str>) -> RunRequest {
