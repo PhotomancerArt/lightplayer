@@ -644,7 +644,7 @@ it will find.
   bytes and `meta.json` gained `fast` and `callBytes`.
   `just test-emu-jit-replay` is the recipe: it records and replays the
   `harness` image in **node (V8) and bun (JavaScriptCore)**, every field
-  compared on every entry, in 3m56s on an M2 Max. Still true, and still why
+  compared on every entry, in 2m52s on an M2 Max. Still true, and still why
   this is not a committed fixture: a `render-basic` recording is a 76 MB
   `module.wasm` and a 24 MB `memory.bin` beside 67 KB of entries — the recipe
   takes its own recording instead.

@@ -3043,7 +3043,7 @@ test-emu-jit-identity: test-emu-jit-engines
 # **What it costs, and why that keeps it out of CI.** A recording pays
 # cranelift TWICE: a recording run refuses the incremental `fence.i` path,
 # because a recording is of ONE module and two live modules would be a
-# recording of neither. Measured end to end on an M2 Max: **3m56s** for
+# recording of neither. Measured end to end on an M2 Max: **2m52s** for
 # `harness` (47 k blocks) against ~13 minutes for the render pair (154 k) —
 # which is why `harness` is the cell here exactly as it is for
 # `test-emu-jit-image`.

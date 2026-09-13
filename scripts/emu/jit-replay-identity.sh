@@ -24,7 +24,7 @@
 # The cost is cranelift's, and a recording pays it TWICE: a run that records
 # refuses the incremental `fence.i` path (a recording is of ONE module, and two
 # live modules would be a recording of neither), so the whole image is
-# translated again after the fence. Measured end to end on an M2 Max: 3m56s
+# translated again after the fence. Measured end to end on an M2 Max: 2m52s
 # for `harness` against ~13 minutes for the render pair. That is why the
 # `harness` image is the cell and the render pair is not.
 #
