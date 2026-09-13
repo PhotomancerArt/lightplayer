@@ -1,0 +1,146 @@
+diff --git a/lp-emu/esp/lp-emu-esp32c6/src/periph/rmt.rs b/lp-emu/esp/lp-emu-esp32c6/src/periph/rmt.rs
+index 4968ead73..51c8cd97e 100644
+--- a/lp-emu/esp/lp-emu-esp32c6/src/periph/rmt.rs
++++ b/lp-emu/esp/lp-emu-esp32c6/src/periph/rmt.rs
+@@ -788,6 +788,12 @@ pub struct Rmt {
+     /// test-emu-c6`'s gates turn them on through
+     /// [`crate::machine::Esp32C6Builder::rmt_logs`].
+     keep_logs: bool,
++    /// R5 TIER PROBE (scripts/emu/tier-probes): the guest's write watermark,
++    /// one bit per RAM word. Set by [`Rmt::write_word`], cleared when the
++    /// transmitter consumes the word. The bulk in [`Rmt::fetch`] never reads
++    /// past the highest word the guest has written since the last consume,
++    /// which is the bound R2 lacked.
++    written: Box<[bool; RAM_WORDS]>,
+ }
+ 
+ /// A trace note, formatted only when the trace is on.
+@@ -817,6 +823,8 @@ impl Rmt {
+             warned_ref_cnt: [false; 4],
+             warned_late_start: [false; TX_CHANNELS],
+             keep_logs: false,
++            // R5 TIER PROBE.
++            written: Box::new([false; RAM_WORDS]),
+         }
+     }
+ 
+@@ -1183,7 +1191,63 @@ impl Rmt {
+         }
+     }
+ 
++    /// R5 TIER PROBE (scripts/emu/tier-probes): the write-watermark bulk.
++    ///
++    /// Today one `EV_WORD` is scheduled per word and 96 % of the run's 1.53 M
++    /// slices are bounded by it. This consumes a **run** of words in one go —
++    /// each pulse still stamped with its own true cycle, in word order — and
++    /// schedules one `EV_WORD` at the first word the run did not take.
++    ///
++    /// Three bounds, and the third is the one R2 lacked:
++    ///
++    /// 1. **Before the threshold word.** The word that makes `pos == tx_lim`
++    ///    is fetched on its own at its own cycle, so `INT_TX_THR` is raised at
++    ///    exactly the cycle it is raised today (BD4) with no second event.
++    /// 2. **Before the window's last word**, so the wrap is a fetch of its
++    ///    own and `raddr` never jumps across the window boundary in bulk.
++    /// 3. **At the guest's write watermark** ([`Rmt::written`]): the run stops
++    ///    at the first word the guest has not written since the transmitter
++    ///    last consumed it. That is what stops the bulk reading RAM ahead of
++    ///    the CPU — the race that broke R2.
+     fn fetch(&mut self, ch: usize, now: Cycles, cx: &mut BusCx<'_>) {
++        let mut at = now;
++        loop {
++            let Some(word_end) = self.fetch_one(ch, at, cx) else {
++                // Stalled, or the frame ended: `fetch_one` scheduled or
++                // cancelled whatever it needed to.
++                return;
++            };
++            let e = &self.ch[ch];
++            let stop_state = !e.running || e.stalled || e.ending != Ending::No;
++            let window_start = BLOCK_WORDS * ch as u32;
++            let next = self.ch[ch].raddr;
++            let next_pos = next - window_start;
++            // Bound 1 and 2.
++            let stop_thr = next_pos + 1 == self.tx_lim(ch);
++            let stop_wrap = next_pos + 1 >= self.ch[ch].window_words();
++            // Bound 3 — the watermark.
++            let unwritten = !self.written[(next as usize).min(RAM_WORDS - 1)];
++            // Bound 4 (R5a) — the guard. The driver plants a STOP word in the
++            // half it just left and then overwrites it as it refills; a word
++            // that would END the transmission is therefore the one word the
++            // watermark's "the guest has written it" is a lie about. Fetch it
++            // on its own, at its own cycle, so the refill has the same cycles
++            // to overwrite it that it has today.
++            let stop_guard = self.ram[(next as usize).min(RAM_WORDS - 1)] & 0x7fff == 0;
++            if stop_state || stop_thr || stop_wrap || unwritten || stop_guard {
++                cx.sched
++                    .schedule_at(word_end, event_id(self.index, EV_WORD + ch as u16));
++                return;
++            }
++            at = word_end;
++        }
++    }
++
++    /// R5 TIER PROBE: one word — today's `fetch` body, with the per-word
++    /// `EV_WORD` schedule lifted out into [`Self::fetch`]. Returns the cycle
++    /// the word's pulses end, or `None` when the engine stalled or the frame
++    /// ended (in which case nothing more is to be fetched).
++    fn fetch_one(&mut self, ch: usize, now: Cycles, cx: &mut BusCx<'_>) -> Option<Cycles> {
+         let raddr = self.ch[ch].raddr as usize;
+         let word = self.ram[raddr.min(RAM_WORDS - 1)];
+         let dur1 = word & 0x7fff;
+@@ -1194,8 +1258,11 @@ impl Rmt {
+             // The all-zero STOP word, or a zero first half (modeled, §10.4):
+             // the transmission ends before it — no clock needed.
+             self.log_word(ch, now, word, cx);
++            // R5 TIER PROBE: consumed — the guest must write it again before
++            // the bulk will take it.
++            self.written[raddr.min(RAM_WORDS - 1)] = false;
+             self.end_frame(ch, now, cx);
+-            return;
++            return None;
+         }
+ 
+         let clock = match self.clock() {
+@@ -1204,10 +1271,12 @@ impl Rmt {
+                 // Not fetched yet: the word is logged when it actually goes
+                 // out, on the resume.
+                 self.stall(ch, now, reason, cx);
+-                return;
++                return None;
+             }
+         };
+         self.log_word(ch, now, word, cx);
++        // R5 TIER PROBE: consumed.
++        self.written[raddr.min(RAM_WORDS - 1)] = false;
+         {
+             let e = &mut self.ch[ch];
+             let t0 = e.ticks_since_start;
+@@ -1261,8 +1330,8 @@ impl Rmt {
+             e.ticks_since_start = t0 + u64::from(dur1) + u64::from(dur2);
+             e.word_due = word_end;
+         }
+-        cx.sched
+-            .schedule_at(word_end, event_id(self.index, EV_WORD + ch as u16));
++        // R5 TIER PROBE: the `EV_WORD` is scheduled by the bulk driver at the
++        // END of the run, not here.
+ 
+         // Advance: the pointer now names the next word to fetch (§10.2).
+         let window_start = BLOCK_WORDS * ch as u32;
+@@ -1291,6 +1360,7 @@ impl Rmt {
+             }
+         }
+         self.update_lines(cx);
++        Some(word_end)
+     }
+ 
+     /// The current word's pulses ended.
+@@ -1756,6 +1826,9 @@ impl Rmt {
+                 // Live: the engine reads this on its next fetch, refilled
+                 // or not.
+                 *slot = value;
++                // R5 TIER PROBE: the watermark. This word is now the guest's
++                // to give; the bulk may take it.
++                self.written[i] = true;
+                 // …and it is the last word of a refill until another one
+                 // lands, which is how the fill half of the measurement is
+                 // read off the guest's own writes.

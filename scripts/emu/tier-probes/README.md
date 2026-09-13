@@ -27,16 +27,19 @@ swallows the RAM whole and the guest's ISR never runs" (R3).
 
 ## Base
 
-Every patch applies to **`38b12c848d38ad1337ccd0c210f9d32587d2547f`**
-(`origin/main` at dispatch — the P1 merge, PR #731).
+`R1`–`R3` apply to **`38b12c848d38ad1337ccd0c210f9d32587d2547f`**
+(`origin/main` at P1b's dispatch — the P1 merge, PR #731).
+
+`R5`, `R5a` and `R5c` are **P1d**'s and apply to
+**`0c622e12a5e9324fad9b91fc6a0b0e61dfafd5a3`** (`origin/main` at P1d's
+dispatch — the P1c merge, PR #736).
 
 ```sh
-git checkout 38b12c848d38ad1337ccd0c210f9d32587d2547f
 git apply --check scripts/emu/tier-probes/R1-pins-off.patch   # and so on
 ```
 
-They are `git diff` output against that tree and are **mutually exclusive** —
-apply one, take the rows, `git apply -R` it, apply the next.
+They are `git diff` output against those trees and are **mutually exclusive**
+— apply one, take the rows, `git apply -R` it, apply the next.
 
 ## The rungs
 
@@ -47,6 +50,9 @@ apply one, take the rows, `git apply -R` it, apply the next.
 | `R2-coalesced-words.patch` | **R2** | the per-word `EV_WORD` is replaced by one event at the threshold word and one at end-of-transmission; the words up to the threshold are fetched in bulk and their pulses emitted with their true cycles; the threshold interrupt is raised at the cycle it would have been |
 | `R3-instant-rmt.patch` | **R3** | the transmitter consumes the whole RAM window at the first start and raises only end-of-transmission. The threshold interrupt never fires, so the guest's refill ISR never runs. No pins |
 | — | **R4** | **not taken.** See "R4" below |
+| `R5-write-watermark.patch` | **R5** (P1d) | the per-word `EV_WORD` becomes one event per **run** of words: `fetch` consumes words in a loop, each pulse still stamped with its own true cycle in word order, and schedules one `EV_WORD` at the first word the run did not take. Four bounds — before the threshold word (so `INT_TX_THR` keeps its cycle), before the window's last word, and **at the guest's write watermark**: a new `Rmt::written` bit per RAM word, set by the guest's store and cleared when the transmitter consumes it. This is the shape G-LOOP0b named as the one unexplored candidate |
+| `R5a-watermark-plus-guard.patch` | **R5a** (P1d) | R5 plus a fourth bound: the run also stops before any word that would **end** the transmission (`dur1 == 0`). R5's first failure is that the driver's STOP guard is a word the guest writes precisely so it can overwrite it again; R5a removes that failure so the *second*, deeper one can be seen on its own |
+| `R5c-shadow-census.patch` | **R5c** (P1d) | **no behaviour change at all.** The transmitter fetches word by word exactly as it does today; alongside it the same four bounds are evaluated and the words a bulk *would* have absorbed are counted. It exists because R5 and R5a do not run the guest, so their slice censuses are a broken program's — R5c sizes the lever on the healthy cadence |
 
 ## R4 — not taken, and the census is the reason
 
