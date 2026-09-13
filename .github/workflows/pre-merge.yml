@@ -331,6 +331,19 @@ jobs:
               # P5b it is also where the JS host is attached, so the same
               # applies twice over.
               - 'lp-app/lpa-studio-web/public/lpa-link/emulator_wasi.js'
+              # The rest of the tab host, added in W8. The shim was listed and
+              # its three neighbours were not, so #746 — a change to the
+              # WORKER's pacing loop — shipped with this job path-skipped
+              # entirely. The smoke does not drive the worker (it drives the
+              # shim directly, which is why the pacing loop has no test), and
+              # the bridge it does not touch at all; they are here anyway,
+              # because the job is cheap and because the alternative is a
+              # filter that says "the files this job happens to execute today"
+              # rather than "the tab host", and the first kind is what let
+              # #746 through.
+              - 'lp-app/lpa-studio-web/public/lpa-link/emulator_worker.js'
+              - 'lp-app/lpa-studio-web/public/lpa-link/emulator_tab.js'
+              - 'lp-app/lpa-link/src/providers/emulator_tab/emulator_tab_bridge.js'
               # The recipe that builds every image this job boots. It was
               # missing until L4, so a change to the reference build — the
               # thing that decides WHICH BYTES the gates run against — ran no
