@@ -113,6 +113,16 @@ browser-serial-esp32 = [
     "dep:wasm-bindgen-futures",
     "dep:web-sys",
 ]
+# The tab emulator's platform half (`app/devices/browser_emu_source.rs`).
+# wasm-only, like the sim's worker half: the model half it plugs into
+# (`emu_transport.rs`) is host-tested and pays nothing for this.
+emulator-tab = [
+    "lpa-link/emulator-tab",
+    "dep:js-sys",
+    "dep:wasm-bindgen",
+    "dep:wasm-bindgen-futures",
+    "dep:web-sys",
+]
 
 [lints]
 workspace = true

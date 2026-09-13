@@ -76,9 +76,10 @@ does not blur into a larger API rename.
   the editor is bound to). Capacity is a policy and it is ONE
   (`SESSION_CAPACITY` — one device per tab, D37); "connected" means "a
   session exists in the pool". The one thing left that a session forks on
-  is `LinkTransport { Sim, Serial }`, read off the link's endpoint: a fact
-  about the WIRE (an in-process worker channel has no bandwidth bound, a
-  serial port does), never about the kind of device.
+  is `LinkTransport { Sim, Emu, Serial }`, read off the link's endpoint: a
+  fact about the WIRE (an in-process worker channel has no bandwidth bound,
+  a serial port does, and an emulated board's USB-Serial-JTAG FIFO does
+  too — so `Emu` paces with `Serial`), never about the kind of device.
 - `DeviceController` owns the connect flow — the `LinkProviderRegistry`
   catalog and the picker view state (`ConnectFlowState`) — and is the
   session FACTORY: connect flows build and return a `RuntimePayload` that

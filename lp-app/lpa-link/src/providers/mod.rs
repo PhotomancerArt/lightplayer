@@ -22,6 +22,14 @@
 
 #[cfg(all(feature = "browser-serial-esp32", target_arch = "wasm32"))]
 pub mod browser_serial_esp32;
+// Where a packaged firmware build's manifest lives. Declared outside the
+// wasm32 gate — and re-exported from `browser_serial_esp32` so wasm
+// consumers still read one module path — because the emulated board writes
+// the SAME build the esptool path flashes, and the transport that decides
+// so is host-tested. One place derives that URL, or the two paths
+// eventually name different files.
+#[path = "browser_serial_esp32/browser_serial_esp32_options.rs"]
+pub mod browser_serial_esp32_options;
 #[cfg(all(feature = "browser-worker", target_arch = "wasm32"))]
 pub mod browser_worker;
 // Pure (browser-free) boot-wait policy for the browser-worker provider.
@@ -29,6 +37,9 @@ pub mod browser_worker;
 // suite; `browser_worker::worker_handle` only feeds it observations.
 #[path = "browser_worker/boot_wait.rs"]
 pub mod browser_worker_boot_wait;
+/// An ESP32-C6 emulated in this tab, over the page's own Worker backing.
+#[cfg(all(feature = "emulator-tab", target_arch = "wasm32"))]
+pub mod emulator_tab;
 pub mod fake;
 #[cfg(feature = "fake-device")]
 pub mod fake_device;

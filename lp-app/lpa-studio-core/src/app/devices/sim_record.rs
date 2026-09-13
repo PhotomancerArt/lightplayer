@@ -1,8 +1,27 @@
-//! Sim identity and its sidecar: what makes a sim a remembered device.
+//! Runtime identity and its sidecar: what makes a sim — or an emu — a
+//! remembered device.
 //!
-//! A sim is a device with a link and a record — no new flow, no `is_sim`
-//! anywhere in the fold. Two facts make that work, and this module owns
-//! both.
+//! A runtime is a device with a link and a record — no new flow, no
+//! `is_sim` and no `is_emu` anywhere in the fold. Two facts make that work,
+//! and this module owns both.
+//!
+//! # Two kinds of runtime, one record (D6/D19)
+//!
+//! A **sim** is the desktop firmware wearing a target's hardware manifest;
+//! an **emu** is the target's own firmware image on an emulated SoC in this
+//! tab. They differ in what runs, not in what Studio remembers: both are
+//! made rather than discovered, both wear a minted locally-administered
+//! MAC, both are reached at a scheme-prefixed endpoint, and both are
+//! forgotten the same way. So there is ONE sidecar with a
+//! [`RuntimeKind`] in it, not two files that would drift.
+//!
+//! **No format bump.** [`RuntimeKind::Sim`] serializes to the `"sim"` this
+//! field has always carried, so every sidecar already on disk round-trips
+//! byte for byte; the only new bytes are in files this change also creates.
+//! The persisted-format rule (`AGENTS.md`) bumps on a change to bytes a
+//! reader could misread, and there is none here — a reader that predates
+//! `"emu"` treats an emu sidecar as a foreign kind and reports absence,
+//! which is the posture below.
 //!
 //! # The identity is minted, and it is shaped like silicon's
 //!
@@ -19,24 +38,34 @@
 //! `crypto.getRandomValues`, tests hand in fixed bytes, and this module has
 //! no opinion about where entropy comes from.
 //!
-//! # The sidecar is the sole "this is a sim" fact
+//! # The sidecar is the sole "this is a runtime" fact
 //!
 //! `/device-sims/<uid>.json`, beside `/device-frames/<uid>.json`, with the
 //! same posture and its own [`SIM_RECORD_VERSION`]:
 //!
-//! - **Absence means "not a sim"** — a board that never had one simply is
-//!   not one, which is every board in every existing library.
+//! - **Absence means "not a runtime"** — a board that never had one simply
+//!   is not one, which is every board in every existing library.
 //! - **Unreadable or foreign-version reads as absent** (`debug!`, never a
 //!   user-facing error, never a migration).
 //! - **Cache-like in its failure modes, user-owned in its lifetime.** Unlike
 //!   a frame snapshot, losing one is not free: the target and the base MAC
-//!   are what the sim boots with, so a lost sidecar costs the device, not a
-//!   picture. That is why `Forget` deletes it deliberately and nothing else
-//!   ever does.
+//!   are what the runtime boots with, so a lost sidecar costs the device,
+//!   not a picture. That is why `Forget` deletes it deliberately and nothing
+//!   else ever does.
 //!
-//! Nothing about a sim rides the wire. The hello reports a `board_id` and a
-//! base MAC exactly as silicon does; what says "sim" is this file and the
-//! registry row's `transport`, both of them Studio's own bookkeeping.
+//! **An emu has a second thing beside it, and Forget takes that too (Q7).**
+//! The 4 MiB flash image an emu boots from lives in a worker-owned OPFS
+//! directory (`emu-flash/<uid>.bin`, D15), NOT in the library store: it is
+//! megabytes of chip state rather than a document, and the worker holds it
+//! through a sync access handle. This module does not touch it — the
+//! transport's `forget` does, through the page — but the two go together,
+//! so a Forget that deleted only the sidecar would leave an orphaned image
+//! nothing can name.
+//!
+//! Nothing about a runtime rides the wire. The hello reports a `board_id`
+//! and a base MAC exactly as silicon does; what says "sim" or "emu" is this
+//! file and the registry row's `transport`, both of them Studio's own
+//! bookkeeping.
 
 use lpa_devices::identity::{DeviceUid, EndpointKey, MacAddress};
 use lpa_devices::link::LinkInfo;
@@ -45,7 +74,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::app::places::{HardwareId, RegisteredDevice};
 
-use super::device_records::SIM_TRANSPORT;
+use super::device_records::{EMU_TRANSPORT, SIM_TRANSPORT};
 
 /// Where the sidecars live inside the library store, beside `/registry.json`
 /// and `/device-frames/`.
@@ -55,10 +84,40 @@ pub const DEVICE_SIMS_DIR: &str = "/device-sims";
 /// reader could misread; an older reader treats a newer file as absent.
 pub const SIM_RECORD_VERSION: u32 = 1;
 
-/// The `kind` every sidecar carries. A discriminator, not a mode: it exists
-/// so a future device-scoped sidecar in this directory reads as foreign
-/// rather than as a sim with missing fields.
-pub const SIM_RECORD_KIND: &str = "sim";
+/// What a sidecar's `kind` says the runtime is.
+///
+/// A discriminator, not a mode: it exists so a future device-scoped sidecar
+/// in this directory reads as foreign rather than as a runtime with missing
+/// fields, and so the two kinds Studio can actually run are told apart by a
+/// value rather than by a second file.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum RuntimeKind {
+    /// The desktop firmware wearing the target's hardware manifest.
+    Sim,
+    /// The target's own firmware image on an emulated SoC in this tab.
+    Emu,
+}
+
+impl RuntimeKind {
+    /// The word on disk. `"sim"` is what every existing sidecar carries,
+    /// which is why this change bumps no version.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Sim => "sim",
+            Self::Emu => "emu",
+        }
+    }
+
+    /// Read a sidecar's `kind`. `None` for anything this build does not
+    /// run — which reads as "not a runtime", never as a broken one.
+    pub fn from_key(key: &str) -> Option<Self> {
+        match key {
+            "sim" => Some(Self::Sim),
+            "emu" => Some(Self::Emu),
+            _ => None,
+        }
+    }
+}
 
 /// The endpoint scheme a sim's link is reached at.
 ///
@@ -67,6 +126,10 @@ pub const SIM_RECORD_KIND: &str = "sim";
 /// link is served by the sim transport" without the model learning a second
 /// kind of device.
 pub const SIM_ENDPOINT_PREFIX: &str = "sim:";
+
+/// The endpoint scheme an emu's link is reached at — the same rule as
+/// [`SIM_ENDPOINT_PREFIX`], for the transport that serves emulated boards.
+pub const EMU_ENDPOINT_PREFIX: &str = "emu:";
 
 /// `/device-sims/<uid>.json`.
 pub fn sim_record_path(uid: &str) -> String {
@@ -81,6 +144,16 @@ pub fn sim_endpoint(uid: &str) -> EndpointKey {
 /// The uid inside a sim endpoint key, or `None` for any other endpoint.
 pub fn uid_from_sim_endpoint(endpoint: &str) -> Option<&str> {
     endpoint.strip_prefix(SIM_ENDPOINT_PREFIX)
+}
+
+/// The endpoint key an emu with this uid is reached at.
+pub fn emu_endpoint(uid: &str) -> EndpointKey {
+    EndpointKey(format!("{EMU_ENDPOINT_PREFIX}{uid}"))
+}
+
+/// The uid inside an emu endpoint key, or `None` for any other endpoint.
+pub fn uid_from_emu_endpoint(endpoint: &str) -> Option<&str> {
+    endpoint.strip_prefix(EMU_ENDPOINT_PREFIX)
 }
 
 /// The [`LinkInfo`] a sim's link wears.
@@ -98,37 +171,64 @@ pub fn sim_link_info(uid: &str, display_name: &str) -> LinkInfo {
     }
 }
 
+/// The [`LinkInfo`] an emu's link wears — [`sim_link_info`]'s twin.
+///
+/// `usb: None` for the same reason, and it is just as much a fact here: the
+/// board's link is an EMULATED USB-Serial-JTAG, so there is no USB device
+/// in the page to describe and no serial number the browser assigned.
+pub fn emu_link_info(uid: &str, display_name: &str) -> LinkInfo {
+    LinkInfo {
+        label: format!("Emu · {display_name}"),
+        endpoint: emu_endpoint(uid),
+        usb: None,
+        serial_number: None,
+    }
+}
+
 /// The on-disk shape of `/device-sims/<uid>.json`.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SimRecord {
     pub version: u32,
-    /// Always [`SIM_RECORD_KIND`] today.
+    /// A [`RuntimeKind`]'s word. Kept as a `String` because it is the
+    /// on-disk field: a sidecar whose kind this build does not know reads
+    /// as absent rather than failing to parse.
     pub kind: String,
-    /// The hardware target this sim runs: a board id, or the Desktop board
-    /// id. What the runtime manifest is looked up by.
+    /// The hardware target this runtime runs: a board id, or the Desktop
+    /// board id. What the runtime manifest is looked up by.
     pub target: String,
-    /// The minted, locally administered base MAC this sim reports.
+    /// The minted, locally administered base MAC this runtime reports.
     /// `aa:bb:cc:dd:ee:ff`, lowercase — the hello's own form.
     pub base_mac: String,
-    /// Epoch seconds (the studio clock) when the sim was created.
+    /// Epoch seconds (the studio clock) when the runtime was created.
     pub created_at: f64,
 }
 
 impl SimRecord {
     /// A v1 record for `target`, minted at `created_at`.
-    pub fn new(target: impl Into<String>, base_mac: impl Into<String>, created_at: f64) -> Self {
+    pub fn new(
+        target: impl Into<String>,
+        base_mac: impl Into<String>,
+        created_at: f64,
+        kind: RuntimeKind,
+    ) -> Self {
         Self {
             version: SIM_RECORD_VERSION,
-            kind: SIM_RECORD_KIND.to_string(),
+            kind: kind.as_str().to_string(),
             target: target.into(),
             base_mac: base_mac.into(),
             created_at,
         }
     }
+
+    /// What kind of runtime this is. Always `Some` on a record that came
+    /// from [`decode`] — an unknown kind never gets that far.
+    pub fn kind(&self) -> Option<RuntimeKind> {
+        RuntimeKind::from_key(&self.kind)
+    }
 }
 
-/// Mint a sim's identity from six caller-supplied random bytes.
+/// Mint a runtime's identity from six caller-supplied random bytes.
 ///
 /// Octet 0 gets the locally-administered bit set (`0x02`) and the multicast
 /// bit cleared (`0x01`), which is what makes the address legal to invent:
@@ -169,23 +269,28 @@ pub struct NewSimRecord {
     pub sidecar: SimRecord,
 }
 
-/// Mint a sim of `target`, optionally already named.
+/// Mint a runtime of `target`, optionally already named.
 ///
 /// The row is deliberately ordinary: `hardware_id` is the `efuse:` form,
 /// `board_id` is the target, `last_seen_at` is the creation moment so a
-/// fresh sim sorts as recent on the remembered line. The ONE thing that is
-/// not ordinary is `transport`, and the sidecar is what backs it up.
+/// fresh runtime sorts as recent on the remembered line. The ONE thing that
+/// is not ordinary is `transport`, and the sidecar is what backs it up.
 pub fn new_sim_record(
     target: &str,
     name: Option<&str>,
     random: &[u8; 6],
     created_at: f64,
+    kind: RuntimeKind,
 ) -> NewSimRecord {
     let (mac, uid) = mint_sim_identity(random);
+    let transport = match kind {
+        RuntimeKind::Sim => SIM_TRANSPORT,
+        RuntimeKind::Emu => EMU_TRANSPORT,
+    };
     let row = RegisteredDevice {
         uid: uid.0.clone(),
         name: name.unwrap_or_default().to_string(),
-        transport: SIM_TRANSPORT.to_string(),
+        transport: transport.to_string(),
         last_seen_at: created_at,
         board_id: Some(target.to_string()),
         hardware_id: Some(
@@ -198,7 +303,7 @@ pub fn new_sim_record(
     NewSimRecord {
         uid: uid.0,
         row,
-        sidecar: SimRecord::new(target, mac.0, created_at),
+        sidecar: SimRecord::new(target, mac.0, created_at, kind),
     }
 }
 
@@ -215,14 +320,14 @@ pub fn write_sim_record_bytes(fs: &dyn LpFs, uid: &str, bytes: &[u8]) -> Result<
 }
 
 /// Read `uid`'s sidecar. `None` when there is none — which is what every
-/// board that is not a sim looks like — or when what is there should not be
-/// trusted (see the module doc's posture).
+/// board that is not a runtime looks like — or when what is there should
+/// not be trusted (see the module doc's posture).
 pub fn read_sim_record(fs: &dyn LpFs, uid: &str) -> Option<SimRecord> {
     let bytes = match fs.read_file(sim_record_path(uid).as_path()) {
         Ok(bytes) => bytes,
         Err(FsError::NotFound(_)) => return None,
         Err(error) => {
-            log::debug!("sim record for {uid} unreadable: {error}");
+            log::debug!("runtime record for {uid} unreadable: {error}");
             return None;
         }
     };
@@ -234,20 +339,20 @@ pub fn decode(bytes: &[u8]) -> Option<SimRecord> {
     let record: SimRecord = match serde_json::from_slice(bytes) {
         Ok(record) => record,
         Err(error) => {
-            log::debug!("sim record unreadable: {error}");
+            log::debug!("runtime record unreadable: {error}");
             return None;
         }
     };
     if record.version != SIM_RECORD_VERSION {
         log::debug!(
-            "sim record version {} is not {SIM_RECORD_VERSION}; ignored",
+            "runtime record version {} is not {SIM_RECORD_VERSION}; ignored",
             record.version
         );
         return None;
     }
-    if record.kind != SIM_RECORD_KIND {
+    if record.kind().is_none() {
         log::debug!(
-            "device sidecar kind {:?} is not a sim; ignored",
+            "device sidecar kind {:?} is not a runtime this build knows; ignored",
             record.kind
         );
         return None;
@@ -317,7 +422,13 @@ mod tests {
 
     #[test]
     fn a_new_sim_is_an_ordinary_row_that_says_sim_in_one_column() {
-        let minted = new_sim_record("lightplayer/desktop", Some("Bench sim"), &RANDOM, 1_800.0);
+        let minted = new_sim_record(
+            "lightplayer/desktop",
+            Some("Bench sim"),
+            &RANDOM,
+            1_800.0,
+            RuntimeKind::Sim,
+        );
 
         assert_eq!(minted.row.uid, minted.uid);
         assert_eq!(minted.row.transport, "sim");
@@ -333,12 +444,13 @@ mod tests {
         assert_eq!(minted.sidecar.base_mac, "12:22:33:44:55:66");
         assert_eq!(minted.sidecar.created_at, 1_800.0);
         assert_eq!(minted.sidecar.version, SIM_RECORD_VERSION);
-        assert_eq!(minted.sidecar.kind, SIM_RECORD_KIND);
+        assert_eq!(minted.sidecar.kind, "sim");
+        assert_eq!(minted.sidecar.kind(), Some(RuntimeKind::Sim));
     }
 
     #[test]
     fn an_unnamed_sim_gets_no_invented_name() {
-        let minted = new_sim_record("lightplayer/desktop", None, &RANDOM, 1.0);
+        let minted = new_sim_record("lightplayer/desktop", None, &RANDOM, 1.0, RuntimeKind::Sim);
         assert!(
             minted.row.name.is_empty(),
             "naming is the registry's own rule, not minting's"
@@ -359,7 +471,12 @@ mod tests {
 
     #[test]
     fn the_sidecar_round_trips_as_camel_case_json_with_its_own_version() {
-        let record = SimRecord::new("seeed/xiao-esp32-c6", "12:22:33:44:55:66", 42.5);
+        let record = SimRecord::new(
+            "seeed/xiao-esp32-c6",
+            "12:22:33:44:55:66",
+            42.5,
+            RuntimeKind::Sim,
+        );
         let bytes = serde_json::to_vec(&record).unwrap();
         let text = String::from_utf8(bytes.clone()).unwrap();
 
@@ -377,7 +494,12 @@ mod tests {
         assert_eq!(decode(b"not json"), None);
         assert_eq!(decode(b"{}"), None);
 
-        let record = SimRecord::new("lightplayer/desktop", "12:22:33:44:55:66", 1.0);
+        let record = SimRecord::new(
+            "lightplayer/desktop",
+            "12:22:33:44:55:66",
+            1.0,
+            RuntimeKind::Sim,
+        );
         let mut foreign: serde_json::Value =
             serde_json::from_slice(&serde_json::to_vec(&record).unwrap()).unwrap();
         foreign["version"] = serde_json::json!(SIM_RECORD_VERSION + 1);
@@ -389,14 +511,19 @@ mod tests {
         assert_eq!(
             decode(&serde_json::to_vec(&other_kind).unwrap()),
             None,
-            "a future sidecar in this directory is foreign, not a broken sim"
+            "a future sidecar in this directory is foreign, not a broken runtime"
         );
     }
 
     #[test]
     fn the_store_helpers_key_by_uid_and_tolerate_absence() {
         let fs = LpFsMemory::new();
-        let record = SimRecord::new("lightplayer/desktop", "12:22:33:44:55:66", 7.0);
+        let record = SimRecord::new(
+            "lightplayer/desktop",
+            "12:22:33:44:55:66",
+            7.0,
+            RuntimeKind::Sim,
+        );
 
         assert_eq!(sim_record_path("dev1"), "/device-sims/dev1.json");
         assert_eq!(read_sim_record(&fs, "dev1"), None, "absence is not a sim");

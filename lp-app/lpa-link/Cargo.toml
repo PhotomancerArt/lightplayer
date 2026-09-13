@@ -114,6 +114,18 @@ device-session = ["dep:async-trait", "dep:lpa-client", "dep:lpc-wire"]
 # Implied by every host provider feature; never enabled on wasm (it pulls
 # lpa-client's tokio-full host runtime).
 device-session-host = ["device-session", "lpa-client/host"]
+# An ESP32-C6 emulated in this tab (plan decision D4). wasm-only: the whole
+# module is a join onto the page's own `emulator_tab.js`. `device-link` for
+# the `ByteStreamLink` it is hosted in, `device-session` for the
+# `lpa_client::ClientIo` the effect conversations speak through.
+emulator-tab = [
+    "device-link",
+    "device-session",
+    "dep:js-sys",
+    "dep:wasm-bindgen",
+    "dep:wasm-bindgen-futures",
+    "dep:web-sys",
+]
 fake-device = [
     "device-link",
     "device-session-host",

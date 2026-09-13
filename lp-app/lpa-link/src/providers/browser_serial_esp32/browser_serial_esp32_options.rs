@@ -40,6 +40,11 @@ impl BrowserSerialEsp32Options {
         )
     }
 
+    /// Where the flasher loads esptool-js from. Gated to the provider that
+    /// has one: this file is compiled on every target now (the emu
+    /// transport shares [`Self::firmware_manifest_path`]), and a host build
+    /// has no esptool to point at.
+    #[cfg(all(feature = "browser-serial-esp32", target_arch = "wasm32"))]
     pub(crate) fn esptool_module_path(&self) -> &str {
         self.esptool_module_path.as_deref().unwrap_or("")
     }
