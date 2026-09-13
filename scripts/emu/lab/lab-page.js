@@ -277,6 +277,7 @@ export function main() {
       if (p.state === 'done' && p.tainted) return { c: 'tainted', g: '⚠', t: 'tainted' };
       if (p.state === 'done') return { c: 'ok', g: '✓', t: 'done' };
       if (p.state === 'failed') return { c: 'fail', g: '✗', t: 'failed' };
+      if (p.state === 'skipped') return { c: 'skipped', g: '–', t: 'not taken (the build settled)' };
       if (p.state === 'sent' || p.state === 'deferred') return { c: 'now', g: '●', t: p.state };
       return { c: 'todo', g: '○', t: 'pending' };
     };
