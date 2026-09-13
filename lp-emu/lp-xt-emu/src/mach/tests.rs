@@ -2624,3 +2624,443 @@ fn a_call0_inside_the_vector_leaves_ps_callinc_for_the_interrupted_entry() {
         "the callee's a1, in the new window"
     );
 }
+
+// --- the block cache (M7 P01) ------------------------------------------------
+//
+// ⚠️ **Every test above this line already runs through the block cache**:
+// `TestBus::fetch_is_pure` is true and `XtHart::new` turns the cache on, so
+// the whole file is the cache's differential. What follows is the part that
+// needs the cache *and* its off-switch in one test — the identity claim — plus
+// the cases the classification and the store-address contract exist for.
+
+/// Where the constructed self-modifying tests put the code the guest
+/// rewrites: the fixture's stand-in for SRAM0's JIT region.
+const SMC: u32 = RAM_BASE + 0x1800;
+
+/// Run one constructed scenario **twice** — the cache on, then off — and
+/// assert the two runs are indistinguishable in everything the invariant
+/// names: the slice end, the pc, the counters, the whole AR file and every
+/// byte of guest memory.
+///
+/// This is `v3-oracle.sh` in miniature, and it is the reason a test here can
+/// assert one number: whatever the assertion says, it says of both legs.
+fn differential(
+    build: impl Fn(&mut TestBus),
+    setup: impl Fn(&mut XtHart<TestBus>),
+    budget: u64,
+) -> (SliceEnd, XtHart<TestBus>, TestBus) {
+    let mut out: Option<(SliceEnd, XtHart<TestBus>, TestBus)> = None;
+    for cache in [true, false] {
+        let (mut hart, mut bus) = fresh();
+        hart.set_block_cache(cache);
+        build(&mut bus);
+        setup(&mut hart);
+        let end = hart.run_slice(&mut bus, budget);
+        assert_eq!(hart.block_cache(), cache);
+        match out.take() {
+            None => out = Some((end, hart, bus)),
+            Some((prev_end, prev_hart, prev_bus)) => {
+                assert_eq!(
+                    end, prev_end,
+                    "the slice ended differently with the cache off"
+                );
+                assert_eq!(hart.pc(), prev_hart.pc(), "pc");
+                assert_eq!(
+                    hart.instruction_count(),
+                    prev_hart.instruction_count(),
+                    "retired instructions"
+                );
+                assert_eq!(hart.cycle_count(), prev_hart.cycle_count(), "cycles");
+                assert_eq!(hart.cpu().ar, prev_hart.cpu().ar, "the AR file");
+                assert_eq!(hart.cpu().window_base, prev_hart.cpu().window_base);
+                assert_eq!(hart.cpu().window_start, prev_hart.cpu().window_start);
+                assert_eq!(hart.ps(), prev_hart.ps(), "PS");
+                assert_eq!(hart.sr().epc[1], prev_hart.sr().epc[1], "EPC1");
+                assert_eq!(hart.sr().exccause, prev_hart.sr().exccause, "EXCCAUSE");
+                assert_eq!(bus.ram, prev_bus.ram, "guest memory");
+                out = Some((prev_end, prev_hart, prev_bus));
+            }
+        }
+    }
+    out.expect("two legs ran")
+}
+
+/// The word that turns `movi a2, <old>` + the first byte of the `ret` after it
+/// into `movi a2, <new>` + that same byte — one aligned word store, which is
+/// what the classic's guest publishes with (SRAM0 is word-only).
+fn movi_publish_word(value: i32) -> u32 {
+    let m = encode(&movi(2, value));
+    let r = encode(&Inst::Nullary(NullaryOp::Ret));
+    assert_eq!(m.len(), 3);
+    u32::from_le_bytes([m[0], m[1], m[2], r[0]])
+}
+
+/// Build the self-modifying scenario: a two-instruction subroutine at [`SMC`]
+/// that the driver rewrites with one word store and then jumps back into.
+///
+/// The driver lives at [`CODE`], well outside the declared code span, exactly
+/// as the classic's publish loop lives in flash `.text` while the buffer it
+/// writes lives in SRAM0.
+fn build_self_modifying(bus: &mut TestBus, after_store: &[Inst]) {
+    asm(bus, SMC, &[movi(2, 111), Inst::Nullary(NullaryOp::Ret)]);
+    let mut driver = vec![s32i(4, 3, 0)];
+    driver.extend_from_slice(after_store);
+    let j_at = CODE + driver.iter().map(|i| encode(i).len() as u32).sum::<u32>();
+    driver.push(Inst::J(SMC as i32 - (j_at as i32 + 4)));
+    asm(bus, CODE, &driver);
+}
+
+fn setup_self_modifying(hart: &mut XtHart<TestBus>) {
+    // a0 is where `ret` goes: back to the driver.
+    hart.cpu_mut().set_a(0, CODE);
+    hart.cpu_mut().set_a(3, SMC);
+    hart.cpu_mut().set_a(4, movi_publish_word(222));
+    hart.set_pc(SMC);
+}
+
+/// **The store-address contract, and the whole reason it exists** (M7 XD3).
+///
+/// A guest that rewrites a subroutine by a word store into executable memory
+/// and jumps into it again runs the NEW bytes — with **no barrier of any kind**
+/// between the store and the jump, because the classic's firmware emits none
+/// (`lp-shader/lpvm-native/src/codemem_esp32.rs:545`). The store is drained at
+/// polling point (c), before the next fetch, so the cached block for the
+/// subroutine is gone by the time the `j` arrives at it.
+#[test]
+fn a_word_store_republishes_a_subroutine_with_no_barrier() {
+    let (end, hart, _) = differential(
+        |bus| {
+            bus.code_span = Some((SMC, SMC + 0x40));
+            build_self_modifying(bus, &[]);
+        },
+        setup_self_modifying,
+        // movi(111), ret, s32i, j, movi(222), ret
+        6,
+    );
+    assert_eq!(end, SliceEnd::BudgetExhausted);
+    assert_eq!(hart.instruction_count(), 6);
+    assert_eq!(
+        hart.cpu().a(2),
+        222,
+        "the second call must run the bytes the store published, not the bytes \
+         the cache decoded before it"
+    );
+}
+
+/// The same publish with an `isync` behind it — the barrier the firmware does
+/// not emit, which must not change the answer.
+#[test]
+fn the_same_publish_through_an_isync() {
+    let (_, hart, _) = differential(
+        |bus| {
+            bus.code_span = Some((SMC, SMC + 0x40));
+            build_self_modifying(bus, &[Inst::Nullary(NullaryOp::Isync)]);
+        },
+        setup_self_modifying,
+        7,
+    );
+    assert_eq!(hart.cpu().a(2), 222);
+    assert_eq!(hart.isync_count(), 1);
+}
+
+/// And with a `wsr.lend` behind it.
+///
+/// ⚠️ **A loop-register write is not a block-cache event** — see
+/// `XtHart::invalidate_translated`. What republishes the subroutine here is
+/// the store, exactly as in the bare case; the `wsr` invalidates the
+/// translated core and nothing else, and this test is what says the answer does
+/// not depend on it.
+#[test]
+fn the_same_publish_through_a_loop_register_write() {
+    let (_, hart, _) = differential(
+        |bus| {
+            bus.code_span = Some((SMC, SMC + 0x40));
+            build_self_modifying(bus, &[wsr(SpecialReg::Lend, 5)]);
+        },
+        setup_self_modifying,
+        7,
+    );
+    assert_eq!(hart.cpu().a(2), 222);
+}
+
+/// A store into a region that is **not** executable publishes nothing, and the
+/// cache is not disturbed by it. The negative half of the contract, and the
+/// reason an interpreted run pays one `bool` test per store and no more.
+#[test]
+fn a_store_into_data_memory_is_not_a_publish() {
+    let (mut hart, mut bus) = fresh();
+    // No code span at all: this fixture's RAM is data as far as the contract
+    // is concerned.
+    asm(&mut bus, CODE, &[s32i(4, 3, 0), nop(), nop(), nop()]);
+    hart.cpu_mut().set_a(3, RAM_BASE + 0x2000);
+    hart.cpu_mut().set_a(4, 0xDEAD_BEEF);
+    hart.set_pc(CODE);
+    hart.run_slice(&mut bus, 4);
+    let stats = hart.block_stats().expect("the cache ran");
+    assert_eq!(
+        stats.range_invalidations, 0,
+        "a store into data memory must not invalidate anything"
+    );
+    assert_eq!(stats.flushes, 0);
+    assert_eq!(bus.word_at(RAM_BASE + 0x2000), 0xDEAD_BEEF);
+}
+
+/// A window overflow raised **inside** a block leaves at exactly that slot,
+/// with the same `EPC1` and the same rotated `WindowBase` a single-stepping
+/// run would have left.
+///
+/// The check runs before the instruction and moves the pc to the handler, so
+/// the block executor sees a pc that is not the one the decoder expected and
+/// leaves. That is the whole mechanism, and it is why a classification mistake
+/// can only make a block shorter.
+#[test]
+fn a_window_overflow_inside_a_block_leaves_at_that_slot() {
+    let (end, hart, _) = differential(
+        |bus| {
+            install_window_handlers(bus);
+            // Five slots that touch only a0..a3, then one that touches a4 —
+            // group 1, and frame 1 is live, so it overflows.
+            asm(
+                bus,
+                CODE,
+                &[
+                    nop(),
+                    nop(),
+                    nop(),
+                    nop(),
+                    nop(),
+                    Inst::Rrr(AluRrr::Or, a(4), a(2), a(2)),
+                    nop(),
+                    nop(),
+                ],
+            );
+        },
+        |hart| {
+            hart.set_ps_raw(PS_WOE | PS_UM);
+            hart.cpu_mut().window_base = 0;
+            hart.cpu_mut().window_start = 0b11;
+            hart.set_pc(CODE);
+        },
+        6,
+    );
+    assert_eq!(end, SliceEnd::BudgetExhausted);
+    assert_eq!(
+        hart.sr().epc[1],
+        CODE + 5 * 3,
+        "EPC1 names the instruction that raised the overflow, not the block"
+    );
+    assert_eq!(
+        hart.cpu().window_base,
+        1,
+        "the check rotated WindowBase before vectoring"
+    );
+    assert!(hart.ps() & PS_EXCM != 0);
+}
+
+/// A trap **inside** a block — a load from unmapped memory — leaves at the
+/// faulting slot with the interpreter's own `EXCCAUSE`, `EXCVADDR` and `EPC1`.
+#[test]
+fn a_load_fault_inside_a_block_leaves_at_that_slot() {
+    let (_, hart, _) = differential(
+        |bus| {
+            asm(
+                bus,
+                CODE,
+                &[nop(), nop(), l32i(2, 3, 0), nop(), nop(), nop()],
+            );
+        },
+        |hart| {
+            hart.set_ps_raw(PS_BOOT);
+            hart.cpu_mut().set_a(3, NOWHERE);
+            hart.set_pc(CODE);
+        },
+        // Exactly to the trap: this fixture installs no handler, so a longer
+        // budget would run whatever the zeroed vector decodes to and overwrite
+        // the state the assertions are about.
+        3,
+    );
+    assert_eq!(hart.sr().exccause, cause::LOAD_STORE_ERROR);
+    assert_eq!(hart.sr().excvaddr, NOWHERE);
+    assert_eq!(hart.sr().epc[1], CODE + 2 * 3);
+}
+
+/// A slice deadline **inside** a block stops on exactly the instruction the
+/// single-stepping loop stops on.
+///
+/// The budget rule (M5 MD3): a block whose whole cost fits runs with no
+/// per-slot compare, and one that does not fit runs slot by slot with the
+/// compare — so the answer is the same either way, which is what the sweep
+/// over every budget from 0 to 9 asserts.
+#[test]
+fn a_deadline_inside_a_block_stops_on_the_same_instruction() {
+    for budget in 0..=9u64 {
+        let (end, hart, _) = differential(
+            |bus| {
+                asm(
+                    bus,
+                    CODE,
+                    &[
+                        addi(2, 2, 1),
+                        addi(2, 2, 1),
+                        addi(2, 2, 1),
+                        addi(2, 2, 1),
+                        addi(2, 2, 1),
+                        addi(2, 2, 1),
+                        addi(2, 2, 1),
+                        addi(2, 2, 1),
+                    ],
+                );
+            },
+            |hart| hart.set_pc(CODE),
+            budget,
+        );
+        assert_eq!(end, SliceEnd::BudgetExhausted);
+        assert_eq!(
+            hart.instruction_count(),
+            budget.min(8),
+            "budget {budget}: the cached and the stepping loops must stop together"
+        );
+        assert_eq!(hart.cpu().a(2), budget.min(8) as u32);
+    }
+}
+
+/// A block ends **at** a `loop`, and the loop-back leaves the block that
+/// follows it.
+///
+/// `loop` writes `LBEG`/`LEND`/`LCOUNT` and the loop-back test in `step` reads
+/// `LEND` on the *next* instruction, so a `loop` is a terminator and the body
+/// starts its own block. When the body's last instruction retires, `step` puts
+/// the pc at `LBEG` rather than straight on, and the block executor leaves.
+#[test]
+fn a_loop_terminates_its_block_and_the_back_edge_leaves_the_body() {
+    let (_, hart, _) = differential(
+        |bus| {
+            // `loop a3, <end>` with a3 = 3: the body is two `addi`s.
+            let body = [addi(2, 2, 1), addi(2, 2, 10)];
+            let body_len: u32 = body.iter().map(|i| encode(i).len() as u32).sum();
+            // `lend = pc + 4 + imm8`, so the field is the body length minus one.
+            let lp = Inst::Loop(LoopOp::Loop, a(3), (body_len - 1) as u8);
+            let after = asm(bus, CODE, &[lp]);
+            asm(bus, after, &body);
+        },
+        |hart| {
+            // The loop-back is computed only while `PS.EXCM` is clear
+            // (RM §3.5.4.1), and a hart at reset has it set.
+            hart.set_ps_raw(PS_BOOT);
+            hart.cpu_mut().set_a(3, 3);
+            hart.set_pc(CODE);
+        },
+        // loop + three passes of two instructions
+        7,
+    );
+    assert_eq!(
+        hart.cpu().a(2),
+        33,
+        "three passes of +1 and +10, which is the loop-back running"
+    );
+    assert_eq!(hart.instruction_count(), 7);
+}
+
+/// `waiti`, `break` and a bus yield each end the slice from **inside** a
+/// cached run with the same [`SliceEnd`] and the same pc the interpreter
+/// gives.
+///
+/// `waiti` is a terminator (it changes `PS.INTLEVEL`), `break` is refused
+/// outright — the machine gets it back untouched and may re-present it — and a
+/// bus yield arrives at polling point (c) after a store. All three are
+/// reachable with the cache on, and all three must read exactly as they do
+/// with it off.
+#[test]
+fn waiti_and_break_end_a_cached_slice_the_same_way() {
+    let (end, hart, _) = differential(
+        |bus| {
+            asm(bus, CODE, &[nop(), nop(), Inst::Waiti(0), nop()]);
+        },
+        |hart| hart.set_pc(CODE),
+        8,
+    );
+    assert_eq!(end, SliceEnd::Wfi);
+    assert_eq!(hart.pc(), CODE + 3 * 3, "waiti advances past itself");
+
+    let (end, hart, _) = differential(
+        |bus| {
+            asm(bus, CODE, &[nop(), nop(), brk(), nop()]);
+        },
+        |hart| hart.set_pc(CODE),
+        8,
+    );
+    assert_eq!(end, SliceEnd::Ebreak { pc: CODE + 2 * 3 });
+    assert_eq!(hart.pc(), CODE + 2 * 3, "break does not advance");
+    assert_eq!(hart.instruction_count(), 2, "and does not retire");
+}
+
+/// An address whose first instruction the decoder refuses is **not cacheable**,
+/// and the interpreter runs it instead — with everything it always did.
+#[test]
+fn a_refused_first_instruction_makes_an_address_uncacheable() {
+    let (mut hart, mut bus) = fresh();
+    // `s32c1i` is refused (it carries the side-band and the poll), so the
+    // block that would start at CODE is empty and `step_once` runs it.
+    asm(
+        &mut bus,
+        CODE,
+        &[
+            Inst::AtomicLs(AtomicLsOp::S32c1i, a(2), a(3), 0),
+            nop(),
+            nop(),
+        ],
+    );
+    hart.cpu_mut().set_a(3, RAM_BASE + 0x2000);
+    hart.set_pc(CODE);
+    hart.run_slice(&mut bus, 3);
+    let stats = hart.block_stats().expect("the cache ran");
+    assert_eq!(hart.instruction_count(), 3);
+    assert_eq!(
+        stats.decodes, 1,
+        "only the block starting at the two nops is cacheable"
+    );
+}
+
+/// `set_cycle_model` invalidates: a block's `max_cycles` is computed against
+/// the model it was built under, and that bound is what lets a block run whole
+/// with no per-slot deadline compare.
+#[test]
+fn changing_the_cycle_model_invalidates_the_cache() {
+    let (mut hart, mut bus) = fresh();
+    asm(&mut bus, CODE, &[nop(), nop(), nop(), nop()]);
+    hart.set_pc(CODE);
+    hart.run_slice(&mut bus, 2);
+    assert_eq!(hart.block_stats().expect("built").flushes, 0);
+    hart.set_cycle_model(CycleModel::Esp32C6);
+    hart.set_pc(CODE);
+    hart.run_slice(&mut bus, 2);
+    assert_eq!(
+        hart.block_stats().expect("built").flushes,
+        1,
+        "a model change must throw the bounds away"
+    );
+    // And a model that does not change must not.
+    hart.set_cycle_model(CycleModel::Esp32C6);
+    hart.set_pc(CODE);
+    hart.run_slice(&mut bus, 2);
+    assert_eq!(hart.block_stats().expect("built").flushes, 1);
+}
+
+/// A clone — the snapshot path — starts with an empty cache and keeps the
+/// flag. The cache is not architectural state, and the clone's bus may hold
+/// different bytes at the same addresses.
+#[test]
+fn a_clone_starts_with_an_empty_cache() {
+    let (mut hart, mut bus) = fresh();
+    asm(&mut bus, CODE, &[nop(), nop(), nop(), nop()]);
+    hart.set_pc(CODE);
+    hart.run_slice(&mut bus, 2);
+    assert!(hart.block_stats().is_some());
+    let twin = hart.clone();
+    assert!(twin.block_stats().is_none(), "a clone starts with no cache");
+    assert!(twin.block_cache(), "and keeps the flag");
+
+    let mut off = XtHart::<TestBus>::new(0, config());
+    off.set_block_cache(false);
+    assert!(!off.clone().block_cache());
+}

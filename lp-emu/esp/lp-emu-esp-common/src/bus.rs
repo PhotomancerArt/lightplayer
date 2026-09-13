@@ -4817,4 +4817,142 @@ mod tests {
             "translated code does loads the bus never sees, so it refuses"
         );
     }
+    // --- the store-address invalidation contract (M7 XD3) -------------------
+
+    /// Nothing is recorded until a hart asks. An interpreted run with no block
+    /// cache and no translated core — the identity leg — pays one `bool` test
+    /// per guest store and nothing else, and this is what says so.
+    #[test]
+    fn nothing_is_recorded_until_a_hart_asks() {
+        let mut bus = bus_with_ram();
+        assert!(!bus.code_stores_watched());
+        bus.write_word(0x4080_0010, 0x1234_5678).unwrap();
+        assert!(!bus.code_dirty(), "the recorder is off");
+        assert!(bus.take_code_dirty().is_empty());
+    }
+
+    /// A guest store into an **executable** region is a publish; a store into
+    /// a data region is not.
+    #[test]
+    fn only_a_store_into_executable_memory_is_a_publish() {
+        let mut bus = bus_with_ram();
+        bus.watch_code_stores(true);
+
+        bus.write_word(0x5000_0010, 0x0bad_c0de).unwrap();
+        assert!(
+            !bus.code_dirty(),
+            "`lp-ram` is not executable, so a store into it publishes nothing"
+        );
+
+        bus.write_word(0x4080_0010, 0x1234_5678).unwrap();
+        assert!(bus.code_dirty());
+        assert_eq!(bus.take_code_dirty(), alloc::vec![(0x4080_0010, 0x4080_0014)]);
+        assert!(!bus.code_dirty(), "and the drain empties it");
+    }
+
+    /// A store that writes back the bytes that were already there publishes
+    /// nothing. The classic's `.bss` zeroing marches over SRAM0 writing zeros
+    /// onto zeros, and every one of those would otherwise be an invalidation.
+    #[test]
+    fn a_store_that_changes_nothing_is_not_a_publish() {
+        let mut bus = bus_with_ram();
+        bus.watch_code_stores(true);
+        bus.write_word(0x4080_0010, 0x1234_5678).unwrap();
+        assert_eq!(bus.take_code_dirty().len(), 1);
+        bus.write_word(0x4080_0010, 0x1234_5678).unwrap();
+        assert!(
+            !bus.code_dirty(),
+            "the same bytes again publish nothing new"
+        );
+    }
+
+    /// Contiguous stores coalesce into one span. A code copy is contiguous, so
+    /// a 6 KiB publish is one span the hart invalidates once rather than
+    /// 1,606 the hart invalidates 1,606 times.
+    #[test]
+    fn contiguous_stores_coalesce_into_one_span() {
+        let mut bus = bus_with_ram();
+        bus.watch_code_stores(true);
+        for i in 0..16u32 {
+            bus.write_word(0x4080_0100 + 4 * i, 0x1000 + i as i32).unwrap();
+        }
+        assert_eq!(bus.take_code_dirty(), alloc::vec![(0x4080_0100, 0x4080_0140)]);
+    }
+
+    /// A store far from the last one starts a new span rather than widening
+    /// the old one into a range that is mostly untouched.
+    #[test]
+    fn a_distant_store_starts_a_new_span() {
+        let mut bus = bus_with_ram();
+        bus.watch_code_stores(true);
+        bus.write_word(0x4080_0100, 1).unwrap();
+        bus.write_word(0x4080_0800, 2).unwrap();
+        assert_eq!(
+            bus.take_code_dirty(),
+            alloc::vec![(0x4080_0100, 0x4080_0104), (0x4080_0800, 0x4080_0804)]
+        );
+    }
+
+    /// **Two harts, one bus.** A store by core 0 into code core 1 has cached
+    /// has to reach core 1's cache as well as core 0's, so the record is per
+    /// hart and the first drain must not hide the write from the second.
+    ///
+    /// Core 0 drains at its own polling point (c), inside its own slice; core
+    /// 1 drains on entry to its next slice, which is the first moment it could
+    /// execute anything.
+    #[test]
+    fn each_hart_hears_about_the_other_harts_code_write() {
+        let mut bus = bus_with_ram();
+        bus.watch_code_stores(true);
+
+        bus.set_hart(0);
+        bus.write_word(0x4080_0010, 0x1234_5678).unwrap();
+        assert!(bus.code_dirty(), "core 0 sees its own publish");
+        assert_eq!(bus.take_code_dirty(), alloc::vec![(0x4080_0010, 0x4080_0014)]);
+        assert!(!bus.code_dirty());
+
+        bus.set_hart(1);
+        assert!(
+            bus.code_dirty(),
+            "core 1 must still hear about it — core 0's drain is not core 1's"
+        );
+        assert_eq!(bus.take_code_dirty(), alloc::vec![(0x4080_0010, 0x4080_0014)]);
+        assert!(!bus.code_dirty());
+    }
+
+    /// The arming request is **sticky**: one hart saying "I do not need this"
+    /// must not stop recording for the other hart on the same bus.
+    #[test]
+    fn arming_the_recorder_is_sticky() {
+        let mut bus = bus_with_ram();
+        bus.watch_code_stores(true);
+        bus.watch_code_stores(false);
+        assert!(bus.code_stores_watched());
+        bus.write_word(0x4080_0010, 0x1234_5678).unwrap();
+        assert!(bus.code_dirty());
+    }
+
+    /// A hart that is held in reset while the other publishes cannot drain, so
+    /// its record is bounded: past the cap the whole list collapses into the
+    /// one span that covers it, which invalidates a superset and is therefore
+    /// always correct.
+    #[test]
+    fn an_undrained_record_collapses_rather_than_growing_without_bound() {
+        let mut bus = bus_with_ram();
+        bus.watch_code_stores(true);
+        // Stores 16 bytes apart never coalesce, so each one is its own span.
+        for i in 0..(MAX_CODE_DIRTY_SPANS as u32 + 8) {
+            bus.write_word(0x4080_0000 + 16 * i, 0x1000 + i as i32).unwrap();
+        }
+        let spans = bus.take_code_dirty();
+        assert!(
+            spans.len() <= MAX_CODE_DIRTY_SPANS,
+            "the record is bounded, got {} spans",
+            spans.len()
+        );
+        let lo = spans.iter().map(|s| s.0).min().unwrap();
+        let hi = spans.iter().map(|s| s.1).max().unwrap();
+        assert_eq!(lo, 0x4080_0000, "and it still covers everything written");
+        assert_eq!(hi, 0x4080_0000 + 16 * (MAX_CODE_DIRTY_SPANS as u32 + 7) + 4);
+    }
 }
