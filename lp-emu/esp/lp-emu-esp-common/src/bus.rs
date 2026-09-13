@@ -527,14 +527,32 @@ pub struct SocBus {
     /// has to reach core 1's cache as well as core 0's, and the first drain
     /// must not hide the write from the second hart. Indexed by
     /// [`code_dirty_slot`](Self::code_dirty_slot).
-    code_dirty: [Vec<(u32, u32)>; MAX_CODE_DIRTY_HARTS],
+    ///
+    /// **Behind a `Box`, and allocated only when a hart arms the record**, so
+    /// a bus that never wants it — every C6 run — carries one pointer rather
+    /// than four `Vec` headers. That is not tidiness: `SocBus` is the hot
+    /// struct on every chip, and 96 bytes of unused fields inside it read as
+    /// **+1.2 % on the C6's `render-basic`** (measured, tight interleave,
+    /// five pairs), which is a tenth of what that chip's own block cache
+    /// bought.
+    code_dirty: Option<Box<[Vec<(u32, u32)>; MAX_CODE_DIRTY_HARTS]>>,
     /// Whether to record the above at all. Off until a hart whose block cache
     /// or translated core is on asks for it ([`Bus::watch_code_stores`]), and
     /// **sticky** thereafter: two harts share one bus, so one of them saying
     /// "I do not need this" must never stop recording for the other. A
-    /// `--no-block-cache` run with no core never arms it and pays one `bool`
-    /// test per guest store and nothing else.
+    /// `--no-block-cache` run with no core never arms it and pays nothing at
+    /// all, because it is not the flag the store path tests — see
+    /// [`watch_code_any`](Self::watch_code_any).
     watch_code_stores: bool,
+    /// `watch_guest_code || watch_code_stores`, maintained by both setters.
+    ///
+    /// The **one** flag the guest store path reads. Testing the two
+    /// separately there costs a second load on every guest store, which is
+    /// the hottest branch in the bus; this keeps that path exactly the one
+    /// `bool` test it was before the store-address contract existed, and the
+    /// two-way split happens inside the cold arm that has already decided the
+    /// store landed in executable memory and changed it.
+    watch_code_any: bool,
 
     /// `--strict-bus` only: the 4 KiB pages the guest has fetched
     /// instructions from.
@@ -666,8 +684,9 @@ impl SocBus {
             guest_code_head: 0,
             guest_code_len: 0,
             watch_guest_code: false,
-            code_dirty: [const { Vec::new() }; MAX_CODE_DIRTY_HARTS],
+            code_dirty: None,
             watch_code_stores: false,
+            watch_code_any: false,
             matrix: Box::new(NoCpuInterrupts),
             request: None,
             memory_cost: None,
@@ -1778,7 +1797,10 @@ impl SocBus {
     #[inline(never)]
     fn note_code_dirty(&mut self, address: u32, len: u32) {
         let end = address.saturating_add(len);
-        for list in &mut self.code_dirty {
+        let lists = self
+            .code_dirty
+            .get_or_insert_with(|| Box::new([const { Vec::new() }; MAX_CODE_DIRTY_HARTS]));
+        for list in lists.iter_mut() {
             match list.last_mut() {
                 Some(span) if address <= span.1 && end >= span.0 => {
                     span.0 = span.0.min(address);
@@ -1801,7 +1823,10 @@ impl SocBus {
     /// last drained? See [`Bus::code_dirty`].
     #[inline]
     pub fn code_dirty_pending(&self) -> bool {
-        !self.code_dirty[self.code_dirty_slot()].is_empty()
+        let slot = self.code_dirty_slot();
+        self.code_dirty
+            .as_ref()
+            .is_some_and(|lists| !lists[slot].is_empty())
     }
 
     /// Whether the store-address record is armed — what a run report and a
@@ -1818,6 +1843,7 @@ impl SocBus {
     /// leaves it off otherwise, so nothing but a `--jit` run pays for it.
     pub fn watch_guest_code(&mut self, on: bool) {
         self.watch_guest_code = on;
+        self.watch_code_any = self.watch_guest_code || self.watch_code_stores;
         if !on {
             self.guest_code_head = 0;
             self.guest_code_len = 0;
@@ -2546,14 +2572,15 @@ impl SocBus {
             if self.strict {
                 self.note_guest_code_write(off, address, len, value);
             }
-            // One test against a `bool` the branch predictor owns, then the
-            // region's own `exec` flag, then — only for a store that lands in
-            // executable memory — the four-byte compare that tells "the guest
+            // **One** test against a `bool` the branch predictor owns — not
+            // two, which is why `watch_code_any` exists — then the region's
+            // own `exec` flag, then, only for a store that lands in
+            // executable memory, the four-byte compare that tells "the guest
             // published something here" from "the guest wrote what was
             // already here". On the classic the only writable executable
             // region is SRAM0, so the second test is false for every stack
             // push and every `.bss` word.
-            if (self.watch_guest_code || self.watch_code_stores)
+            if self.watch_code_any
                 && self.regions[i].exec
                 && self.arena[off..off + len as usize] != value.to_le_bytes()[..len as usize]
             {
@@ -3120,6 +3147,7 @@ impl Bus for SocBus {
     #[inline]
     fn watch_code_stores(&mut self, on: bool) {
         self.watch_code_stores |= on;
+        self.watch_code_any = self.watch_guest_code || self.watch_code_stores;
     }
 
     #[inline]
@@ -3129,7 +3157,10 @@ impl Bus for SocBus {
 
     fn take_code_dirty(&mut self) -> Vec<(u32, u32)> {
         let slot = self.code_dirty_slot();
-        core::mem::take(&mut self.code_dirty[slot])
+        match self.code_dirty.as_mut() {
+            Some(lists) => core::mem::take(&mut lists[slot]),
+            None => Vec::new(),
+        }
     }
 
     fn sideband_or_yield_pending(&self) -> bool {
