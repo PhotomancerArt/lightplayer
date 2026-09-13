@@ -120,9 +120,7 @@ pub fn run() -> ! {
             firmware_dirty: fw_checks::str_is_true(env!("LP_BUILD_DIRTY")),
         },
     );
-    info!(
-        "[inc-shader-compile] cpenable={cpenable:#010x} (armed before the first compile)"
-    );
+    info!("[inc-shader-compile] cpenable={cpenable:#010x} (armed before the first compile)");
     info!(
         "[inc-shader-compile] === incremental shader compile experiment starting \
          ({} KiB heap, JIT out of the heap through SRAM1's I-bus alias — no reserved region) ===",

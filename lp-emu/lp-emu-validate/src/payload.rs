@@ -1570,93 +1570,95 @@ pub static ALL_PAYLOADS: &[Payload] = &[
         // `lpvm-native` and `lp-gfx-lpvm`, so the JIT half existed; what the
         // harness adds is the case list, the per-tick line and the header
         // (`lp-fw/fw-esp32v3/src/tests/shader_compile_incremental.rs`).
-        chips: &[ChipArm {
-            chip: "esp32v3",
-            // No `server`: a `test_*` build sets `fw_harness` and cfg's the
-            // whole app path out. The harness IS the entrypoint.
-            firmware_features: &["test_shader_compile_incremental"],
-            emulator_features: None,
-            // The PRODUCT's link, and the one difference from the C6's
-            // top-level row worth a sentence: the C6 keeps this payload on
-            // `Uart0Spike` because three committed captures are of that
-            // image. The classic has no such history and no such feature —
-            // `spike_uart0_link` does not exist on `fw-esp32v3`, and this
-            // part has no USB-Serial-JTAG peripheral at all.
-            link: Link::Uart0,
-            // `Direct`, not `RomUp`: a harness image is not the shipped
-            // image, there is no committed silicon boot log of it, and the
-            // `boot-log` class — the one class where the two paths differ —
-            // makes no claim here. `boot-idle` is where `RomUp` earns itself.
-            boot: BootPath::Direct,
-            // A USB-host schedule means nothing on a UART0 chip.
-            host_plan: None,
-            // The harness talks and the host only listens.
-            host_script: None,
-            // A harness build never mounts `lpfs`, so nothing formats an
-            // arena and there is no first-boot/second-boot difference to
-            // have. `second_boot` is `boot-idle`'s fact, not the chip's.
-            second_boot: false,
-            sentinel: None,
-        },
-        // The S3's arm (M6 P08, D7 (b)). The same payload for the same
-        // reason the classic has it — and one more that is this chip's
-        // alone: it is the milestone's one payload that drives D2's
-        // **write→execute rule** on a dynamic allocation. The S3 has no
-        // reserved code region: the JIT takes its code buffer out of the
-        // ordinary `esp_alloc` heap, stores the bytes through the D-bus view
-        // at `0x3FC8_xxxx`, and patches every intra-module relocation with
-        // that buffer's I-bus alias at `+0x6F_0000`
-        // (`lpvm_native::exec_addr`'s S3 arm) — so a machine modelling the
-        // two views as two memories emits branch targets the fetch path
-        // cannot reach.
-        //
-        // ⚠️ **Stated no wider than it is**: this harness compiles and
-        // DROPS, it does not render, so the fetched-through-the-alias half
-        // is exercised by the firmware's own `.rwtext` and vectors (which
-        // live in the I-bus view on every boot of every payload) rather than
-        // by the shader compiled here. Executing JIT'd code through the
-        // alias needs a loaded project, and no payload in M6 loads one.
-        //
-        // `fw-esp32s3`'s `server` already pulls `lpvm-native` and
-        // `lp-gfx-lpvm`, so the JIT half existed; the harness adds the case
-        // list, the per-tick line and the header
-        // (`lp-fw/fw-esp32s3/src/tests/incremental_shader_compile/`).
-        ChipArm {
-            chip: "esp32s3",
-            // No `server` named: a `test_*` build sets `fw_harness` and cfg's
-            // the whole app path out. The harness IS the entrypoint.
-            firmware_features: &["test_shader_compile_incremental"],
-            emulator_features: None,
-            // The PRODUCT's link, as on the C6's own shipped image and unlike
-            // the C6's top-level row here: `spike_uart0_link` does not exist
-            // on `fw-esp32s3` and cannot — the console is `jtag-serial` and
-            // `board/esp32s3/usb_connection.rs` says so in as many words.
-            // This chip has no committed capture of an older image to stay
-            // compatible with, so there is nothing pulling it the other way.
-            link: Link::UsbSerialJtag,
-            // `Direct`, for the classic's reason: a harness image is not the
-            // shipped image, there is no committed silicon boot log of it,
-            // and the `boot-log` class — the one class where the two paths
-            // differ — makes no claim here. It is also what lets this arm
-            // RUN today: the harness never mounts a filesystem, so it never
-            // reaches the SPI1 spin that holds `boot-idle` until P06.
-            boot: BootPath::Direct,
-            // The harness talks and the host only listens — but a host that
-            // is not there is not a smaller run on this link, it is no run
-            // (nothing drains the endpoint and the sentinel never arrives).
-            // `attached`, no script, from the first byte: the same state
-            // `espflash --monitor` puts a board in.
-            host_plan: Some(HostPlan {
-                host: "attached",
-                script: "",
-            }),
-            host_script: None,
-            // A harness build never mounts `lpfs`, so nothing formats an
-            // arena and there is no first-boot/second-boot difference to
-            // have. `second_boot` is `boot-idle`'s fact, not the chip's.
-            second_boot: false,
-            sentinel: None,
-        }],
+        chips: &[
+            ChipArm {
+                chip: "esp32v3",
+                // No `server`: a `test_*` build sets `fw_harness` and cfg's the
+                // whole app path out. The harness IS the entrypoint.
+                firmware_features: &["test_shader_compile_incremental"],
+                emulator_features: None,
+                // The PRODUCT's link, and the one difference from the C6's
+                // top-level row worth a sentence: the C6 keeps this payload on
+                // `Uart0Spike` because three committed captures are of that
+                // image. The classic has no such history and no such feature —
+                // `spike_uart0_link` does not exist on `fw-esp32v3`, and this
+                // part has no USB-Serial-JTAG peripheral at all.
+                link: Link::Uart0,
+                // `Direct`, not `RomUp`: a harness image is not the shipped
+                // image, there is no committed silicon boot log of it, and the
+                // `boot-log` class — the one class where the two paths differ —
+                // makes no claim here. `boot-idle` is where `RomUp` earns itself.
+                boot: BootPath::Direct,
+                // A USB-host schedule means nothing on a UART0 chip.
+                host_plan: None,
+                // The harness talks and the host only listens.
+                host_script: None,
+                // A harness build never mounts `lpfs`, so nothing formats an
+                // arena and there is no first-boot/second-boot difference to
+                // have. `second_boot` is `boot-idle`'s fact, not the chip's.
+                second_boot: false,
+                sentinel: None,
+            },
+            // The S3's arm (M6 P08, D7 (b)). The same payload for the same
+            // reason the classic has it — and one more that is this chip's
+            // alone: it is the milestone's one payload that drives D2's
+            // **write→execute rule** on a dynamic allocation. The S3 has no
+            // reserved code region: the JIT takes its code buffer out of the
+            // ordinary `esp_alloc` heap, stores the bytes through the D-bus view
+            // at `0x3FC8_xxxx`, and patches every intra-module relocation with
+            // that buffer's I-bus alias at `+0x6F_0000`
+            // (`lpvm_native::exec_addr`'s S3 arm) — so a machine modelling the
+            // two views as two memories emits branch targets the fetch path
+            // cannot reach.
+            //
+            // ⚠️ **Stated no wider than it is**: this harness compiles and
+            // DROPS, it does not render, so the fetched-through-the-alias half
+            // is exercised by the firmware's own `.rwtext` and vectors (which
+            // live in the I-bus view on every boot of every payload) rather than
+            // by the shader compiled here. Executing JIT'd code through the
+            // alias needs a loaded project, and no payload in M6 loads one.
+            //
+            // `fw-esp32s3`'s `server` already pulls `lpvm-native` and
+            // `lp-gfx-lpvm`, so the JIT half existed; the harness adds the case
+            // list, the per-tick line and the header
+            // (`lp-fw/fw-esp32s3/src/tests/incremental_shader_compile/`).
+            ChipArm {
+                chip: "esp32s3",
+                // No `server` named: a `test_*` build sets `fw_harness` and cfg's
+                // the whole app path out. The harness IS the entrypoint.
+                firmware_features: &["test_shader_compile_incremental"],
+                emulator_features: None,
+                // The PRODUCT's link, as on the C6's own shipped image and unlike
+                // the C6's top-level row here: `spike_uart0_link` does not exist
+                // on `fw-esp32s3` and cannot — the console is `jtag-serial` and
+                // `board/esp32s3/usb_connection.rs` says so in as many words.
+                // This chip has no committed capture of an older image to stay
+                // compatible with, so there is nothing pulling it the other way.
+                link: Link::UsbSerialJtag,
+                // `Direct`, for the classic's reason: a harness image is not the
+                // shipped image, there is no committed silicon boot log of it,
+                // and the `boot-log` class — the one class where the two paths
+                // differ — makes no claim here. It is also what lets this arm
+                // RUN today: the harness never mounts a filesystem, so it never
+                // reaches the SPI1 spin that holds `boot-idle` until P06.
+                boot: BootPath::Direct,
+                // The harness talks and the host only listens — but a host that
+                // is not there is not a smaller run on this link, it is no run
+                // (nothing drains the endpoint and the sentinel never arrives).
+                // `attached`, no script, from the first byte: the same state
+                // `espflash --monitor` puts a board in.
+                host_plan: Some(HostPlan {
+                    host: "attached",
+                    script: "",
+                }),
+                host_script: None,
+                // A harness build never mounts `lpfs`, so nothing formats an
+                // arena and there is no first-boot/second-boot difference to
+                // have. `second_boot` is `boot-idle`'s fact, not the chip's.
+                second_boot: false,
+                sentinel: None,
+            },
+        ],
         display_name: "Incremental shader compile stress",
         fw_check_slug: "shader-compile-stress",
         firmware_features: &["test_shader_compile_incremental"],
@@ -2084,140 +2086,142 @@ pub static ALL_PAYLOADS: &[Payload] = &[
         // grew `fw-esp32v3`'s three harnesses and gave the other three
         // classic payloads (`shader-compile-stress`, `gpio-calibrate`,
         // `cycle-probe`) their arms.
-        chips: &[ChipArm {
-            chip: "esp32v3",
-            // `fw-esp32v3`'s shipped set, on top of the crate's `esp32`
-            // chip feature (`lp-fw/fw-esp32v3/Cargo.toml`). No `memory_fs`
-            // and no `radio`: the classic boots from a modelled flash chip
-            // with a real filesystem, and there is no radio in the shipped
-            // classic image at all.
-            firmware_features: &["server", "float-f32"],
-            emulator_features: None,
-            // The PRODUCT's link. This part has no USB-Serial-JTAG
-            // peripheral, so UART0 over the CH340K is what it ships with —
-            // never `Uart0Spike`, whose cargo feature does not exist here.
-            link: Link::Uart0,
-            // Every silicon capture of this payload is a ROM-up boot: the
-            // real mask ROM banner and the real IDF second-stage bootloader
-            // lines are IN the committed transcript, and `boot-log` is the
-            // one class where the two paths genuinely differ. `Direct`
-            // stays available for iteration (`LP_WALK_BOOT=direct`), and
-            // `rom_up_boot.rs` already gates the two paths' app-entry
-            // equality.
-            boot: BootPath::RomUp {
-                reset_cause: "poweron",
-                strap: "app",
+        chips: &[
+            ChipArm {
+                chip: "esp32v3",
+                // `fw-esp32v3`'s shipped set, on top of the crate's `esp32`
+                // chip feature (`lp-fw/fw-esp32v3/Cargo.toml`). No `memory_fs`
+                // and no `radio`: the classic boots from a modelled flash chip
+                // with a real filesystem, and there is no radio in the shipped
+                // classic image at all.
+                firmware_features: &["server", "float-f32"],
+                emulator_features: None,
+                // The PRODUCT's link. This part has no USB-Serial-JTAG
+                // peripheral, so UART0 over the CH340K is what it ships with —
+                // never `Uart0Spike`, whose cargo feature does not exist here.
+                link: Link::Uart0,
+                // Every silicon capture of this payload is a ROM-up boot: the
+                // real mask ROM banner and the real IDF second-stage bootloader
+                // lines are IN the committed transcript, and `boot-log` is the
+                // one class where the two paths genuinely differ. `Direct`
+                // stays available for iteration (`LP_WALK_BOOT=direct`), and
+                // `rom_up_boot.rs` already gates the two paths' app-entry
+                // equality.
+                boot: BootPath::RomUp {
+                    reset_cause: "poweron",
+                    strap: "app",
+                },
+                // A USB-host schedule means nothing on a UART0 chip.
+                host_plan: None,
+                // **This payload's heartbeat triple is ELICITED on the classic**
+                // — `esp32_memory_stats` is called on a project load/unload/
+                // stop-all or a client `runtime_status`, never from the
+                // five-second server heartbeat — so the C6's shape (boot, wait,
+                // stop on the `[stack]` line) produces NOTHING here unless the
+                // host asks. The asking is the committed script below: exactly
+                // `boot_idle.rs::STOP_ALL`'s bytes on exactly that file's
+                // `LAST_LINE` (`[INIT] I/O task spawned`), one emulated
+                // millisecond later, which is what `stop_all_script()` there
+                // does. `a_committed_stop_all_script_matches_boot_idles` checks
+                // the file against those constants, so the gate and the walk
+                // cannot drift apart quietly.
+                //
+                // What it buys is that silicon and an emulated configuration are
+                // the same **stimulus** and not merely the same image: L1 asked
+                // with these bytes at the desk on 2026-09-10. The one gap, not
+                // widened, is that the emulated send lands 1 ms of guest time
+                // after the trigger where a desk host's select loop polls at
+                // 50 ms — host latency, and the reason nothing in the `timing`
+                // class is compared for this payload.
+                host_script: Some("lp-emu/lp-emu-validate/walks/v3-stop-all.script"),
+                // espflash hard-resets after writing, so every silicon capture
+                // is the boot AFTER the one that formatted `lpfs`. 2032 bytes of
+                // `largest_free` hang on this. See `ChipArm::second_boot`.
+                second_boot: true,
+                // **One line later than the C6's, and on the same stimulus.**
+                // `[stack] heartbeat: high-water` is the FIRST line of the
+                // classic's elicited triple, not the last, so a capture that
+                // stopped there would carry the stack figure and neither the
+                // `[MEM]` nor the `[JIT]` line — the two the memory comparison
+                // is made of. `[JIT] used=` closes the same triple and is what
+                // `lp-emu-esp32v3`'s own gate stops on
+                // (`tests/boot_idle.rs`). Silicon's committed capture contains
+                // both markers, so this is which line the transcript ENDS at,
+                // never a difference in what the two machines were asked.
+                sentinel: Some(Sentinel::Done("[JIT] used=")),
             },
-            // A USB-host schedule means nothing on a UART0 chip.
-            host_plan: None,
-            // **This payload's heartbeat triple is ELICITED on the classic**
-            // — `esp32_memory_stats` is called on a project load/unload/
-            // stop-all or a client `runtime_status`, never from the
-            // five-second server heartbeat — so the C6's shape (boot, wait,
-            // stop on the `[stack]` line) produces NOTHING here unless the
-            // host asks. The asking is the committed script below: exactly
-            // `boot_idle.rs::STOP_ALL`'s bytes on exactly that file's
-            // `LAST_LINE` (`[INIT] I/O task spawned`), one emulated
-            // millisecond later, which is what `stop_all_script()` there
-            // does. `a_committed_stop_all_script_matches_boot_idles` checks
-            // the file against those constants, so the gate and the walk
-            // cannot drift apart quietly.
-            //
-            // What it buys is that silicon and an emulated configuration are
-            // the same **stimulus** and not merely the same image: L1 asked
-            // with these bytes at the desk on 2026-09-10. The one gap, not
-            // widened, is that the emulated send lands 1 ms of guest time
-            // after the trigger where a desk host's select loop polls at
-            // 50 ms — host latency, and the reason nothing in the `timing`
-            // class is compared for this payload.
-            host_script: Some("lp-emu/lp-emu-validate/walks/v3-stop-all.script"),
-            // espflash hard-resets after writing, so every silicon capture
-            // is the boot AFTER the one that formatted `lpfs`. 2032 bytes of
-            // `largest_free` hang on this. See `ChipArm::second_boot`.
-            second_boot: true,
-            // **One line later than the C6's, and on the same stimulus.**
-            // `[stack] heartbeat: high-water` is the FIRST line of the
-            // classic's elicited triple, not the last, so a capture that
-            // stopped there would carry the stack figure and neither the
-            // `[MEM]` nor the `[JIT]` line — the two the memory comparison
-            // is made of. `[JIT] used=` closes the same triple and is what
-            // `lp-emu-esp32v3`'s own gate stops on
-            // (`tests/boot_idle.rs`). Silicon's committed capture contains
-            // both markers, so this is which line the transcript ENDS at,
-            // never a difference in what the two machines were asked.
-            sentinel: Some(Sentinel::Done("[JIT] used=")),
-        },
-        // The S3's arm (M6 P08). The shipped image again — this payload IS
-        // the product build on every chip, which is why it needs no `test_*`
-        // feature anywhere.
-        ChipArm {
-            chip: "esp32s3",
-            // `fw-esp32s3`'s shipped set, on top of the crate's `esp32s3`
-            // chip feature (`lp-fw/fw-esp32s3/Cargo.toml`'s `default`). No
-            // `memory_fs` — the crate declares no such feature — and no
-            // `radio`: there is no ESP-NOW in this image at all (notes Q5).
-            firmware_features: &["server", "float-f32"],
-            emulator_features: None,
-            // The PRODUCT's link, and on this chip there is no other: the
-            // console is `esp-println`'s `jtag-serial` and
-            // `board/esp32s3/usb_connection.rs` states the rule — "the S3 has
-            // no `spike_uart0_link` build, so its link is always the real USB
-            // one". UART0 exists on the part and the mask ROM uses it;
-            // nothing the application writes goes there.
-            link: Link::UsbSerialJtag,
-            // Q6: every silicon capture is a ROM-up boot, the ROM banner is
-            // in the transcript, and `boot-log` is the one class where the
-            // two paths genuinely differ.
-            //
-            // ⚠️ **This arm is written for the image P06 lands, not for
-            // today's machine.** `lp-emu-esp32s3`'s binary direct-loads and
-            // has no `--merged`/`--flash` yet; P06 owns the flash controller
-            // and the ROM-up path, and until it merges a run of this arm
-            // stops in the SPI1 spin after `[INIT] I/O task spawned`
-            // (`lp-emu-esp32s3/tests/boot_idle.rs`,
-            // `the_boot_stops_where_p06_begins`). What is NOT done about
-            // that is weaken the sentinel below: an arm that passes by asking
-            // a smaller question is worse than an arm that waits.
-            boot: BootPath::RomUp {
-                reset_cause: "poweron",
-                strap: "app",
+            // The S3's arm (M6 P08). The shipped image again — this payload IS
+            // the product build on every chip, which is why it needs no `test_*`
+            // feature anywhere.
+            ChipArm {
+                chip: "esp32s3",
+                // `fw-esp32s3`'s shipped set, on top of the crate's `esp32s3`
+                // chip feature (`lp-fw/fw-esp32s3/Cargo.toml`'s `default`). No
+                // `memory_fs` — the crate declares no such feature — and no
+                // `radio`: there is no ESP-NOW in this image at all (notes Q5).
+                firmware_features: &["server", "float-f32"],
+                emulator_features: None,
+                // The PRODUCT's link, and on this chip there is no other: the
+                // console is `esp-println`'s `jtag-serial` and
+                // `board/esp32s3/usb_connection.rs` states the rule — "the S3 has
+                // no `spike_uart0_link` build, so its link is always the real USB
+                // one". UART0 exists on the part and the mask ROM uses it;
+                // nothing the application writes goes there.
+                link: Link::UsbSerialJtag,
+                // Q6: every silicon capture is a ROM-up boot, the ROM banner is
+                // in the transcript, and `boot-log` is the one class where the
+                // two paths genuinely differ.
+                //
+                // ⚠️ **This arm is written for the image P06 lands, not for
+                // today's machine.** `lp-emu-esp32s3`'s binary direct-loads and
+                // has no `--merged`/`--flash` yet; P06 owns the flash controller
+                // and the ROM-up path, and until it merges a run of this arm
+                // stops in the SPI1 spin after `[INIT] I/O task spawned`
+                // (`lp-emu-esp32s3/tests/boot_idle.rs`,
+                // `the_boot_stops_where_p06_begins`). What is NOT done about
+                // that is weaken the sentinel below: an arm that passes by asking
+                // a smaller question is worse than an arm that waits.
+                boot: BootPath::RomUp {
+                    reset_cause: "poweron",
+                    strap: "app",
+                },
+                // A cable in and an application reading, from the first byte —
+                // the same state `espflash --monitor` puts the board in, and the
+                // one the silicon capture is taken in.
+                host_plan: Some(HostPlan {
+                    host: "attached",
+                    script: "",
+                }),
+                // **Elicited here too** — the single fact that most often makes a
+                // `boot-idle` arm read "no first heartbeat" for ever. M6 P04b
+                // (PR #742) put `stack_probe::log_if_grown` and the `[MEM]` /
+                // `[JIT]` `println!`s on `esp32_memory_stats`, which `lpa_server`
+                // calls on a project load/unload/stop-all, a client
+                // `runtime_status` or either side of a compile — and NEVER from
+                // the five-second heartbeat, which takes `heartbeat_memory_stats`
+                // and prints nothing. So this chip has the classic's shape, not
+                // the C6's, and the asking is the committed script: the classic's
+                // bytes on the classic's trigger line, checked against it by
+                // `the_s3_stop_all_script_is_the_classics_stimulus`.
+                host_script: Some("lp-emu/lp-emu-validate/walks/s3-stop-all.script"),
+                // Q9: espflash hard-resets after writing, so every silicon
+                // capture is the boot AFTER the one that formatted `lpfs`. The
+                // classic's rule, unchanged, and it is the classic's evidence
+                // that says how much hangs on it. See `ChipArm::second_boot`.
+                second_boot: true,
+                // The classic's marker, and for the classic's reason: P04b gave
+                // this image the same three lines in the same order, so
+                // `[stack] heartbeat: high-water` is the FIRST line of the
+                // elicited triple and `[JIT] used=` is the last. A capture that
+                // stopped on the C6's marker would carry the stack figure and
+                // neither the `[MEM]` nor the `[JIT]` line — the two the memory
+                // comparison is made of. Verified against the image rather than
+                // assumed: `lp-fw/fw-esp32s3/src/main.rs`'s `esp32_memory_stats`
+                // prints `[MEM] …` and then `[JIT] used=0 …`, both
+                // unconditionally, after `stack_probe::log_if_grown`.
+                sentinel: Some(Sentinel::Done("[JIT] used=")),
             },
-            // A cable in and an application reading, from the first byte —
-            // the same state `espflash --monitor` puts the board in, and the
-            // one the silicon capture is taken in.
-            host_plan: Some(HostPlan {
-                host: "attached",
-                script: "",
-            }),
-            // **Elicited here too** — the single fact that most often makes a
-            // `boot-idle` arm read "no first heartbeat" for ever. M6 P04b
-            // (PR #742) put `stack_probe::log_if_grown` and the `[MEM]` /
-            // `[JIT]` `println!`s on `esp32_memory_stats`, which `lpa_server`
-            // calls on a project load/unload/stop-all, a client
-            // `runtime_status` or either side of a compile — and NEVER from
-            // the five-second heartbeat, which takes `heartbeat_memory_stats`
-            // and prints nothing. So this chip has the classic's shape, not
-            // the C6's, and the asking is the committed script: the classic's
-            // bytes on the classic's trigger line, checked against it by
-            // `the_s3_stop_all_script_is_the_classics_stimulus`.
-            host_script: Some("lp-emu/lp-emu-validate/walks/s3-stop-all.script"),
-            // Q9: espflash hard-resets after writing, so every silicon
-            // capture is the boot AFTER the one that formatted `lpfs`. The
-            // classic's rule, unchanged, and it is the classic's evidence
-            // that says how much hangs on it. See `ChipArm::second_boot`.
-            second_boot: true,
-            // The classic's marker, and for the classic's reason: P04b gave
-            // this image the same three lines in the same order, so
-            // `[stack] heartbeat: high-water` is the FIRST line of the
-            // elicited triple and `[JIT] used=` is the last. A capture that
-            // stopped on the C6's marker would carry the stack figure and
-            // neither the `[MEM]` nor the `[JIT]` line — the two the memory
-            // comparison is made of. Verified against the image rather than
-            // assumed: `lp-fw/fw-esp32s3/src/main.rs`'s `esp32_memory_stats`
-            // prints `[MEM] …` and then `[JIT] used=0 …`, both
-            // unconditionally, after `stack_probe::log_if_grown`.
-            sentinel: Some(Sentinel::Done("[JIT] used=")),
-        }],
+        ],
         display_name: "Shipped image to the idle loop",
         fw_check_slug: "boot-idle",
         // The shipped-image walk as a payload (vision Q1: "shipped-image walks
@@ -3056,8 +3060,8 @@ mod tests {
     fn the_s3_stop_all_script_is_the_classics_stimulus() {
         let root = repo_root();
         let directive = |path: &str| -> String {
-            let text = std::fs::read_to_string(root.join(path))
-                .unwrap_or_else(|e| panic!("{path}: {e}"));
+            let text =
+                std::fs::read_to_string(root.join(path)).unwrap_or_else(|e| panic!("{path}: {e}"));
             let lines: Vec<String> = text
                 .lines()
                 .map(str::trim)
@@ -3081,10 +3085,9 @@ mod tests {
 
         // The trigger is a line this image really prints: the S3 machine's
         // gate pins the whole `[INIT]` chain as `HELLO`, byte for byte.
-        let gate = std::fs::read_to_string(
-            root.join("lp-emu/esp/lp-emu-esp32s3/tests/boot_idle.rs"),
-        )
-        .expect("the S3 machine's boot_idle.rs");
+        let gate =
+            std::fs::read_to_string(root.join("lp-emu/esp/lp-emu-esp32s3/tests/boot_idle.rs"))
+                .expect("the S3 machine's boot_idle.rs");
         assert!(
             gate.contains("[INIT] I/O task spawned"),
             "the S3's trigger line is no longer in the machine gate's pinned hello"
@@ -3098,7 +3101,10 @@ mod tests {
             arm.host_script,
             Some("lp-emu/lp-emu-validate/walks/s3-stop-all.script")
         );
-        assert!(arm.second_boot, "M6 notes Q9 — the classic's rule, unchanged");
+        assert!(
+            arm.second_boot,
+            "M6 notes Q9 — the classic's rule, unchanged"
+        );
     }
 
     /// The S3's two arms (M6 P08, D7 (b)), and the facts a later reader is
