@@ -876,7 +876,10 @@ best-of-N + same-press-ratio table itself. The director drives it with
 ONE background `just emu-lab wait --job <id>` (never a poll), and
 `just emu-lab report <id>`; builds go into the store per sha with
 `just emu-lab stage <sha>` or `scripts/emu/bench-web.sh --stage-into
-~/.photomancer/emu-lab`. Results land in `~/.photomancer/emu-lab/results/`
+~/.photomancer/emu-lab` — and the newest `origin/main` puts itself there,
+staged by a third launchd agent every ten minutes
+(`scripts/emu/lab/restage-main.sh`, `just emu-lab logs restage`), so
+queueing the current head takes no staging step at all. Results land in `~/.photomancer/emu-lab/results/`
 (the rig's own `result-*.json` shape, `bench-web.sh --collect <dir>`).
 **Agents never open the lab page themselves**: a hidden tab is refused by
 design, and a headless browser's number is a desk number. Phone numbers
