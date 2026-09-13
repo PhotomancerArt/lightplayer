@@ -1,6 +1,7 @@
 ---
-status: open      # a fix is in flight elsewhere (W5), not on this branch — do not claim fixed
+status: fixed
 found: 2026-09-11      # live-debugging, the C6-in-tab plan's G2
+fixed: 0560344fa       # #715 via #728 (P5b's merge, which carried #715)
 area: lpa-studio-web (public/lpa-link)
 class: partial-knowledge-loss
 related: [lp2025/2026-09-10-1707-c6-emulator-in-tab/G2-handoff.md]
@@ -51,16 +52,29 @@ still holds the file's sync access handle when the delete runs, and
 `removeEntry` fails silently on a file with an open handle, exactly the
 kind of failure the swallowed `.catch` would hide.
 
-**Fix** — not made here. `emulator_worker.js` and `emulator_tab.js` are
-files another effort (W5, part of
-`lp2025/2026-09-11-0911-tab-emulator-loose-ends`) is editing concurrently
-with this plan's P5; this phase was directed not to touch them. **Do not
-treat this as fixed** until that work lands and this entry is updated.
+**Fix** — landed 2026-09-13, PR #715 (W5), merged via #728 (`0560344fa`).
+The cause was exactly the plausible-and-untested guess above: the worker
+holds a sync access handle on the board's flash image for as long as the
+board is alive, `removeEntry` refuses with `NoModificationAllowedError`
+while that handle is open, and the bare `.catch(() => {})` swallowed the
+rejection and turned it into a false success. The fix, in the two files
+above:
 
-**Regression coverage** — none yet; whoever fixes this should stop
-swallowing the rejection (or explicitly close/release the sync access
-handle before the delete) and add a test that a Forget after Ready leaves no
-file behind.
+- The worker's removal is now `removeFlashImage(key)` — it rejects by name
+  when a file existed and did not go, rather than swallowing the error.
+- `emulator_tab.js`'s `deleteFlash(key)` ends any live worker holding that
+  key first, **awaiting** the `destroy` reply the worker sends only after
+  it has written the chip back and closed the handle, then removes the
+  file — sequencing, not a retry loop.
+
+Verified in headless Chrome, real OPFS: before the fix, `deleteFlash` after
+Forget resolved and the image stayed; after, `worker.removeFlashImage`
+rejects `NoModificationAllowedError` while the handle is open, and
+`tab.deleteFlash` (the Forget verb) resolves `true` and the image is gone.
+
+**Regression coverage** — the before/after OPFS proof above (`node`,
+headless Chrome, real `public/lpa-link/*.js`); no Rust test, because no Rust
+changed.
 
 **Lesson** — a bare `.catch(() => {})` on a delete is worse than no error
 handling at all: it converts "this operation failed and here's why" into

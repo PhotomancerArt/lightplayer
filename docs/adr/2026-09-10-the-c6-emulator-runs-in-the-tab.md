@@ -303,9 +303,25 @@ and which core a board runs" section (both landed on `main` at #728's merge,
   4.6 s of wall; 8 s old costs 46 s. Escalated (E4); fix brief at
   `lp2025/2026-09-11-0911-tab-emulator-loose-ends/w4-reset-replay-fix.md`,
   not dispatched. See the defect entry below.
+
+  > **Amended 2026-09-13 — CLOSED for the C6 by #737 (`4940c2b53`).**
+  > `stop_cycle` now rebases to `now + remaining` after a successful
+  > `reboot()`, so a reset inside a slice costs at most that slice's
+  > remaining budget. **The classic (`lp-emu-esp32v3`'s `Machine::run_until`,
+  > `machine.rs:2717`) has the identical, unrebased shape and is NOT
+  > fixed** — reported to the Xtensa director, not this plan's to fix. See
+  > the defect entry, now closed for the C6 only.
 - **Forget leaves the OPFS image behind.** `deleteFlash` resolves and
   deletes nothing; a sibling effort (W5) is in flight on it as of this ADR.
   Not claimed fixed here. See the defect entry below.
+
+  > **Amended 2026-09-13 — CLOSED by #715, merged via #728 (`0560344fa`).**
+  > The cause was the held sync access handle: `removeEntry` refused with
+  > `NoModificationAllowedError` while the worker held it, and a bare
+  > `.catch(() => {})` swallowed the rejection. Fixed by ending the worker
+  > (awaiting its `destroy` reply) before removing the file, and by
+  > rejecting by name on failure instead of swallowing it. See the defect
+  > entry, now closed.
 - **The tab walk's upload step flaked once in three runs** (`WentQuiet`
   ~30 s mid-push, heartbeats alive) — undiagnosed; filed as a defect, not
   chased in this phase.

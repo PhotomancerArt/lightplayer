@@ -1,6 +1,7 @@
 ---
-status: open
+status: fixed
 found: 2026-09-11      # live-debugging, the tab emulator's loose-ends plan (#710, "W3 — where it stands")
+fixed: 4940c2b53       # #737, C6 only — the classic (lp-emu-esp32v3) has the same shape, not fixed
 area: lp-emu/esp/lp-emu-esp32c6
 class: assumed-context
 related: [lp2025/2026-09-11-0911-tab-emulator-loose-ends/w4-reset-replay-fix.md, lp2025/2026-09-10-1707-c6-emulator-in-tab/G1-handoff.md]
@@ -51,18 +52,27 @@ masked by it: the worker's own "micros went backwards" reboot detection and
 `EmulatorPort`'s `cyc`-goes-backwards detection never fire on this path,
 because the replay keeps the clock monotonic throughout.
 
-**Fix** — not made here (this plan's P5 is docs/ADR/cleanup only, and the
-file is `lp-emu/**`, which this plan's P1 is the only phase allowed to
-touch — D27). A fix brief is drafted and **not yet dispatched**:
-`lp2025/2026-09-11-0911-tab-emulator-loose-ends/w4-reset-replay-fix.md`
-(escalation E4). Its shape: rebase `stop_cycle` to `now + remaining` when the
-clock is zeroed by a reboot, so a reboot inside a slice consumes at most that
-slice's remaining budget, never the board's prior lifetime again.
+**Fix** — landed 2026-09-13, PR #737 (merge `4940c2b53`), the escalated brief
+(E4) dispatched: `stop_cycle` becomes `mut`; the reset arm reads what is
+**left** of the budget while the old clock origin still stands, then rebases
+the bound onto the new origin after a successful `reboot()`. `old + budget`
+→ `budget`; no `emu_*` ABI number was added. Measured on the shipping CLI
+binary: a `--usb-script "100 reset"` slice that used to stop after
+16 160 000 cycles now stops after 160 000.
 
-**Regression coverage** — none yet; the fix brief specifies a native test in
-`machine.rs`'s test module (or `tests/tab_surface.rs`) that ages a board,
-resets it inside a slice, and asserts the cycles consumed are `≈ budget`, not
-`old + budget`.
+**C6 only — the classic has the same shape and is NOT fixed.**
+`lp-emu/esp/lp-emu-esp32v3/src/machine.rs`'s `Machine::run_until` (`:2717`,
+`let stop_cycle = stop.stop_cycle.unwrap_or(u64::MAX);`) is never rebased
+after `Machine::reboot`'s `self.restore(&power_on)` zeroes the clock — the
+identical defect, unfixed. #737 reported it to the Xtensa director rather
+than fixing it there; it is not this entry's fix and not closed by it.
+
+**Regression coverage** — `lp-emu-esp32c6`'s
+`machine::tests::a_reboot_inside_a_slice_consumes_the_budget_and_not_the_boards_lifetime`
+ages a board 100 ms of guest time, resets it a quarter of the way into a 1 ms
+slice, and asserts the slice consumes `≈ budget` (120 000 cycles — the
+100 ms already spent — 40 000, subtracted from the 160 000-cycle budget),
+never `old + budget` (16 160 000).
 
 **Lesson** — an absolute stop bound computed before a loop starts is only
 safe if nothing inside the loop can change what "zero" means. A reboot
