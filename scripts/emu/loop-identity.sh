@@ -11,8 +11,24 @@
 #   frames   `--dump-frames` — what the WS281x decoder read off the pad
 #   uart     `--uart0` — what the firmware said
 #   trap     `--trap-log` — every trap the hart TOOK (P1; see below)
-#   trace    a second, 20 ms run with `--trace` — every MMIO access and every
+#   trace    a second, 500 ms run with `--trace` — every MMIO access and every
 #            interrupt-line transition
+#
+# # The trace window is 500 ms because a 20 ms one never reached the RMT
+#
+# Until 2026-09-13 the trace leg was a **20 ms** window, and that column was
+# not evidence about the peripheral it was most often read for. On
+# `render-basic` t2 the WS281x transmitter has not started a frame by 20 ms:
+# the first `RMT ch0 start` is at cycle **36,188,821 ≈ 452 ms**, so a 20 ms
+# trace stops 432 ms short of it. P1d (`G-LOOP0c-gate.md`) read `trace same`
+# on the R5/R5a rungs while UART, frames, pin log and trap log all said
+# `DIFF` — the trace run had simply never touched the RMT.
+#
+# At 500 ms the trace leg covers the same window as the other four readings
+# and contains all **11** `RMT ch0 start` lines of the cell. It costs 22 s of
+# wall and 5.3 s of CPU per binary (measured 2026-09-13 at loadavg 231 — a
+# quiet desk is faster, not slower) and writes a **66 MB** `.trace` per side
+# into the out-dir, which is the price of the column meaning something.
 #
 # # Why the interpreter leg, and why against the previous head
 #
@@ -81,11 +97,12 @@ legs() {
         --pin-log "file:$stem.pin" \
         ${trap_args[@]+"${trap_args[@]}"} \
         >"$stem.out" 2>"$stem.err"
-    # 20 ms with the trace: every access and every line transition.
-    "$bin" --elf "$elf" --time-grade t2 --timeout 20ms --wall-timeout 1800 \
+    # The same 500 ms with the trace: every access and every line transition.
+    # Same window as the leg above — see the header on why it is not 20 ms.
+    "$bin" --elf "$elf" --time-grade t2 --timeout 500ms --wall-timeout 1800 \
         --interpreter \
-        --uart0 "file:$stem-20ms.uart" --trace --trace-file "$stem.trace" \
-        >"$stem-20ms.out" 2>"$stem-20ms.err"
+        --uart0 "file:$stem-trace.uart" --trace --trace-file "$stem.trace" \
+        >"$stem-trace.out" 2>"$stem-trace.err"
 }
 
 echo "loop-identity: before = $before" >&2
@@ -129,6 +146,11 @@ echo "n: $(wc -l <"$out/after.pin" | tr -d ' ') pin edges, \
 $(wc -l <"$out/after.jsonl" | tr -d ' ') frames, \
 $(wc -l <"$out/after.trace" | tr -d ' ') trace lines\
 $( [[ -f "$out/after.trap" ]] && echo ", $(wc -l <"$out/after.trap" | tr -d ' ') traps")"
+# The trace column's own liveness check. A `0` here means the window closed
+# before the transmitter started and `trace same` is boot-only — which is
+# exactly the state this leg was in until 2026-09-13.
+echo "trace reaches the RMT: \
+$(grep -c 'RMT ch0 start' "$out/after.trace" || true) 'RMT ch0 start' lines in the after-trace"
 echo "artefacts: $out/"
 
 if (( fail )); then

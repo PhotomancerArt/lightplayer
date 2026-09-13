@@ -2998,6 +2998,114 @@ mod tests {
         assert_eq!(r.words(1).len(), 49);
     }
 
+    /// The pad each TX channel's signal is routed to in the two-channel test.
+    const TWO_CH_PADS: [lp_emu_esp_common::PadId; 2] =
+        [lp_emu_esp_common::PadId(8), lp_emu_esp_common::PadId(9)];
+
+    /// Start TX on `ch` with one memory block, wrap on, in one write — the
+    /// shape `channel_one_has_its_own_window_engine_and_interrupt_bits` uses,
+    /// applied to either channel so the two are started symmetrically.
+    fn start_ch(sb: &mut Sandbox, r: &mut Rmt, ch: usize) {
+        let c = sb.read(r, CH_TX_CONF0[ch]);
+        sb.write(
+            r,
+            CH_TX_CONF0[ch],
+            c | CONF_MEM_TX_WRAP_EN | CONF_MEM_RD_RST | CONF_TX_START | CONF_CONF_UPDATE,
+        );
+    }
+
+    /// Both TX channels sending the same word at the same cycles, with
+    /// `first` started first. Returns the pin log as the fabric recorded it.
+    fn two_channel_edges(first: usize) -> Vec<lp_emu_esp_common::pins::Edge> {
+        let (mut sb, mut r, _) = rig();
+        for ch in 0..2 {
+            sb.pins.route(
+                TWO_CH_PADS[ch],
+                lp_emu_esp_common::pins::RouteSource::Signal(signal_of(ch), false),
+                false,
+                0,
+            );
+            sb.pins.set_gpio_enable(TWO_CH_PADS[ch], true, 0);
+            let conf =
+                (1 << CONF_DIV_CNT_SHIFT) | (1 << 6) | (1 << CONF_MEM_SIZE_SHIFT) | (1 << 20);
+            sb.write(&mut r, CH_TX_CONF0[ch], conf);
+            // Four identical words and a stop word, in each channel's block.
+            let base = 48 * ch as u32;
+            fill(&mut sb, &mut r, base, base + 4, ZERO);
+            sb.write(&mut r, ram_off(base + 4), 0);
+            sb.write(&mut r, CH_TX_LIM[ch], 24);
+        }
+        sb.write(&mut r, INT_ENA, 0x333);
+        start_ch(&mut sb, &mut r, first);
+        start_ch(&mut sb, &mut r, 1 - first);
+        let mut edges = sb.pins.take_edges();
+        for step in 1..=6u64 {
+            sb.run_to(&mut r, step * WORD_CYCLES);
+            edges.extend(sb.pins.take_edges());
+        }
+        edges
+    }
+
+    /// (g) **Two TX channels: the pin log is in call order, and call order is
+    /// the scheduler's dispatch order — not `(at, seq)` order over the
+    /// edges.** The trap `vision.md` §2 registered and P1d could not test,
+    /// because no product image drives two TX channels (`render-basic` and
+    /// `render-rocaille` start ch0 only).
+    ///
+    /// It is worse than "two edges at one cycle tie": `push_pulse` emits
+    /// **both halves of a word at the fetch**, each stamped with its own true
+    /// cycle, so a second channel's word is appended *behind* the first
+    /// channel's already-future edge. The `at` column of the combined log is
+    /// therefore not monotone at all — it reads 0, 64, 0, 64, 200, 264, …
+    ///
+    /// Nothing downstream sorts it: `Machine::drain_pins` writes
+    /// `Fabric::take_edges` straight into `--pin-log`. What saves the product
+    /// path is that every consumer is **per pad** — each pad's own edges are
+    /// strictly increasing, and a `Ws281xDecoder` exists per pad.
+    #[test]
+    fn two_tx_channels_put_the_pin_log_in_dispatch_order_not_at_order() {
+        let a = two_channel_edges(0);
+        assert_eq!(
+            a,
+            two_channel_edges(0),
+            "the same two-channel run gives the same pin log twice"
+        );
+
+        // Each pad's own edges are strictly increasing in `at` — this is the
+        // invariant every consumer actually depends on.
+        for pad in TWO_CH_PADS {
+            let ats: Vec<Cycles> = a.iter().filter(|e| e.pad == pad).map(|e| e.at).collect();
+            assert_eq!(ats.len(), 8, "four words, two halves each, on {pad:?}");
+            assert!(
+                ats.windows(2).all(|w| w[0] < w[1]),
+                "pad {pad:?} is out of order: {ats:?}"
+            );
+        }
+
+        // The combined stream is not. Both of ch0's first-word edges precede
+        // both of ch1's, and ch1's first edge is back-dated to cycle 0.
+        let head: Vec<(Cycles, u8, bool)> =
+            a.iter().take(4).map(|e| (e.at, e.pad.0, e.level)).collect();
+        assert_eq!(
+            head,
+            vec![(0, 8, true), (64, 8, false), (0, 9, true), (64, 9, false)],
+            "a whole word of ch0, then a whole word of ch1 at the same cycles"
+        );
+        assert!(
+            a.windows(2).any(|w| w[0].at > w[1].at),
+            "the `at` column is not monotone"
+        );
+
+        // Start ch1 first and the wire is identical while the log's order
+        // flips: the order is the scheduler's dispatch order, nothing else.
+        let b = two_channel_edges(1);
+        assert_ne!(a, b, "the log's order follows which channel started first");
+        let (mut sa, mut sb_) = (a.clone(), b.clone());
+        sa.sort_by_key(|e| (e.at, e.pad.0));
+        sb_.sort_by_key(|e| (e.at, e.pad.0));
+        assert_eq!(sa, sb_, "…and the wire itself is the same either way");
+    }
+
     // ---- the receiver (M2 P3) -------------------------------------------
 
     /// The pad the loopback's receiver reads, and the RX channel that reads
