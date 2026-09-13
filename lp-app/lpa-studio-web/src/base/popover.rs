@@ -1,6 +1,6 @@
 use dioxus::prelude::*;
 use std::cell::{Cell, RefCell};
-use std::rc::Rc;
+use std::rc::{Rc, Weak};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use wasm_bindgen::{JsCast, closure::Closure};
 
@@ -168,6 +168,9 @@ pub fn PopoverButton(
     let position = use_signal(|| PopoverPosition::hidden(placement));
     let auto_update = use_hook(|| Rc::new(RefCell::new(None::<PopoverAutoUpdate>)));
     let panel_resize = use_hook(|| Rc::new(RefCell::new(None::<PanelResizeObserver>)));
+    // The stabilization re-measure timers in flight, owned by this scope so
+    // teardown cancels them (see [`ArmedMeasures`]).
+    let armed_measures = use_hook(|| Rc::new(RefCell::new(ArmedMeasures::default())));
     let gradient_id = use_hook(|| {
         let id = NEXT_POPOVER_ID.fetch_add(1, Ordering::Relaxed);
         format!("ux-popover-grad-{id}")
@@ -249,6 +252,7 @@ pub fn PopoverButton(
     let layer_id_for_effect = layer_id.clone();
     let auto_update_for_effect = auto_update.clone();
     let panel_resize_for_effect = panel_resize.clone();
+    let armed_for_effect = armed_measures.clone();
     let panel_resize_for_panel_mount = panel_resize.clone();
     let measured_id_for_layer_mount = measured_id.clone();
     let panel_id_for_layer_mount = panel_id.clone();
@@ -279,6 +283,7 @@ pub fn PopoverButton(
                 position,
                 placement,
                 stabilized,
+                &armed_for_effect,
             );
             ensure_popover_auto_update(
                 auto_update_for_effect.clone(),
@@ -312,6 +317,7 @@ pub fn PopoverButton(
                 position,
                 placement,
                 stabilized,
+                Rc::downgrade(&armed_for_effect),
             );
         } else {
             auto_update_for_effect.borrow_mut().take();
@@ -339,6 +345,9 @@ pub fn PopoverButton(
         hide_popover_layer(&layer_id_for_drop);
         auto_update.borrow_mut().take();
         panel_resize.borrow_mut().take();
+        // A stabilization timer that fires after this point would measure
+        // into signals this scope has already dropped.
+        armed_measures.borrow_mut().cancel_all();
     });
 
     rsx! {
@@ -600,6 +609,10 @@ pub fn IconPopoverButton(
     unused_variables,
     reason = "host builds have no font loading; the wasm body consumes the args"
 )]
+#[allow(
+    clippy::too_many_arguments,
+    reason = "One measurement pass's inputs plus the timer holder"
+)]
 fn remeasure_after_fonts_ready(
     trigger_id: String,
     panel_id: String,
@@ -608,6 +621,7 @@ fn remeasure_after_fonts_ready(
     position: Signal<PopoverPosition>,
     placement: PopoverPlacement,
     stabilized: Signal<bool>,
+    armed: Weak<RefCell<ArmedMeasures>>,
 ) {
     #[cfg(not(target_arch = "wasm32"))]
     return;
@@ -626,21 +640,39 @@ fn remeasure_after_fonts_ready(
             return;
         };
         wasm_bindgen_futures::spawn_local(async move {
-            if wasm_bindgen_futures::JsFuture::from(promise).await.is_ok() {
-                measure_trigger_with_stabilization(
-                    trigger_id,
-                    panel_id,
-                    panel_size,
-                    trigger_rect,
-                    position,
-                    placement,
-                    stabilized,
-                );
+            if wasm_bindgen_futures::JsFuture::from(promise).await.is_err() {
+                return;
             }
+            // The holder is a hook value of the popover's scope, so failing
+            // to upgrade IS the scope being gone — and this future is not a
+            // Dioxus task, so nothing else would have cancelled it.
+            let Some(armed) = armed.upgrade() else {
+                return;
+            };
+            measure_trigger_with_stabilization(
+                trigger_id,
+                panel_id,
+                panel_size,
+                trigger_rect,
+                position,
+                placement,
+                stabilized,
+                &armed,
+            );
         });
     }
 }
 
+/// Run a stabilization round: measure now, then re-measure after each
+/// [`STABILIZE_MEASURE_DELAYS_MS`] delay.
+///
+/// `armed` owns the round's timers. A new round supersedes the previous one
+/// (its late re-measures would only re-confirm what this round is about to
+/// measure), and the popover's teardown cancels whatever is still pending.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "One measurement pass's inputs plus the timer holder"
+)]
 fn measure_trigger_with_stabilization(
     trigger_id: String,
     panel_id: String,
@@ -649,10 +681,17 @@ fn measure_trigger_with_stabilization(
     position: Signal<PopoverPosition>,
     placement: PopoverPlacement,
     mut stabilized: Signal<bool>,
+    armed: &Rc<RefCell<ArmedMeasures>>,
 ) {
-    if *stabilized.peek() {
+    // Deferred callers can land after the popover's scope is gone; every
+    // signal here died with it. See [`measure_trigger_once`].
+    let Ok(already_stable) = stabilized.try_peek().map(|value| *value) else {
+        return;
+    };
+    if already_stable {
         stabilized.set(false);
     }
+    armed.borrow_mut().cancel_all();
     measure_trigger_once(
         trigger_id.clone(),
         panel_id.clone(),
@@ -672,6 +711,7 @@ fn measure_trigger_with_stabilization(
             placement,
             (delay_ms == last_delay).then_some(stabilized),
             delay_ms,
+            armed,
         );
     }
 }
@@ -684,6 +724,18 @@ fn measure_trigger_once(
     position: Signal<PopoverPosition>,
     placement: PopoverPlacement,
 ) {
+    // Every path into here is deferred — a stabilization timer, the
+    // fonts-ready future, the rAF the scroll/resize/panel observers coalesce
+    // into — so any of them can land after the popover's component scope has
+    // gone away, and these signals die with that scope. The timers are
+    // cancelled at teardown ([`ArmedMeasures`]) and the observers unsubscribe
+    // on Drop, but a frame the browser has ALREADY queued cannot be recalled:
+    // that one used to read a dropped signal and panic
+    // (`Dropped(ValueDroppedError)`). One liveness check covers all four —
+    // they share the one scope, so either all are alive or none are.
+    if panel_size.try_peek().is_err() {
+        return;
+    }
     let current_panel_size = panel_size_by_id(&panel_id).or_else(|| panel_size());
     if let Some(size) = current_panel_size {
         let mut panel_size = panel_size;
@@ -705,6 +757,42 @@ fn measure_trigger_once(
     );
 }
 
+/// The stabilization timers a popover currently has in flight.
+///
+/// A `setTimeout` outlives the component that armed it. The re-measures are
+/// armed 50 ms and 250 ms after an open, so a popover torn down inside that
+/// window — a panel swapped out from under an open picker — used to fire a
+/// measurement into signals its scope had already dropped, panicking the
+/// read. Holding the handles here (instead of `forget()`-ing the closure and
+/// losing the id) lets teardown cancel them, and frees the closure with
+/// them. Defect:
+/// `docs/defects/2026-09-13-a-stabilization-timer-outlived-the-popover.md`.
+#[derive(Default)]
+struct ArmedMeasures {
+    timers: Vec<ArmedTimer>,
+}
+
+impl ArmedMeasures {
+    fn cancel_all(&mut self) {
+        self.timers.clear();
+    }
+}
+
+/// One armed `setTimeout`, cancelled when dropped. A timer that already
+/// fired drops just as safely: `clearTimeout` on a spent id is a no-op.
+struct ArmedTimer {
+    window: web_sys::Window,
+    handle: i32,
+    /// Held so the callback stays alive until it fires or is cancelled.
+    _callback: Closure<dyn FnMut()>,
+}
+
+impl Drop for ArmedTimer {
+    fn drop(&mut self) {
+        self.window.clear_timeout_with_handle(self.handle);
+    }
+}
+
 #[allow(
     clippy::too_many_arguments,
     reason = "Small DOM timer callback factory"
@@ -718,6 +806,7 @@ fn schedule_delayed_measure_trigger(
     placement: PopoverPlacement,
     stabilized: Option<Signal<bool>>,
     delay_ms: i32,
+    armed: &Rc<RefCell<ArmedMeasures>>,
 ) {
     let Some(window) = web_sys::window() else {
         // No timers available; don't leave story captures waiting forever.
@@ -727,7 +816,7 @@ fn schedule_delayed_measure_trigger(
         return;
     };
 
-    let callback = Closure::once(move || {
+    let callback: Closure<dyn FnMut()> = Closure::once(move || {
         measure_trigger_once(
             trigger_id,
             panel_id,
@@ -737,19 +826,25 @@ fn schedule_delayed_measure_trigger(
             placement,
         );
         // The final stabilization pass has run: measurements are trustworthy
-        // now, so story captures may proceed.
+        // now, so story captures may proceed. Same liveness rule as
+        // `measure_trigger_once`: a cancelled timer never reaches this line,
+        // and the check keeps that guarantee local to the write.
         if let Some(mut stabilized) = stabilized {
-            stabilized.set(true);
+            let scope_alive = stabilized.try_peek().is_ok();
+            if scope_alive {
+                stabilized.set(true);
+            }
         }
     });
-    if window
-        .set_timeout_with_callback_and_timeout_and_arguments_0(
-            callback.as_ref().unchecked_ref(),
-            delay_ms,
-        )
-        .is_ok()
-    {
-        callback.forget();
+    if let Ok(handle) = window.set_timeout_with_callback_and_timeout_and_arguments_0(
+        callback.as_ref().unchecked_ref(),
+        delay_ms,
+    ) {
+        armed.borrow_mut().timers.push(ArmedTimer {
+            window,
+            handle,
+            _callback: callback,
+        });
     }
 }
 
@@ -841,6 +936,14 @@ fn spawn_measure_trigger_element(
     placement: PopoverPlacement,
     attempt: u8,
 ) {
+    // Retries hop frames, so this can land after the scope is gone even
+    // though [`measure_trigger_once`] checked before the first attempt. A
+    // missing element is NOT that check: in anchored mode the measured
+    // element belongs to a component that outlives this popover, so the rect
+    // still resolves and the writes below would land on dropped signals.
+    if trigger_rect.try_peek().is_err() {
+        return;
+    }
     let Some(anchor) = trigger_rect_by_id(&trigger_id) else {
         if attempt < MEASURE_RETRY_LIMIT {
             schedule_measure_trigger_element(
