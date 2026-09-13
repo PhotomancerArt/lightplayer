@@ -3,9 +3,12 @@
 #
 #   just bench-emu-web              # build, stage, serve on the LAN
 #   just bench-emu-web --collect    # print every uploaded result-*.json as a table
+#   scripts/emu/bench-web.sh --collect ~/.photomancer/emu-lab/results   # …over any directory of them (the perf lab's)
 #   scripts/emu/bench-web.sh --no-build       # skip the wasip1 rebuild
 #   scripts/emu/bench-web.sh --no-serve       # build and stage only
 #   scripts/emu/bench-web.sh --port 12345     # serve on a specific port instead
+#   scripts/emu/bench-web.sh --stage-into ~/.photomancer/emu-lab              # build, then stage into the perf lab's store, no serve
+#   scripts/emu/bench-web.sh --stage-into ~/.photomancer/emu-lab --from-stage <dir>   # import another tree's staged dir instead
 #
 # A stage REFUSES an `emu.wasm` older than HEAD's commit (M7 P9): the manifest
 # stamps HEAD's sha at staging time, so an older module would be published
@@ -36,6 +39,14 @@
 # and prints a table: device (from the UA), engine guess, image, grade, wall
 # seconds, instr/s and the real-time ratio.
 #
+# `--stage-into <lab-home>` fills the perf lab's per-sha build store instead
+# of serving (scripts/emu/lab/README.md): `<lab-home>/builds/<id>/` gets the
+# same file list as the stage, the manifest gains `build.id`, and each ELF
+# becomes a relative symlink into `<lab-home>/images/<sha12>.elf` so four
+# builds share one copy of 36 MB of firmware (D15, D16). `--from-stage <dir>`
+# imports a directory some OTHER checkout's own `--no-serve` produced — that
+# is how a head older than the flag gets into the store.
+#
 # Emulated microseconds never gate anything (AGENTS.md "The ESP32-C6
 # emulator"): transcripts decide, probes report.
 set -euo pipefail
@@ -52,25 +63,50 @@ do_build=1
 do_collect=0
 do_serve=1
 port=""
+stage_into=""
+from_stage=""
+collect_dir=""
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        --collect) do_collect=1; shift ;;
+        --collect)
+            do_collect=1; shift
+            # An optional directory: the perf lab keeps the same result-*.json
+            # shape under ~/.photomancer/emu-lab/results (D12), one per press.
+            if [[ $# -gt 0 && "$1" != --* ]]; then collect_dir="$1"; shift; fi ;;
         --no-build) do_build=0; shift ;;
         --no-serve) do_serve=0; shift ;;
         --port) port="${2:?--port needs a number}"; shift 2 ;;
-        -h|--help) sed -n '2,31p' "$0"; exit 0 ;;
+        --stage-into) stage_into="${2:?--stage-into needs the lab home}"; shift 2 ;;
+        --from-stage) from_stage="${2:?--from-stage needs a staged directory}"; shift 2 ;;
+        -h|--help) sed -n '2,25p' "$0"; exit 0 ;;
         *) echo "bench-web: unknown option $1" >&2; exit 2 ;;
     esac
 done
 
+# --stage-into never serves: the lab server serves the store. A --port beside
+# it is a contradiction, not a default to pick between.
+if [[ -n "$stage_into" ]]; then
+    if [[ -n "$port" ]]; then echo "bench-web: --stage-into and --port are mutually exclusive (the lab serves the store)" >&2; exit 2; fi
+    do_serve=0
+    stage_into="$(cd "$stage_into" 2>/dev/null && pwd || { mkdir -p "$stage_into" && cd "$stage_into" && pwd; })"
+fi
+if [[ -n "$from_stage" ]]; then
+    [[ -n "$stage_into" ]] || { echo "bench-web: --from-stage needs --stage-into" >&2; exit 2; }
+    [[ -f "$from_stage/manifest.json" && -f "$from_stage/emu.wasm" ]] || { echo "bench-web: $from_stage is not a staged directory (no manifest.json + emu.wasm)" >&2; exit 1; }
+    stage_dir="$(cd "$from_stage" && pwd)"
+    do_build=0
+    do_stage=0
+fi
+
 # --- --collect: print every uploaded result as a table, no build/serve -----
 if [[ $do_collect -eq 1 ]]; then
+    collect_dir="${collect_dir:-$stage_dir}"
     shopt -s nullglob
-    files=("$stage_dir"/result-*.json)
+    files=("$collect_dir"/result-*.json)
     shopt -u nullglob
     if [[ ${#files[@]} -eq 0 ]]; then
-        echo "bench-web: no result-*.json in $stage_dir yet (run the page first)" >&2
+        echo "bench-web: no result-*.json in $collect_dir yet (run the page first)" >&2
         exit 1
     fi
     printf '%-13s %-15s %-16s %-4s %-6s %4s %8s %9s %9s %7s\n' \
@@ -88,6 +124,10 @@ if [[ $do_collect -eq 1 ]]; then
             *Macintosh*) device="Mac" ;;
             *Android*) device="Android" ;;
         esac
+        # A lab result names its device (the name Yona typed at Join); the UA
+        # guess is for the rig's own uploads, which carry none.
+        named="$(jq -r '.deviceName // empty' "$f")"
+        [[ -z "$named" ]] || device="${named:0:11}"
         case "$ua" in
             *CriOS*|*Chrome/*) engine="V8" ;;
             *Firefox/*|*FxiOS*) engine="SpiderMonkey" ;;
@@ -240,6 +280,14 @@ resolve_image() {
     echo "$path"
 }
 
+sha256() {
+    if command -v shasum >/dev/null 2>&1; then
+        shasum -a 256 "$1" | awk '{print $1}'
+    else
+        sha256sum "$1" | awk '{print $1}'
+    fi
+}
+
 if [[ $do_stage -eq 1 ]]; then
 mkdir -p "$stage_dir"
 cp "$wasm_bin" "$stage_dir/emu.wasm"
@@ -256,14 +304,6 @@ cp "$wasm_bin" "$stage_dir/emu.wasm"
 cp "$rig_dir/index.html" "$rig_dir/worker.js" \
    "$rig_dir/wasi-shim.js" "$rig_dir/bench-run.js" "$rig_dir/bench-cli.mjs" "$stage_dir/"
 cp "$host_js" "$stage_dir/jit-host.js"
-
-sha256() {
-    if command -v shasum >/dev/null 2>&1; then
-        shasum -a 256 "$1" | awk '{print $1}'
-    else
-        sha256sum "$1" | awk '{print $1}'
-    fi
-}
 
 manifest_images="[]"
 for spec in "${images[@]}"; do
@@ -362,6 +402,52 @@ jq -n --argjson images "$manifest_images" --argjson build "$build_obj" \
 
 echo "bench-web: staged $stage_dir ($(du -sh "$stage_dir" | cut -f1)) build $build_short$([[ $build_dirty == true ]] && echo ' (dirty)')" >&2
 fi   # do_stage
+
+# --- --stage-into: the perf lab's per-sha store --------------------------------
+if [[ -n "$stage_into" ]]; then
+    manifest="$stage_dir/manifest.json"
+    short="$(jq -r '.build.short' "$manifest")"
+    dirty="$(jq -r '.build.dirty' "$manifest")"
+    wasm_sha="$(jq -r '.build.wasm_sha256' "$manifest")"
+    [[ -n "$short" && "$short" != null ]] || { echo "bench-web: $manifest has no build.short" >&2; exit 1; }
+    # D15: the id is the stamp the page hangs the whole build off, so two dirty
+    # builds at one HEAD must not share it.
+    id="$short"
+    [[ "$dirty" == true ]] && id="${short}-dirty-${wasm_sha:0:6}"
+    store_builds="$stage_into/builds"
+    store_images="$stage_into/images"
+    mkdir -p "$store_builds" "$store_images"
+    tmp="$store_builds/.tmp-$id"
+    rm -rf "$tmp"; mkdir -p "$tmp"
+    for f in emu.wasm worker.js bench-run.js wasi-shim.js jit-host.js bench-cli.mjs index.html; do
+        [[ -f "$stage_dir/$f" ]] && cp "$stage_dir/$f" "$tmp/$f"
+    done
+    # D16: one content-addressed copy of each ELF, a relative symlink per
+    # build. The worker fetches `fw-<slug>.elf` beside itself and never learns
+    # the difference; the server follows the link and refuses anything that
+    # resolves outside the home.
+    n="$(jq '.images | length' "$manifest")"
+    for ((i = 0; i < n; i++)); do
+        elf="$(jq -r ".images[$i].elf" "$manifest")"
+        stamp="$(jq -r ".images[$i].elfStamp" "$manifest")"
+        [[ -f "$stage_dir/$elf" ]] || { echo "bench-web: $stage_dir/$elf missing" >&2; exit 1; }
+        sha12="$(sha256 "$stage_dir/$elf" | cut -c1-12)"
+        [[ "$stamp" == "$sha12" ]] || echo "bench-web: warning: $elf elfStamp $stamp != content $sha12 (the store uses the content)" >&2
+        if [[ ! -f "$store_images/$sha12.elf" ]]; then
+            cp "$stage_dir/$elf" "$store_images/.tmp-$sha12.elf"
+            mv "$store_images/.tmp-$sha12.elf" "$store_images/$sha12.elf"
+        fi
+        ln -s "../../images/$sha12.elf" "$tmp/$elf"
+    done
+    jq --arg id "$id" '.build.id = $id' "$manifest" >"$tmp/manifest.json"
+    # Replace in one rename: the page may be loading the old directory.
+    if [[ -e "$store_builds/$id" ]]; then mv "$store_builds/$id" "$store_builds/.old-$id"; fi
+    mv "$tmp" "$store_builds/$id"
+    rm -rf "$store_builds/.old-$id"
+    echo "bench-web: staged build $id into $store_builds/$id ($(du -shL "$store_builds/$id" | cut -f1) with ELFs, shared in $store_images)" >&2
+    echo "$id"
+    exit 0
+fi
 
 # --- serve ---------------------------------------------------------------
 if [[ $do_serve -eq 0 ]]; then

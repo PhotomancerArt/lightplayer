@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- The ngrok tunnel in front of the lab's pinned port, as a launchd user
+     agent with KeepAlive (D7, T8): "away from home" stops being a mode.
+     Rendered by `scripts/emu/lab/lab.sh install`. @URLARGS@ is
+     `--url https://<domain>` when config.json names a static domain and
+     empty otherwise (a random URL, read back from the 4040 API by
+     `lab.sh url`). The token on every write is what makes a public URL
+     acceptable (D9, D17); the interstitial is not authentication. -->
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>com.yona.emu-lab-tunnel</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/opt/homebrew/bin/ngrok</string>
+    <string>http</string>
+    <string>@PORT@</string>
+    @URLARGS@
+    <string>--log</string>
+    <string>@HOME@/.photomancer/emu-lab/log/tunnel.log</string>
+    <string>--log-format</string>
+    <string>json</string>
+  </array>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>HOME</key><string>@HOME@</string>
+    <key>PATH</key><string>/opt/homebrew/bin:/usr/bin:/bin</string>
+  </dict>
+  <key>WorkingDirectory</key><string>@HOME@/.photomancer/emu-lab</string>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+  <key>ThrottleInterval</key><integer>10</integer>
+  <key>StandardOutPath</key><string>@HOME@/.photomancer/emu-lab/log/tunnel.stdout.log</string>
+  <key>StandardErrorPath</key><string>@HOME@/.photomancer/emu-lab/log/tunnel.stdout.log</string>
+</dict>
+</plist>
