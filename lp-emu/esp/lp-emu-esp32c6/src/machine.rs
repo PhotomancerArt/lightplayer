@@ -5650,6 +5650,65 @@ mod tests {
         );
     }
 
+    /// A reboot moves the clock's origin, and `run_until`'s stop is an
+    /// ABSOLUTE guest cycle fixed before its loop. If the bound is not
+    /// rebased, the slice that carries a reboot runs the board's whole prior
+    /// lifetime over again before it reaches a cycle count it has already
+    /// passed once — silently, with the host frozen for the duration.
+    /// `docs/defects/2026-09-11-a-reset-replays-the-boards-lifetime.md`.
+    ///
+    /// The measurement is in cycles and only in cycles: the age and the
+    /// budget are guest quantities, and nothing here reads a clock.
+    #[test]
+    fn a_reboot_inside_a_slice_consumes_the_budget_and_not_the_boards_lifetime() {
+        // 100 ms of guest time, then one 1 ms slice — the tab's pacing slice,
+        // and a hundredth of the age, so the two answers cannot be confused.
+        const AGE: Cycles = 100 * 1_000 * memmap::CYCLES_PER_US;
+        const BUDGET: Cycles = 1_000 * memmap::CYCLES_PER_US;
+
+        let mut m = Esp32C6Builder::new()
+            .reboot_on_reset(true)
+            // The reset lands INSIDE the second slice, not on its boundary.
+            .usb_script(vec![(AGE + BUDGET / 4, ControlCommand::Reset)])
+            .build()
+            .unwrap();
+        // `j .` in HP SRAM: guest time passes and nothing else happens, so
+        // the age is the only thing the first run produces.
+        m.bus
+            .load_image(memmap::HP_SRAM_BASE, &0x0000_006fu32.to_le_bytes())
+            .unwrap();
+        m.harts[0].set_pc(memmap::HP_SRAM_BASE);
+
+        // Age the board.
+        let out = m.run_until(&StopCondition {
+            stop_cycle: Some(AGE),
+            ..Default::default()
+        });
+        assert!(matches!(out, Outcome::Deadline { .. }), "{out:?}");
+        assert_eq!(m.reboots(), 0, "nothing has reset it yet");
+        let aged = m.cycles();
+        assert!(aged >= AGE, "the board is {aged} cycles old");
+
+        // One slice, sized in the host's terms: an absolute bound one budget
+        // past where the board already is.
+        let out = m.run_until(&StopCondition {
+            stop_cycle: Some(aged + BUDGET),
+            ..Default::default()
+        });
+        assert_eq!(m.reboots(), 1, "the slice carried exactly one reboot");
+        assert!(
+            matches!(out, Outcome::Deadline { .. }),
+            "the slice still ends at its deadline: {out:?}"
+        );
+        let consumed = m.cycles();
+        assert!(
+            consumed <= BUDGET,
+            "a reboot inside the slice must cost at most the slice's budget \
+             ({BUDGET} cycles); it consumed {consumed}, which is the board's \
+             {aged}-cycle lifetime replayed on top of it"
+        );
+    }
+
     #[test]
     fn the_seeded_rng_is_the_same_run_twice_and_a_different_one_at_a_new_seed() {
         let draw = |seed| {
