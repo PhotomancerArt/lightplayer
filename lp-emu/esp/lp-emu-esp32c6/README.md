@@ -40,6 +40,15 @@ same scripted host input are byte-identical — pinned by a test on the shipped
 image, not asserted. `--wall-timeout` is the single exception and it is a
 safety net: it can end a run, never change one.
 
+The loop samples that net **every 64th slice boundary**, not every one
+(`WALL_TIMEOUT_SLICE_STRIDE` in `machine.rs`). Reading the host clock is a
+WASI import call in the wasm build, and P1's decomposition priced it at
+148 ns a slice — 227 ms of a 5,500 ms `render-basic` t2 run. The stride's
+price is granularity: the net can fire up to a stride late, at most
+63 × `MAX_SLICE_CYCLES` = 516,096 emulated cycles, ≈ 3 ms of wall at 1×.
+Nothing the guest can observe depends on when it fires, so no transcript
+surface moves. `--wall-timeout` is a net, never a stopwatch.
+
 Time comes in three grades. The first two are just the hart's cycle model:
 `t1` (`lp-emu:esp32c6:t1`) counts instructions, `t2` uses a per-class model.
 `t3` adds what an access's **address** costs — a 32 KiB 4-way cache of

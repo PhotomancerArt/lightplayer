@@ -114,7 +114,7 @@ wall). The five items above the instrument's floor:
 | item | ns/slice | ms/run |
 |---|---:|---:|
 | `run_due_events` | 192.9 | 295.5 |
-| `wall_timeout` → `started.elapsed()` | 148.3 | 227.2 |
+| `wall_timeout` → `started.elapsed()` — **taken 2026-09-13 (P1c)** | 148.3 | 227.2 |
 | `drain_pins` | 117.3 | 179.7 |
 | `pending_cpu_interrupt` + `set_external` + `poll_interrupts` | 32.5 | 49.8 |
 | the six-term deadline + `next_deadline` + census gates | 26.6 | 40.8 |
@@ -287,7 +287,7 @@ headroom against the **1×-held** bar, not by distance to 3×.
 | **R4 — the UART TX-FIFO tap** | on `render-basic`: **~0.14 % ceiling**, i.e. nothing. On the **harness** image M4 measured 86 % of MMIO as TX-FIFO poll | the UART0 byte transcript — the primary identity surface | the console text a user reads | sm | someone is optimising the *harness* image. For product images this lever is dead |
 | **R3′ — the firmware turns real output off under emulation** | not measurable: the switch does not exist | the pin log and everything downstream of the wire | **the guest's own ISR stops running**, so the reported fps is one the hardware will not deliver. This is exactly the trade §0 forbids in the user lane | md (firmware) | it would have to report fps from a *modelled* refill cost rather than a real one, which is a cycle-model change, not a switch |
 | **`tick`** — the boundary as an import the stay calls | **≈ 376 ms ≈ 6.8 %** (P1, measured) | none — P1 proved the trap hook is in exactly one place and translated code never writes `mcause`/`mepc`/`mtvec` | none | **lg** | shelved at G-LOOP0 as a *milestone*; it re-enters here as **headroom**. Against a 10–18 % thermal shortfall, 6.8 % is a third to two thirds of the gap |
-| **`wall_timeout` → `started.elapsed()`** | **227 ms ≈ 4.1 %**, one hunk | none | none | **xs** — one hunk | it changes the timeout path's *granularity*: the wall check would stride instead of running per slice. That is a behaviour change on a diagnostic path only. **60 % of `tick`'s whole payoff for one hunk** |
+| ~~**`wall_timeout` → `started.elapsed()`**~~ **— SHIPPED 2026-09-13, P1c (#736)** | **227 ms ≈ 4.1 %** predicted, one hunk | none | none | **xs** — one hunk | **taken.** The check strides: the clock is read every 64th slice, so the net may fire up to 63 × `MAX_SLICE_CYCLES` emulated cycles late. Yona ruled the granularity acceptable at `G-LOOP0b`. See §3's dated row for what it measured |
 | **the published-register table** (P3 generalised) | NEVER MEASURED. SYSTIMER is 47.05 % of crossings and 2,322,975 of its 2,767,705 are *stores* to `unit0_op` — the published-read side addresses the 444,730 loads | none if the disarm rules hold (trace / strict / after an escape) | none | md | the store side stays: the interpreter polls after *every* MMIO store |
 | **per-tick work** (P4's phase) | NEVER MEASURED as a phase. `run_due_events` 295 ms + `drain_pins` 180 ms = 475 ms is the target, and `tick` relocates it rather than removing it | none | none | md | |
 | **translator quality** | **4.5 ns per translated instruction at 8/fn against ~2 warm**; the cold-code 2.3× residual is unexplained | none | none | **lg** | the one lever that is pure win in both lanes. It is also the only lever that touches `boot-idle-memfs`'s 47 % shortfall, which is fixed translation cost |
@@ -302,7 +302,8 @@ closes it alone, and the two biggest entries are unavailable:
 - **Available and exact in the user lane:** R1 (1–2.7 %) + `wall_timeout`
   (4.1 %) + `tick` (6.8 %) ≈ **12 %** — which does reach the bottom of the
   band, and every one of those three leaves the guest's instret, frames and
-  fps untouched.
+  fps untouched. **`wall_timeout` was taken on 2026-09-13 (P1c, #736)**, so
+  what is left of that 12 % is R1 and `tick`.
 - **Unavailable:** the per-word cadence (14 %) has no correct shape; the full
   tier (R3) reports an fps the hardware will not deliver.
 - **Untouched by all of it:** `boot-idle-memfs` at 0.53×, which is translation
