@@ -77,21 +77,24 @@
 //! the chain is [`BOOTLOADER_FRAME_CHAIN`]:
 //!
 //! ```text
-//! mask ROM  _start            0x40034c02  l32r a1, __stack      a1 = 0x3FCE_B710
-//!           0x40034c45        call4 main
-//! mask ROM  main              0x40043a2c  entry a1, 32          a1 = 0x3FCE_B6F0
-//!           0x40043cad        callx8 [user_code_start]   (0x3fcedf14 → the bootloader's entry)
-//! IDF bl    call_start_cpu0   0x403c9908  entry a1, 192         a1 = 0x3FCE_B630
-//!           0x403c9971        call8 0x403cdd54
-//! IDF bl    …load_boot_image  0x403cdd54  entry a1, 304         a1 = 0x3FCE_B500
-//!           0x403cdd79        call8 0x403cd8ac
-//! IDF bl    load_image        0x403cd8ac  entry a1, 64          a1 = 0x3FCE_B4C0
-//!           0x403cd980        callx8 a9                  (the app's e_entry, from the stack: `l32i.n a9, a1, 24`)
+//! mask ROM  _start                    0x40034c02  l32r a1, __stack      a1 = 0x3FCE_B710
+//!           0x40034c45                call4 main
+//! mask ROM  main                      0x40043a2c  entry a1, 32          a1 = 0x3FCE_B6F0
+//!           0x40043ab6                call8 ets_run_flash_bootloader
+//! mask ROM  ets_run_flash_bootloader  0x4004578c  entry a1, 384         a1 = 0x3FCE_B570
+//!           0x40045c01                callx8 a2                  (the bootloader image's entry, `l32i a2, a3, 64`,
+//!                                                                 two instructions after the ROM prints `entry 0x…`)
+//! IDF bl    call_start_cpu0           0x403c9908  entry a1, 192         a1 = 0x3FCE_B4B0
+//!           0x403c9971                call8 0x403cdd54
+//! IDF bl    …load_boot_image          0x403cdd54  entry a1, 304         a1 = 0x3FCE_B380
+//!           0x403cdd79                call8 0x403cd8ac
+//! IDF bl    load_image                0x403cd8ac  entry a1, 64          a1 = 0x3FCE_B340
+//!           0x403cd980                callx8 a9                  (the app's e_entry, from the stack: `l32i.n a9, a1, 24`)
 //! ```
 //!
-//! So the application's `Reset` is entered with **`a1 = 0x3FCE_B4C0`** and
+//! So the application's `Reset` is entered with **`a1 = 0x3FCE_B340`** and
 //! `PS.CALLINC = 2`. The bootloader never sets a stack pointer of its own;
-//! it runs on the ROM's PRO stack, 592 bytes down. The ROM half is read
+//! it runs on the ROM's PRO stack, 976 bytes down. The ROM half is read
 //! from the vendored `esp32s3_rev0_rom.elf` with symbols; the bootloader
 //! half from the bootloader `espflash save-image --chip esp32s3 --merge`
 //! embeds (ESP-IDF `v5.1-beta1-378-gea5e0ff298-dirt`, entry `0x403c_9908`,
@@ -104,6 +107,24 @@
 //! after `cache_hal_enable(CACHE_TYPE_ALL)` and one after
 //! `bootloader_atexit`'s `uart_tx_flush` (`403cdf0c` → ROM `0x4000_0690`),
 //! which is what a `noreturn` call into the app looks like.
+//!
+//! ⚠️ **"At the app's entry" means before the app's own `entry`.** A
+//! windowed call rotates the register window in the callee's `entry`, not
+//! in the `callx8`; so at `Reset`'s first instruction the hart still shows
+//! `load_image`'s window — its `a1`, its `a0` — with the return address the
+//! `callx8` wrote sitting in `a8` and `PS.CALLINC = 2` waiting for the
+//! app's `entry a1, N` to turn them into the app's frame. That is the state
+//! the direct load seeds and the cross-check measures.
+//!
+//! ⚠️ **The first derivation of this chain was 384 bytes short.** It read
+//! `main` → `callx8 [user_code_start]` at `0x4004_3cad` and summed four
+//! frames (592 bytes, `a1 = 0x3FCE_B4C0`); the cross-check measured
+//! `0x3FCE_B340`. On a flash boot `main` never reaches that `callx8`: it
+//! calls `ets_run_flash_bootloader` (`40043ab6`), whose `entry a1, 0x180`
+//! is the missing frame and whose `callx8 a2` at `0x40045c01` — after
+//! `Cache_MMU_Init` and the `entry 0x…` line the ROM prints — is the call
+//! into the bootloader. A derivation is a hypothesis until a run reads the
+//! register; `tests/rom_up_boot.rs` reads it.
 //!
 //! The four words of the base save area at `[a1-16, a1)` and `PS.OWB` are
 //! **not** derived here; `tests/rom_up_boot.rs`'s cross-check, which arrives
@@ -130,10 +151,10 @@ use crate::memmap;
 use crate::rom::{self, RomError, place_spanning};
 
 /// The stack pointer the IDF bootloader hands the application: the mask
-/// ROM's `__stack` minus the four frames between `_start` and the `callx8`
+/// ROM's `__stack` minus the five frames between `_start` and the `callx8`
 /// into the app. See the module docs for the derivation and
 /// [`BOOTLOADER_FRAME_CHAIN`] for the frames.
-pub const BOOTLOADER_SP_AT_APP_ENTRY: u32 = 0x3FCE_B4C0;
+pub const BOOTLOADER_SP_AT_APP_ENTRY: u32 = 0x3FCE_B340;
 
 /// One frame between the ROM's `__stack` and the app's entry:
 /// `(who, the pc of its `entry`, the bytes that `entry` reserves)`.
@@ -141,9 +162,21 @@ pub const BOOTLOADER_SP_AT_APP_ENTRY: u32 = 0x3FCE_B4C0;
 /// `the_bootloader_sp_is_the_rom_stack_minus_the_frame_chain` re-derives
 /// [`BOOTLOADER_SP_AT_APP_ENTRY`] from this table and
 /// [`memmap::ROM_PRO_STACK_TOP`], so the constant and its derivation cannot
-/// drift apart.
+/// drift apart; `tests/rom_up_boot.rs` re-derives it again from the `entry`
+/// instruction **at each pc**, read out of the vendored ROM and the merged
+/// image's bootloader, and the cross-check there measures the result.
+///
+/// ⚠️ **Five frames, not four.** The first derivation of this chain (P06's
+/// first agent) went `main` → `callx8 [user_code_start]` at `0x4004_3cad`
+/// and summed 592 bytes; the cross-check measured `a1 = 0x3FCE_B340`, 384
+/// bytes lower. On a flash boot `main` does not reach that `callx8`: it
+/// calls **`ets_run_flash_bootloader`** (`40043ab6: call8 4004578c`), whose
+/// `entry a1, 0x180` is the 384 bytes, and *that* function makes the
+/// `callx8` into the bootloader. The chain below is the one the machine
+/// walked.
 pub const BOOTLOADER_FRAME_CHAIN: &[(&str, u32, u32)] = &[
     ("mask ROM main", 0x4004_3A2C, 32),
+    ("mask ROM ets_run_flash_bootloader", 0x4004_578C, 384),
     ("IDF bootloader call_start_cpu0", 0x403C_9908, 192),
     (
         "IDF bootloader bootloader_utility_load_boot_image",
@@ -157,22 +190,31 @@ pub const BOOTLOADER_FRAME_CHAIN: &[(&str, u32, u32)] = &[
 /// reaches the application's entry — `a0, a1, a2, a3` of the frame behind
 /// the app's, in the order `_WindowOverflow4` spills them.
 ///
-/// **A coherent frame until measured.** `tests/rom_up_boot.rs::
-/// rom_up_and_direct_load_agree_on_what_the_app_sees` stops both paths at
-/// the app's first instruction, reads the ROM-up side's stack, and asserts
-/// the direct load's seed against it; this constant is what that assertion
-/// holds, and the run that first read the real words is the one that sets
-/// it. `a0 = 0` is the frame chain's end and the saved `a1` chains to the
-/// stack top, so a spill through the frame lands in ROM-owned memory.
-/// Nothing in the application reads these before its first window overflow
-/// overwrites them.
-pub const BOOTLOADER_SAVE_AREA: [u32; 4] = [0x0000_0000, BOOTLOADER_SP_AT_APP_ENTRY, 0, 0];
+/// **Measured** by `tests/rom_up_boot.rs::
+/// rom_up_and_direct_load_agree_on_what_the_app_sees`, which stops the
+/// ROM-up path at the app's first instruction and reads the stack under
+/// `load_image`'s `a1`: the base save area of `load_image`'s window holds its
+/// caller's `a0..a3` as the overflow handler spilled them —
+///
+/// - `a0 = 0x803C_9974`: the return into `call_start_cpu0` after its
+///   `call8 bootloader_utility_load_boot_image` (`403c9971`), with the
+///   `call8` window increment in bits 31:30;
+/// - `a1 = 0x3FCE_B380`: `bootloader_utility_load_boot_image`'s own stack
+///   pointer, 64 bytes above `load_image`'s;
+/// - `a2 = 0x3FCE_B4B0`: its first argument, the `bootloader_state_t` on
+///   `call_start_cpu0`'s stack (`call_start_cpu0`'s own `a1`);
+/// - `a3 = 0xFFFF_FFFF`: its second, `boot_index = -1`.
+///
+/// The direct load seeds these so that the application's first window
+/// overflow through the frame behind it reads what the bootloader would
+/// have left. Nothing in the application reads them before that.
+pub const BOOTLOADER_SAVE_AREA: [u32; 4] = [0x803C_9974, 0x3FCE_B380, 0x3FCE_B4B0, 0xFFFF_FFFF];
 
-/// `PS.OWB` at the application's entry. **Zero until measured** by the same
-/// cross-check: the architectural value for a frame no window exception has
-/// touched. The classic's 7 is the classic's measurement and is not carried
-/// over.
-pub const BOOTLOADER_OWB: u8 = 0;
+/// `PS.OWB` at the application's entry: **11**, measured by the same
+/// cross-check (`PS = 0x0006_0B20` at `Reset`: `WOE`, `CALLINC = 2`,
+/// `OWB = 0xb`, `UM`). The classic's 7 is the classic's measurement and was
+/// not carried over.
+pub const BOOTLOADER_OWB: u8 = 11;
 
 impl BootFrame {
     /// The frame the IDF bootloader leaves at the application's entry:
@@ -742,11 +784,11 @@ mod tests {
     #[test]
     fn the_bootloader_sp_is_the_rom_stack_minus_the_frame_chain() {
         let used: u32 = BOOTLOADER_FRAME_CHAIN.iter().map(|(_, _, n)| n).sum();
-        assert_eq!(used, 592, "32 + 192 + 304 + 64");
+        assert_eq!(used, 976, "32 + 384 + 192 + 304 + 64");
         assert_eq!(
             memmap::ROM_PRO_STACK_TOP - used,
             BOOTLOADER_SP_AT_APP_ENTRY,
-            "the pinned constant is __stack minus the four entry frames"
+            "the pinned constant is __stack minus the five entry frames"
         );
         assert_eq!(BootFrame::idf_bootloader().sp, BOOTLOADER_SP_AT_APP_ENTRY);
         // Every frame is a whole number of 16-byte units, as `entry` requires

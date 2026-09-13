@@ -640,23 +640,24 @@ pub type CoreOneHandle = Arc<Mutex<CoreOneControl>>;
 /// `0x3FCE_B710` ([`memmap::ROM_PRO_STACK_TOP`]). That is a cited value and
 /// it is the right *shape*.
 ///
-/// ⚠️ **It is not the bootloader's own SP, and P06 owns that.** The ESP-IDF
-/// second-stage bootloader runs on a stack its own linker script places, and
-/// the value it holds at the `callx8` into the app is P06's to derive from
-/// the ROM-up chain — from the bootloader disassembly or from a ROM-up run
-/// that gets that far. Until then this is the machine's *seam*: a builder
-/// parameter with a cited default and a test that proves a seeded hart
-/// survives its first exception, not a claim about what silicon holds.
+/// ⚠️ **It is not the bootloader's own SP; [`BootFrame::idf_bootloader`]
+/// is.** The ESP-IDF second-stage bootloader runs on the ROM's PRO stack,
+/// 976 bytes down (`crate::loader`'s module docs derive the five frames and
+/// `tests/rom_up_boot.rs` measures the result: `a1 = 0x3FCE_B340` at the
+/// app's `Reset`). The direct load seeds that frame since P06; this
+/// constructor is the machine's *seam* for a hart seeded without an
+/// application (`tests/boot.rs`, `tests/cache_off_stop.rs`).
 ///
-/// # `owb` is zero here, and the classic's 7 is not carried over
+/// # `owb`: measured 11 on this chip, and the classic's 7 is not carried over
 ///
 /// The classic seeds `PS.OWB = 7` because a cross-check **measured** it: its
 /// ROM-up walk read `PS = 0x0006_0720` at the application's entry against the
-/// direct load's `0x0006_0020`. No such walk exists on the S3 until P06, so
-/// this field is zero — the architectural value for a frame no window
-/// exception has touched — and a P06 cross-check is what would change it.
-/// Carrying the classic's 7 across would be a measurement of one chip
-/// reported as a fact about another.
+/// direct load's `0x0006_0020`. P06's cross-check read the S3's:
+/// `PS = 0x0006_0B20` at `Reset`, `OWB = 0xb` — `crate::loader::BOOTLOADER_OWB`
+/// carries it and [`BootFrame::idf_bootloader`] seeds it. [`BootFrame::at`]
+/// keeps zero, the architectural value for a frame no window exception has
+/// touched. Carrying the classic's 7 across would have been a measurement of
+/// one chip reported as a fact about another.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct BootFrame {
     /// `a1` at entry: the outermost live frame's stack pointer.
@@ -665,7 +666,8 @@ pub struct BootFrame {
     /// order, which is the order `_WindowOverflow4` stores them in
     /// (`s32e a0, a5, -16` … `s32e a3, a5, -4`).
     pub save_area: [u32; 4],
-    /// `PS.OWB` at the application's entry. Zero until P06 measures one.
+    /// `PS.OWB` at the application's entry: 11 on the bootloader's frame
+    /// (measured, P06), zero on a synthetic one.
     pub owb: u8,
 }
 
