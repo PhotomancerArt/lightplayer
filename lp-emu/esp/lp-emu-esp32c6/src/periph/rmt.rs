@@ -3088,12 +3088,7 @@ mod tests {
             a.iter().take(4).map(|e| (e.at, e.pad.0, e.level)).collect();
         assert_eq!(
             head,
-            vec![
-                (0, 8, true),
-                (64, 8, false),
-                (0, 9, true),
-                (64, 9, false)
-            ],
+            vec![(0, 8, true), (64, 8, false), (0, 9, true), (64, 9, false)],
             "a whole word of ch0, then a whole word of ch1 at the same cycles"
         );
         assert!(
