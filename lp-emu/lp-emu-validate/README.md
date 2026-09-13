@@ -105,11 +105,13 @@ The named reference implementation a payload ran on (plan PD4):
 ```text
 silicon:esp32c6                 real silicon, that chip
 silicon:esp32v3                 the desk's classic ESP32 (revision v3)
+silicon:esp32s3                 the desk's ESP32-S3 (M6)
 esp-emu:0.42.0                  Espressif's binary emulator, that version
 lp-emu:esp32c6:t1               our machine, time grade 1 (instruction count)
 lp-emu:esp32c6:t2               our machine, time grade 2 (per-class model)
 lp-emu:esp32c6:t3               our machine, time grade 3 (+ what an address costs)
 lp-emu:esp32v3:t1               our classic machine, and its ONLY grade
+lp-emu:esp32s3:t1               our S3 machine, and its ONLY grade (M6 notes Q2)
 ```
 
 **Identity is the chip, not the board** (Yona, G2 2026-09-06). This is chip
@@ -198,6 +200,33 @@ has **no `usb-serial-jtag` row at all** — that part has no such peripheral —
 and `validate list` still prints `usb-serial-jtag=modeled` for it, because a
 class with no entry defaults to `modeled`; the absence of a row and a
 `modeled` row are not distinguished in that view.
+
+`lp-emu:esp32s3:t1` (M6 P08) is the third row, and it is the one to read as a
+**shape without evidence yet**. Every class is `modeled`, as everywhere; the
+difference from the classic's row is that **no S3 has been captured at all** —
+P09 is the sitting that takes the first — so no `because` here cites a
+field-by-field comparison and none claims one. What each cites instead is the
+gate that pins the behaviour today (the `[INIT]` chain byte for byte and where
+the boot stops, `lp-emu-esp32s3/tests/boot_idle.rs`) and, in the same
+sentence, what that does not cover. Three things about this chip's ledger are
+worth carrying out of that row, because a comparison that missed any of them
+would be comparing nothing:
+
+- `[MEM] retry_saves` is always `0` — there is no OOM retry allocator in this
+  image, so `0` is the true count of retries that saved an allocation.
+- the whole `[JIT]` line is zeros, `cap=0` included — the S3 has no reserved
+  code region, the JIT allocates out of the `esp_alloc` heap, and its
+  residency is already inside `[MEM] used`.
+- the boot heap line is **one number**, `[INIT] chip=esp32s3 arch=xtensa
+  heap=245760`, where the classic prints the four-region sum. The *fields* are
+  comparable across the three chips; the *line* is not.
+
+Its `usb-serial-jtag` row is the one most likely to be misread as a
+promotion. The S3's block **is** the C6's IP — same offsets, same bitfields,
+same reset values — and M6 P05 moved the view into
+`lp-emu-esp-common/src/ip/usb_sj.rs` so both chips run one model. The C6's
+transcripts sit behind that model and **they are not a measurement of an S3**:
+the row says so in as many words, and stays `modeled`.
 
 ### A band: how wrong a class is allowed to be
 
@@ -367,7 +396,7 @@ code) names the differences that mean nothing — heap digits in prose, uptime,
 fps, tick counters, bootloader timestamps — each with the reason it is ignored.
 Masking here means *reported but not compared*, never *deleted*.
 
-## The chip table (M5 P1)
+## The chip table (M5 P1, third row M6 P08)
 
 The runner drives more than one chip, and everything that differs between
 them is **one row** in `ChipSpec` (`src/driver.rs`) — crate directory, target
@@ -376,20 +405,22 @@ chip word, the emulator package, the vendored mask ROM's stem, the monitor
 baud, the serial bridge's port prefix, and the time grades the machine
 actually defines.
 
-| | `esp32c6` | `esp32v3` |
-|---|---|---|
-| `espflash --chip` | `esp32c6` | **`esp32`** — espflash does not know the revision |
-| chip cargo feature | `esp32c6` | `esp32` |
-| target | `riscv32imac-unknown-none-elf` | `xtensa-esp32-none-elf` |
-| profile | `release-esp32` | `release-esp32v3` |
-| firmware crate | `lp-fw/fw-esp32c6` | `lp-fw/fw-esp32v3` |
-| emulator package | `lp-emu-esp32c6` | `lp-emu-esp32v3` |
-| mask ROM | `esp32c6_rev0_rom.elf` | `esp32_rev300_rom.elf` |
-| `--monitor-baud` | none | **921600, not optional** |
-| port | `cu.usbmodem…` (native USB) | `cu.wchusbserial…` (CH340K) |
-| time grades | `t1` `t2` `t3` | `t1` — and only `t1` |
-| `--core-quantum` | none — single-core | `256`, the machine's default (recorded as the header's `quantum`) |
-| product link | USB-Serial-JTAG | **UART0** (no USB-SJ peripheral) |
+| | `esp32c6` | `esp32v3` | `esp32s3` |
+|---|---|---|---|
+| `espflash --chip` | `esp32c6` | **`esp32`** — espflash does not know the revision | `esp32s3` — ours and espflash's agree |
+| chip cargo feature | `esp32c6` | `esp32` | `esp32s3` |
+| target | `riscv32imac-unknown-none-elf` | `xtensa-esp32-none-elf` | `xtensa-esp32s3-none-elf` |
+| profile | `release-esp32` | `release-esp32v3` | `release-esp32s3` |
+| firmware crate | `lp-fw/fw-esp32c6` | `lp-fw/fw-esp32v3` | `lp-fw/fw-esp32s3` |
+| flash size | 4 MB | 4 MB | **8 MB** — the partition floor ADR |
+| emulator package | `lp-emu-esp32c6` | `lp-emu-esp32v3` | `lp-emu-esp32s3` |
+| mask ROM | `esp32c6_rev0_rom.elf` | `esp32_rev300_rom.elf` | `esp32s3_rev0_rom.elf` |
+| `--monitor-baud` | none | **921600, not optional** | none |
+| port | `cu.usbmodem…` (native USB) | `cu.wchusbserial…` (CH340K) | `cu.usbmodem…` — **the same as the C6's** |
+| time grades | `t1` `t2` `t3` | `t1` — and only `t1` | `t1` — and only `t1` |
+| `--core-quantum` | none — single-core | `256`, the machine's default (recorded as the header's `quantum`) | `256`, the same default; slot 1 is held, so core 0 is the only one that takes a window |
+| `--reset-cause` / `--strap` | both, two values each | neither — one cause, one strap | neither yet; P06 owns the ROM-up path |
+| product link | USB-Serial-JTAG | **UART0** (no USB-SJ peripheral) | USB-Serial-JTAG (no `spike_uart0_link` exists) |
 
 **The table is a mirror, and the mirror is the contract.** Its values are the
 `justfile`'s (`xt_v3_target`, `v3_flash_size`, `fw_esp32v3_dir`, the profiles,
@@ -401,7 +432,7 @@ against the script on every `cargo test`, and the second of them found real
 drift the day it was written (`render-basic` and `render-rocaille` had been in
 the script and not in `reference_image_slug` since the render benches landed).
 
-Two entries in the table are the ones a reader will otherwise get wrong.
+Three entries in the table are the ones a reader will otherwise get wrong.
 `--monitor-baud 921600` on the classic is **not optional**: `board::esp32v3::
 init` reprograms `clkdiv` mid-stream, so the ROM and the second-stage
 bootloader talk at 115200 and the application at 921600, and a monitor left at
@@ -411,8 +442,18 @@ held-port pre-check was a literal `usbmodem` grep until M5, so a held CH340
 port passed it silently; `ensure_port_free` takes the prefix from this table
 *and* checks the request's own `--port`.
 
-Adding a chip is one row plus arms on the payloads that run there. M6's S3 is
-the next one, and that is the shape it should take.
+And the third: **`port_prefix` cannot identify a board on the S3, and must
+never be used to pick one.** An S3 and a C6 both enumerate as `303a:1001`
+with a `/dev/cu.usbmodem…` node, so the two rows share a prefix on purpose —
+it answers "is some board of this kind held?" and nothing else.
+`scripts/emu/board-port.py` resolves a board by its USB **serial number,
+which is the MAC**, opening nothing and resetting nothing; wherever a silicon
+plan names a port it names a MAC and resolves it. "The first matching port"
+is how another session's board gets flashed.
+
+Adding a chip is one row plus arms on the payloads that run there — M6 P08
+added the S3's exactly that way, and nothing else in `driver.rs` learned a
+chip name.
 
 ### A payload on a chip: `ChipArm`
 
@@ -425,10 +466,10 @@ Everything else is chip-independent **by construction**: `fw_checks_feature`,
 `emits_header`, `sentinel`, `mask_set`, `fields`, `series`, `record_kinds`.
 Both chips print the same `[MEM] free=` / `[JIT] used=` / `[stack]
 heartbeat:` lines out of the same `lpa-server` / `fw-core` code. That is what
-makes **one payload name over two chips** possible, and it is why the classic
-gets arms rather than `v3-`-prefixed payload names: the committed silicon
-transcript's sidecar already says `"payload": "boot-idle"`, and transcripts
-are never edited.
+makes **one payload name over three chips** possible, and it is why the other
+two get arms rather than `v3-` / `s3-`-prefixed payload names: the committed
+silicon transcript's sidecar already says `"payload": "boot-idle"`, and
+transcripts are never edited.
 
 Read an arm through `Payload::arm(chip)`. `esp32c6` is *synthesised* from the
 top-level fields rather than duplicated, so a row that says nothing about
@@ -467,6 +508,26 @@ sentinel_for(chip)` and `Transcript::sentinel_marker()` are the accessors; the
 C6's synthesised arm carries no override, so every committed C6 transcript
 means exactly what it meant.
 
+The S3's two arms (M6 P08) are where all three of those fields repeat
+together, and the reason is that its ledger is elicited too: M6 P04b put the
+`[stack]` / `[MEM]` / `[JIT]` lines on `esp32_memory_stats` — a project
+load/unload/stop-all, a client `runtime_status`, either side of a compile —
+and **not** on the five-second heartbeat, which takes
+`heartbeat_memory_stats` and prints nothing. So the S3 has the classic's
+shape and not the C6's: `second_boot` is true, the `sentinel` override is
+`[JIT] used=`, and the arm carries a `host_script`
+(`walks/s3-stop-all.script`) whose single directive is byte-identical to the
+classic's — checked by `the_s3_stop_all_script_is_the_classics_stimulus`, so
+all three chips answer one question with one stimulus.
+
+⚠️ **That arm's run cannot complete until M6 P06.** The shipped S3 image
+mounts `lpfs` through SPI1 after `[INIT] I/O task spawned`, SPI1 is an accept
+block on that machine today, and the run spins there — which is exactly what
+`lp-emu-esp32s3/tests/boot_idle.rs::the_boot_stops_where_p06_begins` pins.
+The arm is written for the image after P06 and the sentinel is **not**
+weakened to make today's run pass; `shader-compile-stress` is the S3 payload
+that completes today, because a harness image never mounts a filesystem.
+
 ### `Link::Uart0` is not `Link::Uart0Spike`
 
 `Uart0Spike` is a **C6 workaround**: the cargo feature `spike_uart0_link`
@@ -476,6 +537,15 @@ peripheral at all. Conflating them would put a feature that does not exist on
 a classic build (an unbuildable command line) and would write `uart0-spike`
 into every classic sidecar, where it reads as a workaround rather than as the
 product.
+
+The S3 is the third case and needs no third variant: it takes
+`Link::UsbSerialJtag`, the C6's own value, and it takes it for a stronger
+reason than the C6 does. `spike_uart0_link` does not exist on `fw-esp32s3`
+and cannot — the console is `esp-println`'s `jtag-serial`, and
+`board/esp32s3/usb_connection.rs` states the rule: "the S3 has no
+`spike_uart0_link` build, so its link is always the real USB one". UART0
+exists on the part and the mask ROM prints to it; nothing the application
+writes goes there.
 
 ## Runner
 
