@@ -74,7 +74,10 @@ pub mod accept;
 pub mod efuse;
 pub mod extmem;
 pub mod flash_mmu;
+pub mod gpio;
 pub mod i2c_ana_mst;
+pub mod io_mux;
+pub mod rmt;
 pub mod rng;
 pub mod rtc_cntl;
 pub mod sha;
@@ -263,13 +266,12 @@ pub fn boot_set(
             uart::UART_LEN,
             Box::new(uart::Uart::uart1(None)),
         ),
-        (
-            base::GPIO,
-            accept::GPIO_LEN,
-            Box::new(accept::GpioBlock::new(flash.strap)),
-        ),
-        (base::IO_MUX, accept::IO_MUX_LEN, Box::new(accept::io_mux())),
-        (base::RMT, accept::RMT_LEN, Box::new(accept::rmt())),
+        // ---- P07: the pads and the RMT, where the accept blocks were ----
+        (base::GPIO, gpio::LEN, Box::new(gpio::Gpio::new(flash.strap))),
+        (base::IO_MUX, io_mux::LEN, Box::new(io_mux::IoMux::new())),
+        // Registers, the gap, and the RAM at `+0x800..+0xe00` — P06's accept
+        // block was `0x100` long and left the RAM unmapped on purpose.
+        (base::RMT, rmt::LEN, Box::new(rmt::new())),
         (
             base::ASSIST_DEBUG,
             accept::ASSIST_DEBUG_LEN,

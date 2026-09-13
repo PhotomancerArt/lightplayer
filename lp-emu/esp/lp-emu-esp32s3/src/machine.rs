@@ -111,14 +111,18 @@ use lp_emu_core::Bus;
 use lp_emu_core::sched::Cycles;
 use lp_emu_esp_common::bus::StrictViolation;
 use lp_emu_esp_common::host::ByteSink;
+use lp_emu_esp_common::pins::{PadId, RouteSource};
+use lp_emu_esp_common::strip::ws281x::{Frame, Ws281xDecoder, unpermute};
 use lp_emu_esp_common::{ByteLog, ByteSource, ElfImage, MachineRequest, SocBus, Strap};
 
 use crate::cache::{self, CacheHandle, CacheOffAccess, CacheOffPolicy, S3Cache, Which};
 use crate::control::{ControlCommand, ControlReply, HostReport};
 use crate::flash::{FlashBacking, FlashHandle, FlashImage};
-use crate::periph::accept::{GPIO_STRAP_DOWNLOAD, GPIO_STRAP_SPI_FAST_FLASH_BOOT, GpioBlock};
+use crate::periph::accept::{GPIO_STRAP_DOWNLOAD, GPIO_STRAP_SPI_FAST_FLASH_BOOT};
 use crate::periph::usb_sj::{LIVE_POLL_CYCLES, UsbSerialJtag};
 use crate::periph::{FlashSet, HostStreams};
+
+use lp_ws281x::{ChannelTiming, ColorOrder};
 
 use lp_xt_emu::mach::interrupt::{IntKind, IntLine};
 use lp_xt_emu::mach::sr::PS_BOOT;
@@ -911,6 +915,178 @@ impl From<LoadError> for BuildError {
 /// trait object has none. The manual impl below prints the fields a test
 /// failure wants and prints the source as a flag, which is the same thing
 /// [`TraceSink`] does one field along.
+/// Where decoded WS281x frames go (`--dump-frames`).
+///
+/// One JSON line per frame, as it is decoded — a stream, not a report, so a
+/// run that is killed still leaves the frames it had already seen.
+#[derive(Clone, Debug, Default)]
+pub enum FrameSink {
+    /// Kept in memory only, for [`Machine::frames`].
+    #[default]
+    Memory,
+    Stdout,
+    File(PathBuf),
+}
+
+/// Where the raw pin log goes (`--pin-log`): one line per edge.
+///
+/// Never the default: a 256-LED frame is 12,288 edges.
+#[derive(Clone, Debug, Default)]
+pub enum PinLogSink {
+    #[default]
+    Off,
+    File(PathBuf),
+}
+
+/// Lines the pin log writes before it stops, with a closing note.
+pub const PIN_LOG_LINE_CAP: u64 = 2_000_000;
+
+/// Frames kept in memory per pad, with a note when the cap is reached. The
+/// `--dump-frames` stream itself is not capped.
+pub const FRAMES_PER_PAD_CAP: usize = 8_192;
+
+/// The strip a pad is decoded as: the wire timing, and the byte order the
+/// record's `rgb` field is unpermuted with.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct StripConfig {
+    pub timing: ChannelTiming,
+    pub order: ColorOrder,
+}
+
+impl Default for StripConfig {
+    fn default() -> Self {
+        Self {
+            timing: ChannelTiming::WS2812,
+            order: ColorOrder::Grb,
+        }
+    }
+}
+
+impl StripConfig {
+    /// `ws2812` | `ws2811`.
+    pub fn parse_timing(text: &str) -> Option<ChannelTiming> {
+        match text {
+            "ws2812" => Some(ChannelTiming::WS2812),
+            "ws2811" => Some(ChannelTiming::WS2811),
+            _ => None,
+        }
+    }
+
+    /// `rgb` | `rbg` | `grb` | `gbr` | `brg` | `bgr`.
+    pub fn parse_order(text: &str) -> Option<ColorOrder> {
+        match text {
+            "rgb" => Some(ColorOrder::Rgb),
+            "rbg" => Some(ColorOrder::Rbg),
+            "grb" => Some(ColorOrder::Grb),
+            "gbr" => Some(ColorOrder::Gbr),
+            "brg" => Some(ColorOrder::Brg),
+            "bgr" => Some(ColorOrder::Bgr),
+            _ => None,
+        }
+    }
+
+    /// The timing with this record's byte order on it.
+    pub fn timing(&self) -> ChannelTiming {
+        self.timing.with_color_order(self.order)
+    }
+}
+
+/// What the machine has decoded from the pads.
+///
+/// The sinks are deliberately not here: a snapshot is state, and a file
+/// handle is not ([`crate::snapshot`]). A decoder caught **mid-frame** is
+/// state — one restored without its half-shifted bits would resume a frame
+/// that never existed.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct PinState {
+    /// Per pad, its decoder.
+    pub decoders: std::collections::BTreeMap<u8, Ws281xDecoder>,
+    /// Per pad, the frames it has completed.
+    pub frames: std::collections::BTreeMap<u8, Vec<Frame>>,
+    /// Per pad, what it is routed to right now.
+    pub routed: std::collections::BTreeMap<u8, RouteSource>,
+    /// Per pad, edges seen.
+    pub edges: std::collections::BTreeMap<u8, u64>,
+    /// Pads whose frame list reached [`FRAMES_PER_PAD_CAP`].
+    pub capped: std::collections::BTreeSet<u8>,
+}
+
+/// The pads, online: one decoder per routed pad, fed from the fabric every
+/// window, plus the two host sinks.
+///
+/// ⚠️ **Two cores, one fabric.** The edges are drained once per *window*, not
+/// once per core, and the cycle the decoder reads is the edge's own `at` —
+/// stamped by whoever drove the signal, not by the drain. So the interleave
+/// cannot reorder a waveform, and a frame decoded here is the same frame at
+/// any `--core-quantum`. ⚠️ And on **this** chip the pusher runs on core 0
+/// only — slot 1 is held — so there is no cross-core frame-start jitter
+/// either: two quanta give the same frames *and* the same frame-start
+/// cycles, which the classic's cannot promise (its DD-noted 64-cycle offset).
+///
+/// `cpu_hz` is a **parameter** of [`Ws281xDecoder`] and the S3's is
+/// [`memmap::CPU_HZ`] = 240 MHz against the C6's 160: one WS2812 bit is a
+/// different number of cycles here and every threshold follows from it.
+struct PinObserver {
+    strip: StripConfig,
+    cpu_hz: u64,
+    state: PinState,
+    /// The last [`lp_emu_esp_common::pins::Fabric::route_epoch`] seen, so a
+    /// window that changed no routing walks no pads.
+    epoch: u64,
+    dump: Option<Box<dyn std::io::Write + Send>>,
+    pin_log: Option<Box<dyn std::io::Write + Send>>,
+    pin_log_lines: u64,
+    pin_log_capped: bool,
+}
+
+/// One decoded frame as a JSON line — the `--dump-frames` record.
+///
+/// `wire` is what the wire carried and `rgb` is that unpermuted with the
+/// configured order: the frame the *driver* was handed. Both are in the
+/// record on purpose, so a wrong order assumption is a visible difference
+/// between two fields rather than a silent one inside `rgb`.
+pub fn frame_record(frame: &Frame, strip: StripConfig, routed: Option<&RouteSource>) -> String {
+    let signal = match routed {
+        Some(RouteSource::Signal(sig, _)) => crate::regs::output_signals::output_signal_name(sig.0)
+            .map_or_else(|| format!("sig{}", sig.0), str::to_string),
+        Some(RouteSource::GpioOut) => "GPIO_OUT".to_string(),
+        None => "unrouted".to_string(),
+    };
+    let us = |cycles: Cycles| cycles as f64 / memmap::CYCLES_PER_US as f64;
+    let reset = match frame.reset_cycles {
+        Some(c) => format!("{:.3}", us(c)),
+        None => "null".to_string(),
+    };
+    format!(
+        "{{\"kind\":\"ws281x-frame\",\"pad\":{},\"signal\":\"{signal}\",\"n\":{},\
+         \"start_us\":{:.3},\"end_us\":{:.3},\"bits\":{},\"leds\":{},\
+         \"wire\":\"{}\",\"rgb\":\"{}\",\"errors\":{},\"trailing_bits\":{},\
+         \"reset_us\":{reset},\"complete\":{}}}",
+        frame.pad.0,
+        frame.n,
+        us(frame.start),
+        us(frame.end),
+        frame.bits,
+        frame.leds(),
+        hex(&frame.wire),
+        hex(&unpermute(&frame.wire, strip.order)),
+        frame.error_count,
+        frame.trailing_bits,
+        frame.is_complete(),
+    )
+}
+
+/// Lowercase hex, no separators — the shape `[ORACLE] rgb=` and the
+/// firmware's own `[OUT] dump` line already use.
+pub fn hex(bytes: &[u8]) -> String {
+    use std::fmt::Write as _;
+    let mut out = String::with_capacity(bytes.len() * 2);
+    for b in bytes {
+        let _ = write!(out, "{b:02x}");
+    }
+    out
+}
+
 pub struct Esp32S3Builder {
     rom: RomSource,
     app: AppSource,
@@ -944,6 +1120,12 @@ pub struct Esp32S3Builder {
     uart0_source: Option<Box<dyn ByteSource>>,
     uart0_script_source: Option<lp_emu_esp_common::ScriptedSource>,
     strap_word: u32,
+    // ---- the pads, the RMT and the frame (M6 P07) ----
+    dump_frames: FrameSink,
+    pin_log: PinLogSink,
+    strip: StripConfig,
+    /// Keep the RMT's pulse and word logs (`Rmt::set_keep_logs`).
+    rmt_logs: bool,
 }
 
 impl Default for Esp32S3Builder {
@@ -979,6 +1161,10 @@ impl Default for Esp32S3Builder {
             uart0_source: None,
             uart0_script_source: None,
             strap_word: GPIO_STRAP_SPI_FAST_FLASH_BOOT,
+            dump_frames: FrameSink::default(),
+            pin_log: PinLogSink::default(),
+            strip: StripConfig::default(),
+            rmt_logs: false,
         }
     }
 }
@@ -1252,6 +1438,34 @@ impl Esp32S3Builder {
         self
     }
 
+    /// Where decoded WS281x frames go. They are always also kept in memory
+    /// for [`Machine::frames`].
+    pub fn dump_frames(mut self, sink: FrameSink) -> Self {
+        self.dump_frames = sink;
+        self
+    }
+
+    /// Where the raw pin log goes: one line per edge, on every routed pad.
+    pub fn pin_log(mut self, sink: PinLogSink) -> Self {
+        self.pin_log = sink;
+        self
+    }
+
+    /// How each pad is decoded: the wire timing and the byte order the
+    /// record's `rgb` field is unpermuted with.
+    pub fn strip(mut self, strip: StripConfig) -> Self {
+        self.strip = strip;
+        self
+    }
+
+    /// Keep the RMT's per-channel pulse and word logs — the word-level
+    /// oracle a test compares the decoder against. Off by default: a
+    /// 24-frame run holds hundreds of thousands of pulses.
+    pub fn rmt_logs(mut self, keep: bool) -> Self {
+        self.rmt_logs = keep;
+        self
+    }
+
     pub fn build(self) -> Result<Machine, BuildError> {
         let rom_image = match &self.rom {
             RomSource::Vendored => rom::vendored()?,
@@ -1437,6 +1651,46 @@ impl Esp32S3Builder {
         };
         let usb_index = bus.peripheral_index("USB_DEVICE");
         let gpio_index = bus.peripheral_index("GPIO");
+        let rmt_index = bus.peripheral_index("RMT");
+
+        // ⚠️ The S3's `IO_MUX.gpio[n]` resets with `fun_ie` **set** (`0x0b00`)
+        // where the C6's has it clear, so the fabric is told what the
+        // register file already says before the guest runs. Without this the
+        // block and its own registers disagree from cycle zero.
+        crate::periph::io_mux::seed_input_enables(&mut bus.pins);
+
+        // The pads' two sinks. Opened here rather than at the first frame so
+        // a run that cannot write its log says so before the guest starts.
+        let dump: Option<Box<dyn std::io::Write + Send>> = match &self.dump_frames {
+            FrameSink::Memory => None,
+            FrameSink::Stdout => Some(Box::new(std::io::stdout())),
+            FrameSink::File(path) => Some(Box::new(std::io::BufWriter::new(
+                std::fs::File::create(path).map_err(|e| {
+                    BuildError::Io(format!("--dump-frames {}: {e}", path.display()))
+                })?,
+            ))),
+        };
+        let pin_log_sink: Option<Box<dyn std::io::Write + Send>> = match &self.pin_log {
+            PinLogSink::Off => None,
+            PinLogSink::File(path) => Some(Box::new(std::io::BufWriter::new(
+                std::fs::File::create(path)
+                    .map_err(|e| BuildError::Io(format!("--pin-log {}: {e}", path.display())))?,
+            ))),
+        };
+        if self.rmt_logs {
+            match rmt_index {
+                Some(i) => {
+                    bus.with_peripheral::<lp_emu_esp_common::ip::rmt::Rmt, _>(i, |r, _| {
+                        r.set_keep_logs(true)
+                    });
+                }
+                None => {
+                    return Err(BuildError::App(
+                        "rmt_logs was asked for and this machine has no RMT block".into(),
+                    ));
+                }
+            }
+        }
 
         // The ROM first, always (PD7), its non-alloc data with it, and the
         // ROM's own copy of that data at the addresses its reset handler
@@ -1519,6 +1773,17 @@ impl Esp32S3Builder {
             uart0_tcp,
             gpio_index,
             strap_word: self.strap_word,
+            rmt_index,
+            pins: PinObserver {
+                strip: self.strip,
+                cpu_hz: memmap::CPU_HZ,
+                state: PinState::default(),
+                epoch: 0,
+                dump,
+                pin_log: pin_log_sink,
+                pin_log_lines: 0,
+                pin_log_capped: false,
+            },
         };
 
         match self.boot_mode {
@@ -1694,6 +1959,11 @@ pub struct Machine {
     uart0_tcp: Option<lp_emu_esp_common::TcpHost>,
     /// `GPIO`'s peripheral index, where a reboot re-latches the strap.
     gpio_index: Option<usize>,
+    /// The other block that watches the pads: the RMT's own logs and
+    /// refill telemetry are read through it (M6 P07).
+    rmt_index: Option<usize>,
+    /// The pads: a decoder per routed pad, the frames, and the two sinks.
+    pins: PinObserver,
     /// The strapping word the run was built with (`--strap`).
     strap_word: u32,
 }
@@ -2270,6 +2540,148 @@ impl Machine {
         self.bus.first_strict_violation()
     }
 
+    // ---- the pads (M6 P07) --------------------------------------------------
+
+    /// Every pad the guest has routed, ascending, with what it is routed to.
+    ///
+    /// A pad appears the moment `func_out_sel_cfg` names something, whether
+    /// or not anything has driven it yet — so an empty `frames()` on a pad
+    /// that *is* here separates "the matrix never routed it" from "the
+    /// engine never pumped it", which are different failures.
+    ///
+    /// ⚠️ **Do not assert its length.** A boot routes pads this phase has no
+    /// interest in; the assertion a test wants is that the strip's pad is
+    /// present and carries `RMT_SIG_0`.
+    pub fn routed_pads(&self) -> Vec<(PadId, RouteSource)> {
+        self.pins
+            .state
+            .routed
+            .iter()
+            .map(|(p, r)| (PadId(*p), *r))
+            .collect()
+    }
+
+    /// The frames decoded on `pad`. Empty for a pad nothing routed.
+    pub fn frames(&self, pad: u8) -> &[Frame] {
+        self.pins
+            .state
+            .frames
+            .get(&pad)
+            .map(Vec::as_slice)
+            .unwrap_or(&[])
+    }
+
+    /// Edges seen on `pad` since the machine started.
+    pub fn pin_edges(&self, pad: u8) -> u64 {
+        self.pins.state.edges.get(&pad).copied().unwrap_or(0)
+    }
+
+    /// What is decoded, for a snapshot and for a test that wants to compare
+    /// two runs.
+    pub fn pin_state(&self) -> &PinState {
+        &self.pins.state
+    }
+
+    /// How each pad is being read: the wire timing and the byte order the
+    /// record's `rgb` field is unpermuted with.
+    pub fn strip(&self) -> StripConfig {
+        self.pins.strip
+    }
+
+    /// One line per routed pad: `pin gpio9: 22 frames, 22 complete, 0
+    /// errors, 256 leds`. What the CLI prints at exit.
+    pub fn pin_report(&self) -> Vec<String> {
+        self.pins
+            .state
+            .routed
+            .keys()
+            .map(|pad| {
+                let frames = self.frames(*pad);
+                let complete = frames.iter().filter(|f| f.is_complete()).count();
+                let errors: u64 = frames.iter().map(|f| f.error_count).sum();
+                let leds = frames.last().map(Frame::leds).unwrap_or(0);
+                format!(
+                    "pin gpio{pad}: {} frames, {complete} complete, {errors} errors, {leds} leds, \
+                     {} edges",
+                    frames.len(),
+                    self.pin_edges(*pad),
+                )
+            })
+            .collect()
+    }
+
+    /// End of the run: a frame still open on a pad is reported incomplete.
+    ///
+    /// Not part of [`run_until`](Self::run_until), because a run can be
+    /// resumed and closing a frame that is still being transmitted would
+    /// invent one — a flushed frame carries `reset_cycles: None` and so is
+    /// never `is_complete()`. The CLI calls it before its summary; so does a
+    /// test that wants the last frame.
+    pub fn flush_frames(&mut self) {
+        let at = self.clock();
+        let pads: Vec<u8> = self.pins.state.decoders.keys().copied().collect();
+        for pad in pads {
+            let Some(frame) = self
+                .pins
+                .state
+                .decoders
+                .get_mut(&pad)
+                .and_then(|d| d.flush(at))
+            else {
+                continue;
+            };
+            self.record_frame(pad, frame);
+        }
+        if let Some(w) = self.pins.dump.as_mut() {
+            let _ = w.flush();
+        }
+        if let Some(w) = self.pins.pin_log.as_mut() {
+            let _ = w.flush();
+        }
+    }
+
+    /// Which pads a **peripheral signal** is routed to and output-enabled on
+    /// — `Gpio::peripheral_driven_pads`, from outside the bus.
+    pub fn peripheral_driven_pads(&mut self) -> Vec<(PadId, lp_emu_esp_common::SignalId)> {
+        let Some(index) = self.gpio_index else {
+            return Vec::new();
+        };
+        self.bus
+            .with_peripheral::<crate::periph::gpio::Gpio, _>(index, |g, cx| {
+                g.peripheral_driven_pads(cx)
+            })
+            .unwrap_or_default()
+    }
+
+    fn rmt(&self) -> Option<&lp_emu_esp_common::ip::rmt::Rmt> {
+        self.bus
+            .peripheral(self.rmt_index?)?
+            .as_any()?
+            .downcast_ref()
+    }
+
+    /// Every pulse TX channel `ch` has put on its signal. Empty unless
+    /// [`Esp32S3Builder::rmt_logs`] asked for the logs.
+    pub fn rmt_pulses(&self, ch: usize) -> &[lp_emu_esp_common::ip::rmt::Pulse] {
+        self.rmt().map(|r| r.pulses(ch)).unwrap_or(&[])
+    }
+
+    /// Every word TX channel `ch` fetched, with the cycle it was fetched at.
+    pub fn rmt_words(&self, ch: usize) -> &[(Cycles, u32)] {
+        self.rmt().map(|r| r.words(ch)).unwrap_or(&[])
+    }
+
+    /// `tx_end`s raised on channel `ch`.
+    pub fn rmt_frames_ended(&self, ch: usize) -> usize {
+        self.rmt().map(|r| r.frames_ended(ch)).unwrap_or(0)
+    }
+
+    /// What channel `ch`'s refills cost, in words. **Reported, never gated**
+    /// (PD9).
+    pub fn rmt_refill_stats(&self, ch: usize) -> lp_emu_esp_common::ip::rmt::RefillStats {
+        self.rmt().map(|r| r.refill_stats(ch)).unwrap_or_default()
+    }
+
     pub fn hook_calls(&self) -> u64 {
         self.hook_calls
     }
@@ -2589,6 +3001,10 @@ impl Machine {
             // and given the matrix feed it could not sample for itself.
             let at = self.clock();
             self.bus.run_due_events(at);
+            // The pads: whatever the window put on the wire, in cycle order,
+            // and before the feed — a pad whose edge latches a GPIO
+            // interrupt must reach the matrix in this same iteration.
+            self.drain_pins();
             // The host's side, at a slice boundary and never inside one: a
             // scripted command due by now, then — on the poll cadence — the
             // byte socket's client edge and the control channel's lines.
@@ -2746,6 +3162,141 @@ impl Machine {
             let external = self.bus.pending_cpu_interrupt_mask();
             self.harts[core].set_external_mask(external);
             self.harts[core].poll_interrupts();
+        }
+    }
+
+    /// The pads, at a slice boundary: the routing the window changed, then
+    /// every edge it put on the wire, in cycle order.
+    ///
+    /// Three consumers read the same edge stream and so can never disagree
+    /// about what was on the wire: the GPIO block's input side (which latches
+    /// pad interrupts), the RMT's receivers on a chip that has them — the S3
+    /// does not model its own — and one WS281x decoder per routed pad.
+    fn drain_pins(&mut self) {
+        // The routing first, and only when something moved it — that is the
+        // whole point of `Fabric::route_epoch`, so a window that routed
+        // nothing walks no pads.
+        let epoch = self.bus.pins.route_epoch();
+        if epoch != self.pins.epoch {
+            self.pins.epoch = epoch;
+            let routes: Vec<(PadId, RouteSource)> = self
+                .bus
+                .pins
+                .routes()
+                .map(|(pad, route)| (pad, route.source))
+                .collect();
+            self.pins.state.routed.clear();
+            for (pad, source) in routes {
+                self.pins.state.routed.insert(pad.0, source);
+                let strip = self.pins.strip;
+                let cpu_hz = self.pins.cpu_hz;
+                // `or_insert_with`: a re-mux between the pusher's waves
+                // rewrites `func_out_sel_cfg` for a pad that is already
+                // being decoded, and throwing that decoder away would lose
+                // the bits of the frame in flight.
+                self.pins
+                    .state
+                    .decoders
+                    .entry(pad.0)
+                    .or_insert_with(|| Ws281xDecoder::new(pad, strip.timing(), cpu_hz));
+                self.note_pin_route(pad.0, source);
+            }
+        }
+        let edges = self.bus.pins.take_edges();
+        if edges.is_empty() {
+            return;
+        }
+        if let Some(index) = self.gpio_index {
+            self.bus
+                .with_peripheral::<crate::periph::gpio::Gpio, _>(index, |g, cx| {
+                    g.observe_edges(&edges, cx)
+                });
+        }
+        if let Some(index) = self.rmt_index {
+            self.bus
+                .with_peripheral::<lp_emu_esp_common::ip::rmt::Rmt, _>(index, |r, cx| {
+                    r.observe_edges(&edges, cx)
+                });
+        }
+        for edge in edges {
+            let pad = edge.pad.0;
+            *self.pins.state.edges.entry(pad).or_default() += 1;
+            self.write_pin_log(&edge);
+            let Some(frame) = self
+                .pins
+                .state
+                .decoders
+                .get_mut(&pad)
+                .and_then(|d| d.feed(&edge))
+            else {
+                continue;
+            };
+            self.record_frame(pad, frame);
+        }
+    }
+
+    /// One `# route` note per pad in the pin log when the routing changes, so
+    /// a reader of the edge stream can see which signal was driving it.
+    fn note_pin_route(&mut self, pad: u8, source: RouteSource) {
+        use std::io::Write as _;
+        let Some(w) = self.pins.pin_log.as_mut() else {
+            return;
+        };
+        let what = match source {
+            RouteSource::Signal(sig, invert) => {
+                let name = crate::regs::output_signals::output_signal_name(sig.0)
+                    .map_or_else(|| format!("sig{}", sig.0), str::to_string);
+                format!("{name} (out_sel={} inv={})", sig.0, u8::from(invert))
+            }
+            RouteSource::GpioOut => "GPIO_OUT".to_string(),
+        };
+        let _ = writeln!(w, "# route gpio{pad} <- {what}");
+    }
+
+    fn write_pin_log(&mut self, edge: &lp_emu_esp_common::pins::Edge) {
+        use std::io::Write as _;
+        let Some(w) = self.pins.pin_log.as_mut() else {
+            return;
+        };
+        if self.pins.pin_log_lines >= PIN_LOG_LINE_CAP {
+            if !self.pins.pin_log_capped {
+                self.pins.pin_log_capped = true;
+                let _ = writeln!(
+                    w,
+                    "# pin log cap ({PIN_LOG_LINE_CAP} lines) reached; later edges are not logged"
+                );
+            }
+            return;
+        }
+        self.pins.pin_log_lines += 1;
+        // `<us> <pad> <level> cyc=<cycle>`: the microseconds are for a human
+        // and the **cycle** is the number anything may compute with. Emulated
+        // microseconds never gate anything (PD9).
+        let us = edge.at as f64 / memmap::CYCLES_PER_US as f64;
+        let _ = writeln!(
+            w,
+            "{us:.3} {} {} cyc={}",
+            edge.pad,
+            u8::from(edge.level),
+            edge.at
+        );
+    }
+
+    /// Keep a decoded frame, and write its record if a sink asked for one.
+    fn record_frame(&mut self, pad: u8, frame: Frame) {
+        use std::io::Write as _;
+        if let Some(w) = self.pins.dump.as_mut() {
+            let line = frame_record(&frame, self.pins.strip, self.pins.state.routed.get(&pad));
+            let _ = writeln!(w, "{line}");
+        }
+        let frames = self.pins.state.frames.entry(pad).or_default();
+        if frames.len() < FRAMES_PER_PAD_CAP {
+            frames.push(frame);
+        } else if self.pins.state.capped.insert(pad) {
+            log::warn!(
+                "pin gpio{pad}: {FRAMES_PER_PAD_CAP} frames kept in memory; later ones are \
+                 decoded and dumped but not kept"
+            );
         }
     }
 
@@ -3036,7 +3587,9 @@ impl Machine {
         };
         if let Some(index) = self.gpio_index {
             self.bus
-                .with_peripheral::<GpioBlock, _>(index, |g, _| g.set_strap(word));
+                .with_peripheral::<crate::periph::gpio::Gpio, _>(index, |g, _| {
+                    g.set_strap(word)
+                });
         }
 
         let usb_host = self.usb_host;
