@@ -223,6 +223,49 @@ named and deliberately not pursued) or **candidate**.
 | 2026-09-12 | **P1b R3 — instant RMT** (the full DD26 tier) | `scripts/emu/tier-probes/R3-instant-rmt.patch` | slices → 61,155; **zero frames**; the guest never renders | **rejected as built** |
 | 2026-09-12 | **P1b R4 — the UART tap** | §2's MMIO census | **not taken**: UART0 is 0.14 % of crossings on `render-basic`, a hundredth of the 2 % floor the phase set | **rejected — wrong image**. It remains a *harness*-image lever |
 | 2026-09-12 | **P1b R3′ — the firmware's own "no real output under emulation" switch** | `lp-fw/fw-esp32c6/src/` | **does not exist**. `bench/render_loop.rs` mentions emulation only to pick a shorter run; the RMT driver is unconditional | **registered** — an unbuilt firmware-side lever |
+| 2026-09-13 | **P1c — the `wall_timeout` check strides** (`WALL_TIMEOUT_SLICE_STRIDE = 64` in `machine.rs`) | this document §3's note below; PR #736 | **computed −224 ms V8 / −210 ms JSC** (1,508,000 of 1,531,923 clock reads removed × P1's 148.3 / 139.5 ns). **Desk best-of, one invocation per engine, `render-basic` t2 5,500 ms: V8 16/fn 5.38 s → 5.07 s (−310 ms, 1.062×), JSC 8/fn 6.96 s → 6.50 s (−460 ms, 1.070×)** — both taken at loadavg 43–83 from three foreign worktrees, so the magnitudes carry a wide error bar and only the sign and the order are safe. Every identity leg `same` | **shipped** |
+
+### The P1c note: what the stride removed, and what the desk could say
+
+The lever is one hunk. `run_until` asked `started.elapsed()` at every slice
+boundary to see whether `--wall-timeout` had expired; it now asks on the first
+slice of a run and every 64th after. The net is a **diagnostic** stop (exit
+code 4) and no guest state depends on it, so the only thing the stride costs is
+*when* it fires: up to 63 × `MAX_SLICE_CYCLES` = 516,096 emulated cycles late,
+≈ 3 ms of wall at 1×. Yona ruled that acceptable at `G-LOOP0b`.
+
+**The load-independent number is the computed one.** A `render-basic` t2 run
+makes 1,531,923 slices, so the stride removes 1,508,000 of its 1,531,923 clock
+reads; at P1's measured 148.3 ns (V8) and 139.5 ns (JSC) that is **224 ms and
+210 ms**. Nothing else on the loop path reads a host clock: after P1c the only
+unconditional `Instant::now()` in `run_until` is the one at entry, and every
+read in `jit.rs` is behind `LP_EMU_JIT_ENTRY_TIME` or one-shot at translation.
+
+**The desk rows agree in sign and order and cannot pin the magnitude.** They
+were taken at loadavg 43–83 — three other worktrees were running emulator
+sweeps and clippy on the same desk for the whole phase — so best-of had to be
+widened from 5 to 11 (V8) and 9 (JSC) before either engine caught a window
+close to P1b's clean baseline. What they say:
+
+| engine | best of | before | after | delta | × | P1b's clean baseline |
+|---|---:|---:|---:|---:|---:|---:|
+| node/V8 16/fn | 11 | 5.38 s | **5.07 s** | −310 ms (−5.8 %) | 1.062× | 5.24 s at loadavg 3.1 |
+| bun/JSC 8/fn | 9 | 6.96 s | **6.50 s** | −460 ms (−6.6 %) | 1.070× | 6.35 s |
+
+Both exceed the computed prize, which under this contention is **not evidence
+of more**: a best-of on a busy desk is biased upward whenever one side happens
+to catch a quieter moment. Read the computed 224/210 ms as the number and these
+as confirmation of its sign.
+
+⚠️ **A bun row's `loadavg` is a fiction.** `rung-rows.mjs` records
+`os.loadavg()[0]`, and **bun's `node:os.loadavg()` returns ~0 unconditionally**
+(measured 2026-09-13: `1.8e-10, 0, 2.8e-12` against node's `70.8, 83.2, 63.8`
+on the same desk in the same second). Every JSC row this runner has printed
+therefore reads `loadavg 0.0` whatever the desk was doing — including §2's and
+`G-LOOP0b`'s "loadavg 0.0" JSC tables, whose load is **unknown, not zero**.
+§1's law that "a wall-clock number with no `loadavg` beside it is not a row"
+is not satisfied by a bun row today. Take the load from `node` or `uptime`
+beside the invocation until the runner is fixed.
 
 ### The P1b finding that matters most
 
