@@ -335,6 +335,7 @@ fn home_open_package_pushes_the_library_head_end_to_end() {
         ControllerId::new(HOME_NODE_ID),
         HomeOp::OpenPackage {
             key: summary.uid.to_string(),
+            prefer: None,
         },
     )));
     drive(actor.run_one_batch_for_test());
@@ -429,6 +430,7 @@ fn an_open_narrates_on_the_card_while_it_runs() {
             ControllerId::new(HOME_NODE_ID),
             HomeOp::OpenPackage {
                 key: summary.uid.to_string(),
+                prefer: None,
             },
         ),
         sink,
@@ -507,6 +509,7 @@ fn a_failed_open_gives_the_project_back_to_the_library() {
         ControllerId::new(HOME_NODE_ID),
         HomeOp::OpenPackage {
             key: summary.uid.to_string(),
+            prefer: None,
         },
     )));
     drive(actor.run_one_batch_for_test());
@@ -941,7 +944,7 @@ fn opening_another_package_releases_the_previous_project_lock() {
     let open = |key: String| {
         StudioCommand::Action(UiAction::from_op(
             ControllerId::new(HOME_NODE_ID),
-            HomeOp::OpenPackage { key },
+            HomeOp::OpenPackage { key, prefer: None },
         ))
     };
     handle.tx.send(open(first.uid.to_string()));
@@ -1010,6 +1013,7 @@ fn save_after_home_open_pulls_the_edit_into_the_library() {
         ControllerId::new(HOME_NODE_ID),
         HomeOp::OpenPackage {
             key: summary.uid.to_string(),
+            prefer: None,
         },
     )));
     drive(actor.run_one_batch_for_test());

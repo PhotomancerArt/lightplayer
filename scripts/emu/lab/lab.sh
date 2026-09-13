@@ -3,8 +3,8 @@
 #
 #   lab.sh status                                  # devices, builds, job counts
 #   lab.sh devices                                 # the device table
-#   lab.sh queue --build 23a3d3c --rows gate-rows --repeats 3 --spacing 3m [--device NAME] [--ttl 24h] [--note ...]
-#   lab.sh queue --ab 86cb2e0 23a3d3c --rows gate-rows --repeats 5 --spacing 3m     # A1 B1 A2 B2 … on one device
+#   lab.sh queue --build 23a3d3c --rows gate-rows --repeats 3 [--spacing 90s] [--device NAME] [--ttl 24h] [--note ...]
+#   lab.sh queue --ab 86cb2e0 23a3d3c --rows gate-rows --repeats 5     # A1 B1 A2 B2 … on one device
 #   lab.sh queue --build X --row render-basic:t2:jit:8 --row render-basic:t2:interp  # explicit rows
 #   lab.sh queue --ab A B --repeats 8 --stop-when-stable [PCT] [--stable-row interp|all|KEY] [--stable-min N]  # stop a build once its control row settles
 #   lab.sh wait --job ID [--max-time 3600]         # ONE blocking call; prints report.md's path on exit 0
@@ -72,7 +72,13 @@ dur_ms() {
 }
 
 cmd_queue() {
-    local builds='[]' rows='"gate-rows"' rowlist='[]' repeats=1 spacing=0 device=any ttl=86400000 retry=1 note=null
+    # `spacing` defaults to 60000 — the same 60 s as the device cooldown, which
+    # is what gated presses anyway while this said 0. 3 m was the old advice and
+    # bought nothing: on build 9f67d78, 10 presses each, 3 m spacing
+    # (j-20260913-0755-1213) against back-to-back (j-20260913-0755-14e2) gave a
+    # translated median of 1.046× vs 1.053× and an interpreter 0.677 vs 0.669.
+    # `--spacing 0` is still allowed and still means back-to-back.
+    local builds='[]' rows='"gate-rows"' rowlist='[]' repeats=1 spacing=60000 device=any ttl=86400000 retry=1 note=null
     local stable=null stable_pct=5 stable_row=interp stable_min=4
     while [[ $# -gt 0 ]]; do
         case "$1" in
@@ -253,7 +259,20 @@ cmd_install() {
         # empty grep must not take the install down with it.
         launchctl print "gui/$(id -u)/$l" | grep -E "^\s+(state|pid) " | tr -s ' ' | sed "s|^|lab: $l|" >&2 || true
     done
-    curl -sf "http://127.0.0.1:$(port)/healthz" >/dev/null || { echo "lab: server agent is not answering /healthz yet (lab.sh logs server)" >&2; exit 1; }
+    # The server boots in ~2.3 s, so the old single shot after `sleep 2` failed
+    # a healthy install (twice on 2026-09-13). Poll every 0.5 s for up to 10 s
+    # and say how long it took — a slow boot is worth seeing, not worth failing.
+    local health_url waited=0 healthy=0
+    health_url="http://127.0.0.1:$(port)/healthz"
+    for _ in $(seq 1 20); do
+        if curl -sf "$health_url" >/dev/null; then healthy=1; break; fi
+        sleep 0.5
+        waited=$(( waited + 5 ))
+    done
+    [[ $healthy -eq 1 ]] || { echo "lab: server agent is not answering /healthz yet (lab.sh logs server)" >&2; exit 1; }
+    # `waited` counts tenths of a second so the message can print one decimal
+    # without bc; the 2 s sleep above is part of the boot the director waited on.
+    printf 'lab: server answered /healthz after %d.%d s\n' $(( (20 + waited) / 10 )) $(( (20 + waited) % 10 )) >&2
     echo "lab: installed ${labels[*]} (repo $repo$([[ $force -eq 1 ]] && echo ', --force'), exposure $exp)" >&2
     if [[ "$exp" == tailscale ]]; then
         # Serve the lab on the tailnet over https. Needs MagicDNS + HTTPS

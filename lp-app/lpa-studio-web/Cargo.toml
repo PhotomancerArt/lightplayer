@@ -23,7 +23,10 @@ log = { workspace = true }
 lpa-client = { path = "../lpa-client", default-features = false }
 lpa-link = { path = "../lpa-link", features = ["browser-worker"] }
 lpa-agent = { path = "../lpa-agent" }
-lpa-studio-core = { path = "../lpa-studio-core", features = ["browser-worker", "browser-serial-esp32"] }
+# `emulator-tab` is what compiles `browser_emu_source.rs` into the shipped
+# wasm: without it the emu transport has a model half and no platform half,
+# so the picker's emu row would mint a record nothing could ever start.
+lpa-studio-core = { path = "../lpa-studio-core", features = ["browser-worker", "browser-serial-esp32", "emulator-tab"] }
 # The Gradient value type and its checked-in catalog + sampling helpers,
 # for GradientStripCanvas.
 lpc-model = { path = "../../lp-core/lpc-model" }

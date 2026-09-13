@@ -3231,7 +3231,7 @@ bench-emu-web *args:
 # director's CLI over it.
 #
 #   just emu-lab status                       # devices, builds, job counts
-#   just emu-lab queue --ab A B --rows gate-rows --repeats 5 --spacing 3m
+#   just emu-lab queue --ab A B --rows gate-rows --repeats 5   # spacing 60 s by default
 #   just emu-lab wait --job <id>              # ONE blocking call, run in the background
 #   just bench-emu-web --stage-into ~/.photomancer/emu-lab   # put this tree's build in the store
 #

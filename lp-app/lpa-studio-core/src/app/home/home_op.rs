@@ -80,9 +80,19 @@ impl ProjectTemplate {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum HomeOp {
     /// Open a library package — by slug (URLs) or `prj…` uid (cards) —
-    /// pushing its head to the sim (D13/D19).
+    /// pushing its head to a runtime Studio resolves (D13/D19).
     OpenPackage {
         key: String,
+        /// Which KIND of runtime the address asked for: `?on=emu`,
+        /// `?on=sim`, or `None` for an address that asked for nothing
+        /// (D1). A parameter rather than a sibling op — unlike
+        /// [`Self::OpenPackageOnDevice`] — because it is the same gesture:
+        /// "open this project, you pick the device", narrowed. The open
+        /// still reuses the tab's own runtime and still mints one when
+        /// there is none; all `prefer` decides is which kind it settles
+        /// for. `None` resolves exactly as it always has, a sim, so no
+        /// default flips.
+        prefer: Option<crate::RuntimeKind>,
     },
     /// Open a library package **on the device the address named** —
     /// `?on=mac:<base mac>` (D43), or the mismatch page's "push here".
@@ -381,6 +391,7 @@ mod tests {
         for op in [
             HomeOp::OpenPackage {
                 key: "prj1".to_string(),
+                prefer: None,
             },
             HomeOp::OpenExample {
                 id: "catalog/plasma".to_string(),

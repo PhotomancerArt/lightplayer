@@ -503,8 +503,19 @@ in the whole image — and **6,397 core switches per million instructions**,
 one every 156 instructions. The full reading is the Xtensa plan's
 `m7/notes.md`.
 
-Evidence, and the rungs not yet climbed (poll-loop skip, block cache): the
-planning workspace's
+**The block cache** is the rung after that table, and it is on by default on
+every non-`rom-up` C6 run: the machine pre-decodes a run of instructions ending
+at a control transfer and remembers it, because 74 % of the interpreter's host
+time on the render loop went on working out what the next instruction *is*
+against 4 % on the guest's arithmetic. It measured **1.15× on `render-basic`
+t2 and 1.33× on `render-rocaille` t2**. Nothing observable depends on a hit or
+a miss — that is the invariant the design hangs on — so `--no-block-cache` is a
+free identity oracle and the bisection tool when a transcript moves.
+`docs/adr/2026-09-09-emulator-block-cache.md` is the argument;
+`lp-emu-core/src/block.rs`'s module docs are the mechanism.
+
+Evidence, and the rung that was measured and **rejected** (the poll-loop skip):
+the planning workspace's
 `2026-09-06-1001-esp-emulator/2026-09-07-speed-ladder-research.md` and its
 `speed-research/` directory, executed by the `2026-09-07-0827-emu-speed-ladder`
 plan.

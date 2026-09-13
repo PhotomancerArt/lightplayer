@@ -44,9 +44,29 @@ let tabModule = null;
 
 function loadTabModule() {
   if (!tabModule) {
-    tabModule = import("/lpa-link/emulator_tab.js");
+    tabModule = import(tabModulePath());
   }
   return tabModule;
+}
+
+/**
+ * Where the page serves its tab-emulator module.
+ *
+ * **A function, not an inline literal, and that is load-bearing.** The
+ * specifier is a SITE path, resolved by the browser at run time; a literal
+ * here is constant-foldable, so the bundler tries to resolve it against this
+ * crate's source tree, finds nothing, and fails the whole JS bundling step —
+ * after which `dx` falls back to copying the snippets somewhere the emitted
+ * bundle does not look for them, and Studio stops booting at all (measured
+ * 2026-09-11, the first build with `emulator-tab` enabled on
+ * `lpa-studio-web`). Behind a call the specifier is opaque and the import
+ * survives to run time untouched.
+ *
+ * `browser_serial.js` wraps its controller path for exactly this reason;
+ * this is the same shape, deliberately.
+ */
+function tabModulePath() {
+  return "/lpa-link/emulator_tab.js";
 }
 
 /**

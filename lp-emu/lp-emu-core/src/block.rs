@@ -204,18 +204,21 @@ impl BlockStats {
     }
 }
 
-/// Default table size: 2^16 entries.
+/// Default table size: 2^18 entries.
 ///
 /// P1 measured **37,517 distinct block starts** on `render-basic` and 34,906
-/// on `render-rocaille`; 2^12 would thrash and 2^16 leaves the table a little
-/// over half occupied. 512 KiB of table at 8 bytes an entry.
+/// on `render-rocaille`; 2^12 would thrash, and 2^16 — the size this shipped
+/// with first — left the table a little over half occupied. With the
+/// multiply-shift index mix, 2^18 is what measured best: 73,162 decodes at a
+/// 99.93 % hit rate. 2 MiB of table at 8 bytes an entry.
 pub const DEFAULT_TABLE_BITS: u32 = 18;
 
 /// Default slot-arena cap.
 ///
 /// P1's working set is ~37.5 k blocks at a mean of 4.69 slots — about 176 k
-/// slots. 2^19 leaves room for the re-decodes a direct-mapped table's
-/// collisions cause without ever reaching the capacity flush.
+/// slots. 2^21 leaves room for the re-decodes a direct-mapped table's
+/// collisions cause without ever reaching the capacity flush: both render
+/// images report [`BlockStats::capacity_flushes`] at 0.
 pub const DEFAULT_ARENA_SLOTS: usize = 1 << 21;
 
 /// Default cap on distinct live blocks, for the same reason.

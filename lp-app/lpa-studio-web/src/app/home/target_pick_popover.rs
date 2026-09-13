@@ -4,10 +4,13 @@
 //! two decisions that differ are props:
 //!
 //! - **The Devices page's add slot** — the quiet second verb "start a board
-//!   here ▾". Its rows are tagged with what this build would run them as
-//!   (`sim`, from core's capability table), and picking one dispatches
-//!   [`SimCreateOp`]: mint the record, power it on, and the card appears in
-//!   the grid beside the slot that made it.
+//!   here ▾". Its rows are tagged with what picking them would start
+//!   (`emu` / `sim`, from core's capability table), and picking one
+//!   dispatches [`SimCreateOp`]: mint the record, power it on, and the card
+//!   appears in the grid beside the slot that made it. A board this build
+//!   can emulate has TWO rows (D1), so a row is identified by its board id
+//!   **and** its backing — the key, the roving cursor and the pick all
+//!   carry both.
 //! - **A project's Hardware row** — the same two groups with **no tag at
 //!   all**: `target` names hardware, and "a board is just a board" (D41).
 //!   Emu/sim is something a *device* is, not something a project declares.
@@ -33,7 +36,7 @@
 
 use dioxus::prelude::*;
 use lpa_studio_core::{
-    HomeOp, SimCreateOp, TargetChoice, TargetGroup, TargetOffer, TargetScope, UiAction,
+    Backing, HomeOp, SimCreateOp, TargetChoice, TargetGroup, TargetOffer, TargetScope, UiAction,
     target_offer,
 };
 use wasm_bindgen::JsCast;
@@ -79,8 +82,8 @@ pub(crate) fn TargetPickPopover(
             TargetPickMenu {
                 offer: target_offer(TargetScope::Runnable),
                 show_tags: true,
-                on_pick: move |board_id: String| {
-                    on_action.call(SimCreateOp::action_for(board_id));
+                on_pick: move |choice: TargetChoice| {
+                    on_action.call(SimCreateOp::action_for(choice.board_id, choice.backing));
                 },
             }
         }
@@ -134,12 +137,14 @@ pub fn HardwarePickPopover(
                 show_tags: false,
                 show_ids: true,
                 selected: selected.clone(),
-                on_pick: move |board_id: String| {
+                on_pick: move |choice: TargetChoice| {
                     on_action
                         .call(
                             home_action(HomeOp::SetPackageTarget {
                                 uid: uid.clone(),
-                                target: Some(board_id),
+                                // The BOARD, and nothing about a backing:
+                                // `target` names hardware (D41).
+                                target: Some(choice.board_id),
                             }),
                         );
                 },
@@ -160,21 +165,25 @@ pub(crate) fn TargetPickMenu(
     /// value people paste into manifests, so the row shows the value).
     #[props(default = false)]
     show_ids: bool,
-    /// The row already chosen, when the menu has one.
+    /// The row already chosen, when the menu has one. By board id: the one
+    /// menu that has a selection (the Hardware row) has one row per board.
     #[props(default)]
     selected: Option<String>,
-    on_pick: EventHandler<String>,
+    on_pick: EventHandler<TargetChoice>,
 ) -> Element {
     let close = try_consume_context::<PopoverCloseHandle>();
     let menu_id = use_hook(next_menu_id);
     // Which pickable row the arrow keys are on. Only the ENABLED rows are
     // reachable: a row the build cannot run is a statement, not a stop.
     let mut cursor = use_signal(|| 0usize);
-    let pickable: Vec<String> = offer
+    // Identified by board id AND backing: an emulated board has two rows,
+    // and a cursor keyed on the board alone would land the arrow keys on
+    // whichever came first, twice (D1).
+    let pickable: Vec<(String, Backing)> = offer
         .choices
         .iter()
         .filter(|choice| choice.runnable)
-        .map(|choice| choice.board_id.clone())
+        .map(|choice| (choice.board_id.clone(), choice.backing))
         .collect();
     let last = pickable.len().saturating_sub(1);
 
@@ -201,13 +210,16 @@ pub(crate) fn TargetPickMenu(
                                 {
                                     let row = pickable
                                         .iter()
-                                        .position(|id| id == &choice.board_id);
+                                        .position(|(id, backing)| {
+                                            id == &choice.board_id
+                                                && *backing == choice.backing
+                                        });
                                     let picked = selected.as_deref()
                                         == Some(choice.board_id.as_str());
-                                    let board_id = choice.board_id.clone();
+                                    let picked_choice = choice.clone();
                                     rsx! {
                                         button {
-                                            key: "{choice.board_id}",
+                                            key: "{choice.board_id}-{choice.backing.tag()}",
                                             id: row.map(|row| format!("{menu_id}-row-{row}")),
                                             class: row_class(choice.runnable, picked),
                                             r#type: "button",
@@ -220,7 +232,7 @@ pub(crate) fn TargetPickMenu(
                                             },
                                             onclick: move |event: MouseEvent| {
                                                 event.stop_propagation();
-                                                on_pick.call(board_id.clone());
+                                                on_pick.call(picked_choice.clone());
                                                 if let Some(mut close) = close {
                                                     close.close();
                                                 }
