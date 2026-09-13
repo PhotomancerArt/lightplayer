@@ -32,6 +32,10 @@
 // in the report this produces is about a duration — an agent-driven tab is
 // throttled to ~1 Hz, so a duration measured here would be a measurement of
 // the throttle.
+//
+// A Rust panic in the page fails the walk even when all six steps pass: a
+// step only sees the surface it drives, so the code that panics is by
+// definition somewhere none of them is looking.
 
 import { createServer } from "node:http";
 import { mkdirSync, writeFileSync } from "node:fs";
@@ -461,6 +465,15 @@ async function main() {
 
   const registry = await liveRegistry({ doorAddr: door?.addr ?? null, driver }).catch(() => null);
   const consoleErrors = driver.consoleLines().filter((l) => l.startsWith("[error]") || l.startsWith("[exception]"));
+  // A Rust panic in the page is a failure of the walk even when every step
+  // passed: the panicking code is by definition somewhere no step looks. The
+  // first one found was a popover measuring itself from a `setTimeout` that
+  // outlived the component
+  // (docs/defects/2026-09-13-a-stabilization-timer-outlived-the-popover.md),
+  // twelve times over, under a green 6/6. Matched narrowly on the panic
+  // preamble so ordinary console noise — a 404, a warning — still only
+  // reports.
+  const panics = consoleErrors.filter((l) => l.includes("panicked at"));
 
   // The trace, and a per-step index into it.
   writeFileSync(path.join(options.out, "walk.jsonl"), sink.raw.join("\n") + "\n");
@@ -503,6 +516,10 @@ async function main() {
     console.log("\n  page console errors:");
     for (const line of consoleErrors.slice(-8)) console.log(`    ${line}`);
   }
+  if (panics.length) {
+    console.log(`\n  ✗ ${panics.length} panic(s) in the page:`);
+    for (const line of panics.slice(0, 4)) console.log(`    ${line.split("\n")[0]}`);
+  }
   console.log(`\n  trace  → ${path.join(options.out, "walk.jsonl")}  (${sink.records.length} records)`);
   console.log(`  steps  → ${path.join(options.out, "walk-steps.json")}`);
   if (door) {
@@ -521,6 +538,13 @@ async function main() {
 
   if (fatal) {
     console.error(`\nThe walk did not finish: ${fatal.message}`);
+    process.exit(1);
+  }
+  if (panics.length) {
+    console.error(
+      `\nThe walk's six steps passed, but the page panicked ${panics.length} time(s). ` +
+        `The full text is in walk-steps.json (consoleErrors).`,
+    );
     process.exit(1);
   }
   console.log(
