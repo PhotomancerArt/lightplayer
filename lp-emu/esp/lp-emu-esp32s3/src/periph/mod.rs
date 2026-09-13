@@ -1,4 +1,5 @@
-//! The S3's peripheral set — **the blocks before the console** (M6 P04).
+//! The S3's peripheral set — **the blocks before the console** (M6 P04),
+//! **and the console** (M6 P05).
 //!
 //! Every block here is one of three things, and each file says which:
 //!
@@ -8,15 +9,22 @@
 //!   runs**, the super-watchdog), [`timg`] (two counters per group, the
 //!   RTC calibration, the MWDT gate), [`systimer`] (the S3's
 //!   `Instant::now()`), [`efuse`] (the MAC and the wafer version),
-//!   [`i2c_ana_mst`] (the analog master as a `{block, register}` store), and
-//!   the two halves of the interrupt matrix ([`crate::intmatrix`]);
+//!   [`i2c_ana_mst`] (the analog master as a `{block, register}` store),
+//!   [`usb_sj`] (**the link, and the console on it**), and the two halves of
+//!   the interrupt matrix ([`crate::intmatrix`]);
 //! - **accept-and-remember** — a [`lp_emu_esp_common::RegFile`] seeded from
 //!   the PAC's resets, with the bits something spins on pinned to a cited
 //!   value ([`accept`]): `SENSITIVE`, `EXTMEM`'s boot registers, `SPI0`,
 //!   `SPI1`, `APB_CTRL`, `BB`, `NRX`, `FE`, `FE2`;
 //! - **not modelled** — left unmapped on purpose, so a strict run stops on
-//!   them: the console (`USB_DEVICE`, P05), the flash cache and SHA (P06),
-//!   the pad fabric and RMT (P07).
+//!   them: the flash cache and SHA (P06), the pad fabric and RMT (P07).
+//!
+//! ⚠️ [`usb_sj`] is the one block here that is **not** the S3's own file: it
+//! is the C6's view, moved to [`lp_emu_esp_common::ip::usb_sj`] and
+//! parameterised (ruling D1 (b) / DD64), because the two chips' PACs agree on
+//! that layout offset-for-offset. The S3's file is the chip's parameters and
+//! nothing else — and the two registers this part does not have sit behind a
+//! capability it withholds.
 //!
 //! Every constant that is a *guess* is marked `modeled` where it is defined;
 //! nothing here is `measured` — no S3 silicon has been read yet.
@@ -41,6 +49,13 @@
 //! list re-points already-scheduled events; a block a later phase adds goes
 //! **in its place in the list** — where the boot meets it — never appended
 //! for convenience.
+//!
+//! ⚠️ **`USB_DEVICE` is the exception, and it is appended.** The boot meets
+//! the console a few hundred cycles *before* it meets `SYSTIMER`, which P04
+//! registered last on the expectation that `Instant::now()` would be the last
+//! thing reached. Putting the console in the boot's order would move
+//! `SYSTIMER`'s index — which is the thing this rule exists to prevent — so
+//! the index contract wins and the list's comment carries the narrative.
 
 pub mod accept;
 pub mod efuse;
@@ -49,7 +64,9 @@ pub mod rtc_cntl;
 pub mod system;
 pub mod systimer;
 pub mod timg;
+pub mod usb_sj;
 
+use lp_emu_esp_common::StreamId;
 use lp_emu_esp_common::periph::BoxedPeripheral;
 
 use crate::intmatrix::InterruptCoreView;
@@ -90,6 +107,19 @@ pub const WDT_WKEY: u32 = 0x50D8_3AA1;
 /// so the SWD too is unlocked at power-on.
 pub const SWD_WKEY: u32 = 0x8F1D_312A;
 
+/// The host byte streams a block writes to and reads from. One block has
+/// any: the link ([`usb_sj`]).
+///
+/// `usb_sj` is what a host **received** from the IN endpoint and what it
+/// **sent** on the OUT path; `usb_sj_tried` is the observation stream — bytes
+/// the guest handed over that no host took. Both are `None` on a machine
+/// built with no host side at all, which is what a unit test wants.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct HostStreams {
+    pub usb_sj: Option<StreamId>,
+    pub usb_sj_tried: Option<StreamId>,
+}
+
 /// The whole boot set, in [`crate::machine::PERIPHERAL_REGISTRATION_ORDER`].
 ///
 /// `reset_cause` is what a direct load asserts into `RTC_CNTL.reset_state`
@@ -97,12 +127,16 @@ pub const SWD_WKEY: u32 = 0x8F1D_312A;
 /// item 7); `stall` is the handle RTC_CNTL publishes its half of the CPU
 /// stall key through and the machine reads; `core1` is
 /// `SYSTEM.core_1_control_0`, the register the machine's hold on slot 1
-/// already reads, now shared with the view that lets a guest write it.
+/// already reads, now shared with the view that lets a guest write it;
+/// `streams` and `usb_host` are the link's (M6 P05) — where its bytes go,
+/// and whether a cable is in at power-on.
 pub fn boot_set(
     reset_cause: ResetCause,
     identity: EfuseIdentity,
     stall: rtc_cntl::StallKey,
     core1: CoreOneHandle,
+    streams: HostStreams,
+    usb_host: usb_sj::HostState,
 ) -> Vec<(u32, u32, BoxedPeripheral)> {
     vec![
         (
@@ -158,6 +192,11 @@ pub fn boot_set(
             base::SYSTIMER,
             systimer::SYSTIMER_LEN,
             Box::new(systimer::Systimer::new()),
+        ),
+        (
+            base::USB_DEVICE,
+            usb_sj::USB_DEVICE_LEN,
+            Box::new(usb_sj::new(streams.usb_sj, streams.usb_sj_tried, usb_host)),
         ),
     ]
 }

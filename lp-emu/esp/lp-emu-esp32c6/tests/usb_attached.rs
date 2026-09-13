@@ -25,7 +25,6 @@ use lp_emu_esp32c6::machine::{
     AppSource, Esp32C6Builder, Esp32C6Machine, Outcome, StopCondition, TimeGrade, UsbHost,
 };
 use lp_emu_esp32c6::memmap;
-use lp_emu_esp32c6::periph::usb_sj::UsbSerialJtag;
 use lp_emu_esp32c6::test_support::{FwImage, fw_esp32c6_image, skip_notice};
 use sha2::{Digest, Sha256};
 
@@ -413,8 +412,8 @@ fn g4_4_the_shipped_image_crosses_no_modeled_usb_register() {
     // The lists the README publishes, printed for the record.
     println!(
         "G4-4: {} modeled USB_DEVICE registers, none crossed in {GATE_US} us: {}",
-        UsbSerialJtag::modeled_registers().len(),
-        UsbSerialJtag::modeled_registers().join(", ")
+        lp_emu_esp32c6::periph::usb_sj::modeled_registers().len(),
+        lp_emu_esp32c6::periph::usb_sj::modeled_registers().join(", ")
     );
     let gpio = lp_emu_esp32c6::periph::gpio::Gpio::modeled_registers();
     println!(

@@ -181,11 +181,7 @@ pub fn boot_set(
         (
             base::USB_DEVICE,
             0x100,
-            Box::new(usb_sj::UsbSerialJtag::new(
-                streams.usb_sj,
-                streams.usb_sj_tried,
-                usb_host,
-            )),
+            Box::new(usb_sj::new(streams.usb_sj, streams.usb_sj_tried, usb_host)),
         ),
         (base::IO_MUX, io_mux::LEN, Box::new(io_mux::IoMux::new())),
         (

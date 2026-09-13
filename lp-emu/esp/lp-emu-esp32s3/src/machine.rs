@@ -110,7 +110,12 @@ use std::time::{Duration, Instant};
 use lp_emu_core::Bus;
 use lp_emu_core::sched::Cycles;
 use lp_emu_esp_common::bus::StrictViolation;
-use lp_emu_esp_common::{ByteLog, ElfImage, MachineRequest, SocBus, Strap};
+use lp_emu_esp_common::host::ByteSink;
+use lp_emu_esp_common::{ByteLog, ByteSource, ElfImage, MachineRequest, SocBus, Strap};
+
+use crate::control::{ControlCommand, ControlReply, HostReport};
+use crate::periph::HostStreams;
+use crate::periph::usb_sj::{LIVE_POLL_CYCLES, UsbSerialJtag};
 
 use lp_xt_emu::mach::interrupt::{IntKind, IntLine};
 use lp_xt_emu::mach::sr::PS_BOOT;
@@ -206,6 +211,19 @@ pub const PERIPHERAL_REGISTRATION_ORDER: &[&str] = &[
     // registered here — last, where the boot will meet it — because it is
     // the S3's clock and `tests/clock.rs` pins its derivation.
     "SYSTIMER",
+    // Cycle 2,137,399: `esp_println::Printer::write_bytes+0x9` reads
+    // `ep1_conf` at `0x6003_8004` — P04's last strict stop, and the console
+    // (M6 P05).
+    //
+    // ⚠️ **Appended, not inserted**, and the two readings of this list part
+    // company here for the first time. The boot meets the console BEFORE it
+    // meets SYSTIMER: the note above registered SYSTIMER last on the
+    // expectation that `Instant::now()` was the last thing the boot would
+    // reach, and the console beats it by a few hundred cycles. Re-sorting
+    // the pair to match the boot would move SYSTIMER's peripheral index, and
+    // the bus packs that index into every scheduler event id — so the index
+    // contract wins over the narrative, and this comment is the narrative.
+    "USB_DEVICE",
 ];
 
 /// How far back [`Machine::symbolize`] will look for a name when no symbol's
@@ -301,6 +319,122 @@ impl TimeGrade {
         }
     }
 }
+
+/// The USB host's state at power-on, under the name the CLI spells it
+/// (`--usb-host absent|attached|attached-idle`). The control channel and
+/// `--usb-script` move it from there; see [`crate::periph::usb_sj`] for what
+/// each state does to the registers.
+pub use crate::periph::usb_sj::HostState as UsbHost;
+
+/// Where the USB-Serial-JTAG bytes go. Used twice: for the `usb-sj` stream —
+/// what a **host received** from the IN endpoint (`--usb-sj`) — and for the
+/// observation stream — what the guest handed over that no host took
+/// (`--usb-sj-tried`). Both are always also kept in memory
+/// ([`Machine::usb_sj`], [`Machine::usb_sj_tried`]).
+#[derive(Clone, Debug, Default)]
+pub enum UsbSjSink {
+    #[default]
+    Memory,
+    Stderr,
+    File(PathBuf),
+    /// **Listen** on this address for one client at a time: the client
+    /// receives what a host received, and its bytes are the OUT endpoint's
+    /// live source. `lp-cli … serial:tcp://<addr>` connects to it unchanged.
+    ///
+    /// Only the `usb-sj` stream may be a socket — the observation stream is
+    /// an observation, not a link.
+    Tcp(String),
+}
+
+/// Whether connecting to the USB byte socket opens the port.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum UsbSjDrain {
+    /// A client connecting is an application opening the port;
+    /// disconnecting is it closing. What `lp-cli`'s readiness engine
+    /// expects, and what a Web Serial `open()`/`close()` means.
+    #[default]
+    Auto,
+    /// The control channel owns `open` and `close`; the socket only carries
+    /// bytes. For a run that wants a host attached and *not* draining while
+    /// a client watches the byte stream.
+    Manual,
+}
+
+impl UsbSjDrain {
+    pub fn parse(text: &str) -> Option<Self> {
+        match text {
+            "auto" => Some(UsbSjDrain::Auto),
+            "manual" => Some(UsbSjDrain::Manual),
+            _ => None,
+        }
+    }
+
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            UsbSjDrain::Auto => "auto",
+            UsbSjDrain::Manual => "manual",
+        }
+    }
+}
+
+/// A `ByteSink` that keeps every byte in a log as well as passing it on.
+struct TeeSink {
+    log: ByteLog,
+    inner: Box<dyn ByteSink>,
+}
+
+impl ByteSink for TeeSink {
+    fn write(&mut self, bytes: &[u8]) {
+        self.log.append(bytes);
+        self.inner.write(bytes);
+    }
+
+    fn flush(&mut self) {
+        self.inner.flush();
+    }
+}
+
+/// A `ByteSink` over the host's stderr, kept off stdout so it never mixes
+/// with a run report.
+struct StderrSink;
+
+impl ByteSink for StderrSink {
+    fn write(&mut self, bytes: &[u8]) {
+        use std::io::Write;
+        let mut err = std::io::stderr().lock();
+        let _ = err.write_all(bytes);
+        let _ = err.flush();
+    }
+}
+
+/// A `ByteSink` over a file handle, buffered: a `write(2)` per byte is
+/// measurable on a console that drains a byte at a time.
+struct FileSink(std::io::BufWriter<std::fs::File>);
+
+impl ByteSink for FileSink {
+    fn write(&mut self, bytes: &[u8]) {
+        use std::io::Write;
+        let _ = self.0.write_all(bytes);
+    }
+
+    fn flush(&mut self) {
+        use std::io::Write;
+        let _ = self.0.flush();
+    }
+}
+
+/// The control channel's listener plus the tail of a line that arrived in
+/// pieces. One reply per command, `\n`-terminated, in [`crate::control`]'s
+/// grammar — never an `M!` frame.
+struct ControlChannel {
+    host: lp_emu_esp_common::TcpHost,
+    partial: Vec<u8>,
+}
+
+/// The longest control line the channel will assemble. A client that sends
+/// more without a newline is answered once and resynchronised, rather than
+/// growing a buffer for as long as it keeps typing.
+const MAX_CONTROL_LINE: usize = 4 << 10;
 
 /// Where the mask ROM comes from. There is no "no ROM" variant: plan PD7 says
 /// the ROM is loaded in every configuration, and on this chip it is most of
@@ -519,6 +653,9 @@ pub enum Outcome {
         source: &'static str,
         strap: Strap,
     },
+    /// `--exit-on <substr>` matched a **complete** line on the console.
+    /// Exit code 0: the run did what it was asked for.
+    ExitMatched { cycle: Cycles },
 }
 
 impl Outcome {
@@ -542,7 +679,7 @@ impl Outcome {
     ///   here rather than left as a silent gap in the table.
     pub const fn exit_code(&self) -> i32 {
         match self {
-            Outcome::Deadline { .. } => 0,
+            Outcome::Deadline { .. } | Outcome::ExitMatched { .. } => 0,
             Outcome::Fault { .. } | Outcome::Reset { .. } => 2,
             Outcome::StrictBus { .. } => 3,
             Outcome::WallTimeout { .. } => 4,
@@ -556,6 +693,7 @@ impl Outcome {
             | Outcome::Fault { cycle, .. }
             | Outcome::WallTimeout { cycle }
             | Outcome::Breakpoint { cycle, .. }
+            | Outcome::ExitMatched { cycle }
             | Outcome::Reset { cycle, .. } => *cycle,
             Outcome::StrictBus { violation } => violation.cycle,
         }
@@ -576,6 +714,10 @@ pub struct StopCondition {
     /// `(cycle, symbol)` — print the word at `symbol` when guest time reaches
     /// `cycle`.
     pub probes: Vec<(Cycles, String)>,
+    /// `--exit-on <substr>`: stop at the end of the **complete** line this
+    /// appears on, on the console. Checked at slice boundaries against the
+    /// `usb-sj` log — which on this chip is the console, because the link is.
+    pub exit_on: Option<String>,
 }
 
 impl StopCondition {
@@ -673,7 +815,12 @@ impl From<LoadError> for BuildError {
 }
 
 /// The S3 machine, built.
-#[derive(Debug, Default)]
+///
+/// ⚠️ Not `derive(Debug)`: `usb_sj_source` is a `Box<dyn ByteSource>` and a
+/// trait object has none. The manual impl below prints the fields a test
+/// failure wants and prints the source as a flag, which is the same thing
+/// [`TraceSink`] does one field along.
+#[derive(Default)]
 pub struct Esp32S3Builder {
     rom: RomSource,
     app: AppSource,
@@ -688,6 +835,39 @@ pub struct Esp32S3Builder {
     seed: u64,
     reset_cause: ResetCause,
     efuse: EfuseIdentity,
+    // ---- the link (M6 P05) ----
+    usb_sj: UsbSjSink,
+    usb_sj_tried: UsbSjSink,
+    usb_sj_source: Option<Box<dyn ByteSource>>,
+    usb_script_source: Option<lp_emu_esp_common::ScriptedSource>,
+    usb_host: UsbHost,
+    usb_sj_drain: UsbSjDrain,
+    control: Option<String>,
+    usb_script: Vec<(Cycles, ControlCommand)>,
+    reboot_on_reset: bool,
+}
+
+impl fmt::Debug for Esp32S3Builder {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Esp32S3Builder")
+            .field("rom", &self.rom)
+            .field("app", &self.app)
+            .field("time_grade", &self.time_grade)
+            .field("strict", &self.strict)
+            .field("boot_frame", &self.boot_frame)
+            .field("core_quantum", &self.core_quantum)
+            .field("seed", &self.seed)
+            .field("usb_sj", &self.usb_sj)
+            .field("usb_sj_tried", &self.usb_sj_tried)
+            .field("usb_host", &self.usb_host)
+            .field("usb_sj_drain", &self.usb_sj_drain)
+            .field("usb_sj_source", &self.usb_sj_source.is_some())
+            .field("usb_script_source", &self.usb_script_source.is_some())
+            .field("control", &self.control)
+            .field("usb_script", &self.usb_script.len())
+            .field("reboot_on_reset", &self.reboot_on_reset)
+            .finish_non_exhaustive()
+    }
 }
 
 /// A trace destination, kept out of [`Esp32S3Builder`]'s `Debug` by being its
@@ -793,6 +973,80 @@ impl Esp32S3Builder {
         self
     }
 
+    // ---- the link (M6 P05) ------------------------------------------------
+
+    /// Where the `usb-sj` stream goes: what a **host received** from the IN
+    /// endpoint. A `Tcp` sink also **is** the OUT endpoint's live source.
+    pub fn usb_sj(mut self, sink: UsbSjSink) -> Self {
+        self.usb_sj = sink;
+        self
+    }
+
+    /// Where the observation stream goes: bytes the guest handed over that
+    /// no host took. Never a socket — it is an observation, not a link.
+    pub fn usb_sj_tried(mut self, sink: UsbSjSink) -> Self {
+        self.usb_sj_tried = sink;
+        self
+    }
+
+    /// Host → device bytes, for a test that wants neither a socket nor a
+    /// script file.
+    pub fn usb_sj_source(mut self, source: Box<dyn ByteSource>) -> Self {
+        self.usb_sj_source = Some(source);
+        self
+    }
+
+    /// The byte half of a `--usb-script`. Preferred over
+    /// [`usb_sj_source`](Self::usb_sj_source) for a script, because the
+    /// machine wires it to watch the delivered log — which is what makes an
+    /// `after "<line>"` step see exactly what a host on this link saw.
+    pub fn usb_script_source(mut self, script: lp_emu_esp_common::ScriptedSource) -> Self {
+        self.usb_script_source = Some(script);
+        self
+    }
+
+    /// The host's state at power-on. `Absent` is the honest default for a
+    /// machine with nothing plugged into it; the control channel and
+    /// `--usb-script` move it from there.
+    pub fn usb_host(mut self, host: UsbHost) -> Self {
+        self.usb_host = host;
+        self
+    }
+
+    /// Whether a byte-socket client counts as an application opening the
+    /// port.
+    pub fn usb_sj_drain(mut self, drain: UsbSjDrain) -> Self {
+        self.usb_sj_drain = drain;
+        self
+    }
+
+    /// Listen for the control channel's line protocol on this address
+    /// (`--control tcp:<host:port>`). See [`crate::control`].
+    pub fn control(mut self, addr: impl Into<String>) -> Self {
+        self.control = Some(addr.into());
+        self
+    }
+
+    /// Scripted control commands at declared cycles — the deterministic
+    /// twin of the control socket (`--usb-script`'s non-byte lines).
+    pub fn usb_script(mut self, commands: Vec<(Cycles, ControlCommand)>) -> Self {
+        self.usb_script = commands;
+        self
+    }
+
+    /// **Perform** a reset request instead of reporting it: the machine goes
+    /// back to the state it was built in and runs again, as a chip does.
+    ///
+    /// ⚠️ There is still no ROM-up boot on this machine (P06), so a reboot
+    /// is a **direct load** replayed: the app's segments are placed again and
+    /// core 0 starts at its entry with the same boot frame. That is what a
+    /// reboot of a direct-loaded machine can honestly be, and the run report
+    /// says how many happened.
+    pub fn reboot_on_reset(mut self, reboot: bool) -> Self {
+        self.reboot_on_reset = reboot;
+        self
+    }
+
     pub fn build(self) -> Result<Machine, BuildError> {
         let rom_image = match &self.rom {
             RomSource::Vendored => rom::vendored()?,
@@ -819,6 +1073,78 @@ impl Esp32S3Builder {
         let stall_key = StallKey::new();
         let core_1_control: CoreOneHandle = Arc::new(Mutex::new(CoreOneControl::reset()));
 
+        // The link's two byte streams. `usb-sj` is what a host received —
+        // and, from its source, what it sent; `usb-sj-tried` is the
+        // observation stream, bytes the guest handed over that no host took.
+        let usb_sink = |sink: &UsbSjSink| -> Result<Box<dyn ByteSink>, BuildError> {
+            Ok(match sink {
+                UsbSjSink::Memory => Box::new(lp_emu_esp_common::host::NullSink),
+                UsbSjSink::Stderr => Box::new(StderrSink),
+                UsbSjSink::File(path) => {
+                    let file = std::fs::File::create(path)
+                        .map_err(|e| BuildError::Io(format!("creating {}: {e}", path.display())))?;
+                    Box::new(FileSink(std::io::BufWriter::new(file)))
+                }
+                UsbSjSink::Tcp(addr) => {
+                    return Err(BuildError::Io(format!(
+                        "tcp:{addr} is only a destination for --usb-sj, never for \
+                         --usb-sj-tried: the observation stream is an observation, not a link"
+                    )));
+                }
+            })
+        };
+        let usb_sj_log = ByteLog::new();
+        let mut usb_sj_tcp: Option<lp_emu_esp_common::TcpHost> = None;
+        // A USB script watches the same log the sink tees into, so an
+        // `after "<line>"` step sees exactly what a host on this link saw.
+        let usb_sj_source = match self.usb_script_source {
+            Some(script) => {
+                Some(Box::new(script.watching(usb_sj_log.clone())) as Box<dyn ByteSource>)
+            }
+            None => self.usb_sj_source,
+        };
+        let (usb_inner, usb_source): (Box<dyn ByteSink>, Box<dyn ByteSource>) = match &self.usb_sj {
+            UsbSjSink::Tcp(addr) => {
+                let host = lp_emu_esp_common::TcpHost::listen(addr)
+                    .map_err(|e| BuildError::Io(format!("listening on {addr}: {e}")))?;
+                eprintln!("usb-sj listening on {}", host.local_addr());
+                if usb_sj_source.is_some() {
+                    log::warn!(
+                        "--usb-script's byte lines are ignored with --usb-sj tcp: the client is \
+                         the source (its control lines still apply)"
+                    );
+                }
+                let halves = host.split();
+                usb_sj_tcp = Some(host);
+                halves
+            }
+            other => (
+                usb_sink(other)?,
+                usb_sj_source.unwrap_or_else(|| Box::new(lp_emu_esp_common::host::NullSource)),
+            ),
+        };
+        let usb_sj_id = bus.host.add(
+            "usb-sj",
+            Box::new(TeeSink {
+                log: usb_sj_log.clone(),
+                inner: usb_inner,
+            }),
+            usb_source,
+        );
+        let usb_sj_tried_log = ByteLog::new();
+        let usb_sj_tried_id = bus.host.add(
+            "usb-sj-tried",
+            Box::new(TeeSink {
+                log: usb_sj_tried_log.clone(),
+                inner: usb_sink(&self.usb_sj_tried)?,
+            }),
+            Box::new(lp_emu_esp_common::host::NullSource),
+        );
+        let streams = HostStreams {
+            usb_sj: Some(usb_sj_id),
+            usb_sj_tried: Some(usb_sj_tried_id),
+        };
+
         // The peripherals, in the declared order, before any memory is
         // placed: a block's index is fixed at registration and the schedule
         // is empty until `start_peripherals`.
@@ -827,11 +1153,30 @@ impl Esp32S3Builder {
             self.efuse,
             stall_key.clone(),
             Arc::clone(&core_1_control),
+            streams,
+            self.usb_host,
         );
         check_registration_order(&set)?;
         for (base, len, periph) in set {
             bus.add_peripheral(base, len, periph);
         }
+
+        // The control channel's listener, and the block it drives. The index
+        // is looked up once: it is the peripheral's identity for the whole
+        // run (see PERIPHERAL_REGISTRATION_ORDER).
+        let control = match self.control {
+            Some(addr) => {
+                let host = lp_emu_esp_common::TcpHost::listen(&addr)
+                    .map_err(|e| BuildError::Io(format!("listening on {addr}: {e}")))?;
+                eprintln!("control listening on {}", host.local_addr());
+                Some(ControlChannel {
+                    host,
+                    partial: Vec::new(),
+                })
+            }
+            None => None,
+        };
+        let usb_index = bus.peripheral_index("USB_DEVICE");
 
         // The ROM first, always (PD7), and its non-alloc data with it.
         let rom_segments = rom::load(&mut bus, &rom_image)?;
@@ -883,7 +1228,21 @@ impl Esp32S3Builder {
             idle_skips: 0,
             seed: self.seed,
             rng: self.seed,
-            console: ByteLog::new(),
+            usb_sj_log,
+            usb_sj_tried_log,
+            usb_host: self.usb_host,
+            usb_sj_tcp,
+            usb_sj_drain: self.usb_sj_drain,
+            usb_client_connected: false,
+            usb_index,
+            control,
+            script: self.usb_script.into(),
+            control_lines: 0,
+            next_host_poll: 0,
+            reboot_on_reset: self.reboot_on_reset,
+            reboots: 0,
+            strap: Strap::App,
+            power_on: None,
         };
 
         if machine.app.is_some() {
@@ -896,6 +1255,12 @@ impl Esp32S3Builder {
         // Guest time is zero and everything is placed: the one moment a
         // peripheral may schedule something before the guest touches it.
         machine.bus.start_peripherals();
+
+        // The state a reboot goes back to, taken only when one was asked
+        // for: a snapshot costs a copy of every region.
+        if self.reboot_on_reset {
+            machine.power_on = Some(machine.snapshot());
+        }
 
         Ok(machine)
     }
@@ -985,14 +1350,44 @@ pub struct Machine {
     idle_skips: u64,
     seed: u64,
     rng: u64,
-    /// Everything the console said.
+    /// **Everything the console said** — which on this chip is the `usb-sj`
+    /// stream, because the console *is* the link: `esp-println` with the
+    /// `jtag-serial` feature writes `ep1` directly and there is no
+    /// `spike_uart0_link` build of this firmware. P03 declared the log and
+    /// `--console` with no producer; M6 P05 is the producer.
     ///
-    /// ⚠️ **Empty in P03, and that is not a bug.** The S3's console is
-    /// USB-Serial-JTAG and nothing drives it until **P05**; the log and
-    /// `--console` exist now so P05 adds a producer rather than a plumbing
-    /// layer, and so the determinism test's console-sha comparison is the
-    /// same comparison on both sides of that change.
-    console: ByteLog,
+    /// What is in here is what a **host received**, never what the guest
+    /// tried: bytes committed into an endpoint nobody drained are on
+    /// [`Machine::usb_sj_tried`] instead, and telling those two apart is the
+    /// whole point of the host model.
+    usb_sj_log: ByteLog,
+    /// The observation stream: bytes the guest handed over that no host took.
+    usb_sj_tried_log: ByteLog,
+    /// The host's state at power-on, kept for the run report; the live state
+    /// is the block's.
+    usb_host: UsbHost,
+    /// The byte socket's listener, when `--usb-sj tcp:` was chosen.
+    usb_sj_tcp: Option<lp_emu_esp_common::TcpHost>,
+    usb_sj_drain: UsbSjDrain,
+    /// Whether a byte client was connected at the last poll — the edge the
+    /// open/close coupling fires on.
+    usb_client_connected: bool,
+    /// `USB_DEVICE`'s peripheral index, the control channel's target.
+    usb_index: Option<usize>,
+    control: Option<ControlChannel>,
+    /// Scripted control commands still to apply, in file order.
+    script: std::collections::VecDeque<(Cycles, ControlCommand)>,
+    /// How many control commands have been applied (scripted and socket).
+    control_lines: u64,
+    /// The next cycle the socket side is polled at.
+    next_host_poll: Cycles,
+    reboot_on_reset: bool,
+    reboots: u64,
+    /// The strapping the last reboot used.
+    strap: Strap,
+    /// The state a reboot goes back to. `None` unless
+    /// [`Esp32S3Builder::reboot_on_reset`] asked for one.
+    power_on: Option<Snapshot>,
 }
 
 impl Machine {
@@ -1101,10 +1496,71 @@ impl Machine {
         &mut self.bus
     }
 
-    /// Everything the console said. Empty until P05 gives it a producer — see
-    /// the field's docs.
+    /// Everything the console said. On this chip the console **is** the
+    /// link, so this is the `usb-sj` stream — see the field's docs.
     pub fn console(&self) -> &ByteLog {
-        &self.console
+        &self.usb_sj_log
+    }
+
+    /// What a host received from the IN endpoint.
+    pub fn usb_sj(&self) -> Vec<u8> {
+        self.usb_sj_log.bytes()
+    }
+
+    /// Bytes the guest handed to the IN endpoint that no host ever took.
+    pub fn usb_sj_tried(&self) -> Vec<u8> {
+        self.usb_sj_tried_log.bytes()
+    }
+
+    /// The host's state at power-on (the live one is the block's).
+    pub fn usb_host(&self) -> UsbHost {
+        self.usb_host
+    }
+
+    /// The USB byte-socket listener, when `UsbSjSink::Tcp` was chosen.
+    pub fn usb_sj_tcp(&self) -> Option<&lp_emu_esp_common::TcpHost> {
+        self.usb_sj_tcp.as_ref()
+    }
+
+    /// The control channel's listener, when `--control` was given.
+    pub fn control_tcp(&self) -> Option<&lp_emu_esp_common::TcpHost> {
+        self.control.as_ref().map(|c| &c.host)
+    }
+
+    /// How many control commands have been applied (scripted and socket).
+    pub fn control_lines(&self) -> u64 {
+        self.control_lines
+    }
+
+    /// Scripted control commands not yet due.
+    pub fn scripted_commands_left(&self) -> usize {
+        self.script.len()
+    }
+
+    /// How many reset requests this run performed
+    /// ([`Esp32S3Builder::reboot_on_reset`]).
+    pub fn reboots(&self) -> u64 {
+        self.reboots
+    }
+
+    /// The strapping the chip was started with, or the one the last reboot
+    /// used.
+    pub fn strap(&self) -> Strap {
+        self.strap
+    }
+
+    /// The USB block's live host state, `None` on a machine with no block.
+    pub fn usb_host_now(&mut self) -> Option<UsbHost> {
+        let index = self.usb_index?;
+        self.bus
+            .with_peripheral::<UsbSerialJtag, _>(index, |u, _| u.host())
+    }
+
+    /// Drive the link from the host's side, outside a run — what a test uses
+    /// instead of a socket or a script.
+    pub fn apply_control_now(&mut self, command: &ControlCommand) -> ControlReply {
+        let at = self.cycles();
+        self.apply_control(command, at)
     }
 
     /// `SYSTEM.core_1_control_0` as the guest left it, and the handle P04's
@@ -1424,10 +1880,13 @@ impl Machine {
     /// the bring-up rule.
     pub fn run_until(&mut self, stop: &StopCondition) -> Outcome {
         let started = Instant::now();
-        let stop_cycle = stop.stop_cycle.unwrap_or(u64::MAX);
+        let mut stop_cycle = stop.stop_cycle.unwrap_or(u64::MAX);
         let mut probes = stop.probes.clone();
         probes.sort_by(|a, b| a.0.cmp(&b.0));
         let mut next_probe = 0usize;
+        // `--exit-on`'s scan anchor, so a long run does not rescan the whole
+        // console at every slice boundary.
+        let mut matched = 0usize;
 
         loop {
             let now = self.cycles();
@@ -1447,6 +1906,11 @@ impl Machine {
             }
             if let Some((at, _)) = probes.get(next_probe) {
                 deadline = deadline.min((*at).max(now + 1));
+            }
+            // The host's side bounds the slice too, or a guest sitting in
+            // `waiti` would jump clean over a whole script.
+            if let Some(at) = self.next_host_service(now) {
+                deadline = deadline.min(at.max(now + 1));
             }
             if self.bus.strict() {
                 deadline = deadline.min(now + STRICT_SLICE_CYCLES);
@@ -1521,6 +1985,10 @@ impl Machine {
             // and given the matrix feed it could not sample for itself.
             let at = self.clock();
             self.bus.run_due_events(at);
+            // The host's side, at a slice boundary and never inside one: a
+            // scripted command due by now, then — on the poll cadence — the
+            // byte socket's client edge and the control channel's lines.
+            self.service_host(at);
             self.feed_cores(at);
 
             // The deterministic idle skip: only when **every** running core is
@@ -1538,10 +2006,13 @@ impl Machine {
             if self.no_running_core_is_awake() {
                 let event = self.bus.sched.next_deadline();
                 let bytes = self.bus.host.next_ready();
+                // …and anything the host's side is due to do, for the same
+                // reason the slice is bounded by it.
+                let host = self.next_host_service(at);
                 let timers = (0..CORES)
                     .filter(|c| !self.core_stalled(*c))
                     .filter_map(|c| self.harts[c].next_timer_cycle());
-                let wake = [event, bytes]
+                let wake = [event, bytes, host]
                     .into_iter()
                     .flatten()
                     .chain(timers)
@@ -1586,15 +2057,42 @@ impl Machine {
                     pc,
                 };
             }
-            // A peripheral asked for a reset — the RWDT's stage 0 expired.
-            // This machine has no boot chain to restart until P06, so the
-            // run ends here and names who asked; performing it is P06's.
+            // A peripheral asked for a reset — the RWDT's stage 0 expired, or
+            // the link's control channel asked for one. Reported by default;
+            // `--reboot-on-reset` performs it instead.
             if let Some(MachineRequest::Reset { source, at, strap }) = self.bus.take_request() {
+                // ⚠️ `stop_cycle` is an **absolute** guest cycle and a reboot
+                // moves what zero means. Read what is LEFT of the budget while
+                // the old origin still stands and rebase it onto the new one,
+                // or the loop `continue`s against a bound the board's whole
+                // prior lifetime away and replays it inside one slice — which
+                // is `docs/defects/2026-09-11-a-reset-replays-the-boards-lifetime.md`,
+                // measured on the C6 at exactly `old + budget`.
+                let remaining = stop
+                    .stop_cycle
+                    .map(|_| stop_cycle.saturating_sub(self.cycles()));
+                if self.reboot_on_reset && self.reboot(strap) {
+                    log::info!("machine: {source} at cycle {at} — rebooting into strap {strap}");
+                    if let Some(remaining) = remaining {
+                        stop_cycle = self.cycles().saturating_add(remaining);
+                    }
+                    matched = 0;
+                    continue;
+                }
                 log::info!("machine: {source} at cycle {at}; the reset is reported, not performed");
                 return Outcome::Reset {
                     cycle: at,
                     source,
                     strap,
+                };
+            }
+            if let Some(needle) = &stop.exit_on
+                && self
+                    .usb_sj_log
+                    .with_bytes(|text| Self::line_complete(text, needle.as_bytes(), &mut matched))
+            {
+                return Outcome::ExitMatched {
+                    cycle: self.cycles(),
                 };
             }
             if let Some(limit) = stop.wall_timeout
@@ -1650,6 +2148,315 @@ impl Machine {
         }
     }
 
+    // ---- the host's side (M6 P05) ----------------------------------------
+
+    /// The next cycle at which [`service_host`](Self::service_host) has
+    /// something to do, or `None` when nothing outside can reach this run.
+    ///
+    /// A scripted command's own cycle, or the socket poll cadence. It bounds
+    /// the slice and the idle skip, which is what stops a guest sitting in
+    /// `waiti` from jumping over the whole script.
+    fn next_host_service(&self, _now: Cycles) -> Option<Cycles> {
+        let scripted = self.script.front().map(|(at, _)| *at);
+        let polled =
+            (self.control.is_some() || self.usb_sj_tcp.is_some()).then_some(self.next_host_poll);
+        [scripted, polled].into_iter().flatten().min()
+    }
+
+    /// Apply everything the host has asked for by cycle `now`.
+    ///
+    /// Order is deliberate: the script first (its times are the contract),
+    /// then the byte socket's coupling edge, then the control channel's
+    /// lines. Called only at a slice boundary, so a command never lands
+    /// between two instructions of one slice, and the reply names the cycle
+    /// it was drained at.
+    fn service_host(&mut self, now: Cycles) {
+        while self.script.front().is_some_and(|(at, _)| *at <= now) {
+            let (_, command) = self.script.pop_front().expect("checked");
+            let reply = self.apply_control(&command, now);
+            if let ControlReply::Err(reason) = &reply {
+                log::warn!("--usb-script: {reason}");
+            }
+        }
+
+        if self.control.is_none() && self.usb_sj_tcp.is_none() {
+            return;
+        }
+        if now < self.next_host_poll {
+            return;
+        }
+        self.next_host_poll = now.saturating_add(LIVE_POLL_CYCLES);
+
+        // The coupling rule: a client on the byte socket is an application
+        // with the port open. A cable is a separate thing — `attach` and
+        // `detach` are never implied by a socket.
+        if let Some(connected) = self.usb_sj_tcp.as_ref().map(|t| t.client_connected())
+            && connected != self.usb_client_connected
+        {
+            self.usb_client_connected = connected;
+            if self.usb_sj_drain == UsbSjDrain::Auto {
+                let command = if connected {
+                    ControlCommand::Open
+                } else {
+                    ControlCommand::Close
+                };
+                if let ControlReply::Err(reason) = self.apply_control(&command, now) {
+                    log::warn!("--usb-sj tcp: coupling: {reason}");
+                }
+            }
+        }
+
+        self.service_control(now);
+    }
+
+    /// Read whole lines off the control socket, apply each, answer each.
+    fn service_control(&mut self, now: Cycles) {
+        let Some(channel) = self.control.as_mut() else {
+            return;
+        };
+        let incoming = channel.host.take_inbound();
+        if incoming.is_empty() && channel.partial.is_empty() {
+            return;
+        }
+        channel.partial.extend_from_slice(&incoming);
+
+        let mut lines: Vec<Result<String, String>> = Vec::new();
+        while let Some(at) = channel.partial.iter().position(|b| *b == b'\n') {
+            let raw: Vec<u8> = channel.partial.drain(..=at).collect();
+            let text = String::from_utf8_lossy(&raw[..raw.len() - 1])
+                .trim_end_matches('\r')
+                .trim()
+                .to_string();
+            if text.is_empty() || text.starts_with('#') {
+                continue;
+            }
+            lines.push(Ok(text));
+        }
+        if channel.partial.len() > MAX_CONTROL_LINE {
+            channel.partial.clear();
+            lines.push(Err(format!(
+                "a line longer than {MAX_CONTROL_LINE} bytes with no newline — dropped, and \
+                 the channel resynchronised at the next newline"
+            )));
+        }
+
+        for line in lines {
+            let reply = match line {
+                Err(reason) => ControlReply::Err(reason),
+                Ok(text) => match ControlCommand::parse(&text) {
+                    Ok(command) => self.apply_control(&command, now),
+                    Err(reason) => ControlReply::Err(reason),
+                },
+            };
+            let channel = self.control.as_mut().expect("held for this run");
+            let mut out = reply.to_string();
+            out.push('\n');
+            if !channel.host.write_to_client(out.as_bytes()) {
+                log::warn!("control: `{}` had nobody left to answer", out.trim_end());
+            }
+        }
+    }
+
+    /// Apply one control command to the USB block at guest cycle `now`.
+    ///
+    /// Every precondition is checked here rather than swallowed by the
+    /// model: a command that could not be applied answers `err <reason>` and
+    /// changes nothing, so a script that has drifted out of step is visible
+    /// rather than quietly ineffective.
+    ///
+    /// ⚠️ **`reset` and `download-mode` are unconditional on this chip.**
+    /// The C6 refuses them when the guest has set `chip_rst` bit 2; the S3
+    /// has no `chip_rst`, so there is no such reply here and the difference
+    /// is the README's.
+    fn apply_control(&mut self, command: &ControlCommand, now: Cycles) -> ControlReply {
+        let Some(index) = self.usb_index else {
+            return ControlReply::Err("no USB_DEVICE block in this machine".to_string());
+        };
+        self.bus.set_time(now);
+        let outcome = self
+            .bus
+            .with_peripheral::<UsbSerialJtag, _>(index, |u, cx| match command {
+                ControlCommand::Attach => {
+                    if u.host().attached() {
+                        return Err("attach: a host is already attached".to_string());
+                    }
+                    u.attach(cx);
+                    Ok(None)
+                }
+                ControlCommand::Detach => {
+                    if !u.host().attached() {
+                        return Err("detach: no host is attached".to_string());
+                    }
+                    u.detach(cx);
+                    Ok(None)
+                }
+                ControlCommand::Open => {
+                    if !u.host().attached() {
+                        return Err("open: no host is attached (attach first — a cable is not \
+                                    a port open)"
+                            .to_string());
+                    }
+                    if u.host().draining() {
+                        return Err("open: the port is already open".to_string());
+                    }
+                    u.open(cx);
+                    Ok(None)
+                }
+                ControlCommand::Close => {
+                    if !u.host().draining() {
+                        return Err("close: the port is not open".to_string());
+                    }
+                    u.close(cx);
+                    Ok(None)
+                }
+                // The lines reach no guest-visible register on this chip —
+                // see the module docs — but the RTS falling edge still
+                // decodes a dance into a reset or a download-mode request,
+                // which is what esptool's sequences are made of.
+                ControlCommand::Signals { dtr, rts } => {
+                    u.set_signals(*dtr, *rts, cx);
+                    Ok(None)
+                }
+                ControlCommand::Reset | ControlCommand::DownloadMode => {
+                    let download = matches!(command, ControlCommand::DownloadMode);
+                    let performed = if download {
+                        u.download_mode(cx)
+                    } else {
+                        u.reset(cx)
+                    };
+                    // `chip_reset_disabled` is always false on this part, so
+                    // this can only be `true` — and asserting it here is
+                    // cheaper than a reader wondering whether the C6's
+                    // refusal path was dropped or forgotten.
+                    debug_assert!(performed, "the S3 has no chip_rst to refuse with");
+                    Ok(None)
+                }
+                ControlCommand::UsbWrite(bytes) => {
+                    if !u.host().attached() {
+                        return Err(
+                            "usb-write: no host is attached, so nothing could have sent bytes"
+                                .to_string(),
+                        );
+                    }
+                    u.host_write(bytes, cx);
+                    Ok(None)
+                }
+                ControlCommand::State => Ok(Some(HostReport {
+                    attached: u.host().attached(),
+                    draining: u.host().draining(),
+                    sof: u.sof_running(),
+                    in_pending: u.in_fifo().len(),
+                    out_queued: u.out_pending(),
+                })),
+                ControlCommand::Wait(_) => Err(
+                    "`wait` is a --usb-script command; a client on this socket waits by waiting"
+                        .to_string(),
+                ),
+            });
+
+        match outcome {
+            None => ControlReply::Err("USB_DEVICE declined the control channel".to_string()),
+            Some(Err(reason)) => ControlReply::Err(reason),
+            Some(Ok(host)) => {
+                self.control_lines += 1;
+                if self.bus.trace.is_enabled() {
+                    let line = format!("cyc={now} CONTROL {}", command.verb());
+                    self.bus.trace.note(&line);
+                }
+                match host {
+                    Some(host) => ControlReply::State { cycle: now, host },
+                    None => ControlReply::Ok {
+                        verb: command.verb(),
+                        cycle: now,
+                    },
+                }
+            }
+        }
+    }
+
+    /// Reboot into `strap`, as a chip does when something asserts its reset.
+    ///
+    /// ⚠️ **This machine has no ROM-up boot** (P06), so a reboot is the
+    /// power-on state put back: the machine returns to the snapshot taken
+    /// after the direct load, with the clock, the peripherals, the schedule
+    /// and both harts where they were at cycle zero. `strap` is recorded and
+    /// reported; **nothing reads it**, because there is no boot chain to
+    /// choose with it yet — saying so is cheaper than a reader assuming a
+    /// download console appears.
+    ///
+    /// The consoles keep their bytes: a restore would put back the empty
+    /// logs the machine was built with, and a boot log that lost everything
+    /// before the reset would be a worse record than one with both boots in
+    /// it.
+    pub fn reboot(&mut self, strap: Strap) -> bool {
+        let Some(power_on) = self.power_on.clone() else {
+            return false;
+        };
+        let (usb_sj, tried) = (self.usb_sj_log.bytes(), self.usb_sj_tried_log.bytes());
+        self.restore(&power_on);
+        self.usb_sj_log.replace(&usb_sj);
+        self.usb_sj_tried_log.replace(&tried);
+
+        let usb_host = self.usb_host;
+        self.strap = strap;
+        // ⚠️ The host-poll deadline is an ABSOLUTE guest cycle and it lives
+        // outside the peripheral set, so a reboot that puts the clock back to
+        // zero would leave it in the guest's future for as long as the board
+        // had been up — the C6 measured a board 120 s old going silent for
+        // 3.5 minutes after a flasher's reset. A reset is the moment a host
+        // needs the chip most, so the deadline goes back with the clock.
+        self.next_host_poll = 0;
+        // Same class, one layer up: the port's open/closed state is the
+        // block's and the byte client's connectedness is not, and the
+        // coupling only fires on an EDGE. Re-derive it from BOTH sides, so
+        // the next poll sees an edge exactly when one is needed and none
+        // when it is not.
+        let client = self
+            .usb_sj_tcp
+            .as_ref()
+            .is_some_and(|tcp| tcp.client_connected());
+        self.usb_client_connected = client && usb_host.draining();
+        self.reboots += 1;
+        true
+    }
+
+    /// Is `needle` in `text` at or after `from`, with a newline behind it?
+    ///
+    /// The search is over **bytes**, not `str`: a console is a byte stream
+    /// and anchoring an index into a lossily-decoded `String` lands inside a
+    /// multi-byte character and panics. (It did, on the C6, the first time
+    /// `--exit-on` met an em dash.) Console output is ASCII and UTF-8 is
+    /// self-synchronising, so a byte search finds exactly what a text search
+    /// would.
+    fn line_complete(text: &[u8], needle: &[u8], from: &mut usize) -> bool {
+        if text.len() <= *from {
+            return false;
+        }
+        let found = if needle.is_empty() {
+            Some(0)
+        } else {
+            text[*from..]
+                .windows(needle.len())
+                .position(|w| w == needle)
+        };
+        match found.map(|i| *from + i) {
+            Some(at) if text[at + needle.len()..].contains(&b'\n') => true,
+            // Matched, but the line is still arriving: hold the anchor here
+            // so the next byte re-checks this same match rather than the tail.
+            Some(at) => {
+                *from = at;
+                false
+            }
+            // Keep the search anchored so a long run does not rescan the
+            // whole console every slice; back off by the needle so a match
+            // split across two slices is still found.
+            None => {
+                *from = text.len().saturating_sub(needle.len());
+                false
+            }
+        }
+    }
+
     fn report_probe(&mut self, at: Cycles, name: &str) {
         match self.peek_symbol(name) {
             Some((address, value)) => {
@@ -1677,7 +2484,7 @@ impl Machine {
             idle_skips: self.idle_skips,
             wfi_ends: self.wfi_ends,
             core_quantum: self.core_quantum,
-            console: self.console.bytes(),
+            console: self.usb_sj_log.bytes(),
         }
     }
 
@@ -1697,8 +2504,7 @@ impl Machine {
         self.hook_calls = snap.hook_calls;
         self.idle_skips = snap.idle_skips;
         self.wfi_ends = snap.wfi_ends;
-        self.console.clear();
-        self.console.append(&snap.console);
+        self.usb_sj_log.replace(&snap.console);
         // The quantum is something a run's future depends on, so a restored
         // run takes the snapshot's — and says so if that differs from what
         // this machine was built with.

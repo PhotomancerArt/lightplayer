@@ -21,7 +21,13 @@ register layout is chip-family data. `regnames` holds the type and the
 lookup, never a table. (The two tables under `tests/regs/` are the
 generator's proof, not the crate's data; see below.)
 
-## Engines and views
+One seam, added by Xtensa M6 P05 and bounded by its own rule: `ip/` may hold
+the **offsets** of a block two chips' PACs agree on offset-for-offset, with
+every number that could differ — base, aperture, source, `regs` table, clock,
+grades — still the chip's, passed in as a parameter. See *Engines, views, and
+IP* below.
+
+## Engines, views, and IP
 
 **An engine is behaviour without a register map.** A peripheral block on an
 Espressif part is two things wearing one name: what the hardware *does* — a
@@ -91,16 +97,41 @@ extracting a struct two chips happen to share — the argument has to be that
 *this* algorithm has an external standard three views must agree with, not
 that two views have similar fields.
 
-### The USB-Serial-JTAG finding (M2, for M6)
+### `ip/` — a layout two chips genuinely share
 
-The C6's `usb_sj` block is offset-identical to the S3's for the whole range
-the S3 has (`EP1` @0x00 through `FRAM_NUM` @0x24, the interrupt quad at
-0x08–0x14 in the same order), and the C6's extra registers are a superset
-rather than a conflict — so M6 should **reuse the C6's file** rather than
-re-derive it. Where such a file lives is a placement question, not an
-engine/view one, and it is M6's to execute: this crate is not the home,
-because its rule forbids register offsets and that block is nothing but
-offsets.
+M2 recorded the USB-Serial-JTAG finding: the C6's `usb_sj` block is
+offset-identical to the S3's for the whole range the S3 has (`ep1` @0x00
+through `fram_num` @0x24, the interrupt quad at 0x08–0x14 in the same order),
+and the C6's extra registers are a superset rather than a conflict, so M6
+should **reuse the C6's file** rather than re-derive it. It also guessed that
+this crate could not be the home, "because its rule forbids register offsets
+and that block is nothing but offsets".
+
+**Xtensa M6 P05 settled it the other way** (ruling D1 (b) / DD64), and the
+distinction the guess was missing is the one `ip/` is named after:
+
+> An `ip` module may hold a register **layout** only when two chips' PACs
+> agree on it offset-for-offset, verified and quoted. The base address, the
+> aperture, the interrupt source number, the `regs` table and the grades are
+> always the chip's, supplied as parameters. `engine/` holds behaviour with
+> no layout; `ip/` holds a layout two parts genuinely share. Anything that is
+> neither is a chip's own view.
+
+So an `ip` view *does* own its `Peripheral` impl — which an engine never does
+— but it owns it against a `Config` the chip crate writes out, and the chip
+crate keeps its own base, aperture, source number, generated register table,
+clock, interrupt-bit mask and grade table. The neutrality rule is unchanged:
+there is still not one chip number in this crate outside a `#[cfg(test)]`
+fixture, and the fixtures say so in their own docs.
+
+| ip | why it earned one |
+|---|---|
+| `ip::usb_sj` | USB-Serial-JTAG: the honest host model (absent / attached-port-closed / attached-draining), the SOF cadence, the drain latencies, the auto-commit at 64 bytes, the bus reset that drops a committed packet. Two thousand lines whose every behaviour is paid for by a committed C6 transcript, and the alternative was a copy — which is where two models start to drift. The two registers the S3's silicon lacks (`chip_rst`, `bus_reset_st`) sit behind a `HostReset` capability the chip supplies or withholds, and the interrupt bits a part does not declare are held out by `Config::int_mask` |
+
+⚠️ **Grades never travel between parts.** A transcript recorded on a C6 is a
+measurement of a C6. `Config::grades` is the chip's own table and a chip whose
+silicon nobody has read supplies an empty one — every register `Modeled`,
+which is the honest answer rather than a gap.
 
 ## The layering
 

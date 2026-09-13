@@ -28,6 +28,19 @@ view, and the four peripheral **engines** — UART, TIMG, SPI-flash and SHA —
 each of which holds the behaviour and none of which holds a register offset.
 Under that, `lp-emu-core`'s guest memory, scheduler and cycle model.
 
+One more thing is shared, and it is a **different kind** of sharing: the
+USB-Serial-JTAG view, in `lp-emu-esp-common/src/ip/usb_sj.rs`. An `ip` module
+may hold a register **layout**, which an engine may not — but only when two
+chips' PACs agree on it offset-for-offset, verified and quoted, and with the
+base, the aperture, the source number, the `regs` table, the clock and the
+grades still the chip's, passed in as a `Config`. The C6's and the S3's
+`usb_device` blocks do agree over every register either chip's drivers touch;
+where they part — the C6's `chip_rst` and `bus_reset_st`, and its four extra
+interrupt bits — sits behind a capability a chip supplies or withholds. That
+seam and its rule are Xtensa M6 P05's (ruling D1 (b) / DD64), and
+`lp-emu-esp-common/README.md`'s *Engines, views, and IP* is where it is
+argued.
+
 **Not shared**, and each of these is a place the two chips genuinely differ:
 
 | | `lp-emu-esp32c6` | `lp-emu-esp32v3` |
