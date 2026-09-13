@@ -12,16 +12,17 @@
 //! ⚠️ **An unrecognised flag is an error.** A door a phase has not opened is
 //! deliberately *not* stubbed with a no-op, so the phase that adds one is
 //! visible in the diff instead of silently changing what an old command line
-//! meant. P04 will add the peripheral flags, P05 the link's, P06 the flash
-//! and cache ones, P07 the pads'.
+//! meant. P04 added the peripheral flags (`--efuse-mac`, `--efuse-rev`);
+//! P05 adds the link's, P06 the flash and cache ones, P07 the pads'.
 
 use std::path::PathBuf;
 use std::process::ExitCode;
 use std::time::Duration;
 
+use lp_emu_esp32s3::loader::EfuseIdentity;
 use lp_emu_esp32s3::machine::{
     AppSource, CORE_QUANTUM_DEFAULT, CORES, CPENABLE_RESET_DEFAULT, Esp32S3Builder, Machine,
-    Outcome, RomSource, StopCondition, TimeGrade,
+    Outcome, PERIPHERAL_REGISTRATION_ORDER, RomSource, StopCondition, TimeGrade,
 };
 use lp_emu_esp32s3::{bus_setup, memmap};
 
@@ -44,11 +45,18 @@ OPTIONS:
                             configuration: on this chip the ROM is most of
                             the dynamic instruction count, not a formality
     --strict-bus            every access to an address nothing claims is a
-                            STOP instead of a silent zero. NO peripheral is
-                            modelled in M6 P03, so a strict run stops at the
-                            FIRST block the boot touches and says which —
-                            which is this phase's deliverable and P04's
-                            starting ledger
+                            STOP instead of a silent zero. M6 P04 models
+                            every block the boot touches before the console,
+                            so a strict run of the shipped image gets past
+                            esp_hal::init and stops at USB_DEVICE — the
+                            console, which is P05's
+    --efuse-mac <aa:bb:cc:dd:ee:ff>
+                            the MAC the eFuse block answers. ⚠️ The default
+                            is the PAC's zero, NOT a plausible board: no S3
+                            fuse dump has been read yet (P09) [00:00:00:00:00:00]
+    --efuse-rev <major.minor>
+                            the wafer version the eFuse block answers, in the
+                            S3's own split (minor across two words) [0.0]
     --core-quantum <cycles> the upper bound on one core's window. Every core
                             that is not held gets a window of at most this
                             many cycles per loop iteration, core 0 then core
@@ -89,7 +97,9 @@ OPTIONS:
     -h, --help              this
 
 EXIT CODES (a cross-machine contract — one table for all three machines):
-    0 the deadline was reached          2 the hart faulted
+    0 the deadline was reached          2 the hart faulted, or the RWDT
+                                          expired (a reset this machine
+                                          reports and cannot yet perform)
     3 a strict-bus refusal              4 the wall-clock net fired
     5 a --break-at was reached
     6 a cache-off fetch — NOT PRODUCIBLE HERE: this machine has no cache
@@ -128,6 +138,7 @@ struct Args {
     trace_blocks: Vec<String>,
     console: Option<PathBuf>,
     seed: u64,
+    efuse: EfuseIdentity,
     hooks: bool,
     map: bool,
     help: bool,
@@ -156,6 +167,7 @@ fn run() -> Result<ExitCode, String> {
         .strict(args.strict)
         .core_quantum(args.core_quantum.unwrap_or(CORE_QUANTUM_DEFAULT))
         .cpenable_reset(args.cpenable_reset.unwrap_or(CPENABLE_RESET_DEFAULT))
+        .efuse(args.efuse)
         .seed(args.seed);
     if let Some(path) = args.rom {
         builder = builder.rom(RomSource::Path(path));
@@ -276,16 +288,23 @@ fn print_map() {
     }
     for span in memmap::MMIO_WINDOWS {
         println!(
-            "  {:<20} {:#010x}..{:#010x}  declared; NO block is modelled in M6 P03, so a \
-             strict run stops at the first one the boot touches",
+            "  {:<20} {:#010x}..{:#010x}  declared; the blocks below are modelled and a \
+             strict run stops at the first one that is not",
             span.name,
             span.base,
             span.end()
         );
     }
-    println!("  the blocks the image's own MMIO census names, for P04 to model in stop order:");
+    println!("  modelled (M6 P04), in registration order — the order the direct load met them:");
+    println!("    {}", PERIPHERAL_REGISTRATION_ORDER.join(" "));
+    println!("  the blocks the image's own MMIO census names, in address order:");
     for (name, base) in peripheral_census() {
-        println!("    {name:<18} {base:#010x}");
+        let state = if PERIPHERAL_REGISTRATION_ORDER.contains(&name) {
+            "modelled"
+        } else {
+            "NOT modelled — a strict run stops here"
+        };
+        println!("    {name:<18} {base:#010x}  {state}");
     }
     println!("  deliberately unmapped:");
     for (span, why) in bus_setup::deliberately_unmapped() {
@@ -449,6 +468,13 @@ fn print_outcome(machine: &mut Machine, outcome: &Outcome) {
         Outcome::WallTimeout { .. } => {
             println!("WALL TIMEOUT cycle={cycle} ({micros} us emulated)");
         }
+        Outcome::Reset { source, strap, .. } => {
+            println!(
+                "RESET cycle={cycle} ({micros} us emulated): {source} asked for a chip reset \
+                 into strap {strap}. This machine has no boot chain to restart until P06, so \
+                 the run ends here; on silicon the chip would reboot."
+            );
+        }
         Outcome::Fault {
             core, pc, fault, ..
         } => {
@@ -474,8 +500,10 @@ fn print_outcome(machine: &mut Machine, outcome: &Outcome) {
                 .symbolize(violation.pc)
                 .unwrap_or_else(|| "?".into());
             let where_ = if violation.in_mmio_window {
-                "inside the declared peripheral window — an UNMODELLED BLOCK. M6 P03 models \
-                 none, so this is the expected end of a bring-up run and P04's first entry"
+                "inside the declared peripheral window — an UNMODELLED BLOCK. M6 P04 models \
+                 every block before the console; a stop here is the next thing the boot needs \
+                 and the next phase's first entry (the console is P05's, flash and the cache \
+                 P06's, the pads P07's)"
                     .to_string()
             } else if let Some((span, why)) = bus_setup::unmapped_window(violation.address) {
                 format!(
@@ -569,6 +597,18 @@ fn parse(argv: Vec<String>) -> Result<Args, String> {
             "--seed" => {
                 let v = value()?;
                 args.seed = v.parse().map_err(|_| format!("--seed {v}: not a number"))?;
+            }
+            "--efuse-mac" => {
+                let v = value()?;
+                args.efuse.mac =
+                    EfuseIdentity::parse_mac(&v).map_err(|e| format!("--efuse-mac: {e}"))?;
+            }
+            "--efuse-rev" => {
+                let v = value()?;
+                let (major, minor) =
+                    EfuseIdentity::parse_rev(&v).map_err(|e| format!("--efuse-rev: {e}"))?;
+                args.efuse.wafer_major = major;
+                args.efuse.wafer_minor = minor;
             }
             other => {
                 return Err(format!(

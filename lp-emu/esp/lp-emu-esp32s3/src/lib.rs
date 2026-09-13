@@ -20,11 +20,18 @@
 //! [`machine`], two hart slots with slot 1 held and the quantum run loop;
 //! [`snapshot`]; [`test_support`]; and a binary, `lp-emu-esp32s3`.
 //!
-//! **No peripheral.** That is the point of P03: with the MMIO window declared
-//! and nothing inside it, a `--strict-bus` run stops at the **first** block
-//! the boot touches and says which — which is this phase's deliverable and
-//! P04's starting ledger. Nor is there a console (P05), a flash cache or a
-//! ROM-up boot (P06), or a pad fabric (P07).
+//! **The blocks before the console** (M6 P04): [`periph`] — the clock gates
+//! and the four software interrupts (`SYSTEM`), the reset cause, the stall
+//! key and **the RWDT that really runs** (`RTC_CNTL`), two counters per
+//! timer group (`TIMG0`/`TIMG1`), the S3's `Instant::now()` (`SYSTIMER`),
+//! the MAC and wafer version (`EFUSE`), the analog master, and the accept
+//! blocks the mask ROM's cache setup and `esp_hal::init`'s inlined path
+//! touch (`SENSITIVE`, `EXTMEM`, `SPI0`/`SPI1`, `APB_CTRL`, `BB`, `NRX`,
+//! `FE`, `FE2`) — with [`intmatrix`], the two halves of the interrupt matrix
+//! in the **mask form only** (X43). A `--strict-bus` run now gets past
+//! `esp_hal::init` and stops at the console (`USB_DEVICE`), which is P05's.
+//! There is still no flash cache or ROM-up boot (P06) and no pad fabric
+//! (P07).
 //!
 //! # What P03 found, in four lines
 //!

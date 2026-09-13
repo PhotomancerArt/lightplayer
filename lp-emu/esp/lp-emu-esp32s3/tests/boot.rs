@@ -491,29 +491,52 @@ fn each_slot_answers_its_own_prid() {
 // The shipped image. `#[ignore]`d — `just test-emu-esp32s3-boot` builds it.
 // ---------------------------------------------------------------------------
 
-/// **The deliverable of M6 P03**: a direct load of the shipped image runs,
-/// executes mask-ROM code, and reaches its **first strict stop inside the
-/// MMIO window**.
+/// A trace sink a test can read back.
+#[derive(Clone, Default)]
+struct SharedSink(std::sync::Arc<std::sync::Mutex<Vec<u8>>>);
+
+impl std::io::Write for SharedSink {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        self.0.lock().unwrap().extend_from_slice(buf);
+        Ok(buf.len())
+    }
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+impl SharedSink {
+    fn text(&self) -> String {
+        String::from_utf8_lossy(&self.0.lock().unwrap()).into_owned()
+    }
+}
+
+/// **The deliverable of M6 P04**: a direct load of the shipped image runs,
+/// executes mask-ROM code, gets **past `esp_hal::init`**, and reaches its
+/// first strict stop at **the console** — `USB_DEVICE`, which is P05's.
 ///
-/// What the stop is, is the phase's product and P04's first ledger entry —
-/// so the assertions here are about its *shape*, not its address: pinning
-/// `0x600C_1004` would turn P04's first commit into a test edit. What is
-/// pinned is that the stop is inside the declared peripheral window (so it is
-/// a block to model, not a memory-map question) and that the pc that made the
-/// access is **inside the mask ROM** (so the ROM really executed).
+/// P03 pinned the *shape* of its stop (inside the MMIO window, from a ROM
+/// pc) rather than the address, so that P04's first commit would not be a
+/// test edit. P04 pins the block: the stop is inside `USB_DEVICE`'s window,
+/// and it is made by `esp_println`'s writer — application code, after every
+/// pre-console block has answered. That the mask ROM really executed is
+/// asserted separately, off the trace: the first `SENSITIVE` access is made
+/// from a mask-ROM pc.
 #[test]
 #[ignore = "needs LP_EMU_ESP32S3_ELF; run through `just test-emu-esp32s3-boot`"]
-fn the_shipped_image_reaches_its_first_strict_stop_inside_the_mmio_window() {
+fn the_shipped_image_gets_past_esp_hal_init_and_stops_at_the_console() {
     let Ok(elf) = test_support::fw_esp32s3_image() else {
         test_support::skip_notice(
-            "the_shipped_image_reaches_its_first_strict_stop_inside_the_mmio_window",
+            "the_shipped_image_gets_past_esp_hal_init_and_stops_at_the_console",
             "no image",
         );
         return;
     };
+    let sink = SharedSink::default();
     let mut machine = Esp32S3Builder::new()
         .app(AppSource::Path(elf))
         .strict(true)
+        .trace(Box::new(sink.clone()), vec!["SENSITIVE".into()])
         .build()
         .expect("the shipped image direct-loads");
 
@@ -553,27 +576,54 @@ fn the_shipped_image_reaches_its_first_strict_stop_inside_the_mmio_window() {
     assert!(
         violation.in_mmio_window,
         "the stop is inside the declared peripheral window — an unmodelled \
-         block, which is what P04 answers. A stop outside every window would \
-         be a memory-map question: {violation:?}"
+         block. A stop outside every window would be a memory-map question: \
+         {violation:?}"
     );
+    let usb = memmap::periph::USB_DEVICE;
     assert!(
-        violation.pc >= memmap::ROM_MASK_BASE
-            && violation.pc < memmap::ROM_MASK_BASE + memmap::ROM_MASK_LEN,
-        "the access was made by mask-ROM code — the ROM really executes on \
-         this machine, which is the property 4,769 memcpy call sites make \
-         load-bearing. pc = {:#010x}",
+        (usb..usb + 0x1000).contains(&violation.address),
+        "the stop is the console, USB_DEVICE (P05's block), and nothing before it: \
+         {violation:?}"
+    );
+    let symbol = machine
+        .symbolize(violation.pc)
+        .unwrap_or_else(|| "?".into());
+    assert!(
+        symbol.contains("esp_println"),
+        "the access is esp-println's writer — application code past esp_hal::init, not a \
+         block esp_hal::init needed: {symbol} at {:#010x}",
         violation.pc
     );
+    assert!(
+        machine.bus().unmapped_reads() + machine.bus().unmapped_writes() == 1,
+        "exactly one unmodelled access: the console's"
+    );
+    // The mask ROM really executed: the first SENSITIVE access — P03's own
+    // first stop — is made from a mask-ROM pc.
+    let trace = sink.text();
+    let first = trace
+        .lines()
+        .find(|l| l.contains("SENSITIVE+0x004"))
+        .expect("the ROM's Cache_Occupy_ICache_MEMORY reads cache_dataarray_connect_1");
+    let pc = first
+        .split_whitespace()
+        .find_map(|w| w.strip_prefix("pc=0x"))
+        .and_then(|h| u32::from_str_radix(h, 16).ok())
+        .expect("a pc on the trace line");
+    assert!(
+        (memmap::ROM_MASK_BASE..memmap::ROM_MASK_BASE + memmap::ROM_MASK_LEN).contains(&pc),
+        "made by mask-ROM code — the ROM really executes on this machine, which is the \
+         property 4,769 memcpy call sites make load-bearing: {first}"
+    );
     println!(
-        "FIRST STRICT STOP: {:?} {:?} at {:#010x} from pc {:#010x} ({}) at cycle {}",
+        "STRICT STOP PAST esp_hal::init: {:?} {:?} at {:#010x} from pc {:#010x} ({symbol}) at \
+         cycle {} ({} us); first ROM MMIO: {first}",
         violation.access,
         violation.width,
         violation.address,
         violation.pc,
-        machine
-            .symbolize(violation.pc)
-            .unwrap_or_else(|| "?".into()),
         violation.cycle,
+        violation.cycle / memmap::CYCLES_PER_US,
     );
     for line in machine.core_report() {
         println!("  {line}");
@@ -581,8 +631,10 @@ fn the_shipped_image_reaches_its_first_strict_stop_inside_the_mmio_window() {
 }
 
 /// The image loads and the two hart slots are where a run report says they
-/// are, with no peripheral registered and no strict bus — the scouting run,
-/// which is the one that shows how far the machine gets before P04 exists.
+/// are, with no strict bus — the scouting run, which carries on past the
+/// console's unmodelled reads with zeros and shows how far the machine gets
+/// with the pre-console set answering (twenty emulated milliseconds: the
+/// console is reached at ~8.7 ms).
 #[test]
 #[ignore = "needs LP_EMU_ESP32S3_ELF; run through `just test-emu-esp32s3-boot`"]
 fn a_non_strict_direct_load_runs_rom_code_until_it_needs_a_block_nobody_models() {
@@ -599,7 +651,7 @@ fn a_non_strict_direct_load_runs_rom_code_until_it_needs_a_block_nobody_models()
         .expect("the shipped image direct-loads");
 
     let outcome = machine.run_until(&StopCondition {
-        stop_cycle: Some(1_000 * memmap::CYCLES_PER_US),
+        stop_cycle: Some(20_000 * memmap::CYCLES_PER_US),
         ..Default::default()
     });
     assert!(
