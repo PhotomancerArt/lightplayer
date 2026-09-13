@@ -68,6 +68,7 @@ pub mod bus_setup;
 pub mod loader;
 pub mod machine;
 pub mod memmap;
+pub mod periph;
 pub mod regs;
 pub mod rom;
 pub mod snapshot;
