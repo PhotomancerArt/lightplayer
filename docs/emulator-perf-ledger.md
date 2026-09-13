@@ -259,7 +259,7 @@ named and deliberately not pursued) or **candidate**.
 | 2026-09-06 | `opt-level = "z"` → `3` for the five host emulator crates | `docs/reports/2026-09-06-lp-riscv-emu-speed-probe.md`; `lp-emu/README.md` §Speed | **2.3× free** | **shipped** |
 | 2026-09-06 | bookkeeping reduction in the interpreter loop | speed-ladder research | **+2.1×** | **shipped** |
 | 2026-09-06 | PGO (`scripts/emu/pgo-c6.sh`) | speed-ladder research | **+1.45×** | **registered** — the build-side cost was never taken on |
-| 2026-09-07 | the block cache | `lp-emu/lp-emu-jit/README.md` | on the interpreter path | **shipped** |
+| 2026-09-09 | **the block cache** — pre-decoded basic blocks on the interpreter path | `docs/adr/2026-09-09-emulator-block-cache.md`; `lp-emu/lp-emu-core/src/block.rs` | **1.15× `render-basic` t2, 1.33× `render-rocaille` t2** (1.07× harness, 1.09× boot-idle); mean block 4.98, hit rate 99.93 % | **shipped** — Step A only; every Step B lever was built and measured at ~1.0× native / 1.12–1.14× phone and never merged (G3) |
 | 2026-09-08 | **poll-loop skip** — a whole-iteration credit for a spinning guest | `docs/adr/2026-09-08-emulator-poll-loop-skip.md` | never reached a fixed point on the render images | **rejected** — do not re-attempt in this shape |
 | 2026-09-07→11 | **M7, the wasm translator** (P1–P7) | `docs/adr/2026-09-11-emulator-wasm-translator.md`; archive `2026-09-07-0827-emu-speed-ladder/m7/` | the wasm build's core is the translator by default; phone **1.025× best of 3** at 8/fn | **shipped** |
 | 2026-09-11 | M7b P1, incremental `fence.i` translation | m7b archive; JD20 | **1,050 ms of 2,058**, 400 ms handed back at the module boundary | **shipped** |
@@ -442,6 +442,8 @@ The phone's shortfall on `render-basic` is now **~9 %** (worst spaced press
 `2026-09-07-emu-web-bench-baseline.md`, `2026-05-12-jit-math-perf.md`.
 
 **ADRs.** `docs/adr/2026-09-11-emulator-wasm-translator.md`,
+`docs/adr/2026-09-09-emulator-block-cache.md` (the rung below it, and why a
+decode memo is not architectural state),
 `docs/adr/2026-09-08-emulator-poll-loop-skip.md` (Rejected — read it before
 proposing anything that credits a spinning guest),
 `docs/adr/2026-09-06-esp-soc-emulator-architecture.md`.
