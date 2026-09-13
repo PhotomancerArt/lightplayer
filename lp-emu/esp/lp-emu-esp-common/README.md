@@ -185,6 +185,68 @@ MMIO writes set the **sideband** flag; RAM writes and MMIO reads do not. The
 privileged stepper consumes it after store- and system-class instructions to
 know whether the interrupt state may have moved.
 
+#### The bus answers twice: `add_ram_alias` (Xtensa plan M6 P02, D2/DD64)
+
+Some parts map one physical SRAM at two addresses — an I-bus view and a
+D-bus view of the same bytes. `add_region` refuses to model that as two
+regions, and rightly: two regions are two arena spans, and a write through
+one would be invisible through the other, silently. `add_peripheral_alias`
+already solves the same problem for MMIO (DD38: one state, two decodes).
+`SocBus::add_ram_alias(base, len, target_base)` is that rule for RAM.
+
+**One arena, one region, two decodes.** An alias is an address translation,
+applied by one private `canonical()` helper **at the top of every entry
+point** — `read`, `write`, `fetch_instruction`, `fetch_bytes` and
+`load_image` — *before* the region lookup, the watchpoint check, the
+memory-cost model, the `bench` counters, the strict-bus code-word checker and
+the guest-code span record see the address. So there is exactly one
+`RamRegion`, exactly one arena span, and everything downstream sees the
+**canonical (target) address**:
+
+- the permission table marks the alias window `PERM_NONE` (it is a gap in the
+  arena), so a translated core's inline access there goes out through the
+  bus and is translated like any other;
+- `take_guest_code_writes` and `take_code_writes` report canonical spans, so
+  a translator seeds from the arena's own address and never the door;
+- a watchpoint is armed at a canonical address and fires on an access through
+  either door; one armed at an alias address never fires;
+- a fault raised through the alias carries the canonical address;
+- the trace names the door once per `(pc, kind)`:
+  `cyc=41 pc=0x42001000 ALIAS store 0x40378010 -> 0x3fc88010`.
+
+The fetch path is the point. The ESP32-S3's shader JIT stores through the
+D-bus view of SRAM1 and fetches at `write + 0x6F_0000` — every shader, on the
+shipped image (`lp-shader/lpvm-native/src/exec_addr.rs`) — so a translation
+that covered loads and stores but not fetch would boot the firmware and fault
+on the first shader with no diagnostic. `tests/ram_alias.rs` holds one test
+per path, each of which was run against a bus with that path's translation
+removed.
+
+**Why it is not the default, and why the classic's aliases stay unmapped.**
+DD36's rule is that an alias region is built only when a strict stop — or a
+static reading of the image — names a user. M0 measured the classic's SRAM1
+I-bus mirror and its RTC-fast I-bus view **unused** by the shipped
+`fw-esp32v3` image and by the mask ROM, so the classic names them in its
+`memmap` and maps neither (DD3, DD24 R1, DD36): an alias with no user is a
+model nobody checks. The C6 has no dual-mapped memory. The S3 is the first
+caller, and this crate still holds none of its numbers.
+
+**Cost.** On a bus with no alias, every access pays one `bool` test
+(`has_ram_alias`) and nothing else; the table walk and the trace note are out
+of line. The same-window A/B of `just bench-emu-c6` is in the P02 PR body.
+
+**Registration is checked, in `add_region`'s voice.** `add_ram_alias` panics
+when the target span is not inside one registered region, when the alias
+span overlaps a region, another alias, its own target, a peripheral or an
+MMIO window, and when the length is zero or a span wraps. `add_region`,
+`add_peripheral` and `add_peripheral_alias` refuse the overlap from the
+other direction. A RAM alias therefore never reaches MMIO, which is what
+lets a translated module's published register window stay a plain compare.
+
+**Snapshot.** `BusScalars` carries the alias table and the trace's
+once-per-site set; `restore_scalars` refuses a snapshot whose table is not
+this bus's, as `restore_regions` refuses a different region count.
+
 ### `periph` — what a peripheral may see
 
 A `Peripheral` gets an offset, a `Width` and a `BusCx`: cycles, the issuing
