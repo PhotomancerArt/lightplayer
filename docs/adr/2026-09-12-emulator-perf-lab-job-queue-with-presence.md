@@ -76,6 +76,55 @@ relays, the agent drives over HTTP.
   the one declared exception to the never-pinned rule, because a
   machine-wide service cannot hash per worktree.
 
+## Amendment 2026-09-13 — the cooldown is sized by the burn
+
+The decision above says the scheduler sends the next press "only when the
+device is present, its cooldown has elapsed, …". That cooldown shipped as a
+**flat 60 s, and the 60 s was never measured** — it was a guess, and on a
+job whose presses each burn about 30 s it meant a device spent more than
+half of the job's wall clock idle. Yona, 2026-09-13: "the tests take a few
+seconds, with _60 seconds_ of cooldown? how can that possibly be the right
+model?"
+
+**The measurement.** One build (`9f67d78`), one device (Yona's iPhone), the
+same four `gate-rows` (jit/8, jit/16, jit/32, interp — about **30 s of burn
+per press**), 10 presses, spacing 0, three cooldowns:
+
+| job | cooldown | jit/8 median | spread | shape |
+|---|---|---:|---:|---|
+| `j-20260913-1937-3d3a` | 0 s | 0.757 | 41 % | monotone fall 1.044 → 0.61–0.68 by press 5 (thermal throttle) |
+| `j-20260913-1959-ba34` | 30 s ≈ **1× burn** | 0.941 | 5.3 % | flat |
+| `j-20260913-1944-055f` | 60 s ≈ 2× burn | 0.974 | 14.5 % | flat |
+
+No idle throttles about 35 % within ten presses. Idle equal to the burn
+holds the row flat, and was the *tightest* of the three runs; twice the
+burn bought nothing over it. Absolute medians drifted down all afternoon at
+every cooldown (jit/8 0.94–0.97 against the morning's 1.05; interp
+0.52–0.57 against 0.67) — day-level drift, not the cooldown, which is why
+the same-press translated ÷ interpreter ratio stays the quotable number
+(DD41).
+
+**The rule.** The cooldown after a press is `cooldownFactor` × **that
+press's own duration** (`resultAt − sentAt` on the server's clock, so it
+includes the page's overhead and errs long), clamped to
+`[cooldownFloorMs, cooldownMs]`. Defaults: factor **1**, floor **5 s**,
+ceiling **60 s**. `cooldownMs` keeps its config name and its
+`LAB_COOLDOWN_MS` override and becomes the ceiling — and the fallback for a
+device whose last burn is unknown (a record written before this model, or a
+press that ended with no result). `cooldownMs: 0` still turns the cooldown
+off. The duration is persisted on the device record as
+`lastPressDurationMs`, so a restart does not forget it.
+
+The job **spacing** default follows: back to **0**, cooldown-governed. It
+had been set to 60 s "because that is what the cooldown gated anyway", and
+that is no longer true; spacing now means only "run this job slower than
+the thermal rule needs".
+
+**What this does not change.** Presence (D3/D20), the taint rule (D23), the
+stability stop (F3), and the drop window — `dropLostMs` still defaults to
+the cooldown **ceiling** floored at 60 s, because a dropped stream is not a
+thermal question.
+
 ## Consequences
 
 - The phone is a milestone bar again on the same terms the desk proxy
