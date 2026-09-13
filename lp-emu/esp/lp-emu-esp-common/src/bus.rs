@@ -2646,6 +2646,10 @@ fn watchpoint_span(wp: &Watchpoint) -> (u64, u64) {
 impl Bus for SocBus {
     #[inline]
     fn fetch_instruction(&mut self, address: u32) -> Result<u32, MemoryError> {
+        // First: the fetch path is the one a RAM alias exists for (the S3's
+        // JIT stores through one view and fetches through the other), and the
+        // one a translation that covered only data access would miss.
+        let address = self.canonical(address, Some(MemoryAccessKind::InstructionFetch));
         if address % 2 != 0 {
             return Err(MemoryError::Unaligned {
                 address,
@@ -2716,6 +2720,10 @@ impl Bus for SocBus {
     /// reason: fetch never routes to MMIO.
     #[inline]
     fn fetch_bytes(&mut self, pc: u32, out: &mut [u8; 3]) -> Result<usize, MemoryError> {
+        // First, and in particular before the `bench` counters below, so a
+        // fetch through an alias door is counted under the address the bytes
+        // actually live at. See `canonical`.
+        let pc = self.canonical(pc, Some(MemoryAccessKind::InstructionFetch));
         // One increment per retired Xtensa instruction: `XtHart::step` calls
         // this exactly once per instruction and nothing caches in front of it.
         #[cfg(feature = "bench")]
