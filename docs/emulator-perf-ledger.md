@@ -223,9 +223,9 @@ named and deliberately not pursued) or **candidate**.
 | 2026-09-12 | **P1b R3 — instant RMT** (the full DD26 tier) | `scripts/emu/tier-probes/R3-instant-rmt.patch` | slices → 61,155; **zero frames**; the guest never renders | **rejected as built** |
 | 2026-09-12 | **P1b R4 — the UART tap** | §2's MMIO census | **not taken**: UART0 is 0.14 % of crossings on `render-basic`, a hundredth of the 2 % floor the phase set | **rejected — wrong image**. It remains a *harness*-image lever |
 | 2026-09-12 | **P1b R3′ — the firmware's own "no real output under emulation" switch** | `lp-fw/fw-esp32c6/src/` | **does not exist**. `bench/render_loop.rs` mentions emulation only to pick a shorter run; the RMT driver is unconditional | **registered** — an unbuilt firmware-side lever |
-| 2026-09-13 | **P1c — the `wall_timeout` check strides** (`WALL_TIMEOUT_SLICE_STRIDE = 64` in `machine.rs`) | this document §3's note below; PR #736 | **computed −224 ms V8 / −210 ms JSC** (1,508,000 of 1,531,923 clock reads removed × P1's 148.3 / 139.5 ns). **Desk best-of, one invocation per engine, `render-basic` t2 5,500 ms: V8 16/fn 5.38 s → 5.07 s (−310 ms, 1.062×), JSC 8/fn 6.96 s → 6.50 s (−460 ms, 1.070×)** — both taken at loadavg 43–83 from three foreign worktrees, so the magnitudes carry a wide error bar and only the sign and the order are safe. Every identity leg `same` | **shipped** |
+| 2026-09-13 | **P1c — the `wall_timeout` check strides** (`WALL_TIMEOUT_SLICE_STRIDE = 64` in `machine.rs`) | this document §3's note below; PR #736 | **desk, best of 11 in one invocation per engine, `render-basic` t2 5,500 ms: V8 16/fn 5.15 s → 4.89 s (−260 ms, −5.0 %, 1.055×) at loadavg 5.8–7.1; JSC 8/fn 6.33 s → 6.13 s (−200 ms, −3.2 %, 1.031×)**. **Phone (lab `j-20260913-0758-2bb9`, iPhone, 5 spaced presses each): translated 8/fn median 1.049× → 1.091× (+4.0 %), best 1.100× → 1.129×; the interpreter row +6.2 % median.** Predicted 227/214 ms. Every identity leg `same` | **shipped** |
 
-### The P1c note: what the stride removed, and what the desk could say
+### The P1c note: what the stride removed, and what three instruments said
 
 The lever is one hunk. `run_until` asked `started.elapsed()` at every slice
 boundary to see whether `--wall-timeout` had expired; it now asks on the first
@@ -241,21 +241,33 @@ reads; at P1's measured 148.3 ns (V8) and 139.5 ns (JSC) that is **224 ms and
 unconditional `Instant::now()` in `run_until` is the one at entry, and every
 read in `jit.rs` is behind `LP_EMU_JIT_ENTRY_TIME` or one-shot at translation.
 
-**The desk rows agree in sign and order and cannot pin the magnitude.** They
-were taken at loadavg 43–83 — three other worktrees were running emulator
-sweeps and clippy on the same desk for the whole phase — so best-of had to be
-widened from 5 to 11 (V8) and 9 (JSC) before either engine caught a window
-close to P1b's clean baseline. What they say:
+**And the desk agrees.** Best of 11, interleaved `BEFORE, AFTER, …` in one
+invocation per engine, base `8ee2e1510`, on a quiet desk:
 
-| engine | best of | before | after | delta | × | P1b's clean baseline |
+| engine | before | after | delta | × | loadavg | P1b's baseline |
 |---|---:|---:|---:|---:|---:|---:|
-| node/V8 16/fn | 11 | 5.38 s | **5.07 s** | −310 ms (−5.8 %) | 1.062× | 5.24 s at loadavg 3.1 |
-| bun/JSC 8/fn | 9 | 6.96 s | **6.50 s** | −460 ms (−6.6 %) | 1.070× | 6.35 s |
+| node/V8 25.2.1, 16/fn | 5.15 s (1.067×) | **4.89 s (1.125×)** | **−260 ms (−5.0 %)** | **1.055×** | 5.8–7.1 | 5.24 s |
+| bun/JSC 1.1.18, 8/fn | 6.33 s (0.869×) | **6.13 s (0.897×)** | **−200 ms (−3.2 %)** | **1.031×** | 9.6 (from `node`) | 6.35 s |
 
-Both exceed the computed prize, which under this contention is **not evidence
-of more**: a best-of on a busy desk is biased upward whenever one side happens
-to catch a quieter moment. Read the computed 224/210 ms as the number and these
-as confirmation of its sign.
+The before rows reproduce P1b's clean baselines (5.24 s / 6.35 s), and the
+deltas land on the computed prize from the other side: −260 against 224
+predicted in V8, −200 against 210 in JSC. Every one of the 44 rows is
+byte-identical — UART0 `2407828f80684331`, frames `830bcc3f3088d4ac`, trap
+`51ddaf56c96b77d3`, 542,906,355 retired instructions, 256 frames.
+
+**The phone says the same** — lab job `j-20260913-0758-2bb9`, an iPhone, five
+spaced presses per build, base `9f67d78` against that base plus this hunk:
+
+| row | before, best / median | after, best / median | median Δ |
+|---|---:|---:|---:|
+| `render-basic` t2 8/fn | 1.100× / 1.049× | **1.129× / 1.091×** | **+4.0 %** |
+| `render-basic` t2 interpreter | 0.683× / 0.681× | 0.735× / 0.723× | +6.2 % |
+
+UART0 `2407828f80684331` on every phone row of both builds. The interpreter
+row moves too, and slightly more, which is what a lever in `run_until` — the
+loop both cores share — should do; it is also why the same-press translated ÷
+interpreter ratio reads −1.9 %, which is not a regression in the translated
+core.
 
 ⚠️ **A bun row's `loadavg` is a fiction.** `rung-rows.mjs` records
 `os.loadavg()[0]`, and **bun's `node:os.loadavg()` returns ~0 unconditionally**
