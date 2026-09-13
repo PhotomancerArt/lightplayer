@@ -47,14 +47,17 @@
 
 // The JIT harness allocates (JIT buffers, module tables); the app path is the
 // whole server stack. `test_button` also needs it: the button driver's
-// registry/endpoint types are alloc-based, same as on fw-esp32c6.
+// registry/endpoint types are alloc-based, same as on fw-esp32c6. So does the
+// compile harness, which is the one that allocates hardest — the heap either
+// side of every slice is the figure that payload exists to report.
 // `test_backtrace_oracle` is the exception — it is deliberately
 // allocation-free, because it exercises a walk the panic path takes, and the
 // panic path must not allocate.
 #[cfg(any(
     not(fw_harness),
     feature = "test_xt_jit_corpus",
-    feature = "test_button"
+    feature = "test_button",
+    feature = "test_shader_compile_incremental"
 ))]
 extern crate alloc;
 
@@ -235,6 +238,15 @@ fn boot() -> ! {
     {
         drop(peripherals);
         tests::xt_fp_conformance::run_all();
+    }
+
+    // The compile harness builds its engine and compiles out of the heap this
+    // function already installed; it claims no peripheral of its own, so the
+    // raw singleton is simply dropped (the same shape as the JIT corpus).
+    #[cfg(feature = "test_shader_compile_incremental")]
+    {
+        drop(peripherals);
+        tests::incremental_shader_compile::run();
     }
 }
 

@@ -1600,15 +1600,26 @@ pub static ALL_PAYLOADS: &[Payload] = &[
         },
         // The S3's arm (M6 P08, D7 (b)). The same payload for the same
         // reason the classic has it — and one more that is this chip's
-        // alone: **this is the only test in the milestone that exercises
-        // D2's alias end to end.** The S3 has no reserved code region; a
-        // shader compiled here is written through the D-bus into an
-        // `esp_alloc` buffer and executed through that buffer's I-bus alias
-        // (`lpvm_native::exec_addr`'s `+0x6F_0000`), which is exactly what
-        // silicon does and what a machine that modelled the two views as two
-        // memories would get wrong. `fw-esp32s3`'s `server` already pulls
-        // `lpvm-native` and `lp-gfx-lpvm`, so the JIT half existed; the
-        // harness adds the case list, the per-tick line and the header
+        // alone: it is the milestone's one payload that drives D2's
+        // **write→execute rule** on a dynamic allocation. The S3 has no
+        // reserved code region: the JIT takes its code buffer out of the
+        // ordinary `esp_alloc` heap, stores the bytes through the D-bus view
+        // at `0x3FC8_xxxx`, and patches every intra-module relocation with
+        // that buffer's I-bus alias at `+0x6F_0000`
+        // (`lpvm_native::exec_addr`'s S3 arm) — so a machine modelling the
+        // two views as two memories emits branch targets the fetch path
+        // cannot reach.
+        //
+        // ⚠️ **Stated no wider than it is**: this harness compiles and
+        // DROPS, it does not render, so the fetched-through-the-alias half
+        // is exercised by the firmware's own `.rwtext` and vectors (which
+        // live in the I-bus view on every boot of every payload) rather than
+        // by the shader compiled here. Executing JIT'd code through the
+        // alias needs a loaded project, and no payload in M6 loads one.
+        //
+        // `fw-esp32s3`'s `server` already pulls `lpvm-native` and
+        // `lp-gfx-lpvm`, so the JIT half existed; the harness adds the case
+        // list, the per-tick line and the header
         // (`lp-fw/fw-esp32s3/src/tests/incremental_shader_compile/`).
         ChipArm {
             chip: "esp32s3",
