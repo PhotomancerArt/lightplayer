@@ -245,7 +245,10 @@ two *images* — `2407828f80684331` for `render-basic`, `a570b6597cc0fc31` for
 | phone (JSC) | render-basic | same-press 8/fn ÷ interp | — | 1.56 / 1.42 / 1.53 / 1.70 / 1.54 | — | **1.70×** (median 1.54) | same job |
 | phone (JSC) | render-rocaille | same-press 8/fn ÷ interp | — | 1.95 / 1.84 / 1.85 / 1.77 / 1.81 | — | **1.95×** (median 1.84) | same job |
 | phone (JSC) | render-basic | t2 8/fn (older) | 1.025× | 0.863 / 0.945 / 1.008 / 0.921 / 0.818 — thermal | up to 18 % | — | M7 director log E7 |
-| phone | harness, boot-idle-memfs | — | **NEVER MEASURED** | — | — | — | the rig now defines the rows (translator-quality P1); lab `j-20260913-1702-102a` is in flight on `c66d8ac` (3 presses) with no press completed yet |
+| phone | harness, boot-idle-memfs | — | ~~**NEVER MEASURED**~~ | — | — | — | **superseded 2026-09-13** by the three rows below — `j-20260913-1702-102a` landed all three of its presses |
+| phone (JSC) | **harness** | t2 8/fn | **3.168×** (median 3.166, spread 7.2 %) | 3.168 / 2.940 / 3.166 — worst press **2.940** | **holds**, with ~3× of margin on the worst press | **2.63×** (median 2.56, same press) | lab `j-20260913-1702-102a` |
+| phone (JSC) | **boot-idle-memfs** | t2 8/fn | **3.241×** (median 3.198, spread 2.5 %) | 3.198 / 3.159 / 3.241 — worst press **3.159** | **holds**, with ~3× of margin on the worst press | **0.59×** (median 0.59, same press) — the image where the translated core loses | lab `j-20260913-1702-102a` |
+| phone (JSC) | render-basic | t2 8/fn (the same-build anchor) | 1.027× (median 1.006, spread 14.1 %) | 0.883 / 1.006 / 1.027 — worst press **0.883**, a **new low** against `j-20260913-0726-c5bb`'s 0.909 | **up to 12 %** — does not hold 1× on the worst press; median at the line | — (no interpreter leg in this job) | lab `j-20260913-1702-102a` |
 | desk V8 16/fn | render-basic | t2 | 1.051× | — (best of 5, one invocation) | holds | — | P1b |
 | desk JSC 8/fn | render-basic | t2 | 0.867× | — | **13 %** | — | P1b |
 | desk V8 16/fn | render-rocaille | t2 | **1.166×** | — (best of 3, one invocation per image) | holds | 1.73× | P9 — corrected 2026-09-13, see below |
@@ -283,16 +286,34 @@ image for the emulator, because more guest work per emulated microsecond means
 the fixed per-slice cost is amortised further. The image that needs the margin
 is the light one.
 
-**One shortfall, one unknown** (rewritten 2026-09-13 with the correction
-above). The phone's ~9 % on `render-basic` is thermal throttling of
-steady-state work, and it is the **only** measured shortfall against 1× left
-in this table: `render-rocaille` holds on both devices, and all four images
-hold on the desk. What is *unknown* is `harness` and `boot-idle-memfs` on a
-phone — **no phone row exists for either**. The rig defines the rows as of
-translator-quality P1 and `j-20260913-1702-102a` is in flight; until presses land,
-their phone margin is unknown, not good. `boot-idle-memfs`'s 0.53× is a
-different question in a different column — fixed translation cost against its
-own interpreter, which no steady-state loop lever touches.
+**The two unknown images are measured now, and both hold.** Lab job
+**`j-20260913-1702-102a`** (build `c66d8ac`, main at 2026-09-13 16:29Z; iPhone,
+iOS 18.7 / Safari 26.6.1; t2 at 8 blocks a function, 5,500 ms emulated, 3
+presses a row at the lab's own 60 s cooldown, **0 tainted**) is the first phone
+row either image has ever had. `harness` reads **3.168× best, 3.166 median,
+2.940 on its worst press**; `boot-idle-memfs` **3.241× best, 3.198 median,
+3.159 on its worst**. Both **hold 1× with about 3× of margin on the worst
+press** — on the phone, not just the desk. Their interpreter controls in the
+same job are 1.238× / 1.204 median (`harness`) and 5.528× / 5.392 median
+(`boot-idle-memfs`), and the same-press translated ÷ interpreter ratios are
+**2.63×** and **0.59×**: the phone reproduces the desk's shape in both columns,
+including the one product image where the translated core is a net loss against
+its own interpreter. UART sha on every row and every press —
+`b6da0bd777529664` for `harness`, `17a0a1a3869073fe` for `boot-idle-memfs`,
+`2407828f80684331` for `render-basic`.
+
+**One shortfall, and it is `render-basic`'s alone** (rewritten 2026-09-13 after
+that job, and after the correction above). The light image is the only measured
+shortfall against 1× left in this table: `render-rocaille` holds on both
+devices, `harness` and `boot-idle-memfs` now hold on both devices, and all four
+images hold on the desk. And the shortfall got **worse, not better**: the same
+job's `render-basic` anchor — same build, same presses, same phone — read
+1.027 / 1.006 / **0.883**, so its worst spaced press is now **0.883, a new low
+against `j-20260913-0726-c5bb`'s 0.909**, i.e. **up to 12 %** rather than 9 %.
+Its median, 1.006, sits exactly at the line. `boot-idle-memfs`'s 0.53× on the
+desk and 0.59× on the phone remain a different question in a different column —
+fixed translation cost against its own interpreter, which no steady-state loop
+lever touches.
 
 ---
 
@@ -331,6 +352,7 @@ named and deliberately not pursued) or **candidate**.
 | 2026-09-13 | **translator-quality P1 — the gate preset grows to all four product images**, and §2's three desk rows are corrected | `scripts/emu/bench-web/bench-run.js` (`GATE_ROWS`); §2's margin table and its correction note; lab `j-20260913-1702-102a` | **no code under `lp-emu/`.** The desk proof that the two new rows are real, node/V8 25.2.1 at 8/fn on build `c66d8ac`, one invocation, both legs per image: every row stops at **exactly 5,500,000 us emulated (880,000,000 cycles)** — the emulated bound, not `harness`'s `--exit-on` marker and not the wall guard — and the two legs of each image agree byte for byte on UART (`harness` `b6da0bd777529664…`, `boot-idle-memfs` `17a0a1a3869073fe…`), on the trap log and on retired instructions (289,953,877 and 51,052,668). Coverage and mean stay reproduce the ADR exactly (99.63 % / 1354.0 and 97.82 % / 43.7). **The wall times are NOT margin numbers — loadavg was 181–186** (53 concurrent `rustc`); the same-invocation *ratios* still land near the ADR's, 2.46× and 0.514× against 2.68× and 0.53×. **No phone row yet**: the job was still on its first press when this row was written | **measured** (rig + doc only) |
 | 2026-09-13 | **the two-channel `(at, seq)` pin-log ordering trap** (`vision.md` §2, registered since the tier work began) | `scripts/emu/tier-probes/README.md` §"It fires, and it is bigger than a same-cycle tie"; `lp-emu-esp32c6` `rmt.rs` `tests::two_tx_channels_put_the_pin_log_in_dispatch_order_not_at_order` | **the assumption had NEVER RUN** — no product image drives two TX channels (`render-basic` and `render-rocaille` start ch0 only; ch1 is configured and never started), so it was constructed. It **fires, and wider than registered**: `push_pulse` emits both halves of a word at the fetch, so a second channel's word lands *behind* the first's already-future edge and the combined `at` column is not monotone at any point — `0, 64, 0, 64, 200, 264, …`. Start ch1 first and the wire is byte-identical while the log's order flips; `Machine::drain_pins` writes `Fabric::take_edges` into `--pin-log` with no sort. **Not a defect on the product path**: every consumer is per pad, each pad's own edges are strictly increasing, and there is one `Ws281xDecoder` per pad | **registered — now tested, not merely named.** The exposure is a reader who treats the combined pin log as a time-ordered stream, and a byte-identity comparison of two runs that dispatch the channels in different orders |
 | 2026-09-13 | **Xtensa #735, `SocBus::add_ram_alias`** — one `bool` test (`has_ram_alias`) per memory access on the C6's hot path (E5) | PR #735, merged 2026-09-13 09:39Z; the A/B is in that PR's own body, `scripts/emu/bench-c6.sh --no-build --no-promote`, stock vs branch back to back | **quoting #735's pair 3** (post-rebase binaries, best of 3, load 4.2–5.1 on 12 cores, user seconds): `render-basic` t1 5.55 → 5.46 (**−1.6 %**), t2 5.00 → 4.94 (**−1.2 %**); `render-rocaille` t1 4.48 → 4.42 (−1.3 %), t2 4.49 → 4.45 (−0.9 %); `harness` t1/t2 **+0.9 %** each; `boot-idle-memfs` t1 0, t2 −3 %. Their words: "every render-loop row is within ±2 %, both signs — inside the bench's own run-to-run noise." Binary text +8.9 KB (2,034,850 → 2,043,774). **Not re-measured here** — the row quotes theirs | **shipped (theirs)** — no measurable C6 cost, inside the bench's noise. The C6 registers no alias, so the cost is the `bool` and nothing else |
+| 2026-09-13 | **translator-quality P1, the phone rows** — the first phone measurement of `harness` and `boot-idle-memfs`, with `render-basic` t2 8/fn as the same-build anchor | lab `j-20260913-1702-102a`; §2's margin table | build `c66d8ac`, iPhone (iOS 18.7 / Safari 26.6.1), t2 at 8 blocks/fn, 5,500 ms emulated, 3 presses a row at the lab's 60 s cooldown, **0 tainted**. `harness` best **3.168×** (median 3.166, spread 7.2 %, worst press 2.940); `boot-idle-memfs` best **3.241×** (median 3.198, spread 2.5 %, worst press 3.159) — **both hold 1× with ~3× of margin on the worst press**. Interpreter controls 1.238× and 5.528×; same-press translated ÷ interpreter **2.63×** and **0.59×**. The `render-basic` anchor read 1.027 / 1.006 / **0.883** — a **new worst press**, below `j-20260913-0726-c5bb`'s 0.909. UART on every row: `b6da0bd777529664`, `17a0a1a3869073fe`, `2407828f80684331` | **measured** — no code |
 
 ### The P1c note: what the stride removed, and what three instruments said
 
@@ -464,6 +486,11 @@ The phone's shortfall on `render-basic` is now **~9 %** (worst spaced press
 0.909 of five, best 1.063 — job `j-20260913-0726-c5bb`), not 10–18 %. And
 `render-rocaille`, the heavier image, **already holds 1×** at a 1.382× median.
 
+Amended 2026-09-13 by `j-20260913-1702-102a` (build `c66d8ac`, 3 presses): that
+job's `render-basic` anchor took the worst press lower still, **0.883**, so
+read the shortfall as **up to ~12 %**. The levers below are not re-ranked here,
+but the 8–9 % they sum to no longer covers the whole gap.
+
 - **Available and exact in the user lane:** `wall_timeout` (4.1 %) **taken**
   on 2026-09-13 (P1c, #736, phone +4.0 % median). What is left is R1
   (1–2.7 % desk, +0.1 % best / +6.3 % median on the phone — inside the noise)
@@ -478,8 +505,12 @@ The phone's shortfall on `render-basic` is now **~9 %** (worst spaced press
   interpreter** — a *fixed* translation cost, not loop cost, and the only
   number in this document no loop lever reaches. It is **not** a margin
   shortfall: that image runs at 2.808× of real time on the desk and holds 1×
-  with room (§2's correction, 2026-09-13). And `harness` and `boot-idle-memfs`
-  still have **no phone row at all**, so the desk is all either of them has.
+  with room (§2's correction, 2026-09-13). **The phone now says the same**
+  (lab `j-20260913-1702-102a`, 2026-09-13, the first phone rows either image
+  has had): `harness` **3.168×** and `boot-idle-memfs` **3.241×** of real time,
+  both holding 1× on their worst press, with same-press ratios **2.63×** and
+  **0.59×**. So the ratio finding is the phone's too, and the only shortfall
+  left on any device belongs to `render-basic`, the light image.
 
 ---
 
