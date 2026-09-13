@@ -7,6 +7,7 @@
 
 pub mod accept;
 pub mod system;
+pub mod systimer;
 
 /// The crystal: **40 MHz**. esp-hal's S3 clock tree forces it —
 /// `ClockConfig::configure` sets `XtalClkConfig::_40` with a `TODO: support
