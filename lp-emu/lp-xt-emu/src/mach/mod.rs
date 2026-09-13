@@ -163,13 +163,13 @@ use lp_emu_core::{Bus, CycleModel, InstClass, MemoryAccessKind, MemoryError};
 use lp_xt_inst::{AluRs, DecodeError, Inst, NullaryNarrowOp, NullaryOp};
 
 use crate::block::XtSlot;
-use block::MAX_BLOCK_SLOTS;
 use crate::cpu::Cpu;
 use crate::emu::Flow;
 use crate::error::{TRAP_CAUSE_WATCHPOINT, Trap, TrapKind};
 use crate::executor::Exec;
 use crate::fp_policy::FpPolicy;
 use crate::trace::{NoopTracer, TraceEvent, Tracer};
+use block::MAX_BLOCK_SLOTS;
 use breakpoint::BreakUnit;
 use extreg::ExternalRegs;
 use interrupt::{IntLine, InterruptUnit, Take};
@@ -1307,8 +1307,7 @@ impl<B: Bus> XtHart<B> {
                     // interior instruction boundary strictly below `end` and
                     // needs no per-instruction compare; one that does not fit
                     // runs with the compare the single-stepping loop uses.
-                    let whole =
-                        self.cycle_count.saturating_add(u64::from(block.max_cycles)) <= end;
+                    let whole = self.cycle_count.saturating_add(u64::from(block.max_cycles)) <= end;
                     // The slot arena is borrowed for the length of the block
                     // so the inner loop reads a slice rather than
                     // bounds-checking per instruction; the counter the borrow

@@ -1138,12 +1138,8 @@ fn core_zero_writes_code_core_one_has_cached() {
             m.harts[1].cpu().a(4) == 111
         });
         let old = lp_xt_inst::encode(&Inst::Movi(reg(4), 111));
-        let old_word = u32::from_le_bytes([
-            old[0],
-            old[1],
-            old[2],
-            lp_xt_inst::encode(&Inst::J(-7))[0],
-        ]);
+        let old_word =
+            u32::from_le_bytes([old[0], old[1], old[2], lp_xt_inst::encode(&Inst::J(-7))[0]]);
         assert_eq!(
             m.bus_mut().read_word(PUB_STUB).unwrap() as u32,
             old_word,

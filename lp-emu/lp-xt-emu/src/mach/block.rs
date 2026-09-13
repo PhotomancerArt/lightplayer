@@ -258,11 +258,7 @@ mod tests {
             "terminator",
             "bnez.n"
         );
-        assert_eq!(
-            class_of(Inst::Nullary(NullaryOp::Ret)),
-            "terminator",
-            "ret"
-        );
+        assert_eq!(class_of(Inst::Nullary(NullaryOp::Ret)), "terminator", "ret");
         assert_eq!(
             class_of(Inst::NullaryN(NullaryNarrowOp::RetwN)),
             "terminator",
@@ -272,7 +268,11 @@ mod tests {
 
     #[test]
     fn the_window_and_special_register_families_are_terminators() {
-        assert_eq!(class_of(Inst::Entry(Reg::new(1), 32)), "terminator", "entry");
+        assert_eq!(
+            class_of(Inst::Entry(Reg::new(1), 32)),
+            "terminator",
+            "entry"
+        );
         assert_eq!(class_of(Inst::Rotw(1)), "terminator", "rotw");
         assert_eq!(
             class_of(Inst::Rs(AluRs::Movsp, Reg::new(1), Reg::new(2))),
@@ -311,11 +311,7 @@ mod tests {
     #[test]
     fn the_hart_owned_and_unmodelled_families_are_refused() {
         assert_eq!(class_of(Inst::Break(1, 2)), "refused", "break");
-        assert_eq!(
-            class_of(Inst::BreakN(1)),
-            "refused",
-            "break.n"
-        );
+        assert_eq!(class_of(Inst::BreakN(1)), "refused", "break.n");
         assert_eq!(
             class_of(Inst::Nullary(NullaryOp::Syscall)),
             "refused",
@@ -367,7 +363,12 @@ mod tests {
             "memw is hot and is never an event (XD3)"
         );
         assert_eq!(
-            class_of(Inst::Rrr(AluRrr::Add, Reg::new(2), Reg::new(3), Reg::new(4))),
+            class_of(Inst::Rrr(
+                AluRrr::Add,
+                Reg::new(2),
+                Reg::new(3),
+                Reg::new(4)
+            )),
             "body",
             "add"
         );

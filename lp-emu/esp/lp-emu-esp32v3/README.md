@@ -43,6 +43,40 @@ exactly two ways:
 - **`harts` has two slots, and both run** — on one guest clock, a window
   each, the deterministic quantum interleave (M4 P1, plan decision D3).
 
+### The block cache and `--no-block-cache`
+
+Both harts run out of a pre-decoded block cache by default (M7 P01); it is
+worth **1.73×** on `render-loop` at t1. `--no-block-cache` turns it off and is
+the identity oracle: the same binary either way must print the same UART0
+bytes, the same `run:` line, the same decoded frames, the same stdout and the
+same 20 ms `--trace`. `scripts/emu/v3-oracle.sh` runs both legs and compares
+them cell for cell.
+
+Two things differ from the C6, and both follow from this chip's invalidation
+contract being the **store address** rather than a guest barrier (M7 XD3 — the
+firmware publishes JIT'd code into SRAM0 with no `isync`, deliberately):
+
+- **The cache stays on under `--boot-mode rom-up`.** The C6 turns its cache
+  off there (M5 MD13) because the mask ROM and the IDF bootloader publish code
+  without a `fence.i` and we own neither. Here those copies are ordinary guest
+  stores into an executable region, so the same drain catches them.
+- **The dirty record is per hart.** A store by core 0 into code core 1 has
+  cached reaches core 1 too: core 0 drains at its own polling point (c), core 1
+  on entry to its next slice.
+
+Each hart prints its own counter line on stderr at exit, and it is **never
+part of a compared transcript** — the oracle masks it:
+
+```text
+blocks: core0 decodes=151613 hits=100926332 (99.85% of 101077945 entries) \
+        slots=430518345 mean=4.26 flushes=2 capacity_flushes=0 \
+        range=354 (dropping 21 entries) collisions=101705; 2 isync
+```
+
+`isync` is the Xtensa `fence.i` count, and a small number there is the
+**expected** reading on this chip rather than a warning: the firmware does not
+emit one after a publish, which is exactly why the contract is the store.
+
 ### Two cores
 
 *Written for someone deciding whether to trust a result.*

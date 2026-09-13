@@ -1652,6 +1652,19 @@ impl SocBus {
             // drains this at the slice boundary and invalidates.
             self.code_writes
                 .push((address, address + bytes.len() as u32));
+            // …and the **store-address record** as well, for a hart that
+            // pre-decodes (M7 XD3). The two are not redundant: `code_writes`
+            // needs a machine to drain it into the harts, and a hart is
+            // perfectly capable of running with no machine around it — a
+            // fixture that places a program, runs a slice, places a second
+            // program over it and runs another one would otherwise execute
+            // the first program's cached blocks. `lp-emu-esp32s3`'s
+            // `tests/isa_gaps.rs` is exactly that shape, and it is what found
+            // this. Recorded per hart, drained by each hart on entry to its
+            // next slice, and off entirely until a hart asks.
+            if self.watch_code_stores {
+                self.note_code_dirty(address, bytes.len() as u32);
+            }
         }
         Ok(())
     }
@@ -4846,7 +4859,10 @@ mod tests {
 
         bus.write_word(0x4080_0010, 0x1234_5678).unwrap();
         assert!(bus.code_dirty());
-        assert_eq!(bus.take_code_dirty(), alloc::vec![(0x4080_0010, 0x4080_0014)]);
+        assert_eq!(
+            bus.take_code_dirty(),
+            alloc::vec![(0x4080_0010, 0x4080_0014)]
+        );
         assert!(!bus.code_dirty(), "and the drain empties it");
     }
 
@@ -4874,9 +4890,13 @@ mod tests {
         let mut bus = bus_with_ram();
         bus.watch_code_stores(true);
         for i in 0..16u32 {
-            bus.write_word(0x4080_0100 + 4 * i, 0x1000 + i as i32).unwrap();
+            bus.write_word(0x4080_0100 + 4 * i, 0x1000 + i as i32)
+                .unwrap();
         }
-        assert_eq!(bus.take_code_dirty(), alloc::vec![(0x4080_0100, 0x4080_0140)]);
+        assert_eq!(
+            bus.take_code_dirty(),
+            alloc::vec![(0x4080_0100, 0x4080_0140)]
+        );
     }
 
     /// A store far from the last one starts a new span rather than widening
@@ -4890,6 +4910,31 @@ mod tests {
         assert_eq!(
             bus.take_code_dirty(),
             alloc::vec![(0x4080_0100, 0x4080_0104), (0x4080_0800, 0x4080_0804)]
+        );
+    }
+
+    /// A **host-side** write of guest code — an image load, a flash-cache
+    /// refill, a ROM-hook patch — raises the record too.
+    ///
+    /// `take_code_writes` is the funnel a *machine* drains into its harts, and
+    /// a hart does not need a machine to be correct: a fixture that places a
+    /// program, runs a slice, places a second one over it and runs again would
+    /// otherwise run the first program out of the cache.
+    #[test]
+    fn a_host_side_code_write_raises_the_record_too() {
+        let mut bus = bus_with_ram();
+        bus.watch_code_stores(true);
+        bus.load_image(0x4080_0040, &[0u8; 8]).expect("placed");
+        assert!(bus.code_dirty());
+        assert_eq!(
+            bus.take_code_dirty(),
+            alloc::vec![(0x4080_0040, 0x4080_0048)]
+        );
+
+        bus.load_image(0x5000_0040, &[0u8; 8]).expect("placed");
+        assert!(
+            !bus.code_dirty(),
+            "`lp-ram` is not executable, so placing bytes in it publishes nothing"
         );
     }
 
@@ -4908,7 +4953,10 @@ mod tests {
         bus.set_hart(0);
         bus.write_word(0x4080_0010, 0x1234_5678).unwrap();
         assert!(bus.code_dirty(), "core 0 sees its own publish");
-        assert_eq!(bus.take_code_dirty(), alloc::vec![(0x4080_0010, 0x4080_0014)]);
+        assert_eq!(
+            bus.take_code_dirty(),
+            alloc::vec![(0x4080_0010, 0x4080_0014)]
+        );
         assert!(!bus.code_dirty());
 
         bus.set_hart(1);
@@ -4916,7 +4964,10 @@ mod tests {
             bus.code_dirty(),
             "core 1 must still hear about it — core 0's drain is not core 1's"
         );
-        assert_eq!(bus.take_code_dirty(), alloc::vec![(0x4080_0010, 0x4080_0014)]);
+        assert_eq!(
+            bus.take_code_dirty(),
+            alloc::vec![(0x4080_0010, 0x4080_0014)]
+        );
         assert!(!bus.code_dirty());
     }
 
@@ -4942,7 +4993,8 @@ mod tests {
         bus.watch_code_stores(true);
         // Stores 16 bytes apart never coalesce, so each one is its own span.
         for i in 0..(MAX_CODE_DIRTY_SPANS as u32 + 8) {
-            bus.write_word(0x4080_0000 + 16 * i, 0x1000 + i as i32).unwrap();
+            bus.write_word(0x4080_0000 + 16 * i, 0x1000 + i as i32)
+                .unwrap();
         }
         let spans = bus.take_code_dirty();
         assert!(
