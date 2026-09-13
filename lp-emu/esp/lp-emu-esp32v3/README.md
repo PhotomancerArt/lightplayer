@@ -666,7 +666,7 @@ is taken from `esp-hal-1.1.1`'s `gpio_intr_enable` (bit 0 = APP, bit 2 = PRO,
 so `pin[n]` bits 13 and 15) rather than from the PAC's own prose, which skips
 a bit and runs past the width of the field it describes.
 
-### What the pin class is trusted for: a waveform, not yet a frame
+### What the pin class is trusted for: a frame, and still both readings ours
 
 The routing is modelled. `IO_MUX`'s `fun_ie` reaches the fabric. `GPIO.enable`
 decides which routed pads drive. Through all of M3 **no waveform was produced
@@ -685,8 +685,23 @@ about what was on the wire.
 routed to a peripheral signal rather than to `GPIO_OUT`. M3's gate asserted it
 was empty; from P2 it is the list a strip decoder should be watching, and
 `tests/rmt_registers.rs` asserts a routed pad carries both edges of every bit
-of a whole WS2812 frame. **Nothing decodes it yet** — that is P3, and no
-frame claim is made here.
+of a whole WS2812 frame.
+
+**M4 P3 closed the other half**, and the frame claims live in "The pad" and
+"A frame three ways" below: a WS281x decoder rides the fabric, `--dump-frames`
+writes a `.pins.jsonl` beside a transcript, and the shipped image's first lit
+frame off IO18 is byte-identical to the guest's own `[OUT] dump` line and to
+the host oracle's. Since M5 P7 the configuration says so out loud —
+`records_pins = true` on `lp-emu:esp32v3:t1` in `validate.toml` (DD72).
+
+That is a **capability**, not a promotion. The `pin` class is still `modeled`,
+and the reason is unchanged and short: the waveform is a modelled RMT's and
+the decoder that reads it back is ours, so **both readings of the pad are
+ours**. No instrument has been on a classic pad — no logic analyser, no scope.
+`silicon:esp32v3` therefore records no pins at all, which is why a replay of an
+emulated classic transcript against a silicon one says *"silicon:esp32v3
+records none"* instead of comparing two pads and calling the silence
+agreement.
 
 Not modelled, and each of these is an electrical fact a logic analyser on the
 pin header would not show you either: drive strength, the *value* of a pull-up
