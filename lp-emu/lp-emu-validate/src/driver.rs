@@ -142,10 +142,11 @@ pub struct ChipSpec {
 }
 
 /// Mirrors `CORE_QUANTUM_DEFAULT` in `lp-emu/esp/lp-emu-esp32v3/src/machine.rs`
-/// (256 cycles per unheld core's window, D3). Not a dependency on that crate
-/// -- `lp-emu-validate` shells out to that package rather than linking it --
-/// so this is a second place the same fact lives, mirrored the way every
-/// other field in [`ChipSpec`]'s doc comment says it is.
+/// (256 cycles per unheld core's window, D3). Not a dependency on that crate —
+/// `lp-emu-validate` shells out to that package rather than linking it — so
+/// this is a second place the same fact lives, and
+/// `the_classic_core_quantum_mirrors_the_machines_default` keeps the two
+/// honest the way the chip table's own mirror test does.
 pub const ESP32V3_CORE_QUANTUM_DEFAULT: u32 = 256;
 
 /// The C6: the chip every configuration in this crate was written for, and the
@@ -1908,6 +1909,36 @@ mod tests {
             seen += 1;
         }
         assert!(seen >= 7, "expected the script's short slugs, found {seen}");
+    }
+
+    /// [`ESP32V3_CORE_QUANTUM_DEFAULT`] is a mirror too, and a mirror nobody
+    /// checks is a lie waiting to be written into a sidecar.
+    ///
+    /// This crate shells out to `lp-emu-esp32v3` rather than linking it, so
+    /// the constant cannot be imported; the machine's source is read instead,
+    /// the way the chip table reads `build-reference-image.sh`. If the
+    /// machine's default ever moves, the header would otherwise keep
+    /// recording 256 for runs that did not use it — a provenance field that
+    /// lies is worse than one that is absent.
+    #[test]
+    fn the_classic_core_quantum_mirrors_the_machines_default() {
+        let machine = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../esp/lp-emu-esp32v3/src/machine.rs");
+        let source = std::fs::read_to_string(&machine).unwrap();
+        let line = source
+            .lines()
+            .find_map(|l| l.trim().strip_prefix("pub const CORE_QUANTUM_DEFAULT: u64 = "))
+            .expect("`CORE_QUANTUM_DEFAULT` is declared in the machine");
+        let want: u32 = line
+            .trim_end_matches(';')
+            .trim()
+            .parse()
+            .expect("the machine's default is a number");
+        assert_eq!(
+            ESP32V3_CORE_QUANTUM_DEFAULT, want,
+            "the classic's `core_quantum` no longer mirrors the machine's default",
+        );
+        assert_eq!(ESP32V3.core_quantum, Some(want));
     }
 
     fn request(config: &str, payload: &str, port: Option<&str>) -> RunRequest {
