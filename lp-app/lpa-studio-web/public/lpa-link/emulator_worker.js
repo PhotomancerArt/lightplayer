@@ -529,11 +529,34 @@ function flushConsole(final = false) {
   }
 }
 
+/**
+ * One sample into the dilation window, and the expired prefix out.
+ *
+ * The prefix leaves in ONE `splice`, and that is the whole point of the
+ * shape. A guest that is AHEAD of the wall gets no cycles (the pacing rule's
+ * first branch), so this loop does nothing but `tick()` — and a flashed board
+ * idling in `wfi`, whose guest clock the machine fast-forwards, is ahead
+ * almost all the time. Measured 2026-09-13 on a `?emu=tab` board: **193 858
+ * samples inside one 1 000 ms window**. Retiring that prefix one `shift()` at
+ * a time is quadratic; it held this thread — and so its inbox, and so every
+ * control line a flasher was waiting on — for up to 21 s in a single call,
+ * which is how a Flash pressed on a board that had been up a minute waited
+ * out `emulator_tab.js`'s 30 s request deadline
+ * (`docs/defects/2026-09-13-the-dilation-window-drains-one-shift-at-a-time.md`).
+ *
+ * Which samples are kept is unchanged: the same predicate, applied to the
+ * same entries, in the same order.
+ */
 function sample(wallAt) {
   dilationWindow.push([wallAt, Number(emu.micros())]);
-  while (dilationWindow.length > 2 && wallAt - dilationWindow[0][0] > DILATION_WINDOW_MS) {
-    dilationWindow.shift();
+  let expired = 0;
+  while (
+    dilationWindow.length - expired > 2 &&
+    wallAt - dilationWindow[expired][0] > DILATION_WINDOW_MS
+  ) {
+    expired += 1;
   }
+  if (expired > 0) dilationWindow.splice(0, expired);
 }
 
 /**

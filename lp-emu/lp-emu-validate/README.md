@@ -156,15 +156,38 @@ remove, and a gap that closed is a finding to be re-read rather than a test
 that quietly goes green. E2 is open with Yona.
 
 ⚠️ The stack figure is **−480 B and not the −640 B** `lp-emu-esp32v3/tests/
-boot_idle.rs` pins, and the two do not conflict: that constant is measured on
-a **direct load** and this is the **ROM-up** path, whose own cross-path gap in
-the same file is +160 B (16332 + 160 = 16492). Silicon has no direct load — on
-a board every boot is a ROM-up boot — so −480 B is the like-for-like number.
+boot_idle.rs` pins, and the two do not conflict because **they are not the
+same measurement**: −640 B is a **direct load of the image built at HEAD**
+(emulator 16332), −480 B is a **ROM-up boot of the image built at
+`c976f17a9`** (emulator 16492). The high-water is the deepest point an
+interrupt happened to land on, so it moves with the image's layout and with
+where in the pacer's phase the heartbeat falls. Silicon has no direct load —
+on a board every boot is a ROM-up boot — so −480 B is the like-for-like
+number, and it is the one `v3_replays.rs` pins.
+
+⚠️ **Corrected by M5 P7.** This paragraph used to reconcile the two through
+that file's cross-path gap, "+160 B (16332 + 160 = 16492)". **`PATH_HIGH_
+WATER_GAP` has been −64 since M4 P3b (#704) re-measured it** — the ROM-up
+boot is 64 B *shallower* than the direct load, not 160 B deeper — so the
+arithmetic was reading a stale constant. Re-measured on the tree at
+`095d46b90`: direct 16460, rom-up 16396, difference −64, exactly as the
+constant says. The arithmetic is withdrawn. **No figure moved with it**: −480,
+−640 and +84 are all unchanged, and the pins in `v3_replays.rs` and
+`boot_idle.rs` are untouched.
 
 Every classic class is still **`modeled`**, including the two where the
 evidence is now large (372 memory values byte-equal on the compile harness,
 360 structural values on the cycle kernels). Evidence goes in the `because`; a
 promotion is the director's.
+
+`records_pins` is the one classic flag that **did** move: `true` on
+`lp-emu:esp32v3:t1` since M5 P7 (DD72), because M4 P3 gave the classic binary
+`--dump-frames` and M4 P5 committed the first `.pins.jsonl` beside a classic
+transcript. It is a **capability**, not a grade — `pin` stays `modeled`,
+since the waveform is a modelled RMT's and the decoder reading it back is ours
+— and `silicon:esp32v3` still records none, so a classic replay reports
+`silicon:esp32v3 records none` rather than comparing two pads. The walk record
+says in as many words what has been on a classic pad: nothing.
 
 It also has **one** time grade, and that is a statement rather than an
 omission: `TimeGrade` on `lp-emu-esp32v3` has one arm, there is no measured

@@ -12,16 +12,19 @@
 //! ⚠️ **An unrecognised flag is an error.** A door a phase has not opened is
 //! deliberately *not* stubbed with a no-op, so the phase that adds one is
 //! visible in the diff instead of silently changing what an old command line
-//! meant. P04 will add the peripheral flags, P05 the link's, P06 the flash
-//! and cache ones, P07 the pads'.
+//! meant. P04 added the peripheral flags (`--efuse-mac`, `--efuse-rev`);
+//! P05 adds the link's, P06 the flash and cache ones, P07 the pads'.
 
 use std::path::PathBuf;
 use std::process::ExitCode;
 use std::time::Duration;
 
+use lp_emu_esp32s3::control::parse_usb_script;
+use lp_emu_esp32s3::loader::EfuseIdentity;
 use lp_emu_esp32s3::machine::{
     AppSource, CORE_QUANTUM_DEFAULT, CORES, CPENABLE_RESET_DEFAULT, Esp32S3Builder, Machine,
-    Outcome, RomSource, StopCondition, TimeGrade,
+    Outcome, PERIPHERAL_REGISTRATION_ORDER, RomSource, StopCondition, TimeGrade, UsbHost,
+    UsbSjDrain, UsbSjSink,
 };
 use lp_emu_esp32s3::{bus_setup, memmap};
 
@@ -44,11 +47,18 @@ OPTIONS:
                             configuration: on this chip the ROM is most of
                             the dynamic instruction count, not a formality
     --strict-bus            every access to an address nothing claims is a
-                            STOP instead of a silent zero. NO peripheral is
-                            modelled in M6 P03, so a strict run stops at the
-                            FIRST block the boot touches and says which —
-                            which is this phase's deliverable and P04's
-                            starting ledger
+                            STOP instead of a silent zero. M6 P04 models
+                            every block the boot touches before the console,
+                            so a strict run of the shipped image gets past
+                            esp_hal::init and stops at USB_DEVICE — the
+                            console, which is P05's
+    --efuse-mac <aa:bb:cc:dd:ee:ff>
+                            the MAC the eFuse block answers. ⚠️ The default
+                            is the PAC's zero, NOT a plausible board: no S3
+                            fuse dump has been read yet (P09) [00:00:00:00:00:00]
+    --efuse-rev <major.minor>
+                            the wafer version the eFuse block answers, in the
+                            S3's own split (minor across two words) [0.0]
     --core-quantum <cycles> the upper bound on one core's window. Every core
                             that is not held gets a window of at most this
                             many cycles per loop iteration, core 0 then core
@@ -78,10 +88,45 @@ OPTIONS:
     --trace <path|->        write the bus trace here
     --trace-block <name>    only trace this block (repeatable)
     --console <path>        write everything the console SAID to this file
-                            when the run ends. ⚠️ EMPTY in M6 P03: the S3's
-                            console is USB-Serial-JTAG and nothing drives it
-                            until P05. The door exists now so P05 adds a
-                            producer rather than a plumbing layer
+                            when the run ends. On this chip the console IS
+                            the link, so this is the usb-sj stream: what a
+                            HOST RECEIVED, never what the guest tried
+    --exit-on <substr>      stop at the end of the line this appears on, on
+                            the console. Exit code 0
+    --usb-host absent|attached|attached-idle
+                            the host's side at power-on: no cable, a cable
+                            with an application draining the port, or a cable
+                            with the port closed [absent]
+    --usb-sj stderr|file:<path>|tcp:<host:port>
+                            where the usb-sj stream goes: the IN-endpoint
+                            packets a draining host took [kept in memory,
+                            and --console writes it]. tcp: LISTENS, and the
+                            client's bytes are the OUT endpoint's source
+    --usb-sj-tried stderr|file:<path>
+                            where the OBSERVATION stream goes: bytes the
+                            guest handed over that no host took. Never tcp:
+                            it is an observation, not a link
+    --usb-sj-drain auto|manual
+                            whether a client on the byte socket counts as an
+                            application opening the port, and disconnecting
+                            as closing it. `manual` leaves open/close to the
+                            control channel [auto]. A cable is never implied
+                            — attach/detach are control commands
+    --control tcp:<host:port>
+                            LISTEN for the host control channel: one line
+                            per command, one reply line per command, applied
+                            at the next slice boundary. attach, detach, open,
+                            close, dtr, rts, signals, reset, download-mode,
+                            state, usb-write
+    --usb-script <file>     scripted host input on the USB link: bytes at
+                            declared EMULATED times, plus the control words
+                            above, one entry per line. Repeatable. Guest
+                            time, so two runs deliver the same bytes at the
+                            same cycles
+    --reboot-on-reset       PERFORM a reset request instead of reporting it:
+                            the machine goes back to its power-on state and
+                            runs again. ⚠️ There is no ROM-up boot here until
+                            P06, so the strap is recorded and nothing reads it
     --seed <n>              the machine's PRNG seed [0]
     --hooks                 list the ROM hook table and exit. It is EMPTY,
                             and stays empty: try the real ROM path first
@@ -89,7 +134,10 @@ OPTIONS:
     -h, --help              this
 
 EXIT CODES (a cross-machine contract — one table for all three machines):
-    0 the deadline was reached          2 the hart faulted
+    0 --exit-on matched, or the        2 the hart faulted, or the RWDT
+      deadline was reached
+                                          expired (a reset this machine
+                                          reports and cannot yet perform)
     3 a strict-bus refusal              4 the wall-clock net fired
     5 a --break-at was reached
     6 a cache-off fetch — NOT PRODUCIBLE HERE: this machine has no cache
@@ -127,7 +175,16 @@ struct Args {
     trace: Option<String>,
     trace_blocks: Vec<String>,
     console: Option<PathBuf>,
+    exit_on: Option<String>,
+    usb_sj: UsbSjSink,
+    usb_sj_tried: UsbSjSink,
+    usb_host: UsbHost,
+    usb_sj_drain: UsbSjDrain,
+    usb_script: Vec<PathBuf>,
+    control: Option<String>,
+    reboot_on_reset: bool,
     seed: u64,
+    efuse: EfuseIdentity,
     hooks: bool,
     map: bool,
     help: bool,
@@ -156,7 +213,36 @@ fn run() -> Result<ExitCode, String> {
         .strict(args.strict)
         .core_quantum(args.core_quantum.unwrap_or(CORE_QUANTUM_DEFAULT))
         .cpenable_reset(args.cpenable_reset.unwrap_or(CPENABLE_RESET_DEFAULT))
+        .efuse(args.efuse)
+        .usb_sj(args.usb_sj.clone())
+        .usb_sj_tried(args.usb_sj_tried.clone())
+        .usb_host(args.usb_host)
+        .usb_sj_drain(args.usb_sj_drain)
+        .reboot_on_reset(args.reboot_on_reset)
         .seed(args.seed);
+    if let Some(addr) = args.control.clone() {
+        builder = builder.control(addr);
+    }
+    if !args.usb_script.is_empty() {
+        let mut commands = Vec::new();
+        let mut bytes = lp_emu_esp_common::ScriptedSource::new();
+        for path in &args.usb_script {
+            let text = std::fs::read_to_string(path)
+                .map_err(|e| format!("--usb-script {}: {e}", path.display()))?;
+            let script = parse_usb_script(&text).map_err(|e| format!("{}: {e}", path.display()))?;
+            commands.extend(script.commands);
+            bytes.extend(script.bytes);
+        }
+        commands.sort_by_key(|(at, _)| *at);
+        println!(
+            "usb script: {} byte(s) of host input in {} chunk(s) and {} control command(s)",
+            bytes.remaining(),
+            bytes.chunks(),
+            commands.len()
+        );
+        builder = builder.usb_script(commands);
+        builder = builder.usb_script_source(bytes);
+    }
     if let Some(path) = args.rom {
         builder = builder.rom(RomSource::Path(path));
     }
@@ -193,6 +279,7 @@ fn run() -> Result<ExitCode, String> {
         stop_cycle: Some(emulated_cycles(timeout)),
         wall_timeout: args.wall_timeout,
         probes: args.probes.clone(),
+        exit_on: args.exit_on.clone(),
     };
 
     let outcome = machine.run_until(&stop);
@@ -225,6 +312,43 @@ fn print_run_summary(machine: &Machine) {
     let per_core: Vec<String> = (0..CORES)
         .map(|c| format!("core{c}={}", machine.core_instructions(c)))
         .collect();
+    // The link, in one line a gate can read: where the host was at
+    // power-on, how many bytes reached it, and — the state a gate must be
+    // able to tell apart from "the firmware crashed" — how many the guest
+    // handed over that nobody took.
+    let tried = machine.usb_sj_tried();
+    println!(
+        "usb-sj: host {} at power-on; {} bytes reached the host; {} bytes were merely tried{}",
+        machine.usb_host(),
+        machine.usb_sj().len(),
+        tried.len(),
+        match machine.usb_sj_tcp() {
+            Some(tcp) => format!(
+                " (listening on {}, client {})",
+                tcp.local_addr(),
+                if tcp.client_connected() {
+                    "connected"
+                } else {
+                    "absent"
+                }
+            ),
+            None => String::new(),
+        }
+    );
+    if machine.control_tcp().is_some() || machine.control_lines() > 0 {
+        println!(
+            "control: {} command(s) applied, {} scripted command(s) never came due",
+            machine.control_lines(),
+            machine.scripted_commands_left()
+        );
+    }
+    if machine.reboots() > 0 {
+        println!(
+            "reboots: {} performed (--reboot-on-reset); last strap {}",
+            machine.reboots(),
+            machine.strap()
+        );
+    }
     println!(
         "run: cycles={} instructions={} ({}) idle={} unmapped={} (reads {}, writes {}, {} \
          sites) fence={} quantum={}",
@@ -276,16 +400,23 @@ fn print_map() {
     }
     for span in memmap::MMIO_WINDOWS {
         println!(
-            "  {:<20} {:#010x}..{:#010x}  declared; NO block is modelled in M6 P03, so a \
-             strict run stops at the first one the boot touches",
+            "  {:<20} {:#010x}..{:#010x}  declared; the blocks below are modelled and a \
+             strict run stops at the first one that is not",
             span.name,
             span.base,
             span.end()
         );
     }
-    println!("  the blocks the image's own MMIO census names, for P04 to model in stop order:");
+    println!("  modelled (M6 P04), in registration order — the order the direct load met them:");
+    println!("    {}", PERIPHERAL_REGISTRATION_ORDER.join(" "));
+    println!("  the blocks the image's own MMIO census names, in address order:");
     for (name, base) in peripheral_census() {
-        println!("    {name:<18} {base:#010x}");
+        let state = if PERIPHERAL_REGISTRATION_ORDER.contains(&name) {
+            "modelled"
+        } else {
+            "NOT modelled — a strict run stops here"
+        };
+        println!("    {name:<18} {base:#010x}  {state}");
     }
     println!("  deliberately unmapped:");
     for (span, why) in bus_setup::deliberately_unmapped() {
@@ -442,12 +573,22 @@ fn print_outcome(machine: &mut Machine, outcome: &Outcome) {
                 );
             }
         }
+        Outcome::ExitMatched { .. } => {
+            println!("--exit-on matched at cycle={cycle} ({micros} us emulated)");
+        }
         Outcome::Breakpoint { core, pc, .. } => {
             let sym = machine.symbolize(*pc).unwrap_or_else(|| "?".into());
             println!("BREAKPOINT core={core} pc={pc:#010x} ({sym}) cycle={cycle}");
         }
         Outcome::WallTimeout { .. } => {
             println!("WALL TIMEOUT cycle={cycle} ({micros} us emulated)");
+        }
+        Outcome::Reset { source, strap, .. } => {
+            println!(
+                "RESET cycle={cycle} ({micros} us emulated): {source} asked for a chip reset \
+                 into strap {strap}. This machine has no boot chain to restart until P06, so \
+                 the run ends here; on silicon the chip would reboot."
+            );
         }
         Outcome::Fault {
             core, pc, fault, ..
@@ -474,8 +615,10 @@ fn print_outcome(machine: &mut Machine, outcome: &Outcome) {
                 .symbolize(violation.pc)
                 .unwrap_or_else(|| "?".into());
             let where_ = if violation.in_mmio_window {
-                "inside the declared peripheral window — an UNMODELLED BLOCK. M6 P03 models \
-                 none, so this is the expected end of a bring-up run and P04's first entry"
+                "inside the declared peripheral window — an UNMODELLED BLOCK. M6 P04 models \
+                 every block before the console; a stop here is the next thing the boot needs \
+                 and the next phase's first entry (the console is P05's, flash and the cache \
+                 P06's, the pads P07's)"
                     .to_string()
             } else if let Some((span, why)) = bus_setup::unmapped_window(violation.address) {
                 format!(
@@ -566,9 +709,43 @@ fn parse(argv: Vec<String>) -> Result<Args, String> {
             "--trace" => args.trace = Some(value()?),
             "--trace-block" => args.trace_blocks.push(value()?),
             "--console" => args.console = Some(PathBuf::from(value()?)),
+            "--exit-on" => args.exit_on = Some(value()?),
+            "--usb-sj" => args.usb_sj = parse_usb_sj(&value()?, "--usb-sj", true)?,
+            "--usb-sj-tried" => {
+                args.usb_sj_tried = parse_usb_sj(&value()?, "--usb-sj-tried", false)?
+            }
+            "--usb-host" => {
+                let text = value()?;
+                args.usb_host = UsbHost::parse(&text).ok_or_else(|| {
+                    format!("--usb-host `{text}`: expected absent, attached or attached-idle")
+                })?;
+            }
+            "--usb-sj-drain" => {
+                let text = value()?;
+                args.usb_sj_drain = UsbSjDrain::parse(&text)
+                    .ok_or_else(|| format!("--usb-sj-drain `{text}`: expected auto or manual"))?;
+            }
+            "--usb-script" => args.usb_script.push(value()?.into()),
+            "--control" => {
+                let text = value()?;
+                args.control = Some(parse_control(&text)?);
+            }
+            "--reboot-on-reset" => args.reboot_on_reset = true,
             "--seed" => {
                 let v = value()?;
                 args.seed = v.parse().map_err(|_| format!("--seed {v}: not a number"))?;
+            }
+            "--efuse-mac" => {
+                let v = value()?;
+                args.efuse.mac =
+                    EfuseIdentity::parse_mac(&v).map_err(|e| format!("--efuse-mac: {e}"))?;
+            }
+            "--efuse-rev" => {
+                let v = value()?;
+                let (major, minor) =
+                    EfuseIdentity::parse_rev(&v).map_err(|e| format!("--efuse-rev: {e}"))?;
+                args.efuse.wafer_major = major;
+                args.efuse.wafer_minor = minor;
             }
             other => {
                 return Err(format!(
@@ -580,6 +757,57 @@ fn parse(argv: Vec<String>) -> Result<Args, String> {
         }
     }
     Ok(args)
+}
+
+/// `--usb-sj` / `--usb-sj-tried`: where a link stream goes.
+///
+/// `-` is stderr, spelled as the other machines spell it, so one command
+/// line drives all three. Only the delivered stream may be a socket: the
+/// observation stream is an observation, not a link, and refusing it here is
+/// how a reader finds that out.
+fn parse_usb_sj(text: &str, flag: &str, allow_tcp: bool) -> Result<UsbSjSink, String> {
+    match text {
+        "stderr" | "-" => Ok(UsbSjSink::Stderr),
+        "memory" => Ok(UsbSjSink::Memory),
+        other => {
+            if let Some(path) = other.strip_prefix("file:") {
+                return Ok(UsbSjSink::File(PathBuf::from(path)));
+            }
+            if let Some(addr) = other.strip_prefix("tcp:") {
+                if !allow_tcp {
+                    return Err(format!(
+                        "{flag} tcp:{addr}: only --usb-sj may be a socket — the observation \
+                         stream is an observation, not a link"
+                    ));
+                }
+                if !addr.contains(':') {
+                    return Err(format!(
+                        "{flag} tcp:{addr}: write tcp:<host:port>, e.g. tcp:127.0.0.1:5556"
+                    ));
+                }
+                return Ok(UsbSjSink::Tcp(addr.to_string()));
+            }
+            Err(format!(
+                "{flag} `{other}`: expected stderr, memory, file:<path> or tcp:<host:port>"
+            ))
+        }
+    }
+}
+
+/// `--control tcp:<host:port>`. Only `tcp:` exists: a control channel with
+/// nobody on the other end would be a flag with no effect, and a script
+/// (`--usb-script`) is the file-shaped way to say the same thing.
+fn parse_control(text: &str) -> Result<String, String> {
+    match text.strip_prefix("tcp:") {
+        Some(addr) if addr.contains(':') => Ok(addr.to_string()),
+        Some(addr) => Err(format!(
+            "--control tcp:{addr}: write tcp:<host:port>, e.g. tcp:127.0.0.1:5557"
+        )),
+        None => Err(format!(
+            "`{text}` is not a control channel (tcp:<host:port>; --usb-script is the \
+             file-shaped way to drive the link deterministically)"
+        )),
+    }
 }
 
 /// `--probe`, in either of its two spellings, as `(cycle, symbol)`.

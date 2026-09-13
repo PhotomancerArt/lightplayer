@@ -289,11 +289,21 @@ fn the_twin_answers_the_desk_boards_identity() {
 ///
 /// ⚠️ **The stack gap here is −480 B, and `boot_idle.rs`'s
 /// `STACK_HIGH_WATER_GAP` is −640 B.** They are not in conflict and neither is
-/// wrong: that constant is measured on a **direct load**, this is the
-/// **ROM-up** path, and the cross-path difference is that file's own
-/// `PATH_HIGH_WATER_GAP` — the ROM-up boot goes 160 B deeper (16332 + 160 =
-/// 16492). Silicon has no direct load: on a board every boot is a ROM-up boot,
-/// so −480 B is the like-for-like figure and the one this phase reports.
+/// wrong, because **they are not the same measurement**: that constant is a
+/// **direct load of the image built at HEAD** (emulator 16332), this is a
+/// **ROM-up boot of the image built at `c976f17a9`** (emulator 16492). A stack
+/// high-water is the deepest point an interrupt happened to land on, so it
+/// moves with the image's layout and with where in the pacer's phase the
+/// heartbeat falls. Silicon has no direct load: on a board every boot is a
+/// ROM-up boot, so −480 B is the like-for-like figure and the one this phase
+/// reports.
+///
+/// ⚠️ **Corrected by M5 P7.** This paragraph used to bridge the two with
+/// `boot_idle.rs`'s cross-path constant — "the ROM-up boot goes 160 B deeper
+/// (16332 + 160 = 16492)". **`PATH_HIGH_WATER_GAP` has been −64 since M4 P3b
+/// (#704) re-measured it**, and the ROM-up boot goes 64 B *shallower*, not
+/// 160 B deeper; re-measured again on 2026-09-11 (direct 16460, rom-up 16396).
+/// The bridge is withdrawn. No figure below moved with it.
 ///
 /// `[MEM] used` is +84 B on every path and every quantum measured so far, and
 /// the sampling explanation was tested and refuted on both sides. Neither gap
@@ -683,8 +693,17 @@ fn the_classic_defines_one_time_grade() {
         cfg.configuration("lp-emu:esp32v3:t2").is_err(),
         "a `t2` row would be a claim nothing measured"
     );
-    // And no classic configuration claims a pin capture it cannot take: no
-    // instrument has been on a classic pad.
-    assert!(!cfg.configuration("lp-emu:esp32v3:t1").unwrap().records_pins);
+    // And the pin CAPABILITY, which is a different claim from the pin GRADE.
+    //
+    // Our machine drives a pad off its own signal fabric and decodes it back,
+    // so it records pins and says so (M5 P7, DD72: `--dump-frames` landed in
+    // M4 P3, the first classic `.pins.jsonl` in M4 P5). That does not promote
+    // the class — `pin` is still `modeled`, because both readings of the pad
+    // are ours and no instrument has been on a classic one.
+    //
+    // Silicon records NONE, and this is the assertion that keeps it that way:
+    // a real pad needs a logic analyser nobody has put on this bench, and a
+    // `true` here would turn "we did not look" into "we looked and agreed".
+    assert!(cfg.configuration("lp-emu:esp32v3:t1").unwrap().records_pins);
     assert!(!cfg.configuration("silicon:esp32v3").unwrap().records_pins);
 }

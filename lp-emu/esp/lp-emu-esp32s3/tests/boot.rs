@@ -9,7 +9,7 @@
 
 use lp_emu_esp32s3::machine::{
     AppSource, BootFrame, CORES, CPENABLE_RESET_DEFAULT, CoreOneControl, Esp32S3Builder, Outcome,
-    StopCondition,
+    StopCondition, UsbHost,
 };
 use lp_emu_esp32s3::{memmap, rom, test_support};
 use lp_xt_inst::{AluRrr, BrZ, CallOp, CallxOp, Inst, Reg, encode};
@@ -491,29 +491,65 @@ fn each_slot_answers_its_own_prid() {
 // The shipped image. `#[ignore]`d — `just test-emu-esp32s3-boot` builds it.
 // ---------------------------------------------------------------------------
 
-/// **The deliverable of M6 P03**: a direct load of the shipped image runs,
-/// executes mask-ROM code, and reaches its **first strict stop inside the
-/// MMIO window**.
+/// A trace sink a test can read back.
+#[derive(Clone, Default)]
+struct SharedSink(std::sync::Arc<std::sync::Mutex<Vec<u8>>>);
+
+impl std::io::Write for SharedSink {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        self.0.lock().unwrap().extend_from_slice(buf);
+        Ok(buf.len())
+    }
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+impl SharedSink {
+    fn text(&self) -> String {
+        String::from_utf8_lossy(&self.0.lock().unwrap()).into_owned()
+    }
+}
+
+/// **The deliverable of M6 P05 at the machine level**: a direct load of the
+/// shipped image runs, executes mask-ROM code, gets past `esp_hal::init`,
+/// and **crosses the console** — where P04 stopped — with **no strict stop
+/// at all**.
 ///
-/// What the stop is, is the phase's product and P04's first ledger entry —
-/// so the assertions here are about its *shape*, not its address: pinning
-/// `0x600C_1004` would turn P04's first commit into a test edit. What is
-/// pinned is that the stop is inside the declared peripheral window (so it is
-/// a block to model, not a memory-map question) and that the pc that made the
-/// access is **inside the mask ROM** (so the ROM really executed).
+/// P03 pinned the *shape* of its stop (inside the MMIO window, from a ROM
+/// pc); P04 pinned the block (`USB_DEVICE`, made by `esp_println`'s writer).
+/// P05 models that block, so there is nothing left for a strict run of the
+/// pre-console set to refuse: the run reaches its deadline with
+/// `unmapped == 0`. What the console *said* is `tests/boot_idle.rs`'s.
+///
+/// ⚠️ **The run does not finish booting, and that is P06's, not a defect.**
+/// It ends spinning on `SPI1.cmd` bit 28 (`usr`) — a flash read that no
+/// hardware here will complete — which is exactly the stop
+/// `crate::periph::accept::spi1`'s own doc predicted: *"a flash read sets
+/// `cmd.usr` and spins until hardware clears it, and a block that remembers
+/// holds it set forever. That spin is P06's."* Everything the firmware
+/// prints **after** that spin — the `lpfs` mount failure, the hardware
+/// manifest, `[INIT] fw-esp32 initialized, starting server loop` — is
+/// therefore P06's reading, not this phase's.
+///
+/// That the mask ROM really executed is asserted separately, off the trace:
+/// the first `SENSITIVE` access is made from a mask-ROM pc.
 #[test]
 #[ignore = "needs LP_EMU_ESP32S3_ELF; run through `just test-emu-esp32s3-boot`"]
-fn the_shipped_image_reaches_its_first_strict_stop_inside_the_mmio_window() {
+fn the_shipped_image_gets_past_esp_hal_init_and_crosses_the_console() {
     let Ok(elf) = test_support::fw_esp32s3_image() else {
         test_support::skip_notice(
-            "the_shipped_image_reaches_its_first_strict_stop_inside_the_mmio_window",
+            "the_shipped_image_gets_past_esp_hal_init_and_crosses_the_console",
             "no image",
         );
         return;
     };
+    let sink = SharedSink::default();
     let mut machine = Esp32S3Builder::new()
         .app(AppSource::Path(elf))
         .strict(true)
+        .usb_host(UsbHost::Attached { draining: true })
+        .trace(Box::new(sink.clone()), vec!["SENSITIVE".into()])
         .build()
         .expect("the shipped image direct-loads");
 
@@ -546,34 +582,60 @@ fn the_shipped_image_reaches_its_first_strict_stop_inside_the_mmio_window() {
         ..Default::default()
     });
 
-    let Outcome::StrictBus { violation } = &outcome else {
-        panic!("expected a strict-bus stop, got {outcome:?}");
-    };
-    assert_eq!(outcome.exit_code(), 3, "the cross-machine contract");
     assert!(
-        violation.in_mmio_window,
-        "the stop is inside the declared peripheral window — an unmodelled \
-         block, which is what P04 answers. A stop outside every window would \
-         be a memory-map question: {violation:?}"
+        matches!(outcome, Outcome::Deadline { .. }),
+        "nothing the pre-console set or the console can refuse is left: {outcome:?}"
+    );
+    assert_eq!(outcome.exit_code(), 0, "the cross-machine contract");
+    assert!(
+        machine.first_strict_violation().is_none(),
+        "P04's stop was the console and P05 models it"
+    );
+    assert_eq!(
+        machine.bus().unmapped_reads() + machine.bus().unmapped_writes(),
+        0,
+        "zero unmapped accesses: every block this boot reaches answers"
+    );
+    // The console said something, and it reached a host rather than dying in
+    // a committed endpoint nobody drained.
+    assert!(
+        machine.usb_sj().starts_with(b"[INIT] fw-esp32s3 boot\n"),
+        "the first line out of the link"
     );
     assert!(
-        violation.pc >= memmap::ROM_MASK_BASE
-            && violation.pc < memmap::ROM_MASK_BASE + memmap::ROM_MASK_LEN,
-        "the access was made by mask-ROM code — the ROM really executes on \
-         this machine, which is the property 4,769 memcpy call sites make \
-         load-bearing. pc = {:#010x}",
-        violation.pc
+        machine.usb_sj_tried().is_empty(),
+        "a draining host took it all"
+    );
+
+    // ⚠️ Where it stopped, named: the flash read P06 owns.
+    let pc = machine.harts[0].pc();
+    let symbol = machine.symbolize(pc).unwrap_or_else(|| "?".into());
+    println!(
+        "P06's stop: the run ends at {pc:#010x} ({symbol}), spinning on SPI1.cmd bit 28 \
+         (`usr`) — a flash read no hardware here completes"
+    );
+    // The mask ROM really executed: the first SENSITIVE access — P03's own
+    // first stop — is made from a mask-ROM pc.
+    let trace = sink.text();
+    let first = trace
+        .lines()
+        .find(|l| l.contains("SENSITIVE+0x004"))
+        .expect("the ROM's Cache_Occupy_ICache_MEMORY reads cache_dataarray_connect_1");
+    let pc = first
+        .split_whitespace()
+        .find_map(|w| w.strip_prefix("pc=0x"))
+        .and_then(|h| u32::from_str_radix(h, 16).ok())
+        .expect("a pc on the trace line");
+    assert!(
+        (memmap::ROM_MASK_BASE..memmap::ROM_MASK_BASE + memmap::ROM_MASK_LEN).contains(&pc),
+        "made by mask-ROM code — the ROM really executes on this machine, which is the \
+         property 4,769 memcpy call sites make load-bearing: {first}"
     );
     println!(
-        "FIRST STRICT STOP: {:?} {:?} at {:#010x} from pc {:#010x} ({}) at cycle {}",
-        violation.access,
-        violation.width,
-        violation.address,
-        violation.pc,
-        machine
-            .symbolize(violation.pc)
-            .unwrap_or_else(|| "?".into()),
-        violation.cycle,
+        "PAST esp_hal::init AND PAST THE CONSOLE: {} bytes reached the host in {} us, \
+         unmapped=0, no strict stop; first ROM MMIO: {first}",
+        machine.usb_sj().len(),
+        machine.cycles() / memmap::CYCLES_PER_US,
     );
     for line in machine.core_report() {
         println!("  {line}");
@@ -581,45 +643,52 @@ fn the_shipped_image_reaches_its_first_strict_stop_inside_the_mmio_window() {
 }
 
 /// The image loads and the two hart slots are where a run report says they
-/// are, with no peripheral registered and no strict bus — the scouting run,
-/// which is the one that shows how far the machine gets before P04 exists.
+/// are, with no strict bus — the scouting run.
+///
+/// ⚠️ **It reaches nothing unmapped any more**, and that changed with P05:
+/// P04's version asserted `unmapped_reads() > 0` because the console was the
+/// one block nothing modelled. With the console modelled, twenty emulated
+/// milliseconds of this image touch only blocks that answer — so the
+/// assertion is inverted, deliberately, and a future unmapped read here is a
+/// block a later phase has to name.
 #[test]
 #[ignore = "needs LP_EMU_ESP32S3_ELF; run through `just test-emu-esp32s3-boot`"]
-fn a_non_strict_direct_load_runs_rom_code_until_it_needs_a_block_nobody_models() {
+fn a_non_strict_direct_load_now_reaches_nothing_the_machine_does_not_model() {
     let Ok(elf) = test_support::fw_esp32s3_image() else {
         test_support::skip_notice(
-            "a_non_strict_direct_load_runs_rom_code_until_it_needs_a_block_nobody_models",
+            "a_non_strict_direct_load_now_reaches_nothing_the_machine_does_not_model",
             "no image",
         );
         return;
     };
     let mut machine = Esp32S3Builder::new()
         .app(AppSource::Path(elf))
+        .usb_host(UsbHost::Attached { draining: true })
         .build()
         .expect("the shipped image direct-loads");
 
     let outcome = machine.run_until(&StopCondition {
-        stop_cycle: Some(1_000 * memmap::CYCLES_PER_US),
+        stop_cycle: Some(20_000 * memmap::CYCLES_PER_US),
         ..Default::default()
     });
     assert!(
         matches!(outcome, Outcome::Deadline { .. }),
-        "without strict mode an unmapped read answers zero and the run \
-         continues; got {outcome:?}"
+        "got {outcome:?}"
     );
-    assert!(
-        machine.bus().unmapped_reads() > 0,
-        "and it did reach MMIO nothing models"
+    assert_eq!(
+        machine.bus().unmapped_reads() + machine.bus().unmapped_writes(),
+        0,
+        "every block twenty milliseconds of this image touches now answers"
     );
     assert_eq!(machine.core_instructions(1), 0, "slot 1 still ran nothing");
     println!(
-        "SCOUTING RUN: {} instructions, pc {:#010x} ({}), {} unmapped reads at {} sites",
+        "SCOUTING RUN: {} instructions, pc {:#010x} ({}), {} console bytes, {} unmapped reads",
         machine.instructions(),
         machine.harts[0].pc(),
         machine
             .symbolize(machine.harts[0].pc())
             .unwrap_or_else(|| "?".into()),
+        machine.usb_sj().len(),
         machine.bus().unmapped_reads(),
-        machine.bus().unmapped_sites(),
     );
 }
