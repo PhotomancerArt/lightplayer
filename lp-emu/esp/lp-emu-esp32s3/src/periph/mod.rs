@@ -11,6 +11,7 @@ pub mod systimer;
 pub mod rtc_cntl;
 pub mod timg;
 pub mod efuse;
+pub mod i2c_ana_mst;
 
 /// The crystal: **40 MHz**. esp-hal's S3 clock tree forces it —
 /// `ClockConfig::configure` sets `XtalClkConfig::_40` with a `TODO: support
