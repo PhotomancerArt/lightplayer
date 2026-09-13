@@ -38,5 +38,10 @@
 //!   report's §5 is the evidence and the one-sentence ruling.
 
 pub mod bus_setup;
+pub mod loader;
+pub mod machine;
 pub mod memmap;
 pub mod regs;
+pub mod rom;
+pub mod snapshot;
+pub mod test_support;
