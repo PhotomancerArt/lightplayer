@@ -634,7 +634,7 @@ fn the_shipped_image_gets_past_esp_hal_init_and_stops_at_the_console() {
 /// are, with no strict bus — the scouting run, which carries on past the
 /// console's unmodelled reads with zeros and shows how far the machine gets
 /// with the pre-console set answering (twenty emulated milliseconds: the
-/// console is reached at ~8.7 ms).
+/// console is reached at ~8.9 ms).
 #[test]
 #[ignore = "needs LP_EMU_ESP32S3_ELF; run through `just test-emu-esp32s3-boot`"]
 fn a_non_strict_direct_load_runs_rom_code_until_it_needs_a_block_nobody_models() {

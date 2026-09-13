@@ -53,11 +53,15 @@ console**, which is P05's:
 
 ```text
 STRICT BUS STOP
-  pc      = 0x420a5ab1 (esp_println::Printer::write_bytes+0x9)
-  cycle   = 2098417 (8743 us emulated)
+  pc      = 0x420a5a91 (esp_println::Printer::write_bytes+0x9)
+  cycle   = 2137399 (8905 us emulated)
   access  = Read Word at 0x60038004
   where   = inside the declared peripheral window — an UNMODELLED BLOCK
 ```
+
+(On the image before P04b's heap-ledger lines the same stop was at cycle
+2,098,417; the eighteen first-touch cycles in the table below did not move,
+because every one of them is before the code that changed.)
 
 `0x6003_8004` is `USB_DEVICE.ep1_conf`: `esp-println`'s `jtag-serial` writer
 checking whether the IN endpoint has room for the first byte of `[INIT]`.
