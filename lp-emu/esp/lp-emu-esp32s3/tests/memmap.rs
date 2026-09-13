@@ -235,6 +235,7 @@ fn the_mmio_window_stops_where_rtc_fast_begins() {
         ("USB_DEVICE", memmap::periph::USB_DEVICE),
         ("SHA", memmap::periph::SHA),
         ("SYSTEM", memmap::periph::SYSTEM),
+        ("SENSITIVE", memmap::periph::SENSITIVE),
         ("INTERRUPT_CORE0", memmap::periph::INTERRUPT_CORE0),
         ("INTERRUPT_CORE1", memmap::periph::INTERRUPT_CORE1),
         ("EXTMEM", memmap::periph::EXTMEM),

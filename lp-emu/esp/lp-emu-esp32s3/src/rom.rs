@@ -458,6 +458,18 @@ pub fn seed_data(bus: &mut SocBus, rom: &ElfImage) -> Result<Vec<SeededSection>,
 /// [`SocBus::load_image`], which is the emulator putting memory in the state
 /// silicon was handed. A read-only region still accepts them, which is how
 /// the mask ROM gets its own contents.
+///
+/// ⚠️ **The region walk resolves a RAM alias first, exactly as the bus does.**
+/// The shipped image's `.vectors` and `.rwtext` link at `0x4037_8000` and
+/// `0x4037_8400` — the SRAM1 **I-bus** view, which is an alias and not a
+/// region — so a walk that asked `regions()` about the raw address would
+/// refuse an image that is perfectly well placed.
+/// [`SocBus::load_image`] already applies `canonical()` before it writes
+/// (P02, ruling DD81); this loop has to apply the same translation to the
+/// *lookup* it does for chunking and naming, and the S3 is the first machine
+/// where the two differ. That is why the placed regions of an executable
+/// segment at `0x4037_8000` read `sram1-dbus`: the region a byte lives in is
+/// the canonical one, whichever door it arrived through.
 pub(crate) fn place_spanning(
     bus: &mut SocBus,
     address: u32,
@@ -470,17 +482,24 @@ pub(crate) fn place_spanning(
     let mut done = 0u32;
 
     while done < total {
+        // The canonical address and how far the alias window itself runs: a
+        // span that ran off the end of an alias would have to be looked up
+        // again, so the alias's own remaining room bounds this chunk too.
+        let (canonical, alias_room) = match crate::bus_setup::ram_alias_of(at) {
+            Some((span, canonical)) => (canonical, span.end() - at),
+            None => (at, u32::MAX),
+        };
         let (name, room) = bus
             .regions()
             .iter()
-            .find(|r| r.contains(at))
-            .map(|r| (r.name, r.end() - at))
+            .find(|r| r.contains(canonical))
+            .map(|r| (r.name, r.end() - canonical))
             .ok_or(RomError::Unmapped {
                 vaddr: address,
                 memsz: total,
                 at,
             })?;
-        let chunk = room.min(total - done);
+        let chunk = room.min(alias_room).min(total - done);
 
         // The file half of this chunk, then the zero-fill half.
         let from_file = (data.len() as u32).saturating_sub(done).min(chunk);

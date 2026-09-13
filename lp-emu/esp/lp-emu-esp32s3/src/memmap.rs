@@ -274,8 +274,23 @@ pub const ROM_MASK_LEN: u32 = 0x0005_77A8;
 /// `0x4005_8C00`** — they differ, so a loader must place by `p_vaddr`.
 pub const ROM_DATA_BASE: u32 = 0x3FF1_8C00;
 
-/// `0x5F3C`, the ROM ELF's `.rodata` `PT_LOAD` (`FileSiz == MemSiz`).
-pub const ROM_DATA_LEN: u32 = 0x0000_5F3C;
+/// `0x7400` — through `0x3FF2_0000`, and **not** the `.rodata` `PT_LOAD`'s
+/// `0x5F3C`.
+///
+/// ⚠️ **Found the hard way, which is what a stop-and-report loader is for.**
+/// The window first read as `0x5F3C`, the length of the `.rodata` `PT_LOAD`
+/// (`0x3FF1_8C00..0x3FF1_EB3C`). The first strict build then refused with
+/// `RomError::Unmapped { vaddr: 0x3ff1ee50, memsz: 0x11b0 }`: the ROM carries
+/// a **second** read-only chunk, `.rodata.interface` — a `PROGBITS` section
+/// flagged `W` and not `A`, so no program header covers it and only
+/// [`crate::rom::seed_data`] places it (`readelf -SW esp32s3_rev0_rom.elf`,
+/// section 94: `3ff1ee50 … 0011b0 W`). It ends exactly at `0x3FF2_0000`.
+///
+/// So the region runs to `0x3FF2_0000` and the `0x314` bytes between the two
+/// chunks are inside it — mapped and zero, which is what a ROM's own address
+/// space looks like. The alternative, two regions with a hole, would make a
+/// stray read of that gap a fault this map could not explain.
+pub const ROM_DATA_LEN: u32 = 0x0000_7400;
 
 /// `_stack_sentry` in the ROM ELF, `0x3FCE_9710` — the bottom of the mask
 /// ROM's PRO-core stack, so that stack is 8 KiB.
@@ -392,6 +407,20 @@ pub mod periph {
     /// `:1010`. The peripheral clock and reset gates, and — the part this
     /// phase cares about — `core_1_control_0` at `+0x00`.
     pub const SYSTEM: u32 = 0x600C_0000;
+    /// `:956`. ⚠️ **The first strict stop's block, and the census does not
+    /// name it.**
+    ///
+    /// `m6/notes.md` §2.4 lists `sensitive` under "not touched", and that is
+    /// correct about the *application*: the census swept the shipped image's
+    /// own `l32r` literals, and no application symbol reaches this block. The
+    /// first access on a direct load comes from the **mask ROM** —
+    /// `Cache_Occupy_ICache_MEMORY+0xc` at `0x4004_F670` reads
+    /// `+0x04` (`cache_dataarray_connect_1`, "Cache data array configuration
+    /// register 1") thirty-six cycles in, on `esp32_init`'s
+    /// `rom_config_instruction_cache_mode` path — which a literal sweep of the
+    /// application could not see. P03's bring-up run is the evidence and P04
+    /// models it first.
+    pub const SENSITIVE: u32 = 0x600C_1000;
     /// `:785`. ⚠️ `INTERRUPT_CORE0` and `INTERRUPT_CORE1` are **one 4 KiB
     /// window**, core 0 at `+0x000` and core 1 at `+0x800`. The PAC gives both
     /// types the same base and that is correct, not an SVD leak.
