@@ -290,3 +290,17 @@ test('POST /jobs: `by` round-trips to the job view and the job file; absent is n
 
   for (const id of [mine.body.id, anon.body.id, blank.body.id, ok64.body.id]) await api('/jobs/' + id, { method: 'DELETE' });
 });
+
+// The page's job card reads the queue view, so `by` has to ride that event and
+// not only the director's job views.
+test('the queue view the page receives carries `by`', async () => {
+  const quiet = { beforeAnswer: async () => { throw new Error('never answers'); } };
+  const dev = await fakeDevice(lab, { name: 'card-reader', pressMs: 5, ...quiet });
+  const { body: j } = await queue({ builds: ['aaa1111'], repeats: 1, spacingMs: 0, ttlMs: 60000, device: 'card-reader', by: 'emu-lab-job-by-xx' });
+  let seen;
+  for (let i = 0; i < 5; i++) { const ev = await dev.sse.next('queue', 3000); seen = ev.jobs.find((x) => x.id === j.id); if (seen) break; }
+  assert.ok(seen, 'the view lists the job');
+  assert.equal(seen.by, 'emu-lab-job-by-xx');
+  await dev.stop();
+  await api('/jobs/' + j.id, { method: 'DELETE' });
+});
