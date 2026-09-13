@@ -9,8 +9,10 @@
 #   1. every workspace package whose manifest lives under `lp-emu/` declares
 #      exactly `license = "MIT"`;
 #   2. no crate under `lp-emu/` reaches a workspace-local crate OUTSIDE
-#      `lp-emu/`, transitively, except the crates named in ALLOWED_OUTSIDE
-#      below — each with the reason it is allowed.
+#      `lp-emu/`, transitively, unless that crate itself declares
+#      `license = "MIT"` (no allowlist entry needed — the fence is about the
+#      licence, not the path) or is named in ALLOWED_OUTSIDE below, each with
+#      the reason it is allowed.
 #
 # Rule 2 walks the DECLARED dependencies from `cargo metadata` (normal, dev and
 # build, optional ones included), not the resolved graph: a dependency behind a
@@ -37,18 +39,12 @@ root = sys.argv[1]
 # Adding an entry means accepting that the MIT unit is not self-contained on
 # that edge. Say why, and prefer deleting the dependency.
 ALLOWED_OUTSIDE = {
-    # Compiler-backend infrastructure shared with `lpvm-native`; they stay
-    # outside `lp-emu/` by vision Q3 and are AGPL today. Whether they flip to
-    # MIT too is escalation E1 in the director log — the open question at G1.
-    "lp-riscv-inst": "rv32 ISA encode/decode (vision Q3, AGPL; see E1)",
-    "lp-riscv-elf": "rv32 ELF loader (vision Q3, AGPL; see E1)",
-    "lp-xt-inst": "Xtensa ISA encode/decode (vision Q3, AGPL; see E1)",
-    "lp-xt-elf": "Xtensa ELF loader (vision Q3, AGPL; see E1)",
     # The FP conformance vector corpus. A dev-dependency of lp-xt-emu only
     # (tests/fp_conformance.rs), and the same crate fw-esp32s3's device harness
-    # uses — which is what makes the vectors identical on both sides. Same AGPL
-    # question as the four above.
-    "lp-xt-fp-vectors": "FP vector corpus, dev-dep only (AGPL; see E1)",
+    # uses — which is what makes the vectors identical on both sides. Not
+    # ruled by E1's 2026-09-13 flip (that covered the ISA/ELF crates only);
+    # stays AGPL.
+    "lp-xt-fp-vectors": "FP vector corpus, dev-dep only (AGPL; not ruled by E1)",
     # The rv32 guest runtime's crash-staging path (panic.rs) and its optional
     # profiling hook (allocator.rs, behind `profile`). AGPL, under lp-base/.
     # Not covered by E1 as written; raised at G1 alongside it.
@@ -117,6 +113,8 @@ for rootpkg in fence:
             nchain = chain + [dep["name"]]
             if in_fence(dep):
                 stack.append((nchain, dep))
+                continue
+            if dep["license"] == "MIT":
                 continue
             if dep["name"] in ALLOWED_OUTSIDE:
                 continue

@@ -106,12 +106,14 @@ The permitted edges out of the fence, today:
 
 | Crate | Licence | Why |
 |---|---|---|
-| `lp-riscv-inst`, `lp-riscv-elf` | AGPL | rv32 ISA / ELF; Q3, see **Open** |
-| `lp-xt-inst`, `lp-xt-elf` | AGPL | Xtensa ISA / ELF; Q3, see **Open** |
 | `lp-xt-fp-vectors` | AGPL | FP vector corpus, dev-dependency only |
 | `lp-recovery` | AGPL | rv32 guest's panic → staged crash record |
 | `lp-perf` | AGPL | rv32 guest's free-list hook, optional `profile` |
 | `lp-ws281x` | MIT | already MIT; the M5 strip decoder's counterpart |
+
+`lp-riscv-inst`, `lp-riscv-elf`, `lp-xt-inst` and `lp-xt-elf` left this table
+on 2026-09-13 (E1, below): they are MIT now, so the fence's rule 2 accepts
+them on their own declared licence and no allowlist entry is needed.
 
 One edge was **deleted rather than allowlisted**: `lp-riscv-emu-guest`
 declared `lpc-shared` and referenced it nowhere, which pulled `lpc-model`,
@@ -123,10 +125,12 @@ its first run.
 
 - "Where does the emulator live" has one answer, and the C6 SoC work has a
   home to land in that already says what its licence is.
-- The MIT unit is **not yet externally self-contained**: six AGPL crates sit
-  on its dependency edges (table above). Anyone extracting `lp-emu/` today
-  would have to replace or relicense them. This is a known, listed cost, not
-  an accident — the lint is what keeps the list short and honest.
+- The MIT unit is **not yet externally self-contained**: three AGPL crates
+  sit on its dependency edges (table above) — `lp-xt-fp-vectors`,
+  `lp-recovery`, `lp-perf`. Anyone extracting `lp-emu/` today would have to
+  replace or relicense them. This is a known, listed cost, not an accident —
+  the lint is what keeps the list short and honest. The ISA/ELF crates that
+  used to be on this list are gone from it: E1 (below) flipped them to MIT.
 - Adding a dependency to an `lp-emu/` crate now has a cost: either it is
   inside the fence, or it needs a line of justification in the lint. That
   friction is the point.
@@ -183,3 +187,18 @@ than around the emulator.
 Raised at gate G1 alongside a second, smaller version of the same question:
 `lp-recovery` and `lp-perf`, which the rv32 guest runtime reaches for its
 panic path and its profiling hook. Both are small and both are AGPL.
+
+**E1 decided (2026-09-13, Yona, G-M7D-XT of the Xtensa speed ladder plan):
+flip all four.** `lp-riscv-inst`, `lp-riscv-elf`, `lp-xt-inst` and
+`lp-xt-elf` now declare `license = "MIT"` (plan M7 P00). The CLA
+(`2026-07-31-contributor-license-agreement.md`) is what makes this safe —
+it gives the maintainer the relicensing grant on any outside contribution
+those crates have taken. With the flip, the Xtensa translator (`lp-xt-jit`,
+MIT) may depend on `lp-xt-inst` with no licence edge at all, mooting a
+question raised alongside E1 at G-M7D-XT. The compiler-backend counter-
+argument stands but did not win: `lpvm-native` still depends on these
+crates and stays AGPL itself, same as before — an MIT dependency of an
+AGPL crate is an ordinary permissive import, not a licence change to the
+compiler. `lp-recovery` and `lp-perf` were **not** part of this ruling and
+stay AGPL, as does `lp-xt-fp-vectors` — none of the three came up at
+G-M7D-XT.

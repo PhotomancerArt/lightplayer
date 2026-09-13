@@ -3,7 +3,7 @@ name = "lp-xt-elf"
 version.workspace = true
 authors.workspace = true
 edition.workspace = true
-license.workspace = true
+license = "MIT"
 description = "Xtensa linked-ELF loader + guest-syscall host for lp-xt-emu."
 
 [lints]

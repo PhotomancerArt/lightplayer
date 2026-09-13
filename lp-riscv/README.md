@@ -19,8 +19,12 @@ been there. See `lp-emu/README.md` and
 `docs/adr/2026-09-06-lp-emu-home-and-mit-fence.md`.
 
 The crates in this directory stayed: they are compiler-backend
-infrastructure, not emulator infrastructure, and they are AGPL like the rest
-of the product (vision Q3).
+infrastructure, not emulator infrastructure (vision Q3). Unlike the rest of
+the product, `lp-riscv-inst` and `lp-riscv-elf` are **MIT**, not AGPL —
+Yona ruled the flip 2026-09-13 (E1 in
+`docs/adr/2026-09-06-lp-emu-home-and-mit-fence.md`), so `lp-emu/`'s MIT
+fence can depend on them with no licence edge. `lp-riscv-tools` stays AGPL
+like the rest of the product; it is deprecated and unused.
 
 The host↔guest protocol crate formerly here (`lp-riscv-emu-shared`) is now
 `lp-emu/lp-emu-abi`; see `docs/adr/2026-07-28-emu-core-crate-family.md`.

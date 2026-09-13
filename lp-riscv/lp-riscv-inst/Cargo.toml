@@ -3,7 +3,7 @@ name = "lp-riscv-inst"
 version.workspace = true
 authors.workspace = true
 edition.workspace = true
-license.workspace = true
+license = "MIT"
 description = "RISC-V 32-bit instruction encoding/decoding utilities"
 
 [lints]
