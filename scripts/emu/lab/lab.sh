@@ -300,6 +300,9 @@ stage_lock() {
     mkdir -p "$home/.stage"
     if ! mkdir "$stage_lock_dir" 2>/dev/null; then
         pid="$(cat "$stage_lock_dir/pid" 2>/dev/null || true)"
+        # `kill -0` answers for THIS user's processes: another user's pid reads
+        # as gone (EPERM). Every stage here runs as the desk's own user, so
+        # that is the right answer and not a hole.
         if [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null; then
             echo "lab: a stage is already running (pid $pid, $(cat "$stage_lock_dir/what" 2>/dev/null || echo '?')) — try again when it is done" >&2
             exit 3
