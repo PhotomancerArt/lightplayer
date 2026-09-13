@@ -46,7 +46,8 @@ exactly two ways:
 ### The block cache and `--no-block-cache`
 
 Both harts run out of a pre-decoded block cache by default (M7 P01); it is
-worth **1.73×** on `render-loop` at t1. `--no-block-cache` turns it off and is
+worth **1.71×** on `render-loop` at t1 (16.07 → 9.38 user seconds, best of
+three interleaved pairs). `--no-block-cache` turns it off and is
 the identity oracle: the same binary either way must print the same UART0
 bytes, the same `run:` line, the same decoded frames, the same stdout and the
 same 20 ms `--trace`. `scripts/emu/v3-oracle.sh` runs both legs and compares

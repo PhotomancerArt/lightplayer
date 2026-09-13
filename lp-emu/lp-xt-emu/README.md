@@ -521,9 +521,10 @@ runs out of a **pre-decoded block cache** by default (M7 P01). A block is a run
 of at most 64 instructions ending at a control transfer or at anything that
 changes what the next instruction means; the slot (`block::XtSlot`) caches the
 decoded `Inst` and its width, so a hit skips `lp_xt_inst::decode` outright. On
-the classic's render loop that is worth **1.73×** (`render-loop` at t1, both
-cores, 16.77 → 9.70 user seconds), because fetch and decode were 34.6 % of host
-time and nothing cached either.
+the classic's render loop that is worth **1.71×** (`render-loop` at t1, both
+cores, 16.07 → 9.38 user seconds, best of three interleaved pairs of one
+binary), because fetch and decode were 34.6 % of host time and nothing cached
+either.
 
 Three things to know about it:
 

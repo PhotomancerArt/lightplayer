@@ -520,9 +520,14 @@ free identity oracle and the bisection tool when a transcript moves.
 hart. `render-loop` at t1, both cores at `--core-quantum 256`, the same binary
 with the cache on against `--no-block-cache`, interleaved on this desk:
 
-| image | cache off, user s | cache on, user s | speedup | mean block | hit rate |
+| image | cache off, user s | cache on, user s | speedup | mean block (core 0) | hit rate (core 0) |
 |---|---:|---:|---:|---:|---:|
-| `render-loop` | 16.77 | 9.70 | **1.73×** | 4.26 | 99.85 % |
+| `render-loop` | 16.07 | 9.38 | **1.71×** | 4.26 | 99.85 % |
+| `shader-compile-stress` | 1.65 | 0.94 | **1.76×** | 3.63 | 99.90 % |
+| `boot-idle` | 0.77 | 0.43 | **1.79×** | 3.62 | 99.91 % |
+
+Best of three interleaved pairs on this desk at load 3.8–5.5; `rt(user)` on
+`render-loop` goes 0.132× → 0.229× against the 240 MHz part.
 
 Every column of `scripts/emu/v3-oracle.sh` reads `same` on all three pinned
 images, which is the claim that matters: a cache hit is not architectural
