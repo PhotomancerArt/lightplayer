@@ -49,7 +49,9 @@ pub mod rtc_cntl;
 pub mod system;
 pub mod systimer;
 pub mod timg;
+pub mod usb_sj;
 
+use lp_emu_esp_common::StreamId;
 use lp_emu_esp_common::periph::BoxedPeripheral;
 
 use crate::intmatrix::InterruptCoreView;
@@ -90,6 +92,19 @@ pub const WDT_WKEY: u32 = 0x50D8_3AA1;
 /// so the SWD too is unlocked at power-on.
 pub const SWD_WKEY: u32 = 0x8F1D_312A;
 
+/// The host byte streams a block writes to and reads from. One block has
+/// any: the link ([`usb_sj`]).
+///
+/// `usb_sj` is what a host **received** from the IN endpoint and what it
+/// **sent** on the OUT path; `usb_sj_tried` is the observation stream — bytes
+/// the guest handed over that no host took. Both are `None` on a machine
+/// built with no host side at all, which is what a unit test wants.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct HostStreams {
+    pub usb_sj: Option<StreamId>,
+    pub usb_sj_tried: Option<StreamId>,
+}
+
 /// The whole boot set, in [`crate::machine::PERIPHERAL_REGISTRATION_ORDER`].
 ///
 /// `reset_cause` is what a direct load asserts into `RTC_CNTL.reset_state`
@@ -97,12 +112,16 @@ pub const SWD_WKEY: u32 = 0x8F1D_312A;
 /// item 7); `stall` is the handle RTC_CNTL publishes its half of the CPU
 /// stall key through and the machine reads; `core1` is
 /// `SYSTEM.core_1_control_0`, the register the machine's hold on slot 1
-/// already reads, now shared with the view that lets a guest write it.
+/// already reads, now shared with the view that lets a guest write it;
+/// `streams` and `usb_host` are the link's (M6 P05) — where its bytes go,
+/// and whether a cable is in at power-on.
 pub fn boot_set(
     reset_cause: ResetCause,
     identity: EfuseIdentity,
     stall: rtc_cntl::StallKey,
     core1: CoreOneHandle,
+    streams: HostStreams,
+    usb_host: usb_sj::HostState,
 ) -> Vec<(u32, u32, BoxedPeripheral)> {
     vec![
         (
@@ -158,6 +177,11 @@ pub fn boot_set(
             base::SYSTIMER,
             systimer::SYSTIMER_LEN,
             Box::new(systimer::Systimer::new()),
+        ),
+        (
+            base::USB_DEVICE,
+            usb_sj::USB_DEVICE_LEN,
+            Box::new(usb_sj::new(streams.usb_sj, streams.usb_sj_tried, usb_host)),
         ),
     ]
 }
