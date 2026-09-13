@@ -1,7 +1,7 @@
 ---
 status: fixed
 found: 2026-09-13      # live-debugging (W7 of lp2025/2026-09-11-0911-tab-emulator-loose-ends)
-fixed: this change
+fixed: 56d543cdd    # the commit before the entry's own, in this PR
 area: lpa-studio-web/public/lpa-link/emulator_worker.js (the tab backing's pacing loop)
 class: bound-in-a-foreign-unit
 related:
