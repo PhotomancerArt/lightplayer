@@ -265,10 +265,24 @@ pub const DRAM2_SEG_LEN: u32 = 0x3FCE_D710 - DRAM2_SEG_BASE;
 /// `e_entry` — read off its own program headers and symbol table.
 pub const ROM_MASK_BASE: u32 = 0x4000_0000;
 
-/// Through `0x4005_77A8`: the ROM ELF's last executable `PT_LOAD` is
-/// `0x4000_0400 + 0x573A8`, and `0x4005_77A8` is also the load address its
-/// first `.data` segment carries as a `paddr`.
-pub const ROM_MASK_LEN: u32 = 0x0005_77A8;
+/// Through `0x4005_8190`: the ROM ELF's last executable `PT_LOAD` ends at
+/// `0x4000_0400 + 0x573A8 = 0x4005_77A8`, and **the ROM's data image
+/// follows it in the same silicon** — `0x4005_77A8` is the load address its
+/// first `.data` segment carries as a `paddr`, and the reset handler's
+/// unpack loop (`_ResetHandler` `4000050b <unpackloop>`, the table at
+/// `_data_start` `0x4005_7354`..`_data_end` `0x4005_75C4`) copies every
+/// `.data_*` and `.data.interface.*` section from a source in
+/// `0x4005_77A8..0x4005_8190` to its RAM address. The highest source byte
+/// any of the 39 entries names is `0x4005_8190` (`0x4005_818C + 4`, the
+/// `.data_ets_delay` entry) — which is also the ROM ELF's own **`_at_text`**
+/// symbol, the end of its image — and [`crate::rom::seed_data_image`] fills
+/// that span; `tests/rom_vendoring.rs` re-derives this end from the table
+/// and the symbol.
+///
+/// ⚠️ P03 stopped the region at `0x4005_77A8` because a direct load never
+/// runs the unpack loop; the first ROM-up boot (P06) stopped at
+/// `unpcopy` `0x4000_0522` reading `0x4005_77A8`, cycle 162.
+pub const ROM_MASK_LEN: u32 = 0x0005_8190;
 
 /// Mask ROM read-only data. `.rodata` has **vaddr `0x3FF1_8C00`, paddr
 /// `0x4005_8C00`** — they differ, so a loader must place by `p_vaddr`.
@@ -438,6 +452,31 @@ pub mod periph {
     /// which makes the S3 the first machine in this plan with no UART on the
     /// application path. Its base is also [`super::MMIO_BASE`].
     pub const UART0: u32 = 0x6000_0000;
+    /// `:1064`. Nothing opens it; the mask ROM's `uartAttach` (`0x4004_8860`)
+    /// writes its `int_clr` (`40048897: l32r a8, 60010010`) on every
+    /// ROM-up boot, so it gets the same view as UART0 (P06).
+    pub const UART1: u32 = 0x6001_0000;
+    /// The flash MMU page table — **not in the PAC**, and not in
+    /// [`EXTMEM`]'s block: `Cache_MMU_Init` (`0x4004_f6f4`) writes 512 words
+    /// starting here (`4004f6f7: l32r a9, 600c5000`). See
+    /// [`crate::cache`] (P06).
+    pub const FLASH_MMU: u32 = 0x600C_5000;
+    /// `:659`. Not in the census: the mask ROM's `boot_prepare`
+    /// (`40043883: l32r a2, 600ce05c` — `core_0_debug_mode`) reads it on
+    /// every ROM-up boot, and `assist_debug_record_enable` (`0x4004_36f4`)
+    /// writes `+0x48`/`+0x4c`. The S3's first ROM-up boot stopped here at
+    /// cycle 21,846 (P06); an accept block.
+    pub const ASSIST_DEBUG: u32 = 0x600C_E000;
+    /// `:641`. Not in the census: the IDF bootloader's RNG early entropy
+    /// source reads `+0x70` — the S3's second ROM-up strict stop, cycle
+    /// 12,482,844 (P06). An accept block.
+    pub const APB_SARADC: u32 = 0x6004_0000;
+    /// `:947`. The same entropy source's other half. An accept block (P06).
+    pub const SENS: u32 = 0x6000_8800;
+    /// `:893`. The PAC's `RNG` block: one register, `data` at `+0x110` —
+    /// `0x6003_507C`, the word `bootloader_fill_random` reads for the
+    /// image-hash salt. A seeded generator (P06, ruling R4).
+    pub const RNG: u32 = 0x6003_4F6C;
 }
 
 /// `SYSTEM.core_1_control_0`'s address — the register that holds core 1 on

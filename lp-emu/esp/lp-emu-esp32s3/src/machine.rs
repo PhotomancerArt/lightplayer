@@ -113,9 +113,12 @@ use lp_emu_esp_common::bus::StrictViolation;
 use lp_emu_esp_common::host::ByteSink;
 use lp_emu_esp_common::{ByteLog, ByteSource, ElfImage, MachineRequest, SocBus, Strap};
 
+use crate::cache::{self, CacheHandle, CacheOffAccess, CacheOffPolicy, S3Cache, Which};
 use crate::control::{ControlCommand, ControlReply, HostReport};
-use crate::periph::HostStreams;
+use crate::flash::{FlashBacking, FlashHandle, FlashImage};
+use crate::periph::accept::{GPIO_STRAP_DOWNLOAD, GPIO_STRAP_SPI_FAST_FLASH_BOOT, GpioBlock};
 use crate::periph::usb_sj::{LIVE_POLL_CYCLES, UsbSerialJtag};
+use crate::periph::{FlashSet, HostStreams};
 
 use lp_xt_emu::mach::interrupt::{IntKind, IntLine};
 use lp_xt_emu::mach::sr::PS_BOOT;
@@ -123,7 +126,7 @@ use lp_xt_emu::mach::trap::NUM_INTERRUPTS;
 use lp_xt_emu::mach::{CoreConfig, HartFault, SliceEnd, XtHart};
 
 pub use crate::loader::PlacedAppSegment;
-use crate::loader::{self, EfuseIdentity, LoadError, ResetCause};
+use crate::loader::{self, EfuseIdentity, FlashChipSeed, FlashStaging, LoadError, ResetCause};
 use crate::memmap;
 use crate::periph::rtc_cntl::StallKey;
 use crate::rom::{self, DataImage, HookResult, HookTable, PlacedSegment, RomError, SeededSection};
@@ -224,6 +227,51 @@ pub const PERIPHERAL_REGISTRATION_ORDER: &[&str] = &[
     // the bus packs that index into every scheduler event id — so the index
     // contract wins over the narrative, and this comment is the narrative.
     "USB_DEVICE",
+    // ---- M6 P06: the ROM-up boot's blocks, appended for the same reason ----
+    //
+    // Every one of these is met by a **ROM-up** boot long before
+    // `SENSITIVE` — `GPIO.strap` in `boot_prepare`, `UART0`/`UART1` in
+    // `uartAttach`, `IO_MUX` in `SelectSpiFunction`, the MMU table in
+    // `ROM_Boot_Cache_Init`, `SHA` in `ets_run_flash_bootloader` — and by
+    // the direct load never or last. Inserting them where that boot meets
+    // them would move every index above; appended, and said.
+    //
+    // ROM-up, `ROM_Boot_Cache_Init` → `Cache_MMU_Init` (`0x4004_f6f4`): the
+    // 512-entry page table at 0x600C_5000, which the bootloader then fills
+    // for the app. `EXTMEM` (in place above) became a view with it.
+    "FLASH_MMU",
+    // ROM-up, `ets_run_flash_bootloader` → `ets_sha_enable`/`ets_sha_init`:
+    // the ROM hashes the second-stage bootloader with SHA-256 before it
+    // jumps, and the bootloader hashes the app the same way.
+    "SHA",
+    // ROM-up, `boot_prepare` → `uartAttach` (`0x4004_8860`): the mask ROM's
+    // console; the banner and the bootloader's log come out here.
+    "UART0",
+    // ROM-up, the same `uartAttach`: one `int_clr` store to UART1 on every
+    // boot, and nothing else ever.
+    "UART1",
+    // ROM-up, `boot_prepare` reads `strap` at 0x6000_4038 to decide the boot
+    // mode; `SelectSpiFunction` writes the matrix. P07's block; the strap
+    // word is the reason it is here now.
+    "GPIO",
+    // ROM-up, `SelectSpiFunction` (`0x4004_974c`) and `Uart_Init`: the SPI
+    // and UART pads. P07's block.
+    "IO_MUX",
+    // Direct load, cycle 3,072,844 — the first stop once the flash was
+    // behind the hello: `init_board`'s `RmtClockGuard::new` reads
+    // `RMT.sys_conf`, between `flash filesystem mounted` and the server
+    // loop. P07's block; a table here.
+    "RMT",
+    // ROM-up, cycle 21,846: `boot_prepare+0xfd` reads
+    // `ASSIST_DEBUG.core_0_debug_mode` — the S3's first ROM-up strict stop.
+    "ASSIST_DEBUG",
+    // ROM-up, cycle 12,482,844: the IDF bootloader's RNG early entropy
+    // source reads `APB_SARADC+0x70` — the second ROM-up strict stop — then
+    // `SENS`, and `bootloader_fill_random` reads `RNG.data` (ruling R4: the
+    // machine's seeded generator).
+    "APB_SARADC",
+    "SENS",
+    "RNG",
 ];
 
 /// How far back [`Machine::symbolize`] will look for a name when no symbol's
@@ -450,17 +498,47 @@ pub enum RomSource {
 
 /// The application image, if there is one.
 ///
-/// ⚠️ [`AppSource::None`] is **not a ROM-up boot**. It builds a machine with
-/// the map, the ROM and two harts and leaves core 0 at the ROM's reset
-/// vector with no boot frame; the tests use it, and the CLI refuses it,
-/// because starting the real ROM's reset path is **P06**'s and this phase has
-/// walked none of it.
+/// Under [`BootMode::Direct`] it is the image the loader places and enters;
+/// under [`BootMode::RomUp`] it is a symbol table and a cross-check
+/// reference only — the bytes the machine runs come out of the flash chip.
 #[derive(Clone, Debug, Default)]
 pub enum AppSource {
     #[default]
     None,
     /// `--elf <path>`.
     Path(PathBuf),
+}
+
+/// How the machine starts.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum BootMode {
+    /// Place the app's `PT_LOAD`s, stage its flash-resident half in the
+    /// chip, program the MMU, and start at its entry with the boot state
+    /// the bootloader would have left ([`BootFrame::idf_bootloader`]).
+    #[default]
+    Direct,
+    /// Start at the mask ROM's reset vector (`0x4000_0400`) with the
+    /// architectural reset state and seed **nothing**: the flash chip holds
+    /// a whole merged image and the real ROM and the real ESP-IDF
+    /// second-stage bootloader do the rest (M6 P06).
+    RomUp,
+}
+
+impl BootMode {
+    pub fn parse(text: &str) -> Option<Self> {
+        match text {
+            "direct" => Some(BootMode::Direct),
+            "rom-up" => Some(BootMode::RomUp),
+            _ => None,
+        }
+    }
+
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            BootMode::Direct => "direct",
+            BootMode::RomUp => "rom-up",
+        }
+    }
 }
 
 /// `SYSTEM.core_1_control_0` (`0x600C_0000 + 0x00`) — the register that holds
@@ -562,23 +640,24 @@ pub type CoreOneHandle = Arc<Mutex<CoreOneControl>>;
 /// `0x3FCE_B710` ([`memmap::ROM_PRO_STACK_TOP`]). That is a cited value and
 /// it is the right *shape*.
 ///
-/// ⚠️ **It is not the bootloader's own SP, and P06 owns that.** The ESP-IDF
-/// second-stage bootloader runs on a stack its own linker script places, and
-/// the value it holds at the `callx8` into the app is P06's to derive from
-/// the ROM-up chain — from the bootloader disassembly or from a ROM-up run
-/// that gets that far. Until then this is the machine's *seam*: a builder
-/// parameter with a cited default and a test that proves a seeded hart
-/// survives its first exception, not a claim about what silicon holds.
+/// ⚠️ **It is not the bootloader's own SP; [`BootFrame::idf_bootloader`]
+/// is.** The ESP-IDF second-stage bootloader runs on the ROM's PRO stack,
+/// 976 bytes down (`crate::loader`'s module docs derive the five frames and
+/// `tests/rom_up_boot.rs` measures the result: `a1 = 0x3FCE_B340` at the
+/// app's `Reset`). The direct load seeds that frame since P06; this
+/// constructor is the machine's *seam* for a hart seeded without an
+/// application (`tests/boot.rs`, `tests/cache_off_stop.rs`).
 ///
-/// # `owb` is zero here, and the classic's 7 is not carried over
+/// # `owb`: measured 11 on this chip, and the classic's 7 is not carried over
 ///
 /// The classic seeds `PS.OWB = 7` because a cross-check **measured** it: its
 /// ROM-up walk read `PS = 0x0006_0720` at the application's entry against the
-/// direct load's `0x0006_0020`. No such walk exists on the S3 until P06, so
-/// this field is zero — the architectural value for a frame no window
-/// exception has touched — and a P06 cross-check is what would change it.
-/// Carrying the classic's 7 across would be a measurement of one chip
-/// reported as a fact about another.
+/// direct load's `0x0006_0020`. P06's cross-check read the S3's:
+/// `PS = 0x0006_0B20` at `Reset`, `OWB = 0xb` — `crate::loader::BOOTLOADER_OWB`
+/// carries it and [`BootFrame::idf_bootloader`] seeds it. [`BootFrame::at`]
+/// keeps zero, the architectural value for a frame no window exception has
+/// touched. Carrying the classic's 7 across would have been a measurement of
+/// one chip reported as a fact about another.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct BootFrame {
     /// `a1` at entry: the outermost live frame's stack pointer.
@@ -587,7 +666,8 @@ pub struct BootFrame {
     /// order, which is the order `_WindowOverflow4` stores them in
     /// (`s32e a0, a5, -16` … `s32e a3, a5, -4`).
     pub save_area: [u32; 4],
-    /// `PS.OWB` at the application's entry. Zero until P06 measures one.
+    /// `PS.OWB` at the application's entry: 11 on the bootloader's frame
+    /// (measured, P06), zero on a synthetic one.
     pub owb: u8,
 }
 
@@ -656,6 +736,18 @@ pub enum Outcome {
     /// `--exit-on <substr>` matched a **complete** line on the console.
     /// Exit code 0: the run did what it was asked for.
     ExitMatched { cycle: Cycles },
+    /// **D4.** The core reached through a flash window whose cache was
+    /// disabled. See [`crate::cache`] for the design and
+    /// [`Machine::cache_off_message`] for what the message claims and what it
+    /// does not. Exit code 6.
+    CacheOffFetch {
+        cycle: Cycles,
+        /// The instruction that made the access — exact, because the hart
+        /// runs one instruction at a time while the watch is armed.
+        pc: u32,
+        symbol: Option<String>,
+        access: CacheOffAccess,
+    },
 }
 
 impl Outcome {
@@ -666,17 +758,14 @@ impl Outcome {
     /// reset the machine could not perform, 3 strict-bus refusal, 4 wall
     /// timeout, 5 `--break-at`, 6 cache-off fetch, 7 MMU divergence.
     ///
-    /// Two of those cannot arise here, and saying so is cheaper than leaving
-    /// a reader to wonder:
-    ///
-    /// - **6** is the cache-off fetch stop. This machine has no cache model —
-    ///   `EXTMEM` is **P06**'s — so nothing can produce it yet, and P06 adds
-    ///   the variant rather than reusing a code.
-    /// - **7** is a flash-MMU divergence between two cores' tables, and it is
-    ///   **not applicable on this machine at all**: one core runs, so there
-    ///   is no second MMU table to diverge from. The code stays reserved
-    ///   across the family and this machine never emits it — which is stated
-    ///   here rather than left as a silent gap in the table.
+    /// **7 cannot arise here**, and saying so is cheaper than leaving a
+    /// reader to wonder: it is a flash-MMU divergence between two cores'
+    /// tables (the classic's ruling R4), and **one core runs on this chip
+    /// with one table** — `Cache_Ibus_MMU_Set` and `Cache_Dbus_MMU_Set`
+    /// write the same `0x600C_5000` array — so there is no second table to
+    /// diverge from. The code stays reserved across the family and this
+    /// machine never emits it; there is no `--app-mmu-divergence` flag to
+    /// reserve either.
     pub const fn exit_code(&self) -> i32 {
         match self {
             Outcome::Deadline { .. } | Outcome::ExitMatched { .. } => 0,
@@ -684,6 +773,7 @@ impl Outcome {
             Outcome::StrictBus { .. } => 3,
             Outcome::WallTimeout { .. } => 4,
             Outcome::Breakpoint { .. } => 5,
+            Outcome::CacheOffFetch { .. } => 6,
         }
     }
 
@@ -694,6 +784,7 @@ impl Outcome {
             | Outcome::WallTimeout { cycle }
             | Outcome::Breakpoint { cycle, .. }
             | Outcome::ExitMatched { cycle }
+            | Outcome::CacheOffFetch { cycle, .. }
             | Outcome::Reset { cycle, .. } => *cycle,
             Outcome::StrictBus { violation } => violation.cycle,
         }
@@ -820,10 +911,10 @@ impl From<LoadError> for BuildError {
 /// trait object has none. The manual impl below prints the fields a test
 /// failure wants and prints the source as a flag, which is the same thing
 /// [`TraceSink`] does one field along.
-#[derive(Default)]
 pub struct Esp32S3Builder {
     rom: RomSource,
     app: AppSource,
+    boot_mode: BootMode,
     time_grade: TimeGrade,
     strict: bool,
     strict_unsupported: Option<bool>,
@@ -845,6 +936,51 @@ pub struct Esp32S3Builder {
     control: Option<String>,
     usb_script: Vec<(Cycles, ControlCommand)>,
     reboot_on_reset: bool,
+    // ---- the flash, the cache and the ROM's console (M6 P06) ----
+    flash_backing: FlashBacking,
+    flash_len: u32,
+    cache_off: CacheOffPolicy,
+    uart0: UsbSjSink,
+    uart0_source: Option<Box<dyn ByteSource>>,
+    uart0_script_source: Option<lp_emu_esp_common::ScriptedSource>,
+    strap_word: u32,
+}
+
+impl Default for Esp32S3Builder {
+    fn default() -> Self {
+        Self {
+            rom: RomSource::default(),
+            app: AppSource::default(),
+            boot_mode: BootMode::default(),
+            time_grade: TimeGrade::default(),
+            strict: false,
+            strict_unsupported: None,
+            boot_frame: None,
+            cpenable_reset: None,
+            core_quantum: None,
+            trace: None,
+            trace_blocks: Vec::new(),
+            seed: 0,
+            reset_cause: ResetCause::default(),
+            efuse: EfuseIdentity::default(),
+            usb_sj: UsbSjSink::default(),
+            usb_sj_tried: UsbSjSink::default(),
+            usb_sj_source: None,
+            usb_script_source: None,
+            usb_host: UsbHost::default(),
+            usb_sj_drain: UsbSjDrain::default(),
+            control: None,
+            usb_script: Vec::new(),
+            reboot_on_reset: false,
+            flash_backing: FlashBacking::default(),
+            flash_len: crate::flash::DEFAULT_FLASH_LEN,
+            cache_off: CacheOffPolicy::default(),
+            uart0: UsbSjSink::default(),
+            uart0_source: None,
+            uart0_script_source: None,
+            strap_word: GPIO_STRAP_SPI_FAST_FLASH_BOOT,
+        }
+    }
 }
 
 impl fmt::Debug for Esp32S3Builder {
@@ -852,6 +988,7 @@ impl fmt::Debug for Esp32S3Builder {
         f.debug_struct("Esp32S3Builder")
             .field("rom", &self.rom)
             .field("app", &self.app)
+            .field("boot_mode", &self.boot_mode)
             .field("time_grade", &self.time_grade)
             .field("strict", &self.strict)
             .field("boot_frame", &self.boot_frame)
@@ -866,6 +1003,11 @@ impl fmt::Debug for Esp32S3Builder {
             .field("control", &self.control)
             .field("usb_script", &self.usb_script.len())
             .field("reboot_on_reset", &self.reboot_on_reset)
+            .field("flash_backing", &self.flash_backing)
+            .field("flash_len", &self.flash_len)
+            .field("cache_off", &self.cache_off)
+            .field("uart0", &self.uart0)
+            .field("strap_word", &format_args!("{:#x}", self.strap_word))
             .finish_non_exhaustive()
     }
 }
@@ -894,6 +1036,69 @@ impl Esp32S3Builder {
 
     pub fn app(mut self, app: AppSource) -> Self {
         self.app = app;
+        self
+    }
+
+    /// Direct load (the default) or a boot from the reset vector through
+    /// the real ROM and the real bootloader ([`BootMode`]).
+    pub fn boot_mode(mut self, mode: BootMode) -> Self {
+        self.boot_mode = mode;
+        self
+    }
+
+    /// Where the flash chip's bytes come from and whether they go back:
+    /// `--flash <path>` is read-write, `--flash-copy <path>` / `--merged`
+    /// reads once and never writes, and the default is a blank chip that
+    /// dies with the process ([`crate::flash`]).
+    pub fn flash(mut self, backing: FlashBacking) -> Self {
+        self.flash_backing = backing;
+        self
+    }
+
+    /// The flash chip's size. This is the number the JEDEC capacity byte
+    /// and the ROM's `chip_size` word are derived from
+    /// ([`loader::seed_rom_flash_chip`]); default
+    /// [`crate::flash::DEFAULT_FLASH_LEN`], the board's 8 MiB.
+    pub fn flash_len(mut self, bytes: u32) -> Self {
+        self.flash_len = bytes;
+        self
+    }
+
+    /// `--cache-off-fetch` (D4). The default is [`CacheOffPolicy::Stop`],
+    /// and that is what every gate run uses.
+    pub fn cache_off_fetch(mut self, policy: CacheOffPolicy) -> Self {
+        self.cache_off = policy;
+        self
+    }
+
+    /// Where the mask ROM's UART0 console goes (`--uart0`). A `Tcp` sink is
+    /// also the wire's live source.
+    pub fn uart0(mut self, sink: UsbSjSink) -> Self {
+        self.uart0 = sink;
+        self
+    }
+
+    /// Host → device bytes on UART0, for a test that wants neither a socket
+    /// nor a script file.
+    pub fn uart0_source(mut self, source: Box<dyn ByteSource>) -> Self {
+        self.uart0_source = Some(source);
+        self
+    }
+
+    /// The byte half of a script on UART0, watching UART0's own log.
+    pub fn uart0_script(mut self, script: lp_emu_esp_common::ScriptedSource) -> Self {
+        self.uart0_script_source = Some(script);
+        self
+    }
+
+    /// What `GPIO.strap` reads: the strapping pins as the pads were latched
+    /// at reset (`--strap`). Default
+    /// [`GPIO_STRAP_SPI_FAST_FLASH_BOOT`] — the smallest word the ROM's own
+    /// decode calls a flash boot, because no S3 board's word has been
+    /// captured yet (P09). A reboot into [`Strap::Download`] latches
+    /// [`GPIO_STRAP_DOWNLOAD`] instead.
+    pub fn strap(mut self, word: u32) -> Self {
+        self.strap_word = word;
         self
     }
 
@@ -1037,11 +1242,11 @@ impl Esp32S3Builder {
     /// **Perform** a reset request instead of reporting it: the machine goes
     /// back to the state it was built in and runs again, as a chip does.
     ///
-    /// ⚠️ There is still no ROM-up boot on this machine (P06), so a reboot
-    /// is a **direct load** replayed: the app's segments are placed again and
-    /// core 0 starts at its entry with the same boot frame. That is what a
-    /// reboot of a direct-loaded machine can honestly be, and the run report
-    /// says how many happened.
+    /// Under [`BootMode::RomUp`] that is a real reboot — core 0 back at the
+    /// reset vector, the strap re-latched into `GPIO.strap` for the ROM to
+    /// read. Under [`BootMode::Direct`] it is a **direct load replayed**:
+    /// the app's segments are placed again and core 0 starts at its entry
+    /// with the same boot frame. The run report says how many happened.
     pub fn reboot_on_reset(mut self, reboot: bool) -> Self {
         self.reboot_on_reset = reboot;
         self
@@ -1140,9 +1345,62 @@ impl Esp32S3Builder {
             }),
             Box::new(lp_emu_esp_common::host::NullSource),
         );
+        // The mask ROM's UART0 console (M6 P06): the same tee shape as the
+        // link's, and a `Tcp` sink is the wire's live source.
+        let uart0_log = ByteLog::new();
+        let mut uart0_tcp: Option<lp_emu_esp_common::TcpHost> = None;
+        let uart0_source = match self.uart0_script_source {
+            Some(script) => {
+                Some(Box::new(script.watching(uart0_log.clone())) as Box<dyn ByteSource>)
+            }
+            None => self.uart0_source,
+        };
+        let (uart0_inner, uart0_src): (Box<dyn ByteSink>, Box<dyn ByteSource>) = match &self.uart0 {
+            UsbSjSink::Tcp(addr) => {
+                let host = lp_emu_esp_common::TcpHost::listen(addr)
+                    .map_err(|e| BuildError::Io(format!("listening on {addr}: {e}")))?;
+                eprintln!("uart0 listening on {}", host.local_addr());
+                let halves = host.split();
+                uart0_tcp = Some(host);
+                halves
+            }
+            other => (
+                usb_sink(other)?,
+                uart0_source.unwrap_or_else(|| Box::new(lp_emu_esp_common::host::NullSource)),
+            ),
+        };
+        let uart0_id = bus.host.add(
+            "uart0",
+            Box::new(TeeSink {
+                log: uart0_log.clone(),
+                inner: uart0_inner,
+            }),
+            uart0_src,
+        );
         let streams = HostStreams {
             usb_sj: Some(usb_sj_id),
             usb_sj_tried: Some(usb_sj_tried_id),
+            uart0: Some(uart0_id),
+        };
+
+        // The flash chip is shared state, not a peripheral: SPI1 executes
+        // commands against it and the cache fill reads through it. The
+        // cache model is shared the same way between EXTMEM, FLASH_MMU and
+        // the machine.
+        let flash: FlashHandle = Arc::new(Mutex::new(
+            FlashImage::open(self.flash_backing, self.flash_len)
+                .map_err(|e| BuildError::Io(format!("opening the flash image: {e}")))?,
+        ));
+        let cache = S3Cache::handle();
+        cache
+            .lock()
+            .expect("cache poisoned")
+            .set_policy(self.cache_off);
+        let flash_set = FlashSet {
+            flash: flash.clone(),
+            cache: cache.clone(),
+            strap: self.strap_word,
+            seed: self.seed,
         };
 
         // The peripherals, in the declared order, before any memory is
@@ -1155,6 +1413,7 @@ impl Esp32S3Builder {
             Arc::clone(&core_1_control),
             streams,
             self.usb_host,
+            &flash_set,
         );
         check_registration_order(&set)?;
         for (base, len, periph) in set {
@@ -1177,10 +1436,15 @@ impl Esp32S3Builder {
             None => None,
         };
         let usb_index = bus.peripheral_index("USB_DEVICE");
+        let gpio_index = bus.peripheral_index("GPIO");
 
-        // The ROM first, always (PD7), and its non-alloc data with it.
+        // The ROM first, always (PD7), its non-alloc data with it, and the
+        // ROM's own copy of that data at the addresses its reset handler
+        // copies from (P06 — `crate::rom`'s module docs).
         let rom_segments = rom::load(&mut bus, &rom_image)?;
         let rom_data = rom::seed_data(&mut bus, &rom_image)?;
+        let unpack_seeded = rom::seed_data_image(&mut bus, &rom_image)?;
+        log::debug!("rom: {unpack_seeded} unpack-table sources seeded");
 
         let app_image = match &self.app {
             AppSource::None => None,
@@ -1243,13 +1507,32 @@ impl Esp32S3Builder {
             reboots: 0,
             strap: Strap::App,
             power_on: None,
+            boot_mode: self.boot_mode,
+            cache,
+            flash,
+            cache_fills: 0,
+            staging: FlashStaging::default(),
+            cache_watch: false,
+            flash_seed: None,
+            pending_breaks: Vec::new(),
+            uart0_log,
+            uart0_tcp,
+            gpio_index,
+            strap_word: self.strap_word,
         };
 
-        if machine.app.is_some() {
-            let frame = self
-                .boot_frame
-                .unwrap_or_else(|| BootFrame::rom_pro_stack(&machine.rom));
-            machine.direct_load(frame)?;
+        match self.boot_mode {
+            BootMode::Direct if machine.app.is_some() => {
+                let frame = self.boot_frame.unwrap_or_else(BootFrame::idf_bootloader);
+                machine.direct_load(frame)?;
+            }
+            // No image under `Direct` is a bare machine — the map, the ROM
+            // and two harts, core 0 at the reset vector with no boot frame —
+            // which is what the unit tests build. Under `RomUp` the hart
+            // starts at the reset vector with the architectural reset state
+            // and the machine seeds nothing: the chip holds the merged image
+            // and every step after this is the ROM's.
+            BootMode::Direct | BootMode::RomUp => {}
         }
 
         // Guest time is zero and everything is placed: the one moment a
@@ -1388,6 +1671,31 @@ pub struct Machine {
     /// The state a reboot goes back to. `None` unless
     /// [`Esp32S3Builder::reboot_on_reset`] asked for one.
     power_on: Option<Snapshot>,
+    // ---- the flash, the cache and the ROM's console (M6 P06) ----
+    boot_mode: BootMode,
+    /// The cache-enable bits, the MMU table and D4's watch slot, shared
+    /// with the `EXTMEM` and `FLASH_MMU` views.
+    cache: CacheHandle,
+    /// The flash chip, shared with SPI1 and read by the cache fill.
+    flash: FlashHandle,
+    /// How many entries the fill has copied out of the chip.
+    cache_fills: u64,
+    /// What a direct load staged in the chip; empty on a ROM-up machine.
+    staging: FlashStaging,
+    /// Whether D4's watch is installed on the bus right now.
+    cache_watch: bool,
+    /// What a direct load wrote into the ROM's chip description.
+    flash_seed: Option<FlashChipSeed>,
+    /// Breakpoints waiting for their bytes to arrive
+    /// ([`Machine::break_at_address_when`]).
+    pending_breaks: Vec<(u32, [u8; 3], &'static str)>,
+    /// Everything the mask ROM's UART0 console put on the wire.
+    uart0_log: ByteLog,
+    uart0_tcp: Option<lp_emu_esp_common::TcpHost>,
+    /// `GPIO`'s peripheral index, where a reboot re-latches the strap.
+    gpio_index: Option<usize>,
+    /// The strapping word the run was built with (`--strap`).
+    strap_word: u32,
 }
 
 impl Machine {
@@ -1395,16 +1703,287 @@ impl Machine {
 
     /// Place the application's `PT_LOAD`s and seed the boot state a
     /// bootloader would have left: [`crate::loader`] is the documentation.
+    ///
+    /// Segments, the flash-resident half into the chip with the MMU
+    /// programmed for it, the ROM's flash chip description, both caches
+    /// enabled, the fill, then the hart — entry, [`PS_BOOT`] and the
+    /// [`BootFrame`]. What a direct load does *not* reproduce is the
+    /// fourteen-item list in the loader's module docs.
     fn direct_load(&mut self, frame: BootFrame) -> Result<(), BuildError> {
         let Some(app) = self.app.as_ref() else {
-            return Err(BuildError::App("a direct load needs an --elf".into()));
+            return Err(BuildError::App(
+                "--boot-mode direct needs an --elf to load".into(),
+            ));
         };
         // Cloned because the loader borrows the bus mutably and the app image
         // is borrowed from `self`. Placed once, at build.
         let app = app.clone();
         self.app_segments = loader::load_app(&mut self.bus, &app)?;
+        // Item 2: what the second-stage bootloader would have done — the
+        // flash-resident half of the image into the chip, and the MMU
+        // programmed for it.
+        self.staging = loader::stage_image_in_flash(&self.flash, &self.cache, &app);
+        let chip_len = self.staging.chip_len;
+        // Item 12: the ROM's chip description.
+        self.flash_seed = Some(loader::seed_rom_flash_chip(
+            &mut self.bus,
+            &self.rom,
+            chip_len,
+        )?);
+        // Item 11: the bootloader hands the app both caches on, and a direct
+        // load runs no bootloader. Through the bus, so the `EXTMEM` view and
+        // the model agree.
+        self.seed_cache_enabled();
+        // Everything staged was already placed into the windows by
+        // `load_app`; filling now proves the table and the placement agree,
+        // and is what serves the windows from here on.
+        self.cache_fills = self.refill_now();
+        // The staging is what a flasher left behind, not a guest write.
+        self.flash
+            .lock()
+            .expect("flash poisoned")
+            .take_written_blocks();
         self.seed_boot_state(app.entry, frame)?;
         Ok(())
+    }
+
+    /// Item 11: `icache_ctrl.icache_enable` and `dcache_ctrl.dcache_enable`
+    /// both set — what `load_image`'s `cache_hal_enable(CACHE_TYPE_ALL)`
+    /// leaves two instructions before the `callx8` into the app
+    /// (`crate::loader`'s module docs).
+    fn seed_cache_enabled(&mut self) {
+        for which in [Which::ICache, Which::DCache] {
+            let at = memmap::periph::EXTMEM + which.ctrl_offset();
+            let word = self.peek_word(at).unwrap_or(0);
+            self.poke_word(at, word | cache::CACHE_ENABLE);
+        }
+    }
+
+    /// Fill every page the table marked dirty, with the accesses marked as
+    /// the emulator's so D4's watch does not arm on them ([`crate::cache`]).
+    fn refill_now(&mut self) -> u64 {
+        self.set_host_access(true);
+        let filled = cache::fill(&mut self.bus, &self.flash, &self.cache) as u64;
+        self.set_host_access(false);
+        filled
+    }
+
+    /// Refill any window page whose mapping or backing bytes moved.
+    ///
+    /// Called once per slice. Almost always a flash-block check and a `bool`
+    /// and nothing else: only an MMU entry write or a flash write under a
+    /// mapped page puts anything in the list.
+    fn refill_cache(&mut self) {
+        let written = self
+            .flash
+            .lock()
+            .expect("flash poisoned")
+            .take_written_blocks();
+        if !written.is_empty() {
+            let mut c = self.cache.lock().expect("cache poisoned");
+            let mut moved: Vec<u32> = Vec::new();
+            for block in written {
+                moved.extend(c.mmu.invalidate_page_at(block * crate::flash::BLOCK_LEN));
+            }
+            for index in moved {
+                c.forget_fill(index);
+            }
+        }
+        if !self.cache.lock().expect("cache poisoned").mmu.has_dirty() {
+            return;
+        }
+        self.cache_fills += self.refill_now();
+    }
+
+    fn set_host_access(&mut self, on: bool) {
+        self.cache
+            .lock()
+            .expect("cache poisoned")
+            .set_host_access(on);
+    }
+
+    /// The flash chip, for a test and for the run report.
+    pub fn flash(&self) -> &FlashHandle {
+        &self.flash
+    }
+
+    /// Write the flash image back if its backing says to.
+    pub fn flush_flash(&mut self) -> std::io::Result<bool> {
+        self.flash.lock().expect("flash poisoned").flush()
+    }
+
+    /// What a direct load staged in the chip and mapped; empty on a rom-up
+    /// machine, where the bootloader does it.
+    pub fn flash_staging(&self) -> &FlashStaging {
+        &self.staging
+    }
+
+    /// How many MMU entries the fill has copied out of the chip.
+    pub fn cache_fills(&self) -> u64 {
+        self.cache_fills
+    }
+
+    /// What a direct load wrote into the ROM's flash chip description;
+    /// `None` on a rom-up machine, where the bootloader does it.
+    pub fn flash_seed(&self) -> Option<FlashChipSeed> {
+        self.flash_seed
+    }
+
+    /// The cache state and the flash MMU table.
+    pub fn cache(&self) -> &CacheHandle {
+        &self.cache
+    }
+
+    /// The flash MMU table, all 512 entries — what decides what the IROM and
+    /// DROM windows contain. The cross-check compares it between the two
+    /// boot paths.
+    pub fn flash_mmu_entries(&self) -> Vec<u32> {
+        self.cache
+            .lock()
+            .expect("cache poisoned")
+            .mmu
+            .entries()
+            .to_vec()
+    }
+
+    pub fn boot_mode(&self) -> BootMode {
+        self.boot_mode
+    }
+
+    /// Everything the mask ROM's UART0 console has put on the wire.
+    pub fn uart0(&self) -> &ByteLog {
+        &self.uart0_log
+    }
+
+    /// The UART0 socket's listener, when `UsbSjSink::Tcp` was chosen.
+    pub fn uart0_tcp(&self) -> Option<&lp_emu_esp_common::TcpHost> {
+        self.uart0_tcp.as_ref()
+    }
+
+    /// The strapping word `GPIO.strap` reads (`--strap`).
+    pub fn strap_word(&self) -> u32 {
+        self.strap_word
+    }
+
+    /// Stop the run the first time `address` holds `expect` **and** is
+    /// reached.
+    ///
+    /// ⚠️ A hook is a `break` written into the guest's instruction stream,
+    /// which is exactly right for a mask ROM — nothing rewrites
+    /// `0x4000_xxxx`. It is wrong for an address in IRAM on the ROM-up path:
+    /// the second-stage bootloader loads its own segments over
+    /// `0x403c_9700..` and then the application's over `0x4037_8000..`, so a
+    /// `break` planted before the run is gone before the pc reaches it, and
+    /// a patch that re-armed itself blindly would plant three bytes across
+    /// the middle of a bootloader instruction. So the breakpoint waits: every
+    /// slice, while any is pending, the machine reads the three bytes at the
+    /// address and arms the hook the moment they are the caller's — for the
+    /// app-entry cross-check, the application ELF's own first instruction.
+    pub fn break_at_address_when(&mut self, address: u32, expect: [u8; 3]) {
+        self.pending_breaks.push((address, expect, "break-at"));
+    }
+
+    /// Arm every pending breakpoint whose bytes have appeared.
+    fn arm_pending_breaks(&mut self) {
+        let mut still = Vec::new();
+        for (address, expect, symbol) in std::mem::take(&mut self.pending_breaks) {
+            self.set_host_access(true);
+            let bytes = rom::read_three(&mut self.bus, address);
+            self.set_host_access(false);
+            match bytes {
+                Ok(bytes) if bytes == expect => {
+                    if let Err(e) = self
+                        .hooks
+                        .install_at(&mut self.bus, address, symbol, |_| HookResult::Stop)
+                    {
+                        log::warn!("machine: arming `{symbol}` at {address:#010x}: {e}");
+                    } else {
+                        log::debug!(
+                            "machine: armed `{symbol}` at {address:#010x} at cycle {}",
+                            self.cycles()
+                        );
+                    }
+                }
+                _ => still.push((address, expect, symbol)),
+            }
+        }
+        self.pending_breaks = still;
+    }
+
+    // ---- D4, the cache-off fetch stop ------------------------------------
+
+    /// Install or remove the watch, following [`S3Cache::watch_wanted`]. A
+    /// run whose guest never disables a cache never installs it and pays
+    /// one `Option` test per access, which is what the bus already cost.
+    fn sync_cache_watch(&mut self) {
+        let wanted = self.cache.lock().expect("cache poisoned").watch_wanted();
+        if wanted == self.cache_watch {
+            return;
+        }
+        if wanted {
+            self.bus
+                .set_memory_cost(Some(Box::new(cache::CacheOffWatch::new(
+                    self.cache.clone(),
+                ))));
+        } else {
+            self.bus.set_memory_cost(None);
+        }
+        self.cache_watch = wanted;
+    }
+
+    /// The offence the watch recorded during the window just run, as an
+    /// outcome. `pc` is the instruction that made the access — the window
+    /// was one instruction long, which is what makes that exact.
+    fn take_cache_off_fetch(&mut self, pc: u32) -> Option<Outcome> {
+        let access = self.cache.lock().expect("cache poisoned").take_offence()?;
+        Some(Outcome::CacheOffFetch {
+            cycle: self.harts[0].cycle_count(),
+            pc,
+            symbol: self.symbolize(pc),
+            access,
+        })
+    }
+
+    /// What D4's stop says, and what it does not claim. Written for a reader
+    /// who has just been stopped by it.
+    pub fn cache_off_message(&self, cycle: Cycles, pc: u32, access: &CacheOffAccess) -> String {
+        let symbol = |at: u32| match self.symbolize(at) {
+            Some(name) => format!(" ({name})"),
+            None => String::new(),
+        };
+        let why = match access.disabled_by {
+            Some(by) => format!(
+                "at cycle {} by a write to\n  EXTMEM+{:#05x} ({} <- 0) from pc={by:#010x}{}",
+                access.disabled_at,
+                access.cache.ctrl_offset(),
+                access.cache.ctrl_name(),
+                symbol(by),
+            ),
+            // Nothing ever turned it on. On a direct load that would be a bug
+            // in the loader's cache seed; on a ROM-up boot it means the
+            // guest reached the window before the ROM's `Cache_Enable_*`.
+            None => format!(
+                "by reset and never turned on: the PAC gives EXTMEM+{:#05x} no reset, \
+                 {}\n  (bit 0) is clear, and on silicon it is the ROM's \
+                 `ROM_Boot_Cache_Init` and the bootloader's `cache_hal_enable` that set it",
+                access.cache.ctrl_offset(),
+                access.cache.ctrl_name(),
+            ),
+        };
+        let what = if access.fetch { "fetch" } else { "read" };
+        format!(
+            "CACHE-OFF FETCH  core=0  cycle={cycle}\n  \
+             pc={pc:#010x}{}  {what} from {} {:#010x}, served by the {}\n  \
+             the {} was disabled {why}\n\n  \
+             On silicon this core stalls until the cache returns; nothing observes it\n  \
+             except a crash or a watchdog. This emulator refuses instead.\n  \
+             `--cache-off-fetch permit` continues (and claims nothing about the stall).",
+            symbol(pc),
+            access.window,
+            access.addr,
+            access.cache,
+            access.cache,
+        )
     }
 
     /// Seed core 0's entry, `PS` and boot frame.
@@ -1831,11 +2410,14 @@ impl Machine {
         hit
     }
 
-    /// Read a word of guest memory from the host side.
+    /// Read a word of guest memory from the host side. Marked as the
+    /// emulator's own access, so D4's watch never arms on it.
     pub fn peek_word(&mut self, address: u32) -> Option<u32> {
         let saved = self.bus.pc();
         self.bus.set_pc(0);
+        self.set_host_access(true);
         let value = self.bus.read_word(address).ok().map(|v| v as u32);
+        self.set_host_access(false);
         self.bus.set_pc(saved);
         value
     }
@@ -1845,7 +2427,9 @@ impl Machine {
     pub fn poke_word(&mut self, address: u32, value: u32) -> bool {
         let saved = self.bus.pc();
         self.bus.set_pc(0);
+        self.set_host_access(true);
         let ok = self.bus.write_word(address, value as i32).is_ok();
+        self.set_host_access(false);
         self.bus.set_pc(saved);
         ok
     }
@@ -1931,9 +2515,29 @@ impl Machine {
                 // guest time as the other core's.
                 self.harts[core].advance_to_cycle(now);
 
+                // D4. Arming and disarming happen here, between windows,
+                // and the `EXTMEM` view asks for a boundary the moment an
+                // enable bit moves — so the window between "the cache went
+                // off" and "the check is on" is zero instructions.
+                self.sync_cache_watch();
+                let budget = if self.cache_watch {
+                    // `MemoryCost` sees the address and not the pc, so while
+                    // the watch is armed the hart runs one instruction at a
+                    // time and the pc below is exactly the one that made the
+                    // access.
+                    1
+                } else {
+                    window
+                };
+                let issuing_pc = self.harts[core].pc();
+
                 self.bus.set_time(now);
                 self.bus.set_hart(core);
-                let end = self.harts[core].run_slice(&mut self.bus, window);
+                let end = self.harts[core].run_slice(&mut self.bus, budget);
+
+                if let Some(outcome) = self.take_cache_off_fetch(issuing_pc) {
+                    return outcome;
+                }
 
                 match end {
                     SliceEnd::BudgetExhausted | SliceEnd::BusYield => {}
@@ -2047,6 +2651,22 @@ impl Machine {
                 }
             }
 
+            // The flash windows: an MMU entry write or a flash write under a
+            // mapped page marked pages for a refill at this boundary. A fill
+            // rewrites window bytes the hart may have cached as code, so it
+            // goes through the same invalidation.
+            self.refill_cache();
+            if self.bus.code_writes_pending() {
+                for (lo, hi) in self.bus.take_code_writes() {
+                    for hart in &mut self.harts {
+                        hart.invalidate_block_range(lo, hi);
+                    }
+                }
+            }
+            if !self.pending_breaks.is_empty() {
+                self.arm_pending_breaks();
+            }
+
             if let Some(violation) = self.bus.first_strict_violation() {
                 return Outcome::StrictBus { violation };
             }
@@ -2085,6 +2705,11 @@ impl Machine {
                     source,
                     strap,
                 };
+            }
+            // A ROM-up reboot restored the table and marked it dirty: fill
+            // before the ROM's first window read rather than after it.
+            if self.cache.lock().expect("cache poisoned").mmu.has_dirty() {
+                self.refill_cache();
             }
             if let Some(needle) = &stop.exit_on
                 && self
@@ -2376,13 +3001,14 @@ impl Machine {
 
     /// Reboot into `strap`, as a chip does when something asserts its reset.
     ///
-    /// ⚠️ **This machine has no ROM-up boot** (P06), so a reboot is the
-    /// power-on state put back: the machine returns to the snapshot taken
-    /// after the direct load, with the clock, the peripherals, the schedule
-    /// and both harts where they were at cycle zero. `strap` is recorded and
-    /// reported; **nothing reads it**, because there is no boot chain to
-    /// choose with it yet — saying so is cheaper than a reader assuming a
-    /// download console appears.
+    /// The power-on state put back: the machine returns to the snapshot
+    /// taken at build, with the clock, the peripherals, the schedule and
+    /// both harts where they were at cycle zero. Under [`BootMode::RomUp`]
+    /// that is core 0 at the reset vector and the strap **re-latched into
+    /// `GPIO.strap`** for the ROM's `boot_prepare` to read — the strap's
+    /// first reader on this machine; under [`BootMode::Direct`] it is the
+    /// direct load replayed, and the strap is recorded and read by nothing,
+    /// because a direct load runs no ROM.
     ///
     /// The consoles keep their bytes: a restore would put back the empty
     /// logs the machine was built with, and a boot log that lost everything
@@ -2392,10 +3018,26 @@ impl Machine {
         let Some(power_on) = self.power_on.clone() else {
             return false;
         };
-        let (usb_sj, tried) = (self.usb_sj_log.bytes(), self.usb_sj_tried_log.bytes());
+        let (usb_sj, tried, uart0) = (
+            self.usb_sj_log.bytes(),
+            self.usb_sj_tried_log.bytes(),
+            self.uart0_log.bytes(),
+        );
         self.restore(&power_on);
         self.usb_sj_log.replace(&usb_sj);
         self.usb_sj_tried_log.replace(&tried);
+        self.uart0_log.replace(&uart0);
+
+        // The strapping pins as this reset latched them: the run's own word
+        // for a plain reset, the ROM's download nibble for IO0 held low.
+        let word = match strap {
+            Strap::App => self.strap_word,
+            Strap::Download => GPIO_STRAP_DOWNLOAD,
+        };
+        if let Some(index) = self.gpio_index {
+            self.bus
+                .with_peripheral::<GpioBlock, _>(index, |g, _| g.set_strap(word));
+        }
 
         let usb_host = self.usb_host;
         self.strap = strap;
@@ -2485,6 +3127,7 @@ impl Machine {
             wfi_ends: self.wfi_ends,
             core_quantum: self.core_quantum,
             console: self.usb_sj_log.bytes(),
+            uart0: self.uart0_log.bytes(),
         }
     }
 
@@ -2505,6 +3148,12 @@ impl Machine {
         self.idle_skips = snap.idle_skips;
         self.wfi_ends = snap.wfi_ends;
         self.usb_sj_log.replace(&snap.console);
+        self.uart0_log.replace(&snap.uart0);
+        // The restore put the peripherals' blobs back, the MMU table with
+        // them (it rides in `EXTMEM`'s), and marked every entry dirty; the
+        // watch is re-armed from the restored enable bits at the next window.
+        self.cache_watch = false;
+        self.bus.set_memory_cost(None);
         // The quantum is something a run's future depends on, so a restored
         // run takes the snapshot's — and says so if that differs from what
         // this machine was built with.

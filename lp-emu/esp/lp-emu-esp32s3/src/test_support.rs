@@ -86,6 +86,45 @@ pub fn workspace_root() -> Option<PathBuf> {
     }
 }
 
+/// The environment variable naming the **merged** flash image — the whole
+/// 8 MiB chip `espflash save-image --chip esp32s3 --merge` writes: the
+/// bundled ESP-IDF second-stage bootloader at `0x0`, the partition table at
+/// `0x8000`, the app in `factory`. `just test-emu-esp32s3-boot` builds it
+/// beside the ELF and sets this; with `espflash` absent it is not set and
+/// the tests that need one print a SKIP notice.
+pub const MERGED_ENV: &str = "LP_EMU_ESP32S3_MERGED";
+
+/// The merged chip image, if the caller has one. Same contract as
+/// [`fw_esp32s3_image`]: `Err` is a SKIP, a set-but-missing path is a
+/// broken recipe.
+pub fn merged_chip_image() -> Result<PathBuf, String> {
+    match std::env::var_os(MERGED_ENV) {
+        Some(path) => {
+            let mut path = PathBuf::from(path);
+            if path.is_relative()
+                && !path.is_file()
+                && let Some(root) = workspace_root()
+            {
+                path = root.join(&path);
+            }
+            assert!(
+                path.is_file(),
+                "{MERGED_ENV}={} names a file that does not exist; `just \
+                 test-emu-esp32s3-boot` writes it with `espflash save-image --chip esp32s3 \
+                 --merge`",
+                path.display()
+            );
+            Ok(path)
+        }
+        None => Err(format!(
+            "{MERGED_ENV} is not set. `just test-emu-esp32s3-boot` builds the shipped image, \
+             runs `espflash save-image --chip esp32s3 --merge --partition-table \
+             lp-fw/fw-esp32s3/partitions.csv --flash-size 8mb` on it, and sets this; a bare \
+             `cargo test` skips every test that needs one"
+        )),
+    }
+}
+
 /// Print why a test did nothing, in the one shape a log reader greps for.
 pub fn skip_notice(test: &str, reason: &str) {
     println!("SKIP {test}: {reason}");

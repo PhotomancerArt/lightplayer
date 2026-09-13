@@ -72,7 +72,10 @@
 //!   report's §5 is the evidence and the one-sentence ruling.
 
 pub mod bus_setup;
+pub mod cache;
 pub mod control;
+pub mod flash;
+pub mod image;
 pub mod intmatrix;
 pub mod loader;
 pub mod machine;

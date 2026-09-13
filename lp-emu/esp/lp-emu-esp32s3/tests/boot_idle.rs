@@ -18,34 +18,58 @@
 //!   identical cycle counts.
 //! - **G5-5** where the boot stops, and whose it is.
 //!
-//! # ⚠️ Where this boot stops, and why the chain is shorter than the brief
+//! # Where P05's boot stopped, and what P06 changed
 //!
-//! The image does **not** reach `[INIT] fw-esp32 initialized, starting
-//! server loop` on this machine, and it cannot until **P06**. After
-//! `[INIT] I/O task spawned` it calls `mount_filesystem(flash)`, which issues
-//! a flash read: `esp_storage` sets `SPI1.cmd` bit 28 (`usr`) and spins until
-//! hardware clears it. `SPI1` is an accept block here, so the bit stays set
-//! and the spin never ends — which is exactly what
-//! `lp_emu_esp32s3::periph::accept::spi1`'s own doc predicted in P04:
+//! Until P06 the image did **not** reach `[INIT] fw-esp32 initialized,
+//! starting server loop` on this machine: after `[INIT] I/O task spawned`
+//! it called `mount_filesystem(flash)`, `esp_storage` set `SPI1.cmd` bit 28
+//! (`usr`) and spun until hardware cleared it, and `SPI1` was an accept
+//! block, so the bit stayed set for ever — exactly what
+//! `lp_emu_esp32s3::periph::accept::spi1`'s own doc predicted in P04. P06
+//! put `engine::spi_flash` behind `SPI1` and a real chip behind the windows
+//! (`crate::flash`, `crate::cache`), so the boot now goes on: the
+//! filesystem mounts (a fresh chip is formatted first), the hardware
+//! manifest prints, the server loop starts, the unsolicited `hello` goes
+//! out on the wire, and a request on the wire is answered.
+//! [`the_boot_goes_past_where_p05_stopped`] pins the three lines P05 pinned
+//! as absent, present, with the same register read back — `cmd.usr` clear,
+//! because the engine completes the transfer.
 //!
-//! > a flash read sets `cmd.usr` and spins until hardware clears it when the
-//! > transfer is done, and a block that remembers holds it set forever. That
-//! > spin is **P06**'s stop, on `engine::spi_flash`.
+//! The ledger triple (`[stack]`, `[MEM]`, `[JIT]`, added to this image by
+//! P04b / PR #742) is **elicited**, as the classic's is: a `stopAllProjects`
+//! over the wire, one millisecond after `[INIT] I/O task spawned` — the same
+//! directive P08's `walks/s3-stop-all.script` carries.
+//! [`the_ledger_triple_is_elicited_by_a_stop_all_on_the_wire`] is that run.
 //!
-//! So the `lpfs` mount failure, the memory-filesystem fallback and the
-//! server-loop line are **P06's** readings, not P05's — and
-//! [`the_boot_stops_where_p06_begins`] pins that they are absent, with the
-//! register the run is spinning on, so the phase that changes it is visible.
+//! # ⚠️ The link drops one packet of the io_task's first framed write
 //!
-//! The same block is why the ledger triple (`[stack]`, `[MEM]`, `[JIT]`,
-//! added to this image by P04b / PR #742) cannot be **elicited** here: the
-//! classic elicits it with a `stop-all` over the wire, and a wire needs the
-//! server loop. [`the_ledger_triple_is_not_elicitable_until_the_server_loop_runs`]
-//! pins that too, with the shapes P06 will assert.
+//! With the boot going past the `[INIT]` chain, the first thing the wire
+//! carries that is longer than 64 bytes is the `hello`, and **one 64-byte
+//! packet of it never reaches the host** — on both boot paths, at the same
+//! instruction. The mechanism is in
+//! `docs/defects/2026-09-13-the-s3-link-drops-the-io-tasks-next-chunk-on-a-stale-serial-in-empty.md`:
+//! esp-println's polled path leaves `serial_in_empty` set in `int_raw`
+//! after its packet drains, esp-hal's `UsbSerialJtagWriteFuture::new` only
+//! *enables* the interrupt and never clears the stale raw, so the future
+//! resolves 342 cycles after the io_task's first chunk commits — long before
+//! the modelled 100 µs drain — and the next chunk is written into a FIFO
+//! the model holds committed and drops. A stop-all's **reply** is lost the
+//! same way, behind the triple's last `esp_println` packet.
+//!
+//! This file **pins that behaviour where it shows** rather than widening
+//! anything: the tried stream's length and content are asserted, with the
+//! defect named, so that whichever side is fixed — the link model, if
+//! silicon accepts a write while a packet is pending; esp-hal, if it should
+//! clear the raw; the firmware, if it should — flips one assertion here.
+//! The `[INIT]` chain itself (esp-println, polled) is delivered whole and
+//! is still pinned byte for byte as the stream's prefix.
 //!
 //! The tests that need a built `fw-esp32s3` are `#[ignore]`d and run by
 //! `just test-emu-esp32s3-boot`.
 
+use std::path::PathBuf;
+
+use lp_emu_esp32s3::flash::FlashBacking;
 use lp_emu_esp32s3::machine::{
     AppSource, Esp32S3Builder, Machine, Outcome, StopCondition, UsbHost,
 };
@@ -53,10 +77,70 @@ use lp_emu_esp32s3::periph::usb_sj::IN_DRAIN_LATENCY_CYCLES;
 use lp_emu_esp32s3::{memmap, test_support};
 use sha2::{Digest, Sha256};
 
-/// Long enough that everything before the flash spin has been printed, short
-/// enough that a suite run is seconds: the whole chain is out by ~8.9 ms of
-/// guest time and the RWDT's boot stage is 30 s away.
+/// Why a test here did nothing: both files are needed.
+const SKIP: &str = "no image (LP_EMU_ESP32S3_ELF) or no merged chip (LP_EMU_ESP32S3_MERGED)";
+
+/// The shipped ELF and the merged chip behind it, or `None` — the caller
+/// prints the skip notice. **Every test here boots the flashed chip**: since
+/// P06 the boot's second half — the mount, the server loop, the hello — is
+/// what the chip holds, and a blank chip is a different reading (the
+/// memory-FS fallback), which `tests/boot.rs` pins.
+fn images() -> Option<(PathBuf, PathBuf)> {
+    match (
+        test_support::fw_esp32s3_image(),
+        test_support::merged_chip_image(),
+    ) {
+        (Ok(elf), Ok(merged)) => Some((elf, merged)),
+        _ => None,
+    }
+}
+
+/// Long enough that the whole boot — the `[INIT]` chain by ~8.9 ms of guest
+/// time, the first-boot format and the server loop's first tick by ~120 ms
+/// — has been printed, short enough that a suite run is seconds; the RWDT's
+/// boot stage is 30 s away.
 const GATE_US: u64 = 2_000_000;
+
+/// The defect entry for the link's dropped packet (module docs).
+const LINK_DEFECT: &str = "docs/defects/2026-09-13-the-s3-link-drops-the-io-tasks-next-chunk-on-a-stale-serial-in-empty.md";
+
+/// The three lines P05 pinned as absent and P06 delivers (DD86), plus the
+/// wire's own two.
+const PAST_P05: &[&str] = &[
+    "[INIT] flash filesystem mounted",
+    "hardware manifest",
+    // The line `lpa_link::device_session::device_readiness` matches, and
+    // which is chip-agnostic on purpose — never "fw-esp32s3".
+    "[INIT] fw-esp32 initialized, starting server loop",
+    "\"id\":0,\"msg\":{\"hello\"",
+    "[RECOVERY] boot complete (first frame served)",
+];
+
+/// What the link drops of the io_task's first framed write with a draining
+/// host attached from power-on: one 64-byte packet from inside the `hello`.
+/// See [`LINK_DEFECT`].
+fn assert_the_one_dropped_packet(machine: &Machine, delivered: &[u8]) {
+    let tried = machine.usb_sj_tried();
+    let text = String::from_utf8_lossy(delivered).into_owned();
+    let lost = String::from_utf8_lossy(&tried).into_owned();
+    assert_eq!(
+        tried.len(),
+        64,
+        "exactly one IN packet is merely tried ({LINK_DEFECT}): {lost:?}"
+    );
+    assert!(
+        !lost.contains("[INIT]"),
+        "the esp_println chain is delivered whole; the loss is the io_task's: {lost:?}"
+    );
+    assert!(
+        lost.contains("\",\"node."),
+        "the packet is from inside the hello's feature list: {lost:?}"
+    );
+    assert!(
+        !text.contains(&lost),
+        "and the delivered stream really lacks it"
+    );
+}
 
 /// **The hello, byte for byte.** Pinned as a whole stream, as
 /// `lp-emu-esp32v3/tests/boot.rs` pins the classic's.
@@ -82,9 +166,10 @@ fn sha(bytes: &[u8]) -> String {
 
 /// A strict run of the shipped image with the host in `host`, for `GATE_US`.
 fn run(host: UsbHost) -> Option<(Machine, Outcome)> {
-    let elf = test_support::fw_esp32s3_image().ok()?;
+    let (elf, merged) = images()?;
     let mut machine = Esp32S3Builder::new()
         .app(AppSource::Path(elf))
+        .flash(FlashBacking::Copy(merged))
         .strict(true)
         .usb_host(host)
         .build()
@@ -110,7 +195,7 @@ fn the_shipped_image_prints_its_init_chain_out_of_the_link() {
     let Some((machine, outcome)) = run(UsbHost::Attached { draining: true }) else {
         test_support::skip_notice(
             "the_shipped_image_prints_its_init_chain_out_of_the_link",
-            "no image",
+            SKIP,
         );
         return;
     };
@@ -126,28 +211,42 @@ fn the_shipped_image_prints_its_init_chain_out_of_the_link() {
     );
 
     let delivered = machine.usb_sj();
-    assert_eq!(
-        String::from_utf8_lossy(&delivered),
-        HELLO,
-        "the whole chain, in order, out of the link"
-    );
-    assert_eq!(delivered.len(), HELLO_BYTES);
-    assert_eq!(sha(&delivered), HELLO_SHA);
+    let text = String::from_utf8_lossy(&delivered).into_owned();
+    // The `[INIT]` chain, in order, byte for byte, **first** out of the
+    // link — P05's hello, as the stream's prefix now that the boot goes on.
     assert!(
-        machine.usb_sj_tried().is_empty(),
-        "a draining host took every byte: nothing was merely tried"
+        text.starts_with(HELLO),
+        "the whole chain, in order, first out of the link:\n{text}"
     );
+    assert_eq!(&delivered[..HELLO_BYTES], HELLO.as_bytes());
+    assert_eq!(sha(&delivered[..HELLO_BYTES]), HELLO_SHA);
+    // …and P06's continuation behind it: the flash is real, so the boot
+    // mounts, starts the server loop, says hello on the wire and serves a
+    // frame.
+    for line in PAST_P05 {
+        assert!(text.contains(line), "P06's boot prints `{line}`:\n{text}");
+    }
+    assert!(
+        text.contains("[FS] Mount failed (filesystem corrupt), formatting partition..."),
+        "a fresh copy of the chip is formatted on its first boot:\n{text}"
+    );
+    // ⚠️ Not "a draining host took every byte": one packet of the io_task's
+    // hello is dropped, and this is where that is pinned (module docs).
+    assert_the_one_dropped_packet(&machine, &delivered);
     // The console and the link are the same stream on this chip, so
     // `--console` writes exactly this.
     assert_eq!(machine.console().bytes(), delivered);
 
     println!(
-        "HELLO: {} bytes, sha {}, delivered in {} us of guest time, unmapped=0",
-        delivered.len(),
-        sha(&delivered),
+        "HELLO: {} bytes, sha {}, then {} more; {} tried ({LINK_DEFECT}); {} us of guest time, \
+         unmapped=0",
+        HELLO_BYTES,
+        HELLO_SHA,
+        delivered.len() - HELLO_BYTES,
+        machine.usb_sj_tried().len(),
         machine.cycles() / memmap::CYCLES_PER_US
     );
-    print!("{}", String::from_utf8_lossy(&delivered));
+    print!("{text}");
 }
 
 /// **G5-2 — nobody there.** With no cable the same image prints into an
@@ -164,7 +263,7 @@ fn with_no_host_the_console_commits_once_and_falls_silent() {
     let Some((machine, outcome)) = run(UsbHost::Absent) else {
         test_support::skip_notice(
             "with_no_host_the_console_commits_once_and_falls_silent",
-            "no image",
+            SKIP,
         );
         return;
     };
@@ -179,20 +278,42 @@ fn with_no_host_the_console_commits_once_and_falls_silent() {
     // never fills. The next print finds `free` still 0, writes `wr_done`
     // into a committed endpoint, spins its 50,000 iterations, latches
     // `TIMED_OUT` and returns at once for ever after; so `[INIT] fw-esp32s3
-    // boot` is every byte this firmware ever hands over with nobody there.
-    assert_eq!(
-        tried,
-        b"[INIT] fw-esp32s3 boot",
-        "one committed line, then TIMED_OUT latches and the console falls silent: {}",
+    // boot` is every byte **esp-println** ever hands over with nobody there.
+    const FIRST: &[u8] = b"[INIT] fw-esp32s3 boot";
+    assert!(
+        tried.starts_with(FIRST),
+        "one committed line, then TIMED_OUT latches: {}",
         String::from_utf8_lossy(&tried)
     );
+    let rest = &tried[FIRST.len()..];
+    let rest_text = String::from_utf8_lossy(rest).into_owned();
     assert!(
-        HELLO.as_bytes().starts_with(&tried),
-        "what was tried is a prefix of what a host would have received"
+        !rest_text.contains("[INIT]"),
+        "the console fell silent after one commit: no second `[INIT]` line was ever tried: \
+         {rest_text:?}"
     );
+    // Since P06 the boot goes on to the server loop, whose **io_task** does
+    // not latch on esp-println's flag: its `ChunkedWriter` writes the
+    // hello's first 64-byte chunk (a `\n` and 63 bytes of `M!{"id":0,…`)
+    // into the committed endpoint — dropped, and observed here — waits out
+    // its 250 ms chunk timeout, latches *its* not-draining, and then probes
+    // the dead port with one `\n` per probe interval: two of them by 2 s.
+    // 22 + 64 + 2.
+    assert_eq!(
+        tried.len(),
+        FIRST.len() + 64 + 2,
+        "the first line, the io_task's first chunk, two probes: {rest_text:?}"
+    );
+    assert_eq!(rest[0], b'\n', "the chunk opens with the framing newline");
+    assert!(
+        rest_text.contains("M!{\"id\":0,\"msg\":{\"hello\""),
+        "the io_task's hello, tried into a dead port: {rest_text:?}"
+    );
+    assert_eq!(&rest[64..], b"\n\n", "two probe newlines after the latch");
     println!(
-        "HOST ABSENT: 0 bytes delivered, {} bytes tried — the console fell silent after one \
-         commit, and the run kept running ({} us, unmapped={})",
+        "HOST ABSENT: 0 bytes delivered, {} bytes tried — esp-println fell silent after one \
+         commit, the io_task tried one chunk and two probes, and the run kept running ({} us, \
+         unmapped={})",
         tried.len(),
         machine.cycles() / memmap::CYCLES_PER_US,
         machine.bus().unmapped_reads() + machine.bus().unmapped_writes(),
@@ -209,15 +330,16 @@ fn with_no_host_the_console_commits_once_and_falls_silent() {
 #[test]
 #[ignore = "needs LP_EMU_ESP32S3_ELF; run through `just test-emu-esp32s3-boot`"]
 fn an_attached_but_closed_port_holds_the_packet_until_an_application_opens_it() {
-    let Ok(elf) = test_support::fw_esp32s3_image() else {
+    let Some((elf, merged)) = images() else {
         test_support::skip_notice(
             "an_attached_but_closed_port_holds_the_packet_until_an_application_opens_it",
-            "no image",
+            SKIP,
         );
         return;
     };
     let mut machine = Esp32S3Builder::new()
         .app(AppSource::Path(elf))
+        .flash(FlashBacking::Copy(merged))
         .strict(true)
         .usb_host(UsbHost::Attached { draining: false })
         .build()
@@ -230,10 +352,23 @@ fn an_attached_but_closed_port_holds_the_packet_until_an_application_opens_it() 
         machine.usb_sj().is_empty(),
         "the port is closed: nothing drains"
     );
+    // esp-println's held packet is not a lost one — nothing of the `[INIT]`
+    // chain is on the tried stream. What *is* there is the io_task's, as in
+    // the host-absent case minus the first line: its first chunk into the
+    // committed endpoint and two probes, 64 + 2 (see
+    // `with_no_host_the_console_commits_once_and_falls_silent`).
+    let tried = machine.usb_sj_tried();
+    let tried_text = String::from_utf8_lossy(&tried).into_owned();
     assert!(
-        machine.usb_sj_tried().is_empty(),
-        "and nothing is dropped either — a held packet is not a lost one"
+        !tried_text.contains("[INIT]"),
+        "a held packet is not a lost one: {tried_text:?}"
     );
+    assert_eq!(
+        tried.len(),
+        64 + 2,
+        "the io_task's chunk and two probes: {tried_text:?}"
+    );
+    assert!(tried_text.contains("M!{\"id\":0,\"msg\":{\"hello\""));
     assert_eq!(
         machine.usb_host_now(),
         Some(UsbHost::Attached { draining: false })
@@ -264,9 +399,10 @@ fn an_attached_but_closed_port_holds_the_packet_until_an_application_opens_it() 
         String::from_utf8_lossy(&delivered)
     );
     assert!(HELLO.as_bytes().starts_with(&delivered));
-    assert!(
-        machine.usb_sj_tried().is_empty(),
-        "held, then delivered — never dropped"
+    assert_eq!(
+        machine.usb_sj_tried().len(),
+        66,
+        "held, then delivered — the open dropped nothing more"
     );
     println!(
         "ATTACHED-IDLE → OPEN: {} bytes held for {} us, then delivered in {} us",
@@ -283,7 +419,7 @@ fn an_attached_but_closed_port_holds_the_packet_until_an_application_opens_it() 
 #[ignore = "needs LP_EMU_ESP32S3_ELF; run through `just test-emu-esp32s3-boot`"]
 fn two_runs_of_the_hello_are_the_same_run() {
     let Some((a, _)) = run(UsbHost::Attached { draining: true }) else {
-        test_support::skip_notice("two_runs_of_the_hello_are_the_same_run", "no image");
+        test_support::skip_notice("two_runs_of_the_hello_are_the_same_run", SKIP);
         return;
     };
     let (b, _) = run(UsbHost::Attached { draining: true }).expect("the image is still there");
@@ -298,24 +434,27 @@ fn two_runs_of_the_hello_are_the_same_run() {
     );
 }
 
-/// **G5-5 — where the boot stops, and whose it is.**
+/// **G5-5, flipped — the boot goes past where P05 stopped, and the register
+/// says why.**
 ///
-/// ⚠️ This test asserts the **absence** of three lines, on purpose. The boot
-/// ends spinning on `SPI1.cmd` bit 28 (`usr`) — a flash read no hardware here
-/// completes — so everything `mount_filesystem` and what follows it would
-/// print belongs to **P06**. Pinning the absence is what makes the phase that
-/// changes it visible in a diff instead of in a reader's memory.
+/// P05 pinned the **absence** of three lines with the register the run was
+/// spinning on: `SPI1.cmd` bit 28 (`usr`), set by `esp_storage` for a flash
+/// read no hardware there completed. P06 put `engine::spi_flash` behind
+/// `SPI1`, so the same register now reads with `usr` **clear** — the engine
+/// completes the transfer and clears the trigger, which is what the ROM's
+/// driver and `esp_storage` both spin on — and the three lines are present.
 #[test]
 #[ignore = "needs LP_EMU_ESP32S3_ELF; run through `just test-emu-esp32s3-boot`"]
-fn the_boot_stops_where_p06_begins() {
+fn the_boot_goes_past_where_p05_stopped() {
     let Some((mut machine, _)) = run(UsbHost::Attached { draining: true }) else {
-        test_support::skip_notice("the_boot_stops_where_p06_begins", "no image");
+        test_support::skip_notice("the_boot_goes_past_where_p05_stopped", SKIP);
         return;
     };
     let text = String::from_utf8_lossy(&machine.usb_sj()).into_owned();
-    for absent in [
-        // The `lpfs` mount failure and the memory-filesystem fallback.
-        "lpfs",
+    for present in [
+        // The `lpfs` mount line (`main.rs`'s `[INIT] flash filesystem
+        // mounted`), mounted this time — the flash is real.
+        "[INIT] flash filesystem mounted",
         // The hardware manifest, printed straight after the mount.
         "hardware manifest",
         // The line `lpa_link::device_session::device_readiness` matches, and
@@ -323,27 +462,40 @@ fn the_boot_stops_where_p06_begins() {
         "fw-esp32 initialized, starting server loop",
     ] {
         assert!(
-            !text.contains(absent),
-            "`{absent}` is printed after `mount_filesystem`, which needs the flash engine \
-             (P06). If this now appears, P06 has landed and this test is the one to update."
+            text.contains(present),
+            "`{present}` is printed after `mount_filesystem`, which P06's flash engine \
+             serves:\n{text}"
         );
     }
+    assert!(
+        !text.contains("memory filesystem"),
+        "no memory-filesystem fallback: the mount succeeded:\n{text}"
+    );
 
-    // The register it is spinning on, read back through the machine's own
-    // decode so the citation cannot drift from the model.
+    // The register P05 cited, read back through the machine's own decode so
+    // the citation cannot drift from the model: `usr` is clear, because the
+    // engine's command completed and cleared its own trigger.
     const SPI1_CMD_USR: u32 = 1 << 28;
     let cmd = machine
         .peek_word(memmap::periph::SPI1)
-        .expect("SPI1.cmd is mapped — it is an accept block (P04)");
+        .expect("SPI1.cmd is mapped — engine::spi_flash (P06)");
     assert_eq!(
         cmd & SPI1_CMD_USR,
-        SPI1_CMD_USR,
-        "SPI1.cmd.usr is set and nothing here will clear it: that is P06's stop, and \
-         `periph::accept::spi1`'s own doc predicted it"
+        0,
+        "SPI1.cmd.usr is clear: the engine completes a `usr` transfer and clears the bit \
+         `esp_storage` spins on"
+    );
+    // And the chip saw the mount: a fresh copy is formatted (erases and
+    // programs), then read.
+    let census = machine.flash().lock().expect("flash").command_census();
+    assert!(
+        census.reads > 0 && census.sector_erases > 0 && census.programs > 0,
+        "{census}"
     );
     let pc = machine.harts[0].pc();
     println!(
-        "P06's STOP: pc={pc:#010x} ({}), SPI1.cmd={cmd:#010x} (usr set), after {} console bytes",
+        "PAST P05: pc={pc:#010x} ({}), SPI1.cmd={cmd:#010x} (usr clear), {census}, after {} \
+         console bytes",
         machine.symbolize(pc).unwrap_or_else(|| "?".into()),
         machine.usb_sj().len(),
     );
@@ -364,10 +516,10 @@ fn the_boot_stops_where_p06_begins() {
 #[test]
 #[ignore = "needs LP_EMU_ESP32S3_ELF; run through `just test-emu-esp32s3-boot`"]
 fn a_usb_script_resolves_its_walk_forms_and_two_runs_are_the_same_run() {
-    let Ok(elf) = test_support::fw_esp32s3_image() else {
+    let Some((elf, merged)) = images() else {
         test_support::skip_notice(
             "a_usb_script_resolves_its_walk_forms_and_two_runs_are_the_same_run",
-            "no image",
+            SKIP,
         );
         return;
     };
@@ -386,6 +538,7 @@ then +2ms 4d 21 0a
         assert_eq!(script.commands.len(), 2, "attach and open");
         let mut machine = Esp32S3Builder::new()
             .app(AppSource::Path(elf.clone()))
+            .flash(FlashBacking::Copy(merged.clone()))
             .strict(true)
             .usb_host(UsbHost::Absent)
             .usb_script(script.commands)
@@ -405,27 +558,41 @@ then +2ms 4d 21 0a
     assert_eq!(a.scripted_commands_left(), 0, "and both came due");
     // The cable is in and the port open by 2 ms, and the firmware's first
     // line is not printed until ~8.7 ms, so a draining host takes the whole
-    // chain: the script's timing is the reason nothing is merely tried.
-    assert_eq!(
-        String::from_utf8_lossy(&a.usb_sj()),
-        HELLO,
-        "the whole chain, delivered to a host the script plugged in"
+    // chain: the script's timing is the reason nothing of it is merely
+    // tried. (The io_task's one dropped packet is the link finding, pinned
+    // in `the_shipped_image_prints_its_init_chain_out_of_the_link`.)
+    let delivered = a.usb_sj();
+    let text = String::from_utf8_lossy(&delivered).into_owned();
+    assert!(
+        text.starts_with(HELLO),
+        "the whole chain, delivered to a host the script plugged in:\n{text}"
     );
-    assert!(a.usb_sj_tried().is_empty());
+    assert_the_one_dropped_packet(&a, &delivered);
     assert_eq!(a.usb_host_now(), Some(UsbHost::Attached { draining: true }));
 
     // **Both walk forms resolved.** The `after` step waited on a line the
     // device printed on this link and the `then` step on its own predecessor,
-    // so 11 + 3 host bytes crossed; the guest is spinning on P06's flash read
-    // and never reads them, which is why they are still queued.
+    // so 11 + 3 host bytes crossed — and since P06 the server loop **reads**
+    // them: nothing is left queued, and both lines are refused by name on
+    // the wire, because neither is a request (`M!{"id":1}` has no `msg`,
+    // `M!` has nothing). That is a request answered, one request before
+    // the ledger test's real one.
     let reply = a.apply_control_now(&lp_emu_esp32s3::control::ControlCommand::State);
     let lp_emu_esp32s3::control::ControlReply::State { host, .. } = reply else {
         panic!("`state` answers a HostReport: {reply}");
     };
     assert!(host.attached && host.draining && host.sof);
     assert_eq!(
-        host.out_queued, 14,
-        "`after \"…\"` delivered 11 bytes and `then +2ms` three more"
+        host.out_queued, 0,
+        "`after \"…\"` delivered 11 bytes and `then +2ms` three more, and the guest read them"
+    );
+    assert!(
+        text.contains("dropping unparseable 8 B M! line (missing field `msg`"),
+        "the first line is refused by name:\n{text}"
+    );
+    assert!(
+        text.contains("dropping unparseable 0 B M! line"),
+        "and the second:\n{text}"
     );
 
     let (b, _) = build();
@@ -441,21 +608,22 @@ then +2ms 4d 21 0a
     );
 }
 
-/// **The ledger triple, and why it is not here.**
+/// **The ledger triple, elicited** (DD86's last two deliverables: an answered
+/// request on the wire, and the triple).
 ///
 /// P04b (PR #742) gave this image the classic's `[stack]` / `[MEM]` / `[JIT]`
 /// lines at the classic's elicitation points — project load, unload,
 /// stop-all, `runtime_status`, either side of a shader compile — and
 /// **never** on the five-second heartbeat. So a bare boot prints none of
 /// them, exactly as the classic's bare boot does, and eliciting one needs a
-/// request on the wire.
+/// request on the wire: `stopAllProjects`, the smallest request that reaches
+/// `handlers::handle_stop_all_projects`'s `log_memory`, sent one millisecond
+/// after `[INIT] I/O task spawned` — the same directive, on the same
+/// trigger line, as P08's `walks/s3-stop-all.script` and the classic's
+/// `walks/v3-stop-all.script`.
 ///
-/// ⚠️ **There is no wire yet.** A request is answered by the server loop, the
-/// server loop is behind `mount_filesystem`, and `mount_filesystem` is behind
-/// P06's flash engine (see [`the_boot_stops_where_p06_begins`]). So this test
-/// pins what the boot prints **today** and names the three shapes as the
-/// follow-on assertion, with the two facts about them that are structural
-/// rather than measured:
+/// Two facts about the triple are structural rather than measured, and are
+/// asserted as such:
 ///
 /// - `[MEM] … retry_saves=0` — this image has no OOM retry allocator, so the
 ///   counter is a constant zero rather than a number that happened to be
@@ -466,21 +634,107 @@ then +2ms 4d 21 0a
 ///   `[MEM] used`.
 ///
 /// Neither may ever be graded `measured`: nobody has read this chip.
+///
+/// ⚠️ **The reply is written and lost.** The server answers the request
+/// (`Stopping all projects (0 loaded)` … `Stopped all projects` are on the
+/// wire, and the triple is printed twice — `log_memory` before and after
+/// the stop), and the io_task then writes the reply line
+/// `M!{"id":1,"msg":"stopAllProjects"}` — straight after the triple's last
+/// `esp_println` packet committed, into a FIFO the link model holds
+/// committed for its 100 µs drain. So the reply is on the **tried** stream
+/// and not on the delivered one (module docs, [`LINK_DEFECT`]). Pinned as
+/// what it is; the fix flips the last two assertions.
 #[test]
 #[ignore = "needs LP_EMU_ESP32S3_ELF; run through `just test-emu-esp32s3-boot`"]
-fn the_ledger_triple_is_not_elicitable_until_the_server_loop_runs() {
-    let Some((machine, _)) = run(UsbHost::Attached { draining: true }) else {
+fn the_ledger_triple_is_elicited_by_a_stop_all_on_the_wire() {
+    let Some((elf, merged)) = images() else {
         test_support::skip_notice(
-            "the_ledger_triple_is_not_elicitable_until_the_server_loop_runs",
-            "no image",
+            "the_ledger_triple_is_elicited_by_a_stop_all_on_the_wire",
+            SKIP,
         );
         return;
     };
-    let text = String::from_utf8_lossy(&machine.usb_sj()).into_owned();
-    for marker in ["[stack]", "[MEM]", "[JIT]"] {
+    const STOP_ALL: &str = "M!{\"id\":1,\"msg\":\"stopAllProjects\"}\n";
+    const SCRIPT: &str = "after \"[INIT] I/O task spawned\" +1ms \
+                          \"M!{\\\"id\\\":1,\\\"msg\\\":\\\"stopAllProjects\\\"}\\n\"\n";
+    let script = lp_emu_esp32s3::control::parse_usb_script(SCRIPT).expect("the script parses");
+    assert!(
+        script.commands.is_empty(),
+        "bytes only: the host is attached from power-on"
+    );
+    let mut machine = Esp32S3Builder::new()
+        .app(AppSource::Path(elf))
+        .flash(FlashBacking::Copy(merged))
+        .strict(true)
+        .usb_host(UsbHost::Attached { draining: true })
+        .usb_script_source(script.bytes)
+        .build()
+        .expect("the shipped image direct-loads");
+    let outcome = machine.run_until(&StopCondition {
+        stop_cycle: Some(GATE_US * memmap::CYCLES_PER_US),
+        ..Default::default()
+    });
+    assert!(matches!(outcome, Outcome::Deadline { .. }), "{outcome:?}");
+    assert!(machine.first_strict_violation().is_none());
+    let delivered = machine.usb_sj();
+    let text = String::from_utf8_lossy(&delivered).into_owned();
+
+    // The request reached the server loop and was handled.
+    assert!(
+        text.contains("Stopping all projects (0 loaded)"),
+        "the request was read and handled:\n{text}"
+    );
+    assert!(text.contains("Stopped all projects"), "{text}");
+
+    // The triple, twice (before and after the stop), in the shapes P05
+    // named — with the numbers read rather than pinned, and the structural
+    // zeros asserted as constants.
+    let stack: Vec<&str> = text
+        .lines()
+        .filter(|l| l.starts_with("[stack] heartbeat: high-water "))
+        .collect();
+    let mem: Vec<&str> = text
+        .lines()
+        .filter(|l| l.starts_with("[MEM] free="))
+        .collect();
+    let jit: Vec<&str> = text
+        .lines()
+        .filter(|l| l.starts_with("[JIT] used="))
+        .collect();
+    assert_eq!(stack.len(), 1, "one [stack] line per stop-all:\n{text}");
+    assert_eq!(mem.len(), 2, "[MEM] before and after the stop:\n{text}");
+    assert_eq!(jit.len(), 2, "[JIT] before and after the stop:\n{text}");
+    // `[stack] heartbeat: high-water <used> B of 37280 B (<headroom> B headroom)`
+    let words: Vec<&str> = stack[0].split_whitespace().collect();
+    let used: u32 = words[3].parse().expect("high-water bytes");
+    assert_eq!(
+        &words[4..7],
+        &["B", "of", "37280"],
+        "the S3's 37,280 B total: {}",
+        stack[0]
+    );
+    let headroom: u32 = words[8]
+        .trim_start_matches('(')
+        .parse()
+        .expect("headroom bytes");
+    assert_eq!(used + headroom, 37_280, "{}", stack[0]);
+    assert!(used > 0 && used < 37_280, "{}", stack[0]);
+    for line in &mem {
         assert!(
-            !text.contains(marker),
-            "`{marker}` is elicited, never printed on a bare boot (P04b): {text}"
+            line.contains(" used=") && line.contains(" largest_free="),
+            "{line}"
+        );
+        assert!(
+            line.ends_with(" retry_saves=0"),
+            "structural: no OOM retry allocator in this image: {line}"
+        );
+    }
+    for line in &jit {
+        assert_eq!(
+            *line,
+            "[JIT] used=0 peak=0 cap=0 spans=0 peak_spans=0 allocs=0 frees=0 fails=0 \
+             largest_free=0",
+            "structural: no reserved code region; JIT residency is inside [MEM] used"
         );
     }
     // And the one boot line P04b's note fixes: a single-number heap, where
@@ -496,12 +750,24 @@ fn the_ledger_triple_is_not_elicitable_until_the_server_loop_runs() {
          line's `of <total> B` instead"
     );
 
+    // ⚠️ The reply: written by the guest, dropped by the link (module docs).
+    let tried = String::from_utf8_lossy(&machine.usb_sj_tried()).into_owned();
+    assert!(
+        tried.contains(STOP_ALL.trim_end()),
+        "the reply is written — it is on the tried stream ({LINK_DEFECT}): {tried:?}"
+    );
+    assert!(
+        !text.contains("\"id\":1,\"msg\":\"stopAllProjects\""),
+        "…and not on the delivered one. If it is now, {LINK_DEFECT} is fixed: flip this and \
+         the line above.\n{text}"
+    );
+
     println!(
-        "LEDGER TRIPLE: not elicitable in P05 — a `stop-all` needs the server loop, which \
-         needs P06's flash. P06 asserts, after a stop-all:\n  \
-         [stack] heartbeat: high-water <used> B of 37280 B (<headroom> B headroom)\n  \
-         [MEM] free=… used=… largest_free=… retry_saves=0   (structural: no retry allocator)\n  \
-         [JIT] used=0 peak=0 cap=0 spans=0 peak_spans=0 allocs=0 frees=0 fails=0 \
-         largest_free=0   (structural: no reserved code region; JIT lives in [MEM] used)"
+        "LEDGER TRIPLE, elicited by a stop-all at +1 ms after `I/O task spawned`:\n  {}\n  {}\n  {}\n\
+         reply: written, dropped ({} tried bytes; {LINK_DEFECT})",
+        stack[0],
+        mem[1],
+        jit[1],
+        machine.usb_sj_tried().len()
     );
 }

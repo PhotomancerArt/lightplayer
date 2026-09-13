@@ -13,17 +13,21 @@
 //! deliberately *not* stubbed with a no-op, so the phase that adds one is
 //! visible in the diff instead of silently changing what an old command line
 //! meant. P04 added the peripheral flags (`--efuse-mac`, `--efuse-rev`);
-//! P05 adds the link's, P06 the flash and cache ones, P07 the pads'.
+//! P05 the link's; P06 the flash, cache and ROM-console ones (`--boot-mode`,
+//! `--flash`, `--flash-copy`, `--merged`, `--flash-len`, `--cache-off-fetch`,
+//! `--uart0`, `--strap`); P07 the pads'.
 
 use std::path::PathBuf;
 use std::process::ExitCode;
 use std::time::Duration;
 
+use lp_emu_esp32s3::cache::CacheOffPolicy;
 use lp_emu_esp32s3::control::parse_usb_script;
+use lp_emu_esp32s3::flash::FlashBacking;
 use lp_emu_esp32s3::loader::EfuseIdentity;
 use lp_emu_esp32s3::machine::{
-    AppSource, CORE_QUANTUM_DEFAULT, CORES, CPENABLE_RESET_DEFAULT, Esp32S3Builder, Machine,
-    Outcome, PERIPHERAL_REGISTRATION_ORDER, RomSource, StopCondition, TimeGrade, UsbHost,
+    AppSource, BootMode, CORE_QUANTUM_DEFAULT, CORES, CPENABLE_RESET_DEFAULT, Esp32S3Builder,
+    Machine, Outcome, PERIPHERAL_REGISTRATION_ORDER, RomSource, StopCondition, TimeGrade, UsbHost,
     UsbSjDrain, UsbSjSink,
 };
 use lp_emu_esp32s3::{bus_setup, memmap};
@@ -33,25 +37,58 @@ lp-emu-esp32s3 — the ESP32-S3 (LX7) machine
 
 USAGE:
     lp-emu-esp32s3 --elf <app.elf> [options]
+    lp-emu-esp32s3 --boot-mode rom-up --merged <chip.bin> [options]
     lp-emu-esp32s3 --map
 
 OPTIONS:
-    --elf <path>            the application image to direct-load. Its
-                            PT_LOADs are placed by vaddr and the hart starts
-                            at its entry with the boot state a bootloader
-                            would have left. REQUIRED: there is no ROM-up
-                            boot on this machine yet, and starting the mask
-                            ROM's reset path is P06's
+    --elf <path>            the application image. Under --boot-mode direct
+                            (the default) its PT_LOADs are placed by vaddr,
+                            its flash-resident half is staged in the chip
+                            with the MMU programmed for it, and the hart
+                            starts at its entry with the boot state the IDF
+                            bootloader would have left. Under rom-up it is a
+                            symbol table only
+    --boot-mode direct|rom-up
+                            direct: the above. rom-up: start at the mask
+                            ROM's reset vector with the architectural reset
+                            state and seed NOTHING — the flash chip holds a
+                            whole merged image (--merged) and the real ROM
+                            and the real ESP-IDF second-stage bootloader do
+                            the rest [direct]
     --rom <path>            a mask ROM ELF (default: the vendored ESP32-S3
                             rev0 image, compiled in). Loaded in EVERY
                             configuration: on this chip the ROM is most of
                             the dynamic instruction count, not a formality
+    --flash <path>          back the flash chip with this file: it is read at
+                            start and written back at the end of the run. A
+                            path that does not exist is created blank
+    --flash-copy <path>     read the file once and never write it back — a
+                            scratch copy of a known image
+    --merged <path>         --flash-copy, spelled for what a ROM-up boot
+                            wants: the whole 8 MiB `espflash save-image
+                            --chip esp32s3 --merge` writes. Sets --flash-len
+                            to the file's length unless told otherwise
+    --flash-len <bytes>     the chip's size [8388608, the S3 board's 8 MB]
+    --cache-off-fetch stop|permit
+                            D4. `stop` (the default, and every gate run's)
+                            refuses a fetch or read through a flash window
+                            while that window's cache is disabled, exit 6;
+                            `permit` does not check at all
+    --uart0 stderr|memory|file:<path>|tcp:<host:port>
+                            where the mask ROM's UART0 console goes: the
+                            reset banner and the bootloader's log on a
+                            rom-up boot. tcp: LISTENS, and the client's bytes
+                            are the wire's source [memory]
+    --strap <word>          what GPIO.strap reads — the strapping pins as the
+                            pads were latched at reset. The default is the
+                            smallest word the ROM's own decode calls
+                            SPI_FAST_FLASH_BOOT (bit 3); no S3 board's word
+                            has been captured yet (P09) [0x8]
     --strict-bus            every access to an address nothing claims is a
-                            STOP instead of a silent zero. M6 P04 models
-                            every block the boot touches before the console,
-                            so a strict run of the shipped image gets past
-                            esp_hal::init and stops at USB_DEVICE — the
-                            console, which is P05's
+                            STOP instead of a silent zero. Every block the
+                            direct load and the ROM-up boot touch is
+                            modelled through P06; a strict run of the shipped
+                            image reaches the server loop with unmapped=0
     --efuse-mac <aa:bb:cc:dd:ee:ff>
                             the MAC the eFuse block answers. ⚠️ The default
                             is the PAC's zero, NOT a plausible board: no S3
@@ -125,8 +162,10 @@ OPTIONS:
                             same cycles
     --reboot-on-reset       PERFORM a reset request instead of reporting it:
                             the machine goes back to its power-on state and
-                            runs again. ⚠️ There is no ROM-up boot here until
-                            P06, so the strap is recorded and nothing reads it
+                            runs again. Under rom-up the strap is re-latched
+                            into GPIO.strap and the ROM reads it; under
+                            direct the load is replayed and the strap is
+                            recorded only
     --seed <n>              the machine's PRNG seed [0]
     --hooks                 list the ROM hook table and exit. It is EMPTY,
                             and stays empty: try the real ROM path first
@@ -135,16 +174,13 @@ OPTIONS:
 
 EXIT CODES (a cross-machine contract — one table for all three machines):
     0 --exit-on matched, or the        2 the hart faulted, or the RWDT
-      deadline was reached
-                                          expired (a reset this machine
-                                          reports and cannot yet perform)
+      deadline was reached                expired without --reboot-on-reset
     3 a strict-bus refusal              4 the wall-clock net fired
-    5 a --break-at was reached
-    6 a cache-off fetch — NOT PRODUCIBLE HERE: this machine has no cache
-      model, EXTMEM is P06's
+    5 a --break-at was reached          6 a cache-off fetch (D4)
     7 a flash-MMU divergence between two cores' tables — NOT APPLICABLE on
-      this machine at all: one core runs, so there is no second MMU table to
-      diverge from. Reserved across the family, never emitted here
+      this machine: one core runs and ONE table serves both buses, so there
+      is no second table to diverge from. Reserved across the family, never
+      emitted here, and there is no --app-mmu-divergence flag to reserve
 ";
 
 fn main() -> ExitCode {
@@ -164,6 +200,12 @@ fn main() -> ExitCode {
 struct Args {
     elf: Option<PathBuf>,
     rom: Option<PathBuf>,
+    boot_mode: BootMode,
+    flash: Option<FlashBacking>,
+    flash_len: Option<u32>,
+    cache_off: CacheOffPolicy,
+    uart0: UsbSjSink,
+    strap: Option<u32>,
     strict: bool,
     core_quantum: Option<u64>,
     cpenable_reset: Option<u32>,
@@ -200,10 +242,18 @@ fn run() -> Result<ExitCode, String> {
         print_map();
         return Ok(ExitCode::SUCCESS);
     }
-    if args.elf.is_none() && !args.hooks {
+    if args.elf.is_none() && !args.hooks && args.boot_mode == BootMode::Direct {
         return Err(
-            "--elf is required: this machine direct-loads an application, and starting the \
-             mask ROM's reset path instead is P06's. `--map` and `--help` need no image."
+            "--elf is required under --boot-mode direct: this machine direct-loads an \
+             application. `--boot-mode rom-up --merged <chip.bin>` boots from the reset \
+             vector instead; `--map` and `--help` need no image."
+                .into(),
+        );
+    }
+    if args.boot_mode == BootMode::RomUp && args.flash.is_none() {
+        return Err(
+            "--boot-mode rom-up needs a chip to boot from: --merged <chip.bin> (or --flash / \
+             --flash-copy). A blank chip has no bootloader and the ROM would only say so."
                 .into(),
         );
     }
@@ -211,6 +261,9 @@ fn run() -> Result<ExitCode, String> {
     let mut builder = Esp32S3Builder::new()
         .time_grade(args.time_grade)
         .strict(args.strict)
+        .boot_mode(args.boot_mode)
+        .cache_off_fetch(args.cache_off)
+        .uart0(args.uart0.clone())
         .core_quantum(args.core_quantum.unwrap_or(CORE_QUANTUM_DEFAULT))
         .cpenable_reset(args.cpenable_reset.unwrap_or(CPENABLE_RESET_DEFAULT))
         .efuse(args.efuse)
@@ -220,6 +273,25 @@ fn run() -> Result<ExitCode, String> {
         .usb_sj_drain(args.usb_sj_drain)
         .reboot_on_reset(args.reboot_on_reset)
         .seed(args.seed);
+    if let Some(word) = args.strap {
+        builder = builder.strap(word);
+    }
+    if let Some(backing) = args.flash.clone() {
+        // A merged image says how big the part it was built for is; taking
+        // the file's length as the chip's is what keeps a `--merged` run
+        // from silently truncating one.
+        if args.flash_len.is_none()
+            && let FlashBacking::File(p) | FlashBacking::Copy(p) = &backing
+            && let Ok(meta) = std::fs::metadata(p)
+            && meta.len() > 0
+        {
+            builder = builder.flash_len(meta.len() as u32);
+        }
+        builder = builder.flash(backing);
+    }
+    if let Some(len) = args.flash_len {
+        builder = builder.flash_len(len);
+    }
     if let Some(addr) = args.control.clone() {
         builder = builder.control(addr);
     }
@@ -291,6 +363,11 @@ fn run() -> Result<ExitCode, String> {
     {
         eprintln!("lp-emu-esp32s3: --console {}: {e}", path.display());
     }
+    match machine.flush_flash() {
+        Ok(true) => println!("flash: written back"),
+        Ok(false) => {}
+        Err(e) => eprintln!("lp-emu-esp32s3: writing the flash image back: {e}"),
+    }
     Ok(ExitCode::from(outcome.exit_code() as u8))
 }
 
@@ -348,6 +425,21 @@ fn print_run_summary(machine: &Machine) {
             machine.reboots(),
             machine.strap()
         );
+    }
+    {
+        let chip = machine.flash().lock().expect("flash poisoned");
+        println!(
+            "flash: {} ({} MiB), backing {:?}, jedec {:#010x}; {}; cache fills {}",
+            chip.len(),
+            chip.len() >> 20,
+            chip.backing(),
+            chip.jedec_id(),
+            chip.command_census(),
+            machine.cache_fills(),
+        );
+    }
+    if !machine.uart0().is_empty() {
+        println!("uart0: {} bytes on the wire", machine.uart0().len());
     }
     println!(
         "run: cycles={} instructions={} ({}) idle={} unmapped={} (reads {}, writes {}, {} \
@@ -503,11 +595,45 @@ fn print_build_report(machine: &Machine) {
         image.sections,
         image.bytes,
     );
+    println!(
+        "boot: {} (strap {:#x}, cache-off-fetch {})",
+        machine.boot_mode().as_str(),
+        machine.strap_word(),
+        machine
+            .cache()
+            .lock()
+            .expect("cache poisoned")
+            .policy()
+            .as_str(),
+    );
     println!("app: {} segments placed", machine.app_segments().len());
     for seg in machine.app_segments().iter().filter(|s| s.relocated()) {
         println!(
             "app: segment vaddr={:#010x} paddr={:#010x} placed by vaddr (memsz {:#x})",
             seg.vaddr, seg.paddr, seg.memsz
+        );
+    }
+    if let Some(seed) = machine.flash_seed() {
+        println!(
+            "flash chip: rom_spiflash_legacy_data -> {:#010x} chip_size {:#x} -> {:#x} ({} MiB)",
+            seed.chip,
+            seed.previous,
+            seed.chip_size,
+            seed.chip_size >> 20
+        );
+    }
+    let staging = machine.flash_staging();
+    if !staging.pages.is_empty() {
+        let first = staging.pages.first().expect("pages");
+        let last = staging.pages.last().expect("pages");
+        println!(
+            "flash staging: {} pages, {} B, factory {:#010x}..{:#010x}; MMU entries {}..={}",
+            staging.pages.len(),
+            staging.bytes,
+            first.paddr,
+            last.paddr + lp_emu_esp32s3::cache::PAGE_LEN,
+            first.index,
+            last.index,
         );
     }
     if let Some(frame) = machine.boot_frame() {
@@ -586,9 +712,14 @@ fn print_outcome(machine: &mut Machine, outcome: &Outcome) {
         Outcome::Reset { source, strap, .. } => {
             println!(
                 "RESET cycle={cycle} ({micros} us emulated): {source} asked for a chip reset \
-                 into strap {strap}. This machine has no boot chain to restart until P06, so \
-                 the run ends here; on silicon the chip would reboot."
+                 into strap {strap}. Pass --reboot-on-reset to make the machine perform it; \
+                 without it the run ends here, and on silicon the chip would reboot."
             );
+        }
+        Outcome::CacheOffFetch {
+            pc, access, cycle, ..
+        } => {
+            println!("{}", machine.cache_off_message(*cycle, *pc, access));
         }
         Outcome::Fault {
             core, pc, fault, ..
@@ -682,6 +813,35 @@ fn parse(argv: Vec<String>) -> Result<Args, String> {
             "--strict-bus" => args.strict = true,
             "--elf" => args.elf = Some(PathBuf::from(value()?)),
             "--rom" => args.rom = Some(PathBuf::from(value()?)),
+            "--boot-mode" => {
+                let v = value()?;
+                args.boot_mode = BootMode::parse(&v)
+                    .ok_or_else(|| format!("--boot-mode {v}: expected direct or rom-up"))?;
+            }
+            "--flash" => args.flash = Some(FlashBacking::File(PathBuf::from(value()?))),
+            "--flash-copy" | "--merged" => {
+                args.flash = Some(FlashBacking::Copy(PathBuf::from(value()?)))
+            }
+            "--flash-len" => {
+                let v = value()?;
+                let n = v
+                    .strip_prefix("0x")
+                    .map(|h| u32::from_str_radix(h, 16))
+                    .unwrap_or_else(|| v.parse())
+                    .map_err(|_| format!("--flash-len {v}: not a byte count"))?;
+                args.flash_len = Some(n);
+            }
+            "--cache-off-fetch" => args.cache_off = CacheOffPolicy::parse(&value()?)?,
+            "--uart0" => args.uart0 = parse_usb_sj(&value()?, "--uart0", true)?,
+            "--strap" => {
+                let v = value()?;
+                let n = v
+                    .strip_prefix("0x")
+                    .map(|h| u32::from_str_radix(h, 16))
+                    .unwrap_or_else(|| v.parse())
+                    .map_err(|_| format!("--strap {v}: not a number"))?;
+                args.strap = Some(n);
+            }
             "--core-quantum" => {
                 let v = value()?;
                 let n: u64 = v
@@ -916,13 +1076,43 @@ mod tests {
     /// phase's diff.
     #[test]
     fn an_unknown_flag_is_an_error_that_explains_itself() {
-        let err = parse(vec!["--uart0".into(), "stdout".into()]).unwrap_err();
-        assert!(err.contains("unrecognised flag `--uart0`"), "{err}");
+        let err = parse(vec!["--pin".into(), "gpio5".into()]).unwrap_err();
+        assert!(err.contains("unrecognised flag `--pin`"), "{err}");
         assert!(err.contains("visible in the diff"), "{err}");
-        // Including flags the *other* machines have: the S3's console is
-        // USB-Serial-JTAG and `--uart0` is not a door here.
-        assert!(parse(vec!["--flash".into(), "x".into()]).is_err());
-        assert!(parse(vec!["--boot-mode".into(), "rom-up".into()]).is_err());
+        // Including a flag only the classic has: one core, one table, no
+        // `--app-mmu-divergence` on this machine.
+        assert!(parse(vec!["--app-mmu-divergence".into(), "permit".into()]).is_err());
+        assert!(parse(vec!["--uart0-baud".into(), "115200".into()]).is_err());
+    }
+
+    /// P06's doors: the flash, the boot mode, D4's policy, the ROM's
+    /// console and the strap.
+    #[test]
+    fn the_flash_and_boot_doors_parse() {
+        let a = parse(vec![
+            "--boot-mode".into(),
+            "rom-up".into(),
+            "--merged".into(),
+            "chip.bin".into(),
+            "--cache-off-fetch".into(),
+            "permit".into(),
+            "--strap".into(),
+            "0x8".into(),
+            "--flash-len".into(),
+            "0x800000".into(),
+        ])
+        .unwrap();
+        assert_eq!(a.boot_mode, BootMode::RomUp);
+        assert_eq!(a.flash, Some(FlashBacking::Copy(PathBuf::from("chip.bin"))));
+        assert_eq!(a.cache_off, CacheOffPolicy::Permit);
+        assert_eq!(a.strap, Some(8));
+        assert_eq!(a.flash_len, Some(8 << 20));
+        assert!(parse(vec!["--boot-mode".into(), "sideways".into()]).is_err());
+        assert!(parse(vec!["--cache-off-fetch".into(), "maybe".into()]).is_err());
+        let b = parse(vec!["--flash".into(), "chip.bin".into()]).unwrap();
+        assert_eq!(b.flash, Some(FlashBacking::File(PathBuf::from("chip.bin"))));
+        assert_eq!(b.boot_mode, BootMode::Direct, "direct is the default");
+        assert_eq!(b.cache_off, CacheOffPolicy::Stop, "stop is the default");
     }
 
     /// `t2` and `t3` are refused with the reason, not accepted quietly.

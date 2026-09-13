@@ -416,6 +416,19 @@ ESP32S3_TARGETS = [
     # The 49-pad fabric (GPIO0..=GPIO48) and its mux.
     _s3("gpio", "GPIO"),
     _s3("io_mux", "IO_MUX"),
+    # The mask ROM's `boot_prepare` (`0x4004_378c`) reads `core_0_debug_mode`
+    # (`+0x5c`) on every ROM-up boot and `assist_debug_record_enable` writes
+    # two more — the first strict stop of the S3's first ROM-up boot (M6 P06,
+    # cycle 21,846, `boot_prepare+0xfd` at `0x600c_e05c`). An accept block.
+    _s3("assist_debug", "ASSIST_DEBUG"),
+    # The IDF second-stage bootloader's RNG early entropy source
+    # (`bootloader_random_enable` → `apb_saradc` + `sens` on this chip) and
+    # the RNG word `bootloader_fill_random` reads for its image-hash salt —
+    # the second ROM-up strict stop (M6 P06, cycle 12,482,844, bootloader
+    # `0x403c_9c84` at `0x6004_0070`). Accept blocks, and a seeded RNG.
+    _s3("apb_saradc", "APB_SARADC"),
+    _s3("sens", "SENS"),
+    _s3("rng", "RNG"),
     # MAC, chip revision, and the dbias/voltage fields esp-hal's clock path
     # reads before it raises the core voltage.
     _s3("efuse", "EFUSE"),

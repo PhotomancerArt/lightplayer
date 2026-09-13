@@ -79,6 +79,8 @@
 //! semantics — so it is said here, where a reader of the table will be.
 
 mod apb_ctrl;
+mod apb_saradc;
+mod assist_debug;
 mod bb;
 mod efuse;
 mod extmem;
@@ -92,7 +94,9 @@ mod interrupt_sources;
 mod io_mux;
 mod nrx;
 mod rmt;
+mod rng;
 mod rtc_cntl;
+mod sens;
 mod sensitive;
 mod sha;
 mod spi0;
@@ -104,6 +108,8 @@ mod uart0;
 mod usb_device;
 
 pub use apb_ctrl::APB_CTRL;
+pub use apb_saradc::APB_SARADC;
+pub use assist_debug::ASSIST_DEBUG;
 pub use bb::BB;
 pub use efuse::EFUSE;
 pub use extmem::EXTMEM;
@@ -117,7 +123,9 @@ pub use interrupt_sources::{INTERRUPT_SOURCES, source};
 pub use io_mux::IO_MUX;
 pub use nrx::NRX;
 pub use rmt::RMT;
+pub use rng::RNG;
 pub use rtc_cntl::RTC_CNTL;
+pub use sens::SENS;
 pub use sensitive::SENSITIVE;
 pub use sha::SHA;
 pub use spi0::SPI0;
@@ -131,6 +139,8 @@ pub use usb_device::USB_DEVICE;
 /// Every table, for the tests that sweep them.
 pub const ALL: &[&lp_emu_esp_common::RegNames] = &[
     &APB_CTRL,
+    &APB_SARADC,
+    &ASSIST_DEBUG,
     &BB,
     &EFUSE,
     &EXTMEM,
@@ -143,7 +153,9 @@ pub const ALL: &[&lp_emu_esp_common::RegNames] = &[
     &IO_MUX,
     &NRX,
     &RMT,
+    &RNG,
     &RTC_CNTL,
+    &SENS,
     &SENSITIVE,
     &SHA,
     &SPI0,
@@ -174,6 +186,8 @@ mod tests {
         let blocks: Vec<&str> = ALL.iter().map(|t| t.block).collect();
         for expected in [
             "apb_ctrl",
+            "apb_saradc",
+            "assist_debug",
             "bb",
             "efuse",
             "extmem",
@@ -186,7 +200,9 @@ mod tests {
             "io_mux",
             "nrx",
             "rmt",
+            "rng",
             "rtc_cntl",
+            "sens",
             "sensitive",
             "sha",
             "spi0",
@@ -199,7 +215,10 @@ mod tests {
         ] {
             assert!(blocks.contains(&expected), "`{expected}` has no table");
         }
-        assert_eq!(blocks.len(), 23);
+        // P01's 23 from the shipped image's census, plus the four the
+        // ROM-up boot chain reaches that the application never does (P06):
+        // `assist_debug`, `apb_saradc`, `sens`, `rng`.
+        assert_eq!(blocks.len(), 27);
     }
 
     /// The PAC numbers 94 sources over `0..=98`; the numbers M6 notes §3.3
