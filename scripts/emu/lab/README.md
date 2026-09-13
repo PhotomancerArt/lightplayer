@@ -1,6 +1,6 @@
 # The emulator perf lab
 
-**Yona opens one bookmarked tab on any device, taps Join, and puts it down.
+**Yona opens one bookmarked tab on any device, joins it once, and puts it down.
 From then on the director decides what that device measures, when, and
 against which build, and reads the numbers back with nobody in the loop.**
 
@@ -135,6 +135,13 @@ happens until somebody looks at `lab.sh status`. When jobs are waiting
 (`queued` or `running`) and **no device is present**, the lab sends **one**
 notification.
 
+Its body names the waiting jobs and then says what the phone it wakes will
+actually see: open the lab tab, which re-joins on its own, and tap **"Keep
+the screen on"** if that button is showing — a Join button exists only on a
+device that has never joined (see "The page"). Any future wording here is
+held to the same rule: never name a control the returning phone does not
+have.
+
 **Nothing ships configured.** There is no default topic, URL or account
 anywhere in the repo: with no `notify` block in `config.json` the feature is
 off and `lab.sh notify status` says so. The outward reach is Yona's to grant,
@@ -231,20 +238,29 @@ the token is the guard, not the interface. There is no general upload: a
 result is written only through the routes above, named by the server's
 clock, into `results/`.
 
-## The page: what Join does and what it refuses
+## The page: what joining does and what it refuses
 
 One page at `/`, the rig's own look, for the phone and for any desk browser
 Yona is in front of (Q5). On load it moves `#t=<token>` from the bookmark
 into `localStorage` and strips the hash; with no token it shows "Open the
 bookmark the director gave you" and nothing else works.
 
-**Join** is one tap, and the tap is what makes the wake lock legal on iOS
-(T6): it requests `navigator.wakeLock('screen')`, opens the `EventSource`,
-posts the device's state, and turns the page into a status board. After
-Join the page runs any press it receives with no second tap (Q2). A reload
-re-joins on its own — everything but the lock, which needs a gesture, so
-the board shows "Keep the screen on" and rows run either way with
-`wakeLock: 'none'`.
+**A first visit is the only visit with a Join button.** The page shows a name
+field and **Join**; the tap is what makes the wake lock legal on iOS (T6). It
+requests `navigator.wakeLock('screen')`, opens the `EventSource`, posts the
+device's state, and turns the page into a status board. After Join the page
+runs any press it receives with no second tap (Q2).
+
+**Every later visit has no Join button at all.** The token, the device id and
+the name live in `localStorage`, so opening the tab — or tapping a
+notification through to it — re-joins on its own and goes straight to the
+board ("Re-joined after a reload."). The one thing that cannot come back on
+its own is the screen lock, which needs a gesture: the board shows a **"Keep
+the screen on"** button whenever the lock is not held, and it is the only
+button to look for. Rows run either way, recorded as `wakeLock: 'none'` when
+no lock is held. *So a notification, or any instruction to the phone, must
+say "Keep the screen on", never "Join"* — on 2026-09-13 the "jobs waiting"
+push said Join and sent Yona hunting for a button that was not there.
 
 **Every row records** `visibilityAtStart/End`, `sawHidden`,
 `hasFocusAtStart/End`, `wakeLock` (`active | released | none | unsupported |
