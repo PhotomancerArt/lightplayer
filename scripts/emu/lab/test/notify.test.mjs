@@ -231,3 +231,33 @@ test('a mistyped notify block is off and says why, rather than crash-looping a m
   assert.equal(ok.graceMs, 30000);
   assert.equal(ok.minIntervalMs, 600000);
 });
+
+// D: the push says who is waiting on the device, as a clause appended to
+// whatever the body already says. Names, not job ids, are what tells the
+// director whose turn it is.
+test('the waiting push names who queued the jobs, and says nothing extra when nobody signed them', async () => {
+  const home = tempHome(NTFY);
+  const lab = await startServer(home, { ...FAST, ...stubEnv(home) });
+  try {
+    await queue(lab, { by: 'emu-lab-polish-d1a04a-bb' });
+    await queue(lab, { by: 'emu-lab-join-wording-77' });
+    await queue(lab, { by: 'emu-lab-polish-d1a04a-bb' });   // the same name twice is one name
+    await queue(lab, {});                                    // and an unsigned job adds nothing
+    await TICKS(15);
+    const lines = calls(home);
+    assert.equal(lines.length, 1, 'expected one notification, got ' + JSON.stringify(lines));
+    const body = lines[0].split('|')[1];
+    assert.match(body, / — queued by emu-lab-polish-d1a04a-bb, emu-lab-join-wording-77$/, 'the clause is appended last: ' + body);
+  } finally { await lab.stop(); }
+});
+
+test('with no names on the waiting jobs the body gains no clause', async () => {
+  const home = tempHome(NTFY);
+  const lab = await startServer(home, { ...FAST, ...stubEnv(home) });
+  try {
+    await queue(lab, {});
+    await TICKS(15);
+    const body = calls(home)[0].split('|')[1];
+    assert.doesNotMatch(body, /queued by/);
+  } finally { await lab.stop(); }
+});

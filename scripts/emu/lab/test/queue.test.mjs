@@ -366,3 +366,45 @@ test('POST /jobs: spacingMs defaults to 60 s; an explicit 0 is still back-to-bac
   await api('/jobs/' + dflt.body.id, { method: 'DELETE' });
   await api('/jobs/' + zero.body.id, { method: 'DELETE' });
 });
+
+// D: a job says who queued it. `lab.sh` supplies the default (its own flag,
+// $LAB_BY, or $USER@host); the server never invents one, so a job posted with
+// no `by` is honestly anonymous.
+test('POST /jobs: `by` round-trips to the job view and the job file; absent is null; too long is 400', async () => {
+  const mine = await queue({ builds: ['aaa1111'], repeats: 1, ttlMs: 60000, device: 'nobody', by: '  emu-lab-polish-d1a04a-bb  ' });
+  assert.equal(mine.status, 201);
+  assert.equal(mine.body.by, 'emu-lab-polish-d1a04a-bb', 'the create response carries it, trimmed');
+  const file = JSON.parse(fs.readFileSync(path.join(home, 'jobs', mine.body.id + '.json'), 'utf8'));
+  assert.equal(file.by, 'emu-lab-polish-d1a04a-bb', 'and so does the job file');
+  const view = await api('/jobs/' + mine.body.id).then((r) => r.json());
+  assert.equal(view.by, 'emu-lab-polish-d1a04a-bb', 'and the job view');
+  const listed = await api('/jobs').then((r) => r.json());
+  assert.equal(listed.jobs.find((j) => j.id === mine.body.id).by, 'emu-lab-polish-d1a04a-bb');
+
+  const anon = await queue({ builds: ['aaa1111'], repeats: 1, ttlMs: 60000, device: 'nobody' });
+  assert.equal(anon.status, 201);
+  assert.equal(anon.body.by, null, 'the server invents nobody');
+  const blank = await queue({ builds: ['aaa1111'], repeats: 1, ttlMs: 60000, device: 'nobody', by: '   ' });
+  assert.equal(blank.body.by, null, 'blank is the same as absent');
+
+  assert.equal((await queue({ builds: ['aaa1111'], ttlMs: 60000, device: 'nobody', by: 'x'.repeat(65) })).status, 400);
+  assert.equal((await queue({ builds: ['aaa1111'], ttlMs: 60000, device: 'nobody', by: 42 })).status, 400);
+  const ok64 = await queue({ builds: ['aaa1111'], ttlMs: 60000, device: 'nobody', by: 'x'.repeat(64) });
+  assert.equal(ok64.status, 201, '64 is the limit, not one under it');
+
+  for (const id of [mine.body.id, anon.body.id, blank.body.id, ok64.body.id]) await api('/jobs/' + id, { method: 'DELETE' });
+});
+
+// The page's job card reads the queue view, so `by` has to ride that event and
+// not only the director's job views.
+test('the queue view the page receives carries `by`', async () => {
+  const quiet = { beforeAnswer: async () => { throw new Error('never answers'); } };
+  const dev = await fakeDevice(lab, { name: 'card-reader', pressMs: 5, ...quiet });
+  const { body: j } = await queue({ builds: ['aaa1111'], repeats: 1, spacingMs: 0, ttlMs: 60000, device: 'card-reader', by: 'emu-lab-job-by-xx' });
+  let seen;
+  for (let i = 0; i < 5; i++) { const ev = await dev.sse.next('queue', 3000); seen = ev.jobs.find((x) => x.id === j.id); if (seen) break; }
+  assert.ok(seen, 'the view lists the job');
+  assert.equal(seen.by, 'emu-lab-job-by-xx');
+  await dev.stop();
+  await api('/jobs/' + j.id, { method: 'DELETE' });
+});
