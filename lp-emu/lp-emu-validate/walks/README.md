@@ -11,6 +11,7 @@ beside the registry that points at them rather than beside a machine.
 | file | payload | what it is |
 |---|---|---|
 | `v3-stop-all.script` | `boot-idle` on `esp32v3` | one request, on the appearance of `[INIT] I/O task spawned`: the classic's heartbeat triple is **elicited**, and this is the eliciting |
+| `s3-stop-all.script` | `boot-idle` on `esp32s3` | the same request on the same trigger line, because the S3's triple is elicited too (M6 P04b put the printer on the elicitation points, never on the heartbeat) |
 
 ## `v3-stop-all.script`'s provenance
 
@@ -43,8 +44,38 @@ lands 1 ms of guest time after the trigger, where a desk host's select loop
 polls at 50 ms. That is host latency. It is why nothing in the `timing` class
 is compared for this payload.
 
+## `s3-stop-all.script`'s provenance
+
+The classic's file, checked against the classic's file — `the_s3_stop_all_script_is_the_classics_stimulus`
+(`lp-emu-validate/src/payload.rs`) asserts that the two carry the **same
+single directive**, and the classic's is in turn asserted against
+`lp-emu-esp32v3/tests/boot_idle.rs`'s constants, so the S3's walk is two
+links away from a gate rather than from an eye. A second assertion checks the
+trigger line against `lp-emu-esp32s3/tests/boot_idle.rs`'s `HELLO`, which
+pins this image's whole `[INIT]` chain byte for byte: a trigger that is not a
+line the firmware prints is a run that waits for ever.
+
+Why one stimulus and not a chip-shaped one: the answer a `boot-idle`
+transcript carries is a heap ledger, and two chips asked different questions
+produce two ledgers nobody may compare. `stopAllProjects` reaches
+`esp32_memory_stats` on both Xtensa chips through the same
+`handlers::handle_stop_all_projects`, so the bytes are the same and the
+difference left in the transcripts is the chip's.
+
+⚠️ The run this file is written for does not complete yet. Until **M6 P06**
+lands the flash controller, the shipped S3 image spins on `SPI1.cmd` after
+`[INIT] I/O task spawned` and never reaches the server loop that would read
+these bytes (`lp-emu-esp32s3/tests/boot_idle.rs`,
+`the_boot_stops_where_p06_begins`). The arm keeps the full sentinel
+(`[JIT] used=`) all the same: a sentinel weakened to make today's run pass is
+a payload that stops recording the thing it exists for.
+
 ## A walk is not a link
 
 The same file replays on whichever link the run used — `after "<line>"` matches
 what a host *on that link* received. On `esp32v3` that link is UART0 and there
-is no other: this part has no USB-Serial-JTAG peripheral at all.
+is no other: this part has no USB-Serial-JTAG peripheral at all. On `esp32s3`
+it is the other way round — the console is `jtag-serial` and USB-Serial-JTAG
+is the only link the application writes to — so the same directives reach the
+machine as `--usb-script` rather than `--uart0-script`, chosen by the driver
+from the arm's `Link` and never written into the file.
