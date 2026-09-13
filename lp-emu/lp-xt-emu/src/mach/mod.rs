@@ -163,6 +163,7 @@ use lp_emu_core::{Bus, CycleModel, InstClass, MemoryAccessKind, MemoryError};
 use lp_xt_inst::{AluRs, DecodeError, Inst, NullaryNarrowOp, NullaryOp};
 
 use crate::block::XtSlot;
+use block::MAX_BLOCK_SLOTS;
 use crate::cpu::Cpu;
 use crate::emu::Flow;
 use crate::error::{TRAP_CAUSE_WATCHPOINT, Trap, TrapKind};
@@ -234,6 +235,14 @@ pub enum HartFault {
     /// for M5's ADR.
     UnsupportedInstruction { pc: u32, word: u32, len: u8 },
 }
+
+/// The most bytes one cached block can span: [`block::MAX_BLOCK_SLOTS`] slots
+/// of at most three bytes each.
+///
+/// What [`XtHart::apply_pending_blocks`] compares against, so that "could a
+/// block starting here have reached into the span the guest just wrote?" is
+/// one add and two compares rather than a walk of the table.
+const MAX_BLOCK_BYTES: u32 = MAX_BLOCK_SLOTS as u32 * 3;
 
 /// What one instruction did to the slice loop.
 enum StepOutcome {
@@ -315,11 +324,19 @@ pub struct XtHart<B: Bus> {
     /// Configuration, not state: whether this hart may use a block cache at
     /// all ([`XtHart::set_block_cache`]). Default **on**.
     block_cache: bool,
-    /// A flush asked for while the cache was lifted out of the hart — see
-    /// [`XtHart::drain_block_flush`]. The store-address drain at polling
-    /// point (c), `isync` and a `wsr` to a loop register are why it exists,
-    /// and the block executor reads it as "leave this block".
-    block_flush_pending: bool,
+    /// An invalidation asked for while the cache was lifted out of the hart —
+    /// see [`XtHart::drain_block_flush`]. The store-address drain at polling
+    /// point (c) and `isync` are why it exists, and the block executor reads
+    /// "not `None`" as "leave this block".
+    ///
+    /// A [`PendingInvalidate`] rather than a `bool`, and the reason is
+    /// measured: on this chip the whole of SRAM0 is one executable region, so
+    /// a guest store into IRAM *data* raises the store-address side-band
+    /// exactly as a code publish does, about 800 times an emulated second on
+    /// the render loop. A `bool` would turn each of those into a 2 MiB
+    /// `memset` of the table and throw the warm cache away; a range keeps
+    /// everything the write did not touch.
+    block_flush_pending: PendingInvalidate,
     /// The installed translated core, if any, and the entry table that says
     /// where it may be entered (direct-mapped **by byte**, `0` = no entry).
     ///
@@ -394,7 +411,7 @@ impl<B: Bus> Clone for XtHart<B> {
             // different bytes at the same addresses.
             cache: None,
             block_cache: self.block_cache,
-            block_flush_pending: false,
+            block_flush_pending: PendingInvalidate::None,
             // Not copied: a translated core is not architectural state, and
             // it holds host code for guest bytes that the clone's bus may not
             // have. The snapshot path is exactly the case that matters.
@@ -462,7 +479,7 @@ impl<B: Bus> XtHart<B> {
             isync_count: 0,
             cache: None,
             block_cache: true,
-            block_flush_pending: false,
+            block_flush_pending: PendingInvalidate::None,
             core: None,
             core_entries: Vec::new(),
             core_flush_pending: PendingInvalidate::None,
@@ -738,9 +755,9 @@ impl<B: Bus> XtHart<B> {
         match self.cache.as_mut() {
             Some(cache) => cache.invalidate_range(lo, hi),
             // The cache is lifted out of `self` for the whole of a slice (see
-            // [`XtHart::run_slice_cached`]), so a flush asked for from inside
-            // one is recorded and applied where the cache is.
-            None => self.block_flush_pending = true,
+            // [`XtHart::run_slice_cached`]), so an invalidation asked for from
+            // inside one is recorded and applied where the cache is.
+            None => self.note_block_pending(Some((lo, hi))),
         }
     }
 
@@ -753,13 +770,36 @@ impl<B: Bus> XtHart<B> {
     /// is the one that has to hear it.
     #[inline]
     pub fn invalidate_blocks(&mut self) {
+        self.invalidate_translated();
+        match self.cache.as_mut() {
+            Some(cache) => cache.invalidate_all(),
+            None => self.note_block_pending(None),
+        }
+    }
+
+    /// Forget everything the **translator** holds, and nothing the block cache
+    /// holds.
+    ///
+    /// One event uses this rather than [`XtHart::invalidate_blocks`]: a
+    /// `wsr`/`xsr` to `LBEG`, `LEND` or `LCOUNT`. A translated block may have
+    /// inlined the `LEND` it saw, so the core has to hear about it. **A
+    /// cached block cannot have**, because an [`XtSlot`] holds a decoded
+    /// instruction and its width and nothing else: the loop-back test in
+    /// [`XtHart::step`] reads `LEND` and `LCOUNT` out of the special-register
+    /// file live, on every instruction. No slot goes stale when a loop
+    /// register moves.
+    ///
+    /// That distinction is worth a method because `restore_context` rewrites
+    /// all three on **every context switch** (xtensa-lx-rt 0.22.0,
+    /// `src/exception/asm.rs`), and a whole-cache flush is a 2 MiB `memset`
+    /// of the table. Measured on `boot-idle` at 100 ms: **545 whole flushes
+    /// before this split, 3 after** — and those three are the `isync`es, which
+    /// are the real thing.
+    #[inline]
+    pub fn invalidate_translated(&mut self) {
         match self.core.as_mut() {
             Some(core) => core.invalidate(None),
             None => self.core_flush_pending = self.core_flush_pending.add(None),
-        }
-        match self.cache.as_mut() {
-            Some(cache) => cache.invalidate_all(),
-            None => self.block_flush_pending = true,
         }
     }
 
@@ -770,14 +810,79 @@ impl<B: Bus> XtHart<B> {
     /// [`XtHart::step_one`], the instruction it ran was an `isync` or a `wsr`
     /// to `LEND`, and the core that has to forget what it translated was in
     /// the caller's hand at the time.
-    /// Apply a flush that was asked for while the cache was lifted out of the
-    /// hart. The store-address drain at polling point (c), `isync` and a
-    /// `wsr` to a loop register are the reasons this exists.
+    /// Record an invalidation the cache cannot be given yet, **merging two
+    /// ranges into the span that covers both**.
+    ///
+    /// This is where the cache's accumulator differs from the translated
+    /// core's ([`PendingInvalidate::add`], which widens a second range to
+    /// `All`), and the difference is the whole of the store-address
+    /// contract's cost. A guest publishing 1,606 consecutive words raises
+    /// 1,606 four-byte ranges; widening to `All` at the second one throws the
+    /// warm cache away and then does it again at every block lookup for the
+    /// rest of the copy — **measured on `render-loop` as 720 whole flushes**.
+    /// The hull of two ranges invalidates a superset of what either does, so
+    /// it is conservative in the **safe** direction, and the copy collapses to
+    /// one range applied once, when the guest finally jumps into what it
+    /// wrote.
+    #[inline]
+    fn note_block_pending(&mut self, range: Option<(u32, u32)>) {
+        self.block_flush_pending = match (self.block_flush_pending, range) {
+            (PendingInvalidate::All, _) | (_, None) => PendingInvalidate::All,
+            (PendingInvalidate::None, Some((lo, hi))) => PendingInvalidate::Range(lo, hi),
+            (PendingInvalidate::Range(lo, hi), Some((a, b))) => {
+                PendingInvalidate::Range(lo.min(a), hi.max(b))
+            }
+        };
+    }
+
+    /// Apply a recorded invalidation **only if it could reach a block
+    /// starting at `pc`** — the lazy half of [`XtHart::drain_block_flush`],
+    /// and the reason the store-address contract is affordable.
+    ///
+    /// The guest publishes its shader by storing 1,606 consecutive words into
+    /// SRAM0, and polling point (c) sees every one of them. Applying each
+    /// store to the cache means 1,606 walks of a 2^18-entry table for one
+    /// copy — measured on `render-loop` as **+1.1 user seconds out of 9.6**,
+    /// to drop 21 entries in total. So the request is *recorded* and the walk
+    /// is deferred until the hart is about to look up a block the write could
+    /// have touched: a cached block is at most
+    /// [`block::MAX_BLOCK_SLOTS`] × 3 bytes long, so a block starting at `pc`
+    /// overlaps `[lo, hi)` only when `pc < hi && pc + 192 > lo`. Anything
+    /// outside that window is served from a cache the write cannot have
+    /// staled, and the walk happens once, when the guest finally jumps into
+    /// what it wrote.
+    ///
+    /// Exact, and the reason is that the pending record is only ever *cleared*
+    /// by an apply: it survives a block, a slice and a stepping window, and
+    /// every path that consults the cache goes through here or through
+    /// [`XtHart::drain_block_flush`] first.
+    #[inline]
+    fn apply_pending_blocks(&mut self, cache: &mut BlockCache<XtSlot>, pc: u32) {
+        match self.block_flush_pending {
+            PendingInvalidate::None => {}
+            PendingInvalidate::Range(lo, hi) => {
+                if pc < hi && pc.wrapping_add(MAX_BLOCK_BYTES) > lo {
+                    self.block_flush_pending = PendingInvalidate::None;
+                    cache.invalidate_range(lo, hi);
+                }
+            }
+            PendingInvalidate::All => {
+                self.block_flush_pending = PendingInvalidate::None;
+                cache.invalidate_all();
+            }
+        }
+    }
+
+    /// Apply an invalidation that was asked for while the cache was lifted out
+    /// of the hart, whatever it names. The store-address drain at polling
+    /// point (c) and `isync` are the reasons this exists;
+    /// [`XtHart::apply_pending_blocks`] is the form the hot path uses.
     #[inline]
     fn drain_block_flush(&mut self, cache: &mut BlockCache<XtSlot>) {
-        if self.block_flush_pending {
-            self.block_flush_pending = false;
-            cache.invalidate_all();
+        match core::mem::replace(&mut self.block_flush_pending, PendingInvalidate::None) {
+            PendingInvalidate::None => {}
+            PendingInvalidate::Range(lo, hi) => cache.invalidate_range(lo, hi),
+            PendingInvalidate::All => cache.invalidate_all(),
         }
     }
 
@@ -1038,7 +1143,11 @@ impl<B: Bus> XtHart<B> {
         let mut cache = cached.then(|| {
             self.cache
                 .take()
-                .unwrap_or_else(|| Box::new(BlockCache::with_defaults()))
+                // Byte-indexed, not `pc >> 1`: Xtensa instructions are 2 or
+                // 3 bytes, so block starts land on every residue and bit 0 of
+                // a `pc` carries real information. See
+                // [`BlockCache::with_pc_shift`].
+                .unwrap_or_else(|| Box::new(BlockCache::with_defaults_byte_indexed()))
         });
         let mut core = self.core.take();
         if let Some(cache) = cache.as_mut() {
@@ -1179,6 +1288,7 @@ impl<B: Bus> XtHart<B> {
             if let Some(cache) = cache.as_mut()
                 && self.breaks.ibreakenable == 0
             {
+                self.apply_pending_blocks(cache, pc);
                 let block = match cache.lookup(pc) {
                     Some(block) => Some(block),
                     None => {
@@ -1216,11 +1326,10 @@ impl<B: Bus> XtHart<B> {
                         return over;
                     }
                     // The block may have left because something inside it
-                    // published code, retired an `isync` or wrote a loop
-                    // register. The cache that has to forget was out here
-                    // rather than in the hart, and the next pc must be looked
-                    // up against a fresh one.
-                    self.drain_block_flush(cache);
+                    // published code or retired an `isync`. The request is
+                    // recorded, and `apply_pending_blocks` above applies it at
+                    // the top of the next iteration — but only if the next pc
+                    // is one the write could have reached.
                     if let Some(core) = core.as_mut() {
                         self.drain_core_flush(core);
                     }
@@ -1245,13 +1354,11 @@ impl<B: Bus> XtHart<B> {
                 }
                 return over;
             }
-            // That instruction may have been an `isync`, a `wsr` to a loop
-            // register, or a store that published code — and the cache and the
-            // core that wanted invalidating are out here rather than in the
-            // hart.
-            if let Some(cache) = cache.as_mut() {
-                self.drain_block_flush(cache);
-            }
+            // That instruction may have been an `isync` or a store that
+            // published code, and the core that wanted invalidating is out
+            // here rather than in the hart. The cache's own request is
+            // recorded and applied by `apply_pending_blocks` at the next
+            // lookup it could reach.
             if let Some(core) = core.as_mut() {
                 self.drain_core_flush(core);
             }
@@ -1333,9 +1440,11 @@ impl<B: Bus> XtHart<B> {
                 return (None, ran);
             }
             // The store-address contract (XD3): the slot just run published
-            // code, and the cache is out of the hart, so the request is a
-            // flag. Leave the block — a leave, not a slice end.
-            if self.block_flush_pending {
+            // code, and the cache is out of the hart, so the request is
+            // recorded rather than applied. Leave the block — a leave, not a
+            // slice end — so the next pc is looked up against a cache that has
+            // heard about it.
+            if self.block_flush_pending != PendingInvalidate::None {
                 return (None, ran);
             }
             pc = straight_on;

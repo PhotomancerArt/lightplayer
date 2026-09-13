@@ -1017,6 +1017,9 @@ pub struct Esp32V3Builder {
     time_grade: TimeGrade,
     strict: bool,
     strict_unsupported: bool,
+    /// `--no-block-cache`, held as its positive. On by default; see
+    /// [`Esp32V3Builder::block_cache`].
+    block_cache: bool,
     boot_frame: Option<BootFrame>,
     flash_backing: crate::flash::FlashBacking,
     flash_len: u32,
@@ -1056,6 +1059,7 @@ impl Default for Esp32V3Builder {
             time_grade: TimeGrade::default(),
             strict: false,
             strict_unsupported: true,
+            block_cache: true,
             boot_frame: None,
             flash_backing: crate::flash::FlashBacking::default(),
             flash_len: crate::flash::DEFAULT_FLASH_LEN,
@@ -1157,6 +1161,24 @@ impl Esp32V3Builder {
     /// illegal-instruction handler.
     pub fn strict_unsupported(mut self, on: bool) -> Self {
         self.strict_unsupported = on;
+        self
+    }
+
+    /// Pre-decode blocks of instructions, or do not (`--no-block-cache`).
+    ///
+    /// **On by default**, and off is the identity oracle this milestone leans
+    /// on hardest: the same binary with the cache off must print an identical
+    /// everything — the same UART0 bytes, the same `run:` line, the same
+    /// frames, the same trace (`scripts/emu/v3-oracle.sh`).
+    ///
+    /// Unlike the C6 there is no `rom-up` exclusion (M7 XD4). The C6 turns its
+    /// cache off under `BootMode::RomUp` because its invalidation contract is
+    /// the guest's `fence.i` and it owns neither the mask ROM nor the IDF
+    /// bootloader; this machine's contract is the **store address** (XD3), and
+    /// those two programs publish code with ordinary guest stores, which the
+    /// same drain catches.
+    pub fn block_cache(mut self, on: bool) -> Self {
+        self.block_cache = on;
         self
     }
 
@@ -1538,7 +1560,14 @@ impl Esp32V3Builder {
         // pretended otherwise would have nowhere for P4's DPORT view to
         // write, and nothing for a snapshot to carry.
         let harts: Vec<XtHart<SocBus>> = (0..CORES)
-            .map(|core| fresh_hart(core, self.time_grade, self.strict_unsupported))
+            .map(|core| {
+                fresh_hart(
+                    core,
+                    self.time_grade,
+                    self.strict_unsupported,
+                    self.block_cache,
+                )
+            })
             .collect();
 
         let mut machine = Machine {
@@ -1560,6 +1589,7 @@ impl Esp32V3Builder {
             #[cfg(feature = "bench")]
             bench_windows: [0; CORES],
             strict_unsupported: self.strict_unsupported,
+            block_cache: self.block_cache,
             pending_breaks: Vec::new(),
             stall_key,
             rom: rom_image,
@@ -1754,11 +1784,19 @@ pub const APP_CORE_RELEASE_PS: u32 = PS_BOOT;
 /// A hart at the architectural reset state of **this part**, with the
 /// machine's cycle model and unsupported-opcode policy applied. What `build`
 /// makes both slots from, and what a core reset puts back.
-fn fresh_hart(core: usize, grade: TimeGrade, strict_unsupported: bool) -> XtHart<SocBus> {
+fn fresh_hart(
+    core: usize,
+    grade: TimeGrade,
+    strict_unsupported: bool,
+    block_cache: bool,
+) -> XtHart<SocBus> {
     let mut hart = XtHart::new(core as u32, core_config(core));
     hart.cpu_mut().cpenable = CPENABLE_RESET;
     hart.set_cycle_model(grade.cycle_model());
     hart.set_strict_unsupported(strict_unsupported);
+    // No `boot_mode != RomUp` term, deliberately: M7 XD4. See
+    // [`Esp32V3Builder::block_cache`].
+    hart.set_block_cache(block_cache);
     hart
 }
 
@@ -1792,6 +1830,9 @@ pub struct Machine {
     /// The builder's unsupported-opcode policy, kept so a core reset
     /// (`service_app_core_start`) builds the new hart the same way.
     strict_unsupported: bool,
+    /// The builder's block-cache setting, kept for the same reason, and read
+    /// by the run report so a run says which of the two identity legs it is.
+    block_cache: bool,
     /// The flash MMU tables and the cache-enable state, shared with the
     /// DPORT and FLASH_MMU views.
     cache: crate::cache::CacheHandle,
@@ -2223,6 +2264,32 @@ impl Machine {
     /// Instructions retired by `core` alone.
     pub fn core_instructions(&self, core: usize) -> u64 {
         self.harts.get(core).map_or(0, XtHart::instruction_count)
+    }
+
+    /// Whether this machine's harts pre-decode blocks
+    /// ([`Esp32V3Builder::block_cache`]). `false` is `--no-block-cache`, the
+    /// identity leg.
+    pub fn block_cache(&self) -> bool {
+        self.block_cache
+    }
+
+    /// What `core`'s block cache did, or `None` when it never built one.
+    ///
+    /// **Never part of a compared transcript.** The oracle compares the UART0
+    /// bytes, the `run:` line, the decoded frames and the trace, and this is
+    /// none of those; it is how a run says whether the cache was reached at
+    /// all and how long its blocks realised.
+    pub fn block_stats(&self, core: usize) -> Option<lp_emu_core::block::BlockStats> {
+        self.harts.get(core).and_then(XtHart::block_stats)
+    }
+
+    /// `isync` instructions `core` has retired — the Xtensa `fence.i` count,
+    /// and the diagnostic that says whether a guest barrier reached the
+    /// machine at all. On this chip the answer is expected to be small: the
+    /// firmware publishes JIT'd code with no barrier, which is why
+    /// invalidation is store-address driven (M7 XD3).
+    pub fn isync_count(&self, core: usize) -> u64 {
+        self.harts.get(core).map_or(0, XtHart::isync_count)
     }
 
     pub fn first_strict_violation(&self) -> Option<StrictViolation> {
@@ -3373,7 +3440,12 @@ impl Machine {
         }
         self.stalled[1] = false;
         let frame = self.app_core_boot_frame();
-        let mut hart = fresh_hart(1, self.time_grade, self.strict_unsupported);
+        let mut hart = fresh_hart(
+            1,
+            self.time_grade,
+            self.strict_unsupported,
+            self.block_cache,
+        );
         hart.set_counters(clock, 0);
         hart.set_pc(entry);
         hart.set_ps_raw(APP_CORE_RELEASE_PS);

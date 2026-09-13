@@ -660,17 +660,25 @@ impl<B: Bus> XtHart<B> {
             // rewrites all three on every context switch. Cheap to raise, and
             // the failure it prevents is silent. The `LOOP` instruction writes
             // them too and is deliberately *not* an event — see that module.
+            //
+            // ⚠️ **The translated core only, not the block cache** — see
+            // [`XtHart::invalidate_translated`]. A cached slot holds a decoded
+            // instruction and its width; the loop-back test in `step` reads
+            // `LEND` and `LCOUNT` live, so no slot can go stale here. And this
+            // fires on every context switch, where a whole-cache flush is a
+            // 2 MiB `memset` of the table: `boot-idle` at 100 ms went from 545
+            // whole flushes to 3.
             SpecialReg::Lbeg => {
                 self.sr.lbeg = v;
-                self.invalidate_blocks();
+                self.invalidate_translated();
             }
             SpecialReg::Lend => {
                 self.sr.lend = v;
-                self.invalidate_blocks();
+                self.invalidate_translated();
             }
             SpecialReg::Lcount => {
                 self.sr.lcount = v;
-                self.invalidate_blocks();
+                self.invalidate_translated();
             }
             // SAR is 6 bits (Table 5-135).
             SpecialReg::Sar => self.cpu.sar = v & 0x3F,
