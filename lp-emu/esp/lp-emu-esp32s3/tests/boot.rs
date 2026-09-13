@@ -602,17 +602,47 @@ fn the_shipped_image_gets_past_esp_hal_init_and_crosses_the_console() {
         machine.usb_sj().starts_with(b"[INIT] fw-esp32s3 boot\n"),
         "the first line out of the link"
     );
+    // ⚠️ Not "a draining host took it all" any more. Since P06 the boot
+    // goes past the flash and the server loop's first framed write — the
+    // hello — loses one 64-byte packet to the link (a stale
+    // `serial_in_empty` wakes esp-hal's write future early; see
+    // `docs/defects/2026-09-13-the-s3-link-drops-the-io-tasks-next-chunk-on-a-stale-serial-in-empty.md`
+    // and `tests/boot_idle.rs`, where it is pinned in full). What this test
+    // keeps claiming is P05's: nothing of the esp-println chain is dropped.
+    let tried = machine.usb_sj_tried();
+    assert_eq!(tried.len(), 64, "the one dropped packet, and only it");
     assert!(
-        machine.usb_sj_tried().is_empty(),
-        "a draining host took it all"
+        !String::from_utf8_lossy(&tried).contains("[INIT]"),
+        "the esp-println chain reached the host whole"
     );
 
-    // ⚠️ Where it stopped, named: the flash read P06 owns.
+    // Where P05's run stopped, and where P06's goes: past the flash read —
+    // on a **blank** chip, since this machine has no `--flash`. The ROM's
+    // driver reads erased bytes, the firmware finds no partition table,
+    // says so by name, falls back to its memory filesystem and still
+    // reaches the server loop. The flashed chip's reading — the `lpfs`
+    // mount — is `tests/boot_idle.rs`'s, on the merged image.
     let pc = machine.harts[0].pc();
     let symbol = machine.symbolize(pc).unwrap_or_else(|| "?".into());
+    let text = String::from_utf8_lossy(&machine.usb_sj()).into_owned();
+    assert!(
+        text.contains("[ERROR] no `lpfs` partition in the flashed table"),
+        "P06: the flash read `esp_storage` spun on is served, and a blank chip has no \
+         table:\n{text}"
+    );
+    assert!(text.contains("using memory FS"), "{text}");
+    assert!(
+        text.contains("[INIT] fw-esp32 initialized, starting server loop"),
+        "and the boot goes on to the server loop regardless:\n{text}"
+    );
+    let census = machine.flash().lock().expect("flash").command_census();
+    assert!(
+        census.reads > 0 && census.programs == 0 && census.sector_erases == 0,
+        "a blank chip is read and never written by this boot: {census}"
+    );
     println!(
-        "P06's stop: the run ends at {pc:#010x} ({symbol}), spinning on SPI1.cmd bit 28 \
-         (`usr`) — a flash read no hardware here completes"
+        "P05's stop was SPI1.cmd bit 28 (`usr`); P06 serves it ({census}), and the run ends \
+         at {pc:#010x} ({symbol}) past the mount, on the memory FS"
     );
     // The mask ROM really executed: the first SENSITIVE access — P03's own
     // first stop — is made from a mask-ROM pc.

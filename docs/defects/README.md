@@ -349,6 +349,7 @@ a fifth still lands somewhere the new `Fault` status and pattern don't reach.
 
 | Class | Date | Entry | Status | Area |
 | --- | --- | --- | --- | --- |
+| backend-contract-divergence | 2026-09-13 | [the-s3-link-drops-the-io-tasks-next-chunk-on-a-stale-serial-in-empty](2026-09-13-the-s3-link-drops-the-io-tasks-next-chunk-on-a-stale-serial-in-empty.md) | **open** | lp-emu-esp-common ip/usb_sj (the USB-Serial-JTAG link model) × esp-hal write_async × fw-esp32s3 io_task |
 | state-conflation | 2026-09-09 | [browser-crash-reported-as-test-failure](2026-09-09-browser-crash-reported-as-test-failure.md) | fixed | scripts/browser-test-harness.sh: `wasm-bindgen-test-runner` says `Error: some tests failed` whether a test failed or headless Firefox was SIGKILLed mid-run |
 | open-path-wait-without-wakeup | 2026-09-08 | [a-held-lens-waited-for-a-sim-nobody-was-going-to-start](2026-09-08-a-held-lens-waited-for-a-sim-nobody-was-going-to-start.md) | fixed | lpa-studio-core studio_controller (try_pending_device_lens, resolve_open_device, seed_device_sim_records) — prod outage, no project could open |
 | write-ordering | 2026-09-07 | [merge-delete-erased-the-merged-row](2026-09-07-merge-delete-erased-the-merged-row.md) | fixed | lpa-devices roster (reconcile_identities) + lpa-studio-core studio_controller (settle_device_records) |
