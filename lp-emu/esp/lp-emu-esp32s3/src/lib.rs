@@ -7,7 +7,7 @@
 //! they are put together with a memory map, a mask ROM, a reset state and a
 //! run loop, and the result takes a `fw-esp32s3` binary.
 //!
-//! # What is here today (M6 P03), and what is not
+//! # What is here today (M6 P04), and what is not
 //!
 //! **A machine.** [`memmap`], every base cited to
 //! `third_party/esp-hal/ld/esp32s3/memory.x`, the `.rwdata_dummy`

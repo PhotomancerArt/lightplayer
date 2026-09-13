@@ -9,21 +9,22 @@ run loop, and the result takes a `fw-esp32s3` binary.
 It is `lp-emu-esp32v3`'s twin — same hart, same shape, same module names — and
 `lp-emu-esp32c6`'s where the peripherals are concerned.
 
-> **M6 P03. There is a machine here now, and it has no peripherals — which
-> is the point.**
+> **M6 P04. The blocks before the console answer, and a strict run of the
+> shipped image gets past `esp_hal::init` and stops at the console.**
 >
 > **What exists:** the memory map ([`src/memmap.rs`](src/memmap.rs)), the bus
 > it builds ([`src/bus_setup.rs`](src/bus_setup.rs)) **with SRAM1's I-bus view
 > as a RAM alias**, the mask-ROM loader ([`src/rom.rs`](src/rom.rs)), the
 > direct load ([`src/loader.rs`](src/loader.rs)), two hart slots and the
 > quantum run loop ([`src/machine.rs`](src/machine.rs)), the snapshot, the
-> generated register tables, and a binary — `just emu-esp32s3 <elf>`.
+> generated register tables, a binary — `just emu-esp32s3 <elf>` — and, from
+> P04, **every peripheral block the boot touches before it needs the
+> console** ([`src/periph/`](src/periph/), [`src/intmatrix.rs`](src/intmatrix.rs);
+> the table below), including **the RWDT that really runs**.
 >
-> **What does not exist:** any peripheral. With the MMIO window declared and
-> nothing inside it, a `--strict-bus` run stops at the **first** block the
-> boot touches and says which; that stop is P03's deliverable and P04's first
-> ledger entry. There is also no console (P05), no flash cache and no ROM-up
-> boot (P06), and no pad fabric (P07).
+> **What does not exist:** the console and the link (`USB_DEVICE`, P05) —
+> which is where a strict run now stops — the flash cache and the ROM-up
+> boot (P06), and the pad fabric and RMT (P07).
 
 ## Running it
 
@@ -47,24 +48,99 @@ must be visible in that phase's diff. `--help` lists what exists.
    disassembly, a linker-script constant. Never "what the boot needed".
 4. Run again.
 
-P03's own run of the shipped image stops here:
+P04's run of the shipped image stops here — **past `esp_hal::init`, at the
+console**, which is P05's:
 
 ```text
 STRICT BUS STOP
-  pc      = 0x4004f670 (Cache_Occupy_ICache_MEMORY+0xc)
-  cycle   = 36 (0 us emulated)
-  access  = Read Word at 0x600c1004
+  pc      = 0x420a5ab1 (esp_println::Printer::write_bytes+0x9)
+  cycle   = 2098417 (8743 us emulated)
+  access  = Read Word at 0x60038004
   where   = inside the declared peripheral window — an UNMODELLED BLOCK
 ```
 
-⚠️ **That is `SENSITIVE + 0x04` (`cache_dataarray_connect_1`), and the MMIO
-census says `sensitive` is not touched.** Both are true: the census
-(`m6/notes.md` §2.4) swept the *application's* `l32r` literals, and this
-access is the **mask ROM's**, on `esp_hal::init`'s
-`rom_config_instruction_cache_mode` path. It is also the evidence that the ROM
-really executes — which on this chip is not a formality (§2.5: `memcpy` alone
-is 4,769 call sites), and `tests/boot.rs` calls ROM `memcpy` over guest memory
-to say so directly.
+`0x6003_8004` is `USB_DEVICE.ep1_conf`: `esp-println`'s `jtag-serial` writer
+checking whether the IN endpoint has room for the first byte of `[INIT]`.
+Every block before it answered, in the order below. P03's stop — `SENSITIVE +
+0x04` from the mask ROM's `Cache_Occupy_ICache_MEMORY+0xc` at cycle 36 — is
+now the first line of the trace, and `tests/boot.rs` asserts that line's pc is
+mask-ROM code, because on this chip the ROM really executing is not a
+formality (§2.5: `memcpy` alone is 4,769 call sites).
+
+## The peripherals, in the order the boot met them
+
+`machine::PERIPHERAL_REGISTRATION_ORDER` is a contract — the bus packs a
+block's index into every scheduler event id — and it is the ledger of P04's
+strict loop: each block was added when the run stopped on it, with the cycle
+of its first access on the shipped image. Grades are `lp-emu-validate`'s
+ladder per register (`RegFile::with_pac_grades`): **documented** where the
+PAC calls the register read-write and the block pretends nothing, **modeled**
+otherwise; **nothing is `measured`** — no S3 silicon has been read yet.
+
+| # | block | first access | what it is | source |
+|---|---|---:|---|---|
+| 1 | `SENSITIVE` | 36 | accept, PAC resets. The mask ROM's `Cache_Occupy_*_MEMORY` read-modify-writes `cache_dataarray_connect_1` and `internal_sram_usage_1` | fresh |
+| 2 | `EXTMEM` | 71 | accept **with the operation-done bits answered**: every `*_sync_ctrl` / `*_preload_ctrl` / `*_lock_ctrl` operation bit is a pulse whose done bit reads 1, `cache_state` reads idle, and the two `*_freeze` done bits **mirror** their enable bits — the ROM waits for those both ways. The cache *model* is P06's | fresh; the C6's mirror idiom |
+| 3 | `INTERRUPT_CORE1` | 403 | a register view over the bus's matrix — core 1's half. esp-hal clears the *other* core's map first | the classic's `intmatrix.rs` |
+| 4 | `INTERRUPT_CORE0` | 407 | core 0's half of the same 4 KB block | the classic's |
+| 5 | `RTC_CNTL` | 205,054 | the reset cause (asserted `POWERON_RESET`, the one PAC deviation), the two-register stall key, **the RWDT as a real scheduler counter** with its key, the super-watchdog with its own key `0x8F1D_312A`, the clock and store registers | the classic's `rtc_cntl.rs`, offset table `+4` |
+| 6 | `SYSTEM` | 206,309 | the clock and reset gates written-and-read-back; `core_1_control_0` through the machine's hold handle; `cpu_intr_from_cpu[0..4]` as sources 79..82 | fresh |
+| 7 | `EFUSE` | 207,842 | the MAC and the wafer version, **in the S3's own words** (minor split across `+0x50`/`+0x58`, major in `+0x58` — not the C6's `+0x50`); PAC zero everywhere else, no dump seeded (P09) | the C6's `efuse.rs` |
+| 8 | `I2C_ANA_MST` | 207,952 | the analog master as a `{block, register}` store behind the ROM's eight command words, plus the PAC's three registers with `ana_conf0.bbpll_cal_done` reading 1 (esp-hal spins on it) | the classic's `i2c_ana_mst.rs` |
+| 9 | `TIMG0` | 288,925 | **two** counters on `engine::timg` (XTAL or APB per `use_xtal`), the RTC calibration `calibrate_rtc_slow_clock` really runs (1024 cycles of 136 kHz = the 7.5 ms gap to the next row), the MWDT gate; **no LACT**, asserted | the C6's `timg.rs`, counter count 1 → 2 |
+| 10 | `APB_CTRL` | 2,097,791 | accept, PAC resets (`front_end_mem_pd`, `clkgate_force_on`, `mem_power_up`) | fresh |
+| 11 | `SPI0` | 2,097,806 | accept, PAC resets (`clock_gate`); the flash port is P06's | fresh |
+| 12 | `SPI1` | 2,097,812 | accept, PAC resets (`clock_gate`); the flash controller is P06's | fresh |
+| 13 | `BB` | 2,097,896 | accept, one register (`bbpd_ctrl`) | fresh |
+| 14 | `NRX` | 2,097,903 | accept, one register (`nrxpd_ctrl`) | fresh |
+| 15 | `FE` | 2,097,910 | accept, one register (`gen_ctrl`) | fresh |
+| 16 | `FE2` | 2,097,917 | accept, one register (`tx_interp_ctrl`) | fresh |
+| 17 | `TIMG1` | 2,098,065 | the same view; met only for its watchdog disable | the C6's |
+| 18 | `SYSTIMER` | — | **the S3's `Instant::now()`**: Unit0 at XTAL/2.5 = 16 MHz, one tick per 15 cycles, `micros = ticks >> 4`; three comparators. ⚠️ Not reached before the console — `time_init` on this chip touches no register — but registered, and `tests/clock.rs` pins the derivation | the C6's `systimer.rs`, verbatim |
+
+Which parent each block came from matters, and the wrong one is silently
+wrong (`m6/notes.md` §3): `RTC_CNTL`, `I2C_ANA_MST` and the matrix are the
+**classic's**; `TIMG`, `SYSTIMER` and `EFUSE` are the **C6's**. The copies
+live in this crate because the plan's invariant is that the C6 and the
+classic do not move by a byte; the extraction into `lp-emu-esp-common` is
+M8's, and each file names what it would extract.
+
+### Two things the accept blocks needed that a PAC reset does not give
+
+- **`EXTMEM`'s freeze pair.** The ROM's `Cache_Freeze_*_Enable` sets bit 0
+  and spins until `done` (bit 2) is **1**; `Cache_Freeze_*_Disable` clears
+  bit 0 and spins until it is **0**. The first traced run stood at
+  `Cache_Freeze_DCache_Disable+0x1b` for two emulated seconds on the PAC's
+  reset `0x04`. No constant satisfies both polls; a read **mirror** does, and
+  says the true thing. `periph::accept::READ_MIRRORS` lists both with the
+  disassembly beside them; `READ_OVERRIDES` lists every other pretended bit.
+- **`I2C_ANA_MST.ana_conf0.bbpll_cal_done`.** esp-hal's `enable_pll_clk_impl`
+  spins `while … bbpll_cal_done().bit_is_clear() {}` (`clocks.rs:232-238`)
+  and the PAC gives the register no reset. It reads 1, *modeled*, with the
+  citation.
+
+### The watchdog that really runs
+
+The shipped firmware arms the RWDT at 30 s, tightens it to 8 s on the first
+feed, and withholds the feed when the io task has been silent for 2 s — there
+is no `disable()` anywhere in the crate (`m6/notes.md` §5.2). So stage 0 is a
+real counter here: `hold × 2 / RC_SLOW_HZ` seconds after the last feed or arm
+(esp-hal's `set_timeout` shifts right by `1 + WDT_DELAY_SEL`, which reads 0),
+and expiry asks the machine for a reset, which the run reports as
+`Outcome::Reset` (exit 2) because there is no boot chain to restart until P06.
+`tests/clock.rs` runs both directions through the machine at the real
+quantum: armed for 30 s and never fed, the run ends in a reset at cycle
+7,200,000,010; armed for 8 s and fed once a second by a `CCOMPARE1` handler,
+forty seconds pass with no reset, and 7 s after the feeds stop it bites.
+
+### X43, on this chip
+
+The matrix answers the **mask** form and never implements `cpu_interrupt`
+(`intmatrix.rs`'s module docs). `tests/clock.rs` raises `FROM_CPU_INTR0`
+through `SYSTEM.cpu_intr_from_cpu0` with `INTENABLE` still 0, performs one
+more MMIO store — the store that zeroed the mask under X43 — then enables the
+line, and asserts the take followed within a few instructions (CCOUNT 12 →
+20) rather than at the next 256-cycle window boundary. Never single-stepped.
 
 ## Three things about this machine that its siblings do not have
 
@@ -178,24 +254,18 @@ fails the same lint a hand edit in the C6's tables does. **Never hand-edit a
 file under `src/regs/` except `mod.rs`**, which is hand-written and carries the
 prose and the assertions no generator could produce.
 
-Twenty-two blocks: every one the image's own MMIO census names, plus `uart0`
-and `sha` for the ROM-up path. A table nothing reads is cheap; a missing one is
-a phase blocked on a regenerate.
+Twenty-three blocks: every one the image's own MMIO census names, plus `uart0`
+and `sha` for the ROM-up path, plus `sensitive` — the block P03's first
+strict stop found, reached from the **mask ROM** and invisible to a census of
+the application's literals (P04 added it to the generator's list). A table
+nothing reads is cheap; a missing one is a phase blocked on a regenerate.
 
-⚠️ **And one is missing: `sensitive`.** P03's first strict stop is
-`SENSITIVE + 0x04`, reached from the mask ROM (see the bring-up section
-above), and the census could not have predicted it because it swept the
-*application's* literals. P04 regenerates with `--pac esp32s3` to pick the
-table up; the block itself is `0x600C_1000`
-([`memmap::periph::SENSITIVE`](src/memmap.rs)).
-
-⚠️ **One table is deliberately absent: the interrupt-source numbers.**
-`esp32s3-0.35.2` puts its `Interrupt` enum in `src/lib.rs`, not in a
-`src/interrupt.rs` as the C6 does, and the generator reads the latter by name.
-Teaching it a second path is a generator change and P01's scope was the chip
-entry, so the phase that first needs the table makes it. The four numbers a
-phase needs in the meantime are in M6 notes §3.3: `RMT = 40`,
-`TG0_T0_LEVEL = 50`, `SYSTIMER_TARGET0..2 = 57,58,59`, `USB_DEVICE = 96`.
+**The interrupt-source table is generated too** (`src/regs/interrupt_sources.rs`,
+the `source` module). `esp32s3-0.35.2` keeps its `Interrupt` enum in
+`src/lib.rs` rather than in a `src/interrupt.rs` as the C6's PAC does; the
+generator's `sources_file` field (P04) is the one-line difference. Ninety-four
+named sources over the number range `0..=98`, with gaps — which is why the
+matrix has 99 map entries and the table 94 rows.
 
 ## Licence
 
