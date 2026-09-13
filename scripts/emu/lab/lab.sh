@@ -6,6 +6,7 @@
 #   lab.sh queue --build 23a3d3c --rows gate-rows --repeats 3 --spacing 3m [--device NAME] [--ttl 24h] [--note ...]
 #   lab.sh queue --ab 86cb2e0 23a3d3c --rows gate-rows --repeats 5 --spacing 3m     # A1 B1 A2 B2 … on one device
 #   lab.sh queue --build X --row render-basic:t2:jit:8 --row render-basic:t2:interp  # explicit rows
+#   lab.sh queue --ab A B --repeats 8 --stop-when-stable [PCT] [--stable-row interp|all|KEY] [--stable-min N]  # stop a build once its control row settles
 #   lab.sh wait --job ID [--max-time 3600]         # ONE blocking call; prints report.md's path on exit 0
 #   lab.sh wait --device any|NAME | --queue-idle   # until a device is present / the queue drains
 #   lab.sh report ID                               # cat report.md
@@ -39,7 +40,7 @@ home="${LAB_HOME:-$HOME/.photomancer/emu-lab}"
 # it before it does any work of its own.
 stage_lock_dir="$home/.stage/lock"
 
-usage() { sed -n '2,22p' "$0"; }
+usage() { sed -n '2,23p' "$0"; }
 
 need_home() {
     [[ -f "$home/config.json" && -f "$home/token" ]] || {
@@ -72,6 +73,7 @@ dur_ms() {
 
 cmd_queue() {
     local builds='[]' rows='"gate-rows"' rowlist='[]' repeats=1 spacing=0 device=any ttl=86400000 retry=1 note=null
+    local stable=null stable_pct=5 stable_row=interp stable_min=4
     while [[ $# -gt 0 ]]; do
         case "$1" in
             --build) builds="$(jq -cn --arg b "$2" '[$b]')"; shift 2 ;;
@@ -89,20 +91,33 @@ cmd_queue() {
             --ttl) ttl="$(dur_ms "$2")"; shift 2 ;;
             --retry-tainted) retry="$2"; shift 2 ;;
             --note) note="$(jq -cn --arg n "$2" '$n')"; shift 2 ;;
+            # The percentage is optional: `--stop-when-stable` alone is the
+            # sized default (interp, 5 %, last 4), `--stop-when-stable 3` is
+            # tighter. Only a bare number is eaten as the argument.
+            --stop-when-stable)
+                stable=on
+                if [[ "${2:-}" =~ ^[0-9]+([.][0-9]+)?$ ]]; then stable_pct="$2"; shift 2; else shift; fi ;;
+            --stable-row) stable=on; stable_row="$2"; shift 2 ;;
+            --stable-min) stable=on; stable_min="$2"; shift 2 ;;
             *) echo "lab: queue: unknown option $1" >&2; exit 2 ;;
         esac
     done
     [[ "$builds" != '[]' ]] || { echo "lab: queue needs --build X or --ab A B" >&2; exit 2; }
     if [[ "$rowlist" != '[]' ]]; then rows="$rowlist"; fi
+    local sws=null
+    if [[ "$stable" == on ]]; then
+        sws="$(jq -cn --arg row "$stable_row" --argjson pct "$stable_pct" --argjson minPresses "$stable_min" \
+            '{row: $row, pct: $pct, minPresses: $minPresses}')"
+    fi
     local body
     body="$(jq -cn --argjson builds "$builds" --argjson rows "$rows" --argjson repeats "$repeats" --argjson spacingMs "$spacing" \
-        --arg device "$device" --argjson ttlMs "$ttl" --argjson retryTainted "$retry" --argjson note "$note" \
-        '{kind: "bench", builds: $builds, rows: $rows, repeats: $repeats, spacingMs: $spacingMs, device: $device, ttlMs: $ttlMs, retryTainted: $retryTainted, note: $note}')"
+        --arg device "$device" --argjson ttlMs "$ttl" --argjson retryTainted "$retry" --argjson note "$note" --argjson stopWhenStable "$sws" \
+        '{kind: "bench", builds: $builds, rows: $rows, repeats: $repeats, spacingMs: $spacingMs, device: $device, ttlMs: $ttlMs, retryTainted: $retryTainted, note: $note, stopWhenStable: $stopWhenStable}')"
     local resp
     resp="$(api /jobs -H 'Content-Type: application/json' -w '\n%{http_code}' -d "$body")"
     local code="${resp##*$'\n'}"; resp="${resp%$'\n'*}"
     if [[ "$code" != 201 ]]; then echo "lab: queue refused ($code): $(jq -r '.error // .' <<<"$resp")" >&2; exit 1; fi
-    jq -r '"lab: queued \(.id): \(.builds|join(" vs ")) × \(.repeats) (\(.presses|length) presses), spacing \(.spacingMs/1000)s, device \(.device), ttl \(.ttlMs/3600000)h\(if .note then " — " + .note else "" end)"' <<<"$resp" >&2
+    jq -r '"lab: queued \(.id): \(.builds|join(" vs ")) × \(.repeats) (\(.presses|length) presses), spacing \(.spacingMs/1000)s, device \(.device), ttl \(.ttlMs/3600000)h\(if .stopWhenStable then ", stop when \(.stopWhenStable.row) last \(.stopWhenStable.minPresses) within \(.stopWhenStable.pct)%" else "" end)\(if .note then " — " + .note else "" end)"' <<<"$resp" >&2
     jq -r .id <<<"$resp"
 }
 
@@ -126,7 +141,7 @@ cmd_wait() {
     case "$code" in
         200)
             case "$q" in
-                job=*) jq -r '"lab: job \(.job.id) \(.job.state): presses \(.job.presses.done)/\(.job.presses.total), tainted \(.job.presses.tainted), failed \(.job.presses.failed)"' <<<"$resp" >&2
+                job=*) jq -r '"lab: job \(.job.id) \(.job.state): presses \(.job.presses.done)/\(.job.presses.total), tainted \(.job.presses.tainted), failed \(.job.presses.failed)\(if (.job.presses.skipped // 0) > 0 then ", \(.job.presses.skipped) not taken (\((.job.stoppedEarly // []) | map("\(.build) stable after press \(.afterPress)") | join("; ")))" else "" end)"' <<<"$resp" >&2
                        jq -r .reportMd <<<"$resp" ;;
                 device=*) jq -r '"lab: device present: \(.device.id) \(.device.name // "-") (\(.device.ua // "?"))"' <<<"$resp" >&2; jq -r .device.id <<<"$resp" ;;
                 *) jq -r '"lab: queue idle (\(.jobs.done) done)"' <<<"$resp" >&2 ;;
@@ -419,8 +434,8 @@ case "$cmd" in
     jobs)
         need_home
         api /jobs | jq -r '
-            ["id","state","builds","presses","tainted","failed","device","note"],
-            (.jobs[] | [.id, .state, (.builds|join(" vs ")), "\(.presses.done)/\(.presses.total)", (.presses.tainted|tostring), (.presses.failed|tostring), (.boundDeviceName // .boundDevice // .device), (.note // "")]) | @tsv' | column -t -s $'\t' ;;
+            ["id","state","builds","presses","tainted","failed","skipped","device","note"],
+            (.jobs[] | [.id, .state, (.builds|join(" vs ")), "\(.presses.done)/\(.presses.total)", (.presses.tainted|tostring), (.presses.failed|tostring), ((.presses.skipped // 0)|tostring), (.boundDeviceName // .boundDevice // .device), (.note // "")]) | @tsv' | column -t -s $'\t' ;;
     cancel)
         need_home
         id="${1:?lab cancel needs a job id}"

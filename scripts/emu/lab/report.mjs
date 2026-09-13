@@ -38,7 +38,9 @@ function stats(seq) {
 /// Compute the report for one job from its presses. Each press is
 /// `{n, build, state, tainted, taintReasons, results}` (the press file), in
 /// press order. Tainted and failed presses are listed under `excluded` and
-/// contribute `null` to every sequence.
+/// contribute `null` to every sequence. A `skipped` press — one the stability
+/// rule stood down before it was ever sent (F3) — is neither: it was not
+/// taken, so it is not a hole in the sequence, only a line in `rep.presses`.
 export function computeReport(job, presses) {
   const builds = job.builds;
   const excluded = [];
@@ -48,6 +50,7 @@ export function computeReport(job, presses) {
   for (const p of presses) {
     const pb = perBuild[p.build];
     if (!pb) continue;
+    if (p.state === 'skipped') continue;
     const ok = p.state === 'done' && !p.tainted;
     if (!ok) {
       const reason = p.state === 'failed' ? ['failed']
@@ -117,9 +120,72 @@ export function computeReport(job, presses) {
   return {
     job: job.id, note: job.note ?? null, builds, rows: job.rows, repeats: job.repeats, spacingMs: job.spacingMs,
     device, state: job.state, computedAt: new Date().toISOString(),
+    stopWhenStable: job.stopWhenStable ?? null,
+    stoppedEarly: Array.isArray(job.stoppedEarly) && job.stoppedEarly.length ? job.stoppedEarly : null,
     presses: presses.map((p) => ({ n: p.n, build: p.build, state: p.state, tainted: !!p.tainted, at: p.resultAt ?? null })),
     excluded, perBuild, ab,
   };
+}
+
+// --- F3: the stability stopping rule --------------------------------------
+//
+// The rule reads the report's own `seq` — the rounded, excluded-aware press
+// sequence `stats()` already produced — so there is one arithmetic in this
+// file, not two. A tainted or failed press is `null` in that sequence and is
+// filtered out here, which is how "excluded presses never count toward
+// stability" is enforced rather than remembered.
+
+/// The shape `makeJob` fills in for `stopWhenStable: {}` and the shape
+/// `lab.sh queue --stop-when-stable` sends with no arguments.
+///
+/// `minPresses` is **4**, not the 3 the control row's own settling suggests.
+/// Director's ruling, 2026-09-13, from `j-20260912-1718-5940` — the one job in
+/// the sizing data where a real decision turned on the number: a window of 3
+/// would have stopped that build with its `jit/8` row still climbing and
+/// quoted a best 8.6 % low. A window of 4 fires on 2 of the 11 real runs
+/// rather than 8, and that is the trade the lab wants.
+export const DEFAULT_STOP_WHEN_STABLE = { row: 'interp', pct: 5, minPresses: 4 };
+
+/// Which of a build's rows the rule watches. `'interp'` is every interpreter
+/// row the build has produced (the control rows); `'all'` is every row;
+/// anything else is one exact row key. Every named row must be stable — with
+/// one row that is the brief's rule, with several it is the conservative one.
+export function controlRowKeys(rep, build, row) {
+  const pb = rep.perBuild && rep.perBuild[build];
+  const keys = pb ? Object.keys(pb.rows) : [];
+  if (row === 'all') return keys;
+  if (row === 'interp') return keys.filter((k) => k.split('/')[2] === 'interp');
+  return keys.filter((k) => k === row);
+}
+
+/// Is this build's control row settled? `{stable, afterPress, why, rows}`
+/// where `afterPress` counts the presses of THIS build that were taken
+/// (skipped presses are not among them) and `why` is the sentence the report
+/// and the log quote. Never stable before `minPresses` counted values.
+export function stabilityVerdict(rep, build, opt) {
+  const o = { ...DEFAULT_STOP_WHEN_STABLE, ...(opt || {}) };
+  const pb = rep.perBuild && rep.perBuild[build];
+  if (!pb) return { stable: false, afterPress: 0, why: 'no build ' + build + ' in the report' };
+  const afterPress = pb.presses.length;
+  const keys = controlRowKeys(rep, build, o.row).sort(keyOrder);
+  if (!keys.length) return { stable: false, afterPress, why: 'no control row matching "' + o.row + '" yet' };
+  const rows = [];
+  for (const key of keys) {
+    const vals = pb.rows[key].seq.filter((x) => x !== null && x !== undefined);
+    if (vals.length < o.minPresses) {
+      return { stable: false, afterPress, why: shortKey(key) + ': ' + vals.length + ' of ' + o.minPresses + ' presses counted' };
+    }
+    const w = vals.slice(-o.minPresses);
+    const max = Math.max(...w), min = Math.min(...w);
+    const spreadPct = round(((max - min) / max) * 100, 1);
+    if (spreadPct > o.pct) {
+      return { stable: false, afterPress, why: shortKey(key) + ': last ' + o.minPresses + ' (' + w.map((x) => fmt(x)).join(' ') + ') spread ' + pct(spreadPct) + ' > ' + o.pct + ' %' };
+    }
+    rows.push({ key, window: w, spreadPct });
+  }
+  const why = rows.map((r) => shortKey(r.key) + ' last ' + o.minPresses + ' (' + r.window.map((x) => fmt(x)).join(' ') + ') within ' + pct(r.spreadPct)).join('; ') +
+    ' — at or under ' + o.pct + ' % after ' + afterPress + ' press' + (afterPress === 1 ? '' : 'es');
+  return { stable: true, afterPress, rows, why };
 }
 
 const fmt = (x, d = 3) => (x === null || x === undefined ? '–' : Number(x).toFixed(d));
@@ -137,6 +203,16 @@ export function renderReportMd(rep) {
   out.push('- device: ' + (rep.device ? (rep.device.name || rep.device.id) + (rep.device.ua ? ' · ' + rep.device.ua : '') : 'none'));
   out.push('- state: ' + rep.state + ' · computed ' + rep.computedAt);
   out.push('- protocol: DD41 — best of N spaced presses, quoted with the sequence; the same-press translated ÷ interpreter ratio removes the thermal half.');
+  if (rep.stopWhenStable) {
+    out.push('- stopping rule: stop a build when its `' + rep.stopWhenStable.row + '` row\'s last ' + rep.stopWhenStable.minPresses +
+      ' counted presses are within ' + rep.stopWhenStable.pct + ' % of each other (repeats ' + rep.repeats + ' stays the cap).');
+  }
+  if (rep.stoppedEarly) {
+    for (const s of rep.stoppedEarly) {
+      out.push('- **stopped early: ' + s.build + ' after press ' + s.afterPress + ' of ' + rep.repeats + '** — ' + s.why +
+        (s.skipped ? ' (' + s.skipped + ' press' + (s.skipped === 1 ? '' : 'es') + ' not taken)' : ''));
+    }
+  }
   out.push('');
   for (const b of rep.builds) {
     const pb = rep.perBuild[b];

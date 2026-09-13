@@ -22,7 +22,7 @@
 //   POST /results/manual?device=<id>          a hand-taken run, the legacy result shape + manual:true (D12)
 //   GET  /status                              devices, builds, job counts, result count, notify state
 //   POST /notify/test                         one notification now, whatever the gate thinks (lab.sh notify test)
-//   POST /jobs                                queue a bench job (single build or an A/B pair)
+//   POST /jobs                                queue a bench job (single build or an A/B pair); `stopWhenStable` opts into the F3 rule
 //   GET  /jobs   GET /jobs/<id>   DELETE /jobs/<id>
 //   POST /jobs/<id>/presses/<n>/result        the page's press result (legacy shape + taint fields)
 //   POST /jobs/<id>/presses/<n>/deferred      the page received the press hidden; it will run when visible
@@ -47,7 +47,7 @@ import os from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { execFileSync } from 'node:child_process';
 
-import { computeReport, renderReportMd } from './report.mjs';
+import { computeReport, renderReportMd, stabilityVerdict, DEFAULT_STOP_WHEN_STABLE } from './report.mjs';
 import { createNotifier } from './notify.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -411,7 +411,11 @@ function newJobId() {
 }
 
 const TERMINAL = new Set(['done', 'expired', 'failed', 'cancelled']);
-const PRESS_TERMINAL = new Set(['done', 'failed']);
+// `skipped` is terminal because the job must be able to finalize on it, but it
+// is not `taken`: it never reached a device, so it is not a result and the
+// report drops it rather than excluding it (F3).
+const PRESS_TERMINAL = new Set(['done', 'failed', 'skipped']);
+const PRESS_TAKEN = new Set(['done', 'failed']);
 const KNOWN_MODES = new Set(['jit', 'interp']);
 
 /// Validate a job request and expand its presses A1 B1 A2 B2 … (D5). Only
@@ -445,14 +449,40 @@ function makeJob(body) {
   const retryTainted = Number(body.retryTainted ?? 1);
   if (!Number.isInteger(retryTainted) || retryTainted < 0 || retryTainted > 5) bad('retryTainted must be 0–5');
   const device = typeof body.device === 'string' && body.device ? body.device : 'any';
+  const stopWhenStable = makeStopWhenStable(body.stopWhenStable, { bad, rows, repeats });
   const presses = [];
   for (let r = 0; r < repeats; r++) for (const b of builds) presses.push({ n: presses.length + 1, build: b, state: 'pending', sentAt: null, deferredAt: null, resultAt: null, resends: 0, tainted: false, taintReasons: [] });
   return {
-    id: newJobId(), kind: 'bench', builds, rows, repeats, spacingMs, device, ttlMs, retryTainted,
+    id: newJobId(), kind: 'bench', builds, rows, repeats, spacingMs, device, ttlMs, retryTainted, stopWhenStable,
     note: typeof body.note === 'string' ? body.note.slice(0, 200) : null,
     createdAt: new Date().toISOString(), state: 'queued', boundDevice: null, boundDeviceName: null, boundDeviceUa: null,
-    presses, lastPressEndAt: null, reportAt: null, retriesUsed: 0, error: null,
+    presses, stoppedEarly: [], lastPressEndAt: null, reportAt: null, retriesUsed: 0, error: null,
   };
+}
+
+/// Validate the opt-in stability field (F3). Absent or null means the rule is
+/// off and every press of `repeats` is taken, which is the old behaviour
+/// exactly. `{}` means the sized default.
+function makeStopWhenStable(s, { bad, rows, repeats }) {
+  if (s === undefined || s === null || s === false) return null;
+  if (typeof s !== 'object' || Array.isArray(s)) bad('stopWhenStable must be an object like {"row":"interp","pct":5,"minPresses":3}');
+  const row = s.row ?? DEFAULT_STOP_WHEN_STABLE.row;
+  if (typeof row !== 'string' || !row) bad('stopWhenStable.row must be "interp", "all", or a row key like render-basic/t2/interp');
+  const pct = Number(s.pct ?? DEFAULT_STOP_WHEN_STABLE.pct);
+  if (!Number.isFinite(pct) || pct <= 0 || pct > 50) bad('stopWhenStable.pct must be > 0 and ≤ 50');
+  // A window of one press is stable by definition, so two is the floor; a
+  // window longer than the cap can never close, which is a typo, not a job.
+  const minPresses = Number(s.minPresses ?? DEFAULT_STOP_WHEN_STABLE.minPresses);
+  if (!Number.isInteger(minPresses) || minPresses < 2) bad('stopWhenStable.minPresses must be ≥ 2 (a window of one press is always stable)');
+  if (minPresses > repeats) bad('stopWhenStable.minPresses (' + minPresses + ') is more than repeats (' + repeats + '): the rule could never fire');
+  // With explicit rows, refuse a control row the job will never produce —
+  // silently never stopping is the one failure mode that looks like success.
+  if (rows !== 'gate-rows' && row !== 'all') {
+    const keys = rows.map((r) => r.slug + '/' + r.grade + '/' + r.mode + (r.mode === 'jit' ? '/' + r.fnBlocks : ''));
+    const ok = row === 'interp' ? keys.some((k) => k.split('/')[2] === 'interp') : keys.includes(row);
+    if (!ok) bad('stopWhenStable.row "' + row + '" matches none of this job\'s rows (' + keys.join(', ') + ')');
+  }
+  return { row, pct, minPresses };
 }
 
 function jobRowCount(j) { return j.rows === 'gate-rows' ? 4 : j.rows.length; }
@@ -485,7 +515,7 @@ function queueViewFor(deviceId) {
     .filter((j) => (j.device === 'any' || j.device === deviceId || deviceNameMatches(j.device, deviceId)) && (!j.boundDevice || j.boundDevice === deviceId))
     .map((j) => ({
       id: j.id, state: j.state, builds: j.builds, note: j.note,
-      presses: { done: j.presses.filter((p) => PRESS_TERMINAL.has(p.state)).length, total: j.presses.length },
+      presses: { done: j.presses.filter((p) => PRESS_TAKEN.has(p.state)).length, total: j.presses.length },
       // One entry per press so the page can draw the interleave as ticks.
       pressStates: j.presses.map((p) => ({ n: p.n, build: p.build, state: p.state, tainted: !!p.tainted })),
     }));
@@ -509,12 +539,63 @@ function inFlightOn(deviceId) {
   return null;
 }
 
+/// The presses as `computeReport` wants them, read back from their files.
+/// `takenOnly` is the mid-job view — the presses that actually ran — so a
+/// still-pending press is not mistaken for one that was taken and lost.
+function gatherPresses(j, takenOnly = false) {
+  return j.presses
+    .filter((p) => !takenOnly || PRESS_TAKEN.has(p.state))
+    .map((p) => {
+      const file = readJsonFile(path.join(jobDir(j.id), 'presses', p.n + '.json')) || {};
+      return { n: p.n, build: p.build, state: p.state, tainted: p.tainted, taintReasons: p.taintReasons, resultAt: p.resultAt, results: file.results || [] };
+    });
+}
+
+/// F3: after each result, ask whether the build that produced it has settled.
+/// Recording the verdict is all this does — `tick` stands the build's pending
+/// presses down, so the taint retry, the lost re-send and the interleave keep
+/// their one owner. An A/B stops per build: the other one keeps running.
+function evaluateStability(j) {
+  if (!j.stopWhenStable || TERMINAL.has(j.state)) return false;
+  if (!Array.isArray(j.stoppedEarly)) j.stoppedEarly = [];
+  const rep = computeReport(j, gatherPresses(j, true));
+  let changed = false;
+  for (const b of j.builds) {
+    if (j.stoppedEarly.some((s) => s.build === b)) continue;
+    const v = stabilityVerdict(rep, b, j.stopWhenStable);
+    if (!v.stable) continue;
+    j.stoppedEarly.push({
+      build: b, afterPress: v.afterPress, row: j.stopWhenStable.row, pct: j.stopWhenStable.pct, minPresses: j.stopWhenStable.minPresses,
+      rows: v.rows.map((r) => ({ key: r.key, window: r.window, spreadPct: r.spreadPct })),
+      why: v.why, at: new Date().toISOString(), skipped: 0,
+    });
+    changed = true;
+    log('job ' + j.id + ' build ' + b + ' stable after ' + v.afterPress + ' press(es): ' + v.why);
+  }
+  return changed;
+}
+
+/// Stand down every press still pending for a build the rule has stopped —
+/// including one the taint retry appended after the stop. Never touches a
+/// press that is `sent` or `deferred`: that one is already on the device.
+function sweepStopped(j) {
+  if (!j.stoppedEarly || !j.stoppedEarly.length) return false;
+  let changed = false;
+  for (const s of j.stoppedEarly) {
+    for (const p of j.presses) {
+      if (p.build !== s.build || p.state !== 'pending') continue;
+      p.state = 'skipped'; p.skippedBy = 'stopWhenStable';
+      s.skipped = (s.skipped || 0) + 1;
+      changed = true;
+    }
+  }
+  if (changed) log('job ' + j.id + ' skipped ' + j.stoppedEarly.reduce((a, s) => a + (s.skipped || 0), 0) + ' press(es) for ' + j.stoppedEarly.map((s) => s.build).join(', '));
+  return changed;
+}
+
 function finalize(j, state) {
   j.state = state;
-  const presses = j.presses.map((p) => {
-    const file = readJsonFile(path.join(jobDir(j.id), 'presses', p.n + '.json')) || {};
-    return { n: p.n, build: p.build, state: p.state, tainted: p.tainted, taintReasons: p.taintReasons, resultAt: p.resultAt, results: file.results || [] };
-  });
+  const presses = gatherPresses(j);
   const report = computeReport(j, presses);
   fs.mkdirSync(jobDir(j.id), { recursive: true });
   writeJsonFile(path.join(jobDir(j.id), 'report.json'), report);
@@ -542,6 +623,9 @@ function tick() {
       if (p.state === 'sent' && now - Date.parse(p.sentAt) > lostMs(j)) { markLost(j, p, 'no result in ' + Math.round(lostMs(j) / 1000) + ' s'); changed = true; }
       if (p.state === 'deferred' && now - Date.parse(p.deferredAt) > lostMs(j)) { markLost(j, p, 'deferred too long'); changed = true; }
     }
+    // Before the terminal check: a build the stability rule stopped has no
+    // pending presses left, which is what lets the job finalize early (F3).
+    if (sweepStopped(j)) changed = true;
     if (j.presses.every((p) => PRESS_TERMINAL.has(p.state))) { finalize(j, 'done'); continue; }
     if (changed) saveJob(j);
     waiting.push(j);
@@ -593,7 +677,9 @@ function jobCounts() {
 
 function jobSummary(j) {
   return { id: j.id, state: j.state, builds: j.builds, rows: j.rows, repeats: j.repeats, spacingMs: j.spacingMs, device: j.device, boundDevice: j.boundDevice, boundDeviceName: j.boundDeviceName,
-    note: j.note, createdAt: j.createdAt, reportAt: j.reportAt, presses: { done: j.presses.filter((p) => PRESS_TERMINAL.has(p.state)).length, total: j.presses.length, tainted: j.presses.filter((p) => p.tainted).length, failed: j.presses.filter((p) => p.state === 'failed').length } };
+    note: j.note, createdAt: j.createdAt, reportAt: j.reportAt,
+    stopWhenStable: j.stopWhenStable ?? null, stoppedEarly: (j.stoppedEarly && j.stoppedEarly.length) ? j.stoppedEarly : null,
+    presses: { done: j.presses.filter((p) => PRESS_TAKEN.has(p.state)).length, total: j.presses.length, tainted: j.presses.filter((p) => p.tainted).length, failed: j.presses.filter((p) => p.state === 'failed').length, skipped: j.presses.filter((p) => p.state === 'skipped').length } };
 }
 
 async function postJob(req, res) {
@@ -639,6 +725,10 @@ async function postPressResult(req, res, id, n) {
     j.presses.push({ n: j.presses.length + 1, build: p.build, state: 'pending', sentAt: null, deferredAt: null, resultAt: null, resends: 0, tainted: false, taintReasons: [], retryOf: p.n });
     log('job ' + j.id + ' press ' + p.n + ' tainted (' + p.taintReasons.join(',') + '); press ' + j.presses.length + ' appended');
   }
+  // F3, after the press file is on disk and after the taint retry has been
+  // appended: a tainted press is excluded from the sequence, so it can never
+  // be the press that declares a build stable.
+  evaluateStability(j);
   saveJob(j);
   log('job ' + j.id + ' press ' + p.n + ' ' + p.state + (p.tainted ? ' TAINTED' : '') + ' from ' + device + ' -> ' + p.file);
   send(res, 200, { ok: true, file: p.file, press: p.n, state: p.state });
