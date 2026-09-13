@@ -41,6 +41,14 @@
 # That is the invariant's second leg: the merged `main` binary against the
 # branch's, proving the interpreter itself did not move.
 #
+# ⚠️ **The two binaries need two flag strings, not one**, and that is the
+# whole point of the leg rather than an inconvenience: the off-switch is what
+# the branch ADDS, so the older binary does not have it and refuses it by
+# name ("a door a later phase adds is absent rather than accepted-and-ignored").
+# `--flags-a` / `--flags-b` name each leg's flags; each defaults to `--slow`.
+# For P01 that is `--flags-a "" --flags-b "--no-block-cache"`: main has no
+# cache to turn off, so its interpreter IS its default.
+#
 # # The images
 #
 # The three `scripts/emu/build-reference-image.sh --chip esp32` knows, by the
@@ -56,6 +64,10 @@ cd "$repo"
 
 bin_a=""
 bin_b=""
+flags_a=""
+flags_b=""
+have_flags_a=0
+have_flags_b=0
 fast_flags="${LP_EMU_V3_ORACLE_FAST:-}"
 slow_flags="${LP_EMU_V3_ORACLE_SLOW:---no-block-cache}"
 commit="${LP_EMU_V3_ORACLE_COMMIT:-0773c3fbd}"
@@ -66,7 +78,9 @@ while [[ $# -gt 0 ]]; do
         --bin-b) bin_b="${2:?--bin-b needs a path}"; shift 2 ;;
         --fast) fast_flags="${2?--fast needs a flag string}"; shift 2 ;;
         --slow) slow_flags="${2?--slow needs a flag string}"; shift 2 ;;
-        -h|--help) sed -n '2,52p' "$0"; exit 0 ;;
+        --flags-a) flags_a="${2?--flags-a needs a flag string}"; have_flags_a=1; shift 2 ;;
+        --flags-b) flags_b="${2?--flags-b needs a flag string}"; have_flags_b=1; shift 2 ;;
+        -h|--help) sed -n '2,60p' "$0"; exit 0 ;;
         *) break ;;
     esac
 done
@@ -96,8 +110,12 @@ if [[ -n "$bin_a$bin_b" ]]; then
     mode=pair
     # The pair leg is about the INTERPRETER: both binaries run with the fast
     # path off, so what is compared is the thing neither of them may change.
-    a_bin="$bin_a"; a_flags="$slow_flags"; a_name=main
-    b_bin="$bin_b"; b_flags="$slow_flags"; b_name=branch
+    # Each leg names its own flags because the off-switch is what the branch
+    # adds — see the header.
+    [[ $have_flags_a == 1 ]] || flags_a="$slow_flags"
+    [[ $have_flags_b == 1 ]] || flags_b="$slow_flags"
+    a_bin="$bin_a"; a_flags="$flags_a"; a_name=main
+    b_bin="$bin_b"; b_flags="$flags_b"; b_name=branch
 else
     mode=flag
     a_bin="target/release/lp-emu-esp32v3"; a_flags="$fast_flags"; a_name=fast
