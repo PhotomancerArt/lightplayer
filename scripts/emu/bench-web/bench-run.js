@@ -55,11 +55,39 @@ const siblings = Promise.all([
 /// when this was written. On an engine that dies there, the page dies with it
 /// and nothing uploads — which is that engine's answer, and the one failure
 /// mode of this preset the rig cannot turn into a failed row.
+///
+/// ⚠️ Since the translator-quality plan's P1 the preset is **eight** rows, not
+/// four: `harness` and `boot-idle-memfs` join it in both legs. Those two images
+/// had never been run on a phone at all — the desk numbers everything is ranked
+/// against (`docs/adr/2026-09-11-emulator-wasm-translator.md` §"Per image, and
+/// where the translated core is SLOWER") have no device counterpart, and
+/// `boot-idle-memfs` is the image where the translated core LOSES to its own
+/// interpreter, which is a fixed translation cost no loop lever reaches. Their
+/// configuration is not a guess: it is that table's own — `t2`, a 5,500 ms
+/// emulated bound, both legs, one invocation per image — so a phone row is
+/// comparable to the desk row it answers.
+///
+/// `wallTimeout` and `exitOn` come off the staged manifest in `gateRowsPlan`
+/// exactly as for the four `render-basic` rows, and `defaults.exitOn` is false
+/// (`scripts/emu/bench-web.sh`), so every row runs to the **emulated** bound
+/// rather than to `harness`'s `[inc-shader-compile] === DONE ===` marker. That
+/// is what makes 5,500 ms of emulated time the same unit of work on all four
+/// images. The per-image `timeout` in the manifest (`harness` 5 s,
+/// `boot-idle-memfs` 3 s) is each image's *reference run length* and is not the
+/// bench bound.
+///
+/// A lab job that wants a subset of this preset must now name explicit `--row`s
+/// (`slug:grade:mode[:fnBlocks][:timeout]`, e.g. `boot-idle-memfs:t2:jit:8`):
+/// `--rows gate-rows` means eight presses' worth of rows.
 export const GATE_ROWS = [
   { slug: 'render-basic', grade: 't2', mode: 'jit', fnBlocks: 8, timeout: '5500ms' },
   { slug: 'render-basic', grade: 't2', mode: 'jit', fnBlocks: 16, timeout: '5500ms' },
   { slug: 'render-basic', grade: 't2', mode: 'jit', fnBlocks: 32, timeout: '5500ms' },
   { slug: 'render-basic', grade: 't2', mode: 'interp', fnBlocks: null, timeout: '5500ms' },
+  { slug: 'harness', grade: 't2', mode: 'jit', fnBlocks: 8, timeout: '5500ms' },
+  { slug: 'harness', grade: 't2', mode: 'interp', fnBlocks: null, timeout: '5500ms' },
+  { slug: 'boot-idle-memfs', grade: 't2', mode: 'jit', fnBlocks: 8, timeout: '5500ms' },
+  { slug: 'boot-idle-memfs', grade: 't2', mode: 'interp', fnBlocks: null, timeout: '5500ms' },
 ];
 
 /// `GATE_ROWS` as a plan the Worker can run, taking the wall-clock guard and

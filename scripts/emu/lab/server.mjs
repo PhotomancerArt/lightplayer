@@ -485,7 +485,12 @@ function makeStopWhenStable(s, { bad, rows, repeats }) {
   return { row, pct, minPresses };
 }
 
-function jobRowCount(j) { return j.rows === 'gate-rows' ? 4 : j.rows.length; }
+// Only `lostMs` reads this, and only to size a *budget*: over-counting costs a
+// lost press some extra patience, under-counting declares a live press dead. So
+// the `gate-rows` arm is the largest the preset has ever been, not the current
+// length — a build is staged with its OWN `GATE_ROWS` (D22), so an old build in
+// the store still runs four rows while `bench-run.js` now defines eight.
+function jobRowCount(j) { return j.rows === 'gate-rows' ? 8 : j.rows.length; }
 
 function lostMs(j) {
   if (LOST_MS_OVERRIDE !== null) return LOST_MS_OVERRIDE;
