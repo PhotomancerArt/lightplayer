@@ -60,7 +60,7 @@ for (const d of ['builds', 'images', 'jobs', 'results', 'devices', 'log']) {
   fs.mkdirSync(path.join(HOME, d), { recursive: true });
 }
 
-const DEFAULT_CONFIG = { port: 41111, domain: null, cooldownMs: 60000, maxResultBytes: 2000000 };
+const DEFAULT_CONFIG = { port: 41111, domain: null, cooldownMs: 60000, dropLostMs: null, maxResultBytes: 2000000 };
 const configPath = path.join(HOME, 'config.json');
 let config = { ...DEFAULT_CONFIG };
 if (fs.existsSync(configPath)) {
@@ -213,7 +213,7 @@ function devicePath(id) { return path.join(HOME, 'devices', id + '.json'); }
 function readDevice(id) { return readJsonFile(devicePath(id)); }
 function saveDevice(d) { writeJsonFile(devicePath(d.id), d); return d; }
 function touchDevice(id, patch) {
-  const d = readDevice(id) || { id, name: null, ua: null, cores: null, deviceMemory: null, lastState: null, lastSeen: null, lastPressEndAt: null };
+  const d = readDevice(id) || { id, name: null, ua: null, cores: null, deviceMemory: null, lastState: null, lastSeen: null, lastPressEndAt: null, lastStreamClosedAt: null };
   Object.assign(d, patch, { lastSeen: new Date().toISOString() });
   return saveDevice(d);
 }
@@ -260,7 +260,10 @@ function openEvents(req, res, url) {
   res.socket.setNoDelay(true);
   if (!streams.has(id)) streams.set(id, new Set());
   streams.get(id).add(res);
-  const d = touchDevice(id, {});
+  // `lastStreamClosedAt` means "closed and still closed", so a stream again
+  // clears it: the drop rule below never fires while one is open, and a
+  // flicker (SSE reconnects constantly) leaves no stale timestamp behind.
+  const d = touchDevice(id, { lastStreamClosedAt: null });
   sseWrite(res, 'hello', { serverTime: new Date().toISOString(), config: { cooldownMs: config.cooldownMs }, device: d });
   // ngrok and Safari both drop a silent stream; a comment every 15 s is the
   // cheapest thing that keeps both honest.
@@ -269,8 +272,12 @@ function openEvents(req, res, url) {
   const close = () => {
     clearInterval(ka);
     const s = streams.get(id);
-    if (s) { s.delete(res); if (s.size === 0) streams.delete(id); }
-    touchDevice(id, {});
+    let gone = false;
+    if (s) { s.delete(res); if (s.size === 0) { streams.delete(id); gone = true; } }
+    // When the LAST stream goes the device can no longer be told anything and
+    // can no longer post a result, so the moment is recorded on the device
+    // file: `tick` ages a `sent` press from it (B), and a restart keeps it.
+    touchDevice(id, gone ? { lastStreamClosedAt: new Date().toISOString() } : {});
     log('device ' + id + ' stream closed');
     hooks.onPresenceChange(id);
   };
@@ -355,8 +362,8 @@ function status() {
     uptimeS: Math.round((Date.now() - STARTED) / 1000),
     home: HOME,
     port: PORT,
-    config: { cooldownMs: config.cooldownMs, domain: config.domain },
-    devices: allDevices().map((d) => ({ id: d.id, name: d.name, present: isPresent(d), streams: (streams.get(d.id) || new Set()).size, lastSeen: d.lastSeen, lastState: d.lastState, ua: d.ua, cores: d.cores, lastPressEndAt: d.lastPressEndAt })),
+    config: { cooldownMs: config.cooldownMs, dropLostMs: DROP_LOST_MS, domain: config.domain },
+    devices: allDevices().map((d) => ({ id: d.id, name: d.name, present: isPresent(d), streams: (streams.get(d.id) || new Set()).size, lastSeen: d.lastSeen, lastState: d.lastState, ua: d.ua, cores: d.cores, lastPressEndAt: d.lastPressEndAt, lastStreamClosedAt: d.lastStreamClosedAt ?? null })),
     builds: listBuilds(),
     jobs: hooks.jobCounts(),
     notify: notifier.status(),
@@ -379,13 +386,25 @@ const notifier = createNotifier({ home: HOME, configPath, log });
 // Jobs are files under jobs/<id>.json; presses land in jobs/<id>/presses/<n>.json
 // and the report beside them. Everything below is rebuilt from those files on
 // start, so a kill -9 loses nothing but the in-flight press, which is re-sent
-// once (a `sent` press with no result is `lost`).
+// once (a `sent` press with no result is `lost` — either because its device's
+// stream went away and stayed away, or because the wall bound ran out).
 
 const TICK_MS = Number(process.env.LAB_TICK_MS || 1000);
 const COOLDOWN_MS = process.env.LAB_COOLDOWN_MS !== undefined ? Number(process.env.LAB_COOLDOWN_MS) : config.cooldownMs;
 // A press with no result after wallTimeout × rows + 120 s is lost. Tests
 // shrink it; the build's manifest sets it in life.
 const LOST_MS_OVERRIDE = process.env.LAB_LOST_MS !== undefined ? Number(process.env.LAB_LOST_MS) : null;
+// The OTHER way a press is lost, and the usual one: the tab that was sent it
+// went away. A page with no stream cannot post a result, so a `sent` press
+// whose bound device has had no stream for this long is not running — it is
+// gone, and waiting out the wall bound (3120 s on a 5-row job) leaves a phone
+// that came back staring at "Waiting for the director" for the rest of it.
+// The window only has to outlast an SSE reconnect, so it is the device
+// cooldown, floored at the 60 s the cooldown shipped as: a cooldown of 0 (a
+// test, or a later model) must not mean a blink loses the press.
+const DROP_LOST_MS = process.env.LAB_DROP_LOST_MS !== undefined
+  ? Number(process.env.LAB_DROP_LOST_MS)
+  : (config.dropLostMs != null ? Number(config.dropLostMs) : (COOLDOWN_MS > 0 ? COOLDOWN_MS : DEFAULT_CONFIG.cooldownMs));
 const MAX_WAIT_S = 3600;
 
 const jobs = new Map(); // id -> job (the file's contents)
@@ -505,6 +524,21 @@ function lostMs(j) {
     if (m && m.defaults && m.defaults.wallTimeout) wall = Math.max(wall, Number(m.defaults.wallTimeout));
   }
   return (wall * jobRowCount(j) + 120) * 1000;
+}
+
+/// How long the press's bound device has been without a stream, or null while
+/// it has one (and null when nothing recorded a close, or the close predates
+/// the press — a restart's device file must not retire a fresh press).
+function streamGoneMs(j, p, now) {
+  if (!j.boundDevice) return null;
+  const s = streams.get(j.boundDevice);
+  if (s && s.size > 0) return null;
+  const d = readDevice(j.boundDevice);
+  const closed = d && d.lastStreamClosedAt ? Date.parse(d.lastStreamClosedAt) : NaN;
+  if (!Number.isFinite(closed)) return null;
+  const sent = Date.parse(p.sentAt);
+  if (Number.isFinite(sent) && closed < sent) return null;
+  return now - closed;
 }
 
 function markLost(j, p, why) {
@@ -630,7 +664,15 @@ function tick() {
     if (!inFlight && now - Date.parse(j.createdAt) > j.ttlMs) { finalize(j, 'expired'); continue; }
     let changed = false;
     for (const p of j.presses) {
-      if (p.state === 'sent' && now - Date.parse(p.sentAt) > lostMs(j)) { markLost(j, p, 'no result in ' + Math.round(lostMs(j) / 1000) + ' s'); changed = true; }
+      if (p.state === 'sent') {
+        // The wall bound is for a device that is still there and silent; the
+        // drop bound is for one whose tab went away. A `deferred` press is a
+        // page that said it is hidden and will run when visible — its stream
+        // is open by construction, so only the wall bound applies to it.
+        const gone = streamGoneMs(j, p, now);
+        if (now - Date.parse(p.sentAt) > lostMs(j)) { markLost(j, p, 'no result in ' + Math.round(lostMs(j) / 1000) + ' s'); changed = true; }
+        else if (gone !== null && gone > DROP_LOST_MS) { markLost(j, p, 'device stream closed ' + Math.round(gone / 1000) + ' s ago, no result'); changed = true; }
+      }
       if (p.state === 'deferred' && now - Date.parse(p.deferredAt) > lostMs(j)) { markLost(j, p, 'deferred too long'); changed = true; }
     }
     // Before the terminal check: a build the stability rule stopped has no
@@ -896,7 +938,7 @@ server.listen(PORT, '0.0.0.0', () => {
   // stdout carries exactly one line, for the test that spawns us and for a
   // launchd log a human reads; the rest goes to stderr and log/server.log.
   process.stdout.write('emu-lab: listening on http://127.0.0.1:' + port + '\n');
-  log('started, home ' + HOME + ', port ' + port + ', build ' + (SERVER_BUILD || '?') + ', cooldown ' + COOLDOWN_MS + ' ms');
+  log('started, home ' + HOME + ', port ' + port + ', build ' + (SERVER_BUILD || '?') + ', cooldown ' + COOLDOWN_MS + ' ms, drop window ' + DROP_LOST_MS + ' ms');
   tick();
 });
 

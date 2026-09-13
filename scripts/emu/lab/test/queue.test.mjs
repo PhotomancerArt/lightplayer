@@ -26,8 +26,34 @@ function stageFixture(home, ids) {
 }
 
 let home, lab;
-const api = (p, opts = {}) => fetch(lab.url + p, { ...opts, headers: { Authorization: 'Bearer ' + lab.token, 'Content-Type': 'application/json', ...(opts.headers || {}) } });
+const apiOn = (l, p, opts = {}) => fetch(l.url + p, { ...opts, headers: { Authorization: 'Bearer ' + l.token, 'Content-Type': 'application/json', ...(opts.headers || {}) } });
+const api = (p, opts = {}) => apiOn(lab, p, opts);
 const queue = async (body) => { const r = await api('/jobs', { method: 'POST', body: JSON.stringify(body) }); return { status: r.status, body: await r.json() }; };
+
+/// A second lab of its own, so a test can pin the two bounds against each
+/// other (a wall bound a minute away, a drop window a quarter-second away)
+/// without moving them for every other test in the file.
+async function ownLab(env) {
+  const h = fs.mkdtempSync(path.join(os.tmpdir(), 'emu-lab-drop-'));
+  stageFixture(h, ['aaa1111']);
+  const l = await startServer(h, env);
+  l.queue = async (body) => { const r = await apiOn(l, '/jobs', { method: 'POST', body: JSON.stringify(body) }); return { status: r.status, body: await r.json() }; };
+  l.job = async (id) => (await apiOn(l, '/jobs/' + id)).json();
+  return l;
+}
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+/// Poll a predicate at test speed; throws with the last value on timeout.
+async function until(what, fn, timeoutMs = 5000) {
+  const end = Date.now() + timeoutMs;
+  let last;
+  for (;;) {
+    last = await fn();
+    if (last) return last;
+    if (Date.now() > end) throw new Error('timed out waiting for ' + what);
+    await sleep(20);
+  }
+}
 const waitJob = async (id, timeout = 10) => { const r = await api('/wait?job=' + id + '&timeout=' + timeout); return { status: r.status, body: await r.json() }; };
 
 before(async () => {
@@ -210,6 +236,84 @@ test('lost: a sent press with no result is re-sent once, then failed', async () 
   assert.equal(w.body.job.presses.failed, 1);
   assert.equal(seen, 2, 'sent twice, never a third time');
   await dev.stop().catch(() => {});
+});
+
+// B: the observed failure was a press sent to a phone whose tab went away
+// seconds later. Nothing but the wall bound (wallTimeout × rows + 120 s =
+// 3120 s on that job) could retire it, so the phone came back and sat idle
+// for 40 minutes. A page with no stream cannot post a result, so a closed
+// stream past the drop window is the press's answer.
+test('drop: a press whose device goes away before any result is lost at the drop window, not the wall bound (B)', async () => {
+  // A wall bound a minute out, a drop window a quarter-second out: inside
+  // this test only the drop rule can fire.
+  const l = await ownLab({ LAB_TICK_MS: '20', LAB_COOLDOWN_MS: '0', LAB_LOST_MS: '60000', LAB_DROP_LOST_MS: '250' });
+  try {
+    let seen = 0;
+    const dev = await fakeDevice(l, { pressMs: 5, beforeAnswer: async () => { seen++; throw new Error('the tab went away'); } });
+    const { body: j } = await l.queue({ builds: ['aaa1111'], repeats: 1, spacingMs: 0, ttlMs: 60000 });
+    await until('press 1 to reach the device', async () => seen === 1);
+    const sent = await l.job(j.id);
+    assert.equal(sent.presses[0].state, 'sent');
+    assert.equal(sent.boundDevice, dev.id);
+    await dev.stop().catch(() => {});
+    const back = await until('press 1 back to pending', async () => {
+      const cur = await l.job(j.id);
+      return cur.presses[0].state === 'pending' ? cur : null;
+    }, 5000);
+    assert.equal(back.presses[0].resends, 1, 'lost once, one re-send owed');
+    const logged = fs.readFileSync(path.join(l.home, 'log', 'server.log'), 'utf8');
+    assert.match(logged, /press 1 lost \(device stream closed .* no result\)/, 'the drop rule named it, not the wall bound');
+    // The phone comes back with the id it kept in localStorage: the job is
+    // bound to it (D20), and the re-send is waiting.
+    const dev2 = await fakeDevice(l, { id: dev.id, pressMs: 5 });
+    const w = await apiOn(l, '/wait?job=' + j.id + '&timeout=10');
+    assert.equal(w.status, 200);
+    const wb = await w.json();
+    assert.equal(wb.job.state, 'done');
+    assert.deepEqual(dev2.answered.map((a) => a.press), [1], 'the re-send ran on the reconnected device');
+    await dev2.stop();
+  } finally { await l.stop(); }
+});
+
+test('drop: a stream flicker shorter than the window leaves the press sent (B)', async () => {
+  const l = await ownLab({ LAB_TICK_MS: '20', LAB_COOLDOWN_MS: '0', LAB_LOST_MS: '60000', LAB_DROP_LOST_MS: '1500' });
+  try {
+    let seen = 0;
+    const quiet = async () => { seen++; throw new Error('running it, no result yet'); };
+    const dev = await fakeDevice(l, { pressMs: 5, beforeAnswer: quiet });
+    const { body: j } = await l.queue({ builds: ['aaa1111'], repeats: 1, spacingMs: 0, ttlMs: 60000 });
+    await until('press 1 to reach the device', async () => seen === 1);
+    await dev.stop().catch(() => {});
+    // Back well inside the window, the way an SSE stream reconnects.
+    const again = await fakeDevice(l, { id: dev.id, pressMs: 5, beforeAnswer: quiet });
+    // Now past the window measured from the FIRST close: only a cleared drop
+    // clock keeps the press alive here.
+    await sleep(2200);
+    const cur = await l.job(j.id);
+    assert.equal(cur.presses[0].state, 'sent', 'a flicker is not a device that went away');
+    assert.equal(cur.presses[0].resends, 0);
+    assert.equal(seen, 1, 'never re-sent');
+    await again.stop();
+  } finally { await l.stop(); }
+});
+
+test('drop: a stream that stays open past the wall bound still hits the wall rule (B)', async () => {
+  const l = await ownLab({ LAB_TICK_MS: '20', LAB_COOLDOWN_MS: '0', LAB_LOST_MS: '400', LAB_DROP_LOST_MS: '60000' });
+  try {
+    let seen = 0;
+    const dev = await fakeDevice(l, { pressMs: 5, beforeAnswer: async () => { seen++; throw new Error('never answers'); } });
+    const { body: j } = await l.queue({ builds: ['aaa1111'], repeats: 1, spacingMs: 0, ttlMs: 60000 });
+    const r = await apiOn(l, '/wait?job=' + j.id + '&timeout=10');
+    assert.equal(r.status, 200);
+    const wb = await r.json();
+    assert.equal(wb.job.state, 'done');
+    assert.equal(wb.job.presses.failed, 1);
+    assert.equal(seen, 2, 'sent twice on the wall bound, never a third time');
+    const logged = fs.readFileSync(path.join(l.home, 'log', 'server.log'), 'utf8');
+    assert.match(logged, /press 1 lost \(no result in /, 'the wall bound named it');
+    assert.doesNotMatch(logged, /device stream closed .* no result/, 'the stream never closed, so the drop rule never fired');
+    await dev.stop().catch(() => {});
+  } finally { await l.stop(); }
 });
 
 test('a device that reconnects gets the queue view again even though nothing changed', async () => {
