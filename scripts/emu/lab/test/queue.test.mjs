@@ -249,3 +249,16 @@ test('POST /jobs: 401 without the token creates no file; unknown build, bad rows
   assert.equal(ok.body.rows[0].fnBlocks, 8);
   await api('/jobs/' + ok.body.id, { method: 'DELETE' });
 });
+
+// The coded default is the 60 s device cooldown, not 0 — the cooldown gated
+// presses anyway, and now the job record says so. 0 stays an allowed override.
+test('POST /jobs: spacingMs defaults to 60 s; an explicit 0 is still back-to-back', async () => {
+  const dflt = await queue({ builds: ['aaa1111'], repeats: 1, ttlMs: 60000, device: 'nobody' });
+  assert.equal(dflt.status, 201);
+  assert.equal(dflt.body.spacingMs, 60000);
+  const zero = await queue({ builds: ['aaa1111'], repeats: 1, ttlMs: 60000, device: 'nobody', spacingMs: 0 });
+  assert.equal(zero.status, 201);
+  assert.equal(zero.body.spacingMs, 0);
+  await api('/jobs/' + dflt.body.id, { method: 'DELETE' });
+  await api('/jobs/' + zero.body.id, { method: 'DELETE' });
+});

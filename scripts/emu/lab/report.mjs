@@ -45,7 +45,7 @@ export function computeReport(job, presses) {
   const builds = job.builds;
   const excluded = [];
   const perBuild = {};
-  for (const b of builds) perBuild[b] = { presses: [], rows: {}, ratio: {}, identity: { uartSha256: null, consistent: true } };
+  for (const b of builds) perBuild[b] = { presses: [], rows: {}, ratio: {}, identity: {} };
 
   for (const p of presses) {
     const pb = perBuild[p.build];
@@ -93,12 +93,26 @@ export function computeReport(job, presses) {
       const s = stats(seq);
       pb.ratio[key] = { seq: s.seq.map((x) => round(x, 2)), best: round(s.best, 2), bestPress: s.bestPress, median: round(s.median, 2), spreadPct: s.spreadPct };
     }
-    // Byte-identity across the build's rows: every non-failed row of the
-    // build shares one UART sha, or the build ran two different things. A
-    // null sha is unknown, not inconsistent (DD46).
-    const shas = new Set();
-    for (const p of pb.presses) for (const r of p.results) if (r.uartSha256 && !r.failed) shas.add(r.uartSha256);
-    pb.identity = { uartSha256: shas.size ? Array.from(shas)[0] : null, consistent: shas.size <= 1, shas: Array.from(shas) };
+    // Byte-identity per IMAGE: every non-failed row of one image shares one
+    // UART sha, or that image ran two different things. Pooling the shas
+    // across the whole build was the bug — a job whose rows span
+    // render-basic and render-rocaille has two shas by construction and read
+    // as INCONSISTENT. A null sha is unknown, not inconsistent (DD46).
+    //
+    // Shape: `identity: { <slug>: {uartSha256, consistent, shas} }`, one entry
+    // per image the build produced a non-failed row for, slugs in sort order.
+    const shasBySlug = new Map();
+    for (const p of pb.presses) for (const r of p.results) {
+      if (r.failed) continue;
+      let set = shasBySlug.get(r.slug);
+      if (!set) shasBySlug.set(r.slug, (set = new Set()));
+      if (r.uartSha256) set.add(r.uartSha256);
+    }
+    pb.identity = {};
+    for (const slug of Array.from(shasBySlug.keys()).sort()) {
+      const set = shasBySlug.get(slug);
+      pb.identity[slug] = { uartSha256: set.size ? Array.from(set)[0] : null, consistent: set.size <= 1, shas: Array.from(set) };
+    }
     pb.presses = pb.presses.map((p) => ({ n: p.n, ok: p.ok }));
   }
 
@@ -232,7 +246,14 @@ export function renderReportMd(rep) {
       out.push('| ' + ['**' + shortKey(key) + ' ÷ interpreter, same press**', ...r.seq.map((x) => fmt(x, 2)), r.best === null ? '–' : '**' + fmt(r.best, 2) + '×**', fmt(r.median, 2), pct(r.spreadPct)].join(' | ') + ' |');
     }
     out.push('');
-    out.push('- byte-identity: ' + (pb.identity.consistent ? (pb.identity.uartSha256 ? 'UART `' + pb.identity.uartSha256.slice(0, 16) + '` on every row' : 'no sha reported') : '**INCONSISTENT** — ' + pb.identity.shas.map((s) => s.slice(0, 16)).join(', ')));
+    // One line per image: two images legitimately hold two shas, so the
+    // identity question is only ever asked within an image.
+    const idSlugs = Object.keys(pb.identity);
+    if (!idSlugs.length) out.push('- byte-identity: no rows');
+    for (const slug of idSlugs) {
+      const id = pb.identity[slug];
+      out.push('- byte-identity ' + slug + ': ' + (id.consistent ? (id.uartSha256 ? 'UART `' + id.uartSha256.slice(0, 16) + '` on every row' : 'no sha reported') : '**INCONSISTENT** — ' + id.shas.map((s) => s.slice(0, 16)).join(', ')));
+    }
     const ex = rep.excluded.filter((e) => e.build === b);
     if (ex.length) out.push('- excluded: ' + ex.map((e) => 'press ' + e.press + ' (' + e.reason.join(', ') + ')').join('; '));
     out.push('');
