@@ -2567,7 +2567,7 @@ impl Machine {
         // paid for nothing. The app core's own event is at that release,
         // from the request remembered above.
         for core in 0..1 {
-            let used = self.jit_gap_used();
+            let used = self.jit_gap_used(core);
             let installed = crate::jit::install(
                 &mut self.harts[core],
                 &mut self.bus,
@@ -2616,11 +2616,21 @@ impl Machine {
     /// was emitted with — so every new module's tables go past every live
     /// one's. Computed at each event, because a retired module hands its
     /// slice back.
+    ///
+    /// `skip` is the hart about to translate: its own live modules are not
+    /// counted here, because the event retires the writable one before it
+    /// places the new one and [`crate::jit::install_incremental`] maxes this
+    /// figure with what is left. Counting it would push every event's tables
+    /// a little further out and walk the gap's high-water mark up one module
+    /// per publish — measured on `boot-idle`, whose five events each took
+    /// another 1,245,184 bytes before this argument existed.
     #[cfg(any(feature = "jit", target_family = "wasm"))]
-    fn jit_gap_used(&mut self) -> u32 {
+    fn jit_gap_used(&mut self, skip: usize) -> u32 {
         self.harts
             .iter_mut()
-            .map(crate::jit::core_gap_used)
+            .enumerate()
+            .filter(|(i, _)| *i != skip)
+            .map(|(_, h)| crate::jit::core_gap_used(h))
             .max()
             .unwrap_or(0)
     }
@@ -2660,7 +2670,7 @@ impl Machine {
             if !self.harts[core].has_translated_core() {
                 continue;
             }
-            let used = self.jit_gap_used();
+            let used = self.jit_gap_used(core);
             let done = crate::jit::install_incremental(
                 &mut self.harts[core],
                 &mut self.bus,
@@ -4093,7 +4103,7 @@ impl Machine {
             // Past core 0's live modules in the arena gap: one gap, two harts,
             // and a target slot only means something inside the module it was
             // emitted with.
-            let used = self.jit_gap_used();
+            let used = self.jit_gap_used(1);
             match crate::jit::install(
                 &mut self.harts[1],
                 &mut self.bus,
