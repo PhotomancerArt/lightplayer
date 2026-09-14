@@ -6,6 +6,14 @@
 //     --image render-basic --grade t2 --mode jit --fn-blocks 32 --timeout 5500ms
 //   node scripts/emu/p6c-prof.mjs target/p6c/prof/CPU.*.cpuprofile
 //
+// M7 P08 gave it a `--chip` arm, so the CLASSIC's profile reads through the
+// same buckets:
+//
+//   node --cpu-prof --cpu-prof-dir=target/p08/prof \
+//     target/emu-xt-bench-web/xt-bench-cli.mjs --stage target/emu-xt-bench-web \
+//     --rows render-loop:t1:jit:8 --timeout 5500ms
+//   node scripts/emu/p6c-prof.mjs --chip esp32v3 target/p08/prof/CPU.*.cpuprofile
+//
 // `p6b-prof.mjs` answered "how much" — 55.4 % of the run at 64 blocks a
 // function — by bucketing on the frame's `url`. This answers "of what", and it
 // needs two things `p6b-prof.mjs` does not do.
@@ -32,12 +40,36 @@
 import { readFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 
-const paths = process.argv.slice(2).filter((a) => !a.startsWith('--'));
-const opt = new Set(process.argv.slice(2).filter((a) => a.startsWith('--')));
-if (!paths.length) {
-  console.error('usage: p6c-prof.mjs [--json] <file.cpuprofile> [...]');
+const argv = process.argv.slice(2);
+const paths = [];
+const opt = new Set();
+// `--chip esp32v3` (M7 P08) makes the same rules read the CLASSIC's profile.
+// Only three things in this file are chip-specific — which module's frames are
+// "the emulator", which symbol marks a translation ancestry, and the machine /
+// interpreter / translator namespaces the bucket rules match — and all three
+// are parameters below. The default is the C6, so every invocation that
+// predates the flag reads exactly as it did.
+let chip = 'esp32c6';
+for (let i = 0; i < argv.length; i++) {
+  if (argv[i] === '--chip') chip = argv[++i];
+  else if (argv[i].startsWith('--')) opt.add(argv[i]);
+  else paths.push(argv[i]);
+}
+if (chip === 'esp32') chip = 'esp32v3';
+if (chip !== 'esp32c6' && chip !== 'esp32v3') {
+  console.error('p6c-prof.mjs: --chip is esp32c6 or esp32v3, not ' + chip);
   process.exit(2);
 }
+if (!paths.length) {
+  console.error('usage: p6c-prof.mjs [--chip esp32c6|esp32v3] [--json] <file.cpuprofile> [...]');
+  process.exit(2);
+}
+/// The emulator crate whose frames are "the emulator's own wasm".
+const EMU_CRATE = 'lp_emu_' + chip;
+/// The symbols that mark a sample as translation rather than steady state.
+const INSTALL_RE = chip === 'esp32v3'
+  ? /lp_emu_esp32v3::jit::(install|build_module|emit)|install_translated_cores|translate_if_code_was_published/
+  : /lp_emu_esp32c6::jit::install|jit::emit_sizes|install_translated_core/;
 
 /// The bucket rules, in order — first match wins. Written against the
 /// DEMANGLED path, so a rule reads like the module it is about.
@@ -48,7 +80,7 @@ const RULES = [
   // entry up in. P6b priced this at 82.6 ns an entry natively, of which 24.5
   // was two ordered-map lookups; this is the same thing in wasm.
   [/BTreeMap<u32, u32>>::get/, 'entry index (BTreeMap lookups)'],
-  [/TranslatedCore<.*>>::run|JitCore as |mach::translated/, 'entry path (JitCore::run)'],
+  [/TranslatedCore<.*>>::run|JitCore as |XtJitCore|mach::translated/, 'entry path (JitCore::run)'],
 
   // --- MMIO: the bus's own dispatch, and the two host callbacks the module
   // calls through. Everything from the guest address to the peripheral.
@@ -79,18 +111,25 @@ const RULES = [
 
   // --- the hart's own loop, and the machine step around it.
   [/Esp32C6Machine>::run_until|Esp32C6Machine>::step|MachineHart<.*>>::step|machine::Esp32C6Machine>::(drain|service|pump)/, "hart slice loop"],
+  // The classic's twin: one machine type, and the Xtensa hart's own slice
+  // loop, which is where the window check and the block executor live.
+  [/Esp32V3Machine>::(run_until|step|drain|service|pump)|XtHart(<.*>)?>::(run_slice|step|poll_after_store)/, "hart slice loop"],
 
   // --- the interpreter: the ~6.5 % of instructions translated code does not
   // cover, plus everything between an exit and the next entry.
   [/emu::executor|emu::decoder|riscv_emu::mach::(csr|trap|trigger|block)|fetch_instruction/, 'interpreter'],
   [/lp_riscv_emu::/, 'interpreter'],
+  // The Xtensa interpreter and its decoder. `lp_xt_inst` is the decode table
+  // both the interpreter and the translator share, so it lands here only when
+  // the translation ancestry test did not already claim the sample.
+  [/lp_xt_emu::mach::(sr|exc|window|block)|lp_xt_emu::|lp_xt_inst::/, 'interpreter'],
 
   // --- the block cache the interpreter serves those instructions from.
   [/lp_emu_core::block|esp32c6::cache/, 'block cache'],
 
   // --- translation. Only reached when the ancestry test did not already
   // catch it (an emit that happens off `jit::install`'s stack).
-  [/wasm_encoder|leb128fmt|lp_emu_jit::(translate|dispatch|decode|discover|blocks)|jit::install|jit::arena_word|emit_sizes/, 'translation (emit)'],
+  [/wasm_encoder|leb128fmt|lp_emu_jit::(translate|dispatch|decode|discover|blocks)|lp_xt_jit::(translate|discover|blocks|replay)|jit::install|jit::arena_word|emit_sizes/, 'translation (emit)'],
 
   // --- the wasm runtime under all of it.
   [/^(dlmalloc|dlfree|dlcalloc|calloc|malloc|free|realloc|sbrk|memcpy|memset|memmove|__multi3|__udivti3|abort)$/, 'allocator + runtime'],
@@ -120,7 +159,7 @@ for (const path of paths) {
     self.set(p.samples[i], (self.get(p.samples[i]) ?? 0) + dt);
   }
 
-  const isEmu = (f) => (f.url || '').includes('lp_emu_esp32c6');
+  const isEmu = (f) => (f.url || '').includes(EMU_CRATE);
   const isTranslated = (f) => (f.url || '').startsWith('wasm://') && !isEmu(f);
 
   // Demangle every emulator-module name the profile carries, in one call.
@@ -138,7 +177,7 @@ for (const path of paths) {
     let v = false;
     if (n) {
       const nm = isEmu(n.callFrame) ? nameOf.get(n.callFrame.functionName) ?? '' : '';
-      v = /lp_emu_esp32c6::jit::install|jit::emit_sizes|install_translated_core/.test(nm)
+      v = INSTALL_RE.test(nm)
         || (parent.has(id) ? isInstalling(parent.get(id)) : false);
     }
     installing.set(id, v);

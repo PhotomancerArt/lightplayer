@@ -466,7 +466,8 @@ profile session calls `create_dir_all`, and only a `--jit-record` or
 #### The JIT seam: `emu_host`, and which core a board runs
 
 The wasm build installs a **translated core by default**
-(`machine::TRANSLATED_BY_DEFAULT = cfg!(target_family = "wasm")`), so the
+(`machine::TRANSLATED_BY_DEFAULT = cfg!(target_family = "wasm")` — the same
+constant on the C6 and, since M7 P08, on the classic), so the
 module declares two more imports, in the namespace **`emu_host`** —
 `jit_compile(ptr, len, base, timings) -> i32` and `jit_release(idx)` — and
 **an instantiation that does not supply them fails at link time**. There is no

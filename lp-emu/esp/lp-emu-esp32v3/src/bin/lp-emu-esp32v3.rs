@@ -181,12 +181,18 @@ OPTIONS:
                             accepting the flag and interpreting quietly.
                             Direct load only: --boot-mode rom-up installs
                             nothing, because the ROM puts the image in place
-                            with guest stores. Today every instruction escapes
-                            back to the interpreter, so this is SLOWER than
-                            --interpreter and what it proves is identity
-    --interpreter           run no translated core. The default natively, and
+                            with guest stores. Natively wasmtime spends
+                            minutes of cranelift on these images, so a native
+                            --jit run proves IDENTITY and its seconds are not
+                            a speed number; the browser build is where the
+                            number is read (scripts/emu/build-xt-wasm.sh)
+    --interpreter           run no translated core. The default NATIVELY, and
                             the off-switch the identity oracle compares --jit
-                            against (scripts/emu/v3-oracle.sh)
+                            against (scripts/emu/v3-oracle.sh). In the
+                            wasm32-wasip1 build the default is the other way
+                            round — the translated core is the product core
+                            there (machine::TRANSLATED_BY_DEFAULT) — and this
+                            is the oracle leg the desk and phone rows take
     --jit-seeds <file>      OVERRIDE the sweep's seeds with this list, one
                             address per line (0x-prefixed or decimal; blank
                             lines and #-comments ignored). Without it --jit
@@ -251,9 +257,15 @@ struct Args {
     /// `--no-block-cache`. The cache is ON by default, so the flag is held as
     /// its negation and `Default` gives the default behaviour.
     no_block_cache: bool,
-    /// `--jit`. Off by default natively, so the flag is held as its positive
-    /// and `--interpreter` clears it; the two are the identity oracle's pair.
+    /// `--jit`. Held as **two** positives rather than one `bool` with a
+    /// default, because the default is the target's
+    /// (`machine::TRANSLATED_BY_DEFAULT`: on in the wasm build, off natively)
+    /// and `Args` derives `Default`. `--jit` only ever turns translation ON and
+    /// `--interpreter` only ever turns it OFF; a run that names neither takes
+    /// the build's own policy. The two are the identity oracle's pair.
     jit: bool,
+    /// `--interpreter`. See `jit` above.
+    interpreter: bool,
     jit_seeds: Option<PathBuf>,
     jit_blocks: Option<usize>,
     jit_fn_blocks: Option<usize>,
@@ -316,6 +328,9 @@ fn run() -> Result<ExitCode, String> {
     // is the whole point: the alternative is a flag that is accepted and does
     // nothing, and then a measurement of the interpreter labelled as the
     // translator's.
+    if args.jit && args.interpreter {
+        return Err("`--jit` and `--interpreter` ask for opposite things; name one".into());
+    }
     if args.jit && !cfg!(any(feature = "jit", target_family = "wasm")) {
         return Err(
             "`--jit` needs a binary built with the translator: cargo build --release -p \
@@ -339,7 +354,6 @@ fn run() -> Result<ExitCode, String> {
         .cache_off_fetch(args.cache_off)
         .app_mmu_divergence(args.mmu_divergence)
         .core_quantum(args.core_quantum.unwrap_or(CORE_QUANTUM_DEFAULT))
-        .jit(args.jit)
         .jit_report(args.jit_report)
         .rmt_logs(args.rmt_logs)
         .dump_frames(args.dump_frames.clone())
@@ -356,6 +370,16 @@ fn run() -> Result<ExitCode, String> {
         .efuse(args.efuse)
         .uart0(args.uart0.clone())
         .reboot_on_reset(args.reboot_on_reset);
+    // Neither flag leaves the builder's own default (`TRANSLATED_BY_DEFAULT`)
+    // alone to decide. `.jit(args.jit)` would have *cleared* the wasm default
+    // on every run that did not repeat the flag, which is how a product build
+    // silently measures the interpreter.
+    if args.jit {
+        builder = builder.jit(true);
+    }
+    if args.interpreter {
+        builder = builder.jit(false);
+    }
     if let Some(baud) = args.uart0_baud {
         builder = builder.uart0_baud(baud);
     }
@@ -996,7 +1020,7 @@ fn parse(argv: Vec<String>) -> Result<Args, String> {
             "--strict-bus" => args.strict = true,
             "--no-block-cache" => args.no_block_cache = true,
             "--jit" => args.jit = true,
-            "--interpreter" => args.jit = false,
+            "--interpreter" => args.interpreter = true,
             "--jit-report" => args.jit_report = true,
             "--jit-seeds" => args.jit_seeds = Some(PathBuf::from(value()?)),
             "--jit-blocks" => {

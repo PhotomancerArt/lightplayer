@@ -1051,10 +1051,12 @@ pub struct Esp32V3Builder {
     strap_word: u32,
     /// `--jit`: install a translated core at the boot event (M7 P04).
     ///
-    /// Off natively, always: wasmtime needs cranelift compilation on the
-    /// images this ladder measures, and every test and gate depends on this
-    /// binary starting fast (JD9/JD24). `--interpreter` is its off-switch, and
-    /// on a wasm target (P08) the default is the other way round.
+    /// [`TRANSLATED_BY_DEFAULT`] — off natively, always: wasmtime needs
+    /// cranelift compilation on the images this ladder measures, and every
+    /// test and gate depends on this binary starting fast (JD9/JD24).
+    /// `--interpreter` is its off-switch, and on a wasm target (P08) the
+    /// default is the other way round, because there the translator *is* the
+    /// core.
     jit: bool,
     /// `--jit-seeds <file>`: an **override** of the sweep's seeds (P05).
     ///
@@ -1105,7 +1107,7 @@ impl Default for Esp32V3Builder {
             control_script: Vec::new(),
             reboot_on_reset: false,
             strap_word: crate::periph::accept::GPIO_STRAP_SPI_FAST_FLASH_BOOT,
-            jit: false,
+            jit: TRANSLATED_BY_DEFAULT,
             jit_seeds: Vec::new(),
             jit_blocks: JIT_BLOCKS_DEFAULT,
             jit_fn_blocks: JIT_FN_BLOCKS_DEFAULT,
@@ -1164,6 +1166,31 @@ const VECTOR_OFFSETS: [u32; 15] = [
     0x000, 0x040, 0x080, 0x0c0, 0x100, 0x140, 0x180, 0x1c0, 0x200, 0x240, 0x280, 0x2c0, 0x300,
     0x340, 0x3c0,
 ];
+
+/// Does this build install a translated core when nothing on the command line
+/// asks either way? (M7 P08 — the twin of `lp_emu_esp32c6::machine::
+/// TRANSLATED_BY_DEFAULT`, same constant, same reasons.)
+///
+/// **`true` on a wasm target, `false` natively**, and both halves are
+/// decisions rather than conveniences:
+///
+/// - The wasm build *is* the product build. It is what the browser bench and
+///   the phone rig run, and its core is the translator: the guest's own
+///   program compiled to wasm and run by the same engine that runs the rest
+///   of the app. `--interpreter` is how you get the old one, and it stays
+///   forever — as the free differential oracle (the desk rows' identity
+///   column) and as the way back from this flip.
+/// - Natively the interpreter is still the default (JD9/JD24): wasmtime needs
+///   130–220 s of cranelift over these images, and every test and CI job
+///   depends on this binary starting fast. `--jit` on a build with
+///   `--features jit` is what the identity oracle compares.
+///
+/// This is a *policy* constant and nothing more. What it selects — whether a
+/// core is installed — is not architectural state: `mach::translated`'s
+/// contract is that a run with a core and a run without one produce a
+/// byte-identical everything, which is what makes flipping a default a
+/// reversible act rather than a new behaviour.
+pub const TRANSLATED_BY_DEFAULT: bool = cfg!(target_family = "wasm");
 
 /// `--jit-blocks`: the most blocks one translation event installs.
 ///
