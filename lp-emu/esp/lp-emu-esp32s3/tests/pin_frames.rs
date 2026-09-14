@@ -59,6 +59,18 @@ const LATCH: u16 = 24_000;
 /// literal 3 — the S3's and the classic's is three where the C6's is two.
 const CYCLES_PER_TICK: u64 = memmap::CPU_HZ / 80_000_000;
 
+/// One bit word on the wire, in channel ticks: a zero is `T0H + T0L` and a one
+/// is `T1H + T1L`, and WS2812 makes those the same 1.25 µs. Having the number
+/// once is what keeps "n words" from being written as a cycle count with the
+/// tick conversion applied twice — 37 words is 37 × 100 × 3 cycles, and
+/// `37 * 300 * CYCLES_PER_TICK` is 111 words, two thresholds further on.
+const WORD_TICKS: u64 = (T0H + T0L) as u64;
+
+/// Cycles for `n` bit words at `div_cnt = 1`.
+fn words_in_cycles(n: u64) -> u64 {
+    n * WORD_TICKS * CYCLES_PER_TICK
+}
+
 /// **D10 on the XIAO ESP32-S3, and no project retarget.**
 /// `projects/test/shader-oracle` names `ws281x:local:D10`; the checked-in
 /// `seeed/xiao-esp32-s3-plus` profile maps `D10` to `/gpio/9`. The classic
@@ -126,12 +138,17 @@ fn gpio_reg(name: &str) -> u32 {
     memmap::periph::GPIO + off(&regs::GPIO, name)
 }
 
-fn tx_end_bit(ch: usize) -> u32 {
-    (CONFIG.int_bit)(Dir::Tx, IntKind::End, ch)
+// ⚠️ `Config::int_bit` answers a bit **position**, not a mask — it is the
+// argument of a shift in the view's own `raise`. These two are the masks an
+// ISR tests `int_raw` and writes `int_clr` with, so the shift belongs here.
+// Getting it wrong is silent on channel 0's `tx_end` (position 0 masks
+// nothing) and reads exactly like a channel that wraps and never refills.
+fn tx_end_mask(ch: usize) -> u32 {
+    1 << (CONFIG.int_bit)(Dir::Tx, IntKind::End, ch)
 }
 
-fn tx_thr_bit(ch: usize) -> u32 {
-    (CONFIG.int_bit)(Dir::Tx, IntKind::Thr, ch)
+fn tx_thr_mask(ch: usize) -> u32 {
+    1 << (CONFIG.int_bit)(Dir::Tx, IntKind::Thr, ch)
 }
 
 // ---- the rig -------------------------------------------------------------
@@ -191,23 +208,36 @@ fn start_frame(m: &mut Machine, stream: &[u32]) {
 fn run_the_frame(m: &mut Machine, stream: &[u32], step: u64) -> usize {
     let mut next = WINDOW;
     let mut refills = 0usize;
+    // The half the reader has just finished, which is the half to refill: the
+    // first threshold is the one `start_frame` armed at `HALF`, and by then
+    // words `0..HALF` are behind the read pointer.
     let mut half = 0usize;
+    // ⚠️ **`tx_lim` is a position in the window, not a repeating count** — the
+    // shared view's module doc says so, and this is what it costs to forget.
+    // The ISR flips it between `HALF` and `WINDOW` (the wrap back to word 0);
+    // re-arming it at `HALF` every time fires one threshold a lap instead of
+    // two, so one of the two halves is never refilled and replays the words it
+    // has already sent. The symptom is a frame with a whole window too many
+    // bits in it, and before the mask above was fixed it was a channel that
+    // wrapped and never refilled at all.
+    let mut lim = WINDOW;
     for _ in 0..4_000 {
         let raw = m
             .peek_word(rmt_reg(CONFIG.int_raw))
             .expect("the RMT answers a host read");
-        if raw & tx_end_bit(0) != 0 {
+        if raw & tx_end_mask(0) != 0 {
             break;
         }
-        if raw & tx_thr_bit(0) != 0 {
-            assert!(m.poke_word(rmt_reg(CONFIG.int_clr), tx_thr_bit(0)));
-            assert!(m.poke_word(rmt_reg(CONFIG.ch_tx_lim[0]), HALF as u32));
+        if raw & tx_thr_mask(0) != 0 {
+            assert!(m.poke_word(rmt_reg(CONFIG.int_clr), tx_thr_mask(0)));
+            assert!(m.poke_word(rmt_reg(CONFIG.ch_tx_lim[0]), lim as u32));
             for k in 0..HALF {
                 let v = stream.get(next + k).copied().unwrap_or(0);
                 assert!(m.poke_word(ram((half * HALF + k) as u32), v));
             }
             next += HALF;
             half ^= 1;
+            lim = if lim == WINDOW { HALF } else { WINDOW };
             refills += 1;
         }
         let until = m.clock() + step;
@@ -327,7 +357,7 @@ fn a_frame_still_in_flight_is_flushed_incomplete() {
     arm_channel_0(&mut m);
     start_frame(&mut m, &stream);
     // Enough bits for the decoder to be mid-frame, nowhere near the latch.
-    let until = m.clock() + 40 * 300 * CYCLES_PER_TICK;
+    let until = m.clock() + words_in_cycles(40);
     m.run_until(&StopCondition {
         stop_cycle: Some(until),
         ..Default::default()
@@ -466,7 +496,7 @@ fn the_decoders_ride_the_snapshot() {
     arm_channel_0(&mut m);
     start_frame(&mut m, &stream);
 
-    let until = m.clock() + 37 * 300 * CYCLES_PER_TICK;
+    let until = m.clock() + words_in_cycles(37);
     m.run_until(&StopCondition {
         stop_cycle: Some(until),
         ..Default::default()
