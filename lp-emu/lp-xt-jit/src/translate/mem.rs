@@ -302,6 +302,9 @@ impl Emitter<'_> {
         self.guest_offset();
         self.get(rt);
         self.i(ins);
+        // Two run-time paths, one static "committed" flag: each path emits
+        // its own decrement, and the flag is restored between them.
+        let committed = self.loop_committed;
         self.loop_commit();
         self.pending_poll(k, next, cost);
         self.i(I::Else);
@@ -311,6 +314,7 @@ impl Emitter<'_> {
         // decrement is part of that state (the handler's `save_context`
         // reads `LCOUNT`), so it is committed first and undone if the bus
         // refused the store.
+        self.loop_committed = committed;
         self.loop_commit();
         self.i(I::I32Const(pc as i32));
         self.i(I::LocalGet(L_CYC));

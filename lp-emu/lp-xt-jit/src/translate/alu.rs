@@ -309,11 +309,17 @@ impl Emitter<'_> {
                 self.i(I::I32Eqz);
                 self.i(I::If(BlockType::Empty));
                 self.extra += 1;
+                // The escape flushes the pending charges on this arm only;
+                // the static accumulator has to read the same on the arm
+                // that carries on.
+                let pending = (self.cycles, self.retired);
                 self.escaped_insts += 1;
                 self.escape(k, pc, d);
                 self.escape_straight_on(k, next);
                 // The hart never retires a zero-divisor divide straight on.
                 self.i(I::Unreachable);
+                self.cycles = pending.0;
+                self.retired = pending.1;
                 self.extra -= 1;
                 self.i(I::End);
                 match op {

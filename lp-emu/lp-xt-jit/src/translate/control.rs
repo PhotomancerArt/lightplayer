@@ -255,7 +255,13 @@ impl Emitter<'_> {
         };
         let taken = self.cost(InstClass::BranchTaken);
         let not_taken = self.cost(InstClass::BranchNotTaken);
+        // The pending charges are captured and the static accumulator
+        // zeroed **before** either path is emitted: a `goto` whose target
+        // is outside the set is an `exit`, and an exit hands back whatever
+        // the accumulator still holds.
         let (cycles, retired) = (self.cycles, self.retired);
+        self.cycles = 0;
+        self.retired = 0;
         self.condition(d);
         self.i(I::LocalSet(L_T));
         self.loop_commit();
@@ -269,8 +275,6 @@ impl Emitter<'_> {
         self.i(I::End);
         self.add_cycles(cycles + not_taken);
         self.add_retired(retired + 1);
-        self.cycles = 0;
-        self.retired = 0;
         if self.loop_mark.is_some() {
             self.i(I::LocalGet(L_LOOPED));
             self.i(I::If(BlockType::Empty));
@@ -409,21 +413,31 @@ impl Emitter<'_> {
                 true
             }
         };
+        // The pending charges are handed back on **both** paths from the
+        // same captured values: a flush inside the skip arm would reset the
+        // static accumulator for the fall-through arm too.
+        let (cycles, retired) = (self.cycles, self.retired);
         if skip {
             self.i(I::If(BlockType::Empty));
             self.extra += 1;
             self.pending_poll(k, lend, cost);
-            self.cycles += cost;
-            self.retired += 1;
-            self.flush_counters();
+            // The pending charges, handed back before the `goto` (whose
+            // out-of-set case is an exit that would hand them back again).
+            self.cycles = 0;
+            self.retired = 0;
+            self.add_cycles(cycles + cost);
+            self.add_retired(retired + 1);
             self.goto(k, lend);
+            self.cycles = cycles;
+            self.retired = retired;
             self.extra -= 1;
             self.i(I::End);
         }
         self.pending_poll(k, next, cost);
-        self.cycles += cost;
-        self.retired += 1;
-        self.flush_counters();
+        self.cycles = 0;
+        self.retired = 0;
+        self.add_cycles(cycles + cost);
+        self.add_retired(retired + 1);
         self.fall_through(k, next);
     }
 }
