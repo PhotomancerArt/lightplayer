@@ -597,6 +597,24 @@ impl<B: Bus> XtHart<B> {
         self.core_flush_pending = PendingInvalidate::None;
     }
 
+    /// Rebuild the entry table over `entries`, **keeping** the installed core.
+    ///
+    /// What a core that grew rather than being replaced needs (M7 P07): the
+    /// publish-by-store event installs an additional module beside the ones
+    /// already compiled, which widens the set of pcs the hart may enter at,
+    /// and nothing else about the core changes. A pending flush is left
+    /// alone, because unlike [`Self::set_translated_core`] the core this
+    /// applies to is the same core that asked for it.
+    pub fn set_translated_entries(&mut self, entries: &[u32]) {
+        self.core_entries = translated::entry_table(entries);
+    }
+
+    /// The installed core, to reach something only it and its own machine
+    /// crate understand — see [`translated::TranslatedCore::as_any_mut`].
+    pub fn translated_core_mut(&mut self) -> Option<&mut translated::BoxedCore<B>> {
+        self.core.as_mut()
+    }
+
     /// Remove the installed core, if any, and go back to interpreting.
     ///
     /// This is what `--interpreter` reaches: every build can turn the

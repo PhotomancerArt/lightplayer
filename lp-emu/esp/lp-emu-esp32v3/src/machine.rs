@@ -1740,6 +1740,11 @@ impl Esp32V3Builder {
             pc_census_path: self.pc_census.clone(),
             code_write_spans: Vec::new(),
             track_code_writes: false,
+            #[cfg(any(feature = "jit", target_family = "wasm"))]
+            jit_code_write_in_window: false,
+            #[cfg(any(feature = "jit", target_family = "wasm"))]
+            jit_publish_pending: false,
+            jit_retranslations: 0,
             core_quantum: self.core_quantum,
             wfi_ends: [0; CORES],
             #[cfg(feature = "bench")]
@@ -2114,6 +2119,29 @@ pub struct Machine {
     /// drains the same ring.
     code_write_spans: Vec<(u32, u32)>,
     track_code_writes: bool,
+    /// **The publish-by-store event's burst rule** (XD10).
+    ///
+    /// The guest publishes ~1,300 word stores at a time (the JIT region, 5
+    /// KiB, once per project load), and the drain fires on the first of them.
+    /// Retiring is immediate — the hart's own drain at polling point (c)
+    /// marks the writable module stale before another translated block runs,
+    /// so nothing stale is ever *entered* — but **retranslating** per store
+    /// would pay cranelift 1,300 times for one publish. So: a code write in
+    /// the window just run sets this, and the event fires at the first
+    /// boundary that finds it clear with a non-empty published set. Exactly
+    /// "the boundary after the burst", at the cost of one `bool` per slice.
+    ///
+    /// The rule is a **speed** decision and not a correctness one: retiring
+    /// already happened, so firing late costs interpreted instructions and
+    /// firing early costs a second compile, and neither can move a byte of
+    /// the transcript.
+    #[cfg(any(feature = "jit", target_family = "wasm"))]
+    jit_code_write_in_window: bool,
+    /// Whether anything has been published since the last event ran.
+    #[cfg(any(feature = "jit", target_family = "wasm"))]
+    jit_publish_pending: bool,
+    /// How many publish-by-store events this run ran.
+    jit_retranslations: u64,
     /// The pads, online: one [`Ws281xDecoder`] per routed pad, the frames
     /// they completed, and the two host sinks.
     ///
@@ -2539,6 +2567,7 @@ impl Machine {
         // paid for nothing. The app core's own event is at that release,
         // from the request remembered above.
         for core in 0..1 {
+            let used = self.jit_gap_used();
             let installed = crate::jit::install(
                 &mut self.harts[core],
                 &mut self.bus,
@@ -2547,6 +2576,7 @@ impl Machine {
                 max_blocks,
                 fn_blocks,
                 event,
+                used,
             )
             .map_err(BuildError::App)?;
             // The boot-cost line, on stderr and masked by `v3-oracle.sh`: it
@@ -2579,6 +2609,108 @@ impl Machine {
         self.track_code_writes = true;
     }
 
+    /// How much of the arena gap the modules on **both** harts have taken.
+    ///
+    /// One gap, four or more module instances (two harts × read-only +
+    /// writable), and a target slot only means something inside the module it
+    /// was emitted with — so every new module's tables go past every live
+    /// one's. Computed at each event, because a retired module hands its
+    /// slice back.
+    #[cfg(any(feature = "jit", target_family = "wasm"))]
+    fn jit_gap_used(&mut self) -> u32 {
+        self.harts
+            .iter_mut()
+            .map(crate::jit::core_gap_used)
+            .max()
+            .unwrap_or(0)
+    }
+
+    /// **The publish-by-store event** (XD10), at the slice boundary after the
+    /// burst stopped landing.
+    ///
+    /// The retire has already happened: a guest store into executable memory
+    /// raises the `code_dirty` side-band (XD3), the hart drains it at polling
+    /// point (c) into `invalidate_block_range`, and the core answers that by
+    /// re-reading each module's bytes and marking the ones that changed
+    /// stale. A stale module is never entered again. What is left for this —
+    /// and it is the only thing left — is to translate the code the guest
+    /// published, so the run does not interpret it for the rest of the window.
+    ///
+    /// Both harts, because the classic's two cores run the same image and a
+    /// publish on one is code the other may call.
+    #[cfg(any(feature = "jit", target_family = "wasm"))]
+    fn translate_if_code_was_published(&mut self) {
+        if !self.jit_publish_pending {
+            return;
+        }
+        if self.jit_code_write_in_window {
+            // The burst is still landing. One `bool` per boundary is what the
+            // rule costs; see the field's own docs.
+            self.jit_code_write_in_window = false;
+            return;
+        }
+        let Some(request) = self.jit_install.clone() else {
+            self.jit_publish_pending = false;
+            return;
+        };
+        self.jit_publish_pending = false;
+        self.jit_retranslations += 1;
+        let written = self.code_write_spans.clone();
+        for core in 0..CORES {
+            if !self.harts[core].has_translated_core() {
+                continue;
+            }
+            let used = self.jit_gap_used();
+            let done = crate::jit::install_incremental(
+                &mut self.harts[core],
+                &mut self.bus,
+                core,
+                &request.walk.as_walk(),
+                &written,
+                request.fn_blocks,
+                used,
+            );
+            match done {
+                // The event's own cost line, on stderr and masked by
+                // `v3-oracle.sh` exactly as the boot event's is: it is the
+                // host's cost and no reading of the guest can see it.
+                Ok(crate::jit::Incremental::Added(built)) => eprintln!(
+                    "jit: {}",
+                    built.boot_line(
+                        core,
+                        &format!("publish-by-store #{}", self.jit_retranslations)
+                    )
+                ),
+                Ok(crate::jit::Incremental::Nothing) => eprintln!(
+                    "jit: core{core} publish-by-store #{}: the published code was already \
+                     translated; nothing to add",
+                    self.jit_retranslations
+                ),
+                // Loud and not fatal: the core keeps what it has and the
+                // published code is interpreted, which is slow and exact.
+                Ok(crate::jit::Incremental::WholeImage(why)) => {
+                    log::warn!(
+                        "jit: core{core}: the incremental path does not apply ({why}); the \
+                         published code will be interpreted"
+                    );
+                }
+                Err(e) => {
+                    log::warn!("jit: core{core}: the published code did not translate: {e}");
+                }
+            }
+        }
+    }
+
+    /// How many publish-by-store events this run ran.
+    ///
+    /// The C6's spike observed exactly one per project load on the pinned
+    /// images. A run that reports many is a finding, not a tuning
+    /// opportunity.
+    #[must_use]
+    pub fn jit_retranslations(&self) -> u64 {
+        self.jit_retranslations
+    }
+
     /// Drain the bus's code-write ring into the machine's own list.
     ///
     /// The ring holds eight coalesced spans and the render loop stores into
@@ -2589,6 +2721,13 @@ impl Machine {
         let spans = self.bus.take_guest_code_writes();
         if spans.is_empty() {
             return;
+        }
+        // The burst rule's one `bool`: something was published in the window
+        // just run, so the event waits for the boundary after it.
+        #[cfg(any(feature = "jit", target_family = "wasm"))]
+        {
+            self.jit_code_write_in_window = true;
+            self.jit_publish_pending = true;
         }
         self.code_write_spans.extend(spans);
         if self.code_write_spans.len() > 1024 {
@@ -3507,6 +3646,12 @@ impl Machine {
                     }
                 }
             }
+            // **The second translation event** (XD10): the guest published
+            // code, the writable module is already retired by the hart's own
+            // drain, and the burst has stopped landing. Host time — no cycle
+            // is charged for it and no transcript can see it.
+            #[cfg(any(feature = "jit", target_family = "wasm"))]
+            self.translate_if_code_was_published();
 
             if !self.pending_breaks.is_empty() {
                 self.arm_pending_breaks();
@@ -3944,6 +4089,10 @@ impl Machine {
         // and exact.
         #[cfg(any(feature = "jit", target_family = "wasm"))]
         if let Some(request) = self.jit_install.clone() {
+            // Past core 0's live modules in the arena gap: one gap, two harts,
+            // and a target slot only means something inside the module it was
+            // emitted with.
+            let used = self.jit_gap_used();
             match crate::jit::install(
                 &mut self.harts[1],
                 &mut self.bus,
@@ -3952,6 +4101,7 @@ impl Machine {
                 request.max_blocks,
                 request.fn_blocks,
                 "app-core release",
+                used,
             ) {
                 Ok(installed) => {
                     eprintln!("jit: {}", installed.boot_line());
