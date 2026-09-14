@@ -74,7 +74,18 @@ use lp_xt_jit::lp_emu_jit::host::{
     self, EXCHANGE_LEN, ExchangeLayout, HostOps, MmioLoad, MmioStore, PERM_ENTRIES, PERM_NONE,
     PERM_READ, PERM_SHIFT, Polled, STEP_CONTINUE, STEP_SLICE_ENDED, StepOne,
 };
-use lp_xt_jit::lp_emu_jit::host_wasmtime::WasmtimeCore;
+// Which host runs the emitted module, chosen by target and by nothing else —
+// the C6's `jit.rs` line for line (P08).
+//
+// The two have the same surface on purpose — `new`, `enter`, `compile_us`,
+// `instantiate_us`, `module_bytes`, `ops_mut` — so everything below this line
+// is one code path. `WasmtimeCore` exists so identity can be proven on the
+// desk (JD18, XD14's CI cell); `BrowserCore` is the product host, and on a
+// wasm target it is not a choice: it is the only thing that can run a module.
+#[cfg(target_family = "wasm")]
+use lp_xt_jit::lp_emu_jit::host_browser::BrowserCore as HostCore;
+#[cfg(not(target_family = "wasm"))]
+use lp_xt_jit::lp_emu_jit::host_wasmtime::WasmtimeCore as HostCore;
 use lp_xt_jit::lp_emu_jit::translate::Layout;
 use lp_xt_jit::replay::case::{self, Call};
 use lp_xt_jit::replay::marshal;
@@ -976,7 +987,7 @@ impl Recorder {
 /// every installed module's block starts as a stop set, so exactly one module
 /// answers for any pc.
 struct XtModule {
-    core: WasmtimeCore<V3Ops>,
+    core: HostCore<V3Ops>,
     /// Guest pc to this module's **local** block index. The hart's own
     /// byte-indexed entry table says *whether* a pc is an entry; the core's
     /// index says which module and which block.
@@ -1411,8 +1422,13 @@ impl TranslatedCore<SocBus> for XtJitCore {
         self.stats.poll_left += poll_left;
         self.stats.poll_code_dirty += poll_code_dirty;
 
-        let exit_pc = match entered {
-            Ok(exit) => exit.pc,
+        let (exit_pc, flags) = match entered {
+            // `exit.flags` since DD111: both hosts read the flags at
+            // `HostOps::layout().flags()`, which for this core is the Xtensa
+            // layout's offset past the 64-word `AR` file. P04 read them here
+            // instead, because the hosts held RV32's constant and that offset
+            // lands *inside* the register file on this machine.
+            Ok(exit) => (exit.pc, exit.flags),
             // The emitted module cannot trap on any path this translator
             // emits, so a trap is a translator bug. Saying so and refusing is
             // the only answer that keeps the transcript right.
@@ -1423,9 +1439,6 @@ impl TranslatedCore<SocBus> for XtJitCore {
             }
         };
 
-        // The flags are read at **this layout's** offset (P04's workaround:
-        // `WasmtimeCore::enter` reads `exit.flags` at RV32's fixed offset,
-        // which past a 64-word file is inside the AR file).
         let x = self.mods[which_mod].core.ops_mut().exchange_slice();
         let read_i64 = |x: &[u8], at: u64| {
             u64::from_le_bytes(x[at as usize..][..8].try_into().expect("eight bytes"))
@@ -1435,7 +1448,11 @@ impl TranslatedCore<SocBus> for XtJitCore {
         };
         let cycle_count = read_i64(x, lp_xt_jit::LAYOUT.cycle());
         let instruction_count = read_i64(x, lp_xt_jit::LAYOUT.instret());
-        let flags = read_i32(x, lp_xt_jit::LAYOUT.flags());
+        debug_assert_eq!(
+            flags,
+            read_i32(x, lp_xt_jit::LAYOUT.flags()),
+            "DD111: the host read the flags somewhere other than this layout's offset"
+        );
         let exit_why = read_i32(x, lp_xt_jit::LAYOUT.exit_why());
         let dirty = marshal::dirty(x);
         let words_out = recording.then(|| marshal::words(x));
@@ -1892,7 +1909,7 @@ fn build_module(
     // `arena_guard` is the arena's own report: when it is `Some`, the bytes
     // past `arena_len` really are unmapped out to the end of the reservation
     // and its guard.
-    let core = unsafe { WasmtimeCore::new(&emitted.wasm, ops, arena_ptr, arena_len, arena_guard) }
+    let core = unsafe { HostCore::new(&emitted.wasm, ops, arena_ptr, arena_len, arena_guard) }
         .map_err(|e| format!("the translated module did not build: {e:?}"))?;
 
     let report = BuildReport {
