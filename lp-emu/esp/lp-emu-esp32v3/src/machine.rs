@@ -2667,6 +2667,7 @@ impl Machine {
                 core,
                 &request.walk.as_walk(),
                 &written,
+                request.max_blocks,
                 request.fn_blocks,
                 used,
             );

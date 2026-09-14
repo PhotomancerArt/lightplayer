@@ -696,7 +696,11 @@ impl BuildReport {
         self.indirect_bytes += other.indirect_bytes;
         self.indirect_pages += other.indirect_pages;
         self.escape_all |= other.escape_all;
-        if other.stats.starts != 0 {
+        // The walk's own figures belong to the event that walked, and the
+        // first module of the boot event is the one that carries them. A
+        // later event's are its own and would otherwise overwrite the line
+        // that describes the image.
+        if self.stats.starts == 0 {
             self.stats = other.stats;
         }
         for (k, v) in &other.static_escapes {
@@ -2134,6 +2138,7 @@ pub fn install_incremental(
     which: usize,
     walk: &Walk,
     written: &[(u32, u32)],
+    max_blocks: usize,
     fn_blocks: usize,
     gap_used: u32,
 ) -> Result<Incremental, String> {
@@ -2158,16 +2163,23 @@ pub fn install_incremental(
     core.retire_all_but_read_only();
     let known = core.starts();
     let used = gap_used.max(core.gap_used());
+    // The budget is the whole core's, not this module's: a boot event that
+    // was bounded (`--jit-blocks`, and the CI cell is one) must not have the
+    // rest of the image arrive through the back door at the first publish.
+    let budget = max_blocks.saturating_sub(known.len());
 
     // Two seed lists, because neither sees everything on its own: the image's
     // own symbols still name `.rwtext`, and only the guest's own write spans
-    // name the JIT region.
-    let (found, discover_us) = walk_image(bus, walk, usize::MAX, &known);
+    // name the JIT region. The written walk is bounded by the spans
+    // themselves and so is never the budget's problem; it goes first for
+    // exactly that reason — the published code is what this event is for.
+    let third = walk_written(bus, written, &known, &|w| w);
     let mut seen: BTreeSet<u32> = known;
-    seen.extend(found.set.index.keys().copied());
-    let third = walk_written(bus, written, &seen, &|w| w);
-    let mut blocks = found.set.blocks.clone();
-    blocks.extend(third.found.set.blocks.iter().cloned());
+    seen.extend(third.found.set.index.keys().copied());
+    let budget = budget.saturating_sub(third.found.set.blocks.len());
+    let (found, discover_us) = walk_image(bus, walk, budget, &seen);
+    let mut blocks = third.found.set.blocks.clone();
+    blocks.extend(found.set.blocks.iter().cloned());
     if blocks.is_empty() {
         return Ok(Incremental::Nothing);
     }
