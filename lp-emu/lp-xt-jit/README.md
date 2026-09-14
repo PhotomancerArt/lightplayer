@@ -237,10 +237,61 @@ Against P05's escape-everything module (61 MB, 59.6 s): the real bodies are
 1.5× the bytes and 2.5× the compile. The native compile is not the product
 path (JD24); the browser engines are P08's, and `fn_blocks` is untouched.
 
-`boot-idle` is the one caveat: its module went **stale** after 1,487,935
+`boot-idle` was the one caveat: its module went **stale** after 1,487,935
 native instructions — one block's bytes changed under it (the 1-of-2
 invalidations that found them changed) — and the rest of that image ran
-interpreted, exactly as P05's rule says. Incremental retranslation is P07's.
+interpreted, exactly as P05's rule said. That is what P07 fixed.
+
+## What the two events changed (P07)
+
+The block set this crate produces did not move; **how many modules the
+machine keeps, and when it walks again, did**. The driver
+(`lp-emu-esp32v3/src/jit.rs`) now splits the boot event's blocks by
+**writability** — one module for bytes the guest cannot write (the
+flash-cache window, the mask ROM), one for `.rwtext` and the JIT region — and
+adds a second event, **publish-by-store**, that retires and re-emits only the
+writable one. Three things make the second exact rather than merely cheaper:
+the walk is given every installed module's starts as a stop set, so exactly
+one module answers for any pc; each module gets its own indirect-target
+tables, because a target slot holds a block index and a block index only
+means something inside the module it was emitted with; and every edge out of
+a module is an ordinary exit, so the hart re-enters through the index.
+
+`boot-idle` at t1 over 20 ms, the same binary with and without the split:
+
+| | one module | split + publish-by-store |
+|---|---|---|
+| `stale` refusals | 610,588 | 88 |
+| instructions inside translated code | 1,487,941 | 4,325,742 |
+| cranelift per publish event | 146.4 s (the whole image) | 1.3 s (787 KB) |
+
+`render-loop` to its own sentinel (529.7 M instructions, 256 frames, and
+byte-identical to `--interpreter` on UART, all 256 frames, stdout and the
+`run:` line):
+
+| | core 0 | core 1 |
+|---|---|---|
+| retired by the core | 434,061,843 | 95,652,811 |
+| **inside translated code** | **333,074,800 (76.7 %)** — 99.87 % retired natively | **84,920,635 (88.8 %)** — 99.33 % |
+| entries · **mean stay** | 7,183,916 · **46.4** (runway ~155) | 1,399,762 · **60.7** |
+| publish-by-store events | 7 | 3 |
+| `stale` refusals | **0** | **0** |
+| exits by reason | budget 3,077,768 · indirect-miss 2,476,155 · undecodable 804,851 · edge-out 459,729 · **window 361,805** · escape-target 1,843 · after-store 1,508 · slice-ended 257 | budget 733,095 · undecodable 546,522 · window 47,035 · edge-out 23,514 · escape-target 23,256 |
+| boot event: blocks · module · compile | 142,084 · 90,472,591 B · **152.4 s** | the same walk, its own instance |
+| publish event: blocks · module · compile | 1,532 → **3,182** · 1,245,883 B · **1.2–2.0 s** | 3,182 · 1.2 MB |
+
+Two readings worth taking from that table:
+
+- **The window is not what ends a stay.** `window` is 5.0 % of core 0's
+  exits; `budget` — the slice's own instruction bound at `--core-quantum 256`
+  — is 42.8 %, and `indirect-miss` is 34.5 %. The mean stay of 46.4 sits well
+  under the ≈155 runway, and the thing bounding it is the slice.
+- **The JIT region is translated now.** The written walk finds it at
+  `0x40088000..0x40089914` — 1,220 word seeds, 1,651 blocks, P05's figures to
+  the block — and events #6 and #7 are where it arrives: the writable module
+  grows from 1,537 blocks to 3,182. The seven events per run are a finding
+  rather than a target; P1b expected one per project load, and the first five
+  are small `.rwtext` churn ahead of the region's own two.
 
 ## Discovery: the nine rules, and why each one is there (M7 P05, XD9)
 

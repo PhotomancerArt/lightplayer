@@ -206,6 +206,27 @@ pub trait TranslatedCore<B: Bus> {
     /// One line for `--jit-report`: what the core translated, how much of the
     /// run it covered, and how often it left for the interpreter.
     fn report(&self) -> String;
+
+    /// A way back to the concrete core, for the machine crate that built it.
+    ///
+    /// This crate owns the seam and contains no translator, so there is
+    /// nothing it can usefully do with the answer — and that is the point.
+    /// M7 P07's **publish-by-store** event installs an additional module
+    /// beside the ones a core already holds, which is a conversation between
+    /// the machine crate and its own core about a shape this crate has no
+    /// business knowing. The alternative was a `fn extend(…)` on this trait
+    /// spelled in terms of block sets and wasm modules, which would put the
+    /// translator's vocabulary in the hart.
+    ///
+    /// The RV32 seam has exactly this method for exactly this reason
+    /// (`lp_riscv_emu::mach::translated::TranslatedCore::as_any_mut`); the
+    /// two are deliberately the same shape.
+    ///
+    /// The default is `None`, so a core that has no such conversation — every
+    /// test double in this crate — implements nothing.
+    fn as_any_mut(&mut self) -> Option<&mut dyn core::any::Any> {
+        None
+    }
 }
 
 /// `log2` of the hart's entry table, which is direct-mapped **by byte**.

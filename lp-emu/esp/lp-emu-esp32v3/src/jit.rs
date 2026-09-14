@@ -463,33 +463,46 @@ struct Areas {
     gap_left: u32,
 }
 
-/// Place the permission table, the exchange areas and the indirect-target
-/// tables in the arena's largest gap, and say how much of the arena a wasm
-/// memory can cover.
+/// How many exchange areas the gap's shared prefix reserves: one per hart.
+const INSTANCES: u32 = 2;
+
+/// What the permission table and the two exchange areas take, before any
+/// module's own tables. Every module of every hart reads the same permission
+/// table and a hart's modules share that hart's exchange area — only one
+/// module is entered at a time and the whole head is marshalled in and out at
+/// every entry (XD8) — so this prefix is written once and never grows.
+const SHARED_PREFIX: u32 = PERM_ENTRIES + lp_xt_jit::LAYOUT.len() * INSTANCES;
+
+/// Place the permission table, the exchange areas and **this module's**
+/// indirect-target tables in the arena's largest gap, and say how much of the
+/// arena a wasm memory can cover.
 ///
-/// The exchange area is per **instance**, and the two harts get two of them
-/// side by side in the gap — a stay belongs to one hart and its counters are
-/// that hart's.
-fn areas(bus: &SocBus, instances: u32, indirect_len: u64) -> Result<Areas, String> {
+/// `used` is how much of the gap the modules already live on **both harts**
+/// have taken past `perm_at`; this module's tables go past that, because a
+/// target slot holds a block index and a block index only means something
+/// inside the module it was emitted with (XD10). A retired module hands its
+/// slice back, so the number is computed at every event rather than
+/// remembered.
+fn areas(bus: &SocBus, indirect_len: u64, used: u32) -> Result<Areas, String> {
     let arena_len = bus.guest_arena().len();
     let pages = (arena_len / 65536) as u64;
     if pages == 0 {
         return Err("the guest arena is smaller than one wasm page".into());
     }
-    let exchange_len = lp_xt_jit::LAYOUT.len();
-    let exchanges = u64::from(exchange_len) * u64::from(instances);
-    let need = u64::from(PERM_ENTRIES) + exchanges + indirect_len;
+    let before = u64::from(used.max(SHARED_PREFIX));
+    let need = before + indirect_len;
     let (gap_base, gap_len) = bus
         .largest_arena_gap()
         .ok_or_else(|| "the guest arena has no gap for the translator's tables".to_string())?;
     if u64::from(gap_len) < need {
         return Err(format!(
-            "the arena's largest gap is {gap_len} bytes and this core's tables need {need}"
+            "the arena's largest gap is {gap_len} bytes, {used} of them are already a live \
+             module's tables, and this module needs {indirect_len} more"
         ));
     }
     let perm_at = gap_base - bus.guest_arena_base();
     let exchange_at = perm_at + PERM_ENTRIES;
-    let indirect_at = (u64::from(exchange_at) + exchanges) as u32;
+    let indirect_at = (u64::from(perm_at) + before) as u32;
     if u64::from(perm_at) + need > pages * 65536 {
         return Err("the translator's tables fall outside the wasm memory".into());
     }
@@ -502,6 +515,49 @@ fn areas(bus: &SocBus, instances: u32, indirect_len: u64) -> Result<Areas, Strin
         gap_len,
         gap_left: gap_len - (need as u32),
     })
+}
+
+/// Split a block set into **read-only** blocks and **writable** blocks, in
+/// that order, dropping whichever half is empty (XD10, the C6's M7b P1 shape).
+///
+/// The one rule the whole-module retire cares about: bytes the guest cannot
+/// write cannot make a module stale. On the classic that is the flash-cache
+/// window at `0x400D_0000+` and the mask ROM — the overwhelming majority of
+/// the image — against `.rwtext` in SRAM0 and, empty at boot, the JIT region.
+/// A block is read-only when every byte it was translated from sits in a
+/// region the bus calls read-only; a block that straddles the two counts as
+/// writable, because **invalidating too much is slow, invalidating too little
+/// is wrong**.
+fn split_by_writability(bus: &SocBus, set: &BlockSet) -> Vec<(BlockSet, bool)> {
+    let spans = bus.region_spans();
+    let read_only = |pc: u32, len: u32| {
+        spans.iter().any(|&(base, l, writable)| {
+            !writable
+                && pc >= base
+                && u64::from(pc) + u64::from(len) <= u64::from(base) + u64::from(l)
+        })
+    };
+    let (mut ro, mut rw) = (Vec::new(), Vec::new());
+    for b in &set.blocks {
+        let len = b.end_pc().wrapping_sub(b.pc);
+        if read_only(b.pc, len) {
+            ro.push(b.clone());
+        } else {
+            rw.push(b.clone());
+        }
+    }
+    [(ro, true), (rw, false)]
+        .into_iter()
+        .filter(|(blocks, _)| !blocks.is_empty())
+        .map(|(blocks, read_only)| {
+            let index = blocks
+                .iter()
+                .enumerate()
+                .map(|(i, b)| (b.pc, i))
+                .collect::<BTreeMap<_, _>>();
+            (BlockSet::from_blocks(blocks, index), read_only)
+        })
+        .collect()
 }
 
 /// Write the permission table into the arena.
@@ -586,6 +642,72 @@ pub struct BuildReport {
 }
 
 impl BuildReport {
+    /// An empty report, to add modules' own into.
+    fn empty() -> Self {
+        Self {
+            seeds: 0,
+            blocks: 0,
+            insts: 0,
+            native_insts: 0,
+            escaped_insts: 0,
+            module_bytes: 0,
+            functions: 0,
+            fn_blocks: 0,
+            max_body_bytes: 0,
+            discover_us: 0,
+            emit_us: 0,
+            compile_us: 0,
+            instantiate_us: 0,
+            gap_len: 0,
+            gap_left: 0,
+            whole_blocks: 0,
+            stats: DiscoverStats::default(),
+            indirect_bytes: 0,
+            indirect_pages: 0,
+            static_escapes: BTreeMap::new(),
+            escape_all: false,
+        }
+    }
+
+    /// Add a module's figures to this one's.
+    ///
+    /// The costs add up, because a core pays all of them; the arena gap is the
+    /// one gap and is taken from the newest module, which is the one that saw
+    /// the most of it used; the discovery statistics belong to the walk and
+    /// are carried by the first module alone (that is what
+    /// [`BuildReport::empty`] plus this leaves).
+    fn add(&mut self, other: &Self) {
+        self.seeds = self.seeds.max(other.seeds);
+        self.blocks += other.blocks;
+        self.insts += other.insts;
+        self.native_insts += other.native_insts;
+        self.escaped_insts += other.escaped_insts;
+        self.module_bytes += other.module_bytes;
+        self.functions += other.functions;
+        self.fn_blocks = self.fn_blocks.max(other.fn_blocks);
+        self.max_body_bytes = self.max_body_bytes.max(other.max_body_bytes);
+        self.discover_us += other.discover_us;
+        self.emit_us += other.emit_us;
+        self.compile_us += other.compile_us;
+        self.instantiate_us += other.instantiate_us;
+        self.gap_len = other.gap_len;
+        self.gap_left = other.gap_left;
+        self.whole_blocks = self.whole_blocks.max(other.whole_blocks);
+        self.indirect_bytes += other.indirect_bytes;
+        self.indirect_pages += other.indirect_pages;
+        self.escape_all |= other.escape_all;
+        // The walk's own figures belong to the event that walked, and the
+        // first module of the boot event is the one that carries them. A
+        // later event's are its own and would otherwise overwrite the line
+        // that describes the image.
+        if self.stats.starts == 0 {
+            self.stats = other.stats;
+        }
+        for (k, v) in &other.static_escapes {
+            *self.static_escapes.entry(k).or_insert(0) += v;
+        }
+    }
+
     /// The boot-cost line: discover / emit / compile / instantiate, and what
     /// the module is.
     ///
@@ -845,53 +967,133 @@ impl Recorder {
 
 // ---- the core --------------------------------------------------------------
 
-/// One core's installed module, and the entry index into it.
-pub struct XtJitCore {
+/// One compiled, installed module, and everything that is per module rather
+/// than per core (XD10).
+///
+/// A core holds two of these after the boot event — the read-only half of the
+/// image and the writable half — and replaces the writable one at every
+/// publish-by-store event. They never overlap: the incremental walk is given
+/// every installed module's block starts as a stop set, so exactly one module
+/// answers for any pc.
+struct XtModule {
     core: WasmtimeCore<V3Ops>,
-    /// Guest pc to block index. The hart's own byte-indexed entry table says
-    /// *whether* a pc is an entry; this says which block it is.
+    /// Guest pc to this module's **local** block index. The hart's own
+    /// byte-indexed entry table says *whether* a pc is an entry; the core's
+    /// index says which module and which block.
     index: BTreeMap<u32, u32>,
-    /// Every `LEND` the walk marked: a stay may not start with `LCOUNT != 0`
-    /// and a live `LEND` outside this set.
+    /// Every `LEND` this module's blocks hold: a stay may not start with
+    /// `LCOUNT != 0` and a live `LEND` outside the entered module's set.
     lends: BTreeSet<u32>,
+    /// The guest bytes each block was translated from, so an invalidation can
+    /// be answered by asking whether they changed rather than by giving up.
+    code: Vec<(u32, Box<[u8]>)>,
+    report: BuildReport,
+    /// Every byte this module was translated from sits in a region the bus
+    /// calls read-only, so the guest cannot change them and this module can
+    /// never go stale. That is what a publish-by-store event keeps.
+    read_only: bool,
+    /// Guest bytes **this module** was translated from have changed. It stops
+    /// being entered and the next translation event replaces it; the other
+    /// modules are untouched, which is sound because every edge out of a
+    /// module is an exit and the hart re-enters through the index.
+    stale: bool,
+    /// The module's own bytes, kept only while a recording wants them.
+    wasm: Option<Vec<u8>>,
+    /// Where this module's tables ended up.
+    at: Areas,
+}
+
+impl XtModule {
+    /// How much of the arena gap this module's tables take past `perm_at`.
+    fn gap_used(&self) -> u32 {
+        (self.at.indirect_at - self.at.perm_at) + self.at.indirect_len
+    }
+
+    /// How many of this module's blocks no longer match the guest's bytes.
+    fn changed_blocks(&self, bus: &SocBus) -> usize {
+        let base = bus.guest_arena_base();
+        let arena = bus.guest_arena();
+        self.code
+            .iter()
+            .filter(|(pc, bytes)| {
+                let at = (u64::from(*pc) - u64::from(base)) as usize;
+                arena.get(at..at + bytes.len()) != Some(&bytes[..])
+            })
+            .count()
+    }
+
+    /// The first block whose bytes changed, for the event's report line.
+    fn first_changed_block(&self, bus: &SocBus) -> Option<u32> {
+        let base = bus.guest_arena_base();
+        let arena = bus.guest_arena();
+        self.code
+            .iter()
+            .find(|(pc, bytes)| {
+                let at = (u64::from(*pc) - u64::from(base)) as usize;
+                arena.get(at..at + bytes.len()) != Some(&bytes[..])
+            })
+            .map(|(pc, _)| *pc)
+    }
+}
+
+/// A translated core for one hart: **one or more modules**, and one index over
+/// all of them.
+pub struct XtJitCore {
+    /// Installed modules, read-only ones first. Index 0 is the boot event's
+    /// read-only module on every image that has one.
+    mods: Vec<XtModule>,
+    /// Guest pc to `(module, local block index)`.
+    index: BTreeMap<u32, (u32, u32)>,
     which: usize,
     /// The cost model the budget checks were emitted against.
     model: lp_emu_core::CycleModel,
     /// What installed this core: `boot`, or `app-core release`.
     event: String,
-    report: BuildReport,
     stats: Stats,
-    /// Set when the guest changed code this module was translated from, or
-    /// when the cost model moved under it. A stale module is never entered
-    /// again: retranslation is P07's.
-    stale: bool,
+    /// Something the core cannot recover from: a trap out of translated code,
+    /// or a cost model that changed under the modules. It stops being entered
+    /// entirely.
+    dead: bool,
     /// An invalidation arrived and the bytes have not been re-checked yet.
     verify_pending: bool,
-    /// The guest bytes each block was translated from. See P04/P05.
-    code: Vec<(u32, Box<[u8]>)>,
-    /// The module's own bytes, kept while a recording wants them.
-    wasm: Option<Vec<u8>>,
     recorder: Option<Recorder>,
     pages: u64,
     exchange_at: u32,
+    /// How many publish-by-store events replaced this core's writable module.
+    retranslations: u64,
 }
 
 impl XtJitCore {
-    /// Are the guest bytes still the ones this module was translated from?
+    /// Are the guest bytes still the ones each module was translated from?
+    ///
+    /// Per module, because that is the whole point of the split: the guest
+    /// rewriting the JIT region must not retire the flash window's 140,000
+    /// blocks with it.
     fn verify(&mut self, bus: &SocBus) {
         self.verify_pending = false;
         let base = bus.guest_arena_base();
-        let arena = bus.guest_arena();
-        for (pc, bytes) in &self.code {
-            let at = (u64::from(*pc) - u64::from(base)) as usize;
-            let now = arena.get(at..at + bytes.len());
-            if now != Some(&bytes[..]) {
-                self.stats.verify_failed += 1;
-                self.stale = true;
-                return;
+        let mut any = false;
+        for i in 0..self.mods.len() {
+            if self.mods[i].stale {
+                continue;
+            }
+            let changed = {
+                let arena = bus.guest_arena();
+                self.mods[i].code.iter().any(|(pc, bytes)| {
+                    let at = (u64::from(*pc) - u64::from(base)) as usize;
+                    arena.get(at..at + bytes.len()) != Some(&bytes[..])
+                })
+            };
+            if changed {
+                self.mods[i].stale = true;
+                any = true;
             }
         }
-        self.stats.verified += 1;
+        if any {
+            self.stats.verify_failed += 1;
+        } else {
+            self.stats.verified += 1;
+        }
     }
 
     /// The pcs the hart's entry table should be built from.
@@ -900,17 +1102,156 @@ impl XtJitCore {
         self.index.keys().copied().collect()
     }
 
-    /// The block starts this module holds — the stop set for an incremental
-    /// walk over code published after it was installed (XD10, P07).
+    /// The block starts the installed modules hold — the stop set for an
+    /// incremental walk over code published after they were installed (XD10).
     #[must_use]
     pub fn starts(&self) -> BTreeSet<u32> {
         self.index.keys().copied().collect()
     }
 
-    /// The boot-cost line for this core's one translation event.
+    /// How much of the arena gap this core's modules have taken.
+    ///
+    /// Computed rather than remembered, because a retired module hands its
+    /// slice back and the next module may have it.
+    #[must_use]
+    pub fn gap_used(&self) -> u32 {
+        self.mods.iter().map(XtModule::gap_used).max().unwrap_or(0)
+    }
+
+    /// Whether a recording is running, which is what keeps a run that asked
+    /// for one on the whole-image path.
+    #[must_use]
+    pub fn recording(&self) -> bool {
+        self.recorder.is_some()
+    }
+
+    /// Re-check every module's bytes now rather than at the next entry, and
+    /// say which modules went stale and what changed in them.
+    ///
+    /// The machine asks this at a translation event, because whether a module
+    /// is stale is what decides between replacing the writable module and
+    /// retranslating the image.
+    pub fn verify_now(&mut self, bus: &SocBus) -> Option<String> {
+        if self.verify_pending {
+            self.verify(bus);
+        }
+        let stale: Vec<usize> = self
+            .mods
+            .iter()
+            .enumerate()
+            .filter(|(_, m)| m.stale)
+            .map(|(i, _)| i)
+            .collect();
+        if stale.is_empty() {
+            return None;
+        }
+        let mut out = String::from("the guest rewrote code these modules were translated from:");
+        for i in stale {
+            let m = &self.mods[i];
+            let _ = write!(
+                out,
+                " module {i} ({} of {} block(s){})",
+                m.changed_blocks(bus),
+                m.code.len(),
+                match m.first_changed_block(bus) {
+                    Some(pc) => format!(", first at {pc:#010x}"),
+                    None => String::new(),
+                },
+            );
+        }
+        Some(out)
+    }
+
+    /// Whether a **read-only** module went stale, and what changed.
+    ///
+    /// It should not be able to: the guest cannot write the bytes it was
+    /// translated from. If it ever does, something moved memory the bus calls
+    /// read-only, the split's premise is gone, and the honest answer is to
+    /// retranslate the image rather than to trust a module over a measurement.
+    #[must_use]
+    pub fn read_only_module_is_stale(&self, bus: &SocBus) -> Option<String> {
+        let m = self.mods.iter().find(|m| m.read_only && m.stale)?;
+        Some(format!(
+            "a read-only module went stale: {} of its {} block(s) no longer match the guest's \
+             bytes",
+            m.changed_blocks(bus),
+            m.code.len(),
+        ))
+    }
+
+    /// Drop every module but the read-only ones, and the index entries they
+    /// answered for.
+    ///
+    /// This **is** the whole-module retire, applied to the modules whose bytes
+    /// a publish can have changed — "invalidating too much is slow,
+    /// invalidating too little is wrong", with the read-only half exempt
+    /// because the guest cannot reach it.
+    pub fn retire_all_but_read_only(&mut self) {
+        let keep = self.mods.iter().filter(|m| m.read_only).count();
+        debug_assert!(
+            self.mods.iter().take(keep).all(|m| m.read_only),
+            "the read-only modules are not the first ones"
+        );
+        self.mods.truncate(keep);
+        let live = keep as u32;
+        self.index.retain(|_, &mut (m, _)| m < live);
+        self.retranslations += 1;
+    }
+
+    /// Add an already-built module beside the ones this core holds, and say
+    /// what it cost.
+    ///
+    /// The index is extended rather than rebuilt: the incremental walk was
+    /// given every installed module's starts as a stop set, so no pc it claims
+    /// is one an earlier module answers for. The `debug_assert` is that rule,
+    /// checked.
+    fn add(&mut self, module: XtModule) -> BuildReport {
+        let m = self.mods.len() as u32;
+        for (&pc, &b) in &module.index {
+            let clash = self.index.insert(pc, (m, b));
+            debug_assert!(
+                clash.is_none(),
+                "two modules answer for {pc:#010x}: the incremental walk was given the wrong \
+                 stop set"
+            );
+        }
+        let report = module.report.clone();
+        self.mods.push(module);
+        report
+    }
+
+    /// The boot-cost figures of every live module, added up.
+    #[must_use]
+    pub fn totals(&self) -> BuildReport {
+        let mut out = BuildReport::empty();
+        for m in &self.mods {
+            out.add(&m.report);
+        }
+        out
+    }
+
+    /// The boot-cost line for this core's translation events.
     #[must_use]
     pub fn boot_line(&self) -> String {
-        self.report.boot_line(self.which, &self.event)
+        let split: Vec<String> = self
+            .mods
+            .iter()
+            .enumerate()
+            .map(|(i, m)| {
+                format!(
+                    "{i} {} {} block(s) {} B{}",
+                    if m.read_only { "read-only" } else { "writable" },
+                    m.report.blocks,
+                    m.report.module_bytes,
+                    if m.stale { " STALE" } else { "" },
+                )
+            })
+            .collect();
+        format!(
+            "{}; modules: {}",
+            self.totals().boot_line(self.which, &self.event),
+            split.join(", "),
+        )
     }
 
     /// Which instruction a `why::WINDOW` exit refused at.
@@ -943,28 +1284,32 @@ impl XtJitCore {
 
 impl TranslatedCore<SocBus> for XtJitCore {
     fn run(&mut self, hart: &mut XtHart<SocBus>, bus: &mut SocBus, end: u64) -> RunOutcome {
-        if self.stale {
+        if self.dead {
             self.stats.refused_stale += 1;
             return RunOutcome::Refused;
         }
         if self.verify_pending {
             self.verify(bus);
-            if self.stale {
-                self.stats.refused_stale += 1;
-                return RunOutcome::Refused;
-            }
         }
         if hart.cycle_model() != self.model {
             log::warn!("jit: the cost model changed under a translated core; interpreting");
-            self.stale = true;
+            self.dead = true;
             self.stats.refused_stale += 1;
             return RunOutcome::Refused;
         }
         let pc = hart.pc();
-        let Some(&entry) = self.index.get(&pc) else {
+        let Some(&(which_mod, entry)) = self.index.get(&pc) else {
             self.stats.refused_no_entry += 1;
             return RunOutcome::Refused;
         };
+        let which_mod = which_mod as usize;
+        // Only the module whose bytes changed stops being entered. The others
+        // are untouched, which is sound because every edge out of a module is
+        // an exit and the hart re-enters through the index.
+        if self.mods[which_mod].stale {
+            self.stats.refused_stale += 1;
+            return RunOutcome::Refused;
+        }
 
         // The refusals, in the order the C6's spike learned them, plus this
         // chip's three.
@@ -1011,7 +1356,7 @@ impl TranslatedCore<SocBus> for XtJitCore {
         // straight through.
         {
             let sr = hart.sr();
-            if sr.lcount != 0 && !self.lends.contains(&sr.lend) {
+            if sr.lcount != 0 && !self.mods[which_mod].lends.contains(&sr.lend) {
                 self.stats.refused_loop += 1;
                 return RunOutcome::Refused;
             }
@@ -1032,7 +1377,7 @@ impl TranslatedCore<SocBus> for XtJitCore {
             Vec::new()
         };
         {
-            let ops = self.core.ops_mut();
+            let ops = self.mods[which_mod].core.ops_mut();
             ops.slice_end = None;
             ops.hart = hart;
             ops.bus = bus;
@@ -1041,20 +1386,30 @@ impl TranslatedCore<SocBus> for XtJitCore {
             // The whole head, hart → exchange (XD8).
             ops.give_state();
         }
-        let words_in = recording.then(|| marshal::words(self.core.ops_mut().exchange_slice()));
-        let entered = self.core.enter(entry, cycle, instret, end, watch);
-        let ops = self.core.ops_mut();
-        ops.hart = core::ptr::null_mut();
-        ops.bus = core::ptr::null_mut();
-        let escaped = core::mem::take(&mut ops.escape_hatch);
+        let words_in =
+            recording.then(|| marshal::words(self.mods[which_mod].core.ops_mut().exchange_slice()));
+        let entered = self.mods[which_mod]
+            .core
+            .enter(entry, cycle, instret, end, watch);
+        let (escaped, escapes_by, poll_left, poll_code_dirty, slice_end, calls) = {
+            let ops = self.mods[which_mod].core.ops_mut();
+            ops.hart = core::ptr::null_mut();
+            ops.bus = core::ptr::null_mut();
+            (
+                core::mem::take(&mut ops.escape_hatch),
+                core::mem::take(&mut ops.escapes_by),
+                core::mem::take(&mut ops.poll_left),
+                core::mem::take(&mut ops.poll_code_dirty),
+                ops.slice_end.take(),
+                core::mem::take(&mut ops.calls),
+            )
+        };
         self.stats.escape_hatch += escaped;
-        for (name, n) in core::mem::take(&mut ops.escapes_by) {
+        for (name, n) in escapes_by {
             *self.stats.escapes_by.entry(name).or_insert(0) += n;
         }
-        self.stats.poll_left += core::mem::take(&mut ops.poll_left);
-        self.stats.poll_code_dirty += core::mem::take(&mut ops.poll_code_dirty);
-        let slice_end = ops.slice_end.take();
-        let calls = core::mem::take(&mut ops.calls);
+        self.stats.poll_left += poll_left;
+        self.stats.poll_code_dirty += poll_code_dirty;
 
         let exit_pc = match entered {
             Ok(exit) => exit.pc,
@@ -1063,7 +1418,7 @@ impl TranslatedCore<SocBus> for XtJitCore {
             // the only answer that keeps the transcript right.
             Err(e) => {
                 log::error!("jit: translated code trapped at {pc:#010x}: {e}");
-                self.stale = true;
+                self.dead = true;
                 return RunOutcome::Refused;
             }
         };
@@ -1071,7 +1426,7 @@ impl TranslatedCore<SocBus> for XtJitCore {
         // The flags are read at **this layout's** offset (P04's workaround:
         // `WasmtimeCore::enter` reads `exit.flags` at RV32's fixed offset,
         // which past a 64-word file is inside the AR file).
-        let x = self.core.ops_mut().exchange_slice();
+        let x = self.mods[which_mod].core.ops_mut().exchange_slice();
         let read_i64 = |x: &[u8], at: u64| {
             u64::from_le_bytes(x[at as usize..][..8].try_into().expect("eight bytes"))
         };
@@ -1087,7 +1442,7 @@ impl TranslatedCore<SocBus> for XtJitCore {
 
         // The whole head, exchange → hart, then the pc and the counters.
         {
-            let ops = self.core.ops_mut();
+            let ops = self.mods[which_mod].core.ops_mut();
             ops.hart = hart;
             ops.bus = bus;
             ops.take_state();
@@ -1123,11 +1478,16 @@ impl TranslatedCore<SocBus> for XtJitCore {
                 instret_out: instruction_count,
                 words_out: words_out.unwrap_or_default(),
             };
+            let mut done = false;
             if let Some(r) = self.recorder.as_mut() {
                 r.after_entry(bus.guest_arena(), entry_rec);
-                if r.done {
-                    let wasm = self.wasm.take().unwrap_or_default();
-                    r.finish(&wasm, bus.guest_arena(), self.pages, self.exchange_at);
+                done = r.done;
+            }
+            if done {
+                let wasm = self.mods[which_mod].wasm.take().unwrap_or_default();
+                let (pages, exchange_at) = (self.pages, self.exchange_at);
+                if let Some(r) = self.recorder.as_ref() {
+                    r.finish(&wasm, bus.guest_arena(), pages, exchange_at);
                 }
             }
         }
@@ -1156,9 +1516,13 @@ impl TranslatedCore<SocBus> for XtJitCore {
 
     fn invalidate(&mut self, _range: Option<(u32, u32)>) {
         // Noted, not acted on: the answer is only needed at the next entry,
-        // and most invalidations are not about this module's bytes at all
-        // (see `XtJitCore::code`).
+        // and most invalidations are not about these modules' bytes at all
+        // (see `XtModule::code`).
         self.verify_pending = true;
+    }
+
+    fn as_any_mut(&mut self) -> Option<&mut dyn core::any::Any> {
+        Some(self)
     }
 
     fn report(&self) -> String {
@@ -1192,9 +1556,19 @@ impl TranslatedCore<SocBus> for XtJitCore {
         } else {
             4.0 * groups as f64 / exits as f64
         };
+        // The number this phase is about: how long a stay lasts against the
+        // ≈155-instruction runway the interpreter's own block lengths imply,
+        // and — through the `why` histogram above — what ends it.
+        let mean_stay = if s.entries == 0 {
+            0.0
+        } else {
+            s.retired as f64 / s.entries as f64
+        };
         format!(
             "core{}: {} entries, {} instruction(s) inside translated code ({} escaped to the \
-             interpreter, {} retired natively, {:.2} % of the entered); {} refusal(s) (no-entry \
+             interpreter, {} retired natively, {:.2} % of the entered); mean stay {:.1} \
+             instruction(s) (runway ~155); {} publish-by-store retranslation(s); {} refusal(s) \
+             (no-entry \
              {}, pending {}, watch {}, impure {}, timer {}, stale {}, ps {}, ibreak {}, loop {}); \
              {} invalidation(s) answered by re-reading the bytes, {} that found them changed; {} \
              slice end(s), {} no-progress exit(s); exits by reason: {}; window refusals: block \
@@ -1211,6 +1585,8 @@ impl TranslatedCore<SocBus> for XtJitCore {
             } else {
                 100.0 * native as f64 / s.retired as f64
             },
+            mean_stay,
+            self.retranslations,
             refused,
             s.refused_no_entry,
             s.refused_pending,
@@ -1366,6 +1742,195 @@ pub fn walk_written(
     }
 }
 
+/// The emission policy and whether it is the escape-everything build, read
+/// once from the environment (both diagnostics, off by default).
+fn policy_from_env() -> (Emit, bool) {
+    let escape_all = std::env::var_os("LP_EMU_XT_JIT_ESCAPE_ALL").is_some_and(|v| v == "1");
+    let policy = if escape_all {
+        Emit::NOTHING
+    } else if let Ok(families) = std::env::var("LP_EMU_XT_JIT_EMIT") {
+        Emit {
+            alu: families.contains("alu"),
+            memory: families.contains("memory"),
+            control: families.contains("control"),
+            ..Emit::EVERYTHING
+        }
+    } else {
+        Emit::EVERYTHING
+    };
+    let escape_all = escape_all || policy == Emit::NOTHING;
+    (policy, escape_all)
+}
+
+/// Everything one module's build needs that is not the bus, the policy or the
+/// cost model.
+struct ModuleBuild<'a> {
+    set: &'a BlockSet,
+    read_only: bool,
+    /// The whole walk's figures. Carried by the **first** module of an event
+    /// only: they describe the image, not the half of it this module holds,
+    /// and [`XtJitCore::totals`] adds them up.
+    stats: DiscoverStats,
+    discover_us: u128,
+    whole_blocks: usize,
+    seeds: usize,
+    fn_blocks: usize,
+    /// Which hart this instance belongs to: it picks the exchange area.
+    which: usize,
+    /// How much of the arena gap the modules already live on **both** harts
+    /// have taken.
+    gap_used: u32,
+    /// The guest regions, for the escape hatch's granules while recording.
+    live: Vec<(u32, u32)>,
+    /// Keep the module's own bytes: only a recording wants them.
+    want_wasm: bool,
+}
+
+/// Emit, compile and instantiate one module.
+///
+/// # Errors
+///
+/// A block set that does not fit the arena's shape, a module over the
+/// per-function byte budget, or a module the engine will not compile.
+fn build_module(
+    bus: &mut SocBus,
+    model: lp_emu_core::CycleModel,
+    policy: Emit,
+    escape_all: bool,
+    b: &ModuleBuild,
+) -> Result<XtModule, String> {
+    let indirect_len = target_table_bytes(b.set);
+    let at = areas(bus, indirect_len, b.gap_used)?;
+    write_permission_table(bus, at);
+    let arena_base = bus.guest_arena_base();
+    let indirect_pages = {
+        let mut pages: Vec<u32> = b.set.blocks.iter().map(|x| x.pc >> PERM_SHIFT).collect();
+        pages.sort_unstable();
+        pages.dedup();
+        pages.len()
+    };
+
+    let arena_len = bus.guest_arena().len();
+    let arena_ptr = bus.guest_arena_mut().as_mut_ptr();
+    #[cfg(target_family = "wasm")]
+    let (mem_base, memory_pages) = (arena_ptr as u32, core::arch::wasm32::memory_size(0) as u64);
+    #[cfg(not(target_family = "wasm"))]
+    let (mem_base, memory_pages) = (0u32, at.pages);
+
+    // This module's own indirect-target page map and slot arrays, written
+    // whole (P05): a target slot holds a block index, and a block index only
+    // means something inside the module it was emitted with.
+    let indirect_bytes =
+        write_target_tables(bus.guest_arena_mut(), mem_base, at.indirect_at, b.set);
+
+    // One exchange area per **hart**, not per module: only one module is
+    // entered at a time and the whole head crosses at every entry (XD8).
+    let exchange_at = at.exchange_at + lp_xt_jit::LAYOUT.len() * b.which as u32;
+    let layout = Layout {
+        memory_pages,
+        guest_base: arena_base,
+        arena_offset: mem_base,
+        perm_offset: mem_base + at.perm_at,
+        exchange_offset: mem_base + exchange_at,
+        indirect: Some(mem_base + at.indirect_at),
+        fast_reads: None,
+    };
+
+    let started = std::time::Instant::now();
+    let emitted = lp_xt_jit::translate::emit_module(b.set, model, layout, policy, b.fn_blocks);
+    let emit_us = started.elapsed().as_micros();
+    if emitted.max_body_bytes > lp_xt_jit::lp_emu_jit::dispatch::BODY_BUDGET {
+        return Err(format!(
+            "at {} blocks per function the largest body is {} bytes, over the {}-byte budget; use \
+             fewer (--jit-fn-blocks)",
+            b.fn_blocks,
+            emitted.max_body_bytes,
+            lp_xt_jit::lp_emu_jit::dispatch::BODY_BUDGET,
+        ));
+    }
+
+    // The guest bytes behind each block, so an invalidation can be answered by
+    // asking whether they changed rather than by giving up.
+    let code: Vec<(u32, Box<[u8]>)> = {
+        let arena = bus.guest_arena();
+        b.set
+            .blocks
+            .iter()
+            .map(|blk| {
+                let at = (u64::from(blk.pc) - u64::from(arena_base)) as usize;
+                let len = blk.end_pc().wrapping_sub(blk.pc) as usize;
+                let bytes = arena
+                    .get(at..at + len)
+                    .map_or_else(|| Vec::new().into_boxed_slice(), |x| x.to_vec().into());
+                (blk.pc, bytes)
+            })
+            .collect()
+    };
+
+    let arena_guard = bus.guest_arena_guard();
+    let exchange = bus.guest_arena_mut()[exchange_at as usize..].as_mut_ptr();
+    let ops = V3Ops {
+        hart: core::ptr::null_mut(),
+        bus: core::ptr::null_mut(),
+        exchange,
+        exchange_len: lp_xt_jit::LAYOUT.len() as usize,
+        slice_end: None,
+        escape_hatch: 0,
+        escapes_by: BTreeMap::new(),
+        poll_left: 0,
+        poll_code_dirty: 0,
+        recording: false,
+        calls: Vec::new(),
+        live: b.live.clone(),
+    };
+    // SAFETY: `arena_ptr` is the bus's own arena, allocated once during
+    // construction from the chip's declared memory map and documented as not
+    // moving for the life of the machine; the memory wasmtime is given covers
+    // only whole wasm pages of it. Nothing holds a Rust reference into the
+    // arena while translated code runs: `XtJitCore::run` reaches the bus
+    // through the raw pointer it just set and does not touch it otherwise.
+    // `arena_guard` is the arena's own report: when it is `Some`, the bytes
+    // past `arena_len` really are unmapped out to the end of the reservation
+    // and its guard.
+    let core = unsafe { WasmtimeCore::new(&emitted.wasm, ops, arena_ptr, arena_len, arena_guard) }
+        .map_err(|e| format!("the translated module did not build: {e:?}"))?;
+
+    let report = BuildReport {
+        seeds: b.seeds,
+        blocks: b.set.blocks.len(),
+        insts: b.stats.insts,
+        native_insts: emitted.native_insts,
+        escaped_insts: emitted.escaped_insts,
+        module_bytes: emitted.wasm.len(),
+        functions: emitted.functions,
+        fn_blocks: b.fn_blocks.min(b.set.blocks.len()),
+        max_body_bytes: emitted.max_body_bytes,
+        discover_us: b.discover_us,
+        emit_us,
+        compile_us: core.compile_us(),
+        instantiate_us: core.instantiate_us(),
+        gap_len: at.gap_len,
+        gap_left: at.gap_left,
+        whole_blocks: b.whole_blocks,
+        stats: b.stats,
+        indirect_bytes,
+        indirect_pages,
+        static_escapes: static_census(b.set),
+        escape_all,
+    };
+    Ok(XtModule {
+        core,
+        index: index_of(b.set),
+        lends: known_lends(b.set),
+        code,
+        report,
+        read_only: b.read_only,
+        stale: false,
+        wasm: b.want_wasm.then(|| emitted.wasm.clone()),
+        at,
+    })
+}
+
 /// Discover the image from `walk`, translate it, and install a core on
 /// `hart`.
 ///
@@ -1373,6 +1938,23 @@ pub fn walk_written(
 /// struck out, `LEND` a terminator, refused instructions stepped over. The
 /// whole image is walked **unbounded** first and reported, whatever budget
 /// the caller named.
+///
+/// # Two modules, split on whether the guest could rewrite the bytes
+///
+/// Read-only guest code — the flash-cache window at `0x400D_0000+` and the
+/// mask ROM — cannot change, so a module holding only that can never go
+/// stale, and on the classic it is the overwhelming majority of the image.
+/// Everything in writable memory (`.rwtext` in SRAM0, and the JIT region,
+/// empty at boot) goes in the other one, which is what the publish-by-store
+/// event replaces. Without the split there is nothing for an incremental
+/// translation to be incremental *against*: **one** block of `boot-idle`'s
+/// 140,282 changes 1.49 M instructions into the run, and a whole-core retire
+/// takes all 140,282 with it — which is exactly what P06 measured
+/// (`stale 610,588` refusals for the rest of the window).
+///
+/// A recording is of ONE module's bytes, so a run that asked for one keeps
+/// the single-module shape; it is a diagnostic and its speed is nobody's
+/// number.
 ///
 /// # Errors
 ///
@@ -1387,6 +1969,7 @@ pub fn install(
     max_blocks: usize,
     fn_blocks: usize,
     event: &str,
+    gap_used: u32,
 ) -> Result<XtJitCore, String> {
     let nothing = BTreeSet::new();
     let (whole, mut discover_us) = walk_image(bus, walk, usize::MAX, &nothing);
@@ -1405,99 +1988,13 @@ pub fn install(
         whole
     };
 
-    // The tables, sized from what the walk covered.
-    let indirect_len = target_table_bytes(&found.set);
-    let at = areas(bus, 2, indirect_len)?;
-    write_permission_table(bus, at);
-    let arena_base = bus.guest_arena_base();
-    let indirect_pages = {
-        let mut pages: Vec<u32> = found
-            .set
-            .blocks
-            .iter()
-            .map(|b| b.pc >> PERM_SHIFT)
-            .collect();
-        pages.sort_unstable();
-        pages.dedup();
-        pages.len()
-    };
-
-    let arena_len = bus.guest_arena().len();
-    let arena_ptr = bus.guest_arena_mut().as_mut_ptr();
-    #[cfg(target_family = "wasm")]
-    let (mem_base, memory_pages) = (arena_ptr as u32, core::arch::wasm32::memory_size(0) as u64);
-    #[cfg(not(target_family = "wasm"))]
-    let (mem_base, memory_pages) = (0u32, at.pages);
-
-    // The indirect-target page map and slot arrays, written whole (P05).
-    let indirect_bytes =
-        write_target_tables(bus.guest_arena_mut(), mem_base, at.indirect_at, &found.set);
-
-    // One exchange area per instance, side by side in the gap.
-    let exchange_at = at.exchange_at + lp_xt_jit::LAYOUT.len() * which as u32;
-    let layout = Layout {
-        memory_pages,
-        guest_base: arena_base,
-        arena_offset: mem_base,
-        perm_offset: mem_base + at.perm_at,
-        exchange_offset: mem_base + exchange_at,
-        indirect: Some(mem_base + at.indirect_at),
-        fast_reads: None,
-    };
-
-    // The emission policy, read once from the environment (a diagnostic, off
-    // by default): `LP_EMU_XT_JIT_ESCAPE_ALL=1` is the escape-everything
-    // build; `LP_EMU_XT_JIT_EMIT=alu,memory,control` names the families to
-    // emit natively, for bisecting a machine-scale divergence by family.
-    let escape_all = std::env::var_os("LP_EMU_XT_JIT_ESCAPE_ALL").is_some_and(|v| v == "1");
-    let policy = if escape_all {
-        Emit::NOTHING
-    } else if let Ok(families) = std::env::var("LP_EMU_XT_JIT_EMIT") {
-        Emit {
-            alu: families.contains("alu"),
-            memory: families.contains("memory"),
-            control: families.contains("control"),
-            ..Emit::EVERYTHING
-        }
-    } else {
-        Emit::EVERYTHING
-    };
-    let escape_all = escape_all || policy == Emit::NOTHING;
-    let model = hart.cycle_model();
-    let started = std::time::Instant::now();
-    let emitted = lp_xt_jit::translate::emit_module(&found.set, model, layout, policy, fn_blocks);
-    let emit_us = started.elapsed().as_micros();
-    if emitted.max_body_bytes > lp_xt_jit::lp_emu_jit::dispatch::BODY_BUDGET {
-        return Err(format!(
-            "at {fn_blocks} blocks per function the largest body is {} bytes, over the {}-byte \
-             budget; use fewer (--jit-fn-blocks)",
-            emitted.max_body_bytes,
-            lp_xt_jit::lp_emu_jit::dispatch::BODY_BUDGET,
-        ));
-    }
-
-    // The guest bytes behind each block, so an invalidation can be answered by
-    // asking whether they changed rather than by giving up.
-    let code: Vec<(u32, Box<[u8]>)> = {
-        let arena = bus.guest_arena();
-        found
-            .set
-            .blocks
-            .iter()
-            .map(|b| {
-                let at = (u64::from(b.pc) - u64::from(arena_base)) as usize;
-                let len = b.end_pc().wrapping_sub(b.pc) as usize;
-                let bytes = arena
-                    .get(at..at + len)
-                    .map_or_else(|| Vec::new().into_boxed_slice(), |b| b.to_vec().into());
-                (b.pc, bytes)
-            })
-            .collect()
-    };
-
+    // Where the shared prefix lands, so the recorder can name the ranges a
+    // replay has to reproduce. The modules' own tables go past it.
+    let probe = areas(bus, target_table_bytes(&found.set), gap_used)?;
+    let exchange_at = probe.exchange_at + lp_xt_jit::LAYOUT.len() * which as u32;
     // The recorder, core 0 only: one module, one recording.
     let recorder = if which == 0 {
-        Recorder::from_env(at, bus, exchange_at)
+        Recorder::from_env(probe, bus, exchange_at)
     } else {
         None
     };
@@ -1505,76 +2002,223 @@ pub fn install(
         .as_ref()
         .map(|r| r.live.clone())
         .unwrap_or_default();
+    let recording = recorder.is_some();
 
-    let arena_guard = bus.guest_arena_guard();
-    let exchange = bus.guest_arena_mut()[exchange_at as usize..].as_mut_ptr();
-    let ops = V3Ops {
-        hart: core::ptr::null_mut(),
-        bus: core::ptr::null_mut(),
-        exchange,
-        exchange_len: lp_xt_jit::LAYOUT.len() as usize,
-        slice_end: None,
-        escape_hatch: 0,
-        escapes_by: BTreeMap::new(),
-        poll_left: 0,
-        poll_code_dirty: 0,
-        recording: false,
-        calls: Vec::new(),
-        live,
+    let sets = if recording {
+        vec![(found.set.clone(), false)]
+    } else {
+        split_by_writability(bus, &found.set)
     };
-    // SAFETY: `arena_ptr` is the bus's own arena, allocated once during
-    // construction from the chip's declared memory map and documented as not
-    // moving for the life of the machine; the memory wasmtime is given covers
-    // only whole wasm pages of it. Nothing holds a Rust reference into the
-    // arena while translated code runs: `XtJitCore::run` reaches the bus
-    // through the raw pointer it just set and does not touch it otherwise.
-    // `arena_guard` is the arena's own report: when it is `Some`, the bytes
-    // past `arena_len` really are unmapped out to the end of the reservation
-    // and its guard.
-    let core = unsafe { WasmtimeCore::new(&emitted.wasm, ops, arena_ptr, arena_len, arena_guard) }
-        .map_err(|e| format!("the translated module did not build: {e:?}"))?;
 
-    let report = BuildReport {
-        seeds: walk.seeds.len(),
-        blocks: found.set.blocks.len(),
-        insts: found.stats.insts,
-        native_insts: emitted.native_insts,
-        escaped_insts: emitted.escaped_insts,
-        module_bytes: emitted.wasm.len(),
-        functions: emitted.functions,
-        fn_blocks: fn_blocks.min(found.set.blocks.len()),
-        max_body_bytes: emitted.max_body_bytes,
-        discover_us,
-        emit_us,
-        compile_us: core.compile_us(),
-        instantiate_us: core.instantiate_us(),
-        gap_len: at.gap_len,
-        gap_left: at.gap_left,
-        whole_blocks,
-        stats: found.stats,
-        indirect_bytes,
-        indirect_pages,
-        static_escapes: static_census(&found.set),
-        escape_all,
-    };
-    let wasm = recorder.as_ref().map(|_| emitted.wasm.clone());
-    Ok(XtJitCore {
-        core,
-        index: index_of(&found.set),
-        lends: known_lends(&found.set),
+    let (policy, escape_all) = policy_from_env();
+    let model = hart.cycle_model();
+    let mut core = XtJitCore {
+        mods: Vec::new(),
+        index: BTreeMap::new(),
         which,
         model,
         event: event.to_string(),
-        report,
         stats: Stats::default(),
-        stale: false,
+        dead: false,
         verify_pending: false,
-        code,
-        wasm,
         recorder,
-        pages: at.pages,
+        pages: probe.pages,
         exchange_at,
-    })
+        retranslations: 0,
+    };
+    for (i, (set, read_only)) in sets.iter().enumerate() {
+        let used = gap_used.max(core.gap_used());
+        let module = build_module(
+            bus,
+            model,
+            policy,
+            escape_all,
+            &ModuleBuild {
+                set,
+                read_only: *read_only,
+                stats: if i == 0 {
+                    found.stats
+                } else {
+                    DiscoverStats::default()
+                },
+                discover_us: if i == 0 { discover_us } else { 0 },
+                whole_blocks: if i == 0 { whole_blocks } else { 0 },
+                seeds: walk.seeds.len(),
+                fn_blocks,
+                which,
+                gap_used: used,
+                live: live.clone(),
+                want_wasm: recording,
+            },
+        )?;
+        core.add(module);
+    }
+    Ok(core)
+}
+
+/// What one publish-by-store event did, so the machine can say it without
+/// knowing this module's internals.
+pub enum Incremental {
+    /// A module was added beside the ones already installed.
+    Added(BuildReport),
+    /// The publish claimed nothing the installed modules do not already hold.
+    Nothing,
+    /// The incremental path does not apply and the caller must retranslate the
+    /// image instead: a read-only module went stale, no core is installed, or
+    /// this run is recording.
+    WholeImage(String),
+}
+
+/// The way back from the hart's boxed core to this crate's own.
+///
+/// See [`lp_xt_emu::mach::translated::TranslatedCore::as_any_mut`]: the hart
+/// holds a `dyn TranslatedCore` and has no business knowing what a module is,
+/// so the machine crate asks for its own type back.
+trait AsXtJitCore {
+    fn as_xt_jit_core(&mut self) -> Option<&mut XtJitCore>;
+}
+
+impl AsXtJitCore for lp_xt_emu::mach::translated::BoxedCore<SocBus> {
+    fn as_xt_jit_core(&mut self) -> Option<&mut XtJitCore> {
+        self.as_any_mut()?.downcast_mut::<XtJitCore>()
+    }
+}
+
+/// How much of the arena gap this hart's installed modules have taken, or 0
+/// when it has no core.
+///
+/// The machine asks both harts and hands the larger figure to the next module
+/// build: one gap, four or more live instances, and a target slot only means
+/// something inside the module it was emitted with.
+#[must_use]
+pub fn core_gap_used(hart: &mut XtHart<SocBus>) -> u32 {
+    hart.translated_core_mut()
+        .and_then(|c| c.as_xt_jit_core())
+        .map_or(0, |c| c.gap_used())
+}
+
+/// The **second** translation event: publish-by-store, done incrementally
+/// (XD10).
+///
+/// Where [`install`] walks the whole image, emits ~90 MB of wasm and replaces
+/// the core, this keeps the **read-only** module — which the guest cannot
+/// write — and re-emits only the writable side, which is where a publish
+/// lands.
+///
+/// Three things make it exact rather than merely cheaper:
+///
+/// - the walk is given every installed module's block starts as a **stop
+///   set**, so exactly one module answers for any pc and the hart's entry
+///   index has one answer;
+/// - the new module gets **its own** indirect-target tables, past the live
+///   modules' in the arena gap, because a target slot holds a block index and
+///   a block index only means something inside the module it was emitted with;
+/// - every edge that leaves a module is an ordinary **exit**, so the hart
+///   re-enters through the index and lands in whichever module holds the
+///   target.
+///
+/// **The whole-module retire stays.** The writable module is retired and
+/// replaced *whole* at every event — this is that retire, applied to the only
+/// module whose bytes can change. If the **read-only** module ever goes stale
+/// this returns [`Incremental::WholeImage`] and the caller retranslates.
+///
+/// `written` are the spans of executable memory the guest has stored into
+/// since the core was installed, and they seed the walk's third path (XD9
+/// rule 8) word by word — the code the guest published has no symbol to name
+/// it, and on the classic the bus sees those stores whether the writer was
+/// interpreted or translated (an executable page never takes an inline store:
+/// see [`write_permission_table`]).
+///
+/// # Errors
+///
+/// Anything that stops the new module being built. The caller keeps what it
+/// has: a failure here costs coverage and never a transcript.
+pub fn install_incremental(
+    hart: &mut XtHart<SocBus>,
+    bus: &mut SocBus,
+    which: usize,
+    walk: &Walk,
+    written: &[(u32, u32)],
+    max_blocks: usize,
+    fn_blocks: usize,
+    gap_used: u32,
+) -> Result<Incremental, String> {
+    let Some(core) = hart.translated_core_mut().and_then(|c| c.as_xt_jit_core()) else {
+        return Ok(Incremental::WholeImage(
+            "no translated core is installed".to_string(),
+        ));
+    };
+    if core.recording() {
+        // A recording replays ONE module's bytes against one block set. Two
+        // live modules would make it a recording of neither.
+        return Ok(Incremental::WholeImage("this run is recording".to_string()));
+    }
+    let model = core.model;
+    core.verify_now(bus);
+    if let Some(why) = core.read_only_module_is_stale(bus) {
+        return Ok(Incremental::WholeImage(why));
+    }
+    // Retire every writable module and re-walk what they held. The walk stops
+    // at the read-only module's own starts, so what it claims is exactly "the
+    // writable side of the image as it now stands", published code included.
+    core.retire_all_but_read_only();
+    let known = core.starts();
+    let used = gap_used.max(core.gap_used());
+    // The budget is the whole core's, not this module's: a boot event that
+    // was bounded (`--jit-blocks`, and the CI cell is one) must not have the
+    // rest of the image arrive through the back door at the first publish.
+    let budget = max_blocks.saturating_sub(known.len());
+
+    // Two seed lists, because neither sees everything on its own: the image's
+    // own symbols still name `.rwtext`, and only the guest's own write spans
+    // name the JIT region. The written walk is bounded by the spans
+    // themselves and so is never the budget's problem; it goes first for
+    // exactly that reason — the published code is what this event is for.
+    let third = walk_written(bus, written, &known, &|w| w);
+    let mut seen: BTreeSet<u32> = known;
+    seen.extend(third.found.set.index.keys().copied());
+    let budget = budget.saturating_sub(third.found.set.blocks.len());
+    let (found, discover_us) = walk_image(bus, walk, budget, &seen);
+    let mut blocks = third.found.set.blocks.clone();
+    blocks.extend(found.set.blocks.iter().cloned());
+    if blocks.is_empty() {
+        return Ok(Incremental::Nothing);
+    }
+    let index: BTreeMap<u32, usize> = blocks.iter().enumerate().map(|(i, b)| (b.pc, i)).collect();
+    let merged = BlockSet::from_blocks(blocks, index);
+    let mut stats = found.stats;
+    stats.blocks = merged.blocks.len();
+    stats.insts += third.found.stats.insts;
+
+    let (policy, escape_all) = policy_from_env();
+    let module = build_module(
+        bus,
+        model,
+        policy,
+        escape_all,
+        &ModuleBuild {
+            set: &merged,
+            read_only: false,
+            stats,
+            discover_us: discover_us + third.us,
+            whole_blocks: merged.blocks.len(),
+            seeds: walk.seeds.len() + third.seeds,
+            fn_blocks,
+            which,
+            gap_used: used,
+            live: Vec::new(),
+            want_wasm: false,
+        },
+    )?;
+
+    let core = hart
+        .translated_core_mut()
+        .and_then(|c| c.as_xt_jit_core())
+        .expect("the core was here a moment ago");
+    let report = core.add(module);
+    let entries: Vec<u32> = core.index.keys().copied().collect();
+    hart.set_translated_entries(&entries);
+    Ok(Incremental::Added(report))
 }
 
 fn index_of(set: &BlockSet) -> BTreeMap<u32, u32> {
