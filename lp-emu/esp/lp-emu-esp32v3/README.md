@@ -78,6 +78,67 @@ blocks: core0 decodes=151613 hits=100926332 (99.85% of 101077945 entries) \
 **expected** reading on this chip rather than a warning: the firmware does not
 emit one after a publish, which is exactly why the contract is the store.
 
+### The translated core and `--jit` (M7 P04)
+
+A second, much younger fast path: `--jit` turns the guest's own program into
+WebAssembly at the boot event and runs it under `wasmtime`. It needs a binary
+built `--features jit` — one without it says so and exits rather than
+accepting the flag and interpreting quietly, because a flag that is accepted
+and does nothing is how a measurement of the interpreter ends up labelled as
+the translator's.
+
+**It is slower than the interpreter today, and that is the expected reading.**
+Every guest instruction escapes back to `XtHart::step_one`; the module emits
+no guest semantics at all. It is the RV32 side's `Emit::NOTHING` build, kept
+because it is the one translation that cannot be wrong about an instruction,
+and what this phase asks of it is identity rather than speed.
+
+| flag | what it does |
+|---|---|
+| `--jit` | install a translated core at the boot event. Direct load only |
+| `--interpreter` | install none. The default natively, and the oracle's other leg |
+| `--jit-seeds <file>` | the block starts to translate from, one address per line (`0x`-prefixed or decimal; blank lines and `#` comments ignored). Required by `--jit` until the discovery sweep lands |
+| `--jit-blocks <n>` | the most blocks one translation event installs [200000] |
+| `--jit-fn-blocks <n>` | how many blocks one wasm function holds [64]. Lower it if a module is refused for body size |
+| `--jit-report` | print the per-core coverage line at the end of the run |
+
+Three refusals are worth knowing about before reading a report:
+
+- **`--boot-mode rom-up` installs nothing** (M7 XD10). The ROM and the
+  second-stage bootloader put the image in place with guest **stores**, so a
+  core installed before them would hold blocks of bytes that are about to be
+  overwritten. Retranslation is a later phase.
+- **`--trace` installs nothing**, and says so. The trace is the
+  *interpreter's* instruction-by-instruction reading and a translated stay
+  cannot emit one.
+- **Core 1's core is installed at its DPORT release**, not at boot: the
+  release hands the app core a fresh hart, so a core installed on it earlier
+  would be dropped before it ran anything. The report names the event.
+
+Both lines it prints — `jit: core<N> <event>: …` at install and
+`jit: core<N>: …` at exit — go to **stderr** and are masked by the oracle
+alongside `blocks:`, for the same reason: they are the host's own bookkeeping
+and no reading of the guest can see them.
+
+```text
+jit: core0: 3574343 entries, 3646767 instruction(s) inside translated code \
+     (3646767 escaped to the interpreter, 0 retired natively); 0 refusal(s) …
+```
+
+Read that line as two numbers, not one. **Entered** is the share of retired
+instructions that reached the module; **retired natively** is the share the
+module ran itself, and it is zero by construction until the emitter grows
+arms. A coverage figure that did not separate them would read like progress
+that has not been made.
+
+The identity pair is `scripts/emu/v3-oracle.sh`:
+
+```bash
+scripts/emu/v3-oracle.sh --name-a jit --name-b interp \
+    --flags-a "--jit --jit-seeds seeds.txt" --flags-b "--interpreter" \
+    target/v3-oracle render-loop 2200ms
+```
+
 ### Two cores
 
 *Written for someone deciding whether to trust a result.*

@@ -289,6 +289,47 @@ rediscover it.
 table is the switches; `docs/adr/2026-09-11-emulator-wasm-translator.md` is
 the argument, the licence posture and the ladder's honest history.
 
+### The Xtensa side, from M7 P04
+
+The classic ESP32 has the same seam now, and it is deliberately at the
+beginning of the same road. `lp-xt-jit` is the Xtensa emitter and
+`lp-emu-esp32v3/src/jit.rs` the driver; `--jit` installs a translated core at
+the boot event and `--interpreter` is its off-switch.
+
+**The two crates share an ABI, not an IR** (M7 XD7, re-asked on its merits).
+wasm is the intermediate representation: `lp-emu-jit` owns the exchange
+protocol, the four imports, the module shape and selector, the permission and
+indirect-target tables, the budget rule and the record shapes, and each
+architecture emits wasm directly from its own decoded form. An IR would have
+added a lowering per architecture plus a backend, and neither architecture's
+hard part — windowed registers here, the `fence.i` contract there — survives a
+register-machine IR without the same special casing.
+
+**What it emits today is nothing.** Every guest instruction escapes back to
+`XtHart::step_one`, which is the RV32 side's `Emit::NOTHING` build — slower
+than the interpreter, not a product path, and the one translation that cannot
+be wrong about an instruction. What it proves is the seam, and the proof is
+`v3-oracle.sh` with `--flags-a --jit --flags-b --interpreter`: the three
+pinned images at t1, both cores at `--core-quantum 256`, every column `same`.
+The guest semantics, the discovery sweep, the publish-by-store event, the wasm
+build and the S3 twin are the phases after it.
+
+Two differences from the C6 are worth naming here because they are the
+architecture's and not choices:
+
+- **The exchange area holds the physical `AR[0..64]` file**, not sixteen
+  window registers, plus the window pair, `SAR`, the three loop registers,
+  `PS.CALLINC` and a dirty mask. `a3` is not a register on this machine — it
+  is `AR[(WindowBase * 4 + 3) mod 64]` — so a stay that cached "a3" across an
+  `ENTRY` would be wrong in a way no RV32 shape warns about.
+- **The indirect-target tables are byte-granular**, against RV32's two bytes:
+  Xtensa instructions are two or three bytes at any alignment and all four
+  `pc mod 4` residues are live in equal measure, which is the same answer the
+  hart's own entry table reaches for the same reason.
+
+`lp-xt-jit/README.md` is that crate; `lp-emu-esp32v3/README.md`'s flag table
+is the switches.
+
 ## Speed
 
 The interpreter's throughput is a product concern, not a curiosity: the

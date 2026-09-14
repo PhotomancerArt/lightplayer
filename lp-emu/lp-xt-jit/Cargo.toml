@@ -1,0 +1,42 @@
+[package]
+name = "lp-xt-jit"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+# MIT as a unit with the rest of `lp-emu/`, NOT the workspace's AGPL.
+# See lp-emu/LICENSE-MIT and `just lint-emu-fence`.
+license = "MIT"
+description = "Translates Xtensa guest blocks to WebAssembly for the LightPlayer emulators"
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+# The ABI, not an IR (M7 XD7): the exchange protocol, the four imports, the
+# module shape, the dispatch selector, the record/replay shapes and the two
+# hosts all come from here, and this crate supplies the decoded form and the
+# body emitter. `dispatch::emit_module_with` is the seam.
+lp-emu-jit = { path = "../lp-emu-jit" }
+lp-emu-core = { path = "../lp-emu-core" }
+# The decoder. **No licence edge and no allowlist entry**: Yona flipped
+# `lp-xt-inst` to MIT in #763, so the fence lint accepts it by licence like
+# any other MIT workspace dependency. G-M7D-XT Q3 was superseded by that flip
+# — this crate writes no second decoder and owes no agreement test, which is
+# the RV32 side's `decode.rs` + `tests/decoder_agreement.rs` price not paid.
+lp-xt-inst = { path = "../../lp-xt/lp-xt-inst" }
+# The cost class (`block::cost_bound`), the window group (`block::ar_group_bound`)
+# and the seam types (`mach::translated::{TranslatedCore, RunOutcome}`) the
+# machine's driver plugs into.
+lp-xt-emu = { path = "../lp-xt-emu" }
+# The byte emitter, through the same version `lp-emu-jit` pins: a body emitter
+# writes `wasm_encoder::Function` directly and the two crates must agree on
+# the type.
+wasm-encoder = { version = "0.245", default-features = false }
+
+[features]
+# A native wasmtime host for translated modules — development, CI and the
+# classic's native `--jit` path. NEVER a default: the product host is the
+# browser's own engine (P08), and wasmtime needs minutes of cranelift
+# compilation on the images this ladder measures.
+host-wasmtime = ["lp-emu-jit/host-wasmtime"]

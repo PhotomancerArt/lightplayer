@@ -51,6 +51,15 @@ pub mod control;
 pub mod flash;
 pub mod image;
 pub mod intmatrix;
+/// The translated core (`--jit`, `--features jit`). See the module docs.
+///
+/// `any(feature = "jit", target_family = "wasm")` for the reason the manifest
+/// gives: natively the translator is optional because wasmtime costs minutes
+/// of cranelift per image, and on a wasm target it is the core rather than an
+/// option — a build of the product that had to be asked for its own execution
+/// engine is one forgotten flag from silently measuring the interpreter.
+#[cfg(any(feature = "jit", target_family = "wasm"))]
+pub mod jit;
 pub mod loader;
 pub mod machine;
 pub mod memmap;

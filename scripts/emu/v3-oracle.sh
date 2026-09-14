@@ -45,7 +45,16 @@
 # whole point of the leg rather than an inconvenience: the off-switch is what
 # the branch ADDS, so the older binary does not have it and refuses it by
 # name ("a door a later phase adds is absent rather than accepted-and-ignored").
-# `--flags-a` / `--flags-b` name each leg's flags; each defaults to `--slow`.
+# `--flags-a` / `--flags-b` name each leg's flags, and `--name-a` / `--name-b`
+# name the legs themselves (the names land in the artefact filenames and in
+# the masked-lines footer). In pair mode each flag set defaults to `--slow`.
+#
+# M7 P04's pair is the translated core against the interpreter:
+#
+#   scripts/emu/v3-oracle.sh --name-a jit --name-b interp \
+#       --flags-a "--jit --jit-seeds seeds.txt" --flags-b "--interpreter" \
+#       target/v3-oracle boot-idle 100ms
+#
 # For P01 that is `--flags-a "" --flags-b "--no-block-cache"`: main has no
 # cache to turn off, so its interpreter IS its default.
 #
@@ -68,6 +77,8 @@ flags_a=""
 flags_b=""
 have_flags_a=0
 have_flags_b=0
+name_a=""
+name_b=""
 fast_flags="${LP_EMU_V3_ORACLE_FAST:-}"
 slow_flags="${LP_EMU_V3_ORACLE_SLOW:---no-block-cache}"
 commit="${LP_EMU_V3_ORACLE_COMMIT:-0773c3fbd}"
@@ -80,6 +91,8 @@ while [[ $# -gt 0 ]]; do
         --slow) slow_flags="${2?--slow needs a flag string}"; shift 2 ;;
         --flags-a) flags_a="${2?--flags-a needs a flag string}"; have_flags_a=1; shift 2 ;;
         --flags-b) flags_b="${2?--flags-b needs a flag string}"; have_flags_b=1; shift 2 ;;
+        --name-a) name_a="${2:?--name-a needs a name}"; shift 2 ;;
+        --name-b) name_b="${2:?--name-b needs a name}"; shift 2 ;;
         -h|--help) sed -n '2,60p' "$0"; exit 0 ;;
         *) break ;;
     esac
@@ -114,12 +127,25 @@ if [[ -n "$bin_a$bin_b" ]]; then
     # adds — see the header.
     [[ $have_flags_a == 1 ]] || flags_a="$slow_flags"
     [[ $have_flags_b == 1 ]] || flags_b="$slow_flags"
-    a_bin="$bin_a"; a_flags="$flags_a"; a_name=main
-    b_bin="$bin_b"; b_flags="$flags_b"; b_name=branch
+    a_bin="$bin_a"; a_flags="$flags_a"; a_name="${name_a:-main}"
+    b_bin="$bin_b"; b_flags="$flags_b"; b_name="${name_b:-branch}"
 else
     mode=flag
-    a_bin="target/release/lp-emu-esp32v3"; a_flags="$fast_flags"; a_name=fast
-    b_bin="$a_bin";                        b_flags="$slow_flags"; b_name=slow
+    # One binary, two flag sets. The default pair is P01's — the block cache
+    # against `--no-block-cache` — and M7 P04 added the second: `--jit`
+    # against `--interpreter`, named through `--flags-a`/`--flags-b` so the
+    # legs are not called "fast" and "slow" when the translated leg is the
+    # slower of the two (every instruction escapes; identity is the question,
+    # not speed).
+    a_bin="target/release/lp-emu-esp32v3"; b_bin="$a_bin"
+    if [[ $have_flags_a == 1 || $have_flags_b == 1 ]]; then
+        a_flags="$flags_a"; b_flags="$flags_b"
+        : "${name_a:=a}"; : "${name_b:=b}"
+    else
+        a_flags="$fast_flags"; b_flags="$slow_flags"
+        : "${name_a:=fast}"; : "${name_b:=slow}"
+    fi
+    a_name="$name_a"; b_name="$name_b"
 fi
 for b in "$a_bin" "$b_bin"; do
     [[ -x "$b" ]] || { echo "v3-oracle: $b is not an executable" >&2; exit 1; }
@@ -156,11 +182,18 @@ a="$out/$slug-$window-$a_name"
 b="$out/$slug-$window-$b_name"
 same() { if cmp -s "$1" "$2"; then echo same; else echo DIFFERENT; fi; }
 
-# The `blocks:` lines are the cache's own counters. They MUST differ between
-# the two legs — that is what the two legs ARE — and they are not guest state:
-# no transcript, no waveform and no cycle count can see them. Masked here and
-# printed raw below.
-mask() { grep -v -e '^blocks: ' "$1"; }
+# The `blocks:` lines are the cache's own counters, and the `jit:` lines are
+# the translated core's. They MUST differ between the two legs — that is what
+# the two legs ARE — and neither is guest state: no transcript, no waveform and
+# no cycle count can see them. Masked here and printed raw below.
+#
+# `jit:` joined the mask with M7 P04, when `--flags-a --jit` became one of the
+# pairs this script is asked to run. A leg that printed a coverage line the
+# other leg did not would fail on `stderr*` for a reason that is not the
+# machine's, which is exactly the failure mode masking exists to prevent —
+# and exactly why the masked lines are printed raw underneath rather than
+# dropped, so the masking can be checked rather than trusted.
+mask() { grep -v -e '^blocks: ' -e '^jit: ' "$1"; }
 mask "$a.err" >"$a.err.masked"
 mask "$b.err" >"$b.err.masked"
 
@@ -190,5 +223,5 @@ else
 fi
 sed -n '1p' "$a.run"
 echo "--- the masked lines, raw ($a_name then $b_name) ---"
-grep -h '^blocks: ' "$a.err" || true
-grep -h '^blocks: ' "$b.err" || true
+grep -h -e '^blocks: ' -e '^jit: ' "$a.err" || true
+grep -h -e '^blocks: ' -e '^jit: ' "$b.err" || true

@@ -77,11 +77,9 @@ use wasm_encoder::{
     Module, RefType, TableSection, TableType, TypeSection, ValType,
 };
 
-use crate::blocks::BlockSet;
-use crate::host::{
-    EXCHANGE_CROSS, EXCHANGE_CYCLE, EXCHANGE_FLAGS, EXCHANGE_INDIRECT_MISS, EXCHANGE_INSTRET,
-    PERM_SHIFT,
-};
+use crate::blocks::{BlockSet, DecodedInst};
+use crate::decode::Decoded;
+use crate::host::{ExchangeLayout, PERM_SHIFT};
 use crate::translate::{
     ENTRY_FUNC, Emit, Emitted, F_FIRST_BODY, F_MMIO_LOAD, IMPORT_MODULE, Layout, emit_body,
     fast_load,
@@ -154,13 +152,29 @@ impl Selector {
 pub const PAGEMAP_ENTRIES: u32 = 1 << (32 - PERM_SHIFT);
 /// The page map's size in bytes.
 pub const PAGEMAP_BYTES: u32 = PAGEMAP_ENTRIES * 4;
-/// One `i32` per two bytes of a 16 KiB page.
-pub const SLOTS_PER_PAGE: u32 = (1 << PERM_SHIFT) / 2;
-/// One page's slot array, in bytes.
+/// One `i32` per two bytes of a 16 KiB page — **the RV32 figure**.
+///
+/// The granularity is the decoded type's ([`DecodedInst::SLOT_SHIFT`]) since
+/// M7 XD6; this is what that rule derives for RV32 and it is what every RV32
+/// module has always used. [`slots_per_page`] is the general form.
+pub const SLOTS_PER_PAGE: u32 = slots_per_page(Decoded::SLOT_SHIFT);
+/// One page's slot array, in bytes — the RV32 figure. See [`SLOTS_PER_PAGE`].
 pub const SLOT_ARRAY_BYTES: u32 = SLOTS_PER_PAGE * 4;
 
+/// One `i32` per `1 << slot_shift` bytes of a 16 KiB page.
+#[must_use]
+pub const fn slots_per_page(slot_shift: u32) -> u32 {
+    (1 << PERM_SHIFT) >> slot_shift
+}
+
+/// One page's slot array, in bytes, at `slot_shift` granularity.
+#[must_use]
+pub const fn slot_array_bytes(slot_shift: u32) -> u32 {
+    slots_per_page(slot_shift) * 4
+}
+
 /// The 16 KiB pages of the guest space that hold at least one block start.
-fn target_pages(set: &BlockSet) -> Vec<u32> {
+fn target_pages<D: DecodedInst>(set: &BlockSet<D>) -> Vec<u32> {
     let mut pages: Vec<u32> = set.blocks.iter().map(|b| b.pc >> PERM_SHIFT).collect();
     // Sorted before the dedup, because `dedup` only drops **adjacent**
     // duplicates and this function does not assume the block set is in
@@ -181,9 +195,9 @@ fn target_pages(set: &BlockSet) -> Vec<u32> {
 /// executable" branch entirely: an address on a page with no blocks reads
 /// `-1` exactly like an address on a page that has some but not this one.
 #[must_use]
-pub fn target_table_bytes(set: &BlockSet) -> u64 {
+pub fn target_table_bytes<D: DecodedInst>(set: &BlockSet<D>) -> u64 {
     let pages = target_pages(set).len() as u64 + 1;
-    u64::from(PAGEMAP_BYTES) + pages * u64::from(SLOT_ARRAY_BYTES)
+    u64::from(PAGEMAP_BYTES) + pages * u64::from(slot_array_bytes(D::SLOT_SHIFT))
 }
 
 /// Write the indirect-target page map and slot arrays into `mem` at `at`,
@@ -209,7 +223,14 @@ pub fn target_table_bytes(set: &BlockSet) -> u64 {
 /// Panics when `mem` is shorter than [`target_table_bytes`] past `at`, or
 /// when the tables would not fit a 32-bit offset. Both are the host's sizing
 /// to get right before it promises [`Layout::indirect`].
-pub fn write_target_tables(mem: &mut [u8], base: u32, at: u32, set: &BlockSet) -> u32 {
+pub fn write_target_tables<D: DecodedInst>(
+    mem: &mut [u8],
+    base: u32,
+    at: u32,
+    set: &BlockSet<D>,
+) -> u32 {
+    let slots_per_page = slots_per_page(D::SLOT_SHIFT);
+    let slot_array_bytes = slot_array_bytes(D::SLOT_SHIFT);
     let need = target_table_bytes(set);
     let end = u64::from(at) + need;
     assert!(
@@ -224,27 +245,29 @@ pub fn write_target_tables(mem: &mut [u8], base: u32, at: u32, set: &BlockSet) -
     // The shared "nothing starts here" array sits first, so every page map
     // entry has something valid to point at before any page is placed.
     let dead = at + PAGEMAP_BYTES;
-    for slot in 0..SLOTS_PER_PAGE {
+    for slot in 0..slots_per_page {
         put(mem, dead + slot * 4, -1);
     }
     for page in 0..PAGEMAP_ENTRIES {
         put(mem, at + page * 4, (base + dead) as i32);
     }
 
-    let mut next = dead + SLOT_ARRAY_BYTES;
+    let mut next = dead + slot_array_bytes;
     for page in target_pages(set) {
-        for slot in 0..SLOTS_PER_PAGE {
+        for slot in 0..slots_per_page {
             put(mem, next + slot * 4, -1);
         }
         put(mem, at + page * 4, (base + next) as i32);
-        next += SLOT_ARRAY_BYTES;
+        next += slot_array_bytes;
     }
     for (i, b) in set.blocks.iter().enumerate() {
-        // An odd start is unreachable by `jalr`, which clears the low bit of
-        // every target, and it would share a slot with the address below it.
-        // Dropping it from the table costs that block nothing but the
-        // indirect edge it could never have had.
-        if b.pc & 1 != 0 {
+        // A start the slot granularity cannot name is unreachable through this
+        // table and would share a slot with the address below it. Dropping it
+        // costs that block nothing but the indirect edge it could never have
+        // had. On RV32 that is an odd start, which `jalr` — whose target has
+        // its low bit cleared — can never reach; at byte granularity
+        // (`SLOT_SHIFT == 0`) the mask is empty and nothing is dropped.
+        if b.pc & ((1u32 << D::SLOT_SHIFT) - 1) != 0 {
             continue;
         }
         // The page map holds a memory-relative pointer; writing through
@@ -255,7 +278,7 @@ pub fn write_target_tables(mem: &mut [u8], base: u32, at: u32, set: &BlockSet) -
                 .expect("four bytes"),
         ) as u32
             - base;
-        let slot = (b.pc & ((1 << PERM_SHIFT) - 1)) >> 1;
+        let slot = (b.pc & ((1 << PERM_SHIFT) - 1)) >> D::SLOT_SHIFT;
         put(mem, array + slot * 4, i as i32);
     }
     next - at
@@ -313,6 +336,45 @@ pub fn emit_module(
     policy: Emit,
     fn_blocks: usize,
 ) -> Emitted {
+    emit_module_with(
+        set,
+        layout,
+        ExchangeLayout::RV32,
+        policy.selector,
+        fn_blocks,
+        &|set, lo, len, load_func| emit_body(set, lo, len, model, layout, policy, load_func),
+    )
+}
+
+/// [`emit_module`] for any architecture: the module's shape, with the **body
+/// emitter supplied** (M7 XD6).
+///
+/// Everything in this function is the ABI rather than the instruction set —
+/// the four imports and their signatures, the imported memory, the selector,
+/// the function table, the export, the body budget — which is exactly the
+/// claim XD7 makes: the two architectures share an ABI, not an intermediate
+/// representation. `lp-xt-jit` calls this with its own decoded type and its
+/// own body emitter and gets the same module shape the C6 has been running
+/// since M7 P5.
+///
+/// `body` is handed `(set, lo, len, load_func)` and returns the sub-dispatcher
+/// function plus how many instructions it emitted natively and how many it
+/// escaped. The cycle model and the emission policy are the body emitter's own
+/// business and are captured by the closure rather than threaded through here.
+///
+/// # Panics
+///
+/// Panics on an empty block set, or on `fn_blocks == 0` — both are callers'
+/// bugs, not states a walk can produce.
+#[must_use]
+pub fn emit_module_with<D: DecodedInst>(
+    set: &BlockSet<D>,
+    layout: Layout,
+    exchange: ExchangeLayout,
+    shape: Selector,
+    fn_blocks: usize,
+    body: &dyn Fn(&BlockSet<D>, usize, usize, u32) -> (Function, usize, usize),
+) -> Emitted {
     assert!(!set.is_empty(), "an empty block set has nothing to emit");
     assert!(fn_blocks > 0, "a sub-dispatcher holds at least one block");
     let total = set.blocks.len();
@@ -333,7 +395,7 @@ pub fn emit_module(
     for c in 0..count {
         let lo = c * chunk;
         let len = chunk.min(total - lo);
-        let (f, native, escaped) = emit_body(set, lo, len, model, layout, policy, load_func);
+        let (f, native, escaped) = body(set, lo, len, load_func);
         native_insts += native;
         escaped_insts += escaped;
         bodies.push(f);
@@ -344,7 +406,7 @@ pub fn emit_module(
     // sub-dispatchers and not the one function that grows as they shrink, so
     // the budget check below had a blind spot at exactly the sizes where the
     // selector is the largest function in the module.
-    let sel = selector(count, chunk, layout, policy.selector);
+    let sel = selector(count, chunk, layout, exchange, shape);
     let fast = layout.fast_reads.map(fast_load);
     let max_sub_body_bytes = bodies.iter().map(Function::byte_len).max().unwrap_or(0);
     let selector_bytes = sel.byte_len();
@@ -438,7 +500,7 @@ pub fn emit_module(
     // Note it is table **0** of this module and has nothing to do with the
     // emulator's own `__indirect_function_table`: an emitted module has no
     // tables at all otherwise, and imports none.
-    if policy.selector == Selector::Flat {
+    if shape == Selector::Flat {
         let mut tables = TableSection::new();
         tables.table(TableType {
             element_type: RefType::FUNCREF,
@@ -455,7 +517,7 @@ pub fn emit_module(
     exports.export(ENTRY_FUNC, ExportKind::Func, selector_index);
     module.section(&exports);
 
-    if policy.selector == Selector::Flat {
+    if shape == Selector::Flat {
         let mut elements = ElementSection::new();
         let fns: Vec<u32> = (0..count as u32).map(|j| F_FIRST_BODY + j).collect();
         elements.active(
@@ -489,7 +551,13 @@ pub fn emit_module(
 
 /// The outer selector: the one export, and the only thing that knows a global
 /// block index is a `(function, local index)` pair.
-fn selector(count: usize, chunk: usize, layout: Layout, shape: Selector) -> Function {
+fn selector(
+    count: usize,
+    chunk: usize,
+    layout: Layout,
+    exchange: ExchangeLayout,
+    shape: Selector,
+) -> Function {
     let locals = alloc::vec![
         (1, ValType::I32), // next
         (1, ValType::I64), // the sub-dispatcher's result
@@ -500,7 +568,7 @@ fn selector(count: usize, chunk: usize, layout: Layout, shape: Selector) -> Func
     let mut e = |ins: I<'static>| {
         f.instruction(&ins);
     };
-    let exchange = |field: u64| memarg(u64::from(layout.exchange_offset) + field);
+    let at = |field: u64| memarg(u64::from(layout.exchange_offset) + field);
 
     // The stay's own flags, and the stay's own counters. Cleared here because
     // this is the one place the host's entry and the module's begin together:
@@ -508,13 +576,13 @@ fn selector(count: usize, chunk: usize, layout: Layout, shape: Selector) -> Func
     // and the two counters below are read back per entry.
     e(I::I32Const(0));
     e(I::I32Const(0));
-    e(I::I32Store(exchange(EXCHANGE_FLAGS)));
+    e(I::I32Store(at(exchange.flags())));
     e(I::I32Const(0));
     e(I::I64Const(0));
-    e(I::I64Store(exchange(EXCHANGE_CROSS)));
+    e(I::I64Store(at(exchange.cross())));
     e(I::I32Const(0));
     e(I::I64Const(0));
-    e(I::I64Store(exchange(EXCHANGE_INDIRECT_MISS)));
+    e(I::I64Store(at(exchange.indirect_miss())));
 
     e(I::LocalGet(P_ENTRY));
     e(I::LocalSet(S_NEXT));
@@ -607,10 +675,10 @@ fn selector(count: usize, chunk: usize, layout: Layout, shape: Selector) -> Func
     // the exchange area, which the sub-dispatcher's epilogue has just
     // written.
     e(I::I32Const(0));
-    e(I::I64Load(exchange(EXCHANGE_CYCLE)));
+    e(I::I64Load(at(exchange.cycle())));
     e(I::LocalSet(S_CYC));
     e(I::I32Const(0));
-    e(I::I64Load(exchange(EXCHANGE_INSTRET)));
+    e(I::I64Load(at(exchange.instret())));
     e(I::LocalSet(S_INS));
 
     e(I::LocalGet(S_RET));
@@ -623,10 +691,10 @@ fn selector(count: usize, chunk: usize, layout: Layout, shape: Selector) -> Func
     e(I::LocalSet(S_NEXT));
     e(I::I32Const(0));
     e(I::I32Const(0));
-    e(I::I64Load(exchange(EXCHANGE_CROSS)));
+    e(I::I64Load(at(exchange.cross())));
     e(I::I64Const(1));
     e(I::I64Add);
-    e(I::I64Store(exchange(EXCHANGE_CROSS)));
+    e(I::I64Store(at(exchange.cross())));
     e(I::Br(1)); // $L
     e(I::End);
 
