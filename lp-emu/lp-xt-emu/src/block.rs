@@ -36,6 +36,7 @@ use lp_xt_inst::Inst;
 
 use crate::emu::Flow;
 use crate::executor::inst_class;
+use crate::mach::window::ar_group;
 
 /// One pre-decoded Xtensa instruction.
 ///
@@ -54,6 +55,22 @@ pub struct XtSlot {
     /// An **upper bound** on the cost class this slot can charge — see
     /// [`cost_bound`] for why it is a bound and not the exact class.
     pub class: InstClass,
+    /// An **upper bound** on the 4-register group this slot's address-register
+    /// operands reach — see [`ar_group_bound`] for the one instruction where
+    /// it is a bound rather than the exact answer.
+    pub group: u8,
+    /// The maximum [`group`](Self::group) over the whole block — **valid on
+    /// the block's first slot only**, and meaningless on any other.
+    ///
+    /// This is the per-block window precondition's input (M7 XD5). The plan
+    /// forbids an Xtensa field on the arch-neutral
+    /// [`lp_emu_core::block::Block`], so the answer rides the arena's first
+    /// slot: it is the one slot the block executor reads before it runs
+    /// anything, so the byte is already in cache when it is wanted.
+    /// [`XtSlot::new`] leaves it equal to `group` — the right answer for a
+    /// one-slot block — and `mach::block::decode_block` raises it to the
+    /// block's maximum as it fills the arena.
+    pub block_group: u8,
 }
 
 impl XtSlot {
@@ -62,10 +79,13 @@ impl XtSlot {
     #[inline]
     #[must_use]
     pub fn new(inst: Inst, len: u8) -> Self {
+        let group = ar_group_bound(&inst);
         Self {
             inst,
             len,
             class: cost_bound(&inst),
+            group,
+            block_group: group,
         }
     }
 }
@@ -103,6 +123,73 @@ impl lp_emu_core::block::Slot for XtSlot {
 #[must_use]
 pub fn cost_bound(inst: &Inst) -> InstClass {
     inst_class(inst, &Flow::Jump(0))
+}
+
+/// The **upper bound** on the 4-register group one instruction's address
+/// registers reach, taken at decode time (M7 XD5).
+///
+/// [`crate::mach::window::ar_group`] is exact but takes `PS.CALLINC`, which is
+/// live state, so a decode-time answer cannot always be the exact one. It is
+/// exact for every instruction but **`ENTRY`**, whose group is
+/// `max(group(as), PS.CALLINC)`: this returns 3 for `ENTRY`, the largest a
+/// 2-bit `CALLINC` can contribute, and therefore an answer no live `CALLINC`
+/// can exceed.
+///
+/// A bound in this direction is the safe one, exactly as [`cost_bound`]'s is.
+/// The per-block precondition asks "can any slot in this block overflow?", and
+/// a group that is too *large* can only make the answer "maybe" when the exact
+/// answer was "no" — a block that runs slot by slot with the check it has
+/// always had. A group that were too *small* would skip a check that should
+/// have fired, which is a wrong answer, and that is why `ENTRY` rounds up
+/// rather than storing `group(as)` and hoping.
+///
+/// The cost of rounding `ENTRY` up is a block that could have hoisted on a
+/// `CALLINC` of 1 or 2 running slot by slot instead. `ENTRY` is a block
+/// terminator, so it is one slot of one block, and its own check is the
+/// interpreter's own either way.
+#[inline]
+#[must_use]
+pub fn ar_group_bound(inst: &Inst) -> u8 {
+    match inst {
+        // `ar_group(Entry, callinc) = max(group(as), callinc & 3) <= 3`.
+        Inst::Entry(..) => 3,
+        // Every other arm ignores `ps_callinc`, so any value gives the exact
+        // answer.
+        _ => ar_group(inst, 0),
+    }
+}
+
+/// How many blocks ran with the window overflow check **hoisted** — decided
+/// once at block entry — and how many ran it slot by slot (M7 XD5).
+///
+/// A diagnostic, and nothing else: both paths retire the same instructions in
+/// the same order with the same architectural state, so this pair says only
+/// how much of a run took the cheap route. It is not architectural state, it
+/// is absent from a snapshot, a clone starts at zero, and it is masked out of
+/// every compared transcript along with the rest of the `blocks:` line.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct WindowHoistStats {
+    /// Blocks entered with the per-slot overflow check skipped for the whole
+    /// block, because no `WindowStart` bit was within reach of the block's
+    /// maximum group (or because `PS.WOE` was clear / `PS.EXCM` set, where the
+    /// per-instruction check is skipped anyway).
+    pub hoisted: u64,
+    /// Blocks entered with the per-slot check left exactly as the interpreter
+    /// has always run it, because a bit **was** within reach.
+    pub slotwise: u64,
+}
+
+impl WindowHoistStats {
+    /// The share of blocks that took the hoisted path, 0.0 when none ran.
+    #[must_use]
+    pub fn hoisted_share(&self) -> f64 {
+        let total = self.hoisted + self.slotwise;
+        if total == 0 {
+            0.0
+        } else {
+            self.hoisted as f64 / total as f64
+        }
+    }
 }
 
 #[cfg(test)]
@@ -146,5 +233,55 @@ mod tests {
             "the bound must be the taken class; BranchNotTaken would be too small"
         );
         assert_ne!(slot.cost_bound(), InstClass::BranchNotTaken);
+    }
+
+    /// [`ar_group_bound`] is the exact [`ar_group`] for every instruction that
+    /// does not read `PS.CALLINC`, and rounds the one that does — `ENTRY` — up
+    /// to 3, the largest a 2-bit `CALLINC` can make it.
+    ///
+    /// The sweep over all four `CALLINC` values is the claim the hoist rests
+    /// on: no live `CALLINC` can push a slot's group above the bound the block
+    /// was folded from.
+    #[test]
+    fn the_decode_time_group_is_an_upper_bound_on_the_live_one() {
+        use lp_xt_inst::{AluRrr, CallOp, LoadOp};
+
+        for inst in [
+            Inst::Nullary(lp_xt_inst::NullaryOp::Nop),
+            Inst::Rrr(AluRrr::Or, Reg::new(2), Reg::new(3), Reg::new(4)),
+            Inst::Rrr(AluRrr::Or, Reg::new(13), Reg::new(3), Reg::new(4)),
+            Inst::Load(LoadOp::L32i, Reg::new(9), Reg::new(1), 0),
+            Inst::Call(CallOp::Call12, 4),
+            Inst::BranchRr(BrRr::Beq, Reg::new(2), Reg::new(3), 4),
+        ] {
+            for callinc in 0..4u8 {
+                assert_eq!(
+                    ar_group_bound(&inst),
+                    ar_group(&inst, callinc),
+                    "{inst:?} does not read CALLINC, so the bound is exact"
+                );
+            }
+        }
+
+        let entry = Inst::Entry(Reg::new(1), 16);
+        assert_eq!(ar_group_bound(&entry), 3, "ENTRY rounds up");
+        for callinc in 0..4u8 {
+            assert!(
+                ar_group(&entry, callinc) <= ar_group_bound(&entry),
+                "CALLINC {callinc} must not reach past the bound"
+            );
+        }
+    }
+
+    /// The share is 0.0 on a run that entered no block, and the ratio
+    /// otherwise.
+    #[test]
+    fn the_hoisted_share_is_zero_before_any_block_runs() {
+        assert_eq!(WindowHoistStats::default().hoisted_share(), 0.0);
+        let stats = WindowHoistStats {
+            hoisted: 3,
+            slotwise: 1,
+        };
+        assert!((stats.hoisted_share() - 0.75).abs() < f64::EPSILON);
     }
 }

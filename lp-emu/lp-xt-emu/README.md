@@ -555,6 +555,38 @@ A trap, a window exception, an interrupt taken at a polling point and a
 loop-back all do that, so a classification mistake can only make a block
 shorter, never wrong.
 
+### The window check, decided once per block
+
+The RM's `WindowCheck` (§4.7.1.3) runs before **every** instruction while
+`PS.WOE && !PS.EXCM`, and it was 6.6 % of the classic's host time for an event
+that fires once every 1,156 instructions. Its answer comes from
+`(WindowBase, WindowStart, group)` and nothing else — and nothing inside a
+block can move the first two, because every instruction that writes either
+(`ENTRY`, `RETW`, `ROTW`, `MOVSP`, `rfwo`/`rfwu`, any `wsr`/`xsr`) is a block
+terminator or a refusal, and an exception moves the pc off the straight line,
+which leaves the block. So the check is decided **once at block entry** (M7
+P02, XD5): each slot records an upper bound on its address-register group at
+decode time, `decode_block` folds the block's maximum onto the first slot, and
+`window::overflow_in_reach` — the read half of `overflow_check`, factored out
+so the precondition and the check it stands in for have one definition — says
+whether any `WindowStart` bit is within reach of that maximum. If none is, the
+whole block runs with the per-slot check skipped; if one is, the block runs
+slot by slot with exactly the check the interpreter has always run, and the
+overflow fires at exactly the slot that would have raised it.
+
+`ENTRY` is the one instruction whose group is not known at decode time
+(`max(group(as), PS.CALLINC)`), so its bound rounds **up** to 3. Rounding up
+can only cost a block the fast path; rounding down would skip a check that
+should have fired.
+
+On the render loop **99.80 %** of core 0's blocks and **99.91 %** of core 1's
+take the hoisted path, and the rung is worth **1.18×** (`render-loop` at t1,
+both cores, 9.85 → 8.37 user seconds against P01's binary, best of three
+interleaved pairs). The classic's per-core `blocks:` report line carries
+`window hoisted=… slotwise=… (…% hoisted)` so any run can say which path it
+took; like the rest of that line it is a diagnostic, masked out of every
+compared transcript.
+
 The user-mode `Emulator` below is **untouched** by all of this: it is the FP
 and JIT oracle and its replays stay byte-identical.
 
