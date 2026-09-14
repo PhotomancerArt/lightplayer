@@ -978,6 +978,17 @@ impl Recorder {
 
 // ---- the core --------------------------------------------------------------
 
+/// Which modules [`XtJitCore::verify`] re-reads the guest's bytes for.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Scope {
+    /// Only the modules a guest store could have changed. What an
+    /// invalidation asks for, on the entry path.
+    Writable,
+    /// Every module, the read-only half included. What a translation event
+    /// asks for, at a slice boundary.
+    All,
+}
+
 /// One compiled, installed module, and everything that is per module rather
 /// than per core (XD10).
 ///
@@ -1080,12 +1091,39 @@ impl XtJitCore {
     /// Per module, because that is the whole point of the split: the guest
     /// rewriting the JIT region must not retire the flash window's 140,000
     /// blocks with it.
-    fn verify(&mut self, bus: &SocBus) {
+    ///
+    /// # Which modules, and why the hot path skips the read-only half (P08)
+    ///
+    /// [`Scope::Writable`] is what an **invalidation** asks for — the drain at
+    /// polling point (c), and a `wsr` to a loop register, both of which reach
+    /// here through [`TranslatedCore::invalidate`]. Neither can have changed a
+    /// byte the read-only half was translated from: a guest store into a
+    /// region the bus calls read-only is refused, which is the premise
+    /// [`split_by_writability`] is built on and what [`XtModule::read_only`]
+    /// already documents.
+    ///
+    /// It is a narrowing rather than a nicety. `restore_context` rewrites
+    /// `LBEG`/`LEND`/`LCOUNT` on **every context switch** (the reason DD104
+    /// took the loop registers off the *cache*'s flush path), so on
+    /// `render-loop` this runs **72,458 times in 5.5 s of emulated time** —
+    /// and re-reading the read-only module's 138,564 blocks each time was
+    /// **86.25 % of a translated browser run's whole wall clock** (M7 P08's
+    /// V8 profile: `XtJitCore::run` self time 97.4 s of 112.9 s). Zero of
+    /// those 72,458 ever found a changed byte, and none could.
+    ///
+    /// [`Scope::All`] is what a **translation event** asks for, at a slice
+    /// boundary, where the cost is paid once and
+    /// [`XtJitCore::read_only_module_is_stale`] is the check it exists for —
+    /// the one that says "something moved memory the bus calls read-only" and
+    /// retranslates the image rather than trusting the split. That net is
+    /// unchanged, and since P08 it is cast at every event rather than only at
+    /// an event a pending invalidation happened to precede.
+    fn verify(&mut self, bus: &SocBus, scope: Scope) {
         self.verify_pending = false;
         let base = bus.guest_arena_base();
         let mut any = false;
         for i in 0..self.mods.len() {
-            if self.mods[i].stale {
+            if self.mods[i].stale || (scope == Scope::Writable && self.mods[i].read_only) {
                 continue;
             }
             let changed = {
@@ -1143,9 +1181,10 @@ impl XtJitCore {
     /// is stale is what decides between replacing the writable module and
     /// retranslating the image.
     pub fn verify_now(&mut self, bus: &SocBus) -> Option<String> {
-        if self.verify_pending {
-            self.verify(bus);
-        }
+        // Unconditional: the hot path's own verify only ever looked at the
+        // writable half (see [`XtJitCore::verify`]), so the read-only half's
+        // net has to be cast here whether or not an invalidation is pending.
+        self.verify(bus, Scope::All);
         let stale: Vec<usize> = self
             .mods
             .iter()
@@ -1300,7 +1339,7 @@ impl TranslatedCore<SocBus> for XtJitCore {
             return RunOutcome::Refused;
         }
         if self.verify_pending {
-            self.verify(bus);
+            self.verify(bus, Scope::Writable);
         }
         if hart.cycle_model() != self.model {
             log::warn!("jit: the cost model changed under a translated core; interpreting");
@@ -1587,7 +1626,8 @@ impl TranslatedCore<SocBus> for XtJitCore {
              instruction(s) (runway ~155); {} publish-by-store retranslation(s); {} refusal(s) \
              (no-entry \
              {}, pending {}, watch {}, impure {}, timer {}, stale {}, ps {}, ibreak {}, loop {}); \
-             {} invalidation(s) answered by re-reading the bytes, {} that found them changed; {} \
+             {} invalidation(s) answered by re-reading the writable modules' bytes, {} that \
+             found them changed; {} \
              slice end(s), {} no-progress exit(s); exits by reason: {}; window refusals: block \
              {}, entry {}, retw {}; polls that left {} (code-dirty {}); writeback per exit: \
              0 groups {}, 1 {}, 2 {}, 3 {}, 4 {} (mean {:.2} words of 64); escapes by \
