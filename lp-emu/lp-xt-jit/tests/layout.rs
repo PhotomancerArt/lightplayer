@@ -121,7 +121,7 @@ fn an_undecodable_word_is_refused_with_the_density_rules_width() {
     // `op0 = 0xE` is a three-byte form; this particular word is not an
     // instruction the decoder knows.
     match lp_xt_jit::decode::decode(&[0xFE, 0xFF, 0xFF]) {
-        Decode::Refused { width } | Decode::Undecodable { width } => assert_eq!(width, 3),
+        Decode::Refused { width } | Decode::Undecodable { width, .. } => assert_eq!(width, 3),
         Decode::Ok(d) => panic!("0xFFFFFE decoded as {:?}", d.inst),
     }
     // Nothing fetched at all: step by the longest an instruction can be, so

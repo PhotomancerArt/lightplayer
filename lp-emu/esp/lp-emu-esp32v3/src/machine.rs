@@ -170,6 +170,7 @@
 //! useful for scouting, never for a claim.
 
 use std::fmt;
+use std::fmt::Write as _;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
@@ -1055,14 +1056,19 @@ pub struct Esp32V3Builder {
     /// binary starting fast (JD9/JD24). `--interpreter` is its off-switch, and
     /// on a wasm target (P08) the default is the other way round.
     jit: bool,
-    /// `--jit-seeds <file>`: the block starts to translate from.
+    /// `--jit-seeds <file>`: an **override** of the sweep's seeds (P05).
     ///
-    /// Supplied, because the real sweep is P05's. Nothing a supplied list
-    /// produces can be wrong, only short.
+    /// Empty — the product path — means the machine seeds from its own
+    /// symbols; a list here replaces those seeds and keeps the bounds, a
+    /// debugging door for walking one function.
     jit_seeds: Vec<u32>,
     jit_blocks: usize,
     jit_fn_blocks: usize,
     jit_report: bool,
+    /// `LP_EMU_XT_BLOCKPROF=<path>`: the per-pc retirement census, written
+    /// there at the end of the run (M7 P05). `None` — every run that did not
+    /// ask — costs one `Option` test per retire on each hart and nothing else.
+    pc_census: Option<PathBuf>,
 }
 
 impl Default for Esp32V3Builder {
@@ -1104,6 +1110,7 @@ impl Default for Esp32V3Builder {
             jit_blocks: JIT_BLOCKS_DEFAULT,
             jit_fn_blocks: JIT_FN_BLOCKS_DEFAULT,
             jit_report: false,
+            pc_census: None,
         }
     }
 }
@@ -1116,10 +1123,47 @@ impl Default for Esp32V3Builder {
 #[cfg(any(feature = "jit", target_family = "wasm"))]
 #[derive(Clone, Debug)]
 struct JitRequest {
-    seeds: Vec<u32>,
+    walk: WalkData,
     max_blocks: usize,
     fn_blocks: usize,
 }
+
+/// The sweep's seeds and bounds, derived once from the two ELFs and the
+/// memory map (P05, [`Machine::translation_walk`]) and owned so a later event
+/// can walk again.
+#[cfg(any(feature = "jit", target_family = "wasm"))]
+#[derive(Clone, Debug, Default)]
+struct WalkData {
+    seeds: Vec<u32>,
+    extents: Vec<lp_xt_jit::discover::Extent>,
+    spans: Vec<(u32, u32)>,
+    /// In-text symbols with no `st_size`, which bound nothing. Reported
+    /// because the brief asks: on both of this chip's ELFs it is zero.
+    zero_sized_symbols: usize,
+}
+
+#[cfg(any(feature = "jit", target_family = "wasm"))]
+impl WalkData {
+    fn as_walk(&self) -> crate::jit::Walk<'_> {
+        crate::jit::Walk {
+            seeds: &self.seeds,
+            extents: &self.extents,
+            spans: &self.spans,
+        }
+    }
+}
+
+/// The LX6 vector table's arms, as offsets from `VECBASE`: the six window
+/// handlers, the level-2..7 interrupt entries, the kernel, user and double
+/// exception vectors. Reached by hardware, never by an edge a walk can
+/// follow, so each is a seed (rule 1). The app's ELF names them all as
+/// symbols too; this is the belt to those braces, and it is what seeds a
+/// ROM-up image whose vectors live in the mask ROM.
+#[cfg(any(feature = "jit", target_family = "wasm"))]
+const VECTOR_OFFSETS: [u32; 15] = [
+    0x000, 0x040, 0x080, 0x0c0, 0x100, 0x140, 0x180, 0x1c0, 0x200, 0x240, 0x280, 0x2c0, 0x300,
+    0x340, 0x3c0,
+];
 
 /// `--jit-blocks`: the most blocks one translation event installs.
 ///
@@ -1312,12 +1356,21 @@ impl Esp32V3Builder {
         self
     }
 
-    /// `--jit-seeds <file>`: the block starts a translation event walks from.
+    /// `--jit-seeds <file>`: override the sweep's seeds with this list.
     ///
-    /// Supplied in this phase because the real sweep is P05's; a pc no seed
-    /// reaches is a pc the interpreter runs.
+    /// The product path leaves it empty and seeds from the image's own
+    /// symbols (P05). A supplied list keeps the symbol bounds and replaces the
+    /// seeds — a door for walking one function under the oracle.
     pub fn jit_seeds(mut self, seeds: Vec<u32>) -> Self {
         self.jit_seeds = seeds;
+        self
+    }
+
+    /// `LP_EMU_XT_BLOCKPROF=<path>`: take the per-pc retirement census on
+    /// both harts and write it there at the end of the run, with the sweep's
+    /// coverage and FP tables in its header (M7 P05). Off by default.
+    pub fn pc_census(mut self, path: Option<PathBuf>) -> Self {
+        self.pc_census = path;
         self
     }
 
@@ -1684,6 +1737,9 @@ impl Esp32V3Builder {
             stalled: [false, true],
             #[cfg(any(feature = "jit", target_family = "wasm"))]
             jit_install: None,
+            pc_census_path: self.pc_census.clone(),
+            code_write_spans: Vec::new(),
+            track_code_writes: false,
             core_quantum: self.core_quantum,
             wfi_ends: [0; CORES],
             #[cfg(feature = "bench")]
@@ -1769,6 +1825,14 @@ impl Esp32V3Builder {
             // are about to be overwritten, and answering that needs the
             // retranslation P07 brings. Q5 may schedule it; today ROM-up runs
             // interpreted and says so.
+            // The census (P05): on both harts from the first instruction, and
+            // the guest's code-write spans tracked for the third path's walk.
+            if machine.pc_census_path.is_some() {
+                for hart in &mut machine.harts {
+                    hart.set_pc_census(true);
+                }
+                machine.track_code_writes();
+            }
             #[cfg(any(feature = "jit", target_family = "wasm"))]
             if self.jit && traced {
                 // **`--trace` refuses the core**, exactly as the C6 does.
@@ -2041,6 +2105,15 @@ pub struct Machine {
     /// natively unless one did.
     #[cfg(any(feature = "jit", target_family = "wasm"))]
     jit_install: Option<JitRequest>,
+    /// `LP_EMU_XT_BLOCKPROF=<path>`, when a run asked for the census (P05).
+    pc_census_path: Option<PathBuf>,
+    /// The spans of executable memory the guest stored into — write
+    /// addresses, unnormalised — drained from the bus's ring at every slice
+    /// boundary while [`track_code_writes`](Self::track_code_writes) is on.
+    /// The third path's seeds (P05 rule 8); P07's publish-by-store event
+    /// drains the same ring.
+    code_write_spans: Vec<(u32, u32)>,
+    track_code_writes: bool,
     /// The pads, online: one [`Ws281xDecoder`] per routed pad, the frames
     /// they completed, and the two host sinks.
     ///
@@ -2451,9 +2524,11 @@ impl Machine {
         event: &str,
     ) -> Result<(), BuildError> {
         use lp_emu_core::Bus;
+        let walk = self.translation_walk(seeds);
         self.bus.watch_code_stores(true);
+        self.track_code_writes();
         self.jit_install = Some(JitRequest {
-            seeds: seeds.to_vec(),
+            walk: walk.clone(),
             max_blocks,
             fn_blocks,
         });
@@ -2468,7 +2543,7 @@ impl Machine {
                 &mut self.harts[core],
                 &mut self.bus,
                 core,
-                seeds,
+                &walk.as_walk(),
                 max_blocks,
                 fn_blocks,
                 event,
@@ -2495,6 +2570,177 @@ impl Machine {
             .iter()
             .filter_map(XtHart::translated_core_report)
             .collect()
+    }
+
+    /// Start recording the spans of executable memory the guest stores into
+    /// (the bus's ring), and drain them at every slice boundary.
+    fn track_code_writes(&mut self) {
+        self.bus.watch_guest_code(true);
+        self.track_code_writes = true;
+    }
+
+    /// Drain the bus's code-write ring into the machine's own list.
+    ///
+    /// The ring holds eight coalesced spans and the render loop stores into
+    /// IRAM hundreds of times an emulated second, so a list that is only read
+    /// at the end of the run would hold the last eight of those and not the
+    /// shader. Drained per slice, merged when it grows.
+    fn note_code_writes(&mut self) {
+        let spans = self.bus.take_guest_code_writes();
+        if spans.is_empty() {
+            return;
+        }
+        self.code_write_spans.extend(spans);
+        if self.code_write_spans.len() > 1024 {
+            self.code_write_spans.sort_unstable();
+            let mut merged: Vec<(u32, u32)> = Vec::with_capacity(64);
+            for (lo, hi) in self.code_write_spans.drain(..) {
+                match merged.last_mut() {
+                    Some(last) if lo <= last.1 => last.1 = last.1.max(hi),
+                    _ => merged.push((lo, hi)),
+                }
+            }
+            self.code_write_spans = merged;
+        }
+    }
+
+    /// The sweep's seeds and bounds (P05, rules 1 and 3), from the two ELFs
+    /// and the executable regions.
+    ///
+    /// Seeds, in walk order: the app's entry point; the fifteen vector arms
+    /// at `VECBASE`; every function symbol in an executable region of the app,
+    /// biggest first; then the mask ROM's, biggest first — or `seeds_override`
+    /// verbatim when `--jit-seeds` gave one. Extents: every symbol of both
+    /// images with an `st_size`, in an executable region.
+    #[cfg(any(feature = "jit", target_family = "wasm"))]
+    fn translation_walk(&mut self, seeds_override: &[u32]) -> WalkData {
+        use lp_xt_jit::discover::Extent;
+        let vecbase = self.harts[0].sr_mut().vecbase;
+        let mut spans: Vec<(u32, u32)> = self
+            .bus
+            .regions()
+            .iter()
+            .filter(|r| r.is_executable())
+            .map(|r| (r.base, r.end()))
+            .collect();
+        spans.sort_unstable();
+        let in_text = |a: u32| spans.iter().any(|&(lo, hi)| a >= lo && a < hi);
+        let named = |image: &ElfImage| -> Vec<(u32, u32)> {
+            image
+                .symbols()
+                .iter()
+                .filter(|s| in_text(s.address))
+                .map(|s| (s.size, s.address))
+                .collect()
+        };
+        let mut app = self.app.as_ref().map(named).unwrap_or_default();
+        let mut rom = named(&self.rom);
+        let mut extents: Vec<Extent> = app
+            .iter()
+            .chain(rom.iter())
+            .filter(|&&(size, _)| size > 0)
+            .map(|&(size, start)| Extent {
+                start,
+                end: start.wrapping_add(size),
+            })
+            .collect();
+        extents.sort_unstable();
+        extents.dedup();
+        let zero_sized_symbols = app.iter().chain(rom.iter()).filter(|s| s.0 == 0).count();
+        let seeds = if seeds_override.is_empty() {
+            let mut seeds = Vec::with_capacity(app.len() + rom.len() + 16);
+            if let Some(app) = &self.app {
+                seeds.push(app.entry);
+            }
+            for off in VECTOR_OFFSETS {
+                let v = vecbase.wrapping_add(off);
+                if in_text(v) {
+                    seeds.push(v);
+                }
+            }
+            // Biggest first, the app's before the ROM's: with a budget that
+            // binds, app text is what a render loop spends its time in.
+            let biggest_first = |v: &mut Vec<(u32, u32)>| {
+                v.sort_unstable_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.cmp(&b.1)));
+            };
+            biggest_first(&mut app);
+            biggest_first(&mut rom);
+            seeds.extend(app.iter().map(|&(_, at)| at));
+            seeds.extend(rom.iter().map(|&(_, at)| at));
+            seeds
+        } else {
+            seeds_override.to_vec()
+        };
+        WalkData {
+            seeds,
+            extents,
+            spans,
+            zero_sized_symbols,
+        }
+    }
+
+    /// Write the per-pc census (`LP_EMU_XT_BLOCKPROF`) and return the lines
+    /// the run prints for it — the sweep's coverage and FP tables when this
+    /// binary has the translator, a note that it has not otherwise.
+    ///
+    /// `None` on every run that did not ask.
+    pub fn pc_census_report(&mut self) -> Option<Vec<String>> {
+        let path = self.pc_census_path.clone()?;
+        self.note_code_writes();
+        let mut lines: Vec<String> = Vec::new();
+        #[cfg(any(feature = "jit", target_family = "wasm"))]
+        {
+            let walk = match &self.jit_install {
+                Some(request) => request.walk.clone(),
+                None => self.translation_walk(&[]),
+            };
+            lines.push(format!(
+                "walk: {} seed(s), {} extent(s), {} executable span(s); {} in-text symbol(s) \
+                 carry no st_size",
+                walk.seeds.len(),
+                walk.extents.len(),
+                walk.spans.len(),
+                walk.zero_sized_symbols,
+            ));
+            let cores: Vec<(usize, &lp_xt_emu::mach::PcCensus)> = self
+                .harts
+                .iter()
+                .enumerate()
+                .filter_map(|(i, h)| h.pc_census().map(|c| (i, c)))
+                .collect();
+            lines.extend(crate::jit::coverage_lines(
+                &self.bus,
+                &walk.as_walk(),
+                &self.code_write_spans,
+                &cores,
+                &|pc| self.symbolize(pc),
+            ));
+        }
+        #[cfg(not(any(feature = "jit", target_family = "wasm")))]
+        lines.push(
+            "this binary has no translator (--features jit), so the census carries no coverage \
+             table; the per-pc counts are in the file"
+                .to_string(),
+        );
+        let mut out = String::with_capacity(1 << 22);
+        for line in &lines {
+            let _ = writeln!(out, "# {line}");
+        }
+        for (i, hart) in self.harts.iter().enumerate() {
+            let Some(census) = hart.pc_census() else {
+                continue;
+            };
+            let _ = writeln!(out, "[core{i}]");
+            let _ = writeln!(out, "# retired {}", census.retired());
+            for (pc, n) in census.iter() {
+                let _ = writeln!(out, "{pc:#010x} {n}");
+            }
+        }
+        match std::fs::write(&path, out) {
+            Ok(()) => lines.push(format!("written to {}", path.display())),
+            Err(e) => lines.push(format!("could not write {}: {e}", path.display())),
+        }
+        Some(lines)
     }
 
     pub fn block_stats(&self, core: usize) -> Option<lp_emu_core::block::BlockStats> {
@@ -3108,6 +3354,9 @@ impl Machine {
                 self.bus.set_time(now);
                 self.bus.set_hart(core);
                 let end = self.harts[core].run_slice(&mut self.bus, budget);
+                if self.track_code_writes {
+                    self.note_code_writes();
+                }
 
                 if let Some(outcome) = self.take_cache_off_fetch(core, issuing_pc) {
                     return outcome;
@@ -3683,9 +3932,14 @@ impl Machine {
         hart.set_ps_raw(APP_CORE_RELEASE_PS);
         hart.cpu_mut().set_a(1, frame.sp);
         self.harts[1] = hart;
+        // The fresh hart dropped the census with the core; the run asked for
+        // both harts' retires.
+        if self.pc_census_path.is_some() {
+            self.harts[1].set_pc_census(true);
+        }
         // The fresh hart above dropped whatever core was installed on core 1
         // at boot, so the app core gets its own translation event here — the
-        // same seeds, its own module, its own exchange area. A failure is
+        // same walk, its own module, its own exchange area. A failure is
         // logged and not fatal: the app core then interprets, which is slow
         // and exact.
         #[cfg(any(feature = "jit", target_family = "wasm"))]
@@ -3694,7 +3948,7 @@ impl Machine {
                 &mut self.harts[1],
                 &mut self.bus,
                 1,
-                &request.seeds,
+                &request.walk.as_walk(),
                 request.max_blocks,
                 request.fn_blocks,
                 "app-core release",
