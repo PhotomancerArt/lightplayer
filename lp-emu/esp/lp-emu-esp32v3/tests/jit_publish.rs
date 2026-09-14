@@ -371,9 +371,7 @@ fn the_fixture_decodes_back_to_what_it_says_it_is() {
     let (first, len) = lp_xt_inst::decode(&f).expect("the published function decodes");
     assert_eq!(first, Inst::MoviN(reg(2), PUBLISHED_ANSWER));
     assert_eq!(
-        lp_xt_inst::decode(&f[len..])
-            .expect("and its return")
-            .0,
+        lp_xt_inst::decode(&f[len..]).expect("and its return").0,
         Inst::NullaryN(NullaryNarrowOp::RetN)
     );
 }

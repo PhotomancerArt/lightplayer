@@ -140,10 +140,7 @@ fn program() -> Vec<(u32, Inst)> {
         CODE,
         &insts,
         a6,
-        &[
-            Inst::Store(StoreOp::S32i, a5, a3, 0),
-            Inst::Addi(a3, a3, 4),
-        ],
+        &[Inst::Store(StoreOp::S32i, a5, a3, 0), Inst::Addi(a3, a3, 4)],
     );
     insts.push(Inst::Nullary(NullaryOp::Isync));
 

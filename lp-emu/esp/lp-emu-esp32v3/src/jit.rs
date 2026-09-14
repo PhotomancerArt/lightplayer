@@ -1820,7 +1820,8 @@ fn build_module(
     // This module's own indirect-target page map and slot arrays, written
     // whole (P05): a target slot holds a block index, and a block index only
     // means something inside the module it was emitted with.
-    let indirect_bytes = write_target_tables(bus.guest_arena_mut(), mem_base, at.indirect_at, b.set);
+    let indirect_bytes =
+        write_target_tables(bus.guest_arena_mut(), mem_base, at.indirect_at, b.set);
 
     // One exchange area per **hart**, not per module: only one module is
     // entered at a time and the whole head crosses at every entry (XD8).
