@@ -35,10 +35,37 @@
 //! the cache re-reads `LBEG`/`LEND`/`LCOUNT` live on every instruction, and a
 //! translated stay would have folded them in. Ending before them costs a block
 //! boundary and removes the whole question.
+//!
+//! **Keep this in step with `lp_xt_emu::mach::block::classify`.** P05's sweep
+//! extends the restatement in two ways that the cache's classification does
+//! not need and does not have: [`edges`] derives each terminator's static
+//! targets, and [`Decoded::lbeg`] marks the one instruction the decoder cannot
+//! see as a terminator — the last of a zero-overhead loop body, which the
+//! *walk* finds by decoding the `loop` that names its `LEND`. P10 documents
+//! the duplication.
+//!
+//! # The width of a refused instruction
+//!
+//! [`Decode::Undecodable`] carries the width of an instruction the translator
+//! refuses but the decoder decoded — a `wsr`, an `isync`, a `break`. That
+//! width is exact, because the decoder produced it, and the sweep uses it to
+//! **step over** the refused instruction to the next block start. It is the
+//! P05 brief's `refused_width`, living on the enum arm P04 already gave it
+//! rather than as a field on [`Decoded`]. [`Decode::Refused`] — bytes the
+//! decoder does not decode at all — carries only the density rule's guess,
+//! and the sweep does **not** step over those: on Xtensa the length of an
+//! unknown encoding is not knowable from its first byte (`op0 = 14/15` are
+//! reserved formats), so a refused word ends the walk there and the next seed
+//! carries on (JD7: never guess a width).
 
 use lp_emu_core::InstClass;
 use lp_emu_jit::blocks::DecodedInst;
 use lp_xt_inst::{AluRs, Inst, NullaryNarrowOp, NullaryOp};
+
+/// The decoder this crate's decoded form is built on, re-exported so a
+/// machine driver that matches on [`Decoded::inst`] names the same crate at
+/// the same version rather than taking a second dependency edge.
+pub use lp_xt_inst;
 
 /// One decoded Xtensa instruction, as this crate's emitter sees it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -50,6 +77,21 @@ pub struct Decoded {
     /// block walk steps by it and re-deriving it would mean re-reading the
     /// first byte.
     pub width: u8,
+    /// `Some(LBEG)` when the address after this instruction is a `LEND` some
+    /// `loop`/`loopnez`/`loopgtz` in the walk named (study §2.2, XD9).
+    ///
+    /// The hart's loop-back — `if LCOUNT != 0 && next == LEND { pc = LBEG }` —
+    /// is invisible to the decoder: no branch is encoded at `LEND`. The
+    /// **sweep** sets this when it has decoded the `loop` that names the
+    /// address, and sets [`control`](Self::control) with it, so the block ends
+    /// here with a static back-edge to `LBEG` that P06's emitter can turn into
+    /// a counter compare. This phase's emitter only sees `control` and exits;
+    /// the interpreter has already done the loop-back, so the exit pc is the
+    /// right one either way.
+    ///
+    /// Never set by [`decode`]: it is a property of the *address*, known only
+    /// once the walk has seen the loop.
+    pub lbeg: Option<u32>,
     /// The cost class the budget check charges, as an **upper bound**: a
     /// branch is charged as taken.
     ///
@@ -100,8 +142,11 @@ pub enum Decode {
     Ok(Decoded),
     /// A decoded instruction the **translator** refuses: the block ends
     /// before it and the interpreter runs it. `width` is how far the walk
-    /// steps to look for the next block start.
-    Undecodable { width: u8 },
+    /// steps to look for the next block start — exact, because the decoder
+    /// gave it — and `inst` is what was refused, so the walk can decline to
+    /// step over the one refused instruction nothing follows
+    /// ([`ends_the_walk`]).
+    Undecodable { inst: Inst, width: u8 },
     /// The bytes do not decode at all. The walk cannot even step over it
     /// reliably, so `width` is the density rule's answer from the first byte —
     /// a walk that finds nothing rather than a walk that is wrong.
@@ -130,15 +175,117 @@ pub fn decode(bytes: &[u8]) -> Decode {
     };
     let width = len as u8;
     if undecodable(&inst) {
-        return Decode::Undecodable { width };
+        return Decode::Undecodable { inst, width };
     }
     Decode::Ok(Decoded {
         inst,
         width,
+        lbeg: None,
         class: lp_xt_emu::block::cost_bound(&inst),
         group: lp_xt_emu::block::ar_group_bound(&inst),
         control: terminator(&inst),
     })
+}
+
+/// The static edges one instruction at `pc` names — what the sweep follows.
+///
+/// `lp-xt-inst` stores every pc-relative field **raw** so that
+/// `encode(decode(w)) == w` holds independent of pc, which means the absolute
+/// targets are derived here and nowhere else in this crate: the emitter that
+/// resolves a branch in-module (P06) asks this same function, so the walk and
+/// the emitted compare cannot disagree about where an edge goes.
+///
+/// The formulas are the RM's, and `tests/discover.rs` checks each arm against
+/// [`lp_xt_inst::disasm::format_inst`], which resolves the same targets for
+/// the disassembler:
+///
+/// - every branch and `j`: `pc + 4 + offset` (the `+4` is the architectural
+///   base, not the instruction's width — a 2-byte `beqz.n` uses it too);
+/// - `call0/4/8/12`: `(pc & !3) + (offset << 2) + 4`;
+/// - `loop`/`loopnez`/`loopgtz`: `LEND = pc + 4 + imm8`
+///   ([`lp_xt_inst::disasm::loop_end`], the one formula kept in the decoder
+///   crate because the hart needs it too), and `LBEG = pc + 3`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Edges {
+    /// Nothing static: an indirect jump, a return, an exception return, or a
+    /// body instruction.
+    None,
+    /// `j`: one target, no fall-through.
+    Jump(u32),
+    /// A conditional branch: the target and the fall-through.
+    Branch { target: u32, next: u32 },
+    /// A call. `target` is `None` for `callx*`, which names no callee; `ret`
+    /// is the address the callee returns to and is always a block start.
+    Call { target: Option<u32>, ret: u32 },
+    /// A zero-overhead loop: `body` is `LBEG` (the instruction after the
+    /// `loop`), `end` is `LEND`.
+    Loop { body: u32, end: u32 },
+    /// `entry` and the other terminators that fall straight through: the
+    /// next instruction is a start.
+    Next(u32),
+}
+
+/// The static edges the instruction at `pc` names. See [`Edges`].
+#[must_use]
+pub fn edges(pc: u32, d: &Decoded) -> Edges {
+    let next = pc.wrapping_add(u32::from(d.width));
+    let branch = |off: i32| pc.wrapping_add(4).wrapping_add(off as u32);
+    match d.inst {
+        Inst::J(off) => Edges::Jump(branch(off)),
+        Inst::BranchRr(_, _, _, off)
+        | Inst::BranchRi(_, _, _, off)
+        | Inst::BranchRiu(_, _, _, off)
+        | Inst::BranchZ(_, _, off)
+        | Inst::BranchBiI(_, _, _, off)
+        | Inst::BranchBool(_, _, off) => Edges::Branch {
+            target: branch(off),
+            next,
+        },
+        Inst::BranchZN(_, _, imm6) => Edges::Branch {
+            target: branch(imm6 as i32),
+            next,
+        },
+        Inst::Call(_, words) => Edges::Call {
+            target: Some((pc & !3).wrapping_add((words as u32) << 2).wrapping_add(4)),
+            ret: next,
+        },
+        Inst::Callx(..) => Edges::Call {
+            target: None,
+            ret: next,
+        },
+        Inst::Loop(_, _, imm8) => Edges::Loop {
+            body: next,
+            end: lp_xt_inst::disasm::loop_end(pc, imm8),
+        },
+        // `entry`, `rotw`, `movsp`, `rsil`, `waiti`: the block ends after
+        // them (they rotate or change what the next instruction means) and
+        // control goes straight on.
+        Inst::Entry(..)
+        | Inst::Rotw(_)
+        | Inst::Rs(AluRs::Movsp, ..)
+        | Inst::Rsil(..)
+        | Inst::Waiti(_) => Edges::Next(next),
+        _ => Edges::None,
+    }
+}
+
+/// A refused instruction the sweep does **not** step over: `ill` and `ill.n`.
+///
+/// Every other refused instruction is followed by code — a `wsr` retires and
+/// control goes on, a `break` is stepped past when the debugger resumes — so
+/// the address after it is a real block start (rule 7). `ill` is not: it is
+/// the compiler's trap, the instruction after it is reached by an edge or a
+/// symbol if at all, and — the reason this exists — **`00 00 00` decodes as
+/// `ill`**. A walk that stepped over it would march through every zeroed
+/// word of executable RAM three bytes at a time, one empty start per word:
+/// measured on the classic at boot, 33,000 starts in SRAM0's unwritten half
+/// from one zero-sized label. Harmless (JD7) and pure waste.
+#[must_use]
+pub fn ends_the_walk(inst: &Inst) -> bool {
+    matches!(
+        inst,
+        Inst::Nullary(NullaryOp::Ill) | Inst::NullaryN(NullaryNarrowOp::IllN)
+    )
 }
 
 /// The block ends **before** this instruction and the interpreter runs it.
