@@ -1108,6 +1108,19 @@ impl Default for Esp32V3Builder {
     }
 }
 
+/// What one translation event needs, so a later event can repeat it.
+///
+/// Held by [`Machine`] for exactly one reason: core 1's hart is **replaced**
+/// when DPORT releases it, so its core has to be installed a second time, at
+/// the release rather than at the boot event.
+#[cfg(any(feature = "jit", target_family = "wasm"))]
+#[derive(Clone, Debug)]
+struct JitRequest {
+    seeds: Vec<u32>,
+    max_blocks: usize,
+    fn_blocks: usize,
+}
+
 /// `--jit-blocks`: the most blocks one translation event installs.
 ///
 /// A **host** bound and not a design one — every wasm engine refuses a large
@@ -1469,6 +1482,7 @@ impl Esp32V3Builder {
         // Remembered because the sink itself is moved into the bus here and
         // the boot event, further down, has to know whether this run is traced
         // — see the `--trace` refusal there.
+        #[cfg(any(feature = "jit", target_family = "wasm"))]
         let traced = self.trace.is_some();
         if let Some(sink) = self.trace {
             bus.trace =
@@ -1668,6 +1682,8 @@ impl Esp32V3Builder {
             // this field with `stall_key` (RTC_CNTL's two halves, P5) and
             // with DPORT's `appcpu_ctrl_*` (P4).
             stalled: [false, true],
+            #[cfg(any(feature = "jit", target_family = "wasm"))]
+            jit_install: None,
             core_quantum: self.core_quantum,
             wfi_ends: [0; CORES],
             #[cfg(feature = "bench")]
@@ -2015,6 +2031,16 @@ pub struct Machine {
     gpio_index: Option<usize>,
     /// `RMT`'s peripheral index, for the observation accessors.
     rmt_index: Option<usize>,
+    /// What a translation event needs, kept because **core 1 gets a fresh
+    /// hart when DPORT releases it** (`service_app_core_start` assigns
+    /// `self.harts[1]`), which drops whatever core was installed on it at
+    /// boot. Without this the app core would run interpreted for the whole
+    /// run while the report claimed two cores were translated.
+    ///
+    /// `None` on every run that did not ask for `--jit`, which is every run
+    /// natively unless one did.
+    #[cfg(any(feature = "jit", target_family = "wasm"))]
+    jit_install: Option<JitRequest>,
     /// The pads, online: one [`Ws281xDecoder`] per routed pad, the frames
     /// they completed, and the two host sinks.
     ///
@@ -2426,7 +2452,18 @@ impl Machine {
     ) -> Result<(), BuildError> {
         use lp_emu_core::Bus;
         self.bus.watch_code_stores(true);
-        for core in 0..CORES {
+        self.jit_install = Some(JitRequest {
+            seeds: seeds.to_vec(),
+            max_blocks,
+            fn_blocks,
+        });
+        // **Core 0 only, here.** Core 1 is held at the boot event and DPORT
+        // hands it a *fresh* hart when it releases it — so a core installed
+        // on it now would be dropped before it ran one instruction, and its
+        // compilation (about 0.6 s of cranelift on these images) would be
+        // paid for nothing. The app core's own event is at that release,
+        // from the request remembered above.
+        for core in 0..1 {
             let installed = crate::jit::install(
                 &mut self.harts[core],
                 &mut self.bus,
@@ -2434,13 +2471,14 @@ impl Machine {
                 seeds,
                 max_blocks,
                 fn_blocks,
+                event,
             )
             .map_err(BuildError::App)?;
             // The boot-cost line, on stderr and masked by `v3-oracle.sh`: it
             // is the host's own cost and no reading of the guest can see it. A
             // product number all the same (JD20) — in a browser it is the time
             // between the tab opening and the first frame.
-            eprintln!("jit: {}", installed.boot_line(event));
+            eprintln!("jit: {}", installed.boot_line());
             let entries = installed.entries();
             self.harts[core].set_translated_core(Box::new(installed), &entries);
         }
@@ -3645,6 +3683,30 @@ impl Machine {
         hart.set_ps_raw(APP_CORE_RELEASE_PS);
         hart.cpu_mut().set_a(1, frame.sp);
         self.harts[1] = hart;
+        // The fresh hart above dropped whatever core was installed on core 1
+        // at boot, so the app core gets its own translation event here — the
+        // same seeds, its own module, its own exchange area. A failure is
+        // logged and not fatal: the app core then interprets, which is slow
+        // and exact.
+        #[cfg(any(feature = "jit", target_family = "wasm"))]
+        if let Some(request) = self.jit_install.clone() {
+            match crate::jit::install(
+                &mut self.harts[1],
+                &mut self.bus,
+                1,
+                &request.seeds,
+                request.max_blocks,
+                request.fn_blocks,
+                "app-core release",
+            ) {
+                Ok(installed) => {
+                    eprintln!("jit: {}", installed.boot_line());
+                    let entries = installed.entries();
+                    self.harts[1].set_translated_core(Box::new(installed), &entries);
+                }
+                Err(e) => log::warn!("jit: core 1 was released and its core did not build: {e}"),
+            }
+        }
         for (i, word) in frame.save_area.iter().enumerate() {
             let at = frame.sp.wrapping_sub(16).wrapping_add(4 * i as u32);
             if let Err(e) = self.bus.load_image(at, &word.to_le_bytes()) {

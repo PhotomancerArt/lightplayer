@@ -381,6 +381,11 @@ pub struct XtJitCore {
     which: usize,
     /// The cost model the budget checks were emitted against.
     model: lp_emu_core::CycleModel,
+    /// What installed this core: `boot`, or `app-core release` for the core
+    /// the app core gets when DPORT hands it a fresh hart. Carried so the
+    /// report names the event rather than assuming every core came from the
+    /// boot one.
+    event: String,
     report: BuildReport,
     stats: Stats,
     /// Set when the guest changed code this module was translated from, or
@@ -443,8 +448,8 @@ impl XtJitCore {
 
     /// The boot-cost line for this core's one translation event.
     #[must_use]
-    pub fn boot_line(&self, event: &str) -> String {
-        self.report.boot_line(self.which, event)
+    pub fn boot_line(&self) -> String {
+        self.report.boot_line(self.which, &self.event)
     }
 }
 
@@ -637,7 +642,7 @@ impl TranslatedCore<SocBus> for XtJitCore {
             s.verify_failed,
             s.exit_slice_ended,
             s.exit_no_progress,
-            self.report.boot_line(self.which, "boot"),
+            self.boot_line(),
         )
     }
 }
@@ -662,6 +667,7 @@ pub fn install(
     seeds: &[u32],
     max_blocks: usize,
     fn_blocks: usize,
+    event: &str,
 ) -> Result<XtJitCore, String> {
     let at = areas(bus, 2)?;
     write_permission_table(bus, at);
@@ -798,6 +804,7 @@ pub fn install(
         index: index_of(&found.set),
         which,
         model,
+        event: event.to_string(),
         report,
         stats: Stats::default(),
         stale: false,
