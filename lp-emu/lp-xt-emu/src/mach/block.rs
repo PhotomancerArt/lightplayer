@@ -44,6 +44,8 @@ use lp_emu_core::Bus;
 use lp_xt_inst::{AluRs, Inst, NullaryNarrowOp, NullaryOp};
 
 use crate::block::XtSlot;
+use crate::cpu::Cpu;
+use crate::mach::window;
 
 extern crate alloc;
 use alloc::vec::Vec;
@@ -181,34 +183,88 @@ pub(super) fn classify(inst: Inst, len: u8) -> Class {
 /// into a single [`crate::mach::XtHart::step_once`] — the fetch error, the
 /// illegal instruction and the `break` are then delivered by the interpreter
 /// at exactly the `pc` it always delivered them at.
+/// It also fills in the block's **maximum address-register group** on the
+/// first slot's [`XtSlot::block_group`] — the input to
+/// [`window_check_hoistable`] and the whole of M7 XD5's per-block precondition.
+/// Every early return goes through [`finish_groups`] so a block that ended at
+/// a fetch error, a refused encoding or the slot cap carries the same answer a
+/// complete one would.
 pub(super) fn decode_block<B: Bus>(bus: &mut B, pc: u32, out: &mut Vec<XtSlot>) {
     let mut at = pc;
     let mut bytes = [0u8; 3];
     for _ in 0..MAX_BLOCK_SLOTS {
         let Ok(got) = bus.fetch_bytes(at, &mut bytes) else {
-            return;
+            return finish_groups(out);
         };
         // A `Truncated` or `Unsupported` decode ends the block *before* the
         // instruction — refused, never guessed. The interpreter raises the
         // fetch error or the illegal instruction from its own fetch.
         let Ok((inst, len)) = lp_xt_inst::decode(&bytes[..got]) else {
-            return;
+            return finish_groups(out);
         };
         match classify(inst, len as u8) {
             Class::Body(slot) => {
                 out.push(slot);
                 match at.checked_add(len as u32) {
                     Some(next) => at = next,
-                    None => return,
+                    None => return finish_groups(out),
                 }
             }
             Class::Terminator(slot) => {
                 out.push(slot);
-                return;
+                return finish_groups(out);
             }
-            Class::Refused => return,
+            Class::Refused => return finish_groups(out),
         }
     }
+    finish_groups(out);
+}
+
+/// Record the block's maximum [`XtSlot::group`] on its first slot.
+///
+/// Once per decode, never per execution: the block is decoded once and run
+/// thousands of times (P01 measured a 99.85 % hit rate on the render loop), so
+/// the fold belongs here and the block executor's job is one byte load.
+fn finish_groups(out: &mut [XtSlot]) {
+    let max = out.iter().map(|s| s.group).max().unwrap_or(0);
+    if let Some(first) = out.first_mut() {
+        first.block_group = max;
+    }
+}
+
+/// **The per-block window precondition** (M7 XD5): may this whole block run
+/// with the per-instruction overflow check skipped?
+///
+/// The RM's `WindowCheck` (§4.7.1.3) answers from `(WindowBase, WindowStart,
+/// group)` and nothing else. `group` is a property of the instruction, known
+/// at decode time and bounded above per block by
+/// [`XtSlot::block_group`]; `WindowBase` and `WindowStart` are hart state that
+/// **nothing inside a block can move** — every instruction that writes either
+/// (`ENTRY`, `RETW`, `ROTW`, `RFWO`/`RFWU`, `wsr`/`xsr` to `WINDOWBASE` or
+/// `WINDOWSTART`) is a [`Class::Terminator`], the last slot of its block, and
+/// `L32E`/`S32E` are [`Class::Refused`]. An exception moves them, and an
+/// exception moves the `pc` off the straight line, which leaves the block. So
+/// the answer taken once at block entry is the answer at every slot, and
+/// [`window::overflow_in_reach`] is monotone in `group`, which is why the
+/// block's maximum is the only group worth asking about.
+///
+/// `PS.WOE` and `PS.EXCM` are read here for the same reason and hold for the
+/// same one: `wsr.ps`, `rsil`, `waiti`, `rfe`/`rfi`/`rfde` and the `CALLn`
+/// family are all terminators, and interrupt or exception entry leaves the
+/// block. Under `!woe || excm` [`crate::mach::XtHart::step`] skips the check
+/// per instruction anyway, so the block hoists trivially.
+///
+/// A `true` here means "no slot in this block can overflow"; a `false` means
+/// "one might", and the block then runs with exactly the check it has always
+/// run, at exactly the slot that would have raised it.
+pub(super) fn window_check_hoistable(cpu: &Cpu, woe: bool, excm: bool, slots: &[XtSlot]) -> bool {
+    if !woe || excm {
+        return true;
+    }
+    let Some(first) = slots.first() else {
+        return true;
+    };
+    window::overflow_in_reach(cpu.window_base, cpu.window_start, first.block_group).is_none()
 }
 
 #[cfg(test)]

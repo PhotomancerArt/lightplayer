@@ -162,7 +162,7 @@ use lp_emu_core::block::{BlockCache, BlockStats};
 use lp_emu_core::{Bus, CycleModel, InstClass, MemoryAccessKind, MemoryError};
 use lp_xt_inst::{AluRs, DecodeError, Inst, NullaryNarrowOp, NullaryOp};
 
-use crate::block::XtSlot;
+use crate::block::{WindowHoistStats, XtSlot};
 use crate::cpu::Cpu;
 use crate::emu::Flow;
 use crate::error::{TRAP_CAUSE_WATCHPOINT, Trap, TrapKind};
@@ -324,6 +324,14 @@ pub struct XtHart<B: Bus> {
     /// Configuration, not state: whether this hart may use a block cache at
     /// all ([`XtHart::set_block_cache`]). Default **on**.
     block_cache: bool,
+    /// How the block executor decided M7 XD5's window precondition, block by
+    /// block.
+    ///
+    /// **Not architectural state**, exactly like the cache it counts: absent
+    /// from a snapshot, zero on a clone, and masked out of every compared
+    /// transcript. It is only ever incremented on the cached path, so a run
+    /// with `--no-block-cache` reports zeroes.
+    window_hoist: WindowHoistStats,
     /// An invalidation asked for while the cache was lifted out of the hart —
     /// see [`XtHart::drain_block_flush`]. The store-address drain at polling
     /// point (c) and `isync` are why it exists, and the block executor reads
@@ -411,6 +419,9 @@ impl<B: Bus> Clone for XtHart<B> {
             // different bytes at the same addresses.
             cache: None,
             block_cache: self.block_cache,
+            // Zero for the same reason `cache` is empty: it counts what the
+            // cache did, and this clone's cache has done nothing.
+            window_hoist: WindowHoistStats::default(),
             block_flush_pending: PendingInvalidate::None,
             // Not copied: a translated core is not architectural state, and
             // it holds host code for guest bytes that the clone's bus may not
@@ -479,6 +490,7 @@ impl<B: Bus> XtHart<B> {
             isync_count: 0,
             cache: None,
             block_cache: true,
+            window_hoist: WindowHoistStats::default(),
             block_flush_pending: PendingInvalidate::None,
             core: None,
             core_entries: Vec::new(),
@@ -689,6 +701,17 @@ impl<B: Bus> XtHart<B> {
     #[must_use]
     pub fn block_stats(&self) -> Option<BlockStats> {
         self.cache.as_ref().map(|c| c.stats())
+    }
+
+    /// How the block executor decided M7 XD5's window precondition: blocks run
+    /// with the overflow check hoisted, against blocks run slot by slot.
+    ///
+    /// A diagnostic, never a transcript. Both paths retire the same
+    /// instructions in the same order and leave the same architectural state;
+    /// this only says how much of a run took the cheap route.
+    #[must_use]
+    pub fn window_hoist_stats(&self) -> WindowHoistStats {
+        self.window_hoist
     }
 
     /// Replace the FP policy (the machine hands the hart the constants P6
@@ -1421,6 +1444,22 @@ impl<B: Bus> XtHart<B> {
     ) -> (Option<SliceEnd>, u32) {
         let mut pc = block_pc;
         let mut ran = 0u32;
+        // **The window check, decided once** (M7 XD5). `WindowBase`,
+        // `WindowStart`, `PS.WOE` and `PS.EXCM` cannot move inside a block, so
+        // the RM's `WindowCheck` has one answer for the whole of it: see
+        // `block::window_check_hoistable` for the argument and for what makes
+        // the block's maximum group the only group worth asking about.
+        let hoisted = block::window_check_hoistable(
+            &self.cpu,
+            self.ps & PS_WOE != 0,
+            self.ps & PS_EXCM != 0,
+            slots,
+        );
+        if hoisted {
+            self.window_hoist.hoisted += 1;
+        } else {
+            self.window_hoist.slotwise += 1;
+        }
         for slot in slots {
             if !whole && self.cycle_count >= end {
                 return (Some(SliceEnd::BudgetExhausted), ran);
@@ -1429,7 +1468,7 @@ impl<B: Bus> XtHart<B> {
             // otherwise report the block's first `pc` to the bus's trace and
             // to its unmapped-site dedup, which is keyed on `(pc, address)`.
             bus.set_issuing(pc, self.cycle_count);
-            let out = self.step_decoded(bus, pc, &slot.inst, u32::from(slot.len), tracer);
+            let out = self.step_decoded(bus, pc, &slot.inst, u32::from(slot.len), tracer, hoisted);
             ran += 1;
             if let Some(over) = out {
                 return (Some(over), ran);
@@ -1547,7 +1586,7 @@ impl<B: Bus> XtHart<B> {
                 );
             }
         };
-        self.step_decoded(bus, pc, &inst, len as u32, tracer)
+        self.step_decoded(bus, pc, &inst, len as u32, tracer, false)
     }
 
     /// One **already-decoded** instruction: trace it, run it, charge what the
@@ -1559,6 +1598,11 @@ impl<B: Bus> XtHart<B> {
     /// that can drift. The caller names the instruction to the bus
     /// (`set_issuing`) before calling, because `step_once` has to do that
     /// before its fetch and a cached slot has no fetch.
+    ///
+    /// `hoisted` is M7 XD5's per-block precondition: the block executor has
+    /// already proved that no slot in this block can raise a window overflow,
+    /// so [`step`](Self::step) may skip the RM's `WindowCheck`. Single-stepping
+    /// passes `false` and is the reference path.
     #[inline(always)]
     fn step_decoded<T: Tracer + ?Sized>(
         &mut self,
@@ -1567,13 +1611,14 @@ impl<B: Bus> XtHart<B> {
         inst: &Inst,
         len: u32,
         tracer: &mut T,
+        hoisted: bool,
     ) -> Option<SliceEnd> {
         tracer.event(TraceEvent::Inst {
             pc,
             len: len as usize,
             inst,
         });
-        let outcome = self.step(bus, pc, inst, len, tracer);
+        let outcome = self.step(bus, pc, inst, len, tracer, hoisted);
         // Drained after the instruction, so the fetch and any load or store
         // it made are charged together, once.
         self.charge_memory(bus);
@@ -1585,6 +1630,14 @@ impl<B: Bus> XtHart<B> {
 
     /// One decoded instruction: the window check, the loop-back, the hart's
     /// own families or the shared executors, then the retire.
+    ///
+    /// `hoisted` is the **only** thing the block executor's fast path changes
+    /// (M7 XD5): the RM's per-instruction `WindowCheck` is skipped, because the
+    /// block executor already proved at block entry that it cannot fire for any
+    /// group this block reaches. Nothing else moves — `ENTRY`'s, `RETW`'s and
+    /// `MOVSP`'s own checks below run either way, and so does everything after
+    /// them. One function with a `bool` the compiler specialises, not two
+    /// copies that can drift.
     fn step<T: Tracer + ?Sized>(
         &mut self,
         bus: &mut B,
@@ -1592,12 +1645,13 @@ impl<B: Bus> XtHart<B> {
         inst: &Inst,
         len: u32,
         tracer: &mut T,
+        hoisted: bool,
     ) -> StepOutcome {
         // --- the window machinery, before the instruction (RM §4.7.1.3) ---
         let woe = self.ps & PS_WOE != 0;
         let excm = self.ps & PS_EXCM != 0;
         let mut owb = 0u8;
-        let event = if woe && !excm {
+        let event = if !hoisted && woe && !excm {
             let group = window::ar_group(inst, self.cpu.ps_callinc);
             window::overflow_check(&mut self.cpu, group, &mut owb)
         } else {

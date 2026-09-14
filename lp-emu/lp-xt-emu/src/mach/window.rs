@@ -154,6 +154,39 @@ pub fn ar_group(inst: &Inst, ps_callinc: u8) -> u8 {
     }
 }
 
+/// The **read half** of [`overflow_check`]: the position of the first
+/// `WindowStart` bit within reach of `group`, counting up from `base`, or
+/// `None` when nothing is in reach.
+///
+/// Pure — it moves nothing and writes nothing — which is what lets the block
+/// executor ask the question once at block entry (M7 XD5) instead of once per
+/// instruction. [`overflow_check`] is this plus the rotation, so there is one
+/// definition of "in reach" and the hoisted precondition cannot drift from the
+/// check it is standing in for.
+///
+/// **Monotone in `group`**, which is the property the hoist rests on: the
+/// tests made for `group` are a superset of those made for any smaller group
+/// (`set(1)` for every non-zero group, `set(2)` from 2 up, `set(3)` at 3), so
+/// a `None` at the block's maximum group is a `None` at every slot's.
+#[inline]
+#[must_use]
+pub fn overflow_in_reach(base: u8, window_start: u16, group: u8) -> Option<u8> {
+    if group == 0 {
+        return None;
+    }
+    let set = |k: u8| window_start & (1u16 << ((base + k) % NUM_BASES)) != 0;
+    // First set bit within reach, in order — n = 1, 2, 3.
+    if set(1) {
+        Some(1)
+    } else if group >= 2 && set(2) {
+        Some(2)
+    } else if group >= 3 && set(3) {
+        Some(3)
+    } else {
+        None
+    }
+}
+
 /// The RM's `WindowCheck` (§4.7.1.3), run before an instruction that
 /// references a register in group `group` (0..=3) of the current window while
 /// `CWOE = 1`.
@@ -170,21 +203,8 @@ pub fn ar_group(inst: &Inst, ps_callinc: u8) -> u8 {
 /// than once (the RM's a4..a7 / a8..a15 example): the hart re-executes it
 /// after `rfwo` and this check runs again.
 pub fn overflow_check(cpu: &mut Cpu, group: u8, owb: &mut u8) -> Option<WindowEvent> {
-    if group == 0 {
-        return None;
-    }
     let base = cpu.window_base;
-    let set = |k: u8| cpu.window_start & (1u16 << ((base + k) % NUM_BASES)) != 0;
-    // First set bit within reach, in order — n = 1, 2, 3.
-    let n = if set(1) {
-        1
-    } else if group >= 2 && set(2) {
-        2
-    } else if group >= 3 && set(3) {
-        3
-    } else {
-        return None;
-    };
+    let n = overflow_in_reach(base, cpu.window_start, group)?;
     let m = (base + n) % NUM_BASES;
     let set_at = |k: u8| cpu.window_start & (1u16 << ((m + k) % NUM_BASES)) != 0;
     let vector_inc = if set_at(1) {
