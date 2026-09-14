@@ -157,6 +157,7 @@ pub mod trap;
 pub mod window;
 
 use core::marker::PhantomData;
+use std::collections::BTreeMap;
 
 use lp_emu_core::block::{BlockCache, BlockStats};
 use lp_emu_core::{Bus, CycleModel, InstClass, MemoryAccessKind, MemoryError};
@@ -357,7 +358,74 @@ pub struct XtHart<B: Bus> {
     /// see [`XtHart::drain_core_flush`]. `isync` and a `wsr` to `LEND` are why
     /// it exists.
     core_flush_pending: PendingInvalidate,
+    /// The per-pc retirement census, when a run asked for it (M7 P05). `None`
+    /// — the default — is one `Option` test at each retire and nothing else.
+    /// See [`PcCensus`].
+    pc_census: Option<Box<PcCensus>>,
     _bus: PhantomData<fn(&mut B)>,
+}
+
+/// A census of **where guest instructions retire**, by pc — off by default,
+/// and a diagnostic only (M7 P05; the C6's `blockprof` twin).
+///
+/// One count per pc, kept as 64 KiB pages of `u64` so a retire costs a page
+/// lookup and an index rather than a map insert. It is the instrument the
+/// translator's coverage is measured with: the driver holds the set of pcs
+/// its walk claimed, and this says how many retires landed on them and — page
+/// by page — how many did not. Under `--interpreter` it therefore reports
+/// what a walk *would* cover, on a run with no core installed at all.
+///
+/// **Not architectural state** and never consulted by anything: absent from
+/// a snapshot, and a run that takes it is not a run whose wall clock means
+/// anything. What it counts is every retire this hart makes — interpreted,
+/// through the block executor, or through a translated core's escape hatch —
+/// including a `waiti` and a `break` the machine re-presented. What it does
+/// not count: an instruction that trapped (nothing retired), and nothing a
+/// translated core retires natively (P06+: a core reports its own count).
+#[derive(Clone, Debug, Default)]
+pub struct PcCensus {
+    /// `pc >> 16` → one `u64` per byte of that 64 KiB page.
+    pages: BTreeMap<u32, Box<[u64]>>,
+    retired: u64,
+}
+
+impl PcCensus {
+    /// Count one retire at `pc`.
+    #[inline]
+    pub fn note(&mut self, pc: u32) {
+        self.retired += 1;
+        let page = self
+            .pages
+            .entry(pc >> 16)
+            .or_insert_with(|| vec![0u64; 1 << 16].into_boxed_slice());
+        page[(pc & 0xffff) as usize] += 1;
+    }
+
+    /// Retires counted.
+    #[inline]
+    #[must_use]
+    pub fn retired(&self) -> u64 {
+        self.retired
+    }
+
+    /// Every `(pc, count)` with a non-zero count, ascending by pc.
+    pub fn iter(&self) -> impl Iterator<Item = (u32, u64)> + '_ {
+        self.pages.iter().flat_map(|(&page, counts)| {
+            counts
+                .iter()
+                .enumerate()
+                .filter(|(_, n)| **n != 0)
+                .map(move |(i, &n)| ((page << 16) | i as u32, n))
+        })
+    }
+
+    /// The count at one pc.
+    #[must_use]
+    pub fn at(&self, pc: u32) -> u64 {
+        self.pages
+            .get(&(pc >> 16))
+            .map_or(0, |counts| counts[(pc & 0xffff) as usize])
+    }
 }
 
 /// An invalidation held for a translated core that is not currently in the
@@ -429,6 +497,7 @@ impl<B: Bus> Clone for XtHart<B> {
             core: None,
             core_entries: Vec::new(),
             core_flush_pending: PendingInvalidate::None,
+            pc_census: None,
             _bus: PhantomData,
         }
     }
@@ -495,6 +564,7 @@ impl<B: Bus> XtHart<B> {
             core: None,
             core_entries: Vec::new(),
             core_flush_pending: PendingInvalidate::None,
+            pc_census: None,
             _bus: PhantomData,
         }
     }
@@ -712,6 +782,27 @@ impl<B: Bus> XtHart<B> {
     #[must_use]
     pub fn window_hoist_stats(&self) -> WindowHoistStats {
         self.window_hoist
+    }
+
+    /// Turn the per-pc retirement census on or off (M7 P05). Off by default;
+    /// turning it on discards whatever it had recorded. See [`PcCensus`].
+    pub fn set_pc_census(&mut self, on: bool) {
+        self.pc_census = on.then(Box::default);
+    }
+
+    /// The census, or `None` when the run did not ask for one.
+    #[inline]
+    #[must_use]
+    pub fn pc_census(&self) -> Option<&PcCensus> {
+        self.pc_census.as_deref()
+    }
+
+    /// One retire at `pc`, for the census — one `Option` test when it is off.
+    #[inline(always)]
+    fn census_retire(&mut self, pc: u32) {
+        if let Some(census) = self.pc_census.as_mut() {
+            census.note(pc);
+        }
     }
 
     /// Replace the FP policy (the machine hands the hart the constants P6
@@ -1033,6 +1124,7 @@ impl<B: Bus> XtHart<B> {
         };
         // The retire the slice loop skipped when it handed the break out.
         self.instruction_count += 1;
+        self.census_retire(pc);
         self.charge(InstClass::System);
         self.cpu.pc = pc;
         if InterruptUnit::cintlevel(self.ps()) < DEBUGLEVEL {
@@ -1710,6 +1802,7 @@ impl<B: Bus> XtHart<B> {
             Ok(Priv::Retire { flow, class, poll }) => (flow, class, poll),
             Ok(Priv::Waiti) => {
                 self.instruction_count += 1;
+                self.census_retire(pc);
                 self.charge(InstClass::System);
                 self.cpu.pc = next;
                 self.waiti = true;
@@ -1748,6 +1841,7 @@ impl<B: Bus> XtHart<B> {
 
         // --- retire ---
         self.instruction_count += 1;
+        self.census_retire(pc);
         self.charge(class);
         self.cpu.pc = match flow {
             Flow::Next => next,
