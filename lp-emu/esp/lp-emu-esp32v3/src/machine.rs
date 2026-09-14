@@ -1048,6 +1048,21 @@ pub struct Esp32V3Builder {
     control_script: Vec<(Cycles, ControlCommand)>,
     reboot_on_reset: bool,
     strap_word: u32,
+    /// `--jit`: install a translated core at the boot event (M7 P04).
+    ///
+    /// Off natively, always: wasmtime needs cranelift compilation on the
+    /// images this ladder measures, and every test and gate depends on this
+    /// binary starting fast (JD9/JD24). `--interpreter` is its off-switch, and
+    /// on a wasm target (P08) the default is the other way round.
+    jit: bool,
+    /// `--jit-seeds <file>`: the block starts to translate from.
+    ///
+    /// Supplied, because the real sweep is P05's. Nothing a supplied list
+    /// produces can be wrong, only short.
+    jit_seeds: Vec<u32>,
+    jit_blocks: usize,
+    jit_fn_blocks: usize,
+    jit_report: bool,
 }
 
 impl Default for Esp32V3Builder {
@@ -1084,9 +1099,29 @@ impl Default for Esp32V3Builder {
             control_script: Vec::new(),
             reboot_on_reset: false,
             strap_word: crate::periph::accept::GPIO_STRAP_SPI_FAST_FLASH_BOOT,
+            jit: false,
+            jit_seeds: Vec::new(),
+            jit_blocks: JIT_BLOCKS_DEFAULT,
+            jit_fn_blocks: JIT_FN_BLOCKS_DEFAULT,
+            jit_report: false,
         }
     }
 }
+
+/// `--jit-blocks`: the most blocks one translation event installs.
+///
+/// A **host** bound and not a design one — every wasm engine refuses a large
+/// enough module and they refuse at wildly different sizes — so it is a knob
+/// rather than a constant, and a walk that hits it says so.
+pub const JIT_BLOCKS_DEFAULT: usize = 200_000;
+
+/// `--jit-fn-blocks`: how many blocks one wasm function holds.
+///
+/// The RV32 ladder's number, carried over rather than re-derived: V8's
+/// optimising tier OOMs at 512 blocks a function and the phone's engine
+/// prefers 8. This is the native default, where wasmtime has neither problem;
+/// P08's browser build is where the small end matters.
+pub const JIT_FN_BLOCKS_DEFAULT: usize = 64;
 
 impl fmt::Debug for Esp32V3Builder {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -1247,6 +1282,51 @@ impl Esp32V3Builder {
         self
     }
 
+    /// `--jit` / `--interpreter`: install a translated core at the boot event.
+    ///
+    /// Natively this is off unless asked (JD9/JD24: wasmtime needs cranelift
+    /// minutes per image and every gate depends on this binary starting
+    /// fast), and the binary must have been built `--features jit` — the CLI
+    /// says so and exits otherwise rather than accepting the flag and doing
+    /// nothing.
+    ///
+    /// **Direct load only** (XD10/Q5). Under `--boot-mode rom-up` nothing is
+    /// installed: the ROM and the bootloader copy the image into place as
+    /// guest stores, so a core installed before them would hold blocks of
+    /// bytes that are about to be overwritten, and retranslation is P07's.
+    pub fn jit(mut self, on: bool) -> Self {
+        self.jit = on;
+        self
+    }
+
+    /// `--jit-seeds <file>`: the block starts a translation event walks from.
+    ///
+    /// Supplied in this phase because the real sweep is P05's; a pc no seed
+    /// reaches is a pc the interpreter runs.
+    pub fn jit_seeds(mut self, seeds: Vec<u32>) -> Self {
+        self.jit_seeds = seeds;
+        self
+    }
+
+    /// `--jit-blocks <n>`: the most blocks one event installs.
+    pub fn jit_blocks(mut self, blocks: usize) -> Self {
+        self.jit_blocks = blocks.max(1);
+        self
+    }
+
+    /// `--jit-fn-blocks <n>`: how many blocks one wasm function holds.
+    pub fn jit_fn_blocks(mut self, blocks: usize) -> Self {
+        self.jit_fn_blocks = blocks.max(1);
+        self
+    }
+
+    /// `--jit-report`: print the coverage and boot-cost lines at the end of
+    /// the run.
+    pub fn jit_report(mut self, on: bool) -> Self {
+        self.jit_report = on;
+        self
+    }
+
     /// Keep the RMT's per-channel pulse and word logs
     /// ([`crate::periph::rmt::Rmt::set_keep_logs`]).
     ///
@@ -1386,6 +1466,10 @@ impl Esp32V3Builder {
 
         let mut bus = crate::bus_setup::build();
         bus.set_strict(self.strict);
+        // Remembered because the sink itself is moved into the bus here and
+        // the boot event, further down, has to know whether this run is traced
+        // — see the `--trace` refusal there.
+        let traced = self.trace.is_some();
         if let Some(sink) = self.trace {
             bus.trace =
                 lp_emu_esp_common::Trace::to_sink(sink).with_block_filter(self.trace_blocks);
@@ -1660,6 +1744,41 @@ impl Esp32V3Builder {
         if self.boot_mode == BootMode::Direct {
             let frame = self.boot_frame.unwrap_or_else(BootFrame::idf_bootloader);
             machine.direct_load(frame)?;
+            // **The boot event** (M7 XD10), and the only translation event the
+            // classic has until P07's publish-by-store.
+            //
+            // Here, and not under `BootMode::RomUp`: the ROM and the second-
+            // stage bootloader put the image in place with guest **stores**, so
+            // a core installed before they run would hold blocks of bytes that
+            // are about to be overwritten, and answering that needs the
+            // retranslation P07 brings. Q5 may schedule it; today ROM-up runs
+            // interpreted and says so.
+            #[cfg(any(feature = "jit", target_family = "wasm"))]
+            if self.jit && traced {
+                // **`--trace` refuses the core**, exactly as the C6 does.
+                //
+                // The trace is the *interpreter's* instruction-by-instruction
+                // reading, and translated code cannot emit it: the seam hands
+                // the hart over whole and the escape hatch runs against
+                // `NoopTracer` (`lp_xt_emu::mach::translated`'s own docs). A
+                // traced run with a core installed would produce a trace with
+                // the stays missing from it, which is not a trace of anything.
+                //
+                // Said out loud rather than silently ignored: a flag that is
+                // accepted and does nothing is how a measurement of the
+                // interpreter ends up labelled as the translator's.
+                eprintln!(
+                    "jit: --trace asks for the interpreter's own instruction trace, which a \
+                     translated stay cannot emit; no core installed"
+                );
+            } else if self.jit {
+                machine.install_translated_cores(
+                    &self.jit_seeds,
+                    self.jit_blocks,
+                    self.jit_fn_blocks,
+                    "boot",
+                )?;
+            }
         }
 
         // Before the power-on snapshot, so a reboot restores the stated rate
@@ -2279,6 +2398,67 @@ impl Machine {
     /// bytes, the `run:` line, the decoded frames and the trace, and this is
     /// none of those; it is how a run says whether the cache was reached at
     /// all and how long its blocks realised.
+    /// Translate from `seeds` and install one core per hart (M7 P04).
+    ///
+    /// **One module compiled per core, not one shared** (XD10): the exchange
+    /// area is per instance and a stay belongs to one hart, so each core gets
+    /// its own instantiation — and in this phase its own compilation, because
+    /// sharing one compiled module across two instantiations is the shape P07
+    /// needs anyway and doing it now would be a second thing to prove.
+    ///
+    /// Turns on `watch_code_stores` (P01's side-band) for the whole run: a
+    /// guest store into executable memory has to reach
+    /// `invalidate_block_range` before the next fetch, and that flag is sticky
+    /// exactly so two consumers — the block cache and this core — cannot turn
+    /// each other's off.
+    ///
+    /// # Errors
+    ///
+    /// A walk that found nothing, a module over the per-function byte budget,
+    /// or a module the engine will not compile.
+    #[cfg(any(feature = "jit", target_family = "wasm"))]
+    pub fn install_translated_cores(
+        &mut self,
+        seeds: &[u32],
+        max_blocks: usize,
+        fn_blocks: usize,
+        event: &str,
+    ) -> Result<(), BuildError> {
+        use lp_emu_core::Bus;
+        self.bus.watch_code_stores(true);
+        for core in 0..CORES {
+            let installed = crate::jit::install(
+                &mut self.harts[core],
+                &mut self.bus,
+                core,
+                seeds,
+                max_blocks,
+                fn_blocks,
+            )
+            .map_err(BuildError::App)?;
+            // The boot-cost line, on stderr and masked by `v3-oracle.sh`: it
+            // is the host's own cost and no reading of the guest can see it. A
+            // product number all the same (JD20) — in a browser it is the time
+            // between the tab opening and the first frame.
+            eprintln!("jit: {}", installed.boot_line(event));
+            let entries = installed.entries();
+            self.harts[core].set_translated_core(Box::new(installed), &entries);
+        }
+        Ok(())
+    }
+
+    /// The per-core coverage lines a `--jit-report` run prints.
+    ///
+    /// Empty when no core was installed, which is what a run without `--jit`
+    /// — and every ROM-up run — reports.
+    #[must_use]
+    pub fn translated_core_reports(&self) -> Vec<String> {
+        self.harts
+            .iter()
+            .filter_map(XtHart::translated_core_report)
+            .collect()
+    }
+
     pub fn block_stats(&self, core: usize) -> Option<lp_emu_core::block::BlockStats> {
         self.harts.get(core).and_then(XtHart::block_stats)
     }

@@ -45,6 +45,15 @@
 
 extern crate alloc;
 
+/// The ABI, re-exported.
+///
+/// A machine's driver needs both crates — this one for the decoded form and
+/// the emitter, `lp-emu-jit` for the host trait, the exchange constants, the
+/// `Layout` and whichever host runs the module — and re-exporting is what
+/// keeps that **one** dependency edge rather than two that can drift to
+/// different versions of the same protocol.
+pub use lp_emu_jit;
+
 pub mod blocks;
 pub mod decode;
 pub mod discover;
