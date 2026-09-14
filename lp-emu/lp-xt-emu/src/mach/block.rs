@@ -463,7 +463,10 @@ mod tests {
         }
         assert_eq!(out[0].group, 0, "the first slot's own group is 0");
         finish_groups(&mut out);
-        assert_eq!(out[0].block_group, 2, "a2 in the third slot reaches group 2");
+        assert_eq!(
+            out[0].block_group, 2,
+            "a2 in the third slot reaches group 2"
+        );
 
         // An empty block — a refused first instruction — folds to nothing and
         // must not panic.

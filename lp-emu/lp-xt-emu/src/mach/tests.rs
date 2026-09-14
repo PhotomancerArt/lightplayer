@@ -3159,7 +3159,10 @@ fn a_bit_in_reach_of_group_two_runs_the_block_slot_by_slot() {
     );
     assert_eq!(end, SliceEnd::BudgetExhausted);
     let stats = hart.window_hoist_stats();
-    assert_eq!(stats.hoisted, 0, "a bit was in reach of the block's group 2");
+    assert_eq!(
+        stats.hoisted, 0,
+        "a bit was in reach of the block's group 2"
+    );
     assert_eq!(stats.slotwise, 1);
     assert_eq!(
         hart.sr().epc[1],
