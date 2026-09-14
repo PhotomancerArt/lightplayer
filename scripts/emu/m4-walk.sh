@@ -445,33 +445,40 @@ if [[ "$CHIP" == "esp32s3" ]]; then
     cable state
     cable_want "the host's state at power-on" "host=attached" "draining=true" "sof=on"
 
-    # ⚠️ **Do not add a "wait for the guest to boot" barrier here.** It is the
-    # obvious next idea and it makes this walk WORSE, which is worth the
-    # paragraph because the evidence cost two runs to get.
+    # ⚠️ **Do not make the walk wait for the guest to boot before uploading.**
+    # It is the obvious next idea, it was tried three ways, and every one of
+    # them makes this walk WORSE. The upload rides two races that pull
+    # opposite ways:
     #
-    # The upload rides two races, and they pull opposite ways:
-    #
-    #   * `lp-cli`'s readiness budget is five WALL seconds from link-open to
-    #     the device's hello (`DEFAULT_READY_DEADLINE`), and this chip's
-    #     ROM-up boot — the real mask ROM, the real IDF bootloader, 1.9 MB of
-    #     app hashed and mapped — can take longer than that to interpret on a
-    #     loaded desk. Connecting at once spends the boot INSIDE that budget,
-    #     which is why the client is started immediately; a run that loses
-    #     this race says "timed out waiting for the device hello".
+    #   * `lp-cli` allows five WALL seconds from link-open to the device's
+    #     hello (lpa-link's `DEFAULT_READY_DEADLINE`). This chip's ROM-up boot
+    #     — the real mask ROM, the real IDF bootloader, 1.9 MB of app hashed
+    #     and mapped — is seconds of interpreting, and on a LOADED desk it is
+    #     more than five: the run then reports "timed out waiting for the
+    #     device hello" and the load average is the whole story. Measured:
+    #     `--exit-on "[RECOVERY] boot complete"` puts the server loop at
+    #     83,572,924 cycles = **348 ms of guest time**, and this desk at load
+    #     average 7–33 does not reach it inside the budget.
     #   * The open link defect (DD103) eats the io_task's framed write when it
-    #     follows an esp-println packet inside the 100 us IN drain latency —
-    #     and the deploy's `stopAllProjects` reply is written straight after
-    #     the ledger triple the handler prints, which is exactly that shape
-    #     (`tests/boot_idle.rs` pins it). A run that loses THIS race says
-    #     "device did not respond within 10.0s" and the reply is on the tried
-    #     stream printed under THE RUN.
+    #     follows an esp-println packet inside the 100 us IN drain latency,
+    #     which is exactly the shape of the deploy's `stopAllProjects` reply —
+    #     written straight after the ledger triple the handler prints
+    #     (`tests/boot_idle.rs` pins it). A client that arrives after the
+    #     machine has started booting loses this race, reports "device did not
+    #     respond within 10.0s", and the reply is on the tried stream THE RUN
+    #     prints.
     #
-    # Connecting at once wins the second race in practice (the client's hello
-    # request is already in the OUT FIFO when the server loop starts, and the
-    # reply lands clear of the boot's print burst); waiting for a measured
-    # 500 ms guest barrier — the server loop is up at 348 ms, `--exit-on
-    # "[RECOVERY] boot complete"` — loses it every time. So: no barrier, and
-    # the fix is the defect closing rather than anything in this script.
+    # Waiting loses the second race at **every** barrier tried — 500 ms (past
+    # the loop), 300 ms (a poll overshot to 353 ms), and 200 ms (short of the
+    # loop, and it lost anyway, which is what refutes "get the request queued
+    # before the loop's first read" as the explanation). Only a client that
+    # connects at POWER-ON has ever completed the deploy, so that is what this
+    # does — the C6 arm's shape, unchanged.
+    #
+    # Which means: on a quiet desk this walk passes, and on a busy one it
+    # loses the readiness race. **The fix is the defect closing**, not another
+    # barrier; the five-second budget is `lp-app/lpa-link`'s and this script
+    # has no business tuning it.
 fi
 
 # ---------------------------------------------------------------- the upload
