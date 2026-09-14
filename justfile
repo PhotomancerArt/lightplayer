@@ -3247,6 +3247,47 @@ test-emu-serve:
 walk-esp32c6-emu *args: install-rv32-target build-rv32-builtins
     scripts/emu/m4-walk.sh {{ args }}
 
+# The same walk on the ESP32-S3 — the same script, a second chip (M6 P10).
+#
+# A chip case rather than a script of its own, which is the OPPOSITE of the
+# classic's ruling below and for a named reason: the S3 is the C6's shape, not
+# the classic's. Native USB-Serial-JTAG, the C6's generation of RMT, `lp-cli
+# upload` over the same kind of socket, and a board whose `D10` pad is the one
+# `projects/test/shader-oracle` already names — so the project is uploaded
+# UNMODIFIED, exactly as on the C6, and there is no scratch copy to look for.
+# The classic's UART0 link and CH340 cable verbs are what made a separate
+# script the honest shape there (DD69).
+#
+# Three differences from the C6 recipe, all in the script's header:
+#
+#   the runner  the `lp-emu-esp32s3` binary, not `lp-cli emu run` — `emu run`
+#               knows one chip and teaching it a second is M8's.
+#   the image   8 MiB, not 4: this chip's partition table does not fit a 4 MB
+#               part (docs/adr/2026-07-30-esp32s3-partition-floor.md).
+#   the port    `--usb-sj-drain manual` + the control channel do what
+#               `--monitor` does on the C6: hold the port open after `lp-cli
+#               upload` disconnects, so the deferred lit dump thirty frames
+#               later still reaches a host. The walk then really does unplug
+#               the cable and asserts the state.
+#
+# ⚠️ **This walk is M6's only end-to-end exercise of D2's alias.** The oracle
+# project compiles a shader ON THE DEVICE; on the S3 that shader is written
+# through the D-bus and executed through the I-bus. If the alias were wrong,
+# this is where it would show.
+#
+# ⚠️ DD110: frame-START cycles on this chip move with `--core-quantum` (~3.9
+# us/frame between 256 and 1024 — the guest's ISR observes the RMT threshold
+# at slice boundaries) and frame BYTES do not. The walk runs at the default
+# quantum 256 and compares bytes, never emulated microseconds (PD9).
+#
+# NOT in any CI job, for the C6 recipe's reason and the classic's (R6/DD49): it
+# builds a firmware image, a merged 8 MiB image and a release `lp-cli`, then
+# runs the machine for eight emulated seconds. What it proves per-tick lives in
+# `lp-emu-esp32s3/tests/pin_frames.rs`, which does run there —
+# `just test-emu-esp32s3-gate` is the CI surface.
+walk-esp32s3-emu *args: install-rv32-target build-rv32-builtins
+    scripts/emu/m4-walk.sh --chip esp32s3 {{ args }}
+
 # The same walk on the CLASSIC ESP32 — the whole thing (M5 P5).
 #
 # The shorter name IS the bigger thing, which is the rule M4 P4 wrote into the
