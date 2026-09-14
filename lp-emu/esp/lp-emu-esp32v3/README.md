@@ -78,66 +78,147 @@ blocks: core0 decodes=151613 hits=100926332 (99.85% of 101077945 entries) \
 **expected** reading on this chip rather than a warning: the firmware does not
 emit one after a publish, which is exactly why the contract is the store.
 
-### The translated core and `--jit` (M7 P04)
+### The translated core and `--jit` (M7 P04–P07)
 
 A second, much younger fast path: `--jit` turns the guest's own program into
-WebAssembly at the boot event and runs it under `wasmtime`. It needs a binary
-built `--features jit` — one without it says so and exits rather than
-accepting the flag and interpreting quietly, because a flag that is accepted
-and does nothing is how a measurement of the interpreter ends up labelled as
-the translator's.
+WebAssembly and runs it under `wasmtime`. It needs a binary built
+`--features jit` — one without it says so and exits rather than accepting the
+flag and interpreting quietly, because a flag that is accepted and does
+nothing is how a measurement of the interpreter ends up labelled as the
+translator's.
 
-**It is slower than the interpreter today, and that is the expected reading.**
-Every guest instruction escapes back to `XtHart::step_one`; the module emits
-no guest semantics at all. It is the RV32 side's `Emit::NOTHING` build, kept
-because it is the one translation that cannot be wrong about an instruction,
-and what this phase asks of it is identity rather than speed.
+**Natively it is slower than the interpreter, and that is not a defect.**
+Cranelift needs about 150 seconds per core to compile the whole image, so the
+interpreter stays the native default and `--jit` is an **identity** door
+here, never a speed one. The speed reading is a browser engine's and belongs
+to P08. *Never quote a native `--jit` second as a speed number.*
 
 | flag | what it does |
 |---|---|
-| `--jit` | install a translated core at the boot event. Direct load only |
+| `--jit` | install a translated core. Direct load only |
 | `--interpreter` | install none. The default natively, and the oracle's other leg |
-| `--jit-seeds <file>` | the block starts to translate from, one address per line (`0x`-prefixed or decimal; blank lines and `#` comments ignored). Required by `--jit` until the discovery sweep lands |
+| `--jit-seeds <file>` | **override** the sweep's seeds, one address per line (`0x`-prefixed or decimal; blank lines and `#` comments ignored). Rarely wanted: the sweep seeds itself from the image's symbols |
 | `--jit-blocks <n>` | the most blocks one translation event installs [200000] |
 | `--jit-fn-blocks <n>` | how many blocks one wasm function holds [64]. Lower it if a module is refused for body size |
 | `--jit-report` | print the per-core coverage line at the end of the run |
 
-Three refusals are worth knowing about before reading a report:
+Four environment switches, all diagnostics, all off by default and read once:
+`LP_EMU_XT_JIT_ESCAPE_ALL=1` (emit the escape-everything module),
+`LP_EMU_XT_JIT_EMIT=alu,memory,control` (bisect a divergence by family),
+`LP_EMU_XT_JIT_RECORD=<dir>` with `_AFTER` and `_ENTRIES` (record core 0's
+entries for the engine check), and `LP_EMU_XT_BLOCKPROF=<path>` (the per-pc
+census and the coverage table). They are switches rather than flags because
+nobody runs one by accident and each perturbs the very thing the rest of the
+run reports.
 
-- **`--boot-mode rom-up` installs nothing** (M7 XD10). The ROM and the
-  second-stage bootloader put the image in place with guest **stores**, so a
-  core installed before them would hold blocks of bytes that are about to be
-  overwritten. Retranslation is a later phase.
-- **`--trace` installs nothing**, and says so. The trace is the
-  *interpreter's* instruction-by-instruction reading and a translated stay
-  cannot emit one.
-- **Core 1's core is installed at its DPORT release**, not at boot: the
-  release hands the app core a fresh hart, so a core installed on it earlier
-  would be dropped before it ran anything. The report names the event.
+#### The two events (XD10)
 
-Both lines it prints — `jit: core<N> <event>: …` at install and
-`jit: core<N>: …` at exit — go to **stderr** and are masked by the oracle
-alongside `blocks:`, for the same reason: they are the host's own bookkeeping
-and no reading of the guest can see them.
+The classic translates **twice**, and a report that shows only one is a
+report of half a run.
+
+1. **The boot event**, at a direct load, over the whole image: the symbol
+   walk (P05) finds ~140,000 blocks and emits ~90 MB of wasm. The module is
+   **split by writability** — one module for the flash-cache window at
+   `0x400D_0000+` and the mask ROM, which the guest cannot write and which can
+   therefore never go stale, and one for `.rwtext` in SRAM0 and the JIT
+   region, which is empty at boot. Each hart gets its own instance of each,
+   because the exchange area is per instance and a stay belongs to one hart.
+   Core 1's is installed **at its DPORT release** and not at boot: the release
+   hands the app core a fresh hart, so a core installed on it earlier would be
+   dropped before it ran anything. The report names the event.
+2. **Publish-by-store**, whenever the guest writes code. A guest store into
+   executable memory raises the `code_dirty` side-band (XD3); the hart drains
+   it at polling point (c) into `invalidate_block_range`; the core answers by
+   re-reading each module's bytes and marking **only the changed one** stale.
+   A stale module is never entered again, which is what keeps the run exact.
+   Then, at the next slice boundary, the machine retires the writable module
+   and re-emits it from the code as it now stands — the symbol walk stopped at
+   the read-only module's own starts, plus the third path's word seeds over
+   the spans the guest actually wrote.
+
+   **The burst rule.** The product publishes its JIT region as ~1,300 word
+   stores and the drain fires on the first of them, so the event waits: a code
+   write in the window just run sets one `bool`, and the event fires at the
+   first boundary that finds it clear. Correctness does not depend on the
+   rule — the retire already happened — so firing late costs interpreted
+   instructions and firing early costs a second compile, and neither can move
+   a byte of the transcript.
+
+What the split is worth, measured on `boot-idle` at t1 over a 20 ms window,
+against the same binary with one module per hart:
+
+| | one module | split + publish-by-store |
+|---|---|---|
+| `stale` refusals | 610,588 | 88 |
+| instructions inside translated code | 1,487,941 | 4,325,742 |
+| cranelift per publish event | 146.4 s (the whole image) | 1.3 s (787 KB) |
+
+And on `render-loop`, the whole image, running to its own
+`[render-loop] === DONE ===` sentinel (529.7 M instructions, 256 frames):
 
 ```text
-jit: core0: 3574343 entries, 3646767 instruction(s) inside translated code \
-     (3646767 escaped to the interpreter, 0 retired natively); 0 refusal(s) …
+core0  7,183,916 entries, 333,074,800 instructions inside translated code
+       (99.87 % retired natively) = 76.7 % of the hart's 434.1 M retires
+       mean stay 46.4 instructions (runway ~155), 7 publish-by-store events
+core1  1,399,762 entries,  84,920,635 instructions inside translated code
+       (99.33 % retired natively) = 88.8 % of the hart's 95.7 M retires
+       mean stay 60.7 instructions, 3 publish-by-store events
 ```
 
-Read that line as two numbers, not one. **Entered** is the share of retired
-instructions that reached the module; **retired natively** is the share the
-module ran itself, and it is zero by construction until the emitter grows
-arms. A coverage figure that did not separate them would read like progress
-that has not been made.
+**What ends a stay** is the question the `why` histogram answers, and on
+`render-loop` core 0 the answer is not the window: `budget` 3,077,768 (42.8 %),
+`indirect-miss` 2,476,155 (34.5 %), `undecodable` 804,851 (11.2 %), `edge-out`
+459,729 (6.4 %), `window` 361,805 (5.0 %). Mean stay 46.4 against a ≈155
+runway, with `budget` — the slice's own instruction bound at
+`--core-quantum 256` — the largest single reason.
 
-The identity pair is `scripts/emu/v3-oracle.sh`:
+#### Three refusals worth knowing before reading a report
+
+- **`--boot-mode rom-up` installs nothing** (XD10). The ROM and the
+  second-stage bootloader put the image in place with guest **stores**, so a
+  core installed before them would hold blocks of bytes that are about to be
+  overwritten. Publish-by-store could now answer exactly that; whether ROM-up
+  should translate is Q5's to schedule. `tests/jit_default.rs` is the rule.
+- **`--trace` installs nothing**, and says so. The trace is the
+  *interpreter's* instruction-by-instruction reading and a translated stay
+  cannot emit one. ⚠️ This is why the CI identity cell does **not** use a
+  `--trace` window: a `--jit --trace` leg would compare a run against itself.
+- **A cache-off watch makes every entry refuse.** D4's watch is a
+  `MemoryCost` on the bus and a bus with a cost model is not a pure fetch, so
+  `XtJitCore::run` refuses (`impure`). On a ROM-up machine the flash cache is
+  never enabled and the watch is armed for the whole run —
+  `--cache-off-fetch permit` is what the fixtures in `tests/jit_publish.rs`
+  and `tests/jit_events.rs` need, and without it they compare two interpreted
+  runs.
+
+Both lines the translator prints — `jit: core<N> <event>: …` at each
+translation event and `jit: core<N>: …` at exit — go to **stderr** and are
+masked by the oracle alongside `blocks:`, for the same reason: they are the
+host's own bookkeeping and no reading of the guest can see them. The oracle
+prints them raw underneath, so the masking can be checked rather than
+trusted.
+
+#### The identity pairs
+
+The branch-and-desk form, with every column and every image:
 
 ```bash
 scripts/emu/v3-oracle.sh --name-a jit --name-b interp \
-    --flags-a "--jit --jit-seeds seeds.txt" --flags-b "--interpreter" \
-    target/v3-oracle render-loop 2200ms
+    --flags-a "--jit --jit-report" --flags-b "--interpreter" \
+    target/v3-oracle render-loop 3s
 ```
+
+The CI cell, bounded so it fits the classic job's budget (XD14, DD98):
+
+```bash
+just test-emu-xt-jit-image                 # boot-idle, 100 ms, 12,000 blocks
+```
+
+It refuses a trace-sized window and it fails — loudly, never silently —
+when the binary has no translator, when the run made zero entries, or when
+no publish-by-store event happened, because each of those would make it a
+self-comparison. `scripts/emu/xt-jit-identity-image.sh`'s header carries the
+argument for the bound and for the missing trace column.
 
 ### Two cores
 
