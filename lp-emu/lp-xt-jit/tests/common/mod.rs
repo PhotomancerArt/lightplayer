@@ -47,8 +47,8 @@ use lp_emu_jit::host::{
 use lp_emu_jit::host_wasmtime::WasmtimeCore;
 use lp_emu_jit::translate::Layout;
 use lp_xt_emu::mach::interrupt::IntLine;
-use lp_xt_emu::mach::trap::NUM_INTERRUPTS;
 use lp_xt_emu::mach::sr::{PS_BOOT, PS_EXCM, PS_WOE};
+use lp_xt_emu::mach::trap::NUM_INTERRUPTS;
 use lp_xt_emu::mach::{CoreConfig, XtHart};
 use lp_xt_inst::{Inst, Reg};
 use lp_xt_jit::blocks::BlockSet;
@@ -205,7 +205,9 @@ impl RamBus {
 impl Bus for RamBus {
     fn fetch_instruction(&mut self, address: u32) -> Result<u32, MemoryError> {
         let i = self.offset(address, 4, MemoryAccessKind::InstructionFetch)?;
-        Ok(u32::from_le_bytes(self.bytes()[i..i + 4].try_into().unwrap()))
+        Ok(u32::from_le_bytes(
+            self.bytes()[i..i + 4].try_into().unwrap(),
+        ))
     }
     fn fetch_bytes(&mut self, pc: u32, out: &mut [u8; 3]) -> Result<usize, MemoryError> {
         let i = self.offset(pc, 1, MemoryAccessKind::InstructionFetch)?;
@@ -711,7 +713,11 @@ pub fn run(program: &Program, policy: Emit, fn_blocks: usize, case_name: &str) -
     let mut budget = program.budget;
     loop {
         budget -= 1;
-        assert!(budget > 0, "the program did not leave in {} steps", program.budget);
+        assert!(
+            budget > 0,
+            "the program did not leave in {} steps",
+            program.budget
+        );
         let h = core.ops_mut();
         let pc = h.hart.pc();
         if !(PROGRAM_AT..end).contains(&pc) {
@@ -752,8 +758,10 @@ pub fn run(program: &Program, policy: Emit, fn_blocks: usize, case_name: &str) -
             .expect("translated code does not trap");
         let h = core.ops_mut();
         let x = h.exchange_bytes();
-        let read_i64 = |x: &[u8], at: u64| u64::from_le_bytes(x[at as usize..][..8].try_into().unwrap());
-        let read_i32 = |x: &[u8], at: u64| i32::from_le_bytes(x[at as usize..][..4].try_into().unwrap());
+        let read_i64 =
+            |x: &[u8], at: u64| u64::from_le_bytes(x[at as usize..][..8].try_into().unwrap());
+        let read_i32 =
+            |x: &[u8], at: u64| i32::from_le_bytes(x[at as usize..][..4].try_into().unwrap());
         let cycle_out = read_i64(x, lp_xt_jit::LAYOUT.cycle());
         let instret_out = read_i64(x, lp_xt_jit::LAYOUT.instret());
         let flags = read_i32(x, lp_xt_jit::LAYOUT.flags());
@@ -863,10 +871,89 @@ pub fn run(program: &Program, policy: Emit, fn_blocks: usize, case_name: &str) -
     }
 }
 
+/// The program on a bare hart — no module, no marshalling, the interpreter
+/// stepping from [`PROGRAM_AT`] until the pc leaves the program.
+///
+/// The third reading: the escape-everything run marshals the head through
+/// the exchange area exactly as the emitted one does, so a marshalling or
+/// layout mistake would agree with itself. This one cannot.
+pub fn pure(program: &Program) -> Outcome {
+    let mut image = Vec::new();
+    for inst in &program.insts {
+        image.extend_from_slice(&lp_xt_inst::encode(inst));
+    }
+    let end = PROGRAM_AT + image.len() as u32;
+    let mut mem = GuestArena::zeroed((PAGES as usize) * 65536);
+    {
+        let m = &mut mem[..];
+        let at = (ARENA_AT + PROGRAM_AT - GUEST_BASE) as usize;
+        m[at..at + image.len()].copy_from_slice(&image);
+        for (i, w) in program.literals.iter().enumerate() {
+            let at = (ARENA_AT + LITERALS_AT - GUEST_BASE) as usize + 4 * i;
+            m[at..at + 4].copy_from_slice(&w.to_le_bytes());
+        }
+    }
+    let base = mem.as_mut_ptr();
+    let mut hart = XtHart::new(0, config());
+    hart.set_cycle_model(program.model);
+    hart.set_ps_raw(PS_BOOT);
+    hart.set_block_cache(false);
+    let mut bus = RamBus {
+        // SAFETY: the guest region is inside the arena, which outlives the
+        // bus.
+        ram: unsafe { base.add(ARENA_AT as usize) },
+        device: 0,
+        load_leaves_yield: false,
+        store_raises_sideband: false,
+        yield_pending: false,
+        sideband: false,
+        watch_code_stores: false,
+        code_dirty: Vec::new(),
+        watchpoints: [None, None],
+        mmio: Vec::new(),
+    };
+    bus.watch_code_stores(true);
+    (program.setup)(&mut hart, &mut bus);
+    hart.set_pc(PROGRAM_AT);
+    let mut budget = program.budget;
+    while (PROGRAM_AT..end).contains(&hart.pc()) {
+        budget -= 1;
+        assert!(budget > 0, "the bare hart did not leave in {} steps", program.budget);
+        hart.step_one(&mut bus);
+    }
+    let cpu = hart.cpu();
+    let sr = hart.sr();
+    let mut fnv = case::Fnv::default();
+    // SAFETY: the arena's own guest bytes.
+    fnv.update(unsafe { std::slice::from_raw_parts(base.add(ARENA_AT as usize), RAM_LEN as usize) });
+    Outcome {
+        pc: hart.pc(),
+        ar: cpu.ar,
+        window: Window {
+            window_base: cpu.window_base,
+            window_start: cpu.window_start,
+            sar: cpu.sar,
+            lbeg: sr.lbeg,
+            lend: sr.lend,
+            lcount: sr.lcount,
+            ps: hart.ps(),
+        },
+        cycle: hart.cycle_count(),
+        instret: hart.instruction_count(),
+        epc1: sr.epc[1],
+        exccause: sr.exccause,
+        excvaddr: sr.excvaddr,
+        memory_fnv: fnv.finish(),
+        device: bus.device,
+    }
+}
+
 /// The round trip: the emitted module and the escape-everything module
-/// agree on everything, at 1, 8 and 64 blocks a function. Returns the
-/// emitted run at 64 for the test's own assertions.
+/// agree on everything, at 1, 8 and 64 blocks a function — and both agree
+/// with the bare hart. Returns the emitted run at 64 for the test's own
+/// assertions.
 pub fn agree(name: &str, program: &Program) -> Run {
+    let bare = pure(program);
     let mut last = None;
     for fn_blocks in [1usize, 8, 64] {
         let nothing = run(
@@ -887,6 +974,12 @@ pub fn agree(name: &str, program: &Program) -> Run {
             "{name}: the emitted module emitted nothing"
         );
         assert_eq!(
+            nothing.outcome, bare,
+            "{name} at {fn_blocks} blocks/fn: the escape-everything run diverged from the bare \
+             hart — the marshalling, not an arm; exits {:?}",
+            nothing.exits
+        );
+        assert_eq!(
             everything.outcome, nothing.outcome,
             "{name} at {fn_blocks} blocks/fn: the emitted run diverged from the interpreter's; \
              exits {:?} against {:?}",
@@ -901,4 +994,3 @@ pub fn agree(name: &str, program: &Program) -> Run {
 pub fn exited_with(run: &Run, code: i32) -> bool {
     run.exits.iter().any(|&(_, w)| w == code)
 }
-

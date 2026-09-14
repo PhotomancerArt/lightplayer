@@ -366,6 +366,7 @@ pub fn emit_body(
         extra: 0,
         cycles: 0,
         retired: 0,
+        dirty_after: 0,
         loop_mark: None,
         loop_committed: false,
         native_insts: 0,
@@ -472,6 +473,9 @@ pub(crate) struct Emitter<'a> {
     /// handed back, within the block being emitted.
     pub(crate) cycles: u64,
     pub(crate) retired: u32,
+    /// The groups the block's native arms still write after the instruction
+    /// being emitted — the dirty mask an escape's reload leaves behind.
+    pub(crate) dirty_after: u8,
     /// `Some(LBEG)` while emitting an instruction the walk marked as ending
     /// at a `LEND` (rule 6): the arm has to apply the loop-back.
     pub(crate) loop_mark: Option<u32>,
@@ -683,7 +687,11 @@ impl<'a> Emitter<'a> {
         self.i(I::I64Load(instret_at));
         self.i(I::LocalSet(L_INSTRET));
         self.load_window_state();
-        self.i(I::I32Const(0));
+        // Every local equals the file again — and the block's remaining
+        // native arms will write some of them. The mask is what they write,
+        // not zero: a zero here lost every write after an escaped body
+        // instruction, and the classic found it on its first boot.
+        self.i(I::I32Const(i32::from(self.dirty_after)));
         self.i(I::LocalSet(L_DIRTY));
         self.fill_window();
 
@@ -800,9 +808,7 @@ impl<'a> Emitter<'a> {
             | Inst::Loop(..)
             | Inst::Entry(..)
             | Inst::Nullary(NullaryOp::Ret | NullaryOp::Retw)
-            | Inst::NullaryN(NullaryNarrowOp::RetN | NullaryNarrowOp::RetwN) => {
-                self.policy.control
-            }
+            | Inst::NullaryN(NullaryNarrowOp::RetN | NullaryNarrowOp::RetwN) => self.policy.control,
             // A body instruction the walk marked as a loop end is a
             // terminator whose flow is the loop-back's: it needs the control
             // arms as well as its own.
@@ -871,9 +877,24 @@ impl<'a> Emitter<'a> {
             }
         }
 
-        for (pc, d) in pcs {
+        // The groups the block's native arms write **after** each
+        // instruction: what the dirty mask becomes when an escape reloads
+        // the window mid-block.
+        let mut suffix = alloc::vec![0u8; pcs.len() + 1];
+        for i in (0..pcs.len()).rev() {
+            let d = &pcs[i].1;
+            let own = if self.emits(d) {
+                window::written_groups(&d.inst)
+            } else {
+                0
+            };
+            suffix[i] = suffix[i + 1] | own;
+        }
+
+        for (i, (pc, d)) in pcs.iter().enumerate() {
             let (pc, d) = (*pc, *d);
             let next_pc = pc.wrapping_add(u32::from(d.width));
+            self.dirty_after = suffix[i + 1];
 
             if !self.emits(&d) {
                 self.escaped_insts += 1;
@@ -920,12 +941,24 @@ impl<'a> Emitter<'a> {
                 self.load(k, pc, mem::LoadShape::Word, rt.num(), rs.num(), off)
             }
             Inst::L32r(rt, field) => self.l32r(k, pc, rt.num(), field),
-            Inst::Store(op, rt, rs, off) => {
-                self.store(k, pc, d.width, mem::StoreShape::Op(op), rt.num(), rs.num(), off)
-            }
-            Inst::S32iN(rt, rs, off) => {
-                self.store(k, pc, d.width, mem::StoreShape::Word, rt.num(), rs.num(), off)
-            }
+            Inst::Store(op, rt, rs, off) => self.store(
+                k,
+                pc,
+                d.width,
+                mem::StoreShape::Op(op),
+                rt.num(),
+                rs.num(),
+                off,
+            ),
+            Inst::S32iN(rt, rs, off) => self.store(
+                k,
+                pc,
+                d.width,
+                mem::StoreShape::Word,
+                rt.num(),
+                rs.num(),
+                off,
+            ),
             Inst::BranchRr(..)
             | Inst::BranchRi(..)
             | Inst::BranchRiu(..)

@@ -12,8 +12,7 @@
 mod common;
 
 use common::{
-    DATA, DEVICE, MMIO_BASE, PROGRAM_AT, Program, SP, STOP, a, agree, exited_with, l32r_field,
-    run,
+    DATA, DEVICE, MMIO_BASE, PROGRAM_AT, Program, SP, STOP, a, agree, exited_with, l32r_field, run,
 };
 use lp_emu_core::CycleModel;
 use lp_xt_inst::{
@@ -97,7 +96,10 @@ fn the_three_register_alu_agrees_with_the_interpreter() {
     let program = Program::new(insts).setup(|hart, _| seed(hart));
     let run = agree("alu-rrr", &program);
     assert_eq!(run.outcome.pc, STOP);
-    assert!(run.escapes.is_empty(), "nothing in the integer core escapes");
+    assert!(
+        run.escapes.is_empty(),
+        "nothing in the integer core escapes"
+    );
 }
 
 /// The divides: a zero divisor is **refused and escaped** — the interpreter
@@ -125,7 +127,10 @@ fn the_divides_agree_including_the_zero_divisor_trap() {
             "{op:?}"
         );
         assert_eq!(run.outcome.epc1, PROGRAM_AT + 9, "EPC1 is the divide's pc");
-        assert_eq!(run.outcome.ar[8], 0xDEAD_BEEF, "nothing after the trap ran: a8 keeps its seed");
+        assert_eq!(
+            run.outcome.ar[8], 0xDEAD_BEEF,
+            "nothing after the trap ran: a8 keeps its seed"
+        );
         assert!(
             exited_with(&run, why::ESCAPE_DIVERGED),
             "the escape left the straight line: {:?}",
@@ -261,10 +266,16 @@ fn loads_stores_and_l32r_agree_with_the_interpreter() {
             cpu.set_a(14, PROGRAM_AT & !3);
         });
     let run = agree("memory", &program);
-    assert_ne!(run.outcome.pc, STOP, "the byte load from the word-only region trapped");
+    assert_ne!(
+        run.outcome.pc, STOP,
+        "the byte load from the word-only region trapped"
+    );
     assert_eq!(run.outcome.ar[11], 0xCAFE_F00D);
     assert_eq!(run.outcome.ar[12], 0x0BAD_F00D);
-    assert_eq!(run.outcome.ar[2] as i32, -1234, "nothing after the trap ran");
+    assert_eq!(
+        run.outcome.ar[2] as i32, -1234,
+        "nothing after the trap ran"
+    );
     assert!(exited_with(&run, why::LOAD_REFUSED), "{:?}", run.exits);
     assert!(run.escapes.is_empty());
 }
@@ -425,7 +436,38 @@ fn the_costs_agree_under_a_model_with_classes() {
         });
     let run = agree("costs", &program);
     assert_eq!(run.outcome.pc, STOP);
-    assert!(run.outcome.cycle > run.outcome.instret, "taken branches cost more than one");
+    assert!(
+        run.outcome.cycle > run.outcome.instret,
+        "taken branches cost more than one"
+    );
+}
+
+/// An escaped **body** instruction between two native writes in one block:
+/// the reload after the escape must leave the dirty mask naming the groups
+/// the block still writes, or the writes after it are lost. `clamps` is a
+/// refusal that stays in the block; the classic's first boot found this
+/// through an FP store mid-block.
+#[test]
+fn a_native_write_after_a_mid_block_escape_is_written_back() {
+    let insts = vec![
+        Inst::Movi(a(2), 5),
+        Inst::Movi(a(9), -100),
+        Inst::Clamps(a(3), a(9), 7), // escapes; a3 = -100 clamped to 8 bits
+        Inst::Addi(a(4), a(2), 1),   // group 1, written after the escape
+        Inst::Addi(a(10), a(2), 2),  // group 2
+        Inst::Movi(a(14), 77),       // group 3
+        Inst::Rrr(AluRrr::Add, a(2), a(2), a(4)),
+        ret(),
+    ];
+    let program = Program::new(insts).setup(|hart, _| seed(hart));
+    let run = agree("escape-mid-block", &program);
+    assert_eq!(run.outcome.pc, STOP);
+    assert_eq!(run.escapes.len(), 1);
+    assert_eq!(run.outcome.ar[4], 6);
+    assert_eq!(run.outcome.ar[10], 7);
+    assert_eq!(run.outcome.ar[14], 77);
+    assert_eq!(run.outcome.ar[2], 11);
+    assert_eq!(run.outcome.ar[3] as i32, -100);
 }
 
 /// The escape-everything build alone: every instruction goes to the hart,

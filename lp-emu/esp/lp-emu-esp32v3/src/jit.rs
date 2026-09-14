@@ -540,7 +540,9 @@ fn write_permission_table(bus: &mut SocBus, at: Areas) {
         }
         let guest = (u64::from(base) + offset) as u32;
         let entry = (u64::from(guest) >> PERM_SHIFT) as usize;
-        let rule = rules.iter().find(|&&(lo, hi, _, _)| lo <= guest && guest < hi);
+        let rule = rules
+            .iter()
+            .find(|&&(lo, hi, _, _)| lo <= guest && guest < hi);
         arena[at.perm_at as usize + entry] = match rule {
             Some(&(_, _, true, AccessRule::WordOnly)) => PERM_READ_WORD,
             Some(&(_, _, true, _)) => PERM_READ,
@@ -1443,13 +1445,24 @@ pub fn install(
         fast_reads: None,
     };
 
-    // The escape-everything build, read once from the environment.
+    // The emission policy, read once from the environment (a diagnostic, off
+    // by default): `LP_EMU_XT_JIT_ESCAPE_ALL=1` is the escape-everything
+    // build; `LP_EMU_XT_JIT_EMIT=alu,memory,control` names the families to
+    // emit natively, for bisecting a machine-scale divergence by family.
     let escape_all = std::env::var_os("LP_EMU_XT_JIT_ESCAPE_ALL").is_some_and(|v| v == "1");
     let policy = if escape_all {
         Emit::NOTHING
+    } else if let Ok(families) = std::env::var("LP_EMU_XT_JIT_EMIT") {
+        Emit {
+            alu: families.contains("alu"),
+            memory: families.contains("memory"),
+            control: families.contains("control"),
+            ..Emit::EVERYTHING
+        }
     } else {
         Emit::EVERYTHING
     };
+    let escape_all = escape_all || policy == Emit::NOTHING;
     let model = hart.cycle_model();
     let started = std::time::Instant::now();
     let emitted = lp_xt_jit::translate::emit_module(&found.set, model, layout, policy, fn_blocks);
@@ -1488,7 +1501,10 @@ pub fn install(
     } else {
         None
     };
-    let live = recorder.as_ref().map(|r| r.live.clone()).unwrap_or_default();
+    let live = recorder
+        .as_ref()
+        .map(|r| r.live.clone())
+        .unwrap_or_default();
 
     let arena_guard = bus.guest_arena_guard();
     let exchange = bus.guest_arena_mut()[exchange_at as usize..].as_mut_ptr();
