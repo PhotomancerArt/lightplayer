@@ -32,7 +32,61 @@ extern crate alloc;
 use alloc::collections::BTreeMap;
 use alloc::vec::Vec;
 
+use lp_emu_core::InstClass;
+
 use crate::decode::Decoded;
+
+/// What this crate needs to know about one decoded guest instruction,
+/// whatever the architecture.
+///
+/// Three questions and no more, and each is asked in exactly one place: the
+/// width is how a block's byte span is computed, the class is what the budget
+/// check charges, and `is_control` is what ends a block. Everything else about
+/// an instruction — its operands, what it does, whether the emitter has an arm
+/// for it — belongs to the emitter that owns the type, not here (M7 XD6/XD7:
+/// wasm is the IR and the two architectures share the ABI, not a decoded
+/// form).
+pub trait DecodedInst: Copy {
+    /// `log2` of how many guest bytes share one indirect-target slot.
+    ///
+    /// **1 on RV32**: RVC makes every block start two-byte aligned, and 48.99 %
+    /// of real starts sit at 2 mod 4, so a four-byte table would miss half of
+    /// them and a two-byte one misses none. **0 on Xtensa**: instructions are
+    /// two or three bytes at any alignment and all four residues are live in
+    /// equal measure (25.37 / 25.02 / 24.74 / 24.87 % over 721,066
+    /// instructions of the firmware image), so the table is indexed by the byte
+    /// — the same answer `lp_xt_emu::mach::translated::ENTRY_TABLE_BITS` gives
+    /// for the hart's own entry table, for the same reason.
+    ///
+    /// It costs 4 B per `1 << SLOT_SHIFT` guest bytes on a page that holds a
+    /// block start; see [`crate::dispatch::target_table_bytes`].
+    const SLOT_SHIFT: u32;
+
+    /// Bytes this instruction occupies.
+    fn width(&self) -> u8;
+
+    /// The cost class the budget check charges for it.
+    fn class(&self) -> InstClass;
+
+    /// Does it decide the next pc itself? A block ends after one of these.
+    fn is_control(&self) -> bool;
+}
+
+impl DecodedInst for Decoded {
+    const SLOT_SHIFT: u32 = 1;
+
+    fn width(&self) -> u8 {
+        self.width
+    }
+
+    fn class(&self) -> InstClass {
+        self.class
+    }
+
+    fn is_control(&self) -> bool {
+        Decoded::is_control(self)
+    }
+}
 
 /// The most instructions one translated block may hold.
 ///
@@ -60,39 +114,55 @@ pub enum BlockEnd {
 }
 
 /// One straight-line run of guest instructions.
+///
+/// Generic over the decoded form since M7 XD6, and **defaulted to the RV32
+/// one**, so every RV32 caller — this crate's own walk and emitter, and the
+/// C6's driver — names `Block` exactly as it always did.
 #[derive(Clone, Debug)]
-pub struct Block {
+pub struct Block<D = Decoded> {
     /// The guest pc of the first instruction.
     pub pc: u32,
     /// `(pc, decoded)` in execution order.
-    pub insts: Vec<(u32, Decoded)>,
+    pub insts: Vec<(u32, D)>,
     pub end: BlockEnd,
 }
 
-impl Block {
+impl<D: DecodedInst> Block<D> {
     /// The guest pc just past the last instruction.
     #[must_use]
     pub fn end_pc(&self) -> u32 {
         match self.insts.last() {
-            Some((pc, d)) => pc.wrapping_add(u32::from(d.width)),
+            Some((pc, d)) => pc.wrapping_add(u32::from(d.width())),
             None => self.pc,
         }
     }
 }
 
 /// The blocks one wasm function holds, and how to find one by pc.
-#[derive(Clone, Debug, Default)]
-pub struct BlockSet {
+#[derive(Clone, Debug)]
+pub struct BlockSet<D = Decoded> {
     /// Sorted by `pc`, and never empty once a walk found something to
     /// translate.
-    pub blocks: Vec<Block>,
+    pub blocks: Vec<Block<D>>,
     /// `pc` to index in [`BlockSet::blocks`].
     pub index: BTreeMap<u32, usize>,
     /// The pcs the hart may enter at — every block start.
     entries: Vec<u32>,
 }
 
-impl BlockSet {
+// Derived `Default` would demand `D: Default`, which a decoded instruction has
+// no reason to be: an empty set holds none of them.
+impl<D> Default for BlockSet<D> {
+    fn default() -> Self {
+        Self {
+            blocks: Vec::new(),
+            index: BTreeMap::new(),
+            entries: Vec::new(),
+        }
+    }
+}
+
+impl<D> BlockSet<D> {
     /// The pcs a hart's entry table should be built from.
     #[must_use]
     pub fn entries(&self) -> &[u32] {
@@ -120,7 +190,7 @@ impl BlockSet {
     /// order and a fall-through into the block laid out next costs nothing at
     /// all — and `index` must map each block's pc to its position.
     #[must_use]
-    pub fn from_blocks(blocks: Vec<Block>, index: BTreeMap<u32, usize>) -> Self {
+    pub fn from_blocks(blocks: Vec<Block<D>>, index: BTreeMap<u32, usize>) -> Self {
         debug_assert!(
             blocks.windows(2).all(|w| w[0].pc < w[1].pc),
             "a block set is sorted by pc and holds each pc once"

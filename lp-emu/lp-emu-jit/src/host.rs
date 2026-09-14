@@ -91,6 +91,141 @@
 
 // ---- the exchange area ----------------------------------------------------
 
+/// How the exchange area is laid out for one guest architecture.
+///
+/// **Everything past the register file is the same for every architecture**:
+/// the counters, the flags, the status, the two counters the selector keeps
+/// and the exit reason are the protocol's own, and none of them is RV32's. The
+/// only thing that varies is how much room the guest's architectural state
+/// takes at the front, so that is the only thing this carries — the fields
+/// below are derived from it.
+///
+/// The RV32 shape is [`ExchangeLayout::RV32`] and the constants
+/// [`EXCHANGE_CYCLE`]..[`EXCHANGE_LEN`] are exactly what it derives, asserted
+/// in this module's tests. Nothing about an RV32 module moved when this type
+/// landed (M7 XD6).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ExchangeLayout {
+    /// How many `i32` words the architectural register file at `+0` holds.
+    ///
+    /// 32 on RV32 (`x0` included — [`HostOps::step_one`] runs an arbitrary
+    /// guest instruction and the whole file has to be somewhere it can reach).
+    /// 64 on Xtensa: the physical `AR[0..64]` file, because `a3` is not a
+    /// register but `AR[(WindowBase * 4 + 3) mod 64]`.
+    pub regs_words: u32,
+    /// How many further `i32` words sit between the register file and the
+    /// counters.
+    ///
+    /// Zero on RV32: there is no architectural state a translated stay caches
+    /// in a local beyond the register file. Xtensa has `WindowBase`,
+    /// `WindowStart`, `SAR`, `LBEG`, `LEND`, `LCOUNT`, `PS.CALLINC` and the
+    /// dirty mask an exit writes back on (XD8), and those live here.
+    pub extra_words: u32,
+}
+
+/// The protocol's own fields, as offsets past the architectural state.
+///
+/// Hand-assigned rather than packed, because they are a **wire format**: the
+/// emitted module folds them in as constants and the host reads the same bytes
+/// back. The gaps are what keeps each `i64` eight-byte aligned without the
+/// derivation needing to know which field is which width.
+const FIELD_CYCLE: u64 = 0;
+const FIELD_INSTRET: u64 = 8;
+const FIELD_FLAGS: u64 = 16;
+const FIELD_STATUS: u64 = 20;
+const FIELD_CROSS: u64 = 24;
+const FIELD_INDIRECT_MISS: u64 = 32;
+const FIELD_EXIT_WHY: u64 = 40;
+
+/// How much of the exchange area the protocol's own fields claim, past the
+/// architectural state: the 44 bytes above, rounded up with room to add one.
+const TAIL_BYTES: u32 = 128;
+
+/// The register-file width `HostOps::step_one`'s `[i32; 32]` is.
+pub const RV32_REGS_WORDS: u32 = 32;
+
+impl ExchangeLayout {
+    /// RV32's: 32 register words and nothing else.
+    pub const RV32: Self = Self {
+        regs_words: RV32_REGS_WORDS,
+        extra_words: 0,
+    };
+
+    /// Bytes the register file and the extra words take together — where the
+    /// protocol's own fields start.
+    #[must_use]
+    pub const fn head_bytes(self) -> u64 {
+        4 * (self.regs_words as u64 + self.extra_words as u64)
+    }
+
+    /// Where the architectural register file starts. Always `+0`.
+    #[must_use]
+    pub const fn regs(self) -> u64 {
+        EXCHANGE_REGS
+    }
+
+    /// Where architectural word `i` of the register file sits.
+    #[must_use]
+    pub const fn reg(self, i: u32) -> u64 {
+        EXCHANGE_REGS + 4 * i as u64
+    }
+
+    /// Where extra word `i` sits — the machine's own state past the register
+    /// file, in whatever order that machine's driver and emitter agree on.
+    #[must_use]
+    pub const fn extra(self, i: u32) -> u64 {
+        4 * self.regs_words as u64 + 4 * i as u64
+    }
+
+    /// The cycle counter, as an `i64`.
+    #[must_use]
+    pub const fn cycle(self) -> u64 {
+        self.head_bytes() + FIELD_CYCLE
+    }
+
+    /// The retired-instruction counter, as an `i64`.
+    #[must_use]
+    pub const fn instret(self) -> u64 {
+        self.head_bytes() + FIELD_INSTRET
+    }
+
+    /// The exit flags, as an `i32`.
+    #[must_use]
+    pub const fn flags(self) -> u64 {
+        self.head_bytes() + FIELD_FLAGS
+    }
+
+    /// The status the escape hatch last reported, as an `i32`.
+    #[must_use]
+    pub const fn status(self) -> u64 {
+        self.head_bytes() + FIELD_STATUS
+    }
+
+    /// Cross-function transfers this stay made, as an `i64`.
+    #[must_use]
+    pub const fn cross(self) -> u64 {
+        self.head_bytes() + FIELD_CROSS
+    }
+
+    /// Indirect jumps this stay could not resolve, as an `i64`.
+    #[must_use]
+    pub const fn indirect_miss(self) -> u64 {
+        self.head_bytes() + FIELD_INDIRECT_MISS
+    }
+
+    /// Why the stay ended, as an `i32`.
+    #[must_use]
+    pub const fn exit_why(self) -> u64 {
+        self.head_bytes() + FIELD_EXIT_WHY
+    }
+
+    /// How much of the imported memory this exchange area claims.
+    #[must_use]
+    pub const fn len(self) -> u32 {
+        self.head_bytes() as u32 + TAIL_BYTES
+    }
+}
+
 /// `regs[32]`, `x0` first.
 pub const EXCHANGE_REGS: u64 = 0;
 /// `mcycle`, as an `i64`.
@@ -371,6 +506,17 @@ pub struct StepOne {
 /// Every method is handed the **exact `(pc, cycle)` the interpreter would have
 /// set** before the access, because peripheral models read both.
 pub trait HostOps {
+    /// The [`ExchangeLayout`] the module this host serves was emitted against.
+    ///
+    /// A **method** rather than an associated constant because the browser
+    /// host parks a `dyn HostOps` pointer for the length of a stay
+    /// (`host_browser::CURRENT`) and an associated constant would make the
+    /// trait not object-safe. Defaults to [`ExchangeLayout::RV32`], so every
+    /// RV32 host is exactly what it was.
+    fn layout(&self) -> ExchangeLayout {
+        ExchangeLayout::RV32
+    }
+
     /// An access on a page the permission table says is not plain RAM.
     fn mmio_load(&mut self, pc: u32, cycle: u64, address: u32, kind: u32) -> MmioLoad;
 
@@ -421,6 +567,51 @@ pub trait HostOps {
     /// far, and the returned ones are what the instruction left.
     fn step_one(&mut self, pc: u32, cycle: u64, instret: u64, regs: &mut [i32; 32]) -> StepOne;
 
+    /// The escape hatch for a host whose architectural register file is **not**
+    /// RV32's 32 words — see [`ExchangeLayout`].
+    ///
+    /// [`step_one`](HostOps::step_one)'s `[i32; 32]` is RV32's file, in RV32's
+    /// order, and it is the shape this crate has marshalled through since M7
+    /// P3. A machine whose file is a different width (Xtensa's physical
+    /// `AR[0..64]`, which the *hart* owns) overrides this instead: the host
+    /// reaches the exchange area through [`exchange`](HostOps::exchange) and
+    /// marshals whatever its own register model needs, and this crate
+    /// marshals nothing.
+    ///
+    /// The default is exactly what [`escape_hatch`] always did: the whole
+    /// 32-word file out of the exchange area, through
+    /// [`step_one`](HostOps::step_one), and back. So no RV32 host changed when
+    /// this method landed, and none has to know it exists.
+    ///
+    /// # Panics
+    ///
+    /// If [`layout`](HostOps::layout) says the register file is not 32 words
+    /// and this method was not overridden — the default cannot carry a file it
+    /// has no type for, and saying so is better than marshalling the first 32
+    /// words of a wider one.
+    fn step_one_wide(&mut self, pc: u32, cycle: u64, instret: u64) -> StepOne {
+        let layout = self.layout();
+        assert_eq!(
+            layout.regs_words, RV32_REGS_WORDS,
+            "a host whose register file is {} words overrides `HostOps::step_one_wide`; the \
+             default marshals RV32's `[i32; 32]` through `step_one` and cannot carry it",
+            layout.regs_words
+        );
+        let mut regs = [0i32; RV32_REGS_WORDS as usize];
+        {
+            let x = self.exchange();
+            for (i, r) in regs.iter_mut().enumerate() {
+                *r = read_i32(&x[layout.reg(i as u32) as usize..]);
+            }
+        }
+        let out = self.step_one(pc, cycle, instret, &mut regs);
+        let x = self.exchange();
+        for (i, r) in regs.iter().enumerate() {
+            x[layout.reg(i as u32) as usize..][..4].copy_from_slice(&r.to_le_bytes());
+        }
+        out
+    }
+
     /// The [`EXCHANGE_LEN`] bytes of the imported memory the emitted module
     /// uses to talk to its host — the *same* bytes, not a copy.
     ///
@@ -449,31 +640,88 @@ fn read_i64(at: &[u8]) -> i64 {
 ///
 /// Panics if [`HostOps::exchange`] is shorter than [`EXCHANGE_LEN`].
 pub fn escape_hatch<H: HostOps + ?Sized>(ops: &mut H, pc: u32) -> u32 {
-    let mut regs = [0i32; 32];
+    let layout = ops.layout();
     let (cycle, instret) = {
         let x = ops.exchange();
         assert!(
-            x.len() >= EXCHANGE_LEN as usize,
-            "the exchange area is {} bytes, not {EXCHANGE_LEN}",
-            x.len()
+            x.len() >= layout.len() as usize,
+            "the exchange area is {} bytes, not {}",
+            x.len(),
+            layout.len()
         );
-        for (i, r) in regs.iter_mut().enumerate() {
-            *r = read_i32(&x[EXCHANGE_REGS as usize + 4 * i..]);
-        }
         (
-            read_i64(&x[EXCHANGE_CYCLE as usize..]) as u64,
-            read_i64(&x[EXCHANGE_INSTRET as usize..]) as u64,
+            read_i64(&x[layout.cycle() as usize..]) as u64,
+            read_i64(&x[layout.instret() as usize..]) as u64,
         )
     };
 
-    let out = ops.step_one(pc, cycle, instret, &mut regs);
+    // The register file crosses here or it does not, and which it is belongs
+    // to the host: RV32's default marshals the `[i32; 32]` it has always
+    // marshalled, and a machine whose file is its hart's own overrides
+    // `step_one_wide` and reaches the exchange area itself.
+    let out = ops.step_one_wide(pc, cycle, instret);
 
     let x = ops.exchange();
-    for (i, r) in regs.iter().enumerate() {
-        x[EXCHANGE_REGS as usize + 4 * i..][..4].copy_from_slice(&r.to_le_bytes());
-    }
-    x[EXCHANGE_CYCLE as usize..][..8].copy_from_slice(&out.cycle.to_le_bytes());
-    x[EXCHANGE_INSTRET as usize..][..8].copy_from_slice(&out.instret.to_le_bytes());
-    x[EXCHANGE_STATUS as usize..][..4].copy_from_slice(&out.status.to_le_bytes());
+    x[layout.cycle() as usize..][..8].copy_from_slice(&out.cycle.to_le_bytes());
+    x[layout.instret() as usize..][..8].copy_from_slice(&out.instret.to_le_bytes());
+    x[layout.status() as usize..][..4].copy_from_slice(&out.status.to_le_bytes());
     out.pc
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The constants above are a **wire format**, and [`ExchangeLayout`] is a
+    /// second way of writing the same one. If the two ever disagree, an RV32
+    /// module and its host stop reading the same bytes — silently, because
+    /// both sides would still be self-consistent.
+    ///
+    /// This is the test that made the generalising pass (M7 XD6) a refactor
+    /// rather than a rewrite: every constant below was here before the type
+    /// was, and not one of them moved.
+    #[test]
+    fn the_rv32_constants_are_what_the_rv32_layout_derives() {
+        let l = ExchangeLayout::RV32;
+        assert_eq!(l.regs(), EXCHANGE_REGS);
+        assert_eq!(l.reg(0), EXCHANGE_REGS);
+        assert_eq!(l.reg(31), EXCHANGE_REGS + 4 * 31);
+        assert_eq!(l.cycle(), EXCHANGE_CYCLE);
+        assert_eq!(l.instret(), EXCHANGE_INSTRET);
+        assert_eq!(l.flags(), EXCHANGE_FLAGS);
+        assert_eq!(l.status(), EXCHANGE_STATUS);
+        assert_eq!(l.cross(), EXCHANGE_CROSS);
+        assert_eq!(l.indirect_miss(), EXCHANGE_INDIRECT_MISS);
+        assert_eq!(l.exit_why(), EXCHANGE_EXIT_WHY);
+        assert_eq!(l.len(), EXCHANGE_LEN);
+        // Nothing the register file holds may overlap the first field past it.
+        assert!(l.reg(l.regs_words - 1) + 4 <= l.cycle());
+    }
+
+    /// A wider layout moves every field past the register file and nothing
+    /// else, and every `i64` field stays eight-byte aligned.
+    ///
+    /// The Xtensa numbers are XD8's data half: `AR[0..64]` and eight words of
+    /// window, loop and dirty-mask state.
+    #[test]
+    fn a_wider_layout_moves_the_fields_and_keeps_the_alignment() {
+        let l = ExchangeLayout {
+            regs_words: 64,
+            extra_words: 8,
+        };
+        assert_eq!(l.head_bytes(), 4 * (64 + 8));
+        assert_eq!(l.reg(63), 4 * 63);
+        assert_eq!(l.extra(0), 4 * 64);
+        assert_eq!(l.extra(7), 4 * 71);
+        assert_eq!(l.cycle(), 288);
+        assert_eq!(l.instret(), 296);
+        assert_eq!(l.exit_why(), 328);
+        assert_eq!(l.len(), 288 + TAIL_BYTES);
+        for field in [l.cycle(), l.instret(), l.cross(), l.indirect_miss()] {
+            assert_eq!(field % 8, 0, "{field} is an i64 field and is not aligned");
+        }
+        // The extras sit between the file and the fields, touching neither.
+        assert_eq!(l.extra(0), l.reg(l.regs_words - 1) + 4);
+        assert_eq!(l.extra(l.extra_words - 1) + 4, l.cycle());
+    }
 }
