@@ -3141,6 +3141,28 @@ test-emu-jit:
 test-emu-xt-jit:
     cargo test -p lp-xt-jit --features host-wasmtime
 
+# The Xtensa translated module's answers, checked in three engines (M7 P06,
+# JD19). The round-trip suites emit every module, run it under wasmtime
+# against a real `XtHart` behind the escape hatch, and write each run out as
+# an engine case — the module bytes, the memory as ranges, the exchange head
+# in and out per entry, the import answers in call order (the escape
+# hatch's included, with the memory it wrote) — and the same bytes then run
+# under `node` (V8) and `bun` (JavaScriptCore) against the same inputs.
+test-emu-xt-jit-engines:
+    rm -rf target/xt-jit-cases
+    LP_EMU_XT_JIT_ENGINE_CASE="$PWD/target/xt-jit-cases" cargo test -q -p lp-xt-jit \
+        --features host-wasmtime --test translate_roundtrip --test window_roundtrip \
+        --test loop_roundtrip
+    node scripts/emu/jit-engine-check.mjs target/xt-jit-cases
+    bun scripts/emu/jit-engine-check.mjs target/xt-jit-cases
+
+# The differential oracle, tier (a), for the classic: the three engines on
+# the crate's cases, then the crate's whole suite under wasmtime. The
+# image-scale form is a classic run with `LP_EMU_XT_JIT_RECORD=<dir>` replayed
+# through the same script (`node scripts/emu/jit-engine-check.mjs <dir>`).
+test-emu-xt-jit-identity: test-emu-xt-jit-engines
+    cargo test -p lp-xt-jit --features host-wasmtime
+
 # The translated module's answers, checked in three engines (M7 JD19).
 #
 # The round-trip test emits the modules and asserts them under wasmtime; each
