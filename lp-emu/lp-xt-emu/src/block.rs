@@ -234,4 +234,54 @@ mod tests {
         );
         assert_ne!(slot.cost_bound(), InstClass::BranchNotTaken);
     }
+
+    /// [`ar_group_bound`] is the exact [`ar_group`] for every instruction that
+    /// does not read `PS.CALLINC`, and rounds the one that does — `ENTRY` — up
+    /// to 3, the largest a 2-bit `CALLINC` can make it.
+    ///
+    /// The sweep over all four `CALLINC` values is the claim the hoist rests
+    /// on: no live `CALLINC` can push a slot's group above the bound the block
+    /// was folded from.
+    #[test]
+    fn the_decode_time_group_is_an_upper_bound_on_the_live_one() {
+        use lp_xt_inst::{AluRrr, CallOp, LoadOp};
+
+        for inst in [
+            Inst::Nullary(lp_xt_inst::NullaryOp::Nop),
+            Inst::Rrr(AluRrr::Or, Reg::new(2), Reg::new(3), Reg::new(4)),
+            Inst::Rrr(AluRrr::Or, Reg::new(13), Reg::new(3), Reg::new(4)),
+            Inst::Load(LoadOp::L32i, Reg::new(9), Reg::new(1), 0),
+            Inst::Call(CallOp::Call12, 4),
+            Inst::BranchRr(BrRr::Beq, Reg::new(2), Reg::new(3), 4),
+        ] {
+            for callinc in 0..4u8 {
+                assert_eq!(
+                    ar_group_bound(&inst),
+                    ar_group(&inst, callinc),
+                    "{inst:?} does not read CALLINC, so the bound is exact"
+                );
+            }
+        }
+
+        let entry = Inst::Entry(Reg::new(1), 16);
+        assert_eq!(ar_group_bound(&entry), 3, "ENTRY rounds up");
+        for callinc in 0..4u8 {
+            assert!(
+                ar_group(&entry, callinc) <= ar_group_bound(&entry),
+                "CALLINC {callinc} must not reach past the bound"
+            );
+        }
+    }
+
+    /// The share is 0.0 on a run that entered no block, and the ratio
+    /// otherwise.
+    #[test]
+    fn the_hoisted_share_is_zero_before_any_block_runs() {
+        assert_eq!(WindowHoistStats::default().hoisted_share(), 0.0);
+        let stats = WindowHoistStats {
+            hoisted: 3,
+            slotwise: 1,
+        };
+        assert!((stats.hoisted_share() - 0.75).abs() < f64::EPSILON);
+    }
 }

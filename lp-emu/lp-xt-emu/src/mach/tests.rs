@@ -3064,3 +3064,193 @@ fn a_clone_starts_with_an_empty_cache() {
     off.set_block_cache(false);
     assert!(!off.clone().block_cache());
 }
+
+// --- the window check, hoisted per block (M7 P02, XD5) -----------------------
+//
+// The claim is an identity claim, so every one of these runs through
+// `differential`: the cached leg takes the hoist, the `--no-block-cache` leg
+// single-steps with the per-instruction check the interpreter has always run,
+// and the two are compared on the slice end, the pc, both counters, the whole
+// AR file, `WindowBase`, `WindowStart`, `PS`, `EPC1`, `EXCCAUSE` and every byte
+// of guest memory. The counters below then say *which* path the cached leg
+// took, which is the only thing the hoist is allowed to change.
+
+/// Five slots reaching groups 0, 1, 0 and 2 in that order, so a `WindowStart`
+/// bit two frames up is within reach of the fourth and of nothing before it.
+/// Shared by the slot-by-slot case and its `PS.EXCM` twin, so the two differ in
+/// exactly one bit of `PS`.
+fn groups_0_1_0_2(bus: &mut TestBus) {
+    install_window_handlers(bus);
+    asm(
+        bus,
+        CODE,
+        &[
+            movi(2, 7),                              // group 0
+            Inst::Rrr(AluRrr::Or, a(4), a(2), a(2)), // group 1
+            nop(),                                   // group 0
+            Inst::Rrr(AluRrr::Or, a(8), a(2), a(2)), // group 2
+            nop(),
+        ],
+    );
+}
+
+/// (a) Nothing within reach of the block's **maximum** group: the whole block
+/// runs with the per-slot overflow check skipped, and leaves exactly what
+/// single-stepping leaves.
+#[test]
+fn a_block_with_nothing_in_reach_runs_hoisted() {
+    let (end, hart, _) = differential(
+        |bus| {
+            install_window_handlers(bus);
+            asm(
+                bus,
+                CODE,
+                &[
+                    movi(2, 7),                               // group 0
+                    Inst::Rrr(AluRrr::Or, a(5), a(2), a(2)),  // group 1
+                    Inst::Rrr(AluRrr::Or, a(9), a(2), a(2)),  // group 2
+                    Inst::Rrr(AluRrr::Or, a(13), a(2), a(2)), // group 3
+                    nop(),
+                    nop(),
+                ],
+            );
+        },
+        |hart| {
+            hart.set_ps_raw(PS_WOE | PS_UM);
+            hart.cpu_mut().window_base = 0;
+            // Only the current frame is resident, so no bit is within reach of
+            // any group — not even 3.
+            hart.cpu_mut().window_start = 1;
+            hart.set_pc(CODE);
+        },
+        6,
+    );
+    assert_eq!(end, SliceEnd::BudgetExhausted);
+    let stats = hart.window_hoist_stats();
+    assert_eq!(
+        stats.slotwise, 0,
+        "nothing is within reach of the block's group 3"
+    );
+    assert_eq!(stats.hoisted, 1, "one block, decided once at its entry");
+    assert_eq!(hart.instruction_count(), 6, "every slot retired");
+    assert_eq!(hart.cpu().a(13), 7, "including the group-3 slot");
+    assert_eq!(hart.cpu().window_base, 0, "nothing rotated");
+    assert_eq!(hart.cpu().window_start, 1);
+    assert_eq!(hart.sr().epc[1], 0, "no exception was raised");
+}
+
+/// (b) A bit within reach of group 2 and of nothing smaller: the block runs
+/// slot by slot, and the overflow fires at the first slot that reaches group 2
+/// — not at the block's first pc, and not at the group-1 slot before it.
+#[test]
+fn a_bit_in_reach_of_group_two_runs_the_block_slot_by_slot() {
+    let (end, hart, _) = differential(
+        groups_0_1_0_2,
+        |hart| {
+            hart.set_ps_raw(PS_WOE | PS_UM);
+            hart.cpu_mut().window_base = 0;
+            // The current frame and one two above it: out of reach of group 1,
+            // within reach of group 2.
+            hart.cpu_mut().window_start = 0b101;
+            hart.set_pc(CODE);
+        },
+        // Three retired slots, then the cycle the trapping one costs.
+        4,
+    );
+    assert_eq!(end, SliceEnd::BudgetExhausted);
+    let stats = hart.window_hoist_stats();
+    assert_eq!(stats.hoisted, 0, "a bit was in reach of the block's group 2");
+    assert_eq!(stats.slotwise, 1);
+    assert_eq!(
+        hart.sr().epc[1],
+        CODE + 3 * 3,
+        "EPC1 names the group-2 slot, not the block and not the group-1 slot"
+    );
+    assert_eq!((hart.ps() >> 8) & 0xF, 0, "PS.OWB = the old base");
+    assert_eq!(hart.cpu().window_base, 2, "rotated to the victim m = 0 + 2");
+    assert!(excm(&hart));
+    assert_eq!(
+        hart.instruction_count(),
+        3,
+        "the overflowing slot has not retired"
+    );
+    // The physical register, not `a(4)`: the check rotated `WindowBase` to the
+    // victim before vectoring, so the window the group-1 slot wrote through is
+    // no longer the current one.
+    assert_eq!(hart.cpu().ar[4], 7, "the group-1 slot did retire");
+}
+
+/// (c) The same block with `PS.EXCM` set: the check is skipped per instruction
+/// either way, so the block hoists trivially and the group-2 slot retires.
+#[test]
+fn the_same_block_under_excm_hoists_and_never_checks() {
+    let (end, hart, _) = differential(
+        groups_0_1_0_2,
+        |hart| {
+            hart.set_ps_raw(PS_WOE | PS_UM | PS_EXCM);
+            hart.cpu_mut().window_base = 0;
+            hart.cpu_mut().window_start = 0b101;
+            hart.set_pc(CODE);
+        },
+        5,
+    );
+    assert_eq!(end, SliceEnd::BudgetExhausted);
+    let stats = hart.window_hoist_stats();
+    assert_eq!(stats.slotwise, 0, "EXCM skips the check per instruction");
+    assert_eq!(stats.hoisted, 1);
+    assert_eq!(hart.instruction_count(), 5, "every slot retired");
+    assert_eq!(hart.cpu().a(8), 7, "including the group-2 slot");
+    assert_eq!(hart.cpu().window_base, 0, "nothing rotated");
+    assert_eq!(hart.cpu().window_start, 0b101);
+    assert_eq!(hart.sr().epc[1], 0, "no exception was raised");
+}
+
+/// (d) A block of group-0 slots ending in `entry`: the decode-time group bound
+/// rounds `ENTRY` up to 3 (its live group is `max(group(as), PS.CALLINC)` and
+/// `CALLINC` is not known at decode time), so the block does **not** hoist and
+/// the entry's overflow is raised exactly where it always was.
+///
+/// This is the test that would fail if `ar_group_bound` stored `group(as)` for
+/// `ENTRY`: the two slots before it are group 0, the hoist would take the
+/// block, and a `CALLINC` of 2 would walk into an occupied frame in silence.
+#[test]
+fn a_block_ending_in_entry_raises_the_entry_overflow_with_the_hoist_on() {
+    let (end, hart, _) = differential(
+        |bus| {
+            asm(bus, CODE, &[nop(), nop(), Inst::Entry(a(1), 16)]);
+            asm(bus, VEC + VECOFS_WINDOW_OF8, &[brk()]);
+        },
+        |hart| {
+            // The current frame at base 14, an old one at 0 whose callee sits
+            // at 2 (a call8). `CALLINC = 2` puts the new frame at 14 + 2 = 0,
+            // which the old frame owns.
+            hart.set_ps_raw(PS_WOE | PS_UM | (2 << PS_CALLINC_SHIFT));
+            hart.cpu_mut().window_base = 14;
+            hart.cpu_mut().window_start = (1 << 14) | 1 | (1 << 2);
+            hart.cpu_mut().set_a(1, STACK_TOP);
+            hart.set_pc(CODE);
+        },
+        10,
+    );
+    assert_eq!(
+        end,
+        SliceEnd::Ebreak {
+            pc: VEC + VECOFS_WINDOW_OF8
+        }
+    );
+    let stats = hart.window_hoist_stats();
+    assert_eq!(
+        stats.hoisted, 0,
+        "ENTRY's group bound of 3 keeps the check on the block"
+    );
+    assert_eq!(stats.slotwise, 1);
+    assert_eq!(hart.cpu().window_base, 0, "rotated to the victim (m)");
+    assert_eq!((hart.ps() >> 8) & 0xF, 14, "PS.OWB = the old base");
+    assert_eq!(hart.sr().epc[1], CODE + 2 * 3, "EPC1 names the entry");
+    assert!(excm(&hart));
+    assert_eq!(
+        hart.instruction_count(),
+        2,
+        "the entry has not retired; the two nops before it have"
+    );
+}

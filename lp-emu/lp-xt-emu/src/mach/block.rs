@@ -446,6 +446,63 @@ mod tests {
         );
     }
 
+    /// The block's maximum group lands on the **first** slot, whatever slot it
+    /// came from — the one byte the block executor reads before it runs
+    /// anything (M7 XD5).
+    #[test]
+    fn the_first_slot_carries_the_blocks_maximum_group() {
+        let mut out = Vec::new();
+        for inst in [
+            Inst::Nullary(NullaryOp::Nop),
+            Inst::Rrr(AluRrr::Or, Reg::new(2), Reg::new(3), Reg::new(4)),
+            Inst::Rrr(AluRrr::Or, Reg::new(11), Reg::new(3), Reg::new(4)),
+            Inst::Nullary(NullaryOp::Nop),
+        ] {
+            let (decoded, len) = lp_xt_inst::decode(&lp_xt_inst::encode(&inst)).expect("decodes");
+            out.push(XtSlot::new(decoded, len as u8));
+        }
+        assert_eq!(out[0].group, 0, "the first slot's own group is 0");
+        finish_groups(&mut out);
+        assert_eq!(out[0].block_group, 2, "a2 in the third slot reaches group 2");
+
+        // An empty block — a refused first instruction — folds to nothing and
+        // must not panic.
+        let mut empty: Vec<XtSlot> = Vec::new();
+        finish_groups(&mut empty);
+        assert!(empty.is_empty());
+    }
+
+    /// The precondition, read against the three states the block executor can
+    /// be in: no bit in reach, a bit in reach, and the check already off.
+    #[test]
+    fn the_precondition_answers_from_window_base_window_start_and_the_block_group() {
+        let (decoded, len) = lp_xt_inst::decode(&lp_xt_inst::encode(&Inst::Rrr(
+            AluRrr::Or,
+            Reg::new(8),
+            Reg::new(2),
+            Reg::new(2),
+        )))
+        .expect("decodes");
+        let mut slots = alloc::vec![XtSlot::new(decoded, len as u8)];
+        finish_groups(&mut slots);
+        assert_eq!(slots[0].block_group, 2);
+
+        let mut cpu = Cpu::default();
+        cpu.window_base = 0;
+        // Only the current frame: nothing within reach of group 2.
+        cpu.window_start = 0b1;
+        assert!(window_check_hoistable(&cpu, true, false, &slots));
+        // A frame two above: within reach of group 2.
+        cpu.window_start = 0b101;
+        assert!(!window_check_hoistable(&cpu, true, false, &slots));
+        // …and the per-instruction check is skipped anyway under either of
+        // these, so the block hoists trivially.
+        assert!(window_check_hoistable(&cpu, false, false, &slots));
+        assert!(window_check_hoistable(&cpu, true, true, &slots));
+        // An empty block runs nothing.
+        assert!(window_check_hoistable(&cpu, true, false, &[]));
+    }
+
     #[test]
     fn a_slot_carries_the_width_the_decoder_produced() {
         let (inst, len) =
