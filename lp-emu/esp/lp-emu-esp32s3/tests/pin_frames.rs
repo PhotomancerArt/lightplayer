@@ -29,8 +29,8 @@
 //! the guest writes through.
 
 use lp_emu_esp_common::ip::rmt::{
-    CONF_APB_MEM_RST, CONF_CONF_UPDATE, CONF_DIV_CNT_SHIFT, CONF_MEM_RD_RST,
-    CONF_MEM_TX_WRAP_EN, CONF_TX_START, Dir, IntKind,
+    CONF_APB_MEM_RST, CONF_CONF_UPDATE, CONF_DIV_CNT_SHIFT, CONF_MEM_RD_RST, CONF_MEM_TX_WRAP_EN,
+    CONF_TX_START, Dir, IntKind,
 };
 use lp_emu_esp_common::pins::{PadId, RouteSource, SignalId};
 use lp_emu_esp_common::regnames::RegNames;
@@ -190,7 +190,8 @@ fn start_frame(m: &mut Machine, stream: &[u32]) {
     }
     assert!(m.poke_word(rmt_reg(CONFIG.ch_tx_lim[0]), HALF as u32));
 
-    let conf = (1 << CONF_DIV_CNT_SHIFT) | (MEM_SIZE << CONFIG.conf_mem_size_shift) | CONF_MEM_TX_WRAP_EN;
+    let conf =
+        (1 << CONF_DIV_CNT_SHIFT) | (MEM_SIZE << CONFIG.conf_mem_size_shift) | CONF_MEM_TX_WRAP_EN;
     assert!(m.poke_word(rmt_reg(CONFIG.ch_tx_conf0[0]), conf));
     assert!(m.poke_word(rmt_reg(CONFIG.ch_tx_conf0[0]), conf | CONF_CONF_UPDATE));
     assert!(m.poke_word(
@@ -256,7 +257,10 @@ fn payload() -> Vec<u8> {
 }
 
 fn tempdir(tag: &str) -> std::path::PathBuf {
-    let dir = std::env::temp_dir().join(format!("lp-emu-esp32s3-pin-frames-{tag}-{}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!(
+        "lp-emu-esp32s3-pin-frames-{tag}-{}",
+        std::process::id()
+    ));
     std::fs::create_dir_all(&dir).expect("a scratch directory");
     dir
 }
@@ -362,10 +366,7 @@ fn a_frame_still_in_flight_is_flushed_incomplete() {
         stop_cycle: Some(until),
         ..Default::default()
     });
-    assert!(
-        m.frames(D10).is_empty(),
-        "no reset has closed anything yet"
-    );
+    assert!(m.frames(D10).is_empty(), "no reset has closed anything yet");
     assert!(m.pin_edges(D10) > 0, "but the wire has been busy");
 
     m.flush_frames();
@@ -458,10 +459,7 @@ fn two_runs_and_two_quanta_decode_the_same_frame() {
         m.flush_frames();
         let starts: Vec<u64> = m.frames(D10).iter().map(|f| f.start).collect();
         drop(m);
-        (
-            std::fs::read(&path).expect("the dump was written"),
-            starts,
-        )
+        (std::fs::read(&path).expect("the dump was written"), starts)
     };
 
     let (a, a_starts) = run("a.jsonl", 256);
