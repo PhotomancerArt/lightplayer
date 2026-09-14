@@ -188,6 +188,18 @@ use window::{WindowEvent, WindowPolicy};
 
 use exec::Priv;
 
+/// What polling point (c) observed — [`XtHart::poll_after_store`]'s answer.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct AfterStore {
+    /// The store published code: the store-address record was drained into
+    /// the invalidation seams. A translated stay leaves on this, so the
+    /// invalidation is applied before another translated block runs.
+    pub code_dirty: bool,
+    /// [`Bus::take_yield`] said the machine takes over: the slice ends
+    /// ([`SliceEnd::BusYield`]).
+    pub yielded: bool,
+}
+
 /// Why a slice stopped. The five variants RV32's `SliceEnd` has, by design.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SliceEnd {
@@ -1016,6 +1028,60 @@ impl<B: Bus> XtHart<B> {
         }
     }
 
+    /// **Polling point (c), as one callable thing** (M7 XD3; the speed
+    /// ladder's DD111): what the hart does after a Store-, Atomic- or
+    /// System-class instruction retired, in the order it does it.
+    ///
+    /// 1. [`Bus::take_sideband`] — an MMIO store may have moved the interrupt
+    ///    state: re-read the asserted-line mask and poll.
+    /// 2. [`Bus::code_dirty`] — the store may have published code: drain the
+    ///    store-address record into the invalidation seams **before the next
+    ///    fetch**.
+    /// 3. [`Bus::take_yield`] — a peripheral asked the machine to take over:
+    ///    the slice ends.
+    ///
+    /// This is the **one copy** of the sequence. [`XtHart::step`] runs it
+    /// after every instruction of those classes; [`XtHart::run_blocks`]
+    /// runs it when a translated core reports an after-store exit; and the
+    /// classic's translated core runs it *from inside a stay*, through the
+    /// fused-poll import, at exactly the instruction the interpreter would
+    /// have — the plan's "one polling point, one copy" rule is what forbids
+    /// the driver writing these lines a second time. It is `pub` for that
+    /// third caller and for no other reason.
+    ///
+    /// The caller has already put the hart where the interpreter would be —
+    /// the post-store pc and counters, `PS.CALLINC` current — because the
+    /// poll can take an interrupt, and interrupt entry saves `PS` whole.
+    ///
+    /// Returns what the point observed, so a translated stay can decide
+    /// whether it may carry on: a `code_dirty` means the core's own bytes may
+    /// have moved and the stay must leave for the invalidation to be applied
+    /// before another translated block runs; a `yielded` is
+    /// [`SliceEnd::BusYield`].
+    #[inline]
+    pub fn poll_after_store(&mut self, bus: &mut B) -> AfterStore {
+        if bus.take_sideband() {
+            self.resample_external(bus);
+        }
+        // (c) **the store-address invalidation contract** (M7 XD3). The
+        // guest may have stored into executable memory, and on this chip
+        // that store is the publish: the classic's firmware deliberately
+        // emits no barrier after writing JIT'd code into SRAM0, so there
+        // is no `isync` to hang invalidation on and the store itself is
+        // the event. Drained here -- after the instruction that made it
+        // and before the next fetch -- so a pre-decoded block is never run
+        // from bytes the guest has already replaced, and the block
+        // executor leaves the block it is in.
+        let code_dirty = bus.code_dirty();
+        if code_dirty {
+            self.drain_code_dirty(bus);
+        }
+        AfterStore {
+            code_dirty,
+            yielded: bus.take_yield(),
+        }
+    }
+
     fn drain_core_flush(&mut self, core: &mut translated::BoxedCore<B>) {
         match core::mem::replace(&mut self.core_flush_pending, PendingInvalidate::None) {
             PendingInvalidate::None => {}
@@ -1356,18 +1422,15 @@ impl<B: Bus> XtHart<B> {
                     self.cycle_count = cycle_count;
                     self.instruction_count = instruction_count;
                     if after_store {
-                        // Polling point (c), byte for byte what `step` does
-                        // after an interpreted store.
-                        if bus.take_sideband() {
-                            self.resample_external(bus);
+                        // Polling point (c), the same code `step` runs after
+                        // an interpreted store.
+                        let polled = self.poll_after_store(bus);
+                        if polled.code_dirty
+                            && let Some(cache) = cache.as_mut()
+                        {
+                            self.drain_block_flush(cache);
                         }
-                        if bus.code_dirty() {
-                            self.drain_code_dirty(bus);
-                            if let Some(cache) = cache.as_mut() {
-                                self.drain_block_flush(cache);
-                            }
-                        }
-                        if bus.take_yield() {
+                        if polled.yielded {
                             return SliceEnd::BusYield;
                         }
                     }
@@ -1854,29 +1917,15 @@ impl<B: Bus> XtHart<B> {
             self.poll_interrupts();
         }
         // (c) an MMIO store may have changed interrupt state, and it may have
-        // changed something only the machine can act on.
+        // changed something only the machine can act on. One copy of the
+        // sequence — [`XtHart::poll_after_store`] — shared with the
+        // translated core's fused poll.
         if matches!(
             class,
             InstClass::Store | InstClass::Atomic | InstClass::System
-        ) {
-            if bus.take_sideband() {
-                self.resample_external(bus);
-            }
-            // (c) **the store-address invalidation contract** (M7 XD3). The
-            // guest may have stored into executable memory, and on this chip
-            // that store is the publish: the classic's firmware deliberately
-            // emits no barrier after writing JIT'd code into SRAM0, so there
-            // is no `isync` to hang invalidation on and the store itself is
-            // the event. Drained here -- after the instruction that made it
-            // and before the next fetch -- so a pre-decoded block is never run
-            // from bytes the guest has already replaced, and the block
-            // executor leaves the block it is in.
-            if bus.code_dirty() {
-                self.drain_code_dirty(bus);
-            }
-            if bus.take_yield() {
-                return StepOutcome::End(SliceEnd::BusYield);
-            }
+        ) && self.poll_after_store(bus).yielded
+        {
+            return StepOutcome::End(SliceEnd::BusYield);
         }
         // (e) an internal timer reached its compare.
         self.tick_timers();
