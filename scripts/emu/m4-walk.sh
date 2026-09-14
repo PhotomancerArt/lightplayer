@@ -170,7 +170,12 @@ command -v jq >/dev/null 2>&1 || {
 mkdir -p "$OUT"
 console="$OUT/walk.console.txt"
 frames="$OUT/walk.frames.jsonl"
-rm -f "$console" "$frames"
+# The OBSERVATION stream: bytes the guest handed the link that no host took.
+# On the S3 it is not empty and the reason is a known open defect — see THE
+# RUN below. It is never a gate; it is the difference between "the firmware
+# said nothing" and "the firmware said it and the link ate it".
+tried="$OUT/walk.tried.txt"
+rm -f "$console" "$frames" "$tried"
 
 # ------------------------------------------------- the image, and its bytes
 #
@@ -235,6 +240,21 @@ case "$BOOT" in
         fi
         ;;
     direct)
+        # No flash chip, and no bootloader: the fast path, for bisecting. On
+        # the S3 that means no partition table either, so the firmware logs
+        # `no lpfs partition in the flashed table … using memory FS` and runs
+        # on the memory FS — a different allocator load from the ROM-up boot's
+        # and a thing to remember before comparing figures across the two.
+        #
+        # ⚠️ **On the S3 this path cannot complete an upload today**, and the
+        # reason is the open link defect rather than this script: the deploy's
+        # `stopAllProjects` reply lands on the TRIED stream (printed under THE
+        # RUN below) and `lp-cli` waits ten seconds for a reply the host never
+        # got. ROM-up is unaffected — the same run loses only the hello's
+        # feature-list packet, which `lp-cli` survives. Giving this path a
+        # flash chip (`--flash-copy`) removes the `lpfs` error line and does
+        # NOT bring the reply back, so the log line is not the trigger. The
+        # walk still runs, prints everything it reached and exits non-zero.
         boot_args=(--elf "$elf")
         ;;
     *)
@@ -311,6 +331,7 @@ esp32s3)
     "$emu" \
         "${boot_args[@]}" \
         --usb-sj "tcp:$LINK" \
+        --usb-sj-tried "file:$tried" \
         --usb-sj-drain manual \
         --usb-host attached \
         --control "tcp:$CTRL" \
@@ -354,7 +375,20 @@ cable_replies="$OUT/walk.cable.txt"
 cable_failed=0
 cable() {
     local verb="$*" reply=""
-    printf '%s\n' "$verb" >&4
+    # A machine that has reached its own deadline has closed this socket, and
+    # a `printf` into it would take the script out with SIGPIPE — at a
+    # progress print, on a run whose evidence is already collected. Say so
+    # instead.
+    if ! kill -0 "$emu_pid" 2>/dev/null; then
+        printf '%-16s (the machine had already ended; no verb sent)\n' "$verb"
+        CABLE_REPLY=""
+        return 0
+    fi
+    printf '%s\n' "$verb" >&4 2>/dev/null || {
+        printf '%-16s (the control socket is gone)\n' "$verb"
+        CABLE_REPLY=""
+        return 0
+    }
     # `|| true`: a read that times out returns non-zero and would take the
     # script with it under `set -e` — at the point where the reply we are
     # about to complain about would have been printed.
@@ -365,6 +399,13 @@ cable() {
 cable_want() {
     local what="$1"
     shift
+    # No reply at all means the machine had already ended (above), which some
+    # other check has already failed the run for. Asserting on a reply nobody
+    # sent would bury that reason under this one.
+    if [[ -z "$CABLE_REPLY" ]]; then
+        echo "  (not asserted: $what — there was no reply to read)"
+        return 0
+    fi
     for want in "$@"; do
         if [[ "$CABLE_REPLY" != *"$want"* ]]; then
             echo "FAIL: $what has no '$want':"
@@ -439,12 +480,25 @@ set +e
 cli_status=$?
 set -e
 tail -5 "$OUT/cli.stdout" || true
+upload_failed=0
 if [[ $cli_status -ne 0 ]]; then
     echo "upload: FAILED (exit $cli_status)" >&2
     tail -30 "$OUT/cli.stderr" >&2
-    exit 1
+    # The C6 stops here. The S3 carries on, which is the classic walk's rule
+    # (`m4-walk-esp32v3.sh`) and its reason: a guest that lost the client
+    # mid-upload has usually already loaded the project, opened its output and
+    # rendered, and a walk that exits here throws away the only evidence it
+    # went to all this trouble to collect — the console, the pad and the run
+    # report, none of which exist until the machine reaches its deadline. The
+    # exit code still says FAILED.
+    if [[ "$CHIP" != "esp32s3" ]]; then
+        exit 1
+    fi
+    echo "       continuing: the frames the pad already carried are printed below" >&2
+    upload_failed=1
+else
+    echo "upload: OK"
 fi
-echo "upload: OK"
 
 # ------------------------------------------------- the cable, released again
 #
@@ -487,9 +541,10 @@ if [[ "$CHIP" == "esp32s3" ]]; then
     cable close
     cable detach
     cable state
+    released="$CABLE_REPLY"
     cable_want "the released cable" "host=absent" "draining=false"
     exec 4<&- || true
-    if [[ $cable_failed -eq 0 ]]; then
+    if [[ $cable_failed -eq 0 && -n "$released" ]]; then
         echo "PASS: the port stayed open after the client left, and the cable is out."
     fi
 fi
@@ -507,6 +562,49 @@ if [[ $emu_status -ne 0 ]]; then
     exit 1
 fi
 
+echo
+# Everything a reader needs to know about what the MACHINE did, before the
+# frame comparison that is what the walk is for. Here rather than at the end
+# because the checks below exit on the first missing reading, and a run that
+# rendered nothing is exactly the run whose report is worth having.
+fail=$(( cable_failed + upload_failed ))
+echo "===== THE RUN ====="
+case "$CHIP" in
+esp32c6)
+    grep -m 8 -a "^emu: " "$OUT/emu.stderr" || true
+    ;;
+esp32s3)
+    # This machine prints its report on STDOUT, not stderr, and the `run:`
+    # line is the one a gate reads.
+    grep -m 8 -aE "^(usb-sj|control|flash|uart0|run):" "$OUT/emu.stdout" || true
+    # `unmapped=0` is the walk's third gate, beside the bytes: a run that
+    # reached an address nothing claims rendered its frame past a hole in the
+    # map, and the frame being right anyway is luck rather than evidence.
+    # Under `--strict-bus` the machine would have stopped first — this is what
+    # says so in the transcript the PR body carries.
+    # What the link ate, said out loud. Reported, NEVER gated: the open defect
+    # docs/defects/2026-09-13-the-s3-link-drops-the-io-tasks-next-chunk-on-a-
+    # stale-serial-in-empty.md drops one 64-byte packet whenever a framed
+    # write follows an esp-println packet inside the IN drain latency, and
+    # which side is wrong — this model or esp-hal's future — is not known
+    # until P09 reads silicon. Printing the bytes is what keeps a future run's
+    # "the firmware said nothing" from being confused with "the firmware said
+    # it and the link ate it".
+    if [[ -s "$tried" ]]; then
+        echo "tried: $(wc -c <"$tried" | tr -d ' ') byte(s) the guest handed over that no host took"
+        echo "  the open link defect (DD103), reported and not gated. The first 120 bytes:"
+        head -c 120 "$tried" | tr -d '\000' | sed 's/^/    /'
+        echo
+    fi
+    if grep -qa 'unmapped=0 ' "$OUT/emu.stdout"; then
+        echo "PASS: unmapped=0 — every access the guest made landed on a block that claims it."
+    else
+        echo "FAIL: the run summary does not say unmapped=0."
+        grep -m 1 -a '^run: ' "$OUT/emu.stdout" || true
+        fail=1
+    fi
+    ;;
+esac
 echo
 echo "===== DEVICE ====="
 # `does not produce` is in the filter on purpose, exactly as in the hardware
@@ -630,7 +728,6 @@ if [[ "$distinct_lit" != "1" ]]; then
     exit 1
 fi
 
-fail="$cable_failed"
 if [[ "$device_hex" != "$pad_hex" ]]; then
     echo "FAIL: the firmware's dump and the pad disagree."
     echo "  [OUT] dump: $device_hex"
@@ -686,30 +783,6 @@ if [[ "$device_hex" == "$pad_hex" && "$device_hex" == "$oracle_hex" ]]; then
     fi
 fi
 
-echo
-echo "===== THE RUN ====="
-case "$CHIP" in
-esp32c6)
-    grep -m 8 -a "^emu: " "$OUT/emu.stderr" || true
-    ;;
-esp32s3)
-    # This machine prints its report on STDOUT, not stderr, and the `run:`
-    # line is the one a gate reads.
-    grep -m 8 -aE "^(usb-sj|control|flash|uart0|run):" "$OUT/emu.stdout" || true
-    # `unmapped=0` is the walk's third gate, beside the bytes: a run that
-    # reached an address nothing claims rendered its frame past a hole in the
-    # map, and the frame being right anyway is luck rather than evidence.
-    # Under `--strict-bus` the machine would have stopped first — this is what
-    # says so in the transcript the PR body carries.
-    if grep -qa 'unmapped=0 ' "$OUT/emu.stdout"; then
-        echo "PASS: unmapped=0 — every access the guest made landed on a block that claims it."
-    else
-        echo "FAIL: the run summary does not say unmapped=0."
-        grep -m 1 -a '^run: ' "$OUT/emu.stdout" || true
-        fail=1
-    fi
-    ;;
-esac
 echo "artefacts: $OUT"
 if [[ $keep -eq 0 && $fail -eq 0 ]]; then
     rm -f "$OUT/emu.stdout" "$OUT/cli.stdout" "$OUT/cli.stderr"
