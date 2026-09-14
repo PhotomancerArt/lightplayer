@@ -163,6 +163,85 @@ written any register. An escaped Load-class instruction sets the pending
 flag so the next store or System-class instruction polls; a poll that finds
 nothing is not observable.
 
+## The numbers (P06)
+
+Every number is the classic at `t1`, both cores at `--core-quantum 256`,
+under wasmtime on this desk; `--jit` against `--interpreter` on the same
+binary (`scripts/emu/v3-oracle.sh`), the previous head's binary against this
+one both `--interpreter`. **Every column `same`** on every cell:
+
+| image | window | jit vs interp | main vs branch |
+|---|---|---|---|
+| `boot-idle` | 100 ms | same ×5 | same ×5 |
+| `boot-idle` | 20 ms (trace, 427,900 lines) | same ×5 | — |
+| `shader-compile-stress` | 2 s (to the sentinel) | same ×5 | same ×5 |
+| `render-loop` | 20 ms (trace, 601,344 lines) | same ×5 | — |
+| `render-loop` | 2200 ms (256 frames) | same ×5 | same ×5 |
+
+The 20 ms cells refuse the core under `--trace` (P04's rule) and are two
+interpreted legs. The three-engine differential: the crate's 266 round-trip
+cases and a 200-entry `render-loop` recording (`LP_EMU_XT_JIT_RECORD`, taken
+300 M cycles in) match the wasmtime run in node v25.2.1 / V8 and bun 1.1.18
+/ JavaScriptCore, every field.
+
+### `render-loop` 2200 ms, core 0 — what the module did
+
+| | |
+|---|---|
+| retired by the core | 434,061,843 |
+| **retired natively** | **297,063,861 (68.44 %)** — 99.85 % of what entered translated code |
+| inside the walk's blocks (P05) | 96.08 % |
+| entries | 5,810,220 — 51.2 instructions per entry |
+| escaped to the interpreter from inside a stay | 452,813 (0.10 % of the core): `rsil` 212,212, FP load/store 130,297, FP 64,796, `bt`/`bf` 23,347, `rotw` 19,801, `rfi` 2,103, `waiti` 257 |
+| entry refusals | `PS.EXCM`/`!WOE` 83,353; none for pending, watch, impure, timer, stale, IBREAK, loop |
+| exits by reason | budget 2,757,214 · indirect-miss 1,702,522 · undecodable 697,734 · **window 361,541** · edge-out 287,341 · escape-target 2,103 · after-store 1,508 · slice-ended 257 |
+| no-progress exits | 961,995 (a refused block's pc handed to the interpreter for one instruction) |
+| invalidations | 11,739 answered by re-reading the bytes, 0 changed |
+
+The interpreted remainder is now two things: the 3.92 % outside the walk
+(P05's page table: the window handlers, `jx` targets, `xthal_get_ccount`),
+and the 27.6 % *inside* the walk that the stays hand back — the budget at the
+slice edge, the indirect misses (a `retw`/`jx`/`callx*` target the table does
+not hold), the undecodables the walk ends blocks before, and the window
+refusals. Each of those is a name on the exits row, not a mystery.
+
+### The window (XD8, the numbers XD5 asked for)
+
+| | |
+|---|---|
+| `WINDOW` refusals | **361,541** — 235,228 at a block's precondition, 126,313 at a `retw`, 0 at an `entry`'s own check — against the interpreter's 458,373 exceptions (229,319 overflow, 229,054 underflow); the rest fire inside interpreted stretches |
+| `entry` rotates emitted natively | **2,665,077 of 5,138,231** (51.9 %) |
+| `retw` rotates emitted natively | **3,816,394 of 5,137,969** (74.3 %) |
+| writeback per exit, by groups written | 0: 1,383,884 · 1: 2,333,268 · 2: 1,436,217 · 3: 348,654 · 4: 308,197 |
+| **mean words written back per exit** | **5.15 of 64** (8.0 % of a full writeback; 32 % of the window) |
+
+The dirty mask is the design's justification, measured: a full 64-word
+writeback per exit would write 12× what the mask writes. The `entry`
+one-instruction block (1.18 % of retires, P05) is still its own block: with
+the rotate at ~90 wasm instructions in the `CALLINC = 2` case, folding it
+into its successor saves one dispatch per call and is P08's to price with a
+real engine.
+
+### Size and boot cost (a product number, JD20)
+
+| | `render-loop` | `shader-compile-stress` |
+|---|---|---|
+| blocks · instructions | 140,424 · 599,278 | 63,342 · 256,787 |
+| emitted natively · escaped (static) | 590,572 · 9,036 (**1.51 %**) | 250,909 · 6,164 (2.40 %) |
+| static escapes by name | FP 5,297 · FP ld/st 2,548 · `bt`/`bf` 721 · `rsil` 88 · `rotw` 19 · `rf*` 17 · `rfi` 11 · `waiti` 4 · `movsp` 1 | FP 3,902 · FP ld/st 1,467 · `bt`/`bf` 401 · `rsil` 58 · … |
+| module | **89,970,707 B — 150.0 B per instruction** | 39,728,527 B — 154.5 B |
+| largest body (64 blocks a function, 2,195 functions) | 398,288 B | 351,825 B |
+| discover · emit · **compile** (cranelift, per core) | 130 ms · 730 ms · **149.0 s** | 56 ms · 304 ms · 62.4 s |
+
+Against P05's escape-everything module (61 MB, 59.6 s): the real bodies are
+1.5× the bytes and 2.5× the compile. The native compile is not the product
+path (JD24); the browser engines are P08's, and `fn_blocks` is untouched.
+
+`boot-idle` is the one caveat: its module went **stale** after 1,487,935
+native instructions — one block's bytes changed under it (the 1-of-2
+invalidations that found them changed) — and the rest of that image ran
+interpreted, exactly as P05's rule says. Incremental retranslation is P07's.
+
 ## Discovery: the nine rules, and why each one is there (M7 P05, XD9)
 
 The RV32 walk's five rules (`lp-emu-jit/README.md` §Discovery) transfer as
