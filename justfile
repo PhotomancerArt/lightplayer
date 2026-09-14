@@ -3351,6 +3351,14 @@ bench-emu-esp32v3 *args:
 bench-emu-c6-pgo:
     scripts/emu/pgo-c6.sh
 
+# PGO recipe for the classic ESP32 (v3) machine binary — the C6's twin
+# (M7 P03). Opt-in — never a default build or CI step, and the ladder
+# target is met without it. Needs `rustup component add llvm-tools-preview`;
+# the script checks first. See `scripts/emu/pgo-esp32v3.sh` and
+# `lp-emu/README.md`'s Speed section.
+bench-emu-esp32v3-pgo:
+    scripts/emu/pgo-esp32v3.sh
+
 # The C6 machine's browser/phone speed probe: builds the wasip1 module,
 # stages it with the two pinned reference images plus a page and worker
 # under a JS WASI shim, and serves it on the LAN (port from

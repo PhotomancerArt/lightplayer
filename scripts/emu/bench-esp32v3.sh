@@ -4,10 +4,18 @@
 #   just bench-emu-esp32v3                             # build, run, table, promote to prev/
 #   scripts/emu/bench-esp32v3.sh --json out.json       # same, plus machine-readable
 #   scripts/emu/bench-esp32v3.sh --bin <path> --no-promote --no-build
+#   scripts/emu/bench-esp32v3.sh --extra-flags "--no-block-cache"  # rung 0, re-takeable on any binary
 #
 # `scripts/emu/bench-c6.sh`'s twin, and everything in that script's header
 # applies here — read it too. What is different about this chip is written
 # down below.
+#
+# **`--extra-flags "<flags>"`** is appended, unquoted (a flag STRING, not a
+# single argument — the caller composed it), to every invocation of the
+# binary under test. It exists so the ladder's rung 0 (`--no-block-cache`,
+# M7 P01) can be re-taken against *any* binary this script is pointed at —
+# the PGO binary included — without a second script. It is not `v3-oracle.sh`'s
+# pair mode: this is one binary, one flag string, on every row.
 #
 # Runs three pinned reference images (`scripts/emu/build-reference-image.sh
 # --chip esp32`, building them if they are missing; override with
@@ -59,6 +67,14 @@
 #   uart          `cmp` of this run's UART0 bytes against `prev/`, which is
 #                 the identity oracle — speed work must not change one byte
 #                 of any transcript.
+#   blocks        the cache's mean realised block length, core 0, read off the
+#                 `blocks: core0 … mean=…` report line the run leaves on
+#                 stderr (M7 P01's counter; `v3-oracle.sh` masks the same
+#                 line by its `^blocks: ` prefix). `off` when the row ran
+#                 under `--no-block-cache` (its own line has no `mean=`);
+#                 `n/a` when the binary predates the counter. A diagnostic,
+#                 never an identity column — nothing here is compared byte
+#                 for byte the way `uart` is.
 #
 # A meaningful before/after is a SAME-WINDOW A/B: run the saved stock binary
 # with `--bin ... --no-promote --no-build`, then the new one, back to back,
@@ -88,6 +104,7 @@ json_out=""
 do_build=1
 do_promote=1
 runs=2
+extra_flags=""
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -96,7 +113,8 @@ while [[ $# -gt 0 ]]; do
         --no-build) do_build=0; shift ;;
         --no-promote) do_promote=0; shift ;;
         --runs) runs="${2:?--runs needs a count}"; shift 2 ;;
-        -h|--help) sed -n '2,78p' "$0"; exit 0 ;;
+        --extra-flags) extra_flags="${2?--extra-flags needs a flag string}"; shift 2 ;;
+        -h|--help) sed -n '2,94p' "$0"; exit 0 ;;
         *) echo "bench-esp32v3: unknown option $1" >&2; exit 2 ;;
     esac
 done
@@ -177,19 +195,23 @@ for spec in "${images[@]}"; do
     best_load=""
     summary=""
     emulated=""
+    blocks_line=""
 
     for _ in $(seq "$runs"); do
         out="$(mktemp)"
         load="$(loadavg)"
         set +e
+        # $extra_flags is unquoted on purpose: a flag STRING the caller
+        # composed (e.g. "--no-block-cache"), not a single argument.
+        # shellcheck disable=SC2086
         if [[ -n "$exit_on" ]]; then
             /usr/bin/time -p "$bin" --elf "$elf" --timeout "$timeout" \
                 --wall-timeout 900 --exit-on "$exit_on" \
-                --uart0 "file:$uart" --time-grade "$grade" >"$out" 2>&1
+                --uart0 "file:$uart" --time-grade "$grade" $extra_flags >"$out" 2>&1
         else
             /usr/bin/time -p "$bin" --elf "$elf" --timeout "$timeout" \
                 --wall-timeout 900 \
-                --uart0 "file:$uart" --time-grade "$grade" >"$out" 2>&1
+                --uart0 "file:$uart" --time-grade "$grade" $extra_flags >"$out" 2>&1
         fi
         rc=$?
         set -e
@@ -207,6 +229,10 @@ for spec in "${images[@]}"; do
         [[ -n "$summary" ]] || { echo "bench-esp32v3: no 'run: cycles=' line for $slug" >&2; tail -40 "$out" >&2; exit 1; }
         emulated="$(sed -nE 's/.*\(([0-9]+) us emulated\).*/\1/p' "$out" | head -1)"
         [[ -n "$emulated" ]] || { echo "bench-esp32v3: no 'us emulated' figure for $slug" >&2; tail -40 "$out" >&2; exit 1; }
+        # `blocks: core0 …` — M7 P01's counter, core 0 only (a diagnostic, not
+        # an identity column). Absent under `--no-block-cache` other than the
+        # "no cache" line, and absent entirely on a binary that predates it.
+        blocks_line="$(grep -m1 '^blocks: core0 ' "$out" || true)"
         user="$(awk '/^user /{print $2}' "$out")"
         real="$(awk '/^real /{print $2}' "$out")"
         rm -f "$out"
@@ -233,20 +259,29 @@ for spec in "${images[@]}"; do
         uart_cmp="no prev"
     fi
 
-    rows+=("$(printf '%-22s %-5s %8s %8s %9s %9s %9s %9s %9s %7s %8s' \
+    if [[ -z "$blocks_line" ]]; then
+        blocks="n/a"
+    elif [[ "$blocks_line" == *"no cache"* ]]; then
+        blocks="off"
+    else
+        blocks="$(sed -nE 's/.*mean=([0-9.]+).*/\1/p' <<<"$blocks_line")"
+        [[ -n "$blocks" ]] || blocks="n/a"
+    fi
+
+    rows+=("$(printf '%-22s %-5s %8s %8s %9s %9s %9s %9s %9s %7s %8s %7s' \
         "$slug" "$grade" "$best_user" "$best_real" "${instr_s}M" \
-        "${c0_s}M" "${c1_s}M" "${rt_user}x" "${rt_wall}x" "$best_load" "$uart_cmp")")
+        "${c0_s}M" "${c1_s}M" "${rt_user}x" "${rt_wall}x" "$best_load" "$uart_cmp" "$blocks")")
     lines+=("$slug $grade: $summary ($emulated us emulated)")
-    json_rows+=("$(printf '{"image":"%s","grade":"%s","user_s":%s,"wall_s":%s,"instr_per_s":%s,"cycles":%s,"emulated_us":%s,"instructions":%s,"instructions_core0":%s,"instructions_core1":%s,"real_time_user":%s,"real_time_wall":%s,"loadavg_1m":%s,"uart_cmp":"%s"}' \
+    json_rows+=("$(printf '{"image":"%s","grade":"%s","user_s":%s,"wall_s":%s,"instr_per_s":%s,"cycles":%s,"emulated_us":%s,"instructions":%s,"instructions_core0":%s,"instructions_core1":%s,"real_time_user":%s,"real_time_wall":%s,"loadavg_1m":%s,"uart_cmp":"%s","blocks_mean":"%s"}' \
         "$slug" "$grade" "$best_user" "$best_real" "$instr_raw" \
-        "$cycles" "$emulated" "$instr" "$core0" "$core1" "$rt_user" "$rt_wall" "$best_load" "$uart_cmp")")
+        "$cycles" "$emulated" "$instr" "$core0" "$core1" "$rt_user" "$rt_wall" "$best_load" "$uart_cmp" "$blocks")")
 done
 
 echo
-printf '%-22s %-5s %8s %8s %9s %9s %9s %9s %9s %7s %8s\n' \
-    image grade "user s" "wall s" "instr/s" "core0/s" "core1/s" "rt(user)" "rt(wall)" load uart
-printf '%-22s %-5s %8s %8s %9s %9s %9s %9s %9s %7s %8s\n' \
-    ---------------------- ----- -------- -------- --------- --------- --------- --------- --------- ------- --------
+printf '%-22s %-5s %8s %8s %9s %9s %9s %9s %9s %7s %8s %7s\n' \
+    image grade "user s" "wall s" "instr/s" "core0/s" "core1/s" "rt(user)" "rt(wall)" load uart blocks
+printf '%-22s %-5s %8s %8s %9s %9s %9s %9s %9s %7s %8s %7s\n' \
+    ---------------------- ----- -------- -------- --------- --------- --------- --------- --------- ------- -------- -------
 for row in "${rows[@]}"; do echo "$row"; done
 echo
 for line in "${lines[@]}"; do echo "$line"; done

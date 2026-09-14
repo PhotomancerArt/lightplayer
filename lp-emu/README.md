@@ -477,6 +477,13 @@ classic is roughly **5.8× further from real time** and its interpreter
 retires **3.4× fewer** instructions a second. Two windows, not one: read that
 as an order, not a same-window pair.
 
+> **The classic ledger.**
+> [`docs/emulator-perf-ledger-classic.md`](../docs/emulator-perf-ledger-classic.md)
+> is this chip's own living record — the C6 ledger's shape, this chip's own
+> rungs (the block cache, the window hoist, PGO), the ladder table and the
+> menu of what is left. Read it before proposing a performance change on this
+> machine.
+
 **Where the seconds go** is a different pair of instruments, both off by
 default and neither in a gate binary — and both **slower than the probe by
 construction**, so their seconds mean nothing and only their shares do:
@@ -546,6 +553,39 @@ the next fetch. Two consequences: the cache stays **on** under `--boot-mode
 rom-up`, where the C6's is off (M5 MD13) — the ROM's and the bootloader's
 copies are guest stores — and the record is **per hart**, because the classic
 has two harts on one bus.
+
+**The second rung** (M7 P02): the RM's window-overflow check, hoisted out of
+the per-instruction path to once per block. It ran before **every**
+instruction while `PS.WOE && !PS.EXCM` — 6.6 % of host time for an event
+that fires once every 1,156 instructions — and now runs once at block entry
+when the block's own maximum register group proves the check cannot fire
+inside it. `render-loop` at t1, both cores, P01's binary against P02's,
+interleaved, best of three: **9.85 → 8.37 user s = 1.18×**, rt(user)
+0.216× → 0.254×, 99.80 % of core 0's blocks and 99.91 % of core 1's take the
+hoisted path. Every `v3-oracle.sh` column `same`, both flag and pair mode.
+
+**PGO** (M7 P03) is `just bench-emu-esp32v3-pgo` / `scripts/emu/pgo-esp32v3.sh`
+— the C6's recipe, twinned: an instrumented build, one training run of each
+of the three pinned images, a merge, an optimised rebuild, then the probe on
+the result, each phase in its own `target/emu-pgo-v3/*` dir. Opt-in, same as
+the C6's: never a default build or a CI step. `render-loop` at t1, both
+cores, P02's binary against a PGO build of it, interleaved, best of three,
+every leg under loadavg ~8: **8.23 → 5.65 user s = 1.457×**, rt(user)
+0.259× → 0.377×. Every `v3-oracle.sh` pair-mode column `same` on all three
+images, including the masked `blocks:` counters themselves, which is the
+whole claim: PGO changes codegen and nothing the guest, the cache or the
+hoist can observe. `docs/emulator-perf-ledger-classic.md` §3 has the full
+table, the contaminated-window rounds this phase set aside, and why.
+
+**Three rungs, one ladder**: 1.71× (block cache) × 1.18× (window hoist) ×
+1.457× (PGO) ≈ **2.94×** over the pre-cache interpreter on `render-loop` —
+arithmetic across three windows, not an end-to-end reading, but it agrees
+with a same-tree, same-session check (`--no-block-cache` on the P02 binary,
+16.70 user s, against the PGO binary's 5.65) that reads **≈2.96×** directly.
+Against the 1.7× ceiling `m7/notes.md` §2.7 computed from sampled host-time
+shares, the landed rungs already read higher — the sampled shares understated
+the prize, or the cache buys something beyond decode and fetch (DD105,
+unresolved, recorded rather than chased).
 
 The rung not yet climbed on this chip (poll-loop skip) is **out** by
 measurement rather than pending: MMIO is 1.7 % of host time here, so a perfect
