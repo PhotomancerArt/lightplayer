@@ -187,11 +187,19 @@ OPTIONS:
     --interpreter           run no translated core. The default natively, and
                             the off-switch the identity oracle compares --jit
                             against (scripts/emu/v3-oracle.sh)
-    --jit-seeds <file>      the block starts --jit translates from, one
+    --jit-seeds <file>      OVERRIDE the sweep's seeds with this list, one
                             address per line (0x-prefixed or decimal; blank
-                            lines and #-comments ignored). Required by --jit
-                            until the discovery sweep lands: a pc no seed
-                            reaches is a pc the interpreter runs
+                            lines and #-comments ignored). Without it --jit
+                            seeds from the image's own symbols and the mask
+                            ROM's (M7 P05); with it the symbol bounds stay and
+                            only the seeds change — a door for walking one
+                            function under the oracle
+    LP_EMU_XT_BLOCKPROF=<path>  (environment) take the per-pc retirement
+                            census on both cores and write it to <path> at the
+                            end of the run, with the sweep's coverage and FP
+                            tables in its header and on stderr. A diagnostic:
+                            off unless set, and a run that takes it is not a
+                            run whose wall clock means anything
     --jit-blocks <n>        the most blocks one translation event installs
                             [200000]
     --jit-fn-blocks <n>     how many blocks one wasm function holds [64].
@@ -319,13 +327,9 @@ fn run() -> Result<ExitCode, String> {
         Some(path) => read_jit_seeds(path)?,
         None => Vec::new(),
     };
-    if args.jit && jit_seeds.is_empty() {
-        return Err(
-            "`--jit` needs `--jit-seeds <file>`: the discovery sweep is a later phase, so the \
-             block starts are supplied"
-                .into(),
-        );
-    }
+    // Read once, here, and never again: the census is a diagnostic and its
+    // switch is the environment (the plan's rule for every diagnostic).
+    let pc_census = std::env::var_os("LP_EMU_XT_BLOCKPROF").map(PathBuf::from);
 
     let mut builder = Esp32V3Builder::new()
         .boot_mode(boot_mode)
@@ -345,6 +349,7 @@ fn run() -> Result<ExitCode, String> {
             args.strip_timing.unwrap_or(StripConfig::default().timing),
         )
         .jit_seeds(jit_seeds)
+        .pc_census(pc_census)
         .jit_blocks(args.jit_blocks.unwrap_or(JIT_BLOCKS_DEFAULT))
         .jit_fn_blocks(args.jit_fn_blocks.unwrap_or(JIT_FN_BLOCKS_DEFAULT))
         .seed(args.seed)
@@ -438,6 +443,13 @@ fn run() -> Result<ExitCode, String> {
     print_block_report(&machine);
     if args.jit_report {
         print_jit_report(&machine);
+    }
+    // The census (LP_EMU_XT_BLOCKPROF): the coverage and FP tables on stderr,
+    // the per-pc counts in the file. Host numbers, never a transcript.
+    if let Some(lines) = machine.pc_census_report() {
+        for line in lines {
+            eprintln!("census: {line}");
+        }
     }
     print_refill_lag(&machine);
     // The pads, last: a frame still in flight when the deadline hit is

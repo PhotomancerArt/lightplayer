@@ -31,13 +31,17 @@
 //! the slice back to the interpreter, which is always correct and only ever
 //! slow. A translated core that cannot be exact about something does not try.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
+use std::fmt::Write as _;
 
-use lp_emu_core::Bus;
+use lp_emu_core::{Bus, InstClass};
 use lp_emu_esp_common::bus::{PERMISSION_PAGE_LEN, SocBus};
 use lp_xt_emu::mach::translated::{RunOutcome, TranslatedCore};
-use lp_xt_emu::mach::{SliceEnd, XtHart};
+use lp_xt_emu::mach::{PcCensus, SliceEnd, XtHart};
 use lp_xt_jit::blocks::BlockSet;
+use lp_xt_jit::decode::lp_xt_inst::{self, Inst};
+use lp_xt_jit::discover::{Bounds, DiscoverStats, Discovered, Extent, discover_from, word_seeds};
+use lp_xt_jit::lp_emu_jit::dispatch::{target_table_bytes, write_target_tables};
 use lp_xt_jit::lp_emu_jit::host::{
     self, EXCHANGE_LEN, ExchangeLayout, HostOps, MmioLoad, MmioStore, PERM_ENTRIES, PERM_NONE,
     PERM_SHIFT, Polled, STEP_CONTINUE, STEP_SLICE_ENDED, StepOne,
@@ -217,31 +221,38 @@ const POLL_GAP: &str = "this phase emits no inline store, so nothing fuses a pol
 struct Areas {
     perm_at: u32,
     exchange_at: u32,
+    /// The indirect-target page map and slot arrays (M7 P05).
+    indirect_at: u32,
     pages: u64,
     gap_len: u32,
     gap_left: u32,
 }
 
-/// Place the permission table and the exchange area in the arena's largest
-/// gap, and say how much of the arena a wasm memory can cover.
+/// Place the permission table, the exchange areas and the indirect-target
+/// tables in the arena's largest gap, and say how much of the arena a wasm
+/// memory can cover.
 ///
-/// No indirect-target tables: this phase emits no indirect resolution, so the
-/// page map and its slot arrays are not built and not paid for. At Xtensa's
-/// byte granularity they are **twice** the RV32 size per covered page
-/// (`SLOT_SHIFT = 0`), which is a number P05 will have to place rather than
-/// one this phase should reserve blind.
+/// The indirect tables are sized from the walk's covered pages
+/// (`indirect_len`, [`target_table_bytes`]). At Xtensa's byte granularity a
+/// covered 16 KiB page costs a 64 KiB slot array — **twice** the RV32 size —
+/// and the classic's text covers on the order of a hundred pages, so the
+/// tables are megabytes against a gap of hundreds; the boot line prints the
+/// number. Nothing this phase emits reads them (every indirect jump still
+/// leaves), but the page map is written whole so that P06's first `jx`
+/// resolution finds a table and not a half-built one.
 ///
 /// The exchange area is per **instance**, and the two harts get two of them
 /// side by side in the gap — a stay belongs to one hart and its counters are
 /// that hart's.
-fn areas(bus: &SocBus, instances: u32) -> Result<Areas, String> {
+fn areas(bus: &SocBus, instances: u32, indirect_len: u64) -> Result<Areas, String> {
     let arena_len = bus.guest_arena().len();
     let pages = (arena_len / 65536) as u64;
     if pages == 0 {
         return Err("the guest arena is smaller than one wasm page".into());
     }
     let exchange_len = lp_xt_jit::LAYOUT.len();
-    let need = u64::from(PERM_ENTRIES) + u64::from(exchange_len) * u64::from(instances);
+    let exchanges = u64::from(exchange_len) * u64::from(instances);
+    let need = u64::from(PERM_ENTRIES) + exchanges + indirect_len;
     let (gap_base, gap_len) = bus
         .largest_arena_gap()
         .ok_or_else(|| "the guest arena has no gap for the translator's tables".to_string())?;
@@ -252,12 +263,14 @@ fn areas(bus: &SocBus, instances: u32) -> Result<Areas, String> {
     }
     let perm_at = gap_base - bus.guest_arena_base();
     let exchange_at = perm_at + PERM_ENTRIES;
-    if u64::from(exchange_at) + u64::from(exchange_len) * u64::from(instances) > pages * 65536 {
+    let indirect_at = (u64::from(exchange_at) + exchanges) as u32;
+    if u64::from(perm_at) + need > pages * 65536 {
         return Err("the translator's tables fall outside the wasm memory".into());
     }
     Ok(Areas {
         perm_at,
         exchange_at,
+        indirect_at,
         pages,
         gap_len,
         gap_left: gap_len - (need as u32),
@@ -313,6 +326,13 @@ pub struct BuildReport {
     pub instantiate_us: u128,
     pub gap_len: u32,
     pub gap_left: u32,
+    /// What the whole-image walk found before any host budget bound it.
+    pub whole_blocks: usize,
+    /// The sweep's own account of where it stopped short (P05).
+    pub stats: DiscoverStats,
+    /// The indirect-target tables' bytes, and the 16 KiB pages they cover.
+    pub indirect_bytes: u32,
+    pub indirect_pages: usize,
 }
 
 impl BuildReport {
@@ -329,7 +349,7 @@ impl BuildReport {
             "core{core} {event}: {} block(s) from {} seed(s), {} instruction(s) ({} escaped, 0 \
              emitted natively); {} function(s) at {} blocks each, largest body {} B, module {} B; \
              discover {:.1} ms, emit {:.1} ms, compile {:.1} ms, instantiate {:.1} ms; arena gap \
-             {} B, {} B left",
+             {} B, {} B left; indirect tables {} B over {} page(s); sweep: {}",
             self.blocks,
             self.seeds,
             self.insts,
@@ -344,8 +364,32 @@ impl BuildReport {
             self.instantiate_us as f64 / 1000.0,
             self.gap_len,
             self.gap_left,
+            self.indirect_bytes,
+            self.indirect_pages,
+            stats_line(&self.stats, self.whole_blocks),
         )
     }
+}
+
+/// The sweep's counters, in one line, the same way everywhere they print.
+fn stats_line(s: &DiscoverStats, whole_blocks: usize) -> String {
+    format!(
+        "{} start(s) → {} block(s) (whole image {}), undecodable {}, refused {}, extent-ends {}, \
+         data-ends {}, literals {} ({} start(s) dropped), loop-ends {}, empty {}, capped {}{}",
+        s.starts,
+        s.blocks,
+        whole_blocks,
+        s.undecodable,
+        s.refused,
+        s.extent_ends,
+        s.data_ends,
+        s.literals,
+        s.literal_starts_dropped,
+        s.loop_ends,
+        s.empty_starts,
+        s.capped,
+        if s.truncated { ", TRUNCATED" } else { "" },
+    )
 }
 
 /// What a run of a translated core did.
@@ -443,6 +487,13 @@ impl XtJitCore {
     /// The pcs the hart's entry table should be built from.
     #[must_use]
     pub fn entries(&self) -> Vec<u32> {
+        self.index.keys().copied().collect()
+    }
+
+    /// The block starts this module holds — the stop set for an incremental
+    /// walk over code published after it was installed (XD10, P07).
+    #[must_use]
+    pub fn starts(&self) -> BTreeSet<u32> {
         self.index.keys().copied().collect()
     }
 
@@ -649,55 +700,176 @@ impl TranslatedCore<SocBus> for XtJitCore {
 
 // ---- installing ------------------------------------------------------------
 
-/// Translate the blocks reachable from `seeds` and install a core on `hart`.
+/// What one translation event walks from: the seeds and the bounds the
+/// machine derives from its ELFs and its memory map (P05, rules 1 and 3).
+#[derive(Clone, Copy, Debug)]
+pub struct Walk<'a> {
+    /// In the order the sweep should take them — biggest symbol first.
+    pub seeds: &'a [u32],
+    /// Every sized symbol in an executable region, sorted by start.
+    pub extents: &'a [Extent],
+    /// The executable regions, `[lo, hi)`, sorted.
+    pub spans: &'a [(u32, u32)],
+}
+
+impl Walk<'_> {
+    fn bounds(&self) -> Bounds<'_> {
+        Bounds {
+            extents: self.extents,
+            spans: self.spans,
+        }
+    }
+}
+
+/// One guest byte, straight out of the arena — **pure**: this runs before the
+/// guest reaches any of these addresses, so a fetch that charged a cycle or
+/// fired a watchpoint would be a change the guest can see.
+#[inline]
+fn arena_byte(arena: &[u8], base: u32, pc: u32) -> Option<u8> {
+    pc.checked_sub(base)
+        .and_then(|o| arena.get(o as usize))
+        .copied()
+}
+
+/// Walk the image from `walk`, stopping wherever `known` already holds a
+/// block start, and say how long it took in microseconds.
+#[must_use]
+pub fn walk_image(
+    bus: &SocBus,
+    walk: &Walk,
+    budget: usize,
+    known: &BTreeSet<u32>,
+) -> (Discovered, u128) {
+    let base = bus.guest_arena_base();
+    let arena = bus.guest_arena();
+    let started = std::time::Instant::now();
+    let found = discover_from(walk.seeds, walk.bounds(), budget, known, &mut |pc| {
+        arena_byte(arena, base, pc)
+    });
+    (found, started.elapsed().as_micros())
+}
+
+/// The third path's result (rule 8).
+#[derive(Clone, Debug, Default)]
+pub struct WrittenWalk {
+    /// The write spans, normalised: sorted, merged, `[lo, hi)`.
+    pub spans: Vec<(u32, u32)>,
+    /// Word-aligned addresses in them that decode.
+    pub seeds: usize,
+    pub found: Discovered,
+    pub us: u128,
+}
+
+/// Sort and merge write spans so they can bound a walk.
+fn normalise_spans(spans: &[(u32, u32)]) -> Vec<(u32, u32)> {
+    let mut sorted: Vec<(u32, u32)> = spans.iter().copied().filter(|&(lo, hi)| hi > lo).collect();
+    sorted.sort_unstable();
+    let mut out: Vec<(u32, u32)> = Vec::with_capacity(sorted.len());
+    for (lo, hi) in sorted {
+        match out.last_mut() {
+            Some(last) if lo <= last.1 => last.1 = last.1.max(hi),
+            _ => out.push((lo, hi)),
+        }
+    }
+    out
+}
+
+/// Walk the guest's own code (rule 8): every word-aligned address in the
+/// spans it stored into executable memory that decodes is a seed; the walk
+/// is bounded by the spans and stops at `known`.
 ///
-/// `seeds` is a **supplied** list of block starts — `--jit-seeds` — because
-/// the real sweep is P05's. Nothing it produces can be wrong, only short: a pc
-/// no seed reaches is a pc the interpreter runs.
+/// `written` are **write** addresses; `exec_of` maps each to where the code
+/// executes — identity on the classic, the alias offset on the S3 (P09).
+#[must_use]
+pub fn walk_written(
+    bus: &SocBus,
+    written: &[(u32, u32)],
+    known: &BTreeSet<u32>,
+    exec_of: &dyn Fn(u32) -> u32,
+) -> WrittenWalk {
+    let spans = normalise_spans(written);
+    if spans.is_empty() {
+        return WrittenWalk::default();
+    }
+    let base = bus.guest_arena_base();
+    let arena = bus.guest_arena();
+    let started = std::time::Instant::now();
+    let mut fetch = |pc: u32| arena_byte(arena, base, pc);
+    let seeds = word_seeds(&spans, exec_of, &mut fetch);
+    let exec_spans: Vec<(u32, u32)> = spans
+        .iter()
+        .map(|&(lo, hi)| (exec_of(lo), exec_of(hi)))
+        .collect();
+    let bounds = Bounds {
+        extents: &[],
+        spans: &exec_spans,
+    };
+    let found = discover_from(&seeds, bounds, usize::MAX, known, &mut fetch);
+    WrittenWalk {
+        spans,
+        seeds: seeds.len(),
+        found,
+        us: started.elapsed().as_micros(),
+    }
+}
+
+/// Discover the image from `walk`, translate it, and install a core on
+/// `hart`.
+///
+/// The walk is the real sweep (P05): symbol-seeded, extent-bounded, literals
+/// struck out, `LEND` a terminator, refused instructions stepped over. The
+/// whole image is walked **unbounded** first and reported, whatever budget
+/// the caller named — `max_blocks` is a bound on what a host will compile,
+/// not on what the program can run, and hiding the walk behind the budget
+/// would hide the number the module split is sized against.
 ///
 /// # Errors
 ///
-/// A block set that does not fit the arena's shape, a module over the
-/// per-function byte budget (use fewer `--jit-fn-blocks`), or a module the
-/// engine will not compile.
+/// A walk that reached nothing, a block set that does not fit the arena's
+/// shape, a module over the per-function byte budget (use fewer
+/// `--jit-fn-blocks`), or a module the engine will not compile.
 pub fn install(
     hart: &mut XtHart<SocBus>,
     bus: &mut SocBus,
     which: usize,
-    seeds: &[u32],
+    walk: &Walk,
     max_blocks: usize,
     fn_blocks: usize,
     event: &str,
 ) -> Result<XtJitCore, String> {
-    let at = areas(bus, 2)?;
-    write_permission_table(bus, at);
-
-    // A **pure** read of the guest's own bytes: this runs before the guest
-    // reaches any of these addresses, so a fetch that charged a cycle or fired
-    // a watchpoint would be a change the guest can see. Straight out of the
-    // arena for exactly that reason.
-    let started = std::time::Instant::now();
-    let arena_base = bus.guest_arena_base();
-    let found = {
-        let arena = bus.guest_arena();
-        let mut fetch = |pc: u32| {
-            pc.checked_sub(arena_base)
-                .and_then(|o| arena.get(o as usize))
-                .copied()
-        };
-        let mut starts: Vec<u32> = seeds.to_vec();
-        starts.sort_unstable();
-        starts.dedup();
-        starts.truncate(max_blocks);
-        lp_xt_jit::discover::build(&starts, &mut fetch)
-    };
-    let discover_us = started.elapsed().as_micros();
-    if found.set.is_empty() {
+    let nothing = BTreeSet::new();
+    let (whole, mut discover_us) = walk_image(bus, walk, usize::MAX, &nothing);
+    if whole.set.is_empty() {
         return Err(format!(
-            "none of the {} seed(s) named an address with a decodable instruction",
-            seeds.len()
+            "none of the {} seed(s) reached a decodable instruction",
+            walk.seeds.len()
         ));
     }
+    let whole_blocks = whole.set.blocks.len();
+    let found = if whole_blocks > max_blocks {
+        let (bounded, us) = walk_image(bus, walk, max_blocks, &nothing);
+        discover_us += us;
+        bounded
+    } else {
+        whole
+    };
+
+    // The tables, sized from what the walk covered.
+    let indirect_len = target_table_bytes(&found.set);
+    let at = areas(bus, 2, indirect_len)?;
+    write_permission_table(bus, at);
+    let arena_base = bus.guest_arena_base();
+    let indirect_pages = {
+        let mut pages: Vec<u32> = found
+            .set
+            .blocks
+            .iter()
+            .map(|b| b.pc >> PERM_SHIFT)
+            .collect();
+        pages.sort_unstable();
+        pages.dedup();
+        pages.len()
+    };
 
     let arena_len = bus.guest_arena().len();
     let arena_ptr = bus.guest_arena_mut().as_mut_ptr();
@@ -710,6 +882,12 @@ pub fn install(
     #[cfg(not(target_family = "wasm"))]
     let (mem_base, memory_pages) = (0u32, at.pages);
 
+    // The indirect-target page map and slot arrays, written whole (P05). The
+    // same block set gives the same bytes at the same place for both cores'
+    // installs, so the second write is a no-op in effect.
+    let indirect_bytes =
+        write_target_tables(bus.guest_arena_mut(), mem_base, at.indirect_at, &found.set);
+
     // One exchange area per instance, side by side in the gap.
     let exchange_at = at.exchange_at + lp_xt_jit::LAYOUT.len() * which as u32;
     let layout = Layout {
@@ -718,8 +896,9 @@ pub fn install(
         arena_offset: mem_base,
         perm_offset: mem_base + at.perm_at,
         exchange_offset: mem_base + exchange_at,
-        // This phase emits no indirect resolution and no published reads.
-        indirect: None,
+        // Placed and fully written; nothing this phase emits reads it (every
+        // indirect jump still leaves), and no published reads exist yet.
+        indirect: Some(mem_base + at.indirect_at),
         fast_reads: None,
     };
 
@@ -784,7 +963,7 @@ pub fn install(
         .map_err(|e| format!("the translated module did not build: {e:?}"))?;
 
     let report = BuildReport {
-        seeds: seeds.len(),
+        seeds: walk.seeds.len(),
         blocks: found.set.blocks.len(),
         insts: found.stats.insts,
         escaped_insts: emitted.escaped_insts,
@@ -798,6 +977,10 @@ pub fn install(
         instantiate_us: core.instantiate_us(),
         gap_len: at.gap_len,
         gap_left: at.gap_left,
+        whole_blocks,
+        stats: found.stats,
+        indirect_bytes,
+        indirect_pages,
     };
     Ok(XtJitCore {
         core,
@@ -819,6 +1002,240 @@ fn index_of(set: &BlockSet) -> BTreeMap<u32, u32> {
         .enumerate()
         .map(|(i, b)| (b.pc, i as u32))
         .collect()
+}
+
+// ---- the coverage census -------------------------------------------------------
+
+/// How many pages the interpreted-remainder table names.
+const CENSUS_TOP_PAGES: usize = 14;
+
+/// The coverage and FP tables from a run's per-pc census (P05).
+///
+/// The walk is run **here, at the end of the run, on the arena as it stands**
+/// — once from the image's symbols and once, with the first walk's starts as
+/// the stop set, from the spans the guest stored into executable memory —
+/// and the union of the two block sets is scored against every retire each
+/// hart's [`PcCensus`] counted. So the number is what the walk *would* cover,
+/// and it is the same number under `--interpreter` and under `--jit`: the
+/// census counts retires, not stays, and this phase's stays retire nothing
+/// natively.
+///
+/// Three tables per core: the share inside the walk's blocks, with the
+/// interpreted remainder by 64 KiB page (the P1b table's shape) so a shortfall
+/// names its region and its hottest pc; the `entry` one-instruction-block cost
+/// (the retires at pcs holding an `entry`, which P06 may fold into the block
+/// after it); and the FP share (G-M7D-XT Q8's input), by cost class and by
+/// the load/store and move families the classes do not separate.
+pub fn coverage_lines(
+    bus: &SocBus,
+    walk: &Walk,
+    written: &[(u32, u32)],
+    cores: &[(usize, &PcCensus)],
+    symbolize: &dyn Fn(u32) -> Option<String>,
+) -> Vec<String> {
+    let mut lines = Vec::new();
+    let nothing = BTreeSet::new();
+    let (boot, boot_us) = walk_image(bus, walk, usize::MAX, &nothing);
+    let known: BTreeSet<u32> = boot.set.index.keys().copied().collect();
+    let third = walk_written(bus, written, &known, &|w| w);
+    let covered: BTreeSet<u32> = boot
+        .set
+        .blocks
+        .iter()
+        .chain(third.found.set.blocks.iter())
+        .flat_map(|b| b.insts.iter().map(|&(pc, _)| pc))
+        .collect();
+    lines.push(format!(
+        "discover: boot walk from {} seed(s) in {:.1} ms — {}",
+        walk.seeds.len(),
+        boot_us as f64 / 1000.0,
+        stats_line(&boot.stats, boot.set.blocks.len()),
+    ));
+    let written_bytes: u64 = third.spans.iter().map(|&(lo, hi)| u64::from(hi - lo)).sum();
+    lines.push(format!(
+        "discover: written walk from {} word seed(s) over {} span(s) ({} B) in {:.1} ms — {}",
+        third.seeds,
+        third.spans.len(),
+        written_bytes,
+        third.us as f64 / 1000.0,
+        stats_line(&third.found.stats, third.found.set.blocks.len()),
+    ));
+    for &(lo, hi) in third.spans.iter().take(8) {
+        lines.push(format!(
+            "discover: written span {lo:#010x}..{hi:#010x} ({} B)",
+            hi - lo
+        ));
+    }
+
+    let base = bus.guest_arena_base();
+    let arena = bus.guest_arena();
+    let region_of = |pc: u32| -> &str {
+        bus.regions()
+            .iter()
+            .find(|r| r.contains(pc))
+            .map_or("outside the arena", |r| r.name)
+    };
+    let decode_at = |pc: u32| -> Option<Inst> {
+        let mut bytes = [0u8; 3];
+        let mut got = 0;
+        for (i, slot) in bytes.iter_mut().enumerate() {
+            match pc
+                .checked_add(i as u32)
+                .and_then(|a| arena_byte(arena, base, a))
+            {
+                Some(b) => {
+                    *slot = b;
+                    got = i + 1;
+                }
+                None => break,
+            }
+        }
+        lp_xt_inst::decode(&bytes[..got]).ok().map(|(inst, _)| inst)
+    };
+
+    for &(core, census) in cores {
+        let total = census.retired();
+        let pct = |n: u64| {
+            if total == 0 {
+                0.0
+            } else {
+                n as f64 * 100.0 / total as f64
+            }
+        };
+        let mut inside = 0u64;
+        let mut entry_hits = 0u64;
+        let mut fp = FpShare::default();
+        // page base → (retired, interpreted, hottest interpreted (count, pc))
+        let mut pages: BTreeMap<u32, (u64, u64, (u64, u32))> = BTreeMap::new();
+        for (pc, n) in census.iter() {
+            let page = pages.entry(pc & !0xffff).or_default();
+            page.0 += n;
+            if covered.contains(&pc) {
+                inside += n;
+            } else {
+                page.1 += n;
+                if n > page.2.0 {
+                    page.2 = (n, pc);
+                }
+            }
+            if let Some(inst) = decode_at(pc) {
+                if matches!(inst, Inst::Entry(..)) {
+                    entry_hits += n;
+                }
+                fp.note(&inst, n);
+            }
+        }
+        lines.push(format!(
+            "core{core}: {total} retired; {inside} inside the walk's blocks ({:.2} %), {} \
+             interpreted ({:.2} %)",
+            pct(inside),
+            total - inside,
+            pct(total - inside),
+        ));
+        lines.push(format!(
+            "core{core}: entry one-instruction blocks: {entry_hits} retire(s) at an `entry` \
+             ({:.2} % of retired)",
+            pct(entry_hits),
+        ));
+        lines.push(format!(
+            "core{core}: fp: arith {} ({:.2} %), muladd {} ({:.2} %), convert {} ({:.2} %), \
+             compare {} ({:.2} %), estimate {} ({:.2} %), ld/st {} ({:.2} %), moves/const {} \
+             ({:.2} %) → {} ({:.2} % of retired)",
+            fp.arith,
+            pct(fp.arith),
+            fp.muladd,
+            pct(fp.muladd),
+            fp.convert,
+            pct(fp.convert),
+            fp.compare,
+            pct(fp.compare),
+            fp.estimate,
+            pct(fp.estimate),
+            fp.ldst,
+            pct(fp.ldst),
+            fp.moves,
+            pct(fp.moves),
+            fp.total(),
+            pct(fp.total()),
+        ));
+        let mut rows: Vec<(u32, (u64, u64, (u64, u32)))> = pages.into_iter().collect();
+        rows.sort_by(|a, b| b.1.1.cmp(&a.1.1).then_with(|| a.0.cmp(&b.0)));
+        lines.push(format!(
+            "core{core}: interpreted remainder by 64 KiB page (top {}, of {}):",
+            CENSUS_TOP_PAGES.min(rows.len()),
+            rows.len()
+        ));
+        for (page, (retired, interpreted, (hot_n, hot_pc))) in
+            rows.into_iter().take(CENSUS_TOP_PAGES)
+        {
+            let mut row = format!(
+                "core{core}:   {page:#010x} {:<16} retired {retired:>11} interpreted {interpreted:>11} \
+                 ({:>6.2} % of core)",
+                region_of(page),
+                pct(interpreted),
+            );
+            if interpreted > 0 {
+                let _ = write!(
+                    row,
+                    "; hottest {hot_pc:#010x} ×{hot_n} {}",
+                    symbolize(hot_pc).unwrap_or_else(|| "?".to_string())
+                );
+            }
+            lines.push(row);
+        }
+    }
+    lines
+}
+
+/// The FP share's counters (G-M7D-XT Q8).
+#[derive(Clone, Copy, Debug, Default)]
+struct FpShare {
+    arith: u64,
+    muladd: u64,
+    convert: u64,
+    compare: u64,
+    estimate: u64,
+    /// `lsi`/`ssi`/`lsx`/`ssx` and their update forms — `Load`/`Store` by
+    /// class, FP by family.
+    ldst: u64,
+    /// `rfr`/`wfr`/`const.s`/`movt.s`… — `Alu` by class, FP by family.
+    moves: u64,
+}
+
+impl FpShare {
+    fn note(&mut self, inst: &Inst, n: u64) {
+        match lp_xt_emu::block::cost_bound(inst) {
+            InstClass::FloatArith => self.arith += n,
+            InstClass::FloatMulAdd => self.muladd += n,
+            InstClass::FloatConvert => self.convert += n,
+            InstClass::FloatCompare => self.compare += n,
+            InstClass::FloatEstimate => self.estimate += n,
+            _ => match inst {
+                Inst::FpLsi(..) | Inst::FpLsx(..) => self.ldst += n,
+                Inst::Rfr(..)
+                | Inst::Wfr(..)
+                | Inst::ConstS(..)
+                | Inst::FpMovAr(..)
+                | Inst::FpMovBr(..)
+                | Inst::FpRr(..)
+                | Inst::FpRrr(..)
+                | Inst::FpCmp(..)
+                | Inst::FpToInt(..)
+                | Inst::IntToFp(..) => self.moves += n,
+                _ => {}
+            },
+        }
+    }
+
+    fn total(&self) -> u64 {
+        self.arith
+            + self.muladd
+            + self.convert
+            + self.compare
+            + self.estimate
+            + self.ldst
+            + self.moves
+    }
 }
 
 /// The exchange area the RV32 protocol sizes, for the assertion below.
