@@ -5729,6 +5729,7 @@ dependencies = [
  "lp-ws281x",
  "lp-xt-emu",
  "lp-xt-inst",
+ "lp-xt-jit",
  "sha2",
 ]
 
@@ -5952,6 +5953,17 @@ name = "lp-xt-inst"
 version = "40.0.0"
 dependencies = [
  "object 0.36.7",
+]
+
+[[package]]
+name = "lp-xt-jit"
+version = "40.0.0"
+dependencies = [
+ "lp-emu-core",
+ "lp-emu-jit",
+ "lp-xt-emu",
+ "lp-xt-inst",
+ "wasm-encoder 0.245.1",
 ]
 
 [[package]]

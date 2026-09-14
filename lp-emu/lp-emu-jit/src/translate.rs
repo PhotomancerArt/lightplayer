@@ -319,14 +319,17 @@ fn body_locals() -> Vec<(u32, ValType)> {
     ]
 }
 
-pub(crate) const F_MMIO_LOAD: u32 = 0;
-pub(crate) const F_MMIO_STORE: u32 = 1;
-pub(crate) const F_STEP_ONE: u32 = 2;
+/// The `mmio_load` import.
+pub const F_MMIO_LOAD: u32 = 0;
+/// The `mmio_store` import — polling point (c) fused in.
+pub const F_MMIO_STORE: u32 = 1;
+/// The escape hatch import.
+pub const F_STEP_ONE: u32 = 2;
 /// Polling point (c) for a store the bus never saw (M7b P2).
-pub(crate) const F_POLL: u32 = 3;
+pub const F_POLL: u32 = 3;
 /// The first function index a sub-dispatcher can have: the four imports come
 /// first, and the module defines everything after them.
-pub(crate) const F_FIRST_BODY: u32 = 4;
+pub const F_FIRST_BODY: u32 = 4;
 
 fn memarg(offset: u64) -> MemArg {
     MemArg {

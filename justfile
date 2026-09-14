@@ -2355,6 +2355,23 @@ clippy-host:
 clippy-emu-jit:
     cargo clippy -p lp-emu-esp32c6 --features jit --all-targets -- --no-deps -D warnings
 
+# The Xtensa translator's lint seat, and the classic's `jit` feature with it
+# (M7 P04).
+#
+# The twin of `clippy-emu-jit` above, for exactly the reason that one exists: a
+# whole `--features jit` arm of `lp-emu-esp32v3` — the driver, the wasmtime
+# host, the `--jit*` flags — is compiled by nothing else in the gate, and a
+# feature no gate compiles is a feature that rots. `--all-targets`, so the
+# crate's own tests are linted under the feature too.
+#
+# `lp-xt-jit` is named separately because its default build has no wasmtime in
+# it at all: the crate must stay lintable — and buildable — without the engine,
+# since P08's browser host is the product path and links none of it.
+clippy-xt-jit:
+    cargo clippy -p lp-xt-jit --all-targets -- --no-deps -D warnings
+    cargo clippy -p lp-xt-jit --features host-wasmtime --all-targets -- --no-deps -D warnings
+    cargo clippy -p lp-emu-esp32v3 --features jit --all-targets -- --no-deps -D warnings
+
 # The wgpu-tree workspace members excluded from clippy-host.
 clippy-gfx:
     cargo clippy -p lp-gfx-wgpu -p fw-browser -p naga-wasm-poc -- --no-deps -D warnings
@@ -2462,7 +2479,7 @@ check-studio-core-minimal:
 clippy-rv32-emu-guest-test-app: install-rv32-target
     cd lp-emu/lp-riscv-emu-guest-test-app && cargo clippy --target {{ rv32_target }} --release -- --no-deps -D warnings
 
-clippy: clippy-host clippy-emu-jit clippy-rv32
+clippy: clippy-host clippy-emu-jit clippy-xt-jit clippy-rv32
 
 clippy-fix:
     cargo clippy --fix --allow-dirty --allow-staged
@@ -3078,6 +3095,23 @@ emu-esp32s3 elf *args:
 # CI seat; until then this is the local recipe.
 test-emu-jit:
     LP_EMU_BUILD_FW=1 cargo test -p lp-emu-jit -- --include-ignored --nocapture
+
+# The Xtensa translator's own tests, under wasmtime (M7 P04).
+#
+# Two tiers, and both are here because they answer different questions.
+# `tests/layout.rs` needs no engine: it pins the exchange layout (XD8's data
+# half) as the wire format it is, and it holds this crate's three-way
+# instruction classification against P01's, which is the one thing duplicated
+# between the block cache and the translator.
+#
+# `tests/seam_escape_all.rs` needs the engine, and it runs the emitted module
+# against a **scripted interpreter** rather than a hart — so the test can say
+# what the interpreter did and then assert what the stay reported, with no
+# machine in between to be the thing that is actually right. The whole-machine
+# form of the same question is `scripts/emu/v3-oracle.sh` with `--flags-a --jit`
+# against `--flags-b --interpreter`.
+test-emu-xt-jit:
+    cargo test -p lp-xt-jit --features host-wasmtime
 
 # The translated module's answers, checked in three engines (M7 JD19).
 #

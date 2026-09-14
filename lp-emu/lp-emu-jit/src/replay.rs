@@ -56,21 +56,96 @@ pub const GRANULE_BYTES: usize = 64;
 /// decoder to itself.
 pub const RECORDED_REGS: usize = 31;
 
-/// `x1`..`x31`, in that order.
+/// The architectural number the first recorded register has.
+///
+/// 1 on RV32: `x0` is not recorded, so slot 0 is `x1`. An architecture with no
+/// hardwired-zero register records from 0 — Xtensa's physical `AR[0..64]` file
+/// has no `x0` to skip (M7 XD6).
+pub const RECORDED_FIRST: u8 = 1;
+
+/// `x1`..`x31`, in that order — and, since M7 XD6, any other architecture's
+/// recorded file.
 ///
 /// Indexed by *architectural* register number so that a caller cannot quietly
-/// be off by one against the `[i32; 32]` file the interpreter keeps.
+/// be off by one against the `[i32; 32]` file the interpreter keeps. `N` is how
+/// many registers are carried and `FIRST` is the architectural number of the
+/// first, both defaulted to RV32's, so `Regs` on its own means exactly what it
+/// meant before the type took parameters.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct Regs([i32; RECORDED_REGS]);
+pub struct Regs<const N: usize = RECORDED_REGS, const FIRST: u8 = RECORDED_FIRST>([i32; N]);
 
-impl Regs {
+impl<const N: usize, const FIRST: u8> Regs<N, FIRST> {
     /// All zero.
     #[must_use]
     pub const fn zeroed() -> Self {
-        Self([0; RECORDED_REGS])
+        Self([0; N])
     }
 
+    /// The recorded words, in architectural order.
+    #[must_use]
+    pub fn words(&self) -> &[i32; N] {
+        &self.0
+    }
+
+    /// The recorded words, to be written in place.
+    pub fn words_mut(&mut self) -> &mut [i32; N] {
+        &mut self.0
+    }
+
+    /// Take the whole recorded file from a slice of exactly `N` words.
+    ///
+    /// # Panics
+    ///
+    /// If `words` is not `N` long — a recorder and its replay disagreeing on
+    /// the register count is a corrupt format, not a divergence.
+    #[must_use]
+    pub fn from_words(words: &[i32]) -> Self {
+        let mut regs = [0i32; N];
+        assert_eq!(
+            words.len(),
+            N,
+            "a record carries {N} registers and was handed {}",
+            words.len()
+        );
+        regs.copy_from_slice(words);
+        Self(regs)
+    }
+
+    /// The value of register `n`, for `n` in `FIRST..FIRST + N`.
+    ///
+    /// # Panics
+    ///
+    /// If `n` is outside that range — a bug in the caller, not a state a
+    /// recording can be in.
+    #[must_use]
+    pub fn get(&self, n: u8) -> i32 {
+        let slot = usize::from(n).checked_sub(usize::from(FIRST));
+        let slot = slot.filter(|&s| s < N);
+        match slot {
+            Some(slot) => self.0[slot],
+            None => panic!("r{n} is not an architectural register a record carries"),
+        }
+    }
+
+    /// The first register whose value differs, as `(n, mine, theirs)`, with
+    /// `n` the architectural number.
+    #[must_use]
+    pub fn first_difference(&self, other: &Self) -> Option<(u8, i32, i32)> {
+        self.0
+            .iter()
+            .zip(other.0.iter())
+            .enumerate()
+            .find(|(_, (a, b))| a != b)
+            .map(|(i, (a, b))| ((i as u8).wrapping_add(FIRST), *a, *b))
+    }
+}
+
+impl Regs {
     /// Take `x1`..`x31` from the interpreter's 32-entry register file.
+    ///
+    /// RV32's own, and deliberately still typed on `[i32; 32]`: the whole
+    /// point of the shape is that a caller cannot be off by one against the
+    /// file the interpreter keeps.
     #[must_use]
     pub fn from_file(file: &[i32; 32]) -> Self {
         let mut regs = [0i32; RECORDED_REGS];
@@ -84,35 +159,9 @@ impl Regs {
         file[0] = 0;
         file[1..].copy_from_slice(&self.0);
     }
-
-    /// The value of `x<n>`, for `n` in `1..=31`.
-    ///
-    /// # Panics
-    ///
-    /// If `n` is 0 or above 31 — both are bugs in the caller, not states a
-    /// recording can be in.
-    #[must_use]
-    pub fn get(&self, n: u8) -> i32 {
-        assert!(
-            (1..=31).contains(&n),
-            "x{n} is not an architectural register a record carries"
-        );
-        self.0[usize::from(n) - 1]
-    }
-
-    /// The first register whose value differs, as `(n, mine, theirs)`.
-    #[must_use]
-    pub fn first_difference(&self, other: &Self) -> Option<(u8, i32, i32)> {
-        self.0
-            .iter()
-            .zip(other.0.iter())
-            .enumerate()
-            .find(|(_, (a, b))| a != b)
-            .map(|(i, (a, b))| ((i + 1) as u8, *a, *b))
-    }
 }
 
-impl Default for Regs {
+impl<const N: usize, const FIRST: u8> Default for Regs<N, FIRST> {
     fn default() -> Self {
         Self::zeroed()
     }
@@ -190,7 +239,7 @@ pub enum DeltaError {
 /// The same shape whether it came from the interpreter's recording or from the
 /// engine under test, so [`compare`] has nothing to translate between.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct EntryOutcome {
+pub struct EntryOutcome<const N: usize = RECORDED_REGS, const FIRST: u8 = RECORDED_FIRST> {
     /// Where control left translated code.
     pub exit_pc: u32,
     /// The cycle counter at the exit. Absolute, not a delta: peripherals read
@@ -203,29 +252,29 @@ pub struct EntryOutcome {
     /// Did the stay end after a store? The machine resamples external state
     /// after one, so getting this wrong moves an interrupt.
     pub after_store: bool,
-    /// `x1`..`x31` at the exit.
-    pub regs: Regs,
+    /// `x1`..`x31` at the exit — or whatever this architecture records.
+    pub regs: Regs<N, FIRST>,
 }
 
 /// One entry into translated code, recorded.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct EntryRecord {
+pub struct EntryRecord<const N: usize = RECORDED_REGS, const FIRST: u8 = RECORDED_FIRST> {
     /// Where translated code was entered.
     pub entry_pc: u32,
     /// The cycle counter at the entry.
     pub cycle_in: u64,
     /// `x1`..`x31` at the entry — what a replay seeds the engine with.
-    pub regs_in: Regs,
+    pub regs_in: Regs<N, FIRST>,
     /// What the interpreter's run produced. A replay must reproduce it
     /// exactly.
-    pub outcome: EntryOutcome,
+    pub outcome: EntryOutcome<N, FIRST>,
     /// Guest memory the interpreter changed between the previous entry's exit
     /// and this entry — see the module docs. Applied *before* the entry runs,
     /// and never counted in a timing.
     pub memory_delta: MemoryDelta,
 }
 
-impl EntryRecord {
+impl<const N: usize, const FIRST: u8> EntryRecord<N, FIRST> {
     /// Cycles charged during the stay.
     #[must_use]
     pub fn cycles(&self) -> u64 {
@@ -235,11 +284,11 @@ impl EntryRecord {
 
 /// A whole run's worth of entries, in the order they happened.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct ReplayRecord {
-    pub entries: Vec<EntryRecord>,
+pub struct ReplayRecord<const N: usize = RECORDED_REGS, const FIRST: u8 = RECORDED_FIRST> {
+    pub entries: Vec<EntryRecord<N, FIRST>>,
 }
 
-impl ReplayRecord {
+impl<const N: usize, const FIRST: u8> ReplayRecord<N, FIRST> {
     /// The mean bytes of memory delta per entry — the figure that says whether
     /// the diff is affordable on a given image. The spike measured ~180 on
     /// `render-rocaille`.
@@ -298,7 +347,10 @@ pub struct Mismatch {
 /// Reports the *first* difference in a fixed order — exit pc, cycle, retired,
 /// after-store, then registers in number order — so that two runs of the same
 /// divergence report the same thing.
-pub fn compare(recorded: &EntryOutcome, replayed: &EntryOutcome) -> Result<(), Divergence> {
+pub fn compare<const N: usize, const FIRST: u8>(
+    recorded: &EntryOutcome<N, FIRST>,
+    replayed: &EntryOutcome<N, FIRST>,
+) -> Result<(), Divergence> {
     if recorded.exit_pc != replayed.exit_pc {
         return Err(Divergence::ExitPc {
             recorded: recorded.exit_pc,

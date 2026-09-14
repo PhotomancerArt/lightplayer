@@ -30,6 +30,7 @@ use lp_emu_esp32v3::machine::{
     AppSource, BootMode, CORE_QUANTUM_DEFAULT, CORES, Esp32V3Builder, FrameSink, Machine, Outcome,
     PinLogSink, RomSource, StopCondition, StripConfig, TimeGrade, Uart0Sink,
 };
+use lp_emu_esp32v3::machine::{JIT_BLOCKS_DEFAULT, JIT_FN_BLOCKS_DEFAULT};
 use lp_emu_esp32v3::{bus_setup, memmap};
 use lp_ws281x::{ChannelTiming, ColorOrder};
 
@@ -174,6 +175,32 @@ OPTIONS:
                             under --boot-mode rom-up, unlike the C6's, because
                             this chip's invalidation contract is the store
                             address and not a guest barrier
+    --jit                   install a translated core at the boot event and
+                            run from it. NEEDS a binary built --features jit;
+                            one without it says so and exits, rather than
+                            accepting the flag and interpreting quietly.
+                            Direct load only: --boot-mode rom-up installs
+                            nothing, because the ROM puts the image in place
+                            with guest stores. Today every instruction escapes
+                            back to the interpreter, so this is SLOWER than
+                            --interpreter and what it proves is identity
+    --interpreter           run no translated core. The default natively, and
+                            the off-switch the identity oracle compares --jit
+                            against (scripts/emu/v3-oracle.sh)
+    --jit-seeds <file>      the block starts --jit translates from, one
+                            address per line (0x-prefixed or decimal; blank
+                            lines and #-comments ignored). Required by --jit
+                            until the discovery sweep lands: a pc no seed
+                            reaches is a pc the interpreter runs
+    --jit-blocks <n>        the most blocks one translation event installs
+                            [200000]
+    --jit-fn-blocks <n>     how many blocks one wasm function holds [64].
+                            Lower it if a module is refused for body size
+    --jit-report            print the per-core coverage line at the end of the
+                            run. The boot-cost line is printed at install
+                            either way. Both go to stderr and both are masked
+                            by the oracle: they are the host's own numbers and
+                            no reading of the guest can see them
     --seed <n>              the machine's PRNG seed [0]
     --efuse-mac <a:b:..>    the MAC the eFuse block answers [30:76:f5:ec:f6:34, the desk board]
     --efuse-rev <maj.min>   the chip revision it answers [3.1, the desk board]
@@ -216,6 +243,13 @@ struct Args {
     /// `--no-block-cache`. The cache is ON by default, so the flag is held as
     /// its negation and `Default` gives the default behaviour.
     no_block_cache: bool,
+    /// `--jit`. Off by default natively, so the flag is held as its positive
+    /// and `--interpreter` clears it; the two are the identity oracle's pair.
+    jit: bool,
+    jit_seeds: Option<PathBuf>,
+    jit_blocks: Option<usize>,
+    jit_fn_blocks: Option<usize>,
+    jit_report: bool,
     cache_off: CacheOffPolicy,
     mmu_divergence: MmuDivergencePolicy,
     core_quantum: Option<u64>,
@@ -270,6 +304,29 @@ fn run() -> Result<ExitCode, String> {
         return Err("--boot-mode direct needs an --elf".into());
     }
 
+    // A binary without the feature accepts no `--jit`. Saying so and exiting
+    // is the whole point: the alternative is a flag that is accepted and does
+    // nothing, and then a measurement of the interpreter labelled as the
+    // translator's.
+    if args.jit && !cfg!(any(feature = "jit", target_family = "wasm")) {
+        return Err(
+            "`--jit` needs a binary built with the translator: cargo build --release -p \
+             lp-emu-esp32v3 --features jit"
+                .into(),
+        );
+    }
+    let jit_seeds = match args.jit_seeds.as_ref() {
+        Some(path) => read_jit_seeds(path)?,
+        None => Vec::new(),
+    };
+    if args.jit && jit_seeds.is_empty() {
+        return Err(
+            "`--jit` needs `--jit-seeds <file>`: the discovery sweep is a later phase, so the \
+             block starts are supplied"
+                .into(),
+        );
+    }
+
     let mut builder = Esp32V3Builder::new()
         .boot_mode(boot_mode)
         .time_grade(args.time_grade)
@@ -278,6 +335,8 @@ fn run() -> Result<ExitCode, String> {
         .cache_off_fetch(args.cache_off)
         .app_mmu_divergence(args.mmu_divergence)
         .core_quantum(args.core_quantum.unwrap_or(CORE_QUANTUM_DEFAULT))
+        .jit(args.jit)
+        .jit_report(args.jit_report)
         .rmt_logs(args.rmt_logs)
         .dump_frames(args.dump_frames.clone())
         .pin_log(args.pin_log.clone())
@@ -285,6 +344,9 @@ fn run() -> Result<ExitCode, String> {
             args.strip_order.unwrap_or(StripConfig::default().order),
             args.strip_timing.unwrap_or(StripConfig::default().timing),
         )
+        .jit_seeds(jit_seeds)
+        .jit_blocks(args.jit_blocks.unwrap_or(JIT_BLOCKS_DEFAULT))
+        .jit_fn_blocks(args.jit_fn_blocks.unwrap_or(JIT_FN_BLOCKS_DEFAULT))
         .seed(args.seed)
         .efuse(args.efuse)
         .uart0(args.uart0.clone())
@@ -374,6 +436,9 @@ fn run() -> Result<ExitCode, String> {
     print_outcome(&mut machine, &outcome);
     print_run_summary(&machine);
     print_block_report(&machine);
+    if args.jit_report {
+        print_jit_report(&machine);
+    }
     print_refill_lag(&machine);
     // The pads, last: a frame still in flight when the deadline hit is
     // closed here as INCOMPLETE rather than dropped, so the summary counts
@@ -470,6 +535,68 @@ fn print_run_summary(machine: &Machine) {
 /// expected reading on this chip**: the firmware publishes JIT'd code into
 /// SRAM0 with no barrier at all, which is exactly why the contract is the
 /// store address and not the barrier.
+/// `--jit-report`: the per-core coverage line.
+///
+/// **Entered, not natively emitted.** With every instruction escaping, the
+/// share this reports is the share of retired instructions that entered the
+/// translated module — every one of which was then run by the interpreter
+/// through the escape hatch. The natively-emitted share is zero and the line
+/// says so, because a coverage number that did not distinguish the two would
+/// read like progress the translator has not made.
+///
+/// `eprintln!`, never stdout, and masked by the oracle: it is the host's own
+/// bookkeeping and no reading of the guest can see it.
+fn print_jit_report(machine: &Machine) {
+    let lines = machine.translated_core_reports();
+    if lines.is_empty() {
+        eprintln!(
+            "jit: no translated core was installed (--jit was not asked for, or this is a \
+             rom-up boot)"
+        );
+        return;
+    }
+    for line in lines {
+        eprintln!("jit: {line}");
+    }
+}
+
+/// `--jit-seeds <file>`: one guest address per line.
+///
+/// `0x`-prefixed or decimal; blank lines and `#` comments ignored. A file with
+/// no usable address is an error rather than an empty walk, because an empty
+/// walk installs nothing and the run would then interpret while claiming to
+/// have been asked for a translated core.
+fn read_jit_seeds(path: &std::path::Path) -> Result<Vec<u32>, String> {
+    let text = std::fs::read_to_string(path)
+        .map_err(|e| format!("--jit-seeds {}: {e}", path.display()))?;
+    let mut seeds = Vec::new();
+    for (n, line) in text.lines().enumerate() {
+        let line = line.split('#').next().unwrap_or("").trim();
+        if line.is_empty() {
+            continue;
+        }
+        let parsed = line
+            .strip_prefix("0x")
+            .or_else(|| line.strip_prefix("0X"))
+            .map_or_else(
+                || line.parse::<u32>().ok(),
+                |hex| u32::from_str_radix(hex, 16).ok(),
+            );
+        let Some(address) = parsed else {
+            return Err(format!(
+                "--jit-seeds {}: line {} is `{line}`, which is not an address",
+                path.display(),
+                n + 1
+            ));
+        };
+        seeds.push(address);
+    }
+    if seeds.is_empty() {
+        return Err(format!("--jit-seeds {}: no addresses", path.display()));
+    }
+    Ok(seeds)
+}
+
 fn print_block_report(machine: &Machine) {
     for core in 0..CORES {
         let hoist = machine.window_hoist_stats(core);
@@ -856,6 +983,24 @@ fn parse(argv: Vec<String>) -> Result<Args, String> {
             "--hooks" => args.hooks = true,
             "--strict-bus" => args.strict = true,
             "--no-block-cache" => args.no_block_cache = true,
+            "--jit" => args.jit = true,
+            "--interpreter" => args.jit = false,
+            "--jit-report" => args.jit_report = true,
+            "--jit-seeds" => args.jit_seeds = Some(PathBuf::from(value()?)),
+            "--jit-blocks" => {
+                let v = value()?;
+                args.jit_blocks =
+                    Some(v.parse::<usize>().ok().filter(|&n| n > 0).ok_or_else(|| {
+                        format!("`--jit-blocks` wants a count above zero, not `{v}`")
+                    })?);
+            }
+            "--jit-fn-blocks" => {
+                let v = value()?;
+                args.jit_fn_blocks =
+                    Some(v.parse::<usize>().ok().filter(|&n| n > 0).ok_or_else(|| {
+                        format!("`--jit-fn-blocks` wants a count above zero, not `{v}`")
+                    })?);
+            }
             "--rmt-logs" => args.rmt_logs = true,
             "--dump-frames" => {
                 let spec = value()?;

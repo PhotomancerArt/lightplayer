@@ -238,7 +238,7 @@ runtime.
 | `lp-riscv-emu`   | RV32 emulator (host) — in `lp-emu/`    | yes (+std feat)  |
 | `lp-xt-emu`      | Xtensa emulator + machine-mode hart (host) — in `lp-emu/` | yes (+std feat)  |
 | `lp-emu-esp32c6` | ESP32-C6 SoC emulator (host) — `lp-emu/esp/` | no        |
-| `lp-emu-esp32v3` | Classic ESP32 (v3, Xtensa LX6) SoC emulator (host) — `lp-emu/esp/`. **Two cores** on a deterministic quantum interleave. Boots the shipped `fw-esp32v3` on **both** paths (direct load, and from the mask ROM's reset vector through the real IDF bootloader), takes a real upload over UART0 with the CH340 cable modelled, and renders a frame that is byte-identical on all three readings. `just test-emu-esp32v3-gate`, `just walk-esp32v3-emu`; the walk record is `docs/reports/2026-09-11-esp32v3-emulator-walk.md`. Speed: `just bench-emu-esp32v3` (an oracle, never a gate) and `scripts/emu/v3-oracle.sh <out-dir> <slug> <window>` — the identity oracle WITHIN one binary, the fast path against `--no-block-cache`, on the three pinned images; `--bin-a`/`--bin-b` runs it ACROSS binaries with the fast path off, which is what proves the interpreter did not move | no |
+| `lp-emu-esp32v3` | Classic ESP32 (v3, Xtensa LX6) SoC emulator (host) — `lp-emu/esp/`. **Two cores** on a deterministic quantum interleave. Boots the shipped `fw-esp32v3` on **both** paths (direct load, and from the mask ROM's reset vector through the real IDF bootloader), takes a real upload over UART0 with the CH340 cable modelled, and renders a frame that is byte-identical on all three readings. `just test-emu-esp32v3-gate`, `just walk-esp32v3-emu`; the walk record is `docs/reports/2026-09-11-esp32v3-emulator-walk.md`. Speed: `just bench-emu-esp32v3` (an oracle, never a gate) and `scripts/emu/v3-oracle.sh <out-dir> <slug> <window>` — the identity oracle WITHIN one binary, the fast path against `--no-block-cache`, on the three pinned images; `--bin-a`/`--bin-b` runs it ACROSS binaries with the fast path off, which is what proves the interpreter did not move, and `--flags-a`/`--flags-b` (with `--name-a`/`--name-b`) runs any other pair — M7 P04's is `--jit` against `--interpreter`. **`--jit` needs `--features jit`** and today escapes every instruction back to the interpreter, so it is SLOWER than not asking for it; what it proves is identity | no |
 | `lp-emu-esp32s3` | ESP32-S3 (Xtensa LX7) SoC emulator (host) — `lp-emu/esp/`. **M6 P01: register tables and a vendored ROM only — no map, no hart, no peripheral, no boot yet.** What the shipped image actually does is `docs/reports/2026-09-11-esp32s3-firmware-inventory.md` | no |
 | `lp-emu-validate` | The validation runner (host) — `lp-emu/`. Payloads, configurations, transcripts and their sidecars, replay, and the **trust table** (`validate.toml`) every claim in the two walk records is graded by. Reached through `lp-cli validate list\|record\|run\|replay` | no |
 
@@ -873,6 +873,11 @@ just studio-emu-sidecar                         # …laid down where a served St
 node scripts/emu/tab-smoke.mjs                  # the tab host's hermetic smoke (CI runs this)
 just lpa-link-browser-test-tab                  # the conformance suite over boards hosted in the tab (Chrome, local)
 just bench-emu-xt                               # the Xtensa core's probe (same rules)
+just test-emu-xt-jit                            # the Xtensa translator's own tests (layout + the seam, under wasmtime)
+just clippy-xt-jit                              # its lint seat, and the classic's `jit` feature (in `just check`)
+scripts/emu/v3-oracle.sh --name-a jit --name-b interp \
+    --flags-a "--jit --jit-seeds seeds.txt" --flags-b "--interpreter" \
+    <out-dir> <slug> <window>                   # the classic's identity pair: translated against interpreted
 cargo run -p lp-cli -- validate run emu-m3 --config lp-emu:esp32c6:t1 --dry-run
 ```
 
