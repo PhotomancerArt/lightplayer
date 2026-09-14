@@ -573,10 +573,18 @@ chip = "esp32s3"
 # default: this machine can decode a pad only once P07 gives the binary its
 # pin half, and until then no S3 transcript may claim a pin capture it does
 # not have. Stated, never inferred — silence is not a capability, and neither
-# is a `false` nobody revisits. **P07 flips this**, with the walk record's
-# sentence about what has and has not been on an S3 pad (nothing) written at
-# the same time.
-records_pins = false
+# is a `false` nobody revisits.
+#
+# **M6 P07 flipped it**, and here is the companion sentence DD72 requires,
+# which is about capability and not about truth: the S3 machine now routes
+# `RMT_SIG_0..3` through the GPIO matrix onto a pad and decodes the waveform
+# back off its own signal fabric at 240 MHz, so a transcript from this
+# configuration CAN carry a pin capture. ⚠️ **BOTH READINGS OF THAT PAD ARE
+# OURS.** The waveform is a modelled RMT's and the decoder that reads it back
+# is ours. **NO INSTRUMENT HAS BEEN ON AN ESP32-S3 PAD FOR THIS PLAN — not a
+# logic analyser, not a scope, not a single LED.** `silicon:esp32s3` records
+# no pins at all, and P09 is the phase that would change that.
+records_pins = true
 
 [[configuration.trust]]
 class = "memory"
@@ -601,7 +609,7 @@ because = "⚠️ and the reason is the one a reader is most likely to mistake f
 [[configuration.trust]]
 class = "pin"
 grade = "modeled"
-because = "both readings of a pad would be ours — the fabric and the decoder are both in the machine — and on this chip there is not even that yet: the RMT view and `--dump-frames` are P07's, `records_pins` is `false` above until they land, and NO INSTRUMENT HAS BEEN ON AN S3 PAD (no logic analyser, no scope), which the walk record says in as many words. No payload in this milestone makes a pin claim on this chip (D7 (b)), so nothing is being graded here — the row exists to say that plainly rather than by silence"
+because = "both readings of a pad are ours — the fabric and the decoder are both in the machine. M6 P07 landed the RMT view, the GPIO matrix and `--dump-frames`/`--pin-log` on this chip, so `records_pins` is `true` above and a whole WS2812 frame now comes off gpio9 with zero bit errors and decodes back to the bytes the engine fetched (`lp-emu-esp32s3/tests/pin_frames.rs`). That is a model agreeing with itself three ways — the words the RMT fetched, the edges on the fabric, the bytes the decoder read — and it is emphatically NOT a measurement: NO INSTRUMENT HAS BEEN ON AN ESP32-S3 PAD (no logic analyser, no scope, no LED), which the walk record says in as many words. The grade therefore stays `modeled` and does not move on the strength of a waveform — a waveform is not a register's bit map and it is not silicon. No payload in this milestone makes a pin claim on this chip (D7 (b)), so nothing is being graded here; the row exists to say all of that plainly rather than by silence, and P09's capture is what could change it"
 
 [[configuration.trust]]
 class = "wire"

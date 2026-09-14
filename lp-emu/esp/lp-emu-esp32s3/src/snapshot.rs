@@ -64,6 +64,11 @@ pub struct Snapshot {
     pub console: Vec<u8>,
     /// Everything the mask ROM's UART0 console had put on the wire (P06).
     pub uart0: Vec<u8>,
+    /// What the pads had decoded (P07): one WS281x decoder per routed pad,
+    /// its completed frames, the routing and the edge counts. A decoder
+    /// caught **mid-frame** is state — one restored without its half-shifted
+    /// bits would resume a frame that never existed.
+    pub pins: crate::machine::PinState,
 }
 
 impl Snapshot {

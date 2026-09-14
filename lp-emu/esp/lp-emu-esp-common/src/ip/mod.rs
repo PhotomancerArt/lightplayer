@@ -33,9 +33,20 @@
 //!   has eight more registers, which is why the two registers the C6 view
 //!   gives *behaviour* sit behind a capability the chip supplies rather than
 //!   being unconditional.
+//! - [`rmt`] — the remote-control transceiver. The S3's RMT **is** the C6's
+//!   IP: `ch_tx_conf0`, `ch_rx_conf0/1`, `ch_tx_status`, `ch_rx_status`,
+//!   `ch_tx_lim`, `ch_rx_lim`, `ch_rx_carrier_rm`, `sys_conf`, `tx_sim` and
+//!   `ref_cnt_rst` exist on both by name with the same fields in the same
+//!   order, and **none of them exists on the classic**, whose block keeps its
+//!   own file (`m6/notes.md` §3.2, ruling D4). What differs is a table of
+//!   offsets, five field positions and where the clock comes from — so the
+//!   clock is a trait the chip implements and everything else is
+//!   [`rmt::Config`]. The C6's committed transcripts are the gate on the
+//!   move: the file's behaviour is unchanged, note for note.
 //!
 //! An IP view exists **only where the win is real**: the alternative to this
 //! one was a 2,000-line copy of a file whose every behaviour is paid for by
 //! a committed transcript, and a copy is where two models start to drift.
 
+pub mod rmt;
 pub mod usb_sj;

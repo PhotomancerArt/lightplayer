@@ -27,10 +27,11 @@ use lp_emu_esp32s3::flash::FlashBacking;
 use lp_emu_esp32s3::loader::EfuseIdentity;
 use lp_emu_esp32s3::machine::{
     AppSource, BootMode, CORE_QUANTUM_DEFAULT, CORES, CPENABLE_RESET_DEFAULT, Esp32S3Builder,
-    Machine, Outcome, PERIPHERAL_REGISTRATION_ORDER, RomSource, StopCondition, TimeGrade, UsbHost,
-    UsbSjDrain, UsbSjSink,
+    FrameSink, Machine, Outcome, PERIPHERAL_REGISTRATION_ORDER, PinLogSink, RomSource,
+    StopCondition, StripConfig, TimeGrade, UsbHost, UsbSjDrain, UsbSjSink,
 };
 use lp_emu_esp32s3::{bus_setup, memmap};
+use lp_ws281x::{ChannelTiming, ColorOrder};
 
 const USAGE: &str = "\
 lp-emu-esp32s3 — the ESP32-S3 (LX7) machine
@@ -79,6 +80,31 @@ OPTIONS:
                             reset banner and the bootloader's log on a
                             rom-up boot. tcp: LISTENS, and the client's bytes
                             are the wire's source [memory]
+    --rmt-logs              keep the RMT's per-channel pulse and word logs.
+                            OFF by default: a 256-LED frame is 6,146 words
+                            and 12,292 pulses, and a run that only wants a
+                            boot has no use for them. The refill-lag summary
+                            below the run report is collected either way — it
+                            is REPORTED, never gated (PD9)
+    --dump-frames <spec>    where decoded WS281x frames go: `-` or `stdout`,
+                            or `file:<path>`. One `ws281x-frame` JSON line
+                            per frame as it is decoded, carrying BOTH the
+                            wire bytes and the `rgb` unpermutation, so a
+                            wrong order assumption is a visible difference
+                            between two fields rather than a silent one
+                            inside `rgb`. Frames are kept in memory either
+                            way [memory]
+    --pin-log <path>        the raw edge stream, one line per edge:
+                            `<us> <pad> <level> cyc=<cycle>`, with a
+                            `# route` note whenever the matrix moves a pad.
+                            Off by default — a 256-LED frame is 12,292
+                            edges. Capped at 2,000,000 lines with a note
+    --strip-timing ws2812|ws2811
+                            the wire timing every routed pad is decoded as
+                            [ws2812]
+    --strip-order rgb|rbg|grb|gbr|brg|bgr
+                            the byte order on the wire, which is what the
+                            record's `rgb` field is unpermuted with [grb]
     --strap <word>          what GPIO.strap reads — the strapping pins as the
                             pads were latched at reset. The default is the
                             smallest word the ROM's own decode calls
@@ -230,6 +256,12 @@ struct Args {
     hooks: bool,
     map: bool,
     help: bool,
+    // ---- the pads (M6 P07) ----
+    rmt_logs: bool,
+    dump_frames: FrameSink,
+    pin_log: PinLogSink,
+    strip_timing: Option<ChannelTiming>,
+    strip_order: Option<ColorOrder>,
 }
 
 fn run() -> Result<ExitCode, String> {
@@ -272,6 +304,13 @@ fn run() -> Result<ExitCode, String> {
         .usb_host(args.usb_host)
         .usb_sj_drain(args.usb_sj_drain)
         .reboot_on_reset(args.reboot_on_reset)
+        .rmt_logs(args.rmt_logs)
+        .dump_frames(args.dump_frames.clone())
+        .pin_log(args.pin_log.clone())
+        .strip(StripConfig {
+            timing: args.strip_timing.unwrap_or(StripConfig::default().timing),
+            order: args.strip_order.unwrap_or(StripConfig::default().order),
+        })
         .seed(args.seed);
     if let Some(word) = args.strap {
         builder = builder.strap(word);
@@ -356,8 +395,15 @@ fn run() -> Result<ExitCode, String> {
 
     let outcome = machine.run_until(&stop);
     machine.bus_mut().host.flush_all();
+    // ⚠️ Before the report, and before anything reads the last frame: a frame
+    // is not closed until something follows its latch, so a run that stopped
+    // mid-frame has one still open. `flush_frames` reports it **incomplete**
+    // rather than inventing a reset gap.
+    machine.flush_frames();
     print_outcome(&mut machine, &outcome);
     print_run_summary(&machine);
+    print_pin_report(&machine);
+    print_refill_lag(&machine);
     if let Some(path) = &args.console
         && let Err(e) = std::fs::write(path, machine.console().bytes())
     {
@@ -369,6 +415,57 @@ fn run() -> Result<ExitCode, String> {
         Err(e) => eprintln!("lp-emu-esp32s3: writing the flash image back: {e}"),
     }
     Ok(ExitCode::from(outcome.exit_code() as u8))
+}
+
+/// One line per routed pad at exit: frames, complete frames, bit errors,
+/// LEDs and edges.
+///
+/// Silent for a run that routed nothing, which is every run that does not
+/// load a project. ⚠️ The numbers here are one model read three ways — the
+/// RMT's words, the fabric's edges and the decoder's frames — and not a
+/// measurement. No S3 silicon has been read.
+fn print_pin_report(machine: &Machine) {
+    for line in machine.pin_report() {
+        println!("{line}");
+    }
+}
+
+/// The RMT's own reading of the refill race, per channel, at exit.
+///
+/// Two histograms in the shape the guest's `[WS281X]` telemetry line prints
+/// its own — nine buckets, eighths of a half-window, the last one "≥ half" —
+/// so the two can be read side by side. **Reported, never gated** (PD9): the
+/// entry half is a floor, because the emulated ISR path is RAM-resident and
+/// the machine has no flash-miss cost, and silicon's own entry delay is
+/// mostly those misses.
+///
+/// Silent for a run whose guest never started a channel.
+fn print_refill_lag(machine: &Machine) {
+    use lp_emu_esp32s3::periph::rmt::{RefillStats, TX_CHANNELS};
+    for ch in 0..TX_CHANNELS {
+        let s = machine.rmt_refill_stats(ch);
+        if s.refills == 0 && s.unanswered == 0 {
+            continue;
+        }
+        println!(
+            "rmt refill ch{ch}: {} measured, half={} words; entry max {} hist {}; \
+             fill max {} hist {}{}",
+            s.refills,
+            s.half_words,
+            s.entry_max,
+            RefillStats::hist_string(&s.entry_hist),
+            s.fill_max,
+            RefillStats::hist_string(&s.fill_hist),
+            if s.unanswered == 0 {
+                String::new()
+            } else {
+                format!(
+                    "; {} unanswered (the last one of a frame is `finish`'s, not `refill`'s)",
+                    s.unanswered
+                )
+            },
+        );
+    }
 }
 
 /// The one line a gate reads: what the run cost and what it refused.
@@ -833,6 +930,33 @@ fn parse(argv: Vec<String>) -> Result<Args, String> {
             }
             "--cache-off-fetch" => args.cache_off = CacheOffPolicy::parse(&value()?)?,
             "--uart0" => args.uart0 = parse_usb_sj(&value()?, "--uart0", true)?,
+            "--rmt-logs" => args.rmt_logs = true,
+            "--dump-frames" => {
+                let spec = value()?;
+                args.dump_frames = match spec.as_str() {
+                    "-" | "stdout" => FrameSink::Stdout,
+                    "memory" => FrameSink::Memory,
+                    other => match other.split_once(':') {
+                        Some(("file", path)) => FrameSink::File(PathBuf::from(path)),
+                        _ => FrameSink::File(PathBuf::from(other)),
+                    },
+                };
+            }
+            "--pin-log" => args.pin_log = PinLogSink::File(PathBuf::from(value()?)),
+            "--strip-timing" => {
+                let text = value()?;
+                args.strip_timing = Some(
+                    StripConfig::parse_timing(&text)
+                        .ok_or_else(|| format!("--strip-timing {text}: ws2812|ws2811"))?,
+                );
+            }
+            "--strip-order" => {
+                let text = value()?;
+                args.strip_order = Some(
+                    StripConfig::parse_order(&text)
+                        .ok_or_else(|| format!("--strip-order {text}: rgb|rbg|grb|gbr|brg|bgr"))?,
+                );
+            }
             "--strap" => {
                 let v = value()?;
                 let n = v

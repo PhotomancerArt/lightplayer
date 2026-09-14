@@ -93,6 +93,11 @@ mod interrupt_core1;
 mod interrupt_sources;
 mod io_mux;
 mod nrx;
+/// The GPIO matrix's **signal** numbers (M6 P07) — hand-written, because the
+/// interconnect's enumeration lives in esp-hal's metadata rather than in the
+/// PAC, so the generator has nothing to read. Both directions are in there,
+/// as two tables that happen to agree on this chip.
+pub mod output_signals;
 mod rmt;
 mod rng;
 mod rtc_cntl;
