@@ -66,7 +66,7 @@ use wasmtime::{
     Caller, Config, Engine, Extern, Instance, LinearMemory, MemoryCreator, Module, Store, TypedFunc,
 };
 
-use crate::host::{EXCHANGE_FLAGS, HostOps};
+use crate::host::HostOps;
 use crate::translate::ENTRY_FUNC;
 
 pub use crate::host::Exit;
@@ -438,7 +438,14 @@ impl<H: HostOps + 'static> WasmtimeCore<H> {
             ),
         )?;
         let flags = {
-            let x = &self.store.data_mut().exchange()[EXCHANGE_FLAGS as usize..];
+            // DD111 — **the layout's own offset**, not RV32's constant. The
+            // exchange layout is a parameter (XD6) and on Xtensa the flags sit
+            // past a 64-word `AR` file plus eight extra words, so `+144` there
+            // is a register rather than the flags and every exit read one.
+            // `EXCHANGE_FLAGS` is still exactly this for an RV32 host, which
+            // `ExchangeLayout::RV32` is the default of.
+            let at = self.store.data().layout().flags() as usize;
+            let x = &self.store.data_mut().exchange()[at..];
             i32::from_le_bytes([x[0], x[1], x[2], x[3]])
         };
         Ok(Exit {
