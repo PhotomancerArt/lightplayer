@@ -1548,6 +1548,23 @@ jobs:
       - name: Emulator ESP32v3 gate (both boot paths, the replays, the reference image)
         run: cd lp2025 && just test-emu-esp32v3-gate
 
+      # **The translator's identity cell** (M7 XD14, P07): `--jit` against
+      # `--interpreter` on the pinned `boot-idle` image, five readings
+      # compared byte for byte, and a check that both of the classic's
+      # translation events ran — the boot event and publish-by-store.
+      #
+      # A step of its own rather than a line inside `test-emu-esp32v3-gate`,
+      # against this file's usual rule, for one reason: DD98 bounds this cell
+      # at ~3 minutes on the runner and a step is where that number can be
+      # read. It is still one `just` recipe a human runs the same way.
+      #
+      # It comes AFTER the gate step because the gate builds the reference
+      # image at HEAD that this reuses, so the only thing this pays for is the
+      # release `lp-emu-esp32v3 --features jit` binary and ~25 s of cranelift.
+      # Measured end to end on an M2 Max with the image already built: 27.8 s.
+      - name: Translated-core identity cell (--jit vs --interpreter, boot-idle)
+        run: cd lp2025 && just test-emu-xt-jit-image
+
       # The classic's half of the heap-budget record's chip section (M5 P5).
       # It lives here rather than in `Heap budget (esp32c6 chip)` because it
       # needs the Xtensa toolchain this job already installs — a cold espup

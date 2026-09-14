@@ -3141,6 +3141,54 @@ test-emu-jit:
 test-emu-xt-jit:
     cargo test -p lp-xt-jit --features host-wasmtime
 
+# **The classic's differential oracle, tier (b)** — the CI cell (M7 XD14):
+# one binary, one pinned image, `--jit` against `--interpreter`, five readings
+# compared byte for byte, and a check that BOTH of the classic's translation
+# events (XD10) actually ran.
+#
+# `scripts/emu/xt-jit-identity-image.sh` carries the whole argument; the two
+# things a reader should know before running it are in its header and
+# repeated here because they are what make this cell different from the C6's
+# (`test-emu-jit-image`):
+#
+# 1. **No `--trace` column.** A `--jit --trace` run on the classic installs no
+#    core at all — the trace is the interpreter's own reading and a translated
+#    stay cannot emit it — so a 20 ms trace cell would compare a run against
+#    itself and pass. The script refuses a trace-sized window and the third
+#    reading is the decoded frames instead.
+# 2. **The walk is bounded.** The classic's three pinned images are all the
+#    same 9 MB firmware, so the whole-image walk is ~140,000 blocks and ~90 MB
+#    of wasm *whatever the slug* — 146 s of cranelift per core on an M2 Max,
+#    293 s for the pair, against DD98's ~3-minute budget. At 12,000 blocks the
+#    `--jit` leg is 26.5 s locally and both events still fire; measured end to
+#    end, this recipe is **27.8 s** on an M2 Max with the image already built.
+#
+# The image is the one `test-emu-esp32v3-gate` already builds at HEAD, so in
+# CI this step pays for the emulator binary and nothing else. Run on its own
+# it builds the image first.
+#
+# Needs `--features jit` (wasmtime). It never skips: a binary without the
+# feature accepts `--jit`, translates nothing, and the script fails with that
+# named as the reason rather than passing a self-comparison.
+test-emu-xt-jit-image slug="boot-idle" window="100ms" blocks="12000":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cargo build --release -p lp-emu-esp32v3 --features jit
+    commit="$(git rev-parse --short HEAD)"
+    elf="target/emu-ref/$commit-{{ slug }}/fw-esp32v3"
+    if [[ ! -f "$elf" ]]; then
+        # The feature set per slug is `bench-esp32v3.sh`'s table; only the
+        # default slug is built here, because the other two are 60-second
+        # runs nobody wants in a per-PR gate.
+        case "{{ slug }}" in
+            boot-idle) features=esp32,server,float-f32 ;;
+            *) echo "test-emu-xt-jit-image: build the {{ slug }} image first (just bench-esp32v3)" >&2; exit 1 ;;
+        esac
+        scripts/emu/build-reference-image.sh --chip esp32 "$features" "$commit" none
+    fi
+    LP_EMU_V3_ORACLE_ELF="$elf" scripts/emu/xt-jit-identity-image.sh \
+        {{ slug }} {{ window }} {{ blocks }}
+
 # The Xtensa translated module's answers, checked in three engines (M7 P06,
 # JD19). The round-trip suites emit every module, run it under wasmtime
 # against a real `XtHart` behind the escape hatch, and write each run out as
