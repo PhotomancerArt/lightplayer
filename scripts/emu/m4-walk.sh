@@ -406,10 +406,35 @@ if [[ "$CHIP" == "esp32s3" ]]; then
 fi
 
 # ---------------------------------------------------------------- the upload
+#
+# ⚠️ **`--no-wait` on the S3, and it is the open link defect rather than a
+# shortcut.** `lp-cli upload`'s post-deploy wait polls `projectRead`, whose
+# reply is a multi-frame stream of the whole shape registry — tens of
+# kilobytes. On this chip the link model drops one 64-byte packet whenever a
+# framed write follows an `esp-println` packet inside the IN drain latency
+# (docs/defects/2026-09-13-the-s3-link-drops-the-io-tasks-next-chunk-on-a-
+# stale-serial-in-empty.md, DD103, still open — which side is wrong is
+# P09's measurement), so that stream arrives with a frame missing and
+# `lp-cli` reports `expected project read frame seq 0, got 1`. The DEPLOY
+# itself is unaffected and the console proves it: `Project loaded`,
+# `compilation succeeded`, `[OUT] open`.
+#
+# So this arm asks for the deploy ack and takes its "is it running?" evidence
+# from somewhere better than a reply the link is known to mangle: LIT FRAMES
+# ON THE PAD, counted below. That is the thing the walk is about, and a run
+# where the project did not start has none of them and says so by name.
+#
+# ⚠️ Do NOT copy this onto the C6 arm, and re-point this at the plain wait the
+# day the defect closes. P07's `walks/shader-oracle.script` carries the same
+# workaround one layer down (it waits on `Stopped all projects` rather than on
+# the reply's bytes) and the same instruction.
+upload_args=(--wait-timeout "${LP_WALK_CLI_TIMEOUT:-600}")
+[[ "$CHIP" == "esp32s3" ]] && upload_args=(--no-wait)
+
 echo
 echo "===== UPLOAD ====="
 set +e
-"$cli" upload "$PROJECT" "serial:tcp://$LINK" --wait-timeout "${LP_WALK_CLI_TIMEOUT:-600}" \
+"$cli" upload "$PROJECT" "serial:tcp://$LINK" "${upload_args[@]}" \
     >"$OUT/cli.stdout" 2>"$OUT/cli.stderr"
 cli_status=$?
 set -e
