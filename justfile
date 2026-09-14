@@ -3057,20 +3057,29 @@ test-emu-esp32s3-boot: build-fw-esp32s3
     fi
     cargo test -p lp-emu-esp32s3 -- --include-ignored
 
-# **M6's gate so far.** What the `Emulator ESP32-S3 (x64)` job will run.
-#
-# ⚠️ **There is no such CI job yet — P08 adds it**, with its path filter
-# mirroring `emu_esp32v3` and including `lp-fw/fw-esp32-common/**` (E6). This
-# recipe is deliberately the whole of what that job will do, so the gate a
-# human runs and the gate CI runs stay one thing.
+# **M6's gate.** What the `Emulator ESP32-S3 (x64)` job runs (M6 P10 added
+# it, path-gated on `emu_esp32s3` and non-required — the filter mirrors
+# `emu_esp32v3` and includes `lp-fw/fw-esp32-common/**`, E6). This recipe is
+# deliberately the whole of what that job does, so the gate a human runs and
+# the gate CI runs stay one thing.
 #
 # The two lints cover all three chips, so a hand edit to the S3's generated
-# register tables fails the same lint a hand edit to the C6's does.
+# register tables fails the same lint a hand edit to the C6's does. The two
+# host test commands are the classic gate's, for its reason: the transcript
+# replays and the payload registry are what a chip's rows in
+# `lp-emu-validate` are worth, and running them beside the machine's own
+# suite is what keeps a registry edit from landing untested.
+#
+# ⚠️ The WALK is not here (`just walk-esp32s3-emu`): it builds a merged image
+# and a release `lp-cli` and runs eight emulated seconds, which is a walk and
+# not a per-PR gate (R6/DD49).
 test-emu-esp32s3-gate: test-emu-esp32s3-boot
     #!/usr/bin/env bash
     set -euo pipefail
     just lint-emu-fence
     just lint-emu-regnames
+    cargo test -p lp-emu-validate
+    cargo test -p lp-cli --test validate_registry_parity
 
 # Run an image on the ESP32-S3 machine.
 emu-esp32s3 elf *args:

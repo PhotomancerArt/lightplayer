@@ -148,6 +148,7 @@ jobs:
       firmware: ${{ github.event_name != 'pull_request' && 'true' || steps.some.outputs.firmware }}
       emu_c6: ${{ github.event_name != 'pull_request' && 'true' || steps.some.outputs.emu_c6 }}
       emu_esp32v3: ${{ github.event_name != 'pull_request' && 'true' || steps.some.outputs.emu_esp32v3 }}
+      emu_esp32s3: ${{ github.event_name != 'pull_request' && 'true' || steps.some.outputs.emu_esp32s3 }}
     steps:
       # Default quantifier ("some"): a filter is true when ANY changed file
       # matches one of its globs. Each list is the *dependency closure* of what
@@ -379,6 +380,39 @@ jobs:
               # ratchet, so the gate has to fire when the gate's own script or
               # its recorded figures change. Neither filter covered them
               # before, which meant a record edit ran no chip gate at all.
+              - 'scripts/heap-budget-check.sh'
+              - 'scripts/heap-budget-record.json'
+              - 'justfile'
+              - '.github/workflows/pre-merge.yml'
+              - '.github/actions/**'
+            # emu_esp32s3 is the third of the same shape, for the ESP32-S3's
+            # machine (`lp-emu-esp32s3`, plan three M6). The job it gates is
+            # **non-required** and path-gated for `emu_esp32v3`'s reasons and
+            # at the same cost: a cross-target Xtensa firmware, an `espflash
+            # save-image --merge` chip from it, and the emulator suite with
+            # its images.
+            #
+            # `lp-emu/**` and not `lp-emu/esp/lp-emu-esp32s3/**`, for the
+            # classic's reason exactly: this machine sits on
+            # `lp-emu-esp-common`'s bus, scheduler, fabric and USB link and on
+            # `lp-xt-emu`'s hart, so a change to any of them is a change to
+            # this machine — and all three emulator filters firing together on
+            # a shared-crate change is the point rather than the waste. A
+            # change that moves one machine and not its siblings is exactly
+            # what nobody would notice.
+            emu_esp32s3:
+              - 'lp-emu/**'
+              - 'lp-fw/fw-esp32s3/**'
+              # The server loop and wire code all three chips' firmware share
+              # — see `emu_c6`'s comment above for why it belongs here too
+              # (E6) and why it stops short of `lp-core/**` (DD77).
+              - 'lp-fw/fw-esp32-common/**'
+              - 'scripts/emu/**'
+              # This job carries the S3's heap-budget ratchet, for the reason
+              # the classic's job carries the classic's: it is the job that
+              # already installs this chip's Xtensa toolchain, and the C6's
+              # heap job has none (DD71). So the gate has to fire when the
+              # gate's own script or its recorded figures change.
               - 'scripts/heap-budget-check.sh'
               - 'scripts/heap-budget-record.json'
               - 'justfile'
@@ -1533,6 +1567,159 @@ jobs:
       # pay; it is a much smaller dependency tree than `lp-cli`'s.
       - name: Heap budget ratchet — the classic's own ledger
         run: cd lp2025 && just heap-budget-check-chips-v3
+
+      - name: sccache stats
+        if: always()
+        shell: bash
+        run: |
+          if command -v sccache >/dev/null; then
+            { echo '#### sccache'; echo '```'; sccache --show-stats; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+  # The ESP32-S3's machine (`lp-emu-esp32s3`, plan three M6), and the third
+  # job of this shape. **Non-required and path-gated**, for `emu-esp32v3`'s
+  # reasons (Q8, ruling R10): it builds a cross-target Xtensa firmware and an
+  # `espflash save-image --merge` chip from it, on a chip only one plan is
+  # working on.
+  #
+  # What it costs, and why each part is here:
+  #
+  #   * a cross-target **Xtensa** firmware build (`just build-fw-esp32s3`),
+  #     because the whole gate is about the SHIPPED image and not a fixture;
+  #   * `espflash save-image --chip esp32s3 --merge` on it — 8 MiB here, not
+  #     4: this chip's partition table does not fit a 4 MB part
+  #     (docs/adr/2026-07-30-esp32s3-partition-floor.md). The bundled
+  #     second-stage bootloader is what the ROM-up tests boot through, so the
+  #     espflash version is load-bearing and pinned to 3.3.0 like the other
+  #     two jobs';
+  #   * the suite with the `#[ignore]`d half included — 264 tests with their
+  #     images (M6 P07): both boot paths, the flash and cache window, the
+  #     link, the pads and the decoded frame;
+  #   * the two emulator lints, which cover all three chips, so a hand edit to
+  #     this chip's generated register tables fails the same lint a hand edit
+  #     to the C6's does;
+  #   * `cargo test -p lp-emu-validate` and the registry parity test, in the
+  #     RECIPE rather than as steps here, so the gate a human runs and the
+  #     gate CI runs stay one thing.
+  #
+  # ⚠️ **The walk twin is not here** (`just walk-esp32s3-emu`), and that is
+  # ruling R6/DD49 applied unchanged: it builds a firmware, a merged 8 MiB
+  # image and a release `lp-cli`, then runs the machine for eight emulated
+  # seconds. It is a walk — something you run, not something every PR pays
+  # for. What it proves per-tick lives in `tests/pin_frames.rs`, which does
+  # run here.
+  #
+  # `fetch-depth: 0` as the two sibling jobs have it. Nothing this recipe runs
+  # needs history TODAY — the S3 does not build a reference image in its gate
+  # — but `scripts/emu/build-reference-image.sh` has this chip's arm (M6 P08)
+  # and the day the gate uses it a depth-1 checkout fails at
+  # `git worktree add --detach` rather than at something that names itself.
+  emu-esp32s3:
+    name: Emulator ESP32-S3 (x64)
+    runs-on: ubuntu-24.04
+    # No p95: this job is new in M6 P10. The budget is the classic's 35 with
+    # the same reasoning — a fully cold run is an Xtensa firmware, a merged
+    # image, the emulator suite and the heap ratchet's second firmware build,
+    # and a job living at 90 % of its budget is a job that starts failing on
+    # cache misses. The classic's comparable job runs 22–27 minutes with its
+    # frame gates. **The first green run's wall clock goes in this comment.**
+    timeout-minutes: 35
+    needs: detect-changes
+    if: needs.detect-changes.outputs.emu_esp32s3 == 'true'
+    env:
+      CARGO_INCREMENTAL: "0"
+      CARGO_PROFILE_DEV_DEBUG: "false"
+      CARGO_PROFILE_TEST_DEBUG: "false"
+      SCCACHE_GHA_ENABLED: "true"
+      RUSTC_WRAPPER: sccache
+    steps:
+      - name: Install system deps (libudev for serialport/espflash)
+        run: |
+          sudo rm -f /etc/apt/sources.list.d/*chrome* /etc/apt/sources.list.d/*google*
+          sudo apt-get update || echo "apt-get update reported errors; continuing — the install below is the real gate"
+          sudo apt-get install -y libudev-dev pkg-config
+
+      - name: Checkout lp2025
+        uses: actions/checkout@v4
+        with:
+          path: lp2025
+          fetch-depth: 0
+
+      - name: Checkout lp-regalloc2
+        uses: actions/checkout@v4
+        with:
+          repository: PhotomancerArt/lp-regalloc2
+          path: lp-regalloc2
+
+      # The emulator itself is a HOST binary on the repo's own nightly; the
+      # firmware it boots is Xtensa. Both toolchains are installed, in that
+      # order, and the Xtensa one is NOT made default — `lp-fw/fw-esp32s3`
+      # selects it through its own rust-toolchain.toml, and making it default
+      # would build the host crates on the fork as well.
+      - name: Install Rust toolchain (host)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: nightly-2026-04-27
+          components: rust-src
+
+      # ⚠️ **One job, one buildtarget.** `esp32s3` only, never `esp32,esp32s3`
+      # to save an install: espup's unauthenticated `api.github.com` is the
+      # known 403 failure mode and the cache budget is real, so a job that
+      # installs a target it does not build pays for it on every run. Same
+      # version and buildtargets as `firmware-esp32s3`; keep them in sync.
+      - name: Install Xtensa Rust toolchain
+        uses: ./lp2025/.github/actions/xtensa-toolchain
+        with:
+          version: 1.95.0.0
+          buildtargets: esp32s3
+          default: false
+
+      - name: Run sccache
+        uses: mozilla/sccache-action@v0.0.10
+
+      # Its own shared-key, for the classic job's reason: this job builds both
+      # a host test tree on the repo nightly AND an Xtensa firmware on the
+      # fork, so it matches neither `x64-nightly` nor `xtensa-fw` cleanly and
+      # would evict from whichever it borrowed.
+      - name: Cache cargo registry and build artifacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: lp2025 -> target
+          cache-targets: false
+          cache-bin: false
+          shared-key: emu-esp32s3
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+          cache-on-failure: true
+
+      - name: Install just
+        uses: extractions/setup-just@v3
+
+      - name: Install cargo-binstall
+        uses: cargo-bins/cargo-binstall@v1.21.1
+
+      # Prebuilt and pinned, exactly as the sibling jobs do it: espflash
+      # bundles the second-stage bootloader the ROM-up tests boot through, so
+      # a different espflash is a different program in the image.
+      - name: Install espflash (prebuilt — the merged image's bootloader)
+        run: cargo binstall --no-confirm --locked espflash@3.3.0
+
+      - name: Emulator ESP32-S3 gate (both boot paths, the pads, the replays)
+        run: cd lp2025 && just test-emu-esp32s3-gate
+
+      # The S3's half of the heap-budget record's chip section (M6 P10). It
+      # lives here rather than in `Heap budget (esp32c6 chip)` because it
+      # needs the Xtensa toolchain this job already installs — a cold espup
+      # install is ~8 minutes — and because that job is path-gated on
+      # `emu_c6`, which does not fire for `lp-fw/fw-esp32s3/**` at all, so
+      # this firmware's own changes would have run its heap gate never
+      # (DD71).
+      #
+      # Cost, measured on an M2 Max with a warm cargo cache: ~25 s all in — a
+      # `fw-esp32s3` rebuild (the walk's `frame-dump` build shares this target
+      # path, so naming the features is what makes the shipped image come
+      # back) plus a sub-second boot that ends on its own `[JIT] used=` line.
+      - name: Heap budget ratchet — the S3's own ledger
+        run: cd lp2025 && just heap-budget-check-chips-s3
 
       - name: sccache stats
         if: always()
