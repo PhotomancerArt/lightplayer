@@ -5,18 +5,23 @@ cores live at the root of `lp-emu/`, and anything that assumes a *chip* — a
 memory map, MMIO decode, peripherals, a ROM image — lives under the vendor it
 belongs to.
 
-It holds **two machines**, and both boot the shipped firmware to its idle
-loop:
+It holds **three machines**, and each boots its chip's shipped firmware to
+its idle loop:
 
 ```bash
 just emu-c6 target/emu-ref/d6cfaa205-boot-idle-memfs/fw-esp32c6 --timeout 6s --strict-bus
 just emu-esp32v3 target/emu-ref/<commit>-boot-idle/fw-esp32v3 --timeout 2s --strict-bus
+just emu-esp32s3 target/xtensa-esp32s3-none-elf/release-esp32s3/fw-esp32s3 --timeout 2s --strict-bus
 ```
 
-## Two machines
+## Three machines
 
-They are the two sides of the engine extraction M2 did, and the interesting
-part is the seam between what they share and what they cannot.
+The C6 and the classic are the two sides of the engine extraction M2 did,
+and the interesting part is the seam between what they share and what they
+cannot; the S3 (M6) is the third machine built ON that seam, and what it
+reuses is the evidence the seam was drawn in the right place. The table below
+stays a two-chip comparison for that reason — it is about the extraction, not
+a census of chips.
 
 **Shared**, and shared *because* a second machine was built rather than in
 anticipation of one: `lp-emu-esp-common`'s bus and MMIO decode, the
@@ -41,7 +46,8 @@ seam and its rule are Xtensa M6 P05's (ruling D1 (b) / DD64), and
 `lp-emu-esp-common/README.md`'s *Engines, views, and IP* is where it is
 argued.
 
-**Not shared**, and each of these is a place the two chips genuinely differ:
+**Not shared**, and each of these is a place the C6 and the classic
+genuinely differ (the S3's own deltas are its README's, block by block):
 
 | | `lp-emu-esp32c6` | `lp-emu-esp32v3` |
 |---|---|---|
@@ -61,16 +67,50 @@ the decoder's FNV-1a of the bytes the pad carried. **On both chips, today,
 both readings are ours** — `rmt-chase` has no silicon twin on either chip, and
 the classic's `pin` class is `modeled` for that reason.
 
-Both machines now answer their chip's **routine hardware walk** without a
-board — `just walk-esp32c6-emu` and `just walk-esp32v3-emu` — and each has its
-record: `docs/reports/2026-09-08-esp32c6-emulator-walk.md` and
-`docs/reports/2026-09-11-esp32v3-emulator-walk.md`. Read each record's "what
-this does not cover" before quoting a figure out of it; the two lists are not
-the same list, because the two machines are not wrong about the same things.
+### The third machine, and why it is not a third column
 
-A change to anything in the first list is a change to both machines, which is
-why CI's `emu_c6` and `emu_esp32v3` path filters both fire on `lp-emu/**`. A
-change that moves one and not the other is exactly what nobody would notice.
+`lp-emu-esp32s3` (Xtensa M6) is not a midpoint between the two: it is **the
+C6's shape on the classic's hart**. Native USB-Serial-JTAG rather than a
+bridge chip on the board, the C6's generation of RMT, SYSTIMER and EFUSE —
+and `lp-xt-emu`'s windowed hart, the classic's `RTC_CNTL`, `I2C_ANA_MST` and
+interrupt matrix, a cache MMU over two flash windows, and SRAM1 mapped
+**twice** so the same memory is written through the D-bus and executed
+through the I-bus. Which parent each block came from is the thing a reader
+guesses wrong, so it is written down per block in
+[`lp-emu-esp32s3/README.md`](lp-emu-esp32s3/README.md) rather than summarised
+into a column here — "close to the C6's" is exactly the kind of claim that
+costs a week.
+
+### The walks
+
+All three machines now answer their chip's **routine hardware walk** without
+a board:
+
+```bash
+just walk-esp32c6-emu     # scripts/emu/m4-walk.sh
+just walk-esp32s3-emu     # the same script, --chip esp32s3 (M6 P10)
+just walk-esp32v3-emu     # its own script: UART0 and a CH340's cable verbs
+```
+
+The C6 and the S3 share a script because they share a shape — one native USB
+link, one socket, one `lp-cli upload`, and a board whose `D10` pad is the one
+`projects/test/shader-oracle` names, so **neither retargets the project**. The
+classic needed its own (DD69): its link is UART0 and its walk drives a
+CH340's auto-reset dance over a control socket, and pretending those were one
+script would have hidden the difference rather than shown it.
+
+Two of the three have a record: `docs/reports/2026-09-08-esp32c6-emulator-walk.md`
+and `docs/reports/2026-09-11-esp32v3-emulator-walk.md`. **The S3 has none
+yet** — M6 P11 writes it — so until it lands, what that walk does and does
+not cover is the script's own header and the crate README's "The walk".
+Read each record's "what this does not cover" before quoting a figure out of
+it; the lists are not the same list, because the machines are not wrong about
+the same things.
+
+A change to anything in the first list is a change to all three machines,
+which is why CI's `emu_c6`, `emu_esp32v3` and `emu_esp32s3` path filters
+**all** fire on `lp-emu/**`. A change that moves one and not the others is
+exactly what nobody would notice.
 
 ## The layering
 

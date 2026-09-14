@@ -2176,8 +2176,21 @@ heap-budget-check-chips-c6 margin_pct="0": (heap-budget-check-chips margin_pct "
 heap-budget-check-chips-v3 margin_pct="0":
     LP_EMU_BUILD_FW=1 scripts/heap-budget-check.sh chips {{ margin_pct }} esp32v3
 
-# Re-measure the chip figures into scripts/heap-budget-record.json — both
-# chips, or the one named.
+# The S3's arm alone — CI's `Emulator ESP32-S3 (x64)` job (M6 P10).
+#
+# It rides that job for exactly the classic's two reasons: this ELF is an
+# Xtensa cross-build and only the S3's own job installs that toolchain, and
+# `heap-budget-chips` is path-gated on `emu_c6`, which does not fire for
+# `lp-fw/fw-esp32s3/**` — so this firmware's own changes would run its heap
+# gate never. `emu_esp32s3` is the filter that fires for them (DD71).
+#
+# No `install-rv32-target`, for the classic's reason: nothing in this arm is
+# riscv32.
+heap-budget-check-chips-s3 margin_pct="0":
+    LP_EMU_BUILD_FW=1 scripts/heap-budget-check.sh chips {{ margin_pct }} esp32s3
+
+# Re-measure the chip figures into scripts/heap-budget-record.json — every
+# chip, or the one named.
 heap-budget-baseline-chips chip="": install-rv32-target
     LP_EMU_BUILD_FW=1 scripts/heap-budget-check.sh chips-baseline {{ chip }}
 
@@ -2185,6 +2198,12 @@ heap-budget-baseline-chips chip="": install-rv32-target
 # `stack_band_note` in the record); a runner's figure is M5 P6's to add.
 heap-budget-baseline-chips-v3:
     LP_EMU_BUILD_FW=1 scripts/heap-budget-check.sh chips-baseline esp32v3
+
+# Re-measure the S3's alone. Its band is measured on ONE host today (see
+# `stack_band_note` in the record); a runner's figure is the first green
+# `Emulator ESP32-S3 (x64)` run's to add.
+heap-budget-baseline-chips-s3:
+    LP_EMU_BUILD_FW=1 scripts/heap-budget-check.sh chips-baseline esp32s3
 
 # Emit RV32 stack-size metadata for the ESP32 firmware.
 # The direct cargo build can fail at final link on local ESP linker-script setup,
@@ -3055,20 +3074,29 @@ test-emu-esp32s3-boot: build-fw-esp32s3
     fi
     cargo test -p lp-emu-esp32s3 -- --include-ignored
 
-# **M6's gate so far.** What the `Emulator ESP32-S3 (x64)` job will run.
-#
-# ⚠️ **There is no such CI job yet — P08 adds it**, with its path filter
-# mirroring `emu_esp32v3` and including `lp-fw/fw-esp32-common/**` (E6). This
-# recipe is deliberately the whole of what that job will do, so the gate a
-# human runs and the gate CI runs stay one thing.
+# **M6's gate.** What the `Emulator ESP32-S3 (x64)` job runs (M6 P10 added
+# it, path-gated on `emu_esp32s3` and non-required — the filter mirrors
+# `emu_esp32v3` and includes `lp-fw/fw-esp32-common/**`, E6). This recipe is
+# deliberately the whole of what that job does, so the gate a human runs and
+# the gate CI runs stay one thing.
 #
 # The two lints cover all three chips, so a hand edit to the S3's generated
-# register tables fails the same lint a hand edit to the C6's does.
+# register tables fails the same lint a hand edit to the C6's does. The two
+# host test commands are the classic gate's, for its reason: the transcript
+# replays and the payload registry are what a chip's rows in
+# `lp-emu-validate` are worth, and running them beside the machine's own
+# suite is what keeps a registry edit from landing untested.
+#
+# ⚠️ The WALK is not here (`just walk-esp32s3-emu`): it builds a merged image
+# and a release `lp-cli` and runs eight emulated seconds, which is a walk and
+# not a per-PR gate (R6/DD49).
 test-emu-esp32s3-gate: test-emu-esp32s3-boot
     #!/usr/bin/env bash
     set -euo pipefail
     just lint-emu-fence
     just lint-emu-regnames
+    cargo test -p lp-emu-validate
+    cargo test -p lp-cli --test validate_registry_parity
 
 # Run an image on the ESP32-S3 machine.
 emu-esp32s3 elf *args:
@@ -3280,6 +3308,47 @@ test-emu-serve:
 # Xtensa half of `ci-prereqs` has nothing to do with this chip.
 walk-esp32c6-emu *args: install-rv32-target build-rv32-builtins
     scripts/emu/m4-walk.sh {{ args }}
+
+# The same walk on the ESP32-S3 — the same script, a second chip (M6 P10).
+#
+# A chip case rather than a script of its own, which is the OPPOSITE of the
+# classic's ruling below and for a named reason: the S3 is the C6's shape, not
+# the classic's. Native USB-Serial-JTAG, the C6's generation of RMT, `lp-cli
+# upload` over the same kind of socket, and a board whose `D10` pad is the one
+# `projects/test/shader-oracle` already names — so the project is uploaded
+# UNMODIFIED, exactly as on the C6, and there is no scratch copy to look for.
+# The classic's UART0 link and CH340 cable verbs are what made a separate
+# script the honest shape there (DD69).
+#
+# Three differences from the C6 recipe, all in the script's header:
+#
+#   the runner  the `lp-emu-esp32s3` binary, not `lp-cli emu run` — `emu run`
+#               knows one chip and teaching it a second is M8's.
+#   the image   8 MiB, not 4: this chip's partition table does not fit a 4 MB
+#               part (docs/adr/2026-07-30-esp32s3-partition-floor.md).
+#   the port    `--usb-sj-drain manual` + the control channel do what
+#               `--monitor` does on the C6: hold the port open after `lp-cli
+#               upload` disconnects, so the deferred lit dump thirty frames
+#               later still reaches a host. The walk then really does unplug
+#               the cable and asserts the state.
+#
+# ⚠️ **This walk is M6's only end-to-end exercise of D2's alias.** The oracle
+# project compiles a shader ON THE DEVICE; on the S3 that shader is written
+# through the D-bus and executed through the I-bus. If the alias were wrong,
+# this is where it would show.
+#
+# ⚠️ DD110: frame-START cycles on this chip move with `--core-quantum` (~3.9
+# us/frame between 256 and 1024 — the guest's ISR observes the RMT threshold
+# at slice boundaries) and frame BYTES do not. The walk runs at the default
+# quantum 256 and compares bytes, never emulated microseconds (PD9).
+#
+# NOT in any CI job, for the C6 recipe's reason and the classic's (R6/DD49): it
+# builds a firmware image, a merged 8 MiB image and a release `lp-cli`, then
+# runs the machine for eight emulated seconds. What it proves per-tick lives in
+# `lp-emu-esp32s3/tests/pin_frames.rs`, which does run there —
+# `just test-emu-esp32s3-gate` is the CI surface.
+walk-esp32s3-emu *args: install-rv32-target build-rv32-builtins
+    scripts/emu/m4-walk.sh --chip esp32s3 {{ args }}
 
 # The same walk on the CLASSIC ESP32 — the whole thing (M5 P5).
 #
