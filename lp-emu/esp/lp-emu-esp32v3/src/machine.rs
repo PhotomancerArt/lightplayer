@@ -1821,15 +1821,18 @@ impl Esp32V3Builder {
         if self.boot_mode == BootMode::Direct {
             let frame = self.boot_frame.unwrap_or_else(BootFrame::idf_bootloader);
             machine.direct_load(frame)?;
-            // **The boot event** (M7 XD10), and the only translation event the
-            // classic has until P07's publish-by-store.
+            // **The boot event**, the first of the classic's two (M7 XD10);
+            // the second is [`Esp32V3Machine::translate_if_code_was_published`].
             //
             // Here, and not under `BootMode::RomUp`: the ROM and the second-
             // stage bootloader put the image in place with guest **stores**, so
             // a core installed before they run would hold blocks of bytes that
-            // are about to be overwritten, and answering that needs the
-            // retranslation P07 brings. Q5 may schedule it; today ROM-up runs
-            // interpreted and says so.
+            // are about to be overwritten. P07's publish-by-store event could
+            // now answer exactly that — it is the "the guest rewrote this"
+            // case, and it retires and re-emits at the boundary — but whether
+            // ROM-up should translate is Q5's to schedule and this plan does
+            // not move it. Today ROM-up runs interpreted and says so;
+            // `tests/jit_default.rs` is that rule.
             // The census (P05): on both harts from the first instruction, and
             // the guest's code-write spans tracked for the third path's walk.
             if machine.pc_census_path.is_some() {
