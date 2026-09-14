@@ -3550,9 +3550,35 @@ bench-emu-esp32v3-pgo:
 #   bun  target/emu-bench-web/bench-cli.mjs --stage target/emu-bench-web
 #   node target/emu-bench-web/bench-cli.mjs --stage target/emu-bench-web
 #
+# `--chip esp32v3` routes to the CLASSIC's own rig instead (M7 P08):
+# `scripts/emu/build-xt-wasm.sh`, which builds the `wasm32-wasip1` module of
+# `lp-emu-esp32v3` and stages it beside the three pinned classic images.
+# A separate script and a separate stage directory rather than a `--chip` arm
+# inside `bench-web.sh`, because `scripts/emu/bench-web{.sh,/}` is the perf
+# lab's and is never edited by another plan — and because the two machines
+# share neither argv[0], nor the flag list, nor the `--jit-report` grammar a
+# row is read out of. See `docs/emulator-perf-ledger-classic.md` §4.
+#
+#   just bench-emu-web --chip esp32v3              # build + stage the classic
+#   scripts/emu/build-xt-wasm.sh --verify          # one row in each desk engine
+#
 # Also an ORACLE, not a gate — see the script's header.
 bench-emu-web *args:
-    scripts/emu/bench-web.sh {{ args }}
+    #!/usr/bin/env bash
+    set -euo pipefail
+    args=({{ args }})
+    for i in "${!args[@]}"; do
+        if [[ "${args[$i]}" == "--chip" ]]; then
+            chip="${args[$((i + 1))]:-}"
+            unset 'args[i]' 'args[i+1]'
+            case "$chip" in
+                esp32v3|esp32) exec scripts/emu/build-xt-wasm.sh "${args[@]}" ;;
+                esp32c6) break ;;
+                *) echo "bench-emu-web: --chip is esp32c6 or esp32v3, not '$chip'" >&2; exit 2 ;;
+            esac
+        fi
+    done
+    exec scripts/emu/bench-web.sh "${args[@]}"
 
 # The emulator perf lab: the phone joins once, the director queues the
 # presses (scripts/emu/lab/README.md). A dependency-free node server on the

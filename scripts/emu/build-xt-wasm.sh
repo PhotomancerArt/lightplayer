@@ -285,5 +285,5 @@ if [[ $do_verify -eq 1 ]]; then
 fi
 
 echo "build-xt-wasm: measure the desk engines off the stage with" >&2
-echo "  bun  $stage_dir/xt-bench-cli.mjs --stage $stage_dir --rows render-loop:t1:jit:8,render-loop:t1:jit:16,render-loop:t1:interp --best-of 5" >&2
+echo "  bun  $stage_dir/xt-bench-cli.mjs --stage $stage_dir --rows render-loop:t1:jit:8,render-loop:t1:jit:16,render-loop:t1:jit:64,render-loop:t1:interp --best-of 5" >&2
 echo "  /opt/homebrew/bin/node $stage_dir/xt-bench-cli.mjs --stage $stage_dir --rows … --best-of 5" >&2

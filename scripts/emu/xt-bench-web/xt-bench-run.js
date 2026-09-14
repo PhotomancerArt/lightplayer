@@ -45,16 +45,23 @@ const siblings = Promise.all([
 ]).then(([wasiMod, jitMod]) => ({ makeWasi: wasiMod.makeWasi, makeJitHost: jitMod.makeJitHost }));
 
 /// The rows the milestone bar is read on (acceptance 3): `render-loop` at t1,
-/// both cores at `--core-quantum 256`, the translated core at the two sizes
-/// the RV32 ladder left open (JSC prefers 8, V8 16), and the same image
-/// re-taken under `--interpreter` on the same binary in the same session.
+/// both cores at `--core-quantum 256`, the translated core at the three sizes
+/// the desk table sweeps, and the same image re-taken under `--interpreter`
+/// on the same binary in the same session.
+///
+/// **8, 16 and 64**, not the RV32 ladder's 8 and 16: P08's desk tables put
+/// the classic's best at **64 in V8** and **16 in JSC**, and 64 is the
+/// emulator's own `JIT_FN_BLOCKS_DEFAULT` — so a phone press has to cover the
+/// default it would otherwise not measure. The phone's own preference is
+/// G-M7P-XT's question, and a preset that cannot ask it is not the preset.
 ///
 /// The interpreter row is not a historical number: it is the denominator of
 /// the ratio the gate quotes, and it has to come from the same invocation on
-/// the same machine at the same load or it is not a ratio of anything.
+/// the same device at the same load or it is not a ratio of anything.
 export const GATE_ROWS = [
   { slug: 'render-loop', grade: 't1', mode: 'jit', fnBlocks: 8, timeout: '5500ms' },
   { slug: 'render-loop', grade: 't1', mode: 'jit', fnBlocks: 16, timeout: '5500ms' },
+  { slug: 'render-loop', grade: 't1', mode: 'jit', fnBlocks: 64, timeout: '5500ms' },
   { slug: 'render-loop', grade: 't1', mode: 'interp', fnBlocks: null, timeout: '5500ms' },
 ];
 
@@ -131,10 +138,14 @@ export function readouts(text) {
 
   // JD20's boot-cost line, one per translation event per core, verbatim plus
   // the numbers the gate table quotes. `lp-emu-esp32v3/src/jit.rs`'s
-  // `BuildReport::boot_line` is the grammar; `event` is `boot`, `release` or
-  // `publish` (the classic's two events, plus the APP core's DPORT release).
+  // `BuildReport::boot_line` is the grammar; `event` is `boot`,
+  // `app-core release` or `publish-by-store #N` — the classic's two events
+  // plus the APP core's DPORT release, and two of the three carry a space, so
+  // the event is `[^:]+` rather than one token. The same lines appear again
+  // inside each per-core report line; those are mid-line and the `^` anchor is
+  // what keeps them from being counted twice.
   for (const m of text.matchAll(
-    /^jit: core(\d+) (\S+): (\d+) block\(s\) from (\d+) seed\(s\), (\d+) instruction\(s\) \((\d+) escaped, (\d+) emitted natively, static escape share ([\d.]+) %[^)]*\); (\d+) function\(s\) at (\d+) blocks each, largest body (\d+) B, module (\d+) B \(([\d.]+) B per instruction\); discover ([\d.]+) ms, emit ([\d.]+) ms, compile ([\d.]+) ms, instantiate ([\d.]+) ms/gm,
+    /^jit: core(\d+) ([^:]+): (\d+) block\(s\) from (\d+) seed\(s\), (\d+) instruction\(s\) \((\d+) escaped, (\d+) emitted natively, static escape share ([\d.]+) %[^)]*\); (\d+) function\(s\) at (\d+) blocks each, largest body (\d+) B, module (\d+) B \(([\d.]+) B per instruction\); discover ([\d.]+) ms, emit ([\d.]+) ms, compile ([\d.]+) ms, instantiate ([\d.]+) ms/gm,
   )) {
     r.boot.push({
       core: num(m[1]), event: m[2],
