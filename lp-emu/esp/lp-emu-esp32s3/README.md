@@ -41,6 +41,8 @@ just build-fw-esp32s3
 just emu-esp32s3 target/xtensa-esp32s3-none-elf/release-esp32s3/fw-esp32s3 --strict-bus
 just test-emu-esp32s3          # the suite; builds no firmware
 just test-emu-esp32s3-boot     # …plus the image-backed half (builds the merged chip too)
+just test-emu-esp32s3-gate     # …plus the lints and the replays: the CI job's whole content
+just walk-esp32s3-emu          # the hardware walk with this machine where the board goes
 cargo run -p lp-emu-esp32s3 --release -- --map
 
 # The chip boots itself (P06): the real mask ROM and the real IDF bootloader
@@ -504,6 +506,74 @@ wrong (`m6/notes.md` §3): `RTC_CNTL`, `I2C_ANA_MST` and the matrix are the
 live in this crate because the plan's invariant is that the C6 and the
 classic do not move by a byte; the extraction into `lp-emu-esp-common` is
 M8's, and each file names what it would extract.
+
+### The walk
+
+`just walk-esp32s3-emu` (`scripts/emu/m4-walk.sh --chip esp32s3`, M6 P10) is
+**not** in `test-emu-esp32s3` and is not a test. It is
+`scripts/m4-hardware-walk.sh` — which defaults to this very chip — with this
+machine where the XIAO S3 goes: the current tree's shipped image plus
+`frame-dump`, merged into an 8 MiB flash part, booted from the reset vector
+through the real mask ROM and the real IDF bootloader, served on a socket,
+`lp-cli upload projects/test/shader-oracle` against it, and the rendered frame
+held against the host oracle **twice** — the firmware's own `[OUT] dump` line
+and the waveform decoded back off gpio9 by a decoder that never spoke to the
+firmware. It fails if those two disagree with each other, which is the
+comparison a board cannot be asked to make.
+
+⚠️ **This walk is M6's only end-to-end exercise of the I-bus/D-bus alias.**
+The oracle project compiles its shader ON THE DEVICE: the JIT writes code
+through the D-bus view of SRAM1 and the hart fetches it through the I-bus
+view. Every other test on this chip writes and reads through one view. If the
+alias were wrong, this is where it would show.
+
+**No project retarget**, and the same thing said a third time because a reader
+coming from the classic will look for it: `ws281x:local:D10` is this board's
+own pad. The classic's walk copies the project and rewrites `D10 → IO18`; this
+one uploads the committed project unmodified, exactly as the C6's does.
+
+**The quantum.** The twin runs at `--core-quantum 256`, the default, and
+compares **bytes** — never emulated microseconds (PD9). That matters here
+because of a distinction the pad section above is easy to misread: frames the
+HOST drives (`tests/pin_frames.rs`) start at identical cycles at any quantum,
+while frames the GUEST drives move their start by a few microseconds with it,
+because the guest's ISR observes the RMT threshold at a slice boundary. The
+bytes are the same either way, and the bytes are what this walk is about.
+
+**What it does not cover**, beyond the machine's own limits: no Chromium USB
+stack, no analog anything, no silicon — **no S3 board has been read at all**
+(M6 P09 owns that), so nothing this walk prints is a measurement of hardware.
+And two things it carries rather than hides:
+
+- `LP_WALK_BOOT=direct`, the fast path everywhere else, **cannot complete an
+  upload on this chip today**. The deploy's `stopAllProjects` reply lands on
+  the link's *tried* stream — the open defect
+  `docs/defects/2026-09-13-the-s3-link-drops-the-io-tasks-next-chunk-on-a-stale-serial-in-empty.md`
+  (DD103) — and `lp-cli` waits for a reply the host never got. The ROM-up
+  default loses only one 64-byte packet of the `hello`'s feature list, which
+  `lp-cli` survives. Giving the direct path a flash chip removes its `lpfs`
+  error line and does **not** bring the reply back, so that log line is not
+  the trigger.
+- For the same defect the ROM-up walk asks `lp-cli upload` for the deploy ack
+  (`--no-wait`) and takes its "is it running?" evidence from lit frames on the
+  pad instead of from a `projectRead` stream the link is known to mangle. Both
+  are re-pointed at the plain calls the day the defect closes.
+
+It builds a firmware image, a merged image and a release `lp-cli`, then runs
+eight emulated seconds, so it costs minutes rather than seconds and belongs in
+a session rather than in a PR gate (R6/DD49). What it proves per tick is
+`tests/pin_frames.rs`, which does run in `just test-emu-esp32s3-gate` — the
+`Emulator ESP32-S3 (x64)` job's whole content.
+
+`just heap-budget-check-chips-s3` is the other thing that reads this machine
+for a gate: the shipped image's own first-heartbeat allocator figures,
+ratcheted into `scripts/heap-budget-record.json`. ⚠️ Its triple is
+**elicited** (`walks/s3-stop-all.script`), as the classic's is and as the
+C6's is not, and it is measured on a **direct load with no flash chip**, so
+the firmware runs on its memory FS — the record's `boot_shape` says what that
+costs against the ROM-up figures, and the two must never be compared as if
+they were the same boot. The band is one host's until the CI job reports a
+second (`docs/heap-budget-gate.md`).
 
 ### Two things the accept blocks needed that a PAC reset does not give
 
