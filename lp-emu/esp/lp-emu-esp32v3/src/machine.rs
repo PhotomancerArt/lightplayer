@@ -2667,6 +2667,14 @@ impl Machine {
             return;
         };
         self.jit_publish_pending = false;
+        // A restore replaces the harts wholesale and a cloned hart carries no
+        // translated core (`lp_xt_emu::mach::translated`'s contract — a core
+        // is not architectural state and is absent from snapshots), so a
+        // publish after one has nothing to retranslate. Counting it would put
+        // an event in the report that did no work.
+        if !self.harts.iter().any(XtHart::has_translated_core) {
+            return;
+        }
         self.jit_retranslations += 1;
         let written = self.code_write_spans.clone();
         for core in 0..CORES {
