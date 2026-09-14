@@ -43,9 +43,7 @@ pub fn written_groups(inst: &Inst) -> u8 {
         Inst::Slli(rd, ..) | Inst::Srli(rd, ..) | Inst::Srai(rd, ..) => g(rd),
         Inst::Extui(rd, ..) | Inst::Sext(rd, ..) => g(rd),
         Inst::MovN(rt, _) | Inst::AddN(rt, ..) | Inst::AddiN(rt, ..) => g(rt),
-        Inst::Addi(rt, ..) | Inst::Addmi(rt, ..) | Inst::Movi(rt, _) | Inst::MoviN(rt, _) => {
-            g(rt)
-        }
+        Inst::Addi(rt, ..) | Inst::Addmi(rt, ..) | Inst::Movi(rt, _) | Inst::MoviN(rt, _) => g(rt),
         Inst::Load(_, rt, ..) | Inst::L32iN(rt, ..) | Inst::L32r(rt, _) => g(rt),
         Inst::Call(op, _) => match op {
             CallOp::Call0 => 1,
@@ -325,7 +323,10 @@ impl Emitter<'_> {
             self.i(I::Block(BlockType::Empty));
         }
         self.i(I::LocalGet(sel));
-        self.i(I::BrTable(alloc::borrow::Cow::Owned(alloc::vec![0, 1, 2, 3]), 3));
+        self.i(I::BrTable(
+            alloc::borrow::Cow::Owned(alloc::vec![0, 1, 2, 3]),
+            3,
+        ));
         self.i(I::End);
         for n in 0..4u8 {
             arm(self, n);

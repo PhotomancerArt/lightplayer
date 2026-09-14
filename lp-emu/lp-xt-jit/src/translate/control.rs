@@ -101,7 +101,9 @@ impl Emitter<'_> {
     /// Continue at the live `LBEG`: the walk's static back-edge when the
     /// register agrees with it, else out of the stay at the live value.
     fn loop_target(&mut self, k: usize) {
-        let lbeg = self.loop_mark.expect("only a marked instruction loops back");
+        let lbeg = self
+            .loop_mark
+            .expect("only a marked instruction loops back");
         self.i(I::LocalGet(L_LBEG));
         self.i(I::I32Const(lbeg as i32));
         self.i(I::I32Eq);

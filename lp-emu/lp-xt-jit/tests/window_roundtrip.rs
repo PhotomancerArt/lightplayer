@@ -182,32 +182,31 @@ fn every_call_increment_nests_and_wraps_the_ring() {
         // The `callx` targets have no static edge: seed them, as the classic
         // seeds every function symbol.
         let seeds = starts[3..].to_vec();
-        let program = Program::new(all.clone()).literals(literals).seeds(seeds).setup(move |hart, bus| {
-            seed(hart, bus);
-            let cpu = hart.cpu_mut();
-            cpu.window_base = base;
-            cpu.window_start = 1 << base;
-            // `main` is entered as if a `call4` from the frame at `base` had
-            // just happened: a4 holds the mangled return to STOP.
-            cpu.ps_callinc = 1;
-            // The window moved: re-seed the visible registers.
-            cpu.set_a(1, SP);
-            cpu.set_a(4, (1 << 30) | (STOP & 0x3FFF_FFFF));
-            cpu.set_a(13, PROGRAM_AT);
-        });
+        let program = Program::new(all.clone())
+            .literals(literals)
+            .seeds(seeds)
+            .setup(move |hart, bus| {
+                seed(hart, bus);
+                let cpu = hart.cpu_mut();
+                cpu.window_base = base;
+                cpu.window_start = 1 << base;
+                // `main` is entered as if a `call4` from the frame at `base` had
+                // just happened: a4 holds the mangled return to STOP.
+                cpu.ps_callinc = 1;
+                // The window moved: re-seed the visible registers.
+                cpu.set_a(1, SP);
+                cpu.set_a(4, (1 << 30) | (STOP & 0x3FFF_FFFF));
+                cpu.set_a(13, PROGRAM_AT);
+            });
         let run = agree(&format!("nest-base{base}"), &program);
         assert!(run.escapes.is_empty(), "base {base}: {:?}", run.escapes);
         // Main's frame plus 3+2+1+3+2+1 groups is 13 of the ring's 16, so no
         // frame is ever within reach from any base — no overflow, and the
         // chain returns to STOP through seven `retw`s.
         assert_eq!(
-            run.outcome.pc,
-            STOP,
+            run.outcome.pc, STOP,
             "base {base}: exits {:?}, exccause {} excvaddr {:#x} epc1 {:#x}",
-            run.exits,
-            run.outcome.exccause,
-            run.outcome.excvaddr,
-            run.outcome.epc1
+            run.exits, run.outcome.exccause, run.outcome.excvaddr, run.outcome.epc1
         );
         assert!(
             !exited_with(&run, why::WINDOW),
@@ -241,7 +240,10 @@ fn a_frame_within_reach_refuses_the_block_and_the_interpreter_takes_the_exceptio
     let run = agree("overflow", &program);
     assert_ne!(run.outcome.pc, STOP, "the overflow trapped to the vector");
     assert_eq!(run.outcome.epc1, PROGRAM_AT + 6, "EPC1 is the addi's pc");
-    assert_eq!(run.outcome.window.window_base, 5, "moved to the frame to spill");
+    assert_eq!(
+        run.outcome.window.window_base, 5,
+        "moved to the frame to spill"
+    );
     assert!(exited_with(&run, why::WINDOW), "{:?}", run.exits);
     assert_eq!(run.outcome.ar[3 * 4 + 4], 0, "a4 = 3 never ran");
 }
@@ -304,7 +306,10 @@ fn call0_and_ret_agree() {
         Inst::Nullary(NullaryOp::Ret),
     ];
     // `addi` takes -128..=127.
-    let leaf = vec![Inst::Addi(a(2), a(2), 100), Inst::NullaryN(NullaryNarrowOp::RetN)];
+    let leaf = vec![
+        Inst::Addi(a(2), a(2), 100),
+        Inst::NullaryN(NullaryNarrowOp::RetN),
+    ];
     pad_to_word(&mut insts);
     let pcs = Program::new(insts.clone()).pcs();
     let leaf_at = *pcs.last().unwrap();

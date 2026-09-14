@@ -146,7 +146,10 @@ fn a_refused_access_at_the_loop_end_undoes_nothing_it_did_not_do() {
     });
     let run = agree("refused-at-lend", &program);
     assert_ne!(run.outcome.pc, STOP);
-    assert_eq!(run.outcome.window.lcount, 3, "the first iteration's decrement never happened");
+    assert_eq!(
+        run.outcome.window.lcount, 3,
+        "the first iteration's decrement never happened"
+    );
     assert_eq!(run.outcome.ar[2], 1);
 }
 
@@ -233,5 +236,9 @@ fn the_loop_back_is_native_at_one_block_a_function() {
     assert_eq!(emitted.outcome.ar[2], 50);
     assert_eq!(emitted.outcome.ar[4], 50 * 51 / 2);
     assert!(emitted.escapes.is_empty());
-    assert_eq!(emitted.entries, 1, "one stay ran the whole loop: {:?}", emitted.exits);
+    assert_eq!(
+        emitted.entries, 1,
+        "one stay ran the whole loop: {:?}",
+        emitted.exits
+    );
 }

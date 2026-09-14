@@ -158,7 +158,10 @@ fn run(insts: &[Inst], script: &[(u32, Step)], end: u64) -> Outcome {
         lp_xt_jit::translate::Emit::NOTHING,
         64,
     );
-    assert_eq!(emitted.native_insts, 0, "nothing is emitted natively under NOTHING");
+    assert_eq!(
+        emitted.native_insts, 0,
+        "nothing is emitted natively under NOTHING"
+    );
     assert_eq!(emitted.escaped_insts, found.stats.insts);
 
     let mut mem = lp_emu_core::arena::GuestArena::zeroed((PAGES as usize) * 65536);

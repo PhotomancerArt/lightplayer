@@ -918,14 +918,20 @@ pub fn pure(program: &Program) -> Outcome {
     let mut budget = program.budget;
     while (PROGRAM_AT..end).contains(&hart.pc()) {
         budget -= 1;
-        assert!(budget > 0, "the bare hart did not leave in {} steps", program.budget);
+        assert!(
+            budget > 0,
+            "the bare hart did not leave in {} steps",
+            program.budget
+        );
         hart.step_one(&mut bus);
     }
     let cpu = hart.cpu();
     let sr = hart.sr();
     let mut fnv = case::Fnv::default();
     // SAFETY: the arena's own guest bytes.
-    fnv.update(unsafe { std::slice::from_raw_parts(base.add(ARENA_AT as usize), RAM_LEN as usize) });
+    fnv.update(unsafe {
+        std::slice::from_raw_parts(base.add(ARENA_AT as usize), RAM_LEN as usize)
+    });
     Outcome {
         pc: hart.pc(),
         ar: cpu.ar,
