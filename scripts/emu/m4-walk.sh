@@ -444,6 +444,34 @@ if [[ "$CHIP" == "esp32s3" ]]; then
     # simply be empty and every failure below would blame the render.
     cable state
     cable_want "the host's state at power-on" "host=attached" "draining=true" "sof=on"
+
+    # ⚠️ **Do not add a "wait for the guest to boot" barrier here.** It is the
+    # obvious next idea and it makes this walk WORSE, which is worth the
+    # paragraph because the evidence cost two runs to get.
+    #
+    # The upload rides two races, and they pull opposite ways:
+    #
+    #   * `lp-cli`'s readiness budget is five WALL seconds from link-open to
+    #     the device's hello (`DEFAULT_READY_DEADLINE`), and this chip's
+    #     ROM-up boot — the real mask ROM, the real IDF bootloader, 1.9 MB of
+    #     app hashed and mapped — can take longer than that to interpret on a
+    #     loaded desk. Connecting at once spends the boot INSIDE that budget,
+    #     which is why the client is started immediately; a run that loses
+    #     this race says "timed out waiting for the device hello".
+    #   * The open link defect (DD103) eats the io_task's framed write when it
+    #     follows an esp-println packet inside the 100 us IN drain latency —
+    #     and the deploy's `stopAllProjects` reply is written straight after
+    #     the ledger triple the handler prints, which is exactly that shape
+    #     (`tests/boot_idle.rs` pins it). A run that loses THIS race says
+    #     "device did not respond within 10.0s" and the reply is on the tried
+    #     stream printed under THE RUN.
+    #
+    # Connecting at once wins the second race in practice (the client's hello
+    # request is already in the OUT FIFO when the server loop starts, and the
+    # reply lands clear of the boot's print burst); waiting for a measured
+    # 500 ms guest barrier — the server loop is up at 348 ms, `--exit-on
+    # "[RECOVERY] boot complete"` — loses it every time. So: no barrier, and
+    # the fix is the defect closing rather than anything in this script.
 fi
 
 # ---------------------------------------------------------------- the upload
@@ -493,6 +521,22 @@ if [[ $cli_status -ne 0 ]]; then
     # exit code still says FAILED.
     if [[ "$CHIP" != "esp32s3" ]]; then
         exit 1
+    fi
+    # The two known failures, named, because both look like "the emulator is
+    # broken" and neither is. See the CABLE section above for the full
+    # argument and the measurements.
+    if grep -qa "timed out waiting for the device hello" "$OUT/cli.stderr"; then
+        echo "       TRIAGE: the readiness race, and it is about how busy this host is." >&2
+        echo "       lp-cli allows five WALL seconds from link-open to the hello" >&2
+        echo "       (lpa-link DEFAULT_READY_DEADLINE). This chip's server loop is up at" >&2
+        echo "       348 ms of GUEST time, which is a few wall seconds of interpreting —" >&2
+        echo "       under a loaded desk it is more than five. Check the load average and" >&2
+        echo "       run it again on a quiet machine. Nothing about the image changed." >&2
+    elif grep -qa "device did not respond within" "$OUT/cli.stderr"; then
+        echo "       TRIAGE: a reply the LINK ate — the open defect DD103. THE RUN section" >&2
+        echo "       below prints the tried stream; if it holds the deploy's" >&2
+        echo "       'stopAllProjects' reply, that is this failure and the guest served the" >&2
+        echo "       request perfectly (the DEVICE section shows it)." >&2
     fi
     echo "       continuing: the frames the pad already carried are printed below" >&2
     upload_failed=1
