@@ -35,6 +35,12 @@ fn seed(hart: &mut lp_xt_emu::mach::XtHart<common::RamBus>, _: &mut common::RamB
 fn the_three_loop_forms_agree_with_the_interpreter() {
     for op in [LoopOp::Loop, LoopOp::Loopnez, LoopOp::Loopgtz] {
         for count in [0i32, 1, 5, -3] {
+            // `loop` with a count of 0 or below, and `loopnez` with a
+            // negative one, run 2^32 times on hardware, and a stay does not
+            // stop for the harness's budget.
+            if (op == LoopOp::Loop && count <= 0) || (op == LoopOp::Loopnez && count < 0) {
+                continue;
+            }
             let insts = vec![
                 Inst::Movi(a(3), count),
                 Inst::Loop(op, a(3), loop_imm(6)),
@@ -64,12 +70,7 @@ fn the_three_loop_forms_agree_with_the_interpreter() {
                     }
                 }
             };
-            // `loop` with a count of 0 runs 2^32 times on hardware; the
-            // harness's budget would stop it — keep the counts positive for
-            // that form.
-            if !(op == LoopOp::Loop && count <= 0) {
-                assert_eq!(run.outcome.ar[2], expect, "{op:?} {count}");
-            }
+            assert_eq!(run.outcome.ar[2], expect, "{op:?} {count}");
         }
     }
 }
@@ -82,7 +83,7 @@ fn a_branch_at_the_loop_end_decrements_and_wins() {
         Inst::Movi(a(3), 6),
         Inst::Loop(LoopOp::Loopnez, a(3), loop_imm(6)),
         Inst::Addi(a(2), a(2), 1),
-        Inst::BranchZ(BrZ::Beqz, a(6), 3), // taken once a6 == 0: skips the movi
+        Inst::BranchZ(BrZ::Beqz, a(6), 2), // taken once a6 == 0: to the ret, over the movi
         Inst::Movi(a(5), 9),
         ret(),
     ];
@@ -155,23 +156,20 @@ fn a_refused_access_at_the_loop_end_undoes_nothing_it_did_not_do() {
 /// not have.
 #[test]
 fn a_lend_the_walk_never_marked_keeps_the_stay_out() {
-    // The loop names LEND = after the two addis; then `wsr.lend` moves it
-    // to after ONE addi, so the interpreter loops on the first addi alone.
-    let mut insts = vec![
+    // The loop's body is `wsr.lend; addi a2; addi a4` (9 bytes); the `wsr`
+    // moves the live LEND to after the first addi, so the interpreter loops
+    // on `addi a2` alone from then on.
+    let insts = vec![
         Inst::Movi(a(3), 3),
-        Inst::Loop(LoopOp::Loop, a(3), loop_imm(6)),
+        Inst::Loop(LoopOp::Loop, a(3), loop_imm(9)),
+        Inst::Sr(SrOp::Wsr, SpecialReg::Lend, a(8)),
         Inst::Addi(a(2), a(2), 1),
         Inst::Addi(a(4), a(4), 1),
         Inst::Movi(a(5), 9),
         ret(),
     ];
-    // `wsr.lend a8` right after the loop head, inside the body.
     let pcs = Program::new(insts.clone()).pcs();
-    let new_lend = pcs[3]; // after the first addi (as laid out before the wsr insert)
-    let _ = new_lend;
-    insts.insert(2, Inst::Sr(SrOp::Wsr, SpecialReg::Lend, a(8)));
-    let pcs = Program::new(insts.clone()).pcs();
-    // With the wsr in place the first addi is at pcs[3] and ends at pcs[4].
+    // The first addi is at pcs[3] and ends at pcs[4].
     let lend_after_first_addi = pcs[4];
     let program = Program::new(insts).setup(move |hart, bus| {
         seed(hart, bus);
@@ -179,6 +177,10 @@ fn a_lend_the_walk_never_marked_keeps_the_stay_out() {
     });
     let run = agree("wsr-lend", &program);
     assert_eq!(run.outcome.pc, STOP);
+    // First pass: wsr, addi a2 (loop-back at the moved LEND), then `addi a2`
+    // twice more on its own, then addi a4 once.
+    assert_eq!(run.outcome.ar[2], 3);
+    assert_eq!(run.outcome.ar[4], 1);
     // The wsr is undecodable: the block ends before it and the interpreter
     // runs it; with LCOUNT != 0 and an unmarked LEND the stay is refused
     // until the loop is over.
@@ -190,17 +192,18 @@ fn a_lend_the_walk_never_marked_keeps_the_stay_out() {
 /// walk, and leaves at the live `LBEG` (`LOOP_BACK_MISS`).
 #[test]
 fn a_moved_lbeg_leaves_at_the_live_value() {
-    let mut insts = vec![
+    // The body is `wsr.lbeg; addi a2; addi a4` (9 bytes); LBEG moves to the
+    // second addi, so each loop-back skips the wsr and the first addi.
+    let insts = vec![
         Inst::Movi(a(3), 3),
-        Inst::Loop(LoopOp::Loop, a(3), loop_imm(6)),
+        Inst::Loop(LoopOp::Loop, a(3), loop_imm(9)),
+        Inst::Sr(SrOp::Wsr, SpecialReg::Lbeg, a(8)),
         Inst::Addi(a(2), a(2), 1),
         Inst::Addi(a(4), a(4), 1),
         Inst::Movi(a(5), 9),
         ret(),
     ];
-    insts.insert(2, Inst::Sr(SrOp::Wsr, SpecialReg::Lbeg, a(8)));
     let pcs = Program::new(insts.clone()).pcs();
-    // LBEG → the second addi: each loop-back skips the first one.
     let second_addi = pcs[4];
     let program = Program::new(insts).setup(move |hart, bus| {
         seed(hart, bus);

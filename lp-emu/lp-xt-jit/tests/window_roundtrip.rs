@@ -20,6 +20,21 @@ fn retw() -> Inst {
     Inst::NullaryN(NullaryNarrowOp::RetwN)
 }
 
+/// Pad `insts` with nops so the next instruction starts word-aligned: a
+/// `call0/4/8/12` reaches `(pc & !3) + (off << 2) + 4` and nothing else.
+fn pad_to_word(insts: &mut Vec<Inst>) {
+    let end = *Program::new(insts.clone()).pcs().last().unwrap();
+    match end % 4 {
+        1 => insts.push(Inst::Nullary(NullaryOp::Nop)),
+        2 => insts.push(Inst::NullaryN(NullaryNarrowOp::NopN)),
+        3 => {
+            insts.push(Inst::NullaryN(NullaryNarrowOp::NopN));
+            insts.push(Inst::Nullary(NullaryOp::Nop));
+        }
+        _ => {}
+    }
+}
+
 /// A callee that writes every register of its window with a value derived
 /// from its arguments, stores a marker, and returns.
 fn callee(marker: i32) -> Vec<Inst> {
@@ -47,6 +62,9 @@ fn seed(hart: &mut lp_xt_emu::mach::XtHart<common::RamBus>, _: &mut common::RamB
 /// `entry` and were written back if dirty).
 #[test]
 fn call8_entry_retw_round_trips_the_callers_registers() {
+    // `main` is entered as if a `call8` from frame 0 had just happened: a8
+    // holds the mangled return to STOP and CALLINC is 2, so main's own
+    // `retw` at the end returns to STOP through the window.
     let mut insts = vec![
         Inst::Entry(a(1), 64),
         Inst::Movi(a(2), 11),
@@ -59,6 +77,7 @@ fn call8_entry_retw_round_trips_the_callers_registers() {
         Inst::Store(StoreOp::S32i, a(5), a(1), 4),
         retw(),
     ];
+    pad_to_word(&mut insts);
     let pcs = Program::new(insts.clone()).pcs();
     let callee_at = *pcs.last().unwrap();
     let call_pc = pcs[6];
@@ -66,7 +85,9 @@ fn call8_entry_retw_round_trips_the_callers_registers() {
     insts.extend(callee(100));
     let program = Program::new(insts).setup(|hart, bus| {
         seed(hart, bus);
-        hart.cpu_mut().ps_callinc = 2;
+        let cpu = hart.cpu_mut();
+        cpu.set_a(8, (2 << 30) | (STOP & 0x3FFF_FFFF));
+        cpu.ps_callinc = 2;
     });
     let run = agree("call8", &program);
     assert_eq!(run.outcome.pc, STOP);
@@ -113,63 +134,86 @@ fn every_call_increment_nests_and_wraps_the_ring() {
     {
         let mut f = callee(40 + 10 * i as i32);
         f.pop();
-        // a4 = next function's address: PROGRAM_AT (a13 seeded) + offset,
-        // patched below.
-        f.push(Inst::Addi(a(4), a(13), 0));
+        // a4 = the next function's address, from the literal pool (the
+        // callee's own window holds no caller register it could add to);
+        // the field is patched once the layout is known.
+        f.push(Inst::L32r(a(4), 0));
         f.push(Inst::Callx(*op, a(4)));
         f.push(retw());
-        frames.push((f.len() - 2, f));
+        // The instruction to patch is the `l32r`, two before the `retw`.
+        frames.push((f.len() - 3, f));
     }
-    frames.push((0, callee(90)));
+    // The leaf sits at base + 13 of a 16-group ring: it writes three groups,
+    // not four, so its reach stops at base + 15 and nothing overflows.
+    let mut leaf = callee(90);
+    leaf.retain(|i| !matches!(i, Inst::Addi(r, ..) if r.num() >= 12));
+    frames.push((0, leaf));
     // Lay out and patch.
     let mut starts = Vec::new();
     let mut all = insts.clone();
+    let mut frame_index = Vec::new();
     for (_, f) in &frames {
+        pad_to_word(&mut all);
         starts.push(Program::new(all.clone()).pcs().last().copied().unwrap());
+        frame_index.push(all.len());
         all.extend(f.iter().cloned());
     }
     let pcs = Program::new(all.clone()).pcs();
     // main's call12 → frames[0]
     all[1] = Inst::Call(CallOp::Call12, call_words(pcs[1], starts[0]));
-    let mut idx = insts.len();
-    for (fi, (call_at, f)) in frames.iter().enumerate() {
+    let mut literals = Vec::new();
+    for (fi, (call_at, _)) in frames.iter().enumerate() {
         let next = starts.get(fi + 1).copied();
-        let at = idx + call_at;
+        let at = frame_index[fi] + call_at;
         match all[at] {
             Inst::Call(op, _) => {
                 all[at] = Inst::Call(op, call_words(pcs[at], next.unwrap()));
             }
-            Inst::Addi(rd, rs, _) => {
-                let off = (next.unwrap() - PROGRAM_AT) as i32;
-                assert!(off < 128, "the addi reaches the callee ({off})");
-                all[at] = Inst::Addi(rd, rs, off);
+            Inst::L32r(rt, _) => {
+                let slot = common::LITERALS_AT + 4 * literals.len() as u32;
+                literals.push(next.unwrap());
+                all[at] = Inst::L32r(rt, common::l32r_field(pcs[at], slot));
             }
             _ => {}
         }
-        idx += f.len();
     }
     for base in [0u8, 5, 10, 12, 13, 14, 15] {
-        let program = Program::new(all.clone()).setup(move |hart, bus| {
+        let literals = literals.clone();
+        // The `callx` targets have no static edge: seed them, as the classic
+        // seeds every function symbol.
+        let seeds = starts[3..].to_vec();
+        let program = Program::new(all.clone()).literals(literals).seeds(seeds).setup(move |hart, bus| {
             seed(hart, bus);
             let cpu = hart.cpu_mut();
-            cpu.set_a(13, PROGRAM_AT);
             cpu.window_base = base;
             cpu.window_start = 1 << base;
+            // `main` is entered as if a `call4` from the frame at `base` had
+            // just happened: a4 holds the mangled return to STOP.
             cpu.ps_callinc = 1;
             // The window moved: re-seed the visible registers.
-            cpu.set_a(0, STOP);
             cpu.set_a(1, SP);
+            cpu.set_a(4, (1 << 30) | (STOP & 0x3FFF_FFFF));
             cpu.set_a(13, PROGRAM_AT);
         });
         let run = agree(&format!("nest-base{base}"), &program);
         assert!(run.escapes.is_empty(), "base {base}: {:?}", run.escapes);
-        // Seven frames of 1..3 groups fit a 16-group ring from any base
-        // without overflow only when the sum of increments (3+2+1+3+2+1 =
-        // 12, plus main's own) stays under 16 — it does not always, so the
-        // interpreter's overflow handler would run. There is none in this
-        // harness: a refused stay ends at the vector, and the run agrees
-        // either way.
-        let _ = run;
+        // Main's frame plus 3+2+1+3+2+1 groups is 13 of the ring's 16, so no
+        // frame is ever within reach from any base — no overflow, and the
+        // chain returns to STOP through seven `retw`s.
+        assert_eq!(
+            run.outcome.pc,
+            STOP,
+            "base {base}: exits {:?}, exccause {} excvaddr {:#x} epc1 {:#x}",
+            run.exits,
+            run.outcome.exccause,
+            run.outcome.excvaddr,
+            run.outcome.epc1
+        );
+        assert!(
+            !exited_with(&run, why::WINDOW),
+            "base {base}: {:?}",
+            run.exits
+        );
     }
 }
 
@@ -253,17 +297,19 @@ fn call0_and_ret_agree() {
         Inst::Addi(a(2), a(2), 10),
         Inst::Addi(a(5), a(13), 0), // patched: the leaf
         Inst::Callx(CallxOp::Callx0, a(5)),
-        Inst::Addi(a(2), a(2), 100),
+        Inst::Addi(a(2), a(2), 30),
         Inst::Store(StoreOp::S32i, a(2), a(1), 0),
-        Inst::Nullary(NullaryOp::Ret), // to STOP: a0 was saved in a6
+        // The final `ret` needs a0 = STOP again: restore it from a6.
+        Inst::Rrr(AluRrr::Or, a(0), a(6), a(6)),
+        Inst::Nullary(NullaryOp::Ret),
     ];
-    let leaf = vec![Inst::Addi(a(2), a(2), 1000), Inst::NullaryN(NullaryNarrowOp::RetN)];
+    // `addi` takes -128..=127.
+    let leaf = vec![Inst::Addi(a(2), a(2), 100), Inst::NullaryN(NullaryNarrowOp::RetN)];
+    pad_to_word(&mut insts);
     let pcs = Program::new(insts.clone()).pcs();
     let leaf_at = *pcs.last().unwrap();
     insts[1] = Inst::Call(CallOp::Call0, call_words(pcs[1], leaf_at));
     insts[3] = Inst::Addi(a(5), a(13), (leaf_at - PROGRAM_AT) as i32);
-    // The final `ret` needs a0 = STOP again: restore it from a6 first.
-    insts.insert(7, Inst::Rrr(AluRrr::Or, a(0), a(6), a(6)));
     insts.extend(leaf);
     let program = Program::new(insts).setup(|hart, bus| {
         seed(hart, bus);
@@ -274,7 +320,7 @@ fn call0_and_ret_agree() {
     });
     let run = agree("call0", &program);
     assert_eq!(run.outcome.pc, STOP);
-    assert_eq!(run.outcome.ar[2], 2111);
+    assert_eq!(run.outcome.ar[2], 1 + 100 + 10 + 100 + 30);
     assert!(run.escapes.is_empty());
 }
 

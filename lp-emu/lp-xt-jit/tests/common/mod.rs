@@ -27,7 +27,10 @@
 //! | code | `+0x0_0000..+0x1_0000` | executable, **word-only**, publishes | [`PERM_READ_WORD`] |
 //! | data | `+0x1_0000..+0x3_0000` | any width, any alignment | `PERM_READ_WRITE` |
 //! | mmio | `+0x3_0000..+0x3_4000` | one device word, scripted side-band/yield | `PERM_NONE` |
-#![allow(dead_code)]
+#![allow(
+    dead_code,
+    reason = "one harness for four suites; each uses a different subset of it"
+)]
 
 use std::collections::BTreeSet;
 
@@ -760,6 +763,12 @@ pub fn run(program: &Program, policy: Emit, fn_blocks: usize, case_name: &str) -
         h.hart.set_pc(exit.pc);
         h.hart.set_counters(cycle_out, instret_out);
         exits.push((exit.pc, why));
+        if std::env::var_os("LP_EMU_XT_JIT_TRACE").is_some() {
+            eprintln!(
+                "  entry {entry} @ {pc:#010x} -> {:#010x} why {why} cycle {cycle}->{cycle_out} instret {instret}->{instret_out}",
+                exit.pc
+            );
+        }
         if case_dir.is_some() {
             entries.push(case::Entry {
                 entry: entry as u32,
@@ -784,6 +793,15 @@ pub fn run(program: &Program, policy: Emit, fn_blocks: usize, case_name: &str) -
             // The interpreter's own slice end — a bus yield, a break. The
             // harness carries on as the machine would at the next slice.
             let _ = core.ops_mut().slice_end.take();
+        }
+        // The hart's no-progress rule (`XtHart::run_blocks`): a stay that
+        // left where it entered with nothing retired — a refused block, a
+        // budget that does not fit — hands that instruction to the
+        // interpreter rather than being asked again.
+        if exit.pc == pc && instret_out == instret {
+            let h = core.ops_mut();
+            h.hart.step_one(&mut h.bus);
+            hart_steps += 1;
         }
     }
 

@@ -24,9 +24,6 @@
 //!   `layout` block (how many words the state is, where the protocol's fields
 //!   sit) and a list of entries so one file can carry a whole recording.
 
-use alloc::string::String;
-use alloc::vec::Vec;
-
 use lp_emu_jit::replay;
 
 /// How many registers an Xtensa record carries: the physical `AR` file.
@@ -403,8 +400,3 @@ pub mod case {
         )
     }
 }
-
-/// Kept so the `String`/`Vec` imports above are used by the module's own
-/// signature surface; the JSON writer is in [`case`].
-#[allow(dead_code)]
-fn _uses(_: String, _: Vec<u8>) {}

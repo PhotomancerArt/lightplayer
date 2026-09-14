@@ -106,11 +106,12 @@ fn the_three_register_alu_agrees_with_the_interpreter() {
 #[test]
 fn the_divides_agree_including_the_zero_divisor_trap() {
     for op in [AluRrr::Quou, AluRrr::Quos, AluRrr::Remu, AluRrr::Rems] {
-        // a5 = INT_MIN, a15 = -1: the overflow pair. a7 = 0: the trap.
+        // a5 = INT_MIN, a15 = -1: the overflow pair. a14 = 3, a11 = 0xFF:
+        // ordinary divisors. a7 = 0: the trap.
         let insts = vec![
             Inst::Rrr(op, a(2), a(5), a(15)),
-            Inst::Rrr(op, a(3), a(4), a(2)),
-            Inst::Rrr(op, a(4), a(10), a(3)),
+            Inst::Rrr(op, a(3), a(4), a(14)),
+            Inst::Rrr(op, a(4), a(10), a(11)),
             Inst::Rrr(op, a(6), a(4), a(7)),
             Inst::Movi(a(8), 99),
             ret(),
@@ -124,7 +125,7 @@ fn the_divides_agree_including_the_zero_divisor_trap() {
             "{op:?}"
         );
         assert_eq!(run.outcome.epc1, PROGRAM_AT + 9, "EPC1 is the divide's pc");
-        assert_eq!(run.outcome.ar[8], 0, "nothing after the trap ran");
+        assert_eq!(run.outcome.ar[8], 0xDEAD_BEEF, "nothing after the trap ran: a8 keeps its seed");
         assert!(
             exited_with(&run, why::ESCAPE_DIVERGED),
             "the escape left the straight line: {:?}",
@@ -301,7 +302,8 @@ fn mmio_and_the_fused_poll_agree_with_the_interpreter() {
         assert_eq!(run.outcome.pc, STOP);
         assert_eq!(run.outcome.device, 0x101);
         assert_eq!(run.outcome.ar[7], 0x106);
-        assert!(run.mmio.len() >= 5, "{:?}", run.mmio);
+        // The device: a load, a store, two loads.
+        assert_eq!(run.mmio.len(), 4, "{:?}", run.mmio);
         assert_eq!(DEVICE, MMIO_BASE + 0x40);
     }
 }
@@ -334,51 +336,49 @@ fn branches_and_jumps_agree_with_the_interpreter() {
         BrRr::Bbs,
     ] {
         for (s, t) in [(2u8, 3u8), (4, 4), (5, 9), (8, 2)] {
-            // offset 3: past the following 3-byte `addi`.
-            push_branch(&mut insts, Inst::BranchRr(op, a(s), a(t), 3));
+            // The target is `pc + 4 + offset`: 2 lands past the 3-byte
+            // `addi` that follows a 3-byte branch.
+            push_branch(&mut insts, Inst::BranchRr(op, a(s), a(t), 2));
         }
     }
     for op in [BrRi::Beqi, BrRi::Bnei, BrRi::Blti, BrRi::Bgei] {
         for (s, imm) in [(2u8, 7i32), (3, -1), (5, 32), (9, 256)] {
-            push_branch(&mut insts, Inst::BranchRi(op, a(s), imm, 3));
+            push_branch(&mut insts, Inst::BranchRi(op, a(s), imm, 2));
         }
     }
     for op in [BrRiu::Bltui, BrRiu::Bgeui] {
         for (s, imm) in [(2u8, 8i32), (3, 32768), (10, 65536), (12, 2)] {
-            push_branch(&mut insts, Inst::BranchRiu(op, a(s), imm, 3));
+            push_branch(&mut insts, Inst::BranchRiu(op, a(s), imm, 2));
         }
     }
     for op in [BrZ::Beqz, BrZ::Bnez, BrZ::Bltz, BrZ::Bgez] {
         for s in [2u8, 3, 5, 7] {
-            push_branch(&mut insts, Inst::BranchZ(op, a(s), 3));
+            push_branch(&mut insts, Inst::BranchZ(op, a(s), 2));
         }
     }
     for set in [true, false] {
         for (s, bit) in [(2u8, 0u8), (3, 31), (4, 12), (7, 5)] {
-            push_branch(&mut insts, Inst::BranchBiI(set, a(s), bit, 3));
+            push_branch(&mut insts, Inst::BranchBiI(set, a(s), bit, 2));
         }
     }
     for nez in [true, false] {
         for s in [2u8, 7, 15] {
-            // Narrow: the `addi` after it is 3 bytes.
-            push_branch(&mut insts, Inst::BranchZN(nez, a(s), 3));
+            // Narrow (2 bytes): `pc + 4 + 1` lands past the 3-byte `addi`.
+            push_branch(&mut insts, Inst::BranchZN(nez, a(s), 1));
         }
     }
-    // `j` over an `addi`, then `jx` to the `ret` via a register.
-    insts.push(Inst::J(3));
+    // `j` over an `addi`, then `jx` to the `ret` through a literal.
+    insts.push(Inst::J(2));
     insts.push(Inst::Addi(a(15), a(15), 1000));
     let pcs = Program::new(insts.clone()).pcs();
     let here = *pcs.last().unwrap();
-    // movi a14, <ret>: the target is a small offset from a known pc; use
-    // addi on a13 (= PROGRAM_AT, seeded) instead of a movi that cannot hold
-    // an address.
-    let ret_at = here + 3 + 3;
-    insts.push(Inst::Addi(a(14), a(13), (ret_at - PROGRAM_AT) as i32));
+    // l32r a14 (3), jx (3), addi a15 (3), then the ret.
+    let ret_at = here + 9;
+    insts.push(Inst::L32r(a(14), l32r_field(here, common::LITERALS_AT)));
     insts.push(Inst::Jx(a(14)));
     insts.push(Inst::Addi(a(15), a(15), 2000));
     insts.push(ret());
-    assert!(ret_at - PROGRAM_AT < 128, "the addi immediate reaches the ret");
-    let program = Program::new(insts).setup(|hart, _| {
+    let program = Program::new(insts).literals(vec![ret_at]).setup(|hart, _| {
         let cpu = hart.cpu_mut();
         cpu.set_a(0, STOP);
         cpu.set_a(1, SP);
@@ -397,12 +397,10 @@ fn branches_and_jumps_agree_with_the_interpreter() {
     let run = agree("branches", &program);
     assert_eq!(run.outcome.pc, STOP);
     assert!(run.escapes.is_empty());
-    // The `jx` resolved through the table rather than leaving.
-    assert!(
-        !exited_with(&run, why::INDIRECT_MISS),
-        "the jx target is in the set: {:?}",
-        run.exits
-    );
+    // The `jx` resolved through the table rather than leaving: one stay ran
+    // the whole program, and its one exit is the final `ret` to STOP.
+    assert_eq!(run.entries, 1, "{:?}", run.exits);
+    assert!(exited_with(&run, why::INDIRECT_MISS));
 }
 
 /// The budget (M5 MD3) and the costs: under a cycle model that prices a
@@ -412,7 +410,7 @@ fn the_costs_agree_under_a_model_with_classes() {
     let insts = vec![
         Inst::Movi(a(2), 3),
         Inst::Addi(a(2), a(2), -1),
-        Inst::BranchZ(BrZ::Bnez, a(2), -6), // back to the addi
+        Inst::BranchZ(BrZ::Bnez, a(2), -7), // back to the addi: pc + 4 - 7
         Inst::Load(LoadOp::L32i, a(3), a(1), 0),
         Inst::Store(StoreOp::S32i, a(2), a(1), 4),
         Inst::Rrr(AluRrr::Mull, a(4), a(2), a(3)),
