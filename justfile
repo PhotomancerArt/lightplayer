@@ -2176,8 +2176,21 @@ heap-budget-check-chips-c6 margin_pct="0": (heap-budget-check-chips margin_pct "
 heap-budget-check-chips-v3 margin_pct="0":
     LP_EMU_BUILD_FW=1 scripts/heap-budget-check.sh chips {{ margin_pct }} esp32v3
 
-# Re-measure the chip figures into scripts/heap-budget-record.json — both
-# chips, or the one named.
+# The S3's arm alone — CI's `Emulator ESP32-S3 (x64)` job (M6 P10).
+#
+# It rides that job for exactly the classic's two reasons: this ELF is an
+# Xtensa cross-build and only the S3's own job installs that toolchain, and
+# `heap-budget-chips` is path-gated on `emu_c6`, which does not fire for
+# `lp-fw/fw-esp32s3/**` — so this firmware's own changes would run its heap
+# gate never. `emu_esp32s3` is the filter that fires for them (DD71).
+#
+# No `install-rv32-target`, for the classic's reason: nothing in this arm is
+# riscv32.
+heap-budget-check-chips-s3 margin_pct="0":
+    LP_EMU_BUILD_FW=1 scripts/heap-budget-check.sh chips {{ margin_pct }} esp32s3
+
+# Re-measure the chip figures into scripts/heap-budget-record.json — every
+# chip, or the one named.
 heap-budget-baseline-chips chip="": install-rv32-target
     LP_EMU_BUILD_FW=1 scripts/heap-budget-check.sh chips-baseline {{ chip }}
 
@@ -2185,6 +2198,12 @@ heap-budget-baseline-chips chip="": install-rv32-target
 # `stack_band_note` in the record); a runner's figure is M5 P6's to add.
 heap-budget-baseline-chips-v3:
     LP_EMU_BUILD_FW=1 scripts/heap-budget-check.sh chips-baseline esp32v3
+
+# Re-measure the S3's alone. Its band is measured on ONE host today (see
+# `stack_band_note` in the record); a runner's figure is the first green
+# `Emulator ESP32-S3 (x64)` run's to add.
+heap-budget-baseline-chips-s3:
+    LP_EMU_BUILD_FW=1 scripts/heap-budget-check.sh chips-baseline esp32s3
 
 # Emit RV32 stack-size metadata for the ESP32 firmware.
 # The direct cargo build can fail at final link on local ESP linker-script setup,
