@@ -2283,6 +2283,20 @@ impl Machine {
         self.harts.get(core).and_then(XtHart::block_stats)
     }
 
+    /// How `core`'s block executor decided the window precondition (M7 XD5):
+    /// blocks run with the overflow check hoisted, against blocks run slot by
+    /// slot.
+    ///
+    /// **Never part of a compared transcript**, for exactly the reason
+    /// [`Machine::block_stats`] is not: both paths retire the same
+    /// instructions and leave the same architectural state.
+    pub fn window_hoist_stats(&self, core: usize) -> lp_xt_emu::block::WindowHoistStats {
+        self.harts
+            .get(core)
+            .map(XtHart::window_hoist_stats)
+            .unwrap_or_default()
+    }
+
     /// `isync` instructions `core` has retired — the Xtensa `fence.i` count,
     /// and the diagnostic that says whether a guest barrier reached the
     /// machine at all. On this chip the answer is expected to be small: the

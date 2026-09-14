@@ -461,17 +461,23 @@ fn print_run_summary(machine: &Machine) {
 /// and — through `range` — how often the guest published code the
 /// store-address contract had to invalidate for (M7 XD3).
 ///
+/// `window hoisted=…/slotwise=…` is M7 XD5's precondition, block by block: how
+/// often the RM's per-instruction `WindowCheck` was decided once at block entry
+/// rather than run per slot. Both paths retire the same instructions and leave
+/// the same architectural state, so this is a share and never a transcript.
+///
 /// `isync` is the Xtensa `fence.i` count, and a **small number here is the
 /// expected reading on this chip**: the firmware publishes JIT'd code into
 /// SRAM0 with no barrier at all, which is exactly why the contract is the
 /// store address and not the barrier.
 fn print_block_report(machine: &Machine) {
     for core in 0..CORES {
+        let hoist = machine.window_hoist_stats(core);
         match machine.block_stats(core) {
             Some(stats) => eprintln!(
                 "blocks: core{core} decodes={} hits={} ({:.2}% of {} entries) slots={} \
                  mean={:.2} flushes={} capacity_flushes={} range={} (dropping {} entries) \
-                 collisions={}; {} isync",
+                 collisions={}; window hoisted={} slotwise={} ({:.2}% hoisted); {} isync",
                 stats.decodes,
                 stats.hits,
                 stats.hit_rate() * 100.0,
@@ -483,6 +489,9 @@ fn print_block_report(machine: &Machine) {
                 stats.range_invalidations,
                 stats.range_entries_dropped,
                 stats.collisions,
+                hoist.hoisted,
+                hoist.slotwise,
+                hoist.hoisted_share() * 100.0,
                 machine.isync_count(core),
             ),
             None => eprintln!(
