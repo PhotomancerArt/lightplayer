@@ -48,9 +48,15 @@
 //!                       it like any lens route. An unknown bare segment
 //!                       stays the landing, never a guess.
 //! /device/<dev-uid>     a RESOLVER, never an emitted address (D51): the
-//!                       editor opens as a lens on that device's session
-//!                       and the URL heals to the project that device is
+//!                       editor opens as a lens on that device's session and
+//!                       the URL heals to the project that device is
 //!                       running, plus the hint — `/p/<slug>-prj…?on=mac:…`.
+//!                       The heal is a BIND when the board is at a library
+//!                       package's head (no push, no reload) and an ADOPT
+//!                       when the library does not hold it yet (the board's
+//!                       package is pulled and installed under its own uid,
+//!                       `PulledFromDevice` provenance) — see
+//!                       `docs/adr/2026-09-22-opening-a-board-adopts-its-project.md`.
 //!                       Devices keep their own `dev…` identity (vision
 //!                       D13), so the address stays parseable and
 //!                       linkable; it is simply never what the app writes.
@@ -115,10 +121,13 @@
 //!   coming from a page — a gallery open, a new history entry — a
 //!   **replace** when already on a lens route). This is also what makes
 //!   `/device/<uid>` a resolver: the lens lands, and the next emission
-//!   heals the address to the project the device is running.
-//!   A not-yet-identified device, and a board running a project this
-//!   library does not have, are the two lenses with no honest project
-//!   address; the URL stays put.
+//!   heals the address to the project the device is running — by binding
+//!   the library's own copy of it, or by adopting it into the library
+//!   first when this library did not already have it (D1-D5 of
+//!   `docs/adr/2026-09-22-opening-a-board-adopts-its-project.md`).
+//!   A not-yet-identified device, and a board whose content is not at the
+//!   library head (the divergence case, F1), are the two lenses with no
+//!   honest project address; the URL stays put.
 //! - the open project's display name is known (or changed) → the address
 //!   bar HEALS to `/p/<slugify(name)>-<uid>` via `replaceState` (D10), so
 //!   a stale slug, a case-mangled paste and a bare uid all straighten out
@@ -844,11 +853,13 @@ pub(crate) fn lens_route(view: &UiStudioView) -> Option<StudioRoute> {
             on,
         });
     }
-    // No library project behind the lens — a board running something this
-    // library does not have — is the one case with no honest project
-    // address. The URL stays where it is (the `/device/<uid>` the user
-    // typed or followed), rather than being yanked to a gallery while the
-    // editor is open on that board.
+    // No library project behind the lens is what is left once the core's
+    // own bind/adopt step (device_bind.rs) has already had its try: a board
+    // not yet identified, or one whose content is not at the library head
+    // (the divergence case, F1 — nothing is bound or written there either).
+    // Either way there is no honest project address, so the URL stays where
+    // it is (the `/device/<uid>` the user typed or followed) rather than
+    // being yanked to a gallery while the editor is open on that board.
     let uid: PrefixedUid = project_uid.as_deref()?.parse().ok()?;
     Some(StudioRoute::Project {
         uid,
@@ -1565,10 +1576,13 @@ mod tests {
         );
     }
 
-    /// A board whose project this library does NOT have is the one lens
-    /// with no honest project address: the URL is left where the user put
-    /// it (the `/device/<uid>` they followed) rather than replaced with a
-    /// guess.
+    /// `project_uid: None` is what the web still sees when the core's own
+    /// bind/adopt step could not name the board's project — not yet
+    /// identified, or content that is not at the library head (F1; a board
+    /// running a project this library lacks is no longer this case, since
+    /// the core adopts it first). Either way the URL is left where the user
+    /// put it (the `/device/<uid>` they followed) rather than replaced with
+    /// a guess.
     #[test]
     fn a_lens_on_a_foreign_project_binds_nothing() {
         assert_eq!(

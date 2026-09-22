@@ -924,6 +924,39 @@ impl DeviceBench {
     fn library(&self) -> Vec<crate::app::library::PackageSummary> {
         self.store.list().expect("the library reads back")
     }
+
+    /// One library package's head content hash — what a bind compares the
+    /// board's own hash against, and what proves the library was left
+    /// alone.
+    fn library_head(&self, uid: lpc_history::PrefixedUid) -> lpc_history::ContentHash {
+        self.store
+            .open(uid)
+            .expect("the package opens")
+            .content_hash()
+            .expect("the package hashes")
+    }
+
+    /// The runtime handle the editor is connected to, when a project is
+    /// ready. A push would have loaded a NEW one, so this is how a test
+    /// says "the open did not reload the engine".
+    fn ready_handle(&self) -> Option<u32> {
+        match self.controller.project_for_test().snapshot().state {
+            crate::ProjectState::Ready { handle_id, .. } => Some(handle_id),
+            _ => None,
+        }
+    }
+
+    /// The newest console line containing `needle`, if the console said it.
+    fn console_line_containing(&self, needle: &str) -> Option<String> {
+        self.controller
+            .view()
+            .console
+            .entries
+            .iter()
+            .rev()
+            .find(|entry| entry.message.contains(needle))
+            .map(|entry| entry.message.clone())
+    }
 }
 
 /// M5's walk, host half: Open on the running face borrows the board's
@@ -2901,6 +2934,558 @@ fn an_unknown_mac_raises_no_page() {
 
 /// The base MAC [`empty_light_player`] reports.
 const BENCH_BOARD_MAC: &str = "60:55:f9:0a:0b:0c";
+
+// ---------------------------------------------------------------------
+// P1: opening a board binds the library package it is running (D1, D6)
+// ---------------------------------------------------------------------
+
+/// A board with a library project on it, its push banked, and the gallery
+/// inputs settled — the state a person is in when they click Open on the
+/// running face. Returns the board's registry uid and the library package.
+fn a_board_running_a_library_project(
+    bench: &mut DeviceBench,
+    tasks: &TaskPool,
+) -> (String, lpc_history::PrefixedUid) {
+    bench.run_until(tasks, "the board to report nothing loaded", |bench| {
+        bench
+            .view()
+            .devices
+            .first()
+            .is_some_and(|card| card.loaded_project == lpa_devices::view::LoadedProject::Empty)
+    });
+    let card = bench.view().devices[0].clone();
+    bench.push_gesture(card.id, bundled_example());
+    bench.run_until(tasks, "the push to finish and be banked", |bench| {
+        bench
+            .view()
+            .devices
+            .first()
+            .is_some_and(|card| card.activity.is_none() && card.last_outcome.is_some())
+            && bench
+                .registry()
+                .first()
+                .is_some_and(|row| row.association.is_some())
+    });
+    // The gallery inputs are what the candidate search reads its
+    // association and its package list from.
+    drive(bench.controller.settle_library());
+    let device_uid = bench.registry()[0].uid.clone();
+    let project = bench.library()[0].uid;
+    (device_uid, project)
+}
+
+/// D1, end to end: a board running what this library has at head is opened,
+/// and the open NAMES it — `active_library_uid` is the package's, so the
+/// lens runtime carries the uid `/p/<slug>-prj…?on=…` is built from (D51).
+///
+/// And it names it without sending anything: the library is byte-identical
+/// afterwards, and re-opening the lens lands on the SAME runtime handle.
+/// A push would have replaced the loaded project with a new one, so an
+/// unchanged handle is the engine saying it was never reloaded.
+#[test]
+fn opening_a_board_binds_the_library_project_it_is_already_running() {
+    let device = empty_light_player("dev000000daqf6dvvr3");
+    let (mut bench, tasks) = identified(&device, "usb-bind-head");
+    let (device_uid, project) = a_board_running_a_library_project(&mut bench, &tasks);
+    let project_uid = project.to_string();
+    let head = bench.library_head(project);
+
+    bench
+        .open_lens(&device_uid)
+        .expect("the running board opens in the editor");
+
+    let view = bench.controller.view();
+    assert_eq!(
+        view.open_project_uid.as_deref(),
+        Some(project_uid.as_str()),
+        "the running project is named by the library package it IS"
+    );
+    assert!(
+        matches!(
+            view.lens,
+            Some(crate::UiLensRuntime::Device {
+                project_uid: Some(_),
+                ..
+            })
+        ),
+        "the lens runtime carries the uid the project route needs: {:?}",
+        view.lens
+    );
+    assert_eq!(
+        bench.library_head(project),
+        head,
+        "a bind writes nothing: the library copy is untouched"
+    );
+    let handle = bench
+        .ready_handle()
+        .expect("the editor is on a ready project");
+
+    bench.detach_lens();
+    bench.run_until(&tasks, "the pump to hear the board again", |bench| {
+        bench
+            .view()
+            .devices
+            .first()
+            .is_some_and(|card| card.state_label == "Ready")
+    });
+    bench
+        .open_lens(&device_uid)
+        .expect("the board opens a second time");
+
+    assert_eq!(
+        bench.ready_handle(),
+        Some(handle),
+        "no push and no reload: the editor re-attached to the project the board was already running"
+    );
+    assert_eq!(
+        bench.controller.view().open_project_uid.as_deref(),
+        Some(project_uid.as_str()),
+        "and the second open binds the same package — its lock came back"
+    );
+}
+
+/// D4: the library has the project the board was given, but not at the
+/// version the board is running — somebody saved here since. Nothing binds,
+/// nothing is written, and the console names both sides.
+///
+/// This is the honest floor, not the destination: the clobber-join UX is
+/// its own effort. What must never happen is a silent choice between two
+/// versions of somebody's work.
+#[test]
+fn a_board_behind_the_library_copy_is_not_bound() {
+    let device = empty_light_player("dev000000daqf6dvvr4");
+    let (mut bench, tasks) = identified(&device, "usb-bind-differs");
+    let (device_uid, project) = a_board_running_a_library_project(&mut bench, &tasks);
+    let board = bench.library_head(project);
+
+    // A save lands in the LIBRARY copy after the push: the same project,
+    // and the board no longer has what the library has at head.
+    let mut handle = bench.store.open(project).expect("the library copy opens");
+    handle
+        .apply_update(
+            lpc_model::LpPath::new("/notes.txt"),
+            Some(b"edited here since the push"),
+        )
+        .expect("the edit writes");
+    handle.record_save(2_000.0).expect("the edit is saved");
+    let head = handle.content_hash().expect("the saved copy hashes");
+    drop(handle);
+    assert_ne!(head, board, "the library moved and the board did not");
+    drive(bench.controller.settle_library());
+
+    bench
+        .open_lens(&device_uid)
+        .expect("the board still opens in the editor");
+
+    let view = bench.controller.view();
+    assert_eq!(
+        view.open_project_uid, None,
+        "a board that is not at the library head is not named by it"
+    );
+    assert!(
+        matches!(
+            view.lens,
+            Some(crate::UiLensRuntime::Device {
+                project_uid: None,
+                ..
+            })
+        ),
+        "the lens runtime says so too: {:?}",
+        view.lens
+    );
+    assert_eq!(
+        bench.library_head(project),
+        head,
+        "nothing was pulled into the library copy"
+    );
+    let said = bench
+        .console_line_containing("is not running the library's copy")
+        .expect("the console says why nothing was bound");
+    assert!(
+        said.contains(&board.short()) && said.contains(&head.short()),
+        "the line names both versions: {said}"
+    );
+}
+
+/// D6's second candidate: no association to go on — another browser pushed
+/// to this board, or the row predates associations entirely — and the board
+/// is still recognised, by scanning library heads for the content it
+/// reports.
+#[test]
+fn a_board_with_no_association_is_found_by_scanning_library_heads() {
+    let device = empty_light_player("dev000000daqf6dvvr5");
+    let (mut bench, tasks) = identified(&device, "usb-bind-scan");
+    let (device_uid, project) = a_board_running_a_library_project(&mut bench, &tasks);
+    let project_uid = project.to_string();
+
+    // Forget what this browser knows it gave the board. The project stays;
+    // only the hint goes.
+    let mut row = bench.registry()[0].clone();
+    row.association = None;
+    DeviceRegistry::new(bench.store.fs_handle())
+        .upsert(row)
+        .expect("the row writes back");
+    drive(bench.controller.settle_library());
+    assert!(
+        bench.registry()[0].association.is_none(),
+        "the hint is gone: {:?}",
+        bench.registry()[0]
+    );
+
+    bench.open_lens(&device_uid).expect("the board opens");
+
+    assert_eq!(
+        bench.controller.view().open_project_uid.as_deref(),
+        Some(project_uid.as_str()),
+        "the head scan recognised the package by its content"
+    );
+}
+
+// ---------------------------------------------------------------------
+// P2: opening a board ADOPTS a project the library does not have (D2/D3/D5)
+// ---------------------------------------------------------------------
+
+/// A LightPlayer that boots with a project already on it and LOADED — a
+/// board provisioned from the CLI, or one another browser pushed to. The
+/// bench's own library has never seen these files.
+fn light_player_running(uid: &str, files: Vec<(String, Vec<u8>)>) -> FakeEsp32Device {
+    FakeEsp32Device::new(FakeDeviceScript::new(FakeBootState::LightPlayer(
+        FakeLightPlayerState::new()
+            .with_identity(FakeDeviceIdentity::new(uid, "Bench board"))
+            .with_base_mac(BENCH_BOARD_MAC)
+            .with_heartbeat_interval(Duration::from_millis(20))
+            .with_project_files(files)
+            .with_loaded_project(),
+    )))
+}
+
+/// A real, runnable project carrying an identity minted SOMEWHERE ELSE: a
+/// bundled example installed into a throwaway library, so its
+/// `project.json` has a genuine `prj…` uid that this bench's store does not
+/// hold. The provenance sidecar is dropped — a board is not a library and
+/// does not carry one.
+fn a_project_from_another_library(seed: u8) -> (String, Vec<(String, Vec<u8>)>) {
+    let elsewhere = LibraryStore::new(
+        Rc::new(RefCell::new(lpfs::LpFsMemory::new())),
+        Rc::new(move || [seed; 16]),
+        Rc::new(|| "2026-09-22-0900".to_string()),
+    );
+    let example = crate::app::home::embedded_example::embedded_example(
+        crate::first_bundled_example_id().expect("this build bundles examples"),
+    )
+    .expect("the bundled example resolves");
+    let summary = elsewhere
+        .install_package(
+            "porch sign",
+            &example.files(),
+            crate::app::library::PackageProvenance::Created,
+            1.0,
+        )
+        .expect("the other library installs it");
+    let files = elsewhere
+        .open(summary.uid)
+        .expect("the other library's copy opens")
+        .read_all_files()
+        .expect("it reads back")
+        .into_iter()
+        .filter(|(path, _)| path != ".lp/meta.json")
+        .collect();
+    (summary.uid.to_string(), files)
+}
+
+/// Drive a board that boots with a project already loaded to its settled
+/// card, and hand back its registry key — the state a person is in when
+/// they click Open on it.
+///
+/// The card's running face is deliberately NOT waited on: the fake mirrors
+/// loaded projects from the server FRAMES it forwards, and a boot-time
+/// auto-load produces none, so the synthetic heartbeat says idle until
+/// somebody asks over the wire. The open asks, which is the path under
+/// test.
+fn running_board(device: &FakeEsp32Device, endpoint: &str) -> (DeviceBench, TaskPool, String) {
+    let (mut bench, tasks) = identified(device, endpoint);
+    bench.settle_library();
+    let uid = bench
+        .registry()
+        .first()
+        .map(|row| row.uid.clone())
+        .expect("an identified board has a registry row");
+    (bench, tasks, uid)
+}
+
+/// D2/D3, end to end: the board is running a project this library has never
+/// seen, so the open PULLS it off the board and installs it — under the
+/// board's own uid, with honest provenance, and with a history rooted at
+/// exactly what was pulled. Then it binds, which is what lets the address
+/// bar heal into `/p/<slug>-prj…?on=…` (D51).
+///
+/// Nothing is asked and nothing is sent: adoption writes this browser's
+/// library and touches neither the board nor anyone else's copy.
+#[test]
+fn opening_a_board_adopts_the_project_this_library_does_not_have() {
+    let (project_uid, files) = a_project_from_another_library(0x5a);
+    let device = light_player_running("dev000000daqf6dvvr6", files);
+    let (mut bench, _tasks, device_uid) = running_board(&device, "usb-adopt");
+    // What the roster calls this board is what the provenance and the
+    // console line must call it too.
+    let board_title = bench.view().devices[0].title.clone();
+    assert!(
+        bench.library().is_empty(),
+        "this library has never seen the board's project: {:?}",
+        bench.library()
+    );
+
+    bench
+        .open_lens(&device_uid)
+        .expect("the running board opens in the editor");
+
+    // Installed, under the identity the board's manifest carries (D17).
+    let library = bench.library();
+    assert_eq!(
+        library.len(),
+        1,
+        "exactly one project was adopted: {library:?}"
+    );
+    assert_eq!(
+        library[0].uid.to_string(),
+        project_uid,
+        "the adopted copy keeps the board's identity"
+    );
+    let adopted = bench.store.open(library[0].uid).expect("the copy opens");
+
+    // Provenance says where it came from, by name.
+    let meta = crate::app::library::package_meta::read_meta(&*adopted.package_fs.borrow())
+        .expect("the sidecar reads")
+        .expect("an adopted copy carries provenance");
+    assert_eq!(
+        meta.provenance,
+        crate::app::library::PackageProvenance::PulledFromDevice {
+            device_uid: device_uid.clone(),
+            device_name: board_title.clone(),
+        },
+        "the gallery card can say which board this came off"
+    );
+
+    // History: the origin the provenance describes, then one save at the
+    // content that was pulled — and the `Pushed` event the association
+    // write banks on top (D5).
+    let events = lpc_history::EventLog::new(&*adopted.history_fs.borrow())
+        .read_all()
+        .expect("the event log reads");
+    assert!(
+        matches!(
+            events.first().map(|event| &event.kind),
+            Some(lpc_history::EventKind::PulledFromDevice { .. })
+        ),
+        "the origin names the pull: {events:?}"
+    );
+    assert!(
+        events
+            .iter()
+            .any(|event| matches!(event.kind, lpc_history::EventKind::Saved { .. })),
+        "the pulled snapshot is the first save: {events:?}"
+    );
+    let head = adopted.content_hash().expect("the adopted copy hashes");
+    assert_eq!(
+        adopted.history.head(),
+        Some(head),
+        "the history head IS the adopted content"
+    );
+
+    // The association names what this board is carrying (D5), so the
+    // mismatch page can answer truthfully without guessing.
+    let association = bench.registry()[0]
+        .association
+        .clone()
+        .expect("the adoption is banked");
+    assert_eq!(association.project.to_string(), project_uid);
+    assert_eq!(association.version, head);
+
+    // And the editor is pointed at it: the uid the project route is built
+    // from (D51).
+    let view = bench.controller.view();
+    assert_eq!(
+        view.open_project_uid.as_deref(),
+        Some(project_uid.as_str()),
+        "the adopted project is the open one"
+    );
+    assert!(
+        matches!(
+            view.lens,
+            Some(crate::UiLensRuntime::Device {
+                project_uid: Some(_),
+                ..
+            })
+        ),
+        "the lens runtime carries the uid: {:?}",
+        view.lens
+    );
+    assert!(
+        bench
+            .console_line_containing("adopted")
+            .is_some_and(|line| line.contains(&board_title)),
+        "the console says what happened and where it came from"
+    );
+}
+
+/// Adoption happens ONCE. The second open of the same board finds the copy
+/// the first one made — by content, which is the only check that can be
+/// trusted — and binds it, leaving the library exactly as it was.
+#[test]
+fn reopening_an_adopted_board_binds_instead_of_adopting_again() {
+    let (project_uid, files) = a_project_from_another_library(0x5b);
+    let device = light_player_running("dev000000daqf6dvvr7", files);
+    let (mut bench, tasks, device_uid) = running_board(&device, "usb-adopt-twice");
+
+    bench.open_lens(&device_uid).expect("the board opens");
+    let library = bench.library();
+    assert_eq!(library.len(), 1, "{library:?}");
+    let head = bench.library_head(library[0].uid);
+    let slug = library[0].slug.clone();
+
+    bench.detach_lens();
+    bench.run_until(&tasks, "the pump to hear the board again", |bench| {
+        bench
+            .view()
+            .devices
+            .first()
+            .is_some_and(|card| card.state_label == "Ready")
+    });
+    bench.settle_library();
+
+    bench.open_lens(&device_uid).expect("the board opens again");
+
+    let library = bench.library();
+    assert_eq!(
+        library.len(),
+        1,
+        "the second open adopted nothing: {library:?}"
+    );
+    assert_eq!(library[0].slug, slug, "and installed no second copy");
+    assert_eq!(
+        bench.library_head(library[0].uid),
+        head,
+        "the library copy is untouched"
+    );
+    assert_eq!(
+        bench.controller.view().open_project_uid.as_deref(),
+        Some(project_uid.as_str()),
+        "the second open bound the copy the first one made"
+    );
+}
+
+/// A board running files that carry no identity is NOT adopted (D17).
+///
+/// Minting a uid for it would give the library copy a different
+/// `project.json` from the board's — and the manifest is inside the
+/// canonical hash, so the copy would not hash like the thing it is a copy
+/// of, and the next save would trip the save-as-pull tripwire. The editor
+/// works on the board's project unnamed, and the console says why.
+#[test]
+fn a_board_running_an_identity_free_project_is_not_adopted() {
+    let example = crate::app::home::embedded_example::embedded_example(
+        crate::first_bundled_example_id().expect("this build bundles examples"),
+    )
+    .expect("the bundled example resolves");
+    // The bundled example's manifest carries no uid: a uid is minted when
+    // a project ENTERS a library, and this one never did.
+    let files = example.files();
+    assert!(
+        files.iter().any(|(path, bytes)| path == "project.json"
+            && !String::from_utf8_lossy(bytes).contains("\"uid\"")),
+        "the fixture is identity-free by construction"
+    );
+    let device = light_player_running("dev000000daqf6dvvr8", files);
+    let (mut bench, _tasks, device_uid) = running_board(&device, "usb-adopt-anon");
+
+    bench.open_lens(&device_uid).expect("the board still opens");
+
+    assert!(
+        bench.library().is_empty(),
+        "nothing was written: {:?}",
+        bench.library()
+    );
+    assert_eq!(
+        bench.controller.view().open_project_uid,
+        None,
+        "and nothing was named"
+    );
+    assert!(
+        bench.ready_handle().is_some(),
+        "the editor is still working on the board's project"
+    );
+    assert!(
+        bench
+            .console_line_containing("no identity of its own")
+            .is_some(),
+        "the console says why: {:?}",
+        bench.controller.view().console.entries
+    );
+}
+
+/// D4, the divergence floor: the library HAS this project's uid, but not
+/// this content — somebody saved here, or the board was given an older
+/// version. The bind's head scan already found nothing at the board's
+/// hash, so adoption would be a second copy under the same identity, which
+/// would make `/p/<uid>` ambiguous. Nothing is installed and nothing is
+/// bound; the console names the project.
+#[test]
+fn a_board_running_a_known_project_at_another_version_is_not_adopted() {
+    let (project_uid, files) = a_project_from_another_library(0x5c);
+    let device = light_player_running("dev000000daqf6dvvr9", files.clone());
+    let (mut bench, _tasks, device_uid) = running_board(&device, "usb-adopt-known");
+
+    // The same project, in THIS library, at a different version — and no
+    // association, so the bind reaches adoption rather than stopping at
+    // D4's association arm.
+    let mut diverged = files;
+    diverged.push(("notes.txt".to_string(), b"edited in this library".to_vec()));
+    let (package_files, history_files) = crate::app::project::device_bind::adopt_board_package(
+        "porch sign",
+        project_uid.parse().expect("the uid parses"),
+        &diverged,
+        crate::app::library::PackageProvenance::Created,
+        1_400.0,
+    )
+    .expect("this library's own version builds");
+    let installed = bench
+        .store
+        .install_synced(
+            "porch sign",
+            &package_files,
+            &history_files,
+            crate::app::library::PackageProvenance::Created,
+            1_500.0,
+        )
+        .expect("the library holds its own version");
+    assert_eq!(installed.uid.to_string(), project_uid);
+    let head = bench.library_head(installed.uid);
+    bench.settle_library();
+
+    bench.open_lens(&device_uid).expect("the board still opens");
+
+    assert_eq!(
+        bench.library().len(),
+        1,
+        "no second copy under the same identity: {:?}",
+        bench.library()
+    );
+    assert_eq!(
+        bench.library_head(installed.uid),
+        head,
+        "and the library's own version is untouched"
+    );
+    assert_eq!(
+        bench.controller.view().open_project_uid,
+        None,
+        "nothing was bound"
+    );
+    assert!(
+        bench.console_line_containing("different version").is_some(),
+        "the console names the divergence: {:?}",
+        bench.controller.view().console.entries
+    );
+}
 
 /// The New tab's naming: a starter pushed with a project name lands in the
 /// library under that name (not the board's), and the "name the board the

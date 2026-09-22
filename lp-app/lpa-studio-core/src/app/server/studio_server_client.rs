@@ -276,13 +276,8 @@ impl StudioServerClient {
 
         // version probe: an empty changes page carries the runtime's
         // current fs revision — the baseline for save-as-pull
-        let version_probe = self
-            .client
-            .pull_changed_files(storage_id, lpc_model::FsVersion::new(i64::MAX - 1))
-            .await
-            .map_err(map_client_error)?;
-        logs.extend(self.absorb_events(version_probe.events));
-        let (_, synced_version) = version_probe.value;
+        let (synced_version, probe_logs) = self.current_fs_version(storage_id).await?;
+        logs.extend(probe_logs);
 
         let inventory = self
             .client
@@ -372,6 +367,32 @@ impl StudioServerClient {
         let mut logs = self.absorb_events(outcome.events);
         logs.extend(self.take_pending_logs());
         Ok(logs)
+    }
+
+    /// The runtime's CURRENT fs revision for a project directory — the
+    /// baseline a library copy that is already in sync should carry as its
+    /// `last_synced`.
+    ///
+    /// The wire has no "what revision are you at" question of its own
+    /// (`lpc_wire::server::fs_api`): what it has is `ChangesSince`, and
+    /// every page of one carries the revision its enumeration was current
+    /// to. So the probe is a `ChangesSince` from a version nothing can be
+    /// newer than — an empty page, cheap on the device, whose only payload
+    /// is the number we came for. [`Self::open_library_project`] has always
+    /// ended with this; the device-open bind needs the same fact without
+    /// the push in front of it.
+    pub async fn current_fs_version(
+        &mut self,
+        project_id: &str,
+    ) -> Result<(lpc_model::FsVersion, Vec<UiLogDraft>), UiError> {
+        let probe = self
+            .client
+            .pull_changed_files(project_id, lpc_model::FsVersion::new(i64::MAX - 1))
+            .await
+            .map_err(map_client_error)?;
+        let logs = self.absorb_events(probe.events);
+        let (_, version) = probe.value;
+        Ok((version, logs))
     }
 
     /// Canonical package hash of a project directory (push/pull verify).

@@ -847,10 +847,14 @@ pub fn App() -> Element {
                     // sync above heals the address to the project that
                     // device is running, plus its `?on=` hint. There is no
                     // second redirect to write, because the lens's own
-                    // address IS the answer — a board whose project this
-                    // library does not have simply has no project address,
-                    // and the URL is left where the user put it rather
-                    // than being replaced with a guess.
+                    // address IS the answer — the core binds the library's
+                    // own copy when the board is at its head, or adopts an
+                    // unknown project under its own uid first
+                    // (docs/adr/2026-09-22-opening-a-board-adopts-its-project.md).
+                    // A board not yet identified, or one whose content is
+                    // not at the library head (F1), simply has no project
+                    // address yet, and the URL is left where the user put
+                    // it rather than being replaced with a guess.
                     //
                     // The actor owns readiness — a board still identifying
                     // holds the intent and attaches when it says hello —

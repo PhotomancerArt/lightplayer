@@ -8,6 +8,7 @@ use lpa_client::{CancelSignal, ProgressDeadline};
 use crate::app::project::agent_support::{
     AgentShaderBinding, AgentShaderTarget, param_upsert_edits, space_declaration_edits,
 };
+use crate::app::project::device_bind::{BindOutcome, PulledPackage, RunningPackage};
 use crate::app::project::edit_journal::{EditJournal, EditStep};
 use crate::app::project::slot::{
     AssetEditEntry, AssetEditKey, AssetEditState, BindingFactEditOp, BindingFactOverrides,
@@ -3006,6 +3007,197 @@ impl ProjectController {
         self.project_fs_root = loaded.fs_root;
         self.def_artifacts = loaded.node_def_artifacts;
         Ok(loaded.logs)
+    }
+
+    /// Whether a library is attached at all.
+    ///
+    /// The storeless demo path has none, and neither does a controller
+    /// built before the browser shell handed its store over. Bookkeeping
+    /// that would spend a wire round-trip to find that out asks here
+    /// first.
+    pub(crate) fn has_library(&self) -> bool {
+        self.library.is_some()
+    }
+
+    /// Read what the LENS runtime is running: the canonical hash of its
+    /// project directory and the fs revision that hash was read at.
+    ///
+    /// The revision is probed BEFORE the content is hashed, and that order
+    /// is the whole of the bind's save-path safety: a write landing on the
+    /// board after the probe is strictly newer than the baseline, so the
+    /// first save-as-pull carries it into the library copy. The other
+    /// order would let a write that slipped between the two be counted as
+    /// already synced, and the library copy would quietly stop being what
+    /// the board runs.
+    pub(crate) async fn read_running_package(
+        &mut self,
+        server: &mut StudioServerClient,
+    ) -> Result<(RunningPackage, Vec<UiLogDraft>), UiError> {
+        let (version, mut logs) = server.current_fs_version(&self.runtime_storage_id).await?;
+        let (hash, hash_logs) = server.hash_package(&self.runtime_storage_id).await?;
+        logs.extend(hash_logs);
+        let hash = hash.parse::<lpc_history::ContentHash>().map_err(|error| {
+            UiError::Project(format!(
+                "the runtime reported an unreadable package hash {hash:?}: {error}"
+            ))
+        })?;
+        Ok((RunningPackage { hash, version }, logs))
+    }
+
+    /// Make the library package `key` the ACTIVE project behind the board
+    /// the lens is already connected to — no push, no engine reload (D1).
+    ///
+    /// Opening a board connects to whatever it already runs; what this
+    /// adds is the *identity* of that content. Binding is what makes
+    /// [`Self::active_library_uid`] `Some`, which is what heals
+    /// `/device/<uid>` into `/p/<slug>-prj…?on=…` (D51), what lets the
+    /// header read the project's name instead of the storage id, and what
+    /// gives a save somewhere to pull into.
+    ///
+    /// The bind is by CONTENT, never by name: the candidate is bound only
+    /// when its head content hash equals the hash the board computed over
+    /// its own directory. A candidate that differs comes back as
+    /// [`BindOutcome::Differs`] with the open given straight back — the
+    /// board holds content this library does not have at head, and
+    /// adopting either side's bytes behind the user's back would lose
+    /// somebody's work (D4).
+    ///
+    /// The save path needs nothing else: `pull_committed_changes_into_library`
+    /// pulls whatever is newer than `last_synced` out of
+    /// `runtime_storage_id` and records a `Saved` event — it never assumes
+    /// the active package was pushed from this tab.
+    ///
+    /// Receipt discipline is `open_opened_package`'s: until the handle
+    /// reaches `context.active` nothing would ever queue its close, so
+    /// every early return abandons the open and the committed one hands
+    /// the host's lock to the ordinary close path.
+    pub(crate) async fn bind_running_to_library(
+        &mut self,
+        key: &str,
+        running: &RunningPackage,
+    ) -> Result<BindOutcome, UiError> {
+        if !matches!(self.state, ProjectState::Ready { .. }) {
+            return Ok(BindOutcome::NotApplicable);
+        }
+        let Some(context) = self.library.as_ref() else {
+            return Ok(BindOutcome::NotApplicable);
+        };
+        // Already bound to this package: re-attaching the lens to the same
+        // session must not ask the host for a project THIS tab holds open —
+        // the real host refuses that (`OpenInThisTab`), and rightly.
+        if let Some(active) = context.active.as_ref()
+            && (active.handle.uid.to_string() == key || active.handle.slug == key)
+        {
+            return Ok(BindOutcome::Bound {
+                uid: active.handle.uid.to_string(),
+            });
+        }
+        let host = Rc::clone(&context.host);
+        let crate::app::library::OpenedProject {
+            uid,
+            slug,
+            package_fs,
+            history_fs,
+            receipt,
+        } = host.open_project(key).await.map_err(UiError::from)?;
+        let handle =
+            match crate::app::library::PackageHandle::load(uid, slug, package_fs, history_fs) {
+                Ok(handle) => handle,
+                Err(error) => {
+                    receipt.abandon();
+                    return Err(library_ui_error(error));
+                }
+            };
+        let library = match handle.content_hash() {
+            Ok(hash) => hash,
+            Err(error) => {
+                receipt.abandon();
+                return Err(library_ui_error(error));
+            }
+        };
+        if library != running.hash {
+            receipt.abandon();
+            return Ok(BindOutcome::Differs {
+                uid: handle.uid.to_string(),
+                library,
+                board: running.hash,
+            });
+        }
+        let uid = handle.uid.to_string();
+        let Some(context) = self.library.as_mut() else {
+            receipt.abandon();
+            return Ok(BindOutcome::NotApplicable);
+        };
+        if let Some(previous) = context.active.take() {
+            // A transient session holds nothing host-side — no lock, no
+            // flusher — so there is nothing to queue a close for.
+            if previous.handle.uid.to_string() != uid && previous.transient.is_none() {
+                context.pending_close.push(previous.handle.uid.to_string());
+            }
+        }
+        context.active = Some(ActiveLibraryProject {
+            handle,
+            last_synced: running.version,
+            // A bound board project is the library's own package, not a
+            // memory-backed view session.
+            transient: None,
+        });
+        // Active: the ordinary close path owns the host's lock from here on.
+        receipt.commit();
+        Ok(BindOutcome::Bound { uid })
+    }
+
+    /// Read the board's whole project off the wire — the pull half of
+    /// adoption (D3).
+    ///
+    /// `FsVersion(0)` means "everything is newer", so one paged
+    /// `ChangesSince` enumerates the project directory as it stands; the
+    /// client does the paging (`lpa_client::LpClient::pull_changed_files`),
+    /// so a board with more files than fit a frame costs more round trips
+    /// and nothing else. Nothing is sent to the board and nothing is
+    /// unloaded first: this is the same read the save path already makes on
+    /// every save, and the running project keeps running through it.
+    ///
+    /// The pulled set is then hashed HERE and checked against what the
+    /// board said it was running. That check is the whole safety of the
+    /// step: it is the same canonical `lpc_history::hash_package` on both
+    /// sides, so a disagreement means the pull is not what the board has —
+    /// a write landed mid-pull, or the wire dropped something — and
+    /// installing it would produce a library copy the bind would then
+    /// refuse, leaving a phantom project behind. The caller treats a
+    /// mismatch as "not adopted", which is a log line and no writes.
+    ///
+    /// The file count and total bytes go out at info level: a classic board
+    /// with a big project is the one place this read could hurt, and the
+    /// walk that judges it needs a number to judge.
+    pub(crate) async fn pull_board_package(
+        &mut self,
+        server: &mut StudioServerClient,
+        running: &RunningPackage,
+    ) -> Result<(PulledPackage, Vec<UiLogDraft>), UiError> {
+        let pulled = server
+            .pull_changed_files(&self.runtime_storage_id, lpc_model::FsVersion::new(0))
+            .await?;
+        let package = crate::app::project::device_bind::package_from_pull(&pulled.updates)
+            .map_err(library_ui_error)?;
+        let bytes: usize = package.files.iter().map(|(_, body)| body.len()).sum();
+        let mut logs = pulled.logs;
+        logs.push(UiLogDraft::new(
+            UiLogLevel::Info,
+            UiLogOrigin::Studio,
+            format!(
+                "read {} file(s), {bytes} bytes, off the board to see what it is running",
+                package.files.len()
+            ),
+        ));
+        if package.hash != running.hash {
+            return Err(UiError::Project(format!(
+                "what came off the board ({}) is not what the board says it is running ({}) — it changed mid-read",
+                package.hash.short(),
+                running.hash.short()
+            )));
+        }
+        Ok((package, logs))
     }
 
     /// Re-push the ACTIVE library project's on-disk content to the running
@@ -9929,6 +10121,133 @@ mod tests {
             .install_package("old", &files, PackageProvenance::Created, 1.0)
             .unwrap();
         (store, summary)
+    }
+
+    /// A controller connected to a running project, with `store`'s library
+    /// attached — the shape a bind runs against. The host comes back so a
+    /// test can assert what the open receipt did with the project lock.
+    fn ready_with_library(
+        store: &crate::app::library::LibraryStore,
+    ) -> (
+        ProjectController,
+        Rc<crate::app::library::MemoryLibraryHost>,
+    ) {
+        let host = Rc::new(crate::app::library::MemoryLibraryHost::new(
+            store.clone(),
+            Rc::new(|| 9.0),
+        ));
+        let mut project = ProjectController::new();
+        project.set_library(
+            Rc::clone(&host) as Rc<dyn crate::app::library::LibraryHost>,
+            Rc::new(|| 9.0),
+            Rc::new(|| [3u8; 16]),
+        );
+        project.mark_ready("studio", 7, ProjectInventorySummary::default());
+        (project, host)
+    }
+
+    fn current_format_package() -> (
+        crate::app::library::LibraryStore,
+        crate::app::library::PackageSummary,
+    ) {
+        package_for_open(&[(
+            "project.json",
+            format!(r#"{{"format":{}}}"#, lpc_model::PROJECT_FORMAT_VERSION).as_bytes(),
+        )])
+    }
+
+    /// D1: the board's content IS this package, so the package becomes the
+    /// active library project — and the runtime revision it was read at
+    /// becomes the save path's baseline.
+    #[test]
+    fn a_board_at_the_library_head_binds_that_package() {
+        let (store, summary) = current_format_package();
+        let head = store.open(summary.uid).unwrap().content_hash().unwrap();
+        let uid = summary.uid.to_string();
+        let (mut project, host) = ready_with_library(&store);
+
+        let outcome = block_on_ready(project.bind_running_to_library(
+            &uid,
+            &RunningPackage {
+                hash: head,
+                version: lpc_model::FsVersion::new(12),
+            },
+        ))
+        .unwrap();
+
+        assert_eq!(outcome, BindOutcome::Bound { uid: uid.clone() });
+        assert_eq!(project.active_library_uid().as_deref(), Some(uid.as_str()));
+        assert!(
+            host.abandoned_projects().is_empty(),
+            "the open was committed, not given back: {:?}",
+            host.abandoned_projects()
+        );
+    }
+
+    /// D4: same package, different content. Nothing binds, nothing is
+    /// written, and the project lock goes straight back — a refusal that
+    /// held a lock would refuse every later open of it too.
+    #[test]
+    fn a_board_that_is_not_at_the_library_head_binds_nothing() {
+        let (store, summary) = current_format_package();
+        let head = store.open(summary.uid).unwrap().content_hash().unwrap();
+        let uid = summary.uid.to_string();
+        let board = lpc_history::ContentHash::of(b"what the board actually runs");
+        let (mut project, host) = ready_with_library(&store);
+
+        let outcome = block_on_ready(project.bind_running_to_library(
+            &uid,
+            &RunningPackage {
+                hash: board,
+                version: lpc_model::FsVersion::new(12),
+            },
+        ))
+        .unwrap();
+
+        assert_eq!(
+            outcome,
+            BindOutcome::Differs {
+                uid: uid.clone(),
+                library: head,
+                board,
+            }
+        );
+        assert!(project.active_library_uid().is_none());
+        assert_eq!(
+            host.abandoned_projects(),
+            vec![uid],
+            "the refused open gave the project back"
+        );
+    }
+
+    /// The bind is bookkeeping on top of an open, never a way to start
+    /// one: with no connected project, and with no library at all, there
+    /// is nothing to bind and nothing to complain about.
+    #[test]
+    fn binding_needs_both_a_connected_project_and_a_library() {
+        let (store, summary) = current_format_package();
+        let head = store.open(summary.uid).unwrap().content_hash().unwrap();
+        let uid = summary.uid.to_string();
+        let running = RunningPackage {
+            hash: head,
+            version: lpc_model::FsVersion::new(12),
+        };
+
+        let (mut project, _host) = ready_with_library(&store);
+        project.disconnect();
+        assert_eq!(
+            block_on_ready(project.bind_running_to_library(&uid, &running)).unwrap(),
+            BindOutcome::NotApplicable,
+            "no running project to name"
+        );
+
+        let mut storeless = ProjectController::new();
+        storeless.mark_ready("studio", 7, ProjectInventorySummary::default());
+        assert_eq!(
+            block_on_ready(storeless.bind_running_to_library(&uid, &running)).unwrap(),
+            BindOutcome::NotApplicable,
+            "no library to name it from"
+        );
     }
 
     #[test]
