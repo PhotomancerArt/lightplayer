@@ -950,15 +950,32 @@ impl ProjectController {
     }
 
     /// The products Studio streams no matter what has focus: the project's
-    /// primary visual and primary control outputs.
+    /// primary control output, and — on a sim lens — its primary visual.
     ///
-    /// These are the project's face and its rendered lamps — the two things
+    /// These are the project's rendered lamps and its face — the two things
     /// permanent surfaces (the root module's hero, every wiring drawer's
     /// value box) show without anyone asking, so they ride every pull
     /// regardless of the focus/lens gate that governs ordinary node
     /// products (M6 P3, generalized).
+    ///
+    /// Over a device wire (serial, or the emu running the device's
+    /// firmware) the primary VISUAL stays out unless its producer is the
+    /// focused node: every render-product probe is a second shader render
+    /// on the board — a 16×16 texture is 256 texels next to a small
+    /// fixture's few dozen lamps — shipped over serial at the device
+    /// cadence, and the surfaces it feeds are already covered there (the
+    /// root module's hero draws the composed published output frame, which
+    /// renders nothing device-side). What a device lens needs unasked is
+    /// the primary control product: the lamps the fixture rendered, which
+    /// is what the board is showing. (2026-09-22, the PLAYFUL choker: the
+    /// unfocused shader's texture probe rode every pull and dragged the C6's
+    /// frame rate down.)
     pub fn always_live_products(&self) -> Vec<UiProductRef> {
-        self.primary_visual_product()
+        let visual = match self.lens_transport {
+            Some(crate::LinkTransport::Emu | crate::LinkTransport::Serial) => None,
+            Some(crate::LinkTransport::Sim) | None => self.primary_visual_product(),
+        };
+        visual
             .into_iter()
             .chain(self.primary_control_product())
             .collect()
@@ -5106,7 +5123,9 @@ impl ProjectController {
             // A DEVICE lens (and an unknown one) subscribes the focused
             // node only: every subscribed product is frames pulled over
             // serial, and a board asked for every expanded node's frames
-            // stops answering heartbeats (round-2 M5 re-arms this).
+            // stops answering heartbeats (round-2 M5 re-arms this). The
+            // primary control product is unioned in regardless; the
+            // primary visual only on a sim lens (`always_live_products`).
             ProjectProductSubscriptionIntent::Default => match self.lens_transport {
                 Some(crate::LinkTransport::Sim) => !node.state().collapsed,
                 // An EMU is on the device side of this fork: its wire is an
@@ -5127,12 +5146,15 @@ impl ProjectController {
         for node in &self.root_nodes {
             self.collect_subscribed_products(node, &mut product_refs);
         }
-        // The primary visual and primary control stream whenever a project
-        // is open — the project's face and its rendered lamps are always
-        // live regardless of node focus (ADR 2026-07-16-primary-visual-product;
-        // M6 P3). Without the control half, a device lens has no bytes for
-        // the `control.out` value box or a control module's hero unless the
-        // producing fixture happens to be the focused node.
+        // The primary control (and, on a sim lens, the primary visual)
+        // stream whenever a project is open — the project's rendered lamps
+        // and its face are live regardless of node focus (ADR
+        // 2026-07-16-primary-visual-product; M6 P3). Without the control
+        // half, a device lens has no bytes for the `control.out` value box
+        // or a control module's hero unless the producing fixture happens
+        // to be the focused node. The visual half is a device-side render
+        // per pull, so over a device wire it follows focus like every other
+        // node product (see `always_live_products`).
         product_refs.extend(self.always_live_products());
         product_refs.into_iter().collect()
     }
@@ -11684,7 +11706,7 @@ mod tests {
 
     #[test]
     fn the_primary_control_product_is_always_subscribed() {
-        // The primary visual is unioned in regardless of node scope, or no
+        // The primary control is unioned in regardless of node scope, or no
         // surface outside the focused fixture card could ever show the
         // project's rendered lamps. Every node here is opted OUT, so the
         // primary is the ONLY thing that can put it in the list.
@@ -11712,6 +11734,64 @@ mod tests {
             project.subscribed_products(),
             vec![UiProductRef::from_control_product(fixture_control_product())]
         );
+    }
+
+    /// Over a device wire the primary visual is NOT always live: a
+    /// render-product probe is a second shader render on the board every
+    /// pull, and the surfaces it feeds are covered by the published output
+    /// frame there. The primary control still rides every pull, and the
+    /// visual comes back the moment its producer is the focused node — or
+    /// the lens is a sim (2026-09-22, the PLAYFUL choker's frame rate).
+    #[test]
+    fn a_device_lens_keeps_the_primary_visual_out_until_its_node_is_focused() {
+        let visual = lpc_model::ProductRef::visual(lpc_model::VisualProduct::new(
+            lpc_model::NodeId::new(1),
+            0,
+        ));
+        let mut view = single_node_view(1, NodeRuntimeStatus::Ok);
+        install_ui_projection_slots(&mut view, 1, Revision::new(4));
+        let mut project = ProjectController::new();
+        project.mark_ready("loaded-project", 7, ProjectInventorySummary::default());
+        project.apply_project_view(&view).unwrap();
+        clear_node_focus(&mut project.root_nodes);
+        let scope = lpc_wire::WireScopeRef::Module {
+            owner: lpc_model::NodeId::new(1),
+        };
+        project
+            .sync_mut()
+            .unwrap()
+            .set_binding_graph_for_test(control_out_graph(scope, Some(visual)));
+        let control = UiProductRef::from_control_product(fixture_control_product());
+        let visual = UiProductRef::Visual {
+            node_id: 1,
+            output: 0,
+        };
+
+        for transport in [crate::LinkTransport::Serial, crate::LinkTransport::Emu] {
+            project.set_lens_transport(Some(transport));
+            assert_eq!(
+                project.always_live_products(),
+                vec![control],
+                "{transport:?}: only the rendered lamps ride unasked"
+            );
+            assert_eq!(project.subscribed_products(), vec![control]);
+        }
+
+        // Focus the shader: its products stream like any focused node's.
+        project.set_lens_transport(Some(crate::LinkTransport::Serial));
+        project
+            .node_mut(&node_address("/demo.module/orbit.shader"))
+            .expect("shader controller")
+            .state_mut()
+            .focused = true;
+        assert!(project.subscribed_products().contains(&visual));
+        clear_node_focus(&mut project.root_nodes);
+
+        // A sim lens (and a detached mirror) keep the face always live.
+        for transport in [Some(crate::LinkTransport::Sim), None] {
+            project.set_lens_transport(transport);
+            assert_eq!(project.always_live_products(), vec![visual, control]);
+        }
     }
 
     #[test]
