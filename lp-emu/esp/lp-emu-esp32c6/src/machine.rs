@@ -2061,8 +2061,10 @@ impl Esp32C6Builder {
         // **Every boot that is not from the reset vector starts where the
         // second-stage bootloader left off**, and one of the things the
         // bootloader does is turn off MWDT0's flash-boot protection — which
-        // the chip comes out of reset with armed, counting towards a 0.65 s
-        // system reset. A ROM-up boot runs the real bootloader and does it
+        // the chip comes out of reset with armed, counting towards a 0.325 s
+        // system reset (26,000,000 ticks at 80 MHz APB — measured against the
+        // PAC; an early reading against the XTAL clock had this at 0.65 s).
+        // A ROM-up boot runs the real bootloader and does it
         // for itself; anything else is handed the state it produced, so the
         // loader stands in for it. Not inside the `BootMode::Direct` block
         // above, because that one also needs an app image and a machine with

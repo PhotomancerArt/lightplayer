@@ -30,7 +30,7 @@
 //! - **MWDT0's flash-boot protection turned off**
 //!   ([`disable_flash_boot_watchdog`]). The chip resets with it armed and
 //!   the real bootloader clears it; an app that woke up with it still
-//!   counting would be reset 0.65 s in by a watchdog it never saw.
+//!   counting would be reset 0.325 s in by a watchdog it never saw.
 //! - The mask ROM, loaded **first**, so its `.bss` (which reaches from
 //!   `0x4086_ad08` across what the app calls RAM) is overwritten by the app's
 //!   own segments — the order the real bootloader runs in.
@@ -620,12 +620,13 @@ pub fn seed_rom_flash_chip(bus: &mut SocBus, chip_size: u32) -> Option<(u32, u32
 /// protection **off**.
 ///
 /// The chip comes out of reset with `wdtconfig0 = 0x0004_c000`, whose bit 14
-/// (`flashboot_mod_en`) has MWDT0 counting towards a 0.65 s system reset
-/// before a single instruction runs — that is the watchdog the first-flash
-/// defect's board kept tripping. The real bootloader turns it off 40 ms in
-/// (`wdt_hal_set_flashboot_en(ctx, false)`), and **a direct load's whole
-/// premise is that the bootloader already ran**. Without this the app would
-/// be shot at 0.65 s by a watchdog it never saw armed.
+/// (`flashboot_mod_en`) has MWDT0 counting towards a 0.325 s system reset
+/// (26,000,000 ticks at 80 MHz APB) before a single instruction runs — that
+/// is the watchdog the first-flash defect's board kept tripping. The real
+/// bootloader turns it off 40 ms in (`wdt_hal_set_flashboot_en(ctx, false)`),
+/// and **a direct load's whole premise is that the bootloader already ran**.
+/// Without this the app would be shot at 0.325 s by a watchdog it never saw
+/// armed.
 ///
 /// MEASURED: the value is the one a `--trace TIMG0` of a ROM-up boot of the
 /// reference merged image shows the bootloader writing, and the value the
