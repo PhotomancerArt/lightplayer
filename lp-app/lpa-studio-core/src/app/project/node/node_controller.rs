@@ -585,10 +585,11 @@ impl NodeController {
                     product.preview = preview;
                     has_cached_preview = true;
                 }
-                // The primary visual and primary control are always
-                // presented live: both are subscribed project-wide
-                // regardless of node focus (ADR
-                // 2026-07-16-primary-visual-product, M6 P3).
+                // The always-live products are presented live: the primary
+                // control, and on a sim lens the primary visual, are
+                // subscribed project-wide regardless of node focus (ADR
+                // 2026-07-16-primary-visual-product, M6 P3; the device-wire
+                // exception is `ProjectController::always_live_products`).
                 let is_always_live = product
                     .product
                     .is_some_and(|product| always_live.contains(&product));
