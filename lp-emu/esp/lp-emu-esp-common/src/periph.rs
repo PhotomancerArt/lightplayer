@@ -152,9 +152,10 @@ pub enum Watchdog {
 /// That one property is the whole of
 /// `docs/defects/2026-09-06-c6-analog-master-wedges-the-bootloader.md`: a
 /// board whose `LPPERI_CLK_EN` has the analog I2C master's clock gated hangs
-/// the second-stage bootloader, the ROM-armed watchdog resets the HP system,
-/// and the next boot lands in the same hang — for ever — because the gate is
-/// LP-domain state that no reset touched.
+/// the second-stage bootloader, the flash-boot-protection watchdog (armed by
+/// a reset value, disarmed by the bootloader — never by the ROM) resets the
+/// HP system, and the next boot lands in the same hang — for ever — because
+/// the gate is LP-domain state that no reset touched.
 ///
 /// A block declares its own domain (`Peripheral::domain`) rather than
 /// appearing in a list somewhere: the block knows what it is, and a list

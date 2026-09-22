@@ -46,8 +46,12 @@ it go away, which is why nobody had looked.
    (`LP_I2C_ANA_MST`, `0x600b2400`). Its first regi2c write in `rtc_clk_init`
    (slave `0x6d`, register `0x0e`) latches the master busy with no clock to
    finish it, and the bootloader spins at `0x4086ed7a` — inside its own
-   second load segment — until the ROM-armed TG0 flash-boot watchdog resets
-   it. Sometimes; the induced repro hangs silently.
+   second load segment — until the flash-boot-protection watchdog resets it
+   (TG0's MWDT0, reset-armed by `TIMG0.wdtconfig0`'s power-on value, not by
+   any ROM code — the c6-lp-domain-reset plan's P2 traced this: the ROM
+   never touches TIMG0, the bootloader is what turns the protection *off*,
+   40 ms in, and the induced board never gets that far). Sometimes; the
+   induced repro hangs silently.
 3. Every reset a flasher can send — USB-Serial-JTAG's RTS reset, the
    watchdog — resets the HP domain only. The LP domain, that clock gate
    included, survives. Only a power-on reset restores it. The flasher, the
@@ -109,7 +113,11 @@ scenarios `a_native_usb_board_after_a_flash_never_gets_the_ch34x_rung`,
 `scripts/c6-bootloader-hang-walk.sh <MAC>` induces the fault, flashes
 through the host provider and asserts the hello; the browser path is the
 same walk by hand through Studio. The JS layer has no harness
-(`docs/debt/web-serial-js-untestable.md`).
+(`docs/debt/web-serial-js-untestable.md`). The hang itself, its loop, the
+cure and the power cycle are also reproduced with no board at all in
+`lp-emu/esp/lp-emu-esp32c6/tests/bootloader_hang.rs` — see
+[c6-analog-master-wedges-the-bootloader](2026-09-06-c6-analog-master-wedges-the-bootloader.md)'s
+"Reproduced on the emulator" section.
 
 **Lesson** — a reset is not a power cycle. On the C6 family the LP domain
 carries clock gates, PMU and PLL state across every reset a host can send,
