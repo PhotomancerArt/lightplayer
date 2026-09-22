@@ -100,6 +100,33 @@ use crate::snapshot::Snapshot;
 /// `LP_CLKRST + 0x10`, the register the mask ROM reads before anything else.
 const LP_CLKRST_RESET_CAUSE: u32 = 0x010;
 
+/// `ASSIST_DEBUG + 0x048` — `cpu0.rcd_pdebugpc`, the crash recorder's
+/// captured PC, and **the register the ROM's `Saved PC:` line comes from**.
+///
+/// Read out of the vendored ROM's `main`, which does this immediately after
+/// the `rst:`/`boot:` banner and immediately before arming the recorder for
+/// the next boot:
+///
+/// ```text
+/// 40018abe:  jal  0x4001a602 <ets_clk_assist_debug_clock_enable>
+/// 40018ac2:  lui  a5, 0x600c2
+/// 40018ac6:  lw   a1, 0x48(a5)     ; a1 = ASSIST_DEBUG.cpu0.rcd_pdebugpc
+/// 40018ac8:  lui  a5, 0x40880
+/// 40018acc:  sw   a1, -0x4(a5)     ; stashed at 0x4087fffc for the app
+/// 40018ad0:  beqz a1, 0x40018ade   ; zero → print nothing
+/// 40018ad2:  lui  a0, 0x4004a
+/// 40018ad6:  addi a0, a0, 0x7d0    ; "Saved PC:0x%08x\n"
+/// 40018ada:  jal  0x40019358 <ets_printf>
+/// 40018ade:  lui  a5, 0x600c2
+/// 40018ae2:  li   a4, 0x3
+/// 40018ae4:  sw   a4, 0x44(a5)     ; cpu0.rcd_en = recorden | pdebugen
+/// ```
+///
+/// So the line is printed **only when the register is non-zero**, which is
+/// why a power-on boot has none: `cpu0.rcd_pdebugpc` resets to 0 and the
+/// emulator's ASSIST_DEBUG accept block has always answered with that.
+const ASSIST_DEBUG_RCD_PDEBUGPC: u32 = 0x048;
+
 pub const MAX_SLICE_CYCLES: u64 = 8_192;
 
 /// How many slice boundaries `run_until` lets pass between two reads of the
@@ -2031,6 +2058,24 @@ impl Esp32C6Builder {
         // not in the common crate.
         bus.set_watchpoint_slots(4);
 
+        // **Every boot that is not from the reset vector starts where the
+        // second-stage bootloader left off**, and one of the things the
+        // bootloader does is turn off MWDT0's flash-boot protection — which
+        // the chip comes out of reset with armed, counting towards a 0.65 s
+        // system reset. A ROM-up boot runs the real bootloader and does it
+        // for itself; anything else is handed the state it produced, so the
+        // loader stands in for it. Not inside the `BootMode::Direct` block
+        // above, because that one also needs an app image and a machine with
+        // no app at all (`--hooks`, `--map`, a bare builder in a test) is
+        // just as much "the bootloader already ran".
+        if boot_mode != BootMode::RomUp {
+            loader::disable_flash_boot_watchdog(&mut bus);
+        }
+        // …and a download-mode boot is not a flash boot at all, so its
+        // flash-boot protection does not count. See
+        // `periph::timg::Timg::set_flash_boot`.
+        loader::set_flash_boot_strap(&mut bus, strap);
+
         // Guest time is zero and the schedule is empty: the peripherals that
         // need a first event (a UART polling its host source) take it now.
         bus.set_time(0);
@@ -3506,18 +3551,27 @@ impl Esp32C6Machine {
     /// The machine goes back to the state it was built in and the two
     /// registers the mask ROM reads before anything else are re-seeded: the
     /// strap it prints as `boot:0x..` and chooses a path with, and the reset
-    /// cause it prints as `rst:0x..`, which is `USB_UART_HPSYS` because
-    /// every producer of a reset request on this chip is the serial bridge or
-    /// a watchdog and the ROM has one code for "not a power-on" that the
-    /// firmware maps to `user-reset`.
+    /// cause it prints as `rst:0x..`, which is `cause` — the request's own,
+    /// mapped through the ROM's reset-reason table by
+    /// [`ResetCause::for_source`]. Before P2 this was hard-coded
+    /// `USB_UART_HPSYS`, which was right for the serial bridge and wrong for
+    /// a watchdog.
+    ///
+    /// A cause that [records a saved PC](ResetCause::records_saved_pc) also
+    /// leaves the hart's PC in [`ASSIST_DEBUG_RCD_PDEBUGPC`], which is where
+    /// the ROM reads the `Saved PC:` line from — the emulated half of
+    /// `rst:0x7 (TG0_WDT_HPSYS)` / `Saved PC:0x4086ed7a`. Read **before**
+    /// the restore, because the restore is what puts the hart back at the
+    /// reset vector.
     ///
     /// The consoles keep their bytes: a restore would put back the empty logs
     /// the machine was built with, and a boot log that lost everything before
     /// the reset would be a worse record than one that has both boots in it.
-    pub fn reboot(&mut self, strap: Strap) -> bool {
+    pub fn reboot(&mut self, strap: Strap, cause: ResetCause) -> bool {
         let Some(power_on) = self.power_on.clone() else {
             return false;
         };
+        let saved_pc = cause.records_saved_pc().then(|| self.pc());
         let (uart0, usb_sj, tried) = (
             self.uart0_log.bytes(),
             self.usb_sj_log.bytes(),
@@ -3529,17 +3583,54 @@ impl Esp32C6Machine {
         self.usb_sj_tried_log.replace(&tried);
 
         self.strap = strap;
-        self.reset_cause = ResetCause::UsbUartHpSys;
+        self.reset_cause = cause;
         let strap_word = loader::strap_word(strap);
         let cause = self.reset_cause.rom_code();
         if let Some(i) = self.bus.peripheral_index("GPIO") {
             self.bus
                 .with_peripheral::<periph::gpio::Gpio, _>(i, |g, _| g.set_strap(strap_word));
         }
-        if let Some(i) = self.bus.peripheral_index("LP_CLKRST") {
+        // The banner's `rst:0x..`. ⚠️ This poke used to fail SILENTLY — a
+        // bare `RegFile` had no `Peripheral::as_any_mut`, so the downcast
+        // returned `None` — and nothing noticed for as long as `reboot()`
+        // hard-coded the one cause a run could already have started with.
+        // Hence the `expect`: a reboot whose banner would lie is worth a
+        // panic, not a warning nobody reads.
+        let poked = self
+            .bus
+            .peripheral_index("LP_CLKRST")
+            .and_then(|i| {
+                self.bus
+                    .with_peripheral::<lp_emu_esp_common::RegFile, _>(i, |r, _| {
+                        r.poke(LP_CLKRST_RESET_CAUSE, cause)
+                    })
+            })
+            .is_some();
+        assert!(
+            poked,
+            "reboot: LP_CLKRST would not take the reset cause, so the ROM's \
+             banner would print the previous boot's"
+        );
+        // The strapping decides whether MWDT0's flash-boot protection counts,
+        // and a reboot can change the strapping — the download dance is
+        // exactly that. Re-derive it, or a chip reset into the ROM console
+        // would inherit the *previous* boot's answer.
+        loader::set_flash_boot_strap(&mut self.bus, strap);
+        // ⚠️ P3 owns the domain question this register raises. On silicon
+        // ASSIST_DEBUG sits in the HP peripheral window and its record
+        // registers survive an HP reset *because the block is reset by a
+        // narrower signal than the one the watchdog asserts* — the whole
+        // point of a crash recorder. Here it is poked back after the
+        // restore, which reproduces the observable behaviour without
+        // committing to a domain; when P3 gives peripherals a `domain()`,
+        // ASSIST_DEBUG is the one block whose answer is neither obviously
+        // `Hp` nor obviously `Lp`, and this poke is what it has to replace.
+        if let Some(pc) = saved_pc
+            && let Some(i) = self.bus.peripheral_index("ASSIST_DEBUG")
+        {
             self.bus
                 .with_peripheral::<lp_emu_esp_common::RegFile, _>(i, |r, _| {
-                    r.poke(LP_CLKRST_RESET_CAUSE, cause)
+                    r.poke(ASSIST_DEBUG_RCD_PDEBUGPC, pc)
                 });
         }
         // The cache MMU is shared state outside the snapshot, like the flash
@@ -4846,8 +4937,12 @@ impl Esp32C6Machine {
                     pc,
                 };
             }
-            if let Some(lp_emu_esp_common::MachineRequest::Reset { source, at, strap }) =
-                self.bus.take_request()
+            if let Some(lp_emu_esp_common::MachineRequest::Reset {
+                source,
+                at,
+                strap,
+                cause,
+            }) = self.bus.take_request()
             {
                 // `stop_cycle` is an absolute guest cycle and a reboot moves
                 // what zero means: `restore(power_on)` puts the clock back.
@@ -4866,8 +4961,14 @@ impl Esp32C6Machine {
                 let remaining = stop
                     .stop_cycle
                     .map(|_| stop_cycle.saturating_sub(self.cycles()));
-                if self.reboot_on_reset && self.reboot(strap) {
-                    log::info!("machine: {source} at cycle {at} — rebooting into strap {strap}");
+                let cause = ResetCause::for_source(cause);
+                if self.reboot_on_reset && self.reboot(strap, cause) {
+                    log::info!(
+                        "machine: {source} at cycle {at} — rebooting into strap {strap}, \
+                         rst:{:#x} ({})",
+                        cause.rom_code(),
+                        cause.rom_name()
+                    );
                     if let Some(remaining) = remaining {
                         stop_cycle = self.cycles().saturating_add(remaining);
                     }
@@ -5964,7 +6065,10 @@ mod tests {
         assert!(m.usb_sj_open(), "the power-on port is open");
         assert!(!m.usb_client_connected, "and no byte client opened it");
 
-        assert!(m.reboot(Strap::App), "the machine reboots");
+        assert!(
+            m.reboot(Strap::App, ResetCause::UsbUartHpSys),
+            "the machine reboots"
+        );
 
         assert!(m.usb_sj_open(), "the restore puts the open port back");
         assert!(

@@ -25,7 +25,10 @@
 //!   `reset_en` bit 29 through an [`lp_peri::LpPeriLines`] handle: a
 //!   transaction started with the clock gated latches `busy`, and only a
 //!   reset-line pulse or a power cycle clears it — the first-flash
-//!   bootloader hang).
+//!   bootloader hang) and [`timg`]'s **MWDT0**, which comes out of reset with
+//!   `flashboot_mod_en` set and shoots a bootloader that does not disable it
+//!   within 325 ms (`rst:0x7 (TG0_WDT_HPSYS)`) — the loop that ends each
+//!   hang. TIMG1's MWDT stays accepted; see `timg.rs` for why.
 //! - **modelled, M2 P1** — [`io_mux`] (the P5 accept block, now also
 //!   pushing each pad's `fun_ie` into the signal fabric as the pad's input
 //!   enable) and [`gpio`] as a **two-way** view: `in_`, `pin[n].int_type`,

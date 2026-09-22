@@ -3096,7 +3096,10 @@ impl Machine {
             // A peripheral asked for a reset — the RWDT's stage 0 expired, or
             // the link's control channel asked for one. Reported by default;
             // `--reboot-on-reset` performs it instead.
-            if let Some(MachineRequest::Reset { source, at, strap }) = self.bus.take_request() {
+            if let Some(MachineRequest::Reset {
+                source, at, strap, ..
+            }) = self.bus.take_request()
+            {
                 // ⚠️ `stop_cycle` is an **absolute** guest cycle and a reboot
                 // moves what zero means. Read what is LEFT of the budget while
                 // the old origin still stands and rebase it onto the new one,

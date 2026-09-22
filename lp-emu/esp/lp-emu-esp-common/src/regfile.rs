@@ -405,6 +405,22 @@ impl Peripheral for RegFile {
         )
     }
 
+    /// **A machine that pokes an accept block needs this.** Every accept
+    /// table on every chip here is a bare `RegFile` behind
+    /// `Box<dyn Peripheral>`, and `SocBus::with_peripheral::<RegFile, _>`
+    /// downcasts through this; without it the call returns `None` and the
+    /// poke silently does nothing.
+    ///
+    /// It was missing, and the C6's `reboot()` had been quietly failing to
+    /// re-seed `LP_CLKRST.reset_cause` since M7 — invisible for as long as
+    /// the only cause a reboot could produce was the one the run started
+    /// with. P2 gave `reboot()` a second possible cause
+    /// (`rst:0x7 (TG0_WDT_HPSYS)`) and the banner kept printing the first,
+    /// which is how it surfaced.
+    fn as_any_mut(&mut self) -> Option<&mut dyn core::any::Any> {
+        Some(self)
+    }
+
     fn save_state(&self) -> Vec<u8> {
         let mut out = Vec::with_capacity(self.regs.len() * 4);
         for r in &self.regs {

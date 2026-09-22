@@ -201,7 +201,11 @@ the ROM's console globals, the `rst:0x1 (POWERON)` banner, early RNG entropy,
 real eFuse, and the derived reset cause. That list was the seed for the
 ROM-up cross-check, and it is worth more than the code around it. (It was
 also not complete: the ROM's **own** data image is an eighth item, and only a
-boot that runs `_init` could have found it — see below.)
+boot that runs `_init` could have found it — see below. **MWDT0's flash-boot
+protection was a ninth**, found the same way, by P2 giving that watchdog a
+real expiry and watching `boot_idle` get shot a third of a second in: the chip resets with
+`TIMG0.wdtconfig0`'s bit 14 set, the real bootloader clears it, and a direct
+load has to stand in for that too — `loader::disable_flash_boot_watchdog`.)
 
 Two of those seven the loader now does, because M4's firmware asks the flash
 *chip* questions and the two halves of the address space have to describe one
@@ -254,6 +258,8 @@ Two flags decide the banner, and both are inputs rather than choices:
 download console. `0x15` and `0x1e` are what the committed silicon
 `boot-idle-flash` transcript recorded; `--strap download` is `0x1e` with the
 one bit the ROM's decode tests cleared, and reaches `waiting for download`.
+`--reset-cause tg0-wdt` is the third spelling: `0x7`, what a board that has
+just been shot by its own flash-boot watchdog starts from.
 
 An `--elf` given with `--merged` is never loaded: it is the symbol table
 `--probe` and `--break-at` read, and the reference the cross-check compares
@@ -269,7 +275,8 @@ left in the LP domain, which no reset a host can send restores. Bit 29 is
 
 ```console
 $ lp-emu-esp32c6 --merged …/merged.bin --lpperi-clk-en 5f000000 \
-      --reset-cause usb-uart --strap app --uart0 stdout --timeout 2s
+      --reset-cause usb-uart --strap app --uart0 stdout \
+      --reboot-on-reset --timeout 800ms
 ESP-ROM:esp32c6-20220919
 Build:Sep 19 2022
 rst:0x15 (USB_UART_HPSYS),boot:0x1e (SPI_FAST_FLASH_BOOT)
@@ -279,8 +286,22 @@ load:0x4086c410,len:0xd48
 load:0x4086e610,len:0x2d68
 load:0x40875720,len:0x1800
 entry 0x4086c410
-                        ← and then nothing
+ESP-ROM:esp32c6-20220919
+Build:Sep 19 2022
+rst:0x7 (TG0_WDT_HPSYS),boot:0x1e (SPI_FAST_FLASH_BOOT)
+Saved PC:0x4086ed7a
+SPIWP:0xee
+…                       ← and round again, every 325 ms
 ```
+
+That is the wedged XIAO's serial log, line for line, `Saved PC` included.
+Without `--reboot-on-reset` the run stops at the first reset and says
+`RESET requested by TIMG0 MWDT flash-boot protection at cycle 52000000` —
+`0x0004_c000` is `wdtconfig0`'s reset word and bit 14 of it is flash-boot
+protection, which the second-stage bootloader turns off 40 ms into a healthy
+boot and a wedged one never reaches. The `Saved PC` comes from
+`ASSIST_DEBUG.cpu0.rcd_pdebugpc`, which is where the ROM reads it
+(`0x40018ac6` in the vendored ROM).
 
 The second-stage bootloader's first `regi2c` write in `rtc_clk_init` (slave
 `0x6d`, register `0x0e`) latches `LP_I2C_ANA_MST.i2c0_ctrl` busy with no
@@ -553,16 +574,16 @@ milestone owns.
 | `PLIC_MX` | `0x2000_1000` | modelled | `enable`, `type`, `clear` (pulse, reads 0), `pri[0..32]` (4 bits), `thresh` (8 bits, resets **1**), `emip_status`; fires iff `enable && pri >= thresh`; ties → higher number (*modeled*); edge type stored, modelled as level |
 | `INTPRI` | `0x600C_5000` | modelled | `cpu_intr_from_cpu[0..4]` bit 0 = level of source 22+n; rest accept |
 | `SYSTIMER` | `0x6000_A000` | modelled | two 52-bit units at cycles/10 (16 MHz), `unit_op.update`/`value_valid`, three comparators armed by `comp_load`, period mode, `int_*`; sources 57..59 |
-| `TIMG0` | `0x6000_8000` | modelled | **the esp-rtos tick**: T0 at XTAL/2 (*modeled*: esp-hal's default source and prescaler reading), `update` pulse, alarm as a scheduled event, `alarm_en` self-clearing, auto-reload; RTC calibration as a timed event (value *modeled* `40e6·max/136e3`); MWDT accepted behind its key, arming leaves a `WDT ARMED` note |
-| `TIMG1` | `0x6000_9000` | modelled | same type, sources 54/56; the firmware only disables its WDT |
+| `TIMG0` | `0x6000_8000` | modelled | **the esp-rtos tick**: T0 at XTAL/2 (*modeled*: esp-hal's default source and prescaler reading), `update` pulse, alarm as a scheduled event, `alarm_en` self-clearing, auto-reload; RTC calibration as a timed event (value *modeled* `40e6·max/136e3`); **the MWDT expires** behind its key: `flashboot_mod_en` (bit 14, set out of reset) counts at 80 MHz / `wdtconfig1`'s prescaler and asks for a `TG0_WDT_HPSYS` reset 325 ms in unless the bootloader turns it off, the two-bit stage actions decide outside that mode, and a `wdtfeed` or a config write re-arms. *Modeled*: that flash-boot protection counts only on a flash-boot strap (see `periph/timg.rs`) |
+| `TIMG1` | `0x6000_9000` | modelled | same type, sources 54/56; the firmware only disables its WDT. Its MWDT stays **accepted** — `regs::TIMG0` is the resets table for both instances and `flashboot_mod_en` out of reset is TIMG0's fact, so arming TIMG1 from it would be inventing behaviour. A write that arms it still leaves a `WDT ARMED` note |
 | `LP_WDT` | `0x600B_1C00` | modelled | RWDT: key-gated config/feed, stage-0 expiry as a scheduled event at `hold·2/136 kHz` (*modeled* from esp-hal's `>> 1` shift); a reset action ends the run with `Outcome::Reset`; interrupt action drives source 18; SWD accepted; `+0x54` named `reserved_054` |
 | `EFUSE` | `0x600B_0800` | modelled | memory seeded from `--efuse-mac`/`--efuse-rev` in esp-hal's byte order (`rd_mac_spi_sys_0/1/3`) |
 | `RNG` (the `LP_PERI` block; `periph/lp_peri.rs`) | `0x600B_2800` | modelled | `rng_data` (+0x08) = xorshift64\* from `--seed`; deterministic by design. Since 2026-09-22 also the LP domain's **gates**: `clk_en` (+0x00, `LPPERI_CLK_EN`) and `reset_en` (+0x04, `LPPERI_RESET_EN`) bit 29 — `LP_ANA_I2C_CK_EN` / `LP_ANA_I2C_RESET_EN` — drive an `LpPeriLines` handle into `LP_I2C_ANA_MST`, carrying both levels **and the rising edge** of the reset line (the flashers' cure is a pulse with no access to the master in between). `clk_en`'s power-on value is `--lpperi-clk-en` (default `0x7f80_0000`, the PAC reset). The peripheral is still named `RNG`: the power-on snapshot restores by name. Other `LP_PERI` offsets accept |
-| `LP_CLKRST` | `0x600B_0400` | accept | `reset_cause` seeded 1 (POWERON) — the mask ROM's `rtc_get_reset_reason` reads it; `lp_clk_conf` = RC_SLOW |
+| `LP_CLKRST` | `0x600B_0400` | accept | `reset_cause` seeded 1 (POWERON) — the mask ROM's `rtc_get_reset_reason` reads it; `lp_clk_conf` = RC_SLOW. A reboot re-seeds it from the reset request's own cause (`ResetCause::for_source`), so a watchdog reset prints `rst:0x7`, not the cause the run was started with |
 | `PCR` | `0x6009_6000` | accept | `sysclk_conf.clk_xtal_freq` pinned 40; `cpu_waiti_conf.cpu_wait_mode_force_on` pinned 0; `timergroup.timer_clk_conf` reset = XTAL; `uart(n).clk_conf` drives the two UART clock lines (reset = XTAL, enabled); `rmt_conf`/`rmt_sclk_conf` drive the RMT clock line (reset `0x0050_1000` = PLL/2 = 40 MHz; esp-hal writes `div_num 0` for 80) |
 | `I2C_ANA_MST` | `0x600A_F800` | accept | `ana_conf0.cal_done` pinned 1; `i2c_ctrl(0/1).busy` pinned 0; `ana_conf2` reset 0 (master 1) |
 | `LP_I2C_ANA_MST` | `0x600B_2400` | modelled | the **LP** analog master, the one the ESP-IDF second-stage bootloader drives, **gated by `LP_PERI`**. Clocked and not reset: the transaction runs against this block's own `{block, register}` store and `busy` reads 0 — what every clean boot has always seen; the answer to a read lands in `i2c0_data.rdata` (bits 0:7), not in `i2c0_ctrl` as on the HP master. Clock gated: the command word is stored, the transaction does **not** run, and `busy` **latches** — the first-flash bootloader hang, reproduced. Turning the clock back on does not clear it; a rising edge of `reset_en` bit 29 does, and returns the window to its reset values, and while that line is high the block ignores writes. Grades: `i2c0_ctrl` and `i2c0_data` *modeled*, the rest the PAC's. See `tests/bootloader_hang.rs` |
-| `ASSIST_DEBUG` | `0x600C_2000` | accept | `cpu0.debug_mode` pinned 0 (no debugger: watchpoints arm, `wfi` runs) |
+| `ASSIST_DEBUG` | `0x600C_2000` | accept | `cpu0.debug_mode` pinned 0 (no debugger: watchpoints arm, `wfi` runs). `cpu0.rcd_pdebugpc` (+0x48) is where the ROM reads the `Saved PC:` it prints — and it prints nothing when the register is 0, which is why a power-on boot has no such line. A **watchdog** reboot leaves the hart's PC there; a `chip_rst` one does not, deliberately (`ResetCause::records_saved_pc`) |
 | `GPIO` | `0x6009_1000` | modelled (M5 P2) | a routing **view** over the bus's signal fabric: `func_out_sel_cfg[n]` routes pad `n` to `out_sel` (128 = follow `GPIO_OUT[n]`, `inv_sel` inverts, `oen_sel` recorded and reported as `oe=`, never gated on), `out`/`out_w1ts`/`out_w1tc` are the output bitmap a `GPIO_OUT` pad follows, `enable`/`w1ts`/`w1tc` the OE bitmap. The `w1ts`/`w1tc` registers fold into `out`/`enable` and read back 0 (write-only in the PAC). Since M2 P1 it is a **two-way** view: `in_` is each pad's resolved fabric level for the pads whose input enable is set, `pin[n].int_type` is decoded (0 disable / 1 posedge / 2 negedge / 3 any edge / 4 low level / 5 high level, the PAC's own numbering), `status` is the sticky latch with `status_w1ts`/`status_w1tc` over it (write-only, read back 0), `pcpu_int` is `status` gated by `pin[n]` bit 13 (`int_ena` bit 0), and source **30** is held high as a LEVEL while any `pcpu_int` bit is pending. `pcpu_nmi_int` and source 31 are **not** raised (esp-hal never sets `int_ena` bit 14 on this chip); `in1`/`status1`/`pcpu_int1` read 0 — the C6 has 31 pads. Per-register grades (the file header's table; `--strict-grade`): the registers above plus `strap` and `func*_out_sel_cfg` *documented*, everything else *modeled*, nothing *measured* until M2 P2's transcript. Everything else is still a `RegFile`. A pad is **observed once the guest writes its routing**: seeding 31 routes from the `0x80` reset value would give a boot that drives nothing 31 pads to decode. See "The pin" |
 | `IO_MUX` | `0x6009_0000` | modelled (M2 P1) | the P5 accept block, all 31 pads at reset `0x0800`, plus one seam: `gpio[n].fun_ie` (bit 9) is pushed into the signal fabric as the pad's **input enable**, which is what `GPIO.in_` reads back. Everything else in the word — `fun_wpu`/`fun_wpd` (the *value* of a pull is not modelled), `fun_drv`, `filter_en`, the `slp_*` bits and `mcu_sel` — is accept-and-remember |
 | `PMU`, `LP_AON`, `LP_APM`, `LP_APM0`, `HP_APM`, `MODEM_SYSCON`, `MODEM_LPCON`, `APB_SARADC`, `HP_SYS`, `TEE`, `LP_TEE`, `LP_IO`, `LP_TIMER`, `EXTMEM` | — | accept | written by `esp_hal::init`, read back as written; `LP_AON.store1` carries the calibration value |
@@ -1906,7 +1927,7 @@ is a local affair.
 | `rmt_chase`, `rmt_chase_replay` | M5's chase: the words, the pad, the payload's checksums against the pad, the telemetry line |
 | `shader_oracle_pin` | M5 P4's pin claim on the shipped image: `walks/shader-oracle.script`'s first lit frame off gpio18 against the host oracle, under both grades |
 | `basic_pin` | `examples/basic` on the pad: whole, latched 241-LED frames at a steady period, never their contents |
-| `bootloader_hang` | the first-flash bootloader hang: the reference merged image booted ROM-up with `--lpperi-clk-en 0x5f000000` spins in bootloader segment 2 on `LP_I2C_ANA_MST.i2c0_ctrl` busy and never prints `2nd stage bootloader`; the same image with the PAC reset `clk_en` does |
+| `bootloader_hang` | the first-flash bootloader hang: the reference merged image booted ROM-up with `--lpperi-clk-en 0x5f000000` spins in bootloader segment 2 on `LP_I2C_ANA_MST.i2c0_ctrl` busy, never prints `2nd stage bootloader`, and is shot by MWDT0's flash-boot protection; the same image with the PAC reset `clk_en` boots. With `--reboot-on-reset` it **loops**: six boots in 2 s emulated, each `rst:0x7 (TG0_WDT_HPSYS)` with a `Saved PC` inside the spin, period 325 ms against silicon's ≈400 ms |
 | `host_absent`, `boot_no_radio`, `boot`, `rom_*`, `stack_guard` | M3's |
 
 `just test-emu-c6` is the whole set: the machine's boot tests, the M3 and M4

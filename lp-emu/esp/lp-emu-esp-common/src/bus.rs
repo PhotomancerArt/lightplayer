@@ -3185,7 +3185,7 @@ impl Bus for SocBus {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::periph::{Peripheral, RegGrades, Strap};
+    use crate::periph::{Peripheral, RegGrades, ResetScope, ResetSource, Strap, Watchdog};
     use crate::regfile::RegFile;
     use crate::trace::SharedBuffer;
 
@@ -4240,6 +4240,10 @@ mod tests {
                 source: "WDT stage 0",
                 at,
                 strap: Strap::App,
+                cause: ResetSource::Watchdog {
+                    watchdog: Watchdog::Rwdt,
+                    scope: ResetScope::System,
+                },
             });
         }
 
@@ -4266,6 +4270,10 @@ mod tests {
                 source: "WDT stage 0",
                 at: 77,
                 strap: Strap::App,
+                cause: ResetSource::Watchdog {
+                    watchdog: Watchdog::Rwdt,
+                    scope: ResetScope::System,
+                },
             }),
             "the first request is the one the machine sees"
         );

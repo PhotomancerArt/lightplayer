@@ -44,7 +44,10 @@
 
 use lp_emu_core::sched::EventId;
 use lp_emu_esp_common::regfile::{lane_of, merge_lane};
-use lp_emu_esp_common::{BusCx, MachineRequest, Peripheral, RegFile, Strap, Width, event_id};
+use lp_emu_esp_common::{
+    BusCx, MachineRequest, Peripheral, RegFile, ResetScope, ResetSource, Strap, Watchdog, Width,
+    event_id,
+};
 
 use super::systimer::Reader;
 use super::{RC_SLOW_HZ, WDT_WKEY};
@@ -216,10 +219,10 @@ impl Peripheral for LpWdt {
             self.update_lines(cx);
             return;
         }
-        let source = match action {
-            2 => "LP_WDT stage 0 (ResetCpu)",
-            3 => "LP_WDT stage 0 (ResetCore)",
-            _ => "LP_WDT stage 0 (ResetSystem)",
+        let (source, scope) = match action {
+            2 => ("LP_WDT stage 0 (ResetCpu)", ResetScope::Cpu),
+            3 => ("LP_WDT stage 0 (ResetCore)", ResetScope::Core),
+            _ => ("LP_WDT stage 0 (ResetSystem)", ResetScope::System),
         };
         if !self.expired {
             self.expired = true;
@@ -235,6 +238,10 @@ impl Peripheral for LpWdt {
             source,
             at,
             strap: Strap::App,
+            cause: ResetSource::Watchdog {
+                watchdog: Watchdog::Rwdt,
+                scope,
+            },
         });
     }
 
@@ -360,6 +367,10 @@ mod tests {
                 source: "LP_WDT stage 0 (ResetSystem)",
                 at: 5 * memmap::CPU_HZ + period,
                 strap: Strap::App,
+                cause: ResetSource::Watchdog {
+                    watchdog: Watchdog::Rwdt,
+                    scope: ResetScope::System,
+                },
             })
         );
         assert_eq!(buf.lines().len(), 1);

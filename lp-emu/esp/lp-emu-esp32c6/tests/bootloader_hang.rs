@@ -10,9 +10,10 @@
 //! `docs/defects/2026-09-06-c6-first-flash-bootloader-hang-lp-analog-i2c-clock.md`,
 //! `docs/defects/2026-09-06-c6-analog-master-wedges-the-bootloader.md`.
 //!
-//! P1 owns AC1 and the control; P2 and P3 extend this file with the MWDT0
-//! reset loop (AC2), the cure between two reboots (AC3) and the power cycle
-//! (AC4).
+//! P1 owns AC1 and the control; **P2 owns the loop** (AC2) — the MWDT0
+//! flash-boot watchdog ending each hang with `rst:0x7 (TG0_WDT_HPSYS)` and a
+//! `Saved PC` inside the bootloader. P3 extends it with the cure between two
+//! reboots (AC3) and the power cycle (AC4).
 //!
 //! `#[ignore]`d for the usual reason: it needs the reference merged image
 //! (`test_support`), so `just test-emu-c6` is what runs it.
@@ -52,6 +53,16 @@ const GATE_US: u64 = 2_000_000;
 /// instructions.
 const LATER_US: u64 = 2_500_000;
 
+/// Silicon's loop period: the wedged XIAO "boot-loops about every 0.4 s"
+/// (`docs/defects/2026-09-06-c6-analog-master-wedges-the-bootloader.md`, an
+/// eyeballed figure, not an instrumented one). AC2 asks the emulator to land
+/// within 2× of it.
+const SILICON_LOOP_US: u64 = 400_000;
+
+/// The line the ROM prints for a TIMG0 watchdog reset, from its own
+/// reset-reason table at `0x4004_a8e8`.
+const TG0_BANNER: &str = "rst:0x7 (TG0_WDT_HPSYS)";
+
 /// `Saved PC:0x4086ed7a`, printed by the wedged XIAO on every one of its
 /// reset cycles (both defect entries). The reference image's second-stage
 /// bootloader is the **same binary** — espflash 3.3.0's bundled one, pinned
@@ -75,15 +86,24 @@ struct Run {
     outcome: Outcome,
 }
 
-/// A ROM-up boot of the reference merged image with `clk_en` seeded. The
-/// builder incantation is `rom_up_boot`'s, with one line added.
+/// A ROM-up boot of the reference merged image with `clk_en` seeded, run to
+/// the banner or the gate.
 fn boot(clk_en: u32) -> Result<Run, String> {
+    let mut machine = build(clk_en, false)?;
+    let outcome = machine.run_until(&StopCondition::after_micros(GATE_US).exit_on(BANNER));
+    Ok(Run { machine, outcome })
+}
+
+/// The machine both halves boot, not yet run. The builder incantation is
+/// `rom_up_boot`'s, with two lines added. `reboot_on_reset` is what turns the
+/// MWDT0 reset the hang provokes into a reboot instead of the end of the run.
+fn build(clk_en: u32, reboot_on_reset: bool) -> Result<Esp32C6Machine, String> {
     let merged = merged_image(&IMAGE)?;
     let elf = reference_image(&IMAGE)?;
     let len = std::fs::metadata(&merged)
         .map_err(|e| format!("{}: {e}", merged.display()))?
         .len() as u32;
-    let mut machine = Esp32C6Builder::new()
+    Esp32C6Builder::new()
         .boot_mode(BootMode::RomUp)
         // A symbol table and a cross-check reference; the bytes the machine
         // runs come out of the chip.
@@ -95,10 +115,9 @@ fn boot(clk_en: u32) -> Result<Run, String> {
         .uart0(Uart0Sink::Memory)
         .usb_host(lp_emu_esp32c6::machine::UsbHost::Attached { draining: true })
         .lp_peri_clk_en(clk_en)
+        .reboot_on_reset(reboot_on_reset)
         .build()
-        .map_err(|e| e.to_string())?;
-    let outcome = machine.run_until(&StopCondition::after_micros(GATE_US).exit_on(BANNER));
-    Ok(Run { machine, outcome })
+        .map_err(|e| e.to_string())
 }
 
 /// The bootloader's own segments, read out of the merged image's header
@@ -148,13 +167,25 @@ fn an_induced_board_hangs_in_the_bootloader_on_the_lp_analog_masters_busy_bit() 
         }
     };
 
-    // 1. The run reached its deadline: no banner, no fault, no strict-bus
-    //    refusal, no reset (P2 arms the watchdog that would make one).
+    // 1. The run ended the way the wedged board's boot did: no banner, no
+    //    fault, no strict-bus refusal — **the flash-boot watchdog**. Until
+    //    P2 this was the emulated deadline, because the MWDT's expiry was
+    //    not modelled and an emulated wedge spun for ever. `reboot_on_reset`
+    //    is off here, so the reset ends the run and names itself; the loop
+    //    test below is the one that lets it reboot.
+    let Outcome::Reset { cycle, source, .. } = run.outcome else {
+        panic!(
+            "the induced board should have been reset by MWDT0, not {:?}\nconsole:\n{}",
+            run.outcome,
+            console(&run.machine)
+        )
+    };
+    assert_eq!(source, "TIMG0 MWDT flash-boot protection");
+    let us = cycle / lp_emu_esp32c6::memmap::CYCLES_PER_US;
+    println!("the flash-boot watchdog bit at cycle {cycle} ({us} us)");
     assert!(
-        matches!(run.outcome, Outcome::Deadline { .. }),
-        "the induced board should have spun until the deadline, not {:?}\nconsole:\n{}",
-        run.outcome,
-        console(&run.machine)
+        us.abs_diff(SILICON_LOOP_US) < SILICON_LOOP_US,
+        "the first hang lasted {us} us; silicon's whole loop was ≈{SILICON_LOOP_US} us"
     );
 
     // 2. …and the bootloader never introduced itself.
@@ -239,12 +270,13 @@ fn an_induced_board_hangs_in_the_bootloader_on_the_lp_analog_masters_busy_bit() 
     let regs = run.machine.registers();
     assert!(
         regs.iter().any(|r| *r == base::LP_I2C_ANA_MST),
-        "no register holds {:#010x} at the deadline: {regs:#010x?}",
+        "no register holds {:#010x} at the reset: {regs:#010x?}",
         base::LP_I2C_ANA_MST
     );
 
     // 5. It is a *spin*: half a second later the hart has not left those
-    //    few instructions.
+    //    few instructions. Nothing re-armed the watchdog after the reset it
+    //    was not allowed to perform, so this stretch runs to its deadline.
     let outcome = run
         .machine
         .run_until(&StopCondition::after_micros(LATER_US).exit_on(BANNER));
@@ -295,4 +327,140 @@ fn the_same_image_on_a_clean_board_reaches_the_bootloaders_banner() {
     // difference between the two runs.
     assert_ne!(CLK_EN_RESET & LP_ANA_I2C_BIT, 0);
     assert_eq!(INDUCED_CLK_EN & LP_ANA_I2C_BIT, 0);
+}
+
+/// **AC2, P2's half.** With the reset performed instead of reported, the
+/// induced board does what the XIAO on the desk did for an hour: boot, wedge,
+/// get shot by MWDT0, and come back to the same wedge, printing
+/// `rst:0x7 (TG0_WDT_HPSYS)` and the same `Saved PC` every time.
+///
+/// **Why the second boot re-hangs, which is the thing to be sure of.** Until
+/// P3 every reboot is a whole restore of the power-on snapshot, so an
+/// LP-domain gate would be *undone* by one — except that the induced
+/// `clk_en` **is** the power-on value (P1 seeds it with `RegFile::poke` in
+/// `LpPeri::new`, before the snapshot is taken). So the restore puts the
+/// induced board back, not a clean one, and the loop closes for the right
+/// reason by accident of the seeding rather than by the domain model. P3's
+/// AC4 is what tells the two apart: there, a `power_cycle()` must ALSO come
+/// back induced while the cure survives a plain `reboot()`.
+///
+/// AC2's other half — that `--reboot-on-reset` is what the CLI offers for
+/// this — is P3's.
+#[test]
+#[ignore = "needs the reference merged image; `just test-emu-c6`"]
+fn the_induced_board_boot_loops_on_the_flash_boot_watchdog_with_silicons_banner() {
+    let mut machine = match build(INDUCED_CLK_EN, true) {
+        Ok(m) => m,
+        Err(reason) => {
+            skip_notice(
+                "the_induced_board_boot_loops_on_the_flash_boot_watchdog_with_silicons_banner",
+                &reason,
+            );
+            return;
+        }
+    };
+
+    // One run, one budget, and let it loop. **How the period is measured:**
+    // the budget is an absolute cycle bound that a reboot rebases onto the
+    // new clock (`machine.rs`, the `remaining` rebase), and a reboot puts the
+    // clock back to zero — so the leftover at the deadline is
+    // `budget - reboots × period` and the period falls out exactly, without
+    // needing a marker in the console. It also means the period is measured
+    // from reset vector to watchdog bite, the ROM's own boot **inside** it,
+    // which is the same span silicon's "every 0.4 s" covers.
+    let budget = GATE_US * lp_emu_esp32c6::memmap::CYCLES_PER_US;
+    let outcome = machine.run_until(&StopCondition::after_micros(GATE_US).exit_on(BANNER));
+    let text = console(&machine);
+    let Outcome::Deadline { cycle: leftover } = outcome else {
+        panic!("the loop should have run the budget out, not ended: {outcome:?}\n{text}")
+    };
+    let reboots = machine.reboots();
+    assert!(
+        reboots >= 3,
+        "AC2 wants three consecutive boots; got {reboots} reboots:\n{text}"
+    );
+    let period = (budget - leftover) / reboots;
+    let period_us = period / lp_emu_esp32c6::memmap::CYCLES_PER_US;
+    assert!(
+        !text.contains(BANNER),
+        "one of these boots reached the bootloader's banner:\n{text}"
+    );
+
+    // Every reset says it was TIMG0's, in the ROM's own words. The first boot
+    // of all prints the run's own `--reset-cause` instead, so there are
+    // exactly as many of these as there were reboots.
+    let banners = text.matches(TG0_BANNER).count() as u64;
+    assert_eq!(
+        banners, reboots,
+        "one `{TG0_BANNER}` per reboot; found {banners} for {reboots}:\n{text}"
+    );
+    assert_eq!(
+        text.matches("rst:0x15 (USB_UART_HPSYS)").count(),
+        1,
+        "only the FIRST boot is the run's own reset cause:\n{text}"
+    );
+
+    // And every `Saved PC` is an address inside the bootloader segment the
+    // spin lives in — the assertion the defect's own reading rests on
+    // ("`Saved PC:0x4086ed7a` is a **bootloader** address, not an app one").
+    let segments = bootloader_segments();
+    let saved: Vec<u32> = text
+        .lines()
+        .filter_map(|l| l.trim().strip_prefix("Saved PC:0x"))
+        .filter_map(|hex| u32::from_str_radix(&hex[..8.min(hex.len())], 16).ok())
+        .collect();
+    assert_eq!(
+        saved.len() as u64,
+        reboots,
+        "one `Saved PC` per reboot, and none on the cold first boot:\n{text}"
+    );
+    for pc in &saved {
+        let (n, seg) = segment_of(&segments, *pc)
+            .unwrap_or_else(|| panic!("Saved PC {pc:#010x} is in no bootloader segment"));
+        assert_eq!(
+            (seg.vaddr, seg.len),
+            SILICON_SPIN_SEGMENT,
+            "Saved PC {pc:#010x} landed in segment {n}, not the spin's"
+        );
+        assert!(
+            pc.abs_diff(SILICON_SAVED_PC) <= 8,
+            "Saved PC {pc:#010x} against the board's {SILICON_SAVED_PC:#010x}"
+        );
+    }
+    // The board printed **one** address for an hour; the emulator prints two,
+    // `0x4086ed7c` and `0x4086ed7e`, and that is the model being honest rather
+    // than wrong. Silicon's ASSIST_DEBUG recorder samples the real pdebug PC
+    // continuously, so it captures whichever of the loop's three instructions
+    // the hart was on at the reset edge, and on that board it was always the
+    // `lw` at `…7a`. The emulator writes the PC at the **slice boundary**
+    // where the machine takes the reset request, which is quantised to
+    // `MAX_SLICE_CYCLES` — so it lands on the `and` or the `bnez` instead.
+    // The assertion is therefore "the same three instructions", which is what
+    // the defect's reading actually rests on.
+    let (lo, hi) = (
+        *saved.iter().min().expect("at least one"),
+        *saved.iter().max().expect("at least one"),
+    );
+    assert!(
+        hi - lo <= 8,
+        "these are not all one loop's worth of instructions: {saved:#010x?}"
+    );
+
+    println!(
+        "{reboots} reboots in {GATE_US} us emulated ({leftover} cycles left): \
+         loop period {period} cycles = {period_us} us, against silicon's \
+         ≈{SILICON_LOOP_US} us"
+    );
+    for line in text
+        .lines()
+        .filter(|l| l.contains(TG0_BANNER) || l.contains("Saved PC:"))
+        .take(4)
+    {
+        println!("  {}", line.trim());
+    }
+    assert!(
+        period_us * 2 >= SILICON_LOOP_US && period_us <= SILICON_LOOP_US * 2,
+        "the loop period is {period_us} us, not within 2× of silicon's \
+         ≈{SILICON_LOOP_US} us"
+    );
 }
