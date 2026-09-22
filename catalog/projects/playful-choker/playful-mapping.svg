@@ -1,0 +1,263 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 132.41 36.26">
+  <!-- PLAYFUL choker: every WS2812B-2020 on the PCB (positions from the EasyEDA
+       PCB export, chain from its netlist), numbered in the wire order
+       playful.map2d.json declares. Units are millimetres from the board's
+       top-left; one group per mapping object; the LEDn label is the PCB
+       designator. Regenerate from the exports rather than editing by hand. -->
+  <rect x="0" y="0" width="132.41" height="36.26" fill="#111" stroke="#6bbd45" stroke-width="0.2"/>
+  <g id="P">
+    <polyline fill="none" stroke="#6bbd45" stroke-width="0.15" points="11.361 25.469 11.361 22.167 11.361 19.246 11.361 16.452 11.361 13.658 11.318 11.008 14.917 10.864 17.965 10.991 21.013 12.007 21.775 14.928 21.013 17.976 17.711 19.246 14.79 19.246"/>
+    <rect x="10.36" y="24.47" width="2" height="2" fill="#fff" stroke="#000" stroke-width="0.1"/>
+    <text x="11.36" y="25.92" font-family="sans-serif" font-size="1.2" text-anchor="middle" fill="#000">1</text>
+    <text x="11.36" y="27.67" font-family="sans-serif" font-size="0.8" text-anchor="middle" fill="#6bbd45">LED2</text>
+    <rect x="10.36" y="21.17" width="2" height="2" fill="#fff" stroke="#000" stroke-width="0.1"/>
+    <text x="11.36" y="22.62" font-family="sans-serif" font-size="1.2" text-anchor="middle" fill="#000">2</text>
+    <text x="11.36" y="24.37" font-family="sans-serif" font-size="0.8" text-anchor="middle" fill="#6bbd45">LED3</text>
+    <rect x="10.36" y="18.25" width="2" height="2" fill="#fff" stroke="#000" stroke-width="0.1"/>
+    <text x="11.36" y="19.70" font-family="sans-serif" font-size="1.2" text-anchor="middle" fill="#000">3</text>
+    <text x="11.36" y="21.45" font-family="sans-serif" font-size="0.8" text-anchor="middle" fill="#6bbd45">LED4</text>
+    <rect x="10.36" y="15.45" width="2" height="2" fill="#fff" stroke="#000" stroke-width="0.1"/>
+    <text x="11.36" y="16.90" font-family="sans-serif" font-size="1.2" text-anchor="middle" fill="#000">4</text>
+    <text x="11.36" y="18.65" font-family="sans-serif" font-size="0.8" text-anchor="middle" fill="#6bbd45">LED5</text>
+    <rect x="10.36" y="12.66" width="2" height="2" fill="#fff" stroke="#000" stroke-width="0.1"/>
+    <text x="11.36" y="14.11" font-family="sans-serif" font-size="1.2" text-anchor="middle" fill="#000">5</text>
+    <text x="11.36" y="15.86" font-family="sans-serif" font-size="0.8" text-anchor="middle" fill="#6bbd45">LED78</text>
+    <rect x="10.32" y="10.01" width="2" height="2" fill="#fff" stroke="#000" stroke-width="0.1"/>
+    <text x="11.32" y="11.46" font-family="sans-serif" font-size="1.2" text-anchor="middle" fill="#000">6</text>
+    <text x="11.32" y="13.21" font-family="sans-serif" font-size="0.8" text-anchor="middle" fill="#6bbd45">LED6</text>
+    <rect x="13.92" y="9.86" width="2" height="2" fill="#fff" stroke="#000" stroke-width="0.1"/>
+    <text x="14.92" y="11.31" font-family="sans-serif" font-size="1.2" text-anchor="middle" fill="#000">7</text>
+    <text x="14.92" y="13.06" font-family="sans-serif" font-size="0.8" text-anchor="middle" fill="#6bbd45">LED7</text>
+    <rect x="16.96" y="9.99" width="2" height="2" fill="#fff" stroke="#000" stroke-width="0.1"/>
+    <text x="17.96" y="11.44" font-family="sans-serif" font-size="1.2" text-anchor="middle" fill="#000">8</text>
+    <text x="17.96" y="13.19" font-family="sans-serif" font-size="0.8" text-anchor="middle" fill="#6bbd45">LED8</text>
+    <rect x="20.01" y="11.01" width="2" height="2" fill="#fff" stroke="#000" stroke-width="0.1"/>
+    <text x="21.01" y="12.46" font-family="sans-serif" font-size="1.2" text-anchor="middle" fill="#000">9</text>
+    <text x="21.01" y="14.21" font-family="sans-serif" font-size="0.8" text-anchor="middle" fill="#6bbd45">LED9</text>
+    <rect x="20.77" y="13.93" width="2" height="2" fill="#fff" stroke="#000" stroke-width="0.1"/>
+    <text x="21.77" y="15.38" font-family="sans-serif" font-size="1.2" text-anchor="middle" fill="#000">10</text>
+    <text x="21.77" y="17.13" font-family="sans-serif" font-size="0.8" text-anchor="middle" fill="#6bbd45">LED10</text>
+    <rect x="20.01" y="16.98" width="2" height="2" fill="#fff" stroke="#000" stroke-width="0.1"/>
+    <text x="21.01" y="18.43" font-family="sans-serif" font-size="1.2" text-anchor="middle" fill="#000">11</text>
+    <text x="21.01" y="20.18" font-family="sans-serif" font-size="0.8" text-anchor="middle" fill="#6bbd45">LED11</text>
+    <rect x="16.71" y="18.25" width="2" height="2" fill="#fff" stroke="#000" stroke-width="0.1"/>
+    <text x="17.71" y="19.70" font-family="sans-serif" font-size="1.2" text-anchor="middle" fill="#000">12</text>
+    <text x="17.71" y="21.45" font-family="sans-serif" font-size="0.8" text-anchor="middle" fill="#6bbd45">LED12</text>
+    <rect x="13.79" y="18.25" width="2" height="2" fill="#fff" stroke="#000" stroke-width="0.1"/>
+    <text x="14.79" y="19.70" font-family="sans-serif" font-size="1.2" text-anchor="middle" fill="#000">13</text>
+    <text x="14.79" y="21.45" font-family="sans-serif" font-size="0.8" text-anchor="middle" fill="#6bbd45">LED13</text>
+  </g>
+  <g id="L1">
+    <polyline fill="none" stroke="#6bbd45" stroke-width="0.15" points="27.871 10.991 27.871 14.547 27.871 18.103 27.871 21.405 27.871 25.215 30.792 25.088 34.348 25.088 37.396 25.088"/>
+    <rect x="26.87" y="9.99" width="2" height="2" fill="#fff" stroke="#000" stroke-width="0.1"/>
+    <text x="27.87" y="11.44" font-family="sans-serif" font-size="1.2" text-anchor="middle" fill="#000">14</text>
+    <text x="27.87" y="13.19" font-family="sans-serif" font-size="0.8" text-anchor="middle" fill="#6bbd45">LED14</text>
+    <rect x="26.87" y="13.55" width="2" height="2" fill="#fff" stroke="#000" stroke-width="0.1"/>
+    <text x="27.87" y="15.00" font-family="sans-serif" font-size="1.2" text-anchor="middle" fill="#000">15</text>
+    <text x="27.87" y="16.75" font-family="sans-serif" font-size="0.8" text-anchor="middle" fill="#6bbd45">LED15</text>
+    <rect x="26.87" y="17.10" width="2" height="2" fill="#fff" stroke="#000" stroke-width="0.1"/>
+    <text x="27.87" y="18.55" font-family="sans-serif" font-size="1.2" text-anchor="middle" fill="#000">16</text>
+    <text x="27.87" y="20.30" font-family="sans-serif" font-size="0.8" text-anchor="middle" fill="#6bbd45">LED16</text>
+    <rect x="26.87" y="20.41" width="2" height="2" fill="#fff" stroke="#000" stroke-width="0.1"/>
+    <text x="27.87" y="21.86" font-family="sans-serif" font-size="1.2" text-anchor="middle" fill="#000">17</text>
+    <text x="27.87" y="23.61" font-family="sans-serif" font-size="0.8" text-anchor="middle" fill="#6bbd45">LED17</text>
+    <rect x="26.87" y="24.21" width="2" height="2" fill="#fff" stroke="#000" stroke-width="0.1"/>
+    <text x="27.87" y="25.66" font-family="sans-serif" font-size="1.2" text-anchor="middle" fill="#000">18</text>
+    <text x="27.87" y="27.41" font-family="sans-serif" font-size="0.8" text-anchor="middle" fill="#6bbd45">LED18</text>
+    <rect x="29.79" y="24.09" width="2" height="2" fill="#fff" stroke="#000" stroke-width="0.1"/>
+    <text x="30.79" y="25.54" font-family="sans-serif" font-size="1.2" text-anchor="middle" fill="#000">19</text>
+    <text x="30.79" y="27.29" font-family="sans-serif" font-size="0.8" text-anchor="middle" fill="#6bbd45">LED19</text>
+    <rect x="33.35" y="24.09" width="2" height="2" fill="#fff" stroke="#000" stroke-width="0.1"/>
+    <text x="34.35" y="25.54" font-family="sans-serif" font-size="1.2" text-anchor="middle" fill="#000">20</text>
+    <text x="34.35" y="27.29" font-family="sans-serif" font-size="0.8" text-anchor="middle" fill="#6bbd45">LED20</text>
+    <rect x="36.40" y="24.09" width="2" height="2" fill="#fff" stroke="#000" stroke-width="0.1"/>
+    <text x="37.40" y="25.54" font-family="sans-serif" font-size="1.2" text-anchor="middle" fill="#000">21</text>
+    <text x="37.40" y="27.29" font-family="sans-serif" font-size="0.8" text-anchor="middle" fill="#6bbd45">LED21</text>
+  </g>
+  <g id="A">
+    <polyline fill="none" stroke="#6bbd45" stroke-width="0.15" points="43.873 24.834 45.143 21.786 46.159 18.611 47.175 15.182 48.318 12.134 51.874 12.007 53.144 15.309 54.287 18.484 55.049 21.405 56.446 24.707"/>
+    <rect x="42.87" y="23.83" width="2" height="2" fill="#fff" stroke="#000" stroke-width="0.1"/>
+    <text x="43.87" y="25.28" font-family="sans-serif" font-size="1.2" text-anchor="middle" fill="#000">22</text>
+    <text x="43.87" y="27.03" font-family="sans-serif" font-size="0.8" text-anchor="middle" fill="#6bbd45">LED26</text>
+    <rect x="44.14" y="20.79" width="2" height="2" fill="#fff" stroke="#000" stroke-width="0.1"/>
+    <text x="45.14" y="22.24" font-family="sans-serif" font-size="1.2" text-anchor="middle" fill="#000">23</text>
+    <text x="45.14" y="23.99" font-family="sans-serif" font-size="0.8" text-anchor="middle" fill="#6bbd45">LED27</text>
+    <rect x="45.16" y="17.61" width="2" height="2" fill="#fff" stroke="#000" stroke-width="0.1"/>
+    <text x="46.16" y="19.06" font-family="sans-serif" font-size="1.2" text-anchor="middle" fill="#000">24</text>
+    <text x="46.16" y="20.81" font-family="sans-serif" font-size="0.8" text-anchor="middle" fill="#6bbd45">LED28</text>
+    <rect x="46.17" y="14.18" width="2" height="2" fill="#fff" stroke="#000" stroke-width="0.1"/>
+    <text x="47.17" y="15.63" font-family="sans-serif" font-size="1.2" text-anchor="middle" fill="#000">25</text>
+    <text x="47.17" y="17.38" font-family="sans-serif" font-size="0.8" text-anchor="middle" fill="#6bbd45">LED29</text>
+    <rect x="47.32" y="11.13" width="2" height="2" fill="#fff" stroke="#000" stroke-width="0.1"/>
+    <text x="48.32" y="12.58" font-family="sans-serif" font-size="1.2" text-anchor="middle" fill="#000">26</text>
+    <text x="48.32" y="14.33" font-family="sans-serif" font-size="0.8" text-anchor="middle" fill="#6bbd45">LED30</text>
+    <rect x="50.87" y="11.01" width="2" height="2" fill="#fff" stroke="#000" stroke-width="0.1"/>
+    <text x="51.87" y="12.46" font-family="sans-serif" font-size="1.2" text-anchor="middle" fill="#000">27</text>
+    <text x="51.87" y="14.21" font-family="sans-serif" font-size="0.8" text-anchor="middle" fill="#6bbd45">LED31</text>
+    <rect x="52.14" y="14.31" width="2" height="2" fill="#fff" stroke="#000" stroke-width="0.1"/>
+    <text x="53.14" y="15.76" font-family="sans-serif" font-size="1.2" text-anchor="middle" fill="#000">28</text>
+    <text x="53.14" y="17.51" font-family="sans-serif" font-size="0.8" text-anchor="middle" fill="#6bbd45">LED32</text>
+    <rect x="53.29" y="17.48" width="2" height="2" fill="#fff" stroke="#000" stroke-width="0.1"/>
+    <text x="54.29" y="18.93" font-family="sans-serif" font-size="1.2" text-anchor="middle" fill="#000">29</text>
+    <text x="54.29" y="20.68" font-family="sans-serif" font-size="0.8" text-anchor="middle" fill="#6bbd45">LED33</text>
+    <rect x="54.05" y="20.41" width="2" height="2" fill="#fff" stroke="#000" stroke-width="0.1"/>
+    <text x="55.05" y="21.86" font-family="sans-serif" font-size="1.2" text-anchor="middle" fill="#000">30</text>
+    <text x="55.05" y="23.61" font-family="sans-serif" font-size="0.8" text-anchor="middle" fill="#6bbd45">LED34</text>
+    <rect x="55.45" y="23.71" width="2" height="2" fill="#fff" stroke="#000" stroke-width="0.1"/>
+    <text x="56.45" y="25.16" font-family="sans-serif" font-size="1.2" text-anchor="middle" fill="#000">31</text>
+    <text x="56.45" y="26.91" font-family="sans-serif" font-size="0.8" text-anchor="middle" fill="#6bbd45">LED35</text>
+  </g>
+  <g id="A-bar">
+    <polyline fill="none" stroke="#6bbd45" stroke-width="0.15" points="51.747 21.405 48.318 21.405"/>
+    <rect x="50.75" y="20.41" width="2" height="2" fill="#fff" stroke="#000" stroke-width="0.1"/>
+    <text x="51.75" y="21.86" font-family="sans-serif" font-size="1.2" text-anchor="middle" fill="#000">32</text>
+    <text x="51.75" y="23.61" font-family="sans-serif" font-size="0.8" text-anchor="middle" fill="#6bbd45">LED36</text>
+    <rect x="47.32" y="20.41" width="2" height="2" fill="#fff" stroke="#000" stroke-width="0.1"/>
+    <text x="48.32" y="21.86" font-family="sans-serif" font-size="1.2" text-anchor="middle" fill="#000">33</text>
+    <text x="48.32" y="23.61" font-family="sans-serif" font-size="0.8" text-anchor="middle" fill="#6bbd45">LED37</text>
+  </g>
+  <g id="Y-stem">
+    <polyline fill="none" stroke="#6bbd45" stroke-width="0.15" points="64.447 25.977 64.447 22.675 64.32 19.246"/>
+    <rect x="63.45" y="24.98" width="2" height="2" fill="#fff" stroke="#000" stroke-width="0.1"/>
+    <text x="64.45" y="26.43" font-family="sans-serif" font-size="1.2" text-anchor="middle" fill="#000">34</text>
+    <text x="64.45" y="28.18" font-family="sans-serif" font-size="0.8" text-anchor="middle" fill="#6bbd45">LED38</text>
+    <rect x="63.45" y="21.68" width="2" height="2" fill="#fff" stroke="#000" stroke-width="0.1"/>
+    <text x="64.45" y="23.12" font-family="sans-serif" font-size="1.2" text-anchor="middle" fill="#000">35</text>
+    <text x="64.45" y="24.88" font-family="sans-serif" font-size="0.8" text-anchor="middle" fill="#6bbd45">LED39</text>
+    <rect x="63.32" y="18.25" width="2" height="2" fill="#fff" stroke="#000" stroke-width="0.1"/>
+    <text x="64.32" y="19.70" font-family="sans-serif" font-size="1.2" text-anchor="middle" fill="#000">36</text>
+    <text x="64.32" y="21.45" font-family="sans-serif" font-size="0.8" text-anchor="middle" fill="#6bbd45">LED40</text>
+  </g>
+  <g id="Y-left">
+    <polyline fill="none" stroke="#6bbd45" stroke-width="0.15" points="62.542 16.833 60.891 13.785 59.367 11.118"/>
+    <rect x="61.54" y="15.83" width="2" height="2" fill="#fff" stroke="#000" stroke-width="0.1"/>
+    <text x="62.54" y="17.28" font-family="sans-serif" font-size="1.2" text-anchor="middle" fill="#000">37</text>
+    <text x="62.54" y="19.03" font-family="sans-serif" font-size="0.8" text-anchor="middle" fill="#6bbd45">LED41</text>
+    <rect x="59.89" y="12.79" width="2" height="2" fill="#fff" stroke="#000" stroke-width="0.1"/>
+    <text x="60.89" y="14.23" font-family="sans-serif" font-size="1.2" text-anchor="middle" fill="#000">38</text>
+    <text x="60.89" y="15.98" font-family="sans-serif" font-size="0.8" text-anchor="middle" fill="#6bbd45">LED42</text>
+    <rect x="58.37" y="10.12" width="2" height="2" fill="#fff" stroke="#000" stroke-width="0.1"/>
+    <text x="59.37" y="11.57" font-family="sans-serif" font-size="1.2" text-anchor="middle" fill="#000">39</text>
+    <text x="59.37" y="13.32" font-family="sans-serif" font-size="0.8" text-anchor="middle" fill="#6bbd45">LED43</text>
+  </g>
+  <g id="Y-right">
+    <polyline fill="none" stroke="#6bbd45" stroke-width="0.15" points="66.733 16.579 68.13 13.658 69.908 11.118"/>
+    <rect x="65.73" y="15.58" width="2" height="2" fill="#fff" stroke="#000" stroke-width="0.1"/>
+    <text x="66.73" y="17.03" font-family="sans-serif" font-size="1.2" text-anchor="middle" fill="#000">40</text>
+    <text x="66.73" y="18.78" font-family="sans-serif" font-size="0.8" text-anchor="middle" fill="#6bbd45">LED44</text>
+    <rect x="67.13" y="12.66" width="2" height="2" fill="#fff" stroke="#000" stroke-width="0.1"/>
+    <text x="68.13" y="14.11" font-family="sans-serif" font-size="1.2" text-anchor="middle" fill="#000">41</text>
+    <text x="68.13" y="15.86" font-family="sans-serif" font-size="0.8" text-anchor="middle" fill="#6bbd45">LED45</text>
+    <rect x="68.91" y="10.12" width="2" height="2" fill="#fff" stroke="#000" stroke-width="0.1"/>
+    <text x="69.91" y="11.57" font-family="sans-serif" font-size="1.2" text-anchor="middle" fill="#000">42</text>
+    <text x="69.91" y="13.32" font-family="sans-serif" font-size="0.8" text-anchor="middle" fill="#6bbd45">LED46</text>
+  </g>
+  <g id="F-lower">
+    <polyline fill="none" stroke="#6bbd45" stroke-width="0.15" points="78.798 25.342 78.798 22.04 78.798 18.484"/>
+    <rect x="77.80" y="24.34" width="2" height="2" fill="#fff" stroke="#000" stroke-width="0.1"/>
+    <text x="78.80" y="25.79" font-family="sans-serif" font-size="1.2" text-anchor="middle" fill="#000">43</text>
+    <text x="78.80" y="27.54" font-family="sans-serif" font-size="0.8" text-anchor="middle" fill="#6bbd45">LED47</text>
+    <rect x="77.80" y="21.04" width="2" height="2" fill="#fff" stroke="#000" stroke-width="0.1"/>
+    <text x="78.80" y="22.49" font-family="sans-serif" font-size="1.2" text-anchor="middle" fill="#000">44</text>
+    <text x="78.80" y="24.24" font-family="sans-serif" font-size="0.8" text-anchor="middle" fill="#6bbd45">LED48</text>
+    <rect x="77.80" y="17.48" width="2" height="2" fill="#fff" stroke="#000" stroke-width="0.1"/>
+    <text x="78.80" y="18.93" font-family="sans-serif" font-size="1.2" text-anchor="middle" fill="#000">45</text>
+    <text x="78.80" y="20.68" font-family="sans-serif" font-size="0.8" text-anchor="middle" fill="#6bbd45">LED49</text>
+  </g>
+  <g id="F-bar">
+    <polyline fill="none" stroke="#6bbd45" stroke-width="0.15" points="82.608 18.357 86.672 18.484"/>
+    <rect x="81.61" y="17.36" width="2" height="2" fill="#fff" stroke="#000" stroke-width="0.1"/>
+    <text x="82.61" y="18.81" font-family="sans-serif" font-size="1.2" text-anchor="middle" fill="#000">46</text>
+    <text x="82.61" y="20.56" font-family="sans-serif" font-size="0.8" text-anchor="middle" fill="#6bbd45">LED50</text>
+    <rect x="85.67" y="17.48" width="2" height="2" fill="#fff" stroke="#000" stroke-width="0.1"/>
+    <text x="86.67" y="18.93" font-family="sans-serif" font-size="1.2" text-anchor="middle" fill="#000">47</text>
+    <text x="86.67" y="20.68" font-family="sans-serif" font-size="0.8" text-anchor="middle" fill="#6bbd45">LED51</text>
+  </g>
+  <g id="F-upper">
+    <polyline fill="none" stroke="#6bbd45" stroke-width="0.15" points="78.798 14.928 78.798 11.118 81.973 11.118 85.148 11.118 88.323 11.118"/>
+    <rect x="77.80" y="13.93" width="2" height="2" fill="#fff" stroke="#000" stroke-width="0.1"/>
+    <text x="78.80" y="15.38" font-family="sans-serif" font-size="1.2" text-anchor="middle" fill="#000">48</text>
+    <text x="78.80" y="17.13" font-family="sans-serif" font-size="0.8" text-anchor="middle" fill="#6bbd45">LED52</text>
+    <rect x="77.80" y="10.12" width="2" height="2" fill="#fff" stroke="#000" stroke-width="0.1"/>
+    <text x="78.80" y="11.57" font-family="sans-serif" font-size="1.2" text-anchor="middle" fill="#000">49</text>
+    <text x="78.80" y="13.32" font-family="sans-serif" font-size="0.8" text-anchor="middle" fill="#6bbd45">LED53</text>
+    <rect x="80.97" y="10.12" width="2" height="2" fill="#fff" stroke="#000" stroke-width="0.1"/>
+    <text x="81.97" y="11.57" font-family="sans-serif" font-size="1.2" text-anchor="middle" fill="#000">50</text>
+    <text x="81.97" y="13.32" font-family="sans-serif" font-size="0.8" text-anchor="middle" fill="#6bbd45">LED54</text>
+    <rect x="84.15" y="10.12" width="2" height="2" fill="#fff" stroke="#000" stroke-width="0.1"/>
+    <text x="85.15" y="11.57" font-family="sans-serif" font-size="1.2" text-anchor="middle" fill="#000">51</text>
+    <text x="85.15" y="13.32" font-family="sans-serif" font-size="0.8" text-anchor="middle" fill="#6bbd45">LED55</text>
+    <rect x="87.32" y="10.12" width="2" height="2" fill="#fff" stroke="#000" stroke-width="0.1"/>
+    <text x="88.32" y="11.57" font-family="sans-serif" font-size="1.2" text-anchor="middle" fill="#000">52</text>
+    <text x="88.32" y="13.32" font-family="sans-serif" font-size="0.8" text-anchor="middle" fill="#6bbd45">LED56</text>
+  </g>
+  <g id="U">
+    <polyline fill="none" stroke="#6bbd45" stroke-width="0.15" points="94.546 10.864 94.546 14.42 94.546 17.722 94.546 20.897 95.562 23.945 97.721 25.723 100.642 26.231 103.436 25.723 105.595 23.945 106.611 21.024 106.611 17.849 106.611 14.42 106.611 10.737"/>
+    <rect x="93.55" y="9.86" width="2" height="2" fill="#fff" stroke="#000" stroke-width="0.1"/>
+    <text x="94.55" y="11.31" font-family="sans-serif" font-size="1.2" text-anchor="middle" fill="#000">53</text>
+    <text x="94.55" y="13.06" font-family="sans-serif" font-size="0.8" text-anchor="middle" fill="#6bbd45">LED57</text>
+    <rect x="93.55" y="13.42" width="2" height="2" fill="#fff" stroke="#000" stroke-width="0.1"/>
+    <text x="94.55" y="14.87" font-family="sans-serif" font-size="1.2" text-anchor="middle" fill="#000">54</text>
+    <text x="94.55" y="16.62" font-family="sans-serif" font-size="0.8" text-anchor="middle" fill="#6bbd45">LED58</text>
+    <rect x="93.55" y="16.72" width="2" height="2" fill="#fff" stroke="#000" stroke-width="0.1"/>
+    <text x="94.55" y="18.17" font-family="sans-serif" font-size="1.2" text-anchor="middle" fill="#000">55</text>
+    <text x="94.55" y="19.92" font-family="sans-serif" font-size="0.8" text-anchor="middle" fill="#6bbd45">LED59</text>
+    <rect x="93.55" y="19.90" width="2" height="2" fill="#fff" stroke="#000" stroke-width="0.1"/>
+    <text x="94.55" y="21.35" font-family="sans-serif" font-size="1.2" text-anchor="middle" fill="#000">56</text>
+    <text x="94.55" y="23.10" font-family="sans-serif" font-size="0.8" text-anchor="middle" fill="#6bbd45">LED60</text>
+    <rect x="94.56" y="22.95" width="2" height="2" fill="#fff" stroke="#000" stroke-width="0.1"/>
+    <text x="95.56" y="24.39" font-family="sans-serif" font-size="1.2" text-anchor="middle" fill="#000">57</text>
+    <text x="95.56" y="26.14" font-family="sans-serif" font-size="0.8" text-anchor="middle" fill="#6bbd45">LED61</text>
+    <rect x="96.72" y="24.72" width="2" height="2" fill="#fff" stroke="#000" stroke-width="0.1"/>
+    <text x="97.72" y="26.17" font-family="sans-serif" font-size="1.2" text-anchor="middle" fill="#000">58</text>
+    <text x="97.72" y="27.92" font-family="sans-serif" font-size="0.8" text-anchor="middle" fill="#6bbd45">LED62</text>
+    <rect x="99.64" y="25.23" width="2" height="2" fill="#fff" stroke="#000" stroke-width="0.1"/>
+    <text x="100.64" y="26.68" font-family="sans-serif" font-size="1.2" text-anchor="middle" fill="#000">59</text>
+    <text x="100.64" y="28.43" font-family="sans-serif" font-size="0.8" text-anchor="middle" fill="#6bbd45">LED63</text>
+    <rect x="102.44" y="24.72" width="2" height="2" fill="#fff" stroke="#000" stroke-width="0.1"/>
+    <text x="103.44" y="26.17" font-family="sans-serif" font-size="1.2" text-anchor="middle" fill="#000">60</text>
+    <text x="103.44" y="27.92" font-family="sans-serif" font-size="0.8" text-anchor="middle" fill="#6bbd45">LED64</text>
+    <rect x="104.59" y="22.95" width="2" height="2" fill="#fff" stroke="#000" stroke-width="0.1"/>
+    <text x="105.59" y="24.39" font-family="sans-serif" font-size="1.2" text-anchor="middle" fill="#000">61</text>
+    <text x="105.59" y="26.14" font-family="sans-serif" font-size="0.8" text-anchor="middle" fill="#6bbd45">LED65</text>
+    <rect x="105.61" y="20.02" width="2" height="2" fill="#fff" stroke="#000" stroke-width="0.1"/>
+    <text x="106.61" y="21.47" font-family="sans-serif" font-size="1.2" text-anchor="middle" fill="#000">62</text>
+    <text x="106.61" y="23.22" font-family="sans-serif" font-size="0.8" text-anchor="middle" fill="#6bbd45">LED66</text>
+    <rect x="105.61" y="16.85" width="2" height="2" fill="#fff" stroke="#000" stroke-width="0.1"/>
+    <text x="106.61" y="18.30" font-family="sans-serif" font-size="1.2" text-anchor="middle" fill="#000">63</text>
+    <text x="106.61" y="20.05" font-family="sans-serif" font-size="0.8" text-anchor="middle" fill="#6bbd45">LED67</text>
+    <rect x="105.61" y="13.42" width="2" height="2" fill="#fff" stroke="#000" stroke-width="0.1"/>
+    <text x="106.61" y="14.87" font-family="sans-serif" font-size="1.2" text-anchor="middle" fill="#000">64</text>
+    <text x="106.61" y="16.62" font-family="sans-serif" font-size="0.8" text-anchor="middle" fill="#6bbd45">LED68</text>
+    <rect x="105.61" y="9.74" width="2" height="2" fill="#fff" stroke="#000" stroke-width="0.1"/>
+    <text x="106.61" y="11.19" font-family="sans-serif" font-size="1.2" text-anchor="middle" fill="#000">65</text>
+    <text x="106.61" y="12.94" font-family="sans-serif" font-size="0.8" text-anchor="middle" fill="#6bbd45">LED69</text>
+  </g>
+  <g id="L2">
+    <polyline fill="none" stroke="#6bbd45" stroke-width="0.15" points="114.104 11.118 113.977 14.674 113.977 18.23 113.977 21.786 114.104 25.342 117.279 25.342 120.454 25.342 123.883 25.342"/>
+    <rect x="113.10" y="10.12" width="2" height="2" fill="#fff" stroke="#000" stroke-width="0.1"/>
+    <text x="114.10" y="11.57" font-family="sans-serif" font-size="1.2" text-anchor="middle" fill="#000">66</text>
+    <text x="114.10" y="13.32" font-family="sans-serif" font-size="0.8" text-anchor="middle" fill="#6bbd45">LED70</text>
+    <rect x="112.98" y="13.67" width="2" height="2" fill="#fff" stroke="#000" stroke-width="0.1"/>
+    <text x="113.98" y="15.12" font-family="sans-serif" font-size="1.2" text-anchor="middle" fill="#000">67</text>
+    <text x="113.98" y="16.87" font-family="sans-serif" font-size="0.8" text-anchor="middle" fill="#6bbd45">LED71</text>
+    <rect x="112.98" y="17.23" width="2" height="2" fill="#fff" stroke="#000" stroke-width="0.1"/>
+    <text x="113.98" y="18.68" font-family="sans-serif" font-size="1.2" text-anchor="middle" fill="#000">68</text>
+    <text x="113.98" y="20.43" font-family="sans-serif" font-size="0.8" text-anchor="middle" fill="#6bbd45">LED72</text>
+    <rect x="112.98" y="20.79" width="2" height="2" fill="#fff" stroke="#000" stroke-width="0.1"/>
+    <text x="113.98" y="22.24" font-family="sans-serif" font-size="1.2" text-anchor="middle" fill="#000">69</text>
+    <text x="113.98" y="23.99" font-family="sans-serif" font-size="0.8" text-anchor="middle" fill="#6bbd45">LED73</text>
+    <rect x="113.10" y="24.34" width="2" height="2" fill="#fff" stroke="#000" stroke-width="0.1"/>
+    <text x="114.10" y="25.79" font-family="sans-serif" font-size="1.2" text-anchor="middle" fill="#000">70</text>
+    <text x="114.10" y="27.54" font-family="sans-serif" font-size="0.8" text-anchor="middle" fill="#6bbd45">LED74</text>
+    <rect x="116.28" y="24.34" width="2" height="2" fill="#fff" stroke="#000" stroke-width="0.1"/>
+    <text x="117.28" y="25.79" font-family="sans-serif" font-size="1.2" text-anchor="middle" fill="#000">71</text>
+    <text x="117.28" y="27.54" font-family="sans-serif" font-size="0.8" text-anchor="middle" fill="#6bbd45">LED75</text>
+    <rect x="119.45" y="24.34" width="2" height="2" fill="#fff" stroke="#000" stroke-width="0.1"/>
+    <text x="120.45" y="25.79" font-family="sans-serif" font-size="1.2" text-anchor="middle" fill="#000">72</text>
+    <text x="120.45" y="27.54" font-family="sans-serif" font-size="0.8" text-anchor="middle" fill="#6bbd45">LED76</text>
+    <rect x="122.88" y="24.34" width="2" height="2" fill="#fff" stroke="#000" stroke-width="0.1"/>
+    <text x="123.88" y="25.79" font-family="sans-serif" font-size="1.2" text-anchor="middle" fill="#000">73</text>
+    <text x="123.88" y="27.54" font-family="sans-serif" font-size="0.8" text-anchor="middle" fill="#6bbd45">LED77</text>
+  </g>
+</svg>
