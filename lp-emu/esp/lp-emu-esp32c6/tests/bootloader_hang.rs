@@ -12,8 +12,14 @@
 //!
 //! P1 owns AC1 and the control; **P2 owns the loop** (AC2) — the MWDT0
 //! flash-boot watchdog ending each hang with `rst:0x7 (TG0_WDT_HPSYS)` and a
-//! `Saved PC` inside the bootloader. P3 extends it with the cure between two
-//! reboots (AC3) and the power cycle (AC4).
+//! `Saved PC` inside the bootloader. **P3 owns the pair at the end** (AC3,
+//! AC4): the cure poked onto the bus between two reboots frees the board
+//! *because the LP domain survived the reset*, and a power cycle hands the
+//! same wedged board straight back *because the induced gate word is the
+//! power-on value*. Those two facts together are what tells P3's domain model
+//! apart from P2's accident of seeding — see
+//! [`the_cure_survives_a_reboot_and_the_next_boot_reaches_the_app`] and
+//! [`a_power_cycle_hands_the_induced_board_back_induced`].
 //!
 //! `#[ignore]`d for the usual reason: it needs the reference merged image
 //! (`test_support`), so `just test-emu-c6` is what runs it.
@@ -26,7 +32,7 @@ use lp_emu_esp32c6::machine::{
 };
 use lp_emu_esp32c6::memmap::periph as base;
 use lp_emu_esp32c6::periph::lp_i2c_ana_mst::{BUSY, I2C0_CTRL};
-use lp_emu_esp32c6::periph::lp_peri::{CLK_EN_RESET, LP_ANA_I2C_BIT};
+use lp_emu_esp32c6::periph::lp_peri::{CLK_EN, CLK_EN_RESET, LP_ANA_I2C_BIT, RESET_EN};
 use lp_emu_esp32c6::test_support::{ReferenceImage, merged_image, reference_image, skip_notice};
 
 /// The image both halves boot: the shipped feature set at the commit the
@@ -463,4 +469,304 @@ fn the_induced_board_boot_loops_on_the_flash_boot_watchdog_with_silicons_banner(
         "the loop period is {period_us} us, not within 2× of silicon's \
          ≈{SILICON_LOOP_US} us"
     );
+}
+
+// ---- P3: the cure, and the power cycle ---------------------------------
+
+/// The line the ROM prints for a power-on, from the same table as
+/// [`TG0_BANNER`]. `1` is the value `__pre_init` compares against before it
+/// zeroes `.rtc_fast.persistent`.
+const POWERON_BANNER: &str = "rst:0x1 (POWERON)";
+
+/// Long enough for exactly **one** watchdog cycle and no more: the flash-boot
+/// bite lands at 325 000 us, so a 400 000 us budget carries one reboot and
+/// then runs out. That makes "the state of the board after its first reboot"
+/// a deterministic place to stand, rather than "somewhere in the loop".
+const ONE_CYCLE_US: u64 = 400_000;
+
+/// How long the cured board is given to boot and reach its first heartbeat.
+/// `rom_up_boot` reaches `[INIT] fw-esp32 initialized` inside two emulated
+/// seconds and the first `[stack] heartbeat` lands at five, so six is the
+/// heartbeat with room.
+const APP_US: u64 = 6_000_000;
+
+/// The app's own first line, and the line that says it is *running* rather
+/// than initialising. Both are `rom_up_boot`'s.
+const APP_FIRST: &str = "[INIT] Initializing board";
+const HEARTBEAT: &str = "[stack] heartbeat: high-water ";
+
+/// **The flasher's cure, poked onto the bus** — `lpa_link`'s
+/// `host_esp32_flash.rs:606-622` and its browser twin, bench-proven
+/// 2026-09-06/08 and the only thing short of a power cycle that frees a
+/// wedged board:
+///
+/// ```text
+/// LPPERI_CLK_EN   |= 1 << 29     turn the analog master's clock back on
+/// LPPERI_RESET_EN |= 1 << 29     assert its reset
+/// LPPERI_RESET_EN &= ~(1 << 29)  release it
+/// ```
+///
+/// Three word writes through [`Esp32C6Machine::poke_word`], which is the
+/// bus's own decode — the same path a ROM-download-mode `write_reg` would
+/// take when T4 gives the emulator one. Nothing reaches behind a block.
+fn poke_the_cure(machine: &mut Esp32C6Machine) {
+    let clk = base::RNG + CLK_EN;
+    let reset = base::RNG + RESET_EN;
+    let was = machine.peek_word(clk).expect("LP_PERI answers the bus");
+    assert_eq!(
+        was & LP_ANA_I2C_BIT,
+        0,
+        "the board is not wedged: clk_en {was:#010x} already has bit 29"
+    );
+    assert!(machine.poke_word(clk, was | LP_ANA_I2C_BIT));
+    let held = machine.peek_word(reset).expect("LP_PERI answers the bus");
+    assert!(machine.poke_word(reset, held | LP_ANA_I2C_BIT));
+    assert!(machine.poke_word(reset, held & !LP_ANA_I2C_BIT));
+    // What the flasher then re-reads, and the reason the cure is three
+    // writes rather than one: the clock alone does not clear a latched busy.
+    let ctrl = machine
+        .peek_word(base::LP_I2C_ANA_MST + I2C0_CTRL)
+        .expect("LP_I2C_ANA_MST answers the bus");
+    assert_eq!(
+        ctrl & BUSY,
+        0,
+        "after the cure the master still reads busy ({ctrl:#010x})"
+    );
+}
+
+/// Run the induced board until its first watchdog reboot, and hand it back
+/// mid-wedge — the place both P3 tests start from.
+fn at_the_first_reboot(name: &str) -> Option<Esp32C6Machine> {
+    let mut machine = match build(INDUCED_CLK_EN, true) {
+        Ok(m) => m,
+        Err(reason) => {
+            skip_notice(name, &reason);
+            return None;
+        }
+    };
+    let outcome = machine.run_until(&StopCondition::after_micros(ONE_CYCLE_US).exit_on(BANNER));
+    let text = console(&machine);
+    assert!(
+        matches!(outcome, Outcome::Deadline { .. }),
+        "the first cycle should have run its budget out: {outcome:?}\n{text}"
+    );
+    assert_eq!(
+        machine.reboots(),
+        1,
+        "exactly one watchdog cycle fits in {ONE_CYCLE_US} us:\n{text}"
+    );
+    assert_eq!(machine.power_cycles(), 0, "nothing cut the power");
+    assert_eq!(
+        text.matches(TG0_BANNER).count(),
+        1,
+        "the second boot's banner is the watchdog's:\n{text}"
+    );
+    assert!(
+        !text.contains(BANNER),
+        "neither boot reached the bootloader's banner:\n{text}"
+    );
+    Some(machine)
+}
+
+/// **AC3, and the first half of the domain model.** The cure poked onto the
+/// bus between two reboots frees the board: the next boot prints
+/// `2nd stage bootloader` and runs the app to its first heartbeat.
+///
+/// **Why this is the assertion that matters.** P2's loop already closed, but
+/// for an accident: the induced `clk_en` *is* the power-on value, so a
+/// whole-snapshot restore put the wedge back rather than clearing it. Nothing
+/// about that run distinguished "the LP domain survived the reset" from "the
+/// restore happened to restore a wedged board". This does. The cure is
+/// written into LP-domain state and then a plain `reboot()` follows it — so a
+/// clean boot afterwards is only possible if the reboot **kept** those
+/// blocks. Before P3 this test's `reboot()` would have restored `LPPERI` from
+/// the power-on snapshot, thrown the cure away, and re-hung.
+///
+/// The sequence is also the flasher's own, in order: hold the board, write
+/// the three registers, reset it. `lpa_link` does exactly this over
+/// ROM-download mode, and the reset is espflash's `--after hard-reset`.
+#[test]
+#[ignore = "needs the reference merged image; `just test-emu-c6`"]
+fn the_cure_survives_a_reboot_and_the_next_boot_reaches_the_app() {
+    let Some(mut machine) =
+        at_the_first_reboot("the_cure_survives_a_reboot_and_the_next_boot_reaches_the_app")
+    else {
+        return;
+    };
+    let before = console(&machine).len();
+
+    poke_the_cure(&mut machine);
+    // A chip reset, the kind a flasher asks for when it is done writing.
+    // Immediately, with no guest time in between, so that everything after
+    // this point in the console belongs to the boot that follows the cure.
+    assert!(
+        machine.reboot(Strap::App, ResetCause::UsbUartHpSys),
+        "the machine can reboot (reboot_on_reset kept a power-on snapshot)"
+    );
+    assert_eq!(machine.power_cycles(), 0, "no power was cut, ever");
+
+    let outcome = machine.run_until(&StopCondition::after_micros(APP_US).exit_on(HEARTBEAT));
+    let text = console(&machine);
+    let after = &text[before..];
+    assert!(
+        matches!(outcome, Outcome::ExitMatched { .. }),
+        "the cured board never heartbeat: {outcome:?}\n{after}"
+    );
+
+    // 1. The bootloader introduced itself — the line AC1 said must not appear
+    //    and AC3 says must.
+    let banner = after
+        .lines()
+        .find(|l| l.contains(BANNER))
+        .unwrap_or_else(|| panic!("no `{BANNER}` after the cure:\n{after}"));
+    // 2. …on a boot whose own banner is the reset we asked for, not another
+    //    watchdog bite.
+    assert!(
+        after.contains("rst:0x15 (USB_UART_HPSYS)"),
+        "the boot after the cure is the chip reset's:\n{after}"
+    );
+    assert!(
+        !after.contains(TG0_BANNER),
+        "the watchdog bit again after the cure:\n{after}"
+    );
+    // 3. …and the app ran. `[INIT]` is it starting; the heartbeat is it
+    //    running.
+    let first = after
+        .lines()
+        .find(|l| l.contains(APP_FIRST))
+        .unwrap_or_else(|| panic!("the app never started:\n{after}"));
+    let beat = after
+        .lines()
+        .find(|l| l.contains(HEARTBEAT))
+        .expect("the run stopped on it");
+    // 4. The cure is still in the LP domain, which is the whole point.
+    let clk = machine
+        .peek_word(base::RNG + CLK_EN)
+        .expect("LP_PERI answers the bus");
+    assert_ne!(
+        clk & LP_ANA_I2C_BIT,
+        0,
+        "the reboot threw the cure away: clk_en is {clk:#010x}, and the LP \
+         domain was restored rather than kept"
+    );
+    assert_eq!(
+        machine.reboots(),
+        2,
+        "one watchdog cycle, then the cure and one chip reset"
+    );
+
+    println!("AC3, the boot after the cure:");
+    println!("  {}", banner.trim());
+    println!("  {}", first.trim());
+    println!("  {}", beat.trim());
+    println!(
+        "  LPPERI_CLK_EN {clk:#010x} — bit 29 set, kept across the reboot \
+         (power-on value was {INDUCED_CLK_EN:#010x})"
+    );
+}
+
+/// **AC4, and the second half of the domain model.** A power cycle takes the
+/// LP domain with it — so it undoes the cure, and hands the wedged board
+/// straight back.
+///
+/// This is the test that makes AC3's claim mean something. If `reboot()` and
+/// `power_cycle()` did the same thing, AC3 could not tell whether the cure
+/// survived or the snapshot happened to hold it; here the *same* cure, on the
+/// *same* board, is thrown away by the *other* restart, and the board re-hangs
+/// exactly as it did before anyone touched it.
+///
+/// **A note on AC4 as the plan spelled it.** The plan's table reads
+/// "`power_cycle()` from the loop → next boot is `rst:0x1 (POWERON)` and
+/// clean". The banner half holds and is asserted below. The word *clean* does
+/// not, and cannot: `--lpperi-clk-en` seeds the induced gate word into the
+/// power-on snapshot, so a power cycle restores an **induced** board. That is
+/// not the emulator being unfaithful — it is what the bench saw. Unplugging a
+/// wedged XIAO and plugging it back in did nothing, because the gate is written
+/// by the firmware in its flash on every boot; the board on the desk needed
+/// the *cure*, and a power cycle only helped when it interrupted the firmware
+/// before it gated the clock again. The emulator models the induced state as a
+/// power-on condition, so a power cycle reproduces it. `power_cycle()` on a
+/// *clean* board is a clean boot, which is the `--lpperi-clk-en`-less default
+/// and what `machine.rs`'s unit tests cover.
+#[test]
+#[ignore = "needs the reference merged image; `just test-emu-c6`"]
+fn a_power_cycle_hands_the_induced_board_back_induced() {
+    let Some(mut machine) =
+        at_the_first_reboot("a_power_cycle_hands_the_induced_board_back_induced")
+    else {
+        return;
+    };
+    let before = console(&machine).len();
+
+    // The same cure as AC3's, written into the same LP registers.
+    poke_the_cure(&mut machine);
+    assert!(machine.power_cycle(Strap::App), "the supply comes back");
+    assert_eq!(machine.power_cycles(), 1);
+    assert_eq!(machine.reboots(), 2, "a power cycle is a restart too");
+    assert_eq!(
+        machine.reset_cause(),
+        ResetCause::PowerOn,
+        "the ROM will read a power-on out of LP_CLKRST"
+    );
+
+    // The cure is gone: the LP domain went with the supply, and what came
+    // back is the power-on value — which for this board is the induced one.
+    let clk = machine
+        .peek_word(base::RNG + CLK_EN)
+        .expect("LP_PERI answers the bus");
+    assert_eq!(
+        clk, INDUCED_CLK_EN,
+        "a power cycle restores the POWER-ON gate word, cure and all"
+    );
+
+    let outcome = machine.run_until(&StopCondition::after_micros(ONE_CYCLE_US).exit_on(BANNER));
+    let text = console(&machine);
+    let after = &text[before..];
+    assert!(
+        matches!(outcome, Outcome::Deadline { .. }),
+        "the board should have wedged again, not {outcome:?}\n{after}"
+    );
+    assert!(
+        !after.contains(BANNER),
+        "the board booted after a power cycle, so the wedge was NOT in the \
+         power-on state:\n{after}"
+    );
+
+    // The banner the ROM printed for the power cycle, and the `Saved PC` it
+    // did NOT print: the crash recorder reads zero on a cold chip
+    // (`beqz a1` at 0x40018ad0), which is why `ResetCause::PowerOn` does not
+    // record one.
+    let poweron = after
+        .lines()
+        .find(|l| l.contains(POWERON_BANNER))
+        .unwrap_or_else(|| panic!("no `{POWERON_BANNER}` after the power cycle:\n{after}"));
+    let lines: Vec<&str> = after.lines().collect();
+    let at = lines
+        .iter()
+        .position(|l| l.contains(POWERON_BANNER))
+        .expect("found above");
+    assert!(
+        !lines[at + 1].contains("Saved PC"),
+        "a power-on boot printed a `Saved PC`: {}",
+        lines[at + 1]
+    );
+
+    // …and then the watchdog shot it again, which is the loop closing for the
+    // second reason: not because a reset preserved the wedge, but because the
+    // wedge is what this board powers on into.
+    let bites = after.matches(TG0_BANNER).count();
+    assert_eq!(
+        bites, 1,
+        "one more watchdog cycle after the power cycle:\n{after}"
+    );
+    assert_eq!(machine.reboots(), 3);
+    assert_eq!(machine.power_cycles(), 1, "one of the three was the supply");
+
+    println!("AC4, the boot after the power cycle:");
+    println!("  {}", poweron.trim());
+    println!("  {}", lines[at + 1].trim());
+    println!("  LPPERI_CLK_EN {clk:#010x} — the cure undone, bit 29 clear again");
+    for line in after.lines().filter(|l| l.contains(TG0_BANNER)) {
+        println!("  {}", line.trim());
+    }
 }

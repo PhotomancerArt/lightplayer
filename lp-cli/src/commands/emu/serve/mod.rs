@@ -101,6 +101,7 @@ pub fn serve(args: ServeArgs) -> Result<()> {
             },
             air: air.clone(),
             air_seat: seat,
+            lpperi_clk_en: args.lpperi_clk_en,
         };
         let id = spec.id.clone();
         let flash = spec.flash.clone();

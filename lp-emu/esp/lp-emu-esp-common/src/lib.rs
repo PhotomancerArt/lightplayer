@@ -67,7 +67,7 @@ pub use host::{
     TcpHost,
 };
 pub use periph::{
-    BusCx, CpuIntMatrix, IrqLines, MachineRequest, NoCpuInterrupts, Peripheral, RegGrade,
+    BusCx, CpuIntMatrix, Domain, IrqLines, MachineRequest, NoCpuInterrupts, Peripheral, RegGrade,
     RegGrades, ResetScope, ResetSource, Sandbox, Strap, Watchdog, Width,
 };
 pub use pins::{Edge, Fabric, PadId, Route, RouteSource, SignalId};

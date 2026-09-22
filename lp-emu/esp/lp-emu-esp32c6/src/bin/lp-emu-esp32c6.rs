@@ -122,7 +122,9 @@ OPTIONS:
                             per command, one reply per command, in the
                             scripted fake device's vocabulary (attach,
                             detach, open, close, dtr, rts, signals, reset,
-                            download-mode, state, usb-write). Not the wire:
+                            download-mode, power-cycle, state, usb-write).
+                            reset is HP-only and leaves the LP domain
+                            standing; power-cycle takes both. Not the wire:
                             no M! frame is ever sent or expected here.
                             Protocol: lp-emu/esp/README.md
     --usb-script <file>     scripted host input on the USB link,

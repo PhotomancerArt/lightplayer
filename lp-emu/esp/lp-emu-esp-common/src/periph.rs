@@ -123,6 +123,54 @@ pub enum Watchdog {
     Rwdt,
 }
 
+/// Which power domain a peripheral lives in, and therefore **what a reset
+/// does to it**.
+///
+/// These parts have two: the high-power domain (the CPU, the HP peripherals,
+/// the flash cache) and the low-power domain (the RTC/LP island — `LP_AON`'s
+/// stores, `LP_IO`, the LP timer, `LPPERI`'s clock gates, the LP analog
+/// master). An HP-only reset — a host's `chip_rst` over the USB-Serial-JTAG
+/// bridge, an MWDT stage action, an RWDT `ResetCore` — takes the HP domain
+/// back to its power-on state and **leaves the LP domain exactly as it was**.
+/// Only removing power clears the LP domain.
+///
+/// That one property is the whole of
+/// `docs/defects/2026-09-06-c6-analog-master-wedges-the-bootloader.md`: a
+/// board whose `LPPERI_CLK_EN` has the analog I2C master's clock gated hangs
+/// the second-stage bootloader, the ROM-armed watchdog resets the HP system,
+/// and the next boot lands in the same hang — for ever — because the gate is
+/// LP-domain state that no reset touched.
+///
+/// A block declares its own domain (`Peripheral::domain`) rather than
+/// appearing in a list somewhere: the block knows what it is, and a list
+/// drifts.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub enum Domain {
+    /// The high-power domain. A reset puts it back to power-on. The default,
+    /// because most of a chip is here and a block that has not been asked the
+    /// question is far more likely to be HP than LP.
+    #[default]
+    Hp,
+    /// The low-power (RTC) island. A reset leaves it alone; only a power
+    /// cycle clears it.
+    Lp,
+}
+
+impl Domain {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Domain::Hp => "hp",
+            Domain::Lp => "lp",
+        }
+    }
+}
+
+impl core::fmt::Display for Domain {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
 /// What asked for a reset, in terms a chip crate can map to its own mask
 /// ROM's reset-reason code.
 ///
@@ -139,6 +187,11 @@ pub enum ResetSource {
         watchdog: Watchdog,
         scope: ResetScope,
     },
+    /// The power came back: a cold chip, both domains cleared. Nothing
+    /// *inside* the chip can ask for this one — it is the host taking the
+    /// supply away, which on a bench is a hand on the cable and here is the
+    /// `power-cycle` control verb.
+    PowerOn,
 }
 
 /// Something a peripheral needs the *machine* to do, because it cannot do
@@ -610,6 +663,22 @@ pub trait Peripheral {
     fn read(&mut self, off: u32, width: Width, cx: &mut BusCx<'_>) -> u32;
 
     fn write(&mut self, off: u32, width: Width, value: u32, cx: &mut BusCx<'_>);
+
+    /// Which power domain this block lives in — see [`Domain`].
+    ///
+    /// `Hp` by default, and the default is the conservative answer: an HP
+    /// block goes back to power-on on every reset, which is what every block
+    /// on every chip in this family did before the domains existed. A block
+    /// that overrides this to `Lp` is making a claim about silicon — that a
+    /// reset does not clear it — and owes the reader the evidence in its own
+    /// doc comment.
+    ///
+    /// Read by [`crate::bus::SocBus::restore_peripherals_in`], which is how a
+    /// machine's `reboot()` restores the HP domain and leaves the LP domain
+    /// standing.
+    fn domain(&self) -> Domain {
+        Domain::Hp
+    }
 
     /// The bus has given this peripheral index `index`. Called once, from
     /// [`crate::bus::SocBus::add_peripheral`]; a peripheral that schedules

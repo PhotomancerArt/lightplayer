@@ -67,7 +67,7 @@ use lp_emu_esp_common::periph::BoxedPeripheral;
 use lp_emu_esp_common::pins::{PadId, RouteSource};
 use lp_emu_esp_common::strip::ws281x::{Frame, Ws281xDecoder, unpermute};
 use lp_emu_esp_common::{
-    ByteLog, ByteSink, ByteSource, ElfImage, RamRegion, RegGrade, SocBus, Strap,
+    ByteLog, ByteSink, ByteSource, Domain, ElfImage, RamRegion, RegGrade, SocBus, Strap,
 };
 use lp_riscv_emu::mach::trigger::TRIGGER_COUNT;
 use lp_riscv_emu::mach::{HartFault, MachineHart, SliceEnd};
@@ -2190,6 +2190,7 @@ impl Esp32C6Builder {
             jit_split_events: Vec::new(),
             power_on: None,
             reboots: 0,
+            power_cycles: 0,
             seed,
             rng: seed,
             rom_segments,
@@ -2551,8 +2552,13 @@ pub struct Esp32C6Machine {
     /// [`Esp32C6Builder::reboot_on_reset`] asked for it — a reboot is a
     /// restore of this.
     power_on: Option<Snapshot>,
-    /// How many reset requests this run performed.
+    /// How many times this run restarted the chip — reboots and power cycles
+    /// together, because that is the number a host asking "has the board come
+    /// back" wants.
     reboots: u64,
+    /// How many of those were power cycles (both domains cleared), which is
+    /// the half `reboots` alone cannot tell a reader.
+    power_cycles: u64,
     seed: u64,
     rng: u64,
     rom_segments: Vec<PlacedSegment>,
@@ -3540,19 +3546,42 @@ impl Esp32C6Machine {
         self.strap
     }
 
-    /// How many reset requests this run performed
-    /// ([`Esp32C6Builder::reboot_on_reset`]).
+    /// How many times this run has restarted the chip — a reboot or a power
+    /// cycle, whichever ([`Esp32C6Builder::reboot_on_reset`]).
+    ///
+    /// Every restart counts, because this is the number `emu serve` publishes
+    /// as a board's `reboots` and the door's clients read as "has it come back
+    /// yet". [`power_cycles`](Self::power_cycles) says how many of them took
+    /// the LP domain with them.
     pub fn reboots(&self) -> u64 {
         self.reboots
     }
 
-    /// Reboot into `strap`, as a chip does when something asserts its reset.
+    /// How many of those [restarts](Self::reboots) were **power cycles** —
+    /// the supply taken away and put back, both domains cleared.
+    pub fn power_cycles(&self) -> u64 {
+        self.power_cycles
+    }
+
+    /// Reboot into `strap`, as a chip does when something asserts its reset:
+    /// the **HP domain** goes back to power-on and the **LP domain stays as
+    /// it is**.
     ///
-    /// The machine goes back to the state it was built in and the two
-    /// registers the mask ROM reads before anything else are re-seeded: the
-    /// strap it prints as `boot:0x..` and chooses a path with, and the reset
-    /// cause it prints as `rst:0x..`, which is `cause` — the request's own,
-    /// mapped through the ROM's reset-reason table by
+    /// That split is the point of this function and the one property silicon
+    /// has that the emulator lacked until P3. An HP-only reset — a host's
+    /// `chip_rst` over the USB-Serial-JTAG bridge, an MWDT stage action —
+    /// does not touch the LP island, so `LPPERI`'s clock gates, the LP analog
+    /// master's latched busy and `LP_AON`'s stores all survive it. A board
+    /// whose LP domain is wedged therefore **reboots straight back into the
+    /// wedge**, for ever, which is what the first-flash defect recorded on
+    /// the desk. Use [`power_cycle`](Self::power_cycle) for the other kind.
+    /// Which blocks are which is each block's own answer
+    /// ([`lp_emu_esp_common::Peripheral::domain`]).
+    ///
+    /// The two registers the mask ROM reads before anything else are
+    /// re-seeded: the strap it prints as `boot:0x..` and chooses a path with,
+    /// and the reset cause it prints as `rst:0x..`, which is `cause` — the
+    /// request's own, mapped through the ROM's reset-reason table by
     /// [`ResetCause::for_source`]. Before P2 this was hard-coded
     /// `USB_UART_HPSYS`, which was right for the serial bridge and wrong for
     /// a watchdog.
@@ -3568,6 +3597,38 @@ impl Esp32C6Machine {
     /// the machine was built with, and a boot log that lost everything before
     /// the reset would be a worse record than one that has both boots in it.
     pub fn reboot(&mut self, strap: Strap, cause: ResetCause) -> bool {
+        self.restart(strap, cause, Some(Domain::Hp))
+    }
+
+    /// Take the supply away and put it back: **both domains** go to power-on
+    /// and the cause is `POWERON`.
+    ///
+    /// The emulator's whole-snapshot restore, which is what every reboot used
+    /// to be. It is the other half of the first-flash defect's finding — a
+    /// power cycle clears the wedge where no reset does — and the reason this
+    /// and [`reboot`](Self::reboot) have to be two functions rather than one
+    /// with a flag: a caller that says "power-cycle" is making a claim about
+    /// the *supply*, and the strapping is the only thing it gets to choose
+    /// (the pins are still whatever they are wired to).
+    ///
+    /// There is no `Saved PC` after one: `ResetCause::PowerOn` does not
+    /// [record one](ResetCause::records_saved_pc), which is the ROM's own
+    /// behaviour (`beqz a1` at `0x40018ad0` — the recorder reads zero on a
+    /// cold chip, so nothing is printed).
+    ///
+    /// **A power cycle restores the power-on snapshot, which is not the same
+    /// thing as a clean board.** `--lpperi-clk-en` seeds the induced gate
+    /// word *into* that snapshot, so power-cycling an induced board hands it
+    /// back induced — exactly as taking the cable out of a wedged XIAO and
+    /// putting it back does nothing, because the wedge is in its flash.
+    pub fn power_cycle(&mut self, strap: Strap) -> bool {
+        self.restart(strap, ResetCause::PowerOn, None)
+    }
+
+    /// The one restart path. `restore` is the domain to put back from the
+    /// power-on snapshot: `Some(Domain::Hp)` for a reset, `None` — every
+    /// block — for a power cycle.
+    fn restart(&mut self, strap: Strap, cause: ResetCause, restore: Option<Domain>) -> bool {
         let Some(power_on) = self.power_on.clone() else {
             return false;
         };
@@ -3577,7 +3638,7 @@ impl Esp32C6Machine {
             self.usb_sj_log.bytes(),
             self.usb_sj_tried_log.bytes(),
         );
-        self.restore(&power_on);
+        self.restore_in(&power_on, restore);
         self.uart0_log.replace(&uart0);
         self.usb_sj_log.replace(&usb_sj);
         self.usb_sj_tried_log.replace(&tried);
@@ -3616,15 +3677,17 @@ impl Esp32C6Machine {
         // exactly that. Re-derive it, or a chip reset into the ROM console
         // would inherit the *previous* boot's answer.
         loader::set_flash_boot_strap(&mut self.bus, strap);
-        // ⚠️ P3 owns the domain question this register raises. On silicon
-        // ASSIST_DEBUG sits in the HP peripheral window and its record
+        // ASSIST_DEBUG stays `Domain::Hp` and the poke stays — the director's
+        // ruling DD9, and the simplest true statement about it. On silicon
+        // the block sits in the HP peripheral window and its record
         // registers survive an HP reset *because the block is reset by a
         // narrower signal than the one the watchdog asserts* — the whole
-        // point of a crash recorder. Here it is poked back after the
-        // restore, which reproduces the observable behaviour without
-        // committing to a domain; when P3 gives peripherals a `domain()`,
-        // ASSIST_DEBUG is the one block whose answer is neither obviously
-        // `Hp` nor obviously `Lp`, and this poke is what it has to replace.
+        // point of a crash recorder. But the value is **produced by the reset
+        // event**, not carried across it by a block: giving ASSIST_DEBUG
+        // `Domain::Lp` would get the right `Saved PC` under a wrong name and
+        // would carry the block's fifty other registers across a reboot as a
+        // side effect. So the restore clears it, like every other HP block,
+        // and the reset path writes the PC it just captured.
         if let Some(pc) = saved_pc
             && let Some(i) = self.bus.peripheral_index("ASSIST_DEBUG")
         {
@@ -3693,6 +3756,9 @@ impl Esp32C6Machine {
             .is_some_and(|tcp| tcp.client_connected());
         self.usb_client_connected = client && self.usb_sj_open();
         self.reboots += 1;
+        if restore.is_none() {
+            self.power_cycles += 1;
+        }
         true
     }
 
@@ -4962,7 +5028,23 @@ impl Esp32C6Machine {
                     .stop_cycle
                     .map(|_| stop_cycle.saturating_sub(self.cycles()));
                 let cause = ResetCause::for_source(cause);
-                if self.reboot_on_reset && self.reboot(strap, cause) {
+                // A `PowerOn` cause is the supply coming back, and only the
+                // host can ask for that (`power-cycle` on the control
+                // channel): both domains go, where every other cause leaves
+                // the LP island standing. One dispatch, so the two kinds of
+                // restart cannot drift apart — and so a power cycle gets the
+                // budget rebase and the host-deadline reset below for free.
+                //
+                // The `reboot_on_reset` test comes FIRST and still
+                // short-circuits: without the flag a reset request ends the
+                // run and reports itself, and nothing is restarted.
+                let performed = self.reboot_on_reset
+                    && if matches!(cause, ResetCause::PowerOn) {
+                        self.power_cycle(strap)
+                    } else {
+                        self.reboot(strap, cause)
+                    };
+                if performed {
                     log::info!(
                         "machine: {source} at cycle {at} — rebooting into strap {strap}, \
                          rst:{:#x} ({})",
@@ -5324,6 +5406,37 @@ impl Esp32C6Machine {
                     pads: self.pad_reports(),
                 };
             }
+            // Not the USB block's either, and for a sharper reason than the
+            // pads: a power cycle is a hand on the *plug*, so nothing the
+            // guest writes to `USB_DEVICE` can refuse it and a machine with
+            // no USB console still has a supply.
+            //
+            // Left as a request rather than performed here, exactly as
+            // `reset` is (which becomes one inside `UsbSerialJtag::reset`):
+            // the run loop is the one place that knows how to restart the
+            // chip AND rebase the run's cycle budget onto the new clock
+            // (`docs/defects/2026-09-11-a-reset-replays-the-boards-lifetime.md`).
+            // The strapping is the machine's current one — a power cycle
+            // re-reads the pins, and nothing moved them.
+            ControlCommand::PowerCycle => {
+                self.bus.set_time(now);
+                self.bus
+                    .request_from_host(lp_emu_esp_common::MachineRequest::Reset {
+                        source: "host power-cycle (control channel)",
+                        at: now,
+                        strap: self.strap,
+                        cause: lp_emu_esp_common::ResetSource::PowerOn,
+                    });
+                self.control_lines += 1;
+                if self.bus.trace.is_enabled() {
+                    let line = format!("cyc={now} CONTROL power-cycle");
+                    self.bus.trace.note(&line);
+                }
+                return ControlReply::Ok {
+                    verb: "power-cycle",
+                    cycle: now,
+                };
+            }
             _ => {}
         }
         let Some(index) = self.usb_index else {
@@ -5412,9 +5525,13 @@ impl Esp32C6Machine {
                     "`wait` is a --usb-script command; a client on this socket waits by waiting"
                         .to_string(),
                 ),
-                // Handled above: the pads are not this block's.
-                ControlCommand::Pin { .. } | ControlCommand::Pins => {
-                    Err("unreachable: a pin verb never reaches USB_DEVICE".to_string())
+                // Handled above: the pads are not this block's, and neither
+                // is the supply.
+                ControlCommand::Pin { .. } | ControlCommand::Pins | ControlCommand::PowerCycle => {
+                    Err(
+                        "unreachable: a pin verb and `power-cycle` never reach USB_DEVICE"
+                            .to_string(),
+                    )
                 }
             });
 
@@ -5592,6 +5709,33 @@ impl Esp32C6Machine {
     /// hart's trigger CSRs, because they live on the bus and the bus does not
     /// know they came from a hart.
     pub fn restore(&mut self, s: &Snapshot) {
+        self.restore_in(s, None);
+    }
+
+    /// [`restore`](Self::restore), optionally restricted to one power
+    /// [`Domain`]'s peripherals — the restore an HP-only reset performs.
+    ///
+    /// **`domain` filters the peripherals and nothing else.** The harts, the
+    /// memory regions, the scheduler, the interrupt matrix and the bus's
+    /// scalars all go back whole, because that is what the machine did before
+    /// the domains existed and no committed transcript may move. Two of those
+    /// are honest gaps rather than decisions, and both are named here so
+    /// nobody has to rediscover them:
+    ///
+    /// * **Memory.** On silicon an HP reset does not clear HP SRAM either,
+    ///   and the LP island has its own RAM (`.rtc_fast.persistent`, which the
+    ///   ROM's `__pre_init` zeroes *only* when the cause is `POWERON` — proof
+    ///   that silicon expects it to survive). Here every region is restored,
+    ///   so that persistence does not reach across an emulated reboot. A real
+    ///   gap, with no transcript to move: no committed run reboots.
+    /// * **The scheduler.** A restored schedule is the power-on schedule, so
+    ///   an LP block that had an event outstanding would keep its registers
+    ///   and lose its event. None of the LP blocks schedules anything today
+    ///   (the six accept blocks cannot, and the two modelled ones apply the
+    ///   reset pulse lazily on the next access rather than on a timer), so
+    ///   the pair is consistent — but an LP block that grows an event has to
+    ///   revisit this.
+    fn restore_in(&mut self, s: &Snapshot, domain: Option<Domain>) {
         // The block cache is not architectural state and is absent from a
         // snapshot: `Clone for MachineHart` hands back an empty one, which is
         // the whole of "restore invalidates all". A translated core rides on
@@ -5608,7 +5752,10 @@ impl Esp32C6Machine {
         self.harts[0].restore_trap_log(trap_log);
         self.bus.restore_regions(&s.regions);
         let _ = self.bus.take_code_writes();
-        self.bus.restore_peripherals(&s.periph);
+        match domain {
+            None => self.bus.restore_peripherals(&s.periph),
+            Some(domain) => self.bus.restore_peripherals_in(&s.periph, domain),
+        }
         self.bus.restore_scalars(&s.scalars);
         self.bus.sched.restore(&s.sched);
         self.bus.matrix_mut().load_state(&s.matrix);
@@ -5896,6 +6043,168 @@ mod tests {
             "a reboot inside the slice must cost at most the slice's budget \
              ({BUDGET} cycles); it consumed {consumed}, which is the board's \
              {aged}-cycle lifetime replayed on top of it"
+        );
+    }
+
+    /// **The LP set, written down.** The declaration lives on each block, so
+    /// this is the one place a reader can see the whole answer — and the one
+    /// place a block that quietly changes its mind is caught.
+    ///
+    /// Eight blocks: the LP_PERI window (whose peripheral name is still
+    /// `RNG`, the name every transcript spells), the LP analog master, and
+    /// the six LP accept blocks. Everything else is `Hp`, deliberately,
+    /// including four `LP_`-shaped blocks — see the "reset domains" section
+    /// of `periph/accept.rs` for why each is out.
+    #[test]
+    fn the_lp_domain_is_exactly_these_eight_blocks() {
+        let m = Esp32C6Builder::new().build().unwrap();
+        let lp: Vec<&str> = m
+            .bus
+            .peripheral_domains()
+            .into_iter()
+            .filter(|(_, d)| *d == Domain::Lp)
+            .map(|(name, _)| name)
+            .collect();
+        assert_eq!(
+            lp,
+            [
+                "LP_APM",
+                "LP_AON",
+                "PMU",
+                "LP_I2C_ANA_MST",
+                "LP_TIMER",
+                "LP_TEE",
+                "LP_IO",
+                "RNG",
+            ],
+            "in registration order. Adding or removing one is a claim about \
+             silicon and a change to what every reboot preserves — say why in \
+             the block, and change this list on purpose."
+        );
+        // The four that are LP-shaped and deliberately HP-restored, plus
+        // EFUSE. Asserted rather than left implicit, because "it was
+        // considered and left out" is the statement, not an oversight.
+        for name in ["LP_CLKRST", "LP_WDT", "LP_APM0", "LP_ANA", "EFUSE"] {
+            let domain = m
+                .bus
+                .peripheral_domains()
+                .into_iter()
+                .find(|(n, _)| *n == name)
+                .map(|(_, d)| d);
+            assert_eq!(
+                domain,
+                Some(Domain::Hp),
+                "{name} is deliberately HP-restored (plan notes D4)"
+            );
+        }
+    }
+
+    /// **The domain model, in one pair of calls.** A reboot puts the HP
+    /// domain back and leaves the LP domain standing; a power cycle takes
+    /// both.
+    ///
+    /// No image and no reference build: two registers, two restarts. The
+    /// reference-image half — the wedged bootloader that only a power cycle
+    /// (or the cure) frees — is `tests/bootloader_hang.rs`.
+    #[test]
+    fn a_reboot_keeps_the_lp_domain_and_a_power_cycle_clears_it() {
+        let mut m = Esp32C6Builder::new()
+            .reset_cause(ResetCause::UsbUartHpSys)
+            .reboot_on_reset(true)
+            .build()
+            .unwrap();
+        // One register on each side. `LP_AON.store0` is the LP island's own
+        // scratch word — what a bootloader leaves for an app — and
+        // `HP_SYS.sram_usage_conf` is an ordinary HP one.
+        let lp = memmap::periph::LP_AON;
+        let hp = memmap::periph::HP_SYS + 0x004;
+        assert!(m.poke_word(lp, 0xabad_1dea));
+        assert!(m.poke_word(hp, 0x0000_0011));
+        assert_eq!(m.peek_word(lp), Some(0xabad_1dea));
+        assert_eq!(m.peek_word(hp), Some(0x0000_0011));
+
+        // A reset.
+        assert!(m.reboot(Strap::App, ResetCause::Tg0WdtHpSys));
+        assert_eq!(
+            m.peek_word(lp),
+            Some(0xabad_1dea),
+            "an HP-only reset does not reach the LP island — the whole of \
+             docs/defects/2026-09-06-c6-analog-master-wedges-the-bootloader.md"
+        );
+        assert_eq!(
+            m.peek_word(hp),
+            Some(0),
+            "the HP block went back to its power-on value"
+        );
+        assert_eq!(m.reset_cause(), ResetCause::Tg0WdtHpSys);
+        assert_eq!((m.reboots(), m.power_cycles()), (1, 0));
+
+        // The supply.
+        assert!(m.power_cycle(Strap::App));
+        assert_eq!(
+            m.peek_word(lp),
+            Some(0),
+            "a power cycle clears the LP island too — the bench's other cure"
+        );
+        assert_eq!(m.reset_cause(), ResetCause::PowerOn, "rst:0x1 (POWERON)");
+        assert_eq!(
+            m.peek_word(memmap::periph::LP_CLKRST + 0x010),
+            Some(1),
+            "and the ROM would read that cause out of LP_CLKRST"
+        );
+        assert_eq!(
+            (m.reboots(), m.power_cycles()),
+            (2, 1),
+            "both restarts count; one of them was a power cycle"
+        );
+    }
+
+    /// `power-cycle` on the control channel: one reply line, then the run
+    /// loop performs it — the same route `reset` takes, so the cycle budget
+    /// is rebased and the host deadlines go back with the clock.
+    #[test]
+    fn the_power_cycle_verb_reaches_the_run_loop_and_clears_both_domains() {
+        assert_eq!(
+            ControlCommand::parse("power-cycle"),
+            Ok(ControlCommand::PowerCycle),
+            "the verb parses"
+        );
+        let mut m = Esp32C6Builder::new()
+            .reset_cause(ResetCause::UsbUartHpSys)
+            .reboot_on_reset(true)
+            .build()
+            .unwrap();
+        m.bus
+            .load_image(memmap::HP_SRAM_BASE, &0x0000_006fu32.to_le_bytes())
+            .unwrap();
+        m.harts[0].set_pc(memmap::HP_SRAM_BASE);
+        let lp = memmap::periph::LP_AON;
+        assert!(m.poke_word(lp, 0xabad_1dea));
+
+        // No USB host is attached and the guest could have disabled
+        // `chip_rst`; neither is the supply's business, so neither is asked.
+        assert_eq!(
+            m.control_line("power-cycle").to_string(),
+            "ok power-cycle cyc=0 us=0"
+        );
+        let out = m.run_until(&StopCondition::after_micros(1_000));
+        assert!(matches!(out, Outcome::Deadline { .. }), "{out:?}");
+        assert_eq!((m.reboots(), m.power_cycles()), (1, 1));
+        assert_eq!(m.reset_cause(), ResetCause::PowerOn);
+        assert_eq!(m.peek_word(lp), Some(0), "the LP island went with it");
+
+        // …and `reset` through the same door is still an HP-only reset.
+        assert!(m.poke_word(lp, 0x5555_5555));
+        m.apply_control(&ControlCommand::Attach, m.cycles());
+        assert!(m.control_line("reset").to_string().starts_with("ok reset "));
+        let out = m.run_until(&StopCondition::after_micros(2_000));
+        assert!(matches!(out, Outcome::Deadline { .. }), "{out:?}");
+        assert_eq!((m.reboots(), m.power_cycles()), (2, 1));
+        assert_eq!(m.reset_cause(), ResetCause::UsbUartHpSys);
+        assert_eq!(
+            m.peek_word(lp),
+            Some(0x5555_5555),
+            "a chip_rst leaves the LP island alone"
         );
     }
 

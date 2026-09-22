@@ -73,9 +73,26 @@ pub enum ControlCommand {
         rts: Option<bool>,
     },
     /// The hard-reset dance's effect, without the dance.
+    ///
+    /// An **HP-only** reset, which is what `chip_rst` is: the LP domain
+    /// survives it. See [`PowerCycle`](ControlCommand::PowerCycle) for the
+    /// other kind.
     Reset,
     /// The download dance's effect, without the dance.
     DownloadMode,
+    /// The supply taken away and put back: **both** domains cleared,
+    /// `rst:0x1 (POWERON)`, and no `Saved PC`.
+    ///
+    /// The one verb here that is not the USB cable's. A host holding a
+    /// serial port cannot power-cycle a board — the hand that can is on the
+    /// USB *plug*, or on a bench supply — so this command does not go to
+    /// `USB_DEVICE`, is not refused when the guest has set
+    /// `disable_usb_serial_chip_reset`, and works on a machine with no USB
+    /// block at all. It exists because a reset and a power cycle stopped
+    /// being the same thing when the emulator learned the reset domains, and
+    /// the flasher's own ladder distinguishes them: "reset it; if it still
+    /// hangs, unplug it".
+    PowerCycle,
     /// Report the host's side. Answered by [`ControlReply::State`].
     State,
     /// Host → device bytes with no byte socket in the picture (tests).
@@ -113,6 +130,7 @@ impl ControlCommand {
             ControlCommand::Signals { .. } => "signals",
             ControlCommand::Reset => "reset",
             ControlCommand::DownloadMode => "download-mode",
+            ControlCommand::PowerCycle => "power-cycle",
             ControlCommand::State => "state",
             ControlCommand::UsbWrite(_) => "usb-write",
             ControlCommand::Wait(_) => "wait",
@@ -134,6 +152,7 @@ impl ControlCommand {
         "signals",
         "reset",
         "download-mode",
+        "power-cycle",
         "state",
         "usb-write",
         "wait",
@@ -167,6 +186,7 @@ impl ControlCommand {
             "close" => no_args(ControlCommand::Close),
             "reset" => no_args(ControlCommand::Reset),
             "download-mode" => no_args(ControlCommand::DownloadMode),
+            "power-cycle" => no_args(ControlCommand::PowerCycle),
             "state" => no_args(ControlCommand::State),
             "dtr" | "rts" => {
                 let [value] = rest[..] else {
@@ -659,6 +679,7 @@ mod tests {
             ("close", ControlCommand::Close),
             ("reset", ControlCommand::Reset),
             ("download-mode", ControlCommand::DownloadMode),
+            ("power-cycle", ControlCommand::PowerCycle),
             ("state", ControlCommand::State),
             (
                 "dtr 1",

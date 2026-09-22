@@ -181,6 +181,21 @@ pub struct RunArgs {
     /// does. Applied before the power-on snapshot, so a reboot keeps it.
     #[arg(long = "uart0-baud")]
     pub uart0_baud: Option<u64>,
+
+    /// `LPPERI_CLK_EN`'s power-on value, in hex — what a board's previous
+    /// firmware left in the LP domain. Default: the PAC reset `7f800000`, a
+    /// clean board.
+    ///
+    /// Bit 29 is `LP_ANA_I2C_CK_EN`. Clear it — the bench's induced board
+    /// read `5f000000` — and the second-stage bootloader hangs on the LP
+    /// analog master's busy bit before its first console line, the MWDT0
+    /// flash-boot watchdog shoots it 0.325 s in, and the next boot lands in
+    /// the same hang, because an HP reset does not reach the LP island. That
+    /// is `docs/defects/2026-09-06-c6-first-flash-bootloader-hang-lp-analog-i2c-clock.md`
+    /// reproduced with no board. `power-cycle` on a served board's control
+    /// channel does not clear it either: the value IS the power-on value.
+    #[arg(long = "lpperi-clk-en", value_name = "HEX", value_parser = parse_hex_u32)]
+    pub lpperi_clk_en: Option<u32>,
 }
 
 /// The USB host's state at a served board's power-on. The same three the
@@ -292,4 +307,40 @@ pub struct ServeArgs {
     /// validation configuration or CI job ever uses.
     #[arg(long = "air")]
     pub air: Option<String>,
+
+    /// `LPPERI_CLK_EN`'s power-on value, in hex — what a board's previous
+    /// firmware left in the LP domain. Default: the PAC reset `7f800000`, a
+    /// clean board.
+    ///
+    /// Bit 29 is `LP_ANA_I2C_CK_EN`. Clear it — the bench's induced board
+    /// read `5f000000` — and the second-stage bootloader hangs on the LP
+    /// analog master's busy bit before its first console line, the MWDT0
+    /// flash-boot watchdog shoots it 0.325 s in, and the next boot lands in
+    /// the same hang, because an HP reset does not reach the LP island. That
+    /// is `docs/defects/2026-09-06-c6-first-flash-bootloader-hang-lp-analog-i2c-clock.md`
+    /// reproduced with no board. `power-cycle` on a served board's control
+    /// channel does not clear it either: the value IS the power-on value.
+    #[arg(long = "lpperi-clk-en", value_name = "HEX", value_parser = parse_hex_u32)]
+    pub lpperi_clk_en: Option<u32>,
+}
+
+/// `5f000000` or `0x5f000000` → a `u32`. Hex without a prefix, because that
+/// is how a register value is read out of a trace and pasted back in.
+fn parse_hex_u32(text: &str) -> Result<u32, String> {
+    let body = text.strip_prefix("0x").unwrap_or(text);
+    u32::from_str_radix(body, 16).map_err(|e| format!("`{text}` is not a 32-bit hex word: {e}"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_register_word_reads_with_or_without_the_prefix() {
+        assert_eq!(parse_hex_u32("5f000000"), Ok(0x5f00_0000));
+        assert_eq!(parse_hex_u32("0x7f800000"), Ok(0x7f80_0000));
+        assert!(parse_hex_u32("nope").is_err());
+        // Wider than the register, so it is a mistake and not a truncation.
+        assert!(parse_hex_u32("1_0000_0000").is_err());
+    }
 }

@@ -17,8 +17,41 @@
 //! A `with_reset` in this file is now a **deviation from the PAC**, and
 //! `the_only_deviations_from_the_pacs_resets_are_the_listed_ones` below is
 //! the list.
+//!
+//! # `with_domain(Domain::Lp)` — the reset domains
+//!
+//! Six blocks here sit in the chip's **low-power island**, so an HP-only
+//! reset does not clear them (see [`Domain`] and
+//! `Esp32C6Machine::reboot`): `LP_AON`, `LP_IO`, `LP_TEE`, `LP_APM`,
+//! `LP_TIMER`, `PMU`. Each carries the line, and the evidence is the same
+//! one sentence for all six: the `LP_` prefix and the base address are the
+//! PAC's own statement of which island a block is on, and `PMU` is the
+//! power-management unit that *performs* the domain switching — an LP block
+//! by construction. `LP_AON`'s name says the rest: **a**lways-**on**.
+//!
+//! Four blocks in this file are `LP_`-shaped and deliberately **stay
+//! HP-restored** (plan `notes.md` D4, the conservative first cut — fewer
+//! ways to move a clean board's transcript):
+//!
+//! - **`LP_CLKRST`** — `reset_cause` is an *input to the run*, re-poked by
+//!   the reboot path itself with the cause of the reset that just happened.
+//!   A block whose one interesting register is rewritten after every
+//!   restore gains nothing from a domain.
+//! - **`LP_WDT`** — a live RWDT carried across a reboot could fire
+//!   spuriously in the middle of the next boot, and the ROM re-arms it
+//!   anyway. LP_WDT's domain semantics are deferred, on purpose.
+//! - **`LP_APM0`** and **`LP_ANA`** — both really are LP-island blocks and
+//!   both are honestly *not* in the first cut: nothing reads a status bit
+//!   out of either (the boot's only traffic is `pre_init` zeroing APM
+//!   `func_ctrl`s and the bootloader's brownout read-modify-writes), so
+//!   carrying their state changes no decision any image makes. Named here
+//!   rather than left unmentioned, because "it did not occur to anyone" and
+//!   "it was considered and left out" are different statements.
+//!
+//! `EFUSE` is the fifth of that kind and lives in `efuse.rs`: constant for
+//! the life of a chip, so restoring it and keeping it are the same thing.
 
-use lp_emu_esp_common::RegFile;
+use lp_emu_esp_common::{Domain, RegFile};
 
 use crate::regs;
 
@@ -28,6 +61,7 @@ pub fn lp_apm() -> RegFile {
     RegFile::new("LP_APM", 0x100)
         .with_names(regs::LP_APM)
         .with_pac_grades()
+        .with_domain(Domain::Lp)
 }
 
 pub fn lp_apm0() -> RegFile {
@@ -49,6 +83,7 @@ pub fn lp_aon() -> RegFile {
     RegFile::new("LP_AON", 0x400)
         .with_names(regs::LP_AON)
         .with_pac_grades()
+        .with_domain(Domain::Lp)
 }
 
 // ---- PMU: written by `rtc::init`, never read back (discovery §4).
@@ -57,6 +92,7 @@ pub fn pmu() -> RegFile {
     RegFile::new("PMU", 0x400)
         .with_names(regs::PMU)
         .with_pac_grades()
+        .with_domain(Domain::Lp)
 }
 
 /// `LP_CLKRST`. `reset_cause` at `+0x10` is the very first MMIO access of
@@ -206,6 +242,7 @@ pub fn lp_timer() -> RegFile {
     RegFile::new("LP_TIMER", 0x400)
         .with_names(regs::LP_TIMER)
         .with_pac_grades()
+        .with_domain(Domain::Lp)
 }
 
 pub fn apb_saradc() -> RegFile {
@@ -243,12 +280,14 @@ pub fn lp_tee() -> RegFile {
     RegFile::new("LP_TEE", 0x100)
         .with_names(regs::LP_TEE)
         .with_pac_grades()
+        .with_domain(Domain::Lp)
 }
 
 pub fn lp_io() -> RegFile {
     RegFile::new("LP_IO", 0x400)
         .with_names(regs::LP_IO)
         .with_pac_grades()
+        .with_domain(Domain::Lp)
 }
 
 /// `EXTMEM` — the cache controller.

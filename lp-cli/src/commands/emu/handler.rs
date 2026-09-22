@@ -177,6 +177,12 @@ fn run(args: RunArgs) -> Result<()> {
     if let Some(baud) = args.uart0_baud {
         builder = builder.uart0_baud(baud);
     }
+    // The LP domain's power-on gate word: the one register that says whether
+    // this is a clean board or one a previous firmware wedged. Applied before
+    // the power-on snapshot, so a `power-cycle` hands the same board back.
+    if let Some(clk_en) = args.lpperi_clk_en {
+        builder = builder.lp_peri_clk_en(clk_en);
+    }
     if let Some(path) = &args.dump_frames {
         builder = builder.dump_frames(FrameSink::File(path.clone()));
     }

@@ -43,7 +43,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 
 use lp_emu_esp_common::regfile::lane_of;
-use lp_emu_esp_common::{BusCx, Peripheral, RegFile, Width};
+use lp_emu_esp_common::{BusCx, Domain, Peripheral, RegFile, Width};
 
 use super::systimer::Reader;
 use crate::regs;
@@ -197,6 +197,23 @@ impl LpPeri {
 impl Peripheral for LpPeri {
     fn name(&self) -> &'static str {
         "RNG"
+    }
+
+    /// The **low-power island**. `LPPERI` is the LP domain's own peripheral
+    /// clock-and-reset controller (base `0x600B_2800`, between `LP_TIMER` and
+    /// the LP analog master), and the gate word it holds is exactly the state
+    /// the first-flash defect turns on: a previous firmware clears bit 29,
+    /// every HP reset leaves it clear, and only removing power puts the PAC's
+    /// `0x7f80_0000` back. That is what the bench measured — the cure is a
+    /// register write or a power cycle, and nothing else works
+    /// (`docs/defects/2026-09-06-c6-analog-master-wedges-the-bootloader.md`).
+    ///
+    /// The RNG's xorshift state rides along, because it is in this block
+    /// (plan `notes.md` D6). Silicon's RNG has no state to restore anyway,
+    /// and no clean board's transcript can see the difference: a clean boot
+    /// never reboots.
+    fn domain(&self) -> Domain {
+        Domain::Lp
     }
 
     fn read(&mut self, off: u32, width: Width, cx: &mut BusCx<'_>) -> u32 {

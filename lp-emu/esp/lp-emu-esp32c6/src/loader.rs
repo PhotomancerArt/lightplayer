@@ -232,6 +232,10 @@ impl ResetCause {
     pub const fn for_source(source: ResetSource) -> Self {
         match source {
             ResetSource::ChipReset => ResetCause::UsbUartHpSys,
+            // The supply came back. The one cause whose *scope* is both
+            // domains, which is why the machine answers it with
+            // `power_cycle()` rather than `reboot()`.
+            ResetSource::PowerOn => ResetCause::PowerOn,
             ResetSource::Watchdog {
                 watchdog: Watchdog::Mwdt(0),
                 scope: ResetScope::Cpu,

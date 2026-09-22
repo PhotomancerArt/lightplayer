@@ -249,6 +249,7 @@ cable, not the protocol on it.
 >  signals dtr=0 rts=1      # both in one write, the way a UartBridge-style host does it
 >  reset                    # what the hard-reset dance does: chip_rst + Reset { strap: App }
 >  download-mode            # what the download dance does: Reset { strap: Download }
+>  power-cycle              # the supply away and back: BOTH domains, rst:0x1 (POWERON)
 >  usb-write <hex bytes>    # host -> device bytes with no byte socket (tests)
 >  pin 20 1                 # a bench driver holds a level on a pad, from outside
 >  pins                     # both sides of every pad, one line
@@ -271,6 +272,15 @@ Every reply is one line and begins with `ok` or `err`:
 `pin` and `pins` need no USB block: the pads are the bus's, so they work on
 a machine whose only console is UART0. `pin` refuses GPIO9, 12, 13, 16, 17
 and 18 by name, exactly as `--pin-script` does.
+
+**`power-cycle` needs no USB block either, and for a sharper reason.** Every
+other verb here is a host holding a serial port; that one is a hand on the
+plug. It does not go to `USB_DEVICE`, so it cannot be refused by the guest's
+`disable_usb_serial_chip_reset`, and it differs from `reset` in what it
+clears: `reset` is an **HP-only** reset and leaves the LP island standing,
+while `power-cycle` takes both domains. See "A reset is not a power cycle" in
+`lp-emu-esp32c6/README.md`; on a board whose LP domain is wedged the two are
+the difference between a boot loop for ever and a chip that starts.
 
 A precondition is checked before the model is touched, so a script that has
 drifted out of step says so instead of quietly doing nothing.
@@ -360,6 +370,14 @@ ROM asks — is there an image magic at the reset vector — and it is recompute
 on every flush, so `blank → flash → loaded` is a sequence you can watch. A
 `kind=elf` board runs an image that was never in its flash and truthfully
 reports `blank` for its whole life.
+
+`reboots` and `power_cycles` beside it are the restart counters, auditable and
+never a gate: `reboots` is **every** restart — it is what a page polls to
+learn that the board it just reset has come back — and `power_cycles` is how
+many of those were the `power-cycle` verb, which takes the LP domain with it
+where `reset` does not. `--lpperi-clk-en <hex>` seeds every board's
+`LPPERI_CLK_EN` power-on value, so a serve can hold a **wedged** board (the
+first-flash bootloader hang, no hardware) and watch a `reset` fail to free it.
 
 `--usb-host` decides what a byte client finds. `attached` (the default, and
 `emu run`'s) is the cable in with the port open from power-on, so the boot
@@ -698,14 +716,17 @@ mints a new `SerialPort`. `Esp32C6Machine::reboot` puts the guest's clock back
 to zero, which is how a host learns a reboot happened at all; what it must not
 do is make the port vanish under the flasher that asked for it.
 
-### `reset` and `download-mode`
+### `reset`, `download-mode` and `power-cycle`
 
-Both end the run **unless `--reboot-on-reset`**. M7 shipped the boot chain and
-the flag: with it the machine performs the reset — `Esp32C6Machine::reboot`
-puts the chip back to its power-on state with the strap and the reset cause
-re-seeded, keeps both consoles' bytes so a log with two boots in it is a
-better record than one that lost everything before the reset, and the run
-carries on with `reboots()` incremented. The flag is **off by default** on
+All three end the run **unless `--reboot-on-reset`**. M7 shipped the boot chain
+and the flag: with it the machine performs the reset — `Esp32C6Machine::reboot`
+puts the chip's **HP domain** back to its power-on state with the strap and the
+reset cause re-seeded, **leaves the LP domain as it is**, keeps both consoles'
+bytes so a log with two boots in it is a better record than one that lost
+everything before the reset, and the run carries on with `reboots()`
+incremented. `power-cycle` is `Esp32C6Machine::power_cycle` instead: every
+block back to power-on, cause `POWERON`, no `Saved PC`, and `power_cycles()`
+incremented alongside `reboots()`. The flag is **off by default** on
 purpose: three merged M6 scenarios read the exit code of a run that ended on
 a reset as their evidence.
 

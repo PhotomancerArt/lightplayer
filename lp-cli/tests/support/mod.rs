@@ -172,6 +172,12 @@ impl Serve {
         self.board(id)["reboots"].as_u64().expect("a count")
     }
 
+    /// How many of the board's restarts were power cycles — the `power-cycle`
+    /// verb, which takes the LP domain with it where a `reset` does not.
+    pub fn power_cycles(&self, id: &str) -> u64 {
+        self.board(id)["power_cycles"].as_u64().expect("a count")
+    }
+
     /// A byte client on `/board/<id>/bytes`. Connecting is the application
     /// opening the port; dropping it is the application closing it.
     pub fn bytes(&self, id: &str) -> WebSocket<TcpStream> {

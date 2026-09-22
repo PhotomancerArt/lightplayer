@@ -35,8 +35,8 @@ use lp_emu_core::sched::{Cycles, EventId, Scheduler};
 
 use crate::host::HostSinks;
 use crate::periph::{
-    BoxedPeripheral, BusCx, CpuIntMatrix, IrqLines, MachineRequest, NoCpuInterrupts, RegGrade,
-    Width,
+    BoxedPeripheral, BusCx, CpuIntMatrix, Domain, IrqLines, MachineRequest, NoCpuInterrupts,
+    RegGrade, Width,
 };
 use crate::pins::Fabric;
 use crate::trace::{Access, MmioEvent, Trace};
@@ -2006,6 +2006,24 @@ impl SocBus {
         self.request.take()
     }
 
+    /// Leave a request for the machine **from the host side** — the same slot
+    /// [`BusCx::request`] fills and with the same rule, the first in a slice
+    /// wins.
+    ///
+    /// The caller is the machine's own control channel, for something no
+    /// peripheral can ask for: taking the supply away. Routing it through the
+    /// request slot rather than acting at once is what keeps one code path
+    /// responsible for a restart — the machine's run loop, which also rebases
+    /// the run's cycle budget onto the new clock
+    /// (`docs/defects/2026-09-11-a-reset-replays-the-boards-lifetime.md`).
+    pub fn request_from_host(&mut self, request: MachineRequest) {
+        if let Some(existing) = self.request {
+            log::warn!("SocBus: {request:?} dropped, the bus already holds {existing:?}");
+            return;
+        }
+        self.request = Some(request);
+    }
+
     // ---- diagnostics --------------------------------------------------
 
     /// Distinct `(pc, address)` sites that hit nothing, capped at
@@ -2081,6 +2099,28 @@ impl SocBus {
     }
 
     pub fn restore_peripherals(&mut self, states: &[(String, Vec<u8>)]) {
+        self.restore_peripherals_where(states, None);
+    }
+
+    /// Restore only the peripherals in `domain`, leaving every other block's
+    /// state **exactly as it is**.
+    ///
+    /// `restore_peripherals_in(states, Domain::Hp)` is what an HP-only reset
+    /// does on silicon: the high-power side goes back to power-on and the LP
+    /// island keeps whatever it held — `LPPERI`'s clock gates, `LP_AON`'s
+    /// stores, a latched analog-master busy. See [`Domain`], and
+    /// `lp-emu-esp32c6`'s `Esp32C6Machine::reboot` for the one caller that
+    /// matters.
+    ///
+    /// The registration-order check still runs over **every** entry, in or
+    /// out of the domain: the order is part of the snapshot (event ids pack
+    /// the peripheral index) and a filtered restore must not be a weaker
+    /// check than a whole one.
+    pub fn restore_peripherals_in(&mut self, states: &[(String, Vec<u8>)], domain: Domain) {
+        self.restore_peripherals_where(states, Some(domain));
+    }
+
+    fn restore_peripherals_where(&mut self, states: &[(String, Vec<u8>)], domain: Option<Domain>) {
         assert_eq!(
             states.len(),
             self.mmio.len(),
@@ -2098,8 +2138,21 @@ impl SocBus {
                 range.periph.name(),
                 name
             );
+            if domain.is_some_and(|want| range.periph.domain() != want) {
+                continue;
+            }
             range.periph.load_state(bytes);
         }
+    }
+
+    /// Every peripheral's name and the domain it declares, in registration
+    /// order — for a machine that wants to *report* its domain split (a
+    /// `--map` reader, a test that pins the LP set).
+    pub fn peripheral_domains(&self) -> Vec<(&'static str, Domain)> {
+        self.mmio
+            .iter()
+            .map(|r| (r.periph.name(), r.periph.domain()))
+            .collect()
     }
 
     /// Everything else the bus carries. See [`BusScalars`].
@@ -4596,6 +4649,84 @@ mod tests {
         assert_eq!(bus.unmapped_reads(), 1);
         assert_eq!(bus.unmapped_sites(), 1);
         assert_eq!(bus.peripheral(0).unwrap().save_state(), alloc::vec![1]);
+    }
+
+    /// The reset-domain filter: an HP-only restore puts the HP block back and
+    /// **leaves the LP block exactly as the guest left it**. This is the one
+    /// property silicon has that the emulator lacked, and it is the whole of
+    /// `docs/defects/2026-09-06-c6-analog-master-wedges-the-bootloader.md`.
+    #[test]
+    fn an_hp_only_restore_leaves_an_lp_block_standing() {
+        use crate::regfile::RegFile;
+
+        let mut bus = SocBus::new();
+        bus.add_peripheral(
+            0x6000_0000,
+            0x100,
+            Box::new(RegFile::new("HP_THING", 0x100)),
+        );
+        bus.add_peripheral(
+            0x6000_1000,
+            0x100,
+            Box::new(RegFile::new("LP_THING", 0x100).with_domain(Domain::Lp)),
+        );
+        assert_eq!(
+            bus.peripheral_domains(),
+            [("HP_THING", Domain::Hp), ("LP_THING", Domain::Lp)],
+            "the block declares its own domain"
+        );
+
+        // Power-on: both zero. Snapshot that.
+        let power_on = bus.save_peripherals();
+
+        // The guest writes to both.
+        bus.write_word(0x6000_0000, 0x1111_1111).unwrap();
+        bus.write_word(0x6000_1000, 0x2222_2222).unwrap();
+        assert_eq!(bus.read_word(0x6000_0000).unwrap() as u32, 0x1111_1111);
+        assert_eq!(bus.read_word(0x6000_1000).unwrap() as u32, 0x2222_2222);
+
+        // An HP-only reset.
+        bus.restore_peripherals_in(&power_on, Domain::Hp);
+        assert_eq!(
+            bus.read_word(0x6000_0000).unwrap() as u32,
+            0,
+            "the HP block went back to power-on"
+        );
+        assert_eq!(
+            bus.read_word(0x6000_1000).unwrap() as u32,
+            0x2222_2222,
+            "the LP block kept what the guest left in it"
+        );
+
+        // …and the LP-only restore is the mirror image, which is what proves
+        // the filter is a filter rather than "skip the last block".
+        bus.write_word(0x6000_0000, 0x3333_3333).unwrap();
+        bus.restore_peripherals_in(&power_on, Domain::Lp);
+        assert_eq!(bus.read_word(0x6000_0000).unwrap() as u32, 0x3333_3333);
+        assert_eq!(bus.read_word(0x6000_1000).unwrap() as u32, 0);
+
+        // A whole restore still takes everything.
+        bus.restore_peripherals(&power_on);
+        assert_eq!(bus.read_word(0x6000_0000).unwrap() as u32, 0);
+        assert_eq!(bus.read_word(0x6000_1000).unwrap() as u32, 0);
+    }
+
+    /// A filtered restore is not a weaker check than a whole one: the
+    /// registration order is part of the snapshot either way.
+    #[test]
+    #[should_panic(expected = "registration order is part of the snapshot")]
+    fn an_hp_only_restore_still_checks_the_registration_order() {
+        use crate::regfile::RegFile;
+
+        let mut bus = SocBus::new();
+        bus.add_peripheral(
+            0x6000_1000,
+            0x100,
+            Box::new(RegFile::new("LP_THING", 0x100).with_domain(Domain::Lp)),
+        );
+        // A snapshot naming a different block — an LP one, so a filter that
+        // skipped the comparison along with the load would say nothing.
+        bus.restore_peripherals_in(&[("SOMETHING_ELSE".to_string(), alloc::vec![])], Domain::Hp);
     }
 
     #[test]
