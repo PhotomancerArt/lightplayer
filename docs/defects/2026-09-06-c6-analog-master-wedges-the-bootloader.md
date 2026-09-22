@@ -114,6 +114,93 @@ Not proven. The best-supported reading:
   factory demo) after the unwiring, and went into the loop during the
   flash-then-`hard-reset` that followed. Once wedged, it stays wedged.
 
+## Reproduced on the emulator (2026-09-22, no board)
+
+Every observable fact in this record — the busy latch, the loop, the
+domain asymmetry between a reboot and a power cycle — reproduces with no
+hardware attached: `lp-emu/esp/lp-emu-esp32c6/tests/bootloader_hang.rs`,
+plan `c6-lp-domain-reset` (P1–P4). What is **not** reproduced is the
+mechanism above ("What wedges it in the first place"): the emulator seeds
+or pokes the gate word directly rather than modelling a supply transient
+during BBPLL bring-up, so it confirms the *shape* of the wedge, not this
+file's own theory of its cause.
+
+**The induced-board recipe.** `--lpperi-clk-en 0x5f000000` (the same gate
+word this bench read off a wedged board) seeds the emulator's `LP_PERI`
+block directly, rather than leaving the wedge to an accident of wiring:
+
+```text
+lp-cli emu run --merged <chip.bin> --lpperi-clk-en 5f000000 \
+  --reset-cause usb-uart --strap app --uart0 stdout --reboot-on-reset \
+  --timeout 800ms
+```
+
+The ROM-up boot spins at the same three instructions this file
+disassembled — `lw`/`and`/`bnez` around `0x4086ed7a` — and prints the same
+`Saved PC` this file's board did:
+
+```text
+ESP-ROM:esp32c6-20220919
+Build:Sep 19 2022
+rst:0x15 (USB_UART_HPSYS),boot:0x1e (SPI_FAST_FLASH_BOOT)
+...
+entry 0x4086c410
+ESP-ROM:esp32c6-20220919
+Build:Sep 19 2022
+rst:0x7 (TG0_WDT_HPSYS),boot:0x1e (SPI_FAST_FLASH_BOOT)
+Saved PC:0x4086ed7a
+```
+
+**The observed loop.** `--reboot-on-reset` turns every watchdog reset into
+another boot, reproducing "boot-loops about every 0.4 s" as a run the tests
+can measure rather than a stopwatch on a desk:
+
+```text
+6 reboots in 2000000 us emulated (8000000 cycles left): loop period 52000000
+cycles = 325000 us, against silicon's ≈400000 us
+  rst:0x7 (TG0_WDT_HPSYS),boot:0x1e (SPI_FAST_FLASH_BOOT)
+  Saved PC:0x4086ed7c
+```
+
+**The measured period: 325,000 µs**, against this file's own eyeballed
+"about every 0.4 s" — a ratio of 1.23, inside the plan's 2× bound. This is
+the first *instrumented* number for that period; the bench never captured
+one, because a wedged board offers no clock to time itself against short of
+a stopwatch.
+
+**"Only power-on clears it" — the section title above, demonstrated both
+ways.** The pair the plan calls AC4a and AC4b are opposite bench shapes and
+both hold:
+
+- A board whose wedge is *itself* the power-on value (a previous firmware's
+  own runtime write, `docs/defects/2026-09-06-c6-first-flash-bootloader-hang-lp-analog-i2c-clock.md`'s
+  shape) hands the wedge straight back after a power cycle — the register
+  writes are the only cure, not the power cycle.
+- A board that was **running fine and only got wedged afterward** — this
+  file's own shape, whatever the mechanism — is the one a plain power
+  cycle actually cleans, because the wedge was never a power-on property of
+  the board to begin with:
+
+  ```text
+  AC4b, the hang after the runtime poke and a reboot():
+    rst:0x15 (USB_UART_HPSYS),boot:0x1e (SPI_FAST_FLASH_BOOT)
+    rst:0x7 (TG0_WDT_HPSYS),boot:0x1e (SPI_FAST_FLASH_BOOT)
+    Saved PC:0x4086ed7c
+  AC4b, the clean boot after power_cycle():
+    rst:0x1 (POWERON),boot:0x1e (SPI_FAST_FLASH_BOOT)
+    [stack] heartbeat: high-water 11908 B of 71512 B (59604 B headroom)
+  ```
+
+  `a_runtime_wedge_survives_a_reboot_and_a_power_cycle_boots_it_clean` is
+  the test name — the LP domain is exactly what a reboot leaves standing
+  and exactly what a power cycle clears, on a board whose power-on state
+  was never the wedge.
+- The register-write cure this file's own board never got to try (three
+  writes to `LPPERI_CLK_EN`/`LPPERI_RESET_EN`, the flashers' fix) also
+  reproduces: poked onto the bus between two reboots, it frees the board
+  and **survives** a further `reboot()` — because an HP-only reset does not
+  reach the LP domain either way, cure or wedge.
+
 ## What to do
 
 1. **Power-cycle the board** — unplug the USB cable and plug it back in. That is

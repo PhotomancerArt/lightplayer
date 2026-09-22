@@ -20,18 +20,30 @@
 //!
 //! # `with_domain(Domain::Lp)` — the reset domains
 //!
-//! Six blocks here sit in the chip's **low-power island**, so an HP-only
+//! Eight blocks here sit in the chip's **low-power island**, so an HP-only
 //! reset does not clear them (see [`Domain`] and
 //! `Esp32C6Machine::reboot`): `LP_AON`, `LP_IO`, `LP_TEE`, `LP_APM`,
-//! `LP_TIMER`, `PMU`. Each carries the line, and the evidence is the same
-//! one sentence for all six: the `LP_` prefix and the base address are the
-//! PAC's own statement of which island a block is on, and `PMU` is the
-//! power-management unit that *performs* the domain switching — an LP block
-//! by construction. `LP_AON`'s name says the rest: **a**lways-**on**.
+//! `LP_APM0`, `LP_ANA`, `LP_TIMER`, `PMU`. Each carries the line, and the
+//! evidence is the same one sentence for all eight: the `LP_` prefix and the
+//! base address are the PAC's own statement of which island a block is on,
+//! and `PMU` is the power-management unit that *performs* the domain
+//! switching — an LP block by construction. `LP_AON`'s name says the rest:
+//! **a**lways-**on**.
 //!
-//! Four blocks in this file are `LP_`-shaped and deliberately **stay
-//! HP-restored** (plan `notes.md` D4, the conservative first cut — fewer
-//! ways to move a clean board's transcript):
+//! `LP_APM0` and `LP_ANA` were held out of the first cut (P3) because
+//! nothing reads a status bit out of either — the boot's only traffic is
+//! `pre_init` zeroing APM `func_ctrl`s and the bootloader's brownout
+//! read-modify-writes — so carrying their state changed no decision any
+//! image made. The director's ruling (DD11): the block declares what it
+//! **is**, not what anyone currently reads from it (D5), and marking a real
+//! LP-island block `Hp` because nobody happens to read it back makes that
+//! rule a lie. Both moved to `Domain::Lp` here; the pinning test in
+//! `machine.rs` widened from eight blocks to ten, and this is `modeled` —
+//! no image or transcript exercises either block across a reboot.
+//!
+//! Two blocks in this file are `LP_`-shaped and deliberately **stay
+//! HP-restored** (plan `notes.md` D4, conservative on purpose — fewer ways
+//! to move a clean board's transcript):
 //!
 //! - **`LP_CLKRST`** — `reset_cause` is an *input to the run*, re-poked by
 //!   the reboot path itself with the cause of the reset that just happened.
@@ -40,16 +52,10 @@
 //! - **`LP_WDT`** — a live RWDT carried across a reboot could fire
 //!   spuriously in the middle of the next boot, and the ROM re-arms it
 //!   anyway. LP_WDT's domain semantics are deferred, on purpose.
-//! - **`LP_APM0`** and **`LP_ANA`** — both really are LP-island blocks and
-//!   both are honestly *not* in the first cut: nothing reads a status bit
-//!   out of either (the boot's only traffic is `pre_init` zeroing APM
-//!   `func_ctrl`s and the bootloader's brownout read-modify-writes), so
-//!   carrying their state changes no decision any image makes. Named here
-//!   rather than left unmentioned, because "it did not occur to anyone" and
-//!   "it was considered and left out" are different statements.
 //!
-//! `EFUSE` is the fifth of that kind and lives in `efuse.rs`: constant for
-//! the life of a chip, so restoring it and keeping it are the same thing.
+//! `EFUSE` is a third block that is conservatively left `Hp`, in
+//! `efuse.rs`: constant for the life of a chip, so restoring it and keeping
+//! it are the same thing.
 
 use lp_emu_esp_common::{Domain, RegFile};
 
@@ -64,10 +70,16 @@ pub fn lp_apm() -> RegFile {
         .with_domain(Domain::Lp)
 }
 
+/// `LP_APM0`. `Domain::Lp`: the base address is on the LP island, and DD11
+/// rules that a real LP-island block declares `Lp` whether or not anything
+/// currently reads it back (`pre_init`'s `func_ctrl` zeroing is the only
+/// traffic this boot ever sees). `modeled` — no image reboots between a
+/// `func_ctrl` write and a read today.
 pub fn lp_apm0() -> RegFile {
     RegFile::new("LP_APM0", 0x800)
         .with_names(regs::LP_APM0)
         .with_pac_grades()
+        .with_domain(Domain::Lp)
 }
 
 pub fn hp_apm() -> RegFile {
@@ -151,10 +163,16 @@ pub fn slc() -> RegFile {
 /// read-modify-writing `+0x04` and `+0x0c`. Nothing reads a status bit out
 /// of it, so accept-and-remember is the whole model; the brownout it
 /// configures cannot happen on a machine with no analog supply.
+///
+/// `Domain::Lp`: the base address (`0x600B_2C00`) is on the LP island, and
+/// DD11 rules that a real LP-island block declares `Lp` whether or not
+/// anything currently reads it back. `modeled` — no image reboots between
+/// two BOD writes today, so nothing exercises the claim either way.
 pub fn lp_ana() -> RegFile {
     RegFile::new("LP_ANA", 0x400)
         .with_names(regs::LP_ANA)
         .with_pac_grades()
+        .with_domain(Domain::Lp)
 }
 
 pub fn hinf() -> RegFile {

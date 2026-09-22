@@ -354,17 +354,19 @@ chip has **two power domains** and a reset only takes one of them down.
 
 Which blocks are which is **each block's own answer**
 (`Peripheral::domain()`, `Domain::{Hp, Lp}`), not a list in the reboot path:
-a list drifts and a block does not. Eight blocks answer `Lp`, in
-registration order: `LP_APM`, `LP_AON`, `PMU`, `LP_I2C_ANA_MST`, `LP_TIMER`,
-`LP_TEE`, `LP_IO` and the `LP_PERI` block (whose peripheral name is still
-`RNG`). Four `LP_`-shaped blocks deliberately stay HP-restored, each with its
-reason in `periph/accept.rs`: `LP_CLKRST` (the reboot path re-pokes its one
-interesting register anyway), `LP_WDT` (a live RWDT carried across a reboot
-could fire spuriously mid-boot, and the ROM re-arms it), `LP_APM0` and
-`LP_ANA` (real LP blocks, but nothing reads a status bit out of either, so
-carrying their state changes no decision any image makes). `EFUSE` is the
-fifth of that kind: constant for the life of a chip, so restoring it and
-keeping it are the same thing.
+a list drifts and a block does not. Ten blocks answer `Lp`, in registration
+order: `LP_APM`, `LP_APM0`, `LP_AON`, `PMU`, `LP_I2C_ANA_MST`, `LP_TIMER`,
+`LP_TEE`, `LP_IO`, the `LP_PERI` block (whose peripheral name is still
+`RNG`), and `LP_ANA`. `LP_APM0` and `LP_ANA` moved here in a later phase
+(DD11): both are genuinely LP-island blocks and were held out only because
+nothing reads a status bit out of either — which is not a reason to call a
+block `Hp` when its base address says which island it is on. Two
+`LP_`-shaped blocks deliberately stay HP-restored, each with its reason in
+`periph/accept.rs`: `LP_CLKRST` (the reboot path re-pokes its one
+interesting register anyway) and `LP_WDT` (a live RWDT carried across a
+reboot could fire spuriously mid-boot, and the ROM re-arms it). `EFUSE` is a
+third block held HP-restored: constant for the life of a chip, so restoring
+it and keeping it are the same thing.
 
 **A power cycle is not the same thing as a clean board.** `--lpperi-clk-en`
 seeds the induced gate word into the *power-on snapshot*, so power-cycling
@@ -633,7 +635,7 @@ milestone owns.
 | `ASSIST_DEBUG` | `0x600C_2000` | accept | `cpu0.debug_mode` pinned 0 (no debugger: watchpoints arm, `wfi` runs). `cpu0.rcd_pdebugpc` (+0x48) is where the ROM reads the `Saved PC:` it prints — and it prints nothing when the register is 0, which is why a power-on boot has no such line. A **watchdog** reboot leaves the hart's PC there; a `chip_rst` one does not, deliberately (`ResetCause::records_saved_pc`), and a power cycle never does. The block stays `Domain::Hp` and the reset path pokes the PC back **after** the restore: the value is produced by the reset event, not carried across it by a block, and giving the block an LP domain would carry its fifty other registers along as a side effect |
 | `GPIO` | `0x6009_1000` | modelled (M5 P2) | a routing **view** over the bus's signal fabric: `func_out_sel_cfg[n]` routes pad `n` to `out_sel` (128 = follow `GPIO_OUT[n]`, `inv_sel` inverts, `oen_sel` recorded and reported as `oe=`, never gated on), `out`/`out_w1ts`/`out_w1tc` are the output bitmap a `GPIO_OUT` pad follows, `enable`/`w1ts`/`w1tc` the OE bitmap. The `w1ts`/`w1tc` registers fold into `out`/`enable` and read back 0 (write-only in the PAC). Since M2 P1 it is a **two-way** view: `in_` is each pad's resolved fabric level for the pads whose input enable is set, `pin[n].int_type` is decoded (0 disable / 1 posedge / 2 negedge / 3 any edge / 4 low level / 5 high level, the PAC's own numbering), `status` is the sticky latch with `status_w1ts`/`status_w1tc` over it (write-only, read back 0), `pcpu_int` is `status` gated by `pin[n]` bit 13 (`int_ena` bit 0), and source **30** is held high as a LEVEL while any `pcpu_int` bit is pending. `pcpu_nmi_int` and source 31 are **not** raised (esp-hal never sets `int_ena` bit 14 on this chip); `in1`/`status1`/`pcpu_int1` read 0 — the C6 has 31 pads. Per-register grades (the file header's table; `--strict-grade`): the registers above plus `strap` and `func*_out_sel_cfg` *documented*, everything else *modeled*, nothing *measured* until M2 P2's transcript. Everything else is still a `RegFile`. A pad is **observed once the guest writes its routing**: seeding 31 routes from the `0x80` reset value would give a boot that drives nothing 31 pads to decode. See "The pin" |
 | `IO_MUX` | `0x6009_0000` | modelled (M2 P1) | the P5 accept block, all 31 pads at reset `0x0800`, plus one seam: `gpio[n].fun_ie` (bit 9) is pushed into the signal fabric as the pad's **input enable**, which is what `GPIO.in_` reads back. Everything else in the word — `fun_wpu`/`fun_wpd` (the *value* of a pull is not modelled), `fun_drv`, `filter_en`, the `slp_*` bits and `mcu_sel` — is accept-and-remember |
-| `PMU`, `LP_AON`, `LP_APM`, `LP_APM0`, `HP_APM`, `MODEM_SYSCON`, `MODEM_LPCON`, `APB_SARADC`, `HP_SYS`, `TEE`, `LP_TEE`, `LP_IO`, `LP_TIMER`, `EXTMEM` | — | accept | written by `esp_hal::init`, read back as written; `LP_AON.store1` carries the calibration value. Six of them declare **`Domain::Lp`** and so survive a reset: `PMU`, `LP_AON`, `LP_APM`, `LP_TEE`, `LP_IO`, `LP_TIMER`. `LP_APM0` and `LP_ANA` are LP-island blocks left HP-restored on purpose — see "A reset is not a power cycle" |
+| `PMU`, `LP_AON`, `LP_APM`, `LP_APM0`, `HP_APM`, `MODEM_SYSCON`, `MODEM_LPCON`, `APB_SARADC`, `HP_SYS`, `TEE`, `LP_TEE`, `LP_IO`, `LP_TIMER`, `EXTMEM`, `LP_ANA` | — | accept | written by `esp_hal::init` (`LP_ANA` by the second-stage bootloader instead), read back as written; `LP_AON.store1` carries the calibration value. Eight of them declare **`Domain::Lp`** and so survive a reset: `PMU`, `LP_AON`, `LP_APM`, `LP_APM0`, `LP_TEE`, `LP_IO`, `LP_TIMER`, `LP_ANA` — see "A reset is not a power cycle" |
 | `UART0`, `UART1` | `0x6000_0000/1000` | modelled | 128-byte FIFOs; the shifter drains **at the configured baud in emulated time** (PCR clock line × `clkdiv`; reset `clkdiv = 347 + 3/16` = 115,200 from XTAL, *modeled* "as the ROM boot leaves it"); `rxfifo_full`/`txfifo_empty` as levels (`>`/`<` the `conf1` thresholds, per the TRM), `rxfifo_tout` in bit-times, `tx_done`, `rxfifo_ovf`, `reg_update` pulse; `at_cmd_char_det` never fires (stated, not modelled); sources 43/44. See "UART0 and the outside" |
 | `USB_DEVICE` | `0x6000_F000` | measured on its data path (M6) | the host's side in three states (`--usb-host absent\|attached\|attached-idle`, the transitions for P3's control channel): **absent** — `sof` never, `free` = 0 for ever after the first `wr_done`, nothing arrives; **attached, port closed** — `int_raw.sof` every 1 ms (*documented*), `fram_num` counts, a committed IN packet is held until the port opens; **attached, draining** — the packet reaches the `usb-sj` stream 100 µs after `wr_done` (*modeled*), `free` returns, `serial_in_empty` and `in_token_rec_in_ep1` rise; host bytes land as ≤ 64 B OUT packets, one resident at a time (*modeled*), `avail` + `serial_out_recv_pkt` + `out_ep1_st.wr_addr/rec_data_cnt`. The DTR/RTS dance → `chip_rst` bit 0 + `MachineRequest::Reset { strap }`. Per-register grades (the file header's table; `--strict-grade`): `ep1`, `ep1_conf` and the four `int_*` registers *measured* — four committed transcripts cover them, and the bits they cover are named there — `fram_num` and `conf0` *documented*, the twenty listed below *modeled*. The PCR reset of the block is **not** modelled (stated). Source 48 |
 | `SPI1` | `0x6000_3000` | modelled | **the legacy flash controller**, against a `flash::FlashImage`: `flash_rdid` (esp-storage's own size probe), the `usr` engine (command/address/dummy/data phases from `user`/`user1`/`user2`/`addr`/`w0..w15`), the dedicated `flash_read`/`pp`/`se`/`be`/`ce`/`wren`/`wrdi`/`rdsr`/`wrsr` bits, and a real status register (WIP always clear, WEL set by `wren` and consumed by a program or erase). Every trigger self-clears and `mst_st` reads idle, which is what `Wait_SPI_Idle` waits for. **Every PAC reset value is carried**, `user = 0x8000_0000` above all: the mask ROM's read path never sets `usr_command` because reset already did |
@@ -1684,6 +1686,8 @@ lp-emu-esp32c6 --elf <app.elf> [--rom <path>] [--time-grade t1|t2|t3]
     [--usb-sj-tried stderr|memory|file:<path>]
     [--control tcp:<host:port>] [--usb-script <file>]
     [--pin-script <file>]... [--wire <a>:<b>]...
+    [--reset-cause poweron|usb-uart|tg0-wdt] [--reboot-on-reset]
+    [--strap app|download]
     [--tx-log stderr|file:<path>] [--trap-log stdout|file:<path>]
     [--efuse-mac a0:f2:62:87:b4:8c] [--efuse-rev 0.2] [--seed <u64>]
     [--lpperi-clk-en <hex>]

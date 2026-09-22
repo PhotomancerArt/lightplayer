@@ -18,8 +18,9 @@
 //! v5.1-beta1-378) drives it through **this** one. Its first `regi2c` write
 //! in `rtc_clk_init` (slave `0x6d`, register `0x0e`) latches the master busy
 //! with no clock to finish it, and the bootloader spins before
-//! `bootloader_console_init()` — no output, a fixed `Saved PC`, and the
-//! ROM-armed TG0 watchdog as the only thing that moves. Disassembled from
+//! `bootloader_console_init()` — no output, a fixed `Saved PC`, and TG0's
+//! flash-boot-protection watchdog (reset-armed, bootloader-disarmed — see
+//! [`super::timg`]) as the only thing that moves. Disassembled from
 //! the wedged board's own bootloader segment
 //! (`docs/defects/2026-09-06-c6-analog-master-wedges-the-bootloader.md`):
 //!
