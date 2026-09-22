@@ -78,6 +78,11 @@ impl Registry {
                     // Auditable, never a gate: how many times this board has
                     // rebooted since the server started it (PD11).
                     "reboots": b.reboots.load(Ordering::SeqCst),
+                    // …and how many of those took the LP domain with them
+                    // (the `power-cycle` verb). A `reset` and a `power-cycle`
+                    // are different things to this chip, and a page that
+                    // offers both should be able to see which one it got.
+                    "power_cycles": b.power_cycles.load(Ordering::SeqCst),
                 })
             })
             .collect();

@@ -300,6 +300,66 @@ fn reset_reboots_the_board_and_the_server_stays_up() {
     assert!(hello.starts_with("M!{"), "a second hello: {hello}");
 }
 
+/// **`power-cycle` beside `reset`** — additive, and a different thing.
+///
+/// The door is a pump: a verb the machine's parser knows reaches it, and this
+/// door neither filters one nor adds one. So the whole of P3's control-surface
+/// work is visible here as one new verb that answers `ok power-cycle …` and
+/// moves a counter `reset` does not move.
+///
+/// The board is clean, so both restarts are boots that work; what this asserts
+/// is that the door can ask for each kind and see which one it got. The
+/// LP-domain half — the wedge that survives one and not the other — is
+/// `lp-emu/esp/lp-emu-esp32c6/tests/bootloader_hang.rs`, where a deterministic
+/// machine can hold it.
+#[test]
+#[ignore = "needs the shipped reference image; run through `just test-emu-serve`"]
+fn power_cycle_is_a_second_verb_beside_reset_and_the_door_says_which_it_got() {
+    let Some(elf) = reference_elf("power_cycle_is_a_second_verb") else {
+        return;
+    };
+    let serve = Serve::start(&elf, &["c6-a", "c6-b"], &[]);
+    let mut control = serve.control("c6-a");
+
+    assert_eq!((serve.reboots("c6-a"), serve.power_cycles("c6-a")), (0, 0));
+
+    // A plain reset first, so the two are compared on one board.
+    assert!(control.cmd("reset").starts_with("ok reset "));
+    serve.wait_for_reboot("c6-a", 1);
+    assert_eq!(
+        serve.power_cycles("c6-a"),
+        0,
+        "a chip_rst is not a power cycle"
+    );
+
+    // Then the supply. No `attach`, no port state, no DTR/RTS: the hand that
+    // can cut the power is on the plug, not on the port.
+    let reply = control.cmd("power-cycle");
+    assert!(reply.starts_with("ok power-cycle "), "power-cycle: {reply}");
+    serve.wait_for_reboot("c6-a", 2);
+    assert_eq!(
+        serve.power_cycles("c6-a"),
+        1,
+        "the door reports which kind of restart it got"
+    );
+    assert_eq!(
+        (serve.reboots("c6-b"), serve.power_cycles("c6-b")),
+        (0, 0),
+        "a power cycle on one board is not one on the other"
+    );
+
+    // The server is still up, the board still answers, and it still says
+    // hello — a power cycle is a board coming back, not a board disappearing.
+    assert!(control.cmd("state").starts_with("ok state "));
+    assert_eq!(serve.board("c6-a")["state"], "running");
+    assert!(serve.hello("c6-a").starts_with("M!{"));
+
+    // And the verb takes no arguments, from the machine's own parser through
+    // the door unchanged.
+    let reply = control.cmd("power-cycle now");
+    assert!(reply.starts_with("err "), "power-cycle now: {reply}");
+}
+
 /// **Boards are independent.** Two boards, two flash files, two MACs, and
 /// nothing one does appears in the other's state.
 #[test]

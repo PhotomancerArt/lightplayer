@@ -130,6 +130,12 @@ pub struct Board {
     /// still listed, and says so.
     pub stopped: Arc<AtomicBool>,
     pub reboots: Arc<AtomicU64>,
+    /// How many of those [`reboots`](Board::reboots) were **power cycles** —
+    /// both domains cleared, `rst:0x1 (POWERON)`. A `reset` and a
+    /// `power-cycle` are different things to this chip since the emulator
+    /// learned the reset domains, and a door client that can ask for both
+    /// wants to see which one it got.
+    pub power_cycles: Arc<AtomicU64>,
     shutdown: Arc<AtomicBool>,
     thread: std::sync::Mutex<Option<std::thread::JoinHandle<()>>>,
 }
@@ -143,6 +149,11 @@ pub struct BoardOptions {
     pub usb_host: UsbHost,
     pub air: Option<Arc<AirTap>>,
     pub air_seat: usize,
+    /// `LPPERI_CLK_EN`'s power-on value for every board this serve holds, or
+    /// `None` for the PAC reset (a clean board). Serve-wide rather than
+    /// per-`--board`: the flag is a *fault injection*, and a serve that wants
+    /// one wedged board and one clean one is a second serve.
+    pub lpperi_clk_en: Option<u32>,
 }
 
 impl Board {
@@ -166,6 +177,7 @@ impl Board {
         let flush_now = Arc::new(AtomicBool::new(false));
         let stopped = Arc::new(AtomicBool::new(false));
         let reboots = Arc::new(AtomicU64::new(0));
+        let power_cycles = Arc::new(AtomicU64::new(0));
         let has_image = Arc::new(AtomicBool::new(at_start));
         let (tx, rx) = std::sync::mpsc::channel::<Result<(SocketAddr, SocketAddr)>>();
 
@@ -177,6 +189,7 @@ impl Board {
             let flush_now = Arc::clone(&flush_now);
             let stopped = Arc::clone(&stopped);
             let reboots = Arc::clone(&reboots);
+            let power_cycles = Arc::clone(&power_cycles);
             let has_image = Arc::clone(&has_image);
             std::thread::Builder::new()
                 .name(format!("emu-board-{id}"))
@@ -189,6 +202,7 @@ impl Board {
                         flush_now,
                         stopped,
                         reboots,
+                        power_cycles,
                         has_image,
                     });
                 })
@@ -212,6 +226,7 @@ impl Board {
             flush_now,
             stopped,
             reboots,
+            power_cycles,
             shutdown,
             thread: std::sync::Mutex::new(Some(thread)),
         })
@@ -267,6 +282,7 @@ struct RunBoard {
     flush_now: Arc<AtomicBool>,
     stopped: Arc<AtomicBool>,
     reboots: Arc<AtomicU64>,
+    power_cycles: Arc<AtomicU64>,
     has_image: Arc<AtomicBool>,
 }
 
@@ -279,6 +295,7 @@ fn run_board(this: RunBoard) {
         flush_now,
         stopped,
         reboots,
+        power_cycles,
         has_image,
     } = this;
     let mut machine = match build(&spec, &options) {
@@ -323,6 +340,7 @@ fn run_board(this: RunBoard) {
     while !shutdown.load(Ordering::SeqCst) {
         let outcome = machine.run_until(&stop);
         reboots.store(machine.reboots(), Ordering::SeqCst);
+        power_cycles.store(machine.power_cycles(), Ordering::SeqCst);
         if let Some(air) = &options.air {
             for frame in machine.take_air_frames() {
                 air.publish(options.air_seat, frame.at, &frame.bytes);
@@ -489,6 +507,13 @@ fn build(
         // process for a number.
         .usb_sj(UsbSjSink::Tcp("127.0.0.1:0".to_string()))
         .control("127.0.0.1:0");
+
+    // The LP domain's power-on gate word, if the serve induced one. Before
+    // the snapshot, so `power-cycle` on the control channel hands the same
+    // board back — which is the point of the flag.
+    if let Some(clk_en) = options.lpperi_clk_en {
+        builder = builder.lp_peri_clk_en(clk_en);
+    }
 
     let image = match spec.kind {
         BoardKind::Elf => Image::Elf(
