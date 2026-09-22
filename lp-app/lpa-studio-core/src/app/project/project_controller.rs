@@ -8,7 +8,7 @@ use lpa_client::{CancelSignal, ProgressDeadline};
 use crate::app::project::agent_support::{
     AgentShaderBinding, AgentShaderTarget, param_upsert_edits, space_declaration_edits,
 };
-use crate::app::project::device_bind::{BindOutcome, RunningPackage};
+use crate::app::project::device_bind::{BindOutcome, PulledPackage, RunningPackage};
 use crate::app::project::edit_journal::{EditJournal, EditStep};
 use crate::app::project::slot::{
     AssetEditEntry, AssetEditKey, AssetEditState, BindingFactEditOp, BindingFactOverrides,
@@ -3128,6 +3128,59 @@ impl ProjectController {
         // Active: the ordinary close path owns the host's lock from here on.
         receipt.commit();
         Ok(BindOutcome::Bound { uid })
+    }
+
+    /// Read the board's whole project off the wire — the pull half of
+    /// adoption (D3).
+    ///
+    /// `FsVersion(0)` means "everything is newer", so one paged
+    /// `ChangesSince` enumerates the project directory as it stands; the
+    /// client does the paging (`lpa_client::LpClient::pull_changed_files`),
+    /// so a board with more files than fit a frame costs more round trips
+    /// and nothing else. Nothing is sent to the board and nothing is
+    /// unloaded first: this is the same read the save path already makes on
+    /// every save, and the running project keeps running through it.
+    ///
+    /// The pulled set is then hashed HERE and checked against what the
+    /// board said it was running. That check is the whole safety of the
+    /// step: it is the same canonical `lpc_history::hash_package` on both
+    /// sides, so a disagreement means the pull is not what the board has —
+    /// a write landed mid-pull, or the wire dropped something — and
+    /// installing it would produce a library copy the bind would then
+    /// refuse, leaving a phantom project behind. The caller treats a
+    /// mismatch as "not adopted", which is a log line and no writes.
+    ///
+    /// The file count and total bytes go out at info level: a classic board
+    /// with a big project is the one place this read could hurt, and the
+    /// walk that judges it needs a number to judge.
+    pub(crate) async fn pull_board_package(
+        &mut self,
+        server: &mut StudioServerClient,
+        running: &RunningPackage,
+    ) -> Result<(PulledPackage, Vec<UiLogDraft>), UiError> {
+        let pulled = server
+            .pull_changed_files(&self.runtime_storage_id, lpc_model::FsVersion::new(0))
+            .await?;
+        let package = crate::app::project::device_bind::package_from_pull(&pulled.updates)
+            .map_err(library_ui_error)?;
+        let bytes: usize = package.files.iter().map(|(_, body)| body.len()).sum();
+        let mut logs = pulled.logs;
+        logs.push(UiLogDraft::new(
+            UiLogLevel::Info,
+            UiLogOrigin::Studio,
+            format!(
+                "read {} file(s), {bytes} bytes, off the board to see what it is running",
+                package.files.len()
+            ),
+        ));
+        if package.hash != running.hash {
+            return Err(UiError::Project(format!(
+                "what came off the board ({}) is not what the board says it is running ({}) — it changed mid-read",
+                package.hash.short(),
+                running.hash.short()
+            )));
+        }
+        Ok((package, logs))
     }
 
     /// Re-push the ACTIVE library project's on-disk content to the running

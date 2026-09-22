@@ -3124,7 +3124,7 @@ impl StudioController {
         {
             return self.bind_candidate(&uid, &running).await;
         }
-        BindOutcome::NoCandidate
+        BindOutcome::NoCandidate { running }
     }
 
     /// Bind one candidate and say what happened in the console.
@@ -3181,6 +3181,276 @@ impl StudioController {
                 ));
                 BindOutcome::NotApplicable
             }
+        }
+    }
+
+    /// Adopt the project a board is running when this library has no
+    /// answer for it: pull it off the board, install it under the SAME uid
+    /// its manifest carries, record the association, and bind it (D2/D3/D5).
+    ///
+    /// This is the case a device open used to leave unnamed forever — a
+    /// board flashed from the CLI, a board somebody else pushed to, this
+    /// library on a fresh browser. The project exists; it is just not
+    /// HERE. Pulling it is the only way the editor can say what it is
+    /// working on, and it is safe to do without asking (D3) because it
+    /// writes only this browser's library: nothing is sent to the board,
+    /// nothing on the board is unloaded, and the running project keeps
+    /// running throughout.
+    ///
+    /// Two boards are NOT adopted, each with one line and no writes:
+    ///
+    /// - **A manifest with no uid.** Minting one would give the library
+    ///   copy a different `project.json` from the board's — and
+    ///   `project.json` is inside the canonical hash, so the copy would
+    ///   hash differently from the thing it is a copy of, and the very
+    ///   next save would trip the save-as-pull tripwire. Identity is
+    ///   preserved or the project is not adopted (D17).
+    /// - **A uid this library already holds.** The bind already scanned
+    ///   every library head for the board's content and found nothing, so
+    ///   a library copy under this uid is a DIFFERENT version of the same
+    ///   project — the divergence case, which nobody may resolve silently
+    ///   (D4). `install_synced` would refuse it anyway; refusing here is
+    ///   what makes the console line name the project.
+    ///
+    /// Best-effort from end to end, like every other piece of bookkeeping
+    /// on this path: the editor is already connected to the board, so a
+    /// failed adoption is a warn line and an unnamed open, never a failed
+    /// one.
+    async fn adopt_board_project(
+        &mut self,
+        running: &crate::app::project::device_bind::RunningPackage,
+    ) -> BindOutcome {
+        let Some((device_uid, device_name)) = self.lens_device_identity() else {
+            log::debug!("no lens device to adopt a project from");
+            return BindOutcome::NoCandidate { running: *running };
+        };
+        let pulled = {
+            let server = match self
+                .pool
+                .lens_session_mut()
+                .and_then(crate::RuntimeSession::client_mut)
+            {
+                Ok(server) => server,
+                Err(error) => {
+                    log::debug!("no wire to pull the board's project over: {error}");
+                    return BindOutcome::NoCandidate { running: *running };
+                }
+            };
+            self.project.pull_board_package(server, running).await
+        };
+        let (pulled, logs) = match pulled {
+            Ok(pulled) => pulled,
+            Err(error) => {
+                self.push_log(UiLogDraft::new(
+                    UiLogLevel::Warn,
+                    UiLogOrigin::Studio,
+                    format!("could not read this board's project into your library: {error}"),
+                ));
+                return BindOutcome::NoCandidate { running: *running };
+            }
+        };
+        self.record_logs(logs);
+
+        let Some(uid) = pulled.uid else {
+            self.push_log(UiLogDraft::new(
+                UiLogLevel::Warn,
+                UiLogOrigin::Studio,
+                format!(
+                    "{device_name} is running a project with no identity of its own, so it was not added to your library — the editor is working on the board's copy"
+                ),
+            ));
+            return BindOutcome::NoCandidate { running: *running };
+        };
+        let uid_text = uid.to_string();
+        if self.library_holds_uid(&uid_text).await {
+            let name = self
+                .library_project_named(&uid_text)
+                .map(|project| project.name)
+                .unwrap_or_else(|| uid_text.clone());
+            self.push_log(UiLogDraft::new(
+                UiLogLevel::Warn,
+                UiLogOrigin::Studio,
+                format!(
+                    "this board is running a different version of {name} ({}) than your library has — nothing was changed on either side",
+                    running.hash.short()
+                ),
+            ));
+            return BindOutcome::NoCandidate { running: *running };
+        }
+
+        let name = pulled.name.clone().unwrap_or_else(|| device_name.clone());
+        let provenance = crate::app::library::PackageProvenance::PulledFromDevice {
+            // The registry key, which is the board's `dev…` uid whenever
+            // it has one (`registry_key` prefers it). A board still keyed
+            // on its MAC has no history identity, and the origin event
+            // degrades to `Created` with a warn rather than inventing one
+            // — the same honest skip `bank_completed_push` makes.
+            device_uid: device_uid.clone(),
+            device_name: device_name.clone(),
+        };
+        let now = (self.now_secs)();
+        let built = crate::app::project::device_bind::adopt_board_package(
+            &name,
+            uid,
+            &pulled.files,
+            provenance.clone(),
+            now,
+        );
+        let (package_files, history_files) = match built {
+            Ok(built) => built,
+            Err(error) => {
+                self.push_log(UiLogDraft::new(
+                    UiLogLevel::Warn,
+                    UiLogOrigin::Studio,
+                    format!("could not prepare {name} for your library: {error}"),
+                ));
+                return BindOutcome::NoCandidate { running: *running };
+            }
+        };
+        let installed = self
+            .run_catalog_op(CatalogOp::InstallSyncedProject {
+                name: name.clone(),
+                package_files,
+                history_files,
+                provenance,
+            })
+            .await;
+        let installed = match installed {
+            Ok(outcome) => outcome.summary,
+            Err(error) => {
+                self.push_log(UiLogDraft::new(
+                    UiLogLevel::Warn,
+                    UiLogOrigin::Studio,
+                    format!("could not add {name} to your library: {error}"),
+                ));
+                return BindOutcome::NoCandidate { running: *running };
+            }
+        };
+        let Some(installed) = installed else {
+            self.push_log(UiLogDraft::new(
+                UiLogLevel::Warn,
+                UiLogOrigin::Studio,
+                format!("adding {name} to your library produced no project"),
+            ));
+            return BindOutcome::NoCandidate { running: *running };
+        };
+
+        // D5: the board WAS given this content — that is where it came
+        // from — so the association says so, and the mismatch page (D50)
+        // can answer "what is on this board" without guessing. Best-effort
+        // exactly like `bank_completed_push`; the adopted history knows
+        // its `Saved` head, so `record_push` has a version it can name.
+        self.bank_adopted_association(&installed.uid.to_string(), running.hash)
+            .await;
+
+        match self
+            .project
+            .bind_running_to_library(&installed.uid.to_string(), running)
+            .await
+        {
+            Ok(BindOutcome::Bound { uid }) => {
+                self.push_log(UiLogDraft::new(
+                    UiLogLevel::Info,
+                    UiLogOrigin::Studio,
+                    format!("adopted {name} from {device_name} into your library"),
+                ));
+                BindOutcome::Bound { uid }
+            }
+            Ok(other) => {
+                // The install wrote the bytes that just came off the board,
+                // so the bind matches by construction. Anything else here
+                // is a bug in one of the two, and the open carries on
+                // unnamed rather than pretending.
+                self.push_log(UiLogDraft::new(
+                    UiLogLevel::Warn,
+                    UiLogOrigin::Studio,
+                    format!(
+                        "{name} was added to your library but the editor could not be pointed at it: {other:?}"
+                    ),
+                ));
+                BindOutcome::NoCandidate { running: *running }
+            }
+            Err(error) => {
+                self.push_log(UiLogDraft::new(
+                    UiLogLevel::Warn,
+                    UiLogOrigin::Studio,
+                    format!("{name} was added to your library but would not open: {error}"),
+                ));
+                BindOutcome::NoCandidate { running: *running }
+            }
+        }
+    }
+
+    /// The lens device's registry key and its display title, when the lens
+    /// is on a device the roster knows.
+    ///
+    /// Both halves go into the adopted package's provenance, so both are
+    /// read from the MODEL's record rather than the gallery's cached rows:
+    /// the record is the live truth about the board the editor is attached
+    /// to right now.
+    fn lens_device_identity(&self) -> Option<(String, String)> {
+        let key = self.pool.lens_session()?.attachment().uid.clone();
+        let device = self.devices.device_for_key(&key)?;
+        Some((key, device.title()))
+    }
+
+    /// Whether this library already holds a project uid.
+    ///
+    /// Read off a fresh catalog snapshot rather than the gallery's cached
+    /// inputs: the hydration behind those is asynchronous, and a decision
+    /// about whether to WRITE a project may not rest on a list that could
+    /// still be a settle behind.
+    ///
+    /// The question is asked of the LISTING, not of `resolve_key` — that
+    /// one answers "is this a well-formed key", and every `prj…` uid is,
+    /// whether or not the library has ever seen it.
+    async fn library_holds_uid(&mut self, uid: &str) -> bool {
+        let Ok(host) = self.library_host() else {
+            return false;
+        };
+        let Ok(fs) = host.catalog_snapshot().await else {
+            return false;
+        };
+        crate::app::library::LibraryStore::read_only(fs)
+            .list()
+            .is_ok_and(|packages| {
+                packages
+                    .iter()
+                    .any(|summary| summary.uid.to_string() == uid)
+            })
+    }
+
+    /// Bank the association for a project adopted off a board (D5).
+    ///
+    /// The shape is [`Self::bank_completed_push`]'s, and so are its two
+    /// honest skips — a board with no persisted record, and a board still
+    /// keyed on its MAC, which `record_push` refuses because an event may
+    /// not name a device the registry cannot resolve.
+    async fn bank_adopted_association(
+        &mut self,
+        project_uid: &str,
+        version: lpc_history::ContentHash,
+    ) {
+        let Some(row) = self
+            .pool
+            .lens_session()
+            .map(|session| session.attachment().uid.clone())
+            .and_then(|key| self.devices.device_for_key(&key))
+            .and_then(|device| device.record.as_ref())
+            .and_then(crate::app::devices::registry_row_from_record)
+        else {
+            log::debug!("adoption not banked: the lens device has no persisted record");
+            return;
+        };
+        if let Err(error) = self
+            .run_catalog_op(CatalogOp::RecordPush {
+                project_uid: project_uid.to_string(),
+                device: Box::new(row),
+                version,
+            })
+            .await
+        {
+            log::warn!("adoption not banked: {error}");
         }
     }
 
@@ -5170,13 +5440,13 @@ impl StudioController {
                 // read: the view built after the sync should already carry
                 // the project's uid and name, not the storage id.
                 match self.bind_running_project_to_library().await {
-                    // The adoption seam: the board is running a project
-                    // this library does not have, which is a thing to PULL
-                    // off the board and install, not a thing to bind. Until
-                    // that lands the editor works on it unnamed, exactly as
-                    // it did before any of this existed.
-                    BindOutcome::NoCandidate => {
-                        log::debug!("the board runs a project this library does not have at head");
+                    // The board is running a project this library does not
+                    // have, which is a thing to PULL off the board and
+                    // install, not a thing to bind — so adopt it (D3) and
+                    // bind the copy. A refused adoption leaves the open
+                    // exactly as it was: connected, working, unnamed.
+                    BindOutcome::NoCandidate { running } => {
+                        self.adopt_board_project(&running).await;
                     }
                     // Bound, refused by content (D4), or nothing to bind at
                     // all — each already said whatever it had to say.
