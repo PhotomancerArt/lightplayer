@@ -658,6 +658,21 @@ pub fn disable_flash_boot_watchdog(bus: &mut SocBus) {
     });
 }
 
+/// Tell TIMG0 whether this boot is a flash boot, which is what decides
+/// whether its flash-boot protection counts
+/// ([`crate::periph::timg::Timg::set_flash_boot`] carries the reasoning and
+/// the fact that it is *modeled*). Called at build time and again on every
+/// reboot, because a reboot can change the strapping.
+pub fn set_flash_boot_strap(bus: &mut SocBus, strap: lp_emu_esp_common::Strap) {
+    let flash_boot = matches!(strap, lp_emu_esp_common::Strap::App);
+    let Some(i) = bus.peripheral_index("TIMG0") else {
+        return;
+    };
+    bus.with_peripheral::<crate::periph::timg::Timg, _>(i, |t, cx| {
+        t.set_flash_boot(flash_boot, cx)
+    });
+}
+
 /// Read `out.len()` bytes out of a RAM region, or `None` if the address is
 /// not in one. (`SocBus` has `load_image` for the other direction; this is
 /// the small counterpart the loader needs and nothing else does.)

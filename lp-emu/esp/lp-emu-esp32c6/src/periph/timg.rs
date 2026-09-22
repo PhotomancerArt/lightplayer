@@ -94,7 +94,9 @@
 //! whose board looped "about every 0.4 s", against 0.325 s of watchdog plus
 //! the 40 ms of ROM in front of it.
 //!
-//! - **Counting** when `flashboot_mod_en` is set, or when `wdt_en` is set
+//! - **Counting** when `flashboot_mod_en` is set **and this boot is a flash
+//!   boot** ([`Timg::set_flash_boot`] — the one *modeled* part, and the one
+//!   with an argument on both sides; read its doc), or when `wdt_en` is set
 //!   with a non-`Off` stage-0 action. A write to `wdtconfig0/1/2` re-arms
 //!   from now; so does any write to `wdtfeed` (bit 31 is the documented
 //!   one, and the ROM's `wdt_hal_feed` writes exactly that).
@@ -252,6 +254,9 @@ pub struct Timg {
     /// Set once the MWDT has expired with a reset action, so the trace says
     /// so once per boot rather than once per slice.
     wdt_expired: bool,
+    /// Whether this boot **is** a flash boot, and therefore whether
+    /// `flashboot_mod_en` counts. See [`Timg::set_flash_boot`].
+    flash_boot: bool,
 }
 
 impl Timg {
@@ -270,6 +275,10 @@ impl Timg {
             warned_decrement: false,
             wdt_expiry,
             wdt_expired: false,
+            // A chip that comes out of reset strapped for flash boot, which
+            // is every boot but a download-mode one; the machine tells the
+            // block otherwise.
+            flash_boot: true,
         }
     }
 
@@ -391,6 +400,28 @@ impl Timg {
         self.regs.stored(WDTWPROTECT) == WDT_WKEY
     }
 
+    /// Whether this boot is a flash boot, which is what decides whether
+    /// `flashboot_mod_en` counts. Set by the machine from the strapping, and
+    /// re-set on every reboot; the default is `true`.
+    ///
+    /// **Modeled**, and the one part of this watchdog with no direct
+    /// evidence. Against it: the block cannot see the strapping pins and
+    /// nothing in the vendored ROM ever writes TIMG0, so on the register
+    /// level a download-mode chip looks exactly like a flash-booting one.
+    /// For it: the register's own name, the PAC's own field doc ("When set,
+    /// **Flash boot** protection is enabled"), the ESP32-family TRM's
+    /// wording ("MWDT is enabled in flash boot protection *procedure*") —
+    /// and the fact that a board really does sit in the ROM's download
+    /// console indefinitely while esptool talks to it, which it could not do
+    /// if this watchdog reset it every 0.325 s. The strapping IS a hardware
+    /// signal latched at reset, so a hardware gate on it is the reading that
+    /// fits both observations. Promoting or refuting it needs a bench
+    /// sitting: hold a board in download mode and read `wdtconfig0`.
+    pub fn set_flash_boot(&mut self, flash_boot: bool, cx: &mut BusCx<'_>) {
+        self.flash_boot = flash_boot;
+        self.rearm_wdt(cx);
+    }
+
     /// `wdtconfig0.wdt_stg0`.
     fn wdt_stage0(&self) -> u32 {
         (self.regs.stored(WDTCONFIG0) >> WDT_STG0_SHIFT) & WDT_STG_MASK
@@ -399,8 +430,18 @@ impl Timg {
     /// Is the MWDT counting? Flash-boot protection counts on its own; the
     /// ordinary enable needs a stage-0 action to do anything with.
     pub fn wdt_armed(&self) -> bool {
-        let cfg = self.regs.stored(WDTCONFIG0);
-        cfg & WDT_FLASHBOOT_MOD_EN != 0 || (cfg & WDT_EN != 0 && self.wdt_stage0() != WDT_STG_OFF)
+        self.flash_boot_armed() || self.stage_armed()
+    }
+
+    /// Flash-boot protection, counting. See [`Timg::set_flash_boot`] for the
+    /// second term.
+    fn flash_boot_armed(&self) -> bool {
+        self.flash_boot && self.regs.stored(WDTCONFIG0) & WDT_FLASHBOOT_MOD_EN != 0
+    }
+
+    /// The ordinary enable, with something for stage 0 to do.
+    fn stage_armed(&self) -> bool {
+        self.regs.stored(WDTCONFIG0) & WDT_EN != 0 && self.wdt_stage0() != WDT_STG_OFF
     }
 
     /// `wdtconfig1`'s prescaler. **Not** the timer's 0 → 65536 reading: the
@@ -567,7 +608,7 @@ impl Timg {
         if !self.wdt_armed() {
             return;
         }
-        let flashboot = self.regs.stored(WDTCONFIG0) & WDT_FLASHBOOT_MOD_EN != 0;
+        let flashboot = self.flash_boot_armed();
         // Flash-boot protection is not a stage action: the stage field reads
         // `Off` out of reset and the mode resets the chip anyway. Silicon
         // printed the HP-system code for it, so it is read as `ResetSystem`.
@@ -695,6 +736,7 @@ impl Peripheral for Timg {
         // register file, which is where every other block puts its own
         // additions: the blob is only ever read back by this type.
         out.extend_from_slice(&u32::from(self.wdt_expired).to_le_bytes());
+        out.extend_from_slice(&u32::from(self.flash_boot).to_le_bytes());
         out.extend_from_slice(&self.regs.save_state());
         out
     }
@@ -718,6 +760,7 @@ impl Peripheral for Timg {
         self.cali_value = r.u32().unwrap_or(0);
         self.warned_decrement = r.u32().unwrap_or(0) != 0;
         self.wdt_expired = r.u32().unwrap_or(0) != 0;
+        self.flash_boot = r.u32().unwrap_or(1) != 0;
         self.regs.load_state(r.0);
     }
 }
@@ -924,6 +967,46 @@ mod tests {
         assert!(t1.wdt_armed(), "the same register says the same thing");
         t1.started(&mut sb1.cx());
         assert_eq!(sb1.sched.next_deadline(), None, "and nothing happens");
+    }
+
+    /// **A download-mode boot is not a flash boot**, so the protection does
+    /// not count — see [`Timg::set_flash_boot`], which is where the argument
+    /// for and against this lives. The ordinary enable is unaffected, which
+    /// is the whole point of keeping the two terms apart.
+    #[test]
+    fn a_download_mode_boot_does_not_count_the_flash_boot_protection() {
+        let mut sb = Sandbox::new();
+        let mut t = Timg::timg0();
+        t.attached(3);
+        t.set_flash_boot(false, &mut sb.cx());
+        assert!(
+            !t.wdt_armed(),
+            "the register still says so, the boot does not"
+        );
+        assert_eq!(
+            sb.read(&mut t, WDTCONFIG0) & WDT_FLASHBOOT_MOD_EN,
+            WDT_FLASHBOOT_MOD_EN,
+            "and the bit reads back set, because silicon's would"
+        );
+        t.started(&mut sb.cx());
+        assert_eq!(sb.sched.next_deadline(), None);
+        sb.run_to(&mut t, 4 * memmap::CPU_HZ);
+        assert!(
+            sb.request.is_none(),
+            "four seconds in the console, no reset"
+        );
+
+        // A guest that arms the MWDT properly still gets it.
+        sb.write(&mut t, WDTCONFIG2, 80_000);
+        sb.write(
+            &mut t,
+            WDTCONFIG0,
+            WDT_EN | (WDT_STG_RESET_SYSTEM << WDT_STG0_SHIFT),
+        );
+        assert!(t.wdt_armed());
+        let due = sb.sched.next_deadline().expect("armed");
+        sb.run_to(&mut t, due);
+        assert!(sb.request.is_some());
     }
 
     /// The bootloader's own disable, register for register out of a

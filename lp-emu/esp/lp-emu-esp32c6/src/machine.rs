@@ -2071,6 +2071,10 @@ impl Esp32C6Builder {
         if boot_mode != BootMode::RomUp {
             loader::disable_flash_boot_watchdog(&mut bus);
         }
+        // …and a download-mode boot is not a flash boot at all, so its
+        // flash-boot protection does not count. See
+        // `periph::timg::Timg::set_flash_boot`.
+        loader::set_flash_boot_strap(&mut bus, strap);
 
         // Guest time is zero and the schedule is empty: the peripherals that
         // need a first event (a UART polling its host source) take it now.
@@ -3586,12 +3590,32 @@ impl Esp32C6Machine {
             self.bus
                 .with_peripheral::<periph::gpio::Gpio, _>(i, |g, _| g.set_strap(strap_word));
         }
-        if let Some(i) = self.bus.peripheral_index("LP_CLKRST") {
-            self.bus
-                .with_peripheral::<lp_emu_esp_common::RegFile, _>(i, |r, _| {
-                    r.poke(LP_CLKRST_RESET_CAUSE, cause)
-                });
-        }
+        // The banner's `rst:0x..`. ⚠️ This poke used to fail SILENTLY — a
+        // bare `RegFile` had no `Peripheral::as_any_mut`, so the downcast
+        // returned `None` — and nothing noticed for as long as `reboot()`
+        // hard-coded the one cause a run could already have started with.
+        // Hence the `expect`: a reboot whose banner would lie is worth a
+        // panic, not a warning nobody reads.
+        let poked = self
+            .bus
+            .peripheral_index("LP_CLKRST")
+            .and_then(|i| {
+                self.bus
+                    .with_peripheral::<lp_emu_esp_common::RegFile, _>(i, |r, _| {
+                        r.poke(LP_CLKRST_RESET_CAUSE, cause)
+                    })
+            })
+            .is_some();
+        assert!(
+            poked,
+            "reboot: LP_CLKRST would not take the reset cause, so the ROM's \
+             banner would print the previous boot's"
+        );
+        // The strapping decides whether MWDT0's flash-boot protection counts,
+        // and a reboot can change the strapping — the download dance is
+        // exactly that. Re-derive it, or a chip reset into the ROM console
+        // would inherit the *previous* boot's answer.
+        loader::set_flash_boot_strap(&mut self.bus, strap);
         // ⚠️ P3 owns the domain question this register raises. On silicon
         // ASSIST_DEBUG sits in the HP peripheral window and its record
         // registers survive an HP reset *because the block is reset by a
