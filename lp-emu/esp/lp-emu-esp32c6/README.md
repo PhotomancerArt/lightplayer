@@ -1686,6 +1686,8 @@ lp-emu-esp32c6 --elf <app.elf> [--rom <path>] [--time-grade t1|t2|t3]
     [--usb-sj-tried stderr|memory|file:<path>]
     [--control tcp:<host:port>] [--usb-script <file>]
     [--pin-script <file>]... [--wire <a>:<b>]...
+    [--reset-cause poweron|usb-uart|tg0-wdt] [--reboot-on-reset]
+    [--strap app|download]
     [--tx-log stderr|file:<path>] [--trap-log stdout|file:<path>]
     [--efuse-mac a0:f2:62:87:b4:8c] [--efuse-rev 0.2] [--seed <u64>]
     [--lpperi-clk-en <hex>]
