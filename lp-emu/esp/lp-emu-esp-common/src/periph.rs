@@ -110,8 +110,23 @@ pub enum ResetScope {
     /// domain survives, which is the whole of
     /// `docs/defects/2026-09-06-c6-analog-master-wedges-the-bootloader.md`.
     Core,
-    /// Everything, LP domain included. The closest thing to a power cycle a
-    /// watchdog can ask for.
+    /// The widest a watchdog's own stage action can ask for — esp-hal's own
+    /// name for it, and the scope a chip's RWDT `ResetSystem` action
+    /// carries.
+    ///
+    /// **Not honoured yet.** Every restart this crate performs today —
+    /// `System` included — is dispatched as one of two things: a `reboot()`
+    /// (HP domain restored, LP domain kept) or a `power_cycle()` (both
+    /// restored), and nothing here reads `ResetScope` to choose between
+    /// them; the C6's own dispatch is on [`ResetSource`] alone (a `PowerOn`
+    /// cause is a power cycle, everything else — `System` watchdog resets
+    /// included — is a reboot). So a `System` reset behaves exactly like
+    /// `Core` today: the LP domain survives it. On real esp-hal, a `System`
+    /// stage action is the closest a watchdog gets to asking for a power
+    /// cycle, which on this chip family would mean clearing the LP domain
+    /// too — F9 in the `c6-lp-domain-reset` plan is the follow-up to make
+    /// the dispatch honour this variant instead of silently treating it as
+    /// `Core`.
     System,
 }
 
