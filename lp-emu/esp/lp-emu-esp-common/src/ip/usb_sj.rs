@@ -192,8 +192,8 @@ use lp_emu_core::sched::EventId;
 use crate::regfile::{lane_of, merge_lane};
 use crate::regnames::RegNames;
 use crate::{
-    BusCx, MachineRequest, Peripheral, RegFile, RegGrade, RegGrades, Strap, StreamId, Width,
-    event_id, event_local,
+    BusCx, MachineRequest, Peripheral, RegFile, RegGrade, RegGrades, ResetSource, Strap, StreamId,
+    Width, event_id, event_local,
 };
 
 pub const EP1: u32 = 0x00;
@@ -818,6 +818,7 @@ impl UsbSerialJtag {
             source: "USB_DEVICE chip_rst (serial)",
             at,
             strap,
+            cause: ResetSource::ChipReset,
         });
         true
     }
@@ -2253,6 +2254,7 @@ mod tests {
                 source: "USB_DEVICE chip_rst (serial)",
                 at: sb.now,
                 strap: Strap::App,
+                cause: ResetSource::ChipReset,
             })
         );
         assert_eq!(sb.read(&mut u, CHIP_RST) & CHIP_RST_SERIAL, CHIP_RST_SERIAL);
@@ -2487,6 +2489,7 @@ mod tests {
                 source: "USB_DEVICE chip_rst (serial)",
                 at: sb.now,
                 strap: Strap::App,
+                cause: ResetSource::ChipReset,
             })
         );
         // And the download dance the same way.

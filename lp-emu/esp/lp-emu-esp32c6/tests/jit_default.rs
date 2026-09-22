@@ -271,7 +271,10 @@ fn run_with_a_restore_and_a_reboot(translated: bool) -> (Outcome, u64) {
 
     let fences = m.harts[0].fence_i_count();
     assert!(
-        m.reboot(lp_emu_esp_common::Strap::App),
+        m.reboot(
+            lp_emu_esp_common::Strap::App,
+            lp_emu_esp32c6::loader::ResetCause::UsbUartHpSys
+        ),
         "a reboot was armed"
     );
     assert!(

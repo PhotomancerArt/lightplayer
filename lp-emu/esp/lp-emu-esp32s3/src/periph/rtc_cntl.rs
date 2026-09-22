@@ -156,7 +156,10 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use lp_emu_core::sched::EventId;
 use lp_emu_esp_common::engine::timg::{WdtWrite, wdt_write};
 use lp_emu_esp_common::regfile::{lane_of, merge_lane};
-use lp_emu_esp_common::{BusCx, MachineRequest, Peripheral, RegFile, Strap, Width, event_id};
+use lp_emu_esp_common::{
+    BusCx, MachineRequest, Peripheral, RegFile, ResetScope, ResetSource, Strap, Watchdog, Width,
+    event_id,
+};
 
 use super::systimer::Reader;
 use super::{RC_SLOW_HZ, SWD_WKEY, WDT_WKEY};
@@ -479,10 +482,10 @@ impl Peripheral for RtcCntl {
             self.update_lines(cx);
             return;
         }
-        let source = match action {
-            2 => "RTC_CNTL RWDT stage 0 (ResetCpu)",
-            3 => "RTC_CNTL RWDT stage 0 (ResetCore)",
-            _ => "RTC_CNTL RWDT stage 0 (ResetSystem)",
+        let (source, scope) = match action {
+            2 => ("RTC_CNTL RWDT stage 0 (ResetCpu)", ResetScope::Cpu),
+            3 => ("RTC_CNTL RWDT stage 0 (ResetCore)", ResetScope::Core),
+            _ => ("RTC_CNTL RWDT stage 0 (ResetSystem)", ResetScope::System),
         };
         if !self.expired {
             self.expired = true;
@@ -498,6 +501,10 @@ impl Peripheral for RtcCntl {
             source,
             at,
             strap: Strap::App,
+            cause: ResetSource::Watchdog {
+                watchdog: Watchdog::Rwdt,
+                scope,
+            },
         });
     }
 
@@ -677,6 +684,10 @@ mod tests {
                 source: "RTC_CNTL RWDT stage 0 (ResetSystem)",
                 at: expiry,
                 strap: Strap::App,
+                cause: ResetSource::Watchdog {
+                    watchdog: Watchdog::Rwdt,
+                    scope: ResetScope::System,
+                },
             })
         );
         assert!(buf.lines().iter().any(|l| l.contains("RWDT EXPIRED")));

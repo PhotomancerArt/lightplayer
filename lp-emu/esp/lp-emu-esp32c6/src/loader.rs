@@ -27,6 +27,10 @@
 //!   (`init.rs:45`). The requirement is only that the bytes are RAM rather
 //!   than the bootloader's own image, which is exactly what "the bootloader
 //!   finished and went away" means.
+//! - **MWDT0's flash-boot protection turned off**
+//!   ([`disable_flash_boot_watchdog`]). The chip resets with it armed and
+//!   the real bootloader clears it; an app that woke up with it still
+//!   counting would be reset 0.65 s in by a watchdog it never saw.
 //! - The mask ROM, loaded **first**, so its `.bss` (which reaches from
 //!   `0x4086_ad08` across what the app calls RAM) is overwritten by the app's
 //!   own segments — the order the real bootloader runs in.
@@ -68,7 +72,7 @@
 //! 7. **The reset cause is asserted as POWERON.** Nothing consulted a PMU
 //!    register to decide it.
 
-use lp_emu_esp_common::{ElfImage, SocBus};
+use lp_emu_esp_common::{ElfImage, ResetScope, ResetSource, SocBus, Watchdog};
 use lp_riscv_emu::mach::{MachineHart, csr};
 
 use crate::cache::CacheHandle;
@@ -135,18 +139,50 @@ impl EfuseIdentity {
 /// that table in the vendored ROM, so `rst:0x15 (USB_UART_HPSYS)` is not a
 /// string this crate invented.
 ///
-/// Only the two a run can actually start from are modelled. [`PowerOn`] is a
-/// cold chip and the direct loader's assertion; [`UsbUartHpSys`] is what a
-/// host's DTR/RTS dance over the USB-Serial-JTAG bridge leaves behind — the
-/// reset the silicon `boot-idle-flash` transcript was captured after, and
-/// therefore the one a boot-log diff has to be run with.
+/// [`PowerOn`] is a cold chip and the direct loader's assertion;
+/// [`UsbUartHpSys`] is what a host's DTR/RTS dance over the USB-Serial-JTAG
+/// bridge leaves behind — the reset the silicon `boot-idle-flash` transcript
+/// was captured after, and therefore the one a boot-log diff has to be run
+/// with. The seven watchdog causes are the ones the watchdogs this chip
+/// models can actually produce, one per `(watchdog, stage action)` pair;
+/// [`Tg0WdtHpSys`] is the one the first-flash defect recorded on silicon.
+///
+/// The whole table, transcribed 2026-09-22 with
+/// `rust-objdump -s -j .rodata lp-emu/esp/roms/esp32c6_rev0_rom.elf` (25
+/// pointers at `0x4004_a8e8`, strings from `0x4004_a94c`):
+///
+/// ```text
+/// 0 SW_CLR        5 SLEEP_WAKEUP  10 N/A          15 LP_BOD_SYS    20 EFUSE_HPSYS
+/// 1 POWERON       6 SDIO_HPSYS    11 TG0_WDT_CPU  16 LP_WDT_SYS    21 USB_UART_HPSYS
+/// 2 N/A           7 TG0_WDT_HPSYS 12 SW_CPU       17 TG1_WDT_CPU   22 USB_JTAG_HPSYS
+/// 3 LP_SW_HPSYS   8 TG1_WDT_HPSYS 13 LP_WDT_CPU   18 LP_SWDT_SYS   23 N/A
+/// 4 N/A           9 LP_WDT_HPSYS  14 N/A          19 N/A           24 JTAG_CPU
+/// ```
 ///
 /// [`PowerOn`]: ResetCause::PowerOn
 /// [`UsbUartHpSys`]: ResetCause::UsbUartHpSys
+/// [`Tg0WdtHpSys`]: ResetCause::Tg0WdtHpSys
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum ResetCause {
     #[default]
     PowerOn,
+    /// `0x7` — TIMG0's main watchdog reset the HP system. **The loop the
+    /// first-flash defect recorded**: `rst:0x7 (TG0_WDT_HPSYS)` every
+    /// ≈0.4 s while the bootloader spun on the LP analog master.
+    Tg0WdtHpSys,
+    /// `0xb` — TIMG0's MWDT with a stage action of `ResetCpu`.
+    Tg0WdtCpu,
+    /// `0x8` — TIMG1's MWDT resetting the HP system.
+    Tg1WdtHpSys,
+    /// `0x11` — TIMG1's MWDT with a stage action of `ResetCpu`.
+    Tg1WdtCpu,
+    /// `0x10` — the RWDT's `ResetSystem`, which is what our firmware arms
+    /// (`WatchdogFeeder::start(rwdt, 0)`).
+    LpWdtSys,
+    /// `0x9` — the RWDT's `ResetCore`.
+    LpWdtHpSys,
+    /// `0xd` — the RWDT's `ResetCpu`.
+    LpWdtCpu,
     /// `0x15` — the serial bridge asserted `chip_rst`. What espflash's
     /// `--after hard-reset` and M6's `reset` control command do.
     UsbUartHpSys,
@@ -159,6 +195,13 @@ impl ResetCause {
             // `POWERON` — the value `__pre_init` compares against 1
             // before zeroing `.rtc_fast.persistent`.
             ResetCause::PowerOn => 1,
+            ResetCause::Tg1WdtHpSys => 0x8,
+            ResetCause::Tg0WdtHpSys => 0x7,
+            ResetCause::LpWdtHpSys => 0x9,
+            ResetCause::Tg0WdtCpu => 0xb,
+            ResetCause::LpWdtCpu => 0xd,
+            ResetCause::LpWdtSys => 0x10,
+            ResetCause::Tg1WdtCpu => 0x11,
             ResetCause::UsbUartHpSys => 0x15,
         }
     }
@@ -167,8 +210,83 @@ impl ResetCause {
     pub const fn rom_name(self) -> &'static str {
         match self {
             ResetCause::PowerOn => "POWERON",
+            ResetCause::Tg0WdtHpSys => "TG0_WDT_HPSYS",
+            ResetCause::Tg0WdtCpu => "TG0_WDT_CPU",
+            ResetCause::Tg1WdtHpSys => "TG1_WDT_HPSYS",
+            ResetCause::Tg1WdtCpu => "TG1_WDT_CPU",
+            ResetCause::LpWdtSys => "LP_WDT_SYS",
+            ResetCause::LpWdtHpSys => "LP_WDT_HPSYS",
+            ResetCause::LpWdtCpu => "LP_WDT_CPU",
             ResetCause::UsbUartHpSys => "USB_UART_HPSYS",
         }
+    }
+
+    /// The cause a peripheral's [`ResetSource`] produces on **this** chip.
+    ///
+    /// `esp-common` deliberately knows no codes: it says which watchdog and
+    /// how wide the stage action's reset is, and this table — the ROM's —
+    /// turns that into the number the banner prints. A `ResetScope::System`
+    /// MWDT reset has no name of its own in the table (the MWDT's stage
+    /// actions stop at "reset system", which on this part *is* the HP
+    /// system), so it lands on the same `..._HPSYS` row as `Core`.
+    pub const fn for_source(source: ResetSource) -> Self {
+        match source {
+            ResetSource::ChipReset => ResetCause::UsbUartHpSys,
+            ResetSource::Watchdog {
+                watchdog: Watchdog::Mwdt(0),
+                scope: ResetScope::Cpu,
+            } => ResetCause::Tg0WdtCpu,
+            ResetSource::Watchdog {
+                watchdog: Watchdog::Mwdt(0),
+                ..
+            } => ResetCause::Tg0WdtHpSys,
+            ResetSource::Watchdog {
+                watchdog: Watchdog::Mwdt(_),
+                scope: ResetScope::Cpu,
+            } => ResetCause::Tg1WdtCpu,
+            ResetSource::Watchdog {
+                watchdog: Watchdog::Mwdt(_),
+                ..
+            } => ResetCause::Tg1WdtHpSys,
+            ResetSource::Watchdog {
+                watchdog: Watchdog::Rwdt,
+                scope: ResetScope::Cpu,
+            } => ResetCause::LpWdtCpu,
+            ResetSource::Watchdog {
+                watchdog: Watchdog::Rwdt,
+                scope: ResetScope::Core,
+            } => ResetCause::LpWdtHpSys,
+            ResetSource::Watchdog {
+                watchdog: Watchdog::Rwdt,
+                scope: ResetScope::System,
+            } => ResetCause::LpWdtSys,
+        }
+    }
+
+    /// Whether the mask ROM prints a `Saved PC:` line after a reset with
+    /// this cause — that is, whether the reset left ASSIST_DEBUG's crash
+    /// recorder holding a PC.
+    ///
+    /// **Modeled, and deliberately narrow.** On silicon the recorder is
+    /// armed by the ROM on *every* boot (`cpu0.rcd_en = 3` at
+    /// `0x40018ae4`), so any HP reset leaves a PC behind and the ROM prints
+    /// one — the first-flash defect quotes a `Saved PC:0x40800832` after an
+    /// ordinary flash reset. The emulator restricts it to the watchdog
+    /// causes because a watchdog reset is the one this milestone measured,
+    /// and because widening it would put a new line into every committed
+    /// `chip_rst` reboot's console. Widening is a fidelity question with a
+    /// transcript attached; it is not this phase's.
+    pub const fn records_saved_pc(self) -> bool {
+        matches!(
+            self,
+            ResetCause::Tg0WdtHpSys
+                | ResetCause::Tg0WdtCpu
+                | ResetCause::Tg1WdtHpSys
+                | ResetCause::Tg1WdtCpu
+                | ResetCause::LpWdtSys
+                | ResetCause::LpWdtHpSys
+                | ResetCause::LpWdtCpu
+        )
     }
 
     /// `--reset-cause`'s spellings.
@@ -176,6 +294,7 @@ impl ResetCause {
         match text {
             "poweron" | "power-on" => Some(ResetCause::PowerOn),
             "usb-uart" | "usb-uart-hpsys" => Some(ResetCause::UsbUartHpSys),
+            "tg0-wdt" | "tg0-wdt-hpsys" => Some(ResetCause::Tg0WdtHpSys),
             _ => None,
         }
     }
@@ -183,6 +302,13 @@ impl ResetCause {
     pub const fn as_str(self) -> &'static str {
         match self {
             ResetCause::PowerOn => "poweron",
+            ResetCause::Tg0WdtHpSys => "tg0-wdt",
+            ResetCause::Tg0WdtCpu => "tg0-wdt-cpu",
+            ResetCause::Tg1WdtHpSys => "tg1-wdt",
+            ResetCause::Tg1WdtCpu => "tg1-wdt-cpu",
+            ResetCause::LpWdtSys => "lp-wdt-sys",
+            ResetCause::LpWdtHpSys => "lp-wdt-hpsys",
+            ResetCause::LpWdtCpu => "lp-wdt-cpu",
             ResetCause::UsbUartHpSys => "usb-uart",
         }
     }
@@ -484,6 +610,52 @@ pub fn seed_rom_flash_chip(bus: &mut SocBus, chip_size: u32) -> Option<(u32, u32
     // at `+4`); `device_id` is the first and stays the ROM's own.
     bus.load_image(chip + 4, &chip_size.to_le_bytes()).ok()?;
     Some((chip, chip_size))
+}
+
+/// `TIMG0.wdtconfig0` as the second-stage bootloader leaves it: flash-boot
+/// protection **off**.
+///
+/// The chip comes out of reset with `wdtconfig0 = 0x0004_c000`, whose bit 14
+/// (`flashboot_mod_en`) has MWDT0 counting towards a 0.65 s system reset
+/// before a single instruction runs — that is the watchdog the first-flash
+/// defect's board kept tripping. The real bootloader turns it off 40 ms in
+/// (`wdt_hal_set_flashboot_en(ctx, false)`), and **a direct load's whole
+/// premise is that the bootloader already ran**. Without this the app would
+/// be shot at 0.65 s by a watchdog it never saw armed.
+///
+/// MEASURED: the value is the one a `--trace TIMG0` of a ROM-up boot of the
+/// reference merged image shows the bootloader writing, and the value the
+/// app's own `esp_hal::init` then reads back and writes unchanged —
+///
+/// ```text
+/// cyc=6496236 pc=0x40020f94 W4 TIMG0+0x048 wdtconfig0 = 0x00048000
+/// cyc=6496240 pc=0x40020f9e W4 TIMG0+0x048 wdtconfig0 = 0x00448000   <- this
+/// cyc=39730442 pc=0x42095db6 R4 TIMG0+0x048 wdtconfig0 = 0x00448000
+/// cyc=39730445 pc=0x42095dbe W4 TIMG0+0x048 wdtconfig0 = 0x00448000
+/// ```
+///
+/// — bit 22 (`conf_update_en`) included, because that is what the register
+/// reads on the machine this is standing in for. Its sibling `wdtwprotect`
+/// is deliberately **not** seeded: it resets to the write key and the
+/// bootloader leaves it at 0, but every driver writes the key before
+/// touching the block, so the difference is unobservable and the smaller
+/// change is the one that cannot move a transcript.
+const BOOTLOADER_TIMG0_WDTCONFIG0: u32 = 0x0044_8000;
+
+/// Put TIMG0's MWDT where the second-stage bootloader would have left it.
+/// See [`BOOTLOADER_TIMG0_WDTCONFIG0`]. Called on the direct-load path only;
+/// a ROM-up boot runs the real bootloader and does this for itself.
+///
+/// Must run **before** `SocBus::start_peripherals`, which is where TIMG0
+/// schedules its first expiry from whatever `wdtconfig0` then says.
+pub fn disable_flash_boot_watchdog(bus: &mut SocBus) {
+    let Some(i) = bus.peripheral_index("TIMG0") else {
+        log::warn!("loader: no TIMG0 block; the flash-boot watchdog was not disabled");
+        return;
+    };
+    bus.with_peripheral::<crate::periph::timg::Timg, _>(i, |t, _| {
+        t.poke_wdtconfig0(BOOTLOADER_TIMG0_WDTCONFIG0)
+    });
 }
 
 /// Read `out.len()` bytes out of a RAM region, or `None` if the address is

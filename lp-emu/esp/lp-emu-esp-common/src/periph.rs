@@ -94,6 +94,53 @@ impl core::fmt::Display for Strap {
     }
 }
 
+/// How much of the chip a reset takes down — the three stage actions every
+/// Espressif watchdog spells the same way (`ResetCpu`, `ResetCore`,
+/// `ResetSystem`; esp-hal's `RwdtStageAction`, ESP-IDF's
+/// `wdt_stage_action_t`).
+///
+/// Chip-agnostic on purpose: which *reset reason code* each one produces is
+/// a fact about one chip's mask ROM, and belongs to that chip's crate. This
+/// says only how wide the blast radius is.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ResetScope {
+    /// The CPU alone; the peripherals keep running.
+    Cpu,
+    /// The high-power system — CPU and the HP peripherals. The LP/RTC
+    /// domain survives, which is the whole of
+    /// `docs/defects/2026-09-06-c6-analog-master-wedges-the-bootloader.md`.
+    Core,
+    /// Everything, LP domain included. The closest thing to a power cycle a
+    /// watchdog can ask for.
+    System,
+}
+
+/// Which watchdog asked. `Mwdt(n)` is timer group `n`'s main watchdog;
+/// `Rwdt` is the RTC/LP watchdog, of which every chip here has one.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Watchdog {
+    Mwdt(u8),
+    Rwdt,
+}
+
+/// What asked for a reset, in terms a chip crate can map to its own mask
+/// ROM's reset-reason code.
+///
+/// The C6's mapping is `crate::loader::ResetCause::for_source` in
+/// `lp-emu-esp32c6`, read out of the ROM's own name table; nothing here
+/// knows a code.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ResetSource {
+    /// Something outside the chip pulled its reset line — on these parts the
+    /// USB-Serial-JTAG bridge's `chip_rst`, driven by a host's DTR/RTS dance.
+    ChipReset,
+    /// A watchdog's stage action expired.
+    Watchdog {
+        watchdog: Watchdog,
+        scope: ResetScope,
+    },
+}
+
 /// Something a peripheral needs the *machine* to do, because it cannot do
 /// it itself: a reset. The bus holds at most one (the first wins) and the
 /// machine takes it at the next slice boundary.
@@ -112,6 +159,10 @@ pub enum MachineRequest {
         at: Cycles,
         /// What the chip would boot into. See [`Strap`].
         strap: Strap,
+        /// Which mechanism asked, and how wide its reset is. The mask ROM
+        /// prints a code for this (`rst:0x7 (TG0_WDT_HPSYS)`); the chip
+        /// crate owns the translation.
+        cause: ResetSource,
     },
 }
 
