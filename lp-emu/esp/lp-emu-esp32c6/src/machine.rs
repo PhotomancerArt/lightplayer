@@ -6050,13 +6050,16 @@ mod tests {
     /// this is the one place a reader can see the whole answer — and the one
     /// place a block that quietly changes its mind is caught.
     ///
-    /// Eight blocks: the LP_PERI window (whose peripheral name is still
-    /// `RNG`, the name every transcript spells), the LP analog master, and
-    /// the six LP accept blocks. Everything else is `Hp`, deliberately,
-    /// including four `LP_`-shaped blocks — see the "reset domains" section
-    /// of `periph/accept.rs` for why each is out.
+    /// Ten blocks: the LP_PERI window (whose peripheral name is still `RNG`,
+    /// the name every transcript spells), the LP analog master, and eight LP
+    /// accept blocks — six from P3 plus `LP_APM0` and `LP_ANA`, moved here in
+    /// P4 (DD11): both are genuinely LP-island blocks and P3 only left them
+    /// out because nothing reads a status bit out of either, which is not a
+    /// reason to call a block `Hp`. Everything else is `Hp`, deliberately,
+    /// including two `LP_`-shaped blocks plus `EFUSE` — see the "reset
+    /// domains" section of `periph/accept.rs` for why each is out.
     #[test]
-    fn the_lp_domain_is_exactly_these_eight_blocks() {
+    fn the_lp_domain_is_exactly_these_ten_blocks() {
         let m = Esp32C6Builder::new().build().unwrap();
         let lp: Vec<&str> = m
             .bus
@@ -6069,6 +6072,7 @@ mod tests {
             lp,
             [
                 "LP_APM",
+                "LP_APM0",
                 "LP_AON",
                 "PMU",
                 "LP_I2C_ANA_MST",
@@ -6076,15 +6080,16 @@ mod tests {
                 "LP_TEE",
                 "LP_IO",
                 "RNG",
+                "LP_ANA",
             ],
             "in registration order. Adding or removing one is a claim about \
              silicon and a change to what every reboot preserves — say why in \
              the block, and change this list on purpose."
         );
-        // The four that are LP-shaped and deliberately HP-restored, plus
+        // The two that are LP-shaped and deliberately HP-restored, plus
         // EFUSE. Asserted rather than left implicit, because "it was
         // considered and left out" is the statement, not an oversight.
-        for name in ["LP_CLKRST", "LP_WDT", "LP_APM0", "LP_ANA", "EFUSE"] {
+        for name in ["LP_CLKRST", "LP_WDT", "EFUSE"] {
             let domain = m
                 .bus
                 .peripheral_domains()
