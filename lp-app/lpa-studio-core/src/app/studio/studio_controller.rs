@@ -34,6 +34,7 @@ use lpa_client::{CancelSignal, ProgressDeadline};
 use crate::app::home::home_view_builder::HomeInputs;
 use crate::app::home::{HOME_NODE_ID, HomeOp, UiHomeView, home_view_builder};
 use crate::app::library::{CatalogOp, LibraryHost};
+use crate::app::project::device_bind::BindOutcome;
 use crate::app::studio::console_command::ConsoleCommand;
 use crate::app::studio::refresh_cadence::RefreshCadence;
 use crate::app::studio::ui_console_view::UiConsoleView;
@@ -3017,6 +3018,172 @@ impl StudioController {
         store.open(uid).ok()?.content_hash().ok()
     }
 
+    /// The library package whose head content is EXACTLY what the board
+    /// reports running, when this library has one (D6's second candidate).
+    ///
+    /// One catalog snapshot, one hash per package over it: the packages
+    /// are directories in an in-memory snapshot here and a library is tens
+    /// of projects, not thousands. [`Self::library_head_hash`] is the same
+    /// read for a single key; this is the sweep, and it takes the snapshot
+    /// once rather than once per package.
+    ///
+    /// A package that will not open is skipped rather than failing the
+    /// sweep: a damaged project in the library is not a reason to refuse
+    /// to name a healthy one.
+    async fn library_package_at_hash(&mut self, board: lpc_history::ContentHash) -> Option<String> {
+        let host = self.library_host().ok()?;
+        let fs = host.catalog_snapshot().await.ok()?;
+        let store = crate::app::library::LibraryStore::read_only(fs);
+        store.list().ok()?.into_iter().find_map(|summary| {
+            let head = store
+                .open(summary.uid)
+                .and_then(|handle| handle.content_hash())
+                .ok()?;
+            (head == board).then(|| summary.uid.to_string())
+        })
+    }
+
+    /// The library project the registry says the LENS device was last
+    /// given (D6's first candidate), when there is one.
+    fn lens_associated_project(&self) -> Option<String> {
+        let attachment = self.pool.lens_session()?.attachment();
+        let registry = self.home_inputs.as_ref()?.registered.as_slice();
+        crate::app::devices::device_by_base_mac::last_given_project(registry, &attachment.uid)
+    }
+
+    /// Bind the project the board is ALREADY running to the library
+    /// package it IS (D1) — the second half of a device open.
+    ///
+    /// [`Self::attach_lens`] connects the editor to whatever the board
+    /// runs; nothing until here says *which* project that is, so
+    /// `active_library_uid()` stayed `None` — and with it the address bar
+    /// could not heal `/device/<uid>` into `/p/<slug>-prj…?on=…` (D51),
+    /// the header read the storage id ("studio"), and a save had nowhere
+    /// to pull into.
+    ///
+    /// Candidates (D6, content before memory):
+    ///
+    /// 1. a scan of library heads for one whose content hash is what the
+    ///    board reports — a match here is the truth, whatever the registry
+    ///    remembers, because another browser can have pushed a different
+    ///    library project since this one last did;
+    /// 2. the registry association for the lens device — what this library
+    ///    last verified it gave that board — checked by content like any
+    ///    other candidate. When it names a project this library holds at a
+    ///    DIFFERENT version, the console says so by name and nothing binds
+    ///    or is written (D4).
+    ///
+    /// Best-effort throughout, like every other piece of bookkeeping here
+    /// (`bank_completed_push`): a board that will not answer, a library
+    /// that will not read, an open the host refuses — each is a log line,
+    /// never a failed open. The editor works on a device project with no
+    /// library binding; it just cannot name it.
+    async fn bind_running_project_to_library(&mut self) -> BindOutcome {
+        if !self.project.has_library() {
+            return BindOutcome::NotApplicable;
+        }
+        let read = {
+            let server = match self
+                .pool
+                .lens_session_mut()
+                .and_then(crate::RuntimeSession::client_mut)
+            {
+                Ok(server) => server,
+                Err(error) => {
+                    log::debug!("no wire to ask what the board is running: {error}");
+                    return BindOutcome::NotApplicable;
+                }
+            };
+            self.project.read_running_package(server).await
+        };
+        let (running, logs) = match read {
+            Ok(read) => read,
+            Err(error) => {
+                self.push_log(UiLogDraft::new(
+                    UiLogLevel::Warn,
+                    UiLogOrigin::Studio,
+                    format!("could not read what the board is running: {error}"),
+                ));
+                return BindOutcome::NotApplicable;
+            }
+        };
+        self.record_logs(logs);
+
+        // Content first: a package whose head IS what the board runs cannot
+        // be the wrong answer, whatever the registry remembers — another
+        // browser may have pushed a different library project since this
+        // one last did, and that project deserves its name too.
+        if let Some(uid) = self.library_package_at_hash(running.hash).await {
+            return self.bind_candidate(&uid, &running).await;
+        }
+        // Nothing at that hash: the association, when it names a project
+        // this library has, explains WHY — the board and the library copy
+        // have parted (D4), and the console should say so by name.
+        if let Some(uid) = self.lens_associated_project()
+            && self.library_project_named(&uid).is_some()
+        {
+            return self.bind_candidate(&uid, &running).await;
+        }
+        BindOutcome::NoCandidate
+    }
+
+    /// Bind one candidate and say what happened in the console.
+    async fn bind_candidate(
+        &mut self,
+        key: &str,
+        running: &crate::app::project::device_bind::RunningPackage,
+    ) -> BindOutcome {
+        match self.project.bind_running_to_library(key, running).await {
+            Ok(BindOutcome::Bound { uid }) => {
+                let name = self
+                    .project
+                    .active_library_display_name()
+                    .unwrap_or_else(|| uid.clone());
+                self.push_log(UiLogDraft::new(
+                    UiLogLevel::Info,
+                    UiLogOrigin::Studio,
+                    format!(
+                        "opened {name} from the board — the library copy is at the same version"
+                    ),
+                ));
+                BindOutcome::Bound { uid }
+            }
+            Ok(BindOutcome::Differs {
+                uid,
+                library,
+                board,
+            }) => {
+                let name = self
+                    .library_project_named(&uid)
+                    .map(|project| project.name)
+                    .unwrap_or_else(|| uid.clone());
+                self.push_log(UiLogDraft::new(
+                    UiLogLevel::Warn,
+                    UiLogOrigin::Studio,
+                    format!(
+                        "this board is not running the library's copy of {name}: the board has {} and the library head is {} — edits here are not saving into that project",
+                        board.short(),
+                        library.short()
+                    ),
+                ));
+                BindOutcome::Differs {
+                    uid,
+                    library,
+                    board,
+                }
+            }
+            Ok(other) => other,
+            Err(error) => {
+                self.push_log(UiLogDraft::new(
+                    UiLogLevel::Warn,
+                    UiLogOrigin::Studio,
+                    format!("could not open the library copy of what this board runs: {error}"),
+                ));
+                BindOutcome::NotApplicable
+            }
+        }
+    }
+
     /// Which device the pending open was told to land on.
     fn pending_open_on(&self) -> OpenOn {
         match &self.pending_open {
@@ -4999,6 +5166,24 @@ impl StudioController {
         match result {
             Ok(ProjectConnectResult::Connected { logs }) => {
                 self.record_logs(logs);
+                // Name what the board is running BEFORE the project pane's
+                // read: the view built after the sync should already carry
+                // the project's uid and name, not the storage id.
+                match self.bind_running_project_to_library().await {
+                    // The adoption seam: the board is running a project
+                    // this library does not have, which is a thing to PULL
+                    // off the board and install, not a thing to bind. Until
+                    // that lands the editor works on it unnamed, exactly as
+                    // it did before any of this existed.
+                    BindOutcome::NoCandidate => {
+                        log::debug!("the board runs a project this library does not have at head");
+                    }
+                    // Bound, refused by content (D4), or nothing to bind at
+                    // all — each already said whatever it had to say.
+                    BindOutcome::Bound { .. }
+                    | BindOutcome::Differs { .. }
+                    | BindOutcome::NotApplicable => {}
+                }
                 let sync = self.sync_project_after_attach(updates).await?;
                 Ok(UiNotices::new().with_notice(project_sync_notice(
                     sync.synced,

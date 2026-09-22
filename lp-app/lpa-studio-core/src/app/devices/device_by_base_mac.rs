@@ -138,7 +138,13 @@ fn is_running_a_project(device: &Device) -> bool {
 
 /// The library project a registry row was last verified to have been
 /// given, as a `prj…` uid string.
-fn last_given_project(registry: &[RegisteredDevice], key: &str) -> Option<String> {
+///
+/// Also the device-open bind's first candidate (D6): the board the editor
+/// just landed on is most likely running the last thing this library gave
+/// it. It stays a *hint* there, exactly as it is here — the association
+/// names a project, never a version anyone has re-checked — so the caller
+/// verifies by content before acting on it.
+pub(crate) fn last_given_project(registry: &[RegisteredDevice], key: &str) -> Option<String> {
     registry
         .iter()
         .find(|row| row.uid == key)?

@@ -24,6 +24,7 @@
 pub(crate) mod agent_support;
 pub mod asset;
 pub mod demo_project;
+pub(crate) mod device_bind;
 pub mod dirty_summary;
 pub(crate) mod edit_journal;
 pub(crate) mod editor_meta_op;
