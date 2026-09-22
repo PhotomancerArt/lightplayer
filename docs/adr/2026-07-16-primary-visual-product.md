@@ -9,6 +9,18 @@
   gone — its rows are the module card's wiring drawer
   (`2026-08-03-panel-visibility-is-derived.md`). Read every "bus pane"
   below as "wiring drawer"; the constant and its meaning are unchanged.
+  *Amended 2026-09-22:* the always-live subscription (Consumers, "Studio
+  always-live preview") is lens-scoped. Over a device wire — serial, or
+  the emulator running the device's firmware — the primary visual is
+  subscribed only while its producing node is focused; the primary
+  control product stays always live. A render-product probe is a second
+  shader render on the board every pull (a 16×16 texture is 256 texels
+  against a small fixture's few dozen lamps), and the permanent surfaces
+  it fed on a device lens are already covered by the published
+  output-frame probe, which renders nothing device-side. Observed on the
+  PLAYFUL choker (73 LEDs on a C6): the unfocused shader's texture probe
+  rode every 150 ms pull and dragged the board's frame rate down. The sim
+  lens is unchanged. See `ProjectController::always_live_products`.
 
 ## Context
 
