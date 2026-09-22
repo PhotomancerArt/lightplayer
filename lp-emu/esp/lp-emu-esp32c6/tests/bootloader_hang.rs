@@ -13,13 +13,20 @@
 //! P1 owns AC1 and the control; **P2 owns the loop** (AC2) — the MWDT0
 //! flash-boot watchdog ending each hang with `rst:0x7 (TG0_WDT_HPSYS)` and a
 //! `Saved PC` inside the bootloader. **P3 owns the pair at the end** (AC3,
-//! AC4): the cure poked onto the bus between two reboots frees the board
+//! AC4a): the cure poked onto the bus between two reboots frees the board
 //! *because the LP domain survived the reset*, and a power cycle hands the
 //! same wedged board straight back *because the induced gate word is the
 //! power-on value*. Those two facts together are what tells P3's domain model
 //! apart from P2's accident of seeding — see
 //! [`the_cure_survives_a_reboot_and_the_next_boot_reaches_the_app`] and
 //! [`a_power_cycle_hands_the_induced_board_back_induced`].
+//!
+//! **P4 adds AC4b** (DD10): silicon's own story rather than the seeded
+//! fixture's. A board that boots **clean** and is only wedged at runtime —
+//! the way the factory firmware actually gated the clock — re-hangs after a
+//! `reboot()` exactly as AC1/AC2 do, and *does* boot clean after a
+//! `power_cycle()`, because this board's power-on value was never wedged.
+//! See [`a_runtime_wedge_survives_a_reboot_and_a_power_cycle_boots_it_clean`].
 //!
 //! `#[ignore]`d for the usual reason: it needs the reference merged image
 //! (`test_support`), so `just test-emu-c6` is what runs it.
@@ -769,4 +776,205 @@ fn a_power_cycle_hands_the_induced_board_back_induced() {
     for line in after.lines().filter(|l| l.contains(TG0_BANNER)) {
         println!("  {}", line.trim());
     }
+}
+
+// ---- P4: AC4b — silicon's own story ------------------------------------
+
+/// Poke `LPPERI_CLK_EN` bit 29 **clear** directly on the bus — what the
+/// factory firmware did, at runtime, on the board this whole plan started
+/// from: nothing wrote the flashers' three-register cure in reverse, the
+/// shipped image simply gated the clock itself. The opposite direction of
+/// [`poke_the_cure`], and asserted the same way: the board must be clean
+/// (bit 29 set) before the poke, or this is not modelling what it claims to.
+///
+/// The LP master's edge from this line is applied **lazily**, on its own
+/// next access (P1's finding, restated in the crate README) — nothing
+/// observable changes at the moment of this write, because nothing touches
+/// the master while the app is running. The latch only shows up the next
+/// time something starts a transaction against a gated clock, which here is
+/// the next boot's bootloader.
+fn poke_the_wedge(machine: &mut Esp32C6Machine) {
+    let clk = base::RNG + CLK_EN;
+    let was = machine.peek_word(clk).expect("LP_PERI answers the bus");
+    assert_ne!(
+        was & LP_ANA_I2C_BIT,
+        0,
+        "the board is already wedged: clk_en {was:#010x} has bit 29 clear"
+    );
+    assert!(machine.poke_word(clk, was & !LP_ANA_I2C_BIT));
+}
+
+/// **AC4b.** Silicon's own story, not the seeded fixture's: a board that
+/// booted **clean** — `clk_en` at its power-on value, bit 29 set — reaches
+/// the app, and only *then* does something (the factory firmware, on the
+/// real board; this poke, here) clear the gate. A `reboot()` after that
+/// hangs exactly as AC1/AC2 do; a `power_cycle()` after the hang boots clean,
+/// because the gate this board powers on into was never wedged — only the
+/// runtime poke was.
+///
+/// **Why AC4a does not already cover this.** AC4a's board is wedged from
+/// power-on (`--lpperi-clk-en` seeds the induced word into the snapshot), so
+/// its `power_cycle()` hands the wedge straight back — proving the opposite
+/// of what a clean-silicon reader expects "power cycle" to mean. AC4b is the
+/// fixture whose `power_cycle()` genuinely cleans a board, because here the
+/// wedge is state a *reset* would clear too, if only the write had happened
+/// to an HP register instead of an LP one. Both fixtures are real: DD10 is
+/// what makes them fit together rather than contradict.
+#[test]
+#[ignore = "needs the reference merged image; `just test-emu-c6`"]
+fn a_runtime_wedge_survives_a_reboot_and_a_power_cycle_boots_it_clean() {
+    let mut machine = match build(CLK_EN_RESET, true) {
+        Ok(m) => m,
+        Err(reason) => {
+            skip_notice(
+                "a_runtime_wedge_survives_a_reboot_and_a_power_cycle_boots_it_clean",
+                &reason,
+            );
+            return;
+        }
+    };
+
+    // 1. A clean board, ROM-up, to its first heartbeat — exactly the boot
+    //    every other test in this file starts a clean board with, except
+    //    this one does not stop there.
+    let outcome = machine.run_until(&StopCondition::after_micros(APP_US).exit_on(HEARTBEAT));
+    let text = console(&machine);
+    let Outcome::ExitMatched {
+        cycle: clean_heartbeat_cycle,
+    } = outcome
+    else {
+        panic!("the clean board never heartbeat: {outcome:?}\n{text}")
+    };
+    let clean_heartbeat = text
+        .lines()
+        .find(|l| l.contains(HEARTBEAT))
+        .expect("the run stopped on it")
+        .trim()
+        .to_owned();
+    assert_eq!(machine.reboots(), 0, "no reset yet");
+    assert_eq!(machine.power_cycles(), 0, "no power cut yet");
+    let before = text.len();
+
+    // 2. The runtime poke — silicon's own act, not a seed.
+    poke_the_wedge(&mut machine);
+
+    // 3. A reboot, the kind a host asks for (`chip_rst` over the
+    //    USB-Serial-JTAG bridge). It hangs: `rst:0x15` for this reboot's own
+    //    cause, then the flash-boot watchdog loop AC2 already proved, because
+    //    `reboot_on_reset` is on and the board is now wedged from the LP
+    //    domain the reboot did not touch.
+    assert!(machine.reboot(Strap::App, ResetCause::UsbUartHpSys));
+    assert_eq!(machine.power_cycles(), 0, "still no power cut");
+
+    // No `exit_on` here, deliberately: `BANNER` and `HEARTBEAT` already
+    // appear earlier in this same console (the clean boot in step 1), and
+    // `exit_on`'s search anchor starts fresh at the top of the accumulated
+    // text on every `run_until` call — so a needle that already occurred
+    // once matches instantly on the next call, whatever the guest is doing
+    // now. `ONE_CYCLE_US` (`at_the_first_reboot`'s own budget: "long enough
+    // for exactly one watchdog cycle and no more") is what bounds this run
+    // instead; `reboot()` puts the clock back to zero, so it is exactly one
+    // MWDT0 cycle of *new* time.
+    let outcome = machine.run_until(&StopCondition::after_micros(ONE_CYCLE_US));
+    let text = console(&machine);
+    let hang = &text[before..];
+    assert!(
+        matches!(outcome, Outcome::Deadline { .. }),
+        "the reboot should have run its budget out hung, not {outcome:?}:\n{hang}"
+    );
+    assert!(
+        !hang.contains(BANNER),
+        "the reboot after the runtime poke should not have booted:\n{hang}"
+    );
+    let reboot_banner = hang
+        .lines()
+        .find(|l| l.contains("rst:0x15 (USB_UART_HPSYS)"))
+        .unwrap_or_else(|| panic!("the reboot's own banner is missing:\n{hang}"));
+    let tg0_banner = hang
+        .lines()
+        .find(|l| l.contains(TG0_BANNER))
+        .unwrap_or_else(|| panic!("no watchdog bite after the reboot:\n{hang}"));
+    let saved_pc_line = hang
+        .lines()
+        .find(|l| l.contains("Saved PC"))
+        .unwrap_or_else(|| panic!("no `Saved PC` in the hang:\n{hang}"));
+    let saved_pc = saved_pc_line
+        .trim()
+        .strip_prefix("Saved PC:0x")
+        .and_then(|hex| u32::from_str_radix(&hex[..8.min(hex.len())], 16).ok())
+        .expect("Saved PC parses");
+    assert!(
+        saved_pc.abs_diff(SILICON_SAVED_PC) <= 8,
+        "Saved PC {saved_pc:#010x} against the board's {SILICON_SAVED_PC:#010x}"
+    );
+    let reboots_after_hang = machine.reboots();
+    assert!(
+        reboots_after_hang >= 2,
+        "the reboot() call plus at least one watchdog bite: got {reboots_after_hang}\n{hang}"
+    );
+
+    // 4. A power cycle. This board's power-on value is the clean one — the
+    //    poke only ever touched a running board's registers, never the
+    //    snapshot — so this is the one fixture where `power_cycle()`
+    //    genuinely cleans a wedged board, the story AC4a's seeded fixture
+    //    cannot tell.
+    let before = console(&machine).len();
+    assert!(machine.power_cycle(Strap::App));
+    assert_eq!(
+        machine.reset_cause(),
+        ResetCause::PowerOn,
+        "the ROM will read a power-on out of LP_CLKRST"
+    );
+    let clk = machine
+        .peek_word(base::RNG + CLK_EN)
+        .expect("LP_PERI answers the bus");
+    assert_eq!(
+        clk, CLK_EN_RESET,
+        "a power cycle restores the POWER-ON gate word, and this board's is clean"
+    );
+
+    // Same reason as the hang's `run_until` above: `HEARTBEAT` and `BANNER`
+    // both already occurred once (step 1's clean boot), so `exit_on` would
+    // match at cycle zero of this call rather than at the second occurrence,
+    // and there is no early exit available. Rather than pay `APP_US`'s full
+    // six emulated seconds a second time, the budget is this same board's
+    // own step-1 heartbeat cycle plus 50% margin — a power-on boot is the
+    // same firmware doing the same work, so it is not a different number,
+    // just an unmeasured one until step 1 measured it.
+    let mut stop = StopCondition::after_micros(0);
+    stop.stop_cycle = Some(clean_heartbeat_cycle + clean_heartbeat_cycle / 2);
+    let outcome = machine.run_until(&stop);
+    let text = console(&machine);
+    let after = &text[before..];
+    assert!(
+        matches!(outcome, Outcome::Deadline { .. }),
+        "unexpected outcome after the power cycle: {outcome:?}\n{after}"
+    );
+    let poweron_line = after
+        .lines()
+        .find(|l| l.contains(POWERON_BANNER))
+        .unwrap_or_else(|| panic!("no `{POWERON_BANNER}` after the power cycle:\n{after}"));
+    let clean_banner = after
+        .lines()
+        .find(|l| l.contains(BANNER))
+        .unwrap_or_else(|| panic!("no `{BANNER}` after the power cycle:\n{after}"));
+    assert!(
+        !after.contains(TG0_BANNER),
+        "the watchdog bit again after the power cycle:\n{after}"
+    );
+    let clean_heartbeat_2 = after
+        .lines()
+        .find(|l| l.contains(HEARTBEAT))
+        .expect("the run stopped on it");
+
+    println!("AC4b, the clean boot before the runtime poke:");
+    println!("  {clean_heartbeat}");
+    println!("AC4b, the hang after the runtime poke and a reboot():");
+    println!("  {}", reboot_banner.trim());
+    println!("  {}", tg0_banner.trim());
+    println!("  {}", saved_pc_line.trim());
+    println!("AC4b, the clean boot after power_cycle():");
+    println!("  {}", poweron_line.trim());
+    println!("  {}", clean_banner.trim());
+    println!("  {}", clean_heartbeat_2.trim());
 }
