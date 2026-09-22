@@ -691,7 +691,8 @@ fn the_cure_survives_a_reboot_and_the_next_boot_reaches_the_app() {
 #[test]
 #[ignore = "needs the reference merged image; `just test-emu-c6`"]
 fn a_power_cycle_hands_the_induced_board_back_induced() {
-    let Some(mut machine) = at_the_first_reboot("a_power_cycle_hands_the_induced_board_back_induced")
+    let Some(mut machine) =
+        at_the_first_reboot("a_power_cycle_hands_the_induced_board_back_induced")
     else {
         return;
     };

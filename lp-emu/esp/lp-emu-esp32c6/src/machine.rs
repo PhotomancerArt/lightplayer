@@ -5527,11 +5527,12 @@ impl Esp32C6Machine {
                 ),
                 // Handled above: the pads are not this block's, and neither
                 // is the supply.
-                ControlCommand::Pin { .. }
-                | ControlCommand::Pins
-                | ControlCommand::PowerCycle => Err(
-                    "unreachable: a pin verb and `power-cycle` never reach USB_DEVICE".to_string(),
-                ),
+                ControlCommand::Pin { .. } | ControlCommand::Pins | ControlCommand::PowerCycle => {
+                    Err(
+                        "unreachable: a pin verb and `power-cycle` never reach USB_DEVICE"
+                            .to_string(),
+                    )
+                }
             });
 
         match outcome {

@@ -679,6 +679,7 @@ mod tests {
             ("close", ControlCommand::Close),
             ("reset", ControlCommand::Reset),
             ("download-mode", ControlCommand::DownloadMode),
+            ("power-cycle", ControlCommand::PowerCycle),
             ("state", ControlCommand::State),
             (
                 "dtr 1",

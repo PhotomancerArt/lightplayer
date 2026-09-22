@@ -2120,11 +2120,7 @@ impl SocBus {
         self.restore_peripherals_where(states, Some(domain));
     }
 
-    fn restore_peripherals_where(
-        &mut self,
-        states: &[(String, Vec<u8>)],
-        domain: Option<Domain>,
-    ) {
+    fn restore_peripherals_where(&mut self, states: &[(String, Vec<u8>)], domain: Option<Domain>) {
         assert_eq!(
             states.len(),
             self.mmio.len(),
