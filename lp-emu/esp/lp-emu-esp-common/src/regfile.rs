@@ -28,7 +28,7 @@
 use alloc::vec;
 use alloc::vec::Vec;
 
-use crate::periph::{BusCx, Peripheral, RegGrade, Width};
+use crate::periph::{BusCx, Domain, Peripheral, RegGrade, Width};
 use crate::regnames::{self, Access, RegNames};
 
 /// A masked value applied to one register.
@@ -68,6 +68,12 @@ pub struct RegFile {
     /// has asked this block the question", which `--strict-grade` passes
     /// over and is not the same statement as `Some(Modeled)`.
     grades: Option<Vec<(u32, RegGrade)>>,
+    /// Which power domain the block sits in — see
+    /// [`with_domain`](RegFile::with_domain). Construction-time
+    /// configuration, not state: it is deliberately absent from
+    /// `save_state`, because a snapshot restores what a block *holds* and
+    /// never what it *is*.
+    domain: Domain,
 }
 
 impl RegFile {
@@ -86,7 +92,21 @@ impl RegFile {
             write_one_pulse: Vec::new(),
             read_only: Vec::new(),
             grades: None,
+            domain: Domain::Hp,
         }
+    }
+
+    /// Declare which power domain this block lives in. See [`Domain`]; `Hp`
+    /// is the default and the conservative answer.
+    ///
+    /// The accept blocks of the LP island use this — `LP_AON`, `LP_IO`,
+    /// `LP_TEE`, `LP_APM`, `LP_TIMER`, `PMU` on the C6 — so that a machine's
+    /// `reboot()` leaves them standing while it puts the HP domain back. A
+    /// `RegFile` cannot state its own evidence, so the caller says why in the
+    /// constructor's doc comment.
+    pub fn with_domain(mut self, domain: Domain) -> Self {
+        self.domain = domain;
+        self
     }
 
     /// Attach a generated register-name table — and **seed the block's
@@ -357,6 +377,10 @@ pub fn merge_lane(word: u32, off: u32, width: Width, value: u32) -> u32 {
 impl Peripheral for RegFile {
     fn name(&self) -> &'static str {
         self.name
+    }
+
+    fn domain(&self) -> Domain {
+        self.domain
     }
 
     fn read(&mut self, off: u32, width: Width, _cx: &mut BusCx<'_>) -> u32 {
