@@ -110,7 +110,7 @@
 use std::collections::BTreeMap;
 
 use lp_emu_esp_common::periph::RegGrade;
-use lp_emu_esp_common::{BusCx, Peripheral, RegFile, Width};
+use lp_emu_esp_common::{BusCx, Domain, Peripheral, RegFile, Width};
 
 use super::lp_peri::LpPeriLines;
 use crate::regs;
@@ -214,6 +214,15 @@ impl LpI2cAnaMst {
 impl Peripheral for LpI2cAnaMst {
     fn name(&self) -> &'static str {
         "LP_I2C_ANA_MST"
+    }
+
+    /// The **low-power island**, with the `LPPERI` block that gates it. The
+    /// latched busy this block holds is the *other* half of the wedge: on the
+    /// bench, setting the clock alone did not clear it, which is why the
+    /// flasher's cure pulses `LPPERI_RESET_EN` bit 29 as well — a latch a
+    /// reset did not clear is a latch in a domain the reset did not reach.
+    fn domain(&self) -> Domain {
+        Domain::Lp
     }
 
     fn read(&mut self, off: u32, width: Width, cx: &mut BusCx<'_>) -> u32 {
