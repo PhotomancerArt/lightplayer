@@ -164,18 +164,16 @@ pub fn modem_lpcon() -> RegFile {
 //
 // `docs/defects/2026-09-08-regi2c-is-one-data-register-not-a-register-file.md`
 
-/// `LP_I2C_ANA_MST` — the fourth spin site, found the hard way on the bench
-/// (director note 6, `docs/defects/2026-09-06-c6-analog-master-wedges-the-
-/// bootloader.md`): the bootloader's BBPLL path spins on `I2C0_CTRL` bit 25
-/// (`I2C0_BUSY`) in `regi2c_ctrl_write_reg_mask`, and a chip whose LP
-/// domain holds it high wedges exactly like silicon did on 2026-09-06. It
-/// reads **0** here so the ROM-up boot (M7) does not.
-pub fn lp_i2c_ana_mst() -> RegFile {
-    RegFile::new("LP_I2C_ANA_MST", 0x400)
-        .with_names(regs::LP_I2C_ANA_MST)
-        .with_read_override(0x000, 1 << 25, 0)
-        .with_pac_grades()
-}
+// `LP_I2C_ANA_MST` was an accept block here from P5 until 2026-09-22, with
+// `i2c0_ctrl` bit 25 (`I2C0_BUSY`) pinned 0 and a note calling it the fourth
+// spin site — which is exactly the reason it could not be one: a pinned 0
+// cannot reproduce the hang the bench found (director note 6,
+// `docs/defects/2026-09-06-c6-analog-master-wedges-the-bootloader.md`).
+// `super::lp_i2c_ana_mst` is the block with the gate on it: `LP_PERI`'s
+// `clk_en`/`reset_en` bit 29 ride in on a `LpPeriLines` handle, a
+// transaction started unclocked latches busy, and only a reset-line pulse
+// (or a power cycle) clears it. `busy` still reads 0 on a clean board, so
+// the ROM-up boot still does not hang.
 
 /// `PCR` — the clock and reset controller. The `disable_peripherals` sweep
 /// and the clock-tree apply write it; three registers are read:
@@ -350,12 +348,9 @@ mod tests {
     #[test]
     fn the_spin_bits_read_the_way_the_discovery_says_whatever_was_written() {
         let mut sb = Sandbox::new();
-        // `I2C_ANA_MST`'s own spin bits moved to `super::i2c_ana_mst` with
-        // the block; `LP_I2C_ANA_MST` is still an accept block.
-        let mut lp = lp_i2c_ana_mst();
-        sb.write(&mut lp, 0x000, 0xffff_ffff);
-        assert_eq!(sb.read(&mut lp, 0x000) & (1 << 25), 0, "I2C0_BUSY");
-
+        // Both analog masters' spin bits moved out with their blocks:
+        // `super::i2c_ana_mst` (2026-09-08) and `super::lp_i2c_ana_mst`
+        // (2026-09-22).
         let mut p = pcr();
         assert_eq!((sb.read(&mut p, 0x110) >> 24) & 0x7f, 40);
         sb.write(&mut p, 0x110, 0);
@@ -428,7 +423,6 @@ mod tests {
             (plic_ux(), regs::PLIC_UX),
             (modem_syscon(), regs::MODEM_SYSCON),
             (modem_lpcon(), regs::MODEM_LPCON),
-            (lp_i2c_ana_mst(), regs::LP_I2C_ANA_MST),
             (pcr(), regs::PCR),
             (lp_timer(), regs::LP_TIMER),
             (apb_saradc(), regs::APB_SARADC),

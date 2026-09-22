@@ -3,7 +3,8 @@
 //! - **modelled** — a real type with behaviour and events: the interrupt
 //!   matrix ([`crate::intmatrix`]), [`systimer`], [`timg`] (T0 + the RTC
 //!   calibration), [`lp_wdt`] (the RWDT, with a real stage-0 expiry),
-//!   [`intpri`] (software interrupts), [`rng`], [`efuse`].
+//!   [`intpri`] (software interrupts), [`lp_peri`] (the RNG, and since
+//!   2026-09-22 the LP domain's clock and reset gates), [`efuse`].
 //! - **accept** — a [`lp_emu_esp_common::RegFile`] with a short table of
 //!   exceptions ([`accept`]): every block `esp_hal::init` writes and reads
 //!   back, with the bits it spins on pinned to the value the discovery cites.
@@ -19,6 +20,12 @@
 //! - **modelled, 2026-09-08** — [`i2c_ana_mst`] (the analog I2C master as a
 //!   `{block, register}` store rather than one shared `data` byte, so a
 //!   `regi2c` read answers the register it asked for).
+//! - **modelled, 2026-09-22** — [`lp_i2c_ana_mst`] (the **LP** analog master
+//!   the ESP-IDF bootloader drives, gated by [`lp_peri`]'s `clk_en` /
+//!   `reset_en` bit 29 through an [`lp_peri::LpPeriLines`] handle: a
+//!   transaction started with the clock gated latches `busy`, and only a
+//!   reset-line pulse or a power cycle clears it — the first-flash
+//!   bootloader hang).
 //! - **modelled, M2 P1** — [`io_mux`] (the P5 accept block, now also
 //!   pushing each pad's `fun_ie` into the signal fabric as the pad's input
 //!   enable) and [`gpio`] as a **two-way** view: `in_`, `pin[n].int_type`,
@@ -40,10 +47,11 @@ pub mod gpio;
 pub mod i2c_ana_mst;
 pub mod intpri;
 pub mod io_mux;
+pub mod lp_i2c_ana_mst;
+pub mod lp_peri;
 pub mod lp_wdt;
 pub mod pcr;
 pub mod rmt;
-pub mod rng;
 pub mod sha;
 pub mod spi0;
 pub mod spi1;
@@ -100,8 +108,11 @@ pub struct HostStreams {
 ///
 /// `efuse` seeds the EFUSE block; `seed` seeds the RNG; `streams` are the
 /// consoles' outsides; `flash` is the chip SPI1 drives and `mmu` the page
-/// table SPI0 programs; `usb_host` is the USB host's state at power-on.
-/// Everything else is the same on every machine.
+/// table SPI0 programs; `usb_host` is the USB host's state at power-on;
+/// `lp_peri_clk_en` is `LPPERI_CLK_EN`'s power-on value — the one register
+/// that says whether this is a clean board or one a previous firmware left
+/// with the LP analog master's clock gated. Everything else is the same on
+/// every machine.
 pub fn boot_set(
     efuse: EfuseIdentity,
     seed: u64,
@@ -111,9 +122,13 @@ pub fn boot_set(
     usb_host: usb_sj::HostState,
     reset_cause: crate::loader::ResetCause,
     strap: lp_emu_esp_common::Strap,
+    lp_peri_clk_en: u32,
 ) -> Vec<(u32, u32, BoxedPeripheral)> {
     let clocks = pcr::UartClockLines::default();
     let rmt_clock = pcr::RmtClockLine::default();
+    // The LP domain's own seam: `LP_PERI` writes the two bits,
+    // `LP_I2C_ANA_MST` reads them.
+    let lp_peri = lp_peri::LpPeriLines::new(lp_peri_clk_en);
     vec![
         (
             base::LP_APM,
@@ -139,8 +154,8 @@ pub fn boot_set(
         ),
         (
             base::LP_I2C_ANA_MST,
-            0x400,
-            Box::new(accept::lp_i2c_ana_mst()),
+            lp_i2c_ana_mst::LEN,
+            Box::new(lp_i2c_ana_mst::LpI2cAnaMst::new(lp_peri.clone())),
         ),
         (
             base::PCR,
@@ -166,7 +181,11 @@ pub fn boot_set(
         (base::TEE, 0x1000, Box::new(accept::tee())),
         (base::LP_TEE, 0x100, Box::new(accept::lp_tee())),
         (base::LP_IO, 0x400, Box::new(accept::lp_io())),
-        (base::RNG, 0x400, Box::new(rng::Rng::new(seed))),
+        (
+            base::RNG,
+            0x400,
+            Box::new(lp_peri::LpPeri::new(seed, lp_peri_clk_en, lp_peri)),
+        ),
         (base::EXTMEM, 0x400, Box::new(accept::extmem())),
         (
             base::UART0,
