@@ -214,6 +214,13 @@ OPTIONS:
     --efuse-mac <a0:f2:..>  the MAC the eFuse block reports [the desk board]
     --efuse-rev <0.2>       wafer major.minor [0.2]
     --seed <u64>            the machine PRNG's seed [0]
+    --lpperi-clk-en <hex>   LPPERI_CLK_EN's power-on value, which is what a
+                            board's previous firmware left in the LP domain
+                            [7f800000, the PAC reset]. Bit 29 is
+                            LP_ANA_I2C_CK_EN: clear it (the bench's induced
+                            board read 5f000000) and the second-stage
+                            bootloader hangs on the LP analog master before
+                            its first line, exactly as silicon does
     --trace [BLOCK,BLOCK]   log every MMIO access; an optional block filter
     --trace-file <path>     write the trace here instead of stderr
     --strict-bus            an access nothing claims is fatal; exits 3.
@@ -380,6 +387,9 @@ struct Args {
     strap: Option<lp_emu_esp_common::Strap>,
     reboot_on_reset: bool,
     seed: u64,
+    /// `--lpperi-clk-en <hex>`: `LPPERI_CLK_EN`'s power-on value. `None`
+    /// leaves the PAC reset (a clean board); `Args` derives `Default`.
+    lpperi_clk_en: Option<u32>,
     trace: bool,
     trace_blocks: Vec<String>,
     trace_file: Option<PathBuf>,
@@ -475,6 +485,9 @@ fn run() -> Result<ExitCode, String> {
     // still the opt-in that JD9 leaves it as.
     if args.jit {
         builder = builder.jit(true);
+    }
+    if let Some(word) = args.lpperi_clk_en {
+        builder = builder.lp_peri_clk_en(word);
     }
     if let Some(blocks) = args.jit_blocks {
         builder = builder.jit_blocks(blocks);
@@ -803,6 +816,14 @@ fn parse(argv: Vec<String>) -> Result<Args, String> {
             "--seed" => {
                 let text = value("--seed")?;
                 args.seed = text.parse().map_err(|e| format!("--seed `{text}`: {e}"))?;
+            }
+            "--lpperi-clk-en" => {
+                let text = value("--lpperi-clk-en")?;
+                let body = text.strip_prefix("0x").unwrap_or(&text);
+                args.lpperi_clk_en = Some(
+                    u32::from_str_radix(body, 16)
+                        .map_err(|e| format!("--lpperi-clk-en `{text}`: {e}"))?,
+                );
             }
             "--trace" => {
                 args.trace = true;

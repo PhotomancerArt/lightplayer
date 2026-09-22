@@ -1100,6 +1100,8 @@ pub struct Esp32C6Builder {
     /// `--wire a:b`: pads tied in the fabric before the guest starts.
     wires: Vec<(PadId, PadId)>,
     seed: u64,
+    /// `LPPERI_CLK_EN`'s power-on value: the induced board's gate.
+    lp_peri_clk_en: u32,
     /// Where the flash chip's bytes come from and whether they go back.
     flash: crate::flash::FlashBacking,
     /// The modelled chip's size. `--flash` a larger file and the build
@@ -1169,6 +1171,7 @@ impl Esp32C6Builder {
             pin_script: PinScript::new(),
             wires: Vec::new(),
             seed: 0,
+            lp_peri_clk_en: crate::periph::lp_peri::CLK_EN_RESET,
             flash: crate::flash::FlashBacking::Blank,
             flash_len: crate::flash::DEFAULT_FLASH_LEN,
             boot_set: true,
@@ -1612,6 +1615,21 @@ impl Esp32C6Builder {
         self
     }
 
+    /// `LPPERI_CLK_EN`'s **power-on** value (`--lpperi-clk-en`), which is
+    /// what a board's previous firmware left in the LP domain — the one
+    /// register that decides whether this machine boots or hangs.
+    ///
+    /// Bit 29 is `LP_ANA_I2C_CK_EN`. The default is the PAC reset
+    /// [`crate::periph::lp_peri::CLK_EN_RESET`] (`0x7f80_0000`, bit 29 set:
+    /// a clean board). `0x5f00_0000` is the value the bench induced by hand
+    /// on 2026-09-08 to reproduce the first-flash bootloader hang;
+    /// `0x4100_0000` is what a factory ESP-IDF app had left on the board the
+    /// defect was found on. See [`crate::periph::lp_i2c_ana_mst`].
+    pub fn lp_peri_clk_en(mut self, word: u32) -> Self {
+        self.lp_peri_clk_en = word;
+        self
+    }
+
     /// Where the flash chip's bytes come from, and whether they go back
     /// ([`crate::flash::FlashBacking`]). The default is a blank chip that
     /// lives and dies with the machine.
@@ -1714,6 +1732,7 @@ impl Esp32C6Builder {
             pin_script,
             wires,
             seed,
+            lp_peri_clk_en,
             flash,
             flash_len,
             boot_set,
@@ -1905,6 +1924,7 @@ impl Esp32C6Builder {
                 usb_host,
                 reset_cause,
                 strap,
+                lp_peri_clk_en,
             )
         } else {
             Vec::new()
@@ -3673,6 +3693,12 @@ impl Esp32C6Machine {
     pub fn trap_csrs(&self) -> (u32, u32, u32) {
         let csr = self.harts[0].csr();
         (csr.mcause, csr.mepc, csr.mtval)
+    }
+
+    /// Where the hart is. What a deadline that stopped a spin leaves
+    /// behind, and the address a `Saved PC` would name.
+    pub fn pc(&self) -> u32 {
+        self.harts[0].pc()
     }
 
     /// The hart's integer registers, `x0..x31`.

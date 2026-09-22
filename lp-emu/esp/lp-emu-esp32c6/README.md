@@ -259,6 +259,41 @@ An `--elf` given with `--merged` is never loaded: it is the symbol table
 `--probe` and `--break-at` read, and the reference the cross-check compares
 against.
 
+### The induced board: `--lpperi-clk-en`
+
+A third flag is an input in the same way, and it is the one that decides
+whether this boot happens at all. `--lpperi-clk-en <hex>` seeds
+`LPPERI_CLK_EN`'s **power-on** value — what a board's *previous* firmware
+left in the LP domain, which no reset a host can send restores. Bit 29 is
+`LP_ANA_I2C_CK_EN`, the LP analog I2C master's clock:
+
+```console
+$ lp-emu-esp32c6 --merged …/merged.bin --lpperi-clk-en 5f000000 \
+      --reset-cause usb-uart --strap app --uart0 stdout --timeout 2s
+ESP-ROM:esp32c6-20220919
+Build:Sep 19 2022
+rst:0x15 (USB_UART_HPSYS),boot:0x1e (SPI_FAST_FLASH_BOOT)
+SPIWP:0xee
+mode:DIO, clock div:2
+load:0x4086c410,len:0xd48
+load:0x4086e610,len:0x2d68
+load:0x40875720,len:0x1800
+entry 0x4086c410
+                        ← and then nothing
+```
+
+The second-stage bootloader's first `regi2c` write in `rtc_clk_init` (slave
+`0x6d`, register `0x0e`) latches `LP_I2C_ANA_MST.i2c0_ctrl` busy with no
+clock to finish it, and it spins at `0x4086ed7a` inside its own second load
+segment — *before* `bootloader_console_init()`, which is why there is no
+output and no clue. That is the first-flash bootloader hang, and the two
+defect entries it belongs to are
+`docs/defects/2026-09-06-c6-first-flash-bootloader-hang-lp-analog-i2c-clock.md`
+and `docs/defects/2026-09-06-c6-analog-master-wedges-the-bootloader.md`.
+`0x5f00_0000` is the value the bench induced by hand; `0x4100_0000` is what
+a factory ESP-IDF app had left on the board the defect was found on; the
+default `0x7f80_0000` is the PAC reset, and boots.
+
 Three things the direct path never needed:
 
 - **The ROM's own data image** (`rom::seed_data_image`). `_init` copies 37
@@ -522,11 +557,11 @@ milestone owns.
 | `TIMG1` | `0x6000_9000` | modelled | same type, sources 54/56; the firmware only disables its WDT |
 | `LP_WDT` | `0x600B_1C00` | modelled | RWDT: key-gated config/feed, stage-0 expiry as a scheduled event at `hold·2/136 kHz` (*modeled* from esp-hal's `>> 1` shift); a reset action ends the run with `Outcome::Reset`; interrupt action drives source 18; SWD accepted; `+0x54` named `reserved_054` |
 | `EFUSE` | `0x600B_0800` | modelled | memory seeded from `--efuse-mac`/`--efuse-rev` in esp-hal's byte order (`rd_mac_spi_sys_0/1/3`) |
-| `RNG` | `0x600B_2800` | modelled | `rng_data` (+0x08) = xorshift64\* from `--seed`; deterministic by design; other `LP_PERI` offsets accept |
+| `RNG` (the `LP_PERI` block; `periph/lp_peri.rs`) | `0x600B_2800` | modelled | `rng_data` (+0x08) = xorshift64\* from `--seed`; deterministic by design. Since 2026-09-22 also the LP domain's **gates**: `clk_en` (+0x00, `LPPERI_CLK_EN`) and `reset_en` (+0x04, `LPPERI_RESET_EN`) bit 29 — `LP_ANA_I2C_CK_EN` / `LP_ANA_I2C_RESET_EN` — drive an `LpPeriLines` handle into `LP_I2C_ANA_MST`, carrying both levels **and the rising edge** of the reset line (the flashers' cure is a pulse with no access to the master in between). `clk_en`'s power-on value is `--lpperi-clk-en` (default `0x7f80_0000`, the PAC reset). The peripheral is still named `RNG`: the power-on snapshot restores by name. Other `LP_PERI` offsets accept |
 | `LP_CLKRST` | `0x600B_0400` | accept | `reset_cause` seeded 1 (POWERON) — the mask ROM's `rtc_get_reset_reason` reads it; `lp_clk_conf` = RC_SLOW |
 | `PCR` | `0x6009_6000` | accept | `sysclk_conf.clk_xtal_freq` pinned 40; `cpu_waiti_conf.cpu_wait_mode_force_on` pinned 0; `timergroup.timer_clk_conf` reset = XTAL; `uart(n).clk_conf` drives the two UART clock lines (reset = XTAL, enabled); `rmt_conf`/`rmt_sclk_conf` drive the RMT clock line (reset `0x0050_1000` = PLL/2 = 40 MHz; esp-hal writes `div_num 0` for 80) |
 | `I2C_ANA_MST` | `0x600A_F800` | accept | `ana_conf0.cal_done` pinned 1; `i2c_ctrl(0/1).busy` pinned 0; `ana_conf2` reset 0 (master 1) |
-| `LP_I2C_ANA_MST` | `0x600B_2400` | accept | `i2c0_ctrl.I2C0_BUSY` (bit 25) pinned 0 — the bench's fourth spin site |
+| `LP_I2C_ANA_MST` | `0x600B_2400` | modelled | the **LP** analog master, the one the ESP-IDF second-stage bootloader drives, **gated by `LP_PERI`**. Clocked and not reset: the transaction runs against this block's own `{block, register}` store and `busy` reads 0 — what every clean boot has always seen; the answer to a read lands in `i2c0_data.rdata` (bits 0:7), not in `i2c0_ctrl` as on the HP master. Clock gated: the command word is stored, the transaction does **not** run, and `busy` **latches** — the first-flash bootloader hang, reproduced. Turning the clock back on does not clear it; a rising edge of `reset_en` bit 29 does, and returns the window to its reset values, and while that line is high the block ignores writes. Grades: `i2c0_ctrl` and `i2c0_data` *modeled*, the rest the PAC's. See `tests/bootloader_hang.rs` |
 | `ASSIST_DEBUG` | `0x600C_2000` | accept | `cpu0.debug_mode` pinned 0 (no debugger: watchpoints arm, `wfi` runs) |
 | `GPIO` | `0x6009_1000` | modelled (M5 P2) | a routing **view** over the bus's signal fabric: `func_out_sel_cfg[n]` routes pad `n` to `out_sel` (128 = follow `GPIO_OUT[n]`, `inv_sel` inverts, `oen_sel` recorded and reported as `oe=`, never gated on), `out`/`out_w1ts`/`out_w1tc` are the output bitmap a `GPIO_OUT` pad follows, `enable`/`w1ts`/`w1tc` the OE bitmap. The `w1ts`/`w1tc` registers fold into `out`/`enable` and read back 0 (write-only in the PAC). Since M2 P1 it is a **two-way** view: `in_` is each pad's resolved fabric level for the pads whose input enable is set, `pin[n].int_type` is decoded (0 disable / 1 posedge / 2 negedge / 3 any edge / 4 low level / 5 high level, the PAC's own numbering), `status` is the sticky latch with `status_w1ts`/`status_w1tc` over it (write-only, read back 0), `pcpu_int` is `status` gated by `pin[n]` bit 13 (`int_ena` bit 0), and source **30** is held high as a LEVEL while any `pcpu_int` bit is pending. `pcpu_nmi_int` and source 31 are **not** raised (esp-hal never sets `int_ena` bit 14 on this chip); `in1`/`status1`/`pcpu_int1` read 0 — the C6 has 31 pads. Per-register grades (the file header's table; `--strict-grade`): the registers above plus `strap` and `func*_out_sel_cfg` *documented*, everything else *modeled*, nothing *measured* until M2 P2's transcript. Everything else is still a `RegFile`. A pad is **observed once the guest writes its routing**: seeding 31 routes from the `0x80` reset value would give a boot that drives nothing 31 pads to decode. See "The pin" |
 | `IO_MUX` | `0x6009_0000` | modelled (M2 P1) | the P5 accept block, all 31 pads at reset `0x0800`, plus one seam: `gpio[n].fun_ie` (bit 9) is pushed into the signal fabric as the pad's **input enable**, which is what `GPIO.in_` reads back. Everything else in the word — `fun_wpu`/`fun_wpd` (the *value* of a pull is not modelled), `fun_drv`, `filter_en`, the `slp_*` bits and `mcu_sel` — is accept-and-remember |
@@ -566,6 +601,16 @@ configuration (plan DD22); `INTERRUPT_CORE0` and `PLIC_MX` are register
 *views* that write into it through `BusCx::matrix` and read back from it.
 One state, nothing to keep in sync, and `Bus::pending_cpu_interrupt` stays a
 pure function of the source levels.
+
+The LP domain needed the same shape one power domain over: `LP_PERI` owns
+the clock gate and the reset line of the LP analog I2C master, and
+`LP_I2C_ANA_MST` is the block that stops working when they move. The handle
+between them (`periph::lp_peri::LpPeriLines`) carries both register words
+**and the rising edge** of `reset_en` bit 29 — the flashers' cure for a
+wedged board is `clk_en |= bit29; reset_en |= bit29; reset_en &= !bit29`,
+three writes to `LP_PERI` with no bus access to the master in between, so a
+consumer that only sampled the level would never see the pulse that clears
+the latch.
 
 A peripheral cannot reset the chip. When the RWDT's stage 0 expires with a
 reset action it leaves a `MachineRequest::Reset` on the bus, and the run ends
@@ -1567,6 +1612,7 @@ lp-emu-esp32c6 --elf <app.elf> [--rom <path>] [--time-grade t1|t2|t3]
     [--pin-script <file>]... [--wire <a>:<b>]...
     [--tx-log stderr|file:<path>] [--trap-log stdout|file:<path>]
     [--efuse-mac a0:f2:62:87:b4:8c] [--efuse-rev 0.2] [--seed <u64>]
+    [--lpperi-clk-en <hex>]
     [--trace [BLOCK,BLOCK…]] [--trace-file <path>] [--strict-bus]
     [--strict-grade modeled|documented|measured]
     [--strict-grade-blocks NAME[,NAME…]]
@@ -1860,6 +1906,7 @@ is a local affair.
 | `rmt_chase`, `rmt_chase_replay` | M5's chase: the words, the pad, the payload's checksums against the pad, the telemetry line |
 | `shader_oracle_pin` | M5 P4's pin claim on the shipped image: `walks/shader-oracle.script`'s first lit frame off gpio18 against the host oracle, under both grades |
 | `basic_pin` | `examples/basic` on the pad: whole, latched 241-LED frames at a steady period, never their contents |
+| `bootloader_hang` | the first-flash bootloader hang: the reference merged image booted ROM-up with `--lpperi-clk-en 0x5f000000` spins in bootloader segment 2 on `LP_I2C_ANA_MST.i2c0_ctrl` busy and never prints `2nd stage bootloader`; the same image with the PAC reset `clk_en` does |
 | `host_absent`, `boot_no_radio`, `boot`, `rom_*`, `stack_guard` | M3's |
 
 `just test-emu-c6` is the whole set: the machine's boot tests, the M3 and M4
