@@ -194,16 +194,23 @@ OPTIONS:
                             Repeatable, and transitive. `<a>` is the TX side
                             and is the only place gpio18 is allowed
                             (`--wire 18:19`, the strip pad into an RX pad)
-    --reset-cause poweron|usb-uart
+    --reset-cause poweron|usb-uart|tg0-wdt
                             what LP_CLKRST.reset_cause says, and so what the
-                            mask ROM prints as `rst:0x..`: a cold chip, or a
+                            mask ROM prints as `rst:0x..`: a cold chip, a
                             host's DTR/RTS dance on the serial bridge (the
                             silicon boot transcripts were captured after one
-                            of those) [poweron]
+                            of those), or TIMG0's watchdog — which is where a
+                            board that has just been shot by its own
+                            flash-boot protection starts [poweron]
     --reboot-on-reset       PERFORM a reset request instead of reporting it:
                             reboot the chip into the strap the request names
-                            (the USB reset dance, the RWDT's stage action) and
-                            carry on. Off by default — three recorded
+                            (the USB reset dance, the RWDT's stage action,
+                            MWDT0's flash-boot protection) and carry on. The
+                            next boot's banner carries the cause the request
+                            named, and a watchdog reset also leaves the hart's
+                            PC in ASSIST_DEBUG's crash recorder, which the ROM
+                            prints as `Saved PC:0x..`.
+                            Off by default — three recorded
                             scenarios read the exit code as their evidence.
                             Needs a boot chain, so it is only useful with
                             --merged
@@ -795,7 +802,7 @@ fn parse(argv: Vec<String>) -> Result<Args, String> {
                 let text = value("--reset-cause")?;
                 args.reset_cause =
                     lp_emu_esp32c6::loader::ResetCause::parse(&text).ok_or_else(|| {
-                        format!("--reset-cause `{text}`: expected poweron or usb-uart")
+                        format!("--reset-cause `{text}`: expected poweron, usb-uart or tg0-wdt")
                     })?;
             }
             "--reboot-on-reset" => args.reboot_on_reset = true,
