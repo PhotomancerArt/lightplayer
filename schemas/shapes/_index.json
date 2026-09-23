@@ -26,6 +26,8 @@
   "lpc_model::nodes::playlist::playlist_def::PlaylistDef": 1520921198,
   "lpc_model::nodes::playlist::playlist_entry::PlaylistEntry": 899201012,
   "lpc_model::nodes::playlist::playlist_state::PlaylistState": 237636858,
+  "lpc_model::nodes::power_button::power_button_def::PowerButtonDef": 1590289769,
+  "lpc_model::nodes::power_button::power_button_def::PowerButtonState": 618579751,
   "lpc_model::nodes::provenance_def::ProvenanceDef": 718754952,
   "lpc_model::nodes::radio::control_radio_def::ControlRadioDef": 4099574392,
   "lpc_model::nodes::radio::control_radio_def::ControlRadioState": 1057824914,

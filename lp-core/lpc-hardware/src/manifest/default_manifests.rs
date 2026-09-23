@@ -131,7 +131,7 @@ fn normalize_resource_for_emu(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{HardwareSystem, HwEndpointSpec, HwRegistry};
+    use crate::{HardwareSystem, HwCapability, HwEndpointSpec, HwRegistry};
 
     #[test]
     fn default_esp32c6_manifest_loads_checked_in_board_profile() {
@@ -146,6 +146,25 @@ mod tests {
                 .and_then(|resource| resource.reserved_reason())
                 .is_some()
         );
+    }
+
+    /// Only the C6's LP GPIOs (0–7) can be an EXT1 deep-sleep wake source,
+    /// so on the XIAO the wake-capable labelled pins are D0–D2 — and D9, the
+    /// catalog's usual button pin (GPIO20), is not one of them.
+    #[test]
+    fn default_esp32c6_manifest_marks_exactly_the_lp_gpios_as_wake_capable() {
+        let manifest = default_esp32c6_hardware_manifest();
+
+        for gpio in 0..=30 {
+            let Some(resource) = manifest.resource(&HwAddress::gpio(gpio)) else {
+                continue;
+            };
+            assert_eq!(
+                resource.supports(HwCapability::DeepSleepWake),
+                gpio <= 7,
+                "gpio{gpio}"
+            );
+        }
     }
 
     #[test]

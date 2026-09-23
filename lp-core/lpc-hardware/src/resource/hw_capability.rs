@@ -19,4 +19,7 @@ pub enum HwCapability {
     Rmt,
     /// Packet radio peripheral.
     Radio,
+    /// GPIO that can wake the chip from deep sleep (on the ESP32-C6, the LP
+    /// GPIOs 0–7 — the only pins its EXT1 wake source can watch).
+    DeepSleepWake,
 }

@@ -66,7 +66,8 @@
       "display_label": "D0",
       "capabilities": [
         "gpio-output",
-        "gpio-input"
+        "gpio-input",
+        "deep-sleep-wake"
       ],
       "aliases": [
         "IO0",
@@ -78,7 +79,8 @@
       "display_label": "D1",
       "capabilities": [
         "gpio-output",
-        "gpio-input"
+        "gpio-input",
+        "deep-sleep-wake"
       ],
       "aliases": [
         "IO1",
@@ -90,7 +92,8 @@
       "display_label": "D2",
       "capabilities": [
         "gpio-output",
-        "gpio-input"
+        "gpio-input",
+        "deep-sleep-wake"
       ],
       "aliases": [
         "IO2",
@@ -102,7 +105,8 @@
       "display_label": "GPIO3",
       "capabilities": [
         "gpio-output",
-        "gpio-input"
+        "gpio-input",
+        "deep-sleep-wake"
       ],
       "aliases": [
         "IO3"
@@ -113,7 +117,8 @@
       "display_label": "GPIO4",
       "capabilities": [
         "gpio-output",
-        "gpio-input"
+        "gpio-input",
+        "deep-sleep-wake"
       ],
       "aliases": [
         "IO4"
@@ -124,7 +129,8 @@
       "display_label": "GPIO5",
       "capabilities": [
         "gpio-output",
-        "gpio-input"
+        "gpio-input",
+        "deep-sleep-wake"
       ],
       "aliases": [
         "IO5"
@@ -135,7 +141,8 @@
       "display_label": "GPIO6",
       "capabilities": [
         "gpio-output",
-        "gpio-input"
+        "gpio-input",
+        "deep-sleep-wake"
       ],
       "aliases": [
         "IO6"
@@ -146,7 +153,8 @@
       "display_label": "GPIO7",
       "capabilities": [
         "gpio-output",
-        "gpio-input"
+        "gpio-input",
+        "deep-sleep-wake"
       ],
       "aliases": [
         "IO7"

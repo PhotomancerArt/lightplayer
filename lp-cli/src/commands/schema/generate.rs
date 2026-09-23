@@ -474,6 +474,7 @@ mod tests {
         let expected = [
             "Module",
             "Button",
+            "PowerButton",
             "Clock",
             "Texture",
             "Shader",

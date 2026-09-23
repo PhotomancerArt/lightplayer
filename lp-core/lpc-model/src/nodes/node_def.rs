@@ -19,6 +19,7 @@ use crate::nodes::fluid::FluidDef;
 use crate::nodes::module::ModuleDef;
 use crate::nodes::output::OutputDef;
 use crate::nodes::playlist::PlaylistDef;
+use crate::nodes::power_button::PowerButtonDef;
 use crate::nodes::radio::ControlRadioDef;
 use crate::nodes::shader::{ComputeShaderDef, ShaderDef};
 use crate::nodes::texture::TextureDef;
@@ -31,6 +32,7 @@ use crate::{
 
 const MODULE_VARIANT: &str = "Module";
 const BUTTON_VARIANT: &str = "Button";
+const POWER_BUTTON_VARIANT: &str = "PowerButton";
 const CLOCK_VARIANT: &str = "Clock";
 const TEXTURE_VARIANT: &str = "Texture";
 const SHADER_VARIANT: &str = "Shader";
@@ -43,6 +45,7 @@ const FIXTURE_VARIANT: &str = "Fixture";
 const NODE_DEF_VARIANT_NAMES: &[&str] = &[
     MODULE_VARIANT,
     BUTTON_VARIANT,
+    POWER_BUTTON_VARIANT,
     CLOCK_VARIANT,
     TEXTURE_VARIANT,
     SHADER_VARIANT,
@@ -64,6 +67,7 @@ pub enum NodeDef {
     #[default]
     Module(ModuleDef),
     Button(ButtonDef),
+    PowerButton(PowerButtonDef),
     Clock(ClockDef),
     Texture(TextureDef),
     Shader(ShaderDef),
@@ -167,6 +171,7 @@ impl NodeDef {
         match kind {
             NodeKind::Module => Self::Module(ModuleDef::default()),
             NodeKind::Button => Self::Button(ButtonDef::default()),
+            NodeKind::PowerButton => Self::PowerButton(PowerButtonDef::default()),
             NodeKind::Clock => Self::Clock(ClockDef::default()),
             NodeKind::Texture => Self::Texture(TextureDef::default()),
             NodeKind::Shader => Self::Shader(ShaderDef::default()),
@@ -184,6 +189,7 @@ impl NodeDef {
         match self {
             Self::Module(_) => NodeKind::Module,
             Self::Button(_) => NodeKind::Button,
+            Self::PowerButton(_) => NodeKind::PowerButton,
             Self::Clock(_) => NodeKind::Clock,
             Self::Texture(_) => NodeKind::Texture,
             Self::Shader(_) => NodeKind::Shader,
@@ -201,6 +207,7 @@ impl NodeDef {
         match self {
             Self::Module(_) => ModuleDef::KIND,
             Self::Button(_) => ButtonDef::KIND,
+            Self::PowerButton(_) => PowerButtonDef::KIND,
             Self::Clock(_) => ClockDef::KIND,
             Self::Texture(_) => TextureDef::KIND,
             Self::Shader(_) => ShaderDef::KIND,
@@ -218,6 +225,7 @@ impl NodeDef {
         match self {
             Self::Module(_) => MODULE_VARIANT,
             Self::Button(_) => BUTTON_VARIANT,
+            Self::PowerButton(_) => POWER_BUTTON_VARIANT,
             Self::Clock(_) => CLOCK_VARIANT,
             Self::Texture(_) => TEXTURE_VARIANT,
             Self::Shader(_) => SHADER_VARIANT,
@@ -502,6 +510,7 @@ impl SlotAccess for NodeDef {
         match self {
             Self::Module(def) => def.shape_id(),
             Self::Button(def) => def.shape_id(),
+            Self::PowerButton(def) => def.shape_id(),
             Self::Clock(def) => def.shape_id(),
             Self::Texture(def) => def.shape_id(),
             Self::Shader(def) => def.shape_id(),
@@ -518,6 +527,7 @@ impl SlotAccess for NodeDef {
         match self {
             Self::Module(def) => def.data(),
             Self::Button(def) => def.data(),
+            Self::PowerButton(def) => def.data(),
             Self::Clock(def) => def.data(),
             Self::Texture(def) => def.data(),
             Self::Shader(def) => def.data(),
@@ -544,6 +554,7 @@ impl SlotMutAccess for NodeDef {
         match self {
             Self::Module(def) => def.data_mut(),
             Self::Button(def) => def.data_mut(),
+            Self::PowerButton(def) => def.data_mut(),
             Self::Clock(def) => def.data_mut(),
             Self::Texture(def) => def.data_mut(),
             Self::Shader(def) => def.data_mut(),
@@ -1369,6 +1380,7 @@ mod tests {
         for kind in [
             NodeKind::Module,
             NodeKind::Button,
+            NodeKind::PowerButton,
             NodeKind::Clock,
             NodeKind::Texture,
             NodeKind::Shader,

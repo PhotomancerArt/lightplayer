@@ -7,6 +7,7 @@ pub mod node_def;
 pub mod output;
 pub mod pattern_project;
 pub mod playlist;
+pub mod power_button;
 pub mod projection_shape;
 pub mod provenance_def;
 pub mod radio;
@@ -43,6 +44,9 @@ pub use pattern_project::{
 pub use playlist::{
     PlaylistDef, PlaylistDefView, PlaylistEntry, PlaylistEntryView, PlaylistState,
     PlaylistStateView,
+};
+pub use power_button::{
+    PowerButtonDef, PowerButtonDefView, PowerButtonMode, PowerButtonState, PowerButtonStateView,
 };
 pub use projection_shape::{FlipMode, MirrorMode, ProjectionShape};
 pub use provenance_def::ProvenanceDef;

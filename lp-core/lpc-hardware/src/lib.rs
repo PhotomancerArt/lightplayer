@@ -38,7 +38,9 @@ pub mod resource;
 pub use output_error::OutputError;
 
 pub use drivers::button::button_debouncer::ButtonDebouncer;
-pub use drivers::button::button_driver::{ButtonConfig, ButtonDriver, ButtonInput};
+pub use drivers::button::button_driver::{
+    ButtonActive, ButtonConfig, ButtonDriver, ButtonInput, ButtonPull,
+};
 pub use drivers::button::button_event::{ButtonEvent, ButtonEventKind};
 pub use drivers::button::virtual_button::VirtualButton;
 pub use drivers::button::virtual_button_driver::VirtualButtonDriver;
