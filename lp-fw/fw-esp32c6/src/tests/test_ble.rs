@@ -85,6 +85,23 @@ pub async fn run_ble_test(_: embassy_executor::Spawner) -> ! {
     esp_alloc::heap_allocator!(#[esp_hal::ram(reclaimed)] size: 65_536);
     heap("heap-init");
 
+    // XIAO ESP32C6 RF switch (Seeed wiki): GPIO3 LOW powers the switch in
+    // front of the antenna, GPIO14 LOW selects the on-board ceramic antenna
+    // (HIGH = the U.FL connector). Nothing in fw-esp32c6 drives either pin, so
+    // until now every XIAO build has run the radio into an unpowered switch.
+    // The drivers are leaked so the pins stay driven for the life of the image.
+    core::mem::forget(esp_hal::gpio::Output::new(
+        peripherals.GPIO3,
+        esp_hal::gpio::Level::Low,
+        esp_hal::gpio::OutputConfig::default(),
+    ));
+    core::mem::forget(esp_hal::gpio::Output::new(
+        peripherals.GPIO14,
+        esp_hal::gpio::Level::Low,
+        esp_hal::gpio::OutputConfig::default(),
+    ));
+    println!("[BLE] xiao rf switch: GPIO3=LOW (switch on), GPIO14=LOW (on-board antenna)");
+
     let sw_int = SoftwareInterruptControl::new(peripherals.SW_INTERRUPT);
     let timg0 = TimerGroup::new(peripherals.TIMG0);
     esp_rtos::start(timg0.timer0, sw_int.software_interrupt0);

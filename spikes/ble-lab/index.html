@@ -116,8 +116,17 @@ async function reconnectLoop() {
   const t0 = Date.now();
   for (let attempt = 1, wait = 500; attempt <= 20 && S.autoReconnect && !S.connected; attempt++, wait = Math.min(wait * 2, 8000)) {
     event("reconnecting", { attempt });
-    try { await attach(); event("reconnected", { afterMs: Date.now() - t0, attempts: attempt }); break; }
-    catch (e) { show(`reconnect ${attempt}: ${e.message}`, "warn"); await sleep(wait); }
+    // A gatt.connect() can hang forever (seen 2026-09-23 after a 0x13 drop),
+    // so each attempt is bounded and a timed-out one is torn down before the
+    // next, or the loop sits on attempt 1 for good.
+    try {
+      await Promise.race([attach(), sleep(10000).then(() => { throw new Error("attempt timed out"); })]);
+      event("reconnected", { afterMs: Date.now() - t0, attempts: attempt }); break;
+    } catch (e) {
+      show(`reconnect ${attempt}: ${e.message}`, "warn");
+      try { S.device.gatt.disconnect(); } catch {}
+      await sleep(wait);
+    }
   }
   if (!S.connected && S.autoReconnect) event("gave-up", { afterMs: Date.now() - t0 });
   S.reconnecting = false; chips();
@@ -234,7 +243,7 @@ async function execute(cmd) {
       return { ok: false, error: `unknown op ${op}` };
   }
 }
-const lab = { S, sleep, attach, execute, enc, dec };
+const lab = { S, sleep, attach, reconnectLoop, execute, enc, dec };
 window.lab = lab;
 
 /* ======================== control channel (SSE) ======================= */
