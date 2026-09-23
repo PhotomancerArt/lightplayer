@@ -375,6 +375,7 @@ fn a_gradient_config_panel_write_round_trips_on_a_palette_channel() {
         set: vec![solid([1.0, 0.0, 0.0]), solid([0.0, 0.4, 1.0])],
         step_seconds: 20.0,
         fade_seconds: 0.5,
+        pinned: None,
     };
     let response = project.panel_write(&WirePanelWriteRequest {
         scope,
@@ -426,6 +427,7 @@ fn a_gradient_panel_write_survives_a_wire_project_read() {
         set: vec![solid([1.0, 0.0, 0.0]), solid([0.0, 0.4, 1.0])],
         step_seconds: 20.0,
         fade_seconds: 0.5,
+        pinned: None,
     };
     let response = project.panel_write(&WirePanelWriteRequest {
         scope,

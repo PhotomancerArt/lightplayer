@@ -97,7 +97,7 @@ use crate::slot_codec::{JsonSyntaxSource, SyntaxEvent, SyntaxEventSource};
 /// - `2` — shader nodes replaced the `glsl_opts` record (`add_sub`/`mul`/
 ///   `div` Q32 mode slots) with a single `float_mode` slot. Artifacts at
 ///   version `1` are refused, not migrated.
-pub const PROJECT_FORMAT_VERSION: u32 = 10;
+pub const PROJECT_FORMAT_VERSION: u32 = 11;
 
 /// A project's authored kind (module authoring unit, P1 —
 /// `docs/design/modules.md`): the default general project, or one of two

@@ -294,6 +294,7 @@ fn four_solids(step_seconds: f32, fade_seconds: f32) -> GradientConfig {
         ],
         step_seconds,
         fade_seconds,
+        pinned: None,
     }
 }
 

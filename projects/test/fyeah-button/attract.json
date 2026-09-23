@@ -29,6 +29,7 @@
         "kind": "cycle",
         "step_seconds": 9.0909091,
         "fade_seconds": 0.7272727,
+        "pinned": -1,
         "set": [
           {
             "space": "oklab",

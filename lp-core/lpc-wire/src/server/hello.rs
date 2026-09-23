@@ -33,6 +33,12 @@ use serde::{Deserialize, Serialize};
 ///
 /// # History
 ///
+/// - 21: `GradientConfig` gained a fifth storage field, `pinned` (an
+///   `i32`, `-1` for none) — the palette chooser's "show just this one"
+///   pin on a cycle. Every slot value, panel write and inventory frame
+///   that carries a palette changes shape, and the reader requires all
+///   five fields, so an old peer cannot decode a new palette (or the
+///   reverse). Rides with project format 11.
 /// - 20: `ClientRequest::ClearFaults` + its `ServerMsgBody::ClearFaults {
 ///   ledger_cleared }` ack — the studio's Clear faults verb, which forgets
 ///   the crash-recovery ledger and re-arms the engine's faulted nodes.
@@ -176,7 +182,7 @@ use serde::{Deserialize, Serialize};
 /// as `None` on new Studio and a new firmware's extra fields are ignored
 /// by old Studio. Bumping for those would mark every board running
 /// current firmware Incompatible in exchange for nothing.
-pub const WIRE_PROTO_VERSION: u32 = 20;
+pub const WIRE_PROTO_VERSION: u32 = 21;
 
 /// Unsolicited/boot-time server identity, version, and capability report.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -483,7 +489,7 @@ mod tests {
     #[test]
     fn the_proto_version_is_pinned_to_its_history() {
         assert_eq!(
-            WIRE_PROTO_VERSION, 20,
+            WIRE_PROTO_VERSION, 21,
             "if you meant to bump, add the History entry in this file's \
              doc comment and update this pin"
         );

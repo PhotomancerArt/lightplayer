@@ -886,7 +886,7 @@ mod tests {
         let mut fs = lpfs::LpFsMemory::new();
         // Both halves: the container manifest gates the load (D-A refuses a
         // project without one), the root module carries the def.
-        fs.write_file_mut(lpfs::LpPath::new("/project.json"), br#"{"format": 10}"#)
+        fs.write_file_mut(lpfs::LpPath::new("/project.json"), br#"{"format": 11}"#)
             .expect("write container manifest");
         fs.write_file_mut(lpfs::LpPath::new("/module.json"), br#"{"kind": "Module"}"#)
             .expect("write root module");

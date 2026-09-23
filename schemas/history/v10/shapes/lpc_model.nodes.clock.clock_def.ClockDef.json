@@ -1,0 +1,110 @@
+{
+  "record": {
+    "fields": [
+      {
+        "name": "bindings",
+        "shape": {
+          "map": {
+            "key": "string",
+            "meta": {},
+            "value": {
+              "ref": {
+                "id": 1885459118
+              }
+            }
+          }
+        }
+      },
+      {
+        "name": "transport",
+        "panel": "show",
+        "shape": {
+          "record": {
+            "fields": [
+              {
+                "default_bind": "bus:clock.play_state",
+                "name": "play_state",
+                "role": "debug",
+                "semantics": {
+                  "direction": "consumed"
+                },
+                "shape": {
+                  "value": {
+                    "shape": {
+                      "editor": {
+                        "dropdown": {
+                          "options": [
+                            {
+                              "label": "Playing",
+                              "value": "playing"
+                            },
+                            {
+                              "label": "Paused",
+                              "value": "paused"
+                            }
+                          ]
+                        }
+                      },
+                      "id": 256914120,
+                      "meta": {},
+                      "ty": "string"
+                    }
+                  }
+                }
+              },
+              {
+                "default_bind": "bus:clock.rate",
+                "name": "rate",
+                "role": "debug",
+                "semantics": {
+                  "direction": "consumed"
+                },
+                "shape": {
+                  "value": {
+                    "shape": {
+                      "editor": {
+                        "slider": {
+                          "max": 8.0,
+                          "min": 0.25
+                        }
+                      },
+                      "id": 885023043,
+                      "meta": {},
+                      "ty": "f32"
+                    }
+                  }
+                }
+              },
+              {
+                "default_bind": "bus:clock.scrub",
+                "name": "scrub_offset_seconds",
+                "role": "debug",
+                "semantics": {
+                  "direction": "consumed"
+                },
+                "shape": {
+                  "value": {
+                    "shape": {
+                      "editor": {
+                        "slider": {
+                          "max": 10.0,
+                          "min": -10.0,
+                          "step": 0.01666666753590107
+                        }
+                      },
+                      "id": 3375024484,
+                      "meta": {},
+                      "ty": "f32"
+                    }
+                  }
+                }
+              }
+            ],
+            "meta": {}
+          }
+        }
+      }
+    ],
+    "meta": {}
+  }
+}
