@@ -101,8 +101,7 @@ client of a real board:
   `upload-walk.sh` runs the binary with `--usb-host attached`, the explicit
   opt-in above.
 - The `lp-emu-esp32c6` binary's default is `absent`, and it is unchanged.
-  `lp-cli emu run` had kept `attached` here too; the follow-up below
-  changed it.
+  `lp-cli emu run` had `attached` too; it gets the same fix, below.
 - The Studio tab backing (`emulator_tab.js`, `usb_host=attached`) has no
   byte socket and no `TcpHost` backlog. It sends `open` itself.
 - The committed `lp-app/lpa-link/testdata/device-traces/*.emu.failed.jsonl`
@@ -134,8 +133,7 @@ Measured on the reference image (`d6cfaa205`, `lp-emu:esp32c6:t1`):
   the first heartbeat (boot console and boot hello), whose `uptime_ms` was
   5 000, so the test fails on the replayed heartbeat.
 
-**Follow-up: `lp-cli emu run --link`** (the gap #791 left, closed in the
-change that added this section). `emu run` defaulted to `attached` from
+**The same fix for `lp-cli emu run --link`.** `emu run` defaulted to `attached` from
 power-on however it was run, so a client that connected to `--link` late was
 replayed the boot console and every heartbeat, exactly as `emu serve` had
 been. The same rule now applies to it. When the USB-Serial-JTAG port *is*
