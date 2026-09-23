@@ -20,6 +20,8 @@ static HOST_ENUMERATED: AtomicBool = AtomicBool::new(true);
 
 /// Whether a USB host (Studio, a computer) is on the USB-Serial-JTAG port
 /// right now. A charger or power bank sends no SOF, so it does not count.
+/// Read only by the product's power platform (`hardware::power`).
+#[cfg(all(not(fw_harness), feature = "server"))]
 pub fn host_enumerated() -> bool {
     HOST_ENUMERATED.load(Ordering::Relaxed)
 }
