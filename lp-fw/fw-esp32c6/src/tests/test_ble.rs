@@ -33,9 +33,11 @@ use core::fmt::Write as _;
 use embassy_sync_07 as embassy_sync;
 
 use bt_hci::cmd::le::{
+    LeConnUpdate, LeReadLocalSupportedFeatures, LeReadPhy,
     LeRemoteConnectionParameterRequestNegativeReply, LeRemoteConnectionParameterRequestReply,
 };
-use bt_hci::controller::ControllerCmdAsync;
+use bt_hci::cmd::status::ReadRssi;
+use bt_hci::controller::{ControllerCmdAsync, ControllerCmdSync};
 use embassy_futures::join::join;
 use embassy_futures::select::select;
 use embassy_time::{Duration, Instant, Timer};
@@ -159,7 +161,7 @@ pub async fn run_ble_test(_: embassy_executor::Spawner) -> ! {
                 Ok(conn) => {
                     reprint_boot_stages();
                     heap("connected");
-                    select(gatt_events(&server, &conn, &stack), heartbeat()).await;
+                    select(gatt_events(&server, &conn, &stack), heartbeat(&conn, &stack)).await;
                     heap("disconnected");
                 }
                 Err(e) => {
@@ -226,9 +228,7 @@ async fn gatt_events<C, P: PacketPool>(
     conn: &GattConnection<'_, '_, P>,
     stack: &Stack<'_, C, P>,
 ) where
-    C: Controller
-        + ControllerCmdAsync<LeRemoteConnectionParameterRequestReply>
-        + ControllerCmdAsync<LeRemoteConnectionParameterRequestNegativeReply>,
+    C: LabController,
 {
     let rx = &server.uart.rx;
     let tx = &server.uart.tx;
@@ -237,6 +237,8 @@ async fn gatt_events<C, P: PacketPool>(
     // `count` write reports the total back and resets it.
     let mut counted = 0usize;
     let mut first_at: Option<Instant> = None;
+    // Live-pixel meter: any write whose first byte is FRAME_MARKER is a frame.
+    let mut frames = FrameStats::new();
     let reason = loop {
         match conn.next().await {
             GattConnectionEvent::Disconnected { reason } => break reason,
@@ -245,7 +247,9 @@ async fn gatt_events<C, P: PacketPool>(
                 if let GattEvent::Write(w) = &event {
                     if w.handle() == rx.handle {
                         let data = w.data();
-                        if data.len() == BURST_PACKET {
+                        if data.first() == Some(&FRAME_MARKER) {
+                            frames.record(data.len());
+                        } else if data.len() == BURST_PACKET {
                             first_at.get_or_insert_with(Instant::now);
                             counted += data.len();
                         } else {
@@ -261,6 +265,34 @@ async fn gatt_events<C, P: PacketPool>(
                 if let Some(bytes) = echo {
                     if let Some(n) = burst_request(&bytes) {
                         burst(tx, conn, n).await;
+                    } else if bytes.as_slice() == b"frames" {
+                        let mut line: heapless::String<200> = heapless::String::new();
+                        frames.report(&mut line);
+                        println!("[BLE] {line}");
+                        reply_text(tx, conn, &line).await;
+                        frames = FrameStats::new();
+                    } else if bytes.as_slice() == b"params" {
+                        let mut line: heapless::String<200> = heapless::String::new();
+                        describe_link(conn, stack, &mut line).await;
+                        println!("[BLE] {line}");
+                        reply_text(tx, conn, &line).await;
+                    } else if let Some((min_us, max_us)) = interval_request(&bytes) {
+                        let params = RequestedConnParams {
+                            min_connection_interval: Duration::from_micros(min_us),
+                            max_connection_interval: Duration::from_micros(max_us),
+                            max_latency: 0,
+                            supervision_timeout: Duration::from_secs(4),
+                            ..Default::default()
+                        };
+                        let result = conn.raw().update_connection_params(stack, &params).await;
+                        let mut line: heapless::String<120> = heapless::String::new();
+                        let _ = write!(
+                            line,
+                            "interval request {min_us}..{max_us} us: {}",
+                            if result.is_ok() { "sent" } else { "FAILED" }
+                        );
+                        println!("[BLE] {line}");
+                        reply_text(tx, conn, &line).await;
                     } else if bytes.as_slice() == b"count" {
                         let ms = first_at.map(|t| t.elapsed().as_millis()).unwrap_or(0);
                         println!("[BLE] count bytes={counted} ms={ms}");
@@ -352,11 +384,156 @@ async fn burst<P: PacketPool>(
     );
 }
 
-async fn heartbeat() {
+async fn heartbeat<C: LabController, P: PacketPool>(
+    conn: &GattConnection<'_, '_, P>,
+    stack: &Stack<'_, C, P>,
+) {
     loop {
         Timer::after(Duration::from_secs(5)).await;
         heap("heartbeat");
+        let mut line: heapless::String<200> = heapless::String::new();
+        describe_link(conn, stack, &mut line).await;
+        println!("[BLE] {line}");
     }
+}
+
+/// Every controller command the lab uses, in one bound.
+trait LabController:
+    Controller
+    + ControllerCmdAsync<LeRemoteConnectionParameterRequestReply>
+    + ControllerCmdAsync<LeRemoteConnectionParameterRequestNegativeReply>
+    + ControllerCmdAsync<LeConnUpdate>
+    + ControllerCmdSync<LeReadLocalSupportedFeatures>
+    + ControllerCmdSync<LeReadPhy>
+    + ControllerCmdSync<ReadRssi>
+{
+}
+impl<T> LabController for T where
+    T: Controller
+        + ControllerCmdAsync<LeRemoteConnectionParameterRequestReply>
+        + ControllerCmdAsync<LeRemoteConnectionParameterRequestNegativeReply>
+        + ControllerCmdAsync<LeConnUpdate>
+        + ControllerCmdSync<LeReadLocalSupportedFeatures>
+        + ControllerCmdSync<LeReadPhy>
+        + ControllerCmdSync<ReadRssi>
+{
+}
+
+/// First byte of a live-pixel frame write.
+const FRAME_MARKER: u8 = 0xF0;
+
+/// Arrival statistics for marker-tagged frame writes: count, bytes, span,
+/// and the gaps between consecutive arrivals, which is what jitter on the
+/// LEDs would be.
+struct FrameStats {
+    count: u32,
+    bytes: u32,
+    first: Option<Instant>,
+    last: Option<Instant>,
+    gap_min_us: u64,
+    gap_max_us: u64,
+    gap_sum_us: u64,
+    /// Gap histogram, upper bounds in ms: 10, 20, 35, 50, 75, 100, 150, 250, inf.
+    buckets: [u32; 9],
+}
+
+const GAP_BOUNDS_MS: [u64; 8] = [10, 20, 35, 50, 75, 100, 150, 250];
+
+impl FrameStats {
+    fn new() -> Self {
+        Self {
+            count: 0,
+            bytes: 0,
+            first: None,
+            last: None,
+            gap_min_us: u64::MAX,
+            gap_max_us: 0,
+            gap_sum_us: 0,
+            buckets: [0; 9],
+        }
+    }
+
+    fn record(&mut self, len: usize) {
+        let now = Instant::now();
+        if let Some(last) = self.last {
+            let gap = (now - last).as_micros();
+            self.gap_min_us = self.gap_min_us.min(gap);
+            self.gap_max_us = self.gap_max_us.max(gap);
+            self.gap_sum_us += gap;
+            let ms = gap / 1000;
+            let i = GAP_BOUNDS_MS.iter().position(|b| ms < *b).unwrap_or(8);
+            self.buckets[i] += 1;
+        } else {
+            self.first = Some(now);
+        }
+        self.last = Some(now);
+        self.count += 1;
+        self.bytes += len as u32;
+    }
+
+    fn report(&self, out: &mut heapless::String<200>) {
+        let span_ms = match (self.first, self.last) {
+            (Some(a), Some(b)) => (b - a).as_millis(),
+            _ => 0,
+        };
+        let gaps = self.count.saturating_sub(1) as u64;
+        let mean = if gaps > 0 { self.gap_sum_us / gaps } else { 0 };
+        let min = if gaps > 0 { self.gap_min_us } else { 0 };
+        let b = &self.buckets;
+        let _ = write!(
+            out,
+            "frames n={} bytes={} span_ms={} gap_us min={} mean={} max={} hist10/20/35/50/75/100/150/250/+={}/{}/{}/{}/{}/{}/{}/{}/{}",
+            self.count, self.bytes, span_ms, min, mean, self.gap_max_us,
+            b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7], b[8]
+        );
+    }
+}
+
+/// The link's current parameters, PHY and signal, as one line.
+async fn describe_link<C: LabController, P: PacketPool>(
+    conn: &GattConnection<'_, '_, P>,
+    stack: &Stack<'_, C, P>,
+    out: &mut heapless::String<200>,
+) {
+    let raw = conn.raw();
+    let p = raw.params();
+    let rssi = raw.rssi(stack).await.ok();
+    let phy = raw.read_phy(stack).await.ok();
+    let phy_name = |k: PhyKind| match k {
+        PhyKind::Le1M => "1M",
+        PhyKind::Le2M => "2M",
+        _ => "coded",
+    };
+    let _ = write!(
+        out,
+        "link interval_us={} latency={} timeout_ms={} mtu={} rssi={} phy_tx={} phy_rx={}",
+        p.conn_interval.as_micros(),
+        p.peripheral_latency,
+        p.supervision_timeout.as_millis(),
+        raw.att_mtu(),
+        rssi.map(|r| r as i32).unwrap_or(i32::MIN),
+        phy.map(|(t, _)| phy_name(t)).unwrap_or("?"),
+        phy.map(|(_, r)| phy_name(r)).unwrap_or("?"),
+    );
+}
+
+async fn reply_text<P: PacketPool>(
+    tx: &Characteristic<Vec<u8, TX_MAX>>,
+    conn: &GattConnection<'_, '_, P>,
+    text: &str,
+) {
+    let mut reply: Vec<u8, TX_MAX> = Vec::new();
+    let _ = reply.extend_from_slice(&text.as_bytes()[..text.len().min(TX_MAX)]);
+    let _ = tx.notify(conn, &reply).await;
+}
+
+/// `interval <min_us> <max_us>` → Some((min, max)).
+fn interval_request(bytes: &[u8]) -> Option<(u64, u64)> {
+    let s = core::str::from_utf8(bytes).ok()?.trim();
+    let mut it = s.strip_prefix("interval")?.split_whitespace();
+    let min = it.next()?.parse().ok()?;
+    let max = it.next().map_or(Some(min), |v| v.parse().ok())?;
+    Some((min, max))
 }
 
 /// Boot-stage heap figures, kept so they can be re-printed on every connect:
