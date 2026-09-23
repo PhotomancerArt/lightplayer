@@ -50,6 +50,7 @@ pub mod compute_shader;
 pub mod gfx_error;
 pub mod graphics;
 pub mod handle_allocator;
+pub mod latent_read_back;
 #[cfg(feature = "null-backend")]
 pub mod null_graphics;
 pub mod sample_out_handle;
@@ -64,6 +65,7 @@ pub use compute_shader::LpComputeShader;
 pub use gfx_error::GfxError;
 pub use graphics::LpGraphics;
 pub use handle_allocator::{HandleAllocator, HandleBacking};
+pub use latent_read_back::LatentReadBack;
 pub use lp_shader::{ShaderEntrySpace, ShaderFuelTrap, ShaderFuelTrapEntry};
 #[cfg(feature = "null-backend")]
 pub use null_graphics::NullGraphics;

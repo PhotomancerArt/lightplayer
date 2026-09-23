@@ -9,6 +9,7 @@ use lps_shared::{LpsValueF32, TextureStorageFormat};
 
 use crate::compute_shader::LpComputeShader;
 use crate::gfx_error::GfxError;
+use crate::latent_read_back::LatentReadBack;
 use crate::sample_out_handle::SampleOutHandle;
 use crate::sample_points_handle::SamplePointsHandle;
 use crate::shader::LpShader;
@@ -183,14 +184,43 @@ pub trait LpGraphics: Send + Sync {
     /// consumers — tests, probes, captures.
     fn read_back_into(&self, texture: &TextureHandle, out: &mut [u8]) -> Result<(), GfxError>;
 
+    /// Read `texture` back into `out` without blocking, accepting that the
+    /// bytes may belong to an earlier call's texture.
+    ///
+    /// `tag` names this call's frame (the caller's revision, say); the
+    /// answer is the tag of the frame actually written into `out`, or
+    /// `None` while no frame has landed yet (`out` untouched). `state` is
+    /// caller-owned and must be the same value on every call from one read
+    /// site, with a texture of the same shape each time.
+    ///
+    /// The default is synchronous — [`Self::read_back_into`], answering
+    /// this call's own `tag` — which is exact for every backend that can
+    /// read back at all. The browser GPU tier, which cannot block on a
+    /// buffer map, overrides it with a one-frame-latency pipeline (the
+    /// wire probe's byte previews; see
+    /// `docs/adr/2026-08-05-browser-sample-readback-is-async.md`).
+    fn read_back_latent(
+        &self,
+        texture: &TextureHandle,
+        state: &mut LatentReadBack,
+        tag: u64,
+        out: &mut [u8],
+    ) -> Result<Option<u64>, GfxError> {
+        let _ = state;
+        self.read_back_into(texture, out)?;
+        Ok(Some(tag))
+    }
+
     /// Whether [`Self::read_back`] / [`Self::read_back_into`] can service
     /// requests on this backend.
     ///
     /// CPU backends keep textures host-resident and always answer `true`
     /// (the default). The browser GPU tier answers `false`: readback would
     /// require blocking on an async buffer map, so render products stay
-    /// GPU-resident and byte-needing consumers must run on the CPU tier
-    /// (`docs/adr/2026-07-09-preview-fidelity-tiers.md`). Render paths use
+    /// GPU-resident and per-tick byte consumers must run on the CPU tier
+    /// (`docs/adr/2026-07-09-preview-fidelity-tiers.md`); a preview reader
+    /// that can take last frame's bytes uses [`Self::read_back_latent`],
+    /// which every backend serves. Render paths use
     /// this to decide between materializing byte-backed texture products and
     /// returning handle-carrying (GPU-resident) ones — an explicit
     /// capability, never an error-sniffing fallback.

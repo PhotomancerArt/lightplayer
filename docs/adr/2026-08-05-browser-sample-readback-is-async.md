@@ -90,5 +90,16 @@ Consequences of the shape:
 
 ## Follow-ups
 
+- **Extended 2026-09-23** to the wire render-product probe. Studio's
+  texture previews on a GPU-tier sim answered "product is GPU-resident
+  … probe a CPU-tier runtime" while the same sim's fixture rendered.
+  `LpGraphics::read_back_latent` is the whole-texture form of the same
+  pipeline: a persistent `MAP_READ` buffer per probe read site (held by
+  the engine, keyed by product, size, space and policy, LRU-capped),
+  one probe late, answered with the revision its bytes were rendered
+  at. Before a site's first frame lands the probe still answers
+  `GpuResident`, which Studio now shows as a pending preview. Every
+  other backend serves it synchronously through the trait default.
+
 - The gallery gpu-tier badge could disclose "lamps trail by one frame"
   if anyone ever asks; not worth UI surface today.
