@@ -203,10 +203,15 @@ pub struct RunArgs {
 /// nobody has to learn a second vocabulary for one chip.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, ValueEnum)]
 pub enum ServeHost {
-    /// Cable in, port open and draining from power-on — `emu run`'s default.
-    #[default]
+    /// Cable in, port open and draining from power-on — `emu run`'s default,
+    /// and on `serve` an explicit opt-in: the emulated host reads from
+    /// power-on whether or not anybody is connected, so the first byte
+    /// client is replayed everything the board wrote before it (up to
+    /// `TCP_BACKLOG_CAP`).
     Attached,
     /// Cable in, port CLOSED. The byte client's connect is what opens it.
+    /// `serve`'s default: no client means nobody is reading.
+    #[default]
     #[value(name = "attached-idle")]
     AttachedIdle,
     /// No cable. An `attach` on the control channel is the plug-in edge.
@@ -278,18 +283,28 @@ pub struct ServeArgs {
     /// The USB host's state at power-on, spelled as `lp-emu-esp32c6
     /// --usb-host` spells it.
     ///
-    /// `attached` is the default and matches `emu run`: the cable is in and
-    /// the port is open from power-on, so the board's boot console is on the
-    /// wire and the first byte client is replayed it — which is what
-    /// "connect and watch it boot" means and what every walk over this door
-    /// wants.
-    ///
-    /// `attached-idle` is the cable in with the port CLOSED, which is what
-    /// makes the coupling rule literal: the byte client's connect is the
+    /// `attached-idle` is the default: the cable is in and the port is
+    /// CLOSED until a byte client connects. The client's connect is the
     /// `open` and its disconnect is the `close`, provable through `state`.
-    /// The cost is the board's boot log, which the firmware does not write
-    /// while nothing is draining — a real board does that too.
-    #[arg(long = "usb-host", value_enum, default_value_t = ServeHost::Attached)]
+    /// Before the first client nothing is reading, so the firmware's own
+    /// write timeouts latch "host not draining" and it drops what it would
+    /// have sent, exactly as a board on a desk does when no application has
+    /// the port open. A client that connects later gets at most what the
+    /// 64-byte IN FIFO still holds, then fresh frames — never a replay of
+    /// the boot console or of the heartbeats nobody read
+    /// (`docs/defects/2026-09-23-emulated-usb-port-drains-with-no-client-attached.md`).
+    /// The boot console is not lost: `--console-dir` writes it to
+    /// `<id>.console-untaken.log`.
+    ///
+    /// `attached` is the explicit opt-in to the old behaviour, and matches
+    /// `emu run`: the port is open and draining from power-on with nobody
+    /// connected, so the firmware's writes all succeed and the first byte
+    /// client is replayed everything written before it (up to 4 MiB). That
+    /// is "an application had the port open since power-on", which is a
+    /// state a real board can be in but not what an unopened port does.
+    ///
+    /// `absent` is no cable at all.
+    #[arg(long = "usb-host", value_enum, default_value_t = ServeHost::AttachedIdle)]
     pub usb_host: ServeHost,
 
     /// Refuse any access to an address no peripheral claims.

@@ -132,7 +132,18 @@ fn the_walk_over_the_ws_door_lands_the_same_project_with_the_same_figures() {
         let _ = std::fs::remove_file(state.join(format!("{name}.console-untaken.log")));
     }
 
-    let again = Serve::start_in(&elf, &["c6-a", "c6-b"], &[], state.clone());
+    // `--usb-host attached`: this half reads the second boot's console, and
+    // a boot log is only on the wire if something had the port open while it
+    // was written — on a desk that is a monitor started before the reset.
+    // The door's default is an unopened port, whose boot log the firmware
+    // drops (`docs/defects/2026-09-23-emulated-usb-port-drains-with-no-client-attached.md`),
+    // so this asks for the host that reads from power-on by name.
+    let again = Serve::start_in(
+        &elf,
+        &["c6-a", "c6-b"],
+        &["--usb-host", "attached"],
+        state.clone(),
+    );
     // **Amended for plan two M5, deliberately.** This asserted `loaded`, and
     // it passed because the word was then "the flash FILE is non-empty" —
     // which a 4 MiB chip of `0xff` also satisfies. M5 made the word ask the

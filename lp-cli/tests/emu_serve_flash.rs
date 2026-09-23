@@ -80,8 +80,18 @@ fn a_rom_up_board_boots_the_mask_rom_out_of_its_own_chip() {
         "an erased chip is blank: {board:#}"
     );
 
+    // The client connects after power-on, and the door does not replay what
+    // the ROM printed before anyone had the port open — at most the IN
+    // FIFO's leftovers are waiting, which can be a torn line
+    // (`docs/defects/2026-09-23-emulated-usb-port-drains-with-no-client-attached.md`).
+    // An erased C6 resets and re-runs its boot on a loop, so what a late
+    // monitor reliably sees is the NEXT pass whole: wait for a boot-mode line
+    // with an `invalid header` after it.
     let mut bytes = serve.bytes("c6-a");
-    let text = read_until(&mut bytes, |text| text.contains("invalid header"));
+    let text = read_until(&mut bytes, |text| {
+        text.find("SPI_FAST_FLASH_BOOT")
+            .is_some_and(|at| text[at..].contains("invalid header"))
+    });
     assert!(
         text.contains("ESP-ROM:esp32c6"),
         "no mask ROM banner — this did not boot from the reset vector:\n{text}"
