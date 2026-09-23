@@ -28,3 +28,7 @@ required-features = ["std"]
 [[bin]]
 name = "lpbj-stream"
 required-features = ["std"]
+
+[[bin]]
+name = "lpbj-bench"
+required-features = ["std"]

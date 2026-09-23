@@ -98,8 +98,25 @@ impl<'a> Encoder<'a> {
         if let Some(e) = self.failed {
             return Err(e);
         }
-        for &b in bytes {
-            if let Err(e) = self.step(b) {
+        let mut i = 0;
+        while i < bytes.len() {
+            let r = if self.lex == Lex::Str {
+                // Fast path: a string's plain run goes out in one copy. The
+                // serializer writes whole string slices, so this is most bytes.
+                let rest = &bytes[i..];
+                let run = rest.iter().position(|&b| b == b'"' || b == b'\\').unwrap_or(rest.len());
+                if run > 0 {
+                    i += run;
+                    self.put_all(&rest[..run])
+                } else {
+                    i += 1;
+                    self.step(rest[0])
+                }
+            } else {
+                i += 1;
+                self.step(bytes[i - 1])
+            };
+            if let Err(e) = r {
                 self.failed = Some(e);
                 return Err(e);
             }

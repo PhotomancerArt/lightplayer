@@ -4,7 +4,7 @@
 //! declaration in every stream: both ends compile the same table in, and the
 //! wire's existing `ServerHello` version (`WIRE_PROTO_VERSION`) is what says
 //! which table that is. Tables are frequency-ordered so the commonest entries
-//! get one-byte codes; lookup is a binary search over a sorted index.
+//! get one-byte codes; lookup hashes the text into an open-addressed table of entry indices.
 
 #[allow(clippy::all)]
 mod data {
@@ -19,18 +19,29 @@ fn entry<'a>(text: &'a [u8], offs: &[u16], i: usize) -> Option<&'a [u8]> {
     text.get(a..b)
 }
 
-fn find(text: &[u8], offs: &[u16], sorted: &[u16], needle: &[u8]) -> Option<usize> {
-    let (mut lo, mut hi) = (0usize, sorted.len());
-    while lo < hi {
-        let mid = (lo + hi) / 2;
-        let i = sorted[mid] as usize;
-        match entry(text, offs, i)?.cmp(needle) {
-            core::cmp::Ordering::Less => lo = mid + 1,
-            core::cmp::Ordering::Greater => hi = mid,
-            core::cmp::Ordering::Equal => return Some(i),
-        }
+/// FNV-1a, 32-bit — the generator's hash; linear probing over a power-of-two
+/// table of entry indices (`0xFFFF` = empty), about half full.
+fn fnv1a(bytes: &[u8]) -> u32 {
+    let mut h: u32 = 0x811c_9dc5;
+    for &b in bytes {
+        h = (h ^ u32::from(b)).wrapping_mul(0x0100_0193);
     }
-    None
+    h
+}
+
+fn find(text: &[u8], offs: &[u16], hash: &[u16], needle: &[u8]) -> Option<usize> {
+    let mask = hash.len() - 1;
+    let mut h = fnv1a(needle) as usize & mask;
+    loop {
+        let i = hash[h];
+        if i == 0xFFFF {
+            return None;
+        }
+        if entry(text, offs, usize::from(i))? == needle {
+            return Some(usize::from(i));
+        }
+        h = (h + 1) & mask;
+    }
 }
 
 pub fn key(i: usize) -> Option<&'static [u8]> {
@@ -38,7 +49,7 @@ pub fn key(i: usize) -> Option<&'static [u8]> {
 }
 
 pub fn find_key(text: &[u8]) -> Option<usize> {
-    find(data::KEY_TEXT, data::KEY_OFFS, data::KEY_SORTED, text)
+    find(data::KEY_TEXT, data::KEY_OFFS, data::KEY_HASH, text)
 }
 
 pub fn value(i: usize) -> Option<&'static [u8]> {
@@ -46,7 +57,7 @@ pub fn value(i: usize) -> Option<&'static [u8]> {
 }
 
 pub fn find_value(text: &[u8]) -> Option<usize> {
-    find(data::VAL_TEXT, data::VAL_OFFS, data::VAL_SORTED, text)
+    find(data::VAL_TEXT, data::VAL_OFFS, data::VAL_HASH, text)
 }
 
 pub fn is_blob_key(text: &[u8]) -> bool {
@@ -54,9 +65,9 @@ pub fn is_blob_key(text: &[u8]) -> bool {
 }
 
 pub fn key_count() -> usize {
-    data::KEY_SORTED.len()
+    data::KEY_OFFS.len() - 1
 }
 
 pub fn value_count() -> usize {
-    data::VAL_SORTED.len()
+    data::VAL_OFFS.len() - 1
 }
