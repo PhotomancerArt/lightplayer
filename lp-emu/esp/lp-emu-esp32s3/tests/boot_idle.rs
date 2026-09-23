@@ -704,21 +704,28 @@ fn the_ledger_triple_is_elicited_by_a_stop_all_on_the_wire() {
     assert_eq!(stack.len(), 1, "one [stack] line per stop-all:\n{text}");
     assert_eq!(mem.len(), 2, "[MEM] before and after the stop:\n{text}");
     assert_eq!(jit.len(), 2, "[JIT] before and after the stop:\n{text}");
-    // `[stack] heartbeat: high-water <used> B of 37280 B (<headroom> B headroom)`
+    // `[stack] heartbeat: high-water <used> B of <total> B (<headroom> B headroom)`
+    //
+    // The total is the image's own layout — what RAM has left after
+    // `.data`/`.bss`, ~37 KB — and moves with any change to the firmware's
+    // static data (PR #787 took 72 B), so it is read, not pinned. What is
+    // asserted is the line's shape and its arithmetic.
     let words: Vec<&str> = stack[0].split_whitespace().collect();
     let used: u32 = words[3].parse().expect("high-water bytes");
-    assert_eq!(
-        &words[4..7],
-        &["B", "of", "37280"],
-        "the S3's 37,280 B total: {}",
-        stack[0]
-    );
+    assert_eq!(&words[4..5], &["B"], "{}", stack[0]);
+    assert_eq!(&words[5..6], &["of"], "{}", stack[0]);
+    let total: u32 = words[6].parse().expect("stack total bytes");
     let headroom: u32 = words[8]
         .trim_start_matches('(')
         .parse()
         .expect("headroom bytes");
-    assert_eq!(used + headroom, 37_280, "{}", stack[0]);
-    assert!(used > 0 && used < 37_280, "{}", stack[0]);
+    assert_eq!(used + headroom, total, "{}", stack[0]);
+    assert!(used > 0 && used < total, "{}", stack[0]);
+    assert!(
+        (32 * 1024..48 * 1024).contains(&total),
+        "the S3's main stack is ~37 KB: {}",
+        stack[0]
+    );
     for line in &mem {
         assert!(
             line.contains(" used=") && line.contains(" largest_free="),
@@ -746,7 +753,7 @@ fn the_ledger_triple_is_elicited_by_a_stop_all_on_the_wire() {
     );
     assert!(
         !text.contains("[INIT] main stack"),
-        "the S3 prints no `main stack` line; its 37,280 B total is in every `[stack]` \
+        "the S3 prints no `main stack` line; its total is in every `[stack]` \
          line's `of <total> B` instead"
     );
 

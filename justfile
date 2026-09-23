@@ -3007,7 +3007,26 @@ test-emu-esp32v3-boot: build-fw-esp32v3
       exit 1
     fi
     export LP_EMU_ESP32V3_FRAME_DUMP_ELF="$dump"
-    echo "images: shipped=$shipped chase=$chase frame-dump=$dump"
+    # The SILICON REFERENCE image: the bytes the committed boot-idle silicon
+    # transcript was captured from, rebuilt at its pinned commit. The test that
+    # grades this machine against the desk board runs these, not today's image
+    # — any change to the classic's static RAM moves lines the board printed,
+    # and a transcript is never edited. Reproducible on one host; built once
+    # and reused from target/emu-ref.
+    ref_commit=75486b114
+    ref_elf={{ justfile_directory() }}/target/emu-ref/$ref_commit-boot-idle/fw-esp32v3
+    if [[ ! -f "$ref_elf" ]]; then
+      scripts/emu/build-reference-image.sh --chip esp32 esp32,server,float-f32 "$ref_commit" none
+    fi
+    export LP_EMU_ESP32V3_SILICON_REF_ELF="$ref_elf"
+    if command -v espflash >/dev/null 2>&1; then
+      ref_merged="$out/merged-silicon-ref.bin"
+      espflash save-image --chip esp32 --merge \
+          --partition-table {{ fw_esp32v3_dir }}/partitions.csv \
+          --flash-size {{ v3_flash_size }} "$ref_elf" "$ref_merged"
+      export LP_EMU_ESP32V3_SILICON_REF_MERGED="$ref_merged"
+    fi
+    echo "images: shipped=$shipped chase=$chase frame-dump=$dump silicon-ref=$ref_elf"
     cargo test -p lp-emu-esp32v3 -- --include-ignored
 
 # Run an image on the classic ESP32 (v3) machine.

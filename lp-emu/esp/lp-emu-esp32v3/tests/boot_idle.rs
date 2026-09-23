@@ -45,7 +45,12 @@ const PREFIX_BYTES: usize = 543;
 /// The golden's SHA-256, pinned so a change to the boot's *text* is a
 /// deliberate edit to this line and not a test that quietly re-blessed
 /// itself. A run that changes it must say which line moved and why.
-const PREFIX_SHA256: &str = "ea8bae305953ef613f68a97fb84919378f33b37eb5623dcb970e8dce2b7343e7";
+///
+/// Moved 2026-09-22 (PowerButton, PR #787): `[INIT] main stack 45280 B` →
+/// `45264 B`, and nothing else — 16 B of new literal pools, which the
+/// classic keeps in RAM. Checked by restoring `45280` in the new prefix and
+/// getting the old hash back.
+const PREFIX_SHA256: &str = "f7d2aed9da062cfdd765333a356a6f1c12601c714632e97d81c0d37d58748efa";
 
 /// Run the shipped image, direct-loaded, under `--strict-bus`, stopping at
 /// the first complete line containing `exit_on`.
@@ -119,7 +124,8 @@ fn the_init_chain_comes_out_of_the_wire_byte_for_byte() {
         "[INIT] fw-esp32v3 boot",
         "[INIT] chip=esp32 arch=xtensa heap=15072+112640+98304+15536=241552",
         "[INIT] heap regions: 0 0x3ffe0440+15072 (ROM PRO stack)",
-        "[INIT] main stack 45280 B",
+        // Its size is today's image's, and PREFIX_SHA256 already pins it.
+        "[INIT] main stack ",
         "[RECOVERY] boot: cause=power-on level=green safe_mode=false prior_boot_complete=true",
         "[INIT] runtime started",
         "[INIT] I/O task spawned (uart0 921600 8N1, swi2 executor prio2, timg0t1 pacer 1ms)",
@@ -450,8 +456,20 @@ fn the_two_paths_report_the_same_memory_figures() {
         b[0].split("high-water").next(),
         "and it is the same stack, reported the same way"
     );
-    assert!(
-        a[0].contains(" of 45280 B ") && b[0].contains(" of 45280 B "),
+    // The two paths agree with EACH OTHER on the stack's size. Its value is
+    // today's image's (it moves with the classic's static RAM, which holds
+    // the literal pools), so it is not pinned here: the boot chain goldens
+    // say which image this is, and the desk-board test grades the figure
+    // against silicon on the image the board ran.
+    let stack_size = |line: &str| {
+        line.split(" of ")
+            .nth(1)
+            .and_then(|rest| rest.split_whitespace().next())
+            .map(str::to_owned)
+    };
+    assert_eq!(
+        stack_size(&a[0]),
+        stack_size(&b[0]),
         "the stack's size is the same on both paths: {a:?} vs {b:?}"
     );
     // The one figure the boot banner carries too, so the triple can be read
@@ -655,6 +673,13 @@ const PATH_HIGH_WATER_GAP: i64 = -64;
 /// **G2 (e).** Every memory-class field of the idle heartbeat, this machine
 /// against the desk board, on the same image and the same request.
 ///
+/// **The same image means the transcript's image**, rebuilt at its pinned
+/// commit (`SILICON_REF_COMMIT`), not today's. Until 2026-09-22 this test
+/// ran the current tree's image and held only because nothing had moved the
+/// classic's static RAM since the capture; the first change that did (PR #787,
+/// 24 B of literal pools) changed the `main stack` line the board printed.
+/// A silicon comparison of two different images is not a fidelity check.
+///
 /// # What is compared, and what is not
 ///
 /// Compared: the boot banner's heap arithmetic, the main stack's **size**,
@@ -688,11 +713,10 @@ const PATH_HIGH_WATER_GAP: i64 = -64;
 /// it. `rom_up_boot.rs::a_second_boot_from_the_same_chip_mounts_rather_than_reformats`
 /// is the same fact from the flash census's side.
 #[test]
-#[ignore = "needs the shipped image and espflash; run through `just test-emu-esp32v3-boot`"]
+#[ignore = "needs the silicon reference image and espflash; run through `just test-emu-esp32v3-boot`"]
 fn the_heartbeats_memory_figures_are_the_desk_boards() {
-    let Some(elf) = image() else { return };
-    let merged = match lp_emu_esp32v3::test_support::merged_chip_image() {
-        Ok(p) => p,
+    let (elf, merged) = match lp_emu_esp32v3::test_support::silicon_reference_images() {
+        Ok(images) => images,
         Err(reason) => {
             skip_notice("the_heartbeats_memory_figures_are_the_desk_boards", &reason);
             return;

@@ -1340,17 +1340,22 @@ fn the_direct_load_mounts_the_flash_filesystem() {
 /// `676`/`bfb8d720…` and `575`/`87fb3c41…`, taken when this machine had no
 /// APP core.
 ///
+/// Both re-measured 2026-09-22 (PowerButton, PR #787): the one difference is
+/// `[INIT] main stack 45280 B` → `45264 B` — 16 B of new literal pools,
+/// which the classic keeps in RAM, and the stack is what RAM has left.
+/// Verified for both pins by restoring `45280` and getting the old hash.
+///
 /// A blank chip: the P3 prefix, the `[ERROR] no lpfs partition …` fallback,
 /// and the dual-core tail.
 const INIT_CHAIN_BLANK_SHA256: &str =
-    "3f91b2e29b1b3a2c7a0b80730eb7c457a7ab801d1a8b58fea0fb71bbf9a23eee";
+    "03f7813b604b9a844c818de0d64d08e1b7a9f334daeaeee66050689a84d80dcd";
 const INIT_CHAIN_BLANK_LEN: usize = 804;
 
 /// The merged image: the same prefix plus `[INIT] flash filesystem mounted`,
 /// and **fewer** bytes than the blank-chip chain, because the error line it
 /// replaces is longer than the success line.
 const INIT_CHAIN_MERGED_SHA256: &str =
-    "660ac8ddc039193b4423305ccb4356cd37a412c25c3ddf15f5eeb0b8c0afe9e1";
+    "9eb6cec1fc50da57840e2528b95da5a5661538d991d3bc78bd1b1476fc712139";
 const INIT_CHAIN_MERGED_LEN: usize = 703;
 
 /// The boot threshold, pinned on both chips.

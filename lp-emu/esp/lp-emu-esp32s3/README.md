@@ -134,7 +134,7 @@ loop — `tests/boot.rs` pins that reading.
 ⚠️ **The heap line is a single number**, `heap=245760` (`HEAP_SIZE = 240 *
 1024`), where the classic prints a four-region sum. Anything comparing the two
 chips' boot captures must not expect the same line. There is no
-`[INIT] main stack <N> B` line either; the S3's 37,280 B total appears in
+`[INIT] main stack <N> B` line either; the S3's total (~37 KB) appears in
 every `[stack]` line's `of <total> B`.
 
 P03's stop — `SENSITIVE + 0x04` from the mask ROM's

@@ -30,7 +30,9 @@ use lp_emu_esp32v3::flash::FlashBacking;
 use lp_emu_esp32v3::machine::{
     AppSource, BootMode, CORE_QUANTUM_DEFAULT, Esp32V3Builder, Machine, Outcome, StopCondition,
 };
-use lp_emu_esp32v3::test_support::{fw_esp32v3_image, merged_chip_image, skip_notice};
+use lp_emu_esp32v3::test_support::{
+    fw_esp32v3_image, merged_chip_image, silicon_reference_images, skip_notice,
+};
 use sha2::{Digest, Sha256};
 
 /// Far enough in for the console, the filesystem mount and the io_task, and
@@ -307,6 +309,12 @@ const PREFIX_IDLE_SKIPS: u64 = 0;
 const PREFIX_BYTES: usize = 543;
 const PREFIX_SHA256: &str = "ea8bae305953ef613f68a97fb84919378f33b37eb5623dcb970e8dce2b7343e7";
 
+/// **Run on the `75486b114` image itself** — the silicon reference image
+/// (`test_support::SILICON_REF_COMMIT`) — because these counters describe
+/// the MACHINE on a fixed input. On today's image they move whenever the
+/// firmware's boot path does (PR #787's 16 B of literal pools moved all of
+/// them), which says nothing about the loop.
+///
 /// **The single-core safety net.** A run in which core 1 never starts is
 /// the run M3 produced: same bytes, same sha, same cycles, same
 /// instructions, same skips. The quantum is the loop's window bound now and
@@ -315,7 +323,13 @@ const PREFIX_SHA256: &str = "ea8bae305953ef613f68a97fb84919378f33b37eb5623dcb970
 #[test]
 #[ignore = "needs the shipped image; `just test-emu-esp32v3-boot`"]
 fn the_single_core_prefix_is_unchanged() {
-    let Some(elf) = elf() else { return };
+    let elf = match silicon_reference_images() {
+        Ok((elf, _)) => elf,
+        Err(reason) => {
+            skip_notice("the_single_core_prefix_is_unchanged", &reason);
+            return;
+        }
+    };
     let mut m = Esp32V3Builder::new()
         .boot_mode(BootMode::Direct)
         .app(AppSource::Path(elf))
