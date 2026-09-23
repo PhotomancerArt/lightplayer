@@ -55,6 +55,7 @@ fn create_every_picker_kind_lands_in_tree_and_on_disk() {
         (NodeKind::Fluid, "fluid", "fluid"),
         (NodeKind::ComputeShader, "compute_shader", "compute_shader"),
         (NodeKind::Button, "button", "button"),
+        (NodeKind::PowerButton, "power_button", "power_button"),
         (NodeKind::ControlRadio, "radio", "control_radio"),
     ];
     for (kind, name, ty) in cases {

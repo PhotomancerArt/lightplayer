@@ -15256,7 +15256,7 @@ mod tests {
             .expect("picker data rides the editor");
         assert_eq!(
             menu.entries.len(),
-            11,
+            12,
             "every instantiable kind, Module included"
         );
 

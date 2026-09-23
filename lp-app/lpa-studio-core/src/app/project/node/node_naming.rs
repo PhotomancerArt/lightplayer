@@ -17,6 +17,7 @@ pub fn node_kind_slug(kind: NodeKind) -> &'static str {
     match kind {
         NodeKind::Module => "module",
         NodeKind::Button => "button",
+        NodeKind::PowerButton => "power_button",
         NodeKind::Clock => "clock",
         NodeKind::Texture => "texture",
         NodeKind::Shader => "shader",
@@ -34,6 +35,7 @@ pub fn node_kind_label(kind: NodeKind) -> &'static str {
     match kind {
         NodeKind::Module => "Module",
         NodeKind::Button => "Button",
+        NodeKind::PowerButton => "Power button",
         NodeKind::Clock => "Clock",
         NodeKind::Texture => "Texture",
         NodeKind::Shader => "Shader",
@@ -123,6 +125,7 @@ mod tests {
         for kind in [
             NodeKind::Module,
             NodeKind::Button,
+            NodeKind::PowerButton,
             NodeKind::Clock,
             NodeKind::Texture,
             NodeKind::Shader,

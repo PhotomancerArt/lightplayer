@@ -421,6 +421,7 @@ const fn catalog_note(feature: LpFeature) -> CatalogNote {
         | LpFeature::NodeFluid
         | LpFeature::NodeFixture
         | LpFeature::NodePlaylist
+        | LpFeature::NodePowerButton
         | LpFeature::NodeRadio
         | LpFeature::NodeShader
         | LpFeature::NodeTexture => CatalogNote::NodeRuntime,
@@ -513,6 +514,7 @@ pub fn node_kind_label(kind: NodeKind) -> &'static str {
     match kind {
         NodeKind::Module => "Module",
         NodeKind::Button => "Button",
+        NodeKind::PowerButton => "Power button",
         NodeKind::Clock => "Clock",
         NodeKind::Texture => "Texture",
         NodeKind::Shader => "Shader",
