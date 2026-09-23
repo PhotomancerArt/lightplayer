@@ -1,0 +1,26 @@
+[package]
+name = "ion-wire-spike"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+description = "Spike: an Ion-inspired compact binary JSON for the M! wire (LPBJ). Throwaway; not for production."
+
+[lints]
+workspace = true
+
+[features]
+default = []
+# Host tools: the corpus runner and the f32 sweep.
+std = ["dep:ryu-js"]
+
+[dependencies]
+ryu-js = { version = "1.0", default-features = false, optional = true }
+
+[[bin]]
+name = "lpbj-corpus"
+required-features = ["std"]
+
+[[bin]]
+name = "lpbj-f32-sweep"
+required-features = ["std"]

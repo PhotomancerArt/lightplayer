@@ -113,6 +113,7 @@ members = [
     "lp-shader/lps-filetests-app",
     "lp-app/web-demo",
     "spikes/naga-wasm-poc",
+    "spikes/ion-wire",
     "lp-shader/lps-q32",
 ]
 # Xtensa DEVICE-target crates (esp toolchain): lp-xt/fixtures is its own
