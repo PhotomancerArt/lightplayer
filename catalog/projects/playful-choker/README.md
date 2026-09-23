@@ -26,7 +26,7 @@ without guessing.
 Object order is wire order. Each object is one pen stroke — the strokes a pen
 cannot join (the crossbars of the A and F, the three strokes of the Y) are
 separate objects — so the resolver's even spacing along each polyline lands
-within 0.8 mm of every pad. The chain, from the data-in pad:
+within 0.93 mm of every pad. The chain, from the data-in pad:
 
 | object | designators | stroke |
 |---|---|---|
@@ -39,5 +39,13 @@ within 0.8 mm of every pad. The chain, from the data-in pad:
 | `U` | LED57–69 | down, round the bottom, up |
 | `L2` | LED70–77 | stem down, foot right |
 
-The generator that reads the exports is not part of the entry (it depends on
-the design folder); re-run it rather than hand-editing if the PCB changes.
+The generator is `scripts/pcb-export-to-map2d.py`, and the table above is its
+strokes table, `scripts/pcb-export-strokes/playful-choker.json`. The exports
+are design files and stay in the choker's design folder, never in this repo.
+Regenerate rather than hand-edit if the PCB changes, and check that the
+committed files still match the exports after touching the generator:
+
+```bash
+just playful-choker-map2d <design-folder>           # regenerate both files
+just playful-choker-map2d <design-folder> --check   # byte-identical, or fail
+```
