@@ -2,22 +2,23 @@ use std::collections::BTreeMap;
 use std::rc::Rc;
 
 use lpc_model::{
-    ArtifactLocation, ArtifactOverlay, AssetBodyOverlay, ControlDisplayLayout, MutationCmd,
-    MutationEffect, MutationOp, ProjectOverlay, Revision, SlotEditOp, SlotPath, StoredSlotEdit,
+    ArtifactLocation, ArtifactOverlay, AssetBodyOverlay, MutationCmd, MutationEffect, MutationOp,
+    ProjectOverlay, Revision, SlotEditOp, SlotPath, StoredSlotEdit,
 };
 use lpc_view::{ApplyStatus, ProjectReadApplier, ProjectView};
 use lpc_wire::{
-    BindingGraphProbeRequest, BindingGraphProbeResult, ControlDisplayLayoutProbeResult,
-    ControlDisplayLayoutRead, ControlProductProbeRequest, ControlProductProbeResult, NodeReadQuery,
-    NodeReadSelection, OutputFrameProbeRequest, OutputFrameProbeResult, ProjectProbeRequest,
-    ProjectProbeResult, ProjectReadEvent, ProjectReadQuery, ProjectReadRequest, ReadLevel,
-    RenderProductProbeRequest, RenderProductProbeResult, ResourcePayloadRead, ResourceReadQuery,
-    RuntimeReadQuery, ShapeReadQuery, TimebaseProbeRequest, TimebaseProbeResult, WireBindingGraph,
+    BindingGraphProbeRequest, BindingGraphProbeResult, ControlProductProbeRequest,
+    ControlProductProbeResult, NodeReadQuery, NodeReadSelection, OutputFrameProbeRequest,
+    OutputFrameProbeResult, ProjectProbeRequest, ProjectProbeResult, ProjectReadEvent,
+    ProjectReadQuery, ProjectReadRequest, ReadLevel, RenderProductProbeRequest,
+    RenderProductProbeResult, ResourcePayloadRead, ResourceReadQuery, RuntimeReadQuery,
+    ShapeReadQuery, TimebaseProbeRequest, TimebaseProbeResult, WireBindingGraph,
     WireCellProjection, WireChannelSampleFormat, WireConsumerPolicy, WireProjectionOrigin,
     WireProjectionShape, WireTextureFormat, WireVisualSpace,
 };
 
 use crate::app::frame_feed::OutputFrameCache;
+use crate::app::project::control_geometry_cache::ControlGeometryCache;
 use crate::{
     ProjectRuntimeSummary, ProjectSyncPhase, ProjectSyncSummary, UiCellProjection,
     UiConsumerPolicy, UiControlProductPreview, UiControlSampleFormat, UiError, UiIssue,
@@ -65,6 +66,10 @@ pub struct ProjectSync {
     /// owns an output. Filled by the published-frame probe, which rides
     /// every read of a project that HAS an output and nothing otherwise.
     output_frames: OutputFrameCache,
+    /// The geometry (sample + display layout) each previewed control product
+    /// last answered with, held while its revision stands — the client half
+    /// of the probe's geometry gate. See [`ControlGeometryCache`].
+    control_geometry: ControlGeometryCache,
     /// Latest binding-graph snapshot, kept while a consumer subscribes.
     binding_graph: Option<WireBindingGraph>,
     /// Whether reads should carry the binding-graph probe. Armed for every
@@ -97,6 +102,7 @@ impl ProjectSync {
             product_space_previews: BTreeMap::new(),
             preview_spaces: BTreeMap::new(),
             output_frames: OutputFrameCache::default(),
+            control_geometry: ControlGeometryCache::default(),
             binding_graph: None,
             binding_graph_subscribed: false,
             issue: None,
@@ -591,9 +597,14 @@ impl ProjectSync {
     /// malformed, that assumption is broken and further deltas cannot be
     /// trusted, so we discard the mirror (resetting `view.revision` to `0`)
     /// and let the caller resync with a full read. Product-preview caches are
-    /// cleared with it, since they are keyed off the same read cycle.
+    /// cleared with it, since they are keyed off the same read cycle — and so
+    /// is every cached geometry claim (control products' and outputs'), so
+    /// the next read asks for all of it outright. The outputs' last frames
+    /// stay up until then.
     pub fn reset_view(&mut self) {
         self.view = ProjectView::new();
+        self.control_geometry.clear();
+        self.output_frames.forget_geometry();
         self.product_previews.clear();
         self.timebases.clear();
         self.product_spaces.clear();
@@ -673,10 +684,10 @@ impl ProjectSync {
         // that owns an output heroes the wire that output composes, and no
         // product ref names that wire. It renders nothing device-side (the
         // frame is already published), and the geometry half is revision-gated
-        // so a steady lens ships it once.
+        // per output so a steady lens ships it once.
         if self.has_output_nodes() {
             probes.push(ProjectProbeRequest::OutputFrame(OutputFrameProbeRequest {
-                display_layout: self.output_frames.display_layout_read(),
+                geometry: self.output_frames.geometry_read(),
             }));
         }
         if self.binding_graph_subscribed {
@@ -731,7 +742,7 @@ impl ProjectSync {
                             ControlProductProbeRequest {
                                 product: control,
                                 sample_format: WireChannelSampleFormat::U16,
-                                display_layout: self.display_layout_read_for(product),
+                                geometry: self.control_geometry.read_for(&product),
                             },
                         ));
                     }
@@ -788,24 +799,15 @@ impl ProjectSync {
         }
     }
 
-    /// What the next probe should ask for: nothing new while the cached
-    /// layout's revision still stands, otherwise the whole layout.
-    fn display_layout_read_for(&self, product: UiProductRef) -> ControlDisplayLayoutRead {
-        match self
-            .product_previews
-            .get(&product)
-            .and_then(control_preview_display_layout)
-            .map(|layout| layout.revision())
-        {
-            Some(revision) => ControlDisplayLayoutRead::IfChanged {
-                known_revision: Some(revision),
-            },
-            None => ControlDisplayLayoutRead::Always,
-        }
-    }
-
+    /// The preview a probe answer becomes, if any.
+    ///
+    /// A control preview is drawn against the product's CACHED geometry (see
+    /// [`ControlGeometryCache`]): when none is current — a first answer that
+    /// was not `Changed`, an `Omitted`, a stale `Unchanged` — the samples are
+    /// dropped rather than laid out against a guess, the product's last
+    /// preview stands, and the next read asks for the geometry outright.
     fn product_preview_from_probe(
-        &self,
+        &mut self,
         probe: &ProjectProbeResult,
     ) -> Option<(UiProductRef, UiProductPreview)> {
         match probe {
@@ -814,21 +816,21 @@ impl ProjectSync {
                 revision,
                 extent,
                 sample_format: WireChannelSampleFormat::U16,
-                sample_layout,
-                display_layout,
+                geometry,
                 bytes,
             }) => {
                 let product_ref = UiProductRef::from_control_product(*product);
-                let cached = self.product_previews.get(&product_ref);
-                let display_layout = display_layout_from_probe_result(display_layout, cached);
+                let geometry = self.control_geometry.apply(product_ref, geometry)?;
                 Some((
                     product_ref,
                     UiProductPreview::ControlNative(UiControlProductPreview {
                         revision: revision.0,
                         extent: *extent,
                         sample_format: UiControlSampleFormat::U16,
-                        sample_layout: sample_layout.clone(),
-                        display_layout,
+                        sample_layout: geometry.sample_layout.clone(),
+                        // The cached `Rc`: pointer-stable while the revision
+                        // stands, which is the lamp renderer's repaint key.
+                        display_layout: geometry.display_layout.clone(),
                         bytes: Rc::from(bytes.as_slice()),
                     }),
                 ))
@@ -1282,34 +1284,6 @@ fn ui_projection_origin(origin: WireProjectionOrigin) -> UiProjectionOrigin {
     }
 }
 
-fn control_preview_display_layout(preview: &UiProductPreview) -> Option<&Rc<ControlDisplayLayout>> {
-    match preview {
-        UiProductPreview::ControlNative(preview) => preview.display_layout.as_ref(),
-        _ => None,
-    }
-}
-
-/// The layout the fresh preview should carry. Reuses the cached `Rc` on the
-/// per-tick `Unchanged`/`Omitted` paths — a dome-scale layout is 1500 lamps,
-/// and deep-copying it every tick was a measurable slice of the 2026-08-05
-/// editor-perf trace. Only a genuinely new engine-sent layout allocates.
-fn display_layout_from_probe_result(
-    result: &ControlDisplayLayoutProbeResult,
-    cached: Option<&UiProductPreview>,
-) -> Option<Rc<ControlDisplayLayout>> {
-    match result {
-        ControlDisplayLayoutProbeResult::Layout(layout) => Some(Rc::new(layout.clone())),
-        ControlDisplayLayoutProbeResult::Unchanged { revision } => cached
-            .and_then(control_preview_display_layout)
-            .filter(|layout| layout.revision() == *revision)
-            .cloned(),
-        ControlDisplayLayoutProbeResult::Omitted => {
-            cached.and_then(control_preview_display_layout).cloned()
-        }
-        ControlDisplayLayoutProbeResult::Unsupported { .. } => None,
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1317,7 +1291,10 @@ mod tests {
         ControlDisplayLayout, ControlExtent, ControlLamp2d, ControlLayout2d, ControlProduct,
         ControlSampleEncoding, ControlSampleLayout, ControlSampleSpan, NodeId, VisualProduct,
     };
-    use lpc_wire::ProjectReadProbeEvent;
+    use lpc_wire::{
+        ControlProductGeometry, GeometryDisplayLayout, GeometryProbeResult, GeometryRead,
+        ProjectReadProbeEvent,
+    };
 
     /// Build a probe-only project-read event stream at `revision`.
     fn probe_events(revision: i64, probes: Vec<ProjectProbeResult>) -> Vec<ProjectReadEvent> {
@@ -2014,7 +1991,7 @@ mod tests {
                 ControlProductProbeRequest {
                     product,
                     sample_format: WireChannelSampleFormat::U16,
-                    display_layout: ControlDisplayLayoutRead::Always,
+                    geometry: GeometryRead::Always,
                 },
             )]
         );
@@ -2025,7 +2002,7 @@ mod tests {
     }
 
     #[test]
-    fn control_product_preview_reuses_cached_display_layout_revision() {
+    fn control_product_preview_reuses_cached_geometry_revision() {
         let mut sync = ProjectSync::new();
         let product = ControlProduct::new(NodeId::new(7), 2, ControlExtent::new(1, 3));
         let product_ref = UiProductRef::from_control_product(product);
@@ -2062,8 +2039,11 @@ mod tests {
                     revision: Revision::new(9),
                     extent: product.preferred_extent(),
                     sample_format: WireChannelSampleFormat::U16,
-                    sample_layout: sample_layout.clone(),
-                    display_layout: ControlDisplayLayoutProbeResult::Layout(display_layout.clone()),
+                    geometry: GeometryProbeResult::Changed(ControlProductGeometry {
+                        revision: Revision::new(12),
+                        sample_layout: sample_layout.clone(),
+                        display_layout: GeometryDisplayLayout::Layout(display_layout.clone()),
+                    }),
                     bytes: first_bytes,
                 },
             )],
@@ -2078,7 +2058,7 @@ mod tests {
                 ControlProductProbeRequest {
                     product,
                     sample_format: WireChannelSampleFormat::U16,
-                    display_layout: ControlDisplayLayoutRead::IfChanged {
+                    geometry: GeometryRead::IfChanged {
                         known_revision: Some(Revision::new(12)),
                     },
                 },
@@ -2094,8 +2074,7 @@ mod tests {
                     revision: Revision::new(10),
                     extent: product.preferred_extent(),
                     sample_format: WireChannelSampleFormat::U16,
-                    sample_layout: sample_layout.clone(),
-                    display_layout: ControlDisplayLayoutProbeResult::Unchanged {
+                    geometry: GeometryProbeResult::Unchanged {
                         revision: Revision::new(12),
                     },
                     bytes: second_bytes.clone(),
@@ -2114,6 +2093,52 @@ mod tests {
                 display_layout: Some(Rc::new(display_layout)),
                 bytes: Rc::from(second_bytes.as_slice()),
             }))
+        );
+    }
+
+    /// Samples with no cached geometry behind them — here an `Unchanged`
+    /// the lens never had the bundle for (a reconnect's first read, say) —
+    /// are not drawn against a guess: the preview stays as it was, and the
+    /// next read asks for the geometry outright.
+    #[test]
+    fn control_samples_without_cached_geometry_are_not_drawn() {
+        let mut sync = ProjectSync::new();
+        let product = ControlProduct::new(NodeId::new(7), 2, ControlExtent::new(1, 3));
+        let product_ref = UiProductRef::from_control_product(product);
+        let _ = sync.refresh_project_read_request(vec![product_ref]);
+
+        sync.apply_project_read_events(probe_events(
+            9,
+            vec![ProjectProbeResult::ControlProduct(
+                ControlProductProbeResult::Preview {
+                    product,
+                    revision: Revision::new(9),
+                    extent: product.preferred_extent(),
+                    sample_format: WireChannelSampleFormat::U16,
+                    geometry: GeometryProbeResult::Unchanged {
+                        revision: Revision::new(12),
+                    },
+                    bytes: vec![0, 0, 255, 255, 0, 0],
+                },
+            )],
+        ))
+        .unwrap();
+
+        assert_eq!(
+            sync.product_preview(&product_ref),
+            Some(&UiProductPreview::Pending),
+            "no geometry, no picture"
+        );
+        let request = sync.refresh_project_read_request(vec![product_ref]);
+        assert_eq!(
+            request.probes,
+            vec![ProjectProbeRequest::ControlProduct(
+                ControlProductProbeRequest {
+                    product,
+                    sample_format: WireChannelSampleFormat::U16,
+                    geometry: GeometryRead::Always,
+                },
+            )]
         );
     }
 

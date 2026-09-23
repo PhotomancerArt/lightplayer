@@ -96,7 +96,7 @@ browser-serial-esp32 = [
 # `fake-device` in.
 device-link = ["dep:lpa-devices", "dep:lpc-wire"]
 # The worker envelope speaks the wire's published-frame vocabulary
-# (`OutputFrameEntry`, `ControlDisplayLayoutRead`) so the preview host and the
+# (`OutputFrameEntry`, `OutputFrameGeometryRead`) so the preview host and the
 # device card feed read output frames through one set of types.
 browser-worker = [
     "dep:lpc-wire",

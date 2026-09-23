@@ -24,10 +24,11 @@ pub mod transport_error;
 pub mod tree;
 
 pub use messages::{
-    BindingGraphProbeRequest, BindingGraphProbeResult, ControlDisplayLayoutProbeResult,
-    ControlDisplayLayoutRead, ControlProductProbeRequest, ControlProductProbeResult,
-    ControlProductProbeResultHeader, NodeReadQuery, NodeReadSelection, OutputFrameEntry,
-    OutputFrameEntryHeader, OutputFrameProbeRequest, OutputFrameProbeResult,
+    BindingGraphProbeRequest, BindingGraphProbeResult, ControlProductGeometry,
+    ControlProductProbeRequest, ControlProductProbeResult, ControlProductProbeResultHeader,
+    GeometryDisplayLayout, GeometryProbeResult, GeometryRead, KnownOutputFrameGeometry,
+    NodeReadQuery, NodeReadSelection, OutputFrameEntry, OutputFrameEntryHeader,
+    OutputFrameGeometry, OutputFrameGeometryRead, OutputFrameProbeRequest, OutputFrameProbeResult,
     OutputFrameProbeResultHeader, PROJECT_READ_FRAME_MAX_BYTES,
     PROJECT_READ_FRAME_SERIAL_BUFFER_BYTES, PROJECT_READ_FRAME_SERIAL_MARGIN_BYTES,
     PROJECT_READ_PROBE_HEADER_RESERVE_BYTES, PROJECT_READ_RUNTIME_CHUNK_BYTES, ProjectProbeRequest,

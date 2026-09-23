@@ -491,7 +491,7 @@ impl DeviceFrameFeed {
             // One probe, no mirror queries: a picture, not a ProjectSync.
             probes: vec![lpc_wire::ProjectProbeRequest::OutputFrame(
                 lpc_wire::OutputFrameProbeRequest {
-                    display_layout: self.state.display_layout_read(),
+                    geometry: self.state.geometry_read(),
                 },
             )],
         };

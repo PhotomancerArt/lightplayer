@@ -28,9 +28,10 @@ pub use crate::budget::{
 };
 pub use node_read::{NodeReadQuery, NodeReadSelection};
 pub use probe::{
-    BindingGraphProbeRequest, BindingGraphProbeResult, ControlDisplayLayoutProbeResult,
-    ControlDisplayLayoutRead, ControlProductProbeRequest, ControlProductProbeResult,
-    ControlProductProbeResultHeader, OutputFrameEntry, OutputFrameEntryHeader,
+    BindingGraphProbeRequest, BindingGraphProbeResult, ControlProductGeometry,
+    ControlProductProbeRequest, ControlProductProbeResult, ControlProductProbeResultHeader,
+    GeometryDisplayLayout, GeometryProbeResult, GeometryRead, KnownOutputFrameGeometry,
+    OutputFrameEntry, OutputFrameEntryHeader, OutputFrameGeometry, OutputFrameGeometryRead,
     OutputFrameProbeRequest, OutputFrameProbeResult, OutputFrameProbeResultHeader,
     ProjectProbeRequest, ProjectProbeResult, ProjectProbeResultHeader, RenderProductProbeRequest,
     RenderProductProbeResult, RenderProductProbeResultHeader, TimebaseProbeRequest,

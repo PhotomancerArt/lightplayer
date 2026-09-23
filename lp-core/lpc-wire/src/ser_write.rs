@@ -312,32 +312,35 @@ mod cross_serializer_tests {
                     revision: Revision::new(18),
                     extent: ControlExtent::new(1, 30),
                     sample_format: crate::project::WireChannelSampleFormat::U16,
-                    sample_layout: ControlSampleLayout {
-                        spans: Vec::from([ControlSampleSpan {
-                            row: 0,
-                            start: 0,
-                            len: 30,
-                            encoding: ControlSampleEncoding::RgbPixels {
-                                count: 10,
-                                color_order: ColorOrder::Rgb,
-                            },
-                        }]),
-                    },
-                    display_layout: crate::ControlDisplayLayoutProbeResult::Layout(
-                        ControlDisplayLayout::Layout2d(ControlLayout2d::new(
-                            Revision::new(18),
-                            10,
-                            10,
-                            (0..10)
-                                .map(|index| ControlLamp2d {
-                                    lamp_index: index,
-                                    sample_start: index * 3,
-                                    center: [index as f32 / 16.0, index as f32 / 15.0],
-                                    radius: if index < 5 { 1.0 } else { 0.02 },
-                                })
-                                .collect(),
-                        )),
-                    ),
+                    geometry: crate::GeometryProbeResult::Changed(crate::ControlProductGeometry {
+                        revision: Revision::new(18),
+                        sample_layout: ControlSampleLayout {
+                            spans: Vec::from([ControlSampleSpan {
+                                row: 0,
+                                start: 0,
+                                len: 30,
+                                encoding: ControlSampleEncoding::RgbPixels {
+                                    count: 10,
+                                    color_order: ColorOrder::Rgb,
+                                },
+                            }]),
+                        },
+                        display_layout: crate::GeometryDisplayLayout::Layout(
+                            ControlDisplayLayout::Layout2d(ControlLayout2d::new(
+                                Revision::new(18),
+                                10,
+                                10,
+                                (0..10)
+                                    .map(|index| ControlLamp2d {
+                                        lamp_index: index,
+                                        sample_start: index * 3,
+                                        center: [index as f32 / 16.0, index as f32 / 15.0],
+                                        radius: if index < 5 { 1.0 } else { 0.02 },
+                                    })
+                                    .collect(),
+                            )),
+                        ),
+                    }),
                     bytes: vec![0u8; 30 * 2],
                 },
             )),

@@ -1,16 +1,26 @@
 //! Control-product preview probe.
 //!
-//! The probe returns native control samples plus metadata that lets clients
-//! inspect those samples and optionally render a human-facing display layout.
+//! The probe returns native control samples plus the geometry that lets
+//! clients inspect those samples and optionally render a human-facing display
+//! layout.
+//!
+//! # Bandwidth
+//!
+//! The samples are re-rendered and re-sent on every read. The geometry — the
+//! `sample_layout` (how samples group into lamps, which only a mapping or
+//! fixture change moves) and the `display_layout` (where to draw the lamps) —
+//! rides the shared [geometry gate](super::GeometryRead): sent once, then
+//! `Unchanged` while its revision stands. Before the gate the choker's sample
+//! layout alone was 1,070 B of every 11 KB lens read, unchanged in 872 reads.
 
 use alloc::string::String;
 use alloc::vec::Vec;
 
-use lpc_model::{
-    ControlDisplayLayout, ControlExtent, ControlProduct, ControlSampleLayout, Revision,
-};
+use lpc_model::{ControlExtent, ControlProduct, ControlSampleLayout, Revision};
 
 use crate::project::WireChannelSampleFormat;
+
+use super::{GeometryDisplayLayout, GeometryProbeResult, GeometryRead};
 
 /// Request to materialize a control product for inspection.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -18,28 +28,23 @@ use crate::project::WireChannelSampleFormat;
 pub struct ControlProductProbeRequest {
     pub product: ControlProduct,
     pub sample_format: WireChannelSampleFormat,
-    pub display_layout: ControlDisplayLayoutRead,
+    /// The geometry gate for this product's sample and display layouts.
+    pub geometry: GeometryRead,
 }
 
-/// Whether and how a control-product probe should include display layout data.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-#[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
-#[serde(rename_all = "snake_case")]
-pub enum ControlDisplayLayoutRead {
-    None,
-    Always,
-    IfChanged { known_revision: Option<Revision> },
-}
-
-/// Display layout payload attached to a control-product probe response.
+/// Everything static about a control product's samples, under one revision.
+///
+/// The revision moves whenever the sample layout or the display layout does
+/// (see the engine's control-product probe for how it is derived); it is not
+/// the preview's own per-render `revision`.
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
-#[serde(rename_all = "snake_case")]
-pub enum ControlDisplayLayoutProbeResult {
-    Omitted,
-    Unchanged { revision: Revision },
-    Layout(ControlDisplayLayout),
-    Unsupported { reason: String },
+pub struct ControlProductGeometry {
+    pub revision: Revision,
+    /// How the native samples group into lamps.
+    pub sample_layout: ControlSampleLayout,
+    /// Where to draw those lamps, or why the engine will not say.
+    pub display_layout: GeometryDisplayLayout,
 }
 
 /// Result of a control-product preview probe.
@@ -52,8 +57,8 @@ pub enum ControlProductProbeResult {
         revision: Revision,
         extent: ControlExtent,
         sample_format: WireChannelSampleFormat,
-        sample_layout: ControlSampleLayout,
-        display_layout: ControlDisplayLayoutProbeResult,
+        /// Gated by the request's [`GeometryRead`].
+        geometry: GeometryProbeResult<ControlProductGeometry>,
         #[cfg_attr(feature = "schema-gen", schemars(with = "String"))]
         #[serde(with = "crate::serde_base64")]
         bytes: Vec<u8>,
@@ -71,8 +76,8 @@ pub enum ControlProductProbeResult {
 /// A [`ControlProductProbeResult::Preview`] with its bulk `bytes` removed.
 ///
 /// Produced by [`ControlProductProbeResult::into_chunked_parts`] when a preview
-/// result is streamed as bounded chunks. The structured header — extent, sample
-/// layout, and (per the plan) the `display_layout` — rides in
+/// result is streamed as bounded chunks. The structured header — extent and the
+/// gated geometry — rides in
 /// `ProjectReadProbeEvent::ResultBegin`; only the native `bytes` chunk. Recombine
 /// with [`ControlProductProbeResultHeader::into_result`].
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -82,8 +87,7 @@ pub struct ControlProductProbeResultHeader {
     pub revision: Revision,
     pub extent: ControlExtent,
     pub sample_format: WireChannelSampleFormat,
-    pub sample_layout: ControlSampleLayout,
-    pub display_layout: ControlDisplayLayoutProbeResult,
+    pub geometry: GeometryProbeResult<ControlProductGeometry>,
 }
 
 impl ControlProductProbeResult {
@@ -97,8 +101,7 @@ impl ControlProductProbeResult {
                 revision,
                 extent,
                 sample_format,
-                sample_layout,
-                display_layout,
+                geometry,
                 bytes,
             } => Ok((
                 ControlProductProbeResultHeader {
@@ -106,8 +109,7 @@ impl ControlProductProbeResult {
                     revision,
                     extent,
                     sample_format,
-                    sample_layout,
-                    display_layout,
+                    geometry,
                 },
                 bytes,
             )),
@@ -125,8 +127,7 @@ impl ControlProductProbeResultHeader {
             revision: self.revision,
             extent: self.extent,
             sample_format: self.sample_format,
-            sample_layout: self.sample_layout,
-            display_layout: self.display_layout,
+            geometry: self.geometry,
             bytes,
         }
     }
@@ -155,18 +156,23 @@ mod tests {
             revision: Revision::new(7),
             extent: ControlExtent::new(1, 3),
             sample_format: WireChannelSampleFormat::U16,
-            sample_layout: ControlSampleLayout {
-                spans: Vec::from([ControlSampleSpan {
-                    row: 0,
-                    start: 0,
-                    len: 3,
-                    encoding: ControlSampleEncoding::RgbPixels {
-                        count: 1,
-                        color_order: ColorOrder::Rgb,
-                    },
-                }]),
-            },
-            display_layout: ControlDisplayLayoutProbeResult::Omitted,
+            geometry: GeometryProbeResult::Changed(ControlProductGeometry {
+                revision: Revision::new(7),
+                sample_layout: ControlSampleLayout {
+                    spans: Vec::from([ControlSampleSpan {
+                        row: 0,
+                        start: 0,
+                        len: 3,
+                        encoding: ControlSampleEncoding::RgbPixels {
+                            count: 1,
+                            color_order: ColorOrder::Rgb,
+                        },
+                    }]),
+                },
+                display_layout: GeometryDisplayLayout::Unsupported {
+                    reason: String::from("no display layout"),
+                },
+            }),
             bytes: Vec::from([0, 0, 255, 255, 128, 0]),
         };
 
@@ -184,32 +190,35 @@ mod tests {
             revision: Revision::new(18),
             extent: ControlExtent::new(1, 723),
             sample_format: WireChannelSampleFormat::U16,
-            sample_layout: ControlSampleLayout {
-                spans: Vec::from([ControlSampleSpan {
-                    row: 0,
-                    start: 0,
-                    len: 723,
-                    encoding: ControlSampleEncoding::RgbPixels {
-                        count: 241,
-                        color_order: ColorOrder::Rgb,
-                    },
-                }]),
-            },
-            display_layout: ControlDisplayLayoutProbeResult::Layout(
-                ControlDisplayLayout::Layout2d(ControlLayout2d::new(
-                    Revision::new(18),
-                    10,
-                    10,
-                    (0..241)
-                        .map(|index| ControlLamp2d {
-                            lamp_index: index,
-                            sample_start: index * 3,
-                            center: [(index % 17) as f32 / 16.0, (index / 17) as f32 / 15.0],
-                            radius: 0.02,
-                        })
-                        .collect(),
+            geometry: GeometryProbeResult::Changed(ControlProductGeometry {
+                revision: Revision::new(7),
+                sample_layout: ControlSampleLayout {
+                    spans: Vec::from([ControlSampleSpan {
+                        row: 0,
+                        start: 0,
+                        len: 723,
+                        encoding: ControlSampleEncoding::RgbPixels {
+                            count: 241,
+                            color_order: ColorOrder::Rgb,
+                        },
+                    }]),
+                },
+                display_layout: GeometryDisplayLayout::Layout(ControlDisplayLayout::Layout2d(
+                    ControlLayout2d::new(
+                        Revision::new(18),
+                        10,
+                        10,
+                        (0..241)
+                            .map(|index| ControlLamp2d {
+                                lamp_index: index,
+                                sample_start: index * 3,
+                                center: [(index % 17) as f32 / 16.0, (index / 17) as f32 / 15.0],
+                                radius: 0.02,
+                            })
+                            .collect(),
+                    ),
                 )),
-            ),
+            }),
             bytes: vec![0; 723 * 2],
         };
         let events = Vec::from([ProjectReadEvent::Probe {
@@ -277,10 +286,13 @@ mod tests {
             revision: Revision::new(1),
             extent: ControlExtent::new(1, LAMPS * 3),
             sample_format: WireChannelSampleFormat::U16,
-            sample_layout: ControlSampleLayout { spans: Vec::new() },
-            display_layout: ControlDisplayLayoutProbeResult::Layout(
-                ControlDisplayLayout::Layout2d(layout),
-            ),
+            geometry: GeometryProbeResult::Changed(ControlProductGeometry {
+                revision: Revision::new(7),
+                sample_layout: ControlSampleLayout { spans: Vec::new() },
+                display_layout: GeometryDisplayLayout::Layout(ControlDisplayLayout::Layout2d(
+                    layout,
+                )),
+            }),
             bytes: Vec::new(),
         };
         let (header, _) = crate::ProjectProbeResult::ControlProduct(result)
@@ -334,32 +346,35 @@ mod tests {
             revision: Revision::new(18),
             extent: ControlExtent::new(1, 723),
             sample_format: WireChannelSampleFormat::U16,
-            sample_layout: ControlSampleLayout {
-                spans: Vec::from([ControlSampleSpan {
-                    row: 0,
-                    start: 0,
-                    len: 723,
-                    encoding: ControlSampleEncoding::RgbPixels {
-                        count: 241,
-                        color_order: ColorOrder::Rgb,
-                    },
-                }]),
-            },
-            display_layout: ControlDisplayLayoutProbeResult::Layout(
-                ControlDisplayLayout::Layout2d(ControlLayout2d::new(
-                    Revision::new(18),
-                    10,
-                    10,
-                    (0..241)
-                        .map(|index| ControlLamp2d {
-                            lamp_index: index,
-                            sample_start: index * 3,
-                            center: [(index % 17) as f32 / 16.0, (index / 17) as f32 / 15.0],
-                            radius: 0.02,
-                        })
-                        .collect(),
+            geometry: GeometryProbeResult::Changed(ControlProductGeometry {
+                revision: Revision::new(7),
+                sample_layout: ControlSampleLayout {
+                    spans: Vec::from([ControlSampleSpan {
+                        row: 0,
+                        start: 0,
+                        len: 723,
+                        encoding: ControlSampleEncoding::RgbPixels {
+                            count: 241,
+                            color_order: ColorOrder::Rgb,
+                        },
+                    }]),
+                },
+                display_layout: GeometryDisplayLayout::Layout(ControlDisplayLayout::Layout2d(
+                    ControlLayout2d::new(
+                        Revision::new(18),
+                        10,
+                        10,
+                        (0..241)
+                            .map(|index| ControlLamp2d {
+                                lamp_index: index,
+                                sample_start: index * 3,
+                                center: [(index % 17) as f32 / 16.0, (index / 17) as f32 / 15.0],
+                                radius: 0.02,
+                            })
+                            .collect(),
+                    ),
                 )),
-            ),
+            }),
             bytes: vec![0u8; bulk_len],
         };
 

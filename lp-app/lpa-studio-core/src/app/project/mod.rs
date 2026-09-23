@@ -23,6 +23,7 @@
 
 pub(crate) mod agent_support;
 pub mod asset;
+pub(crate) mod control_geometry_cache;
 pub mod demo_project;
 pub(crate) mod device_bind;
 pub mod dirty_summary;

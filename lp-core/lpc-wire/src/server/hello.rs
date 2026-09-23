@@ -33,6 +33,21 @@ use serde::{Deserialize, Serialize};
 ///
 /// # History
 ///
+/// - 21: the geometry gate (lean-wire) — everything static about a probed
+///   buffer rides one revision-gated bundle. `ControlProductProbeRequest`'s
+///   `display_layout: ControlDisplayLayoutRead` becomes `geometry:
+///   GeometryRead`, and its preview (and chunk header) replaces
+///   `sample_layout` + `display_layout` with `geometry:
+///   GeometryProbeResult<ControlProductGeometry>`. `OutputFrameProbeRequest`
+///   gains a PER-OUTPUT gate (`geometry: OutputFrameGeometryRead`, whose
+///   `IfChanged` lists a known revision per output node), and
+///   `OutputFrameEntry` (and its header) replaces `sample_layout` +
+///   `display_layout` + `placements` with `geometry:
+///   GeometryProbeResult<OutputFrameGeometry>`. `ControlDisplayLayoutRead`
+///   and `ControlDisplayLayoutProbeResult` are gone. Renamed and retyped
+///   fields on existing messages: an old peer cannot decode either side,
+///   which is what earns the bump. A steady lens read of the PLAYFUL choker
+///   drops from 10,997 B to 8,698 B.
 /// - 20: `ClientRequest::ClearFaults` + its `ServerMsgBody::ClearFaults {
 ///   ledger_cleared }` ack — the studio's Clear faults verb, which forgets
 ///   the crash-recovery ledger and re-arms the engine's faulted nodes.
@@ -176,7 +191,7 @@ use serde::{Deserialize, Serialize};
 /// as `None` on new Studio and a new firmware's extra fields are ignored
 /// by old Studio. Bumping for those would mark every board running
 /// current firmware Incompatible in exchange for nothing.
-pub const WIRE_PROTO_VERSION: u32 = 20;
+pub const WIRE_PROTO_VERSION: u32 = 21;
 
 /// Unsolicited/boot-time server identity, version, and capability report.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -483,7 +498,7 @@ mod tests {
     #[test]
     fn the_proto_version_is_pinned_to_its_history() {
         assert_eq!(
-            WIRE_PROTO_VERSION, 20,
+            WIRE_PROTO_VERSION, 21,
             "if you meant to bump, add the History entry in this file's \
              doc comment and update this pin"
         );

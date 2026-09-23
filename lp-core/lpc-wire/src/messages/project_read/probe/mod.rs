@@ -2,6 +2,7 @@
 
 mod binding_graph_probe;
 mod control_product_probe;
+mod geometry_gate;
 mod output_frame_probe;
 mod project_probe;
 mod render_product_probe;
@@ -13,11 +14,13 @@ pub use binding_graph_probe::{
     WireScopeRef,
 };
 pub use control_product_probe::{
-    ControlDisplayLayoutProbeResult, ControlDisplayLayoutRead, ControlProductProbeRequest,
-    ControlProductProbeResult, ControlProductProbeResultHeader,
+    ControlProductGeometry, ControlProductProbeRequest, ControlProductProbeResult,
+    ControlProductProbeResultHeader,
 };
+pub use geometry_gate::{GeometryDisplayLayout, GeometryProbeResult, GeometryRead};
 pub use output_frame_probe::{
-    OutputFrameEntry, OutputFrameEntryHeader, OutputFrameProbeRequest, OutputFrameProbeResult,
+    KnownOutputFrameGeometry, OutputFrameEntry, OutputFrameEntryHeader, OutputFrameGeometry,
+    OutputFrameGeometryRead, OutputFrameProbeRequest, OutputFrameProbeResult,
     OutputFrameProbeResultHeader, WireOutputPlacement,
 };
 pub use project_probe::{ProjectProbeRequest, ProjectProbeResult, ProjectProbeResultHeader};

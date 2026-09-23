@@ -9,20 +9,22 @@ use lp_collection::VecMap;
 use lpc_model::{ChannelName, ControlDisplayLayout, ControlLayout2d, Kind, NodeId, Revision};
 use lpc_registry::ProjectRegistry;
 use lpc_wire::{
-    BindingGraphProbeRequest, BindingGraphProbeResult, ControlDisplayLayoutProbeResult,
-    ControlDisplayLayoutRead, ControlProductProbeRequest, ControlProductProbeResult,
-    OutputFrameEntry, OutputFrameProbeRequest, OutputFrameProbeResult, RenderProductProbeRequest,
-    RenderProductProbeResult, TimebaseProbeRequest, TimebaseProbeResult, WireBindingDirection,
-    WireBindingEndpoint, WireBindingGraph, WireBindingOrigin, WireBusChannel, WireBusChannelValue,
-    WireCellProjection, WireChannelSampleFormat, WireConsumerPolicy, WireEffectiveBinding,
-    WirePhasorOrigin, WirePhasorRow, WireProjectionOrigin, WireProjectionShape, WireVisualSpace,
+    BindingGraphProbeRequest, BindingGraphProbeResult, ControlProductGeometry,
+    ControlProductProbeRequest, ControlProductProbeResult, GeometryDisplayLayout,
+    GeometryProbeResult, GeometryRead, OutputFrameEntry, OutputFrameGeometry,
+    OutputFrameGeometryRead, OutputFrameProbeRequest, OutputFrameProbeResult,
+    RenderProductProbeRequest, RenderProductProbeResult, TimebaseProbeRequest, TimebaseProbeResult,
+    WireBindingDirection, WireBindingEndpoint, WireBindingGraph, WireBindingOrigin, WireBusChannel,
+    WireBusChannelValue, WireCellProjection, WireChannelSampleFormat, WireConsumerPolicy,
+    WireEffectiveBinding, WirePhasorOrigin, WirePhasorRow, WireProjectionOrigin,
+    WireProjectionShape, WireVisualSpace,
 };
 use lps_shared::TextureStorageFormat;
 
 use crate::dataflow::binding::{
     BindingEntry, BindingPriority, BindingRef, BindingSource, BindingTarget,
 };
-use crate::engine::engine::gate_display_layout;
+use crate::engine::engine::display_layout_over_budget;
 use crate::node::NodeEntryState;
 use crate::nodes::{OutputFragment, merge_fragment_display_layouts};
 use crate::products::control::{
@@ -51,6 +53,17 @@ struct PublishedOutputCandidate {
     /// knows where each producer's lamps ended up on this wire.
     fragments: Vec<OutputFragment>,
     placement_revision: Revision,
+    sample_layout_revision: Revision,
+}
+
+/// What an output's producers answered about their display layouts — asked
+/// once per product, before the gate decides whether any of it is sent.
+struct OutputDisplayParts {
+    /// One entry per distinct product on the wire: its layout, or why not.
+    probed: Vec<(ControlProduct, Result<ControlLayout2d, String>)>,
+    /// `max(placement revision, every answering producer's layout revision)`
+    /// — the display-layout component of the output's geometry revision.
+    revision: Revision,
 }
 
 impl Engine {
@@ -378,20 +391,25 @@ impl Engine {
             samples.as_mut_slice(),
         );
         let revision = self.revision();
+        let want_geometry = !matches!(request.geometry, GeometryRead::None);
         match self.render_control_product_probe(
             registry,
             product,
             &render_request,
             target,
-            request.display_layout,
+            want_geometry,
         ) {
             Ok((sample_layout, display_layout)) => ControlProductProbeResult::Preview {
                 product,
                 revision,
                 extent,
                 sample_format: request.sample_format,
-                sample_layout,
-                display_layout,
+                geometry: self.control_product_geometry(
+                    product,
+                    request.geometry,
+                    sample_layout,
+                    display_layout,
+                ),
                 bytes: control_samples_u16_to_bytes(&samples),
             },
             Err(error) => ControlProductProbeResult::Error {
@@ -399,6 +417,55 @@ impl Engine {
                 message: format!("{error}"),
             },
         }
+    }
+
+    /// Gate one control product's geometry.
+    ///
+    /// The revision is `max(sample-layout stamp, display-layout revision)`:
+    /// the stamp moves when the rendered sample layout differs from the last
+    /// one answered for this product (compared by value — see
+    /// [`super::control_geometry_stamps`]), and the display layout's own
+    /// revision moves with its mapping and render size. Both are stamped at
+    /// the frame revision that saw the change, so either moving moves the max.
+    ///
+    /// A layout over the link's budget is still an answer: the bundle goes out
+    /// with [`GeometryDisplayLayout::Unsupported`] under the same revision,
+    /// and the client's `IfChanged` then keeps it at `Unchanged` instead of
+    /// asking for — and this engine measuring — the same refusal every read.
+    fn control_product_geometry(
+        &mut self,
+        product: ControlProduct,
+        read: GeometryRead,
+        sample_layout: ControlLayout,
+        display_layout: Option<ControlDisplayLayout>,
+    ) -> GeometryProbeResult<ControlProductGeometry> {
+        let known_revision = match read {
+            GeometryRead::None => return GeometryProbeResult::Omitted,
+            GeometryRead::Always => None,
+            GeometryRead::IfChanged { known_revision } => known_revision,
+        };
+        let sample_revision = self.stamp_control_sample_layout(product, &sample_layout);
+        let revision = display_layout.as_ref().map_or(sample_revision, |layout| {
+            sample_revision.max(layout.revision())
+        });
+        if known_revision == Some(revision) {
+            return GeometryProbeResult::Unchanged { revision };
+        }
+        let display_layout = match display_layout {
+            None => GeometryDisplayLayout::Unsupported {
+                reason: String::from("control product does not expose display layout"),
+            },
+            Some(layout) => match display_layout_over_budget(&layout, self.display_layout_budget())
+            {
+                Some(reason) => GeometryDisplayLayout::Unsupported { reason },
+                None => GeometryDisplayLayout::Layout(layout),
+            },
+        };
+        GeometryProbeResult::Changed(ControlProductGeometry {
+            revision,
+            sample_layout,
+            display_layout,
+        })
     }
 
     /// Read the frames every output node has ALREADY published.
@@ -437,17 +504,19 @@ impl Engine {
                     sample_layout: node.runtime_output_sample_layout().cloned(),
                     fragments: node.runtime_output_fragments().to_vec(),
                     placement_revision: node.runtime_output_placement_revision(),
+                    sample_layout_revision: node.runtime_output_sample_layout_revision(),
                 })
             })
             .collect();
 
         // The frame-probe HEADER is one unchunked event carrying EVERY
         // entry's display layout, so the budget that matters here is the
-        // header TOTAL: three layouts that each pass the per-layout gate
-        // can still jointly blow the frame and wedge the read stream. Track
-        // the running layout bytes and degrade later entries to
-        // `Unsupported` once the total is spent — their frames still flow,
-        // only the geometry of the excess outputs is refused.
+        // header TOTAL: three layouts that each pass the per-layout check can
+        // still jointly blow the frame and wedge the read stream. Track the
+        // running layout bytes and DEFER later entries' geometry once the
+        // total is spent (`Omitted`: their frames still flow, and the client
+        // asks again next read — when the entries that did fit answer
+        // `Unchanged` and the deferred one has the frame to itself).
         let mut layout_bytes_spent = 0usize;
         let mut outputs = Vec::with_capacity(candidates.len());
         for candidate in candidates {
@@ -467,31 +536,12 @@ impl Engine {
             let revision = buffer.changed_at();
             let bytes = buffer.value().bytes().into_owned();
 
-            let display_layout = if let ControlDisplayLayoutRead::None = request.display_layout {
-                ControlDisplayLayoutProbeResult::Omitted
-            } else {
-                let answer =
-                    self.output_frame_display_layout(registry, &candidate, request.display_layout);
-                match (self.display_layout_budget(), answer) {
-                    (Some(budget), ControlDisplayLayoutProbeResult::Layout(layout)) => {
-                        let layout_len = lpc_wire::ser_write_json_len(&layout);
-                        if layout_bytes_spent + layout_len > budget {
-                            ControlDisplayLayoutProbeResult::Unsupported {
-                                reason: format!(
-                                    "the frame header already carries {layout_bytes_spent} \
-                                     bytes of display layouts; this one ({layout_len} bytes) \
-                                     would push the single header event past the link's \
-                                     {budget}-byte budget"
-                                ),
-                            }
-                        } else {
-                            layout_bytes_spent += layout_len;
-                            ControlDisplayLayoutProbeResult::Layout(layout)
-                        }
-                    }
-                    (_, answer) => answer,
-                }
-            };
+            let geometry = self.output_frame_geometry(
+                registry,
+                &candidate,
+                &request.geometry,
+                &mut layout_bytes_spent,
+            );
 
             outputs.push(OutputFrameEntry {
                 node: candidate.node,
@@ -501,18 +551,107 @@ impl Engine {
                     RuntimeChannelSampleFormat::U8 => WireChannelSampleFormat::U8,
                     RuntimeChannelSampleFormat::U16 => WireChannelSampleFormat::U16,
                 },
-                sample_layout: candidate.sample_layout.unwrap_or_default(),
-                display_layout,
-                placements: candidate
-                    .fragments
-                    .iter()
-                    .map(wire_output_placement)
-                    .collect(),
+                geometry,
                 bytes,
             });
         }
 
         OutputFrameProbeResult::Frame { outputs }
+    }
+
+    /// Gate one published output's geometry: its sample layout, its merged
+    /// display layout and its placements, under one revision.
+    ///
+    /// The revision is the max of three stamps, each taken at the tick (or
+    /// probe) that saw its piece CHANGE: the output's sample-layout stamp,
+    /// its placement stamp (a patch re-cutting the wire), and every
+    /// producer's display-layout revision (a mapping or render-size change).
+    /// Any piece moving therefore moves the max. The buffer's per-tick
+    /// `revision` is never part of it.
+    ///
+    /// The producers are asked for their layouts every read — their revisions
+    /// are part of the answer — but merging, measuring and sending happen
+    /// only when the client's revision is stale.
+    ///
+    /// An output that has not planned its placements yet answers `Omitted`,
+    /// not a refusal: "nothing to say this tick", and the client keeps asking
+    /// until there is. Its geometry would otherwise be cached as a refusal
+    /// under a revision that only the first plan moves — honest, but a card
+    /// would sit on "no layout" for exactly the frames that matter most.
+    fn output_frame_geometry(
+        &mut self,
+        registry: &ProjectRegistry,
+        candidate: &PublishedOutputCandidate,
+        read: &OutputFrameGeometryRead,
+        layout_bytes_spent: &mut usize,
+    ) -> GeometryProbeResult<OutputFrameGeometry> {
+        if matches!(read, OutputFrameGeometryRead::None) || candidate.fragments.is_empty() {
+            return GeometryProbeResult::Omitted;
+        }
+        let parts = self.output_frame_display_parts(registry, candidate);
+        let revision = parts
+            .revision
+            .max(candidate.placement_revision)
+            .max(candidate.sample_layout_revision);
+        if read.holds(candidate.node, revision) {
+            return GeometryProbeResult::Unchanged { revision };
+        }
+
+        let display_layout = self.output_frame_display_layout(candidate, parts);
+        if let GeometryDisplayLayout::Layout(layout) = &display_layout
+            && let Some(budget) = self.display_layout_budget()
+        {
+            let layout_len = lpc_wire::ser_write_json_len(layout);
+            if *layout_bytes_spent + layout_len > budget {
+                return GeometryProbeResult::Omitted;
+            }
+            *layout_bytes_spent += layout_len;
+        }
+
+        GeometryProbeResult::Changed(OutputFrameGeometry {
+            revision,
+            sample_layout: candidate.sample_layout.clone().unwrap_or_default(),
+            display_layout,
+            placements: candidate
+                .fragments
+                .iter()
+                .map(wire_output_placement)
+                .collect(),
+        })
+    }
+
+    /// Ask every producer on one output for its display layout — once per
+    /// PRODUCT, not per fragment: a patched producer is cut into several runs
+    /// and every one of them wants the same geometry.
+    fn output_frame_display_parts(
+        &mut self,
+        registry: &ProjectRegistry,
+        candidate: &PublishedOutputCandidate,
+    ) -> OutputDisplayParts {
+        let mut probed: Vec<(ControlProduct, Result<ControlLayout2d, String>)> = Vec::new();
+        let mut revision = candidate.placement_revision;
+        for fragment in &candidate.fragments {
+            if probed
+                .iter()
+                .any(|(product, _)| *product == fragment.product)
+            {
+                continue;
+            }
+            let answer = match self.control_display_layout_probe(registry, fragment.product) {
+                Ok(Some(ControlDisplayLayout::Layout2d(layout))) => {
+                    revision = revision.max(layout.revision);
+                    Ok(layout)
+                }
+                Ok(None) => Err(format!(
+                    "node {:?} exposes no display layout for control output {}",
+                    fragment.product.node(),
+                    fragment.product.output()
+                )),
+                Err(error) => Err(format!("{error}")),
+            };
+            probed.push((fragment.product, answer));
+        }
+        OutputDisplayParts { probed, revision }
     }
 
     /// Where to draw the lamps of one published frame.
@@ -521,75 +660,49 @@ impl Engine {
     /// states its lamps in its OWN numbering (`sample_start = channel * 3`),
     /// and the fragment that placed it is the only thing that knows where
     /// those samples ended up on the wire — after an authored offset, after a
-    /// reversal, after however many other strands share the run. So: ask each
-    /// producer once, rebase every fragment's share through the placement, and
-    /// merge. A client can then index the frame's bytes by each lamp's
-    /// `sample_start` and get that lamp's own color, which is the contract
-    /// `OutputFrameEntry` already claims.
+    /// reversal, after however many other strands share the run. So: rebase
+    /// every fragment's share of its producer's layout through the placement,
+    /// and merge. A client can then index the frame's bytes by each lamp's
+    /// `sample_start` and get that lamp's own color.
     ///
     /// A producer whose layout the engine declines (over the wire budget at
     /// dome scale, or a kind with no geometry at all) simply contributes no
     /// lamps; the rest of the wire still draws. Only when NOTHING answers does
-    /// the whole read report `Unsupported`, carrying the first refusal's reason
-    /// so the client can say why.
-    ///
-    /// `Unsupported` is a PERMANENT answer, and every client treats it as one:
-    /// both feeds stop asking for geometry on the spot and stand a local
-    /// synthesis up in its place (see `card_feed.rs` and
-    /// `preview_output_feed.rs`), because re-asking would make a dome-scale
-    /// board rebuild and measure a layout it cannot send, every pull. So an
-    /// output that has simply not planned its placements yet must NOT answer
-    /// with it: "nothing to say this tick" is `Omitted`, and the client keeps
-    /// asking until there is.
+    /// the bundle carry `Unsupported`, with the first refusal's reason so the
+    /// client can say why — cached by the client under the bundle's revision,
+    /// so it is not rebuilt and re-measured every read.
     fn output_frame_display_layout(
-        &mut self,
-        registry: &ProjectRegistry,
+        &self,
         candidate: &PublishedOutputCandidate,
-        read: ControlDisplayLayoutRead,
-    ) -> ControlDisplayLayoutProbeResult {
-        if candidate.fragments.is_empty() {
-            return ControlDisplayLayoutProbeResult::Omitted;
-        }
-
-        // One probe per PRODUCT, not per fragment: a patched producer is cut
-        // into several runs and every one of them wants the same geometry.
-        let mut probed: Vec<(ControlProduct, Option<ControlLayout2d>)> = Vec::new();
+        parts: OutputDisplayParts,
+    ) -> GeometryDisplayLayout {
+        let budget = self.display_layout_budget();
         let mut refusal: Option<String> = None;
-        for fragment in &candidate.fragments {
-            if probed
-                .iter()
-                .any(|(product, _)| *product == fragment.product)
-            {
-                continue;
-            }
-            // ALWAYS, never the caller's gate: the gate belongs to the merged
-            // answer, and an `Unchanged` on one part would silently drop that
-            // producer's lamps out of the composite.
-            let answer = match self.control_display_layout_probe(
-                registry,
-                fragment.product,
-                ControlDisplayLayoutRead::Always,
-            ) {
-                Ok(ControlDisplayLayoutProbeResult::Layout(ControlDisplayLayout::Layout2d(
-                    layout,
-                ))) => Some(layout),
-                Ok(ControlDisplayLayoutProbeResult::Unsupported { reason }) => {
+        let mut usable: Vec<(ControlProduct, ControlLayout2d)> = Vec::new();
+        for (product, answer) in parts.probed {
+            match answer {
+                Ok(layout) => {
+                    let layout = ControlDisplayLayout::Layout2d(layout);
+                    match display_layout_over_budget(&layout, budget) {
+                        Some(reason) => {
+                            refusal.get_or_insert(reason);
+                        }
+                        None => {
+                            let ControlDisplayLayout::Layout2d(layout) = layout;
+                            usable.push((product, layout));
+                        }
+                    }
+                }
+                Err(reason) => {
                     refusal.get_or_insert(reason);
-                    None
                 }
-                Ok(_) => None,
-                Err(error) => {
-                    refusal.get_or_insert_with(|| format!("{error}"));
-                    None
-                }
-            };
-            probed.push((fragment.product, answer));
+            }
         }
 
         let mut revision = candidate.placement_revision;
         let mut placed = Vec::with_capacity(candidate.fragments.len());
         for fragment in &candidate.fragments {
-            let Some((_, Some(layout))) = probed
+            let Some((_, layout)) = usable
                 .iter()
                 .find(|(product, _)| *product == fragment.product)
             else {
@@ -599,18 +712,19 @@ impl Engine {
             placed.push((*fragment, layout.clone()));
         }
         if placed.is_empty() {
-            return ControlDisplayLayoutProbeResult::Unsupported {
+            return GeometryDisplayLayout::Unsupported {
                 reason: refusal.unwrap_or_else(|| {
                     String::from("no producer on this output exposes a display layout")
                 }),
             };
         }
 
-        gate_display_layout(
-            ControlDisplayLayout::Layout2d(merge_fragment_display_layouts(&placed, revision)),
-            read,
-            self.display_layout_budget(),
-        )
+        let merged =
+            ControlDisplayLayout::Layout2d(merge_fragment_display_layouts(&placed, revision));
+        match display_layout_over_budget(&merged, budget) {
+            Some(reason) => GeometryDisplayLayout::Unsupported { reason },
+            None => GeometryDisplayLayout::Layout(merged),
+        }
     }
 
     /// List the live phasors riding one clock's timebase (parent D10).

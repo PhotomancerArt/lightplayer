@@ -16,8 +16,8 @@ use lpc_engine::{Engine, EngineServices, ProjectLoader};
 use lpc_model::{NodeRuntimeStatus, Revision, TreePath};
 use lpc_registry::{ParseCtx, ProjectRegistry};
 use lpc_wire::{
-    ControlDisplayLayoutProbeResult, ControlDisplayLayoutRead, OutputFrameProbeRequest,
-    OutputFrameProbeResult,
+    GeometryDisplayLayout, GeometryProbeResult, KnownOutputFrameGeometry, OutputFrameEntry,
+    OutputFrameGeometry, OutputFrameGeometryRead, OutputFrameProbeRequest, OutputFrameProbeResult,
 };
 use lpfs::{AsLpPath, FsEvent, FsEventKind, LpFs, LpFsMemory, LpPathBuf};
 
@@ -569,20 +569,33 @@ fn published_display_layout(
     engine: &mut Engine,
     registry: &ProjectRegistry,
 ) -> lpc_model::ControlLayout2d {
-    let result = engine.read_project_output_frame_probe(
-        registry,
-        OutputFrameProbeRequest {
-            display_layout: ControlDisplayLayoutRead::Always,
-        },
-    );
-    let OutputFrameProbeResult::Frame { outputs } = result;
-    let entry = outputs.into_iter().next().expect("one published output");
-    match entry.display_layout {
-        ControlDisplayLayoutProbeResult::Layout(lpc_model::ControlDisplayLayout::Layout2d(
-            layout,
-        )) => layout,
+    match published_geometry(engine, registry).display_layout {
+        GeometryDisplayLayout::Layout(lpc_model::ControlDisplayLayout::Layout2d(layout)) => layout,
         other => panic!("expected a published display layout, got {other:?}"),
     }
+}
+
+/// The first output's whole geometry bundle, asked for outright.
+fn published_geometry(engine: &mut Engine, registry: &ProjectRegistry) -> OutputFrameGeometry {
+    let entry = output_entries(engine, registry, OutputFrameGeometryRead::Always)
+        .into_iter()
+        .next()
+        .expect("one published output");
+    match entry.geometry {
+        GeometryProbeResult::Changed(geometry) => geometry,
+        other => panic!("expected changed geometry, got {other:?}"),
+    }
+}
+
+/// Every published output's entry under one geometry gate.
+fn output_entries(
+    engine: &mut Engine,
+    registry: &ProjectRegistry,
+    geometry: OutputFrameGeometryRead,
+) -> Vec<OutputFrameEntry> {
+    let OutputFrameProbeResult::Frame { outputs } =
+        engine.read_project_output_frame_probe(registry, OutputFrameProbeRequest { geometry });
+    outputs
 }
 
 /// The x coordinate of each drawn lamp, in wire order. Every lamp in these
@@ -659,54 +672,56 @@ fn a_patched_display_layout_draws_every_lamp_at_its_own_colour() {
 
 /// "No placements yet" is a MOMENT, not a refusal.
 ///
-/// `Unsupported` is permanent on the wire: both client feeds stop asking for
-/// geometry the instant they see one, and stand a locally synthesized layout
-/// up in its place — which, for a project with more than one fixture, is one
-/// fixture's lamps reading the whole wire's samples. Answering an output that
-/// has simply not planned its fragments yet with `Unsupported` would therefore
-/// strand a card on that wrong picture for the rest of the connection. The
-/// honest answer is `Omitted`, and the very next read carries the layout.
+/// A client caches a refused display layout for as long as its geometry
+/// revision stands. Answering an output that has simply not planned its
+/// fragments yet with `Unsupported` would park a card on "no layout" until
+/// the first plan moved the revision; the honest answer is `Omitted` —
+/// "nothing to say this read" — and the client keeps asking until the
+/// geometry arrives.
 #[test]
 fn an_output_with_no_placements_yet_omits_its_layout_rather_than_refusing_it() {
     let fs = project_fs(true);
     let (mut engine, registry) = load(&fs);
 
     // Before the first settled frame the output has published no fragments.
-    let answer = display_layout_answer(&mut engine, &registry);
+    let answer = geometry_answer(&mut engine, &registry);
     assert!(
         matches!(
             answer,
-            ControlDisplayLayoutProbeResult::Omitted | ControlDisplayLayoutProbeResult::Layout(_)
+            None | Some(GeometryProbeResult::Omitted)
+                | Some(GeometryProbeResult::Changed(OutputFrameGeometry {
+                    display_layout: GeometryDisplayLayout::Layout(_),
+                    ..
+                }))
         ),
-        "a not-yet-placed output says nothing, it does not refuse forever: {answer:?}"
+        "a not-yet-placed output says nothing, it does not refuse: {answer:?}"
     );
 
     tick(&mut engine, &registry, SETTLE_TICKS);
     assert!(
         matches!(
-            display_layout_answer(&mut engine, &registry),
-            ControlDisplayLayoutProbeResult::Layout(_)
+            published_geometry(&mut engine, &registry).display_layout,
+            GeometryDisplayLayout::Layout(_)
         ),
         "and the geometry arrives once the placements do"
     );
 }
 
-/// The display-layout half of the published-frame answer, whatever it is.
-fn display_layout_answer(
+/// The geometry half of the first published entry, whatever it is (`None`
+/// when no output has published a frame at all).
+fn geometry_answer(
     engine: &mut Engine,
     registry: &ProjectRegistry,
-) -> ControlDisplayLayoutProbeResult {
-    let OutputFrameProbeResult::Frame { outputs } = engine.read_project_output_frame_probe(
-        registry,
-        OutputFrameProbeRequest {
-            display_layout: ControlDisplayLayoutRead::Always,
-        },
-    );
-    outputs
+) -> Option<GeometryProbeResult<OutputFrameGeometry>> {
+    output_entries(engine, registry, OutputFrameGeometryRead::Always)
         .into_iter()
         .next()
-        .map(|entry| entry.display_layout)
-        .unwrap_or(ControlDisplayLayoutProbeResult::Omitted)
+        .map(|entry| entry.geometry)
+}
+
+/// The display layout inside the first output's changed geometry.
+fn display_layout_answer(engine: &mut Engine, registry: &ProjectRegistry) -> GeometryDisplayLayout {
+    published_geometry(engine, registry).display_layout
 }
 
 /// A patch edit re-cuts the wire without touching any mapping — so the
@@ -746,6 +761,59 @@ fn re_patching_moves_the_display_layout_revision() {
     );
 }
 
+/// Trigger 3 of the geometry gate — the PLACEMENTS move. A client holding
+/// the wire's geometry at its revision hears `Unchanged` while nothing
+/// moves, and `Changed` — with the re-cut placements — the read after a
+/// patch edit, though no mapping (and so no producer's own layout) changed.
+#[test]
+fn re_patching_moves_the_geometry_revision_and_resends_the_placements() {
+    let mut fs = project_fs(true);
+    let (mut engine, mut registry) = load(&fs);
+    tick(&mut engine, &registry, SETTLE_TICKS);
+    let before = published_geometry(&mut engine, &registry);
+    let node = output_entries(&mut engine, &registry, OutputFrameGeometryRead::None)[0].node;
+    let known = OutputFrameGeometryRead::IfChanged {
+        known: vec![KnownOutputFrameGeometry {
+            node,
+            revision: before.revision,
+        }],
+    };
+
+    tick(&mut engine, &registry, 2);
+    assert_eq!(
+        output_entries(&mut engine, &registry, known.clone())[0].geometry,
+        GeometryProbeResult::Unchanged {
+            revision: before.revision
+        },
+        "a steady wire's geometry stands"
+    );
+
+    fs.write_file_mut(
+        "/leaf.patch.json".as_path(),
+        br#"{
+  "format": 1,
+  "entries": [
+    { "range": { "start": 0, "count": 2 }, "at": { "channel": 2 }, "reversed": true }
+  ]
+}"#,
+    )
+    .expect("flip the leaf");
+    apply_asset_change(&mut engine, &mut registry, &fs, &["/leaf.patch.json"]);
+    tick(&mut engine, &registry, 2);
+
+    let GeometryProbeResult::Changed(after) = output_entries(&mut engine, &registry, known)
+        .remove(0)
+        .geometry
+    else {
+        panic!("a re-cut wire must resend its geometry");
+    };
+    assert!(after.revision > before.revision);
+    assert_ne!(
+        after.placements, before.placements,
+        "the new cut rides the changed bundle"
+    );
+}
+
 fn apply_asset_change(
     engine: &mut Engine,
     registry: &mut ProjectRegistry,
@@ -778,7 +846,7 @@ fn the_declared_link_budget_gates_the_published_layout() {
 
     engine.set_display_layout_budget(Some(64));
     let refused = display_layout_answer(&mut engine, &registry);
-    let ControlDisplayLayoutProbeResult::Unsupported { reason } = refused else {
+    let GeometryDisplayLayout::Unsupported { reason } = refused else {
         panic!("a 64-byte link cannot carry this layout: {refused:?}");
     };
     assert!(
@@ -794,16 +862,16 @@ fn the_declared_link_budget_gates_the_published_layout() {
     assert!(
         matches!(
             display_layout_answer(&mut engine, &registry),
-            ControlDisplayLayoutProbeResult::Layout(_)
+            GeometryDisplayLayout::Layout(_)
         ),
         "an unbounded link answers the same layout"
     );
 }
 
 /// The frame-probe header carries EVERY output's layout in one unchunked
-/// event, so the budget is a header TOTAL: outputs whose layouts each fit
-/// individually degrade to `Unsupported` once the header is spent — and
-/// their frames still flow.
+/// event, so the budget is a header TOTAL: once the header is spent, a later
+/// output's geometry is DEFERRED (`Omitted`) — its frame still flows — and
+/// the next read, where the others answer `Unchanged`, carries it.
 #[test]
 fn the_header_total_gates_layouts_across_outputs() {
     // Three outputs on the same control bus, each carrying real content:
@@ -891,42 +959,54 @@ fn the_header_total_gates_layouts_across_outputs() {
     // Measure one layout as the wire would, then declare a budget that
     // holds two of them but not three.
     let one = match display_layout_answer(&mut engine, &registry) {
-        ControlDisplayLayoutProbeResult::Layout(layout) => lpc_wire::ser_write_json_len(&layout),
+        GeometryDisplayLayout::Layout(layout) => lpc_wire::ser_write_json_len(&layout),
         other => panic!("expected a layout to measure: {other:?}"),
     };
     engine.set_display_layout_budget(Some(one * 2 + one / 2));
 
-    let OutputFrameProbeResult::Frame { outputs } = engine.read_project_output_frame_probe(
-        &registry,
-        OutputFrameProbeRequest {
-            display_layout: ControlDisplayLayoutRead::Always,
-        },
-    );
+    let outputs = output_entries(&mut engine, &registry, OutputFrameGeometryRead::Always);
     assert_eq!(outputs.len(), 3, "all three frames flow regardless");
-    let answered = outputs
+    let answered: Vec<_> = outputs
         .iter()
-        .filter(|entry| {
-            matches!(
-                entry.display_layout,
-                ControlDisplayLayoutProbeResult::Layout(_)
-            )
-        })
-        .count();
-    let refused: Vec<_> = outputs
-        .iter()
-        .filter_map(|entry| match &entry.display_layout {
-            ControlDisplayLayoutProbeResult::Unsupported { reason } => Some(reason.clone()),
+        .filter_map(|entry| match &entry.geometry {
+            GeometryProbeResult::Changed(geometry) => Some(KnownOutputFrameGeometry {
+                node: entry.node,
+                revision: geometry.revision,
+            }),
             _ => None,
         })
         .collect();
+    let deferred: Vec<_> = outputs
+        .iter()
+        .filter(|entry| entry.geometry == GeometryProbeResult::Omitted)
+        .map(|entry| entry.node)
+        .collect();
     assert_eq!(
-        (answered, refused.len()),
+        (answered.len(), deferred.len()),
         (2, 1),
-        "two layouts fit the header, the third degrades: {refused:?}"
+        "two layouts fit the header, the third is deferred"
     );
+
+    // The next read names what it holds: the two answered outputs are
+    // `Unchanged`, which leaves the header to the deferred one.
+    let outputs = output_entries(
+        &mut engine,
+        &registry,
+        OutputFrameGeometryRead::IfChanged { known: answered },
+    );
+    let deferred_entry = outputs
+        .iter()
+        .find(|entry| entry.node == deferred[0])
+        .expect("the deferred output still publishes");
     assert!(
-        refused[0].contains("header already carries"),
-        "the refusal explains the header total: {}",
-        refused[0]
+        matches!(
+            &deferred_entry.geometry,
+            GeometryProbeResult::Changed(OutputFrameGeometry {
+                display_layout: GeometryDisplayLayout::Layout(_),
+                ..
+            })
+        ),
+        "the deferred output's geometry rides the next read: {:?}",
+        deferred_entry.geometry
     );
 }
