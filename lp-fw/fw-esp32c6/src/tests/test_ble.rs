@@ -9,10 +9,22 @@
 //! - `6E400002-…` RX: the central writes bytes here;
 //! - `6E400003-…` TX: the board notifies bytes back.
 //!
-//! Every write is echoed back on TX. A write of `burst` (optionally
-//! `burst <n>`) instead notifies `n` 180-byte packets back to back and prints
-//! how long they took, which is the first honest number for "how fast can a
-//! project upload go over this".
+//! Text writes are commands; anything else echoes back on TX:
+//!
+//! - `burst [n]` notifies `n` 180-byte packets back to back (board → central);
+//! - exactly-180-byte writes are counted, not echoed, and `count` reports
+//!   bytes + ms (central → board, the upload direction);
+//! - writes whose first byte is `0xF0` are live-pixel frames, timed on
+//!   arrival, and `frames` reports count, span and a gap histogram;
+//! - `params` reports interval / latency / supervision timeout / MTU / RSSI /
+//!   PHY (also printed with every heartbeat);
+//! - `interval <min_us> [max_us]` asks the central for new connection
+//!   parameters (4 s supervision timeout).
+//!
+//! It also drives the XIAO ESP32C6's RF switch (GPIO3 LOW, GPIO14 LOW), which
+//! the product firmware does not — see
+//! `docs/defects/2026-09-23-xiao-c6-rf-switch-never-powered.md`. The desk rig
+//! that drives all of this is `spikes/ble-lab/`.
 //!
 //! Heap is printed at each bring-up stage with the PRODUCT's heap layout
 //! (the same two regions `init_board` declares), so the deltas read straight
@@ -161,7 +173,11 @@ pub async fn run_ble_test(_: embassy_executor::Spawner) -> ! {
                 Ok(conn) => {
                     reprint_boot_stages();
                     heap("connected");
-                    select(gatt_events(&server, &conn, &stack), heartbeat(&conn, &stack)).await;
+                    select(
+                        gatt_events(&server, &conn, &stack),
+                        heartbeat(&conn, &stack),
+                    )
+                    .await;
                     heap("disconnected");
                 }
                 Err(e) => {
@@ -483,8 +499,21 @@ impl FrameStats {
         let _ = write!(
             out,
             "frames n={} bytes={} span_ms={} gap_us min={} mean={} max={} hist10/20/35/50/75/100/150/250/+={}/{}/{}/{}/{}/{}/{}/{}/{}",
-            self.count, self.bytes, span_ms, min, mean, self.gap_max_us,
-            b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7], b[8]
+            self.count,
+            self.bytes,
+            span_ms,
+            min,
+            mean,
+            self.gap_max_us,
+            b[0],
+            b[1],
+            b[2],
+            b[3],
+            b[4],
+            b[5],
+            b[6],
+            b[7],
+            b[8]
         );
     }
 }

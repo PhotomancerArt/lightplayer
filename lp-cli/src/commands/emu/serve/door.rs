@@ -403,9 +403,17 @@ struct WireTap(Option<std::fs::File>);
 
 impl WireTap {
     fn open(board: &str) -> Self {
-        let Some(dir) = std::env::var_os("LP_EMU_WIRE_TAP") else { return Self(None) };
+        let Some(dir) = std::env::var_os("LP_EMU_WIRE_TAP") else {
+            return Self(None);
+        };
         let path = std::path::Path::new(&dir).join(format!("{board}.tap"));
-        Self(std::fs::OpenOptions::new().create(true).append(true).open(path).ok())
+        Self(
+            std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(path)
+                .ok(),
+        )
     }
 
     fn record(&mut self, dir: u8, bytes: &[u8]) {
