@@ -187,6 +187,16 @@ impl PowerGateController {
         }
     }
 
+    /// Whether every gate in `mask` is up — i.e. a channel with that mask has
+    /// power. `true` for an empty mask (an ungated channel always does).
+    pub fn all_asserted(&self, mask: u32) -> bool {
+        self.gates
+            .iter()
+            .enumerate()
+            .take(u32::BITS as usize)
+            .all(|(index, gate)| mask & (1 << index) == 0 || gate.asserted)
+    }
+
     /// Gates whose trailing all-black debounce has expired — the deassert
     /// *candidates*.
     ///
