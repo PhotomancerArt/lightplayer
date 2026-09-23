@@ -5302,16 +5302,19 @@ impl ProjectController {
                 .iter()
                 .map(|child| child.dirty)
                 .sum::<DirtySummary>();
-        ProjectNodeTreeItem::new(
+        let focused = self.is_focused_node(node);
+        let mut item = ProjectNodeTreeItem::new(
             node.address().to_string(),
             node.label(),
             node.kind(),
             node.status().clone(),
-            self.is_focused_node(node),
+            focused,
             node_focus_action(node),
             children,
         )
-        .with_dirty(dirty)
+        .with_dirty(dirty);
+        item.streaming_live = focused && self.lens_streams_selection_only();
+        item
     }
 
     fn is_focused_node(&self, node: &NodeController) -> bool {
@@ -13922,10 +13925,18 @@ mod tests {
         assert_eq!(product.tracking, UiProductTrackingState::Tracking);
         assert_eq!(product.show_live, None, "already live: nothing to offer");
 
+        let editor = project.editor_view("loaded-project", 7, &ProjectInventorySummary::default());
+        assert!(
+            editor.tree.roots[0].streaming_live,
+            "the sidebar row agrees with the card"
+        );
+
         project.set_lens_transport(Some(crate::LinkTransport::Sim));
         let (card, _) = visual(&project);
         assert!(!card.selection_streams);
         assert!(!card.streaming_live, "sim streams everything; no Live chip");
+        let editor = project.editor_view("loaded-project", 7, &ProjectInventorySummary::default());
+        assert!(!editor.tree.roots[0].streaming_live);
     }
 
     /// The visual probe tier follows the lens kind: 16×16 over serial, the
