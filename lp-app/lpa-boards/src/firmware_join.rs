@@ -794,8 +794,11 @@ mod tests {
             c6.extras
         );
 
+        // The S3 has no deep-sleep power platform yet, so it does not carry
+        // the power-button runtime — and says so, rather than offering a node
+        // that could only report "no power service".
         let s3 = feature_summary(build_by_id("esp32s3-8mb").unwrap()).expect("s3 fixture");
-        assert!(s3.runs_every_node_kind());
+        assert_eq!(s3.missing_node_kinds, [NodeKind::PowerButton]);
         assert_eq!(s3.extras, ["f32 shader math"]);
         assert!(s3.gaps.contains(&"no ESP-NOW radio"), "{:?}", s3.gaps);
     }
