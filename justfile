@@ -4073,6 +4073,23 @@ fwtest-shader-compile-stress-trace-esp32c6: install-rv32-target
 fwtest-espnow-esp32c6: install-rv32-target
     cd lp-fw/fw-esp32c6 && cargo run --no-default-features --features test_espnow,esp32c6 --target {{ rv32_target }} --profile {{ fw_esp32c6_profile }}
 
+# BLE spike (vision `ble-remote-control`): advertise as `LP-BLE-xxxx`, echo
+# over a Nordic-UART-shaped GATT service, print heap per bring-up stage.
+# Talk to it with nRF Connect on a phone, or `scripts/ble/nus-probe.py` on
+# the Mac. Pass the port explicitly (resolve by MAC with
+# `scripts/emu/board-port.py --list`) when more than one C6 is attached.
+fwtest-ble-esp32c6 port="": install-rv32-target
+    #!/usr/bin/env bash
+    set -euo pipefail
+    port="{{ port }}"
+    if [[ -z "$port" ]]; then
+        port="$(cargo run -q -p lp-cli -- fwcheck port --chip esp32c6)"
+    fi
+    echo "Using ESPFLASH_PORT=$port"
+    cd lp-fw/fw-esp32c6 && ESPFLASH_PORT="$port" cargo run --no-default-features \
+        --features test_ble,esp32c6 --target {{ rv32_target }} \
+        --profile {{ fw_esp32c6_profile }}
+
 # Run firmware with test_f32_softfloat: IEEE f32 semantics on the C6's soft-float
 # path — the ROM `rvfplib` routines probed directly, plus a GLSL shader compiled
 # on-device in FloatMode::F32 and executed.

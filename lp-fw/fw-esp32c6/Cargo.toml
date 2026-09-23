@@ -194,6 +194,13 @@ test_espnow = ["radio"]  # ESP-NOW broadcast/receive smoke test with simulated 1
 # hardware registry and the executor. `test_espnow` itself is untouched and
 # undeleted (RD13/DD31).
 test_espnow_broadcast = ["dep:fw-checks", "fw-checks/check-espnow-broadcast", "radio"]
+# BLE spike (vision `ble-remote-control`, 2026-09-23): back to basics. The C6
+# advertises as `LP-BLE`, serves a Nordic-UART-shaped GATT service (one write
+# characteristic in, one notify characteristic out) that echoes what it is
+# sent, and prints heap at each bring-up stage. No server, no WiFi init — it
+# answers "can this chip, on this esp-radio, talk BLE at all, and what does
+# the controller cost". Never shipped.
+test_ble = ["radio", "esp-radio/ble", "dep:trouble-host", "dep:bt-hci", "dep:heapless", "dep:static_cell", "dep:embassy-sync-07"]
 
 # FIXTURE builds — test scaffolding, never shipped. Make this CURRENT
 # build misreport its hello so a current Studio classifies it Incompatible,
@@ -234,6 +241,16 @@ esp-rtos = { version = "0.3.0", features = ["embassy", "log-04"] }
 esp-radio = { version = "0.18.0", optional = true, features = ["esp-now", "log-04", "unstable", "wifi"] }
 esp-println = { version = "0.17.0", default-features = false, features = ["esp32c6", "jtag-serial", "log-04"] }
 esp-alloc = { version = "0.10.0", features = ["internal-heap-stats"] }
+# BLE spike only (`test_ble`). trouble-host 0.6 is the release on bt-hci 0.8,
+# which is what esp-radio 0.18's `BleConnector` implements.
+trouble-host = { version = "0.6.0", optional = true, default-features = false, features = ["derive", "gatt", "peripheral", "log", "default-packet-pool", "default-packet-pool-mtu-255"] }
+bt-hci = { version = "0.8.0", optional = true, default-features = false }
+heapless = { version = "0.9", optional = true }
+# trouble-host 0.6's `#[gatt_server]` expands to `static_cell::…` and
+# `embassy_sync::…` paths, and its embassy-sync is 0.7 (ours is 0.8); the
+# spike module aliases this one in as `embassy_sync`.
+static_cell = { version = "2.1", optional = true }
+embassy-sync-07 = { package = "embassy-sync", version = "0.7", optional = true }
 critical-section = "1"
 
 fw-core = { path = "../fw-core", default-features = false }
