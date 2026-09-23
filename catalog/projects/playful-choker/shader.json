@@ -8,9 +8,6 @@
     },
     "scale": {
       "source": "bus:scale"
-    },
-    "palette": {
-      "source": "bus:palette"
     }
   },
   "consumed": {
@@ -20,8 +17,8 @@
       "default": 1,
       "min": 0.25,
       "max": 4,
-      "label": "Scale",
-      "description": "Spatial frequency of the noise field: below 1 the blobs span several letters, above 1 each letter gets its own"
+      "label": "Band density",
+      "description": "How many color bands fit across the word: at 1 about three, higher packs them tighter"
     },
     "driftPhase": {
       "kind": "phasor",
@@ -33,64 +30,23 @@
       },
       "default": 0,
       "label": "Drift",
-      "description": "Slow side-to-side wander of the field (0-1 cycle position)"
-    },
-    "shimmerPhase": {
-      "kind": "phasor",
-      "value": "f32",
-      "phasor": {
-        "period_seconds": 5.3,
-        "waveform": "ramp",
-        "phase_offset": 0.0
-      },
-      "default": 0,
-      "label": "Shimmer",
-      "description": "Brightness ripple cycle riding on the fine noise octave (0-1)"
+      "description": "Slow lean of the fronts, from tilted one way to the other (0-1 cycle position)"
     },
     "time": {
       "kind": "seconds",
       "value": "f32",
       "default": 0,
       "label": "Time",
-      "description": "Seconds from the scope's time product: the noise field scrolls, it does not wrap"
+      "description": "Seconds from the scope's time product: the bands scroll, they do not wrap"
     },
-    "palette": {
-      "kind": "palette",
-      "value": "sampler2D",
-      "label": "Palette",
-      "description": "The ramps the field reads its colors from; the cycle walks them with a cross-fade",
-      "gradient": {
-        "kind": "cycle",
-        "step_seconds": 16.0,
-        "fade_seconds": 4.0,
-        "set": [
-          {
-            "space": "srgb",
-            "method": "linear",
-            "stops": "#2b0a3d #7a1f6e #e0468c #ff8f5a #ffd98a #ff8f5a #e0468c #7a1f6e #2b0a3d"
-          },
-          {
-            "space": "srgb",
-            "method": "linear",
-            "stops": "#03123d #0a4f8a #12a5c9 #7ef0e0 #b8ffd6 #7ef0e0 #12a5c9 #0a4f8a #03123d"
-          },
-          {
-            "space": "srgb",
-            "method": "linear",
-            "stops": "#ff3d7f #ffb3d9 #9d4dff #4dd2ff #ffffff #4dd2ff #9d4dff #ffb3d9 #ff3d7f"
-          },
-          {
-            "space": "srgb",
-            "method": "linear",
-            "stops": "#062a12 #0f6b3a #3ddc84 #b8ff7a #fff6a8 #b8ff7a #3ddc84 #0f6b3a #062a12"
-          },
-          {
-            "space": "srgb",
-            "method": "linear",
-            "stops": "#2a0500 #7a1a00 #ff4d00 #ffb300 #fff1a8 #ffb300 #ff4d00 #7a1a00 #2a0500"
-          }
-        ]
-      }
+    "frontWidth": {
+      "kind": "value",
+      "value": "f32",
+      "default": 0.12,
+      "min": 0.02,
+      "max": 0.6,
+      "label": "Front width",
+      "description": "How much of each band the change to the next color takes: small is a crisp edge, large a soft blend"
     }
   }
 }

@@ -439,6 +439,20 @@ pub const COMPLETIONS: &[CompletionEntry] = &[
         description: "Hue to RGB",
     },
     CompletionEntry {
+        name: "lpfn_oklab2rgb",
+        module: "lpfn",
+        detail: "vec3 lpfn_oklab2rgb(vec3 lab)",
+        snippet: "lpfn_oklab2rgb(${lab})",
+        description: "Oklab to RGB",
+    },
+    CompletionEntry {
+        name: "lpfn_oklch2rgb",
+        module: "lpfn",
+        detail: "vec3 lpfn_oklch2rgb(vec3 lch)",
+        snippet: "lpfn_oklch2rgb(${lch})",
+        description: "Oklch to RGB",
+    },
+    CompletionEntry {
         name: "lpfn_psrdnoise",
         module: "lpfn",
         detail: "float lpfn_psrdnoise(vec2 x, vec2 period, float alpha, out vec2 gradient, uint seed)",
@@ -486,6 +500,20 @@ pub const COMPLETIONS: &[CompletionEntry] = &[
         detail: "vec4 lpfn_rgb2hsv(vec4 rgb)",
         snippet: "lpfn_rgb2hsv(${rgb})",
         description: "RGB to HSV (vec4)",
+    },
+    CompletionEntry {
+        name: "lpfn_rgb2oklab",
+        module: "lpfn",
+        detail: "vec3 lpfn_rgb2oklab(vec3 rgb)",
+        snippet: "lpfn_rgb2oklab(${rgb})",
+        description: "RGB to Oklab",
+    },
+    CompletionEntry {
+        name: "lpfn_rgb2oklch",
+        module: "lpfn",
+        detail: "vec3 lpfn_rgb2oklch(vec3 rgb)",
+        snippet: "lpfn_rgb2oklch(${rgb})",
+        description: "RGB to Oklch",
     },
     CompletionEntry {
         name: "lpfn_saturate",

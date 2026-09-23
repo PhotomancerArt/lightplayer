@@ -265,7 +265,11 @@ pub(crate) fn cranelift_sig_for_builtin_inner(
             sig.returns.push(AbiParam::new(types::F32));
         }
         BuiltinId::LpLpfnHsv2rgbF32
+        | BuiltinId::LpLpfnOklab2rgbF32
+        | BuiltinId::LpLpfnOklch2rgbF32
         | BuiltinId::LpLpfnRgb2hsvF32
+        | BuiltinId::LpLpfnRgb2oklabF32
+        | BuiltinId::LpLpfnRgb2oklchF32
         | BuiltinId::LpLpfnSaturateVec3F32 => {
             // extern "C" fn(*mut f32, f32, f32, f32) -> ()
             sig.params.push(AbiParam::new(pointer_type));
@@ -274,7 +278,11 @@ pub(crate) fn cranelift_sig_for_builtin_inner(
             sig.params.push(AbiParam::new(types::F32));
         }
         BuiltinId::LpLpfnHsv2rgbQ32
+        | BuiltinId::LpLpfnOklab2rgbQ32
+        | BuiltinId::LpLpfnOklch2rgbQ32
         | BuiltinId::LpLpfnRgb2hsvQ32
+        | BuiltinId::LpLpfnRgb2oklabQ32
+        | BuiltinId::LpLpfnRgb2oklchQ32
         | BuiltinId::LpLpfnSaturateVec3Q32 => {
             // extern "C" fn(*mut i32, i32, i32, i32) -> ()
             sig.params.push(AbiParam::new(pointer_type));

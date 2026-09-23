@@ -165,6 +165,8 @@ pub fn glsl_lpfn_q32_builtin_id(name: &str, params: &[GlslParamKind]) -> Option<
         ("lpfn_hsv2rgb", &[GlslParamKind::Vec3]) => Some(BuiltinId::LpLpfnHsv2rgbQ32),
         ("lpfn_hsv2rgb", &[GlslParamKind::Vec4]) => Some(BuiltinId::LpLpfnHsv2rgbVec4Q32),
         ("lpfn_hue2rgb", &[GlslParamKind::Float]) => Some(BuiltinId::LpLpfnHue2rgbQ32),
+        ("lpfn_oklab2rgb", &[GlslParamKind::Vec3]) => Some(BuiltinId::LpLpfnOklab2rgbQ32),
+        ("lpfn_oklch2rgb", &[GlslParamKind::Vec3]) => Some(BuiltinId::LpLpfnOklch2rgbQ32),
         (
             "lpfn_psrdnoise",
             &[
@@ -196,6 +198,8 @@ pub fn glsl_lpfn_q32_builtin_id(name: &str, params: &[GlslParamKind]) -> Option<
         }
         ("lpfn_rgb2hsv", &[GlslParamKind::Vec3]) => Some(BuiltinId::LpLpfnRgb2hsvQ32),
         ("lpfn_rgb2hsv", &[GlslParamKind::Vec4]) => Some(BuiltinId::LpLpfnRgb2hsvVec4Q32),
+        ("lpfn_rgb2oklab", &[GlslParamKind::Vec3]) => Some(BuiltinId::LpLpfnRgb2oklabQ32),
+        ("lpfn_rgb2oklch", &[GlslParamKind::Vec3]) => Some(BuiltinId::LpLpfnRgb2oklchQ32),
         ("lpfn_saturate", &[GlslParamKind::Float]) => Some(BuiltinId::LpLpfnSaturateQ32),
         ("lpfn_saturate", &[GlslParamKind::Vec3]) => Some(BuiltinId::LpLpfnSaturateVec3Q32),
         ("lpfn_saturate", &[GlslParamKind::Vec4]) => Some(BuiltinId::LpLpfnSaturateVec4Q32),
@@ -366,6 +370,8 @@ pub fn glsl_lpfn_f32_builtin_id(name: &str, params: &[GlslParamKind]) -> Option<
         ("lpfn_hsv2rgb", &[GlslParamKind::Vec3]) => Some(BuiltinId::LpLpfnHsv2rgbF32),
         ("lpfn_hsv2rgb", &[GlslParamKind::Vec4]) => Some(BuiltinId::LpLpfnHsv2rgbVec4F32),
         ("lpfn_hue2rgb", &[GlslParamKind::Float]) => Some(BuiltinId::LpLpfnHue2rgbF32),
+        ("lpfn_oklab2rgb", &[GlslParamKind::Vec3]) => Some(BuiltinId::LpLpfnOklab2rgbF32),
+        ("lpfn_oklch2rgb", &[GlslParamKind::Vec3]) => Some(BuiltinId::LpLpfnOklch2rgbF32),
         (
             "lpfn_psrdnoise",
             &[
@@ -397,6 +403,8 @@ pub fn glsl_lpfn_f32_builtin_id(name: &str, params: &[GlslParamKind]) -> Option<
         }
         ("lpfn_rgb2hsv", &[GlslParamKind::Vec3]) => Some(BuiltinId::LpLpfnRgb2hsvF32),
         ("lpfn_rgb2hsv", &[GlslParamKind::Vec4]) => Some(BuiltinId::LpLpfnRgb2hsvVec4F32),
+        ("lpfn_rgb2oklab", &[GlslParamKind::Vec3]) => Some(BuiltinId::LpLpfnRgb2oklabF32),
+        ("lpfn_rgb2oklch", &[GlslParamKind::Vec3]) => Some(BuiltinId::LpLpfnRgb2oklchF32),
         ("lpfn_saturate", &[GlslParamKind::Float]) => Some(BuiltinId::LpLpfnSaturateF32),
         ("lpfn_saturate", &[GlslParamKind::Vec3]) => Some(BuiltinId::LpLpfnSaturateVec3F32),
         ("lpfn_saturate", &[GlslParamKind::Vec4]) => Some(BuiltinId::LpLpfnSaturateVec4F32),

@@ -63,6 +63,30 @@ pub const CANONICAL_GLSL: &[CanonicalGlsl] = &[
         deps: &[],
     },
     CanonicalGlsl {
+        name: "oklab2rgb",
+        path: "glsl/lpfn/color/space/oklab2rgb.glsl",
+        source: include_str!("../glsl/lpfn/color/space/oklab2rgb.glsl"),
+        deps: &[],
+    },
+    CanonicalGlsl {
+        name: "oklch2rgb",
+        path: "glsl/lpfn/color/space/oklch2rgb.glsl",
+        source: include_str!("../glsl/lpfn/color/space/oklch2rgb.glsl"),
+        deps: &["oklab2rgb"],
+    },
+    CanonicalGlsl {
+        name: "rgb2oklab",
+        path: "glsl/lpfn/color/space/rgb2oklab.glsl",
+        source: include_str!("../glsl/lpfn/color/space/rgb2oklab.glsl"),
+        deps: &[],
+    },
+    CanonicalGlsl {
+        name: "rgb2oklch",
+        path: "glsl/lpfn/color/space/rgb2oklch.glsl",
+        source: include_str!("../glsl/lpfn/color/space/rgb2oklch.glsl"),
+        deps: &["rgb2oklab"],
+    },
+    CanonicalGlsl {
         name: "random1",
         path: "glsl/lpfn/generative/random/random1.glsl",
         source: include_str!("../glsl/lpfn/generative/random/random1.glsl"),

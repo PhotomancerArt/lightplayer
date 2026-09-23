@@ -622,6 +622,82 @@ pub(super) fn dispatch_native_builtin(
             }
             Ok(())
         }
+        BuiltinId::LpLpfnOklab2rgbF32 => {
+            let mem = linked_env_memory;
+            let off_0 = params[0].unwrap_i32() as u32 as usize;
+            let mut buf_0 = [0f32; 3];
+            let p1 = params[1].unwrap_f32();
+            let p2 = params[2].unwrap_f32();
+            let p3 = params[3].unwrap_f32();
+            lps_builtins::builtins::lpfn::color::space::oklab2rgb_f32::__lp_lpfn_oklab2rgb_f32(
+                buf_0.as_mut_ptr(),
+                p1,
+                p2,
+                p3,
+            );
+            for (i, v) in buf_0.iter().enumerate() {
+                mem.write(&mut caller, off_0 + i * 4, &v.to_le_bytes())
+                    .map_err(|e| wasmtime::Error::msg(format!("builtin write-back: {e}")))?;
+            }
+            Ok(())
+        }
+        BuiltinId::LpLpfnOklab2rgbQ32 => {
+            let mem = linked_env_memory;
+            let off_0 = params[0].unwrap_i32() as u32 as usize;
+            let mut buf_0 = [0i32; 3];
+            let p1 = params[1].unwrap_i32();
+            let p2 = params[2].unwrap_i32();
+            let p3 = params[3].unwrap_i32();
+            lps_builtins::builtins::lpfn::color::space::oklab2rgb_q32::__lp_lpfn_oklab2rgb_q32(
+                buf_0.as_mut_ptr(),
+                p1,
+                p2,
+                p3,
+            );
+            for (i, v) in buf_0.iter().enumerate() {
+                mem.write(&mut caller, off_0 + i * 4, &v.to_le_bytes())
+                    .map_err(|e| wasmtime::Error::msg(format!("builtin write-back: {e}")))?;
+            }
+            Ok(())
+        }
+        BuiltinId::LpLpfnOklch2rgbF32 => {
+            let mem = linked_env_memory;
+            let off_0 = params[0].unwrap_i32() as u32 as usize;
+            let mut buf_0 = [0f32; 3];
+            let p1 = params[1].unwrap_f32();
+            let p2 = params[2].unwrap_f32();
+            let p3 = params[3].unwrap_f32();
+            lps_builtins::builtins::lpfn::color::space::oklch2rgb_f32::__lp_lpfn_oklch2rgb_f32(
+                buf_0.as_mut_ptr(),
+                p1,
+                p2,
+                p3,
+            );
+            for (i, v) in buf_0.iter().enumerate() {
+                mem.write(&mut caller, off_0 + i * 4, &v.to_le_bytes())
+                    .map_err(|e| wasmtime::Error::msg(format!("builtin write-back: {e}")))?;
+            }
+            Ok(())
+        }
+        BuiltinId::LpLpfnOklch2rgbQ32 => {
+            let mem = linked_env_memory;
+            let off_0 = params[0].unwrap_i32() as u32 as usize;
+            let mut buf_0 = [0i32; 3];
+            let p1 = params[1].unwrap_i32();
+            let p2 = params[2].unwrap_i32();
+            let p3 = params[3].unwrap_i32();
+            lps_builtins::builtins::lpfn::color::space::oklch2rgb_q32::__lp_lpfn_oklch2rgb_q32(
+                buf_0.as_mut_ptr(),
+                p1,
+                p2,
+                p3,
+            );
+            for (i, v) in buf_0.iter().enumerate() {
+                mem.write(&mut caller, off_0 + i * 4, &v.to_le_bytes())
+                    .map_err(|e| wasmtime::Error::msg(format!("builtin write-back: {e}")))?;
+            }
+            Ok(())
+        }
         BuiltinId::LpLpfnPsrdnoise2F32 => {
             let mem = linked_env_memory;
             let off_5 = params[5].unwrap_i32() as u32 as usize;
@@ -819,6 +895,82 @@ pub(super) fn dispatch_native_builtin(
                 p2,
                 p3,
                 p4,
+            );
+            for (i, v) in buf_0.iter().enumerate() {
+                mem.write(&mut caller, off_0 + i * 4, &v.to_le_bytes())
+                    .map_err(|e| wasmtime::Error::msg(format!("builtin write-back: {e}")))?;
+            }
+            Ok(())
+        }
+        BuiltinId::LpLpfnRgb2oklabF32 => {
+            let mem = linked_env_memory;
+            let off_0 = params[0].unwrap_i32() as u32 as usize;
+            let mut buf_0 = [0f32; 3];
+            let p1 = params[1].unwrap_f32();
+            let p2 = params[2].unwrap_f32();
+            let p3 = params[3].unwrap_f32();
+            lps_builtins::builtins::lpfn::color::space::rgb2oklab_f32::__lp_lpfn_rgb2oklab_f32(
+                buf_0.as_mut_ptr(),
+                p1,
+                p2,
+                p3,
+            );
+            for (i, v) in buf_0.iter().enumerate() {
+                mem.write(&mut caller, off_0 + i * 4, &v.to_le_bytes())
+                    .map_err(|e| wasmtime::Error::msg(format!("builtin write-back: {e}")))?;
+            }
+            Ok(())
+        }
+        BuiltinId::LpLpfnRgb2oklabQ32 => {
+            let mem = linked_env_memory;
+            let off_0 = params[0].unwrap_i32() as u32 as usize;
+            let mut buf_0 = [0i32; 3];
+            let p1 = params[1].unwrap_i32();
+            let p2 = params[2].unwrap_i32();
+            let p3 = params[3].unwrap_i32();
+            lps_builtins::builtins::lpfn::color::space::rgb2oklab_q32::__lp_lpfn_rgb2oklab_q32(
+                buf_0.as_mut_ptr(),
+                p1,
+                p2,
+                p3,
+            );
+            for (i, v) in buf_0.iter().enumerate() {
+                mem.write(&mut caller, off_0 + i * 4, &v.to_le_bytes())
+                    .map_err(|e| wasmtime::Error::msg(format!("builtin write-back: {e}")))?;
+            }
+            Ok(())
+        }
+        BuiltinId::LpLpfnRgb2oklchF32 => {
+            let mem = linked_env_memory;
+            let off_0 = params[0].unwrap_i32() as u32 as usize;
+            let mut buf_0 = [0f32; 3];
+            let p1 = params[1].unwrap_f32();
+            let p2 = params[2].unwrap_f32();
+            let p3 = params[3].unwrap_f32();
+            lps_builtins::builtins::lpfn::color::space::rgb2oklch_f32::__lp_lpfn_rgb2oklch_f32(
+                buf_0.as_mut_ptr(),
+                p1,
+                p2,
+                p3,
+            );
+            for (i, v) in buf_0.iter().enumerate() {
+                mem.write(&mut caller, off_0 + i * 4, &v.to_le_bytes())
+                    .map_err(|e| wasmtime::Error::msg(format!("builtin write-back: {e}")))?;
+            }
+            Ok(())
+        }
+        BuiltinId::LpLpfnRgb2oklchQ32 => {
+            let mem = linked_env_memory;
+            let off_0 = params[0].unwrap_i32() as u32 as usize;
+            let mut buf_0 = [0i32; 3];
+            let p1 = params[1].unwrap_i32();
+            let p2 = params[2].unwrap_i32();
+            let p3 = params[3].unwrap_i32();
+            lps_builtins::builtins::lpfn::color::space::rgb2oklch_q32::__lp_lpfn_rgb2oklch_q32(
+                buf_0.as_mut_ptr(),
+                p1,
+                p2,
+                p3,
             );
             for (i, v) in buf_0.iter().enumerate() {
                 mem.write(&mut caller, off_0 + i * 4, &v.to_le_bytes())

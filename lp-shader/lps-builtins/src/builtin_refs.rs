@@ -82,6 +82,18 @@ use crate::builtins::glsl::tanh_q32::__lps_tanh_q32;
 use crate::builtins::lpfn::color::space::hue2rgb_f32::__lp_lpfn_hue2rgb_f32;
 use crate::builtins::lpfn::color::space::hue2rgb_q32::__lp_lpfn_hue2rgb_q32;
 #[cfg(feature = "float-f32")]
+use crate::builtins::lpfn::color::space::oklab2rgb_f32::__lp_lpfn_oklab2rgb_f32;
+use crate::builtins::lpfn::color::space::oklab2rgb_q32::__lp_lpfn_oklab2rgb_q32;
+#[cfg(feature = "float-f32")]
+use crate::builtins::lpfn::color::space::oklch2rgb_f32::__lp_lpfn_oklch2rgb_f32;
+use crate::builtins::lpfn::color::space::oklch2rgb_q32::__lp_lpfn_oklch2rgb_q32;
+#[cfg(feature = "float-f32")]
+use crate::builtins::lpfn::color::space::rgb2oklab_f32::__lp_lpfn_rgb2oklab_f32;
+use crate::builtins::lpfn::color::space::rgb2oklab_q32::__lp_lpfn_rgb2oklab_q32;
+#[cfg(feature = "float-f32")]
+use crate::builtins::lpfn::color::space::rgb2oklch_f32::__lp_lpfn_rgb2oklch_f32;
+use crate::builtins::lpfn::color::space::rgb2oklch_q32::__lp_lpfn_rgb2oklch_q32;
+#[cfg(feature = "float-f32")]
 use crate::builtins::lpfn::color::space::{
     hsv2rgb_f32::__lp_lpfn_hsv2rgb_f32, hsv2rgb_f32::__lp_lpfn_hsv2rgb_vec4_f32,
 };
@@ -428,6 +440,16 @@ pub fn ensure_builtins_referenced() {
         let _lpfn_hue2rgb_f32_fn: extern "C" fn(*mut f32, f32) -> () = __lp_lpfn_hue2rgb_f32;
         let _lpfn_hue2rgb_q32_fn: extern "C" fn(*mut i32, i32) -> () = __lp_lpfn_hue2rgb_q32;
         #[cfg(feature = "float-f32")]
+        let _lpfn_oklab2rgb_f32_fn: extern "C" fn(*mut f32, f32, f32, f32) -> () =
+            __lp_lpfn_oklab2rgb_f32;
+        let _lpfn_oklab2rgb_q32_fn: extern "C" fn(*mut i32, i32, i32, i32) -> () =
+            __lp_lpfn_oklab2rgb_q32;
+        #[cfg(feature = "float-f32")]
+        let _lpfn_oklch2rgb_f32_fn: extern "C" fn(*mut f32, f32, f32, f32) -> () =
+            __lp_lpfn_oklch2rgb_f32;
+        let _lpfn_oklch2rgb_q32_fn: extern "C" fn(*mut i32, i32, i32, i32) -> () =
+            __lp_lpfn_oklch2rgb_q32;
+        #[cfg(feature = "float-f32")]
         let _lpfn_psrdnoise2_f32_fn: extern "C" fn(
             f32,
             f32,
@@ -481,6 +503,16 @@ pub fn ensure_builtins_referenced() {
             __lp_lpfn_rgb2hsv_vec4_f32;
         let _lpfn_rgb2hsv_vec4_q32_fn: extern "C" fn(*mut i32, i32, i32, i32, i32) -> () =
             __lp_lpfn_rgb2hsv_vec4_q32;
+        #[cfg(feature = "float-f32")]
+        let _lpfn_rgb2oklab_f32_fn: extern "C" fn(*mut f32, f32, f32, f32) -> () =
+            __lp_lpfn_rgb2oklab_f32;
+        let _lpfn_rgb2oklab_q32_fn: extern "C" fn(*mut i32, i32, i32, i32) -> () =
+            __lp_lpfn_rgb2oklab_q32;
+        #[cfg(feature = "float-f32")]
+        let _lpfn_rgb2oklch_f32_fn: extern "C" fn(*mut f32, f32, f32, f32) -> () =
+            __lp_lpfn_rgb2oklch_f32;
+        let _lpfn_rgb2oklch_q32_fn: extern "C" fn(*mut i32, i32, i32, i32) -> () =
+            __lp_lpfn_rgb2oklch_q32;
         #[cfg(feature = "float-f32")]
         let _lpfn_saturate_f32_fn: extern "C" fn(f32) -> f32 = __lp_lpfn_saturate_f32;
         let _lpfn_saturate_q32_fn: extern "C" fn(i32) -> i32 = __lp_lpfn_saturate_q32;
@@ -807,6 +839,12 @@ pub fn ensure_builtins_referenced() {
         let _ = core::ptr::read_volatile(&_lpfn_hue2rgb_f32_fn as *const _);
         let _ = core::ptr::read_volatile(&_lpfn_hue2rgb_q32_fn as *const _);
         #[cfg(feature = "float-f32")]
+        let _ = core::ptr::read_volatile(&_lpfn_oklab2rgb_f32_fn as *const _);
+        let _ = core::ptr::read_volatile(&_lpfn_oklab2rgb_q32_fn as *const _);
+        #[cfg(feature = "float-f32")]
+        let _ = core::ptr::read_volatile(&_lpfn_oklch2rgb_f32_fn as *const _);
+        let _ = core::ptr::read_volatile(&_lpfn_oklch2rgb_q32_fn as *const _);
+        #[cfg(feature = "float-f32")]
         let _ = core::ptr::read_volatile(&_lpfn_psrdnoise2_f32_fn as *const _);
         let _ = core::ptr::read_volatile(&_lpfn_psrdnoise2_q32_fn as *const _);
         #[cfg(feature = "float-f32")]
@@ -827,6 +865,12 @@ pub fn ensure_builtins_referenced() {
         #[cfg(feature = "float-f32")]
         let _ = core::ptr::read_volatile(&_lpfn_rgb2hsv_vec4_f32_fn as *const _);
         let _ = core::ptr::read_volatile(&_lpfn_rgb2hsv_vec4_q32_fn as *const _);
+        #[cfg(feature = "float-f32")]
+        let _ = core::ptr::read_volatile(&_lpfn_rgb2oklab_f32_fn as *const _);
+        let _ = core::ptr::read_volatile(&_lpfn_rgb2oklab_q32_fn as *const _);
+        #[cfg(feature = "float-f32")]
+        let _ = core::ptr::read_volatile(&_lpfn_rgb2oklch_f32_fn as *const _);
+        let _ = core::ptr::read_volatile(&_lpfn_rgb2oklch_q32_fn as *const _);
         #[cfg(feature = "float-f32")]
         let _ = core::ptr::read_volatile(&_lpfn_saturate_f32_fn as *const _);
         let _ = core::ptr::read_volatile(&_lpfn_saturate_q32_fn as *const _);

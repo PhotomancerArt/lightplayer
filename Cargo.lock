@@ -6014,6 +6014,7 @@ dependencies = [
  "gloo-timers",
  "js-sys",
  "lp-collection 1.0.0",
+ "lps-builtin-completions",
  "lps-builtins",
  "lps-probe",
  "reqwest",

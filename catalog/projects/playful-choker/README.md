@@ -5,12 +5,14 @@ WS2812-class LEDs, driven by an ESP32-C6 on the wearer's battery.
 
 - **Board / wiring:** XIAO ESP32-C6, data on `D10` (GPIO 18 on the default
   C6 profile), one channel, 73 lamps.
-- **Brightness:** 20 % — it runs from a battery and sits an inch from a face.
+- **Brightness:** 10 % — it runs from a battery and sits an inch from a face.
   Nudge `brightness` in `fixture.json` (or the master fader in Studio).
-- **Pattern:** one shader, a slow psrdnoise field scrolling along the word
-  with a finer octave twinkling the brightness, colored through a five-palette
-  cycle (16 s per palette, 4 s cross-fade). `scale` on the panel sets how many
-  letters one blob spans.
+- **Pattern:** one shader: bands of color sweeping along the word with crisp
+  fronts between them, bent by a slow noise field and leaning back and forth
+  so they cut the letters diagonally. Every lamp is the same Oklch lightness
+  and chroma (`lpfn_oklch2rgb`), so only the hue moves and the letters read
+  evenly. `scale` sets how many bands fit across the word and `frontWidth`
+  how sharp the edge between two colors is.
 
 ## Mapping
 
