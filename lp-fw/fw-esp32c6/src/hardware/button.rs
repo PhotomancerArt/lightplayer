@@ -8,9 +8,9 @@ use alloc::vec::Vec;
 
 use esp_hal::gpio::{AnyPin, Input, InputConfig, Pull};
 use lpc_hardware::{
-    ButtonConfig, ButtonDebouncer, ButtonDriver, ButtonEvent, ButtonInput, HardwareEndpointError,
-    HardwareLease, HwAddress, HwCapability, HwClaim, HwDriver, HwEndpoint, HwEndpointId,
-    HwEndpointKind, HwError, HwRegistry,
+    ButtonActive, ButtonConfig, ButtonDebouncer, ButtonDriver, ButtonEvent, ButtonInput,
+    ButtonPull, HardwareEndpointError, HardwareLease, HwAddress, HwCapability, HwClaim, HwDriver,
+    HwEndpoint, HwEndpointId, HwEndpointKind, HwError, HwRegistry,
 };
 use lpc_model::HwEndpointSpec;
 
@@ -99,7 +99,11 @@ impl ButtonDriver for Esp32GpioButtonDriver {
             // Board init drops the concrete HAL GPIO token after startup. The hardware registry
             // owns logical exclusivity, so the driver recreates the erased pin after claiming it.
             unsafe { AnyPin::steal(gpio) },
-            InputConfig::default().with_pull(Pull::Up),
+            InputConfig::default().with_pull(match config.pull() {
+                ButtonPull::Up => Pull::Up,
+                ButtonPull::Down => Pull::Down,
+                ButtonPull::None => Pull::None,
+            }),
         );
 
         Ok(Box::new(Esp32ButtonInput::new(
@@ -117,6 +121,7 @@ pub struct Esp32ButtonInput {
     source: HwAddress,
     lease: Option<HardwareLease>,
     input: Option<Input<'static>>,
+    active: ButtonActive,
     debouncer: ButtonDebouncer,
 }
 
@@ -133,6 +138,7 @@ impl Esp32ButtonInput {
             source: source.clone(),
             lease: Some(lease),
             input: Some(input),
+            active: config.active(),
             debouncer: ButtonDebouncer::new(source, config.stable_ms()),
         }
     }
@@ -155,7 +161,11 @@ impl ButtonInput for Esp32ButtonInput {
 
     fn poll(&mut self, now_ms: u64) -> Option<ButtonEvent> {
         let input = self.input.as_mut()?;
-        self.debouncer.sample(now_ms, input.is_low())
+        let pressed = match self.active {
+            ButtonActive::Low => input.is_low(),
+            ButtonActive::High => input.is_high(),
+        };
+        self.debouncer.sample(now_ms, pressed)
     }
 }
 

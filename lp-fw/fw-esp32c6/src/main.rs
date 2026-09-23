@@ -484,6 +484,10 @@ fn boot_firmware(spawner: embassy_executor::Spawner) -> FirmwareApp {
         hardware_registry.manifest().board_id(),
     )));
     server.set_reboot_hook(Some(Rc::new(reboot_now)));
+    // A PowerButton node deep-sleeps the chip through this (EXT1 wake).
+    server.set_power_platform(Some(Rc::new(
+        crate::hardware::power::Esp32C6PowerPlatform::new(Rc::clone(&hardware_system)),
+    )));
     esp_println::println!("[INIT] LpServer created");
 
     // Auto-load project at boot (from config or lexical-first) — unless

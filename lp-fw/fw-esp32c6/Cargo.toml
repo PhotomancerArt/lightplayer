@@ -267,7 +267,7 @@ libm = "0.2"
 # (RV32 → lpvm-native::rt_jit on this firmware). No Cargo feature.
 lp-gfx-lpvm = { path = "../../lp-gfx/lp-gfx-lpvm", default-features = false, optional = true }
 # fw-esp32c6 deliberately opts into every node kind it has today — all
-# eight `lpa-server` node-* gates (which forward to the matching
+# nine `lpa-server` node-* gates (which forward to the matching
 # `lpc-engine` gate) — on top of the real `lp-gfx-lpvm` compiler backend
 # selected below by target architecture.
 # This is not a constrained build; it exists so a genuinely constrained
@@ -276,6 +276,7 @@ lp-gfx-lpvm = { path = "../../lp-gfx/lp-gfx-lpvm", default-features = false, opt
 # `lpc-engine/README.md` for what each gate is worth in flash.
 lpa-server = { path = "../../lp-app/lpa-server", default-features = false, features = [
     "node-button",
+    "node-power-button",
     "node-radio",
     "node-fluid",
     "node-fixture",
