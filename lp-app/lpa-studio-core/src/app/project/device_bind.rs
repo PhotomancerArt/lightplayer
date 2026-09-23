@@ -26,9 +26,18 @@
 //! the board's own bytes into the two file sets
 //! `CatalogOp::InstallSyncedProject` installs, under the SAME uid the
 //! board's manifest carries (D17: identity is preserved, never re-minted)
-//! and with `PulledFromDevice` provenance. It writes only this browser's
-//! library and sends nothing to the board (D3), and the bind that follows
-//! matches by construction.
+//! and with `PulledFromDevice` provenance. The bind that follows matches by
+//! construction.
+//!
+//! A board running a project with NO identity — anything pushed straight
+//! from the repo's `catalog/`, whose manifests are uid-free by design — is
+//! given one first, ON THE BOARD: [`restamp_identity`] recognises a library
+//! copy that differs from the board only by its uid, [`mint_identity`]
+//! stamps a fresh one otherwise, and the caller writes the stamped
+//! `project.json` back over the wire. That one manifest write is the only
+//! thing adoption ever sends to a board (D3, amended 2026-09-22); it keeps
+//! the board's bytes and the library copy's bytes identical, which is what
+//! the canonical hash — and so the bind — needs.
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -112,8 +121,15 @@ pub(crate) struct PulledPackage {
     /// The project's content, verbatim.
     pub files: Vec<(String, Vec<u8>)>,
     /// The library identity `project.json` carries — `None` when the
-    /// board is running a project that never passed through a library.
+    /// board is running a project that never passed through a library, or
+    /// one whose manifest could not be read at all ([`Self::manifest`]
+    /// tells the two apart).
     pub uid: Option<PrefixedUid>,
+    /// The parsed `project.json`, when there is one that parses. A manifest
+    /// that parses with no uid is the identity-free case the caller stamps
+    /// an identity onto; `None` here — no manifest, or one that is not a
+    /// manifest — is a board this library cannot adopt at all.
+    pub manifest: Option<lpc_model::ProjectManifest>,
     /// The manifest's display name, when it has one.
     pub name: Option<String>,
     /// Canonical hash of [`Self::files`], computed HERE over a memory fs
@@ -159,39 +175,46 @@ pub(crate) fn package_from_pull(
         .collect();
     files.sort_by(|a, b| a.0.cmp(&b.0));
 
-    let (uid, name) = manifest_identity(&files)?;
-    let fs = LpFsMemory::new();
-    for (relative, bytes) in &files {
-        fs.write_file(format!("/{relative}").as_str().as_path(), bytes)?;
-    }
-    let (hash, _) =
-        lpc_history::hash_package(&fs).map_err(|error| LibraryError::History(error.to_string()))?;
+    let (uid, manifest) = manifest_identity(&files)?;
+    let hash = hash_files(&files)?;
     Ok(PulledPackage {
+        name: manifest.as_ref().and_then(|manifest| manifest.name.clone()),
         files,
         uid,
-        name,
+        manifest,
         hash,
     })
 }
 
-/// The identity the pulled `project.json` carries, if any.
+/// Canonical `lpc_history::hash_package` of a relative-path file set,
+/// over a memory fs — the number the board computes over its own
+/// directory, computed here for bytes that have not reached it yet.
+fn hash_files(files: &[(String, Vec<u8>)]) -> Result<ContentHash, LibraryError> {
+    let fs = LpFsMemory::new();
+    for (relative, bytes) in files {
+        fs.write_file(format!("/{relative}").as_str().as_path(), bytes)?;
+    }
+    let (hash, _) =
+        lpc_history::hash_package(&fs).map_err(|error| LibraryError::History(error.to_string()))?;
+    Ok(hash)
+}
+
+/// The identity the pulled `project.json` carries, if any, and the parsed
+/// manifest it came from.
 ///
 /// A missing or unreadable manifest is not an error here: it is a board
 /// running something this library cannot adopt, and the caller says so in
 /// one line rather than failing an open that is already working. A manifest
-/// that parses but carries no uid is the same answer — see
-/// `StudioController::adopt_board_package` for why adoption refuses to
-/// mint one.
+/// that parses but carries no uid is a different answer — the parsed
+/// manifest comes back with no uid, and the caller stamps one onto the
+/// board (`StudioController::adopt_board_project`).
 fn manifest_identity(
     files: &[(String, Vec<u8>)],
-) -> Result<(Option<PrefixedUid>, Option<String>), LibraryError> {
+) -> Result<(Option<PrefixedUid>, Option<lpc_model::ProjectManifest>), LibraryError> {
     let Some((_, bytes)) = files.iter().find(|(path, _)| path == "project.json") else {
         return Ok((None, None));
     };
-    let Ok(text) = core::str::from_utf8(bytes) else {
-        return Ok((None, None));
-    };
-    let Ok(manifest) = lpc_model::ProjectManifest::read_json(text) else {
+    let Some(manifest) = parse_manifest(bytes) else {
         return Ok((None, None));
     };
     let uid = match manifest.uid.as_deref() {
@@ -202,7 +225,111 @@ fn manifest_identity(
         })?),
         None => None,
     };
-    Ok((uid, manifest.name))
+    Ok((uid, Some(manifest)))
+}
+
+/// `project.json` bytes as a manifest, or `None` when they are not one.
+fn parse_manifest(bytes: &[u8]) -> Option<lpc_model::ProjectManifest> {
+    let text = core::str::from_utf8(bytes).ok()?;
+    lpc_model::ProjectManifest::read_json(text).ok()
+}
+
+/// Whether `project.json` bytes are a manifest that parses and carries no
+/// uid — a project that has never been through a library, which is what a
+/// board pushed straight from the repo's `catalog/` runs.
+///
+/// The bind asks this before it reads the registry association as a
+/// version of some library project: an identity-free board is not a
+/// VERSION of anything (identity is the uid, D17), so it goes to adoption,
+/// where a copy that differs only by its uid is recognised by content.
+pub(crate) fn is_identity_free_manifest(bytes: &[u8]) -> bool {
+    parse_manifest(bytes).is_some_and(|manifest| manifest.uid.is_none())
+}
+
+/// An identity-free board's files with a uid stamped into `project.json`:
+/// what the board will run once the manifest is written back, and what
+/// the library copy holds byte for byte.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct StampedPackage {
+    /// The identity now in the manifest.
+    pub uid: PrefixedUid,
+    /// The stamped `project.json` bytes — the ONE file written to the
+    /// board.
+    pub manifest: Vec<u8>,
+    /// The pulled files with [`Self::manifest`] in place of the board's
+    /// identity-free one.
+    pub files: Vec<(String, Vec<u8>)>,
+    /// Canonical hash of [`Self::files`]: what the board must report once
+    /// the manifest lands, and the library copy's head.
+    pub hash: ContentHash,
+}
+
+/// Stamp a FRESH identity onto an identity-free board's files.
+///
+/// The manifest is serialized exactly the way the library stamps one when
+/// a project enters it (`package_manifest::ensure_uid`: set the uid,
+/// `ProjectManifest::write_json`), so the board's bytes and the library
+/// copy's bytes are one and the same.
+pub(crate) fn mint_identity(
+    files: &[(String, Vec<u8>)],
+    manifest: &lpc_model::ProjectManifest,
+    uid: PrefixedUid,
+) -> Result<StampedPackage, LibraryError> {
+    let mut stamped = manifest.clone();
+    stamped.uid = Some(uid.to_string());
+    stamp(files, uid, stamped.write_json().into_bytes())
+}
+
+/// Stamp an EXISTING library identity back onto an identity-free board,
+/// when `library_manifest` is the board's manifest plus a uid and nothing
+/// else.
+///
+/// This is what keeps a re-push from `catalog/` from minting a duplicate:
+/// the board lost its uid, not its content. The library copy's own
+/// manifest bytes are substituted verbatim (never re-serialized), so the
+/// result hashes exactly like the library copy when the rest of the files
+/// agree — which the caller checks against that copy's head before
+/// writing anything. `None` when the library manifest does not parse,
+/// carries no uid, or differs from the board's in anything but the uid.
+pub(crate) fn restamp_identity(
+    files: &[(String, Vec<u8>)],
+    manifest: &lpc_model::ProjectManifest,
+    library_manifest: &[u8],
+) -> Option<StampedPackage> {
+    let mut library = parse_manifest(library_manifest)?;
+    let uid: PrefixedUid = library.uid.take()?.parse().ok()?;
+    let mut board = manifest.clone();
+    board.uid = None;
+    if library != board {
+        return None;
+    }
+    stamp(files, uid, library_manifest.to_vec()).ok()
+}
+
+/// `files` with `manifest` in place of their `project.json`, hashed.
+fn stamp(
+    files: &[(String, Vec<u8>)],
+    uid: PrefixedUid,
+    manifest: Vec<u8>,
+) -> Result<StampedPackage, LibraryError> {
+    let files: Vec<(String, Vec<u8>)> = files
+        .iter()
+        .map(|(path, bytes)| {
+            let bytes = if path == "project.json" {
+                manifest.clone()
+            } else {
+                bytes.clone()
+            };
+            (path.clone(), bytes)
+        })
+        .collect();
+    let hash = hash_files(&files)?;
+    Ok(StampedPackage {
+        uid,
+        manifest,
+        files,
+        hash,
+    })
 }
 
 /// Build the two verbatim file sets `CatalogOp::InstallSyncedProject`
@@ -252,9 +379,10 @@ pub(crate) fn adopt_board_package(
             },
         )?;
     }
-    // The uid is the manifest's, never minted: `ensure_uid` would be a
-    // no-op here and a lie if the manifest had none, so the caller refuses
-    // an identity-free board before it gets this far (D17).
+    // The uid is the manifest's, never minted here: `ensure_uid` would be
+    // a no-op, and a lie if the manifest had none — so the caller stamps an
+    // identity-free board's manifest (on the board AND in `files`) before
+    // it gets this far (D17).
     let mut handle = PackageHandle::load(
         uid,
         label.to_string(),
@@ -370,16 +498,127 @@ mod tests {
     }
 
     /// A board provisioned outside a library runs files with no identity.
-    /// That is not a parse failure — it is a project this library cannot
-    /// adopt without inventing a uid, which is the caller's refusal (D17).
+    /// That is not a parse failure — the manifest comes back parsed with no
+    /// uid, which is the caller's cue to stamp one onto the board.
     #[test]
     fn a_manifest_without_a_uid_is_read_as_identity_free() {
-        let pulled = package_from_pull(&[upsert(
-            "/project.json",
-            format!(r#"{{"format":{}}}"#, lpc_model::PROJECT_FORMAT_VERSION).as_bytes(),
-        )])
-        .expect("the pull reads back");
+        let bytes = format!(r#"{{"format":{}}}"#, lpc_model::PROJECT_FORMAT_VERSION);
+        let pulled = package_from_pull(&[upsert("/project.json", bytes.as_bytes())])
+            .expect("the pull reads back");
         assert!(pulled.uid.is_none());
+        assert!(
+            pulled.manifest.is_some(),
+            "the manifest parsed, so an identity can be stamped onto it"
+        );
+        assert!(is_identity_free_manifest(bytes.as_bytes()));
+    }
+
+    /// A `project.json` that is not a manifest — or no `project.json` at
+    /// all — is NOT identity-free: there is nothing to stamp a uid into,
+    /// and the caller refuses to adopt it.
+    #[test]
+    fn an_unreadable_manifest_is_not_stampable() {
+        for pulled in [
+            package_from_pull(&[upsert("/project.json", b"{ not json")]),
+            package_from_pull(&[upsert("/effects/plasma.glsl", b"void main() {}")]),
+        ] {
+            let pulled = pulled.expect("the pull reads back");
+            assert!(pulled.uid.is_none());
+            assert!(pulled.manifest.is_none(), "{pulled:?}");
+        }
+        assert!(!is_identity_free_manifest(b"{ not json"));
+        assert!(!is_identity_free_manifest(&manifest("prj000000daqf6dvvr3")));
+    }
+
+    fn identity_free_files() -> Vec<(String, Vec<u8>)> {
+        vec![
+            (
+                "effects/plasma.glsl".to_string(),
+                b"void main() {}".to_vec(),
+            ),
+            (
+                "project.json".to_string(),
+                format!(
+                    "{{\n  \"format\": {},\n  \"name\": \"Porch sign\"\n}}\n",
+                    lpc_model::PROJECT_FORMAT_VERSION
+                )
+                .into_bytes(),
+            ),
+        ]
+    }
+
+    /// Minting stamps the uid the way the library does when a project
+    /// enters it (`ensure_uid`'s `write_json`), replaces ONLY the manifest,
+    /// and hashes the result — the number the board must report once the
+    /// manifest is written back.
+    #[test]
+    fn minting_stamps_only_the_manifest_the_way_the_library_does() {
+        let files = identity_free_files();
+        let pulled = package_from_pull(&[
+            upsert("/project.json", &files[1].1),
+            upsert("/effects/plasma.glsl", &files[0].1),
+        ])
+        .expect("the pull reads back");
+        let manifest = pulled.manifest.clone().expect("the manifest parses");
+        let random = [7; 16];
+        let uid = PrefixedUid::mint(lpc_history::UidPrefix::Project, &random);
+
+        let stamped = mint_identity(&pulled.files, &manifest, uid).expect("the stamp builds");
+
+        // The library's own stamp, over the same bytes and the same entropy.
+        let library = LpFsMemory::new();
+        library
+            .write_file("/project.json".as_path(), &files[1].1)
+            .unwrap();
+        let library_uid =
+            crate::app::library::package_manifest::ensure_uid(&library, &random).unwrap();
+        assert_eq!(library_uid, uid);
+        assert_eq!(
+            stamped.manifest,
+            library.read_file("/project.json".as_path()).unwrap(),
+            "the board's manifest and the library copy's are the same bytes"
+        );
+        assert_eq!(
+            stamped
+                .files
+                .iter()
+                .find(|(path, _)| path == "effects/plasma.glsl")
+                .map(|(_, bytes)| bytes.as_slice()),
+            Some(b"void main() {}".as_slice()),
+            "nothing but the manifest changes"
+        );
+        assert_eq!(stamped.hash, hash_files(&stamped.files).unwrap());
+        assert_ne!(stamped.hash, pulled.hash, "the manifest is inside the hash");
+    }
+
+    /// A library copy that is the board's content plus a uid gives that
+    /// uid back — byte for byte its own manifest, so the stamped set hashes
+    /// like the copy. A copy whose manifest differs in anything else is not
+    /// this project.
+    #[test]
+    fn restamping_recognises_a_copy_that_differs_only_by_its_uid() {
+        let files = identity_free_files();
+        let manifest =
+            lpc_model::ProjectManifest::read_json(core::str::from_utf8(&files[1].1).unwrap())
+                .unwrap();
+        let uid: PrefixedUid = "prj000000daqf6dvvr3".parse().unwrap();
+        let minted = mint_identity(&files, &manifest, uid).unwrap();
+
+        let restamped = restamp_identity(&files, &manifest, &minted.manifest)
+            .expect("the copy differs only by its uid");
+        assert_eq!(restamped, minted);
+
+        let mut renamed = manifest.clone();
+        renamed.name = Some("Someone else's sign".to_string());
+        renamed.uid = Some(uid.to_string());
+        assert!(
+            restamp_identity(&files, &manifest, renamed.write_json().as_bytes()).is_none(),
+            "a different manifest is a different project"
+        );
+        assert!(
+            restamp_identity(&files, &manifest, &files[1].1).is_none(),
+            "a library manifest with no uid has no identity to give back"
+        );
     }
 
     /// The install payload: the manifest's uid survives, the provenance
