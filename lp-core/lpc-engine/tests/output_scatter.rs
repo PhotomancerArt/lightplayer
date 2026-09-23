@@ -26,7 +26,7 @@ const SETTLE_TICKS: usize = 3;
 
 fn project_fs(dome_patch: Option<&str>, doors_patch: Option<&str>) -> LpFsMemory {
     let fs = LpFsMemory::new();
-    fs.write_file("/project.json".as_path(), b"{\n  \"format\": 10\n}\n")
+    fs.write_file("/project.json".as_path(), b"{\n  \"format\": 11\n}\n")
         .expect("container manifest");
     fs.write_file(
         "/module.json".as_path(),

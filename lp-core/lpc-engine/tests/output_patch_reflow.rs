@@ -54,7 +54,7 @@ const LEAF_PATCH: &str = r#"{
 /// and the test needs no graphics backend.
 fn project_fs(patched: bool) -> LpFsMemory {
     let fs = LpFsMemory::new();
-    fs.write_file("/project.json".as_path(), b"{\n  \"format\": 10\n}\n")
+    fs.write_file("/project.json".as_path(), b"{\n  \"format\": 11\n}\n")
         .expect("container manifest");
     fs.write_file(
         "/module.json".as_path(),

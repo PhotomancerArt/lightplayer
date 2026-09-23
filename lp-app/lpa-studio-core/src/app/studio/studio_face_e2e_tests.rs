@@ -2228,7 +2228,7 @@ fn face_e2e_server() -> LpServer {
         graphics,
     );
 
-    let project_json = "{\n  \"format\": 10\n}\n";
+    let project_json = "{\n  \"format\": 11\n}\n";
     let module_json = r#"{
   "kind": "Module",
   "nodes": {
@@ -2351,7 +2351,7 @@ fn single_product_e2e_server(visual_only: bool) -> LpServer {
     } else {
         ("bus:raster", "bus:control.out")
     };
-    let project_json = "{\n  \"format\": 10\n}\n";
+    let project_json = "{\n  \"format\": 11\n}\n";
     let module_json = r#"{
   "kind": "Module",
   "nodes": {
@@ -2456,7 +2456,7 @@ fn bound_glow_e2e_server() -> LpServer {
         graphics,
     );
 
-    let project_json = "{\n  \"format\": 10\n}\n";
+    let project_json = "{\n  \"format\": 11\n}\n";
     // Authored provenance (R14/§8): the root face's footer line is derived
     // from these, and the omitted `created` proves the join skips absent
     // fields rather than leaving a dangling separator.
@@ -2567,7 +2567,7 @@ fn palette_e2e_server() -> LpServer {
         graphics,
     );
 
-    let project_json = "{\n  \"format\": 10\n}\n";
+    let project_json = "{\n  \"format\": 11\n}\n";
     let module_json = r#"{
   "kind": "Module",
   "nodes": {
@@ -2882,7 +2882,7 @@ fn playlist_bound_glow_e2e_server() -> LpServer {
         graphics,
     );
 
-    let project_json = "{\n  \"format\": 10\n}\n";
+    let project_json = "{\n  \"format\": 11\n}\n";
     let module_json = r#"{
   "kind": "Module",
   "nodes": {
@@ -2994,7 +2994,7 @@ fn playlist_e2e_server(idle_entry: u32) -> LpServer {
         graphics,
     );
 
-    let project_json = "{\n  \"format\": 10\n}\n";
+    let project_json = "{\n  \"format\": 11\n}\n";
     let module_json = r#"{
   "kind": "Module",
   "nodes": {
@@ -3094,7 +3094,7 @@ fn output_face_e2e_server() -> LpServer {
         graphics,
     );
 
-    let project_json = "{\n  \"format\": 10\n}\n";
+    let project_json = "{\n  \"format\": 11\n}\n";
     let module_json = r#"{
   "kind": "Module",
   "nodes": {

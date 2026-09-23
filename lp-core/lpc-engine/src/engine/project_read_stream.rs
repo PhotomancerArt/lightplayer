@@ -1257,7 +1257,7 @@ mod tests {
         let mut fs = lpfs::LpFsMemory::new();
         fs.write_file_mut(
             lpfs::LpPath::new("/project.json"),
-            b"{\n  \"format\": 10\n}\n",
+            b"{\n  \"format\": 11\n}\n",
         )
         .expect("write container manifest");
         fs.write_file_mut(
@@ -1366,7 +1366,7 @@ mod tests {
         let mut fs = lpfs::LpFsMemory::new();
         fs.write_file_mut(
             lpfs::LpPath::new("/project.json"),
-            b"{\n  \"format\": 10\n}\n",
+            b"{\n  \"format\": 11\n}\n",
         )
         .expect("write container manifest");
         fs.write_file_mut(
