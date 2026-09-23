@@ -32,6 +32,14 @@ pub struct UiNodeView {
     pub focused: bool,
     /// Action that focuses this node as the current Studio selection.
     pub action: Option<UiAction>,
+    /// The lens streams previews for the SELECTED node only (a device
+    /// lens: serial, emu, or unknown) — so selecting is how a node goes
+    /// live, and the select control says so. `false` on a sim lens, which
+    /// streams every expanded node.
+    pub selection_streams: bool,
+    /// This card is selected AND [`Self::selection_streams`]: its previews
+    /// are the ones streaming live from the device (the header's Live chip).
+    pub streaming_live: bool,
     /// Whether the pane starts collapsed.
     pub collapsed: bool,
     /// Projection or runtime issues for the whole node.
@@ -63,6 +71,8 @@ impl UiNodeView {
             children: Vec::new(),
             focused: false,
             action: None,
+            selection_streams: false,
+            streaming_live: false,
             collapsed: false,
             issues: Vec::new(),
             add_node_menu: None,

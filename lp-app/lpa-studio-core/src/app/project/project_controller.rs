@@ -693,6 +693,7 @@ impl ProjectController {
                         kind: ui_product_kind(product),
                         preview: bytes,
                         tracking: borrowed_tracking(&subscribed, product),
+                        show_live: self.show_live_action(&subscribed, product),
                         frame: crate::UiProductPreviewFrame::VISUAL_DEFAULT,
                     })
                 });
@@ -2350,6 +2351,7 @@ impl ProjectController {
             // session is not visible, so one pass at the top keeps a
             // playlist's picker honest with the project pane's.
             self.gate_add_node_menus(node);
+            self.stamp_selection_streaming(node);
         }
         // The root card IS the project (GV fix 4): its header carries the
         // project's display name rather than the runtime tree's root
@@ -3775,6 +3777,24 @@ impl ProjectController {
         self.gate_child_add_node_menus(&mut node.children);
     }
 
+    /// Tell every card, nested ones included, whether selecting it is what
+    /// makes it stream (a device lens) and whether it is streaming now —
+    /// the select control's copy and the header's Live chip. Stamped here
+    /// for the same reason as the add-node gate: only this controller
+    /// knows the lens.
+    fn stamp_selection_streaming(&self, node: &mut UiNodeView) {
+        let selection_streams = self.lens_streams_selection_only();
+        node.selection_streams = selection_streams;
+        node.streaming_live = selection_streams && node.focused;
+        stamp_child_selection_streaming(&mut node.children, selection_streams);
+    }
+
+    /// Whether the lens subscribes the focused node's products only — the
+    /// device side of [`Self::node_subscribes_products`]'s fork.
+    fn lens_streams_selection_only(&self) -> bool {
+        !matches!(self.lens_transport, Some(crate::LinkTransport::Sim))
+    }
+
     fn gate_child_add_node_menus(&self, children: &mut [crate::UiNodeChild]) {
         for child in children {
             if let Some(menu) = child.add_node_menu.as_mut() {
@@ -4551,7 +4571,13 @@ impl ProjectController {
                     {
                         hero.preview = bytes.clone();
                         hero.tracking = borrowed_tracking(subscribed, product);
+                        hero.show_live = self.show_live_action(subscribed, product);
                         hero.product = Some(product);
+                    } else if let Some(action) = self.show_live_action(subscribed, product) {
+                        // No bytes yet: the mirror row's own "Show live"
+                        // would select the MODULE, which streams nothing
+                        // new — the producer is who has to be selected.
+                        hero.show_live = Some(action);
                     }
                 }
                 Some(product) => {
@@ -4559,11 +4585,12 @@ impl ProjectController {
                     // (or stale) here — a black square is not this module's
                     // output, its fixtures' lamps are. The hero becomes the
                     // control product outright (kind included, so the shared
-                    // preview draws the lamp layout), and says "not tracked"
+                    // preview draws the lamp layout), and says "not live"
                     // honestly when the bytes are not in the stream instead
                     // of showing the mirror.
                     hero.kind = ui_product_kind(product);
                     hero.tracking = borrowed_tracking(subscribed, product);
+                    hero.show_live = self.show_live_action(subscribed, product);
                     hero.product = Some(product);
                     hero.preview = self
                         .sync
@@ -5300,6 +5327,23 @@ impl ProjectController {
             }
             _ => false,
         }
+    }
+
+    /// The "Show live" action for a BORROWED preview (a module's output
+    /// hero, a channel's value box): select the product's producer node,
+    /// which is what puts it in a device lens's subscription set. `None`
+    /// while the product is already streaming, or when the producer is not
+    /// in the tree.
+    fn show_live_action(
+        &self,
+        subscribed: &[UiProductRef],
+        product: UiProductRef,
+    ) -> Option<UiAction> {
+        if subscribed.contains(&product) {
+            return None;
+        }
+        self.node_by_runtime_id(lpc_model::NodeId::new(product.node_id()))
+            .map(node_focus_action)
     }
 
     fn node_subscribes_products(&self, node: &NodeController) -> bool {
@@ -9215,6 +9259,14 @@ struct DescendantModuleScope {
     /// Module owners from just below the target down to and including
     /// this one — the scopes whose writers block R5 inheritance.
     path_owners: Vec<lpc_model::NodeId>,
+}
+
+fn stamp_child_selection_streaming(children: &mut [crate::UiNodeChild], selection_streams: bool) {
+    for child in children {
+        child.selection_streams = selection_streams;
+        child.streaming_live = selection_streams && child.focused;
+        stamp_child_selection_streaming(&mut child.children, selection_streams);
+    }
 }
 
 fn node_focus_action(node: &NodeController) -> UiAction {
@@ -13825,6 +13877,55 @@ mod tests {
                 }
             ]
         );
+    }
+
+    /// A device lens streams the selected node only, so a preview that is
+    /// not live offers "Show live" (select its producer), and the selected
+    /// card says it is the one streaming. A sim lens streams every expanded
+    /// node: nothing to offer, and no card claims to be "the live one".
+    #[test]
+    fn device_lens_offers_show_live_until_the_node_is_selected() {
+        let node = node_address("/demo.module/orbit.shader");
+        let mut view = single_node_view(1, NodeRuntimeStatus::Ok);
+        install_ui_projection_slots(&mut view, 1, Revision::new(4));
+        let mut project = ProjectController::new();
+        project.set_lens_transport(Some(crate::LinkTransport::Serial));
+        project.mark_ready("loaded-project", 7, ProjectInventorySummary::default());
+        project.apply_project_view(&view).unwrap();
+        clear_node_focus(&mut project.root_nodes);
+
+        let visual = |project: &ProjectController| {
+            let editor =
+                project.editor_view("loaded-project", 7, &ProjectInventorySummary::default());
+            let card = editor.nodes[0].clone();
+            let product = section_products(node_sections(&card))
+                .iter()
+                .find(|product| product.kind == crate::UiProductKind::Visual)
+                .cloned()
+                .expect("the shader's visual product");
+            (card, product)
+        };
+
+        let (card, product) = visual(&project);
+        assert!(card.selection_streams);
+        assert!(!card.streaming_live, "unselected: not the live card");
+        assert_ne!(product.tracking, UiProductTrackingState::Tracking);
+        assert_eq!(
+            product.show_live, card.action,
+            "Show live selects the producer — this card"
+        );
+        assert!(product.show_live.is_some());
+
+        project.node_mut(&node).unwrap().state_mut().focused = true;
+        let (card, product) = visual(&project);
+        assert!(card.streaming_live);
+        assert_eq!(product.tracking, UiProductTrackingState::Tracking);
+        assert_eq!(product.show_live, None, "already live: nothing to offer");
+
+        project.set_lens_transport(Some(crate::LinkTransport::Sim));
+        let (card, _) = visual(&project);
+        assert!(!card.selection_streams);
+        assert!(!card.streaming_live, "sim streams everything; no Live chip");
     }
 
     /// The visual probe tier follows the lens kind: 16×16 over serial, the
