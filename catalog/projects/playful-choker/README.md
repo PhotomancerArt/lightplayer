@@ -46,6 +46,6 @@ Regenerate rather than hand-edit if the PCB changes, and check that the
 committed files still match the exports after touching the generator:
 
 ```bash
-just playful-choker-map2d <design-folder>           # regenerate both files
-just playful-choker-map2d <design-folder> --check   # byte-identical, or fail
+just pcb-map2d playful-choker <design-folder>           # regenerate both files
+just pcb-map2d playful-choker <design-folder> --check   # byte-identical, or fail
 ```
