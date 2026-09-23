@@ -20,7 +20,7 @@
 
 mod support;
 
-use support::{Serve, read_until, reference_elf};
+use support::{Serve, read_until, reference_elf, state_field};
 use tungstenite::Message;
 
 /// **Gate 1** — the door exists and lists its boards.
@@ -445,6 +445,77 @@ fn a_frame_the_client_writes_is_answered_by_the_guest() {
     );
 }
 
+/// **No client means nobody is reading** — the default door delivers no
+/// pre-attach backlog.
+///
+/// `docs/defects/2026-09-23-emulated-usb-port-drains-with-no-client-attached.md`:
+/// the door used to power its boards on with the port open and draining and
+/// nobody connected, so every write the firmware made succeeded and the
+/// first client was replayed all of it — 299 heartbeats (~160 KB) in the
+/// run that found it. A board on a desk with no application holding the
+/// port drops those frames instead: its own write timeouts latch "host not
+/// draining", and a later application gets at most what the 64-byte IN FIFO
+/// still holds.
+///
+/// So: the DEFAULT serve (no `--usb-host`), three heartbeat intervals of the
+/// board's own clock with no client, then connect. The port must still be
+/// closed with at most a FIFO's worth waiting, and the first whole heartbeat
+/// the client reads must be one the board wrote after it connected, which
+/// its own `uptime_ms` says. A replayed backlog would open with the first
+/// heartbeat of the boot. Every clock here is the guest's; the wall net only
+/// ends a run that never gets there.
+#[test]
+#[ignore = "needs the shipped reference image; run through `just test-emu-serve`"]
+fn with_no_client_the_default_port_is_closed_and_nothing_is_replayed() {
+    let Some(elf) = reference_elf("with_no_client_the_default_port_is_closed") else {
+        return;
+    };
+    let serve = Serve::start(&elf, &["c6-a"], &[]);
+    let mut control = serve.control("c6-a");
+
+    let power_on = control.cmd("state");
+    assert!(
+        power_on.contains("host=attached") && power_on.contains("draining=false"),
+        "the default is a cable in and a port nobody has opened: {power_on}"
+    );
+
+    // Three heartbeat intervals of guest time with nobody on the byte
+    // socket. The firmware wrote its boot hello and at least two heartbeats
+    // in here; none of them may be waiting for the client below.
+    let before = serve.wait_for_guest_micros(&mut control, 3 * HEARTBEAT_INTERVAL_MICROS);
+    assert!(
+        before.contains("draining=false"),
+        "no client, so the port is still closed: {before}"
+    );
+    let waiting = state_field(&before, "in_pending").expect("`state` names in_pending");
+    assert!(
+        waiting <= IN_FIFO_BYTES,
+        "at most the IN FIFO may hold anything for a later reader: {before}"
+    );
+
+    let mut bytes = serve.bytes("c6-a");
+    let text = read_until(&mut bytes, |text| first_heartbeat(text).is_some());
+    let (stale_prefix, first_uptime) = first_heartbeat(&text).expect("read until one arrived");
+    eprintln!(
+        "no-client backlog: {waiting} B pending in the IN FIFO at attach, {stale_prefix} B \
+         before the first whole heartbeat (uptime_ms {first_uptime})"
+    );
+
+    assert!(
+        first_uptime >= 2 * HEARTBEAT_INTERVAL_MICROS / 1_000,
+        "the first heartbeat the client read was written before it connected — the \
+         pre-attach backlog was replayed ({stale_prefix} B ahead of it):\n{text}"
+    );
+    assert!(
+        !text[..stale_prefix].contains("\"hello\""),
+        "the boot hello was replayed to a client that connected after it:\n{text}"
+    );
+    assert!(
+        stale_prefix <= MAX_BYTES_BEFORE_FIRST_FRESH_FRAME,
+        "{stale_prefix} B arrived ahead of the first fresh heartbeat:\n{text}"
+    );
+}
+
 /// Nothing in this file asserts a cycle, a microsecond or a duration — a
 /// socket is not deterministic, and a test that pinned one would be pinning
 /// the host's clock. This checks itself.
@@ -467,4 +538,42 @@ fn no_test_in_this_file_asserts_a_cycle() {
     }
     // …and the guard is only worth having if it can see the file at all.
     assert!(source.contains("fn no_test_in_this_file_asserts_a_cycle"));
+}
+
+/// `fw-esp32-common`'s `HEARTBEAT_INTERVAL_MS`, in guest microseconds.
+const HEARTBEAT_INTERVAL_MICROS: u64 = 5_000_000;
+
+/// USB-Serial-JTAG's IN endpoint FIFO: the most an unopened port can still
+/// be holding when an application opens it.
+const IN_FIFO_BYTES: u64 = 64;
+
+/// What may precede the first fresh heartbeat on a port that was opened
+/// late: the FIFO's leftovers, and the log lines the firmware writes between
+/// the open and its next heartbeat (the not-draining latch lifting, the idle
+/// loop's own chatter). A replayed backlog is the boot console plus a hello
+/// plus two heartbeats — many kilobytes — so the gap is wide.
+const MAX_BYTES_BEFORE_FIRST_FRESH_FRAME: usize = 1024;
+
+/// The first whole, parseable heartbeat line in `text`: how many bytes came
+/// before it, and its `uptime_ms`. A line the IN FIFO's stale bytes were
+/// glued onto does not parse, and so does not count.
+fn first_heartbeat(text: &str) -> Option<(usize, u64)> {
+    let mut at = 0;
+    for line in text.split_inclusive('\n') {
+        let start = at;
+        at += line.len();
+        if !line.ends_with('\n') {
+            break;
+        }
+        let Some(json) = line.trim_end().strip_prefix("M!") else {
+            continue;
+        };
+        let Ok(value) = serde_json::from_str::<serde_json::Value>(json) else {
+            continue;
+        };
+        if let Some(uptime) = value["msg"]["heartbeat"]["uptime_ms"].as_u64() {
+            return Some((start, uptime));
+        }
+    }
+    None
 }

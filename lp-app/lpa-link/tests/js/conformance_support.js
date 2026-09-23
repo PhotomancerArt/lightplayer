@@ -98,8 +98,10 @@ class ScriptedBoard {
     this.received = [];
     this.control = null;
     this.bytes = null;
-    // What the board says the moment an application opens the port — the
-    // door's replay of a boot console to its first byte client.
+    // What the board says the moment an application opens the port. The
+    // real door no longer replays a boot console to its first byte client
+    // (docs/defects/2026-09-23-emulated-usb-port-drains-with-no-client-attached.md);
+    // this fake greets on open so the read pump has something to carry.
     this.greeting = `M! {"hello":"${id}"}\n`;
   }
 

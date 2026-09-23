@@ -626,6 +626,12 @@ impl ByteSource for ScriptedSource {
 /// How much device→host output a [`TcpHost`] keeps for a client that has
 /// not connected yet. The spike's proxy kept the same 4 MiB, so a walk that
 /// attaches after the boot banner still sees the banner.
+///
+/// It only fills when the peripheral in front of it *delivers* with no client.
+/// UART0 always does (it has no host-open concept). USB-Serial-JTAG does only
+/// while its host is draining, so an unopened port — `lp-cli emu serve`'s
+/// default — backs nothing up, as on silicon
+/// (`docs/defects/2026-09-23-emulated-usb-port-drains-with-no-client-attached.md`).
 pub const TCP_BACKLOG_CAP: usize = 4 << 20;
 
 /// A byte stream over one TCP socket: the emulator **listens**, one client at
