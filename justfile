@@ -2746,7 +2746,7 @@ lint-classic-capture:
 
 # The PCB-export mapping generator reads EasyEDA's exports, which are design
 # files and never live in this repo, so its real run is a desk-side recipe
-# (`playful-choker-map2d`). This runs the half that needs no exports: the
+# (`pcb-map2d`). This runs the half that needs no exports: the
 # PcbDoc and netlist parsers, the strokes-must-equal-the-chain refusal and the
 # --check comparison, on a synthetic three-lamp board built in memory.
 lint-pcb-export:
@@ -3928,27 +3928,19 @@ validate *args:
 demo project="projects/test/basic":
     cargo run -p lp-cli -- dev {{ project }}
 
-# Regenerate catalog/projects/playful-choker's mapping (playful.map2d.json and
-# playful-mapping.svg) from the choker's EasyEDA exports. `exports` is the
-# design folder, or a copy of it: the newest `Altium_*.zip` and `Netlist_*.tel`
-# in it are read (their names are dated). The exports are Yona's design files
-# and are never committed here. The strokes table is
-# scripts/pcb-export-strokes/playful-choker.json.
+# Regenerate a PCB fixture's mapping (a map2d document and its numbered SVG)
+# from the board's EasyEDA exports. `table` names a strokes table in
+# scripts/pcb-export-strokes/ (e.g. `playful-choker`), which says which
+# designators form each mapping object and which catalog folder the files go
+# to. `exports` is the board's design folder, or a copy of it: the newest
+# `Altium_*.zip` and `Netlist_*.tel` in it are read. The exports are design
+# files and are never committed here.
 #
-# `just playful-choker-map2d <exports> --check` writes nothing and fails unless
+# `just pcb-map2d <table> <exports> --check` writes nothing and fails unless
 # the committed files are byte-identical to a regeneration: run it after the
 # PCB changes, or after touching the generator.
-playful-choker-map2d exports *args:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    pcb="$(ls "{{ exports }}"/Altium_*.zip 2>/dev/null | sort | tail -n1 || true)"
-    net="$(ls "{{ exports }}"/Netlist_*.tel 2>/dev/null | sort | tail -n1 || true)"
-    [[ -n "$pcb" && -n "$net" ]] || { echo "no Altium_*.zip and Netlist_*.tel in {{ exports }}" >&2; exit 1; }
-    echo "pcb:     $pcb"
-    echo "netlist: $net"
-    python3 scripts/pcb-export-to-map2d.py --pcb "$pcb" --netlist "$net" \
-        --strokes scripts/pcb-export-strokes/playful-choker.json \
-        --out-dir catalog/projects/playful-choker {{ args }}
+pcb-map2d table exports *args:
+    python3 scripts/pcb-export-to-map2d.py --strokes "{{ table }}" --exports "{{ exports }}" {{ args }}
 
 # Requires: ESP32-C6 device connected via USB. Builds the default lps-glsl frontend path.
 # Usage: just demo-esp32c6-host [project-dir]
