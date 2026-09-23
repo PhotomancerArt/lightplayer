@@ -100,15 +100,9 @@ client of a real board:
   transcribing proxy invents no dropped-frame semantics.
   `upload-walk.sh` runs the binary with `--usb-host attached`, the explicit
   opt-in above.
-- `lp-cli emu run` keeps `attached` (draining from power-on) as its
-  default; the `lp-emu-esp32c6` binary's default is `absent`, and nothing
-  here changed either. They are one-image runs whose typical client is a
-  monitor or a scripted host present from boot, and the walk scripts
-  (`m4-walk.sh`, `heap-budget-check.sh`, `flash-over-socket.sh`,
-  `upload-walk.sh`) pass `--usb-host attached` explicitly because they read
-  the boot console. A late `--link` client of `emu run` is still
-  replayed. That is out of this fix's scope, and the doc comment on
-  `UsbSjSink::Tcp` now says so plainly.
+- The `lp-emu-esp32c6` binary's default is `absent`, and it is unchanged.
+  `lp-cli emu run` had kept `attached` here too; the follow-up below
+  changed it.
 - The Studio tab backing (`emulator_tab.js`, `usb_host=attached`) has no
   byte socket and no `TcpHost` backlog. It sends `open` itself.
 - The committed `lp-app/lpa-link/testdata/device-traces/*.emu.failed.jsonl`
@@ -139,6 +133,47 @@ Measured on the reference image (`d6cfaa205`, `lp-emu:esp32c6:t1`):
 - **old default:** 0 B pending (it had all been taken), **2 212 B** before
   the first heartbeat (boot console and boot hello), whose `uptime_ms` was
   5 000, so the test fails on the replayed heartbeat.
+
+**Follow-up: `lp-cli emu run --link`** (the gap #791 left, closed in the
+change that added this section). `emu run` defaulted to `attached` from
+power-on however it was run, so a client that connected to `--link` late was
+replayed the boot console and every heartbeat, exactly as `emu serve` had
+been. The same rule now applies to it. When the USB-Serial-JTAG port *is*
+the `--link` socket, the default is `attached-idle` and the client's connect
+is the `open`. `emu run` now takes `--usb-host attached|attached-idle|absent`,
+spelled as `serve` spells it, in place of `--host-absent`, so `attached` stays
+an explicit opt-in. The default only changes where a socket client stands for
+the application. Everywhere else a reader present from power-on is what the
+run means, so it stays `attached`:
+
+- `--monitor`, which declares a reader holding the port for the whole run
+  and so refuses `--usb-host`. `m4-walk.sh` (`just walk-esp32c6-emu`) uses
+  it, so the walk's console is unchanged.
+- no `--link` at all. The emulator is the reader and `--console` writes what
+  it read. This is `heap-budget-check.sh`'s run.
+- `--link-kind uart0`, where nothing couples a client to the USB port
+  (`two-binary-probe.sh`).
+
+No test or script ran `emu run --link` over USB without `--monitor`, so
+nothing that read the replayed console had to change. The resolution is
+`handler.rs::usb_host_at_power_on`, unit-tested there. The machine-side
+behaviour is the same configuration as `serve`'s default (`Attached {
+draining: false }`, a `Tcp` sink, `UsbSjDrain::Auto`), which the regression
+test above already covers end to end.
+
+Measured by hand on the reference image (`d6cfaa205`, `lp-emu:esp32c6:t1`),
+connecting to `emu run --elf … --link` 8 s of wall clock after start (the
+wait is only a way to arrive late; every figure below is the guest's):
+
+- **new default:** `replaying 0 B`, **139 B** before the first whole
+  heartbeat, whose `uptime_ms` was 75 001, and no hello ahead of it. These are
+  the same 139 B `serve`'s fixed default measured.
+- **`--usb-host attached`:** `replaying 11391 B`, **2 212 B** (boot console
+  and boot hello) before the first heartbeat, whose `uptime_ms` was 5 000.
+
+`lp-cli upload projects/test/basic serial:tcp://…` against the new default
+connects, compiles the shader on the guest and reports "Project uploaded and
+running". The client asks for its hello and needs no replayed one.
 
 **Lesson** — "cable in" and "port open" are two facts, and a door that
 couples a socket to one of them must start both from the same place. An edge-

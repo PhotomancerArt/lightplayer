@@ -568,9 +568,10 @@ pub enum UsbSjSink {
     ///   until a client connects (its connect is the `open`), so there is
     ///   nothing to replay; a late client gets at most what the 64-byte IN
     ///   FIFO still holds. This is what an unopened port on silicon does, and
-    ///   `lp-cli emu serve`'s default.
-    /// - `Attached { draining: true }` (`--usb-host attached`, `lp-cli emu
-    ///   run`'s default and `emu serve`'s opt-in) — the host reads from power-on with nobody connected, every
+    ///   the default of `lp-cli emu serve` and of `lp-cli emu run --link`.
+    /// - `Attached { draining: true }` (`--usb-host attached`, an opt-in on
+    ///   `lp-cli emu run --link` and `emu serve` alike) — the host reads from
+    ///   power-on with nobody connected, every
     ///   guest write succeeds, and [`lp_emu_esp_common::TcpHost`] keeps it
     ///   all (up to `TCP_BACKLOG_CAP`, 4 MiB) and replays it to the first
     ///   client. That models an application that had the port open since
@@ -3754,9 +3755,9 @@ impl Esp32C6Machine {
         //   client is attached, no edge would fire, and nothing would re-open
         //   the port — host bytes stage forever and the chip is deaf to the
         //   flasher that just reset it.
-        // * The CLIENT term. `--usb-host attached` — `emu run`'s default,
-        //   `emu serve`'s opt-in — powers on with the port OPEN and no byte
-        //   client at all. Without
+        // * The CLIENT term. `--usb-host attached` — `emu run --monitor`'s
+        //   host, and an opt-in on both doors — powers on with the port OPEN
+        //   and no byte client at all. Without
         //   it a reboot would claim a client that does not exist, and the
         //   very next poll would see `connected=false` against it and issue
         //   the matching `close` — slamming shut the port the restore had
