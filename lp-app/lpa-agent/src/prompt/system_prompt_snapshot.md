@@ -39,6 +39,10 @@ color/space:
   vec4 lpfn_hsv2rgb(vec4 hsv)
   vec3 lpfn_rgb2hsv(vec3 rgb)
   vec4 lpfn_rgb2hsv(vec4 rgb)
+  vec3 lpfn_oklab2rgb(vec3 lab)
+  vec3 lpfn_oklch2rgb(vec3 lch)
+  vec3 lpfn_rgb2oklab(vec3 rgb)
+  vec3 lpfn_rgb2oklch(vec3 rgb)
 core:
   uint lpfn_hash_mix(uint x, uint seed)
   uint lpfn_hash(uint x, uint seed)
