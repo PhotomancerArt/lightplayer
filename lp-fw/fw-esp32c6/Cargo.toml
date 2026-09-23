@@ -243,7 +243,7 @@ esp-println = { version = "0.17.0", default-features = false, features = ["esp32
 esp-alloc = { version = "0.10.0", features = ["internal-heap-stats"] }
 # BLE spike only (`test_ble`). trouble-host 0.6 is the release on bt-hci 0.8,
 # which is what esp-radio 0.18's `BleConnector` implements.
-trouble-host = { version = "0.6.0", optional = true, default-features = false, features = ["derive", "gatt", "peripheral", "log", "default-packet-pool", "default-packet-pool-mtu-255"] }
+trouble-host = { version = "0.6.0", optional = true, default-features = false, features = ["derive", "gatt", "peripheral", "log", "connection-params-update", "default-packet-pool", "default-packet-pool-mtu-255"] }
 bt-hci = { version = "0.8.0", optional = true, default-features = false }
 heapless = { version = "0.9", optional = true }
 # trouble-host 0.6's `#[gatt_server]` expands to `static_cell::…` and

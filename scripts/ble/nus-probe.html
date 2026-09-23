@@ -1,0 +1,139 @@
+<!doctype html>
+<!--
+  Web Bluetooth side of the `test_ble` spike (vision `ble-remote-control`).
+  The same three checks as nus-probe.py — echo, board->browser burst,
+  browser->board writes — from a browser, which is how Studio would talk BLE.
+  Needs a secure origin: serve on localhost (scripts/ble/serve-probe.sh) or HTTPS.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LP BLE probe</title>
+<style>
+  :root { color-scheme: light dark; --bg:#fff; --fg:#111; --mute:#666; --ok:#0a7d32; --bad:#b3261e; --line:#ddd; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#111; --fg:#eee; --mute:#999; --ok:#5fd38a; --bad:#ff8a80; --line:#333; } }
+  body { background:var(--bg); color:var(--fg); font:15px/1.4 system-ui, sans-serif; margin:0; padding:16px; max-width:720px; }
+  h1 { font-size:18px; margin:0 0 4px; }
+  p { color:var(--mute); margin:0 0 12px; }
+  button { font:inherit; padding:10px 14px; margin:0 8px 8px 0; border-radius:8px; border:1px solid var(--line); background:transparent; color:var(--fg); }
+  button:disabled { opacity:.4; }
+  input { font:inherit; padding:9px; width:100%; box-sizing:border-box; border:1px solid var(--line); border-radius:8px; background:transparent; color:var(--fg); margin-bottom:8px; }
+  pre { border-top:1px solid var(--line); padding-top:8px; white-space:pre-wrap; word-break:break-all; font:13px/1.35 ui-monospace, monospace; user-select:text; }
+  .ok { color:var(--ok); } .bad { color:var(--bad); }
+</style>
+</head>
+<body>
+<h1>LightPlayer BLE probe</h1>
+<p>Connects to an <code>LP-BLE-…</code> board running the <code>test_ble</code> spike firmware.</p>
+<button id="connect">Connect</button>
+<button id="echo" disabled>Echo</button>
+<button id="burst" disabled>Burst ←</button>
+<button id="writes" disabled>Writes →</button>
+<button id="disconnect" disabled>Disconnect</button>
+<input id="line" value='M!{"hello":"from the browser"}' aria-label="text to send">
+<button id="send" disabled>Send text</button>
+<pre id="log"></pre>
+<script>
+const NUS = "6e400001-b5a3-f393-e0a9-e50e24dcca9e";
+const RX  = "6e400002-b5a3-f393-e0a9-e50e24dcca9e";
+const TX  = "6e400003-b5a3-f393-e0a9-e50e24dcca9e";
+const $ = (id) => document.getElementById(id);
+const logEl = $("log");
+const enc = new TextEncoder(), dec = new TextDecoder();
+let device, rx, tx, onPacket = null;
+
+function log(msg, cls) {
+  const line = document.createElement("div");
+  line.textContent = `${new Date().toISOString().slice(11, 23)}  ${msg}`;
+  if (cls) line.className = cls;
+  logEl.prepend(line);
+}
+function setConnected(on) {
+  for (const id of ["echo", "burst", "writes", "disconnect", "send"]) $(id).disabled = !on;
+  $("connect").disabled = on;
+}
+function nextPacket(ms = 5000) {
+  return new Promise((resolve, reject) => {
+    const t = setTimeout(() => { onPacket = null; reject(new Error("timeout")); }, ms);
+    onPacket = (v) => { clearTimeout(t); onPacket = null; resolve(v); };
+  });
+}
+
+if (!navigator.bluetooth) log("This browser has no Web Bluetooth (navigator.bluetooth is missing).", "bad");
+
+$("connect").onclick = async () => {
+  try {
+    const t0 = performance.now();
+    device = await navigator.bluetooth.requestDevice({ filters: [{ namePrefix: "LP-BLE" }], optionalServices: [NUS] });
+    const tPicked = performance.now();
+    device.addEventListener("gattserverdisconnected", () => { log("disconnected"); setConnected(false); });
+    const server = await device.gatt.connect();
+    const svc = await server.getPrimaryService(NUS);
+    rx = await svc.getCharacteristic(RX);
+    tx = await svc.getCharacteristic(TX);
+    tx.addEventListener("characteristicvaluechanged", (e) => {
+      const v = new Uint8Array(e.target.value.buffer.slice(0));
+      if (onPacket) onPacket(v); else log(`← ${v.length} B ${dec.decode(v)}`);
+    });
+    await tx.startNotifications();
+    log(`connected to ${device.name}: chooser ${(tPicked - t0).toFixed(0)} ms, connect+discover ${(performance.now() - tPicked).toFixed(0)} ms`, "ok");
+    setConnected(true);
+  } catch (e) { log(`connect failed: ${e.message}`, "bad"); }
+};
+
+$("disconnect").onclick = () => device?.gatt?.disconnect();
+
+$("send").onclick = async () => {
+  const bytes = enc.encode($("line").value);
+  await rx.writeValueWithResponse(bytes);
+  log(`→ ${bytes.length} B`);
+};
+
+$("echo").onclick = async () => {
+  const msg = enc.encode('M!{"hello":"from the browser"}\n');
+  const t0 = performance.now();
+  const wait = nextPacket();
+  await rx.writeValueWithResponse(msg);
+  try {
+    const got = await wait;
+    const same = got.length === msg.length && got.every((b, i) => b === msg[i]);
+    log(`echo ${same ? "OK" : "MISMATCH"} rtt=${(performance.now() - t0).toFixed(1)} ms`, same ? "ok" : "bad");
+  } catch (e) { log(`echo ${e.message}`, "bad"); }
+};
+
+$("burst").onclick = async () => {
+  const n = 100;
+  let count = 0, bytes = 0, t0 = 0;
+  const done = new Promise((resolve) => {
+    let idle;
+    const arm = () => { clearTimeout(idle); idle = setTimeout(resolve, 3000); };
+    onPacket = (v) => { if (!t0) t0 = performance.now(); count++; bytes += v.length; arm(); if (count >= n) resolve(); };
+    arm();
+  });
+  await rx.writeValueWithResponse(enc.encode(`burst ${n}`));
+  await done; onPacket = null;
+  const secs = t0 ? (performance.now() - t0) / 1000 : 0;
+  log(`burst board→browser ${count}/${n} pkts ${bytes} B in ${secs.toFixed(2)} s = ${secs ? Math.round(bytes / secs) : 0} B/s`, count === n ? "ok" : "bad");
+};
+
+$("writes").onclick = async () => {
+  // 180-byte writes are counted on the board, not echoed; `count` asks for
+  // the board's own total and elapsed time, which is the number that matters.
+  const n = 100, payload = new Uint8Array(180).map((_, i) => 32 + (i % 90));
+  const t0 = performance.now();
+  for (let i = 0; i < n; i++) await rx.writeValueWithoutResponse(payload);
+  const tQueued = performance.now();
+  const wait = nextPacket(10000);
+  await rx.writeValueWithResponse(enc.encode("count"));
+  try {
+    const reply = dec.decode(await wait);
+    const secs = (performance.now() - t0) / 1000;
+    const m = /bytes=(\d+) ms=(\d+)/.exec(reply);
+    const boardRate = m && +m[2] ? Math.round(+m[1] / (+m[2] / 1000)) : 0;
+    log(`writes browser→board: board says "${reply}" → ${boardRate} B/s on the board's clock; ${secs.toFixed(2)} s end to end (queued in ${(tQueued - t0).toFixed(0)} ms)`, m && +m[1] === n * 180 ? "ok" : "bad");
+  } catch (e) { log(`writes: no count reply (${e.message})`, "bad"); }
+};
+</script>
+</body>
+</html>

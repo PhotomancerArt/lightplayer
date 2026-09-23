@@ -32,6 +32,10 @@ use core::fmt::Write as _;
 // the extern-prelude name for this file only.
 use embassy_sync_07 as embassy_sync;
 
+use bt_hci::cmd::le::{
+    LeRemoteConnectionParameterRequestNegativeReply, LeRemoteConnectionParameterRequestReply,
+};
+use bt_hci::controller::ControllerCmdAsync;
 use embassy_futures::join::join;
 use embassy_futures::select::select;
 use embassy_time::{Duration, Instant, Timer};
@@ -136,8 +140,9 @@ pub async fn run_ble_test(_: embassy_executor::Spawner) -> ! {
         loop {
             match advertise(name.as_str(), &mut peripheral, &server).await {
                 Ok(conn) => {
+                    reprint_boot_stages();
                     heap("connected");
-                    select(gatt_events(&server, &conn), heartbeat()).await;
+                    select(gatt_events(&server, &conn, &stack), heartbeat()).await;
                     heap("disconnected");
                 }
                 Err(e) => {
@@ -199,9 +204,22 @@ async fn advertise<'values, 'server, C: Controller>(
     Ok(conn)
 }
 
-async fn gatt_events<P: PacketPool>(server: &Server<'_>, conn: &GattConnection<'_, '_, P>) {
+async fn gatt_events<C, P: PacketPool>(
+    server: &Server<'_>,
+    conn: &GattConnection<'_, '_, P>,
+    stack: &Stack<'_, C, P>,
+) where
+    C: Controller
+        + ControllerCmdAsync<LeRemoteConnectionParameterRequestReply>
+        + ControllerCmdAsync<LeRemoteConnectionParameterRequestNegativeReply>,
+{
     let rx = &server.uart.rx;
     let tx = &server.uart.tx;
+    // Upload-direction meter: writes of exactly BURST_PACKET bytes are counted,
+    // not echoed (echoing a flood of writes starves the packet pool), and a
+    // `count` write reports the total back and resets it.
+    let mut counted = 0usize;
+    let mut first_at: Option<Instant> = None;
     let reason = loop {
         match conn.next().await {
             GattConnectionEvent::Disconnected { reason } => break reason,
@@ -210,8 +228,13 @@ async fn gatt_events<P: PacketPool>(server: &Server<'_>, conn: &GattConnection<'
                 if let GattEvent::Write(w) = &event {
                     if w.handle() == rx.handle {
                         let data = w.data();
-                        println!("[BLE] rx {} B", data.len());
-                        echo = Vec::from_slice(&data[..data.len().min(TX_MAX)]).ok();
+                        if data.len() == BURST_PACKET {
+                            first_at.get_or_insert_with(Instant::now);
+                            counted += data.len();
+                        } else {
+                            println!("[BLE] rx {} B", data.len());
+                            echo = Vec::from_slice(&data[..data.len().min(TX_MAX)]).ok();
+                        }
                     }
                 }
                 match event.accept() {
@@ -221,18 +244,59 @@ async fn gatt_events<P: PacketPool>(server: &Server<'_>, conn: &GattConnection<'
                 if let Some(bytes) = echo {
                     if let Some(n) = burst_request(&bytes) {
                         burst(tx, conn, n).await;
+                    } else if bytes.as_slice() == b"count" {
+                        let ms = first_at.map(|t| t.elapsed().as_millis()).unwrap_or(0);
+                        println!("[BLE] count bytes={counted} ms={ms}");
+                        let mut reply: Vec<u8, TX_MAX> = Vec::new();
+                        let mut line: heapless::String<64> = heapless::String::new();
+                        let _ = write!(line, "count bytes={counted} ms={ms}");
+                        let _ = reply.extend_from_slice(line.as_bytes());
+                        let _ = tx.notify(conn, &reply).await;
+                        counted = 0;
+                        first_at = None;
                     } else if tx.notify(conn, &bytes).await.is_err() {
                         println!("[BLE] echo notify failed");
                     }
                 }
             }
-            GattConnectionEvent::ConnectionParamsUpdated { conn_interval, .. } => {
-                println!("[BLE] conn interval {} us", conn_interval.as_micros());
+            GattConnectionEvent::RequestConnectionParams(req) => {
+                let p = req.params();
+                println!(
+                    "[BLE] central asks conn params interval={}..{} us latency={} timeout={} ms",
+                    p.min_connection_interval.as_micros(),
+                    p.max_connection_interval.as_micros(),
+                    p.max_latency,
+                    p.supervision_timeout.as_millis()
+                );
+                match req.accept(None, stack).await {
+                    Ok(()) => println!("[BLE] conn params accepted"),
+                    Err(_) => println!("[BLE] conn params accept FAILED"),
+                }
             }
-            _ => {}
+            GattConnectionEvent::ConnectionParamsUpdated {
+                conn_interval,
+                peripheral_latency,
+                supervision_timeout,
+            } => {
+                println!(
+                    "[BLE] conn params now interval={} us latency={} timeout={} ms",
+                    conn_interval.as_micros(),
+                    peripheral_latency,
+                    supervision_timeout.as_millis()
+                );
+            }
+            GattConnectionEvent::PhyUpdated { .. } => println!("[BLE] phy updated"),
+            GattConnectionEvent::DataLengthUpdated {
+                max_tx_octets,
+                max_rx_octets,
+                ..
+            } => println!("[BLE] data length tx={max_tx_octets} rx={max_rx_octets}"),
         }
     };
-    println!("[BLE] disconnected: {reason:?}");
+    // `{:?}` formats to nothing in this build (`-Zfmt-debug=none`), so print
+    // the HCI status code itself: 0x08 supervision timeout, 0x13 remote user
+    // terminated, 0x16 local host terminated, 0x3e failed to establish.
+    println!("[BLE] disconnected: reason=0x{:02x}", reason.into_inner());
 }
 
 /// `burst` or `burst <n>` → Some(n).
@@ -278,10 +342,29 @@ async fn heartbeat() {
     }
 }
 
-fn heap(stage: &str) {
-    println!(
-        "[BLE] heap stage={stage} free={} used={}",
-        esp_alloc::HEAP.free(),
-        esp_alloc::HEAP.used()
-    );
+/// Boot-stage heap figures, kept so they can be re-printed on every connect:
+/// a non-resetting serial reader attaches after the boot has already scrolled.
+static BOOT_STAGES: critical_section::Mutex<
+    core::cell::RefCell<heapless::Vec<(&'static str, usize, usize), 8>>,
+> = critical_section::Mutex::new(core::cell::RefCell::new(heapless::Vec::new()));
+
+fn heap(stage: &'static str) {
+    let (free, used) = (esp_alloc::HEAP.free(), esp_alloc::HEAP.used());
+    println!("[BLE] heap stage={stage} free={free} used={used}");
+    if matches!(
+        stage,
+        "heap-init" | "rtos-started" | "controller-up" | "host-built"
+    ) {
+        critical_section::with(|cs| {
+            let _ = BOOT_STAGES.borrow_ref_mut(cs).push((stage, free, used));
+        });
+    }
+}
+
+fn reprint_boot_stages() {
+    critical_section::with(|cs| {
+        for (stage, free, used) in BOOT_STAGES.borrow_ref(cs).iter() {
+            println!("[BLE] boot stage={stage} free={free} used={used}");
+        }
+    });
 }
