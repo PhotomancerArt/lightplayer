@@ -30,6 +30,9 @@ pub fn ProducedProductView(
     // padded, full-width treatment.
     let media = matches!(product.kind, UiProductKind::Visual | UiProductKind::Control);
     let bus_target = product.binding.bindings.bus_target.clone();
+    // Core's producer-aware "Show live" wins; the pane's own focus action
+    // (the owning node) is the fallback for hand-built product rows.
+    let focus_action = product.show_live.clone().or(focus_action);
     let treatment = if bus_target.is_some() {
         SlotPaneTreatment::Bound
     } else {
