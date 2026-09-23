@@ -2716,7 +2716,7 @@ test-glsl-filetests:
 # (which need chip builds this gate deliberately avoids). Note the narrow
 # residue: drift unique to the emu fixture itself is only caught locally.
 [parallel]
-check-lint: fmt-check clippy check-lpc-engine-gates check-studio-core-minimal lint-serde-content lint-browser-test-harness lint-classic-capture lint-schemars-fw lint-upgrade-fw lint-emu-fence lint-emu-regnames lint-torture-corpus lint-vec-corpus lint-tw-utilities
+check-lint: fmt-check clippy check-lpc-engine-gates check-studio-core-minimal lint-serde-content lint-browser-test-harness lint-classic-capture lint-pcb-export lint-schemars-fw lint-upgrade-fw lint-emu-fence lint-emu-regnames lint-torture-corpus lint-vec-corpus lint-tw-utilities
 
 [parallel]
 check: check-lint schema-check fw-manifest-check-emu
@@ -2743,6 +2743,14 @@ lint-browser-test-harness:
 # .raw.bin byte for byte. It opens no port.
 lint-classic-capture:
     python3 scripts/emu/classic-reset-and-capture.py --self-test
+
+# The PCB-export mapping generator reads EasyEDA's exports, which are design
+# files and never live in this repo, so its real run is a desk-side recipe
+# (`playful-choker-map2d`). This runs the half that needs no exports: the
+# PcbDoc and netlist parsers, the strokes-must-equal-the-chain refusal and the
+# --check comparison, on a synthetic three-lamp board built in memory.
+lint-pcb-export:
+    python3 scripts/pcb-export-to-map2d.py --self-test
 
 # The control-flow torture corpus is generated; without this gate, hand edits to
 # those files are silently reverted by the next `--write` (that is how the
@@ -3919,6 +3927,28 @@ validate *args:
 # Example: just demo catalog/patterns/pulse
 demo project="projects/test/basic":
     cargo run -p lp-cli -- dev {{ project }}
+
+# Regenerate catalog/projects/playful-choker's mapping (playful.map2d.json and
+# playful-mapping.svg) from the choker's EasyEDA exports. `exports` is the
+# design folder, or a copy of it: the newest `Altium_*.zip` and `Netlist_*.tel`
+# in it are read (their names are dated). The exports are Yona's design files
+# and are never committed here. The strokes table is
+# scripts/pcb-export-strokes/playful-choker.json.
+#
+# `just playful-choker-map2d <exports> --check` writes nothing and fails unless
+# the committed files are byte-identical to a regeneration: run it after the
+# PCB changes, or after touching the generator.
+playful-choker-map2d exports *args:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    pcb="$(ls "{{ exports }}"/Altium_*.zip 2>/dev/null | sort | tail -n1 || true)"
+    net="$(ls "{{ exports }}"/Netlist_*.tel 2>/dev/null | sort | tail -n1 || true)"
+    [[ -n "$pcb" && -n "$net" ]] || { echo "no Altium_*.zip and Netlist_*.tel in {{ exports }}" >&2; exit 1; }
+    echo "pcb:     $pcb"
+    echo "netlist: $net"
+    python3 scripts/pcb-export-to-map2d.py --pcb "$pcb" --netlist "$net" \
+        --strokes scripts/pcb-export-strokes/playful-choker.json \
+        --out-dir catalog/projects/playful-choker {{ args }}
 
 # Requires: ESP32-C6 device connected via USB. Builds the default lps-glsl frontend path.
 # Usage: just demo-esp32c6-host [project-dir]
