@@ -237,6 +237,22 @@ pub(super) fn wasm_import_val_types(builtin: BuiltinId) -> (Vec<ValType>, Vec<Va
         ),
         BuiltinId::LpLpfnHue2rgbF32 => (vec![ValType::I32, ValType::F32], Vec::new()),
         BuiltinId::LpLpfnHue2rgbQ32 => (vec![ValType::I32, ValType::I32], Vec::new()),
+        BuiltinId::LpLpfnOklab2rgbF32 => (
+            vec![ValType::I32, ValType::F32, ValType::F32, ValType::F32],
+            Vec::new(),
+        ),
+        BuiltinId::LpLpfnOklab2rgbQ32 => (
+            vec![ValType::I32, ValType::I32, ValType::I32, ValType::I32],
+            Vec::new(),
+        ),
+        BuiltinId::LpLpfnOklch2rgbF32 => (
+            vec![ValType::I32, ValType::F32, ValType::F32, ValType::F32],
+            Vec::new(),
+        ),
+        BuiltinId::LpLpfnOklch2rgbQ32 => (
+            vec![ValType::I32, ValType::I32, ValType::I32, ValType::I32],
+            Vec::new(),
+        ),
         BuiltinId::LpLpfnPsrdnoise2F32 => (
             vec![
                 ValType::F32,
@@ -333,6 +349,22 @@ pub(super) fn wasm_import_val_types(builtin: BuiltinId) -> (Vec<ValType>, Vec<Va
                 ValType::I32,
                 ValType::I32,
             ],
+            Vec::new(),
+        ),
+        BuiltinId::LpLpfnRgb2oklabF32 => (
+            vec![ValType::I32, ValType::F32, ValType::F32, ValType::F32],
+            Vec::new(),
+        ),
+        BuiltinId::LpLpfnRgb2oklabQ32 => (
+            vec![ValType::I32, ValType::I32, ValType::I32, ValType::I32],
+            Vec::new(),
+        ),
+        BuiltinId::LpLpfnRgb2oklchF32 => (
+            vec![ValType::I32, ValType::F32, ValType::F32, ValType::F32],
+            Vec::new(),
+        ),
+        BuiltinId::LpLpfnRgb2oklchQ32 => (
+            vec![ValType::I32, ValType::I32, ValType::I32, ValType::I32],
             Vec::new(),
         ),
         BuiltinId::LpLpfnSaturateF32 => (vec![ValType::F32], vec![ValType::F32]),

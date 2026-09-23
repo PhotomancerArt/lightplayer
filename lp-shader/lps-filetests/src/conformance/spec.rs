@@ -94,6 +94,10 @@ vec3 probe_hsv2rgb3(vec3 hsv) { return lpfn_hsv2rgb(hsv); }
 vec4 probe_hsv2rgb4(vec4 hsv) { return lpfn_hsv2rgb(hsv); }
 vec3 probe_rgb2hsv3(vec3 rgb) { return lpfn_rgb2hsv(rgb); }
 vec4 probe_rgb2hsv4(vec4 rgb) { return lpfn_rgb2hsv(rgb); }
+vec3 probe_oklab2rgb(vec3 lab) { return lpfn_oklab2rgb(lab); }
+vec3 probe_rgb2oklab(vec3 rgb) { return lpfn_rgb2oklab(rgb); }
+vec3 probe_oklch2rgb(vec3 lch) { return lpfn_oklch2rgb(lch); }
+vec3 probe_rgb2oklch(vec3 rgb) { return lpfn_rgb2oklch(rgb); }
 float probe_random1(float x, uint seed) { return lpfn_random(x, seed); }
 float probe_random2(vec2 p, uint seed) { return lpfn_random(p, seed); }
 float probe_random3(vec3 p, uint seed) { return lpfn_random(p, seed); }
@@ -240,6 +244,59 @@ pub fn all_specs() -> Vec<BuiltinSpec> {
             },
             known_q32_bug: None,
             cases: cases_vec4_unit,
+        },
+        // oklab2rgb: two 3x3 matrices around a cube; the only error is
+        // Q16.16 coefficient and product rounding.
+        BuiltinSpec {
+            name: "oklab2rgb",
+            probe: "probe_oklab2rgb",
+            mode: Mode::Pointwise {
+                // measured max_err 3.0e-4 on this corpus
+                tol: 1e-3,
+                max_outliers: 0,
+            },
+            known_q32_bug: None,
+            cases: cases_oklab,
+        },
+        // rgb2oklab: the Q32 cube root is exact (integer digit-by-digit);
+        // error is the matrices' rounding, amplified by cbrt's slope near 0.
+        BuiltinSpec {
+            name: "rgb2oklab",
+            probe: "probe_rgb2oklab",
+            mode: Mode::Pointwise {
+                // measured max_err 9.1e-5 on this corpus
+                tol: 1e-3,
+                max_outliers: 0,
+            },
+            known_q32_bug: None,
+            cases: cases_vec3_unit,
+        },
+        // oklch2rgb: oklab2rgb behind the Q32 fast sin/cos (shader-quality
+        // parabola), whose error is scaled by the chroma.
+        BuiltinSpec {
+            name: "oklch2rgb",
+            probe: "probe_oklch2rgb",
+            mode: Mode::Pointwise {
+                // measured max_err 1.8e-3 on this corpus
+                tol: 4e-3,
+                max_outliers: 0,
+            },
+            known_q32_bug: None,
+            cases: cases_oklch,
+        },
+        // rgb2oklch: the hue is atan2 of the chroma plane, so its error is
+        // the Q32 atan2 polynomial plus a/b rounding divided by chroma. The
+        // corpus leaves out greys and near-greys, whose hue is undefined.
+        BuiltinSpec {
+            name: "rgb2oklch",
+            probe: "probe_rgb2oklch",
+            mode: Mode::Pointwise {
+                // measured max_err 1.7e-3 on this corpus
+                tol: 4e-3,
+                max_outliers: 0,
+            },
+            known_q32_bug: None,
+            cases: cases_rgb_chromatic,
         },
         // ---- chaotic sin-hash family (statistical; see module docs) ----
         BuiltinSpec {
@@ -619,6 +676,50 @@ fn cases_vec3_unit() -> Vec<Vec<Arg>> {
     v.push(vec![Arg::Vec3(0.5, 0.515625, 0.5)]);
     v.push(vec![Arg::Vec3(0.5, 0.5, 0.5)]);
     v
+}
+
+/// Oklab `(L, a, b)`: lightness across its range, a/b across the sRGB gamut
+/// and a little past it.
+fn cases_oklab() -> Vec<Vec<Arg>> {
+    let ls = [0.0f32, 0.25, 0.5, 0.75, 1.0];
+    let ab = [-0.25f32, -0.125, 0.0, 0.0625, 0.125, 0.25];
+    let mut v = Vec::new();
+    for &l in &ls {
+        for &a in &ab {
+            for &b in &ab {
+                v.push(vec![Arg::Vec3(l, a, b)]);
+            }
+        }
+    }
+    v
+}
+
+/// Oklch `(L, C, h turns)`, hues including negative and past one turn.
+fn cases_oklch() -> Vec<Vec<Arg>> {
+    let ls = [0.25f32, 0.5, 0.75, 1.0];
+    let cs = [0.0f32, 0.0625, 0.125, 0.25];
+    let hs = [-0.375f32, 0.0, 0.125, 0.328125, 0.5, 0.75, 1.25];
+    let mut v = Vec::new();
+    for &l in &ls {
+        for &c in &cs {
+            for &h in &hs {
+                v.push(vec![Arg::Vec3(l, c, h)]);
+            }
+        }
+    }
+    v
+}
+
+/// RGB colors with a real hue: the unit grid minus anything whose channels
+/// span less than a quarter (greys and near-greys have no defined hue).
+fn cases_rgb_chromatic() -> Vec<Vec<Arg>> {
+    cases_vec3_unit()
+        .into_iter()
+        .filter(|case| match case[0] {
+            Arg::Vec3(r, g, b) => r.max(g).max(b) - r.min(g).min(b) >= 0.25,
+            _ => false,
+        })
+        .collect()
 }
 
 fn cases_vec4_unit() -> Vec<Vec<Arg>> {

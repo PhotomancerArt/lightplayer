@@ -1548,6 +1548,10 @@ fn lpfn_return_type(name: &str, glsl_params: &[&str]) -> Option<LpsType> {
         "lpfn_hsv2rgb" if matches!(glsl_params, [a] if *a == "Vec4") => Some(LpsType::Vec4),
         "lpfn_rgb2hsv" if matches!(glsl_params, [a] if *a == "Vec3") => Some(LpsType::Vec3),
         "lpfn_rgb2hsv" if matches!(glsl_params, [a] if *a == "Vec4") => Some(LpsType::Vec4),
+        "lpfn_oklab2rgb" if matches!(glsl_params, [a] if *a == "Vec3") => Some(LpsType::Vec3),
+        "lpfn_rgb2oklab" if matches!(glsl_params, [a] if *a == "Vec3") => Some(LpsType::Vec3),
+        "lpfn_oklch2rgb" if matches!(glsl_params, [a] if *a == "Vec3") => Some(LpsType::Vec3),
+        "lpfn_rgb2oklch" if matches!(glsl_params, [a] if *a == "Vec3") => Some(LpsType::Vec3),
         "lpfn_fbm" if matches!(glsl_params, [a, b, c] if (*a == "Vec2" || *a == "Vec3") && *b == "Int" && *c == "UInt") => {
             Some(LpsType::Float)
         }
