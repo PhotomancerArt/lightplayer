@@ -42,6 +42,22 @@ pub(crate) fn collapsed_node_pane() -> Element {
     }
 }
 
+#[story(
+    description = "On a device lens the selected card is the one streaming: its header wears the Live chip, and the whole header band (not just the name) selects a card."
+)]
+pub(crate) fn selected_live_node_pane() -> Element {
+    let mut view = playlist_node_view();
+    view.action = Some(story_focus_action());
+    view.focused = true;
+    view.selection_streams = true;
+    view.streaming_live = true;
+    view.collapsed = true;
+
+    rsx! {
+        NodePane { view, on_action: move |_| {} }
+    }
+}
+
 #[story(description = "Node pane with an error status and projection issues.")]
 pub(crate) fn error_node() -> Element {
     rsx! {

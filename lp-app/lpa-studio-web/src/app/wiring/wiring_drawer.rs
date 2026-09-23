@@ -263,7 +263,7 @@ fn ChannelValueBody(channel: UiBusChannelView) -> Element {
                         preview: preview.preview,
                         tracking: preview.tracking,
                         frame: preview.frame,
-                        focus_action: None,
+                        focus_action: preview.show_live.clone(),
                     }
                 }
                 if let Some(value) = channel.value.clone() {

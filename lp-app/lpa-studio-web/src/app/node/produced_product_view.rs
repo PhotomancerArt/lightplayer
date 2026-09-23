@@ -12,6 +12,7 @@ use lpa_studio_core::{
 use wasm_bindgen::{Clamped, JsCast};
 
 use crate::app::node::lamp_view::{LampView, control_sample_layout_has_rgb};
+use crate::app::node::node_pane::LIVE_STREAM_EXPLAINER;
 use crate::app::node::{BindingChip, BindingChipDirection, SlotPane, SlotPaneTreatment};
 
 #[component]
@@ -138,7 +139,7 @@ pub(crate) fn ProductPreview(
 
     let frame_class = product_frame_class(kind);
     let frame_style = preview_frame_style(&preview, frame);
-    let overlay = product_tracking_overlay(kind, tracking);
+    let overlay = product_tracking_overlay(kind, tracking, preview_has_frame(&preview));
 
     rsx! {
         div { class: "{frame_class}", style: "{frame_style}",
@@ -198,10 +199,9 @@ pub(crate) fn ProductPreview(
                     }
                 },
             }
-            if let Some(overlay) = overlay {
+            if let Some(title) = overlay {
                 ProductTrackingOverlay {
-                    title: overlay.title,
-                    detail: overlay.detail,
+                    title,
                     focus_action,
                     on_action,
                 }
@@ -441,18 +441,17 @@ fn ProductMessage(tone: ProductMessageTone, message: String) -> Element {
     }
 }
 
-/// The "not tracked / paused" wash over a product's frame.
+/// The "not live" wash over a product's frame.
 ///
-/// The detail line is an INSTRUCTION ("Click to view"), so it renders only
-/// when the overlay is actually a button (G1 R-C). Every node-face hero
-/// passes `focus_action: None` — the overlay there is a dead `<div>`, and
-/// telling someone to click a thing that does not respond is worse than
-/// saying nothing. The title alone still explains the state.
+/// With a `focus_action` (the product's `show_live`: select its producer
+/// node) the whole frame is a button and says **Show live**; the tooltip
+/// explains why only one node streams. Without one (a surface that cannot
+/// select anything) the title alone states the fact — an instruction on a
+/// thing that does not respond is worse than none (G1 R-C).
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 fn ProductTrackingOverlay(
     title: &'static str,
-    detail: &'static str,
     focus_action: Option<UiAction>,
     on_action: Option<EventHandler<UiAction>>,
 ) -> Element {
@@ -461,12 +460,13 @@ fn ProductTrackingOverlay(
             button {
                 class: "ux-produced-product-overlay ux-produced-product-overlay-button",
                 r#type: "button",
+                title: LIVE_STREAM_EXPLAINER,
                 onclick: move |event| {
                     event.stop_propagation();
                     handler.call(action.clone());
                 },
                 strong { "{title}" }
-                span { "{detail}" }
+                span { class: "ux-produced-product-overlay-cta", "{SHOW_LIVE_LABEL}" }
             }
         };
     }
@@ -490,40 +490,40 @@ enum ProductMessageTone {
     Error,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-struct ProductOverlayCopy {
-    title: &'static str,
-    detail: &'static str,
-}
+/// The call to action on a preview that is not live.
+const SHOW_LIVE_LABEL: &str = "Show live";
 
+/// Title of the "not live" wash, or `None` while the product streams.
+///
+/// "Paused" and "not tracked" were Studio's words for its own subscription
+/// bookkeeping, and "paused" read as "the shader stopped". What the viewer
+/// needs is whether these pixels are live — and whether they are looking at
+/// a real (stale) frame or nothing yet, which the frame itself shows.
 fn product_tracking_overlay(
     kind: UiProductKind,
     tracking: UiProductTrackingState,
-) -> Option<ProductOverlayCopy> {
-    let label = match kind {
-        UiProductKind::Visual => "Visual output",
-        UiProductKind::Control => "Control output",
-        _ => return None,
-    };
-    match tracking {
-        UiProductTrackingState::Untracked => Some(ProductOverlayCopy {
-            title: if kind == UiProductKind::Visual {
-                "Visual output not tracked"
-            } else {
-                "Control output not tracked"
-            },
-            detail: "Click to view",
-        }),
-        UiProductTrackingState::Paused => Some(ProductOverlayCopy {
-            title: if label == "Visual output" {
-                "Visual output paused"
-            } else {
-                "Control output paused"
-            },
-            detail: "Click to view",
-        }),
-        UiProductTrackingState::Tracking => None,
+    has_frame: bool,
+) -> Option<&'static str> {
+    if !matches!(kind, UiProductKind::Visual | UiProductKind::Control) {
+        return None;
     }
+    match tracking {
+        UiProductTrackingState::Tracking => None,
+        UiProductTrackingState::Untracked | UiProductTrackingState::Paused => Some(if has_frame {
+            "Last frame · not live"
+        } else {
+            "Not live"
+        }),
+    }
+}
+
+/// Whether the preview holds a real frame (stale or not) rather than a
+/// placeholder.
+fn preview_has_frame(preview: &UiProductPreview) -> bool {
+    matches!(
+        preview,
+        UiProductPreview::VisualSrgb8 { .. } | UiProductPreview::ControlNative(_)
+    )
 }
 
 fn preview_frame_style(preview: &UiProductPreview, frame: UiProductPreviewFrame) -> String {
