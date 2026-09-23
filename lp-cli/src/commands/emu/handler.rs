@@ -255,6 +255,15 @@ fn run(args: RunArgs) -> Result<()> {
     // A frame still open on a pad is reported as incomplete rather than
     // silently dropped.
     machine.flush_frames();
+    // `--flash` promises a project uploaded in one run is still there in the
+    // next, and that promise is kept HERE: the flash part is written back
+    // when the run ends, however it ended — the standalone
+    // `lp-emu-esp32c6` does the same, and `emu serve` does it per board.
+    match machine.flush_flash() {
+        Ok(true) => eprintln!("emu: flash image written back"),
+        Ok(false) => {}
+        Err(e) => eprintln!("emu: could not write the flash image back: {e}"),
+    }
 
     let console = console_bytes(&machine, args.link_kind);
     if let Some(path) = &args.console {
