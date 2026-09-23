@@ -965,6 +965,7 @@ pub(crate) fn palette_cycle() -> GradientConfig {
         ],
         step_seconds: 20.0,
         fade_seconds: 0.5,
+        pinned: None,
     }
 }
 

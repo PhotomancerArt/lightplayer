@@ -2823,17 +2823,20 @@ fn successive_palette_writes_compose_instead_of_clobbering() {
                 set: vec![current, added],
                 step_seconds: 20.0,
                 fade_seconds: 0.5,
+                pinned: None,
             },
             lpc_model::GradientConfig::Cycle {
                 mut set,
                 step_seconds,
                 fade_seconds,
+                pinned,
             } => {
                 set.push(added);
                 lpc_model::GradientConfig::Cycle {
                     set,
                     step_seconds,
                     fade_seconds,
+                    pinned,
                 }
             }
         };

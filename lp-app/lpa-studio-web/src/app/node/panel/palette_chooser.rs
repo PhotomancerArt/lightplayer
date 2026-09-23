@@ -17,6 +17,12 @@
 //! A pick in the Palette tab closes the popover (a selection is a completed
 //! gesture, the add-node picker's rule); cycle edits do not, because
 //! building a set is several gestures in a row.
+//!
+//! Each member chip carries a pin: "keep this set, but right now show me
+//! just this one". Pressing it pins that member (the palette then plays as if
+//! the set held only it), pressing it again unpins, and pressing another
+//! member's pin moves the pin there. The pin is part of the config, so it
+//! rides the same whole-config write as every other cycle edit.
 
 use dioxus::prelude::*;
 use lpa_studio_core::{ProjectSlotAddress, UiAction, UiPanelTarget};
@@ -287,6 +293,7 @@ fn CycleTabBody(
     on_edit: EventHandler<(usize, Gradient)>,
 ) -> Element {
     let members: Vec<Gradient> = config.gradients().to_vec();
+    let pinned = pinned_member(&config);
     let full = members.len() >= MAX_CYCLE_SET as usize;
     let groups = group_choices(&choices);
     let step_seconds = cycle_step_seconds(&config);
@@ -303,8 +310,19 @@ fn CycleTabBody(
                     key: "{index}",
                     name: member_name(&gradient, &named, index),
                     gradient: gradient.clone(),
-                    // A one-member "set" has nothing to remove down to.
+                    // A one-member "set" has nothing to remove down to —
+                    // and nothing to pin away from, either.
                     removable: members.len() > 1,
+                    pin: match pinned {
+                        _ if members.len() < 2 => MemberPin::Unavailable,
+                        Some(pin) if pin == index => MemberPin::Pinned,
+                        Some(_) => MemberPin::Hidden,
+                        None => MemberPin::Unpinned,
+                    },
+                    on_pin: {
+                        let config = config.clone();
+                        move |_| on_change.call(with_member_pin_toggled(&config, index))
+                    },
                     on_remove: {
                         let config = config.clone();
                         move |_| on_change.call(with_member_removed(&config, index))
@@ -519,23 +537,65 @@ fn EditPaletteButton(
     }
 }
 
-/// One member of the cycle set: its strip, its name, and the remove that
-/// takes it back out.
+/// Where one member stands with respect to the cycle's pin.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum MemberPin {
+    /// Nothing is pinned: this member takes its turn in the walk.
+    Unpinned,
+    /// This member is the pinned one — the only palette showing.
+    Pinned,
+    /// Another member is pinned, so this one is in the set but not showing.
+    Hidden,
+    /// A single palette: there is no walk to pin out of, so no pin button.
+    Unavailable,
+}
+
+/// One member of the cycle set: its strip, its name, its pin, and the remove
+/// that takes it back out.
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 fn CycleMemberChip(
     name: String,
     gradient: Gradient,
     removable: bool,
+    #[props(default = MemberPin::Unavailable)] pin: MemberPin,
+    #[props(default)] on_pin: Option<EventHandler<()>>,
     on_remove: EventHandler<()>,
     on_edit: EventHandler<()>,
 ) -> Element {
+    // The pinned chip reads as "this is the one showing": a strong border.
+    // The others dim, because while a pin holds they are not playing — the
+    // set is still there, it is just not what the lights are doing.
+    let chip_class = match pin {
+        MemberPin::Pinned => {
+            "tw:flex tw:min-w-0 tw:items-center tw:gap-2 tw:rounded-xs tw:border tw:border-border-strong tw:bg-card-muted tw:px-1.5 tw:py-1"
+        }
+        _ => {
+            "tw:flex tw:min-w-0 tw:items-center tw:gap-2 tw:rounded-xs tw:border tw:border-border-subtle tw:px-1.5 tw:py-1"
+        }
+    };
+    let dimmed = if pin == MemberPin::Hidden {
+        " tw:opacity-40"
+    } else {
+        ""
+    };
     rsx! {
-        div { class: "tw:flex tw:min-w-0 tw:items-center tw:gap-2 tw:rounded-xs tw:border tw:border-border-subtle tw:px-1.5 tw:py-1",
-            span { class: "tw:w-14 tw:flex-none",
+        div { class: chip_class,
+            span { class: "tw:w-14 tw:flex-none{dimmed}",
                 GradientStripCanvas { gradient }
             }
-            span { class: "tw:min-w-0 tw:grow tw:truncate tw:text-xs", "{name}" }
+            span { class: "tw:min-w-0 tw:grow tw:truncate tw:text-xs{dimmed}", "{name}" }
+            if pin != MemberPin::Unavailable {
+                PinMemberButton {
+                    name: name.clone(),
+                    pinned: pin == MemberPin::Pinned,
+                    on_pin: move |_| {
+                        if let Some(handler) = on_pin {
+                            handler.call(());
+                        }
+                    },
+                }
+            }
             EditPaletteButton { name: name.clone(), on_edit: move |_| on_edit.call(()) }
             if removable {
                 button {
@@ -550,6 +610,37 @@ fn CycleMemberChip(
                     StudioIcon { name: StudioIconName::Remove, size: 12 }
                 }
             }
+        }
+    }
+}
+
+/// A member chip's pin. Unpinned it is as quiet as the ✎ beside it; pinned
+/// it is solid, so the one palette showing can be found at a glance.
+#[component]
+#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
+fn PinMemberButton(name: String, pinned: bool, on_pin: EventHandler<()>) -> Element {
+    let tone = if pinned {
+        "tw:text-strong-foreground"
+    } else {
+        "tw:text-subtle-foreground tw:hover:text-strong-foreground"
+    };
+    let (title, label) = if pinned {
+        ("Resume cycling", format!("Unpin {name}"))
+    } else {
+        ("Show only this palette", format!("Pin {name}"))
+    };
+    rsx! {
+        button {
+            class: "tw:inline-flex tw:flex-none tw:cursor-pointer tw:appearance-none tw:items-center tw:border-0 tw:bg-transparent tw:p-1 {tone}",
+            r#type: "button",
+            title,
+            aria_label: label,
+            aria_pressed: "{pinned}",
+            onclick: move |event: MouseEvent| {
+                event.stop_propagation();
+                on_pin.call(());
+            },
+            StudioIcon { name: StudioIconName::Pin, size: 12 }
         }
     }
 }
@@ -668,21 +759,26 @@ pub fn with_member_added(config: &GradientConfig, gradient: &Gradient) -> Option
             set: vec![current.clone(), gradient.clone()],
             step_seconds: PROMOTED_STEP_SECONDS,
             fade_seconds: PROMOTED_FADE_SECONDS,
+            pinned: None,
         }),
         GradientConfig::Cycle {
             set,
             step_seconds,
             fade_seconds,
+            pinned,
         } => {
             if set.len() >= MAX_CYCLE_SET as usize {
                 return None;
             }
             let mut set = set.clone();
             set.push(gradient.clone());
+            // Appending never moves an existing member, so a pin still names
+            // the palette it named.
             Some(GradientConfig::Cycle {
                 set,
                 step_seconds: *step_seconds,
                 fade_seconds: *fade_seconds,
+                pinned: *pinned,
             })
         }
     }
@@ -691,12 +787,17 @@ pub fn with_member_added(config: &GradientConfig, gradient: &Gradient) -> Option
 /// Take the member at `index` out. Removing down to ONE member is not a
 /// one-entry cycle — the model's floor is two — so it becomes a static hold
 /// of the survivor, which is also what the gesture means.
+///
+/// The pin follows its palette: removing the pinned member unpins, and
+/// removing one ahead of it shifts the index down so it still names the
+/// same palette.
 #[must_use]
 pub fn with_member_removed(config: &GradientConfig, index: usize) -> GradientConfig {
     let GradientConfig::Cycle {
         set,
         step_seconds,
         fade_seconds,
+        pinned,
     } = config
     else {
         return config.clone();
@@ -713,6 +814,53 @@ pub fn with_member_removed(config: &GradientConfig, index: usize) -> GradientCon
             set,
             step_seconds: *step_seconds,
             fade_seconds: *fade_seconds,
+            pinned: match *pinned {
+                Some(pin) if pin == index => None,
+                Some(pin) if pin > index => Some(pin - 1),
+                other => other,
+            },
+        },
+    }
+}
+
+/// The member a cycle is pinned to, if any — what the chips light up.
+#[must_use]
+pub fn pinned_member(config: &GradientConfig) -> Option<usize> {
+    match config {
+        GradientConfig::Cycle {
+            pinned: Some(index),
+            ..
+        } if config.pinned_gradient().is_some() => Some(*index),
+        _ => None,
+    }
+}
+
+/// A chip's pin: pin the member at `index`, or unpin it when it is already
+/// the pinned one. Pinning a different member moves the pin there — there is
+/// only ever one. A static palette (nothing to pin away from) and a stale
+/// index come back unchanged.
+#[must_use]
+pub fn with_member_pin_toggled(config: &GradientConfig, index: usize) -> GradientConfig {
+    let GradientConfig::Cycle {
+        set,
+        step_seconds,
+        fade_seconds,
+        pinned,
+    } = config
+    else {
+        return config.clone();
+    };
+    if index >= set.len() {
+        return config.clone();
+    }
+    GradientConfig::Cycle {
+        set: set.clone(),
+        step_seconds: *step_seconds,
+        fade_seconds: *fade_seconds,
+        pinned: if *pinned == Some(index) {
+            None
+        } else {
+            Some(index)
         },
     }
 }
@@ -760,6 +908,7 @@ pub fn with_palette_edited(
                 set,
                 step_seconds,
                 fade_seconds,
+                pinned,
             },
             PaletteEditTarget::Member(index),
         ) => {
@@ -770,10 +919,13 @@ pub fn with_palette_edited(
                 return config.clone();
             }
             set[index] = gradient.clone();
+            // Editing a pinned member is the common case — pin it, then
+            // tune it while it is the only one showing — so the pin stays.
             GradientConfig::Cycle {
                 set,
                 step_seconds: *step_seconds,
                 fade_seconds: *fade_seconds,
+                pinned: *pinned,
             }
         }
     }
@@ -815,11 +967,15 @@ pub fn palette_identity(gradient: &Gradient, choices: &[PaletteChoice]) -> (Stri
 pub fn with_step_seconds(config: &GradientConfig, seconds: f32) -> GradientConfig {
     match config {
         GradientConfig::Cycle {
-            set, fade_seconds, ..
+            set,
+            fade_seconds,
+            pinned,
+            ..
         } => GradientConfig::Cycle {
             set: set.clone(),
             step_seconds: seconds.max(0.0),
             fade_seconds: *fade_seconds,
+            pinned: *pinned,
         },
         GradientConfig::Static(_) => config.clone(),
     }
@@ -829,11 +985,15 @@ pub fn with_step_seconds(config: &GradientConfig, seconds: f32) -> GradientConfi
 pub fn with_fade_seconds(config: &GradientConfig, seconds: f32) -> GradientConfig {
     match config {
         GradientConfig::Cycle {
-            set, step_seconds, ..
+            set,
+            step_seconds,
+            pinned,
+            ..
         } => GradientConfig::Cycle {
             set: set.clone(),
             step_seconds: *step_seconds,
             fade_seconds: seconds.max(0.0),
+            pinned: *pinned,
         },
         GradientConfig::Static(_) => config.clone(),
     }
@@ -872,6 +1032,7 @@ mod tests {
             set: (0..count).map(|i| ramp(i as f32 / 10.0)).collect(),
             step_seconds: 20.0,
             fade_seconds: 0.5,
+            pinned: None,
         }
     }
 
@@ -895,6 +1056,7 @@ mod tests {
             set,
             step_seconds,
             fade_seconds,
+            ..
         } = promoted
         else {
             panic!("adding a member makes a cycle");
@@ -919,6 +1081,7 @@ mod tests {
             set: vec![ramp(0.2), ramp(0.8)],
             step_seconds: 20.0,
             fade_seconds: 0.5,
+            pinned: None,
         };
         assert_eq!(
             with_member_removed(&two, 0),
@@ -992,12 +1155,51 @@ mod tests {
     }
 
     #[test]
+    fn a_pin_toggles_on_off_and_moves_between_members() {
+        let unpinned = cycle(4);
+        let pinned = with_member_pin_toggled(&unpinned, 2);
+        assert_eq!(pinned_member(&pinned), Some(2));
+
+        // The same pin again: gone.
+        assert_eq!(pinned_member(&with_member_pin_toggled(&pinned, 2)), None);
+
+        // Another member's pin: the pin moves, there is only ever one.
+        assert_eq!(pinned_member(&with_member_pin_toggled(&pinned, 0)), Some(0));
+
+        // Nothing to pin on a static palette, and a stale index is a no-op.
+        let held = GradientConfig::Static(ramp(0.3));
+        assert_eq!(with_member_pin_toggled(&held, 0), held);
+        assert_eq!(with_member_pin_toggled(&unpinned, 9), unpinned);
+    }
+
+    #[test]
+    fn the_pin_follows_its_palette_through_set_edits() {
+        let pinned = with_member_pin_toggled(&cycle(4), 2);
+
+        // Removing a member ahead of it shifts the index down.
+        assert_eq!(pinned_member(&with_member_removed(&pinned, 0)), Some(1));
+        // Removing one after it leaves it alone.
+        assert_eq!(pinned_member(&with_member_removed(&pinned, 3)), Some(2));
+        // Removing the pinned member itself unpins.
+        assert_eq!(pinned_member(&with_member_removed(&pinned, 2)), None);
+
+        // Add, edit, and both timings all keep it.
+        let added = with_member_added(&pinned, &ramp(0.9)).expect("room");
+        assert_eq!(pinned_member(&added), Some(2));
+        let edited = with_palette_edited(&pinned, PaletteEditTarget::Member(2), &ramp(0.7));
+        assert_eq!(pinned_member(&edited), Some(2));
+        assert_eq!(pinned_member(&with_step_seconds(&pinned, 3.0)), Some(2));
+        assert_eq!(pinned_member(&with_fade_seconds(&pinned, 0.0)), Some(2));
+    }
+
+    #[test]
     fn timing_edits_carry_the_whole_config() {
         let retimed = with_step_seconds(&cycle(3), 4.0);
         let GradientConfig::Cycle {
             set,
             step_seconds,
             fade_seconds,
+            ..
         } = retimed
         else {
             panic!("retiming keeps the kind");
@@ -1054,6 +1256,7 @@ mod tests {
             set,
             step_seconds,
             fade_seconds,
+            ..
         } = with_palette_edited(&three, PaletteEditTarget::Member(1), &ramp(0.9))
         else {
             panic!("replacing a member keeps the cycle a cycle");
