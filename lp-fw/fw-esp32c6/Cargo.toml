@@ -81,6 +81,10 @@ ws281x_telemetry = []
 #   cargo build --profile release-esp32 --features esp32c6,server,radio,frame-dump
 frame-dump = []
 
+# SPIKE (ion-wire-spike): LPBJ project-read replies. Measurement only.
+spike_lpbj = ["server", "fw-esp32-common/spike-lpbj"]
+spike_lpbj_trace = ["spike_lpbj", "fw-esp32-common/spike-lpbj-trace"]
+
 # The `render-loop` benchmark image — OFF by default, never shipped.
 #
 # The shipped server image with two additions and no substitutions: the

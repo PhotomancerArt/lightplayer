@@ -62,3 +62,22 @@ pub use lpbj_to_json::{DecodeError, decode_to_json};
 
 /// Back-reference table size per frame, shared by encoder and decoder.
 pub const MAX_BACKREFS: usize = 64;
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn cobs_in_place_matches_copying_encoder() {
+        let payload: [u8; 700] = core::array::from_fn(|i| if i % 97 == 0 { 0 } else { (i * 7) as u8 | 1 });
+        let mut a = [0u8; 800];
+        let na = crate::cobs_frame::encode(&payload, &mut a).unwrap();
+        let mut b = [0u8; 800];
+        let at = crate::cobs_frame::in_place_headroom(payload.len());
+        b[at..at + payload.len()].copy_from_slice(&payload);
+        let nb = crate::cobs_frame::encode_in_place(&mut b, at, payload.len()).unwrap();
+        assert_eq!(&a[..na], &b[..nb]);
+        assert!(na <= crate::cobs_frame::max_framed_len(payload.len()));
+        let mut back = [0u8; 800];
+        let n = crate::cobs_frame::decode(&a[2..na - 1], &mut back).unwrap();
+        assert_eq!(&back[..n], &payload[..]);
+    }
+}

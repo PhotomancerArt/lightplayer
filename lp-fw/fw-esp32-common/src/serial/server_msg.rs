@@ -117,6 +117,12 @@ pub fn serialize_server_msg(
             msg.id, detail
         )));
     }
+    #[cfg(feature = "spike-lpbj")]
+    if matches!(msg.msg, lpc_wire::server::ServerMsgBody::ProjectRead { .. })
+        && let Some(len) = spike_lpbj::serialize(msg, json_len)
+    {
+        return Ok(len);
+    }
     let mut writer = FrameBufWriter { len: 0 };
     let mut write_all = || -> Result<(), FrameBufFull> {
         writer.write(b"\nM!")?;
@@ -272,5 +278,79 @@ pub fn project_read_event_kind(event: &lpc_wire::ProjectReadEvent) -> &'static s
         },
         lpc_wire::ProjectReadEvent::End { .. } => "end",
         lpc_wire::ProjectReadEvent::Error { .. } => "error",
+    }
+}
+
+/// SPIKE (ion-wire-spike, 2026-09-23): encode a project-read reply as LPBJ,
+/// framed `00 'B' COBS 00`, straight into [`FRAME_BUF`]. Any failure returns
+/// `None` and the caller writes the JSON line as usual. Logs the retired
+/// instructions and cycles the write pass took (emulator CSRs; see the report).
+#[cfg(feature = "spike-lpbj")]
+mod spike_lpbj {
+    use super::{FRAME_BUF, SERVER_MSG_JSON_BUFFER_SIZE};
+    use ion_wire_spike::{EncodeError, Encoder, cobs_frame};
+
+    struct Sink<'e, 'b>(&'e mut Encoder<'b>);
+
+    impl ser_write_json::SerWrite for Sink<'_, '_> {
+        type Error = EncodeError;
+        fn write(&mut self, buf: &[u8]) -> Result<(), Self::Error> {
+            self.0.push(buf)
+        }
+    }
+
+    #[cfg(all(feature = "spike-lpbj-trace", target_arch = "riscv32"))]
+    fn counters() -> (u32, u32) {
+        let (i, c): (u32, u32);
+        // SAFETY: CSR reads; `minstret` exists on the emulated C6 (lp-emu) —
+        // this spike image is never flashed.
+        unsafe {
+            core::arch::asm!("csrr {0}, minstret", out(reg) i);
+            core::arch::asm!("csrr {0}, 0x7e2", out(reg) c);
+        }
+        (i, c)
+    }
+    #[cfg(all(feature = "spike-lpbj-trace", not(target_arch = "riscv32")))]
+    fn counters() -> (u32, u32) {
+        (0, 0)
+    }
+
+    pub fn serialize(msg: &lpc_wire::WireServerMessage, json_len: usize) -> Option<usize> {
+        let head = cobs_frame::in_place_headroom(json_len + 64);
+        if head + json_len + 64 > SERVER_MSG_JSON_BUFFER_SIZE {
+            return None;
+        }
+        // SAFETY: the same single-writer window as `serialize_server_msg`.
+        let buf: &mut [u8; SERVER_MSG_JSON_BUFFER_SIZE] = unsafe { &mut *core::ptr::addr_of_mut!(FRAME_BUF) };
+        // Baseline: the same serializer into a counting sink (JSON only).
+        #[cfg(feature = "spike-lpbj-trace")]
+        let (ib, cb) = counters();
+        #[cfg(feature = "spike-lpbj-trace")]
+        let _ = core::hint::black_box(lpc_wire::ser_write_json_len(msg));
+        #[cfg(feature = "spike-lpbj-trace")]
+        let (i0, c0) = counters();
+        let mut enc = Encoder::new(&mut buf[head..]);
+        lpc_wire::ser_write_json_to(&mut Sink(&mut enc), msg).ok()?;
+        let n = enc.finish().ok()?;
+        #[cfg(feature = "spike-lpbj-trace")]
+        let (i1, c1) = counters();
+        let framed = cobs_frame::encode_in_place(buf, head, n)?;
+        #[cfg(feature = "spike-lpbj-trace")]
+        let (i2, c2) = counters();
+        #[cfg(feature = "spike-lpbj-trace")]
+        log::info!(
+            "[lpbj] json={} lpbj={} framed={} json_count_insns={} json_count_cycles={} ser+enc_insns={} ser+enc_cycles={} cobs_insns={} cobs_cycles={} encoder_bytes={}",
+            json_len,
+            n,
+            framed,
+            i0.wrapping_sub(ib),
+            c0.wrapping_sub(cb),
+            i1.wrapping_sub(i0),
+            c1.wrapping_sub(c0),
+            i2.wrapping_sub(i1),
+            c2.wrapping_sub(c1),
+            core::mem::size_of::<Encoder<'static>>()
+        );
+        Some(framed)
     }
 }

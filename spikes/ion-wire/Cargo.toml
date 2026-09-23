@@ -24,3 +24,7 @@ required-features = ["std"]
 [[bin]]
 name = "lpbj-f32-sweep"
 required-features = ["std"]
+
+[[bin]]
+name = "lpbj-stream"
+required-features = ["std"]

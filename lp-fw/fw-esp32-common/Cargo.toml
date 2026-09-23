@@ -15,6 +15,7 @@ workspace = true
 # .cargo/config.toml, no panic-strategy assumptions. Chip facts arrive by injection
 # (memory-stats fn, RMT RAM base, flash Storage impl, manifest fallback).
 [dependencies]
+ion-wire-spike = { path = "../../spikes/ion-wire", optional = true }
 fw-core = { path = "../fw-core", default-features = false }
 lp-collection = { workspace = true, features = ["serde"] }
 lpc-hardware = { path = "../../lp-core/lpc-hardware", default-features = false }
@@ -55,4 +56,8 @@ ser-write-json = { version = "0.3", optional = true, default-features = false, f
 
 [features]
 default = []
+# SPIKE (ion-wire-spike, 2026-09-23): project-read replies leave as LPBJ+COBS
+# instead of `M!{json}` lines. Measurement only; never in a default build.
+spike-lpbj = ["server", "dep:ion-wire-spike"]
+spike-lpbj-trace = ["spike-lpbj"]
 server = ["dep:littlefs-rust", "dep:lp-recovery", "dep:lpa-server", "dep:lpc-model", "dep:lpc-wire", "dep:lpfs", "dep:ser-write-json"]

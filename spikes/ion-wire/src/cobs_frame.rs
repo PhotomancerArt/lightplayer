@@ -6,8 +6,9 @@
 //! after a torn write (the reader resyncs at the next NUL). `'B'` leaves room
 //! for other frame kinds. Overhead: 3 bytes + 1 per 254 payload bytes.
 
-/// Encoded size of a payload of `n` bytes, framing included.
-pub fn framed_len(n: usize) -> usize {
+/// Worst-case framed size of an `n`-byte payload (exact when the payload has
+/// no NUL within any 254-byte run).
+pub fn max_framed_len(n: usize) -> usize {
     3 + n + n / 254 + 1
 }
 
@@ -68,4 +69,45 @@ pub fn decode(body: &[u8], out: &mut [u8]) -> Option<usize> {
         }
     }
     Some(w)
+}
+
+/// Where to place a payload of at most `max_payload` bytes so that
+/// [`encode_in_place`] can frame it forward into the same buffer from offset 0.
+pub fn in_place_headroom(max_payload: usize) -> usize {
+    4 + max_payload / 254
+}
+
+/// Frame `buf[src_at..src_at + n]` into `buf[0..]` in place. `src_at` must be at
+/// least [`in_place_headroom`]`(n)`: the writer then never overtakes the reader.
+pub fn encode_in_place(buf: &mut [u8], src_at: usize, n: usize) -> Option<usize> {
+    if src_at < in_place_headroom(n) || src_at + n > buf.len() {
+        return None;
+    }
+    buf[0] = 0;
+    buf[1] = b'B';
+    let mut code_at = 2;
+    let mut w = 3;
+    let mut code: u8 = 1;
+    for r in src_at..src_at + n {
+        let b = buf[r];
+        if b == 0 {
+            buf[code_at] = code;
+            code_at = w;
+            w += 1;
+            code = 1;
+        } else {
+            buf[w] = b;
+            w += 1;
+            code += 1;
+            if code == 0xFF {
+                buf[code_at] = code;
+                code_at = w;
+                w += 1;
+                code = 1;
+            }
+        }
+    }
+    buf[code_at] = code;
+    *buf.get_mut(w)? = 0;
+    Some(w + 1)
 }
