@@ -1,4 +1,4 @@
-//! Caller-owned state for [`crate::LpGraphics::read_back_latent`].
+//! Caller-owned state for [`crate::LatentReadBackSource::read_back_latent`].
 
 use alloc::boxed::Box;
 use core::any::Any;

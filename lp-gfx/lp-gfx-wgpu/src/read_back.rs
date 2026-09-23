@@ -14,7 +14,7 @@
 //!   consumer that needs bytes — does not come through here: the sample pass
 //!   keeps its own one-frame-latency `map_async` pipeline (see
 //!   [`crate::sample_pass`]). The wire probe's texture previews take the
-//!   same shape for a whole texture (`LpGraphics::read_back_latent`, the
+//!   same shape for a whole texture (`LatentReadBackSource`, the
 //!   `latent_read_back` module): one probe late. The one-shot on-demand
 //!   consumer (gallery poster capture) uses [`read_back_texture_async`]
 //!   instead: submit now, `await` the map on the worker's event loop.

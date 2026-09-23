@@ -200,6 +200,12 @@ impl BrowserFirmwareRuntime {
         // batching/refusal code path the device runs, so budget regressions
         // surface in browser CI instead of on silicon.
         server.set_project_read_frame_budget(Some(HOST_LINK_FRAME_BUDGET_BYTES));
+        // GPU tier: render products stay GPU-resident (the browser cannot
+        // block on a buffer map), so texture previews read back one probe
+        // late through the backend's latent pipeline instead of refusing.
+        if let Some(state) = &gpu {
+            server.set_latent_read_back(Some(state.graphics.clone()));
+        }
         // Wire hello identity (sans-IO: injected here). Browser runtimes
         // carry no git provenance or stamped identity; the hello's
         // capability half comes from the constructor above.

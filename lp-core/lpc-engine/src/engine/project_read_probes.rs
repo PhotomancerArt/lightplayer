@@ -142,9 +142,10 @@ impl Engine {
         }
     }
 
-    /// Bytes for a GPU-resident probe texture through the backend's latent
+    /// Bytes for a GPU-resident probe texture through the injected latent
     /// readback: the most recent landed frame of this read site and the
-    /// revision it was rendered at, or `None` while none has landed.
+    /// revision it was rendered at, or `None` while none has landed — or
+    /// when the host injected no source at all.
     fn read_back_gpu_resident(
         &mut self,
         product: VisualProduct,
@@ -152,28 +153,28 @@ impl Engine {
         space: VisualSpace,
         policy: ConsumerPolicy,
     ) -> Result<Option<(Vec<u8>, Revision)>, String> {
-        let graphics = self
-            .graphics()
-            .cloned()
-            .ok_or_else(|| String::from("GPU-resident product on an engine without graphics"))?;
+        let tag = self.revision().0 as u64;
+        let Some(probe_read_backs) = self.probe_read_backs.as_deref_mut() else {
+            return Ok(None);
+        };
         let handle = texture.gpu_handle().ok_or_else(|| {
             String::from("render produced a texture with neither host bytes nor GPU handle")
         })?;
-        let tag = self.revision().0 as u64;
-        let site = self.probe_read_backs.site(ProbeReadBackKey {
+        let Some((source, site)) = probe_read_backs.source_and_site(ProbeReadBackKey {
             product,
             width: texture.width(),
             height: texture.height(),
             space,
             policy,
-        });
-        let mut bytes = vec![
-            0u8;
-            texture.width() as usize
-                * texture.height() as usize
-                * texture.storage_format().bytes_per_pixel()
-        ];
-        let served = graphics
+        }) else {
+            return Ok(None);
+        };
+        // The source sizes the buffer. Calling `bytes_per_pixel` here
+        // linked its lowered lookup table (`[8, 6, 2]`) into `.data` on the
+        // Xtensa images — 16 B of DRAM off the classic's pinned main stack
+        // for a path a device never takes.
+        let mut bytes = Vec::new();
+        let served = source
             .read_back_latent(handle, site, tag, &mut bytes)
             .map_err(|error| format!("probe read back: {error}"))?;
         Ok(served.map(|served| (bytes, Revision(served as i64))))

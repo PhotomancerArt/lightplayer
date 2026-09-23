@@ -3,9 +3,9 @@
 use std::sync::{Arc, OnceLock};
 
 use lp_gfx::{
-    GfxError, HandleAllocator, HandleBacking, LpComputeShader, LpGraphics, LpShader,
-    SampleOutHandle, SamplePointsHandle, ShaderCompileOptions, ShaderSemantics, TextureData,
-    TextureHandle,
+    GfxError, HandleAllocator, HandleBacking, LatentReadBack, LatentReadBackSource,
+    LpComputeShader, LpGraphics, LpShader, SampleOutHandle, SamplePointsHandle,
+    ShaderCompileOptions, ShaderSemantics, TextureData, TextureHandle,
 };
 use lps_shared::{LpsTexture2DDescriptor, LpsTexture2DValue, LpsValueF32, TextureStorageFormat};
 
@@ -374,30 +374,6 @@ impl LpGraphics for GpuGraphics {
         Ok(())
     }
 
-    /// Browser tier: one frame late, never blocking
-    /// ([`crate::latent_read_back`]). Native keeps the trait's default, the
-    /// blocking [`Self::read_back_into`] — fresh bytes every call.
-    #[cfg(target_arch = "wasm32")]
-    fn read_back_latent(
-        &self,
-        texture: &TextureHandle,
-        state: &mut lp_gfx::LatentReadBack,
-        tag: u64,
-        out: &mut [u8],
-    ) -> Result<Option<u64>, GfxError> {
-        crate::latent_read_back::read_back_latent(
-            &self.shared.device,
-            &self.shared.queue,
-            gpu_texture(texture)?,
-            texture.width(),
-            texture.height(),
-            texture.format(),
-            state,
-            tag,
-            out,
-        )
-    }
-
     /// Native wgpu can block on a buffer map; the browser tier cannot, so
     /// render products stay GPU-resident there (fidelity-tiers ADR — the
     /// probe edge surfaces the residency instead of an error string).
@@ -495,6 +471,46 @@ pub(crate) struct GpuShared {
     /// Live texture id → view map for texture uniform resolution
     /// (see [`crate::texture_registry`]).
     pub(crate) textures: TextureRegistry,
+}
+
+/// The browser tier's latent readback — the only backend whose render
+/// products stay GPU-resident, and so the only one a host hands the engine
+/// as a [`LatentReadBackSource`].
+impl LatentReadBackSource for GpuGraphics {
+    /// Browser: one frame late, never blocking ([`crate::latent_read_back`]).
+    #[cfg(target_arch = "wasm32")]
+    fn read_back_latent(
+        &self,
+        texture: &TextureHandle,
+        state: &mut LatentReadBack,
+        tag: u64,
+        out: &mut Vec<u8>,
+    ) -> Result<Option<u64>, GfxError> {
+        crate::latent_read_back::read_back_latent(
+            &self.shared.device,
+            &self.shared.queue,
+            gpu_texture(texture)?,
+            texture.width(),
+            texture.height(),
+            texture.format(),
+            state,
+            tag,
+            out,
+        )
+    }
+
+    /// Native can block on a map, so it answers this call's own frame.
+    #[cfg(not(target_arch = "wasm32"))]
+    fn read_back_latent(
+        &self,
+        texture: &TextureHandle,
+        _state: &mut LatentReadBack,
+        tag: u64,
+        out: &mut Vec<u8>,
+    ) -> Result<Option<u64>, GfxError> {
+        *out = self.read_back(texture)?.into_bytes();
+        Ok(Some(tag))
+    }
 }
 
 impl HandleAllocator for GpuShared {
@@ -949,21 +965,23 @@ void tick() {
             .expect("texture");
         let mut state = lp_gfx::LatentReadBack::new();
         let mut out = vec![0u8; first.len()];
-        let latent =
-            |state: &mut lp_gfx::LatentReadBack, texture: &TextureHandle, tag, out: &mut [u8]| {
-                crate::latent_read_back::read_back_latent(
-                    &graphics.shared.device,
-                    &graphics.shared.queue,
-                    gpu_texture(texture).expect("gpu texture"),
-                    texture.width(),
-                    texture.height(),
-                    texture.format(),
-                    state,
-                    tag,
-                    out,
-                )
-                .expect("latent read back")
-            };
+        let latent = |state: &mut lp_gfx::LatentReadBack,
+                      texture: &TextureHandle,
+                      tag,
+                      out: &mut Vec<u8>| {
+            crate::latent_read_back::read_back_latent(
+                &graphics.shared.device,
+                &graphics.shared.queue,
+                gpu_texture(texture).expect("gpu texture"),
+                texture.width(),
+                texture.height(),
+                texture.format(),
+                state,
+                tag,
+                out,
+            )
+            .expect("latent read back")
+        };
         let settle = || {
             graphics
                 .shared

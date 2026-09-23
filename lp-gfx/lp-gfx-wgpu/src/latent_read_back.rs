@@ -1,4 +1,4 @@
-//! The browser tier's [`lp_gfx::LpGraphics::read_back_latent`]: whole-texture
+//! The browser tier's [`lp_gfx::LatentReadBackSource`]: whole-texture
 //! readback one frame late.
 //!
 //! The same shape as the sample pass's pipeline (`crate::sample_pass`, ADR
@@ -12,7 +12,7 @@
 //! 3. serves the most recent landed frame, tagged with the tag it was
 //!    issued under — or nothing, until the first one lands.
 //!
-//! Native keeps the trait's synchronous default: it can block on a map.
+//! Native answers synchronously (`GpuGraphics`'s impl): it can block on a map.
 
 use std::sync::{Arc, Mutex};
 
@@ -53,15 +53,8 @@ pub(crate) fn read_back_latent(
     format: TextureStorageFormat,
     state: &mut LatentReadBack,
     tag: u64,
-    out: &mut [u8],
+    out: &mut Vec<u8>,
 ) -> Result<Option<u64>, GfxError> {
-    let expected = width as usize * height as usize * format.bytes_per_pixel();
-    if out.len() != expected {
-        return Err(GfxError::Backend(format!(
-            "latent read_back bytes: expected {expected}, got {}",
-            out.len()
-        )));
-    }
     let reusable = state
         .backing_mut()
         .and_then(|staged| staged.downcast_mut::<Staging>())
@@ -81,7 +74,8 @@ pub(crate) fn read_back_latent(
         staging.issue(device, queue, backing, tag);
     }
     Ok(staging.last.as_ref().map(|(bytes, served)| {
-        out.copy_from_slice(bytes);
+        out.clear();
+        out.extend_from_slice(bytes);
         *served
     }))
 }

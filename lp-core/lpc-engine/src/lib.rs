@@ -45,5 +45,5 @@ pub use features::supported_features;
 // by hosts, injected via `Engine::set_graphics`). `ShaderFrontend` is the
 // host's explicit GLSL-frontend product decision, passed when constructing
 // the backend.
-pub use lp_gfx::{GfxError, LpGraphics, LpShader, ShaderCompileOptions};
+pub use lp_gfx::{GfxError, LatentReadBackSource, LpGraphics, LpShader, ShaderCompileOptions};
 pub use lp_shader::ShaderFrontend;

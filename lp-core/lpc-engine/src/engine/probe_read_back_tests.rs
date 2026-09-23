@@ -6,9 +6,10 @@
 //! [`lp_gfx::LpGraphics::supports_read_back`] with `false`, so
 //! `ShaderNode::render_texture` keeps its render target GPU-resident
 //! (`shader_node.rs`'s `TextureRenderProduct::gpu_resident`) exactly the way
-//! the browser GPU tier does. Its [`lp_gfx::LpGraphics::read_back_latent`]
-//! simulates that tier's one-probe-late pipeline: read synchronously, stage
-//! it, and hand back whatever was staged from the *previous* call.
+//! the browser GPU tier does. Its [`LatentReadBackSource`] impl, injected
+//! with `Engine::set_latent_read_back`, simulates that tier's one-probe-late
+//! pipeline: read synchronously, stage it, and hand back whatever was staged
+//! from the *previous* call.
 
 extern crate std;
 
@@ -17,8 +18,9 @@ use alloc::sync::Arc;
 use alloc::vec::Vec;
 
 use lp_gfx::{
-    GfxError, LatentReadBack, LpComputeShader, LpGraphics, LpShader, SampleOutHandle,
-    SamplePointsHandle, ShaderCompileOptions, ShaderSemantics, TextureData, TextureHandle,
+    GfxError, LatentReadBack, LatentReadBackSource, LpComputeShader, LpGraphics, LpShader,
+    SampleOutHandle, SamplePointsHandle, ShaderCompileOptions, ShaderSemantics, TextureData,
+    TextureHandle,
 };
 use lpc_model::{ArtifactLocation, LpValue, NodeDefLocation, NodeId, ProductRef, TreePath};
 use lpc_wire::{
@@ -42,10 +44,10 @@ use crate::products::visual::VisualProduct;
 /// is exactly one probe, not "eventually catches up".
 #[test]
 fn gpu_resident_probe_serves_the_previous_frame_one_probe_late() {
-    let graphics: Arc<dyn LpGraphics> = Arc::new(LatentGraphics {
+    let graphics = Arc::new(LatentGraphics {
         inner: lp_gfx_lpvm::TargetLpvmGraphics::new(lp_shader::ShaderFrontend::LpsGlsl),
     });
-    let (rt, product) = load_warmed_basic(graphics);
+    let (rt, product) = load_warmed_basic(graphics.clone(), Some(graphics));
     let (mut engine, registry) = rt.into_parts();
 
     let revision_at_probe_1 = engine.revision();
@@ -125,15 +127,34 @@ fn gpu_resident_probe_serves_the_previous_frame_one_probe_late() {
     }
 }
 
-/// The CPU tier (`supports_read_back() == true`, the trait's synchronous
-/// default) is unchanged by the latent pipeline: the very first probe
-/// already answers `Texture` at the engine's current revision.
+/// With no source injected — every device, and any host that never wires
+/// one — a GPU-resident product keeps answering `GpuResident`: the engine
+/// has nowhere to read it from, and says so rather than guessing.
+#[test]
+fn gpu_resident_probe_without_an_injected_source_stays_gpu_resident() {
+    let graphics = Arc::new(LatentGraphics {
+        inner: lp_gfx_lpvm::TargetLpvmGraphics::new(lp_shader::ShaderFrontend::LpsGlsl),
+    });
+    let (mut rt, product) = load_warmed_basic(graphics, None);
+    for _ in 0..3 {
+        let (engine, registry) = rt.read_parts();
+        match probe_once(engine, registry, render_product_request(product)) {
+            RenderProductProbeResult::GpuResident { .. } => {}
+            other => panic!("no source, no bytes: expected GpuResident, got {other:?}"),
+        }
+        rt.tick(40).expect("tick");
+    }
+}
+
+/// The CPU tier (`supports_read_back() == true`) never reaches the latent
+/// pipeline: the very first probe already answers `Texture` at the
+/// engine's current revision.
 #[test]
 fn cpu_tier_probe_answers_texture_on_the_first_call() {
     let graphics: Arc<dyn LpGraphics> = Arc::new(lp_gfx_lpvm::TargetLpvmGraphics::new(
         lp_shader::ShaderFrontend::LpsGlsl,
     ));
-    let (rt, product) = load_warmed_basic(graphics);
+    let (rt, product) = load_warmed_basic(graphics, None);
     let (mut engine, registry) = rt.into_parts();
 
     let current_revision = engine.revision();
@@ -160,7 +181,7 @@ fn cpu_tier_probe_answers_texture_on_the_first_call() {
     }
 }
 
-/// A `read_back_latent` backend, one call behind: the bytes and tag staged
+/// A [`LatentReadBackSource`] frame, one call behind: the bytes and tag staged
 /// by a call are handed back on the *next* one.
 struct StagedFrame {
     bytes: Vec<u8>,
@@ -169,8 +190,8 @@ struct StagedFrame {
 
 /// Forwards every [`LpGraphics`] method to a real backend except
 /// [`LpGraphics::supports_read_back`] (`false`, so render products stay
-/// GPU-resident) and [`LpGraphics::read_back_latent`] (a one-probe-late
-/// staging pipeline instead of the trait's synchronous default).
+/// GPU-resident), and is also a [`LatentReadBackSource`] (a one-probe-late
+/// staging pipeline) for the tests that inject it.
 struct LatentGraphics {
     inner: lp_gfx_lpvm::TargetLpvmGraphics,
 }
@@ -251,32 +272,6 @@ impl LpGraphics for LatentGraphics {
         self.inner.read_back_into(texture, out)
     }
 
-    /// One-probe-late: read the current frame synchronously, stage it, and
-    /// hand back whatever the *previous* call staged (or `None` on the
-    /// first call at this read site).
-    fn read_back_latent(
-        &self,
-        texture: &TextureHandle,
-        state: &mut LatentReadBack,
-        tag: u64,
-        out: &mut [u8],
-    ) -> Result<Option<u64>, GfxError> {
-        let mut fresh = alloc::vec![0u8; out.len()];
-        self.inner.read_back_into(texture, &mut fresh)?;
-        let previous = state
-            .backing_mut()
-            .and_then(|backing| backing.downcast_mut::<StagedFrame>())
-            .map(|staged| (core::mem::take(&mut staged.bytes), staged.tag));
-        state.set_backing(Box::new(StagedFrame { bytes: fresh, tag }));
-        match previous {
-            Some((bytes, served_tag)) => {
-                out.copy_from_slice(&bytes);
-                Ok(Some(served_tag))
-            }
-            None => Ok(None),
-        }
-    }
-
     fn supports_read_back(&self) -> bool {
         false
     }
@@ -338,6 +333,33 @@ impl LpGraphics for LatentGraphics {
 
     fn sample_batch_capacity(&self) -> u32 {
         self.inner.sample_batch_capacity()
+    }
+}
+
+impl LatentReadBackSource for LatentGraphics {
+    /// One-probe-late: read the current frame synchronously, stage it, and
+    /// hand back whatever the *previous* call staged (or `None` on the
+    /// first call at this read site).
+    fn read_back_latent(
+        &self,
+        texture: &TextureHandle,
+        state: &mut LatentReadBack,
+        tag: u64,
+        out: &mut Vec<u8>,
+    ) -> Result<Option<u64>, GfxError> {
+        let fresh = self.inner.read_back(texture)?.into_bytes();
+        let previous = state
+            .backing_mut()
+            .and_then(|backing| backing.downcast_mut::<StagedFrame>())
+            .map(|staged| (core::mem::take(&mut staged.bytes), staged.tag));
+        state.set_backing(Box::new(StagedFrame { bytes: fresh, tag }));
+        match previous {
+            Some((bytes, served_tag)) => {
+                *out = bytes;
+                Ok(Some(served_tag))
+            }
+            None => Ok(None),
+        }
     }
 }
 
@@ -414,11 +436,15 @@ fn probe_once(
 /// and renders — see `compile_window_broadcasts_pressure_before_the_boot_compile`
 /// in `project_loader.rs`). Returns the loaded runtime and the shader's
 /// output product.
-fn load_warmed_basic(graphics: Arc<dyn LpGraphics>) -> (LoadedProjectRuntime, VisualProduct) {
+fn load_warmed_basic(
+    graphics: Arc<dyn LpGraphics>,
+    latent: Option<Arc<dyn LatentReadBackSource>>,
+) -> (LoadedProjectRuntime, VisualProduct) {
     let fs = examples_basic_fs();
     let services = EngineServices::new(TreePath::parse("/basic.show").expect("root path"));
     let mut rt = ProjectLoader::load_from_root(&fs, services).expect("load projects/test/basic");
     rt.set_graphics(Some(graphics));
+    rt.engine_mut().set_latent_read_back(latent);
 
     let shader = node_for_def_path(&rt, "/shader.json");
     rt.tick(40).expect("tick 1: compile window request");
@@ -427,5 +453,3 @@ fn load_warmed_basic(graphics: Arc<dyn LpGraphics>) -> (LoadedProjectRuntime, Vi
     let product = shader_visual_product(&mut rt, shader);
     (rt, product)
 }
-
-// ---- tests ------------------------------------------------------------------

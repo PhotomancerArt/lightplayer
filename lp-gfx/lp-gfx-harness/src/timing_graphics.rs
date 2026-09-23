@@ -109,16 +109,6 @@ impl LpGraphics for TimingGraphics {
         self.inner.read_back_into(texture, out)
     }
 
-    fn read_back_latent(
-        &self,
-        texture: &TextureHandle,
-        state: &mut lp_gfx::LatentReadBack,
-        tag: u64,
-        out: &mut [u8],
-    ) -> Result<Option<u64>, GfxError> {
-        self.inner.read_back_latent(texture, state, tag, out)
-    }
-
     fn supports_read_back(&self) -> bool {
         self.inner.supports_read_back()
     }

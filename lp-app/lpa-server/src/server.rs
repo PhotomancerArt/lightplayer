@@ -903,6 +903,20 @@ impl LpServer {
         Ok(handle)
     }
 
+    /// Inject (or clear) the latent readback for a graphics backend whose
+    /// render products stay GPU-resident — the browser GPU tier, which cannot
+    /// block on a buffer map. Every loaded and future project's engine gets
+    /// it, so a texture probe answers one read late instead of
+    /// `GpuResident`. Behind the `latent-read-back` feature: device images
+    /// never carry the stored source (see the feature's note).
+    #[cfg(feature = "latent-read-back")]
+    pub fn set_latent_read_back(
+        &mut self,
+        source: Option<Arc<dyn lpc_engine::LatentReadBackSource>>,
+    ) {
+        self.project_manager.set_latent_read_back(source);
+    }
+
     /// Set (or clear) the device-level safe-mode output ceiling and apply it
     /// to every loaded project's engine. Future loads inherit it too.
     pub fn set_safe_output_clamp(&mut self, level: Option<u8>) {

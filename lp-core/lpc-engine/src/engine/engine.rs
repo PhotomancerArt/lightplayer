@@ -141,10 +141,12 @@ pub struct Engine {
     /// What outputs do while [`Self::project_fault`] is set (D2). Engine
     /// state, default `Pattern`, not persisted anywhere.
     fault_presentation: FaultPresentation,
-    /// Render-product probe readback state for backends whose products
-    /// stay GPU-resident (the browser GPU tier): the previous probe's
-    /// bytes, served one read late. Empty on every CPU backend.
-    pub(super) probe_read_backs: super::probe_read_backs::ProbeReadBacks,
+    /// Render-product probe readback for backends whose products stay
+    /// GPU-resident (the browser GPU tier): the injected source and its
+    /// read sites, serving the previous probe's bytes one read late. `None`
+    /// unless the host injected a source — always, on a device — and boxed
+    /// so that costs the engine one pointer.
+    pub(super) probe_read_backs: Option<alloc::boxed::Box<super::probe_read_backs::ProbeReadBacks>>,
     /// The tree shape and resolver epoch as of the last tick, so that a
     /// structural change that forgot to invalidate resolution is caught here
     /// rather than by someone noticing a stale value on a device.
@@ -184,7 +186,7 @@ impl Engine {
             project_fault: None,
             project_fault_fingerprint: None,
             fault_presentation: FaultPresentation::default(),
-            probe_read_backs: super::probe_read_backs::ProbeReadBacks::new(),
+            probe_read_backs: None,
             #[cfg(debug_assertions)]
             last_structural_check: None,
         }
@@ -480,7 +482,20 @@ impl Engine {
     pub fn set_graphics(&mut self, graphics: Option<Arc<dyn LpGraphics>>) {
         self.graphics = graphics;
         // Staging state belongs to the backend that built it.
-        self.probe_read_backs.clear();
+        if let Some(probe_read_backs) = &mut self.probe_read_backs {
+            probe_read_backs.clear();
+        }
+    }
+
+    /// Inject (or clear) the latent readback the render-product probe uses
+    /// when a render product stays GPU-resident — the browser GPU tier's
+    /// backend, which cannot block on a buffer map. Without one, such a
+    /// probe answers `GpuResident`. A host whose backend reads back
+    /// synchronously never calls this.
+    pub fn set_latent_read_back(&mut self, source: Option<Arc<dyn lp_gfx::LatentReadBackSource>>) {
+        self.probe_read_backs = source.map(|source| {
+            alloc::boxed::Box::new(super::probe_read_backs::ProbeReadBacks::new(source))
+        });
     }
 
     /// Set (or clear) the device-level safe-mode output ceiling.
