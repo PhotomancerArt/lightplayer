@@ -4075,8 +4075,8 @@ fwtest-espnow-esp32c6: install-rv32-target
 
 # BLE spike (vision `ble-remote-control`): advertise as `LP-BLE-xxxx`, echo
 # over a Nordic-UART-shaped GATT service, print heap per bring-up stage.
-# Talk to it with nRF Connect on a phone, or `scripts/ble/nus-probe.py` on
-# the Mac. Pass the port explicitly (resolve by MAC with
+# Talk to it with nRF Connect on a phone, or through `spikes/ble-lab/` (a page
+# that holds the BLE link, driven over HTTP) from the Mac. Pass the port explicitly (resolve by MAC with
 # `scripts/emu/board-port.py --list`) when more than one C6 is attached.
 fwtest-ble-esp32c6 port="": install-rv32-target
     #!/usr/bin/env bash
