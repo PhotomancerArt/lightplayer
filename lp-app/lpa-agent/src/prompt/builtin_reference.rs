@@ -146,8 +146,14 @@ mod tests {
 
     #[test]
     fn signature_name_is_the_identifier() {
-        assert_eq!(signature_name("vec3 lpfn_hsv2rgb(vec3 hsv)"), "lpfn_hsv2rgb");
-        assert_eq!(signature_name("uint lpfn_hash(uvec2 xy, uint seed)"), "lpfn_hash");
+        assert_eq!(
+            signature_name("vec3 lpfn_hsv2rgb(vec3 hsv)"),
+            "lpfn_hsv2rgb"
+        );
+        assert_eq!(
+            signature_name("uint lpfn_hash(uvec2 xy, uint seed)"),
+            "lpfn_hash"
+        );
     }
 
     #[test]
