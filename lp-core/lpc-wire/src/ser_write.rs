@@ -38,6 +38,8 @@ impl core::fmt::Display for ErasedWriteError {
 /// is a single type regardless of the underlying writer.
 trait DynSink {
     fn write_all(&mut self, buf: &[u8]) -> Result<(), ErasedWriteError>;
+    /// SPIKE (ion-wire F1): forward a structural token; `false` = write text.
+    fn token(&mut self, token: ser_write_json::ser_write::Token<'_>) -> Result<bool, ErasedWriteError>;
 }
 
 /// Adapts any [`SerWrite`] into a [`DynSink`]. This *is* generic, but it
@@ -49,11 +51,18 @@ impl<W: SerWrite> DynSink for SinkOf<'_, W> {
     fn write_all(&mut self, buf: &[u8]) -> Result<(), ErasedWriteError> {
         self.0.write(buf).map_err(|_| ErasedWriteError)
     }
+
+    fn token(&mut self, token: ser_write_json::ser_write::Token<'_>) -> Result<bool, ErasedWriteError> {
+        self.0.token(token).map_err(|_| ErasedWriteError)
+    }
 }
 
 /// The single [`SerWrite`] type the JSON serializer is ever instantiated over.
 struct ErasedSerWrite<'a> {
     sink: &'a mut dyn DynSink,
+    /// SPIKE (ion-wire F1): the sink's `TAKES_TOKENS`, so a JSON sink pays a
+    /// branch per token instead of two virtual calls.
+    takes_tokens: bool,
 }
 
 impl SerWrite for ErasedSerWrite<'_> {
@@ -61,6 +70,14 @@ impl SerWrite for ErasedSerWrite<'_> {
 
     fn write(&mut self, buf: &[u8]) -> Result<(), Self::Error> {
         self.sink.write_all(buf)
+    }
+
+    #[inline]
+    fn token(&mut self, token: ser_write_json::ser_write::Token<'_>) -> Result<bool, Self::Error> {
+        if !self.takes_tokens {
+            return Ok(false);
+        }
+        self.sink.token(token)
     }
 }
 
@@ -83,7 +100,7 @@ pub fn ser_write_json_to<W: SerWrite, T: Serialize + ?Sized>(
     value: &T,
 ) -> Result<(), ErasedWriteError> {
     let mut adapter = SinkOf(sink);
-    let mut erased = ErasedSerWrite { sink: &mut adapter };
+    let mut erased = ErasedSerWrite { sink: &mut adapter, takes_tokens: W::TAKES_TOKENS };
     to_writer(&mut erased, value).map_err(|_| ErasedWriteError)
 }
 

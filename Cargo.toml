@@ -507,6 +507,9 @@ opt-level = 3
 # spans it reclaims once both cores are up) and `add_region` panics past the
 # cap. See third_party/esp-alloc/README-LP.md.
 esp-alloc = { path = "third_party/esp-alloc" }
+# SPIKE (ion-wire-spike F1): ser-write 0.3.1 + a provided `SerWrite::token`
+# hook. See third_party/ser-write/README-LP.md.
+ser-write = { path = "third_party/ser-write" }
 esp-storage = { path = "third_party/esp-storage" }
 # esp-hal 1.1.1 fork: `#[ram]` on the three helpers the `#[ram]` Xtensa
 # level-1/2/3 interrupt entries call on every peripheral interrupt

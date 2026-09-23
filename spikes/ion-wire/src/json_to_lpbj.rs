@@ -93,6 +93,27 @@ impl<'a> Encoder<'a> {
         }
     }
 
+    /// Continue an existing frame: write from `start` in `out`, with the
+    /// frame's back-reference table so far (F1: raw JSON inside a token frame).
+    pub(crate) fn continuing(
+        out: &'a mut [u8],
+        start: usize,
+        backrefs: [(u32, u16); MAX_BACKREFS],
+        backref_count: usize,
+    ) -> Self {
+        let mut e = Self::new(out);
+        e.len = start;
+        e.backrefs = backrefs;
+        e.backref_count = backref_count;
+        e
+    }
+
+    /// [`Encoder::finish`], also handing back the back-reference table.
+    pub(crate) fn finish_parts(self) -> Result<(usize, [(u32, u16); MAX_BACKREFS], usize), EncodeError> {
+        let (b, c) = (self.backrefs, self.backref_count);
+        self.finish().map(|n| (n, b, c))
+    }
+
     /// Feed the next slice of JSON text.
     pub fn push(&mut self, bytes: &[u8]) -> Result<(), EncodeError> {
         if let Some(e) = self.failed {

@@ -288,10 +288,14 @@ pub fn project_read_event_kind(event: &lpc_wire::ProjectReadEvent) -> &'static s
 #[cfg(feature = "spike-lpbj")]
 mod spike_lpbj {
     use super::{FRAME_BUF, SERVER_MSG_JSON_BUFFER_SIZE};
-    use ion_wire_spike::{EncodeError, Encoder, cobs_frame};
+    use ion_wire_spike::cobs_frame;
+    #[cfg(not(feature = "spike-lpbj-tokens"))]
+    use ion_wire_spike::{EncodeError, Encoder};
 
+    #[cfg(not(feature = "spike-lpbj-tokens"))]
     struct Sink<'e, 'b>(&'e mut Encoder<'b>);
 
+    #[cfg(not(feature = "spike-lpbj-tokens"))]
     impl ser_write_json::SerWrite for Sink<'_, '_> {
         type Error = EncodeError;
         fn write(&mut self, buf: &[u8]) -> Result<(), Self::Error> {
@@ -329,9 +333,19 @@ mod spike_lpbj {
         let _ = core::hint::black_box(lpc_wire::ser_write_json_len(msg));
         #[cfg(feature = "spike-lpbj-trace")]
         let (i0, c0) = counters();
-        let mut enc = Encoder::new(&mut buf[head..]);
-        lpc_wire::ser_write_json_to(&mut Sink(&mut enc), msg).ok()?;
-        let n = enc.finish().ok()?;
+        #[cfg(not(feature = "spike-lpbj-tokens"))]
+        let n = {
+            let mut enc = Encoder::new(&mut buf[head..]);
+            lpc_wire::ser_write_json_to(&mut Sink(&mut enc), msg).ok()?;
+            enc.finish().ok()?
+        };
+        // F1: the serializer hands the sink its tokens; no JSON text is made.
+        #[cfg(feature = "spike-lpbj-tokens")]
+        let n = {
+            let mut enc = ion_wire_spike::TokenEncoder::new(&mut buf[head..]);
+            lpc_wire::ser_write_json_to(&mut enc, msg).ok()?;
+            enc.len()
+        };
         #[cfg(feature = "spike-lpbj-trace")]
         let (i1, c1) = counters();
         let framed = cobs_frame::encode_in_place(buf, head, n)?;
@@ -349,7 +363,7 @@ mod spike_lpbj {
             c1.wrapping_sub(c0),
             i2.wrapping_sub(i1),
             c2.wrapping_sub(c1),
-            core::mem::size_of::<Encoder<'static>>()
+            core::mem::size_of::<ion_wire_spike::TokenEncoder<'static>>().max(core::mem::size_of::<ion_wire_spike::Encoder<'static>>())
         );
         Some(framed)
     }

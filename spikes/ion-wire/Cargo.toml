@@ -12,10 +12,13 @@ workspace = true
 [features]
 default = []
 # Host tools: the corpus runner and the f32 sweep.
-std = ["dep:ryu-js"]
+std = ["dep:lpc-wire", "dep:serde"]
 
 [dependencies]
-ryu-js = { version = "1.0", default-features = false, optional = true }
+ryu-js = { version = "1.0", default-features = false }
+ser-write = { version = "0.3", default-features = false }
+serde = { workspace = true, optional = true }
+lpc-wire = { path = "../../lp-core/lpc-wire", optional = true, features = ["std", "ser-write-json"] }
 
 [[bin]]
 name = "lpbj-corpus"
@@ -31,4 +34,8 @@ required-features = ["std"]
 
 [[bin]]
 name = "lpbj-bench"
+required-features = ["std"]
+
+[[bin]]
+name = "lpbj-tokens-corpus"
 required-features = ["std"]

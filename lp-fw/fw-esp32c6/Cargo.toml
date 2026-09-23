@@ -84,6 +84,7 @@ frame-dump = []
 # SPIKE (ion-wire-spike): LPBJ project-read replies. Measurement only.
 spike_lpbj = ["server", "fw-esp32-common/spike-lpbj"]
 spike_lpbj_trace = ["spike_lpbj", "fw-esp32-common/spike-lpbj-trace"]
+spike_lpbj_tokens = ["spike_lpbj", "fw-esp32-common/spike-lpbj-tokens"]
 
 # The `render-loop` benchmark image — OFF by default, never shipped.
 #

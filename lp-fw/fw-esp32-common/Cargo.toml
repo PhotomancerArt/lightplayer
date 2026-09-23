@@ -60,4 +60,6 @@ default = []
 # instead of `M!{json}` lines. Measurement only; never in a default build.
 spike-lpbj = ["server", "dep:ion-wire-spike"]
 spike-lpbj-trace = ["spike-lpbj"]
+# F1: the same frames, built from the serializer's tokens instead of re-lexing its JSON.
+spike-lpbj-tokens = ["spike-lpbj"]
 server = ["dep:littlefs-rust", "dep:lp-recovery", "dep:lpa-server", "dep:lpc-model", "dep:lpc-wire", "dep:lpfs", "dep:ser-write-json"]

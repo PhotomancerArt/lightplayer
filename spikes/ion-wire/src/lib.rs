@@ -53,11 +53,13 @@ pub mod cobs_frame;
 pub mod decimal_text;
 pub mod format_tags;
 pub mod json_to_lpbj;
+pub mod tokens_to_lpbj;
 pub mod lpbj_to_json;
 pub mod varint;
 pub mod wire_dictionary;
 
 pub use json_to_lpbj::{EncodeError, Encoder};
+pub use tokens_to_lpbj::TokenEncoder;
 pub use lpbj_to_json::{DecodeError, decode_to_json};
 
 /// Back-reference table size per frame, shared by encoder and decoder.

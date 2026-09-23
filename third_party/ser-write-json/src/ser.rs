@@ -16,6 +16,7 @@ use alloc::{
 };
 
 use crate::SerWrite;
+use ser_write::Token;
 use serde::{ser, Serialize};
 
 /// JSON serializer serializing bytes to an array of numbers
@@ -317,6 +318,39 @@ impl<W, B> Serializer<W, B> {
 }
 
 impl<W: SerWrite, B> Serializer<W, B> {
+    /// LP fork (spike): offer `token` to the sink; write `json` if it declines.
+    /// Out of line: the serializer's methods inline into every `Serialize` impl,
+    /// so anything inlined here is paid once per field of every wire type.
+    #[inline(never)]
+    fn tok(&mut self, token: Token<'_>, json: &[u8]) -> Result<(), W::Error> {
+        if !self.output.token(token)? {
+            self.output.write(json)?;
+        }
+        Ok(())
+    }
+
+    /// LP fork (spike): `,` (unless first) + key + `:` for one struct field — one
+    /// out-of-line call per field instead of three.
+    #[inline(never)]
+    fn field_prefix(&mut self, first: bool, key: &str) -> Result<(), W::Error> {
+        if !first {
+            self.tok(Token::Separator, b",")?;
+        }
+        self.key_str(key)?;
+        self.tok(Token::Separator, b":")
+    }
+
+    /// LP fork (spike): an object key — a `Key` token, or a quoted JSON string.
+    #[inline(never)]
+    fn key_str(&mut self, key: &str) -> Result<(), W::Error> {
+        if !self.output.token(Token::Key(key))? {
+            self.output.write_byte(b'"')?;
+            format_escaped_str_contents(&mut self.output, key)?;
+            self.output.write_byte(b'"')?;
+        }
+        Ok(())
+    }
+
     /// Serialize given slice of bytes as ASCII HEX nibbles
     pub fn serialize_bytes_as_hex_str(&mut self, v: &[u8]) -> Result<(), W::Error> {
         let writer = self.writer();
@@ -428,7 +462,7 @@ where
     type SerializeStructVariant = SeqMapSerializer<'a, W, B>;
 
     fn serialize_bool(self, v: bool) -> Result<(), W::Error> {
-        Ok(self.output.write(if v { b"true" } else { b"false" })?)
+        Ok(self.tok(Token::Bool(v), if v { b"true" } else { b"false" })?)
     }
     #[inline(always)]
     fn serialize_i8(self, v: i8) -> Result<(), W::Error> {
@@ -440,11 +474,17 @@ where
     }
 
     fn serialize_i32(self, v: i32) -> Result<(), W::Error> {
+        if self.output.token(Token::I64(i64::from(v)))? {
+            return Ok(());
+        }
         // "-2147483648"
         serialize_signed!(self, 11, v, i32, u32)
     }
 
     fn serialize_i64(self, v: i64) -> Result<(), W::Error> {
+        if self.output.token(Token::I64(v))? {
+            return Ok(());
+        }
         // "-9223372036854775808"
         serialize_signed!(self, 20, v, i64, u64)
     }
@@ -458,17 +498,26 @@ where
     }
 
     fn serialize_u32(self, v: u32) -> Result<Self::Ok, W::Error> {
+        if self.output.token(Token::U64(u64::from(v)))? {
+            return Ok(());
+        }
         // "4294967295"
         serialize_unsigned!(self, 10, v)
     }
 
     fn serialize_u64(self, v: u64) -> Result<Self::Ok, W::Error> {
+        if self.output.token(Token::U64(v))? {
+            return Ok(());
+        }
         // "18446744073709551615"
         serialize_unsigned!(self, 20, v)
     }
 
     fn serialize_f32(self, v: f32) -> Result<(), W::Error> {
         if v.is_finite() {
+            if self.output.token(Token::F32(v))? {
+                return Ok(());
+            }
             serialize_ryu!(self, v)
         } else {
             self.serialize_none()
@@ -477,6 +526,9 @@ where
 
     fn serialize_f64(self, v: f64) -> Result<(), W::Error> {
         if v.is_finite() {
+            if self.output.token(Token::F64(v))? {
+                return Ok(());
+            }
             serialize_ryu!(self, v)
         } else {
             self.serialize_none()
@@ -490,6 +542,9 @@ where
     }
 
     fn serialize_str(self, v: &str) -> Result<(), W::Error> {
+        if self.output.token(Token::Str(v))? {
+            return Ok(());
+        }
         self.output.write_byte(b'"')?;
         format_escaped_str_contents(&mut self.output, v)?;
         Ok(self.output.write_byte(b'"')?)
@@ -500,7 +555,7 @@ where
     }
 
     fn serialize_none(self) -> Result<(), W::Error> {
-        Ok(self.output.write(b"null")?)
+        Ok(self.tok(Token::Null, b"null")?)
     }
 
     fn serialize_some<T>(self, value: &T) -> Result<(), W::Error>
@@ -544,15 +599,15 @@ where
     where
         T: ?Sized + Serialize,
     {
-        self.output.write_byte(b'{')?;
-        self.serialize_str(variant)?;
-        self.output.write_byte(b':')?;
+        self.tok(Token::MapBegin, b"{")?;
+        self.key_str(variant)?;
+        self.tok(Token::Separator, b":")?;
         value.serialize(&mut *self)?;
-        Ok(self.output.write_byte(b'}')?)
+        Ok(self.tok(Token::MapEnd, b"}")?)
     }
 
     fn serialize_seq(self, _len: Option<usize>) -> Result<Self::SerializeSeq, W::Error> {
-        self.output.write_byte(b'[')?;
+        self.tok(Token::SeqBegin, b"[")?;
         Ok(SeqMapSerializer {
             first: true,
             raw_value: false,
@@ -579,9 +634,10 @@ where
         variant: &'static str,
         _len: usize,
     ) -> Result<Self::SerializeTupleVariant, W::Error> {
-        self.output.write_byte(b'{')?;
-        self.serialize_str(variant)?;
-        self.output.write(b":[")?;
+        self.tok(Token::MapBegin, b"{")?;
+        self.key_str(variant)?;
+        self.tok(Token::Separator, b":")?;
+        self.tok(Token::SeqBegin, b"[")?;
         Ok(SeqMapSerializer {
             first: true,
             raw_value: false,
@@ -591,7 +647,7 @@ where
 
     // Maps are represented in JSON as `{ K: V, K: V, ... }`.
     fn serialize_map(self, _len: Option<usize>) -> Result<Self::SerializeMap, W::Error> {
-        self.output.write_byte(b'{')?;
+        self.tok(Token::MapBegin, b"{")?;
         Ok(SeqMapSerializer {
             first: true,
             raw_value: false,
@@ -623,9 +679,10 @@ where
         variant: &'static str,
         _len: usize,
     ) -> Result<Self::SerializeStructVariant, W::Error> {
-        self.output.write_byte(b'{')?;
-        self.serialize_str(variant)?;
-        self.output.write(b":{")?;
+        self.tok(Token::MapBegin, b"{")?;
+        self.key_str(variant)?;
+        self.tok(Token::Separator, b":")?;
+        self.tok(Token::MapBegin, b"{")?;
         Ok(SeqMapSerializer {
             first: true,
             raw_value: false,
@@ -653,15 +710,25 @@ impl<'a, W: SerWrite, B: ByteEncoder> KeySer<'a, W, B>
 where
     <W as SerWrite>::Error: fmt::Display + fmt::Debug,
 {
-    #[inline(always)]
-    fn quote(
-        self,
-        serialize: impl FnOnce(&mut Serializer<W, B>) -> Result<(), W::Error>,
-    ) -> Result<(), W::Error> {
-        self.ser.output.write_byte(b'"')?;
-        serialize(&mut *self.ser)?;
-        self.ser.output.write_byte(b'"')?;
-        Ok(())
+    /// LP fork (spike): an integer key, as its decimal text (a `Key` token, or
+    /// the same quoted digits the JSON path always wrote).
+    fn key_int(self, neg: bool, mut v: u64) -> Result<(), W::Error> {
+        let mut buf = [0u8; 21];
+        let mut i = buf.len();
+        loop {
+            i -= 1;
+            buf[i] = b'0' + (v % 10) as u8;
+            v /= 10;
+            if v == 0 {
+                break;
+            }
+        }
+        if neg {
+            i -= 1;
+            buf[i] = b'-';
+        }
+        let text = core::str::from_utf8(&buf[i..]).map_err(|_| Error::FormatError)?;
+        Ok(self.ser.key_str(text)?)
     }
 }
 
@@ -681,39 +748,39 @@ where
     type SerializeStructVariant = SeqMapSerializer<'a, W, B>;
 
     fn serialize_bool(self, v: bool) -> Result<(), W::Error> {
-        self.quote(|ser| ser.serialize_bool(v))
+        Ok(self.ser.key_str(if v { "true" } else { "false" })?)
     }
     #[inline(always)]
     fn serialize_i8(self, v: i8) -> Result<(), W::Error> {
-        self.quote(|ser| ser.serialize_i8(v))
+        self.key_int(i64::from(v) < 0, i64::from(v).unsigned_abs())
     }
     #[inline(always)]
     fn serialize_i16(self, v: i16) -> Result<(), W::Error> {
-        self.quote(|ser| ser.serialize_i16(v))
+        self.key_int(i64::from(v) < 0, i64::from(v).unsigned_abs())
     }
     #[inline(always)]
     fn serialize_i32(self, v: i32) -> Result<(), W::Error> {
-        self.quote(|ser| ser.serialize_i32(v))
+        self.key_int(i64::from(v) < 0, i64::from(v).unsigned_abs())
     }
     #[inline(always)]
     fn serialize_i64(self, v: i64) -> Result<(), W::Error> {
-        self.quote(|ser| ser.serialize_i64(v))
+        self.key_int(i64::from(v) < 0, i64::from(v).unsigned_abs())
     }
     #[inline(always)]
     fn serialize_u8(self, v: u8) -> Result<(), W::Error> {
-        self.quote(|ser| ser.serialize_u8(v))
+        self.key_int(false, u64::from(v))
     }
     #[inline(always)]
     fn serialize_u16(self, v: u16) -> Result<(), W::Error> {
-        self.quote(|ser| ser.serialize_u16(v))
+        self.key_int(false, u64::from(v))
     }
 
     fn serialize_u32(self, v: u32) -> Result<Self::Ok, W::Error> {
-        self.quote(|ser| ser.serialize_u32(v))
+        self.key_int(false, u64::from(v))
     }
 
     fn serialize_u64(self, v: u64) -> Result<Self::Ok, W::Error> {
-        self.quote(|ser| ser.serialize_u64(v))
+        self.key_int(false, u64::from(v))
     }
 
     fn serialize_f32(self, _v: f32) -> Result<(), W::Error> {
@@ -725,11 +792,12 @@ where
     }
 
     fn serialize_char(self, v: char) -> Result<(), W::Error> {
-        self.ser.serialize_char(v)
+        let mut tmp = [0u8; 4];
+        Ok(self.ser.key_str(v.encode_utf8(&mut tmp))?)
     }
 
     fn serialize_str(self, v: &str) -> Result<(), W::Error> {
-        self.ser.serialize_str(v)
+        Ok(self.ser.key_str(v)?)
     }
 
     fn serialize_bytes(self, _v: &[u8]) -> Result<(), W::Error> {
@@ -1056,13 +1124,13 @@ where
         if self.first {
             self.first = false;
         } else {
-            self.ser.output.write_byte(b',')?;
+            self.ser.tok(Token::Separator, b",")?;
         }
         value.serialize(&mut *self.ser)
     }
 
     fn end(self) -> Result<(), W::Error> {
-        Ok(self.ser.output.write_byte(b']')?)
+        Ok(self.ser.tok(Token::SeqEnd, b"]")?)
     }
 }
 
@@ -1080,13 +1148,13 @@ where
         if self.first {
             self.first = false;
         } else {
-            self.ser.output.write_byte(b',')?;
+            self.ser.tok(Token::Separator, b",")?;
         }
         value.serialize(&mut *self.ser)
     }
 
     fn end(self) -> Result<(), W::Error> {
-        Ok(self.ser.output.write_byte(b']')?)
+        Ok(self.ser.tok(Token::SeqEnd, b"]")?)
     }
 }
 
@@ -1104,13 +1172,13 @@ where
         if self.first {
             self.first = false;
         } else {
-            self.ser.output.write_byte(b',')?;
+            self.ser.tok(Token::Separator, b",")?;
         }
         value.serialize(&mut *self.ser)
     }
 
     fn end(self) -> Result<(), W::Error> {
-        Ok(self.ser.output.write_byte(b']')?)
+        Ok(self.ser.tok(Token::SeqEnd, b"]")?)
     }
 }
 
@@ -1129,13 +1197,14 @@ where
         if self.first {
             self.first = false;
         } else {
-            self.ser.output.write_byte(b',')?;
+            self.ser.tok(Token::Separator, b",")?;
         }
         value.serialize(&mut *self.ser)
     }
 
     fn end(self) -> Result<(), W::Error> {
-        Ok(self.ser.output.write(b"]}")?)
+        self.ser.tok(Token::SeqEnd, b"]")?;
+        Ok(self.ser.tok(Token::MapEnd, b"}")?)
     }
 }
 
@@ -1156,7 +1225,7 @@ where
         if self.first {
             self.first = false;
         } else {
-            self.ser.output.write_byte(b',')?;
+            self.ser.tok(Token::Separator, b",")?;
         }
         key.serialize(KeySer { ser: self.ser })
     }
@@ -1165,12 +1234,12 @@ where
     where
         T: ?Sized + Serialize,
     {
-        self.ser.output.write(b":")?;
+        self.ser.tok(Token::Separator, b":")?;
         value.serialize(&mut *self.ser)
     }
 
     fn end(self) -> Result<(), W::Error> {
-        Ok(self.ser.output.write_byte(b'}')?)
+        Ok(self.ser.tok(Token::MapEnd, b"}")?)
     }
 }
 
@@ -1193,13 +1262,8 @@ where
             return value.serialize(RawValueStrEmitter { ser: self.ser });
         }
 
-        if self.first {
-            self.first = false;
-        } else {
-            self.ser.output.write_byte(b',')?;
-        }
-        key.serialize(&mut *self.ser)?;
-        self.ser.output.write(b":")?;
+        let first = core::mem::replace(&mut self.first, false);
+        self.ser.field_prefix(first, key)?;
         value.serialize(&mut *self.ser)
     }
 
@@ -1207,7 +1271,7 @@ where
         if self.raw_value {
             return Ok(());
         }
-        Ok(self.ser.output.write_byte(b'}')?)
+        Ok(self.ser.tok(Token::MapEnd, b"}")?)
     }
 }
 
@@ -1222,18 +1286,14 @@ where
     where
         T: ?Sized + Serialize,
     {
-        if self.first {
-            self.first = false;
-        } else {
-            self.ser.output.write_byte(b',')?;
-        }
-        key.serialize(&mut *self.ser)?;
-        self.ser.output.write(b":")?;
+        let first = core::mem::replace(&mut self.first, false);
+        self.ser.field_prefix(first, key)?;
         value.serialize(&mut *self.ser)
     }
 
     fn end(self) -> Result<(), W::Error> {
-        Ok(self.ser.output.write(b"}}")?)
+        self.ser.tok(Token::MapEnd, b"}")?;
+        Ok(self.ser.tok(Token::MapEnd, b"}")?)
     }
 }
 
