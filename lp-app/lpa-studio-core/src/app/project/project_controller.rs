@@ -3044,6 +3044,45 @@ impl ProjectController {
         Ok((RunningPackage { hash, version }, logs))
     }
 
+    /// The lens runtime's `project.json`, addressed by the storage dir it
+    /// actually serves (`/projects/<runtime_storage_id>/project.json`).
+    fn running_manifest_path(&self) -> String {
+        lpa_client::project_deploy::project_file_path(&self.runtime_storage_id, "project.json")
+    }
+
+    /// Read the lens runtime's `project.json` bytes — one file, not a pull:
+    /// the bind asks this only to tell an identity-free board from a
+    /// versioned one before it reads the association as a version.
+    pub(crate) async fn read_running_manifest(
+        &mut self,
+        server: &mut StudioServerClient,
+    ) -> Result<(Vec<u8>, Vec<UiLogDraft>), UiError> {
+        use lpc_model::AsLpPath;
+        let read = server
+            .fs_read(self.running_manifest_path().as_str().as_path())
+            .await?;
+        Ok((read.data, read.logs))
+    }
+
+    /// Write a stamped `project.json` onto the lens runtime — the ONE board
+    /// write adoption makes, giving an identity-free project its library
+    /// identity (ADR 2026-09-22, amended).
+    ///
+    /// An ordinary fs write: the server sees it as an `FsEvent` on the
+    /// running project and applies it incrementally
+    /// (`lpa_server::Project::refresh_artifacts`), so nothing is unloaded
+    /// or reloaded and the runtime handle the editor holds stays good.
+    pub(crate) async fn write_running_manifest(
+        &mut self,
+        server: &mut StudioServerClient,
+        bytes: &[u8],
+    ) -> Result<Vec<UiLogDraft>, UiError> {
+        use lpc_model::AsLpPath;
+        server
+            .fs_write(self.running_manifest_path().as_str().as_path(), bytes)
+            .await
+    }
+
     /// Make the library package `key` the ACTIVE project behind the board
     /// the lens is already connected to — no push, no engine reload (D1).
     ///
@@ -3154,9 +3193,11 @@ impl ProjectController {
     /// `ChangesSince` enumerates the project directory as it stands; the
     /// client does the paging (`lpa_client::LpClient::pull_changed_files`),
     /// so a board with more files than fit a frame costs more round trips
-    /// and nothing else. Nothing is sent to the board and nothing is
-    /// unloaded first: this is the same read the save path already makes on
-    /// every save, and the running project keeps running through it.
+    /// and nothing else. The pull writes nothing to the board and unloads
+    /// nothing first: this is the same read the save path already makes on
+    /// every save, and the running project keeps running through it. (The
+    /// only board write adoption ever makes is stamping an identity onto an
+    /// identity-free manifest — [`Self::write_running_manifest`].)
     ///
     /// The pulled set is then hashed HERE and checked against what the
     /// board said it was running. That check is the whole safety of the
