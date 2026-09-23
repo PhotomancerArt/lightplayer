@@ -15,7 +15,9 @@ use alloc::{
 };
 use core::cell::RefCell;
 use hashbrown::HashMap;
-use lpc_engine::{ButtonService, LpGraphics, PowerService, RadioService};
+#[cfg(feature = "node-power-button")]
+use lpc_engine::PowerService;
+use lpc_engine::{ButtonService, LpGraphics, RadioService};
 use lpc_model::{LpPath, LpPathBuf};
 use lpc_shared::backtrace;
 use lpc_shared::output::OutputProvider;
@@ -33,7 +35,9 @@ pub struct ProjectManager {
     next_handle_id: u32,
     /// Base directory where projects are stored (relative path)
     projects_base_dir: LpPathBuf,
-    /// Power-off service handed to every project this manager loads.
+    /// Power-off service handed to every project this manager loads. Only
+    /// in builds with the power-button runtime (see `LpServer::power`).
+    #[cfg(feature = "node-power-button")]
     power_service: Option<Rc<dyn PowerService>>,
 }
 
@@ -48,12 +52,14 @@ impl ProjectManager {
             name_to_handle: HashMap::new(),
             next_handle_id: 1,
             projects_base_dir: projects_base_dir.to_path_buf(),
+            #[cfg(feature = "node-power-button")]
             power_service: None,
         }
     }
 
     /// Install the power-off service for every project loaded from now on,
     /// and for those already loaded.
+    #[cfg(feature = "node-power-button")]
     pub fn set_power_service(&mut self, power_service: Option<Rc<dyn PowerService>>) {
         for project in self.projects.values_mut() {
             project.set_power_service(power_service.clone());
@@ -125,7 +131,7 @@ impl ProjectManager {
             let loaded_fs_version = base_fs.current_version();
 
             backtrace::set_oom_context("project manager: create project");
-            let mut project = Project::new(
+            let project = Project::new(
                 name.clone(),
                 project_path.as_path(),
                 project_fs,
@@ -138,7 +144,12 @@ impl ProjectManager {
                 loaded_fs_version,
             )?;
 
-            project.set_power_service(self.power_service.clone());
+            #[cfg(feature = "node-power-button")]
+            let project = {
+                let mut project = project;
+                project.set_power_service(self.power_service.clone());
+                project
+            };
 
             backtrace::set_oom_context("project manager: insert project runtime");
             self.projects.insert(handle, project);

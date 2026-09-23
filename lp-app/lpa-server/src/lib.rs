@@ -15,6 +15,7 @@ pub mod error;
 pub mod file_sync;
 pub mod handlers;
 pub mod panel_state;
+#[cfg(feature = "node-power-button")]
 mod power_off;
 pub mod project;
 pub mod project_manager;
@@ -34,6 +35,7 @@ pub use lpc_engine::{
 // Manifest-core inputs, re-exported so embedders that reach lpc-engine only
 // through this crate can assemble their firmware manifest (M2).
 pub use lpc_engine::features::{ENGINE_FEATURE_FRAGMENT, supported_features};
+#[cfg(feature = "node-power-button")]
 pub use power_off::{PowerOffQueue, PowerPlatform};
 pub use project::Project;
 pub use project_manager::{ProjectManager, is_project_dir};
