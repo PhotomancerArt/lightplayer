@@ -4,9 +4,17 @@
 //! Entries are grouped by their path segment (color/generative/math/...);
 //! function signatures are extracted from each source with a best-effort
 //! string scan (falling back to the entry name when nothing scans).
+//!
+//! The canonical sources also define internal helpers under the `lpfn_`
+//! prefix (`lpfn_snoise2_surflet`, `lpfn_hash_mix`, ...) that a shader cannot
+//! call: the frontend declares only the real builtins. Signatures are kept
+//! only when their name is a callable builtin, per the generated completion
+//! table ([`lps_builtin_completions::COMPLETIONS`]), so the agent is never
+//! told about a function the compiler will reject.
 
 use std::collections::BTreeMap;
 
+use lps_builtin_completions::COMPLETIONS;
 use lps_builtins::canonical_glsl::CANONICAL_GLSL;
 
 /// GLSL return-type tokens a signature line can start with.
@@ -20,7 +28,10 @@ pub fn builtin_reference() -> String {
     let mut groups: BTreeMap<String, Vec<String>> = BTreeMap::new();
     for entry in CANONICAL_GLSL {
         let group = group_of(entry.path);
-        let mut signatures = scan_signatures(entry.source);
+        let mut signatures: Vec<String> = scan_signatures(entry.source)
+            .into_iter()
+            .filter(|sig| is_callable_builtin(signature_name(sig)))
+            .collect();
         if signatures.is_empty() {
             signatures.push(format!("{} (see builtin docs)", entry.name));
         }
@@ -38,6 +49,21 @@ pub fn builtin_reference() -> String {
         }
     }
     out
+}
+
+/// Whether `name` is an `lpfn_*` builtin a shader can call.
+fn is_callable_builtin(name: &str) -> bool {
+    COMPLETIONS
+        .iter()
+        .any(|entry| entry.module == "lpfn" && entry.name == name)
+}
+
+/// `vec3 lpfn_hsv2rgb(vec3 hsv)` → `lpfn_hsv2rgb`.
+fn signature_name(signature: &str) -> &str {
+    let after_type = signature
+        .split_once(char::is_whitespace)
+        .map_or(signature, |(_, rest)| rest.trim_start());
+    after_type.split('(').next().unwrap_or(after_type).trim()
 }
 
 /// `glsl/lpfn/color/space/hsv2rgb.glsl` → `color/space`; top-level files →
@@ -100,6 +126,28 @@ mod tests {
                 entry.name
             );
         }
+    }
+
+    #[test]
+    fn reference_lists_only_callable_builtins() {
+        let reference = builtin_reference();
+        for line in reference.lines().filter(|l| l.starts_with("  ")) {
+            let name = signature_name(line.trim());
+            assert!(
+                is_callable_builtin(name),
+                "{name} is listed but is not a callable builtin"
+            );
+        }
+        // Canonical-source helpers are what this filter exists for.
+        for helper in ["lpfn_snoise2_surflet", "lpfn_hash_mix", "lpfn_worley3_test"] {
+            assert!(!reference.contains(helper), "{helper} leaked: {reference}");
+        }
+    }
+
+    #[test]
+    fn signature_name_is_the_identifier() {
+        assert_eq!(signature_name("vec3 lpfn_hsv2rgb(vec3 hsv)"), "lpfn_hsv2rgb");
+        assert_eq!(signature_name("uint lpfn_hash(uvec2 xy, uint seed)"), "lpfn_hash");
     }
 
     #[test]

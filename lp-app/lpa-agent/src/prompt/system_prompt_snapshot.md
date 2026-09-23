@@ -44,7 +44,6 @@ color/space:
   vec3 lpfn_rgb2oklab(vec3 rgb)
   vec3 lpfn_rgb2oklch(vec3 rgb)
 core:
-  uint lpfn_hash_mix(uint x, uint seed)
   uint lpfn_hash(uint x, uint seed)
   uint lpfn_hash(uvec2 xy, uint seed)
   uint lpfn_hash(uvec3 xyz, uint seed)
@@ -58,10 +57,7 @@ generative/gnoise:
   float lpfn_gnoise(vec3 p, uint seed)
   float lpfn_gnoise(vec3 p, float tileLength, uint seed)
 generative/psrdnoise:
-  int lpfn_psrdnoise2_hash(int iu, int iv)
   float lpfn_psrdnoise(vec2 x, vec2 period, float alpha, out vec2 gradient, uint seed)
-  int lpfn_psrdnoise3_hash(int iu, int iv, int iw)
-  vec3 lpfn_psrdnoise3_grad(int hash, float sinAlpha, float cosAlpha)
   float lpfn_psrdnoise(vec3 x, vec3 period, float alpha, out vec3 gradient, uint seed)
 generative/random:
   float lpfn_random(float x, uint seed)
@@ -69,11 +65,7 @@ generative/random:
   float lpfn_random(vec3 p, uint seed)
 generative/snoise:
   float lpfn_snoise(float x, uint seed)
-  vec2 lpfn_snoise2_grad(uint index)
-  float lpfn_snoise2_surflet(uint gi, vec2 off)
   float lpfn_snoise(vec2 p, uint seed)
-  vec3 lpfn_snoise3_grad(uint index)
-  float lpfn_snoise3_surflet(uint gi, vec3 off)
   float lpfn_snoise(vec3 p, uint seed)
 generative/srandom:
   float lpfn_srandom(float x, uint seed)
@@ -82,11 +74,8 @@ generative/srandom:
   vec3 lpfn_srandom3_vec(vec3 p, uint seed)
   vec3 lpfn_srandom3_tile(vec3 p, float tileLength, uint seed)
 generative/worley:
-  vec2 lpfn_worley2_point(uint index, int cellX, int cellY)
   float lpfn_worley(vec2 p, uint seed)
   float lpfn_worley_value(vec2 p, uint seed)
-  vec3 lpfn_worley3_point(uint index, int cellX, int cellY, int cellZ)
-  float lpfn_worley3_test(vec3 p, uint seed, int tx, int ty, int tz)
   float lpfn_worley(vec3 p, uint seed)
   float lpfn_worley_value(vec3 p, uint seed)
 math:

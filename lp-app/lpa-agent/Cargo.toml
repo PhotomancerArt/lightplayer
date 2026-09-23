@@ -11,6 +11,7 @@ description = "Model-facing shader agent core: provider abstraction, agent loop,
 [dependencies]
 futures-util = "0.3"
 lp-collection = { workspace = true, features = ["serde"] }
+lps-builtin-completions = { path = "../../lp-shader/lps-builtin-completions" }
 lps-builtins = { path = "../../lp-shader/lps-builtins" }
 lps-probe = { path = "../../lp-shader/lps-probe" }
 serde = { workspace = true, features = ["derive"] }
