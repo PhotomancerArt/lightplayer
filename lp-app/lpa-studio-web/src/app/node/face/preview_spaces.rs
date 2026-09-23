@@ -115,7 +115,7 @@ pub fn SpacedProductPreview(
                 preview: product.preview.clone(),
                 tracking: product.tracking,
                 frame: product.frame,
-                focus_action: None,
+                focus_action: product.show_live.clone(),
                 on_action,
             }
         };
@@ -135,7 +135,7 @@ pub fn SpacedProductPreview(
                     preview: view.preview.clone(),
                     tracking: product.tracking,
                     frame: display_frame(&view),
-                    focus_action: None,
+                    focus_action: product.show_live.clone(),
                     on_action,
                 }
                 // Always rendered, whatever the frame turned out to be: a

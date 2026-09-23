@@ -135,6 +135,16 @@ impl UiProductRef {
         }
     }
 
+    /// The runtime id of the node that produces this product.
+    #[must_use]
+    pub fn node_id(self) -> u32 {
+        match self {
+            Self::Visual { node_id, .. }
+            | Self::Control { node_id, .. }
+            | Self::Time { node_id, .. } => node_id,
+        }
+    }
+
     /// Convert this identity back into a visual product when possible.
     #[must_use]
     pub fn visual_product(self) -> Option<VisualProduct> {
@@ -447,6 +457,11 @@ pub struct UiProducedProduct {
     pub spaces: Vec<UiProductSpaceView>,
     /// Whether Studio is watching this product now.
     pub tracking: UiProductTrackingState,
+    /// The "Show live" action for a preview that is not live: it selects
+    /// the product's PRODUCER node, because under a device lens only the
+    /// selected node's products stream. `None` while [`Self::tracking`] is
+    /// `Tracking`, and wherever no producer node is known.
+    pub show_live: Option<crate::UiAction>,
     /// Stable preview frame used even before bytes are available.
     pub frame: UiProductPreviewFrame,
     /// Optional size, shape, or sample-count detail.
@@ -469,6 +484,7 @@ impl UiProducedProduct {
             preview: UiProductPreview::for_kind(kind),
             spaces: Vec::new(),
             tracking: UiProductTrackingState::Untracked,
+            show_live: None,
             frame: UiProductPreviewFrame::VISUAL_DEFAULT,
             detail: None,
             binding: UiProducedBinding::none(),

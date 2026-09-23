@@ -73,6 +73,7 @@ fn visual_channel_preview() -> UiBusChannelPreview {
             bytes: visual_preview_bytes(32, 32).into(),
         },
         tracking: UiProductTrackingState::Tracking,
+        show_live: None,
         frame: UiProductPreviewFrame::VISUAL_DEFAULT,
     }
 }
@@ -84,6 +85,7 @@ fn control_channel_preview() -> UiBusChannelPreview {
         kind: UiProductKind::Control,
         preview: control_preview_product("output").preview,
         tracking: UiProductTrackingState::Tracking,
+        show_live: None,
         frame: UiProductPreviewFrame::VISUAL_DEFAULT,
     }
 }

@@ -86,6 +86,9 @@ pub struct UiBusChannelPreview {
     pub preview: UiProductPreview,
     /// Whether Studio is watching this product now.
     pub tracking: UiProductTrackingState,
+    /// Selects the product's producer node so it streams live; `None` while
+    /// tracking (see [`crate::UiProducedProduct::show_live`]).
+    pub show_live: Option<crate::UiAction>,
     /// Stable frame used before bytes arrive.
     pub frame: UiProductPreviewFrame,
 }

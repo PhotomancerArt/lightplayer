@@ -150,7 +150,7 @@ pub fn FixtureFace(
                     preview: preview.preview.clone(),
                     tracking: preview.tracking,
                     frame: preview.frame,
-                    focus_action: None,
+                    focus_action: preview.show_live.clone(),
                     on_action,
                     live: view().live,
                 }

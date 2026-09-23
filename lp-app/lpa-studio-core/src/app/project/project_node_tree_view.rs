@@ -28,6 +28,10 @@ pub struct ProjectNodeTreeItem {
     /// Aggregate dirty-edit summary for this node's subtree (own slots plus
     /// descendant nodes), matching the node header and per-field affordances.
     pub dirty: DirtySummary,
+    /// This row's node is the one streaming previews live from the device
+    /// (selected, on a lens that streams the selection only) — the row's
+    /// live dot, twin of the card header's Live chip.
+    pub streaming_live: bool,
 }
 
 impl ProjectNodeTreeItem {
@@ -49,6 +53,7 @@ impl ProjectNodeTreeItem {
             action,
             children,
             dirty: DirtySummary::clean(),
+            streaming_live: false,
         }
     }
 

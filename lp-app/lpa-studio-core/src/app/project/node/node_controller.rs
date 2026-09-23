@@ -599,7 +599,11 @@ impl NodeController {
                     UiProductTrackingState::Paused
                 } else {
                     base_tracking
-                }
+                };
+                // Not live → the way to make it live is to select this
+                // node: a device lens streams the selected node only.
+                product.show_live = (product.tracking != UiProductTrackingState::Tracking)
+                    .then(|| node_focus_action(self));
             }
             sections.push(UiNodeSection::ProducedProducts(products));
         }

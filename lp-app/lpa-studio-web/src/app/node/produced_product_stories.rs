@@ -7,6 +7,7 @@ use lpa_studio_core::{
     UiControlProductPreview, UiControlSampleFormat, UiProducedProduct, UiProductPreview,
     UiProductTrackingState,
 };
+use lpa_studio_core::{ControllerId, ProjectEditorOp, UiAction};
 use lpa_studio_web_story_macros::story;
 
 use crate::app::node::lamp_view::LampView;
@@ -30,10 +31,15 @@ pub(crate) fn empty_product() -> Element {
     }
 }
 
-#[story(description = "A visual product that exists but is not being tracked.")]
+#[story(
+    description = "A visual product on a device lens whose node is not selected, with no frame yet: 'Not live' and a Show live button that selects the producer node."
+)]
 pub(crate) fn visual_untracked() -> Element {
     rsx! {
-        ProducedProductView { product: UiProducedProduct::visual("output").with_detail("32 x 32 preview") }
+        ProducedProductView {
+            product: with_show_live(UiProducedProduct::visual("output").with_detail("32 x 32 preview")),
+            on_action: move |_| {},
+        }
     }
 }
 
@@ -73,8 +79,24 @@ pub(crate) fn visual_loaded() -> Element {
     }
 }
 
-#[story(description = "A visual product with cached preview bytes that is not being tracked now.")]
+#[story(
+    description = "A visual product with a stale frame from when its node was last selected: 'Last frame · not live' over the dimmed frame, and Show live."
+)]
 pub(crate) fn visual_paused() -> Element {
+    rsx! {
+        ProducedProductView {
+            product: with_show_live(
+                visual_preview_product("output").with_tracking(UiProductTrackingState::Paused),
+            ),
+            on_action: move |_| {},
+        }
+    }
+}
+
+#[story(
+    description = "A not-live preview on a surface that cannot select anything (no producer known): the title states the fact and offers no button."
+)]
+pub(crate) fn visual_paused_no_action() -> Element {
     rsx! {
         ProducedProductView {
             product: visual_preview_product("output")
@@ -234,12 +256,16 @@ pub(crate) fn control_loaded() -> Element {
     }
 }
 
-#[story(description = "A control product with cached preview bytes that is not being tracked now.")]
+#[story(
+    description = "A control product with a stale frame: 'Last frame · not live' over the lamps, and Show live."
+)]
 pub(crate) fn control_paused() -> Element {
     rsx! {
         ProducedProductView {
-            product: control_preview_product("dmx")
-                .with_tracking(UiProductTrackingState::Paused)
+            product: with_show_live(
+                control_preview_product("dmx").with_tracking(UiProductTrackingState::Paused),
+            ),
+            on_action: move |_| {},
         }
     }
 }
@@ -263,4 +289,14 @@ pub(crate) fn control_error() -> Element {
                 })
         }
     }
+}
+
+/// The core fills `show_live` with the producer node's select action; a
+/// story stand-in makes the overlay render as the button it is in the app.
+fn with_show_live(mut product: UiProducedProduct) -> UiProducedProduct {
+    product.show_live = Some(UiAction::from_op(
+        ControllerId::new("story.node"),
+        ProjectEditorOp::Focus,
+    ));
+    product
 }
