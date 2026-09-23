@@ -164,6 +164,8 @@ mod tests {
     pub mod msafluid_solver;
     #[cfg(feature = "test_rmt_rx")]
     pub mod rmt_rx;
+    #[cfg(feature = "test_ble")]
+    pub mod test_ble;
     #[cfg(feature = "test_button")]
     pub mod test_button;
     #[cfg(feature = "test_dither")]
@@ -645,6 +647,12 @@ async fn main(spawner: embassy_executor::Spawner) {
     {
         use tests::test_espnow::run_espnow_test;
         run_espnow_test(spawner).await;
+    }
+
+    #[cfg(feature = "test_ble")]
+    {
+        use tests::test_ble::run_ble_test;
+        run_ble_test(spawner).await;
     }
 
     #[cfg(feature = "test_espnow_broadcast")]

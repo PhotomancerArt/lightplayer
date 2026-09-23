@@ -2447,10 +2447,11 @@ clippy-fw-esp32c6-harnesses: install-rv32-target
         cargo clippy --target {{ rv32_target }} --profile {{ fw_esp32c6_profile }} \
             --features "$feature,esp32c6" -- --no-deps -D warnings
     done
-    # Two harnesses build without default features: test_espnow wants the radio
-    # capability alone, and test_f32_softfloat wants the compiler alone (plus
-    # `float-f32`, which no other configuration in this crate turns on).
-    for feature in test_espnow test_f32_softfloat; do
+    # Three harnesses build without default features: test_espnow wants the
+    # radio capability alone, test_ble the radio plus the BLE host, and
+    # test_f32_softfloat the compiler alone (plus `float-f32`, which no other
+    # configuration in this crate turns on).
+    for feature in test_espnow test_ble test_f32_softfloat; do
         echo "==> fw-esp32c6 harness: $feature (--no-default-features)"
         cargo clippy --target {{ rv32_target }} --profile {{ fw_esp32c6_profile }} \
             --no-default-features --features "$feature,esp32c6" -- --no-deps -D warnings
@@ -4084,6 +4085,23 @@ fwtest-shader-compile-stress-trace-esp32c6: install-rv32-target
 # Run firmware with test_espnow: 1Hz simulated button events over ESP-NOW
 fwtest-espnow-esp32c6: install-rv32-target
     cd lp-fw/fw-esp32c6 && cargo run --no-default-features --features test_espnow,esp32c6 --target {{ rv32_target }} --profile {{ fw_esp32c6_profile }}
+
+# BLE spike (vision `ble-remote-control`): advertise as `LP-BLE-xxxx`, echo
+# over a Nordic-UART-shaped GATT service, print heap per bring-up stage.
+# Talk to it with nRF Connect on a phone, or through `spikes/ble-lab/` (a page
+# that holds the BLE link, driven over HTTP) from the Mac. Pass the port explicitly (resolve by MAC with
+# `scripts/emu/board-port.py --list`) when more than one C6 is attached.
+fwtest-ble-esp32c6 port="": install-rv32-target
+    #!/usr/bin/env bash
+    set -euo pipefail
+    port="{{ port }}"
+    if [[ -z "$port" ]]; then
+        port="$(cargo run -q -p lp-cli -- fwcheck port --chip esp32c6)"
+    fi
+    echo "Using ESPFLASH_PORT=$port"
+    cd lp-fw/fw-esp32c6 && ESPFLASH_PORT="$port" cargo run --no-default-features \
+        --features test_ble,esp32c6 --target {{ rv32_target }} \
+        --profile {{ fw_esp32c6_profile }}
 
 # Run firmware with test_f32_softfloat: IEEE f32 semantics on the C6's soft-float
 # path — the ROM `rvfplib` routines probed directly, plus a GLSL shader compiled
