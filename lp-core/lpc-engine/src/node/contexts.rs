@@ -10,7 +10,7 @@ use crate::dataflow::resolver::{
     Production, ProductionSource, QueryKey, ResolveError, TickResolver,
 };
 use crate::dataflow::timebase::PhasorKey;
-use crate::engine::{ButtonService, FaultPresentation, RadioService};
+use crate::engine::{ButtonService, FaultPresentation, PowerService, RadioService};
 use crate::products::control::{
     ControlLayout, ControlProduct, ControlRenderRequest, ControlRenderTarget,
 };
@@ -126,6 +126,7 @@ pub struct TickContext<'r> {
     time_provider: Option<Rc<dyn TimeProvider>>,
     button_service: Option<Rc<dyn ButtonService>>,
     radio_service: Option<Rc<dyn RadioService>>,
+    power_service: Option<Rc<dyn PowerService>>,
     frame_time_seconds: f32,
     /// Frame time the project's continuous fault began at, as derived at the
     /// END of the previous tick (`Engine::project_fault`). `None` = no node
@@ -198,6 +199,7 @@ impl<'r> TickContext<'r> {
             time_provider,
             button_service,
             radio_service,
+            power_service: None,
             frame_time_seconds,
             project_fault_since_seconds: None,
             project_fault_node_count: 0,
@@ -222,6 +224,13 @@ impl<'r> TickContext<'r> {
         self.project_fault_since_seconds = since_seconds;
         self.project_fault_node_count = node_count;
         self.fault_presentation = presentation;
+        self
+    }
+
+    /// Attach the power-off service. A builder step for the same reason as
+    /// [`Self::with_project_fault`]: only the power-button node reads it.
+    pub fn with_power_service(mut self, power_service: Option<Rc<dyn PowerService>>) -> Self {
+        self.power_service = power_service;
         self
     }
 
@@ -423,6 +432,10 @@ impl<'r> TickContext<'r> {
 
     pub fn radio_service(&self) -> Option<Rc<dyn RadioService>> {
         self.radio_service.clone()
+    }
+
+    pub fn power_service(&self) -> Option<Rc<dyn PowerService>> {
+        self.power_service.clone()
     }
 
     /// Materializes a visual product into a full texture through the active engine session.

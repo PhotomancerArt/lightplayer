@@ -8,6 +8,7 @@ mod frame_num;
 mod frame_time;
 mod loaded_project_runtime;
 pub mod memory_pressure;
+mod power_service;
 // All three tests in this module exercise a Fixture node fed by a Shader
 // node's output slot, so the module needs both node kinds.
 #[cfg(all(test, feature = "node-fixture", feature = "node-shader"))]
@@ -67,6 +68,7 @@ pub use engine_services::{ButtonService, EngineServices, OutputFlushError, Radio
 pub use frame_num::FrameNum;
 pub use frame_time::FrameTime;
 pub use loaded_project_runtime::LoadedProjectRuntime;
+pub use power_service::{PowerError, PowerOffRequest, PowerService, PowerWakeLevel};
 pub use project_apply::RuntimeApplyResult;
 pub use project_fault::{FaultPresentation, ProjectFault};
 pub use project_loader::{ProjectLoadError, ProjectLoader};

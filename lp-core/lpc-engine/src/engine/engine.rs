@@ -1531,6 +1531,7 @@ impl EngineResolveHost<'_> {
         let time_provider = self.time_provider.clone();
         let button_service = self.button_service.clone();
         let radio_service = self.radio_service.clone();
+        let power_service = self.services.power_service();
         let time_s = self.frame_time_seconds;
         let slot_shapes = self.slot_shapes;
         let fault = self.fault;
@@ -1552,11 +1553,8 @@ impl EngineResolveHost<'_> {
                 radio_service,
                 time_s,
             )
-            .with_project_fault(
-                fault.since_seconds,
-                fault.node_count,
-                fault.presentation,
-            );
+            .with_project_fault(fault.since_seconds, fault.node_count, fault.presentation)
+            .with_power_service(power_service);
             catch_node_panic_framed(lp_recovery::FrameKind::NodeRender, &recovery_name, || {
                 node_runtime.produce(slot, &mut tick_ctx)
             })
@@ -3157,6 +3155,7 @@ fn consume_tree_node(
     let time_provider = host.time_provider.clone();
     let button_service = host.button_service.clone();
     let radio_service = host.radio_service.clone();
+    let power_service = host.services.power_service();
     let time_s = host.frame_time_seconds;
     let slot_shapes = host.slot_shapes;
     let fault = host.fault;
@@ -3180,7 +3179,8 @@ fn consume_tree_node(
             time_s,
         )
         .with_project_fault(fault.since_seconds, fault.node_count, fault.presentation)
-        .with_output_smoothing(smoothing);
+        .with_output_smoothing(smoothing)
+        .with_power_service(power_service);
         catch_node_panic_framed(lp_recovery::FrameKind::NodeRender, &recovery_name, || {
             node_runtime.consume(&mut tick_ctx)
         })

@@ -15,7 +15,7 @@ use alloc::{
 };
 use core::cell::RefCell;
 use hashbrown::HashMap;
-use lpc_engine::{ButtonService, LpGraphics, RadioService};
+use lpc_engine::{ButtonService, LpGraphics, PowerService, RadioService};
 use lpc_model::{LpPath, LpPathBuf};
 use lpc_shared::backtrace;
 use lpc_shared::output::OutputProvider;
@@ -33,6 +33,8 @@ pub struct ProjectManager {
     next_handle_id: u32,
     /// Base directory where projects are stored (relative path)
     projects_base_dir: LpPathBuf,
+    /// Power-off service handed to every project this manager loads.
+    power_service: Option<Rc<dyn PowerService>>,
 }
 
 impl ProjectManager {
@@ -46,7 +48,17 @@ impl ProjectManager {
             name_to_handle: HashMap::new(),
             next_handle_id: 1,
             projects_base_dir: projects_base_dir.to_path_buf(),
+            power_service: None,
         }
+    }
+
+    /// Install the power-off service for every project loaded from now on,
+    /// and for those already loaded.
+    pub fn set_power_service(&mut self, power_service: Option<Rc<dyn PowerService>>) {
+        for project in self.projects.values_mut() {
+            project.set_power_service(power_service.clone());
+        }
+        self.power_service = power_service;
     }
 
     /// Create a new project
@@ -113,7 +125,7 @@ impl ProjectManager {
             let loaded_fs_version = base_fs.current_version();
 
             backtrace::set_oom_context("project manager: create project");
-            let project = Project::new(
+            let mut project = Project::new(
                 name.clone(),
                 project_path.as_path(),
                 project_fs,
@@ -125,6 +137,8 @@ impl ProjectManager {
                 graphics,
                 loaded_fs_version,
             )?;
+
+            project.set_power_service(self.power_service.clone());
 
             backtrace::set_oom_context("project manager: insert project runtime");
             self.projects.insert(handle, project);

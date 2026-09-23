@@ -15,6 +15,7 @@ pub mod error;
 pub mod file_sync;
 pub mod handlers;
 pub mod panel_state;
+mod power_off;
 pub mod project;
 pub mod project_manager;
 mod project_read_source;
@@ -27,11 +28,13 @@ pub use lpc_engine::products::visual::{
     ConsumerPolicy, RenderTextureRequest, TextureRenderProduct, VisualProduct, VisualSpace,
 };
 pub use lpc_engine::{
-    ButtonService, LpGraphics, LpShader, RadioService, ShaderCompileOptions, ShaderFrontend,
+    ButtonService, LpGraphics, LpShader, PowerError, PowerOffRequest, PowerService, PowerWakeLevel,
+    RadioService, ShaderCompileOptions, ShaderFrontend,
 };
 // Manifest-core inputs, re-exported so embedders that reach lpc-engine only
 // through this crate can assemble their firmware manifest (M2).
 pub use lpc_engine::features::{ENGINE_FEATURE_FRAGMENT, supported_features};
+pub use power_off::{PowerOffQueue, PowerPlatform};
 pub use project::Project;
 pub use project_manager::{ProjectManager, is_project_dir};
 pub use server::{

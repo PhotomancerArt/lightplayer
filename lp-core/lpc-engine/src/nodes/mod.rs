@@ -13,6 +13,8 @@ mod placeholder;
 // when `node-playlist` is off (see `playlist/mod.rs`); the `PlaylistNode`
 // runtime itself is gated inside that module.
 pub mod playlist;
+#[cfg(feature = "node-power-button")]
+pub mod power_button;
 #[cfg(feature = "node-radio")]
 pub mod radio;
 #[cfg(feature = "node-shader")]
@@ -39,6 +41,8 @@ pub use placeholder::CorePlaceholderNode;
 pub use playlist::playlist_output_path;
 #[cfg(feature = "node-playlist")]
 pub use playlist::{PlaylistNode, PlaylistRuntimeEntry};
+#[cfg(feature = "node-power-button")]
+pub use power_button::{PowerButtonNode, power_button_click_path};
 #[cfg(feature = "node-radio")]
 pub use radio::{ControlRadioNode, control_radio_input_path, control_radio_output_path};
 #[cfg(feature = "node-shader")]

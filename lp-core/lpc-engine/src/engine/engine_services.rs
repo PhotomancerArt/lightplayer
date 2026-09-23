@@ -22,6 +22,7 @@ use lpc_shared::output::{
 };
 use lpc_shared::time::TimeProvider;
 
+use super::PowerService;
 use crate::resource::{RuntimeBufferId, RuntimeBufferStore};
 
 /// Every wire one output node drives from its single control buffer.
@@ -177,6 +178,7 @@ pub struct EngineServices {
     time_provider: Option<Rc<dyn TimeProvider>>,
     button_service: Option<Rc<dyn ButtonService>>,
     radio_service: Option<Rc<dyn RadioService>>,
+    power_service: Option<Rc<dyn PowerService>>,
     /// Fixture-written buffers paired with the wires their output node drives.
     output_sinks: HashMap<RuntimeBufferId, OutputSinkSet>,
 }
@@ -227,6 +229,7 @@ impl EngineServices {
             time_provider: None,
             button_service: None,
             radio_service: None,
+            power_service: None,
             output_sinks: HashMap::new(),
         }
     }
@@ -263,6 +266,14 @@ impl EngineServices {
 
     pub fn button_service(&self) -> Option<Rc<dyn ButtonService>> {
         self.button_service.clone()
+    }
+
+    pub fn set_power_service(&mut self, service: Option<Rc<dyn PowerService>>) {
+        self.power_service = service;
+    }
+
+    pub fn power_service(&self) -> Option<Rc<dyn PowerService>> {
+        self.power_service.clone()
     }
 
     pub fn set_radio_service(&mut self, service: Option<Rc<dyn RadioService>>) {
