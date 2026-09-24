@@ -664,7 +664,10 @@ const STACK_HIGH_WATER_GAP: u64 = 640;
 /// moved — the server loop's future shrank 80 B and the main stack grew by
 /// as much — and with it where each path's heartbeat lands in the pacer's
 /// phase. The cause was not isolated further than that; the memory-transfer
-/// fields still agree between the paths to the byte.
+/// fields still agree between the paths to the byte. (Both absolute figures
+/// fell by 3,328 B — `direct` 16460 → 13132 — and that part IS named: the
+/// embassy main task's `poll` frame shrank from `entry a1, 4304` to `976`;
+/// see `determinism.rs`'s `PREFIX_CYCLES`. The 32 B move of the gap is not.)
 const PATH_HIGH_WATER_GAP: i64 = -96;
 
 /// **G2 (e).** Every memory-class field of the idle heartbeat, this machine
@@ -705,9 +708,14 @@ const PATH_HIGH_WATER_GAP: i64 = -96;
 #[test]
 #[ignore = "needs the shipped image and espflash; run through `just test-emu-esp32v3-boot`"]
 fn the_heartbeats_memory_figures_are_the_desk_boards() {
-    let Some(elf) = image() else { return };
-    let merged = match lp_emu_esp32v3::test_support::merged_chip_image() {
-        Ok(p) => p,
+    // ⚠️ **The pinned reference image, not the tree's** (BLE plan M3, ruling
+    // DD8). The capture is of `75486b114`'s bytes and its sidecar says so; a
+    // tree build compared against it moves every image-derived line the
+    // moment `.bss` does, and that is a change to the firmware, not to this
+    // machine or to the board. The image's identity is checked below off its
+    // own hello stamp, which both sides print.
+    let (elf, merged) = match lp_emu_esp32v3::test_support::reference_images() {
+        Ok(pair) => pair,
         Err(reason) => {
             skip_notice("the_heartbeats_memory_figures_are_the_desk_boards", &reason);
             return;
@@ -760,6 +768,18 @@ fn the_heartbeats_memory_figures_are_the_desk_boards() {
         "the second boot MOUNTS what the first wrote:\n{emulated}"
     );
     let _ = std::fs::remove_file(&chip);
+
+    // Same bytes on both sides, read off the image's own stamp: the commit
+    // `build.rs` baked in and the clean-tree flag. A different ELF here would
+    // make every comparison below a comparison of two builds.
+    let stamp = "[INIT] fw-esp32 initialized, starting server loop... ";
+    let (a, b) = (field_line(&silicon, stamp), field_line(&emulated, stamp));
+    assert_eq!(a, b, "the reference image is the capture's image");
+    let pinned = format!("commit={}", lp_emu_esp32v3::test_support::REFERENCE_COMMIT);
+    assert!(
+        a.contains(&pinned) && a.contains("dirty=false"),
+        "the capture is of the pinned clean commit: {a}"
+    );
 
     // The three lines the boot banner carries, which are image-derived and
     // must be identical to the byte.
