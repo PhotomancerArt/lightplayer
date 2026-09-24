@@ -276,9 +276,12 @@ lpa-link-browser-test: install-wasm32-target
         echo "wasm-bindgen-test-runner not found. Install: cargo install wasm-bindgen-cli --version 0.2.114"
         exit 1
     fi
+    # Two suites, one runner: Web Serial over `?emu=`'s polyfill, and (M5)
+    # Web Bluetooth over `?ble=emu`'s, both against the scripted door.
     CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUNNER="$PWD/scripts/wasm-serial-test-runner.sh" \
         cargo test -p lpa-link --target wasm32-unknown-unknown \
-            --features browser-serial-esp32 --test browser_serial_conformance
+            --features browser-serial-esp32,browser-ble \
+            --test browser_serial_conformance --test browser_ble_conformance
 
 # The SAME assertions against boards hosted IN THE TAB — one Worker per
 # board, each holding the emulator's own wasm, and no server anywhere

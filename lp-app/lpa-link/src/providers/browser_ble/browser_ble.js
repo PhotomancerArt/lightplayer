@@ -201,8 +201,15 @@ class BleSession {
     this.reconnectTimer = null;
     this.attemptsLeft = 0;
     this.onValue = (event) => this.receive(event);
+    this.adopt(device);
+  }
+
+  /// Hold `device` and listen for its drops. Events from an object this
+  /// session no longer holds are ignored.
+  adopt(device) {
+    this.device = device;
     device.addEventListener?.("gattserverdisconnected", () => {
-      if (this.state === "connected") {
+      if (this.device === device && this.state === "connected") {
         handleDrop(this, "the board or the radio ended the connection");
       }
     });
@@ -238,9 +245,17 @@ class BleSession {
 
 function sessionFor(device) {
   for (const session of sessions.values()) {
-    if (session.device === device || (device.id && session.device.id === device.id)) {
-      // A re-pick hands back a NEW object in some browsers; the held one is
-      // the one whose events we listen to, so it is kept.
+    if (session.device === device) {
+      return session;
+    }
+    if (device.id && session.device.id === device.id) {
+      // The same device as a NEW object (a re-pick in some browsers, or a
+      // polyfill re-installed under the page). A live connection keeps the
+      // object it is listening to; an idle session adopts the new one,
+      // because the old one may belong to nothing any more.
+      if (session.state !== "connected" && session.state !== "connecting") {
+        session.adopt(device);
+      }
       return session;
     }
   }
