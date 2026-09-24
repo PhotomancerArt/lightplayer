@@ -15,8 +15,8 @@ use lpc_model::AsLpPath;
 use lpc_shared::output::MemoryOutputProvider;
 use lpc_shared::time::TimeProvider;
 use lpc_wire::{
-    ClientMessage, ControlDisplayLayoutRead, OutputFrameEntry, OutputFrameProbeRequest,
-    OutputFrameProbeResult, json,
+    ClientMessage, OutputFrameEntry, OutputFrameGeometryRead, OutputFrameProbeRequest,
+    OutputFrameProbeResult, WireChannelSampleFormat, json,
 };
 use lpfs::LpFsMemory;
 use lps_shared::TextureStorageFormat;
@@ -382,7 +382,7 @@ impl BrowserFirmwareRuntime {
     /// The lamp counterpart of [`Self::render_bus_texture_rgba8`], and it
     /// renders nothing: the tick that just ran published these buffers, so a
     /// card drawing lamps costs one buffer clone plus — only when
-    /// `display_layout` asks — an O(lamps) geometry read. That is why this
+    /// `geometry` asks — an O(lamps) geometry read. That is why this
     /// rides the preview frame the host already schedules instead of being a
     /// second render.
     ///
@@ -390,7 +390,7 @@ impl BrowserFirmwareRuntime {
     /// driving lamps here" is a state, not an error.
     pub(crate) fn read_output_frame(
         &mut self,
-        display_layout: ControlDisplayLayoutRead,
+        geometry: OutputFrameGeometryRead,
     ) -> (bool, Vec<OutputFrameEntry>) {
         let handle = self
             .server
@@ -420,7 +420,12 @@ impl BrowserFirmwareRuntime {
             }
         });
         let OutputFrameProbeResult::Frame { outputs } =
-            project.read_output_frame(OutputFrameProbeRequest { display_layout });
+            project.read_output_frame(OutputFrameProbeRequest {
+                geometry,
+                // The sim's own in-page frames keep full precision: nothing
+                // crosses a cable here (lean-wire P5 leaves the sim as is).
+                samples: Some(WireChannelSampleFormat::U16),
+            });
         // Published outputs break the tie ONLY for a project whose visual
         // side already took the control-only fallback (multi-module bus
         // ties): there the outputs are the ground truth — fragments MERGE,
@@ -611,7 +616,9 @@ impl BrowserFirmwareRuntime {
                         .is_ok();
                     let OutputFrameProbeResult::Frame { outputs } =
                         project.read_output_frame(OutputFrameProbeRequest {
-                            display_layout: ControlDisplayLayoutRead::None,
+                            geometry: OutputFrameGeometryRead::None,
+                            // Only the count of outputs is read here.
+                            samples: None,
                         });
                     log::debug!(
                         "preview runtime: visual fallback: control_resolves={} outputs={} \

@@ -21,8 +21,8 @@ use lpc_engine::node::NodeEntryState;
 use lpc_engine::{EngineServices, ProjectLoader};
 use lpc_model::TreePath;
 use lpc_wire::{
-    ControlDisplayLayoutProbeResult, ControlDisplayLayoutRead, OutputFrameProbeRequest,
-    OutputFrameProbeResult,
+    GeometryDisplayLayout, OutputFrameGeometry, OutputFrameGeometryRead, OutputFrameProbeRequest,
+    OutputFrameProbeResult, RevisionGateResult,
 };
 use lpfs::LpFsStd;
 
@@ -109,7 +109,8 @@ fn the_published_display_layout_draws_every_lamp_of_both_fixtures() {
         let result = engine.read_project_output_frame_probe(
             registry,
             OutputFrameProbeRequest {
-                display_layout: ControlDisplayLayoutRead::Always,
+                geometry: OutputFrameGeometryRead::Always,
+                samples: Some(lpc_wire::WireChannelSampleFormat::U16),
             },
         );
         let OutputFrameProbeResult::Frame { outputs } = result;
@@ -117,9 +118,11 @@ fn the_published_display_layout_draws_every_lamp_of_both_fixtures() {
             .into_iter()
             .next()
             .unwrap_or_else(|| panic!("{example}: one published output"));
-        let ControlDisplayLayoutProbeResult::Layout(lpc_model::ControlDisplayLayout::Layout2d(
-            layout,
-        )) = entry.display_layout
+        let RevisionGateResult::Changed(OutputFrameGeometry {
+            display_layout:
+                GeometryDisplayLayout::Layout(lpc_model::ControlDisplayLayout::Layout2d(layout)),
+            ..
+        }) = entry.geometry
         else {
             panic!("{example}: the published frame carries no display layout");
         };

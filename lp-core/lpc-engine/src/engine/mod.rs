@@ -1,5 +1,7 @@
 //! Core runtime owner: [`Engine`] drives frame state, tree, bindings, and resolver.
 
+mod content_stamp;
+mod control_geometry_stamps;
 mod engine;
 mod engine_error;
 mod engine_services;
@@ -27,6 +29,7 @@ mod project_apply;
 mod project_fault;
 // The never-black policy's oracle: what faults a project, what must not,
 // and how the verdict clears.
+mod preview_sample_encoding;
 #[cfg(test)]
 mod project_fault_tests;
 mod project_loader;
@@ -50,6 +53,8 @@ mod shader_palette_tests;
 #[cfg(all(test, feature = "node-clock", feature = "node-shader"))]
 mod shader_timebase_tests;
 mod srgb8_lut;
+mod state_root_stamps;
+mod state_root_values_hash;
 #[cfg(test)]
 pub(crate) mod test_support;
 // Every project here drives a clock through an output → fixture → shader →

@@ -243,6 +243,16 @@ pub trait NodeRuntime {
         Revision::default()
     }
 
+    /// Revision stamped the last time
+    /// [`Self::runtime_output_sample_layout`] changed.
+    ///
+    /// Folded into the published-frame read's geometry revision beside the
+    /// placement revision: a lamp-count or color-order change regroups the
+    /// samples without re-cutting the wire.
+    fn runtime_output_sample_layout_revision(&self) -> Revision {
+        Revision::default()
+    }
+
     /// Where this node's control product lands on its output's wire, when the
     /// node authored a patch for it.
     ///

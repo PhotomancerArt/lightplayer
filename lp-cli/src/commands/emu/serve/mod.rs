@@ -38,6 +38,7 @@
 mod air;
 mod board;
 mod door;
+mod wire_tap;
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;

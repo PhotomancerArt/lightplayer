@@ -15,7 +15,7 @@ use lpc_model::{
 };
 use lpc_registry::ProjectRegistry;
 use lpc_shared::time::TimeProvider;
-use lpc_wire::{ControlDisplayLayoutProbeResult, ControlDisplayLayoutRead, NodeRuntimeStatus};
+use lpc_wire::NodeRuntimeStatus;
 
 use crate::dataflow::binding::{BindingDraft, BindingError, BindingRef};
 use crate::dataflow::resolver::{
@@ -126,6 +126,19 @@ pub struct Engine {
     /// un-plumbed host refuses big layouts rather than wedging a serial
     /// link. Device/link state, never project data.
     display_layout_budget: Option<usize>,
+    /// When each probed control product's sample layout last changed — the
+    /// sample-layout half of the control-product probe's geometry revision
+    /// (see [`super::control_geometry_stamps`]). Probe bookkeeping, not
+    /// project data.
+    control_geometry_stamps: super::control_geometry_stamps::ControlGeometryStamps,
+    /// When the binding graph's structure last changed — the binding-graph
+    /// probe's structure revision (see [`super::content_stamp`]).
+    /// Probe bookkeeping, not project data.
+    binding_structure_stamp: super::content_stamp::ContentStamp,
+    /// When each node's state slot root last changed by content — the
+    /// project read's state-root gate (see [`super::state_root_stamps`]).
+    /// Read bookkeeping, not project data.
+    state_root_stamps: super::state_root_stamps::StateRootStamps,
     /// Every node in [`NodeRuntimeStatus::Fault`] as of the END of the last
     /// tick, and when the project's continuous fault began — the project-level
     /// verdict outputs paint the fault pattern from (D1).
@@ -183,6 +196,9 @@ impl Engine {
                 lpc_wire::PROJECT_READ_FRAME_MAX_BYTES
                     - lpc_wire::PROJECT_READ_PROBE_HEADER_RESERVE_BYTES,
             ),
+            control_geometry_stamps: Default::default(),
+            binding_structure_stamp: Default::default(),
+            state_root_stamps: Default::default(),
             project_fault: None,
             project_fault_fingerprint: None,
             fault_presentation: FaultPresentation::default(),
@@ -529,6 +545,70 @@ impl Engine {
         self.display_layout_budget
     }
 
+    /// The revision at which `product`'s sample layout last changed, given
+    /// the layout a control-product probe just rendered — see
+    /// [`super::control_geometry_stamps`].
+    pub(super) fn stamp_control_sample_layout(
+        &mut self,
+        product: ControlProduct,
+        sample_layout: &ControlLayout,
+    ) -> Revision {
+        let tree = &self.tree;
+        self.control_geometry_stamps
+            .stamp(product, sample_layout, self.revision, |node| {
+                tree.get(node).is_some()
+            })
+    }
+
+    /// The binding graph's structure revision, given the hash of the
+    /// structure a binding-graph probe just built — see
+    /// [`super::content_stamp`].
+    pub(super) fn stamp_binding_structure(&mut self, structure_hash: u64) -> Revision {
+        self.binding_structure_stamp
+            .stamp(structure_hash, self.revision)
+    }
+
+    /// Hash the state slot root of every alive node `selected` admits and
+    /// stamp the ones whose content moved (see [`super::state_root_stamps`]).
+    /// A read runs this before it decides which state roots to send.
+    ///
+    /// Stamps of nodes that no longer hold a state root are dropped when
+    /// the whole tree was looked at.
+    pub(super) fn refresh_state_root_stamps(
+        &mut self,
+        selected: impl Fn(NodeId) -> bool,
+        whole_tree: bool,
+    ) {
+        let now = self.revision;
+        let tree = &self.tree;
+        let stamps = &mut self.state_root_stamps;
+        for entry in tree.entries().filter(|entry| selected(entry.id)) {
+            if let NodeEntryState::Alive(node) = entry.state.value()
+                && let Some(state) = node.runtime_state_slots()
+            {
+                let hash = super::state_root_values_hash::state_root_values_hash(
+                    state.shape_id(),
+                    state.data(),
+                );
+                stamps.stamp(entry.id, hash, now);
+            }
+        }
+        if whole_tree {
+            stamps.retain(|id| {
+                tree.get(id).is_some_and(|entry| {
+                    matches!(entry.state.value(), NodeEntryState::Alive(node)
+                        if node.runtime_state_slots().is_some())
+                })
+            });
+        }
+    }
+
+    /// When `node`'s state slot root last changed by content, as of the
+    /// last [`Self::refresh_state_root_stamps`] that looked at it.
+    pub(super) fn state_root_changed_at(&self, node: NodeId) -> Option<Revision> {
+        self.state_root_stamps.changed_at(node)
+    }
+
     pub fn graphics(&self) -> Option<&Arc<dyn LpGraphics>> {
         self.graphics.as_ref()
     }
@@ -813,7 +893,6 @@ impl Engine {
             radio_service,
             frame_time_seconds: time_s,
             safe_output_clamp_q16: self.safe_output_clamp_q16,
-            display_layout_budget: self.display_layout_budget,
             services: &self.services,
             frame_revision: self.revision,
             fault: fault_tick_view(self.project_fault.as_ref(), self.fault_presentation),
@@ -958,7 +1037,6 @@ impl Engine {
             radio_service,
             frame_time_seconds: time_s,
             safe_output_clamp_q16: self.safe_output_clamp_q16,
-            display_layout_budget: self.display_layout_budget,
             services: &self.services,
             frame_revision: self.revision,
             fault: fault_tick_view(self.project_fault.as_ref(), self.fault_presentation),
@@ -1006,7 +1084,6 @@ impl Engine {
             radio_service,
             frame_time_seconds: time_s,
             safe_output_clamp_q16: self.safe_output_clamp_q16,
-            display_layout_budget: self.display_layout_budget,
             services: &self.services,
             frame_revision: self.revision,
             fault: fault_tick_view(self.project_fault.as_ref(), self.fault_presentation),
@@ -1099,7 +1176,6 @@ impl Engine {
             radio_service,
             frame_time_seconds: time_s,
             safe_output_clamp_q16: self.safe_output_clamp_q16,
-            display_layout_budget: self.display_layout_budget,
             services: &self.services,
             frame_revision: self.revision,
             fault: fault_tick_view(self.project_fault.as_ref(), self.fault_presentation),
@@ -1160,7 +1236,6 @@ impl Engine {
             radio_service,
             frame_time_seconds: time_s,
             safe_output_clamp_q16: self.safe_output_clamp_q16,
-            display_layout_budget: self.display_layout_budget,
             services: &self.services,
             frame_revision: self.revision,
             fault: fault_tick_view(self.project_fault.as_ref(), self.fault_presentation),
@@ -1206,7 +1281,6 @@ impl Engine {
             radio_service,
             frame_time_seconds: time_s,
             safe_output_clamp_q16: self.safe_output_clamp_q16,
-            display_layout_budget: self.display_layout_budget,
             services: &self.services,
             frame_revision: self.revision,
             fault: fault_tick_view(self.project_fault.as_ref(), self.fault_presentation),
@@ -1229,8 +1303,8 @@ impl Engine {
         product: ControlProduct,
         request: &ControlRenderRequest,
         target: ControlRenderTarget<'_>,
-        display_layout: ControlDisplayLayoutRead,
-    ) -> Result<(ControlLayout, ControlDisplayLayoutProbeResult), SessionResolveError> {
+        want_display_layout: bool,
+    ) -> Result<(ControlLayout, Option<ControlDisplayLayout>), SessionResolveError> {
         let mut producers_ticked = VecSet::new();
         let time_s = self.frame_time.total_ms as f32 / 1000.0;
         let time_provider = self.services.time_provider();
@@ -1252,12 +1326,11 @@ impl Engine {
             radio_service,
             frame_time_seconds: time_s,
             safe_output_clamp_q16: self.safe_output_clamp_q16,
-            display_layout_budget: self.display_layout_budget,
             services: &self.services,
             frame_revision: self.revision,
             fault: fault_tick_view(self.project_fault.as_ref(), self.fault_presentation),
         };
-        host.render_node_control_probe(product, request, target, display_layout)
+        host.render_node_control_probe(product, request, target, want_display_layout)
     }
 
     /// Ask a control producer for its display layout WITHOUT rendering it.
@@ -1268,12 +1341,15 @@ impl Engine {
     /// positions to draw them. Producers answer from cached mapping state, so
     /// the cost is O(lamps) with no graph resolve and no shader work — which
     /// is the whole point of not going through the control-product probe.
+    ///
+    /// `Ok(None)` when the node exposes no display layout for `product`. The
+    /// layout is returned raw: the byte budget and the revision gate belong
+    /// to the caller, which knows what it is going to send.
     pub(crate) fn control_display_layout_probe(
         &mut self,
         registry: &ProjectRegistry,
         product: ControlProduct,
-        display_layout: ControlDisplayLayoutRead,
-    ) -> Result<ControlDisplayLayoutProbeResult, SessionResolveError> {
+    ) -> Result<Option<ControlDisplayLayout>, SessionResolveError> {
         let mut producers_ticked = VecSet::new();
         let time_s = self.frame_time.total_ms as f32 / 1000.0;
         let time_provider = self.services.time_provider();
@@ -1295,12 +1371,11 @@ impl Engine {
             radio_service,
             frame_time_seconds: time_s,
             safe_output_clamp_q16: self.safe_output_clamp_q16,
-            display_layout_budget: self.display_layout_budget,
             services: &self.services,
             frame_revision: self.revision,
             fault: fault_tick_view(self.project_fault.as_ref(), self.fault_presentation),
         };
-        host.node_control_display_layout(product, display_layout)
+        host.node_control_display_layout(product)
     }
 }
 
@@ -1351,7 +1426,6 @@ struct EngineResolveHost<'a> {
     radio_service: Option<Rc<dyn RadioService>>,
     frame_time_seconds: f32,
     safe_output_clamp_q16: Option<u32>,
-    display_layout_budget: Option<usize>,
     /// The engine's services, read-only — for the per-output smoothing
     /// notice an output's consume context carries. Disjoint from every
     /// `&mut` field above, so the borrow is free.
@@ -2626,8 +2700,8 @@ impl EngineResolveHost<'_> {
         product: ControlProduct,
         request: &ControlRenderRequest,
         target: ControlRenderTarget<'_>,
-        display_layout: ControlDisplayLayoutRead,
-    ) -> Result<(ControlLayout, ControlDisplayLayoutProbeResult), SessionResolveError> {
+        want_display_layout: bool,
+    ) -> Result<(ControlLayout, Option<ControlDisplayLayout>), SessionResolveError> {
         let node_id = product.node();
         let revision = self.frame_revision;
         let mut node_runtime = {
@@ -2679,7 +2753,6 @@ impl EngineResolveHost<'_> {
                     )),
                 );
             };
-            let budget = self.display_layout_budget;
             let mut ctx = ControlRenderContext::new(
                 node_id,
                 revision,
@@ -2691,13 +2764,11 @@ impl EngineResolveHost<'_> {
             catch_node_panic_framed(lp_recovery::FrameKind::NodeRender, &recovery_name, || {
                 let sample_layout =
                     control_node.render_control(product, request, target, &mut ctx)?;
-                let display_layout = control_display_layout_result(
-                    control_node,
-                    product,
-                    display_layout,
-                    budget,
-                    &mut ctx,
-                )?;
+                let display_layout = if want_display_layout {
+                    control_node.control_display_layout(product, &mut ctx)?
+                } else {
+                    None
+                };
                 Ok((sample_layout, display_layout))
             })
         };
@@ -2737,8 +2808,7 @@ impl EngineResolveHost<'_> {
     fn node_control_display_layout(
         &mut self,
         product: ControlProduct,
-        request: ControlDisplayLayoutRead,
-    ) -> Result<ControlDisplayLayoutProbeResult, SessionResolveError> {
+    ) -> Result<Option<ControlDisplayLayout>, SessionResolveError> {
         let node_id = product.node();
         let revision = self.frame_revision;
         let mut node_runtime = {
@@ -2778,14 +2848,8 @@ impl EngineResolveHost<'_> {
                 if let Some(entry) = self.tree.get_mut(node_id) {
                     entry.set_state(NodeEntryState::Alive(node_runtime), revision);
                 }
-                return Ok(ControlDisplayLayoutProbeResult::Unsupported {
-                    reason: format!(
-                        "node {node_id:?} renders no control product output {}",
-                        product.output()
-                    ),
-                });
+                return Ok(None);
             };
-            let budget = self.display_layout_budget;
             let mut ctx = ControlRenderContext::new(
                 node_id,
                 revision,
@@ -2795,7 +2859,7 @@ impl EngineResolveHost<'_> {
                 self,
             );
             catch_node_panic_framed(lp_recovery::FrameKind::NodeRender, &recovery_name, || {
-                control_display_layout_result(control_node, product, request, budget, &mut ctx)
+                control_node.control_display_layout(product, &mut ctx)
             })
         };
 
@@ -2811,70 +2875,32 @@ impl EngineResolveHost<'_> {
     }
 }
 
-fn control_display_layout_result(
-    control_node: &mut dyn crate::node::ControlNode,
-    product: ControlProduct,
-    request: ControlDisplayLayoutRead,
-    budget: Option<usize>,
-    ctx: &mut ControlRenderContext<'_>,
-) -> Result<ControlDisplayLayoutProbeResult, NodeError> {
-    match request {
-        ControlDisplayLayoutRead::None => Ok(ControlDisplayLayoutProbeResult::Omitted),
-        ControlDisplayLayoutRead::Always | ControlDisplayLayoutRead::IfChanged { .. } => {
-            let Some(layout) = control_node.control_display_layout(product, ctx)? else {
-                return Ok(ControlDisplayLayoutProbeResult::Unsupported {
-                    reason: alloc::string::String::from(
-                        "control product does not expose display layout",
-                    ),
-                });
-            };
-            Ok(gate_display_layout(layout, request, budget))
-        }
-    }
-}
-
-/// Apply the read's revision gate and the transport's byte budget to a
-/// layout that is already in hand.
-///
-/// Split out of [`control_display_layout_result`] because the published-frame
-/// read builds its layout rather than asking one node for it — an output's
-/// geometry is N producers' layouts rebased through the fragments that placed
-/// them — and the gate must be the same gate either way.
+/// Why `layout` cannot ride one project-read answer on this link, or `None`
+/// when it fits.
 ///
 /// `budget` is the embedder-declared transport limit
 /// ([`Engine::set_display_layout_budget`]): the transport rejects any single
 /// event larger than its frame, and that rejection is terminal for the whole
 /// read stream — an over-budget layout wedges the entire project view, not
-/// just one probe. So an oversized layout is refused here as `Unsupported`,
-/// which clients render as an honest "no layout". `None` = the link has no
-/// meaningful frame limit and every layout is answered.
-pub(crate) fn gate_display_layout(
-    layout: ControlDisplayLayout,
-    request: ControlDisplayLayoutRead,
+/// just one probe. So an oversized layout is refused by the probes as
+/// `Unsupported`, which clients render as an honest "no layout". `None` = the
+/// link has no meaningful frame limit and every layout is answered.
+///
+/// Measured only when a layout is about to be SENT: the geometry gate answers
+/// `Unchanged` before anything is serialized.
+pub(crate) fn display_layout_over_budget(
+    layout: &ControlDisplayLayout,
     budget: Option<usize>,
-) -> ControlDisplayLayoutProbeResult {
-    let revision = layout.revision();
-    match request {
-        ControlDisplayLayoutRead::None => ControlDisplayLayoutProbeResult::Omitted,
-        ControlDisplayLayoutRead::IfChanged {
-            known_revision: Some(known),
-        } if known == revision => ControlDisplayLayoutProbeResult::Unchanged { revision },
-        _ => {
-            if let Some(budget) = budget {
-                let layout_len = lpc_wire::ser_write_json_len(&layout);
-                if layout_len > budget {
-                    return ControlDisplayLayoutProbeResult::Unsupported {
-                        reason: alloc::format!(
-                            "display layout is {layout_len} bytes serialized, over this \
-                             link's {budget}-byte budget; a layout this large cannot ride \
-                             one project-read frame"
-                        ),
-                    };
-                }
-            }
-            ControlDisplayLayoutProbeResult::Layout(layout)
-        }
-    }
+) -> Option<alloc::string::String> {
+    let budget = budget?;
+    let layout_len = lpc_wire::ser_write_json_len(layout);
+    (layout_len > budget).then(|| {
+        alloc::format!(
+            "display layout is {layout_len} bytes serialized, over this \
+             link's {budget}-byte budget; a layout this large cannot ride \
+             one project-read frame"
+        )
+    })
 }
 
 fn slot_path_semantics(
@@ -3127,7 +3153,7 @@ fn restore_node_after_failed_control_probe(
     node_runtime: Box<dyn NodeRuntime>,
     revision: Revision,
     err: SessionResolveError,
-) -> Result<(ControlLayout, ControlDisplayLayoutProbeResult), SessionResolveError> {
+) -> Result<(ControlLayout, Option<ControlDisplayLayout>), SessionResolveError> {
     if let Some(entry) = tree.get_mut(node_id) {
         entry.set_state(NodeEntryState::Alive(node_runtime), revision);
     }
@@ -3282,7 +3308,6 @@ pub(crate) fn resolve_with_engine_host(
         radio_service,
         frame_time_seconds: time_s,
         safe_output_clamp_q16: eng.safe_output_clamp_q16,
-        display_layout_budget: eng.display_layout_budget,
         services: &eng.services,
         frame_revision: eng.revision,
         fault: fault_tick_view(eng.project_fault.as_ref(), eng.fault_presentation),
@@ -3329,7 +3354,6 @@ pub(super) fn resolve_twice_same_frame_with_engine_host(
         radio_service,
         frame_time_seconds: time_s,
         safe_output_clamp_q16: eng.safe_output_clamp_q16,
-        display_layout_budget: eng.display_layout_budget,
         services: &eng.services,
         frame_revision: eng.revision,
         fault: fault_tick_view(eng.project_fault.as_ref(), eng.fault_presentation),

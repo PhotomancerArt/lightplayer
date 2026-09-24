@@ -612,7 +612,7 @@ pub(crate) fn map2d_control_preview_product(
         .with_preview(UiProductPreview::ControlNative(UiControlProductPreview {
             revision: 104,
             extent: ControlExtent::new(1, count * 3),
-            sample_format: UiControlSampleFormat::U16,
+            sample_format: UiControlSampleFormat::U8,
             sample_layout: ControlSampleLayout {
                 spans: vec![ControlSampleSpan {
                     row: 0,
@@ -636,7 +636,7 @@ pub(crate) fn control_preview_product(name: &str) -> UiProducedProduct {
         .with_preview(UiProductPreview::ControlNative(UiControlProductPreview {
             revision: 104,
             extent: ControlExtent::new(1, 48),
-            sample_format: UiControlSampleFormat::U16,
+            sample_format: UiControlSampleFormat::U8,
             sample_layout: ControlSampleLayout {
                 spans: vec![ControlSampleSpan {
                     row: 0,
@@ -690,16 +690,16 @@ fn control_layout_2d_fixture() -> ControlDisplayLayout {
     ControlDisplayLayout::Layout2d(ControlLayout2d::new(Revision::new(104), 1, 1, lamps))
 }
 
+/// A live control preview's samples: LINEAR unorm8, one byte per sample —
+/// what Studio pulls over a wire.
 fn control_preview_bytes(lamps: u32) -> Vec<u8> {
-    let mut bytes = Vec::with_capacity((lamps * 3 * 2) as usize);
+    let mut bytes = Vec::with_capacity((lamps * 3) as usize);
     for index in 0..lamps {
         let phase = index as f32 / lamps.max(1) as f32;
-        let r = ((phase * core::f32::consts::TAU).sin() * 0.5 + 0.5) * u16::MAX as f32;
-        let g = (((phase + 0.33) * core::f32::consts::TAU).sin() * 0.5 + 0.5) * u16::MAX as f32;
-        let b = (((phase + 0.66) * core::f32::consts::TAU).sin() * 0.5 + 0.5) * u16::MAX as f32;
-        for sample in [r as u16, g as u16, b as u16] {
-            bytes.extend_from_slice(&sample.to_le_bytes());
-        }
+        let level = |offset: f32| {
+            ((((phase + offset) * core::f32::consts::TAU).sin() * 0.5 + 0.5) * 255.0).round() as u8
+        };
+        bytes.extend_from_slice(&[level(0.0), level(0.33), level(0.66)]);
     }
     bytes
 }

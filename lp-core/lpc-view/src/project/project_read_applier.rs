@@ -1052,6 +1052,35 @@ mod tests {
         events
     }
 
+    /// lean-wire P6: a steady read sends a node's state root only when its
+    /// content changed, and no `entry_changed` for a node that did not
+    /// change. A read with neither keeps what the mirror holds.
+    #[test]
+    fn a_steady_read_without_roots_or_deltas_keeps_the_mirror() {
+        let mut view = ProjectView::new();
+        apply_stream(&mut view, baseline_events()).unwrap();
+        let entry_before = view.tree.nodes.get(&NodeId::new(1)).cloned();
+
+        let steady = vec![
+            begin(9),
+            q(
+                0,
+                nodes(ProjectReadNodeEvent::Begin {
+                    level: ReadLevel::Detail,
+                }),
+            ),
+            q(0, nodes(ProjectReadNodeEvent::End)),
+            end(9),
+        ];
+        let revision = apply_stream(&mut view, steady).unwrap();
+
+        assert_eq!(revision, Revision::new(9));
+        assert_eq!(view.revision, Revision::new(9));
+        assert_eq!(f32_root_value(&view, "node.1.state"), 2.0);
+        assert_eq!(f32_root_value(&view, "node.1.def"), 1.0);
+        assert_eq!(view.tree.nodes.get(&NodeId::new(1)).cloned(), entry_before);
+    }
+
     #[test]
     fn full_stream_applies_to_view() {
         let events = baseline_events();

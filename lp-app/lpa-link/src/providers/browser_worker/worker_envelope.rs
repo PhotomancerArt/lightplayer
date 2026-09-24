@@ -23,15 +23,16 @@
 //!   `lamps × 3 × 2` bytes, which is the size the device already sends
 //!   base64 over a serial link. It rides the ordinary envelope path.
 //! - **Geometry travels once.** The request carries the same
-//!   [`ControlDisplayLayoutRead`] gate the device feed pulls with, so a
-//!   steady card asks `Always` once and `IfChanged` thereafter; the layout
-//!   crosses only when it actually moved, never per frame.
+//!   [`OutputFrameGeometryRead`] gate the device feed pulls with, so a
+//!   steady card asks `Always` once and `IfChanged` thereafter; the sample
+//!   layout, display layout and placements cross only when they actually
+//!   moved, never per frame.
 //!
 //! `output_frame: None` means the host is not reading the output side at all
 //! — which is every tick of a shader-only slot once the worker's first answer
 //! reported `control_first: false` — so those slots pay nothing.
 
-use lpc_wire::{ControlDisplayLayoutRead, OutputFrameEntry};
+use lpc_wire::{OutputFrameEntry, OutputFrameGeometryRead};
 use serde::{Deserialize, Serialize};
 
 /// How the browser worker advances the firmware clock.
@@ -195,7 +196,7 @@ pub enum BrowserInputEnvelope {
         /// Also deliver the project's published output frame this tick — see
         /// the type's docs for why the request rides the frame it belongs to.
         #[serde(skip_serializing_if = "Option::is_none")]
-        output_frame: Option<ControlDisplayLayoutRead>,
+        output_frame: Option<OutputFrameGeometryRead>,
     },
     /// Tick a GPU-tier runtime and present its bus visual product directly
     /// to the card surface attached via `attach_preview_surface` — zero
@@ -215,7 +216,7 @@ pub enum BrowserInputEnvelope {
         /// Also deliver the project's published output frame this tick — see
         /// the type's docs for why the request rides the frame it belongs to.
         #[serde(skip_serializing_if = "Option::is_none")]
-        output_frame: Option<ControlDisplayLayoutRead>,
+        output_frame: Option<OutputFrameGeometryRead>,
     },
     /// Capture ONE poster frame of the bus visual product at the requested
     /// size — the on-demand readback for cards whose canvas cannot be read

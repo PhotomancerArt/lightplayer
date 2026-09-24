@@ -10,16 +10,51 @@
 //! itself stays virtual (demand-resolved). Channel values are resolved on
 //! demand when `include_values` is set, so a topology-only read costs no
 //! resolution work. A future materialized bus can serve the same contract.
+//!
+//! # Structure on change, values every read
+//!
+//! The answer has two halves that move at very different rates:
+//!
+//! - the **structure** ([`WireBindingGraph`]): the bindings, and each
+//!   channel's identity and static fields (scope, name, kind, providers,
+//!   consumers, the primary-visual role). It moves when the wiring does — a
+//!   binding registered or removed, a priority or kind changed, a channel
+//!   appearing or disappearing, a `panel = "show"` hint changing, a panel
+//!   writer engaging or letting go;
+//! - the **values** ([`WireBusChannelValues`]): each channel's resolved value,
+//!   which moves every tick.
+//!
+//! The structure is revision-gated (`revision_gate`): the request says
+//! [`RevisionGateRead`], and the answer's structure is a
+//! [`RevisionGateResult`] — `Unchanged { revision }` on a steady read. The
+//! values ride every read that asks for them, as a positional list in the
+//! structure's channel order, stamped with the structure revision they were
+//! resolved against. A client applies a value list ONLY to a cached
+//! structure at that revision; on a mismatch it drops the list and asks the
+//! structure `Always` next read. Values are never applied to the wrong
+//! channels.
+//!
+//! The structure revision moves only when the structure does: the engine
+//! compares each read's structure by content and stamps the revision at which
+//! it last changed. A value can therefore never sit inside the structure —
+//! which is why an engaged panel writer is the value-free
+//! [`WireBindingEndpoint::PanelWriter`], not a literal carrying the knob's
+//! position. See `docs/adr/2026-07-06-binding-graph-probe.md` (amended
+//! 2026-09-23).
 
 use alloc::string::String;
 use alloc::vec::Vec;
 
 use lpc_model::{Kind, LpValue, NodeId, Revision, SlotPath};
 
-/// Request the project's effective binding graph and bus channel summary.
+use super::{RevisionGateRead, RevisionGateResult};
+
+/// Request the project's effective binding graph and bus channel values.
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
 pub struct BindingGraphProbeRequest {
+    /// Whether and how to ship the graph's structure (revision-gated).
+    pub structure: RevisionGateRead,
     /// Resolve and include each channel's current value.
     pub include_values: bool,
 }
@@ -29,17 +64,31 @@ pub struct BindingGraphProbeRequest {
 #[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case")]
 pub enum BindingGraphProbeResult {
-    Graph(WireBindingGraph),
+    Graph(WireBindingGraphRead),
     Error { message: String },
 }
 
-/// The project's effective binding graph at one revision.
+/// One binding-graph answer: the gated structure and, when asked, the values.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
+pub struct WireBindingGraphRead {
+    /// The graph's structure, revision-gated.
+    pub structure: RevisionGateResult<WireBindingGraph>,
+    /// Every channel's value, present when the request asked for values.
+    pub values: Option<WireBusChannelValues>,
+}
+
+/// The project's effective binding graph: its structure at one structure
+/// revision. Carries no channel values (see [`WireBusChannelValues`]).
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
 pub struct WireBindingGraph {
-    /// Engine revision the snapshot was taken at.
+    /// The structure revision: the engine revision at which this structure
+    /// was first answered. Moves only when the structure does — never on a
+    /// value change, never merely because the engine ticked.
     pub revision: Revision,
-    /// Every registered binding, authored and default.
+    /// Every registered binding, authored and default, plus one row per
+    /// engaged panel writer.
     pub bindings: Vec<WireEffectiveBinding>,
     /// Every bus channel referenced by at least one binding.
     pub channels: Vec<WireBusChannel>,
@@ -136,6 +185,11 @@ pub enum WireBindingEndpoint {
     NodeSlot { node: NodeId, slot: SlotPath },
     /// An authored literal value.
     Literal { value: LpValue },
+    /// An engaged panel writer (a [`WireBindingOrigin::Panel`] row). The
+    /// value it holds is deliberately NOT here: it is the channel's value
+    /// (the writer outranks every provider), which rides the values list. A
+    /// knob turn must not move the structure.
+    PanelWriter,
 }
 
 /// Where an effective binding came from.
@@ -170,25 +224,67 @@ pub struct WireBusChannel {
     /// Indices into [`WireBindingGraph::bindings`] whose endpoint consumes
     /// from this channel.
     pub consumers: Vec<u32>,
-    /// Resolved current value, present when the request asked for values.
-    pub value: Option<WireBusChannelValue>,
     /// Engine-reported root-scope role: true for THE channel the root
     /// module's output interface mirrors (the project's primary visual).
     /// Consumers must key off this flag, never off the channel name.
     pub primary_visual: bool,
 }
 
-/// A channel's resolved value (or the resolution failure) at the snapshot
-/// revision.
+/// Every channel's value at one read, keyed to the structure by position.
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
-pub struct WireBusChannelValue {
-    /// Engine revision the value was resolved at.
-    pub revision: Revision,
-    /// Resolved value; `None` when resolution failed.
-    pub value: Option<LpValue>,
-    /// Resolution failure detail when `value` is `None`.
-    pub error: Option<String>,
+pub struct WireBusChannelValues {
+    /// The structure revision these values were resolved against. A client
+    /// whose cached structure is at any other revision must drop the list.
+    pub structure_revision: Revision,
+    /// One entry per [`WireBindingGraph::channels`] row, in that order.
+    pub values: Vec<WireBusChannelValue>,
+}
+
+/// One channel's value at the read.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
+#[serde(rename_all = "snake_case")]
+pub enum WireBusChannelValue {
+    /// Not resolved: resolving it would put demand on an inactive sink scope
+    /// (the R2 no-demand property — a probe never renders an idle playlist
+    /// entry).
+    Unresolved,
+    /// Resolved, and the channel carries no value.
+    Empty,
+    /// The resolved value.
+    Value(LpValue),
+    /// Nothing writes the channel in any scope its consumers can see: the
+    /// resolver's no-provider case, which consumers treat as a legitimate
+    /// empty channel (authored defaults apply). Its own variant rather than
+    /// an [`Self::Error`] string because it is the common case on every
+    /// project with unwritten inputs, and the channel it names is already the
+    /// structure row at the same position — as a string it cost ~60 B per
+    /// such channel on every read (lean-wire P6).
+    NoProvider,
+    /// Resolution failed for any other reason.
+    Error(String),
+}
+
+impl WireBusChannelValue {
+    /// The resolved value, when there is one.
+    #[must_use]
+    pub fn value(&self) -> Option<&LpValue> {
+        match self {
+            Self::Value(value) => Some(value),
+            Self::Unresolved | Self::Empty | Self::NoProvider | Self::Error(_) => None,
+        }
+    }
+
+    /// The resolution failure, when resolution failed for a reason other
+    /// than [`Self::NoProvider`].
+    #[must_use]
+    pub fn error(&self) -> Option<&str> {
+        match self {
+            Self::Error(error) => Some(error),
+            Self::Unresolved | Self::Empty | Self::NoProvider | Self::Value(_) => None,
+        }
+    }
 }
 
 #[cfg(test)]
@@ -199,7 +295,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn binding_graph_round_trips_through_json() {
+    fn binding_graph_read_round_trips_through_json() {
         let graph = WireBindingGraph {
             revision: Revision::new(7),
             bindings: vec![WireEffectiveBinding {
@@ -226,20 +322,45 @@ mod tests {
                 kind: Some(Kind::Instant),
                 providers: vec![],
                 consumers: vec![0],
-                value: Some(WireBusChannelValue {
-                    revision: Revision::new(7),
-                    value: None,
-                    error: None,
-                }),
                 primary_visual: false,
             }],
         };
-        let result = BindingGraphProbeResult::Graph(graph.clone());
+        let result = BindingGraphProbeResult::Graph(WireBindingGraphRead {
+            structure: RevisionGateResult::Changed(graph),
+            values: Some(WireBusChannelValues {
+                structure_revision: Revision::new(7),
+                values: vec![WireBusChannelValue::Error("no writer".to_string())],
+            }),
+        });
 
         let json = serde_json::to_string(&result).unwrap();
         let decoded: BindingGraphProbeResult = serde_json::from_str(&json).unwrap();
 
-        assert_eq!(decoded, BindingGraphProbeResult::Graph(graph));
+        assert_eq!(decoded, result);
+    }
+
+    /// A steady read is the structure's `unchanged` plus the values, and each
+    /// value is a few bytes: no per-channel revision, no null fields.
+    #[test]
+    fn a_steady_read_is_values_only() {
+        let read = WireBindingGraphRead {
+            structure: RevisionGateResult::Unchanged {
+                revision: Revision::new(40),
+            },
+            values: Some(WireBusChannelValues {
+                structure_revision: Revision::new(40),
+                values: vec![
+                    WireBusChannelValue::Value(LpValue::F32(0.5)),
+                    WireBusChannelValue::Empty,
+                    WireBusChannelValue::Unresolved,
+                ],
+            }),
+        };
+        let json = crate::json::to_string(&read).unwrap();
+        assert_eq!(
+            json,
+            r#"{"structure":{"unchanged":{"revision":40}},"values":{"structure_revision":40,"values":[{"value":{"f32":0.5}},"empty","unresolved"]}}"#
+        );
     }
 
     #[test]
@@ -259,10 +380,32 @@ mod tests {
             WireBindingEndpoint::Literal {
                 value: LpValue::F32(0.5),
             },
+            WireBindingEndpoint::PanelWriter,
         ] {
             let json = serde_json::to_string(&endpoint).unwrap();
             let decoded: WireBindingEndpoint = serde_json::from_str(&json).unwrap();
             assert_eq!(decoded, endpoint);
         }
+    }
+
+    #[test]
+    fn channel_value_accessors_split_value_from_error() {
+        let value = WireBusChannelValue::Value(LpValue::F32(1.0));
+        assert_eq!(value.value(), Some(&LpValue::F32(1.0)));
+        assert_eq!(value.error(), None);
+        let error = WireBusChannelValue::Error("boom".to_string());
+        assert_eq!(error.value(), None);
+        assert_eq!(error.error(), Some("boom"));
+        assert_eq!(WireBusChannelValue::Unresolved.value(), None);
+        assert_eq!(WireBusChannelValue::NoProvider.value(), None);
+        assert_eq!(WireBusChannelValue::NoProvider.error(), None);
+    }
+
+    #[test]
+    fn no_provider_is_a_bare_tag_on_the_wire() {
+        let json = serde_json::to_string(&WireBusChannelValue::NoProvider).unwrap();
+        assert_eq!(json, r#""no_provider""#);
+        let decoded: WireBusChannelValue = serde_json::from_str(&json).unwrap();
+        assert_eq!(decoded, WireBusChannelValue::NoProvider);
     }
 }

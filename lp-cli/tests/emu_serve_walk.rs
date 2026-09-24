@@ -13,8 +13,9 @@
 //! Equal figures, not equal bytes.
 //!
 //! Two `#[ignore]`d tests, because between them they want a riscv32 build of
-//! a pinned firmware commit and a `git archive` of a project the catalog has
-//! since moved.
+//! a pinned firmware commit, a host build of the `lp-cli` that speaks its wire
+//! protocol ([`CLIENT_COMMIT`]), and a `git archive` of a project the catalog
+//! has since moved.
 
 mod support;
 
@@ -36,6 +37,20 @@ const COMPILE_OUTPUTS: &str = "lpir_inst_count=573, lpir_func_count=12, lpir_imp
 /// `lp-emu/esp/lp-emu-esp32c6/walks/README.md` says the same.
 const WALK_COMMIT: &str = "d6cfaa205";
 
+/// The client the walk uploads with: the last `main` that speaks the
+/// reference image's wire protocol (20). **Not the `lp-cli` under test.**
+///
+/// The image is pinned, so it speaks proto 20 for ever; today's `lp-cli`
+/// speaks whatever `WIRE_PROTO_VERSION` is now and — correctly — refuses a
+/// mismatched device. Pairing the two made this gate fail on every wire bump
+/// (the first was 20 → 21, PR #785), so the client is pinned the way the
+/// firmware is and the pair never drifts. It cannot be [`WALK_COMMIT`]
+/// itself: `serial:ws://`, the only way to reach the door, landed three days
+/// after it (76c67d592). What this gate asks of TODAY's build is the door —
+/// `lp-cli emu serve`, which [`Serve`] still runs from this tree.
+/// `scripts/emu/build-reference-cli.sh` builds it.
+const CLIENT_COMMIT: &str = "13b04dd0b";
+
 /// **Gate 4** — the upload walk over the WS door, and **gate 5** — the second
 /// boot finds the project.
 ///
@@ -50,6 +65,9 @@ fn the_walk_over_the_ws_door_lands_the_same_project_with_the_same_figures() {
     let Some(project) = walk_project() else {
         return;
     };
+    let Some(client) = reference_cli() else {
+        return;
+    };
     let state = scratch();
     let _ = std::fs::remove_dir_all(&state);
 
@@ -62,7 +80,7 @@ fn the_walk_over_the_ws_door_lands_the_same_project_with_the_same_figures() {
     );
 
     let host = format!("serial:ws://127.0.0.1:{}/board/c6-a/bytes", serve.port());
-    let upload = Command::new(env!("CARGO_BIN_EXE_lp-cli"))
+    let upload = Command::new(&client)
         .arg("upload")
         .arg(&project)
         .arg(&host)
@@ -243,6 +261,54 @@ fn walk_project() -> Option<PathBuf> {
         return None;
     }
     project.join("project.json").is_file().then_some(project)
+}
+
+/// The proto-20 client ([`CLIENT_COMMIT`]): `LP_EMU_REF_CLI`, else the
+/// conventional path, else — only with `LP_EMU_BUILD_FW=1`, as the reference
+/// image itself — built by `scripts/emu/build-reference-cli.sh`. `None` with
+/// an honest skip otherwise.
+fn reference_cli() -> Option<PathBuf> {
+    if let Ok(from_env) = std::env::var("LP_EMU_REF_CLI") {
+        let from_env = PathBuf::from(from_env);
+        assert!(
+            from_env.is_file(),
+            "LP_EMU_REF_CLI points at {}, which is not a file",
+            from_env.display()
+        );
+        return Some(from_env);
+    }
+    let root = workspace_root()?;
+    let path = root
+        .join("target")
+        .join("emu-ref")
+        .join(format!("{CLIENT_COMMIT}-lp-cli"))
+        .join("lp-cli");
+    if path.is_file() {
+        return Some(path);
+    }
+    if std::env::var("LP_EMU_BUILD_FW").as_deref() != Ok("1") {
+        skip(
+            "emu_serve_walk",
+            &format!(
+                "no proto-20 client at {}. Set LP_EMU_BUILD_FW=1 to build it \
+                 (scripts/emu/build-reference-cli.sh {CLIENT_COMMIT}), or point LP_EMU_REF_CLI \
+                 at one.",
+                path.display()
+            ),
+        );
+        return None;
+    }
+    let status = Command::new(root.join("scripts/emu/build-reference-cli.sh"))
+        .arg(CLIENT_COMMIT)
+        .current_dir(&root)
+        .status()
+        .expect("running build-reference-cli.sh");
+    assert!(
+        status.success() && path.is_file(),
+        "build-reference-cli.sh {CLIENT_COMMIT} failed: {status} — LP_EMU_BUILD_FW=1 asked for \
+         this client, so a failed build is a failed test, not a skip"
+    );
+    Some(path)
 }
 
 fn workspace_root() -> Option<PathBuf> {

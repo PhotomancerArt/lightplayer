@@ -326,7 +326,6 @@ pub(crate) fn project_editor_summary(phase: ProjectSyncPhase) -> ProjectSyncSumm
         node_count: 5,
         root_node_count: 1,
         slot_root_count: 10,
-        resource_count: 2,
         shape_count: 18,
         shapes_complete: true,
         runtime: Some(ProjectRuntimeSummary {
