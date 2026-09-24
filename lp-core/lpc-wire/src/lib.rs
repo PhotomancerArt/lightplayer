@@ -1,4 +1,14 @@
 //! LightPlayer engine↔client wire model (`Wire*` types where needed).
+//!
+//! A board writes its replies as JSON text (`M!{json}` lines) until a host
+//! opts a link into **JSON Pack**, a compact binary form of the same JSON
+//! that decodes back byte-identical ([`lp_json_pack`], `lp-base/lp-json-pack`).
+//! The per-link choice ([`WireEncoding`], `wire_encoding` module), when to
+//! ask for it ([`PackOptIn`], `pack_opt_in` module), and the generated,
+//! `WIRE_PROTO_VERSION`-versioned dictionary the two ends must agree on
+//! ([`WIRE_DICTIONARY`], `wire_dictionary` module) are documented on those
+//! items; see `docs/adr/2026-09-24-json-pack-wire-encoding.md` for the
+//! decision as a whole.
 
 #![no_std]
 

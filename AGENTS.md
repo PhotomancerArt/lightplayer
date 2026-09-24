@@ -169,6 +169,14 @@ The core is IO-free state machines; async belongs to platform edges. See
   server means pre-hello firmware and is itself the mismatch signal. Never
   use error-text sniffing or silent format probing. See
   `docs/adr/2026-07-14-wire-hello-versioning.md`.
+- **A board's packed-wire dictionary (`lp-json-pack`/`lpc-wire`) is part of
+  the wire, not a side artifact.** A dictionary change is a wire change:
+  regenerate it with `just wire-dict` and bump `WIRE_PROTO_VERSION` in the
+  same change. `just wire-dict-check` (in `check-lint`, so in CI) fails both
+  when the committed dictionary is stale against the wire types and when the
+  dictionary changed without the version bump — the same proto number must
+  always mean the same dictionary. See
+  `docs/adr/2026-09-24-json-pack-wire-encoding.md`.
 
 ## Persisted-format compatibility (the wire rule does NOT apply here)
 
@@ -235,6 +243,7 @@ runtime.
 | `lp-engine`      | Shader runtime, node graph             | yes              |
 | `lpc-access`     | Access core: secrets, tiers, HMAC login, backoff (sans-IO) | yes |
 | `lp-server`      | Project management, client connections | yes              |
+| `lp-json-pack`   | JSON Pack: a compact binary form of JSON that decodes back to byte-identical JSON text (`lp-base/`, generic, dictionary injected) | yes |
 | `lpa-devices`    | Device model: event fold, no IO, no UI | no (host + wasm) |
 | `fw-esp32c6`       | ESP32 firmware                         | yes (bare metal) |
 | `fw-emu`         | RISC-V emulator firmware (CI)          | yes (bare metal) |
@@ -872,6 +881,8 @@ just test-emu-c6                                # its gates (builds firmware)
 just heap-budget-check-chips                    # the firmware's own heap ledger, ratcheted
 just emu-c6 <elf> --strict-bus --timeout 6s     # the workshop binary, thirty flags
 LP_EMU_WIRE_TAP=<dir> just studio-dev-emu; just wire-tap-stat <dir>/c6-a.tap --ledger   # exact wire bytes of a real Studio session, by JSON path — the tool for any wire-size claim
+lp-cli wire unpack --sizes < capture.bin > capture.txt   # rewrite packed frames (JSON Pack) back to `M!{json}` lines, with a per-frame/total size report on stderr
+LP_WIRE_ENCODING=json lp-cli upload projects/test/basic serial:auto   # lp-cli's own serial transports never ask for packed — a JSON-vs-packed comparison, or a link you want to watch as text
 just bench-emu-c6                               # its speed probe (an oracle, never a gate)
 scripts/emu/oracle-sweep.sh <bin-a> <bin-b>     # the identity oracle ACROSS BINARIES: uart + cycles + decoded FRAMES
 just test-emu-jit-image                         # the identity oracle WITHIN one binary: --jit vs --interpreter (CI runs this cell)
