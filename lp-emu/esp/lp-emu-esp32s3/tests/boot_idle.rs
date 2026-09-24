@@ -363,7 +363,10 @@ fn an_attached_but_closed_port_holds_the_packet_until_an_application_opens_it() 
     // `with_no_host_the_console_commits_once_and_falls_silent`).
     let tried = machine.usb_sj_tried();
     let tried_text = String::from_utf8_lossy(&tried).into_owned();
-    assert!(tried.is_empty(), "nothing tried, nothing lost: {tried_text:?}");
+    assert!(
+        tried.is_empty(),
+        "nothing tried, nothing lost: {tried_text:?}"
+    );
     assert_nothing_was_refused(&mut machine);
     assert_eq!(
         machine.usb_host_now(),

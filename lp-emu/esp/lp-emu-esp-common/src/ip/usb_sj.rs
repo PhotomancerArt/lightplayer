@@ -157,7 +157,7 @@
 //!
 //! | grade | registers | why |
 //! |---|---|---|
-//! | `measured` | `ep1`, `ep1_conf`, `int_raw`, `int_st`, `int_ena`, `int_clr` | the transitions those transcripts prove: SOF present while attached and absent when the cable is out; `serial_in_ep_data_free` returning only once a host has drained the packet; `serial_in_empty` completing esp-hal's write future; `serial_out_recv_pkt` on host bytes (`lp-cli`'s hello, `emu_usb_hello`); and the whole path exercised byte for byte by both drivers |
+//! | `measured` | `ep1`, `ep1_conf`, `int_raw`, `int_st`, `int_ena`, `int_clr` | the transitions those transcripts prove: SOF present while attached and absent when the cable is out; `serial_in_ep_data_free` returning only once a host has drained the packet (measured through esp-println's polled path and one writer at a time; a write *into* the pending packet is the "one send buffer" paragraph's — documented refusal, modeled fate); `serial_in_empty` completing esp-hal's write future; `serial_out_recv_pkt` on host bytes (`lp-cli`'s hello, `emu_usb_hello`); and the whole path exercised byte for byte by both drivers |
 //! | `documented` | `fram_num` (the SOF period is the USB full-speed frame), `conf0` (the PAC bit map; never written by the shipped image on the C6) | a document states the behaviour; nothing measured it |
 //! | `modeled` | everything else — listed under "Modeled registers" below | our reading of the PAC and the drivers |
 //!
@@ -2088,7 +2088,7 @@ mod tests {
         sb.write(u, INT_CLR, INT_SERIAL_IN_EMPTY | INT_SERIAL_OUT_RECV_PKT);
     }
 
-    /// The firmware's gate (`fw-esp32s3` / `fw-esp32c6`
+    /// The firmware's gate (`fw-esp32s3`
     /// `serial::in_endpoint::InEndpoint::ready`), register for register: wait
     /// until the buffer is free — clear, recheck, else esp-hal's
     /// `flush_tx_async` — then clear the now-stale `serial_in_empty`.
