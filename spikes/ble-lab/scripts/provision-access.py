@@ -101,7 +101,24 @@ def main() -> int:
     ap.add_argument("--open", action="store_true", help="untrusted links hold play without login")
     ap.add_argument("--disable", action="store_true", help="BLE off, no secrets")
     ap.add_argument("--no-reboot", action="store_true")
+    ap.add_argument("--reboot-only", action="store_true", help="skip the write; just reboot")
+    ap.add_argument(
+        "--watch",
+        type=float,
+        default=0.0,
+        help="after the reboot, reopen the port and print the console for this many seconds",
+    )
     args = ap.parse_args()
+
+    if args.reboot_only:
+        fd = open_port(args.dev)
+        try:
+            reply = request(fd, 9002, "reboot")
+            print(f"reboot: {json.dumps(reply)[:200] if reply else 'NO REPLY'}")
+        finally:
+            os.close(fd)
+        watch(args.dev, args.watch)
+        return 0
 
     if args.disable:
         store = device_store(None, args.label, args.tier, args.iterations, False, False)
@@ -125,7 +142,45 @@ def main() -> int:
     safe = dict(store)
     safe["secrets"] = [{**s, "k": "<redacted>"} for s in store["secrets"]]
     print(json.dumps(safe))
+    if not args.no_reboot:
+        watch(args.dev, args.watch)
     return 0
+
+
+def watch(dev: str, seconds: float) -> None:
+    """Reopen the port as soon as the rebooted board re-enumerates and print
+    its non-frame console lines — the boot's `[ble]` lines are only kept if a
+    host is reading when they are written."""
+    if seconds <= 0:
+        return
+    deadline = time.monotonic() + seconds
+    fd = None
+    buf = b""
+    while time.monotonic() < deadline:
+        if fd is None:
+            try:
+                fd = open_port(dev)
+            except OSError:
+                time.sleep(0.05)
+                continue
+        r, _, _ = select.select([fd], [], [], 0.2)
+        if fd not in r:
+            continue
+        try:
+            data = os.read(fd, 65536)
+        except BlockingIOError:
+            continue
+        except OSError:
+            os.close(fd)
+            fd = None
+            continue
+        buf += data
+        *lines, buf = buf.split(b"\n")
+        for raw in lines:
+            if raw.strip() and not raw.startswith(b"M!"):
+                print(raw.decode(errors="replace").rstrip())
+    if fd is not None:
+        os.close(fd)
 
 
 if __name__ == "__main__":
