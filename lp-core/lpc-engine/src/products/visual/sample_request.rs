@@ -4,7 +4,7 @@ use alloc::vec::Vec;
 
 use lp_gfx::{LpGraphics, SampleOutHandle, SamplePointsHandle};
 
-use super::{ConsumerPolicy, VisualSpace};
+use super::{ConsumerPolicy, ScopeGeometry, VisualSpace};
 use crate::node::{NodeError, err_ctx};
 
 /// Texture UV sample point encoded as Q16.16.
@@ -65,6 +65,12 @@ pub struct VisualSampleStream<'a> {
     /// deferred on batch 0 stays deferred on batch 1, exactly as it would
     /// have across the one call the whole product used to be.
     pub continuation: bool,
+    /// The consumer's scope geometry (lamp box, pitch, count) in this
+    /// stream's pixel frame, when it has lamps to describe — a fixture's
+    /// mapping. Read only by a producer whose shader opted into pattern
+    /// space; `None` means every texel centre of the request is a lamp
+    /// ([`ScopeGeometry::texel_centres`]).
+    pub scope: Option<ScopeGeometry>,
 }
 
 impl VisualSampleStream<'_> {
