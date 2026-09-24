@@ -916,8 +916,10 @@ fn a_report_burst_the_run_stopped_inside_is_in_flight_not_lost() {
     let mut console = groups_through(1920, &WIRES);
     console.push_str(&line(1980, WIRES[0]));
     // The second line of the burst, cut in its `first=` list …
-    console.push_str("[INFO] fw_esp32v3::output::rmt::frame_dump: [OUT] frame=1980 leds=16 \
-         crc=0xda7f5d46 lit=16 first=(100,1,87)");
+    console.push_str(
+        "[INFO] fw_esp32v3::output::rmt::frame_dump: [OUT] frame=1980 leds=16 \
+         crc=0xda7f5d46 lit=16 first=(100,1,87)",
+    );
     let parsed = summaries(&console);
     assert_eq!(parsed.len(), 32 * 5 + 1, "the cut line is not a report");
     assert_eq!(reached(&parsed, &WIRES), Ok(1980));
@@ -942,7 +944,10 @@ fn a_withheld_report_is_still_a_lost_one() {
         console.push_str(&line(1980, crc));
     }
     let lost = reached(&summaries(&console), &WIRES).unwrap_err();
-    assert!(lost.contains("frame 1920") && lost.contains("a report was lost"), "{lost}");
+    assert!(
+        lost.contains("frame 1920") && lost.contains("a report was lost"),
+        "{lost}"
+    );
 
     // The last burst with its third line missing and the fourth present:
     // not a burst the run stopped inside.
@@ -951,7 +956,10 @@ fn a_withheld_report_is_still_a_lost_one() {
         console.push_str(&line(1980, crc));
     }
     let lost = reached(&summaries(&console), &WIRES).unwrap_err();
-    assert!(lost.contains("frame 1980") && lost.contains("not cut off"), "{lost}");
+    assert!(
+        lost.contains("frame 1980") && lost.contains("not cut off"),
+        "{lost}"
+    );
 
     // A whole group gone: 1860 then 1980.
     let mut console = groups_through(1860, &WIRES);
@@ -959,7 +967,10 @@ fn a_withheld_report_is_still_a_lost_one() {
         console.push_str(&line(1980, crc));
     }
     let lost = reached(&summaries(&console), &WIRES).unwrap_err();
-    assert!(lost.contains("frame 1980 follows the group of frame 1860"), "{lost}");
+    assert!(
+        lost.contains("frame 1980 follows the group of frame 1860"),
+        "{lost}"
+    );
 
     // A wire reporting twice in one finished group is not "one line per wire".
     let mut console = groups_through(1860, &WIRES);
@@ -1002,7 +1013,13 @@ fn the_five_pads_are_the_boards_own() {
 // ---------------------------------------------------------------------------
 
 /// The five checksums of the defect's run, in output order.
-const WIRES: [u32; 5] = [0x19e6_e98d, 0xda7f_5d46, 0x9da2_5dce, 0x373a_63e9, 0xe2b7_45a3];
+const WIRES: [u32; 5] = [
+    0x19e6_e98d,
+    0xda7f_5d46,
+    0x9da2_5dce,
+    0x373a_63e9,
+    0xe2b7_45a3,
+];
 
 /// One complete summary line, as `frame_dump::report` prints it.
 fn line(n: usize, crc: u32) -> String {
@@ -1015,6 +1032,10 @@ fn line(n: usize, crc: u32) -> String {
 /// Every report group from frame 60 through `through`, whole and in order.
 fn groups_through(through: usize, wires: &[u32]) -> String {
     (1..=through / REPORT_EVERY_FRAMES)
-        .flat_map(|k| wires.iter().map(move |crc| line(k * REPORT_EVERY_FRAMES, *crc)))
+        .flat_map(|k| {
+            wires
+                .iter()
+                .map(move |crc| line(k * REPORT_EVERY_FRAMES, *crc))
+        })
         .collect()
 }

@@ -1,6 +1,7 @@
 ---
-status: open
+status: fixed
 found: 2026-09-23      # ci-equivalent local gate (`just test-emu-esp32v3-boot`), merging lean-wire (#791) into the BLE M3 access core (#794)
+fixed: a3d928d4d
 area: lp-emu/esp/lp-emu-esp32v3/tests/five_wires.rs (the "no summary line is lost" bound)
 class: assumed-context
 related:
@@ -42,13 +43,34 @@ stops"). Lean-wire slowed the render loop from ~2,000 to ~1,986 frames in
 the window and the access core ~4 more; 1,982 is the first count that puts
 the deadline inside a report's drain.
 
-**Fix** — none yet: a gate's tolerance is not this merge's to widen. The
-shape a fix takes is the test's to choose — count a report as made once
-its frame is on the pad and its line has had time to drain, or stop the
-run on a quiet UART rather than a bare deadline — not a larger constant.
+**Fix** — `a3d928d4d`, in the test's reading, with no bound or constant
+moved. Two changes:
 
-**Regression coverage** — the failing test is the coverage; it fails
-deterministically on this image.
+- The summary parser reads **complete lines only**: the text after the
+  console's last newline is the line still in flight and is never parsed
+  (`deinterleave` now keeps the console's final newline, and leaves a cut
+  record whose tail never arrived unterminated). A half-sent line cut in its
+  `crc=` could otherwise report a checksum the guest never printed.
+- The guest's counter is read off the **report groups** (`reached`), not
+  off each wire's own highest line. Groups must be 60 frames apart with
+  none missing; every group but the last must carry exactly one line per
+  wire; the last may be short only as a **prefix of the burst's order** —
+  the burst the run stopped inside. Every wire then reached that frame, and
+  the unchanged bounds `claimed <= decoded < claimed + 60` apply to it.
+
+The bound's strength for real losses is kept and, in two ways, raised: a
+line withheld from any finished group, a line missing from the *middle*
+of the last burst, a wire reporting twice, and a whole missing group all
+fail by name (`a_withheld_report_is_still_a_lost_one`, which fails when
+the two group checks are disabled), and the lower bound now holds every
+wire to the latest frame any wire reported. On the #794 image the walk
+reads all five wires at 1980 against 1,982 pad frames and passes, all
+three claims.
+
+**Regression coverage** — `a_report_burst_the_run_stopped_inside_is_in_flight_not_lost`
+replays this defect's own stream shape (cut in `first=` and cut in
+`crc=`), and `a_withheld_report_is_still_a_lost_one` holds the teeth;
+both run in plain `cargo test -p lp-emu-esp32v3`, no firmware needed.
 
 **Lesson** — a bound between two streams that leave the machine at
 different rates (pad frames at the render rate, their reports at the
