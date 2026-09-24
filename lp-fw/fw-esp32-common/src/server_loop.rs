@@ -211,17 +211,18 @@ pub async fn run_server_loop<T: ServerTransport>(
             // One heartbeat per open link (unsolicited: id 0, single/final
             // message). The server builds each for the link it goes to: a
             // link that holds no tier is told nothing the hello does not.
-            let heartbeats = server.heartbeats(
-                &transport.links(),
-                heartbeat_status(
-                    &server,
-                    fps_stats,
-                    frame_count,
-                    current_time,
-                    startup_time,
-                    memory_stats(),
-                ),
+            // The heap figures first, then the link list: a heartbeat's
+            // memory numbers must not count the transient Vec it is sent
+            // through (the chip ratchet reads them to the byte).
+            let status = heartbeat_status(
+                &server,
+                fps_stats,
+                frame_count,
+                current_time,
+                startup_time,
+                memory_stats(),
             );
+            let heartbeats = server.heartbeats(&transport.links(), status);
             for (link, heartbeat_msg) in heartbeats {
                 // Send heartbeat (non-blocking, ignore errors)
                 if let Err(e) = transport.send(link, heartbeat_msg).await {
@@ -247,6 +248,7 @@ pub async fn run_server_loop<T: ServerTransport>(
 /// function (not an `async` one, not a closure over the loop's state) so it
 /// adds nothing to the loop future's frame — see [`run_server_loop`] on why
 /// that matters on the C6.
+#[inline(never)]
 fn heartbeat_status(
     server: &LpServer,
     fps: lpc_wire::server::SampleStats,
@@ -489,17 +491,18 @@ pub async fn run_server_loop_bounded<T: ServerTransport>(
             // One heartbeat per open link (unsolicited: id 0, single/final
             // message). The server builds each for the link it goes to: a
             // link that holds no tier is told nothing the hello does not.
-            let heartbeats = server.heartbeats(
-                &transport.links(),
-                heartbeat_status(
-                    &server,
-                    fps_stats,
-                    frame_count,
-                    current_time,
-                    startup_time,
-                    memory_stats(),
-                ),
+            // The heap figures first, then the link list: a heartbeat's
+            // memory numbers must not count the transient Vec it is sent
+            // through (the chip ratchet reads them to the byte).
+            let status = heartbeat_status(
+                &server,
+                fps_stats,
+                frame_count,
+                current_time,
+                startup_time,
+                memory_stats(),
             );
+            let heartbeats = server.heartbeats(&transport.links(), status);
             for (link, heartbeat_msg) in heartbeats {
                 // Send heartbeat (non-blocking, ignore errors)
                 if let Err(e) = transport.send(link, heartbeat_msg).await {

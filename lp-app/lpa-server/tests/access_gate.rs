@@ -735,11 +735,7 @@ impl Rig {
             Arc::new(TargetLpvmGraphics::new(lpa_server::DEVICE_SHADER_FRONTEND))
                 as Arc<dyn LpGraphics>,
         );
-        let counter = Rc::new(Cell::new(0u8));
-        server.set_entropy_source(Some(Rc::new(move |buf: &mut [u8]| {
-            counter.set(counter.get().wrapping_add(1));
-            buf.fill(counter.get());
-        })));
+        server.set_entropy_source(Some(counting_entropy));
 
         let mut rig = Self {
             server,
@@ -908,6 +904,15 @@ fn answer(password: &[u8], nonce: &[u8; 32], offers: &[lpc_access::LoginOffer]) 
             LoginMac::compute(&k, nonce)
         })
         .collect()
+}
+
+/// Test entropy: a different fill every call, never a real RNG.
+fn counting_entropy(buf: &mut [u8]) {
+    static COUNTER: core::sync::atomic::AtomicU8 = core::sync::atomic::AtomicU8::new(0);
+    let next = COUNTER
+        .fetch_add(1, core::sync::atomic::Ordering::Relaxed)
+        .wrapping_add(1);
+    buf.fill(next);
 }
 
 fn status() -> HeartbeatStatus {

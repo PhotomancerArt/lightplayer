@@ -457,6 +457,7 @@ impl LpServer {
 
     /// The hello for `link`: the held payload with `auth` computed for that
     /// link (what it may do, and whether it must log in to do more).
+    #[inline(never)]
     pub fn hello_for_link(&self, link: Link) -> lpc_wire::ServerHello {
         let mut hello = self.hello.clone();
         hello.auth = self.access.hello_auth(link, &*self.base_fs);
@@ -483,6 +484,7 @@ impl LpServer {
     /// none (untrusted, not logged in, device not `open`) sees nothing the
     /// hello does not already show: identity only, every measurement zeroed
     /// or absent — a heartbeat that still says "alive" and nothing else.
+    #[inline(never)]
     pub fn heartbeats(
         &self,
         links: &[Link],

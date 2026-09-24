@@ -502,7 +502,7 @@ fn boot_firmware(spawner: embassy_executor::Spawner) -> FirmwareApp {
     server.set_reboot_hook(Some(Rc::new(reboot_now)));
     // Login challenges draw from the chip's hardware RNG; the server itself
     // never draws randomness (sans-IO).
-    server.set_entropy_source(Some(Rc::new(fill_random)));
+    server.set_entropy_source(Some(fill_random));
     esp_println::println!("[INIT] LpServer created");
 
     // Auto-load project at boot (from config or lexical-first) — unless

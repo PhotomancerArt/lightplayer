@@ -10,7 +10,6 @@
 
 extern crate alloc;
 
-use alloc::rc::Rc;
 use alloc::string::String;
 use core::cell::Cell;
 use hashbrown::HashMap;
@@ -24,8 +23,10 @@ use crate::access_store;
 use crate::link_session::LinkSession;
 
 /// Fills a buffer with random bytes: the embedder's RNG, injected
-/// (`LpServer::set_entropy_source`). A closure so tests can script it.
-pub type EntropySource = Rc<dyn Fn(&mut [u8])>;
+/// (`LpServer::set_entropy_source`). A plain `fn`, not a boxed closure: the
+/// C6's resident heap is ratcheted to the byte, and an `Rc` here cost 16 B
+/// of it for nothing.
+pub type EntropySource = fn(&mut [u8]);
 
 /// Everything the access gate remembers between requests.
 pub struct AccessState {
@@ -92,6 +93,7 @@ impl AccessState {
     }
 
     /// The tier `link` holds now. A trusted link never touches the fs.
+    #[inline(never)]
     pub fn tier(&self, link: Link, fs: &dyn LpFs) -> Option<Tier> {
         let session = self
             .sessions
@@ -108,6 +110,7 @@ impl AccessState {
     }
 
     /// The hello's access half, for `link`.
+    #[inline(never)]
     pub fn hello_auth(&self, link: Link, fs: &dyn LpFs) -> HelloAuth {
         HelloAuth {
             required: link.trust == LinkTrust::Untrusted,
@@ -122,13 +125,19 @@ impl AccessState {
 
     /// `LoginBegin` on `link`: a challenge over every installed secret, or
     /// the reason there is none.
+    ///
+    /// Never inlined, like the other login paths: they are rare, and their
+    /// temporaries (the installed secrets, the challenge) must not deepen
+    /// the frame of the `tick_and_send` every frame runs — the C6's main-task
+    /// stack high water is ratcheted.
+    #[inline(never)]
     pub fn begin_login<'a>(
         &mut self,
         link: LinkId,
         fs: &dyn LpFs,
         loaded_project_paths: impl IntoIterator<Item = &'a str>,
     ) -> ServerMsgBody {
-        let Some(entropy) = self.entropy.clone() else {
+        let Some(entropy) = self.entropy else {
             return ServerMsgBody::Error {
                 error: String::from("login is unavailable: this server has no entropy source"),
             };
@@ -155,6 +164,7 @@ impl AccessState {
     ///
     /// Only the link that began the login may answer it; an answer from any
     /// other link is refused and leaves the challenge standing.
+    #[inline(never)]
     pub fn answer_login(&mut self, link: LinkId, macs: &[LoginMac]) -> ServerMsgBody {
         if self.login_owner != Some(link) {
             return ServerMsgBody::LoginResult(LoginOutcome::Refused {
