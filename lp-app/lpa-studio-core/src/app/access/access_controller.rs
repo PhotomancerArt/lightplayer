@@ -569,10 +569,9 @@ pub enum AccessFollowUp {
 ///
 /// NOT the registry key, which is the uid and falls back to the MAC: a board
 /// first seen before it was stamped is `mac:…` in the registry and becomes
-/// `dev…` the moment a uid is stamped on it — which a restart can do — and a
-/// record keyed on the old key would vanish from the panel right after the
-/// restart that turned Bluetooth on (found by the M6 walk). The MAC is the
-/// one identity a board carries from its first hello to its last.
+/// `dev…` once a uid is stamped on it, and a record keyed on the old key
+/// would vanish from the panel. The MAC is the one identity a board carries
+/// from its first hello to its last.
 fn record_key(identity: &lpa_devices::identity::IdentityChain) -> Option<String> {
     if let Some(mac) = &identity.mac {
         return Some(format!("mac:{}", mac.0));
