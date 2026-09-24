@@ -5428,3 +5428,106 @@ fn opening_a_project_under_a_board_lens_never_touches_the_board() {
         bench.view()
     );
 }
+
+/// M5's twin-row guard, end to end: the same board (same base MAC, no
+/// stamped uid — the registry's shared `mac:` key, where twin rows have
+/// happened before) heard over USB and then over Bluetooth is ONE card and
+/// ONE registry row, and the row's transport follows the live link.
+#[test]
+fn a_board_seen_over_usb_and_over_bluetooth_is_one_registry_row() {
+    let board = || {
+        FakeEsp32Device::new(FakeDeviceScript::new(FakeBootState::LightPlayer(
+            FakeLightPlayerState::new().with_base_mac("a0:f2:62:87:b4:8c"),
+        )))
+    };
+    let usb_side = board();
+    let (mut bench, tasks) = DeviceBench::granted(&usb_side, "usb-twin");
+    bench.run_until(&tasks, "the USB board to identify", |bench| {
+        bench
+            .view()
+            .devices
+            .first()
+            .is_some_and(|card| card.state_label == "Ready")
+    });
+    let rows = bench.registry();
+    assert_eq!(rows.len(), 1, "{rows:?}");
+    assert_eq!(rows[0].uid, "mac:a0:f2:62:87:b4:8c", "{rows:?}");
+    assert_eq!(rows[0].transport, "USB");
+
+    // The shipped build's shape: a sim half, and now a Bluetooth half whose
+    // one present device is the same board. Installing arms a sweep.
+    bench
+        .controller
+        .set_device_sim_transport(Rc::new(SimDeviceTransport::new(Rc::new(
+            ScriptedSimSource {
+                device: board(),
+                restarts: Rc::new(Cell::new(0)),
+                manifests: Rc::new(RefCell::new(Vec::new())),
+            },
+        ))));
+    bench
+        .controller
+        .set_ble_transport(Rc::new(crate::BleDeviceTransport::new(Rc::new(
+            OneBleBoard {
+                device: board(),
+                device_id: "QkxFLWlk".to_string(),
+            },
+        ))));
+    bench.run_until(&tasks, "the Bluetooth link to merge in", |bench| {
+        bench.view().pending.is_empty()
+            && bench
+                .registry()
+                .first()
+                .is_some_and(|row| row.transport == "Bluetooth")
+    });
+
+    let cards = bench.view().devices;
+    assert_eq!(cards.len(), 1, "one board, one card: {cards:?}");
+    assert_eq!(
+        cards[0].firmware_blocked.as_deref(),
+        Some(lpa_devices::view::FIRMWARE_NEEDS_USB),
+        "reached over Bluetooth, the card says why it cannot flash"
+    );
+    let rows = bench.registry();
+    assert_eq!(rows.len(), 1, "one row, never a twin: {rows:?}");
+    assert_eq!(rows[0].uid, "mac:a0:f2:62:87:b4:8c");
+}
+
+/// One Bluetooth board, always present: a fake-device link at a `ble:`
+/// endpoint, and the real `M!` io over the same fake.
+struct OneBleBoard {
+    device: FakeEsp32Device,
+    device_id: String,
+}
+
+impl crate::BleLinkSource for OneBleBoard {
+    fn present(&self) -> Vec<GrantedLink> {
+        let info = crate::ble_link_info(&self.device_id, "LP-b48c");
+        vec![GrantedLink {
+            link: Box::new(fake_device_link(info.clone(), &self.device)),
+            info,
+        }]
+    }
+
+    fn restore(&self) {}
+
+    fn request(&self) -> DeviceTransportFuture<Result<Option<GrantedLink>, String>> {
+        Box::pin(core::future::ready(Ok(None)))
+    }
+
+    fn forget(&self, _device_id: &str) -> DeviceTransportFuture<Result<(), String>> {
+        Box::pin(core::future::ready(Ok(())))
+    }
+
+    fn client_io(
+        &self,
+        _device_id: &str,
+        tap: Option<LensLineTap>,
+    ) -> Result<Box<dyn lpa_client::ClientIo>, String> {
+        let io = FakeDeviceIo::new(&self.device);
+        Ok(Box::new(match tap {
+            Some(tap) => io.with_tap(tap),
+            None => io,
+        }))
+    }
+}

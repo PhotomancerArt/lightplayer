@@ -38,9 +38,7 @@ use std::rc::Rc;
 use js_sys::{Array, Promise};
 use lpa_devices::link::{Link, LinkCommand, LinkEvent, ResetKind};
 use lpa_link::device_link::browser_ble::{BrowserBleLink, ble_link_info};
-use lpa_link::providers::browser_ble::{
-    self as ble, BleClientIo, BleDevice, BleTapLine, BleWire,
-};
+use lpa_link::providers::browser_ble::{self as ble, BleClientIo, BleDevice, BleTapLine, BleWire};
 use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::JsFuture;
 use wasm_bindgen_test::*;
@@ -118,9 +116,10 @@ async fn a_line_split_across_notifications_arrives_whole() {
     let long = "x".repeat(600);
     js_deliver_bytes("c6-a", &format!("{long}\n"));
 
-    let line = wait_for(&mut link, |event| {
-        matches!(event, LinkEvent::Line(line) if line.len() == 600)
-    })
+    let line = wait_for(
+        &mut link,
+        |event| matches!(event, LinkEvent::Line(line) if line.len() == 600),
+    )
     .await;
     assert_eq!(line, Some(LinkEvent::Line(long)));
 
@@ -171,7 +170,10 @@ async fn a_drop_is_a_departure_and_the_session_reconnects_by_itself() {
     .await;
     assert!(lost.is_some(), "the drop is said in the departure's words");
     assert_eq!(edges.1.get(), disconnects + 1, "one disconnect edge");
-    assert!(ble::present_devices().is_empty(), "a dropped device is not present");
+    assert!(
+        ble::present_devices().is_empty(),
+        "a dropped device is not present"
+    );
 
     // Back in range: the held device reconnects with no chooser and no call
     // from us, and says so with a connect edge.
@@ -182,7 +184,11 @@ async fn a_drop_is_a_departure_and_the_session_reconnects_by_itself() {
         }
         tick(20).await;
     }
-    assert_eq!(edges.0.get(), connects + 1, "one connect edge on the reconnect");
+    assert_eq!(
+        edges.0.get(),
+        connects + 1,
+        "one connect edge on the reconnect"
+    );
     assert_eq!(ble::present_devices().len(), 1);
 
     polyfill_off().await;
@@ -232,13 +238,17 @@ async fn a_connect_that_never_settles_fails_by_name() {
     link.submit(LinkCommand::Close);
     wait_for(&mut link, |event| matches!(event, LinkEvent::Closed { .. })).await;
 
-    JsFuture::from(js_ble_hang_next_connect("c6-a")).await.unwrap();
+    JsFuture::from(js_ble_hang_next_connect("c6-a"))
+        .await
+        .unwrap();
     link.submit(LinkCommand::Open { baud: 0 });
 
     // The real 10 s bound: ~12 s of polling at most.
-    let failed = wait_for_up_to(&mut link, 600, |event| {
-        matches!(event, LinkEvent::Error(error) if error.contains("timed out after 10 s"))
-    })
+    let failed = wait_for_up_to(
+        &mut link,
+        600,
+        |event| matches!(event, LinkEvent::Error(error) if error.contains("timed out after 10 s")),
+    )
     .await;
     assert!(failed.is_some(), "a hung connect ends with its reason");
 
@@ -260,7 +270,11 @@ async fn a_closed_link_stays_present_and_reopens_without_the_chooser() {
             .await
             .is_some()
     );
-    assert_eq!(edges.1.get(), disconnects, "our own close is not a departure");
+    assert_eq!(
+        edges.1.get(),
+        disconnects,
+        "our own close is not a departure"
+    );
     assert_eq!(ble::present_devices().len(), 1, "still ours, still listed");
 
     link.submit(LinkCommand::Open { baud: 0 });
@@ -270,7 +284,11 @@ async fn a_closed_link_stays_present_and_reopens_without_the_chooser() {
             .is_some()
     );
     let after = stats("c6-a").await;
-    assert_eq!(after.connects, before.connects + 1, "one GATT connect, no chooser");
+    assert_eq!(
+        after.connects,
+        before.connects + 1,
+        "one GATT connect, no chooser"
+    );
 
     polyfill_off().await;
 }
@@ -340,7 +358,10 @@ async fn the_conversation_io_round_trips_a_request() {
     );
     js_deliver_bytes(
         "c6-a",
-        &format!("M!{}\n", lpc_wire::json::to_string(&reply).expect("encodes")),
+        &format!(
+            "M!{}\n",
+            lpc_wire::json::to_string(&reply).expect("encodes")
+        ),
     );
     let answer: WireServerMessage = io.receive().await.expect("answered");
 
@@ -406,7 +427,8 @@ async fn pick() -> BleDevice {
 }
 
 async fn open_link(device: &BleDevice) -> BrowserBleLink {
-    let mut link = BrowserBleLink::new(Rc::new(BleWire::new(device.session)), ble_link_info(device));
+    let mut link =
+        BrowserBleLink::new(Rc::new(BleWire::new(device.session)), ble_link_info(device));
     link.submit(LinkCommand::Open { baud: 921_600 });
     let opened = wait_for(&mut link, |event| matches!(event, LinkEvent::Opened { .. })).await;
     assert!(opened.is_some(), "the link opened");

@@ -38,6 +38,20 @@ pub fn PlayModeSurface(
     #[props(default)] on_action: Option<EventHandler<UiAction>>,
 ) -> Element {
     let title = panel.label.clone();
+    // The Play lease (M5): while this surface is mounted, a lens over a
+    // Bluetooth link reads only when someone touches a control (and once a
+    // minute), instead of streaming — Play over BLE is the steady state,
+    // and the board shares that air time with ESP-NOW.
+    use_effect(move || {
+        if let Some(on_action) = on_action {
+            on_action.call(lpa_studio_core::PlayViewOp::action_for(true));
+        }
+    });
+    use_drop(move || {
+        if let Some(on_action) = on_action {
+            on_action.call(lpa_studio_core::PlayViewOp::action_for(false));
+        }
+    });
 
     rsx! {
         div { class: "tw:grid tw:min-h-full tw:min-w-0 tw:content-start tw:gap-0 tw:bg-page",

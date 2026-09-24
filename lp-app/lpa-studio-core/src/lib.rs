@@ -66,6 +66,7 @@ pub use app::devices::{
     write_sim_record,
 };
 pub use app::docs_host::DocsSimHost;
+pub use app::studio::PlayViewOp;
 // The project's declared hardware (D41): the web shell's Hardware row and
 // the gallery card's "for <board>" badge both read it.
 pub use app::frame_feed::{

@@ -138,6 +138,10 @@ pub struct StudioController {
     /// The transport that reaches BLUETOOTH devices (M5), when this build
     /// has one. `dyn`-free for symmetry with the other two halves.
     ble_transport: Option<Rc<crate::BleDeviceTransport>>,
+    /// How many Play surfaces are mounted on the lens right now (the
+    /// `PlayViewOp` lease). Play is the one mode with an idle read budget
+    /// over Bluetooth; everything else is authoring.
+    play_views: u32,
     /// The `/device-sims/<uid>.json` sidecars, read off the library
     /// snapshot at settle. The sole "this device is a runtime" fact — for
     /// BOTH kinds, keyed by uid, with the sidecar's own `kind` saying
@@ -392,6 +396,7 @@ impl StudioController {
             sim_transport: None,
             emu_transport: None,
             ble_transport: None,
+            play_views: 0,
             device_sims: std::collections::BTreeMap::new(),
             pool: RuntimePool::new(),
             project: ProjectController::new(),
@@ -1506,13 +1511,17 @@ impl StudioController {
     /// The effective minimum gap between passive pulls on the lens session:
     /// the kind cadence, tightened by a post-apply verdict chase, stretched
     /// by that session's failure backoff.
+    ///
+    /// A Bluetooth lens held in Play mode is the one idle-budgeted case
+    /// (M5): see [`BLE_PLAY_IDLE_REFRESH_INTERVAL`](crate::app::studio::BLE_PLAY_IDLE_REFRESH_INTERVAL).
     fn lens_refresh_gap(&self, session: &crate::RuntimeSession) -> Duration {
-        let gap = session.cadence_interval();
-        let gap = match self.project.verdict_chase_interval() {
-            Some(chase) => gap.min(chase),
-            None => gap,
-        };
-        gap.saturating_add(session.backoff_delay())
+        let ble_play = session.transport() == crate::LinkTransport::Ble && self.play_views > 0;
+        crate::app::studio::lens_refresh_gap_policy(
+            session.cadence_interval(),
+            ble_play,
+            self.project.verdict_chase_interval(),
+            session.backoff_delay(),
+        )
     }
 
     /// Whether the lens session's next passive pull is due. Early ticks (the
@@ -1921,7 +1930,11 @@ impl StudioController {
                 // face ("flash", "erase") mean what they say on it — which
                 // is also what `DeviceFace::from_transport` already answers
                 // for an `emu` registry row.
-                crate::LinkTransport::Emu | crate::LinkTransport::Serial => crate::DeviceFace::Wire,
+                // A Bluetooth link is a wire too; the card says what it
+                // cannot do (`DeviceView::firmware_blocked`).
+                crate::LinkTransport::Emu
+                | crate::LinkTransport::Serial
+                | crate::LinkTransport::Ble => crate::DeviceFace::Wire,
             },
             key: format!("device:{}", attachment.uid),
             device: Some(attachment.device),
@@ -2372,6 +2385,14 @@ impl StudioController {
         if node_id.as_str() == crate::SimCreateOp::NODE_ID {
             let op = action.into_op::<crate::SimCreateOp>()?;
             return self.execute_sim_create_op(op).await;
+        }
+        if node_id.as_str() == crate::PlayViewOp::NODE_ID {
+            let op = action.into_op::<crate::PlayViewOp>()?;
+            self.play_views = match op.shown {
+                true => self.play_views.saturating_add(1),
+                false => self.play_views.saturating_sub(1),
+            };
+            return Ok(UiNotices::new());
         }
         if node_id.as_str() == crate::DeviceFeedOp::NODE_ID {
             let op = action.into_op::<crate::DeviceFeedOp>()?;
@@ -3860,7 +3881,7 @@ impl StudioController {
         let held = match attachment.transport {
             crate::LinkTransport::Sim => crate::RuntimeKind::Sim,
             crate::LinkTransport::Emu => crate::RuntimeKind::Emu,
-            crate::LinkTransport::Serial => return None,
+            crate::LinkTransport::Serial | crate::LinkTransport::Ble => return None,
         };
         (attachment.board_id.as_deref() == Some(target.board_id())
             && prefer.is_none_or(|wanted| wanted == held))
@@ -3925,7 +3946,7 @@ impl StudioController {
             && let Some(held) = match session.transport() {
                 crate::LinkTransport::Sim => Some(crate::RuntimeKind::Sim),
                 crate::LinkTransport::Emu => Some(crate::RuntimeKind::Emu),
-                crate::LinkTransport::Serial => None,
+                crate::LinkTransport::Serial | crate::LinkTransport::Ble => None,
             }
             && prefer.is_none_or(|wanted| wanted == held)
             && self
@@ -4624,6 +4645,8 @@ impl StudioController {
             // The same `M!` line framing over the same serial-shaped wire;
             // the only difference is which side of the USB the chip is on.
             crate::LinkTransport::Emu | crate::LinkTransport::Serial => "usb-serial",
+            // The same `M!` line framing, over a NUS GATT service.
+            crate::LinkTransport::Ble => "ble-nus",
         };
         let client = crate::StudioServerClient::from_lens_io(io, deadline, protocol);
         let id = self.pool.install(crate::RuntimePayload::Device(attachment));
