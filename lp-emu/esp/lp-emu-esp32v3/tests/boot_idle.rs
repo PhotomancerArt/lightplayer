@@ -22,9 +22,12 @@
 //!
 //! # And one number that is *not* silicon's, on purpose
 //!
-//! `[INIT] main stack 45280 B` where L0's capture says 45,488: the desk board
-//! runs a different, dirty commit (`2e21b6226bcd-dirty`, ruling R7). P3
-//! recorded the same difference against the same image.
+//! `[INIT] main stack N B` is the image's, not any capture's: on this chip the
+//! main stack is what `dram_seg` leaves after the statics, so it moves with
+//! every image (45,488 on L0's dirty `2e21b6226bcd-dirty`, ruling R7; 45,280 on
+//! `75486b114`; 45,256 after `lp-json-pack`). Where it is compared against
+//! silicon, it is compared by derivation from the ELF — see
+//! `the_heartbeats_memory_figures_are_the_desk_boards`.
 
 use std::path::PathBuf;
 
@@ -400,7 +403,7 @@ fn the_two_paths_report_the_same_memory_figures() {
 
     let mut direct = Esp32V3Builder::new()
         .boot_mode(BootMode::Direct)
-        .app(AppSource::Path(elf))
+        .app(AppSource::Path(elf.clone()))
         .flash(lp_emu_esp32v3::flash::FlashBacking::Copy(merged.clone()))
         .flash_len(len)
         .strict(true)
@@ -455,9 +458,11 @@ fn the_two_paths_report_the_same_memory_figures() {
         b[0].split("high-water").next(),
         "and it is the same stack, reported the same way"
     );
+    // The size is the image's (see `stack_bytes_from_elf`), not a pin.
+    let stack = stack_bytes_from_elf(&elf);
     assert!(
-        a[0].contains(" of 45256 B ") && b[0].contains(" of 45256 B "),
-        "the stack's size is the same on both paths: {a:?} vs {b:?}"
+        a[0].contains(&format!(" of {stack} B ")) && b[0].contains(&format!(" of {stack} B ")),
+        "the stack's size is the image's {stack} B on both paths: {a:?} vs {b:?}"
     );
     // The one figure the boot banner carries too, so the triple can be read
     // against `[INIT] chip=esp32 … heap=…`.
@@ -521,6 +526,53 @@ fn number(line: &str, key: &str) -> u64 {
     rest[..end]
         .parse()
         .unwrap_or_else(|_| panic!("`{key}` in `{line}` is not a number"))
+}
+
+/// The main stack's size **as the image defines it**: `_stack_start −
+/// _stack_end`, the two esp-hal linker symbols `fw-esp32v3/src/stack_probe.rs`
+/// subtracts for `total_bytes()` (top minus bottom, guard zone included).
+///
+/// Read from the ELF's symbol table rather than pinned, because on the classic
+/// ESP32 the main stack is the *residual* of `dram_seg` after `.data` and
+/// `.bss`: every byte of statics any change adds comes out of it. A pinned
+/// number is a claim about one image; this is the derivation, applied to
+/// whichever image ran. `scripts/heap-budget-stack-layout.py` derives the same
+/// figure from the same two symbols.
+fn stack_bytes_from_elf(elf: &std::path::Path) -> u64 {
+    let bytes = std::fs::read(elf).unwrap_or_else(|e| panic!("{}: {e}", elf.display()));
+    let image = lp_emu_esp_common::ElfImage::parse(&bytes)
+        .unwrap_or_else(|e| panic!("{}: {e:?}", elf.display()));
+    let at = |name: &str| {
+        image
+            .symbol(name)
+            .unwrap_or_else(|| panic!("{} has no `{name}`", elf.display()))
+            .address
+    };
+    let (top, bottom) = (at("_stack_start"), at("_stack_end"));
+    assert!(
+        top > bottom,
+        "`_stack_start` {top:#x} is above `_stack_end` {bottom:#x}"
+    );
+    u64::from(top - bottom)
+}
+
+/// The commit the silicon capture was taken from — the `75486b114` in
+/// [`SILICON_921600`]'s name.
+const SILICON_COMMIT: &str = "75486b114";
+
+/// The pinned reference image the silicon capture ran, if it is on this disk:
+/// `LP_EMU_ESP32V3_SILICON_ELF`, else `build-reference-image.sh`'s output path
+/// `target/emu-ref/75486b114-boot-idle/fw-esp32v3`. Absent in CI (the gate
+/// pins HEAD, not this commit) and on a fresh checkout, which is not a failure:
+/// the half of the check that needs it is skipped with a notice.
+fn silicon_reference_elf() -> Option<PathBuf> {
+    if let Some(p) = std::env::var_os("LP_EMU_ESP32V3_SILICON_ELF") {
+        return Some(PathBuf::from(p));
+    }
+    let p = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../../target/emu-ref")
+        .join(format!("{SILICON_COMMIT}-boot-idle/fw-esp32v3"));
+    p.is_file().then_some(p)
 }
 
 /// **The heap's live bytes, and this machine is 84 of them heavier.**
@@ -624,7 +676,18 @@ const HEAP_USED_GAP: u64 = 84;
 /// largest_free=108526` before and after), which is what the sentence above
 /// — "84 B of placement rather than of accounting" — predicted for a change
 /// that touches no allocation. The remaining 640 B is still unexplained.
-const STACK_HIGH_WATER_GAP: u64 = 640;
+///
+/// ⚠️ **Re-measured on 2026-09-24 for lp-json-pack (PR #795): 640 → 592.**
+/// This one is not the machine: the silicon capture is of image `75486b114`
+/// and the emulator runs the image this tree builds, and lp-json-pack's
+/// serializer (the out-of-line struct-field helpers behind the token hook)
+/// makes that image's main stack go **48 B deeper** at its high-water —
+/// 16,332 → 16,380 B, with the stack top fixed at `0x3ffe0000`, so it is
+/// depth, not placement. The desk board never ran this image, so the gap
+/// narrows by exactly the image's own 48 B. The same-image gap is still the
+/// 640 above, and still unexplained; a desk re-capture on a later image
+/// would fold the 48 back in.
+const STACK_HIGH_WATER_GAP: u64 = 592;
 
 /// **The two boot paths' own high-water gap: the ROM-up boot goes 160 B
 /// deeper than the direct load.**
@@ -662,9 +725,24 @@ const PATH_HIGH_WATER_GAP: i64 = -64;
 ///
 /// # What is compared, and what is not
 ///
-/// Compared: the boot banner's heap arithmetic, the main stack's **size**,
-/// the JIT region placement line, the whole `[JIT]` census, and the `[MEM]`
-/// line's `largest_free` and `retry_saves`. Those are equal, exactly.
+/// Compared: the boot banner's heap arithmetic, the JIT region placement
+/// line, the whole `[JIT]` census, and the `[MEM]` line's `largest_free` and
+/// `retry_saves`. Those are equal, exactly.
+///
+/// Derived rather than compared: the main stack's **size**. The capture is of
+/// image `75486b114`; this machine runs whatever image the gate just built.
+/// On the classic ESP32 the main stack is the residual of `dram_seg` after
+/// `.data` and `.bss` (esp-hal's `stack.x`), so any change to the image's
+/// statics moves it — `lp-json-pack` added 24 B of statics and the figure
+/// went 45,280 → 45,256. Asserting the two equal would be asserting two
+/// different images have one layout. Instead each side is held to the same
+/// derivation, `_stack_start − _stack_end` read from the ELF
+/// ([`stack_bytes_from_elf`]), applied to its own image: the emulator's
+/// printed figure against the ELF it ran, always; the desk board's against
+/// the pinned `75486b114` reference image, when that image is on this disk
+/// ([`silicon_reference_elf`] — it is not in CI, and that half then prints a
+/// notice and is skipped). What that proves is the thing that transfers: the
+/// firmware reports its linker's stack on both machines.
 ///
 /// Pinned rather than asserted equal: `used`/`free` and the stack's
 /// high-water — see [`HEAP_USED_GAP`] and [`STACK_HIGH_WATER_GAP`], which
@@ -751,16 +829,60 @@ fn the_heartbeats_memory_figures_are_the_desk_boards() {
     );
     let _ = std::fs::remove_file(&chip);
 
-    // The three lines the boot banner carries, which are image-derived and
-    // must be identical to the byte.
+    // The two boot-banner lines fixed by the memory map (constants in
+    // `codemem_esp32` and `HEAP_SIZE`), which must be identical to the byte.
+    // ⚠️ One field of the JIT line is NOT a constant: `rwtext_end` is the
+    // linked end of `.rwtext` (`_rwtext_len`, decoded in `main.rs`'s
+    // `linker_rwtext_end`), so it moves with IRAM code — not with statics.
+    // It has not moved since the capture, and is left compared; the day a
+    // change to IRAM code trips this, that field wants the treatment the main
+    // stack gets below, not a re-pin.
     for marker in [
         "[INIT] chip=esp32 arch=xtensa heap=",
-        "[INIT] main stack ",
         "[INIT] JIT code region: ",
     ] {
         let (a, b) = (field_line(&silicon, marker), field_line(&emulated, marker));
         println!("  {marker}\n    silicon  {a}\n    emulator {b}");
-        assert_eq!(a, b, "`{marker}` is image-derived and must be identical");
+        assert_eq!(
+            a, b,
+            "`{marker}` is fixed by the memory map and must be identical"
+        );
+    }
+
+    // The main stack is layout-derived (the residual of `dram_seg`), so each
+    // side is checked against ITS OWN image's derivation — see
+    // `stack_bytes_from_elf` and this test's doc comment.
+    let stack_marker = "[INIT] main stack ";
+    let (stack_s, stack_e) = (
+        number(field_line(&silicon, stack_marker), stack_marker),
+        number(field_line(&emulated, stack_marker), stack_marker),
+    );
+    let derived = stack_bytes_from_elf(&elf);
+    println!(
+        "  {stack_marker}\n    silicon  {stack_s} B ({SILICON_COMMIT})\n    \
+         emulator {stack_e} B (this image derives {derived} B)"
+    );
+    assert_eq!(
+        stack_e, derived,
+        "the emulator's main stack is `_stack_start − _stack_end` of the image it ran"
+    );
+    match silicon_reference_elf() {
+        Some(reference) => {
+            let derived_s = stack_bytes_from_elf(&reference);
+            assert_eq!(
+                stack_s,
+                derived_s,
+                "the desk board's main stack is the same derivation applied to the image it \
+                 was captured from ({})",
+                reference.display()
+            );
+        }
+        None => println!(
+            "  NOTE: the {SILICON_COMMIT} reference image is not on this disk \
+             (`scripts/emu/build-reference-image.sh --chip esp32 esp32,server,float-f32 \
+             {SILICON_COMMIT}`, or LP_EMU_ESP32V3_SILICON_ELF); the silicon half of the \
+             main-stack derivation check is skipped"
+        ),
     }
 
     // The whole `[JIT]` census, which is a memory-class line end to end.
@@ -800,17 +922,17 @@ fn the_heartbeats_memory_figures_are_the_desk_boards() {
         "the live-bytes gap is the measured one; see HEAP_USED_GAP"
     );
 
-    // `[stack] heartbeat:` — the size is image-derived and equal, the
-    // high-water is the second pinned gap.
+    // `[stack] heartbeat:` — the size is the banner's, side by side (each is
+    // its own image's, checked above); the high-water is the second pinned gap.
     let (st_s, st_e) = (
         field_line(&silicon, "[stack] heartbeat: "),
         field_line(&emulated, "[stack] heartbeat: "),
     );
     println!("  [stack]\n    silicon  {st_s}\n    emulator {st_e}");
     assert_eq!(
-        number(st_s, " B of "),
-        number(st_e, " B of "),
-        "the main stack is the same size on both sides"
+        (number(st_s, " B of "), number(st_e, " B of ")),
+        (stack_s, stack_e),
+        "each side's heartbeat reports the stack its own banner does"
     );
     assert_eq!(
         number(st_s, "high-water ") - number(st_e, "high-water "),
