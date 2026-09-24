@@ -1,8 +1,7 @@
 // Linear Gradient — the palette laid across the piece at an angle, scrolling.
 //
-// idea: the plain scrolling palette gradient every LED controller has
-//       (WLED "Palette", FastLED fill_palette); rebuilt as a 2D ramp with
-//       an angle, a repeat count and a mirror so the scroll never jumps.
+// family: Gradients
+// idea: the plain scrolling palette gradient every LED controller has (WLED "Palette", FastLED fill_palette); rebuilt as a 2D ramp with an angle, a repeat count and a mirror so the scroll never jumps.
 //
 // Pattern space (`"coords": "pattern"`): `pos` is the lamps' box, centred,
 // long side −1…1, y up.

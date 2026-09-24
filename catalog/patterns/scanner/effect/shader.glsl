@@ -1,9 +1,7 @@
 // Scanner — a soft bar sweeping back and forth with a fading tail.
 //
-// idea: the Larson scanner / "KITT" sweep (WLED "Scanner"), expanded to a
-//       bar across 2D and re-authored in closed form: the tail is the time
-//       since the bar last passed a lamp, so it is exact at any frame rate
-//       and needs no per-lamp history.
+// family: Fronts
+// idea: the Larson scanner / "KITT" sweep (WLED "Scanner"), expanded to a bar across 2D and re-authored in closed form: the tail is the time since the bar last passed a lamp, so it is exact at any frame rate and needs no per-lamp history.
 //
 // Pattern space (`"coords": "pattern"`): `pos` is the lamps' box, centred,
 // long side −1…1, y up.

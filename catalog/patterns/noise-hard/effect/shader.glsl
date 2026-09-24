@@ -1,8 +1,7 @@
 // Hard Noise — noise cut into flat bands of palette colour with crisp edges.
 //
-// idea: posterized noise / "contour map" looks (toon-shaded noise, the
-//       stepped-noise palette effects common to LED firmware), re-authored
-//       from scratch.
+// family: Fields
+// idea: posterized noise / "contour map" looks (toon-shaded noise, the stepped-noise palette effects common to LED firmware), re-authored from scratch.
 //
 // Pattern space (`"coords": "pattern"`): `pos` is the lamps' box, centred,
 // long side −1…1, y up.

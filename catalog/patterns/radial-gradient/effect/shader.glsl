@@ -1,8 +1,7 @@
 // Radial Gradient — rings of palette colour flowing outward from the centre.
 //
-// idea: the radial/"ripple from centre" palette gradient (WLED 2D
-//       "Colored Bursts" / radial fills in shader art), rebuilt from
-//       scratch as a mirrored ramp on the distance from the piece's centre.
+// family: Gradients
+// idea: the radial/"ripple from centre" palette gradient (WLED 2D "Colored Bursts" / radial fills in shader art), rebuilt from scratch as a mirrored ramp on the distance from the piece's centre.
 //
 // Pattern space (`"coords": "pattern"`): `pos` is the lamps' box, centred,
 // long side −1…1, y up.

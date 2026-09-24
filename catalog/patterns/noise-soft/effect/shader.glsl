@@ -1,7 +1,7 @@
 // Soft Noise — a slow, smooth noise field drifting through the palette.
 //
-// idea: the classic "noise through a palette" ambient field (FastLED
-//       Noise/Pacifica lineage, WLED "Noise 2D"), re-authored from scratch.
+// family: Fields
+// idea: the classic "noise through a palette" ambient field (FastLED Noise/Pacifica lineage, WLED "Noise 2D"), re-authored from scratch.
 //
 // Pattern space (`"coords": "pattern"`): `pos` is the lamps' box, centred,
 // long side −1…1, y up.

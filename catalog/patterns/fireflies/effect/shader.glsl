@@ -1,8 +1,7 @@
 // Fireflies — a few soft glows drifting slowly over near-black.
 //
-// idea: fireflies on a summer night (WLED "Fireflies"-style sparse glows,
-//       FastLED "Fire flies" sketches), re-authored from scratch: each fly
-//       is a Lissajous path with whole-number frequencies, so it loops.
+// family: Points
+// idea: fireflies on a summer night (WLED "Fireflies"-style sparse glows, FastLED "Fire flies" sketches), re-authored from scratch: each fly is a Lissajous path with whole-number frequencies, so it loops.
 //
 // Pattern space (`"coords": "pattern"`): `pos` is the lamps' box, centred,
 // long side −1…1, y up.

@@ -1,8 +1,7 @@
 // Twinkle — individual lamps bloom and fade like sparks on a background colour.
 //
-// idea: fairy lights / FastLED "TwinkleFOX" and WLED "Twinklefox", re-
-//       authored from scratch in closed form: every lamp has its own
-//       hashed rhythm and a per-cycle coin toss, so nothing is stored.
+// family: Points
+// idea: fairy lights / FastLED "TwinkleFOX" and WLED "Twinklefox", re- authored from scratch in closed form: every lamp has its own hashed rhythm and a per-cycle coin toss, so nothing is stored.
 //
 // Pattern space (`"coords": "pattern"`): `pos` is the lamps' box, centred,
 // long side −1…1, y up.
@@ -49,7 +48,7 @@ vec4 render_2d(vec2 pos) {
     float fade = exp(-min(max(a - 0.08, 0.0) * 9.0, 12.0));
     float env = on * bloom * fade;
 
-    vec3 ground = pal(0.02) * 0.45;
+    vec3 ground = pal(0.1) * 0.8;
     vec3 spark = pal(0.62 + 0.3 * r1);
     return vec4(clamp(mix(ground, spark, env), 0.0, 1.0), 1.0);
 }

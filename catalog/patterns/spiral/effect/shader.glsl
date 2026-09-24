@@ -1,8 +1,7 @@
 // Spiral — pinwheel arms of palette colour turning around the centre.
 //
-// idea: conic gradients and pinwheel/spiral shader art (WLED 2D "Spiral"
-//       lineage), re-authored from scratch: angle times arm count plus a
-//       twist proportional to the distance from the centre.
+// family: Gradients
+// idea: conic gradients and pinwheel/spiral shader art (WLED 2D "Spiral" lineage), re-authored from scratch: angle times arm count plus a twist proportional to the distance from the centre.
 //
 // Pattern space (`"coords": "pattern"`): `pos` is the lamps' box, centred,
 // long side −1…1, y up.

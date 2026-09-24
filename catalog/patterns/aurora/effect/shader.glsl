@@ -1,7 +1,7 @@
 // Aurora — soft ribbons of light that sway and fold across the piece.
 //
-// idea: aurora borealis curtains (WLED "Aurora" and the many shader-art
-//       auroras), re-authored from scratch as two noise-driven ribbons.
+// family: Fields
+// idea: aurora borealis curtains (WLED "Aurora" and the many shader-art auroras), re-authored from scratch as two noise-driven ribbons.
 //
 // Pattern space (`"coords": "pattern"`): `pos` is the lamps' box, centred,
 // long side −1…1, y up.

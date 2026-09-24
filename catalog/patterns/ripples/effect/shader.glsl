@@ -1,9 +1,7 @@
 // Ripples — rings spawn at random spots and spread outward, fading as they go.
 //
-// idea: raindrops on a pond (WLED "Ripple" / "Ripple Rainbow"), expanded
-//       to 2D and re-authored in closed form: each ring slot has a fixed
-//       phase offset, and its birthplace is a hash of the slot and the
-//       ring's cycle number, so no state is kept between frames.
+// family: Fronts
+// idea: raindrops on a pond (WLED "Ripple" / "Ripple Rainbow"), expanded to 2D and re-authored in closed form: each ring slot has a fixed phase offset, and its birthplace is a hash of the slot and the ring's cycle number, so no state is kept between frames.
 //
 // Pattern space (`"coords": "pattern"`): `pos` is the lamps' box, centred,
 // long side −1…1, y up.
@@ -56,9 +54,11 @@ vec4 render_2d(vec2 pos) {
         float thick = pitch * (1.3 + 1.5 * age);
         float d = (length(pos - centre) - radius) / thick;
         float ring = exp(-min(d * d, 16.0));
-        float fade = (1.0 - age) * (1.0 - age);
+        // Bloom in over the first few percent of a life instead of popping
+        // on at full brightness, and fade out as the ring grows.
+        float fade = (1.0 - age) * (1.0 - age) * smoothstep(0.0, 0.06, age);
         // A soft flash at the birthplace for the first moment.
-        float birth = exp(-min(length(pos - centre) / (2.0 * pitch), 8.0)) * max(0.0, 1.0 - age * 6.0);
+        float birth = exp(-min(length(pos - centre) / (2.0 * pitch), 8.0)) * max(0.0, 1.0 - age * 6.0) * smoothstep(0.0, 0.04, age);
 
         float hue = 0.35 + 0.55 * lpfn_random(key + vec2(9.7, 5.9), 0u);
         c += pal(hue) * (ring * fade + birth * 0.6);

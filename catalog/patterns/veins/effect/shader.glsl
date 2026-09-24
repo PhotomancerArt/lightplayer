@@ -1,7 +1,7 @@
 // Veins — thin glowing lines tracing the contours of a slow noise field.
 //
-// idea: ridged noise / marble veins and "noise isolines" (the zero-contour
-//       of a noise field drawn as a line), re-authored from scratch.
+// family: Fields
+// idea: ridged noise / marble veins and "noise isolines" (the zero-contour of a noise field drawn as a line), re-authored from scratch.
 //
 // Pattern space (`"coords": "pattern"`): `pos` is the lamps' box, centred,
 // long side −1…1, y up.

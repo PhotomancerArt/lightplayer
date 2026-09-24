@@ -1,8 +1,7 @@
 // Heartbeat — the whole piece beats lub-dub, each beat spreading from the centre.
 //
-// idea: the heartbeat double pulse (WLED "Heartbeat"), re-authored from
-//       scratch as a closed-form envelope in time, lagged by distance from
-//       the centre so a beat visibly spreads instead of blinking.
+// family: Whole-piece
+// idea: the heartbeat double pulse (WLED "Heartbeat"), re-authored from scratch as a closed-form envelope in time, lagged by distance from the centre so a beat visibly spreads instead of blinking.
 //
 // Pattern space (`"coords": "pattern"`): `pos` is the lamps' box, centred,
 // long side −1…1, y up.

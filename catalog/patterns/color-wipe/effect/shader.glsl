@@ -1,8 +1,7 @@
 // Colour Wipe — each palette colour in turn wipes across the piece.
 //
-// idea: WLED/NeoPixel "Color Wipe" (the Adafruit strandtest classic),
-//       expanded to 2D with an angle and re-authored as a closed-form
-//       front: no per-lamp state, identical at any frame rate.
+// family: Fronts
+// idea: WLED/NeoPixel "Color Wipe" (the Adafruit strandtest classic), expanded to 2D with an angle and re-authored as a closed-form front: no per-lamp state, identical at any frame rate.
 //
 // Pattern space (`"coords": "pattern"`): `pos` is the lamps' box, centred,
 // long side −1…1, y up.

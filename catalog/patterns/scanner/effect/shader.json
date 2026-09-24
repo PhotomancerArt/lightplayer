@@ -42,7 +42,7 @@
     "tail": {
       "kind": "value",
       "value": "f32",
-      "default": 0.3,
+      "default": 0.45,
       "min": 0.05,
       "max": 1,
       "label": "Tail",
