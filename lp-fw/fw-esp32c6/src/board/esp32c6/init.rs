@@ -114,15 +114,21 @@ const HEAP_DRAM2_SIZE: usize = 65_536;
 /// The heap-tracking diagnostic keeps its table in the rest of the segment.
 #[cfg(feature = "heap_track_diag")]
 const HEAP_DRAM2_SIZE: usize = 16_384;
-static mut HEAP_MAIN: core::mem::MaybeUninit<[u8; HEAP_MAIN_SIZE]> =
-    core::mem::MaybeUninit::uninit();
+/// A heap region's backing array, 8-aligned so the allocator loses nothing
+/// to aligning its start (a bare byte array can land on an odd address).
+#[repr(C, align(8))]
+struct HeapArena<const N: usize>(core::mem::MaybeUninit<[u8; N]>);
+static mut HEAP_MAIN: HeapArena<HEAP_MAIN_SIZE> = HeapArena(core::mem::MaybeUninit::uninit());
 #[esp_hal::ram(reclaimed)]
 static mut HEAP_DRAM2: core::mem::MaybeUninit<[u8; HEAP_DRAM2_SIZE]> =
     core::mem::MaybeUninit::uninit();
 
 /// The heap's two regions as `(start address, size)`, main first — the
 /// order the allocator tries them in.
-#[allow(dead_code, reason = "read only by the heap diagnostics and the BLE placement")]
+#[allow(
+    dead_code,
+    reason = "read only by the heap diagnostics"
+)]
 pub fn heap_regions() -> [(usize, usize); 2] {
     [
         (core::ptr::addr_of!(HEAP_MAIN) as usize, HEAP_MAIN_SIZE),

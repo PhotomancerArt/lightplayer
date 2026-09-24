@@ -71,21 +71,16 @@ pub async fn serve(
     let mut idle_params = false;
 
     let reason = loop {
-        #[cfg(feature = "desk_ble_params")]
-        let idle_at = conn_params::desk::idle_after()
-            .filter(|_| !idle_params && params_request_at.is_none())
-            .map(|after| last_rx + after);
-        #[cfg(not(feature = "desk_ble_params"))]
-        let idle_at: Option<Instant> = None;
         let next_timer = [
             params_request_at,
             params_readback_at,
             (!opened && !closing).then_some(subscribe_deadline),
-            idle_at,
         ]
-        .into_iter()
-        .flatten()
-        .min();
+        .into_iter();
+        // Run K only; the shipped build's connection future carries none of it.
+        #[cfg(feature = "desk_ble_params")]
+        let next_timer = next_timer.chain([idle_deadline(idle_params, params_request_at, last_rx)]);
+        let next_timer = next_timer.flatten().min();
         let timer = async move {
             match next_timer {
                 Some(at) => Timer::at(at).await,
@@ -194,7 +189,14 @@ pub async fn serve(
                 } else if params_readback_at.is_some_and(|at| now >= at) {
                     params_readback_at = None;
                     conn_params::log_granted(link, &conn, "granted");
-                } else if idle_at.is_some_and(|at| now >= at) {
+                } else if {
+                    #[cfg(feature = "desk_ble_params")]
+                    let due = idle_deadline(idle_params, params_request_at, last_rx)
+                        .is_some_and(|at| now >= at);
+                    #[cfg(not(feature = "desk_ble_params"))]
+                    let due = false;
+                    due
+                } {
                     #[cfg(feature = "desk_ble_params")]
                     {
                         idle_params = true;
@@ -226,4 +228,16 @@ pub async fn serve(
         reason.into_inner(),
         esp_alloc::HEAP.used()
     );
+}
+
+/// Run K's active/idle switch: when to ask for the idle parameters, if at all.
+#[cfg(feature = "desk_ble_params")]
+fn idle_deadline(
+    idle_params: bool,
+    params_request_at: Option<Instant>,
+    last_rx: Instant,
+) -> Option<Instant> {
+    conn_params::desk::idle_after()
+        .filter(|_| !idle_params && params_request_at.is_none())
+        .map(|after| last_rx + after)
 }

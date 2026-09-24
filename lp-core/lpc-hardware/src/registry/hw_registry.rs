@@ -45,20 +45,12 @@ struct HwRegistryState {
 
 impl HwRegistry {
     pub fn new(manifest: HwManifest) -> Self {
-        // Both tables are sized for the whole manifest here, at construction,
-        // and so never grow: an address can be claimed at most once, and a
-        // lease holds at least one address. Grown on demand instead, they were
-        // reallocated while a project ran — above its memory — and outlived
-        // it, splitting the heap the project gave back (a device refused the
-        // next project on contiguity: docs/defects/
-        // 2026-09-24-ble-enabled-c6-refuses-a-project-switch-after-the-heap-cut.md).
-        let addresses = manifest.resources().len();
         Self {
             manifest,
             state: RefCell::new(HwRegistryState {
                 next_lease_id: 1,
-                active_by_address: VecMap::with_capacity(addresses),
-                addresses_by_lease: VecMap::with_capacity(addresses),
+                active_by_address: VecMap::new(),
+                addresses_by_lease: VecMap::new(),
             }),
             // Starts nonzero so a consumer whose "last seen" value defaults to
             // zero sees an initial change rather than mistaking a fresh
@@ -126,6 +118,17 @@ impl HwRegistry {
 
         for address in addresses {
             state.active_by_address.remove(&address);
+        }
+        // Emptied tables give their memory back. They are first grown when a
+        // project's output opens — above the project's memory — so kept
+        // capacity outlived the project and split the heap it freed (a
+        // device refused the next project on contiguity:
+        // docs/defects/2026-09-24-ble-enabled-c6-refuses-a-project-switch-after-the-heap-cut.md).
+        if state.active_by_address.is_empty() {
+            state.active_by_address = VecMap::new();
+        }
+        if state.addresses_by_lease.is_empty() {
+            state.addresses_by_lease = VecMap::new();
         }
         drop(state);
         self.bump_generation();
