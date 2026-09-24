@@ -7,7 +7,8 @@
 // bytes to the SAME board `?emu=` holds:
 //
 //     add over Bluetooth → identify (flash disabled, with its reason)
-//       → push a project over Bluetooth → open Play → idle → turn a knob
+//       → clear + push a project over Bluetooth → the editor (authoring,
+//       counted for comparison) → Play → idle → turn a knob
 //
 // and it states the one number M5 owes: the bytes per second an idle,
 // connected Studio in Play mode puts on a `ble:` link, both directions,
@@ -271,13 +272,13 @@ async function main() {
       return JSON.stringify(report.idle);
     });
 
-    await step("knob", "turn the first knob to its end, and watch the board's render change", async () => {
+    await step("knob", "turn the first knob to its end; the board takes it and says so", async () => {
       const s0 = await stats();
-      const d0 = await driver.evaluate(CANVAS_DIGEST);
+      await driver.evaluate(`window.__lpBleCensus = {}`);
       const before = await driver.evaluate(
         `document.querySelector('#main [role="slider"]').getAttribute('aria-valuenow')`,
       );
-      await driver.evaluate(`(() => {
+      const key = await driver.evaluate(`(() => {
         const knob = document.querySelector('#main [role="slider"]');
         knob.focus();
         const key = Number(knob.getAttribute('aria-valuenow')) >= Number(knob.getAttribute('aria-valuemax')) ? 'Home' : 'End';
@@ -288,19 +289,30 @@ async function main() {
         `(() => { const s = window.__lpEmuBluetooth.stats(${JSON.stringify(BOARD)}); return s.writes > ${s0.writes}; })()`,
         { timeoutMs: STEP_DEADLINE_MS, what: "the panel write to go out over Bluetooth" },
       );
-      await driver.waitFor(`${CANVAS_DIGEST} !== ${JSON.stringify(d0)}`, {
-        timeoutMs: STEP_DEADLINE_MS,
-        what: "the Play preview (the board's own output frame) to change",
-      });
+      // The knob shows what the BOARD holds: its value moves only when a
+      // read after the write brings the board's panel state back.
+      await driver.waitFor(
+        `document.querySelector('#main [role="slider"]').getAttribute('aria-valuenow') !== ${JSON.stringify(before)}`,
+        { timeoutMs: STEP_DEADLINE_MS, what: "the board's panel state to come back with the new value" },
+      );
       const after = await driver.evaluate(
         `document.querySelector('#main [role="slider"]').getAttribute('aria-valuenow')`,
       );
+      // The write's verdict-chase reads bring the board's render back to
+      // the Play preview — wait for them rather than for the idle minute.
+      await driver.waitFor(`(window.__lpBleCensus.projectRead ?? 0) >= 3`, {
+        timeoutMs: 30_000,
+        what: "the write's verdict-chase reads",
+      });
       const s1 = await stats();
+      const census = await driver.evaluate(`JSON.stringify(window.__lpBleCensus)`).then(JSON.parse);
       report.knob = {
+        key,
         valueBefore: before,
         valueAfter: after,
         studioToBoardBytes: s1.written - s0.written,
         boardToStudioBytes: s1.notified - s0.notified,
+        studioRequestsByKind: census,
       };
       return JSON.stringify(report.knob);
     });

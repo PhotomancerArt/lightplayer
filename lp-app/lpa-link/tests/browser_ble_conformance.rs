@@ -21,6 +21,7 @@
 //! | every connect is bounded | [`a_connect_that_never_settles_fails_by_name`] |
 //! | close is ours: the session stays, reopening needs no chooser | [`a_closed_link_stays_present_and_reopens_without_the_chooser`] |
 //! | no reset over GATT | [`a_reset_over_bluetooth_fails_by_name`] |
+//! | M4: an untrusted link that never logs in is closed in 10 s | [`an_untrusted_link_that_never_logs_in_is_dropped`] |
 //! | a borrowing conversation's io | [`the_conversation_io_round_trips_a_request`] |
 //! | availability, for the add slot's copy | [`availability_reads_the_browser_not_a_guess`] |
 //!
@@ -67,6 +68,9 @@ extern "C" {
 
     #[wasm_bindgen(js_name = bleHangNextConnect)]
     fn js_ble_hang_next_connect(board_id: &str) -> Promise;
+
+    #[wasm_bindgen(js_name = bleUnauthTimeout)]
+    fn js_ble_unauth_timeout(ms: u32) -> Promise;
 
     #[wasm_bindgen(js_name = bleOutOfRange)]
     fn js_ble_out_of_range(board_id: &str) -> Promise;
@@ -289,6 +293,32 @@ async fn a_closed_link_stays_present_and_reopens_without_the_chooser() {
         before.connects + 1,
         "one GATT connect, no chooser"
     );
+
+    polyfill_off().await;
+}
+
+/// M4's rule, as the polyfill models it from the board's own hello: a link
+/// whose hello asks for a login and gets none is closed after 10 s — and
+/// Studio hears that as the link being lost, not as silence.
+#[wasm_bindgen_test]
+async fn an_untrusted_link_that_never_logs_in_is_dropped() {
+    polyfill_over(&["c6-a"]).await;
+    let device = pick().await;
+    let mut link = open_link(&device).await;
+    // The rule is 10 s; the suite's runner allows ~20 s for everything, so
+    // the timeout is shortened here (the rule's SHAPE is what is pinned).
+    JsFuture::from(js_ble_unauth_timeout(300)).await.unwrap();
+
+    js_deliver_bytes(
+        "c6-a",
+        "M!{\"id\":0,\"msg\":{\"hello\":{\"auth\":{\"required\":true,\"granted\":null}}}}\n",
+    );
+
+    let lost = wait_for_up_to(&mut link, 250, |event| {
+        matches!(event, LinkEvent::Error(error) if error.starts_with("bluetooth link lost"))
+    })
+    .await;
+    assert!(lost.is_some(), "the board closed the unauthenticated link");
 
     polyfill_off().await;
 }

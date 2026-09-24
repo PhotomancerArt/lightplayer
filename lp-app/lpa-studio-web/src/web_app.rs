@@ -1036,9 +1036,30 @@ pub fn App() -> Element {
     let _refresh_task = use_future(move || {
         let refresh_bridge = refresh_bridge.clone();
         async move {
+            // The wait re-reads the published delay in slices, so a delay
+            // that SHRINKS mid-wait is honoured: a lens held in Play over
+            // Bluetooth idles on a minute-long gap (M5), and a knob write's
+            // verdict-chase reads must not wait that minute out. A short
+            // delay (the sim's 33 ms, the device's 150 ms) is one slice, as
+            // before; a long one wakes every quarter second to look, and
+            // sends nothing until it is due.
+            const REFRESH_WAIT_SLICE: core::time::Duration = core::time::Duration::from_millis(250);
             loop {
-                let delay = refresh_bridge.delay.get();
-                TimeoutFuture::new(delay.as_millis() as u32).await;
+                // At least one timer await per tick, even at a zero delay:
+                // the loop must always yield to the browser.
+                let mut waited = core::time::Duration::ZERO;
+                loop {
+                    let slice = refresh_bridge
+                        .delay
+                        .get()
+                        .saturating_sub(waited)
+                        .min(REFRESH_WAIT_SLICE);
+                    TimeoutFuture::new(slice.as_millis() as u32).await;
+                    waited += slice;
+                    if waited >= refresh_bridge.delay.get() {
+                        break;
+                    }
+                }
                 refresh_bridge.tx.send(StudioCommand::RefreshTick);
             }
         }

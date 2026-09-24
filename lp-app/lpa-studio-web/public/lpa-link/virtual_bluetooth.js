@@ -23,6 +23,11 @@
 // "Bluetooth" OR over serial in one page, not both at once — its one byte
 // channel can only be opened once, which is the door's rule, not ours.
 //
+// THE LINK OPENS ON SUBSCRIBE, as M4's firmware does: `gatt.connect()`
+// reaches the board, and the board's side of the link (the byte channel)
+// opens only when the central starts TX notifications. A hello that says
+// `auth.required` with nothing granted arms M4's 10 s unauthenticated drop.
+//
 // THE CABLE IS THE RADIO. The dev banner's `detach` takes a board out of
 // range: an open GATT connection drops (`gattserverdisconnected`), and
 // `connect()` fails until `attach` brings it back. That is what exercises
@@ -38,6 +43,9 @@
 export const NUS_SERVICE = "6e400001-b5a3-f393-e0a9-e50e24dcca9e";
 export const NUS_RX = "6e400002-b5a3-f393-e0a9-e50e24dcca9e";
 export const NUS_TX = "6e400003-b5a3-f393-e0a9-e50e24dcca9e";
+
+/// M4: an untrusted link that has not logged in is closed after this long.
+const UNAUTHENTICATED_TIMEOUT_MS = 10_000;
 
 /// A notification's payload on a 247-byte ATT MTU — what iOS and macOS
 /// both negotiated in the M2 runs.
@@ -103,6 +111,9 @@ class VirtualBluetooth extends EventTarget {
     this.granted = new Set();
     // Board ids out of range: the cable is out.
     this.away = new Set();
+    // M4's unauthenticated-link timeout. Page-internal: the conformance
+    // suite shortens it, because its runner allows the whole suite ~20 s.
+    this.unauthTimeoutMs = UNAUTHENTICATED_TIMEOUT_MS;
     this.onCableOut = (event) => {
       const boardId = event?.detail?.port?.boardId;
       if (!boardId) return;
@@ -227,11 +238,15 @@ class VirtualGattServer {
   constructor(device) {
     this.device = device;
     this.connected = false;
+    // The board's side of the link is open only while TX is subscribed
+    // (M4: "the link opens when the central SUBSCRIBES", not at connect).
     this.emulator = null;
     this.service = new VirtualNusService(this);
     this.hangNext = false;
     this.offBytes = null;
     this.offError = null;
+    this.unauthTimer = null;
+    this.lineTail = "";
     this.stats = { written: 0, writes: 0, notified: 0, notifications: 0, connects: 0 };
   }
 
@@ -247,17 +262,60 @@ class VirtualGattServer {
     if (!bluetooth.inRange(this.device.boardId)) {
       throw domError("NetworkError", "Bluetooth Device is no longer in range.");
     }
-    const port = bluetooth.bus.newestPortFor(this.device.boardId);
-    const emulator = port.emulator;
-    // Opening the byte channel IS the board's USB port opening (the door's
-    // coupling rule). If the serial side of this page holds it, this says so.
-    await emulator.open();
-    this.emulator = emulator;
     this.connected = true;
     this.stats.connects += 1;
-    this.offBytes = emulator.onBytes((bytes) => this.service.tx.deliver(bytes));
-    this.offError = emulator.on("byteserror", () => this.drop("the board's link failed"));
     return this;
+  }
+
+  /// TX subscribed: the board opens this link. Opening the byte channel IS
+  /// the board's port opening (the door's coupling rule); if the serial side
+  /// of this page holds it, this says so.
+  async openLink() {
+    if (this.emulator) {
+      return;
+    }
+    const port = this.device.bluetooth.bus.newestPortFor(this.device.boardId);
+    const emulator = port.emulator;
+    await emulator.open();
+    this.emulator = emulator;
+    this.lineTail = "";
+    this.offBytes = emulator.onBytes((bytes) => {
+      this.watchAuth(bytes);
+      this.service.tx.deliver(bytes);
+    });
+    this.offError = emulator.on("byteserror", () => this.drop("the board's link failed"));
+  }
+
+  /// M4's rule, modelled from the board's OWN words: a link whose hello
+  /// says `auth.required` with nothing granted must log in within 10 s or
+  /// the board closes it. The emulated board's link is trusted USB, so its
+  /// hello never asks and this never fires here — it exists so the polyfill
+  /// behaves like the firmware wherever the board DOES ask.
+  watchAuth(bytes) {
+    const text = this.lineTail + new TextDecoder().decode(bytes);
+    const lines = text.split("\n");
+    this.lineTail = lines.pop() ?? "";
+    for (const line of lines) {
+      if (!line.startsWith("M!")) continue;
+      let frame;
+      try {
+        frame = JSON.parse(line.slice(2));
+      } catch {
+        continue;
+      }
+      const auth = findKey(frame, "auth");
+      if (auth && auth.required === true && (auth.granted ?? null) === null && !this.unauthTimer) {
+        this.unauthTimer = setTimeout(
+          () => this.drop("an untrusted link did not log in within 10 s"),
+          this.device.bluetooth.unauthTimeoutMs,
+        );
+      }
+      const result = findKey(frame, "loginResult");
+      if (result && result.granted) {
+        clearTimeout(this.unauthTimer);
+        this.unauthTimer = null;
+      }
+    }
   }
 
   disconnect() {
@@ -270,6 +328,9 @@ class VirtualGattServer {
       return;
     }
     this.connected = false;
+    clearTimeout(this.unauthTimer);
+    this.unauthTimer = null;
+    this.service.tx.notifying = false;
     this.offBytes?.();
     this.offError?.();
     this.offBytes = null;
@@ -345,6 +406,7 @@ class VirtualTxCharacteristic extends EventTarget {
       throw domError("NetworkError", "GATT Server is disconnected.");
     }
     this.notifying = true;
+    await this.gatt.openLink();
     return this;
   }
 
@@ -361,6 +423,18 @@ class VirtualTxCharacteristic extends EventTarget {
       this.dispatchEvent(new Event("characteristicvaluechanged"));
     }
   }
+}
+
+/// The first value under `key`, searching a parsed frame a few levels deep
+/// (the hello's `auth` and a `loginResult` sit inside the message body).
+function findKey(value, key, depth = 0) {
+  if (!value || typeof value !== "object" || depth > 4) return null;
+  if (Object.prototype.hasOwnProperty.call(value, key)) return value[key];
+  for (const child of Object.values(value)) {
+    const found = findKey(child, key, depth + 1);
+    if (found) return found;
+  }
+  return null;
 }
 
 function wantsNus(options) {

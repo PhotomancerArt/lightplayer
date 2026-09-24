@@ -697,6 +697,12 @@ export async function bleHangNextConnect(boardId) {
   (await bluetoothModule()).bluetooth().hangNextConnect(boardId);
 }
 
+/// Shorten M4's unauthenticated-link timeout for one test (the runner gives
+/// the whole suite ~20 s, and the bounded-connect test already spends 10).
+export async function bleUnauthTimeout(ms) {
+  (await bluetoothModule()).bluetooth().unauthTimeoutMs = ms;
+}
+
 /// The board goes out of range (the cable, on this bus).
 export async function bleOutOfRange(boardId) {
   const { bus } = await polyfill();
