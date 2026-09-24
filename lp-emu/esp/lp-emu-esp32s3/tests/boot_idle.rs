@@ -739,8 +739,8 @@ fn the_ledger_triple_is_elicited_by_a_stop_all_on_the_wire() {
         .trim_start_matches('(')
         .parse()
         .expect("headroom bytes");
-    assert_eq!(used + headroom, 37_296, "{}", stack[0]);
-    assert!(used > 0 && used < 37_296, "{}", stack[0]);
+    assert_eq!(used + headroom, 37_280, "{}", stack[0]);
+    assert!(used > 0 && used < 37_280, "{}", stack[0]);
     for line in &mem {
         assert!(
             line.contains(" used=") && line.contains(" largest_free="),
