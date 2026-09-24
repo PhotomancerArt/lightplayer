@@ -9121,8 +9121,6 @@ dependencies = [
 [[package]]
 name = "ser-write"
 version = "0.3.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "167f92a96f0940635714bd76ee19d502a12540bc4ab7c1c6a28356e62f2a8098"
 dependencies = [
  "tinyvec",
 ]

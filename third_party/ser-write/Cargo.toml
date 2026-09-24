@@ -12,26 +12,27 @@
 [package]
 edition = "2021"
 rust-version = "1.81"
-name = "ser-write-json"
+name = "ser-write"
 version = "0.3.1"
 authors = ["Rafal Michalski <royaltm75@gmail.com>"]
 build = false
-exclude = [
-    "examples",
-    "tests",
+include = [
+    "src/",
+    "/README.md",
+    "/LICENSE-MIT",
+    "/LICENSE-APACHE",
 ]
 autolib = false
 autobins = false
 autoexamples = false
 autotests = false
 autobenches = false
-description = "JSON serializer for ser-write and deserializer for convenience"
+description = "Common traits for writer-style serializers and deserializers designed for no_std targets"
 homepage = "https://github.com/royaltm/rust-ser-write"
 readme = "README.md"
 keywords = [
     "embedded",
     "serde",
-    "json",
 ]
 categories = ["no-std"]
 license = "MIT OR Apache-2.0"
@@ -45,39 +46,44 @@ rustdoc-args = [
 ]
 
 [features]
-alloc = ["ser-write/alloc"]
-de-any-f32 = []
+alloc = ["tinyvec?/alloc"]
+arrayvec = ["dep:arrayvec"]
 default = ["std"]
-std = ["ser-write/std"]
+heapless = ["dep:heapless"]
+smallvec = [
+    "dep:smallvec",
+    "alloc",
+]
+std = ["tinyvec?/std"]
+tinyvec = ["dep:tinyvec"]
 
 [lib]
-name = "ser_write_json"
+name = "ser_write"
 path = "src/lib.rs"
 
-[dependencies.ryu-js]
-version = "1.0"
+[dependencies.arrayvec]
+version = "0.7"
+optional = true
 default-features = false
 
-[dependencies.ser-write]
-version = "0.3"
-# LP fork: the vendored ser-write carries the token hook this crate calls. The
-# root workspace patches it in anyway; the path makes this crate's own tests
-# (`just test-ser-write`) build against it too.
-path = "../ser-write"
+[dependencies.heapless]
+version = "0.8"
+optional = true
 default-features = false
 
-[dependencies.serde]
-version = "1.0.219"
+[dependencies.smallvec]
+version = "1.15"
+optional = true
 default-features = false
 
-[dev-dependencies.serde]
-version = "1.0"
-features = ["derive"]
+[dependencies.tinyvec]
+version = "1.9"
+features = [
+    "grab_spare_slice",
+    "rustc_1_57",
+]
+optional = true
+default-features = false
 
-[dev-dependencies.serde_bytes]
-version = "0.11"
-
-[dev-dependencies.serde_json]
-version = "1.0"
-
+# LP fork: its own workspace, so its tests run standalone (`just test-ser-write`).
 [workspace]
