@@ -55,9 +55,12 @@ use super::shader_input_materialize::materialize_shader_input;
 const TIME_CHANNEL: &str = "time";
 /// The authored representation pin, read through the option's `some` branch.
 const FLOAT_MODE_PIN_PATH: &str = "float_mode.some";
-/// The authored pattern-space opt-in, read through the option's `some`
-/// branch like the float-mode pin.
-const COORDS_PATH: &str = "coords.some";
+/// The authored pattern-space opt-in, read at the OPTION itself rather than
+/// through its `some` branch: an absent `some` is an unresolved slot, and an
+/// unresolved read formats its error every tick — every shader that never
+/// authored the key (all of them, today) would pay allocations per frame for
+/// it. The option root resolves on both sides.
+const COORDS_PATH: &str = "coords";
 /// Default max semantic errors forwarded from the GLSL to LPIR front end.
 const SHADER_COMPILE_MAX_ERRORS: usize = 20;
 
@@ -459,8 +462,7 @@ impl ShaderNode {
         }
         // Absent reads as Pixels: removing the key is a real gesture back to
         // today's frame. No recompile — the transform is host-side.
-        self.coords =
-            try_read_static_authored_value::<ShaderCoords>(ctx, COORDS_PATH)?.unwrap_or_default();
+        self.coords = read_authored_coords(ctx)?;
         Ok(())
     }
 
@@ -1520,6 +1522,23 @@ fn try_read_static_authored_value<T: lpc_model::FromLpValue>(
     T::from_lp_value(value.value())
         .map(Some)
         .map_err(|e| NodeError::msg(alloc::format!("shader path {path:?}: {e}")))
+}
+
+/// The authored `coords` option: `Pixels` when absent (or unreadable, which
+/// is how a runtime built without a def view answers), else its value.
+fn read_authored_coords(ctx: &mut TickContext<'_>) -> Result<ShaderCoords, NodeError> {
+    let Ok(production) = ctx.resolve_static_consumed(COORDS_PATH) else {
+        return Ok(ShaderCoords::Pixels);
+    };
+    let lpc_model::SlotData::Option(option) = production.data() else {
+        return Err(NodeError::msg("shader path \"coords\" is not an option"));
+    };
+    match option.data.as_deref() {
+        None => Ok(ShaderCoords::Pixels),
+        Some(lpc_model::SlotData::Value(value)) => ShaderCoords::from_lp_value(value.value())
+            .map_err(|e| NodeError::msg(alloc::format!("shader path \"coords\": {e}"))),
+        Some(_) => Err(NodeError::msg("shader path \"coords\" is not a value")),
+    }
 }
 
 /// Read one authored field of one consumed uniform through its cached key.
@@ -4467,6 +4486,45 @@ mod authored_sync_tests {
         );
     }
 
+    /// The pattern-space opt-in follows the authored option both ways, with
+    /// no recompile: authoring `"coords": "pattern"` lands on the next tick,
+    /// and removing the key goes back to pixels.
+    #[test]
+    fn the_coords_opt_in_lands_and_leaves_without_a_recompile() {
+        let mut node = node_with_two_value_uniforms();
+        let mut resolver = authored_view();
+        let shapes = SlotShapeRegistry::default();
+        sync_once(&mut node, &mut resolver, &shapes, 1);
+        assert_eq!(node.coords, ShaderCoords::Pixels);
+        node.needs_compile = false;
+
+        resolver.set_static(
+            COORDS_PATH,
+            Production::new(
+                SlotData::Option(lpc_model::SlotOptionDyn::some(SlotData::Value(
+                    WithRevision::new(Revision::new(2), LpValue::String(String::from("pattern"))),
+                ))),
+                ProductionSource::Default,
+            ),
+        );
+        sync_once(&mut node, &mut resolver, &shapes, 2);
+        assert_eq!(node.coords, ShaderCoords::Pattern);
+        assert!(
+            !node.needs_compile,
+            "the transform is host-side: no recompile"
+        );
+
+        resolver.set_static(
+            COORDS_PATH,
+            Production::new(
+                SlotData::Option(lpc_model::SlotOptionDyn::none()),
+                ProductionSource::Default,
+            ),
+        );
+        sync_once(&mut node, &mut resolver, &shapes, 3);
+        assert_eq!(node.coords, ShaderCoords::Pixels);
+    }
+
     /// The same guarantee for the value pass the visual node runs right
     /// after the def sync: the uniform list is rewritten in place rather
     /// than rebuilt, so the uniform NAMES are not cloned per frame either.
@@ -4859,6 +4917,15 @@ mod authored_sync_tests {
             FLOAT_MODE_PIN_PATH,
             Production::leaf(
                 WithRevision::new(Revision::new(1), LpValue::String(String::from("fixed"))),
+                ProductionSource::Default,
+            ),
+        );
+        // An unauthored `coords` option: the option root resolves to `none`
+        // in a loaded project, which is why the node reads it there.
+        view.set_static(
+            COORDS_PATH,
+            Production::new(
+                SlotData::Option(lpc_model::SlotOptionDyn::none()),
                 ProductionSource::Default,
             ),
         );
