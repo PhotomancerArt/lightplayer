@@ -134,7 +134,7 @@ pub use nodes::{
     PathSpec, PlayState, PlaylistDef, PlaylistDefView, PlaylistEntry, PlaylistEntryView,
     PlaylistState, PlaylistStateView, ProjectionShape, ProvenanceDef, STARTER_SHADER_GLSL,
     STARTER_STEM_PLACEHOLDER, ScalarHint, ScalarHintView, ShaderBudget, ShaderBudgetError,
-    ShaderDef, ShaderDefView, ShaderHeaderGenError, ShaderMapKeyDef, ShaderParamDef,
+    ShaderCoords, ShaderDef, ShaderDefView, ShaderHeaderGenError, ShaderMapKeyDef, ShaderParamDef,
     ShaderParamDefView, ShaderSlotDef, ShaderSlotKind, ShaderSlotMappingDef, ShaderSlotMappingKind,
     ShaderSpace, ShaderState, ShaderStateView, ShaderValueShapeRef, SpaceAnswer1, SpaceAnswer2,
     TextureDef, TextureDefView, TextureFormat, TextureState, TextureStateView, VisualConsumerSpace,
