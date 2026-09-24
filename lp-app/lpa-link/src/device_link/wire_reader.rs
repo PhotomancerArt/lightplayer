@@ -17,19 +17,42 @@
 //! ([`WireRead::Note`]) — a board that stays on JSON because its dictionary
 //! is not this build's is otherwise invisible, since every reader decodes
 //! both forms.
+//!
+//! One dev-only rider ([`WireReader::with_device_log_level`], Studio's
+//! `?device-log=<level>`): once the board has said hello and the opt-in is
+//! settled, the reader asks it once for that log level, and swallows the
+//! answer into a note — the same shape as the opt-in, so no drainer sees a
+//! reply to a request it did not make.
 
 use std::cell::Cell;
 
+use lpc_wire::server::api::LogLevel;
 use lpc_wire::{
-    ClientMessage, PACK_OPT_IN_REQUEST_ID, PackOptIn, ServerMsgBody, WIRE_DICTIONARY_FINGERPRINT,
-    WIRE_PROTO_VERSION, WIRE_STREAM_MAX_FRAME, WireChunk, WireEncoding, WireServerMessage,
-    WireStream,
+    ClientMessage, ClientRequest, PACK_OPT_IN_REQUEST_ID, PackOptIn, ServerMsgBody,
+    WIRE_DICTIONARY_FINGERPRINT, WIRE_PROTO_VERSION, WIRE_STREAM_MAX_FRAME, WireChunk,
+    WireEncoding, WireServerMessage, WireStream,
 };
 
 thread_local! {
     /// Whether this page's browser readers ask boards to pack. See
     /// [`set_packed_replies_wanted`].
     static PACKED_REPLIES_WANTED: Cell<bool> = const { Cell::new(true) };
+    /// The dev log level this page's browser readers ask boards for. See
+    /// [`set_device_log_level`].
+    static DEVICE_LOG_LEVEL: Cell<Option<LogLevel>> = const { Cell::new(None) };
+}
+
+/// Dev-only (Studio's `?device-log=<level>`): the log level the browser's
+/// Web Serial readers ask each board for, once per link, after its hello and
+/// the opt-in. `None` (the default) never asks. Readers built after the call
+/// take it.
+pub fn set_device_log_level(level: Option<LogLevel>) {
+    DEVICE_LOG_LEVEL.with(|cell| cell.set(level));
+}
+
+/// See [`set_device_log_level`].
+pub fn device_log_level() -> Option<LogLevel> {
+    DEVICE_LOG_LEVEL.with(Cell::get)
 }
 
 /// Whether the browser's readers (Web Serial and the tab emulator) ask a
@@ -45,6 +68,10 @@ pub fn set_packed_replies_wanted(wanted: bool) {
 pub fn packed_replies_wanted() -> bool {
     PACKED_REPLIES_WANTED.with(Cell::get)
 }
+
+/// The id the dev log-level request goes out with: one below the opt-in's,
+/// so it is as far from any request counter and still exact in JavaScript.
+pub const DEVICE_LOG_LEVEL_REQUEST_ID: u64 = PACK_OPT_IN_REQUEST_ID - 1;
 
 /// One thing a [`WireReader`] produced, in stream order.
 #[derive(Debug)]
@@ -101,6 +128,23 @@ pub struct WireReader {
     fallback_noted: bool,
     /// Packed frames since the link last (re)opened, for the notes.
     packed_frames: u64,
+    /// The dev log level to ask for, once per link (`None`: never ask).
+    device_log: Option<LogLevel>,
+    /// Where the dev log-level request stands on this link.
+    device_log_step: DeviceLogStep,
+}
+
+/// The dev log-level request's progress on one link.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DeviceLogStep {
+    /// No hello yet.
+    WaitingForHello,
+    /// Hello seen; the opt-in went out and its answer has not come.
+    WaitingForOptIn,
+    /// Hello seen and the opt-in settled (or never asked): ask now.
+    Due,
+    /// Asked.
+    Sent,
 }
 
 impl WireReader {
@@ -113,7 +157,16 @@ impl WireReader {
             told: Told::Nothing,
             fallback_noted: false,
             packed_frames: 0,
+            device_log: None,
+            device_log_step: DeviceLogStep::WaitingForHello,
         }
+    }
+
+    /// Dev-only: also ask the board for `level` once per link, after its
+    /// hello and the opt-in. `None` never asks.
+    pub fn with_device_log_level(mut self, level: Option<LogLevel>) -> Self {
+        self.device_log = level;
+        self
     }
 
     /// The encoding the board is writing this link's replies in, as far as
@@ -132,6 +185,8 @@ impl WireReader {
             told,
             fallback_noted,
             packed_frames,
+            device_log,
+            device_log_step,
         } = self;
         stream.push(bytes, |chunk| match chunk {
             WireChunk::Line(line) => on(WireRead::Line(line)),
@@ -151,6 +206,12 @@ impl WireReader {
                 if packed {
                     *packed_frames += 1;
                 }
+                if decoded.id == DEVICE_LOG_LEVEL_REQUEST_ID
+                    && let Some(note) = device_log_answer(decoded)
+                {
+                    on(WireRead::Note(note));
+                    return;
+                }
                 let before = opt_in.encoding();
                 let step = opt_in.observe(decoded, packed, now_ms);
                 let after = opt_in.encoding();
@@ -162,8 +223,19 @@ impl WireReader {
                 if let Some(note) = note_for(*wanted, told, fallback_noted, decoded, seen) {
                     on(WireRead::Note(note));
                 }
+                let opt_in_sent = step.send.is_some();
                 if let Some(request) = step.send {
                     on(WireRead::Send(request));
+                }
+                if let Some(level) = *device_log {
+                    *device_log_step = next_device_log_step(*device_log_step, decoded, opt_in_sent);
+                    if *device_log_step == DeviceLogStep::Due {
+                        *device_log_step = DeviceLogStep::Sent;
+                        on(WireRead::Send(ClientMessage {
+                            id: DEVICE_LOG_LEVEL_REQUEST_ID,
+                            msg: ClientRequest::SetLogLevel { level },
+                        }));
+                    }
                 }
                 if step.deliver {
                     on(WireRead::Frame(ReadFrame {
@@ -179,8 +251,37 @@ impl WireReader {
     /// Forget a partial line or frame and the opt-in: the port (re)opened or
     /// the board reset, and the board has forgotten it was asked.
     pub fn clear(&mut self) {
-        *self = Self::new(self.wanted);
+        *self = Self::new(self.wanted).with_device_log_level(self.device_log);
     }
+}
+
+/// Where the dev log-level request stands after `message`, `opt_in_sent` when
+/// the reader just wrote the opt-in because of it.
+fn next_device_log_step(
+    step: DeviceLogStep,
+    message: &WireServerMessage,
+    opt_in_sent: bool,
+) -> DeviceLogStep {
+    let hello = matches!(message.msg, ServerMsgBody::Hello(_));
+    let opt_in_answer = message.id == PACK_OPT_IN_REQUEST_ID;
+    match step {
+        DeviceLogStep::Sent => DeviceLogStep::Sent,
+        DeviceLogStep::WaitingForHello if !hello => DeviceLogStep::WaitingForHello,
+        _ if opt_in_sent => DeviceLogStep::WaitingForOptIn,
+        DeviceLogStep::WaitingForOptIn if !opt_in_answer => DeviceLogStep::WaitingForOptIn,
+        _ => DeviceLogStep::Due,
+    }
+}
+
+/// The note the board's answer to the dev log-level request earns.
+fn device_log_answer(message: &WireServerMessage) -> Option<String> {
+    Some(match &message.msg {
+        ServerMsgBody::SetLogLevel => "dev: the board applied the requested log level".to_string(),
+        ServerMsgBody::Error { error } => {
+            format!("dev: the board refused the requested log level: {error}")
+        }
+        _ => return None,
+    })
 }
 
 /// What one message moved: the encoding before and after it, and the packed
@@ -454,6 +555,54 @@ mod tests {
         let inside = 10 + frame.len() - 2;
         assert_eq!(complete_prefix_len(&bytes[..inside]), 11);
         assert_eq!(complete_prefix_len(b"no newline"), 0);
+    }
+
+    #[test]
+    fn the_dev_log_level_is_asked_once_after_the_opt_in_settles() {
+        let mut reader = WireReader::new(true).with_device_log_level(Some(LogLevel::Debug));
+        let mut sends = Vec::new();
+        let mut on = |r: WireRead, sends: &mut Vec<u64>| {
+            if let WireRead::Send(request) = r {
+                sends.push(request.id);
+            }
+        };
+        reader.push(&json_line(&other(1)), 0, |r| on(r, &mut sends));
+        assert!(sends.is_empty(), "nothing before the hello");
+        reader.push(&json_line(&hello(WIRE_DICTIONARY_FINGERPRINT)), 0, |r| {
+            on(r, &mut sends)
+        });
+        assert_eq!(sends, [PACK_OPT_IN_REQUEST_ID], "the opt-in first, alone");
+        reader.push(&json_line(&answer(WireEncoding::Packed)), 5, |r| {
+            on(r, &mut sends)
+        });
+        assert_eq!(sends, [PACK_OPT_IN_REQUEST_ID, DEVICE_LOG_LEVEL_REQUEST_ID]);
+        reader.push(&packed(&other(2)), 10, |r| on(r, &mut sends));
+        assert_eq!(sends.len(), 2, "once per link");
+
+        let ack = WireServerMessage::new(DEVICE_LOG_LEVEL_REQUEST_ID, ServerMsgBody::SetLogLevel);
+        let mut reads = Vec::new();
+        reader.push(&packed(&ack), 20, |r| reads.push(r));
+        assert!(
+            matches!(reads.as_slice(), [WireRead::Line(_), WireRead::Note(note)] if note.contains("applied")),
+            "the answer is a note, never a frame: {reads:?}"
+        );
+
+        reader.clear();
+        sends.clear();
+        reader.push(&json_line(&hello(0)), 30, |r| on(r, &mut sends));
+        assert_eq!(
+            sends,
+            [DEVICE_LOG_LEVEL_REQUEST_ID],
+            "asked again after a reopen"
+        );
+    }
+
+    #[test]
+    fn no_dev_log_level_never_asks() {
+        let mut reader = WireReader::new(false);
+        reader.push(&json_line(&hello(0)), 0, |r| {
+            assert!(!matches!(r, WireRead::Send(_)));
+        });
     }
 
     fn notes_of(reader: &mut WireReader, bytes: &[u8], now_ms: u64) -> Vec<String> {

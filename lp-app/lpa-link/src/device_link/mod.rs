@@ -21,6 +21,7 @@
 //! | [`wire`] | `lpc_wire` frames ⇄ the model's minimal mirror (the ONE meeting point) |
 //! | [`demux`] | whole serial lines → `LinkEvent`s (the `M!` demux) |
 //! | [`wire_reader`] | one port's bytes → lines and messages, and the packed-reply opt-in |
+//! | [`wire_capture`] | dev-only: a capped tee of every raw byte the browser port reads |
 //! | `byte_stream` | the sync `DeviceByteStream` seam → `Link` (host) |
 //! | `fake` | the scripted `FakeEsp32Device` → `Link` (host tests) |
 //! | `browser_serial` | the Web Serial provider → `Link` (wasm) |
@@ -34,6 +35,7 @@
 
 pub mod demux;
 pub mod wire;
+pub mod wire_capture;
 pub mod wire_reader;
 
 #[cfg(any(

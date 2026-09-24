@@ -7,7 +7,10 @@ use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::{JsFuture, spawn_local};
 
 use crate::LinkError;
-use crate::device_link::wire_reader::{WireRead, WireReader, packed_replies_wanted};
+use crate::device_link::wire_capture::capture_wire_bytes;
+use crate::device_link::wire_reader::{
+    WireRead, WireReader, device_log_level, packed_replies_wanted,
+};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct BrowserSerialPortHandle {
@@ -199,6 +202,12 @@ pub async fn write_line(id: u32, line: &str) -> Result<(), LinkError> {
         .map_err(js_error)
 }
 
+#[wasm_bindgen]
+extern "C" {
+    #[wasm_bindgen(js_namespace = console, js_name = warn)]
+    fn console_warn(message: &str);
+}
+
 thread_local! {
     /// One reader per port session, shared by every drainer of that port —
     /// the model's link pump and, while it holds the wire, a conversation
@@ -232,6 +241,14 @@ pub fn take_reads(id: u32) -> Vec<WireRead> {
         .ok()
         .map(|value| Uint8Array::new(&value).to_vec())
         .unwrap_or_default();
+    // Dev-only tee (`?wire-capture=1`): every byte the pump read, before any
+    // splitting, in order. A no-op unless the page turned it on.
+    if capture_wire_bytes(&bytes) {
+        console_warn(&format!(
+            "wire capture is full ({} bytes); dropping what the port reads from here on",
+            crate::device_link::wire_capture::WIRE_CAPTURE_CAP
+        ));
+    }
     let now_ms = js_sys::Date::now() as u64;
     let mut reads = Vec::new();
     let mut sends = Vec::new();
@@ -239,7 +256,8 @@ pub fn take_reads(id: u32) -> Vec<WireRead> {
         let mut readers = readers.borrow_mut();
         let port = readers.entry(id).or_insert_with(|| PortReader {
             generation,
-            reader: WireReader::new(packed_replies_wanted()),
+            reader: WireReader::new(packed_replies_wanted())
+                .with_device_log_level(device_log_level()),
             notes: Vec::new(),
         });
         if port.generation != generation {
@@ -247,7 +265,8 @@ pub fn take_reads(id: u32) -> Vec<WireRead> {
             // read, and what the board had agreed, belong to the previous
             // port generation.
             port.generation = generation;
-            port.reader = WireReader::new(packed_replies_wanted());
+            port.reader =
+                WireReader::new(packed_replies_wanted()).with_device_log_level(device_log_level());
         }
         let notes = &mut port.notes;
         port.reader.push(&bytes, now_ms, |read| match read {

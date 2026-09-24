@@ -601,6 +601,20 @@ whose hello offers this build's pack dictionary; what the board answered is one
 replies stay JSON — <why>`). See
 `docs/adr/2026-09-09-studio-device-stack-over-a-virtual-serial-port.md`.
 
+Two more exist for a hardware sitting, where Web Serial's exclusive hold on the
+port means nothing else can read what the board sends:
+`?wire-capture=1` tees every raw byte chunk the Web Serial read pump hands to
+Rust (`browser_serial::take_reads`, before any splitting) into an in-memory
+buffer capped at 16 MiB (one console warning at the cap, then it drops). Run
+`lpWireCapture()` in the page's console to download it as
+`wire-capture-<unix-ms>.bin`; the capture keeps running, and the file is
+exactly what arrived, so `lp-cli wire unpack --sizes < file` reads it.
+`?device-log=<trace|debug|info|warn|error>` asks each board for that log
+level (`SetLogLevel`) once per link, after its hello and the packed-reply
+opt-in; the answer is a `dev: …` `WireNote` line, never a frame. Both cover
+Web Serial ports (a real board, `?emu=ws://…`), not the in-tab board
+(`?emu=tab`).
+
 ### Running the device walk yourself
 
 With a dev server already up on this worktree's port:

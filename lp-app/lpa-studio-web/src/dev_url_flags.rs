@@ -1,16 +1,20 @@
 //! Dev-only URL flags that tune the device wire for a measurement, read once
-//! at page load. Neither is a setting: no UI, no persistence, and a page
+//! at page load. None is a setting: no UI, no persistence, and a page
 //! without them behaves exactly as shipped.
 //!
 //! | flag | what it does |
 //! |---|---|
 //! | `?lens-pause-ms=N` | the editor lens's pause between device reads (`DEVICE_REFRESH_INTERVAL`, 150 ms), clamped to 0–1000 ms — the JSON Pack cadence probe (plan `lp-json-pack`, D2) |
 //! | `?wire=json` | this page does not ask boards to pack their replies, so JSON and packed can be measured on one build |
+//! | `?wire-capture=1` | tee every raw byte the Web Serial read pump hands to Rust into a 16 MiB in-memory buffer; `lpWireCapture()` in the console downloads it as `wire-capture-<unix-ms>.bin` (`lpa_link::device_link::wire_capture`) |
+//! | `?device-log=<level>` | once per link, after the board's hello and the packed-reply opt-in, ask it for `trace`/`debug`/`info`/`warn`/`error` logging (`SetLogLevel`) |
 //!
 //! Validated the way `?capture-sink=` is (`device_events_io.rs`): a query is
 //! user input, a value that does not parse reads as no flag, and the page
 //! says so once in the console. Both are documented beside `?emu=` in
 //! `AGENTS.md` ("Studio against an emulated board").
+
+use lpc_wire::server::api::LogLevel;
 
 /// The dev flags a query string carries.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -26,6 +30,10 @@ pub struct DevUrlFlags {
     pub lens_pause_ms: Option<u64>,
     /// `?wire=json`.
     pub wire_json: bool,
+    /// `?wire-capture=1`.
+    pub wire_capture: bool,
+    /// `?device-log=<level>`.
+    pub device_log: Option<LogLevel>,
     /// Flags present but unreadable, for the console.
     pub ignored: Vec<String>,
 }
@@ -55,11 +63,32 @@ impl DevUrlFlags {
                     "packed" => flags.wire_json = false,
                     _ => flags.ignored.push(pair.to_string()),
                 },
+                "wire-capture" => match value.trim() {
+                    "1" | "true" | "" => flags.wire_capture = true,
+                    "0" | "false" => flags.wire_capture = false,
+                    _ => flags.ignored.push(pair.to_string()),
+                },
+                "device-log" => match parse_log_level(value.trim()) {
+                    Some(level) => flags.device_log = Some(level),
+                    None => flags.ignored.push(pair.to_string()),
+                },
                 _ => {}
             }
         }
         flags
     }
+}
+
+/// A `?device-log=` value, case-insensitive.
+fn parse_log_level(value: &str) -> Option<LogLevel> {
+    Some(match value.to_ascii_lowercase().as_str() {
+        "trace" => LogLevel::Trace,
+        "debug" => LogLevel::Debug,
+        "info" => LogLevel::Info,
+        "warn" => LogLevel::Warn,
+        "error" => LogLevel::Error,
+        _ => return None,
+    })
 }
 
 /// Read the flags from this page's URL and apply them. Before any device
@@ -84,6 +113,46 @@ pub fn install() {
         lpa_link::device_link::wire_reader::set_packed_replies_wanted(false);
         log::info!("dev flag: this page does not ask boards for packed replies (?wire=json)");
     }
+    if flags.wire_capture {
+        install_wire_capture();
+    }
+    if let Some(level) = flags.device_log {
+        lpa_link::device_link::wire_reader::set_device_log_level(Some(level));
+        log::info!("dev flag: each board is asked for {level:?} logging once it is ready");
+    }
+}
+
+/// Start the raw-byte tee and put `window.lpWireCapture()` on the page: it
+/// downloads everything captured so far as `wire-capture-<unix-ms>.bin`, and
+/// returns the byte count. The capture keeps running.
+#[cfg(target_arch = "wasm32")]
+fn install_wire_capture() {
+    use wasm_bindgen::prelude::*;
+
+    lpa_link::device_link::wire_capture::set_wire_capture(true);
+    let download = Closure::<dyn Fn() -> f64>::new(|| {
+        let bytes = lpa_link::device_link::wire_capture::wire_capture_bytes();
+        let name = format!("wire-capture-{}.bin", js_sys::Date::now() as u64);
+        if let Err(error) = crate::app::home::package_export::trigger_download(
+            &name,
+            "application/octet-stream",
+            &bytes,
+        ) {
+            log::warn!("wire capture download failed: {error:?}");
+        }
+        bytes.len() as f64
+    });
+    let installed = web_sys::window().is_some_and(|window| {
+        js_sys::Reflect::set(&window, &"lpWireCapture".into(), download.as_ref()).is_ok()
+    });
+    // The page lives as long as the function does.
+    download.forget();
+    if installed {
+        log::info!(
+            "dev flag: capturing the device port's raw bytes (?wire-capture=1); \
+             run lpWireCapture() in the console to download them"
+        );
+    }
 }
 
 /// Host builds read no URL.
@@ -100,6 +169,19 @@ mod tests {
         assert_eq!(flags.lens_pause_ms, Some(75));
         assert!(flags.wire_json);
         assert!(flags.ignored.is_empty());
+    }
+
+    #[test]
+    fn the_capture_and_log_flags_parse() {
+        let flags = DevUrlFlags::parse("?emu=ws://127.0.0.1:9/&wire-capture=1&device-log=Debug");
+        assert!(flags.wire_capture);
+        assert_eq!(flags.device_log, Some(LogLevel::Debug));
+        assert!(flags.ignored.is_empty());
+
+        let flags = DevUrlFlags::parse("wire-capture=yes&device-log=loud");
+        assert!(!flags.wire_capture);
+        assert_eq!(flags.device_log, None);
+        assert_eq!(flags.ignored, ["wire-capture=yes", "device-log=loud"]);
     }
 
     #[test]
