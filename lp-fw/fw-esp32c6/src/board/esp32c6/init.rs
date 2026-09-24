@@ -125,10 +125,7 @@ static mut HEAP_DRAM2: core::mem::MaybeUninit<[u8; HEAP_DRAM2_SIZE]> =
 
 /// The heap's two regions as `(start address, size)`, main first — the
 /// order the allocator tries them in.
-#[allow(
-    dead_code,
-    reason = "read only by the heap diagnostics"
-)]
+#[allow(dead_code, reason = "read only by the heap diagnostics")]
 pub fn heap_regions() -> [(usize, usize); 2] {
     [
         (core::ptr::addr_of!(HEAP_MAIN) as usize, HEAP_MAIN_SIZE),
