@@ -305,7 +305,10 @@ const PREFIX_CYCLES: u64 = 3_245_171;
 const PREFIX_INSTRUCTIONS: u64 = 3_245_151;
 const PREFIX_IDLE_SKIPS: u64 = 0;
 const PREFIX_BYTES: usize = 543;
-const PREFIX_SHA256: &str = "ea8bae305953ef613f68a97fb84919378f33b37eb5623dcb970e8dce2b7343e7";
+/// Moved by the BLE plan's M3 (access core): one line of the 543 bytes,
+/// `[INIT] main stack 45280 B` → `45360 B` (the server loop's future in
+/// `.bss` shrank 80 B). See `boot_idle.rs`'s `PREFIX_SHA256`. Was `ea8bae30…`.
+const PREFIX_SHA256: &str = "465c8d520e705c194205b6d60045946b576b01df361850322f57f14ac0a11f11";
 
 /// **The single-core safety net.** A run in which core 1 never starts is
 /// the run M3 produced: same bytes, same sha, same cycles, same
