@@ -11,6 +11,7 @@ pub mod budget;
 pub mod json;
 pub mod message;
 pub mod messages;
+pub mod pack_opt_in;
 #[cfg(feature = "ser-write-json")]
 pub mod pack_sink;
 #[cfg(feature = "ser-write-json")]
@@ -35,6 +36,7 @@ pub mod wire_dictionary;
 #[cfg(feature = "wire-dict-gen")]
 pub mod wire_dictionary_gen;
 pub mod wire_encoding;
+pub mod wire_stream;
 
 pub use messages::{
     BindingGraphProbeRequest, BindingGraphProbeResult, ControlProductGeometry,
@@ -58,6 +60,7 @@ pub use messages::{
     WireProjectionShape, WireScopeRef, WireVisualSpace,
 };
 pub use messages::{ClientMessage, ClientRequest, Message, ServerMessage};
+pub use pack_opt_in::{PACK_OPT_IN_REQUEST_ID, PACK_REASK_INTERVAL_MS, PackOptIn, PackOptInStep};
 #[cfg(feature = "ser-write-json")]
 pub use pack_sink::PackSink;
 #[cfg(feature = "ser-write-json")]
@@ -103,6 +106,9 @@ pub use transport_error::TransportError;
 pub use tree::{WireChildKind, WireEntryState, WireSlotIndex, WireTreeDelta};
 pub use wire_dictionary::{WIRE_DICTIONARY, WIRE_DICTIONARY_FINGERPRINT, WIRE_DICTIONARY_PROTO};
 pub use wire_encoding::WireEncoding;
+pub use wire_stream::{
+    UnpackedFrame, WIRE_STREAM_MAX_FRAME, WireChunk, WireForm, WireFrame, WireStream, WireUnpacker,
+};
 
 /// Canonical project-read message envelope.
 pub type WireMessage = Message;

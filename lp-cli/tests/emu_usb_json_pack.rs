@@ -18,18 +18,31 @@
 //! requests are framed and the frames decoded by `lpc-wire`, which nothing
 //! under `lp-emu/` may depend on.
 //!
+//! A second test (P5) takes the same image through the `emu serve` door the
+//! way a host does — a client that reads through `lpc_wire::WireStream` and
+//! opts in with `lpc_wire::PackOptIn` — and checks that `lp-cli wire unpack`
+//! turns what it received, and the door's wire tap, back into JSON.
+//!
 //! `#[ignore]`d and run by `just test-emu-c6`: it needs a built
 //! `fw-esp32c6` ELF (`LP_EMU_BUILD_FW=1`) and builds the emulator in
 //! release.
 
-use std::process::Command;
+mod support;
+
+use std::io::Write;
+use std::process::{Command, Stdio};
+use std::time::{Duration, Instant};
 
 use lp_emu_esp32c6::test_support::{FwImage, fw_esp32c6_image};
 use lp_json_pack::{FRAME_KIND_PACK, FrameScanner, ScanEvent, VecFrameBuffer};
 use lpc_wire::json::to_serial_line;
 use lpc_wire::message::client::{ClientMessage, ClientRequest};
 use lpc_wire::server::ServerMsgBody;
-use lpc_wire::{WIRE_DICTIONARY_FINGERPRINT, WireEncoding, WireServerMessage};
+use lpc_wire::{
+    PackOptIn, WIRE_DICTIONARY_FINGERPRINT, WireChunk, WireEncoding, WireServerMessage, WireStream,
+};
+use support::Serve;
+use tungstenite::Message;
 
 /// The conversation, by emulated millisecond. The boot hello goes out at
 /// ~143 ms and the server is serving well before the first line.
@@ -207,6 +220,169 @@ fn an_opted_in_link_gets_packed_frames_until_the_cable_is_pulled() {
     );
 }
 
+/// P5: an opted-in client gets packed frames through the `emu serve` door,
+/// and `lp-cli wire unpack` restores the JSON — of the bytes the client
+/// read, and of the door's own wire tap.
+///
+/// The client is a host reader in miniature: bytes through
+/// [`WireStream`], every message through [`PackOptIn`], whose asks it
+/// writes. The first hello is re-sent on a wall cadence until answered (a
+/// board that has just been opened may still be latched "not draining";
+/// see `Serve::hello`), and that cadence is a retry, never an assertion.
+#[test]
+#[ignore = "needs a built fw-esp32c6 ELF; `just test-emu-c6` runs it"]
+fn an_opted_in_client_through_the_door_gets_packed_frames_and_unpack_restores_json() {
+    const ASK_AGAIN: Duration = Duration::from_secs(2);
+    let elf = match fw_esp32c6_image(&FwImage::SHIPPED) {
+        Ok(path) => path,
+        Err(reason) => {
+            eprintln!("emu_usb_json_pack: skipped — {reason}");
+            return;
+        }
+    };
+    let tap_dir = tempfile::tempdir().expect("a temp dir");
+    let serve = Serve::start_specs_with_env(
+        &[format!("c6-a={}", elf.display())],
+        &[],
+        support::scratch(),
+        &[("LP_EMU_WIRE_TAP", tap_dir.path())],
+    );
+    let mut socket = serve.bytes("c6-a");
+    socket
+        .get_mut()
+        .set_read_timeout(Some(Duration::from_millis(200)))
+        .expect("a read timeout");
+
+    let started = Instant::now();
+    let mut raw = Vec::new();
+    let mut wire = WireStream::new();
+    let mut opt_in = PackOptIn::new(true);
+    // (id, packed, JSON as it arrived) for every message the board sent.
+    let mut received: Vec<(u64, bool, String)> = Vec::new();
+    let mut asked_hello_at: Option<Instant> = None;
+    let mut sent_reads = false;
+    let deadline = Instant::now() + support::NET;
+
+    let done = |received: &[(u64, bool, String)]| received.iter().any(|(id, ..)| *id == 4);
+    while !done(&received) {
+        assert!(
+            Instant::now() < deadline,
+            "no reply to request 4 within the wall net; received:\n{}",
+            received_summary(&received)
+        );
+        let hello_answered = received.iter().any(|(id, ..)| *id == 2);
+        if !hello_answered && asked_hello_at.is_none_or(|at| at.elapsed() >= ASK_AGAIN) {
+            send(&mut socket, 2, ClientRequest::Hello);
+            asked_hello_at = Some(Instant::now());
+        }
+        if !sent_reads && opt_in.encoding() == WireEncoding::Packed {
+            send(&mut socket, 3, ClientRequest::Hello);
+            send(&mut socket, 4, ClientRequest::ListLoadedProjects);
+            sent_reads = true;
+        }
+
+        let bytes = match socket.read() {
+            Ok(Message::Binary(bytes)) => bytes,
+            Ok(Message::Close(_)) => panic!("the byte endpoint closed"),
+            Ok(_) => continue,
+            Err(tungstenite::Error::Io(e))
+                if matches!(
+                    e.kind(),
+                    std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
+                ) =>
+            {
+                continue;
+            }
+            Err(e) => panic!("reading the byte endpoint: {e}"),
+        };
+        raw.extend_from_slice(&bytes);
+        for chunk in wire.push_collect(&bytes) {
+            let frame = match chunk {
+                WireChunk::Frame(frame) => frame,
+                WireChunk::Error(error) => panic!("a packed frame did not decode: {error}"),
+                WireChunk::Line(_) => continue,
+            };
+            let message: WireServerMessage =
+                lpc_wire::json::from_str(&frame.json).expect("a message parses");
+            let now_ms = started.elapsed().as_millis() as u64;
+            let step = opt_in.observe(&message, frame.is_packed(), now_ms);
+            if let Some(ask) = step.send {
+                send(&mut socket, ask.id, ask.msg);
+            }
+            received.push((message.id, frame.is_packed(), frame.json));
+        }
+    }
+    drop(socket);
+    serve.shutdown();
+
+    // 1. The replies after the opt-in came packed, and decode to exactly
+    //    the JSON the typed message serializes to.
+    for id in [3, 4] {
+        let (_, packed, json) = received
+            .iter()
+            .find(|(i, ..)| *i == id)
+            .unwrap_or_else(|| panic!("no reply {id}"));
+        assert!(
+            *packed,
+            "reply {id} came as JSON:\n{}",
+            received_summary(&received)
+        );
+        let message: WireServerMessage = lpc_wire::json::from_str(json).unwrap();
+        assert_eq!(&lpc_wire::json::to_string(&message).unwrap(), json);
+    }
+    let packed_seen = received.iter().filter(|(_, p, _)| *p).count();
+
+    // 2. `wire unpack --sizes` over the client's bytes: one `M!` line per
+    //    frame, every other byte as it came.
+    let (stdout, stderr) = lp_cli_wire_unpack(&["--sizes"], &raw);
+    assert!(!stdout.contains(&0), "a frame byte survived the unpack");
+    let text = String::from_utf8(stdout).expect("unpacked text is UTF-8");
+    for (_, _, json) in &received {
+        assert!(text.contains(&format!("M!{json}\n")), "missing M!{json}");
+    }
+    let stderr = String::from_utf8(stderr).unwrap();
+    assert_eq!(
+        stderr.lines().filter(|l| l.starts_with("frame ")).count(),
+        packed_seen,
+        "{stderr}"
+    );
+    assert!(
+        stderr.contains(&format!("total frames {packed_seen} packed ")),
+        "{stderr}"
+    );
+    assert!(stderr.trim_end().ends_with("errors 0"), "{stderr}");
+
+    // 3. The door's tap recorded the frames raw and annotated each; after
+    //    `wire unpack --tap` it reads like a tap of a link that never packed.
+    let tap = std::fs::read(tap_dir.path().join("c6-a.tap")).expect("the tap was written");
+    let annotations = tap_headers(&tap)
+        .iter()
+        .filter(|h| h.split(' ').nth(1) == Some("P"))
+        .count();
+    assert_eq!(annotations, packed_seen, "one P record per packed frame");
+    let (unpacked_tap, stderr) = lp_cli_wire_unpack(&["--tap"], &tap);
+    assert!(stderr.is_empty(), "{}", String::from_utf8_lossy(&stderr));
+    assert!(
+        tap_headers(&unpacked_tap)
+            .iter()
+            .all(|h| matches!(h.split(' ').nth(1), Some("<" | ">"))),
+        "the annotations are dropped"
+    );
+    assert!(
+        !unpacked_tap.contains(&0),
+        "a frame byte survived in the tap"
+    );
+    let (_, _, list_json) = received.iter().find(|(i, ..)| *i == 4).unwrap();
+    let unpacked_tap = String::from_utf8_lossy(&unpacked_tap);
+    assert!(unpacked_tap.contains(&format!("M!{list_json}\n")));
+
+    eprintln!(
+        "json-pack door: {} B read, {} messages, {packed_seen} packed",
+        raw.len(),
+        received.len()
+    );
+}
+
 /// How a message came over the link.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Form {
@@ -287,6 +463,66 @@ fn summary(items: &[Item]) -> String {
             Item::Json(j) => format!("json   {}", &j[..j.len().min(100)]),
             Item::Packed(j) => format!("packed {}", &j[..j.len().min(100)]),
             Item::Console(l) => format!("text   {l}"),
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// Write one request as its `M!` line.
+fn send(socket: &mut tungstenite::WebSocket<std::net::TcpStream>, id: u64, msg: ClientRequest) {
+    let line = to_serial_line(&ClientMessage { id, msg }).expect("framing a request");
+    socket
+        .send(Message::Binary(line.into_bytes()))
+        .expect("writing a request");
+}
+
+/// `lp-cli wire unpack <args>` over `input`: (stdout, stderr).
+fn lp_cli_wire_unpack(args: &[&str], input: &[u8]) -> (Vec<u8>, Vec<u8>) {
+    let mut child = Command::new(env!("CARGO_BIN_EXE_lp-cli"))
+        .args(["wire", "unpack"])
+        .args(args)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("spawning lp-cli wire unpack");
+    let mut stdin = child.stdin.take().expect("piped");
+    let input = input.to_vec();
+    let writer = std::thread::spawn(move || stdin.write_all(&input));
+    let output = child.wait_with_output().expect("lp-cli wire unpack ran");
+    writer.join().unwrap().expect("writing its stdin");
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    (output.stdout, output.stderr)
+}
+
+/// Every record header of a wire tap, in order.
+fn tap_headers(tap: &[u8]) -> Vec<String> {
+    let mut headers = Vec::new();
+    let mut at = 0;
+    while at < tap.len() {
+        let nl = at
+            + tap[at..]
+                .iter()
+                .position(|&b| b == b'\n')
+                .expect("a header");
+        let header = String::from_utf8(tap[at..nl].to_vec()).expect("a text header");
+        let len: usize = header.split(' ').nth(2).expect("a length").parse().unwrap();
+        headers.push(header);
+        at = nl + 1 + len + 1;
+    }
+    headers
+}
+
+fn received_summary(received: &[(u64, bool, String)]) -> String {
+    received
+        .iter()
+        .map(|(id, packed, json)| {
+            let form = if *packed { "packed" } else { "json  " };
+            format!("{form} id {id} {}", &json[..json.len().min(100)])
         })
         .collect::<Vec<_>>()
         .join("\n")

@@ -30,7 +30,9 @@ use std::collections::VecDeque;
 
 use lpa_devices::link::{Link, LinkCommand, LinkEvent, LinkInfo, ResetKind};
 
-use crate::device_link::demux::{LineSplitter, push_bytes};
+use lpc_wire::WireStream;
+
+use crate::device_link::demux::push_bytes;
 use crate::device_link::wire::encode_client_frame;
 use crate::stream::{ByteStreamError, DeviceByteStream};
 
@@ -47,7 +49,8 @@ pub struct ByteStreamLink<S: DeviceByteStream> {
     info: LinkInfo,
     stream: S,
     open: bool,
-    splitter: LineSplitter,
+    /// Console lines, `M!` lines and packed frames, split frame-first.
+    splitter: WireStream,
     events: VecDeque<LinkEvent>,
 }
 
@@ -59,7 +62,7 @@ impl<S: DeviceByteStream> ByteStreamLink<S> {
             info,
             stream,
             open: false,
-            splitter: LineSplitter::default(),
+            splitter: WireStream::new(),
             events: VecDeque::new(),
         }
     }

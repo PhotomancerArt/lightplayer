@@ -33,6 +33,8 @@ pub mod transport_emu_serial;
 pub mod transport_serial;
 #[cfg(feature = "ws")]
 pub mod transport_ws;
+#[cfg(feature = "host")]
+pub mod wire_encoding_env;
 
 // Re-export main types
 pub use client::{ClientOutcome, ClientTimerFuture, LpClient, RequestDeadline};
@@ -62,3 +64,5 @@ pub use tokio_client::{SharedClientTransport, TokioClientIo, TokioLpClient};
 pub use transport::ClientTransport;
 #[cfg(feature = "ws")]
 pub use transport_ws::WebSocketClientTransport;
+#[cfg(feature = "host")]
+pub use wire_encoding_env::{WIRE_ENCODING_ENV, requested_wire_encoding};

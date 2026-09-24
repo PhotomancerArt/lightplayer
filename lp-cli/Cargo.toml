@@ -105,7 +105,7 @@ lpc-hardware = { path = "../lp-core/lpc-hardware" }
 lpc-shared = { path = "../lp-core/lpc-shared" }
 lpfs = { path = "../lp-base/lpfs", features = ["std"] }
 lpc-model = { path = "../lp-core/lpc-model" }
-lpc-wire = { path = "../lp-core/lpc-wire" }
+lpc-wire = { path = "../lp-core/lpc-wire", features = ["ser-write-json"] }
 # The frame scanner the JSON Pack emulator test reads the link with
 # (tests/emu_usb_json_pack.rs).
 lp-json-pack = { workspace = true, features = ["alloc"] }
