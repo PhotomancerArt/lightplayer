@@ -63,6 +63,8 @@ pub fn transport_label_for_endpoint(endpoint: &str) -> &'static str {
         LinkProviderKind::BrowserWorker
     } else if endpoint.starts_with(super::sim_record::EMU_ENDPOINT_PREFIX) {
         LinkProviderKind::EmulatorTab
+    } else if endpoint.starts_with(super::sim_record::BLE_ENDPOINT_PREFIX) {
+        LinkProviderKind::BrowserBle
     } else {
         LinkProviderKind::BrowserSerialEsp32
     };

@@ -144,6 +144,18 @@ impl ControllerOp for DevicesOp {
                 ActionPriority::Primary,
             )
             .with_icon("usb"),
+            // The sibling verb the comment above anticipated: the same
+            // claim ("the board is here"), over a different path. It says
+            // what the path cannot do up front, because a user who adds a
+            // piece over Bluetooth and then looks for "Update firmware" is
+            // owed the reason before, not after.
+            Action::AddFromBle => ActionMeta::new(
+                "Add over Bluetooth",
+                "Pick your LightPlayer piece from the browser's Bluetooth list. \
+                 Play and edit work over Bluetooth; firmware updates need USB.",
+                ActionPriority::Secondary,
+            )
+            .with_icon("bluetooth"),
             Action::AdoptLink { .. } => ActionMeta::new(
                 "Set up this device",
                 "Remember this board so it can be set up.",

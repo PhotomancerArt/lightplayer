@@ -12,6 +12,7 @@
 //! | `StartTimer` | [`DeviceEffects`] → one spawned future per timer on the app's timer factory |
 //! | `PersistRecord` / `DeleteRecord` | [`DeviceRoster`] → the kept `places::device_registry`, through the library host's locked catalog |
 //! | `RequestUsbGrant` | [`DeviceTransport::request_grant`] → the platform chooser |
+//! | `RequestBleGrant` | [`DeviceTransport::request_ble_grant`] → the platform's Bluetooth chooser |
 //! | `RevokeGrant` | [`DeviceTransport::revoke_grant`] → the provider's `forget_endpoint` |
 //! | `RunEffect` | [`DeviceEffects::run_effect`] → the wire, borrowed exclusively: esptool for a flash, the `lpa-client` conversation for a push |
 //!

@@ -1444,6 +1444,7 @@ mod tests {
             last_outcome: None,
             terminal: Vec::new(),
             terminal_dropped: 0,
+            firmware_blocked: None,
             escapes: vec![DeviceEscape::Forget],
         }
     }

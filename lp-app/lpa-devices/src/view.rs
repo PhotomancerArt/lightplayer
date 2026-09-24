@@ -113,9 +113,24 @@ pub struct DeviceView {
     /// How many lines have fallen off the front of [`Self::terminal`] to
     /// keep it bounded — the panel's honest "…and N more" count.
     pub terminal_dropped: u32,
+    /// Why this board's firmware cannot be written from here, when it
+    /// cannot: today exactly one reason, [`FIRMWARE_NEEDS_USB`], for a board
+    /// reached over Bluetooth. `None` = nothing about the LINK stands in the
+    /// way (whether a verb is offered is still the firmware face's call).
+    ///
+    /// A reason and not a bool on purpose: the card draws the verb DISABLED
+    /// with this sentence under it rather than hiding it, so "why can't I
+    /// update this?" is answered where it is asked.
+    #[serde(default)]
+    pub firmware_blocked: Option<String>,
     /// Never empty (invariant I3).
     pub escapes: Vec<Escape>,
 }
+
+/// The one sentence a card says when the link cannot carry firmware: a
+/// Bluetooth link has no reset lines and no ROM downloader behind it, so
+/// flash, update and factory reset all need the cable.
+pub const FIRMWARE_NEEDS_USB: &str = "Firmware updates need USB";
 
 /// The running activity, as the card shows it.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -326,6 +341,12 @@ pub fn device_view(device: &Device, now: Millis) -> DeviceView {
         last_outcome: device.evidence.last_outcome.as_ref().map(outcome_view),
         terminal: device.evidence.recent_output().cloned().collect(),
         terminal_dropped: device.evidence.terminal_dropped(),
+        firmware_blocked: device
+            .identity
+            .endpoint
+            .as_ref()
+            .filter(|endpoint| endpoint.is_bluetooth())
+            .map(|_| FIRMWARE_NEEDS_USB.to_string()),
         escapes,
     }
 }

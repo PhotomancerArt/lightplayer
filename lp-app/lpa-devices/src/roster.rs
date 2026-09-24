@@ -30,7 +30,7 @@ use serde::{Deserialize, Serialize};
 use crate::device::Device;
 use crate::event::{Action, Command, Event, Input};
 use crate::evidence::{Classification, Evidence};
-use crate::identity::{DeviceId, IdentityChain, IdentityMatch};
+use crate::identity::{DeviceId, EndpointKey, IdentityChain, IdentityMatch};
 use crate::journal::{EvictionReason, Journal, JournalNote, Scope};
 use crate::link::{LinkCommand, LinkId, LinkInfo};
 use crate::record::DeviceRecord;
@@ -271,6 +271,10 @@ impl Roster {
                 self.state.journal.record_input(now, Scope::Roster, input);
                 vec![Command::RequestUsbGrant]
             }
+            Action::AddFromBle => {
+                self.state.journal.record_input(now, Scope::Roster, input);
+                vec![Command::RequestBleGrant]
+            }
             Action::AdoptLink { link } => {
                 self.state
                     .journal
@@ -288,11 +292,27 @@ impl Roster {
             // back to a board whose grant did not survive (a
             // serial-number-less bridge loses it on replug); the picked
             // port folds back into this device through the identity merge.
+            //
+            // A board last reached over Bluetooth is re-asked through the
+            // Bluetooth chooser: offering a PORT chooser for a board that is
+            // across the room on a GATT link would be a dead end. The
+            // endpoint is the only thing that says which, and a remembered
+            // board loaded from the registry carries none (endpoints are
+            // never persisted), so that case keeps the USB chooser.
             Action::Reconnect { device } => {
                 self.state
                     .journal
                     .record_input(now, Scope::Device(*device), input);
-                vec![Command::RequestUsbGrant]
+                let over_bluetooth = self
+                    .devices
+                    .iter()
+                    .find(|entry| entry.id == *device)
+                    .and_then(|entry| entry.identity.endpoint.as_ref())
+                    .is_some_and(EndpointKey::is_bluetooth);
+                match over_bluetooth {
+                    true => vec![Command::RequestBleGrant],
+                    false => vec![Command::RequestUsbGrant],
+                }
             }
             // Flashing a still-pending link adopts it first: writing our
             // firmware onto a board is the strongest possible "keep this
@@ -951,7 +971,7 @@ fn addresses_link(command: &Command, link: LinkId) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::identity::{DeviceUid, EndpointKey, PeerIdentity};
+    use crate::identity::{DeviceUid, EndpointKey, MacAddress, PeerIdentity};
     use crate::link::LinkEvent;
     use crate::wire::{HelloFacts, ServerFrame};
 
@@ -1271,6 +1291,103 @@ mod tests {
         );
     }
 
+    #[test]
+    fn add_over_bluetooth_asks_the_bluetooth_chooser() {
+        let mut roster = Roster::new(RosterConfig::default());
+
+        let commands = roster.handle(Millis(0), Input::Action(Action::AddFromBle));
+
+        assert_eq!(commands, vec![Command::RequestBleGrant]);
+    }
+
+    /// A board last reached over Bluetooth is re-asked through the Bluetooth
+    /// chooser; one last reached over USB keeps the port chooser.
+    #[test]
+    fn reconnect_asks_the_chooser_the_board_was_last_reached_through() {
+        let mut roster = Roster::new(RosterConfig::default());
+        roster.load_records(vec![
+            DeviceRecord::new(
+                DeviceId(4),
+                IdentityChain {
+                    endpoint: Some(EndpointKey("ble:QkxFLWlk".to_string())),
+                    mac: Some(MacAddress("a0:f2:62:87:b4:8c".to_string())),
+                    ..Default::default()
+                },
+            ),
+            DeviceRecord::new(
+                DeviceId(5),
+                IdentityChain {
+                    endpoint: Some(EndpointKey("usb-1".to_string())),
+                    mac: Some(MacAddress("10:bd:a3:b0:8e:30".to_string())),
+                    ..Default::default()
+                },
+            ),
+        ]);
+
+        let over_ble = roster.handle(
+            Millis(0),
+            Input::Action(Action::Reconnect {
+                device: DeviceId(4),
+            }),
+        );
+        let over_usb = roster.handle(
+            Millis(1),
+            Input::Action(Action::Reconnect {
+                device: DeviceId(5),
+            }),
+        );
+
+        assert_eq!(over_ble, vec![Command::RequestBleGrant]);
+        assert_eq!(over_usb, vec![Command::RequestUsbGrant]);
+    }
+
+    /// M5's twin-row guard at the model level: the same board heard over USB
+    /// and then over Bluetooth — both links up at once, which the firmware
+    /// allows (DD12) — is ONE device, identified by the hello's base MAC. The
+    /// Bluetooth arrival is a pending link until its hello, then merges.
+    #[test]
+    fn a_board_heard_over_usb_and_bluetooth_at_once_is_one_device() {
+        let mut roster = Roster::new(RosterConfig::default());
+        let facts = roster_proto(&roster);
+        roster.handle(Millis(0), attach(LinkId(1), "usb-1"));
+        roster.handle(Millis(10), opened(LinkId(1), "usb-1"));
+        roster.handle(
+            Millis(20),
+            hello_mac(LinkId(1), &facts, "a0:f2:62:87:b4:8c"),
+        );
+        assert_eq!(roster.devices().len(), 1);
+        let known = roster.devices()[0].id;
+
+        roster.handle(Millis(100), attach(LinkId(2), "ble:QkxFLWlk"));
+        assert_eq!(roster.pending().len(), 1, "a new endpoint identifies first");
+        roster.handle(Millis(110), opened(LinkId(2), "ble:QkxFLWlk"));
+        roster.handle(
+            Millis(120),
+            hello_mac(LinkId(2), &facts, "a0:f2:62:87:b4:8c"),
+        );
+
+        assert!(roster.pending().is_empty());
+        assert_eq!(roster.devices().len(), 1, "merged, never a twin");
+        let device = &roster.devices()[0];
+        assert_eq!(device.id, known, "the entry known over USB survives");
+        assert_eq!(device.link(), Some(LinkId(2)));
+        assert_eq!(
+            crate::view::device_view(device, Millis(130)).firmware_blocked,
+            Some(crate::view::FIRMWARE_NEEDS_USB.to_string()),
+            "reached over Bluetooth, the card says why it cannot flash"
+        );
+
+        // And back: the USB link speaking again moves the binding home, and
+        // the reason goes away with it.
+        roster.handle(Millis(200), opened(LinkId(1), "usb-1"));
+        let device = &roster.devices()[0];
+        assert_eq!(roster.devices().len(), 1);
+        assert_eq!(
+            crate::view::device_view(device, Millis(210)).firmware_blocked,
+            None
+        );
+    }
+
     fn roster_proto(roster: &Roster) -> HelloFacts {
         HelloFacts {
             proto: roster.config().expected_proto,
@@ -1298,6 +1415,15 @@ mod tests {
         let mut facts = facts.clone();
         facts.identity = PeerIdentity {
             uid: Some(DeviceUid(uid.to_string())),
+            ..Default::default()
+        };
+        Input::link(link, LinkEvent::Frame(ServerFrame::hello(1, facts)))
+    }
+
+    fn hello_mac(link: LinkId, facts: &HelloFacts, mac: &str) -> Input {
+        let mut facts = facts.clone();
+        facts.identity = PeerIdentity {
+            mac: Some(MacAddress(mac.to_string())),
             ..Default::default()
         };
         Input::link(link, LinkEvent::Frame(ServerFrame::hello(1, facts)))
