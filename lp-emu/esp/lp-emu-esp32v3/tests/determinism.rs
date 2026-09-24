@@ -320,8 +320,21 @@ fn the_snapshot_carries_the_state_that_is_not_a_register() {
 /// 852 × 7 = 5,964, and the other five are straight-line code in
 /// `boot_firmware`. The bytes changed by one line for the `.bss` reason
 /// (see `PREFIX_SHA256`); the skip count did not move.
-const PREFIX_CYCLES: u64 = 3_251_027;
-const PREFIX_INSTRUCTIONS: u64 = 3_251_007;
+///
+/// Then **+3 more when M3 merged over lean-wire (PR #791): 3,251,027 →
+/// 3,251,030 cycles, 3,251,007 → 3,251,010 instructions.** Again the image,
+/// and found the same way (`LP_EMU_XT_BLOCKPROF`, the M3 branch's image at
+/// `458d3769e` against the merged tree's, per symbol): `boot_firmware` +2 and
+/// the mask ROM +1, nothing else. `boot_firmware` came out 8 B longer and
+/// its code around the `stack_probe::paint` loop is scheduled differently —
+/// the loop still runs 8,424 times, and two more straight-line instructions
+/// retire once each. The ROM's +1 is `uart_tx_one_char`'s TX-FIFO wait
+/// (0x4000921a–0x40009222, a four-instruction poll entered 672 times): one
+/// call's wait retires one more of the loop's instructions before it exits,
+/// which is what the two-cycle shift upstream of it buys. Bytes, sha and
+/// skips did not move.
+const PREFIX_CYCLES: u64 = 3_251_030;
+const PREFIX_INSTRUCTIONS: u64 = 3_251_010;
 const PREFIX_IDLE_SKIPS: u64 = 0;
 const PREFIX_BYTES: usize = 543;
 /// Moved by the BLE plan's M3 (access core): one line of the 543 bytes,
