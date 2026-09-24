@@ -629,7 +629,7 @@ mod tests {
             vec![lpc_wire::ProjectProbeRequest::OutputFrame(
                 lpc_wire::OutputFrameProbeRequest {
                     geometry: lpc_wire::RevisionGateRead::Always,
-                    samples: Some(lpc_wire::WireChannelSampleFormat::U8),
+                    samples: Some(lpc_wire::WireChannelSampleFormat::Srgb8),
                 }
             )]
         );

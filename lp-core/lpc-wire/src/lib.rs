@@ -48,7 +48,7 @@ pub use project::{
     NodeRuntimeStatus, WireChannelSampleFormat, WireColorLayout, WireProjectHandle,
     WireResourceAvailability, WireResourceKindSummary, WireResourceMetadataSummary,
     WireResourceSummary, WireRuntimeBufferKind, WireRuntimeBufferMetadataPayload,
-    WireRuntimeBufferPayload, WireTextureFormat,
+    WireRuntimeBufferPayload, WireTextureFormat, linear16_to_srgb8, srgb8_to_linear16,
 };
 pub use project_command::{
     WireCreateNodeRequest, WireCreateNodeResponse, WireNodeCommand, WireNodeCommandResponse,

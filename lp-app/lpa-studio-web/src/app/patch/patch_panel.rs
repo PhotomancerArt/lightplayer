@@ -2346,8 +2346,8 @@ mod tests {
         UiControlProductPreview {
             revision: 1,
             extent: ControlExtent::new(1, lamps * 3),
-            // A live wire, as Studio pulls it: 8-bit.
-            sample_format: UiControlSampleFormat::U8,
+            // A live wire, as Studio pulls it: sRGB8.
+            sample_format: UiControlSampleFormat::Srgb8,
             sample_layout: ControlSampleLayout {
                 spans: vec![ControlSampleSpan {
                     row: 0,

@@ -12349,8 +12349,8 @@ mod tests {
             assert_eq!(
                 lens_pixel_probes(&mut project),
                 vec![
-                    LensPixelProbe::Control(lpc_wire::WireChannelSampleFormat::U8),
-                    LensPixelProbe::Output(Some(lpc_wire::WireChannelSampleFormat::U8)),
+                    LensPixelProbe::Control(lpc_wire::WireChannelSampleFormat::Srgb8),
+                    LensPixelProbe::Output(Some(lpc_wire::WireChannelSampleFormat::Srgb8)),
                 ],
                 "{transport:?}: first read"
             );
@@ -12359,7 +12359,7 @@ mod tests {
             assert_eq!(
                 lens_pixel_probes(&mut project),
                 vec![LensPixelProbe::Output(Some(
-                    lpc_wire::WireChannelSampleFormat::U8
+                    lpc_wire::WireChannelSampleFormat::Srgb8
                 ))],
                 "{transport:?}: steady read — one copy"
             );
@@ -12414,7 +12414,7 @@ mod tests {
             assert_eq!(
                 lens_pixel_probes(&mut project),
                 vec![LensPixelProbe::Output(Some(
-                    lpc_wire::WireChannelSampleFormat::U8
+                    lpc_wire::WireChannelSampleFormat::Srgb8
                 ))]
             );
 
@@ -12460,8 +12460,8 @@ mod tests {
         assert_eq!(
             lens_pixel_probes(&mut project),
             vec![
-                LensPixelProbe::Control(lpc_wire::WireChannelSampleFormat::U8),
-                LensPixelProbe::Output(Some(lpc_wire::WireChannelSampleFormat::U8)),
+                LensPixelProbe::Control(lpc_wire::WireChannelSampleFormat::Srgb8),
+                LensPixelProbe::Output(Some(lpc_wire::WireChannelSampleFormat::Srgb8)),
             ]
         );
     }
@@ -12476,8 +12476,8 @@ mod tests {
         assert_eq!(
             lens_pixel_probes(&mut project),
             vec![
-                LensPixelProbe::Control(lpc_wire::WireChannelSampleFormat::U8),
-                LensPixelProbe::Output(Some(lpc_wire::WireChannelSampleFormat::U8)),
+                LensPixelProbe::Control(lpc_wire::WireChannelSampleFormat::Srgb8),
+                LensPixelProbe::Output(Some(lpc_wire::WireChannelSampleFormat::Srgb8)),
             ]
         );
     }
@@ -14389,7 +14389,7 @@ mod tests {
             node: NodeId::new(5),
             revision: Revision::new(2),
             channels: 10,
-            sample_format: Some(lpc_wire::WireChannelSampleFormat::U8),
+            sample_format: Some(lpc_wire::WireChannelSampleFormat::Srgb8),
             geometry: lpc_wire::RevisionGateResult::Changed(lpc_wire::OutputFrameGeometry {
                 revision: Revision::new(1),
                 sample_layout: lpc_model::ControlSampleLayout::default(),

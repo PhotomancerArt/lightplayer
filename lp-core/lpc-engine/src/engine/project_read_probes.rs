@@ -19,7 +19,7 @@ use lpc_wire::{
     WireBindingGraph, WireBindingGraphRead, WireBindingOrigin, WireBusChannel, WireBusChannelValue,
     WireBusChannelValues, WireCellProjection, WireChannelSampleFormat, WireConsumerPolicy,
     WireEffectiveBinding, WirePhasorOrigin, WirePhasorRow, WireProjectionOrigin,
-    WireProjectionShape, WireVisualSpace,
+    WireProjectionShape, WireVisualSpace, linear16_to_srgb8,
 };
 use lps_shared::TextureStorageFormat;
 
@@ -630,13 +630,14 @@ impl Engine {
                 RuntimeChannelSampleFormat::U16 => WireChannelSampleFormat::U16,
             };
             // The client's precision, never wider than what was published:
-            // a `U16` buffer asked for `U8` is rounded to nearest; anything
-            // else travels verbatim. No ask, no bytes.
+            // a `U16` buffer is encoded in whatever the client asked for
+            // (rounded to linear `U8`, or to `Srgb8` display codes); a `U8`
+            // buffer travels verbatim. No ask, no bytes.
             let (sample_format, bytes) = match (request.samples, published) {
                 (None, _) => (None, Vec::new()),
-                (Some(WireChannelSampleFormat::U8), WireChannelSampleFormat::U16) => (
-                    Some(WireChannelSampleFormat::U8),
-                    encode_unorm16_le_bytes(&buffer.value().bytes(), WireChannelSampleFormat::U8),
+                (Some(asked), WireChannelSampleFormat::U16) => (
+                    Some(asked),
+                    encode_unorm16_le_bytes(&buffer.value().bytes(), asked),
                 ),
                 (Some(_), published) => (Some(published), buffer.value().bytes().into_owned()),
             };
@@ -918,23 +919,17 @@ fn wire_output_placement(fragment: &OutputFragment) -> lpc_wire::WireOutputPlace
     }
 }
 
+/// Linear RGBA16 texels to RGB display codes: the same correctly rounded
+/// sRGB8 encoding the `Srgb8` channel-sample format uses
+/// (`lpc_wire::linear16_to_srgb8`), integer-only, so one table serves both.
 fn rgba16_linear_to_srgb8(bytes: &[u8]) -> alloc::vec::Vec<u8> {
     let mut out = alloc::vec::Vec::with_capacity(bytes.len() / 8 * 3);
     for px in bytes.chunks_exact(8) {
-        out.push(linear_unorm16_to_srgb8(u16::from_le_bytes([px[0], px[1]])));
-        out.push(linear_unorm16_to_srgb8(u16::from_le_bytes([px[2], px[3]])));
-        out.push(linear_unorm16_to_srgb8(u16::from_le_bytes([px[4], px[5]])));
+        out.push(linear16_to_srgb8(u16::from_le_bytes([px[0], px[1]])));
+        out.push(linear16_to_srgb8(u16::from_le_bytes([px[2], px[3]])));
+        out.push(linear16_to_srgb8(u16::from_le_bytes([px[4], px[5]])));
     }
     out
-}
-
-/// Encode one linear unorm16 sample as sRGB8 via the generated lookup
-/// table — an index instead of a per-sample `libm::powf`, which dominated
-/// on-device probe cost (thousands of calls per frame). Within 1 u8 LSB of
-/// the exact float transfer (see [`srgb8_lut`](super::srgb8_lut) and the
-/// exhaustive test below).
-fn linear_unorm16_to_srgb8(value: u16) -> u8 {
-    super::srgb8_lut::LINEAR16_TO_SRGB8[(value >> 4) as usize]
 }
 
 /// The render-product probe's `(projection, origin)` pair: `Some` exactly
@@ -1114,31 +1109,6 @@ mod tests {
 
     use super::*;
     use crate::engine::test_support::{EngineTestBuilder, bus, output, produced_slot};
-
-    /// The exact float transfer the LUT replaces (the pre-LUT
-    /// implementation, kept as the test reference).
-    fn linear_unorm16_to_srgb8_reference(value: u16) -> u8 {
-        let linear = value as f32 / u16::MAX as f32;
-        let srgb = if linear <= 0.003_130_8 {
-            linear * 12.92
-        } else {
-            1.055 * libm::powf(linear, 1.0 / 2.4) - 0.055
-        };
-        (srgb.clamp(0.0, 1.0) * 255.0 + 0.5) as u8
-    }
-
-    #[test]
-    fn srgb8_lut_matches_float_reference_within_one_lsb() {
-        for value in 0..=u16::MAX {
-            let lut = linear_unorm16_to_srgb8(value);
-            let reference = linear_unorm16_to_srgb8_reference(value);
-            let error = (i16::from(lut) - i16::from(reference)).abs();
-            assert!(
-                error <= 1,
-                "lut diverges at {value}: lut={lut} reference={reference}"
-            );
-        }
-    }
 
     #[test]
     fn binding_graph_probe_reports_bindings_channels_and_values() {

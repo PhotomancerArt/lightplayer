@@ -39,18 +39,20 @@
 //! [`OutputFrameProbeRequest::samples`] names the element format the client
 //! wants, or `None` for no samples at all — the revision, the channel count
 //! and the gated geometry still arrive, which is everything a module face or
-//! a patch bay needs to derive its shape. When the client asks for
-//! [`WireChannelSampleFormat::U8`] and the output published `U16`, the engine
-//! rounds each sample to the nearest 8-bit level (`round(v / 257)`: 0 → 0,
-//! 65535 → 255). That is a TRANSPORT precision, not an un-correction: the
+//! a patch bay needs to derive its shape. When the client asks for an 8-bit
+//! format and the output published `U16`, the engine rounds each sample:
+//! [`WireChannelSampleFormat::U8`] to the nearest linear 8-bit level
+//! (`round(v / 257)`), [`WireChannelSampleFormat::Srgb8`] to the correctly
+//! rounded sRGB display code (`crate::linear16_to_srgb8`); both map 0 → 0 and
+//! 65535 → 255. That is a TRANSPORT precision, not an un-correction: the
 //! values are still the post-finalize ones above, only coarser. A buffer
-//! published at `U8` is never widened; the entry's own
+//! published at `U8` is never widened or re-encoded; the entry's own
 //! [`OutputFrameEntry::sample_format`] always says what `bytes` holds.
 //!
 //! # Bandwidth
 //!
 //! One frame is `channels × 3 × 2` bytes before base64 at `U16`, and half
-//! that at `U8`, on a link shared with every other protocol message; at `U16`
+//! that at either 8-bit format, on a link shared with every other protocol message; at `U16`
 //! a 1500-lamp dome frame is ~9 KB, a 300-lamp strip ~1.8 KB. The geometry is what the gate keeps off the steady read:
 //! before it, the PLAYFUL choker's 73-lamp entry carried 1,070 B of sample
 //! layout and 99 B of placements on every read, and small-dome's two entries

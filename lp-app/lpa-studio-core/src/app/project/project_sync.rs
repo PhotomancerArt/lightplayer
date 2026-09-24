@@ -2105,7 +2105,7 @@ mod tests {
             vec![ProjectProbeRequest::ControlProduct(
                 ControlProductProbeRequest {
                     product,
-                    sample_format: WireChannelSampleFormat::U8,
+                    sample_format: WireChannelSampleFormat::Srgb8,
                     geometry: RevisionGateRead::Always,
                 },
             )]
@@ -2153,7 +2153,7 @@ mod tests {
                     product,
                     revision: Revision::new(9),
                     extent: product.preferred_extent(),
-                    sample_format: WireChannelSampleFormat::U8,
+                    sample_format: WireChannelSampleFormat::Srgb8,
                     geometry: RevisionGateResult::Changed(ControlProductGeometry {
                         revision: Revision::new(12),
                         sample_layout: sample_layout.clone(),
@@ -2172,7 +2172,7 @@ mod tests {
             vec![ProjectProbeRequest::ControlProduct(
                 ControlProductProbeRequest {
                     product,
-                    sample_format: WireChannelSampleFormat::U8,
+                    sample_format: WireChannelSampleFormat::Srgb8,
                     geometry: RevisionGateRead::if_changed(Some(Revision::new(12))),
                 },
             )]
@@ -2186,7 +2186,7 @@ mod tests {
                     product,
                     revision: Revision::new(10),
                     extent: product.preferred_extent(),
-                    sample_format: WireChannelSampleFormat::U8,
+                    sample_format: WireChannelSampleFormat::Srgb8,
                     geometry: RevisionGateResult::Unchanged {
                         revision: Revision::new(12),
                     },
@@ -2201,7 +2201,7 @@ mod tests {
             Some(&UiProductPreview::ControlNative(UiControlProductPreview {
                 revision: 10,
                 extent: product.preferred_extent(),
-                sample_format: UiControlSampleFormat::U8,
+                sample_format: UiControlSampleFormat::Srgb8,
                 sample_layout,
                 display_layout: Some(Rc::new(display_layout)),
                 bytes: Rc::from(second_bytes.as_slice()),
@@ -2225,7 +2225,7 @@ mod tests {
                     product,
                     revision: Revision::new(9),
                     extent: product.preferred_extent(),
-                    sample_format: WireChannelSampleFormat::U8,
+                    sample_format: WireChannelSampleFormat::Srgb8,
                     geometry: RevisionGateResult::Omitted,
                     bytes: vec![0, 0, 255, 255, 0, 0],
                 },
@@ -2257,7 +2257,7 @@ mod tests {
                     product,
                     revision: Revision::new(9),
                     extent: product.preferred_extent(),
-                    sample_format: WireChannelSampleFormat::U8,
+                    sample_format: WireChannelSampleFormat::Srgb8,
                     geometry: RevisionGateResult::Unchanged {
                         revision: Revision::new(12),
                     },
@@ -2278,7 +2278,7 @@ mod tests {
             vec![ProjectProbeRequest::ControlProduct(
                 ControlProductProbeRequest {
                     product,
-                    sample_format: WireChannelSampleFormat::U8,
+                    sample_format: WireChannelSampleFormat::Srgb8,
                     geometry: RevisionGateRead::Always,
                 },
             )]

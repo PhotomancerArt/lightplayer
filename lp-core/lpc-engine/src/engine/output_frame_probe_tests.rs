@@ -24,7 +24,7 @@ use lpc_wire::{
     GeometryDisplayLayout, KnownRevision, OutputFrameEntry, OutputFrameGeometry,
     OutputFrameProbeRequest, OutputFrameProbeResult, ProjectProbeRequest, ProjectProbeResult,
     ProjectReadRequest, RevisionGateRead, RevisionGateResult, WireChannelSampleFormat,
-    WireChildKind, WireSlotIndex,
+    WireChildKind, WireSlotIndex, linear16_to_srgb8,
 };
 
 use crate::dataflow::binding::{BindingDraft, BindingPriority, BindingSource, BindingTarget};
@@ -313,6 +313,30 @@ fn output_frame_probe_rounds_to_u8_when_asked() {
     assert_eq!(entries[0].channels, 1, "the lamp count does not change");
 }
 
+/// Asked for `Srgb8` (Studio's preview default), the published linear `U16`
+/// frame travels as each sample's correctly rounded sRGB display code.
+#[test]
+fn output_frame_probe_encodes_srgb8_when_asked() {
+    let mut harness = Harness::build([u16::MAX, 0, 0, u16::MAX]);
+    harness.tick();
+    let published: Vec<u16> = harness
+        .published_bytes()
+        .chunks_exact(2)
+        .map(|pair| u16::from_le_bytes([pair[0], pair[1]]))
+        .collect();
+
+    let entries =
+        harness.read_samples(RevisionGateRead::None, Some(WireChannelSampleFormat::Srgb8));
+
+    assert_eq!(
+        entries[0].sample_format,
+        Some(WireChannelSampleFormat::Srgb8)
+    );
+    let encoded: Vec<u8> = published.iter().map(|&v| linear16_to_srgb8(v)).collect();
+    assert_eq!(entries[0].bytes, encoded);
+    assert_eq!(entries[0].bytes, vec![255, 0, 0], "one sample per byte");
+}
+
 /// No samples asked: the entry still answers its revision, channel count and
 /// geometry — what a module face derives from — with no pixel bytes.
 #[test]
@@ -353,6 +377,26 @@ fn control_product_probe_rounds_to_u8_when_asked() {
         })
         .collect();
     assert_eq!(narrow, rounded);
+}
+
+/// The control-product preview ships `Srgb8` when asked: the 16-bit render,
+/// each sample encoded as its sRGB display code.
+#[test]
+fn control_product_probe_encodes_srgb8_when_asked() {
+    let mut harness = Harness::build([0, u16::MAX, 0, u16::MAX]);
+    harness.tick();
+
+    let (_, _, wide) =
+        harness.read_control_preview(RevisionGateRead::None, WireChannelSampleFormat::U16);
+    let (_, format, display) =
+        harness.read_control_preview(RevisionGateRead::None, WireChannelSampleFormat::Srgb8);
+
+    assert_eq!(format, WireChannelSampleFormat::Srgb8);
+    let encoded: Vec<u8> = wide
+        .chunks_exact(2)
+        .map(|pair| linear16_to_srgb8(u16::from_le_bytes([pair[0], pair[1]])))
+        .collect();
+    assert_eq!(display, encoded);
 }
 
 /// The display layout's OWN revision inside a changed bundle.

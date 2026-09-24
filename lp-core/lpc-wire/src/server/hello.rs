@@ -44,7 +44,9 @@ use serde::{Deserialize, Serialize};
 ///   three request messages: an old peer cannot decode the other's
 ///   requests, which is what earns the bump. One request shape is also one
 ///   deserializer on the device (1,584 B of ESP32-C6 flash). Answers are
-///   unchanged.
+///   unchanged. In the same bump, `WireChannelSampleFormat` gains `Srgb8`
+///   (an sRGB-encoded 8-bit sample, Studio's preview default): an old
+///   server cannot decode a request that asks for it.
 /// - 21: the revision gate (lean-wire) — what a probe answers unchanged on
 ///   every read rides behind a revision (`RevisionGateRead` →
 ///   `RevisionGateResult<T>`). First, everything static about a probed

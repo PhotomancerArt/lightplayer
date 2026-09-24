@@ -8,13 +8,14 @@
 //! `ProjectSync::probe_requests` / `product_probe_requests`, in that order:
 //!
 //! 1. the `control_product` probe for the project's primary control
-//!    product, at `U8` — but only while the lens cannot yet see that every
+//!    product, at `Srgb8` — but only while the lens cannot yet see that every
 //!    lamp of it sits on an output wire (lean-wire P5's one-copy rule,
 //!    `ProjectController::always_live_products`), or when the user has
 //!    selected its fixture (Show live). Geometry `always`, then
 //!    `if_changed`;
 //! 2. the `output_frame` probe (the project drives an output), its pixels at
-//!    `U8`, geometry per output likewise;
+//!    `Srgb8` (8-bit, sRGB-encoded; one byte per sample like P5's
+//!    linear `U8`), geometry per output likewise;
 //! 3. the `binding_graph` probe with values (Studio subscribes on every
 //!    lens), its structure asked `always` and then `if_changed`.
 //!
@@ -37,7 +38,7 @@
 //!   — it opens on the root module, and that automatic selection asks for
 //!   nothing (lean-wire P5, ruling B);
 //! - **selected**: the steady read with the fixture selected — Show live on
-//!   its preview — so both copies ride, both at `U8`.
+//!   its preview — so both copies ride, both at `Srgb8`.
 //!
 //! The control product is the project's first control product in node
 //! order: on the PLAYFUL choker that is the fixture, which is the product
@@ -254,7 +255,7 @@ fn measure_lens_reads(slug: &str, root: &str) -> LensReads {
 
 /// Studio's lens request: `project_read_request`'s queries, and
 /// `probe_requests`' probes in its order (products, output frame, graph),
-/// every pixel ask at Studio's preview precision (`U8`).
+/// every pixel ask at Studio's preview precision (`Srgb8`).
 fn lens_read_request(
     since: Option<Revision>,
     control: Option<(ControlProduct, RevisionGateRead)>,
@@ -266,14 +267,14 @@ fn lens_read_request(
         probes.push(ProjectProbeRequest::ControlProduct(
             ControlProductProbeRequest {
                 product,
-                sample_format: WireChannelSampleFormat::U8,
+                sample_format: WireChannelSampleFormat::Srgb8,
                 geometry,
             },
         ));
     }
     probes.push(ProjectProbeRequest::OutputFrame(OutputFrameProbeRequest {
         geometry: output_geometry,
-        samples: Some(WireChannelSampleFormat::U8),
+        samples: Some(WireChannelSampleFormat::Srgb8),
     }));
     probes.push(ProjectProbeRequest::BindingGraph(
         BindingGraphProbeRequest {

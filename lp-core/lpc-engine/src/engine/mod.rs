@@ -52,7 +52,6 @@ pub(crate) mod steady_frame_alloc_tests;
 mod shader_palette_tests;
 #[cfg(all(test, feature = "node-clock", feature = "node-shader"))]
 mod shader_timebase_tests;
-mod srgb8_lut;
 mod state_root_stamps;
 mod state_root_values_hash;
 #[cfg(test)]
