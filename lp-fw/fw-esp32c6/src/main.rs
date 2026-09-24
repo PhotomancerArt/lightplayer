@@ -215,6 +215,15 @@ fn read_headroom_probe() -> Option<u32> {
     Some(recovery::panic_path::largest_free_block().min(u32::MAX as usize) as u32)
 }
 
+/// The login challenge's randomness: the C6's hardware RNG. Its output is
+/// true-random while the radio runs (the product's default image brings
+/// ESP-NOW up), and still unpredictable enough for a single-use 32-byte
+/// nonce when it does not — a nonce needs uniqueness, not secrecy.
+#[cfg(not(fw_harness))]
+fn fill_random(buf: &mut [u8]) {
+    esp_hal::rng::Rng::new().read(buf);
+}
+
 /// The `ClientRequest::Reboot` action: the chip reset the chip-agnostic
 /// server cannot perform itself.
 ///
@@ -491,6 +500,9 @@ fn boot_firmware(spawner: embassy_executor::Spawner) -> FirmwareApp {
         hardware_registry.manifest().board_id(),
     )));
     server.set_reboot_hook(Some(Rc::new(reboot_now)));
+    // Login challenges draw from the chip's hardware RNG; the server itself
+    // never draws randomness (sans-IO).
+    server.set_entropy_source(Some(fill_random));
     esp_println::println!("[INIT] LpServer created");
 
     // Auto-load project at boot (from config or lexical-first) — unless

@@ -127,7 +127,10 @@ silicon agrees with is not yet measured (the `in_ep1_st` write pointer is
 seven bits wide on this part — room for two packets). Filed as
 `docs/defects/2026-09-13-the-s3-link-drops-the-io-tasks-next-chunk-on-a-stale-serial-in-empty.md`
 and pinned in `tests/boot_idle.rs` where it shows, so the fix flips
-assertions rather than a reader's memory. A blank chip (no `--flash`)
+assertions rather than a reader's memory. (2026-09-23: on the BLE plan's
+M3 image the hello's trigger is lost to a race and the run says `0 bytes
+were merely tried`; the stop-all reply still shows it. The defect entry's
+dated note has why.) A blank chip (no `--flash`)
 boots too: no partition table, `using memory FS`, and the same server
 loop — `tests/boot.rs` pins that reading.
 
@@ -551,7 +554,8 @@ And two things it carries rather than hides:
   `docs/defects/2026-09-13-the-s3-link-drops-the-io-tasks-next-chunk-on-a-stale-serial-in-empty.md`
   (DD103) — and `lp-cli` waits for a reply the host never got. The ROM-up
   default loses only one 64-byte packet of the `hello`'s feature list, which
-  `lp-cli` survives. Giving the direct path a flash chip removes its `lpfs`
+  `lp-cli` survives (none at all since the BLE plan's M3 image — a race,
+  see the entry's 2026-09-23 note). Giving the direct path a flash chip removes its `lpfs`
   error line and does **not** bring the reply back, so that log line is not
   the trigger.
 - For the same defect the ROM-up walk asks `lp-cli upload` for the deploy ack

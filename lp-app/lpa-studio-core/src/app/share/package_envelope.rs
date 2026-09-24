@@ -2,8 +2,8 @@
 //!
 //! The same file set the zip codec carries
 //! ([`crate::app::library::export_package`]) — every package file including
-//! `/.lp/meta.json`, never `/history/**` — in a form that survives a chat
-//! window. Zip is still the right channel for a real handoff; JSON is for
+//! `/.lp/meta.json`, never `/history/**`, never the access sidecar
+//! `/.lp/access.json` — in a form that survives a chat window. Zip is still the right channel for a real handoff; JSON is for
 //! the small project you want to paste into a message.
 //!
 //! Import mints a **fresh uid**, exactly as zip import does: envelopes get
@@ -45,6 +45,7 @@ impl PackageEnvelope {
             name: name.to_string(),
             files: files
                 .iter()
+                .filter(|(path, _)| crate::app::library::is_shareable(path))
                 .map(|(path, bytes)| (path.clone(), ShareFile::from_bytes(bytes)))
                 .collect(),
         }
@@ -104,6 +105,21 @@ impl PackageEnvelope {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A pasted envelope gets shared like a zip: the access sidecar's keys
+    /// stay in the library, while the rest of `/.lp` still rides.
+    #[test]
+    fn the_access_sidecar_never_enters_an_envelope() {
+        let files = vec![
+            (".lp/access.json".to_string(), b"{\"version\":1}".to_vec()),
+            (".lp/meta.json".to_string(), b"{}".to_vec()),
+            ("project.json".to_string(), br#"{"kind":"Module"}"#.to_vec()),
+        ];
+        let envelope = PackageEnvelope::encode("Demo", &files);
+        assert!(!envelope.files.contains_key(".lp/access.json"));
+        assert!(envelope.files.contains_key(".lp/meta.json"));
+        assert!(envelope.files.contains_key("project.json"));
+    }
 
     #[test]
     fn a_package_round_trips_byte_for_byte() {

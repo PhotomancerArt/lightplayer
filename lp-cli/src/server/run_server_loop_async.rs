@@ -1,7 +1,6 @@
 use lpa_server::LpServer;
 use lpc_shared::transport::ServerTransport;
 use lpc_wire::TransportError;
-use lpc_wire::WireMessage;
 use std::time::{Duration, Instant};
 
 /// Target frame time for 60 FPS (16.67ms per frame)
@@ -36,9 +35,8 @@ pub async fn run_server_loop_async<T: ServerTransport>(
         let mut incoming_messages = Vec::new();
         loop {
             match transport.receive().await {
-                Ok(Some(client_msg)) => {
-                    // Wrap in Message envelope
-                    incoming_messages.push(WireMessage::Client(client_msg));
+                Ok(Some(incoming)) => {
+                    incoming_messages.push(incoming);
                 }
                 Ok(None) => {
                     // No more messages available
