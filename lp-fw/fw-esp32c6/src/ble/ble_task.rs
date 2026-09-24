@@ -15,6 +15,7 @@
 
 use core::sync::atomic::{AtomicBool, Ordering};
 
+use alloc::boxed::Box;
 use embassy_executor::Spawner;
 use embassy_futures::select::{Either, select};
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
@@ -22,7 +23,6 @@ use embassy_sync::signal::Signal;
 use embassy_time::Timer;
 use esp_radio::ble::controller::BleConnector;
 use fw_esp32_common::radio_link::RADIO_LINK_SLOTS;
-use static_cell::StaticCell;
 use trouble_host::prelude::*;
 
 use super::advertising;
@@ -41,12 +41,11 @@ pub type BleStackError = BleHostError<esp_radio::ble::controller::BleConnectorEr
 /// L2CAP channels: the signalling and ATT channels of every connection.
 const L2CAP_CHANNELS_MAX: usize = 2 * RADIO_LINK_SLOTS;
 
-static RESOURCES: StaticCell<
-    HostResources<DefaultPacketPool, RADIO_LINK_SLOTS, L2CAP_CHANNELS_MAX>,
-> = StaticCell::new();
-static STACK: StaticCell<BleStack> = StaticCell::new();
-static SERVER: StaticCell<NusServer<'static>> = StaticCell::new();
-static GAP_NAME: StaticCell<heapless::String<{ advertising::ADV_NAME_MAX }>> = StaticCell::new();
+// The host's resources, the stack and the GATT server live on the HEAP,
+// leaked at `start`, not in `.bss`: static RAM on this chip comes straight out
+// of the main task's stack (it is whatever `.data`/`.bss` leave), and every
+// image links this module whether or not the device store turns BLE on. On
+// the heap, only a board that starts BLE pays for them (~3.5 KB).
 
 /// Which connection slots hold a connection.
 static SLOT_BUSY: [AtomicBool; RADIO_LINK_SLOTS] = [AtomicBool::new(false), AtomicBool::new(false)];
@@ -68,21 +67,25 @@ pub fn start(spawner: Spawner, bt: esp_hal::peripherals::BT<'static>, _quirks: B
     let heap_controller = esp_alloc::HEAP.used();
     let controller: BleController = ExternalController::new(connector);
 
-    let resources = RESOURCES.init(HostResources::new());
-    let stack: &'static BleStack = STACK.init(
+    let resources: &'static mut HostResources<
+        DefaultPacketPool,
+        RADIO_LINK_SLOTS,
+        L2CAP_CHANNELS_MAX,
+    > = Box::leak(Box::new(HostResources::new()));
+    let stack: &'static BleStack = Box::leak(Box::new(
         trouble_host::new(controller, resources).set_random_address(advertising::static_address()),
-    );
+    ));
     let Host {
         peripheral, runner, ..
     } = stack.build();
 
-    let gap_name: &'static str = GAP_NAME.init(advertising::mac_name()).as_str();
+    let gap_name: &'static str = Box::leak(Box::new(advertising::mac_name())).as_str();
     let server: &'static NusServer<'static> =
         match NusServer::new_with_config(GapConfig::Peripheral(PeripheralConfig {
             name: gap_name,
             appearance: &appearance::UNKNOWN,
         })) {
-            Ok(server) => SERVER.init(server),
+            Ok(server) => Box::leak(Box::new(server)),
             Err(error) => {
                 log::error!("[ble] GATT server build FAILED ({error}) — BLE stays off this boot");
                 return;
