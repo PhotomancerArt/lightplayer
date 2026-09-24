@@ -123,7 +123,7 @@ impl ProjectProbeRequest {
         Self::ControlProduct(ControlProductProbeRequest {
             product: ControlProduct::new(NodeId::new(1), 0, ControlExtent::new(1, 3)),
             sample_format: crate::WireChannelSampleFormat::U16,
-            display_layout: super::ControlDisplayLayoutRead::None,
+            geometry: super::RevisionGateRead::None,
         })
     }
 }

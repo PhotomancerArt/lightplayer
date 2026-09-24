@@ -7378,7 +7378,7 @@ mod tests {
         assert_eq!(sent[0].id, 1);
         assert_eq!(handle.id(), 7);
         assert_eq!(request.since, None);
-        assert_eq!(request.queries.len(), 4);
+        assert_eq!(request.queries.len(), 3);
 
         let sync = studio
             .project

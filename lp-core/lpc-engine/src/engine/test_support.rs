@@ -363,6 +363,34 @@ impl EngineTestHarness {
             .value()
             .clone()
     }
+
+    /// The whole binding graph and, when `include_values`, one value per
+    /// channel in channel order (empty otherwise): a binding-graph probe that
+    /// asks the structure `always`.
+    pub(crate) fn binding_graph(
+        &mut self,
+        include_values: bool,
+    ) -> (
+        lpc_wire::WireBindingGraph,
+        alloc::vec::Vec<lpc_wire::WireBusChannelValue>,
+    ) {
+        let result = self.engine.read_project_binding_graph_probe(
+            &self.registry,
+            lpc_wire::BindingGraphProbeRequest {
+                structure: lpc_wire::RevisionGateRead::Always,
+                include_values,
+            },
+        );
+        let lpc_wire::BindingGraphProbeResult::Graph(lpc_wire::WireBindingGraphRead {
+            structure: lpc_wire::RevisionGateResult::Changed(graph),
+            values,
+        }) = result
+        else {
+            panic!("expected the whole graph, got {result:?}");
+        };
+        let values = values.map(|values| values.values).unwrap_or_default();
+        (graph, values)
+    }
 }
 
 impl OutputSpec {

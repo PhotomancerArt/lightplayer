@@ -332,8 +332,8 @@ async function capturePoster(message) {
 // `output_frame` is absent whenever the host is not reading the output side —
 // which is every tick of a shader-only slot after the worker's first answer —
 // so those cards carry no extra traffic. When present it is the serialized
-// display-layout gate (`always` / `if_changed` / `none`), which is what keeps
-// geometry off the per-frame path.
+// per-output geometry gate (`always` / `if_changed` / `none`), which is what
+// keeps geometry off the per-frame path.
 function postOutputFrame(message, runtimeId, frameId) {
   if (message.output_frame == null) {
     return;

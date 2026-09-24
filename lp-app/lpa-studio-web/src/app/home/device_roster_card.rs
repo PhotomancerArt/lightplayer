@@ -1609,10 +1609,11 @@ mod tests {
                 lpa_studio_core::UiControlProductPreview {
                     revision: 3,
                     extent: lpc_model::ControlExtent::new(1, 12),
-                    sample_format: lpa_studio_core::UiControlSampleFormat::U16,
+                    // The card pulls its frame at 8 bits.
+                    sample_format: lpa_studio_core::UiControlSampleFormat::U8,
                     sample_layout: lpc_model::ControlSampleLayout { spans: Vec::new() },
                     display_layout: layout,
-                    bytes: Rc::from(vec![0u8; 24]),
+                    bytes: Rc::from(vec![0u8; 12]),
                 }
             }),
             frame_age_secs: Some(12.0),

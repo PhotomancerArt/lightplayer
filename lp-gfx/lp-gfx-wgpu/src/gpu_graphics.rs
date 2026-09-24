@@ -3,9 +3,9 @@
 use std::sync::{Arc, OnceLock};
 
 use lp_gfx::{
-    GfxError, HandleAllocator, HandleBacking, LpComputeShader, LpGraphics, LpShader,
-    SampleOutHandle, SamplePointsHandle, ShaderCompileOptions, ShaderSemantics, TextureData,
-    TextureHandle,
+    GfxError, HandleAllocator, HandleBacking, LatentReadBack, LatentReadBackSource,
+    LpComputeShader, LpGraphics, LpShader, SampleOutHandle, SamplePointsHandle,
+    ShaderCompileOptions, ShaderSemantics, TextureData, TextureHandle,
 };
 use lps_shared::{LpsTexture2DDescriptor, LpsTexture2DValue, LpsValueF32, TextureStorageFormat};
 
@@ -473,6 +473,46 @@ pub(crate) struct GpuShared {
     pub(crate) textures: TextureRegistry,
 }
 
+/// The browser tier's latent readback — the only backend whose render
+/// products stay GPU-resident, and so the only one a host hands the engine
+/// as a [`LatentReadBackSource`].
+impl LatentReadBackSource for GpuGraphics {
+    /// Browser: one frame late, never blocking ([`crate::latent_read_back`]).
+    #[cfg(target_arch = "wasm32")]
+    fn read_back_latent(
+        &self,
+        texture: &TextureHandle,
+        state: &mut LatentReadBack,
+        tag: u64,
+        out: &mut Vec<u8>,
+    ) -> Result<Option<u64>, GfxError> {
+        crate::latent_read_back::read_back_latent(
+            &self.shared.device,
+            &self.shared.queue,
+            gpu_texture(texture)?,
+            texture.width(),
+            texture.height(),
+            texture.format(),
+            state,
+            tag,
+            out,
+        )
+    }
+
+    /// Native can block on a map, so it answers this call's own frame.
+    #[cfg(not(target_arch = "wasm32"))]
+    fn read_back_latent(
+        &self,
+        texture: &TextureHandle,
+        _state: &mut LatentReadBack,
+        tag: u64,
+        out: &mut Vec<u8>,
+    ) -> Result<Option<u64>, GfxError> {
+        *out = self.read_back(texture)?.into_bytes();
+        Ok(Some(tag))
+    }
+}
+
 impl HandleAllocator for GpuShared {
     fn free_texture(&self, backing: HandleBacking) {
         // wgpu resources release on drop; the allocator drops the registry
@@ -907,6 +947,68 @@ void tick() {
         graphics.clear_texture(&mut texture).expect("clear");
         let data = graphics.read_back(&texture).expect("read back");
         assert!(data.bytes().iter().all(|&b| b == 0));
+    }
+
+    /// The browser tier's latent pipeline, driven natively: the map lands
+    /// only once the device is polled between calls, which is what the
+    /// worker's event loop turn does in the browser.
+    #[test]
+    fn latent_read_back_serves_the_previous_call_s_frame_with_its_tag() {
+        let Some(graphics) = test_graphics() else {
+            eprintln!("SKIP: no GPU adapter available");
+            return;
+        };
+        let first = rgba16_bytes(&[1000, 2000, 3000, 65535, 4000, 5000, 6000, 65535]);
+        let second = rgba16_bytes(&[7000, 8000, 9000, 65535, 10000, 11000, 12000, 65535]);
+        let mut texture = graphics
+            .create_texture(2, 1, TextureStorageFormat::Rgba16Unorm, &first)
+            .expect("texture");
+        let mut state = lp_gfx::LatentReadBack::new();
+        let mut out = vec![0u8; first.len()];
+        let latent = |state: &mut lp_gfx::LatentReadBack,
+                      texture: &TextureHandle,
+                      tag,
+                      out: &mut Vec<u8>| {
+            crate::latent_read_back::read_back_latent(
+                &graphics.shared.device,
+                &graphics.shared.queue,
+                gpu_texture(texture).expect("gpu texture"),
+                texture.width(),
+                texture.height(),
+                texture.format(),
+                state,
+                tag,
+                out,
+            )
+            .expect("latent read back")
+        };
+        let settle = || {
+            graphics
+                .shared
+                .device
+                .poll(wgpu::PollType::wait_indefinitely())
+                .expect("poll");
+        };
+
+        // Nothing has landed on the first call.
+        assert_eq!(latent(&mut state, &texture, 1, &mut out), None);
+        settle();
+        graphics
+            .write_texture(&mut texture, &second)
+            .expect("write");
+        // The second call serves the FIRST frame, tagged as issued.
+        assert_eq!(latent(&mut state, &texture, 2, &mut out), Some(1));
+        assert_eq!(out, first);
+        settle();
+        assert_eq!(latent(&mut state, &texture, 3, &mut out), Some(2));
+        assert_eq!(out, second);
+
+        // A new shape rebuilds the staging: back to nothing landed.
+        let small = graphics
+            .create_texture(1, 1, TextureStorageFormat::Rgba16Unorm, &first[..8])
+            .expect("small texture");
+        let mut small_out = vec![0u8; 8];
+        assert_eq!(latent(&mut state, &small, 4, &mut small_out), None);
     }
 
     #[test]

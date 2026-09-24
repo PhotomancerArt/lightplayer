@@ -33,7 +33,7 @@
 //! read is a host-driven pull with its own pacing and offline story. This one
 //! rides a frame the preview host already schedules, so it owns neither.
 
-use lpc_wire::{ControlDisplayLayoutRead, OutputFrameEntry};
+use lpc_wire::{OutputFrameEntry, OutputFrameGeometryRead};
 
 use crate::UiControlProductPreview;
 use crate::app::frame_feed::OutputFrameCache;
@@ -73,15 +73,14 @@ impl PreviewOutputFeed {
 
     /// What the next preview frame should ask for: `None` once the engine
     /// has said this project is not control-first (no output traffic at
-    /// all), otherwise the shared multi-output geometry gate
-    /// ([`OutputFrameCache::display_layout_read`]) — `Always` while any
-    /// output still lacks a layout, `IfChanged` while every layout stands,
-    /// `None` once the engine refused them all.
-    pub fn next_read(&self) -> Option<ControlDisplayLayoutRead> {
+    /// all), otherwise the per-output geometry gate
+    /// ([`OutputFrameCache::geometry_read`]) — every output's held geometry
+    /// revision (refusals included), `Always` while none is held.
+    pub fn next_read(&self) -> Option<OutputFrameGeometryRead> {
         if self.control_first == Some(false) {
             return None;
         }
-        Some(self.outputs.display_layout_read())
+        Some(self.outputs.geometry_read())
     }
 
     /// Fold one `preview_output_frame` answer into the feed and recompose
@@ -117,7 +116,10 @@ mod tests {
         ColorOrder, ControlDisplayLayout, ControlLamp2d, ControlLayout2d, ControlSampleEncoding,
         ControlSampleLayout, ControlSampleSpan, NodeId, Revision,
     };
-    use lpc_wire::{ControlDisplayLayoutProbeResult, WireChannelSampleFormat};
+    use lpc_wire::{
+        GeometryDisplayLayout, KnownOutputFrameGeometry, OutputFrameGeometry, RevisionGateResult,
+        WireChannelSampleFormat,
+    };
 
     use super::*;
 
@@ -126,7 +128,7 @@ mod tests {
     #[test]
     fn a_project_that_is_not_control_first_stops_the_asking() {
         let mut feed = PreviewOutputFeed::default();
-        assert_eq!(feed.next_read(), Some(ControlDisplayLayoutRead::Always));
+        assert_eq!(feed.next_read(), Some(OutputFrameGeometryRead::Always));
 
         feed.apply(false, &[]);
 
@@ -176,15 +178,17 @@ mod tests {
     #[test]
     fn geometry_travels_once_and_keeps_its_rc_while_unchanged() {
         let mut feed = PreviewOutputFeed::default();
-        let mut first = entry(4, 1, vec![1, 0, 2, 0, 3, 0]);
-        first.display_layout = ControlDisplayLayoutProbeResult::Layout(layout(11));
+        let first = with_layout(entry(4, 1, vec![1, 0, 2, 0, 3, 0]), 11, layout(11));
 
         feed.apply(true, &[first]);
 
         assert_eq!(
             feed.next_read(),
-            Some(ControlDisplayLayoutRead::IfChanged {
-                known_revision: Some(Revision::new(11)),
+            Some(OutputFrameGeometryRead::IfChanged {
+                known: vec![KnownOutputFrameGeometry {
+                    node: NodeId::new(4),
+                    revision: Revision::new(11),
+                }],
             })
         );
         let geometry = Rc::clone(
@@ -196,7 +200,7 @@ mod tests {
         );
 
         let mut second = entry(4, 2, vec![9, 0, 8, 0, 7, 0]);
-        second.display_layout = ControlDisplayLayoutProbeResult::Unchanged {
+        second.geometry = RevisionGateResult::Unchanged {
             revision: Revision::new(11),
         };
         feed.apply(true, &[second]);
@@ -214,23 +218,32 @@ mod tests {
         );
     }
 
-    /// A refusal is permanent for the connection: the geometry asking
-    /// stops (the engine would rebuild and re-measure only to refuse
-    /// again) while the frames keep flowing without a layout.
+    /// A refusal is held under its geometry revision: the engine answers
+    /// `Unchanged` rather than rebuilding and re-measuring a layout only to
+    /// refuse it again, while the frames keep flowing without a layout.
     #[test]
-    fn a_refused_layout_stops_the_geometry_asking_but_not_the_frames() {
+    fn a_refused_layout_is_held_while_the_frames_keep_flowing() {
         let mut feed = PreviewOutputFeed::default();
-        let mut refused = entry(4, 1, vec![1, 0, 2, 0, 3, 0]);
-        refused.display_layout = ControlDisplayLayoutProbeResult::Unsupported {
-            reason: "over the size budget".to_string(),
+
+        feed.apply(true, &[entry(4, 1, vec![1, 0, 2, 0, 3, 0])]);
+
+        assert_eq!(
+            feed.next_read(),
+            Some(OutputFrameGeometryRead::IfChanged {
+                known: vec![KnownOutputFrameGeometry {
+                    node: NodeId::new(4),
+                    revision: Revision::new(1),
+                }],
+            })
+        );
+
+        let mut next = entry(4, 2, vec![9, 0, 8, 0, 7, 0]);
+        next.geometry = RevisionGateResult::Unchanged {
+            revision: Revision::new(1),
         };
-
-        feed.apply(true, &[refused]);
-
-        assert_eq!(feed.next_read(), Some(ControlDisplayLayoutRead::None));
-
-        feed.apply(true, &[entry(4, 2, vec![9, 0, 8, 0, 7, 0])]);
+        feed.apply(true, &[next]);
         let frame = feed.frame().expect("frames keep flowing");
+        assert_eq!(frame.revision, 2);
         assert!(frame.display_layout.is_none());
     }
 
@@ -245,10 +258,8 @@ mod tests {
             bytes: Vec::new(),
             ..entry(2, 1, vec![1, 0, 2, 0, 3, 0])
         };
-        let mut box_1 = entry(4, 1, vec![1, 0, 2, 0, 3, 0]);
-        box_1.display_layout = ControlDisplayLayoutProbeResult::Layout(layout(11));
-        let mut box_2 = entry(5, 1, vec![9, 0, 8, 0, 7, 0]);
-        box_2.display_layout = ControlDisplayLayoutProbeResult::Layout(layout(12));
+        let box_1 = with_layout(entry(4, 1, vec![1, 0, 2, 0, 3, 0]), 11, layout(11));
+        let box_2 = with_layout(entry(5, 1, vec![9, 0, 8, 0, 7, 0]), 12, layout(12));
 
         feed.apply(true, &[unpublished, box_1, box_2]);
 
@@ -264,16 +275,17 @@ mod tests {
         assert_eq!(starts, vec![0, 3], "each output's lamps read its stretch");
     }
 
-    /// A format the lamp renderer cannot read leaves the last good frame up
-    /// rather than drawing garbage.
+    /// Bytes that contradict their own format (three bytes claiming a
+    /// 16-bit lamp) leave the last good frame up rather than drawing
+    /// garbage.
     #[test]
-    fn an_unreadable_sample_format_is_ignored() {
+    fn an_unreadable_frame_is_ignored() {
         let mut feed = PreviewOutputFeed::default();
         feed.apply(true, &[entry(4, 1, vec![1, 0, 2, 0, 3, 0])]);
 
-        let mut u8_frame = entry(4, 2, vec![1, 2, 3]);
-        u8_frame.sample_format = WireChannelSampleFormat::U8;
-        feed.apply(true, &[u8_frame]);
+        let mut short = entry(4, 2, vec![1, 0, 2, 0, 3, 0]);
+        short.bytes = vec![1, 2, 3];
+        feed.apply(true, &[short]);
 
         assert_eq!(feed.frame().expect("frame").revision, 1);
         assert_eq!(feed.frame_revision(), 1);
@@ -284,15 +296,14 @@ mod tests {
     #[test]
     fn invalidating_the_runtime_keeps_the_frame_and_the_verdict() {
         let mut feed = PreviewOutputFeed::default();
-        let mut first = entry(4, 1, vec![1, 0, 2, 0, 3, 0]);
-        first.display_layout = ControlDisplayLayoutProbeResult::Layout(layout(11));
+        let first = with_layout(entry(4, 1, vec![1, 0, 2, 0, 3, 0]), 11, layout(11));
         feed.apply(true, &[first]);
 
         feed.invalidate_runtime();
 
         assert_eq!(feed.control_first(), Some(true));
         assert_eq!(feed.frame().expect("last frame").revision, 1);
-        assert_eq!(feed.next_read(), Some(ControlDisplayLayoutRead::Always));
+        assert_eq!(feed.next_read(), Some(OutputFrameGeometryRead::Always));
     }
 
     fn entry(node: u32, revision: i64, bytes: Vec<u8>) -> OutputFrameEntry {
@@ -300,24 +311,45 @@ mod tests {
             node: NodeId::new(node),
             revision: Revision::new(revision),
             channels: (bytes.len() / 6) as u32,
-            sample_format: WireChannelSampleFormat::U16,
-            sample_layout: ControlSampleLayout {
-                spans: vec![ControlSampleSpan {
-                    row: 0,
-                    start: 0,
-                    len: (bytes.len() / 2) as u32,
-                    encoding: ControlSampleEncoding::RgbPixels {
-                        count: (bytes.len() / 6) as u32,
-                        color_order: ColorOrder::Rgb,
-                    },
-                }],
-            },
-            display_layout: ControlDisplayLayoutProbeResult::Omitted,
-            // These feeds render lamps, not the bay: one auto-flowed
-            // producer over the whole wire is the shape they see.
-            placements: Vec::new(),
+            sample_format: Some(WireChannelSampleFormat::U16),
+            // Geometry at revision 1 with a REFUSED display layout — the
+            // bare case; `with_layout` adds one.
+            geometry: RevisionGateResult::Changed(OutputFrameGeometry {
+                revision: Revision::new(1),
+                sample_layout: ControlSampleLayout {
+                    spans: vec![ControlSampleSpan {
+                        row: 0,
+                        start: 0,
+                        len: (bytes.len() / 2) as u32,
+                        encoding: ControlSampleEncoding::RgbPixels {
+                            count: (bytes.len() / 6) as u32,
+                            color_order: ColorOrder::Rgb,
+                        },
+                    }],
+                },
+                display_layout: GeometryDisplayLayout::Unsupported {
+                    reason: "no display layout in this fixture".to_string(),
+                },
+                // These feeds render lamps, not the bay: the cut is not
+                // what they read.
+                placements: Vec::new(),
+            }),
             bytes,
         }
+    }
+
+    /// The entry with a display layout in its geometry, at `revision`.
+    fn with_layout(
+        mut entry: OutputFrameEntry,
+        revision: i64,
+        layout: ControlDisplayLayout,
+    ) -> OutputFrameEntry {
+        let RevisionGateResult::Changed(geometry) = &mut entry.geometry else {
+            unreachable!("the helper sends geometry");
+        };
+        geometry.revision = Revision::new(revision);
+        geometry.display_layout = GeometryDisplayLayout::Layout(layout);
+        entry
     }
 
     fn layout(revision: i64) -> ControlDisplayLayout {

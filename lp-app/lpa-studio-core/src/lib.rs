@@ -63,7 +63,9 @@ pub use app::devices::{
 pub use app::docs_host::DocsSimHost;
 // The project's declared hardware (D41): the web shell's Hardware row and
 // the gallery card's "for <board>" badge both read it.
-pub use app::frame_feed::{CardFeedApply, CardFeedState};
+pub use app::frame_feed::{
+    CLOSE_INSPECTION_SAMPLE_FORMAT, CardFeedApply, CardFeedState, PREVIEW_SAMPLE_FORMAT,
+};
 pub use app::home::{
     DEFAULT_STRIP_PIXELS, GenerateProjectError, GeneratedProject, HOME_NODE_ID, HomeOp,
     ProjectTemplate, UiExampleCard, UiExampleGroup, UiHomeView, UiOpenMismatch, UiPackageCard,

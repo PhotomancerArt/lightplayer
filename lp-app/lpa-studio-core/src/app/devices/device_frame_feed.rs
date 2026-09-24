@@ -120,6 +120,28 @@ pub(crate) fn feed_target(device: &Device, effects: &DeviceEffects) -> Option<Fe
     })
 }
 
+/// The card's pull: one output-frame probe, no mirror queries — a picture,
+/// not a `ProjectSync`.
+///
+/// The card draws these pixels, so they ride at the preview precision like
+/// every live preview's. It is never a second copy of the lens's: a card
+/// pulls only while nobody holds the wire ([`feed_target`]), and the lens
+/// holds it for as long as it is open.
+pub(crate) fn card_frame_request(
+    geometry: lpc_wire::OutputFrameGeometryRead,
+) -> lpc_wire::ProjectReadRequest {
+    lpc_wire::ProjectReadRequest {
+        since: None,
+        queries: Vec::new(),
+        probes: vec![lpc_wire::ProjectProbeRequest::OutputFrame(
+            lpc_wire::OutputFrameProbeRequest {
+                geometry,
+                samples: Some(crate::app::frame_feed::PREVIEW_SAMPLE_FORMAT),
+            },
+        )],
+    }
+}
+
 /// One open conversation: the client on a link, minting in the app range.
 struct Conversation {
     link: LinkId,
@@ -485,16 +507,7 @@ impl DeviceFrameFeed {
                 return false;
             }
         };
-        let request = lpc_wire::ProjectReadRequest {
-            since: None,
-            queries: Vec::new(),
-            // One probe, no mirror queries: a picture, not a ProjectSync.
-            probes: vec![lpc_wire::ProjectProbeRequest::OutputFrame(
-                lpc_wire::OutputFrameProbeRequest {
-                    display_layout: self.state.display_layout_read(),
-                },
-            )],
-        };
+        let request = card_frame_request(self.state.geometry_read());
         let deadline = ProgressDeadline::new(deadline_budget, make_timer);
         let Some(conversation) = self.conversation.as_mut() else {
             return false;
@@ -604,6 +617,23 @@ impl DeviceFrameFeed {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Card only (no lens on the board): the card asks for its frame's
+    /// pixels at 8 bits, with its geometry gate.
+    #[test]
+    fn the_card_pulls_its_frame_at_the_preview_precision() {
+        let request = card_frame_request(lpc_wire::OutputFrameGeometryRead::Always);
+        assert!(request.queries.is_empty());
+        assert_eq!(
+            request.probes,
+            vec![lpc_wire::ProjectProbeRequest::OutputFrame(
+                lpc_wire::OutputFrameProbeRequest {
+                    geometry: lpc_wire::OutputFrameGeometryRead::Always,
+                    samples: Some(lpc_wire::WireChannelSampleFormat::U8),
+                }
+            )]
+        );
+    }
 
     #[test]
     fn a_parked_feed_re_arms_when_its_window_changes() {

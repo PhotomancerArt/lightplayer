@@ -6,32 +6,39 @@ use alloc::vec;
 use alloc::vec::Vec;
 
 use lp_collection::VecMap;
-use lpc_model::{ChannelName, ControlDisplayLayout, ControlLayout2d, Kind, NodeId, Revision};
+use lpc_model::{
+    ChannelName, ControlDisplayLayout, ControlLayout2d, Kind, NodeId, Revision, VisualProduct,
+};
 use lpc_registry::ProjectRegistry;
 use lpc_wire::{
-    BindingGraphProbeRequest, BindingGraphProbeResult, ControlDisplayLayoutProbeResult,
-    ControlDisplayLayoutRead, ControlProductProbeRequest, ControlProductProbeResult,
-    OutputFrameEntry, OutputFrameProbeRequest, OutputFrameProbeResult, RenderProductProbeRequest,
-    RenderProductProbeResult, TimebaseProbeRequest, TimebaseProbeResult, WireBindingDirection,
-    WireBindingEndpoint, WireBindingGraph, WireBindingOrigin, WireBusChannel, WireBusChannelValue,
-    WireCellProjection, WireChannelSampleFormat, WireConsumerPolicy, WireEffectiveBinding,
-    WirePhasorOrigin, WirePhasorRow, WireProjectionOrigin, WireProjectionShape, WireVisualSpace,
+    BindingGraphProbeRequest, BindingGraphProbeResult, ControlProductGeometry,
+    ControlProductProbeRequest, ControlProductProbeResult, GeometryDisplayLayout, OutputFrameEntry,
+    OutputFrameGeometry, OutputFrameGeometryRead, OutputFrameProbeRequest, OutputFrameProbeResult,
+    RenderProductProbeRequest, RenderProductProbeResult, RevisionGateRead, RevisionGateResult,
+    TimebaseProbeRequest, TimebaseProbeResult, WireBindingDirection, WireBindingEndpoint,
+    WireBindingGraph, WireBindingGraphRead, WireBindingOrigin, WireBusChannel, WireBusChannelValue,
+    WireBusChannelValues, WireCellProjection, WireChannelSampleFormat, WireConsumerPolicy,
+    WireEffectiveBinding, WirePhasorOrigin, WirePhasorRow, WireProjectionOrigin,
+    WireProjectionShape, WireVisualSpace,
 };
 use lps_shared::TextureStorageFormat;
 
 use crate::dataflow::binding::{
     BindingEntry, BindingPriority, BindingRef, BindingSource, BindingTarget,
 };
-use crate::engine::engine::gate_display_layout;
+use crate::dataflow::resolver::SessionResolveError;
+use crate::engine::engine::display_layout_over_budget;
 use crate::node::NodeEntryState;
 use crate::nodes::{OutputFragment, merge_fragment_display_layouts};
 use crate::products::control::{
     ControlLayout, ControlProduct, ControlRenderRequest, ControlRenderTarget,
 };
-use crate::products::visual::RenderTextureRequest;
+use crate::products::visual::{RenderTextureRequest, TextureRenderProduct};
 use crate::resource::{RuntimeBufferId, RuntimeBufferMetadata, RuntimeChannelSampleFormat};
 
 use super::Engine;
+use super::preview_sample_encoding::{encode_unorm16_le_bytes, encode_unorm16_samples};
+use super::probe_read_backs::ProbeReadBackKey;
 use crate::products::visual::{
     CellProjection, ConsumerPolicy, ProductSpaceInfo, ProjectionOrigin, ProjectionShape,
     VisualSpace, resolve_1d_to_2d_with_origin,
@@ -51,6 +58,17 @@ struct PublishedOutputCandidate {
     /// knows where each producer's lamps ended up on this wire.
     fragments: Vec<OutputFragment>,
     placement_revision: Revision,
+    sample_layout_revision: Revision,
+}
+
+/// What an output's producers answered about their display layouts — asked
+/// once per product, before the gate decides whether any of it is sent.
+struct OutputDisplayParts {
+    /// One entry per distinct product on the wire: its layout, or why not.
+    probed: Vec<(ControlProduct, Result<ControlLayout2d, String>)>,
+    /// `max(placement revision, every answering producer's layout revision)`
+    /// — the display-layout component of the output's geometry revision.
+    revision: Revision,
 }
 
 impl Engine {
@@ -83,21 +101,37 @@ impl Engine {
         let primary = wire_visual_space(space_info.primary);
         match self.render_texture_product(registry, product, &texture_request) {
             Ok(texture) => {
-                let Some(bytes) = texture.try_raw_bytes() else {
-                    // GPU tier: the product stayed GPU-resident (no readback
-                    // in the browser). Structured answer, not an error — the
-                    // runtime is healthy, bytes are simply not available on
-                    // this tier (fidelity-tiers ADR).
-                    return RenderProductProbeResult::GpuResident {
-                        product,
-                        revision,
-                        width: texture.width(),
-                        height: texture.height(),
-                        space: wire_visual_space(space),
-                        projection,
-                        origin,
-                        primary,
-                    };
+                let latent;
+                let (bytes, revision) = match texture.try_raw_bytes() {
+                    Some(bytes) => (bytes, revision),
+                    None => {
+                        // GPU tier: the product stayed GPU-resident. Read it
+                        // back one probe late (the browser cannot block on a
+                        // map); until the first frame lands the answer is
+                        // `GpuResident` — healthy, just no bytes yet
+                        // (fidelity-tiers ADR).
+                        match self.read_back_gpu_resident(product, &texture, space, policy) {
+                            Ok(Some((bytes, served))) => {
+                                latent = bytes;
+                                (latent.as_slice(), served)
+                            }
+                            Ok(None) => {
+                                return RenderProductProbeResult::GpuResident {
+                                    product,
+                                    revision,
+                                    width: texture.width(),
+                                    height: texture.height(),
+                                    space: wire_visual_space(space),
+                                    projection,
+                                    origin,
+                                    primary,
+                                };
+                            }
+                            Err(message) => {
+                                return RenderProductProbeResult::Error { product, message };
+                            }
+                        }
+                    }
                 };
                 let bytes = match request.format {
                     lpc_wire::WireTextureFormat::Rgba16 => bytes.to_vec(),
@@ -123,6 +157,44 @@ impl Engine {
         }
     }
 
+    /// Bytes for a GPU-resident probe texture through the injected latent
+    /// readback: the most recent landed frame of this read site and the
+    /// revision it was rendered at, or `None` while none has landed — or
+    /// when the host injected no source at all.
+    fn read_back_gpu_resident(
+        &mut self,
+        product: VisualProduct,
+        texture: &TextureRenderProduct,
+        space: VisualSpace,
+        policy: ConsumerPolicy,
+    ) -> Result<Option<(Vec<u8>, Revision)>, String> {
+        let tag = self.revision().0 as u64;
+        let Some(probe_read_backs) = self.probe_read_backs.as_deref_mut() else {
+            return Ok(None);
+        };
+        let handle = texture.gpu_handle().ok_or_else(|| {
+            String::from("render produced a texture with neither host bytes nor GPU handle")
+        })?;
+        let Some((source, site)) = probe_read_backs.source_and_site(ProbeReadBackKey {
+            product,
+            width: texture.width(),
+            height: texture.height(),
+            space,
+            policy,
+        }) else {
+            return Ok(None);
+        };
+        // The source sizes the buffer. Calling `bytes_per_pixel` here
+        // linked its lowered lookup table (`[8, 6, 2]`) into `.data` on the
+        // Xtensa images — 16 B of DRAM off the classic's pinned main stack
+        // for a path a device never takes.
+        let mut bytes = Vec::new();
+        let served = source
+            .read_back_latent(handle, site, tag, &mut bytes)
+            .map_err(|error| format!("probe read back: {error}"))?;
+        Ok(served.map(|served| (bytes, Revision(served as i64))))
+    }
+
     /// Snapshot the effective binding graph and bus channel summary.
     ///
     /// Derives from the runtime binding index (the bus stays virtual):
@@ -130,6 +202,12 @@ impl Engine {
     /// on implicit runtime consumed slots with no def field — plus every
     /// referenced channel with providers/consumers as indices into the
     /// binding list. See docs/adr/2026-07-06-binding-graph-probe.md.
+    ///
+    /// The structure is revision-gated (`request.structure`) and the values
+    /// ride every read that asks for them. The structure revision is stamped
+    /// by content ([`super::content_stamp`]): the structure is built
+    /// on every read — the values list is keyed to its channel order — hashed,
+    /// and only shipped when the client's revision is not the current one.
     ///
     /// Public (unlike the sibling probes) so host-level tests can assert
     /// the effective graph directly — the binding index is load-time
@@ -139,8 +217,6 @@ impl Engine {
         registry: &ProjectRegistry,
         request: BindingGraphProbeRequest,
     ) -> BindingGraphProbeResult {
-        let revision = self.revision();
-
         let mut bindings = Vec::new();
         let mut wire_index: VecMap<BindingRef, u32> = VecMap::new();
         let mut scoped_rows = Vec::new();
@@ -211,6 +287,7 @@ impl Engine {
         let root_scope = self.tree().node_scope(self.tree().root());
 
         let mut channels = Vec::new();
+        let mut values = Vec::new();
         for scope in scopes {
             let scope_channels: Vec<(ChannelName, Kind)> = match scope {
                 Some(scope) => self.tree().scope_channels(scope),
@@ -225,18 +302,19 @@ impl Engine {
                 // Panel origin — synthesized here (it lives in the side
                 // store, not in any node's binding set) so the UI can
                 // render engaged state from the same graph it already
-                // reads.
+                // reads. Its held value is NOT in the row: that is the
+                // channel's value, and a value inside the structure moved the
+                // structure on every knob turn (Run D: 13 of the structure's
+                // 15 changes in one session were a knob's position).
                 let panel_row = scope.and_then(|scope| {
                     self.panel_writers()
                         .get(scope, &name)
-                        .map(|writer| WireEffectiveBinding {
+                        .map(|_| WireEffectiveBinding {
                             owner: scope.owner(),
                             node: scope.owner(),
                             slot: None,
                             direction: WireBindingDirection::Publishes,
-                            endpoint: WireBindingEndpoint::Literal {
-                                value: writer.value.clone(),
-                            },
+                            endpoint: WireBindingEndpoint::PanelWriter,
                             origin: WireBindingOrigin::Panel,
                             panel_show: false,
                             priority: BindingPriority::panel().as_i32(),
@@ -273,22 +351,23 @@ impl Engine {
                 .filter_map(|(binding_ref, _)| wire_index.get(binding_ref).copied())
                 .collect();
 
-                let value = (request.include_values
-                    && self.bus_probe_value_is_sink_demand_free(scope, &name))
-                .then(
-                    || match self.resolve_bus_channel_value(registry, scope, &name) {
-                        Ok(production) => WireBusChannelValue {
-                            revision,
-                            value: production.value_leaf().map(|leaf| leaf.value().clone()),
-                            error: None,
-                        },
-                        Err(error) => WireBusChannelValue {
-                            revision,
-                            value: None,
-                            error: Some(format!("{error:?}")),
-                        },
-                    },
-                );
+                if request.include_values {
+                    let value = if !self.bus_probe_value_is_sink_demand_free(scope, &name) {
+                        WireBusChannelValue::Unresolved
+                    } else {
+                        match self.resolve_bus_channel_value(registry, scope, &name) {
+                            Ok(production) => match production.value_leaf() {
+                                Some(leaf) => WireBusChannelValue::Value(leaf.value().clone()),
+                                None => WireBusChannelValue::Empty,
+                            },
+                            Err(SessionResolveError::NoBusProvider { .. }) => {
+                                WireBusChannelValue::NoProvider
+                            }
+                            Err(error) => WireBusChannelValue::Error(format!("{error:?}")),
+                        }
+                    };
+                    values.push(value);
+                }
 
                 // Root-scope role, decided engine-side ONCE: the primary
                 // visual is the root scope's listing of the vocabulary
@@ -302,16 +381,36 @@ impl Engine {
                     kind: Some(kind),
                     providers,
                     consumers,
-                    value,
                     primary_visual,
                 });
             }
         }
 
-        BindingGraphProbeResult::Graph(WireBindingGraph {
-            revision,
+        // Stamp the structure by content: hashed with its revision zeroed, so
+        // the hash is of the structure alone.
+        let mut graph = WireBindingGraph {
+            revision: Revision::default(),
             bindings,
             channels,
+        };
+        let revision = self.stamp_binding_structure(lpc_wire::ser_write_json_fnv64(&graph));
+        graph.revision = revision;
+
+        let structure = match request.structure {
+            RevisionGateRead::None => RevisionGateResult::Omitted,
+            RevisionGateRead::IfChanged {
+                known_revision: Some(known),
+            } if known == revision => RevisionGateResult::Unchanged { revision },
+            RevisionGateRead::Always | RevisionGateRead::IfChanged { .. } => {
+                RevisionGateResult::Changed(graph)
+            }
+        };
+        BindingGraphProbeResult::Graph(WireBindingGraphRead {
+            structure,
+            values: request.include_values.then_some(WireBusChannelValues {
+                structure_revision: revision,
+                values,
+            }),
         })
     }
 
@@ -360,15 +459,8 @@ impl Engine {
     ) -> ControlProductProbeResult {
         let product = request.product;
         let extent = product.preferred_extent();
-        let WireChannelSampleFormat::U16 = request.sample_format else {
-            return ControlProductProbeResult::Unsupported {
-                product,
-                reason: format!(
-                    "control product preview sample format {:?} is not supported",
-                    request.sample_format
-                ),
-            };
-        };
+        // Rendered at 16 bits whatever the ask: the requested format is
+        // only how precisely the samples travel (`preview_sample_encoding`).
         let sample_count = extent.sample_count() as usize;
         let mut samples = vec![0u16; sample_count];
         let render_request = ControlRenderRequest::unorm16(extent);
@@ -378,27 +470,81 @@ impl Engine {
             samples.as_mut_slice(),
         );
         let revision = self.revision();
+        let want_geometry = !matches!(request.geometry, RevisionGateRead::None);
         match self.render_control_product_probe(
             registry,
             product,
             &render_request,
             target,
-            request.display_layout,
+            want_geometry,
         ) {
             Ok((sample_layout, display_layout)) => ControlProductProbeResult::Preview {
                 product,
                 revision,
                 extent,
                 sample_format: request.sample_format,
-                sample_layout,
-                display_layout,
-                bytes: control_samples_u16_to_bytes(&samples),
+                geometry: self.control_product_geometry(
+                    product,
+                    request.geometry,
+                    sample_layout,
+                    display_layout,
+                ),
+                bytes: encode_unorm16_samples(&samples, request.sample_format),
             },
             Err(error) => ControlProductProbeResult::Error {
                 product,
                 message: format!("{error}"),
             },
         }
+    }
+
+    /// Gate one control product's geometry.
+    ///
+    /// The revision is `max(sample-layout stamp, display-layout revision)`:
+    /// the stamp moves when the rendered sample layout differs from the last
+    /// one answered for this product (compared by value — see
+    /// [`super::control_geometry_stamps`]), and the display layout's own
+    /// revision moves with its mapping and render size. Both are stamped at
+    /// the frame revision that saw the change, so either moving moves the max.
+    ///
+    /// A layout over the link's budget is still an answer: the bundle goes out
+    /// with [`GeometryDisplayLayout::Unsupported`] under the same revision,
+    /// and the client's `IfChanged` then keeps it at `Unchanged` instead of
+    /// asking for — and this engine measuring — the same refusal every read.
+    fn control_product_geometry(
+        &mut self,
+        product: ControlProduct,
+        read: RevisionGateRead,
+        sample_layout: ControlLayout,
+        display_layout: Option<ControlDisplayLayout>,
+    ) -> RevisionGateResult<ControlProductGeometry> {
+        let known_revision = match read {
+            RevisionGateRead::None => return RevisionGateResult::Omitted,
+            RevisionGateRead::Always => None,
+            RevisionGateRead::IfChanged { known_revision } => known_revision,
+        };
+        let sample_revision = self.stamp_control_sample_layout(product, &sample_layout);
+        let revision = display_layout.as_ref().map_or(sample_revision, |layout| {
+            sample_revision.max(layout.revision())
+        });
+        if known_revision == Some(revision) {
+            return RevisionGateResult::Unchanged { revision };
+        }
+        let display_layout = match display_layout {
+            None => GeometryDisplayLayout::Unsupported {
+                reason: String::from("control product does not expose display layout"),
+            },
+            Some(layout) => match display_layout_over_budget(&layout, self.display_layout_budget())
+            {
+                Some(reason) => GeometryDisplayLayout::Unsupported { reason },
+                None => GeometryDisplayLayout::Layout(layout),
+            },
+        };
+        RevisionGateResult::Changed(ControlProductGeometry {
+            revision,
+            sample_layout,
+            display_layout,
+        })
     }
 
     /// Read the frames every output node has ALREADY published.
@@ -437,17 +583,19 @@ impl Engine {
                     sample_layout: node.runtime_output_sample_layout().cloned(),
                     fragments: node.runtime_output_fragments().to_vec(),
                     placement_revision: node.runtime_output_placement_revision(),
+                    sample_layout_revision: node.runtime_output_sample_layout_revision(),
                 })
             })
             .collect();
 
         // The frame-probe HEADER is one unchunked event carrying EVERY
         // entry's display layout, so the budget that matters here is the
-        // header TOTAL: three layouts that each pass the per-layout gate
-        // can still jointly blow the frame and wedge the read stream. Track
-        // the running layout bytes and degrade later entries to
-        // `Unsupported` once the total is spent — their frames still flow,
-        // only the geometry of the excess outputs is refused.
+        // header TOTAL: three layouts that each pass the per-layout check can
+        // still jointly blow the frame and wedge the read stream. Track the
+        // running layout bytes and DEFER later entries' geometry once the
+        // total is spent (`Omitted`: their frames still flow, and the client
+        // asks again next read — when the entries that did fit answer
+        // `Unchanged` and the deferred one has the frame to itself).
         let mut layout_bytes_spent = 0usize;
         let mut outputs = Vec::with_capacity(candidates.len());
         for candidate in candidates {
@@ -465,54 +613,135 @@ impl Engine {
                 continue;
             };
             let revision = buffer.changed_at();
-            let bytes = buffer.value().bytes().into_owned();
-
-            let display_layout = if let ControlDisplayLayoutRead::None = request.display_layout {
-                ControlDisplayLayoutProbeResult::Omitted
-            } else {
-                let answer =
-                    self.output_frame_display_layout(registry, &candidate, request.display_layout);
-                match (self.display_layout_budget(), answer) {
-                    (Some(budget), ControlDisplayLayoutProbeResult::Layout(layout)) => {
-                        let layout_len = lpc_wire::ser_write_json_len(&layout);
-                        if layout_bytes_spent + layout_len > budget {
-                            ControlDisplayLayoutProbeResult::Unsupported {
-                                reason: format!(
-                                    "the frame header already carries {layout_bytes_spent} \
-                                     bytes of display layouts; this one ({layout_len} bytes) \
-                                     would push the single header event past the link's \
-                                     {budget}-byte budget"
-                                ),
-                            }
-                        } else {
-                            layout_bytes_spent += layout_len;
-                            ControlDisplayLayoutProbeResult::Layout(layout)
-                        }
-                    }
-                    (_, answer) => answer,
-                }
+            let published = match sample_format {
+                RuntimeChannelSampleFormat::U8 => WireChannelSampleFormat::U8,
+                RuntimeChannelSampleFormat::U16 => WireChannelSampleFormat::U16,
             };
+            // The client's precision, never wider than what was published:
+            // a `U16` buffer asked for `U8` is rounded to nearest; anything
+            // else travels verbatim. No ask, no bytes.
+            let (sample_format, bytes) = match (request.samples, published) {
+                (None, _) => (None, Vec::new()),
+                (Some(WireChannelSampleFormat::U8), WireChannelSampleFormat::U16) => (
+                    Some(WireChannelSampleFormat::U8),
+                    encode_unorm16_le_bytes(&buffer.value().bytes(), WireChannelSampleFormat::U8),
+                ),
+                (Some(_), published) => (Some(published), buffer.value().bytes().into_owned()),
+            };
+
+            let geometry = self.output_frame_geometry(
+                registry,
+                &candidate,
+                &request.geometry,
+                &mut layout_bytes_spent,
+            );
 
             outputs.push(OutputFrameEntry {
                 node: candidate.node,
                 revision,
                 channels,
-                sample_format: match sample_format {
-                    RuntimeChannelSampleFormat::U8 => WireChannelSampleFormat::U8,
-                    RuntimeChannelSampleFormat::U16 => WireChannelSampleFormat::U16,
-                },
-                sample_layout: candidate.sample_layout.unwrap_or_default(),
-                display_layout,
-                placements: candidate
-                    .fragments
-                    .iter()
-                    .map(wire_output_placement)
-                    .collect(),
+                sample_format,
+                geometry,
                 bytes,
             });
         }
 
         OutputFrameProbeResult::Frame { outputs }
+    }
+
+    /// Gate one published output's geometry: its sample layout, its merged
+    /// display layout and its placements, under one revision.
+    ///
+    /// The revision is the max of three stamps, each taken at the tick (or
+    /// probe) that saw its piece CHANGE: the output's sample-layout stamp,
+    /// its placement stamp (a patch re-cutting the wire), and every
+    /// producer's display-layout revision (a mapping or render-size change).
+    /// Any piece moving therefore moves the max. The buffer's per-tick
+    /// `revision` is never part of it.
+    ///
+    /// The producers are asked for their layouts every read — their revisions
+    /// are part of the answer — but merging, measuring and sending happen
+    /// only when the client's revision is stale.
+    ///
+    /// An output that has not planned its placements yet answers `Omitted`,
+    /// not a refusal: "nothing to say this tick", and the client keeps asking
+    /// until there is. Its geometry would otherwise be cached as a refusal
+    /// under a revision that only the first plan moves — honest, but a card
+    /// would sit on "no layout" for exactly the frames that matter most.
+    fn output_frame_geometry(
+        &mut self,
+        registry: &ProjectRegistry,
+        candidate: &PublishedOutputCandidate,
+        read: &OutputFrameGeometryRead,
+        layout_bytes_spent: &mut usize,
+    ) -> RevisionGateResult<OutputFrameGeometry> {
+        if matches!(read, OutputFrameGeometryRead::None) || candidate.fragments.is_empty() {
+            return RevisionGateResult::Omitted;
+        }
+        let parts = self.output_frame_display_parts(registry, candidate);
+        let revision = parts
+            .revision
+            .max(candidate.placement_revision)
+            .max(candidate.sample_layout_revision);
+        if read.holds(candidate.node, revision) {
+            return RevisionGateResult::Unchanged { revision };
+        }
+
+        let display_layout = self.output_frame_display_layout(candidate, parts);
+        if let GeometryDisplayLayout::Layout(layout) = &display_layout
+            && let Some(budget) = self.display_layout_budget()
+        {
+            let layout_len = lpc_wire::ser_write_json_len(layout);
+            if *layout_bytes_spent + layout_len > budget {
+                return RevisionGateResult::Omitted;
+            }
+            *layout_bytes_spent += layout_len;
+        }
+
+        RevisionGateResult::Changed(OutputFrameGeometry {
+            revision,
+            sample_layout: candidate.sample_layout.clone().unwrap_or_default(),
+            display_layout,
+            placements: candidate
+                .fragments
+                .iter()
+                .map(wire_output_placement)
+                .collect(),
+        })
+    }
+
+    /// Ask every producer on one output for its display layout — once per
+    /// PRODUCT, not per fragment: a patched producer is cut into several runs
+    /// and every one of them wants the same geometry.
+    fn output_frame_display_parts(
+        &mut self,
+        registry: &ProjectRegistry,
+        candidate: &PublishedOutputCandidate,
+    ) -> OutputDisplayParts {
+        let mut probed: Vec<(ControlProduct, Result<ControlLayout2d, String>)> = Vec::new();
+        let mut revision = candidate.placement_revision;
+        for fragment in &candidate.fragments {
+            if probed
+                .iter()
+                .any(|(product, _)| *product == fragment.product)
+            {
+                continue;
+            }
+            let answer = match self.control_display_layout_probe(registry, fragment.product) {
+                Ok(Some(ControlDisplayLayout::Layout2d(layout))) => {
+                    revision = revision.max(layout.revision);
+                    Ok(layout)
+                }
+                Ok(None) => Err(format!(
+                    "node {:?} exposes no display layout for control output {}",
+                    fragment.product.node(),
+                    fragment.product.output()
+                )),
+                Err(error) => Err(format!("{error}")),
+            };
+            probed.push((fragment.product, answer));
+        }
+        OutputDisplayParts { probed, revision }
     }
 
     /// Where to draw the lamps of one published frame.
@@ -521,75 +750,49 @@ impl Engine {
     /// states its lamps in its OWN numbering (`sample_start = channel * 3`),
     /// and the fragment that placed it is the only thing that knows where
     /// those samples ended up on the wire — after an authored offset, after a
-    /// reversal, after however many other strands share the run. So: ask each
-    /// producer once, rebase every fragment's share through the placement, and
-    /// merge. A client can then index the frame's bytes by each lamp's
-    /// `sample_start` and get that lamp's own color, which is the contract
-    /// `OutputFrameEntry` already claims.
+    /// reversal, after however many other strands share the run. So: rebase
+    /// every fragment's share of its producer's layout through the placement,
+    /// and merge. A client can then index the frame's bytes by each lamp's
+    /// `sample_start` and get that lamp's own color.
     ///
     /// A producer whose layout the engine declines (over the wire budget at
     /// dome scale, or a kind with no geometry at all) simply contributes no
     /// lamps; the rest of the wire still draws. Only when NOTHING answers does
-    /// the whole read report `Unsupported`, carrying the first refusal's reason
-    /// so the client can say why.
-    ///
-    /// `Unsupported` is a PERMANENT answer, and every client treats it as one:
-    /// both feeds stop asking for geometry on the spot and stand a local
-    /// synthesis up in its place (see `card_feed.rs` and
-    /// `preview_output_feed.rs`), because re-asking would make a dome-scale
-    /// board rebuild and measure a layout it cannot send, every pull. So an
-    /// output that has simply not planned its placements yet must NOT answer
-    /// with it: "nothing to say this tick" is `Omitted`, and the client keeps
-    /// asking until there is.
+    /// the bundle carry `Unsupported`, with the first refusal's reason so the
+    /// client can say why — cached by the client under the bundle's revision,
+    /// so it is not rebuilt and re-measured every read.
     fn output_frame_display_layout(
-        &mut self,
-        registry: &ProjectRegistry,
+        &self,
         candidate: &PublishedOutputCandidate,
-        read: ControlDisplayLayoutRead,
-    ) -> ControlDisplayLayoutProbeResult {
-        if candidate.fragments.is_empty() {
-            return ControlDisplayLayoutProbeResult::Omitted;
-        }
-
-        // One probe per PRODUCT, not per fragment: a patched producer is cut
-        // into several runs and every one of them wants the same geometry.
-        let mut probed: Vec<(ControlProduct, Option<ControlLayout2d>)> = Vec::new();
+        parts: OutputDisplayParts,
+    ) -> GeometryDisplayLayout {
+        let budget = self.display_layout_budget();
         let mut refusal: Option<String> = None;
-        for fragment in &candidate.fragments {
-            if probed
-                .iter()
-                .any(|(product, _)| *product == fragment.product)
-            {
-                continue;
-            }
-            // ALWAYS, never the caller's gate: the gate belongs to the merged
-            // answer, and an `Unchanged` on one part would silently drop that
-            // producer's lamps out of the composite.
-            let answer = match self.control_display_layout_probe(
-                registry,
-                fragment.product,
-                ControlDisplayLayoutRead::Always,
-            ) {
-                Ok(ControlDisplayLayoutProbeResult::Layout(ControlDisplayLayout::Layout2d(
-                    layout,
-                ))) => Some(layout),
-                Ok(ControlDisplayLayoutProbeResult::Unsupported { reason }) => {
+        let mut usable: Vec<(ControlProduct, ControlLayout2d)> = Vec::new();
+        for (product, answer) in parts.probed {
+            match answer {
+                Ok(layout) => {
+                    let layout = ControlDisplayLayout::Layout2d(layout);
+                    match display_layout_over_budget(&layout, budget) {
+                        Some(reason) => {
+                            refusal.get_or_insert(reason);
+                        }
+                        None => {
+                            let ControlDisplayLayout::Layout2d(layout) = layout;
+                            usable.push((product, layout));
+                        }
+                    }
+                }
+                Err(reason) => {
                     refusal.get_or_insert(reason);
-                    None
                 }
-                Ok(_) => None,
-                Err(error) => {
-                    refusal.get_or_insert_with(|| format!("{error}"));
-                    None
-                }
-            };
-            probed.push((fragment.product, answer));
+            }
         }
 
         let mut revision = candidate.placement_revision;
         let mut placed = Vec::with_capacity(candidate.fragments.len());
         for fragment in &candidate.fragments {
-            let Some((_, Some(layout))) = probed
+            let Some((_, layout)) = usable
                 .iter()
                 .find(|(product, _)| *product == fragment.product)
             else {
@@ -599,18 +802,19 @@ impl Engine {
             placed.push((*fragment, layout.clone()));
         }
         if placed.is_empty() {
-            return ControlDisplayLayoutProbeResult::Unsupported {
+            return GeometryDisplayLayout::Unsupported {
                 reason: refusal.unwrap_or_else(|| {
                     String::from("no producer on this output exposes a display layout")
                 }),
             };
         }
 
-        gate_display_layout(
-            ControlDisplayLayout::Layout2d(merge_fragment_display_layouts(&placed, revision)),
-            read,
-            self.display_layout_budget(),
-        )
+        let merged =
+            ControlDisplayLayout::Layout2d(merge_fragment_display_layouts(&placed, revision));
+        match display_layout_over_budget(&merged, budget) {
+            Some(reason) => GeometryDisplayLayout::Unsupported { reason },
+            None => GeometryDisplayLayout::Layout(merged),
+        }
     }
 
     /// List the live phasors riding one clock's timebase (parent D10).
@@ -700,14 +904,6 @@ fn wire_output_placement(fragment: &OutputFragment) -> lpc_wire::WireOutputPlace
         lamps: fragment.len_samples / SAMPLES_PER_LAMP,
         reversed: fragment.reversed,
     }
-}
-
-fn control_samples_u16_to_bytes(samples: &[u16]) -> Vec<u8> {
-    let mut bytes = Vec::with_capacity(samples.len() * 2);
-    for sample in samples {
-        bytes.extend_from_slice(&sample.to_le_bytes());
-    }
-    bytes
 }
 
 fn rgba16_linear_to_srgb8(bytes: &[u8]) -> alloc::vec::Vec<u8> {
@@ -943,16 +1139,7 @@ mod tests {
             .build();
         h.tick(10).expect("tick");
 
-        let result = h.engine.read_project_binding_graph_probe(
-            &h.registry,
-            BindingGraphProbeRequest {
-                include_values: true,
-            },
-        );
-
-        let BindingGraphProbeResult::Graph(graph) = result else {
-            panic!("expected graph result");
-        };
+        let (graph, values) = h.binding_graph(true);
         assert_eq!(graph.bindings.len(), 2);
         assert_eq!(graph.channels.len(), 1);
 
@@ -983,9 +1170,28 @@ mod tests {
             WireBindingEndpoint::Bus { channel, .. } if channel == "video"
         ));
 
-        let value = channel.value.as_ref().expect("value requested");
-        assert_eq!(value.error, None);
-        assert_eq!(value.value, Some(LpValue::F32(0.5)));
+        assert_eq!(values, [WireBusChannelValue::Value(LpValue::F32(0.5))]);
+    }
+
+    /// A channel with consumers and no writer anywhere reads as the bare
+    /// `no_provider` tag, not the resolver's error rendered as a string.
+    #[test]
+    fn a_channel_nothing_writes_reads_as_no_provider() {
+        let mut h = EngineTestBuilder::new()
+            .fixture("reader")
+            .bind_demand_input("reader", bus("video"))
+            .demand_root("reader")
+            .build();
+        let _ = h.tick(10);
+
+        let (graph, values) = h.binding_graph(true);
+        let channel = graph
+            .channels
+            .iter()
+            .position(|channel| channel.name == "video")
+            .expect("the consumed channel lists");
+        assert!(graph.channels[channel].providers.is_empty());
+        assert_eq!(values[channel], WireBusChannelValue::NoProvider);
     }
 
     #[test]
@@ -1004,19 +1210,10 @@ mod tests {
             .build();
         h.tick(10).expect("tick");
 
-        let result = h.engine.read_project_binding_graph_probe(
-            &h.registry,
-            BindingGraphProbeRequest {
-                include_values: false,
-            },
-        );
-
-        let BindingGraphProbeResult::Graph(graph) = result else {
-            panic!("expected graph result");
-        };
+        let (graph, values) = h.binding_graph(false);
         let channel = &graph.channels[0];
         assert_eq!(channel.providers.len(), 2);
-        assert!(channel.value.is_none());
+        assert!(values.is_empty(), "no values were asked for");
 
         let first = &graph.bindings[channel.providers[0] as usize];
         let second = &graph.bindings[channel.providers[1] as usize];
@@ -1028,5 +1225,112 @@ mod tests {
             second.priority,
             BindingPriority::default_fallback().as_i32()
         );
+    }
+
+    /// A steady read passing back the structure revision it holds hears
+    /// `unchanged` and gets the values alone — keyed to that revision.
+    #[test]
+    fn a_steady_binding_graph_read_is_unchanged_plus_values() {
+        let mut h = EngineTestBuilder::new()
+            .shader("writer", output("outputs[0]", 0.5))
+            .bind_bus("video", produced_slot("writer", "outputs[0]"))
+            .fixture("reader")
+            .bind_demand_input("reader", bus("video"))
+            .demand_root("reader")
+            .build();
+        h.tick(10).expect("tick");
+        let (graph, _) = h.binding_graph(true);
+
+        h.tick(10).expect("tick");
+        let read = gated_binding_graph_read(
+            &mut h,
+            RevisionGateRead::IfChanged {
+                known_revision: Some(graph.revision),
+            },
+        );
+        assert_eq!(
+            read.structure,
+            RevisionGateResult::Unchanged {
+                revision: graph.revision
+            },
+            "ticking moves values, never the structure"
+        );
+        assert_eq!(
+            read.values,
+            Some(WireBusChannelValues {
+                structure_revision: graph.revision,
+                values: vec![WireBusChannelValue::Value(LpValue::F32(0.5))],
+            })
+        );
+
+        // A client that holds nothing, or a stale revision, gets it all.
+        for known_revision in [None, Some(graph.revision.next())] {
+            let read =
+                gated_binding_graph_read(&mut h, RevisionGateRead::IfChanged { known_revision });
+            assert_eq!(read.structure, RevisionGateResult::Changed(graph.clone()));
+        }
+        assert_eq!(
+            gated_binding_graph_read(&mut h, RevisionGateRead::None).structure,
+            RevisionGateResult::Omitted
+        );
+    }
+
+    /// Registering a binding, and dropping them, each move the structure
+    /// revision — even when the engine revision did not move in between.
+    #[test]
+    fn adding_or_removing_a_binding_moves_the_structure_revision() {
+        let mut h = EngineTestBuilder::new()
+            .shader("writer", output("outputs[0]", 0.5))
+            .bind_bus("video", produced_slot("writer", "outputs[0]"))
+            .fixture("reader")
+            .build();
+        h.tick(10).expect("tick");
+        let (before, _) = h.binding_graph(false);
+
+        let reader = h.node("reader");
+        h.engine
+            .add_binding(
+                crate::dataflow::binding::BindingDraft {
+                    source: BindingSource::BusChannel(ChannelName(String::from("video"))),
+                    target: BindingTarget::ConsumedSlot {
+                        node: reader,
+                        slot: super::super::engine::default_demand_input_path(),
+                    },
+                    priority: BindingPriority::new(0),
+                    kind: Kind::Color,
+                    owner: reader,
+                },
+                h.engine.revision(),
+            )
+            .expect("add binding");
+        let (added, _) = h.binding_graph(false);
+        assert_eq!(added.bindings.len(), before.bindings.len() + 1);
+        assert!(
+            added.revision > before.revision,
+            "a new binding is a new structure: {:?} -> {:?}",
+            before.revision,
+            added.revision
+        );
+
+        h.engine.clear_bindings(h.engine.revision());
+        let (cleared, _) = h.binding_graph(false);
+        assert!(cleared.bindings.is_empty());
+        assert!(cleared.revision > added.revision);
+    }
+
+    fn gated_binding_graph_read(
+        h: &mut crate::engine::test_support::EngineTestHarness,
+        structure: RevisionGateRead,
+    ) -> WireBindingGraphRead {
+        let BindingGraphProbeResult::Graph(read) = h.engine.read_project_binding_graph_probe(
+            &h.registry,
+            BindingGraphProbeRequest {
+                structure,
+                include_values: true,
+            },
+        ) else {
+            panic!("expected a graph answer");
+        };
+        read
     }
 }
