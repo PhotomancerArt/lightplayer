@@ -574,7 +574,9 @@ pub(crate) fn DeviceRosterCard(
                                 trigger: rsx! { "Bluetooth" },
                                 trigger_class: LINE_VERB_CLASS.to_string(),
                                 trigger_open_class: LINE_VERB_CLASS.to_string(),
-                                super::device_access_panel::DeviceAccessPanel { panel, on_access }
+                                crate::base::DetailSection {
+                                    super::device_access_panel::DeviceAccessPanel { panel, on_access }
+                                }
                             }
                         }
                     }

@@ -202,8 +202,7 @@ fn ble_project_bluetooth_list() -> Element {
     }
 }
 
-const PANEL_FRAME: &str =
-    "tw:m-3 tw:w-fit tw:rounded-md tw:border tw:border-border-strong tw:bg-card-raised";
+const PANEL_FRAME: &str = "tw:m-3 tw:w-[320px] tw:max-w-[calc(100vw-24px)] tw:rounded-md tw:border tw:border-border-strong tw:bg-card-raised tw:px-3";
 
 fn secret(label: &str, tier: AccessTier) -> UiAccessSecret {
     UiAccessSecret {

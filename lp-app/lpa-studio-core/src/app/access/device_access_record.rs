@@ -2,11 +2,12 @@
 //!
 //! The device store is **write-only** by design: no link, at any tier, can
 //! read it back (M3's fs gate). So Studio keeps its own record of the file it
-//! last wrote to each device — keyed by the device's registry key (its uid,
-//! or `mac:…` before it has one) — and every change rewrites the WHOLE file
-//! from that record. The panel lists what is here, and says plainly that the
-//! device may hold others written from another browser; saving from here
-//! replaces them, which is the recovery path (USB is trusted).
+//! last wrote to each device — keyed by the board's base MAC (`mac:…`), the
+//! one identity it keeps from first hello to last, else its uid — and every
+//! change rewrites the WHOLE file from that record. The panel lists what is
+//! here, and says plainly that the device may hold others written from
+//! another browser; saving from here replaces them, which is the recovery
+//! path (USB is trusted).
 //!
 //! Stored in `localStorage` (`lp.ble.device-access.v1`) by the web edge. It
 //! carries each secret's derived key `K` — login-equivalent, like the
@@ -17,7 +18,7 @@ use std::collections::BTreeMap;
 use lpc_access::{DeviceAccessFile, MAX_SECRETS_PER_FILE, SALT_BYTES, SecretEntry, Tier};
 use serde::{Deserialize, Serialize};
 
-/// Every device's record, by registry key.
+/// Every device's record, by base MAC (`mac:…`), else uid.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct DeviceAccessRecords {

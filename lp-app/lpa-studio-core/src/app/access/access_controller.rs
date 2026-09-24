@@ -37,7 +37,7 @@ use super::ui_access_view::{
     UiAccessPanel, UiAccessSecret, UiDeviceAccess, UiLoginPrompt, access_line, prompt_sentence,
 };
 use crate::app::devices::device_effects::{DeviceEffects, DeviceTaskFuture, DeviceTimerFuture};
-use crate::app::devices::device_records::registry_key;
+
 use crate::app::studio::studio_command::StudioCommand;
 use crate::app::studio::studio_view_channel::CommandSender;
 
@@ -371,7 +371,7 @@ impl AccessController {
         let Some(found) = roster.device(device) else {
             return fail(self, "this piece is gone");
         };
-        let Some(key) = registry_key(&found.identity) else {
+        let Some(key) = record_key(&found.identity) else {
             return fail(self, "this piece has not said who it is yet");
         };
         let Some(link) = found
@@ -426,7 +426,7 @@ impl AccessController {
         let now = device.evidence.hello_heard_at();
         if now.is_some() && now != before {
             self.restarts.remove(&device.id);
-            if let Some(key) = registry_key(&device.identity)
+            if let Some(key) = record_key(&device.identity)
                 && self.records.note_restarted(&key)
             {
                 self.persist_devices();
@@ -502,7 +502,7 @@ impl AccessController {
         if over_bluetooth && self.granted_tier(device.id) != Some(Tier::Edit) {
             return None;
         }
-        let key = registry_key(&device.identity)?;
+        let key = record_key(&device.identity)?;
         let record = self.records.get(&key);
         let (writing, error) = match self.writes.get(&device.id) {
             Some(WriteStatus::Writing) => (true, None),
@@ -562,6 +562,22 @@ impl AccessController {
 pub enum AccessFollowUp {
     /// Restart this device (the card's Reset, a device-model action).
     Restart(DeviceId),
+}
+
+/// The key a device's store record is kept under: its base MAC when it has
+/// one, else its uid.
+///
+/// NOT the registry key, which is the uid and falls back to the MAC: a board
+/// first seen before it was stamped is `mac:…` in the registry and becomes
+/// `dev…` the moment a uid is stamped on it — which a restart can do — and a
+/// record keyed on the old key would vanish from the panel right after the
+/// restart that turned Bluetooth on (found by the M6 walk). The MAC is the
+/// one identity a board carries from its first hello to its last.
+fn record_key(identity: &lpa_devices::identity::IdentityChain) -> Option<String> {
+    if let Some(mac) = &identity.mac {
+        return Some(format!("mac:{}", mac.0));
+    }
+    identity.uid.as_ref().map(|uid| uid.0.clone())
 }
 
 fn is_bluetooth(device: &Device) -> bool {
@@ -730,6 +746,30 @@ mod tests {
             }
         );
         assert_eq!(board.granted(), Some(Tier::Play));
+    }
+
+    /// The walk's finding: a restart can stamp a uid on a board first seen
+    /// by MAC, and the record must still be found after it.
+    #[test]
+    fn a_record_is_keyed_on_the_mac_a_stamped_uid_does_not_move() {
+        use lpa_devices::identity::{DeviceUid, IdentityChain, MacAddress};
+        let before = IdentityChain {
+            mac: Some(MacAddress("a0:f2:62:87:b4:8c".to_string())),
+            ..Default::default()
+        };
+        let after = IdentityChain {
+            uid: Some(DeviceUid("dev000000daqf6dvvqz".to_string())),
+            ..before.clone()
+        };
+        assert_eq!(record_key(&before), record_key(&after));
+        assert_eq!(
+            record_key(&IdentityChain {
+                uid: Some(DeviceUid("dev1".to_string())),
+                ..Default::default()
+            })
+            .as_deref(),
+            Some("dev1")
+        );
     }
 
     /// A play login cannot write the device store: the refusal is the

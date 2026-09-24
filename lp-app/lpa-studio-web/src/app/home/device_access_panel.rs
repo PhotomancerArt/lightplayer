@@ -42,7 +42,7 @@ pub(crate) fn DeviceAccessPanel(
         move |change: DeviceAccessChange| on_access.call(AccessCommand::Change { device, change });
     let on = panel.ble_enabled == Some(true);
     rsx! {
-        div { class: "tw:grid tw:w-[min(22rem,calc(100vw-2rem))] tw:min-w-0 tw:gap-3 tw:p-3",
+        div { class: "tw:grid tw:min-w-0 tw:gap-3 tw:py-1.5",
             h3 { class: "tw:m-0 tw:text-sm tw:font-bold tw:text-strong-foreground", "Bluetooth" }
             p { class: "tw:m-0 tw:text-sm tw:leading-snug tw:text-muted-foreground", "{state_sentence(&panel)}" }
 
@@ -210,6 +210,7 @@ fn TurnOnForm(
             if default_password.is_some() {
                 p { class: HELP_CLASS, "Your default device password is filled in. Change it for this piece if you like." }
             }
+            p { class: HELP_CLASS, "Its name, and what it can do:" }
             div { class: "tw:flex tw:min-w-0 tw:items-center tw:gap-1.5",
                 NameField { value: label, label: "Name".to_string() }
                 TierChoice { tier }
