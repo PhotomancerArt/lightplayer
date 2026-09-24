@@ -41,6 +41,39 @@ curl -s localhost:$P/serial?n=40                   # the board's console tail
 curl -s localhost:$P/log?n=40                      # page telemetry + server lifecycle
 ```
 
+## A phone (Bluefy on iOS): HTTPS over Tailscale
+
+Web Bluetooth needs a secure context, and `localhost` doesn't reach a phone.
+Expose the lab on the tailnet, on a port other than 443: the perf lab
+(`scripts/emu/lab/`) already owns 443 on the desk.
+
+```bash
+tailscale serve --bg --https=8443 http://127.0.0.1:$P
+# phone: https://<desk>.<tailnet>.ts.net:8443/  → Join → LP-BLE-…
+tailscale serve --https=8443 off              # when done: --bg is a setting, not a process
+```
+
+## Coexistence: BLE beside Wi-Fi/ESP-NOW (`test_ble_coex`)
+
+`test_ble_coex` is `test_ble` plus Wi-Fi/ESP-NOW brought up the way the
+product's radio driver does it (`esp_radio::wifi::new`, channel 11,
+broadcast), with `esp-radio/coex` on. Each board broadcasts a
+sequence-numbered frame at a fixed rate and prints a `[COEX]` line every 2 s,
+with both directions' counters (the peer reports its view inside its frames).
+Loss over a window is Δ`rx_last_seq` − Δ`rx` (peer → this board) and
+Δ`peer_last_seq` − Δ`peer_rx` (this board → peer). Build-time knobs:
+`LP_COEX_BLE=0` (no BLE: the control, and the peer board),
+`LP_COEX_RF_SWITCH=0` (leave the XIAO's RF switch undriven), `LP_COEX_HZ`
+(default 50).
+
+```bash
+cd lp-fw/fw-esp32c6
+LP_COEX_BLE=0 cargo build --target riscv32imac-unknown-none-elf --profile release-esp32 \
+    --no-default-features --features esp32c6,test_ble_coex
+espflash flash --chip esp32c6 --partition-table partitions.csv --flash-size 4mb \
+    --after hard-reset --port <port by MAC> ../../target/riscv32imac-unknown-none-elf/release-esp32/fw-esp32c6
+```
+
 `spikes/ble-lab/scripts/nus-probe.py` does the same checks with `bleak` from a
 terminal. It can't run from an agent shell on macOS: TCC aborts a process
 whose responsible app doesn't declare `NSBluetoothAlwaysUsageDescription`

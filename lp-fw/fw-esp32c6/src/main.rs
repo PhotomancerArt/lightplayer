@@ -167,6 +167,8 @@ mod tests {
     pub mod rmt_rx;
     #[cfg(feature = "test_ble")]
     pub mod test_ble;
+    #[cfg(feature = "test_ble_coex")]
+    pub mod test_ble_coex;
     #[cfg(feature = "test_button")]
     pub mod test_button;
     #[cfg(feature = "test_dither")]
