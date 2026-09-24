@@ -36,6 +36,24 @@ and WiFi later. The PLAYFUL choker is a XIAO C6. None of this has been
 measured on ESP-NOW yet: the evidence is **one A/B on one board, over BLE**.
 Treat the ESP-NOW claim as a strong hypothesis, not a finding.
 
+*Update 2026-09-23/24, M2 Run H (desk sitting, `test_ble_coex` with
+`LP_COEX_BLE=0`, fw `08c6167b3`).* We measured ESP-NOW with the fix and without
+it, on the desk XIAO `A0:F2:62:87:B4:8C`, legs in the order on/off/on/off. The
+peer was a second XIAO, `10:BD:A3:B0:8E:30`, on the same USB hub about 10 cm
+away, sending 50 frames/s each way on channel 11.
+- **Loss did not change measurably.** With the fix: 0.00 / 0.07 / 0.06 %
+  (three 1-minute windows), then 1.37 % (2 min, symmetric, spread evenly). The
+  1.37 % leg was environmental. Without the fix: 0.00 / 0.03 / 0.06 %, then
+  0.05 %.
+- **What the fix does change is received signal: about 20 dB.** `rssi_avg`
+  was 237–240 with the fix and 217–218 without it. Read as a sign-wrapped i8,
+  that is roughly −19 dBm vs −38 dBm; the harness printed RSSI unsigned, now
+  fixed.
+- At 10 cm the link margin hides a 20 dB loss, so the ESP-NOW-loss half of the
+  hypothesis is **untested at a real distance**. A metre-scale run is still
+  owed. The signal difference makes the loss claim more plausible; it does not
+  prove it.
+
 **Fix** — a compiled-in board-quirk table, keyed on the board id of the
 hardware manifest **in effect** (`HwManifest::board_id()`, the compiled-in
 fallback included — and the C6's fallback *is* `seeed/xiao-esp32-c6`). The

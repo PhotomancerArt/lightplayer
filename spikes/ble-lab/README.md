@@ -61,7 +61,12 @@ broadcast), with `esp-radio/coex` on. Each board broadcasts a
 sequence-numbered frame at a fixed rate and prints a `[COEX]` line every 2 s,
 with both directions' counters (the peer reports its view inside its frames).
 Loss over a window is Δ`rx_last_seq` − Δ`rx` (peer → this board) and
-Δ`peer_last_seq` − Δ`peer_rx` (this board → peer). Build-time knobs:
+Δ`peer_last_seq` − Δ`peer_rx` (this board → peer). A sequence up to 1,000
+below the high-water mark counts as `rx_dup`, not as a reboot. The images used
+in M2's sitting (`08c6167b3`) predate that fix: there, a duplicate zeroed `rx`,
+so board → peer is computed per 2 s interval, skipping any interval where a
+counter fell. `rssi_avg`/`peer_rssi` from those images are unsigned bytes
+(237 = −19 dBm). Build-time knobs:
 `LP_COEX_BLE=0` (no BLE: the control, and the peer board),
 `LP_COEX_RF_SWITCH=0` (leave the XIAO's RF switch undriven), `LP_COEX_HZ`
 (default 50).

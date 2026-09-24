@@ -43,6 +43,10 @@ const ESPNOW_CHANNEL: u8 = 11;
 const MAGIC: [u8; 4] = *b"LPCX";
 const FRAME_LEN: usize = 32;
 const REPORT_EVERY: Duration = Duration::from_secs(2);
+/// A sequence this far below the high-water mark is a peer reboot; anything
+/// closer is a duplicate or a reordered frame. A peer that reboots within its
+/// first `REBOOT_GAP` frames reads as duplicates until it passes the old mark.
+const REBOOT_GAP: u32 = 1000;
 
 /// `LP_COEX_BLE=0` → false.
 pub const BLE_ENABLED: bool = !env_is_zero(option_env!("LP_COEX_BLE"));
@@ -118,6 +122,8 @@ struct Stats {
     rx_last_seq: u32,
     /// Sequence resets seen (the peer rebooted).
     rx_resets: u32,
+    /// Duplicate or reordered frames, ignored (not counted in `rx`).
+    rx_dup: u32,
     rssi_sum: i32,
     rssi_n: i32,
     last_rssi: i8,
@@ -145,6 +151,13 @@ impl Stats {
         let word = |i: usize| u32::from_le_bytes([data[i], data[i + 1], data[i + 2], data[i + 3]]);
         let seq = word(4);
         if seq <= self.rx_last_seq {
+            if self.rx_last_seq - seq < REBOOT_GAP {
+                // A duplicate or a reordered frame, not a reboot. Treating
+                // these as a restart zeroed `rx` mid-window (M2 Run G: the
+                // peer's `peer_rx` fell 17289 → 169 with no reboot).
+                self.rx_dup += 1;
+                return;
+            }
             // The peer restarted; start its counters over rather than
             // counting a negative gap.
             self.rx_resets += 1;
@@ -155,9 +168,12 @@ impl Stats {
         self.peer_rx = word(8);
         self.peer_last_seq = word(12);
         self.peer_rssi = data[16] as i8;
+        // `rx_control.rssi` carries the radio's signed byte zero-extended
+        // (M2 printed `rssi_avg=237`, i.e. -19 dBm); re-sign it.
+        let rssi = i32::from(rssi as u8 as i8);
         self.rssi_sum += rssi;
         self.rssi_n += 1;
-        self.last_rssi = rssi.clamp(-128, 127) as i8;
+        self.last_rssi = rssi as i8;
     }
 
     fn report(&mut self, start: Instant) {
@@ -167,13 +183,14 @@ impl Stats {
             0
         };
         println!(
-            "[COEX] t_ms={} tx={} tx_err={} rx={} rx_last_seq={} rx_resets={} rssi_avg={} peer_rx={} peer_last_seq={} peer_rssi={} heap_used={}",
+            "[COEX] t_ms={} tx={} tx_err={} rx={} rx_last_seq={} rx_resets={} rx_dup={} rssi_avg={} peer_rx={} peer_last_seq={} peer_rssi={} heap_used={}",
             start.elapsed().as_millis(),
             self.tx,
             self.tx_err,
             self.rx,
             self.rx_last_seq,
             self.rx_resets,
+            self.rx_dup,
             rssi_avg,
             self.peer_rx,
             self.peer_last_seq,
