@@ -81,6 +81,15 @@ firmware transport that carries the second kind of link.
    a central's own request as-is, and three seconds later reads back and logs
    what was granted (the spike never saw an "updated" event on its own).
 
+6a. **Advertise every 546.25 ms, not every 160 ms.** An advertising event is
+   air time the ESP-NOW receiver loses, and a board with BLE enabled
+   advertises whenever a slot is free — which is its steady state. Desk,
+   2026-09-24 (one 3-minute window each, two XIAOs ~10 cm apart, no central):
+   ESP-NOW RX loss 0.21 % with BLE off, 2.61 % advertising at trouble-host's
+   160 ms default, 0.98 % at 546.25 ms, 0.68 % at 1022.5 ms. 546.25 ms is on
+   Apple's recommended list; what it costs in discovery and reconnect time is
+   not yet measured.
+
 7. **The notify path queues by construction.** trouble-host 0.6's
    `notify(..).await` returns once the value is queued on the host's outbound
    channel (`L2CAP_TX_QUEUE_SIZE`, 8), not when it is sent; the TX runner
