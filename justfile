@@ -3941,6 +3941,14 @@ device-scenario *args:
 walk-no-board *args:
     node scripts/emu/walk-no-board.mjs {{ args }}
 
+# The Bluetooth twin (M5 of the BLE remote-control plan): add over Bluetooth
+# → identify → push → Play → idle → knob, over `?ble=emu` against an emulated
+# C6, and the idle bytes/s a connected Play-mode Studio puts on a `ble:` link.
+# Needs a Studio on this worktree's port, like walk-no-board. Not CI.
+# Proves the transport, the UI and Play — not access enforcement.
+walk-ble-emu *args:
+    node scripts/emu/walk-ble-emu.mjs {{ args }}
+
 # The hardware-validation system: payloads, configurations, transcripts,
 # replay. `just validate list` with no other args; `replay <transcript>
 # --against <transcript|configuration>`; `run <set> --config <name> --port …
