@@ -381,6 +381,14 @@ pub fn App() -> Element {
             controller.set_emu_transport(Rc::new(lpa_studio_core::EmuDeviceTransport::new(
                 Rc::new(lpa_studio_core::BrowserEmuLinkSource::resolving()),
             )));
+            // Bluetooth (M5), installed whether or not this browser HAS Web
+            // Bluetooth: without it the chooser refuses by name and the add
+            // slot explains why (Brave's flag, Bluefy on iPhone), instead of
+            // the verb silently not existing. Nothing connects until a
+            // device is picked, or was granted on an earlier visit.
+            controller.set_ble_transport(Rc::new(lpa_studio_core::BleDeviceTransport::new(
+                Rc::new(lpa_studio_core::BrowserBleSource::new()),
+            )));
         }
         let (actor, handle) = StudioActor::new(controller, make_pull_timer);
         let mut view_rx = handle.view;
@@ -963,6 +971,7 @@ pub fn App() -> Element {
                 // browser's listeners carry no argument. Listener lifetime =
                 // page lifetime (forget).
                 install_serial_hotplug(&startup_bridge.tx);
+                install_ble_hotplug(&startup_bridge.tx);
             }
             #[cfg(not(target_arch = "wasm32"))]
             let _ = &startup_bridge;
@@ -1990,6 +1999,35 @@ fn install_serial_hotplug(tx: &CommandSender) {
         disconnect_tx.send(StudioCommand::DeviceHotplug(DeviceHotplug::Disconnected));
     }) as Box<dyn FnMut()>);
     let installed = lpa_link::providers::browser_serial_esp32::install_serial_events(
+        on_connect.as_ref().unchecked_ref(),
+        on_disconnect.as_ref().unchecked_ref(),
+    );
+    if installed {
+        on_connect.forget();
+        on_disconnect.forget();
+    }
+}
+
+/// The Bluetooth presence edges (M5): the same two re-derivation triggers as
+/// Web Serial's hotplug. `connect` is a session becoming present (a reconnect
+/// that succeeded, a page-load restore); `disconnect` is one dropping —
+/// including a drop only noticed when the page was shown again, which is how
+/// iOS delivers them (docs/defects/2026-09-23-bluefy-hidden-page-does-not-see-ble-drops.md).
+#[cfg(target_arch = "wasm32")]
+fn install_ble_hotplug(tx: &CommandSender) {
+    use lpa_studio_core::app::studio::studio_command::DeviceHotplug;
+    use wasm_bindgen::JsCast;
+    use wasm_bindgen::prelude::Closure;
+
+    let connect_tx = tx.clone();
+    let on_connect = Closure::wrap(Box::new(move || {
+        connect_tx.send(StudioCommand::DeviceHotplug(DeviceHotplug::Connected));
+    }) as Box<dyn FnMut()>);
+    let disconnect_tx = tx.clone();
+    let on_disconnect = Closure::wrap(Box::new(move || {
+        disconnect_tx.send(StudioCommand::DeviceHotplug(DeviceHotplug::Disconnected));
+    }) as Box<dyn FnMut()>);
+    let installed = lpa_link::providers::browser_ble::install_ble_events(
         on_connect.as_ref().unchecked_ref(),
         on_disconnect.as_ref().unchecked_ref(),
     );

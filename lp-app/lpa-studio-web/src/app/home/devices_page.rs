@@ -36,6 +36,7 @@ use lpa_studio_core::{
     device_escape_action_for, split_roster,
 };
 
+use crate::app::home::ble_reach::{BleReach, use_ble_reach};
 use crate::app::home::device_roster_card::{DeviceRosterCard, PendingLinkCard};
 use crate::app::home::play_feed_text::frame_age_label;
 use crate::app::home::target_pick_popover::TargetPickPopover;
@@ -165,8 +166,15 @@ fn AddDeviceCard(
     /// Stories only: mount the target menu open (a capture cannot click).
     #[props(default = false)]
     pick_open: bool,
+    /// Stories only: pin what the Bluetooth half says. Real surfaces ask the
+    /// browser (`use_ble_reach`).
+    #[props(default = None)]
+    ble_reach: Option<BleReach>,
     on_action: EventHandler<UiAction>,
 ) -> Element {
+    let asked = use_ble_reach();
+    let ble = ble_reach.unwrap_or_else(|| asked());
+    let ble_note = ble.note();
     rsx! {
         div { class: "tw:flex tw:min-h-40 tw:flex-col tw:items-center tw:justify-center tw:gap-3 tw:rounded-md tw:border tw:border-dashed tw:border-border-strong tw:bg-transparent tw:px-5 tw:py-6",
             // The invitation is transport-OPEN: connecting is the goal, and
@@ -180,6 +188,29 @@ fn AddDeviceCard(
                 action: DevicesOp::action_for(DeviceAction::AddFromUsb),
                 running: false,
                 on_action,
+            }
+            // The sibling verb the line above anticipated (M5): the same
+            // claim over Bluetooth. Where this browser cannot, the slot says
+            // exactly why and what to do instead — never a verb that fails.
+            if ble.offers_verb() {
+                ActionButton {
+                    action: DevicesOp::action_for(DeviceAction::AddFromBle),
+                    running: false,
+                    variant: ActionButtonVariant::Outline,
+                    on_action,
+                }
+            }
+            if let Some(note) = ble_note {
+                div { class: "tw:grid tw:max-w-64 tw:gap-1 tw:text-center",
+                    p { class: "tw:m-0 tw:text-xs tw:leading-relaxed tw:text-dim-foreground",
+                        "{note.text}"
+                    }
+                    if let Some(copy) = note.copy {
+                        code { class: "tw:select-all tw:[overflow-wrap:anywhere] tw:rounded-sm tw:bg-card-muted tw:px-1.5 tw:py-0.5 tw:font-mono tw:text-[11px] tw:text-strong-foreground",
+                            "{copy}"
+                        }
+                    }
+                }
             }
             span { class: add_slot_or_class(), "or" }
             TargetPickPopover { initially_open: pick_open, on_action }

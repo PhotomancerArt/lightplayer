@@ -128,10 +128,10 @@ use dioxus::prelude::*;
 use lpa_studio_core::{
     DeviceAction, DeviceActivityView, DeviceCardFeedView, DeviceEscape, DeviceFeedOp, DeviceId,
     DeviceLoadedProject, DeviceStatus, DeviceView, DevicesOp, FeedLiveness, FirmwareVerb,
-    PendingLinkView, UiAction, UiExampleCard, UiPackageCard, UiRuntimeBand, UiStatus,
-    device_escape_action_for, device_firmware_line, device_identity_line, device_status_kind,
-    firmware_face_preview_sentence, firmware_verb, pending_escape_action, pending_firmware_line,
-    pending_identity_rows,
+    PendingLinkView, RESET_NEEDS_USB, UiAction, UiExampleCard, UiPackageCard, UiRuntimeBand,
+    UiStatus, blocked_erase_action, device_escape_action_for, device_firmware_line,
+    device_identity_line, device_status_kind, firmware_face_preview_sentence, firmware_verb,
+    pending_escape_action, pending_firmware_line, pending_identity_rows,
 };
 
 use super::device_pick_popover::{
@@ -206,6 +206,10 @@ pub(crate) fn DeviceRosterCard(
     // LightPlayer — one click when its board resolved, the pick once when
     // it did not. `None` while an activity runs (the row is withdrawn).
     let verb = firmware_verb(&card);
+    // A board reached over Bluetooth: the firmware verbs are DRAWN, disabled,
+    // with the reason under them ("Firmware updates need USB") — never
+    // hidden, so the question is answered where it is asked (M5 S6).
+    let firmware_blocked = card.firmware_blocked.clone();
     let offer_flash = matches!(verb, Some(FirmwareVerb::Flash));
     let update_action = verb.as_ref().and_then(|verb| verb.update_action(device));
     // The empty face: a LightPlayer that has REPORTED nothing loaded. A
@@ -421,6 +425,26 @@ pub(crate) fn DeviceRosterCard(
                         }
                     } else if card.activity.is_some() {
                         // Withdrawn at its height while other work runs.
+                    } else if let Some(reason) = firmware_blocked.as_deref() {
+                        if let Some(verb) = verb.as_ref() {
+                            ActionButton {
+                                key: "{\"firmware-blocked\"}",
+                                action: verb.blocked_action(device, reason),
+                                running: false,
+                                variant: ActionButtonVariant::Quiet,
+                                on_action,
+                            }
+                        }
+                        span { class: "tw:min-w-0 tw:flex-1" }
+                        if idle && linked && !offer_flash {
+                            ActionButton {
+                                key: "{\"factory-reset-blocked\"}",
+                                action: blocked_erase_action(device, reason),
+                                running: false,
+                                variant: ActionButtonVariant::Quiet,
+                                on_action,
+                            }
+                        }
                     } else {
                         match verb {
                             // The blank board's face: the chip-filtered
@@ -518,11 +542,17 @@ pub(crate) fn DeviceRosterCard(
                             }
                         }
                     }
-                    // The one device verb that never asks a question.
+                    // The one device verb that never asks a question. It
+                    // pulses the chip's reset lines, which a Bluetooth link
+                    // does not have — so over one it is drawn disabled.
                     if idle && linked {
                         ActionButton {
                             key: "{\"reset-board\"}",
-                            action: DevicesOp::action_for(DeviceAction::ResetBoard { device }),
+                            action: match firmware_blocked.as_deref() {
+                                Some(_) => DevicesOp::action_for(DeviceAction::ResetBoard { device })
+                                    .disabled(RESET_NEEDS_USB),
+                                None => DevicesOp::action_for(DeviceAction::ResetBoard { device }),
+                            },
                             running: false,
                             variant: ActionButtonVariant::Quiet,
                             on_action,

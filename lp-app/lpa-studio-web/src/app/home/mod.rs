@@ -4,6 +4,7 @@
 //! cards they share. One combined gallery page lived here until the
 //! chrome C reorg split it.
 
+pub(crate) mod ble_reach;
 pub(crate) mod brand_hero;
 pub(crate) mod card_footer;
 pub(crate) mod card_thumb;

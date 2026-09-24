@@ -33,6 +33,8 @@ pub use app::agent::{
 pub use app::bus::{
     UiBusChannelPreview, UiBusChannelView, UiBusSiteOrigin, UiBusSiteView, UiBusView,
 };
+#[cfg(all(feature = "browser-ble", target_arch = "wasm32"))]
+pub use app::devices::BrowserBleSource;
 #[cfg(all(feature = "emulator-tab", target_arch = "wasm32"))]
 pub use app::devices::BrowserEmuLinkSource;
 #[cfg(all(feature = "browser-serial-esp32", target_arch = "wasm32"))]
@@ -40,25 +42,28 @@ pub use app::devices::BrowserSerialTransport;
 #[cfg(all(feature = "browser-worker", target_arch = "wasm32"))]
 pub use app::devices::BrowserSimLinkSource;
 pub use app::devices::{
-    Backing, CompletedPush, CompositeDeviceTransport, DEVICE_FEED_PARK_AFTER_FAILURES,
-    DEVICE_FRAME_SNAPSHOT_INTERVAL_SECS, DeviceCardFeedView, DeviceEffectCall, DeviceEffectFacts,
-    DeviceEffectProgress, DeviceEffects, DeviceFace, DeviceFeedOp, DeviceFrameFeed,
-    DeviceFrameFeeds, DeviceIdentityFirmware, DeviceIdentityLine, DevicePushOp, DeviceRoster,
-    DeviceRosterView, DeviceTaskFuture, DeviceTimerFuture, DeviceTransport, DeviceTransportFuture,
-    DevicesOp, EMU_TRANSPORT, EmuBacking, EmuDeviceTransport, EmuLinkSource, EmuRuntimeControl,
-    EmuSession, FeedLiveness, FirmwareVerb, FlashBoardChoice, FlashOffer, GrantedLink, JournalLine,
-    LensLineTap, LensTapEvent, NewSimRecord, PushOffer, PushPayload, PushSource, PushSourceChoice,
-    PushSourceGroup, RememberedView, RosterSplit, RuntimeKind, SIM_TRANSPORT, SimBacking,
-    SimCreateOp, SimDeviceTransport, SimLinkSource, SimRecord, SimRuntimeControl, SimSession,
-    SimTier, StagedPush, TargetChoice, TargetGroup, TargetOffer, TargetScope, UiRuntimeBand,
-    backing_for, delete_sim_record, device_card_feed_view, device_card_feed_views, device_chip,
-    device_escape_action, device_escape_action_for, device_firmware_line, device_identity_line,
-    device_status_kind, emu_endpoint, emu_link_info, emu_offered_for, feed_liveness,
-    firmware_face_preview_sentence, firmware_verb, first_bundled_example_id, flash_offer,
-    flash_offer_for, mint_sim_identity, new_sim_record, pending_escape_action,
-    pending_firmware_line, pending_identity_rows, push_offer, read_sim_record, reflash_choice,
-    sim_device_name, sim_endpoint, sim_link_info, split_roster, target_offer,
-    transport_label_for_endpoint, uid_from_emu_endpoint, uid_from_sim_endpoint, write_sim_record,
+    BLE_ENDPOINT_PREFIX, Backing, BleDeviceTransport, BleLinkSource, CompletedPush,
+    CompositeDeviceTransport, DEVICE_FEED_PARK_AFTER_FAILURES, DEVICE_FRAME_SNAPSHOT_INTERVAL_SECS,
+    DeviceCardFeedView, DeviceEffectCall, DeviceEffectFacts, DeviceEffectProgress, DeviceEffects,
+    DeviceFace, DeviceFeedOp, DeviceFrameFeed, DeviceFrameFeeds, DeviceIdentityFirmware,
+    DeviceIdentityLine, DevicePushOp, DeviceRoster, DeviceRosterView, DeviceTaskFuture,
+    DeviceTimerFuture, DeviceTransport, DeviceTransportFuture, DevicesOp, EMU_TRANSPORT,
+    EmuBacking, EmuDeviceTransport, EmuLinkSource, EmuRuntimeControl, EmuSession, FeedLiveness,
+    FirmwareVerb, FlashBoardChoice, FlashOffer, GrantedLink, JournalLine, LensLineTap,
+    LensTapEvent, NewSimRecord, PushOffer, PushPayload, PushSource, PushSourceChoice,
+    PushSourceGroup, RESET_NEEDS_USB, RememberedView, RosterSplit, RuntimeKind, SIM_TRANSPORT,
+    SimBacking, SimCreateOp, SimDeviceTransport, SimLinkSource, SimRecord, SimRuntimeControl,
+    SimSession, SimTier, StagedPush, TargetChoice, TargetGroup, TargetOffer, TargetScope,
+    UiRuntimeBand, backing_for, ble_endpoint, ble_link_info, blocked_erase_action,
+    delete_sim_record, device_card_feed_view, device_card_feed_views, device_chip,
+    device_escape_action, device_escape_action_for, device_firmware_line,
+    device_id_from_ble_endpoint, device_identity_line, device_status_kind, emu_endpoint,
+    emu_link_info, emu_offered_for, feed_liveness, firmware_face_preview_sentence, firmware_verb,
+    first_bundled_example_id, flash_offer, flash_offer_for, mint_sim_identity, new_sim_record,
+    pending_escape_action, pending_firmware_line, pending_identity_rows, push_offer,
+    read_sim_record, reflash_choice, sim_device_name, sim_endpoint, sim_link_info, split_roster,
+    target_offer, transport_label_for_endpoint, uid_from_emu_endpoint, uid_from_sim_endpoint,
+    write_sim_record,
 };
 pub use app::docs_host::DocsSimHost;
 // The project's declared hardware (D41): the web shell's Hardware row and

@@ -160,6 +160,18 @@ pub fn device_id_from_ble_endpoint(endpoint: &str) -> Option<&str> {
     endpoint.strip_prefix(BLE_ENDPOINT_PREFIX)
 }
 
+/// The [`LinkInfo`] a Bluetooth device's link wears: its advertised name as
+/// the label, `ble:<device id>` as the endpoint, and no USB facts — identity
+/// is the hello's base MAC, as on every other transport.
+pub fn ble_link_info(device_id: &str, name: &str) -> LinkInfo {
+    LinkInfo {
+        label: name.to_string(),
+        endpoint: ble_endpoint(device_id),
+        usb: None,
+        serial_number: None,
+    }
+}
+
 /// `/device-sims/<uid>.json`.
 pub fn sim_record_path(uid: &str) -> String {
     format!("{DEVICE_SIMS_DIR}/{uid}.json")

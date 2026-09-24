@@ -135,6 +135,9 @@ pub struct StudioController {
     /// an emu on and off, and asking it how fast it is running, are not part
     /// of the `DeviceTransport` vocabulary and must not become part of it.
     emu_transport: Option<Rc<crate::EmuDeviceTransport>>,
+    /// The transport that reaches BLUETOOTH devices (M5), when this build
+    /// has one. `dyn`-free for symmetry with the other two halves.
+    ble_transport: Option<Rc<crate::BleDeviceTransport>>,
     /// The `/device-sims/<uid>.json` sidecars, read off the library
     /// snapshot at settle. The sole "this device is a runtime" fact — for
     /// BOTH kinds, keyed by uid, with the sidecar's own `kind` saying
@@ -388,6 +391,7 @@ impl StudioController {
             serial_transport: None,
             sim_transport: None,
             emu_transport: None,
+            ble_transport: None,
             device_sims: std::collections::BTreeMap::new(),
             pool: RuntimePool::new(),
             project: ProjectController::new(),
@@ -545,6 +549,18 @@ impl StudioController {
         self.install_device_transport();
     }
 
+    /// Install the transport that serves BLUETOOTH devices (M5). Install
+    /// before the actor takes ownership, beside the others.
+    ///
+    /// A Studio build installs it even on a browser without Web Bluetooth:
+    /// the chooser then refuses with the reason, and the Add verb's copy
+    /// explains it (Brave's flag, Safari → Bluefy), instead of the verb
+    /// silently not existing.
+    pub fn set_ble_transport(&mut self, transport: Rc<crate::BleDeviceTransport>) {
+        self.ble_transport = Some(transport);
+        self.install_device_transport();
+    }
+
     /// (Re)install whichever transport this build's halves add up to, and
     /// arm the first sweep: a page that CAN see devices should show what it
     /// already has, without the user asking twice.
@@ -558,6 +574,12 @@ impl StudioController {
                 let composite = match &self.emu_transport {
                     Some(emu) => {
                         composite.with_emu(Rc::clone(emu) as Rc<dyn crate::DeviceTransport>)
+                    }
+                    None => composite,
+                };
+                let composite = match &self.ble_transport {
+                    Some(ble) => {
+                        composite.with_ble(Rc::clone(ble) as Rc<dyn crate::DeviceTransport>)
                     }
                     None => composite,
                 };
