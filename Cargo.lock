@@ -5859,6 +5859,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "lp-json-pack"
+version = "40.0.0"
+dependencies = [
+ "ryu-js",
+]
+
+[[package]]
 name = "lp-perf"
 version = "40.0.0"
 dependencies = [

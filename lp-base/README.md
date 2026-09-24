@@ -10,6 +10,9 @@ Inhabitants:
 - `lp-perf` — perf-event tracing macros (cfg-gated sinks).
 - `lp-collection` — embedded/low-memory-friendly collections.
 - `lpfs` — filesystem abstraction (`LpFs` trait + backends).
+- `lp-json-pack` — JSON Pack: a compact binary form of JSON that decodes
+  back to byte-identical JSON text (no_std, no alloc, injected dictionary),
+  plus the `0x00 'P' COBS 0x00` framing and frame scanner the wire uses.
 - `lp-recovery` — crash-recovery bookkeeping: persistent breadcrumb
   region, recovery frame stack, blame ledger. See
   `docs/adr/2026-07-04-crash-recovery-model.md`.
