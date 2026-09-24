@@ -2458,7 +2458,7 @@ clippy-fw-esp32c6-harnesses: install-rv32-target
     # radio capability alone, test_ble the radio plus the BLE host, and
     # test_f32_softfloat the compiler alone (plus `float-f32`, which no other
     # configuration in this crate turns on).
-    for feature in test_espnow test_ble test_f32_softfloat; do
+    for feature in test_espnow test_ble test_ble_coex test_f32_softfloat; do
         echo "==> fw-esp32c6 harness: $feature (--no-default-features)"
         cargo clippy --target {{ rv32_target }} --profile {{ fw_esp32c6_profile }} \
             --no-default-features --features "$feature,esp32c6" -- --no-deps -D warnings
