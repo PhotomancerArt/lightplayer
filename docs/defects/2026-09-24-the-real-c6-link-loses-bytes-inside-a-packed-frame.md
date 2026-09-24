@@ -7,6 +7,7 @@ related:
   - docs/defects/2026-09-13-the-s3-link-drops-the-io-tasks-next-chunk-on-a-stale-serial-in-empty.md
   - docs/defects/2026-08-02-serial-line-interleaving.md
   - docs/adr/2026-09-24-json-pack-wire-encoding.md
+  - https://github.com/PhotomancerArt/lightplayer/pull/805
 ---
 # The real C6's USB link loses a few bytes inside a packed frame; the emulated one never does
 
@@ -46,6 +47,22 @@ write. This capture is the first silicon observation of a silent loss on a
 USB-Serial-JTAG link, but it lost ~5 bytes, not a 64-byte packet, so it is
 evidence, not proof. The host side (the Web Serial read pump) cannot be ruled
 out from one capture.
+
+**Since filed: PR #805** (the S3 link fix) settled from primary documents
+that silicon refuses a write while an IN packet is pending (ESP32-C3 TRM
+v1.3 §30.3.2 p. 767, the same USB-Serial-JTAG block, and the C6/S3 PAC text
+for `SERIAL_IN_EP_DATA_FREE`). It also found that esp-hal 1.1.1's
+`write_async` breaks that rule twice: it writes a chunk without checking the
+endpoint is free, and it wakes on a stale `serial_in_empty`. #805 fixes the
+S3 only. The C6 runs the same driver and was deliberately left out. So the
+stale-wake race is a **candidate cause** here, not a finding. The ~5-byte
+loss does not match the emulator model, which drops the whole write, but no
+document says what silicon does with bytes written into a pending buffer,
+so a partial loss is plausible.
+
+**The test that would tell us:** repeat the capture on a C6 image carrying
+#805's IN-endpoint gate (`lp-fw/fw-esp32s3/src/serial/in_endpoint.rs`,
+ported). If the loss goes away, it was this race.
 
 **What is not known yet.**
 - Whether JSON loses bytes at the same rate. A JSON line with bytes missing
