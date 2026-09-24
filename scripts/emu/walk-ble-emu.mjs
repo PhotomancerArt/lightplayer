@@ -39,6 +39,8 @@ const PROJECT = process.env.WALK_PROJECT ?? "Peach (1D)";
 /// The counting window for the idle measurement. Long enough to hold at
 /// least one of the Play lens's once-a-minute reads.
 const IDLE_WINDOW_MS = Number(process.env.BLE_IDLE_WINDOW_MS ?? 75_000);
+/// The editor's (authoring) comparison window: the same count, shorter.
+const EDITOR_WINDOW_MS = Number(process.env.BLE_EDITOR_WINDOW_MS ?? 20_000);
 const STEP_DEADLINE_MS = 180_000;
 const STUDIO_LOAD_DEADLINE_MS = 420_000;
 
@@ -117,6 +119,44 @@ async function main() {
   };
   const stats = () =>
     driver.evaluate(`JSON.stringify(window.__lpEmuBluetooth?.stats(${JSON.stringify(BOARD)}) ?? null)`).then(JSON.parse);
+  /// Count both directions for `windowMs`, with a census of what Studio
+  /// wrote by request kind (the first chunk of each line carries
+  /// `"msg":{"<kind>"` or `"msg":"<kind>"`).
+  const measure = async (windowMs) => {
+    await driver.evaluate(`(() => {
+      const rx = window.__lpEmuBluetooth.devices.get(${JSON.stringify(BOARD)}).gatt.service.rx;
+      if (!rx.__lpCensus) {
+        const write = rx.writeValueWithResponse.bind(rx);
+        rx.__lpCensus = true;
+        rx.writeValueWithResponse = async (value) => {
+          const text = new TextDecoder().decode(value);
+          const kind = text.match(/"msg":\\{?"([A-Za-z]+)"/)?.[1];
+          if (kind) window.__lpBleCensus[kind] = (window.__lpBleCensus[kind] ?? 0) + 1;
+          return write(value);
+        };
+      }
+      window.__lpBleCensus = {};
+    })()`);
+    const t0 = Date.now();
+    const s0 = await stats();
+    const d0 = await driver.evaluate(CANVAS_DIGEST);
+    await new Promise((resolve) => setTimeout(resolve, windowMs));
+    const s1 = await stats();
+    const d1 = await driver.evaluate(CANVAS_DIGEST);
+    const census = await driver.evaluate(`JSON.stringify(window.__lpBleCensus)`).then(JSON.parse);
+    const seconds = (Date.now() - t0) / 1000;
+    return {
+      seconds: Number(seconds.toFixed(1)),
+      studioToBoardBytes: s1.written - s0.written,
+      studioToBoardWrites: s1.writes - s0.writes,
+      boardToStudioBytes: s1.notified - s0.notified,
+      boardToStudioNotifications: s1.notifications - s0.notifications,
+      studioToBoardBytesPerSecond: Number(((s1.written - s0.written) / seconds).toFixed(1)),
+      boardToStudioBytesPerSecond: Number(((s1.notified - s0.notified) / seconds).toFixed(1)),
+      previewChangedWhileIdle: d0 !== d1,
+      studioRequestsByKind: census,
+    };
+  };
   const step = async (name, describe, body) => {
     console.log(`— ${name}: ${describe}`);
     let error = null;
@@ -163,6 +203,27 @@ async function main() {
       return `reason shown; ${endpoint}`;
     });
 
+    await step("remove", "clear what the board is running, over Bluetooth", async () => {
+      // The packaged image boots with a project on it; clearing it is the
+      // other conversation effect (ask → stop → delete), over the link.
+      // Ready comes first; what it is running arrives on its heartbeat.
+      const face = await driver.waitFor(
+        `(() => { const t = ${MAIN_TEXT};
+                  return t.includes('Remove project') ? 'running' : t.includes('Nothing loaded') ? 'empty' : false; })()`,
+        { timeoutMs: STEP_DEADLINE_MS, what: "the board to say what it runs" },
+      );
+      if (face === "empty") return "nothing was loaded";
+      // An inline two-click confirmation: the first click arms the button,
+      // the second dispatches (both labels live in the one button).
+      await driver.clickWhenReady("Remove project", { timeoutMs: STEP_DEADLINE_MS });
+      await driver.click("Remove project");
+      await driver.waitFor(`${MAIN_TEXT}.includes('to choose from')`, {
+        timeoutMs: STEP_DEADLINE_MS,
+        what: "the empty face",
+      });
+      return "the board reported nothing loaded";
+    });
+
     await step("push", `push ${PROJECT} over Bluetooth`, async () => {
       const before = await stats();
       await driver.clickWhenReady("to choose from", { timeoutMs: STEP_DEADLINE_MS });
@@ -180,13 +241,24 @@ async function main() {
       return `the board said Project loaded; the push wrote ${after.written - before.written} B in ${after.writes - before.writes} writes`;
     });
 
-    await step("play", "open the board in the editor, then Play", async () => {
+    await step("editor", `open the board in the editor, then ${EDITOR_WINDOW_MS / 1000} s untouched (authoring, for comparison)`, async () => {
       await driver.clickWhenReady("Open in editor", { timeoutMs: STEP_DEADLINE_MS });
-      await driver.waitFor(`Boolean(document.querySelector('a[title^="Play mode"]'))`, {
-        timeoutMs: STEP_DEADLINE_MS,
-        what: "the Play toggle",
-      });
+      // The project has to arrive before Play can be asked for: Play is a
+      // view of the lens's project, and the toggle is inert until it is.
+      await driver.waitFor(
+        `!${MAIN_TEXT}.includes('Connecting project') && Boolean(document.querySelector('#main [role="slider"]'))`,
+        { timeoutMs: STEP_DEADLINE_MS, what: "the project to open on the board" },
+      );
+      report.editorIdle = await measure(EDITOR_WINDOW_MS);
+      return JSON.stringify(report.editorIdle);
+    });
+
+    await step("play", "switch the editor to Play", async () => {
       await driver.evaluate(`document.querySelector('a[title^="Play mode"]').click()`);
+      await driver.waitFor(`location.pathname.endsWith('/play')`, {
+        timeoutMs: STEP_DEADLINE_MS,
+        what: "the Play route",
+      });
       await driver.waitFor(`Boolean(document.querySelector('#main [role="slider"]'))`, {
         timeoutMs: STEP_DEADLINE_MS,
         what: "the Play panel's knobs",
@@ -195,25 +267,8 @@ async function main() {
     });
 
     await step("idle", `Play, untouched, for ${IDLE_WINDOW_MS / 1000} s — what goes over the air`, async () => {
-      const t0 = Date.now();
-      const s0 = await stats();
-      const d0 = await driver.evaluate(CANVAS_DIGEST);
-      await new Promise((resolve) => setTimeout(resolve, IDLE_WINDOW_MS));
-      const s1 = await stats();
-      const d1 = await driver.evaluate(CANVAS_DIGEST);
-      const seconds = (Date.now() - t0) / 1000;
-      const idle = {
-        seconds: Number(seconds.toFixed(1)),
-        studioToBoardBytes: s1.written - s0.written,
-        studioToBoardWrites: s1.writes - s0.writes,
-        boardToStudioBytes: s1.notified - s0.notified,
-        boardToStudioNotifications: s1.notifications - s0.notifications,
-        studioToBoardBytesPerSecond: Number(((s1.written - s0.written) / seconds).toFixed(1)),
-        boardToStudioBytesPerSecond: Number(((s1.notified - s0.notified) / seconds).toFixed(1)),
-        previewChangedWhileIdle: d0 !== d1,
-      };
-      report.idle = idle;
-      return JSON.stringify(idle);
+      report.idle = await measure(IDLE_WINDOW_MS);
+      return JSON.stringify(report.idle);
     });
 
     await step("knob", "turn the first knob to its end, and watch the board's render change", async () => {
@@ -262,11 +317,19 @@ async function main() {
 
   console.log("\n=== the Bluetooth walk, step by step");
   for (const s of report.steps) console.log(`  ${s.ok ? "✓" : "✗"} ${s.name.padEnd(9)} ${path.basename(s.shot)}`);
+  if (report.editorIdle) {
+    console.log(
+      `\n  editor over ble (authoring): Studio→board ${report.editorIdle.studioToBoardBytesPerSecond} B/s, ` +
+        `board→Studio ${report.editorIdle.boardToStudioBytesPerSecond} B/s ` +
+        `${JSON.stringify(report.editorIdle.studioRequestsByKind)}`,
+    );
+  }
   if (report.idle) {
     console.log(
       `\n  idle Play over ble: Studio→board ${report.idle.studioToBoardBytesPerSecond} B/s ` +
         `(${report.idle.studioToBoardBytes} B / ${report.idle.seconds} s), board→Studio ` +
-        `${report.idle.boardToStudioBytesPerSecond} B/s (${report.idle.boardToStudioBytes} B)`,
+        `${report.idle.boardToStudioBytesPerSecond} B/s (${report.idle.boardToStudioBytes} B) ` +
+        `${JSON.stringify(report.idle.studioRequestsByKind)}`,
     );
   }
   if (consoleErrors.length) {

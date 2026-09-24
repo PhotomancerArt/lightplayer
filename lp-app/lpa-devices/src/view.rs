@@ -426,6 +426,12 @@ impl FirmwareFace {
 }
 
 impl DeviceView {
+    /// Whether this board is reached over Bluetooth right now — the one
+    /// link that cannot carry firmware, which is how the card knows.
+    pub fn is_over_bluetooth(&self) -> bool {
+        self.firmware_blocked.as_deref() == Some(FIRMWARE_NEEDS_USB)
+    }
+
     /// The flash face: a board pick + Flash as the firmware zone's verbs.
     pub fn needs_firmware(&self) -> bool {
         self.firmware_face.wants_flash()

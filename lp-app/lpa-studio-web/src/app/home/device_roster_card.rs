@@ -437,9 +437,10 @@ pub(crate) fn DeviceRosterCard(
                         }
                         span { class: "tw:min-w-0 tw:flex-1" }
                         if idle && linked && !offer_flash {
+                            // Its reason is the verb's, said once beside it.
                             ActionButton {
                                 key: "{\"factory-reset-blocked\"}",
-                                action: blocked_erase_action(device, reason),
+                                action: blocked_erase_action(device, ""),
                                 running: false,
                                 variant: ActionButtonVariant::Quiet,
                                 on_action,
@@ -1005,6 +1006,11 @@ fn preview_sentence(card: &DeviceView) -> String {
     }
     if card.loaded_project == DeviceLoadedProject::Empty {
         return "Nothing loaded — no picture until something runs.".to_string();
+    }
+    // The card's live picture is not streamed over Bluetooth (M5: that air
+    // time is the board's ESP-NOW's too), so "coming" would be a promise.
+    if card.is_over_bluetooth() {
+        return "No live picture over Bluetooth — open Play to see and control it.".to_string();
     }
     "No picture yet — the live feed is coming.".to_string()
 }

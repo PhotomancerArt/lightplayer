@@ -1524,6 +1524,15 @@ impl StudioController {
         )
     }
 
+    /// The lens's current passive-pull gap (tests: the Play-over-Bluetooth
+    /// idle budget is a fact about this number).
+    #[cfg(test)]
+    pub(crate) fn lens_refresh_gap_for_test(&self) -> Option<Duration> {
+        self.pool
+            .lens_session()
+            .map(|session| self.lens_refresh_gap(session))
+    }
+
     /// Whether the lens session's next passive pull is due. Early ticks (the
     /// UI timer racing a slow pull) bounce off this without a wire op.
     fn passive_refresh_due(&self) -> bool {

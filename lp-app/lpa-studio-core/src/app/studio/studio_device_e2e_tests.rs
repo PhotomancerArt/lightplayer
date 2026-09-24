@@ -5491,6 +5491,43 @@ fn a_board_seen_over_usb_and_over_bluetooth_is_one_registry_row() {
     let rows = bench.registry();
     assert_eq!(rows.len(), 1, "one row, never a twin: {rows:?}");
     assert_eq!(rows[0].uid, "mac:a0:f2:62:87:b4:8c");
+
+    // The editor over Bluetooth is authoring: the device cadence. Play is
+    // the idle-budgeted mode: while a Play surface holds its lease, an
+    // untouched lens reads once a minute.
+    bench
+        .open_lens(&rows[0].uid)
+        .expect("the board opens in the editor over Bluetooth");
+    let session = bench
+        .controller
+        .runtime_pool_for_test()
+        .attached_session()
+        .expect("a device session");
+    assert_eq!(session.transport(), crate::LinkTransport::Ble);
+    assert_eq!(
+        bench.controller.lens_refresh_gap_for_test(),
+        Some(crate::DEVICE_REFRESH_INTERVAL)
+    );
+    drive(
+        bench
+            .controller
+            .dispatch(crate::PlayViewOp::action_for(true)),
+    )
+    .expect("the lease");
+    assert_eq!(
+        bench.controller.lens_refresh_gap_for_test(),
+        Some(crate::app::studio::BLE_PLAY_IDLE_REFRESH_INTERVAL)
+    );
+    drive(
+        bench
+            .controller
+            .dispatch(crate::PlayViewOp::action_for(false)),
+    )
+    .expect("the lease");
+    assert_eq!(
+        bench.controller.lens_refresh_gap_for_test(),
+        Some(crate::DEVICE_REFRESH_INTERVAL)
+    );
 }
 
 /// One Bluetooth board, always present: a fake-device link at a `ble:`

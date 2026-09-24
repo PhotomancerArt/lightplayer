@@ -26,7 +26,7 @@ use lpa_devices::view::FIRMWARE_NEEDS_USB;
 
 use super::device_transport::{
     DeviceEffectCall, DeviceEffectFacts, DeviceEffectProgress, DeviceTransport,
-    DeviceTransportFuture, GrantedLink, LensLineTap,
+    DeviceTransportFuture, GrantedLink, LensLineTap, LensTapEvent,
 };
 use super::sim_record::device_id_from_ble_endpoint;
 use super::wire_conversation::{is_wire_conversation, run_wire_conversation};
@@ -122,9 +122,24 @@ impl DeviceTransport for BleDeviceTransport {
                 "not a Bluetooth endpoint".to_string()
             )));
         };
+        // The board's own words during the conversation — "Project loaded"
+        // among them — ride the progress narration, the way the serial
+        // provider's logs do: the pump is paused for the borrow, so without
+        // this the card's terminal would go deaf for exactly the lines that
+        // say whether the push worked.
+        let narrate: LensLineTap = {
+            let progress = Rc::clone(&progress);
+            Rc::new(move |event| {
+                if let LensTapEvent::Line(line) = event
+                    && !line.starts_with("M!")
+                {
+                    progress(line, None);
+                }
+            })
+        };
         // Built before the future: an io is a borrow of the wire, and a
         // failure to take one is the effect's failure, not a step inside it.
-        let io = match self.source.client_io(device_id, None) {
+        let io = match self.source.client_io(device_id, Some(narrate)) {
             Ok(io) => io,
             Err(error) => return Box::pin(core::future::ready(Err(error))),
         };
@@ -194,7 +209,7 @@ mod tests {
         assert_eq!(
             source.asked.borrow().as_slice(),
             [
-                "io QkxFLWlk".to_string(),
+                "io QkxFLWlk tap".to_string(),
                 "listLoadedProjects".to_string(),
                 "write /hardware.json {\"id\":\"x\"}".to_string()
             ]
