@@ -538,7 +538,7 @@ fn project_commands() -> Vec<(WireProjectCommand, Required)> {
             WireProjectCommand::ReadOverlay {
                 request: WireOverlayReadRequest,
             },
-            Required::Edit,
+            Required::Play,
         ),
         (
             WireProjectCommand::MutateOverlay {
@@ -558,7 +558,7 @@ fn project_commands() -> Vec<(WireProjectCommand, Required)> {
             WireProjectCommand::ReadInventory {
                 request: WireProjectInventoryReadRequest,
             },
-            Required::Edit,
+            Required::Play,
         ),
         (
             WireProjectCommand::CreateNode {

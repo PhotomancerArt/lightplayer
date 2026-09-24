@@ -9,7 +9,7 @@
 //! | Needs | Requests |
 //! |---|---|
 //! | Public | `Hello`, `LoginBegin`, `LoginAnswer` |
-//! | Play | `ProjectRead`; `ProjectCommand` `PanelWrite`/`PanelClear`; `ListAvailableProjects`, `ListLoadedProjects`; read-only fs (`Read`, `ListDir`, `ChangesSince`, `HashPackage`) inside the projects directory |
+//! | Play | `ProjectRead`; `ProjectCommand` `PanelWrite`/`PanelClear`/`ReadOverlay`/`ReadInventory`; `ListAvailableProjects`, `ListLoadedProjects`; read-only fs (`Read`, `ListDir`, `ChangesSince`, `HashPackage`) inside the projects directory |
 //! | Edit | everything else: `LoadProject`, `UnloadProject`, `StopAllProjects`, every other `ProjectCommand`, every fs write/delete and every fs read outside the projects directory, `SetLogLevel`, `Reboot`, `ClearFaults` |
 //!
 //! Separately, and on EVERY link at EVERY tier, the fs handlers never
@@ -73,17 +73,23 @@ pub fn classify(request: &ClientRequest, projects_dir: &str) -> Required {
     }
 }
 
-/// Play turns the panel's knobs; everything else a project command does is
-/// authoring or runtime control, and needs edit.
+/// Play turns the panel's knobs and makes every project read (PQ5 — the
+/// overlay and the inventory are reads too); everything else a project
+/// command does is authoring or runtime control, and needs edit.
+///
+/// The two reads are safe at play because neither can carry an access
+/// file's bytes: both are built from what the project runtime read through
+/// `AccessGuardedFs`, which refuses those files, and the device store sits
+/// outside every project's chroot. The overlay's pending edits are
+/// client-authored values, not file bytes.
 fn classify_project_command(command: &WireProjectCommand) -> Required {
     match command {
-        WireProjectCommand::PanelWrite { .. } | WireProjectCommand::PanelClear { .. } => {
-            Required::Play
-        }
-        WireProjectCommand::ReadOverlay { .. }
-        | WireProjectCommand::MutateOverlay { .. }
+        WireProjectCommand::PanelWrite { .. }
+        | WireProjectCommand::PanelClear { .. }
+        | WireProjectCommand::ReadOverlay { .. }
+        | WireProjectCommand::ReadInventory { .. } => Required::Play,
+        WireProjectCommand::MutateOverlay { .. }
         | WireProjectCommand::CommitOverlay { .. }
-        | WireProjectCommand::ReadInventory { .. }
         | WireProjectCommand::CreateNode { .. }
         | WireProjectCommand::RemoveNode { .. }
         | WireProjectCommand::NodeCommand { .. }
