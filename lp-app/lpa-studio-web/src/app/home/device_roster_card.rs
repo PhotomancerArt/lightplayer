@@ -544,8 +544,40 @@ pub(crate) fn DeviceRosterCard(
             // activity's Cancel, in every state — including Forget
             // mid-activity, which the shipped system could not do.
             footer { class: device_zone_class(),
-                div { class: "ux-armed-dim tw:grid tw:min-w-0",
-                    p { class: info_line_class(), title: "{device_line}", "{device_line}" }
+                // The info line, with the access verbs at its end (BLE M6):
+                // "Log in" / "Log in for edit" opens the password sheet, and
+                // "Bluetooth" opens the device access panel in the top
+                // layer. On the LINE rather than in the verb row, because a
+                // Bluetooth card's row already holds Reset-with-its-reason,
+                // Disconnect and Forget, and at 375 px a fourth chip
+                // overlaps them; the line truncates its freshness first.
+                div { class: "tw:flex tw:min-w-0 tw:items-center tw:gap-2",
+                    div { class: "ux-armed-dim tw:grid tw:min-w-0 tw:flex-1",
+                        p { class: info_line_class(), title: "{device_line}", "{device_line}" }
+                    }
+                    if idle && linked {
+                        if let Some(label) = log_in.clone() {
+                            button {
+                                class: LINE_VERB_CLASS,
+                                r#type: "button",
+                                onclick: move |_| on_access.call(lpa_studio_core::AccessCommand::LogIn { device }),
+                                "{label}"
+                            }
+                        }
+                        if let Some(panel) = access_panel.clone() {
+                            DetailPopover {
+                                icon: StudioIconName::More,
+                                label: "Bluetooth".to_string(),
+                                title: "Who can reach this piece over Bluetooth".to_string(),
+                                placement: PopoverPlacement::TopEnd,
+                                initially_open: access_panel_open,
+                                trigger: rsx! { "Bluetooth" },
+                                trigger_class: LINE_VERB_CLASS.to_string(),
+                                trigger_open_class: LINE_VERB_CLASS.to_string(),
+                                super::device_access_panel::DeviceAccessPanel { panel, on_access }
+                            }
+                        }
+                    }
                 }
                 div { class: verb_row_class(),
                     if busy_zone == Some(ZoneKind::Device) {
@@ -590,35 +622,6 @@ pub(crate) fn DeviceRosterCard(
                             running: false,
                             variant: ActionButtonVariant::Quiet,
                             on_action,
-                        }
-                    }
-                    // Access over Bluetooth (BLE M6): "Log in" / "Log in for
-                    // edit" opens the password sheet; "Bluetooth" opens the
-                    // device access panel in the top layer, so neither can
-                    // change the card's height.
-                    if idle && linked {
-                        if let Some(label) = log_in.clone() {
-                            button {
-                                key: "{\"log-in\"}",
-                                class: quiet_action_class(),
-                                r#type: "button",
-                                onclick: move |_| on_access.call(lpa_studio_core::AccessCommand::LogIn { device }),
-                                "{label}"
-                            }
-                        }
-                        if let Some(panel) = access_panel.clone() {
-                            DetailPopover {
-                                key: "{\"bluetooth\"}",
-                                icon: StudioIconName::More,
-                                label: "Bluetooth".to_string(),
-                                title: "Who can reach this piece over Bluetooth".to_string(),
-                                placement: PopoverPlacement::TopStart,
-                                initially_open: access_panel_open,
-                                trigger: rsx! { "Bluetooth" },
-                                trigger_class: quiet_action_class().to_string(),
-                                trigger_open_class: format!("{} tw:text-strong-foreground", quiet_action_class()),
-                                super::device_access_panel::DeviceAccessPanel { panel, on_access }
-                            }
                         }
                     }
                     span { class: "tw:min-w-0 tw:flex-1" }
@@ -725,6 +728,11 @@ pub(crate) fn DeviceRenameSection(
 /// (`CARD_MENU_TRIGGER_CLASS`), so the two cards' menus read as one
 /// control. Resets UA button chrome itself — Tailwind preflight is not
 /// loaded.
+/// A verb that rides the Device zone's 17px info line (BLE M6's "Log in"
+/// and "Bluetooth"): text with a dotted underline, no chrome, so it fits
+/// the line's height and reads as something to press.
+const LINE_VERB_CLASS: &str = "tw:flex-none tw:cursor-pointer tw:appearance-none tw:border-0 tw:bg-transparent tw:p-0 tw:text-xs tw:font-semibold tw:leading-[17px] tw:text-strong-foreground tw:underline tw:decoration-dotted tw:underline-offset-2 tw:hover:decoration-solid ux-focus-ring";
+
 const HEADER_MENU_TRIGGER_CLASS: &str = "tw:grid tw:h-5 tw:w-5 tw:flex-none tw:cursor-pointer tw:appearance-none tw:place-items-center tw:rounded tw:border-0 tw:bg-transparent tw:p-0 tw:text-muted-foreground tw:transition-colors tw:hover:bg-white/10 tw:hover:text-strong-foreground";
 
 /// The rename form's field — the project card's rename input, verbatim.

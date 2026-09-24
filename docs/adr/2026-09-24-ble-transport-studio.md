@@ -83,6 +83,30 @@ connected-idle, 7–30 % under traffic.
    it proves the transport, the UI and Play mode, and enforcement stays proven
    by M3's host tests and M4's desk check. The page banner says so.
 
+6. **Login on connect is Studio's; the board enforces (M6).** When a `ble:`
+   link says hello, Studio asks that link's own hello what it holds
+   (`auth.required`, `auth.granted`) over the shared wire, and when it holds
+   nothing, logs in: the account default password, then the passwords this
+   browser remembers (most recently successful first), **at most two
+   answers per connect** — each wrong one feeds the board's backoff — and
+   then the password sheet. Automatic tries are spent once per device, not
+   per connect, so a silent reconnect never burns the backoff the typed
+   password is about to need. An open device is connected at play and
+   prompted only when an edit is refused (`NotPermitted { needs: Edit }`,
+   which `lpa-client` now returns as its own error, worded as the sentence
+   the UI shows). The editor lens waits for the link to hold a tier. K is
+   derived in Studio's wasm (`lpc-access`'s PBKDF2), cached per session,
+   with a yield between derivations; new secrets cost 60 000 iterations.
+7. **The device store is written, never read (M6).** Studio keeps, per device
+   (registry key), the whole `/.lp/access.json` it last wrote, and every
+   change rewrites the whole file from that record over the link (USB, or a
+   Bluetooth login at edit). The panel lists what this browser wrote and says
+   the piece may hold others; saving replaces them. `bleEnabled` is read once
+   at boot (M4), so a switch shows "turns on when the piece restarts" until a
+   newer hello is seen, with Restart now over USB. Remembered passwords
+   (`lp.ble.passwords.v1`), these records (`lp.ble.device-access.v1`) and the
+   account default (`lp.settings.v1`) are local to the browser (PQ8).
+
 ## Consequences
 
 - One `?ble=emu` walk (`just walk-ble-emu`, 2026-09-24): an idle Play lens
@@ -91,7 +115,16 @@ connected-idle, 7–30 % under traffic.
   console lines. The editor over the same link: ~1.0 KB/s up, ~7 KB/s down.
   Emulated, and the emulated board's clock is not silicon's.
 - A Bluetooth board after a page reload is reconnected only if the browser
-  still grants it (`getDevices()`); a remembered board with no live endpoint
-  re-grants through the USB chooser, because endpoints are not persisted.
+  still grants it (`getDevices()`). A remembered board has no live endpoint
+  (endpoints are not persisted); since M6 its record carries
+  `last_over_bluetooth` from the registry row's transport column, so its
+  Reconnect opens the Bluetooth chooser, not the USB one.
+- M6 on the same walk: idle Play over `ble:` put **5.5 B/s** Studio→board
+  (411 B in 75 s; one `projectRead`) and **110.5 B/s** board→Studio —
+  login-on-connect adds one `hello` per connect and nothing while idle.
+- KDF cost (M6, desk M2 Max, `derive_login_key` in wasm with Studio's
+  release profile, best of five): 60 000 iterations 46 ms in V8, 44 ms in
+  JavaScriptCore; 100 000 took 77 / 73 ms. Bluefy on the phone is
+  re-measured at the M7 walk.
 - The Web Bluetooth conformance suite (`browser_ble_conformance.rs`) runs in
   `just lpa-link-browser-test` beside the serial one.

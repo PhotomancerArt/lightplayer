@@ -15,12 +15,14 @@ use lpc_access::{KEY_BYTES, LoginOffer, SALT_BYTES, derive_login_key};
 /// PBKDF2 cost for NEW secrets Studio installs.
 ///
 /// PQ10's budget is ~150 ms per derivation in Bluefy on an iPhone. Measured
-/// 2026-09-24 in headless desktop Chrome (M2 Max) through Studio's own wasm:
-/// see `docs/adr/2026-09-24-ble-transport-studio.md` §Consequences for the
-/// figure this was scaled from. The desk walk in Bluefy (M7) re-measures
-/// and moves this if the phone is slower than the scaling assumed; an
-/// installed secret keeps the cost it was written with, so changing this
-/// never locks anyone out.
+/// 2026-09-24 on the desk (M2 Max), this crate's `derive_login_key` built
+/// for wasm with Studio's release profile (opt-level "z", LTO, one codegen
+/// unit), best of five: 60 000 iterations took 46 ms in V8 (node 25) and
+/// 44 ms in JavaScriptCore (bun 1.1) — the engine Bluefy's WebKit view
+/// runs; 100 000 took 77 / 73 ms. 60 000 leaves the phone a 3× margin under
+/// the budget. The desk walk in Bluefy (M7) re-measures and moves this if
+/// the phone is slower than that; an installed secret keeps the cost it was
+/// written with, so changing this never locks anyone out.
 pub const DEFAULT_KDF_ITERATIONS: u32 = 60_000;
 
 /// The session's derived keys.
