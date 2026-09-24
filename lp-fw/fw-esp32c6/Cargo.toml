@@ -201,6 +201,12 @@ test_espnow_broadcast = ["dep:fw-checks", "fw-checks/check-espnow-broadcast", "r
 # answers "can this chip, on this esp-radio, talk BLE at all, and what does
 # the controller cost". Never shipped.
 test_ble = ["radio", "esp-radio/ble", "dep:trouble-host", "dep:bt-hci", "dep:heapless", "dep:static_cell", "dep:embassy-sync-07"]
+# test_ble plus Wi-Fi/ESP-NOW brought up the product's way, and an ESP-NOW
+# loss meter between two boards (plan `ble-remote-control`, M2 Runs G/H).
+# `esp-radio/coex` is what lets the two stacks share the one radio.
+# Build-time knobs: LP_COEX_BLE=0, LP_COEX_RF_SWITCH=0, LP_COEX_HZ (see
+# src/tests/test_ble_coex.rs). Never shipped.
+test_ble_coex = ["test_ble", "esp-radio/coex"]
 
 # FIXTURE builds — test scaffolding, never shipped. Make this CURRENT
 # build misreport its hello so a current Studio classifies it Incompatible,
