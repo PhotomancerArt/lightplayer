@@ -33,6 +33,9 @@ lpc-shared = { path = "../../lp-core/lpc-shared", default-features = false, feat
 lpa-server = { path = "../../lp-app/lpa-server", default-features = false, features = ["std"] }
 critical-section = { version = "1.2", features = ["std"] }
 pollster = "0.3"
+# A graphics backend that renders nothing, so runtime tests can build a server.
+lp-gfx = { path = "../../lp-gfx/lp-gfx", default-features = false, features = ["null-backend"] }
+lpfs = { path = "../../lp-base/lpfs", default-features = false }
 
 [lints]
 workspace = true

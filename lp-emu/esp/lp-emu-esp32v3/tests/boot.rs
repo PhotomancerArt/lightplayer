@@ -1340,17 +1340,24 @@ fn the_direct_load_mounts_the_flash_filesystem() {
 /// `676`/`bfb8d720…` and `575`/`87fb3c41…`, taken when this machine had no
 /// APP core.
 ///
+/// **Re-measured again by the BLE plan's M3 (access core), same lengths.**
+/// One line moved: `[INIT] main stack 45280 B` became `45360 B` — the main
+/// stack is what `.bss` leaves, and the server loop's future (in `.bss`)
+/// shrank 80 B when heartbeats became per link. Confirmed from the ELFs'
+/// `_stack_start - _stack_end` on both sides, not inferred from the hash.
+/// The old pins were `3f91b2e2…` and `660ac8dd…`.
+///
 /// A blank chip: the P3 prefix, the `[ERROR] no lpfs partition …` fallback,
 /// and the dual-core tail.
 const INIT_CHAIN_BLANK_SHA256: &str =
-    "3f91b2e29b1b3a2c7a0b80730eb7c457a7ab801d1a8b58fea0fb71bbf9a23eee";
+    "b1e5c61cd51a545df93d560b59a4171dfe3b39b36bd3650325231621cbc9b8dc";
 const INIT_CHAIN_BLANK_LEN: usize = 804;
 
 /// The merged image: the same prefix plus `[INIT] flash filesystem mounted`,
 /// and **fewer** bytes than the blank-chip chain, because the error line it
 /// replaces is longer than the success line.
 const INIT_CHAIN_MERGED_SHA256: &str =
-    "660ac8ddc039193b4423305ccb4356cd37a412c25c3ddf15f5eeb0b8c0afe9e1";
+    "50ca9bf91026fa9ee5264edab69d06244826ce4faab68af5c8159bd7ce286446";
 const INIT_CHAIN_MERGED_LEN: usize = 703;
 
 /// The boot threshold, pinned on both chips.

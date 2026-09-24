@@ -45,7 +45,13 @@ const PREFIX_BYTES: usize = 543;
 /// The golden's SHA-256, pinned so a change to the boot's *text* is a
 /// deliberate edit to this line and not a test that quietly re-blessed
 /// itself. A run that changes it must say which line moved and why.
-const PREFIX_SHA256: &str = "ea8bae305953ef613f68a97fb84919378f33b37eb5623dcb970e8dce2b7343e7";
+///
+/// ⚠️ **Moved by the BLE plan's M3 (access core), same 543 bytes:**
+/// `[INIT] main stack 45280 B` became `45360 B`. The main stack is what
+/// `.bss` leaves, and the server loop's future (which lives in `.bss`)
+/// shrank 80 B when heartbeats became per link — read off both ELFs'
+/// `_stack_start - _stack_end`, not inferred. The old pin was `ea8bae30…`.
+const PREFIX_SHA256: &str = "465c8d520e705c194205b6d60045946b576b01df361850322f57f14ac0a11f11";
 
 /// Run the shipped image, direct-loaded, under `--strict-bus`, stopping at
 /// the first complete line containing `exit_on`.
@@ -119,7 +125,9 @@ fn the_init_chain_comes_out_of_the_wire_byte_for_byte() {
         "[INIT] fw-esp32v3 boot",
         "[INIT] chip=esp32 arch=xtensa heap=15072+112640+98304+15536=241552",
         "[INIT] heap regions: 0 0x3ffe0440+15072 (ROM PRO stack)",
-        "[INIT] main stack 45280 B",
+        // 45,280 until the BLE plan's M3 shrank the server loop's future (in
+        // `.bss`) by 80 B; see PREFIX_SHA256.
+        "[INIT] main stack 45360 B",
         "[RECOVERY] boot: cause=power-on level=green safe_mode=false prior_boot_complete=true",
         "[INIT] runtime started",
         "[INIT] I/O task spawned (uart0 921600 8N1, swi2 executor prio2, timg0t1 pacer 1ms)",
@@ -451,7 +459,7 @@ fn the_two_paths_report_the_same_memory_figures() {
         "and it is the same stack, reported the same way"
     );
     assert!(
-        a[0].contains(" of 45280 B ") && b[0].contains(" of 45280 B "),
+        a[0].contains(" of 45360 B ") && b[0].contains(" of 45360 B "),
         "the stack's size is the same on both paths: {a:?} vs {b:?}"
     );
     // The one figure the boot banner carries too, so the triple can be read
@@ -650,7 +658,17 @@ const STACK_HIGH_WATER_GAP: u64 = 640;
 /// on, because a pin that could only express one sign was hiding the
 /// direction. The rest of the triple is still identical between the paths
 /// to the byte (`free=223096 used=18456 largest_free=106494 retry_saves=0`).
-const PATH_HIGH_WATER_GAP: i64 = -64;
+///
+/// ⚠️ **Re-measured by the BLE plan's M3 (access core): −64 → −96**
+/// (`direct 13132`, `rom-up 13036`, of a 45,360 B stack). The image's layout
+/// moved — the server loop's future shrank 80 B and the main stack grew by
+/// as much — and with it where each path's heartbeat lands in the pacer's
+/// phase. The cause was not isolated further than that; the memory-transfer
+/// fields still agree between the paths to the byte. (Both absolute figures
+/// fell by 3,328 B — `direct` 16460 → 13132 — and that part IS named: the
+/// embassy main task's `poll` frame shrank from `entry a1, 4304` to `976`;
+/// see `determinism.rs`'s `PREFIX_CYCLES`. The 32 B move of the gap is not.)
+const PATH_HIGH_WATER_GAP: i64 = -96;
 
 /// **G2 (e).** Every memory-class field of the idle heartbeat, this machine
 /// against the desk board, on the same image and the same request.
@@ -690,9 +708,14 @@ const PATH_HIGH_WATER_GAP: i64 = -64;
 #[test]
 #[ignore = "needs the shipped image and espflash; run through `just test-emu-esp32v3-boot`"]
 fn the_heartbeats_memory_figures_are_the_desk_boards() {
-    let Some(elf) = image() else { return };
-    let merged = match lp_emu_esp32v3::test_support::merged_chip_image() {
-        Ok(p) => p,
+    // ⚠️ **The pinned reference image, not the tree's** (BLE plan M3, ruling
+    // DD8). The capture is of `75486b114`'s bytes and its sidecar says so; a
+    // tree build compared against it moves every image-derived line the
+    // moment `.bss` does, and that is a change to the firmware, not to this
+    // machine or to the board. The image's identity is checked below off its
+    // own hello stamp, which both sides print.
+    let (elf, merged) = match lp_emu_esp32v3::test_support::reference_images() {
+        Ok(pair) => pair,
         Err(reason) => {
             skip_notice("the_heartbeats_memory_figures_are_the_desk_boards", &reason);
             return;
@@ -745,6 +768,18 @@ fn the_heartbeats_memory_figures_are_the_desk_boards() {
         "the second boot MOUNTS what the first wrote:\n{emulated}"
     );
     let _ = std::fs::remove_file(&chip);
+
+    // Same bytes on both sides, read off the image's own stamp: the commit
+    // `build.rs` baked in and the clean-tree flag. A different ELF here would
+    // make every comparison below a comparison of two builds.
+    let stamp = "[INIT] fw-esp32 initialized, starting server loop... ";
+    let (a, b) = (field_line(&silicon, stamp), field_line(&emulated, stamp));
+    assert_eq!(a, b, "the reference image is the capture's image");
+    let pinned = format!("commit={}", lp_emu_esp32v3::test_support::REFERENCE_COMMIT);
+    assert!(
+        a.contains(&pinned) && a.contains("dirty=false"),
+        "the capture is of the pinned clean commit: {a}"
+    );
 
     // The three lines the boot banner carries, which are image-derived and
     // must be identical to the byte.
