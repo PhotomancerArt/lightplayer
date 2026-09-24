@@ -1,0 +1,9 @@
+{
+  "format": 10,
+  "name": "Soft Noise",
+  "description": "A slow, smooth noise field drifting through the palette, with dark valleys between the glows.",
+  "kind": "pattern",
+  "exports": [
+    "effect"
+  ]
+}

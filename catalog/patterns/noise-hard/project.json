@@ -1,0 +1,9 @@
+{
+  "format": 10,
+  "name": "Hard Noise",
+  "description": "Noise cut into flat bands of palette colour with crisp edges, sliding past like a moving contour map.",
+  "kind": "pattern",
+  "exports": [
+    "effect"
+  ]
+}

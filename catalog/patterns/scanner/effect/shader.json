@@ -1,0 +1,82 @@
+{
+  "kind": "Shader",
+  "source": "shader.glsl",
+  "render_order": 0,
+  "coords": "pattern",
+  "bindings": {
+    "output": {
+      "target": "bus:visual.out"
+    },
+    "detail": {
+      "source": "bus:detail"
+    },
+    "width": {
+      "source": "bus:width"
+    },
+    "tail": {
+      "source": "bus:tail"
+    },
+    "palette": {
+      "source": "bus:palette"
+    }
+  },
+  "consumed": {
+    "detail": {
+      "kind": "value",
+      "value": "f32",
+      "default": 1,
+      "min": 0.25,
+      "max": 4,
+      "label": "Detail",
+      "description": "Divides the bar width: 2 makes the bar half as wide"
+    },
+    "width": {
+      "kind": "value",
+      "value": "f32",
+      "default": 2.5,
+      "min": 0.5,
+      "max": 12,
+      "label": "Width",
+      "description": "Bar width in lamps"
+    },
+    "tail": {
+      "kind": "value",
+      "value": "f32",
+      "default": 0.3,
+      "min": 0.05,
+      "max": 1,
+      "label": "Tail",
+      "description": "Tail length as a fraction of one sweep across the piece"
+    },
+    "sweepPhase": {
+      "kind": "phasor",
+      "value": "f32",
+      "phasor": {
+        "period_seconds": 5.0,
+        "waveform": "ramp",
+        "phase_offset": 0.0
+      },
+      "default": 0,
+      "label": "Sweep",
+      "description": "Position in one there-and-back sweep (0-1)"
+    },
+    "palette": {
+      "kind": "palette",
+      "value": "sampler2D",
+      "label": "Palette",
+      "description": "The bar is the upper middle of this ramp and the tail fades down it to the dark end",
+      "gradient": {
+        "kind": "static",
+        "step_seconds": 0.0,
+        "fade_seconds": 0.0,
+        "set": [
+          {
+            "space": "oklab",
+            "method": "smooth",
+            "stops": "(0.14,0.04,0.02) (0.38,0.14,0.07) (0.58,0.2,0.11) (0.72,0.12,0.14) (0.84,0.03,0.15)"
+          }
+        ]
+      }
+    }
+  }
+}

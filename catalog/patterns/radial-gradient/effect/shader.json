@@ -1,0 +1,70 @@
+{
+  "kind": "Shader",
+  "source": "shader.glsl",
+  "render_order": 0,
+  "coords": "pattern",
+  "bindings": {
+    "output": {
+      "target": "bus:visual.out"
+    },
+    "detail": {
+      "source": "bus:detail"
+    },
+    "repeat": {
+      "source": "bus:repeat"
+    },
+    "palette": {
+      "source": "bus:palette"
+    }
+  },
+  "consumed": {
+    "detail": {
+      "kind": "value",
+      "value": "f32",
+      "default": 1,
+      "min": 0.25,
+      "max": 4,
+      "label": "Detail",
+      "description": "Multiplies the ring count: 2 packs twice as many rings from centre to edge"
+    },
+    "repeat": {
+      "kind": "value",
+      "value": "f32",
+      "default": 2,
+      "min": 0.5,
+      "max": 8,
+      "label": "Repeat",
+      "description": "How many ramps fit between the centre and the farthest lamp"
+    },
+    "flowPhase": {
+      "kind": "phasor",
+      "value": "f32",
+      "phasor": {
+        "period_seconds": 8.0,
+        "waveform": "ramp",
+        "phase_offset": 0.0
+      },
+      "default": 0,
+      "label": "Flow",
+      "description": "Outward flow: one ramp length per cycle (0-1)"
+    },
+    "palette": {
+      "kind": "palette",
+      "value": "sampler2D",
+      "label": "Palette",
+      "description": "The ramp the rings are made of, mirrored end to end",
+      "gradient": {
+        "kind": "static",
+        "step_seconds": 0.0,
+        "fade_seconds": 0.0,
+        "set": [
+          {
+            "space": "oklab",
+            "method": "smooth",
+            "stops": "(0.217792,0.026456,0.044222)@0 (0.45278,0.085713,0.083028)@0.3 (0.708163,0.064091,0.136545)@0.6 (0.880303,0.009257,0.13446)@0.85 (0.97339,-0.000688,0.035306)@1"
+          }
+        ]
+      }
+    }
+  }
+}

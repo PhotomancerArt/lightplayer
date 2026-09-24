@@ -1,0 +1,14 @@
+{
+  "kind": "Module",
+  "nodes": {
+    "shader": {
+      "ref": "./shader.json"
+    }
+  },
+  "provenance": {
+    "author": "Photomancer",
+    "version": "1",
+    "license": "CC0-1.0",
+    "created": "2026-09-24"
+  }
+}

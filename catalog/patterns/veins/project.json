@@ -1,0 +1,9 @@
+{
+  "format": 10,
+  "name": "Veins",
+  "description": "Thin glowing lines tracing the contours of a slow noise field over a dark ground, colour shifting along each line.",
+  "kind": "pattern",
+  "exports": [
+    "effect"
+  ]
+}

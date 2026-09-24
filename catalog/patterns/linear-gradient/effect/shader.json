@@ -1,0 +1,82 @@
+{
+  "kind": "Shader",
+  "source": "shader.glsl",
+  "render_order": 0,
+  "coords": "pattern",
+  "bindings": {
+    "output": {
+      "target": "bus:visual.out"
+    },
+    "detail": {
+      "source": "bus:detail"
+    },
+    "angle": {
+      "source": "bus:angle"
+    },
+    "repeat": {
+      "source": "bus:repeat"
+    },
+    "palette": {
+      "source": "bus:palette"
+    }
+  },
+  "consumed": {
+    "detail": {
+      "kind": "value",
+      "value": "f32",
+      "default": 1,
+      "min": 0.25,
+      "max": 4,
+      "label": "Detail",
+      "description": "Multiplies the repeat count: 2 packs twice as many ramps across the piece"
+    },
+    "angle": {
+      "kind": "value",
+      "value": "f32",
+      "default": 20,
+      "min": 0,
+      "max": 360,
+      "label": "Angle",
+      "description": "Direction the ramp runs and scrolls, in degrees; 0 is along the long side"
+    },
+    "repeat": {
+      "kind": "value",
+      "value": "f32",
+      "default": 1,
+      "min": 0.5,
+      "max": 6,
+      "label": "Repeat",
+      "description": "How many times the ramp crosses the piece"
+    },
+    "scrollPhase": {
+      "kind": "phasor",
+      "value": "f32",
+      "phasor": {
+        "period_seconds": 12.0,
+        "waveform": "ramp",
+        "phase_offset": 0.0
+      },
+      "default": 0,
+      "label": "Scroll",
+      "description": "Scroll position: one ramp length per cycle (0-1)"
+    },
+    "palette": {
+      "kind": "palette",
+      "value": "sampler2D",
+      "label": "Palette",
+      "description": "The ramp laid across the piece, mirrored end to end",
+      "gradient": {
+        "kind": "static",
+        "step_seconds": 0.0,
+        "fade_seconds": 0.0,
+        "set": [
+          {
+            "space": "oklab",
+            "method": "smooth",
+            "stops": "(0.211891,0.027432,-0.063804) (0.408371,0.103244,-0.074873) (0.596978,0.164116,0.047881) (0.78057,0.067514,0.107443) (0.909681,-0.012831,0.143435)"
+          }
+        ]
+      }
+    }
+  }
+}
