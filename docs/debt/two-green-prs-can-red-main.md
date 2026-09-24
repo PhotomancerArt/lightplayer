@@ -1,5 +1,5 @@
 ---
-status: carried
+status: paying-down
 since: 2026-08-02      # first instance recorded here; the condition is older
 logged: 2026-08-02
 area: CI / merge policy
@@ -60,6 +60,23 @@ repair is not buried inside unrelated work, and say so on the PR.
   was verified by confirming the figures were unchanged (`projects/test/basic`
   6,516 B, `quad-strips-v3` 2,032 B — both still matching `[JIT] used=`
   readings taken off a classic ESP32 the same day).
+
+- **2026-09-24** — main went red at `e226fb283` (the #793 merge) after a
+  green `dafd73d75`. Used as the test case for option (1) below: run against
+  real history, `scripts/ci/red-main-suspects.sh e226fb28` names exactly
+  #793 as the one landing since the last green main (and skips the later
+  green `ebf63d463`, which is a descendant, not an ancestor). The same run
+  against the 2026-09-22 red `e2872cd9a` names #779.
+
+**Paying down (2026-09-24)** — option (1) landed in a cheaper form than a
+schedule: main pushes already force every gate on, so every main run *is* the
+canary. The `red-main-suspects` job at the end of `pre-merge.yml` runs only
+when a push-to-main run fails, finds the newest green `pre-merge` push run on
+main whose sha is an ancestor of the red one, and writes the first-parent
+landings in between (commit, PR number, subject) to the job summary plus an
+`::error::` annotation naming the PRs. It does not prevent the break; it
+removes the misattribution. Retire this entry once a real two-green incident
+has been diagnosed from that output without the detour described above.
 
 **Exit criteria** — accepted as carried for now; the frequency does not justify
 the fix cost. Options, cheapest first, recorded so the next incident starts from
