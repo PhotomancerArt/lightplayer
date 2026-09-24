@@ -63,7 +63,8 @@ env:
 #                   ├─ firmware-esp32v3  (esp32 image size, manifest, clippy)
 #                   ├─ firmware-size     (esp32c6 image size, manifest)
 #                   ├─ emu-c6            (the C6 SoC emulator's own suite)
-#                   ├─ emu-esp32v3       (the classic ESP32 machine's gate)
+#                   ├─ emu-esp32v3       (the classic ESP32 machine's gate: boot suite + heap)
+#                   ├─ emu-esp32v3-ref   (…its other half: replays + reference image + jit cell)
 #                   └─ heap-budget-chips (chip heap ratchet + lp-cli emu tests)
 #
 # Every job is path-gated, including lint/validate via the `core` filter, so a
@@ -1601,9 +1602,22 @@ jobs:
   #     identity;
   #   * the reference image **twice**, for `--verify`.
   #
+  # **Two parallel jobs since 2026-09-24**, split along the recipe's own seam
+  # (`test-emu-esp32v3-gate` = `-boot` + `-reference`): this one builds the
+  # three in-tree images and runs the suite (~13 min of the old ~22), plus the
+  # heap ratchet, whose firmware rebuild is incremental on top of those
+  # images; `emu-esp32v3-ref` below runs the lints, the replays, the registry
+  # parity test, the reference image and the translated-core cell. Nothing
+  # crosses between them — the reference image is built in its own detached
+  # worktree, never from the in-tree firmware — so no artifact is passed and
+  # the split's only cost is a second toolchain install (~1.5 min of runner
+  # time). This job keeps the old check name; the other one is new.
+  #
   # `fetch-depth: 0` for the same reason as emu-c6: the reference build does
   # `git worktree add --detach` at a pinned commit, which a depth-1 checkout
-  # cannot serve.
+  # cannot serve. (That is the other job's step now; kept here too because
+  # the image's build script may read history and 5 s is cheaper than
+  # finding out.)
   emu-esp32v3:
     name: Emulator ESP32v3 (x64)
     runs-on: ubuntu-24.04
@@ -1694,7 +1708,112 @@ jobs:
       - name: Install espflash (prebuilt — the merged image's bootloader)
         run: cargo binstall --no-confirm --locked espflash@3.3.0
 
-      # Since M5 P6 the recipe also runs the two host test commands: `cargo
+      # Part 1 of `test-emu-esp32v3-gate`: the shipped, `rmt-chase` and
+      # `frame-dump` images, the merged chip image, and the whole suite with
+      # the `#[ignore]`d half included. Parts 2–4 are the other job's.
+      - name: Emulator ESP32v3 boot suite (both boot paths, rmt-chase, frame-dump)
+        run: cd lp2025 && just test-emu-esp32v3-boot
+
+      # The classic's half of the heap-budget record's chip section (M5 P5).
+      # It lives here rather than in `Heap budget (esp32c6 chip)` because it
+      # needs the Xtensa toolchain this job already installs — a cold espup
+      # install is ~8 minutes, and the other job is path-gated on `emu_c6`,
+      # which does not fire for `lp-fw/fw-esp32v3/**` at all.
+      #
+      # In THIS half of the split rather than the reference half because the
+      # boot step above has just built the same firmware tree, so the
+      # ratchet's rebuild is incremental (44 s on the runner, run
+      # 35969291379); in the other job it would be a cold ~3-minute build.
+      #
+      # Cost, measured on an M2 Max with a warm cargo cache: 24 s all in — a
+      # 22 s `fw-esp32v3` rebuild (the recipe touches `src/main.rs`, because
+      # this crate's cfg-dependent codegen does not always retrigger on a
+      # feature flip) plus a 0.2 s boot that ends on its own `[JIT] used=`
+      # line at 119 ms of emulated time. The release `lp-emu-esp32v3`
+      # binary the ratchet runs is the one expense this job does not already
+      # pay; it is a much smaller dependency tree than `lp-cli`'s.
+      - name: Heap budget ratchet — the classic's own ledger
+        run: cd lp2025 && just heap-budget-check-chips-v3
+
+      - name: sccache stats
+        if: always()
+        shell: bash
+        run: |
+          if command -v sccache >/dev/null; then
+            { echo '#### sccache'; echo '```'; sccache --show-stats; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+  # The other half of the classic's gate — see `emu-esp32v3` above for the
+  # split. Same path gate, same toolchains, same cache key (the rust-cache
+  # entry is registry-only, `cache-targets: false`, so the two jobs can share
+  # it), and the same 35-minute budget, which this half sits far inside.
+  emu-esp32v3-ref:
+    name: Emulator ESP32v3 reference (x64)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    needs: detect-changes
+    if: needs.detect-changes.outputs.emu_esp32v3 == 'true'
+    env:
+      CARGO_INCREMENTAL: "0"
+      CARGO_PROFILE_DEV_DEBUG: "false"
+      CARGO_PROFILE_TEST_DEBUG: "false"
+      SCCACHE_GHA_ENABLED: "true"
+      RUSTC_WRAPPER: sccache
+    steps:
+      - name: Install system deps (libudev for serialport/espflash)
+        run: |
+          sudo rm -f /etc/apt/sources.list.d/*chrome* /etc/apt/sources.list.d/*google*
+          sudo apt-get update || echo "apt-get update reported errors; continuing — the install below is the real gate"
+          sudo apt-get install -y libudev-dev pkg-config
+
+      - name: Checkout lp2025
+        uses: actions/checkout@v4
+        with:
+          path: lp2025
+          # build-reference-image.sh does `git worktree add --detach` at a
+          # pinned commit; a shallow checkout has no history to detach to.
+          fetch-depth: 0
+
+      - name: Checkout lp-regalloc2
+        uses: actions/checkout@v4
+        with:
+          repository: PhotomancerArt/lp-regalloc2
+          path: lp-regalloc2
+
+      # Both toolchains, in that order, the Xtensa one NOT default — the
+      # sibling job's comment has the reason.
+      - name: Install Rust toolchain (host)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: nightly-2026-04-27
+          components: rust-src
+
+      # Same version and buildtargets as `firmware-esp32v3` and `emu-esp32v3`;
+      # keep all three in sync.
+      - name: Install Xtensa Rust toolchain
+        uses: ./lp2025/.github/actions/xtensa-toolchain
+        with:
+          version: 1.95.0.0
+          buildtargets: esp32
+          default: false
+
+      - name: Run sccache
+        uses: mozilla/sccache-action@v0.0.10
+
+      - name: Cache cargo registry and build artifacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: lp2025 -> target
+          cache-targets: false
+          cache-bin: false
+          shared-key: emu-esp32v3
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+          cache-on-failure: true
+
+      - name: Install just
+        uses: extractions/setup-just@v3
+
+      # Since M5 P6 the gate also runs the two host test commands: `cargo
       # test -p lp-emu-validate` (which owns `tests/v3_replays.rs`, the four
       # committed transcript pairs) and `cargo test -p lp-cli --test
       # validate_registry_parity`. They are IN THE RECIPE rather than extra
@@ -1710,10 +1829,10 @@ jobs:
       # reproducibility break from anything else is caught post-merge, on
       # main. This image is NOT cached like emu-c6's: it is built at HEAD,
       # so there is no pinned commit to key an entry on.
-      - name: Emulator ESP32v3 gate (both boot paths, the replays, the reference image)
+      - name: Emulator ESP32v3 gate, reference half (lints, replays, registry parity, the reference image)
         env:
           LP_EMU_REF_VERIFY: ${{ (needs.detect-changes.outputs.emu_ref_recipe == 'true' || needs.detect-changes.outputs.emu_esp32v3_fw == 'true') && '1' || '0' }}
-        run: cd lp2025 && just test-emu-esp32v3-gate
+        run: cd lp2025 && just test-emu-esp32v3-reference
 
       # **The translator's identity cell** (M7 XD14, P07): `--jit` against
       # `--interpreter` on the pinned `boot-idle` image, five readings
@@ -1725,32 +1844,13 @@ jobs:
       # at ~3 minutes on the runner and a step is where that number can be
       # read. It is still one `just` recipe a human runs the same way.
       #
-      # It comes AFTER the gate step because the gate builds the reference
-      # image at HEAD that this reuses, so the only thing this pays for is the
-      # release `lp-emu-esp32v3 --features jit` binary and ~25 s of cranelift.
-      # Measured end to end on an M2 Max with the image already built: 27.8 s.
+      # It comes AFTER the gate step, in THIS job, because that step builds
+      # the reference image at HEAD that this reuses, so the only thing this
+      # pays for is the release `lp-emu-esp32v3 --features jit` binary and
+      # ~25 s of cranelift. Measured end to end on an M2 Max with the image
+      # already built: 27.8 s.
       - name: Translated-core identity cell (--jit vs --interpreter, boot-idle)
         run: cd lp2025 && just test-emu-xt-jit-image
-
-      # The classic's half of the heap-budget record's chip section (M5 P5).
-      # It lives here rather than in `Heap budget (esp32c6 chip)` because it
-      # needs the Xtensa toolchain this job already installs — a cold espup
-      # install is ~8 minutes, and the other job is path-gated on `emu_c6`,
-      # which does not fire for `lp-fw/fw-esp32v3/**` at all.
-      #
-      # Cost, measured on an M2 Max with a warm cargo cache: 24 s all in — a
-      # 22 s `fw-esp32v3` rebuild (the recipe touches `src/main.rs`, because
-      # this crate's cfg-dependent codegen does not always retrigger on a
-      # feature flip) plus a 0.2 s boot that ends on its own `[JIT] used=`
-      # line at 119 ms of emulated time. The C6's arm in the other job is ~8
-      # minutes (its comment's own figure: a release `lp-cli`, a firmware
-      # build and the profile captures), so the classic's arm is well under
-      # it — but the two are not in the same job, so the comparison is about
-      # size and not about a shared budget. The release `lp-emu-esp32v3`
-      # binary the ratchet runs is the one expense this job does not already
-      # pay; it is a much smaller dependency tree than `lp-cli`'s.
-      - name: Heap budget ratchet — the classic's own ledger
-        run: cd lp2025 && just heap-budget-check-chips-v3
 
       - name: sccache stats
         if: always()
