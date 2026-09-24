@@ -4,6 +4,9 @@
 //! To add support for another board (e.g., ESP32-C3), create a similar file
 //! and add feature gates in board/mod.rs.
 
+// The product boot's only; harnesses drive the pins they need themselves.
+#[cfg(not(fw_harness))]
+pub mod board_quirks;
 pub mod constants;
 #[cfg(any(
     feature = "test_cycle_probe",

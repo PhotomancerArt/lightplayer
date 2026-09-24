@@ -125,6 +125,7 @@ use lpfs::lp_path::AsLpPath;
 #[cfg(not(fw_harness))]
 use {
     alloc::{boxed::Box, rc::Rc, sync::Arc},
+    board::esp32c6::board_quirks::apply_board_quirks,
     board::esp32c6::init::{init_board, start_runtime},
     core::cell::RefCell,
     hardware::button::Esp32GpioButtonDriver,
@@ -380,6 +381,10 @@ fn boot_firmware(spawner: embassy_executor::Spawner) -> FirmwareApp {
         hardware_manifest.board_id(),
         hardware_manifest.board_name()
     );
+    // Before any radio init: the XIAO C6's RF switch is dead until its pins
+    // are driven. Keyed on the manifest in effect, compiled-in fallback
+    // included; any other board id is left alone.
+    apply_board_quirks(hardware_manifest.board_id());
     let hardware_registry = Rc::new(HwRegistry::new(hardware_manifest));
     let mut hardware_system = HardwareSystem::new(Rc::clone(&hardware_registry));
     // How many outputs appear is decided in one place: the board manifest's
