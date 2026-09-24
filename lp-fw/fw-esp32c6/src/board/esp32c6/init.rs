@@ -73,7 +73,9 @@ pub fn init_board() -> (
         esp_alloc::HEAP.add_region(esp_alloc::HeapRegion::new(
             core::ptr::addr_of_mut!(HEAP_DRAM2).cast::<u8>(),
             HEAP_DRAM2_SIZE,
-            esp_alloc::MemoryCapability::Internal.into(),
+            // Tagged so the C heap (the radio blobs) can ask for it first:
+            // see `c_heap`.
+            crate::c_heap::RECLAIMED,
         ));
     }
 

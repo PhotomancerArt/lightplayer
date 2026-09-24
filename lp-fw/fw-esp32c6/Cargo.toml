@@ -152,7 +152,7 @@ desk_espnow_meter = ["radio"]
 # `src/ble/conn_params.rs`, `desk`.
 desk_ble_params = ["ble"]
 heap_map_diag = ["lpc-shared"]
-heap_track_diag = ["heap_map_diag", "esp-alloc/alloc-hooks", "dep:enumset"]
+heap_track_diag = ["heap_map_diag", "esp-alloc/alloc-hooks"]
 heap_diag_ble_standin = ["heap_map_diag"]
 # The `rmt-chase` payload's harness: a 256-LED white chase on GPIO18 through
 # the shipping `lp-ws281x` refill path, three passes, one `rmt-frame` record
@@ -286,7 +286,10 @@ esp-hal = { version = "1.1.0", features = ["log-04", "unstable"] }
 esp-rtos = { version = "0.3.0", features = ["embassy", "log-04"] }
 esp-radio = { version = "0.18.0", optional = true, features = ["esp-now", "log-04", "unstable", "wifi"] }
 esp-println = { version = "0.17.0", default-features = false, features = ["esp32c6", "jtag-serial", "log-04"] }
-esp-alloc = { version = "0.10.0", features = ["internal-heap-stats"] }
+# `compat` (esp-alloc's C `malloc` family) is OFF: `src/c_heap.rs` provides
+# those symbols, placing the radio blobs' allocations in the reclaimed segment
+# first (docs/defects/2026-09-24-ble-enabled-c6-refuses-a-project-switch-after-the-heap-cut.md).
+esp-alloc = { version = "0.10.0", default-features = false, features = ["global-allocator", "internal-heap-stats"] }
 # The BLE link (`ble`) and its spike (`test_ble`). trouble-host 0.6 is the release on bt-hci 0.8,
 # which is what esp-radio 0.18's `BleConnector` implements.
 trouble-host = { version = "0.6.0", optional = true, default-features = false, features = ["derive", "gatt", "peripheral", "log", "connection-params-update", "default-packet-pool", "default-packet-pool-mtu-255"] }
@@ -298,7 +301,7 @@ heapless = { version = "0.9", optional = true }
 static_cell = { version = "2.1", optional = true }
 embassy-sync-07 = { package = "embassy-sync", version = "0.7", optional = true }
 critical-section = "1"
-enumset = { version = "1", optional = true }
+enumset = "1"
 
 fw-core = { path = "../fw-core", default-features = false }
 fw-esp32-common = { path = "../fw-esp32-common" }

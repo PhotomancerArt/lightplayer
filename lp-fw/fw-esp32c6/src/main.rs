@@ -66,6 +66,7 @@ fn on_alloc_error(layout: Layout) -> ! {
 #[cfg(all(feature = "ble", not(fw_harness)))]
 mod ble;
 mod board;
+mod c_heap;
 #[cfg(all(feature = "desk_espnow_meter", not(fw_harness)))]
 mod desk_espnow_meter;
 #[cfg(not(fw_harness))]
