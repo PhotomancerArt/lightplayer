@@ -1,7 +1,8 @@
 ---
-status: carried
+status: retired
 since: 2026-08-07
 logged: 2026-08-07
+retired: 2026-09-24
 area: justfile local gate (`just check`) vs the browser wasm target
 related:
   - docs/debt/local-gate-misses-what-ci-checks.md
@@ -57,9 +58,20 @@ a fresh checkout still works).
 - 2026-08-07 — filed at P7 cleanup: `check-wasm-cloud` confirmed absent
   from `just check`'s recipe chain (`check-lint schema-check
   fw-manifest-check-emu`).
+- 2026-09-24 — paydown: measured first, as the exit criteria ask. In a
+  fresh worktree, cold (first-ever wasm32 build of `lpa-cloud-client`'s
+  dep tree, no prior `target/wasm32-unknown-unknown`) 47.06 s wall; warm
+  1.22 s total (`Finished ... in 1.03s`). Warm is the steady state of a
+  local gate, and ~1 s rides free inside `check`'s `[parallel]` chain
+  beside clippy, so it joined the chain directly (`check-lint
+  schema-check fw-manifest-check-emu check-wasm-cloud`). Local gate only:
+  CI's Lint job runs `just check-lint`, not `just check`, so this adds no
+  CI cost. A fresh checkout needs nothing extra — the recipe depends on
+  `install-wasm32-target`. Retiring — exit criteria met.
 
 **Exit criteria** — either `check-wasm-cloud` joins `just check`'s chain
 (measured for added wall-clock time first — wasm32 compiles are not
 free), or this entry is retired in favor of a broader Studio-wasm local
 gate that already covers it (see `local-gate-misses-what-ci-checks`'s own
-exit criteria, which this is a special case of).
+exit criteria, which this is a special case of). **Met 2026-09-24**: the
+former.
