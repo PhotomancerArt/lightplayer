@@ -60,8 +60,15 @@ pub fn DevicesPage(
     /// half of D44 worth reviewing.
     #[props(default)]
     target_pick_open: bool,
+    /// Stories only: the Bluetooth settings section.s view (the app reads it
+    /// from its access context).
+    #[props(default)]
+    bluetooth_settings: Option<lpa_studio_core::UiDeviceSettingsView>,
     on_action: EventHandler<UiAction>,
 ) -> Element {
+    let access_ui = super::access_ui_context::use_access_ui();
+    let bluetooth =
+        bluetooth_settings.or_else(|| access_ui.map(|ui| ui.device_settings.read().clone()));
     let devices = home.devices.clone();
     // D7: the grid draws the boards that are HERE; the ones Studio only
     // remembers become the quiet line under it. The split is the model's
@@ -112,6 +119,8 @@ pub fn DevicesPage(
                                 // The runtime band, for a device that is
                                 // not silicon; absent = a real board.
                                 runtime: devices.runtime_bands.get(&card.id).cloned(),
+                                // Its login line and access panel (BLE M6).
+                                access: devices.access.get(&card.id).cloned(),
                                 card,
                                 // The empty face's picker reads the SAME two
                                 // lists the gallery does — there is no
@@ -138,6 +147,24 @@ pub fn DevicesPage(
                     }
                 }
             }
+
+            // The account default password and the remembered ones (BLE M6
+            // S3): where Bluetooth is turned on for a piece.
+            if let Some(settings) = bluetooth {
+                super::bluetooth_settings_section::BluetoothSettingsSection {
+                    settings,
+                    on_settings: move |command| {
+                        if let Some(ui) = access_ui {
+                            ui.on_settings.call(command);
+                        }
+                    },
+                    on_access: move |command| {
+                        if let Some(ui) = access_ui {
+                            ui.on_access.call(command);
+                        }
+                    },
+                }
+            }
         }
     }
 }
@@ -162,7 +189,7 @@ pub fn DevicesPage(
 /// shut and the grid never reflows.
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
-fn AddDeviceCard(
+pub(crate) fn AddDeviceCard(
     /// Stories only: mount the target menu open (a capture cannot click).
     #[props(default = false)]
     pick_open: bool,
@@ -519,6 +546,7 @@ mod tests {
 
     fn view(roster: RosterView, transport_available: bool) -> DeviceRosterView {
         DeviceRosterView {
+            access: Default::default(),
             roster,
             transport_available,
             open_addresses: Default::default(),

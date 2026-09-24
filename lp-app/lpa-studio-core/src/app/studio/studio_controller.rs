@@ -1069,6 +1069,13 @@ impl StudioController {
         view
     }
 
+    /// The lens board's login line, when it is reached over Bluetooth.
+    fn lens_access_line(&self) -> Option<String> {
+        let device = self.pool.attached_session()?.attachment().device;
+        let device = self.devices.roster().device(device)?;
+        self.access.device_view(device, None)?.line
+    }
+
     /// The password sheet, when a Bluetooth piece needs one.
     fn login_prompt_view(&self) -> Option<crate::app::access::UiLoginPrompt> {
         let roster = self.devices.roster();
@@ -2092,6 +2099,7 @@ impl StudioController {
             .with_session(self.session_control())
             .with_settings(self.settings_view())
             .with_access(self.login_prompt_view(), self.project_access_view())
+            .with_lens_access_line(self.lens_access_line())
             .with_dirty(dirty)
     }
 

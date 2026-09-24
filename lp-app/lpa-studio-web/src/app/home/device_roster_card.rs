@@ -178,6 +178,14 @@ pub(crate) fn DeviceRosterCard(
     /// why a real card's height is unchanged by this phase.
     #[props(default)]
     runtime: Option<UiRuntimeBand>,
+    /// The device.s access facts (BLE M6): the login line over Bluetooth,
+    /// and the device access panel where this link may write the store.
+    /// Joined at the app view; `None` for a board with neither.
+    #[props(default)]
+    access: Option<lpa_studio_core::UiDeviceAccess>,
+    /// Stories only: mount the Bluetooth panel open.
+    #[props(default)]
+    access_panel_open: bool,
     /// Open the header's ⋯ menu immediately (stories only).
     #[props(default = false)]
     menu_initially_open: bool,
@@ -263,7 +271,15 @@ pub(crate) fn DeviceRosterCard(
         .map(|activity| activity_zone(activity.kind));
     let project_line = project_line_text(&card, busy_zone);
     let firmware_line = firmware_line_text(&card, identity_line.board.as_deref(), busy_zone);
-    let device_line = device_line_text(&card, busy_zone);
+    let device_line = match access.as_ref().and_then(|access| access.line.as_deref()) {
+        // Over Bluetooth the login leads: it is what decides what the
+        // card can do, and at 375 px the freshness is what truncates.
+        Some(login) => format!("{login} · {}", device_line_text(&card, busy_zone)),
+        None => device_line_text(&card, busy_zone),
+    };
+    let on_access = super::access_ui_context::access_handler();
+    let log_in = access.as_ref().and_then(|access| access.log_in.clone());
+    let access_panel = access.as_ref().and_then(|access| access.panel.clone());
     // The fault takes the project line only when no project work is
     // running: the push's own narration outranks it (the terminal keeps the
     // fault either way).
@@ -574,6 +590,35 @@ pub(crate) fn DeviceRosterCard(
                             running: false,
                             variant: ActionButtonVariant::Quiet,
                             on_action,
+                        }
+                    }
+                    // Access over Bluetooth (BLE M6): "Log in" / "Log in for
+                    // edit" opens the password sheet; "Bluetooth" opens the
+                    // device access panel in the top layer, so neither can
+                    // change the card's height.
+                    if idle && linked {
+                        if let Some(label) = log_in.clone() {
+                            button {
+                                key: "{\"log-in\"}",
+                                class: quiet_action_class(),
+                                r#type: "button",
+                                onclick: move |_| on_access.call(lpa_studio_core::AccessCommand::LogIn { device }),
+                                "{label}"
+                            }
+                        }
+                        if let Some(panel) = access_panel.clone() {
+                            DetailPopover {
+                                key: "{\"bluetooth\"}",
+                                icon: StudioIconName::More,
+                                label: "Bluetooth".to_string(),
+                                title: "Who can reach this piece over Bluetooth".to_string(),
+                                placement: PopoverPlacement::TopStart,
+                                initially_open: access_panel_open,
+                                trigger: rsx! { "Bluetooth" },
+                                trigger_class: quiet_action_class().to_string(),
+                                trigger_open_class: format!("{} tw:text-strong-foreground", quiet_action_class()),
+                                super::device_access_panel::DeviceAccessPanel { panel, on_access }
+                            }
                         }
                     }
                     span { class: "tw:min-w-0 tw:flex-1" }

@@ -4,10 +4,16 @@
 //! cards they share. One combined gallery page lived here until the
 //! chrome C reorg split it.
 
+pub(crate) mod access_fields;
+pub(crate) mod access_ui_context;
+#[cfg(feature = "stories")]
+pub(crate) mod ble_access_stories;
 pub(crate) mod ble_reach;
+pub(crate) mod bluetooth_settings_section;
 pub(crate) mod brand_hero;
 pub(crate) mod card_footer;
 pub(crate) mod card_thumb;
+pub(crate) mod device_access_panel;
 pub(crate) mod device_pick_popover;
 pub(crate) mod device_roster_card;
 pub(crate) mod device_terminal;
@@ -21,6 +27,7 @@ pub(crate) mod home_gallery_stories;
 pub mod home_landing;
 #[cfg(feature = "stories")]
 pub(crate) mod home_landing_stories;
+pub(crate) mod login_sheet;
 /// The `catalog/logo-sign` mapping generator plus its drift gate. Test-only:
 /// the running app reads the committed document, never this.
 #[cfg(test)]

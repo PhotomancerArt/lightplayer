@@ -68,3 +68,22 @@ fn groups_wrapped() -> Element {
         }
     }
 }
+
+#[story(
+    description = "Play over Bluetooth, phone width (BLE M6): the same panel, with one line under the title saying how the piece is reached — \"Logged in as camp — play\" — so a knob that works and an edit that asks for a password are both expected. Idle, the page reads the piece once a minute and nothing more (M5's lean Play)."
+)]
+fn mobile_over_bluetooth() -> Element {
+    let face = held_root_face();
+    rsx! {
+        div { class: "tw:h-[720px] tw:w-[375px] tw:overflow-auto tw:border tw:border-border",
+            PlayModeSurface {
+                panel: face.panel,
+                preview: face.preview,
+                auto_save: face.auto_save,
+                access_line: Some("Logged in as camp — play".to_string()),
+                on_panel: move |_| {},
+                on_action: move |_| {},
+            }
+        }
+    }
+}

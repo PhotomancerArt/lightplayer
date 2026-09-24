@@ -298,6 +298,14 @@ pub fn App() -> Element {
             controller.load_user_settings_json(&json);
         }
         controller.set_on_user_settings(crate::settings_io::store_user_settings_json);
+        // Bluetooth access memory (BLE M6): remembered passwords and what
+        // this browser wrote to each piece, each under its own key, read
+        // before the actor spawns and written back on change.
+        controller.apply_access_command(lpa_studio_core::AccessCommand::MemoryLoaded {
+            passwords_json: crate::settings_io::load_local(crate::settings_io::BLE_PASSWORDS_KEY),
+            devices_json: crate::settings_io::load_local(crate::settings_io::BLE_DEVICE_ACCESS_KEY),
+        });
+        controller.set_on_access_persist(crate::settings_io::store_access);
         // Node copy produces envelope text in core and writes it here
         // (core never touches `navigator.clipboard`).
         controller.set_on_copy_text(crate::clipboard::write_text);
@@ -1109,6 +1117,34 @@ pub fn App() -> Element {
     // link to a project this library does NOT have never gets here: the
     // route resolution above lands it on Home with a pending intent.
     let current_view = view.read().clone();
+    // Bluetooth access (BLE M6): the password sheet, the device access
+    // panel, the Devices page's Bluetooth settings and the project's
+    // Bluetooth list all sit under the shell; their callbacks and the two
+    // view slices they read ride one context instead of every layer.
+    let access_bridge = bridge.clone();
+    let access_settings_bridge = bridge.clone();
+    let mut device_settings = use_signal(lpa_studio_core::UiDeviceSettingsView::default);
+    let mut project_access = use_signal(|| None::<lpa_studio_core::UiProjectAccess>);
+    use_context_provider(|| crate::app::home::access_ui_context::AccessUi {
+        on_access: Callback::new(move |command| {
+            access_bridge.tx.send(StudioCommand::Access(command));
+        }),
+        on_settings: Callback::new(move |command| {
+            access_settings_bridge
+                .tx
+                .send(StudioCommand::Settings(command));
+        }),
+        device_settings,
+        project_access,
+    });
+    if *device_settings.peek() != current_view.settings.devices {
+        device_settings.set(current_view.settings.devices.clone());
+    }
+    if *project_access.peek() != current_view.project_access {
+        project_access.set(current_view.project_access.clone());
+    }
+    let login_prompt = current_view.login_prompt.clone();
+    let sheet_bridge = bridge.clone();
     let current_route = route.read().clone();
     let opening_frame = matches!(
         current_route,
@@ -1381,6 +1417,17 @@ pub fn App() -> Element {
             // bottom for acts with no other visible consequence (a link on
             // the clipboard, an access level flipped, a project archived).
             ToastHost {}
+            // The password sheet (BLE M6): page-level, over any route, when
+            // a Bluetooth piece needs a password Studio did not have.
+            if let Some(prompt) = login_prompt {
+                crate::app::home::login_sheet::LoginSheet {
+                    key: "{prompt.device.0}",
+                    prompt,
+                    on_access: move |command| {
+                        sheet_bridge.tx.send(StudioCommand::Access(command));
+                    },
+                }
+            }
         }
     }
 }

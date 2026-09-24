@@ -34,6 +34,11 @@ pub fn PlayModeSurface(
     /// reachable in play mode. `None` hides the switch.
     #[props(default = Some(true))]
     auto_save: Option<bool>,
+    /// How this piece is reached, when it is over Bluetooth ("Logged in
+    /// as camp — play"): the one line a phone on a piece.s panel needs to
+    /// know why an edit might ask for a password (BLE M6).
+    #[props(default)]
+    access_line: Option<String>,
     #[props(default = None)] on_panel: Option<EventHandler<PanelGesture>>,
     #[props(default)] on_action: Option<EventHandler<UiAction>>,
 ) -> Element {
@@ -59,6 +64,12 @@ pub fn PlayModeSurface(
                 h1 { class: "tw:m-0 tw:min-w-0 tw:truncate tw:text-lg tw:text-strong-foreground", "{title}" }
                 span { class: "tw:ml-auto tw:flex-none tw:text-[0.6rem] tw:font-bold tw:uppercase tw:tracking-[0.14em] tw:text-dim-foreground",
                     "play"
+                }
+            }
+            if let Some(line) = access_line {
+                p { class: "tw:m-0 tw:truncate tw:border-b tw:border-border-strong tw:px-4 tw:py-1.5 tw:text-xs tw:text-subtle-foreground",
+                    title: "{line}",
+                    "{line}"
                 }
             }
             if let Some(preview) = preview {

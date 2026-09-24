@@ -528,6 +528,7 @@ fn powered_off_sim_fixture() -> DeviceRosterView {
     card.freshness_label = Some("last heard 4 min ago".to_string());
     let id = card.id;
     DeviceRosterView {
+        access: Default::default(),
         transport_available: true,
         feeds: Default::default(),
         runtime_bands: [(id, UiRuntimeBand::sim("seeed/xiao-esp32-c6", Some("cpu")))]
@@ -823,6 +824,7 @@ fn degraded_card_fixture() -> DeviceView {
 /// chip whose only honest verb is round 2\'s.
 fn roster_fixture() -> DeviceRosterView {
     DeviceRosterView {
+        access: Default::default(),
         transport_available: true,
         feeds: Default::default(),
         runtime_bands: Default::default(),
@@ -1146,6 +1148,7 @@ fn roster_page_fixture() -> DeviceRosterView {
     let empty = devices.remove(3);
     let running = devices.remove(0);
     DeviceRosterView {
+        access: Default::default(),
         transport_available: true,
         feeds: Default::default(),
         runtime_bands: Default::default(),

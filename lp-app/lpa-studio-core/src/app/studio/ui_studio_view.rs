@@ -165,6 +165,9 @@ pub struct UiStudioView {
     /// The open library project.s Bluetooth list (its sidecar), for its
     /// settings. `None` without a library project open.
     pub project_access: Option<crate::app::access::UiProjectAccess>,
+    /// The editor lens.s login line when its board is reached over
+    /// Bluetooth ("Logged in as camp — play"), for Play.s header.
+    pub lens_access_line: Option<String>,
 }
 
 impl UiStudioView {
@@ -186,7 +189,14 @@ impl UiStudioView {
             dirty: crate::DirtySummary::clean(),
             login_prompt: None,
             project_access: None,
+            lens_access_line: None,
         }
+    }
+
+    /// The lens board.s login line (BLE M6).
+    pub fn with_lens_access_line(mut self, line: Option<String>) -> Self {
+        self.lens_access_line = line;
+        self
     }
 
     /// The access slice (BLE M6): the sheet and the project.s list.
