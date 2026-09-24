@@ -20,7 +20,8 @@
 //       --page localhost:<lab port> join --name "LP-Zook dome"
 //
 // Commands:
-//   join [--name <exact>|--prefix <p>] [--timeout-ms N]   click Join, answer the chooser
+//   join [--name <exact>|--prefix <p>] [--timeout-ms N] [--click-expr <js>]
+//                                                         click Join, answer the chooser
 //   js <expr>                                             evaluate in the page, print the value
 //   targets                                               list the page targets
 //
@@ -99,6 +100,8 @@ async function join(s) {
   const name = opt("--name", undefined);
   const prefix = opt("--prefix", name ? undefined : "LP-");
   const timeoutMs = Number(opt("--timeout-ms", "30000"));
+  // What the gesture runs; the lab page's Join by default.
+  const clickExpr = opt("--click-expr", `document.getElementById("btn-join").click(); true`);
   const wanted = (d) => (name ? d.name === name : d.name.startsWith(prefix));
   await s.send("DeviceAccess.enable");
   const t0 = Date.now();
@@ -132,7 +135,7 @@ async function join(s) {
   });
   // The click is not awaited: `requestDevice` resolves only once we pick.
   s.send("Runtime.evaluate", {
-    expression: `document.getElementById("btn-join").click(); true`,
+    expression: clickExpr,
     userGesture: true,
   });
   const res = await picked;
