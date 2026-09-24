@@ -254,7 +254,15 @@ pub enum WireBusChannelValue {
     Empty,
     /// The resolved value.
     Value(LpValue),
-    /// Resolution failed.
+    /// Nothing writes the channel in any scope its consumers can see: the
+    /// resolver's no-provider case, which consumers treat as a legitimate
+    /// empty channel (authored defaults apply). Its own variant rather than
+    /// an [`Self::Error`] string because it is the common case on every
+    /// project with unwritten inputs, and the channel it names is already the
+    /// structure row at the same position — as a string it cost ~60 B per
+    /// such channel on every read (lean-wire P6).
+    NoProvider,
+    /// Resolution failed for any other reason.
     Error(String),
 }
 
@@ -264,16 +272,17 @@ impl WireBusChannelValue {
     pub fn value(&self) -> Option<&LpValue> {
         match self {
             Self::Value(value) => Some(value),
-            Self::Unresolved | Self::Empty | Self::Error(_) => None,
+            Self::Unresolved | Self::Empty | Self::NoProvider | Self::Error(_) => None,
         }
     }
 
-    /// The resolution failure, when resolution failed.
+    /// The resolution failure, when resolution failed for a reason other
+    /// than [`Self::NoProvider`].
     #[must_use]
     pub fn error(&self) -> Option<&str> {
         match self {
             Self::Error(error) => Some(error),
-            Self::Unresolved | Self::Empty | Self::Value(_) => None,
+            Self::Unresolved | Self::Empty | Self::NoProvider | Self::Value(_) => None,
         }
     }
 }
@@ -388,5 +397,15 @@ mod tests {
         assert_eq!(error.value(), None);
         assert_eq!(error.error(), Some("boom"));
         assert_eq!(WireBusChannelValue::Unresolved.value(), None);
+        assert_eq!(WireBusChannelValue::NoProvider.value(), None);
+        assert_eq!(WireBusChannelValue::NoProvider.error(), None);
+    }
+
+    #[test]
+    fn no_provider_is_a_bare_tag_on_the_wire() {
+        let json = serde_json::to_string(&WireBusChannelValue::NoProvider).unwrap();
+        assert_eq!(json, r#""no_provider""#);
+        let decoded: WireBusChannelValue = serde_json::from_str(&json).unwrap();
+        assert_eq!(decoded, WireBusChannelValue::NoProvider);
     }
 }

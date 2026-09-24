@@ -730,9 +730,7 @@ impl ProjectController {
                     value: value
                         .and_then(lpc_wire::WireBusChannelValue::value)
                         .map(format_lp_value),
-                    value_error: value
-                        .and_then(lpc_wire::WireBusChannelValue::error)
-                        .map(str::to_string),
+                    value_error: value.and_then(bus_value_error),
                     primary_visual: channel.primary_visual,
                     contended,
                     preview,
@@ -9093,6 +9091,20 @@ fn child_label(children: &[crate::UiNodeChild], node_path: &str) -> Option<Strin
     None
 }
 
+/// The "unresolved" detail a channel row shows: the engine's error text, or
+/// the sentence for a channel nothing writes (which the wire carries as a
+/// bare `no_provider` tag, not a string).
+fn bus_value_error(value: &lpc_wire::WireBusChannelValue) -> Option<String> {
+    match value {
+        lpc_wire::WireBusChannelValue::NoProvider => Some(NO_BUS_PROVIDER_DETAIL.to_string()),
+        other => other.error().map(str::to_string),
+    }
+}
+
+/// [`bus_value_error`]'s text for a channel with no writer in any scope its
+/// consumers can see.
+const NO_BUS_PROVIDER_DETAIL: &str = "no writer in any enclosing scope";
+
 /// The product a channel's resolved value carries, when it carries one.
 fn channel_product(value: Option<&lpc_wire::WireBusChannelValue>) -> Option<lpc_model::ProductRef> {
     match value?.value()? {
@@ -10289,6 +10301,19 @@ mod tests {
     };
 
     use super::*;
+
+    #[test]
+    fn a_channel_nothing_writes_shows_unresolved_with_a_sentence() {
+        assert_eq!(
+            bus_value_error(&lpc_wire::WireBusChannelValue::NoProvider).as_deref(),
+            Some(NO_BUS_PROVIDER_DETAIL)
+        );
+        assert_eq!(
+            bus_value_error(&lpc_wire::WireBusChannelValue::Error("boom".into())).as_deref(),
+            Some("boom")
+        );
+        assert_eq!(bus_value_error(&lpc_wire::WireBusChannelValue::Empty), None);
+    }
 
     #[test]
     fn disconnected_project_has_no_actions() {

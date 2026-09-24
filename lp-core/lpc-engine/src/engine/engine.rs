@@ -132,9 +132,13 @@ pub struct Engine {
     /// project data.
     control_geometry_stamps: super::control_geometry_stamps::ControlGeometryStamps,
     /// When the binding graph's structure last changed — the binding-graph
-    /// probe's structure revision (see [`super::binding_structure_stamp`]).
+    /// probe's structure revision (see [`super::content_stamp`]).
     /// Probe bookkeeping, not project data.
-    binding_structure_stamp: super::binding_structure_stamp::BindingStructureStamp,
+    binding_structure_stamp: super::content_stamp::ContentStamp,
+    /// When each node's state slot root last changed by content — the
+    /// project read's state-root gate (see [`super::state_root_stamps`]).
+    /// Read bookkeeping, not project data.
+    state_root_stamps: super::state_root_stamps::StateRootStamps,
     /// Every node in [`NodeRuntimeStatus::Fault`] as of the END of the last
     /// tick, and when the project's continuous fault began — the project-level
     /// verdict outputs paint the fault pattern from (D1).
@@ -188,6 +192,7 @@ impl Engine {
             ),
             control_geometry_stamps: Default::default(),
             binding_structure_stamp: Default::default(),
+            state_root_stamps: Default::default(),
             project_fault: None,
             project_fault_fingerprint: None,
             fault_presentation: FaultPresentation::default(),
@@ -535,10 +540,51 @@ impl Engine {
 
     /// The binding graph's structure revision, given the hash of the
     /// structure a binding-graph probe just built — see
-    /// [`super::binding_structure_stamp`].
+    /// [`super::content_stamp`].
     pub(super) fn stamp_binding_structure(&mut self, structure_hash: u64) -> Revision {
         self.binding_structure_stamp
             .stamp(structure_hash, self.revision)
+    }
+
+    /// Hash the state slot root of every alive node `selected` admits and
+    /// stamp the ones whose content moved (see [`super::state_root_stamps`]).
+    /// A read runs this before it decides which state roots to send.
+    ///
+    /// Stamps of nodes that no longer hold a state root are dropped when
+    /// the whole tree was looked at.
+    pub(super) fn refresh_state_root_stamps(
+        &mut self,
+        selected: impl Fn(NodeId) -> bool,
+        whole_tree: bool,
+    ) {
+        let now = self.revision;
+        let tree = &self.tree;
+        let stamps = &mut self.state_root_stamps;
+        for entry in tree.entries().filter(|entry| selected(entry.id)) {
+            if let NodeEntryState::Alive(node) = entry.state.value()
+                && let Some(state) = node.runtime_state_slots()
+            {
+                let hash = super::state_root_values_hash::state_root_values_hash(
+                    state.shape_id(),
+                    state.data(),
+                );
+                stamps.stamp(entry.id, hash, now);
+            }
+        }
+        if whole_tree {
+            stamps.retain(|id| {
+                tree.get(id).is_some_and(|entry| {
+                    matches!(entry.state.value(), NodeEntryState::Alive(node)
+                        if node.runtime_state_slots().is_some())
+                })
+            });
+        }
+    }
+
+    /// When `node`'s state slot root last changed by content, as of the
+    /// last [`Self::refresh_state_root_stamps`] that looked at it.
+    pub(super) fn state_root_changed_at(&self, node: NodeId) -> Option<Revision> {
+        self.state_root_stamps.changed_at(node)
     }
 
     pub fn graphics(&self) -> Option<&Arc<dyn LpGraphics>> {

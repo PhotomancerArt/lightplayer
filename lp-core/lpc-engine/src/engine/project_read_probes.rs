@@ -24,6 +24,7 @@ use lps_shared::TextureStorageFormat;
 use crate::dataflow::binding::{
     BindingEntry, BindingPriority, BindingRef, BindingSource, BindingTarget,
 };
+use crate::dataflow::resolver::SessionResolveError;
 use crate::engine::engine::display_layout_over_budget;
 use crate::node::NodeEntryState;
 use crate::nodes::{OutputFragment, merge_fragment_display_layouts};
@@ -147,7 +148,7 @@ impl Engine {
     ///
     /// The structure is revision-gated (`request.structure`) and the values
     /// ride every read that asks for them. The structure revision is stamped
-    /// by content ([`super::binding_structure_stamp`]): the structure is built
+    /// by content ([`super::content_stamp`]): the structure is built
     /// on every read — the values list is keyed to its channel order — hashed,
     /// and only shipped when the client's revision is not the current one.
     ///
@@ -302,6 +303,9 @@ impl Engine {
                                 Some(leaf) => WireBusChannelValue::Value(leaf.value().clone()),
                                 None => WireBusChannelValue::Empty,
                             },
+                            Err(SessionResolveError::NoBusProvider { .. }) => {
+                                WireBusChannelValue::NoProvider
+                            }
                             Err(error) => WireBusChannelValue::Error(format!("{error:?}")),
                         }
                     };
@@ -1110,6 +1114,27 @@ mod tests {
         ));
 
         assert_eq!(values, [WireBusChannelValue::Value(LpValue::F32(0.5))]);
+    }
+
+    /// A channel with consumers and no writer anywhere reads as the bare
+    /// `no_provider` tag, not the resolver's error rendered as a string.
+    #[test]
+    fn a_channel_nothing_writes_reads_as_no_provider() {
+        let mut h = EngineTestBuilder::new()
+            .fixture("reader")
+            .bind_demand_input("reader", bus("video"))
+            .demand_root("reader")
+            .build();
+        let _ = h.tick(10);
+
+        let (graph, values) = h.binding_graph(true);
+        let channel = graph
+            .channels
+            .iter()
+            .position(|channel| channel.name == "video")
+            .expect("the consumed channel lists");
+        assert!(graph.channels[channel].providers.is_empty());
+        assert_eq!(values[channel], WireBusChannelValue::NoProvider);
     }
 
     #[test]

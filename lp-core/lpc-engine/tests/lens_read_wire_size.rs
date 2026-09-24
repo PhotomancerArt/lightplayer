@@ -69,9 +69,8 @@ use lpc_wire::{
     NodeReadSelection, OutputFrameGeometryRead, OutputFrameProbeRequest, OutputFrameProbeResult,
     ProjectProbeRequest, ProjectProbeResult, ProjectReadEvent, ProjectReadNodeEvent,
     ProjectReadProbeEvent, ProjectReadQuery, ProjectReadQueryEvent, ProjectReadRequest, ReadLevel,
-    ResourcePayloadRead, ResourceReadQuery, RevisionGateRead, RevisionGateResult, RuntimeReadQuery,
-    ServerRuntimeStatus, ShapeReadQuery, TransportError, WireChannelSampleFormat,
-    WireServerMessage,
+    RevisionGateRead, RevisionGateResult, RuntimeReadQuery, ServerRuntimeStatus, ShapeReadQuery,
+    TransportError, WireChannelSampleFormat, WireServerMessage,
 };
 use lpfs::LpFsStd;
 
@@ -97,10 +96,19 @@ struct LensReadCeiling {
 /// each, down from 586 B), steady 3,745 B (the output frame alone: 485 B,
 /// of which 294 B are the 73 lamps), selected 4,326 B (the fixture's copy
 /// back beside it on request, +579 B).
+/// P6 cut what still repeated unchanged: Studio stopped asking for the
+/// resource summaries it never read (−407 B), state roots gate on their
+/// content instead of their per-produce stamps (−647 B: the fixture's and the
+/// shader's roots; the clock's, whose seconds move every frame, still rides),
+/// and a channel nothing writes is a bare `no_provider` value instead of the
+/// resolver's error as a string (−317 B). The tree's per-frame
+/// `entry_changed` deltas (368 B) stay: they are what re-delivers a status a
+/// render probe stamps mid-read (see the P6 report). First 9,951 B, steady
+/// 2,369 B, selected 2,950 B.
 const CHOKER_CEILING: LensReadCeiling = LensReadCeiling {
-    first: 11_550,
-    steady: 3_820,
-    selected: 4_410,
+    first: 10_150,
+    steady: 2_420,
+    selected: 3_010,
 };
 
 /// small-dome (6,310 lamps). P1 baseline (2026-09-23): first 130,555 B,
@@ -114,10 +122,12 @@ const CHOKER_CEILING: LensReadCeiling = LensReadCeiling {
 /// frames, steady 31,026 B in two — the output frames' 25,658 B of chunked
 /// samples are the one copy, and the first fixture's 24,218 B no longer
 /// ride — and selected 55,707 B in four, with that fixture's copy back.
+/// P6 (see the choker's note): first 77,670 B, steady 28,556 B, selected
+/// 53,237 B.
 const SMALL_DOME_CEILING: LensReadCeiling = LensReadCeiling {
-    first: 81_750,
-    steady: 31_650,
-    selected: 56_820,
+    first: 79_225,
+    steady: 29_130,
+    selected: 54_300,
 };
 
 /// Frames between two lens reads: Studio re-reads 150 ms after the last
@@ -328,10 +338,6 @@ fn lens_queries() -> Vec<ProjectReadQuery> {
             level: ReadLevel::Detail,
             nodes: NodeReadSelection::All,
             include_slots: true,
-        }),
-        ProjectReadQuery::Resources(ResourceReadQuery {
-            level: ReadLevel::Summary,
-            payloads: ResourcePayloadRead::None,
         }),
         ProjectReadQuery::Runtime(RuntimeReadQuery),
     ]

@@ -11,10 +11,10 @@ use lpc_wire::{
     ControlProductProbeResult, NodeReadQuery, NodeReadSelection, OutputFrameProbeRequest,
     OutputFrameProbeResult, ProjectProbeRequest, ProjectProbeResult, ProjectReadEvent,
     ProjectReadQuery, ProjectReadRequest, ReadLevel, RenderProductProbeRequest,
-    RenderProductProbeResult, ResourcePayloadRead, ResourceReadQuery, RuntimeReadQuery,
-    ShapeReadQuery, TimebaseProbeRequest, TimebaseProbeResult, WireBindingGraph,
-    WireBusChannelValue, WireCellProjection, WireConsumerPolicy, WireProjectionOrigin,
-    WireProjectionShape, WireTextureFormat, WireVisualSpace,
+    RenderProductProbeResult, RuntimeReadQuery, ShapeReadQuery, TimebaseProbeRequest,
+    TimebaseProbeResult, WireBindingGraph, WireBusChannelValue, WireCellProjection,
+    WireConsumerPolicy, WireProjectionOrigin, WireProjectionShape, WireTextureFormat,
+    WireVisualSpace,
 };
 
 use crate::app::frame_feed::{OutputFrameCache, PREVIEW_SAMPLE_FORMAT};
@@ -159,7 +159,6 @@ impl ProjectSync {
                 .filter(|entry| entry.parent.is_none())
                 .count(),
             slot_root_count: self.view.slots.roots.len(),
-            resource_count: self.view.resource_cache.summary_count(),
             shape_count: self.view.slots.registry.iter().count(),
             shapes_complete: self.phase == ProjectSyncPhase::Ready,
             runtime: self.view.runtime.as_ref().map(ProjectRuntimeSummary::from),
@@ -1018,6 +1017,12 @@ fn overlay_edit_at<'a>(
 /// the classic; the G1 bench walk may tune it.
 pub const INITIAL_SYNC_SLOT_PAGE_NODES: usize = 16;
 
+/// Studio's project read: shapes, nodes (with slots when asked) and runtime.
+///
+/// No `resources` query: Studio reads no resource summary — pixels arrive
+/// through the output-frame and control-product probes — and a runtime
+/// buffer's summary restamps with its content every frame, so asking for it
+/// cost ~400 B of unchanged metadata on every lens read (lean-wire P6).
 pub fn project_read_request(
     since: Option<Revision>,
     include_slots: bool,
@@ -1033,10 +1038,6 @@ pub fn project_read_request(
                 level: ReadLevel::Detail,
                 nodes: NodeReadSelection::All,
                 include_slots,
-            }),
-            ProjectReadQuery::Resources(ResourceReadQuery {
-                level: ReadLevel::Summary,
-                payloads: ResourcePayloadRead::None,
             }),
             ProjectReadQuery::Runtime(RuntimeReadQuery),
         ]),
@@ -1366,11 +1367,11 @@ mod tests {
     }
 
     #[test]
-    fn project_read_request_includes_shapes_nodes_resources_and_runtime() {
+    fn project_read_request_includes_shapes_nodes_and_runtime() {
         let request = project_read_request(Some(Revision::new(12)), true, Vec::new());
 
         assert_eq!(request.since, Some(Revision::new(12)));
-        assert_eq!(request.queries.len(), 4);
+        assert_eq!(request.queries.len(), 3);
         assert_eq!(
             request.queries[0],
             ProjectReadQuery::Shapes(ShapeReadQuery {
@@ -1387,13 +1388,6 @@ mod tests {
         );
         assert_eq!(
             request.queries[2],
-            ProjectReadQuery::Resources(ResourceReadQuery {
-                level: ReadLevel::Summary,
-                payloads: ResourcePayloadRead::None,
-            })
-        );
-        assert_eq!(
-            request.queries[3],
             ProjectReadQuery::Runtime(RuntimeReadQuery)
         );
         assert!(request.probes.is_empty());

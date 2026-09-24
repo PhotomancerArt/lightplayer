@@ -1,6 +1,6 @@
 //! Core runtime owner: [`Engine`] drives frame state, tree, bindings, and resolver.
 
-mod binding_structure_stamp;
+mod content_stamp;
 mod control_geometry_stamps;
 mod engine;
 mod engine_error;
@@ -47,6 +47,8 @@ mod shader_palette_tests;
 #[cfg(all(test, feature = "node-clock", feature = "node-shader"))]
 mod shader_timebase_tests;
 mod srgb8_lut;
+mod state_root_stamps;
+mod state_root_values_hash;
 #[cfg(test)]
 pub(crate) mod test_support;
 // Every project here drives a clock through an output → fixture → shader →

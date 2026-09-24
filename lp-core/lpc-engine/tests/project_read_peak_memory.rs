@@ -24,7 +24,7 @@ use lpc_registry::ProjectRegistry;
 use lpc_shared::transport::ProjectReadEventSink;
 use lpc_wire::{
     NodeReadQuery, ProjectReadEvent, ProjectReadQuery, ProjectReadRequest, ReadLevel,
-    ResourceReadQuery, RuntimeReadQuery, ShapeReadQuery,
+    RuntimeReadQuery, ShapeReadQuery,
 };
 use lpfs::LpFsStd;
 
@@ -168,7 +168,6 @@ fn studio_shaped_read() -> ProjectReadRequest {
                 level: ReadLevel::Detail,
             }),
             ProjectReadQuery::Nodes(NodeReadQuery::detail_all()),
-            ProjectReadQuery::Resources(ResourceReadQuery::default()),
             ProjectReadQuery::Runtime(RuntimeReadQuery),
         ],
         probes: Vec::new(),
