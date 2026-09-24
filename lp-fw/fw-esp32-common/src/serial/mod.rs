@@ -8,6 +8,8 @@ pub mod chunked_write;
 // running image. `current()` — the only part that needs `lpc-wire` — is still
 // behind `server`.
 pub mod link_counters;
+// Ungated for the same reason: `usb_connection` bumps it.
+pub mod link_epoch;
 pub mod shared_serial;
 pub mod usb_connection;
 

@@ -33,6 +33,15 @@ use serde::{Deserialize, Serialize};
 ///
 /// # History
 ///
+/// - 22: JSON Pack (plan `lp-json-pack`) — a board writes its replies
+///   PACKED on a link whose host opted in: `ClientRequest::SetEncoding {
+///   encoding, dictionary }` + its `ServerMsgBody::SetEncoding { encoding }`
+///   answer, and `ServerHello` gains `pack_dictionary`, the fingerprint of
+///   the generated wire dictionary (`WIRE_DICTIONARY_FINGERPRINT`). New
+///   variants on both enums and a required hello field: an old peer cannot
+///   decode either, which is what earns the bump. From here on the
+///   dictionary is part of the wire: `just wire-dict-check` fails a
+///   dictionary change that does not bump this constant.
 /// - 21: the revision gate (lean-wire) — what a probe answers unchanged on
 ///   every read rides behind a revision (`RevisionGateRead` →
 ///   `RevisionGateResult<T>`). First, everything static about a probed
@@ -206,7 +215,7 @@ use serde::{Deserialize, Serialize};
 /// as `None` on new Studio and a new firmware's extra fields are ignored
 /// by old Studio. Bumping for those would mark every board running
 /// current firmware Incompatible in exchange for nothing.
-pub const WIRE_PROTO_VERSION: u32 = 21;
+pub const WIRE_PROTO_VERSION: u32 = 22;
 
 /// Unsolicited/boot-time server identity, version, and capability report.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -225,6 +234,14 @@ pub struct ServerHello {
     /// hello, and `ClientRequest::Hello` answers re-read it, so a
     /// post-stamp request reports the new uid. `None` means unstamped.
     pub device_uid: Option<String>,
+    /// The fingerprint of the JSON Pack dictionary this build packs with
+    /// ([`crate::WIRE_DICTIONARY_FINGERPRINT`]), or 0 when this embedder
+    /// does not pack at all (hosts, the browser, `fw-emu`, an ESP image
+    /// without `json-pack`). A host that asks for packed names its own, and
+    /// the board packs only on a match; this makes a mismatch visible in
+    /// logs and on the device card before anyone asks, and tells a host
+    /// seeing 0 not to ask.
+    pub pack_dictionary: u32,
 }
 
 /// Build facts of the firmware/server binary answering the hello: its
@@ -425,6 +442,7 @@ mod tests {
                 ..Default::default()
             },
             device_uid: Some("dev0000000000000001".to_string()),
+            pack_dictionary: crate::WIRE_DICTIONARY_FINGERPRINT,
         };
         let json = crate::json::to_string(&hello).unwrap();
         assert!(json.contains(&alloc::format!("\"proto\":{WIRE_PROTO_VERSION}")));
@@ -458,6 +476,7 @@ mod tests {
                 ..Default::default()
             },
             device_uid: None,
+            pack_dictionary: crate::WIRE_DICTIONARY_FINGERPRINT,
         };
         let json = crate::json::to_string(&hello).unwrap();
         let back: ServerHello = crate::json::from_str(&json).unwrap();
@@ -485,6 +504,7 @@ mod tests {
                 ..Default::default()
             },
             device_uid: None,
+            pack_dictionary: crate::WIRE_DICTIONARY_FINGERPRINT,
         };
         let frame = ServerMessage::new(0, ServerMsgBody::Hello(hello.clone()));
         let json = crate::json::to_string(&frame).unwrap();
@@ -513,7 +533,7 @@ mod tests {
     #[test]
     fn the_proto_version_is_pinned_to_its_history() {
         assert_eq!(
-            WIRE_PROTO_VERSION, 21,
+            WIRE_PROTO_VERSION, 22,
             "if you meant to bump, add the History entry in this file's \
              doc comment and update this pin"
         );

@@ -1342,15 +1342,22 @@ fn the_direct_load_mounts_the_flash_filesystem() {
 ///
 /// A blank chip: the P3 prefix, the `[ERROR] no lpfs partition …` fallback,
 /// and the dual-core tail.
+///
+/// Re-pinned 2026-09-24 (plan `lp-json-pack`, P4): the firmware's statics grew
+/// by 24 bytes, so `[INIT] main stack 45280 B` now reads `45256 B` — same
+/// length, new hash. The old pin was `3f91b2e2…`.
 const INIT_CHAIN_BLANK_SHA256: &str =
-    "3f91b2e29b1b3a2c7a0b80730eb7c457a7ab801d1a8b58fea0fb71bbf9a23eee";
+    "b6c8a896098cc05c790edf85e24e3384f5328d4106a1f9722a2f1b69f29fc733";
 const INIT_CHAIN_BLANK_LEN: usize = 804;
 
 /// The merged image: the same prefix plus `[INIT] flash filesystem mounted`,
 /// and **fewer** bytes than the blank-chip chain, because the error line it
 /// replaces is longer than the success line.
+///
+/// Re-pinned with the blank chain, for the same `main stack` line (the old
+/// pin was `660ac8dd…`).
 const INIT_CHAIN_MERGED_SHA256: &str =
-    "660ac8ddc039193b4423305ccb4356cd37a412c25c3ddf15f5eeb0b8c0afe9e1";
+    "cbd20c1643149b32571660d15893ca2763154b5705cf68ef2287cca0ea972810";
 const INIT_CHAIN_MERGED_LEN: usize = 703;
 
 /// The boot threshold, pinned on both chips.

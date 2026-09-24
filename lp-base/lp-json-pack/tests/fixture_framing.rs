@@ -84,8 +84,12 @@ fn a_reset_mid_frame_costs_only_that_frame() {
         .filter(|(_, w)| w[0] == 0 && w[1] == FRAME_KIND_PACK)
         .map(|(i, _)| i)
         .collect();
-    let cut = starts[2] + 40;
+    // Halfway through it, whatever its length: a fixed offset can land past
+    // the end of a short frame (the sample's third reply is whatever the
+    // recording's third reply was).
     let resume = starts[3] - "[log] line 3\n".len();
+    let cut = starts[2] + (resume - starts[2]) / 2;
+    assert!(cut > starts[2] + 2, "the third frame has a body to tear");
     let mut torn = stream[..cut].to_vec();
     torn.extend_from_slice(b"ESP-ROM:esp32c6-20220919\nbuild:Mar 27 2021\n[INIT] boot\n");
     torn.extend_from_slice(&stream[resume..]);

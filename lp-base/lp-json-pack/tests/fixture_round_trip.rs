@@ -37,8 +37,9 @@ fn lexer_round_trips_every_line_in_uneven_slices() {
         packed_total += n;
     }
     // Real traffic packs to under 40 % of its JSON even with the base64 left
-    // as text (the lexer path; blobs are the event path's). The post-lean-wire
-    // sample (2026-09-23): 135,131 → 51,902 B, 38.4 %. Lean replies resend
+    // as text (the lexer path; blobs are the event path's). The proto-22
+    // sample (2026-09-23): 174,742 → 60,084 B, 34.4 % (the proto-21 one:
+    // 135,131 → 51,902 B, 38.4 %). Lean replies resend
     // less structure, so there is less for the dictionary to fold than in the
     // pre-lean-wire sample's 4.0×.
     assert!(
@@ -86,7 +87,8 @@ fn blobs_decode_back_to_their_base64_text() {
     );
     // Raw blobs beat their base64 text, repeats included (`AF`).
     assert!(with_blobs < without, "{with_blobs} vs {without}");
-    // 135,131 → 46,719 B (34.6 %) on the post-lean-wire sample.
+    // 174,742 → 54,901 B (31.4 %) on the proto-22 sample (the proto-21
+    // one: 135,131 → 46,719 B, 34.6 %).
     assert!(
         with_blobs * 25 < json_total * 9,
         "{with_blobs} vs {json_total}"

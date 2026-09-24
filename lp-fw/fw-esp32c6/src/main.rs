@@ -491,6 +491,11 @@ fn boot_firmware(spawner: embassy_executor::Spawner) -> FirmwareApp {
         hardware_registry.manifest().board_id(),
     )));
     server.set_reboot_hook(Some(Rc::new(reboot_now)));
+    // JSON Pack: answer a host's opt-in with what this image's transport
+    // can write (`fw-esp32-common/json-pack`).
+    server.set_packed_encoding_supported(
+        fw_esp32_common::serial::server_msg::PACKED_ENCODING_SUPPORTED,
+    );
     esp_println::println!("[INIT] LpServer created");
 
     // Auto-load project at boot (from config or lexical-first) — unless

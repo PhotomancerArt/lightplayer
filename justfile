@@ -2896,13 +2896,14 @@ test-emu-c6-boot:
     cargo test -p lp-emu-validate --test band_contract
     just test-emu-serve
 
-# lp-cli's two emulator-backed tests. Both resolve the ELF through
+# lp-cli's emulator-backed tests. Both resolve the ELF through
 # `lp_emu_esp32c6::test_support` under `LP_EMU_BUILD_FW=1` — a plain
 # `cargo build`, not a reference image, so no espflash and no git history.
 # CI's `Heap budget (esp32c6 chip)` job runs this half.
 test-emu-c6-cli:
     cargo test -p lp-cli --test validate_registry_parity
     LP_EMU_BUILD_FW=1 cargo test -p lp-cli --test emu_usb_hello -- --include-ignored
+    LP_EMU_BUILD_FW=1 cargo test -p lp-cli --test emu_usb_json_pack -- --include-ignored --nocapture
 
 # The classic ESP32 (v3) machine's own suite (plan three, M3).
 #

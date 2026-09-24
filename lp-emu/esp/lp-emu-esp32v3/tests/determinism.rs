@@ -301,11 +301,21 @@ fn the_snapshot_carries_the_state_that_is_not_a_register() {
 /// way to the same 543 bytes at the same cycle: the bytes, the sha, the
 /// cycle count and the skip count did not move. Re-pinned with that cause
 /// attached; a further change here is a finding again.
-const PREFIX_CYCLES: u64 = 3_245_171;
-const PREFIX_INSTRUCTIONS: u64 = 3_245_151;
+///
+/// ⚠️ **Plan `lp-json-pack` P4 moved all three again, with the IMAGE, not the
+/// loop: 3,245,171 / 3,245,151 → 3,245,118 / 3,245,098 (−53 each), and the
+/// sha.** The firmware's statics grew by 24 bytes, so the prefix prints
+/// `[INIT] main stack 45256 B` where it printed `45280 B` (same length), and
+/// everything placed after `.bss` moved with it. The 53 instructions were
+/// not attributed line by line; the emulator did not change (the same tree's
+/// lp-emu, `fafb2b574`), the skip count did not move, and cycles and
+/// instructions moved together.
+const PREFIX_CYCLES: u64 = 3_245_118;
+const PREFIX_INSTRUCTIONS: u64 = 3_245_098;
 const PREFIX_IDLE_SKIPS: u64 = 0;
 const PREFIX_BYTES: usize = 543;
-const PREFIX_SHA256: &str = "ea8bae305953ef613f68a97fb84919378f33b37eb5623dcb970e8dce2b7343e7";
+/// Re-pinned with the counters above (the old sha was `ea8bae30…`).
+const PREFIX_SHA256: &str = "725255e2a7f4d30db7680164fd8c3b93c16930c02d94876c7befb638b99c6443";
 
 /// **The single-core safety net.** A run in which core 1 never starts is
 /// the run M3 produced: same bytes, same sha, same cycles, same

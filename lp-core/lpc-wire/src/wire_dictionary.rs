@@ -17,16 +17,16 @@
 //!   (`lp-base/lp-json-pack/tests/fixtures/choker-lens-sample.txt`),
 //!   then by name. The commonest get the one-byte codes.
 //!
-//! 419 keys (205 ranked by the sample), 186 values (38 ranked); 9188 bytes
+//! 422 keys (208 ranked by the sample), 188 values (47 ranked); 9243 bytes
 //! of statics.
 
 use lp_json_pack::{Dictionary, PackStrings};
 
 /// The `WIRE_PROTO_VERSION` this dictionary was generated at.
-pub const WIRE_DICTIONARY_PROTO: u32 = 21;
+pub const WIRE_DICTIONARY_PROTO: u32 = 22;
 
 /// [`WIRE_DICTIONARY`]'s `fingerprint()`, as generated.
-pub const WIRE_DICTIONARY_FINGERPRINT: u32 = 0x02624794;
+pub const WIRE_DICTIONARY_FINGERPRINT: u32 = 0x2bdc84e2;
 
 /// The wire's dictionary.
 pub static WIRE_DICTIONARY: Dictionary = Dictionary {
@@ -39,350 +39,350 @@ pub static WIRE_DICTIONARY: Dictionary = Dictionary {
 const KEYS: PackStrings = PackStrings {
     text: concat!(
         "revision", // 0
-        "id", // 1
-        "event", // 2
-        "index", // 3
+        "event", // 1
+        "index", // 2
+        "id", // 3
         "node", // 4
-        "msg", // 5
-        "query", // 6
-        "value", // 7
-        "geometry", // 8
-        "nodes", // 9
-        "kind", // 10
-        "projectRead", // 11
-        "begin", // 12
-        "output_frame", // 13
-        "output", // 14
-        "probe", // 15
-        "result", // 16
-        "state", // 17
-        "unchanged", // 18
-        "level", // 19
-        "change_frame", // 20
-        "status", // 21
-        "outputs", // 22
-        "entry_changed", // 23
-        "sample_format", // 24
-        "product", // 25
-        "bytes", // 26
-        "end", // 27
-        "events", // 28
-        "channels", // 29
-        "frame", // 30
-        "changed_at", // 31
-        "if_changed", // 32
-        "handle", // 33
-        "shapes", // 34
-        "rows", // 35
-        "samples_per_row", // 36
-        "request", // 37
-        "since", // 38
-        "freeBytes", // 39
-        "largestFreeBlock", // 40
-        "memory", // 41
-        "totalBytes", // 42
-        "usedBytes", // 43
-        "probes", // 44
-        "samples", // 45
-        "known", // 46
-        "values", // 47
-        "preferred_extent", // 48
-        "runtime", // 49
-        "binding_graph", // 50
-        "structure", // 51
-        "name", // 52
-        "path", // 53
-        "baseMac", // 54
-        "data", // 55
-        "avg", // 56
-        "bootCount", // 57
-        "deltas", // 58
-        "demand_root_count", // 59
-        "fps", // 60
-        "frame_count", // 61
-        "frame_delta_ms", // 62
-        "frame_num", // 63
-        "frame_total_ms", // 64
-        "heartbeat", // 65
-        "hostDrainingAgainMs", // 66
-        "hostNotDrainingMs", // 67
-        "identity", // 68
-        "lastCrash", // 69
-        "last_frame_time_us", // 70
-        "link", // 71
-        "loaded_projects", // 72
-        "max", // 73
-        "min", // 74
-        "notDrainingCount", // 75
-        "outputClamp", // 76
-        "overlay_changed_at", // 77
-        "panel_auto_save", // 78
-        "parseFailures", // 79
-        "paths", // 80
-        "project", // 81
-        "queueFullDrops", // 82
-        "recovery", // 83
-        "resetReason", // 84
-        "runtime_buffer_count", // 85
-        "rxErrors", // 86
-        "safeMode", // 87
-        "sdev", // 88
-        "server", // 89
-        "stalePartialFlushes", // 90
-        "theoretical_fps", // 91
-        "tree_deltas", // 92
-        "uptime_ms", // 93
-        "control", // 94
-        "fields", // 95
-        "fields_revision", // 96
-        "graph", // 97
-        "ids_revision", // 98
-        "shape", // 99
-        "slot_root", // 100
-        "structure_revision", // 101
-        "time", // 102
-        "visual", // 103
-        "known_revision", // 104
-        "filesystem", // 105
-        "control_product", // 106
-        "include_slots", // 107
-        "queries", // 108
-        "include_values", // 109
-        "error", // 110
-        "artifact", // 111
-        "color_order", // 112
-        "count", // 113
-        "encoding", // 114
-        "len", // 115
-        "rgb_pixels", // 116
-        "row", // 117
-        "start", // 118
-        "extent", // 119
-        "preview", // 120
-        "parent", // 121
-        "location", // 122
-        "segments", // 123
-        "ty", // 124
-        "slot", // 125
-        "origin", // 126
-        "write", // 127
-        "child_kind", // 128
-        "children", // 129
-        "children_ver", // 130
-        "created", // 131
-        "created_frame", // 132
-        "def_location", // 133
-        "key", // 134
-        "loaded", // 135
-        "prefix", // 136
-        "runtime_id", // 137
-        "deleteDir", // 138
-        "input", // 139
-        "invocation", // 140
-        "offset", // 141
-        "project_child", // 142
-        "role", // 143
-        "source", // 144
-        "writeChunk", // 145
-        "boardId", // 146
-        "build", // 147
-        "button", // 148
-        "chipRevision", // 149
-        "commit", // 150
-        "deviceUid", // 151
-        "dirty", // 152
-        "eui64", // 153
-        "features", // 154
-        "hardware", // 155
-        "hello", // 156
-        "listLoadedProjects", // 157
-        "package", // 158
-        "profile", // 159
-        "projects", // 160
-        "proto", // 161
-        "radio", // 162
-        "totalLedBudget", // 163
-        "written", // 164
-        "available", // 165
-        "content_type", // 166
-        "hash", // 167
-        "hashPackage", // 168
-        "loadProject", // 169
-        "packageHash", // 170
-        "projectCommand", // 171
-        "read_inventory", // 172
-        "response", // 173
-        "assets", // 174
-        "by_ids", // 175
-        "c", // 176
-        "changed", // 177
-        "changes", // 178
-        "changesSince", // 179
-        "command", // 180
-        "cursor", // 181
-        "defs", // 182
-        "display_layout", // 183
-        "entries", // 184
-        "h", // 185
-        "ids", // 186
-        "lamps", // 187
-        "layout", // 188
-        "layout2d", // 189
-        "membership", // 190
-        "next", // 191
-        "p", // 192
-        "placements", // 193
-        "rev", // 194
-        "reversed", // 195
-        "s", // 196
-        "sample_layout", // 197
-        "seq", // 198
-        "source_lamp", // 199
-        "source_lamps", // 200
-        "spans", // 201
-        "version", // 202
-        "w", // 203
-        "wire_lamp", // 204
-        "Error", // 205
-        "Fault", // 206
-        "Field", // 207
-        "Index", // 208
-        "InitError", // 209
-        "Unsupported", // 210
-        "Warn", // 211
-        "accepted", // 212
-        "added", // 213
-        "array", // 214
-        "artifact_changes", // 215
-        "artifacts", // 216
-        "assign_value", // 217
-        "attach", // 218
-        "availability", // 219
-        "b_vec2", // 220
-        "b_vec3", // 221
-        "b_vec4", // 222
-        "base_display", // 223
-        "base_values", // 224
-        "batch", // 225
-        "bindings", // 226
-        "body", // 227
-        "bool", // 228
-        "bootsAgo", // 229
-        "buffer", // 230
-        "bus", // 231
-        "by_refs", // 232
-        "byte_length", // 233
-        "byte_length_hint", // 234
-        "cause", // 235
-        "channel", // 236
-        "children_changed", // 237
-        "clearFaults", // 238
-        "clear_artifact", // 239
-        "codec", // 240
-        "commands", // 241
-        "commit_overlay", // 242
-        "consumers", // 243
-        "crashCount", // 244
-        "create_node", // 245
-        "custom", // 246
-        "cycle", // 247
-        "default_1d_to_2d", // 248
-        "default_bind", // 249
-        "deleteFile", // 250
-        "delta_seconds", // 251
-        "description", // 252
-        "direction", // 253
-        "domain", // 254
-        "dropdown", // 255
-        "edit", // 256
-        "editor", // 257
-        "edits", // 258
-        "effect", // 259
-        "elem", // 260
-        "enabled", // 261
-        "endpoint", // 262
-        "engaged", // 263
-        "entry", // 264
-        "enum", // 265
-        "f32", // 266
-        "failed", // 267
-        "fault", // 268
-        "field", // 269
-        "file", // 270
-        "fin", // 271
-        "fixture_colors", // 272
-        "flip", // 273
-        "force", // 274
-        "format", // 275
-        "from", // 276
-        "gpio", // 277
-        "gpu_resident", // 278
-        "header", // 279
-        "height", // 280
-        "i32", // 281
-        "i_vec2", // 282
-        "i_vec3", // 283
-        "i_vec4", // 284
-        "inline", // 285
-        "keys_revision", // 286
-        "knob", // 287
-        "label", // 288
-        "ledger_cleared", // 289
-        "list", // 290
-        "listAvailableProjects", // 291
-        "listDir", // 292
-        "literal", // 293
-        "log", // 294
-        "map", // 295
-        "mat2x2", // 296
-        "mat3x3", // 297
-        "mat4x4", // 298
-        "materialized", // 299
-        "merge", // 300
-        "message", // 301
-        "meta", // 302
-        "metadata", // 303
-        "mirror", // 304
-        "move_slot_entry", // 305
-        "mutate_overlay", // 306
-        "mutation", // 307
-        "mux", // 308
-        "node_command", // 309
-        "node_slot", // 310
-        "normalized_to_removal", // 311
-        "number", // 312
-        "oomRetrySaves", // 313
-        "op", // 314
-        "option", // 315
-        "options", // 316
-        "output_channels", // 317
-        "overlay", // 318
-        "overlay_changed", // 319
-        "overlay_revision", // 320
-        "owner", // 321
-        "panel", // 322
-        "panel_clear", // 323
-        "panel_show", // 324
-        "panel_write", // 325
-        "parse_error", // 326
-        "payload", // 327
-        "payloads", // 328
-        "period_seconds", // 329
-        "phase", // 330
-        "phase_offset", // 331
-        "phasors", // 332
-        "playlist_activate_entry", // 333
-        "playlist_entry", // 334
-        "policy", // 335
-        "posted", // 336
-        "presence_revision", // 337
-        "present", // 338
-        "primary", // 339
-        "primary_visual", // 340
-        "priority", // 341
-        "project_nodes", // 342
-        "projection", // 343
-        "providers", // 344
+        "query", // 5
+        "value", // 6
+        "kind", // 7
+        "nodes", // 8
+        "output", // 9
+        "state", // 10
+        "change_frame", // 11
+        "entry_changed", // 12
+        "status", // 13
+        "msg", // 14
+        "level", // 15
+        "begin", // 16
+        "product", // 17
+        "geometry", // 18
+        "changed_at", // 19
+        "probe", // 20
+        "result", // 21
+        "unchanged", // 22
+        "projectRead", // 23
+        "output_frame", // 24
+        "shapes", // 25
+        "sample_format", // 26
+        "values", // 27
+        "outputs", // 28
+        "if_changed", // 29
+        "bytes", // 30
+        "rows", // 31
+        "samples_per_row", // 32
+        "binding_graph", // 33
+        "structure", // 34
+        "runtime", // 35
+        "channels", // 36
+        "end", // 37
+        "events", // 38
+        "frame", // 39
+        "handle", // 40
+        "preferred_extent", // 41
+        "freeBytes", // 42
+        "largestFreeBlock", // 43
+        "memory", // 44
+        "totalBytes", // 45
+        "usedBytes", // 46
+        "name", // 47
+        "request", // 48
+        "since", // 49
+        "data", // 50
+        "probes", // 51
+        "samples", // 52
+        "known", // 53
+        "control", // 54
+        "graph", // 55
+        "structure_revision", // 56
+        "time", // 57
+        "visual", // 58
+        "deltas", // 59
+        "demand_root_count", // 60
+        "fields", // 61
+        "fields_revision", // 62
+        "frame_delta_ms", // 63
+        "frame_num", // 64
+        "frame_total_ms", // 65
+        "ids_revision", // 66
+        "last_frame_time_us", // 67
+        "overlay_changed_at", // 68
+        "panel_auto_save", // 69
+        "project", // 70
+        "runtime_buffer_count", // 71
+        "server", // 72
+        "shape", // 73
+        "slot_root", // 74
+        "theoretical_fps", // 75
+        "tree_deltas", // 76
+        "known_revision", // 77
+        "owner", // 78
+        "path", // 79
+        "include_slots", // 80
+        "include_values", // 81
+        "queries", // 82
+        "control_product", // 83
+        "baseMac", // 84
+        "scope", // 85
+        "slot", // 86
+        "origin", // 87
+        "avg", // 88
+        "bootCount", // 89
+        "filesystem", // 90
+        "fps", // 91
+        "frame_count", // 92
+        "heartbeat", // 93
+        "hostDrainingAgainMs", // 94
+        "hostNotDrainingMs", // 95
+        "identity", // 96
+        "lastCrash", // 97
+        "link", // 98
+        "loaded_projects", // 99
+        "max", // 100
+        "min", // 101
+        "notDrainingCount", // 102
+        "outputClamp", // 103
+        "parseFailures", // 104
+        "paths", // 105
+        "queueFullDrops", // 106
+        "recovery", // 107
+        "resetReason", // 108
+        "rxErrors", // 109
+        "safeMode", // 110
+        "sdev", // 111
+        "stalePartialFlushes", // 112
+        "uptime_ms", // 113
+        "extent", // 114
+        "preview", // 115
+        "artifact", // 116
+        "color_order", // 117
+        "count", // 118
+        "direction", // 119
+        "encoding", // 120
+        "endpoint", // 121
+        "len", // 122
+        "priority", // 123
+        "rgb_pixels", // 124
+        "row", // 125
+        "start", // 126
+        "bus", // 127
+        "channel", // 128
+        "error", // 129
+        "consumers", // 130
+        "location", // 131
+        "primary_visual", // 132
+        "providers", // 133
+        "segments", // 134
+        "write", // 135
+        "def_location", // 136
+        "key", // 137
+        "loaded", // 138
+        "parent", // 139
+        "prefix", // 140
+        "runtime_id", // 141
+        "invocation", // 142
+        "offset", // 143
+        "panel_show", // 144
+        "project_child", // 145
+        "role", // 146
+        "writeChunk", // 147
+        "listLoadedProjects", // 148
+        "projects", // 149
+        "written", // 150
+        "available", // 151
+        "boardId", // 152
+        "build", // 153
+        "button", // 154
+        "changed", // 155
+        "chipRevision", // 156
+        "commit", // 157
+        "content_type", // 158
+        "deleteDir", // 159
+        "deviceUid", // 160
+        "dirty", // 161
+        "eui64", // 162
+        "features", // 163
+        "hardware", // 164
+        "hash", // 165
+        "hashPackage", // 166
+        "hello", // 167
+        "loadProject", // 168
+        "packDictionary", // 169
+        "package", // 170
+        "packageHash", // 171
+        "profile", // 172
+        "projectCommand", // 173
+        "proto", // 174
+        "radio", // 175
+        "read_inventory", // 176
+        "response", // 177
+        "totalLedBudget", // 178
+        "assets", // 179
+        "bindings", // 180
+        "c", // 181
+        "changes", // 182
+        "changesSince", // 183
+        "command", // 184
+        "cursor", // 185
+        "defs", // 186
+        "display_layout", // 187
+        "entries", // 188
+        "f32", // 189
+        "h", // 190
+        "lamps", // 191
+        "layout", // 192
+        "layout2d", // 193
+        "literal", // 194
+        "next", // 195
+        "p", // 196
+        "placements", // 197
+        "rev", // 198
+        "reversed", // 199
+        "s", // 200
+        "sample_layout", // 201
+        "source_lamp", // 202
+        "source_lamps", // 203
+        "spans", // 204
+        "version", // 205
+        "w", // 206
+        "wire_lamp", // 207
+        "Error", // 208
+        "Fault", // 209
+        "Field", // 210
+        "Index", // 211
+        "InitError", // 212
+        "Unsupported", // 213
+        "Warn", // 214
+        "accepted", // 215
+        "added", // 216
+        "array", // 217
+        "artifact_changes", // 218
+        "artifacts", // 219
+        "assign_value", // 220
+        "attach", // 221
+        "availability", // 222
+        "b_vec2", // 223
+        "b_vec3", // 224
+        "b_vec4", // 225
+        "base_display", // 226
+        "base_values", // 227
+        "batch", // 228
+        "body", // 229
+        "bool", // 230
+        "bootsAgo", // 231
+        "buffer", // 232
+        "by_ids", // 233
+        "by_refs", // 234
+        "byte_length", // 235
+        "byte_length_hint", // 236
+        "cause", // 237
+        "child_kind", // 238
+        "children", // 239
+        "children_changed", // 240
+        "children_ver", // 241
+        "clearFaults", // 242
+        "clear_artifact", // 243
+        "codec", // 244
+        "commands", // 245
+        "commit_overlay", // 246
+        "crashCount", // 247
+        "create_node", // 248
+        "created", // 249
+        "created_frame", // 250
+        "custom", // 251
+        "cycle", // 252
+        "default_1d_to_2d", // 253
+        "default_bind", // 254
+        "deleteFile", // 255
+        "delta_seconds", // 256
+        "description", // 257
+        "dictionary", // 258
+        "domain", // 259
+        "dropdown", // 260
+        "edit", // 261
+        "editor", // 262
+        "edits", // 263
+        "effect", // 264
+        "elem", // 265
+        "enabled", // 266
+        "engaged", // 267
+        "entry", // 268
+        "enum", // 269
+        "failed", // 270
+        "fault", // 271
+        "field", // 272
+        "file", // 273
+        "fin", // 274
+        "fixture_colors", // 275
+        "flip", // 276
+        "force", // 277
+        "format", // 278
+        "from", // 279
+        "gpio", // 280
+        "gpu_resident", // 281
+        "header", // 282
+        "height", // 283
+        "i32", // 284
+        "i_vec2", // 285
+        "i_vec3", // 286
+        "i_vec4", // 287
+        "ids", // 288
+        "inline", // 289
+        "input", // 290
+        "keys_revision", // 291
+        "knob", // 292
+        "label", // 293
+        "ledger_cleared", // 294
+        "list", // 295
+        "listAvailableProjects", // 296
+        "listDir", // 297
+        "log", // 298
+        "map", // 299
+        "mat2x2", // 300
+        "mat3x3", // 301
+        "mat4x4", // 302
+        "materialized", // 303
+        "membership", // 304
+        "merge", // 305
+        "message", // 306
+        "meta", // 307
+        "metadata", // 308
+        "mirror", // 309
+        "move_slot_entry", // 310
+        "mutate_overlay", // 311
+        "mutation", // 312
+        "mux", // 313
+        "node_command", // 314
+        "node_slot", // 315
+        "normalized_to_removal", // 316
+        "number", // 317
+        "oomRetrySaves", // 318
+        "op", // 319
+        "option", // 320
+        "options", // 321
+        "output_channels", // 322
+        "overlay", // 323
+        "overlay_changed", // 324
+        "overlay_revision", // 325
+        "panel", // 326
+        "panel_clear", // 327
+        "panel_write", // 328
+        "parse_error", // 329
+        "payload", // 330
+        "payloads", // 331
+        "period_seconds", // 332
+        "phase", // 333
+        "phase_offset", // 334
+        "phasors", // 335
+        "playlist_activate_entry", // 336
+        "playlist_entry", // 337
+        "policy", // 338
+        "posted", // 339
+        "presence_revision", // 340
+        "present", // 341
+        "primary", // 342
+        "project_nodes", // 343
+        "projection", // 344
         "put", // 345
         "put_slot_edit", // 346
         "queueWaitMaxUs", // 347
@@ -411,389 +411,394 @@ const KEYS: PackStrings = PackStrings {
         "runtime_buffer_payload_begin", // 370
         "runtime_buffer_payload_bytes", // 371
         "runtime_buffer_payload_end", // 372
-        "scope", // 373
-        "seconds", // 374
-        "semantics", // 375
-        "sent", // 376
-        "setLogLevel", // 377
-        "set_artifact_body", // 378
-        "sidecar", // 379
-        "sinceMs", // 380
-        "site", // 381
-        "slider", // 382
-        "some", // 383
-        "space", // 384
-        "staged", // 385
-        "staged_deletes", // 386
-        "step", // 387
-        "string", // 388
-        "struct", // 389
-        "summary", // 390
-        "swept_pending_edits", // 391
-        "tagged", // 392
-        "texture", // 393
-        "timebase", // 394
-        "to", // 395
-        "torn", // 396
-        "total", // 397
-        "ttl_ms", // 398
-        "u32", // 399
-        "u_vec2", // 400
-        "u_vec3", // 401
-        "u_vec4", // 402
-        "unit", // 403
-        "unknown", // 404
-        "unloadProject", // 405
-        "unsupported", // 406
-        "validation_error", // 407
-        "variant", // 408
-        "variant_revision", // 409
-        "variants", // 410
-        "vec2", // 411
-        "vec3", // 412
-        "vec4", // 413
-        "waved", // 414
-        "waveform", // 415
-        "width", // 416
-        "wire", // 417
-        "words", // 418
+        "seconds", // 373
+        "semantics", // 374
+        "sent", // 375
+        "seq", // 376
+        "setEncoding", // 377
+        "setLogLevel", // 378
+        "set_artifact_body", // 379
+        "sidecar", // 380
+        "sinceMs", // 381
+        "site", // 382
+        "slider", // 383
+        "some", // 384
+        "source", // 385
+        "space", // 386
+        "staged", // 387
+        "staged_deletes", // 388
+        "step", // 389
+        "string", // 390
+        "struct", // 391
+        "summary", // 392
+        "swept_pending_edits", // 393
+        "tagged", // 394
+        "texture", // 395
+        "timebase", // 396
+        "to", // 397
+        "torn", // 398
+        "total", // 399
+        "ttl_ms", // 400
+        "ty", // 401
+        "u32", // 402
+        "u_vec2", // 403
+        "u_vec3", // 404
+        "u_vec4", // 405
+        "unit", // 406
+        "unknown", // 407
+        "unloadProject", // 408
+        "unsupported", // 409
+        "validation_error", // 410
+        "variant", // 411
+        "variant_revision", // 412
+        "variants", // 413
+        "vec2", // 414
+        "vec3", // 415
+        "vec4", // 416
+        "waved", // 417
+        "waveform", // 418
+        "width", // 419
+        "wire", // 420
+        "words", // 421
     ),
     offsets: &[
-        0, 8, 10, 15, 20, 24, 27, 32, 37, 45, 50, 54, 65, 70, 82, 88,
-        93, 99, 104, 113, 118, 130, 136, 143, 156, 169, 176, 181, 184, 190, 198, 203,
-        213, 223, 229, 235, 239, 254, 261, 266, 275, 291, 297, 307, 316, 322, 329, 334,
-        340, 356, 363, 376, 385, 389, 393, 400, 404, 407, 416, 422, 439, 442, 453, 467,
-        476, 490, 499, 518, 535, 543, 552, 570, 574, 589, 592, 595, 611, 622, 640, 655,
-        668, 673, 680, 694, 702, 713, 733, 741, 749, 753, 759, 778, 793, 804, 813, 820,
-        826, 841, 846, 858, 863, 872, 890, 894, 900, 914, 924, 939, 952, 959, 973, 978,
-        986, 997, 1002, 1010, 1013, 1023, 1026, 1031, 1037, 1044, 1050, 1058, 1066, 1068, 1072, 1078,
-        1083, 1093, 1101, 1113, 1120, 1133, 1145, 1148, 1154, 1160, 1170, 1179, 1184, 1194, 1200, 1213,
-        1217, 1223, 1233, 1240, 1245, 1251, 1263, 1269, 1278, 1283, 1288, 1296, 1304, 1309, 1327, 1334,
-        1341, 1349, 1354, 1359, 1373, 1380, 1389, 1401, 1405, 1416, 1427, 1438, 1452, 1466, 1474, 1480,
-        1486, 1487, 1494, 1501, 1513, 1520, 1526, 1530, 1544, 1551, 1552, 1555, 1560, 1566, 1574, 1584,
-        1588, 1589, 1599, 1602, 1610, 1611, 1624, 1627, 1638, 1650, 1655, 1662, 1663, 1672, 1677, 1682,
-        1687, 1692, 1701, 1712, 1716, 1724, 1729, 1734, 1750, 1759, 1771, 1777, 1789, 1795, 1801, 1807,
-        1819, 1830, 1835, 1843, 1847, 1851, 1859, 1865, 1868, 1875, 1886, 1902, 1907, 1914, 1930, 1941,
-        1955, 1960, 1968, 1982, 1991, 2001, 2012, 2018, 2023, 2039, 2051, 2061, 2074, 2085, 2094, 2100,
-        2108, 2112, 2118, 2123, 2129, 2133, 2140, 2148, 2155, 2160, 2164, 2167, 2173, 2178, 2183, 2187,
-        2190, 2204, 2208, 2213, 2219, 2223, 2227, 2239, 2245, 2251, 2254, 2260, 2266, 2272, 2278, 2291,
-        2295, 2300, 2314, 2318, 2339, 2346, 2353, 2356, 2359, 2365, 2371, 2377, 2389, 2394, 2401, 2405,
-        2413, 2419, 2434, 2448, 2456, 2459, 2471, 2480, 2501, 2507, 2520, 2522, 2528, 2535, 2550, 2557,
-        2572, 2588, 2593, 2598, 2609, 2619, 2630, 2641, 2648, 2656, 2670, 2675, 2687, 2694, 2717, 2731,
-        2737, 2743, 2760, 2767, 2774, 2788, 2796, 2809, 2819, 2828, 2831, 2844, 2858, 2862, 2872, 2884,
-        2892, 2898, 2904, 2913, 2916, 2920, 2928, 2937, 2948, 2964, 2971, 2985, 2997, 3006, 3018, 3030,
-        3037, 3051, 3073, 3101, 3129, 3155, 3160, 3167, 3176, 3180, 3191, 3208, 3215, 3222, 3226, 3232,
-        3236, 3241, 3247, 3261, 3265, 3271, 3277, 3284, 3303, 3309, 3316, 3324, 3326, 3330, 3335, 3341,
-        3344, 3350, 3356, 3362, 3366, 3373, 3386, 3397, 3413, 3420, 3436, 3444, 3448, 3452, 3456, 3461,
-        3469, 3474, 3478, 3483,
+        0, 8, 13, 18, 20, 24, 29, 34, 38, 43, 49, 54, 66, 79, 85, 88,
+        93, 98, 105, 113, 123, 128, 134, 143, 154, 166, 172, 185, 191, 198, 208, 213,
+        217, 232, 245, 254, 261, 269, 272, 278, 283, 289, 305, 314, 330, 336, 346, 355,
+        359, 366, 371, 375, 381, 388, 393, 400, 405, 423, 427, 433, 439, 456, 462, 477,
+        491, 500, 514, 526, 544, 562, 577, 584, 604, 610, 615, 624, 639, 650, 664, 669,
+        673, 686, 700, 707, 722, 729, 734, 738, 744, 747, 756, 766, 769, 780, 789, 808,
+        825, 833, 842, 846, 861, 864, 867, 883, 894, 907, 912, 926, 934, 945, 953, 961,
+        965, 984, 993, 999, 1006, 1014, 1025, 1030, 1039, 1047, 1055, 1058, 1066, 1076, 1079, 1084,
+        1087, 1094, 1099, 1108, 1116, 1130, 1139, 1147, 1152, 1164, 1167, 1173, 1179, 1185, 1195, 1205,
+        1211, 1221, 1234, 1238, 1248, 1266, 1274, 1281, 1290, 1297, 1302, 1308, 1315, 1327, 1333, 1345,
+        1354, 1363, 1368, 1373, 1381, 1389, 1393, 1404, 1409, 1420, 1434, 1441, 1452, 1459, 1473, 1478,
+        1483, 1497, 1505, 1519, 1525, 1533, 1534, 1541, 1553, 1560, 1566, 1570, 1584, 1591, 1594, 1595,
+        1600, 1606, 1614, 1621, 1625, 1626, 1636, 1639, 1647, 1648, 1661, 1672, 1684, 1689, 1696, 1697,
+        1706, 1711, 1716, 1721, 1726, 1735, 1746, 1750, 1758, 1763, 1768, 1784, 1793, 1805, 1811, 1823,
+        1829, 1835, 1841, 1853, 1864, 1869, 1873, 1877, 1885, 1891, 1897, 1904, 1915, 1931, 1936, 1946,
+        1954, 1970, 1982, 1993, 2007, 2012, 2020, 2034, 2044, 2055, 2062, 2075, 2081, 2086, 2102, 2114,
+        2124, 2137, 2148, 2158, 2164, 2172, 2176, 2182, 2187, 2193, 2197, 2204, 2211, 2216, 2220, 2226,
+        2231, 2236, 2240, 2243, 2257, 2261, 2266, 2272, 2276, 2280, 2292, 2298, 2304, 2307, 2313, 2319,
+        2325, 2328, 2334, 2339, 2352, 2356, 2361, 2375, 2379, 2400, 2407, 2410, 2413, 2419, 2425, 2431,
+        2443, 2453, 2458, 2465, 2469, 2477, 2483, 2498, 2512, 2520, 2523, 2535, 2544, 2565, 2571, 2584,
+        2586, 2592, 2599, 2614, 2621, 2636, 2652, 2657, 2668, 2679, 2690, 2697, 2705, 2719, 2724, 2736,
+        2743, 2766, 2780, 2786, 2792, 2809, 2816, 2823, 2836, 2846, 2849, 2862, 2876, 2880, 2890, 2902,
+        2910, 2916, 2922, 2931, 2934, 2938, 2946, 2955, 2966, 2982, 2989, 3003, 3015, 3024, 3036, 3048,
+        3055, 3069, 3091, 3119, 3147, 3173, 3180, 3189, 3193, 3196, 3207, 3218, 3235, 3242, 3249, 3253,
+        3259, 3263, 3269, 3274, 3280, 3294, 3298, 3304, 3310, 3317, 3336, 3342, 3349, 3357, 3359, 3363,
+        3368, 3374, 3376, 3379, 3385, 3391, 3397, 3401, 3408, 3421, 3432, 3448, 3455, 3471, 3479, 3483,
+        3487, 3491, 3496, 3504, 3509, 3513, 3518,
     ],
 };
 
 const VALUES: PackStrings = PackStrings {
     text: concat!(
         "no_provider", // 0
-        "u8", // 1
+        "Ok", // 1
         "alive", // 2
-        "Ok", // 3
-        "detail", // 4
+        "detail", // 3
+        "u8", // 4
         "value", // 5
         "end", // 6
-        "green", // 7
+        "time", // 7
         "record", // 8
-        "time", // 9
-        "all", // 10
+        "all", // 9
+        "green", // 10
         "rgb", // 11
-        "show", // 12
-        "stopAllProjects", // 13
-        "gfx.lpvm", // 14
-        "hello", // 15
+        "color", // 12
+        "consumes", // 13
+        "authored", // 14
+        "default", // 15
         "listLoadedProjects", // 16
-        "node.button", // 17
-        "node.clock", // 18
-        "node.fixture", // 19
-        "node.fluid", // 20
-        "node.playlist", // 21
-        "node.radio", // 22
-        "node.shader", // 23
-        "node.texture", // 24
-        "svc.button", // 25
-        "svc.radio-espnow", // 26
-        "committed", // 27
-        "Clock", // 28
-        "Created", // 29
-        "Fixture", // 30
-        "Module", // 31
-        "Output", // 32
-        "Shader", // 33
-        "always", // 34
-        "fixture_map2d", // 35
-        "root", // 36
-        "shader_source", // 37
-        "Button", // 38
-        "ComputeShader", // 39
-        "ControlRadio", // 40
-        "Debug", // 41
-        "Error", // 42
-        "Fluid", // 43
-        "Info", // 44
-        "Playlist", // 45
-        "Texture", // 46
-        "Trace", // 47
-        "Warn", // 48
-        "accepted", // 49
-        "affine2d", // 50
-        "amplitude", // 51
-        "angle", // 52
-        "angular", // 53
-        "any", // 54
-        "audio_level", // 55
-        "authored", // 56
-        "available", // 57
-        "b_vec2", // 58
-        "b_vec3", // 59
-        "b_vec4", // 60
-        "bgr", // 61
-        "binary", // 62
-        "bool", // 63
-        "brg", // 64
-        "by_key", // 65
-        "choice", // 66
-        "clear", // 67
-        "clearFaults", // 68
-        "color", // 69
-        "compute_shader_source", // 70
-        "consumed", // 71
-        "consumes", // 72
-        "control", // 73
-        "control_product", // 74
-        "count", // 75
-        "debug", // 76
-        "declared", // 77
-        "default", // 78
-        "delete", // 79
-        "deleted", // 80
-        "diag.unwind", // 81
-        "dimensions", // 82
-        "duration", // 83
-        "edit_failed", // 84
-        "empty", // 85
-        "ensure_present", // 86
-        "enum", // 87
-        "error", // 88
-        "external", // 89
-        "extrude_x", // 90
-        "extrude_y", // 91
-        "f32", // 92
-        "fixed", // 93
-        "fixture_colors", // 94
-        "fixture_patch", // 95
-        "forced", // 96
-        "fragments", // 97
-        "frequency", // 98
-        "gbr", // 99
-        "gfx.null", // 100
-        "gfx.wgpu", // 101
-        "gradient", // 102
-        "grb", // 103
-        "i32", // 104
-        "i_vec2", // 105
-        "i_vec3", // 106
-        "i_vec4", // 107
-        "ids", // 108
-        "image", // 109
-        "instant", // 110
-        "invalid_body", // 111
-        "invalid_path", // 112
-        "latest", // 113
-        "listAvailableProjects", // 114
-        "local", // 115
-        "map", // 116
-        "mat2x2", // 117
-        "mat3x3", // 118
-        "mat4x4", // 119
-        "node_ref", // 120
-        "none", // 121
-        "not_a_value_leaf", // 122
-        "not_found", // 123
-        "not_writable", // 124
-        "omitted", // 125
-        "one_d", // 126
-        "option", // 127
-        "output_channels", // 128
-        "overlay_replace", // 129
-        "panel", // 130
-        "panel_writer", // 131
-        "path", // 132
-        "pending", // 133
-        "phase", // 134
-        "plain", // 135
-        "position2d", // 136
-        "position3d", // 137
-        "power", // 138
-        "produced", // 139
-        "publishes", // 140
-        "radial", // 141
-        "ratio", // 142
-        "raw", // 143
-        "rbg", // 144
-        "reboot", // 145
-        "red", // 146
-        "remove", // 147
-        "resource", // 148
-        "result_end", // 149
-        "rgb8", // 150
-        "rgba16", // 151
-        "runtime_buffer", // 152
-        "runtime_buffer_resource", // 153
-        "setLogLevel", // 154
-        "setting", // 155
-        "shader.f32", // 156
-        "srgb8", // 157
-        "state", // 158
-        "string", // 159
-        "summary", // 160
-        "target_occupied", // 161
-        "text", // 162
-        "texture", // 163
-        "two_d", // 164
-        "type_mismatch", // 165
-        "u16", // 166
-        "u32", // 167
-        "u_vec2", // 168
-        "u_vec3", // 169
-        "u_vec4", // 170
-        "unit", // 171
-        "unknown_artifact", // 172
-        "unknown_slot_path", // 173
-        "unloadProject", // 174
-        "unresolved", // 175
-        "unset", // 176
-        "unsupported", // 177
-        "upsert", // 178
-        "vec2", // 179
-        "vec3", // 180
-        "vec4", // 181
-        "visual", // 182
-        "visual_product", // 183
-        "xy", // 184
-        "yellow", // 185
+        "publishes", // 17
+        "amplitude", // 18
+        "choice", // 19
+        "committed", // 20
+        "duration", // 21
+        "gfx.lpvm", // 22
+        "gradient", // 23
+        "hello", // 24
+        "instant", // 25
+        "node.button", // 26
+        "node.clock", // 27
+        "node.fixture", // 28
+        "node.fluid", // 29
+        "node.playlist", // 30
+        "node.radio", // 31
+        "node.shader", // 32
+        "node.texture", // 33
+        "ratio", // 34
+        "stopAllProjects", // 35
+        "svc.button", // 36
+        "svc.radio-espnow", // 37
+        "Clock", // 38
+        "Fixture", // 39
+        "Module", // 40
+        "Output", // 41
+        "Shader", // 42
+        "always", // 43
+        "fixture_map2d", // 44
+        "root", // 45
+        "shader_source", // 46
+        "Button", // 47
+        "ComputeShader", // 48
+        "ControlRadio", // 49
+        "Created", // 50
+        "Debug", // 51
+        "Error", // 52
+        "Fluid", // 53
+        "Info", // 54
+        "Playlist", // 55
+        "Texture", // 56
+        "Trace", // 57
+        "Warn", // 58
+        "accepted", // 59
+        "affine2d", // 60
+        "angle", // 61
+        "angular", // 62
+        "any", // 63
+        "audio_level", // 64
+        "available", // 65
+        "b_vec2", // 66
+        "b_vec3", // 67
+        "b_vec4", // 68
+        "bgr", // 69
+        "binary", // 70
+        "bool", // 71
+        "brg", // 72
+        "by_key", // 73
+        "clear", // 74
+        "clearFaults", // 75
+        "compute_shader_source", // 76
+        "consumed", // 77
+        "control", // 78
+        "control_product", // 79
+        "count", // 80
+        "debug", // 81
+        "declared", // 82
+        "delete", // 83
+        "deleted", // 84
+        "diag.unwind", // 85
+        "dimensions", // 86
+        "edit_failed", // 87
+        "empty", // 88
+        "ensure_present", // 89
+        "enum", // 90
+        "error", // 91
+        "external", // 92
+        "extrude_x", // 93
+        "extrude_y", // 94
+        "f32", // 95
+        "fixed", // 96
+        "fixture_colors", // 97
+        "fixture_patch", // 98
+        "forced", // 99
+        "fragments", // 100
+        "frequency", // 101
+        "gbr", // 102
+        "gfx.null", // 103
+        "gfx.wgpu", // 104
+        "grb", // 105
+        "i32", // 106
+        "i_vec2", // 107
+        "i_vec3", // 108
+        "i_vec4", // 109
+        "ids", // 110
+        "image", // 111
+        "invalid_body", // 112
+        "invalid_path", // 113
+        "json", // 114
+        "latest", // 115
+        "listAvailableProjects", // 116
+        "local", // 117
+        "map", // 118
+        "mat2x2", // 119
+        "mat3x3", // 120
+        "mat4x4", // 121
+        "node_ref", // 122
+        "none", // 123
+        "not_a_value_leaf", // 124
+        "not_found", // 125
+        "not_writable", // 126
+        "omitted", // 127
+        "one_d", // 128
+        "option", // 129
+        "output_channels", // 130
+        "overlay_replace", // 131
+        "packed", // 132
+        "panel", // 133
+        "panel_writer", // 134
+        "path", // 135
+        "pending", // 136
+        "phase", // 137
+        "plain", // 138
+        "position2d", // 139
+        "position3d", // 140
+        "power", // 141
+        "produced", // 142
+        "radial", // 143
+        "raw", // 144
+        "rbg", // 145
+        "reboot", // 146
+        "red", // 147
+        "remove", // 148
+        "resource", // 149
+        "result_end", // 150
+        "rgb8", // 151
+        "rgba16", // 152
+        "runtime_buffer", // 153
+        "runtime_buffer_resource", // 154
+        "setLogLevel", // 155
+        "setting", // 156
+        "shader.f32", // 157
+        "show", // 158
+        "srgb8", // 159
+        "state", // 160
+        "string", // 161
+        "summary", // 162
+        "target_occupied", // 163
+        "text", // 164
+        "texture", // 165
+        "two_d", // 166
+        "type_mismatch", // 167
+        "u16", // 168
+        "u32", // 169
+        "u_vec2", // 170
+        "u_vec3", // 171
+        "u_vec4", // 172
+        "unit", // 173
+        "unknown_artifact", // 174
+        "unknown_slot_path", // 175
+        "unloadProject", // 176
+        "unresolved", // 177
+        "unset", // 178
+        "unsupported", // 179
+        "upsert", // 180
+        "vec2", // 181
+        "vec3", // 182
+        "vec4", // 183
+        "visual", // 184
+        "visual_product", // 185
+        "xy", // 186
+        "yellow", // 187
     ),
     offsets: &[
-        0, 11, 13, 18, 20, 26, 31, 34, 39, 45, 49, 52, 55, 59, 74, 82,
-        87, 105, 116, 126, 138, 148, 161, 171, 182, 194, 204, 220, 229, 234, 241, 248,
-        254, 260, 266, 272, 285, 289, 302, 308, 321, 333, 338, 343, 348, 352, 360, 367,
-        372, 376, 384, 392, 401, 406, 413, 416, 427, 435, 444, 450, 456, 462, 465, 471,
-        475, 478, 484, 490, 495, 506, 511, 532, 540, 548, 555, 570, 575, 580, 588, 595,
-        601, 608, 619, 629, 637, 648, 653, 667, 671, 676, 684, 693, 702, 705, 710, 724,
-        737, 743, 752, 761, 764, 772, 780, 788, 791, 794, 800, 806, 812, 815, 820, 827,
-        839, 851, 857, 878, 883, 886, 892, 898, 904, 912, 916, 932, 941, 953, 960, 965,
-        971, 986, 1001, 1006, 1018, 1022, 1029, 1034, 1039, 1049, 1059, 1064, 1072, 1081, 1087, 1092,
-        1095, 1098, 1104, 1107, 1113, 1121, 1131, 1135, 1141, 1155, 1178, 1189, 1196, 1206, 1211, 1216,
-        1222, 1229, 1244, 1248, 1255, 1260, 1273, 1276, 1279, 1285, 1291, 1297, 1301, 1317, 1334, 1347,
-        1357, 1362, 1373, 1379, 1383, 1387, 1391, 1397, 1411, 1413, 1419,
+        0, 11, 13, 18, 24, 26, 31, 34, 38, 44, 47, 52, 55, 60, 68, 76,
+        83, 101, 110, 119, 125, 134, 142, 150, 158, 163, 170, 181, 191, 203, 213, 226,
+        236, 247, 259, 264, 279, 289, 305, 310, 317, 323, 329, 335, 341, 354, 358, 371,
+        377, 390, 402, 409, 414, 419, 424, 428, 436, 443, 448, 452, 460, 468, 473, 480,
+        483, 494, 503, 509, 515, 521, 524, 530, 534, 537, 543, 548, 559, 580, 588, 595,
+        610, 615, 620, 628, 634, 641, 652, 662, 673, 678, 692, 696, 701, 709, 718, 727,
+        730, 735, 749, 762, 768, 777, 786, 789, 797, 805, 808, 811, 817, 823, 829, 832,
+        837, 849, 861, 865, 871, 892, 897, 900, 906, 912, 918, 926, 930, 946, 955, 967,
+        974, 979, 985, 1000, 1015, 1021, 1026, 1038, 1042, 1049, 1054, 1059, 1069, 1079, 1084, 1092,
+        1098, 1101, 1104, 1110, 1113, 1119, 1127, 1137, 1141, 1147, 1161, 1184, 1195, 1202, 1212, 1216,
+        1221, 1226, 1232, 1239, 1254, 1258, 1265, 1270, 1283, 1286, 1289, 1295, 1301, 1307, 1311, 1327,
+        1344, 1357, 1367, 1372, 1383, 1389, 1393, 1397, 1401, 1407, 1421, 1423, 1429,
     ],
 };
 
 const KEY_HASH: &[u16] = &[
-    0x0109, 0x017a, 0x0163, 0x017e, 0x001a, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff,
-    0x016b, 0x00d3, 0x000d, 0xffff, 0xffff, 0xffff, 0xffff, 0x0041, 0xffff, 0x0077, 0xffff, 0xffff, 0xffff, 0x00dd, 0xffff, 0x00ce,
-    0xffff, 0xffff, 0xffff, 0x006f, 0x018b, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0x004f,
-    0x0173, 0x008a, 0xffff, 0xffff, 0x011d, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0x00ac, 0x002f, 0xffff, 0xffff, 0xffff, 0xffff,
-    0xffff, 0x013d, 0xffff, 0x006c, 0x00da, 0x0142, 0xffff, 0x0165, 0x0080, 0xffff, 0x016d, 0x0042, 0xffff, 0xffff, 0xffff, 0xffff,
-    0xffff, 0xffff, 0x00b0, 0x0167, 0xffff, 0x0016, 0xffff, 0xffff, 0xffff, 0x003f, 0x0009, 0xffff, 0x00e9, 0xffff, 0xffff, 0x0097,
-    0x0117, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0x002c, 0x0111, 0xffff, 0xffff, 0xffff, 0x0036, 0x0038, 0x0086, 0x00f6, 0x00fa,
-    0xffff, 0x0094, 0x0136, 0x017f, 0xffff, 0x001d, 0x0114, 0x0135, 0x0162, 0xffff, 0xffff, 0x00e6, 0x0106, 0xffff, 0xffff, 0xffff,
-    0xffff, 0x0122, 0xffff, 0xffff, 0x0112, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0x0024, 0xffff, 0xffff, 0xffff, 0x007b,
-    0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0x004e, 0x016e, 0xffff, 0x0191, 0x0044, 0x00b1, 0xffff, 0xffff, 0x0002,
-    0x0138, 0xffff, 0xffff, 0xffff, 0xffff, 0x0119, 0x013c, 0xffff, 0xffff, 0xffff, 0x013a, 0x009c, 0x0199, 0xffff, 0xffff, 0x019a,
-    0xffff, 0x018f, 0xffff, 0x00c3, 0xffff, 0xffff, 0xffff, 0x00a0, 0xffff, 0xffff, 0xffff, 0x0083, 0x0192, 0xffff, 0x014d, 0xffff,
-    0x00a4, 0xffff, 0x012b, 0x00e2, 0x0137, 0xffff, 0x0150, 0xffff, 0xffff, 0xffff, 0x0069, 0x0018, 0x0161, 0xffff, 0xffff, 0x0022,
-    0x0040, 0xffff, 0xffff, 0xffff, 0x0141, 0x00ed, 0xffff, 0x00f4, 0xffff, 0x00be, 0x0104, 0xffff, 0xffff, 0xffff, 0x00c5, 0x0076,
-    0xffff, 0xffff, 0x019c, 0xffff, 0x0125, 0x012d, 0xffff, 0xffff, 0xffff, 0x0084, 0x0065, 0x0181, 0x0152, 0xffff, 0xffff, 0x00fb,
-    0xffff, 0x00cd, 0xffff, 0x0179, 0x0187, 0x0189, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0x0096, 0x0079, 0xffff, 0x00bc,
-    0x0087, 0x013f, 0xffff, 0x013e, 0x0039, 0x019d, 0xffff, 0x00cf, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0x0146, 0xffff, 0x011e,
-    0xffff, 0x015b, 0xffff, 0xffff, 0xffff, 0xffff, 0x003a, 0x00db, 0x00c8, 0x0058, 0x00de, 0x010f, 0xffff, 0xffff, 0x0028, 0xffff,
-    0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0x0063, 0x00d6, 0x0166, 0xffff, 0xffff, 0x0031, 0x0019, 0xffff, 0xffff, 0xffff,
-    0xffff, 0xffff, 0xffff, 0xffff, 0x0045, 0xffff, 0x0035, 0xffff, 0x00ae, 0x0184, 0xffff, 0xffff, 0xffff, 0x00e4, 0xffff, 0x003b,
-    0x00d4, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0x0099, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff,
-    0x0156, 0x0126, 0x0113, 0xffff, 0x0103, 0xffff, 0xffff, 0x004a, 0x015d, 0xffff, 0xffff, 0x002b, 0x0132, 0xffff, 0xffff, 0xffff,
-    0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0x00ba, 0xffff, 0xffff, 0x00ea, 0xffff, 0xffff, 0xffff,
-    0xffff, 0xffff, 0x00f5, 0x008c, 0xffff, 0x00e3, 0xffff, 0xffff, 0xffff, 0x0067, 0xffff, 0x0075, 0x005f, 0x00b3, 0x0064, 0xffff,
-    0x0157, 0xffff, 0x00c4, 0xffff, 0xffff, 0xffff, 0x0092, 0x0198, 0xffff, 0xffff, 0x003d, 0xffff, 0xffff, 0xffff, 0x0043, 0xffff,
-    0xffff, 0x0008, 0x0100, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0x01a1, 0xffff, 0x005d, 0xffff, 0x0056, 0x0026, 0x0154, 0xffff,
-    0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0x001e, 0x007a, 0xffff, 0xffff, 0x001b, 0x0003, 0x005a, 0xffff, 0x0029, 0x0197,
-    0xffff, 0x000f, 0x0025, 0xffff, 0xffff, 0x00f0, 0xffff, 0x00ee, 0xffff, 0xffff, 0xffff, 0x0030, 0x00cc, 0xffff, 0xffff, 0x004b,
-    0xffff, 0x0091, 0x0130, 0xffff, 0xffff, 0xffff, 0x0033, 0xffff, 0xffff, 0x0088, 0xffff, 0xffff, 0xffff, 0x0188, 0x011b, 0x00a8,
-    0x00d2, 0x005c, 0x0059, 0x0081, 0x0085, 0x00f1, 0x0139, 0x019f, 0x0090, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0x00ad, 0x0143,
-    0x0074, 0xffff, 0x0148, 0x0006, 0x0164, 0xffff, 0x0034, 0x012a, 0x00bf, 0xffff, 0x0176, 0xffff, 0xffff, 0xffff, 0x0159, 0x00ab,
-    0x0072, 0x00d8, 0xffff, 0xffff, 0x0071, 0x0032, 0xffff, 0x0014, 0x014a, 0x009b, 0x00e7, 0x00c7, 0x00e0, 0x0115, 0xffff, 0x0048,
-    0xffff, 0xffff, 0x00a9, 0xffff, 0xffff, 0xffff, 0xffff, 0x0193, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0x0004, 0x009d, 0x00b5,
-    0x0124, 0x0183, 0x019e, 0xffff, 0xffff, 0xffff, 0x015e, 0x0177, 0x0000, 0x008f, 0x0160, 0x00d1, 0x002a, 0xffff, 0xffff, 0x01a0,
-    0x00eb, 0x011f, 0x0185, 0xffff, 0x0010, 0xffff, 0xffff, 0x012c, 0xffff, 0x00bd, 0x0145, 0xffff, 0xffff, 0x0190, 0x007c, 0xffff,
-    0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0x00c9, 0xffff, 0xffff, 0xffff, 0xffff, 0x004c, 0xffff, 0xffff, 0xffff, 0x00e8,
-    0x0121, 0xffff, 0xffff, 0x000a, 0xffff, 0xffff, 0xffff, 0x0061, 0xffff, 0xffff, 0xffff, 0x0057, 0x00d0, 0xffff, 0x017d, 0x007e,
-    0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0x00bb, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0x0129,
-    0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0x0131, 0x010d, 0xffff, 0x0047, 0xffff, 0x0168, 0xffff, 0xffff, 0xffff, 0xffff,
-    0xffff, 0xffff, 0xffff, 0xffff, 0x0151, 0x019b, 0xffff, 0xffff, 0x0101, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0x000c, 0x00e5,
-    0x014f, 0x018e, 0xffff, 0xffff, 0xffff, 0x0180, 0xffff, 0x011c, 0xffff, 0xffff, 0x00dc, 0x01a2, 0xffff, 0xffff, 0xffff, 0xffff,
-    0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0x00ca, 0x00a5, 0xffff, 0xffff, 0x0098, 0xffff, 0x0134, 0x0095, 0xffff,
-    0x017b, 0xffff, 0xffff, 0x0093, 0x00a3, 0x0037, 0x00ec, 0xffff, 0x003c, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff,
-    0x0017, 0xffff, 0x00b4, 0xffff, 0x00a2, 0x00af, 0x0170, 0xffff, 0xffff, 0x017c, 0xffff, 0x0062, 0x0068, 0x00aa, 0x0012, 0x0051,
-    0x014c, 0xffff, 0xffff, 0xffff, 0x010a, 0xffff, 0x0102, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff,
-    0x004d, 0x018a, 0x00c2, 0x0144, 0xffff, 0xffff, 0xffff, 0xffff, 0x00ff, 0x001f, 0xffff, 0xffff, 0xffff, 0x0158, 0xffff, 0xffff,
-    0x0001, 0x003e, 0xffff, 0xffff, 0xffff, 0x00d5, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0x0182, 0x016a, 0x009f, 0xffff,
-    0xffff, 0xffff, 0x0116, 0x00b8, 0x0195, 0x016f, 0x0011, 0x0128, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0x018d, 0xffff, 0xffff,
-    0xffff, 0x0020, 0x0005, 0xffff, 0x000e, 0x0052, 0x0053, 0xffff, 0xffff, 0x0155, 0xffff, 0xffff, 0x0073, 0xffff, 0xffff, 0x0110,
-    0x0082, 0xffff, 0xffff, 0x0186, 0xffff, 0x00d7, 0xffff, 0xffff, 0x015f, 0x0049, 0xffff, 0xffff, 0x0054, 0xffff, 0xffff, 0xffff,
-    0xffff, 0x0174, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0x00f8, 0xffff, 0xffff,
-    0x0196, 0x0172, 0xffff, 0xffff, 0xffff, 0xffff, 0x00cb, 0xffff, 0xffff, 0xffff, 0xffff, 0x0171, 0xffff, 0xffff, 0xffff, 0xffff,
-    0x012f, 0xffff, 0x0118, 0x010e, 0x0133, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0x00b2, 0xffff, 0xffff, 0xffff, 0x0149, 0xffff,
-    0xffff, 0x006e, 0xffff, 0xffff, 0xffff, 0xffff, 0x00d9, 0x0078, 0x00b9, 0x005b, 0x012e, 0xffff, 0x007f, 0xffff, 0x006d, 0xffff,
-    0xffff, 0x011a, 0xffff, 0xffff, 0xffff, 0x006b, 0xffff, 0xffff, 0xffff, 0x00fc, 0x00fd, 0xffff, 0xffff, 0x00b6, 0x0027, 0xffff,
-    0xffff, 0x007d, 0xffff, 0xffff, 0xffff, 0xffff, 0x000b, 0xffff, 0xffff, 0xffff, 0xffff, 0x008b, 0xffff, 0xffff, 0x0107, 0x010c,
-    0x0178, 0xffff, 0xffff, 0xffff, 0x001c, 0xffff, 0xffff, 0xffff, 0xffff, 0x00c1, 0xffff, 0x008e, 0x002e, 0x0060, 0xffff, 0x00f2,
-    0xffff, 0x0089, 0xffff, 0x0108, 0x013b, 0xffff, 0xffff, 0xffff, 0x0023, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0x005e, 0x0050,
-    0x0105, 0xffff, 0xffff, 0xffff, 0xffff, 0x0147, 0xffff, 0xffff, 0x00b7, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff,
-    0x014e, 0x00a1, 0x0127, 0xffff, 0x010b, 0x015a, 0xffff, 0xffff, 0xffff, 0x0140, 0x0055, 0x0194, 0x002d, 0x00c6, 0xffff, 0xffff,
-    0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0x015c, 0x0046, 0xffff, 0xffff, 0x00ef, 0x0007, 0x008d, 0x009a, 0xffff, 0x00f3, 0xffff,
-    0xffff, 0x00a7, 0xffff, 0x0021, 0xffff, 0x00df, 0x0123, 0x0070, 0xffff, 0x0153, 0xffff, 0x0169, 0xffff, 0x0013, 0xffff, 0xffff,
-    0xffff, 0xffff, 0xffff, 0xffff, 0x0066, 0x018c, 0xffff, 0xffff, 0xffff, 0xffff, 0x006a, 0x014b, 0x0175, 0xffff, 0xffff, 0x0015,
-    0x00c0, 0x00f7, 0x00fe, 0x016c, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0x009e, 0x00e1, 0x00f9, 0x0120, 0x00a6,
+    0x010d, 0x017b, 0x0163, 0x017f, 0x001e, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff,
+    0x016b, 0x00d6, 0x0018, 0xffff, 0xffff, 0xffff, 0xffff, 0x005d, 0xffff, 0x0072, 0xffff, 0xffff, 0xffff, 0x00e0, 0xffff, 0x00d1,
+    0xffff, 0xffff, 0xffff, 0x0074, 0x018d, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0x0068,
+    0x0173, 0x009f, 0xffff, 0xffff, 0x0121, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0x00b0, 0x001b, 0xffff, 0xffff, 0xffff, 0xffff,
+    0xffff, 0x0142, 0xffff, 0x0052, 0x00dd, 0x0146, 0xffff, 0x0165, 0x00ee, 0xffff, 0x016d, 0x005e, 0xffff, 0xffff, 0xffff, 0xffff,
+    0xffff, 0xffff, 0x00b5, 0x0167, 0xffff, 0x001c, 0xffff, 0xffff, 0xffff, 0x0040, 0x0008, 0xffff, 0x00eb, 0xffff, 0xffff, 0x00a0,
+    0x011a, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0x0033, 0x0114, 0xffff, 0xffff, 0xffff, 0x0054, 0x0058, 0x0089, 0x00fb, 0x00ff,
+    0xffff, 0x009a, 0x013b, 0x0180, 0xffff, 0x0024, 0x0117, 0x013a, 0x0162, 0xffff, 0xffff, 0x00e8, 0x0079, 0xffff, 0xffff, 0xffff,
+    0xffff, 0x0127, 0xffff, 0xffff, 0x0115, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0x0020, 0xffff, 0xffff, 0xffff, 0x0086,
+    0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0x0045, 0x016e, 0xffff, 0x0194, 0x0060, 0x009b, 0xffff, 0xffff, 0x0001,
+    0x013d, 0xffff, 0xffff, 0xffff, 0xffff, 0x011c, 0x0141, 0xffff, 0xffff, 0xffff, 0x013f, 0x00a7, 0x019c, 0xffff, 0xffff, 0x019d,
+    0xffff, 0x0192, 0xffff, 0x00c7, 0xffff, 0xffff, 0xffff, 0x0095, 0xffff, 0xffff, 0xffff, 0x00f9, 0x0195, 0xffff, 0x0150, 0xffff,
+    0x0096, 0xffff, 0x012f, 0x00b4, 0x013c, 0xffff, 0x0153, 0xffff, 0xffff, 0xffff, 0x005a, 0x001a, 0x0161, 0xffff, 0xffff, 0x0019,
+    0x0041, 0xffff, 0xffff, 0xffff, 0x004e, 0x00f0, 0xffff, 0x00f7, 0xffff, 0x0130, 0x0109, 0xffff, 0xffff, 0xffff, 0x00c9, 0x007e,
+    0xffff, 0xffff, 0x019f, 0xffff, 0x00c2, 0x0132, 0xffff, 0xffff, 0xffff, 0x00fa, 0x0038, 0x0183, 0x0155, 0xffff, 0xffff, 0x0100,
+    0xffff, 0x00d0, 0xffff, 0x017a, 0x0189, 0x018b, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0x009d, 0x008b, 0xffff, 0x00c0,
+    0x008a, 0x0144, 0xffff, 0x0143, 0x0059, 0x01a0, 0xffff, 0x00d2, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0x0149, 0xffff, 0x0123,
+    0xffff, 0x015b, 0xffff, 0xffff, 0xffff, 0xffff, 0x003b, 0x00de, 0x00cb, 0x006f, 0x00e1, 0x0112, 0xffff, 0xffff, 0x002b, 0xffff,
+    0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0x0049, 0x00d9, 0x0166, 0xffff, 0xffff, 0x0023, 0x0011, 0xffff, 0xffff, 0xffff,
+    0xffff, 0xffff, 0xffff, 0xffff, 0x0061, 0x0102, 0x004f, 0xffff, 0x00b3, 0x0186, 0xffff, 0xffff, 0xffff, 0x00e6, 0xffff, 0x003c,
+    0x00d7, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0x00a2, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff,
+    0x0157, 0x012a, 0x0116, 0xffff, 0x0108, 0xffff, 0xffff, 0x0065, 0x015d, 0xffff, 0xffff, 0x002e, 0x0137, 0xffff, 0xffff, 0xffff,
+    0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0x0120, 0xffff, 0xffff, 0x00ec, 0xffff, 0xffff, 0xffff,
+    0xffff, 0xffff, 0x00f8, 0x008e, 0xffff, 0x00e5, 0xffff, 0xffff, 0xffff, 0x003a, 0xffff, 0x007d, 0x003d, 0x00b7, 0x004a, 0xffff,
+    0x0158, 0xffff, 0x00c8, 0xffff, 0x00a9, 0xffff, 0x0098, 0x019b, 0xffff, 0xffff, 0x005c, 0xffff, 0xffff, 0xffff, 0x005f, 0xffff,
+    0xffff, 0x0012, 0x0105, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0x01a4, 0xffff, 0x0071, 0xffff, 0x006d, 0x0031, 0x0084, 0xffff,
+    0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0x0027, 0x0083, 0xffff, 0xffff, 0x0025, 0x0002, 0x0070, 0xffff, 0x002c, 0x019a,
+    0xffff, 0x0014, 0x0030, 0x0179, 0xffff, 0x00f4, 0xffff, 0x00f2, 0xffff, 0xffff, 0xffff, 0x0029, 0x00cf, 0xffff, 0xffff, 0x0066,
+    0xffff, 0x0093, 0x0135, 0xffff, 0xffff, 0xffff, 0x0022, 0xffff, 0xffff, 0x008c, 0xffff, 0xffff, 0xffff, 0x018a, 0x011e, 0x00a6,
+    0x00d5, 0x004c, 0x0048, 0x0088, 0x00ef, 0x00f5, 0x013e, 0x01a2, 0x0181, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0x00b1, 0x0147,
+    0x007c, 0xffff, 0x014b, 0x0005, 0x0164, 0xffff, 0x002f, 0x012e, 0x00c3, 0xffff, 0x0175, 0xffff, 0xffff, 0xffff, 0x0159, 0x00ad,
+    0x0078, 0x00db, 0xffff, 0xffff, 0x0076, 0x0021, 0xffff, 0x000b, 0x014d, 0x007f, 0x00a4, 0x00ca, 0x00e3, 0x0118, 0xffff, 0x0063,
+    0xffff, 0xffff, 0x00a8, 0xffff, 0xffff, 0xffff, 0xffff, 0x0196, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0x0004, 0x0094, 0x00b9,
+    0x0129, 0x0185, 0x01a1, 0xffff, 0xffff, 0xffff, 0x015e, 0x0176, 0x0000, 0x0092, 0x0160, 0x00d4, 0x002d, 0xffff, 0xffff, 0x01a3,
+    0x00ed, 0x0124, 0x0187, 0xffff, 0x0015, 0xffff, 0xffff, 0x0131, 0xffff, 0x00c1, 0x0148, 0xffff, 0xffff, 0x0193, 0x0191, 0xffff,
+    0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0x00cc, 0xffff, 0xffff, 0xffff, 0xffff, 0x0067, 0xffff, 0xffff, 0xffff, 0x00ea,
+    0x0126, 0xffff, 0xffff, 0x0007, 0xffff, 0xffff, 0xffff, 0x0037, 0xffff, 0xffff, 0xffff, 0x006e, 0x00d3, 0xffff, 0x017e, 0x0057,
+    0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0x00bf, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0x012d,
+    0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0x0136, 0x0110, 0xffff, 0x0062, 0xffff, 0x0168, 0xffff, 0xffff, 0xffff, 0xffff,
+    0xffff, 0xffff, 0xffff, 0xffff, 0x0154, 0x019e, 0xffff, 0xffff, 0x0106, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0x0010, 0x00e7,
+    0x0152, 0x0190, 0xffff, 0xffff, 0xffff, 0x0182, 0xffff, 0x011f, 0xffff, 0xffff, 0x00df, 0x01a5, 0xffff, 0xffff, 0xffff, 0xffff,
+    0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0x00cd, 0x0097, 0xffff, 0xffff, 0x00a1, 0xffff, 0x0139, 0x009c, 0xffff,
+    0x017c, 0xffff, 0xffff, 0x0099, 0x0080, 0x0032, 0x00b2, 0xffff, 0x005b, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff,
+    0x000c, 0xffff, 0x00b8, 0xffff, 0x00af, 0x00e9, 0x0170, 0xffff, 0xffff, 0x017d, 0xffff, 0x0042, 0x004d, 0x00ab, 0x0016, 0x0046,
+    0x014f, 0xffff, 0xffff, 0xffff, 0x00bd, 0xffff, 0x0107, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff,
+    0x0044, 0x018c, 0x00c6, 0x0090, 0xffff, 0xffff, 0xffff, 0xffff, 0x0104, 0x0013, 0xffff, 0xffff, 0xffff, 0x0085, 0xffff, 0xffff,
+    0x0003, 0x003f, 0xffff, 0xffff, 0xffff, 0x00d8, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0x0184, 0x016a, 0x00ac, 0xffff,
+    0xffff, 0xffff, 0x0119, 0x00bc, 0x0198, 0x016f, 0x000a, 0x012c, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0x018f, 0xffff, 0xffff,
+    0xffff, 0x001d, 0x000e, 0xffff, 0x0009, 0x006a, 0x006b, 0xffff, 0xffff, 0x007b, 0xffff, 0xffff, 0x007a, 0xffff, 0xffff, 0x0113,
+    0x00f1, 0xffff, 0xffff, 0x0188, 0xffff, 0x00da, 0xffff, 0xffff, 0x015f, 0x0064, 0xffff, 0xffff, 0x006c, 0xffff, 0xffff, 0xffff,
+    0xffff, 0x0174, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0x00fd, 0xffff, 0xffff,
+    0x0199, 0x0172, 0xffff, 0xffff, 0xffff, 0xffff, 0x00ce, 0xffff, 0xffff, 0xffff, 0xffff, 0x0171, 0xffff, 0xffff, 0xffff, 0xffff,
+    0x0134, 0xffff, 0x011b, 0x0111, 0x0138, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0x00b6, 0xffff, 0xffff, 0xffff, 0x014c, 0xffff,
+    0xffff, 0x0081, 0xffff, 0xffff, 0xffff, 0xffff, 0x00dc, 0x0073, 0x00be, 0x004b, 0x0133, 0xffff, 0x0087, 0xffff, 0x0051, 0xffff,
+    0xffff, 0x011d, 0xffff, 0xffff, 0xffff, 0x0050, 0xffff, 0xffff, 0xffff, 0x0101, 0x0077, 0xffff, 0xffff, 0x00ba, 0x002a, 0xffff,
+    0xffff, 0x0056, 0xffff, 0xffff, 0xffff, 0xffff, 0x0017, 0xffff, 0xffff, 0xffff, 0xffff, 0x0122, 0xffff, 0xffff, 0x010b, 0x010f,
+    0x0177, 0xffff, 0xffff, 0xffff, 0x0026, 0xffff, 0xffff, 0xffff, 0xffff, 0x00c5, 0xffff, 0x0091, 0x0035, 0x003e, 0xffff, 0x00f6,
+    0xffff, 0x008d, 0xffff, 0x010c, 0x0140, 0xffff, 0xffff, 0xffff, 0x001f, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0x0036, 0x0069,
+    0x010a, 0xffff, 0xffff, 0xffff, 0xffff, 0x014a, 0xffff, 0xffff, 0x00bb, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff,
+    0x0151, 0x00ae, 0x012b, 0xffff, 0x010e, 0x015a, 0xffff, 0xffff, 0xffff, 0x0145, 0x0047, 0x0197, 0x0034, 0x0178, 0xffff, 0xffff,
+    0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0x015c, 0x0043, 0xffff, 0xffff, 0x00f3, 0x0006, 0x008f, 0x00a3, 0xffff, 0x0082, 0xffff,
+    0xffff, 0x00a5, 0xffff, 0x0028, 0xffff, 0x00e2, 0x0128, 0x0075, 0xffff, 0x0156, 0xffff, 0x0169, 0xffff, 0x000f, 0xffff, 0xffff,
+    0xffff, 0xffff, 0xffff, 0xffff, 0x0039, 0x018e, 0xffff, 0xffff, 0xffff, 0xffff, 0x0053, 0x0055, 0x014e, 0xffff, 0xffff, 0x000d,
+    0x00c4, 0x00fc, 0x0103, 0x016c, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0x00aa, 0x00e4, 0x00fe, 0x0125, 0x009e,
 ];
 
 const VALUE_HASH: &[u16] = &[
-    0x0057, 0x0062, 0xffff, 0xffff, 0xffff, 0xffff, 0x0002, 0x00ab, 0x0025, 0xffff, 0x00af, 0xffff, 0x0096, 0x0089, 0x0010, 0xffff,
-    0xffff, 0x0030, 0x00b7, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0x0034, 0xffff, 0xffff, 0xffff, 0x00ad, 0x003b, 0xffff, 0xffff,
-    0xffff, 0xffff, 0x0043, 0xffff, 0xffff, 0x002c, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0x00a8, 0xffff, 0xffff,
-    0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0x0048, 0xffff, 0xffff, 0xffff, 0x0063, 0xffff, 0x000c, 0xffff, 0x00a2, 0xffff,
-    0xffff, 0x0080, 0xffff, 0xffff, 0xffff, 0x0024, 0x0071, 0x0082, 0xffff, 0x00b9, 0x004f, 0xffff, 0xffff, 0x0036, 0xffff, 0xffff,
-    0xffff, 0xffff, 0x00a4, 0xffff, 0xffff, 0xffff, 0x0042, 0xffff, 0x0045, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0x0076,
-    0x007c, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0x0018, 0xffff, 0x0050, 0xffff, 0xffff, 0x0019, 0x006f, 0x008d,
-    0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0x0028, 0x00b3, 0xffff, 0xffff, 0xffff, 0x0046, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff,
-    0xffff, 0xffff, 0xffff, 0xffff, 0x008e, 0xffff, 0xffff, 0x006b, 0x0021, 0x0099, 0x003a, 0x0059, 0x0081, 0xffff, 0x000d, 0xffff,
-    0xffff, 0x0026, 0xffff, 0xffff, 0x0004, 0xffff, 0x0040, 0x009d, 0x0039, 0x001b, 0x00a9, 0x0054, 0x007e, 0xffff, 0xffff, 0x0014,
-    0x0060, 0xffff, 0x0033, 0xffff, 0xffff, 0x0066, 0x0068, 0xffff, 0xffff, 0x0012, 0xffff, 0x000f, 0xffff, 0xffff, 0xffff, 0xffff,
-    0x0052, 0x00a7, 0xffff, 0x004d, 0xffff, 0xffff, 0x0090, 0x0098, 0xffff, 0xffff, 0xffff, 0x00aa, 0x0007, 0x001f, 0x003d, 0xffff,
-    0xffff, 0xffff, 0xffff, 0x0056, 0x005c, 0xffff, 0xffff, 0xffff, 0x00ac, 0xffff, 0xffff, 0xffff, 0x0008, 0xffff, 0xffff, 0xffff,
-    0xffff, 0xffff, 0x001e, 0xffff, 0xffff, 0xffff, 0xffff, 0x0038, 0xffff, 0xffff, 0xffff, 0xffff, 0x0092, 0xffff, 0xffff, 0x001a,
-    0x0016, 0xffff, 0x00b4, 0xffff, 0xffff, 0x0051, 0xffff, 0xffff, 0xffff, 0xffff, 0x0061, 0xffff, 0xffff, 0xffff, 0x0055, 0xffff,
-    0xffff, 0x002a, 0x008f, 0x009a, 0x00a3, 0x00ae, 0x009e, 0x0075, 0x0001, 0xffff, 0xffff, 0xffff, 0x003e, 0x001c, 0xffff, 0xffff,
-    0xffff, 0xffff, 0xffff, 0x00b5, 0xffff, 0xffff, 0x0095, 0xffff, 0x0073, 0xffff, 0xffff, 0xffff, 0xffff, 0x0053, 0xffff, 0x005e,
-    0xffff, 0xffff, 0xffff, 0x002b, 0x00a0, 0xffff, 0xffff, 0xffff, 0x003c, 0x0041, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0x00a6,
-    0xffff, 0xffff, 0xffff, 0xffff, 0x0020, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff,
-    0x00b1, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0x0084, 0x0078, 0x0029, 0x009f, 0xffff, 0xffff, 0x0085, 0x003f, 0xffff, 0xffff,
-    0x0031, 0x0083, 0xffff, 0xffff, 0xffff, 0xffff, 0x008a, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0x0013, 0x002f,
-    0xffff, 0x0058, 0xffff, 0x0027, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0x007d, 0xffff, 0x001d, 0xffff, 0xffff, 0xffff, 0xffff,
-    0x0037, 0x0023, 0x0069, 0xffff, 0xffff, 0xffff, 0xffff, 0x0087, 0xffff, 0x006c, 0xffff, 0xffff, 0xffff, 0x005a, 0xffff, 0xffff,
-    0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0x00b6, 0x00b0, 0xffff, 0x000b, 0x0097, 0x0070, 0x009c,
-    0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0x0032, 0xffff, 0xffff, 0x002d, 0xffff, 0x0011, 0xffff, 0x000e,
-    0xffff, 0xffff, 0xffff, 0x0064, 0x002e, 0x007f, 0xffff, 0xffff, 0x004c, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0x0049, 0xffff,
-    0xffff, 0xffff, 0x00b2, 0xffff, 0x0088, 0xffff, 0xffff, 0x0065, 0xffff, 0xffff, 0x0006, 0x009b, 0x00a5, 0xffff, 0x0000, 0xffff,
-    0xffff, 0x0074, 0x006e, 0xffff, 0xffff, 0xffff, 0xffff, 0x0015, 0x0044, 0x0091, 0x00a1, 0x005f, 0xffff, 0xffff, 0xffff, 0x0047,
-    0xffff, 0xffff, 0xffff, 0xffff, 0x000a, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0x0005, 0xffff, 0xffff, 0xffff, 0x006a, 0x0003,
-    0xffff, 0x007b, 0x008b, 0xffff, 0xffff, 0xffff, 0x0072, 0xffff, 0xffff, 0xffff, 0x005b, 0x0067, 0x0017, 0x0079, 0x004e, 0x00b8,
-    0xffff, 0xffff, 0xffff, 0xffff, 0x0009, 0x0022, 0xffff, 0x0077, 0xffff, 0x0035, 0x004a, 0x007a, 0x008c, 0xffff, 0xffff, 0xffff,
-    0xffff, 0xffff, 0xffff, 0xffff, 0x004b, 0x0094, 0xffff, 0xffff, 0x0086, 0x005d, 0x006d, 0xffff, 0xffff, 0x0093, 0xffff, 0xffff,
+    0x005a, 0x0065, 0xffff, 0xffff, 0xffff, 0xffff, 0x0002, 0x00ad, 0x002e, 0xffff, 0x00b1, 0xffff, 0x0097, 0x008c, 0x0010, 0xffff,
+    0xffff, 0x003a, 0x00b9, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0x003d, 0xffff, 0xffff, 0xffff, 0x00af, 0x0043, 0xffff, 0xffff,
+    0xffff, 0xffff, 0x004a, 0xffff, 0xffff, 0x0036, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0x00aa, 0xffff, 0xffff,
+    0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0x000d, 0xffff, 0xffff, 0xffff, 0x0066, 0xffff, 0x009e, 0xffff, 0x00a4, 0xffff,
+    0xffff, 0x0082, 0xffff, 0x0072, 0xffff, 0x002d, 0x0073, 0x0085, 0xffff, 0x00bb, 0x0053, 0xffff, 0xffff, 0x003f, 0xffff, 0xffff,
+    0xffff, 0xffff, 0x00a6, 0xffff, 0xffff, 0xffff, 0x0013, 0xffff, 0x000c, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0x0078,
+    0x007e, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0x0021, 0xffff, 0x0054, 0xffff, 0xffff, 0x0024, 0x0070, 0x008f,
+    0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0x0031, 0x00b5, 0xffff, 0xffff, 0xffff, 0x004c, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff,
+    0xffff, 0xffff, 0xffff, 0xffff, 0x0022, 0xffff, 0xffff, 0x006d, 0x002a, 0x009a, 0x0042, 0x005c, 0x0083, 0xffff, 0x0023, 0xffff,
+    0xffff, 0x002f, 0xffff, 0xffff, 0x0003, 0xffff, 0x0048, 0x009f, 0x0041, 0x0014, 0x00ab, 0x0057, 0x0080, 0xffff, 0xffff, 0x001d,
+    0x0063, 0xffff, 0x0012, 0xffff, 0xffff, 0x0017, 0x006a, 0xffff, 0xffff, 0x001b, 0xffff, 0x0018, 0xffff, 0xffff, 0xffff, 0xffff,
+    0x0056, 0x00a9, 0xffff, 0x0052, 0xffff, 0xffff, 0x0091, 0x0099, 0xffff, 0xffff, 0xffff, 0x00ac, 0x000a, 0x0028, 0x0045, 0xffff,
+    0xffff, 0xffff, 0xffff, 0x0059, 0x005f, 0xffff, 0xffff, 0xffff, 0x00ae, 0xffff, 0xffff, 0xffff, 0x0008, 0xffff, 0xffff, 0xffff,
+    0xffff, 0xffff, 0x0027, 0xffff, 0xffff, 0xffff, 0xffff, 0x000e, 0xffff, 0xffff, 0xffff, 0xffff, 0x0093, 0xffff, 0xffff, 0x0025,
+    0x001f, 0x0084, 0x00b6, 0xffff, 0xffff, 0x0055, 0xffff, 0xffff, 0xffff, 0xffff, 0x0064, 0xffff, 0xffff, 0xffff, 0x0058, 0xffff,
+    0xffff, 0x0034, 0x0090, 0x009b, 0x00a5, 0x00b0, 0x00a0, 0x0077, 0x0004, 0xffff, 0xffff, 0xffff, 0x0046, 0x0026, 0xffff, 0xffff,
+    0xffff, 0xffff, 0xffff, 0x00b7, 0xffff, 0xffff, 0x0096, 0xffff, 0x0075, 0xffff, 0xffff, 0xffff, 0xffff, 0x0015, 0xffff, 0x0061,
+    0xffff, 0xffff, 0xffff, 0x0035, 0x00a2, 0xffff, 0xffff, 0xffff, 0x0044, 0x0049, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0x00a8,
+    0xffff, 0xffff, 0xffff, 0xffff, 0x0029, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff,
+    0x00b3, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0x0087, 0x007a, 0x0033, 0x00a1, 0xffff, 0xffff, 0x0088, 0x0047, 0xffff, 0xffff,
+    0x003b, 0x0086, 0xffff, 0xffff, 0xffff, 0xffff, 0x008d, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0x001c, 0x0039,
+    0xffff, 0x005b, 0xffff, 0x0030, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0x007f, 0xffff, 0x0032, 0xffff, 0xffff, 0xffff, 0xffff,
+    0x0040, 0x002c, 0x006b, 0xffff, 0xffff, 0xffff, 0xffff, 0x008a, 0xffff, 0x006e, 0xffff, 0xffff, 0xffff, 0x005d, 0xffff, 0xffff,
+    0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0x00b8, 0x00b2, 0xffff, 0x000b, 0x0098, 0x0071, 0x009d,
+    0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0x003c, 0xffff, 0xffff, 0x0037, 0xffff, 0x001a, 0xffff, 0x0016,
+    0xffff, 0xffff, 0xffff, 0x0067, 0x0038, 0x0081, 0xffff, 0xffff, 0x0051, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0x004e, 0xffff,
+    0xffff, 0xffff, 0x00b4, 0xffff, 0x008b, 0xffff, 0xffff, 0x0068, 0xffff, 0xffff, 0x0006, 0x009c, 0x00a7, 0xffff, 0x0000, 0xffff,
+    0xffff, 0x0076, 0x0019, 0xffff, 0xffff, 0xffff, 0xffff, 0x001e, 0x004b, 0x0092, 0x00a3, 0x0062, 0xffff, 0xffff, 0xffff, 0x004d,
+    0xffff, 0xffff, 0xffff, 0xffff, 0x0009, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0x0005, 0xffff, 0xffff, 0xffff, 0x006c, 0x0001,
+    0xffff, 0x007d, 0x008e, 0xffff, 0xffff, 0xffff, 0x0074, 0xffff, 0xffff, 0xffff, 0x005e, 0x0069, 0x0020, 0x007b, 0x000f, 0x00ba,
+    0xffff, 0xffff, 0xffff, 0xffff, 0x0007, 0x002b, 0xffff, 0x0079, 0xffff, 0x003e, 0x004f, 0x007c, 0x0011, 0xffff, 0xffff, 0xffff,
+    0xffff, 0xffff, 0xffff, 0xffff, 0x0050, 0x0095, 0xffff, 0xffff, 0x0089, 0x0060, 0x006f, 0xffff, 0xffff, 0x0094, 0xffff, 0xffff,
 ];
 
 #[cfg(test)]

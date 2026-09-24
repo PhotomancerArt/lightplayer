@@ -161,7 +161,8 @@ mod tests {
             lines += 1;
         }
         assert!(lines > 100, "{lines} lines");
-        // 135,131 → 47,432 B (35.1 %) on the post-lean-wire sample: a ratchet.
+        // 174,742 → 55,802 B (31.9 %) on the proto-22 sample (the proto-21
+        // one: 135,131 → 47,432 B, 35.1 %): a ratchet.
         assert!(
             packed_total * 25 < json_total * 9,
             "{packed_total} vs {json_total}"

@@ -45,7 +45,12 @@ const PREFIX_BYTES: usize = 543;
 /// The golden's SHA-256, pinned so a change to the boot's *text* is a
 /// deliberate edit to this line and not a test that quietly re-blessed
 /// itself. A run that changes it must say which line moved and why.
-const PREFIX_SHA256: &str = "ea8bae305953ef613f68a97fb84919378f33b37eb5623dcb970e8dce2b7343e7";
+///
+/// Re-blessed 2026-09-24 (plan `lp-json-pack`, P4): `[INIT] main stack 45280
+/// B` became `45256 B` — the firmware's statics grew by 24 bytes (the link
+/// epoch and the transport's per-link encoding). Same length; the old pin
+/// was `ea8bae30…`.
+const PREFIX_SHA256: &str = "725255e2a7f4d30db7680164fd8c3b93c16930c02d94876c7befb638b99c6443";
 
 /// Run the shipped image, direct-loaded, under `--strict-bus`, stopping at
 /// the first complete line containing `exit_on`.
@@ -119,7 +124,7 @@ fn the_init_chain_comes_out_of_the_wire_byte_for_byte() {
         "[INIT] fw-esp32v3 boot",
         "[INIT] chip=esp32 arch=xtensa heap=15072+112640+98304+15536=241552",
         "[INIT] heap regions: 0 0x3ffe0440+15072 (ROM PRO stack)",
-        "[INIT] main stack 45280 B",
+        "[INIT] main stack 45256 B",
         "[RECOVERY] boot: cause=power-on level=green safe_mode=false prior_boot_complete=true",
         "[INIT] runtime started",
         "[INIT] I/O task spawned (uart0 921600 8N1, swi2 executor prio2, timg0t1 pacer 1ms)",
@@ -451,7 +456,7 @@ fn the_two_paths_report_the_same_memory_figures() {
         "and it is the same stack, reported the same way"
     );
     assert!(
-        a[0].contains(" of 45280 B ") && b[0].contains(" of 45280 B "),
+        a[0].contains(" of 45256 B ") && b[0].contains(" of 45256 B "),
         "the stack's size is the same on both paths: {a:?} vs {b:?}"
     );
     // The one figure the boot banner carries too, so the triple can be read

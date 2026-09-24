@@ -1,8 +1,11 @@
-//! Wire-protocol server messages, serialized to JSON for a host link.
+//! Wire-protocol server messages, serialized for a host link.
 //!
 //! This is the chip-agnostic serialization half of every firmware's server
 //! write path: take a [`lpc_wire::WireServerMessage`] and produce one framed
-//! wire line (`\nM!{json}\n`) in the static frame buffer. It runs in
+//! wire message in the static frame buffer — the JSON line `\nM!{json}\n`,
+//! or, on a link whose host opted in (the transport holds the choice), the
+//! packed frame `\n 0x00 'P' COBS(packed) 0x00` (`lpc_wire::packed_frame`,
+//! feature `json-pack`). It runs in
 //! **thread context** (the
 //! transport), never in the io task: serialization recursion plus a
 //! frame-budget buffer must not ride an interrupt executor's borrowed stack —
@@ -83,9 +86,86 @@ pub fn frame_bytes(len: usize) -> &'static [u8] {
 
 /// The serialized-frame budget: the shared `ProjectRead` frame budget plus
 /// room for the `\nM!` prefix and trailing `\n` (4 bytes, padded to 16).
+///
+/// The same buffer holds a packed frame unchanged: the engine's chunking
+/// budget is in JSON bytes, and a message's packed frame is never longer than
+/// its JSON line (`lpc_wire::packed_frame`'s tests, on recorded traffic).
 const SERVER_MSG_FRAMING_BYTES: usize = 16;
 const SERVER_MSG_JSON_BUFFER_SIZE: usize =
     lpc_wire::PROJECT_READ_FRAME_SERIAL_BUFFER_BYTES + SERVER_MSG_FRAMING_BYTES;
+
+/// Whether this image can write packed frames: the `json-pack` feature.
+/// The chip crate hands it to `LpServer::set_packed_encoding_supported`, so
+/// the server answers a host's opt-in with what this transport can do.
+pub const PACKED_ENCODING_SUPPORTED: bool = cfg!(feature = "json-pack");
+
+/// Serialize `msg` into the static frame buffer in `encoding`, returning the
+/// framed length for the write request.
+///
+/// [`WireEncoding::Packed`](lpc_wire::WireEncoding::Packed) writes the packed
+/// frame with no measure pass (plan `lp-json-pack`, G-F2). If it does not
+/// fit or cannot be packed, that one message goes out as JSON instead,
+/// measure pass included — never dropped. Without the `json-pack` feature a
+/// packed request is JSON too.
+pub fn serialize_server_msg(
+    msg: &lpc_wire::WireServerMessage,
+    encoding: lpc_wire::WireEncoding,
+) -> Result<usize, lpc_wire::TransportError> {
+    #[cfg(feature = "json-pack")]
+    if encoding == lpc_wire::WireEncoding::Packed {
+        match serialize_server_msg_packed(msg) {
+            Ok(len) => return Ok(len),
+            Err(error) => note_packed_fallback(msg, error),
+        }
+    }
+    #[cfg(not(feature = "json-pack"))]
+    let _ = encoding;
+    serialize_server_msg_json(msg)
+}
+
+/// Write `msg` as one packed frame into [`FRAME_BUF`].
+#[cfg(feature = "json-pack")]
+fn serialize_server_msg_packed(
+    msg: &lpc_wire::WireServerMessage,
+) -> Result<usize, lpc_wire::WireWriteError> {
+    // SAFETY: single writer by protocol (see FRAME_BUF): the transport
+    // serializes only between write requests, and the io task reads the
+    // buffer only inside one. The slice is dropped before this returns.
+    let buf = unsafe {
+        core::slice::from_raw_parts_mut(
+            core::ptr::addr_of_mut!(FRAME_BUF) as *mut u8,
+            SERVER_MSG_JSON_BUFFER_SIZE,
+        )
+    };
+    let len = lpc_wire::ser_packed_frame_to(buf, msg)?;
+    debug_assert!(
+        len <= lpc_wire::ser_write_json_len(msg) + 4,
+        "a packed frame outgrew its JSON line"
+    );
+    Ok(len)
+}
+
+/// A packed write failed: say so once per boot (then at debug, so a message
+/// class that never packs cannot flood the link), and let the caller send
+/// JSON.
+#[cfg(feature = "json-pack")]
+fn note_packed_fallback(msg: &lpc_wire::WireServerMessage, error: lpc_wire::WireWriteError) {
+    use core::sync::atomic::{AtomicBool, Ordering::Relaxed};
+    static WARNED: AtomicBool = AtomicBool::new(false);
+    if WARNED.swap(true, Relaxed) {
+        log::debug!(
+            "[io_task] server message id={} not packed ({error}); sending JSON",
+            msg.id
+        );
+    } else {
+        log::warn!(
+            "[io_task] server message id={} {} not packed ({error}); sending JSON \
+             (further fallbacks log at debug)",
+            msg.id,
+            server_message_detail(msg)
+        );
+    }
+}
 
 /// Serialize `msg` into the static frame buffer as one framed wire line
 /// (`\nM!{json}\n`), returning its length for the write request.
@@ -96,7 +176,7 @@ const SERVER_MSG_JSON_BUFFER_SIZE: usize =
 /// the loaded-project heap (see [`FRAME_BUF`] for both lessons' receipts).
 /// The measure pass runs first so an oversized frame is refused with the
 /// budget numbers instead of a mid-write failure.
-pub fn serialize_server_msg(
+fn serialize_server_msg_json(
     msg: &lpc_wire::WireServerMessage,
 ) -> Result<usize, lpc_wire::TransportError> {
     const FRAMING_OVERHEAD: usize = 4; // "\nM!" + trailing "\n"
@@ -223,6 +303,9 @@ pub fn server_message_detail(msg: &lpc_wire::WireServerMessage) -> String {
         lpc_wire::server::ServerMsgBody::Reboot => "Reboot".into(),
         lpc_wire::server::ServerMsgBody::ClearFaults { ledger_cleared } => {
             format!("ClearFaults ledger_cleared={ledger_cleared}")
+        }
+        lpc_wire::server::ServerMsgBody::SetEncoding { encoding } => {
+            format!("SetEncoding encoding={}", encoding.as_str())
         }
         lpc_wire::server::ServerMsgBody::Log { level, .. } => {
             format!("Log level={level:?}")

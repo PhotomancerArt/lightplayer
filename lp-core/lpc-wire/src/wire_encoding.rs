@@ -20,9 +20,28 @@
 //!   already refuse a peer whose hello `proto` differs;
 //! - at runtime, a host that asks for packed names its dictionary's
 //!   `fingerprint()`, and a board packs only when it matches its own.
+//!
+//! # The opt-in
+//!
+//! A host asks with [`ClientRequest::SetEncoding`](crate::ClientRequest::SetEncoding)
+//! `{ encoding, dictionary }`, always as JSON. The server answers
+//! [`ServerMsgBody::SetEncoding`](crate::server::ServerMsgBody::SetEncoding)
+//! with the encoding now in effect: `packed` only when the host asked for it,
+//! named [`WIRE_DICTIONARY_FINGERPRINT`](crate::WIRE_DICTIONARY_FINGERPRINT),
+//! and the embedder can pack (`LpServer::set_packed_encoding_supported`);
+//! `json` otherwise. The answer itself goes out as JSON; the transport that
+//! wrote it switches afterwards, and falls back to JSON when the link closes.
+
+use serde::{Deserialize, Serialize};
 
 /// The form a wire message is written in.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+///
+/// On the wire (the opt-in request [`ClientRequest::SetEncoding`] and its
+/// answer) it is the bare string `"json"` or `"packed"`.
+///
+/// [`ClientRequest::SetEncoding`]: crate::ClientRequest::SetEncoding
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub enum WireEncoding {
     /// `M!{json}` text: what every link speaks until a host opts in.
     #[default]
@@ -30,4 +49,17 @@ pub enum WireEncoding {
     /// JSON Pack (`lp-json-pack`) against [`WIRE_DICTIONARY`](crate::WIRE_DICTIONARY):
     /// the same JSON, packed.
     Packed,
+}
+
+impl WireEncoding {
+    /// The wire spelling (`"json"`, `"packed"`), for logs.
+    ///
+    /// A named `&str` rather than `Debug`: firmware images build with
+    /// `Debug` formatting stripped, where `{:?}` prints nothing.
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Json => "json",
+            Self::Packed => "packed",
+        }
+    }
 }

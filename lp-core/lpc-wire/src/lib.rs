@@ -13,6 +13,8 @@ pub mod message;
 pub mod messages;
 #[cfg(feature = "ser-write-json")]
 pub mod pack_sink;
+#[cfg(feature = "ser-write-json")]
+pub mod packed_frame;
 pub mod packed_json_decode;
 pub mod project;
 pub mod project_command;
@@ -58,6 +60,8 @@ pub use messages::{
 pub use messages::{ClientMessage, ClientRequest, Message, ServerMessage};
 #[cfg(feature = "ser-write-json")]
 pub use pack_sink::PackSink;
+#[cfg(feature = "ser-write-json")]
+pub use packed_frame::ser_packed_frame_to;
 pub use packed_json_decode::{PackedDecodeError, decode_packed_to_json};
 pub use project::{
     NodeRuntimeStatus, WireChannelSampleFormat, WireColorLayout, WireProjectHandle,

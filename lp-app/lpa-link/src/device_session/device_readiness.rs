@@ -519,6 +519,7 @@ mod tests {
                 ..Default::default()
             },
             device_uid: None,
+            pack_dictionary: lpc_wire::WIRE_DICTIONARY_FINGERPRINT,
         }
     }
 }

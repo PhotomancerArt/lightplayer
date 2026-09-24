@@ -69,6 +69,23 @@ pub enum ClientRequest {
     /// If the failure is still there the node faults again and the device
     /// re-degrades within a heartbeat — the honest answer, not a bug.
     ClearFaults,
+    /// Ask the board to write its replies on THIS link in `encoding`
+    /// (plan `lp-json-pack`, Q1): the per-link opt-in to
+    /// [`WireEncoding::Packed`](crate::WireEncoding::Packed).
+    ///
+    /// `dictionary` is the host's
+    /// [`WIRE_DICTIONARY_FINGERPRINT`](crate::WIRE_DICTIONARY_FINGERPRINT).
+    /// The board packs only when it equals its own and it can pack;
+    /// otherwise it stays JSON. Answered with
+    /// [`crate::server::ServerMsgBody::SetEncoding`], which names the
+    /// encoding now in effect and is itself written as JSON: the switch
+    /// happens after it. The request is always JSON (board→host only).
+    /// The link returns to JSON when it closes or the board resets, so a
+    /// host asks again on every connect.
+    SetEncoding {
+        encoding: crate::WireEncoding,
+        dictionary: u32,
+    },
 }
 
 #[cfg(test)]

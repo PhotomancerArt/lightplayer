@@ -8,7 +8,7 @@ license.workspace = true
 rust-version.workspace = true
 
 [features]
-default = ["esp32c6", "server", "radio"]
+default = ["esp32c6", "server", "radio", "json-pack"]
 esp32c6 = [
     "esp-backtrace/esp32c6",
     "esp-bootloader-esp-idf/esp32c6",
@@ -38,6 +38,11 @@ naga = ["lpa-server/naga"]
 # computed at driver init from the board manifest's declared WS281x channel
 # count (1 declared channel = the whole 192-word RMT RAM, 2 = one 48-word
 # block each). See `src/output/rmt/c6_rmt.rs::plan_for_declared`.
+
+# JSON Pack (plan `lp-json-pack`, Q4): replies go out packed on a link whose
+# host opted in (`ClientRequest::SetEncoding`); every other link stays JSON.
+# On by default; without it the board answers every opt-in "json".
+json-pack = ["server", "fw-esp32-common/json-pack"]
 
 # Periodic WS281x telemetry over the serial link — OFF by default.
 #

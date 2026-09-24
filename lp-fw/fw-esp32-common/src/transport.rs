@@ -7,9 +7,17 @@
 //! polls run in interrupt context on a borrowed stack, and serialization
 //! recursion there corrupted the system on the bench (see
 //! `serial::server_msg`'s module docs and the 2026-08-25 ADR).
+//!
+//! It also holds the one piece of per-link wire state: the encoding a host
+//! opted into (`ClientRequest::SetEncoding`, plan `lp-json-pack`). The
+//! server decides the answer; the transport sees the answer it writes, and
+//! switches after it — which is why the state lives here, beside the link,
+//! and not in the IO-free server: only the transport knows when the link
+//! the answer was for has gone (see [`crate::serial::link_epoch`]).
 
 use alloc::vec::Vec;
 
+use crate::serial::link_epoch;
 use crate::serial::server_msg::serialize_server_msg;
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::channel::Channel;
@@ -30,6 +38,11 @@ pub struct StreamingMessageRouterTransport {
     /// result whose generation does not match, so a result orphaned by a
     /// cancelled send can never be misattributed to the next write.
     generation: u32,
+    /// The encoding this link's host opted into; `Json` until one does.
+    encoding: lpc_wire::WireEncoding,
+    /// The [`link_epoch`] `encoding` was negotiated in. A different epoch
+    /// means the host that asked is gone, and the link is JSON again.
+    encoding_epoch: u32,
 }
 
 impl StreamingMessageRouterTransport {
@@ -49,7 +62,23 @@ impl StreamingMessageRouterTransport {
             server_write_request,
             server_write_result,
             generation: 0,
+            encoding: lpc_wire::WireEncoding::Json,
+            encoding_epoch: link_epoch::current(),
         }
+    }
+
+    /// The encoding the next frame goes out in: the negotiated one, unless
+    /// the link it was negotiated on has closed since.
+    fn link_encoding(&mut self) -> lpc_wire::WireEncoding {
+        let epoch = link_epoch::current();
+        if epoch != self.encoding_epoch {
+            if self.encoding != lpc_wire::WireEncoding::Json {
+                log::info!("StreamingMessageRouterTransport: link closed; replies are JSON again");
+            }
+            self.encoding = lpc_wire::WireEncoding::Json;
+            self.encoding_epoch = epoch;
+        }
+        self.encoding
     }
 }
 
@@ -63,10 +92,17 @@ impl StreamingMessageRouterTransport {
     /// produced for this request.
     async fn write_once(&mut self, msg: WireServerMessage) -> Result<(), TransportError> {
         let id = msg.id;
+        // The answer to an opt-in is always JSON (the host reads it before it
+        // knows the outcome); the switch it announces happens in `send`,
+        // after it is written.
+        let encoding = match msg.msg {
+            lpc_wire::server::ServerMsgBody::SetEncoding { .. } => lpc_wire::WireEncoding::Json,
+            _ => self.link_encoding(),
+        };
         // Fills the shared static frame buffer; sending the LENGTH hands the
         // buffer to the io task, and awaiting the matching result below is
         // what makes reusing it for the next message sound (see FRAME_BUF).
-        let len = serialize_server_msg(&msg)?;
+        let len = serialize_server_msg(&msg, encoding)?;
         let generation = self.generation;
         self.generation = self.generation.wrapping_add(1);
         self.server_write_request
@@ -92,11 +128,27 @@ impl ServerTransport for StreamingMessageRouterTransport {
         // Captured before the message moves: a failed Error notice must not
         // recurse into another notice.
         let is_error_frame = matches!(msg.msg, lpc_wire::server::ServerMsgBody::Error { .. });
+        let switch_to = match msg.msg {
+            lpc_wire::server::ServerMsgBody::SetEncoding { encoding } => Some(encoding),
+            _ => None,
+        };
         let result = self.write_once(msg).await;
         match &result {
-            Ok(()) => log::debug!(
-                "StreamingMessageRouterTransport: wrote message id={id} through io_task"
-            ),
+            Ok(()) => {
+                log::debug!(
+                    "StreamingMessageRouterTransport: wrote message id={id} through io_task"
+                );
+                // The host has its answer; every frame after it is in the
+                // encoding it names, until this link closes.
+                if let Some(encoding) = switch_to {
+                    self.encoding = encoding;
+                    self.encoding_epoch = link_epoch::current();
+                    log::info!(
+                        "StreamingMessageRouterTransport: replies are now {}",
+                        encoding.as_str()
+                    );
+                }
+            }
             Err(error) => {
                 // io_task has already retried per its link's write policy, so
                 // this drop is final — say so at error level, never as a
