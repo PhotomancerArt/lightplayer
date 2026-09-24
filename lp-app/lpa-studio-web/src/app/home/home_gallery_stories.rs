@@ -921,6 +921,7 @@ fn roster_fixture() -> DeviceRosterView {
                         ),
                     ],
                     terminal_dropped: 0,
+                    firmware_blocked: None,
                     escapes: vec![DeviceEscape::Disconnect, DeviceEscape::Forget],
                 },
                 DeviceView {
@@ -966,6 +967,7 @@ fn roster_fixture() -> DeviceRosterView {
                     ],
                     terminal_dropped: 0,
                     // Cancel FIRST: a running activity\'s way out leads.
+                    firmware_blocked: None,
                     escapes: vec![
                         DeviceEscape::Cancel,
                         DeviceEscape::Disconnect,
@@ -1013,6 +1015,7 @@ fn roster_fixture() -> DeviceRosterView {
                         ),
                     ],
                     terminal_dropped: 0,
+                    firmware_blocked: None,
                     escapes: vec![DeviceEscape::Disconnect, DeviceEscape::Forget],
                 },
                 // The EMPTY face (M3): a LightPlayer that has SAID it has
@@ -1071,6 +1074,7 @@ fn roster_fixture() -> DeviceRosterView {
                         ),
                     ],
                     terminal_dropped: 0,
+                    firmware_blocked: None,
                     escapes: vec![DeviceEscape::Disconnect, DeviceEscape::Forget],
                 },
                 // The remembered board (D7): known, named, and not on the
@@ -1103,6 +1107,7 @@ fn roster_fixture() -> DeviceRosterView {
                     terminal: Vec::new(),
                     terminal_dropped: 0,
                     // The two verbs an absent board can honestly offer.
+                    firmware_blocked: None,
                     escapes: vec![DeviceEscape::Reconnect, DeviceEscape::Forget],
                 },
             ],
@@ -1327,6 +1332,7 @@ fn firmware_face_fixtures() -> Vec<(&'static str, DeviceView, Option<String>)> {
             "ESP-ROM:esp32c6-20220919",
         )],
         terminal_dropped: 0,
+        firmware_blocked: None,
         escapes: vec![DeviceEscape::Disconnect, DeviceEscape::Forget],
     };
     let pre_hello = DeviceView {
@@ -1437,6 +1443,7 @@ fn firmware_face_fixtures() -> Vec<(&'static str, DeviceView, Option<String>)> {
         // The link is still attached (the port was closed, not unplugged),
         // so the projection offers Disconnect — which is also what keeps
         // the terminal and the verb rows drawn at their fixed heights.
+        firmware_blocked: None,
         escapes: vec![DeviceEscape::Disconnect, DeviceEscape::Forget],
     };
 
