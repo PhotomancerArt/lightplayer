@@ -356,6 +356,27 @@ fn picker_with_imports(patterns: &[(&str, &str, &str, bool)]) -> Element {
     }
 }
 
+#[story(
+    description = "On a device lens the selected node's tree row wears a small live dot — the sidebar twin of the card header's Live chip: this is the one node the device is streaming."
+)]
+pub(crate) fn tree_live_row() -> Element {
+    let mut view = project_editor_fixture(ProjectSyncPhase::Ready);
+    // The fixture's focused row (Orbit shader), as a device lens stamps it.
+    for row in &mut view.tree.roots[0].children {
+        row.streaming_live = row.focused;
+    }
+
+    rsx! {
+        div { class: "tw:max-w-[320px]",
+            ProjectPane {
+                view,
+                status: UiStatus::good("Ready"),
+                on_action: move |_| {},
+            }
+        }
+    }
+}
+
 /// The build of a device that carries no fluid and no radio runtime — the
 /// shape the picker and the tree are gated against.
 fn gapped_device_features() -> Vec<LpFeature> {

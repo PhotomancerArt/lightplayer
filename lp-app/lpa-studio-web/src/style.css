@@ -2589,6 +2589,19 @@ label:has(> input:not(:disabled)) {
     font-weight: 700;
 }
 
+.ux-produced-product-overlay .ux-produced-product-overlay-cta {
+    justify-self: center;
+    border: 1px solid var(--studio-color-border-strong);
+    border-radius: 999px;
+    padding: 0.2rem 0.7rem;
+    color: var(--studio-color-text-strong);
+    font-size: 0.75rem;
+}
+
+.ux-produced-product-overlay-button:hover .ux-produced-product-overlay-cta {
+    background: rgba(255, 255, 255, 0.12);
+}
+
 .ux-produced-product-overlay-button {
     cursor: pointer;
     transition: background-color 120ms ease, color 120ms ease;

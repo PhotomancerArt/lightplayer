@@ -172,7 +172,7 @@ impl Default for Config {
             reboot_on_reset: true,
             // No cable. The consumer plugs one in with a control line —
             // and a board that wants its boot log on the wire asks for
-            // `usb_host=attached` instead, exactly as `emu run` does.
+            // `usb_host=attached` instead, as `emu run --monitor` does.
             usb_host: UsbHost::Absent,
             strap: Strap::App,
             reset_cause: ResetCause::PowerOn,

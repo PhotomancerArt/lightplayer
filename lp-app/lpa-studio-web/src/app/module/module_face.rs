@@ -97,7 +97,7 @@ pub fn ModuleFace(
                         preview: preview.preview.clone(),
                         tracking: preview.tracking,
                         frame: preview.frame,
-                        focus_action: None,
+                        focus_action: preview.show_live.clone(),
                         on_action,
                     }
                     if let Some(current) = hero_choice {

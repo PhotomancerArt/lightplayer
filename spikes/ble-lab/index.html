@@ -1,0 +1,297 @@
+<!doctype html>
+<!--
+  BLE lab page (spikes/ble-lab). Holds the Web Bluetooth link to an LP-BLE-…
+  board running fw-esp32c6's `test_ble` spike and executes the commands the
+  agent sends through server.py. The human clicks Join once (Web Bluetooth
+  needs a user gesture for the chooser); every reconnect after that needs no
+  gesture, so the page reconnects by itself and the agent drives the rest.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>BLE lab</title>
+<style>
+  :root { color-scheme: light dark; --bg:#fff; --fg:#111; --mute:#666; --ok:#0a7d32; --warn:#9a6700; --bad:#b3261e; --line:#ddd; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#111; --fg:#eee; --mute:#999; --ok:#5fd38a; --warn:#e3b341; --bad:#ff8a80; --line:#333; } }
+  body { background:var(--bg); color:var(--fg); font:15px/1.4 system-ui, sans-serif; margin:0; padding:16px; }
+  h1 { font-size:18px; margin:0 0 4px; }
+  p { color:var(--mute); margin:0 0 12px; max-width:720px; }
+  button { font:inherit; padding:10px 16px; margin:0 8px 8px 0; border-radius:8px; border:1px solid var(--line); background:transparent; color:var(--fg); }
+  .chips { margin:0 0 12px; }
+  .chip { display:inline-block; padding:2px 10px; margin:0 6px 6px 0; border-radius:999px; border:1px solid var(--line); font-size:13px; }
+  .chip.on { color:var(--ok); border-color:var(--ok); } .chip.warn { color:var(--warn); border-color:var(--warn); } .chip.off { color:var(--bad); border-color:var(--bad); }
+  #nosupport { display:none; color:var(--bad); margin-bottom:12px; }
+  pre { border-top:1px solid var(--line); padding-top:8px; white-space:pre-wrap; word-break:break-all; font:12.5px/1.35 ui-monospace, monospace; user-select:text; margin:0; }
+  .meta { color:var(--mute); } .ok { color:var(--ok); } .bad { color:var(--bad); } .warn { color:var(--warn); }
+</style>
+</head>
+<body>
+<h1>BLE lab</h1>
+<p>Click <b>Join</b> once and pick the <code>LP-BLE-…</code> board. After that the agent drives it and this page reconnects by itself. Keep this tab in front: a hidden tab gets its timers throttled.</p>
+<div id="nosupport"></div>
+<div class="chips">
+  <span id="chip-ctl" class="chip warn">control: connecting…</span>
+  <span id="chip-ble" class="chip off">ble: not joined</span>
+  <span id="chip-vis" class="chip on">tab: visible</span>
+</div>
+<button id="btn-join">Join</button>
+<button id="btn-drop">Disconnect</button>
+<pre id="log"></pre>
+<script>
+"use strict";
+const NUS = "6e400001-b5a3-f393-e0a9-e50e24dcca9e";
+const RX  = "6e400002-b5a3-f393-e0a9-e50e24dcca9e";   // page -> board
+const TX  = "6e400003-b5a3-f393-e0a9-e50e24dcca9e";   // board -> page
+const $ = (id) => document.getElementById(id);
+const enc = new TextEncoder(), dec = new TextDecoder();
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+const S = {
+  device: null, rx: null, tx: null,
+  connected: false, autoReconnect: true, reconnecting: false,
+  events: [],          // {t, kind, ...} the link's timeline, newest last
+  connectedAt: 0, drops: 0,
+  onPacket: null,      // a command's packet sink; otherwise packets are logged
+  rxPackets: 0, rxBytes: 0,
+};
+
+/* ============================== logging =============================== */
+const logEl = $("log");
+function show(text, cls = "") {
+  const d = document.createElement("div");
+  d.textContent = `${new Date().toISOString().slice(11, 23)}  ${text}`;
+  if (cls) d.className = cls;
+  logEl.prepend(d);
+  while (logEl.childNodes.length > 400) logEl.lastChild.remove();
+}
+function pageLog(line) {
+  fetch("/page-log", { method: "POST", body: JSON.stringify({ line }) }).catch(() => {});
+}
+function event(kind, fields = {}) {
+  const ev = { t: Date.now(), kind, ...fields };
+  S.events.push(ev);
+  if (S.events.length > 500) S.events.shift();
+  const text = `${kind} ${JSON.stringify(fields)}`;
+  show(text, kind === "disconnected" || kind === "gave-up" ? "bad" : kind === "connected" ? "ok" : "meta");
+  pageLog(text);
+}
+function chips() {
+  const b = $("chip-ble");
+  if (!S.device) { b.textContent = "ble: not joined"; b.className = "chip off"; }
+  else if (S.connected) { b.textContent = `ble: ${S.device.name} connected`; b.className = "chip on"; }
+  else if (S.reconnecting) { b.textContent = `ble: ${S.device.name} reconnecting…`; b.className = "chip warn"; }
+  else { b.textContent = `ble: ${S.device.name} disconnected`; b.className = "chip off"; }
+}
+
+/* ============================== the link ============================== */
+async function attach() {
+  const t0 = performance.now();
+  const server = await S.device.gatt.connect();
+  const svc = await server.getPrimaryService(NUS);
+  S.rx = await svc.getCharacteristic(RX);
+  S.tx = await svc.getCharacteristic(TX);
+  S.tx.addEventListener("characteristicvaluechanged", (e) => {
+    const v = new Uint8Array(e.target.value.buffer.slice(0));
+    S.rxPackets++; S.rxBytes += v.length;
+    if (S.onPacket) S.onPacket(v); else show(`← ${v.length} B ${dec.decode(v).slice(0, 120)}`);
+  });
+  await S.tx.startNotifications();
+  S.connected = true; S.connectedAt = Date.now();
+  event("connected", { device: S.device.name, connectMs: Math.round(performance.now() - t0) });
+  chips();
+}
+
+function onDisconnected() {
+  const upMs = S.connectedAt ? Date.now() - S.connectedAt : null;
+  S.connected = false; S.rx = S.tx = null; S.drops++;
+  event("disconnected", { upMs });
+  chips();
+  if (S.autoReconnect) reconnectLoop();
+}
+
+async function reconnectLoop() {
+  if (S.reconnecting) return;
+  S.reconnecting = true; chips();
+  const t0 = Date.now();
+  for (let attempt = 1, wait = 500; attempt <= 20 && S.autoReconnect && !S.connected; attempt++, wait = Math.min(wait * 2, 8000)) {
+    event("reconnecting", { attempt });
+    // A gatt.connect() can hang forever (seen 2026-09-23 after a 0x13 drop),
+    // so each attempt is bounded and a timed-out one is torn down before the
+    // next, or the loop sits on attempt 1 for good.
+    try {
+      await Promise.race([attach(), sleep(10000).then(() => { throw new Error("attempt timed out"); })]);
+      event("reconnected", { afterMs: Date.now() - t0, attempts: attempt }); break;
+    } catch (e) {
+      show(`reconnect ${attempt}: ${e.message}`, "warn");
+      try { S.device.gatt.disconnect(); } catch {}
+      await sleep(wait);
+    }
+  }
+  if (!S.connected && S.autoReconnect) event("gave-up", { afterMs: Date.now() - t0 });
+  S.reconnecting = false; chips();
+}
+
+function nextPacket(ms = 5000) {
+  return new Promise((resolve, reject) => {
+    const t = setTimeout(() => { S.onPacket = null; reject(new Error("timeout")); }, ms);
+    S.onPacket = (v) => { clearTimeout(t); S.onPacket = null; resolve(v); };
+  });
+}
+function need() { if (!S.connected) throw new Error("not connected"); }
+
+/* ============================== commands ============================== */
+async function execute(cmd) {
+  const op = cmd.op;
+  switch (op) {
+    case "status":
+      return {
+        ok: true, joined: !!S.device, device: S.device?.name ?? null,
+        connected: S.connected, upMs: S.connected ? Date.now() - S.connectedAt : null,
+        autoReconnect: S.autoReconnect, reconnecting: S.reconnecting, drops: S.drops,
+        rxPackets: S.rxPackets, rxBytes: S.rxBytes,
+        visible: document.visibilityState, events: S.events.slice(-(cmd.n ?? 10)),
+      };
+    case "connect":
+      if (!S.device) return { ok: false, error: "not joined — the human must click Join once" };
+      if (!S.connected) await attach();
+      return { ok: true, connected: S.connected };
+    case "disconnect": {
+      const auto = S.autoReconnect;
+      S.autoReconnect = cmd.reconnect ?? false;
+      S.device?.gatt?.disconnect();
+      await sleep(200);
+      S.autoReconnect = cmd.reconnect ?? auto;
+      return { ok: true };
+    }
+    case "auto":
+      S.autoReconnect = !!cmd.on;
+      return { ok: true, autoReconnect: S.autoReconnect };
+    case "idle": {
+      // Hold the link and do nothing; report what the link did meanwhile.
+      const from = Date.now();
+      await sleep(cmd.ms ?? 20000);
+      return { ok: true, connected: S.connected, events: S.events.filter((e) => e.t >= from) };
+    }
+    case "send": {
+      need();
+      const bytes = enc.encode(cmd.text ?? "");
+      await S.rx.writeValueWithResponse(bytes);
+      return { ok: true, bytes: bytes.length };
+    }
+    case "echo": {
+      need();
+      const msg = enc.encode(cmd.text ?? 'M!{"hello":"from the ble lab"}\n');
+      const t0 = performance.now();
+      const wait = nextPacket();
+      await S.rx.writeValueWithResponse(msg);
+      const got = await wait;
+      const same = got.length === msg.length && got.every((b, i) => b === msg[i]);
+      return { ok: same, rttMs: +(performance.now() - t0).toFixed(1), bytes: msg.length };
+    }
+    case "burst": {
+      // board -> page: the board notifies n 180-byte packets back to back.
+      need();
+      const n = cmd.n ?? 100;
+      let count = 0, bytes = 0, first = 0, last = 0;
+      const done = new Promise((resolve) => {
+        let idle;
+        const arm = () => { clearTimeout(idle); idle = setTimeout(resolve, 3000); };
+        S.onPacket = (v) => { last = performance.now(); if (!first) first = last; count++; bytes += v.length; arm(); if (count >= n) resolve(); };
+        arm();
+      });
+      await S.rx.writeValueWithResponse(enc.encode(`burst ${n}`));
+      await done; S.onPacket = null;
+      const secs = first && last > first ? (last - first) / 1000 : 0;
+      return { ok: count === n, packets: count, of: n, bytes, secs: +secs.toFixed(3), bytesPerSec: secs ? Math.round(bytes / secs) : null };
+    }
+    case "writes": {
+      // page -> board, the upload direction: n writes-without-response of
+      // exactly 180 bytes, which the board counts rather than echoes; then
+      // `count` asks for the board's own total and elapsed time.
+      need();
+      const n = cmd.n ?? 100;
+      const payload = new Uint8Array(180).map((_, i) => 32 + (i % 90));
+      const t0 = performance.now();
+      for (let i = 0; i < n; i++) await S.rx.writeValueWithoutResponse(payload);
+      const queuedMs = performance.now() - t0;
+      const wait = nextPacket(15000);
+      await S.rx.writeValueWithResponse(enc.encode("count"));
+      const reply = dec.decode(await wait);
+      const endToEndMs = performance.now() - t0;
+      const m = /bytes=(\d+) ms=(\d+)/.exec(reply);
+      const boardBytes = m ? +m[1] : null, boardMs = m ? +m[2] : null;
+      return {
+        ok: boardBytes === n * 180, sent: n * 180, boardBytes, boardMs,
+        boardBytesPerSec: boardMs ? Math.round(boardBytes / (boardMs / 1000)) : null,
+        endToEndMs: Math.round(endToEndMs), endToEndBytesPerSec: Math.round((n * 180) / (endToEndMs / 1000)),
+        queuedMs: Math.round(queuedMs),
+      };
+    }
+    case "clear":
+      logEl.innerHTML = ""; S.events = []; return { ok: true };
+    case "eval": {
+      const AsyncFn = Object.getPrototypeOf(async function () {}).constructor;
+      try {
+        const value = await new AsyncFn("lab", cmd.js)(lab);
+        let json;
+        try { json = JSON.parse(JSON.stringify(value ?? null)); } catch { json = String(value); }
+        return { ok: true, value: json };
+      } catch (e) { return { ok: false, error: String(e) }; }
+    }
+    default:
+      return { ok: false, error: `unknown op ${op}` };
+  }
+}
+const lab = { S, sleep, attach, reconnectLoop, execute, enc, dec };
+window.lab = lab;
+
+/* ======================== control channel (SSE) ======================= */
+function connectControl() {
+  const es = new EventSource("/events");
+  es.onopen = () => {
+    $("chip-ctl").textContent = "control: connected"; $("chip-ctl").className = "chip on";
+    pageLog("page connected " + (navigator.userAgent.includes("Brave") ? "(brave)" : ""));
+  };
+  es.onerror = () => { $("chip-ctl").textContent = "control: reconnecting…"; $("chip-ctl").className = "chip warn"; };
+  es.onmessage = async (ev) => {
+    let cmd;
+    try { cmd = JSON.parse(ev.data); } catch { return; }
+    show(`[cmd ${cmd.id}] ${JSON.stringify(cmd)}`, "meta");
+    let result;
+    try { result = await execute(cmd); } catch (e) { result = { ok: false, error: String(e?.message ?? e) }; }
+    result.id = cmd.id;
+    show(`[cmd ${cmd.id}] -> ${JSON.stringify(result).slice(0, 300)}`, result.ok ? "" : "bad");
+    fetch("/result", { method: "POST", body: JSON.stringify(result) }).catch(() => {});
+  };
+}
+
+/* ============================== boot ================================== */
+function boot() {
+  if (!navigator.bluetooth) {
+    const el = $("nosupport");
+    el.style.display = "block";
+    el.textContent = "Web Bluetooth is unavailable here. In Brave: enable brave://flags/#brave-web-bluetooth-api (or use Chrome), then reload.";
+    pageLog("NO WEB BLUETOOTH in this browser profile");
+  }
+  $("btn-join").onclick = async () => {
+    try {
+      S.device = await navigator.bluetooth.requestDevice({ filters: [{ namePrefix: "LP-BLE" }], optionalServices: [NUS] });
+      S.device.addEventListener("gattserverdisconnected", onDisconnected);
+      event("joined", { device: S.device.name });
+      await attach();
+    } catch (e) { show(`join: ${e.message}`, "bad"); pageLog(`join failed: ${e.message}`); }
+  };
+  $("btn-drop").onclick = () => execute({ op: "disconnect", reconnect: false });
+  document.addEventListener("visibilitychange", () => {
+    const v = document.visibilityState;
+    $("chip-vis").textContent = `tab: ${v}`; $("chip-vis").className = v === "visible" ? "chip on" : "chip warn";
+    event("visibility", { state: v });
+  });
+  connectControl();
+  show("ble lab ready — click Join, then the agent drives via /cmd", "meta");
+}
+boot();
+</script>
+</body>
+</html>

@@ -631,6 +631,7 @@ fn control_wiring() -> UiBusView {
                     kind: UiProductKind::Control,
                     preview: control_preview_product("output").preview,
                     tracking: UiProductTrackingState::Tracking,
+                    show_live: None,
                     frame: UiProductPreviewFrame::VISUAL_DEFAULT,
                 }),
                 ..channel(
@@ -694,6 +695,7 @@ fn both_products_wiring() -> UiBusView {
                 kind: UiProductKind::Visual,
                 preview: aurora_preview(48, 21, 0.0),
                 tracking: UiProductTrackingState::Tracking,
+                show_live: None,
                 frame: UiProductPreviewFrame::new(16, 7),
             }),
             ..channel(
