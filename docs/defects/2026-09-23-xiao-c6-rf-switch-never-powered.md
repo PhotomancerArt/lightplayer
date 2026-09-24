@@ -1,6 +1,7 @@
 ---
-status: open
+status: fixed
 found: 2026-09-23      # how: hardware-walk (the BLE spike, spikes/ble-lab)
+fixed: db129b4cf
 area: fw-esp32c6 board init (board/esp32c6/init.rs) — no board-specific radio setup
 class: assumed-context
 related:
@@ -35,16 +36,27 @@ and WiFi later. The PLAYFUL choker is a XIAO C6. None of this has been
 measured on ESP-NOW yet: the evidence is **one A/B on one board, over BLE**.
 Treat the ESP-NOW claim as a strong hypothesis, not a finding.
 
-**Fix** — not yet in the product. The spike harness drives both pins in
-`lp-fw/fw-esp32c6/src/tests/test_ble.rs`. The product fix is a
-board-conditional init. GPIO3 and GPIO14 are ordinary pins on other C6
-boards and must not be driven blindly, so this belongs with the board
-manifest (`hardware.json`) or the board registry, not in unconditional chip
-init.
+**Fix** — a compiled-in board-quirk table, keyed on the board id of the
+hardware manifest **in effect** (`HwManifest::board_id()`, the compiled-in
+fallback included — and the C6's fallback *is* `seeed/xiao-esp32-c6`). The
+pure table is `lpc_hardware::board_quirks_for`
+(`lp-core/lpc-hardware/src/manifest/board_quirk.rs`); `fw-esp32c6` applies it
+in `board/esp32c6/board_quirks.rs`, called from `boot_firmware` right after
+the manifest loads and before the ESP-NOW radio init. For the XIAO it drives
+GPIO3 LOW and GPIO14 LOW, holds both for the life of the program, and logs
+`Board quirk applied: xiao-c6-rf-switch (GPIO3=LOW GPIO14=LOW)`. Any other
+board id is left alone. `hardware.json` and its schema are unchanged: a new
+field there would be a persisted-format change. Choosing the U.FL antenna
+(GPIO14 HIGH) is future work, as a user setting, not a quirk.
 
-**Regression coverage** — none: the emulator has no RF model. The desk
-check is `spikes/ble-lab` with the drop counter, which a phone or laptop at
-a fixed distance can repeat.
+**Regression coverage** — `lpc-hardware`'s `manifest::board_quirk::tests`
+pin the table: the XIAO id and the C6 fallback manifest take the quirk; every
+other compiled-in board, every other checked-in board file (the C6
+DevKitC-1 among them) and a set of near-miss ids take none. The emulated C6
+boots the shipped image under `--strict-bus` with the quirk applied and no
+fault. The *effect* has no automated coverage: the emulator has no RF model.
+The desk check is `spikes/ble-lab` with the drop counter (the BLE plan's M2),
+which a phone or laptop at a fixed distance can repeat.
 
 **Lesson** — a dev board is a chip plus decisions the board maker made, and
 some of those decisions need firmware cooperation to work at all. A radio
