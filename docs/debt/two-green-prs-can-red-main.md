@@ -61,25 +61,33 @@ repair is not buried inside unrelated work, and say so on the PR.
   6,516 B, `quad-strips-v3` 2,032 B — both still matching `[JIT] used=`
   readings taken off a classic ESP32 the same day).
 
-- **2026-09-24** — main went red at `e226fb283` (the #793 merge) after a
-  green `dafd73d75`. Used as the test case for option (1) below: run against
-  real history, `scripts/ci/red-main-suspects.sh e226fb28` names exactly
-  #793 as the one landing since the last green main (and skips the later
-  green `ebf63d463`, which is a descendant, not an ancestor). The same run
-  against the 2026-09-22 red `e2872cd9a` names #779.
+- **2026-09-24** — main went red at `e226fb283` (the #793 merge, run
+  35946788718) after a green `dafd73d75`. Not a two-green combination: the
+  failure was `Emulator C6 (x64)` in the `boot_no_radio` test, a flake. It
+  is recorded here because it is the worked example for option (1) below:
+  run against real history, `scripts/ci/red-main-suspects.sh e226fb28` names
+  exactly #793 as the one landing since the last green main. The same run
+  against the 2026-09-22 red `e2872cd9a` names #779. Building it turned up a
+  trap worth keeping: `gh run list --workflow pre-merge.yml --limit 30`
+  returned a page three weeks stale on one call (newest green `9345fce08`,
+  2026-09-03, so 269 "suspects") and the right page on the next. The script
+  asks the API per first-parent sha instead of trusting a listing.
 
-**Paying down (2026-09-24)** — option (1) landed in a cheaper form than a
-schedule: main pushes already force every gate on, so every main run *is* the
-canary. The `red-main-suspects` job at the end of `pre-merge.yml` runs only
-when a push-to-main run fails, finds the newest green `pre-merge` push run on
-main whose sha is an ancestor of the red one, and writes the first-parent
-landings in between (commit, PR number, subject) to the job summary plus an
-`::error::` annotation naming the PRs. It does not prevent the break; it
-removes the misattribution. Retire this entry once a real two-green incident
-has been diagnosed from that output without the detour described above.
+**Paying down (2026-09-24, #800)** — option (1) landed in a cheaper form than
+a schedule: main pushes already force every gate on, so every main run *is*
+the canary. The `red-main-suspects` job at the end of `pre-merge.yml` runs
+only when a push-to-main run fails. It walks the red commit's first-parent
+line back to the newest commit with a successful `pre-merge` push run, then
+writes the landings in between (commit, PR number from a merge commit or a
+`(#N)` squash, subject) to the job summary plus an `::error::` annotation
+naming the PRs. It is read-only (`contents: read`, `actions: read`, no
+persisted credentials) and `continue-on-error`, so it can never add a red
+job of its own. It does not prevent the break; it removes the
+misattribution. Retire this entry once a real two-green incident has been
+diagnosed from that output without the detour described above.
 
-**Exit criteria** — accepted as carried for now; the frequency does not justify
-the fix cost. Options, cheapest first, recorded so the next incident starts from
+**Exit criteria** — (1) has landed (see Paying down above); (2) and (3) stay
+unjustified at this frequency. Options, cheapest first, recorded so the next incident starts from
 a decision rather than a discussion:
 
 1. **A `main` build canary** — a scheduled `just check test` on `main` that

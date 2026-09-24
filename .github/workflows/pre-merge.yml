@@ -2647,7 +2647,11 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          persist-credentials: false
       - name: Name the PRs merged since the last green main
+        # Diagnostic only: a failure here must not add a second red job to a
+        # run that is already red for a real reason.
+        continue-on-error: true
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}

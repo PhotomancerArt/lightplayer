@@ -14,13 +14,17 @@
 #   <head-rev>   the red commit (default HEAD)
 #   --since      skip the lookup and use this sha as the last green main
 #
-# The last green main is the newest successful `pre-merge.yml` push run on
-# main whose head sha is an ANCESTOR of <head-rev>. Main runs are concurrent
-# (one concurrency group per sha), so the newest green run by time can be a
-# later push than the red one; it is skipped rather than trusted.
+# The last green main is found by walking <head-rev>'s FIRST-PARENT line
+# backwards (main's own landings: one per merge commit, squash, or direct
+# push) and asking the API, per sha, for a successful `pre-merge.yml` push
+# run on exactly that commit. It asks by sha rather than listing recent runs:
+# main runs are concurrent, so the newest green run by time can be a LATER
+# push than the red one, and `gh run list --limit 30` was seen (2026-09-24)
+# to return a page three weeks stale on one call and the right page on the
+# next. Gives up (exit 0, warning) after MAX_WALK landings (default 50).
 #
 # Needs full history (checkout fetch-depth: 0) and, without --since, `gh`
-# with actions:read. Writes a markdown section to $GITHUB_STEP_SUMMARY when
+# with actions:read (GH_REPO names the repo in CI). Writes a markdown section to $GITHUB_STEP_SUMMARY when
 # set and prints an `::error::` annotation under GitHub Actions. Exits 0
 # whenever it could name suspects: the run is already red; this step
 # explains it rather than adding a second failure.
@@ -31,27 +35,30 @@ since=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --since) since="${2:?--since needs a sha}"; shift 2 ;;
-    -h|--help) sed -n '2,26p' "$0"; exit 0 ;;
+    -h|--help) sed -n '2,30p' "$0"; exit 0 ;;
     *) head_rev="$1"; shift ;;
   esac
 done
 
 head_sha=$(git rev-parse --verify "${head_rev}^{commit}")
 
+max_walk=${MAX_WALK:-50}
 if [[ -z "$since" ]]; then
-  # Enough runs to reach past a burst of concurrent merges; the ancestor
-  # filter below does the choosing.
-  candidates=$(gh run list --workflow pre-merge.yml --branch main --event push \
-    --status success --limit 30 --json headSha --jq '.[].headSha')
-  for sha in $candidates; do
-    [[ "$sha" == "$head_sha" ]] && continue
-    if git merge-base --is-ancestor "$sha" "$head_sha" 2>/dev/null; then
+  api_errors=0
+  while read -r sha; do
+    if ! n=$(gh api \
+      "repos/{owner}/{repo}/actions/workflows/pre-merge.yml/runs?head_sha=${sha}&event=push&status=success&per_page=1" \
+      --jq '.total_count' 2>/dev/null); then
+      api_errors=$((api_errors + 1))
+      continue
+    fi
+    if [[ "$n" =~ ^[1-9] ]]; then
       since="$sha"
       break
     fi
-  done
+  done < <(git rev-list --first-parent --max-count="$max_walk" "${head_sha}^")
   if [[ -z "$since" ]]; then
-    msg="No green pre-merge run on main among the last 30 is an ancestor of ${head_sha:0:10}; cannot name suspects."
+    msg="No green pre-merge push run on any of the last ${max_walk} first-parent ancestors of ${head_sha:0:10} (${api_errors} API errors); cannot name suspects."
     echo "$msg" >&2
     if [[ -n "${GITHUB_ACTIONS:-}" ]]; then echo "::warning::$msg"; fi
     exit 0
@@ -94,7 +101,7 @@ summary=$(
   echo
   echo "| commit | PR | subject |"
   echo "|---|---|---|"
-  for row in "${rows[@]}"; do
+  for row in ${rows[@]+"${rows[@]}"}; do
     IFS=$'\t' read -r sha pr subject <<<"$row"
     echo "| \`${sha:0:10}\` | ${pr:+#$pr} | ${subject//|/\\|} |"
   done
