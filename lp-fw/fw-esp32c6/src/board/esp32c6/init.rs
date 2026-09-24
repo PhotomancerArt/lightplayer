@@ -37,16 +37,26 @@ pub fn init_board() -> (
     // demand levels deep under the compute node) overflowed it by a few
     // hundred bytes into the heap array (2026-09-01 bench, `Stack overflow
     // detected … Stack pointer: 408664e0`, `_stack_end` = 40866610). At
-    // 260_000 B the stack is 72,776 B. `stack_probe` paints it at boot and
+    // 260_000 B the stack was 72,776 B. `stack_probe` paints it at boot and
     // the heartbeat logs the high-water mark, so the margin is a number in
     // the journal rather than a guess.
-    esp_alloc::heap_allocator!(size: 260_000);
+    //
+    // 260_000 → 236_000 (2026-09-24): linking `ble` (in `default`, on every
+    // board whether the device store enables it or not) put ~36 KB of static
+    // RAM — the controller blob's IRAM link-layer code, its statics, the
+    // packet pool — below the stack, which fell to 38,680 B against meteor's
+    // ~35.5 KB high-water. The 24,000 B come out of the heap instead, one
+    // image for every device (Yona's ruling: "a stack overflow crashes; a
+    // smaller heap only narrows the compile margin"). See
+    // docs/adr/2026-09-02-esp32c6-ram-split.md, "Amendment".
+    esp_alloc::heap_allocator!(size: 236_000);
     // The 40 KB the main region gave up comes back with interest from
     // `dram2_seg`: the 64 KB the ESP-IDF second-stage bootloader used as
     // its loader segment (0x4086E610..0x4087E610) and never touches again
     // once the app runs — esp-hal's `#[ram(reclaimed)]` exists for exactly
     // this. A second `esp_alloc` region: `HEAP.free()`/`used()` sum both,
-    // allocations fill the main region first. Heap total 325,536 B.
+    // allocations fill the main region first. Heap total 301,536 B
+    // (325,536 B before the 2026-09-24 cut).
     esp_alloc::heap_allocator!(#[esp_hal::ram(reclaimed)] size: 65_536);
 
     // Extract peripherals we need before moving others
