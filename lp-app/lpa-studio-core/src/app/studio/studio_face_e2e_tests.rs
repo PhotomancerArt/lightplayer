@@ -1464,10 +1464,11 @@ fn the_peaches_open_onto_a_live_hero() {
                 .iter()
                 .find(|lamp| lamp.sample_start == slot * 3)
                 .unwrap_or_else(|| panic!("{id}: no lamp draws wire channel {slot}"));
-            let base = lamp.sample_start as usize * 2;
+            let base = lamp.sample_start as usize;
             core::array::from_fn(|channel| {
-                let at = base + channel * 2;
-                u16::from_le_bytes([frame.bytes[at], frame.bytes[at + 1]])
+                frame
+                    .unorm16_sample(base + channel)
+                    .expect("the wire carries this lamp")
             })
         };
         for slot in [0, 21, 34, 55] {
@@ -1744,10 +1745,11 @@ fn a_patch_pulse_lights_the_subjects_lamps_on_the_live_wire() {
     // The wire before the pulse: leaves green, flesh pink.
     let lamp_colour = |bay: &crate::UiPatchBay, lamp: u32| -> [u16; 3] {
         let frame = bay.frame.as_ref().expect("the bay draws a live wire");
-        let base = lamp as usize * 3 * 2;
+        let base = lamp as usize * 3;
         core::array::from_fn(|channel| {
-            let at = base + channel * 2;
-            u16::from_le_bytes([frame.bytes[at], frame.bytes[at + 1]])
+            frame
+                .unorm16_sample(base + channel)
+                .expect("the wire carries this lamp")
         })
     };
     for lamp in [22, 33] {

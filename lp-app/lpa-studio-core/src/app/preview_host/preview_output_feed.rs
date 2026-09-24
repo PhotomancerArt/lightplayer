@@ -275,16 +275,17 @@ mod tests {
         assert_eq!(starts, vec![0, 3], "each output's lamps read its stretch");
     }
 
-    /// A format the lamp renderer cannot read leaves the last good frame up
-    /// rather than drawing garbage.
+    /// Bytes that contradict their own format (three bytes claiming a
+    /// 16-bit lamp) leave the last good frame up rather than drawing
+    /// garbage.
     #[test]
-    fn an_unreadable_sample_format_is_ignored() {
+    fn an_unreadable_frame_is_ignored() {
         let mut feed = PreviewOutputFeed::default();
         feed.apply(true, &[entry(4, 1, vec![1, 0, 2, 0, 3, 0])]);
 
-        let mut u8_frame = entry(4, 2, vec![1, 2, 3]);
-        u8_frame.sample_format = WireChannelSampleFormat::U8;
-        feed.apply(true, &[u8_frame]);
+        let mut short = entry(4, 2, vec![1, 0, 2, 0, 3, 0]);
+        short.bytes = vec![1, 2, 3];
+        feed.apply(true, &[short]);
 
         assert_eq!(feed.frame().expect("frame").revision, 1);
         assert_eq!(feed.frame_revision(), 1);
@@ -310,7 +311,7 @@ mod tests {
             node: NodeId::new(node),
             revision: Revision::new(revision),
             channels: (bytes.len() / 6) as u32,
-            sample_format: WireChannelSampleFormat::U16,
+            sample_format: Some(WireChannelSampleFormat::U16),
             // Geometry at revision 1 with a REFUSED display layout — the
             // bare case; `with_layout` adds one.
             geometry: RevisionGateResult::Changed(OutputFrameGeometry {

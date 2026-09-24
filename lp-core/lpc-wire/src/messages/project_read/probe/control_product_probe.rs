@@ -27,6 +27,10 @@ use super::{GeometryDisplayLayout, RevisionGateRead, RevisionGateResult};
 #[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
 pub struct ControlProductProbeRequest {
     pub product: ControlProduct,
+    /// The element format the samples travel in. The engine renders at
+    /// 16 bits either way; `U8` rounds each sample to the nearest 8-bit level
+    /// (`round(v / 257)`) for transport — half the bytes, and all a screen
+    /// preview can show.
     pub sample_format: WireChannelSampleFormat,
     /// The geometry gate for this product's sample and display layouts.
     pub geometry: RevisionGateRead,

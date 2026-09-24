@@ -7,10 +7,14 @@
 //! `lpa-studio-core`'s `project_read_request` plus the probe set of
 //! `ProjectSync::probe_requests` / `product_probe_requests`, in that order:
 //!
-//! 1. one `control_product` probe for the lens's selected product, at
-//!    `U16`, with its geometry asked `always` and then `if_changed`;
-//! 2. the `output_frame` probe (the project drives an output), geometry
-//!    likewise, per output;
+//! 1. the `control_product` probe for the project's primary control
+//!    product, at `U8` — but only while the lens cannot yet see that every
+//!    lamp of it sits on an output wire (lean-wire P5's one-copy rule,
+//!    `ProjectController::always_live_products`), or when the user has
+//!    selected its fixture (Show live). Geometry `always`, then
+//!    `if_changed`;
+//! 2. the `output_frame` probe (the project drives an output), its pixels at
+//!    `U8`, geometry per output likewise;
 //! 3. the `binding_graph` probe with values (Studio subscribes on every
 //!    lens), its structure asked `always` and then `if_changed`.
 //!
@@ -20,18 +24,25 @@
 //! number here is the byte count of the `M!{json}\n` lines a board would put
 //! on the link.
 //!
-//! Two reads per project:
+//! Three reads per project:
 //!
-//! - **first**: the lens's first refresh after Studio's initial sync (the
-//!   mirror's revision as `since`), layouts asked outright;
+//! - **first**: a lens refresh that knows nothing yet (the mirror's revision
+//!   as `since`, every layout asked outright, no placements seen — so the
+//!   control product rides too);
 //! - **steady**: a few ticks later, passing back what the first read taught
 //!   (the view's revision as `since`, the geometry and binding-structure
-//!   revisions as `if_changed`),
-//!   which is what every 150 ms lens refresh after the first one looks like.
+//!   revisions as `if_changed`, and the placements that decide whether the
+//!   control product is a second copy), which is what every 150 ms lens
+//!   refresh after the first one looks like on a freshly opened device lens
+//!   — it opens on the root module, and that automatic selection asks for
+//!   nothing (lean-wire P5, ruling B);
+//! - **selected**: the steady read with the fixture selected — Show live on
+//!   its preview — so both copies ride, both at `U8`.
 //!
-//! The lens's selected product is the project's first control product in
-//! node order: on the PLAYFUL choker that is the fixture, which is what the
-//! Run D recording (`lean-wire` plan, 2026-09-23) asked for.
+//! The control product is the project's first control product in node
+//! order: on the PLAYFUL choker that is the fixture, which is the product
+//! `control.out` resolves to and what the Run D recording
+//! (`lean-wire` plan, 2026-09-23) asked for.
 //!
 //! What is NOT modelled, and why the tap is still the evidence for a live
 //! session: the revision numbers here are a few ticks old, not a long
@@ -69,6 +80,7 @@ use lpfs::LpFsStd;
 struct LensReadCeiling {
     first: usize,
     steady: usize,
+    selected: usize,
 }
 
 /// PLAYFUL choker (73 lamps). P1 baseline (2026-09-23): first 12,078 B,
@@ -80,9 +92,15 @@ struct LensReadCeiling {
 /// list: first 11,913 B (the values left the channel rows, which also shed
 /// each value's revision and null fields), steady 4,911 B — the binding
 /// graph is a 29 B `unchanged` plus 653 B of values, down from 4,562 B.
+/// P5 asked for every pixel at `U8` and one copy per read: first 11,327 B
+/// (both copies still ride — no placements seen yet — at 294 B of base64
+/// each, down from 586 B), steady 3,745 B (the output frame alone: 485 B,
+/// of which 294 B are the 73 lamps), selected 4,326 B (the fixture's copy
+/// back beside it on request, +579 B).
 const CHOKER_CEILING: LensReadCeiling = LensReadCeiling {
-    first: 12_150,
-    steady: 5_010,
+    first: 11_550,
+    steady: 3_820,
+    selected: 4_410,
 };
 
 /// small-dome (6,310 lamps). P1 baseline (2026-09-23): first 130,555 B,
@@ -92,9 +110,14 @@ const CHOKER_CEILING: LensReadCeiling = LensReadCeiling {
 /// frames — both probes' geometry is `unchanged`, the refusal included.
 /// After P4: first 130,184 B, steady 105,824 B — the binding graph is
 /// 1,278 B (a 29 B `unchanged` and 1,156 B of values), down from 8,449 B.
+/// P5 (every pixel at `U8`, one copy per read): first 80,140 B in seven
+/// frames, steady 31,026 B in two — the output frames' 25,658 B of chunked
+/// samples are the one copy, and the first fixture's 24,218 B no longer
+/// ride — and selected 55,707 B in four, with that fixture's copy back.
 const SMALL_DOME_CEILING: LensReadCeiling = LensReadCeiling {
-    first: 132_800,
-    steady: 107_950,
+    first: 81_750,
+    steady: 31_650,
+    selected: 56_820,
 };
 
 /// Frames between two lens reads: Studio re-reads 150 ms after the last
@@ -107,14 +130,14 @@ const DOME_SCALE_LAMPS: usize = 25_000;
 
 #[test]
 fn playful_choker_lens_read_stays_under_its_ceiling() {
-    let (first, steady) = measure_lens_reads("playful-choker", "/playful_choker.show");
-    assert_under_ceiling("playful-choker", &first, &steady, &CHOKER_CEILING);
+    let reads = measure_lens_reads("playful-choker", "/playful_choker.show");
+    assert_under_ceiling("playful-choker", &reads, &CHOKER_CEILING);
 }
 
 #[test]
 fn small_dome_lens_read_stays_under_its_ceiling() {
-    let (first, steady) = measure_lens_reads("small-dome", "/small_dome.show");
-    assert_under_ceiling("small-dome", &first, &steady, &SMALL_DOME_CEILING);
+    let reads = measure_lens_reads("small-dome", "/small_dome.show");
+    assert_under_ceiling("small-dome", &reads, &SMALL_DOME_CEILING);
 }
 
 #[test]
@@ -155,74 +178,143 @@ struct EncodedEvent {
     json: Vec<u8>,
 }
 
-fn measure_lens_reads(slug: &str, root: &str) -> (MeasuredRead, MeasuredRead) {
+/// The three lens reads of one project (see the module docs).
+struct LensReads {
+    first: MeasuredRead,
+    steady: MeasuredRead,
+    selected: MeasuredRead,
+}
+
+fn measure_lens_reads(slug: &str, root: &str) -> LensReads {
     let (mut engine, registry) = load_catalog_project(slug, root);
     // Studio's mirror: one view, every read applied into it.
     let mut view = lpc_view::ProjectView::new();
 
-    // Studio finds products in node state; the lens asks for the selected
-    // one. Here: the project's first control product in node order.
+    // The primary control product: the project's first control product in
+    // node order.
     let product = first_control_product(&mut engine, &registry, &mut view)
         .unwrap_or_else(|| panic!("{slug}: no control product to put under the lens"));
 
     tick(&mut engine, &registry, LENS_REFRESH_TICKS);
 
-    // The lens's first refresh after the initial sync: the mirror's
-    // revision as `since`, nothing cached for either layout yet.
+    // A refresh that knows nothing yet: no placements seen, so the control
+    // product rides beside the output frame; every layout asked outright.
     let first_request = lens_read_request(
         Some(view.revision),
-        product,
-        RevisionGateRead::Always,
+        Some((product, RevisionGateRead::Always)),
         OutputFrameGeometryRead::Always,
         RevisionGateRead::Always,
     );
     let first = measure_read(&mut engine, &registry, &mut view, first_request);
 
-    // The next refresh lands one lens period later.
+    // The next refresh lands one lens period later. Nothing selected: the
+    // control product rides only if the outputs do not carry all its lamps.
     tick(&mut engine, &registry, LENS_REFRESH_TICKS);
-
+    let control_geometry = control_geometry_read_after(&first.probes);
+    let steady_control =
+        (!lamps_all_placed(product, &first.probes)).then_some((product, control_geometry));
     let steady_request = lens_read_request(
         Some(first.revision),
-        product,
-        control_geometry_read_after(&first.probes),
+        steady_control,
         output_geometry_read_after(&first.probes),
         binding_structure_read_after(&first.probes),
     );
     let steady = measure_read(&mut engine, &registry, &mut view, steady_request);
 
+    // One more period, with the fixture selected (Show live): both copies.
+    tick(&mut engine, &registry, LENS_REFRESH_TICKS);
+    let selected_request = lens_read_request(
+        Some(steady.revision),
+        Some((product, control_geometry)),
+        output_geometry_read_after(&first.probes),
+        binding_structure_read_after(&first.probes),
+    );
+    let selected = measure_read(&mut engine, &registry, &mut view, selected_request);
+
     let lamps = lamp_count(&steady.probes);
     print_read(slug, "first", &first, lamps);
     print_read(slug, "steady", &steady, lamps);
-    (first, steady)
+    print_read(slug, "selected", &selected, lamps);
+    LensReads {
+        first,
+        steady,
+        selected,
+    }
 }
 
 /// Studio's lens request: `project_read_request`'s queries, and
-/// `probe_requests`' probes in its order (products, output frame, graph).
+/// `probe_requests`' probes in its order (products, output frame, graph),
+/// every pixel ask at Studio's preview precision (`U8`).
 fn lens_read_request(
     since: Option<Revision>,
-    product: ControlProduct,
-    control_geometry: RevisionGateRead,
+    control: Option<(ControlProduct, RevisionGateRead)>,
     output_geometry: OutputFrameGeometryRead,
     binding_structure: RevisionGateRead,
 ) -> ProjectReadRequest {
+    let mut probes = Vec::new();
+    if let Some((product, geometry)) = control {
+        probes.push(ProjectProbeRequest::ControlProduct(
+            ControlProductProbeRequest {
+                product,
+                sample_format: WireChannelSampleFormat::U8,
+                geometry,
+            },
+        ));
+    }
+    probes.push(ProjectProbeRequest::OutputFrame(OutputFrameProbeRequest {
+        geometry: output_geometry,
+        samples: Some(WireChannelSampleFormat::U8),
+    }));
+    probes.push(ProjectProbeRequest::BindingGraph(
+        BindingGraphProbeRequest {
+            structure: binding_structure,
+            include_values: true,
+        },
+    ));
     ProjectReadRequest {
         since,
         queries: lens_queries(),
-        probes: vec![
-            ProjectProbeRequest::ControlProduct(ControlProductProbeRequest {
-                product,
-                sample_format: WireChannelSampleFormat::U16,
-                geometry: control_geometry,
-            }),
-            ProjectProbeRequest::OutputFrame(OutputFrameProbeRequest {
-                geometry: output_geometry,
-            }),
-            ProjectProbeRequest::BindingGraph(BindingGraphProbeRequest {
-                structure: binding_structure,
-                include_values: true,
-            }),
-        ],
+        probes,
     }
+}
+
+/// Studio's one-copy test (`output_lamp_coverage::product_lamps_all_placed`
+/// in `lpa-studio-core`): do the placements the outputs answered cover
+/// every lamp of `product`, in the producer's own numbering?
+fn lamps_all_placed(product: ControlProduct, probes: &[ProjectProbeResult]) -> bool {
+    let mut runs: Vec<(u32, u32)> = Vec::new();
+    let mut total = 0_u32;
+    for probe in probes {
+        let ProjectProbeResult::OutputFrame(OutputFrameProbeResult::Frame { outputs }) = probe
+        else {
+            continue;
+        };
+        for output in outputs {
+            let RevisionGateResult::Changed(geometry) = &output.geometry else {
+                continue;
+            };
+            for run in geometry
+                .placements
+                .iter()
+                .filter(|run| run.node == product.node() && run.output == product.output())
+            {
+                total = total.max(run.source_lamps);
+                runs.push((run.source_lamp, run.source_lamp + run.lamps));
+            }
+        }
+    }
+    if total == 0 {
+        return false;
+    }
+    runs.sort_unstable();
+    let mut covered_to = 0;
+    for (start, end) in runs {
+        if start > covered_to {
+            return false;
+        }
+        covered_to = covered_to.max(end);
+    }
+    covered_to >= total
 }
 
 /// `project_read_request`'s query set, with slots (a lens refresh always
@@ -394,26 +486,19 @@ fn server_status() -> ServerRuntimeStatus {
 // The report.
 // ---------------------------------------------------------------------------
 
-fn assert_under_ceiling(
-    slug: &str,
-    first: &MeasuredRead,
-    steady: &MeasuredRead,
-    ceiling: &LensReadCeiling,
-) {
-    assert!(
-        first.total() <= ceiling.first,
-        "{slug}: first lens read is {} B, over its {} B ceiling — if this growth is \
-         deliberate, raise the const with a measurement and a reason",
-        first.total(),
-        ceiling.first
-    );
-    assert!(
-        steady.total() <= ceiling.steady,
-        "{slug}: steady lens read is {} B, over its {} B ceiling — if this growth is \
-         deliberate, raise the const with a measurement and a reason",
-        steady.total(),
-        ceiling.steady
-    );
+fn assert_under_ceiling(slug: &str, reads: &LensReads, ceiling: &LensReadCeiling) {
+    for (name, read, limit) in [
+        ("first", &reads.first, ceiling.first),
+        ("steady", &reads.steady, ceiling.steady),
+        ("selected", &reads.selected, ceiling.selected),
+    ] {
+        assert!(
+            read.total() <= limit,
+            "{slug}: {name} lens read is {} B, over its {limit} B ceiling — if this growth \
+             is deliberate, raise the const with a measurement and a reason",
+            read.total(),
+        );
+    }
 }
 
 /// Print one read: total, then one row per part, then each big part's

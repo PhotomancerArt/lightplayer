@@ -73,6 +73,13 @@ pub struct ProjectController {
     /// `sync_lens_probe_policy` at every action and tick that might move
     /// the lens; `None` while detached.
     lens_transport: Option<crate::LinkTransport>,
+    /// The current selection is the one Studio made when the tree landed
+    /// (`ensure_default_node_focus`), not one the user made. On a device
+    /// lens that selection HIGHLIGHTS but streams nothing: a second pixel
+    /// copy — or a shader render on the board — rides only on an explicit
+    /// request (lean-wire P5, ruling B). Cleared by the first explicit focus
+    /// (`focus_editor_target`).
+    focus_is_automatic: bool,
     /// Every pattern export the local library offers, for the add-node
     /// picker's import source (module authoring unit, P5). Pushed down from
     /// the studio controller at each library settle — a view build must
@@ -443,6 +450,7 @@ impl ProjectController {
             running_project_status: RunningProjectStatus::Unknown,
             lens_device_features: None,
             lens_transport: None,
+            focus_is_automatic: false,
             import_patterns: Vec::new(),
             active_editor_target: None,
             runtime_storage_id: crate::app::project::demo_project::DEMO_PROJECT_STORAGE_ID
@@ -982,15 +990,52 @@ impl ProjectController {
     /// is what the board is showing. (2026-09-22, the PLAYFUL choker: the
     /// unfocused shader's texture probe rode every pull and dragged the C6's
     /// frame rate down.)
+    ///
+    /// And over a device wire the primary CONTROL stays out too once every
+    /// one of its lamps sits on an output wire: the lens already streams
+    /// that wire's published frame, pixels and all (the module hero, the
+    /// output's bay and each fixture's patch row draw it), so the product
+    /// would be a second copy of the same lamps on every read. One copy per
+    /// read unless the user asks for more (Yona, lean-wire P5, 2026-09-23):
+    /// the product's own surfaces go not-live with Show live, and selecting
+    /// its fixture streams it again. Before the first read has placed it
+    /// (no placements yet), or while any of its lamps reach no wire, it
+    /// rides as before. A sim lens keeps it: nothing crosses a cable there.
     pub fn always_live_products(&self) -> Vec<UiProductRef> {
-        let visual = match self.lens_transport {
-            Some(crate::LinkTransport::Emu | crate::LinkTransport::Serial) => None,
-            Some(crate::LinkTransport::Sim) | None => self.primary_visual_product(),
+        let device = matches!(
+            self.lens_transport,
+            Some(crate::LinkTransport::Emu | crate::LinkTransport::Serial)
+        );
+        let visual = if device {
+            None
+        } else {
+            self.primary_visual_product()
         };
-        visual
-            .into_iter()
-            .chain(self.primary_control_product())
-            .collect()
+        let control = self
+            .primary_control_product()
+            .filter(|product| !(device && self.output_wires_carry(*product)));
+        visual.into_iter().chain(control).collect()
+    }
+
+    /// Whether the outputs the lens streams already carry every lamp of
+    /// `product` (see [`always_live_products`](Self::always_live_products)).
+    fn output_wires_carry(&self, product: UiProductRef) -> bool {
+        let UiProductRef::Control {
+            node_id, output, ..
+        } = product
+        else {
+            return false;
+        };
+        let Some(sync) = self.sync.as_ref() else {
+            return false;
+        };
+        sync.streams_output_pixels()
+            && super::output_lamp_coverage::product_lamps_all_placed(
+                node_id,
+                output,
+                sync.published_outputs()
+                    .map(|node| sync.output_placements(node)),
+            )
     }
 
     /// The root module's scope, when the project has a root node.
@@ -2062,7 +2107,10 @@ impl ProjectController {
         if let Some(target) = self.active_editor_target.clone() {
             self.focus_editor_target(&target);
         }
-        ensure_default_node_focus(&mut self.root_nodes);
+        let device_lens = self.lens_is_device();
+        if ensure_default_node_focus(&mut self.root_nodes, device_lens) {
+            self.focus_is_automatic = true;
+        }
         // A freshly created node takes focus once its tree entry lands
         // (create-op semantics: the user lands on what they made).
         self.apply_pending_focus();
@@ -5426,8 +5474,12 @@ impl ProjectController {
                 // emulated USB-Serial-JTAG FIFO the guest drains at its own
                 // modelled rate, so every-expanded-node pulls starve its
                 // heartbeats exactly the way they starve a board's.
+                //
+                // Studio's own open-time selection is not a request: until
+                // the user selects something, a device lens streams no
+                // node's products on its account (lean-wire P5, ruling B).
                 Some(crate::LinkTransport::Emu | crate::LinkTransport::Serial) | None => {
-                    self.is_focused_node(node)
+                    !self.focus_is_automatic && self.is_focused_node(node)
                 }
             },
             ProjectProductSubscriptionIntent::Subscribed => true,
@@ -5486,6 +5538,9 @@ impl ProjectController {
     }
 
     fn focus_editor_target(&mut self, target: &ProjectEditorTarget) {
+        // An explicit selection (a click, Show live, the URL's target, a
+        // created node): from here on selection streams as it always has.
+        self.focus_is_automatic = false;
         clear_node_focus(&mut self.root_nodes);
         match target {
             ProjectEditorTarget::AddressedNode { target }
@@ -5655,6 +5710,15 @@ impl ProjectController {
     /// resolution, product-subscription node scope) tracks the lens.
     pub fn set_lens_transport(&mut self, transport: Option<crate::LinkTransport>) {
         self.lens_transport = transport;
+    }
+
+    /// Whether the lens runs over a device wire (serial, or the emu running
+    /// the device's firmware) rather than an in-page sim.
+    fn lens_is_device(&self) -> bool {
+        matches!(
+            self.lens_transport,
+            Some(crate::LinkTransport::Emu | crate::LinkTransport::Serial)
+        )
     }
 
     /// Record what the library can be imported FROM (module authoring
@@ -9503,12 +9567,27 @@ fn clear_node_focus(nodes: &mut [NodeController]) {
     }
 }
 
-fn ensure_default_node_focus(nodes: &mut [NodeController]) {
+/// Select a node when nothing is selected, returning whether it did.
+///
+/// A sim lens (or none) lands on the root's first fixture, else its first
+/// shader. A DEVICE lens lands on the root module itself (lean-wire P5,
+/// ruling B): the project's own card, whose picture is the output wire the
+/// lens already streams — so opening a lens asks for no second copy of it.
+fn ensure_default_node_focus(nodes: &mut [NodeController], device_lens: bool) -> bool {
     if has_focused_node(nodes) {
-        return;
+        return false;
     }
-    if let Some(node) = default_focus_node_mut(nodes) {
-        node.state_mut().focused = true;
+    let node = if device_lens {
+        nodes.first_mut()
+    } else {
+        default_focus_node_mut(nodes)
+    };
+    match node {
+        Some(node) => {
+            node.state_mut().focused = true;
+            true
+        }
+        None => false,
     }
 }
 
@@ -12232,6 +12311,167 @@ mod tests {
         }
     }
 
+    /// The one-copy rule (lean-wire P5). A device lens on a project whose
+    /// output wire carries every lamp of the primary control product
+    /// streams those lamps ONCE: the output frame, at 8 bits. The product
+    /// drops out of the read, and its value box offers Show live.
+    #[test]
+    fn a_device_lens_streams_one_copy_of_lamps_an_output_carries() {
+        for transport in [crate::LinkTransport::Serial, crate::LinkTransport::Emu] {
+            let mut project = one_wire_project(Some(transport));
+            // Lens open, before any read has placed the product: nothing
+            // says the wire carries it yet, so it streams — at 8 bits.
+            assert_eq!(
+                lens_pixel_probes(&mut project),
+                vec![
+                    LensPixelProbe::Control(lpc_wire::WireChannelSampleFormat::U8),
+                    LensPixelProbe::Output(Some(lpc_wire::WireChannelSampleFormat::U8)),
+                ],
+                "{transport:?}: first read"
+            );
+
+            place_fixture_on_the_wire(&mut project, 10);
+            assert_eq!(
+                lens_pixel_probes(&mut project),
+                vec![LensPixelProbe::Output(Some(
+                    lpc_wire::WireChannelSampleFormat::U8
+                ))],
+                "{transport:?}: steady read — one copy"
+            );
+            assert!(project.always_live_products().is_empty());
+
+            let scope = lpc_wire::WireScopeRef::Module {
+                owner: lpc_model::NodeId::new(1),
+            };
+            let bus = project.ui_bus_view_for_scope(scope).expect("wiring view");
+            let channel = bus
+                .channels
+                .iter()
+                .find(|channel| channel.name == lpc_model::PRIMARY_CONTROL_CHANNEL)
+                .expect("the control channel lists");
+            let preview = channel.preview.as_ref().expect("the value box");
+            assert_ne!(preview.tracking, UiProductTrackingState::Tracking);
+            assert!(
+                preview.show_live.is_some(),
+                "{transport:?}: the value box is not live, and says how to make it"
+            );
+        }
+    }
+
+    /// Ruling B: a DEVICE lens opens on the root module, and that automatic
+    /// selection asks for nothing — the steady read of a fresh lens carries
+    /// the output frame alone, no control product and no render of the
+    /// module's mirror. A sim lens keeps its old default (the fixture), and
+    /// the user's own selection streams as before.
+    #[test]
+    fn a_device_lens_opens_on_the_root_module_and_asks_for_one_copy() {
+        for transport in [crate::LinkTransport::Serial, crate::LinkTransport::Emu] {
+            let mut project = one_wire_project_opened(Some(transport), false);
+            let root = project.node(&node_address("/demo.module")).expect("root");
+            assert!(
+                root.state().focused,
+                "{transport:?}: the root module is selected"
+            );
+            assert!(
+                !project
+                    .node(&node_address("/demo.module/pixels.fixture"))
+                    .expect("fixture")
+                    .state()
+                    .focused
+            );
+
+            place_fixture_on_the_wire(&mut project, 10);
+            let products = project.subscribed_products();
+            assert!(
+                products.is_empty(),
+                "{transport:?}: nothing streams on Studio's account: {products:?}"
+            );
+            assert_eq!(
+                lens_pixel_probes(&mut project),
+                vec![LensPixelProbe::Output(Some(
+                    lpc_wire::WireChannelSampleFormat::U8
+                ))]
+            );
+
+            // A later apply (a reconnect's re-read) keeps what the user chose.
+            select_node(&mut project, "/demo.module/pixels.fixture");
+            project.apply_project_view(&one_wire_view()).unwrap();
+            assert!(
+                project
+                    .node(&node_address("/demo.module/pixels.fixture"))
+                    .expect("fixture")
+                    .state()
+                    .focused,
+                "{transport:?}: the user's selection survives a re-read"
+            );
+            assert!(
+                project
+                    .subscribed_products()
+                    .contains(&UiProductRef::from_control_product(
+                        fixture_control_product()
+                    ))
+            );
+        }
+
+        let sim = one_wire_project_opened(Some(crate::LinkTransport::Sim), false);
+        assert!(
+            sim.node(&node_address("/demo.module/pixels.fixture"))
+                .expect("fixture")
+                .state()
+                .focused,
+            "a sim lens keeps its default: the fixture"
+        );
+    }
+
+    /// Show live on a second surface: selecting the fixture (which is what
+    /// Show live does) is the user asking for more, and its product streams
+    /// beside the output frame — two copies, both 8-bit, on request only.
+    #[test]
+    fn selecting_the_fixture_asks_for_its_copy_too() {
+        let mut project = one_wire_project(Some(crate::LinkTransport::Serial));
+        place_fixture_on_the_wire(&mut project, 10);
+        select_node(&mut project, "/demo.module/pixels.fixture");
+
+        assert_eq!(
+            lens_pixel_probes(&mut project),
+            vec![
+                LensPixelProbe::Control(lpc_wire::WireChannelSampleFormat::U8),
+                LensPixelProbe::Output(Some(lpc_wire::WireChannelSampleFormat::U8)),
+            ]
+        );
+    }
+
+    /// Lamps no wire carries are visible nowhere else: a partly patched
+    /// fixture keeps streaming unasked.
+    #[test]
+    fn a_partly_placed_product_keeps_streaming() {
+        let mut project = one_wire_project(Some(crate::LinkTransport::Serial));
+        place_fixture_on_the_wire(&mut project, 6);
+
+        assert_eq!(
+            lens_pixel_probes(&mut project),
+            vec![
+                LensPixelProbe::Control(lpc_wire::WireChannelSampleFormat::U8),
+                LensPixelProbe::Output(Some(lpc_wire::WireChannelSampleFormat::U8)),
+            ]
+        );
+    }
+
+    /// A sim lens is outside the rule — nothing crosses a cable — so the
+    /// primary control stays always live beside the output frame.
+    #[test]
+    fn a_sim_lens_keeps_both_copies() {
+        for transport in [Some(crate::LinkTransport::Sim), None] {
+            let mut project = one_wire_project(transport);
+            place_fixture_on_the_wire(&mut project, 10);
+            assert_eq!(
+                project.always_live_products(),
+                vec![UiProductRef::from_control_product(fixture_control_product())],
+                "{transport:?}"
+            );
+        }
+    }
+
     #[test]
     fn a_control_only_module_heroes_its_control_output_with_no_toggle() {
         // No visual writer anywhere in the scope: the module's own mirror
@@ -13948,7 +14188,6 @@ mod tests {
     /// node: nothing to offer, and no card claims to be "the live one".
     #[test]
     fn device_lens_offers_show_live_until_the_node_is_selected() {
-        let node = node_address("/demo.module/orbit.shader");
         let mut view = single_node_view(1, NodeRuntimeStatus::Ok);
         install_ui_projection_slots(&mut view, 1, Revision::new(4));
         let mut project = ProjectController::new();
@@ -13979,7 +14218,7 @@ mod tests {
         );
         assert!(product.show_live.is_some());
 
-        project.node_mut(&node).unwrap().state_mut().focused = true;
+        select_node(&mut project, "/demo.module/orbit.shader");
         let (card, product) = visual(&project);
         assert!(card.streaming_live);
         assert_eq!(product.tracking, UiProductTrackingState::Tracking);
@@ -14018,6 +14257,136 @@ mod tests {
             project.visual_preview_frame(),
             crate::UiProductPreviewFrame::VISUAL_DEFAULT
         );
+    }
+
+    /// The user selects `address` — what the Focus op (a click, Show live)
+    /// does, synchronously.
+    fn select_node(project: &mut ProjectController, address: &str) {
+        let target = ProjectEditorTarget::addressed_node(
+            project
+                .node(&node_address(address))
+                .expect("node controller")
+                .target()
+                .clone(),
+        );
+        project.focus_editor_target(&target);
+        project.active_editor_target = Some(target);
+    }
+
+    /// The pixel-bearing probes of a lens read, in request order.
+    #[derive(Debug, PartialEq)]
+    enum LensPixelProbe {
+        Control(lpc_wire::WireChannelSampleFormat),
+        Output(Option<lpc_wire::WireChannelSampleFormat>),
+    }
+
+    fn lens_pixel_probes(project: &mut ProjectController) -> Vec<LensPixelProbe> {
+        let products = project.subscribed_products();
+        project
+            .sync_for_request()
+            .expect("a ready mirror")
+            .refresh_project_read_request(products)
+            .probes
+            .into_iter()
+            .filter_map(|probe| match probe {
+                lpc_wire::ProjectProbeRequest::ControlProduct(request) => {
+                    Some(LensPixelProbe::Control(request.sample_format))
+                }
+                lpc_wire::ProjectProbeRequest::OutputFrame(request) => {
+                    Some(LensPixelProbe::Output(request.samples))
+                }
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// A root module owning a fixture (node 3, whose second output is the
+    /// scope's `control.out` — [`fixture_control_product`]) and one output
+    /// wire (node 5), on a lens over `transport`, nothing focused.
+    fn one_wire_project(transport: Option<crate::LinkTransport>) -> ProjectController {
+        one_wire_project_opened(transport, true)
+    }
+
+    /// [`one_wire_project`], optionally keeping the selection Studio makes
+    /// when the tree lands (`clear_focus: false`) — the lens as it opens.
+    fn one_wire_project_opened(
+        transport: Option<crate::LinkTransport>,
+        clear_focus: bool,
+    ) -> ProjectController {
+        let view = one_wire_view();
+        let mut project = ProjectController::new();
+        project.set_lens_transport(transport);
+        project.mark_ready("loaded-project", 7, ProjectInventorySummary::default());
+        project.apply_project_view(&view).unwrap();
+        project.sync_mut().unwrap().set_view_for_test(view);
+        if clear_focus {
+            clear_node_focus(&mut project.root_nodes);
+        }
+        let scope = lpc_wire::WireScopeRef::Module {
+            owner: lpc_model::NodeId::new(1),
+        };
+        project
+            .sync_mut()
+            .unwrap()
+            .set_binding_graph_for_test(control_out_graph(scope, None));
+        project
+    }
+
+    /// The one-wire tree: root module 1 owning fixture 3 (with its product
+    /// state) and output 5.
+    fn one_wire_view() -> ProjectView {
+        let mut view = ProjectView::new();
+        let mut root = node_entry(1, "/demo.module", None, NodeRuntimeStatus::Ok);
+        root.children = vec![NodeId::new(3), NodeId::new(5)];
+        view.tree.insert(root);
+        view.tree.insert(node_entry(
+            3,
+            "/demo.module/pixels.fixture",
+            Some(1),
+            NodeRuntimeStatus::Ok,
+        ));
+        view.tree.insert(node_entry(
+            5,
+            "/demo.module/strip.output",
+            Some(1),
+            NodeRuntimeStatus::Ok,
+        ));
+        // Node 3's state carries its products: a visual and the control
+        // product `control.out` resolves to.
+        install_ui_projection_slots(&mut view, 3, Revision::new(4));
+        view
+    }
+
+    /// Output 5 answers a frame whose wire carries `placed` of the fixture's
+    /// ten lamps (its product's second output).
+    fn place_fixture_on_the_wire(project: &mut ProjectController, placed: u32) {
+        let entry = lpc_wire::OutputFrameEntry {
+            node: NodeId::new(5),
+            revision: Revision::new(2),
+            channels: 10,
+            sample_format: Some(lpc_wire::WireChannelSampleFormat::U8),
+            geometry: lpc_wire::RevisionGateResult::Changed(lpc_wire::OutputFrameGeometry {
+                revision: Revision::new(1),
+                sample_layout: lpc_model::ControlSampleLayout::default(),
+                display_layout: lpc_wire::GeometryDisplayLayout::Unsupported {
+                    reason: "not needed here".to_string(),
+                },
+                placements: vec![lpc_wire::WireOutputPlacement {
+                    node: NodeId::new(3),
+                    output: 1,
+                    source_lamp: 0,
+                    source_lamps: 10,
+                    wire_lamp: 0,
+                    lamps: placed,
+                    reversed: false,
+                }],
+            }),
+            bytes: vec![0; 30],
+        };
+        project
+            .sync_mut()
+            .unwrap()
+            .apply_output_frames_for_test(&[entry]);
     }
 
     fn single_node_view(id: u32, status: NodeRuntimeStatus) -> ProjectView {

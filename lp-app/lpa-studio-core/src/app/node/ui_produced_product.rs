@@ -184,10 +184,38 @@ impl UiProductRef {
     }
 }
 
-/// Native control sample format carried by a Studio preview DTO.
+/// Element format of a Studio control preview's samples: LINEAR unorm, 8 or
+/// 16 bits per sample.
+///
+/// Live previews arrive at `U8` — the transport precision Studio asks for
+/// (the screen draws 8-bit anyway); `U16` is what a published buffer holds
+/// and what a close inspection would ask for. Consumers read samples through
+/// [`UiControlProductPreview::unorm16_sample`], which widens `U8` by ×257, so
+/// no decode path cares which one arrived.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum UiControlSampleFormat {
+    U8,
     U16,
+}
+
+impl UiControlSampleFormat {
+    /// Bytes one sample occupies in `bytes`.
+    #[must_use]
+    pub const fn bytes_per_sample(self) -> usize {
+        match self {
+            Self::U8 => 1,
+            Self::U16 => 2,
+        }
+    }
+
+    /// The wire's element format, as a preview carries it.
+    #[must_use]
+    pub const fn from_wire(format: lpc_wire::WireChannelSampleFormat) -> Self {
+        match format {
+            lpc_wire::WireChannelSampleFormat::U8 => Self::U8,
+            lpc_wire::WireChannelSampleFormat::U16 => Self::U16,
+        }
+    }
 }
 
 /// Data-driven preview for a native control product.
@@ -208,12 +236,31 @@ pub struct UiControlProductPreview {
     /// unchanged across ticks, and the per-tick preview rebuild must not
     /// deep-copy it.
     pub display_layout: Option<Rc<ControlDisplayLayout>>,
-    /// Native sample bytes, little-endian for `U16`.
+    /// Native sample bytes: one per sample at `U8`, two little-endian at
+    /// `U16`. Read them through [`Self::unorm16_sample`].
     ///
     /// Shared (`Rc<[u8]>`) so cloning a preview into a view is a refcount bump,
     /// not a deep copy of the payload — the DTO tree is rebuilt often and these
     /// bytes dominate the per-tick cost.
     pub bytes: Rc<[u8]>,
+}
+
+impl UiControlProductPreview {
+    /// Sample `index` as linear unorm16, whatever format it arrived in: an
+    /// 8-bit level `k` widens to `k · 257`, so 255 is full scale and every
+    /// decode path downstream stays 16-bit. `None` past the buffer.
+    #[must_use]
+    pub fn unorm16_sample(&self, index: usize) -> Option<u16> {
+        match self.sample_format {
+            UiControlSampleFormat::U8 => self.bytes.get(index).map(|&v| u16::from(v) * 257),
+            UiControlSampleFormat::U16 => {
+                let at = index.checked_mul(2)?;
+                let lo = *self.bytes.get(at)?;
+                let hi = *self.bytes.get(at + 1)?;
+                Some(u16::from_le_bytes([lo, hi]))
+            }
+        }
+    }
 }
 
 /// UI mirror of `lpc_wire::WireVisualSpace` — which coordinate space a
@@ -612,5 +659,37 @@ fn product_preview_size(preview: &UiProductPreview) -> Option<String> {
             preview.extent.rows, preview.extent.samples_per_row
         )),
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn preview(sample_format: UiControlSampleFormat, bytes: &[u8]) -> UiControlProductPreview {
+        UiControlProductPreview {
+            revision: 1,
+            extent: ControlExtent::new(1, 3),
+            sample_format,
+            sample_layout: ControlSampleLayout::default(),
+            display_layout: None,
+            bytes: Rc::from(bytes),
+        }
+    }
+
+    /// `U8` widens by ×257 — 0 and 255 land on the 16-bit full-scale ends —
+    /// and `U16` reads little-endian pairs; both stop at the buffer's end.
+    #[test]
+    fn samples_read_as_unorm16_in_either_format() {
+        let narrow = preview(UiControlSampleFormat::U8, &[0, 1, 255]);
+        assert_eq!(narrow.unorm16_sample(0), Some(0));
+        assert_eq!(narrow.unorm16_sample(1), Some(257));
+        assert_eq!(narrow.unorm16_sample(2), Some(u16::MAX));
+        assert_eq!(narrow.unorm16_sample(3), None);
+
+        let wide = preview(UiControlSampleFormat::U16, &[0x34, 0x12, 0xff, 0xff, 7]);
+        assert_eq!(wide.unorm16_sample(0), Some(0x1234));
+        assert_eq!(wide.unorm16_sample(1), Some(u16::MAX));
+        assert_eq!(wide.unorm16_sample(2), None, "a half sample is no sample");
     }
 }

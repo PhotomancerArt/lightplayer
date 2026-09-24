@@ -23,6 +23,7 @@ mod project_apply;
 mod project_fault;
 // The never-black policy's oracle: what faults a project, what must not,
 // and how the verdict clears.
+mod preview_sample_encoding;
 #[cfg(test)]
 mod project_fault_tests;
 mod project_loader;

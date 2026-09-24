@@ -593,8 +593,13 @@ fn output_entries(
     registry: &ProjectRegistry,
     geometry: OutputFrameGeometryRead,
 ) -> Vec<OutputFrameEntry> {
-    let OutputFrameProbeResult::Frame { outputs } =
-        engine.read_project_output_frame_probe(registry, OutputFrameProbeRequest { geometry });
+    let OutputFrameProbeResult::Frame { outputs } = engine.read_project_output_frame_probe(
+        registry,
+        OutputFrameProbeRequest {
+            geometry,
+            samples: Some(lpc_wire::WireChannelSampleFormat::U16),
+        },
+    );
     outputs
 }
 

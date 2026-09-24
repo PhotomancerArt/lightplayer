@@ -34,6 +34,7 @@ use crate::products::visual::RenderTextureRequest;
 use crate::resource::{RuntimeBufferId, RuntimeBufferMetadata, RuntimeChannelSampleFormat};
 
 use super::Engine;
+use super::preview_sample_encoding::{encode_unorm16_le_bytes, encode_unorm16_samples};
 use crate::products::visual::{
     CellProjection, ConsumerPolicy, ProductSpaceInfo, ProjectionOrigin, ProjectionShape,
     VisualSpace, resolve_1d_to_2d_with_origin,
@@ -397,15 +398,8 @@ impl Engine {
     ) -> ControlProductProbeResult {
         let product = request.product;
         let extent = product.preferred_extent();
-        let WireChannelSampleFormat::U16 = request.sample_format else {
-            return ControlProductProbeResult::Unsupported {
-                product,
-                reason: format!(
-                    "control product preview sample format {:?} is not supported",
-                    request.sample_format
-                ),
-            };
-        };
+        // Rendered at 16 bits whatever the ask: the requested format is
+        // only how precisely the samples travel (`preview_sample_encoding`).
         let sample_count = extent.sample_count() as usize;
         let mut samples = vec![0u16; sample_count];
         let render_request = ControlRenderRequest::unorm16(extent);
@@ -434,7 +428,7 @@ impl Engine {
                     sample_layout,
                     display_layout,
                 ),
-                bytes: control_samples_u16_to_bytes(&samples),
+                bytes: encode_unorm16_samples(&samples, request.sample_format),
             },
             Err(error) => ControlProductProbeResult::Error {
                 product,
@@ -558,7 +552,21 @@ impl Engine {
                 continue;
             };
             let revision = buffer.changed_at();
-            let bytes = buffer.value().bytes().into_owned();
+            let published = match sample_format {
+                RuntimeChannelSampleFormat::U8 => WireChannelSampleFormat::U8,
+                RuntimeChannelSampleFormat::U16 => WireChannelSampleFormat::U16,
+            };
+            // The client's precision, never wider than what was published:
+            // a `U16` buffer asked for `U8` is rounded to nearest; anything
+            // else travels verbatim. No ask, no bytes.
+            let (sample_format, bytes) = match (request.samples, published) {
+                (None, _) => (None, Vec::new()),
+                (Some(WireChannelSampleFormat::U8), WireChannelSampleFormat::U16) => (
+                    Some(WireChannelSampleFormat::U8),
+                    encode_unorm16_le_bytes(&buffer.value().bytes(), WireChannelSampleFormat::U8),
+                ),
+                (Some(_), published) => (Some(published), buffer.value().bytes().into_owned()),
+            };
 
             let geometry = self.output_frame_geometry(
                 registry,
@@ -571,10 +579,7 @@ impl Engine {
                 node: candidate.node,
                 revision,
                 channels,
-                sample_format: match sample_format {
-                    RuntimeChannelSampleFormat::U8 => WireChannelSampleFormat::U8,
-                    RuntimeChannelSampleFormat::U16 => WireChannelSampleFormat::U16,
-                },
+                sample_format,
                 geometry,
                 bytes,
             });
@@ -838,14 +843,6 @@ fn wire_output_placement(fragment: &OutputFragment) -> lpc_wire::WireOutputPlace
         lamps: fragment.len_samples / SAMPLES_PER_LAMP,
         reversed: fragment.reversed,
     }
-}
-
-fn control_samples_u16_to_bytes(samples: &[u16]) -> Vec<u8> {
-    let mut bytes = Vec::with_capacity(samples.len() * 2);
-    for sample in samples {
-        bytes.extend_from_slice(&sample.to_le_bytes());
-    }
-    bytes
 }
 
 fn rgba16_linear_to_srgb8(bytes: &[u8]) -> alloc::vec::Vec<u8> {

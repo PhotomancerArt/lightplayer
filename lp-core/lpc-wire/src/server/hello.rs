@@ -56,8 +56,13 @@ use serde::{Deserialize, Serialize};
 ///   }`; `WireBusChannel` loses `value`; `WireBusChannelValue` becomes an
 ///   enum; an engaged panel writer's row is the value-free
 ///   `WireBindingEndpoint::PanelWriter`; and `WireBindingGraph::revision` is
-///   the STRUCTURE revision. A steady lens read of the PLAYFUL choker drops
-///   from 10,997 B to 4,911 B across the two.
+///   the STRUCTURE revision. Third, pixels become the client's ask:
+///   `OutputFrameProbeRequest` gains `samples: Option<WireChannelSampleFormat>`
+///   (`None` = geometry and revisions only; `U8` rounds a `U16` buffer to
+///   nearest), `OutputFrameEntry::sample_format` (and its header's) becomes
+///   `Option`, and the control-product probe answers `U8` as well as `U16`.
+///   A steady lens read of the PLAYFUL choker drops from 10,997 B to 4,911 B
+///   across the first two.
 /// - 20: `ClientRequest::ClearFaults` + its `ServerMsgBody::ClearFaults {
 ///   ledger_cleared }` ack — the studio's Clear faults verb, which forgets
 ///   the crash-recovery ledger and re-arms the engine's faulted nodes.

@@ -13,11 +13,11 @@ use lpc_wire::{
     ProjectReadQuery, ProjectReadRequest, ReadLevel, RenderProductProbeRequest,
     RenderProductProbeResult, ResourcePayloadRead, ResourceReadQuery, RuntimeReadQuery,
     ShapeReadQuery, TimebaseProbeRequest, TimebaseProbeResult, WireBindingGraph,
-    WireBusChannelValue, WireCellProjection, WireChannelSampleFormat, WireConsumerPolicy,
-    WireProjectionOrigin, WireProjectionShape, WireTextureFormat, WireVisualSpace,
+    WireBusChannelValue, WireCellProjection, WireConsumerPolicy, WireProjectionOrigin,
+    WireProjectionShape, WireTextureFormat, WireVisualSpace,
 };
 
-use crate::app::frame_feed::OutputFrameCache;
+use crate::app::frame_feed::{OutputFrameCache, PREVIEW_SAMPLE_FORMAT};
 use crate::app::project::binding_graph_cache::BindingGraphCache;
 use crate::app::project::control_geometry_cache::ControlGeometryCache;
 use crate::{
@@ -364,6 +364,12 @@ impl ProjectSync {
         self.output_frames.frames_seen()
     }
 
+    /// Whether the lens read carries the outputs' pixels: every read of a
+    /// project that drives an output does (see `probe_requests`).
+    pub fn streams_output_pixels(&self) -> bool {
+        self.has_output_nodes()
+    }
+
     /// Whether the mirror carries any output node.
     ///
     /// The probe has no node selector — it answers for every output at once —
@@ -637,6 +643,21 @@ impl ProjectSync {
         self.binding_graph.set_for_test(graph, values);
     }
 
+    /// Replace the mirror's view directly (test fixture path): a fixture
+    /// tree the probe set is derived from, with no read stream behind it.
+    #[cfg(test)]
+    pub(crate) fn set_view_for_test(&mut self, view: ProjectView) {
+        self.view = view;
+    }
+
+    /// Fold published output-frame entries directly (test fixture path),
+    /// standing in for the probe cycle the same way
+    /// `set_binding_graph_for_test` does.
+    #[cfg(test)]
+    pub(crate) fn apply_output_frames_for_test(&mut self, outputs: &[lpc_wire::OutputFrameEntry]) {
+        self.output_frames.apply(outputs);
+    }
+
     /// Inject a timebase read directly (test fixture path), standing in for
     /// the probe cycle the same way `set_binding_graph_for_test` does.
     #[cfg(test)]
@@ -699,9 +720,17 @@ impl ProjectSync {
         // product ref names that wire. It renders nothing device-side (the
         // frame is already published), and the geometry half is revision-gated
         // per output so a steady lens ships it once.
+        //
+        // Its pixels ride too, at the preview precision: a lens that shows an
+        // output shows its wire's picture on the module hero, the output's
+        // patch bay and every fixture's patch row, so SOME surface always
+        // draws them. This is the lens's one copy of those lamps (lean-wire
+        // P5): a control product whose lamps all sit on this wire stops
+        // riding unasked (`ProjectController::always_live_products`).
         if self.has_output_nodes() {
             probes.push(ProjectProbeRequest::OutputFrame(OutputFrameProbeRequest {
                 geometry: self.output_frames.geometry_read(),
+                samples: Some(PREVIEW_SAMPLE_FORMAT),
             }));
         }
         if self.binding_graph_subscribed {
@@ -756,7 +785,7 @@ impl ProjectSync {
                         probes.push(ProjectProbeRequest::ControlProduct(
                             ControlProductProbeRequest {
                                 product: control,
-                                sample_format: WireChannelSampleFormat::U16,
+                                sample_format: PREVIEW_SAMPLE_FORMAT,
                                 geometry: self.control_geometry.read_for(&product),
                             },
                         ));
@@ -830,10 +859,13 @@ impl ProjectSync {
                 product,
                 revision,
                 extent,
-                sample_format: WireChannelSampleFormat::U16,
+                sample_format,
                 geometry,
                 bytes,
-            }) => {
+            }) if bytes.len()
+                == extent.sample_count() as usize
+                    * UiControlSampleFormat::from_wire(*sample_format).bytes_per_sample() =>
+            {
                 let product_ref = UiProductRef::from_control_product(*product);
                 let geometry = self.control_geometry.apply(product_ref, geometry)?;
                 Some((
@@ -841,7 +873,7 @@ impl ProjectSync {
                     UiProductPreview::ControlNative(UiControlProductPreview {
                         revision: revision.0,
                         extent: *extent,
-                        sample_format: UiControlSampleFormat::U16,
+                        sample_format: UiControlSampleFormat::from_wire(*sample_format),
                         sample_layout: geometry.sample_layout.clone(),
                         // The cached `Rc`: pointer-stable while the revision
                         // stands, which is the lamp renderer's repaint key.
@@ -852,13 +884,17 @@ impl ProjectSync {
             }
             ProjectProbeResult::ControlProduct(ControlProductProbeResult::Preview {
                 product,
+                extent,
                 sample_format,
+                bytes,
                 ..
             }) => Some((
                 UiProductRef::from_control_product(*product),
-                UiProductPreview::Unsupported {
-                    reason: format!(
-                        "control preview sample format {sample_format:?} is not supported by Studio"
+                UiProductPreview::Error {
+                    message: format!(
+                        "control preview carried {} bytes for {} {sample_format:?} samples",
+                        bytes.len(),
+                        extent.sample_count()
                     ),
                 },
             )),
@@ -1308,7 +1344,7 @@ mod tests {
     };
     use lpc_wire::{
         ControlProductGeometry, GeometryDisplayLayout, ProjectReadProbeEvent, RevisionGateRead,
-        RevisionGateResult,
+        RevisionGateResult, WireChannelSampleFormat,
     };
 
     /// Build a probe-only project-read event stream at `revision`.
@@ -2076,7 +2112,7 @@ mod tests {
             vec![ProjectProbeRequest::ControlProduct(
                 ControlProductProbeRequest {
                     product,
-                    sample_format: WireChannelSampleFormat::U16,
+                    sample_format: WireChannelSampleFormat::U8,
                     geometry: RevisionGateRead::Always,
                 },
             )]
@@ -2114,7 +2150,7 @@ mod tests {
                 radius: 0.1,
             }],
         ));
-        let first_bytes = vec![0, 0, 255, 255, 0, 0];
+        let first_bytes = vec![0, 255, 0];
         let _ = sync.refresh_project_read_request(vec![product_ref]);
 
         sync.apply_project_read_events(probe_events(
@@ -2124,7 +2160,7 @@ mod tests {
                     product,
                     revision: Revision::new(9),
                     extent: product.preferred_extent(),
-                    sample_format: WireChannelSampleFormat::U16,
+                    sample_format: WireChannelSampleFormat::U8,
                     geometry: RevisionGateResult::Changed(ControlProductGeometry {
                         revision: Revision::new(12),
                         sample_layout: sample_layout.clone(),
@@ -2143,7 +2179,7 @@ mod tests {
             vec![ProjectProbeRequest::ControlProduct(
                 ControlProductProbeRequest {
                     product,
-                    sample_format: WireChannelSampleFormat::U16,
+                    sample_format: WireChannelSampleFormat::U8,
                     geometry: RevisionGateRead::IfChanged {
                         known_revision: Some(Revision::new(12)),
                     },
@@ -2151,7 +2187,7 @@ mod tests {
             )]
         );
 
-        let second_bytes = vec![255, 255, 0, 0, 0, 0];
+        let second_bytes = vec![255, 0, 0];
         sync.apply_project_read_events(probe_events(
             10,
             vec![ProjectProbeResult::ControlProduct(
@@ -2159,7 +2195,7 @@ mod tests {
                     product,
                     revision: Revision::new(10),
                     extent: product.preferred_extent(),
-                    sample_format: WireChannelSampleFormat::U16,
+                    sample_format: WireChannelSampleFormat::U8,
                     geometry: RevisionGateResult::Unchanged {
                         revision: Revision::new(12),
                     },
@@ -2174,12 +2210,42 @@ mod tests {
             Some(&UiProductPreview::ControlNative(UiControlProductPreview {
                 revision: 10,
                 extent: product.preferred_extent(),
-                sample_format: UiControlSampleFormat::U16,
+                sample_format: UiControlSampleFormat::U8,
                 sample_layout,
                 display_layout: Some(Rc::new(display_layout)),
                 bytes: Rc::from(second_bytes.as_slice()),
             }))
         );
+    }
+
+    /// A preview whose bytes contradict its own format (six bytes for three
+    /// 8-bit samples) is an error, never drawn as garbage.
+    #[test]
+    fn a_preview_whose_bytes_contradict_its_format_is_an_error() {
+        let mut sync = ProjectSync::new();
+        let product = ControlProduct::new(NodeId::new(7), 2, ControlExtent::new(1, 3));
+        let product_ref = UiProductRef::from_control_product(product);
+        let _ = sync.refresh_project_read_request(vec![product_ref]);
+
+        sync.apply_project_read_events(probe_events(
+            9,
+            vec![ProjectProbeResult::ControlProduct(
+                ControlProductProbeResult::Preview {
+                    product,
+                    revision: Revision::new(9),
+                    extent: product.preferred_extent(),
+                    sample_format: WireChannelSampleFormat::U8,
+                    geometry: RevisionGateResult::Omitted,
+                    bytes: vec![0, 0, 255, 255, 0, 0],
+                },
+            )],
+        ))
+        .unwrap();
+
+        assert!(matches!(
+            sync.product_preview(&product_ref),
+            Some(UiProductPreview::Error { .. })
+        ));
     }
 
     /// Samples with no cached geometry behind them — here an `Unchanged`
@@ -2200,11 +2266,11 @@ mod tests {
                     product,
                     revision: Revision::new(9),
                     extent: product.preferred_extent(),
-                    sample_format: WireChannelSampleFormat::U16,
+                    sample_format: WireChannelSampleFormat::U8,
                     geometry: RevisionGateResult::Unchanged {
                         revision: Revision::new(12),
                     },
-                    bytes: vec![0, 0, 255, 255, 0, 0],
+                    bytes: vec![0, 255, 0],
                 },
             )],
         ))
@@ -2221,7 +2287,7 @@ mod tests {
             vec![ProjectProbeRequest::ControlProduct(
                 ControlProductProbeRequest {
                     product,
-                    sample_format: WireChannelSampleFormat::U16,
+                    sample_format: WireChannelSampleFormat::U8,
                     geometry: RevisionGateRead::Always,
                 },
             )]

@@ -69,7 +69,7 @@ fn output_frame_probe_returns_published_bytes_without_rendering() {
     assert_eq!(entry.bytes, published, "bytes must be the buffer verbatim");
     // `channels` is the buffer's own count: RGB lamps, not raw samples.
     assert_eq!(entry.channels, 1);
-    assert_eq!(entry.sample_format, WireChannelSampleFormat::U16);
+    assert_eq!(entry.sample_format, Some(WireChannelSampleFormat::U16));
 
     let geometry = changed(entry);
     assert_eq!(geometry.sample_layout.spans.len(), 1);
@@ -300,6 +300,66 @@ fn control_product_geometry_moves_with_its_sample_layout() {
     );
 }
 
+/// Asked for `U8`, the published `U16` frame travels rounded to nearest —
+/// half the bytes, the same post-finalize values — and says so.
+#[test]
+fn output_frame_probe_rounds_to_u8_when_asked() {
+    let mut harness = Harness::build([u16::MAX, 0, 0, u16::MAX]);
+    harness.tick();
+    assert_eq!(harness.published_bytes(), vec![255, 255, 0, 0, 0, 0]);
+
+    let entries = harness.read_samples(
+        OutputFrameGeometryRead::None,
+        Some(WireChannelSampleFormat::U8),
+    );
+
+    assert_eq!(entries[0].sample_format, Some(WireChannelSampleFormat::U8));
+    assert_eq!(entries[0].bytes, vec![255, 0, 0], "one sample per byte");
+    assert_eq!(entries[0].channels, 1, "the lamp count does not change");
+}
+
+/// No samples asked: the entry still answers its revision, channel count and
+/// geometry — what a module face derives from — with no pixel bytes.
+#[test]
+fn output_frame_probe_without_samples_still_carries_geometry() {
+    let mut harness = Harness::build([u16::MAX, 0, 0, u16::MAX]);
+    harness.tick();
+
+    let entries = harness.read_samples(OutputFrameGeometryRead::Always, None);
+
+    let entry = &entries[0];
+    assert_eq!(entry.sample_format, None);
+    assert!(entry.bytes.is_empty());
+    assert_eq!(entry.channels, 1);
+    assert_eq!(changed(entry).placements.len(), 1);
+}
+
+/// The control-product preview renders at 16 bits and ships `U8` when asked:
+/// the same samples, rounded.
+#[test]
+fn control_product_probe_rounds_to_u8_when_asked() {
+    let mut harness = Harness::build([0, u16::MAX, 0, u16::MAX]);
+    harness.tick();
+
+    let (_, wide_format, wide) =
+        harness.read_control_preview(RevisionGateRead::None, WireChannelSampleFormat::U16);
+    let (_, narrow_format, narrow) =
+        harness.read_control_preview(RevisionGateRead::None, WireChannelSampleFormat::U8);
+
+    assert_eq!(wide_format, WireChannelSampleFormat::U16);
+    assert_eq!(narrow_format, WireChannelSampleFormat::U8);
+    assert_eq!(narrow.len() * 2, wide.len());
+    let rounded: Vec<u8> = wide
+        .chunks_exact(2)
+        .map(|pair| {
+            super::preview_sample_encoding::unorm16_to_unorm8(u16::from_le_bytes([
+                pair[0], pair[1],
+            ]))
+        })
+        .collect();
+    assert_eq!(narrow, rounded);
+}
+
 /// The display layout's OWN revision inside a changed bundle.
 fn display_layout_revision(entry: &OutputFrameEntry) -> Revision {
     match &changed(entry).display_layout {
@@ -522,6 +582,21 @@ impl Harness {
         &mut self,
         geometry: RevisionGateRead,
     ) -> RevisionGateResult<ControlProductGeometry> {
+        self.read_control_preview(geometry, WireChannelSampleFormat::U16)
+            .0
+    }
+
+    /// The fixture's control-product preview — geometry, the answered sample
+    /// format and its bytes — asked in `sample_format`.
+    fn read_control_preview(
+        &mut self,
+        geometry: RevisionGateRead,
+        sample_format: WireChannelSampleFormat,
+    ) -> (
+        RevisionGateResult<ControlProductGeometry>,
+        WireChannelSampleFormat,
+        Vec<u8>,
+    ) {
         let results = read_probe_results(
             &mut self.engine,
             &self.registry,
@@ -535,7 +610,7 @@ impl Harness {
                             0,
                             lpc_model::ControlExtent::new(1, 3),
                         ),
-                        sample_format: WireChannelSampleFormat::U16,
+                        sample_format,
                         geometry,
                     },
                 )],
@@ -545,14 +620,25 @@ impl Harness {
             [
                 ProjectProbeResult::ControlProduct(ControlProductProbeResult::Preview {
                     geometry,
+                    sample_format,
+                    bytes,
                     ..
                 }),
-            ] => geometry.clone(),
+            ] => (geometry.clone(), *sample_format, bytes.clone()),
             other => panic!("expected one control preview, got {other:?}"),
         }
     }
 
+    /// A full-precision read: samples verbatim at `U16`.
     fn read(&mut self, geometry: OutputFrameGeometryRead) -> Vec<OutputFrameEntry> {
+        self.read_samples(geometry, Some(WireChannelSampleFormat::U16))
+    }
+
+    fn read_samples(
+        &mut self,
+        geometry: OutputFrameGeometryRead,
+        samples: Option<WireChannelSampleFormat>,
+    ) -> Vec<OutputFrameEntry> {
         let results = read_probe_results(
             &mut self.engine,
             &self.registry,
@@ -561,6 +647,7 @@ impl Harness {
                 queries: vec![],
                 probes: vec![ProjectProbeRequest::OutputFrame(OutputFrameProbeRequest {
                     geometry,
+                    samples,
                 })],
             },
         );

@@ -34,11 +34,24 @@
 //! what the wire actually carries to the strip — and gamma is lossy to invert,
 //! so there is no un-corrected frame to recover. Do not "fix" this.
 //!
+//! # Samples are optional, and their precision is the client's choice
+//!
+//! [`OutputFrameProbeRequest::samples`] names the element format the client
+//! wants, or `None` for no samples at all — the revision, the channel count
+//! and the gated geometry still arrive, which is everything a module face or
+//! a patch bay needs to derive its shape. When the client asks for
+//! [`WireChannelSampleFormat::U8`] and the output published `U16`, the engine
+//! rounds each sample to the nearest 8-bit level (`round(v / 257)`: 0 → 0,
+//! 65535 → 255). That is a TRANSPORT precision, not an un-correction: the
+//! values are still the post-finalize ones above, only coarser. A buffer
+//! published at `U8` is never widened; the entry's own
+//! [`OutputFrameEntry::sample_format`] always says what `bytes` holds.
+//!
 //! # Bandwidth
 //!
-//! One frame is `channels × 3 × 2` bytes before base64, on a link shared with
-//! every other protocol message; a 1500-lamp dome frame is ~9 KB, a 300-lamp
-//! strip ~1.8 KB. The geometry is what the gate keeps off the steady read:
+//! One frame is `channels × 3 × 2` bytes before base64 at `U16`, and half
+//! that at `U8`, on a link shared with every other protocol message; at `U16`
+//! a 1500-lamp dome frame is ~9 KB, a 300-lamp strip ~1.8 KB. The geometry is what the gate keeps off the steady read:
 //! before it, the PLAYFUL choker's 73-lamp entry carried 1,070 B of sample
 //! layout and 99 B of placements on every read, and small-dome's two entries
 //! carried 4,939 B and 5,421 B — none of it ever changing. Bulk bytes ride the same chunked path as the other
@@ -68,6 +81,10 @@ pub struct OutputFrameProbeRequest {
     /// so a feed can ask for each output's geometry once and then say "only
     /// if it changed".
     pub geometry: OutputFrameGeometryRead,
+    /// The element format the client wants the samples in, or `None` for no
+    /// samples at all (geometry and revisions only). `U8` down-converts a
+    /// `U16` buffer by rounding to nearest; see the module docs.
+    pub samples: Option<WireChannelSampleFormat>,
 }
 
 /// Whether and how an output-frame probe should ship each output's geometry.
@@ -138,12 +155,14 @@ pub struct OutputFrameEntry {
     /// `WireResourceMetadataSummary::OutputChannels`, which is the same
     /// number about the same buffer.
     pub channels: u32,
-    /// Element format of `bytes`. `U16` today (little-endian).
-    pub sample_format: WireChannelSampleFormat,
+    /// Element format of `bytes` (`U16` is little-endian), or `None` when
+    /// the request asked for no samples — `bytes` is then empty.
+    pub sample_format: Option<WireChannelSampleFormat>,
     /// Everything static about the buffer, gated by the request's
     /// [`OutputFrameGeometryRead`].
     pub geometry: RevisionGateResult<OutputFrameGeometry>,
-    /// The published buffer, verbatim.
+    /// The published buffer, verbatim at `U16` or rounded to `U8` as the
+    /// request asked; empty when it asked for none.
     #[cfg_attr(feature = "schema-gen", schemars(with = "String"))]
     #[serde(with = "crate::serde_base64")]
     pub bytes: Vec<u8>,
@@ -222,7 +241,7 @@ pub struct OutputFrameEntryHeader {
     pub node: NodeId,
     pub revision: Revision,
     pub channels: u32,
-    pub sample_format: WireChannelSampleFormat,
+    pub sample_format: Option<WireChannelSampleFormat>,
     pub geometry: RevisionGateResult<OutputFrameGeometry>,
     /// Bytes this entry claims out of the concatenated bulk payload.
     pub byte_length: u32,
@@ -305,6 +324,41 @@ mod tests {
         let back: OutputFrameProbeResult = serde_json::from_str(&json).unwrap();
 
         assert_eq!(back, result);
+    }
+
+    /// The pixel ask rides the request: a format, or `null` for none — and
+    /// a samples-free entry says so with a `null` format and no bytes.
+    #[test]
+    fn samples_are_optional_on_request_and_entry() {
+        for samples in [None, Some(WireChannelSampleFormat::U8)] {
+            let request = OutputFrameProbeRequest {
+                geometry: OutputFrameGeometryRead::None,
+                samples,
+            };
+            let json = serde_json::to_string(&request).unwrap();
+            assert_eq!(
+                serde_json::from_str::<OutputFrameProbeRequest>(&json).unwrap(),
+                request
+            );
+        }
+        assert_eq!(
+            crate::json::to_string(&OutputFrameProbeRequest {
+                geometry: OutputFrameGeometryRead::None,
+                samples: Some(WireChannelSampleFormat::U8),
+            })
+            .unwrap(),
+            r#"{"geometry":"none","samples":"u8"}"#
+        );
+
+        let mut bare = entry(NodeId::new(4), 1, Vec::new());
+        bare.sample_format = None;
+        let result = OutputFrameProbeResult::Frame {
+            outputs: vec![bare],
+        };
+        let (header, bytes) = result.clone().into_chunked_parts();
+        assert!(bytes.is_empty());
+        assert_eq!(header.outputs[0].sample_format, None);
+        assert_eq!(header.into_result(bytes), result);
     }
 
     /// The chunked split concatenates in entry order and the header's recorded
@@ -419,7 +473,7 @@ mod tests {
             node,
             revision: Revision::new(revision),
             channels: (bytes.len() / 6) as u32,
-            sample_format: WireChannelSampleFormat::U16,
+            sample_format: Some(WireChannelSampleFormat::U16),
             geometry: RevisionGateResult::Changed(OutputFrameGeometry {
                 revision: Revision::new(3),
                 sample_layout: ControlSampleLayout {

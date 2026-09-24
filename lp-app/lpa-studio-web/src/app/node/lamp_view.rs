@@ -543,14 +543,12 @@ pub(crate) fn wire_lamp_rgb(
 }
 
 /// Three consecutive samples as display sRGB8, in the order they ride the
-/// wire (no colour interpretation yet).
+/// wire (no colour interpretation yet). 8- and 16-bit previews decode alike:
+/// the preview widens its own samples to linear unorm16.
 fn sample_triple(preview: &UiControlProductPreview, sample_start: u32) -> Option<[u8; 3]> {
     let sample = |offset: u32| -> Option<u8> {
         let index = sample_start.checked_add(offset)? as usize;
-        let byte_index = index.checked_mul(2)?;
-        let lo = *preview.bytes.get(byte_index)?;
-        let hi = *preview.bytes.get(byte_index + 1)?;
-        Some(linear_unorm16_to_srgb8(u16::from_le_bytes([lo, hi])))
+        Some(linear_unorm16_to_srgb8(preview.unorm16_sample(index)?))
     };
     Some([sample(0)?, sample(1)?, sample(2)?])
 }
@@ -732,21 +730,49 @@ mod tests {
         );
     }
 
-    /// A wire frame whose lamp `n` carries full-red at `n == 0`, full-green
-    /// at `n == 1`, … cycling — distinguishable colors per wire position.
+    /// An 8-bit preview decodes to the colour its 16-bit twin does: each
+    /// level widens by ×257 before the sRGB transfer, so 0 and 255 land on
+    /// the same black and full scale, and a midtone on the same display
+    /// byte as the unorm16 value it stands for.
+    #[test]
+    fn eight_and_sixteen_bit_previews_decode_alike() {
+        let narrow = UiControlProductPreview {
+            bytes: vec![255_u8, 128, 0].into(),
+            ..wire_frame(1)
+        };
+        let wide = UiControlProductPreview {
+            sample_format: lpa_studio_core::UiControlSampleFormat::U16,
+            bytes: [65_535_u16, 128 * 257, 0]
+                .iter()
+                .flat_map(|sample| sample.to_le_bytes())
+                .collect::<Vec<u8>>()
+                .into(),
+            ..wire_frame(1)
+        };
+        assert_eq!(
+            control_rgb_at_sample(&narrow, 0),
+            control_rgb_at_sample(&wide, 0)
+        );
+        assert_eq!(
+            control_rgb_at_sample(&narrow, 0),
+            Some([255, linear_unorm16_to_srgb8(128 * 257), 0])
+        );
+    }
+
+    /// A live wire frame (8-bit, what Studio pulls) whose lamp `n` carries
+    /// full-red at `n == 0`, full-green at `n == 1`, … cycling —
+    /// distinguishable colors per wire position.
     fn wire_frame(lamps: u32) -> UiControlProductPreview {
-        let mut bytes = Vec::with_capacity(lamps as usize * 6);
+        let mut bytes = Vec::with_capacity(lamps as usize * 3);
         for lamp in 0..lamps {
-            let mut rgb = [0_u16; 3];
-            rgb[(lamp % 3) as usize] = 65535;
-            for sample in rgb {
-                bytes.extend_from_slice(&sample.to_le_bytes());
-            }
+            let mut rgb = [0_u8; 3];
+            rgb[(lamp % 3) as usize] = 255;
+            bytes.extend_from_slice(&rgb);
         }
         UiControlProductPreview {
             revision: 1,
             extent: ControlExtent::new(1, lamps * 3),
-            sample_format: lpa_studio_core::UiControlSampleFormat::U16,
+            sample_format: lpa_studio_core::UiControlSampleFormat::U8,
             sample_layout: ControlSampleLayout {
                 spans: vec![ControlSampleSpan {
                     row: 0,

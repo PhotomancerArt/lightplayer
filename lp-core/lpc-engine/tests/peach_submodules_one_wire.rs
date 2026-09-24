@@ -110,6 +110,7 @@ fn the_published_display_layout_draws_every_lamp_of_both_fixtures() {
             registry,
             OutputFrameProbeRequest {
                 geometry: OutputFrameGeometryRead::Always,
+                samples: Some(lpc_wire::WireChannelSampleFormat::U16),
             },
         );
         let OutputFrameProbeResult::Frame { outputs } = result;

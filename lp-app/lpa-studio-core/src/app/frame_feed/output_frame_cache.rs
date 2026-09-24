@@ -60,7 +60,7 @@ use lpc_model::{
 };
 use lpc_wire::{
     KnownOutputFrameGeometry, OutputFrameEntry, OutputFrameGeometry, OutputFrameGeometryRead,
-    RevisionGateResult, WireChannelSampleFormat, WireOutputPlacement,
+    RevisionGateResult, WireOutputPlacement,
 };
 
 use crate::{UiControlProductPreview, UiControlSampleFormat};
@@ -337,11 +337,14 @@ impl OutputFrameCache {
             .frame
             .as_ref()
             .is_some_and(|frame| frame.revision == entry.revision.0);
-        // U16 is the only format the lamp renderer reads; anything else would
-        // draw as garbage. Keep the last good frame instead.
-        let readable = entry.sample_format == WireChannelSampleFormat::U16
-            && entry.channels > 0
-            && !entry.bytes.is_empty();
+        // No samples (the read asked for geometry only), or a buffer whose
+        // length does not match its own format: nothing to draw. Keep the
+        // last good frame instead.
+        let format = entry.sample_format.map(UiControlSampleFormat::from_wire);
+        let readable = format.is_some_and(|format| {
+            entry.channels > 0
+                && entry.bytes.len() == entry.channels as usize * 3 * format.bytes_per_sample()
+        });
         if unchanged {
             // Geometry may still have moved under a frame that did not: a
             // patch edit re-places the wire without republishing bytes.
@@ -351,15 +354,15 @@ impl OutputFrameCache {
             }
             return false;
         }
-        if !readable {
+        let (true, Some(format)) = (readable, format) else {
             return false;
-        }
+        };
         output.frame = Some(UiControlProductPreview {
             revision: entry.revision.0,
-            // The published buffer is one row of RGB samples: three u16
+            // The published buffer is one row of RGB samples: three
             // channels per lamp.
             extent: ControlExtent::new(1, entry.channels.saturating_mul(3)),
-            sample_format: UiControlSampleFormat::U16,
+            sample_format: format,
             sample_layout: geometry.sample_layout.clone(),
             // The ONE geometry Rc, cloned — pointer-stable across frames.
             display_layout: geometry.layout.clone(),
@@ -374,15 +377,31 @@ impl OutputFrameCache {
 /// given. Each part's samples land at a running offset, and the composed
 /// spans move with them, so a consumer reading a lamp's colour at its
 /// `sample_start` finds exactly that part's bytes.
+///
+/// Parts that all arrived in one format concatenate as they are; a mix (an
+/// output that publishes 8-bit beside ones that publish 16) widens every
+/// part to `U16`, the format no sample loses precision in.
 fn compose_frame(
     parts: &[(NodeId, &UiControlProductPreview)],
     display_layout: Option<Rc<ControlDisplayLayout>>,
 ) -> UiControlProductPreview {
+    let first_format = parts
+        .first()
+        .map_or(UiControlSampleFormat::U16, |(_, part)| part.sample_format);
+    let sample_format = if parts
+        .iter()
+        .all(|(_, part)| part.sample_format == first_format)
+    {
+        first_format
+    } else {
+        UiControlSampleFormat::U16
+    };
     let mut bytes: Vec<u8> = Vec::with_capacity(
         parts
             .iter()
-            .map(|(_, frame)| frame.bytes.len())
-            .sum::<usize>(),
+            .map(|(_, frame)| frame.extent.sample_count() as usize)
+            .sum::<usize>()
+            * sample_format.bytes_per_sample(),
     );
     let mut spans: Vec<ControlSampleSpan> = Vec::new();
     let mut revision = i64::MIN;
@@ -397,13 +416,20 @@ fn compose_frame(
                 encoding: span.encoding.clone(),
             });
         }
-        bytes.extend_from_slice(&part.bytes);
+        if part.sample_format == sample_format {
+            bytes.extend_from_slice(&part.bytes);
+        } else {
+            for index in 0..part.extent.sample_count() as usize {
+                let sample = part.unorm16_sample(index).unwrap_or(0);
+                bytes.extend_from_slice(&sample.to_le_bytes());
+            }
+        }
         offset_samples = offset_samples.saturating_add(part.extent.sample_count());
     }
     UiControlProductPreview {
         revision,
         extent: ControlExtent::new(1, offset_samples),
-        sample_format: UiControlSampleFormat::U16,
+        sample_format,
         sample_layout: ControlSampleLayout { spans },
         display_layout,
         bytes: Rc::from(bytes.as_slice()),
@@ -462,7 +488,7 @@ fn compose_display_layout(
 #[cfg(test)]
 mod tests {
     use lpc_model::{ColorOrder, ControlSampleEncoding};
-    use lpc_wire::GeometryDisplayLayout;
+    use lpc_wire::{GeometryDisplayLayout, WireChannelSampleFormat};
 
     use super::*;
 
@@ -690,11 +716,76 @@ mod tests {
         ]);
         assert_eq!(cache.frames_seen(), 3);
 
-        // Unreadable bytes leave the last good frame — and the clock.
+        // Unreadable bytes (a length that contradicts the format: six
+        // bytes cannot be one lamp at 8 bits) leave the last good frame —
+        // and the clock.
         let mut garbage = entry(4, 4, vec![9, 0, 8, 0, 7, 0]);
-        garbage.sample_format = WireChannelSampleFormat::U8;
+        garbage.sample_format = Some(WireChannelSampleFormat::U8);
         cache.apply(&[garbage]);
         assert_eq!(cache.frames_seen(), 3);
+    }
+
+    /// An 8-bit frame draws as one: the preview keeps the format it arrived
+    /// in, and the shared decode widens each level to unorm16.
+    #[test]
+    fn an_eight_bit_frame_draws_as_eight_bit() {
+        let mut cache = OutputFrameCache::default();
+        let mut narrow = entry(4, 1, vec![0; 6]);
+        narrow.sample_format = Some(WireChannelSampleFormat::U8);
+        narrow.bytes = vec![255, 128, 0];
+
+        cache.apply(&[narrow]);
+
+        let frame = cache.frame(NodeId::new(4)).expect("an 8-bit frame draws");
+        assert_eq!(frame.sample_format, UiControlSampleFormat::U8);
+        assert_eq!(frame.extent.sample_count(), 3);
+        assert_eq!(frame.unorm16_sample(0), Some(u16::MAX));
+        assert_eq!(frame.unorm16_sample(1), Some(128 * 257));
+        assert_eq!(cache.frames_seen(), 1);
+    }
+
+    /// A geometry-only answer (the read asked for no samples) still caches
+    /// the geometry — placements included — and leaves the last frame and
+    /// the frame clock alone.
+    #[test]
+    fn a_samples_free_answer_keeps_geometry_and_the_last_frame() {
+        let mut cache = OutputFrameCache::default();
+        cache.apply(&[entry(4, 1, vec![1, 0, 2, 0, 3, 0])]);
+
+        let mut bare = entry(4, 2, vec![9, 0, 8, 0, 7, 0]);
+        bare.sample_format = None;
+        bare.bytes = Vec::new();
+        cache.apply(&[bare]);
+
+        assert_eq!(cache.placements(NodeId::new(4)).len(), 1);
+        assert_eq!(
+            cache.frame(NodeId::new(4)).expect("last frame").revision,
+            1,
+            "no samples, no new picture"
+        );
+        assert_eq!(cache.frames_seen(), 1);
+    }
+
+    /// Outputs that arrived in different formats compose at `U16`, each
+    /// 8-bit level widened by ×257, so no part loses precision.
+    #[test]
+    fn mixed_formats_compose_widened_to_sixteen_bits() {
+        let mut cache = OutputFrameCache::default();
+        let wide = with_layout(entry(4, 1, vec![1, 0, 2, 0, 3, 0]), 11, layout_at(11, 0.25));
+        let mut narrow = with_layout(entry(5, 1, vec![0; 6]), 12, layout_at(12, 0.75));
+        narrow.sample_format = Some(WireChannelSampleFormat::U8);
+        narrow.bytes = vec![1, 2, 255];
+        cache.apply(&[wide, narrow]);
+
+        let composed = cache
+            .composed_frame(&[NodeId::new(4), NodeId::new(5)])
+            .expect("composed");
+
+        assert_eq!(composed.sample_format, UiControlSampleFormat::U16);
+        assert_eq!(
+            composed.bytes.as_ref(),
+            [1, 0, 2, 0, 3, 0, 1, 1, 2, 2, 255, 255]
+        );
     }
 
     /// The small-dome regression (2026-08-29): TWO outputs cut from one
@@ -876,7 +967,7 @@ mod tests {
             node: NodeId::new(node),
             revision: Revision::new(revision),
             channels: (bytes.len() / 6) as u32,
-            sample_format: WireChannelSampleFormat::U16,
+            sample_format: Some(WireChannelSampleFormat::U16),
             geometry: RevisionGateResult::Changed(OutputFrameGeometry {
                 revision: Revision::new(GEOMETRY_REVISION),
                 sample_layout: ControlSampleLayout {

@@ -16,7 +16,7 @@ use lpc_shared::output::MemoryOutputProvider;
 use lpc_shared::time::TimeProvider;
 use lpc_wire::{
     ClientMessage, OutputFrameEntry, OutputFrameGeometryRead, OutputFrameProbeRequest,
-    OutputFrameProbeResult, json,
+    OutputFrameProbeResult, WireChannelSampleFormat, json,
 };
 use lpfs::LpFsMemory;
 use lps_shared::TextureStorageFormat;
@@ -414,7 +414,12 @@ impl BrowserFirmwareRuntime {
             }
         });
         let OutputFrameProbeResult::Frame { outputs } =
-            project.read_output_frame(OutputFrameProbeRequest { geometry });
+            project.read_output_frame(OutputFrameProbeRequest {
+                geometry,
+                // The sim's own in-page frames keep full precision: nothing
+                // crosses a cable here (lean-wire P5 leaves the sim as is).
+                samples: Some(WireChannelSampleFormat::U16),
+            });
         // Published outputs break the tie ONLY for a project whose visual
         // side already took the control-only fallback (multi-module bus
         // ties): there the outputs are the ground truth — fragments MERGE,
@@ -606,6 +611,8 @@ impl BrowserFirmwareRuntime {
                     let OutputFrameProbeResult::Frame { outputs } =
                         project.read_output_frame(OutputFrameProbeRequest {
                             geometry: OutputFrameGeometryRead::None,
+                            // Only the count of outputs is read here.
+                            samples: None,
                         });
                     log::debug!(
                         "preview runtime: visual fallback: control_resolves={} outputs={} \

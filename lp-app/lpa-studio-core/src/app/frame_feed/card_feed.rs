@@ -430,7 +430,7 @@ mod tests {
             node: NodeId::new(node),
             revision: Revision::new(revision),
             channels: (bytes.len() / 6) as u32,
-            sample_format: WireChannelSampleFormat::U16,
+            sample_format: Some(WireChannelSampleFormat::U16),
             // Geometry at revision 1 with a REFUSED display layout — the
             // bare case; `with_layout` adds one.
             geometry: RevisionGateResult::Changed(OutputFrameGeometry {

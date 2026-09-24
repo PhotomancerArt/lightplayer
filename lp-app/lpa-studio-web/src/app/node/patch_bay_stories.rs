@@ -155,7 +155,7 @@ fn wire_frame(cells: &[UiPatchCell]) -> UiControlProductPreview {
             }
         }
     }
-    let mut samples: Vec<u16> = vec![0; (WIRE_LAMPS * 3) as usize];
+    let mut samples: Vec<u8> = vec![0; (WIRE_LAMPS * 3) as usize];
     for cell in cells {
         let leaf = cell.producer == "peach_leaf";
         let span = if leaf { LEAF_LAMPS } else { BODY_LAMPS };
@@ -175,14 +175,11 @@ fn wire_frame(cells: &[UiPatchCell]) -> UiControlProductPreview {
             samples[base..base + 3].copy_from_slice(&rgb);
         }
     }
-    let mut bytes = Vec::with_capacity(samples.len() * 2);
-    for sample in &samples {
-        bytes.extend_from_slice(&sample.to_le_bytes());
-    }
     UiControlProductPreview {
         revision: 104,
         extent: ControlExtent::new(1, WIRE_LAMPS * 3),
-        sample_format: UiControlSampleFormat::U16,
+        // A live wire, as Studio pulls it: 8-bit.
+        sample_format: UiControlSampleFormat::U8,
         sample_layout: ControlSampleLayout {
             spans: vec![ControlSampleSpan {
                 row: 0,
@@ -195,22 +192,22 @@ fn wire_frame(cells: &[UiPatchCell]) -> UiControlProductPreview {
             }],
         },
         display_layout: None,
-        bytes: bytes.into(),
+        bytes: samples.into(),
     }
 }
 
 /// Peach flesh: warm pink deepening along the fruit.
-fn body_rgb(t: f32) -> [u16; 3] {
+fn body_rgb(t: f32) -> [u8; 3] {
     linear([0.95 - 0.25 * t, 0.34 + 0.12 * t, 0.30 + 0.22 * t])
 }
 
 /// Leaf: green, brightening toward the tip.
-fn leaf_rgb(t: f32) -> [u16; 3] {
+fn leaf_rgb(t: f32) -> [u8; 3] {
     linear([0.10 + 0.10 * t, 0.55 + 0.35 * t, 0.20 + 0.15 * t])
 }
 
-fn linear(rgb: [f32; 3]) -> [u16; 3] {
-    rgb.map(|channel| (channel.clamp(0.0, 1.0) * 65535.0) as u16)
+fn linear(rgb: [f32; 3]) -> [u8; 3] {
+    rgb.map(|channel| (channel.clamp(0.0, 1.0) * 255.0).round() as u8)
 }
 
 #[story(

@@ -69,7 +69,10 @@ struct StoredDeviceFrame {
     captured_at: f64,
     revision: i64,
     extent: ControlExtent,
-    /// The native sample format's name — `"u16"` is the only one today.
+    /// The native sample format's name — `"u16"` is the only one written
+    /// or read: a frame that arrived at 8 bits is widened before it is
+    /// stored (see [`encode`]), so the file's shape never depends on the
+    /// wire's transport precision.
     sample_format: String,
     sample_layout: ControlSampleLayout,
     /// Absent when the board declined its layout (over the wire budget):
@@ -82,12 +85,6 @@ struct StoredDeviceFrame {
 
 const SAMPLE_FORMAT_U16: &str = "u16";
 
-fn sample_format_name(format: UiControlSampleFormat) -> &'static str {
-    match format {
-        UiControlSampleFormat::U16 => SAMPLE_FORMAT_U16,
-    }
-}
-
 fn sample_format_from_name(name: &str) -> Option<UiControlSampleFormat> {
     match name {
         SAMPLE_FORMAT_U16 => Some(UiControlSampleFormat::U16),
@@ -96,16 +93,26 @@ fn sample_format_from_name(name: &str) -> Option<UiControlSampleFormat> {
 }
 
 /// Encode a composed frame captured at `captured_at` as sidecar bytes.
+///
+/// Always stored at `u16`: an 8-bit live frame (the card's transport
+/// precision, lean-wire P5) is widened by ×257 first, so the sidecar format
+/// is exactly what version 1 has always been.
 pub fn encode(frame: &UiControlProductPreview, captured_at: f64) -> Vec<u8> {
+    let bytes: Vec<u8> = match frame.sample_format {
+        UiControlSampleFormat::U16 => frame.bytes.to_vec(),
+        UiControlSampleFormat::U8 => (0..frame.bytes.len())
+            .flat_map(|index| frame.unorm16_sample(index).unwrap_or(0).to_le_bytes())
+            .collect(),
+    };
     let stored = StoredDeviceFrame {
         version: DEVICE_FRAME_SNAPSHOT_VERSION,
         captured_at,
         revision: frame.revision,
         extent: frame.extent,
-        sample_format: sample_format_name(frame.sample_format).to_string(),
+        sample_format: SAMPLE_FORMAT_U16.to_string(),
         sample_layout: frame.sample_layout.clone(),
         display_layout: frame.display_layout.as_deref().cloned(),
-        bytes: base64::engine::general_purpose::STANDARD.encode(&frame.bytes),
+        bytes: base64::engine::general_purpose::STANDARD.encode(&bytes),
     };
     // A struct of plain serde types cannot fail to serialize.
     serde_json::to_vec(&stored).unwrap_or_default()
@@ -134,9 +141,7 @@ pub fn decode(bytes: &[u8]) -> Option<(UiControlProductPreview, f64)> {
     let bytes = base64::engine::general_purpose::STANDARD
         .decode(&stored.bytes)
         .ok()?;
-    let expected_len = match sample_format {
-        UiControlSampleFormat::U16 => stored.extent.sample_count() as usize * 2,
-    };
+    let expected_len = stored.extent.sample_count() as usize * sample_format.bytes_per_sample();
     if bytes.len() != expected_len {
         log::debug!(
             "device frame snapshot carries {} bytes for a {}-sample extent; ignored",
@@ -256,6 +261,24 @@ mod tests {
             }
             (decoded, original) => panic!("layout presence differs: {decoded:?} vs {original:?}"),
         }
+    }
+
+    /// An 8-bit live frame is stored widened to `u16` — the sidecar's
+    /// shape does not follow the wire's transport precision — and reads
+    /// back as the same picture.
+    #[test]
+    fn an_eight_bit_frame_is_stored_at_sixteen_bits() {
+        let mut narrow = frame(false);
+        narrow.sample_format = UiControlSampleFormat::U8;
+        narrow.bytes = Rc::from(vec![0_u8, 1, 255]);
+
+        let encoded = encode(&narrow, 5.0);
+        let text = String::from_utf8(encoded.clone()).expect("json");
+        assert!(text.contains(r#""sampleFormat":"u16""#), "{text}");
+
+        let (decoded, _) = decode(&encoded).expect("decodes");
+        assert_eq!(decoded.sample_format, UiControlSampleFormat::U16);
+        assert_eq!(decoded.bytes.as_ref(), [0, 0, 1, 1, 255, 255]);
     }
 
     #[test]
