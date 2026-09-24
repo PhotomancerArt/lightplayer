@@ -16,6 +16,8 @@ ser-write-json = ["dep:ser-write-json"]
 [dependencies]
 lp-collection = { workspace = true, features = ["serde"] }
 base64 = { workspace = true }
+# Tiers and the login payloads (offers, MACs, outcomes) ride the wire as-is.
+lpc-access = { path = "../lpc-access" }
 lpc-model = { path = "../lpc-model", default-features = false }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }

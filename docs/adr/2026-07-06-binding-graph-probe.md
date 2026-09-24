@@ -119,7 +119,7 @@ probe, one request, one answer (wire proto 21):
 
 - **Request:** `BindingGraphProbeRequest { structure: RevisionGateRead,
   include_values }`. `RevisionGateRead` (`None` | `Always` |
-  `IfChanged { known }`, a list of known revisions since proto 22) is the
+  `IfChanged { known }`, a list of known revisions since proto 23) is the
   same gate the geometry of control-product and output-frame probes uses.
 - **Answer:** `WireBindingGraphRead { structure:
   RevisionGateResult<WireBindingGraph>, values: Option<WireBusChannelValues>

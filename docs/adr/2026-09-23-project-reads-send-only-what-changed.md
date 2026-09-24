@@ -50,7 +50,7 @@ introduces one generic pair used by every probe with a static/moving split:
 enum RevisionGateRead {
     None,
     Always,
-    // Proto 22 (lean-wire follow-ups F1): a list, so the per-output
+    // Proto 23 (lean-wire follow-ups F1): a list, so the per-output
     // output-frame gate is this same type. `node` names the output; a
     // single-half probe lists at most one entry with no node.
     IfChanged { known: Vec<KnownRevision /* { node?, revision } */> },

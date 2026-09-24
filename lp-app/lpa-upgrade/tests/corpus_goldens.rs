@@ -235,6 +235,38 @@ fn no_migrated_project_still_pins_fixed() {
     }
 }
 
+/// The access sidecar (`/.lp/access.json`) is its OWN persisted format
+/// (`version: 1`, `schemas/project-access.schema.json`), outside the
+/// project format: a project upgrade must carry it through byte for byte.
+///
+/// The classifier reads only `project.json`, but every step walks every
+/// `*.json` in the package — `/.lp/` included — so this is the proof that
+/// no step's shape rule touches an access file. Base64 salts and keys can
+/// never match the v5→v6 uid shape (base64 has no `_`); a LABEL spelled
+/// exactly like a pre-v6 uid would, which is a label, not a secret.
+#[test]
+fn an_access_sidecar_rides_the_upgrade_byte_identical() {
+    const SIDECAR: &str = ".lp/access.json";
+    let sidecar = br#"{"version":1,"secrets":[{"label":"camp","tier":"play","salt":"AQEBAQEBAQEBAQEBAQEBAQ==","iterations":120000,"k":"Pz8/Pz8/Pz8/Pz8/Pz8/Pz8/Pz8/Pz8/Pz8/Pz8/Pz8="}]}"#;
+
+    for (version, project) in all_corpus_projects() {
+        let mut files = read_tree(&corpus_root(version).join(&project));
+        files.insert(SIDECAR, sidecar.to_vec());
+
+        let report = upgrade_to_current(&mut files).expect("upgrade");
+
+        assert_eq!(
+            files.get(SIDECAR),
+            Some(&sidecar[..]),
+            "v{version}/{project}: the access sidecar was rewritten"
+        );
+        assert!(
+            !report.changed_files.iter().any(|path| path == SIDECAR),
+            "v{version}/{project}: the access sidecar was reported changed"
+        );
+    }
+}
+
 fn assert_report_notes_cover_changes(report: &UpgradeReport) {
     for path in &report.changed_files {
         assert!(

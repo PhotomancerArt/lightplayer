@@ -37,7 +37,7 @@ const SERIAL_OUT_RECV_PKT: u32 = 1 << 2;
 /// esp-println line that precedes everything).
 const DELIVERED_IN_ORDER: &[&str] = &[
     "[INIT] Initializing board...\n",
-    "\nM!{\"id\":0,\"msg\":{\"hello\":{\"proto\":22,",
+    "\nM!{\"id\":0,\"msg\":{\"hello\":{\"proto\":23,",
     "\"boardId\":\"seeed/xiao-esp32-c6\"",
     "\"baseMac\":\"a0:f2:62:87:b4:8c\"",
     "Esp32C6RmtWs281xDriver: 2 WS281x channels for 2 declared",
@@ -221,7 +221,7 @@ fn g2_3_attached_idle_from_boot_shows_the_not_draining_signature_and_the_probe()
     assert!(r.m.usb_sj().is_empty(), "{:?}", r.m.usb_sj().text());
     let tried = r.m.usb_sj_tried().text();
     assert!(
-        tried.starts_with("\nM!{\"id\":0,\"msg\":{\"hello\":{\"proto\":22,"),
+        tried.starts_with("\nM!{\"id\":0,\"msg\":{\"hello\":{\"proto\":23,"),
         "{tried:?}"
     );
     assert!(!tried.contains("[INIT]"), "{tried:?}");

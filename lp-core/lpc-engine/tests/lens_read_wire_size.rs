@@ -61,8 +61,7 @@ use std::sync::Arc;
 use lpc_engine::{Engine, EngineProjectReadSource, EngineServices, ProjectLoader};
 use lpc_model::{ControlExtent, ControlProduct, NodeId, Revision, TreePath};
 use lpc_registry::ProjectRegistry;
-use lpc_shared::transport::{ProjectReadStreamSink, ServerTransport};
-use lpc_wire::messages::ClientMessage;
+use lpc_shared::transport::{Incoming, Link, LinkId, ProjectReadStreamSink, ServerTransport};
 use lpc_wire::server::ServerMsgBody;
 use lpc_wire::{
     BindingGraphProbeRequest, BindingGraphProbeResult, ControlProductProbeRequest,
@@ -426,7 +425,8 @@ fn measure_read(
 ) -> MeasuredRead {
     let mut transport = CollectingTransport::default();
     block_on(async {
-        let mut sink = ProjectReadStreamSink::new(&mut transport, STUDIO_LIKE_REQUEST_ID);
+        let mut sink =
+            ProjectReadStreamSink::new(&mut transport, LinkId::PRIMARY, STUDIO_LIKE_REQUEST_ID);
         EngineProjectReadSource::with_server_status(engine, registry, Some(server_status()))
             .stream_project_read_events(request, &mut sink)
             .await
@@ -823,17 +823,21 @@ struct CollectingTransport {
 }
 
 impl ServerTransport for CollectingTransport {
-    async fn send(&mut self, msg: WireServerMessage) -> Result<(), TransportError> {
+    async fn send(&mut self, _link: LinkId, msg: WireServerMessage) -> Result<(), TransportError> {
         self.sent.push(msg);
         Ok(())
     }
 
-    async fn receive(&mut self) -> Result<Option<ClientMessage>, TransportError> {
+    async fn receive(&mut self) -> Result<Option<Incoming>, TransportError> {
         Ok(None)
     }
 
-    async fn receive_all(&mut self) -> Result<Vec<ClientMessage>, TransportError> {
+    async fn receive_all(&mut self) -> Result<Vec<Incoming>, TransportError> {
         Ok(Vec::new())
+    }
+
+    fn links(&self) -> Vec<Link> {
+        vec![Link::PRIMARY]
     }
 
     async fn close(&mut self) -> Result<(), TransportError> {

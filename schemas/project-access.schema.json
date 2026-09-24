@@ -1,0 +1,74 @@
+{
+  "$defs": {
+    "SecretEntry": {
+      "additionalProperties": false,
+      "description": "A shared secret the board accepts, stored as the KDF's OUTPUT.\n\n`k = PBKDF2-HMAC-SHA256(password, salt, iterations)` is computed by the\nclient that installs the secret; the password itself is never stored and\nnever crosses a link. `k` is login-equivalent — anyone holding it can\nanswer a challenge — which is accepted (the threat model is someone\ncheeky nearby, not a cracker with the flash chip), and is why no link at\nany tier can read an access file back.\n\n`label` names the secret for people (\"camp\", \"mine\"). It is never\noffered before login; a successful login names the label it matched.",
+      "properties": {
+        "iterations": {
+          "description": "PBKDF2 iteration count (≥ 1), tuned by the installing client.",
+          "format": "uint32",
+          "minimum": 1,
+          "type": "integer"
+        },
+        "k": {
+          "description": "The derived key `K`, base64 (32 bytes).",
+          "type": "string"
+        },
+        "label": {
+          "description": "Human name for this secret.",
+          "type": "string"
+        },
+        "salt": {
+          "description": "PBKDF2 salt, base64 (16 bytes).",
+          "type": "string"
+        },
+        "tier": {
+          "$ref": "#/$defs/Tier",
+          "description": "What a login with this secret grants."
+        }
+      },
+      "required": [
+        "label",
+        "tier",
+        "salt",
+        "iterations",
+        "k"
+      ],
+      "type": "object"
+    },
+    "Tier": {
+      "description": "An access tier. `Edit` implies `Play`: the derived ordering is\n`Play < Edit`, so \"has at least tier X\" is `held >= X`.\n\n- **Play** — the panel (knobs, brightness) plus reads: project reads,\n  project listings, and reading project files over fs.\n- **Edit** — everything: loading projects, authoring, fs writes and\n  deletes, device commands.\n\nNo tier, on any link, reads an access file (`**/.lp/access.json`).\n\nSerialized as `\"play\"` / `\"edit\"`, in the persisted access files and on\nthe wire alike.",
+      "enum": [
+        "play",
+        "edit"
+      ],
+      "type": "string"
+    }
+  },
+  "$id": "https://lightplayer.dev/schemas/project-access.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "A project's own secrets, stored beside the project in its `/.lp/`\nnamespace so they travel with it on deploy.\n\n`/.lp/` is outside the content hash (`lpc-history`'s hash rules), so\nchanging a secret never changes the project's identity, and cloud push,\npublish and fork skip it with the rest of `/.lp/`. The file is\n**write-only** on every link: a device pull cannot bring it back, and\nthe library copy is the source.",
+  "properties": {
+    "secrets": {
+      "description": "The project's secrets.",
+      "items": {
+        "$ref": "#/$defs/SecretEntry"
+      },
+      "type": "array"
+    },
+    "version": {
+      "description": "Format version; always [`ProjectAccessFile::VERSION`].",
+      "format": "uint32",
+      "maximum": 1,
+      "minimum": 1,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "version",
+    "secrets"
+  ],
+  "title": "ProjectAccessFile",
+  "type": "object"
+}
