@@ -2017,7 +2017,7 @@ before quoting a number from it.
 
 `just heap-budget-check-chips` is the other thing that reads this machine for
 a gate: the shipped image's own first-heartbeat allocator figures, ratcheted
-into `scripts/heap-budget-record.json` with silicon's beside them
+into `scripts/heap-budget-record/chips/esp32c6.json` with silicon's beside them
 (`docs/heap-budget-gate.md`).
 
 `just bench-emu-c6` is the speed side of the same two images: both reference

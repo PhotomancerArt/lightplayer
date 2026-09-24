@@ -567,7 +567,7 @@ a session rather than in a PR gate (R6/DD49). What it proves per tick is
 
 `just heap-budget-check-chips-s3` is the other thing that reads this machine
 for a gate: the shipped image's own first-heartbeat allocator figures,
-ratcheted into `scripts/heap-budget-record.json`. ⚠️ Its triple is
+ratcheted into `scripts/heap-budget-record/chips/esp32s3.json`. ⚠️ Its triple is
 **elicited** (`walks/s3-stop-all.script`), as the classic's is and as the
 C6's is not, and it is measured on a **direct load with no flash chip**, so
 the firmware runs on its memory FS — the record's `boot_shape` says what that

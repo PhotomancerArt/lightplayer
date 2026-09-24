@@ -350,6 +350,16 @@ jobs:
               # thing that decides WHICH BYTES the gates run against — ran no
               # gate at all unless it happened to touch something else.
               - 'scripts/emu/**'
+              # The C6's heap-budget ratchet (`heap-budget-chips`) rides this
+              # filter, so the gate's own script, its ELF layout reader and
+              # the C6's record file must fire it — until 2026-09-23 none of
+              # them did, and a C6 record edit ran no C6 chip gate at all. Only
+              # THIS chip's file: since the record split each chip's
+              # re-baseline touches its own file, and the other two chips'
+              # files fire their own jobs.
+              - 'scripts/heap-budget-check.sh'
+              - 'scripts/heap-budget-stack-layout.py'
+              - 'scripts/heap-budget-record/chips/esp32c6.json'
               - 'justfile'
               - '.github/workflows/pre-merge.yml'
             # emu_esp32v3 is the same shape for the CLASSIC ESP32's machine
@@ -381,7 +391,8 @@ jobs:
               # its recorded figures change. Neither filter covered them
               # before, which meant a record edit ran no chip gate at all.
               - 'scripts/heap-budget-check.sh'
-              - 'scripts/heap-budget-record.json'
+              - 'scripts/heap-budget-stack-layout.py'
+              - 'scripts/heap-budget-record/chips/esp32v3.json'
               - 'justfile'
               - '.github/workflows/pre-merge.yml'
               - '.github/actions/**'
@@ -414,7 +425,8 @@ jobs:
               # heap job has none (DD71). So the gate has to fire when the
               # gate's own script or its recorded figures change.
               - 'scripts/heap-budget-check.sh'
-              - 'scripts/heap-budget-record.json'
+              - 'scripts/heap-budget-stack-layout.py'
+              - 'scripts/heap-budget-record/chips/esp32s3.json'
               - 'justfile'
               - '.github/workflows/pre-merge.yml'
               - '.github/actions/**'
