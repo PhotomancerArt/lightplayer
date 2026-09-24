@@ -12,7 +12,7 @@ use crate::secret_entry::{SecretEntry, read_version, validate_secrets};
 /// It holds the device-only secrets, the account default (as one more
 /// secret entry, labelled by Studio), and two switches:
 ///
-/// - `ble_enabled` — BLE is off until this is set over USB (PQ2).
+/// - `bleEnabled` — BLE is off until this is set over USB (PQ2).
 /// - `open` — "open, no password" is explicit (D17): it grants **play**
 ///   to an untrusted link without login, and never edit.
 ///
@@ -25,6 +25,7 @@ use crate::secret_entry::{SecretEntry, read_version, validate_secrets};
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct DeviceAccessFile {
     /// Format version; always [`DeviceAccessFile::VERSION`].
+    #[cfg_attr(feature = "schema-gen", schemars(range(min = 1, max = 1)))]
     pub version: u32,
     /// Device-only secrets and the account default.
     pub secrets: Vec<SecretEntry>,

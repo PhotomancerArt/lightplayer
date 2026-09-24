@@ -173,8 +173,10 @@ The core is IO-free state machines; async belongs to platform edges. See
 ## Persisted-format compatibility (the wire rule does NOT apply here)
 
 - The wire's "no compatibility" freedom stops at anything **persisted**:
-  project.json / package files, the cloud store, and stamped device
-  identity. Real user data already exists at the current
+  project.json / package files, the cloud store, stamped device
+  identity, and the two access files (`<project>/.lp/access.json`, root
+  `/.lp/access.json` — each its own `version: 1` format with a schema in
+  `schemas/`, outside `PROJECT_FORMAT_VERSION`). Real user data already exists at the current
   `PROJECT_FORMAT_VERSION`, and it does not redeploy in lockstep.
 - **A change to persisted bytes IS a format bump, even when no field is
   added or removed.** The 2026-08-07 uid-format change re-rendered a

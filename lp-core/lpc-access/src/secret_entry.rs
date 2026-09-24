@@ -36,6 +36,7 @@ pub struct SecretEntry {
     #[cfg_attr(feature = "schema-gen", schemars(with = "String"))]
     pub salt: [u8; SALT_BYTES],
     /// PBKDF2 iteration count (≥ 1), tuned by the installing client.
+    #[cfg_attr(feature = "schema-gen", schemars(range(min = 1)))]
     pub iterations: u32,
     /// The derived key `K`, base64 (32 bytes).
     #[serde(with = "crate::base64_bytes")]

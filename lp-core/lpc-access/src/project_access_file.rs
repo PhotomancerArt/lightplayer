@@ -20,6 +20,7 @@ use crate::secret_entry::{SecretEntry, read_version, validate_secrets};
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ProjectAccessFile {
     /// Format version; always [`ProjectAccessFile::VERSION`].
+    #[cfg_attr(feature = "schema-gen", schemars(range(min = 1, max = 1)))]
     pub version: u32,
     /// The project's secrets.
     pub secrets: Vec<SecretEntry>,

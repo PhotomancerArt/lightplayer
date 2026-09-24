@@ -19,6 +19,12 @@
 //!   ([`lpc_hardware::HardwareManifestFile`]) via `schemars`.
 //! - `board-display.schema.json` — the board display sidecar
 //!   ([`lpa_boards::BoardDisplayFile`], `*.display.json`) via `schemars`.
+//! - `project-access.schema.json` — the project access sidecar
+//!   ([`lpc_access::ProjectAccessFile`], `<project>/.lp/access.json`) via
+//!   `schemars`.
+//! - `device-access.schema.json` — the device access store
+//!   ([`lpc_access::DeviceAccessFile`], root `/.lp/access.json`) via
+//!   `schemars`.
 //! - `shapes/<shape-name>.json` — the serialized [`SlotShape`] for each
 //!   registered static shape (the source-of-truth dump a future format
 //!   upgrader consumes), plus `shapes/_index.json` mapping registry shape
@@ -93,6 +99,14 @@ fn generate_outputs() -> Result<BTreeMap<String, String>> {
     outputs.insert(
         String::from("board-display.schema.json"),
         render_schema(board_display_schema()?, "board-display.schema.json")?,
+    );
+    outputs.insert(
+        String::from("project-access.schema.json"),
+        render_schema(project_access_schema()?, "project-access.schema.json")?,
+    );
+    outputs.insert(
+        String::from("device-access.schema.json"),
+        render_schema(device_access_schema()?, "device-access.schema.json")?,
     );
 
     let mut index = Map::new();
@@ -285,6 +299,21 @@ fn hardware_schema() -> Result<Value> {
 fn board_display_schema() -> Result<Value> {
     let schema = schemars::schema_for!(lpa_boards::BoardDisplayFile);
     serde_json::to_value(&schema).context("serializing board display schema")
+}
+
+/// Schema for the project access sidecar, `<project>/.lp/access.json`.
+/// Plain serde; a persisted format of its own (`version: 1`), outside the
+/// project format and its `PROJECT_FORMAT_VERSION`.
+fn project_access_schema() -> Result<Value> {
+    let schema = schemars::schema_for!(lpc_access::ProjectAccessFile);
+    serde_json::to_value(&schema).context("serializing project access schema")
+}
+
+/// Schema for the device access store, root `/.lp/access.json`. Plain serde;
+/// its own persisted format (`version: 1`).
+fn device_access_schema() -> Result<Value> {
+    let schema = schemars::schema_for!(lpc_access::DeviceAccessFile);
+    serde_json::to_value(&schema).context("serializing device access schema")
 }
 
 /// File stem for a shape dump: the registry name with Rust path separators

@@ -5597,6 +5597,7 @@ dependencies = [
  "lpa-link",
  "lpa-server",
  "lpa-upgrade",
+ "lpc-access",
  "lpc-engine",
  "lpc-hardware",
  "lpc-mapping",
