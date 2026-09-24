@@ -108,7 +108,20 @@ def main() -> int:
         default=0.0,
         help="after the reboot, reopen the port and print the console for this many seconds",
     )
+    ap.add_argument(
+        "--request",
+        help="send one wire request (JSON `msg`, e.g. '\"stopAllProjects\"') instead, print the reply",
+    )
     args = ap.parse_args()
+
+    if args.request:
+        fd = open_port(args.dev)
+        try:
+            reply = request(fd, 9003, json.loads(args.request))
+            print(json.dumps(reply)[:2000] if reply else "NO REPLY")
+        finally:
+            os.close(fd)
+        return 0
 
     if args.reboot_only:
         fd = open_port(args.dev)

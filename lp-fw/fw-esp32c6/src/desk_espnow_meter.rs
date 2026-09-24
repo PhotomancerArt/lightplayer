@@ -66,6 +66,14 @@ async fn meter_task(esp_now: EspNow<'static>) {
     loop {
         match select(ticker.next(), receiver.receive_async()).await {
             Either::First(()) => {
+                // A loaded executor runs this loop late, and a late `Ticker`
+                // is always ready — so `select` (first arm wins) would never
+                // complete the receive arm. Found on the desk with the zook
+                // project loaded: rx stuck at 13 for a minute while tx ran.
+                // Drain what arrived before sending, every tick.
+                while let Some(received) = receiver.receive() {
+                    stats.record(received.data(), received.info.rx_control.rssi);
+                }
                 stats.tx_seq = stats.tx_seq.wrapping_add(1);
                 let frame = stats.frame();
                 match sender.send_async(&BROADCAST_ADDRESS, &frame).await {
