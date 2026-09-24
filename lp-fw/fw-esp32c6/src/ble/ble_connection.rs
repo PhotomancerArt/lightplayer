@@ -63,12 +63,25 @@ pub async fn serve(
     let mut params_request_at = Some(connected_at + PARAMS_REQUEST_AFTER);
     let mut params_readback_at: Option<Instant> = None;
     let subscribe_deadline = connected_at + Duration::from_millis(LOGIN_DEADLINE_MS);
+    // Run K's active/idle experiment (`desk_ble_params`): the last write from
+    // the central, and whether the idle parameters are in force.
+    #[cfg(feature = "desk_ble_params")]
+    let mut last_rx = connected_at;
+    #[cfg(feature = "desk_ble_params")]
+    let mut idle_params = false;
 
     let reason = loop {
+        #[cfg(feature = "desk_ble_params")]
+        let idle_at = conn_params::desk::idle_after()
+            .filter(|_| !idle_params && params_request_at.is_none())
+            .map(|after| last_rx + after);
+        #[cfg(not(feature = "desk_ble_params"))]
+        let idle_at: Option<Instant> = None;
         let next_timer = [
             params_request_at,
             params_readback_at,
             (!opened && !closing).then_some(subscribe_deadline),
+            idle_at,
         ]
         .into_iter()
         .flatten()
@@ -103,6 +116,17 @@ pub async fn serve(
                 match event.accept() {
                     Ok(reply) => reply.send().await,
                     Err(_) => log::warn!("[ble] {link}: GATT reply failed"),
+                }
+                #[cfg(feature = "desk_ble_params")]
+                if rx_bytes.is_some() {
+                    last_rx = Instant::now();
+                    if idle_params {
+                        idle_params = false;
+                        let (i, l, t) = conn_params::desk::active();
+                        log::info!("[ble-exp] {link}: write after idle — asking for active params");
+                        conn_params::request(link, &conn, stack, i, l, t).await;
+                        params_readback_at = Some(Instant::now() + PARAMS_READBACK_AFTER);
+                    }
                 }
                 if let Some(bytes) = rx_bytes {
                     let report = joiner.push(&bytes, |line| {
@@ -170,6 +194,15 @@ pub async fn serve(
                 } else if params_readback_at.is_some_and(|at| now >= at) {
                     params_readback_at = None;
                     conn_params::log_granted(link, &conn, "granted");
+                } else if idle_at.is_some_and(|at| now >= at) {
+                    #[cfg(feature = "desk_ble_params")]
+                    {
+                        idle_params = true;
+                        let (i, l, t) = conn_params::desk::idle();
+                        log::info!("[ble-exp] {link}: idle — asking for idle params");
+                        conn_params::request(link, &conn, stack, i, l, t).await;
+                        params_readback_at = Some(Instant::now() + PARAMS_READBACK_AFTER);
+                    }
                 } else if !opened && now >= subscribe_deadline {
                     log::warn!(
                         "[ble] {link}: notifications not enabled within {} s — disconnecting",

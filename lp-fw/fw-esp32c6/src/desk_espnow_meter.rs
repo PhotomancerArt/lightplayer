@@ -71,9 +71,12 @@ async fn meter_task(esp_now: EspNow<'static>) {
                 // complete the receive arm. Found on the desk with the zook
                 // project loaded: rx stuck at 13 for a minute while tx ran.
                 // Drain what arrived before sending, every tick.
+                let mut batch = 0u32;
                 while let Some(received) = receiver.receive() {
                     stats.record(received.data(), received.info.rx_control.rssi);
+                    batch += 1;
                 }
+                stats.note_batch(batch);
                 stats.tx_seq = stats.tx_seq.wrapping_add(1);
                 let frame = stats.frame();
                 match sender.send_async(&BROADCAST_ADDRESS, &frame).await {
@@ -107,7 +110,16 @@ struct Stats {
     peer_rx: u32,
     peer_last_seq: u32,
     peer_rssi: i8,
+    /// Most frames drained from esp-radio's ESP-NOW queue in one tick since
+    /// the last report, and how many drains found it at its depth
+    /// ([`RX_QUEUE_DEPTH`]) — the queue drops its OLDEST frame when full, so
+    /// a full drain is where receiver-side loss would show (Run K).
+    rx_max_batch: u32,
+    rx_full: u32,
 }
+
+/// esp-radio 0.18's `RECEIVE_QUEUE_SIZE` (esp_now/mod.rs).
+const RX_QUEUE_DEPTH: u32 = 10;
 
 impl Stats {
     fn frame(&self) -> [u8; FRAME_LEN] {
@@ -118,6 +130,13 @@ impl Stats {
         f[12..16].copy_from_slice(&self.rx_last_seq.to_le_bytes());
         f[16] = self.last_rssi as u8;
         f
+    }
+
+    fn note_batch(&mut self, batch: u32) {
+        self.rx_max_batch = self.rx_max_batch.max(batch);
+        if batch >= RX_QUEUE_DEPTH {
+            self.rx_full += 1;
+        }
     }
 
     fn record(&mut self, data: &[u8], rssi: i32) {
@@ -153,7 +172,7 @@ impl Stats {
             0
         };
         log::info!(
-            "[COEX] t_ms={} tx={} tx_err={} rx={} rx_last_seq={} rx_resets={} rx_dup={} rssi_avg={} peer_rx={} peer_last_seq={} peer_rssi={} heap_used={}",
+            "[COEX] t_ms={} tx={} tx_err={} rx={} rx_last_seq={} rx_resets={} rx_dup={} rssi_avg={} peer_rx={} peer_last_seq={} peer_rssi={} heap_used={} rx_max_batch={} rx_full={}",
             start.elapsed().as_millis(),
             self.tx,
             self.tx_err,
@@ -165,8 +184,11 @@ impl Stats {
             self.peer_rx,
             self.peer_last_seq,
             self.peer_rssi,
-            esp_alloc::HEAP.used()
+            esp_alloc::HEAP.used(),
+            self.rx_max_batch,
+            self.rx_full
         );
+        self.rx_max_batch = 0;
         self.rssi_sum = 0;
         self.rssi_n = 0;
     }

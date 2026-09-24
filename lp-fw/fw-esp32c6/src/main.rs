@@ -78,6 +78,8 @@ use fw_esp32_common::boot;
     feature = "test_gpio_input",
 ))]
 mod hardware;
+#[cfg(all(feature = "heap_map_diag", not(fw_harness)))]
+mod heap_map;
 pub use fw_esp32_common::logger;
 // jit_fns (JIT host-log symbol) now lives in fw-esp32-common; linked via the
 // extern reference from the JIT builtin table.
@@ -222,6 +224,8 @@ fn heartbeat_memory_stats() -> Option<lpc_wire::server::MemoryStats> {
 
 #[cfg(not(fw_harness))]
 fn read_headroom_probe() -> Option<u32> {
+    #[cfg(feature = "heap_map_diag")]
+    heap_map::log_periodic("probe");
     Some(recovery::panic_path::largest_free_block().min(u32::MAX as usize) as u32)
 }
 
@@ -478,6 +482,10 @@ fn boot_firmware(spawner: embassy_executor::Spawner) -> FirmwareApp {
     #[cfg(feature = "ble")]
     let ble_started = {
         let store = lpa_server::access_store::read_device_store(base_fs.as_ref());
+        #[cfg(feature = "desk_ble_params")]
+        if let Ok(bytes) = base_fs.read_file(ble::desk_params_path().as_path()) {
+            ble::configure_desk_params(core::str::from_utf8(&bytes).unwrap_or(""));
+        }
         match (store.ble_enabled, board::esp32c6::init::take_bt()) {
             (true, Some(bt)) => {
                 log::info!("[ble] enabled by the device store — starting");
@@ -490,10 +498,16 @@ fn boot_firmware(spawner: embassy_executor::Spawner) -> FirmwareApp {
             }
             (false, _) => {
                 log::info!("[ble] off (device store: bleEnabled=false)");
+                #[cfg(feature = "heap_diag_ble_standin")]
+                for size in [19_436usize, 3_500, 1_372] {
+                    core::mem::forget(alloc::vec![0u8; size]);
+                }
                 false
             }
         }
     };
+    #[cfg(feature = "heap_map_diag")]
+    heap_map::log("after-ble");
     #[cfg(not(feature = "ble"))]
     let _ = quirks_applied;
 

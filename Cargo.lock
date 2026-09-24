@@ -4040,6 +4040,7 @@ dependencies = [
  "embassy-time",
  "embedded-io-async 0.6.1",
  "embedded-storage",
+ "enumset",
  "esp-alloc",
  "esp-backtrace",
  "esp-bootloader-esp-idf",

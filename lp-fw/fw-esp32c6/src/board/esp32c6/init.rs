@@ -49,7 +49,15 @@ pub fn init_board() -> (
     // image for every device (Yona's ruling: "a stack overflow crashes; a
     // smaller heap only narrows the compile margin"). See
     // docs/adr/2026-09-02-esp32c6-ram-split.md, "Amendment".
-    esp_alloc::heap_allocator!(size: 236_000);
+    // SAFETY: each array is handed to the allocator exactly once, here, and
+    // nothing else ever names it except to read its address.
+    unsafe {
+        esp_alloc::HEAP.add_region(esp_alloc::HeapRegion::new(
+            core::ptr::addr_of_mut!(HEAP_MAIN).cast::<u8>(),
+            HEAP_MAIN_SIZE,
+            esp_alloc::MemoryCapability::Internal.into(),
+        ));
+    }
     // The 40 KB the main region gave up comes back with interest from
     // `dram2_seg`: the 64 KB the ESP-IDF second-stage bootloader used as
     // its loader segment (0x4086E610..0x4087E610) and never touches again
@@ -57,7 +65,17 @@ pub fn init_board() -> (
     // this. A second `esp_alloc` region: `HEAP.free()`/`used()` sum both,
     // allocations fill the main region first. Heap total 301,536 B
     // (325,536 B before the 2026-09-24 cut).
-    esp_alloc::heap_allocator!(#[esp_hal::ram(reclaimed)] size: 65_536);
+    //
+    // Both regions are `esp_alloc::heap_allocator!` spelled out, so the arrays
+    // have names: [`heap_regions`] reports where each one is.
+    // SAFETY: as above.
+    unsafe {
+        esp_alloc::HEAP.add_region(esp_alloc::HeapRegion::new(
+            core::ptr::addr_of_mut!(HEAP_DRAM2).cast::<u8>(),
+            HEAP_DRAM2_SIZE,
+            esp_alloc::MemoryCapability::Internal.into(),
+        ));
+    }
 
     // Extract peripherals we need before moving others
     let rmt = peripherals.RMT;
@@ -84,6 +102,30 @@ pub fn init_board() -> (
     (
         sw_int, timg0, rmt, usb_device, gpio18, flash, gpio4, gpio20, wifi, rwdt,
     )
+}
+
+/// The main heap region's size (see the RAM-split note in [`init_board`]).
+const HEAP_MAIN_SIZE: usize = 236_000;
+/// The reclaimed bootloader segment's size.
+#[cfg(not(feature = "heap_track_diag"))]
+const HEAP_DRAM2_SIZE: usize = 65_536;
+/// The heap-tracking diagnostic keeps its table in the rest of the segment.
+#[cfg(feature = "heap_track_diag")]
+const HEAP_DRAM2_SIZE: usize = 16_384;
+static mut HEAP_MAIN: core::mem::MaybeUninit<[u8; HEAP_MAIN_SIZE]> =
+    core::mem::MaybeUninit::uninit();
+#[esp_hal::ram(reclaimed)]
+static mut HEAP_DRAM2: core::mem::MaybeUninit<[u8; HEAP_DRAM2_SIZE]> =
+    core::mem::MaybeUninit::uninit();
+
+/// The heap's two regions as `(start address, size)`, main first — the
+/// order the allocator tries them in.
+#[allow(dead_code, reason = "read only by the heap diagnostics and the BLE placement")]
+pub fn heap_regions() -> [(usize, usize); 2] {
+    [
+        (core::ptr::addr_of!(HEAP_MAIN) as usize, HEAP_MAIN_SIZE),
+        (core::ptr::addr_of!(HEAP_DRAM2) as usize, HEAP_DRAM2_SIZE),
+    ]
 }
 
 #[cfg(all(feature = "ble", feature = "server", not(fw_harness)))]

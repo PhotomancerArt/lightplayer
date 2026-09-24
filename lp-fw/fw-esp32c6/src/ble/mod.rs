@@ -29,3 +29,15 @@ mod nus_service;
 
 pub use advertising::refresh_advertised_name;
 pub use ble_task::start;
+
+/// Run K's parameter file (`desk_ble_params`).
+#[cfg(feature = "desk_ble_params")]
+pub fn desk_params_path() -> &'static str {
+    conn_params::desk::PATH
+}
+
+/// Take Run K's parameters from the file's text (`desk_ble_params`).
+#[cfg(feature = "desk_ble_params")]
+pub fn configure_desk_params(text: &str) {
+    conn_params::desk::configure(text);
+}
