@@ -93,8 +93,11 @@ texel centres map to ±1, and the pitch is one texel.
   and it keeps an 8 B/texel persistent byte buffer for the texture write. On the
   wasm GPU tier it inherits the point pass's one-frame readback latency.
 - The fixture keeps 24 B of scope geometry per mapping version.
-- The ESP32-C6 image grows by 8,864 B (2,430,880 → 2,439,744 B; headroom
-  705,984 B).
+- The ESP32-C6 image grows by 9,040 B against main at 8fe93d9db
+  (2,459,936 → 2,468,976 B; headroom 676,752 B). Against the earlier main it
+  was first measured on, the growth was 8,864 B.
+- The wire proto bumps (22 → 23): the on-disk key is additive, but an old peer
+  refuses a shader def carrying a field it does not know.
 
 ## Alternatives Considered
 
