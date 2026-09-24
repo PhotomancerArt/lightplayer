@@ -93,9 +93,11 @@ impl LpvmModule for NativeJitModule {
     }
 
     fn instantiate(&self) -> Result<Self::Instance, Self::Error> {
-        let align = 16usize;
+        let align = super::instance::VMCTX_ALIGN;
         let total_size = self.inner.meta.vmctx_buffer_size();
         let size = total_size.max(align);
+        // A throwaway tracker: the buffer's owner is the instance, which
+        // frees it on drop.
         let memory = NativeHostMemory::new();
         let buf = memory
             .alloc(size, align)
@@ -115,6 +117,7 @@ impl LpvmModule for NativeJitModule {
         let mut instance = NativeJitInstance {
             module: self.clone(),
             vmctx_guest: buf.guest_base() as u32,
+            vmctx_alloc_size: size as u32,
             globals_offset,
             snapshot_offset,
             globals_size,

@@ -30,6 +30,9 @@ pub(crate) struct RenderTextureEntry {
 pub struct NativeJitInstance {
     pub(crate) module: NativeJitModule,
     pub(crate) vmctx_guest: u32,
+    /// Size of the vmctx allocation at `vmctx_guest` (16-aligned), which the
+    /// instance owns and frees on drop.
+    pub(crate) vmctx_alloc_size: u32,
     /// Byte offset from vmctx base to globals region
     pub(crate) globals_offset: u32,
     /// Byte offset from vmctx base to snapshot region
@@ -39,6 +42,26 @@ pub struct NativeJitInstance {
     pub(crate) render_texture_cache: Option<RenderTextureEntry>,
     pub(crate) render_samples_cache: Option<RenderTextureEntry>,
 }
+
+/// The vmctx buffer is the instance's: `instantiate` allocates it and
+/// nothing else holds it. Without this it outlived every instance — a leak
+/// per compile, and one that splits the heap: it is allocated while a project
+/// runs, above the project's memory, and stays when the project is stopped
+/// (docs/defects/2026-09-24-ble-enabled-c6-refuses-a-project-switch-after-the-heap-cut.md).
+impl Drop for NativeJitInstance {
+    fn drop(&mut self) {
+        if let Ok(layout) =
+            core::alloc::Layout::from_size_align(self.vmctx_alloc_size as usize, VMCTX_ALIGN)
+        {
+            // SAFETY: `instantiate` allocated exactly this layout at this
+            // address, and the instance is not `Clone`, so this is the one free.
+            unsafe { alloc::alloc::dealloc(self.vmctx_guest as usize as *mut u8, layout) };
+        }
+    }
+}
+
+/// Alignment of a JIT instance's vmctx buffer.
+pub(crate) const VMCTX_ALIGN: usize = 16;
 
 impl NativeJitInstance {
     /// Initialize globals by calling `__shader_init` if it exists,
