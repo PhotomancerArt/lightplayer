@@ -46,6 +46,19 @@ pub fn is_meta_dir_path(path: &str) -> bool {
         .is_some_and(|last| last.eq_ignore_ascii_case(META_DIR))
 }
 
+/// Whether `path`, once resolved, is `dir` itself or lies beneath it — the
+/// check that keeps a "project files" permission from being walked out of
+/// with `..` (`/projects/../hardware.json` is NOT within `/projects`).
+/// Leading slashes do not matter; ASCII case does (a device filesystem is
+/// case-sensitive, and a case-insensitive host only widens what a
+/// case-sensitive comparison already refuses).
+#[must_use]
+pub fn is_within_dir(path: &str, dir: &str) -> bool {
+    let path = resolved_components(path);
+    let dir = resolved_components(dir);
+    path.len() >= dir.len() && path[..dir.len()] == dir[..]
+}
+
 /// Path components with `.`/`..`/empty resolved away. `..` above the root
 /// stays at the root, as a filesystem would.
 fn resolved_components(path: &str) -> Vec<&str> {
@@ -95,6 +108,17 @@ mod tests {
         assert!(!is_access_file_path("/.lp/access.json/.."));
         assert!(!is_access_file_path(""));
         assert!(!is_access_file_path("/"));
+    }
+
+    #[test]
+    fn within_dir_resolves_before_comparing() {
+        assert!(is_within_dir("/projects/x/a.json", "/projects"));
+        assert!(is_within_dir("/projects", "projects/"));
+        assert!(is_within_dir("projects/x", "/projects/"));
+        assert!(!is_within_dir("/projects/../hardware.json", "/projects"));
+        assert!(!is_within_dir("/projectsx/a", "/projects"));
+        assert!(!is_within_dir("/", "/projects"));
+        assert!(is_within_dir("/anything", "/"));
     }
 
     #[test]

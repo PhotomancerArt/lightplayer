@@ -10,10 +10,14 @@
 
 #![no_std]
 
+pub mod access_gate;
+pub mod access_state;
+pub mod access_store;
 pub mod device_identity;
 pub mod error;
 pub mod file_sync;
 pub mod handlers;
+pub mod heartbeat_status;
 pub mod link_session;
 pub mod panel_state;
 pub mod project;
@@ -22,8 +26,11 @@ mod project_read_source;
 pub mod recovery_report;
 pub mod server;
 
+pub use access_gate::{Required, classify};
+pub use access_state::EntropySource;
 pub use device_identity::{DEVICE_IDENTITY_PATH, read_device_uid};
 pub use error::ServerError;
+pub use heartbeat_status::HeartbeatStatus;
 pub use link_session::LinkSession;
 pub use lpc_engine::products::visual::{
     ConsumerPolicy, RenderTextureRequest, TextureRenderProduct, VisualProduct, VisualSpace,

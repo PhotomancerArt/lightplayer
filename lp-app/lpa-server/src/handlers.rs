@@ -138,9 +138,11 @@ pub fn handle_client_message(
                 "project reads must be handled by streaming transport".into(),
             ));
         }
+        // The access gate answers these in `LpServer::tick_and_send`, where
+        // the link and the login state are; they never reach a handler.
         lpc_wire::ClientRequest::LoginBegin | lpc_wire::ClientRequest::LoginAnswer { .. } => {
             return Err(ServerError::Core(
-                "login is not available on this server yet".into(),
+                "login requests are answered by the access gate, not a handler".into(),
             ));
         }
         lpc_wire::ClientRequest::ProjectCommand { handle, command } => {
@@ -242,9 +244,29 @@ fn handle_project_command(
     }
 }
 
+/// Why an access file read is refused — on every link, at every tier.
+pub const ACCESS_FILE_WRITE_ONLY: &str =
+    "access files are write-only: no link at any tier reads .lp/access.json";
+
 /// Handle a filesystem request
-fn handle_fs_request(fs: &mut dyn LpFs, request: FsRequest) -> Result<FsResponse, ServerError> {
+///
+/// The fs path gate lives here, beneath the tier check and on EVERY link:
+/// an access file's bytes (`**/.lp/access.json`, see
+/// [`lpc_access::is_access_file_path`]) are never returned. A read is
+/// refused, a listing may name the file (names only), a changes-since walk
+/// skips it and a package hash that would cover it is refused
+/// (`file_sync`). Writes and deletes pass: whether the link may make them
+/// is the tier check's call, and it has already made it.
+pub fn handle_fs_request(fs: &mut dyn LpFs, request: FsRequest) -> Result<FsResponse, ServerError> {
     match request {
+        FsRequest::Read { path } if lpc_access::is_access_file_path(path.as_str()) => {
+            log::warn!("fs gate: refused a read of access file {}", path.as_str());
+            Ok(FsResponse::Read {
+                path,
+                data: None,
+                error: Some(alloc::string::String::from(ACCESS_FILE_WRITE_ONLY)),
+            })
+        }
         FsRequest::Read { path } => match fs.read_file(path.as_path()) {
             Ok(data) => Ok(FsResponse::Read {
                 path,
@@ -535,6 +557,84 @@ mod tests {
             matches!(response, FsResponse::DeleteDir { error: None, .. }),
             "absent dir deletes as a no-op, got {response:?}"
         );
+    }
+
+    /// The fs gate: an access file's bytes are never returned — the device
+    /// store, a project sidecar, or either spelled around the check.
+    #[test]
+    fn access_files_are_never_read() {
+        use lpc_model::{AsLpPath, AsLpPathBuf};
+        let mut fs = lpfs::LpFsMemory::new();
+        fs.write_file("/.lp/access.json".as_path(), b"SECRET")
+            .unwrap();
+        fs.write_file("/projects/x/.lp/access.json".as_path(), b"SECRET")
+            .unwrap();
+
+        for path in [
+            "/.lp/access.json",
+            "/projects/x/.lp/access.json",
+            "/projects/x/.lp/../.lp/access.json",
+            "//.lp//access.json",
+        ] {
+            let response = handle_fs_request(
+                &mut fs,
+                FsRequest::Read {
+                    path: path.as_path_buf(),
+                },
+            )
+            .expect("handler runs");
+            match response {
+                FsResponse::Read { data, error, .. } => {
+                    assert_eq!(data, None, "{path} returned bytes");
+                    assert_eq!(error.as_deref(), Some(ACCESS_FILE_WRITE_ONLY), "{path}");
+                }
+                other => panic!("{path}: {other:?}"),
+            }
+        }
+    }
+
+    /// Writes and deletes pass the fs gate (the tier check decides them),
+    /// and a listing names the file without its bytes.
+    #[test]
+    fn access_files_may_be_written_listed_and_deleted() {
+        use lpc_model::AsLpPathBuf;
+        let mut fs = lpfs::LpFsMemory::new();
+        let path = "/.lp/access.json".as_path_buf();
+
+        let written = handle_fs_request(
+            &mut fs,
+            FsRequest::Write {
+                path: path.clone(),
+                data: b"{}".to_vec(),
+            },
+        )
+        .unwrap();
+        assert!(matches!(written, FsResponse::Write { error: None, .. }));
+
+        let listed = handle_fs_request(
+            &mut fs,
+            FsRequest::ListDir {
+                path: "/.lp".as_path_buf(),
+                recursive: false,
+            },
+        )
+        .unwrap();
+        match listed {
+            FsResponse::ListDir { entries, .. } => {
+                assert!(
+                    entries
+                        .iter()
+                        .any(|entry| entry.as_str().ends_with("access.json"))
+                );
+            }
+            other => panic!("{other:?}"),
+        }
+
+        let deleted = handle_fs_request(&mut fs, FsRequest::DeleteFile { path }).unwrap();
+        assert!(matches!(
+            deleted,
+            FsResponse::DeleteFile { error: None, .. }
+        ));
     }
 
     /// `log::set_max_level` is process-global, so this single test exercises

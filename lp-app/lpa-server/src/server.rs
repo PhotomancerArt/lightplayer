@@ -15,11 +15,13 @@ use lpc_model::{LpPath, LpPathBuf};
 use lpc_shared::output::OutputProvider;
 use lpc_shared::time::TimeProvider;
 use lpc_shared::transport::{
-    Incoming, LinkId, ProjectReadStreamSink, ServerTransport, transport_error_is_signalable,
+    Incoming, Link, LinkId, ProjectReadStreamSink, ServerTransport, transport_error_is_signalable,
 };
 use lpc_wire::{ClientRequest, WireServerMessage};
 
-use crate::link_session::LinkSession;
+use crate::access_gate::classify;
+use crate::access_state::{AccessState, EntropySource};
+use crate::heartbeat_status::HeartbeatStatus;
 use lpfs::{FsEvent, LpFs};
 
 /// Optional callback returning (free_bytes, used_bytes) for memory logging.
@@ -179,10 +181,11 @@ pub struct LpServer {
     /// a second, each with a full stack trace in the browser, which buries
     /// the very first occurrence that explains the cause.
     tick_failures: HashMap<lpc_wire::WireProjectHandle, u32>,
-    /// Per-link state, keyed on the transport's link ids: created the first
-    /// time a link's message arrives, dropped when the transport reports the
-    /// link closed ([`ServerTransport::take_closed_links`]).
-    sessions: HashMap<LinkId, LinkSession>,
+    /// Who may do what: per-link sessions (created the first time a link's
+    /// message arrives, dropped when the transport reports the link closed —
+    /// [`ServerTransport::take_closed_links`]), the device's one login and
+    /// its backoff, and the clock and randomness they run on.
+    access: AccessState,
 }
 
 /// After the first failure, restate a persistent tick error only every
@@ -341,7 +344,7 @@ impl LpServer {
                 auth: lpc_wire::HelloAuth::TRUSTED,
             },
             tick_failures: HashMap::new(),
-            sessions: HashMap::new(),
+            access: AccessState::new(),
         }
     }
 
@@ -445,10 +448,87 @@ impl LpServer {
         });
     }
 
-    /// The hello payload answered to `ClientRequest::Hello` and emitted
-    /// unsolicited (id 0) by embedder loops.
+    /// The hello payload as a TRUSTED link reads it. What a particular link
+    /// is sent — unsolicited or in answer to `ClientRequest::Hello` — is
+    /// [`Self::hello_for_link`], whose `auth` is that link's.
     pub fn hello(&self) -> &lpc_wire::ServerHello {
         &self.hello
+    }
+
+    /// The hello for `link`: the held payload with `auth` computed for that
+    /// link (what it may do, and whether it must log in to do more).
+    pub fn hello_for_link(&self, link: Link) -> lpc_wire::ServerHello {
+        let mut hello = self.hello.clone();
+        hello.auth = self.access.hello_auth(link, &*self.base_fs);
+        hello
+    }
+
+    /// The tier `link` holds right now (`None`: only `Hello` and `Login*`
+    /// are answered on it).
+    pub fn link_tier(&self, link: Link) -> Option<lpc_access::Tier> {
+        self.access.tier(link, &*self.base_fs)
+    }
+
+    /// Install the embedder's random-byte source for login challenges. Unset
+    /// (the default) = `LoginBegin` is refused: a challenge must never be
+    /// predictable. The firmware wires its hardware RNG; hosts that serve
+    /// only trusted links need none.
+    pub fn set_entropy_source(&mut self, source: Option<EntropySource>) {
+        self.access.set_entropy_source(source);
+    }
+
+    /// One heartbeat per link in `links`, each built for the link it goes to.
+    ///
+    /// A link that holds a tier sees the whole status. A link that holds
+    /// none (untrusted, not logged in, device not `open`) sees nothing the
+    /// hello does not already show: identity only, every measurement zeroed
+    /// or absent — a heartbeat that still says "alive" and nothing else.
+    pub fn heartbeats(
+        &self,
+        links: &[Link],
+        status: HeartbeatStatus,
+    ) -> Vec<(LinkId, WireServerMessage)> {
+        let identity = self.heartbeat_identity();
+        let mut loaded_projects = None;
+        links
+            .iter()
+            .map(|link| {
+                let body = match self.link_tier(*link) {
+                    Some(_) => lpc_wire::server::ServerMsgBody::Heartbeat {
+                        fps: status.fps.clone(),
+                        frame_count: status.frame_count,
+                        loaded_projects: loaded_projects
+                            .get_or_insert_with(|| {
+                                self.project_manager.list_loaded_projects_with_faults()
+                            })
+                            .clone(),
+                        uptime_ms: status.uptime_ms,
+                        memory: status.memory.clone(),
+                        recovery: status.recovery.clone(),
+                        outputs: status.outputs.clone(),
+                        link: status.link,
+                        identity: identity.clone(),
+                    },
+                    None => lpc_wire::server::ServerMsgBody::Heartbeat {
+                        fps: lpc_wire::server::SampleStats {
+                            avg: 0.0,
+                            sdev: 0.0,
+                            min: 0.0,
+                            max: 0.0,
+                        },
+                        frame_count: 0,
+                        loaded_projects: Vec::new(),
+                        uptime_ms: 0,
+                        memory: None,
+                        recovery: None,
+                        outputs: None,
+                        link: None,
+                        identity: identity.clone(),
+                    },
+                };
+                (link.id, WireServerMessage::new(0, body))
+            })
+            .collect()
     }
 
     /// The identity to stamp on an outgoing heartbeat
@@ -650,11 +730,14 @@ impl LpServer {
         transport: &mut T,
     ) -> Result<usize, ServerError> {
         self.advance_frame(delta_ms)?;
+        // The access clock is the frames' own: the embedder's uptime,
+        // supplied at the edge one delta at a time. No clock is read here.
+        self.access.advance_clock(delta_ms);
 
         // Closed links first: a session (and any login it holds) must be
         // gone before anything else is answered this tick.
         for closed in transport.take_closed_links() {
-            self.close_link(closed);
+            self.access.close_link(closed);
         }
 
         let mut response_count = 0usize;
@@ -664,11 +747,70 @@ impl LpServer {
                 trust,
                 msg: client_msg,
             } = message;
-            self.sessions
-                .entry(link)
-                .or_insert_with(|| LinkSession::new(trust));
+            let link = Link { id: link, trust };
+            self.access.see(link);
             let msg_id = client_msg.id;
+
+            // THE GATE. Every request is classified (exhaustively — a new
+            // variant does not compile until it is), and one its link's tier
+            // does not cover is answered `NotPermitted`: a reply, never a
+            // dropped frame. Before login only Public requests pass.
+            let required = classify(&client_msg.msg, self.project_manager.projects_base_dir());
+            if let Some(needs) = required.needs()
+                && !required.permits(self.access.tier(link, &*self.base_fs))
+            {
+                transport
+                    .send(
+                        link.id,
+                        WireServerMessage::new(
+                            msg_id,
+                            lpc_wire::server::ServerMsgBody::NotPermitted { needs },
+                        ),
+                    )
+                    .await
+                    .map_err(|error| ServerError::Core(format!("{error}")))?;
+                response_count += 1;
+                continue;
+            }
+            // Any fs mutation may have rewritten the device store; the
+            // cached `open` flag is re-read on next use.
+            if let ClientRequest::Filesystem(
+                lpc_wire::server::FsRequest::Write { .. }
+                | lpc_wire::server::FsRequest::WriteChunk { .. }
+                | lpc_wire::server::FsRequest::DeleteFile { .. }
+                | lpc_wire::server::FsRequest::DeleteDir { .. },
+            ) = &client_msg.msg
+            {
+                self.access.invalidate_device_store();
+            }
+
             match client_msg.msg {
+                ClientRequest::LoginBegin => {
+                    let loaded: Vec<_> = self
+                        .project_manager
+                        .list_loaded_projects()
+                        .into_iter()
+                        .map(|loaded| loaded.path)
+                        .collect();
+                    let body = self.access.begin_login(
+                        link.id,
+                        &*self.base_fs,
+                        loaded.iter().map(|path| path.as_str()),
+                    );
+                    transport
+                        .send(link.id, WireServerMessage::new(msg_id, body))
+                        .await
+                        .map_err(|error| ServerError::Core(format!("{error}")))?;
+                    response_count += 1;
+                }
+                ClientRequest::LoginAnswer { macs } => {
+                    let body = self.access.answer_login(link.id, &macs);
+                    transport
+                        .send(link.id, WireServerMessage::new(msg_id, body))
+                        .await
+                        .map_err(|error| ServerError::Core(format!("{error}")))?;
+                    response_count += 1;
+                }
                 ClientRequest::ProjectRead { handle, request } => {
                     let sink_frame_budget = self.sink_frame_budget();
                     // Refusal-not-reset: if the heap cannot afford
@@ -681,7 +823,7 @@ impl LpServer {
                     {
                         let mut sink = ProjectReadStreamSink::with_max_bytes(
                             transport,
-                            link,
+                            link.id,
                             msg_id,
                             sink_frame_budget,
                         );
@@ -705,7 +847,7 @@ impl LpServer {
                     let Some(project) = self.project_manager.get_project_mut(handle) else {
                         transport
                             .send(
-                                link,
+                                link.id,
                                 WireServerMessage::new(
                                     msg_id,
                                     lpc_wire::server::ServerMsgBody::Error {
@@ -733,7 +875,7 @@ impl LpServer {
                     let mut source = ServerProjectReadSource::new(project, Some(server_status));
                     let mut sink = ProjectReadStreamSink::with_max_bytes(
                         transport,
-                        link,
+                        link.id,
                         msg_id,
                         sink_frame_budget,
                     );
@@ -786,6 +928,9 @@ impl LpServer {
                     // would drop the frame and leave the client
                     // awaiting forever. Only transport-send failures
                     // abort the tick.
+                    // A hello answers with THIS link's auth.
+                    let link_hello =
+                        matches!(msg, ClientRequest::Hello).then(|| self.hello_for_link(link));
                     let link_state = handlers::EngineLinkState {
                         display_layout_budget: self.engine_display_layout_budget(),
                         safe_output_clamp: self.safe_output_clamp,
@@ -801,7 +946,7 @@ impl LpServer {
                         self.button_service.clone(),
                         self.radio_service.clone(),
                         self.graphics.clone(),
-                        &self.hello,
+                        link_hello.as_ref().unwrap_or(&self.hello),
                         link_state,
                         lpc_wire::ClientMessage { id: msg_id, msg },
                     ) {
@@ -822,7 +967,7 @@ impl LpServer {
                     let acked_reboot =
                         matches!(response.msg, lpc_wire::server::ServerMsgBody::Reboot);
                     transport
-                        .send(link, response)
+                        .send(link.id, response)
                         .await
                         .map_err(|error| ServerError::Core(format!("{error}")))?;
                     response_count += 1;
@@ -839,13 +984,6 @@ impl LpServer {
         }
 
         Ok(response_count)
-    }
-
-    /// Forget a link the transport reported closed: its session and any
-    /// grant it held. A multi-link transport never reuses a link id, so a
-    /// later connection can never inherit this one's login.
-    fn close_link(&mut self, link: LinkId) {
-        self.sessions.remove(&link);
     }
 
     /// Get a reference to the base filesystem

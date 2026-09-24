@@ -45,7 +45,7 @@ pub mod secret_entry;
 pub mod tier;
 
 pub use access_file_error::AccessFileError;
-pub use access_file_path::{is_access_file_path, is_meta_dir_path};
+pub use access_file_path::{is_access_file_path, is_meta_dir_path, is_within_dir};
 pub use constant_time_eq::constant_time_eq;
 pub use device_access_file::DeviceAccessFile;
 pub use hmac_sha256::{HMAC_SHA256_BYTES, HmacSha256, hmac_sha256};
