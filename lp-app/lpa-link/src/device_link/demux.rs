@@ -17,9 +17,10 @@
 use std::collections::VecDeque;
 
 use lpa_devices::link::{APP_CONVERSATION_ID_BASE, LinkEvent};
-use lpc_wire::{WireChunk, WireStream};
+use lpc_wire::{WireChunk, WireServerMessage, WireStream};
 
 use crate::device_link::wire::{decode_server_message, server_frame};
+use crate::device_link::wire_reader::{ReadFrame, WireRead};
 
 /// Demux one whole serial line into the event it is.
 ///
@@ -61,27 +62,54 @@ pub fn demux_chunk(chunk: WireChunk) -> LinkEvent {
     }
 }
 
+/// One [`WireRead`] → the event it is, or `None` for a request the caller
+/// must write ([`WireRead::Send`]) rather than hand to the model.
+///
+/// A frame the reader already decoded is not decoded again; one that did not
+/// decode (console text spliced into a JSON line) takes [`demux_line`]'s
+/// resync.
+pub fn demux_read(read: WireRead) -> Option<LinkEvent> {
+    Some(match read {
+        WireRead::Line(line) => LinkEvent::Line(line),
+        WireRead::Frame(ReadFrame {
+            json,
+            message: Ok(message),
+            ..
+        }) => classify(&json, &message),
+        WireRead::Frame(ReadFrame { json, .. }) => demux_frame_json(&json),
+        WireRead::Error(error) => LinkEvent::Error(error),
+        WireRead::Note(note) => LinkEvent::WireNote(note),
+        WireRead::Send(_) => return None,
+    })
+}
+
 /// An `M!` body (or a decoded packed frame) → the event it is. See
 /// [`demux_line`] for the resync and the app-range rule.
 fn demux_frame_json(mut frame_json: &str) -> LinkEvent {
     loop {
         match decode_server_message(frame_json) {
-            Ok(message) if message.id >= u64::from(APP_CONVERSATION_ID_BASE) => {
-                return LinkEvent::Passthrough {
-                    // Wire ids are `u64`, the model's `u32`; saturating
-                    // keeps a pathological id from aliasing (the same rule
-                    // `server_frame` applies).
-                    request_id: u32::try_from(message.id).unwrap_or(u32::MAX),
-                    line: format!("M!{frame_json}"),
-                };
-            }
-            Ok(message) => return LinkEvent::Frame(server_frame(&message)),
+            Ok(message) => return classify(frame_json, &message),
             Err(error) => match frame_json.find("M!").filter(|offset| *offset > 0) {
                 Some(offset) => frame_json = &frame_json[offset + 2..],
                 None => return LinkEvent::Error(error),
             },
         }
     }
+}
+
+/// A decoded message → the model's frame, or an app conversation's
+/// passthrough by its id.
+fn classify(frame_json: &str, message: &WireServerMessage) -> LinkEvent {
+    if message.id >= u64::from(APP_CONVERSATION_ID_BASE) {
+        return LinkEvent::Passthrough {
+            // Wire ids are `u64`, the model's `u32`; saturating keeps a
+            // pathological id from aliasing (the same rule `server_frame`
+            // applies).
+            request_id: u32::try_from(message.id).unwrap_or(u32::MAX),
+            line: format!("M!{frame_json}"),
+        };
+    }
+    LinkEvent::Frame(server_frame(message))
 }
 
 /// Demux a chunk of bytes straight onto an event queue.

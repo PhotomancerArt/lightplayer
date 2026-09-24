@@ -163,7 +163,8 @@ pub use app::studio::{
     UiChromeSessionControl, UiChromeSessionStatus, UiConsoleView, UiError, UiLensCard,
     UiLensRuntime, UiLogDraft, UiLogEntry, UiLogLevel, UiLogOrigin, UiLogSource, UiNotice,
     UiNoticeLevel, UiResult, UxActivityTarget, UxUpdate, UxUpdateSink, VERDICT_CHASE_INTERVAL,
-    VERDICT_CHASE_TICKS, ViewPublisher, has_unsaved_work, studio_view_channel,
+    VERDICT_CHASE_TICKS, ViewPublisher, has_unsaved_work, set_device_lens_pause_override,
+    studio_view_channel,
 };
 pub use core::notice::UiNotices;
 pub use core::view::activity_view::UiActivityStep;

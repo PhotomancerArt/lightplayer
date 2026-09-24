@@ -458,6 +458,16 @@ export function deliverBytes(boardId, text) {
   board.bytes.deliver(new TextEncoder().encode(text));
 }
 
+/// Bytes exactly as given — a packed frame is binary (`0x00`, `0x0A`, bytes
+/// that are not UTF-8), which `deliverBytes`' text cannot carry.
+export function deliverRawBytes(boardId, bytes) {
+  const board = door?.board(boardId);
+  if (!board?.bytes) {
+    throw new Error(`scripted door: board ${boardId} has no open byte channel`);
+  }
+  board.bytes.deliver(new Uint8Array(bytes));
+}
+
 /// The device goes away under an open port: the byte channel drops from the
 /// far side. This is the read-pump error path, and nothing about it is a
 /// timeout.
@@ -586,8 +596,11 @@ export async function getPortObject(id) {
   return (await load()).serial.getPort(id);
 }
 
-export async function takeLines(id) {
-  return (await load()).serial.takeLines(id);
+// `{ generation, bytes }` — the shipped pump hands over BYTES and the Rust
+// side splits them (`lpa_link::device_link::wire_reader`), so the suite does
+// exactly what production does with them.
+export async function takeBytes(id) {
+  return (await load()).serial.takeBytes(id);
 }
 
 export async function takeErrors(id) {

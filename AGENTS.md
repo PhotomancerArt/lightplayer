@@ -579,7 +579,17 @@ grants itself.
 
 The door admits **one client per board** (a second gets 409), so one Studio tab
 per `emu serve`, and use `?on=` (a different, orthogonal flag) if you want a
-second lens on the same session. See
+second lens on the same session.
+
+Two more dev-only flags tune the device wire for a measurement (read once at
+page load by `lpa-studio-web/src/dev_url_flags.rs`; no UI, no persistence):
+`?lens-pause-ms=N` sets the editor lens's pause between device reads
+(`DEVICE_REFRESH_INTERVAL`, 150 ms; clamped to 0–1000 ms; nothing else moves),
+and `?wire=json` stops the page asking boards to pack their replies, so JSON
+and JSON Pack can be compared on one build. Studio otherwise asks every board
+whose hello offers this build's pack dictionary; what the board answered is one
+`WireNote` line in the device's journal (`wire: replies packed …` or `wire:
+replies stay JSON — <why>`). See
 `docs/adr/2026-09-09-studio-device-stack-over-a-virtual-serial-port.md`.
 
 ### Running the device walk yourself
