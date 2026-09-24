@@ -14,6 +14,7 @@ pub mod device_identity;
 pub mod error;
 pub mod file_sync;
 pub mod handlers;
+pub mod link_session;
 pub mod panel_state;
 pub mod project;
 pub mod project_manager;
@@ -23,6 +24,7 @@ pub mod server;
 
 pub use device_identity::{DEVICE_IDENTITY_PATH, read_device_uid};
 pub use error::ServerError;
+pub use link_session::LinkSession;
 pub use lpc_engine::products::visual::{
     ConsumerPolicy, RenderTextureRequest, TextureRenderProduct, VisualProduct, VisualSpace,
 };

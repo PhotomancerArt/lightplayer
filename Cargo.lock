@@ -6189,6 +6189,7 @@ dependencies = [
  "lp-perf",
  "lp-recovery",
  "lpa-client",
+ "lpc-access",
  "lpc-engine",
  "lpc-hardware",
  "lpc-history",

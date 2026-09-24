@@ -25,11 +25,11 @@ use lpc_model::{
     LpPathBuf, LpValue, ToLpValue,
 };
 use lpc_shared::output::MemoryOutputProvider;
-use lpc_shared::transport::ServerTransport;
+use lpc_shared::transport::{Incoming, Link, LinkId, ServerTransport};
 use lpc_wire::{
     BindingGraphProbeRequest, BindingGraphProbeResult, ClientMessage, ClientRequest,
     ProjectReadEvent, ProjectReadQuery, ProjectReadQueryEvent, ProjectReadRequest,
-    RuntimeReadQuery, TransportError, WireBindingGraph, WireBindingOrigin, WireMessage,
+    RuntimeReadQuery, TransportError, WireBindingGraph, WireBindingOrigin,
     WirePanelAutoSaveRequest, WirePanelClearRequest, WirePanelCommandResponse,
     WirePanelWriteRequest, WireProjectCommand, WireProjectCommandResponse, WireProjectHandle,
     WireScopeRef, WireServerMessage, WireServerMsgBody,
@@ -435,7 +435,7 @@ fn a_gradient_panel_write_survives_a_wire_project_read() {
     });
     assert_eq!(response, WirePanelCommandResponse::Accepted { engaged: 1 });
 
-    let messages = vec![WireMessage::Client(ClientMessage {
+    let messages = vec![Incoming::primary(ClientMessage {
         id: 13,
         msg: ClientRequest::ProjectRead {
             handle,
@@ -602,7 +602,7 @@ fn command(
     handle: WireProjectHandle,
     command: WireProjectCommand,
 ) -> WireProjectCommandResponse {
-    let messages = vec![WireMessage::Client(ClientMessage {
+    let messages = vec![Incoming::primary(ClientMessage {
         id: 11,
         msg: ClientRequest::ProjectCommand { handle, command },
     })];
@@ -617,7 +617,7 @@ fn command(
 /// The auto-save flag as reported by a runtime project read — the carrier
 /// Studio actually reads it from.
 fn read_panel_auto_save(server: &mut LpServer, handle: WireProjectHandle) -> Option<bool> {
-    let messages = vec![WireMessage::Client(ClientMessage {
+    let messages = vec![Incoming::primary(ClientMessage {
         id: 12,
         msg: ClientRequest::ProjectRead {
             handle,
@@ -655,17 +655,21 @@ struct VecTransport {
 }
 
 impl ServerTransport for VecTransport {
-    async fn send(&mut self, msg: WireServerMessage) -> Result<(), TransportError> {
+    async fn send(&mut self, _link: LinkId, msg: WireServerMessage) -> Result<(), TransportError> {
         self.sent.push(msg);
         Ok(())
     }
 
-    async fn receive(&mut self) -> Result<Option<ClientMessage>, TransportError> {
+    async fn receive(&mut self) -> Result<Option<Incoming>, TransportError> {
         Ok(None)
     }
 
-    async fn receive_all(&mut self) -> Result<Vec<ClientMessage>, TransportError> {
+    async fn receive_all(&mut self) -> Result<Vec<Incoming>, TransportError> {
         Ok(Vec::new())
+    }
+
+    fn links(&self) -> Vec<Link> {
+        vec![Link::PRIMARY]
     }
 
     async fn close(&mut self) -> Result<(), TransportError> {

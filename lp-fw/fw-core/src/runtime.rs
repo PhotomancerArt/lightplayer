@@ -10,13 +10,13 @@ use alloc::vec::Vec;
 
 use lpa_server::{LpServer, ServerError};
 use lpc_shared::time::TimeProvider;
-use lpc_shared::transport::ServerTransport;
-use lpc_wire::{TransportError, WireMessage, WireServerMessage};
+use lpc_shared::transport::{Incoming, ServerTransport};
+use lpc_wire::{TransportError, WireServerMessage};
 
 /// Result of draining currently available client messages from a transport.
 #[derive(Debug)]
 pub struct DrainedClientMessages {
-    pub messages: Vec<WireMessage>,
+    pub messages: Vec<Incoming>,
     pub receive_calls: u32,
     pub error: Option<TransportError>,
 }
@@ -37,7 +37,8 @@ pub struct ServerTickOutcome {
     pub server_error: Option<ServerError>,
 }
 
-/// Send the server's unsolicited hello (id 0) through `transport`.
+/// Send the server's unsolicited hello (id 0) on every link `transport`
+/// has open.
 ///
 /// Every embedder loop calls this once, as the first frame it sends when it
 /// starts serving (before/with the first heartbeat). The payload is the
@@ -55,12 +56,18 @@ pub async fn send_unsolicited_hello<T: ServerTransport>(
     if cfg!(feature = "fixture-no-hello") {
         return Ok(());
     }
-    transport
-        .send(WireServerMessage::new(
-            0,
-            lpc_wire::server::ServerMsgBody::Hello(server.hello().clone()),
-        ))
-        .await
+    for link in transport.links() {
+        transport
+            .send(
+                link.id,
+                WireServerMessage::new(
+                    0,
+                    lpc_wire::server::ServerMsgBody::Hello(server.hello().clone()),
+                ),
+            )
+            .await?;
+    }
+    Ok(())
 }
 
 /// Drain all currently available client messages from `transport`.
@@ -74,7 +81,7 @@ pub async fn drain_client_messages<T: ServerTransport>(transport: &mut T) -> Dra
     loop {
         receive_calls += 1;
         match transport.receive().await {
-            Ok(Some(msg)) => messages.push(WireMessage::Client(msg)),
+            Ok(Some(incoming)) => messages.push(incoming),
             Ok(None) => {
                 return DrainedClientMessages {
                     messages,
@@ -100,7 +107,7 @@ pub async fn tick_server_frame<T, P>(
     time_provider: &P,
     frame_start_ms: u64,
     last_tick_ms: u64,
-    incoming_messages: Vec<WireMessage>,
+    incoming_messages: Vec<Incoming>,
 ) -> ServerTickOutcome
 where
     T: ServerTransport,

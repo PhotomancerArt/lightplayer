@@ -15,9 +15,11 @@ use lpc_model::{LpPath, LpPathBuf};
 use lpc_shared::output::OutputProvider;
 use lpc_shared::time::TimeProvider;
 use lpc_shared::transport::{
-    ProjectReadStreamSink, ServerTransport, transport_error_is_signalable,
+    Incoming, LinkId, ProjectReadStreamSink, ServerTransport, transport_error_is_signalable,
 };
-use lpc_wire::{ClientRequest, WireMessage, WireServerMessage};
+use lpc_wire::{ClientRequest, WireServerMessage};
+
+use crate::link_session::LinkSession;
 use lpfs::{FsEvent, LpFs};
 
 /// Optional callback returning (free_bytes, used_bytes) for memory logging.
@@ -177,6 +179,10 @@ pub struct LpServer {
     /// a second, each with a full stack trace in the browser, which buries
     /// the very first occurrence that explains the cause.
     tick_failures: HashMap<lpc_wire::WireProjectHandle, u32>,
+    /// Per-link state, keyed on the transport's link ids: created the first
+    /// time a link's message arrives, dropped when the transport reports the
+    /// link closed ([`ServerTransport::take_closed_links`]).
+    sessions: HashMap<LinkId, LinkSession>,
 }
 
 /// After the first failure, restate a persistent tick error only every
@@ -332,6 +338,7 @@ impl LpServer {
                 device_uid: None,
             },
             tick_failures: HashMap::new(),
+            sessions: HashMap::new(),
         }
     }
 
@@ -629,200 +636,213 @@ impl LpServer {
     /// This avoids materializing large project-read responses before transport
     /// serialization. Simple transports may still fall back to an in-memory
     /// implementation internally, but firmware transports can stream directly.
+    ///
+    /// Every message arrives tagged with its link ([`Incoming`]), and every
+    /// reply goes back on that link. A link's session is created the first
+    /// time it is seen and dropped when the transport reports it closed.
     pub async fn tick_and_send<T: ServerTransport>(
         &mut self,
         delta_ms: u32,
-        incoming: Vec<WireMessage>,
+        incoming: Vec<Incoming>,
         transport: &mut T,
     ) -> Result<usize, ServerError> {
         self.advance_frame(delta_ms)?;
 
+        // Closed links first: a session (and any login it holds) must be
+        // gone before anything else is answered this tick.
+        for closed in transport.take_closed_links() {
+            self.close_link(closed);
+        }
+
         let mut response_count = 0usize;
         for message in incoming {
-            match message {
-                WireMessage::Client(client_msg) => {
-                    let msg_id = client_msg.id;
-                    match client_msg.msg {
-                        ClientRequest::ProjectRead { handle, request } => {
-                            let sink_frame_budget = self.sink_frame_budget();
-                            // Refusal-not-reset: if the heap cannot afford
-                            // even a well-behaved streamed read, fail the
-                            // request with a structured terminal error instead
-                            // of letting infallible alloc abort-reset the
-                            // board mid-assembly.
-                            if let Some(headroom) =
-                                self.read_headroom_probe.and_then(|probe| probe())
-                                && headroom < PROJECT_READ_MIN_HEADROOM_BYTES
-                            {
-                                let mut sink = ProjectReadStreamSink::with_max_bytes(
-                                    transport,
-                                    msg_id,
-                                    sink_frame_budget,
-                                );
-                                let message = format!(
-                                    "read refused: heap headroom too low (largest free block \
-                                     {headroom} B < {PROJECT_READ_MIN_HEADROOM_BYTES} B); narrow \
-                                     the query (include_slots:false, one probe per read, or page \
-                                     nodes by id) and retry",
-                                );
-                                log::warn!("tick_and_send: {message}");
-                                if let Err(send_error) = sink.send_terminal_error(message).await {
-                                    log::warn!(
-                                        "tick_and_send: failed to send read-refusal error for \
-                                         id={msg_id}: {send_error}"
-                                    );
-                                }
-                                response_count += 1;
-                                continue;
-                            }
-                            let mut server_status = self.runtime_status();
-                            let Some(project) = self.project_manager.get_project_mut(handle) else {
-                                transport
-                                    .send(WireServerMessage::new(
-                                        msg_id,
-                                        lpc_wire::server::ServerMsgBody::Error {
-                                            error: format!(
-                                                "{}",
-                                                ServerError::ProjectNotFound(format!(
-                                                    "handle {}",
-                                                    handle.id()
-                                                ))
-                                            ),
-                                        },
-                                    ))
-                                    .await
-                                    .map_err(|error| ServerError::Core(format!("{error}")))?;
-                                response_count += 1;
-                                continue;
-                            };
-                            // The P11 toggle's read path: panel auto-save
-                            // is per-project (`.lp/state.json`) and lives
-                            // on the wrapper, not the engine, so it is
-                            // stamped here — once the read's project is
-                            // known — rather than in `runtime_status`.
-                            server_status.panel_auto_save = Some(project.panel_auto_save());
-                            let mut source =
-                                ServerProjectReadSource::new(project, Some(server_status));
-                            let mut sink = ProjectReadStreamSink::with_max_bytes(
-                                transport,
-                                msg_id,
-                                sink_frame_budget,
+            let Incoming {
+                link,
+                trust,
+                msg: client_msg,
+            } = message;
+            self.sessions
+                .entry(link)
+                .or_insert_with(|| LinkSession::new(trust));
+            let msg_id = client_msg.id;
+            match client_msg.msg {
+                ClientRequest::ProjectRead { handle, request } => {
+                    let sink_frame_budget = self.sink_frame_budget();
+                    // Refusal-not-reset: if the heap cannot afford
+                    // even a well-behaved streamed read, fail the
+                    // request with a structured terminal error instead
+                    // of letting infallible alloc abort-reset the
+                    // board mid-assembly.
+                    if let Some(headroom) = self.read_headroom_probe.and_then(|probe| probe())
+                        && headroom < PROJECT_READ_MIN_HEADROOM_BYTES
+                    {
+                        let mut sink = ProjectReadStreamSink::with_max_bytes(
+                            transport,
+                            link,
+                            msg_id,
+                            sink_frame_budget,
+                        );
+                        let message = format!(
+                            "read refused: heap headroom too low (largest free block \
+                             {headroom} B < {PROJECT_READ_MIN_HEADROOM_BYTES} B); narrow \
+                             the query (include_slots:false, one probe per read, or page \
+                             nodes by id) and retry",
+                        );
+                        log::warn!("tick_and_send: {message}");
+                        if let Err(send_error) = sink.send_terminal_error(message).await {
+                            log::warn!(
+                                "tick_and_send: failed to send read-refusal error for \
+                                 id={msg_id}: {send_error}"
                             );
-                            // The read window opens on an ACCEPTED read — past
-                            // the headroom refusal and past project lookup —
-                            // and closes once the stream has finished or
-                            // failed, so what it measures is the assembly
-                            // cost, never a rejection. Markers only: on device
-                            // `lp_perf` compiles to the no-op sink.
-                            lp_perf::emit_begin!(lp_perf::EVENT_PROJECT_READ);
-                            let stream_result =
-                                source.stream_project_read_events(request, &mut sink).await;
-                            // Every arm below records its outcome and falls
-                            // through to one `emit_end!`: an early `?` here
-                            // would leave the window open forever.
-                            let finish_result = match stream_result {
-                                Ok(()) => sink
-                                    .finish()
-                                    .await
-                                    .map_err(|error| ServerError::Core(format!("{error}"))),
-                                Err(error) => {
-                                    // Signalable failures (event too large for an
-                                    // empty frame, other serialization/budget
-                                    // errors) still have a live connection: send a
-                                    // terminal `Error` frame for this request id
-                                    // and continue the tick. Transport-write
-                                    // failures cannot be signaled and propagate.
-                                    match classify_project_read_stream_error(error) {
-                                        ProjectReadStreamOutcome::Signalable(message) => {
-                                            if let Err(send_error) =
-                                                sink.send_terminal_error(message).await
-                                            {
-                                                log::warn!(
-                                                    "tick_and_send: failed to send terminal \
-                                                     project-read error for id={msg_id}: \
-                                                     {send_error}"
-                                                );
-                                            }
-                                            Ok(())
-                                        }
-                                        ProjectReadStreamOutcome::Fatal(server_error) => {
-                                            Err(server_error)
-                                        }
-                                    }
-                                }
-                            };
-                            lp_perf::emit_end!(lp_perf::EVENT_PROJECT_READ);
-                            finish_result?;
-                            response_count += 1;
                         }
-                        msg => {
-                            // Every request id gets exactly one response even
-                            // when the handler fails — a propagated error here
-                            // would drop the frame and leave the client
-                            // awaiting forever. Only transport-send failures
-                            // abort the tick.
-                            let link_state = handlers::EngineLinkState {
-                                display_layout_budget: self.engine_display_layout_budget(),
-                                safe_output_clamp: self.safe_output_clamp,
-                            };
-                            let response = match handlers::handle_client_message(
-                                &mut self.project_manager,
-                                &mut *self.base_fs,
-                                &self.output_provider,
-                                self.memory_stats.as_ref(),
-                                self.read_headroom_probe,
-                                self.reboot_hook.is_some(),
-                                self.time_provider.clone(),
-                                self.button_service.clone(),
-                                self.radio_service.clone(),
-                                self.graphics.clone(),
-                                &self.hello,
-                                link_state,
-                                lpc_wire::ClientMessage { id: msg_id, msg },
-                            ) {
-                                Ok(response) => response,
-                                Err(error) => {
-                                    log::warn!(
-                                        "tick_and_send: request id={msg_id} failed: {error}"
-                                    );
-                                    WireServerMessage::new(
-                                        msg_id,
-                                        lpc_wire::server::ServerMsgBody::Error {
-                                            error: format!("{error}"),
-                                        },
-                                    )
+                        response_count += 1;
+                        continue;
+                    }
+                    let mut server_status = self.runtime_status();
+                    let Some(project) = self.project_manager.get_project_mut(handle) else {
+                        transport
+                            .send(
+                                link,
+                                WireServerMessage::new(
+                                    msg_id,
+                                    lpc_wire::server::ServerMsgBody::Error {
+                                        error: format!(
+                                            "{}",
+                                            ServerError::ProjectNotFound(format!(
+                                                "handle {}",
+                                                handle.id()
+                                            ))
+                                        ),
+                                    },
+                                ),
+                            )
+                            .await
+                            .map_err(|error| ServerError::Core(format!("{error}")))?;
+                        response_count += 1;
+                        continue;
+                    };
+                    // The P11 toggle's read path: panel auto-save
+                    // is per-project (`.lp/state.json`) and lives
+                    // on the wrapper, not the engine, so it is
+                    // stamped here — once the read's project is
+                    // known — rather than in `runtime_status`.
+                    server_status.panel_auto_save = Some(project.panel_auto_save());
+                    let mut source = ServerProjectReadSource::new(project, Some(server_status));
+                    let mut sink = ProjectReadStreamSink::with_max_bytes(
+                        transport,
+                        link,
+                        msg_id,
+                        sink_frame_budget,
+                    );
+                    // The read window opens on an ACCEPTED read — past
+                    // the headroom refusal and past project lookup —
+                    // and closes once the stream has finished or
+                    // failed, so what it measures is the assembly
+                    // cost, never a rejection. Markers only: on device
+                    // `lp_perf` compiles to the no-op sink.
+                    lp_perf::emit_begin!(lp_perf::EVENT_PROJECT_READ);
+                    let stream_result = source.stream_project_read_events(request, &mut sink).await;
+                    // Every arm below records its outcome and falls
+                    // through to one `emit_end!`: an early `?` here
+                    // would leave the window open forever.
+                    let finish_result = match stream_result {
+                        Ok(()) => sink
+                            .finish()
+                            .await
+                            .map_err(|error| ServerError::Core(format!("{error}"))),
+                        Err(error) => {
+                            // Signalable failures (event too large for an
+                            // empty frame, other serialization/budget
+                            // errors) still have a live connection: send a
+                            // terminal `Error` frame for this request id
+                            // and continue the tick. Transport-write
+                            // failures cannot be signaled and propagate.
+                            match classify_project_read_stream_error(error) {
+                                ProjectReadStreamOutcome::Signalable(message) => {
+                                    if let Err(send_error) = sink.send_terminal_error(message).await
+                                    {
+                                        log::warn!(
+                                            "tick_and_send: failed to send terminal \
+                                             project-read error for id={msg_id}: \
+                                             {send_error}"
+                                        );
+                                    }
+                                    Ok(())
                                 }
-                            };
-                            // A `Reboot` ack is the only response that owes
-                            // an action once it is written; the handler
-                            // produced it only if a hook exists.
-                            let acked_reboot =
-                                matches!(response.msg, lpc_wire::server::ServerMsgBody::Reboot);
-                            transport
-                                .send(response)
-                                .await
-                                .map_err(|error| ServerError::Core(format!("{error}")))?;
-                            response_count += 1;
-                            if acked_reboot && let Some(reboot) = self.reboot_hook.clone() {
-                                // Answer, THEN reset. `send` returns once the
-                                // transport reports the frame written, so the
-                                // client has its ack before the board goes
-                                // down; on hardware this call never returns.
-                                log::info!("tick_and_send: reboot acked, resetting");
-                                reboot();
+                                ProjectReadStreamOutcome::Fatal(server_error) => Err(server_error),
                             }
                         }
-                    }
+                    };
+                    lp_perf::emit_end!(lp_perf::EVENT_PROJECT_READ);
+                    finish_result?;
+                    response_count += 1;
                 }
-                WireMessage::Server(_) => {
-                    return Err(ServerError::Core(
-                        "Received server message on server side".to_string(),
-                    ));
+                msg => {
+                    // Every request id gets exactly one response even
+                    // when the handler fails — a propagated error here
+                    // would drop the frame and leave the client
+                    // awaiting forever. Only transport-send failures
+                    // abort the tick.
+                    let link_state = handlers::EngineLinkState {
+                        display_layout_budget: self.engine_display_layout_budget(),
+                        safe_output_clamp: self.safe_output_clamp,
+                    };
+                    let response = match handlers::handle_client_message(
+                        &mut self.project_manager,
+                        &mut *self.base_fs,
+                        &self.output_provider,
+                        self.memory_stats.as_ref(),
+                        self.read_headroom_probe,
+                        self.reboot_hook.is_some(),
+                        self.time_provider.clone(),
+                        self.button_service.clone(),
+                        self.radio_service.clone(),
+                        self.graphics.clone(),
+                        &self.hello,
+                        link_state,
+                        lpc_wire::ClientMessage { id: msg_id, msg },
+                    ) {
+                        Ok(response) => response,
+                        Err(error) => {
+                            log::warn!("tick_and_send: request id={msg_id} failed: {error}");
+                            WireServerMessage::new(
+                                msg_id,
+                                lpc_wire::server::ServerMsgBody::Error {
+                                    error: format!("{error}"),
+                                },
+                            )
+                        }
+                    };
+                    // A `Reboot` ack is the only response that owes
+                    // an action once it is written; the handler
+                    // produced it only if a hook exists.
+                    let acked_reboot =
+                        matches!(response.msg, lpc_wire::server::ServerMsgBody::Reboot);
+                    transport
+                        .send(link, response)
+                        .await
+                        .map_err(|error| ServerError::Core(format!("{error}")))?;
+                    response_count += 1;
+                    if acked_reboot && let Some(reboot) = self.reboot_hook.clone() {
+                        // Answer, THEN reset. `send` returns once the
+                        // transport reports the frame written, so the
+                        // client has its ack before the board goes
+                        // down; on hardware this call never returns.
+                        log::info!("tick_and_send: reboot acked, resetting");
+                        reboot();
+                    }
                 }
             }
         }
 
         Ok(response_count)
+    }
+
+    /// Forget a link the transport reported closed: its session and any
+    /// grant it held. A multi-link transport never reuses a link id, so a
+    /// later connection can never inherit this one's login.
+    fn close_link(&mut self, link: LinkId) {
+        self.sessions.remove(&link);
     }
 
     /// Get a reference to the base filesystem

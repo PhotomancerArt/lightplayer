@@ -29,7 +29,7 @@ use lpc_shared::fps::FpsTracker;
 use lpc_shared::stats::WindowedStatsCollector;
 use lpc_shared::time::TimeProvider;
 use lpc_shared::transport::ServerTransport;
-use lpc_wire::{WireMessage, WireServerMessage};
+use lpc_wire::WireServerMessage;
 
 use crate::time::Esp32TimeProvider;
 
@@ -118,7 +118,7 @@ pub async fn run_server_loop<T: ServerTransport>(
         loop {
             match transport.receive().await {
                 Ok(Some(msg)) => {
-                    incoming_messages.push(WireMessage::Client(msg));
+                    incoming_messages.push(msg);
                 }
                 Ok(None) => {
                     // No more messages available
@@ -220,37 +220,27 @@ pub async fn run_server_loop<T: ServerTransport>(
             fps_collector.prune_older_than(current_time.saturating_sub(FPS_STATS_WINDOW_MS));
             let fps_stats = fps_collector.compute_stats();
 
-            let memory = memory_stats();
+            let uptime_ms = current_time.saturating_sub(startup_time);
 
-            // Create heartbeat message (unsolicited: id 0, single/final message).
-            let heartbeat_msg = WireServerMessage::new(
-                HEARTBEAT_MESSAGE_ID,
-                lpc_wire::server::ServerMsgBody::Heartbeat {
-                    fps: fps_stats,
-                    frame_count: frame_count as u64,
-                    loaded_projects,
-                    uptime_ms: current_time.saturating_sub(startup_time),
-                    memory,
-                    recovery: lpa_server::recovery_report::current_recovery_status().map(
-                        |mut status| {
-                            // The clamp is server state, not recovery-region
-                            // state — stamp it here where both are in scope.
-                            status.output_clamp = server.safe_output_clamp();
-                            status
-                        },
+            // One heartbeat per open link (unsolicited: id 0, single/final
+            // message), each built for the link it goes to.
+            for link in transport.links() {
+                let heartbeat_msg = WireServerMessage::new(
+                    HEARTBEAT_MESSAGE_ID,
+                    heartbeat_body(
+                        &server,
+                        fps_stats.clone(),
+                        frame_count,
+                        loaded_projects.clone(),
+                        uptime_ms,
+                        memory_stats(),
                     ),
-                    outputs: crate::output::wire_stats_source::current(),
-                    link: crate::serial::link_counters::current(),
-                    // Who we are, on every heartbeat: a Studio that attached
-                    // mid-stream never saw our boot hello, and this resolves
-                    // it passively within one heartbeat period (R4a).
-                    identity: server.heartbeat_identity(),
-                },
-            );
+                );
 
-            // Send heartbeat (non-blocking, ignore errors)
-            if let Err(e) = transport.send(heartbeat_msg).await {
-                log::warn!("run_server_loop: Failed to send heartbeat: {e:?}");
+                // Send heartbeat (non-blocking, ignore errors)
+                if let Err(e) = transport.send(link.id, heartbeat_msg).await {
+                    log::warn!("run_server_loop: Failed to send heartbeat: {e:?}");
+                }
             }
 
             heartbeat_last_sent = current_time;
@@ -264,6 +254,39 @@ pub async fn run_server_loop<T: ServerTransport>(
         // Yield to Embassy runtime (allows other tasks to run)
         // Use embassy_time::Timer to delay slightly
         embassy_time::Timer::after(embassy_time::Duration::from_millis(1)).await;
+    }
+}
+
+/// The heartbeat's body, from what the loop measured and what the server
+/// holds. A plain function (not an `async` one, not a closure over the
+/// loop's state) so it adds nothing to the loop future's frame — see
+/// [`run_server_loop`] on why that matters on the C6.
+fn heartbeat_body(
+    server: &LpServer,
+    fps: lpc_wire::server::SampleStats,
+    frame_count: u32,
+    loaded_projects: Vec<lpc_wire::server::LoadedProject>,
+    uptime_ms: u64,
+    memory: Option<lpc_wire::server::MemoryStats>,
+) -> lpc_wire::server::ServerMsgBody {
+    lpc_wire::server::ServerMsgBody::Heartbeat {
+        fps,
+        frame_count: frame_count as u64,
+        loaded_projects,
+        uptime_ms,
+        memory,
+        recovery: lpa_server::recovery_report::current_recovery_status().map(|mut status| {
+            // The clamp is server state, not recovery-region state — stamp
+            // it here where both are in scope.
+            status.output_clamp = server.safe_output_clamp();
+            status
+        }),
+        outputs: crate::output::wire_stats_source::current(),
+        link: crate::serial::link_counters::current(),
+        // Who we are, on every heartbeat: a Studio that attached mid-stream
+        // never saw our boot hello, and this resolves it passively within one
+        // heartbeat period (R4a).
+        identity: server.heartbeat_identity(),
     }
 }
 
@@ -367,7 +390,7 @@ pub async fn run_server_loop_bounded<T: ServerTransport>(
         loop {
             match transport.receive().await {
                 Ok(Some(msg)) => {
-                    incoming_messages.push(WireMessage::Client(msg));
+                    incoming_messages.push(msg);
                 }
                 Ok(None) => {
                     // No more messages available
@@ -487,37 +510,27 @@ pub async fn run_server_loop_bounded<T: ServerTransport>(
             fps_collector.prune_older_than(current_time.saturating_sub(FPS_STATS_WINDOW_MS));
             let fps_stats = fps_collector.compute_stats();
 
-            let memory = memory_stats();
+            let uptime_ms = current_time.saturating_sub(startup_time);
 
-            // Create heartbeat message (unsolicited: id 0, single/final message).
-            let heartbeat_msg = WireServerMessage::new(
-                HEARTBEAT_MESSAGE_ID,
-                lpc_wire::server::ServerMsgBody::Heartbeat {
-                    fps: fps_stats,
-                    frame_count: frame_count as u64,
-                    loaded_projects,
-                    uptime_ms: current_time.saturating_sub(startup_time),
-                    memory,
-                    recovery: lpa_server::recovery_report::current_recovery_status().map(
-                        |mut status| {
-                            // The clamp is server state, not recovery-region
-                            // state — stamp it here where both are in scope.
-                            status.output_clamp = server.safe_output_clamp();
-                            status
-                        },
+            // One heartbeat per open link (unsolicited: id 0, single/final
+            // message), each built for the link it goes to.
+            for link in transport.links() {
+                let heartbeat_msg = WireServerMessage::new(
+                    HEARTBEAT_MESSAGE_ID,
+                    heartbeat_body(
+                        &server,
+                        fps_stats.clone(),
+                        frame_count,
+                        loaded_projects.clone(),
+                        uptime_ms,
+                        memory_stats(),
                     ),
-                    outputs: crate::output::wire_stats_source::current(),
-                    link: crate::serial::link_counters::current(),
-                    // Who we are, on every heartbeat: a Studio that attached
-                    // mid-stream never saw our boot hello, and this resolves
-                    // it passively within one heartbeat period (R4a).
-                    identity: server.heartbeat_identity(),
-                },
-            );
+                );
 
-            // Send heartbeat (non-blocking, ignore errors)
-            if let Err(e) = transport.send(heartbeat_msg).await {
-                log::warn!("run_server_loop: Failed to send heartbeat: {e:?}");
+                // Send heartbeat (non-blocking, ignore errors)
+                if let Err(e) = transport.send(link.id, heartbeat_msg).await {
+                    log::warn!("run_server_loop: Failed to send heartbeat: {e:?}");
+                }
             }
 
             heartbeat_last_sent = current_time;
