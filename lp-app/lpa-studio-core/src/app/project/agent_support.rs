@@ -41,11 +41,14 @@ pub(crate) fn declared_space(variant: Option<&str>) -> DeclaredSpace {
 }
 
 /// The engine's latest status for one shader node, as a verdict the agent
-/// bridge serves: the status Revision (`change_frame`) plus the parsed
-/// classification. Written into the bridge cell on every pull.
+/// bridge serves: the engine revision of the read that reported it plus the
+/// parsed classification. Written into the bridge cell on every pull.
 #[derive(Clone, Debug, PartialEq)]
 pub struct AgentEngineStatus {
-    /// The engine frame the status last changed at.
+    /// The engine revision of the project read the status is as of (the
+    /// synced view's revision). Not the entry's `change_frame`: that moves
+    /// only when the status does, and an edit that leaves the node `ok` must
+    /// still resolve the verdict wait.
     pub revision: Revision,
     pub verdict: EngineVerdict,
 }

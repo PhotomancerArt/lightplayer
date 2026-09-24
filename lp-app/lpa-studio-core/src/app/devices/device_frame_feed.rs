@@ -139,7 +139,7 @@ pub(crate) fn feed_target(device: &Device, effects: &DeviceEffects) -> Option<Fe
 /// pulls only while nobody holds the wire ([`feed_target`]), and the lens
 /// holds it for as long as it is open.
 pub(crate) fn card_frame_request(
-    geometry: lpc_wire::OutputFrameGeometryRead,
+    geometry: lpc_wire::RevisionGateRead,
 ) -> lpc_wire::ProjectReadRequest {
     lpc_wire::ProjectReadRequest {
         since: None,
@@ -633,14 +633,14 @@ mod tests {
     /// pixels at 8 bits, with its geometry gate.
     #[test]
     fn the_card_pulls_its_frame_at_the_preview_precision() {
-        let request = card_frame_request(lpc_wire::OutputFrameGeometryRead::Always);
+        let request = card_frame_request(lpc_wire::RevisionGateRead::Always);
         assert!(request.queries.is_empty());
         assert_eq!(
             request.probes,
             vec![lpc_wire::ProjectProbeRequest::OutputFrame(
                 lpc_wire::OutputFrameProbeRequest {
-                    geometry: lpc_wire::OutputFrameGeometryRead::Always,
-                    samples: Some(lpc_wire::WireChannelSampleFormat::U8),
+                    geometry: lpc_wire::RevisionGateRead::Always,
+                    samples: Some(lpc_wire::WireChannelSampleFormat::Srgb8),
                 }
             )]
         );

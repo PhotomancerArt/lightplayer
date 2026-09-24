@@ -56,9 +56,7 @@ impl BindingGraphCache {
     /// did not add up.
     pub(crate) fn structure_read(&self) -> RevisionGateRead {
         match &self.held {
-            Some(held) if !self.refetch => RevisionGateRead::IfChanged {
-                known_revision: Some(held.graph.revision),
-            },
+            Some(held) if !self.refetch => RevisionGateRead::if_changed(Some(held.graph.revision)),
             _ => RevisionGateRead::Always,
         }
     }
@@ -155,9 +153,7 @@ mod tests {
         assert_eq!(cache.values(), &[value(0.5)]);
         assert_eq!(
             cache.structure_read(),
-            RevisionGateRead::IfChanged {
-                known_revision: Some(Revision::new(4))
-            }
+            RevisionGateRead::if_changed(Some(Revision::new(4)))
         );
     }
 
@@ -171,9 +167,7 @@ mod tests {
         assert_eq!(cache.values(), &[value(0.75)]);
         assert_eq!(
             cache.structure_read(),
-            RevisionGateRead::IfChanged {
-                known_revision: Some(Revision::new(4))
-            }
+            RevisionGateRead::if_changed(Some(Revision::new(4)))
         );
     }
 
@@ -195,9 +189,7 @@ mod tests {
         assert_eq!(cache.values(), &[value(0.75), value(2.0)]);
         assert_eq!(
             cache.structure_read(),
-            RevisionGateRead::IfChanged {
-                known_revision: Some(Revision::new(9))
-            }
+            RevisionGateRead::if_changed(Some(Revision::new(9)))
         );
     }
 

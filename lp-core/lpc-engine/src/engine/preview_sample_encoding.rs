@@ -1,11 +1,18 @@
 //! Transport precision for the samples a preview probe ships.
 //!
 //! The engine renders and publishes control samples at 16 bits (`unorm16`,
-//! little-endian). A client drawing them on a screen needs 8, so the
-//! control-product and output-frame probes let it ask for
-//! [`WireChannelSampleFormat::U8`] and halve the pixel bytes on the wire.
+//! little-endian, LINEAR). A client drawing them on a screen needs 8, so the
+//! control-product and output-frame probes let it ask for an 8-bit format and
+//! halve the pixel bytes on the wire:
 //!
-//! # The rounding rule
+//! - [`WireChannelSampleFormat::Srgb8`], Studio's preview default: the
+//!   correctly rounded sRGB display code, `lpc_wire::linear16_to_srgb8` (its
+//!   module docs state the rule; integer-only, 766 bytes of tables). The
+//!   codes are spent where a screen tells levels apart, so a dim picture
+//!   keeps its darks.
+//! - [`WireChannelSampleFormat::U8`]: linear, rounded to nearest (below).
+//!
+//! # The linear `U8` rounding rule
 //!
 //! `u8 = round(u16 / 257)`, computed exactly in integers as
 //! `(v · 255 + 32767) / 65535`. 257 is the ratio between the two full scales
@@ -15,12 +22,13 @@
 //! exactly half-way for an integer `v`.
 //!
 //! The samples stay what they were (an output frame's are post-finalize);
-//! 8-bit is only how precisely they travel. A consumer widening them back to
-//! 16 bits multiplies by 257.
+//! 8-bit is only how precisely they travel. A consumer widening `U8` back to
+//! 16 bits multiplies by 257; one decoding `Srgb8` uses
+//! `lpc_wire::srgb8_to_linear16`.
 
 use alloc::vec::Vec;
 
-use lpc_wire::WireChannelSampleFormat;
+use lpc_wire::{WireChannelSampleFormat, linear16_to_srgb8};
 
 /// Round one 16-bit sample to the nearest 8-bit level (see the module docs).
 #[must_use]
@@ -40,20 +48,26 @@ pub(crate) fn encode_unorm16_samples(samples: &[u16], format: WireChannelSampleF
             bytes
         }
         WireChannelSampleFormat::U8 => samples.iter().map(|&v| unorm16_to_unorm8(v)).collect(),
+        WireChannelSampleFormat::Srgb8 => samples.iter().map(|&v| linear16_to_srgb8(v)).collect(),
     }
 }
 
 /// Encode an already-serialized little-endian 16-bit buffer (a published
 /// output frame) in the requested transport format. `U16` is verbatim; a
-/// trailing odd byte, which no published buffer carries, is dropped by `U8`.
+/// trailing odd byte, which no published buffer carries, is dropped by the
+/// 8-bit formats.
 #[must_use]
 pub(crate) fn encode_unorm16_le_bytes(bytes: &[u8], format: WireChannelSampleFormat) -> Vec<u8> {
+    let narrow = |encode: fn(u16) -> u8| -> Vec<u8> {
+        bytes
+            .chunks_exact(2)
+            .map(|pair| encode(u16::from_le_bytes([pair[0], pair[1]])))
+            .collect()
+    };
     match format {
         WireChannelSampleFormat::U16 => bytes.to_vec(),
-        WireChannelSampleFormat::U8 => bytes
-            .chunks_exact(2)
-            .map(|pair| unorm16_to_unorm8(u16::from_le_bytes([pair[0], pair[1]])))
-            .collect(),
+        WireChannelSampleFormat::U8 => narrow(unorm16_to_unorm8),
+        WireChannelSampleFormat::Srgb8 => narrow(linear16_to_srgb8),
     }
 }
 
@@ -110,6 +124,13 @@ mod tests {
         assert_eq!(
             encode_unorm16_le_bytes(&le, WireChannelSampleFormat::U8),
             u8s
+        );
+        let srgb = encode_unorm16_samples(&samples, WireChannelSampleFormat::Srgb8);
+        // 255/65535 linear is sRGB code 13; half scale is code 188.
+        assert_eq!(srgb, vec![0, 13, 188, 255]);
+        assert_eq!(
+            encode_unorm16_le_bytes(&le, WireChannelSampleFormat::Srgb8),
+            srgb
         );
     }
 }

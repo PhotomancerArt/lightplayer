@@ -1,7 +1,7 @@
 {
   "comment": "Measured heap-budget record \u2014 a ratchet, not a target. Two sources. `projects` is what each project costs TODAY on the RV32 ENGINE emulator (`lp-cli profile`), per project and profile mode; steady-render records only the frame window. `chips` is what the FIRMWARE costs on the SoC emulator (`lp-emu-esp32c6`) \u2014 the shipped image booted whole, read from its own first heartbeat, with silicon beside it. Regenerate with `just heap-budget-baseline` and `just heap-budget-baseline-chips`; see docs/heap-budget-gate.md.",
-  "recorded": "2026-09-23",
-  "commit": "e894d2499",
+  "recorded": "2026-09-24",
+  "commit": "d3a7d2743",
   "projects": {
     "catalog/patterns/meteor": {
       "modes": {
@@ -18,11 +18,11 @@
             },
             "project-load": {
               "transient": 50102,
-              "retained": 46556,
-              "largest_alloc": 3584,
+              "retained": 46684,
+              "largest_alloc": 3688,
               "alloc_count": 4933,
-              "alloc_bytes": 292589,
-              "largest_free_at_close": 211368,
+              "alloc_bytes": 292717,
+              "largest_free_at_close": 211240,
               "holes_at_close": 37
             },
             "frame": {
@@ -31,7 +31,7 @@
               "largest_alloc": 20480,
               "alloc_count": 6482,
               "alloc_bytes": 357560,
-              "largest_free_at_close": 171680,
+              "largest_free_at_close": 171552,
               "holes_at_close": 12
             },
             "shader-compile": {
@@ -40,7 +40,7 @@
               "largest_alloc": 8148,
               "alloc_count": 3686,
               "alloc_bytes": 188589,
-              "largest_free_at_close": 131552,
+              "largest_free_at_close": 131424,
               "holes_at_close": 37
             },
             "shader-link": {
@@ -49,7 +49,7 @@
               "largest_alloc": 3192,
               "alloc_count": 7,
               "alloc_bytes": 3337,
-              "largest_free_at_close": 131552,
+              "largest_free_at_close": 131424,
               "holes_at_close": 38
             }
           }
@@ -62,7 +62,7 @@
               "largest_alloc": 560,
               "alloc_count": 655,
               "alloc_bytes": 30691,
-              "largest_free_at_close": 131552,
+              "largest_free_at_close": 131424,
               "holes_at_close": 49
             }
           }
@@ -84,11 +84,11 @@
             },
             "project-load": {
               "transient": 46348,
-              "retained": 41947,
+              "retained": 42075,
               "largest_alloc": 12000,
               "alloc_count": 3591,
-              "alloc_bytes": 226515,
-              "largest_free_at_close": 224232,
+              "alloc_bytes": 226643,
+              "largest_free_at_close": 224104,
               "holes_at_close": 24
             },
             "frame": {
@@ -97,7 +97,7 @@
               "largest_alloc": 20480,
               "alloc_count": 9888,
               "alloc_bytes": 488151,
-              "largest_free_at_close": 193224,
+              "largest_free_at_close": 193096,
               "holes_at_close": 18
             },
             "shader-compile": {
@@ -106,7 +106,7 @@
               "largest_alloc": 7424,
               "alloc_count": 615,
               "alloc_bytes": 84359,
-              "largest_free_at_close": 174344,
+              "largest_free_at_close": 174216,
               "holes_at_close": 22
             },
             "shader-link": {
@@ -115,7 +115,7 @@
               "largest_alloc": 2780,
               "alloc_count": 6,
               "alloc_bytes": 2911,
-              "largest_free_at_close": 174344,
+              "largest_free_at_close": 174216,
               "holes_at_close": 29
             }
           }
@@ -128,7 +128,7 @@
               "largest_alloc": 384,
               "alloc_count": 175,
               "alloc_bytes": 5826,
-              "largest_free_at_close": 174344,
+              "largest_free_at_close": 174216,
               "holes_at_close": 29
             }
           }
@@ -150,11 +150,11 @@
             },
             "project-load": {
               "transient": 41396,
-              "retained": 36826,
+              "retained": 36954,
               "largest_alloc": 4365,
               "alloc_count": 3692,
-              "alloc_bytes": 228046,
-              "largest_free_at_close": 215432,
+              "alloc_bytes": 228174,
+              "largest_free_at_close": 215304,
               "holes_at_close": 24
             },
             "frame": {
@@ -163,7 +163,7 @@
               "largest_alloc": 20480,
               "alloc_count": 3161,
               "alloc_bytes": 281511,
-              "largest_free_at_close": 179984,
+              "largest_free_at_close": 179856,
               "holes_at_close": 11
             },
             "shader-compile": {
@@ -172,7 +172,7 @@
               "largest_alloc": 13092,
               "alloc_count": 2305,
               "alloc_bytes": 274380,
-              "largest_free_at_close": 133008,
+              "largest_free_at_close": 132880,
               "holes_at_close": 15
             },
             "shader-link": {
@@ -181,7 +181,7 @@
               "largest_alloc": 8192,
               "alloc_count": 17,
               "alloc_bytes": 8844,
-              "largest_free_at_close": 133008,
+              "largest_free_at_close": 132880,
               "holes_at_close": 51
             }
           }
@@ -194,7 +194,7 @@
               "largest_alloc": 400,
               "alloc_count": 204,
               "alloc_bytes": 6029,
-              "largest_free_at_close": 133008,
+              "largest_free_at_close": 132880,
               "holes_at_close": 23
             }
           }
@@ -210,14 +210,14 @@
         "totalBytes": 325536,
         "largestFreeBlock": 198746,
         "stackHighWater": 11668,
-        "stackTotal": 71152,
+        "stackTotal": 71136,
         "stackHighWaterBand": [
           11100,
           12200
         ]
       },
-      "recorded": "2026-09-23",
-      "commit": "0ffddcb20",
+      "recorded": "2026-09-24",
+      "commit": "14b358121",
       "comment": "What the FIRMWARE costs, not what a project costs: the shipped image (esp32c6,server,radio \u2014 the bytes a board is flashed with) booted whole on lp-emu:esp32c6:t1 and read from the allocator figures its own first heartbeat reports. `measured` is this tree, and is the ratchet; `silicon_reference` is a committed silicon capture and is NEVER gated \u2014 it is printed every run so the gap between the two cannot widen unseen. Regenerate `measured` with `just heap-budget-baseline-chips`; see docs/heap-budget-gate.md, \"The second source\".",
       "image": "esp32c6,server,radio",
       "configuration": "lp-emu:esp32c6:t1",
@@ -244,14 +244,14 @@
         "totalBytes": 241552,
         "largestFreeBlock": 108544,
         "stackHighWater": 12732,
-        "stackTotal": 45360,
+        "stackTotal": 45344,
         "stackHighWaterBand": [
           12200,
           13300
         ]
       },
-      "recorded": "2026-09-23",
-      "commit": "0ffddcb20",
+      "recorded": "2026-09-24",
+      "commit": "14b358121",
       "comment": "What the classic's FIRMWARE costs: the shipped image (esp32,server,float-f32 \u2014 lp-fw/fw-esp32v3's own default feature set, the bytes the DOM-Z-102 is flashed with) direct-loaded on lp-emu:esp32v3:t1 and read from its FIRST heartbeat triple. \u26a0\ufe0f That triple is ELICITED, not idle-emitted: `esp32_memory_stats` runs on a project load/unload/stop-all or a client `runtime_status`, never on the five-second server heartbeat, so a classic boot with nobody talking prints no `[MEM]` line at all. The gate asks for it with lp-emu/lp-emu-validate/walks/v3-stop-all.script \u2014 the same bytes on the same trigger as lp-emu-esp32v3/tests/boot_idle.rs and as the desk sitting \u2014 and stops on the first `[JIT] used=` line. `measured` is this tree, and is the ratchet. Regenerate with `just heap-budget-baseline-chips-v3`; see docs/heap-budget-gate.md, \"The second source\".",
       "image": "esp32,server,float-f32",
       "configuration": "lp-emu:esp32v3:t1",
@@ -304,14 +304,14 @@
         "totalBytes": 245756,
         "largestFreeBlock": 230990,
         "stackHighWater": 12400,
-        "stackTotal": 37296,
+        "stackTotal": 37280,
         "stackHighWaterBand": [
           11900,
           12900
         ]
       },
-      "recorded": "2026-09-23",
-      "commit": "0ffddcb20",
+      "recorded": "2026-09-24",
+      "commit": "14b358121",
       "comment": "What the S3's FIRMWARE costs: the shipped image (esp32s3,server,float-f32 \u2014 lp-fw/fw-esp32s3's own default feature set, the bytes the M4-walk XIAO ESP32-S3 Plus is flashed with) direct-loaded on lp-emu:esp32s3:t1 and read from its FIRST heartbeat triple. \u26a0\ufe0f That triple is ELICITED, not idle-emitted, exactly as on the classic and NOT as on the C6: `esp32_memory_stats` (M6 P04b) runs on a project load/unload/stop-all or a client `runtime_status`, never on the five-second server heartbeat \u2014 a periodic printer would flood the very USB-Serial-JTAG link the transport runs on. The gate asks for it with lp-emu/lp-emu-validate/walks/s3-stop-all.script \u2014 the same bytes on the same trigger line as lp-emu-esp32s3/tests/boot_idle.rs \u2014 and stops on the first `[JIT] used=` line. `measured` is this tree, and is the ratchet. Regenerate with `just heap-budget-baseline-chips-s3`; see docs/heap-budget-gate.md, \"The second source\".",
       "image": "esp32s3,server,float-f32",
       "configuration": "lp-emu:esp32s3:t1",

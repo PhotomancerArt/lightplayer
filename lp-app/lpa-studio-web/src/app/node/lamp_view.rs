@@ -567,21 +567,15 @@ fn order_channels(color_order: ColorOrder, [a, b, c]: [u8; 3]) -> [u8; 3] {
 
 /// Encode one LINEAR unorm16 control sample as display sRGB8.
 ///
-/// Control samples ride the wire in linear light (the engine renders
-/// `Unorm16` and ships the buffer raw); the render-TEXTURE probe converts
-/// engine-side (`rgba16_linear_to_srgb8`), so until this conversion the two
-/// previews disagreed — linear-as-sRGB reads darker and oversaturated (the
-/// 2026-08-05 G1 finding: "much more saturated than the shader"). Same
-/// transfer as the engine's LUT, float form (non-embedded client; ~4.5k
-/// calls/frame is nothing here).
+/// Control samples are linear light (the engine renders `Unorm16`); shown
+/// raw they read darker and oversaturated next to the render-TEXTURE probe,
+/// which converts engine-side (the 2026-08-05 G1 finding: "much more
+/// saturated than the shader"). This is the wire's own correctly rounded
+/// encoder (`lpc_wire::linear16_to_srgb8`), the one the engine uses for
+/// `Srgb8` previews and textures — so an `Srgb8` preview, decoded to linear
+/// and re-encoded here, draws exactly the codes the engine sent.
 pub(crate) fn linear_unorm16_to_srgb8(value: u16) -> u8 {
-    let linear = value as f32 / 65535.0;
-    let srgb = if linear <= 0.003_130_8 {
-        12.92 * linear
-    } else {
-        1.055 * linear.powf(1.0 / 2.4) - 0.055
-    };
-    (srgb * 255.0 + 0.5) as u8
+    lpc_wire::linear16_to_srgb8(value)
 }
 
 fn install_lamp_resize_observer(
@@ -730,13 +724,59 @@ mod tests {
         );
     }
 
-    /// An 8-bit preview decodes to the colour its 16-bit twin does: each
-    /// level widens by ×257 before the sRGB transfer, so 0 and 255 land on
-    /// the same black and full scale, and a midtone on the same display
+    /// The wire encoder is the float transfer this view used to evaluate
+    /// itself (f32, the pre-follow-ups implementation), for every input — so
+    /// moving onto it changed no pixel.
+    #[test]
+    fn the_wire_encoder_matches_the_float_transfer_for_every_input() {
+        for value in 0..=u16::MAX {
+            let linear = f32::from(value) / 65535.0;
+            let srgb = if linear <= 0.003_130_8 {
+                12.92 * linear
+            } else {
+                1.055 * linear.powf(1.0 / 2.4) - 0.055
+            };
+            let float = (srgb * 255.0 + 0.5) as u8;
+            assert_eq!(linear_unorm16_to_srgb8(value), float, "value {value}");
+        }
+    }
+
+    /// An sRGB8 preview (what Studio pulls) draws exactly the codes the
+    /// engine sent: every code decodes to linear and re-encodes to itself,
+    /// and each is the code its 16-bit twin draws.
+    #[test]
+    fn srgb8_previews_draw_the_codes_the_engine_sent() {
+        for code in 0..=u8::MAX {
+            let display = UiControlProductPreview {
+                bytes: vec![code, 0, 0].into(),
+                ..wire_frame(1)
+            };
+            let linear = lpc_wire::srgb8_to_linear16(code);
+            let wide = UiControlProductPreview {
+                sample_format: lpa_studio_core::UiControlSampleFormat::U16,
+                bytes: [linear, 0, 0]
+                    .iter()
+                    .flat_map(|sample| sample.to_le_bytes())
+                    .collect::<Vec<u8>>()
+                    .into(),
+                ..wire_frame(1)
+            };
+            assert_eq!(control_rgb_at_sample(&display, 0), Some([code, 0, 0]));
+            assert_eq!(
+                control_rgb_at_sample(&display, 0),
+                control_rgb_at_sample(&wide, 0)
+            );
+        }
+    }
+
+    /// A linear 8-bit preview decodes to the colour its 16-bit twin does:
+    /// each level widens by ×257 before the sRGB transfer, so 0 and 255 land
+    /// on the same black and full scale, and a midtone on the same display
     /// byte as the unorm16 value it stands for.
     #[test]
     fn eight_and_sixteen_bit_previews_decode_alike() {
         let narrow = UiControlProductPreview {
+            sample_format: lpa_studio_core::UiControlSampleFormat::U8,
             bytes: vec![255_u8, 128, 0].into(),
             ..wire_frame(1)
         };
@@ -759,7 +799,7 @@ mod tests {
         );
     }
 
-    /// A live wire frame (8-bit, what Studio pulls) whose lamp `n` carries
+    /// A live wire frame (sRGB8, what Studio pulls) whose lamp `n` carries
     /// full-red at `n == 0`, full-green at `n == 1`, … cycling —
     /// distinguishable colors per wire position.
     fn wire_frame(lamps: u32) -> UiControlProductPreview {
@@ -772,7 +812,7 @@ mod tests {
         UiControlProductPreview {
             revision: 1,
             extent: ControlExtent::new(1, lamps * 3),
-            sample_format: lpa_studio_core::UiControlSampleFormat::U8,
+            sample_format: lpa_studio_core::UiControlSampleFormat::Srgb8,
             sample_layout: ControlSampleLayout {
                 spans: vec![ControlSampleSpan {
                     row: 0,

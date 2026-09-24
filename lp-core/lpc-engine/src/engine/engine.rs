@@ -139,6 +139,10 @@ pub struct Engine {
     /// project read's state-root gate (see [`super::state_root_stamps`]).
     /// Read bookkeeping, not project data.
     state_root_stamps: super::state_root_stamps::StateRootStamps,
+    /// When each tree entry's status/state last changed by content — the
+    /// tree deltas' `change_frame` (see [`super::tree_entry_stamps`]).
+    /// Read bookkeeping, not project data.
+    tree_entry_stamps: super::tree_entry_stamps::TreeEntryStamps,
     /// Every node in [`NodeRuntimeStatus::Fault`] as of the END of the last
     /// tick, and when the project's continuous fault began — the project-level
     /// verdict outputs paint the fault pattern from (D1).
@@ -199,6 +203,7 @@ impl Engine {
             control_geometry_stamps: Default::default(),
             binding_structure_stamp: Default::default(),
             state_root_stamps: Default::default(),
+            tree_entry_stamps: Default::default(),
             project_fault: None,
             project_fault_fingerprint: None,
             fault_presentation: FaultPresentation::default(),
@@ -601,6 +606,19 @@ impl Engine {
                 })
             });
         }
+    }
+
+    /// Hash every tree entry's `entry_changed` content and stamp the ones
+    /// that moved (see [`super::tree_entry_stamps`]). A read runs this right
+    /// before it streams tree deltas.
+    pub(super) fn refresh_tree_entry_stamps(&mut self) {
+        self.tree_entry_stamps.refresh(&self.tree, self.revision);
+    }
+
+    /// When `node`'s status/state last changed by content, as of the last
+    /// [`Self::refresh_tree_entry_stamps`].
+    pub(super) fn tree_entry_changed_at(&self, node: NodeId) -> Option<Revision> {
+        self.tree_entry_stamps.changed_at(node)
     }
 
     /// When `node`'s state slot root last changed by content, as of the

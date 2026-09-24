@@ -22,7 +22,7 @@
 //!
 //! All three travel once and then answer `Unchanged` while the bundle's
 //! revision stands, so a steady feed ships geometry once and samples
-//! thereafter. The gate is PER OUTPUT ([`OutputFrameGeometryRead::IfChanged`]
+//! thereafter. The gate is PER OUTPUT ([`RevisionGateRead::IfChanged`]
 //! lists a known revision for each output node), because two outputs'
 //! geometry moves independently — one shared revision would resend the
 //! geometry of every output but the oldest on every read.
@@ -39,18 +39,20 @@
 //! [`OutputFrameProbeRequest::samples`] names the element format the client
 //! wants, or `None` for no samples at all — the revision, the channel count
 //! and the gated geometry still arrive, which is everything a module face or
-//! a patch bay needs to derive its shape. When the client asks for
-//! [`WireChannelSampleFormat::U8`] and the output published `U16`, the engine
-//! rounds each sample to the nearest 8-bit level (`round(v / 257)`: 0 → 0,
-//! 65535 → 255). That is a TRANSPORT precision, not an un-correction: the
+//! a patch bay needs to derive its shape. When the client asks for an 8-bit
+//! format and the output published `U16`, the engine rounds each sample:
+//! [`WireChannelSampleFormat::U8`] to the nearest linear 8-bit level
+//! (`round(v / 257)`), [`WireChannelSampleFormat::Srgb8`] to the correctly
+//! rounded sRGB display code (`crate::linear16_to_srgb8`); both map 0 → 0 and
+//! 65535 → 255. That is a TRANSPORT precision, not an un-correction: the
 //! values are still the post-finalize ones above, only coarser. A buffer
-//! published at `U8` is never widened; the entry's own
+//! published at `U8` is never widened or re-encoded; the entry's own
 //! [`OutputFrameEntry::sample_format`] always says what `bytes` holds.
 //!
 //! # Bandwidth
 //!
 //! One frame is `channels × 3 × 2` bytes before base64 at `U16`, and half
-//! that at `U8`, on a link shared with every other protocol message; at `U16`
+//! that at either 8-bit format, on a link shared with every other protocol message; at `U16`
 //! a 1500-lamp dome frame is ~9 KB, a 300-lamp strip ~1.8 KB. The geometry is what the gate keeps off the steady read:
 //! before it, the PLAYFUL choker's 73-lamp entry carried 1,070 B of sample
 //! layout and 99 B of placements on every read, and small-dome's two entries
@@ -67,7 +69,7 @@ use lpc_model::{ControlSampleLayout, NodeId, Revision};
 
 use crate::project::WireChannelSampleFormat;
 
-use super::{GeometryDisplayLayout, RevisionGateResult};
+use super::{GeometryDisplayLayout, RevisionGateRead, RevisionGateResult};
 
 /// Request the frames every output node has already published.
 ///
@@ -77,54 +79,16 @@ use super::{GeometryDisplayLayout, RevisionGateResult};
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
 pub struct OutputFrameProbeRequest {
-    /// Geometry gate — the control-product probe's idiom, kept per output,
-    /// so a feed can ask for each output's geometry once and then say "only
-    /// if it changed".
-    pub geometry: OutputFrameGeometryRead,
+    /// Geometry gate, per output: `IfChanged` lists a
+    /// [`KnownRevision`](super::KnownRevision) naming each output node the
+    /// client holds geometry for, so a feed asks for each output's geometry
+    /// once and then says "only if it changed". An output the list does not
+    /// name gets its geometry.
+    pub geometry: RevisionGateRead,
     /// The element format the client wants the samples in, or `None` for no
     /// samples at all (geometry and revisions only). `U8` down-converts a
     /// `U16` buffer by rounding to nearest; see the module docs.
     pub samples: Option<WireChannelSampleFormat>,
-}
-
-/// Whether and how an output-frame probe should ship each output's geometry.
-///
-/// The per-output twin of [`super::RevisionGateRead`].
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-#[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
-#[serde(rename_all = "snake_case")]
-pub enum OutputFrameGeometryRead {
-    /// No geometry for any output.
-    None,
-    /// Every output's geometry.
-    Always,
-    /// Each output's geometry only when its revision differs from the one
-    /// listed for it. An output the list does not name gets its geometry —
-    /// that is how a client asks for one it has never seen.
-    IfChanged {
-        known: Vec<KnownOutputFrameGeometry>,
-    },
-}
-
-/// One output's geometry revision, as a client holds it.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-#[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
-pub struct KnownOutputFrameGeometry {
-    pub node: NodeId,
-    pub revision: Revision,
-}
-
-impl OutputFrameGeometryRead {
-    /// Whether the client already holds `node`'s geometry at `revision`.
-    #[must_use]
-    pub fn holds(&self, node: NodeId, revision: Revision) -> bool {
-        match self {
-            Self::IfChanged { known } => known
-                .iter()
-                .any(|entry| entry.node == node && entry.revision == revision),
-            Self::None | Self::Always => false,
-        }
-    }
 }
 
 /// Result of a published output-frame probe.
@@ -159,7 +123,7 @@ pub struct OutputFrameEntry {
     /// the request asked for no samples — `bytes` is then empty.
     pub sample_format: Option<WireChannelSampleFormat>,
     /// Everything static about the buffer, gated by the request's
-    /// [`OutputFrameGeometryRead`].
+    /// [`RevisionGateRead`] for this entry's node.
     pub geometry: RevisionGateResult<OutputFrameGeometry>,
     /// The published buffer, verbatim at `U16` or rounded to `U8` as the
     /// request asked; empty when it asked for none.
@@ -332,7 +296,7 @@ mod tests {
     fn samples_are_optional_on_request_and_entry() {
         for samples in [None, Some(WireChannelSampleFormat::U8)] {
             let request = OutputFrameProbeRequest {
-                geometry: OutputFrameGeometryRead::None,
+                geometry: RevisionGateRead::None,
                 samples,
             };
             let json = serde_json::to_string(&request).unwrap();
@@ -343,7 +307,7 @@ mod tests {
         }
         assert_eq!(
             crate::json::to_string(&OutputFrameProbeRequest {
-                geometry: OutputFrameGeometryRead::None,
+                geometry: RevisionGateRead::None,
                 samples: Some(WireChannelSampleFormat::U8),
             })
             .unwrap(),

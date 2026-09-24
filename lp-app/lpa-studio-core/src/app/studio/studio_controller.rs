@@ -493,7 +493,7 @@ impl StudioController {
     /// records into its shared bridge cell (P2: the engine-verdict seam;
     /// P3: the params-diff seam). Runs at the end of every processed batch
     /// — cheap while no sessions exist — so a running agent's bounded
-    /// verdict wait observes the status Revision advancing as pulls land,
+    /// verdict wait observes each pull's read revision as it lands,
     /// and its params diff sees acked def edits.
     fn refresh_agent_engine_status(&mut self) {
         let project = &self.project;

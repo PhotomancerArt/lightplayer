@@ -1844,10 +1844,10 @@ fn a_fed_boards_last_frame_survives_a_reload() {
     let live = feed.frame().expect("the feed's frame");
     // The packed layout form quantizes lamp centers, so the picture is
     // compared by what a slot would draw from it, not bit for bit.
-    // The card pulls at 8 bits and the sidecar stores 16 (widened by ×257),
-    // so the samples are compared as the lamp decode reads them.
+    // The card pulls sRGB8 and the sidecar stores linear 16 (each code
+    // decoded), so the samples are compared as the lamp decode reads them.
     assert_eq!(stored.revision, live.revision);
-    assert_eq!(live.sample_format, crate::UiControlSampleFormat::U8);
+    assert_eq!(live.sample_format, crate::UiControlSampleFormat::Srgb8);
     assert_eq!(stored.sample_format, crate::UiControlSampleFormat::U16);
     assert_eq!(stored.extent, live.extent);
     let samples = |frame: &crate::UiControlProductPreview| -> Vec<Option<u16>> {
