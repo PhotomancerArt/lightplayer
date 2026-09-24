@@ -75,38 +75,52 @@ impl BleReach {
 }
 
 /// Ask the browser once, per mounted slot. The host build (tests, stories
-/// with no override) answers `Unsupported`: it has no Bluetooth.
+/// with no override) has no Bluetooth and answers `Unsupported`.
 pub fn use_ble_reach() -> Signal<BleReach> {
+    let mut reach = use_signal(|| BleReach::Checking);
+    use_future(move || async move {
+        reach.set(ask_browser().await);
+    });
+    reach
+}
+
+async fn ask_browser() -> BleReach {
     #[cfg(target_arch = "wasm32")]
     {
-        let mut reach = use_signal(|| BleReach::Checking);
-        use_future(move || async move {
-            reach.set(ask_browser().await);
-        });
-        reach
+        use lpa_link::providers::browser_ble::{BleBrowser, availability};
+
+        let found = availability().await;
+        let family = match found.browser {
+            BleBrowser::Brave => "brave",
+            BleBrowser::Ios => "ios",
+            BleBrowser::Firefox => "firefox",
+            BleBrowser::Safari => "safari",
+            BleBrowser::Other => "other",
+        };
+        reach_from(
+            found.supported,
+            found.available,
+            BleReach::for_browser(family),
+        )
     }
     #[cfg(not(target_arch = "wasm32"))]
     {
-        use_signal(|| BleReach::Unsupported)
+        reach_from(false, None, BleReach::for_browser("host"))
     }
 }
 
-#[cfg(target_arch = "wasm32")]
-async fn ask_browser() -> BleReach {
-    use lpa_link::providers::browser_ble::{BleBrowser, availability};
-
-    let found = availability().await;
-    reach_from(
-        found.supported,
-        found.available,
-        match found.browser {
-            BleBrowser::Brave => Some(BleReach::Brave),
-            BleBrowser::Ios => Some(BleReach::Ios),
-            BleBrowser::Firefox => Some(BleReach::Firefox),
-            BleBrowser::Safari => Some(BleReach::Safari),
-            BleBrowser::Other => None,
-        },
-    )
+impl BleReach {
+    /// The sentence family for a browser WITHOUT Web Bluetooth, by the key
+    /// `browser_ble.js`'s `availability()` reports; `None` for any other.
+    pub fn for_browser(key: &str) -> Option<Self> {
+        match key {
+            "brave" => Some(Self::Brave),
+            "ios" => Some(Self::Ios),
+            "firefox" => Some(Self::Firefox),
+            "safari" => Some(Self::Safari),
+            _ => None,
+        }
+    }
 }
 
 /// The decision, apart from the browser so it is testable: a browser WITH
