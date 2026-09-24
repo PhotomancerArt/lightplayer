@@ -2569,6 +2569,21 @@ _test-parallel: test-rust test-filetests test-emu-lab
 
 test-rust-core:
     cargo test
+    # lp-json-pack's corpus tests need its host features (`required-features`),
+    # which the plain workspace run never turns on. No dependencies: cheap.
+    cargo test -p lp-json-pack --all-features
+
+# The vendored serializer forks' own tests: upstream's, plus the LP token
+# hook's. `third_party/ser-write` and `third_party/ser-write-json` are their
+# own workspaces (not members, so the root's lints and `cargo fmt --all` stay
+# off upstream code), which is why this is `--manifest-path`, not `-p`. They
+# resolve their own dependencies, so this is a local check, not a CI job; the
+# hook's behaviour on the wire types is covered by `cargo test -p lpc-wire
+# --features ser-write-json`, which CI runs through `test-rust-core`.
+test-ser-write:
+    CARGO_TARGET_DIR="$PWD/target" cargo test --manifest-path third_party/ser-write/Cargo.toml
+    CARGO_TARGET_DIR="$PWD/target" cargo test --manifest-path third_party/ser-write-json/Cargo.toml
+    rm -f third_party/ser-write/Cargo.lock third_party/ser-write-json/Cargo.lock
 
 # Host Xtensa execution (`lpvm-native/emu-xt`): the ISA-parameterized rt_emu
 # engine running compiled Xtensa code on lp-xt-emu, differentially checked

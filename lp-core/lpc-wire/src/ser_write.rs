@@ -16,6 +16,7 @@
 
 use ser_write_json::SerWrite;
 use ser_write_json::ser::to_writer;
+use ser_write_json::ser_write::Token;
 use serde::Serialize;
 
 /// Error from a type-erased wire serialization.
@@ -38,6 +39,8 @@ impl core::fmt::Display for ErasedWriteError {
 /// is a single type regardless of the underlying writer.
 trait DynSink {
     fn write_all(&mut self, buf: &[u8]) -> Result<(), ErasedWriteError>;
+    /// Forward one structural token; `Ok(false)` means "write the text".
+    fn token(&mut self, token: Token<'_>) -> Result<bool, ErasedWriteError>;
 }
 
 /// Adapts any [`SerWrite`] into a [`DynSink`]. This *is* generic, but it
@@ -49,11 +52,18 @@ impl<W: SerWrite> DynSink for SinkOf<'_, W> {
     fn write_all(&mut self, buf: &[u8]) -> Result<(), ErasedWriteError> {
         self.0.write(buf).map_err(|_| ErasedWriteError)
     }
+
+    fn token(&mut self, token: Token<'_>) -> Result<bool, ErasedWriteError> {
+        self.0.token(token).map_err(|_| ErasedWriteError)
+    }
 }
 
 /// The single [`SerWrite`] type the JSON serializer is ever instantiated over.
 struct ErasedSerWrite<'a> {
     sink: &'a mut dyn DynSink,
+    /// The sink's [`SerWrite::TAKES_TOKENS`], read once: a text sink then
+    /// pays one branch per token instead of a virtual call.
+    takes_tokens: bool,
 }
 
 impl SerWrite for ErasedSerWrite<'_> {
@@ -61,6 +71,14 @@ impl SerWrite for ErasedSerWrite<'_> {
 
     fn write(&mut self, buf: &[u8]) -> Result<(), Self::Error> {
         self.sink.write_all(buf)
+    }
+
+    #[inline]
+    fn token(&mut self, token: Token<'_>) -> Result<bool, Self::Error> {
+        if !self.takes_tokens {
+            return Ok(false);
+        }
+        self.sink.token(token)
     }
 }
 
@@ -78,12 +96,19 @@ impl SerWrite for ErasedSerWrite<'_> {
 ///
 /// The cost is one virtual call per write op. The serializer writes slices
 /// rather than single bytes, so this is not measurable on the streaming path.
+///
+/// A sink with [`SerWrite::TAKES_TOKENS`] also receives the serializer's
+/// structural tokens (see `ser_write::Token`) and writes no text for the ones
+/// it takes; every other sink gets exactly the JSON text.
 pub fn ser_write_json_to<W: SerWrite, T: Serialize + ?Sized>(
     sink: &mut W,
     value: &T,
 ) -> Result<(), ErasedWriteError> {
     let mut adapter = SinkOf(sink);
-    let mut erased = ErasedSerWrite { sink: &mut adapter };
+    let mut erased = ErasedSerWrite {
+        sink: &mut adapter,
+        takes_tokens: W::TAKES_TOKENS,
+    };
     to_writer(&mut erased, value).map_err(|_| ErasedWriteError)
 }
 
@@ -454,6 +479,146 @@ mod cross_serializer_tests {
             delta < crate::PROJECT_READ_FRAME_SERIAL_MARGIN_BYTES,
             "serde_json vs ser-write-json delta {delta} exceeded serial margin {}",
             crate::PROJECT_READ_FRAME_SERIAL_MARGIN_BYTES,
+        );
+    }
+}
+
+/// The token hook through the erased writer, and JSON byte-identity over
+/// recorded traffic.
+#[cfg(test)]
+mod token_hook_tests {
+    use super::ser_write_json_to;
+    use crate::project::{WireRuntimeBufferMetadataPayload, WireRuntimeBufferPayload};
+    use crate::{ClientMessage, WireServerMessage};
+    use alloc::format;
+    use alloc::string::String;
+    use alloc::vec;
+    use alloc::vec::Vec;
+    use lpc_model::{ResourceRef, Revision, RuntimeBufferId};
+    use ser_write_json::SerWrite;
+    use ser_write_json::ser_write::Token;
+
+    /// Recorded Studio ↔ choker traffic (`<` board→host, `>` host→board),
+    /// one `M!` line each; shared with `lp-json-pack`'s round-trip tests.
+    const TRAFFIC: &str =
+        include_str!("../../../lp-base/lp-json-pack/tests/fixtures/choker-lens-sample.txt");
+
+    /// A sink that takes every token (`take`) or declines every one, and
+    /// records both.
+    struct TokenLog {
+        take: bool,
+        tokens: Vec<String>,
+        text: Vec<u8>,
+    }
+
+    impl SerWrite for TokenLog {
+        type Error = core::convert::Infallible;
+        const TAKES_TOKENS: bool = true;
+
+        fn write(&mut self, buf: &[u8]) -> Result<(), Self::Error> {
+            self.text.extend_from_slice(buf);
+            Ok(())
+        }
+
+        fn token(&mut self, token: Token<'_>) -> Result<bool, Self::Error> {
+            if self.take {
+                self.tokens.push(format!("{token:?}"));
+            }
+            Ok(self.take)
+        }
+    }
+
+    fn payload() -> WireRuntimeBufferPayload {
+        WireRuntimeBufferPayload {
+            resource_ref: ResourceRef::runtime_buffer(RuntimeBufferId::new(3)),
+            revision: Revision::new(2),
+            metadata: WireRuntimeBufferMetadataPayload::Raw,
+            bytes: vec![1, 2, 3],
+        }
+    }
+
+    #[test]
+    fn recorded_traffic_reserializes_byte_for_byte() {
+        let mut lines = 0;
+        for line in TRAFFIC.lines() {
+            let (direction, json) = line.split_at(2);
+            let Some(json) = json.strip_prefix("M!") else {
+                continue;
+            };
+            let mut out = Vec::new();
+            match direction {
+                "< " => {
+                    let msg: WireServerMessage = crate::json::from_str(json).unwrap();
+                    ser_write_json_to(&mut out, &msg).unwrap();
+                }
+                "> " => {
+                    let msg: ClientMessage = crate::json::from_str(json).unwrap();
+                    ser_write_json_to(&mut out, &msg).unwrap();
+                }
+                other => panic!("unknown direction {other:?}"),
+            }
+            assert_eq!(core::str::from_utf8(&out).unwrap(), json);
+            lines += 1;
+        }
+        assert!(
+            lines > 100,
+            "the fixture holds the recorded lines ({lines})"
+        );
+    }
+
+    #[test]
+    fn a_token_sink_behind_the_erased_writer_gets_tokens_and_a_blob() {
+        let mut log = TokenLog {
+            take: true,
+            tokens: Vec::new(),
+            text: Vec::new(),
+        };
+        ser_write_json_to(&mut log, &payload()).unwrap();
+        assert!(
+            log.text.is_empty(),
+            "no text reaches a sink that takes tokens"
+        );
+        let expected = [
+            "MapBegin",
+            "Key(\"ref\")",
+            "Separator",
+            "MapBegin",
+            "Key(\"domain\")",
+            "Separator",
+            "Str(\"runtime_buffer\")",
+            "Separator",
+            "Key(\"id\")",
+            "Separator",
+            "U64(3)",
+            "MapEnd",
+            "Separator",
+            "Key(\"revision\")",
+            "Separator",
+            "I64(2)",
+            "Separator",
+            "Key(\"metadata\")",
+            "Separator",
+            "Str(\"raw\")",
+            "Separator",
+            "Key(\"bytes\")",
+            "Separator",
+            "Blob([1, 2, 3])",
+            "MapEnd",
+        ];
+        assert_eq!(log.tokens, expected);
+    }
+
+    #[test]
+    fn a_token_sink_that_declines_gets_the_json_text() {
+        let mut log = TokenLog {
+            take: false,
+            tokens: Vec::new(),
+            text: Vec::new(),
+        };
+        ser_write_json_to(&mut log, &payload()).unwrap();
+        assert_eq!(
+            core::str::from_utf8(&log.text).unwrap(),
+            r#"{"ref":{"domain":"runtime_buffer","id":3},"revision":2,"metadata":"raw","bytes":"AQID"}"#
         );
     }
 }
