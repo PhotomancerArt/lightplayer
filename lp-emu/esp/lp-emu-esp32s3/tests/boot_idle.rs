@@ -41,26 +41,42 @@
 //! directive P08's `walks/s3-stop-all.script` carries.
 //! [`the_ledger_triple_is_elicited_by_a_stop_all_on_the_wire`] is that run.
 //!
-//! # ⚠️ The link drops one packet of the io_task's first framed write
+//! # ⚠️ The link's stale-`serial_in_empty` defect, and where it shows now
 //!
-//! With the boot going past the `[INIT]` chain, the first thing the wire
-//! carries that is longer than 64 bytes is the `hello`, and **one 64-byte
-//! packet of it never reaches the host** — on both boot paths, at the same
-//! instruction. The mechanism is in
-//! `docs/defects/2026-09-13-the-s3-link-drops-the-io-tasks-next-chunk-on-a-stale-serial-in-empty.md`:
-//! esp-println's polled path leaves `serial_in_empty` set in `int_raw`
-//! after its packet drains, esp-hal's `UsbSerialJtagWriteFuture::new` only
-//! *enables* the interrupt and never clears the stale raw, so the future
-//! resolves 342 cycles after the io_task's first chunk commits — long before
-//! the modelled 100 µs drain — and the next chunk is written into a FIFO
-//! the model holds committed and drops. A stop-all's **reply** is lost the
-//! same way, behind the triple's last `esp_println` packet.
+//! `docs/defects/2026-09-13-the-s3-link-drops-the-io-tasks-next-chunk-on-a-stale-serial-in-empty.md`
+//! is **open**: esp-println's polled path leaves `serial_in_empty` set in
+//! `int_raw` after its packet drains, esp-hal's `UsbSerialJtagWriteFuture::new`
+//! only *enables* the interrupt and never clears the stale raw, so an
+//! io_task write future can resolve a few hundred cycles after its chunk
+//! commits — long before the modelled 100 µs drain — and the next chunk is
+//! written into a FIFO the model holds committed and drops.
 //!
-//! This file **pins that behaviour where it shows** rather than widening
-//! anything: the tried stream's length and content are asserted, with the
-//! defect named, so that whichever side is fixed — the link model, if
-//! silicon accepts a write while a packet is pending; esp-hal, if it should
-//! clear the raw; the firmware, if it should — flips one assertion here.
+//! Until 2026-09-23 the boot `hello` lost one 64-byte packet to it. It no
+//! longer does, and **the mechanism is unchanged — it is a race the boot now
+//! loses the other way.** The io_task's first poll clears `serial_in_empty`
+//! (`int_clr = 0x08`) as it takes the link. On the image before
+//! `feat/lp-json-pack` that clear landed 140 cycles *before* the `[INIT]`
+//! chain's last 1-byte packet drained (clear at cyc 4,396,066, drain at
+//! 4,396,206), so the drain re-raised the bit behind it and the hello's
+//! first chunk woke on it. That branch made the main task's JSON path
+//! slower (out-of-line field-prefix helpers), the io_task is first polled
+//! later, and its clear now lands 4,522 cycles *after* the drain (drain at
+//! 4,396,360, clear at 4,400,882): `int_raw` reads `0x302` rather than
+//! `0x30a` before the hello, the write future waits the full drain, and the
+//! hello arrives whole on both boot paths. The defect is **latent** here —
+//! any image whose io_task is first polled inside the last `[INIT]` packet's
+//! drain brings the drop back.
+//!
+//! What this file pins, without widening anything:
+//!
+//! - the boot `hello` is **delivered whole**, the packet the defect used to
+//!   eat (`.button","node.clock",…`) included, with nothing merely tried —
+//!   so a timing shift that re-opens the race fails here by name;
+//! - a stop-all's **reply** is still written and lost, behind the ledger
+//!   triple's last `esp_println` packet
+//!   ([`the_ledger_triple_is_elicited_by_a_stop_all_on_the_wire`]) — that is
+//!   the defect's live witness now, and the assertion the fix flips.
+//!
 //! The `[INIT]` chain itself (esp-println, polled) is delivered whole and
 //! is still pinned byte for byte as the stream's prefix.
 //!
@@ -101,7 +117,7 @@ fn images() -> Option<(PathBuf, PathBuf)> {
 /// boot stage is 30 s away.
 const GATE_US: u64 = 2_000_000;
 
-/// The defect entry for the link's dropped packet (module docs).
+/// The defect entry for the link's stale-`serial_in_empty` drop (module docs).
 const LINK_DEFECT: &str = "docs/defects/2026-09-13-the-s3-link-drops-the-io-tasks-next-chunk-on-a-stale-serial-in-empty.md";
 
 /// The three lines P05 pinned as absent and P06 delivers (DD86), plus the
@@ -116,29 +132,30 @@ const PAST_P05: &[&str] = &[
     "[RECOVERY] boot complete (first frame served)",
 ];
 
-/// What the link drops of the io_task's first framed write with a draining
-/// host attached from power-on: one 64-byte packet from inside the `hello`.
-/// See [`LINK_DEFECT`].
-fn assert_the_one_dropped_packet(machine: &Machine, delivered: &[u8]) {
+/// The packet of the `hello`'s feature list that [`LINK_DEFECT`]'s race
+/// dropped until 2026-09-23 (module docs). Asserted **present** now, so a
+/// timing shift that re-opens the race is a named failure.
+const ONCE_DROPPED: &str =
+    ".button\",\"node.clock\",\"node.fluid\",\"node.fixture\",\"node.playlist";
+
+/// With a draining host attached from power-on, the io_task's first framed
+/// write — the `hello` — reaches the host whole: its first chunk no longer
+/// wakes on a stale `serial_in_empty`, because the io_task's own clear now
+/// lands after the `[INIT]` chain's last packet drains. See [`LINK_DEFECT`]
+/// (still open; the stop-all reply is its live witness).
+fn assert_the_hello_is_delivered_whole(machine: &Machine, delivered: &[u8]) {
     let tried = machine.usb_sj_tried();
     let text = String::from_utf8_lossy(delivered).into_owned();
-    let lost = String::from_utf8_lossy(&tried).into_owned();
     assert_eq!(
         tried.len(),
-        64,
-        "exactly one IN packet is merely tried ({LINK_DEFECT}): {lost:?}"
+        0,
+        "nothing is merely tried: if a packet is, the stale-raw race is back \
+         ({LINK_DEFECT}): {:?}",
+        String::from_utf8_lossy(&tried)
     );
     assert!(
-        !lost.contains("[INIT]"),
-        "the esp_println chain is delivered whole; the loss is the io_task's: {lost:?}"
-    );
-    assert!(
-        lost.contains("\",\"node."),
-        "the packet is from inside the hello's feature list: {lost:?}"
-    );
-    assert!(
-        !text.contains(&lost),
-        "and the delivered stream really lacks it"
+        text.contains(ONCE_DROPPED),
+        "the packet the race used to drop is on the delivered stream ({LINK_DEFECT}):\n{text}"
     );
 }
 
@@ -230,9 +247,9 @@ fn the_shipped_image_prints_its_init_chain_out_of_the_link() {
         text.contains("[FS] Mount failed (filesystem corrupt), formatting partition..."),
         "a fresh copy of the chip is formatted on its first boot:\n{text}"
     );
-    // ⚠️ Not "a draining host took every byte": one packet of the io_task's
-    // hello is dropped, and this is where that is pinned (module docs).
-    assert_the_one_dropped_packet(&machine, &delivered);
+    // A draining host took every byte, the io_task's hello included — the
+    // stale-raw race is lost the other way on this image (module docs).
+    assert_the_hello_is_delivered_whole(&machine, &delivered);
     // The console and the link are the same stream on this chip, so
     // `--console` writes exactly this.
     assert_eq!(machine.console().bytes(), delivered);
@@ -559,15 +576,15 @@ then +2ms 4d 21 0a
     // The cable is in and the port open by 2 ms, and the firmware's first
     // line is not printed until ~8.7 ms, so a draining host takes the whole
     // chain: the script's timing is the reason nothing of it is merely
-    // tried. (The io_task's one dropped packet is the link finding, pinned
-    // in `the_shipped_image_prints_its_init_chain_out_of_the_link`.)
+    // tried. (The hello, too, is delivered whole — see the module docs for
+    // why the link's stale-raw race no longer takes a packet of it.)
     let delivered = a.usb_sj();
     let text = String::from_utf8_lossy(&delivered).into_owned();
     assert!(
         text.starts_with(HELLO),
         "the whole chain, delivered to a host the script plugged in:\n{text}"
     );
-    assert_the_one_dropped_packet(&a, &delivered);
+    assert_the_hello_is_delivered_whole(&a, &delivered);
     assert_eq!(a.usb_host_now(), Some(UsbHost::Attached { draining: true }));
 
     // **Both walk forms resolved.** The `after` step waited on a line the
@@ -643,7 +660,9 @@ then +2ms 4d 21 0a
 /// `esp_println` packet committed, into a FIFO the link model holds
 /// committed for its 100 µs drain. So the reply is on the **tried** stream
 /// and not on the delivered one (module docs, [`LINK_DEFECT`]). Pinned as
-/// what it is; the fix flips the last two assertions.
+/// what it is; the fix flips the last two assertions. Since 2026-09-23 the
+/// boot `hello` no longer shows the defect (the race is lost the other way),
+/// so **this is its live witness** — do not loosen it.
 #[test]
 #[ignore = "needs LP_EMU_ESP32S3_ELF; run through `just test-emu-esp32s3-boot`"]
 fn the_ledger_triple_is_elicited_by_a_stop_all_on_the_wire() {

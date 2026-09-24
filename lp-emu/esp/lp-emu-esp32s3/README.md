@@ -113,16 +113,19 @@ M!{"id":0,"msg":{"hello":{…}}}
 [INFO] fw_esp32s3: [fw-esp32s3] hardware manifest: seeed/xiao-esp32-s3-plus (XIAO ESP32-S3 Plus)
 …
 [INFO] fw_esp32_common::server_loop: [RECOVERY] boot complete (first frame served)
-usb-sj: host attached at power-on; 1524 bytes reached the host; 64 bytes were merely tried
+usb-sj: host attached at power-on; 1586 bytes reached the host; 0 bytes were merely tried
 flash: 8388608 (8 MiB), backing Copy("merged.bin"), jedec 0x001740ef; 491 commands (478 reads, 4 page programs, 2 sector erases, …); cache fills 34
 run: cycles=480000000 … unmapped=0 (reads 0, writes 0, 0 sites) …
 ```
 
-⚠️ **`64 bytes were merely tried` is a finding, not noise.** One packet of
-the io_task's `hello` — and a stop-all's reply — is dropped by the link
-model, because esp-hal's write future arms `serial_in_empty` without
-clearing the raw bit esp-println's polled path left set, and wakes 342
-cycles after the commit, inside the modelled 100 µs drain. Which side
+⚠️ **The link still drops a stop-all's reply**, because esp-hal's write
+future arms `serial_in_empty` without clearing the raw bit esp-println's
+polled path left set, and wakes a few hundred cycles after the commit,
+inside the modelled 100 µs drain. Until 2026-09-23 one 64-byte packet of the
+io_task's `hello` went the same way (`64 bytes were merely tried`); it no
+longer does only because the io_task's own clear of that bit now lands
+after the `[INIT]` chain's last packet drains — a timing shift, not a
+fix. Which side
 silicon agrees with is not yet measured (the `in_ep1_st` write pointer is
 seven bits wide on this part — room for two packets). Filed as
 `docs/defects/2026-09-13-the-s3-link-drops-the-io-tasks-next-chunk-on-a-stale-serial-in-empty.md`
@@ -550,8 +553,8 @@ And two things it carries rather than hides:
   the link's *tried* stream — the open defect
   `docs/defects/2026-09-13-the-s3-link-drops-the-io-tasks-next-chunk-on-a-stale-serial-in-empty.md`
   (DD103) — and `lp-cli` waits for a reply the host never got. The ROM-up
-  default loses only one 64-byte packet of the `hello`'s feature list, which
-  `lp-cli` survives. Giving the direct path a flash chip removes its `lpfs`
+  default delivers the `hello` whole since 2026-09-23 (it lost one 64-byte
+  packet before, which `lp-cli` survived; the defect entry has why). Giving the direct path a flash chip removes its `lpfs`
   error line and does **not** bring the reply back, so that log line is not
   the trigger.
 - For the same defect the ROM-up walk asks `lp-cli upload` for the deploy ack

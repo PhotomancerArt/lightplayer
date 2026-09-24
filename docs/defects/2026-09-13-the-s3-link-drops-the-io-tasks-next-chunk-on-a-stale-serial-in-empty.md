@@ -104,6 +104,44 @@ port-closed / scripted variants; `tests/boot.rs::
 the_shipped_image_gets_past_esp_hal_init_and_crosses_the_console` pins the
 same 64 bytes at 300 ms.
 
+**2026-09-23 — the boot hello no longer shows it; the mechanism is
+unchanged.** On `feat/lp-json-pack` (PR #795: a token hook in the vendored
+`ser-write-json`, struct-field prefix helpers moved `#[inline(never)]`,
+base64 blobs streamed through `collect_str`) the shipped image delivers the
+whole `hello` on both boot paths — direct `1586 bytes reached the host; 0
+bytes were merely tried`, ROM-up `3732 … 0` — where `origin/main`
+(a9429460f), run by the same emulator binary, still reads `1524 … 64` and
+`3670 … 64` with the packet above on the tried stream. The `USB_DEVICE`
+trace (direct, 300 ms, `ALIAS`/byte lines removed) shows why. The io_task's
+first poll clears `serial_in_empty` as it takes the link, and it is a race
+against the drain of the `[INIT]` chain's last 1-byte packet:
+
+```
+origin/main:
+cyc=4396066 pc=0x4208d5e0 W4 USB_DEVICE+0x014 int_clr = 0x00000008   (io_task poll)
+cyc=4396206 pc=0x4208d6b2 USB_DEVICE IN packet of 1 bytes delivered … serial_in_empty raised
+cyc=28398267 pc=0x4208d7eb R4 USB_DEVICE+0x008 int_raw = 0x0000030a   (stale bit 3)
+feat/lp-json-pack:
+cyc=4396360 pc=0x420fb8c5 USB_DEVICE IN packet of 1 bytes delivered … serial_in_empty raised
+cyc=4400882 pc=0x4208d488 W4 USB_DEVICE+0x014 int_clr = 0x00000008   (io_task poll)
+cyc=28403083 pc=0x4208d693 R4 USB_DEVICE+0x008 int_raw = 0x00000302   (bit 3 clear)
+```
+
+On main the clear lands 140 cycles *before* the drain re-raises the bit, so
+the bit is stale when the hello's write future arms. On the branch the main
+task is still inside `ser_write_json::ser::format_escaped_str_contents` when
+the packet drains (the slower JSON path delays the io_task's first poll),
+the clear lands 4,522 cycles *after* the drain, and the hello's first chunk
+waits the full 100 µs (`int_st` at 28,428,827, 24,291 cycles after its
+`int_ena = 0x08`). Nothing in esp-hal, esp-println or the link model
+changed: this is timing, and the defect is **latent** at the hello. Its
+live witness is the stop-all reply — `the_ledger_triple_is_elicited_by_a_stop_all_on_the_wire`
+still reads it on the tried stream (37 bytes) on this branch. The hello
+pins in `tests/boot_idle.rs` and `tests/boot.rs` now assert the hello
+**delivered whole** (0 tried, the once-dropped packet present), so a
+timing shift that re-opens the race fails by name. Emulator:
+`lp-emu-esp32s3` built from this worktree at d5f29f337 (t1).
+
 **Lesson** — an interrupt raw bit is state, and a driver that arms an
 enable without clearing the raw first is asserting "nothing has happened
 since I last looked" — which is only true for the code path that cleared

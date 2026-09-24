@@ -602,18 +602,20 @@ fn the_shipped_image_gets_past_esp_hal_init_and_crosses_the_console() {
         machine.usb_sj().starts_with(b"[INIT] fw-esp32s3 boot\n"),
         "the first line out of the link"
     );
-    // ⚠️ Not "a draining host took it all" any more. Since P06 the boot
-    // goes past the flash and the server loop's first framed write — the
-    // hello — loses one 64-byte packet to the link (a stale
-    // `serial_in_empty` wakes esp-hal's write future early; see
-    // `docs/defects/2026-09-13-the-s3-link-drops-the-io-tasks-next-chunk-on-a-stale-serial-in-empty.md`
-    // and `tests/boot_idle.rs`, where it is pinned in full). What this test
-    // keeps claiming is P05's: nothing of the esp-println chain is dropped.
+    // A draining host took it all. From P06 until 2026-09-23 the server
+    // loop's first framed write — the hello — lost one 64-byte packet here:
+    // a stale `serial_in_empty` woke esp-hal's write future early (see
+    // `docs/defects/2026-09-13-the-s3-link-drops-the-io-tasks-next-chunk-on-a-stale-serial-in-empty.md`,
+    // still open). The io_task's own `int_clr` of that bit now lands after
+    // the `[INIT]` chain's last packet drains rather than 140 cycles before
+    // it, so the hello arrives whole; `tests/boot_idle.rs`'s module docs
+    // have the trace. A packet merely tried here means that race is back.
     let tried = machine.usb_sj_tried();
-    assert_eq!(tried.len(), 64, "the one dropped packet, and only it");
-    assert!(
-        !String::from_utf8_lossy(&tried).contains("[INIT]"),
-        "the esp-println chain reached the host whole"
+    assert_eq!(
+        tried.len(),
+        0,
+        "nothing merely tried: {:?}",
+        String::from_utf8_lossy(&tried)
     );
 
     // Where P05's run stopped, and where P06's goes: past the flash read —
