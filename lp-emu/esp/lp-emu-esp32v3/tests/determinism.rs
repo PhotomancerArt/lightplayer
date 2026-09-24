@@ -301,8 +301,27 @@ fn the_snapshot_carries_the_state_that_is_not_a_register() {
 /// way to the same 543 bytes at the same cycle: the bytes, the sha, the
 /// cycle count and the skip count did not move. Re-pinned with that cause
 /// attached; a further change here is a finding again.
-const PREFIX_CYCLES: u64 = 3_245_171;
-const PREFIX_INSTRUCTIONS: u64 = 3_245_151;
+///
+/// ⚠️ **The BLE plan's M3 (access core) moved both by +5,856: 3,245,171 →
+/// 3,251,027 cycles, 3,245,151 → 3,251,007 instructions.** Not the machine —
+/// the image. Found with `LP_EMU_XT_BLOCKPROF` on `origin/main` (`e226fb283`)
+/// against the branch, both images run to this same line: the whole
+/// difference is `boot_firmware` +5,969, `_xtensa_lx_rt_zero_fill` −60, the
+/// main task's `poll` −49 and the mask ROM −4. Inside `boot_firmware` it is
+/// one 7-instruction loop running 8,424 times instead of 7,572 — the
+/// `stack_probe::paint` loop, which paints from the stack bottom to 1 KiB
+/// below the current `sp`. It paints 852 words more because both ends
+/// moved: the bottom 20 words lower (`.bss` shrank 80 B, which is also the
+/// −60 in `zero_fill`), and the `sp` at the paint 832 words (3,328 B)
+/// higher, because the embassy main task's `poll` frame shrank from `entry
+/// a1, 4304` to `entry a1, 976` — the branch's server-loop changes took
+/// temporaries off that frame (read off both ELFs' `entry` instructions,
+/// not inferred; which of the branch's commits did it was not bisected).
+/// 852 × 7 = 5,964, and the other five are straight-line code in
+/// `boot_firmware`. The bytes changed by one line for the `.bss` reason
+/// (see `PREFIX_SHA256`); the skip count did not move.
+const PREFIX_CYCLES: u64 = 3_251_027;
+const PREFIX_INSTRUCTIONS: u64 = 3_251_007;
 const PREFIX_IDLE_SKIPS: u64 = 0;
 const PREFIX_BYTES: usize = 543;
 /// Moved by the BLE plan's M3 (access core): one line of the 543 bytes,
