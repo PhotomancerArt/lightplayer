@@ -10,7 +10,7 @@ use lp_emu_esp32c6::machine::{
 use lp_emu_esp32c6::memmap;
 use lp_emu_esp32c6::pinscript::{PinScript, parse_pin_script, parse_wire};
 
-use super::args::{EmuChip, EmuCli, EmuCommand, Grade, LinkKind, RunArgs};
+use super::args::{EmuChip, EmuCli, EmuCommand, Grade, LinkKind, RunArgs, UsbHostArg};
 
 pub fn handle_emu(cli: EmuCli) -> Result<()> {
     match cli.command {
@@ -122,11 +122,7 @@ fn run(args: RunArgs) -> Result<()> {
     let mut builder = Esp32C6Builder::new()
         .time_grade(grade)
         .strict(args.strict_bus)
-        .usb_host(if args.host_absent {
-            UsbHost::Absent
-        } else {
-            UsbHost::Attached { draining: true }
-        })
+        .usb_host(usb_host_at_power_on(&args))
         // `--monitor` takes the socket out of the port's open/close story:
         // the host is declared attached and draining from power-on and stays
         // that way, so a client that uploads and leaves does not take the
@@ -308,6 +304,30 @@ fn run(args: RunArgs) -> Result<()> {
     }
 }
 
+/// The USB host at power-on: `--usb-host` when given, otherwise whatever
+/// makes the run's reader the one silicon would have.
+///
+/// When the USB port IS the `--link` socket, the socket's client is the
+/// application, so the port starts closed and the client's connect opens it
+/// (`attached-idle`). Draining from power-on with nobody connected would
+/// succeed every guest write and replay them all to a late client, which a
+/// board with no application on the port never does
+/// (`docs/defects/2026-09-23-emulated-usb-port-drains-with-no-client-attached.md`).
+/// `--monitor` declares a reader present from power-on, and with no socket
+/// on the port (no `--link`, or a UART0 one) the emulator itself is that
+/// reader: both are `attached`.
+fn usb_host_at_power_on(args: &RunArgs) -> UsbHost {
+    if let Some(host) = args.usb_host {
+        return host.usb_host();
+    }
+    let port_is_the_socket = args.link.is_some() && args.link_kind == LinkKind::Usb;
+    if port_is_the_socket && !args.monitor {
+        UsbHostArg::AttachedIdle.usb_host()
+    } else {
+        UsbHostArg::Attached.usb_host()
+    }
+}
+
 /// What the host saw, on whichever serial the link is.
 fn console_bytes(machine: &Esp32C6Machine, kind: LinkKind) -> Vec<u8> {
     match kind {
@@ -360,7 +380,61 @@ pub(super) fn parse_duration_us(text: &str) -> Result<u64> {
 
 #[cfg(test)]
 mod tests {
+    use clap::Parser;
+
     use super::*;
+
+    #[test]
+    fn a_usb_link_socket_starts_with_the_port_closed() {
+        assert_eq!(
+            host(&["--link", "127.0.0.1:5591"]),
+            UsbHost::Attached { draining: false },
+            "a client of the socket is the application: nobody reads before it connects"
+        );
+    }
+
+    #[test]
+    fn a_reader_from_power_on_is_attached_and_draining() {
+        let draining = UsbHost::Attached { draining: true };
+        // No socket on the port: the emulator is the reader (`--console`).
+        assert_eq!(host(&[]), draining);
+        assert_eq!(
+            host(&["--link", "127.0.0.1:5591", "--link-kind", "uart0"]),
+            draining
+        );
+        // `--monitor` says a reader holds the port the whole run.
+        assert_eq!(host(&["--link", "127.0.0.1:5591", "--monitor"]), draining);
+        // And `attached` is the explicit opt-in to the replay.
+        assert_eq!(
+            host(&["--link", "127.0.0.1:5591", "--usb-host", "attached"]),
+            draining
+        );
+    }
+
+    #[test]
+    fn usb_host_is_honoured_as_given() {
+        assert_eq!(host(&["--usb-host", "absent"]), UsbHost::Absent);
+        assert_eq!(
+            host(&["--usb-host", "attached-idle"]),
+            UsbHost::Attached { draining: false }
+        );
+    }
+
+    #[test]
+    fn monitor_refuses_a_usb_host() {
+        let parsed = Cli::try_parse_from([
+            "run",
+            "--elf",
+            "fw",
+            "--monitor",
+            "--usb-host",
+            "attached-idle",
+        ]);
+        assert!(
+            parsed.is_err(),
+            "--monitor already says the host is attached"
+        );
+    }
 
     #[test]
     fn a_duration_needs_a_unit() {
@@ -369,5 +443,17 @@ mod tests {
         assert_eq!(parse_duration_us("900us").unwrap(), 900);
         assert!(parse_duration_us("100").is_err());
         assert!(parse_duration_us("s").is_err());
+    }
+
+    #[derive(Parser)]
+    struct Cli {
+        #[command(flatten)]
+        run: RunArgs,
+    }
+
+    fn host(extra: &[&str]) -> UsbHost {
+        let mut argv = vec!["run", "--elf", "fw"];
+        argv.extend_from_slice(extra);
+        usb_host_at_power_on(&Cli::try_parse_from(argv).expect("parses").run)
     }
 }
