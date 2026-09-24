@@ -9,7 +9,7 @@ use std::sync::{Arc, Mutex};
 
 use futures_util::SinkExt;
 use futures_util::stream::StreamExt;
-use lpc_shared::transport::ServerTransport;
+use lpc_shared::transport::{Incoming, Link, LinkId, ServerTransport};
 use lpc_wire::WireServerMessage;
 use lpc_wire::{ClientMessage, TransportError};
 use tokio::runtime::Runtime;
@@ -271,8 +271,13 @@ impl WebSocketServerTransport {
     }
 }
 
+/// One trusted link for the whole server, whatever the number of sockets:
+/// `lp-cli serve` is a host-side development server, and its sockets are as
+/// trusted as the process that opened them. Replies still go to the first
+/// live connection, exactly as before links existed — per-connection
+/// routing is not this transport's job yet.
 impl ServerTransport for WebSocketServerTransport {
-    async fn send(&mut self, msg: WireServerMessage) -> Result<(), TransportError> {
+    async fn send(&mut self, _link: LinkId, msg: WireServerMessage) -> Result<(), TransportError> {
         // Send to the first available connection
         // TODO: In phase 7, we'll need to route messages to the correct connection
         // based on the request ID or connection tracking
@@ -325,20 +330,27 @@ impl ServerTransport for WebSocketServerTransport {
         ))
     }
 
-    async fn receive(&mut self) -> Result<Option<ClientMessage>, TransportError> {
+    async fn receive(&mut self) -> Result<Option<Incoming>, TransportError> {
         // Check for messages in the queue
         let mut state = self.shared_state.lock().unwrap();
-        Ok(state.pending_messages.pop_front().map(|(_, msg)| msg))
+        Ok(state
+            .pending_messages
+            .pop_front()
+            .map(|(_, msg)| Incoming::primary(msg)))
     }
 
-    async fn receive_all(&mut self) -> Result<Vec<ClientMessage>, TransportError> {
+    async fn receive_all(&mut self) -> Result<Vec<Incoming>, TransportError> {
         // Drain all messages from the queue
         let mut state = self.shared_state.lock().unwrap();
         let mut messages = Vec::new();
         while let Some((_, msg)) = state.pending_messages.pop_front() {
-            messages.push(msg);
+            messages.push(Incoming::primary(msg));
         }
         Ok(messages)
+    }
+
+    fn links(&self) -> Vec<Link> {
+        vec![Link::PRIMARY]
     }
 
     async fn close(&mut self) -> Result<(), TransportError> {

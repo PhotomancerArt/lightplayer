@@ -1,0 +1,30 @@
+[package]
+name = "lpc-access"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Access core: shared secrets, tiers, HMAC-SHA256 login, PBKDF2 key derivation, rate limit — no_std, sans-IO"
+
+[features]
+default = []
+std = []
+# JSON Schema derives for the two persisted access files (host-side tooling)
+schema-gen = ["std", "dep:schemars"]
+
+[dependencies]
+base64 = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+sha2 = { workspace = true }
+schemars = { workspace = true, optional = true }
+
+# RustCrypto's HMAC and PBKDF2 are ORACLES, never dependencies: the product
+# code is written from RFC 2104 / RFC 8018, and these check it in tests.
+[dev-dependencies]
+hmac = "0.12"
+pbkdf2 = { version = "0.12", default-features = false, features = ["hmac"] }
+
+[lints]
+workspace = true

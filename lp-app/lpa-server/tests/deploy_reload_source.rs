@@ -35,8 +35,8 @@ use lpa_server::{LpGraphics, LpServer};
 use lpc_hardware::default_esp32s3_hardware_manifest;
 use lpc_model::AsLpPath;
 use lpc_shared::output::MemoryOutputProvider;
-use lpc_shared::transport::ServerTransport;
-use lpc_wire::{ClientMessage, ClientRequest, TransportError, WireMessage, WireServerMessage};
+use lpc_shared::transport::{Incoming, Link, LinkId, ServerTransport};
+use lpc_wire::{ClientMessage, ClientRequest, TransportError, WireServerMessage};
 use lpfs::LpFsMemory;
 use lpfs::lp_path::LpPathBuf;
 
@@ -140,12 +140,12 @@ fn deploy_requests(shader: &str) -> Vec<ClientRequest> {
     project_deploy_requests(PROJECT_ID, project_files(shader))
 }
 
-fn deploy_messages(requests: &[ClientRequest]) -> Vec<WireMessage> {
+fn deploy_messages(requests: &[ClientRequest]) -> Vec<Incoming> {
     requests
         .iter()
         .enumerate()
         .map(|(index, request)| {
-            WireMessage::Client(ClientMessage {
+            Incoming::primary(ClientMessage {
                 id: index as u64 + 1,
                 msg: request.clone(),
             })
@@ -276,17 +276,21 @@ struct VecTransport {
 }
 
 impl ServerTransport for VecTransport {
-    async fn send(&mut self, msg: WireServerMessage) -> Result<(), TransportError> {
+    async fn send(&mut self, _link: LinkId, msg: WireServerMessage) -> Result<(), TransportError> {
         self.sent.push(msg);
         Ok(())
     }
 
-    async fn receive(&mut self) -> Result<Option<ClientMessage>, TransportError> {
+    async fn receive(&mut self) -> Result<Option<Incoming>, TransportError> {
         Ok(None)
     }
 
-    async fn receive_all(&mut self) -> Result<Vec<ClientMessage>, TransportError> {
+    async fn receive_all(&mut self) -> Result<Vec<Incoming>, TransportError> {
         Ok(Vec::new())
+    }
+
+    fn links(&self) -> Vec<Link> {
+        vec![Link::PRIMARY]
     }
 
     async fn close(&mut self) -> Result<(), TransportError> {

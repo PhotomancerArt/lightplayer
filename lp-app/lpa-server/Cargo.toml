@@ -105,6 +105,8 @@ fixture-no-hello = []
 # crate itself when the gates first landed (2026-07-30). Anyone adding a
 # ninth node gate to `lpc-engine` must add the forwarding feature here too.
 lpc-engine = { path = "../../lp-core/lpc-engine", default-features = false }
+# Tiers, the login machine and the access files: the access gate's vocabulary.
+lpc-access = { path = "../../lp-core/lpc-access" }
 lpc-hardware = { path = "../../lp-core/lpc-hardware", default-features = false }
 lpc-history = { path = "../../lp-core/lpc-history", default-features = false }
 lpc-model = { path = "../../lp-core/lpc-model", default-features = false }

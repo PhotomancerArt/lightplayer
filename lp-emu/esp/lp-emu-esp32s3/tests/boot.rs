@@ -609,8 +609,19 @@ fn the_shipped_image_gets_past_esp_hal_init_and_crosses_the_console() {
     // `docs/defects/2026-09-13-the-s3-link-drops-the-io-tasks-next-chunk-on-a-stale-serial-in-empty.md`
     // and `tests/boot_idle.rs`, where it is pinned in full). What this test
     // keeps claiming is P05's: nothing of the esp-println chain is dropped.
+    //
+    // ⚠️ 2026-09-23 (BLE plan M3): 64 → 0. The hello's drop is a race
+    // between the io_task's first poll clearing `serial_in_empty` and the
+    // host draining esp-println's last packet; this image's clear lands
+    // after the drain, so the raw is not stale and nothing is dropped. Not a
+    // fix — the stop-all reply still reproduces the defect; the entry's
+    // dated note has the cycle counts.
     let tried = machine.usb_sj_tried();
-    assert_eq!(tried.len(), 64, "the one dropped packet, and only it");
+    assert_eq!(
+        tried.len(),
+        0,
+        "nothing tried on this image (the link defect's 2026-09-23 note)"
+    );
     assert!(
         !String::from_utf8_lossy(&tried).contains("[INIT]"),
         "the esp-println chain reached the host whole"
