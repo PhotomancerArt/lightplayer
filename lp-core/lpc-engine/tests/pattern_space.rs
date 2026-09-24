@@ -281,6 +281,139 @@ fn an_opt_out_shader_is_unchanged() {
     assert!(original.published.iter().any(|b| *b != 0));
 }
 
+/// Q32 at dome scale: the small dome's lamps (5,950 on its dome fixture; the
+/// project's 6,310 are split across two fixtures) stay inside ±1 in Q16.16,
+/// and the pitch — computed the device's way, one O(n) pass over the
+/// streamed coordinates — is non-zero, many ulps wide, and agrees with the
+/// same rule computed independently in f64 from the document's own lamps.
+#[test]
+fn dome_scale_pitch_is_nonzero_and_q32_safe() {
+    use lpc_engine::nodes::fixture::mapping::map2d::mapping_from_map2d_doc;
+    use lpc_engine::products::visual::{
+        PatternFrame, ScopeGeometry, normalized_f32_to_q16, normalized_q16_to_pixel_q16,
+    };
+    use lpc_model::nodes::fixture::{MappingRef, mapping_centers};
+
+    let dir = workspace_dir().join("catalog/projects/small-dome/dome");
+    let doc = lpc_mapping::Map2dDoc::from_json(
+        &std::fs::read_to_string(dir.join("dome.map2d.json")).unwrap(),
+    )
+    .expect("dome map2d parses");
+    let (width, height) = (128, 128);
+    let mapping = mapping_from_map2d_doc(&doc, width, height).expect("resolve the dome");
+    let mapping = MappingRef::Compact(&mapping);
+    let scope = ScopeGeometry::from_mapping(mapping, width, height).expect("lamps");
+    assert_eq!(scope.lamp_count, 5950, "the small dome's dome fixture");
+    let frame = PatternFrame::two_d(&scope);
+
+    let mut max_abs = 0i32;
+    for [x, y] in mapping_centers(mapping) {
+        let pixel = [
+            normalized_q16_to_pixel_q16(normalized_f32_to_q16(x), width),
+            normalized_q16_to_pixel_q16(normalized_f32_to_q16(y), height),
+        ];
+        let [px, py] = frame.map_point(pixel);
+        max_abs = max_abs.max(px.abs()).max(py.abs());
+    }
+    assert!(
+        max_abs <= 65536 + 2,
+        "every lamp within ±1 in Q16.16: max |coord| = {max_abs}"
+    );
+
+    // The same rule in f64 from doc space: mean consecutive distance within
+    // resolver spans, over half the long side of the lamp box.
+    let resolved = lpc_mapping::resolve(&doc).expect("resolve");
+    let positions = resolved.positions();
+    let (min, max) = bounds(&positions);
+    let half_long = f64::from((max[0] - min[0]).max(max[1] - min[1])) / 2.0;
+    let mut sum = 0.0f64;
+    let mut pairs = 0usize;
+    for span in &resolved.spans {
+        let lamps = &positions[span.start as usize..(span.start + span.count) as usize];
+        for pair in lamps.windows(2) {
+            let dx = f64::from(pair[1][0] - pair[0][0]);
+            let dy = f64::from(pair[1][1] - pair[0][1]);
+            sum += (dx * dx + dy * dy).sqrt();
+            pairs += 1;
+        }
+    }
+    let expected_pitch = sum / pairs as f64 / half_long;
+    println!(
+        "small dome: {} lamps, extent {:?}, pitch {} (f64 reference {expected_pitch:.6}, \
+         {:.0} Q16 ulps, ~{:.0} lamps across), max |coord| {max_abs}",
+        scope.lamp_count,
+        frame.extent,
+        frame.pitch,
+        f64::from(frame.pitch) * ONE,
+        2.0 / frame.pitch
+    );
+    assert!(frame.pitch > 0.0 && frame.pitch.is_finite());
+    assert!(
+        f64::from(frame.pitch) * ONE > 100.0,
+        "pitch is far above the Q16.16 ulp"
+    );
+    // The device's pitch is taken over pixel-quantized centres (1/65536 px
+    // after a 128-px fit); it tracks the f64 rule to well under a percent.
+    assert_close(
+        f64::from(frame.pitch),
+        expected_pitch,
+        expected_pitch * 0.01,
+        "pitch vs f64 reference",
+    );
+}
+
+/// The big-dome scale (~30k lamps, 5× the small dome) on a synthetic
+/// serpentine grid: the one-pass pitch stays exact and the lamps stay inside
+/// ±1 in Q16.16.
+#[test]
+fn a_30k_lamp_serpentine_keeps_its_pitch_and_range() {
+    use lpc_engine::products::visual::{
+        PatternFrame, ScopeGeometry, normalized_f32_to_q16, normalized_q16_to_pixel_q16,
+    };
+    use lpc_model::nodes::fixture::{MappingConfig, MappingRef, PathSpec, mapping_centers};
+
+    let side = 173u32; // 29,929 lamps
+    let (width, height) = (256u32, 256u32);
+    let rows: Vec<PathSpec> = (0..side)
+        .map(|row| {
+            let points: Vec<[f32; 2]> = (0..side)
+                .map(|col| {
+                    let col = if row % 2 == 0 { col } else { side - 1 - col };
+                    [
+                        (col as f32 + 0.5) / side as f32,
+                        (row as f32 + 0.5) / side as f32,
+                    ]
+                })
+                .collect();
+            PathSpec::point_list(row * side, points)
+        })
+        .collect();
+    let config = MappingConfig::path_points_vec(rows, 1.0);
+    let mapping = MappingRef::Slots(&config);
+    let scope = ScopeGeometry::from_mapping(mapping, width, height).expect("lamps");
+    assert_eq!(scope.lamp_count, side * side);
+    let frame = PatternFrame::two_d(&scope);
+    let mut max_abs = 0i32;
+    for [x, y] in mapping_centers(mapping) {
+        let pixel = [
+            normalized_q16_to_pixel_q16(normalized_f32_to_q16(x), width),
+            normalized_q16_to_pixel_q16(normalized_f32_to_q16(y), height),
+        ];
+        let [px, py] = frame.map_point(pixel);
+        max_abs = max_abs.max(px.abs()).max(py.abs());
+    }
+    assert!(max_abs <= 65536 + 2, "max |coord| {max_abs}");
+    let expected = 2.0 / f64::from(side - 1);
+    println!(
+        "30k serpentine: {} lamps, pitch {} (exact {expected:.6}, {:.0} Q16 ulps), max |coord| {max_abs}",
+        scope.lamp_count,
+        frame.pitch,
+        f64::from(frame.pitch) * ONE
+    );
+    assert_close(f64::from(frame.pitch), expected, expected * 0.005, "pitch");
+    assert!(f64::from(frame.pitch) * ONE > 700.0);
+}
+
 // ---- the recording backend -------------------------------------------------
 
 #[derive(Default)]
