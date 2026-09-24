@@ -157,3 +157,20 @@ probe, one request, one answer (wire proto 21):
 Choker steady lens read: the graph went from 4,562 B to 775 B (a 29 B
 `unchanged` plus 653 B of values); the whole read from 8,698 B to
 4,911 B (`lpc-engine/tests/lens_read_wire_size.rs`).
+
+## Amended 2026-09-23: `no_provider`, and the general rule this split became
+
+A P6 ledger pass over the same lens read found six of the choker's channel
+values answering `error` for a bus channel with no publisher — a
+`Debug`-formatted error string, ~53 B each, for a condition that is not an
+error so much as a fact about the graph's shape. `WireBusChannelValue` grew
+a bare `no_provider` tag for it (no payload), cutting those six values from
+653 B to 336 B. The distinction this ADR draws between a probe's structure
+(gated) and its values (sent every read) turned out to be the general shape
+every probe with a static/moving split needed — the buffer-geometry probes
+(`sample_layout`, `display_layout`, `placements`) gate the identical way
+through a shared `RevisionGateRead`/`RevisionGateResult` pair. That general
+rule, the wire-tap tooling that found every cut in this family, and the
+Studio-side one-copy pixel ask policy that came out of the same pass are
+written up together in
+`docs/adr/2026-09-23-project-reads-send-only-what-changed.md`.
