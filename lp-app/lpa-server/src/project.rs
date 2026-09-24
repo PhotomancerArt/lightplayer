@@ -7,6 +7,8 @@ use crate::panel_state::{self, PANEL_STATE_WRITE_INTERVAL_MS};
 use crate::server::MemoryStatsFn;
 use alloc::{boxed::Box, format, rc::Rc, string::String, sync::Arc, vec::Vec};
 use core::cell::RefCell;
+#[cfg(feature = "latent-read-back")]
+use lpc_engine::LatentReadBackSource;
 use lpc_engine::{ButtonService, Engine, EngineServices, LpGraphics, ProjectLoader, RadioService};
 use lpc_hardware::HwEndpointSpec;
 use lpc_model::{LpPath, LpPathBuf, TreePath, current_revision};
@@ -42,6 +44,10 @@ pub struct Project {
     memory_stats: Option<MemoryStatsFn>,
     /// Graphics backend used by shader runtime nodes.
     graphics: Arc<dyn LpGraphics>,
+    /// The latent readback the host injected (the browser GPU tier), kept
+    /// here so a reload's fresh engine is handed it too.
+    #[cfg(feature = "latent-read-back")]
+    latent_read_back: Option<Arc<dyn LatentReadBackSource>>,
     /// Canonical project registry: artifacts, overlay, effective defs/assets.
     registry: ProjectRegistry,
     /// The loaded project engine.
@@ -130,6 +136,8 @@ impl Project {
             radio_service,
             memory_stats,
             graphics,
+            #[cfg(feature = "latent-read-back")]
+            latent_read_back: None,
             registry,
             runtime: Some(runtime),
             last_fs_version: loaded_fs_version.next(),
@@ -151,6 +159,14 @@ impl Project {
     /// Get the project path
     pub fn path(&self) -> &LpPath {
         &self.path
+    }
+
+    /// Set (or clear) the latent readback this project's engine uses for a
+    /// GPU-resident probe, and keep it for reloads.
+    #[cfg(feature = "latent-read-back")]
+    pub fn set_latent_read_back(&mut self, source: Option<Arc<dyn LatentReadBackSource>>) {
+        self.engine_mut().set_latent_read_back(source.clone());
+        self.latent_read_back = source;
     }
 
     /// Get mutable access to the loaded engine.
@@ -646,6 +662,8 @@ impl Project {
         log_memory(self.memory_stats, "project reload after core project");
         backtrace::set_oom_context("project reload: set graphics");
         runtime.set_graphics(Some(self.graphics.clone()));
+        #[cfg(feature = "latent-read-back")]
+        runtime.set_latent_read_back(self.latent_read_back.clone());
         // Reload rebuilds the Engine — and with it an empty writer store —
         // so panel state must be restored here too, on the same
         // before-first-frame rule as `new()`. (`apply_project_changes`

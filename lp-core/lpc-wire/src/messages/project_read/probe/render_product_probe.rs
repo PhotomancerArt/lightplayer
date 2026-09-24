@@ -136,10 +136,12 @@ pub enum RenderProductProbeResult {
         /// requested — what a preview's checkbox-availability logic needs.
         primary: WireVisualSpace,
     },
-    /// The product rendered successfully but stayed GPU-resident: the
-    /// producing runtime runs the GPU tier, where texture readback is
-    /// unavailable (fidelity-tiers ADR). Byte-needing consumers must probe a
-    /// CPU-tier runtime.
+    /// The product rendered successfully but stayed GPU-resident and no
+    /// bytes are available yet: the producing runtime runs the browser GPU
+    /// tier, which reads a probe back one probe late (it cannot block on a
+    /// buffer map), and this read site's first frame has not landed. Probe
+    /// again; the next answer is a [`Self::Texture`] carrying the revision
+    /// its bytes were rendered at.
     GpuResident {
         product: VisualProduct,
         revision: Revision,

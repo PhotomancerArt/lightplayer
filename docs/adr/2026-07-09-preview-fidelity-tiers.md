@@ -24,7 +24,8 @@
   browser GPU-tier runtimes unable to render fixture-bearing projects
   (carried as `docs/debt/gpu-tier-cannot-sample-led-output.md`, now
   retired); the browser GPU tier now samples via an async readback with
-  one frame of latency. **Amended 2026-08-08** by
+  one frame of latency — extended 2026-09-23 to the wire probe's texture
+  previews, which read back one probe late instead of refusing. **Amended 2026-08-08** by
   `2026-08-08-float-semantics-per-target-representation.md`: it retires nothing
   further here, but it **generalizes decision 2's GPU-tier latitude** (an
   authored `Fixed` rendering IEEE f32 is a documented product decision, not a
