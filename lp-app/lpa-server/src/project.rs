@@ -88,6 +88,10 @@ impl Project {
         loaded_fs_version: FsVersion,
     ) -> Result<Self, ServerError> {
         log_memory(memory_stats, "project new start");
+        // Everything the runtime reads goes through this fs, and none of it
+        // may be an access file (`access_guarded_fs`): a project naming
+        // `.lp/access.json` as a resource gets a load error, never the bytes.
+        let fs = crate::access_guarded_fs::AccessGuardedFs::guard(fs);
         backtrace::set_oom_context("project new: root path");
         let root_path = project_root_path(&name)?;
         log_memory(memory_stats, "project new after root path");

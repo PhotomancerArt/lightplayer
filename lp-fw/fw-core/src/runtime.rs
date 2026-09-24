@@ -10,13 +10,13 @@ use alloc::vec::Vec;
 
 use lpa_server::{LpServer, ServerError};
 use lpc_shared::time::TimeProvider;
-use lpc_shared::transport::ServerTransport;
-use lpc_wire::{TransportError, WireMessage, WireServerMessage};
+use lpc_shared::transport::{Incoming, ServerTransport};
+use lpc_wire::{TransportError, WireServerMessage};
 
 /// Result of draining currently available client messages from a transport.
 #[derive(Debug)]
 pub struct DrainedClientMessages {
-    pub messages: Vec<WireMessage>,
+    pub messages: Vec<Incoming>,
     pub receive_calls: u32,
     pub error: Option<TransportError>,
 }
@@ -37,7 +37,8 @@ pub struct ServerTickOutcome {
     pub server_error: Option<ServerError>,
 }
 
-/// Send the server's unsolicited hello (id 0) through `transport`.
+/// Send the server's unsolicited hello (id 0) on every link `transport`
+/// has open.
 ///
 /// Every embedder loop calls this once, as the first frame it sends when it
 /// starts serving (before/with the first heartbeat). The payload is the
@@ -55,12 +56,20 @@ pub async fn send_unsolicited_hello<T: ServerTransport>(
     if cfg!(feature = "fixture-no-hello") {
         return Ok(());
     }
-    transport
-        .send(WireServerMessage::new(
-            0,
-            lpc_wire::server::ServerMsgBody::Hello(server.hello().clone()),
-        ))
-        .await
+    // Each link reads its own `auth`: a trusted link and an untrusted one
+    // on the same device are told different things.
+    for link in transport.links() {
+        transport
+            .send(
+                link.id,
+                WireServerMessage::new(
+                    0,
+                    lpc_wire::server::ServerMsgBody::Hello(server.hello_for_link(link)),
+                ),
+            )
+            .await?;
+    }
+    Ok(())
 }
 
 /// Drain all currently available client messages from `transport`.
@@ -74,7 +83,7 @@ pub async fn drain_client_messages<T: ServerTransport>(transport: &mut T) -> Dra
     loop {
         receive_calls += 1;
         match transport.receive().await {
-            Ok(Some(msg)) => messages.push(WireMessage::Client(msg)),
+            Ok(Some(incoming)) => messages.push(incoming),
             Ok(None) => {
                 return DrainedClientMessages {
                     messages,
@@ -100,7 +109,7 @@ pub async fn tick_server_frame<T, P>(
     time_provider: &P,
     frame_start_ms: u64,
     last_tick_ms: u64,
-    incoming_messages: Vec<WireMessage>,
+    incoming_messages: Vec<Incoming>,
 ) -> ServerTickOutcome
 where
     T: ServerTransport,
@@ -165,6 +174,91 @@ mod tests {
         assert_eq!(drained.message_count(), 2);
         assert_eq!(drained.receive_calls, 3);
         assert!(drained.error.is_none());
+    }
+
+    /// The boot hello goes to every open link, each carrying that link's
+    /// own `auth`: a trusted link is told edit, a fresh radio link nothing.
+    #[test]
+    fn the_hello_goes_to_every_link_with_its_own_auth() {
+        use alloc::boxed::Box;
+        use alloc::rc::Rc;
+        use alloc::sync::Arc;
+        use core::cell::RefCell;
+        use lpc_model::AsLpPath;
+        use lpc_shared::transport::{Link, LinkId, LinkTrust};
+
+        let radio = Link {
+            id: LinkId::new(3),
+            trust: LinkTrust::Untrusted,
+        };
+        let server = LpServer::new(
+            Rc::new(RefCell::new(lpc_shared::output::MemoryOutputProvider::new())),
+            Box::new(lpfs::LpFsMemory::new()),
+            "/projects/".as_path(),
+            None,
+            None,
+            Arc::new(lp_gfx::NullGraphics::new()),
+        );
+        let mut transport = TwoLinks {
+            links: alloc::vec![Link::PRIMARY, radio],
+            sent: Vec::new(),
+        };
+
+        pollster::block_on(send_unsolicited_hello(&server, &mut transport)).unwrap();
+
+        let auths: Vec<_> = transport
+            .sent
+            .iter()
+            .map(|(link, msg)| match &msg.msg {
+                lpc_wire::server::ServerMsgBody::Hello(hello) => (*link, hello.auth),
+                other => panic!("not a hello: {other:?}"),
+            })
+            .collect();
+        assert_eq!(
+            auths,
+            alloc::vec![
+                (LinkId::PRIMARY, lpc_wire::HelloAuth::TRUSTED),
+                (
+                    radio.id,
+                    lpc_wire::HelloAuth {
+                        required: true,
+                        granted: None
+                    }
+                ),
+            ]
+        );
+    }
+
+    struct TwoLinks {
+        links: Vec<lpc_shared::transport::Link>,
+        sent: Vec<(lpc_shared::transport::LinkId, WireServerMessage)>,
+    }
+
+    impl ServerTransport for TwoLinks {
+        async fn send(
+            &mut self,
+            link: lpc_shared::transport::LinkId,
+            msg: WireServerMessage,
+        ) -> Result<(), TransportError> {
+            self.sent.push((link, msg));
+            Ok(())
+        }
+
+        async fn receive(&mut self) -> Result<Option<Incoming>, TransportError> {
+            Ok(None)
+        }
+
+        async fn receive_all(&mut self) -> Result<Vec<Incoming>, TransportError> {
+            Ok(Vec::new())
+        }
+
+        fn links(&self) -> Vec<lpc_shared::transport::Link> {
+            self.links.clone()
+        }
+
+        async fn close(&mut self) -> Result<(), TransportError> {
+            Ok(())
+        }
     }
 
     #[test]

@@ -1,7 +1,7 @@
 ---
 status: fixed
 found: 2026-09-24      # ci — reddened main at e226fb28 (#793's merge)
-fixed: this change
+fixed: bda62a06c
 area: lp-emu/esp/lp-emu-esp32c6 tests/boot_no_radio.rs (`the_no_radio_image_runs_three_seconds_strict_to_the_idle_loop`)
 class: unenforced-test-precondition
 related: []
