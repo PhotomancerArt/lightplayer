@@ -69,6 +69,11 @@ pub use app::docs_host::DocsSimHost;
 pub use app::studio::PlayViewOp;
 // The project's declared hardware (D41): the web shell's Hardware row and
 // the gallery card's "for <board>" badge both read it.
+pub use app::access::{
+    AccessCommand, AccessPersist, AccessTier, DEFAULT_KDF_ITERATIONS, DeviceAccessChange,
+    NewSecret, UiAccessPanel, UiAccessSecret, UiDeviceAccess, UiLoginPrompt, UiProjectAccess,
+    not_permitted_sentence, tier_word,
+};
 pub use app::frame_feed::{
     CLOSE_INSPECTION_SAMPLE_FORMAT, CardFeedApply, CardFeedState, PREVIEW_SAMPLE_FORMAT,
 };
@@ -154,7 +159,7 @@ pub use app::settings::{
     AgentProvider, AgentProviderGuidance, AgentSettings, BrowserFacts, COMMON_LOCAL_SERVERS,
     DEFAULT_AGENT_MODEL, FindingKind, LocalModelProbeState, LocalServer, ProbeFinding, ProbeLevel,
     ProbeOutcome, ProbeSummary, SettingsCommand, SettingsLayer, SettingsStore, StudioSettings,
-    UiAgentSettingsView, UiModelOption, UiSettingsView, provider_guidance,
+    UiAgentSettingsView, UiDeviceSettingsView, UiModelOption, UiSettingsView, provider_guidance,
 };
 pub use app::share::{
     NODE_KIND, NodeEnvelope, PACKAGE_KIND, PackageEnvelope, SHARE_FORMAT_VERSION, ShareError,

@@ -631,6 +631,9 @@ struct DeviceBench {
     sims: Option<Rc<SimDeviceTransport>>,
     sim_restarts: Rc<Cell<usize>>,
     started: std::time::Instant,
+    /// Where the access controller.s conversations report back (BLE M6):
+    /// the actor.s queue, drained by [`Self::step`].
+    access_rx: crate::app::studio::studio_view_channel::CommandReceiver,
 }
 
 /// `Rc<RefCell<Vec<..>>>` spelled once.
@@ -762,6 +765,8 @@ impl DeviceBench {
             let inbox = Rc::clone(&inbox);
             move |input| inbox.borrow_mut().push_back(input)
         });
+        let (access_tx, access_rx) = crate::app::studio::studio_view_channel::command_channel();
+        controller.set_access_command_sender(access_tx);
         let flash_plan: Rc<Cell<FlashPlan>> = Rc::new(Cell::new(FlashPlan::default()));
         let manifest_writes: Rc<RefCell<Vec<String>>> = Rc::new(RefCell::new(Vec::new()));
         let push_plan: Rc<Cell<PushPlan>> = Rc::new(Cell::new(PushPlan::default()));
@@ -793,6 +798,7 @@ impl DeviceBench {
             sims: None,
             sim_restarts: Rc::new(Cell::new(0)),
             started: std::time::Instant::now(),
+            access_rx,
         };
         (bench, tasks)
     }
@@ -805,6 +811,13 @@ impl DeviceBench {
         let queued: Vec<DeviceInput> = self.inbox.borrow_mut().drain(..).collect();
         for input in queued {
             self.controller.fold_device_input(input);
+        }
+        while self.access_rx.peek_any(|_| true) {
+            for command in drive(self.access_rx.recv_coalesced()).unwrap_or_default() {
+                if let crate::StudioCommand::Access(command) = command {
+                    self.controller.apply_access_command(command);
+                }
+            }
         }
         drive(self.controller.settle_device_records());
     }
@@ -5491,6 +5504,19 @@ fn a_board_seen_over_usb_and_over_bluetooth_is_one_registry_row() {
     let rows = bench.registry();
     assert_eq!(rows.len(), 1, "one row, never a twin: {rows:?}");
     assert_eq!(rows[0].uid, "mac:a0:f2:62:87:b4:8c");
+
+    // A Bluetooth link holds nothing until its hello says what it holds
+    // (BLE M6): the lens waits for that. This board's link is trusted (the
+    // fake answers as a USB link would), so the check grants edit.
+    bench.run_until(&tasks, "the Bluetooth link's access to be read", |bench| {
+        bench
+            .controller
+            .device_roster_view()
+            .access
+            .get(&cards[0].id)
+            .and_then(|access| access.line.as_deref())
+            == Some("Connected — edit")
+    });
 
     // The editor over Bluetooth is authoring: the device cadence. Play is
     // the idle-budgeted mode: while a Play surface holds its lease, an

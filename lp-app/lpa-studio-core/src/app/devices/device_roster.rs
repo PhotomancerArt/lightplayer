@@ -66,6 +66,10 @@ pub struct DeviceRosterView {
     /// behind a device, and the model deliberately does not know that a
     /// sim is a sim. Absent = a real board, which wears no band (D38).
     pub runtime_bands: std::collections::BTreeMap<lpa_devices::DeviceId, super::UiRuntimeBand>,
+    /// Each device.s access facts (BLE M6): the login line over Bluetooth,
+    /// and the device access panel where this link may write the store.
+    pub access:
+        std::collections::BTreeMap<lpa_devices::DeviceId, crate::app::access::UiDeviceAccess>,
 }
 
 impl Default for DeviceRosterView {
@@ -79,6 +83,7 @@ impl Default for DeviceRosterView {
             open_addresses: std::collections::BTreeMap::new(),
             feeds: std::collections::BTreeMap::new(),
             runtime_bands: std::collections::BTreeMap::new(),
+            access: std::collections::BTreeMap::new(),
         }
     }
 }
@@ -336,6 +341,7 @@ impl DeviceRoster {
             // sidecars a band is read from.
             feeds: std::collections::BTreeMap::new(),
             runtime_bands: std::collections::BTreeMap::new(),
+            access: std::collections::BTreeMap::new(),
         }
     }
 
@@ -538,6 +544,7 @@ mod tests {
     #[test]
     fn split_roster_separates_offline_devices_into_remembered() {
         let view = DeviceRosterView {
+            access: Default::default(),
             roster: RosterView {
                 devices: vec![
                     ready_view(1, "Live board"),
@@ -592,6 +599,7 @@ mod tests {
     #[test]
     fn split_roster_preserves_connected_order() {
         let view = DeviceRosterView {
+            access: Default::default(),
             roster: RosterView {
                 devices: vec![ready_view(1, "A"), ready_view(2, "B"), ready_view(3, "C")],
                 pending: Vec::new(),

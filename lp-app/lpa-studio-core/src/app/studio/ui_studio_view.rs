@@ -159,6 +159,12 @@ pub struct UiStudioView {
     /// [`has_unsaved_work`](crate::app::studio::has_unsaved_work) for which
     /// buckets actually mean "you would lose work".
     pub dirty: crate::DirtySummary,
+    /// The password sheet, when a Bluetooth piece needs a password (BLE
+    /// M6). Page-level: it rises over whatever the user is looking at.
+    pub login_prompt: Option<crate::app::access::UiLoginPrompt>,
+    /// The open library project.s Bluetooth list (its sidecar), for its
+    /// settings. `None` without a library project open.
+    pub project_access: Option<crate::app::access::UiProjectAccess>,
 }
 
 impl UiStudioView {
@@ -178,7 +184,20 @@ impl UiStudioView {
             open_mismatch: None,
             settings: crate::app::settings::UiSettingsView::default(),
             dirty: crate::DirtySummary::clean(),
+            login_prompt: None,
+            project_access: None,
         }
+    }
+
+    /// The access slice (BLE M6): the sheet and the project.s list.
+    pub fn with_access(
+        mut self,
+        login_prompt: Option<crate::app::access::UiLoginPrompt>,
+        project_access: Option<crate::app::access::UiProjectAccess>,
+    ) -> Self {
+        self.login_prompt = login_prompt;
+        self.project_access = project_access;
+        self
     }
 
     /// The open stopped at the mismatch page (D50).

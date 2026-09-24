@@ -30,7 +30,7 @@ use serde::{Deserialize, Serialize};
 use crate::device::Device;
 use crate::event::{Action, Command, Event, Input};
 use crate::evidence::{Classification, Evidence};
-use crate::identity::{DeviceId, EndpointKey, IdentityChain, IdentityMatch};
+use crate::identity::{DeviceId, IdentityChain, IdentityMatch};
 use crate::journal::{EvictionReason, Journal, JournalNote, Scope};
 use crate::link::{LinkCommand, LinkId, LinkInfo};
 use crate::record::DeviceRecord;
@@ -296,9 +296,9 @@ impl Roster {
             // A board last reached over Bluetooth is re-asked through the
             // Bluetooth chooser: offering a PORT chooser for a board that is
             // across the room on a GATT link would be a dead end. The
-            // endpoint is the only thing that says which, and a remembered
-            // board loaded from the registry carries none (endpoints are
-            // never persisted), so that case keeps the USB chooser.
+            // live endpoint says which; a remembered board loaded from the
+            // registry carries none (endpoints are never persisted), so its
+            // record.s `last_over_bluetooth` does.
             Action::Reconnect { device } => {
                 self.state
                     .journal
@@ -307,8 +307,15 @@ impl Roster {
                     .devices
                     .iter()
                     .find(|entry| entry.id == *device)
-                    .and_then(|entry| entry.identity.endpoint.as_ref())
-                    .is_some_and(EndpointKey::is_bluetooth);
+                    .is_some_and(|entry| match entry.identity.endpoint.as_ref() {
+                        Some(endpoint) => endpoint.is_bluetooth(),
+                        // A remembered board carries no endpoint; its
+                        // record says how it was last reached.
+                        None => entry
+                            .record
+                            .as_ref()
+                            .is_some_and(|record| record.last_over_bluetooth),
+                    });
                 match over_bluetooth {
                     true => vec![Command::RequestBleGrant],
                     false => vec![Command::RequestUsbGrant],
@@ -1318,6 +1325,48 @@ mod tests {
                 DeviceId(5),
                 IdentityChain {
                     endpoint: Some(EndpointKey("usb-1".to_string())),
+                    mac: Some(MacAddress("10:bd:a3:b0:8e:30".to_string())),
+                    ..Default::default()
+                },
+            ),
+        ]);
+
+        let over_ble = roster.handle(
+            Millis(0),
+            Input::Action(Action::Reconnect {
+                device: DeviceId(4),
+            }),
+        );
+        let over_usb = roster.handle(
+            Millis(1),
+            Input::Action(Action::Reconnect {
+                device: DeviceId(5),
+            }),
+        );
+
+        assert_eq!(over_ble, vec![Command::RequestBleGrant]);
+        assert_eq!(over_usb, vec![Command::RequestUsbGrant]);
+    }
+
+    /// The M5 finding, fixed: a board REMEMBERED from an earlier session has
+    /// no endpoint (endpoints are never persisted), and its Reconnect used
+    /// to open the USB chooser. Its record now says how it was last reached.
+    #[test]
+    fn a_remembered_bluetooth_board_reconnects_through_the_bluetooth_chooser() {
+        let mut roster = Roster::new(RosterConfig::default());
+        let mut remembered = DeviceRecord::new(
+            DeviceId(4),
+            IdentityChain {
+                mac: Some(MacAddress("a0:f2:62:87:b4:8c".to_string())),
+                ..Default::default()
+            },
+        );
+        remembered.last_over_bluetooth = true;
+        roster.load_records(vec![
+            remembered,
+            DeviceRecord::new(
+                DeviceId(5),
+                IdentityChain {
                     mac: Some(MacAddress("10:bd:a3:b0:8e:30".to_string())),
                     ..Default::default()
                 },

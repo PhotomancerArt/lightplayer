@@ -56,6 +56,14 @@ pub struct DeviceRecord {
     /// a known classic dropped the identity line to "no firmware").
     #[serde(default)]
     pub firmware: Option<String>,
+    /// Whether the board was last reached over Bluetooth. Endpoints are
+    /// never persisted (a Web Serial id is minted per page load), so a
+    /// remembered board has none — and without this its Reconnect opened
+    /// the USB chooser for a board across the room on a GATT link (BLE M5
+    /// finding, fixed in M6). Learned from the live endpoint, kept when
+    /// there is none.
+    #[serde(default)]
+    pub last_over_bluetooth: bool,
 }
 
 impl DeviceRecord {
@@ -69,6 +77,7 @@ impl DeviceRecord {
             board_id: None,
             chip: None,
             firmware: None,
+            last_over_bluetooth: false,
         }
     }
 

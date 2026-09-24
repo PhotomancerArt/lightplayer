@@ -6078,6 +6078,7 @@ dependencies = [
  "lp-riscv-elf",
  "lp-riscv-emu",
  "lp-riscv-inst",
+ "lpc-access",
  "lpc-model",
  "lpc-shared",
  "lpc-view",

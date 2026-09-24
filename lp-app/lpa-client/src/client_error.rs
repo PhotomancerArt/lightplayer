@@ -25,6 +25,11 @@ pub enum ClientError {
         operation: &'static str,
         response: String,
     },
+    /// The device refused the request because this link does not hold the
+    /// tier it needs (`NotPermitted { needs }`) — a Bluetooth link logged in
+    /// at play, asked for an edit. Always a reply, never a timeout, so a
+    /// caller can say "this needs an edit password" instead of "failed".
+    NotPermitted { needs: lpc_access::Tier },
 }
 
 impl ClientError {
@@ -46,6 +51,12 @@ impl fmt::Display for ClientError {
                 operation,
                 response,
             } => write!(f, "unexpected response for {operation}: {response}"),
+            // The sentence a person reads: every caller that shows an
+            // error (a push outcome, an action log) says what to do.
+            Self::NotPermitted { needs } => f.write_str(match needs {
+                lpc_access::Tier::Edit => "This needs an edit password — log in again with one.",
+                lpc_access::Tier::Play => "This needs a password — log in first.",
+            }),
         }
     }
 }
