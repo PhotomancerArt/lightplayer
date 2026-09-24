@@ -29,10 +29,10 @@ pub(crate) struct RenderTextureEntry {
 /// Per-instance state: [`NativeJitModule`] plus guest vmctx pointer.
 pub struct NativeJitInstance {
     pub(crate) module: NativeJitModule,
+    /// The vmctx allocation, which the instance owns and frees on drop. Its
+    /// size is not stored: `NativeJitModule::vmctx_alloc_size` recomputes it
+    /// from the module, so the fix for the leak costs no bytes per instance.
     pub(crate) vmctx_guest: u32,
-    /// Size of the vmctx allocation at `vmctx_guest` (16-aligned), which the
-    /// instance owns and frees on drop.
-    pub(crate) vmctx_alloc_size: u32,
     /// Byte offset from vmctx base to globals region
     pub(crate) globals_offset: u32,
     /// Byte offset from vmctx base to snapshot region
@@ -51,7 +51,7 @@ pub struct NativeJitInstance {
 impl Drop for NativeJitInstance {
     fn drop(&mut self) {
         if let Ok(layout) =
-            core::alloc::Layout::from_size_align(self.vmctx_alloc_size as usize, VMCTX_ALIGN)
+            core::alloc::Layout::from_size_align(self.module.vmctx_alloc_size(), VMCTX_ALIGN)
         {
             // SAFETY: `instantiate` allocated exactly this layout at this
             // address, and the instance is not `Clone`, so this is the one free.
