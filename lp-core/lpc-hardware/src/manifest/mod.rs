@@ -4,6 +4,7 @@
 //! by the registry. [`HardwareManifestFile`](hw_manifest_file::HardwareManifestFile)
 //! is the serializable JSON representation used for checked-in board descriptions.
 
+pub mod board_quirk;
 pub mod default_manifests;
 pub mod hw_manifest;
 pub mod hw_manifest_file;
