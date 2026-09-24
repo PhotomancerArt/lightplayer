@@ -36,16 +36,6 @@ pub fn is_access_file_path(path: &str) -> bool {
     }
 }
 
-/// Whether `path` is a directory that could contain an access file directly,
-/// i.e. a `.lp` directory (resolved the same way as [`is_access_file_path`]).
-#[must_use]
-pub fn is_meta_dir_path(path: &str) -> bool {
-    let components = resolved_components(path);
-    components
-        .last()
-        .is_some_and(|last| last.eq_ignore_ascii_case(META_DIR))
-}
-
 /// Whether `path`, once resolved, is `dir` itself or lies beneath it — the
 /// check that keeps a "project files" permission from being walked out of
 /// with `..` (`/projects/../hardware.json` is NOT within `/projects`).
@@ -119,14 +109,5 @@ mod tests {
         assert!(!is_within_dir("/projectsx/a", "/projects"));
         assert!(!is_within_dir("/", "/projects"));
         assert!(is_within_dir("/anything", "/"));
-    }
-
-    #[test]
-    fn meta_dirs() {
-        assert!(is_meta_dir_path("/.lp"));
-        assert!(is_meta_dir_path("/projects/x/.lp/"));
-        assert!(is_meta_dir_path("/projects/x/.LP"));
-        assert!(!is_meta_dir_path("/projects/x"));
-        assert!(!is_meta_dir_path("/.lp/access.json"));
     }
 }
