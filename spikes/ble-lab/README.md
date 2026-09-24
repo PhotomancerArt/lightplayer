@@ -76,6 +76,39 @@ For ESP-NOW loss beside the product server, build the desk meter:
 `[COEX]` counter in place of the ESP-NOW driver; never shipped). Run it on
 both boards and read the `[COEX]` lines from the console as in M2.
 
+## No phone, no human: the Mac's own Chrome as the central
+
+`scripts/cdp-central.mjs` answers the Join chooser over the Chrome DevTools
+Protocol (`DeviceAccess`), so an agent can run the whole battery. It was used
+for M4's Run J. Launch Chrome in the **background** with a scratch profile. It
+must never be a foreground window.
+
+```bash
+open -g -n -a "Google Chrome" --args --remote-debugging-port=9333 \
+    --user-data-dir=<scratch>/chrome-ble --no-first-run --no-default-browser-check \
+    http://localhost:$P/
+node spikes/ble-lab/scripts/cdp-central.mjs --debug-port 9333 --page localhost:$P \
+    join --prefix LP- --timeout-ms 60000
+node spikes/ble-lab/scripts/cdp-central.mjs --debug-port 9333 --page localhost:$P \
+    js 'location.reload(); 1'          # a fresh page before a re-Join
+```
+
+What was learned doing it (2026-09-24, Chrome 153, macOS):
+- **The chooser lists the name macOS has cached**, not the advertised one.
+  The board advertised `LP-PLAYFUL Choker` while the chooser offered
+  `LP-BLE-b48c` (the spike image's name), and later `LP-b48c`. Match with
+  `--prefix LP-`, not `--name`.
+- **Close `chrome://bluetooth-internals` before joining.** While that tab
+  was open, every chooser reported one empty device list and never updated;
+  the first attempt after closing it found the board in 1.4 s. This is
+  correlation from one session: the cause is not proven.
+- A second connection from the same Mac was **not tried**. CoreBluetooth
+  gives each peripheral one link per host, shared between apps, so a second
+  Chrome profile would most likely not open the board's second slot. That is
+  expected, not measured.
+- `requestDevice` needs the gesture. The Join click runs through
+  `Runtime.evaluate` with `userGesture: true`, and nothing else is required.
+
 ## A phone (Bluefy on iOS): HTTPS over Tailscale
 
 Web Bluetooth needs a secure context, and `localhost` doesn't reach a phone.
