@@ -15,6 +15,18 @@
 //! revision stands the engine answers [`RevisionGateResult::Unchanged`] — a
 //! few bytes — and only the moving half rides.
 //!
+//! # One gate, one or many gated halves
+//!
+//! Most probes have ONE gated half (a control product's geometry, the
+//! binding graph's structure). The output-frame probe has one per output
+//! node, and those move independently — one shared revision would resend
+//! every output's geometry but the oldest's on every read. So `IfChanged`
+//! carries a LIST of [`KnownRevision`]s: a single-half probe lists at most
+//! one, with no `node`; the output-frame probe lists one per output it
+//! holds, each naming its node. Every probe shares this one request shape,
+//! which is also one deserializer on a device whose flash is budgeted
+//! (`docs/adr/2026-07-28-esp32c6-flash-budget.md`).
+//!
 //! # The revision
 //!
 //! One revision covers the WHOLE gated half: it moves whenever any piece of
@@ -22,10 +34,12 @@
 //! Each probe documents what its revision covers and how the engine derives
 //! it (`lpc-engine`'s `project_read_probes`).
 
-use lpc_model::Revision;
+use alloc::vec::Vec;
+
+use lpc_model::{NodeId, Revision};
 
 /// Whether and how a probe should ship its revision-gated half.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case")]
 pub enum RevisionGateRead {
@@ -33,8 +47,52 @@ pub enum RevisionGateRead {
     None,
     /// The whole gated half, whatever the client holds.
     Always,
-    /// The gated half only if its revision differs from `known_revision`.
-    IfChanged { known_revision: Option<Revision> },
+    /// Each gated half only if its revision differs from the one `known`
+    /// lists for it. A half the list does not name is sent — that is how a
+    /// client asks for one it has never seen, and an empty list is
+    /// `Always`.
+    IfChanged { known: Vec<KnownRevision> },
+}
+
+/// One gated half the client holds, and at which revision.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
+pub struct KnownRevision {
+    /// Whose half, for a probe with one per node (the output-frame probe:
+    /// the output node). Absent for a probe with a single gated half.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub node: Option<NodeId>,
+    pub revision: Revision,
+}
+
+impl RevisionGateRead {
+    /// The read for a probe with ONE gated half: `IfChanged` naming the
+    /// revision the client holds, or (holding nothing) an empty list.
+    #[must_use]
+    pub fn if_changed(known: Option<Revision>) -> Self {
+        Self::IfChanged {
+            known: known
+                .map(|revision| KnownRevision {
+                    node: None,
+                    revision,
+                })
+                .into_iter()
+                .collect(),
+        }
+    }
+
+    /// Whether the client already holds the gated half of `node` (`None`
+    /// for a single-half probe) at `revision` — the engine answers
+    /// [`RevisionGateResult::Unchanged`] exactly when this holds.
+    #[must_use]
+    pub fn holds(&self, node: Option<NodeId>, revision: Revision) -> bool {
+        match self {
+            Self::IfChanged { known } => known
+                .iter()
+                .any(|entry| entry.node == node && entry.revision == revision),
+            Self::None | Self::Always => false,
+        }
+    }
 }
 
 /// The revision-gated half of a probe answer.
@@ -77,13 +135,58 @@ mod tests {
         for read in [
             RevisionGateRead::None,
             RevisionGateRead::Always,
+            RevisionGateRead::if_changed(Some(Revision::new(7))),
             RevisionGateRead::IfChanged {
-                known_revision: Some(Revision::new(7)),
+                known: Vec::from([
+                    KnownRevision {
+                        node: Some(NodeId::new(3)),
+                        revision: Revision::new(7),
+                    },
+                    KnownRevision {
+                        node: Some(NodeId::new(4)),
+                        revision: Revision::new(9),
+                    },
+                ]),
             },
         ] {
             let json = serde_json::to_string(&read).unwrap();
             let back: RevisionGateRead = serde_json::from_str(&json).unwrap();
             assert_eq!(back, read);
         }
+    }
+
+    /// A single-half probe's entry carries no `node`: the steady request
+    /// stays as small as the scalar gate it replaced.
+    #[test]
+    fn a_single_half_read_names_no_node() {
+        let json =
+            crate::json::to_string(&RevisionGateRead::if_changed(Some(Revision::new(7)))).unwrap();
+        assert_eq!(json, r#"{"if_changed":{"known":[{"revision":7}]}}"#);
+        assert_eq!(
+            crate::json::to_string(&RevisionGateRead::if_changed(None)).unwrap(),
+            r#"{"if_changed":{"known":[]}}"#
+        );
+    }
+
+    /// `holds` matches the node AND the revision: another output holding the
+    /// same revision is not this one's.
+    #[test]
+    fn holds_matches_node_and_revision() {
+        let read = RevisionGateRead::IfChanged {
+            known: Vec::from([KnownRevision {
+                node: Some(NodeId::new(3)),
+                revision: Revision::new(7),
+            }]),
+        };
+        assert!(read.holds(Some(NodeId::new(3)), Revision::new(7)));
+        assert!(!read.holds(Some(NodeId::new(4)), Revision::new(7)));
+        assert!(!read.holds(Some(NodeId::new(3)), Revision::new(8)));
+        assert!(!read.holds(None, Revision::new(7)));
+
+        let single = RevisionGateRead::if_changed(Some(Revision::new(7)));
+        assert!(single.holds(None, Revision::new(7)));
+        assert!(!RevisionGateRead::if_changed(None).holds(None, Revision::new(7)));
+        assert!(!RevisionGateRead::Always.holds(None, Revision::new(7)));
+        assert!(!RevisionGateRead::None.holds(None, Revision::new(7)));
     }
 }

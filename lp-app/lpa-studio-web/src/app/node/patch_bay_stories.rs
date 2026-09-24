@@ -178,8 +178,8 @@ fn wire_frame(cells: &[UiPatchCell]) -> UiControlProductPreview {
     UiControlProductPreview {
         revision: 104,
         extent: ControlExtent::new(1, WIRE_LAMPS * 3),
-        // A live wire, as Studio pulls it: 8-bit.
-        sample_format: UiControlSampleFormat::U8,
+        // A live wire, as Studio pulls it: sRGB8.
+        sample_format: UiControlSampleFormat::Srgb8,
         sample_layout: ControlSampleLayout {
             spans: vec![ControlSampleSpan {
                 row: 0,
@@ -206,8 +206,11 @@ fn leaf_rgb(t: f32) -> [u8; 3] {
     linear([0.10 + 0.10 * t, 0.55 + 0.35 * t, 0.20 + 0.15 * t])
 }
 
+/// Linear-light channels as the sRGB8 codes a live wire carries.
 fn linear(rgb: [f32; 3]) -> [u8; 3] {
-    rgb.map(|channel| (channel.clamp(0.0, 1.0) * 255.0).round() as u8)
+    rgb.map(|channel| {
+        lpc_wire::linear16_to_srgb8((channel.clamp(0.0, 1.0) * 65535.0).round() as u16)
+    })
 }
 
 #[story(
