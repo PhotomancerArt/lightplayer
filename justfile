@@ -277,7 +277,11 @@ lpa-link-browser-test: install-wasm32-target
         exit 1
     fi
     # Two suites, one runner: Web Serial over `?emu=`'s polyfill, and (M5)
-    # Web Bluetooth over `?ble=emu`'s, both against the scripted door.
+    # Web Bluetooth over `?ble=emu`'s, both against the scripted door. The
+    # Bluetooth suite spends a real 10 s proving a hung GATT connect is
+    # bounded, against the runner's default 20 s for a whole suite, so the
+    # budget is raised rather than the bound faked.
+    WASM_BINDGEN_TEST_TIMEOUT="${WASM_BINDGEN_TEST_TIMEOUT:-60}" \
     CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUNNER="$PWD/scripts/wasm-serial-test-runner.sh" \
         cargo test -p lpa-link --target wasm32-unknown-unknown \
             --features browser-serial-esp32,browser-ble \
