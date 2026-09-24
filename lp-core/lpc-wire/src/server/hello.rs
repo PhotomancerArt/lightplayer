@@ -20,6 +20,8 @@ use alloc::vec::Vec;
 use lpc_model::LpFeature;
 use serde::{Deserialize, Serialize};
 
+use crate::server::hello_auth::HelloAuth;
+
 /// Wire protocol version spoken by this build of the workspace.
 ///
 /// # Bump rule
@@ -33,6 +35,18 @@ use serde::{Deserialize, Serialize};
 ///
 /// # History
 ///
+/// - 21: access over untrusted links (BLE remote control, M3) —
+///   `ClientRequest::LoginBegin` / `LoginAnswer { macs }` and their answers
+///   `ServerMsgBody::LoginChallenge { nonce, offers }` /
+///   `LoginResult(Granted { tier, label } | Refused { retry_after_ms })`,
+///   plus `ServerMsgBody::NotPermitted { needs }`, the refusal a request
+///   gets when its link's tier is too low. New variants on both enums, and
+///   `ServerHello` gains the REQUIRED `auth: { required, granted }` for the
+///   link it is sent on: an old client cannot decode the new hello and an
+///   old firmware cannot decode a login. The heartbeat also changes MEANING
+///   on an untrusted link that holds no tier — it carries nothing the hello
+///   does not — though no such link exists until the BLE transport lands.
+///   See `docs/adr/2026-09-23-ble-access-model.md`.
 /// - 20: `ClientRequest::ClearFaults` + its `ServerMsgBody::ClearFaults {
 ///   ledger_cleared }` ack — the studio's Clear faults verb, which forgets
 ///   the crash-recovery ledger and re-arms the engine's faulted nodes.
@@ -176,7 +190,7 @@ use serde::{Deserialize, Serialize};
 /// as `None` on new Studio and a new firmware's extra fields are ignored
 /// by old Studio. Bumping for those would mark every board running
 /// current firmware Incompatible in exchange for nothing.
-pub const WIRE_PROTO_VERSION: u32 = 20;
+pub const WIRE_PROTO_VERSION: u32 = 21;
 
 /// Unsolicited/boot-time server identity, version, and capability report.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -195,6 +209,10 @@ pub struct ServerHello {
     /// hello, and `ClientRequest::Hello` answers re-read it, so a
     /// post-stamp request reports the new uid. `None` means unstamped.
     pub device_uid: Option<String>,
+    /// What the link this hello is sent on may do — computed per link, so
+    /// the same device answers a USB client and an unauthenticated radio
+    /// client differently. See [`HelloAuth`].
+    pub auth: HelloAuth,
 }
 
 /// Build facts of the firmware/server binary answering the hello: its
@@ -395,6 +413,7 @@ mod tests {
                 ..Default::default()
             },
             device_uid: Some("dev0000000000000001".to_string()),
+            auth: HelloAuth::TRUSTED,
         };
         let json = crate::json::to_string(&hello).unwrap();
         assert!(json.contains(&alloc::format!("\"proto\":{WIRE_PROTO_VERSION}")));
@@ -428,6 +447,10 @@ mod tests {
                 ..Default::default()
             },
             device_uid: None,
+            auth: HelloAuth {
+                required: true,
+                granted: None,
+            },
         };
         let json = crate::json::to_string(&hello).unwrap();
         let back: ServerHello = crate::json::from_str(&json).unwrap();
@@ -455,6 +478,10 @@ mod tests {
                 ..Default::default()
             },
             device_uid: None,
+            auth: HelloAuth {
+                required: true,
+                granted: None,
+            },
         };
         let frame = ServerMessage::new(0, ServerMsgBody::Hello(hello.clone()));
         let json = crate::json::to_string(&frame).unwrap();
@@ -483,7 +510,7 @@ mod tests {
     #[test]
     fn the_proto_version_is_pinned_to_its_history() {
         assert_eq!(
-            WIRE_PROTO_VERSION, 20,
+            WIRE_PROTO_VERSION, 21,
             "if you meant to bump, add the History entry in this file's \
              doc comment and update this pin"
         );

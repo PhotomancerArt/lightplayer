@@ -336,6 +336,9 @@ impl LpServer {
                 },
                 hardware,
                 device_uid: None,
+                // The held hello is the trusted view; a hello sent on a
+                // particular link is recomputed for that link.
+                auth: lpc_wire::HelloAuth::TRUSTED,
             },
             tick_failures: HashMap::new(),
             sessions: HashMap::new(),

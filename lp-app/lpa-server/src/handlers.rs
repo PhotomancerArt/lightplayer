@@ -138,6 +138,11 @@ pub fn handle_client_message(
                 "project reads must be handled by streaming transport".into(),
             ));
         }
+        lpc_wire::ClientRequest::LoginBegin | lpc_wire::ClientRequest::LoginAnswer { .. } => {
+            return Err(ServerError::Core(
+                "login is not available on this server yet".into(),
+            ));
+        }
         lpc_wire::ClientRequest::ProjectCommand { handle, command } => {
             ServerMessagePayload::ProjectCommand {
                 response: handle_project_command(project_manager, handle, command)?,

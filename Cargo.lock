@@ -6469,6 +6469,7 @@ version = "40.0.0"
 dependencies = [
  "base64 0.22.1",
  "lp-collection 1.0.0",
+ "lpc-access",
  "lpc-model",
  "schemars",
  "ser-write-json",
