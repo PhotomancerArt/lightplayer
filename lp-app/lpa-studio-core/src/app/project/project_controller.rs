@@ -1454,17 +1454,17 @@ impl ProjectController {
     }
 
     /// The engine's latest status for the shader node behind `artifact`:
-    /// the retained status Revision plus the verdict classification
+    /// the synced read's revision plus the verdict classification
     /// ([`crate::AgentEngineStatus`]). `None` when no shader node uses the
     /// artifact. Written into the agent bridge cell on every pull so a
-    /// running agent's engine-verdict wait can observe status advances.
+    /// running agent's engine-verdict wait can observe each fresh read.
     pub(crate) fn agent_engine_status(
         &self,
         artifact: &ArtifactLocation,
     ) -> Option<crate::AgentEngineStatus> {
         let node = self.agent_shader_node(artifact)?;
         Some(crate::AgentEngineStatus {
-            revision: node.status_frame(),
+            revision: self.sync.as_ref()?.project_view().revision,
             verdict: crate::app::project::agent_support::engine_verdict(node.status()),
         })
     }

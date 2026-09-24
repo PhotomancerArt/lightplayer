@@ -103,13 +103,19 @@ struct LensReadCeiling {
 /// shader's roots; the clock's, whose seconds move every frame, still rides),
 /// and a channel nothing writes is a bare `no_provider` value instead of the
 /// resolver's error as a string (−317 B). The tree's per-frame
-/// `entry_changed` deltas (368 B) stay: they are what re-delivers a status a
-/// render probe stamps mid-read (see the P6 report). First 9,951 B, steady
-/// 2,369 B, selected 2,950 B.
+/// `entry_changed` deltas (368 B) stayed: they were what re-delivered a
+/// status a render probe stamps mid-read (see the P6 report). First 9,951 B,
+/// steady 2,369 B, selected 2,950 B.
+/// Follow-ups F2 labelled every preview `srgb8` (+3 B per label): first
+/// 9,957 B, steady 2,372 B, selected 2,956 B. F3 stamps a tree entry only
+/// when its status or state changes, fencing a mid-read change past the
+/// served revision, so no `entry_changed` rides a steady read (−369 B,
+/// the first read's too — it is a few ticks after the mirror's revision):
+/// first 9,588 B, steady 2,003 B, selected 2,587 B.
 const CHOKER_CEILING: LensReadCeiling = LensReadCeiling {
-    first: 10_150,
-    steady: 2_420,
-    selected: 3_010,
+    first: 9_780,
+    steady: 2_045,
+    selected: 2_640,
 };
 
 /// small-dome (6,310 lamps). P1 baseline (2026-09-23): first 130,555 B,
@@ -124,11 +130,13 @@ const CHOKER_CEILING: LensReadCeiling = LensReadCeiling {
 /// samples are the one copy, and the first fixture's 24,218 B no longer
 /// ride — and selected 55,707 B in four, with that fixture's copy back.
 /// P6 (see the choker's note): first 77,670 B, steady 28,556 B, selected
-/// 53,237 B.
+/// 53,237 B. Follow-ups F2 (`srgb8` labels): first 77,679 B, steady
+/// 28,562 B, selected 53,246 B. F3 (no steady `entry_changed`, −594 B):
+/// first 77,085 B, steady 27,968 B, selected 52,652 B.
 const SMALL_DOME_CEILING: LensReadCeiling = LensReadCeiling {
-    first: 79_225,
-    steady: 29_130,
-    selected: 54_300,
+    first: 78_630,
+    steady: 28_530,
+    selected: 53_710,
 };
 
 /// Frames between two lens reads: Studio re-reads 150 ms after the last
