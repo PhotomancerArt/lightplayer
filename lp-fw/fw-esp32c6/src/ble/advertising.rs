@@ -30,6 +30,12 @@ pub const ADV_NAME_MAX: usize = 26;
 const PREFIX: &str = "LP-";
 /// How often the upkeep looks at the loaded project.
 const NAME_REFRESH_MS: u64 = 5_000;
+/// How often to advertise. trouble-host defaults to 160 ms; every advertising
+/// event is air time the ESP-NOW receiver loses (desk, 2026-09-24: 0.21 % RX
+/// loss with BLE off; advertising at 160 ms 2.61 %, at 546.25 ms 0.98 %, at
+/// 1022.5 ms 0.68 % — one 3-minute window each, same board, same peer, ~10 cm).
+/// 546.25 ms is on Apple's list of recommended intervals.
+const ADV_INTERVAL: embassy_time::Duration = embassy_time::Duration::from_micros(546_250);
 
 type AdvName = heapless::String<ADV_NAME_MAX>;
 
@@ -147,7 +153,11 @@ pub async fn advertise(
     )?;
     let advertiser = peripheral
         .advertise(
-            &Default::default(),
+            &AdvertisementParameters {
+                interval_min: ADV_INTERVAL,
+                interval_max: ADV_INTERVAL,
+                ..Default::default()
+            },
             Advertisement::ConnectableScannableUndirected {
                 adv_data: &adv[..adv_len],
                 scan_data: &scan[..scan_len],
