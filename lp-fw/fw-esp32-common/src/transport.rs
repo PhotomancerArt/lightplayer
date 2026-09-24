@@ -176,6 +176,17 @@ impl crate::link_upkeep::LinkUpkeep for StreamingMessageRouterTransport {}
 /// counted: a torn or spliced frame is protocol loss, not chatter —
 /// 2026-08-26 inbound-loss defect: this drop sat at DEBUG and made losses
 /// invisible). Shared by every link: USB lines and radio lines parse alike.
+///
+/// `#[inline(always)]` is load-bearing. As an ordinary function it is
+/// codegen'd once, out of line, in this crate, and that standalone
+/// `json::from_str::<ClientMessage>` changed how the deserializer was inlined
+/// into the USB receive path: the main task's `poll` frame grew from
+/// `entry a1, 1024` to `4448` on the S3 and from `976` to `4112` on the
+/// classic, on images with no radio link at all (and the S3's `.data` gained
+/// a duplicated 12 B serde_json constant table, which cost the stack 16 B).
+/// Inlined into each caller, both frames are back to what they were before
+/// the radio links existed.
+#[inline(always)]
 pub fn parse_wire_line(msg_line: &str) -> Option<ClientMessage> {
     let Some(json_str) = msg_line.strip_prefix("M!") else {
         log::trace!("transport: skipping non-message line");
