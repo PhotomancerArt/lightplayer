@@ -150,6 +150,7 @@ jobs:
       emu_esp32v3: ${{ github.event_name != 'pull_request' && 'true' || steps.some.outputs.emu_esp32v3 }}
       emu_esp32s3: ${{ github.event_name != 'pull_request' && 'true' || steps.some.outputs.emu_esp32s3 }}
       emu_ref_recipe: ${{ github.event_name != 'pull_request' && 'true' || steps.some.outputs.emu_ref_recipe }}
+      emu_esp32v3_fw: ${{ github.event_name != 'pull_request' && 'true' || steps.some.outputs.emu_esp32v3_fw }}
     steps:
       # Default quantifier ("some"): a filter is true when ANY changed file
       # matches one of its globs. Each list is the *dependency closure* of what
@@ -383,6 +384,21 @@ jobs:
               - 'scripts/emu/build-reference-*.sh'
               - 'scripts/emu/elf-section-digest.py'
               - 'rust-toolchain.toml'
+            # emu_esp32v3_fw is the classic's half of the same rule. Its
+            # reference image is built at HEAD, not at a frozen pin (R7), so
+            # the "pinned sources" are the classic's firmware tree — the part
+            # of it this job's own `emu_esp32v3` filter can see (lp-core and
+            # friends never fire that job at all, DD77). A PR that fires the
+            # job without touching these (emulator, scripts, justfile,
+            # workflow) cannot move the image's bytes and skips the
+            # `--verify` rebuild. The Xtensa toolchain version is pinned in
+            # THIS file, which is deliberately not listed (every workflow
+            # edit would pay the rebuild): a toolchain bump's verify happens
+            # on main.
+            emu_esp32v3_fw:
+              - 'lp-fw/fw-esp32v3/**'
+              - 'lp-fw/fw-esp32-common/**'
+              - '.github/actions/xtensa-toolchain/**'
             emu_esp32v3:
               - 'lp-emu/**'
               - 'lp-fw/fw-esp32v3/**'
@@ -1315,16 +1331,31 @@ jobs:
       # A cache hit looks like a previous build: both scripts return early
       # when `target/emu-ref/<commit>-<slug>/<binary>` already exists.
       #
-      # The key is `emu-ref-c6-<hash of recipe + toolchain>-<hash of the set
-      # of <commit>-<slug> dirs>`. Restore matches on the prefix only (the
-      # newest entry for this recipe + toolchain), and the save step below
-      # computes the second half from what is on disk after the suite. So a
-      # new pin needs no edit here: the run that first builds it saves a new
-      # entry, and the images it restored stay valid because their directory
-      # names ARE their commit + feature set. A recipe or toolchain change
-      # misses outright and rebuilds everything cold.
+      # The key is `emu-ref-c6-<runner os/arch>-<hash of recipe + toolchain>-
+      # <hash of the set of <commit>-<slug> dirs>`. Restore matches on the
+      # prefix only (the newest entry for this runner + recipe + toolchain),
+      # and the save step at the end of this job computes the last part from
+      # what is on disk then. So a new pin needs no edit here: the run that
+      # first builds it saves a new entry, and the images it restored stay
+      # valid because their directory names ARE their commit + feature set
+      # (`build-reference-image.sh`'s slug table; the spike is fixed per
+      # commit and the script refuses a mismatched one). A recipe or
+      # toolchain change misses outright and rebuilds everything cold. The
+      # runner is in the key because the bytes are NOT reproducible across
+      # hosts (docs/debt/reference-images-are-not-reproducible-across-hosts.md):
+      # a hit must only ever hand this runner image what this runner image
+      # built.
       #
-      # Size: five ELFs of ~9 MB plus one lp-cli, tens of MB after zstd.
+      # Budget: the repo's 10 GB Actions cache (see the note above `jobs:`).
+      # An entry is written only when the set changes, so main holds one and
+      # a PR saves its own only while main has none or when it adds a pin.
+      # Measured size is in the PR that added this (#797).
+      - name: Reference-build cache key
+        id: emu-ref-key
+        env:
+          RECIPE_HASH: ${{ hashFiles('lp2025/scripts/emu/build-reference-*.sh', 'lp2025/rust-toolchain.toml') }}
+        run: echo "prefix=emu-ref-c6-${{ runner.os }}-${{ runner.arch }}-$RECIPE_HASH-" >> "$GITHUB_OUTPUT"
+
       - name: Restore pinned reference builds
         id: emu-ref-restore
         uses: actions/cache/restore@v4
@@ -1335,8 +1366,8 @@ jobs:
             lp2025/target/emu-ref/*/PROVENANCE
             lp2025/target/emu-ref/*-lp-cli/lp-cli
             !lp2025/target/emu-ref/wt-*
-          key: emu-ref-c6-${{ hashFiles('lp2025/scripts/emu/build-reference-*.sh', 'lp2025/rust-toolchain.toml') }}-restore-by-prefix
-          restore-keys: emu-ref-c6-${{ hashFiles('lp2025/scripts/emu/build-reference-*.sh', 'lp2025/rust-toolchain.toml') }}-
+          key: ${{ steps.emu-ref-key.outputs.prefix }}restore-by-prefix
+          restore-keys: ${{ steps.emu-ref-key.outputs.prefix }}
 
       # The reference image is reproducible (L4): the same sha256 on every
       # run of this runner, for the same pinned firmware commit. This step is
@@ -1351,17 +1382,30 @@ jobs:
       #
       # **It runs only on pushes to main, or on a PR that changes the recipe
       # (`scripts/emu/build-reference-*.sh`, `elf-section-digest.py`) or
-      # `rust-toolchain.toml`** — the `emu_ref_recipe` gate. What a PR gives
-      # up: a reproducibility break from anything else (in practice, a runner
-      # image change) is caught post-merge on main, not on the PR. The pinned
-      # commits' sources cannot change, so no other PR diff can cause one.
+      # `rust-toolchain.toml`** — the `emu_ref_recipe` gate (2026-09-24). The
+      # image it verifies is pinned by the recipe itself (the script's C6
+      # `default_commit`), so "the pinned commit changed" is a recipe change
+      # and is covered by the same gate. What a PR gives up: a
+      # reproducibility break from anything else — in practice a runner-image
+      # change, since the pinned commits' sources cannot change — is caught
+      # post-merge, on main, where every gate is forced on. That trade buys
+      # ~3 min off the critical-path job on every other PR.
+      #
+      # It can never compare a binary with itself: `--verify` skips the
+      # script's "already built" early return, and both of its builds happen
+      # in fresh worktrees (the cache holds no worktrees), so on a hit it is
+      # two cold builds checked against each other AND against the cached
+      # bytes.
       - name: Reference image reproducibility (--verify)
+        id: emu-ref-verify
         if: needs.detect-changes.outputs.emu_ref_recipe == 'true'
         run: |
           cd lp2025
-          elf=target/emu-ref/d6cfaa205-boot-idle-memfs/fw-esp32c6
+          commit="$(sed -n 's/^ *default_commit="\([0-9a-f]\{7,\}\)".*/\1/p' scripts/emu/build-reference-image.sh | head -1)"
+          [[ -n "$commit" ]] || { echo "::error::could not read the C6 default_commit from build-reference-image.sh"; exit 1; }
+          elf="target/emu-ref/$commit-boot-idle-memfs/fw-esp32c6"
           cached=""
-          if [[ -f "$elf" ]]; then cached="$(sha256sum "$elf" | cut -d' ' -f1)"; fi
+          if [[ -f "$elf" ]]; then cached="$(sha256sum "$elf" | cut -d' ' -f1)"; echo "cached $elf: $cached"; fi
           ./scripts/emu/build-reference-image.sh --verify esp32c6,server,radio,spike_uart0_link,memory_fs
           fresh="$(sha256sum "$elf" | cut -d' ' -f1)"
           if [[ -n "$cached" && "$cached" != "$fresh" ]]; then
@@ -1371,35 +1415,6 @@ jobs:
 
       - name: Emulator C6 boot tests + replays
         run: cd lp2025 && just test-emu-c6-boot
-
-      # Second half of the reference-build cache (see the restore step): name
-      # what is on disk now, and save it if that is not what was restored.
-      # After the boot suite because that is where every pinned build happens;
-      # a failed suite saves nothing, so a half-populated set never becomes an
-      # entry (and the scripts would rebuild whatever was missing anyway).
-      - name: Name the pinned reference-build set
-        id: emu-ref-set
-        env:
-          RECIPE_HASH: ${{ hashFiles('lp2025/scripts/emu/build-reference-*.sh', 'lp2025/rust-toolchain.toml') }}
-        run: |
-          cd lp2025/target/emu-ref
-          dirs="$(find . -mindepth 1 -maxdepth 1 -type d ! -name 'wt-*' ! -name '.*' -printf '%f\n' | sort)"
-          echo "reference builds on disk:"
-          echo "$dirs"
-          set_hash="$(echo "$dirs" | sha256sum | cut -c1-16)"
-          echo "key=emu-ref-c6-$RECIPE_HASH-$set_hash" >> "$GITHUB_OUTPUT"
-
-      - name: Save pinned reference builds
-        if: steps.emu-ref-set.outputs.key != steps.emu-ref-restore.outputs.cache-matched-key
-        uses: actions/cache/save@v4
-        with:
-          path: |
-            lp2025/target/emu-ref/*/fw-esp32c6
-            lp2025/target/emu-ref/*/SHA256SUMS
-            lp2025/target/emu-ref/*/PROVENANCE
-            lp2025/target/emu-ref/*-lp-cli/lp-cli
-            !lp2025/target/emu-ref/wt-*
-          key: ${{ steps.emu-ref-set.outputs.key }}
 
       # The emulator perf lab's own tests (scripts/emu/lab/, `node --test`):
       # the real lab server on port 0 in a temp home, a fake page client
@@ -1515,6 +1530,45 @@ jobs:
 
       - name: Tab host smoke (node + the page's WASI shim)
         run: cd lp2025 && node scripts/emu/tab-smoke.mjs
+
+      # Second half of the reference-build cache (see the restore step): name
+      # what is on disk now, and save it if that is not what was restored.
+      # Last, because the boot suite AND the differential-oracle step above
+      # both resolve pinned images. It runs even when a test failed — every
+      # counted directory holds a finished binary (the scripts publish by
+      # `mv`/`cp` only after a successful build), so a red PR's rerun still
+      # starts warm — but never after a failed `--verify`, whose recipe is by
+      # definition not trustworthy, and never on a cancelled run.
+      - name: Name the pinned reference-build set
+        id: emu-ref-set
+        if: ${{ !cancelled() && steps.emu-ref-verify.outcome != 'failure' }}
+        run: |
+          cd lp2025
+          dirs=""
+          if [[ -d target/emu-ref ]]; then
+            dirs="$(cd target/emu-ref && for d in */; do
+              d="${d%/}"
+              case "$d" in wt-*) continue ;; esac
+              if [[ -f "$d/fw-esp32c6" && -f "$d/SHA256SUMS" ]] || [[ -x "$d/lp-cli" ]]; then echo "$d"; fi
+            done | sort)"
+          fi
+          echo "reference builds on disk:"
+          echo "${dirs:-(none)}"
+          if [[ -z "$dirs" ]]; then echo "key=" >> "$GITHUB_OUTPUT"; exit 0; fi
+          set_hash="$(echo "$dirs" | sha256sum | cut -c1-16)"
+          echo "key=${{ steps.emu-ref-key.outputs.prefix }}$set_hash" >> "$GITHUB_OUTPUT"
+
+      - name: Save pinned reference builds
+        if: ${{ !cancelled() && steps.emu-ref-set.outputs.key != '' && steps.emu-ref-set.outputs.key != steps.emu-ref-restore.outputs.cache-matched-key }}
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            lp2025/target/emu-ref/*/fw-esp32c6
+            lp2025/target/emu-ref/*/SHA256SUMS
+            lp2025/target/emu-ref/*/PROVENANCE
+            lp2025/target/emu-ref/*-lp-cli/lp-cli
+            !lp2025/target/emu-ref/wt-*
+          key: ${{ steps.emu-ref-set.outputs.key }}
 
       - name: sccache stats
         if: always()
@@ -1646,7 +1700,19 @@ jobs:
       # validate_registry_parity`. They are IN THE RECIPE rather than extra
       # steps here, so that the gate a human runs and the gate CI runs stay
       # one thing.
+      #
+      # The recipe's `--verify` reproducibility rebuild (~2.5 min, a second
+      # cold Xtensa build) runs only on pushes to main or when the recipe,
+      # the toolchain file or the classic's firmware changed
+      # (`emu_ref_recipe` / `emu_esp32v3_fw`, 2026-09-24). Otherwise
+      # LP_EMU_REF_VERIFY=0 builds the reference image once — the
+      # translated-core cell below still needs it. The trade: a
+      # reproducibility break from anything else is caught post-merge, on
+      # main. This image is NOT cached like emu-c6's: it is built at HEAD,
+      # so there is no pinned commit to key an entry on.
       - name: Emulator ESP32v3 gate (both boot paths, the replays, the reference image)
+        env:
+          LP_EMU_REF_VERIFY: ${{ (needs.detect-changes.outputs.emu_ref_recipe == 'true' || needs.detect-changes.outputs.emu_esp32v3_fw == 'true') && '1' || '0' }}
         run: cd lp2025 && just test-emu-esp32v3-gate
 
       # **The translator's identity cell** (M7 XD14, P07): `--jit` against
