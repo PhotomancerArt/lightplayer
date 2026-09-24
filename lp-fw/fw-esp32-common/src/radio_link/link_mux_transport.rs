@@ -225,8 +225,8 @@ impl<U: ServerTransport, D: DelayNs> LinkMuxTransport<U, D> {
             Either::Second(()) => {
                 self.port.withdraw_write(slot);
                 log::error!(
-                    "radio link {link}: frame id={id} ({len} B) not sent within {} ms — closing",
-                    RADIO_WRITE_DEADLINE_MS
+                    "radio link {link}: frame id={id} ({len} B) not sent within \
+                     {RADIO_WRITE_DEADLINE_MS} ms — closing"
                 );
                 self.close_radio(link, "write deadline");
                 Ok(())
