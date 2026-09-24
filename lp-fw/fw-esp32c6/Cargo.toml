@@ -134,6 +134,11 @@ bench_project_rocaille = ["bench_render_loop"]
 # returns). Use with `ws281x_telemetry`; `touch src/main.rs` after flipping.
 stress_s2 = ["radio"]  # WiFi scan loop (repeated active scans, station mode)
 stress_s3 = ["radio"]  # ESP-NOW broadcast chatter, max payload, back to back
+# BLE M4's desk ESP-NOW loss meter beside the product server — OFF by default,
+# never shipped. Same shape as the stress builds: replaces the ESP-NOW radio
+# driver registration with M2's `test_ble_coex` counter (same frame, same
+# `[COEX]` line). See `src/desk_espnow_meter.rs`.
+desk_espnow_meter = ["radio"]
 # The `rmt-chase` payload's harness: a 256-LED white chase on GPIO18 through
 # the shipping `lp-ws281x` refill path, three passes, one `rmt-frame` record
 # per frame. The pattern, the checksum and the record live in fw-checks as

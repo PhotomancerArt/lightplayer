@@ -66,6 +66,8 @@ fn on_alloc_error(layout: Layout) -> ! {
 #[cfg(all(feature = "ble", not(fw_harness)))]
 mod ble;
 mod board;
+#[cfg(all(feature = "desk_espnow_meter", not(fw_harness)))]
+mod desk_espnow_meter;
 #[cfg(not(fw_harness))]
 use fw_esp32_common::boot;
 #[cfg(any(
@@ -118,7 +120,11 @@ use fw_esp32_common::lp_fs;
 
 #[cfg(all(
     feature = "radio",
-    not(any(feature = "stress_s2", feature = "stress_s3")),
+    not(any(
+        feature = "stress_s2",
+        feature = "stress_s3",
+        feature = "desk_espnow_meter"
+    )),
     not(fw_harness)
 ))]
 use hardware::espnow_radio_driver::Esp32EspNowRadioDriver;
@@ -426,7 +432,11 @@ fn boot_firmware(spawner: embassy_executor::Spawner) -> FirmwareApp {
     ))));
     #[cfg(all(
         feature = "radio",
-        not(any(feature = "stress_s2", feature = "stress_s3"))
+        not(any(
+            feature = "stress_s2",
+            feature = "stress_s3",
+            feature = "desk_espnow_meter"
+        ))
     ))]
     {
         let radio_driver = Esp32EspNowRadioDriver::new(Rc::clone(&hardware_registry), wifi)
@@ -443,9 +453,18 @@ fn boot_firmware(spawner: embassy_executor::Spawner) -> FirmwareApp {
     // own its controller/interface. See `stress.rs`.
     #[cfg(any(feature = "stress_s2", feature = "stress_s3"))]
     stress::start(spawner, wifi);
+    // The desk's ESP-NOW loss meter (BLE M4's steady-state check): the radio
+    // becomes a sequence-numbered broadcaster and counter instead of a driver,
+    // for the same reason. Never shipped. See `desk_espnow_meter.rs`.
+    #[cfg(feature = "desk_espnow_meter")]
+    desk_espnow_meter::start(spawner, wifi);
     #[cfg(all(
         not(feature = "radio"),
-        not(any(feature = "stress_s2", feature = "stress_s3"))
+        not(any(
+            feature = "stress_s2",
+            feature = "stress_s3",
+            feature = "desk_espnow_meter"
+        ))
     ))]
     let _ = wifi;
     let hardware_system = Rc::new(hardware_system);
