@@ -2688,6 +2688,17 @@ test-all: test test-gfx
 
 test-filetests:
     scripts/filetests.sh
+    just test-example-shaders
+
+# Compile gate over the shipped example shaders: every catalog/ and
+# projects/test/ shader, composed the way its node composes it, compiled (not
+# run) on every filetest target (ALL_TARGETS); any rejection fails. Workspace
+# `cargo test` selection, not `-p`, so it reuses the build `test-rust-core`
+# just made instead of re-unifying features. Needs the rv32 builtins image
+# (`build-rv32-builtins`); without the Xtensa image the xt targets run codegen
+# only. See docs/debt/example-shaders-not-compile-gated.md.
+test-example-shaders:
+    cargo test --test example_shaders_compile -- --ignored --nocapture
 
 # Crash-recovery emulator suite (slow: builds fw-emu with build-std/unwind
 # and simulates multiple reboots). Marked #[ignore]; run explicitly.

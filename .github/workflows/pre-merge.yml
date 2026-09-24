@@ -191,6 +191,13 @@ jobs:
               - 'lp-core/**'
               - 'third_party/**'
               - 'scripts/**'
+              # The shipped example shaders: `test-filetests` runs the
+              # example-shader compile gate (`just test-example-shaders`),
+              # which compiles every catalog/ + projects/test/ shader on every
+              # filetest target — so a shader-only content edit is a shader
+              # change (docs/debt/example-shaders-not-compile-gated.md).
+              - 'catalog/**'
+              - 'projects/test/**'
               - 'Cargo.toml'
               - 'Cargo.lock'
               - 'rust-toolchain.toml'
