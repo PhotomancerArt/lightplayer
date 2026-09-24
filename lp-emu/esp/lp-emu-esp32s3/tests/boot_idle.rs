@@ -704,13 +704,15 @@ fn the_ledger_triple_is_elicited_by_a_stop_all_on_the_wire() {
     assert_eq!(stack.len(), 1, "one [stack] line per stop-all:\n{text}");
     assert_eq!(mem.len(), 2, "[MEM] before and after the stop:\n{text}");
     assert_eq!(jit.len(), 2, "[JIT] before and after the stop:\n{text}");
-    // `[stack] heartbeat: high-water <used> B of 37280 B (<headroom> B headroom)`
+    // `[stack] heartbeat: high-water <used> B of 37304 B (<headroom> B headroom)`
+    // — 37,280 until the BLE plan's M3 changed the server loop's future
+    // (which lives in `.bss`), and with it what `.bss` leaves the stack.
     let words: Vec<&str> = stack[0].split_whitespace().collect();
     let used: u32 = words[3].parse().expect("high-water bytes");
     assert_eq!(
         &words[4..7],
-        &["B", "of", "37280"],
-        "the S3's 37,280 B total: {}",
+        &["B", "of", "37304"],
+        "the S3's 37,304 B total: {}",
         stack[0]
     );
     let headroom: u32 = words[8]
@@ -746,7 +748,7 @@ fn the_ledger_triple_is_elicited_by_a_stop_all_on_the_wire() {
     );
     assert!(
         !text.contains("[INIT] main stack"),
-        "the S3 prints no `main stack` line; its 37,280 B total is in every `[stack]` \
+        "the S3 prints no `main stack` line; its 37,304 B total is in every `[stack]` \
          line's `of <total> B` instead"
     );
 
