@@ -13,10 +13,11 @@
 //! recorded holes, inside each region's bounds, is live (or a hole smaller
 //! than [`MIN_HOLE`]).
 //!
-//! With `heap_track_diag` as well, every allocation whose address falls in a
-//! window given at build time (`LP_HEAP_TRACK_LO`/`LP_HEAP_TRACK_HI`, hex) is
-//! remembered with its frame-pointer backtrace while it is live, and the map
-//! prints the live ones — `addr2line` on the ELF names the allocator.
+//! With `heap_track_diag` as well, every main-region allocation at or above
+//! offset `LP_HEAP_TRACK_FROM` (build time) is remembered with its
+//! frame-pointer backtrace while it is live, and the map prints the live ones
+//! once they are few (after a project stops) — `addr2line` on the ELF names
+//! the allocator.
 
 use core::alloc::Layout;
 use core::sync::atomic::{AtomicU32, Ordering};

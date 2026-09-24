@@ -141,8 +141,10 @@ stress_s3 = ["radio"]  # ESP-NOW broadcast chatter, max payload, back to back
 desk_espnow_meter = ["radio"]
 # Heap diagnostics — OFF by default, never shipped. `heap_map_diag` logs the
 # heap's holes and live spans by address (`[heapmap]`, `src/heap_map.rs`);
-# `heap_track_diag` adds the backtrace of every live allocation inside the
-# build-time window `LP_HEAP_TRACK_LO`..`LP_HEAP_TRACK_HI` (hex);
+# `heap_track_diag` adds the backtrace of every live allocation at or above
+# main-region offset `LP_HEAP_TRACK_FROM` (build-time, decimal; this build
+# gives the heap only 16 KiB of the reclaimed segment and keeps its table in
+# the rest);
 # `heap_diag_ble_standin` leaks BLE's boot-time heap (Run I: 19,436 + 3,500 +
 # 1,372 B) where BLE would start, for an emulated board, which never starts
 # BLE. Written for docs/defects/2026-09-24-ble-enabled-c6-refuses-a-project-switch-after-the-heap-cut.md.

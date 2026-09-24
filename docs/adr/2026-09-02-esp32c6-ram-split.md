@@ -118,6 +118,18 @@ at 0 connections and ~3.5 KB per connection (silicon, the transport ADR), so
 a BLE-enabled board's compile margin is that much smaller again. The
 emulator numbers above are the BLE-disabled board.
 
+**Placement (2026-09-24, same day).** The cut exposed a contiguity cost the
+table above does not show. A BLE-enabled board refused choker → zook with
+212 KB free, because the load gate reads the largest block and only the main
+region can reach 64 KiB. The fix is placement, not size
+(`docs/defects/2026-09-24-ble-enabled-c6-refuses-a-project-switch-after-the-heap-cut.md`).
+The radio blobs' C heap (`malloc` and friends, `lp-fw/fw-esp32c6/src/c_heap.rs`)
+fills the reclaimed `dram2_seg` region first. That region can never pass
+the gate, so radio blocks there cost the gate nothing, and the main region
+is left to Rust. With BLE up on silicon, 44,584 B of `dram2_seg` holds radio
+allocations. Allocations that a project outlives no longer keep memory they
+grew during the project.
+
 ## Alternatives Considered
 
 - **Grow the stack by shrinking the heap alone (no dram2).** Loses
