@@ -2744,10 +2744,22 @@ test-glsl-filetests:
 # (which need chip builds this gate deliberately avoids). Note the narrow
 # residue: drift unique to the emu fixture itself is only caught locally.
 [parallel]
-check-lint: fmt-check clippy check-lpc-engine-gates check-studio-core-minimal lint-serde-content lint-browser-test-harness lint-classic-capture lint-pcb-export lint-schemars-fw lint-upgrade-fw lint-emu-fence lint-emu-regnames lint-torture-corpus lint-vec-corpus lint-tw-utilities
+check-lint: fmt-check clippy check-lpc-engine-gates wire-dict-check check-studio-core-minimal lint-serde-content lint-browser-test-harness lint-classic-capture lint-pcb-export lint-schemars-fw lint-upgrade-fw lint-emu-fence lint-emu-regnames lint-torture-corpus lint-vec-corpus lint-tw-utilities
 
 [parallel]
 check: check-lint schema-check fw-manifest-check-emu
+
+# The wire's JSON Pack dictionary (lp-core/lpc-wire/src/wire_dictionary.rs),
+# generated from the wire types by a host-only tracer (feature `wire-dict-gen`,
+# never enabled by firmware) and ranked by the committed traffic sample.
+# `wire-dict-check` fails when the committed file is stale, and when the
+# dictionary changed while WIRE_PROTO_VERSION did not: a dictionary change is a
+# wire change. `wire-dict` refuses to write in that case too.
+wire-dict:
+    cargo run -q -p lpc-wire --features wire-dict-gen --bin wire-dict
+
+wire-dict-check:
+    cargo run -q -p lpc-wire --features wire-dict-gen --bin wire-dict -- --check
 
 # Guard against serde Content-machinery reintroduction (tag/untagged/flatten).
 # See docs/adr/2026-07-04-json-only-artifacts.md and the script's allowlist.

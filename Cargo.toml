@@ -249,6 +249,7 @@ cranelift-frontend = { git = "https://github.com/PhotomancerArt/lp-cranelift", b
 cranelift-module = { git = "https://github.com/PhotomancerArt/lp-cranelift", branch = "main", version = "0.127.0", default-features = false }
 cranelift-object = { git = "https://github.com/PhotomancerArt/lp-cranelift", branch = "main", version = "0.127.0" }
 lp-collection = { path = "lp-base/lp-collection", default-features = false }
+lp-json-pack = { path = "lp-base/lp-json-pack", default-features = false }
 lp-recovery = { path = "lp-base/lp-recovery", default-features = false }
 
 # Common dependencies

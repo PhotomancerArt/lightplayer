@@ -36,10 +36,13 @@ fn lexer_round_trips_every_line_in_uneven_slices() {
         json_total += line.json.len();
         packed_total += n;
     }
-    // Real traffic packs to under a third of its JSON even with the base64
-    // left as text (the lexer path; blobs are the event path's).
+    // Real traffic packs to under 40 % of its JSON even with the base64 left
+    // as text (the lexer path; blobs are the event path's). The post-lean-wire
+    // sample (2026-09-23): 135,131 → 51,902 B, 38.4 %. Lean replies resend
+    // less structure, so there is less for the dictionary to fold than in the
+    // pre-lean-wire sample's 4.0×.
     assert!(
-        packed_total * 3 < json_total,
+        packed_total * 5 < json_total * 2,
         "{packed_total} vs {json_total}"
     );
 }
@@ -83,8 +86,9 @@ fn blobs_decode_back_to_their_base64_text() {
     );
     // Raw blobs beat their base64 text, repeats included (`AF`).
     assert!(with_blobs < without, "{with_blobs} vs {without}");
+    // 135,131 → 46,719 B (34.6 %) on the post-lean-wire sample.
     assert!(
-        with_blobs * 7 < json_total * 2,
+        with_blobs * 25 < json_total * 9,
         "{with_blobs} vs {json_total}"
     );
 }
@@ -113,8 +117,10 @@ fn a_mixed_frame_shares_back_references() {
 fn full_is_reported_for_every_short_buffer() {
     let dict = fixture_dictionary();
     let lines = fixture_lines();
-    // Every small line, and the first large lens reply, at every size.
-    let big = lines.iter().position(|l| l.json.len() > 8000).unwrap();
+    // Every small line, and the largest line, at every size.
+    let big = (0..lines.len())
+        .max_by_key(|&i| lines[i].json.len())
+        .unwrap();
     let chosen = lines
         .iter()
         .enumerate()

@@ -1,4 +1,5 @@
-//! Byte-counting `SerWrite` sink over the wire serializer.
+//! The wire serializer's sinks: the byte counter, and [`ser_wire_to`], which
+//! writes a message as JSON or packed.
 //!
 //! ESP32 writes outbound messages with the vendored `ser-write-json` crate
 //! (`ryu-js` float formatting), not `serde_json` (`ryu`). Those two serializers
@@ -14,10 +15,14 @@
 //! the `ser-write-json` feature) so the shared frame batcher can budget against
 //! the same serializer that actually writes the bytes.
 
+use lp_json_pack::PackError;
 use ser_write_json::SerWrite;
 use ser_write_json::ser::to_writer;
-use ser_write_json::ser_write::Token;
+use ser_write_json::ser_write::{SliceWriter, Token};
 use serde::Serialize;
+
+use crate::pack_sink::PackSink;
+use crate::wire_encoding::WireEncoding;
 
 /// Error from a type-erased wire serialization.
 ///
@@ -110,6 +115,57 @@ pub fn ser_write_json_to<W: SerWrite, T: Serialize + ?Sized>(
         takes_tokens: W::TAKES_TOKENS,
     };
     to_writer(&mut erased, value).map_err(|_| ErasedWriteError)
+}
+
+/// Why [`ser_wire_to`] wrote nothing usable.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WireWriteError {
+    /// The buffer is too small for the message in this encoding.
+    Full,
+    /// Packed only: the message holds text (a `RawValue`) that the packed form
+    /// cannot reproduce byte for byte, or the value failed to serialize. Send
+    /// it as JSON.
+    Unpackable,
+}
+
+impl core::fmt::Display for WireWriteError {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.write_str(match self {
+            Self::Full => "wire message does not fit the buffer",
+            Self::Unpackable => "wire message cannot be packed; send it as JSON",
+        })
+    }
+}
+
+/// Write `value` into `buf` in `encoding`, and return the bytes written.
+///
+/// [`WireEncoding::Json`] writes exactly the `M!` line's JSON text;
+/// [`WireEncoding::Packed`] writes one JSON Pack frame's payload (unframed:
+/// the transport adds `0x00 'P' COBS … 0x00`) that decodes back to that same
+/// text. Both go through [`ser_write_json_to`], so each wire type still has
+/// one serializer instantiation.
+pub fn ser_wire_to<T: Serialize + ?Sized>(
+    buf: &mut [u8],
+    encoding: WireEncoding,
+    value: &T,
+) -> Result<usize, WireWriteError> {
+    match encoding {
+        WireEncoding::Json => {
+            let mut writer = SliceWriter::new(buf);
+            // The slice writer's one failure mode is a full buffer.
+            ser_write_json_to(&mut writer, value).map_err(|_| WireWriteError::Full)?;
+            Ok(writer.len())
+        }
+        WireEncoding::Packed => {
+            let mut sink = PackSink::new(buf);
+            let serialized = ser_write_json_to(&mut sink, value);
+            match (sink.finish(), serialized) {
+                (Ok(n), Ok(())) => Ok(n),
+                (Err(PackError::Full), _) => Err(WireWriteError::Full),
+                _ => Err(WireWriteError::Unpackable),
+            }
+        }
+    }
 }
 
 /// A [`SerWrite`] sink that discards output and counts bytes.
@@ -560,6 +616,7 @@ mod cross_serializer_tests {
 mod token_hook_tests {
     use super::ser_write_json_to;
     use crate::project::{WireRuntimeBufferMetadataPayload, WireRuntimeBufferPayload};
+    use crate::test_traffic::{TrafficDirection, traffic_lines};
     use crate::{ClientMessage, WireServerMessage};
     use alloc::format;
     use alloc::string::String;
@@ -568,11 +625,6 @@ mod token_hook_tests {
     use lpc_model::{ResourceRef, Revision, RuntimeBufferId};
     use ser_write_json::SerWrite;
     use ser_write_json::ser_write::Token;
-
-    /// Recorded Studio ↔ choker traffic (`<` board→host, `>` host→board),
-    /// one `M!` line each; shared with `lp-json-pack`'s round-trip tests.
-    const TRAFFIC: &str =
-        include_str!("../../../lp-base/lp-json-pack/tests/fixtures/choker-lens-sample.txt");
 
     /// A sink that takes every token (`take`) or declines every one, and
     /// records both.
@@ -611,24 +663,24 @@ mod token_hook_tests {
     #[test]
     fn recorded_traffic_reserializes_byte_for_byte() {
         let mut lines = 0;
-        for line in TRAFFIC.lines() {
-            let (direction, json) = line.split_at(2);
-            let Some(json) = json.strip_prefix("M!") else {
-                continue;
-            };
+        for line in traffic_lines() {
             let mut out = Vec::new();
-            match direction {
-                "< " => {
-                    let msg: WireServerMessage = crate::json::from_str(json).unwrap();
+            match line.direction {
+                TrafficDirection::BoardToHost => {
+                    let msg: WireServerMessage = crate::json::from_str(line.json).unwrap();
                     ser_write_json_to(&mut out, &msg).unwrap();
                 }
-                "> " => {
-                    let msg: ClientMessage = crate::json::from_str(json).unwrap();
+                TrafficDirection::HostToBoard => {
+                    let msg: ClientMessage = crate::json::from_str(line.json).unwrap();
                     ser_write_json_to(&mut out, &msg).unwrap();
                 }
-                other => panic!("unknown direction {other:?}"),
             }
-            assert_eq!(core::str::from_utf8(&out).unwrap(), json);
+            assert_eq!(
+                core::str::from_utf8(&out).unwrap(),
+                line.json,
+                "line {}",
+                line.index
+            );
             lines += 1;
         }
         assert!(

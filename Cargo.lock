@@ -6451,7 +6451,9 @@ version = "40.0.0"
 dependencies = [
  "base64 0.22.1",
  "lp-collection 1.0.0",
+ "lp-json-pack",
  "lpc-model",
+ "ryu-js",
  "schemars",
  "ser-write-json",
  "serde",

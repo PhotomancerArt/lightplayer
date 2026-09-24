@@ -116,7 +116,7 @@
 //! | R5 | separate key and value tables; 240 one-byte keys (Ion: SIDs < 128) | 3,147 | 1,085 | −1–3 % |
 //! | R6 | small integers and the 64 commonest values in the tag byte; LEB128 | 2,874 | 1,024 | −6–9 %, the biggest deviation win |
 //! | R7 | inline strings to 31 B with the length in the tag (Ion: 13) | 2,874 | 1,024 | ±0 here |
-//! | R8 | per-frame back-references | 2,874 | 1,024 | ±0 on the median; it pays on a repeated blob (the device's doubled `layout2d` payload). Blobs joined the table in the product (`AF`): in the committed sample, 9.9 KB of 20.4 KB of base64 repeats within its own frame |
+//! | R8 | per-frame back-references | 2,874 | 1,024 | ±0 on the median; it pays on a repeated blob (the device's doubled `layout2d` payload). Blobs joined the table in the product (`AF`): in the pre-lean-wire Run D sample, 9.9 KB of 20.4 KB of base64 repeated within its own frame |
 //!
 //! What is given up: an off-the-shelf Ion reader cannot read a capture, and
 //! there is no external reference implementation. The decoder here (and the

@@ -215,15 +215,14 @@ mod tests {
     };
     use crate::server::{FileChangeKind, FileChunk, FsRequest, FsResponse};
     use crate::{
-        ControlDisplayLayoutProbeResult, ControlProductProbeResult, OutputFrameEntry,
-        OutputFrameProbeResult, ProjectReadProbeEvent, ProjectReadResourceEvent,
-        RenderProductProbeResult, WireVisualSpace,
+        ControlProductProbeResult, OutputFrameEntry, OutputFrameProbeResult, ProjectReadProbeEvent,
+        ProjectReadResourceEvent, RenderProductProbeResult, RevisionGateResult, WireVisualSpace,
     };
     use alloc::string::ToString;
     use alloc::vec;
     use lpc_model::{
-        AsLpPathBuf, ControlExtent, ControlProduct, ControlSampleLayout, NodeId, ResourceRef,
-        Revision, RuntimeBufferId, VisualProduct,
+        AsLpPathBuf, ControlExtent, ControlProduct, NodeId, ResourceRef, Revision, RuntimeBufferId,
+        VisualProduct,
     };
 
     /// Not UTF-8; its base64 carries `+`, `/` and one `=`.
@@ -328,18 +327,16 @@ mod tests {
                 node: NodeId::new(4),
                 revision: Revision::new(6),
                 channels: 1,
-                sample_format: WireChannelSampleFormat::U16,
-                sample_layout: ControlSampleLayout { spans: Vec::new() },
-                display_layout: ControlDisplayLayoutProbeResult::Unchanged {
+                sample_format: Some(WireChannelSampleFormat::U16),
+                geometry: RevisionGateResult::Unchanged {
                     revision: Revision::new(6),
                 },
-                placements: Vec::new(),
                 bytes: vec![0xff, 0x00, 0x7f, 0x80, 0x01, 0xfe],
             }],
         };
         assert_json(
             &result,
-            r#"{"frame":{"outputs":[{"node":4,"revision":6,"channels":1,"sample_format":"u16","sample_layout":{"spans":[]},"display_layout":{"unchanged":{"revision":6}},"placements":[],"bytes":"/wB/gAH+"}]}}"#,
+            r#"{"frame":{"outputs":[{"node":4,"revision":6,"channels":1,"sample_format":"u16","geometry":{"unchanged":{"revision":6}},"bytes":"/wB/gAH+"}]}}"#,
         );
     }
 
@@ -351,15 +348,14 @@ mod tests {
             revision: Revision::new(18),
             extent: ControlExtent::new(1, 3),
             sample_format: WireChannelSampleFormat::U16,
-            sample_layout: ControlSampleLayout { spans: Vec::new() },
-            display_layout: ControlDisplayLayoutProbeResult::Unchanged {
+            geometry: RevisionGateResult::Unchanged {
                 revision: Revision::new(18),
             },
             bytes: BINARY.to_vec(),
         };
         assert_json(
             &result,
-            r#"{"preview":{"product":{"node":2,"output":0,"preferred_extent":{"rows":1,"samples_per_row":3}},"revision":18,"extent":{"rows":1,"samples_per_row":3},"sample_format":"u16","sample_layout":{"spans":[]},"display_layout":{"unchanged":{"revision":18}},"bytes":"++++7/8="}}"#,
+            r#"{"preview":{"product":{"node":2,"output":0,"preferred_extent":{"rows":1,"samples_per_row":3}},"revision":18,"extent":{"rows":1,"samples_per_row":3},"sample_format":"u16","geometry":{"unchanged":{"revision":18}},"bytes":"++++7/8="}}"#,
         );
     }
 
