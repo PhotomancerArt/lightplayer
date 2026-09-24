@@ -319,6 +319,13 @@ pub fn server_message_detail(msg: &lpc_wire::WireServerMessage) -> String {
             loaded_projects.len()
         ),
         lpc_wire::server::ServerMsgBody::Error { .. } => "Error".into(),
+        lpc_wire::server::ServerMsgBody::LoginChallenge { offers, .. } => {
+            format!("LoginChallenge offers={}", offers.len())
+        }
+        lpc_wire::server::ServerMsgBody::LoginResult(_) => "LoginResult".into(),
+        lpc_wire::server::ServerMsgBody::NotPermitted { needs } => {
+            format!("NotPermitted needs={needs:?}")
+        }
     }
 }
 

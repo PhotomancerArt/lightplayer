@@ -302,20 +302,58 @@ fn the_snapshot_carries_the_state_that_is_not_a_register() {
 /// cycle count and the skip count did not move. Re-pinned with that cause
 /// attached; a further change here is a finding again.
 ///
-/// ⚠️ **Plan `lp-json-pack` P4 moved all three again, with the IMAGE, not the
-/// loop: 3,245,171 / 3,245,151 → 3,245,118 / 3,245,098 (−53 each), and the
-/// sha.** The firmware's statics grew by 24 bytes, so the prefix prints
-/// `[INIT] main stack 45256 B` where it printed `45280 B` (same length), and
-/// everything placed after `.bss` moved with it. The 53 instructions were
-/// not attributed line by line; the emulator did not change (the same tree's
-/// lp-emu, `fafb2b574`), the skip count did not move, and cycles and
-/// instructions moved together.
-const PREFIX_CYCLES: u64 = 3_245_118;
-const PREFIX_INSTRUCTIONS: u64 = 3_245_098;
+/// ⚠️ **The BLE plan's M3 (access core) moved both by +5,856: 3,245,171 →
+/// 3,251,027 cycles, 3,245,151 → 3,251,007 instructions.** Not the machine —
+/// the image. Found with `LP_EMU_XT_BLOCKPROF` on `origin/main` (`e226fb283`)
+/// against the branch, both images run to this same line: the whole
+/// difference is `boot_firmware` +5,969, `_xtensa_lx_rt_zero_fill` −60, the
+/// main task's `poll` −49 and the mask ROM −4. Inside `boot_firmware` it is
+/// one 7-instruction loop running 8,424 times instead of 7,572 — the
+/// `stack_probe::paint` loop, which paints from the stack bottom to 1 KiB
+/// below the current `sp`. It paints 852 words more because both ends
+/// moved: the bottom 20 words lower (`.bss` shrank 80 B, which is also the
+/// −60 in `zero_fill`), and the `sp` at the paint 832 words (3,328 B)
+/// higher, because the embassy main task's `poll` frame shrank from `entry
+/// a1, 4304` to `entry a1, 976` — the branch's server-loop changes took
+/// temporaries off that frame (read off both ELFs' `entry` instructions,
+/// not inferred; which of the branch's commits did it was not bisected).
+/// 852 × 7 = 5,964, and the other five are straight-line code in
+/// `boot_firmware`. The bytes changed by one line for the `.bss` reason
+/// (see `PREFIX_SHA256`); the skip count did not move.
+///
+/// Then **+3 more when M3 merged over lean-wire (PR #791): 3,251,027 →
+/// 3,251,030 cycles, 3,251,007 → 3,251,010 instructions.** Again the image,
+/// and found the same way (`LP_EMU_XT_BLOCKPROF`, the M3 branch's image at
+/// `458d3769e` against the merged tree's, per symbol): `boot_firmware` +2 and
+/// the mask ROM +1, nothing else. `boot_firmware` came out 8 B longer and
+/// its code around the `stack_probe::paint` loop is scheduled differently —
+/// the loop still runs 8,424 times, and two more straight-line instructions
+/// retire once each. The ROM's +1 is `uart_tx_one_char`'s TX-FIFO wait
+/// (0x4000921a–0x40009222, a four-instruction poll entered 672 times): one
+/// call's wait retires one more of the loop's instructions before it exits,
+/// which is what the two-cycle shift upstream of it buys. Bytes, sha and
+/// skips did not move.
+///
+/// Then **−98 each on the merge of `origin/main` (M3) into `lp-json-pack`:
+/// 3,251,030 → 3,250,932 cycles, 3,251,010 → 3,250,912 instructions.** Again
+/// the image, measured on the merged tree with the same lp-emu: the two
+/// branches' statics combine to a main stack of 45,320 B (M3 alone 45,360,
+/// lp-json-pack alone 45,256; the merged ELF's `_stack_start − _stack_end`),
+/// so the `stack_probe::paint` loop above starts 40 B (10 words) higher —
+/// 70 of the 98 at its 7 instructions a word. The other 28 were not
+/// attributed per symbol; the skip count did not move, and the bytes moved by
+/// the one `main stack` line (see `PREFIX_SHA256`).
+const PREFIX_CYCLES: u64 = 3_250_932;
+const PREFIX_INSTRUCTIONS: u64 = 3_250_912;
 const PREFIX_IDLE_SKIPS: u64 = 0;
 const PREFIX_BYTES: usize = 543;
-/// Re-pinned with the counters above (the old sha was `ea8bae30…`).
-const PREFIX_SHA256: &str = "725255e2a7f4d30db7680164fd8c3b93c16930c02d94876c7befb638b99c6443";
+/// Moved by the BLE plan's M3 (access core): one line of the 543 bytes,
+/// `[INIT] main stack 45280 B` → `45360 B` (the server loop's future in
+/// `.bss` shrank 80 B). See `boot_idle.rs`'s `PREFIX_SHA256`. Was `ea8bae30…`.
+/// Then `45360 B` -> `45320 B` on the merge with `lp-json-pack` (+24 B of
+/// statics; the merged ELF's `_stack_start - _stack_end`). M3's pin was
+/// `465c8d52…`.
+const PREFIX_SHA256: &str = "c79000363d9823b04e6ba6bbb6c4425ef70cb87379c31ceb33f4740d8d111c5d";
 
 /// **The single-core safety net.** A run in which core 1 never starts is
 /// the run M3 produced: same bytes, same sha, same cycles, same

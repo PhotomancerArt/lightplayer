@@ -1101,6 +1101,7 @@ mod tests {
                     hardware: lpc_wire::HardwareFacts::default(),
                     device_uid: None,
                     pack_dictionary: lpc_wire::WIRE_DICTIONARY_FINGERPRINT,
+                    auth: lpc_wire::HelloAuth::TRUSTED,
                 }),
             ),
             // This conversation's own answer, right behind it.
@@ -1155,6 +1156,7 @@ mod tests {
             hardware: Default::default(),
             device_uid: Some("dev000000daqf6dvvt2".to_string()),
             pack_dictionary: lpc_wire::WIRE_DICTIONARY_FINGERPRINT,
+            auth: lpc_wire::HelloAuth::TRUSTED,
         }
     }
 

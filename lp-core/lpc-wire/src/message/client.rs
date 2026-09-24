@@ -5,6 +5,7 @@ use crate::project::WireProjectHandle;
 use crate::project_command::WireProjectCommand;
 use crate::server::FsRequest;
 use alloc::string::String;
+use alloc::vec::Vec;
 use serde::{Deserialize, Serialize};
 
 /// Client message with request id for correlation.
@@ -85,6 +86,22 @@ pub enum ClientRequest {
     SetEncoding {
         encoding: crate::WireEncoding,
         dictionary: u32,
+    },
+    /// Begin a login on this link: answered with
+    /// [`crate::server::ServerMsgBody::LoginChallenge`] (a fresh nonce and
+    /// every installed secret's salt and cost, with no labels), or with
+    /// [`crate::server::ServerMsgBody::LoginResult`] `Refused` while another
+    /// login is in flight on the device or the device is in backoff.
+    ///
+    /// Answered on every link at every tier — like [`Self::Hello`], it is
+    /// how an untrusted link gets a tier at all.
+    LoginBegin,
+    /// Answer the outstanding challenge: one
+    /// `HMAC-SHA256(K_i, nonce)` per offer, in offer order (base64). The
+    /// link is granted the highest tier among the entries that verify; the
+    /// verdict comes back as [`crate::server::ServerMsgBody::LoginResult`].
+    LoginAnswer {
+        macs: Vec<lpc_access::LoginMac>,
     },
 }
 
@@ -239,6 +256,29 @@ mod tests {
         assert_eq!(json, "\"clearFaults\"");
         let deserialized: ClientRequest = crate::json::from_str(&json).unwrap();
         assert!(matches!(deserialized, ClientRequest::ClearFaults));
+    }
+
+    /// Login requests: the bare unit spelling for begin, and MACs as
+    /// base64 strings for the answer.
+    #[test]
+    fn test_login_requests() {
+        let begin = crate::json::to_string(&ClientRequest::LoginBegin).unwrap();
+        assert_eq!(begin, r#""loginBegin""#);
+
+        let answer = ClientRequest::LoginAnswer {
+            macs: alloc::vec![lpc_access::LoginMac([0xab; 32])],
+        };
+        let json = crate::json::to_string(&answer).unwrap();
+        assert_eq!(
+            json,
+            r#"{"loginAnswer":{"macs":["q6urq6urq6urq6urq6urq6urq6urq6urq6urq6urq6s="]}}"#
+        );
+        match crate::json::from_str::<ClientRequest>(&json).unwrap() {
+            ClientRequest::LoginAnswer { macs } => {
+                assert_eq!(macs, alloc::vec![lpc_access::LoginMac([0xab; 32])]);
+            }
+            other => panic!("wrong request type: {other:?}"),
+        }
     }
 
     #[test]

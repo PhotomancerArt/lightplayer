@@ -20,6 +20,8 @@ use alloc::vec::Vec;
 use lpc_model::LpFeature;
 use serde::{Deserialize, Serialize};
 
+use crate::server::hello_auth::HelloAuth;
+
 /// Wire protocol version spoken by this build of the workspace.
 ///
 /// # Bump rule
@@ -33,7 +35,8 @@ use serde::{Deserialize, Serialize};
 ///
 /// # History
 ///
-/// - 22: JSON Pack (plan `lp-json-pack`) — a board writes its replies
+/// - 23: JSON Pack (plan `lp-json-pack`; bumped again after the BLE M3
+///   access core took 22) — a board writes its replies
 ///   PACKED on a link whose host opted in: `ClientRequest::SetEncoding {
 ///   encoding, dictionary }` + its `ServerMsgBody::SetEncoding { encoding }`
 ///   answer, and `ServerHello` gains `pack_dictionary`, the fingerprint of
@@ -42,6 +45,18 @@ use serde::{Deserialize, Serialize};
 ///   decode either, which is what earns the bump. From here on the
 ///   dictionary is part of the wire: `just wire-dict-check` fails a
 ///   dictionary change that does not bump this constant.
+/// - 22: access over untrusted links (BLE remote control, M3; bumped
+///   again after lean-wire took 21) — `ClientRequest::LoginBegin` / `LoginAnswer { macs }` and their answers
+///   `ServerMsgBody::LoginChallenge { nonce, offers }` /
+///   `LoginResult(Granted { tier, label } | Refused { retry_after_ms })`,
+///   plus `ServerMsgBody::NotPermitted { needs }`, the refusal a request
+///   gets when its link's tier is too low. New variants on both enums, and
+///   `ServerHello` gains the REQUIRED `auth: { required, granted }` for the
+///   link it is sent on: an old client cannot decode the new hello and an
+///   old firmware cannot decode a login. The heartbeat also changes MEANING
+///   on an untrusted link that holds no tier — it carries nothing the hello
+///   does not — though no such link exists until the BLE transport lands.
+///   See `docs/adr/2026-09-23-ble-access-model.md`.
 /// - 21: the revision gate (lean-wire) — what a probe answers unchanged on
 ///   every read rides behind a revision (`RevisionGateRead` →
 ///   `RevisionGateResult<T>`). First, everything static about a probed
@@ -215,7 +230,7 @@ use serde::{Deserialize, Serialize};
 /// as `None` on new Studio and a new firmware's extra fields are ignored
 /// by old Studio. Bumping for those would mark every board running
 /// current firmware Incompatible in exchange for nothing.
-pub const WIRE_PROTO_VERSION: u32 = 22;
+pub const WIRE_PROTO_VERSION: u32 = 23;
 
 /// Unsolicited/boot-time server identity, version, and capability report.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -242,6 +257,10 @@ pub struct ServerHello {
     /// logs and on the device card before anyone asks, and tells a host
     /// seeing 0 not to ask.
     pub pack_dictionary: u32,
+    /// What the link this hello is sent on may do — computed per link, so
+    /// the same device answers a USB client and an unauthenticated radio
+    /// client differently. See [`HelloAuth`].
+    pub auth: HelloAuth,
 }
 
 /// Build facts of the firmware/server binary answering the hello: its
@@ -443,6 +462,7 @@ mod tests {
             },
             device_uid: Some("dev0000000000000001".to_string()),
             pack_dictionary: crate::WIRE_DICTIONARY_FINGERPRINT,
+            auth: HelloAuth::TRUSTED,
         };
         let json = crate::json::to_string(&hello).unwrap();
         assert!(json.contains(&alloc::format!("\"proto\":{WIRE_PROTO_VERSION}")));
@@ -477,6 +497,10 @@ mod tests {
             },
             device_uid: None,
             pack_dictionary: crate::WIRE_DICTIONARY_FINGERPRINT,
+            auth: HelloAuth {
+                required: true,
+                granted: None,
+            },
         };
         let json = crate::json::to_string(&hello).unwrap();
         let back: ServerHello = crate::json::from_str(&json).unwrap();
@@ -505,6 +529,10 @@ mod tests {
             },
             device_uid: None,
             pack_dictionary: crate::WIRE_DICTIONARY_FINGERPRINT,
+            auth: HelloAuth {
+                required: true,
+                granted: None,
+            },
         };
         let frame = ServerMessage::new(0, ServerMsgBody::Hello(hello.clone()));
         let json = crate::json::to_string(&frame).unwrap();
@@ -533,7 +561,7 @@ mod tests {
     #[test]
     fn the_proto_version_is_pinned_to_its_history() {
         assert_eq!(
-            WIRE_PROTO_VERSION, 22,
+            WIRE_PROTO_VERSION, 23,
             "if you meant to bump, add the History entry in this file's \
              doc comment and update this pin"
         );

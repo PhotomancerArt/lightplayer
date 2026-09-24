@@ -61,6 +61,11 @@ pub fn handle_changes_since(
             }
         }
     }
+    // The fs gate: an access file never rides a changes walk — not its
+    // bytes, and not a tombstone either (nothing about it leaves the device).
+    items.retain(|(rel, _)| {
+        !lpc_access::is_access_file_path(join_prefix(prefix, rel.as_path()).as_str())
+    });
     items.sort_by(|a, b| a.0.as_str().as_bytes().cmp(b.0.as_str().as_bytes()));
 
     // resume: first item at or after the cursor path (a cursor for a path
@@ -216,7 +221,23 @@ pub fn handle_write_chunk(
 }
 
 /// Handle `FsRequest::HashPackage`: canonical package hash of `prefix`.
+///
+/// The fs gate: a hash is a function of the bytes it covers, so a package
+/// hash over an access file would be an offline oracle on the key inside
+/// it. The canonical hash already excludes the package's OWN `/.lp/`
+/// (`lpc_history`'s hash rules), which covers a project's sidecar; a prefix
+/// that would take any other access file into the hash — the device root,
+/// `/projects`, a `.lp` directory itself — is refused.
 pub fn handle_hash_package(fs: &dyn LpFs, prefix: LpPathBuf) -> FsResponse {
+    if hash_would_cover_an_access_file(fs, prefix.as_path()) {
+        return FsResponse::PackageHash {
+            prefix,
+            hash: alloc::string::String::new(),
+            error: Some(alloc::string::String::from(
+                "refused: this package hash would cover an access file (.lp/access.json)",
+            )),
+        };
+    }
     let view = match fs.chroot(prefix.as_path()) {
         Ok(view) => view,
         Err(e) => {
@@ -243,6 +264,19 @@ pub fn handle_hash_package(fs: &dyn LpFs, prefix: LpPathBuf) -> FsResponse {
             error: Some(format!("{e}")),
         },
     }
+}
+
+/// Whether the canonical hash of `prefix` would take in an access file: one
+/// lies under `prefix` and is not in the package's own excluded `/.lp/`.
+fn hash_would_cover_an_access_file(fs: &dyn LpFs, prefix: &LpPath) -> bool {
+    let Ok(paths) = fs.list_dir(prefix, true) else {
+        return false;
+    };
+    paths.iter().any(|path| {
+        lpc_access::is_access_file_path(path.as_str())
+            && relativize(prefix, path.as_path())
+                .is_some_and(|rel| lpc_history::hash::is_hashed_path(rel.as_path()))
+    })
 }
 
 /// Path under `prefix`, kept absolute (leading `/`), or `None` if outside.
@@ -293,6 +327,75 @@ mod tests {
         assert!(relativize(prefix, "/projects/x".as_path()).is_none());
         assert!(relativize(prefix, "/projects/xy/a.json".as_path()).is_none());
         assert!(relativize(prefix, "/other/a.json".as_path()).is_none());
+    }
+
+    /// A pull (changes-since) never carries an access file, neither its
+    /// bytes nor its name, whatever the prefix.
+    #[test]
+    fn changes_since_skips_access_files() {
+        let fs = seeded_fs();
+        for prefix in ["/", "/projects", "/projects/x", "/projects/x/.lp"] {
+            let FsResponse::Changes { entries, error, .. } =
+                handle_changes_since(&fs, prefix.as_path(), FsVersion::new(0), None)
+            else {
+                panic!("{prefix}: not a changes page");
+            };
+            assert_eq!(error, None, "{prefix}");
+            for entry in &entries {
+                assert!(
+                    !entry.path.as_str().ends_with("access.json"),
+                    "{prefix}: {} rode the walk",
+                    entry.path.as_str()
+                );
+            }
+        }
+        // The rest of the package still rides.
+        let FsResponse::Changes { entries, .. } =
+            handle_changes_since(&fs, "/projects/x".as_path(), FsVersion::new(0), None)
+        else {
+            panic!("not a changes page");
+        };
+        let paths: Vec<_> = entries.iter().map(|entry| entry.path.as_str()).collect();
+        assert!(paths.contains(&"/project.json"), "{paths:?}");
+        assert!(paths.contains(&"/.lp/state.json"), "{paths:?}");
+    }
+
+    /// A project's own hash excludes its sidecar (so it is answered); any
+    /// wider or `.lp`-rooted prefix that would hash an access file is not.
+    #[test]
+    fn a_hash_over_an_access_file_is_refused() {
+        let fs = seeded_fs();
+        let hash = |prefix: &str| handle_hash_package(&fs, LpPathBuf::from(prefix));
+
+        match hash("/projects/x") {
+            FsResponse::PackageHash { error, hash, .. } => {
+                assert_eq!(error, None);
+                assert_eq!(hash.len(), 64);
+            }
+            other => panic!("{other:?}"),
+        }
+        for prefix in ["/", "/projects", "/projects/x/.lp", "/.lp"] {
+            match hash(prefix) {
+                FsResponse::PackageHash { error, hash, .. } => {
+                    assert!(error.is_some(), "{prefix} was hashed");
+                    assert!(hash.is_empty(), "{prefix}");
+                }
+                other => panic!("{prefix}: {other:?}"),
+            }
+        }
+    }
+
+    fn seeded_fs() -> lpfs::LpFsMemory {
+        let fs = lpfs::LpFsMemory::new();
+        for (path, bytes) in [
+            ("/.lp/access.json", &b"{\"device\":\"SECRET\"}"[..]),
+            ("/projects/x/project.json", b"{\"format\":10}"),
+            ("/projects/x/.lp/state.json", b"{}"),
+            ("/projects/x/.lp/access.json", b"{\"project\":\"SECRET\"}"),
+        ] {
+            fs.write_file(path.as_path(), bytes).unwrap();
+        }
+        fs
     }
 
     #[test]

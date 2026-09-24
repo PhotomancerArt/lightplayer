@@ -34,6 +34,17 @@ mod tests {
         assert!(!is_hashed_path(LpPath::new("/.lp/nested/deep.json")));
     }
 
+    /// The access sidecar, by name. Cloud push, publish and fork-of-share
+    /// move snapshot trees built from exactly the hashed paths, so this one
+    /// exclusion is what keeps a project's login keys off the cloud — and
+    /// what keeps a secret change from altering the content hash that
+    /// bind-by-hash (#781) matches a device on. A future "hash /.lp too"
+    /// change must fail here first, and loudly.
+    #[test]
+    fn the_access_sidecar_is_never_hashed_so_never_pushed_published_or_forked() {
+        assert!(!is_hashed_path(LpPath::new("/.lp/access.json")));
+    }
+
     #[test]
     fn includes_everything_else() {
         assert!(is_hashed_path(LpPath::new("/project.json")));

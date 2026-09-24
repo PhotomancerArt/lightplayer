@@ -20,6 +20,8 @@ wire-dict-gen = ["std", "lp-json-pack/std"]
 [dependencies]
 lp-collection = { workspace = true, features = ["serde"] }
 base64 = { workspace = true }
+# Tiers and the login payloads (offers, MACs, outcomes) ride the wire as-is.
+lpc-access = { path = "../lpc-access" }
 lpc-model = { path = "../lpc-model", default-features = false }
 # The packed encoding's codec. `alloc` for `decode_packed_to_json`; nothing in
 # it allocates on the encode path the device uses.

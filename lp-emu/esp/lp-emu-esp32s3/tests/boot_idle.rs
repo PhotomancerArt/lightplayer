@@ -41,42 +41,32 @@
 //! directive P08's `walks/s3-stop-all.script` carries.
 //! [`the_ledger_triple_is_elicited_by_a_stop_all_on_the_wire`] is that run.
 //!
-//! # ⚠️ The link's stale-`serial_in_empty` defect, and where it shows now
+//! # ⚠️ The link drops one packet of the io_task's first framed write
 //!
-//! `docs/defects/2026-09-13-the-s3-link-drops-the-io-tasks-next-chunk-on-a-stale-serial-in-empty.md`
-//! is **open**: esp-println's polled path leaves `serial_in_empty` set in
-//! `int_raw` after its packet drains, esp-hal's `UsbSerialJtagWriteFuture::new`
-//! only *enables* the interrupt and never clears the stale raw, so an
-//! io_task write future can resolve a few hundred cycles after its chunk
-//! commits — long before the modelled 100 µs drain — and the next chunk is
-//! written into a FIFO the model holds committed and drops.
+//! With the boot going past the `[INIT]` chain, the first thing the wire
+//! carries that is longer than 64 bytes is the `hello`, and **one 64-byte
+//! packet of it never reaches the host** — on both boot paths, at the same
+//! instruction. The mechanism is in
+//! `docs/defects/2026-09-13-the-s3-link-drops-the-io-tasks-next-chunk-on-a-stale-serial-in-empty.md`:
+//! esp-println's polled path leaves `serial_in_empty` set in `int_raw`
+//! after its packet drains, esp-hal's `UsbSerialJtagWriteFuture::new` only
+//! *enables* the interrupt and never clears the stale raw, so the future
+//! resolves 342 cycles after the io_task's first chunk commits — long before
+//! the modelled 100 µs drain — and the next chunk is written into a FIFO
+//! the model holds committed and drops. A stop-all's **reply** is lost the
+//! same way, behind the triple's last `esp_println` packet.
 //!
-//! Until 2026-09-23 the boot `hello` lost one 64-byte packet to it. It no
-//! longer does, and **the mechanism is unchanged — it is a race the boot now
-//! loses the other way.** The io_task's first poll clears `serial_in_empty`
-//! (`int_clr = 0x08`) as it takes the link. On the image before
-//! `feat/lp-json-pack` that clear landed 140 cycles *before* the `[INIT]`
-//! chain's last 1-byte packet drained (clear at cyc 4,396,066, drain at
-//! 4,396,206), so the drain re-raised the bit behind it and the hello's
-//! first chunk woke on it. That branch made the main task's JSON path
-//! slower (out-of-line field-prefix helpers), the io_task is first polled
-//! later, and its clear now lands 4,522 cycles *after* the drain (drain at
-//! 4,396,360, clear at 4,400,882): `int_raw` reads `0x302` rather than
-//! `0x30a` before the hello, the write future waits the full drain, and the
-//! hello arrives whole on both boot paths. The defect is **latent** here —
-//! any image whose io_task is first polled inside the last `[INIT]` packet's
-//! drain brings the drop back.
+//! ⚠️ **2026-09-23: on the BLE plan's M3 image the hello no longer shows it**
+//! — the raw only goes stale if the host drains esp-println's last packet
+//! after the io_task's first poll clears it, and that is a race this image
+//! loses (the defect entry's dated note has both images' cycle counts). The
+//! stop-all reply still reproduces it; the hello assertions are pinned at 0.
 //!
-//! What this file pins, without widening anything:
-//!
-//! - the boot `hello` is **delivered whole**, the packet the defect used to
-//!   eat (`.button","node.clock",…`) included, with nothing merely tried —
-//!   so a timing shift that re-opens the race fails here by name;
-//! - a stop-all's **reply** is still written and lost, behind the ledger
-//!   triple's last `esp_println` packet
-//!   ([`the_ledger_triple_is_elicited_by_a_stop_all_on_the_wire`]) — that is
-//!   the defect's live witness now, and the assertion the fix flips.
-//!
+//! This file **pins that behaviour where it shows** rather than widening
+//! anything: the tried stream's length and content are asserted, with the
+//! defect named, so that whichever side is fixed — the link model, if
+//! silicon accepts a write while a packet is pending; esp-hal, if it should
+//! clear the raw; the firmware, if it should — flips one assertion here.
 //! The `[INIT]` chain itself (esp-println, polled) is delivered whole and
 //! is still pinned byte for byte as the stream's prefix.
 //!
@@ -117,7 +107,7 @@ fn images() -> Option<(PathBuf, PathBuf)> {
 /// boot stage is 30 s away.
 const GATE_US: u64 = 2_000_000;
 
-/// The defect entry for the link's stale-`serial_in_empty` drop (module docs).
+/// The defect entry for the link's dropped packet (module docs).
 const LINK_DEFECT: &str = "docs/defects/2026-09-13-the-s3-link-drops-the-io-tasks-next-chunk-on-a-stale-serial-in-empty.md";
 
 /// The three lines P05 pinned as absent and P06 delivers (DD86), plus the
@@ -132,30 +122,26 @@ const PAST_P05: &[&str] = &[
     "[RECOVERY] boot complete (first frame served)",
 ];
 
-/// The packet of the `hello`'s feature list that [`LINK_DEFECT`]'s race
-/// dropped until 2026-09-23 (module docs). Asserted **present** now, so a
-/// timing shift that re-opens the race is a named failure.
-const ONCE_DROPPED: &str =
-    ".button\",\"node.clock\",\"node.fluid\",\"node.fixture\",\"node.playlist";
-
-/// With a draining host attached from power-on, the io_task's first framed
-/// write — the `hello` — reaches the host whole: its first chunk no longer
-/// wakes on a stale `serial_in_empty`, because the io_task's own clear now
-/// lands after the `[INIT]` chain's last packet drains. See [`LINK_DEFECT`]
-/// (still open; the stop-all reply is its live witness).
-fn assert_the_hello_is_delivered_whole(machine: &Machine, delivered: &[u8]) {
+/// What the link drops of the io_task's first framed write with a draining
+/// host attached from power-on: **nothing, on this image** — and that is a
+/// race outcome, not a fix. See [`LINK_DEFECT`]'s 2026-09-23 note.
+///
+/// ⚠️ Until the BLE plan's M3 this was one 64-byte packet from inside the
+/// `hello`'s feature list. The raw `serial_in_empty` only goes stale if the
+/// host drains esp-println's last `[INIT]` packet *after* the io_task's
+/// first poll clears it (`int_clr = 0x08`); `origin/main`'s image won that
+/// race by 140 cycles and M3's image loses it by 2,301, so the raw is clear
+/// by the hello (`int_raw = 0x302`, not `0x30a`) and nothing is dropped.
+/// The mechanism still reproduces on the stop-all reply
+/// ([`the_ledger_triple_is_elicited_by_a_stop_all_on_the_wire`]); an image
+/// that falls back across the edge flips this to 64 again.
+fn assert_nothing_of_the_hello_is_dropped(machine: &Machine) {
     let tried = machine.usb_sj_tried();
-    let text = String::from_utf8_lossy(delivered).into_owned();
     assert_eq!(
         tried.len(),
         0,
-        "nothing is merely tried: if a packet is, the stale-raw race is back \
-         ({LINK_DEFECT}): {:?}",
+        "nothing is merely tried on this image ({LINK_DEFECT}, 2026-09-23 note): {:?}",
         String::from_utf8_lossy(&tried)
-    );
-    assert!(
-        text.contains(ONCE_DROPPED),
-        "the packet the race used to drop is on the delivered stream ({LINK_DEFECT}):\n{text}"
     );
 }
 
@@ -247,9 +233,10 @@ fn the_shipped_image_prints_its_init_chain_out_of_the_link() {
         text.contains("[FS] Mount failed (filesystem corrupt), formatting partition..."),
         "a fresh copy of the chip is formatted on its first boot:\n{text}"
     );
-    // A draining host took every byte, the io_task's hello included — the
-    // stale-raw race is lost the other way on this image (module docs).
-    assert_the_hello_is_delivered_whole(&machine, &delivered);
+    // ⚠️ The link defect's hello trigger is a race, and this image is on the
+    // side of it that drops nothing; pinned here so a move either way is
+    // read against the defect entry (module docs).
+    assert_nothing_of_the_hello_is_dropped(&machine);
     // The console and the link are the same stream on this chip, so
     // `--console` writes exactly this.
     assert_eq!(machine.console().bytes(), delivered);
@@ -576,15 +563,15 @@ then +2ms 4d 21 0a
     // The cable is in and the port open by 2 ms, and the firmware's first
     // line is not printed until ~8.7 ms, so a draining host takes the whole
     // chain: the script's timing is the reason nothing of it is merely
-    // tried. (The hello, too, is delivered whole — see the module docs for
-    // why the link's stale-raw race no longer takes a packet of it.)
+    // tried. (The link finding's hello trigger is pinned in
+    // `the_shipped_image_prints_its_init_chain_out_of_the_link`.)
     let delivered = a.usb_sj();
     let text = String::from_utf8_lossy(&delivered).into_owned();
     assert!(
         text.starts_with(HELLO),
         "the whole chain, delivered to a host the script plugged in:\n{text}"
     );
-    assert_the_hello_is_delivered_whole(&a, &delivered);
+    assert_nothing_of_the_hello_is_dropped(&a);
     assert_eq!(a.usb_host_now(), Some(UsbHost::Attached { draining: true }));
 
     // **Both walk forms resolved.** The `after` step waited on a line the
@@ -660,9 +647,7 @@ then +2ms 4d 21 0a
 /// `esp_println` packet committed, into a FIFO the link model holds
 /// committed for its 100 µs drain. So the reply is on the **tried** stream
 /// and not on the delivered one (module docs, [`LINK_DEFECT`]). Pinned as
-/// what it is; the fix flips the last two assertions. Since 2026-09-23 the
-/// boot `hello` no longer shows the defect (the race is lost the other way),
-/// so **this is its live witness** — do not loosen it.
+/// what it is; the fix flips the last two assertions.
 #[test]
 #[ignore = "needs LP_EMU_ESP32S3_ELF; run through `just test-emu-esp32s3-boot`"]
 fn the_ledger_triple_is_elicited_by_a_stop_all_on_the_wire() {
@@ -723,7 +708,7 @@ fn the_ledger_triple_is_elicited_by_a_stop_all_on_the_wire() {
     assert_eq!(stack.len(), 1, "one [stack] line per stop-all:\n{text}");
     assert_eq!(mem.len(), 2, "[MEM] before and after the stop:\n{text}");
     assert_eq!(jit.len(), 2, "[JIT] before and after the stop:\n{text}");
-    // `[stack] heartbeat: high-water <used> B of 37272 B (<headroom> B headroom)`
+    // `[stack] heartbeat: high-water <used> B of 37248 B (<headroom> B headroom)`
     //
     // Re-baselined 2026-09-23 (lean-wire P7): 37,280 → 37,272 (−8 B). The
     // wire-side `RevisionGateRead`/`RevisionGateResult` gate and the
@@ -732,20 +717,31 @@ fn the_ledger_triple_is_elicited_by_a_stop_all_on_the_wire() {
     // `stop_all` walks; nothing about the S3 image's own stack usage or the
     // stop-all path changed on purpose. See `_measurements.md` in
     // `~/.photomancer/planning/lp2025/2026-09-23-1501-lean-wire/`.
+    //
+    // Then the BLE plan's M3 (merged over lean-wire) changed the server
+    // loop's future, which lives in `.bss`, and with it what `.bss` leaves
+    // the stack: 37,272 → 37,296 (+24 B, the same +24 the access gate cost
+    // before lean-wire, 37,280 → 37,304). Measured on the merged tree.
+    //
+    // Then the merge of `origin/main` (M3) into `lp-json-pack`: 37,296 →
+    // 37,248 (−48 B). lp-json-pack's link epoch and the transport's per-link
+    // encoding add statics, and `.bss` takes them from the stack; measured on
+    // the merged image as its ELF's `_stack_start − _stack_end`
+    // (`0x3fcdb700 − 0x3fcd2580`), not summed from the two branches.
     let words: Vec<&str> = stack[0].split_whitespace().collect();
     let used: u32 = words[3].parse().expect("high-water bytes");
     assert_eq!(
         &words[4..7],
-        &["B", "of", "37272"],
-        "the S3's 37,272 B total: {}",
+        &["B", "of", "37248"],
+        "the S3's 37,248 B total: {}",
         stack[0]
     );
     let headroom: u32 = words[8]
         .trim_start_matches('(')
         .parse()
         .expect("headroom bytes");
-    assert_eq!(used + headroom, 37_272, "{}", stack[0]);
-    assert!(used > 0 && used < 37_272, "{}", stack[0]);
+    assert_eq!(used + headroom, 37_248, "{}", stack[0]);
+    assert!(used > 0 && used < 37_248, "{}", stack[0]);
     for line in &mem {
         assert!(
             line.contains(" used=") && line.contains(" largest_free="),
@@ -773,7 +769,7 @@ fn the_ledger_triple_is_elicited_by_a_stop_all_on_the_wire() {
     );
     assert!(
         !text.contains("[INIT] main stack"),
-        "the S3 prints no `main stack` line; its 37,272 B total is in every `[stack]` \
+        "the S3 prints no `main stack` line; its 37,248 B total is in every `[stack]` \
          line's `of <total> B` instead"
     );
 

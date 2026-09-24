@@ -150,6 +150,26 @@ pub enum ServerMsgBody {
     Error {
         error: String,
     },
+    /// Answer to [`crate::ClientRequest::LoginBegin`]: a fresh challenge.
+    /// MAC `nonce` under the key derived for each offer, and answer one MAC
+    /// per offer, in this order. Offers carry salt and cost, never labels.
+    LoginChallenge {
+        #[serde(with = "lpc_access::base64_bytes")]
+        nonce: [u8; lpc_access::NONCE_BYTES],
+        offers: Vec<lpc_access::LoginOffer>,
+    },
+    /// The verdict on a login: `granted` (this link now holds `tier`, via the
+    /// secret named `label`) or `refused` (wait `retry_after_ms`, possibly 0,
+    /// before beginning again). Also the answer to a `LoginBegin` that could
+    /// not start one.
+    LoginResult(lpc_access::LoginOutcome),
+    /// The request was refused because this link does not hold `needs`.
+    ///
+    /// A refusal is always a reply, never a dropped message, so a client can
+    /// say "log in with an edit password" instead of timing out.
+    NotPermitted {
+        needs: lpc_access::Tier,
+    },
 }
 
 /// Log severity carried by [`ServerMsgBody::Log`] frames and
@@ -403,6 +423,77 @@ pub struct LinkCounters {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The three access answers, spelled as a client decodes them:
+    /// externally tagged, binary as base64, tiers by name.
+    #[test]
+    fn access_answers_round_trip() {
+        let challenge = ServerMsgBody::LoginChallenge {
+            nonce: [7; 32],
+            offers: alloc::vec![lpc_access::LoginOffer {
+                salt: [1; 16],
+                iterations: 120_000,
+            }],
+        };
+        let json = crate::json::to_string(&challenge).unwrap();
+        assert_eq!(
+            json,
+            r#"{"loginChallenge":{"nonce":"BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc=","offers":[{"salt":"AQEBAQEBAQEBAQEBAQEBAQ==","iterations":120000}]}}"#
+        );
+        match crate::json::from_str::<ServerMsgBody>(&json).unwrap() {
+            ServerMsgBody::LoginChallenge { nonce, offers } => {
+                assert_eq!(nonce, [7; 32]);
+                assert_eq!(offers.len(), 1);
+            }
+            other => panic!("expected a challenge, got {other:?}"),
+        }
+
+        let granted = ServerMsgBody::LoginResult(lpc_access::LoginOutcome::Granted {
+            tier: lpc_access::Tier::Play,
+            label: "camp".into(),
+        });
+        let json = crate::json::to_string(&granted).unwrap();
+        assert_eq!(
+            json,
+            r#"{"loginResult":{"granted":{"tier":"play","label":"camp"}}}"#
+        );
+        assert!(matches!(
+            crate::json::from_str::<ServerMsgBody>(&json).unwrap(),
+            ServerMsgBody::LoginResult(lpc_access::LoginOutcome::Granted { .. })
+        ));
+
+        let refused = ServerMsgBody::NotPermitted {
+            needs: lpc_access::Tier::Edit,
+        };
+        let json = crate::json::to_string(&refused).unwrap();
+        assert_eq!(json, r#"{"notPermitted":{"needs":"edit"}}"#);
+        assert!(matches!(
+            crate::json::from_str::<ServerMsgBody>(&json).unwrap(),
+            ServerMsgBody::NotPermitted {
+                needs: lpc_access::Tier::Edit
+            }
+        ));
+    }
+
+    /// The firmware writes frames with `ser-write-json`, not `serde_json`:
+    /// the access answers must come out byte-identical through both.
+    #[cfg(feature = "ser-write-json")]
+    #[test]
+    fn access_answers_encode_identically_through_the_device_serializer() {
+        let body = ServerMsgBody::LoginChallenge {
+            nonce: [9; 32],
+            offers: alloc::vec![lpc_access::LoginOffer {
+                salt: [2; 16],
+                iterations: 1,
+            }],
+        };
+        let mut out = alloc::vec::Vec::new();
+        ser_write_json::ser::to_writer(&mut out, &body).unwrap();
+        assert_eq!(
+            core::str::from_utf8(&out).unwrap(),
+            crate::json::to_string(&body).unwrap()
+        );
+    }
 
     #[test]
     fn log_level_trace_round_trips() {

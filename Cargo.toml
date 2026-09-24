@@ -8,6 +8,7 @@ members = [
     "lp-base/lpfs",
     "lp-base/lp-json-pack",
     # lp-app workspace members
+    "lp-core/lpc-access",
     "lp-core/lpc-history",
     "lp-core/lpc-engine",
     "lp-core/lpc-view",
@@ -133,6 +134,7 @@ default-members = [
     "lp-base/lpfs",
     "lp-base/lp-json-pack",
     # lp-app workspace members
+    "lp-core/lpc-access",
     "lp-core/lpc-history",
     "lp-core/lpc-engine",
     "lp-core/lpc-view",

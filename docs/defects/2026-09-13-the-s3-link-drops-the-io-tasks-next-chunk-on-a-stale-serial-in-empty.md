@@ -88,6 +88,51 @@ The C6 shares this model (`lp-emu-esp-common/src/ip/usb_sj.rs` since M6
 P05) and the same esp-hal driver; whether its walk shows the same drop is
 a question for its transcripts, not assumed here.
 
+**2026-09-23 — the hello stopped showing it; the defect did not go
+away.** On the BLE plan's M3 image (PR #794) the `hello` reaches the host
+whole on both boot paths (`0 bytes were merely tried`, direct and ROM-up),
+while `origin/main`'s image (`e226fb283`) still drops the packet. The
+hello growing an `auth` field is **not** the cause. The raw bit only goes
+stale if the host drains esp-println's last `[INIT]` packet *after* the
+io_task's first poll has run its driver set-up, which writes `int_clr =
+0x08` (`serial_in_empty`) — a clear the root cause above does not
+mention, and it is what decides the race. The last polled packet commits
+and is drained `IN_DRAIN_LATENCY_US` = 24,000 cycles later:
+
+| image | last `[INIT]` packet commits | io_task clears `serial_in_empty` | host drains it | raw at the hello |
+|---|---:|---:|---:|---|
+| `e226fb283` (main) | 4,372,295 | 4,396,155 (+23,860) | 4,396,295 (+24,000) | set → stale: `int_raw = 0x30a`, packet dropped |
+| PR #794 | 4,378,368 | 4,404,669 (+26,301) | 4,402,368 (+24,000) | clear: `int_raw = 0x302`, nothing dropped |
+| PR #794 merged over lean-wire (`ebf63d463`), re-measured the same day, clean build | 4,348,791 | 4,375,134 (+26,343) | 4,372,791 (+24,000) | clear: nothing dropped (`1621 bytes reached the host; 0 bytes were merely tried`) |
+
+On main the clear won by **140 cycles**; the branch spends 2,441 more
+cycles between the last polled packet's commit and the io_task's first
+poll (not attributed further; the branch changed the server loop that
+runs on that main task), so the drain lands
+first and the clear wipes it. Read off `--trace-block USB_DEVICE` of both
+images, direct load, `--usb-host attached`, 2 s.
+
+Lean-wire (PR #791) moved the whole prefix ~30k cycles earlier but left the
+gap where it was (+26,343 against +26,301), so the merged image stays on the
+no-drop side by 2,343 cycles and the three hello pins hold at 0 unchanged. Same
+trace, the merged tree's image built from a clean checkout (a dirty
+build's image differs — `LP_BUILD_DIRTY` is in it — and moved these figures
+by a few dozen cycles; CI builds clean).
+
+So the hello trigger is a timing race with a 100 µs window, and which side
+of it an image falls is layout, not design. **The mechanism is unchanged
+and still reproduces** on the second trigger: a stop-all's reply, written
+straight after the triple's last `esp_println` packet, is still on the
+tried stream on the branch's image
+(`tests/boot_idle.rs::the_ledger_triple_is_elicited_by_a_stop_all_on_the_wire`,
+passing unmodified). The three hello-path assertions
+(`the_shipped_image_prints_its_init_chain_out_of_the_link`,
+`a_usb_script_resolves_its_walk_forms_and_two_runs_are_the_same_run`,
+`tests/boot.rs::the_shipped_image_gets_past_esp_hal_init_and_crosses_the_console`)
+are re-pinned to **0 tried**, pointing here; a future image that falls back
+across the 140-cycle edge flips them back to 64, and that is this entry,
+not a new finding.
+
 **Fix** — none yet. Not P06's: the phase's scope is the flash, the cache
 window, SHA and the ROM-up boot, and the link belongs to P05's model in
 the shared crate.
@@ -136,10 +181,12 @@ waits the full 100 µs (`int_st` at 28,428,827, 24,291 cycles after its
 `int_ena = 0x08`). Nothing in esp-hal, esp-println or the link model
 changed: this is timing, and the defect is **latent** at the hello. Its
 live witness is the stop-all reply — `the_ledger_triple_is_elicited_by_a_stop_all_on_the_wire`
-still reads it on the tried stream (37 bytes) on this branch. The hello
-pins in `tests/boot_idle.rs` and `tests/boot.rs` now assert the hello
-**delivered whole** (0 tried, the once-dropped packet present), so a
-timing shift that re-opens the race fails by name. Emulator:
+still reads it on the tried stream (37 bytes) on this branch. When this
+branch merged `origin/main` (2026-09-24) it took M3's hello pins above
+(0 tried, pointing at the dated note before this one) rather than its own
+near-identical ones, which additionally named the once-dropped packet; the
+merged image stays on the no-drop side and `just test-emu-esp32s3-gate`
+passes on it. Emulator:
 `lp-emu-esp32s3` built from this worktree at d5f29f337 (t1).
 
 **Lesson** — an interrupt raw bit is state, and a driver that arms an

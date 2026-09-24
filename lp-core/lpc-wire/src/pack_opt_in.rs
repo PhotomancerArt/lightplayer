@@ -322,6 +322,7 @@ mod tests {
             hardware: HardwareFacts::default(),
             device_uid: None,
             pack_dictionary,
+            auth: crate::HelloAuth::TRUSTED,
         };
         WireServerMessage::new(0, ServerMsgBody::Hello(hello))
     }
