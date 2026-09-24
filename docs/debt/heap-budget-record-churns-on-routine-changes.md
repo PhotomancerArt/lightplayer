@@ -1,10 +1,12 @@
 ---
-status: carried
+status: retired
 since: 2026-09-06
 logged: 2026-09-23
 area: scripts/heap-budget-check.sh + scripts/heap-budget-record.json (the heap ratchet, both arms)
 related:
   - docs/heap-budget-gate.md
+  - docs/adr/2026-09-23-heap-budget-record-split-and-derived-stack.md
+  - PR #798
   - docs/debt/reference-images-are-not-reproducible-across-hosts.md
   - lp2025/2026-09-23-1701-lp-json-pack
 ---
@@ -48,6 +50,18 @@ long-lived branch conflict on this file whenever main re-baselined too.
 - 2026-09-23 — lp-json-pack, merging main after lean-wire #791: conflict in
   the record (both sides re-baselined the C6); took main's, C6 `stackTotal`
   moved again 71,136 → 71,128 for the same 8 B. Second re-baseline.
+- 2026-09-23 — **paid down** by PR #798
+  (`docs/adr/2026-09-23-heap-budget-record-split-and-derived-stack.md`):
+  `stackTotal` leaves the record and is graded against the ELF's own
+  `_stack_start − _stack_end` (with `stackTop` recorded exact in its place,
+  and a check that nothing sits between the statics and the stack); the
+  record is split into `scripts/heap-budget-record/engine/<project>.json`
+  and `scripts/heap-budget-record/chips/<chip>.json`, each with its own
+  stamp, rewritten only when its figures move. Both exit criteria are met —
+  a statics-only change on the C6 passed with the record untouched (proof in
+  the PR), and re-baselines of different chips/projects touch disjoint
+  files. The workarounds above describe the one-file record and no longer
+  apply.
 
 **Exit criteria** — a PR whose only memory effect is a few bytes of statics
 passes the gate without touching the record, and two PRs that each
