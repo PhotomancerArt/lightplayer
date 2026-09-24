@@ -41,6 +41,41 @@ curl -s localhost:$P/serial?n=40                   # the board's console tail
 curl -s localhost:$P/log?n=40                      # page telemetry + server lifecycle
 ```
 
+## Wire mode: the product image (BLE M4)
+
+The product firmware carries the wire itself over the same NUS service, and
+advertises as `LP-<project>` (or `LP-<last 4 MAC hex>`), so **Join** now
+accepts any `LP-…` name or any board advertising NUS. It starts BLE only when
+its device store says so, so provision the board over USB first:
+
+```bash
+curl -s -X DELETE localhost:$P/serial                       # release the console
+python3 spikes/ble-lab/scripts/provision-access.py --dev <port by MAC> --password desk-lab
+curl -s -X POST localhost:$P/serial -d '{"dev":"<port>"}'   # console back (it rebooted)
+# … later, to put it back the way it was:
+python3 spikes/ble-lab/scripts/provision-access.py --dev <port> --disable
+```
+
+Then, after Join:
+
+```bash
+cmd '{"op":"wire","on":true}'                                # packets → the line joiner
+cmd '{"op":"req","msg":"hello"}'                             # any wire request; reply frames back
+cmd '{"op":"req","msg":"listLoadedProjects"}'                # → notPermitted before login (locked board)
+cmd '{"op":"login","password":"desk-lab"}'                   # PBKDF2 + HMAC in WebCrypto → loginResult
+cmd '{"op":"unsolicited","n":10}'                            # hellos/heartbeats the board sent on its own
+```
+
+`scripts/lab.py` has the same as functions (`wire`, `req`, `login`,
+`unsolicited`, `knob_rtt`). WebCrypto needs a secure context: `localhost`, or
+the Tailscale HTTPS origin a phone uses. The password here is for the lab
+only.
+
+For ESP-NOW loss beside the product server, build the desk meter:
+`--features esp32c6,server,desk_espnow_meter` (the product image with M2's
+`[COEX]` counter in place of the ESP-NOW driver; never shipped). Run it on
+both boards and read the `[COEX]` lines from the console as in M2.
+
 `spikes/ble-lab/scripts/nus-probe.py` does the same checks with `bleak` from a
 terminal. It can't run from an agent shell on macOS: TCC aborts a process
 whose responsible app doesn't declare `NSBluetoothAlwaysUsageDescription`
