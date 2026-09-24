@@ -132,7 +132,10 @@ def main() -> int:
 
     # 7. The idle window: the link held, and the [COEX] lines to read loss off.
     start = time.time()
-    idle = cmd({"op": "idle", "ms": int(args.idle_min * 60_000)}, args.idle_min * 60 + 30)
+    idle_ms = int(args.idle_min * 60_000)
+    # `timeoutMs` is the server's wait for the page; without it the server
+    # gives up at its 30 s default and answers 504 mid-window.
+    idle = cmd({"op": "idle", "ms": idle_ms, "timeoutMs": idle_ms + 30_000}, args.idle_min * 60 + 30)
     record(
         "idle",
         minutes=args.idle_min,
