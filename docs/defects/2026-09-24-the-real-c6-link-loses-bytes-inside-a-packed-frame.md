@@ -64,12 +64,28 @@ so a partial loss is plausible.
 #805's IN-endpoint gate (`lp-fw/fw-esp32s3/src/serial/in_endpoint.rs`,
 ported). If the loss goes away, it was this race.
 
+**Packed vs JSON on the same board (2026-09-24, same afternoon).** The
+same XIAO and the same image, Studio at a 150 ms lens pause, captured with
+`?wire-capture=1`:
+
+| run | messages | wire bytes | lost/damaged |
+|---|---:|---:|---:|
+| packed (three G1 captures + one 3-min run) | ~1,400 frames | ~0.95 MB | 4 in steady state (short frames, one `BadTag(255)`) |
+| JSON (board reset so it never packed; 9 min) | 1,270 `M!` lines | 2.84 MB | **0** |
+
+At the packed rate (~0.3 % of messages), JSON should have lost about 4, and
+0 happens about 1 time in 40. So the loss is **specific to the packed path**,
+not a per-byte property of the link. Studio's side is ruled out: both runs
+use the same raw read pump, and the capture is taken before any splitting.
+That leaves the board's packed write path. Packed frames skip the measuring
+pass and go out sooner, in smaller writes, which is the pattern that would
+trigger the stale-`serial_in_empty` race above more often. Not yet proven.
+
 **What is not known yet.**
-- Whether JSON loses bytes at the same rate. A JSON line with bytes missing
-  just fails to parse and is dropped, and nothing has ever counted that. A
-  packed-vs-JSON comparison capture at 150 ms is queued for when the board is
-  free.
-- Whether the loss comes from the board or from the host.
+- Whether #805's IN-endpoint gate, ported to the C6, makes the packed loss
+  go away (the test that would tell us, above).
+- Whether anything else on the packed write path (the in-place frame build
+  in `FRAME_BUF`, the chunking of `\n` + frame) also contributes.
 
 **Why the emulator misses it.** The link model delivers every byte a write
 commits, and drops a byte only in the one committed-FIFO case the S3 defect
