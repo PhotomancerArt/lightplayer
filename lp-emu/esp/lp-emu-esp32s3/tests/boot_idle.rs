@@ -56,6 +56,12 @@
 //! the model holds committed and drops. A stop-all's **reply** is lost the
 //! same way, behind the triple's last `esp_println` packet.
 //!
+//! ⚠️ **2026-09-23: on the BLE plan's M3 image the hello no longer shows it**
+//! — the raw only goes stale if the host drains esp-println's last packet
+//! after the io_task's first poll clears it, and that is a race this image
+//! loses (the defect entry's dated note has both images' cycle counts). The
+//! stop-all reply still reproduces it; the hello assertions are pinned at 0.
+//!
 //! This file **pins that behaviour where it shows** rather than widening
 //! anything: the tried stream's length and content are asserted, with the
 //! defect named, so that whichever side is fixed — the link model, if
@@ -117,28 +123,25 @@ const PAST_P05: &[&str] = &[
 ];
 
 /// What the link drops of the io_task's first framed write with a draining
-/// host attached from power-on: one 64-byte packet from inside the `hello`.
-/// See [`LINK_DEFECT`].
-fn assert_the_one_dropped_packet(machine: &Machine, delivered: &[u8]) {
+/// host attached from power-on: **nothing, on this image** — and that is a
+/// race outcome, not a fix. See [`LINK_DEFECT`]'s 2026-09-23 note.
+///
+/// ⚠️ Until the BLE plan's M3 this was one 64-byte packet from inside the
+/// `hello`'s feature list. The raw `serial_in_empty` only goes stale if the
+/// host drains esp-println's last `[INIT]` packet *after* the io_task's
+/// first poll clears it (`int_clr = 0x08`); `origin/main`'s image won that
+/// race by 140 cycles and M3's image loses it by 2,301, so the raw is clear
+/// by the hello (`int_raw = 0x302`, not `0x30a`) and nothing is dropped.
+/// The mechanism still reproduces on the stop-all reply
+/// ([`the_ledger_triple_is_elicited_by_a_stop_all_on_the_wire`]); an image
+/// that falls back across the edge flips this to 64 again.
+fn assert_nothing_of_the_hello_is_dropped(machine: &Machine) {
     let tried = machine.usb_sj_tried();
-    let text = String::from_utf8_lossy(delivered).into_owned();
-    let lost = String::from_utf8_lossy(&tried).into_owned();
     assert_eq!(
         tried.len(),
-        64,
-        "exactly one IN packet is merely tried ({LINK_DEFECT}): {lost:?}"
-    );
-    assert!(
-        !lost.contains("[INIT]"),
-        "the esp_println chain is delivered whole; the loss is the io_task's: {lost:?}"
-    );
-    assert!(
-        lost.contains("\",\"node."),
-        "the packet is from inside the hello's feature list: {lost:?}"
-    );
-    assert!(
-        !text.contains(&lost),
-        "and the delivered stream really lacks it"
+        0,
+        "nothing is merely tried on this image ({LINK_DEFECT}, 2026-09-23 note): {:?}",
+        String::from_utf8_lossy(&tried)
     );
 }
 
@@ -230,9 +233,10 @@ fn the_shipped_image_prints_its_init_chain_out_of_the_link() {
         text.contains("[FS] Mount failed (filesystem corrupt), formatting partition..."),
         "a fresh copy of the chip is formatted on its first boot:\n{text}"
     );
-    // ⚠️ Not "a draining host took every byte": one packet of the io_task's
-    // hello is dropped, and this is where that is pinned (module docs).
-    assert_the_one_dropped_packet(&machine, &delivered);
+    // ⚠️ The link defect's hello trigger is a race, and this image is on the
+    // side of it that drops nothing; pinned here so a move either way is
+    // read against the defect entry (module docs).
+    assert_nothing_of_the_hello_is_dropped(&machine);
     // The console and the link are the same stream on this chip, so
     // `--console` writes exactly this.
     assert_eq!(machine.console().bytes(), delivered);
@@ -559,15 +563,15 @@ then +2ms 4d 21 0a
     // The cable is in and the port open by 2 ms, and the firmware's first
     // line is not printed until ~8.7 ms, so a draining host takes the whole
     // chain: the script's timing is the reason nothing of it is merely
-    // tried. (The io_task's one dropped packet is the link finding, pinned
-    // in `the_shipped_image_prints_its_init_chain_out_of_the_link`.)
+    // tried. (The link finding's hello trigger is pinned in
+    // `the_shipped_image_prints_its_init_chain_out_of_the_link`.)
     let delivered = a.usb_sj();
     let text = String::from_utf8_lossy(&delivered).into_owned();
     assert!(
         text.starts_with(HELLO),
         "the whole chain, delivered to a host the script plugged in:\n{text}"
     );
-    assert_the_one_dropped_packet(&a, &delivered);
+    assert_nothing_of_the_hello_is_dropped(&a);
     assert_eq!(a.usb_host_now(), Some(UsbHost::Attached { draining: true }));
 
     // **Both walk forms resolved.** The `after` step waited on a line the
@@ -704,7 +708,7 @@ fn the_ledger_triple_is_elicited_by_a_stop_all_on_the_wire() {
     assert_eq!(stack.len(), 1, "one [stack] line per stop-all:\n{text}");
     assert_eq!(mem.len(), 2, "[MEM] before and after the stop:\n{text}");
     assert_eq!(jit.len(), 2, "[JIT] before and after the stop:\n{text}");
-    // `[stack] heartbeat: high-water <used> B of 37272 B (<headroom> B headroom)`
+    // `[stack] heartbeat: high-water <used> B of 37280 B (<headroom> B headroom)`
     //
     // Re-baselined 2026-09-23 (lean-wire P7): 37,280 → 37,272 (−8 B). The
     // wire-side `RevisionGateRead`/`RevisionGateResult` gate and the
@@ -713,20 +717,30 @@ fn the_ledger_triple_is_elicited_by_a_stop_all_on_the_wire() {
     // `stop_all` walks; nothing about the S3 image's own stack usage or the
     // stop-all path changed on purpose. See `_measurements.md` in
     // `~/.photomancer/planning/lp2025/2026-09-23-1501-lean-wire/`.
+    //
+    // Then the BLE plan's M3 (merged over lean-wire) changed the server
+    // loop's future, which lives in `.bss`, and with it what `.bss` leaves
+    // the stack: 37,272 → 37,296 (+24 B, the same +24 the access gate cost
+    // before lean-wire, 37,280 → 37,304). Measured on the merged tree.
+    //
+    // Then lean-wire's follow-ups (#804) left the stack 16 B less:
+    // 37,296 → 37,280, the same −16 B the classic's `[INIT] main stack` line
+    // moved (45,360 → 45,344) in the same change. Measured by CI on the
+    // merged tree; not attributed to one symbol.
     let words: Vec<&str> = stack[0].split_whitespace().collect();
     let used: u32 = words[3].parse().expect("high-water bytes");
     assert_eq!(
         &words[4..7],
-        &["B", "of", "37272"],
-        "the S3's 37,272 B total: {}",
+        &["B", "of", "37280"],
+        "the S3's 37,280 B total: {}",
         stack[0]
     );
     let headroom: u32 = words[8]
         .trim_start_matches('(')
         .parse()
         .expect("headroom bytes");
-    assert_eq!(used + headroom, 37_272, "{}", stack[0]);
-    assert!(used > 0 && used < 37_272, "{}", stack[0]);
+    assert_eq!(used + headroom, 37_280, "{}", stack[0]);
+    assert!(used > 0 && used < 37_280, "{}", stack[0]);
     for line in &mem {
         assert!(
             line.contains(" used=") && line.contains(" largest_free="),
@@ -754,7 +768,7 @@ fn the_ledger_triple_is_elicited_by_a_stop_all_on_the_wire() {
     );
     assert!(
         !text.contains("[INIT] main stack"),
-        "the S3 prints no `main stack` line; its 37,272 B total is in every `[stack]` \
+        "the S3 prints no `main stack` line; its 37,280 B total is in every `[stack]` \
          line's `of <total> B` instead"
     );
 

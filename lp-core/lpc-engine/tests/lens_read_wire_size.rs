@@ -8,13 +8,14 @@
 //! `ProjectSync::probe_requests` / `product_probe_requests`, in that order:
 //!
 //! 1. the `control_product` probe for the project's primary control
-//!    product, at `U8` — but only while the lens cannot yet see that every
+//!    product, at `Srgb8` — but only while the lens cannot yet see that every
 //!    lamp of it sits on an output wire (lean-wire P5's one-copy rule,
 //!    `ProjectController::always_live_products`), or when the user has
 //!    selected its fixture (Show live). Geometry `always`, then
 //!    `if_changed`;
 //! 2. the `output_frame` probe (the project drives an output), its pixels at
-//!    `U8`, geometry per output likewise;
+//!    `Srgb8` (8-bit, sRGB-encoded; one byte per sample like P5's
+//!    linear `U8`), geometry per output likewise;
 //! 3. the `binding_graph` probe with values (Studio subscribes on every
 //!    lens), its structure asked `always` and then `if_changed`.
 //!
@@ -37,7 +38,7 @@
 //!   — it opens on the root module, and that automatic selection asks for
 //!   nothing (lean-wire P5, ruling B);
 //! - **selected**: the steady read with the fixture selected — Show live on
-//!   its preview — so both copies ride, both at `U8`.
+//!   its preview — so both copies ride, both at `Srgb8`.
 //!
 //! The control product is the project's first control product in node
 //! order: on the PLAYFUL choker that is the fixture, which is the product
@@ -60,17 +61,16 @@ use std::sync::Arc;
 use lpc_engine::{Engine, EngineProjectReadSource, EngineServices, ProjectLoader};
 use lpc_model::{ControlExtent, ControlProduct, NodeId, Revision, TreePath};
 use lpc_registry::ProjectRegistry;
-use lpc_shared::transport::{ProjectReadStreamSink, ServerTransport};
-use lpc_wire::messages::ClientMessage;
+use lpc_shared::transport::{Incoming, Link, LinkId, ProjectReadStreamSink, ServerTransport};
 use lpc_wire::server::ServerMsgBody;
 use lpc_wire::{
     BindingGraphProbeRequest, BindingGraphProbeResult, ControlProductProbeRequest,
-    ControlProductProbeResult, KnownOutputFrameGeometry, MemoryStats, NodeReadQuery,
-    NodeReadSelection, OutputFrameGeometryRead, OutputFrameProbeRequest, OutputFrameProbeResult,
-    ProjectProbeRequest, ProjectProbeResult, ProjectReadEvent, ProjectReadNodeEvent,
-    ProjectReadProbeEvent, ProjectReadQuery, ProjectReadQueryEvent, ProjectReadRequest, ReadLevel,
-    RevisionGateRead, RevisionGateResult, RuntimeReadQuery, ServerRuntimeStatus, ShapeReadQuery,
-    TransportError, WireChannelSampleFormat, WireServerMessage,
+    ControlProductProbeResult, KnownRevision, MemoryStats, NodeReadQuery, NodeReadSelection,
+    OutputFrameProbeRequest, OutputFrameProbeResult, ProjectProbeRequest, ProjectProbeResult,
+    ProjectReadEvent, ProjectReadNodeEvent, ProjectReadProbeEvent, ProjectReadQuery,
+    ProjectReadQueryEvent, ProjectReadRequest, ReadLevel, RevisionGateRead, RevisionGateResult,
+    RuntimeReadQuery, ServerRuntimeStatus, ShapeReadQuery, TransportError, WireChannelSampleFormat,
+    WireServerMessage,
 };
 use lpfs::LpFsStd;
 
@@ -102,13 +102,19 @@ struct LensReadCeiling {
 /// shader's roots; the clock's, whose seconds move every frame, still rides),
 /// and a channel nothing writes is a bare `no_provider` value instead of the
 /// resolver's error as a string (−317 B). The tree's per-frame
-/// `entry_changed` deltas (368 B) stay: they are what re-delivers a status a
-/// render probe stamps mid-read (see the P6 report). First 9,951 B, steady
-/// 2,369 B, selected 2,950 B.
+/// `entry_changed` deltas (368 B) stayed: they were what re-delivered a
+/// status a render probe stamps mid-read (see the P6 report). First 9,951 B,
+/// steady 2,369 B, selected 2,950 B.
+/// Follow-ups F2 labelled every preview `srgb8` (+3 B per label): first
+/// 9,957 B, steady 2,372 B, selected 2,956 B. F3 stamps a tree entry only
+/// when its status or state changes, fencing a mid-read change past the
+/// served revision, so no `entry_changed` rides a steady read (−369 B,
+/// the first read's too — it is a few ticks after the mirror's revision):
+/// first 9,588 B, steady 2,003 B, selected 2,587 B.
 const CHOKER_CEILING: LensReadCeiling = LensReadCeiling {
-    first: 10_150,
-    steady: 2_420,
-    selected: 3_010,
+    first: 9_780,
+    steady: 2_045,
+    selected: 2_640,
 };
 
 /// small-dome (6,310 lamps). P1 baseline (2026-09-23): first 130,555 B,
@@ -123,11 +129,13 @@ const CHOKER_CEILING: LensReadCeiling = LensReadCeiling {
 /// samples are the one copy, and the first fixture's 24,218 B no longer
 /// ride — and selected 55,707 B in four, with that fixture's copy back.
 /// P6 (see the choker's note): first 77,670 B, steady 28,556 B, selected
-/// 53,237 B.
+/// 53,237 B. Follow-ups F2 (`srgb8` labels): first 77,679 B, steady
+/// 28,562 B, selected 53,246 B. F3 (no steady `entry_changed`, −594 B):
+/// first 77,085 B, steady 27,968 B, selected 52,652 B.
 const SMALL_DOME_CEILING: LensReadCeiling = LensReadCeiling {
-    first: 79_225,
-    steady: 29_130,
-    selected: 54_300,
+    first: 78_630,
+    steady: 28_530,
+    selected: 53_710,
 };
 
 /// Frames between two lens reads: Studio re-reads 150 ms after the last
@@ -212,7 +220,7 @@ fn measure_lens_reads(slug: &str, root: &str) -> LensReads {
     let first_request = lens_read_request(
         Some(view.revision),
         Some((product, RevisionGateRead::Always)),
-        OutputFrameGeometryRead::Always,
+        RevisionGateRead::Always,
         RevisionGateRead::Always,
     );
     let first = measure_read(&mut engine, &registry, &mut view, first_request);
@@ -222,7 +230,7 @@ fn measure_lens_reads(slug: &str, root: &str) -> LensReads {
     tick(&mut engine, &registry, LENS_REFRESH_TICKS);
     let control_geometry = control_geometry_read_after(&first.probes);
     let steady_control =
-        (!lamps_all_placed(product, &first.probes)).then_some((product, control_geometry));
+        (!lamps_all_placed(product, &first.probes)).then_some((product, control_geometry.clone()));
     let steady_request = lens_read_request(
         Some(first.revision),
         steady_control,
@@ -254,11 +262,11 @@ fn measure_lens_reads(slug: &str, root: &str) -> LensReads {
 
 /// Studio's lens request: `project_read_request`'s queries, and
 /// `probe_requests`' probes in its order (products, output frame, graph),
-/// every pixel ask at Studio's preview precision (`U8`).
+/// every pixel ask at Studio's preview precision (`Srgb8`).
 fn lens_read_request(
     since: Option<Revision>,
     control: Option<(ControlProduct, RevisionGateRead)>,
-    output_geometry: OutputFrameGeometryRead,
+    output_geometry: RevisionGateRead,
     binding_structure: RevisionGateRead,
 ) -> ProjectReadRequest {
     let mut probes = Vec::new();
@@ -266,14 +274,14 @@ fn lens_read_request(
         probes.push(ProjectProbeRequest::ControlProduct(
             ControlProductProbeRequest {
                 product,
-                sample_format: WireChannelSampleFormat::U8,
+                sample_format: WireChannelSampleFormat::Srgb8,
                 geometry,
             },
         ));
     }
     probes.push(ProjectProbeRequest::OutputFrame(OutputFrameProbeRequest {
         geometry: output_geometry,
-        samples: Some(WireChannelSampleFormat::U8),
+        samples: Some(WireChannelSampleFormat::Srgb8),
     }));
     probes.push(ProjectProbeRequest::BindingGraph(
         BindingGraphProbeRequest {
@@ -358,9 +366,7 @@ fn control_geometry_read_after(probes: &[ProjectProbeResult]) -> RevisionGateRea
         _ => None,
     });
     match known {
-        Some(revision) => RevisionGateRead::IfChanged {
-            known_revision: Some(revision),
-        },
+        Some(revision) => RevisionGateRead::if_changed(Some(revision)),
         None => RevisionGateRead::Always,
     }
 }
@@ -368,7 +374,7 @@ fn control_geometry_read_after(probes: &[ProjectProbeResult]) -> RevisionGateRea
 /// Studio's `OutputFrameCache::geometry_read`: each output's cached geometry
 /// revision, listed per node; an output with nothing cached (never answered,
 /// or deferred) is simply absent from the list, which asks for it outright.
-fn output_geometry_read_after(probes: &[ProjectProbeResult]) -> OutputFrameGeometryRead {
+fn output_geometry_read_after(probes: &[ProjectProbeResult]) -> RevisionGateRead {
     let mut known = Vec::new();
     for probe in probes {
         if let ProjectProbeResult::OutputFrame(OutputFrameProbeResult::Frame { outputs }) = probe {
@@ -378,17 +384,17 @@ fn output_geometry_read_after(probes: &[ProjectProbeResult]) -> OutputFrameGeome
                     RevisionGateResult::Unchanged { revision } => *revision,
                     RevisionGateResult::Omitted => continue,
                 };
-                known.push(KnownOutputFrameGeometry {
-                    node: output.node,
+                known.push(KnownRevision {
+                    node: Some(output.node),
                     revision,
                 });
             }
         }
     }
     if known.is_empty() {
-        return OutputFrameGeometryRead::Always;
+        return RevisionGateRead::Always;
     }
-    OutputFrameGeometryRead::IfChanged { known }
+    RevisionGateRead::IfChanged { known }
 }
 
 /// Studio's `BindingGraphCache::structure_read`: `if_changed` against the
@@ -405,9 +411,7 @@ fn binding_structure_read_after(probes: &[ProjectProbeResult]) -> RevisionGateRe
         _ => None,
     });
     match known {
-        Some(revision) => RevisionGateRead::IfChanged {
-            known_revision: Some(revision),
-        },
+        Some(revision) => RevisionGateRead::if_changed(Some(revision)),
         None => RevisionGateRead::Always,
     }
 }
@@ -421,7 +425,8 @@ fn measure_read(
 ) -> MeasuredRead {
     let mut transport = CollectingTransport::default();
     block_on(async {
-        let mut sink = ProjectReadStreamSink::new(&mut transport, STUDIO_LIKE_REQUEST_ID);
+        let mut sink =
+            ProjectReadStreamSink::new(&mut transport, LinkId::PRIMARY, STUDIO_LIKE_REQUEST_ID);
         EngineProjectReadSource::with_server_status(engine, registry, Some(server_status()))
             .stream_project_read_events(request, &mut sink)
             .await
@@ -818,17 +823,21 @@ struct CollectingTransport {
 }
 
 impl ServerTransport for CollectingTransport {
-    async fn send(&mut self, msg: WireServerMessage) -> Result<(), TransportError> {
+    async fn send(&mut self, _link: LinkId, msg: WireServerMessage) -> Result<(), TransportError> {
         self.sent.push(msg);
         Ok(())
     }
 
-    async fn receive(&mut self) -> Result<Option<ClientMessage>, TransportError> {
+    async fn receive(&mut self) -> Result<Option<Incoming>, TransportError> {
         Ok(None)
     }
 
-    async fn receive_all(&mut self) -> Result<Vec<ClientMessage>, TransportError> {
+    async fn receive_all(&mut self) -> Result<Vec<Incoming>, TransportError> {
         Ok(Vec::new())
+    }
+
+    fn links(&self) -> Vec<Link> {
+        vec![Link::PRIMARY]
     }
 
     async fn close(&mut self) -> Result<(), TransportError> {

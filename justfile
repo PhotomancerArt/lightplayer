@@ -2989,6 +2989,22 @@ test-emu-esp32v3-boot: build-fw-esp32v3
           --partition-table {{ fw_esp32v3_dir }}/partitions.csv \
           --flash-size {{ v3_flash_size }} "$shipped" "$merged"
       export LP_EMU_ESP32V3_MERGED="$merged"
+      # The PINNED reference image (BLE M3, ruling DD8): the bytes lab task L1
+      # flashed onto the desk board before the silicon memory capture, so
+      # `boot_idle.rs`'s G2 (e) comparison is same-image on both sides rather
+      # than this tree against `75486b114`. Cached under target/emu-ref/ by
+      # the script, so a second run pays only for the merge.
+      ref_commit=75486b114
+      ref_dir={{ justfile_directory() }}/target/emu-ref/$ref_commit-boot-idle
+      scripts/emu/build-reference-image.sh --chip esp32 esp32,server,float-f32 \
+          "$ref_commit" none
+      # The partition table of THAT commit, not this tree's.
+      git show "$ref_commit:{{ fw_esp32v3_dir }}/partitions.csv" > "$ref_dir/partitions.csv"
+      espflash save-image --chip esp32 --merge \
+          --partition-table "$ref_dir/partitions.csv" \
+          --flash-size {{ v3_flash_size }} "$ref_dir/fw-esp32v3" "$ref_dir/merged.bin"
+      export LP_EMU_ESP32V3_REF_ELF="$ref_dir/fw-esp32v3"
+      export LP_EMU_ESP32V3_REF_MERGED="$ref_dir/merged.bin"
     else
       echo "espflash is not on PATH: the merged-image tests will SKIP" >&2
     fi

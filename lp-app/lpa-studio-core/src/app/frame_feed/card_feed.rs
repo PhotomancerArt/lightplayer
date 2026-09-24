@@ -34,7 +34,7 @@
 //!
 //! [`OutputFrameProbeRequest`]: lpc_wire::OutputFrameProbeRequest
 
-use lpc_wire::{OutputFrameEntry, OutputFrameGeometryRead};
+use lpc_wire::{OutputFrameEntry, RevisionGateRead};
 
 use crate::UiControlProductPreview;
 use crate::app::frame_feed::output_frame_cache::OutputFrameCache;
@@ -153,7 +153,7 @@ impl CardFeedState {
     /// holds none. A refused display layout is held like any other answer,
     /// so a dome-scale board is not asked to rebuild and re-measure a layout
     /// it will refuse again every 150 ms.
-    pub fn geometry_read(&self) -> OutputFrameGeometryRead {
+    pub fn geometry_read(&self) -> RevisionGateRead {
         self.outputs.geometry_read()
     }
 
@@ -212,7 +212,7 @@ mod tests {
         ControlSampleLayout, ControlSampleSpan, NodeId, Revision,
     };
     use lpc_wire::{
-        GeometryDisplayLayout, KnownOutputFrameGeometry, OutputFrameGeometry, RevisionGateResult,
+        GeometryDisplayLayout, KnownRevision, OutputFrameGeometry, RevisionGateResult,
         WireChannelSampleFormat,
     };
 
@@ -289,16 +289,16 @@ mod tests {
     #[test]
     fn the_first_pull_asks_always_and_later_ones_ask_if_changed() {
         let mut feed = CardFeedState::default();
-        assert_eq!(feed.geometry_read(), OutputFrameGeometryRead::Always);
+        assert_eq!(feed.geometry_read(), RevisionGateRead::Always);
 
         let first = with_layout(entry(4, 1, vec![1, 0, 2, 0, 3, 0]), 11, layout(11));
         feed.apply(&[first], NOW);
 
         assert_eq!(
             feed.geometry_read(),
-            OutputFrameGeometryRead::IfChanged {
-                known: vec![KnownOutputFrameGeometry {
-                    node: NodeId::new(4),
+            RevisionGateRead::IfChanged {
+                known: vec![KnownRevision {
+                    node: Some(NodeId::new(4)),
                     revision: Revision::new(11),
                 }],
             }
@@ -317,9 +317,9 @@ mod tests {
 
         assert_eq!(
             feed.geometry_read(),
-            OutputFrameGeometryRead::IfChanged {
-                known: vec![KnownOutputFrameGeometry {
-                    node: NodeId::new(4),
+            RevisionGateRead::IfChanged {
+                known: vec![KnownRevision {
+                    node: Some(NodeId::new(4)),
                     revision: Revision::new(1),
                 }],
             }
@@ -381,7 +381,7 @@ mod tests {
         feed.invalidate_connection();
 
         assert_eq!(feed.handle_id(), None);
-        assert_eq!(feed.geometry_read(), OutputFrameGeometryRead::Always);
+        assert_eq!(feed.geometry_read(), RevisionGateRead::Always);
         assert_eq!(feed.frame().expect("last frame").revision, 1);
         assert_eq!(feed.frame_age_secs(NOW + 9.0), Some(9.0));
     }
@@ -398,7 +398,7 @@ mod tests {
         assert_eq!(fresh.frame_age_secs(NOW), Some(3_600.0));
         // The seed is memory, not a connection claim: the first live pull
         // still asks for the layout and lands as a new frame.
-        assert_eq!(fresh.geometry_read(), OutputFrameGeometryRead::Always);
+        assert_eq!(fresh.geometry_read(), RevisionGateRead::Always);
         assert!(
             fresh
                 .apply(&[entry(4, 1, vec![9, 0, 8, 0, 7, 0])], NOW)

@@ -1,0 +1,84 @@
+{
+  "$defs": {
+    "SecretEntry": {
+      "additionalProperties": false,
+      "description": "A shared secret the board accepts, stored as the KDF's OUTPUT.\n\n`k = PBKDF2-HMAC-SHA256(password, salt, iterations)` is computed by the\nclient that installs the secret; the password itself is never stored and\nnever crosses a link. `k` is login-equivalent — anyone holding it can\nanswer a challenge — which is accepted (the threat model is someone\ncheeky nearby, not a cracker with the flash chip), and is why no link at\nany tier can read an access file back.\n\n`label` names the secret for people (\"camp\", \"mine\"). It is never\noffered before login; a successful login names the label it matched.",
+      "properties": {
+        "iterations": {
+          "description": "PBKDF2 iteration count (≥ 1), tuned by the installing client.",
+          "format": "uint32",
+          "minimum": 1,
+          "type": "integer"
+        },
+        "k": {
+          "description": "The derived key `K`, base64 (32 bytes).",
+          "type": "string"
+        },
+        "label": {
+          "description": "Human name for this secret.",
+          "type": "string"
+        },
+        "salt": {
+          "description": "PBKDF2 salt, base64 (16 bytes).",
+          "type": "string"
+        },
+        "tier": {
+          "$ref": "#/$defs/Tier",
+          "description": "What a login with this secret grants."
+        }
+      },
+      "required": [
+        "label",
+        "tier",
+        "salt",
+        "iterations",
+        "k"
+      ],
+      "type": "object"
+    },
+    "Tier": {
+      "description": "An access tier. `Edit` implies `Play`: the derived ordering is\n`Play < Edit`, so \"has at least tier X\" is `held >= X`.\n\n- **Play** — the panel (knobs, brightness) plus reads: project reads,\n  project listings, and reading project files over fs.\n- **Edit** — everything: loading projects, authoring, fs writes and\n  deletes, device commands.\n\nNo tier, on any link, reads an access file (`**/.lp/access.json`).\n\nSerialized as `\"play\"` / `\"edit\"`, in the persisted access files and on\nthe wire alike.",
+      "enum": [
+        "play",
+        "edit"
+      ],
+      "type": "string"
+    }
+  },
+  "$id": "https://lightplayer.dev/schemas/device-access.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "The device's own access settings, at the root of its filesystem.\n\nIt holds the device-only secrets, the account default (as one more\nsecret entry, labelled by Studio), and two switches:\n\n- `bleEnabled` — BLE is off until this is set over USB (PQ2).\n- `open` — \"open, no password\" is explicit (D17): it grants **play**\n  to an untrusted link without login, and never edit.\n\n**Locked by default.** A missing file reads as [`Self::locked`]: BLE\ndisabled, not open, no secrets. A file that fails to parse reads the\nsame way (the caller logs the error): damage only ever takes access\naway. Enabling is an edit-tier fs write, made by Studio over USB.",
+  "properties": {
+    "bleEnabled": {
+      "description": "Whether the BLE link may start at all.",
+      "type": "boolean"
+    },
+    "open": {
+      "description": "Whether an untrusted link holds play without logging in.",
+      "type": "boolean"
+    },
+    "secrets": {
+      "description": "Device-only secrets and the account default.",
+      "items": {
+        "$ref": "#/$defs/SecretEntry"
+      },
+      "type": "array"
+    },
+    "version": {
+      "description": "Format version; always [`DeviceAccessFile::VERSION`].",
+      "format": "uint32",
+      "maximum": 1,
+      "minimum": 1,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "version",
+    "secrets",
+    "bleEnabled",
+    "open"
+  ],
+  "title": "DeviceAccessFile",
+  "type": "object"
+}

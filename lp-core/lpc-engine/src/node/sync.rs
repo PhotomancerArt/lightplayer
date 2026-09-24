@@ -13,14 +13,24 @@ use crate::node::{RuntimeNodeEntry, RuntimeNodeTree};
 /// Returns deltas for:
 /// 1. Entries whose `created_frame > since` (or all entries if `since == 0`) → `WireTreeDelta::Created`
 /// 2. Entries whose `children_ver > since` (and not newly created) → `WireTreeDelta::ChildrenChanged`
-/// 3. Entries whose `change_frame > since` (and not newly created) → `WireTreeDelta::EntryChanged`
+/// 3. Entries whose `change_frame(entry) > since` (and not newly created) → `WireTreeDelta::EntryChanged`
+///
+/// `change_frame` says when an entry's status/state last changed. A project
+/// read passes the engine's content stamps (`engine::tree_entry_stamps`),
+/// because the entry's own stamps move whenever a runtime is put back, not
+/// only when what a client sees changed; [`RuntimeNodeEntry::changed_at`] is
+/// the stamp-driven answer for a tree nothing puts back.
 ///
 /// `since == 0` is a special case that returns all entries (bulk sync). This allows
 /// the initial sync to work correctly even though root is created at frame 0.
 ///
 /// `Created` deltas are emitted in parent-before-child order (depth-first pre-order).
-pub fn tree_deltas_since<N>(tree: &RuntimeNodeTree<N>, since: Revision) -> Vec<WireTreeDelta> {
-    tree_deltas_since_iter(tree, since).collect()
+pub fn tree_deltas_since<'a, N>(
+    tree: &'a RuntimeNodeTree<N>,
+    since: Revision,
+    change_frame: impl Fn(&RuntimeNodeEntry<N>) -> Revision + Copy + 'a,
+) -> Vec<WireTreeDelta> {
+    tree_deltas_since_iter(tree, since, change_frame).collect()
 }
 
 /// Lazy form of [`tree_deltas_since`]: one delta materialized per step, in the
@@ -33,6 +43,7 @@ pub fn tree_deltas_since<N>(tree: &RuntimeNodeTree<N>, since: Revision) -> Vec<W
 pub fn tree_deltas_since_iter<'a, N>(
     tree: &'a RuntimeNodeTree<N>,
     since: Revision,
+    change_frame: impl Fn(&RuntimeNodeEntry<N>) -> Revision + Copy + 'a,
 ) -> impl Iterator<Item = WireTreeDelta> + 'a {
     // "Created" membership is a pure predicate of the entry, so the later
     // passes can re-evaluate it instead of holding a set of emitted ids. (An
@@ -64,7 +75,7 @@ pub fn tree_deltas_since_iter<'a, N>(
                     status: entry.status.value().clone(),
                     state: entry.state.value().into(),
                     created_frame: entry.created_at,
-                    change_frame: entry.changed_at(),
+                    change_frame: change_frame(entry),
                     children_ver: entry.children_changed_at(),
                 });
             }
@@ -84,13 +95,12 @@ pub fn tree_deltas_since_iter<'a, N>(
 
     // Pass 3: EntryChanged (change_frame > since, but not newly created)
     let entry_changed = tree.entries().filter_map(move |entry| {
-        (entry.changed_at().0 > since.0 && !is_created(entry)).then(|| {
-            WireTreeDelta::EntryChanged {
-                id: entry.id,
-                status: entry.status.value().clone(),
-                state: entry.state.value().into(),
-                change_frame: entry.changed_at(),
-            }
+        let changed_at = change_frame(entry);
+        (changed_at.0 > since.0 && !is_created(entry)).then(|| WireTreeDelta::EntryChanged {
+            id: entry.id,
+            status: entry.status.value().clone(),
+            state: entry.state.value().into(),
+            change_frame: changed_at,
         })
     });
 
@@ -100,6 +110,7 @@ pub fn tree_deltas_since_iter<'a, N>(
 #[cfg(test)]
 mod tests {
     use super::tree_deltas_since;
+    use crate::node::RuntimeNodeEntry;
     use crate::node::test_placeholder_spine;
     use crate::node::{NodeEntryState, RuntimeNodeTree};
     use alloc::vec;
@@ -149,7 +160,7 @@ mod tests {
             )
             .unwrap();
 
-        let deltas = tree_deltas_since(&tree, Revision::new(0));
+        let deltas = tree_deltas_since_by_entry_stamps(&tree, Revision::new(0));
 
         // Should have 3 Created deltas (root + a + b)
         let created: Vec<&WireTreeDelta> = deltas
@@ -192,7 +203,7 @@ mod tests {
         )
         .unwrap();
 
-        let deltas = tree_deltas_since(&tree, Revision::new(1));
+        let deltas = tree_deltas_since_by_entry_stamps(&tree, Revision::new(1));
         let created: Vec<&WireTreeDelta> = deltas
             .iter()
             .filter(|d| matches!(d, WireTreeDelta::Created { .. }))
@@ -225,7 +236,7 @@ mod tests {
             .unwrap()
             .set_status(lpc_wire::NodeRuntimeStatus::Ok, Revision::new(5));
 
-        let deltas = tree_deltas_since(&tree, Revision::new(0));
+        let deltas = tree_deltas_since_by_entry_stamps(&tree, Revision::new(0));
 
         // Bulk sync since frame 0 should include all entries
         let created: Vec<&WireTreeDelta> = deltas
@@ -236,7 +247,7 @@ mod tests {
         assert_eq!(created.len(), 2); // root + a
 
         // Since frame 1: a was created at frame 1, so 1 > 1 is false, no Created
-        let deltas = tree_deltas_since(&tree, Revision::new(1));
+        let deltas = tree_deltas_since_by_entry_stamps(&tree, Revision::new(1));
         let created: Vec<&WireTreeDelta> = deltas
             .iter()
             .filter(|d| matches!(d, WireTreeDelta::Created { .. }))
@@ -244,7 +255,7 @@ mod tests {
         assert_eq!(created.len(), 0); // a already seen at frame 1
 
         // Now check deltas since frame 4 (after a was created but before status change)
-        let deltas = tree_deltas_since(&tree, Revision::new(4));
+        let deltas = tree_deltas_since_by_entry_stamps(&tree, Revision::new(4));
         let changed: Vec<&WireTreeDelta> = deltas
             .iter()
             .filter(|d| matches!(d, WireTreeDelta::EntryChanged { .. }))
@@ -277,7 +288,7 @@ mod tests {
             .unwrap();
 
         // Get deltas since frame 1 (before child was added)
-        let deltas = tree_deltas_since(&tree, Revision::new(1));
+        let deltas = tree_deltas_since_by_entry_stamps(&tree, Revision::new(1));
 
         // Root's children changed (a was added)
         let children_changed: Vec<&WireTreeDelta> = deltas
@@ -326,7 +337,7 @@ mod tests {
             )
             .unwrap();
 
-        let deltas = tree_deltas_since(&tree, Revision::new(0));
+        let deltas = tree_deltas_since_by_entry_stamps(&tree, Revision::new(0));
 
         // Extract Created deltas in order
         let created_order: Vec<NodeId> = deltas
@@ -367,7 +378,7 @@ mod tests {
         tree.remove_subtree(a, Revision::new(5)).unwrap();
 
         // Get deltas since frame 1
-        let deltas = tree_deltas_since(&tree, Revision::new(1));
+        let deltas = tree_deltas_since_by_entry_stamps(&tree, Revision::new(1));
 
         // Should have ChildrenChanged for root (a was removed)
         // No Destroyed delta - client infers from ChildrenChanged
@@ -426,7 +437,7 @@ mod tests {
             .unwrap();
 
         // Generate deltas for initial sync (since=0)
-        let deltas = tree_deltas_since(&server_tree, Revision::new(0));
+        let deltas = tree_deltas_since_by_entry_stamps(&server_tree, Revision::new(0));
 
         // Apply to client
         let mut client_tree = NodeTreeView::new();
@@ -466,7 +477,7 @@ mod tests {
         }
 
         // Get deltas since frame 2 (after b was created)
-        let deltas = tree_deltas_since(&server_tree, Revision::new(2));
+        let deltas = tree_deltas_since_by_entry_stamps(&server_tree, Revision::new(2));
 
         // Apply to client
         apply_tree_deltas(&mut client_tree, &deltas, Revision::new(5)).unwrap();
@@ -483,5 +494,12 @@ mod tests {
         assert!(!client_root.children.contains(&a));
         assert!(client_root.children.contains(&b));
         assert_eq!(client_root.children.len(), 1);
+    }
+
+    fn tree_deltas_since_by_entry_stamps<N>(
+        tree: &RuntimeNodeTree<N>,
+        since: Revision,
+    ) -> Vec<WireTreeDelta> {
+        tree_deltas_since(tree, since, RuntimeNodeEntry::changed_at)
     }
 }

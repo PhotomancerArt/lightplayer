@@ -66,6 +66,26 @@ mod tests {
         assert_eq!(manifest.entries()[0].hash, ContentHash::of(b"{}"));
     }
 
+    /// The tree manifest is what a snapshot stores and what cloud push and
+    /// publish upload: the access sidecar is not in it, and changing a
+    /// secret leaves the package hash where it was.
+    #[test]
+    fn the_access_sidecar_is_not_in_the_manifest_and_moves_no_hash() {
+        let fs = LpFsMemory::new();
+        write(&fs, "/project.json", b"{}");
+        let (before, _) = hash_package(&fs).unwrap();
+
+        write(&fs, "/.lp/access.json", b"{\"version\":1,\"secrets\":[]}");
+        let (with_secrets, manifest) = hash_package(&fs).unwrap();
+        assert_eq!(before, with_secrets);
+        assert!(
+            manifest
+                .entries()
+                .iter()
+                .all(|entry| entry.path.as_str() != "/.lp/access.json")
+        );
+    }
+
     #[test]
     fn reserved_namespace_does_not_affect_the_hash() {
         let fs = LpFsMemory::new();

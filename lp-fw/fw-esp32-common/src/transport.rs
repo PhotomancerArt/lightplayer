@@ -13,11 +13,16 @@ use alloc::vec::Vec;
 use crate::serial::server_msg::serialize_server_msg;
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::channel::Channel;
-use lpc_shared::transport::ServerTransport;
+use lpc_shared::transport::{Incoming, Link, LinkId, ServerTransport};
 use lpc_wire::WireServerMessage;
 use lpc_wire::{ClientMessage, TransportError, json};
 
 /// Server transport that sends WireServerMessage to io_task for serialization.
+///
+/// ONE link — the product's USB serial line — and it is trusted
+/// ([`Link::PRIMARY`]): physical possession is the recovery path. A second
+/// (radio) link arrives as a separate transport behind a mux, never as a
+/// second id here.
 ///
 /// Uses a single in-flight write request/result pair. `send(msg).await` blocks
 /// until io_task reports that the message was fully written or failed.
@@ -87,7 +92,7 @@ impl StreamingMessageRouterTransport {
 }
 
 impl ServerTransport for StreamingMessageRouterTransport {
-    async fn send(&mut self, msg: WireServerMessage) -> Result<(), TransportError> {
+    async fn send(&mut self, _link: LinkId, msg: WireServerMessage) -> Result<(), TransportError> {
         let id = msg.id;
         // Captured before the message moves: a failed Error notice must not
         // recurse into another notice.
@@ -127,7 +132,7 @@ impl ServerTransport for StreamingMessageRouterTransport {
         result
     }
 
-    async fn receive(&mut self) -> Result<Option<ClientMessage>, TransportError> {
+    async fn receive(&mut self) -> Result<Option<Incoming>, TransportError> {
         let receiver = self.incoming.receiver();
         loop {
             match receiver.try_receive() {
@@ -144,7 +149,8 @@ impl ServerTransport for StreamingMessageRouterTransport {
                                 "StreamingMessageRouterTransport: Received message id={}",
                                 msg.id
                             );
-                            return Ok(Some(msg));
+                            // One link, and it is the USB cable: trusted.
+                            return Ok(Some(Incoming::primary(msg)));
                         }
                         Err(e) => {
                             // A torn/spliced frame is protocol loss, not
@@ -168,7 +174,7 @@ impl ServerTransport for StreamingMessageRouterTransport {
         }
     }
 
-    async fn receive_all(&mut self) -> Result<Vec<ClientMessage>, TransportError> {
+    async fn receive_all(&mut self) -> Result<Vec<Incoming>, TransportError> {
         let mut messages = Vec::new();
         loop {
             match self.receive().await? {
@@ -177,6 +183,10 @@ impl ServerTransport for StreamingMessageRouterTransport {
             }
         }
         Ok(messages)
+    }
+
+    fn links(&self) -> Vec<Link> {
+        alloc::vec![Link::PRIMARY]
     }
 
     async fn close(&mut self) -> Result<(), TransportError> {

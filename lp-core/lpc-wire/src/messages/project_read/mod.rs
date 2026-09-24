@@ -30,8 +30,8 @@ pub use node_read::{NodeReadQuery, NodeReadSelection};
 pub use probe::{
     BindingGraphProbeRequest, BindingGraphProbeResult, ControlProductGeometry,
     ControlProductProbeRequest, ControlProductProbeResult, ControlProductProbeResultHeader,
-    GeometryDisplayLayout, KnownOutputFrameGeometry, OutputFrameEntry, OutputFrameEntryHeader,
-    OutputFrameGeometry, OutputFrameGeometryRead, OutputFrameProbeRequest, OutputFrameProbeResult,
+    GeometryDisplayLayout, KnownRevision, OutputFrameEntry, OutputFrameEntryHeader,
+    OutputFrameGeometry, OutputFrameProbeRequest, OutputFrameProbeResult,
     OutputFrameProbeResultHeader, ProjectProbeRequest, ProjectProbeResult,
     ProjectProbeResultHeader, RenderProductProbeRequest, RenderProductProbeResult,
     RenderProductProbeResultHeader, RevisionGateRead, RevisionGateResult, TimebaseProbeRequest,

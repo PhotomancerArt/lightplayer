@@ -4,7 +4,7 @@
 //! running in the same process. Uses unbounded channels for simplicity.
 
 use crate::transport::ClientTransport;
-use lpc_shared::transport::ServerTransport;
+use lpc_shared::transport::{Incoming, Link, LinkId, ServerTransport};
 use lpc_wire::WireServerMessage;
 use lpc_wire::{TransportError, messages::ClientMessage};
 use tokio::sync::mpsc;
@@ -110,7 +110,7 @@ impl AsyncLocalServerTransport {
 }
 
 impl ServerTransport for AsyncLocalServerTransport {
-    async fn send(&mut self, msg: WireServerMessage) -> Result<(), TransportError> {
+    async fn send(&mut self, _link: LinkId, msg: WireServerMessage) -> Result<(), TransportError> {
         if self.closed {
             return Err(TransportError::ConnectionLost);
         }
@@ -121,13 +121,13 @@ impl ServerTransport for AsyncLocalServerTransport {
         }
     }
 
-    async fn receive(&mut self) -> Result<Option<ClientMessage>, TransportError> {
+    async fn receive(&mut self) -> Result<Option<Incoming>, TransportError> {
         if self.closed {
             return Err(TransportError::ConnectionLost);
         }
 
         match self.server_rx.try_recv() {
-            Ok(msg) => Ok(Some(msg)),
+            Ok(msg) => Ok(Some(Incoming::primary(msg))),
             Err(tokio::sync::mpsc::error::TryRecvError::Empty) => Ok(None),
             Err(tokio::sync::mpsc::error::TryRecvError::Disconnected) => {
                 self.closed = true;
@@ -136,16 +136,20 @@ impl ServerTransport for AsyncLocalServerTransport {
         }
     }
 
-    async fn receive_all(&mut self) -> Result<Vec<ClientMessage>, TransportError> {
+    async fn receive_all(&mut self) -> Result<Vec<Incoming>, TransportError> {
         if self.closed {
             return Err(TransportError::ConnectionLost);
         }
 
         let mut messages = Vec::new();
         while let Ok(msg) = self.server_rx.try_recv() {
-            messages.push(msg);
+            messages.push(Incoming::primary(msg));
         }
         Ok(messages)
+    }
+
+    fn links(&self) -> Vec<Link> {
+        vec![Link::PRIMARY]
     }
 
     async fn close(&mut self) -> Result<(), TransportError> {
@@ -201,14 +205,17 @@ mod tests {
         let received = server_transport.receive().await.unwrap();
         assert!(received.is_some());
         let received_msg = received.unwrap();
-        assert_eq!(received_msg.id, 1);
+        assert_eq!(received_msg.msg.id, 1);
 
         // Send response from server
         let server_msg = WireServerMessage::new(
             1,
             lpc_wire::server::ServerMsgBody::ListAvailableProjects { projects: vec![] },
         );
-        server_transport.send(server_msg).await.unwrap();
+        server_transport
+            .send(LinkId::PRIMARY, server_msg)
+            .await
+            .unwrap();
 
         // Receive on client
         let received = client_transport.receive().await.unwrap();
