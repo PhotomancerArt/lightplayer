@@ -128,9 +128,13 @@ firmware transport that carries the second kind of link.
   static RAM comes out of the main task's stack, which fell from 71,152 B to
   35,152 B; the meteor example (35.8 KB high-water) overflows it on the
   emulator. Moving the host state to the heap recovered 3,528 B (38,680 B).
-  **How the rest is paid — a smaller heap for every board, or a separate BLE
-  image — is an open ruling on PR #810**, and this ADR is amended when it is
-  made.
+  **Ruled (Yona, 2026-09-24): a smaller heap for every board, one image** —
+  "a stack overflow crashes; a smaller heap only narrows the compile
+  margin". The main heap region went 260,000 → 236,000 B (heap total
+  325,536 → 301,536 B), and the stack is 62,664 B, against a meteor
+  high-water of 33,896 B on `lp-emu:esp32c6:t1` (28,768 B headroom). The
+  rejected alternative was a separate BLE image, which reverses `ble` in
+  `default`. See `2026-09-02-esp32c6-ram-split.md`, "Amendment".
 - **A BLE-disabled board is not byte-identical at runtime**: +172 B of heap
   at idle and +1.1 KB of main-stack high-water (the mux's send future, and
   coex init), measured on the emulator's heap ratchet.
