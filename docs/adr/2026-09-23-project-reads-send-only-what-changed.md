@@ -50,7 +50,10 @@ introduces one generic pair used by every probe with a static/moving split:
 enum RevisionGateRead {
     None,
     Always,
-    IfChanged { known_revision: Option<Revision> },
+    // Proto 22 (lean-wire follow-ups F1): a list, so the per-output
+    // output-frame gate is this same type. `node` names the output; a
+    // single-half probe lists at most one entry with no node.
+    IfChanged { known: Vec<KnownRevision /* { node?, revision } */> },
 }
 
 enum RevisionGateResult<T> {
@@ -61,7 +64,7 @@ enum RevisionGateResult<T> {
 ```
 
 A client asks `Always` once, caches `T` and its revision, then asks
-`IfChanged { known_revision }` on every later read. While the revision
+`IfChanged` with the revision it holds on every later read. While the revision
 holds, the engine answers `Unchanged { revision }` — a handful of bytes —
 and only the moving half travels. **One revision covers the whole gated
 half**: it moves whenever any piece of it does, and it is never the

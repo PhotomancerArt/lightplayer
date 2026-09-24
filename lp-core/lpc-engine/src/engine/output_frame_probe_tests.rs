@@ -21,10 +21,10 @@ use lpc_model::{
 use lpc_registry::ProjectRegistry;
 use lpc_wire::{
     ControlProductGeometry, ControlProductProbeRequest, ControlProductProbeResult,
-    GeometryDisplayLayout, KnownOutputFrameGeometry, OutputFrameEntry, OutputFrameGeometry,
-    OutputFrameGeometryRead, OutputFrameProbeRequest, OutputFrameProbeResult, ProjectProbeRequest,
-    ProjectProbeResult, ProjectReadRequest, RevisionGateRead, RevisionGateResult,
-    WireChannelSampleFormat, WireChildKind, WireSlotIndex,
+    GeometryDisplayLayout, KnownRevision, OutputFrameEntry, OutputFrameGeometry,
+    OutputFrameProbeRequest, OutputFrameProbeResult, ProjectProbeRequest, ProjectProbeResult,
+    ProjectReadRequest, RevisionGateRead, RevisionGateResult, WireChannelSampleFormat,
+    WireChildKind, WireSlotIndex,
 };
 
 use crate::dataflow::binding::{BindingDraft, BindingPriority, BindingSource, BindingTarget};
@@ -56,7 +56,7 @@ fn output_frame_probe_returns_published_bytes_without_rendering() {
     assert_eq!(published, vec![255, 255, 0, 0, 0, 0], "red lamp, u16 LE");
 
     let renders_before = harness.renders();
-    let entries = harness.read(OutputFrameGeometryRead::Always);
+    let entries = harness.read(RevisionGateRead::Always);
     assert_eq!(
         harness.renders(),
         renders_before,
@@ -96,10 +96,10 @@ fn output_frame_probe_returns_published_bytes_without_rendering() {
 fn output_frame_probe_revision_moves_on_each_publish() {
     let mut harness = Harness::build([u16::MAX, 0, 0, u16::MAX]);
     harness.tick();
-    let first = harness.read(OutputFrameGeometryRead::None)[0].revision;
+    let first = harness.read(RevisionGateRead::None)[0].revision;
 
     harness.tick();
-    let second = harness.read(OutputFrameGeometryRead::None)[0].revision;
+    let second = harness.read(RevisionGateRead::None)[0].revision;
 
     assert!(
         second > first,
@@ -108,7 +108,7 @@ fn output_frame_probe_revision_moves_on_each_publish() {
 
     // And a read that does not tick in between sees the same revision — the
     // read itself must not look like a new frame.
-    let repeat = harness.read(OutputFrameGeometryRead::None)[0].revision;
+    let repeat = harness.read(RevisionGateRead::None)[0].revision;
     assert_eq!(repeat, second, "a re-read is not a new frame");
 }
 
@@ -135,7 +135,7 @@ fn output_frame_probe_if_changed_omits_unchanged_geometry() {
     );
 
     // `None` is the cheapest gate of all: no geometry work at all.
-    let entries = harness.read(OutputFrameGeometryRead::None);
+    let entries = harness.read(RevisionGateRead::None);
     assert_eq!(entries[0].geometry, RevisionGateResult::Omitted);
 }
 
@@ -147,9 +147,9 @@ fn output_frame_probe_gates_each_output_by_its_own_known_revision() {
     harness.tick();
     let known = harness.geometry_revision();
 
-    let entries = harness.read(OutputFrameGeometryRead::IfChanged {
-        known: vec![KnownOutputFrameGeometry {
-            node: NodeId::new(harness.out_id.0 + 100),
+    let entries = harness.read(RevisionGateRead::IfChanged {
+        known: vec![KnownRevision {
+            node: Some(NodeId::new(harness.out_id.0 + 100)),
             revision: known,
         }],
     });
@@ -233,7 +233,7 @@ fn a_refused_display_layout_is_cached_like_any_other_geometry() {
     harness.engine.set_display_layout_budget(Some(8));
     harness.tick();
 
-    let entries = harness.read(OutputFrameGeometryRead::Always);
+    let entries = harness.read(RevisionGateRead::Always);
     let geometry = changed(&entries[0]);
     assert!(
         matches!(
@@ -273,9 +273,7 @@ fn control_product_geometry_moves_with_its_sample_layout() {
 
     harness.tick();
     assert_eq!(
-        harness.read_control(RevisionGateRead::IfChanged {
-            known_revision: Some(first.revision),
-        }),
+        harness.read_control(RevisionGateRead::if_changed(Some(first.revision))),
         RevisionGateResult::Unchanged {
             revision: first.revision
         },
@@ -284,9 +282,9 @@ fn control_product_geometry_moves_with_its_sample_layout() {
 
     harness.set_fixture_literal("color_order", ColorOrder::Grb.to_lp_value());
     harness.tick();
-    let RevisionGateResult::Changed(second) = harness.read_control(RevisionGateRead::IfChanged {
-        known_revision: Some(first.revision),
-    }) else {
+    let RevisionGateResult::Changed(second) =
+        harness.read_control(RevisionGateRead::if_changed(Some(first.revision)))
+    else {
         panic!("a regrouped sample layout must come back changed");
     };
     assert!(second.revision > first.revision);
@@ -308,10 +306,7 @@ fn output_frame_probe_rounds_to_u8_when_asked() {
     harness.tick();
     assert_eq!(harness.published_bytes(), vec![255, 255, 0, 0, 0, 0]);
 
-    let entries = harness.read_samples(
-        OutputFrameGeometryRead::None,
-        Some(WireChannelSampleFormat::U8),
-    );
+    let entries = harness.read_samples(RevisionGateRead::None, Some(WireChannelSampleFormat::U8));
 
     assert_eq!(entries[0].sample_format, Some(WireChannelSampleFormat::U8));
     assert_eq!(entries[0].bytes, vec![255, 0, 0], "one sample per byte");
@@ -325,7 +320,7 @@ fn output_frame_probe_without_samples_still_carries_geometry() {
     let mut harness = Harness::build([u16::MAX, 0, 0, u16::MAX]);
     harness.tick();
 
-    let entries = harness.read_samples(OutputFrameGeometryRead::Always, None);
+    let entries = harness.read_samples(RevisionGateRead::Always, None);
 
     let entry = &entries[0];
     assert_eq!(entry.sample_format, None);
@@ -562,15 +557,15 @@ impl Harness {
 
     /// The output's current geometry revision, read with `Always`.
     fn geometry_revision(&mut self) -> Revision {
-        let entries = self.read(OutputFrameGeometryRead::Always);
+        let entries = self.read(RevisionGateRead::Always);
         changed(&entries[0]).revision
     }
 
     /// A gate claiming this harness's output geometry at `revision`.
-    fn known(&self, revision: Revision) -> OutputFrameGeometryRead {
-        OutputFrameGeometryRead::IfChanged {
-            known: vec![KnownOutputFrameGeometry {
-                node: self.out_id,
+    fn known(&self, revision: Revision) -> RevisionGateRead {
+        RevisionGateRead::IfChanged {
+            known: vec![KnownRevision {
+                node: Some(self.out_id),
                 revision,
             }],
         }
@@ -630,13 +625,13 @@ impl Harness {
     }
 
     /// A full-precision read: samples verbatim at `U16`.
-    fn read(&mut self, geometry: OutputFrameGeometryRead) -> Vec<OutputFrameEntry> {
+    fn read(&mut self, geometry: RevisionGateRead) -> Vec<OutputFrameEntry> {
         self.read_samples(geometry, Some(WireChannelSampleFormat::U16))
     }
 
     fn read_samples(
         &mut self,
-        geometry: OutputFrameGeometryRead,
+        geometry: RevisionGateRead,
         samples: Option<WireChannelSampleFormat>,
     ) -> Vec<OutputFrameEntry> {
         let results = read_probe_results(

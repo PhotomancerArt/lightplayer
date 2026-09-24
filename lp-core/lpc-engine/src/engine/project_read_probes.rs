@@ -13,7 +13,7 @@ use lpc_registry::ProjectRegistry;
 use lpc_wire::{
     BindingGraphProbeRequest, BindingGraphProbeResult, ControlProductGeometry,
     ControlProductProbeRequest, ControlProductProbeResult, GeometryDisplayLayout, OutputFrameEntry,
-    OutputFrameGeometry, OutputFrameGeometryRead, OutputFrameProbeRequest, OutputFrameProbeResult,
+    OutputFrameGeometry, OutputFrameProbeRequest, OutputFrameProbeResult,
     RenderProductProbeRequest, RenderProductProbeResult, RevisionGateRead, RevisionGateResult,
     TimebaseProbeRequest, TimebaseProbeResult, WireBindingDirection, WireBindingEndpoint,
     WireBindingGraph, WireBindingGraphRead, WireBindingOrigin, WireBusChannel, WireBusChannelValue,
@@ -212,6 +212,10 @@ impl Engine {
     /// Public (unlike the sibling probes) so host-level tests can assert
     /// the effective graph directly — the binding index is load-time
     /// materialized state with no other read surface.
+    ///
+    /// Out of line, like [`Self::read_project_output_frame_probe`]: see the
+    /// note there.
+    #[inline(never)]
     pub fn read_project_binding_graph_probe(
         &mut self,
         registry: &ProjectRegistry,
@@ -396,11 +400,9 @@ impl Engine {
         let revision = self.stamp_binding_structure(lpc_wire::ser_write_json_fnv64(&graph));
         graph.revision = revision;
 
-        let structure = match request.structure {
+        let structure = match &request.structure {
             RevisionGateRead::None => RevisionGateResult::Omitted,
-            RevisionGateRead::IfChanged {
-                known_revision: Some(known),
-            } if known == revision => RevisionGateResult::Unchanged { revision },
+            read if read.holds(None, revision) => RevisionGateResult::Unchanged { revision },
             RevisionGateRead::Always | RevisionGateRead::IfChanged { .. } => {
                 RevisionGateResult::Changed(graph)
             }
@@ -518,16 +520,14 @@ impl Engine {
         sample_layout: ControlLayout,
         display_layout: Option<ControlDisplayLayout>,
     ) -> RevisionGateResult<ControlProductGeometry> {
-        let known_revision = match read {
-            RevisionGateRead::None => return RevisionGateResult::Omitted,
-            RevisionGateRead::Always => None,
-            RevisionGateRead::IfChanged { known_revision } => known_revision,
-        };
+        if matches!(read, RevisionGateRead::None) {
+            return RevisionGateResult::Omitted;
+        }
         let sample_revision = self.stamp_control_sample_layout(product, &sample_layout);
         let revision = display_layout.as_ref().map_or(sample_revision, |layout| {
             sample_revision.max(layout.revision())
         });
-        if known_revision == Some(revision) {
+        if read.holds(None, revision) {
             return RevisionGateResult::Unchanged { revision };
         }
         let display_layout = match display_layout {
@@ -562,6 +562,18 @@ impl Engine {
     /// bytes clone is deliberate and accepted — it is one more copy of a
     /// buffer that already exists, where a render call would be a whole
     /// frame's work.
+    ///
+    /// # Out of line, for flash
+    ///
+    /// This probe and [`Self::read_project_binding_graph_probe`] are the two
+    /// largest probe bodies, and inlined into the project-read `async fn`
+    /// they were copied more than once into the firmware's `tick_and_send`
+    /// state machine. Keeping BOTH out of line took 7,738 B off the
+    /// ESP32-C6 image; either one alone saved only a few hundred bytes, so
+    /// do not drop one of the pair without re-measuring
+    /// (`just fw-esp32c6-size-check`; `docs/adr/2026-07-28-esp32c6-flash-budget.md`).
+    /// One call per probe per read costs nothing measurable.
+    #[inline(never)]
     pub fn read_project_output_frame_probe(
         &mut self,
         registry: &ProjectRegistry,
@@ -672,10 +684,10 @@ impl Engine {
         &mut self,
         registry: &ProjectRegistry,
         candidate: &PublishedOutputCandidate,
-        read: &OutputFrameGeometryRead,
+        read: &RevisionGateRead,
         layout_bytes_spent: &mut usize,
     ) -> RevisionGateResult<OutputFrameGeometry> {
-        if matches!(read, OutputFrameGeometryRead::None) || candidate.fragments.is_empty() {
+        if matches!(read, RevisionGateRead::None) || candidate.fragments.is_empty() {
             return RevisionGateResult::Omitted;
         }
         let parts = self.output_frame_display_parts(registry, candidate);
@@ -683,7 +695,7 @@ impl Engine {
             .revision
             .max(candidate.placement_revision)
             .max(candidate.sample_layout_revision);
-        if read.holds(candidate.node, revision) {
+        if read.holds(Some(candidate.node), revision) {
             return RevisionGateResult::Unchanged { revision };
         }
 
@@ -1242,12 +1254,8 @@ mod tests {
         let (graph, _) = h.binding_graph(true);
 
         h.tick(10).expect("tick");
-        let read = gated_binding_graph_read(
-            &mut h,
-            RevisionGateRead::IfChanged {
-                known_revision: Some(graph.revision),
-            },
-        );
+        let read =
+            gated_binding_graph_read(&mut h, RevisionGateRead::if_changed(Some(graph.revision)));
         assert_eq!(
             read.structure,
             RevisionGateResult::Unchanged {
@@ -1266,7 +1274,7 @@ mod tests {
         // A client that holds nothing, or a stale revision, gets it all.
         for known_revision in [None, Some(graph.revision.next())] {
             let read =
-                gated_binding_graph_read(&mut h, RevisionGateRead::IfChanged { known_revision });
+                gated_binding_graph_read(&mut h, RevisionGateRead::if_changed(known_revision));
             assert_eq!(read.structure, RevisionGateResult::Changed(graph.clone()));
         }
         assert_eq!(

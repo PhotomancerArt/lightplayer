@@ -1427,9 +1427,9 @@ mod tests {
         let request = sync.refresh_project_read_request(Vec::new());
         assert_eq!(
             request.probes,
-            vec![binding_graph_probe(RevisionGateRead::IfChanged {
-                known_revision: Some(Revision::new(4)),
-            })]
+            vec![binding_graph_probe(RevisionGateRead::if_changed(Some(
+                Revision::new(4)
+            )))]
         );
 
         // Unsubscribing drops the cached snapshot.
@@ -2173,9 +2173,7 @@ mod tests {
                 ControlProductProbeRequest {
                     product,
                     sample_format: WireChannelSampleFormat::U8,
-                    geometry: RevisionGateRead::IfChanged {
-                        known_revision: Some(Revision::new(12)),
-                    },
+                    geometry: RevisionGateRead::if_changed(Some(Revision::new(12))),
                 },
             )]
         );

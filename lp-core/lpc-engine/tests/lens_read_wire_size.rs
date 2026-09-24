@@ -65,12 +65,12 @@ use lpc_wire::messages::ClientMessage;
 use lpc_wire::server::ServerMsgBody;
 use lpc_wire::{
     BindingGraphProbeRequest, BindingGraphProbeResult, ControlProductProbeRequest,
-    ControlProductProbeResult, KnownOutputFrameGeometry, MemoryStats, NodeReadQuery,
-    NodeReadSelection, OutputFrameGeometryRead, OutputFrameProbeRequest, OutputFrameProbeResult,
-    ProjectProbeRequest, ProjectProbeResult, ProjectReadEvent, ProjectReadNodeEvent,
-    ProjectReadProbeEvent, ProjectReadQuery, ProjectReadQueryEvent, ProjectReadRequest, ReadLevel,
-    RevisionGateRead, RevisionGateResult, RuntimeReadQuery, ServerRuntimeStatus, ShapeReadQuery,
-    TransportError, WireChannelSampleFormat, WireServerMessage,
+    ControlProductProbeResult, KnownRevision, MemoryStats, NodeReadQuery, NodeReadSelection,
+    OutputFrameProbeRequest, OutputFrameProbeResult, ProjectProbeRequest, ProjectProbeResult,
+    ProjectReadEvent, ProjectReadNodeEvent, ProjectReadProbeEvent, ProjectReadQuery,
+    ProjectReadQueryEvent, ProjectReadRequest, ReadLevel, RevisionGateRead, RevisionGateResult,
+    RuntimeReadQuery, ServerRuntimeStatus, ShapeReadQuery, TransportError, WireChannelSampleFormat,
+    WireServerMessage,
 };
 use lpfs::LpFsStd;
 
@@ -212,7 +212,7 @@ fn measure_lens_reads(slug: &str, root: &str) -> LensReads {
     let first_request = lens_read_request(
         Some(view.revision),
         Some((product, RevisionGateRead::Always)),
-        OutputFrameGeometryRead::Always,
+        RevisionGateRead::Always,
         RevisionGateRead::Always,
     );
     let first = measure_read(&mut engine, &registry, &mut view, first_request);
@@ -222,7 +222,7 @@ fn measure_lens_reads(slug: &str, root: &str) -> LensReads {
     tick(&mut engine, &registry, LENS_REFRESH_TICKS);
     let control_geometry = control_geometry_read_after(&first.probes);
     let steady_control =
-        (!lamps_all_placed(product, &first.probes)).then_some((product, control_geometry));
+        (!lamps_all_placed(product, &first.probes)).then_some((product, control_geometry.clone()));
     let steady_request = lens_read_request(
         Some(first.revision),
         steady_control,
@@ -258,7 +258,7 @@ fn measure_lens_reads(slug: &str, root: &str) -> LensReads {
 fn lens_read_request(
     since: Option<Revision>,
     control: Option<(ControlProduct, RevisionGateRead)>,
-    output_geometry: OutputFrameGeometryRead,
+    output_geometry: RevisionGateRead,
     binding_structure: RevisionGateRead,
 ) -> ProjectReadRequest {
     let mut probes = Vec::new();
@@ -358,9 +358,7 @@ fn control_geometry_read_after(probes: &[ProjectProbeResult]) -> RevisionGateRea
         _ => None,
     });
     match known {
-        Some(revision) => RevisionGateRead::IfChanged {
-            known_revision: Some(revision),
-        },
+        Some(revision) => RevisionGateRead::if_changed(Some(revision)),
         None => RevisionGateRead::Always,
     }
 }
@@ -368,7 +366,7 @@ fn control_geometry_read_after(probes: &[ProjectProbeResult]) -> RevisionGateRea
 /// Studio's `OutputFrameCache::geometry_read`: each output's cached geometry
 /// revision, listed per node; an output with nothing cached (never answered,
 /// or deferred) is simply absent from the list, which asks for it outright.
-fn output_geometry_read_after(probes: &[ProjectProbeResult]) -> OutputFrameGeometryRead {
+fn output_geometry_read_after(probes: &[ProjectProbeResult]) -> RevisionGateRead {
     let mut known = Vec::new();
     for probe in probes {
         if let ProjectProbeResult::OutputFrame(OutputFrameProbeResult::Frame { outputs }) = probe {
@@ -378,17 +376,17 @@ fn output_geometry_read_after(probes: &[ProjectProbeResult]) -> OutputFrameGeome
                     RevisionGateResult::Unchanged { revision } => *revision,
                     RevisionGateResult::Omitted => continue,
                 };
-                known.push(KnownOutputFrameGeometry {
-                    node: output.node,
+                known.push(KnownRevision {
+                    node: Some(output.node),
                     revision,
                 });
             }
         }
     }
     if known.is_empty() {
-        return OutputFrameGeometryRead::Always;
+        return RevisionGateRead::Always;
     }
-    OutputFrameGeometryRead::IfChanged { known }
+    RevisionGateRead::IfChanged { known }
 }
 
 /// Studio's `BindingGraphCache::structure_read`: `if_changed` against the
@@ -405,9 +403,7 @@ fn binding_structure_read_after(probes: &[ProjectProbeResult]) -> RevisionGateRe
         _ => None,
     });
     match known {
-        Some(revision) => RevisionGateRead::IfChanged {
-            known_revision: Some(revision),
-        },
+        Some(revision) => RevisionGateRead::if_changed(Some(revision)),
         None => RevisionGateRead::Always,
     }
 }

@@ -33,6 +33,18 @@ use serde::{Deserialize, Serialize};
 ///
 /// # History
 ///
+/// - 22: one list-shaped revision gate (lean-wire follow-ups). The
+///   output-frame probe's own per-output gate (`OutputFrameGeometryRead` +
+///   `KnownOutputFrameGeometry`) is gone: every probe now asks with
+///   `RevisionGateRead`, whose `IfChanged` changes from `{ known_revision:
+///   Option<Revision> }` to `{ known: Vec<KnownRevision> }`, a
+///   `KnownRevision { node?, revision }` naming the node for the
+///   per-output probe and no node for the single-half ones (the control
+///   product's geometry, the binding graph's structure). A retyped field on
+///   three request messages: an old peer cannot decode the other's
+///   requests, which is what earns the bump. One request shape is also one
+///   deserializer on the device (1,584 B of ESP32-C6 flash). Answers are
+///   unchanged.
 /// - 21: the revision gate (lean-wire) — what a probe answers unchanged on
 ///   every read rides behind a revision (`RevisionGateRead` →
 ///   `RevisionGateResult<T>`). First, everything static about a probed
@@ -42,7 +54,8 @@ use serde::{Deserialize, Serialize};
 ///   `sample_layout` + `display_layout` with `geometry:
 ///   RevisionGateResult<ControlProductGeometry>`. `OutputFrameProbeRequest`
 ///   gains a PER-OUTPUT gate (`geometry: OutputFrameGeometryRead`, whose
-///   `IfChanged` lists a known revision per output node), and
+///   `IfChanged` listed a known revision per output node; folded into
+///   `RevisionGateRead` at 22), and
 ///   `OutputFrameEntry` (and its header) replaces `sample_layout` +
 ///   `display_layout` + `placements` with `geometry:
 ///   RevisionGateResult<OutputFrameGeometry>`. `ControlDisplayLayoutRead`
@@ -206,7 +219,7 @@ use serde::{Deserialize, Serialize};
 /// as `None` on new Studio and a new firmware's extra fields are ignored
 /// by old Studio. Bumping for those would mark every board running
 /// current firmware Incompatible in exchange for nothing.
-pub const WIRE_PROTO_VERSION: u32 = 21;
+pub const WIRE_PROTO_VERSION: u32 = 22;
 
 /// Unsolicited/boot-time server identity, version, and capability report.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -513,7 +526,7 @@ mod tests {
     #[test]
     fn the_proto_version_is_pinned_to_its_history() {
         assert_eq!(
-            WIRE_PROTO_VERSION, 21,
+            WIRE_PROTO_VERSION, 22,
             "if you meant to bump, add the History entry in this file's \
              doc comment and update this pin"
         );
