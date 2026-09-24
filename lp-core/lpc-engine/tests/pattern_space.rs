@@ -286,6 +286,8 @@ fn an_opt_out_shader_is_unchanged() {
 /// and the pitch — computed the device's way, one O(n) pass over the
 /// streamed coordinates — is non-zero, many ulps wide, and agrees with the
 /// same rule computed independently in f64 from the document's own lamps.
+// Resolves the dome through the fixture node's own loader, so it needs that gate.
+#[cfg(feature = "node-fixture")]
 #[test]
 fn dome_scale_pitch_is_nonzero_and_q32_safe() {
     use lpc_engine::nodes::fixture::mapping::map2d::mapping_from_map2d_doc;
