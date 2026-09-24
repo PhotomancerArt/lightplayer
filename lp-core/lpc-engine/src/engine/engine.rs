@@ -131,6 +131,10 @@ pub struct Engine {
     /// (see [`super::control_geometry_stamps`]). Probe bookkeeping, not
     /// project data.
     control_geometry_stamps: super::control_geometry_stamps::ControlGeometryStamps,
+    /// When the binding graph's structure last changed — the binding-graph
+    /// probe's structure revision (see [`super::binding_structure_stamp`]).
+    /// Probe bookkeeping, not project data.
+    binding_structure_stamp: super::binding_structure_stamp::BindingStructureStamp,
     /// Every node in [`NodeRuntimeStatus::Fault`] as of the END of the last
     /// tick, and when the project's continuous fault began — the project-level
     /// verdict outputs paint the fault pattern from (D1).
@@ -183,6 +187,7 @@ impl Engine {
                     - lpc_wire::PROJECT_READ_PROBE_HEADER_RESERVE_BYTES,
             ),
             control_geometry_stamps: Default::default(),
+            binding_structure_stamp: Default::default(),
             project_fault: None,
             project_fault_fingerprint: None,
             fault_presentation: FaultPresentation::default(),
@@ -526,6 +531,14 @@ impl Engine {
             .stamp(product, sample_layout, self.revision, |node| {
                 tree.get(node).is_some()
             })
+    }
+
+    /// The binding graph's structure revision, given the hash of the
+    /// structure a binding-graph probe just built — see
+    /// [`super::binding_structure_stamp`].
+    pub(super) fn stamp_binding_structure(&mut self, structure_hash: u64) -> Revision {
+        self.binding_structure_stamp
+            .stamp(structure_hash, self.revision)
     }
 
     pub fn graphics(&self) -> Option<&Arc<dyn LpGraphics>> {

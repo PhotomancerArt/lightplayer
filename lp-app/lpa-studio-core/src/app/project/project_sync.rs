@@ -13,11 +13,12 @@ use lpc_wire::{
     ProjectReadQuery, ProjectReadRequest, ReadLevel, RenderProductProbeRequest,
     RenderProductProbeResult, ResourcePayloadRead, ResourceReadQuery, RuntimeReadQuery,
     ShapeReadQuery, TimebaseProbeRequest, TimebaseProbeResult, WireBindingGraph,
-    WireCellProjection, WireChannelSampleFormat, WireConsumerPolicy, WireProjectionOrigin,
-    WireProjectionShape, WireTextureFormat, WireVisualSpace,
+    WireBusChannelValue, WireCellProjection, WireChannelSampleFormat, WireConsumerPolicy,
+    WireProjectionOrigin, WireProjectionShape, WireTextureFormat, WireVisualSpace,
 };
 
 use crate::app::frame_feed::OutputFrameCache;
+use crate::app::project::binding_graph_cache::BindingGraphCache;
 use crate::app::project::control_geometry_cache::ControlGeometryCache;
 use crate::{
     ProjectRuntimeSummary, ProjectSyncPhase, ProjectSyncSummary, UiCellProjection,
@@ -70,8 +71,10 @@ pub struct ProjectSync {
     /// last answered with, held while its revision stands — the client half
     /// of the probe's geometry gate. See [`ControlGeometryCache`].
     control_geometry: ControlGeometryCache,
-    /// Latest binding-graph snapshot, kept while a consumer subscribes.
-    binding_graph: Option<WireBindingGraph>,
+    /// The binding graph — structure held while its revision stands, values
+    /// refreshed every read — kept while a consumer subscribes. See
+    /// [`BindingGraphCache`].
+    binding_graph: BindingGraphCache,
     /// Whether reads should carry the binding-graph probe. Armed for every
     /// ready project: module faces derive from it.
     binding_graph_subscribed: bool,
@@ -103,7 +106,7 @@ impl ProjectSync {
             preview_spaces: BTreeMap::new(),
             output_frames: OutputFrameCache::default(),
             control_geometry: ControlGeometryCache::default(),
-            binding_graph: None,
+            binding_graph: BindingGraphCache::default(),
             binding_graph_subscribed: false,
             issue: None,
             overlay: ProjectOverlay::new(),
@@ -578,8 +581,8 @@ impl ProjectSync {
 
     fn apply_binding_graph_probe_results(&mut self, probes: &[&ProjectProbeResult]) {
         for probe in probes {
-            if let ProjectProbeResult::BindingGraph(BindingGraphProbeResult::Graph(graph)) = probe {
-                self.binding_graph = Some(graph.clone());
+            if let ProjectProbeResult::BindingGraph(BindingGraphProbeResult::Graph(read)) = probe {
+                self.binding_graph.apply(read);
             }
         }
     }
@@ -609,18 +612,29 @@ impl ProjectSync {
         self.timebases.clear();
         self.product_spaces.clear();
         self.product_space_previews.clear();
-        self.binding_graph = None;
+        self.binding_graph.clear();
     }
 
-    /// Latest binding-graph snapshot, when a consumer subscribes.
+    /// The held binding-graph structure, when a consumer subscribes.
     pub fn binding_graph(&self) -> Option<&WireBindingGraph> {
-        self.binding_graph.as_ref()
+        self.binding_graph.graph()
     }
 
-    /// Inject a binding-graph snapshot directly (test fixture path).
+    /// One value per [`Self::binding_graph`] channel row, in that order;
+    /// empty when no graph is held.
+    pub fn binding_graph_values(&self) -> &[WireBusChannelValue] {
+        self.binding_graph.values()
+    }
+
+    /// Inject a binding-graph snapshot directly (test fixture path): a
+    /// structure and its channel values, padded with `Unresolved` to the
+    /// channel count (a fixture that does not care about values passes none).
     #[cfg(test)]
-    pub(crate) fn set_binding_graph_for_test(&mut self, graph: WireBindingGraph) {
-        self.binding_graph = Some(graph);
+    pub(crate) fn set_binding_graph_for_test(
+        &mut self,
+        (graph, values): (WireBindingGraph, Vec<WireBusChannelValue>),
+    ) {
+        self.binding_graph.set_for_test(graph, values);
     }
 
     /// Inject a timebase read directly (test fixture path), standing in for
@@ -672,7 +686,7 @@ impl ProjectSync {
     pub fn set_binding_graph_subscribed(&mut self, subscribed: bool) {
         self.binding_graph_subscribed = subscribed;
         if !subscribed {
-            self.binding_graph = None;
+            self.binding_graph.clear();
         }
     }
 
@@ -693,6 +707,7 @@ impl ProjectSync {
         if self.binding_graph_subscribed {
             probes.push(ProjectProbeRequest::BindingGraph(
                 BindingGraphProbeRequest {
+                    structure: self.binding_graph.structure_read(),
                     include_values: true,
                 },
             ));
@@ -1292,8 +1307,8 @@ mod tests {
         ControlSampleEncoding, ControlSampleLayout, ControlSampleSpan, NodeId, VisualProduct,
     };
     use lpc_wire::{
-        ControlProductGeometry, GeometryDisplayLayout, GeometryProbeResult, GeometryRead,
-        ProjectReadProbeEvent,
+        ControlProductGeometry, GeometryDisplayLayout, ProjectReadProbeEvent, RevisionGateRead,
+        RevisionGateResult,
     };
 
     /// Build a probe-only project-read event stream at `revision`.
@@ -1360,11 +1375,7 @@ mod tests {
         let request = sync.refresh_project_read_request(Vec::new());
         assert_eq!(
             request.probes,
-            vec![ProjectProbeRequest::BindingGraph(
-                BindingGraphProbeRequest {
-                    include_values: true,
-                }
-            )]
+            vec![binding_graph_probe(RevisionGateRead::Always)]
         );
 
         let graph = WireBindingGraph {
@@ -1374,18 +1385,97 @@ mod tests {
         };
         sync.apply_project_read_events(probe_events(
             4,
-            vec![ProjectProbeResult::BindingGraph(
-                BindingGraphProbeResult::Graph(graph.clone()),
+            vec![binding_graph_answer(
+                RevisionGateResult::Changed(graph.clone()),
+                4,
+                Vec::new(),
             )],
         ))
         .expect("apply events");
         assert_eq!(sync.binding_graph(), Some(&graph));
+
+        // The next read gates the structure on the held revision.
+        let request = sync.refresh_project_read_request(Vec::new());
+        assert_eq!(
+            request.probes,
+            vec![binding_graph_probe(RevisionGateRead::IfChanged {
+                known_revision: Some(Revision::new(4)),
+            })]
+        );
 
         // Unsubscribing drops the cached snapshot.
         sync.set_binding_graph_subscribed(false);
         assert_eq!(sync.binding_graph(), None);
         let request = sync.refresh_project_read_request(Vec::new());
         assert!(request.probes.is_empty());
+    }
+
+    /// A steady read carries values only; they land on the held structure.
+    /// Values keyed to another structure revision are dropped — never laid
+    /// onto the held channels — and the next read asks the structure
+    /// `Always`.
+    #[test]
+    fn binding_values_apply_to_their_structure_and_a_mismatch_refetches() {
+        let mut sync = ProjectSync::new();
+        sync.set_binding_graph_subscribed(true);
+        let graph = WireBindingGraph {
+            revision: Revision::new(4),
+            bindings: Vec::new(),
+            channels: vec![lpc_wire::WireBusChannel {
+                scope: None,
+                name: "time".to_string(),
+                kind: None,
+                providers: Vec::new(),
+                consumers: Vec::new(),
+                primary_visual: false,
+            }],
+        };
+        let value = |value: f32| WireBusChannelValue::Value(lpc_model::LpValue::F32(value));
+        sync.apply_project_read_events(probe_events(
+            4,
+            vec![binding_graph_answer(
+                RevisionGateResult::Changed(graph.clone()),
+                4,
+                vec![value(0.25)],
+            )],
+        ))
+        .expect("apply events");
+
+        sync.apply_project_read_events(probe_events(
+            5,
+            vec![binding_graph_answer(
+                RevisionGateResult::Unchanged {
+                    revision: Revision::new(4),
+                },
+                4,
+                vec![value(0.5)],
+            )],
+        ))
+        .expect("apply events");
+        assert_eq!(sync.binding_graph(), Some(&graph));
+        assert_eq!(sync.binding_graph_values(), &[value(0.5)]);
+
+        sync.apply_project_read_events(probe_events(
+            6,
+            vec![binding_graph_answer(
+                RevisionGateResult::Unchanged {
+                    revision: Revision::new(4),
+                },
+                9,
+                vec![value(0.75)],
+            )],
+        ))
+        .expect("apply events");
+        assert_eq!(
+            sync.binding_graph_values(),
+            &[value(0.5)],
+            "values keyed to another structure are never applied"
+        );
+        let request = sync.refresh_project_read_request(Vec::new());
+        assert_eq!(
+            request.probes,
+            vec![binding_graph_probe(RevisionGateRead::Always)]
+        );
     }
 
     #[test]
@@ -1412,11 +1502,7 @@ mod tests {
         );
         assert_eq!(
             requests[0].probes,
-            vec![ProjectProbeRequest::BindingGraph(
-                BindingGraphProbeRequest {
-                    include_values: true,
-                }
-            )],
+            vec![binding_graph_probe(RevisionGateRead::Always)],
             "binding-graph probe must ride the staged initial sync after begin_initial_sync"
         );
     }
@@ -1991,7 +2077,7 @@ mod tests {
                 ControlProductProbeRequest {
                     product,
                     sample_format: WireChannelSampleFormat::U16,
-                    geometry: GeometryRead::Always,
+                    geometry: RevisionGateRead::Always,
                 },
             )]
         );
@@ -2039,7 +2125,7 @@ mod tests {
                     revision: Revision::new(9),
                     extent: product.preferred_extent(),
                     sample_format: WireChannelSampleFormat::U16,
-                    geometry: GeometryProbeResult::Changed(ControlProductGeometry {
+                    geometry: RevisionGateResult::Changed(ControlProductGeometry {
                         revision: Revision::new(12),
                         sample_layout: sample_layout.clone(),
                         display_layout: GeometryDisplayLayout::Layout(display_layout.clone()),
@@ -2058,7 +2144,7 @@ mod tests {
                 ControlProductProbeRequest {
                     product,
                     sample_format: WireChannelSampleFormat::U16,
-                    geometry: GeometryRead::IfChanged {
+                    geometry: RevisionGateRead::IfChanged {
                         known_revision: Some(Revision::new(12)),
                     },
                 },
@@ -2074,7 +2160,7 @@ mod tests {
                     revision: Revision::new(10),
                     extent: product.preferred_extent(),
                     sample_format: WireChannelSampleFormat::U16,
-                    geometry: GeometryProbeResult::Unchanged {
+                    geometry: RevisionGateResult::Unchanged {
                         revision: Revision::new(12),
                     },
                     bytes: second_bytes.clone(),
@@ -2115,7 +2201,7 @@ mod tests {
                     revision: Revision::new(9),
                     extent: product.preferred_extent(),
                     sample_format: WireChannelSampleFormat::U16,
-                    geometry: GeometryProbeResult::Unchanged {
+                    geometry: RevisionGateResult::Unchanged {
                         revision: Revision::new(12),
                     },
                     bytes: vec![0, 0, 255, 255, 0, 0],
@@ -2136,7 +2222,7 @@ mod tests {
                 ControlProductProbeRequest {
                     product,
                     sample_format: WireChannelSampleFormat::U16,
-                    geometry: GeometryRead::Always,
+                    geometry: RevisionGateRead::Always,
                 },
             )]
         );
@@ -2643,5 +2729,32 @@ mod tests {
             None,
             "stranded descendants drop their base values with their entries"
         );
+    }
+
+    /// The lens's binding-graph probe, with values, gating the structure as
+    /// `structure` says.
+    fn binding_graph_probe(structure: RevisionGateRead) -> ProjectProbeRequest {
+        ProjectProbeRequest::BindingGraph(BindingGraphProbeRequest {
+            structure,
+            include_values: true,
+        })
+    }
+
+    /// A binding-graph answer: `structure`, and `values` keyed to
+    /// `values_revision`.
+    fn binding_graph_answer(
+        structure: RevisionGateResult<WireBindingGraph>,
+        values_revision: i64,
+        values: Vec<WireBusChannelValue>,
+    ) -> ProjectProbeResult {
+        ProjectProbeResult::BindingGraph(BindingGraphProbeResult::Graph(
+            lpc_wire::WireBindingGraphRead {
+                structure,
+                values: Some(lpc_wire::WireBusChannelValues {
+                    structure_revision: Revision::new(values_revision),
+                    values,
+                }),
+            },
+        ))
     }
 }

@@ -26,22 +26,23 @@ pub mod tree;
 pub use messages::{
     BindingGraphProbeRequest, BindingGraphProbeResult, ControlProductGeometry,
     ControlProductProbeRequest, ControlProductProbeResult, ControlProductProbeResultHeader,
-    GeometryDisplayLayout, GeometryProbeResult, GeometryRead, KnownOutputFrameGeometry,
-    NodeReadQuery, NodeReadSelection, OutputFrameEntry, OutputFrameEntryHeader,
-    OutputFrameGeometry, OutputFrameGeometryRead, OutputFrameProbeRequest, OutputFrameProbeResult,
-    OutputFrameProbeResultHeader, PROJECT_READ_FRAME_MAX_BYTES,
-    PROJECT_READ_FRAME_SERIAL_BUFFER_BYTES, PROJECT_READ_FRAME_SERIAL_MARGIN_BYTES,
-    PROJECT_READ_PROBE_HEADER_RESERVE_BYTES, PROJECT_READ_RUNTIME_CHUNK_BYTES, ProjectProbeRequest,
-    ProjectProbeResult, ProjectProbeResultHeader, ProjectReadEvent, ProjectReadNodeEvent,
-    ProjectReadProbeEvent, ProjectReadQuery, ProjectReadQueryEvent, ProjectReadRequest,
-    ProjectReadResourceEvent, ProjectReadShapeEvent, ProjectRuntimeStatus, ReadLevel,
-    RenderProductProbeRequest, RenderProductProbeResult, RenderProductProbeResultHeader,
-    ResourcePayloadRead, ResourceReadQuery, ResourceReadResult, RuntimeReadQuery,
+    GeometryDisplayLayout, KnownOutputFrameGeometry, NodeReadQuery, NodeReadSelection,
+    OutputFrameEntry, OutputFrameEntryHeader, OutputFrameGeometry, OutputFrameGeometryRead,
+    OutputFrameProbeRequest, OutputFrameProbeResult, OutputFrameProbeResultHeader,
+    PROJECT_READ_FRAME_MAX_BYTES, PROJECT_READ_FRAME_SERIAL_BUFFER_BYTES,
+    PROJECT_READ_FRAME_SERIAL_MARGIN_BYTES, PROJECT_READ_PROBE_HEADER_RESERVE_BYTES,
+    PROJECT_READ_RUNTIME_CHUNK_BYTES, ProjectProbeRequest, ProjectProbeResult,
+    ProjectProbeResultHeader, ProjectReadEvent, ProjectReadNodeEvent, ProjectReadProbeEvent,
+    ProjectReadQuery, ProjectReadQueryEvent, ProjectReadRequest, ProjectReadResourceEvent,
+    ProjectReadShapeEvent, ProjectRuntimeStatus, ReadLevel, RenderProductProbeRequest,
+    RenderProductProbeResult, RenderProductProbeResultHeader, ResourcePayloadRead,
+    ResourceReadQuery, ResourceReadResult, RevisionGateRead, RevisionGateResult, RuntimeReadQuery,
     RuntimeReadResult, ServerRuntimeStatus, ShapeReadQuery, TimebaseProbeRequest,
     TimebaseProbeResult, WireBindingDirection, WireBindingEndpoint, WireBindingGraph,
-    WireBindingOrigin, WireBusChannel, WireBusChannelValue, WireCellProjection, WireConsumerPolicy,
-    WireEffectiveBinding, WireOutputPlacement, WirePhasorOrigin, WirePhasorReading, WirePhasorRow,
-    WireProjectionOrigin, WireProjectionShape, WireScopeRef, WireVisualSpace,
+    WireBindingGraphRead, WireBindingOrigin, WireBusChannel, WireBusChannelValue,
+    WireBusChannelValues, WireCellProjection, WireConsumerPolicy, WireEffectiveBinding,
+    WireOutputPlacement, WirePhasorOrigin, WirePhasorReading, WirePhasorRow, WireProjectionOrigin,
+    WireProjectionShape, WireScopeRef, WireVisualSpace,
 };
 pub use messages::{ClientMessage, ClientRequest, Message, ServerMessage};
 pub use project::{
@@ -65,7 +66,9 @@ pub use project_overlay::{
     WireOverlayMutationResponse, WireOverlayReadRequest, WireOverlayReadResponse,
 };
 #[cfg(feature = "ser-write-json")]
-pub use ser_write::{CountingSerWrite, ErasedWriteError, ser_write_json_len, ser_write_json_to};
+pub use ser_write::{
+    CountingSerWrite, ErasedWriteError, ser_write_json_fnv64, ser_write_json_len, ser_write_json_to,
+};
 pub use server::{
     AvailableProject, BuildFacts, FAULT_MESSAGE_CAP_BYTES, FAULT_NODES_CAP, FaultedNodeWire,
     FsRequest, FsResponse, HardwareFacts, HardwareIdentity, HeartbeatIdentity, HelloIdentity,

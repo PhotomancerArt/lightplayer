@@ -212,7 +212,7 @@ mod tests {
         ControlSampleLayout, ControlSampleSpan, NodeId, Revision,
     };
     use lpc_wire::{
-        GeometryDisplayLayout, GeometryProbeResult, KnownOutputFrameGeometry, OutputFrameGeometry,
+        GeometryDisplayLayout, KnownOutputFrameGeometry, OutputFrameGeometry, RevisionGateResult,
         WireChannelSampleFormat,
     };
 
@@ -268,7 +268,7 @@ mod tests {
         );
 
         let mut second = entry(4, 2, vec![9, 0, 8, 0, 7, 0]);
-        second.geometry = GeometryProbeResult::Unchanged {
+        second.geometry = RevisionGateResult::Unchanged {
             revision: Revision::new(11),
         };
         feed.apply(&[second], NOW + 0.2);
@@ -433,7 +433,7 @@ mod tests {
             sample_format: WireChannelSampleFormat::U16,
             // Geometry at revision 1 with a REFUSED display layout — the
             // bare case; `with_layout` adds one.
-            geometry: GeometryProbeResult::Changed(OutputFrameGeometry {
+            geometry: RevisionGateResult::Changed(OutputFrameGeometry {
                 revision: Revision::new(1),
                 sample_layout: ControlSampleLayout {
                     spans: vec![ControlSampleSpan {
@@ -463,7 +463,7 @@ mod tests {
         revision: i64,
         layout: ControlDisplayLayout,
     ) -> OutputFrameEntry {
-        let GeometryProbeResult::Changed(geometry) = &mut entry.geometry else {
+        let RevisionGateResult::Changed(geometry) = &mut entry.geometry else {
             unreachable!("the helper sends geometry");
         };
         geometry.revision = Revision::new(revision);

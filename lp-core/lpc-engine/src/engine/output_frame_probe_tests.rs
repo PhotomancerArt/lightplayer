@@ -21,9 +21,9 @@ use lpc_model::{
 use lpc_registry::ProjectRegistry;
 use lpc_wire::{
     ControlProductGeometry, ControlProductProbeRequest, ControlProductProbeResult,
-    GeometryDisplayLayout, GeometryProbeResult, GeometryRead, KnownOutputFrameGeometry,
-    OutputFrameEntry, OutputFrameGeometry, OutputFrameGeometryRead, OutputFrameProbeRequest,
-    OutputFrameProbeResult, ProjectProbeRequest, ProjectProbeResult, ProjectReadRequest,
+    GeometryDisplayLayout, KnownOutputFrameGeometry, OutputFrameEntry, OutputFrameGeometry,
+    OutputFrameGeometryRead, OutputFrameProbeRequest, OutputFrameProbeResult, ProjectProbeRequest,
+    ProjectProbeResult, ProjectReadRequest, RevisionGateRead, RevisionGateResult,
     WireChannelSampleFormat, WireChildKind, WireSlotIndex,
 };
 
@@ -125,7 +125,7 @@ fn output_frame_probe_if_changed_omits_unchanged_geometry() {
     let entries = harness.read(harness.known(known));
     assert_eq!(
         entries[0].geometry,
-        GeometryProbeResult::Unchanged { revision: known },
+        RevisionGateResult::Unchanged { revision: known },
         "a steady read carries no geometry"
     );
     assert_eq!(
@@ -136,7 +136,7 @@ fn output_frame_probe_if_changed_omits_unchanged_geometry() {
 
     // `None` is the cheapest gate of all: no geometry work at all.
     let entries = harness.read(OutputFrameGeometryRead::None);
-    assert_eq!(entries[0].geometry, GeometryProbeResult::Omitted);
+    assert_eq!(entries[0].geometry, RevisionGateResult::Omitted);
 }
 
 /// The gate is per OUTPUT: a revision listed for another node says nothing
@@ -250,7 +250,7 @@ fn a_refused_display_layout_is_cached_like_any_other_geometry() {
     let entries = harness.read(harness.known(known));
     assert_eq!(
         entries[0].geometry,
-        GeometryProbeResult::Unchanged { revision: known }
+        RevisionGateResult::Unchanged { revision: known }
     );
 }
 
@@ -262,8 +262,8 @@ fn control_product_geometry_moves_with_its_sample_layout() {
     let mut harness = Harness::build([0, u16::MAX, 0, u16::MAX]);
     harness.tick();
 
-    let first = harness.read_control(GeometryRead::Always);
-    let GeometryProbeResult::Changed(first) = first else {
+    let first = harness.read_control(RevisionGateRead::Always);
+    let RevisionGateResult::Changed(first) = first else {
         panic!("expected changed geometry, got {first:?}");
     };
     let GeometryDisplayLayout::Layout(layout) = &first.display_layout else {
@@ -273,10 +273,10 @@ fn control_product_geometry_moves_with_its_sample_layout() {
 
     harness.tick();
     assert_eq!(
-        harness.read_control(GeometryRead::IfChanged {
+        harness.read_control(RevisionGateRead::IfChanged {
             known_revision: Some(first.revision),
         }),
-        GeometryProbeResult::Unchanged {
+        RevisionGateResult::Unchanged {
             revision: first.revision
         },
         "a steady control read carries no geometry"
@@ -284,7 +284,7 @@ fn control_product_geometry_moves_with_its_sample_layout() {
 
     harness.set_fixture_literal("color_order", ColorOrder::Grb.to_lp_value());
     harness.tick();
-    let GeometryProbeResult::Changed(second) = harness.read_control(GeometryRead::IfChanged {
+    let RevisionGateResult::Changed(second) = harness.read_control(RevisionGateRead::IfChanged {
         known_revision: Some(first.revision),
     }) else {
         panic!("a regrouped sample layout must come back changed");
@@ -311,7 +311,7 @@ fn display_layout_revision(entry: &OutputFrameEntry) -> Revision {
 /// The geometry half of an entry, which the test expects to have CHANGED.
 fn changed(entry: &OutputFrameEntry) -> &OutputFrameGeometry {
     match &entry.geometry {
-        GeometryProbeResult::Changed(geometry) => geometry,
+        RevisionGateResult::Changed(geometry) => geometry,
         other => panic!("expected changed geometry, got {other:?}"),
     }
 }
@@ -520,8 +520,8 @@ impl Harness {
     /// read stream.
     fn read_control(
         &mut self,
-        geometry: GeometryRead,
-    ) -> GeometryProbeResult<ControlProductGeometry> {
+        geometry: RevisionGateRead,
+    ) -> RevisionGateResult<ControlProductGeometry> {
         let results = read_probe_results(
             &mut self.engine,
             &self.registry,

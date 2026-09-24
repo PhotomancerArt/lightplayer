@@ -33,21 +33,31 @@ use serde::{Deserialize, Serialize};
 ///
 /// # History
 ///
-/// - 21: the geometry gate (lean-wire) — everything static about a probed
+/// - 21: the revision gate (lean-wire) — what a probe answers unchanged on
+///   every read rides behind a revision (`RevisionGateRead` →
+///   `RevisionGateResult<T>`). First, everything static about a probed
 ///   buffer rides one revision-gated bundle. `ControlProductProbeRequest`'s
 ///   `display_layout: ControlDisplayLayoutRead` becomes `geometry:
-///   GeometryRead`, and its preview (and chunk header) replaces
+///   RevisionGateRead`, and its preview (and chunk header) replaces
 ///   `sample_layout` + `display_layout` with `geometry:
-///   GeometryProbeResult<ControlProductGeometry>`. `OutputFrameProbeRequest`
+///   RevisionGateResult<ControlProductGeometry>`. `OutputFrameProbeRequest`
 ///   gains a PER-OUTPUT gate (`geometry: OutputFrameGeometryRead`, whose
 ///   `IfChanged` lists a known revision per output node), and
 ///   `OutputFrameEntry` (and its header) replaces `sample_layout` +
 ///   `display_layout` + `placements` with `geometry:
-///   GeometryProbeResult<OutputFrameGeometry>`. `ControlDisplayLayoutRead`
+///   RevisionGateResult<OutputFrameGeometry>`. `ControlDisplayLayoutRead`
 ///   and `ControlDisplayLayoutProbeResult` are gone. Renamed and retyped
 ///   fields on existing messages: an old peer cannot decode either side,
-///   which is what earns the bump. A steady lens read of the PLAYFUL choker
-///   drops from 10,997 B to 8,698 B.
+///   which is what earns the bump. Second, the binding graph splits into a
+///   gated structure and a per-read value list: `BindingGraphProbeRequest`
+///   gains `structure: RevisionGateRead`; `BindingGraphProbeResult::Graph`
+///   carries a `WireBindingGraphRead { structure:
+///   RevisionGateResult<WireBindingGraph>, values: Option<WireBusChannelValues>
+///   }`; `WireBusChannel` loses `value`; `WireBusChannelValue` becomes an
+///   enum; an engaged panel writer's row is the value-free
+///   `WireBindingEndpoint::PanelWriter`; and `WireBindingGraph::revision` is
+///   the STRUCTURE revision. A steady lens read of the PLAYFUL choker drops
+///   from 10,997 B to 4,911 B across the two.
 /// - 20: `ClientRequest::ClearFaults` + its `ServerMsgBody::ClearFaults {
 ///   ledger_cleared }` ack — the studio's Clear faults verb, which forgets
 ///   the crash-recovery ledger and re-arms the engine's faulted nodes.

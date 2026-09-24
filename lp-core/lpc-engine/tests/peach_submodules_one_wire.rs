@@ -21,8 +21,8 @@ use lpc_engine::node::NodeEntryState;
 use lpc_engine::{EngineServices, ProjectLoader};
 use lpc_model::TreePath;
 use lpc_wire::{
-    GeometryDisplayLayout, GeometryProbeResult, OutputFrameGeometry, OutputFrameGeometryRead,
-    OutputFrameProbeRequest, OutputFrameProbeResult,
+    GeometryDisplayLayout, OutputFrameGeometry, OutputFrameGeometryRead, OutputFrameProbeRequest,
+    OutputFrameProbeResult, RevisionGateResult,
 };
 use lpfs::LpFsStd;
 
@@ -117,7 +117,7 @@ fn the_published_display_layout_draws_every_lamp_of_both_fixtures() {
             .into_iter()
             .next()
             .unwrap_or_else(|| panic!("{example}: one published output"));
-        let GeometryProbeResult::Changed(OutputFrameGeometry {
+        let RevisionGateResult::Changed(OutputFrameGeometry {
             display_layout:
                 GeometryDisplayLayout::Layout(lpc_model::ControlDisplayLayout::Layout2d(layout)),
             ..

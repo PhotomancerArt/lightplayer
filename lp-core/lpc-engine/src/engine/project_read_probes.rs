@@ -10,12 +10,12 @@ use lpc_model::{ChannelName, ControlDisplayLayout, ControlLayout2d, Kind, NodeId
 use lpc_registry::ProjectRegistry;
 use lpc_wire::{
     BindingGraphProbeRequest, BindingGraphProbeResult, ControlProductGeometry,
-    ControlProductProbeRequest, ControlProductProbeResult, GeometryDisplayLayout,
-    GeometryProbeResult, GeometryRead, OutputFrameEntry, OutputFrameGeometry,
-    OutputFrameGeometryRead, OutputFrameProbeRequest, OutputFrameProbeResult,
-    RenderProductProbeRequest, RenderProductProbeResult, TimebaseProbeRequest, TimebaseProbeResult,
-    WireBindingDirection, WireBindingEndpoint, WireBindingGraph, WireBindingOrigin, WireBusChannel,
-    WireBusChannelValue, WireCellProjection, WireChannelSampleFormat, WireConsumerPolicy,
+    ControlProductProbeRequest, ControlProductProbeResult, GeometryDisplayLayout, OutputFrameEntry,
+    OutputFrameGeometry, OutputFrameGeometryRead, OutputFrameProbeRequest, OutputFrameProbeResult,
+    RenderProductProbeRequest, RenderProductProbeResult, RevisionGateRead, RevisionGateResult,
+    TimebaseProbeRequest, TimebaseProbeResult, WireBindingDirection, WireBindingEndpoint,
+    WireBindingGraph, WireBindingGraphRead, WireBindingOrigin, WireBusChannel, WireBusChannelValue,
+    WireBusChannelValues, WireCellProjection, WireChannelSampleFormat, WireConsumerPolicy,
     WireEffectiveBinding, WirePhasorOrigin, WirePhasorRow, WireProjectionOrigin,
     WireProjectionShape, WireVisualSpace,
 };
@@ -144,6 +144,12 @@ impl Engine {
     /// referenced channel with providers/consumers as indices into the
     /// binding list. See docs/adr/2026-07-06-binding-graph-probe.md.
     ///
+    /// The structure is revision-gated (`request.structure`) and the values
+    /// ride every read that asks for them. The structure revision is stamped
+    /// by content ([`super::binding_structure_stamp`]): the structure is built
+    /// on every read — the values list is keyed to its channel order — hashed,
+    /// and only shipped when the client's revision is not the current one.
+    ///
     /// Public (unlike the sibling probes) so host-level tests can assert
     /// the effective graph directly — the binding index is load-time
     /// materialized state with no other read surface.
@@ -152,8 +158,6 @@ impl Engine {
         registry: &ProjectRegistry,
         request: BindingGraphProbeRequest,
     ) -> BindingGraphProbeResult {
-        let revision = self.revision();
-
         let mut bindings = Vec::new();
         let mut wire_index: VecMap<BindingRef, u32> = VecMap::new();
         let mut scoped_rows = Vec::new();
@@ -224,6 +228,7 @@ impl Engine {
         let root_scope = self.tree().node_scope(self.tree().root());
 
         let mut channels = Vec::new();
+        let mut values = Vec::new();
         for scope in scopes {
             let scope_channels: Vec<(ChannelName, Kind)> = match scope {
                 Some(scope) => self.tree().scope_channels(scope),
@@ -238,18 +243,19 @@ impl Engine {
                 // Panel origin — synthesized here (it lives in the side
                 // store, not in any node's binding set) so the UI can
                 // render engaged state from the same graph it already
-                // reads.
+                // reads. Its held value is NOT in the row: that is the
+                // channel's value, and a value inside the structure moved the
+                // structure on every knob turn (Run D: 13 of the structure's
+                // 15 changes in one session were a knob's position).
                 let panel_row = scope.and_then(|scope| {
                     self.panel_writers()
                         .get(scope, &name)
-                        .map(|writer| WireEffectiveBinding {
+                        .map(|_| WireEffectiveBinding {
                             owner: scope.owner(),
                             node: scope.owner(),
                             slot: None,
                             direction: WireBindingDirection::Publishes,
-                            endpoint: WireBindingEndpoint::Literal {
-                                value: writer.value.clone(),
-                            },
+                            endpoint: WireBindingEndpoint::PanelWriter,
                             origin: WireBindingOrigin::Panel,
                             panel_show: false,
                             priority: BindingPriority::panel().as_i32(),
@@ -286,22 +292,20 @@ impl Engine {
                 .filter_map(|(binding_ref, _)| wire_index.get(binding_ref).copied())
                 .collect();
 
-                let value = (request.include_values
-                    && self.bus_probe_value_is_sink_demand_free(scope, &name))
-                .then(
-                    || match self.resolve_bus_channel_value(registry, scope, &name) {
-                        Ok(production) => WireBusChannelValue {
-                            revision,
-                            value: production.value_leaf().map(|leaf| leaf.value().clone()),
-                            error: None,
-                        },
-                        Err(error) => WireBusChannelValue {
-                            revision,
-                            value: None,
-                            error: Some(format!("{error:?}")),
-                        },
-                    },
-                );
+                if request.include_values {
+                    let value = if !self.bus_probe_value_is_sink_demand_free(scope, &name) {
+                        WireBusChannelValue::Unresolved
+                    } else {
+                        match self.resolve_bus_channel_value(registry, scope, &name) {
+                            Ok(production) => match production.value_leaf() {
+                                Some(leaf) => WireBusChannelValue::Value(leaf.value().clone()),
+                                None => WireBusChannelValue::Empty,
+                            },
+                            Err(error) => WireBusChannelValue::Error(format!("{error:?}")),
+                        }
+                    };
+                    values.push(value);
+                }
 
                 // Root-scope role, decided engine-side ONCE: the primary
                 // visual is the root scope's listing of the vocabulary
@@ -315,16 +319,36 @@ impl Engine {
                     kind: Some(kind),
                     providers,
                     consumers,
-                    value,
                     primary_visual,
                 });
             }
         }
 
-        BindingGraphProbeResult::Graph(WireBindingGraph {
-            revision,
+        // Stamp the structure by content: hashed with its revision zeroed, so
+        // the hash is of the structure alone.
+        let mut graph = WireBindingGraph {
+            revision: Revision::default(),
             bindings,
             channels,
+        };
+        let revision = self.stamp_binding_structure(lpc_wire::ser_write_json_fnv64(&graph));
+        graph.revision = revision;
+
+        let structure = match request.structure {
+            RevisionGateRead::None => RevisionGateResult::Omitted,
+            RevisionGateRead::IfChanged {
+                known_revision: Some(known),
+            } if known == revision => RevisionGateResult::Unchanged { revision },
+            RevisionGateRead::Always | RevisionGateRead::IfChanged { .. } => {
+                RevisionGateResult::Changed(graph)
+            }
+        };
+        BindingGraphProbeResult::Graph(WireBindingGraphRead {
+            structure,
+            values: request.include_values.then_some(WireBusChannelValues {
+                structure_revision: revision,
+                values,
+            }),
         })
     }
 
@@ -391,7 +415,7 @@ impl Engine {
             samples.as_mut_slice(),
         );
         let revision = self.revision();
-        let want_geometry = !matches!(request.geometry, GeometryRead::None);
+        let want_geometry = !matches!(request.geometry, RevisionGateRead::None);
         match self.render_control_product_probe(
             registry,
             product,
@@ -435,21 +459,21 @@ impl Engine {
     fn control_product_geometry(
         &mut self,
         product: ControlProduct,
-        read: GeometryRead,
+        read: RevisionGateRead,
         sample_layout: ControlLayout,
         display_layout: Option<ControlDisplayLayout>,
-    ) -> GeometryProbeResult<ControlProductGeometry> {
+    ) -> RevisionGateResult<ControlProductGeometry> {
         let known_revision = match read {
-            GeometryRead::None => return GeometryProbeResult::Omitted,
-            GeometryRead::Always => None,
-            GeometryRead::IfChanged { known_revision } => known_revision,
+            RevisionGateRead::None => return RevisionGateResult::Omitted,
+            RevisionGateRead::Always => None,
+            RevisionGateRead::IfChanged { known_revision } => known_revision,
         };
         let sample_revision = self.stamp_control_sample_layout(product, &sample_layout);
         let revision = display_layout.as_ref().map_or(sample_revision, |layout| {
             sample_revision.max(layout.revision())
         });
         if known_revision == Some(revision) {
-            return GeometryProbeResult::Unchanged { revision };
+            return RevisionGateResult::Unchanged { revision };
         }
         let display_layout = match display_layout {
             None => GeometryDisplayLayout::Unsupported {
@@ -461,7 +485,7 @@ impl Engine {
                 None => GeometryDisplayLayout::Layout(layout),
             },
         };
-        GeometryProbeResult::Changed(ControlProductGeometry {
+        RevisionGateResult::Changed(ControlProductGeometry {
             revision,
             sample_layout,
             display_layout,
@@ -584,9 +608,9 @@ impl Engine {
         candidate: &PublishedOutputCandidate,
         read: &OutputFrameGeometryRead,
         layout_bytes_spent: &mut usize,
-    ) -> GeometryProbeResult<OutputFrameGeometry> {
+    ) -> RevisionGateResult<OutputFrameGeometry> {
         if matches!(read, OutputFrameGeometryRead::None) || candidate.fragments.is_empty() {
-            return GeometryProbeResult::Omitted;
+            return RevisionGateResult::Omitted;
         }
         let parts = self.output_frame_display_parts(registry, candidate);
         let revision = parts
@@ -594,7 +618,7 @@ impl Engine {
             .max(candidate.placement_revision)
             .max(candidate.sample_layout_revision);
         if read.holds(candidate.node, revision) {
-            return GeometryProbeResult::Unchanged { revision };
+            return RevisionGateResult::Unchanged { revision };
         }
 
         let display_layout = self.output_frame_display_layout(candidate, parts);
@@ -603,12 +627,12 @@ impl Engine {
         {
             let layout_len = lpc_wire::ser_write_json_len(layout);
             if *layout_bytes_spent + layout_len > budget {
-                return GeometryProbeResult::Omitted;
+                return RevisionGateResult::Omitted;
             }
             *layout_bytes_spent += layout_len;
         }
 
-        GeometryProbeResult::Changed(OutputFrameGeometry {
+        RevisionGateResult::Changed(OutputFrameGeometry {
             revision,
             sample_layout: candidate.sample_layout.clone().unwrap_or_default(),
             display_layout,
@@ -1057,16 +1081,7 @@ mod tests {
             .build();
         h.tick(10).expect("tick");
 
-        let result = h.engine.read_project_binding_graph_probe(
-            &h.registry,
-            BindingGraphProbeRequest {
-                include_values: true,
-            },
-        );
-
-        let BindingGraphProbeResult::Graph(graph) = result else {
-            panic!("expected graph result");
-        };
+        let (graph, values) = h.binding_graph(true);
         assert_eq!(graph.bindings.len(), 2);
         assert_eq!(graph.channels.len(), 1);
 
@@ -1097,9 +1112,7 @@ mod tests {
             WireBindingEndpoint::Bus { channel, .. } if channel == "video"
         ));
 
-        let value = channel.value.as_ref().expect("value requested");
-        assert_eq!(value.error, None);
-        assert_eq!(value.value, Some(LpValue::F32(0.5)));
+        assert_eq!(values, [WireBusChannelValue::Value(LpValue::F32(0.5))]);
     }
 
     #[test]
@@ -1118,19 +1131,10 @@ mod tests {
             .build();
         h.tick(10).expect("tick");
 
-        let result = h.engine.read_project_binding_graph_probe(
-            &h.registry,
-            BindingGraphProbeRequest {
-                include_values: false,
-            },
-        );
-
-        let BindingGraphProbeResult::Graph(graph) = result else {
-            panic!("expected graph result");
-        };
+        let (graph, values) = h.binding_graph(false);
         let channel = &graph.channels[0];
         assert_eq!(channel.providers.len(), 2);
-        assert!(channel.value.is_none());
+        assert!(values.is_empty(), "no values were asked for");
 
         let first = &graph.bindings[channel.providers[0] as usize];
         let second = &graph.bindings[channel.providers[1] as usize];
@@ -1142,5 +1146,112 @@ mod tests {
             second.priority,
             BindingPriority::default_fallback().as_i32()
         );
+    }
+
+    /// A steady read passing back the structure revision it holds hears
+    /// `unchanged` and gets the values alone — keyed to that revision.
+    #[test]
+    fn a_steady_binding_graph_read_is_unchanged_plus_values() {
+        let mut h = EngineTestBuilder::new()
+            .shader("writer", output("outputs[0]", 0.5))
+            .bind_bus("video", produced_slot("writer", "outputs[0]"))
+            .fixture("reader")
+            .bind_demand_input("reader", bus("video"))
+            .demand_root("reader")
+            .build();
+        h.tick(10).expect("tick");
+        let (graph, _) = h.binding_graph(true);
+
+        h.tick(10).expect("tick");
+        let read = gated_binding_graph_read(
+            &mut h,
+            RevisionGateRead::IfChanged {
+                known_revision: Some(graph.revision),
+            },
+        );
+        assert_eq!(
+            read.structure,
+            RevisionGateResult::Unchanged {
+                revision: graph.revision
+            },
+            "ticking moves values, never the structure"
+        );
+        assert_eq!(
+            read.values,
+            Some(WireBusChannelValues {
+                structure_revision: graph.revision,
+                values: vec![WireBusChannelValue::Value(LpValue::F32(0.5))],
+            })
+        );
+
+        // A client that holds nothing, or a stale revision, gets it all.
+        for known_revision in [None, Some(graph.revision.next())] {
+            let read =
+                gated_binding_graph_read(&mut h, RevisionGateRead::IfChanged { known_revision });
+            assert_eq!(read.structure, RevisionGateResult::Changed(graph.clone()));
+        }
+        assert_eq!(
+            gated_binding_graph_read(&mut h, RevisionGateRead::None).structure,
+            RevisionGateResult::Omitted
+        );
+    }
+
+    /// Registering a binding, and dropping them, each move the structure
+    /// revision — even when the engine revision did not move in between.
+    #[test]
+    fn adding_or_removing_a_binding_moves_the_structure_revision() {
+        let mut h = EngineTestBuilder::new()
+            .shader("writer", output("outputs[0]", 0.5))
+            .bind_bus("video", produced_slot("writer", "outputs[0]"))
+            .fixture("reader")
+            .build();
+        h.tick(10).expect("tick");
+        let (before, _) = h.binding_graph(false);
+
+        let reader = h.node("reader");
+        h.engine
+            .add_binding(
+                crate::dataflow::binding::BindingDraft {
+                    source: BindingSource::BusChannel(ChannelName(String::from("video"))),
+                    target: BindingTarget::ConsumedSlot {
+                        node: reader,
+                        slot: super::super::engine::default_demand_input_path(),
+                    },
+                    priority: BindingPriority::new(0),
+                    kind: Kind::Color,
+                    owner: reader,
+                },
+                h.engine.revision(),
+            )
+            .expect("add binding");
+        let (added, _) = h.binding_graph(false);
+        assert_eq!(added.bindings.len(), before.bindings.len() + 1);
+        assert!(
+            added.revision > before.revision,
+            "a new binding is a new structure: {:?} -> {:?}",
+            before.revision,
+            added.revision
+        );
+
+        h.engine.clear_bindings(h.engine.revision());
+        let (cleared, _) = h.binding_graph(false);
+        assert!(cleared.bindings.is_empty());
+        assert!(cleared.revision > added.revision);
+    }
+
+    fn gated_binding_graph_read(
+        h: &mut crate::engine::test_support::EngineTestHarness,
+        structure: RevisionGateRead,
+    ) -> WireBindingGraphRead {
+        let BindingGraphProbeResult::Graph(read) = h.engine.read_project_binding_graph_probe(
+            &h.registry,
+            BindingGraphProbeRequest {
+                structure,
+                include_values: true,
+            },
+        ) else {
+            panic!("expected a graph answer");
+        };
+        read
     }
 }

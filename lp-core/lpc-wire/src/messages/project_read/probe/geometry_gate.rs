@@ -8,11 +8,12 @@
 //! does: in 872 steady reads of the PLAYFUL choker the sample layout took ONE
 //! value, and it rode every read twice (1,070 B each).
 //!
-//! So the metadata travels as one bundle under one revision. A client asks
-//! [`GeometryRead::Always`] once, caches the answer, and then says
-//! [`GeometryRead::IfChanged`] with the revision it holds; while that
-//! revision stands the engine answers [`GeometryProbeResult::Unchanged`] — a
-//! few bytes — and the samples ride alone.
+//! So the metadata travels as one bundle under one revision, through the
+//! general revision gate (`revision_gate`): a request says
+//! [`RevisionGateRead`](super::RevisionGateRead), and the answer's geometry is
+//! a [`RevisionGateResult`](super::RevisionGateResult) of the probe's bundle.
+//! While the client's revision stands the engine answers `Unchanged` — a few
+//! bytes — and the samples ride alone.
 //!
 //! # The revision
 //!
@@ -34,39 +35,7 @@
 
 use alloc::string::String;
 
-use lpc_model::{ControlDisplayLayout, Revision};
-
-/// Whether and how a probe should ship a buffer's geometry bundle.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-#[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
-#[serde(rename_all = "snake_case")]
-pub enum GeometryRead {
-    /// No geometry at all: the answer is [`GeometryProbeResult::Omitted`].
-    None,
-    /// The whole bundle, whatever the client holds.
-    Always,
-    /// The bundle only if its revision differs from `known_revision`.
-    IfChanged { known_revision: Option<Revision> },
-}
-
-/// The geometry half of a probe answer.
-///
-/// `G` is the probe's own bundle (the control product's, or an output
-/// frame's, which also carries the wire's placements).
-#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
-#[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
-#[serde(rename_all = "snake_case")]
-pub enum GeometryProbeResult<G> {
-    /// No statement about geometry in this answer: the read asked for none,
-    /// or the engine could not fit it into this read. A client that asked
-    /// must NOT draw these samples against geometry it guessed or kept from
-    /// an older revision — it asks again (`Always`) on the next read.
-    Omitted,
-    /// The client's revision still stands; draw against the cached bundle.
-    Unchanged { revision: Revision },
-    /// A new bundle: replace whatever the client cached.
-    Changed(G),
-}
+use lpc_model::ControlDisplayLayout;
 
 /// Where to draw the lamps, as a changed geometry bundle carries it.
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -89,37 +58,6 @@ impl GeometryDisplayLayout {
         match self {
             Self::Layout(layout) => Some(layout),
             Self::Unsupported { .. } => None,
-        }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// The steady-read answer is the whole point of the gate: it must stay a
-    /// handful of bytes on the wire.
-    #[test]
-    fn unchanged_is_a_few_bytes() {
-        let unchanged: GeometryProbeResult<()> = GeometryProbeResult::Unchanged {
-            revision: Revision::new(123_456),
-        };
-        let json = crate::json::to_string(&unchanged).unwrap();
-        assert_eq!(json, r#"{"unchanged":{"revision":123456}}"#);
-    }
-
-    #[test]
-    fn geometry_read_round_trips() {
-        for read in [
-            GeometryRead::None,
-            GeometryRead::Always,
-            GeometryRead::IfChanged {
-                known_revision: Some(Revision::new(7)),
-            },
-        ] {
-            let json = serde_json::to_string(&read).unwrap();
-            let back: GeometryRead = serde_json::from_str(&json).unwrap();
-            assert_eq!(back, read);
         }
     }
 }

@@ -2477,8 +2477,8 @@ mod tests {
     #[cfg(feature = "node-shader")]
     use lpc_wire::{
         ControlProductGeometry, ControlProductProbeRequest, ControlProductProbeResult,
-        GeometryDisplayLayout, GeometryProbeResult, GeometryRead, ProjectProbeRequest,
-        ProjectProbeResult, ProjectReadRequest, WireChannelSampleFormat,
+        GeometryDisplayLayout, ProjectProbeRequest, ProjectProbeResult, ProjectReadRequest,
+        RevisionGateRead, RevisionGateResult, WireChannelSampleFormat,
     };
 
     use crate::dataflow::binding::{BindingDraft, BindingPriority, BindingSource, BindingTarget};
@@ -3816,7 +3816,7 @@ mod tests {
                     ControlProductProbeRequest {
                         product,
                         sample_format: WireChannelSampleFormat::U16,
-                        geometry: GeometryRead::Always,
+                        geometry: RevisionGateRead::Always,
                     },
                 )],
             },
@@ -3826,7 +3826,7 @@ mod tests {
             extent: returned_extent,
             sample_format,
             geometry:
-                GeometryProbeResult::Changed(ControlProductGeometry {
+                RevisionGateResult::Changed(ControlProductGeometry {
                     revision: geometry_revision,
                     sample_layout,
                     display_layout:
@@ -3863,7 +3863,7 @@ mod tests {
                     ControlProductProbeRequest {
                         product,
                         sample_format: WireChannelSampleFormat::U16,
-                        geometry: GeometryRead::IfChanged {
+                        geometry: RevisionGateRead::IfChanged {
                             known_revision: Some(known_revision),
                         },
                     },
@@ -3871,7 +3871,7 @@ mod tests {
             },
         );
         let ProjectProbeResult::ControlProduct(ControlProductProbeResult::Preview {
-            geometry: GeometryProbeResult::Unchanged { revision },
+            geometry: RevisionGateResult::Unchanged { revision },
             bytes,
             ..
         }) = &second[0]
@@ -4013,7 +4013,7 @@ mod tests {
                     ControlProductProbeRequest {
                         product,
                         sample_format: WireChannelSampleFormat::U16,
-                        geometry: GeometryRead::Always,
+                        geometry: RevisionGateRead::Always,
                     },
                 )],
             },
@@ -4023,7 +4023,7 @@ mod tests {
         // the display layout degrades, with a reason a human can act on.
         let ProjectProbeResult::ControlProduct(ControlProductProbeResult::Preview {
             geometry:
-                GeometryProbeResult::Changed(ControlProductGeometry {
+                RevisionGateResult::Changed(ControlProductGeometry {
                     display_layout: GeometryDisplayLayout::Unsupported { reason },
                     ..
                 }),
@@ -4057,14 +4057,14 @@ mod tests {
                     ControlProductProbeRequest {
                         product,
                         sample_format: WireChannelSampleFormat::U16,
-                        geometry: GeometryRead::Always,
+                        geometry: RevisionGateRead::Always,
                     },
                 )],
             },
         );
         let ProjectProbeResult::ControlProduct(ControlProductProbeResult::Preview {
             geometry:
-                GeometryProbeResult::Changed(ControlProductGeometry {
+                RevisionGateResult::Changed(ControlProductGeometry {
                     display_layout:
                         GeometryDisplayLayout::Layout(ControlDisplayLayout::Layout2d(layout)),
                     ..

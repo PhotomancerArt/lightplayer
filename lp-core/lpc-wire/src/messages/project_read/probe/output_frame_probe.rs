@@ -13,7 +13,7 @@
 //! answers it **without rendering anything**. Each entry is the output node's
 //! published runtime buffer, verbatim, plus the geometry a client needs to
 //! interpret it ([`OutputFrameGeometry`]), behind the shared
-//! [geometry gate](super::GeometryRead):
+//! [geometry gate](super::RevisionGateRead):
 //!
 //! - `sample_layout` — how the native samples group into lamps. Latched by the
 //!   tick that produced the buffer, not recomputed here.
@@ -54,7 +54,7 @@ use lpc_model::{ControlSampleLayout, NodeId, Revision};
 
 use crate::project::WireChannelSampleFormat;
 
-use super::{GeometryDisplayLayout, GeometryProbeResult};
+use super::{GeometryDisplayLayout, RevisionGateResult};
 
 /// Request the frames every output node has already published.
 ///
@@ -72,7 +72,7 @@ pub struct OutputFrameProbeRequest {
 
 /// Whether and how an output-frame probe should ship each output's geometry.
 ///
-/// The per-output twin of [`super::GeometryRead`].
+/// The per-output twin of [`super::RevisionGateRead`].
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case")]
@@ -142,7 +142,7 @@ pub struct OutputFrameEntry {
     pub sample_format: WireChannelSampleFormat,
     /// Everything static about the buffer, gated by the request's
     /// [`OutputFrameGeometryRead`].
-    pub geometry: GeometryProbeResult<OutputFrameGeometry>,
+    pub geometry: RevisionGateResult<OutputFrameGeometry>,
     /// The published buffer, verbatim.
     #[cfg_attr(feature = "schema-gen", schemars(with = "String"))]
     #[serde(with = "crate::serde_base64")]
@@ -223,7 +223,7 @@ pub struct OutputFrameEntryHeader {
     pub revision: Revision,
     pub channels: u32,
     pub sample_format: WireChannelSampleFormat,
-    pub geometry: GeometryProbeResult<OutputFrameGeometry>,
+    pub geometry: RevisionGateResult<OutputFrameGeometry>,
     /// Bytes this entry claims out of the concatenated bulk payload.
     pub byte_length: u32,
 }
@@ -351,7 +351,7 @@ mod tests {
             18,
             vec![0u8; 3 * PROJECT_READ_RUNTIME_CHUNK_BYTES + 77],
         );
-        let GeometryProbeResult::Changed(geometry) = &mut frame.geometry else {
+        let RevisionGateResult::Changed(geometry) = &mut frame.geometry else {
             unreachable!("the test entry carries its geometry");
         };
         geometry.display_layout =
@@ -420,7 +420,7 @@ mod tests {
             revision: Revision::new(revision),
             channels: (bytes.len() / 6) as u32,
             sample_format: WireChannelSampleFormat::U16,
-            geometry: GeometryProbeResult::Changed(OutputFrameGeometry {
+            geometry: RevisionGateResult::Changed(OutputFrameGeometry {
                 revision: Revision::new(3),
                 sample_layout: ControlSampleLayout {
                     spans: vec![ControlSampleSpan {

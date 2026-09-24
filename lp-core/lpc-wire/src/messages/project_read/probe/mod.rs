@@ -6,18 +6,19 @@ mod geometry_gate;
 mod output_frame_probe;
 mod project_probe;
 mod render_product_probe;
+mod revision_gate;
 mod timebase_probe;
 
 pub use binding_graph_probe::{
     BindingGraphProbeRequest, BindingGraphProbeResult, WireBindingDirection, WireBindingEndpoint,
-    WireBindingGraph, WireBindingOrigin, WireBusChannel, WireBusChannelValue, WireEffectiveBinding,
-    WireScopeRef,
+    WireBindingGraph, WireBindingGraphRead, WireBindingOrigin, WireBusChannel, WireBusChannelValue,
+    WireBusChannelValues, WireEffectiveBinding, WireScopeRef,
 };
 pub use control_product_probe::{
     ControlProductGeometry, ControlProductProbeRequest, ControlProductProbeResult,
     ControlProductProbeResultHeader,
 };
-pub use geometry_gate::{GeometryDisplayLayout, GeometryProbeResult, GeometryRead};
+pub use geometry_gate::GeometryDisplayLayout;
 pub use output_frame_probe::{
     KnownOutputFrameGeometry, OutputFrameEntry, OutputFrameEntryHeader, OutputFrameGeometry,
     OutputFrameGeometryRead, OutputFrameProbeRequest, OutputFrameProbeResult,
@@ -29,6 +30,7 @@ pub use render_product_probe::{
     WireCellProjection, WireConsumerPolicy, WireProjectionOrigin, WireProjectionShape,
     WireVisualSpace,
 };
+pub use revision_gate::{RevisionGateRead, RevisionGateResult};
 pub use timebase_probe::{
     TimebaseProbeRequest, TimebaseProbeResult, WirePhasorOrigin, WirePhasorReading, WirePhasorRow,
 };

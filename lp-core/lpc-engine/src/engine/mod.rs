@@ -1,5 +1,6 @@
 //! Core runtime owner: [`Engine`] drives frame state, tree, bindings, and resolver.
 
+mod binding_structure_stamp;
 mod control_geometry_stamps;
 mod engine;
 mod engine_error;

@@ -11,7 +11,8 @@
 //!    `U16`, with its geometry asked `always` and then `if_changed`;
 //! 2. the `output_frame` probe (the project drives an output), geometry
 //!    likewise, per output;
-//! 3. the `binding_graph` probe with values (Studio subscribes on every lens).
+//! 3. the `binding_graph` probe with values (Studio subscribes on every
+//!    lens), its structure asked `always` and then `if_changed`.
 //!
 //! It streams the reply through the same [`ProjectReadStreamSink`] the server
 //! uses and sizes every frame with the wire serializer (`ser-write-json`,
@@ -24,7 +25,8 @@
 //! - **first**: the lens's first refresh after Studio's initial sync (the
 //!   mirror's revision as `since`), layouts asked outright;
 //! - **steady**: a few ticks later, passing back what the first read taught
-//!   (the view's revision as `since`, the geometry revisions as `if_changed`),
+//!   (the view's revision as `since`, the geometry and binding-structure
+//!   revisions as `if_changed`),
 //!   which is what every 150 ms lens refresh after the first one looks like.
 //!
 //! The lens's selected product is the project's first control product in
@@ -51,13 +53,14 @@ use lpc_shared::transport::{ProjectReadStreamSink, ServerTransport};
 use lpc_wire::messages::ClientMessage;
 use lpc_wire::server::ServerMsgBody;
 use lpc_wire::{
-    BindingGraphProbeRequest, ControlProductProbeRequest, ControlProductProbeResult,
-    GeometryProbeResult, GeometryRead, KnownOutputFrameGeometry, MemoryStats, NodeReadQuery,
+    BindingGraphProbeRequest, BindingGraphProbeResult, ControlProductProbeRequest,
+    ControlProductProbeResult, KnownOutputFrameGeometry, MemoryStats, NodeReadQuery,
     NodeReadSelection, OutputFrameGeometryRead, OutputFrameProbeRequest, OutputFrameProbeResult,
     ProjectProbeRequest, ProjectProbeResult, ProjectReadEvent, ProjectReadNodeEvent,
     ProjectReadProbeEvent, ProjectReadQuery, ProjectReadQueryEvent, ProjectReadRequest, ReadLevel,
-    ResourcePayloadRead, ResourceReadQuery, RuntimeReadQuery, ServerRuntimeStatus, ShapeReadQuery,
-    TransportError, WireChannelSampleFormat, WireServerMessage,
+    ResourcePayloadRead, ResourceReadQuery, RevisionGateRead, RevisionGateResult, RuntimeReadQuery,
+    ServerRuntimeStatus, ShapeReadQuery, TransportError, WireChannelSampleFormat,
+    WireServerMessage,
 };
 use lpfs::LpFsStd;
 
@@ -72,10 +75,14 @@ struct LensReadCeiling {
 /// steady 10,997 B (Run D's live tap: ~10.9–11.1 KB). lean-wire P3 gated the
 /// sample layout and placements with the display layout (one geometry bundle
 /// per buffer): first 12,156 B (+78 B of `geometry`/`changed` wrapper keys),
-/// steady 8,698 B — the bundle is a 29 B `unchanged` on both probes.
+/// steady 8,698 B — the bundle is a 29 B `unchanged` on both probes. P4 split
+/// the binding graph into a revision-gated structure and a per-read value
+/// list: first 11,913 B (the values left the channel rows, which also shed
+/// each value's revision and null fields), steady 4,911 B — the binding
+/// graph is a 29 B `unchanged` plus 653 B of values, down from 4,562 B.
 const CHOKER_CEILING: LensReadCeiling = LensReadCeiling {
-    first: 12_400,
-    steady: 8_870,
+    first: 12_150,
+    steady: 5_010,
 };
 
 /// small-dome (6,310 lamps). P1 baseline (2026-09-23): first 130,555 B,
@@ -83,9 +90,11 @@ const CHOKER_CEILING: LensReadCeiling = LensReadCeiling {
 /// 130,672 B (+117 B of wrapper keys; the refused display layout still rides
 /// the first read's bundle as `unsupported`), steady 112,995 B in nine
 /// frames — both probes' geometry is `unchanged`, the refusal included.
+/// After P4: first 130,184 B, steady 105,824 B — the binding graph is
+/// 1,278 B (a 29 B `unchanged` and 1,156 B of values), down from 8,449 B.
 const SMALL_DOME_CEILING: LensReadCeiling = LensReadCeiling {
-    first: 132_500,
-    steady: 115_250,
+    first: 132_800,
+    steady: 107_950,
 };
 
 /// Frames between two lens reads: Studio re-reads 150 ms after the last
@@ -163,8 +172,9 @@ fn measure_lens_reads(slug: &str, root: &str) -> (MeasuredRead, MeasuredRead) {
     let first_request = lens_read_request(
         Some(view.revision),
         product,
-        GeometryRead::Always,
+        RevisionGateRead::Always,
         OutputFrameGeometryRead::Always,
+        RevisionGateRead::Always,
     );
     let first = measure_read(&mut engine, &registry, &mut view, first_request);
 
@@ -176,6 +186,7 @@ fn measure_lens_reads(slug: &str, root: &str) -> (MeasuredRead, MeasuredRead) {
         product,
         control_geometry_read_after(&first.probes),
         output_geometry_read_after(&first.probes),
+        binding_structure_read_after(&first.probes),
     );
     let steady = measure_read(&mut engine, &registry, &mut view, steady_request);
 
@@ -190,8 +201,9 @@ fn measure_lens_reads(slug: &str, root: &str) -> (MeasuredRead, MeasuredRead) {
 fn lens_read_request(
     since: Option<Revision>,
     product: ControlProduct,
-    control_geometry: GeometryRead,
+    control_geometry: RevisionGateRead,
     output_geometry: OutputFrameGeometryRead,
+    binding_structure: RevisionGateRead,
 ) -> ProjectReadRequest {
     ProjectReadRequest {
         since,
@@ -206,6 +218,7 @@ fn lens_read_request(
                 geometry: output_geometry,
             }),
             ProjectProbeRequest::BindingGraph(BindingGraphProbeRequest {
+                structure: binding_structure,
                 include_values: true,
             }),
         ],
@@ -235,22 +248,22 @@ fn lens_queries() -> Vec<ProjectReadQuery> {
 /// Studio's `ProjectSync::geometry_read_for`: `if_changed` against the
 /// cached geometry's revision once one has arrived (a refused display layout
 /// included — it is cached under its revision like any other answer).
-fn control_geometry_read_after(probes: &[ProjectProbeResult]) -> GeometryRead {
+fn control_geometry_read_after(probes: &[ProjectProbeResult]) -> RevisionGateRead {
     let known = probes.iter().find_map(|probe| match probe {
         ProjectProbeResult::ControlProduct(ControlProductProbeResult::Preview {
             geometry, ..
         }) => match geometry {
-            GeometryProbeResult::Changed(geometry) => Some(geometry.revision),
-            GeometryProbeResult::Unchanged { revision } => Some(*revision),
-            GeometryProbeResult::Omitted => None,
+            RevisionGateResult::Changed(geometry) => Some(geometry.revision),
+            RevisionGateResult::Unchanged { revision } => Some(*revision),
+            RevisionGateResult::Omitted => None,
         },
         _ => None,
     });
     match known {
-        Some(revision) => GeometryRead::IfChanged {
+        Some(revision) => RevisionGateRead::IfChanged {
             known_revision: Some(revision),
         },
-        None => GeometryRead::Always,
+        None => RevisionGateRead::Always,
     }
 }
 
@@ -263,9 +276,9 @@ fn output_geometry_read_after(probes: &[ProjectProbeResult]) -> OutputFrameGeome
         if let ProjectProbeResult::OutputFrame(OutputFrameProbeResult::Frame { outputs }) = probe {
             for output in outputs {
                 let revision = match &output.geometry {
-                    GeometryProbeResult::Changed(geometry) => geometry.revision,
-                    GeometryProbeResult::Unchanged { revision } => *revision,
-                    GeometryProbeResult::Omitted => continue,
+                    RevisionGateResult::Changed(geometry) => geometry.revision,
+                    RevisionGateResult::Unchanged { revision } => *revision,
+                    RevisionGateResult::Omitted => continue,
                 };
                 known.push(KnownOutputFrameGeometry {
                     node: output.node,
@@ -278,6 +291,27 @@ fn output_geometry_read_after(probes: &[ProjectProbeResult]) -> OutputFrameGeome
         return OutputFrameGeometryRead::Always;
     }
     OutputFrameGeometryRead::IfChanged { known }
+}
+
+/// Studio's `BindingGraphCache::structure_read`: `if_changed` against the
+/// cached structure's revision once one has arrived.
+fn binding_structure_read_after(probes: &[ProjectProbeResult]) -> RevisionGateRead {
+    let known = probes.iter().find_map(|probe| match probe {
+        ProjectProbeResult::BindingGraph(BindingGraphProbeResult::Graph(read)) => {
+            match &read.structure {
+                RevisionGateResult::Changed(graph) => Some(graph.revision),
+                RevisionGateResult::Unchanged { revision } => Some(*revision),
+                RevisionGateResult::Omitted => None,
+            }
+        }
+        _ => None,
+    });
+    match known {
+        Some(revision) => RevisionGateRead::IfChanged {
+            known_revision: Some(revision),
+        },
+        None => RevisionGateRead::Always,
+    }
 }
 
 /// Stream `request` through the server's frame sink and size every line.

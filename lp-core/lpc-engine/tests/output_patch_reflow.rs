@@ -16,8 +16,8 @@ use lpc_engine::{Engine, EngineServices, ProjectLoader};
 use lpc_model::{NodeRuntimeStatus, Revision, TreePath};
 use lpc_registry::{ParseCtx, ProjectRegistry};
 use lpc_wire::{
-    GeometryDisplayLayout, GeometryProbeResult, KnownOutputFrameGeometry, OutputFrameEntry,
-    OutputFrameGeometry, OutputFrameGeometryRead, OutputFrameProbeRequest, OutputFrameProbeResult,
+    GeometryDisplayLayout, KnownOutputFrameGeometry, OutputFrameEntry, OutputFrameGeometry,
+    OutputFrameGeometryRead, OutputFrameProbeRequest, OutputFrameProbeResult, RevisionGateResult,
 };
 use lpfs::{AsLpPath, FsEvent, FsEventKind, LpFs, LpFsMemory, LpPathBuf};
 
@@ -582,7 +582,7 @@ fn published_geometry(engine: &mut Engine, registry: &ProjectRegistry) -> Output
         .next()
         .expect("one published output");
     match entry.geometry {
-        GeometryProbeResult::Changed(geometry) => geometry,
+        RevisionGateResult::Changed(geometry) => geometry,
         other => panic!("expected changed geometry, got {other:?}"),
     }
 }
@@ -688,8 +688,8 @@ fn an_output_with_no_placements_yet_omits_its_layout_rather_than_refusing_it() {
     assert!(
         matches!(
             answer,
-            None | Some(GeometryProbeResult::Omitted)
-                | Some(GeometryProbeResult::Changed(OutputFrameGeometry {
+            None | Some(RevisionGateResult::Omitted)
+                | Some(RevisionGateResult::Changed(OutputFrameGeometry {
                     display_layout: GeometryDisplayLayout::Layout(_),
                     ..
                 }))
@@ -712,7 +712,7 @@ fn an_output_with_no_placements_yet_omits_its_layout_rather_than_refusing_it() {
 fn geometry_answer(
     engine: &mut Engine,
     registry: &ProjectRegistry,
-) -> Option<GeometryProbeResult<OutputFrameGeometry>> {
+) -> Option<RevisionGateResult<OutputFrameGeometry>> {
     output_entries(engine, registry, OutputFrameGeometryRead::Always)
         .into_iter()
         .next()
@@ -782,7 +782,7 @@ fn re_patching_moves_the_geometry_revision_and_resends_the_placements() {
     tick(&mut engine, &registry, 2);
     assert_eq!(
         output_entries(&mut engine, &registry, known.clone())[0].geometry,
-        GeometryProbeResult::Unchanged {
+        RevisionGateResult::Unchanged {
             revision: before.revision
         },
         "a steady wire's geometry stands"
@@ -801,7 +801,7 @@ fn re_patching_moves_the_geometry_revision_and_resends_the_placements() {
     apply_asset_change(&mut engine, &mut registry, &fs, &["/leaf.patch.json"]);
     tick(&mut engine, &registry, 2);
 
-    let GeometryProbeResult::Changed(after) = output_entries(&mut engine, &registry, known)
+    let RevisionGateResult::Changed(after) = output_entries(&mut engine, &registry, known)
         .remove(0)
         .geometry
     else {
@@ -969,7 +969,7 @@ fn the_header_total_gates_layouts_across_outputs() {
     let answered: Vec<_> = outputs
         .iter()
         .filter_map(|entry| match &entry.geometry {
-            GeometryProbeResult::Changed(geometry) => Some(KnownOutputFrameGeometry {
+            RevisionGateResult::Changed(geometry) => Some(KnownOutputFrameGeometry {
                 node: entry.node,
                 revision: geometry.revision,
             }),
@@ -978,7 +978,7 @@ fn the_header_total_gates_layouts_across_outputs() {
         .collect();
     let deferred: Vec<_> = outputs
         .iter()
-        .filter(|entry| entry.geometry == GeometryProbeResult::Omitted)
+        .filter(|entry| entry.geometry == RevisionGateResult::Omitted)
         .map(|entry| entry.node)
         .collect();
     assert_eq!(
@@ -1001,7 +1001,7 @@ fn the_header_total_gates_layouts_across_outputs() {
     assert!(
         matches!(
             &deferred_entry.geometry,
-            GeometryProbeResult::Changed(OutputFrameGeometry {
+            RevisionGateResult::Changed(OutputFrameGeometry {
                 display_layout: GeometryDisplayLayout::Layout(_),
                 ..
             })

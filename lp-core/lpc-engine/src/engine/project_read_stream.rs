@@ -1091,6 +1091,7 @@ mod tests {
         let probes = match probe_node {
             Some(_) => vec![lpc_wire::ProjectProbeRequest::BindingGraph(
                 lpc_wire::BindingGraphProbeRequest {
+                    structure: lpc_wire::RevisionGateRead::Always,
                     include_values: false,
                 },
             )],

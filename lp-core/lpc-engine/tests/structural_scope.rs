@@ -570,20 +570,25 @@ fn panel_writer_survives_apply_project_changes() {
     let result = engine.read_project_binding_graph_probe(
         &registry,
         lpc_wire::BindingGraphProbeRequest {
+            structure: lpc_wire::RevisionGateRead::Always,
             include_values: true,
         },
     );
-    let lpc_wire::BindingGraphProbeResult::Graph(graph) = result else {
+    let lpc_wire::BindingGraphProbeResult::Graph(lpc_wire::WireBindingGraphRead {
+        structure: lpc_wire::RevisionGateResult::Changed(graph),
+        values: Some(values),
+    }) = result
+    else {
         panic!("expected graph result");
     };
     let row = graph
         .channels
         .iter()
-        .find(|row| row.name == "time" && !row.scope.is_none())
+        .position(|row| row.name == "time" && !row.scope.is_none())
         .expect("scoped time row");
     assert_eq!(
-        row.value.as_ref().and_then(|value| value.value.clone()),
-        Some(lpc_model::LpValue::F32(42.0)),
+        values.values[row].value(),
+        Some(&lpc_model::LpValue::F32(42.0)),
         "the panel value still wins after apply"
     );
 }

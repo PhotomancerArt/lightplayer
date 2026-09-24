@@ -548,9 +548,18 @@ impl ProjectController {
         self.sync.as_ref().map(ProjectSync::summary)
     }
 
-    /// Latest binding-graph snapshot, when a consumer subscribes.
+    /// The held binding-graph structure, when a consumer subscribes.
     pub fn binding_graph(&self) -> Option<&lpc_wire::WireBindingGraph> {
         self.sync.as_ref()?.binding_graph()
+    }
+
+    /// One value per [`Self::binding_graph`] channel row, in that order —
+    /// refreshed every read while the structure is held across reads.
+    /// Empty when no graph is held.
+    fn binding_graph_values(&self) -> &[lpc_wire::WireBusChannelValue] {
+        self.sync
+            .as_ref()
+            .map_or(&[], |sync| sync.binding_graph_values())
     }
 
     /// Project ONE scope's slice of the binding-graph snapshot into the
@@ -615,16 +624,19 @@ impl ProjectController {
                     && !channel.providers.is_empty()
             })
         };
+        let values = self.binding_graph_values();
         let channels = graph
             .channels
             .iter()
+            .enumerate()
             // Sink rows (playlist entries, wire 8) feed panel liveness only
             // — the wiring drawer keeps R2's presentation: channels private
             // to an entry never show as project wiring. A sink scope can
             // never equal a module scope, so this is belt-and-braces.
-            .filter(|channel| !channel.scope.is_some_and(|scope| scope.is_sink()))
-            .filter(|channel| channel.scope == Some(scope))
-            .map(|channel| {
+            .filter(|(_, channel)| !channel.scope.is_some_and(|scope| scope.is_sink()))
+            .filter(|(_, channel)| channel.scope == Some(scope))
+            .map(|(index, channel)| {
+                let value = values.get(index);
                 // Providers arrive highest-priority first (probe contract).
                 let ranked: Vec<(crate::UiBusSiteView, i32)> =
                     channel.providers.iter().filter_map(site).collect();
@@ -682,7 +694,7 @@ impl ProjectController {
                 // drawn by the one shared preview component (a control
                 // channel showing `control product #7:0` said nothing the
                 // lamps do not say better).
-                let preview = channel_product(channel).and_then(|product| {
+                let preview = channel_product(value).and_then(|product| {
                     let product = UiProductRef::from_product_ref(product);
                     let bytes = self
                         .sync
@@ -707,21 +719,19 @@ impl ProjectController {
                     scope_label: None,
                     name: channel.name.clone(),
                     kind: channel.kind.map(|kind| format!("{kind:?}")),
-                    value: channel
-                        .value
-                        .as_ref()
-                        .and_then(|value| value.value.as_ref())
+                    value: value
+                        .and_then(lpc_wire::WireBusChannelValue::value)
                         .map(format_lp_value),
-                    value_error: channel.value.as_ref().and_then(|value| value.error.clone()),
+                    value_error: value
+                        .and_then(lpc_wire::WireBusChannelValue::error)
+                        .map(str::to_string),
                     primary_visual: channel.primary_visual,
                     contended,
                     preview,
                     // Palettes get the same treatment products do: the value
                     // box draws the thing, not a description of it.
-                    gradient: channel
-                        .value
-                        .as_ref()
-                        .and_then(|value| value.value.as_ref())
+                    gradient: value
+                        .and_then(lpc_wire::WireBusChannelValue::value)
                         .and_then(gradient_config_value),
                     writers,
                     readers,
@@ -910,11 +920,11 @@ impl ProjectController {
     /// non-visual product on the channel.
     pub fn primary_visual_product(&self) -> Option<UiProductRef> {
         let graph = self.binding_graph()?;
-        let channel = graph
+        let index = graph
             .channels
             .iter()
-            .find(|channel| channel.primary_visual)?;
-        match channel_product(channel)? {
+            .position(|channel| channel.primary_visual)?;
+        match channel_product(self.binding_graph_values().get(index))? {
             product @ lpc_model::ProductRef::Visual(_) => {
                 Some(UiProductRef::from_product_ref(product))
             }
@@ -936,14 +946,14 @@ impl ProjectController {
     pub fn primary_control_product(&self) -> Option<UiProductRef> {
         let graph = self.binding_graph()?;
         let root = self.root_module_scope();
-        let channel = graph.channels.iter().find(|channel| {
+        let index = graph.channels.iter().position(|channel| {
             channel.name == lpc_model::PRIMARY_CONTROL_CHANNEL
                 // Pre-scope snapshots list one unscoped set of channels;
                 // that set IS the root scope (the engine's own rule for
                 // flagging the primary visual).
                 && (channel.scope == root || channel.scope.is_none())
         })?;
-        match channel_product(channel)? {
+        match channel_product(self.binding_graph_values().get(index))? {
             product @ lpc_model::ProductRef::Control(_) => {
                 Some(UiProductRef::from_product_ref(product))
             }
@@ -1027,11 +1037,11 @@ impl ProjectController {
         scope: lpc_wire::WireScopeRef,
         name: &str,
     ) -> Option<UiProductRef> {
-        let channel = graph
+        let index = graph
             .channels
             .iter()
-            .find(|channel| channel.scope == Some(scope) && channel.name == name)?;
-        channel_product(channel).map(UiProductRef::from_product_ref)
+            .position(|channel| channel.scope == Some(scope) && channel.name == name)?;
+        channel_product(self.binding_graph_values().get(index)).map(UiProductRef::from_product_ref)
     }
 
     /// Channels the binding picker offers: every channel observed in the
@@ -1042,14 +1052,16 @@ impl ProjectController {
         let observed: Vec<(String, Option<String>, bool)> = self
             .binding_graph()
             .map(|graph| {
+                let values = self.binding_graph_values();
                 graph
                     .channels
                     .iter()
+                    .enumerate()
                     // Sink rows feed panel liveness, not the authoring
                     // surface: a channel private to a playlist entry is not
                     // something the picker should offer (R2 presentation).
-                    .filter(|channel| !channel.scope.is_some_and(|scope| scope.is_sink()))
-                    .map(|channel| {
+                    .filter(|(_, channel)| !channel.scope.is_some_and(|scope| scope.is_sink()))
+                    .map(|(index, channel)| {
                         (
                             channel.name.clone(),
                             channel.kind.map(|kind| format!("{kind:?}")),
@@ -1057,10 +1069,9 @@ impl ProjectController {
                             // any registry claim: a project channel Studio
                             // has never heard of can still hold a product.
                             matches!(
-                                channel
-                                    .value
-                                    .as_ref()
-                                    .and_then(|value| value.value.as_ref()),
+                                values
+                                    .get(index)
+                                    .and_then(lpc_wire::WireBusChannelValue::value),
                                 Some(lpc_model::LpValue::Product(_))
                             ),
                         )
@@ -1297,6 +1308,9 @@ impl ProjectController {
             }
             lpc_wire::WireBindingEndpoint::Literal { value } => {
                 crate::UiBindingEndpoint::new(format_lp_value(value)).with_detail("literal value")
+            }
+            lpc_wire::WireBindingEndpoint::PanelWriter => {
+                crate::UiBindingEndpoint::new("panel".to_string()).with_detail("panel writer")
             }
         }
     }
@@ -6179,7 +6193,13 @@ impl ProjectController {
     ) -> Option<String> {
         match self.pending_panel_write(scope, channel) {
             Some(value) => crate::app::project::format_live_panel_value(value),
-            None => live_channel_value(graph, scope, channel, binding_kind),
+            None => live_channel_value(
+                graph,
+                self.binding_graph_values(),
+                scope,
+                channel,
+                binding_kind,
+            ),
         }
     }
 
@@ -6198,7 +6218,7 @@ impl ProjectController {
     ) -> Option<lpc_model::GradientConfig> {
         let value = match self.pending_panel_write(scope, channel) {
             Some(value) => value,
-            None => graph_channel_value(graph, scope, channel)?,
+            None => graph_channel_value(graph, self.binding_graph_values(), scope, channel)?,
         };
         crate::app::project::gradient_config_value(value)
     }
@@ -9010,8 +9030,8 @@ fn child_label(children: &[crate::UiNodeChild], node_path: &str) -> Option<Strin
 }
 
 /// The product a channel's resolved value carries, when it carries one.
-fn channel_product(channel: &lpc_wire::WireBusChannel) -> Option<lpc_model::ProductRef> {
-    match channel.value.as_ref()?.value.as_ref()? {
+fn channel_product(value: Option<&lpc_wire::WireBusChannelValue>) -> Option<lpc_model::ProductRef> {
+    match value?.value()? {
         lpc_model::LpValue::Product(product) => Some(*product),
         _ => None,
     }
@@ -9073,31 +9093,34 @@ fn borrowed_tracking(
 /// sink row (wire 8) must never be confused with an enclosing scope's
 /// same-named channel. A scope-less endpoint (pre-scope test fakes) falls back
 /// to the first name match.
+///
+/// Returns the row's position in `graph.channels` — which is also its
+/// position in the value list — and the row itself.
 fn graph_channel<'a>(
     graph: &'a lpc_wire::WireBindingGraph,
     scope: Option<&lpc_wire::WireScopeRef>,
     channel_name: &str,
-) -> Option<&'a lpc_wire::WireBusChannel> {
-    graph.channels.iter().find(|channel| {
+) -> Option<(usize, &'a lpc_wire::WireBusChannel)> {
+    graph.channels.iter().enumerate().find(|(_, channel)| {
         channel.name == channel_name && (scope.is_none() || channel.scope.as_ref() == scope)
     })
 }
 
-/// That channel's current value, when it has one.
+/// That channel's current value, when it has one. `values` holds one value
+/// per `graph` channel row, in order.
 fn graph_channel_value<'a>(
-    graph: &'a lpc_wire::WireBindingGraph,
+    graph: &lpc_wire::WireBindingGraph,
+    values: &'a [lpc_wire::WireBusChannelValue],
     scope: Option<&lpc_wire::WireScopeRef>,
     channel_name: &str,
 ) -> Option<&'a lpc_model::LpValue> {
-    graph_channel(graph, scope, channel_name)?
-        .value
-        .as_ref()?
-        .value
-        .as_ref()
+    let (index, _) = graph_channel(graph, scope, channel_name)?;
+    values.get(index)?.value()
 }
 
 fn live_channel_value(
     graph: &lpc_wire::WireBindingGraph,
+    values: &[lpc_wire::WireBusChannelValue],
     scope: Option<&lpc_wire::WireScopeRef>,
     channel_name: &str,
     binding_kind: lpc_model::Kind,
@@ -9107,8 +9130,8 @@ fn live_channel_value(
     // must never be confused with an enclosing scope's same-named channel.
     // A scope-less endpoint (pre-scope test fakes) falls back to the first
     // name match.
-    let channel = graph_channel(graph, scope, channel_name)?;
-    let value = channel.value.as_ref()?.value.as_ref()?;
+    let (index, channel) = graph_channel(graph, scope, channel_name)?;
+    let value = values.get(index)?.value()?;
     // A product handle first, before any kind test: the chip is revision-
     // stable, so no exclusion applies to it.
     if let lpc_model::LpValue::Product(product) = value {
@@ -11401,11 +11424,6 @@ mod tests {
                     kind: Some(lpc_model::Kind::Color),
                     providers: vec![1],
                     consumers: vec![0],
-                    value: Some(lpc_wire::WireBusChannelValue {
-                        revision: Revision::new(2),
-                        value: Some(LpValue::F32(0.5)),
-                        error: None,
-                    }),
                     primary_visual: true,
                 },
                 // A playlist entry's sink row (wire 8): feeds panel
@@ -11417,15 +11435,14 @@ mod tests {
                     kind: Some(lpc_model::Kind::Ratio),
                     providers: vec![],
                     consumers: vec![],
-                    value: None,
                     primary_visual: false,
                 },
             ],
         };
-        project
-            .sync_mut()
-            .unwrap()
-            .set_binding_graph_for_test(graph);
+        project.sync_mut().unwrap().set_binding_graph_for_test((
+            graph,
+            vec![lpc_wire::WireBusChannelValue::Value(LpValue::F32(0.5))],
+        ));
 
         assert!(
             !project
@@ -11585,7 +11602,6 @@ mod tests {
                     kind: Some(lpc_model::Kind::Ratio),
                     providers: vec![0],
                     consumers: vec![],
-                    value: None,
                     primary_visual: false,
                 },
                 lpc_wire::WireBusChannel {
@@ -11594,7 +11610,6 @@ mod tests {
                     kind: Some(lpc_model::Kind::Ratio),
                     providers: vec![],
                     consumers: vec![1],
-                    value: None,
                     primary_visual: false,
                 },
                 lpc_wire::WireBusChannel {
@@ -11603,7 +11618,6 @@ mod tests {
                     kind: Some(lpc_model::Kind::Color),
                     providers: vec![2, 3],
                     consumers: vec![],
-                    value: None,
                     primary_visual: true,
                 },
                 lpc_wire::WireBusChannel {
@@ -11612,7 +11626,6 @@ mod tests {
                     kind: Some(lpc_model::Kind::Ratio),
                     providers: vec![4, 5],
                     consumers: vec![],
-                    value: None,
                     primary_visual: false,
                 },
                 lpc_wire::WireBusChannel {
@@ -11621,7 +11634,6 @@ mod tests {
                     kind: Some(lpc_model::Kind::Ratio),
                     providers: vec![],
                     consumers: vec![6],
-                    value: None,
                     primary_visual: false,
                 },
                 lpc_wire::WireBusChannel {
@@ -11630,7 +11642,6 @@ mod tests {
                     kind: Some(lpc_model::Kind::Ratio),
                     providers: vec![7],
                     consumers: vec![],
-                    value: None,
                     primary_visual: false,
                 },
                 lpc_wire::WireBusChannel {
@@ -11639,7 +11650,6 @@ mod tests {
                     kind: Some(lpc_model::Kind::Ratio),
                     providers: vec![8],
                     consumers: vec![9],
-                    value: None,
                     primary_visual: false,
                 },
             ],
@@ -11647,7 +11657,7 @@ mod tests {
         project
             .sync_mut()
             .unwrap()
-            .set_binding_graph_for_test(graph);
+            .set_binding_graph_for_test((graph, Vec::new()));
 
         let bus = project
             .ui_bus_view_for_scope(root_scope)
@@ -11758,7 +11768,7 @@ mod tests {
         project
             .sync_mut()
             .unwrap()
-            .set_binding_graph_for_test(graph);
+            .set_binding_graph_for_test((graph, Vec::new()));
         project.apply_default_binding_overlay();
 
         let nodes = project.ui_nodes();
@@ -11827,7 +11837,7 @@ mod tests {
         project
             .sync_mut()
             .unwrap()
-            .set_binding_graph_for_test(graph);
+            .set_binding_graph_for_test((graph, Vec::new()));
         project.apply_default_binding_overlay();
 
         let nodes = project.ui_nodes();
@@ -11896,8 +11906,13 @@ mod tests {
         );
     }
 
-    fn primary_visual_graph(value: Option<lpc_model::LpValue>) -> lpc_wire::WireBindingGraph {
-        lpc_wire::WireBindingGraph {
+    fn primary_visual_graph(
+        value: Option<lpc_model::LpValue>,
+    ) -> (
+        lpc_wire::WireBindingGraph,
+        Vec<lpc_wire::WireBusChannelValue>,
+    ) {
+        let graph = lpc_wire::WireBindingGraph {
             revision: Revision::new(2),
             bindings: Vec::new(),
             channels: vec![lpc_wire::WireBusChannel {
@@ -11906,17 +11921,22 @@ mod tests {
                 kind: Some(lpc_model::Kind::Color),
                 providers: Vec::new(),
                 consumers: Vec::new(),
-                value: Some(lpc_wire::WireBusChannelValue {
-                    revision: Revision::new(2),
-                    value,
-                    error: None,
-                }),
                 primary_visual: true,
             }],
-        }
+        };
+        let value = value.map_or(
+            lpc_wire::WireBusChannelValue::Empty,
+            lpc_wire::WireBusChannelValue::Value,
+        );
+        (graph, vec![value])
     }
 
-    fn project_with_graph(graph: lpc_wire::WireBindingGraph) -> ProjectController {
+    fn project_with_graph(
+        graph: (
+            lpc_wire::WireBindingGraph,
+            Vec<lpc_wire::WireBusChannelValue>,
+        ),
+    ) -> ProjectController {
         let mut project = ProjectController::new();
         project.mark_ready("loaded-project", 7, ProjectInventorySummary::default());
         project
@@ -12042,35 +12062,38 @@ mod tests {
     fn control_out_graph(
         scope: lpc_wire::WireScopeRef,
         visual: Option<lpc_model::ProductRef>,
-    ) -> lpc_wire::WireBindingGraph {
+    ) -> (
+        lpc_wire::WireBindingGraph,
+        Vec<lpc_wire::WireBusChannelValue>,
+    ) {
         let channel = |name: &str, value: lpc_model::ProductRef, primary_visual: bool| {
-            lpc_wire::WireBusChannel {
-                scope: Some(scope),
-                name: name.to_string(),
-                kind: Some(lpc_model::Kind::Color),
-                providers: Vec::new(),
-                consumers: Vec::new(),
-                value: Some(lpc_wire::WireBusChannelValue {
-                    revision: Revision::new(2),
-                    value: Some(LpValue::Product(value)),
-                    error: None,
-                }),
-                primary_visual,
-            }
+            (
+                lpc_wire::WireBusChannel {
+                    scope: Some(scope),
+                    name: name.to_string(),
+                    kind: Some(lpc_model::Kind::Color),
+                    providers: Vec::new(),
+                    consumers: Vec::new(),
+                    primary_visual,
+                },
+                lpc_wire::WireBusChannelValue::Value(LpValue::Product(value)),
+            )
         };
-        let mut channels = vec![channel(
+        let mut rows = vec![channel(
             lpc_model::PRIMARY_CONTROL_CHANNEL,
             lpc_model::ProductRef::control(fixture_control_product()),
             false,
         )];
         if let Some(visual) = visual {
-            channels.insert(0, channel(lpc_model::PRIMARY_VISUAL_CHANNEL, visual, true));
+            rows.insert(0, channel(lpc_model::PRIMARY_VISUAL_CHANNEL, visual, true));
         }
-        lpc_wire::WireBindingGraph {
+        let (channels, values) = rows.into_iter().unzip();
+        let graph = lpc_wire::WireBindingGraph {
             revision: Revision::new(2),
             bindings: Vec::new(),
             channels,
-        }
+        };
+        (graph, values)
     }
 
     #[test]
@@ -12302,14 +12325,18 @@ mod tests {
             lpc_model::NodeId::new(2),
             0,
         ));
-        let mut graph = control_out_graph(scope, Some(visual));
-        graph
+        let (mut graph, mut values) = control_out_graph(scope, Some(visual));
+        let control = graph
             .channels
-            .retain(|channel| channel.name != lpc_model::PRIMARY_CONTROL_CHANNEL);
+            .iter()
+            .position(|channel| channel.name == lpc_model::PRIMARY_CONTROL_CHANNEL)
+            .expect("the fixture lists control.out");
+        graph.channels.remove(control);
+        values.remove(control);
         project
             .sync_mut()
             .unwrap()
-            .set_binding_graph_for_test(graph);
+            .set_binding_graph_for_test((graph, values));
 
         let editor = project.editor_view("loaded-project", 7, &ProjectInventorySummary::default());
         let Some(crate::UiNodeFace::Module(face)) = editor.nodes[0].face.clone() else {
@@ -12360,10 +12387,8 @@ mod tests {
         // `primary_visual`, because the project's primary visual is the
         // root's and always-live products are exactly what this predicate
         // stopped keying on.
-        project
-            .sync_mut()
-            .unwrap()
-            .set_binding_graph_for_test(lpc_wire::WireBindingGraph {
+        project.sync_mut().unwrap().set_binding_graph_for_test((
+            lpc_wire::WireBindingGraph {
                 revision: Revision::new(2),
                 bindings: Vec::new(),
                 channels: vec![lpc_wire::WireBusChannel {
@@ -12372,14 +12397,13 @@ mod tests {
                     kind: Some(lpc_model::Kind::Color),
                     providers: Vec::new(),
                     consumers: Vec::new(),
-                    value: Some(lpc_wire::WireBusChannelValue {
-                        revision: Revision::new(2),
-                        value: Some(LpValue::Product(lpc_model::ProductRef::visual(product))),
-                        error: None,
-                    }),
                     primary_visual: false,
                 }],
-            });
+            },
+            vec![lpc_wire::WireBusChannelValue::Value(LpValue::Product(
+                lpc_model::ProductRef::visual(product),
+            ))],
+        ));
         // Fresh bytes in the stream — the re-home branch the old predicate
         // stamped Paused inside.
         let bytes = vec![10, 20, 30, 40, 50, 60];
@@ -12540,7 +12564,7 @@ mod tests {
         project
             .sync_mut()
             .unwrap()
-            .set_binding_graph_for_test(graph);
+            .set_binding_graph_for_test((graph, Vec::new()));
         project.apply_default_binding_overlay();
 
         let nodes = project.ui_nodes();
@@ -12604,7 +12628,7 @@ mod tests {
         project
             .sync_mut()
             .unwrap()
-            .set_binding_graph_for_test(default_time_wiring_graph());
+            .set_binding_graph_for_test((default_time_wiring_graph(), Vec::new()));
         project.apply_default_binding_overlay();
 
         let nodes = project.ui_nodes();
@@ -12663,7 +12687,7 @@ mod tests {
         project
             .sync_mut()
             .unwrap()
-            .set_binding_graph_for_test(default_time_wiring_graph());
+            .set_binding_graph_for_test((default_time_wiring_graph(), Vec::new()));
         project.apply_default_binding_overlay();
 
         let nodes = project.ui_nodes();
@@ -12717,7 +12741,6 @@ mod tests {
                     kind: Some(lpc_model::Kind::Instant),
                     providers: vec![0],
                     consumers: vec![1],
-                    value: None,
                     primary_visual: false,
                 },
                 lpc_wire::WireBusChannel {
@@ -12726,7 +12749,6 @@ mod tests {
                     kind: None,
                     providers: vec![0],
                     consumers: Vec::new(),
-                    value: None,
                     primary_visual: false,
                 },
             ],
@@ -12735,7 +12757,7 @@ mod tests {
         project
             .sync_mut()
             .unwrap()
-            .set_binding_graph_for_test(graph);
+            .set_binding_graph_for_test((graph, Vec::new()));
 
         let choices = project.ui_channel_choices();
         // Well-known first, observed flags merged, ad-hoc channels appended.
@@ -12779,10 +12801,8 @@ mod tests {
                 panel_show: false,
             }
         };
-        project
-            .sync_mut()
-            .unwrap()
-            .set_binding_graph_for_test(lpc_wire::WireBindingGraph {
+        project.sync_mut().unwrap().set_binding_graph_for_test((
+            lpc_wire::WireBindingGraph {
                 revision: Revision::new(2),
                 bindings: vec![
                     // No backing row: an implicit runtime consumed slot.
@@ -12791,7 +12811,9 @@ mod tests {
                     binding("brightness", lpc_wire::WireBindingDirection::Consumes),
                 ],
                 channels: Vec::new(),
-            });
+            },
+            Vec::new(),
+        ));
 
         let nodes = project.ui_nodes();
         let config = section_config_slots(node_sections(&nodes[0]));
@@ -12835,25 +12857,27 @@ mod tests {
                 panel_show: false,
             }
         };
-        let channel = |name: &str, kind: lpc_model::Kind, value: f32| -> lpc_wire::WireBusChannel {
-            lpc_wire::WireBusChannel {
-                scope: None,
-                name: name.to_string(),
-                kind: Some(kind),
-                providers: Vec::new(),
-                consumers: Vec::new(),
-                value: Some(lpc_wire::WireBusChannelValue {
-                    revision: Revision::new(2),
-                    value: Some(LpValue::F32(value)),
-                    error: None,
-                }),
-                primary_visual: false,
-            }
+        let channel = |name: &str, kind: lpc_model::Kind, value: f32| {
+            (
+                lpc_wire::WireBusChannel {
+                    scope: None,
+                    name: name.to_string(),
+                    kind: Some(kind),
+                    providers: Vec::new(),
+                    consumers: Vec::new(),
+                    primary_visual: false,
+                },
+                lpc_wire::WireBusChannelValue::Value(LpValue::F32(value)),
+            )
         };
-        project
-            .sync_mut()
-            .unwrap()
-            .set_binding_graph_for_test(lpc_wire::WireBindingGraph {
+        let (channels, values): (Vec<_>, Vec<_>) = [
+            channel("wobble", lpc_model::Kind::Amplitude, 0.123_456),
+            channel("time", lpc_model::Kind::Instant, 12_345.678),
+        ]
+        .into_iter()
+        .unzip();
+        project.sync_mut().unwrap().set_binding_graph_for_test((
+            lpc_wire::WireBindingGraph {
                 revision: Revision::new(2),
                 bindings: vec![
                     // Implicit runtime slots → binding-derived rows.
@@ -12878,11 +12902,10 @@ mod tests {
                         lpc_wire::WireBindingOrigin::Default,
                     ),
                 ],
-                channels: vec![
-                    channel("wobble", lpc_model::Kind::Amplitude, 0.123_456),
-                    channel("time", lpc_model::Kind::Instant, 12_345.678),
-                ],
-            });
+                channels,
+            },
+            values,
+        ));
         project.apply_default_binding_overlay();
         project.apply_bound_live_values();
 
@@ -12925,23 +12948,16 @@ mod tests {
         project.apply_project_view(&view).unwrap();
 
         let node = lpc_model::NodeId::new(1);
-        let product_channel = |name: &str, value: LpValue| lpc_wire::WireBusChannel {
+        let product_channel = |name: &str| lpc_wire::WireBusChannel {
             scope: None,
             name: name.to_string(),
             kind: Some(lpc_model::Kind::Instant),
             providers: Vec::new(),
             consumers: Vec::new(),
-            value: Some(lpc_wire::WireBusChannelValue {
-                revision: Revision::new(2),
-                value: Some(value),
-                error: None,
-            }),
             primary_visual: false,
         };
-        project
-            .sync_mut()
-            .unwrap()
-            .set_binding_graph_for_test(lpc_wire::WireBindingGraph {
+        project.sync_mut().unwrap().set_binding_graph_for_test((
+            lpc_wire::WireBindingGraph {
                 revision: Revision::new(2),
                 bindings: vec![lpc_wire::WireEffectiveBinding {
                     owner: node,
@@ -12957,14 +12973,15 @@ mod tests {
                     kind: lpc_model::Kind::Instant,
                     panel_show: false,
                 }],
-                channels: vec![product_channel(
-                    "time",
-                    LpValue::Product(lpc_model::ProductRef::time(lpc_model::TimeProduct::new(
-                        lpc_model::NodeId::new(2),
-                        0,
-                    ))),
-                )],
-            });
+                channels: vec![product_channel("time")],
+            },
+            vec![lpc_wire::WireBusChannelValue::Value(LpValue::Product(
+                lpc_model::ProductRef::time(lpc_model::TimeProduct::new(
+                    lpc_model::NodeId::new(2),
+                    0,
+                )),
+            ))],
+        ));
         project.apply_default_binding_overlay();
         project.apply_bound_live_values();
 
@@ -12995,7 +13012,7 @@ mod tests {
 
         // One authored consume of a scoped channel nothing writes: the
         // control reads its own default and offers a panel target.
-        let graph = |panel_provider: bool, value: f32| lpc_wire::WireBindingGraph {
+        let graph = |panel_provider: bool| lpc_wire::WireBindingGraph {
             revision: Revision::new(2),
             bindings: vec![
                 lpc_wire::WireEffectiveBinding {
@@ -13033,13 +13050,14 @@ mod tests {
                 kind: Some(lpc_model::Kind::Amplitude),
                 providers: if panel_provider { vec![1] } else { Vec::new() },
                 consumers: vec![0],
-                value: Some(lpc_wire::WireBusChannelValue {
-                    revision: Revision::new(2),
-                    value: Some(LpValue::F32(value)),
-                    error: None,
-                }),
                 primary_visual: false,
             }],
+        };
+        let graph = |panel_provider: bool, value: f32| {
+            (
+                graph(panel_provider),
+                vec![lpc_wire::WireBusChannelValue::Value(LpValue::F32(value))],
+            )
         };
         project
             .sync_mut()
@@ -13283,6 +13301,7 @@ mod tests {
                 // The binding-graph probe rides along on every
                 // loaded-project read — module faces cannot derive without it.
                 ProjectProbeRequest::BindingGraph(lpc_wire::BindingGraphProbeRequest {
+                    structure: lpc_wire::RevisionGateRead::Always,
                     include_values: true,
                 }),
             ]

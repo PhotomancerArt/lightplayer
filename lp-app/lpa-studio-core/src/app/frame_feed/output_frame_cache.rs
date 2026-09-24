@@ -59,8 +59,8 @@ use lpc_model::{
     ControlSampleLayout, ControlSampleSpan, NodeId, Revision,
 };
 use lpc_wire::{
-    GeometryProbeResult, KnownOutputFrameGeometry, OutputFrameEntry, OutputFrameGeometry,
-    OutputFrameGeometryRead, WireChannelSampleFormat, WireOutputPlacement,
+    KnownOutputFrameGeometry, OutputFrameEntry, OutputFrameGeometry, OutputFrameGeometryRead,
+    RevisionGateResult, WireChannelSampleFormat, WireOutputPlacement,
 };
 
 use crate::{UiControlProductPreview, UiControlSampleFormat};
@@ -303,14 +303,14 @@ impl OutputFrameCache {
     fn apply_entry(&mut self, entry: &OutputFrameEntry) -> bool {
         let output = self.outputs.entry(entry.node).or_default();
         let geometry_moved = match &entry.geometry {
-            GeometryProbeResult::Changed(geometry) => {
+            RevisionGateResult::Changed(geometry) => {
                 output.geometry = Some(CachedOutputGeometry::from_wire(geometry));
                 true
             }
             // "What you have still stands" — keep the `Rc`s, which is the
             // whole point of asking `IfChanged`. A revision this cache does
             // not hold cannot stand for anything: drop it and ask again.
-            GeometryProbeResult::Unchanged { revision } => {
+            RevisionGateResult::Unchanged { revision } => {
                 if output
                     .geometry
                     .as_ref()
@@ -322,7 +322,7 @@ impl OutputFrameCache {
             }
             // No statement this read (the engine deferred it, or has none
             // yet): nothing cached can be trusted to match these samples.
-            GeometryProbeResult::Omitted => {
+            RevisionGateResult::Omitted => {
                 output.geometry = None;
                 false
             }
@@ -558,7 +558,7 @@ mod tests {
         assert_eq!(cache.placements(NodeId::new(4)).len(), 1);
 
         let mut repatched = entry(4, 5, vec![1, 0, 2, 0, 3, 0]);
-        let GeometryProbeResult::Changed(geometry) = &mut repatched.geometry else {
+        let RevisionGateResult::Changed(geometry) = &mut repatched.geometry else {
             unreachable!("the helper sends geometry");
         };
         geometry.revision = Revision::new(2);
@@ -617,7 +617,7 @@ mod tests {
         let mut cache = OutputFrameCache::default();
         let answered = with_layout(entry(4, 1, vec![1, 0, 2, 0, 3, 0]), 11, layout(11));
         let mut deferred = entry(5, 1, vec![9, 0, 8, 0, 7, 0]);
-        deferred.geometry = GeometryProbeResult::Omitted;
+        deferred.geometry = RevisionGateResult::Omitted;
         cache.apply(&[answered, deferred]);
 
         assert!(
@@ -832,7 +832,7 @@ mod tests {
         revision: i64,
         layout: ControlDisplayLayout,
     ) -> OutputFrameEntry {
-        let GeometryProbeResult::Changed(geometry) = &mut entry.geometry else {
+        let RevisionGateResult::Changed(geometry) = &mut entry.geometry else {
             unreachable!("the helper sends geometry");
         };
         geometry.revision = Revision::new(revision);
@@ -842,7 +842,7 @@ mod tests {
 
     /// The entry answering `Unchanged` at `revision` instead of a bundle.
     fn unchanged(mut entry: OutputFrameEntry, revision: i64) -> OutputFrameEntry {
-        entry.geometry = GeometryProbeResult::Unchanged {
+        entry.geometry = RevisionGateResult::Unchanged {
             revision: Revision::new(revision),
         };
         entry
@@ -877,7 +877,7 @@ mod tests {
             revision: Revision::new(revision),
             channels: (bytes.len() / 6) as u32,
             sample_format: WireChannelSampleFormat::U16,
-            geometry: GeometryProbeResult::Changed(OutputFrameGeometry {
+            geometry: RevisionGateResult::Changed(OutputFrameGeometry {
                 revision: Revision::new(GEOMETRY_REVISION),
                 sample_layout: ControlSampleLayout {
                     spans: vec![ControlSampleSpan {

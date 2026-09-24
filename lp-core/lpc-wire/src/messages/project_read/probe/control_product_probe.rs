@@ -9,7 +9,7 @@
 //! The samples are re-rendered and re-sent on every read. The geometry — the
 //! `sample_layout` (how samples group into lamps, which only a mapping or
 //! fixture change moves) and the `display_layout` (where to draw the lamps) —
-//! rides the shared [geometry gate](super::GeometryRead): sent once, then
+//! rides the shared [geometry gate](super::RevisionGateRead): sent once, then
 //! `Unchanged` while its revision stands. Before the gate the choker's sample
 //! layout alone was 1,070 B of every 11 KB lens read, unchanged in 872 reads.
 
@@ -20,7 +20,7 @@ use lpc_model::{ControlExtent, ControlProduct, ControlSampleLayout, Revision};
 
 use crate::project::WireChannelSampleFormat;
 
-use super::{GeometryDisplayLayout, GeometryProbeResult, GeometryRead};
+use super::{GeometryDisplayLayout, RevisionGateRead, RevisionGateResult};
 
 /// Request to materialize a control product for inspection.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -29,7 +29,7 @@ pub struct ControlProductProbeRequest {
     pub product: ControlProduct,
     pub sample_format: WireChannelSampleFormat,
     /// The geometry gate for this product's sample and display layouts.
-    pub geometry: GeometryRead,
+    pub geometry: RevisionGateRead,
 }
 
 /// Everything static about a control product's samples, under one revision.
@@ -57,8 +57,8 @@ pub enum ControlProductProbeResult {
         revision: Revision,
         extent: ControlExtent,
         sample_format: WireChannelSampleFormat,
-        /// Gated by the request's [`GeometryRead`].
-        geometry: GeometryProbeResult<ControlProductGeometry>,
+        /// Gated by the request's [`RevisionGateRead`].
+        geometry: RevisionGateResult<ControlProductGeometry>,
         #[cfg_attr(feature = "schema-gen", schemars(with = "String"))]
         #[serde(with = "crate::serde_base64")]
         bytes: Vec<u8>,
@@ -87,7 +87,7 @@ pub struct ControlProductProbeResultHeader {
     pub revision: Revision,
     pub extent: ControlExtent,
     pub sample_format: WireChannelSampleFormat,
-    pub geometry: GeometryProbeResult<ControlProductGeometry>,
+    pub geometry: RevisionGateResult<ControlProductGeometry>,
 }
 
 impl ControlProductProbeResult {
@@ -156,7 +156,7 @@ mod tests {
             revision: Revision::new(7),
             extent: ControlExtent::new(1, 3),
             sample_format: WireChannelSampleFormat::U16,
-            geometry: GeometryProbeResult::Changed(ControlProductGeometry {
+            geometry: RevisionGateResult::Changed(ControlProductGeometry {
                 revision: Revision::new(7),
                 sample_layout: ControlSampleLayout {
                     spans: Vec::from([ControlSampleSpan {
@@ -190,7 +190,7 @@ mod tests {
             revision: Revision::new(18),
             extent: ControlExtent::new(1, 723),
             sample_format: WireChannelSampleFormat::U16,
-            geometry: GeometryProbeResult::Changed(ControlProductGeometry {
+            geometry: RevisionGateResult::Changed(ControlProductGeometry {
                 revision: Revision::new(7),
                 sample_layout: ControlSampleLayout {
                     spans: Vec::from([ControlSampleSpan {
@@ -286,7 +286,7 @@ mod tests {
             revision: Revision::new(1),
             extent: ControlExtent::new(1, LAMPS * 3),
             sample_format: WireChannelSampleFormat::U16,
-            geometry: GeometryProbeResult::Changed(ControlProductGeometry {
+            geometry: RevisionGateResult::Changed(ControlProductGeometry {
                 revision: Revision::new(7),
                 sample_layout: ControlSampleLayout { spans: Vec::new() },
                 display_layout: GeometryDisplayLayout::Layout(ControlDisplayLayout::Layout2d(
@@ -346,7 +346,7 @@ mod tests {
             revision: Revision::new(18),
             extent: ControlExtent::new(1, 723),
             sample_format: WireChannelSampleFormat::U16,
-            geometry: GeometryProbeResult::Changed(ControlProductGeometry {
+            geometry: RevisionGateResult::Changed(ControlProductGeometry {
                 revision: Revision::new(7),
                 sample_layout: ControlSampleLayout {
                     spans: Vec::from([ControlSampleSpan {

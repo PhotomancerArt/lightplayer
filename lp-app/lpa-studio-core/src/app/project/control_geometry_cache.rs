@@ -26,7 +26,7 @@ use std::collections::BTreeMap;
 use std::rc::Rc;
 
 use lpc_model::{ControlDisplayLayout, ControlSampleLayout, Revision};
-use lpc_wire::{ControlProductGeometry, GeometryProbeResult, GeometryRead};
+use lpc_wire::{ControlProductGeometry, RevisionGateRead, RevisionGateResult};
 
 use crate::UiProductRef;
 
@@ -50,12 +50,12 @@ pub(crate) struct CachedControlGeometry {
 impl ControlGeometryCache {
     /// What the next probe for `product` should ask for: `IfChanged` against
     /// the held revision (a refusal included), `Always` when nothing is held.
-    pub(crate) fn read_for(&self, product: &UiProductRef) -> GeometryRead {
+    pub(crate) fn read_for(&self, product: &UiProductRef) -> RevisionGateRead {
         match self.products.get(product) {
-            Some(geometry) => GeometryRead::IfChanged {
+            Some(geometry) => RevisionGateRead::IfChanged {
                 known_revision: Some(geometry.revision),
             },
-            None => GeometryRead::Always,
+            None => RevisionGateRead::Always,
         }
     }
 
@@ -65,10 +65,10 @@ impl ControlGeometryCache {
     pub(crate) fn apply(
         &mut self,
         product: UiProductRef,
-        answer: &GeometryProbeResult<ControlProductGeometry>,
+        answer: &RevisionGateResult<ControlProductGeometry>,
     ) -> Option<&CachedControlGeometry> {
         match answer {
-            GeometryProbeResult::Changed(geometry) => {
+            RevisionGateResult::Changed(geometry) => {
                 self.products.insert(
                     product,
                     CachedControlGeometry {
@@ -81,7 +81,7 @@ impl ControlGeometryCache {
                     },
                 );
             }
-            GeometryProbeResult::Unchanged { revision } => {
+            RevisionGateResult::Unchanged { revision } => {
                 if self
                     .products
                     .get(&product)
@@ -90,7 +90,7 @@ impl ControlGeometryCache {
                     self.products.remove(&product);
                 }
             }
-            GeometryProbeResult::Omitted => {
+            RevisionGateResult::Omitted => {
                 self.products.remove(&product);
             }
         }
@@ -116,7 +116,7 @@ mod tests {
     #[test]
     fn nothing_held_asks_always_and_a_changed_answer_is_held() {
         let mut cache = ControlGeometryCache::default();
-        assert_eq!(cache.read_for(&product()), GeometryRead::Always);
+        assert_eq!(cache.read_for(&product()), RevisionGateRead::Always);
 
         let held = cache
             .apply(product(), &changed(12, Some(layout())))
@@ -124,7 +124,7 @@ mod tests {
         assert!(held.display_layout.is_some());
         assert_eq!(
             cache.read_for(&product()),
-            GeometryRead::IfChanged {
+            RevisionGateRead::IfChanged {
                 known_revision: Some(Revision::new(12)),
             }
         );
@@ -141,7 +141,7 @@ mod tests {
         let second = cache
             .apply(
                 product(),
-                &GeometryProbeResult::Unchanged {
+                &RevisionGateResult::Unchanged {
                     revision: Revision::new(12),
                 },
             )
@@ -163,7 +163,7 @@ mod tests {
         assert_eq!(held.sample_layout.spans.len(), 1);
         assert_eq!(
             cache.read_for(&product()),
-            GeometryRead::IfChanged {
+            RevisionGateRead::IfChanged {
                 known_revision: Some(Revision::new(3)),
             }
         );
@@ -175,7 +175,7 @@ mod tests {
     #[test]
     fn no_current_geometry_is_not_drawable_and_asks_again() {
         let mut cache = ControlGeometryCache::default();
-        let unheld = GeometryProbeResult::Unchanged {
+        let unheld = RevisionGateResult::Unchanged {
             revision: Revision::new(12),
         };
         assert!(cache.apply(product(), &unheld).is_none());
@@ -185,25 +185,25 @@ mod tests {
             cache
                 .apply(
                     product(),
-                    &GeometryProbeResult::Unchanged {
+                    &RevisionGateResult::Unchanged {
                         revision: Revision::new(99),
                     },
                 )
                 .is_none()
         );
-        assert_eq!(cache.read_for(&product()), GeometryRead::Always);
+        assert_eq!(cache.read_for(&product()), RevisionGateRead::Always);
 
         cache.apply(product(), &changed(12, Some(layout())));
         assert!(
             cache
-                .apply(product(), &GeometryProbeResult::Omitted)
+                .apply(product(), &RevisionGateResult::Omitted)
                 .is_none()
         );
-        assert_eq!(cache.read_for(&product()), GeometryRead::Always);
+        assert_eq!(cache.read_for(&product()), RevisionGateRead::Always);
 
         cache.apply(product(), &changed(12, Some(layout())));
         cache.clear();
-        assert_eq!(cache.read_for(&product()), GeometryRead::Always);
+        assert_eq!(cache.read_for(&product()), RevisionGateRead::Always);
     }
 
     fn product() -> UiProductRef {
@@ -217,8 +217,8 @@ mod tests {
     fn changed(
         revision: i64,
         layout: Option<ControlDisplayLayout>,
-    ) -> GeometryProbeResult<ControlProductGeometry> {
-        GeometryProbeResult::Changed(ControlProductGeometry {
+    ) -> RevisionGateResult<ControlProductGeometry> {
+        RevisionGateResult::Changed(ControlProductGeometry {
             revision: Revision::new(revision),
             sample_layout: ControlSampleLayout {
                 spans: vec![ControlSampleSpan {
