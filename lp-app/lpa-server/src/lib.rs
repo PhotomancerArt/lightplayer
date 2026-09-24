@@ -11,6 +11,7 @@
 #![no_std]
 
 pub mod access_gate;
+pub mod access_guarded_fs;
 pub mod access_state;
 pub mod access_store;
 pub mod device_identity;
@@ -27,6 +28,7 @@ pub mod recovery_report;
 pub mod server;
 
 pub use access_gate::{Required, classify};
+pub use access_guarded_fs::AccessGuardedFs;
 pub use access_state::EntropySource;
 pub use device_identity::{DEVICE_IDENTITY_PATH, read_device_uid};
 pub use error::ServerError;

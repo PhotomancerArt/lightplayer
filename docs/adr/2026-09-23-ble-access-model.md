@@ -33,7 +33,9 @@ A device accepts a short list of **shared secrets**, each with a label
 (`"camp"`, `"mine"`) and a **tier**:
 
 - **play** — the panel (`PanelWrite`/`PanelClear`) plus reads: project
-  reads, project listings, and read-only fs inside the projects directory;
+  reads, the project's overlay and inventory (`ReadOverlay`,
+  `ReadInventory`), project listings, and read-only fs inside the projects
+  directory;
 - **edit** — everything. Edit implies play.
 
 There is no owner and no account on the device. Whoever knows a password
@@ -144,6 +146,21 @@ is an offline oracle on the key). Writes and deletes are edit-tier. The
 consequence, chosen on purpose: **a pull cannot bring a sidecar back**, and
 the library copy is the source. The server reads the files itself, through
 its own fs, never through the wire path.
+
+**Nothing else reads them either — not a loaded project.** The wire path is
+one door; a project's runtime is the other. A project (shared, catalog or
+authored) naming `.lp/access.json` as a shader source or any other resource
+would have the engine read the sidecar, and the shader compiler's parse
+error quotes the source it choked on — label, salt and `k` — into the
+node's status, which a play-tier `ProjectRead` returns. So every loaded
+project's filesystem is wrapped in `AccessGuardedFs`, which refuses a read
+of any access-file path: such a project fails to load (or its asset reports
+the refusal), and no byte reaches the engine, the registry, the inventory
+or the overlay's base-value parse. On the board the complete list of readers is
+therefore two, both the server's own and both through the **base** fs: the
+login's installed-secrets assembly and the device-store read behind
+`open`. `lpa-server/tests/access_file_resource.rs` pins it,
+with a control that shows the same bytes under another name do come out.
 
 ### Sans-IO
 
