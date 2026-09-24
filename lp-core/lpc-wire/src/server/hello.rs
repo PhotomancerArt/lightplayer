@@ -35,8 +35,8 @@ use crate::server::hello_auth::HelloAuth;
 ///
 /// # History
 ///
-/// - 21: access over untrusted links (BLE remote control, M3) —
-///   `ClientRequest::LoginBegin` / `LoginAnswer { macs }` and their answers
+/// - 22: access over untrusted links (BLE remote control, M3; bumped
+///   again after lean-wire took 21) — `ClientRequest::LoginBegin` / `LoginAnswer { macs }` and their answers
 ///   `ServerMsgBody::LoginChallenge { nonce, offers }` /
 ///   `LoginResult(Granted { tier, label } | Refused { retry_after_ms })`,
 ///   plus `ServerMsgBody::NotPermitted { needs }`, the refusal a request
@@ -47,6 +47,36 @@ use crate::server::hello_auth::HelloAuth;
 ///   on an untrusted link that holds no tier — it carries nothing the hello
 ///   does not — though no such link exists until the BLE transport lands.
 ///   See `docs/adr/2026-09-23-ble-access-model.md`.
+/// - 21: the revision gate (lean-wire) — what a probe answers unchanged on
+///   every read rides behind a revision (`RevisionGateRead` →
+///   `RevisionGateResult<T>`). First, everything static about a probed
+///   buffer rides one revision-gated bundle. `ControlProductProbeRequest`'s
+///   `display_layout: ControlDisplayLayoutRead` becomes `geometry:
+///   RevisionGateRead`, and its preview (and chunk header) replaces
+///   `sample_layout` + `display_layout` with `geometry:
+///   RevisionGateResult<ControlProductGeometry>`. `OutputFrameProbeRequest`
+///   gains a PER-OUTPUT gate (`geometry: OutputFrameGeometryRead`, whose
+///   `IfChanged` lists a known revision per output node), and
+///   `OutputFrameEntry` (and its header) replaces `sample_layout` +
+///   `display_layout` + `placements` with `geometry:
+///   RevisionGateResult<OutputFrameGeometry>`. `ControlDisplayLayoutRead`
+///   and `ControlDisplayLayoutProbeResult` are gone. Renamed and retyped
+///   fields on existing messages: an old peer cannot decode either side,
+///   which is what earns the bump. Second, the binding graph splits into a
+///   gated structure and a per-read value list: `BindingGraphProbeRequest`
+///   gains `structure: RevisionGateRead`; `BindingGraphProbeResult::Graph`
+///   carries a `WireBindingGraphRead { structure:
+///   RevisionGateResult<WireBindingGraph>, values: Option<WireBusChannelValues>
+///   }`; `WireBusChannel` loses `value`; `WireBusChannelValue` becomes an
+///   enum; an engaged panel writer's row is the value-free
+///   `WireBindingEndpoint::PanelWriter`; and `WireBindingGraph::revision` is
+///   the STRUCTURE revision. Third, pixels become the client's ask:
+///   `OutputFrameProbeRequest` gains `samples: Option<WireChannelSampleFormat>`
+///   (`None` = geometry and revisions only; `U8` rounds a `U16` buffer to
+///   nearest), `OutputFrameEntry::sample_format` (and its header's) becomes
+///   `Option`, and the control-product probe answers `U8` as well as `U16`.
+///   A steady lens read of the PLAYFUL choker drops from 10,997 B to 4,911 B
+///   across the first two.
 /// - 20: `ClientRequest::ClearFaults` + its `ServerMsgBody::ClearFaults {
 ///   ledger_cleared }` ack — the studio's Clear faults verb, which forgets
 ///   the crash-recovery ledger and re-arms the engine's faulted nodes.
@@ -190,7 +220,7 @@ use crate::server::hello_auth::HelloAuth;
 /// as `None` on new Studio and a new firmware's extra fields are ignored
 /// by old Studio. Bumping for those would mark every board running
 /// current firmware Incompatible in exchange for nothing.
-pub const WIRE_PROTO_VERSION: u32 = 21;
+pub const WIRE_PROTO_VERSION: u32 = 22;
 
 /// Unsolicited/boot-time server identity, version, and capability report.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -510,7 +540,7 @@ mod tests {
     #[test]
     fn the_proto_version_is_pinned_to_its_history() {
         assert_eq!(
-            WIRE_PROTO_VERSION, 21,
+            WIRE_PROTO_VERSION, 22,
             "if you meant to bump, add the History entry in this file's \
              doc comment and update this pin"
         );

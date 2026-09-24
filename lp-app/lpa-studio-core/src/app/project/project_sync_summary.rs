@@ -10,7 +10,6 @@ pub struct ProjectSyncSummary {
     pub node_count: usize,
     pub root_node_count: usize,
     pub slot_root_count: usize,
-    pub resource_count: usize,
     pub shape_count: usize,
     pub shapes_complete: bool,
     pub runtime: Option<ProjectRuntimeSummary>,

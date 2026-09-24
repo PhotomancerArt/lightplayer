@@ -183,8 +183,8 @@ pub(crate) fn lamp_cells_scale_extremes() -> Element {
 }
 
 /// A deterministic control preview over `positions` (normalized), with a
-/// fixed rainbow riding LINEAR unorm16 bytes — what the wire carries and
-/// what `LampView` decodes (the roster ▶ stories' rule).
+/// fixed rainbow riding LINEAR unorm8 bytes — what a live preview carries
+/// over the wire and what `LampView` decodes (the roster ▶ stories' rule).
 fn lamp_story_preview(
     width_hint: u32,
     height_hint: u32,
@@ -193,7 +193,7 @@ fn lamp_story_preview(
 ) -> UiControlProductPreview {
     let count = positions.len() as u32;
     let mut lamps = Vec::with_capacity(positions.len());
-    let mut bytes = Vec::with_capacity(positions.len() * 6);
+    let mut bytes = Vec::with_capacity(positions.len() * 3);
     for (index, center) in positions.iter().enumerate() {
         lamps.push(ControlLamp2d {
             lamp_index: index as u32,
@@ -205,13 +205,13 @@ fn lamp_story_preview(
         for channel in 0..3_u32 {
             let turn = (phase + channel as f32 / 3.0) * core::f32::consts::TAU;
             let level = (turn.sin() * 0.5 + 0.5).powi(2);
-            bytes.extend_from_slice(&((level * f32::from(u16::MAX)) as u16).to_le_bytes());
+            bytes.push((level * 255.0).round() as u8);
         }
     }
     UiControlProductPreview {
         revision: 7,
         extent: ControlExtent::new(1, count * 3),
-        sample_format: UiControlSampleFormat::U16,
+        sample_format: UiControlSampleFormat::U8,
         sample_layout: ControlSampleLayout {
             spans: vec![ControlSampleSpan {
                 row: 0,

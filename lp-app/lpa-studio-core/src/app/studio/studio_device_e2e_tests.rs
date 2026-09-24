@@ -1079,6 +1079,20 @@ fn opening_the_lens_borrows_the_wire_and_the_card_keeps_folding() {
             .lens_holds_wire(link),
         "the lens holds the borrow"
     );
+    // Lens open, card visible (lean-wire P5): the card pulls nothing while
+    // the lens holds the wire, so the lens read is the only copy of the
+    // board's pixels on the link.
+    {
+        let devices = bench.controller.devices_for_test();
+        assert!(
+            crate::app::devices::device_frame_feed::feed_target(
+                &devices.roster().devices()[0],
+                devices.effects(),
+            )
+            .is_none(),
+            "the card does not pull under the lens"
+        );
+    }
     assert_eq!(
         bench
             .controller
@@ -1145,6 +1159,16 @@ fn opening_the_lens_borrows_the_wire_and_the_card_keeps_folding() {
             .is_some_and(|card| card.state_label == "Ready")
     });
     assert_eq!(bench.view().devices.len(), 1, "the card never left");
+    // Card only: with the lens gone the card is the board's one feed again.
+    let devices = bench.controller.devices_for_test();
+    assert!(
+        crate::app::devices::device_frame_feed::feed_target(
+            &devices.roster().devices()[0],
+            devices.effects(),
+        )
+        .is_some(),
+        "the card pulls again once the lens lets go"
+    );
 }
 
 /// The lens reads the board's BUILD off its own wire at attach (M5
@@ -1820,9 +1844,18 @@ fn a_fed_boards_last_frame_survives_a_reload() {
     let live = feed.frame().expect("the feed's frame");
     // The packed layout form quantizes lamp centers, so the picture is
     // compared by what a slot would draw from it, not bit for bit.
+    // The card pulls at 8 bits and the sidecar stores 16 (widened by ×257),
+    // so the samples are compared as the lamp decode reads them.
     assert_eq!(stored.revision, live.revision);
-    assert_eq!(stored.bytes, live.bytes);
+    assert_eq!(live.sample_format, crate::UiControlSampleFormat::U8);
+    assert_eq!(stored.sample_format, crate::UiControlSampleFormat::U16);
     assert_eq!(stored.extent, live.extent);
+    let samples = |frame: &crate::UiControlProductPreview| -> Vec<Option<u16>> {
+        (0..frame.extent.sample_count() as usize)
+            .map(|index| frame.unorm16_sample(index))
+            .collect()
+    };
+    assert_eq!(samples(&stored), samples(live));
     assert!(stored.display_layout.is_some() && live.display_layout.is_some());
     let live_at = feed
         .frame_age_secs(bench.clock.get())

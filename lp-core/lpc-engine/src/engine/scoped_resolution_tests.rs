@@ -18,7 +18,6 @@
 use super::test_support::{EngineTestBuilder, EngineTestHarness, bus, output, produced_slot};
 use crate::node::ScopeRef;
 use lpc_model::NodeId;
-use lpc_wire::{BindingGraphProbeRequest, BindingGraphProbeResult};
 
 /// Mark the root as introducing the root scope and place `members` in it.
 fn assign_root_scope(harness: &mut EngineTestHarness, members: &[NodeId]) -> ScopeRef {
@@ -186,22 +185,17 @@ fn probe_values_never_tick_sink_scope_producers() {
     h.tick(16).expect("tick");
     let before = h.shader_ticks("entry_shader");
 
-    let result = h.engine.read_project_binding_graph_probe(
-        &h.registry,
-        BindingGraphProbeRequest {
-            include_values: true,
-        },
-    );
-    let BindingGraphProbeResult::Graph(graph) = result else {
-        panic!("expected graph result");
-    };
+    let (graph, values) = h.binding_graph(true);
     let channel = graph
         .channels
         .iter()
-        .find(|channel| channel.name == "visual.out")
+        .position(|channel| channel.name == "visual.out")
         .expect("channel listed");
-    let value = channel.value.as_ref().expect("value requested");
-    assert_eq!(value.error, None, "the root-scope read resolves cleanly");
+    assert_eq!(
+        values[channel].error(),
+        None,
+        "the root-scope read resolves cleanly"
+    );
 
     assert_eq!(
         h.shader_ticks("entry_shader"),
@@ -220,7 +214,7 @@ fn probe_values_never_tick_sink_scope_producers() {
     let sink_row = graph
         .channels
         .iter()
-        .find(|channel| {
+        .position(|channel| {
             channel.name == "visual.out"
                 && channel
                     .scope
@@ -228,8 +222,9 @@ fn probe_values_never_tick_sink_scope_producers() {
                     .is_some_and(lpc_wire::WireScopeRef::is_sink)
         })
         .expect("the sink scope's channel row lists");
-    assert!(
-        sink_row.value.is_none(),
+    assert_eq!(
+        values[sink_row],
+        lpc_wire::WireBusChannelValue::Unresolved,
         "a sink-producer-backed value is never resolved by a probe"
     );
 }
@@ -262,20 +257,13 @@ fn sink_channel_rows_carry_panel_writer_values_without_demand() {
     h.engine
         .panel_write(sink, channel, lpc_model::LpValue::F32(0.7), None);
 
-    let result = h.engine.read_project_binding_graph_probe(
-        &h.registry,
-        BindingGraphProbeRequest {
-            include_values: true,
-        },
-    );
-    let BindingGraphProbeResult::Graph(graph) = result else {
-        panic!("expected graph result");
-    };
-    let glow = graph
+    let (graph, values) = h.binding_graph(true);
+    let glow_index = graph
         .channels
         .iter()
-        .find(|channel| channel.name == "glow")
+        .position(|channel| channel.name == "glow")
         .expect("the sink-consumed channel lists");
+    let glow = &graph.channels[glow_index];
     assert!(
         glow.scope
             .as_ref()
@@ -284,8 +272,8 @@ fn sink_channel_rows_carry_panel_writer_values_without_demand() {
         glow.scope
     );
     assert_eq!(
-        glow.value.as_ref().and_then(|value| value.value.clone()),
-        Some(lpc_model::LpValue::F32(0.7)),
+        values[glow_index].value(),
+        Some(&lpc_model::LpValue::F32(0.7)),
         "the engaged writer's literal resolves — no producer demand needed"
     );
     assert!(
@@ -335,37 +323,29 @@ fn probe_lists_same_named_channels_as_distinct_scoped_rows() {
     introduce_module_scope(&mut h, holder_b, &[writer_b, out_b]);
 
     h.tick(16).expect("tick");
-    let result = h.engine.read_project_binding_graph_probe(
-        &h.registry,
-        BindingGraphProbeRequest {
-            include_values: true,
-        },
-    );
-    let BindingGraphProbeResult::Graph(graph) = result else {
-        panic!("expected graph result");
-    };
+    let (graph, values) = h.binding_graph(true);
     let rows: alloc::vec::Vec<_> = graph
         .channels
         .iter()
-        .filter(|channel| channel.name == "chan")
+        .zip(&values)
+        .filter(|(channel, _)| channel.name == "chan")
         .collect();
     assert_eq!(rows.len(), 2, "one row per scope: {rows:?}");
-    let scopes: alloc::vec::Vec<_> = rows.iter().map(|row| row.scope).collect();
+    let scopes: alloc::vec::Vec<_> = rows.iter().map(|(row, _)| row.scope).collect();
     assert!(
         scopes.contains(&Some(lpc_wire::WireScopeRef::Module { owner: holder_a }))
             && scopes.contains(&Some(lpc_wire::WireScopeRef::Module { owner: holder_b })),
         "rows carry structured scopes: {scopes:?}"
     );
-    for row in rows {
-        let value = row.value.as_ref().expect("value requested");
+    for (row, value) in rows {
         let expected = if row.scope == Some(lpc_wire::WireScopeRef::Module { owner: holder_a }) {
             1.0
         } else {
             9.0
         };
         assert_eq!(
-            value.value,
-            Some(lpc_model::LpValue::F32(expected)),
+            value.value(),
+            Some(&lpc_model::LpValue::F32(expected)),
             "each row resolves in ITS scope"
         );
     }
@@ -511,24 +491,16 @@ fn probe_reports_engaged_writers_with_panel_origin() {
     );
     h.tick(16).expect("tick");
 
-    let result = h.engine.read_project_binding_graph_probe(
-        &h.registry,
-        BindingGraphProbeRequest {
-            include_values: true,
-        },
-    );
-    let BindingGraphProbeResult::Graph(graph) = result else {
-        panic!("expected graph result");
-    };
-    let channel = graph
+    let (graph, values) = h.binding_graph(true);
+    let index = graph
         .channels
         .iter()
-        .find(|channel| channel.name == "chan")
+        .position(|channel| channel.name == "chan")
         .expect("channel listed");
-    let value = channel.value.as_ref().expect("value requested");
+    let channel = &graph.channels[index];
     assert_eq!(
-        value.value,
-        Some(lpc_model::LpValue::F32(0.9)),
+        values[index].value(),
+        Some(&lpc_model::LpValue::F32(0.9)),
         "the probe's value read sees the panel overlay"
     );
     let first = &graph.bindings[channel.providers[0] as usize];
@@ -631,4 +603,70 @@ fn clear_all_reaches_sink_scopes() {
         "sink-scope writers clear too"
     );
     assert!(h.engine.panel_writers().is_empty());
+}
+
+#[test]
+fn a_knob_turn_moves_the_value_not_the_structure() {
+    // The Run D churn, pinned: a panel writer ENGAGING is a structure change
+    // (a Panel-origin provider row appears), but turning the knob it holds
+    // is a value change — the structure revision stays put and the new
+    // position arrives in the channel's value. Letting go is structure again.
+    let mut h = EngineTestBuilder::new()
+        .shader("writer", output("outputs[0]", 0.25))
+        .bind_bus("chan", produced_slot("writer", "outputs[0]"))
+        .output_node("reader")
+        .bind_demand_input("reader", bus("chan"))
+        .demand_root("reader")
+        .build();
+    let writer = h.node("writer");
+    let reader = h.node("reader");
+    let root_scope = assign_root_scope(&mut h, &[writer, reader]);
+    let channel = lpc_model::ChannelName(alloc::string::String::from("chan"));
+    h.tick(16).expect("tick");
+    let (idle, _) = h.binding_graph(true);
+
+    h.engine.panel_write(
+        root_scope,
+        channel.clone(),
+        lpc_model::LpValue::F32(0.4),
+        None,
+    );
+    h.tick(16).expect("tick");
+    let (engaged, _) = h.binding_graph(true);
+    assert!(
+        engaged.revision > idle.revision,
+        "engaging a panel writer adds a provider row"
+    );
+
+    for position in [0.5, 0.6, 0.9] {
+        h.engine.panel_write(
+            root_scope,
+            channel.clone(),
+            lpc_model::LpValue::F32(position),
+            None,
+        );
+        h.tick(16).expect("tick");
+        let (turned, values) = h.binding_graph(true);
+        assert_eq!(
+            turned, engaged,
+            "a knob turn leaves the whole structure, revision included, as it was"
+        );
+        let index = turned
+            .channels
+            .iter()
+            .position(|row| row.name == "chan")
+            .expect("channel listed");
+        assert_eq!(
+            values[index].value(),
+            Some(&lpc_model::LpValue::F32(position)),
+            "the knob's position is the channel's value"
+        );
+    }
+
+    assert!(h.engine.panel_clear(root_scope, &channel));
+    let (released, _) = h.binding_graph(true);
+    assert!(
+        released.revision > engaged.revision,
+        "letting go removes the provider row"
+    );
 }

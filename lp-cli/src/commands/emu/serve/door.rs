@@ -36,6 +36,7 @@ use tokio_tungstenite::tungstenite::handshake::derive_accept_key;
 use tokio_tungstenite::tungstenite::protocol::Role;
 
 use super::board::{Board, format_mac};
+use super::wire_tap::{TapDirection, WireTap};
 
 /// The largest HTTP request head this door will read before giving up. A
 /// handshake is a few hundred bytes; this is a bound, not a budget.
@@ -359,19 +360,23 @@ async fn pump_bytes(ws: WebSocketStream<TcpStream>, board: &Board) -> Result<()>
     let (mut link_read, mut link_write) = link.into_split();
     let (mut ws_write, mut ws_read) = ws.split();
     let mut buf = vec![0u8; PUMP_BUF];
-    let mut tap = WireTap::open(&board.id);
+    // Off (and free) unless `LP_EMU_WIRE_TAP` names a directory.
+    let mut tap = WireTap::from_env(&board.id);
 
     let result = loop {
         tokio::select! {
             incoming = ws_read.next() => match incoming {
                 Some(Ok(Message::Binary(bytes))) => {
-                    tap.record(b'>', &bytes);
+                    tap.record(TapDirection::ToBoard, &bytes);
                     link_write.write_all(&bytes).await?
                 }
                 // A text frame is accepted and its UTF-8 goes through as
                 // bytes: a client that types into the port is not wrong,
                 // and refusing it would be a dialect.
-                Some(Ok(Message::Text(text))) => link_write.write_all(text.as_bytes()).await?,
+                Some(Ok(Message::Text(text))) => {
+                    tap.record(TapDirection::ToBoard, text.as_bytes());
+                    link_write.write_all(text.as_bytes()).await?
+                }
                 Some(Ok(Message::Ping(payload))) => ws_write.send(Message::Pong(payload)).await?,
                 Some(Ok(Message::Pong(_) | Message::Frame(_))) => {}
                 Some(Ok(Message::Close(_))) | None => break Ok(()),
@@ -380,7 +385,7 @@ async fn pump_bytes(ws: WebSocketStream<TcpStream>, board: &Board) -> Result<()>
             read = link_read.read(&mut buf) => match read {
                 Ok(0) => break Ok(()),
                 Ok(n) => {
-                    tap.record(b'<', &buf[..n]);
+                    tap.record(TapDirection::ToHost, &buf[..n]);
                     ws_write.send(Message::Binary(buf[..n].to_vec())).await?
                 }
                 Err(e) => break Err(e.into()),
@@ -392,41 +397,6 @@ async fn pump_bytes(ws: WebSocketStream<TcpStream>, board: &Board) -> Result<()>
     board.flush_now.store(true, Ordering::SeqCst);
     let _ = ws_write.send(Message::Close(None)).await;
     result
-}
-
-/// Spike instrument (BLE vision, 2026-09-23): with `LP_EMU_WIRE_TAP=<dir>`,
-/// every chunk the byte pump carries is appended to `<dir>/<board>.tap` as
-/// `<unix_us> <'>' host->board | '<' board->host> <len>\n<bytes>\n`, so a
-/// real Studio session's wire traffic can be sized and timed exactly. Off
-/// (and free) when the variable is unset.
-struct WireTap(Option<std::fs::File>);
-
-impl WireTap {
-    fn open(board: &str) -> Self {
-        let Some(dir) = std::env::var_os("LP_EMU_WIRE_TAP") else {
-            return Self(None);
-        };
-        let path = std::path::Path::new(&dir).join(format!("{board}.tap"));
-        Self(
-            std::fs::OpenOptions::new()
-                .create(true)
-                .append(true)
-                .open(path)
-                .ok(),
-        )
-    }
-
-    fn record(&mut self, dir: u8, bytes: &[u8]) {
-        use std::io::Write as _;
-        let Some(f) = self.0.as_mut() else { return };
-        let us = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_micros())
-            .unwrap_or(0);
-        let _ = write!(f, "{us} {} {}\n", dir as char, bytes.len());
-        let _ = f.write_all(bytes);
-        let _ = f.write_all(b"\n");
-    }
 }
 
 /// `/board/<id>/control` — the line protocol, unchanged.

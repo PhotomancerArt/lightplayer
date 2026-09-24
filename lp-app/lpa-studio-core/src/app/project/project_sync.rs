@@ -2,22 +2,24 @@ use std::collections::BTreeMap;
 use std::rc::Rc;
 
 use lpc_model::{
-    ArtifactLocation, ArtifactOverlay, AssetBodyOverlay, ControlDisplayLayout, MutationCmd,
-    MutationEffect, MutationOp, ProjectOverlay, Revision, SlotEditOp, SlotPath, StoredSlotEdit,
+    ArtifactLocation, ArtifactOverlay, AssetBodyOverlay, MutationCmd, MutationEffect, MutationOp,
+    ProjectOverlay, Revision, SlotEditOp, SlotPath, StoredSlotEdit,
 };
 use lpc_view::{ApplyStatus, ProjectReadApplier, ProjectView};
 use lpc_wire::{
-    BindingGraphProbeRequest, BindingGraphProbeResult, ControlDisplayLayoutProbeResult,
-    ControlDisplayLayoutRead, ControlProductProbeRequest, ControlProductProbeResult, NodeReadQuery,
-    NodeReadSelection, OutputFrameProbeRequest, OutputFrameProbeResult, ProjectProbeRequest,
-    ProjectProbeResult, ProjectReadEvent, ProjectReadQuery, ProjectReadRequest, ReadLevel,
-    RenderProductProbeRequest, RenderProductProbeResult, ResourcePayloadRead, ResourceReadQuery,
-    RuntimeReadQuery, ShapeReadQuery, TimebaseProbeRequest, TimebaseProbeResult, WireBindingGraph,
-    WireCellProjection, WireChannelSampleFormat, WireConsumerPolicy, WireProjectionOrigin,
-    WireProjectionShape, WireTextureFormat, WireVisualSpace,
+    BindingGraphProbeRequest, BindingGraphProbeResult, ControlProductProbeRequest,
+    ControlProductProbeResult, NodeReadQuery, NodeReadSelection, OutputFrameProbeRequest,
+    OutputFrameProbeResult, ProjectProbeRequest, ProjectProbeResult, ProjectReadEvent,
+    ProjectReadQuery, ProjectReadRequest, ReadLevel, RenderProductProbeRequest,
+    RenderProductProbeResult, RuntimeReadQuery, ShapeReadQuery, TimebaseProbeRequest,
+    TimebaseProbeResult, WireBindingGraph, WireBusChannelValue, WireCellProjection,
+    WireConsumerPolicy, WireProjectionOrigin, WireProjectionShape, WireTextureFormat,
+    WireVisualSpace,
 };
 
-use crate::app::frame_feed::OutputFrameCache;
+use crate::app::frame_feed::{OutputFrameCache, PREVIEW_SAMPLE_FORMAT};
+use crate::app::project::binding_graph_cache::BindingGraphCache;
+use crate::app::project::control_geometry_cache::ControlGeometryCache;
 use crate::{
     ProjectRuntimeSummary, ProjectSyncPhase, ProjectSyncSummary, UiCellProjection,
     UiConsumerPolicy, UiControlProductPreview, UiControlSampleFormat, UiError, UiIssue,
@@ -65,8 +67,14 @@ pub struct ProjectSync {
     /// owns an output. Filled by the published-frame probe, which rides
     /// every read of a project that HAS an output and nothing otherwise.
     output_frames: OutputFrameCache,
-    /// Latest binding-graph snapshot, kept while a consumer subscribes.
-    binding_graph: Option<WireBindingGraph>,
+    /// The geometry (sample + display layout) each previewed control product
+    /// last answered with, held while its revision stands — the client half
+    /// of the probe's geometry gate. See [`ControlGeometryCache`].
+    control_geometry: ControlGeometryCache,
+    /// The binding graph — structure held while its revision stands, values
+    /// refreshed every read — kept while a consumer subscribes. See
+    /// [`BindingGraphCache`].
+    binding_graph: BindingGraphCache,
     /// Whether reads should carry the binding-graph probe. Armed for every
     /// ready project: module faces derive from it.
     binding_graph_subscribed: bool,
@@ -97,7 +105,8 @@ impl ProjectSync {
             product_space_previews: BTreeMap::new(),
             preview_spaces: BTreeMap::new(),
             output_frames: OutputFrameCache::default(),
-            binding_graph: None,
+            control_geometry: ControlGeometryCache::default(),
+            binding_graph: BindingGraphCache::default(),
             binding_graph_subscribed: false,
             issue: None,
             overlay: ProjectOverlay::new(),
@@ -150,7 +159,6 @@ impl ProjectSync {
                 .filter(|entry| entry.parent.is_none())
                 .count(),
             slot_root_count: self.view.slots.roots.len(),
-            resource_count: self.view.resource_cache.summary_count(),
             shape_count: self.view.slots.registry.iter().count(),
             shapes_complete: self.phase == ProjectSyncPhase::Ready,
             runtime: self.view.runtime.as_ref().map(ProjectRuntimeSummary::from),
@@ -353,6 +361,12 @@ impl ProjectSync {
     /// and both stand still when nothing is playing.
     pub fn frames_seen(&self) -> u64 {
         self.output_frames.frames_seen()
+    }
+
+    /// Whether the lens read carries the outputs' pixels: every read of a
+    /// project that drives an output does (see `probe_requests`).
+    pub fn streams_output_pixels(&self) -> bool {
+        self.has_output_nodes()
     }
 
     /// Whether the mirror carries any output node.
@@ -572,8 +586,8 @@ impl ProjectSync {
 
     fn apply_binding_graph_probe_results(&mut self, probes: &[&ProjectProbeResult]) {
         for probe in probes {
-            if let ProjectProbeResult::BindingGraph(BindingGraphProbeResult::Graph(graph)) = probe {
-                self.binding_graph = Some(graph.clone());
+            if let ProjectProbeResult::BindingGraph(BindingGraphProbeResult::Graph(read)) = probe {
+                self.binding_graph.apply(read);
             }
         }
     }
@@ -591,25 +605,56 @@ impl ProjectSync {
     /// malformed, that assumption is broken and further deltas cannot be
     /// trusted, so we discard the mirror (resetting `view.revision` to `0`)
     /// and let the caller resync with a full read. Product-preview caches are
-    /// cleared with it, since they are keyed off the same read cycle.
+    /// cleared with it, since they are keyed off the same read cycle — and so
+    /// is every cached geometry claim (control products' and outputs'), so
+    /// the next read asks for all of it outright. The outputs' last frames
+    /// stay up until then.
     pub fn reset_view(&mut self) {
         self.view = ProjectView::new();
+        self.control_geometry.clear();
+        self.output_frames.forget_geometry();
         self.product_previews.clear();
         self.timebases.clear();
         self.product_spaces.clear();
         self.product_space_previews.clear();
-        self.binding_graph = None;
+        self.binding_graph.clear();
     }
 
-    /// Latest binding-graph snapshot, when a consumer subscribes.
+    /// The held binding-graph structure, when a consumer subscribes.
     pub fn binding_graph(&self) -> Option<&WireBindingGraph> {
-        self.binding_graph.as_ref()
+        self.binding_graph.graph()
     }
 
-    /// Inject a binding-graph snapshot directly (test fixture path).
+    /// One value per [`Self::binding_graph`] channel row, in that order;
+    /// empty when no graph is held.
+    pub fn binding_graph_values(&self) -> &[WireBusChannelValue] {
+        self.binding_graph.values()
+    }
+
+    /// Inject a binding-graph snapshot directly (test fixture path): a
+    /// structure and its channel values, padded with `Unresolved` to the
+    /// channel count (a fixture that does not care about values passes none).
     #[cfg(test)]
-    pub(crate) fn set_binding_graph_for_test(&mut self, graph: WireBindingGraph) {
-        self.binding_graph = Some(graph);
+    pub(crate) fn set_binding_graph_for_test(
+        &mut self,
+        (graph, values): (WireBindingGraph, Vec<WireBusChannelValue>),
+    ) {
+        self.binding_graph.set_for_test(graph, values);
+    }
+
+    /// Replace the mirror's view directly (test fixture path): a fixture
+    /// tree the probe set is derived from, with no read stream behind it.
+    #[cfg(test)]
+    pub(crate) fn set_view_for_test(&mut self, view: ProjectView) {
+        self.view = view;
+    }
+
+    /// Fold published output-frame entries directly (test fixture path),
+    /// standing in for the probe cycle the same way
+    /// `set_binding_graph_for_test` does.
+    #[cfg(test)]
+    pub(crate) fn apply_output_frames_for_test(&mut self, outputs: &[lpc_wire::OutputFrameEntry]) {
+        self.output_frames.apply(outputs);
     }
 
     /// Inject a timebase read directly (test fixture path), standing in for
@@ -661,7 +706,7 @@ impl ProjectSync {
     pub fn set_binding_graph_subscribed(&mut self, subscribed: bool) {
         self.binding_graph_subscribed = subscribed;
         if !subscribed {
-            self.binding_graph = None;
+            self.binding_graph.clear();
         }
     }
 
@@ -673,15 +718,24 @@ impl ProjectSync {
         // that owns an output heroes the wire that output composes, and no
         // product ref names that wire. It renders nothing device-side (the
         // frame is already published), and the geometry half is revision-gated
-        // so a steady lens ships it once.
+        // per output so a steady lens ships it once.
+        //
+        // Its pixels ride too, at the preview precision: a lens that shows an
+        // output shows its wire's picture on the module hero, the output's
+        // patch bay and every fixture's patch row, so SOME surface always
+        // draws them. This is the lens's one copy of those lamps (lean-wire
+        // P5): a control product whose lamps all sit on this wire stops
+        // riding unasked (`ProjectController::always_live_products`).
         if self.has_output_nodes() {
             probes.push(ProjectProbeRequest::OutputFrame(OutputFrameProbeRequest {
-                display_layout: self.output_frames.display_layout_read(),
+                geometry: self.output_frames.geometry_read(),
+                samples: Some(PREVIEW_SAMPLE_FORMAT),
             }));
         }
         if self.binding_graph_subscribed {
             probes.push(ProjectProbeRequest::BindingGraph(
                 BindingGraphProbeRequest {
+                    structure: self.binding_graph.structure_read(),
                     include_values: true,
                 },
             ));
@@ -730,8 +784,8 @@ impl ProjectSync {
                         probes.push(ProjectProbeRequest::ControlProduct(
                             ControlProductProbeRequest {
                                 product: control,
-                                sample_format: WireChannelSampleFormat::U16,
-                                display_layout: self.display_layout_read_for(product),
+                                sample_format: PREVIEW_SAMPLE_FORMAT,
+                                geometry: self.control_geometry.read_for(&product),
                             },
                         ));
                     }
@@ -788,24 +842,15 @@ impl ProjectSync {
         }
     }
 
-    /// What the next probe should ask for: nothing new while the cached
-    /// layout's revision still stands, otherwise the whole layout.
-    fn display_layout_read_for(&self, product: UiProductRef) -> ControlDisplayLayoutRead {
-        match self
-            .product_previews
-            .get(&product)
-            .and_then(control_preview_display_layout)
-            .map(|layout| layout.revision())
-        {
-            Some(revision) => ControlDisplayLayoutRead::IfChanged {
-                known_revision: Some(revision),
-            },
-            None => ControlDisplayLayoutRead::Always,
-        }
-    }
-
+    /// The preview a probe answer becomes, if any.
+    ///
+    /// A control preview is drawn against the product's CACHED geometry (see
+    /// [`ControlGeometryCache`]): when none is current — a first answer that
+    /// was not `Changed`, an `Omitted`, a stale `Unchanged` — the samples are
+    /// dropped rather than laid out against a guess, the product's last
+    /// preview stands, and the next read asks for the geometry outright.
     fn product_preview_from_probe(
-        &self,
+        &mut self,
         probe: &ProjectProbeResult,
     ) -> Option<(UiProductRef, UiProductPreview)> {
         match probe {
@@ -813,35 +858,42 @@ impl ProjectSync {
                 product,
                 revision,
                 extent,
-                sample_format: WireChannelSampleFormat::U16,
-                sample_layout,
-                display_layout,
+                sample_format,
+                geometry,
                 bytes,
-            }) => {
+            }) if bytes.len()
+                == extent.sample_count() as usize
+                    * UiControlSampleFormat::from_wire(*sample_format).bytes_per_sample() =>
+            {
                 let product_ref = UiProductRef::from_control_product(*product);
-                let cached = self.product_previews.get(&product_ref);
-                let display_layout = display_layout_from_probe_result(display_layout, cached);
+                let geometry = self.control_geometry.apply(product_ref, geometry)?;
                 Some((
                     product_ref,
                     UiProductPreview::ControlNative(UiControlProductPreview {
                         revision: revision.0,
                         extent: *extent,
-                        sample_format: UiControlSampleFormat::U16,
-                        sample_layout: sample_layout.clone(),
-                        display_layout,
+                        sample_format: UiControlSampleFormat::from_wire(*sample_format),
+                        sample_layout: geometry.sample_layout.clone(),
+                        // The cached `Rc`: pointer-stable while the revision
+                        // stands, which is the lamp renderer's repaint key.
+                        display_layout: geometry.display_layout.clone(),
                         bytes: Rc::from(bytes.as_slice()),
                     }),
                 ))
             }
             ProjectProbeResult::ControlProduct(ControlProductProbeResult::Preview {
                 product,
+                extent,
                 sample_format,
+                bytes,
                 ..
             }) => Some((
                 UiProductRef::from_control_product(*product),
-                UiProductPreview::Unsupported {
-                    reason: format!(
-                        "control preview sample format {sample_format:?} is not supported by Studio"
+                UiProductPreview::Error {
+                    message: format!(
+                        "control preview carried {} bytes for {} {sample_format:?} samples",
+                        bytes.len(),
+                        extent.sample_count()
                     ),
                 },
             )),
@@ -965,6 +1017,12 @@ fn overlay_edit_at<'a>(
 /// the classic; the G1 bench walk may tune it.
 pub const INITIAL_SYNC_SLOT_PAGE_NODES: usize = 16;
 
+/// Studio's project read: shapes, nodes (with slots when asked) and runtime.
+///
+/// No `resources` query: Studio reads no resource summary — pixels arrive
+/// through the output-frame and control-product probes — and a runtime
+/// buffer's summary restamps with its content every frame, so asking for it
+/// cost ~400 B of unchanged metadata on every lens read (lean-wire P6).
 pub fn project_read_request(
     since: Option<Revision>,
     include_slots: bool,
@@ -980,10 +1038,6 @@ pub fn project_read_request(
                 level: ReadLevel::Detail,
                 nodes: NodeReadSelection::All,
                 include_slots,
-            }),
-            ProjectReadQuery::Resources(ResourceReadQuery {
-                level: ReadLevel::Summary,
-                payloads: ResourcePayloadRead::None,
             }),
             ProjectReadQuery::Runtime(RuntimeReadQuery),
         ]),
@@ -1281,34 +1335,6 @@ fn ui_projection_origin(origin: WireProjectionOrigin) -> UiProjectionOrigin {
     }
 }
 
-fn control_preview_display_layout(preview: &UiProductPreview) -> Option<&Rc<ControlDisplayLayout>> {
-    match preview {
-        UiProductPreview::ControlNative(preview) => preview.display_layout.as_ref(),
-        _ => None,
-    }
-}
-
-/// The layout the fresh preview should carry. Reuses the cached `Rc` on the
-/// per-tick `Unchanged`/`Omitted` paths — a dome-scale layout is 1500 lamps,
-/// and deep-copying it every tick was a measurable slice of the 2026-08-05
-/// editor-perf trace. Only a genuinely new engine-sent layout allocates.
-fn display_layout_from_probe_result(
-    result: &ControlDisplayLayoutProbeResult,
-    cached: Option<&UiProductPreview>,
-) -> Option<Rc<ControlDisplayLayout>> {
-    match result {
-        ControlDisplayLayoutProbeResult::Layout(layout) => Some(Rc::new(layout.clone())),
-        ControlDisplayLayoutProbeResult::Unchanged { revision } => cached
-            .and_then(control_preview_display_layout)
-            .filter(|layout| layout.revision() == *revision)
-            .cloned(),
-        ControlDisplayLayoutProbeResult::Omitted => {
-            cached.and_then(control_preview_display_layout).cloned()
-        }
-        ControlDisplayLayoutProbeResult::Unsupported { .. } => None,
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1316,7 +1342,10 @@ mod tests {
         ControlDisplayLayout, ControlExtent, ControlLamp2d, ControlLayout2d, ControlProduct,
         ControlSampleEncoding, ControlSampleLayout, ControlSampleSpan, NodeId, VisualProduct,
     };
-    use lpc_wire::ProjectReadProbeEvent;
+    use lpc_wire::{
+        ControlProductGeometry, GeometryDisplayLayout, ProjectReadProbeEvent, RevisionGateRead,
+        RevisionGateResult, WireChannelSampleFormat,
+    };
 
     /// Build a probe-only project-read event stream at `revision`.
     fn probe_events(revision: i64, probes: Vec<ProjectProbeResult>) -> Vec<ProjectReadEvent> {
@@ -1337,11 +1366,11 @@ mod tests {
     }
 
     #[test]
-    fn project_read_request_includes_shapes_nodes_resources_and_runtime() {
+    fn project_read_request_includes_shapes_nodes_and_runtime() {
         let request = project_read_request(Some(Revision::new(12)), true, Vec::new());
 
         assert_eq!(request.since, Some(Revision::new(12)));
-        assert_eq!(request.queries.len(), 4);
+        assert_eq!(request.queries.len(), 3);
         assert_eq!(
             request.queries[0],
             ProjectReadQuery::Shapes(ShapeReadQuery {
@@ -1358,13 +1387,6 @@ mod tests {
         );
         assert_eq!(
             request.queries[2],
-            ProjectReadQuery::Resources(ResourceReadQuery {
-                level: ReadLevel::Summary,
-                payloads: ResourcePayloadRead::None,
-            })
-        );
-        assert_eq!(
-            request.queries[3],
             ProjectReadQuery::Runtime(RuntimeReadQuery)
         );
         assert!(request.probes.is_empty());
@@ -1382,11 +1404,7 @@ mod tests {
         let request = sync.refresh_project_read_request(Vec::new());
         assert_eq!(
             request.probes,
-            vec![ProjectProbeRequest::BindingGraph(
-                BindingGraphProbeRequest {
-                    include_values: true,
-                }
-            )]
+            vec![binding_graph_probe(RevisionGateRead::Always)]
         );
 
         let graph = WireBindingGraph {
@@ -1396,18 +1414,97 @@ mod tests {
         };
         sync.apply_project_read_events(probe_events(
             4,
-            vec![ProjectProbeResult::BindingGraph(
-                BindingGraphProbeResult::Graph(graph.clone()),
+            vec![binding_graph_answer(
+                RevisionGateResult::Changed(graph.clone()),
+                4,
+                Vec::new(),
             )],
         ))
         .expect("apply events");
         assert_eq!(sync.binding_graph(), Some(&graph));
+
+        // The next read gates the structure on the held revision.
+        let request = sync.refresh_project_read_request(Vec::new());
+        assert_eq!(
+            request.probes,
+            vec![binding_graph_probe(RevisionGateRead::IfChanged {
+                known_revision: Some(Revision::new(4)),
+            })]
+        );
 
         // Unsubscribing drops the cached snapshot.
         sync.set_binding_graph_subscribed(false);
         assert_eq!(sync.binding_graph(), None);
         let request = sync.refresh_project_read_request(Vec::new());
         assert!(request.probes.is_empty());
+    }
+
+    /// A steady read carries values only; they land on the held structure.
+    /// Values keyed to another structure revision are dropped — never laid
+    /// onto the held channels — and the next read asks the structure
+    /// `Always`.
+    #[test]
+    fn binding_values_apply_to_their_structure_and_a_mismatch_refetches() {
+        let mut sync = ProjectSync::new();
+        sync.set_binding_graph_subscribed(true);
+        let graph = WireBindingGraph {
+            revision: Revision::new(4),
+            bindings: Vec::new(),
+            channels: vec![lpc_wire::WireBusChannel {
+                scope: None,
+                name: "time".to_string(),
+                kind: None,
+                providers: Vec::new(),
+                consumers: Vec::new(),
+                primary_visual: false,
+            }],
+        };
+        let value = |value: f32| WireBusChannelValue::Value(lpc_model::LpValue::F32(value));
+        sync.apply_project_read_events(probe_events(
+            4,
+            vec![binding_graph_answer(
+                RevisionGateResult::Changed(graph.clone()),
+                4,
+                vec![value(0.25)],
+            )],
+        ))
+        .expect("apply events");
+
+        sync.apply_project_read_events(probe_events(
+            5,
+            vec![binding_graph_answer(
+                RevisionGateResult::Unchanged {
+                    revision: Revision::new(4),
+                },
+                4,
+                vec![value(0.5)],
+            )],
+        ))
+        .expect("apply events");
+        assert_eq!(sync.binding_graph(), Some(&graph));
+        assert_eq!(sync.binding_graph_values(), &[value(0.5)]);
+
+        sync.apply_project_read_events(probe_events(
+            6,
+            vec![binding_graph_answer(
+                RevisionGateResult::Unchanged {
+                    revision: Revision::new(4),
+                },
+                9,
+                vec![value(0.75)],
+            )],
+        ))
+        .expect("apply events");
+        assert_eq!(
+            sync.binding_graph_values(),
+            &[value(0.5)],
+            "values keyed to another structure are never applied"
+        );
+        let request = sync.refresh_project_read_request(Vec::new());
+        assert_eq!(
+            request.probes,
+            vec![binding_graph_probe(RevisionGateRead::Always)]
+        );
     }
 
     #[test]
@@ -1434,11 +1531,7 @@ mod tests {
         );
         assert_eq!(
             requests[0].probes,
-            vec![ProjectProbeRequest::BindingGraph(
-                BindingGraphProbeRequest {
-                    include_values: true,
-                }
-            )],
+            vec![binding_graph_probe(RevisionGateRead::Always)],
             "binding-graph probe must ride the staged initial sync after begin_initial_sync"
         );
     }
@@ -2012,8 +2105,8 @@ mod tests {
             vec![ProjectProbeRequest::ControlProduct(
                 ControlProductProbeRequest {
                     product,
-                    sample_format: WireChannelSampleFormat::U16,
-                    display_layout: ControlDisplayLayoutRead::Always,
+                    sample_format: WireChannelSampleFormat::U8,
+                    geometry: RevisionGateRead::Always,
                 },
             )]
         );
@@ -2024,7 +2117,7 @@ mod tests {
     }
 
     #[test]
-    fn control_product_preview_reuses_cached_display_layout_revision() {
+    fn control_product_preview_reuses_cached_geometry_revision() {
         let mut sync = ProjectSync::new();
         let product = ControlProduct::new(NodeId::new(7), 2, ControlExtent::new(1, 3));
         let product_ref = UiProductRef::from_control_product(product);
@@ -2050,7 +2143,7 @@ mod tests {
                 radius: 0.1,
             }],
         ));
-        let first_bytes = vec![0, 0, 255, 255, 0, 0];
+        let first_bytes = vec![0, 255, 0];
         let _ = sync.refresh_project_read_request(vec![product_ref]);
 
         sync.apply_project_read_events(probe_events(
@@ -2060,9 +2153,12 @@ mod tests {
                     product,
                     revision: Revision::new(9),
                     extent: product.preferred_extent(),
-                    sample_format: WireChannelSampleFormat::U16,
-                    sample_layout: sample_layout.clone(),
-                    display_layout: ControlDisplayLayoutProbeResult::Layout(display_layout.clone()),
+                    sample_format: WireChannelSampleFormat::U8,
+                    geometry: RevisionGateResult::Changed(ControlProductGeometry {
+                        revision: Revision::new(12),
+                        sample_layout: sample_layout.clone(),
+                        display_layout: GeometryDisplayLayout::Layout(display_layout.clone()),
+                    }),
                     bytes: first_bytes,
                 },
             )],
@@ -2076,15 +2172,15 @@ mod tests {
             vec![ProjectProbeRequest::ControlProduct(
                 ControlProductProbeRequest {
                     product,
-                    sample_format: WireChannelSampleFormat::U16,
-                    display_layout: ControlDisplayLayoutRead::IfChanged {
+                    sample_format: WireChannelSampleFormat::U8,
+                    geometry: RevisionGateRead::IfChanged {
                         known_revision: Some(Revision::new(12)),
                     },
                 },
             )]
         );
 
-        let second_bytes = vec![255, 255, 0, 0, 0, 0];
+        let second_bytes = vec![255, 0, 0];
         sync.apply_project_read_events(probe_events(
             10,
             vec![ProjectProbeResult::ControlProduct(
@@ -2092,9 +2188,8 @@ mod tests {
                     product,
                     revision: Revision::new(10),
                     extent: product.preferred_extent(),
-                    sample_format: WireChannelSampleFormat::U16,
-                    sample_layout: sample_layout.clone(),
-                    display_layout: ControlDisplayLayoutProbeResult::Unchanged {
+                    sample_format: WireChannelSampleFormat::U8,
+                    geometry: RevisionGateResult::Unchanged {
                         revision: Revision::new(12),
                     },
                     bytes: second_bytes.clone(),
@@ -2108,11 +2203,87 @@ mod tests {
             Some(&UiProductPreview::ControlNative(UiControlProductPreview {
                 revision: 10,
                 extent: product.preferred_extent(),
-                sample_format: UiControlSampleFormat::U16,
+                sample_format: UiControlSampleFormat::U8,
                 sample_layout,
                 display_layout: Some(Rc::new(display_layout)),
                 bytes: Rc::from(second_bytes.as_slice()),
             }))
+        );
+    }
+
+    /// A preview whose bytes contradict its own format (six bytes for three
+    /// 8-bit samples) is an error, never drawn as garbage.
+    #[test]
+    fn a_preview_whose_bytes_contradict_its_format_is_an_error() {
+        let mut sync = ProjectSync::new();
+        let product = ControlProduct::new(NodeId::new(7), 2, ControlExtent::new(1, 3));
+        let product_ref = UiProductRef::from_control_product(product);
+        let _ = sync.refresh_project_read_request(vec![product_ref]);
+
+        sync.apply_project_read_events(probe_events(
+            9,
+            vec![ProjectProbeResult::ControlProduct(
+                ControlProductProbeResult::Preview {
+                    product,
+                    revision: Revision::new(9),
+                    extent: product.preferred_extent(),
+                    sample_format: WireChannelSampleFormat::U8,
+                    geometry: RevisionGateResult::Omitted,
+                    bytes: vec![0, 0, 255, 255, 0, 0],
+                },
+            )],
+        ))
+        .unwrap();
+
+        assert!(matches!(
+            sync.product_preview(&product_ref),
+            Some(UiProductPreview::Error { .. })
+        ));
+    }
+
+    /// Samples with no cached geometry behind them — here an `Unchanged`
+    /// the lens never had the bundle for (a reconnect's first read, say) —
+    /// are not drawn against a guess: the preview stays as it was, and the
+    /// next read asks for the geometry outright.
+    #[test]
+    fn control_samples_without_cached_geometry_are_not_drawn() {
+        let mut sync = ProjectSync::new();
+        let product = ControlProduct::new(NodeId::new(7), 2, ControlExtent::new(1, 3));
+        let product_ref = UiProductRef::from_control_product(product);
+        let _ = sync.refresh_project_read_request(vec![product_ref]);
+
+        sync.apply_project_read_events(probe_events(
+            9,
+            vec![ProjectProbeResult::ControlProduct(
+                ControlProductProbeResult::Preview {
+                    product,
+                    revision: Revision::new(9),
+                    extent: product.preferred_extent(),
+                    sample_format: WireChannelSampleFormat::U8,
+                    geometry: RevisionGateResult::Unchanged {
+                        revision: Revision::new(12),
+                    },
+                    bytes: vec![0, 255, 0],
+                },
+            )],
+        ))
+        .unwrap();
+
+        assert_eq!(
+            sync.product_preview(&product_ref),
+            Some(&UiProductPreview::Pending),
+            "no geometry, no picture"
+        );
+        let request = sync.refresh_project_read_request(vec![product_ref]);
+        assert_eq!(
+            request.probes,
+            vec![ProjectProbeRequest::ControlProduct(
+                ControlProductProbeRequest {
+                    product,
+                    sample_format: WireChannelSampleFormat::U8,
+                    geometry: RevisionGateRead::Always,
+                },
+            )]
         );
     }
 
@@ -2617,5 +2788,32 @@ mod tests {
             None,
             "stranded descendants drop their base values with their entries"
         );
+    }
+
+    /// The lens's binding-graph probe, with values, gating the structure as
+    /// `structure` says.
+    fn binding_graph_probe(structure: RevisionGateRead) -> ProjectProbeRequest {
+        ProjectProbeRequest::BindingGraph(BindingGraphProbeRequest {
+            structure,
+            include_values: true,
+        })
+    }
+
+    /// A binding-graph answer: `structure`, and `values` keyed to
+    /// `values_revision`.
+    fn binding_graph_answer(
+        structure: RevisionGateResult<WireBindingGraph>,
+        values_revision: i64,
+        values: Vec<WireBusChannelValue>,
+    ) -> ProjectProbeResult {
+        ProjectProbeResult::BindingGraph(BindingGraphProbeResult::Graph(
+            lpc_wire::WireBindingGraphRead {
+                structure,
+                values: Some(lpc_wire::WireBusChannelValues {
+                    structure_revision: Revision::new(values_revision),
+                    values,
+                }),
+            },
+        ))
     }
 }

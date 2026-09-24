@@ -95,10 +95,15 @@ fn probe_graph(panel: bool) -> lpc_wire::WireBindingGraph {
     let probe = engine.read_project_binding_graph_probe(
         registry,
         lpc_wire::BindingGraphProbeRequest {
+            structure: lpc_wire::RevisionGateRead::Always,
             include_values: false,
         },
     );
-    let lpc_wire::BindingGraphProbeResult::Graph(graph) = probe else {
+    let lpc_wire::BindingGraphProbeResult::Graph(lpc_wire::WireBindingGraphRead {
+        structure: lpc_wire::RevisionGateResult::Changed(graph),
+        ..
+    }) = probe
+    else {
         panic!("binding graph probe failed");
     };
     graph

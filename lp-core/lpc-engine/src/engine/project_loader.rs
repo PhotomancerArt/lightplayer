@@ -4607,11 +4607,16 @@ mod tests {
         let result = engine.read_project_binding_graph_probe(
             project_registry,
             lpc_wire::BindingGraphProbeRequest {
+                structure: lpc_wire::RevisionGateRead::Always,
                 include_values: false,
             },
         );
 
-        let lpc_wire::BindingGraphProbeResult::Graph(graph) = result else {
+        let lpc_wire::BindingGraphProbeResult::Graph(lpc_wire::WireBindingGraphRead {
+            structure: lpc_wire::RevisionGateResult::Changed(graph),
+            ..
+        }) = result
+        else {
             panic!("expected binding graph");
         };
         let channel = |name: &str| {
@@ -5397,10 +5402,15 @@ mod tests {
         let result = engine.read_project_binding_graph_probe(
             project_registry,
             lpc_wire::BindingGraphProbeRequest {
+                structure: lpc_wire::RevisionGateRead::Always,
                 include_values: false,
             },
         );
-        let lpc_wire::BindingGraphProbeResult::Graph(graph) = result else {
+        let lpc_wire::BindingGraphProbeResult::Graph(lpc_wire::WireBindingGraphRead {
+            structure: lpc_wire::RevisionGateResult::Changed(graph),
+            ..
+        }) = result
+        else {
             panic!("expected binding graph");
         };
 

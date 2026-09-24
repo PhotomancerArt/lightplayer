@@ -646,6 +646,18 @@ studio-dev-emu IMAGE="": install-wasm32-target studio-firmware-package-served
     echo
     just studio-dev
 
+# Size a wire tap. Record one by starting the emulator with the tap on:
+#
+#   LP_EMU_WIRE_TAP=/tmp/tap just studio-dev-emu     # use Studio, then stop
+#   just wire-tap-stat /tmp/tap/c6-a.tap             # sizes per message kind
+#   just wire-tap-stat /tmp/tap/c6-a.tap --ledger --skip-seconds 25
+#
+# `--ledger [lens|card|sync|heartbeat|<kind>]` prints bytes by JSON path with
+# a distinct/units column (structure resent unchanged). Sizes are exact; rates
+# are the emulator's. The script's docstring is the manual.
+wire-tap-stat tap *args:
+    python3 scripts/wire-tap/tapstat.py {{ tap }} {{ args }}
+
 studio-dev: install-wasm32-target studio-firmware-package-served
     #!/usr/bin/env bash
     set -euo pipefail

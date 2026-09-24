@@ -103,6 +103,7 @@ and is drained `IN_DRAIN_LATENCY_US` = 24,000 cycles later:
 |---|---:|---:|---:|---|
 | `e226fb283` (main) | 4,372,295 | 4,396,155 (+23,860) | 4,396,295 (+24,000) | set → stale: `int_raw = 0x30a`, packet dropped |
 | PR #794 | 4,378,368 | 4,404,669 (+26,301) | 4,402,368 (+24,000) | clear: `int_raw = 0x302`, nothing dropped |
+| PR #794 merged over lean-wire (`ebf63d463`), re-measured the same day | 4,348,829 | 4,375,109 (+26,280) | 4,372,829 (+24,000) | clear: nothing dropped (`1619 bytes reached the host; 0 bytes were merely tried`) |
 
 On main the clear won by **140 cycles**; the branch spends 2,441 more
 cycles between the last polled packet's commit and the io_task's first
@@ -110,6 +111,11 @@ poll (not attributed further; the branch changed the server loop that
 runs on that main task), so the drain lands
 first and the clear wipes it. Read off `--trace-block USB_DEVICE` of both
 images, direct load, `--usb-host attached`, 2 s.
+
+Lean-wire (PR #791) moved the whole prefix ~30k cycles earlier but left the
+gap where it was (+26,280 against +26,301), so the merged image stays on the
+no-drop side by 2,280 cycles and the three hello pins hold at 0 unchanged. Same
+trace, the merged tree's image.
 
 So the hello trigger is a timing race with a 100 µs window, and which side
 of it an image falls is layout, not design. **The mechanism is unchanged

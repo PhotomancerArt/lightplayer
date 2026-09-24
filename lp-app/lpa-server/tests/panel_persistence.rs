@@ -24,7 +24,8 @@ use lpa_server::{LpGraphics, LpServer, Project};
 use lpc_model::{AsLpPath, LpPath, LpPathBuf, LpValue};
 use lpc_shared::output::MemoryOutputProvider;
 use lpc_wire::{
-    BindingGraphProbeRequest, BindingGraphProbeResult, WireBindingGraph, WirePanelClearRequest,
+    BindingGraphProbeRequest, BindingGraphProbeResult, RevisionGateRead, RevisionGateResult,
+    WireBindingGraph, WireBindingGraphRead, WireBusChannelValue, WirePanelClearRequest,
     WirePanelWriteRequest, WireProjectHandle, WireScopeRef,
 };
 use lpfs::{LpFs, LpFsMemory, LpFsView};
@@ -357,7 +358,7 @@ impl Harness {
     }
 
     fn scope(&mut self) -> WireScopeRef {
-        let graph = self.probe();
+        let (graph, _) = self.probe();
         graph
             .channels
             .iter()
@@ -377,27 +378,30 @@ impl Harness {
         });
     }
 
-    fn probe(&mut self) -> WireBindingGraph {
+    /// The whole binding graph, and each channel's value in channel order.
+    fn probe(&mut self) -> (WireBindingGraph, Vec<WireBusChannelValue>) {
         let (engine, registry) = self.project().runtime_read_parts();
         let result = engine.read_project_binding_graph_probe(
             registry,
             BindingGraphProbeRequest {
+                structure: RevisionGateRead::Always,
                 include_values: true,
             },
         );
-        let BindingGraphProbeResult::Graph(graph) = result else {
-            panic!("expected graph result");
+        let BindingGraphProbeResult::Graph(WireBindingGraphRead {
+            structure: RevisionGateResult::Changed(graph),
+            values: Some(values),
+        }) = result
+        else {
+            panic!("expected the whole graph with values, got {result:?}");
         };
-        graph
+        (graph, values.values)
     }
 
     fn channel_value(&mut self, channel: &str) -> Option<LpValue> {
-        self.probe()
-            .channels
-            .iter()
-            .find(|c| c.name == channel)
-            .and_then(|c| c.value.as_ref())
-            .and_then(|value| value.value.clone())
+        let (graph, values) = self.probe();
+        let index = graph.channels.iter().position(|c| c.name == channel)?;
+        values[index].value().cloned()
     }
 
     fn state_path(&self) -> LpPathBuf {

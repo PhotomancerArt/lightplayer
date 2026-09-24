@@ -292,6 +292,13 @@ pub struct OutputNode {
     /// fixture's `FixtureDisplayLayoutKey` idiom: stamp on change, not per
     /// frame.
     placement_revision: Revision,
+    /// Revision stamped the last time [`Self::published_sample_layout`]
+    /// CHANGED — the same stamp-on-change idiom as `placement_revision`.
+    ///
+    /// The published-frame read gates the sample layout with the rest of the
+    /// output's geometry, and a lamp-count or color-order change moves the
+    /// layout without moving the placements, so it needs its own stamp.
+    sample_layout_revision: Revision,
     /// How many nodes were faulted the last time this output painted the
     /// fault pattern, or `None` when it did not.
     ///
@@ -327,6 +334,7 @@ impl OutputNode {
             published_sample_layout: None,
             published_fragments: Vec::new(),
             placement_revision: Revision::default(),
+            sample_layout_revision: Revision::default(),
             fault_pattern_nodes: None,
             smoothing: None,
             scatter_runs: Vec::new(),
@@ -740,7 +748,14 @@ impl OutputNode {
             }
         }
 
-        self.published_sample_layout = Some(ControlLayout { spans });
+        if self
+            .published_sample_layout
+            .as_ref()
+            .is_none_or(|published| published.spans != spans)
+        {
+            self.published_sample_layout = Some(ControlLayout { spans });
+            self.sample_layout_revision = ctx.revision();
+        }
         if self.published_fragments != fragments {
             self.published_fragments = fragments.to_vec();
             self.placement_revision = ctx.revision();
@@ -1572,6 +1587,10 @@ impl NodeRuntime for OutputNode {
 
     fn runtime_output_placement_revision(&self) -> Revision {
         self.placement_revision
+    }
+
+    fn runtime_output_sample_layout_revision(&self) -> Revision {
+        self.sample_layout_revision
     }
 
     fn consume(&mut self, ctx: &mut TickContext<'_>) -> Result<(), NodeError> {

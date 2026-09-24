@@ -861,6 +861,7 @@ just walk-esp32c6-emu                           # THE WALK (see below) — minut
 just test-emu-c6                                # its gates (builds firmware)
 just heap-budget-check-chips                    # the firmware's own heap ledger, ratcheted
 just emu-c6 <elf> --strict-bus --timeout 6s     # the workshop binary, thirty flags
+LP_EMU_WIRE_TAP=<dir> just studio-dev-emu; just wire-tap-stat <dir>/c6-a.tap --ledger   # exact wire bytes of a real Studio session, by JSON path — the tool for any wire-size claim
 just bench-emu-c6                               # its speed probe (an oracle, never a gate)
 scripts/emu/oracle-sweep.sh <bin-a> <bin-b>     # the identity oracle ACROSS BINARIES: uart + cycles + decoded FRAMES
 just test-emu-jit-image                         # the identity oracle WITHIN one binary: --jit vs --interpreter (CI runs this cell)

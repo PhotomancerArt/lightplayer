@@ -27,8 +27,9 @@ impl Engine {
     ///
     /// A root is included only when its owning revision is newer than `since`:
     /// `.def` roots gate on the node-def entry revision
-    /// ([`lpc_model::NodeDefEntry::revision`]), `.state` roots gate on the node
-    /// runtime entry `changed_at`. The whole [`WireSlotRootSnapshot`] is sent
+    /// ([`lpc_model::NodeDefEntry::revision`]), `.state` roots on when their
+    /// content last changed ([`super::state_root_stamps`] — call
+    /// [`Engine::refresh_state_root_stamps`] first). The whole [`WireSlotRootSnapshot`] is sent
     /// when the gate passes (no sub-root patching — that is M6). The `since == 0`
     /// bulk-sync guard includes every live root so a fresh read is complete.
     ///
@@ -63,25 +64,42 @@ impl Engine {
                     None
                 };
 
-                let state_root = if root_changed_since(since, entry.changed_at())
-                    && let NodeEntryState::Alive(node) = entry.state.value()
-                    && let Some(state) = node.runtime_state_slots()
-                {
-                    Some(WireSlotRootSnapshot {
-                        name: node_state_root_name(entry.id),
-                        shape: state.shape_id(),
-                        data: wire_slot_data_from_slot_access(
-                            self.slot_shapes(),
-                            state.shape_id(),
-                            state.data(),
-                        ),
-                    })
-                } else {
-                    None
-                };
+                let state_root =
+                    if state_root_changed_since(since, self.state_root_changed_at(entry.id))
+                        && let NodeEntryState::Alive(node) = entry.state.value()
+                        && let Some(state) = node.runtime_state_slots()
+                    {
+                        Some(WireSlotRootSnapshot {
+                            name: node_state_root_name(entry.id),
+                            shape: state.shape_id(),
+                            data: wire_slot_data_from_slot_access(
+                                self.slot_shapes(),
+                                state.shape_id(),
+                                state.data(),
+                            ),
+                        })
+                    } else {
+                        None
+                    };
 
                 def_root.into_iter().chain(state_root)
             })
+    }
+}
+
+/// A state root's inclusion test: its content changed after `since`
+/// (`content_changed_at`, from [`Engine::refresh_state_root_stamps`]). A
+/// root no read has hashed yet is always due.
+///
+/// Not the entry's `changed_at`: every engine-dispatched call puts the
+/// runtime back into its entry and stamps it, every frame, so that gate sent
+/// every alive node's root on every read. A node that fails and comes back
+/// needs no resend either: the mirror keeps a root until its node is removed,
+/// and a revived node's first hash is a fresh stamp.
+fn state_root_changed_since(since: Revision, content_changed_at: Option<Revision>) -> bool {
+    match content_changed_at {
+        Some(content_changed_at) => root_changed_since(since, content_changed_at),
+        None => true,
     }
 }
 
