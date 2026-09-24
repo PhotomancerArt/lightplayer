@@ -22,3 +22,10 @@ overflow-checks = false
 
 [profile.dev]
 opt-level = "s"
+
+# `mach` reaches lpc-wire (through lpc-shared), whose serializer needs the
+# root workspace's vendored forks: a separate workspace does not inherit the
+# root `[patch]` table, so it is repeated here for the two it needs.
+[patch.crates-io]
+ser-write = { path = "../../third_party/ser-write" }
+ser-write-json = { path = "../../third_party/ser-write-json" }

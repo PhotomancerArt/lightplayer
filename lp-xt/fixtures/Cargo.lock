@@ -273,8 +273,6 @@ checksum = "04d056b875a9d2e6cb9a61d127afee9ac5999b9f87bcb32079d1318e505be714"
 [[package]]
 name = "ser-write"
 version = "0.3.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "167f92a96f0940635714bd76ee19d502a12540bc4ab7c1c6a28356e62f2a8098"
 dependencies = [
  "tinyvec",
 ]
@@ -282,8 +280,6 @@ dependencies = [
 [[package]]
 name = "ser-write-json"
 version = "0.3.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1b968997189e9b92e0d7f5ce4f2df3d94efa6534a331511137b1083b9b77d532"
 dependencies = [
  "ryu-js",
  "ser-write",
