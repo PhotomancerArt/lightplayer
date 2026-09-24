@@ -1,7 +1,7 @@
 ---
 status: fixed
 found: 2026-09-23      # how: hardware-walk (the BLE spike, spikes/ble-lab)
-fixed: db129b4cf
+fixed: a69d67cb4
 area: fw-esp32c6 board init (board/esp32c6/init.rs) — no board-specific radio setup
 class: assumed-context
 related:
