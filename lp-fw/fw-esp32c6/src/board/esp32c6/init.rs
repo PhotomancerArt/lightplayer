@@ -57,6 +57,11 @@ pub fn init_board() -> (
     let gpio4 = peripherals.GPIO4;
     let gpio20 = peripherals.GPIO20;
     let wifi = peripherals.WIFI;
+    // The BLE controller's peripheral, beside WIFI. Parked rather than added
+    // to the tuple every harness destructures; the product boot takes it
+    // with [`take_bt`] only when the device store enables BLE.
+    #[cfg(all(feature = "ble", feature = "server", not(fw_harness)))]
+    critical_section::with(|cs| BT.borrow_ref_mut(cs).replace(peripherals.BT));
 
     // Set up software interrupt and timer for Embassy runtime
     let sw_int = SoftwareInterruptControl::new(peripherals.SW_INTERRUPT);
@@ -69,6 +74,17 @@ pub fn init_board() -> (
     (
         sw_int, timg0, rmt, usb_device, gpio18, flash, gpio4, gpio20, wifi, rwdt,
     )
+}
+
+#[cfg(all(feature = "ble", feature = "server", not(fw_harness)))]
+static BT: critical_section::Mutex<core::cell::RefCell<Option<esp_hal::peripherals::BT<'static>>>> =
+    critical_section::Mutex::new(core::cell::RefCell::new(None));
+
+/// The BT peripheral [`init_board`] parked, once. `None` before `init_board`
+/// or after the first take.
+#[cfg(all(feature = "ble", feature = "server", not(fw_harness)))]
+pub fn take_bt() -> Option<esp_hal::peripherals::BT<'static>> {
+    critical_section::with(|cs| BT.borrow_ref_mut(cs).take())
 }
 
 /// Start Embassy runtime

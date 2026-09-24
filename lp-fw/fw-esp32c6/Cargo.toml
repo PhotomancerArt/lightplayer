@@ -8,7 +8,7 @@ license.workspace = true
 rust-version.workspace = true
 
 [features]
-default = ["esp32c6", "server", "radio"]
+default = ["esp32c6", "server", "radio", "ble"]
 esp32c6 = [
     "esp-backtrace/esp32c6",
     "esp-bootloader-esp-idf/esp32c6",
@@ -33,6 +33,25 @@ radio = [
     "esp-rtos/esp-alloc",
     "esp-rtos/esp-radio",
 ]  # Root-owned ESP-NOW radio capability
+# The BLE link (plan `ble-remote-control` M4, docs/adr/2026-09-24-ble-transport.md):
+# the wire over a Nordic-UART GATT service, one untrusted link per connection.
+# In the default image, but INERT until the device store (`/.lp/access.json`)
+# says `bleEnabled: true` — read once at boot; nothing initialises the BLE
+# controller otherwise, so a BLE-off board (and every emulated one) runs as
+# before. `esp-radio/coex` is what lets BLE share the one radio with
+# Wi-Fi/ESP-NOW (M2 Run G). Measure both sides of this gate with
+# `just fw-esp32c6-size-check` (on) and the same build with
+# `--no-default-features --features esp32c6,server,radio` (off).
+ble = [
+    "radio",
+    "esp-radio/ble",
+    "esp-radio/coex",
+    "dep:trouble-host",
+    "dep:bt-hci",
+    "dep:heapless",
+    "dep:static_cell",
+    "dep:embassy-sync-07",
+]
 naga = ["lpa-server/naga"]
 # NOTE: the former `ws281x_2blocks` feature is gone: the RMT block plan is now
 # computed at driver init from the board manifest's declared WS281x channel
@@ -200,7 +219,7 @@ test_espnow_broadcast = ["dep:fw-checks", "fw-checks/check-espnow-broadcast", "r
 # sent, and prints heap at each bring-up stage. No server, no WiFi init — it
 # answers "can this chip, on this esp-radio, talk BLE at all, and what does
 # the controller cost". Never shipped.
-test_ble = ["radio", "esp-radio/ble", "dep:trouble-host", "dep:bt-hci", "dep:heapless", "dep:static_cell", "dep:embassy-sync-07"]
+test_ble = ["ble"]
 
 # FIXTURE builds — test scaffolding, never shipped. Make this CURRENT
 # build misreport its hello so a current Studio classifies it Incompatible,
@@ -241,7 +260,7 @@ esp-rtos = { version = "0.3.0", features = ["embassy", "log-04"] }
 esp-radio = { version = "0.18.0", optional = true, features = ["esp-now", "log-04", "unstable", "wifi"] }
 esp-println = { version = "0.17.0", default-features = false, features = ["esp32c6", "jtag-serial", "log-04"] }
 esp-alloc = { version = "0.10.0", features = ["internal-heap-stats"] }
-# BLE spike only (`test_ble`). trouble-host 0.6 is the release on bt-hci 0.8,
+# The BLE link (`ble`) and its spike (`test_ble`). trouble-host 0.6 is the release on bt-hci 0.8,
 # which is what esp-radio 0.18's `BleConnector` implements.
 trouble-host = { version = "0.6.0", optional = true, default-features = false, features = ["derive", "gatt", "peripheral", "log", "connection-params-update", "default-packet-pool", "default-packet-pool-mtu-255"] }
 bt-hci = { version = "0.8.0", optional = true, default-features = false }

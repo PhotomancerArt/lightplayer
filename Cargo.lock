@@ -4006,6 +4006,7 @@ dependencies = [
 name = "fw-esp32-common"
 version = "40.0.0"
 dependencies = [
+ "critical-section",
  "embassy-futures",
  "embassy-sync 0.8.0",
  "embassy-time",

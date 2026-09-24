@@ -30,6 +30,7 @@ use lpc_shared::stats::WindowedStatsCollector;
 use lpc_shared::time::TimeProvider;
 use lpc_shared::transport::ServerTransport;
 
+use crate::link_upkeep::LinkUpkeep;
 use crate::time::Esp32TimeProvider;
 
 /// Performance logging interval.
@@ -63,7 +64,7 @@ const FPS_STATS_WINDOW_MS: u64 = 5000;
 /// second, separate copy that only the `bench_render_loop` call site in
 /// `fw-esp32c6/src/main.rs` ever calls. Keep the two loop bodies in sync by
 /// hand if either changes.
-pub async fn run_server_loop<T: ServerTransport>(
+pub async fn run_server_loop<T: ServerTransport + LinkUpkeep>(
     mut server: LpServer,
     mut transport: T,
     time_provider: Esp32TimeProvider,
@@ -104,6 +105,10 @@ pub async fn run_server_loop<T: ServerTransport>(
 
     loop {
         let frame_start = time_provider.now_ms();
+
+        // A link that joined since the last frame (a radio connection) gets
+        // its own hello before anything else is sent to it.
+        send_owed_hellos(&server, &mut transport).await;
 
         // Collect incoming messages (non-blocking)
         let receive_start = time_provider.now_ms();
@@ -236,6 +241,10 @@ pub async fn run_server_loop<T: ServerTransport>(
         // Feed the RWDT while the loop and the I/O task are both alive; a
         // hang anywhere stops the feeding and the watchdog resets us with
         // the recovery frame stack as the blame record.
+        // Link policy that needs the server and the clock (the radio links'
+        // login deadline).
+        transport.upkeep(&server, current_time);
+
         feed_watchdog(current_time);
 
         // Yield to Embassy runtime (allows other tasks to run)
@@ -248,6 +257,20 @@ pub async fn run_server_loop<T: ServerTransport>(
 /// function (not an `async` one, not a closure over the loop's state) so it
 /// adds nothing to the loop future's frame — see [`run_server_loop`] on why
 /// that matters on the C6.
+/// The hello each newly opened link is owed (a single-link transport never
+/// owes one). A failure is logged and not retried: the link's own `Hello`
+/// request still gets an answer.
+async fn send_owed_hellos<T: ServerTransport + LinkUpkeep>(server: &LpServer, transport: &mut T) {
+    for link in transport.take_opened_links() {
+        if let Err(e) = fw_core::send_hello_to_link(server, transport, link).await {
+            log::warn!(
+                "run_server_loop: failed to send hello to {}: {e:?}",
+                link.id
+            );
+        }
+    }
+}
+
 #[inline(never)]
 fn heartbeat_status(
     server: &LpServer,
@@ -326,7 +349,7 @@ impl FrameBudget {
 /// this — the shipped path calls [`run_server_loop`], a separate copy of the
 /// same loop, not this one. See that function's doc comment for why they are
 /// two copies instead of one wrapping the other.
-pub async fn run_server_loop_bounded<T: ServerTransport>(
+pub async fn run_server_loop_bounded<T: ServerTransport + LinkUpkeep>(
     mut server: LpServer,
     mut transport: T,
     time_provider: Esp32TimeProvider,
@@ -366,6 +389,10 @@ pub async fn run_server_loop_bounded<T: ServerTransport>(
 
     loop {
         let frame_start = time_provider.now_ms();
+
+        // A link that joined since the last frame (a radio connection) gets
+        // its own hello before anything else is sent to it.
+        send_owed_hellos(&server, &mut transport).await;
 
         // Collect incoming messages (non-blocking)
         let receive_start = time_provider.now_ms();
@@ -516,6 +543,10 @@ pub async fn run_server_loop_bounded<T: ServerTransport>(
         // Feed the RWDT while the loop and the I/O task are both alive; a
         // hang anywhere stops the feeding and the watchdog resets us with
         // the recovery frame stack as the blame record.
+        // Link policy that needs the server and the clock (the radio links'
+        // login deadline).
+        transport.upkeep(&server, current_time);
+
         feed_watchdog(current_time);
 
         // Yield to Embassy runtime (allows other tasks to run)

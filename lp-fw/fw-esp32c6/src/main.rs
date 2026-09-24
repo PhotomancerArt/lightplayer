@@ -63,6 +63,8 @@ fn on_alloc_error(layout: Layout) -> ! {
     recovery::panic_path::stage_oom_and_reset(layout)
 }
 
+#[cfg(all(feature = "ble", not(fw_harness)))]
+mod ble;
 mod board;
 #[cfg(not(fw_harness))]
 use fw_esp32_common::boot;
@@ -246,10 +248,22 @@ fn esp32_memory_stats() -> Option<(u32, u32)> {
     ))
 }
 
+/// The server's transport: USB alone, or — with the `ble` feature — the link
+/// mux carrying USB plus up to two BLE links. The mux is there whether or not
+/// the device store turns BLE on; with BLE off no radio link ever opens and
+/// every frame takes the USB path it always did.
+#[cfg(all(feature = "ble", not(fw_harness)))]
+type AppTransport = fw_esp32_common::radio_link::LinkMuxTransport<
+    transport::StreamingMessageRouterTransport,
+    embassy_time::Delay,
+>;
+#[cfg(all(not(feature = "ble"), not(fw_harness)))]
+type AppTransport = transport::StreamingMessageRouterTransport;
+
 #[cfg(not(fw_harness))]
 struct FirmwareApp {
     server: LpServer,
-    transport: transport::StreamingMessageRouterTransport,
+    transport: AppTransport,
     time_provider: Esp32TimeProvider,
     watchdog: recovery::watchdog::WatchdogFeeder,
     /// What `auto_load_project` cost, in cycles — parse, resolve, map and
@@ -393,7 +407,7 @@ fn boot_firmware(spawner: embassy_executor::Spawner) -> FirmwareApp {
     // Before any radio init: the XIAO C6's RF switch is dead until its pins
     // are driven. Keyed on the manifest in effect, compiled-in fallback
     // included; any other board id is left alone.
-    apply_board_quirks(hardware_manifest.board_id());
+    let quirks_applied = apply_board_quirks(hardware_manifest.board_id());
     let hardware_registry = Rc::new(HwRegistry::new(hardware_manifest));
     let mut hardware_system = HardwareSystem::new(Rc::clone(&hardware_registry));
     // How many outputs appear is decided in one place: the board manifest's
@@ -435,6 +449,32 @@ fn boot_firmware(spawner: embassy_executor::Spawner) -> FirmwareApp {
     ))]
     let _ = wifi;
     let hardware_system = Rc::new(hardware_system);
+
+    // BLE (PQ2): off until the device store enables it, read once here. After
+    // the Wi-Fi/ESP-NOW bring-up above (the order M2's Run G proved), after
+    // the board quirks (the token), before the server exists. A board without
+    // the flag never touches the BLE controller.
+    #[cfg(feature = "ble")]
+    let ble_started = {
+        let store = lpa_server::access_store::read_device_store(base_fs.as_ref());
+        match (store.ble_enabled, board::esp32c6::init::take_bt()) {
+            (true, Some(bt)) => {
+                log::info!("[ble] enabled by the device store — starting");
+                ble::start(spawner, bt, quirks_applied);
+                true
+            }
+            (true, None) => {
+                log::error!("[ble] enabled, but the BT peripheral is gone — BLE off");
+                false
+            }
+            (false, _) => {
+                log::info!("[ble] off (device store: bleEnabled=false)");
+                false
+            }
+        }
+    };
+    #[cfg(not(feature = "ble"))]
+    let _ = quirks_applied;
 
     // Initialize output provider
     esp_println::println!("[INIT] Creating output provider...");
@@ -557,6 +597,21 @@ fn boot_firmware(spawner: embassy_executor::Spawner) -> FirmwareApp {
     // Boot frame ends here; the boot-complete milestone is marked by the
     // server loop after the first successful frame.
     drop(boot_guard);
+
+    // USB plus the radio links. The advertised-name hook only when BLE runs.
+    #[cfg(feature = "ble")]
+    let transport = {
+        let mux = fw_esp32_common::radio_link::LinkMuxTransport::new(
+            transport,
+            &fw_esp32_common::radio_link::RADIO_LINK_PORT,
+            embassy_time::Delay,
+        );
+        if ble_started {
+            mux.with_upkeep_hook(ble::refresh_advertised_name)
+        } else {
+            mux
+        }
+    };
 
     FirmwareApp {
         server,
