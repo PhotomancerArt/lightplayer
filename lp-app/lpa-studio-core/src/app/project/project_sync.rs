@@ -1076,16 +1076,15 @@ fn product_preview_from_probe(
                 reason: format!("visual preview format {format:?} is not supported by Studio"),
             },
         )),
+        // The GPU tier reads a probe back one read late: `GpuResident` is
+        // the answer before this product's first frame has landed, and the
+        // next refresh read brings the bytes.
         ProjectProbeResult::RenderProduct(RenderProductProbeResult::GpuResident {
             product,
             ..
         }) => Some((
             UiProductRef::from_visual_product(*product),
-            UiProductPreview::Unsupported {
-                reason: "product is GPU-resident on this runtime (no byte readback on the GPU \
-                         tier); probe a CPU-tier runtime for byte previews"
-                    .to_string(),
-            },
+            UiProductPreview::Pending,
         )),
         ProjectProbeResult::RenderProduct(RenderProductProbeResult::Unsupported {
             product,

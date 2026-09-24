@@ -19,6 +19,12 @@ mod output_flush_tests;
 // re-render would have pulled.
 #[cfg(all(test, feature = "node-fixture", feature = "node-shader"))]
 mod output_frame_probe_tests;
+mod probe_read_backs;
+// The GPU-resident latent-readback path on the render-product probe: a
+// backend whose products stay GPU-resident (`supports_read_back() ==
+// false`) is served the previous probe's frame one probe late.
+#[cfg(all(test, feature = "node-shader"))]
+mod probe_read_back_tests;
 mod project_apply;
 mod project_fault;
 // The never-black policy's oracle: what faults a project, what must not,

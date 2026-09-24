@@ -6,7 +6,9 @@ use alloc::vec;
 use alloc::vec::Vec;
 
 use lp_collection::VecMap;
-use lpc_model::{ChannelName, ControlDisplayLayout, ControlLayout2d, Kind, NodeId, Revision};
+use lpc_model::{
+    ChannelName, ControlDisplayLayout, ControlLayout2d, Kind, NodeId, Revision, VisualProduct,
+};
 use lpc_registry::ProjectRegistry;
 use lpc_wire::{
     BindingGraphProbeRequest, BindingGraphProbeResult, ControlProductGeometry,
@@ -31,11 +33,12 @@ use crate::nodes::{OutputFragment, merge_fragment_display_layouts};
 use crate::products::control::{
     ControlLayout, ControlProduct, ControlRenderRequest, ControlRenderTarget,
 };
-use crate::products::visual::RenderTextureRequest;
+use crate::products::visual::{RenderTextureRequest, TextureRenderProduct};
 use crate::resource::{RuntimeBufferId, RuntimeBufferMetadata, RuntimeChannelSampleFormat};
 
 use super::Engine;
 use super::preview_sample_encoding::{encode_unorm16_le_bytes, encode_unorm16_samples};
+use super::probe_read_backs::ProbeReadBackKey;
 use crate::products::visual::{
     CellProjection, ConsumerPolicy, ProductSpaceInfo, ProjectionOrigin, ProjectionShape,
     VisualSpace, resolve_1d_to_2d_with_origin,
@@ -98,21 +101,37 @@ impl Engine {
         let primary = wire_visual_space(space_info.primary);
         match self.render_texture_product(registry, product, &texture_request) {
             Ok(texture) => {
-                let Some(bytes) = texture.try_raw_bytes() else {
-                    // GPU tier: the product stayed GPU-resident (no readback
-                    // in the browser). Structured answer, not an error — the
-                    // runtime is healthy, bytes are simply not available on
-                    // this tier (fidelity-tiers ADR).
-                    return RenderProductProbeResult::GpuResident {
-                        product,
-                        revision,
-                        width: texture.width(),
-                        height: texture.height(),
-                        space: wire_visual_space(space),
-                        projection,
-                        origin,
-                        primary,
-                    };
+                let latent;
+                let (bytes, revision) = match texture.try_raw_bytes() {
+                    Some(bytes) => (bytes, revision),
+                    None => {
+                        // GPU tier: the product stayed GPU-resident. Read it
+                        // back one probe late (the browser cannot block on a
+                        // map); until the first frame lands the answer is
+                        // `GpuResident` — healthy, just no bytes yet
+                        // (fidelity-tiers ADR).
+                        match self.read_back_gpu_resident(product, &texture, space, policy) {
+                            Ok(Some((bytes, served))) => {
+                                latent = bytes;
+                                (latent.as_slice(), served)
+                            }
+                            Ok(None) => {
+                                return RenderProductProbeResult::GpuResident {
+                                    product,
+                                    revision,
+                                    width: texture.width(),
+                                    height: texture.height(),
+                                    space: wire_visual_space(space),
+                                    projection,
+                                    origin,
+                                    primary,
+                                };
+                            }
+                            Err(message) => {
+                                return RenderProductProbeResult::Error { product, message };
+                            }
+                        }
+                    }
                 };
                 let bytes = match request.format {
                     lpc_wire::WireTextureFormat::Rgba16 => bytes.to_vec(),
@@ -136,6 +155,44 @@ impl Engine {
                 message: format!("{error}"),
             },
         }
+    }
+
+    /// Bytes for a GPU-resident probe texture through the injected latent
+    /// readback: the most recent landed frame of this read site and the
+    /// revision it was rendered at, or `None` while none has landed — or
+    /// when the host injected no source at all.
+    fn read_back_gpu_resident(
+        &mut self,
+        product: VisualProduct,
+        texture: &TextureRenderProduct,
+        space: VisualSpace,
+        policy: ConsumerPolicy,
+    ) -> Result<Option<(Vec<u8>, Revision)>, String> {
+        let tag = self.revision().0 as u64;
+        let Some(probe_read_backs) = self.probe_read_backs.as_deref_mut() else {
+            return Ok(None);
+        };
+        let handle = texture.gpu_handle().ok_or_else(|| {
+            String::from("render produced a texture with neither host bytes nor GPU handle")
+        })?;
+        let Some((source, site)) = probe_read_backs.source_and_site(ProbeReadBackKey {
+            product,
+            width: texture.width(),
+            height: texture.height(),
+            space,
+            policy,
+        }) else {
+            return Ok(None);
+        };
+        // The source sizes the buffer. Calling `bytes_per_pixel` here
+        // linked its lowered lookup table (`[8, 6, 2]`) into `.data` on the
+        // Xtensa images — 16 B of DRAM off the classic's pinned main stack
+        // for a path a device never takes.
+        let mut bytes = Vec::new();
+        let served = source
+            .read_back_latent(handle, site, tag, &mut bytes)
+            .map_err(|error| format!("probe read back: {error}"))?;
+        Ok(served.map(|served| (bytes, Revision(served as i64))))
     }
 
     /// Snapshot the effective binding graph and bus channel summary.

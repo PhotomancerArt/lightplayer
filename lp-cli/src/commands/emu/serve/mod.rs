@@ -46,9 +46,7 @@ use std::sync::Arc;
 use anyhow::{Context, Result, bail};
 use lp_emu_esp32c6::loader::EfuseIdentity;
 
-use lp_emu_esp32c6::machine::UsbHost;
-
-use super::args::{EmuChip, ServeArgs, ServeHost};
+use super::args::{EmuChip, ServeArgs};
 use board::{Board, BoardKind, BoardOptions, BoardSpec, default_mac, format_mac};
 use door::Registry;
 
@@ -95,11 +93,7 @@ pub fn serve(args: ServeArgs) -> Result<()> {
         let options = BoardOptions {
             grade: args.time_grade.time_grade(),
             strict_bus: args.strict_bus,
-            usb_host: match args.usb_host {
-                ServeHost::Attached => UsbHost::Attached { draining: true },
-                ServeHost::AttachedIdle => UsbHost::Attached { draining: false },
-                ServeHost::Absent => UsbHost::Absent,
-            },
+            usb_host: args.usb_host.usb_host(),
             air: air.clone(),
             air_seat: seat,
             lpperi_clk_en: args.lpperi_clk_en,

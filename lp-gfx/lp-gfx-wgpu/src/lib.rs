@@ -39,6 +39,10 @@ pub mod assembly;
 pub mod blend;
 pub mod fault_flag;
 pub mod gpu_graphics;
+// The browser tier's override; compiled natively too so its pipeline is
+// tested against a real adapter (native serves the trait's blocking default).
+#[cfg(any(target_arch = "wasm32", test))]
+pub(crate) mod latent_read_back;
 pub mod loop_bound_pass;
 pub mod read_back;
 pub mod render;

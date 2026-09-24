@@ -85,11 +85,32 @@ pub struct RunArgs {
     #[arg(long = "link-kind", value_enum, default_value_t = LinkKind::Usb)]
     pub link_kind: LinkKind,
 
-    /// Pretend no USB host is attached at power-on. The firmware's connection
-    /// monitor sees an unplugged cable; nothing a client sends is delivered
-    /// until it connects.
-    #[arg(long, conflicts_with = "monitor")]
-    pub host_absent: bool,
+    /// The USB host's state at power-on, spelled as `emu serve --usb-host`
+    /// and the `lp-emu-esp32c6` binary spell it.
+    ///
+    /// Omitted, it follows the link. When the USB-Serial-JTAG port IS the
+    /// `--link` socket it is `attached-idle`: the cable is in, the port is
+    /// closed until a client connects, and the client's connect is the
+    /// `open`. Before that nothing is reading, so the firmware's own write
+    /// timeouts latch "host not draining" and it drops what it would have
+    /// sent, as a board on a desk does when no application has the port
+    /// open. A late client gets at most what the 64-byte IN FIFO still holds,
+    /// then fresh frames, never a replay of the boot console
+    /// (`docs/defects/2026-09-23-emulated-usb-port-drains-with-no-client-attached.md`).
+    ///
+    /// With no `--link`, or a UART0 one, nothing couples a client to the
+    /// USB port, so it stays `attached`: open and draining from power-on,
+    /// the emulator itself the reader, which is what "boot this image and
+    /// show me what it says" (`--console`) needs. `--monitor` implies the
+    /// same and so refuses this flag.
+    ///
+    /// `attached` with a USB `--link` is the explicit opt-in to a reader
+    /// present since power-on: every guest write succeeds with nobody
+    /// connected, and the first client is replayed all of it (up to 4 MiB).
+    /// `absent` is no cable: the firmware's connection monitor sees it
+    /// unplugged.
+    #[arg(long = "usb-host", value_enum, conflicts_with = "monitor")]
+    pub usb_host: Option<UsbHostArg>,
 
     /// Hold a reader on the link for the whole run, the way
     /// `espflash flash --monitor` holds a port.
@@ -198,24 +219,39 @@ pub struct RunArgs {
     pub lpperi_clk_en: Option<u32>,
 }
 
-/// The USB host's state at a served board's power-on. The same three the
-/// `lp-emu-esp32c6` binary's `--usb-host` takes, spelled the same way, so
-/// nobody has to learn a second vocabulary for one chip.
+/// The USB host's state at power-on, for `run` and for every board `serve`
+/// holds. The same three the `lp-emu-esp32c6` binary's `--usb-host` takes,
+/// spelled the same way, so nobody has to learn a second vocabulary for one
+/// chip.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, ValueEnum)]
-pub enum ServeHost {
-    /// Cable in, port open and draining from power-on — `emu run`'s default,
-    /// and on `serve` an explicit opt-in: the emulated host reads from
+pub enum UsbHostArg {
+    /// Cable in, port open and draining from power-on. An explicit opt-in
+    /// wherever a byte socket is the port: the emulated host reads from
     /// power-on whether or not anybody is connected, so the first byte
     /// client is replayed everything the board wrote before it (up to
-    /// `TCP_BACKLOG_CAP`).
+    /// `TCP_BACKLOG_CAP`). `run`'s default when no socket is the port.
     Attached,
     /// Cable in, port CLOSED. The byte client's connect is what opens it.
-    /// `serve`'s default: no client means nobody is reading.
+    /// The default wherever a byte socket is the port: no client means
+    /// nobody is reading.
     #[default]
     #[value(name = "attached-idle")]
     AttachedIdle,
-    /// No cable. An `attach` on the control channel is the plug-in edge.
+    /// No cable. On `serve`, an `attach` on the control channel is the
+    /// plug-in edge; `run` has no control channel, so it stays unplugged.
     Absent,
+}
+
+impl UsbHostArg {
+    /// The machine's power-on host state this spelling names.
+    pub fn usb_host(self) -> lp_emu_esp32c6::machine::UsbHost {
+        use lp_emu_esp32c6::machine::UsbHost;
+        match self {
+            UsbHostArg::Attached => UsbHost::Attached { draining: true },
+            UsbHostArg::AttachedIdle => UsbHost::Attached { draining: false },
+            UsbHostArg::Absent => UsbHost::Absent,
+        }
+    }
 }
 
 /// `lp-cli emu serve` — a registry of named boards behind a WebSocket door.
@@ -296,16 +332,15 @@ pub struct ServeArgs {
     /// The boot console is not lost: `--console-dir` writes it to
     /// `<id>.console-untaken.log`.
     ///
-    /// `attached` is the explicit opt-in to the old behaviour, and matches
-    /// `emu run`: the port is open and draining from power-on with nobody
+    /// `attached` is the explicit opt-in to the old behaviour: the port is open and draining from power-on with nobody
     /// connected, so the firmware's writes all succeed and the first byte
     /// client is replayed everything written before it (up to 4 MiB). That
     /// is "an application had the port open since power-on", which is a
     /// state a real board can be in but not what an unopened port does.
     ///
     /// `absent` is no cable at all.
-    #[arg(long = "usb-host", value_enum, default_value_t = ServeHost::AttachedIdle)]
-    pub usb_host: ServeHost,
+    #[arg(long = "usb-host", value_enum, default_value_t = UsbHostArg::AttachedIdle)]
+    pub usb_host: UsbHostArg,
 
     /// Refuse any access to an address no peripheral claims.
     #[arg(long = "strict-bus")]

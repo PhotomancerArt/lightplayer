@@ -15,6 +15,8 @@ use alloc::{
 };
 use core::cell::RefCell;
 use hashbrown::HashMap;
+#[cfg(feature = "latent-read-back")]
+use lpc_engine::LatentReadBackSource;
 use lpc_engine::{ButtonService, LpGraphics, RadioService};
 use lpc_model::{LpPath, LpPathBuf};
 use lpc_shared::backtrace;
@@ -33,6 +35,10 @@ pub struct ProjectManager {
     next_handle_id: u32,
     /// Base directory where projects are stored (relative path)
     projects_base_dir: LpPathBuf,
+    /// The latent readback every project's engine is handed, when the host
+    /// has one (the browser GPU tier); see `Self::set_latent_read_back`.
+    #[cfg(feature = "latent-read-back")]
+    latent_read_back: Option<Arc<dyn LatentReadBackSource>>,
 }
 
 impl ProjectManager {
@@ -46,7 +52,20 @@ impl ProjectManager {
             name_to_handle: HashMap::new(),
             next_handle_id: 1,
             projects_base_dir: projects_base_dir.to_path_buf(),
+            #[cfg(feature = "latent-read-back")]
+            latent_read_back: None,
         }
+    }
+
+    /// Set (or clear) the latent readback the render-product probe uses on a
+    /// backend whose products stay GPU-resident, and hand it to every loaded
+    /// project. Future loads inherit it.
+    #[cfg(feature = "latent-read-back")]
+    pub fn set_latent_read_back(&mut self, source: Option<Arc<dyn LatentReadBackSource>>) {
+        for project in self.projects.values_mut() {
+            project.set_latent_read_back(source.clone());
+        }
+        self.latent_read_back = source;
     }
 
     /// Create a new project
@@ -125,6 +144,14 @@ impl ProjectManager {
                 graphics,
                 loaded_fs_version,
             )?;
+            #[cfg(feature = "latent-read-back")]
+            let project = {
+                let mut project = project;
+                if self.latent_read_back.is_some() {
+                    project.set_latent_read_back(self.latent_read_back.clone());
+                }
+                project
+            };
 
             backtrace::set_oom_context("project manager: insert project runtime");
             self.projects.insert(handle, project);
