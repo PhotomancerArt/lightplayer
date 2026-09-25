@@ -51,9 +51,8 @@ use lp_collection::VecMap;
 
 use lp_gfx::TextureHandle;
 use lpc_model::{
-    ControlMessage, FromLpValue, NodeId, NodeRuntimeStatus, PlaylistDefView, PlaylistState,
-    PlaylistTour, SlotAccess, SlotData, SlotPath, SlotShapeRegistry, SlotShapeRegistryError,
-    U32List,
+    ControlMessage, FromLpValue, NodeId, NodeRuntimeStatus, PlaylistState, PlaylistTour,
+    SlotAccess, SlotData, SlotPath, SlotShapeRegistry, SlotShapeRegistryError, U32List,
 };
 use lps_shared::TextureStorageFormat;
 
@@ -93,8 +92,6 @@ pub struct PlaylistNode {
     anchor: Option<PlaylistTourAnchor>,
     /// The skipped entry keys this playlist last read.
     skip: Vec<u32>,
-    /// Compiled readers for the def's consumed `tour` and `skip`.
-    def_view: Option<PlaylistDefView>,
     state: PlaylistState,
     /// The selected entry: the one playing, or the one a switch is bringing
     /// in.
@@ -184,7 +181,6 @@ impl PlaylistNode {
             tour: PlaylistTour::Hold,
             anchor: None,
             skip: Vec::new(),
-            def_view: None,
             state: PlaylistState::new(
                 lpc_model::VisualProduct::new(node_id, 0),
                 0.0,
@@ -382,14 +378,11 @@ impl PlaylistNode {
     /// The consumed `tour` and `skip`: the authored defaults, or what Play
     /// mode wrote on their channels. Absent reads as a hold and no skips.
     fn read_tour_and_skip(
-        &mut self,
+        &self,
         ctx: &mut TickContext<'_>,
     ) -> Result<(PlaylistTour, Vec<u32>), NodeError> {
-        let view = PlaylistDefView::get_or_compile(&mut self.def_view, ctx.slot_shapes())
-            .map_err(err_ctx("compile playlist def view"))?;
-        let tour = read_absent_as_none::<PlaylistTour>(ctx, view.tour().some_accessor())?
-            .unwrap_or_default();
-        let skip = read_absent_as_none::<U32List>(ctx, view.skip().some_accessor())?
+        let tour = read_absent_as_none::<PlaylistTour>(ctx, "tour.some")?.unwrap_or_default();
+        let skip = read_absent_as_none::<U32List>(ctx, "skip.some")?
             .map(|list| list.0)
             .unwrap_or_default();
         Ok((tour, skip))
@@ -1296,20 +1289,33 @@ fn detect_triggers(
 /// An option nobody authored and nobody wrote on its channel resolves as an
 /// unresolved consumed slot, not as "option slot is none": the authored
 /// default read cannot tell the two apart (the fixture's `power` read meets
-/// the same thing). The accessor is compiled from `PlaylistDef`'s own shape,
-/// so the path exists and "unresolved" can only mean absent. Any other
+/// the same thing). `path` is one of `PlaylistDef`'s own option fields
+/// (pinned by the tests), so "unresolved" can only mean absent. Any other
 /// error — a written value of the wrong shape — is still an error.
+///
+/// A static path is interned by the resolver once per structural epoch; a
+/// compiled `PlaylistDefView` for the same two reads measured 4,192 B more
+/// of the C6 image.
 fn read_absent_as_none<T: FromLpValue>(
     ctx: &mut TickContext<'_>,
-    accessor: &lpc_model::SlotAccessor,
+    path: &'static str,
 ) -> Result<Option<T>, NodeError> {
-    match ctx.resolve_consumed_slot_accessor_value::<T>(accessor) {
-        Ok(value) => Ok(Some(value)),
-        Err(NodeError::Message(message)) if message.contains("unresolved consumed slot") => {
-            Ok(None)
+    let production = match ctx.resolve_static_consumed(path) {
+        Ok(production) => production,
+        Err(error) if error.message.contains("unresolved consumed slot") => return Ok(None),
+        Err(error) => {
+            return Err(NodeError::msg(format!(
+                "resolve playlist {path}: {}",
+                error.message
+            )));
         }
-        Err(error) => Err(error),
-    }
+    };
+    let value = production
+        .value_leaf()
+        .ok_or_else(|| NodeError::msg(format!("playlist {path} is not a value")))?;
+    T::from_lp_value(value.value())
+        .map(Some)
+        .map_err(|error| NodeError::msg(format!("playlist {path}: {error}")))
 }
 
 fn control_message_from_slot_data(data: &SlotData) -> Result<Option<ControlMessage>, NodeError> {

@@ -228,6 +228,23 @@ mod tests {
         }
     }
 
+    /// The runtime playlist reads these two paths by name
+    /// (`lpc-engine`'s `read_absent_as_none`).
+    #[test]
+    fn tour_and_skip_values_live_at_their_some_paths() {
+        let registry = crate::SlotShapeRegistry::default();
+        let view = crate::PlaylistDefView::compile(&registry).expect("playlist def view");
+
+        assert_eq!(
+            view.tour().some_path(),
+            &crate::SlotPath::parse("tour.some").unwrap()
+        );
+        assert_eq!(
+            view.skip().some_path(),
+            &crate::SlotPath::parse("skip.some").unwrap()
+        );
+    }
+
     #[test]
     fn node_def_delegates_playlist_kind() {
         let def = NodeDef::Playlist(PlaylistDef::default());
