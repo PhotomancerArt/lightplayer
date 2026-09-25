@@ -703,7 +703,7 @@ fn the_ledger_triple_is_elicited_by_a_stop_all_on_the_wire() {
     assert_eq!(stack.len(), 1, "one [stack] line per stop-all:\n{text}");
     assert_eq!(mem.len(), 2, "[MEM] before and after the stop:\n{text}");
     assert_eq!(jit.len(), 2, "[JIT] before and after the stop:\n{text}");
-    // `[stack] heartbeat: high-water <used> B of 37216 B (<headroom> B headroom)`
+    // `[stack] heartbeat: high-water <used> B of 37208 B (<headroom> B headroom)`
     //
     // Re-baselined 2026-09-23 (lean-wire P7): 37,280 → 37,272 (−8 B). The
     // wire-side `RevisionGateRead`/`RevisionGateResult` gate and the
@@ -735,20 +735,24 @@ fn the_ledger_triple_is_elicited_by_a_stop_all_on_the_wire() {
     // +24 B future state was already in both), and `.bss` takes them from the
     // stack. Measured on the merged image as its ELF's
     // `_stack_start − _stack_end` (`0x3fcdb700 − 0x3fcd25a0`), not summed.
+    //
+    // Then main at 5e864de73 (#818, device project-loading feedback) merged
+    // under it: 37,216 → 37,208 (−8 B of statics). Read off the merged
+    // ELF, `0x3fcdb700 − 0x3fcd25a8`.
     let words: Vec<&str> = stack[0].split_whitespace().collect();
     let used: u32 = words[3].parse().expect("high-water bytes");
     assert_eq!(
         &words[4..7],
-        &["B", "of", "37216"],
-        "the S3's 37,216 B total: {}",
+        &["B", "of", "37208"],
+        "the S3's 37,208 B total: {}",
         stack[0]
     );
     let headroom: u32 = words[8]
         .trim_start_matches('(')
         .parse()
         .expect("headroom bytes");
-    assert_eq!(used + headroom, 37_216, "{}", stack[0]);
-    assert!(used > 0 && used < 37_216, "{}", stack[0]);
+    assert_eq!(used + headroom, 37_208, "{}", stack[0]);
+    assert!(used > 0 && used < 37_208, "{}", stack[0]);
     for line in &mem {
         assert!(
             line.contains(" used=") && line.contains(" largest_free="),
@@ -776,7 +780,7 @@ fn the_ledger_triple_is_elicited_by_a_stop_all_on_the_wire() {
     );
     assert!(
         !text.contains("[INIT] main stack"),
-        "the S3 prints no `main stack` line; its 37,216 B total is in every `[stack]` \
+        "the S3 prints no `main stack` line; its 37,208 B total is in every `[stack]` \
          line's `of <total> B` instead"
     );
 
