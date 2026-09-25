@@ -1,6 +1,6 @@
 # ADR: Access over untrusted links — shared secrets, HMAC login, tiers by link
 
-- **Status:** Proposed
+- **Status:** Accepted (shipped in PR #794, 2026-09-24; see Amendments)
 - **Date:** 2026-09-23
 - **Deciders:** Photomancer
 - **Supersedes:** None
@@ -183,8 +183,10 @@ logging in with the same messages against the same access files.
 - Every `ServerTransport` implementer changed shape (link-tagged receive,
   link-addressed send). Single-link transports report one trusted link and
   behave exactly as before.
-- `WIRE_PROTO_VERSION` 20 → 21: new login and refusal messages and a
-  required `auth` on the hello.
+- `WIRE_PROTO_VERSION` bumped for new login and refusal messages and a
+  required `auth` on the hello. Written as 20 → 21; it shipped as **21 → 22**,
+  because lean-wire (#791) landed first and took 21 (the plan's merge-order
+  rule: whoever lands second bumps again).
 - A new wire request cannot ship unclassified: the compiler refuses it, and
   the host table test (`lpa-server/tests/access_gate.rs`) enumerates every
   variant from serde's own variant lists against five link states.
@@ -217,13 +219,39 @@ logging in with the same messages against the same access files.
 
 ## Follow-ups
 
-- M4 (the BLE link) is the first `Untrusted` transport: a link mux in
-  `fw-esp32-common`, unauthenticated-connection timeout and count, and the
-  `Identify` request if cheap.
+- ~~M4 (the BLE link) is the first `Untrusted` transport~~ — shipped in PR
+  #810: the link mux in `fw-esp32-common`, a 10 s unauthenticated-connection
+  drop and at most two connections
+  (`docs/adr/2026-09-24-ble-transport.md`). `Identify` was **not** built
+  (below).
 - M6 (Studio) writes the device store and sidecars and runs the login.
-- `docs/design/device-identity.md` §8 (the auth gap) is closed by this ADR;
-  M7 updates it.
+- ~~`docs/design/device-identity.md` §8 (the auth gap)~~ — updated in M7:
+  closed by this ADR.
 
+## Amendment 2026-09-24 (M7): what shipped, checked against the text above
+
+- **Wire version.** See Consequences: the login bump is proto 22, not 21.
+- **`Identify` is not built** (plan DD22). It needs a new `ClientRequest`
+  (so a wire bump), a per-device rate limit and an output-stage hook in the
+  engine. When it lands it is classified `Play`, like the panel. Until then
+  a wrong-device connect is caught by the advertised name
+  (`LP-<project name>`, or the last four MAC hex digits), not by a blink.
+- **Enabling BLE takes a reboot** (plan DD23). The firmware reads
+  `bleEnabled` from the device store once, at boot
+  (`docs/adr/2026-09-24-ble-transport.md`, decision 4), so the edit-tier write
+  that enables it is not enough on its own. The write-only and locked-by-default
+  rules above are unchanged by it.
+- **Two connections allowed, one gates** (plan DD12). The transport admits two
+  BLE links, and each holds its own grant, but nothing in this slice was
+  tested or gated on the second one. The 2-connection heap figure has never
+  been measured on the product image.
+- The tiers, the classifier, the write-only rule and `AccessGuardedFs` shipped
+  as written; `lpa-server/tests/access_gate.rs` and
+  `tests/access_file_resource.rs` are the proof. The end-to-end refusal was
+  seen on silicon from a desktop central (Run J in the plan's
+  `spike-results.md`: a locked XIAO C6 answered `listLoadedProjects` with
+  `notPermitted { needs: play }` before login, from Mac Chrome 153 over CDP),
+  **not yet from a phone** — that is the plan's G4 walk.
 ## Amendment 2026-09-24: who has access, on the board; Bluetooth on by default
 
 Plan `lp2025/2026-09-24-1953-ble-easy-access` (P1). Yona's rule for it:
@@ -317,3 +345,32 @@ This replaces "Locked by default" above for the device store:
 `WIRE_PROTO_VERSION` 23 → 25 (24 was taken by #785's palette pin first).
 `PROJECT_FORMAT_VERSION` is untouched: the access files are their own
 formats.
+
+## Amendment 2026-09-25: what easy access superseded, and the words
+
+Recorded at the close of the BLE remote-control plan (M7), so this ADR reads
+true on its own. Detail: `2026-09-24-easy-bluetooth-access.md` and plan
+`lp2025/2026-09-24-1953-ble-easy-access`.
+
+- **The wire version the access requests shipped at is 27**, not 25: main
+  took 24–26 while #821 was in flight (#785's palette pin, the pattern
+  space, JSON Pack), and #821 merged at `WIRE_PROTO_VERSION` 27. The cloud
+  API went 3 → 4 for account keys (#819).
+- **Bluetooth is on by default, and locked** (above; Yona's reversal of the
+  plan's PQ2/AC6, DD30). "Locked by default" in the access files section now
+  means *locked*, not *off*: a fresh board answers `Hello` and `Login*` over
+  Bluetooth and nothing else until a key is added over USB.
+- **Typed passwords are the exception.** The normal path is generated keys:
+  one per browser, one per signed-in account, installed silently on a USB
+  connect (with a toast and Undo) and matched by salt, so an automatic unlock
+  never sends a wrong answer. Typed passwords remain for sharing (generated
+  words plus a QR) and as optional account play/edit passwords. The account
+  default password (S6 of `2026-09-24-ble-transport.md`) was removed.
+- **The words are "Unlock", "device password" and "Who has access".** No
+  Studio screen says "log in" about a device; "login" stays the protocol's
+  name (`LoginBegin`, `LoginAnswer`, `LOGIN_DEADLINE_MS`).
+- **Project sidecars** are still honoured by the board but no longer written
+  by Studio; the envelope filter for `.lp/access.json` stays.
+- **The phone walk (G4) passed** on 2026-09-25: Yona's iPhone in Bluefy and
+  his laptop, one board (the PLAYFUL choker, XIAO C6 `10:BD:A3:B0:A5:2C`),
+  one room. Record: `docs/reports/2026-09-25-ble-remote-control-walks.md`.
