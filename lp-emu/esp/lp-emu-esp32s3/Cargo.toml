@@ -42,3 +42,7 @@ lp-xt-inst = { path = "../../../lp-xt/lp-xt-inst" }
 # than a boot; shelling out to `shasum` would make the claim depend on which
 # host ran it.
 sha2 = "0.10"
+# The tests' firmware-derived figures (cycle counts, the main stack's size,
+# boot chains that print it) are read from lp-emu/esp/figures/<chip>.json, not
+# pinned as literals; `just bless-chips` rewrites them. docs/chip-figures.md.
+lp-emu-esp-figures = { path = "../lp-emu-esp-figures" }

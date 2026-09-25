@@ -342,7 +342,14 @@ just heap-budget-baseline catalog/patterns/meteor   # one
 just heap-budget-baseline-chips esp32c6     # one chip
 ```
 
-which re-measures from the current tree and rewrites only the files whose
+**`just bless-chips [chip…]` does all of it in one command**: every chip heap
+record above *and* the chip emulator tests' own pinned firmware figures
+(`lp-emu/esp/figures/<chip>.json` — the main stack's size, boot chains, cycle
+counts), one chip at a time, plus the engine records. See
+[chip-figures.md](chip-figures.md) for what is and is not a figure, the record
+format, and the positional-figure rule.
+
+Each baseline re-measures from the current tree and rewrites only the files whose
 figures moved, so the growth appears in the PR diff where a reviewer sees it
 and an untouched project or chip keeps its stamp. Same shape as
 `just fw-esp32v3-size-check`, with one difference: that gate compares against

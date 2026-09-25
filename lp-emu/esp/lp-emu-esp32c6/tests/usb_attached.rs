@@ -23,6 +23,7 @@
 use lp_emu_core::sched::Cycles;
 use lp_emu_esp_common::RegGrade;
 use lp_emu_esp_common::trace::SharedBuffer;
+use lp_emu_esp_figures::Figures;
 use lp_emu_esp32c6::machine::{
     AppSource, Esp32C6Builder, Esp32C6Machine, Outcome, StopCondition, TimeGrade, UsbHost,
 };
@@ -36,20 +37,40 @@ const TIMED_OUT: &str = "esp_println::serial_jtag_printer::TIMED_OUT";
 const SERIAL_OUT_RECV_PKT: u32 = 1 << 2;
 const SERIAL_IN_EMPTY: u32 = 1 << 3;
 
+/// The hello's opening, up to its protocol version.
+const HELLO_PROTO: &str = "\nM!{\"id\":0,\"msg\":{\"hello\":{\"proto\":";
+
 /// The delivered log's markers, in order (the P6 hello gate's list plus the
-/// esp-println line that precedes everything).
-const DELIVERED_IN_ORDER: &[&str] = &[
-    "[INIT] Initializing board...\n",
-    "\nM!{\"id\":0,\"msg\":{\"hello\":{\"proto\":25,",
-    "\"boardId\":\"seeed/xiao-esp32-c6\"",
-    "\"baseMac\":\"a0:f2:62:87:b4:8c\"",
-    "Esp32C6RmtWs281xDriver: 2 WS281x channels for 2 declared",
-    "ESP-NOW radio ready",
-    "[RECOVERY] boot complete",
-    "M!{\"id\":0,\"msg\":{\"heartbeat\":{",
-    "\"totalBytes\":301536",
-    "[stack] heartbeat: high-water",
+/// esp-println line that precedes everything). A marker with a figure key is
+/// followed by that figure's digits, checked against
+/// `lp-emu/esp/figures/esp32c6.json`: the wire protocol version (bumped by
+/// every breaking wire change, `lpc-wire`'s `WIRE_PROTO_VERSION`) and the
+/// heap's total (moved by a heap-region change — 325,536 → 301,536 with the
+/// BLE heap cut). Both are the shipped image's, not this machine's, so both
+/// are re-recorded by `just bless-chips esp32c6`.
+const DELIVERED_IN_ORDER: &[(&str, Option<&str>)] = &[
+    ("[INIT] Initializing board...\n", None),
+    (HELLO_PROTO, Some("hello.proto")),
+    ("\"boardId\":\"seeed/xiao-esp32-c6\"", None),
+    ("\"baseMac\":\"a0:f2:62:87:b4:8c\"", None),
+    (
+        "Esp32C6RmtWs281xDriver: 2 WS281x channels for 2 declared",
+        None,
+    ),
+    ("ESP-NOW radio ready", None),
+    ("[RECOVERY] boot complete", None),
+    ("M!{\"id\":0,\"msg\":{\"heartbeat\":{", None),
+    ("\"totalBytes\":", Some("heartbeat.total_bytes")),
+    ("[stack] heartbeat: high-water", None),
 ];
+
+/// The decimal number at the start of `s`.
+fn leading_int(s: &str) -> i64 {
+    let end = s.find(|c: char| !c.is_ascii_digit()).unwrap_or(s.len());
+    s[..end]
+        .parse()
+        .unwrap_or_else(|_| panic!("no number at the start of {:?}", &s[..s.len().min(40)]))
+}
 
 struct Run {
     m: Esp32C6Machine,
@@ -138,13 +159,21 @@ fn g2_1_attached_and_draining_from_boot_delivers_the_boot_the_hello_and_a_heartb
     let text = r.m.usb_sj().text();
 
     // Everything reached the host, in order; nothing was merely tried.
+    let mut figures = Figures::new(
+        "esp32c6",
+        "usb_attached::g2_1_attached_and_draining_from_boot_delivers_the_boot_the_hello_and_a_heartbeat",
+    );
     let mut from = 0;
-    for marker in DELIVERED_IN_ORDER {
+    for (marker, figure) in DELIVERED_IN_ORDER {
         let at = text[from..]
             .find(marker)
             .unwrap_or_else(|| panic!("{marker:?} not after byte {from} in:\n{text}"));
         from += at + marker.len();
+        if let Some(key) = figure {
+            figures.int(key, leading_int(&text[from..]));
+        }
     }
+    figures.verify();
     let init_lines: Vec<&str> = text.lines().filter(|l| l.starts_with("[INIT] ")).collect();
     assert!(init_lines.len() >= 5, "{init_lines:?}");
     let hello_at = text.find("M!{\"id\":0,\"msg\":{\"hello\"").unwrap();

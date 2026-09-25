@@ -2230,6 +2230,26 @@ heap-budget-baseline-chips-v3:
 heap-budget-baseline-chips-s3:
     LP_EMU_BUILD_FW=1 scripts/heap-budget-check.sh chips-baseline esp32s3
 
+# ONE command for "the firmware changed and a pinned number moved": re-record
+# every firmware-derived figure for the named targets — esp32c6, esp32v3,
+# esp32s3, engine — or all four. Per chip, the chip's heap record (through
+# `heap-budget-baseline-chips*`) AND the chip emulator tests' figure record,
+# `lp-emu/esp/figures/<chip>.json` (the chip's boot suite run with
+# LP_EMU_BLESS=1). One target at a time, each building its own firmware
+# sequentially. Ends with the records' `git diff --stat`: commit it with the
+# change that moved it.
+#
+#   just bless-chips                  # everything
+#   just bless-chips esp32s3          # one chip
+#   just bless-chips --check esp32v3  # the same gates, rewriting nothing
+#
+# A bless rewrites FIGURES only — never silicon-matched values, transcripts,
+# pinned reference images or structural constants, which stay literals in
+# the tests. If only the emulator changed, a moved figure is a finding: do not
+# bless it. docs/chip-figures.md.
+bless-chips *args:
+    scripts/bless-chips.sh {{ args }}
+
 # Emit RV32 stack-size metadata for the ESP32 firmware.
 # The direct cargo build can fail at final link on local ESP linker-script setup,
 # but rustc still emits the object containing .stack_sizes before that point.
