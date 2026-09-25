@@ -35,6 +35,13 @@ use crate::server::hello_auth::HelloAuth;
 ///
 /// # History
 ///
+/// - 24: `GradientConfig` gained a fifth storage field, `pinned` (an
+///   `i32`, `-1` for none) — the palette chooser's "show just this one"
+///   pin on a cycle; bumped again after lean-wire took 21 and 23 and BLE M3
+///   took 22. Every slot value, panel write and inventory frame that
+///   carries a palette changes shape, and the reader requires all five
+///   fields, so an old peer cannot decode a new palette (or the reverse).
+///   Rides with project format 11.
 /// - 23: one list-shaped revision gate (lean-wire follow-ups; bumped
 ///   again after BLE M3 took 22). The
 ///   output-frame probe's own per-output gate (`OutputFrameGeometryRead` +
@@ -236,7 +243,7 @@ use crate::server::hello_auth::HelloAuth;
 /// as `None` on new Studio and a new firmware's extra fields are ignored
 /// by old Studio. Bumping for those would mark every board running
 /// current firmware Incompatible in exchange for nothing.
-pub const WIRE_PROTO_VERSION: u32 = 23;
+pub const WIRE_PROTO_VERSION: u32 = 24;
 
 /// Unsolicited/boot-time server identity, version, and capability report.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -556,7 +563,7 @@ mod tests {
     #[test]
     fn the_proto_version_is_pinned_to_its_history() {
         assert_eq!(
-            WIRE_PROTO_VERSION, 23,
+            WIRE_PROTO_VERSION, 24,
             "if you meant to bump, add the History entry in this file's \
              doc comment and update this pin"
         );

@@ -220,6 +220,13 @@ jobs:
               - 'lp-core/**'
               - 'third_party/**'
               - 'scripts/**'
+              # The shipped example shaders: `test-filetests` runs the
+              # example-shader compile gate (`just test-example-shaders`),
+              # which compiles every catalog/ + projects/test/ shader on every
+              # filetest target — so a shader-only content edit is a shader
+              # change (docs/debt/example-shaders-not-compile-gated.md).
+              - 'catalog/**'
+              - 'projects/test/**'
               - 'Cargo.toml'
               - 'Cargo.lock'
               - 'rust-toolchain.toml'
@@ -382,6 +389,16 @@ jobs:
               # thing that decides WHICH BYTES the gates run against — ran no
               # gate at all unless it happened to touch something else.
               - 'scripts/emu/**'
+              # The C6's heap-budget ratchet (`heap-budget-chips`) rides this
+              # filter, so the gate's own script, its ELF layout reader and
+              # the C6's record file must fire it — until 2026-09-23 none of
+              # them did, and a C6 record edit ran no C6 chip gate at all. Only
+              # THIS chip's file: since the record split each chip's
+              # re-baseline touches its own file, and the other two chips'
+              # files fire their own jobs.
+              - 'scripts/heap-budget-check.sh'
+              - 'scripts/heap-budget-stack-layout.py'
+              - 'scripts/heap-budget-record/chips/esp32c6.json'
               - 'justfile'
               - '.github/workflows/pre-merge.yml'
             # emu_esp32v3 is the same shape for the CLASSIC ESP32's machine
@@ -439,7 +456,8 @@ jobs:
               # its recorded figures change. Neither filter covered them
               # before, which meant a record edit ran no chip gate at all.
               - 'scripts/heap-budget-check.sh'
-              - 'scripts/heap-budget-record.json'
+              - 'scripts/heap-budget-stack-layout.py'
+              - 'scripts/heap-budget-record/chips/esp32v3.json'
               - 'justfile'
               - '.github/workflows/pre-merge.yml'
               - '.github/actions/**'
@@ -472,7 +490,8 @@ jobs:
               # heap job has none (DD71). So the gate has to fire when the
               # gate's own script or its recorded figures change.
               - 'scripts/heap-budget-check.sh'
-              - 'scripts/heap-budget-record.json'
+              - 'scripts/heap-budget-stack-layout.py'
+              - 'scripts/heap-budget-record/chips/esp32s3.json'
               - 'justfile'
               - '.github/workflows/pre-merge.yml'
               - '.github/actions/**'
@@ -2820,6 +2839,13 @@ jobs:
   # on, so a main run is the canary; this job makes it say which PRs landed
   # since the last green main run, so the diagnosis starts in the right place.
   # It never runs on a pull_request, and it exits 0: the run is already red.
+  #
+  # `needs:` below must list EVERY other job in this file: `failure()` only
+  # sees the jobs named here, so a job left out can go red after this job has
+  # already been skipped. `just lint-red-main-needs`
+  # (scripts/ci/check-red-main-needs.py, part of `just check-lint`, so the
+  # Lint job runs it) fails when one is missing — add a new job here when
+  # you add it to the workflow.
   red-main-suspects:
     name: Red main suspects
     runs-on: ubuntu-24.04

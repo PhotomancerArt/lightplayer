@@ -2604,6 +2604,7 @@ mod tests {
             set: vec![ramp(2), ramp(3)],
             step_seconds: 20.0,
             fade_seconds: 0.5,
+            pinned: None,
         };
         let mut endpoint = channel_endpoint("bus:palette", "palette", 3);
         endpoint.live_value = crate::app::project::format_live_panel_value(

@@ -2130,7 +2130,8 @@ _fw-size-check name chip flash_size elf partition margin doc:
 # Heap-budget ratchet: per-window heap deltas (project-load, shader-compile,
 # frame, …) and per-frame allocation churn (a steady-render pass) measured on
 # the RV32 emulator vs the checked-in measured record
-# (scripts/heap-budget-record.json). A ratchet, not a ceiling — fails on any
+# (scripts/heap-budget-record/engine/<project>.json, one file per project). A
+# ratchet, not a ceiling — fails on any
 # growth beyond the margin; an intentional increase re-baselines explicitly
 # with `just heap-budget-baseline` so the growth lands in the PR diff.
 # The emulator is deterministic, so the default margin is 0%. Never widen the
@@ -2138,13 +2139,17 @@ _fw-size-check name chip flash_size elf partition margin doc:
 heap-budget-check margin_pct="0": install-rv32-target
     scripts/heap-budget-check.sh check {{ margin_pct }}
 
-# Regenerate the heap-budget measured record from the current tree.
+# Regenerate the heap-budget engine records from the current tree — every
+# recorded project, or the one named (which is also how a project is ADDED:
+# name one with no file yet). Only a project whose figures moved gets its file
+# and stamp rewritten, so two PRs re-baselining different projects touch
+# different files.
 #
-# The `chips` section is carried through untouched — it comes from a different
-# emulator and needs a firmware build. `heap-budget-baseline-chips` is its
-# half.
-heap-budget-baseline: install-rv32-target
-    scripts/heap-budget-check.sh baseline
+# The chip records (scripts/heap-budget-record/chips/) are not touched — they
+# come from a different emulator and need a firmware build.
+# `heap-budget-baseline-chips` is their half.
+heap-budget-baseline project="": install-rv32-target
+    scripts/heap-budget-check.sh baseline {{ project }}
 
 # The heap-budget record's OTHER source: a shipped firmware image booted whole
 # on its own SoC emulator, read from the allocator figures its own first
@@ -2201,18 +2206,19 @@ heap-budget-check-chips-v3 margin_pct="0":
 heap-budget-check-chips-s3 margin_pct="0":
     LP_EMU_BUILD_FW=1 scripts/heap-budget-check.sh chips {{ margin_pct }} esp32s3
 
-# Re-measure the chip figures into scripts/heap-budget-record.json — every
-# chip, or the one named.
+# Re-measure the chip figures into scripts/heap-budget-record/chips/<chip>.json
+# — every chip, or the one named. A chip whose gated figures did not move keeps
+# its file and stamp untouched.
 heap-budget-baseline-chips chip="": install-rv32-target
     LP_EMU_BUILD_FW=1 scripts/heap-budget-check.sh chips-baseline {{ chip }}
 
 # Re-measure the classic's alone. Its band is measured on ONE host today (see
-# `stack_band_note` in the record); a runner's figure is M5 P6's to add.
+# `stack_band_note` in its record file); a runner's figure is M5 P6's to add.
 heap-budget-baseline-chips-v3:
     LP_EMU_BUILD_FW=1 scripts/heap-budget-check.sh chips-baseline esp32v3
 
 # Re-measure the S3's alone. Its band is measured on ONE host today (see
-# `stack_band_note` in the record); a runner's figure is the first green
+# `stack_band_note` in its record file); a runner's figure is the first green
 # `Emulator ESP32-S3 (x64)` run's to add.
 heap-budget-baseline-chips-s3:
     LP_EMU_BUILD_FW=1 scripts/heap-budget-check.sh chips-baseline esp32s3
@@ -2697,6 +2703,17 @@ test-all: test test-gfx
 
 test-filetests:
     scripts/filetests.sh
+    just test-example-shaders
+
+# Compile gate over the shipped example shaders: every catalog/ and
+# projects/test/ shader, composed the way its node composes it, compiled (not
+# run) on every filetest target (ALL_TARGETS); any rejection fails. Workspace
+# `cargo test` selection, not `-p`, so it reuses the build `test-rust-core`
+# just made instead of re-unifying features. Needs the rv32 builtins image
+# (`build-rv32-builtins`); without the Xtensa image the xt targets run codegen
+# only. See docs/debt/example-shaders-not-compile-gated.md.
+test-example-shaders:
+    cargo test --test example_shaders_compile -- --ignored --nocapture
 
 # Crash-recovery emulator suite (slow: builds fw-emu with build-std/unwind
 # and simulates multiple reboots). Marked #[ignore]; run explicitly.
@@ -2738,16 +2755,18 @@ test-glsl-filetests:
 # (which need chip builds this gate deliberately avoids). Note the narrow
 # residue: drift unique to the emu fixture itself is only caught locally.
 #
-# `check-wasm-cloud` is also local-full-gate only: it closes the wasm32
-# blind spot for one crate/feature combination (lpa-cloud-client without
-# `in-process`). Warm ~1s, cold ~47s. CI compiles it only inside the stories
-# job's dx build, whose path gate does not include lpa-cloud-client.
-# See docs/debt/wasm-cloud-check-not-in-just-check.md.
+# `check-wasm-cloud` rides in `check-lint`, so CI's Lint job runs it on the
+# `core` gate (every non-docs PR): it closes the wasm32 blind spot for one
+# crate/feature combination (lpa-cloud-client without `in-process`). Before
+# it moved here CI compiled that combination only inside the stories job's
+# dx build, whose `studio` path gate does not include lpa-cloud-client.
+# Warm ~1s, cold ~47s locally; it runs beside clippy, the Lint job's long
+# pole. See docs/debt/wasm-cloud-check-not-in-just-check.md.
 [parallel]
-check-lint: fmt-check clippy check-lpc-engine-gates check-studio-core-minimal lint-serde-content lint-browser-test-harness lint-classic-capture lint-pcb-export lint-schemars-fw lint-upgrade-fw lint-emu-fence lint-nested-patches lint-emu-regnames lint-torture-corpus lint-vec-corpus lint-tw-utilities
+check-lint: fmt-check clippy check-wasm-cloud check-lpc-engine-gates check-studio-core-minimal lint-serde-content lint-browser-test-harness lint-classic-capture lint-pcb-export lint-schemars-fw lint-upgrade-fw lint-emu-fence lint-nested-patches lint-emu-regnames lint-torture-corpus lint-vec-corpus lint-tw-utilities lint-red-main-needs
 
 [parallel]
-check: check-lint schema-check fw-manifest-check-emu check-wasm-cloud
+check: check-lint schema-check fw-manifest-check-emu
 
 # Guard against serde Content-machinery reintroduction (tag/untagged/flatten).
 # See docs/adr/2026-07-04-json-only-artifacts.md and the script's allowlist.
@@ -2828,6 +2847,13 @@ lint-emu-fence:
 # script. docs/debt/nested-workspaces-miss-root-patches.md.
 lint-nested-patches:
     ./scripts/check-nested-patches.sh
+
+# pre-merge.yml's `red-main-suspects` job must `needs:` every other job, or a
+# red main can finish before a failing job does and name no suspects. The
+# list is hand-maintained; this names any job missing from it. Offline,
+# stdlib python, ~0.1 s.
+lint-red-main-needs:
+    python3 scripts/ci/check-red-main-needs.py
 
 # The ESP32-C6 machine's boot tests, which need firmware ELFs, plus the M3
 # replays of the committed transcripts.

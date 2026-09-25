@@ -27,6 +27,19 @@ set -euo pipefail
 # An intentional change re-baselines explicitly (`just heap-budget-baseline`)
 # so it lands in the PR diff where a reviewer sees it.
 #
+# ## The record is a directory, one file per project and per chip
+#
+#   scripts/heap-budget-record/engine/<project path>.json   — the engine arm
+#   scripts/heap-budget-record/chips/<chip>.json            — the chip arm
+#
+# Each file carries its own `recorded`/`commit` stamp, and a baseline rewrites
+# a file ONLY when its figures moved — so two PRs that re-baseline different
+# chips or projects touch disjoint files and cannot conflict. It was one JSON
+# file until 2026-09-23, and 37 of its 67 commits were re-baselines that
+# conflicted with each other on the shared stamp
+# (docs/adr/2026-09-23-heap-budget-record-split-and-derived-stack.md,
+# docs/debt/heap-budget-record-churns-on-routine-changes.md).
+#
 # Why deltas and not absolutes, and what this gate cannot see:
 # docs/heap-budget-gate.md
 #
@@ -37,7 +50,7 @@ set -euo pipefail
 # about an ESP32. It measures what a project costs; it cannot measure what the
 # firmware costs, because in that emulator there is no firmware.
 #
-# `scripts/heap-budget-record.json`'s `chips` section is the other half, and
+# `scripts/heap-budget-record/chips/` is the other half, and
 # it comes from the SoC emulators (`lp-emu-esp32c6`, plan
 # `2026-09-06-1001-esp-emulator`; `lp-emu-esp32v3`, plan three M5 P5): the
 # shipped image booted whole, and the allocator figures its own first
@@ -70,7 +83,7 @@ set -euo pipefail
 #
 # Usage:
 #   heap-budget-check.sh check [margin_pct]          # default margin 0
-#   heap-budget-check.sh baseline
+#   heap-budget-check.sh baseline [project]          # every recorded project, or one
 #   heap-budget-check.sh chips [margin_pct] [chip]   # the chip half alone
 #   heap-budget-check.sh chips-baseline [chip]
 
@@ -84,7 +97,11 @@ cd "$(dirname "$0")/.."
 # shellcheck disable=SC2206
 LP_CLI_CMD=(${LP_CLI:-cargo run -q -p lp-cli --})
 
-RECORD="scripts/heap-budget-record.json"
+RECORD_DIR="scripts/heap-budget-record"
+ENGINE_DIR="${RECORD_DIR}/engine"
+CHIPS_DIR="${RECORD_DIR}/chips"
+# Derives the main stack's layout from the ELF — see `chip_check`.
+STACK_LAYOUT="scripts/heap-budget-stack-layout.py"
 MODES=(startup steady-render)
 # Emulator cycle cap per profile session. The startup capture must reach the
 # END of the frame that contains the first shader compile; a capture the cap
@@ -160,6 +177,21 @@ project_windows() {
               )})
             | from_entries)}" "$budget"
 }
+
+# The recorded projects, one per file under ENGINE_DIR — the path below it,
+# less `.json`, IS the project path. Sorted, so a run's order is stable.
+engine_projects() {
+    [ -d "$ENGINE_DIR" ] || return 0
+    (cd "$ENGINE_DIR" && find . -type f -name '*.json' | sed -e 's|^\./||' -e 's|\.json$||' | LC_ALL=C sort)
+}
+
+engine_record() {
+    echo "${ENGINE_DIR}/$1.json"
+}
+
+# What a newly recorded project's file says about itself.
+# shellcheck disable=SC2016  # the backticks are prose, not expansions
+ENGINE_COMMENT='What this project costs TODAY on the RV32 ENGINE emulator (`lp-cli profile --collect alloc`), per profile mode; steady-render records only the frame window. A ratchet, not a target. The file'"'"'s path under scripts/heap-budget-record/engine/ IS the project path. Regenerate with `just heap-budget-baseline` (every project) or `just heap-budget-baseline <project>`; see docs/heap-budget-gate.md.'
 
 # ---------------------------------------------------------------- the chips
 #
@@ -481,6 +513,22 @@ $dir/console.txt." >&2
     rm -rf "$dir"
 }
 
+# One chip's record file.
+chip_record() {
+    echo "${CHIPS_DIR}/$1.json"
+}
+
+# What the ELF's own layout says the main stack is — `{stackTop, stackBottom,
+# stackTotal, staticsEnd, staticsSection, gap}` — or nothing and a reason.
+chip_layout() {
+    local elf="$1"
+    command -v python3 >/dev/null 2>&1 || {
+        echo "::error::heap-budget: python3 not found; the chip arm reads the stack's layout off the ELF with ${STACK_LAYOUT}." >&2
+        return 1
+    }
+    python3 "$STACK_LAYOUT" "$elf"
+}
+
 # The four memory figures are exact or ratcheted; the stack high-water is a
 # BAND. DD45/DD46 of the plan: the reference image a CI runner builds is not
 # the binary this host builds (same nightly, different rustc `.text`), the
@@ -488,6 +536,16 @@ $dir/console.txt." >&2
 # instruction of a differently laid-out image has a different deepest point.
 # The memory class survives that; the stack figure does not, and pretending
 # otherwise would be a gate that fails on the host it runs on.
+#
+# The stack's SIZE is neither: it is DERIVED. On all three chips esp-hal's
+# `ld/sections/stack.x` makes the main stack the residual of RWDATA after
+# `.data`/`.bss` (`_stack_end` right after the statics, `_stack_start` at
+# `ORIGIN + LENGTH`), so its size moves by every byte of statics and a
+# recorded "exact" figure failed any PR that added a static table. What is
+# recorded exact instead is `stackTop` — `_stack_start`, the one end that only
+# a memory-map change moves — and the heartbeat's `of <total> B` is graded
+# against what the ELF says it must be. See
+# docs/adr/2026-09-23-heap-budget-record-split-and-derived-stack.md.
 chip_check() {
     chip_facts "$1" || return 1
     local margin="$2" fail=0
@@ -499,27 +557,32 @@ C6, 'Emulator ESP32v3 (x64)' for the classic and 'Emulator ESP32-S3 (x64)' for t
 that already have the Xtensa toolchain)."
         return 0
     fi
-    echo "heap-budget: booting ${CHIP_ID} (${CHIP_FEATURES}) on ${CHIP_CONFIG} — $elf"
-    local meas
-    meas="$(chip_measure "$CHIP_ID" "$elf")" || return 1
-
+    local rec_file
+    rec_file="$(chip_record "$CHIP_ID")"
     local recorded
-    recorded="$(jq -c --arg c "$CHIP_ID" '.chips[$c].measured // empty' "$RECORD")"
+    recorded="$(jq -c '.measured // empty' "$rec_file" 2>/dev/null || true)"
     if [ -z "$recorded" ]; then
-        echo "::error::heap-budget: ${CHIP_ID}: no .chips.${CHIP_ID}.measured in ${RECORD} — run \
-'heap-budget-check.sh chips-baseline' and commit it."
+        echo "::error::heap-budget: ${CHIP_ID}: no .measured in ${rec_file} — run \
+'heap-budget-check.sh chips-baseline ${CHIP_ID}' and commit it."
         return 1
     fi
+    echo "heap-budget: booting ${CHIP_ID} (${CHIP_FEATURES}) on ${CHIP_CONFIG} — $elf"
+    local meas layout
+    meas="$(chip_measure "$CHIP_ID" "$elf")" || return 1
+    layout="$(chip_layout "$elf")" || return 1
+    # `stackTop` rides with the measured figures so the one table below grades
+    # it; it comes from the ELF, not the console.
+    meas="$(jq -c --argjson l "$layout" '. + {stackTop: $l.stackTop}' <<<"$meas")"
 
     # figure <TAB> recorded <TAB> measured <TAB> direction
     #   grow  — bigger is worse (usedBytes)
     #   shrink— smaller is worse (freeBytes, largestFreeBlock)
-    #   exact — any difference is a finding (totalBytes, stackTotal)
-    #   band  — inside the recorded range (stackHighWater)
+    #   exact — any difference is a finding (totalBytes, stackTop)
+    #   band  — inside the recorded range (stackHighWater, below)
     local rows
     rows="$(jq -rn --argjson rec "$recorded" --argjson m "$meas" '
         [ ["totalBytes", "exact"], ["usedBytes", "grow"], ["freeBytes", "shrink"],
-          ["largestFreeBlock", "shrink"], ["stackTotal", "exact"] ][]
+          ["largestFreeBlock", "shrink"], ["stackTop", "exact"] ][]
         | . as [$f, $dir] | [$f, ($rec[$f] // "null"), ($m[$f] // "null"), $dir] | @tsv')"
     while IFS=$'\t' read -r f rec meas_v dir; do
         [ -n "$f" ] || continue
@@ -532,8 +595,8 @@ that already have the Xtensa toolchain)."
         exact)
             if [ "$meas_v" != "$rec" ]; then
                 echo "::error::heap-budget: ${CHIP_ID} ${f} changed: ${meas_v} != recorded ${rec}. \
-This figure is the chip's, not a budget — a change is a finding. Intentional? Re-baseline with \
-'just heap-budget-baseline-chips' in this PR."
+This figure is the chip's memory map, not a budget — a change is a finding. Intentional? \
+Re-baseline with 'just heap-budget-baseline-chips ${CHIP_ID}' in this PR."
                 fail=1
             else
                 echo "  ok: ${f}: ${meas_v}"
@@ -544,10 +607,10 @@ This figure is the chip's, not a budget — a change is a finding. Intentional? 
             if [ "$meas_v" -gt "$allowed" ]; then
                 echo "::error::heap-budget: ${CHIP_ID} ${f} grew: ${meas_v} > recorded ${rec} \
 (margin ${margin}%). The firmware's own resident cost went up. Intentional? Re-baseline with \
-'just heap-budget-baseline-chips' in this PR."
+'just heap-budget-baseline-chips ${CHIP_ID}' in this PR."
                 fail=1
             elif [ "$meas_v" -lt "$rec" ]; then
-                echo "  improved: ${f}: ${rec} -> ${meas_v} (lock it in with 'just heap-budget-baseline-chips')"
+                echo "  improved: ${f}: ${rec} -> ${meas_v} (lock it in with 'just heap-budget-baseline-chips ${CHIP_ID}')"
             else
                 echo "  ok: ${f}: ${meas_v}"
             fi
@@ -556,10 +619,10 @@ This figure is the chip's, not a budget — a change is a finding. Intentional? 
             allowed=$(awk -v r="$rec" -v m="$margin" 'BEGIN { printf "%d", r * (1 - m / 100) }')
             if [ "$meas_v" -lt "$allowed" ]; then
                 echo "::error::heap-budget: ${CHIP_ID} ${f} shrank: ${meas_v} < recorded ${rec} \
-(margin ${margin}%). Intentional? Re-baseline with 'just heap-budget-baseline-chips' in this PR."
+(margin ${margin}%). Intentional? Re-baseline with 'just heap-budget-baseline-chips ${CHIP_ID}' in this PR."
                 fail=1
             elif [ "$meas_v" -gt "$rec" ]; then
-                echo "  improved: ${f}: ${rec} -> ${meas_v} (lock it in with 'just heap-budget-baseline-chips')"
+                echo "  improved: ${f}: ${rec} -> ${meas_v} (lock it in with 'just heap-budget-baseline-chips ${CHIP_ID}')"
             else
                 echo "  ok: ${f}: ${meas_v}"
             fi
@@ -570,8 +633,8 @@ This figure is the chip's, not a budget — a change is a finding. Intentional? 
     # The band.
     local hw lo hi
     hw="$(jq -r '.stackHighWater' <<<"$meas")"
-    lo="$(jq -r --arg c "$CHIP_ID" '.chips[$c].measured.stackHighWaterBand[0]' "$RECORD")"
-    hi="$(jq -r --arg c "$CHIP_ID" '.chips[$c].measured.stackHighWaterBand[1]' "$RECORD")"
+    lo="$(jq -r '.stackHighWaterBand[0]' <<<"$recorded")"
+    hi="$(jq -r '.stackHighWaterBand[1]' <<<"$recorded")"
     if [ "$hw" -lt "$lo" ] || [ "$hw" -gt "$hi" ]; then
         echo "::error::heap-budget: ${CHIP_ID} stackHighWater ${hw} B is outside the recorded band \
 ${lo}..${hi} B. The band is wide on purpose (the image a CI runner builds is not this host's \
@@ -582,12 +645,46 @@ lands on the main task."
         echo "  ok: stackHighWater: ${hw} B (band ${lo}..${hi})"
     fi
 
+    # The stack's size, derived. Three things must hold, and each failing is
+    # a finding rather than a re-baseline:
+    #   1. the heartbeat's `of <total> B` is `_stack_start - _stack_end` off
+    #      the ELF — the probe reports the layout;
+    #   2. nothing sits between the statics and the stack (`.stack` is
+    #      `ALIGN(4)`, so the gap is 0..3 B) — the stack is exactly what the
+    #      statics leave, which is the premise that makes deriving it sound;
+    #   3. the stack still covers the recorded worst idle depth.
+    local st_rep st_lay gap sect
+    st_rep="$(jq -r '.stackTotal' <<<"$meas")"
+    st_lay="$(jq -r '.stackTotal' <<<"$layout")"
+    gap="$(jq -r '.gap' <<<"$layout")"
+    sect="$(jq -r '.staticsSection' <<<"$layout")"
+    if [ "$st_rep" != "$st_lay" ]; then
+        echo "::error::heap-budget: ${CHIP_ID} stackTotal: the heartbeat reports ${st_rep} B but \
+the ELF's _stack_start - _stack_end is ${st_lay} B. The probe no longer reports the layout it \
+runs on — a finding, not a re-baseline."
+        fail=1
+    elif [ "$gap" -lt 0 ] || [ "$gap" -ge 4 ]; then
+        echo "::error::heap-budget: ${CHIP_ID} stackTotal: ${gap} B lie between the end of \
+${sect} and _stack_end. The main stack is no longer exactly the residual of RWDATA after the \
+statics, which is the premise the derived check rests on — read the linker script before \
+anything else (docs/adr/2026-09-23-heap-budget-record-split-and-derived-stack.md)."
+        fail=1
+    elif [ "$st_rep" -le "$hi" ]; then
+        echo "::error::heap-budget: ${CHIP_ID} stackTotal ${st_rep} B no longer exceeds the top \
+of the recorded high-water band (${hi} B): statics have eaten the main stack down to its idle \
+depth."
+        fail=1
+    else
+        echo "  ok: stackTotal: ${st_rep} B = RWDATA top - end of ${sect} (derived from the ELF, \
+not recorded; $(( st_rep - hi )) B above the high-water band)"
+    fi
+
     # Silicon, beside it. Never gated — it is a different image at a different
     # commit — but printed every run, because the whole claim of this source is
     # that the two agree, and a gap nobody looks at is a gap nobody notices
     # widening.
     local sil
-    sil="$(jq -c --arg c "$CHIP_ID" '.chips[$c].silicon_reference // empty' "$RECORD")"
+    sil="$(jq -c '.silicon_reference // empty' "$rec_file")"
     if [ -n "$sil" ]; then
         echo "  silicon reference ($(jq -r '.commit' <<<"$sil"), $(jq -r '.transcript' <<<"$sil")):"
         jq -rn --argjson s "$sil" --argjson m "$meas" '
@@ -601,12 +698,16 @@ lands on the main task."
             echo "heap-budget \`${CHIP_ID}\` (${CHIP_FEATURES}, ${CHIP_CONFIG}):"
             echo '```'
             jq -r 'to_entries[] | "\(.key): \(.value)"' <<<"$meas"
+            echo "stack layout: $(jq -c . <<<"$layout")"
             echo '```'
         } >>"$GITHUB_STEP_SUMMARY"
     fi
     return "$fail"
 }
 
+# Writes the chip's file only when its gated figures moved: a re-baseline that
+# changes nothing must not restamp the file, or two PRs that each re-baseline a
+# DIFFERENT chip would still conflict on the untouched ones' stamps.
 chip_baseline() {
     chip_facts "$1" || return 1
     local elf
@@ -614,9 +715,12 @@ chip_baseline() {
         echo "heap-budget: cannot baseline ${CHIP_ID} without a firmware image." >&2
         return 1
     }
+    local rec_file
+    rec_file="$(chip_record "$CHIP_ID")"
     echo "heap-budget: baselining ${CHIP_ID} (${CHIP_FEATURES}) — $elf"
-    local meas
+    local meas layout
     meas="$(chip_measure "$CHIP_ID" "$elf")" || return 1
+    layout="$(chip_layout "$elf")" || return 1
     # The band is the measurement ±500 B, rounded outward to the nearest 100:
     # DD45's measured spread between this host's image and a CI runner's was
     # 128 B, and the band is the documented spread with room, never a fitted
@@ -625,18 +729,27 @@ chip_baseline() {
     hw="$(jq -r '.stackHighWater' <<<"$meas")"
     lo=$(( (hw - 500) / 100 * 100 ))
     hi=$(( (hw + 599) / 100 * 100 ))
+    # `stackTotal` is not recorded: it is derived from the ELF on every check.
+    local measured
+    measured="$(jq -c --argjson l "$layout" --argjson lo "$lo" --argjson hi "$hi" '
+        {freeBytes, usedBytes, totalBytes, largestFreeBlock, stackHighWater,
+         stackTop: $l.stackTop, stackHighWaterBand: [$lo, $hi]}' <<<"$meas")"
+    local existing='{}'
+    [ -f "$rec_file" ] && existing="$(jq -c . "$rec_file")"
+    if [ "$(jq -n --argjson e "$existing" --argjson m "$measured" '$e.measured == $m')" = "true" ]; then
+        echo "heap-budget: ${CHIP_ID}: figures unchanged — ${rec_file} left as it is (stamp kept)"
+        return 0
+    fi
     local updated
-    updated="$(jq --arg c "$CHIP_ID" --argjson m "$meas" --argjson lo "$lo" --argjson hi "$hi" \
+    updated="$(jq -n --argjson e "$existing" --argjson m "$measured" \
         --arg commit "$(git rev-parse --short HEAD)" --arg date "$(date +%F)" '
-        .chips[$c].measured = ($m + {stackHighWaterBand: [$lo, $hi]})
-        | .chips[$c].recorded = $date
-        | .chips[$c].commit = $commit' "$RECORD")"
+        $e | .measured = $m | .recorded = $date | .commit = $commit')"
     # `-a`: the record is committed, and jq's default UTF-8 output would
-    # rewrite every em dash in every OTHER chip's prose the first time this
-    # ran on a host whose jq differs — a diff that looks like the gate moved
-    # figures it never touched. ASCII escapes are what the file holds.
-    printf '%s\n' "$updated" | jq -a . >"$RECORD"
-    echo "heap-budget: wrote ${CHIP_ID} into ${RECORD}"
+    # rewrite every em dash in the prose the first time this ran on a host
+    # whose jq differs — a diff that looks like the gate moved figures it
+    # never touched. ASCII escapes are what the file holds.
+    printf '%s\n' "$updated" | jq -a . >"$rec_file"
+    echo "heap-budget: wrote ${rec_file}"
 }
 
 # Which chips a run covers: all of them, or the one named.
@@ -680,21 +793,23 @@ chips-baseline)
 
 check)
     margin="${2:-0}"
-    if [ ! -f "$RECORD" ]; then
-        echo "::error::heap-budget: record ${RECORD} missing — run 'just heap-budget-baseline' and commit it."
+    projects="$(engine_projects)"
+    if [ -z "$projects" ]; then
+        echo "::error::heap-budget: no project records under ${ENGINE_DIR} — run 'just heap-budget-baseline' and commit them."
         exit 1
     fi
     fail=0
-    for project in $(jq -r '.projects | keys[]' "$RECORD"); do
-        for pmode in $(jq -r --arg p "$project" '.projects[$p].modes | keys[]' "$RECORD"); do
+    for project in $projects; do
+        rec_file="$(engine_record "$project")"
+        for pmode in $(jq -r '.modes | keys[]' "$rec_file"); do
             echo "heap-budget: profiling ${project} (${pmode})..."
             budget="$(budget_for "$project" "$pmode")"
 
             # A recorded window absent from the measurement means the
             # instrument or the instrumented path broke — that must fail, not
             # pass silently.
-            missing="$(jq -r --arg p "$project" --arg m "$pmode" --slurpfile meas "$budget" \
-                '(.projects[$p].modes[$m].windows | keys) - [$meas[0].windows[].name] | .[]' "$RECORD")"
+            missing="$(jq -r --arg m "$pmode" --slurpfile meas "$budget" \
+                '(.modes[$m].windows | keys) - [$meas[0].windows[].name] | .[]' "$rec_file")"
             if [ -n "$missing" ]; then
                 while read -r w; do
                     echo "::error::heap-budget: ${project} (${pmode}): recorded window '${w}' missing from measurement"
@@ -703,11 +818,11 @@ check)
             fi
 
             # window <TAB> figure <TAB> recorded <TAB> measured
-            rows="$(jq -r --arg p "$project" --arg m "$pmode" --slurpfile meas "$budget" '
-                .projects[$p].modes[$m].windows | to_entries[] as {key: $w, value: $figs}
+            rows="$(jq -r --arg m "$pmode" --slurpfile meas "$budget" '
+                .modes[$m].windows | to_entries[] as {key: $w, value: $figs}
                 | ($meas[0].windows[] | select(.name == $w)) as $mw
                 | ($figs | to_entries[]) as {key: $f, value: $rec}
-                | [$w, $f, $rec, $mw[$f]] | @tsv' "$RECORD")"
+                | [$w, $f, $rec, $mw[$f]] | @tsv' "$rec_file")"
 
             while IFS=$'\t' read -r w f rec meas; do
                 [ -n "$w" ] || continue
@@ -722,10 +837,10 @@ check)
                     # below the record, not on growth.
                     allowed=$(awk -v r="$rec" -v m="$margin" 'BEGIN { printf "%d", r * (1 - m / 100) }')
                     if [ "$meas" -lt "$allowed" ]; then
-                        echo "::error::heap-budget: ${project} (${pmode}) ${w}.${f} shrank: ${meas} < recorded ${rec} (margin ${margin}%). Intentional? Re-baseline with 'just heap-budget-baseline' in this PR."
+                        echo "::error::heap-budget: ${project} (${pmode}) ${w}.${f} shrank: ${meas} < recorded ${rec} (margin ${margin}%). Intentional? Re-baseline with 'just heap-budget-baseline ${project}' in this PR."
                         fail=1
                     elif [ "$meas" -gt "$rec" ]; then
-                        echo "  improved: ${w}.${f}: ${rec} -> ${meas} (lock it in with 'just heap-budget-baseline')"
+                        echo "  improved: ${w}.${f}: ${rec} -> ${meas} (lock it in with 'just heap-budget-baseline ${project}')"
                     else
                         echo "  ok: ${w}.${f}: ${meas}"
                     fi
@@ -733,10 +848,10 @@ check)
                 fi
                 allowed=$(awk -v r="$rec" -v m="$margin" 'BEGIN { printf "%d", r * (1 + m / 100) }')
                 if [ "$meas" -gt "$allowed" ]; then
-                    echo "::error::heap-budget: ${project} (${pmode}) ${w}.${f} grew: ${meas} > recorded ${rec} (margin ${margin}%). Intentional? Re-baseline with 'just heap-budget-baseline' in this PR."
+                    echo "::error::heap-budget: ${project} (${pmode}) ${w}.${f} grew: ${meas} > recorded ${rec} (margin ${margin}%). Intentional? Re-baseline with 'just heap-budget-baseline ${project}' in this PR."
                     fail=1
                 elif [ "$meas" -lt "$rec" ]; then
-                    echo "  improved: ${w}.${f}: ${rec} -> ${meas} (lock it in with 'just heap-budget-baseline')"
+                    echo "  improved: ${w}.${f}: ${rec} -> ${meas} (lock it in with 'just heap-budget-baseline ${project}')"
                 else
                     echo "  ok: ${w}.${f}: ${meas}"
                 fi
@@ -762,50 +877,46 @@ check)
     ;;
 
 baseline)
-    projects=()
-    if [ -f "$RECORD" ]; then
-        while read -r p; do projects+=("$p"); done < <(jq -r '.projects | keys[]' "$RECORD")
+    # Every recorded project, or the one named — which is also how a project
+    # is ADDED: `heap-budget-check.sh baseline catalog/…` records a project
+    # that has no file yet. With no records at all, the defaults.
+    if [ -n "${2:-}" ]; then
+        projects="$2"
     else
-        projects=("${DEFAULT_PROJECTS[@]}")
+        projects="$(engine_projects)"
+        [ -n "$projects" ] || projects="${DEFAULT_PROJECTS[*]}"
     fi
 
-    # The `chips` section is carried through untouched: it comes from a
-    # different emulator, needs a firmware build, and is baselined by
-    # `chips-baseline`. A wholesale regeneration that silently dropped it
-    # would delete a gate.
-    chips="$(jq -c '.chips // {}' "$RECORD" 2>/dev/null || echo '{}')"
-    record="$(jq -n \
-        --arg date "$(date +%F)" \
-        --arg commit "$(git rev-parse --short HEAD)" \
-        --argjson chips "$chips" \
-        '{
-            comment: "Measured heap-budget record — a ratchet, not a target. Two sources. `projects` is what each project costs TODAY on the RV32 ENGINE emulator (`lp-cli profile`), per project and profile mode; steady-render records only the frame window. `chips` is what the FIRMWARE costs on the SoC emulator (`lp-emu-esp32c6`) — the shipped image booted whole, read from its own first heartbeat, with silicon beside it. Regenerate with `just heap-budget-baseline` and `just heap-budget-baseline-chips`; see docs/heap-budget-gate.md.",
-            recorded: $date,
-            commit: $commit,
-            projects: {},
-            chips: $chips
-        }')"
-
-    # ${projects[@]+...}: a record with an empty .projects leaves this array
-    # empty, and on bash 3.2 (macOS) a bare "${projects[@]}" would then abort
-    # with an unbound-variable error under `set -u` instead of baselining
-    # nothing.
-    for project in ${projects[@]+"${projects[@]}"}; do
+    for project in $projects; do
+        rec_file="$(engine_record "$project")"
+        modes='{}'
         for pmode in "${MODES[@]}"; do
             echo "heap-budget: baselining ${project} (${pmode})..."
             budget="$(budget_for "$project" "$pmode")"
             windows="$(project_windows "$pmode" "$budget")"
-            record="$(jq --arg p "$project" --arg m "$pmode" --argjson w "$windows" \
-                '.projects[$p].modes[$m] = $w' <<<"$record")"
+            modes="$(jq -c --arg m "$pmode" --argjson w "$windows" '.[$m] = $w' <<<"$modes")"
         done
+        existing='{}'
+        [ -f "$rec_file" ] && existing="$(jq -c . "$rec_file")"
+        # Only a file whose figures moved is rewritten, stamp and all: an
+        # untouched project keeps its stamp, so two PRs that re-baseline
+        # different projects touch different files.
+        if [ "$(jq -n --argjson e "$existing" --argjson m "$modes" '$e.modes == $m')" = "true" ]; then
+            echo "heap-budget: ${project}: figures unchanged — ${rec_file} left as it is (stamp kept)"
+            continue
+        fi
+        mkdir -p "$(dirname "$rec_file")"
+        jq -n --argjson e "$existing" --argjson m "$modes" \
+            --arg date "$(date +%F)" --arg commit "$(git rev-parse --short HEAD)" \
+            --arg comment "$ENGINE_COMMENT" '
+            {comment: ($e.comment // $comment), recorded: $date, commit: $commit, modes: $m}' \
+            | jq -a . >"$rec_file"   # -a: see chip_baseline
+        echo "heap-budget: wrote ${rec_file}"
     done
-
-    printf '%s\n' "$record" | jq -a . >"$RECORD"   # -a: see chip_baseline
-    echo "heap-budget: wrote ${RECORD}"
     ;;
 
 *)
-    echo "usage: $0 check [margin_pct] | baseline | chips [margin_pct] [chip] | \
+    echo "usage: $0 check [margin_pct] | baseline [project] | chips [margin_pct] [chip] | \
 chips-baseline [chip]   (chips: $CHIPS)" >&2
     exit 2
     ;;
