@@ -20,16 +20,22 @@
 //   rx.writeValueWithResponse(bytes)
 //   tx.{startNotifications, addEventListener("characteristicvaluechanged"), value}
 //
-// FOUR RULES, each with a measurement behind it (M2 desk sitting, spike
+// FIVE RULES, each with a measurement behind it (M2 desk sitting, spike
 // Runs B and F):
 //
 //  1. **Every write is awaited, and every write asks for a response.** Knob
 //     turns are one ~190 B packet; write-with-response is plenty for
 //     control. Unpaced write-WITHOUT-response lost about two thirds of the
 //     bytes in Run B, so this file never issues one.
-//  2. **Writes are chunked to ≤ MTU − 3**, assumed 244 (a 247 MTU) because
-//     Web Bluetooth does not expose the negotiated MTU. iOS picked 251 in
-//     Run F, so 244 is inside what every central measured so far accepts.
+//  2. **Writes are chunked to 180 B**, inside one ATT value at any MTU a
+//     central is likely to agree (iOS's common 185 → 182; the board's own is
+//     247 → 244), because Web Bluetooth does not expose the negotiated MTU.
+//     A chunk over MTU − 3 becomes an ATT *long write* (Prepare … Execute):
+//     the board handles one since 2026-09-25, but before that it acked the
+//     segments and dropped the bytes, so a request vanished and the editor's
+//     dead-wire backstop closed it with no error on screen
+//     (docs/defects/2026-09-25-a-long-bluetooth-write-is-acknowledged-and-lost.md).
+//     The same 180 the ble-lab used for every Bluefy measurement.
 //  3. **Every `gatt.connect()` is bounded (10 s).** Chrome's hung forever
 //     once in Run B and wedged the page with it.
 //  4. **A hidden page does not hear its link drop.** iOS suspends a hidden
@@ -38,6 +44,14 @@
 //     So becoming visible is "state unknown": every session re-reads
 //     `gatt.connected`, a dead one is handled as a drop right then, and a
 //     session that was reconnecting starts again at once.
+//  5. **A drop is torn down, whatever reported it.** Bluefy can tell the
+//     page its link is gone while iOS keeps the radio connection up (G4,
+//     2026-09-25: the board held the link for 20 minutes, until the tab
+//     closed). A reconnect then rides the OLD link, so the board never sees
+//     a new one and never sends the hello it owes a new link. Every drop
+//     therefore calls `gatt.disconnect()`, and so does a failed write (the
+//     rest of its line is lost, and a half line would poison the board's
+//     next one): the reconnect is always a fresh link.
 //
 // RECONNECT NEEDS NO GESTURE (G1, Run F): Bluefy reconnected a held
 // `BluetoothDevice` after a page-caused drop in 954 ms and after a board
@@ -54,7 +68,7 @@ const NUS_TX = "6e400003-b5a3-f393-e0a9-e50e24dcca9e"; // board → central (not
 /// Rule 3.
 export const CONNECT_TIMEOUT_MS = 10_000;
 /// Rule 2.
-export const WRITE_CHUNK_BYTES = 244;
+export const WRITE_CHUNK_BYTES = 180;
 /// Bytes a session holds for a reader that is not draining. A connected
 /// board heartbeats every 5 s whether anyone reads or not; this bounds what
 /// a link nobody has opened can pile up.
@@ -421,9 +435,12 @@ export function write(id, bytes) {
           return;
         }
         session.errors.push(`bluetooth write failed: ${messageOf(error)}`);
-        if (!session.device.gatt?.connected) {
-          handleDrop(session, "a write found the connection gone");
-        }
+        // Rule 5: whether or not the browser still calls the link up, a
+        // line with a missing chunk cannot be finished — start clean.
+        handleDrop(
+          session,
+          session.device.gatt?.connected ? "a write failed" : "a write found the connection gone",
+        );
         return;
       }
     }
@@ -543,6 +560,13 @@ function handleDrop(session, why) {
   session.rx = null;
   detachNotifications(session);
   session.state = "lost";
+  // Rule 5: make the radio link as gone as the page thinks it is. The
+  // `gattserverdisconnected` this may fire is ignored (not "connected").
+  try {
+    session.device.gatt?.disconnect();
+  } catch {
+    // Already gone.
+  }
   session.errors.push(`bluetooth link lost: ${why}`);
   if (session.present) {
     session.present = false;
