@@ -140,7 +140,7 @@ the C6. A model change is follow-up work, not part of this fix. Capture:
   mechanism tears JSON lines too.
 
 **Fidelity: what the emulator now reproduces, and what it does not
-(2026-09-25, PR #825).** The link model raised `serial_in_empty` and returned
+(2026-09-25, PR #832).** The link model raised `serial_in_empty` and returned
 `serial_in_ep_data_free` at the same cycle. With one writer, that made this
 loss impossible, gate or no gate. The missing timing condition is **the gap
 between esp-hal's write and the gate's check**. After a drain, esp-hal's
