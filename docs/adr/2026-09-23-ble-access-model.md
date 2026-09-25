@@ -248,6 +248,19 @@ other devices. The threat model above (someone cheeky nearby) accepts
 both. Per-device salts would have needed every browser to keep a record
 for every device.
 
+**Revisit — flagged for any security review (Yona, 2026-09-25).** Yona
+accepts this for now but wants it revisited: "any security analysis would
+flag that for sure. its an acceptable decision now, but we probably should
+revisit it." The fix is to stop sharing one `(salt, K)` across devices. A
+holder could derive a per-device key from its one secret, for example
+`K_dev = HMAC(secret, device uid)` with a fresh salt per device, so one
+dump opens one device. A client would then match offers against the key
+for the device it is talking to, not by a salt shared everywhere. The cost
+is that a phone must know which device it is unlocking before it answers.
+That identity arrives in the hello (`/.lp/device.json`'s uid), so no
+per-device record should be needed. It is a new entry shape and a wire
+change, so it waits for its own plan.
+
 ### Access files v2
 
 `SecretEntry` gains `kind` (`browser` | `account` | `password`) and an
