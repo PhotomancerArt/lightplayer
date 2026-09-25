@@ -15,8 +15,8 @@ use lpc_model::AsLpPath;
 use lpc_shared::output::MemoryOutputProvider;
 use lpc_shared::time::TimeProvider;
 use lpc_wire::{
-    ClientMessage, OutputFrameEntry, OutputFrameGeometryRead, OutputFrameProbeRequest,
-    OutputFrameProbeResult, WireChannelSampleFormat, json,
+    ClientMessage, OutputFrameEntry, OutputFrameProbeRequest, OutputFrameProbeResult,
+    RevisionGateRead, WireChannelSampleFormat, json,
 };
 use lpfs::LpFsMemory;
 use lps_shared::TextureStorageFormat;
@@ -390,7 +390,7 @@ impl BrowserFirmwareRuntime {
     /// driving lamps here" is a state, not an error.
     pub(crate) fn read_output_frame(
         &mut self,
-        geometry: OutputFrameGeometryRead,
+        geometry: RevisionGateRead,
     ) -> (bool, Vec<OutputFrameEntry>) {
         let handle = self
             .server
@@ -616,7 +616,7 @@ impl BrowserFirmwareRuntime {
                         .is_ok();
                     let OutputFrameProbeResult::Frame { outputs } =
                         project.read_output_frame(OutputFrameProbeRequest {
-                            geometry: OutputFrameGeometryRead::None,
+                            geometry: RevisionGateRead::None,
                             // Only the count of outputs is read here.
                             samples: None,
                         });

@@ -50,7 +50,7 @@ use bt_hci::cmd::le::{
 };
 use bt_hci::cmd::status::ReadRssi;
 use bt_hci::controller::{ControllerCmdAsync, ControllerCmdSync};
-use embassy_futures::join::join;
+use embassy_futures::join::join3;
 use embassy_futures::select::select;
 use embassy_time::{Duration, Instant, Timer};
 use esp_hal::clock::CpuClock;
@@ -104,22 +104,46 @@ pub async fn run_ble_test(_: embassy_executor::Spawner) -> ! {
     // (HIGH = the U.FL connector). Nothing in fw-esp32c6 drives either pin, so
     // until now every XIAO build has run the radio into an unpowered switch.
     // The drivers are leaked so the pins stay driven for the life of the image.
-    core::mem::forget(esp_hal::gpio::Output::new(
-        peripherals.GPIO3,
-        esp_hal::gpio::Level::Low,
-        esp_hal::gpio::OutputConfig::default(),
-    ));
-    core::mem::forget(esp_hal::gpio::Output::new(
-        peripherals.GPIO14,
-        esp_hal::gpio::Level::Low,
-        esp_hal::gpio::OutputConfig::default(),
-    ));
-    println!("[BLE] xiao rf switch: GPIO3=LOW (switch on), GPIO14=LOW (on-board antenna)");
+    // `test_ble_coex` can leave the switch undriven (`LP_COEX_RF_SWITCH=0`),
+    // for M2's Run H: ESP-NOW loss with the quirk against without it.
+    #[cfg(feature = "test_ble_coex")]
+    let rf_switch = super::test_ble_coex::RF_SWITCH_ENABLED;
+    #[cfg(not(feature = "test_ble_coex"))]
+    let rf_switch = true;
+    if rf_switch {
+        core::mem::forget(esp_hal::gpio::Output::new(
+            peripherals.GPIO3,
+            esp_hal::gpio::Level::Low,
+            esp_hal::gpio::OutputConfig::default(),
+        ));
+        core::mem::forget(esp_hal::gpio::Output::new(
+            peripherals.GPIO14,
+            esp_hal::gpio::Level::Low,
+            esp_hal::gpio::OutputConfig::default(),
+        ));
+        println!("[BLE] xiao rf switch: GPIO3=LOW (switch on), GPIO14=LOW (on-board antenna)");
+    } else {
+        println!("[BLE] xiao rf switch: NOT driven (LP_COEX_RF_SWITCH=0)");
+    }
 
     let sw_int = SoftwareInterruptControl::new(peripherals.SW_INTERRUPT);
     let timg0 = TimerGroup::new(peripherals.TIMG0);
     esp_rtos::start(timg0.timer0, sw_int.software_interrupt0);
     heap("rtos-started");
+
+    // Coexistence: Wi-Fi/ESP-NOW first, the way the product's radio is
+    // already up by the time anything else starts, then BLE beside it.
+    #[cfg(feature = "test_ble_coex")]
+    let (_wifi_controller, esp_now) = {
+        let pair = super::test_ble_coex::bring_up(peripherals.WIFI);
+        heap("wifi-espnow-up");
+        pair
+    };
+    #[cfg(feature = "test_ble_coex")]
+    if !super::test_ble_coex::BLE_ENABLED {
+        println!("[BLE] BLE not brought up (LP_COEX_BLE=0): ESP-NOW alone");
+        super::test_ble_coex::run(esp_now).await;
+    }
 
     let connector = match BleConnector::new(peripherals.BT, Default::default()) {
         Ok(c) => c,
@@ -167,7 +191,11 @@ pub async fn run_ble_test(_: embassy_executor::Spawner) -> ! {
     .expect("GATT server builds");
     heap("host-built");
 
-    let _ = join(ble_task(runner), async {
+    #[cfg(feature = "test_ble_coex")]
+    let espnow_meter = super::test_ble_coex::run(esp_now);
+    #[cfg(not(feature = "test_ble_coex"))]
+    let espnow_meter = core::future::pending::<()>();
+    let _ = join3(ble_task(runner), espnow_meter, async {
         loop {
             match advertise(name.as_str(), &mut peripheral, &server).await {
                 Ok(conn) => {
@@ -576,7 +604,7 @@ fn heap(stage: &'static str) {
     println!("[BLE] heap stage={stage} free={free} used={used}");
     if matches!(
         stage,
-        "heap-init" | "rtos-started" | "controller-up" | "host-built"
+        "heap-init" | "rtos-started" | "wifi-espnow-up" | "controller-up" | "host-built"
     ) {
         critical_section::with(|cs| {
             let _ = BOOT_STAGES.borrow_ref_mut(cs).push((stage, free, used));

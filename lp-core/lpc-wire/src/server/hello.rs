@@ -35,6 +35,21 @@ use crate::server::hello_auth::HelloAuth;
 ///
 /// # History
 ///
+/// - 23: one list-shaped revision gate (lean-wire follow-ups; bumped
+///   again after BLE M3 took 22). The
+///   output-frame probe's own per-output gate (`OutputFrameGeometryRead` +
+///   `KnownOutputFrameGeometry`) is gone: every probe now asks with
+///   `RevisionGateRead`, whose `IfChanged` changes from `{ known_revision:
+///   Option<Revision> }` to `{ known: Vec<KnownRevision> }`, a
+///   `KnownRevision { node?, revision }` naming the node for the
+///   per-output probe and no node for the single-half ones (the control
+///   product's geometry, the binding graph's structure). A retyped field on
+///   three request messages: an old peer cannot decode the other's
+///   requests, which is what earns the bump. One request shape is also one
+///   deserializer on the device (1,584 B of ESP32-C6 flash). Answers are
+///   unchanged. In the same bump, `WireChannelSampleFormat` gains `Srgb8`
+///   (an sRGB-encoded 8-bit sample, Studio's preview default): an old
+///   server cannot decode a request that asks for it.
 /// - 22: access over untrusted links (BLE remote control, M3; bumped
 ///   again after lean-wire took 21) — `ClientRequest::LoginBegin` / `LoginAnswer { macs }` and their answers
 ///   `ServerMsgBody::LoginChallenge { nonce, offers }` /
@@ -56,7 +71,8 @@ use crate::server::hello_auth::HelloAuth;
 ///   `sample_layout` + `display_layout` with `geometry:
 ///   RevisionGateResult<ControlProductGeometry>`. `OutputFrameProbeRequest`
 ///   gains a PER-OUTPUT gate (`geometry: OutputFrameGeometryRead`, whose
-///   `IfChanged` lists a known revision per output node), and
+///   `IfChanged` listed a known revision per output node; folded into
+///   `RevisionGateRead` at 22), and
 ///   `OutputFrameEntry` (and its header) replaces `sample_layout` +
 ///   `display_layout` + `placements` with `geometry:
 ///   RevisionGateResult<OutputFrameGeometry>`. `ControlDisplayLayoutRead`
@@ -220,7 +236,7 @@ use crate::server::hello_auth::HelloAuth;
 /// as `None` on new Studio and a new firmware's extra fields are ignored
 /// by old Studio. Bumping for those would mark every board running
 /// current firmware Incompatible in exchange for nothing.
-pub const WIRE_PROTO_VERSION: u32 = 22;
+pub const WIRE_PROTO_VERSION: u32 = 23;
 
 /// Unsolicited/boot-time server identity, version, and capability report.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -540,7 +556,7 @@ mod tests {
     #[test]
     fn the_proto_version_is_pinned_to_its_history() {
         assert_eq!(
-            WIRE_PROTO_VERSION, 22,
+            WIRE_PROTO_VERSION, 23,
             "if you meant to bump, add the History entry in this file's \
              doc comment and update this pin"
         );

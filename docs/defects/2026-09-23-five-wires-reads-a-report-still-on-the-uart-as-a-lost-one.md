@@ -76,3 +76,31 @@ both run in plain `cargo test -p lp-emu-esp32v3`, no firmware needed.
 different rates (pad frames at the render rate, their reports at the
 UART's baud) needs the slower stream's in-flight time in it, or a deadline
 that lands in the gap reads as a loss.
+
+## Recurrence — 2026-09-24, the burst's FIRST line (PR #810)
+
+The fix above covered a deadline inside a burst after at least one of its
+lines was complete. On PR #810's `frame-dump` image (the BLE M4 branch) the
+deadline lands one line earlier: the console's last text is
+`[OUT] frame=1980 leds=16` with nothing after it, so no line of frame
+1980's burst is complete, `reached` reads the 1920 group, and the pad has
+carried 1,981 frames:
+
+```
+gpio18: the pad carried 1981 frames while the guest's last report was frame 1920 — more than the one report period (60) a deadline can fall inside, so summary lines are being lost
+```
+
+Same cause, same class — nothing is lost; the same test passes on
+`origin/main` (`1cd1f7d4e`), whose image renders a slightly different
+number of frames in the window. Fixed in the test's reading again, with no
+bound or constant moved: `counted` wraps `reached` and also reads the
+in-flight tail's `frame=` number — never its checksum, and only once the
+character after the number has arrived — accepting it only as the burst
+straight after a **whole** last group (after a short group it means that
+group was finished with a line missing, and fails by name).
+`a_burst_cut_in_its_first_line_is_in_flight_not_lost` replays this stream
+(and the number cut mid-digit, and a non-adjacent frame);
+`a_burst_in_flight_after_a_short_group_is_a_lost_report` holds the teeth.
+
+The lesson above applied only halfway: the in-flight allowance has to reach
+back to the burst's very first byte, not to its first newline.

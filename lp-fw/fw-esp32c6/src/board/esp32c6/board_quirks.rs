@@ -9,9 +9,15 @@
 use esp_hal::gpio::{AnyPin, Level, Output, OutputConfig};
 use lpc_hardware::{GpioHold, HwGateLevel, board_quirks_for};
 
+/// Proof that [`apply_board_quirks`] has run. Radio bring-up that must follow
+/// it (BLE: `ble::start`) takes one by value, so the ordering is a type
+/// error to get wrong, not a comment to forget.
+#[must_use = "radio bring-up needs this token"]
+pub struct BoardQuirksApplied(());
+
 /// Drive and hold every pin the board `board_id` needs, logging one line per
 /// quirk applied. A board with no quirk is left alone.
-pub fn apply_board_quirks(board_id: &str) {
+pub fn apply_board_quirks(board_id: &str) -> BoardQuirksApplied {
     for quirk in board_quirks_for(board_id) {
         for hold in quirk.gpio_holds {
             let level = match hold.level {
@@ -34,6 +40,7 @@ pub fn apply_board_quirks(board_id: &str) {
             GpioHoldsDisplay(quirk.gpio_holds)
         );
     }
+    BoardQuirksApplied(())
 }
 
 /// `GPIO3=LOW GPIO14=LOW`, for the boot log.
