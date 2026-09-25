@@ -2337,18 +2337,17 @@ mod tests {
     /// `declared` lamps carrying `order` and the rest declared by nobody —
     /// the shape of a half-patched port.
     fn wire_frame(lamps: u32, declared: u32, order: ColorOrder) -> UiControlProductPreview {
-        let mut bytes = Vec::with_capacity(lamps as usize * 6);
+        let mut bytes = Vec::with_capacity(lamps as usize * 3);
         for lamp in 0..lamps {
-            let mut rgb = [0_u16; 3];
-            rgb[(lamp % 3) as usize] = 65535;
-            for sample in rgb {
-                bytes.extend_from_slice(&sample.to_le_bytes());
-            }
+            let mut rgb = [0_u8; 3];
+            rgb[(lamp % 3) as usize] = 255;
+            bytes.extend_from_slice(&rgb);
         }
         UiControlProductPreview {
             revision: 1,
             extent: ControlExtent::new(1, lamps * 3),
-            sample_format: UiControlSampleFormat::U16,
+            // A live wire, as Studio pulls it: sRGB8.
+            sample_format: UiControlSampleFormat::Srgb8,
             sample_layout: ControlSampleLayout {
                 spans: vec![ControlSampleSpan {
                     row: 0,
@@ -2448,9 +2447,8 @@ mod tests {
         // A second box, all-red, carrying sector 2's run at wire 0.
         let second = output_node().0 + 1;
         let mut red = wire_frame(60, 30, ColorOrder::Rgb);
-        red.bytes = std::iter::repeat_n([65535_u16, 0, 0], 60)
+        red.bytes = std::iter::repeat_n([255_u8, 0, 0], 60)
             .flatten()
-            .flat_map(u16::to_le_bytes)
             .collect::<Vec<u8>>()
             .into();
         let run = cell("2:1", 30, 0, 30, false);

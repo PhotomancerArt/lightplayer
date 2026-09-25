@@ -288,6 +288,16 @@ enum NamedDeviceRefusal {
     Mismatch(crate::UiOpenMismatch),
 }
 
+/// Where the identity stamped onto an identity-free board came from.
+enum BoardStamp {
+    /// A library copy differs from the board only by its uid: that uid is
+    /// given back, and the copy is bound — nothing is installed.
+    Restored(crate::app::project::device_bind::StampedPackage),
+    /// Nothing here is this project: a fresh uid, and an ordinary adoption
+    /// under it.
+    Minted(crate::app::project::device_bind::StampedPackage),
+}
+
 /// What a home card asked to open.
 #[derive(Clone, Debug)]
 enum PendingOpen {
@@ -474,7 +484,7 @@ impl StudioController {
     /// records into its shared bridge cell (P2: the engine-verdict seam;
     /// P3: the params-diff seam). Runs at the end of every processed batch
     /// — cheap while no sessions exist — so a running agent's bounded
-    /// verdict wait observes the status Revision advancing as pulls land,
+    /// verdict wait observes each pull's read revision as it lands,
     /// and its params diff sees acked def edits.
     fn refresh_agent_engine_status(&mut self) {
         let project = &self.project;
@@ -3122,9 +3132,45 @@ impl StudioController {
         if let Some(uid) = self.lens_associated_project()
             && self.library_project_named(&uid).is_some()
         {
+            // ...unless the board's manifest carries no uid at all: a
+            // project re-pushed from `catalog/` is not a VERSION of the
+            // associated one (identity is the uid, D17). Adoption recognises
+            // a library copy that differs from it only by its uid and gives
+            // that identity back.
+            if self.lens_runs_identity_free_project().await {
+                return BindOutcome::NoCandidate { running };
+            }
             return self.bind_candidate(&uid, &running).await;
         }
         BindOutcome::NoCandidate { running }
+    }
+
+    /// Whether the lens runtime's `project.json` parses and carries no uid.
+    ///
+    /// One file read, asked only when the association would otherwise be
+    /// read as a version of a library project. Any failure answers `false`:
+    /// the association arm then behaves exactly as it always has.
+    async fn lens_runs_identity_free_project(&mut self) -> bool {
+        let read = {
+            let Ok(server) = self
+                .pool
+                .lens_session_mut()
+                .and_then(crate::RuntimeSession::client_mut)
+            else {
+                return false;
+            };
+            self.project.read_running_manifest(server).await
+        };
+        match read {
+            Ok((bytes, logs)) => {
+                self.record_logs(logs);
+                crate::app::project::device_bind::is_identity_free_manifest(&bytes)
+            }
+            Err(error) => {
+                log::debug!("could not read the board's project.json: {error}");
+                false
+            }
+        }
     }
 
     /// Bind one candidate and say what happened in the console.
@@ -3192,19 +3238,25 @@ impl StudioController {
     /// board flashed from the CLI, a board somebody else pushed to, this
     /// library on a fresh browser. The project exists; it is just not
     /// HERE. Pulling it is the only way the editor can say what it is
-    /// working on, and it is safe to do without asking (D3) because it
-    /// writes only this browser's library: nothing is sent to the board,
-    /// nothing on the board is unloaded, and the running project keeps
-    /// running throughout.
+    /// working on, and it is safe to do without asking (D3): nothing on
+    /// the board is unloaded, and the running project keeps running
+    /// throughout.
+    ///
+    /// **A manifest with no uid** — every `catalog/` project and bundled
+    /// example, pushed straight from the repo — is given one ON THE BOARD
+    /// first ([`Self::stamp_board_identity`]): the stamped `project.json`
+    /// is the ONE thing adoption ever writes to a board, and it lands as
+    /// an incremental refresh, not a reload. Minting only in the library
+    /// would give the copy a different `project.json` from the board's —
+    /// and the manifest is inside the canonical hash, so the two would
+    /// never match. A library copy that differs from the board only by its
+    /// uid gives that uid back instead, so re-pushing from `catalog/` never
+    /// mints a duplicate.
     ///
     /// Two boards are NOT adopted, each with one line and no writes:
     ///
-    /// - **A manifest with no uid.** Minting one would give the library
-    ///   copy a different `project.json` from the board's — and
-    ///   `project.json` is inside the canonical hash, so the copy would
-    ///   hash differently from the thing it is a copy of, and the very
-    ///   next save would trip the save-as-pull tripwire. Identity is
-    ///   preserved or the project is not adopted (D17).
+    /// - **No `project.json`, or one that does not parse.** There is no
+    ///   manifest to carry an identity at all.
     /// - **A uid this library already holds.** The bind already scanned
     ///   every library head for the board's content and found nothing, so
     ///   a library copy under this uid is a DIFFERENT version of the same
@@ -3251,34 +3303,58 @@ impl StudioController {
         };
         self.record_logs(logs);
 
-        let Some(uid) = pulled.uid else {
-            self.push_log(UiLogDraft::new(
-                UiLogLevel::Warn,
-                UiLogOrigin::Studio,
-                format!(
-                    "{device_name} is running a project with no identity of its own, so it was not added to your library — the editor is working on the board's copy"
-                ),
-            ));
-            return BindOutcome::NoCandidate { running: *running };
-        };
-        let uid_text = uid.to_string();
-        if self.library_holds_uid(&uid_text).await {
-            let name = self
-                .library_project_named(&uid_text)
-                .map(|project| project.name)
-                .unwrap_or_else(|| uid_text.clone());
-            self.push_log(UiLogDraft::new(
-                UiLogLevel::Warn,
-                UiLogOrigin::Studio,
-                format!(
-                    "this board is running a different version of {name} ({}) than your library has — nothing was changed on either side",
-                    running.hash.short()
-                ),
-            ));
-            return BindOutcome::NoCandidate { running: *running };
-        }
-
         let name = pulled.name.clone().unwrap_or_else(|| device_name.clone());
+        // Which identity the library copy is installed under, the files it
+        // holds, what the board runs now, and whether the identity was
+        // stamped onto the board by this open.
+        let (uid, files, running, stamped) = match pulled.uid {
+            Some(uid) => {
+                let uid_text = uid.to_string();
+                if self.library_holds_uid(&uid_text).await {
+                    let name = self
+                        .library_project_named(&uid_text)
+                        .map(|project| project.name)
+                        .unwrap_or_else(|| uid_text.clone());
+                    self.push_log(UiLogDraft::new(
+                        UiLogLevel::Warn,
+                        UiLogOrigin::Studio,
+                        format!(
+                            "this board is running a different version of {name} ({}) than your library has — nothing was changed on either side",
+                            running.hash.short()
+                        ),
+                    ));
+                    return BindOutcome::NoCandidate { running: *running };
+                }
+                (uid, pulled.files, *running, false)
+            }
+            None => {
+                let Some(manifest) = pulled.manifest.as_ref() else {
+                    self.push_log(UiLogDraft::new(
+                        UiLogLevel::Warn,
+                        UiLogOrigin::Studio,
+                        format!(
+                            "{device_name} is running a project whose project.json could not be read, so it was not added to your library — the editor is working on the board's copy"
+                        ),
+                    ));
+                    return BindOutcome::NoCandidate { running: *running };
+                };
+                let Some((stamp, fresh)) = self
+                    .stamp_board_identity(&pulled.files, manifest, &name, &device_name)
+                    .await
+                else {
+                    return BindOutcome::NoCandidate { running: *running };
+                };
+                match stamp {
+                    BoardStamp::Restored(stamped) => {
+                        return self
+                            .bind_restored_identity(&stamped, &fresh, &name, &device_name)
+                            .await;
+                    }
+                    BoardStamp::Minted(stamped) => (stamped.uid, stamped.files, fresh, true),
+                }
+            }
+        };
+        let running = &running;
         let provenance = crate::app::library::PackageProvenance::PulledFromDevice {
             // The registry key, which is the board's `dev…` uid whenever
             // it has one (`registry_key` prefers it). A board still keyed
@@ -3292,7 +3368,7 @@ impl StudioController {
         let built = crate::app::project::device_bind::adopt_board_package(
             &name,
             uid,
-            &pulled.files,
+            &files,
             provenance.clone(),
             now,
         );
@@ -3349,11 +3425,14 @@ impl StudioController {
             .await
         {
             Ok(BindOutcome::Bound { uid }) => {
-                self.push_log(UiLogDraft::new(
-                    UiLogLevel::Info,
-                    UiLogOrigin::Studio,
-                    format!("adopted {name} from {device_name} into your library"),
-                ));
+                let said = if stamped {
+                    format!(
+                        "gave {name} on {device_name} its library identity and adopted it into your library"
+                    )
+                } else {
+                    format!("adopted {name} from {device_name} into your library")
+                };
+                self.push_log(UiLogDraft::new(UiLogLevel::Info, UiLogOrigin::Studio, said));
                 BindOutcome::Bound { uid }
             }
             Ok(other) => {
@@ -3375,6 +3454,200 @@ impl StudioController {
                     UiLogLevel::Warn,
                     UiLogOrigin::Studio,
                     format!("{name} was added to your library but would not open: {error}"),
+                ));
+                BindOutcome::NoCandidate { running: *running }
+            }
+        }
+    }
+
+    /// Give an identity-free board its library identity, ON THE BOARD, and
+    /// hand back what it runs now.
+    ///
+    /// The identity is the library's own when a copy there differs from
+    /// the board only by its uid ([`Self::library_identity_for`] — the
+    /// board was re-pushed from `catalog/`, losing its uid but not its
+    /// content), and freshly minted from the injected entropy otherwise.
+    /// Either way the stamped `project.json` is written over the wire —
+    /// the one board write adoption makes, applied as an incremental
+    /// refresh — and the board is asked again what it runs: the answer must
+    /// be exactly the stamped set's hash, or nothing is installed.
+    ///
+    /// Best-effort: every failure is one warn line and `None`, and the open
+    /// carries on unnamed. A failure AFTER the write leaves the board
+    /// carrying a uid, which the next open binds or adopts the ordinary way.
+    async fn stamp_board_identity(
+        &mut self,
+        files: &[(String, Vec<u8>)],
+        manifest: &lpc_model::ProjectManifest,
+        name: &str,
+        device_name: &str,
+    ) -> Option<(BoardStamp, crate::app::project::device_bind::RunningPackage)> {
+        let stamp = match self.library_identity_for(files, manifest).await {
+            Some(stamped) => BoardStamp::Restored(stamped),
+            None => {
+                let uid = lpc_history::PrefixedUid::mint(
+                    lpc_history::UidPrefix::Project,
+                    &(self.random)(),
+                );
+                match crate::app::project::device_bind::mint_identity(files, manifest, uid) {
+                    Ok(stamped) => BoardStamp::Minted(stamped),
+                    Err(error) => {
+                        self.push_log(UiLogDraft::new(
+                            UiLogLevel::Warn,
+                            UiLogOrigin::Studio,
+                            format!(
+                                "could not give {name} on {device_name} a library identity: {error}"
+                            ),
+                        ));
+                        return None;
+                    }
+                }
+            }
+        };
+        let stamped = match &stamp {
+            BoardStamp::Restored(stamped) | BoardStamp::Minted(stamped) => stamped,
+        };
+        let written = {
+            let server = match self
+                .pool
+                .lens_session_mut()
+                .and_then(crate::RuntimeSession::client_mut)
+            {
+                Ok(server) => server,
+                Err(error) => {
+                    log::debug!("no wire to stamp the board's identity over: {error}");
+                    return None;
+                }
+            };
+            match self
+                .project
+                .write_running_manifest(server, &stamped.manifest)
+                .await
+            {
+                Ok(mut logs) => {
+                    self.project
+                        .read_running_package(server)
+                        .await
+                        .map(|(fresh, read_logs)| {
+                            logs.extend(read_logs);
+                            (fresh, logs)
+                        })
+                }
+                Err(error) => Err(error),
+            }
+        };
+        let fresh = match written {
+            Ok((fresh, logs)) => {
+                self.record_logs(logs);
+                fresh
+            }
+            Err(error) => {
+                self.push_log(UiLogDraft::new(
+                    UiLogLevel::Warn,
+                    UiLogOrigin::Studio,
+                    format!(
+                        "could not give {name} on {device_name} its library identity, so it was not added to your library: {error}"
+                    ),
+                ));
+                return None;
+            }
+        };
+        if fresh.hash != stamped.hash {
+            self.push_log(UiLogDraft::new(
+                UiLogLevel::Warn,
+                UiLogOrigin::Studio,
+                format!(
+                    "after its identity was written, {device_name} reports {} rather than the expected {} — {name} was not added to your library",
+                    fresh.hash.short(),
+                    stamped.hash.short()
+                ),
+            ));
+            return None;
+        }
+        Some((stamp, fresh))
+    }
+
+    /// The library identity an identity-free board already has here: a
+    /// package whose manifest is the board's plus a uid, and whose head is
+    /// exactly the board's files with that manifest in place.
+    ///
+    /// One catalog snapshot, like [`Self::library_package_at_hash`]; a
+    /// package that will not open or read is skipped rather than failing
+    /// the sweep.
+    async fn library_identity_for(
+        &mut self,
+        files: &[(String, Vec<u8>)],
+        manifest: &lpc_model::ProjectManifest,
+    ) -> Option<crate::app::project::device_bind::StampedPackage> {
+        use lpc_model::AsLpPath;
+        let host = self.library_host().ok()?;
+        let fs = host.catalog_snapshot().await.ok()?;
+        let store = crate::app::library::LibraryStore::read_only(fs);
+        store.list().ok()?.into_iter().find_map(|summary| {
+            let handle = store.open(summary.uid).ok()?;
+            let library_manifest = handle
+                .package_fs
+                .borrow()
+                .read_file(crate::app::library::package_manifest::MANIFEST_PATH.as_path())
+                .ok()?;
+            let stamped = crate::app::project::device_bind::restamp_identity(
+                files,
+                manifest,
+                &library_manifest,
+            )?;
+            let head = handle.content_hash().ok()?;
+            (stamped.uid == summary.uid && stamped.hash == head).then_some(stamped)
+        })
+    }
+
+    /// Bind a board whose library identity was just stamped back onto it:
+    /// the library already holds this project at this content, so there is
+    /// nothing to install — record the association (D5) and bind.
+    async fn bind_restored_identity(
+        &mut self,
+        stamped: &crate::app::project::device_bind::StampedPackage,
+        running: &crate::app::project::device_bind::RunningPackage,
+        name: &str,
+        device_name: &str,
+    ) -> BindOutcome {
+        let uid_text = stamped.uid.to_string();
+        let name = self
+            .library_project_named(&uid_text)
+            .map(|project| project.name)
+            .unwrap_or_else(|| name.to_string());
+        self.bank_adopted_association(&uid_text, running.hash).await;
+        match self
+            .project
+            .bind_running_to_library(&uid_text, running)
+            .await
+        {
+            Ok(BindOutcome::Bound { uid }) => {
+                self.push_log(UiLogDraft::new(
+                    UiLogLevel::Info,
+                    UiLogOrigin::Studio,
+                    format!(
+                        "recognised {name} on {device_name} as your library's copy and restored its identity"
+                    ),
+                ));
+                BindOutcome::Bound { uid }
+            }
+            Ok(other) => {
+                self.push_log(UiLogDraft::new(
+                    UiLogLevel::Warn,
+                    UiLogOrigin::Studio,
+                    format!(
+                        "{name}'s identity was restored on {device_name} but the editor could not be pointed at it: {other:?}"
+                    ),
+                ));
+                BindOutcome::NoCandidate { running: *running }
+            }
+            Err(error) => {
+                self.push_log(UiLogDraft::new(
+                    UiLogLevel::Warn,
+                    UiLogOrigin::Studio,
+                    format!(
+                        "{name}'s identity was restored on {device_name} but its library copy would not open: {error}"
+                    ),
                 ));
                 BindOutcome::NoCandidate { running: *running }
             }
@@ -5903,6 +6176,15 @@ impl StudioController {
         &self.pool
     }
 
+    /// The lens session's wire client, for e2e reads and writes of the
+    /// board's own files (what a CLI or a `catalog/` push would do to it).
+    pub(crate) fn lens_client_mut_for_test(&mut self) -> &mut crate::StudioServerClient {
+        self.pool
+            .lens_session_mut()
+            .and_then(crate::RuntimeSession::client_mut)
+            .expect("a lens session with a connected client")
+    }
+
     /// Set the lens session's server protocol state directly (the retired
     /// `ServerController::set_state` seam). Requires a stub session.
     pub(crate) fn set_server_state_for_test(&mut self, state: crate::ServerState) {
@@ -7096,7 +7378,7 @@ mod tests {
         assert_eq!(sent[0].id, 1);
         assert_eq!(handle.id(), 7);
         assert_eq!(request.since, None);
-        assert_eq!(request.queries.len(), 4);
+        assert_eq!(request.queries.len(), 3);
 
         let sync = studio
             .project

@@ -106,3 +106,71 @@ whole effective binding graph plus a bus-channel summary.**
   declarative policy) without touching the contract.
 - Bus value **writes** (operator overrides) are out of scope; recorded as
   future work in the roadmap.
+
+## Amended 2026-09-23: structure is revision-gated
+
+The "Alternatives Considered" note above rejected splitting topology from
+values as "no MVP benefit". The lens now polls this probe every 150 ms on
+links where bytes matter (USB serial today, BLE next), and the byte ledger
+(lean-wire plan, Run D) found the benefit: the graph was nearly half of a
+steady PLAYFUL-choker lens read, and most of it was resent unchanged. So
+the probe now sends **structure on change, values every read** — still one
+probe, one request, one answer (wire proto 21):
+
+- **Request:** `BindingGraphProbeRequest { structure: RevisionGateRead,
+  include_values }`. `RevisionGateRead` (`None` | `Always` |
+  `IfChanged { known }`, a list of known revisions since proto 23) is the
+  same gate the geometry of control-product and output-frame probes uses.
+- **Answer:** `WireBindingGraphRead { structure:
+  RevisionGateResult<WireBindingGraph>, values: Option<WireBusChannelValues>
+  }`. The structure — bindings, and each channel's scope, name, kind,
+  providers, consumers and primary-visual role — is `Changed(graph)` or a
+  few-byte `Unchanged { revision }`. The values are a positional list in
+  the structure's channel order, stamped with the structure revision they
+  were resolved against; each is `unresolved` (sink no-demand), `empty`,
+  `value(..)` or `error(..)`. `WireBusChannel` no longer carries a value,
+  and a value no longer carries its own revision.
+- **The structure revision moves only when the structure does.**
+  `WireBindingGraph::revision` used to be the engine revision at snapshot
+  time — it moved every tick. It is now stamped by content: the engine
+  builds the structure each read, hashes its wire bytes (FNV-1a 64, no
+  second copy held on the device) and keeps the revision at which that
+  hash last changed, always later than the one it replaces. Registering or
+  removing a binding, a priority or kind change, a channel appearing or
+  disappearing, a `panel = "show"` hint changing, a panel writer engaging
+  or letting go — all move it, because all change the bytes; nothing a
+  mutation site forgets to declare can slip past.
+- **A value may not live inside the structure.** An engaged panel writer's
+  provider row used to be `endpoint: literal { value: <the knob's
+  position> }`. That was the whole of the churn Run D saw: `bindings` changed
+  15 times in the session (16 distinct values), 2 of them genuine (a panel
+  writer engaging on two channels) and 13 of them a knob position riding
+  the structure. The row is now the value-free `WireBindingEndpoint::PanelWriter`;
+  the position is the channel's value (the writer outranks every provider).
+- **Clients never mix halves.** A value list whose structure revision is
+  not the held structure's (or whose length is not its channel count) is
+  dropped, never applied to the wrong channels, and the next read asks the
+  structure `Always`. Studio's `BindingGraphCache` holds one consistent
+  structure-and-values pair; structure-only derivations (the export lint)
+  key off the structure revision and re-derive only when it moves.
+
+Choker steady lens read: the graph went from 4,562 B to 775 B (a 29 B
+`unchanged` plus 653 B of values); the whole read from 8,698 B to
+4,911 B (`lpc-engine/tests/lens_read_wire_size.rs`).
+
+## Amended 2026-09-23: `no_provider`, and the general rule this split became
+
+A P6 ledger pass over the same lens read found six of the choker's channel
+values answering `error` for a bus channel with no publisher — a
+`Debug`-formatted error string, ~53 B each, for a condition that is not an
+error so much as a fact about the graph's shape. `WireBusChannelValue` grew
+a bare `no_provider` tag for it (no payload), cutting those six values from
+653 B to 336 B. The distinction this ADR draws between a probe's structure
+(gated) and its values (sent every read) turned out to be the general shape
+every probe with a static/moving split needed — the buffer-geometry probes
+(`sample_layout`, `display_layout`, `placements`) gate the identical way
+through a shared `RevisionGateRead`/`RevisionGateResult` pair. That general
+rule, the wire-tap tooling that found every cut in this family, and the
+Studio-side one-copy pixel ask policy that came out of the same pass are
+written up together in
+`docs/adr/2026-09-23-project-reads-send-only-what-changed.md`.

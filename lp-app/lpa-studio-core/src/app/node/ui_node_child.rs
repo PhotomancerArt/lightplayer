@@ -24,6 +24,10 @@ pub struct UiNodeChild {
     pub focused: bool,
     /// Action that focuses this child node as the current Studio selection.
     pub action: Option<UiAction>,
+    /// See [`crate::UiNodeView::selection_streams`].
+    pub selection_streams: bool,
+    /// See [`crate::UiNodeView::streaming_live`].
+    pub streaming_live: bool,
     /// Kind-specific permanent face when this child renders as a nested
     /// card (the symmetric seed of [`crate::UiNodeView::face`]). `None`
     /// (any kind without a hand-built face) renders the generic sections.
@@ -71,6 +75,8 @@ impl UiNodeChild {
             active: false,
             focused: false,
             action: None,
+            selection_streams: false,
+            streaming_live: false,
             face: None,
             card_ui: NodeCardUiState::default(),
             sections: Vec::new(),
@@ -143,6 +149,8 @@ impl UiNodeChild {
         view.card_ui = self.card_ui;
         view.focused = self.focused || self.active;
         view.action = self.action;
+        view.selection_streams = self.selection_streams;
+        view.streaming_live = self.streaming_live;
         view.add_node_menu = self.add_node_menu;
         view
     }

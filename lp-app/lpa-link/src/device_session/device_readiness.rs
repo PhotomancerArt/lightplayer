@@ -519,6 +519,7 @@ mod tests {
                 ..Default::default()
             },
             device_uid: None,
+            auth: lpc_wire::HelloAuth::TRUSTED,
         }
     }
 }

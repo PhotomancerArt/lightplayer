@@ -12,6 +12,9 @@ files a catalog entry carries:
 
 Inputs, all given on the command line:
 
+  --exports   The design folder (or a copy of it): the newest `Altium_*.zip`
+              and `Netlist_*.tel` in it are read (EasyEDA dates their names).
+              Or name the two files directly:
   --pcb       EasyEDA's "Altium" export: the zip it downloads, or the
               `*.pcbdoc` inside it (Altium's ASCII PcbDoc). Every
               `|RECORD=Component|` whose SOURCEDESIGNATOR carries the table's
@@ -20,12 +23,17 @@ Inputs, all given on the command line:
   --netlist   EasyEDA's Telesis netlist (`Netlist_*.tel`). The chain is
               walked from the one DIN pin whose net has no DOUT on it (the
               data-in pad), DOUT -> DIN, one net at a time.
-  --strokes   A JSON strokes table (see scripts/pcb-export-strokes/): which
+  --strokes   A JSON strokes table: a path, or the bare name of a table in
+              scripts/pcb-export-strokes/ (`playful-choker`). It says which
               designators form each mapping object, in wire order. The
               concatenation of every stroke MUST be the netlist chain — the
               script refuses to write otherwise — so the table can only say
               where the pen lifts, never reorder the wire.
-  --out-dir   Where the two files go (a catalog project directory).
+  --out-dir   Where the two files go. Defaults to the table's `out_dir`,
+              relative to the repo root (a catalog project directory).
+
+One strokes table per board; `just pcb-map2d <table> <design-folder>` is the
+front door.
 
 Doc space is millimetres, y-down, origin at the board outline's top-left, and
 the outline's bounding box is the canvas. Each object is a `path` shape whose
@@ -33,19 +41,21 @@ points are its pads and whose `count` is its lamp count; the resolver spreads
 `count` lamps evenly along the polyline, so the summary line reports the worst
 distance between an even sample and the pad it stands for.
 
-  scripts/pcb-export-to-map2d.py --pcb Altium_*.zip --netlist Netlist_*.tel \\
-      --strokes scripts/pcb-export-strokes/playful-choker.json \\
-      --out-dir catalog/projects/playful-choker
+  scripts/pcb-export-to-map2d.py --strokes playful-choker --exports <design-folder>
+  scripts/pcb-export-to-map2d.py --strokes playful-choker --exports <design-folder> --check
 
 `--check` writes nothing: it regenerates into a temporary directory and fails
 unless both files are byte-identical to the ones in --out-dir. `--self-test`
 runs the whole pipeline on a synthetic three-lamp board built in memory, so
-the parser has a proof that needs no design files (`just lint-pcb-export`).
+the parser has a proof that needs no design files, and checks that every
+checked-in strokes table loads and names a folder holding both of its outputs
+(`just lint-pcb-export`).
 
 The exports themselves are design files and are never committed here.
 """
 import argparse
 import difflib
+import glob
 import io
 import json
 import math
@@ -56,6 +66,9 @@ import tempfile
 import zipfile
 
 MIL_TO_MM = 0.0254
+SCRIPTS_DIR = os.path.dirname(os.path.abspath(__file__))
+REPO_ROOT = os.path.dirname(SCRIPTS_DIR)
+TABLES_DIR = os.path.join(SCRIPTS_DIR, "pcb-export-strokes")
 
 
 class ExportError(Exception):
@@ -70,10 +83,11 @@ def main() -> int:
         description=__doc__.split("\n\n", 1)[0],
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
+    ap.add_argument("--exports", help="design folder: newest Altium_*.zip and Netlist_*.tel in it")
     ap.add_argument("--pcb", help="EasyEDA Altium export: the .zip, or the .pcbdoc inside it")
     ap.add_argument("--netlist", help="EasyEDA Telesis netlist (.tel)")
-    ap.add_argument("--strokes", help="strokes table (JSON)")
-    ap.add_argument("--out-dir", help="directory the map2d and SVG are written to")
+    ap.add_argument("--strokes", help="strokes table: a JSON path, or a name in scripts/pcb-export-strokes/")
+    ap.add_argument("--out-dir", help="where the map2d and SVG go (default: the table's out_dir)")
     ap.add_argument("--check", action="store_true",
                     help="write nothing; fail unless regenerating reproduces --out-dir byte for byte")
     ap.add_argument("--self-test", action="store_true",
@@ -82,25 +96,32 @@ def main() -> int:
 
     if args.self_test:
         return self_test()
-    missing = [f"--{n.replace('_', '-')}" for n in ("pcb", "netlist", "strokes", "out_dir")
-               if getattr(args, n) is None]
-    if missing:
-        ap.error("missing " + ", ".join(missing))
+    if args.strokes is None:
+        ap.error("missing --strokes")
+    if args.exports is None and (args.pcb is None or args.netlist is None):
+        ap.error("give --exports <design-folder>, or both --pcb and --netlist")
 
     try:
-        table = load_strokes(args.strokes)
-        outputs, summary = generate(table, read_pcbdoc(args.pcb), read_text(args.netlist))
+        table_path = resolve_table(args.strokes)
+        table = load_strokes(table_path)
+        pcb, netlist = args.pcb, args.netlist
+        if args.exports is not None:
+            pcb = pcb or newest(args.exports, "Altium_*.zip")
+            netlist = netlist or newest(args.exports, "Netlist_*.tel")
+        out_dir = args.out_dir or os.path.join(REPO_ROOT, table["out_dir"])
+        print(f"strokes: {table_path}\npcb:     {pcb}\nnetlist: {netlist}")
+        outputs, summary = generate(table, read_pcbdoc(pcb), read_text(netlist))
     except ExportError as e:
         print(f"pcb-export-to-map2d: {e}", file=sys.stderr)
         return 1
     print(summary)
 
     if args.check:
-        return check_outputs(outputs, args.out_dir)
+        return check_outputs(outputs, out_dir)
     for name, text in outputs.items():
-        with open(os.path.join(args.out_dir, name), "w", encoding="utf-8", newline="\n") as f:
+        with open(os.path.join(out_dir, name), "w", encoding="utf-8", newline="\n") as f:
             f.write(text)
-        print(f"wrote {os.path.join(args.out_dir, name)}")
+        print(f"wrote {os.path.join(out_dir, name)}")
     return 0
 
 
@@ -136,6 +157,25 @@ def generate(table: dict, pcb_text: str, netlist_text: str) -> tuple[dict, str]:
 # ---- Inputs ------------------------------------------------------------------
 
 
+def resolve_table(name_or_path: str) -> str:
+    """A strokes table path; a bare name means scripts/pcb-export-strokes/<name>.json."""
+    if os.path.exists(name_or_path):
+        return name_or_path
+    named = os.path.join(TABLES_DIR, f"{name_or_path}.json")
+    if os.sep not in name_or_path and os.path.exists(named):
+        return named
+    known = sorted(os.path.splitext(n)[0] for n in os.listdir(TABLES_DIR) if n.endswith(".json"))
+    raise ExportError(f"no strokes table {name_or_path!r}; the checked-in tables are {known}")
+
+
+def newest(folder: str, pattern: str) -> str:
+    """The newest export of one kind: EasyEDA dates the names, so the last by name."""
+    found = sorted(glob.glob(os.path.join(glob.escape(folder), pattern)))
+    if not found:
+        raise ExportError(f"no {pattern} in {folder}")
+    return found[-1]
+
+
 def read_pcbdoc(path: str) -> str:
     """The ASCII PcbDoc's text, from the export zip or the bare file."""
     if zipfile.is_zipfile(path):
@@ -156,7 +196,7 @@ def read_text(path: str) -> str:
 def load_strokes(path: str) -> dict:
     with open(path, encoding="utf-8") as f:
         table = json.load(f)
-    for key in ("map2d", "svg", "svg_comment", "sample_diameter", "designator_prefix",
+    for key in ("out_dir", "map2d", "svg", "svg_comment", "sample_diameter", "designator_prefix",
                 "din_pin", "dout_pin", "strokes"):
         if key not in table:
             raise ExportError(f"{path}: strokes table has no {key!r}")
@@ -426,6 +466,27 @@ def self_test() -> int:
                                              "LED", 3, 1))
     refuses("disagree on the lamps", lambda: generate(table, pcb.replace("LED9|", "LED8|"), netlist))
     refuses("not the Board record", lambda: read_board(pcb.split("\n", 1)[1], "LED"))
+
+    # --exports picks the newest dated export of each kind.
+    with tempfile.TemporaryDirectory() as tmp:
+        for name in ("Altium_a_2026-01-02.zip", "Altium_a_2026-09-22.zip", "Netlist_s_2026-09-22.tel"):
+            open(os.path.join(tmp, name), "w").close()
+        expect(newest(tmp, "Altium_*.zip").endswith("Altium_a_2026-09-22.zip"), "newest zip by dated name")
+        refuses("no Netlist_*.tel", lambda: newest(os.path.join(tmp, "nope"), "Netlist_*.tel"))
+    refuses("the checked-in tables are", lambda: resolve_table("no-such-board"))
+
+    # Every checked-in table is well-formed and points at a folder holding its outputs.
+    tables = sorted(glob.glob(os.path.join(TABLES_DIR, "*.json")))
+    expect(bool(tables), "at least one checked-in strokes table")
+    for path in tables:
+        t = load_strokes(path)
+        name = os.path.splitext(os.path.basename(path))[0]
+        expect(resolve_table(name) == path, f"{name} resolves by name")
+        for out in (t["map2d"], t["svg"]):
+            expect(os.path.isfile(os.path.join(REPO_ROOT, t["out_dir"], out)),
+                   f"{name}: {t['out_dir']}/{out} exists")
+        leds = [n for s in t["strokes"] for n in s["leds"]]
+        expect(len(leds) == len(set(leds)), f"{name}: no designator in two strokes")
 
     print(f"self-test: {checks} checks passed")
     return 0

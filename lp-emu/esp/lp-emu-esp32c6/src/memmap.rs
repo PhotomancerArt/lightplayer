@@ -144,6 +144,14 @@ pub mod periph {
     pub const WIFI_PWR: u32 = 0x600A_9900;
     pub const WIFI_PWR_LEN: u32 = 0x5700;
     pub const MODEM_LPCON: u32 = 0x600A_F000;
+    /// The Wi-Fi/BLE **coexistence** arbiter's registers: not in the PAC
+    /// (between `MODEM_LPCON`'s `0x100` and `I2C_ANA_MST`). Found by the
+    /// strict-bus stop of the shipped image once it linked `esp-radio/coex`
+    /// (BLE M4, 2026-09-24): `W4 0x600A_F400` from the coex blob's
+    /// `coex_hw_clear_reg`, at Wi-Fi init. That the block is the coex
+    /// arbiter's is an inference from the writer's name and the address.
+    pub const COEX: u32 = 0x600A_F400;
+    pub const COEX_LEN: u32 = 0x400;
     pub const I2C_ANA_MST: u32 = 0x600A_F800;
     /// The analog I2C master's burst **command memory**: `I2C_ANA_MST +
     /// 0x400`, up to PMU. The PAC's `i2c_ana_mst` block has `burst_conf` /

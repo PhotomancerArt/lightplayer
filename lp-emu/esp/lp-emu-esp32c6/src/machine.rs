@@ -394,6 +394,10 @@ pub const PERIPHERAL_REGISTRATION_ORDER: &[&str] = &[
     // The analog I2C master's command memory (P6, G6-2 finding 1): libphy
     // fills it right after its first radio-window writes.
     "I2C_MST_MEM",
+    // The Wi-Fi/BLE coexistence arbiter's registers (BLE M4): the coex blob's
+    // `coex_hw_*` reaches them at radio init once the image links
+    // `esp-radio/coex`, which the shipped image does from M4 on.
+    "COEX",
     // M7: the two SDIO-slave blocks only the mask ROM touches — `HINF`'s
     // device id and the one `SLC` word `ets_spi_download_disabled` reads.
     // Last, not first, even though a ROM-up boot meets them before
@@ -559,11 +563,26 @@ pub enum UsbSjSink {
     /// its bytes are the OUT endpoint's live source. `lp-cli …
     /// serial:tcp://<addr>` connects to it unchanged.
     ///
-    /// There is nothing to replay to a late client. With no client the host
-    /// is `Attached { draining: false }` or `Absent`, so no packet is ever
-    /// delivered and no backlog accumulates; the backlog exists only for a
-    /// client that disconnects and reconnects while `draining` is held on by
-    /// `--usb-sj-drain manual`.
+    /// **A backlog builds whenever the host drains with no client.** The
+    /// coupling only fires on an *edge* of the client's connectedness, and
+    /// "no client yet" is the same `false` it starts from, so the power-on
+    /// host state is what decides:
+    ///
+    /// - `Attached { draining: false }` or `Absent` — nothing is delivered
+    ///   until a client connects (its connect is the `open`), so there is
+    ///   nothing to replay; a late client gets at most what the 64-byte IN
+    ///   FIFO still holds. This is what an unopened port on silicon does, and
+    ///   the default of `lp-cli emu serve` and of `lp-cli emu run --link`.
+    /// - `Attached { draining: true }` (`--usb-host attached`, an opt-in on
+    ///   `lp-cli emu run --link` and `emu serve` alike) — the host reads from
+    ///   power-on with nobody connected, every
+    ///   guest write succeeds, and [`lp_emu_esp_common::TcpHost`] keeps it
+    ///   all (up to `TCP_BACKLOG_CAP`, 4 MiB) and replays it to the first
+    ///   client. That models an application that had the port open since
+    ///   power-on, not an unopened port:
+    ///   `docs/defects/2026-09-23-emulated-usb-port-drains-with-no-client-attached.md`.
+    /// - `--usb-sj-drain manual` holds `draining` on across a client that
+    ///   disconnects and reconnects, so that reconnect is replayed too.
     ///
     /// Only the `usb-sj` stream may be a socket — the observation stream is
     /// an observation, not a link.
@@ -3740,8 +3759,9 @@ impl Esp32C6Machine {
         //   client is attached, no edge would fire, and nothing would re-open
         //   the port — host bytes stage forever and the chip is deaf to the
         //   flasher that just reset it.
-        // * The CLIENT term. `--usb-host attached` — `emu serve`'s default —
-        //   powers on with the port OPEN and no byte client at all. Without
+        // * The CLIENT term. `--usb-host attached` — `emu run --monitor`'s
+        //   host, and an opt-in on both doors — powers on with the port OPEN
+        //   and no byte client at all. Without
         //   it a reboot would claim a client that does not exist, and the
         //   very next poll would see `connected=false` against it and issue
         //   the matching `close` — slamming shut the port the restore had
@@ -6360,8 +6380,9 @@ mod tests {
 
     /// **A reset does not invent a byte client for a port nobody opened.**
     ///
-    /// `--usb-host attached` — `emu serve`'s default — powers on with the
-    /// port already open and no byte client at all. [`Esp32C6Machine::reboot`]
+    /// `--usb-host attached` — `emu serve`'s default until 2026-09-23, still
+    /// its opt-in — powers on with the port already open and no byte client
+    /// at all. [`Esp32C6Machine::reboot`]
     /// re-derives the coupling's memory of the client from the port AND the
     /// socket; from the port alone it would come back believing in a client
     /// that was never there, and the very next host poll would see

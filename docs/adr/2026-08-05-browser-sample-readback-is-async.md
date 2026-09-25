@@ -90,5 +90,26 @@ Consequences of the shape:
 
 ## Follow-ups
 
+- **Extended 2026-09-23** to the wire render-product probe. Studio's
+  texture previews on a GPU-tier sim answered "product is GPU-resident
+  … probe a CPU-tier runtime" while the same sim's fixture rendered.
+  `lp_gfx::LatentReadBackSource` is the whole-texture form of the same
+  pipeline: a persistent `MAP_READ` buffer per probe read site (held by
+  the engine, keyed by product, size, space and policy, LRU-capped),
+  one probe late, answered with the revision its bytes were rendered
+  at. Before a site's first frame lands the probe still answers
+  `GpuResident`, which Studio now shows as a pending preview.
+  **It is a separate trait the host injects** (`LpServer::
+  set_latent_read_back`, behind `lpa-server`'s `latent-read-back`
+  feature, which only fw-browser turns on), not a method on
+  `LpGraphics`, so device images link none of it. That was measured,
+  not assumed: on the Xtensa images the main stack is whatever DRAM is
+  left, and the classic's (45,280 B) is pinned against a silicon
+  capture. The first cut cost it 16–32 B from two things — a stored
+  source field inside `LpServer`, which the classic keeps in its static
+  main-task pool (`.bss`), and `bytes_per_pixel`'s lowered lookup table
+  (`.data`), which the engine path no longer calls. With both gone the
+  classic image's `.data`/`.bss`/stack are byte-identical to `main`'s.
+
 - The gallery gpu-tier badge could disclose "lamps trail by one frame"
   if anyone ever asks; not worth UI surface today.

@@ -25,11 +25,12 @@ use lpc_model::{
     LpPathBuf, LpValue, ToLpValue,
 };
 use lpc_shared::output::MemoryOutputProvider;
-use lpc_shared::transport::ServerTransport;
+use lpc_shared::transport::{Incoming, Link, LinkId, ServerTransport};
 use lpc_wire::{
     BindingGraphProbeRequest, BindingGraphProbeResult, ClientMessage, ClientRequest,
     ProjectReadEvent, ProjectReadQuery, ProjectReadQueryEvent, ProjectReadRequest,
-    RuntimeReadQuery, TransportError, WireBindingGraph, WireBindingOrigin, WireMessage,
+    RevisionGateRead, RevisionGateResult, RuntimeReadQuery, TransportError, WireBindingGraph,
+    WireBindingGraphRead, WireBindingOrigin, WireBusChannel, WireBusChannelValue,
     WirePanelAutoSaveRequest, WirePanelClearRequest, WirePanelCommandResponse,
     WirePanelWriteRequest, WireProjectCommand, WireProjectCommandResponse, WireProjectHandle,
     WireScopeRef, WireServerMessage, WireServerMsgBody,
@@ -169,57 +170,71 @@ fn a_stale_scope_rejects_normally() {
 
 // ---------------------------------------------------------------------------
 
-fn probe(project: &mut Project) -> WireBindingGraph {
+/// One binding-graph probe: the whole structure, and each channel's value
+/// in channel order.
+struct Probed {
+    graph: WireBindingGraph,
+    values: Vec<WireBusChannelValue>,
+}
+
+impl Probed {
+    fn channel(&self, name: &str) -> Option<(&WireBusChannel, &WireBusChannelValue)> {
+        let index = self
+            .graph
+            .channels
+            .iter()
+            .position(|channel| channel.name == name)?;
+        Some((&self.graph.channels[index], &self.values[index]))
+    }
+}
+
+fn probe(project: &mut Project) -> Probed {
     let (engine, registry) = project.runtime_read_parts();
     let result = engine.read_project_binding_graph_probe(
         registry,
         BindingGraphProbeRequest {
+            structure: RevisionGateRead::Always,
             include_values: true,
         },
     );
-    let BindingGraphProbeResult::Graph(graph) = result else {
-        panic!("expected graph result");
+    let BindingGraphProbeResult::Graph(WireBindingGraphRead {
+        structure: RevisionGateResult::Changed(graph),
+        values: Some(values),
+    }) = result
+    else {
+        panic!("expected the whole graph with values, got {result:?}");
     };
-    graph
+    Probed {
+        graph,
+        values: values.values,
+    }
 }
 
 /// One channel's owning scope.
-fn channel_scope(graph: &WireBindingGraph, name: &str) -> WireScopeRef {
-    graph
-        .channels
-        .iter()
-        .find(|channel| channel.name == name)
+fn channel_scope(probed: &Probed, name: &str) -> WireScopeRef {
+    probed
+        .channel(name)
         .unwrap_or_else(|| panic!("no {name} channel in the graph"))
+        .0
         .scope
         .expect("channels list scoped")
 }
 
 /// One channel's current resolved value.
-fn channel_value(graph: &WireBindingGraph, name: &str) -> Option<LpValue> {
-    graph
-        .channels
-        .iter()
-        .find(|channel| channel.name == name)?
-        .value
-        .as_ref()?
-        .value
-        .clone()
+fn channel_value(probed: &Probed, name: &str) -> Option<LpValue> {
+    probed.channel(name)?.1.value().cloned()
 }
 
 /// The `time` channel's scope and current resolved value.
-fn time_channel(graph: &WireBindingGraph) -> (WireScopeRef, Option<LpValue>) {
-    let channel = graph
-        .channels
-        .iter()
-        .find(|channel| channel.name == "time")
-        .expect("clock publishes bus:time");
+fn time_channel(probed: &Probed) -> (WireScopeRef, Option<LpValue>) {
+    let (channel, value) = probed.channel("time").expect("clock publishes bus:time");
     let scope = channel.scope.expect("channels list scoped");
-    let value = channel.value.as_ref().and_then(|value| value.value.clone());
-    (scope, value)
+    (scope, value.value().cloned())
 }
 
 /// Whether the `time` channel lists a Panel-origin provider row.
-fn panel_provider_engaged(graph: &WireBindingGraph) -> bool {
+fn panel_provider_engaged(probed: &Probed) -> bool {
+    let graph = &probed.graph;
     graph
         .channels
         .iter()
@@ -311,7 +326,7 @@ fn an_authored_bus_binding_on_a_uniform_reaches_the_probe_with_a_scope() {
     server.advance_frame(16).expect("tick");
 
     let project = project_mut(&mut server, handle);
-    let graph = probe(project);
+    let graph = probe(project).graph;
 
     let consuming = graph
         .bindings
@@ -437,7 +452,7 @@ fn a_gradient_panel_write_survives_a_wire_project_read() {
     });
     assert_eq!(response, WirePanelCommandResponse::Accepted { engaged: 1 });
 
-    let messages = vec![WireMessage::Client(ClientMessage {
+    let messages = vec![Incoming::primary(ClientMessage {
         id: 13,
         msg: ClientRequest::ProjectRead {
             handle,
@@ -446,6 +461,7 @@ fn a_gradient_panel_write_survives_a_wire_project_read() {
                 queries: Vec::new(),
                 probes: vec![lpc_wire::ProjectProbeRequest::BindingGraph(
                     BindingGraphProbeRequest {
+                        structure: RevisionGateRead::Always,
                         include_values: true,
                     },
                 )],
@@ -604,7 +620,7 @@ fn command(
     handle: WireProjectHandle,
     command: WireProjectCommand,
 ) -> WireProjectCommandResponse {
-    let messages = vec![WireMessage::Client(ClientMessage {
+    let messages = vec![Incoming::primary(ClientMessage {
         id: 11,
         msg: ClientRequest::ProjectCommand { handle, command },
     })];
@@ -619,7 +635,7 @@ fn command(
 /// The auto-save flag as reported by a runtime project read — the carrier
 /// Studio actually reads it from.
 fn read_panel_auto_save(server: &mut LpServer, handle: WireProjectHandle) -> Option<bool> {
-    let messages = vec![WireMessage::Client(ClientMessage {
+    let messages = vec![Incoming::primary(ClientMessage {
         id: 12,
         msg: ClientRequest::ProjectRead {
             handle,
@@ -657,17 +673,21 @@ struct VecTransport {
 }
 
 impl ServerTransport for VecTransport {
-    async fn send(&mut self, msg: WireServerMessage) -> Result<(), TransportError> {
+    async fn send(&mut self, _link: LinkId, msg: WireServerMessage) -> Result<(), TransportError> {
         self.sent.push(msg);
         Ok(())
     }
 
-    async fn receive(&mut self) -> Result<Option<ClientMessage>, TransportError> {
+    async fn receive(&mut self) -> Result<Option<Incoming>, TransportError> {
         Ok(None)
     }
 
-    async fn receive_all(&mut self) -> Result<Vec<ClientMessage>, TransportError> {
+    async fn receive_all(&mut self) -> Result<Vec<Incoming>, TransportError> {
         Ok(Vec::new())
+    }
+
+    fn links(&self) -> Vec<Link> {
+        vec![Link::PRIMARY]
     }
 
     async fn close(&mut self) -> Result<(), TransportError> {

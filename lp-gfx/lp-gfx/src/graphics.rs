@@ -189,8 +189,11 @@ pub trait LpGraphics: Send + Sync {
     /// CPU backends keep textures host-resident and always answer `true`
     /// (the default). The browser GPU tier answers `false`: readback would
     /// require blocking on an async buffer map, so render products stay
-    /// GPU-resident and byte-needing consumers must run on the CPU tier
-    /// (`docs/adr/2026-07-09-preview-fidelity-tiers.md`). Render paths use
+    /// GPU-resident and per-tick byte consumers must run on the CPU tier
+    /// (`docs/adr/2026-07-09-preview-fidelity-tiers.md`); a preview reader
+    /// that can take last frame's bytes goes through a
+    /// [`crate::LatentReadBackSource`] instead, when the host provides one.
+    /// Render paths use
     /// this to decide between materializing byte-backed texture products and
     /// returning handle-carrying (GPU-resident) ones — an explicit
     /// capability, never an error-sniffing fallback.

@@ -53,10 +53,10 @@ pub struct AgentEditRecord {
     /// Engine verdict for this edit (`None` while unresolved).
     pub engine_ok: Option<bool>,
     /// The record's anchor revision — the staleness guard: the engine
-    /// status Revision observed when the record was pushed (normally the
-    /// post-verdict frame, since `iterate` awaits the verdict in-call).
-    /// Only previews with `revision >= at` may become the thumb; while
-    /// `engine_ok` is unresolved, a status advance past `at` resolves it.
+    /// revision of the read the bridge cell showed when the record was
+    /// pushed (normally the post-verdict read, since `iterate` awaits the
+    /// verdict in-call). Only previews with `revision >= at` may become the
+    /// thumb; while `engine_ok` is unresolved, a later read resolves it.
     pub at: Revision,
 }
 
@@ -361,8 +361,8 @@ impl AgentChatSession {
     }
 
     /// Advance the edit records from the shared engine cell plus the
-    /// node's cached preview: unresolved verdicts resolve once the status
-    /// Revision moves past the record's anchor; the NEWEST ok record
+    /// node's cached preview: unresolved verdicts resolve once a read past
+    /// the record's anchor reports; the NEWEST ok record
     /// without a thumb then adopts a preview rendered at-or-after its
     /// anchor (older records missed their window — backfilling them with
     /// a later preview would show the wrong look). Returns true when any

@@ -15,7 +15,7 @@ use core::str;
 use crate::serial::SerialError;
 use crate::serial::SerialIo;
 use log;
-use lpc_shared::transport::ServerTransport;
+use lpc_shared::transport::{Incoming, Link, LinkId, ServerTransport};
 use lpc_wire::WireServerMessage;
 use lpc_wire::json::SERIAL_LINE_PREFIX;
 use lpc_wire::{ClientMessage, TransportError, json};
@@ -55,7 +55,7 @@ impl<Io: SerialIo> ser_write_json::SerWrite for SerialIoSerWrite<'_, Io> {
 }
 
 impl<Io: SerialIo> ServerTransport for SerialTransport<Io> {
-    async fn send(&mut self, msg: WireServerMessage) -> Result<(), TransportError> {
+    async fn send(&mut self, _link: LinkId, msg: WireServerMessage) -> Result<(), TransportError> {
         let id = msg.id;
 
         #[cfg(feature = "emu")]
@@ -101,7 +101,7 @@ impl<Io: SerialIo> ServerTransport for SerialTransport<Io> {
         Ok(())
     }
 
-    async fn receive(&mut self) -> Result<Option<ClientMessage>, TransportError> {
+    async fn receive(&mut self) -> Result<Option<Incoming>, TransportError> {
         // Read available bytes in a loop until we have a complete message or no more data
         let mut temp_buf = [0u8; 256];
         loop {
@@ -167,7 +167,7 @@ impl<Io: SerialIo> ServerTransport for SerialTransport<Io> {
                         message_bytes.len(),
                         json_str
                     );
-                    Ok(Some(msg))
+                    Ok(Some(Incoming::primary(msg)))
                 }
                 Err(e) => {
                     // Parse error - ignore with warning (as specified)
@@ -231,7 +231,7 @@ impl<Io: SerialIo> ServerTransport for SerialTransport<Io> {
         }
     }
 
-    async fn receive_all(&mut self) -> Result<Vec<ClientMessage>, TransportError> {
+    async fn receive_all(&mut self) -> Result<Vec<Incoming>, TransportError> {
         let mut messages = Vec::new();
         loop {
             match self.receive().await? {
@@ -240,6 +240,10 @@ impl<Io: SerialIo> ServerTransport for SerialTransport<Io> {
             }
         }
         Ok(messages)
+    }
+
+    fn links(&self) -> Vec<Link> {
+        alloc::vec![Link::PRIMARY]
     }
 
     async fn close(&mut self) -> Result<(), TransportError> {
@@ -308,7 +312,7 @@ mod tests {
         let mut transport = SerialTransport::new(mock_io);
 
         let msg = WireServerMessage::new(1, lpc_wire::server::ServerMsgBody::UnloadProject);
-        pollster::block_on(transport.send(msg)).unwrap();
+        pollster::block_on(transport.send(LinkId::PRIMARY, msg)).unwrap();
 
         let written = transport.io.take_written();
         let written_str = str::from_utf8(&written).unwrap();
@@ -338,6 +342,7 @@ mod tests {
         transport.io.push_read(line.as_bytes());
 
         let received = pollster::block_on(transport.receive())
+            .map(|m| m.map(|incoming| incoming.msg))
             .unwrap()
             .expect("the framed line parses as a message, not a log line");
         assert_eq!(received.id, 42);
@@ -350,7 +355,10 @@ mod tests {
             .expect("framer output carries the prefix");
         transport.io.push_read(bare.as_bytes());
         assert!(
-            pollster::block_on(transport.receive()).unwrap().is_none(),
+            pollster::block_on(transport.receive())
+                .map(|m| m.map(|incoming| incoming.msg))
+                .unwrap()
+                .is_none(),
             "an unprefixed line is skipped as log output"
         );
     }
@@ -369,7 +377,9 @@ mod tests {
 
         transport.io.push_read(&msg_bytes);
 
-        let received = pollster::block_on(transport.receive()).unwrap();
+        let received = pollster::block_on(transport.receive())
+            .map(|m| m.map(|incoming| incoming.msg))
+            .unwrap();
         assert!(received.is_some());
         let received_msg = received.unwrap();
         assert_eq!(received_msg.id, 1);
@@ -393,7 +403,9 @@ mod tests {
 
         transport.io.push_read(partial);
 
-        let received = pollster::block_on(transport.receive()).unwrap();
+        let received = pollster::block_on(transport.receive())
+            .map(|m| m.map(|incoming| incoming.msg))
+            .unwrap();
         assert!(received.is_none());
     }
 
@@ -417,11 +429,15 @@ mod tests {
 
         transport.io.push_read(&combined);
 
-        let received1 = pollster::block_on(transport.receive()).unwrap();
+        let received1 = pollster::block_on(transport.receive())
+            .map(|m| m.map(|incoming| incoming.msg))
+            .unwrap();
         assert!(received1.is_some());
         assert_eq!(received1.unwrap().id, 1);
 
-        let received2 = pollster::block_on(transport.receive()).unwrap();
+        let received2 = pollster::block_on(transport.receive())
+            .map(|m| m.map(|incoming| incoming.msg))
+            .unwrap();
         assert!(received2.is_some());
         assert_eq!(received2.unwrap().id, 2);
     }
@@ -435,7 +451,9 @@ mod tests {
         transport.io.push_read(invalid_json);
 
         // Should return None (parse error ignored)
-        let received = pollster::block_on(transport.receive()).unwrap();
+        let received = pollster::block_on(transport.receive())
+            .map(|m| m.map(|incoming| incoming.msg))
+            .unwrap();
         assert!(received.is_none());
     }
 
@@ -448,7 +466,9 @@ mod tests {
         transport.io.push_read(b"debug: some log output\n");
 
         // Should return None (filtered out)
-        let received = pollster::block_on(transport.receive()).unwrap();
+        let received = pollster::block_on(transport.receive())
+            .map(|m| m.map(|incoming| incoming.msg))
+            .unwrap();
         assert!(
             received.is_none(),
             "Non-message lines should be filtered out"
@@ -464,7 +484,9 @@ mod tests {
         transport.io.push_read(&msg_bytes);
 
         // Should parse successfully
-        let received = pollster::block_on(transport.receive()).unwrap();
+        let received = pollster::block_on(transport.receive())
+            .map(|m| m.map(|incoming| incoming.msg))
+            .unwrap();
         assert!(received.is_some());
         assert_eq!(received.unwrap().id, 1);
     }

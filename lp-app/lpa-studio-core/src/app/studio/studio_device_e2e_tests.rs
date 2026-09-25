@@ -946,6 +946,70 @@ impl DeviceBench {
         }
     }
 
+    /// The board's `project.json`, read over the lens's own wire from the
+    /// storage dir the editor is connected to.
+    fn board_manifest(&mut self) -> Vec<u8> {
+        let path = self.board_manifest_path();
+        drive(
+            self.controller
+                .lens_client_mut_for_test()
+                .fs_read(path.as_str().as_path()),
+        )
+        .expect("the board's project.json reads")
+        .data
+    }
+
+    /// Overwrite the board's `project.json` behind the editor's back — what
+    /// a CLI or `catalog/` re-push does to it.
+    fn write_board_manifest(&mut self, bytes: &[u8]) {
+        let path = self.board_manifest_path();
+        drive(
+            self.controller
+                .lens_client_mut_for_test()
+                .fs_write(path.as_str().as_path(), bytes),
+        )
+        .expect("the board's project.json writes");
+    }
+
+    fn board_manifest_path(&self) -> String {
+        lpa_client::project_deploy::project_file_path(
+            self.controller
+                .project_for_test()
+                .runtime_storage_id_for_test(),
+            "project.json",
+        )
+    }
+
+    /// The canonical hash the board reports for the dir the editor is on.
+    fn board_hash(&mut self) -> lpc_history::ContentHash {
+        let storage = self
+            .controller
+            .project_for_test()
+            .runtime_storage_id_for_test()
+            .to_string();
+        let (hash, _) = drive(
+            self.controller
+                .lens_client_mut_for_test()
+                .hash_package(&storage),
+        )
+        .expect("the board hashes its project");
+        hash.parse().expect("the board's hash reads")
+    }
+
+    /// The handle of the project the board's server has loaded RIGHT NOW,
+    /// asked over the wire. An unload/reload would mint a new one.
+    fn board_loaded_handle(&mut self) -> Option<u32> {
+        drive(
+            self.controller
+                .lens_client_mut_for_test()
+                .list_loaded_projects(),
+        )
+        .expect("the board lists its loaded projects")
+        .projects
+        .first()
+        .map(|project| project.handle_id)
+    }
+
     /// The newest console line containing `needle`, if the console said it.
     fn console_line_containing(&self, needle: &str) -> Option<String> {
         self.controller
@@ -1015,6 +1079,20 @@ fn opening_the_lens_borrows_the_wire_and_the_card_keeps_folding() {
             .lens_holds_wire(link),
         "the lens holds the borrow"
     );
+    // Lens open, card visible (lean-wire P5): the card pulls nothing while
+    // the lens holds the wire, so the lens read is the only copy of the
+    // board's pixels on the link.
+    {
+        let devices = bench.controller.devices_for_test();
+        assert!(
+            crate::app::devices::device_frame_feed::feed_target(
+                &devices.roster().devices()[0],
+                devices.effects(),
+            )
+            .is_none(),
+            "the card does not pull under the lens"
+        );
+    }
     assert_eq!(
         bench
             .controller
@@ -1081,6 +1159,16 @@ fn opening_the_lens_borrows_the_wire_and_the_card_keeps_folding() {
             .is_some_and(|card| card.state_label == "Ready")
     });
     assert_eq!(bench.view().devices.len(), 1, "the card never left");
+    // Card only: with the lens gone the card is the board's one feed again.
+    let devices = bench.controller.devices_for_test();
+    assert!(
+        crate::app::devices::device_frame_feed::feed_target(
+            &devices.roster().devices()[0],
+            devices.effects(),
+        )
+        .is_some(),
+        "the card pulls again once the lens lets go"
+    );
 }
 
 /// The lens reads the board's BUILD off its own wire at attach (M5
@@ -1756,9 +1844,18 @@ fn a_fed_boards_last_frame_survives_a_reload() {
     let live = feed.frame().expect("the feed's frame");
     // The packed layout form quantizes lamp centers, so the picture is
     // compared by what a slot would draw from it, not bit for bit.
+    // The card pulls sRGB8 and the sidecar stores linear 16 (each code
+    // decoded), so the samples are compared as the lamp decode reads them.
     assert_eq!(stored.revision, live.revision);
-    assert_eq!(stored.bytes, live.bytes);
+    assert_eq!(live.sample_format, crate::UiControlSampleFormat::Srgb8);
+    assert_eq!(stored.sample_format, crate::UiControlSampleFormat::U16);
     assert_eq!(stored.extent, live.extent);
+    let samples = |frame: &crate::UiControlProductPreview| -> Vec<Option<u16>> {
+        (0..frame.extent.sample_count() as usize)
+            .map(|index| frame.unorm16_sample(index))
+            .collect()
+    };
+    assert_eq!(samples(&stored), samples(live));
     assert!(stored.display_layout.is_some() && live.display_layout.is_some());
     let live_at = feed
         .frame_age_secs(bench.clock.get())
@@ -3219,8 +3316,9 @@ fn running_board(device: &FakeEsp32Device, endpoint: &str) -> (DeviceBench, Task
 /// exactly what was pulled. Then it binds, which is what lets the address
 /// bar heal into `/p/<slug>-prj…?on=…` (D51).
 ///
-/// Nothing is asked and nothing is sent: adoption writes this browser's
-/// library and touches neither the board nor anyone else's copy.
+/// Nothing is asked, and — the board's manifest already carrying its
+/// identity — nothing is sent: adoption writes this browser's library and
+/// touches neither the board nor anyone else's copy.
 #[test]
 fn opening_a_board_adopts_the_project_this_library_does_not_have() {
     let (project_uid, files) = a_project_from_another_library(0x5a);
@@ -3374,51 +3472,188 @@ fn reopening_an_adopted_board_binds_instead_of_adopting_again() {
     );
 }
 
-/// A board running files that carry no identity is NOT adopted (D17).
-///
-/// Minting a uid for it would give the library copy a different
-/// `project.json` from the board's — and the manifest is inside the
-/// canonical hash, so the copy would not hash like the thing it is a copy
-/// of, and the next save would trip the save-as-pull tripwire. The editor
-/// works on the board's project unnamed, and the console says why.
-#[test]
-fn a_board_running_an_identity_free_project_is_not_adopted() {
+/// The files a board runs after a push straight from the repo: a bundled
+/// example, whose manifest carries NO uid — a uid is minted when a project
+/// ENTERS a library, and every `catalog/` project and bundled example is
+/// uid-free by design.
+fn identity_free_project() -> Vec<(String, Vec<u8>)> {
     let example = crate::app::home::embedded_example::embedded_example(
         crate::first_bundled_example_id().expect("this build bundles examples"),
     )
     .expect("the bundled example resolves");
-    // The bundled example's manifest carries no uid: a uid is minted when
-    // a project ENTERS a library, and this one never did.
     let files = example.files();
     assert!(
         files.iter().any(|(path, bytes)| path == "project.json"
-            && !String::from_utf8_lossy(bytes).contains("\"uid\"")),
+            && lpc_model::ProjectManifest::read_json(&String::from_utf8_lossy(bytes))
+                .is_ok_and(|manifest| manifest.uid.is_none())),
         "the fixture is identity-free by construction"
     );
-    let device = light_player_running("dev000000daqf6dvvr8", files);
+    files
+}
+
+/// The uid a `project.json` carries, if it parses and has one.
+fn manifest_uid(bytes: &[u8]) -> Option<String> {
+    lpc_model::ProjectManifest::read_json(&String::from_utf8_lossy(bytes))
+        .expect("the board's project.json parses")
+        .uid
+}
+
+/// A board running files with no identity — pushed straight from
+/// `catalog/` — is given one ON THE BOARD and then adopted (ADR
+/// 2026-09-22, amended).
+///
+/// Minting only in the library would give the copy a different
+/// `project.json` from the board's, and the manifest is inside the
+/// canonical hash, so the two would never match. So the stamped manifest
+/// is written back over the wire — the one board write adoption makes —
+/// and it lands as an incremental refresh: the server is still running
+/// the very project the editor connected to.
+#[test]
+fn a_board_running_an_identity_free_project_is_stamped_and_adopted() {
+    let device = light_player_running("dev000000daqf6dvvr8", identity_free_project());
     let (mut bench, _tasks, device_uid) = running_board(&device, "usb-adopt-anon");
+    let board_title = bench.view().devices[0].title.clone();
 
-    bench.open_lens(&device_uid).expect("the board still opens");
+    bench.open_lens(&device_uid).expect("the board opens");
 
-    assert!(
-        bench.library().is_empty(),
-        "nothing was written: {:?}",
-        bench.library()
-    );
+    // One project in the library, under an identity minted for it.
+    let library = bench.library();
+    assert_eq!(library.len(), 1, "exactly one project: {library:?}");
+    let project = library[0].uid;
+    let project_uid = project.to_string();
+
+    // The board carries that identity now, byte for byte the library
+    // copy's manifest.
+    let board_manifest = bench.board_manifest();
     assert_eq!(
-        bench.controller.view().open_project_uid,
-        None,
-        "and nothing was named"
+        manifest_uid(&board_manifest).as_deref(),
+        Some(project_uid.as_str()),
+        "the uid was stamped onto the board"
     );
-    assert!(
-        bench.ready_handle().is_some(),
-        "the editor is still working on the board's project"
+    let adopted = bench.store.open(project).expect("the copy opens");
+    assert_eq!(
+        adopted
+            .package_fs
+            .borrow()
+            .read_file("/project.json".as_path())
+            .expect("the library copy has a manifest"),
+        board_manifest,
+        "the board and the library hold the same manifest bytes"
+    );
+    let meta = crate::app::library::package_meta::read_meta(&*adopted.package_fs.borrow())
+        .expect("the sidecar reads")
+        .expect("an adopted copy carries provenance");
+    assert_eq!(
+        meta.provenance,
+        crate::app::library::PackageProvenance::PulledFromDevice {
+            device_uid: device_uid.clone(),
+            device_name: board_title.clone(),
+        },
+    );
+    drop(adopted);
+
+    // Same content on both sides, so the copy is bound and the address
+    // can heal (D51).
+    let head = bench.library_head(project);
+    assert_eq!(bench.board_hash(), head, "the board is at the library head");
+    assert_eq!(
+        bench.controller.view().open_project_uid.as_deref(),
+        Some(project_uid.as_str()),
+        "the adopted project is the open one"
+    );
+    let association = bench.registry()[0]
+        .association
+        .clone()
+        .expect("the adoption is banked");
+    assert_eq!(association.project, project);
+    assert_eq!(association.version, head);
+
+    // No reload: the project the board runs now is the one the editor
+    // connected to before the manifest was written.
+    let connected = bench
+        .ready_handle()
+        .expect("the editor is on a ready project");
+    assert_eq!(
+        bench.board_loaded_handle(),
+        Some(connected),
+        "the stamp was an incremental refresh, not a reload"
     );
     assert!(
         bench
-            .console_line_containing("no identity of its own")
+            .console_line_containing("its library identity and adopted it")
+            .is_some_and(|line| line.contains(&board_title)),
+        "the console says what happened: {:?}",
+        bench.controller.view().console.entries
+    );
+}
+
+/// Re-pushing a project from `catalog/` strips the board's uid again, but
+/// not its content. The next open recognises the library copy that
+/// differs from the board ONLY by that uid, stamps the SAME identity back,
+/// and binds it — no second copy in the library.
+#[test]
+fn a_board_repushed_without_identity_gets_its_library_identity_back() {
+    let files = identity_free_project();
+    let original = files
+        .iter()
+        .find(|(path, _)| path == "project.json")
+        .map(|(_, bytes)| bytes.clone())
+        .expect("the project has a manifest");
+    let device = light_player_running("dev000000daqf6dvvra", files);
+    let (mut bench, tasks, device_uid) = running_board(&device, "usb-adopt-repush");
+
+    bench.open_lens(&device_uid).expect("the board opens");
+    let library = bench.library();
+    assert_eq!(library.len(), 1, "{library:?}");
+    let project = library[0].uid;
+    let project_uid = project.to_string();
+    let head = bench.library_head(project);
+
+    // The re-push: the uid-free manifest lands on the board again.
+    bench.write_board_manifest(&original);
+    assert_eq!(manifest_uid(&bench.board_manifest()), None);
+    assert_ne!(bench.board_hash(), head, "the board lost its identity");
+
+    bench.detach_lens();
+    bench.run_until(&tasks, "the pump to hear the board again", |bench| {
+        bench
+            .view()
+            .devices
+            .first()
+            .is_some_and(|card| card.state_label == "Ready")
+    });
+    bench.settle_library();
+
+    bench.open_lens(&device_uid).expect("the board opens again");
+
+    let library = bench.library();
+    assert_eq!(library.len(), 1, "no second copy was minted: {library:?}");
+    assert_eq!(library[0].uid, project);
+    assert_eq!(
+        manifest_uid(&bench.board_manifest()).as_deref(),
+        Some(project_uid.as_str()),
+        "the SAME identity was stamped back"
+    );
+    assert_eq!(
+        bench.board_hash(),
+        head,
+        "the board is at the library head again"
+    );
+    assert_eq!(
+        bench.library_head(project),
+        head,
+        "the library copy is untouched"
+    );
+    assert_eq!(
+        bench.controller.view().open_project_uid.as_deref(),
+        Some(project_uid.as_str()),
+        "and the copy is bound"
+    );
+    assert!(
+        bench
+            .console_line_containing("restored its identity")
             .is_some(),
-        "the console says why: {:?}",
+        "the console says what happened: {:?}",
         bench.controller.view().console.entries
     );
 }

@@ -20,10 +20,9 @@ use lpa_client::ClientIo;
 use lpa_server::{LpGraphics, LpServer};
 use lpc_model::{AsLpPath, LpValue, SlotPath};
 use lpc_shared::output::MemoryOutputProvider;
-use lpc_shared::transport::ServerTransport;
+use lpc_shared::transport::{Incoming, Link, LinkId, ServerTransport};
 use lpc_wire::{
-    ClientMessage, ClientRequest, TransportError, WireMessage, WireProjectCommand,
-    WireServerMessage,
+    ClientMessage, ClientRequest, TransportError, WireProjectCommand, WireServerMessage,
 };
 use lpfs::LpFsMemory;
 
@@ -2828,7 +2827,7 @@ impl ClientIo for InProcessServerIo {
             let mut transport = CollectTransport::default();
             server
                 .borrow_mut()
-                .tick_and_send(16, vec![WireMessage::Client(msg)], &mut transport)
+                .tick_and_send(16, vec![Incoming::primary(msg)], &mut transport)
                 .await
                 .map_err(|error| TransportError::Other(format!("server error: {error}")))?;
             inbox.borrow_mut().extend(transport.sent);
@@ -2869,17 +2868,21 @@ struct CollectTransport {
 }
 
 impl ServerTransport for CollectTransport {
-    async fn send(&mut self, msg: WireServerMessage) -> Result<(), TransportError> {
+    async fn send(&mut self, _link: LinkId, msg: WireServerMessage) -> Result<(), TransportError> {
         self.sent.push(msg);
         Ok(())
     }
 
-    async fn receive(&mut self) -> Result<Option<ClientMessage>, TransportError> {
+    async fn receive(&mut self) -> Result<Option<Incoming>, TransportError> {
         Ok(None)
     }
 
-    async fn receive_all(&mut self) -> Result<Vec<ClientMessage>, TransportError> {
+    async fn receive_all(&mut self) -> Result<Vec<Incoming>, TransportError> {
         Ok(Vec::new())
+    }
+
+    fn links(&self) -> Vec<Link> {
+        vec![Link::PRIMARY]
     }
 
     async fn close(&mut self) -> Result<(), TransportError> {

@@ -24,10 +24,10 @@ pub mod transport_error;
 pub mod tree;
 
 pub use messages::{
-    BindingGraphProbeRequest, BindingGraphProbeResult, ControlDisplayLayoutProbeResult,
-    ControlDisplayLayoutRead, ControlProductProbeRequest, ControlProductProbeResult,
-    ControlProductProbeResultHeader, NodeReadQuery, NodeReadSelection, OutputFrameEntry,
-    OutputFrameEntryHeader, OutputFrameProbeRequest, OutputFrameProbeResult,
+    BindingGraphProbeRequest, BindingGraphProbeResult, ControlProductGeometry,
+    ControlProductProbeRequest, ControlProductProbeResult, ControlProductProbeResultHeader,
+    GeometryDisplayLayout, KnownRevision, NodeReadQuery, NodeReadSelection, OutputFrameEntry,
+    OutputFrameEntryHeader, OutputFrameGeometry, OutputFrameProbeRequest, OutputFrameProbeResult,
     OutputFrameProbeResultHeader, PROJECT_READ_FRAME_MAX_BYTES,
     PROJECT_READ_FRAME_SERIAL_BUFFER_BYTES, PROJECT_READ_FRAME_SERIAL_MARGIN_BYTES,
     PROJECT_READ_PROBE_HEADER_RESERVE_BYTES, PROJECT_READ_RUNTIME_CHUNK_BYTES, ProjectProbeRequest,
@@ -35,19 +35,20 @@ pub use messages::{
     ProjectReadProbeEvent, ProjectReadQuery, ProjectReadQueryEvent, ProjectReadRequest,
     ProjectReadResourceEvent, ProjectReadShapeEvent, ProjectRuntimeStatus, ReadLevel,
     RenderProductProbeRequest, RenderProductProbeResult, RenderProductProbeResultHeader,
-    ResourcePayloadRead, ResourceReadQuery, ResourceReadResult, RuntimeReadQuery,
-    RuntimeReadResult, ServerRuntimeStatus, ShapeReadQuery, TimebaseProbeRequest,
-    TimebaseProbeResult, WireBindingDirection, WireBindingEndpoint, WireBindingGraph,
-    WireBindingOrigin, WireBusChannel, WireBusChannelValue, WireCellProjection, WireConsumerPolicy,
-    WireEffectiveBinding, WireOutputPlacement, WirePhasorOrigin, WirePhasorReading, WirePhasorRow,
-    WireProjectionOrigin, WireProjectionShape, WireScopeRef, WireVisualSpace,
+    ResourcePayloadRead, ResourceReadQuery, ResourceReadResult, RevisionGateRead,
+    RevisionGateResult, RuntimeReadQuery, RuntimeReadResult, ServerRuntimeStatus, ShapeReadQuery,
+    TimebaseProbeRequest, TimebaseProbeResult, WireBindingDirection, WireBindingEndpoint,
+    WireBindingGraph, WireBindingGraphRead, WireBindingOrigin, WireBusChannel, WireBusChannelValue,
+    WireBusChannelValues, WireCellProjection, WireConsumerPolicy, WireEffectiveBinding,
+    WireOutputPlacement, WirePhasorOrigin, WirePhasorReading, WirePhasorRow, WireProjectionOrigin,
+    WireProjectionShape, WireScopeRef, WireVisualSpace,
 };
 pub use messages::{ClientMessage, ClientRequest, Message, ServerMessage};
 pub use project::{
     NodeRuntimeStatus, WireChannelSampleFormat, WireColorLayout, WireProjectHandle,
     WireResourceAvailability, WireResourceKindSummary, WireResourceMetadataSummary,
     WireResourceSummary, WireRuntimeBufferKind, WireRuntimeBufferMetadataPayload,
-    WireRuntimeBufferPayload, WireTextureFormat,
+    WireRuntimeBufferPayload, WireTextureFormat, linear16_to_srgb8, srgb8_to_linear16,
 };
 pub use project_command::{
     WireCreateNodeRequest, WireCreateNodeResponse, WireNodeCommand, WireNodeCommandResponse,
@@ -64,12 +65,14 @@ pub use project_overlay::{
     WireOverlayMutationResponse, WireOverlayReadRequest, WireOverlayReadResponse,
 };
 #[cfg(feature = "ser-write-json")]
-pub use ser_write::{CountingSerWrite, ErasedWriteError, ser_write_json_len, ser_write_json_to};
+pub use ser_write::{
+    CountingSerWrite, ErasedWriteError, ser_write_json_fnv64, ser_write_json_len, ser_write_json_to,
+};
 pub use server::{
     AvailableProject, BuildFacts, FAULT_MESSAGE_CAP_BYTES, FAULT_NODES_CAP, FaultedNodeWire,
-    FsRequest, FsResponse, HardwareFacts, HardwareIdentity, HeartbeatIdentity, HelloIdentity,
-    LinkCounters, LoadedProject, MemoryStats, ProjectFaultWire, SampleStats, ServerConfig,
-    ServerHello, ServerMsgBody, WIRE_PROTO_VERSION,
+    FsRequest, FsResponse, HardwareFacts, HardwareIdentity, HeartbeatIdentity, HelloAuth,
+    HelloIdentity, LinkCounters, LoadedProject, MemoryStats, ProjectFaultWire, SampleStats,
+    ServerConfig, ServerHello, ServerMsgBody, WIRE_PROTO_VERSION,
 };
 pub use slot::{
     WireSlotChange, WireSlotData, WireSlotFullSync, WireSlotPatch, WireSlotRootSnapshot,

@@ -19,13 +19,14 @@ use core::cell::RefCell;
 use core::future::Future;
 use core::pin::Pin;
 use core::task::{Context, Poll, RawWaker, RawWakerVTable, Waker};
+use lpc_shared::transport::{Incoming, Link, LinkId};
 
 use lp_gfx_lpvm::TargetLpvmGraphics;
 use lpa_server::{LpGraphics, LpServer, PROJECT_LOAD_MIN_HEADROOM_BYTES};
 use lpc_model::{AsLpPath, LpPathBuf};
 use lpc_shared::output::MemoryOutputProvider;
 use lpc_wire::{
-    ClientMessage, ClientRequest, TransportError, WireMessage, WireServerMessage, WireServerMsgBody,
+    ClientMessage, ClientRequest, TransportError, WireServerMessage, WireServerMsgBody,
 };
 use lpfs::LpFsMemory;
 
@@ -38,7 +39,7 @@ fn starved_heap_refuses_the_load_and_stays_alive() {
     server.set_read_headroom_probe(Some(|| Some(PROJECT_LOAD_MIN_HEADROOM_BYTES - 1)));
 
     let mut transport = VecTransport::default();
-    let load = WireMessage::Client(ClientMessage {
+    let load = Incoming::primary(ClientMessage {
         id: 51,
         msg: ClientRequest::LoadProject {
             path: String::from(project_path.as_str()),
@@ -72,7 +73,7 @@ fn starved_heap_refuses_the_load_and_stays_alive() {
     // loads normally.
     server.set_read_headroom_probe(Some(|| Some(u32::MAX)));
     let mut transport = VecTransport::default();
-    let load = WireMessage::Client(ClientMessage {
+    let load = Incoming::primary(ClientMessage {
         id: 52,
         msg: ClientRequest::LoadProject {
             path: String::from(project_path.as_str()),
@@ -129,17 +130,21 @@ struct VecTransport {
 }
 
 impl lpc_shared::transport::ServerTransport for VecTransport {
-    async fn send(&mut self, msg: WireServerMessage) -> Result<(), TransportError> {
+    async fn send(&mut self, _link: LinkId, msg: WireServerMessage) -> Result<(), TransportError> {
         self.sent.push(msg);
         Ok(())
     }
 
-    async fn receive(&mut self) -> Result<Option<ClientMessage>, TransportError> {
+    async fn receive(&mut self) -> Result<Option<Incoming>, TransportError> {
         Ok(None)
     }
 
-    async fn receive_all(&mut self) -> Result<Vec<ClientMessage>, TransportError> {
+    async fn receive_all(&mut self) -> Result<Vec<Incoming>, TransportError> {
         Ok(Vec::new())
+    }
+
+    fn links(&self) -> Vec<Link> {
+        vec![Link::PRIMARY]
     }
 
     async fn close(&mut self) -> Result<(), TransportError> {

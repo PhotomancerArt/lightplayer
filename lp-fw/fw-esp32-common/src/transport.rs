@@ -13,11 +13,16 @@ use alloc::vec::Vec;
 use crate::serial::server_msg::serialize_server_msg;
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::channel::Channel;
-use lpc_shared::transport::ServerTransport;
+use lpc_shared::transport::{Incoming, Link, LinkId, ServerTransport};
 use lpc_wire::WireServerMessage;
 use lpc_wire::{ClientMessage, TransportError, json};
 
 /// Server transport that sends WireServerMessage to io_task for serialization.
+///
+/// ONE link — the product's USB serial line — and it is trusted
+/// ([`Link::PRIMARY`]): physical possession is the recovery path. A second
+/// (radio) link arrives as a separate transport behind a mux, never as a
+/// second id here.
 ///
 /// Uses a single in-flight write request/result pair. `send(msg).await` blocks
 /// until io_task reports that the message was fully written or failed.
@@ -87,7 +92,7 @@ impl StreamingMessageRouterTransport {
 }
 
 impl ServerTransport for StreamingMessageRouterTransport {
-    async fn send(&mut self, msg: WireServerMessage) -> Result<(), TransportError> {
+    async fn send(&mut self, _link: LinkId, msg: WireServerMessage) -> Result<(), TransportError> {
         let id = msg.id;
         // Captured before the message moves: a failed Error notice must not
         // recurse into another notice.
@@ -127,40 +132,14 @@ impl ServerTransport for StreamingMessageRouterTransport {
         result
     }
 
-    async fn receive(&mut self) -> Result<Option<ClientMessage>, TransportError> {
+    async fn receive(&mut self) -> Result<Option<Incoming>, TransportError> {
         let receiver = self.incoming.receiver();
         loop {
             match receiver.try_receive() {
                 Ok(msg_line) => {
-                    if !msg_line.starts_with("M!") {
-                        log::trace!("StreamingMessageRouterTransport: Skipping non-message line");
-                        continue;
-                    }
-                    let json_str = msg_line.strip_prefix("M!").unwrap_or(&msg_line);
-                    let json_str = json_str.trim_end_matches('\n');
-                    match json::from_str::<ClientMessage>(json_str) {
-                        Ok(msg) => {
-                            log::debug!(
-                                "StreamingMessageRouterTransport: Received message id={}",
-                                msg.id
-                            );
-                            return Ok(Some(msg));
-                        }
-                        Err(e) => {
-                            // A torn/spliced frame is protocol loss, not
-                            // chatter — WARN with evidence and count it
-                            // (2026-08-26 inbound-loss defect: this drop sat
-                            // at DEBUG and made losses invisible).
-                            let preview_len = json_str.len().min(48);
-                            crate::serial::link_counters::bump_parse_failure();
-                            log::warn!(
-                                "StreamingMessageRouterTransport: dropping unparseable {} B M! \
-                                 line ({e}); prefix: {:?}",
-                                json_str.len(),
-                                &json_str[..preview_len]
-                            );
-                            continue;
-                        }
+                    if let Some(msg) = parse_wire_line(&msg_line) {
+                        // One link, and it is the USB cable: trusted.
+                        return Ok(Some(Incoming::primary(msg)));
                     }
                 }
                 Err(_) => return Ok(None),
@@ -168,7 +147,7 @@ impl ServerTransport for StreamingMessageRouterTransport {
         }
     }
 
-    async fn receive_all(&mut self) -> Result<Vec<ClientMessage>, TransportError> {
+    async fn receive_all(&mut self) -> Result<Vec<Incoming>, TransportError> {
         let mut messages = Vec::new();
         loop {
             match self.receive().await? {
@@ -179,7 +158,60 @@ impl ServerTransport for StreamingMessageRouterTransport {
         Ok(messages)
     }
 
+    fn links(&self) -> Vec<Link> {
+        alloc::vec![Link::PRIMARY]
+    }
+
     async fn close(&mut self) -> Result<(), TransportError> {
         Ok(())
+    }
+}
+
+/// The USB transport has one link, open for the life of the image: no hellos
+/// owed after the first, no deadline to keep.
+impl crate::link_upkeep::LinkUpkeep for StreamingMessageRouterTransport {}
+
+/// One received line → the client message it carries, or `None` for a line
+/// that is not a wire frame (skipped quietly) or does not parse (logged and
+/// counted: a torn or spliced frame is protocol loss, not chatter —
+/// 2026-08-26 inbound-loss defect: this drop sat at DEBUG and made losses
+/// invisible). Shared by every link: USB lines and radio lines parse alike.
+///
+/// `#[inline(always)]` is load-bearing. As an ordinary function it is
+/// codegen'd once, out of line, in this crate, and that standalone
+/// `json::from_str::<ClientMessage>` changed how the deserializer was inlined
+/// into the USB receive path: the main task's `poll` frame grew from
+/// `entry a1, 1024` to `4448` on the S3 and from `976` to `4112` on the
+/// classic, on images with no radio link at all (and the S3's `.data` gained
+/// a duplicated 12 B serde_json constant table, which cost the stack 16 B).
+/// Inlined into each caller, both frames are back to what they were before
+/// the radio links existed.
+#[inline(always)]
+pub fn parse_wire_line(msg_line: &str) -> Option<ClientMessage> {
+    let Some(json_str) = msg_line.strip_prefix("M!") else {
+        log::trace!("transport: skipping non-message line");
+        return None;
+    };
+    let json_str = json_str.trim_end_matches('\n');
+    match json::from_str::<ClientMessage>(json_str) {
+        Ok(msg) => {
+            log::debug!("transport: received message id={}", msg.id);
+            Some(msg)
+        }
+        Err(e) => {
+            // A radio line is arbitrary UTF-8: cut the preview on a char
+            // boundary, never mid-character.
+            let mut preview_len = json_str.len().min(48);
+            while !json_str.is_char_boundary(preview_len) {
+                preview_len -= 1;
+            }
+            crate::serial::link_counters::bump_parse_failure();
+            log::warn!(
+                "transport: dropping unparseable {} B M! line ({e}); prefix: {:?}",
+                json_str.len(),
+                &json_str[..preview_len]
+            );
+            None
+        }
     }
 }

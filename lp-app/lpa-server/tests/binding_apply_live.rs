@@ -78,10 +78,15 @@ fn authored_binding_to_the_default_channel_wins_over_the_default() {
     let result = engine.read_project_binding_graph_probe(
         registry,
         BindingGraphProbeRequest {
+            structure: lpc_wire::RevisionGateRead::Always,
             include_values: false,
         },
     );
-    let BindingGraphProbeResult::Graph(graph) = result else {
+    let BindingGraphProbeResult::Graph(lpc_wire::WireBindingGraphRead {
+        structure: lpc_wire::RevisionGateResult::Changed(graph),
+        ..
+    }) = result
+    else {
         panic!("expected graph result");
     };
     let time_writers: alloc::vec::Vec<_> = graph
@@ -148,10 +153,15 @@ fn assert_delta_binding(project: &mut Project, when: &str) {
     let result = engine.read_project_binding_graph_probe(
         registry,
         BindingGraphProbeRequest {
+            structure: lpc_wire::RevisionGateRead::Always,
             include_values: false,
         },
     );
-    let BindingGraphProbeResult::Graph(graph) = result else {
+    let BindingGraphProbeResult::Graph(lpc_wire::WireBindingGraphRead {
+        structure: lpc_wire::RevisionGateResult::Changed(graph),
+        ..
+    }) = result
+    else {
         panic!("expected graph result {when}");
     };
 

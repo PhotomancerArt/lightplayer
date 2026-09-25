@@ -646,6 +646,18 @@ studio-dev-emu IMAGE="": install-wasm32-target studio-firmware-package-served
     echo
     just studio-dev
 
+# Size a wire tap. Record one by starting the emulator with the tap on:
+#
+#   LP_EMU_WIRE_TAP=/tmp/tap just studio-dev-emu     # use Studio, then stop
+#   just wire-tap-stat /tmp/tap/c6-a.tap             # sizes per message kind
+#   just wire-tap-stat /tmp/tap/c6-a.tap --ledger --skip-seconds 25
+#
+# `--ledger [lens|card|sync|heartbeat|<kind>]` prints bytes by JSON path with
+# a distinct/units column (structure resent unchanged). Sizes are exact; rates
+# are the emulator's. The script's docstring is the manual.
+wire-tap-stat tap *args:
+    python3 scripts/wire-tap/tapstat.py {{ tap }} {{ args }}
+
 studio-dev: install-wasm32-target studio-firmware-package-served
     #!/usr/bin/env bash
     set -euo pipefail
@@ -2435,10 +2447,11 @@ clippy-fw-esp32c6-harnesses: install-rv32-target
         cargo clippy --target {{ rv32_target }} --profile {{ fw_esp32c6_profile }} \
             --features "$feature,esp32c6" -- --no-deps -D warnings
     done
-    # Two harnesses build without default features: test_espnow wants the radio
-    # capability alone, and test_f32_softfloat wants the compiler alone (plus
-    # `float-f32`, which no other configuration in this crate turns on).
-    for feature in test_espnow test_f32_softfloat; do
+    # Three harnesses build without default features: test_espnow wants the
+    # radio capability alone, test_ble the radio plus the BLE host, and
+    # test_f32_softfloat the compiler alone (plus `float-f32`, which no other
+    # configuration in this crate turns on).
+    for feature in test_espnow test_ble test_ble_coex test_f32_softfloat; do
         echo "==> fw-esp32c6 harness: $feature (--no-default-features)"
         cargo clippy --target {{ rv32_target }} --profile {{ fw_esp32c6_profile }} \
             --no-default-features --features "$feature,esp32c6" -- --no-deps -D warnings
@@ -2568,6 +2581,15 @@ _test-parallel: test-rust test-filetests test-emu-lab
 
 test-rust-core:
     cargo test
+
+# The lps-probe wall-clock perf sanity: the number behind the probe
+# worker-offload follow-up (docs/adr/2026-07-25-shader-probe-experiment-api.md).
+# `#[ignore]`d in the default suite because it measures machine load as much as
+# code — see docs/debt/lps-probe-perf-test-load-sensitive.md. Trust the result
+# only when the printed load average shows no competing work.
+perf-probe:
+    uptime
+    cargo test -p lps-probe --lib perf_4096 -- --ignored --nocapture
 
 # Host Xtensa execution (`lpvm-native/emu-xt`): the ISA-parameterized rt_emu
 # engine running compiled Xtensa code on lp-xt-emu, differentially checked
@@ -2715,11 +2737,17 @@ test-glsl-filetests:
 # drift class is caught by the per-chip firmware jobs' manifest checks
 # (which need chip builds this gate deliberately avoids). Note the narrow
 # residue: drift unique to the emu fixture itself is only caught locally.
+#
+# `check-wasm-cloud` is also local-full-gate only: it closes the wasm32
+# blind spot for one crate/feature combination (lpa-cloud-client without
+# `in-process`). Warm ~1s, cold ~47s. CI compiles it only inside the stories
+# job's dx build, whose path gate does not include lpa-cloud-client.
+# See docs/debt/wasm-cloud-check-not-in-just-check.md.
 [parallel]
-check-lint: fmt-check clippy check-lpc-engine-gates check-studio-core-minimal lint-serde-content lint-browser-test-harness lint-classic-capture lint-pcb-export lint-schemars-fw lint-upgrade-fw lint-emu-fence lint-emu-regnames lint-torture-corpus lint-vec-corpus lint-tw-utilities
+check-lint: fmt-check clippy check-lpc-engine-gates check-studio-core-minimal lint-serde-content lint-browser-test-harness lint-classic-capture lint-pcb-export lint-schemars-fw lint-upgrade-fw lint-emu-fence lint-nested-patches lint-emu-regnames lint-torture-corpus lint-vec-corpus lint-tw-utilities
 
 [parallel]
-check: check-lint schema-check fw-manifest-check-emu
+check: check-lint schema-check fw-manifest-check-emu check-wasm-cloud
 
 # Guard against serde Content-machinery reintroduction (tag/untagged/flatten).
 # See docs/adr/2026-07-04-json-only-artifacts.md and the script's allowlist.
@@ -2746,7 +2774,7 @@ lint-classic-capture:
 
 # The PCB-export mapping generator reads EasyEDA's exports, which are design
 # files and never live in this repo, so its real run is a desk-side recipe
-# (`playful-choker-map2d`). This runs the half that needs no exports: the
+# (`pcb-map2d`). This runs the half that needs no exports: the
 # PcbDoc and netlist parsers, the strokes-must-equal-the-chain refusal and the
 # --check comparison, on a synthetic three-lamp board built in memory.
 lint-pcb-export:
@@ -2792,6 +2820,14 @@ lint-upgrade-fw:
 # fence lives in the script, one line of reason each.
 lint-emu-fence:
     ./scripts/check-emu-fence.sh
+
+# A `[patch]` table applies only to its own workspace, so a nested workspace
+# (lp-xt/fixtures) that reaches a crate the root patches must repeat the entry
+# or it silently builds against crates.io. Reads manifests and lockfiles only
+# (no network, no esp toolchain); exclusions and their reasons live in the
+# script. docs/debt/nested-workspaces-miss-root-patches.md.
+lint-nested-patches:
+    ./scripts/check-nested-patches.sh
 
 # The ESP32-C6 machine's boot tests, which need firmware ELFs, plus the M3
 # replays of the committed transcripts.
@@ -2903,7 +2939,11 @@ test-emu-esp32v3:
 #      worktrees at two different paths, one sha256. It is last because it is
 #      the slow half (two full Xtensa firmware builds, ~2 minutes each cold on
 #      an M2 Max) and because a failure there is a claim about the *recipe*
-#      rather than about the machine.
+#      rather than about the machine. `LP_EMU_REF_VERIFY=0` builds the image
+#      ONCE instead (the translated-core cell after this recipe still needs
+#      it): CI sets it on a PR that changes neither the recipe nor the
+#      classic's firmware, because such a PR cannot move the image's bytes
+#      (2026-09-24, #797). Pushes to main always verify.
 #
 # Parts 3 and 4 are here rather than as extra steps in the CI job on purpose:
 # the gate a human runs and the gate CI runs are one thing, and a step that
@@ -2928,8 +2968,14 @@ test-emu-esp32v3-gate: test-emu-esp32v3-boot
     cargo test -p lp-emu-validate
     cargo test -p lp-cli --test validate_registry_parity
     commit="$(git rev-parse --short HEAD)"
-    scripts/emu/build-reference-image.sh --verify --chip esp32 \
-        esp32,server,float-f32 "$commit" none
+    if [[ "${LP_EMU_REF_VERIFY:-1}" == 0 ]]; then
+        echo "test-emu-esp32v3-gate: LP_EMU_REF_VERIFY=0 — one reference build, no reproducibility rebuild"
+        scripts/emu/build-reference-image.sh --chip esp32 \
+            esp32,server,float-f32 "$commit" none
+    else
+        scripts/emu/build-reference-image.sh --verify --chip esp32 \
+            esp32,server,float-f32 "$commit" none
+    fi
 
 # The boot half: build the shipped `fw-esp32v3` image, the `rmt-chase` harness
 # image and the `frame-dump` image, then run the whole suite with the
@@ -2976,6 +3022,22 @@ test-emu-esp32v3-boot: build-fw-esp32v3
           --partition-table {{ fw_esp32v3_dir }}/partitions.csv \
           --flash-size {{ v3_flash_size }} "$shipped" "$merged"
       export LP_EMU_ESP32V3_MERGED="$merged"
+      # The PINNED reference image (BLE M3, ruling DD8): the bytes lab task L1
+      # flashed onto the desk board before the silicon memory capture, so
+      # `boot_idle.rs`'s G2 (e) comparison is same-image on both sides rather
+      # than this tree against `75486b114`. Cached under target/emu-ref/ by
+      # the script, so a second run pays only for the merge.
+      ref_commit=75486b114
+      ref_dir={{ justfile_directory() }}/target/emu-ref/$ref_commit-boot-idle
+      scripts/emu/build-reference-image.sh --chip esp32 esp32,server,float-f32 \
+          "$ref_commit" none
+      # The partition table of THAT commit, not this tree's.
+      git show "$ref_commit:{{ fw_esp32v3_dir }}/partitions.csv" > "$ref_dir/partitions.csv"
+      espflash save-image --chip esp32 --merge \
+          --partition-table "$ref_dir/partitions.csv" \
+          --flash-size {{ v3_flash_size }} "$ref_dir/fw-esp32v3" "$ref_dir/merged.bin"
+      export LP_EMU_ESP32V3_REF_ELF="$ref_dir/fw-esp32v3"
+      export LP_EMU_ESP32V3_REF_MERGED="$ref_dir/merged.bin"
     else
       echo "espflash is not on PATH: the merged-image tests will SKIP" >&2
     fi
@@ -3928,27 +3990,19 @@ validate *args:
 demo project="projects/test/basic":
     cargo run -p lp-cli -- dev {{ project }}
 
-# Regenerate catalog/projects/playful-choker's mapping (playful.map2d.json and
-# playful-mapping.svg) from the choker's EasyEDA exports. `exports` is the
-# design folder, or a copy of it: the newest `Altium_*.zip` and `Netlist_*.tel`
-# in it are read (their names are dated). The exports are Yona's design files
-# and are never committed here. The strokes table is
-# scripts/pcb-export-strokes/playful-choker.json.
+# Regenerate a PCB fixture's mapping (a map2d document and its numbered SVG)
+# from the board's EasyEDA exports. `table` names a strokes table in
+# scripts/pcb-export-strokes/ (e.g. `playful-choker`), which says which
+# designators form each mapping object and which catalog folder the files go
+# to. `exports` is the board's design folder, or a copy of it: the newest
+# `Altium_*.zip` and `Netlist_*.tel` in it are read. The exports are design
+# files and are never committed here.
 #
-# `just playful-choker-map2d <exports> --check` writes nothing and fails unless
+# `just pcb-map2d <table> <exports> --check` writes nothing and fails unless
 # the committed files are byte-identical to a regeneration: run it after the
 # PCB changes, or after touching the generator.
-playful-choker-map2d exports *args:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    pcb="$(ls "{{ exports }}"/Altium_*.zip 2>/dev/null | sort | tail -n1 || true)"
-    net="$(ls "{{ exports }}"/Netlist_*.tel 2>/dev/null | sort | tail -n1 || true)"
-    [[ -n "$pcb" && -n "$net" ]] || { echo "no Altium_*.zip and Netlist_*.tel in {{ exports }}" >&2; exit 1; }
-    echo "pcb:     $pcb"
-    echo "netlist: $net"
-    python3 scripts/pcb-export-to-map2d.py --pcb "$pcb" --netlist "$net" \
-        --strokes scripts/pcb-export-strokes/playful-choker.json \
-        --out-dir catalog/projects/playful-choker {{ args }}
+pcb-map2d table exports *args:
+    python3 scripts/pcb-export-to-map2d.py --strokes "{{ table }}" --exports "{{ exports }}" {{ args }}
 
 # Requires: ESP32-C6 device connected via USB. Builds the default lps-glsl frontend path.
 # Usage: just demo-esp32c6-host [project-dir]
@@ -4080,6 +4134,23 @@ fwtest-shader-compile-stress-trace-esp32c6: install-rv32-target
 # Run firmware with test_espnow: 1Hz simulated button events over ESP-NOW
 fwtest-espnow-esp32c6: install-rv32-target
     cd lp-fw/fw-esp32c6 && cargo run --no-default-features --features test_espnow,esp32c6 --target {{ rv32_target }} --profile {{ fw_esp32c6_profile }}
+
+# BLE spike (vision `ble-remote-control`): advertise as `LP-BLE-xxxx`, echo
+# over a Nordic-UART-shaped GATT service, print heap per bring-up stage.
+# Talk to it with nRF Connect on a phone, or through `spikes/ble-lab/` (a page
+# that holds the BLE link, driven over HTTP) from the Mac. Pass the port explicitly (resolve by MAC with
+# `scripts/emu/board-port.py --list`) when more than one C6 is attached.
+fwtest-ble-esp32c6 port="": install-rv32-target
+    #!/usr/bin/env bash
+    set -euo pipefail
+    port="{{ port }}"
+    if [[ -z "$port" ]]; then
+        port="$(cargo run -q -p lp-cli -- fwcheck port --chip esp32c6)"
+    fi
+    echo "Using ESPFLASH_PORT=$port"
+    cd lp-fw/fw-esp32c6 && ESPFLASH_PORT="$port" cargo run --no-default-features \
+        --features test_ble,esp32c6 --target {{ rv32_target }} \
+        --profile {{ fw_esp32c6_profile }}
 
 # Run firmware with test_f32_softfloat: IEEE f32 semantics on the C6's soft-float
 # path — the ROM `rvfplib` routines probed directly, plus a GLSL shader compiled

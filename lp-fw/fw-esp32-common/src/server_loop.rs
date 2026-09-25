@@ -29,8 +29,8 @@ use lpc_shared::fps::FpsTracker;
 use lpc_shared::stats::WindowedStatsCollector;
 use lpc_shared::time::TimeProvider;
 use lpc_shared::transport::ServerTransport;
-use lpc_wire::{WireMessage, WireServerMessage};
 
+use crate::link_upkeep::LinkUpkeep;
 use crate::time::Esp32TimeProvider;
 
 /// Performance logging interval.
@@ -41,12 +41,6 @@ const HEARTBEAT_INTERVAL_MS: u64 = 5000; // Send every 5 seconds
 
 /// FPS statistics window: stats are computed over samples from the last N milliseconds
 const FPS_STATS_WINDOW_MS: u64 = 5000;
-
-/// Special message ID for unsolicited heartbeat messages
-///
-/// Heartbeat messages are not responses to client requests, so they use id=0
-/// to indicate they are unsolicited status updates.
-const HEARTBEAT_MESSAGE_ID: u64 = 0;
 
 /// Run the server loop
 ///
@@ -70,7 +64,7 @@ const HEARTBEAT_MESSAGE_ID: u64 = 0;
 /// second, separate copy that only the `bench_render_loop` call site in
 /// `fw-esp32c6/src/main.rs` ever calls. Keep the two loop bodies in sync by
 /// hand if either changes.
-pub async fn run_server_loop<T: ServerTransport>(
+pub async fn run_server_loop<T: ServerTransport + LinkUpkeep>(
     mut server: LpServer,
     mut transport: T,
     time_provider: Esp32TimeProvider,
@@ -112,13 +106,17 @@ pub async fn run_server_loop<T: ServerTransport>(
     loop {
         let frame_start = time_provider.now_ms();
 
+        // A link that joined since the last frame (a radio connection) gets
+        // its own hello before anything else is sent to it.
+        send_owed_hellos(&server, &mut transport).await;
+
         // Collect incoming messages (non-blocking)
         let receive_start = time_provider.now_ms();
         let mut incoming_messages = Vec::new();
         loop {
             match transport.receive().await {
                 Ok(Some(msg)) => {
-                    incoming_messages.push(WireMessage::Client(msg));
+                    incoming_messages.push(msg);
                 }
                 Ok(None) => {
                     // No more messages available
@@ -207,11 +205,6 @@ pub async fn run_server_loop<T: ServerTransport>(
         // link-loss numbers matter most, and suppressing the heartbeat there
         // made a busy device doubly invisible.
         if current_time.saturating_sub(heartbeat_last_sent) >= HEARTBEAT_INTERVAL_MS {
-            // Get loaded projects from server, each carrying its fault
-            // verdict — the heartbeat is where "this board is degraded"
-            // reaches a card, so it asks the faulting variant.
-            let loaded_projects = server.project_manager().list_loaded_projects_with_faults();
-
             let fps_current = fps_tracker
                 .instantaneous_fps(frame_count, current_time, startup_time)
                 .unwrap_or(0.0);
@@ -220,37 +213,26 @@ pub async fn run_server_loop<T: ServerTransport>(
             fps_collector.prune_older_than(current_time.saturating_sub(FPS_STATS_WINDOW_MS));
             let fps_stats = fps_collector.compute_stats();
 
-            let memory = memory_stats();
-
-            // Create heartbeat message (unsolicited: id 0, single/final message).
-            let heartbeat_msg = WireServerMessage::new(
-                HEARTBEAT_MESSAGE_ID,
-                lpc_wire::server::ServerMsgBody::Heartbeat {
-                    fps: fps_stats,
-                    frame_count: frame_count as u64,
-                    loaded_projects,
-                    uptime_ms: current_time.saturating_sub(startup_time),
-                    memory,
-                    recovery: lpa_server::recovery_report::current_recovery_status().map(
-                        |mut status| {
-                            // The clamp is server state, not recovery-region
-                            // state — stamp it here where both are in scope.
-                            status.output_clamp = server.safe_output_clamp();
-                            status
-                        },
-                    ),
-                    outputs: crate::output::wire_stats_source::current(),
-                    link: crate::serial::link_counters::current(),
-                    // Who we are, on every heartbeat: a Studio that attached
-                    // mid-stream never saw our boot hello, and this resolves
-                    // it passively within one heartbeat period (R4a).
-                    identity: server.heartbeat_identity(),
-                },
+            // One heartbeat per open link (unsolicited: id 0, single/final
+            // message). The server builds each for the link it goes to: a
+            // link that holds no tier is told nothing the hello does not.
+            // The heap figures first, then the link list: a heartbeat's
+            // memory numbers must not count the transient Vec it is sent
+            // through (the chip ratchet reads them to the byte).
+            let status = heartbeat_status(
+                &server,
+                fps_stats,
+                frame_count,
+                current_time,
+                startup_time,
+                memory_stats(),
             );
-
-            // Send heartbeat (non-blocking, ignore errors)
-            if let Err(e) = transport.send(heartbeat_msg).await {
-                log::warn!("run_server_loop: Failed to send heartbeat: {e:?}");
+            let heartbeats = server.heartbeats(&transport.links(), status);
+            for (link, heartbeat_msg) in heartbeats {
+                // Send heartbeat (non-blocking, ignore errors)
+                if let Err(e) = transport.send(link, heartbeat_msg).await {
+                    log::warn!("run_server_loop: Failed to send heartbeat: {e:?}");
+                }
             }
 
             heartbeat_last_sent = current_time;
@@ -259,11 +241,58 @@ pub async fn run_server_loop<T: ServerTransport>(
         // Feed the RWDT while the loop and the I/O task are both alive; a
         // hang anywhere stops the feeding and the watchdog resets us with
         // the recovery frame stack as the blame record.
+        // Link policy that needs the server and the clock (the radio links'
+        // login deadline).
+        transport.upkeep(&server, current_time);
+
         feed_watchdog(current_time);
 
         // Yield to Embassy runtime (allows other tasks to run)
         // Use embassy_time::Timer to delay slightly
         embassy_time::Timer::after(embassy_time::Duration::from_millis(1)).await;
+    }
+}
+
+/// What this loop measured for one heartbeat: the embedder's half. A plain
+/// function (not an `async` one, not a closure over the loop's state) so it
+/// adds nothing to the loop future's frame — see [`run_server_loop`] on why
+/// that matters on the C6.
+/// The hello each newly opened link is owed (a single-link transport never
+/// owes one). A failure is logged and not retried: the link's own `Hello`
+/// request still gets an answer.
+async fn send_owed_hellos<T: ServerTransport + LinkUpkeep>(server: &LpServer, transport: &mut T) {
+    for link in transport.take_opened_links() {
+        if let Err(e) = fw_core::send_hello_to_link(server, transport, link).await {
+            log::warn!(
+                "run_server_loop: failed to send hello to {}: {e:?}",
+                link.id
+            );
+        }
+    }
+}
+
+#[inline(never)]
+fn heartbeat_status(
+    server: &LpServer,
+    fps: lpc_wire::server::SampleStats,
+    frame_count: u32,
+    current_time: u64,
+    startup_time: u64,
+    memory: Option<lpc_wire::server::MemoryStats>,
+) -> lpa_server::HeartbeatStatus {
+    lpa_server::HeartbeatStatus {
+        fps,
+        frame_count: u64::from(frame_count),
+        uptime_ms: current_time.saturating_sub(startup_time),
+        memory,
+        recovery: lpa_server::recovery_report::current_recovery_status().map(|mut status| {
+            // The clamp is server state, not recovery-region state — stamp
+            // it here where both are in scope.
+            status.output_clamp = server.safe_output_clamp();
+            status
+        }),
+        outputs: crate::output::wire_stats_source::current(),
+        link: crate::serial::link_counters::current(),
     }
 }
 
@@ -320,7 +349,7 @@ impl FrameBudget {
 /// this — the shipped path calls [`run_server_loop`], a separate copy of the
 /// same loop, not this one. See that function's doc comment for why they are
 /// two copies instead of one wrapping the other.
-pub async fn run_server_loop_bounded<T: ServerTransport>(
+pub async fn run_server_loop_bounded<T: ServerTransport + LinkUpkeep>(
     mut server: LpServer,
     mut transport: T,
     time_provider: Esp32TimeProvider,
@@ -361,13 +390,17 @@ pub async fn run_server_loop_bounded<T: ServerTransport>(
     loop {
         let frame_start = time_provider.now_ms();
 
+        // A link that joined since the last frame (a radio connection) gets
+        // its own hello before anything else is sent to it.
+        send_owed_hellos(&server, &mut transport).await;
+
         // Collect incoming messages (non-blocking)
         let receive_start = time_provider.now_ms();
         let mut incoming_messages = Vec::new();
         loop {
             match transport.receive().await {
                 Ok(Some(msg)) => {
-                    incoming_messages.push(WireMessage::Client(msg));
+                    incoming_messages.push(msg);
                 }
                 Ok(None) => {
                     // No more messages available
@@ -474,11 +507,6 @@ pub async fn run_server_loop_bounded<T: ServerTransport>(
         // link-loss numbers matter most, and suppressing the heartbeat there
         // made a busy device doubly invisible.
         if current_time.saturating_sub(heartbeat_last_sent) >= HEARTBEAT_INTERVAL_MS {
-            // Get loaded projects from server, each carrying its fault
-            // verdict — the heartbeat is where "this board is degraded"
-            // reaches a card, so it asks the faulting variant.
-            let loaded_projects = server.project_manager().list_loaded_projects_with_faults();
-
             let fps_current = fps_tracker
                 .instantaneous_fps(frame_count, current_time, startup_time)
                 .unwrap_or(0.0);
@@ -487,37 +515,26 @@ pub async fn run_server_loop_bounded<T: ServerTransport>(
             fps_collector.prune_older_than(current_time.saturating_sub(FPS_STATS_WINDOW_MS));
             let fps_stats = fps_collector.compute_stats();
 
-            let memory = memory_stats();
-
-            // Create heartbeat message (unsolicited: id 0, single/final message).
-            let heartbeat_msg = WireServerMessage::new(
-                HEARTBEAT_MESSAGE_ID,
-                lpc_wire::server::ServerMsgBody::Heartbeat {
-                    fps: fps_stats,
-                    frame_count: frame_count as u64,
-                    loaded_projects,
-                    uptime_ms: current_time.saturating_sub(startup_time),
-                    memory,
-                    recovery: lpa_server::recovery_report::current_recovery_status().map(
-                        |mut status| {
-                            // The clamp is server state, not recovery-region
-                            // state — stamp it here where both are in scope.
-                            status.output_clamp = server.safe_output_clamp();
-                            status
-                        },
-                    ),
-                    outputs: crate::output::wire_stats_source::current(),
-                    link: crate::serial::link_counters::current(),
-                    // Who we are, on every heartbeat: a Studio that attached
-                    // mid-stream never saw our boot hello, and this resolves
-                    // it passively within one heartbeat period (R4a).
-                    identity: server.heartbeat_identity(),
-                },
+            // One heartbeat per open link (unsolicited: id 0, single/final
+            // message). The server builds each for the link it goes to: a
+            // link that holds no tier is told nothing the hello does not.
+            // The heap figures first, then the link list: a heartbeat's
+            // memory numbers must not count the transient Vec it is sent
+            // through (the chip ratchet reads them to the byte).
+            let status = heartbeat_status(
+                &server,
+                fps_stats,
+                frame_count,
+                current_time,
+                startup_time,
+                memory_stats(),
             );
-
-            // Send heartbeat (non-blocking, ignore errors)
-            if let Err(e) = transport.send(heartbeat_msg).await {
-                log::warn!("run_server_loop: Failed to send heartbeat: {e:?}");
+            let heartbeats = server.heartbeats(&transport.links(), status);
+            for (link, heartbeat_msg) in heartbeats {
+                // Send heartbeat (non-blocking, ignore errors)
+                if let Err(e) = transport.send(link, heartbeat_msg).await {
+                    log::warn!("run_server_loop: Failed to send heartbeat: {e:?}");
+                }
             }
 
             heartbeat_last_sent = current_time;
@@ -526,6 +543,10 @@ pub async fn run_server_loop_bounded<T: ServerTransport>(
         // Feed the RWDT while the loop and the I/O task are both alive; a
         // hang anywhere stops the feeding and the watchdog resets us with
         // the recovery frame stack as the blame record.
+        // Link policy that needs the server and the clock (the radio links'
+        // login deadline).
+        transport.upkeep(&server, current_time);
+
         feed_watchdog(current_time);
 
         // Yield to Embassy runtime (allows other tasks to run)

@@ -53,6 +53,15 @@ pub struct NativeJitModule {
 }
 
 impl NativeJitModule {
+    /// Size of an instance's vmctx allocation: what `instantiate` allocates
+    /// and the instance's `Drop` frees. Derived, not stored on the instance.
+    pub(crate) fn vmctx_alloc_size(&self) -> usize {
+        self.inner
+            .meta
+            .vmctx_buffer_size()
+            .max(super::instance::VMCTX_ALIGN)
+    }
+
     pub(crate) fn buffer(&self) -> &JitBuffer {
         &self.inner.buffer
     }
@@ -93,9 +102,11 @@ impl LpvmModule for NativeJitModule {
     }
 
     fn instantiate(&self) -> Result<Self::Instance, Self::Error> {
-        let align = 16usize;
+        let align = super::instance::VMCTX_ALIGN;
         let total_size = self.inner.meta.vmctx_buffer_size();
-        let size = total_size.max(align);
+        let size = self.vmctx_alloc_size();
+        // A throwaway tracker: the buffer's owner is the instance, which
+        // frees it on drop.
         let memory = NativeHostMemory::new();
         let buf = memory
             .alloc(size, align)

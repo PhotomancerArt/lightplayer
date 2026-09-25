@@ -14,10 +14,12 @@
 //              hidden tab is throttled to ~1 Hz — never assert a duration.
 //   session    a fresh `rt_<n>` per run; it names nothing across runs.
 //   endpoint   `browser-serial-esp32-port-<n>` is a per-page counter.
-//   rx/tx COUNTS  a blank board is a continuous byte source and the door
-//              replays a board's backlog to its first client (M5 finding:
-//              1.39 MB after 2 minutes), so a line count is a measure of
-//              when somebody connected, not of what happened.
+//   rx/tx COUNTS  a blank board is a continuous byte source, so a line
+//              count is a measure of when somebody connected, not of what
+//              happened. (The door also used to replay a board's backlog to
+//              its first client — M5 finding: 1.39 MB after 2 minutes; fixed
+//              2026-09-23, docs/defects/2026-09-23-emulated-usb-port-drains-
+//              with-no-client-attached.md.)
 //
 // WHAT IS COMPARED, because it is what a fixture is FOR:
 //

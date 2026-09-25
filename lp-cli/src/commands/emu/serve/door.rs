@@ -36,6 +36,7 @@ use tokio_tungstenite::tungstenite::handshake::derive_accept_key;
 use tokio_tungstenite::tungstenite::protocol::Role;
 
 use super::board::{Board, format_mac};
+use super::wire_tap::{TapDirection, WireTap};
 
 /// The largest HTTP request head this door will read before giving up. A
 /// handshake is a few hundred bytes; this is a bound, not a budget.
@@ -359,15 +360,23 @@ async fn pump_bytes(ws: WebSocketStream<TcpStream>, board: &Board) -> Result<()>
     let (mut link_read, mut link_write) = link.into_split();
     let (mut ws_write, mut ws_read) = ws.split();
     let mut buf = vec![0u8; PUMP_BUF];
+    // Off (and free) unless `LP_EMU_WIRE_TAP` names a directory.
+    let mut tap = WireTap::from_env(&board.id);
 
     let result = loop {
         tokio::select! {
             incoming = ws_read.next() => match incoming {
-                Some(Ok(Message::Binary(bytes))) => link_write.write_all(&bytes).await?,
+                Some(Ok(Message::Binary(bytes))) => {
+                    tap.record(TapDirection::ToBoard, &bytes);
+                    link_write.write_all(&bytes).await?
+                }
                 // A text frame is accepted and its UTF-8 goes through as
                 // bytes: a client that types into the port is not wrong,
                 // and refusing it would be a dialect.
-                Some(Ok(Message::Text(text))) => link_write.write_all(text.as_bytes()).await?,
+                Some(Ok(Message::Text(text))) => {
+                    tap.record(TapDirection::ToBoard, text.as_bytes());
+                    link_write.write_all(text.as_bytes()).await?
+                }
                 Some(Ok(Message::Ping(payload))) => ws_write.send(Message::Pong(payload)).await?,
                 Some(Ok(Message::Pong(_) | Message::Frame(_))) => {}
                 Some(Ok(Message::Close(_))) | None => break Ok(()),
@@ -375,7 +384,10 @@ async fn pump_bytes(ws: WebSocketStream<TcpStream>, board: &Board) -> Result<()>
             },
             read = link_read.read(&mut buf) => match read {
                 Ok(0) => break Ok(()),
-                Ok(n) => ws_write.send(Message::Binary(buf[..n].to_vec())).await?,
+                Ok(n) => {
+                    tap.record(TapDirection::ToHost, &buf[..n]);
+                    ws_write.send(Message::Binary(buf[..n].to_vec())).await?
+                }
                 Err(e) => break Err(e.into()),
             },
         }

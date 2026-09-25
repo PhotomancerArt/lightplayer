@@ -28,16 +28,18 @@ pub use crate::budget::{
 };
 pub use node_read::{NodeReadQuery, NodeReadSelection};
 pub use probe::{
-    BindingGraphProbeRequest, BindingGraphProbeResult, ControlDisplayLayoutProbeResult,
-    ControlDisplayLayoutRead, ControlProductProbeRequest, ControlProductProbeResult,
-    ControlProductProbeResultHeader, OutputFrameEntry, OutputFrameEntryHeader,
-    OutputFrameProbeRequest, OutputFrameProbeResult, OutputFrameProbeResultHeader,
-    ProjectProbeRequest, ProjectProbeResult, ProjectProbeResultHeader, RenderProductProbeRequest,
-    RenderProductProbeResult, RenderProductProbeResultHeader, TimebaseProbeRequest,
+    BindingGraphProbeRequest, BindingGraphProbeResult, ControlProductGeometry,
+    ControlProductProbeRequest, ControlProductProbeResult, ControlProductProbeResultHeader,
+    GeometryDisplayLayout, KnownRevision, OutputFrameEntry, OutputFrameEntryHeader,
+    OutputFrameGeometry, OutputFrameProbeRequest, OutputFrameProbeResult,
+    OutputFrameProbeResultHeader, ProjectProbeRequest, ProjectProbeResult,
+    ProjectProbeResultHeader, RenderProductProbeRequest, RenderProductProbeResult,
+    RenderProductProbeResultHeader, RevisionGateRead, RevisionGateResult, TimebaseProbeRequest,
     TimebaseProbeResult, WireBindingDirection, WireBindingEndpoint, WireBindingGraph,
-    WireBindingOrigin, WireBusChannel, WireBusChannelValue, WireCellProjection, WireConsumerPolicy,
-    WireEffectiveBinding, WireOutputPlacement, WirePhasorOrigin, WirePhasorReading, WirePhasorRow,
-    WireProjectionOrigin, WireProjectionShape, WireScopeRef, WireVisualSpace,
+    WireBindingGraphRead, WireBindingOrigin, WireBusChannel, WireBusChannelValue,
+    WireBusChannelValues, WireCellProjection, WireConsumerPolicy, WireEffectiveBinding,
+    WireOutputPlacement, WirePhasorOrigin, WirePhasorReading, WirePhasorRow, WireProjectionOrigin,
+    WireProjectionShape, WireScopeRef, WireVisualSpace,
 };
 pub use project_read_event::{
     ProjectReadEvent, ProjectReadNodeEvent, ProjectReadProbeEvent, ProjectReadQueryEvent,

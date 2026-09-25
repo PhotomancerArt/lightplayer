@@ -11,14 +11,21 @@
 //!
 //! This probe answers the other question — "what did you last push?" — and
 //! answers it **without rendering anything**. Each entry is the output node's
-//! published runtime buffer, verbatim, plus the metadata a client needs to
-//! interpret it:
+//! published runtime buffer, verbatim, plus the geometry a client needs to
+//! interpret it ([`OutputFrameGeometry`]), behind the shared
+//! [geometry gate](super::RevisionGateRead):
 //!
 //! - `sample_layout` — how the native samples group into lamps. Latched by the
 //!   tick that produced the buffer, not recomputed here.
-//! - `display_layout` — where to draw those lamps, revision-gated exactly like
-//!   the control probe's (`Omitted` / `Unchanged` / `Layout` / `Unsupported`),
-//!   so a steady feed ships geometry once and samples thereafter.
+//! - `display_layout` — where to draw those lamps.
+//! - `placements` — how the wire was cut: which producer owns which stretch.
+//!
+//! All three travel once and then answer `Unchanged` while the bundle's
+//! revision stands, so a steady feed ships geometry once and samples
+//! thereafter. The gate is PER OUTPUT ([`RevisionGateRead::IfChanged`]
+//! lists a known revision for each output node), because two outputs'
+//! geometry moves independently — one shared revision would resend the
+//! geometry of every output but the oldest on every read.
 //!
 //! # Samples are post-finalize, deliberately
 //!
@@ -27,11 +34,29 @@
 //! what the wire actually carries to the strip — and gamma is lossy to invert,
 //! so there is no un-corrected frame to recover. Do not "fix" this.
 //!
+//! # Samples are optional, and their precision is the client's choice
+//!
+//! [`OutputFrameProbeRequest::samples`] names the element format the client
+//! wants, or `None` for no samples at all — the revision, the channel count
+//! and the gated geometry still arrive, which is everything a module face or
+//! a patch bay needs to derive its shape. When the client asks for an 8-bit
+//! format and the output published `U16`, the engine rounds each sample:
+//! [`WireChannelSampleFormat::U8`] to the nearest linear 8-bit level
+//! (`round(v / 257)`), [`WireChannelSampleFormat::Srgb8`] to the correctly
+//! rounded sRGB display code (`crate::linear16_to_srgb8`); both map 0 → 0 and
+//! 65535 → 255. That is a TRANSPORT precision, not an un-correction: the
+//! values are still the post-finalize ones above, only coarser. A buffer
+//! published at `U8` is never widened or re-encoded; the entry's own
+//! [`OutputFrameEntry::sample_format`] always says what `bytes` holds.
+//!
 //! # Bandwidth
 //!
-//! One frame is `channels × 3 × 2` bytes before base64, on a link shared with
-//! every other protocol message; a 1500-lamp dome frame is ~9 KB, a 300-lamp
-//! strip ~1.8 KB. Bulk bytes therefore ride the same chunked path as the other
+//! One frame is `channels × 3 × 2` bytes before base64 at `U16`, and half
+//! that at either 8-bit format, on a link shared with every other protocol message; at `U16`
+//! a 1500-lamp dome frame is ~9 KB, a 300-lamp strip ~1.8 KB. The geometry is what the gate keeps off the steady read:
+//! before it, the PLAYFUL choker's 73-lamp entry carried 1,070 B of sample
+//! layout and 99 B of placements on every read, and small-dome's two entries
+//! carried 4,939 B and 5,421 B — none of it ever changing. Bulk bytes ride the same chunked path as the other
 //! bulk-bearing probe results ([`OutputFrameProbeResult::into_chunked_parts`]).
 //! The device-side rationale for why a per-frame pixel transcript has to be
 //! rationed on a shared serial link is written up in
@@ -44,19 +69,26 @@ use lpc_model::{ControlSampleLayout, NodeId, Revision};
 
 use crate::project::WireChannelSampleFormat;
 
-use super::{ControlDisplayLayoutProbeResult, ControlDisplayLayoutRead};
+use super::{GeometryDisplayLayout, RevisionGateRead, RevisionGateResult};
 
 /// Request the frames every output node has already published.
 ///
 /// There is no product selector: the interesting set is "every output this
 /// device is driving", and enumerating them costs a tree walk over nodes that
 /// own a sink buffer. Clients that care about one output filter the result.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
 pub struct OutputFrameProbeRequest {
-    /// Geometry gate — the same idiom the control-product probe uses, so a
-    /// feed can ask for the layout once and then say "only if it changed".
-    pub display_layout: ControlDisplayLayoutRead,
+    /// Geometry gate, per output: `IfChanged` lists a
+    /// [`KnownRevision`](super::KnownRevision) naming each output node the
+    /// client holds geometry for, so a feed asks for each output's geometry
+    /// once and then says "only if it changed". An output the list does not
+    /// name gets its geometry.
+    pub geometry: RevisionGateRead,
+    /// The element format the client wants the samples in, or `None` for no
+    /// samples at all (geometry and revisions only). `U8` down-converts a
+    /// `U16` buffer by rounding to nearest; see the module docs.
+    pub samples: Option<WireChannelSampleFormat>,
 }
 
 /// Result of a published output-frame probe.
@@ -87,26 +119,38 @@ pub struct OutputFrameEntry {
     /// `WireResourceMetadataSummary::OutputChannels`, which is the same
     /// number about the same buffer.
     pub channels: u32,
-    /// Element format of `bytes`. `U16` today (little-endian).
-    pub sample_format: WireChannelSampleFormat,
-    /// How the native samples group — latched by the publishing tick.
-    pub sample_layout: ControlSampleLayout,
-    /// Where to draw the lamps, gated by the request's
-    /// [`ControlDisplayLayoutRead`].
-    pub display_layout: ControlDisplayLayoutProbeResult,
-    /// How the frame was CUT: one entry per producer run placed on this
-    /// wire, in the output's own planning order.
-    ///
-    /// Ungated (unlike `display_layout`): the whole set is a handful of
-    /// six-field rows even at dome scale, and it is the only description of
-    /// which fixture owns which stretch of the strand. Empty when the output
-    /// has not planned a placement yet — never a signal that the wire is
-    /// unpatched.
-    pub placements: Vec<WireOutputPlacement>,
-    /// The published buffer, verbatim.
+    /// Element format of `bytes` (`U16` is little-endian), or `None` when
+    /// the request asked for no samples — `bytes` is then empty.
+    pub sample_format: Option<WireChannelSampleFormat>,
+    /// Everything static about the buffer, gated by the request's
+    /// [`RevisionGateRead`] for this entry's node.
+    pub geometry: RevisionGateResult<OutputFrameGeometry>,
+    /// The published buffer, verbatim at `U16` or rounded to `U8` as the
+    /// request asked; empty when it asked for none.
     #[cfg_attr(feature = "schema-gen", schemars(with = "String"))]
     #[serde(with = "crate::serde_base64")]
     pub bytes: Vec<u8>,
+}
+
+/// Everything static about one output's published buffer, under one revision.
+///
+/// The revision moves whenever any of the three pieces does: the sample
+/// layout (a fixture or mapping change), the display layout, or the
+/// placements (a patch re-cutting the wire). It is NOT the entry's per-tick
+/// `revision`.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
+pub struct OutputFrameGeometry {
+    pub revision: Revision,
+    /// How the native samples group — latched by the publishing tick.
+    pub sample_layout: ControlSampleLayout,
+    /// Where to draw the lamps, or why the engine will not say.
+    pub display_layout: GeometryDisplayLayout,
+    /// How the frame was CUT: one entry per producer run placed on this
+    /// wire, in the output's own planning order. Empty when the output has
+    /// not planned a placement yet — never a signal that the wire is
+    /// unpatched.
+    pub placements: Vec<WireOutputPlacement>,
 }
 
 /// One producer run placed on an output's wire — the `(fixture span ↔ wire
@@ -161,12 +205,8 @@ pub struct OutputFrameEntryHeader {
     pub node: NodeId,
     pub revision: Revision,
     pub channels: u32,
-    pub sample_format: WireChannelSampleFormat,
-    pub sample_layout: ControlSampleLayout,
-    pub display_layout: ControlDisplayLayoutProbeResult,
-    /// The wire's cut — small enough to ride the header with the rest of the
-    /// interpretation metadata.
-    pub placements: Vec<WireOutputPlacement>,
+    pub sample_format: Option<WireChannelSampleFormat>,
+    pub geometry: RevisionGateResult<OutputFrameGeometry>,
     /// Bytes this entry claims out of the concatenated bulk payload.
     pub byte_length: u32,
 }
@@ -190,9 +230,7 @@ impl OutputFrameProbeResult {
                 revision: entry.revision,
                 channels: entry.channels,
                 sample_format: entry.sample_format,
-                sample_layout: entry.sample_layout,
-                display_layout: entry.display_layout,
-                placements: entry.placements,
+                geometry: entry.geometry,
                 byte_length,
             });
         }
@@ -224,9 +262,7 @@ impl OutputFrameProbeResultHeader {
                     revision: header.revision,
                     channels: header.channels,
                     sample_format: header.sample_format,
-                    sample_layout: header.sample_layout,
-                    display_layout: header.display_layout,
-                    placements: header.placements,
+                    geometry: header.geometry,
                     bytes: bytes[start..end].to_vec(),
                 }
             })
@@ -252,6 +288,41 @@ mod tests {
         let back: OutputFrameProbeResult = serde_json::from_str(&json).unwrap();
 
         assert_eq!(back, result);
+    }
+
+    /// The pixel ask rides the request: a format, or `null` for none — and
+    /// a samples-free entry says so with a `null` format and no bytes.
+    #[test]
+    fn samples_are_optional_on_request_and_entry() {
+        for samples in [None, Some(WireChannelSampleFormat::U8)] {
+            let request = OutputFrameProbeRequest {
+                geometry: RevisionGateRead::None,
+                samples,
+            };
+            let json = serde_json::to_string(&request).unwrap();
+            assert_eq!(
+                serde_json::from_str::<OutputFrameProbeRequest>(&json).unwrap(),
+                request
+            );
+        }
+        assert_eq!(
+            crate::json::to_string(&OutputFrameProbeRequest {
+                geometry: RevisionGateRead::None,
+                samples: Some(WireChannelSampleFormat::U8),
+            })
+            .unwrap(),
+            r#"{"geometry":"none","samples":"u8"}"#
+        );
+
+        let mut bare = entry(NodeId::new(4), 1, Vec::new());
+        bare.sample_format = None;
+        let result = OutputFrameProbeResult::Frame {
+            outputs: vec![bare],
+        };
+        let (header, bytes) = result.clone().into_chunked_parts();
+        assert!(bytes.is_empty());
+        assert_eq!(header.outputs[0].sample_format, None);
+        assert_eq!(header.into_result(bytes), result);
     }
 
     /// The chunked split concatenates in entry order and the header's recorded
@@ -298,8 +369,11 @@ mod tests {
             18,
             vec![0u8; 3 * PROJECT_READ_RUNTIME_CHUNK_BYTES + 77],
         );
-        frame.display_layout = ControlDisplayLayoutProbeResult::Layout(
-            ControlDisplayLayout::Layout2d(ControlLayout2d::new(
+        let RevisionGateResult::Changed(geometry) = &mut frame.geometry else {
+            unreachable!("the test entry carries its geometry");
+        };
+        geometry.display_layout =
+            GeometryDisplayLayout::Layout(ControlDisplayLayout::Layout2d(ControlLayout2d::new(
                 Revision::new(18),
                 10,
                 10,
@@ -311,8 +385,7 @@ mod tests {
                         radius: 0.02,
                     })
                     .collect(),
-            )),
-        );
+            )));
 
         let (header, bytes) = ProjectProbeResult::OutputFrame(OutputFrameProbeResult::Frame {
             outputs: vec![frame],
@@ -364,28 +437,33 @@ mod tests {
             node,
             revision: Revision::new(revision),
             channels: (bytes.len() / 6) as u32,
-            sample_format: WireChannelSampleFormat::U16,
-            sample_layout: ControlSampleLayout {
-                spans: vec![ControlSampleSpan {
-                    row: 0,
-                    start: 0,
-                    len: (bytes.len() / 2) as u32,
-                    encoding: ControlSampleEncoding::RgbPixels {
-                        count: (bytes.len() / 6) as u32,
-                        color_order: ColorOrder::Rgb,
-                    },
+            sample_format: Some(WireChannelSampleFormat::U16),
+            geometry: RevisionGateResult::Changed(OutputFrameGeometry {
+                revision: Revision::new(3),
+                sample_layout: ControlSampleLayout {
+                    spans: vec![ControlSampleSpan {
+                        row: 0,
+                        start: 0,
+                        len: (bytes.len() / 2) as u32,
+                        encoding: ControlSampleEncoding::RgbPixels {
+                            count: (bytes.len() / 6) as u32,
+                            color_order: ColorOrder::Rgb,
+                        },
+                    }],
+                },
+                display_layout: GeometryDisplayLayout::Unsupported {
+                    reason: alloc::string::String::from("no display layout"),
+                },
+                placements: vec![WireOutputPlacement {
+                    node: NodeId::new(9),
+                    output: 0,
+                    source_lamp: 0,
+                    source_lamps: (bytes.len() / 6) as u32,
+                    wire_lamp: 0,
+                    lamps: (bytes.len() / 6) as u32,
+                    reversed: false,
                 }],
-            },
-            display_layout: ControlDisplayLayoutProbeResult::Omitted,
-            placements: vec![WireOutputPlacement {
-                node: NodeId::new(9),
-                output: 0,
-                source_lamp: 0,
-                source_lamps: (bytes.len() / 6) as u32,
-                wire_lamp: 0,
-                lamps: (bytes.len() / 6) as u32,
-                reversed: false,
-            }],
+            }),
             bytes,
         }
     }

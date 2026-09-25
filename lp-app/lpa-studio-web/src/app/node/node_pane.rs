@@ -79,6 +79,10 @@ pub fn NodePane(
     let reveal = use_reveal_on_focus(focused);
     let select_action = view.action.clone();
     let select_kind = view.header.kind.clone();
+    // A device lens streams the SELECTED node only: selecting is how a card
+    // goes live, the select control says so, and the live card says so.
+    let selection_streams = view.selection_streams;
+    let streaming_live = view.streaming_live;
     // The node KIND, right-aligned before the ⓘ like the device card's
     // transport label (P2b item 3) — small muted lowercase identity text,
     // not status.
@@ -141,6 +145,7 @@ pub fn NodePane(
                             NodeSelectButton {
                                 action,
                                 focused,
+                                selection_streams,
                                 kind: select_kind,
                                 on_action,
                             }
@@ -153,6 +158,9 @@ pub fn NodePane(
                     actions: header_actions,
                     on_action,
                     trailing: rsx! {
+                        if streaming_live {
+                            NodeLiveChip {}
+                        }
                         NodeDebugMarker { count: debug_overrides }
                         if let Some(worst) = export_chip {
                             span {
@@ -363,29 +371,28 @@ fn NodeUnsupportedBody(
 /// Selection indicator/toggle in the pane's primary-affordance slot, left of
 /// the node name (D3).
 ///
-/// Selecting a node focuses it (probes ride the focused node), so body
-/// clicks stay inert and only this control dispatches the focus action —
-/// editing another node's slots never steals the selection.
+/// Selecting a node focuses it (a device lens streams the focused node's
+/// previews only). The header band around this control selects too
+/// (`StudioPane`'s title action); body clicks stay inert — editing another
+/// node's slots never steals the selection.
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 fn NodeSelectButton(
     action: UiAction,
     focused: bool,
+    /// The lens streams the selected node only (a device lens) — the label
+    /// then says what selecting DOES, not just that it happened.
+    selection_streams: bool,
     /// The node's kind label — its glyph doubles as the select control.
     kind: String,
     #[props(default)] on_action: Option<EventHandler<UiAction>>,
 ) -> Element {
     let icon = node_kind_icon(&kind);
-    let (class, label) = if focused {
-        (
-            "tw:inline-flex tw:h-8 tw:w-8 tw:shrink-0 tw:items-center tw:justify-center tw:rounded-full tw:border tw:border-selection-border tw:bg-transparent tw:p-0 tw:text-strong-foreground",
-            "Node is selected; probes follow this node",
-        )
+    let label = select_button_label(focused, selection_streams);
+    let class = if focused {
+        "tw:inline-flex tw:h-8 tw:w-8 tw:shrink-0 tw:items-center tw:justify-center tw:rounded-full tw:border tw:border-selection-border tw:bg-transparent tw:p-0 tw:text-strong-foreground"
     } else {
-        (
-            "tw:inline-flex tw:h-8 tw:w-8 tw:shrink-0 tw:items-center tw:justify-center tw:rounded-full tw:border tw:border-border-subtle tw:bg-transparent tw:p-0 tw:text-subtle-foreground tw:hover:border-border-strong tw:hover:text-strong-foreground",
-            "Select this node so probes follow it",
-        )
+        "tw:inline-flex tw:h-8 tw:w-8 tw:shrink-0 tw:items-center tw:justify-center tw:rounded-full tw:border tw:border-border-subtle tw:bg-transparent tw:p-0 tw:text-subtle-foreground tw:hover:border-border-strong tw:hover:text-strong-foreground"
     };
 
     rsx! {
@@ -408,6 +415,36 @@ fn NodeSelectButton(
         }
     }
 }
+
+/// The select control's label: what selecting does on this lens.
+fn select_button_label(focused: bool, selection_streams: bool) -> &'static str {
+    match (focused, selection_streams) {
+        (true, true) => "Selected: streaming live from the device",
+        (false, true) => "Select to stream live from the device",
+        (true, false) => "Selected",
+        (false, false) => "Select this node",
+    }
+}
+
+/// The selected card's "Live" chip on a device lens: this is the card whose
+/// previews are streaming, which is the whole reason selection matters there.
+#[component]
+#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
+fn NodeLiveChip() -> Element {
+    rsx! {
+        span {
+            class: "tw:inline-flex tw:items-center tw:gap-1 tw:self-center tw:whitespace-nowrap tw:rounded-pill tw:border tw:border-status-live-border tw:bg-status-live-bg tw:px-2 tw:py-0.5 tw:text-[11px] tw:font-bold tw:leading-none tw:text-status-live-foreground",
+            title: LIVE_STREAM_EXPLAINER,
+            span { class: "tw:h-1.5 tw:w-1.5 tw:rounded-full tw:bg-status-live-foreground" }
+            "Live"
+        }
+    }
+}
+
+/// Why only one card is live — shared by the Live chip and the "Show live"
+/// buttons so the explanation is the same wherever it is met.
+pub(crate) const LIVE_STREAM_EXPLAINER: &str =
+    "To save bandwidth, the device streams only the selected node.";
 
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]

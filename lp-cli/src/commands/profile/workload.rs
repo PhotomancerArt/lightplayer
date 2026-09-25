@@ -161,6 +161,7 @@ async fn studio_sync(client: &TokioLpClient, handle: WireProjectHandle) -> Optio
         queries: Vec::new(),
         probes: vec![ProjectProbeRequest::BindingGraph(
             lpc_wire::BindingGraphProbeRequest {
+                structure: lpc_wire::RevisionGateRead::Always,
                 include_values: false,
             },
         )],

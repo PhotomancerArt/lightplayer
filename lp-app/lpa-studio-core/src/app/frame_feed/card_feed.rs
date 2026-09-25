@@ -34,7 +34,7 @@
 //!
 //! [`OutputFrameProbeRequest`]: lpc_wire::OutputFrameProbeRequest
 
-use lpc_wire::{ControlDisplayLayoutRead, OutputFrameEntry};
+use lpc_wire::{OutputFrameEntry, RevisionGateRead};
 
 use crate::UiControlProductPreview;
 use crate::app::frame_feed::output_frame_cache::OutputFrameCache;
@@ -147,15 +147,14 @@ impl CardFeedState {
         self.last_pull_completed_at
     }
 
-    /// What the next pull should ask for — the shared multi-output gate
-    /// ([`OutputFrameCache::display_layout_read`]): `Always` while any
-    /// output still lacks geometry, `IfChanged` while every layout stands,
-    /// and `None` once every output that could answer has refused — a
-    /// refusal costs the engine a full layout build plus a
-    /// serialized-length measurement, so re-asking every 150 ms would tax
-    /// exactly the dome-scale board that can least afford it.
-    pub fn display_layout_read(&self) -> ControlDisplayLayoutRead {
-        self.outputs.display_layout_read()
+    /// What the next pull should ask for — the per-output geometry gate
+    /// ([`OutputFrameCache::geometry_read`]): every output whose geometry
+    /// this feed holds, at the revision it holds it, and `Always` while it
+    /// holds none. A refused display layout is held like any other answer,
+    /// so a dome-scale board is not asked to rebuild and re-measure a layout
+    /// it will refuse again every 150 ms.
+    pub fn geometry_read(&self) -> RevisionGateRead {
+        self.outputs.geometry_read()
     }
 
     /// Fold one pulled answer — every output entry it carried — into the
@@ -212,7 +211,10 @@ mod tests {
         ColorOrder, ControlDisplayLayout, ControlLamp2d, ControlLayout2d, ControlSampleEncoding,
         ControlSampleLayout, ControlSampleSpan, NodeId, Revision,
     };
-    use lpc_wire::{ControlDisplayLayoutProbeResult, WireChannelSampleFormat};
+    use lpc_wire::{
+        GeometryDisplayLayout, KnownRevision, OutputFrameGeometry, RevisionGateResult,
+        WireChannelSampleFormat,
+    };
 
     use super::*;
 
@@ -254,8 +256,7 @@ mod tests {
     #[test]
     fn the_layout_rc_stays_stable_while_the_device_says_unchanged() {
         let mut feed = CardFeedState::default();
-        let mut first = entry(4, 1, vec![1, 0, 2, 0, 3, 0]);
-        first.display_layout = ControlDisplayLayoutProbeResult::Layout(layout(11));
+        let first = with_layout(entry(4, 1, vec![1, 0, 2, 0, 3, 0]), 11, layout(11));
 
         feed.apply(&[first], NOW);
         let geometry = Rc::clone(
@@ -267,7 +268,7 @@ mod tests {
         );
 
         let mut second = entry(4, 2, vec![9, 0, 8, 0, 7, 0]);
-        second.display_layout = ControlDisplayLayoutProbeResult::Unchanged {
+        second.geometry = RevisionGateResult::Unchanged {
             revision: Revision::new(11),
         };
         feed.apply(&[second], NOW + 0.2);
@@ -288,34 +289,41 @@ mod tests {
     #[test]
     fn the_first_pull_asks_always_and_later_ones_ask_if_changed() {
         let mut feed = CardFeedState::default();
-        assert_eq!(feed.display_layout_read(), ControlDisplayLayoutRead::Always);
+        assert_eq!(feed.geometry_read(), RevisionGateRead::Always);
 
-        let mut first = entry(4, 1, vec![1, 0, 2, 0, 3, 0]);
-        first.display_layout = ControlDisplayLayoutProbeResult::Layout(layout(11));
+        let first = with_layout(entry(4, 1, vec![1, 0, 2, 0, 3, 0]), 11, layout(11));
         feed.apply(&[first], NOW);
 
         assert_eq!(
-            feed.display_layout_read(),
-            ControlDisplayLayoutRead::IfChanged {
-                known_revision: Some(Revision::new(11)),
+            feed.geometry_read(),
+            RevisionGateRead::IfChanged {
+                known: vec![KnownRevision {
+                    node: Some(NodeId::new(4)),
+                    revision: Revision::new(11),
+                }],
             }
         );
     }
 
-    /// A refusal is permanent for the connection: the feed stops asking so
-    /// the engine stops re-building and re-measuring a layout it will
-    /// refuse again — and the card stays honestly layout-less.
+    /// A refusal is held under its geometry revision: the feed keeps
+    /// listing that revision, so the engine answers `Unchanged` instead of
+    /// re-building and re-measuring a layout it will refuse again — and the
+    /// card stays honestly layout-less.
     #[test]
-    fn a_refused_layout_stops_the_asking() {
+    fn a_refused_layout_is_held_not_re_asked() {
         let mut feed = CardFeedState::default();
-        let mut refused = entry(4, 1, vec![1, 0, 2, 0, 3, 0]);
-        refused.display_layout = ControlDisplayLayoutProbeResult::Unsupported {
-            reason: "over the wire budget".to_string(),
-        };
 
-        feed.apply(&[refused], NOW);
+        feed.apply(&[entry(4, 1, vec![1, 0, 2, 0, 3, 0])], NOW);
 
-        assert_eq!(feed.display_layout_read(), ControlDisplayLayoutRead::None);
+        assert_eq!(
+            feed.geometry_read(),
+            RevisionGateRead::IfChanged {
+                known: vec![KnownRevision {
+                    node: Some(NodeId::new(4)),
+                    revision: Revision::new(1),
+                }],
+            }
+        );
         assert!(feed.frame().expect("frame").display_layout.is_none());
     }
 
@@ -326,10 +334,8 @@ mod tests {
     #[test]
     fn every_published_output_joins_the_composed_picture() {
         let mut feed = CardFeedState::default();
-        let mut box_1 = entry(4, 1, vec![1, 0, 2, 0, 3, 0]);
-        box_1.display_layout = ControlDisplayLayoutProbeResult::Layout(layout(11));
-        let mut box_2 = entry(5, 1, vec![9, 0, 8, 0, 7, 0]);
-        box_2.display_layout = ControlDisplayLayoutProbeResult::Layout(layout(12));
+        let box_1 = with_layout(entry(4, 1, vec![1, 0, 2, 0, 3, 0]), 11, layout(11));
+        let box_2 = with_layout(entry(5, 1, vec![9, 0, 8, 0, 7, 0]), 12, layout(12));
 
         feed.apply(&[box_1, box_2], NOW);
 
@@ -369,14 +375,13 @@ mod tests {
     fn invalidating_the_connection_keeps_the_last_frame() {
         let mut feed = CardFeedState::default();
         feed.set_handle_id(3);
-        let mut first = entry(4, 1, vec![1, 0, 2, 0, 3, 0]);
-        first.display_layout = ControlDisplayLayoutProbeResult::Layout(layout(11));
+        let first = with_layout(entry(4, 1, vec![1, 0, 2, 0, 3, 0]), 11, layout(11));
         feed.apply(&[first], NOW);
 
         feed.invalidate_connection();
 
         assert_eq!(feed.handle_id(), None);
-        assert_eq!(feed.display_layout_read(), ControlDisplayLayoutRead::Always);
+        assert_eq!(feed.geometry_read(), RevisionGateRead::Always);
         assert_eq!(feed.frame().expect("last frame").revision, 1);
         assert_eq!(feed.frame_age_secs(NOW + 9.0), Some(9.0));
     }
@@ -393,10 +398,7 @@ mod tests {
         assert_eq!(fresh.frame_age_secs(NOW), Some(3_600.0));
         // The seed is memory, not a connection claim: the first live pull
         // still asks for the layout and lands as a new frame.
-        assert_eq!(
-            fresh.display_layout_read(),
-            ControlDisplayLayoutRead::Always
-        );
+        assert_eq!(fresh.geometry_read(), RevisionGateRead::Always);
         assert!(
             fresh
                 .apply(&[entry(4, 1, vec![9, 0, 8, 0, 7, 0])], NOW)
@@ -428,24 +430,45 @@ mod tests {
             node: NodeId::new(node),
             revision: Revision::new(revision),
             channels: (bytes.len() / 6) as u32,
-            sample_format: WireChannelSampleFormat::U16,
-            sample_layout: ControlSampleLayout {
-                spans: vec![ControlSampleSpan {
-                    row: 0,
-                    start: 0,
-                    len: (bytes.len() / 2) as u32,
-                    encoding: ControlSampleEncoding::RgbPixels {
-                        count: (bytes.len() / 6) as u32,
-                        color_order: ColorOrder::Rgb,
-                    },
-                }],
-            },
-            display_layout: ControlDisplayLayoutProbeResult::Omitted,
-            // These feeds render lamps, not the bay: one auto-flowed
-            // producer over the whole wire is the shape they see.
-            placements: Vec::new(),
+            sample_format: Some(WireChannelSampleFormat::U16),
+            // Geometry at revision 1 with a REFUSED display layout — the
+            // bare case; `with_layout` adds one.
+            geometry: RevisionGateResult::Changed(OutputFrameGeometry {
+                revision: Revision::new(1),
+                sample_layout: ControlSampleLayout {
+                    spans: vec![ControlSampleSpan {
+                        row: 0,
+                        start: 0,
+                        len: (bytes.len() / 2) as u32,
+                        encoding: ControlSampleEncoding::RgbPixels {
+                            count: (bytes.len() / 6) as u32,
+                            color_order: ColorOrder::Rgb,
+                        },
+                    }],
+                },
+                display_layout: GeometryDisplayLayout::Unsupported {
+                    reason: "no display layout in this fixture".to_string(),
+                },
+                // These feeds render lamps, not the bay: the cut is not
+                // what they read.
+                placements: Vec::new(),
+            }),
             bytes,
         }
+    }
+
+    /// The entry with a display layout in its geometry, at `revision`.
+    fn with_layout(
+        mut entry: OutputFrameEntry,
+        revision: i64,
+        layout: ControlDisplayLayout,
+    ) -> OutputFrameEntry {
+        let RevisionGateResult::Changed(geometry) = &mut entry.geometry else {
+            unreachable!("the helper sends geometry");
+        };
+        geometry.revision = Revision::new(revision);
+        geometry.display_layout = GeometryDisplayLayout::Layout(layout);
+        entry
     }
 
     fn layout(revision: i64) -> ControlDisplayLayout {

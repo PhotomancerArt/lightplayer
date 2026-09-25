@@ -5,10 +5,10 @@ pub mod project_read;
 pub use crate::message::client::{ClientMessage, ClientRequest};
 pub use crate::message::envelope::{Message, ServerMessage};
 pub use project_read::{
-    BindingGraphProbeRequest, BindingGraphProbeResult, ControlDisplayLayoutProbeResult,
-    ControlDisplayLayoutRead, ControlProductProbeRequest, ControlProductProbeResult,
-    ControlProductProbeResultHeader, NodeReadQuery, NodeReadSelection, OutputFrameEntry,
-    OutputFrameEntryHeader, OutputFrameProbeRequest, OutputFrameProbeResult,
+    BindingGraphProbeRequest, BindingGraphProbeResult, ControlProductGeometry,
+    ControlProductProbeRequest, ControlProductProbeResult, ControlProductProbeResultHeader,
+    GeometryDisplayLayout, KnownRevision, NodeReadQuery, NodeReadSelection, OutputFrameEntry,
+    OutputFrameEntryHeader, OutputFrameGeometry, OutputFrameProbeRequest, OutputFrameProbeResult,
     OutputFrameProbeResultHeader, PROJECT_READ_FRAME_MAX_BYTES,
     PROJECT_READ_FRAME_SERIAL_BUFFER_BYTES, PROJECT_READ_FRAME_SERIAL_MARGIN_BYTES,
     PROJECT_READ_PROBE_HEADER_RESERVE_BYTES, PROJECT_READ_RUNTIME_CHUNK_BYTES, ProjectProbeRequest,
@@ -16,10 +16,11 @@ pub use project_read::{
     ProjectReadProbeEvent, ProjectReadQuery, ProjectReadQueryEvent, ProjectReadRequest,
     ProjectReadResourceEvent, ProjectReadShapeEvent, ProjectRuntimeStatus, ReadLevel,
     RenderProductProbeRequest, RenderProductProbeResult, RenderProductProbeResultHeader,
-    ResourcePayloadRead, ResourceReadQuery, ResourceReadResult, RuntimeReadQuery,
-    RuntimeReadResult, ServerRuntimeStatus, ShapeReadQuery, TimebaseProbeRequest,
-    TimebaseProbeResult, WireBindingDirection, WireBindingEndpoint, WireBindingGraph,
-    WireBindingOrigin, WireBusChannel, WireBusChannelValue, WireCellProjection, WireConsumerPolicy,
-    WireEffectiveBinding, WireOutputPlacement, WirePhasorOrigin, WirePhasorReading, WirePhasorRow,
-    WireProjectionOrigin, WireProjectionShape, WireScopeRef, WireVisualSpace,
+    ResourcePayloadRead, ResourceReadQuery, ResourceReadResult, RevisionGateRead,
+    RevisionGateResult, RuntimeReadQuery, RuntimeReadResult, ServerRuntimeStatus, ShapeReadQuery,
+    TimebaseProbeRequest, TimebaseProbeResult, WireBindingDirection, WireBindingEndpoint,
+    WireBindingGraph, WireBindingGraphRead, WireBindingOrigin, WireBusChannel, WireBusChannelValue,
+    WireBusChannelValues, WireCellProjection, WireConsumerPolicy, WireEffectiveBinding,
+    WireOutputPlacement, WirePhasorOrigin, WirePhasorReading, WirePhasorRow, WireProjectionOrigin,
+    WireProjectionShape, WireScopeRef, WireVisualSpace,
 };

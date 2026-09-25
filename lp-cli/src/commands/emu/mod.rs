@@ -12,9 +12,14 @@
 //! USB-Serial-JTAG link the product ships on (M6). Two terminals:
 //!
 //! ```text
-//! lp-cli emu run --merged target/emu-ref/…/merged.bin --timeout 30s
+//! lp-cli emu run --merged target/emu-ref/…/merged.bin --link 127.0.0.1:5591 --timeout 30s
 //! lp-cli upload projects/test/shader-oracle serial:tcp://127.0.0.1:5591
 //! ```
+//!
+//! The client there is an application opening the port: nothing is read
+//! before it connects, so it is not replayed the boot console, just as with a
+//! board nobody had open. `--monitor` (a reader from power-on) or `--usb-host
+//! attached` is how to ask for that console on the wire.
 //!
 //! `lp-cli emu serve` is the second door, and the one a browser can reach
 //! (plan two M1). It holds N named boards rather than one, outlives any one

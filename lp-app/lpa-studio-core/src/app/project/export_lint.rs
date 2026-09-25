@@ -352,7 +352,6 @@ mod tests {
             kind: Some(Kind::Ratio),
             providers,
             consumers,
-            value: None,
             primary_visual: false,
         }
     }

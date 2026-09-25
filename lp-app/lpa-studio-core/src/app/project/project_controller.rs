@@ -73,6 +73,13 @@ pub struct ProjectController {
     /// `sync_lens_probe_policy` at every action and tick that might move
     /// the lens; `None` while detached.
     lens_transport: Option<crate::LinkTransport>,
+    /// The current selection is the one Studio made when the tree landed
+    /// (`ensure_default_node_focus`), not one the user made. On a device
+    /// lens that selection HIGHLIGHTS but streams nothing: a second pixel
+    /// copy — or a shader render on the board — rides only on an explicit
+    /// request (lean-wire P5, ruling B). Cleared by the first explicit focus
+    /// (`focus_editor_target`).
+    focus_is_automatic: bool,
     /// Every pattern export the local library offers, for the add-node
     /// picker's import source (module authoring unit, P5). Pushed down from
     /// the studio controller at each library settle — a view build must
@@ -443,6 +450,7 @@ impl ProjectController {
             running_project_status: RunningProjectStatus::Unknown,
             lens_device_features: None,
             lens_transport: None,
+            focus_is_automatic: false,
             import_patterns: Vec::new(),
             active_editor_target: None,
             runtime_storage_id: crate::app::project::demo_project::DEMO_PROJECT_STORAGE_ID
@@ -548,9 +556,18 @@ impl ProjectController {
         self.sync.as_ref().map(ProjectSync::summary)
     }
 
-    /// Latest binding-graph snapshot, when a consumer subscribes.
+    /// The held binding-graph structure, when a consumer subscribes.
     pub fn binding_graph(&self) -> Option<&lpc_wire::WireBindingGraph> {
         self.sync.as_ref()?.binding_graph()
+    }
+
+    /// One value per [`Self::binding_graph`] channel row, in that order —
+    /// refreshed every read while the structure is held across reads.
+    /// Empty when no graph is held.
+    fn binding_graph_values(&self) -> &[lpc_wire::WireBusChannelValue] {
+        self.sync
+            .as_ref()
+            .map_or(&[], |sync| sync.binding_graph_values())
     }
 
     /// Project ONE scope's slice of the binding-graph snapshot into the
@@ -615,16 +632,19 @@ impl ProjectController {
                     && !channel.providers.is_empty()
             })
         };
+        let values = self.binding_graph_values();
         let channels = graph
             .channels
             .iter()
+            .enumerate()
             // Sink rows (playlist entries, wire 8) feed panel liveness only
             // — the wiring drawer keeps R2's presentation: channels private
             // to an entry never show as project wiring. A sink scope can
             // never equal a module scope, so this is belt-and-braces.
-            .filter(|channel| !channel.scope.is_some_and(|scope| scope.is_sink()))
-            .filter(|channel| channel.scope == Some(scope))
-            .map(|channel| {
+            .filter(|(_, channel)| !channel.scope.is_some_and(|scope| scope.is_sink()))
+            .filter(|(_, channel)| channel.scope == Some(scope))
+            .map(|(index, channel)| {
+                let value = values.get(index);
                 // Providers arrive highest-priority first (probe contract).
                 let ranked: Vec<(crate::UiBusSiteView, i32)> =
                     channel.providers.iter().filter_map(site).collect();
@@ -682,7 +702,7 @@ impl ProjectController {
                 // drawn by the one shared preview component (a control
                 // channel showing `control product #7:0` said nothing the
                 // lamps do not say better).
-                let preview = channel_product(channel).and_then(|product| {
+                let preview = channel_product(value).and_then(|product| {
                     let product = UiProductRef::from_product_ref(product);
                     let bytes = self
                         .sync
@@ -693,6 +713,7 @@ impl ProjectController {
                         kind: ui_product_kind(product),
                         preview: bytes,
                         tracking: borrowed_tracking(&subscribed, product),
+                        show_live: self.show_live_action(&subscribed, product),
                         frame: crate::UiProductPreviewFrame::VISUAL_DEFAULT,
                     })
                 });
@@ -706,21 +727,17 @@ impl ProjectController {
                     scope_label: None,
                     name: channel.name.clone(),
                     kind: channel.kind.map(|kind| format!("{kind:?}")),
-                    value: channel
-                        .value
-                        .as_ref()
-                        .and_then(|value| value.value.as_ref())
+                    value: value
+                        .and_then(lpc_wire::WireBusChannelValue::value)
                         .map(format_lp_value),
-                    value_error: channel.value.as_ref().and_then(|value| value.error.clone()),
+                    value_error: value.and_then(bus_value_error),
                     primary_visual: channel.primary_visual,
                     contended,
                     preview,
                     // Palettes get the same treatment products do: the value
                     // box draws the thing, not a description of it.
-                    gradient: channel
-                        .value
-                        .as_ref()
-                        .and_then(|value| value.value.as_ref())
+                    gradient: value
+                        .and_then(lpc_wire::WireBusChannelValue::value)
                         .and_then(gradient_config_value),
                     writers,
                     readers,
@@ -909,11 +926,11 @@ impl ProjectController {
     /// non-visual product on the channel.
     pub fn primary_visual_product(&self) -> Option<UiProductRef> {
         let graph = self.binding_graph()?;
-        let channel = graph
+        let index = graph
             .channels
             .iter()
-            .find(|channel| channel.primary_visual)?;
-        match channel_product(channel)? {
+            .position(|channel| channel.primary_visual)?;
+        match channel_product(self.binding_graph_values().get(index))? {
             product @ lpc_model::ProductRef::Visual(_) => {
                 Some(UiProductRef::from_product_ref(product))
             }
@@ -935,14 +952,14 @@ impl ProjectController {
     pub fn primary_control_product(&self) -> Option<UiProductRef> {
         let graph = self.binding_graph()?;
         let root = self.root_module_scope();
-        let channel = graph.channels.iter().find(|channel| {
+        let index = graph.channels.iter().position(|channel| {
             channel.name == lpc_model::PRIMARY_CONTROL_CHANNEL
                 // Pre-scope snapshots list one unscoped set of channels;
                 // that set IS the root scope (the engine's own rule for
                 // flagging the primary visual).
                 && (channel.scope == root || channel.scope.is_none())
         })?;
-        match channel_product(channel)? {
+        match channel_product(self.binding_graph_values().get(index))? {
             product @ lpc_model::ProductRef::Control(_) => {
                 Some(UiProductRef::from_product_ref(product))
             }
@@ -971,15 +988,52 @@ impl ProjectController {
     /// is what the board is showing. (2026-09-22, the PLAYFUL choker: the
     /// unfocused shader's texture probe rode every pull and dragged the C6's
     /// frame rate down.)
+    ///
+    /// And over a device wire the primary CONTROL stays out too once every
+    /// one of its lamps sits on an output wire: the lens already streams
+    /// that wire's published frame, pixels and all (the module hero, the
+    /// output's bay and each fixture's patch row draw it), so the product
+    /// would be a second copy of the same lamps on every read. One copy per
+    /// read unless the user asks for more (Yona, lean-wire P5, 2026-09-23):
+    /// the product's own surfaces go not-live with Show live, and selecting
+    /// its fixture streams it again. Before the first read has placed it
+    /// (no placements yet), or while any of its lamps reach no wire, it
+    /// rides as before. A sim lens keeps it: nothing crosses a cable there.
     pub fn always_live_products(&self) -> Vec<UiProductRef> {
-        let visual = match self.lens_transport {
-            Some(crate::LinkTransport::Emu | crate::LinkTransport::Serial) => None,
-            Some(crate::LinkTransport::Sim) | None => self.primary_visual_product(),
+        let device = matches!(
+            self.lens_transport,
+            Some(crate::LinkTransport::Emu | crate::LinkTransport::Serial)
+        );
+        let visual = if device {
+            None
+        } else {
+            self.primary_visual_product()
         };
-        visual
-            .into_iter()
-            .chain(self.primary_control_product())
-            .collect()
+        let control = self
+            .primary_control_product()
+            .filter(|product| !(device && self.output_wires_carry(*product)));
+        visual.into_iter().chain(control).collect()
+    }
+
+    /// Whether the outputs the lens streams already carry every lamp of
+    /// `product` (see [`always_live_products`](Self::always_live_products)).
+    fn output_wires_carry(&self, product: UiProductRef) -> bool {
+        let UiProductRef::Control {
+            node_id, output, ..
+        } = product
+        else {
+            return false;
+        };
+        let Some(sync) = self.sync.as_ref() else {
+            return false;
+        };
+        sync.streams_output_pixels()
+            && super::output_lamp_coverage::product_lamps_all_placed(
+                node_id,
+                output,
+                sync.published_outputs()
+                    .map(|node| sync.output_placements(node)),
+            )
     }
 
     /// The root module's scope, when the project has a root node.
@@ -1026,11 +1080,11 @@ impl ProjectController {
         scope: lpc_wire::WireScopeRef,
         name: &str,
     ) -> Option<UiProductRef> {
-        let channel = graph
+        let index = graph
             .channels
             .iter()
-            .find(|channel| channel.scope == Some(scope) && channel.name == name)?;
-        channel_product(channel).map(UiProductRef::from_product_ref)
+            .position(|channel| channel.scope == Some(scope) && channel.name == name)?;
+        channel_product(self.binding_graph_values().get(index)).map(UiProductRef::from_product_ref)
     }
 
     /// Channels the binding picker offers: every channel observed in the
@@ -1041,14 +1095,16 @@ impl ProjectController {
         let observed: Vec<(String, Option<String>, bool)> = self
             .binding_graph()
             .map(|graph| {
+                let values = self.binding_graph_values();
                 graph
                     .channels
                     .iter()
+                    .enumerate()
                     // Sink rows feed panel liveness, not the authoring
                     // surface: a channel private to a playlist entry is not
                     // something the picker should offer (R2 presentation).
-                    .filter(|channel| !channel.scope.is_some_and(|scope| scope.is_sink()))
-                    .map(|channel| {
+                    .filter(|(_, channel)| !channel.scope.is_some_and(|scope| scope.is_sink()))
+                    .map(|(index, channel)| {
                         (
                             channel.name.clone(),
                             channel.kind.map(|kind| format!("{kind:?}")),
@@ -1056,10 +1112,9 @@ impl ProjectController {
                             // any registry claim: a project channel Studio
                             // has never heard of can still hold a product.
                             matches!(
-                                channel
-                                    .value
-                                    .as_ref()
-                                    .and_then(|value| value.value.as_ref()),
+                                values
+                                    .get(index)
+                                    .and_then(lpc_wire::WireBusChannelValue::value),
                                 Some(lpc_model::LpValue::Product(_))
                             ),
                         )
@@ -1297,6 +1352,9 @@ impl ProjectController {
             lpc_wire::WireBindingEndpoint::Literal { value } => {
                 crate::UiBindingEndpoint::new(format_lp_value(value)).with_detail("literal value")
             }
+            lpc_wire::WireBindingEndpoint::PanelWriter => {
+                crate::UiBindingEndpoint::new("panel".to_string()).with_detail("panel writer")
+            }
         }
     }
 
@@ -1396,17 +1454,17 @@ impl ProjectController {
     }
 
     /// The engine's latest status for the shader node behind `artifact`:
-    /// the retained status Revision plus the verdict classification
+    /// the synced read's revision plus the verdict classification
     /// ([`crate::AgentEngineStatus`]). `None` when no shader node uses the
     /// artifact. Written into the agent bridge cell on every pull so a
-    /// running agent's engine-verdict wait can observe status advances.
+    /// running agent's engine-verdict wait can observe each fresh read.
     pub(crate) fn agent_engine_status(
         &self,
         artifact: &ArtifactLocation,
     ) -> Option<crate::AgentEngineStatus> {
         let node = self.agent_shader_node(artifact)?;
         Some(crate::AgentEngineStatus {
-            revision: node.status_frame(),
+            revision: self.sync.as_ref()?.project_view().revision,
             verdict: crate::app::project::agent_support::engine_verdict(node.status()),
         })
     }
@@ -2047,7 +2105,10 @@ impl ProjectController {
         if let Some(target) = self.active_editor_target.clone() {
             self.focus_editor_target(&target);
         }
-        ensure_default_node_focus(&mut self.root_nodes);
+        let device_lens = self.lens_is_device();
+        if ensure_default_node_focus(&mut self.root_nodes, device_lens) {
+            self.focus_is_automatic = true;
+        }
         // A freshly created node takes focus once its tree entry lands
         // (create-op semantics: the user lands on what they made).
         self.apply_pending_focus();
@@ -2350,6 +2411,7 @@ impl ProjectController {
             // session is not visible, so one pass at the top keeps a
             // playlist's picker honest with the project pane's.
             self.gate_add_node_menus(node);
+            self.stamp_selection_streaming(node);
         }
         // The root card IS the project (GV fix 4): its header carries the
         // project's display name rather than the runtime tree's root
@@ -3044,6 +3106,45 @@ impl ProjectController {
         Ok((RunningPackage { hash, version }, logs))
     }
 
+    /// The lens runtime's `project.json`, addressed by the storage dir it
+    /// actually serves (`/projects/<runtime_storage_id>/project.json`).
+    fn running_manifest_path(&self) -> String {
+        lpa_client::project_deploy::project_file_path(&self.runtime_storage_id, "project.json")
+    }
+
+    /// Read the lens runtime's `project.json` bytes — one file, not a pull:
+    /// the bind asks this only to tell an identity-free board from a
+    /// versioned one before it reads the association as a version.
+    pub(crate) async fn read_running_manifest(
+        &mut self,
+        server: &mut StudioServerClient,
+    ) -> Result<(Vec<u8>, Vec<UiLogDraft>), UiError> {
+        use lpc_model::AsLpPath;
+        let read = server
+            .fs_read(self.running_manifest_path().as_str().as_path())
+            .await?;
+        Ok((read.data, read.logs))
+    }
+
+    /// Write a stamped `project.json` onto the lens runtime — the ONE board
+    /// write adoption makes, giving an identity-free project its library
+    /// identity (ADR 2026-09-22, amended).
+    ///
+    /// An ordinary fs write: the server sees it as an `FsEvent` on the
+    /// running project and applies it incrementally
+    /// (`lpa_server::Project::refresh_artifacts`), so nothing is unloaded
+    /// or reloaded and the runtime handle the editor holds stays good.
+    pub(crate) async fn write_running_manifest(
+        &mut self,
+        server: &mut StudioServerClient,
+        bytes: &[u8],
+    ) -> Result<Vec<UiLogDraft>, UiError> {
+        use lpc_model::AsLpPath;
+        server
+            .fs_write(self.running_manifest_path().as_str().as_path(), bytes)
+            .await
+    }
+
     /// Make the library package `key` the ACTIVE project behind the board
     /// the lens is already connected to — no push, no engine reload (D1).
     ///
@@ -3154,9 +3255,11 @@ impl ProjectController {
     /// `ChangesSince` enumerates the project directory as it stands; the
     /// client does the paging (`lpa_client::LpClient::pull_changed_files`),
     /// so a board with more files than fit a frame costs more round trips
-    /// and nothing else. Nothing is sent to the board and nothing is
-    /// unloaded first: this is the same read the save path already makes on
-    /// every save, and the running project keeps running through it.
+    /// and nothing else. The pull writes nothing to the board and unloads
+    /// nothing first: this is the same read the save path already makes on
+    /// every save, and the running project keeps running through it. (The
+    /// only board write adoption ever makes is stamping an identity onto an
+    /// identity-free manifest — [`Self::write_running_manifest`].)
     ///
     /// The pulled set is then hashed HERE and checked against what the
     /// board said it was running. That check is the whole safety of the
@@ -3773,6 +3876,24 @@ impl ProjectController {
             gate_add_node_menu(menu, self.lens_device_features.as_deref());
         }
         self.gate_child_add_node_menus(&mut node.children);
+    }
+
+    /// Tell every card, nested ones included, whether selecting it is what
+    /// makes it stream (a device lens) and whether it is streaming now —
+    /// the select control's copy and the header's Live chip. Stamped here
+    /// for the same reason as the add-node gate: only this controller
+    /// knows the lens.
+    fn stamp_selection_streaming(&self, node: &mut UiNodeView) {
+        let selection_streams = self.lens_streams_selection_only();
+        node.selection_streams = selection_streams;
+        node.streaming_live = selection_streams && node.focused;
+        stamp_child_selection_streaming(&mut node.children, selection_streams);
+    }
+
+    /// Whether the lens subscribes the focused node's products only — the
+    /// device side of [`Self::node_subscribes_products`]'s fork.
+    fn lens_streams_selection_only(&self) -> bool {
+        !matches!(self.lens_transport, Some(crate::LinkTransport::Sim))
     }
 
     fn gate_child_add_node_menus(&self, children: &mut [crate::UiNodeChild]) {
@@ -4551,7 +4672,13 @@ impl ProjectController {
                     {
                         hero.preview = bytes.clone();
                         hero.tracking = borrowed_tracking(subscribed, product);
+                        hero.show_live = self.show_live_action(subscribed, product);
                         hero.product = Some(product);
+                    } else if let Some(action) = self.show_live_action(subscribed, product) {
+                        // No bytes yet: the mirror row's own "Show live"
+                        // would select the MODULE, which streams nothing
+                        // new — the producer is who has to be selected.
+                        hero.show_live = Some(action);
                     }
                 }
                 Some(product) => {
@@ -4559,11 +4686,12 @@ impl ProjectController {
                     // (or stale) here — a black square is not this module's
                     // output, its fixtures' lamps are. The hero becomes the
                     // control product outright (kind included, so the shared
-                    // preview draws the lamp layout), and says "not tracked"
+                    // preview draws the lamp layout), and says "not live"
                     // honestly when the bytes are not in the stream instead
                     // of showing the mirror.
                     hero.kind = ui_product_kind(product);
                     hero.tracking = borrowed_tracking(subscribed, product);
+                    hero.show_live = self.show_live_action(subscribed, product);
                     hero.product = Some(product);
                     hero.preview = self
                         .sync
@@ -5275,16 +5403,19 @@ impl ProjectController {
                 .iter()
                 .map(|child| child.dirty)
                 .sum::<DirtySummary>();
-        ProjectNodeTreeItem::new(
+        let focused = self.is_focused_node(node);
+        let mut item = ProjectNodeTreeItem::new(
             node.address().to_string(),
             node.label(),
             node.kind(),
             node.status().clone(),
-            self.is_focused_node(node),
+            focused,
             node_focus_action(node),
             children,
         )
-        .with_dirty(dirty)
+        .with_dirty(dirty);
+        item.streaming_live = focused && self.lens_streams_selection_only();
+        item
     }
 
     fn is_focused_node(&self, node: &NodeController) -> bool {
@@ -5300,6 +5431,23 @@ impl ProjectController {
             }
             _ => false,
         }
+    }
+
+    /// The "Show live" action for a BORROWED preview (a module's output
+    /// hero, a channel's value box): select the product's producer node,
+    /// which is what puts it in a device lens's subscription set. `None`
+    /// while the product is already streaming, or when the producer is not
+    /// in the tree.
+    fn show_live_action(
+        &self,
+        subscribed: &[UiProductRef],
+        product: UiProductRef,
+    ) -> Option<UiAction> {
+        if subscribed.contains(&product) {
+            return None;
+        }
+        self.node_by_runtime_id(lpc_model::NodeId::new(product.node_id()))
+            .map(node_focus_action)
     }
 
     fn node_subscribes_products(&self, node: &NodeController) -> bool {
@@ -5324,8 +5472,12 @@ impl ProjectController {
                 // emulated USB-Serial-JTAG FIFO the guest drains at its own
                 // modelled rate, so every-expanded-node pulls starve its
                 // heartbeats exactly the way they starve a board's.
+                //
+                // Studio's own open-time selection is not a request: until
+                // the user selects something, a device lens streams no
+                // node's products on its account (lean-wire P5, ruling B).
                 Some(crate::LinkTransport::Emu | crate::LinkTransport::Serial) | None => {
-                    self.is_focused_node(node)
+                    !self.focus_is_automatic && self.is_focused_node(node)
                 }
             },
             ProjectProductSubscriptionIntent::Subscribed => true,
@@ -5384,6 +5536,9 @@ impl ProjectController {
     }
 
     fn focus_editor_target(&mut self, target: &ProjectEditorTarget) {
+        // An explicit selection (a click, Show live, the URL's target, a
+        // created node): from here on selection streams as it always has.
+        self.focus_is_automatic = false;
         clear_node_focus(&mut self.root_nodes);
         match target {
             ProjectEditorTarget::AddressedNode { target }
@@ -5553,6 +5708,15 @@ impl ProjectController {
     /// resolution, product-subscription node scope) tracks the lens.
     pub fn set_lens_transport(&mut self, transport: Option<crate::LinkTransport>) {
         self.lens_transport = transport;
+    }
+
+    /// Whether the lens runs over a device wire (serial, or the emu running
+    /// the device's firmware) rather than an in-page sim.
+    fn lens_is_device(&self) -> bool {
+        matches!(
+            self.lens_transport,
+            Some(crate::LinkTransport::Emu | crate::LinkTransport::Serial)
+        )
     }
 
     /// Record what the library can be imported FROM (module authoring
@@ -6091,7 +6255,13 @@ impl ProjectController {
     ) -> Option<String> {
         match self.pending_panel_write(scope, channel) {
             Some(value) => crate::app::project::format_live_panel_value(value),
-            None => live_channel_value(graph, scope, channel, binding_kind),
+            None => live_channel_value(
+                graph,
+                self.binding_graph_values(),
+                scope,
+                channel,
+                binding_kind,
+            ),
         }
     }
 
@@ -6110,7 +6280,7 @@ impl ProjectController {
     ) -> Option<lpc_model::GradientConfig> {
         let value = match self.pending_panel_write(scope, channel) {
             Some(value) => value,
-            None => graph_channel_value(graph, scope, channel)?,
+            None => graph_channel_value(graph, self.binding_graph_values(), scope, channel)?,
         };
         crate::app::project::gradient_config_value(value)
     }
@@ -8921,9 +9091,23 @@ fn child_label(children: &[crate::UiNodeChild], node_path: &str) -> Option<Strin
     None
 }
 
+/// The "unresolved" detail a channel row shows: the engine's error text, or
+/// the sentence for a channel nothing writes (which the wire carries as a
+/// bare `no_provider` tag, not a string).
+fn bus_value_error(value: &lpc_wire::WireBusChannelValue) -> Option<String> {
+    match value {
+        lpc_wire::WireBusChannelValue::NoProvider => Some(NO_BUS_PROVIDER_DETAIL.to_string()),
+        other => other.error().map(str::to_string),
+    }
+}
+
+/// [`bus_value_error`]'s text for a channel with no writer in any scope its
+/// consumers can see.
+const NO_BUS_PROVIDER_DETAIL: &str = "no writer in any enclosing scope";
+
 /// The product a channel's resolved value carries, when it carries one.
-fn channel_product(channel: &lpc_wire::WireBusChannel) -> Option<lpc_model::ProductRef> {
-    match channel.value.as_ref()?.value.as_ref()? {
+fn channel_product(value: Option<&lpc_wire::WireBusChannelValue>) -> Option<lpc_model::ProductRef> {
+    match value?.value()? {
         lpc_model::LpValue::Product(product) => Some(*product),
         _ => None,
     }
@@ -8985,31 +9169,34 @@ fn borrowed_tracking(
 /// sink row (wire 8) must never be confused with an enclosing scope's
 /// same-named channel. A scope-less endpoint (pre-scope test fakes) falls back
 /// to the first name match.
+///
+/// Returns the row's position in `graph.channels` — which is also its
+/// position in the value list — and the row itself.
 fn graph_channel<'a>(
     graph: &'a lpc_wire::WireBindingGraph,
     scope: Option<&lpc_wire::WireScopeRef>,
     channel_name: &str,
-) -> Option<&'a lpc_wire::WireBusChannel> {
-    graph.channels.iter().find(|channel| {
+) -> Option<(usize, &'a lpc_wire::WireBusChannel)> {
+    graph.channels.iter().enumerate().find(|(_, channel)| {
         channel.name == channel_name && (scope.is_none() || channel.scope.as_ref() == scope)
     })
 }
 
-/// That channel's current value, when it has one.
+/// That channel's current value, when it has one. `values` holds one value
+/// per `graph` channel row, in order.
 fn graph_channel_value<'a>(
-    graph: &'a lpc_wire::WireBindingGraph,
+    graph: &lpc_wire::WireBindingGraph,
+    values: &'a [lpc_wire::WireBusChannelValue],
     scope: Option<&lpc_wire::WireScopeRef>,
     channel_name: &str,
 ) -> Option<&'a lpc_model::LpValue> {
-    graph_channel(graph, scope, channel_name)?
-        .value
-        .as_ref()?
-        .value
-        .as_ref()
+    let (index, _) = graph_channel(graph, scope, channel_name)?;
+    values.get(index)?.value()
 }
 
 fn live_channel_value(
     graph: &lpc_wire::WireBindingGraph,
+    values: &[lpc_wire::WireBusChannelValue],
     scope: Option<&lpc_wire::WireScopeRef>,
     channel_name: &str,
     binding_kind: lpc_model::Kind,
@@ -9019,8 +9206,8 @@ fn live_channel_value(
     // must never be confused with an enclosing scope's same-named channel.
     // A scope-less endpoint (pre-scope test fakes) falls back to the first
     // name match.
-    let channel = graph_channel(graph, scope, channel_name)?;
-    let value = channel.value.as_ref()?.value.as_ref()?;
+    let (index, channel) = graph_channel(graph, scope, channel_name)?;
+    let value = values.get(index)?.value()?;
     // A product handle first, before any kind test: the chip is revision-
     // stable, so no exclusion applies to it.
     if let lpc_model::LpValue::Product(product) = value {
@@ -9217,6 +9404,14 @@ struct DescendantModuleScope {
     path_owners: Vec<lpc_model::NodeId>,
 }
 
+fn stamp_child_selection_streaming(children: &mut [crate::UiNodeChild], selection_streams: bool) {
+    for child in children {
+        child.selection_streams = selection_streams;
+        child.streaming_live = selection_streams && child.focused;
+        stamp_child_selection_streaming(&mut child.children, selection_streams);
+    }
+}
+
 fn node_focus_action(node: &NodeController) -> UiAction {
     UiAction::from_op(
         ProjectEditorTarget::addressed_node(node.target().clone()).node_id(),
@@ -9384,12 +9579,27 @@ fn clear_node_focus(nodes: &mut [NodeController]) {
     }
 }
 
-fn ensure_default_node_focus(nodes: &mut [NodeController]) {
+/// Select a node when nothing is selected, returning whether it did.
+///
+/// A sim lens (or none) lands on the root's first fixture, else its first
+/// shader. A DEVICE lens lands on the root module itself (lean-wire P5,
+/// ruling B): the project's own card, whose picture is the output wire the
+/// lens already streams — so opening a lens asks for no second copy of it.
+fn ensure_default_node_focus(nodes: &mut [NodeController], device_lens: bool) -> bool {
     if has_focused_node(nodes) {
-        return;
+        return false;
     }
-    if let Some(node) = default_focus_node_mut(nodes) {
-        node.state_mut().focused = true;
+    let node = if device_lens {
+        nodes.first_mut()
+    } else {
+        default_focus_node_mut(nodes)
+    };
+    match node {
+        Some(node) => {
+            node.state_mut().focused = true;
+            true
+        }
+        None => false,
     }
 }
 
@@ -10091,6 +10301,19 @@ mod tests {
     };
 
     use super::*;
+
+    #[test]
+    fn a_channel_nothing_writes_shows_unresolved_with_a_sentence() {
+        assert_eq!(
+            bus_value_error(&lpc_wire::WireBusChannelValue::NoProvider).as_deref(),
+            Some(NO_BUS_PROVIDER_DETAIL)
+        );
+        assert_eq!(
+            bus_value_error(&lpc_wire::WireBusChannelValue::Error("boom".into())).as_deref(),
+            Some("boom")
+        );
+        assert_eq!(bus_value_error(&lpc_wire::WireBusChannelValue::Empty), None);
+    }
 
     #[test]
     fn disconnected_project_has_no_actions() {
@@ -11305,11 +11528,6 @@ mod tests {
                     kind: Some(lpc_model::Kind::Color),
                     providers: vec![1],
                     consumers: vec![0],
-                    value: Some(lpc_wire::WireBusChannelValue {
-                        revision: Revision::new(2),
-                        value: Some(LpValue::F32(0.5)),
-                        error: None,
-                    }),
                     primary_visual: true,
                 },
                 // A playlist entry's sink row (wire 8): feeds panel
@@ -11321,15 +11539,14 @@ mod tests {
                     kind: Some(lpc_model::Kind::Ratio),
                     providers: vec![],
                     consumers: vec![],
-                    value: None,
                     primary_visual: false,
                 },
             ],
         };
-        project
-            .sync_mut()
-            .unwrap()
-            .set_binding_graph_for_test(graph);
+        project.sync_mut().unwrap().set_binding_graph_for_test((
+            graph,
+            vec![lpc_wire::WireBusChannelValue::Value(LpValue::F32(0.5))],
+        ));
 
         assert!(
             !project
@@ -11489,7 +11706,6 @@ mod tests {
                     kind: Some(lpc_model::Kind::Ratio),
                     providers: vec![0],
                     consumers: vec![],
-                    value: None,
                     primary_visual: false,
                 },
                 lpc_wire::WireBusChannel {
@@ -11498,7 +11714,6 @@ mod tests {
                     kind: Some(lpc_model::Kind::Ratio),
                     providers: vec![],
                     consumers: vec![1],
-                    value: None,
                     primary_visual: false,
                 },
                 lpc_wire::WireBusChannel {
@@ -11507,7 +11722,6 @@ mod tests {
                     kind: Some(lpc_model::Kind::Color),
                     providers: vec![2, 3],
                     consumers: vec![],
-                    value: None,
                     primary_visual: true,
                 },
                 lpc_wire::WireBusChannel {
@@ -11516,7 +11730,6 @@ mod tests {
                     kind: Some(lpc_model::Kind::Ratio),
                     providers: vec![4, 5],
                     consumers: vec![],
-                    value: None,
                     primary_visual: false,
                 },
                 lpc_wire::WireBusChannel {
@@ -11525,7 +11738,6 @@ mod tests {
                     kind: Some(lpc_model::Kind::Ratio),
                     providers: vec![],
                     consumers: vec![6],
-                    value: None,
                     primary_visual: false,
                 },
                 lpc_wire::WireBusChannel {
@@ -11534,7 +11746,6 @@ mod tests {
                     kind: Some(lpc_model::Kind::Ratio),
                     providers: vec![7],
                     consumers: vec![],
-                    value: None,
                     primary_visual: false,
                 },
                 lpc_wire::WireBusChannel {
@@ -11543,7 +11754,6 @@ mod tests {
                     kind: Some(lpc_model::Kind::Ratio),
                     providers: vec![8],
                     consumers: vec![9],
-                    value: None,
                     primary_visual: false,
                 },
             ],
@@ -11551,7 +11761,7 @@ mod tests {
         project
             .sync_mut()
             .unwrap()
-            .set_binding_graph_for_test(graph);
+            .set_binding_graph_for_test((graph, Vec::new()));
 
         let bus = project
             .ui_bus_view_for_scope(root_scope)
@@ -11662,7 +11872,7 @@ mod tests {
         project
             .sync_mut()
             .unwrap()
-            .set_binding_graph_for_test(graph);
+            .set_binding_graph_for_test((graph, Vec::new()));
         project.apply_default_binding_overlay();
 
         let nodes = project.ui_nodes();
@@ -11731,7 +11941,7 @@ mod tests {
         project
             .sync_mut()
             .unwrap()
-            .set_binding_graph_for_test(graph);
+            .set_binding_graph_for_test((graph, Vec::new()));
         project.apply_default_binding_overlay();
 
         let nodes = project.ui_nodes();
@@ -11800,8 +12010,13 @@ mod tests {
         );
     }
 
-    fn primary_visual_graph(value: Option<lpc_model::LpValue>) -> lpc_wire::WireBindingGraph {
-        lpc_wire::WireBindingGraph {
+    fn primary_visual_graph(
+        value: Option<lpc_model::LpValue>,
+    ) -> (
+        lpc_wire::WireBindingGraph,
+        Vec<lpc_wire::WireBusChannelValue>,
+    ) {
+        let graph = lpc_wire::WireBindingGraph {
             revision: Revision::new(2),
             bindings: Vec::new(),
             channels: vec![lpc_wire::WireBusChannel {
@@ -11810,17 +12025,22 @@ mod tests {
                 kind: Some(lpc_model::Kind::Color),
                 providers: Vec::new(),
                 consumers: Vec::new(),
-                value: Some(lpc_wire::WireBusChannelValue {
-                    revision: Revision::new(2),
-                    value,
-                    error: None,
-                }),
                 primary_visual: true,
             }],
-        }
+        };
+        let value = value.map_or(
+            lpc_wire::WireBusChannelValue::Empty,
+            lpc_wire::WireBusChannelValue::Value,
+        );
+        (graph, vec![value])
     }
 
-    fn project_with_graph(graph: lpc_wire::WireBindingGraph) -> ProjectController {
+    fn project_with_graph(
+        graph: (
+            lpc_wire::WireBindingGraph,
+            Vec<lpc_wire::WireBusChannelValue>,
+        ),
+    ) -> ProjectController {
         let mut project = ProjectController::new();
         project.mark_ready("loaded-project", 7, ProjectInventorySummary::default());
         project
@@ -11946,35 +12166,38 @@ mod tests {
     fn control_out_graph(
         scope: lpc_wire::WireScopeRef,
         visual: Option<lpc_model::ProductRef>,
-    ) -> lpc_wire::WireBindingGraph {
+    ) -> (
+        lpc_wire::WireBindingGraph,
+        Vec<lpc_wire::WireBusChannelValue>,
+    ) {
         let channel = |name: &str, value: lpc_model::ProductRef, primary_visual: bool| {
-            lpc_wire::WireBusChannel {
-                scope: Some(scope),
-                name: name.to_string(),
-                kind: Some(lpc_model::Kind::Color),
-                providers: Vec::new(),
-                consumers: Vec::new(),
-                value: Some(lpc_wire::WireBusChannelValue {
-                    revision: Revision::new(2),
-                    value: Some(LpValue::Product(value)),
-                    error: None,
-                }),
-                primary_visual,
-            }
+            (
+                lpc_wire::WireBusChannel {
+                    scope: Some(scope),
+                    name: name.to_string(),
+                    kind: Some(lpc_model::Kind::Color),
+                    providers: Vec::new(),
+                    consumers: Vec::new(),
+                    primary_visual,
+                },
+                lpc_wire::WireBusChannelValue::Value(LpValue::Product(value)),
+            )
         };
-        let mut channels = vec![channel(
+        let mut rows = vec![channel(
             lpc_model::PRIMARY_CONTROL_CHANNEL,
             lpc_model::ProductRef::control(fixture_control_product()),
             false,
         )];
         if let Some(visual) = visual {
-            channels.insert(0, channel(lpc_model::PRIMARY_VISUAL_CHANNEL, visual, true));
+            rows.insert(0, channel(lpc_model::PRIMARY_VISUAL_CHANNEL, visual, true));
         }
-        lpc_wire::WireBindingGraph {
+        let (channels, values) = rows.into_iter().unzip();
+        let graph = lpc_wire::WireBindingGraph {
             revision: Revision::new(2),
             bindings: Vec::new(),
             channels,
-        }
+        };
+        (graph, values)
     }
 
     #[test]
@@ -12113,6 +12336,167 @@ mod tests {
         }
     }
 
+    /// The one-copy rule (lean-wire P5). A device lens on a project whose
+    /// output wire carries every lamp of the primary control product
+    /// streams those lamps ONCE: the output frame, at 8 bits. The product
+    /// drops out of the read, and its value box offers Show live.
+    #[test]
+    fn a_device_lens_streams_one_copy_of_lamps_an_output_carries() {
+        for transport in [crate::LinkTransport::Serial, crate::LinkTransport::Emu] {
+            let mut project = one_wire_project(Some(transport));
+            // Lens open, before any read has placed the product: nothing
+            // says the wire carries it yet, so it streams — at 8 bits.
+            assert_eq!(
+                lens_pixel_probes(&mut project),
+                vec![
+                    LensPixelProbe::Control(lpc_wire::WireChannelSampleFormat::Srgb8),
+                    LensPixelProbe::Output(Some(lpc_wire::WireChannelSampleFormat::Srgb8)),
+                ],
+                "{transport:?}: first read"
+            );
+
+            place_fixture_on_the_wire(&mut project, 10);
+            assert_eq!(
+                lens_pixel_probes(&mut project),
+                vec![LensPixelProbe::Output(Some(
+                    lpc_wire::WireChannelSampleFormat::Srgb8
+                ))],
+                "{transport:?}: steady read — one copy"
+            );
+            assert!(project.always_live_products().is_empty());
+
+            let scope = lpc_wire::WireScopeRef::Module {
+                owner: lpc_model::NodeId::new(1),
+            };
+            let bus = project.ui_bus_view_for_scope(scope).expect("wiring view");
+            let channel = bus
+                .channels
+                .iter()
+                .find(|channel| channel.name == lpc_model::PRIMARY_CONTROL_CHANNEL)
+                .expect("the control channel lists");
+            let preview = channel.preview.as_ref().expect("the value box");
+            assert_ne!(preview.tracking, UiProductTrackingState::Tracking);
+            assert!(
+                preview.show_live.is_some(),
+                "{transport:?}: the value box is not live, and says how to make it"
+            );
+        }
+    }
+
+    /// Ruling B: a DEVICE lens opens on the root module, and that automatic
+    /// selection asks for nothing — the steady read of a fresh lens carries
+    /// the output frame alone, no control product and no render of the
+    /// module's mirror. A sim lens keeps its old default (the fixture), and
+    /// the user's own selection streams as before.
+    #[test]
+    fn a_device_lens_opens_on_the_root_module_and_asks_for_one_copy() {
+        for transport in [crate::LinkTransport::Serial, crate::LinkTransport::Emu] {
+            let mut project = one_wire_project_opened(Some(transport), false);
+            let root = project.node(&node_address("/demo.module")).expect("root");
+            assert!(
+                root.state().focused,
+                "{transport:?}: the root module is selected"
+            );
+            assert!(
+                !project
+                    .node(&node_address("/demo.module/pixels.fixture"))
+                    .expect("fixture")
+                    .state()
+                    .focused
+            );
+
+            place_fixture_on_the_wire(&mut project, 10);
+            let products = project.subscribed_products();
+            assert!(
+                products.is_empty(),
+                "{transport:?}: nothing streams on Studio's account: {products:?}"
+            );
+            assert_eq!(
+                lens_pixel_probes(&mut project),
+                vec![LensPixelProbe::Output(Some(
+                    lpc_wire::WireChannelSampleFormat::Srgb8
+                ))]
+            );
+
+            // A later apply (a reconnect's re-read) keeps what the user chose.
+            select_node(&mut project, "/demo.module/pixels.fixture");
+            project.apply_project_view(&one_wire_view()).unwrap();
+            assert!(
+                project
+                    .node(&node_address("/demo.module/pixels.fixture"))
+                    .expect("fixture")
+                    .state()
+                    .focused,
+                "{transport:?}: the user's selection survives a re-read"
+            );
+            assert!(
+                project
+                    .subscribed_products()
+                    .contains(&UiProductRef::from_control_product(
+                        fixture_control_product()
+                    ))
+            );
+        }
+
+        let sim = one_wire_project_opened(Some(crate::LinkTransport::Sim), false);
+        assert!(
+            sim.node(&node_address("/demo.module/pixels.fixture"))
+                .expect("fixture")
+                .state()
+                .focused,
+            "a sim lens keeps its default: the fixture"
+        );
+    }
+
+    /// Show live on a second surface: selecting the fixture (which is what
+    /// Show live does) is the user asking for more, and its product streams
+    /// beside the output frame — two copies, both 8-bit, on request only.
+    #[test]
+    fn selecting_the_fixture_asks_for_its_copy_too() {
+        let mut project = one_wire_project(Some(crate::LinkTransport::Serial));
+        place_fixture_on_the_wire(&mut project, 10);
+        select_node(&mut project, "/demo.module/pixels.fixture");
+
+        assert_eq!(
+            lens_pixel_probes(&mut project),
+            vec![
+                LensPixelProbe::Control(lpc_wire::WireChannelSampleFormat::Srgb8),
+                LensPixelProbe::Output(Some(lpc_wire::WireChannelSampleFormat::Srgb8)),
+            ]
+        );
+    }
+
+    /// Lamps no wire carries are visible nowhere else: a partly patched
+    /// fixture keeps streaming unasked.
+    #[test]
+    fn a_partly_placed_product_keeps_streaming() {
+        let mut project = one_wire_project(Some(crate::LinkTransport::Serial));
+        place_fixture_on_the_wire(&mut project, 6);
+
+        assert_eq!(
+            lens_pixel_probes(&mut project),
+            vec![
+                LensPixelProbe::Control(lpc_wire::WireChannelSampleFormat::Srgb8),
+                LensPixelProbe::Output(Some(lpc_wire::WireChannelSampleFormat::Srgb8)),
+            ]
+        );
+    }
+
+    /// A sim lens is outside the rule — nothing crosses a cable — so the
+    /// primary control stays always live beside the output frame.
+    #[test]
+    fn a_sim_lens_keeps_both_copies() {
+        for transport in [Some(crate::LinkTransport::Sim), None] {
+            let mut project = one_wire_project(transport);
+            place_fixture_on_the_wire(&mut project, 10);
+            assert_eq!(
+                project.always_live_products(),
+                vec![UiProductRef::from_control_product(fixture_control_product())],
+                "{transport:?}"
+            );
+        }
+    }
+
     #[test]
     fn a_control_only_module_heroes_its_control_output_with_no_toggle() {
         // No visual writer anywhere in the scope: the module's own mirror
@@ -12206,14 +12590,18 @@ mod tests {
             lpc_model::NodeId::new(2),
             0,
         ));
-        let mut graph = control_out_graph(scope, Some(visual));
-        graph
+        let (mut graph, mut values) = control_out_graph(scope, Some(visual));
+        let control = graph
             .channels
-            .retain(|channel| channel.name != lpc_model::PRIMARY_CONTROL_CHANNEL);
+            .iter()
+            .position(|channel| channel.name == lpc_model::PRIMARY_CONTROL_CHANNEL)
+            .expect("the fixture lists control.out");
+        graph.channels.remove(control);
+        values.remove(control);
         project
             .sync_mut()
             .unwrap()
-            .set_binding_graph_for_test(graph);
+            .set_binding_graph_for_test((graph, values));
 
         let editor = project.editor_view("loaded-project", 7, &ProjectInventorySummary::default());
         let Some(crate::UiNodeFace::Module(face)) = editor.nodes[0].face.clone() else {
@@ -12264,10 +12652,8 @@ mod tests {
         // `primary_visual`, because the project's primary visual is the
         // root's and always-live products are exactly what this predicate
         // stopped keying on.
-        project
-            .sync_mut()
-            .unwrap()
-            .set_binding_graph_for_test(lpc_wire::WireBindingGraph {
+        project.sync_mut().unwrap().set_binding_graph_for_test((
+            lpc_wire::WireBindingGraph {
                 revision: Revision::new(2),
                 bindings: Vec::new(),
                 channels: vec![lpc_wire::WireBusChannel {
@@ -12276,14 +12662,13 @@ mod tests {
                     kind: Some(lpc_model::Kind::Color),
                     providers: Vec::new(),
                     consumers: Vec::new(),
-                    value: Some(lpc_wire::WireBusChannelValue {
-                        revision: Revision::new(2),
-                        value: Some(LpValue::Product(lpc_model::ProductRef::visual(product))),
-                        error: None,
-                    }),
                     primary_visual: false,
                 }],
-            });
+            },
+            vec![lpc_wire::WireBusChannelValue::Value(LpValue::Product(
+                lpc_model::ProductRef::visual(product),
+            ))],
+        ));
         // Fresh bytes in the stream — the re-home branch the old predicate
         // stamped Paused inside.
         let bytes = vec![10, 20, 30, 40, 50, 60];
@@ -12444,7 +12829,7 @@ mod tests {
         project
             .sync_mut()
             .unwrap()
-            .set_binding_graph_for_test(graph);
+            .set_binding_graph_for_test((graph, Vec::new()));
         project.apply_default_binding_overlay();
 
         let nodes = project.ui_nodes();
@@ -12508,7 +12893,7 @@ mod tests {
         project
             .sync_mut()
             .unwrap()
-            .set_binding_graph_for_test(default_time_wiring_graph());
+            .set_binding_graph_for_test((default_time_wiring_graph(), Vec::new()));
         project.apply_default_binding_overlay();
 
         let nodes = project.ui_nodes();
@@ -12567,7 +12952,7 @@ mod tests {
         project
             .sync_mut()
             .unwrap()
-            .set_binding_graph_for_test(default_time_wiring_graph());
+            .set_binding_graph_for_test((default_time_wiring_graph(), Vec::new()));
         project.apply_default_binding_overlay();
 
         let nodes = project.ui_nodes();
@@ -12621,7 +13006,6 @@ mod tests {
                     kind: Some(lpc_model::Kind::Instant),
                     providers: vec![0],
                     consumers: vec![1],
-                    value: None,
                     primary_visual: false,
                 },
                 lpc_wire::WireBusChannel {
@@ -12630,7 +13014,6 @@ mod tests {
                     kind: None,
                     providers: vec![0],
                     consumers: Vec::new(),
-                    value: None,
                     primary_visual: false,
                 },
             ],
@@ -12639,7 +13022,7 @@ mod tests {
         project
             .sync_mut()
             .unwrap()
-            .set_binding_graph_for_test(graph);
+            .set_binding_graph_for_test((graph, Vec::new()));
 
         let choices = project.ui_channel_choices();
         // Well-known first, observed flags merged, ad-hoc channels appended.
@@ -12683,10 +13066,8 @@ mod tests {
                 panel_show: false,
             }
         };
-        project
-            .sync_mut()
-            .unwrap()
-            .set_binding_graph_for_test(lpc_wire::WireBindingGraph {
+        project.sync_mut().unwrap().set_binding_graph_for_test((
+            lpc_wire::WireBindingGraph {
                 revision: Revision::new(2),
                 bindings: vec![
                     // No backing row: an implicit runtime consumed slot.
@@ -12695,7 +13076,9 @@ mod tests {
                     binding("brightness", lpc_wire::WireBindingDirection::Consumes),
                 ],
                 channels: Vec::new(),
-            });
+            },
+            Vec::new(),
+        ));
 
         let nodes = project.ui_nodes();
         let config = section_config_slots(node_sections(&nodes[0]));
@@ -12739,25 +13122,27 @@ mod tests {
                 panel_show: false,
             }
         };
-        let channel = |name: &str, kind: lpc_model::Kind, value: f32| -> lpc_wire::WireBusChannel {
-            lpc_wire::WireBusChannel {
-                scope: None,
-                name: name.to_string(),
-                kind: Some(kind),
-                providers: Vec::new(),
-                consumers: Vec::new(),
-                value: Some(lpc_wire::WireBusChannelValue {
-                    revision: Revision::new(2),
-                    value: Some(LpValue::F32(value)),
-                    error: None,
-                }),
-                primary_visual: false,
-            }
+        let channel = |name: &str, kind: lpc_model::Kind, value: f32| {
+            (
+                lpc_wire::WireBusChannel {
+                    scope: None,
+                    name: name.to_string(),
+                    kind: Some(kind),
+                    providers: Vec::new(),
+                    consumers: Vec::new(),
+                    primary_visual: false,
+                },
+                lpc_wire::WireBusChannelValue::Value(LpValue::F32(value)),
+            )
         };
-        project
-            .sync_mut()
-            .unwrap()
-            .set_binding_graph_for_test(lpc_wire::WireBindingGraph {
+        let (channels, values): (Vec<_>, Vec<_>) = [
+            channel("wobble", lpc_model::Kind::Amplitude, 0.123_456),
+            channel("time", lpc_model::Kind::Instant, 12_345.678),
+        ]
+        .into_iter()
+        .unzip();
+        project.sync_mut().unwrap().set_binding_graph_for_test((
+            lpc_wire::WireBindingGraph {
                 revision: Revision::new(2),
                 bindings: vec![
                     // Implicit runtime slots → binding-derived rows.
@@ -12782,11 +13167,10 @@ mod tests {
                         lpc_wire::WireBindingOrigin::Default,
                     ),
                 ],
-                channels: vec![
-                    channel("wobble", lpc_model::Kind::Amplitude, 0.123_456),
-                    channel("time", lpc_model::Kind::Instant, 12_345.678),
-                ],
-            });
+                channels,
+            },
+            values,
+        ));
         project.apply_default_binding_overlay();
         project.apply_bound_live_values();
 
@@ -12829,23 +13213,16 @@ mod tests {
         project.apply_project_view(&view).unwrap();
 
         let node = lpc_model::NodeId::new(1);
-        let product_channel = |name: &str, value: LpValue| lpc_wire::WireBusChannel {
+        let product_channel = |name: &str| lpc_wire::WireBusChannel {
             scope: None,
             name: name.to_string(),
             kind: Some(lpc_model::Kind::Instant),
             providers: Vec::new(),
             consumers: Vec::new(),
-            value: Some(lpc_wire::WireBusChannelValue {
-                revision: Revision::new(2),
-                value: Some(value),
-                error: None,
-            }),
             primary_visual: false,
         };
-        project
-            .sync_mut()
-            .unwrap()
-            .set_binding_graph_for_test(lpc_wire::WireBindingGraph {
+        project.sync_mut().unwrap().set_binding_graph_for_test((
+            lpc_wire::WireBindingGraph {
                 revision: Revision::new(2),
                 bindings: vec![lpc_wire::WireEffectiveBinding {
                     owner: node,
@@ -12861,14 +13238,15 @@ mod tests {
                     kind: lpc_model::Kind::Instant,
                     panel_show: false,
                 }],
-                channels: vec![product_channel(
-                    "time",
-                    LpValue::Product(lpc_model::ProductRef::time(lpc_model::TimeProduct::new(
-                        lpc_model::NodeId::new(2),
-                        0,
-                    ))),
-                )],
-            });
+                channels: vec![product_channel("time")],
+            },
+            vec![lpc_wire::WireBusChannelValue::Value(LpValue::Product(
+                lpc_model::ProductRef::time(lpc_model::TimeProduct::new(
+                    lpc_model::NodeId::new(2),
+                    0,
+                )),
+            ))],
+        ));
         project.apply_default_binding_overlay();
         project.apply_bound_live_values();
 
@@ -12899,7 +13277,7 @@ mod tests {
 
         // One authored consume of a scoped channel nothing writes: the
         // control reads its own default and offers a panel target.
-        let graph = |panel_provider: bool, value: f32| lpc_wire::WireBindingGraph {
+        let graph = |panel_provider: bool| lpc_wire::WireBindingGraph {
             revision: Revision::new(2),
             bindings: vec![
                 lpc_wire::WireEffectiveBinding {
@@ -12937,13 +13315,14 @@ mod tests {
                 kind: Some(lpc_model::Kind::Amplitude),
                 providers: if panel_provider { vec![1] } else { Vec::new() },
                 consumers: vec![0],
-                value: Some(lpc_wire::WireBusChannelValue {
-                    revision: Revision::new(2),
-                    value: Some(LpValue::F32(value)),
-                    error: None,
-                }),
                 primary_visual: false,
             }],
+        };
+        let graph = |panel_provider: bool, value: f32| {
+            (
+                graph(panel_provider),
+                vec![lpc_wire::WireBusChannelValue::Value(LpValue::F32(value))],
+            )
         };
         project
             .sync_mut()
@@ -13187,6 +13566,7 @@ mod tests {
                 // The binding-graph probe rides along on every
                 // loaded-project read — module faces cannot derive without it.
                 ProjectProbeRequest::BindingGraph(lpc_wire::BindingGraphProbeRequest {
+                    structure: lpc_wire::RevisionGateRead::Always,
                     include_values: true,
                 }),
             ]
@@ -13827,6 +14207,62 @@ mod tests {
         );
     }
 
+    /// A device lens streams the selected node only, so a preview that is
+    /// not live offers "Show live" (select its producer), and the selected
+    /// card says it is the one streaming. A sim lens streams every expanded
+    /// node: nothing to offer, and no card claims to be "the live one".
+    #[test]
+    fn device_lens_offers_show_live_until_the_node_is_selected() {
+        let mut view = single_node_view(1, NodeRuntimeStatus::Ok);
+        install_ui_projection_slots(&mut view, 1, Revision::new(4));
+        let mut project = ProjectController::new();
+        project.set_lens_transport(Some(crate::LinkTransport::Serial));
+        project.mark_ready("loaded-project", 7, ProjectInventorySummary::default());
+        project.apply_project_view(&view).unwrap();
+        clear_node_focus(&mut project.root_nodes);
+
+        let visual = |project: &ProjectController| {
+            let editor =
+                project.editor_view("loaded-project", 7, &ProjectInventorySummary::default());
+            let card = editor.nodes[0].clone();
+            let product = section_products(node_sections(&card))
+                .iter()
+                .find(|product| product.kind == crate::UiProductKind::Visual)
+                .cloned()
+                .expect("the shader's visual product");
+            (card, product)
+        };
+
+        let (card, product) = visual(&project);
+        assert!(card.selection_streams);
+        assert!(!card.streaming_live, "unselected: not the live card");
+        assert_ne!(product.tracking, UiProductTrackingState::Tracking);
+        assert_eq!(
+            product.show_live, card.action,
+            "Show live selects the producer — this card"
+        );
+        assert!(product.show_live.is_some());
+
+        select_node(&mut project, "/demo.module/orbit.shader");
+        let (card, product) = visual(&project);
+        assert!(card.streaming_live);
+        assert_eq!(product.tracking, UiProductTrackingState::Tracking);
+        assert_eq!(product.show_live, None, "already live: nothing to offer");
+
+        let editor = project.editor_view("loaded-project", 7, &ProjectInventorySummary::default());
+        assert!(
+            editor.tree.roots[0].streaming_live,
+            "the sidebar row agrees with the card"
+        );
+
+        project.set_lens_transport(Some(crate::LinkTransport::Sim));
+        let (card, _) = visual(&project);
+        assert!(!card.selection_streams);
+        assert!(!card.streaming_live, "sim streams everything; no Live chip");
+        let editor = project.editor_view("loaded-project", 7, &ProjectInventorySummary::default());
+        assert!(!editor.tree.roots[0].streaming_live);
+    }
+
     /// The visual probe tier follows the lens kind: 16×16 over serial, the
     /// default for the sim and while detached.
     #[test]
@@ -13846,6 +14282,136 @@ mod tests {
             project.visual_preview_frame(),
             crate::UiProductPreviewFrame::VISUAL_DEFAULT
         );
+    }
+
+    /// The user selects `address` — what the Focus op (a click, Show live)
+    /// does, synchronously.
+    fn select_node(project: &mut ProjectController, address: &str) {
+        let target = ProjectEditorTarget::addressed_node(
+            project
+                .node(&node_address(address))
+                .expect("node controller")
+                .target()
+                .clone(),
+        );
+        project.focus_editor_target(&target);
+        project.active_editor_target = Some(target);
+    }
+
+    /// The pixel-bearing probes of a lens read, in request order.
+    #[derive(Debug, PartialEq)]
+    enum LensPixelProbe {
+        Control(lpc_wire::WireChannelSampleFormat),
+        Output(Option<lpc_wire::WireChannelSampleFormat>),
+    }
+
+    fn lens_pixel_probes(project: &mut ProjectController) -> Vec<LensPixelProbe> {
+        let products = project.subscribed_products();
+        project
+            .sync_for_request()
+            .expect("a ready mirror")
+            .refresh_project_read_request(products)
+            .probes
+            .into_iter()
+            .filter_map(|probe| match probe {
+                lpc_wire::ProjectProbeRequest::ControlProduct(request) => {
+                    Some(LensPixelProbe::Control(request.sample_format))
+                }
+                lpc_wire::ProjectProbeRequest::OutputFrame(request) => {
+                    Some(LensPixelProbe::Output(request.samples))
+                }
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// A root module owning a fixture (node 3, whose second output is the
+    /// scope's `control.out` — [`fixture_control_product`]) and one output
+    /// wire (node 5), on a lens over `transport`, nothing focused.
+    fn one_wire_project(transport: Option<crate::LinkTransport>) -> ProjectController {
+        one_wire_project_opened(transport, true)
+    }
+
+    /// [`one_wire_project`], optionally keeping the selection Studio makes
+    /// when the tree lands (`clear_focus: false`) — the lens as it opens.
+    fn one_wire_project_opened(
+        transport: Option<crate::LinkTransport>,
+        clear_focus: bool,
+    ) -> ProjectController {
+        let view = one_wire_view();
+        let mut project = ProjectController::new();
+        project.set_lens_transport(transport);
+        project.mark_ready("loaded-project", 7, ProjectInventorySummary::default());
+        project.apply_project_view(&view).unwrap();
+        project.sync_mut().unwrap().set_view_for_test(view);
+        if clear_focus {
+            clear_node_focus(&mut project.root_nodes);
+        }
+        let scope = lpc_wire::WireScopeRef::Module {
+            owner: lpc_model::NodeId::new(1),
+        };
+        project
+            .sync_mut()
+            .unwrap()
+            .set_binding_graph_for_test(control_out_graph(scope, None));
+        project
+    }
+
+    /// The one-wire tree: root module 1 owning fixture 3 (with its product
+    /// state) and output 5.
+    fn one_wire_view() -> ProjectView {
+        let mut view = ProjectView::new();
+        let mut root = node_entry(1, "/demo.module", None, NodeRuntimeStatus::Ok);
+        root.children = vec![NodeId::new(3), NodeId::new(5)];
+        view.tree.insert(root);
+        view.tree.insert(node_entry(
+            3,
+            "/demo.module/pixels.fixture",
+            Some(1),
+            NodeRuntimeStatus::Ok,
+        ));
+        view.tree.insert(node_entry(
+            5,
+            "/demo.module/strip.output",
+            Some(1),
+            NodeRuntimeStatus::Ok,
+        ));
+        // Node 3's state carries its products: a visual and the control
+        // product `control.out` resolves to.
+        install_ui_projection_slots(&mut view, 3, Revision::new(4));
+        view
+    }
+
+    /// Output 5 answers a frame whose wire carries `placed` of the fixture's
+    /// ten lamps (its product's second output).
+    fn place_fixture_on_the_wire(project: &mut ProjectController, placed: u32) {
+        let entry = lpc_wire::OutputFrameEntry {
+            node: NodeId::new(5),
+            revision: Revision::new(2),
+            channels: 10,
+            sample_format: Some(lpc_wire::WireChannelSampleFormat::Srgb8),
+            geometry: lpc_wire::RevisionGateResult::Changed(lpc_wire::OutputFrameGeometry {
+                revision: Revision::new(1),
+                sample_layout: lpc_model::ControlSampleLayout::default(),
+                display_layout: lpc_wire::GeometryDisplayLayout::Unsupported {
+                    reason: "not needed here".to_string(),
+                },
+                placements: vec![lpc_wire::WireOutputPlacement {
+                    node: NodeId::new(3),
+                    output: 1,
+                    source_lamp: 0,
+                    source_lamps: 10,
+                    wire_lamp: 0,
+                    lamps: placed,
+                    reversed: false,
+                }],
+            }),
+            bytes: vec![0; 30],
+        };
+        project
+            .sync_mut()
+            .unwrap()
+            .apply_output_frames_for_test(&[entry]);
     }
 
     fn single_node_view(id: u32, status: NodeRuntimeStatus) -> ProjectView {

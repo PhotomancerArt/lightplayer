@@ -270,6 +270,9 @@ fn body_label(body: &ServerMsgBody) -> &'static str {
         ServerMsgBody::Log { .. } => "Log",
         ServerMsgBody::Heartbeat { .. } => "Heartbeat",
         ServerMsgBody::Error { .. } => "Error",
+        ServerMsgBody::LoginChallenge { .. } => "LoginChallenge",
+        ServerMsgBody::LoginResult(_) => "LoginResult",
+        ServerMsgBody::NotPermitted { .. } => "NotPermitted",
     }
 }
 
@@ -599,6 +602,7 @@ mod tests {
                 ..Default::default()
             },
             device_uid: Some(uid.to_string()),
+            auth: lpc_wire::HelloAuth::TRUSTED,
         };
         lpc_wire::json::to_string(&WireServerMessage::new(7, ServerMsgBody::Hello(hello)))
             .expect("encode")

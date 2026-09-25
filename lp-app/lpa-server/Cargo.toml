@@ -22,6 +22,14 @@ default = [
 ]
 # Panic recovery via catch_unwind (shader compilation, node render)
 naga = ["lpc-engine/naga"]
+# `LpServer::set_latent_read_back`: hand a GPU-resident backend's latent
+# readback (`lp_gfx::LatentReadBackSource`) to every project's engine, so
+# texture previews read back one probe late instead of refusing. Only the
+# browser GPU tier has such a backend, so only `fw-browser` turns this on.
+# Off by default and never on a device: the stored source is a field of
+# `LpServer`, which the Xtensa images keep in a static task pool — 16 B of
+# DRAM straight off the main stack, a figure pinned against silicon.
+latent-read-back = []
 std = [
 	"lpc-hardware/std",
 	"lpc-shared/std",
@@ -97,6 +105,8 @@ fixture-no-hello = []
 # crate itself when the gates first landed (2026-07-30). Anyone adding a
 # ninth node gate to `lpc-engine` must add the forwarding feature here too.
 lpc-engine = { path = "../../lp-core/lpc-engine", default-features = false }
+# Tiers, the login machine and the access files: the access gate's vocabulary.
+lpc-access = { path = "../../lp-core/lpc-access" }
 lpc-hardware = { path = "../../lp-core/lpc-hardware", default-features = false }
 lpc-history = { path = "../../lp-core/lpc-history", default-features = false }
 lpc-model = { path = "../../lp-core/lpc-model", default-features = false }

@@ -152,6 +152,56 @@ pub fn ser_write_json_len<T: Serialize>(value: &T) -> usize {
     }
 }
 
+/// A 64-bit FNV-1a hash of `value`'s wire encoding, without allocating it.
+///
+/// For content comparison of wire payloads the engine answers repeatedly —
+/// "is this the same structure I answered last time?" — where keeping the
+/// previous answer around to compare against would cost heap on a device.
+/// It hashes exactly the bytes the firmware would write, through the same
+/// erased serializer instantiation as the real write (see
+/// [`ser_write_json_to`]), so a payload type that is written anyway costs no
+/// second serializer.
+///
+/// Not a security boundary: FNV is a non-cryptographic hash, and a collision
+/// (2^-64 per comparison) reads as "unchanged".
+#[must_use]
+pub fn ser_write_json_fnv64<T: Serialize>(value: &T) -> u64 {
+    let mut hasher = Fnv64SerWrite::new();
+    // As in `ser_write_json_len`: the sink is infallible and wire types do not
+    // fail to serialize. A future one that does hashes its prefix, which is
+    // still deterministic.
+    let _ = ser_write_json_to(&mut hasher, value);
+    hasher.hash
+}
+
+/// A [`SerWrite`] sink folding every byte into a 64-bit FNV-1a hash.
+struct Fnv64SerWrite {
+    hash: u64,
+}
+
+impl Fnv64SerWrite {
+    const OFFSET_BASIS: u64 = 0xcbf2_9ce4_8422_2325;
+    const PRIME: u64 = 0x0000_0100_0000_01b3;
+
+    const fn new() -> Self {
+        Self {
+            hash: Self::OFFSET_BASIS,
+        }
+    }
+}
+
+impl SerWrite for Fnv64SerWrite {
+    type Error = core::convert::Infallible;
+
+    fn write(&mut self, buf: &[u8]) -> Result<(), Self::Error> {
+        for byte in buf {
+            self.hash ^= u64::from(*byte);
+            self.hash = self.hash.wrapping_mul(Self::PRIME);
+        }
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -170,6 +220,24 @@ mod tests {
         counter.write(b" world").unwrap();
         assert_eq!(counter.len(), 11);
         assert!(!counter.is_empty());
+    }
+
+    #[test]
+    fn fnv64_hashes_the_wire_bytes() {
+        // FNV-1a 64 of the encoding `"a"` (three bytes: quote, a, quote),
+        // checked against the reference algorithm by hand.
+        let mut reference = Fnv64SerWrite::new();
+        reference.write(b"\"a\"").unwrap();
+        assert_eq!(ser_write_json_fnv64(&"a"), reference.hash);
+        // The empty input is the offset basis — the published vector.
+        assert_eq!(Fnv64SerWrite::new().hash, 0xcbf2_9ce4_8422_2325);
+        let mut a = Fnv64SerWrite::new();
+        a.write(b"a").unwrap();
+        assert_eq!(
+            a.hash, 0xaf63_dc4c_8601_ec8c,
+            "published FNV-1a 64 vector for \"a\""
+        );
+        assert_ne!(ser_write_json_fnv64(&1_u32), ser_write_json_fnv64(&2_u32));
     }
 
     #[test]
@@ -312,32 +380,35 @@ mod cross_serializer_tests {
                     revision: Revision::new(18),
                     extent: ControlExtent::new(1, 30),
                     sample_format: crate::project::WireChannelSampleFormat::U16,
-                    sample_layout: ControlSampleLayout {
-                        spans: Vec::from([ControlSampleSpan {
-                            row: 0,
-                            start: 0,
-                            len: 30,
-                            encoding: ControlSampleEncoding::RgbPixels {
-                                count: 10,
-                                color_order: ColorOrder::Rgb,
-                            },
-                        }]),
-                    },
-                    display_layout: crate::ControlDisplayLayoutProbeResult::Layout(
-                        ControlDisplayLayout::Layout2d(ControlLayout2d::new(
-                            Revision::new(18),
-                            10,
-                            10,
-                            (0..10)
-                                .map(|index| ControlLamp2d {
-                                    lamp_index: index,
-                                    sample_start: index * 3,
-                                    center: [index as f32 / 16.0, index as f32 / 15.0],
-                                    radius: if index < 5 { 1.0 } else { 0.02 },
-                                })
-                                .collect(),
-                        )),
-                    ),
+                    geometry: crate::RevisionGateResult::Changed(crate::ControlProductGeometry {
+                        revision: Revision::new(18),
+                        sample_layout: ControlSampleLayout {
+                            spans: Vec::from([ControlSampleSpan {
+                                row: 0,
+                                start: 0,
+                                len: 30,
+                                encoding: ControlSampleEncoding::RgbPixels {
+                                    count: 10,
+                                    color_order: ColorOrder::Rgb,
+                                },
+                            }]),
+                        },
+                        display_layout: crate::GeometryDisplayLayout::Layout(
+                            ControlDisplayLayout::Layout2d(ControlLayout2d::new(
+                                Revision::new(18),
+                                10,
+                                10,
+                                (0..10)
+                                    .map(|index| ControlLamp2d {
+                                        lamp_index: index,
+                                        sample_start: index * 3,
+                                        center: [index as f32 / 16.0, index as f32 / 15.0],
+                                        radius: if index < 5 { 1.0 } else { 0.02 },
+                                    })
+                                    .collect(),
+                            )),
+                        ),
+                    }),
                     bytes: vec![0u8; 30 * 2],
                 },
             )),
