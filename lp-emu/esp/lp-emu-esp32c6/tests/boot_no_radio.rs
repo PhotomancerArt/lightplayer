@@ -240,8 +240,49 @@ fn the_no_radio_image_runs_three_seconds_strict_to_the_idle_loop() {
         "{} tick interrupts in 3 s",
         handler_entries.len()
     );
+    // The run stops at an emulated deadline, not at a quiet point: the tick
+    // is free to fire a few hundred cycles before it, and the handler it
+    // entered is then cut off mid-flight — entered (`mxint_clear`), maybe
+    // threshold raised, never restored. Which firmware build lands a tick
+    // in that last window is an accident of code layout, so a check that
+    // counts raw entries against raw restores flips between unrelated
+    // commits (docs/defects/2026-09-24-boot-no-radio-asserted-the-window-edge.md).
+    // So pair them: walk the trace in order, and require every entry to be
+    // followed by its raise (2) and its restore (1) before the next entry.
+    // Only the LAST entry may be unfinished, and only because the window
+    // closed on it — which is what `in_flight` names.
+    let walk = walk_handlers(&lines);
+    assert_eq!(
+        walk.completed + usize::from(walk.in_flight.is_some()),
+        handler_entries.len(),
+        "every tick handler but the one the deadline cut off ran to its restore"
+    );
+    // And the one left open really is the window edge: it was entered
+    // within twice the slowest completed handler's span of the deadline
+    // (e226fb28's image: 1,005 cycles, against a slowest 1,140). A handler
+    // that never restores mid-run leaves no later entry to trip the pairing
+    // above, and this is what still catches it; the factor of two is room
+    // for a tail handler on a slower path than any before it, not for a
+    // hang.
+    if let Some((at, stage)) = walk.in_flight {
+        let age = m.cycles() - at;
+        println!(
+            "the deadline cut off the tick handler entered at cyc={at} ({age} cycles before \
+             it) at {stage:?}; the slowest completed handler took {} cycles",
+            walk.longest
+        );
+        assert!(
+            age <= 2 * walk.longest,
+            "the tick handler entered at cyc={at} was still at {stage:?} {age} cycles later — \
+             over twice the slowest handler that finished ({} cycles): a lost restore, not the \
+             edge",
+            walk.longest
+        );
+    }
     // `timer_tick_handler` clears once and `schedule()` clears once more
-    // when it re-arms: two `int_clr` writes per tick.
+    // when it re-arms: two `int_clr` writes per tick. (Not both inside the
+    // handler's raise/restore — `schedule()` also runs outside it — so this
+    // stays a count, with the slack of one tick at the edge.)
     assert!(
         int_clr_writes >= 2 * handler_entries.len() - 2,
         "{int_clr_writes} int_clr writes for {} ticks",
@@ -285,21 +326,8 @@ fn the_no_radio_image_runs_three_seconds_strict_to_the_idle_loop() {
         median_gap / memmap::CYCLES_PER_US
     );
     // Every tick entered `handle_interrupts`: threshold raised to 2 and
-    // restored to 1, the CPU interrupt cleared, the status words read.
-    let thresh_up = lines
-        .iter()
-        .filter(|l| l.contains("W4 PLIC_MX+0x090 mxint_thresh = 0x00000002"))
-        .count();
-    let thresh_down = lines
-        .iter()
-        .filter(|l| l.contains("W4 PLIC_MX+0x090 mxint_thresh = 0x00000001"))
-        .count();
-    assert!(
-        thresh_up >= handler_entries.len(),
-        "{thresh_up} vs {}",
-        handler_entries.len()
-    );
-    assert!(thresh_down >= handler_entries.len());
+    // restored to 1 (paired above, per handler), the CPU interrupt
+    // cleared, the status words read.
     assert!(
         !lines
             .iter()
@@ -350,6 +378,60 @@ fn the_no_radio_image_runs_three_seconds_strict_to_the_idle_loop() {
     let spins: Vec<&String> = lines.iter().filter(|l| l.contains(" SPIN ")).collect();
     assert_eq!(spins.len(), 1, "{spins:?}");
     assert!(spins[0].contains("USB_DEVICE+0x004 ep1_conf"));
+}
+
+/// How far a tick handler got before the trace ended.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum HandlerStage {
+    /// `mxint_clear` written; threshold not yet raised.
+    Entered,
+    /// Threshold raised to 2; not yet restored to 1.
+    Raised,
+}
+
+/// Every tick handler in the trace, paired entry to restore.
+struct HandlerWalk {
+    /// Handlers that reached their restore.
+    completed: usize,
+    /// The longest entry-to-restore span among them, in cycles.
+    longest: u64,
+    /// The one handler the trace ended inside of: its entry cycle and how
+    /// far it got.
+    in_flight: Option<(u64, HandlerStage)>,
+}
+
+/// Walk the trace in order and pair every tick-handler entry
+/// (`mxint_clear = 0x00010000`) with its threshold raise (2) and restore
+/// (1).
+///
+/// Panics if an entry is followed by another entry before it completed:
+/// that is a lost restore, not a window edge. Threshold writes outside a
+/// handler are left alone, as the counts this replaced left them.
+fn walk_handlers(lines: &[String]) -> HandlerWalk {
+    let mut walk = HandlerWalk {
+        completed: 0,
+        longest: 0,
+        in_flight: None,
+    };
+    for l in lines {
+        if l.contains("W4 PLIC_MX+0x008 mxint_clear = 0x00010000") {
+            if let Some((at, stage)) = walk.in_flight {
+                panic!("the tick handler entered at cyc={at} stopped at {stage:?}: {l}");
+            }
+            walk.in_flight = Some((cycle_of(l), HandlerStage::Entered));
+        } else if l.contains("W4 PLIC_MX+0x090 mxint_thresh = 0x00000002") {
+            if let Some((at, HandlerStage::Entered)) = walk.in_flight {
+                walk.in_flight = Some((at, HandlerStage::Raised));
+            }
+        } else if l.contains("W4 PLIC_MX+0x090 mxint_thresh = 0x00000001")
+            && let Some((at, HandlerStage::Raised)) = walk.in_flight
+        {
+            walk.in_flight = None;
+            walk.completed += 1;
+            walk.longest = walk.longest.max(cycle_of(l) - at);
+        }
+    }
+    walk
 }
 
 #[test]
@@ -546,4 +628,46 @@ fn print_gate_excerpts() {
     for l in feeds.iter().take(1).chain(feeds.iter().rev().take(1)) {
         println!("{l}");
     }
+}
+
+// The handler walk on its own, no ELF needed: the edge it must forgive and
+// the lost restore it must not.
+
+#[test]
+fn the_handler_walk_names_the_one_the_deadline_cut_off() {
+    let mut lines = synthetic_handler(0, true);
+    lines.extend(synthetic_handler(50_000, true));
+    lines.extend(synthetic_handler(99_500, false));
+    let walk = walk_handlers(&lines);
+    assert_eq!(walk.completed, 2);
+    assert_eq!(walk.longest, 1_000);
+    assert_eq!(walk.in_flight, Some((99_500, HandlerStage::Raised)));
+}
+
+#[test]
+#[should_panic(expected = "the tick handler entered at cyc=50000 stopped at Raised")]
+fn the_handler_walk_refuses_a_restore_lost_mid_window() {
+    let mut lines = synthetic_handler(0, true);
+    lines.extend(synthetic_handler(50_000, false));
+    lines.extend(synthetic_handler(99_000, true));
+    walk_handlers(&lines);
+}
+
+/// One tick handler's entry, raise and (optionally) restore, in the trace's
+/// own line shape.
+fn synthetic_handler(entry: u64, restore: bool) -> Vec<String> {
+    let mut lines = vec![
+        format!("cyc={entry} 0x42000000 W4 PLIC_MX+0x008 mxint_clear = 0x00010000"),
+        format!(
+            "cyc={} 0x42000004 W4 PLIC_MX+0x090 mxint_thresh = 0x00000002",
+            entry + 10
+        ),
+    ];
+    if restore {
+        lines.push(format!(
+            "cyc={} 0x42000008 W4 PLIC_MX+0x090 mxint_thresh = 0x00000001",
+            entry + 1_000
+        ));
+    }
+    lines
 }
