@@ -486,21 +486,30 @@ def cmd_fetch(args: list[str]) -> None:
             shutil.rmtree(tmp, ignore_errors=True)
         size = sum(f["bytes"] for f in manifest["files"])
         note(f"{chip}: {len(manifest['files'])} files, {size / 1e6:.1f} MB, sha256 verified → {dest}")
-        if not check_fresh(chip, manifest, True):
+        why = staleness(manifest) if any(f["kind"] == "tree" for f in manifest["files"]) else []
+        if why:
             stale_any = True
+            head = git("rev-parse", "--short=12", "HEAD").strip()
+            note(
+                f"{chip}: STALE — built from different firmware sources than this checkout "
+                f"(images: {manifest['commit'][:12]}; HEAD: {head}):\n  " + "\n  ".join(why)
+            )
     if dest_root is None:
         die("nothing fetched")
+    if stale_any and not force:
+        die(
+            "REFUSING: the images above were not built from this checkout's firmware sources, so a "
+            "suite run against them would test someone else's firmware (the recipes refuse them too). "
+            "Fetch the run for this HEAD, merge/rebase onto the images' commit, or re-run with "
+            "--force and then set LP_CI_IMAGES_FORCE=1 to use them anyway."
+        )
     print(f"\nexport LP_CI_IMAGES={dest_root}")
+    if stale_any:
+        print("export LP_CI_IMAGES_FORCE=1   # --force: these images are NOT this checkout's firmware")
     print(
         "then e.g.  just test-emu-esp32s3-boot   just test-emu-esp32v3-boot   just test-emu-c6-boot\n"
         "           just bless-chips esp32s3     (see docs/ci-images.md)"
     )
-    if stale_any and not force:
-        die(
-            "REFUSING: the images above were not built from this checkout's firmware sources (the "
-            "recipes will refuse them too). Re-run with --force to keep them anyway, and use "
-            "LP_CI_IMAGES_FORCE=1 when running against them."
-        )
 
 
 def main() -> None:
