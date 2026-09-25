@@ -8,7 +8,7 @@
 //! policy (what a reset means, when a write is applied, which drainer gets
 //! the bytes) lives in the JS beside it, where the awaits are.
 
-use js_sys::{Array, Promise, Uint8Array};
+use js_sys::{Promise, Uint8Array};
 use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::JsFuture;
 
@@ -34,8 +34,8 @@ extern "C" {
     #[wasm_bindgen(js_name = takeEmuBytes, catch)]
     fn js_take_bytes(id: u32) -> Result<Uint8Array, JsValue>;
 
-    #[wasm_bindgen(js_name = takeEmuLines, catch)]
-    fn js_take_lines(id: u32) -> Result<Array, JsValue>;
+    #[wasm_bindgen(js_name = returnEmuBytes, catch)]
+    fn js_return_bytes(id: u32, bytes: &[u8]) -> Result<(), JsValue>;
 
     #[wasm_bindgen(js_name = takeEmuError, catch)]
     fn js_take_error(id: u32) -> Result<Option<String>, JsValue>;
@@ -163,14 +163,10 @@ impl EmulatorTabPort {
         Ok(js_take_bytes(self.id).map_err(js_error)?.to_vec())
     }
 
-    /// Whole lines the board has said; the trailing partial stays buffered
-    /// for the next drainer.
-    pub fn take_lines(&self) -> Result<Vec<String>, LinkError> {
-        Ok(js_take_lines(self.id)
-            .map_err(js_error)?
-            .iter()
-            .filter_map(|line| line.as_string())
-            .collect())
+    /// Put bytes back at the front of the buffer, for the next drainer: the
+    /// unfinished tail of what [`Self::take_bytes`] handed out.
+    pub fn return_bytes(&self, bytes: &[u8]) -> Result<(), LinkError> {
+        js_return_bytes(self.id, bytes).map_err(js_error)
     }
 
     /// The first failure the queued work hit since the last ask.

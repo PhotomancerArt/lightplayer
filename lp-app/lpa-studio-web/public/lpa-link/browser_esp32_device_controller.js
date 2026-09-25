@@ -11,10 +11,17 @@ export class BrowserEsp32DeviceController {
     this.readStopRequested = false;
     this.releasing = false;
     this.closed = true;
-    this.decoder = new TextDecoder();
     this.encoder = new TextEncoder();
-    this.buffer = "";
-    this.lines = [];
+    // What the board said, as the bytes it said it in. NOT text: on a link
+    // that opted in (plan `lp-json-pack`) replies are packed frames, which
+    // hold any byte — `0x0A` and invalid UTF-8 included — so a TextDecoder
+    // here would mangle them. Rust splits (`lpc_wire::WireStream`, through
+    // `lpa-link`'s `WireReader`), one splitter for every drainer of the port.
+    this.chunks = [];
+    // Bumped on every clearBufferedInput(): the Rust splitter holds a partial
+    // line or frame between drains, and a new generation means that partial
+    // belongs to a port that no longer exists.
+    this.generation = 0;
     this.errors = [];
     this.listeners = new Set();
   }
@@ -165,8 +172,19 @@ export class BrowserEsp32DeviceController {
     await this.writer.write(this.encoder.encode(line));
   }
 
-  takeLines() {
-    return this.lines.splice(0, this.lines.length);
+  // Everything read since the last drain, as ONE Uint8Array, with the
+  // buffer generation it belongs to. See the constructor.
+  takeBytes() {
+    const chunks = this.chunks.splice(0, this.chunks.length);
+    let total = 0;
+    for (const chunk of chunks) total += chunk.length;
+    const bytes = new Uint8Array(total);
+    let at = 0;
+    for (const chunk of chunks) {
+      bytes.set(chunk, at);
+      at += chunk.length;
+    }
+    return { generation: this.generation, bytes };
   }
 
   takeErrors() {
@@ -318,8 +336,8 @@ export class BrowserEsp32DeviceController {
   }
 
   clearBufferedInput() {
-    this.buffer = "";
-    this.lines = [];
+    this.chunks = [];
+    this.generation += 1;
     this.errors = [];
   }
 
@@ -387,10 +405,9 @@ export class BrowserEsp32DeviceController {
         if (!value) {
           continue;
         }
-        const text = this.decoder.decode(value, { stream: true });
-        this.buffer += text;
-        this.emit({ type: "raw", source: "serial", text });
-        this.drainCompleteLines();
+        // Copied: a stream may reuse the buffer it handed out.
+        this.chunks.push(value.slice());
+        this.emit({ type: "raw", source: "serial", bytes: value });
       }
     } catch (error) {
       if (!this.closed && !this.readStopRequested) {
@@ -406,19 +423,6 @@ export class BrowserEsp32DeviceController {
       if (!this.closed && !this.releasing && !this.readStopRequested) {
         this.pushError("Serial port disconnected.");
       }
-    }
-  }
-
-  drainCompleteLines() {
-    for (;;) {
-      const newline = this.buffer.indexOf("\n");
-      if (newline < 0) {
-        return;
-      }
-      const line = this.buffer.slice(0, newline).replace(/\r$/, "");
-      this.buffer = this.buffer.slice(newline + 1);
-      this.lines.push(line);
-      this.emit({ type: "line", source: "serial", text: line });
     }
   }
 

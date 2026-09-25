@@ -30,8 +30,9 @@ use std::collections::VecDeque;
 
 use lpa_devices::link::{Link, LinkCommand, LinkEvent, LinkInfo, ResetKind};
 
-use crate::device_link::demux::{LineSplitter, push_bytes};
+use crate::device_link::demux::demux_read;
 use crate::device_link::wire::encode_client_frame;
+use crate::device_link::wire_reader::{WireRead, WireReader};
 use crate::stream::{ByteStreamError, DeviceByteStream};
 
 /// Bytes read per `read_available` call.
@@ -47,7 +48,12 @@ pub struct ByteStreamLink<S: DeviceByteStream> {
     info: LinkInfo,
     stream: S,
     open: bool,
-    splitter: LineSplitter,
+    /// Console lines, `M!` lines and packed frames, split frame-first, and
+    /// the packed-reply opt-in ([`Self::asking_for_packed_replies`]).
+    reader: WireReader,
+    /// Milliseconds on any monotonic clock, for the opt-in's re-ask limit.
+    /// `None` on a link that never asks.
+    clock: Option<Box<dyn FnMut() -> u64 + Send>>,
     events: VecDeque<LinkEvent>,
 }
 
@@ -59,9 +65,23 @@ impl<S: DeviceByteStream> ByteStreamLink<S> {
             info,
             stream,
             open: false,
-            splitter: LineSplitter::default(),
+            reader: WireReader::new(false),
+            clock: None,
             events: VecDeque::new(),
         }
+    }
+
+    /// Ask the board to pack its replies (plan `lp-json-pack`, Q1) once its
+    /// hello says it can with this build's dictionary, and again when it
+    /// falls back; `now_ms` is any monotonic millisecond clock. The link
+    /// reads both forms either way; this is only whether it asks.
+    pub fn asking_for_packed_replies(
+        mut self,
+        now_ms: impl FnMut() -> u64 + Send + 'static,
+    ) -> Self {
+        self.reader = WireReader::new(true);
+        self.clock = Some(Box::new(now_ms));
+        self
     }
 
     /// Whether the port is currently open for traffic.
@@ -72,7 +92,7 @@ impl<S: DeviceByteStream> ByteStreamLink<S> {
     fn open_port(&mut self, baud: u32) {
         // A fresh port is a fresh window (the fold begins one on `Opened`),
         // so the previous generation's partial line is not this one's first.
-        self.splitter.clear();
+        self.reader.clear();
         match self.stream.reopen(baud) {
             Ok(()) => {
                 self.open = true;
@@ -93,7 +113,7 @@ impl<S: DeviceByteStream> ByteStreamLink<S> {
     /// pointless "cancelling…".
     fn close_port(&mut self, reason: &str) {
         self.open = false;
-        self.splitter.clear();
+        self.reader.clear();
         self.events.push_back(LinkEvent::Closed {
             reason: reason.to_string(),
         });
@@ -168,7 +188,7 @@ impl<S: DeviceByteStream> ByteStreamLink<S> {
         }
         // A device that just rebooted is re-describing itself from scratch,
         // so anything half-read belongs to the machine that no longer exists.
-        self.splitter.clear();
+        self.reader.clear();
         self.events
             .push_back(LinkEvent::ResetOutcome { kind, ok: true });
     }
@@ -182,9 +202,7 @@ impl<S: DeviceByteStream> ByteStreamLink<S> {
         for _ in 0..READS_PER_PUMP {
             match self.stream.read_available(&mut buf) {
                 Ok(0) => return,
-                Ok(read) => {
-                    push_bytes(&mut self.splitter, &buf[..read], &mut self.events);
-                }
+                Ok(read) => self.demux(&buf[..read]),
                 Err(ByteStreamError::Closed) => {
                     self.close_port("device disconnected");
                     return;
@@ -193,6 +211,26 @@ impl<S: DeviceByteStream> ByteStreamLink<S> {
                     self.fail(&error);
                     return;
                 }
+            }
+        }
+    }
+
+    /// Split `bytes` onto the event queue, writing any opt-in the reader asks
+    /// for.
+    fn demux(&mut self, bytes: &[u8]) {
+        let now_ms = self.clock.as_mut().map_or(0, |clock| clock());
+        let mut sends = Vec::new();
+        let events = &mut self.events;
+        self.reader.push(bytes, now_ms, |read| match read {
+            WireRead::Send(request) => sends.push(request),
+            read => events.extend(demux_read(read)),
+        });
+        for request in sends {
+            match lpc_wire::json::to_string(&request) {
+                Ok(json) => self.write(format!("M!{json}\n").as_bytes()),
+                Err(error) => self.events.push_back(LinkEvent::Error(format!(
+                    "failed to encode the opt-in: {error}"
+                ))),
             }
         }
     }

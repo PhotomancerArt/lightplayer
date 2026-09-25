@@ -129,8 +129,10 @@ export async function writeLine(id, line) {
   await requireSession(id).writeLine(line);
 }
 
-export function takeLines(id) {
-  return requireSession(id).takeLines();
+// `{ generation, bytes }`: everything the port read since the last drain,
+// as bytes (the Rust side splits; see the controller's constructor).
+export function takeBytes(id) {
+  return requireSession(id).takeBytes();
 }
 
 export function takeErrors(id) {

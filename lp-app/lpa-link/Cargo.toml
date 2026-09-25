@@ -62,6 +62,8 @@ web-sys = { version = "0.3", optional = true, features = [
 
 [dev-dependencies]
 tokio = { version = "1", features = ["macros", "rt", "time"] }
+# The demux tests write packed frames with the firmware's own frame writer.
+lpc-wire = { path = "../../lp-core/lpc-wire", features = ["ser-write-json"] }
 # golden-trace replay (tests/trace_replay.rs) parses the device-event JSONL
 serde_json = { workspace = true }
 
@@ -140,6 +142,9 @@ emulator-tab = [
 ]
 fake-device = [
     "device-link",
+    # The fake packs its replies the way shipped firmware does, with the
+    # firmware's own frame writer (`lpc_wire::ser_packed_frame_to`).
+    "lpc-wire/ser-write-json",
     "device-session-host",
     "dep:fw-host",
     "dep:littlefs-rust",

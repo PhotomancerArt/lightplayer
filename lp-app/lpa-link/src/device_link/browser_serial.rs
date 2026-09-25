@@ -1,8 +1,10 @@
 //! [`Link`] over the shipped browser Web Serial machinery (wasm only).
 //!
 //! This is a WRAPPER, not a second transport. The JS controller
-//! (`browser_esp32_device_controller.js`) still owns the port, the read pump
-//! and the line splitting; [`BrowserSerialEsp32Provider`] still owns the
+//! (`browser_esp32_device_controller.js`) still owns the port and the read
+//! pump, the provider's per-port reader (`device_link::wire_reader`, shared
+//! with the lens io) owns the splitting and the packed-reply opt-in, and
+//! [`BrowserSerialEsp32Provider`] still owns the
 //! endpoint, session and grant lifecycle. All this adapter does is turn that
 //! promise-shaped surface into the model's event-queue contract.
 //!
@@ -16,9 +18,10 @@
 //!
 //! # Reading is free
 //!
-//! Lines and errors come back through the provider's synchronous
-//! `take_lines`/`take_errors`, so [`Link::poll_event`] needs no future at
-//! all: it drains what the JS read pump has already buffered and demuxes it.
+//! Reads, notes and errors come back through the provider's synchronous
+//! `take_reads`/`take_wire_notes`/`take_errors`, so [`Link::poll_event`]
+//! needs no future at all: it drains what the JS read pump has already
+//! buffered and demuxes it.
 //! A JS controller error means the port died underneath us (the shipped
 //! `mark_gone` rule), so it surfaces as an error AND closes the link.
 
@@ -29,7 +32,7 @@ use std::rc::Rc;
 use lpa_devices::link::{Link, LinkCommand, LinkEvent, LinkInfo, ResetKind};
 use wasm_bindgen_futures::spawn_local;
 
-use crate::device_link::demux::demux_line;
+use crate::device_link::demux::demux_read;
 use crate::device_link::wire::client_message;
 use crate::provider::endpoint::LinkEndpointId;
 use crate::provider::session::LinkSessionId;
@@ -291,9 +294,18 @@ impl BrowserLinkInner {
         let Some(session) = self.session.borrow().clone() else {
             return;
         };
-        if let Ok(lines) = self.provider.take_lines(&session) {
-            for line in lines {
-                self.push(demux_line(&line));
+        if let Ok(reads) = self.provider.take_reads(&session) {
+            for read in reads {
+                if let Some(event) = demux_read(read) {
+                    self.push(event);
+                }
+            }
+        }
+        // After the reads: a note (the board's answer to the opt-in, say) is
+        // made while reading, and belongs after what it was read beside.
+        if let Ok(notes) = self.provider.take_wire_notes(&session) {
+            for note in notes {
+                self.push(LinkEvent::WireNote(note));
             }
         }
         let Ok(errors) = self.provider.take_errors(&session) else {

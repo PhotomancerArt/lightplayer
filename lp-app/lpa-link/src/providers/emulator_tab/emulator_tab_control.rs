@@ -31,8 +31,9 @@ use wasm_bindgen_futures::JsFuture;
 
 use super::emulator_tab_bridge::EmulatorTabPort;
 use crate::LinkError;
+use crate::device_link::wire_reader::{WireRead, WireReader, complete_prefix_len};
 
-/// How often the receive loop re-drains the page's line buffer. The same
+/// How often the receive loop re-drains the page's byte buffer. The same
 /// 20 ms the serial io and the model's pump use; faster would only find an
 /// empty queue.
 const RECEIVE_POLL_MS: u32 = 20;
@@ -115,7 +116,7 @@ impl EmulatorTabControl {
     }
 }
 
-/// `ClientIo` over one tab board's raw line framing.
+/// `ClientIo` over one tab board's bytes.
 struct EmuLineIo {
     port: EmulatorTabPort,
     /// Frames drained but not yet handed out (one drain can carry several).
@@ -146,25 +147,49 @@ impl ClientIo for EmuLineIo {
             if let Some(error) = self.port.take_error() {
                 return Err(TransportError::Other(error));
             }
-            let lines = self
+            let bytes = self
                 .port
-                .take_lines()
+                .take_bytes()
                 .map_err(|error| TransportError::Other(error.to_string()))?;
-            for line in lines {
-                if let Some(tap) = &self.tap {
-                    tap(line.clone());
-                }
-                // A non-`M!` line is the board talking — boot output, a
-                // log — rather than an answer; the tap above already
-                // carried it, and this io has no journal of its own to
-                // put it in (the serial twin has a management sink).
-                if let Some(json) = line.strip_prefix("M!") {
-                    match lpc_wire::json::from_str::<WireServerMessage>(json) {
-                        Ok(message) => self.pending.push(message),
-                        Err(error) => web_sys::console::warn_1(&JsValue::from_str(&format!(
-                            "[emu-link] malformed frame: {error}"
-                        ))),
+            // Read up to the last boundary and hand the rest back: the pump
+            // reads it when the wire is returned, so a line or a packed
+            // frame straddling the end of this conversation is read whole
+            // by exactly one of us.
+            let whole = complete_prefix_len(&bytes);
+            self.port
+                .return_bytes(&bytes[whole..])
+                .map_err(|error| TransportError::Other(error.to_string()))?;
+            // A fresh reader per drain: `whole` ends on a boundary, so
+            // nothing is ever held across drains. It never asks — the pump's
+            // reader owns the opt-in, and hears the board again the moment
+            // the wire is returned.
+            let mut reads = Vec::new();
+            WireReader::new(false).push(&bytes[..whole], 0, |read| reads.push(read));
+            for read in reads {
+                match read {
+                    // The board talking — boot output, a log — rather than an
+                    // answer. Empty lines are the separator every frame is
+                    // written after, and were never handed to the tap.
+                    WireRead::Line(line) => {
+                        if let Some(tap) = self.tap.as_ref().filter(|_| !line.is_empty()) {
+                            tap(line);
+                        }
                     }
+                    WireRead::Frame(frame) => {
+                        if let Some(tap) = &self.tap {
+                            tap(frame.to_line());
+                        }
+                        match frame.message {
+                            Ok(message) => self.pending.push(message),
+                            Err(error) => web_sys::console::warn_1(&JsValue::from_str(&format!(
+                                "[emu-link] malformed frame: {error}"
+                            ))),
+                        }
+                    }
+                    WireRead::Error(error) => web_sys::console::warn_1(&JsValue::from_str(
+                        &format!("[emu-link] undeliverable frame: {error}"),
+                    )),
+                    WireRead::Send(_) | WireRead::Note(_) => {}
                 }
             }
             if !self.pending.is_empty() {

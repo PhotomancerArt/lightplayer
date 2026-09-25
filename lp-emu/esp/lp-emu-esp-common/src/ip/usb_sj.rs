@@ -2088,9 +2088,9 @@ mod tests {
         sb.write(u, INT_CLR, INT_SERIAL_IN_EMPTY | INT_SERIAL_OUT_RECV_PKT);
     }
 
-    /// The firmware's gate (`fw-esp32s3`
-    /// `serial::in_endpoint::InEndpoint::ready`), register for register: wait
-    /// until the buffer is free — clear, recheck, else esp-hal's
+    /// The firmware's gate (`fw-esp32-common`
+    /// `serial::in_endpoint::InEndpoint::ready`, used by the C6 and S3), register
+    /// for register: wait until the buffer is free — clear, recheck, else esp-hal's
     /// `flush_tx_async` — then clear the now-stale `serial_in_empty`.
     fn in_endpoint_ready(sb: &mut Sandbox, u: &mut UsbSerialJtag) {
         let free = |sb: &mut Sandbox, u: &mut UsbSerialJtag| sb.read(u, EP1_CONF) & 0b010 != 0;

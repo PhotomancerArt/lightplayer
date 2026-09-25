@@ -267,6 +267,7 @@ fn body_label(body: &ServerMsgBody) -> &'static str {
         ServerMsgBody::SetLogLevel => "SetLogLevel",
         ServerMsgBody::Reboot => "Reboot",
         ServerMsgBody::ClearFaults { .. } => "ClearFaults",
+        ServerMsgBody::SetEncoding { .. } => "SetEncoding",
         ServerMsgBody::Log { .. } => "Log",
         ServerMsgBody::Heartbeat { .. } => "Heartbeat",
         ServerMsgBody::Error { .. } => "Error",
@@ -602,6 +603,7 @@ mod tests {
                 ..Default::default()
             },
             device_uid: Some(uid.to_string()),
+            pack_dictionary: lpc_wire::WIRE_DICTIONARY_FINGERPRINT,
             auth: lpc_wire::HelloAuth::TRUSTED,
         };
         lpc_wire::json::to_string(&WireServerMessage::new(7, ServerMsgBody::Hello(hello)))

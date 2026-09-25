@@ -164,6 +164,13 @@ impl EmuLinkSource for BrowserEmuLinkSource {
         // the exclusive borrow mean something: an effect's io drains the
         // same buffer the paused pump would have.
         let link = ByteStreamLink::new(info.clone(), EmulatorTabStream::new(port));
+        // Studio asks every board for packed replies (plan `lp-json-pack`);
+        // `?wire=json` is the dev override that keeps a page on JSON.
+        let link = if lpa_link::device_link::wire_reader::packed_replies_wanted() {
+            link.asking_for_packed_replies(|| js_sys::Date::now() as u64)
+        } else {
+            link
+        };
         Ok(EmuBacking {
             link: GrantedLink {
                 link: Box::new(link),

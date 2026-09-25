@@ -28,4 +28,5 @@ opt-level = "s"
 # root `[patch]` table, so it is repeated here for the ones it needs.
 # `just lint-nested-patches` fails if this falls out of step with the root.
 [patch.crates-io]
+ser-write = { path = "../../third_party/ser-write" }
 ser-write-json = { path = "../../third_party/ser-write-json" }

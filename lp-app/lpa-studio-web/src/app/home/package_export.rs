@@ -122,12 +122,22 @@ pub(crate) fn trigger_zip_download(
     file_name: &str,
     bytes: &[u8],
 ) -> Result<(), wasm_bindgen::JsValue> {
+    trigger_download(file_name, "application/zip", bytes)
+}
+
+/// Hand `bytes` to the browser as a named download of MIME type `mime`.
+#[cfg(target_arch = "wasm32")]
+pub(crate) fn trigger_download(
+    file_name: &str,
+    mime: &str,
+    bytes: &[u8],
+) -> Result<(), wasm_bindgen::JsValue> {
     use wasm_bindgen::JsCast;
 
     let parts = js_sys::Array::new();
     parts.push(&js_sys::Uint8Array::from(bytes).buffer());
     let options = web_sys::BlobPropertyBag::new();
-    options.set_type("application/zip");
+    options.set_type(mime);
     let blob = web_sys::Blob::new_with_buffer_source_sequence_and_options(&parts, &options)?;
     let url = web_sys::Url::create_object_url_with_blob(&blob)?;
 

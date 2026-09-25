@@ -281,7 +281,8 @@ impl IdentifyActivity {
             LinkEvent::Line(_)
             | LinkEvent::Error(_)
             | LinkEvent::ResetOutcome { .. }
-            | LinkEvent::Passthrough { .. } => ActivityStep::nothing(),
+            | LinkEvent::Passthrough { .. }
+            | LinkEvent::WireNote(_) => ActivityStep::nothing(),
         }
     }
 }

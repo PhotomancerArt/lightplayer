@@ -35,6 +35,17 @@ use crate::server::hello_auth::HelloAuth;
 ///
 /// # History
 ///
+/// - 26: JSON Pack (plan `lp-json-pack`; bumped again after the BLE M3
+///   access core took 22, lean-wire follow-ups took 23, the gradient pin
+///   took 24 and pattern space took 25) — a board writes its replies
+///   PACKED on a link whose host opted in: `ClientRequest::SetEncoding {
+///   encoding, dictionary }` + its `ServerMsgBody::SetEncoding { encoding }`
+///   answer, and `ServerHello` gains `pack_dictionary`, the fingerprint of
+///   the generated wire dictionary (`WIRE_DICTIONARY_FINGERPRINT`). New
+///   variants on both enums and a required hello field: an old peer cannot
+///   decode either, which is what earns the bump. From here on the
+///   dictionary is part of the wire: `just wire-dict-check` fails a
+///   dictionary change that does not bump this constant.
 /// - 25: pattern space (bumped again after lean-wire follow-ups took 23
 ///   and the gradient-cycle pin took 24;
 ///   `docs/adr/2026-09-24-pattern-space.md`) — the
@@ -252,7 +263,7 @@ use crate::server::hello_auth::HelloAuth;
 /// as `None` on new Studio and a new firmware's extra fields are ignored
 /// by old Studio. Bumping for those would mark every board running
 /// current firmware Incompatible in exchange for nothing.
-pub const WIRE_PROTO_VERSION: u32 = 25;
+pub const WIRE_PROTO_VERSION: u32 = 26;
 
 /// Unsolicited/boot-time server identity, version, and capability report.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -271,6 +282,14 @@ pub struct ServerHello {
     /// hello, and `ClientRequest::Hello` answers re-read it, so a
     /// post-stamp request reports the new uid. `None` means unstamped.
     pub device_uid: Option<String>,
+    /// The fingerprint of the JSON Pack dictionary this build packs with
+    /// ([`crate::WIRE_DICTIONARY_FINGERPRINT`]), or 0 when this embedder
+    /// does not pack at all (hosts, the browser, `fw-emu`, an ESP image
+    /// without `json-pack`). A host that asks for packed names its own, and
+    /// the board packs only on a match; this makes a mismatch visible in
+    /// logs and on the device card before anyone asks, and tells a host
+    /// seeing 0 not to ask.
+    pub pack_dictionary: u32,
     /// What the link this hello is sent on may do — computed per link, so
     /// the same device answers a USB client and an unauthenticated radio
     /// client differently. See [`HelloAuth`].
@@ -475,6 +494,7 @@ mod tests {
                 ..Default::default()
             },
             device_uid: Some("dev0000000000000001".to_string()),
+            pack_dictionary: crate::WIRE_DICTIONARY_FINGERPRINT,
             auth: HelloAuth::TRUSTED,
         };
         let json = crate::json::to_string(&hello).unwrap();
@@ -509,6 +529,7 @@ mod tests {
                 ..Default::default()
             },
             device_uid: None,
+            pack_dictionary: crate::WIRE_DICTIONARY_FINGERPRINT,
             auth: HelloAuth {
                 required: true,
                 granted: None,
@@ -540,6 +561,7 @@ mod tests {
                 ..Default::default()
             },
             device_uid: None,
+            pack_dictionary: crate::WIRE_DICTIONARY_FINGERPRINT,
             auth: HelloAuth {
                 required: true,
                 granted: None,
@@ -572,7 +594,7 @@ mod tests {
     #[test]
     fn the_proto_version_is_pinned_to_its_history() {
         assert_eq!(
-            WIRE_PROTO_VERSION, 25,
+            WIRE_PROTO_VERSION, 26,
             "if you meant to bump, add the History entry in this file's \
              doc comment and update this pin"
         );
