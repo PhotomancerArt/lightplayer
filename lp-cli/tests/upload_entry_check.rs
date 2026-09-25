@@ -25,8 +25,7 @@ fn upload_refuses_when_a_dormant_entry_fails_to_load() {
         wait_timeout_secs: 10,
     });
 
-    let error =
-        result.expect_err("a broken dormant entry must refuse the upload, not deploy it");
+    let error = result.expect_err("a broken dormant entry must refuse the upload, not deploy it");
     let message = format!("{error:#}");
     assert!(
         message.contains("Refusing to upload"),

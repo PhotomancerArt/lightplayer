@@ -102,11 +102,7 @@ mod tests {
         let issues = entries_failing_to_load(&fs);
         assert_eq!(issues.len(), 1, "issues: {issues:?}");
         assert!(issues[0].contains("entry 2"), "issue: {}", issues[0]);
-        assert!(
-            issues[0].contains("\"broken\""),
-            "issue: {}",
-            issues[0]
-        );
+        assert!(issues[0].contains("\"broken\""), "issue: {}", issues[0]);
 
         let notice = issues_notice(&issues).expect("issues produce a notice");
         assert!(

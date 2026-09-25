@@ -1395,12 +1395,13 @@ mod tests {
         assert!(
             registry
                 .residency()
-                .explicit_set(&NodeUseLocation::root().child(SlotPath::parse("nodes[playlist]").unwrap()))
+                .explicit_set(
+                    &NodeUseLocation::root().child(SlotPath::parse("nodes[playlist]").unwrap())
+                )
                 .is_none()
-                || registry
-                    .residency()
-                    .explicit_set(&NodeUseLocation::root().child(SlotPath::parse("nodes[playlist]").unwrap()))
-                    == Some(&[1][..]),
+                || registry.residency().explicit_set(
+                    &NodeUseLocation::root().child(SlotPath::parse("nodes[playlist]").unwrap())
+                ) == Some(&[1][..]),
             "residency was narrowed back to what it was before the call"
         );
     }

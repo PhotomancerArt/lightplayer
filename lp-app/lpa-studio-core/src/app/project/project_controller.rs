@@ -28,9 +28,9 @@ use crate::{
     ProjectState, ProjectSync, ProjectSyncPhase, ProjectSyncRun, ProjectSyncSummary, SlotEditOp,
     StudioOverlayMutation, StudioProjectRead, StudioProjectReadOutcome, StudioServerClient,
     UiAction, UiAssetContent, UiAssetContentBody, UiAssetEditor, UiError, UiIssue, UiLogDraft,
-    UiLogLevel, UiLogOrigin, UiMetric, UiNodeTabBody, UiNodeView, UiNotice, UiPaneAction, UiPaneView,
-    UiPendingEdit, UiPendingEditKind, UiPendingEditPhase, UiProductRef, UiResult, UiShaderError,
-    UiShaderUniform, UiSlotAsset, UiStatus, UiViewContent, UxUpdateSink,
+    UiLogLevel, UiLogOrigin, UiMetric, UiNodeTabBody, UiNodeView, UiNotice, UiPaneAction,
+    UiPaneView, UiPendingEdit, UiPendingEditKind, UiPendingEditPhase, UiProductRef, UiResult,
+    UiShaderError, UiShaderUniform, UiSlotAsset, UiStatus, UiViewContent, UxUpdateSink,
 };
 use lpc_model::slot::SlotPersistence;
 use lpc_model::{
@@ -6390,17 +6390,12 @@ impl ProjectController {
         // uses, reused here because it is exactly the same wait: "the
         // named child under this parent has not landed in a synced view
         // yet".
-        if let Some(expected_name) = node
-            .ui_node()
-            .tabs
-            .iter()
-            .find_map(|tab| match &tab.body {
-                UiNodeTabBody::Sections(sections) => {
-                    node_face_builder::playlist_entry_expected_child_name(sections, op.entry)
-                }
-                UiNodeTabBody::Text { .. } => None,
-            })
-        {
+        if let Some(expected_name) = node.ui_node().tabs.iter().find_map(|tab| match &tab.body {
+            UiNodeTabBody::Sections(sections) => {
+                node_face_builder::playlist_entry_expected_child_name(sections, op.entry)
+            }
+            UiNodeTabBody::Text { .. } => None,
+        }) {
             self.pending_focus = Some(PendingNodeFocus {
                 parent: op.node.clone(),
                 name: expected_name,
