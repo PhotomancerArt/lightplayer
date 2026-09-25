@@ -255,6 +255,29 @@ impl AccessSession {
                     challenge: None,
                 })
             }
+            // The sheet is up on a locked link and nothing holds a challenge
+            // on this window (a reconnect, or a typed password was refused):
+            // begin one now and hold it, so the password being typed answers
+            // it rather than beginning at submit. A board that counts its
+            // unlock deadline from connect keeps a link with a challenge
+            // outstanding (up to the challenge's own life), which is the
+            // Studio half of Run M's "~10 s to type a password". One per
+            // window: a held challenge is never begun over.
+            AccessPhase::Locked
+                if self.prompt.is_some()
+                    && !self
+                        .challenge
+                        .as_ref()
+                        .is_some_and(|(at_window, _, _)| *at_window == window) =>
+            {
+                Some(AccessStep::Login {
+                    window,
+                    held: Vec::new(),
+                    passwords: Vec::new(),
+                    typed: None,
+                    challenge: None,
+                })
+            }
             _ => None,
         }
     }
@@ -262,11 +285,21 @@ impl AccessSession {
     /// A conversation for `window` started.
     pub fn started(&mut self, step: &AccessStep) {
         match step {
-            AccessStep::Login { .. } => {
+            AccessStep::Login {
+                held,
+                passwords,
+                typed,
+                ..
+            } => {
                 self.busy = true;
                 // An open challenge is answered by this login, or dropped.
                 self.challenge = None;
-                self.phase = AccessPhase::LoggingIn;
+                // Holding a challenge for the sheet answers nothing: the
+                // device stays locked, and the sheet does not read
+                // "Unlocking…".
+                if !(held.is_empty() && passwords.is_empty() && typed.is_none()) {
+                    self.phase = AccessPhase::LoggingIn;
+                }
             }
             AccessStep::Check(_) => {
                 self.busy = true;
@@ -553,8 +586,93 @@ mod tests {
         assert_eq!(step, AccessStep::Check(second));
         session.started(&step);
         session.checked(second, true, None, true);
-        assert_eq!(session.next_step(Millis(12_001), &[], &["camp"]), None);
         assert!(session.prompt.is_some(), "the sheet stays up");
+        // What the new window gets is a challenge held for the sheet: a
+        // begin with nothing to answer it with.
+        let step = session.next_step(Millis(12_001), &[], &["camp"]).unwrap();
+        assert!(
+            matches!(&step, AccessStep::Login { held, passwords, typed: None, .. }
+                if held.is_empty() && passwords.is_empty()),
+            "no refused password is re-sent: {step:?}"
+        );
+    }
+
+    /// Run M: the board drops a link nothing unlocked about 10 s after it
+    /// connects, while the sheet is still being typed into. With the sheet
+    /// up, each window begins one challenge and holds it (the device stays
+    /// locked, the sheet is not busy), so the typed password answers it;
+    /// a held challenge is never begun over.
+    #[test]
+    fn with_the_sheet_up_each_window_holds_one_challenge_for_the_typed_password() {
+        let mut session = AccessSession::default();
+        let first = window(1, 10);
+        session.observe(Some(first));
+        session.started(&AccessStep::Check(first));
+        session.checked(first, true, None, false);
+        assert_eq!(session.prompt, Some(PromptReason::NoPasswordKnown));
+
+        let hold = session.next_step(Millis(20), &[], &[]).unwrap();
+        session.started(&hold);
+        assert_eq!(
+            session.phase,
+            AccessPhase::Locked,
+            "holding is not unlocking"
+        );
+        let challenge = lpc_access::Challenge {
+            nonce: [2; 32],
+            offers: Vec::new(),
+        };
+        session.logged_in(
+            first,
+            &LoginAttemptOutcome::NothingMatched {
+                challenge: challenge.clone(),
+            },
+            false,
+            Millis(30),
+        );
+        assert_eq!(
+            session.next_step(Millis(40), &[], &[]),
+            None,
+            "one challenge per window"
+        );
+
+        // The link drops and comes back: the sheet is still up, and the new
+        // window holds its own.
+        session.observe(None);
+        let second = window(2, 11_000);
+        session.observe(Some(second));
+        let check = session.next_step(Millis(11_000), &[], &[]).unwrap();
+        session.started(&check);
+        session.checked(second, true, None, false);
+        assert!(session.prompt.is_some());
+        let hold = session.next_step(Millis(11_010), &[], &[]).unwrap();
+        assert!(matches!(&hold, AccessStep::Login { window, .. } if *window == second));
+        session.started(&hold);
+        session.logged_in(
+            second,
+            &LoginAttemptOutcome::NothingMatched {
+                challenge: challenge.clone(),
+            },
+            false,
+            Millis(11_020),
+        );
+
+        // Submit answers the held challenge.
+        session.type_password(TypedPassword {
+            password: "pw".to_string(),
+            remember: false,
+        });
+        assert!(matches!(
+            session.next_step(Millis(11_030), &[], &[]),
+            Some(AccessStep::Login { challenge: Some(held), typed: Some(_), .. }) if held == challenge
+        ));
+
+        // Dismissed, nothing is begun.
+        let mut dismissed = session.clone();
+        dismissed.typed = None;
+        dismissed.challenge = None;
+        dismissed.dismiss();
+        assert_eq!(dismissed.next_step(Millis(11_040), &[], &[]), None);
     }
 
     /// Nothing matched: the sheet asks, and the typed password answers the

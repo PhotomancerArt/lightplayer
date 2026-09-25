@@ -469,10 +469,6 @@ impl AccessController {
             AccessCommand::Restart { device } => {
                 return Some(self.restart(device, roster));
             }
-            AccessCommand::ProjectSecretAdd(_) | AccessCommand::ProjectSecretRevoke { .. } => {
-                // The studio controller owns the open project; it handles
-                // these before they reach here.
-            }
             AccessCommand::Checked {
                 device,
                 window,
@@ -1190,8 +1186,8 @@ mod tests {
         assert_eq!(board.failures(), 1);
         assert!(session.prompt.is_some());
 
-        // The board drops the link and it reconnects: checked again, but
-        // nothing is re-sent.
+        // The board drops the link and it reconnects: checked again, and a
+        // challenge is held for the sheet, but no password is re-sent.
         session.observe(None);
         let second = LoginWindow {
             link: LinkId(2),
@@ -1204,11 +1200,19 @@ mod tests {
         assert_eq!(step, AccessStep::Check(second));
         session.started(&step);
         session.checked(second, true, None, true);
+        let hold = session
+            .next_step(Millis(12_001), &access.held(), &remembered)
+            .unwrap();
+        run_login(&access, &board, &mut session, hold, Millis(12_002));
+        assert_eq!(session.phase, AccessPhase::Locked);
+        assert!(session.prompt.is_some(), "the sheet stays up");
         assert_eq!(
-            session.next_step(Millis(12_001), &access.held(), &remembered),
-            None
+            session.next_step(Millis(12_003), &access.held(), &remembered),
+            None,
+            "nothing more on this window until a password is typed"
         );
         assert_eq!(board.answers(), 1);
+        assert_eq!(board.failures(), 1);
     }
 
     /// A USB connect adds exactly what is missing (and says what), then a

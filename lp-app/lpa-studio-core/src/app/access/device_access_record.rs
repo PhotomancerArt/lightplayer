@@ -59,25 +59,6 @@ pub enum DeviceAccessChange {
     },
 }
 
-/// A password to install in the open project's sidecar, before its key is
-/// derived.
-#[derive(Clone, PartialEq, Eq)]
-pub struct NewSecret {
-    pub label: String,
-    pub tier: Tier,
-    pub password: String,
-}
-
-impl core::fmt::Debug for NewSecret {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        f.debug_struct("NewSecret")
-            .field("label", &self.label)
-            .field("tier", &self.tier)
-            .field("password", &"<redacted>")
-            .finish()
-    }
-}
-
 impl core::fmt::Debug for DeviceAccessChange {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {

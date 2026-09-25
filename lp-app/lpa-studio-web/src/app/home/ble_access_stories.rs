@@ -223,6 +223,34 @@ fn ble_play_only_prompt() -> Element {
     }
 }
 
+#[story(
+    description = "Reached over Bluetooth, and nothing this browser holds unlocked it: the board answers only its hello and the unlock, so the card does not guess what it runs. The picture slot says it is locked and what to do — \"Locked — Unlock it to see what it runs.\" — the project line is empty with no \"Put it on the board\", and the device line ends in \"Unlock\", which opens the sheet."
+)]
+fn ble_card_locked() -> Element {
+    let access = UiDeviceAccess {
+        over_bluetooth: true,
+        line: Some("Needs a device password".to_string()),
+        unlock: Some(UiUnlockOffer::Locked),
+        panel: None,
+    };
+    rsx! {
+        div { class: CARD_FRAME,
+            DeviceRosterCard {
+                card: DeviceView {
+                    loaded_project: DeviceLoadedProject::Empty,
+                    can_remove_project: false,
+                    ..ble_card()
+                },
+                projects: Vec::new(),
+                examples: Vec::new(),
+                open_uid: None,
+                access: Some(access),
+                on_action: |_| {},
+            }
+        }
+    }
+}
+
 // --- 3 · Plugging in adds this browser ------------------------------------
 
 #[story(

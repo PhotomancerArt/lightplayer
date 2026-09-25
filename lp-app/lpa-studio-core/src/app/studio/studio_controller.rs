@@ -260,8 +260,6 @@ pub struct StudioController {
     /// Access over Bluetooth (BLE M6): login on connect, remembered
     /// passwords, and the device-store writes.
     access: crate::app::access::AccessController,
-    /// The last project Bluetooth-list change that failed, in words.
-    project_access_error: Option<String>,
 }
 
 /// Which device an open lands on — the model half of the URL's `?on=`
@@ -434,7 +432,6 @@ impl StudioController {
             on_copy_text: None,
             agent: crate::AgentController::new(),
             access: crate::app::access::AccessController::new(),
-            project_access_error: None,
         }
     }
 
@@ -948,66 +945,44 @@ impl StudioController {
     /// Apply one access command (the password sheet, the access panel, a
     /// finished conversation), then drive every login again.
     pub fn apply_access_command(&mut self, command: crate::app::access::AccessCommand) {
-        use crate::app::access::AccessCommand;
-        match command {
-            AccessCommand::ProjectSecretAdd(secret) => {
-                let salt = (self.random)();
-                self.project_access_error = self
-                    .with_active_package_fs(|fs| {
-                        crate::app::access::project_access::add_project_secret(
-                            fs,
-                            &secret,
-                            salt,
-                            crate::app::access::DEFAULT_KDF_ITERATIONS,
-                        )
-                    })
-                    .err();
-            }
-            AccessCommand::ProjectSecretRevoke { label } => {
-                self.project_access_error = self
-                    .with_active_package_fs(|fs| {
-                        crate::app::access::project_access::revoke_project_secret(fs, &label)
-                    })
-                    .err();
-            }
-            command => {
-                let now = self.device_now();
-                let now_secs = (self.now_secs)();
-                let random = Rc::clone(&self.random);
-                let follow_up = self.access.apply(
-                    command,
-                    self.devices.roster(),
-                    self.devices.effects(),
-                    now,
-                    now_secs,
-                    &*random,
-                );
-                if let Some(crate::app::access::access_controller::AccessFollowUp::Restart(
-                    device,
-                )) = follow_up
-                {
-                    self.fold_device_input(crate::DeviceInput::Action(
-                        lpa_devices::Action::ResetBoard { device },
-                    ));
-                }
-            }
+        let now = self.device_now();
+        let now_secs = (self.now_secs)();
+        let random = Rc::clone(&self.random);
+        let follow_up = self.access.apply(
+            command,
+            self.devices.roster(),
+            self.devices.effects(),
+            now,
+            now_secs,
+            &*random,
+        );
+        if let Some(crate::app::access::access_controller::AccessFollowUp::Restart(device)) =
+            follow_up
+        {
+            self.fold_device_input(crate::DeviceInput::Action(
+                lpa_devices::Action::ResetBoard { device },
+            ));
         }
         self.drive_device_access();
         self.mark_dirty();
     }
 
-    /// An action failed. A tier refusal (`NotPermitted`) on the editor's
-    /// board opens the password sheet with "This needs an edit password",
-    /// never a silent failure.
+    /// An action failed. A tier refusal (`NotPermitted`) opens the unlock
+    /// sheet with "Editing needs an edit password…", never a silent failure.
+    ///
+    /// The sheet rises on the board that refused: an open refused on a
+    /// board names it on its failure page (the lens never landed there, so
+    /// the attached session may be another board or none); anything else
+    /// was refused by the editor's board.
     pub fn note_action_error(&mut self, error: &UiError) {
         if !matches!(error, UiError::NotPermitted(_)) {
             return;
         }
-        let Some(device) = self
-            .pool
-            .attached_session()
-            .map(|session| session.attachment().device)
-        else {
+        let Some(device) = crate::app::open_progress::refused_open_device().or_else(|| {
+            self.pool
+                .attached_session()
+                .map(|session| session.attachment().device)
+        }) else {
             return;
         };
         self.access.note_needs_edit(device);
@@ -1050,21 +1025,6 @@ impl StudioController {
         self.apply_access_command(result);
     }
 
-    /// Run `write` against the OPEN library project's package filesystem —
-    /// the project's own exclusive-locked handle (the seam
-    /// `set_module_export` uses).
-    fn with_active_package_fs(
-        &self,
-        write: impl FnOnce(&dyn lpfs::LpFs) -> Result<(), String>,
-    ) -> Result<(), String> {
-        let fs = self
-            .project
-            .active_package_fs()
-            .ok_or_else(|| "open a project from your library first".to_string())?;
-        let fs = fs.borrow();
-        write(&*fs)
-    }
-
     /// The settings slice, with the access controller's count joined in.
     fn settings_view(&self) -> crate::app::settings::UiSettingsView {
         let mut view = self.settings.ui_view();
@@ -1080,32 +1040,14 @@ impl StudioController {
         self.access.device_view(device)?.line
     }
 
-    /// The password sheet, when a Bluetooth piece needs one.
+    /// The unlock sheet, when a Bluetooth device needs a password.
     fn login_prompt_view(&self) -> Option<crate::app::access::UiLoginPrompt> {
         let roster = self.devices.roster();
         self.access.prompt(|device| {
             roster
                 .device(device)
                 .map(lpa_devices::Device::title)
-                .unwrap_or_else(|| "This piece".to_string())
-        })
-    }
-
-    /// The open library project's Bluetooth list, for its settings.
-    fn project_access_view(&self) -> Option<crate::app::access::UiProjectAccess> {
-        let fs = self.project.active_package_fs()?;
-        let fs = fs.borrow();
-        let (secrets, read_error) =
-            match crate::app::access::project_access::read_project_access(&*fs) {
-                Ok(file) => (
-                    crate::app::access::project_access::project_access_secrets(&file),
-                    None,
-                ),
-                Err(error) => (Vec::new(), Some(error)),
-            };
-        Some(crate::app::access::UiProjectAccess {
-            secrets,
-            error: self.project_access_error.clone().or(read_error),
+                .unwrap_or_else(|| "This device".to_string())
         })
     }
 
@@ -2051,7 +1993,6 @@ impl StudioController {
                 .with_settings(self.settings_view())
                 .with_access(
                     self.login_prompt_view(),
-                    None,
                     self.access.access_added().cloned(),
                 );
         }
@@ -2105,7 +2046,6 @@ impl StudioController {
             .with_settings(self.settings_view())
             .with_access(
                 self.login_prompt_view(),
-                self.project_access_view(),
                 self.access.access_added().cloned(),
             )
             .with_lens_access_line(self.lens_access_line())
@@ -3082,8 +3022,11 @@ impl StudioController {
                 crate::app::open_progress::note_open_settled();
                 Ok(notices)
             }
+            // The actor routes the returned error through
+            // `note_action_error`, which reads the refused board off the
+            // stage set here.
             Err(error) => {
-                crate::app::open_progress::note_open_failed(error.message(), retry);
+                crate::app::open_progress::note_open_failed_with(&error, retry);
                 Err(error)
             }
         }
@@ -4980,7 +4923,7 @@ impl StudioController {
                 "this board is busy with an activity; wait for it to finish".to_string(),
             ));
         }
-        // A Bluetooth link holds nothing until it logs in (BLE M6): the
+        // A Bluetooth link holds nothing until it unlocks (BLE M6): the
         // board answers only hello and login on it, so a lens attached
         // before the login lands would read nothing and starve the login
         // of its wire. Held until the link holds a tier.
@@ -4988,7 +4931,7 @@ impl StudioController {
             && !self.access.link_is_granted(device)
         {
             return Err(UiError::MissingSession(
-                "this piece is logging in over Bluetooth".to_string(),
+                "this device is still unlocking over Bluetooth".to_string(),
             ));
         }
         Ok(crate::DeviceLensAttachment {
@@ -5300,11 +5243,15 @@ impl StudioController {
                     format!("could not open the device in the editor: {error}"),
                 ));
                 if let Some(pending) = held_open {
-                    crate::app::open_progress::note_open_failed(
-                        error.message(),
+                    crate::app::open_progress::note_open_failed_with(
+                        &error,
                         pending.retry_action(),
                     );
                 }
+                // A held open lands from the tick, not from an action, so
+                // no dispatch reports its error: a tier refusal raises the
+                // unlock sheet here.
+                self.note_action_error(&error);
             }
         }
     }
@@ -6991,6 +6938,73 @@ mod tests {
             upgraded_from: None,
         };
         assert_eq!(import_message("Pasted", &plain), "Pasted Plasma");
+    }
+
+    /// A project open refused over a play-tier link raises the unlock sheet
+    /// on the board that refused it — the lens never landed there, so the
+    /// attached session cannot name it — and says it needs an edit password.
+    #[test]
+    fn a_refused_open_raises_the_unlock_sheet_on_the_board_that_refused() {
+        use crate::app::access::PromptReason;
+        use crate::app::open_progress::{
+            DeviceOpenStep, OpenDevice, note_device_step, note_open_failed_with,
+            note_open_requested, note_open_started, reset_for_test,
+        };
+
+        reset_for_test();
+        let mut studio = StudioController::new(|| 0.0);
+        // A board reached over Bluetooth: the access controller keeps a
+        // session for it from the moment it is on the roster.
+        studio.fold_device_input(crate::DeviceInput::Event(
+            lpa_devices::Event::LinkAttached {
+                link: lpa_devices::link::LinkId(1),
+                info: lpa_devices::link::LinkInfo {
+                    label: "LP-Choker".to_string(),
+                    endpoint: lpa_devices::identity::EndpointKey("ble:choker".to_string()),
+                    ..Default::default()
+                },
+            },
+        ));
+        studio.fold_device_input(crate::DeviceInput::Action(lpa_devices::Action::AdoptLink {
+            link: lpa_devices::link::LinkId(1),
+        }));
+        studio.drive_device_access();
+        let board = studio.devices.roster().devices()[0].id;
+        let prompt = |studio: &StudioController| {
+            studio
+                .access
+                .session(board)
+                .and_then(|session| session.prompt.clone())
+        };
+        assert_eq!(prompt(&studio), None, "no sheet before the open");
+
+        note_open_requested();
+        note_open_started();
+        note_device_step(
+            &OpenDevice {
+                id: Some(board),
+                uid: "devchoker".to_string(),
+                name: "Choker".to_string(),
+            },
+            DeviceOpenStep::Clearing,
+        );
+        let refused = UiError::NotPermitted(
+            crate::app::access::not_permitted_sentence(lpc_access::Tier::Edit).to_string(),
+        );
+        note_open_failed_with(
+            &refused,
+            UiAction::from_op(
+                crate::ControllerId::new(crate::HOME_NODE_ID),
+                crate::HomeOp::OpenPackage {
+                    key: "prjx".to_string(),
+                    prefer: None,
+                },
+            ),
+        );
+        studio.note_action_error(&refused);
+
+        assert_eq!(prompt(&studio), Some(PromptReason::NeedsEdit));
+        reset_for_test();
     }
 
     #[test]

@@ -1,7 +1,7 @@
 //! Inputs to the access controller, riding the studio actor's queue.
 //!
-//! Gestures (the Unlock sheet, the access panel, Undo, the project's
-//! Bluetooth list, Settings' "Forget"), what the web edge knows and core
+//! Gestures (the Unlock sheet, the access panel, Undo, Settings'
+//! "Forget"), what the web edge knows and core
 //! does not (the account's keys, a name for this browser), and the results
 //! of the conversations the controller spawned. Passwords and keys ride some
 //! of them, so `Debug` is written by hand and never prints one.
@@ -12,7 +12,7 @@ use lpc_access::Tier;
 use super::access_session::{LoginWindow, TypedPassword};
 use super::account_keys::AccountKeys;
 use super::device_access_ops::{AccessListing, AccessSynced};
-use super::device_access_record::{DeviceAccessChange, NewSecret};
+use super::device_access_record::DeviceAccessChange;
 use super::login_attempt::LoginAttemptOutcome;
 
 #[derive(Clone)]
@@ -66,10 +66,6 @@ pub enum AccessCommand {
     UndoAutoAdd { device: DeviceId },
     /// "Restart now" after turning Bluetooth on or off.
     Restart { device: DeviceId },
-    /// Add (or replace, by label) a password in the open project's list.
-    ProjectSecretAdd(NewSecret),
-    /// Remove one from it.
-    ProjectSecretRevoke { label: String },
 
     // --- results of spawned conversations --------------------------------
     /// The link's hello answered: does it log in, and what does it hold.
@@ -135,13 +131,6 @@ impl core::fmt::Debug for AccessCommand {
                 .field("device", device)
                 .finish(),
             Self::Restart { device } => f.debug_struct("Restart").field("device", device).finish(),
-            Self::ProjectSecretAdd(secret) => {
-                f.debug_tuple("ProjectSecretAdd").field(secret).finish()
-            }
-            Self::ProjectSecretRevoke { label } => f
-                .debug_struct("ProjectSecretRevoke")
-                .field("label", label)
-                .finish(),
             Self::Checked {
                 device,
                 window,
@@ -201,12 +190,6 @@ mod tests {
             password: "hunter2".to_string(),
             remember: true,
         };
-        assert!(!format!("{command:?}").contains("hunter2"));
-        let command = AccessCommand::ProjectSecretAdd(NewSecret {
-            label: "camp".to_string(),
-            tier: Tier::Play,
-            password: "hunter2".to_string(),
-        });
         assert!(!format!("{command:?}").contains("hunter2"));
         let command = AccessCommand::Change {
             device: DeviceId(1),

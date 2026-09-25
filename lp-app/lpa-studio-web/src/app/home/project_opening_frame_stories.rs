@@ -74,6 +74,7 @@ fn failed() -> Element {
             },
         ),
         device: None,
+        needs_unlock: false,
     })
 }
 
@@ -142,6 +143,25 @@ fn failed_on_board() -> Element {
             },
         ),
         device: Some(choker()),
+        needs_unlock: false,
+    })
+}
+
+#[story(
+    description = "An open the board refused because this Bluetooth link is unlocked for play only. The board is fine, so the way on is Unlock (the sheet asks for an edit password), not Reset the board; Retry once it is unlocked."
+)]
+fn failed_on_board_needs_unlock() -> Element {
+    frame(OpeningState::Failed {
+        message: lpa_studio_core::not_permitted_sentence(lpa_studio_core::AccessTier::Edit)
+            .to_string(),
+        retry: UiAction::from_op(
+            ControllerId::new(HOME_NODE_ID),
+            HomeOp::OpenExample {
+                id: "catalog/fyeah-sign".to_string(),
+            },
+        ),
+        device: Some(choker()),
+        needs_unlock: true,
     })
 }
 

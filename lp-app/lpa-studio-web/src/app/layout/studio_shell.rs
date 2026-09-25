@@ -93,7 +93,6 @@ pub fn StudioShell(
         // the web app renders the Unlock sheet; Studio no longer shows the
         // project's own Bluetooth list (plan D9)
         login_prompt: _,
-        project_access: _,
         lens_access_line,
         // the web app raises the "can now unlock" toast
         access_added: _,

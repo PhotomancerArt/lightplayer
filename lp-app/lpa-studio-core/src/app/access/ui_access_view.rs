@@ -76,13 +76,6 @@ pub struct UiAccessEntry {
     pub added_at: Option<u64>,
 }
 
-/// One password, as the panel and the project list show it.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct UiAccessSecret {
-    pub label: String,
-    pub tier: Tier,
-}
-
 /// The password sheet.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct UiLoginPrompt {
@@ -94,14 +87,6 @@ pub struct UiLoginPrompt {
     pub retry_after_ms: Option<u64>,
     /// A login is running (the button reads "Unlocking…").
     pub busy: bool,
-}
-
-/// The open project's Bluetooth list (the sidecar).
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct UiProjectAccess {
-    pub secrets: Vec<UiAccessSecret>,
-    /// The last change's failure, in words.
-    pub error: Option<String>,
 }
 
 /// The sheet's sentence for why it is open.
@@ -143,10 +128,13 @@ pub fn access_line(phase: &super::AccessPhase) -> Option<String> {
             tier: Tier::Play,
             label: None,
         } => "Open — play, no password".to_string(),
+        // Unlocked at edit with no name to give (a trusted link, or a
+        // re-check that found the link already unlocked): the same word as
+        // every other unlocked state, never a second label for it.
         AccessPhase::Granted {
             tier: Tier::Edit,
             label: None,
-        } => "Connected — edit".to_string(),
+        } => "Unlocked".to_string(),
         AccessPhase::Locked => "Needs a device password".to_string(),
         AccessPhase::Unreachable => {
             "Bluetooth has no device password here — connect by USB to set one".to_string()
@@ -184,6 +172,15 @@ mod tests {
             })
             .as_deref(),
             Some("Open — play, no password")
+        );
+        assert_eq!(
+            access_line(&AccessPhase::Granted {
+                tier: Tier::Edit,
+                label: None
+            })
+            .as_deref(),
+            Some("Unlocked"),
+            "one word for unlocked, with or without a name"
         );
     }
 

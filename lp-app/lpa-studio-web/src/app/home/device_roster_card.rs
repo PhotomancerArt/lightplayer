@@ -223,7 +223,15 @@ pub(crate) fn DeviceRosterCard(
     // The empty face: a LightPlayer that has REPORTED nothing loaded. A
     // board that simply has not said yet gets neither face — see
     // `DeviceLoadedProject::Unknown`.
-    let offer_push = card.can_receive_project && card.loaded_project == DeviceLoadedProject::Empty;
+    // A Bluetooth link nothing has unlocked yet: the board answers only its
+    // hello and the unlock, so what it runs is unknown to the card (its
+    // "nothing loaded" is a refused read, not the board's word), and the
+    // card says it is locked and how to unlock it instead.
+    let locked = access
+        .as_ref()
+        .is_some_and(|access| access.unlock == Some(UiUnlockOffer::Locked));
+    let offer_push =
+        card.can_receive_project && card.loaded_project == DeviceLoadedProject::Empty && !locked;
     let running = match &card.loaded_project {
         DeviceLoadedProject::Running { label } => Some(label.clone()),
         DeviceLoadedProject::Empty | DeviceLoadedProject::Unknown => None,
@@ -269,7 +277,11 @@ pub(crate) fn DeviceRosterCard(
         .activity
         .as_ref()
         .map(|activity| activity_zone(activity.kind));
-    let project_line = project_line_text(&card, busy_zone);
+    let project_line = if locked && busy_zone != Some(ZoneKind::Project) {
+        String::new()
+    } else {
+        project_line_text(&card, busy_zone)
+    };
     let firmware_line = firmware_line_text(&card, identity_line.board.as_deref(), busy_zone);
     let device_line = match access.as_ref().and_then(|access| access.line.as_deref()) {
         // Over Bluetooth the login leads: it is what decides what the
@@ -347,7 +359,7 @@ pub(crate) fn DeviceRosterCard(
                     // otherwise — never a fake picture. The liveness pill
                     // sits top-right INSIDE the frame, so the picture
                     // arriving moves nothing: the frame's height is fixed.
-                    {preview_slot(&card, feed.as_ref())}
+                    {preview_slot(&card, feed.as_ref(), locked)}
                     div { class: line_and_bar_class(),
                         // info line (17px, one line, full text on hover)
                         p {
@@ -1079,6 +1091,10 @@ fn activity_line_text(activity: &DeviceActivityView) -> String {
     text
 }
 
+/// The preview slot's sentence for a Bluetooth card nothing has unlocked:
+/// it is locked, and "Unlock" (on the device line below) is the way in.
+const LOCKED_PREVIEW_SENTENCE: &str = "Locked — Unlock it to see what it runs.";
+
 /// The preview slot's sentence while there is no feed (AC10): why there is
 /// no picture, in this state, in plain words — never a fake picture and
 /// never an empty box.
@@ -1098,7 +1114,8 @@ fn preview_sentence(card: &DeviceView) -> String {
     // The card's live picture is not streamed over Bluetooth (M5: that air
     // time is the board's ESP-NOW's too), so "coming" would be a promise.
     if card.is_over_bluetooth() {
-        return "No live picture over Bluetooth — open Play to see and control it.".to_string();
+        return "No live picture over Bluetooth — Open in editor to see and control it."
+            .to_string();
     }
     "No picture yet — the live feed is coming.".to_string()
 }
@@ -1247,7 +1264,13 @@ fn preview_frame_class() -> &'static str {
 ///    defect.
 /// 4. A feed that is pulling but has no frame yet: waiting.
 /// 5. Otherwise the card's own sentence ([`preview_sentence`]).
-fn preview_slot(card: &DeviceView, feed: Option<&DeviceCardFeedView>) -> Element {
+///
+/// A `locked` Bluetooth card (nothing unlocked it) says so in place of 2–5:
+/// the board answers nothing else until it is unlocked.
+fn preview_slot(card: &DeviceView, feed: Option<&DeviceCardFeedView>, locked: bool) -> Element {
+    // A locked card has no feed to show (the board answers nothing but its
+    // hello and the unlock), so it is read as having none.
+    let feed = feed.filter(|_| !locked);
     let frame_class = feed_frame_class(card, feed);
     let pill = feed_pill(card, feed);
     let picture = card
@@ -1255,7 +1278,11 @@ fn preview_slot(card: &DeviceView, feed: Option<&DeviceCardFeedView>) -> Element
         .is_none()
         .then(|| feed.and_then(|feed| feed.frame.clone()))
         .flatten();
-    let sentence = preview_slot_sentence(card, feed);
+    let sentence = if locked && card.activity.is_none() {
+        Some(LOCKED_PREVIEW_SENTENCE.to_string())
+    } else {
+        preview_slot_sentence(card, feed)
+    };
     rsx! {
         div { class: "{frame_class}",
             if let Some(frame) = picture

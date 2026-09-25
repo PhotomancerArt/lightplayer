@@ -19,13 +19,14 @@
 //! | the device's list: read, add, remove, switch | [`device_access_ops`] |
 //! | each device's last list, cached; panel changes | [`device_access_record`] |
 //! | what a USB connect added on its own | [`access_added`] |
-//! | the project sidecar (`<project>/.lp/access.json`) | [`project_access`] |
 //! | the controller that runs all of it | [`access_controller`] |
 //! | its inputs, and what the UI reads | [`access_command`], [`ui_access_view`] |
 //!
 //! Decision records: `docs/adr/2026-09-23-ble-access-model.md` (the model),
-//! `docs/adr/2026-09-24-ble-transport-studio.md` (the Studio transport and
-//! this UX).
+//! `docs/adr/2026-09-24-ble-transport-studio.md` (the Studio transport),
+//! `docs/adr/2026-09-24-easy-bluetooth-access.md` (key holders, the silent
+//! add over USB, and this UX). The board still honours a project's own
+//! `.lp/access.json`; Studio no longer writes one.
 
 pub mod access_added;
 pub mod access_command;
@@ -38,7 +39,6 @@ pub mod device_access_record;
 pub mod key_holder;
 pub mod login_attempt;
 pub mod login_key_cache;
-pub mod project_access;
 pub mod remembered_passwords;
 pub mod ui_access_view;
 
@@ -55,16 +55,13 @@ pub use access_session::{
 pub use account_keys::AccountKeys;
 pub use browser_key::BrowserKey;
 pub use device_access_ops::{AccessListing, AccessOp};
-pub use device_access_record::{
-    DeviceAccessChange, DeviceAccessRecord, DeviceAccessRecords, NewSecret,
-};
+pub use device_access_record::{DeviceAccessChange, DeviceAccessRecord, DeviceAccessRecords};
 pub use key_holder::{HeldKey, KeyHolder};
 pub use login_attempt::{LoginAttemptOutcome, try_login};
 pub use login_key_cache::{DEFAULT_KDF_ITERATIONS, LoginKeyCache};
 pub use remembered_passwords::{MAX_REMEMBERED_PASSWORDS, RememberedPasswords};
 pub use ui_access_view::{
-    PLAY_ONLY_SENTENCE, UiAccessEntry, UiAccessPanel, UiAccessSecret, UiDeviceAccess,
-    UiLoginPrompt, UiProjectAccess, UiUnlockOffer,
+    PLAY_ONLY_SENTENCE, UiAccessEntry, UiAccessPanel, UiDeviceAccess, UiLoginPrompt, UiUnlockOffer,
 };
 
 /// The access tier, as the UI names it.
