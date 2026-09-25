@@ -52,9 +52,7 @@ impl ControlGeometryCache {
     /// the held revision (a refusal included), `Always` when nothing is held.
     pub(crate) fn read_for(&self, product: &UiProductRef) -> RevisionGateRead {
         match self.products.get(product) {
-            Some(geometry) => RevisionGateRead::IfChanged {
-                known_revision: Some(geometry.revision),
-            },
+            Some(geometry) => RevisionGateRead::if_changed(Some(geometry.revision)),
             None => RevisionGateRead::Always,
         }
     }
@@ -124,9 +122,7 @@ mod tests {
         assert!(held.display_layout.is_some());
         assert_eq!(
             cache.read_for(&product()),
-            RevisionGateRead::IfChanged {
-                known_revision: Some(Revision::new(12)),
-            }
+            RevisionGateRead::if_changed(Some(Revision::new(12)))
         );
     }
 
@@ -163,9 +159,7 @@ mod tests {
         assert_eq!(held.sample_layout.spans.len(), 1);
         assert_eq!(
             cache.read_for(&product()),
-            RevisionGateRead::IfChanged {
-                known_revision: Some(Revision::new(3)),
-            }
+            RevisionGateRead::if_changed(Some(Revision::new(3)))
         );
     }
 

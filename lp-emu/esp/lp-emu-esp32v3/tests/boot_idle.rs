@@ -51,7 +51,11 @@ const PREFIX_BYTES: usize = 543;
 /// `.bss` leaves, and the server loop's future (which lives in `.bss`)
 /// shrank 80 B when heartbeats became per link — read off both ELFs'
 /// `_stack_start - _stack_end`, not inferred. The old pin was `ea8bae30…`.
-const PREFIX_SHA256: &str = "465c8d520e705c194205b6d60045946b576b01df361850322f57f14ac0a11f11";
+///
+/// ⚠️ **Moved by lean-wire's follow-ups (#804), same 543 bytes:**
+/// `[INIT] main stack 45360 B` became `45344 B` (−16 B, the same −16 the
+/// S3's `[stack]` total moved in that change). The old pin was `465c8d52…`.
+const PREFIX_SHA256: &str = "05b270952a2b0bd2f3bf5f4c6a6e9e412c4eb79ea809c35e03435b9200a4c542";
 
 /// Run the shipped image, direct-loaded, under `--strict-bus`, stopping at
 /// the first complete line containing `exit_on`.
@@ -127,7 +131,7 @@ fn the_init_chain_comes_out_of_the_wire_byte_for_byte() {
         "[INIT] heap regions: 0 0x3ffe0440+15072 (ROM PRO stack)",
         // 45,280 until the BLE plan's M3 shrank the server loop's future (in
         // `.bss`) by 80 B; see PREFIX_SHA256.
-        "[INIT] main stack 45360 B",
+        "[INIT] main stack 45344 B",
         "[RECOVERY] boot: cause=power-on level=green safe_mode=false prior_boot_complete=true",
         "[INIT] runtime started",
         "[INIT] I/O task spawned (uart0 921600 8N1, swi2 executor prio2, timg0t1 pacer 1ms)",
@@ -459,7 +463,7 @@ fn the_two_paths_report_the_same_memory_figures() {
         "and it is the same stack, reported the same way"
     );
     assert!(
-        a[0].contains(" of 45360 B ") && b[0].contains(" of 45360 B "),
+        a[0].contains(" of 45344 B ") && b[0].contains(" of 45344 B "),
         "the stack's size is the same on both paths: {a:?} vs {b:?}"
     );
     // The one figure the boot banner carries too, so the triple can be read

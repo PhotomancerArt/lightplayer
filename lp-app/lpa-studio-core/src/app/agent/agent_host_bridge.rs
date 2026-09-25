@@ -10,12 +10,12 @@
 //! sees them before the async apply round-trips.
 //!
 //! The engine-verdict wait rides the same shared cell: the controller
-//! writes the target node's latest `(Revision, verdict)` into
-//! [`AgentBridgeState::engine`] at the end of every processed batch, the
-//! bridge records the pre-stage Revision when it stages, and
-//! [`AgentHostBridge::await_engine_verdict`] polls the cell on the injected
-//! actor timer until the Revision advances past it (or the budget runs out
-//! → `unknown`).
+//! writes the target node's verdict and the engine revision of the read it
+//! was observed at into [`AgentBridgeState::engine`] at the end of every
+//! processed batch, the bridge fences the revision when it stages (see
+//! [`VerdictFence`]), and [`AgentHostBridge::await_engine_verdict`] polls
+//! the cell on the injected actor timer until a read past the fence reports
+//! (or the budget runs out → `unknown`).
 
 use core::time::Duration;
 use std::cell::RefCell;
@@ -89,12 +89,35 @@ pub struct AgentHostBridge {
     /// Actor-injected timer factory driving the verdict-wait polls (wasm:
     /// `setTimeout`; tests: instant or scripted futures).
     timer: AgentTimerFactory,
-    /// The engine-status Revision observed when the last stage was
-    /// enqueued; the verdict wait resolves once the cell advances past it.
-    pre_stage_revision: Option<Revision>,
+    /// Which read the verdict wait trusts for the last staged edit.
+    fence: VerdictFence,
     /// Correlation counter for agent def-write dispatches (acks carry it
     /// back through [`AgentBridgeState::write_ack`]).
     write_seq: u64,
+}
+
+/// Which read the engine-verdict wait trusts after a staged edit.
+///
+/// The cell's revision is the engine revision of the read the verdict was
+/// observed at: a read's tree says what every node's status was when that
+/// read began. A staged edit compiles on the node's next render, and when no
+/// tick renders the node that is a render **probe** — which runs after its
+/// read already sent the tree. So the first read that began after the edit
+/// can still carry the status from before it compiled, and the verdict comes
+/// from the read after that one. (The engine stamps a status changed
+/// mid-read past the revision it served, so that later read delivers it —
+/// `lpc-engine`'s `tree_entry_stamps`.)
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum VerdictFence {
+    /// No status was observed before the stage: any status is fresh.
+    Open,
+    /// Waiting for a read that began after the edit was staged, when the
+    /// cell showed the read at `staged_at`.
+    FirstRead { staged_at: Revision },
+    /// The first read after the stage was at `first_read`; its probes may
+    /// have compiled the edit after its tree went out, so a later read
+    /// answers.
+    SecondRead { first_read: Revision },
 }
 
 impl AgentHostBridge {
@@ -107,7 +130,7 @@ impl AgentHostBridge {
             state,
             tx,
             timer,
-            pre_stage_revision: None,
+            fence: VerdictFence::Open,
             write_seq: 0,
         }
     }
@@ -131,16 +154,10 @@ impl AgentHostBridge {
             .artifact
             .clone()
             .ok_or_else(|| HostError::new("no shader source artifact resolved"))?;
-        // A def change flips the node's needs-compile: mark the pre-stage
-        // engine Revision BEFORE enqueuing, exactly like a staged source
-        // edit, so the following verdict wait resolves on this edit's
-        // outcome.
-        self.pre_stage_revision = self
-            .state
-            .borrow()
-            .engine
-            .as_ref()
-            .map(|status| status.revision);
+        // A def change flips the node's needs-compile: fence the verdict
+        // BEFORE enqueuing, exactly like a staged source edit, so the
+        // following verdict wait resolves on this edit's outcome.
+        self.fence_verdict();
         self.write_seq += 1;
         let seq = self.write_seq;
         self.state.borrow_mut().write_ack = None;
@@ -183,15 +200,36 @@ impl AgentHostBridge {
         }
     }
 
-    /// The engine verdict once the status Revision has advanced past the
-    /// pre-stage mark; `None` while the cell still shows pre-stage state.
-    fn advanced_verdict(&self) -> Option<EngineVerdict> {
+    /// Fence the verdict wait at the read the cell shows now (see
+    /// [`VerdictFence`]).
+    fn fence_verdict(&mut self) {
+        self.fence = match &self.state.borrow().engine {
+            Some(status) => VerdictFence::FirstRead {
+                staged_at: status.revision,
+            },
+            // No observation before the stage: any engine status is fresh.
+            None => VerdictFence::Open,
+        };
+    }
+
+    /// The engine verdict once a read past the fence reported it; `None`
+    /// while the cell still shows a read the fence does not trust.
+    fn advanced_verdict(&mut self) -> Option<EngineVerdict> {
         let state = self.state.borrow();
         let status = state.engine.as_ref()?;
-        match self.pre_stage_revision {
-            // No pre-stage observation: any engine status is fresh info.
-            None => Some(status.verdict.clone()),
-            Some(pre) => (status.revision > pre).then(|| status.verdict.clone()),
+        match self.fence {
+            VerdictFence::Open => Some(status.verdict.clone()),
+            VerdictFence::FirstRead { staged_at } => {
+                if status.revision > staged_at {
+                    self.fence = VerdictFence::SecondRead {
+                        first_read: status.revision,
+                    };
+                }
+                None
+            }
+            VerdictFence::SecondRead { first_read } => {
+                (status.revision > first_read).then(|| status.verdict.clone())
+            }
         }
     }
 }
@@ -221,15 +259,9 @@ impl AgentHost for AgentHostBridge {
                     source.len()
                 )));
             }
-            // Mark the pre-stage engine Revision BEFORE enqueuing the
-            // apply, so a status change caused by this very edit always
-            // reads as "newer".
-            self.pre_stage_revision = self
-                .state
-                .borrow()
-                .engine
-                .as_ref()
-                .map(|status| status.revision);
+            // Fence the verdict BEFORE enqueuing the apply, so the wait
+            // only trusts a read taken after this very edit compiled.
+            self.fence_verdict();
             self.tx.send(StudioCommand::Action(
                 UiAction::from_op(
                     ControllerId::new(ProjectController::NODE_ID),
@@ -447,19 +479,25 @@ mod tests {
     }
 
     #[test]
-    fn advanced_revision_resolves_the_wait_with_the_new_verdict() {
+    fn the_read_after_the_first_one_past_the_stage_resolves_the_wait() {
         let (mut bridge, _rx, state) = bridge_with_artifact();
         state.borrow_mut().engine = Some(engine_status(7, EngineStatusKind::Ok));
         stage(&mut bridge, "new source").expect("stage");
 
-        // Same revision: still the pre-stage status → keeps polling until
-        // the budget runs out (instant timers make this immediate).
+        // Same read: still the pre-stage status → keeps polling until the
+        // budget runs out (instant timers make this immediate).
         let unknown = verdict(&mut bridge, 500).expect("verdict");
         assert_eq!(unknown.status, EngineStatusKind::Unknown);
         assert!(unknown.message.expect("note").contains("not observed"));
 
-        // Advanced revision: the fresh (error) verdict resolves the wait.
-        state.borrow_mut().engine = Some(engine_status(9, EngineStatusKind::Error));
+        // The first read after the stage: its tree went out before its own
+        // render probe compiled the edit, so its `ok` is the old status.
+        state.borrow_mut().engine = Some(engine_status(9, EngineStatusKind::Ok));
+        let first = verdict(&mut bridge, 500).expect("verdict");
+        assert_eq!(first.status, EngineStatusKind::Unknown, "{first:?}");
+
+        // The read after it carries the compile's outcome.
+        state.borrow_mut().engine = Some(engine_status(10, EngineStatusKind::Error));
         let fresh = verdict(&mut bridge, 1500).expect("verdict");
         assert_eq!(fresh.status, EngineStatusKind::Error);
         assert_eq!(
@@ -529,8 +567,8 @@ mod tests {
                 upsert,
             })
         );
-        // The def change marked the pre-stage revision, like stage_source:
-        // a same-revision verdict wait keeps polling (times out unknown).
+        // The def change fenced the verdict, like stage_source: a wait on
+        // the same read keeps polling (times out unknown).
         let verdict = drive(bridge.await_engine_verdict(250)).expect("verdict");
         assert_eq!(verdict.status, EngineStatusKind::Unknown);
     }
