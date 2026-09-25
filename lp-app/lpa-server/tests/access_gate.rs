@@ -226,6 +226,37 @@ fn an_expired_challenge_is_refused() {
     assert_eq!(rig.server.link_tier(BLE_A), None);
 }
 
+/// `login_pending` is what holds a radio link's login deadline open (the
+/// link mux): true for the link that began the login, until its challenge
+/// expires or is answered — and never for any other link.
+#[test]
+fn a_login_is_pending_only_for_its_link_until_it_expires_or_is_answered() {
+    let mut rig = Rig::for_state(LinkState::UntrustedNone);
+    assert!(!rig.server.login_pending(BLE_A));
+    let _ = rig.begin(BLE_A);
+    assert!(rig.server.login_pending(BLE_A));
+    assert!(!rig.server.login_pending(BLE_B));
+    rig.idle(CHALLENGE_TTL_MS as u32 - 1_000);
+    assert!(
+        rig.server.login_pending(BLE_A),
+        "still inside the challenge's life"
+    );
+    rig.idle(1_000);
+    assert!(
+        !rig.server.login_pending(BLE_A),
+        "expired with the challenge"
+    );
+
+    // A refused answer ends it at once.
+    let mut refused = Rig::for_state(LinkState::UntrustedNone);
+    let (nonce, offers) = refused.begin(BLE_A);
+    assert!(matches!(
+        refused.answer(BLE_A, answer(b"wrong", &nonce, &offers)),
+        LoginOutcome::Refused { .. }
+    ));
+    assert!(!refused.server.login_pending(BLE_A));
+}
+
 #[test]
 fn a_second_login_while_one_is_outstanding_is_refused() {
     let mut rig = Rig::for_state(LinkState::UntrustedNone);

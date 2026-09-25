@@ -51,6 +51,7 @@ ble = [
     "dep:heapless",
     "dep:static_cell",
     "dep:embassy-sync-07",
+    "dep:embedded-io-07",
 ]
 naga = ["lpa-server/naga"]
 # NOTE: the former `ws281x_2blocks` feature is gone: the RMT block plan is now
@@ -158,6 +159,11 @@ desk_espnow_meter = ["radio"]
 # active/idle switch) come from `/.lp/ble-exp.txt`, read at boot. See
 # `src/ble/conn_params.rs`, `desk`.
 desk_ble_params = ["ble"]
+# The BLE host-runner recovery drill — OFF by default, never shipped: an ATT
+# write carrying `LP-DESK-FORCE-BLE-HOST-RESTART` fails the host's read the way
+# an unparseable packet does, so a desk board can prove that a runner restart
+# closes its links and advertises again. See `src/ble/hci_transport.rs`.
+desk_ble_fault = ["ble"]
 heap_map_diag = ["lpc-shared"]
 heap_track_diag = ["heap_map_diag", "esp-alloc/alloc-hooks"]
 heap_diag_ble_standin = ["heap_map_diag"]
@@ -316,6 +322,9 @@ heapless = { version = "0.9", optional = true }
 # spike module aliases this one in as `embassy_sync`.
 static_cell = { version = "2.1", optional = true }
 embassy-sync-07 = { package = "embassy-sync", version = "0.7", optional = true }
+# bt-hci 0.8's `Transport` names embedded-io 0.7's `ErrorType`; the BLE link's
+# own HCI transport (`ble::hci_transport`) implements it.
+embedded-io-07 = { package = "embedded-io", version = "0.7", optional = true }
 critical-section = "1"
 enumset = "1"
 
