@@ -28,6 +28,7 @@
 
 use std::path::PathBuf;
 
+use lp_emu_esp_figures::Figures;
 use lp_emu_esp32v3::machine::{
     AppSource, BootMode, Esp32V3Builder, Machine, Outcome, StopCondition,
 };
@@ -38,24 +39,23 @@ use sha2::{Digest, Sha256};
 /// and the line after it is P7's.
 const LAST_LINE: &str = "[INIT] I/O task spawned";
 
-/// P3's byte count for the `[INIT]` chain, over a register that swallowed it
-/// (the ledger's §1.1). It is the same count out of the wire.
-const PREFIX_BYTES: usize = 543;
+/// The `[INIT]` chain up to [`LAST_LINE`] — P3 counted 543 bytes of it into
+/// the accept block (the ledger's §1.1), and the wire carries the same bytes.
+///
+/// A **figure**, recorded in `lp-emu/esp/figures/esp32v3.json` as
+/// `init_chain.prefix`, line by line: it carries `[INIT] main stack <n> B`,
+/// and the main stack is what `.bss` leaves, so any change to the image's
+/// statics moves it (BLE M3: 45,280 → 45,360; #804: → 45,344). Compared byte
+/// for byte; a change to any other line is a change to the boot's *text*,
+/// and the failure names it. `determinism.rs` pins the same prefix under the
+/// same key. `just bless-chips esp32v3` re-records it.
+const PREFIX_KEY: &str = "init_chain.prefix";
 
-/// The golden's SHA-256, pinned so a change to the boot's *text* is a
-/// deliberate edit to this line and not a test that quietly re-blessed
-/// itself. A run that changes it must say which line moved and why.
-///
-/// ⚠️ **Moved by the BLE plan's M3 (access core), same 543 bytes:**
-/// `[INIT] main stack 45280 B` became `45360 B`. The main stack is what
-/// `.bss` leaves, and the server loop's future (which lives in `.bss`)
-/// shrank 80 B when heartbeats became per link — read off both ELFs'
-/// `_stack_start - _stack_end`, not inferred. The old pin was `ea8bae30…`.
-///
-/// ⚠️ **Moved by lean-wire's follow-ups (#804), same 543 bytes:**
-/// `[INIT] main stack 45360 B` became `45344 B` (−16 B, the same −16 the
-/// S3's `[stack]` total moved in that change). The old pin was `465c8d52…`.
-const PREFIX_SHA256: &str = "05b270952a2b0bd2f3bf5f4c6a6e9e412c4eb79ea809c35e03435b9200a4c542";
+/// The main stack's size, as `[INIT] main stack <n> B` and every `[stack]`
+/// line's `of <n> B` print it: `_stack_start − _stack_end`, the residual of
+/// RWDATA after the statics. A figure (`main_stack_bytes`), for the reason
+/// [`PREFIX_KEY`] is.
+const MAIN_STACK_KEY: &str = "main_stack_bytes";
 
 /// Run the shipped image, direct-loaded, under `--strict-bus`, stopping at
 /// the first complete line containing `exit_on`.
@@ -111,17 +111,13 @@ fn the_init_chain_comes_out_of_the_wire_byte_for_byte() {
 
     let bytes = machine.uart0().bytes();
     let text = String::from_utf8_lossy(&bytes).into_owned();
-    assert_eq!(
-        bytes.len(),
-        PREFIX_BYTES,
-        "P3 counted {PREFIX_BYTES} bytes into the accept block; the wire carries the same \
-         count. Got:\n{text}"
+    let mut figures = Figures::new(
+        "esp32v3",
+        "boot_idle::the_init_chain_comes_out_of_the_wire_byte_for_byte",
     );
-    assert_eq!(
-        hex(&Sha256::digest(&bytes)),
-        PREFIX_SHA256,
-        "the golden moved. Say which line changed and why before re-blessing:\n{text}"
-    );
+    figures.utf8(PREFIX_KEY, &bytes);
+    figures.int(MAIN_STACK_KEY, number(&text, "[INIT] main stack "));
+    figures.verify();
 
     // The chain, in order — the same list L0 captured off the desk board
     // (`../bench.md`) as far as this phase reaches.
@@ -129,9 +125,8 @@ fn the_init_chain_comes_out_of_the_wire_byte_for_byte() {
         "[INIT] fw-esp32v3 boot",
         "[INIT] chip=esp32 arch=xtensa heap=15072+112640+98304+15536=241552",
         "[INIT] heap regions: 0 0x3ffe0440+15072 (ROM PRO stack)",
-        // 45,280 until the BLE plan's M3 shrank the server loop's future (in
-        // `.bss`) by 80 B; see PREFIX_SHA256.
-        "[INIT] main stack 45344 B",
+        // Its size is the `main_stack_bytes` figure, checked above.
+        "[INIT] main stack ",
         "[RECOVERY] boot: cause=power-on level=green safe_mode=false prior_boot_complete=true",
         "[INIT] runtime started",
         "[INIT] I/O task spawned (uart0 921600 8N1, swi2 executor prio2, timg0t1 pacer 1ms)",
@@ -184,7 +179,7 @@ fn exit_on_stops_at_a_complete_line() {
     let text = machine.uart0().text();
     assert!(text.ends_with("[INIT] runtime started\n"), "got:\n{text}");
     assert!(
-        text.len() < PREFIX_BYTES,
+        !text.contains(LAST_LINE),
         "and it stopped there rather than running on to the I/O task's line"
     );
 }
@@ -377,7 +372,7 @@ fn the_rom_up_boot_reaches_the_idle_heartbeat() {
 /// is L1's, and it is held until L1 captures from a clean pinned commit.
 ///
 /// ⚠️ With core 1 running, "the same figures" excludes the main stack's
-/// high-water — see [`PATH_HIGH_WATER_GAP`] and the comment at the assertion.
+/// high-water — see [`PATH_HIGH_WATER_GAP_KEY`] and the comment at the assertion.
 #[test]
 #[ignore = "needs the shipped image and espflash; run through `just test-emu-esp32v3-boot`"]
 fn the_two_paths_report_the_same_memory_figures() {
@@ -443,7 +438,7 @@ fn the_two_paths_report_the_same_memory_figures() {
     // core 1 running they still agree **exactly** on every memory-transfer
     // field — `[MEM]`'s `free`/`used`/`largest_free`/`retry_saves` and the
     // whole `[JIT]` census — and differ on the main stack's high-water by
-    // [`PATH_HIGH_WATER_GAP`], which is not a memory-transfer field: it is
+    // [`PATH_HIGH_WATER_GAP_KEY`], which is not a memory-transfer field: it is
     // how deep an interrupt happened to land, and the two paths reach the
     // heartbeat at different points in the pacer's phase.
     assert_eq!(
@@ -452,20 +447,25 @@ fn the_two_paths_report_the_same_memory_figures() {
         "the two boot paths report the same memory figures"
     );
     let (hw_direct, hw_rom_up) = (number(&a[0], "high-water "), number(&b[0], "high-water "));
-    assert_eq!(
-        hw_rom_up as i64 - hw_direct as i64,
-        PATH_HIGH_WATER_GAP,
-        "the cross-path high-water gap is the measured one; see PATH_HIGH_WATER_GAP"
+    let mut figures = Figures::new(
+        "esp32v3",
+        "boot_idle::the_two_paths_report_the_same_memory_figures",
     );
+    // The measured cross-path gap — positional, so the record holds CI's
+    // value; see PATH_HIGH_WATER_GAP_KEY.
+    figures.positional_int(PATH_HIGH_WATER_GAP_KEY, hw_rom_up as i64 - hw_direct as i64);
     assert_eq!(
         a[0].split("high-water").next(),
         b[0].split("high-water").next(),
         "and it is the same stack, reported the same way"
     );
-    assert!(
-        a[0].contains(" of 45344 B ") && b[0].contains(" of 45344 B "),
+    assert_eq!(
+        number(&a[0], " B of "),
+        number(&b[0], " B of "),
         "the stack's size is the same on both paths: {a:?} vs {b:?}"
     );
+    figures.int(MAIN_STACK_KEY, number(&a[0], " B of "));
+    figures.verify();
     // The one figure the boot banner carries too, so the triple can be read
     // against `[INIT] chip=esp32 … heap=…`.
     assert!(
@@ -650,8 +650,22 @@ const STACK_HIGH_WATER_GAP: u64 = 640;
 /// place in the cycle. High-water is a maximum over time, so a path that
 /// takes one more interrupt inside a deeper call reports a larger one.
 ///
-/// Pinned rather than tolerated, like its two neighbours: a change in
-/// either direction is a finding.
+/// Pinned rather than tolerated, like its two neighbours. Unlike them it is
+/// read off **this tree's** image, not the pinned reference, so it is a
+/// figure — recorded as `boot_idle.path_high_water_gap` in
+/// `lp-emu/esp/figures/esp32v3.json` and moved by the image's layout (BLE M3
+/// moved it with nothing but `.bss`). Exactly as strict: any move fails and
+/// names old → new. With an unchanged image a move is the machine's, and a
+/// finding.
+///
+/// ⚠️ **And it is positional, so the record holds CI's value.** A high-water
+/// is where an interrupt happened to land, and the tree's image is not the
+/// same bytes on two hosts (host paths, the host rustc's own build; see
+/// `docs/debt/reference-images-are-not-reproducible-across-hosts.md`). At
+/// `5e864de73` CI's runner reads −96 and a desk worktree reads −64 off the
+/// same commit — a desk failure of this test predates the record. So it is
+/// observed with `positional_int`: checked exactly, but a desk bless does not
+/// rewrite it (CI's failure message carries the new value).
 ///
 /// ⚠️ **Re-measured on 2026-09-11 after M4 P3b: 160 → −64, and the sign
 /// flipped.** `direct 16460`, `rom-up 16396`: the direct load now goes
@@ -672,7 +686,7 @@ const STACK_HIGH_WATER_GAP: u64 = 640;
 /// fell by 3,328 B — `direct` 16460 → 13132 — and that part IS named: the
 /// embassy main task's `poll` frame shrank from `entry a1, 4304` to `976`;
 /// see `determinism.rs`'s `PREFIX_CYCLES`. The 32 B move of the gap is not.)
-const PATH_HIGH_WATER_GAP: i64 = -96;
+const PATH_HIGH_WATER_GAP_KEY: &str = "boot_idle.path_high_water_gap";
 
 /// **G2 (e).** Every memory-class field of the idle heartbeat, this machine
 /// against the desk board, on the same image and the same request.
