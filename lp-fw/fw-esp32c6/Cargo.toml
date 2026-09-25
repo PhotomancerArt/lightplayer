@@ -281,6 +281,15 @@ fixture-old-proto = ["lpa-server/fixture-old-proto"]
 #   cargo build --profile release-esp32 --features esp32c6,server,radio,spike_uart0_link
 spike_uart0_link = []
 fixture-no-hello = ["lpa-server/fixture-no-hello", "fw-core/fixture-no-hello"]
+# Emulator FIXTURE, never shipped: the io_task writes through esp-hal's raw
+# TX half, WITHOUT the USB-Serial-JTAG IN-endpoint gate
+# (fw_esp32_common::serial::in_endpoint) — the write path as it was before
+# PR #795. Exists so the emulated C6 can show the packed-frame loss the gate
+# fixes, under the link model's free-lag hypothesis
+# (lp-cli/tests/emu_usb_free_lag.rs;
+# docs/defects/2026-09-24-the-real-c6-link-loses-bytes-inside-a-packed-frame.md).
+# Not `test_*`: that prefix selects a harness entrypoint instead of the app.
+fixture-no-in-endpoint-gate = []
 
 [dependencies]
 lp-collection = { workspace = true, features = ["serde"] }

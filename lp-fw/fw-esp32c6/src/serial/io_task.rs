@@ -28,9 +28,9 @@ use fw_esp32_common::serial::chunked_write::{ChunkedWriter, WritePolicy};
 use log;
 
 use crate::board::esp32c6::usb_connection::UsbConnectionMonitor;
-#[cfg(not(feature = "spike_uart0_link"))]
+#[cfg(not(any(feature = "spike_uart0_link", feature = "fixture-no-in-endpoint-gate")))]
 use crate::board::esp32c6::usb_connection::UsbSerialJtagInEndpoint;
-#[cfg(not(feature = "spike_uart0_link"))]
+#[cfg(not(any(feature = "spike_uart0_link", feature = "fixture-no-in-endpoint-gate")))]
 use fw_esp32_common::serial::in_endpoint::InEndpoint;
 
 /// Static message channels for MessageRouter
@@ -117,7 +117,11 @@ pub async fn io_task(usb_device: esp_hal::peripherals::USB_DEVICE<'static>) {
         // JSON line, every chunk of a packed frame, a probe — waits for a free
         // buffer (`fw_esp32_common::serial::in_endpoint`; PR #805, and
         // docs/defects/2026-09-24-the-real-c6-link-loses-bytes-inside-a-packed-frame.md).
-        (rx, InEndpoint::<_, UsbSerialJtagInEndpoint>::new(tx))
+        #[cfg(not(feature = "fixture-no-in-endpoint-gate"))]
+        let tx = InEndpoint::<_, UsbSerialJtagInEndpoint>::new(tx);
+        // The emulator fixture: the pre-#795 write path, esp-hal's TX half
+        // as it comes (see the feature's comment in Cargo.toml).
+        (rx, tx)
     };
     // esp-emu spike: the same task over UART0. Everything below this point
     // is generic over `embedded_io_async::{Read, Write}`, so only the halves

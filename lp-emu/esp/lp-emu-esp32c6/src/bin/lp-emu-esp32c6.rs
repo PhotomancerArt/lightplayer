@@ -102,6 +102,11 @@ OPTIONS:
                             the USB-Serial-JTAG host at power-on: no cable
                             (P6's machine), a host with the port open and
                             draining, or a host with the port closed [absent]
+    --usb-in-free-lag <ns>  a HYPOTHESIS switch, off by default: hold the
+                            IN endpoint's serial_in_ep_data_free at 0 for <ns>
+                            emulated nanoseconds after each drain has raised
+                            serial_in_empty (docs/defects/2026-09-24-the-real-
+                            c6-link-loses-bytes-inside-a-packed-frame.md) [0]
     --usb-sj stderr|file:<path>|tcp:<host:port>
                             where the bytes a USB host RECEIVED go — IN
                             packets a draining host took [kept in memory,
@@ -385,6 +390,7 @@ struct Args {
     usb_sj_tried: UsbSjSink,
     usb_host: UsbHost,
     usb_sj_drain: UsbSjDrain,
+    usb_in_free_lag_ns: u64,
     usb_script: Vec<PathBuf>,
     pin_script: Vec<PathBuf>,
     wires: Vec<(PadId, PadId)>,
@@ -480,6 +486,7 @@ fn run() -> Result<ExitCode, String> {
         .usb_sj_tried(args.usb_sj_tried.clone())
         .usb_host(args.usb_host)
         .usb_sj_drain(args.usb_sj_drain)
+        .usb_in_free_lag_ns(args.usb_in_free_lag_ns)
         .dump_frames(args.dump_frames.clone())
         .pin_log(args.pin_log.clone())
         .trap_log(args.trap_log.clone())
@@ -771,6 +778,12 @@ fn parse(argv: Vec<String>) -> Result<Args, String> {
                 let text = value("--usb-sj-drain")?;
                 args.usb_sj_drain = UsbSjDrain::parse(&text)
                     .ok_or_else(|| format!("--usb-sj-drain `{text}`: expected auto or manual"))?;
+            }
+            "--usb-in-free-lag" => {
+                let text = value("--usb-in-free-lag")?;
+                args.usb_in_free_lag_ns = text.parse().map_err(|_| {
+                    format!("--usb-in-free-lag `{text}`: expected nanoseconds, a whole number")
+                })?;
             }
             "--usb-script" => args.usb_script.push(value("--usb-script")?.into()),
             "--pin-script" => args.pin_script.push(value("--pin-script")?.into()),
