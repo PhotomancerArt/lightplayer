@@ -811,11 +811,26 @@ impl ProjectRegistry {
     /// - Residency sets for playlists whose use left the tree are dropped, so
     ///   a playlist that comes back starts from its default.
     pub(super) fn release_left_behind(&mut self, after: &ProjectInventory) {
-        let kept = inventory_artifacts(after);
-        for location in inventory_artifacts(&self.inventory) {
-            if kept.contains(&location) || self.overlay.get().contains_artifact(&location) {
+        // Allocation-free unless something actually left: this runs on every
+        // derivation, including the device's project load (heap-budget
+        // ratchet), so candidates are compared in place, not collected.
+        let mut left: Vec<ArtifactLocation> = Vec::new();
+        let previous = self.inventory.defs.keys().map(|def| &def.artifact).chain(
+            self.inventory.assets.keys().map(|source| {
+                let lpc_model::AssetLocation::Artifact { location } = source;
+                location
+            }),
+        );
+        for location in previous {
+            if inventory_backs_artifact(after, location)
+                || self.overlay.get().contains_artifact(location)
+                || left.contains(location)
+            {
                 continue;
             }
+            left.push(location.clone());
+        }
+        for location in left {
             // Registered by the derivation that produced the previous
             // inventory; an absent entry only means another path already
             // released it.
@@ -1655,20 +1670,13 @@ fn is_strictly_under(ancestor: &SlotPath, descendant: &SlotPath) -> bool {
     ancestor.len() < descendant.len() && descendant.starts_with(ancestor)
 }
 
-/// Every artifact location backing a def or asset row of `inventory`.
-fn inventory_artifacts(inventory: &ProjectInventory) -> Vec<ArtifactLocation> {
-    let mut locations: Vec<ArtifactLocation> = inventory
-        .defs
-        .keys()
-        .map(|location| location.artifact.clone())
-        .collect();
-    for source in inventory.assets.keys() {
-        let lpc_model::AssetLocation::Artifact { location } = source;
-        if !locations.contains(location) {
-            locations.push(location.clone());
-        }
-    }
-    locations
+/// Whether `location` backs a def or asset row of `inventory`.
+fn inventory_backs_artifact(inventory: &ProjectInventory, location: &ArtifactLocation) -> bool {
+    inventory.defs.keys().any(|def| &def.artifact == location)
+        || inventory.assets.keys().any(|source| {
+            let lpc_model::AssetLocation::Artifact { location: asset } = source;
+            asset == location
+        })
 }
 
 impl Default for ProjectRegistry {
