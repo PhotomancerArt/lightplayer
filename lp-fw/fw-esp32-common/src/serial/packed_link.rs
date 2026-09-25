@@ -143,3 +143,97 @@ impl PackedLink {
         self.table = None;
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use lpc_wire::{WireServerMessage, ser_learned_frame_to};
+
+    #[test]
+    fn an_opt_in_allocates_starts_an_epoch_and_json_frees() {
+        let mut link = PackedLink::new();
+        assert!(link.table_for(&heartbeat()).is_none(), "JSON has no table");
+        let mut answer = set_encoding(WireEncoding::Packed);
+        link.prepare_answer(&mut answer);
+        assert!(matches!(
+            answer,
+            ServerMsgBody::SetEncoding {
+                encoding: WireEncoding::Packed
+            }
+        ));
+        assert!(link.table_for(&answer).is_none(), "the answer is JSON");
+        link.answered(WireEncoding::Packed);
+        assert_eq!(link.encoding(), WireEncoding::Packed);
+        assert_eq!(link.table_for(&heartbeat()).unwrap().epoch(), 1);
+
+        // A second opt-in (the host's reset request): a new, empty epoch.
+        send(&mut link, 1);
+        link.prepare_answer(&mut set_encoding(WireEncoding::Packed));
+        link.answered(WireEncoding::Packed);
+        let table = link.table_for(&heartbeat()).unwrap();
+        assert_eq!(table.epoch(), 2);
+        assert_eq!(table.mark(), lp_json_pack::LearnMark::default());
+
+        link.back_to_json();
+        assert_eq!(link.encoding(), WireEncoding::Json);
+        assert!(link.table.is_none(), "freed with the link");
+    }
+
+    /// The io task abandoned the write: the table forgets what it learned
+    /// from that frame, so the next frame's header is the one the host holds.
+    #[test]
+    fn an_abandoned_write_rolls_the_table_back() {
+        let mut link = packed_link();
+        send(&mut link, 1);
+        let before = link.table_for(&heartbeat()).unwrap().mark();
+        let tentative = link.tentative();
+        send(&mut link, 2);
+        assert_ne!(link.table_for(&heartbeat()).unwrap().mark(), before);
+        link.rolled_back(tentative);
+        assert_eq!(link.table_for(&heartbeat()).unwrap().mark(), before);
+    }
+
+    #[test]
+    fn a_dropped_answer_frees_a_table_not_yet_in_use() {
+        let mut link = PackedLink::new();
+        link.prepare_answer(&mut set_encoding(WireEncoding::Packed));
+        assert!(link.table.is_some());
+        link.answer_dropped();
+        assert!(link.table.is_none());
+
+        // On a packed link the table stays: it is in use.
+        let mut link = packed_link();
+        link.prepare_answer(&mut set_encoding(WireEncoding::Packed));
+        link.answer_dropped();
+        assert!(link.table.is_some());
+    }
+
+    fn packed_link() -> PackedLink {
+        let mut link = PackedLink::new();
+        link.prepare_answer(&mut set_encoding(WireEncoding::Packed));
+        link.answered(WireEncoding::Packed);
+        link
+    }
+
+    /// Serialize a reply that teaches the table (a new log line each time).
+    fn send(link: &mut PackedLink, n: u64) {
+        let msg = WireServerMessage::new(
+            n,
+            ServerMsgBody::Log {
+                level: lpc_wire::server::api::LogLevel::Info,
+                message: alloc::format!("line {n}"),
+            },
+        );
+        let mut buf = alloc::vec![0u8; 512];
+        let table = link.table_for(&msg.msg).expect("packed");
+        ser_learned_frame_to(&mut buf, table, &msg).unwrap();
+    }
+
+    fn heartbeat() -> ServerMsgBody {
+        ServerMsgBody::StopAllProjects
+    }
+
+    fn set_encoding(encoding: WireEncoding) -> ServerMsgBody {
+        ServerMsgBody::SetEncoding { encoding }
+    }
+}
