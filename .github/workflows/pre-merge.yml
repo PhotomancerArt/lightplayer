@@ -29,8 +29,8 @@ on:
 # of merge-to-green.
 #
 # Two main runs in flight share state; each case is fine by construction:
-#   - rust-cache and the stories `actions/cache/save`: same key from both,
-#     the second save logs "already exists" and the job continues.
+#   - the cargo-registry and stories `actions/cache/save`: same key from
+#     both, the second save logs "already exists" and the job continues.
 #   - sccache: content-addressed, concurrent writes are fine.
 #   - the stories snapshot push: each run pushes its own `sha-<sha>` ref (the
 #     baseline authority — story-baseline-lookup.mjs reads only
@@ -48,6 +48,17 @@ env:
   RISC_V_TARGET: riscv32imac-unknown-none-elf
   # Work around rustup rename failures on overlay/cross-device filesystems (ARM runners, Docker)
   RUSTUP_PERMIT_COPY_RENAME: 1
+  # sccache writes objects on main only; PR runs read main's objects and
+  # write none. Only jobs with SCCACHE_GHA_ENABLED consult it. The mode
+  # exists from sccache 0.16 (the `version:` pin on every sccache-action
+  # step keeps it honoured). Why: a PR's entries are visible to that PR
+  # alone, yet they count against the repo's one 10 GB budget — PR #811
+  # wrote 1.4 GB in two hours on 2026-09-25, evicting main's baseline that
+  # every other PR reads. Cost: a re-push of the same PR recompiles the
+  # crates that PR changed (and their dependents) instead of hitting its
+  # own previous push. See the budget note above `jobs:` and
+  # docs/debt/actions-cache-budget.md.
+  SCCACHE_GHA_RW_MODE: ${{ github.ref == 'refs/heads/main' && 'READ_WRITE' || 'READ_ONLY' }}
 
 # CI shape (2026-07-28 restructure — measured baseline: Validate was 39-52 min
 # and dominated every run; 2026-09-08 restructure — baseline in the
@@ -63,8 +74,11 @@ env:
 #                   ├─ firmware-esp32v3  (esp32 image size, manifest, clippy)
 #                   ├─ firmware-size     (esp32c6 image size, manifest)
 #                   ├─ emu-c6            (the C6 SoC emulator's own suite)
-#                   ├─ emu-esp32v3       (the classic ESP32 machine's gate)
+#                   ├─ emu-esp32v3       (the classic ESP32 machine's gate: boot suite + heap)
+#                   ├─ emu-esp32v3-ref   (…its other half: replays + reference image + jit cell)
 #                   └─ heap-budget-chips (chip heap ratchet + lp-cli emu tests)
+#   (all of the above) ─ red-main-suspects (main pushes, on failure only:
+#                                           names the PRs since the last green main)
 #
 # Every job is path-gated, including lint/validate via the `core` filter, so a
 # docs-only PR runs nothing but detect-changes — with one carve-out:
@@ -80,8 +94,9 @@ env:
 # fresh checkouts), so before 2026-07-28 every run recompiled all ~64
 # first-party crates from scratch — a no-op PR still paid 25-45 min. sccache
 # (GHA cache backend) now caches individual rustc invocations
-# content-addressed, workspace members included, and writes on every run (PRs
-# too), so unchanged crates are cache hits regardless of mtimes. It does not
+# content-addressed, workspace members included, so unchanged crates are
+# cache hits regardless of mtimes. It writes on main only (PRs read main's
+# objects; `SCCACHE_GHA_RW_MODE` in `env:` above says why). It does not
 # cache build-script execution, linking, or clippy-driver lints of workspace
 # crates (deps still hit). CARGO_INCREMENTAL=0 because sccache cannot cache
 # incremental compiles (and CI never benefited: the incremental state was
@@ -105,9 +120,21 @@ env:
 # The Actions-cache budget (10 GB per repo, LRU) is the constraint every
 # cache decision here answers to. On 2026-09-08 the repo held 11.7 GB in
 # 5,597 entries: 5.8 GB of it was twelve per-job rust-cache copies of the
-# same cargo registry (now one entry per toolchain family, see the lint
-# job's cache step), 4.3 GB sccache objects, 1.07 GB the stories job's
+# same cargo registry, 4.3 GB sccache objects, 1.07 GB the stories job's
 # entry, which that pressure evicted on two of three main runs that day.
+# That fix (one rust-cache entry per toolchain family) was not enough: on
+# 2026-09-25 the repo held 10.86 GB and its OLDEST last-access was 13
+# minutes old — anything not read every ~15 min was gone, the 26 MB
+# emu-ref entry and the stories entry included. The writers were seven
+# ~517 MB registry families re-saved together on every Cargo.toml edit
+# reaching main (~3.1 GB a time) and PR-scoped sccache objects (1.4 GB
+# from one PR in two hours) that no other ref can even read. The rules now:
+#   - every cache is saved from main only; PRs restore main's entries;
+#   - one entry per purpose: ONE cargo registry (lint job writes it, every
+#     job and both deploy workflows restore it), sccache objects, the
+#     stories bundle, Chrome for Testing, the emu-ref builds (the one
+#     exception: a PR adding a reference pin may save its 26 MB entry).
+# Steady state, and the arithmetic, is docs/debt/actions-cache-budget.md.
 # Re-check the listing (`gh api repos/<r>/actions/caches`) before adding any
 # entry over ~100 MB; what it displaces matters more than what it saves.
 #
@@ -149,6 +176,8 @@ jobs:
       emu_c6: ${{ github.event_name != 'pull_request' && 'true' || steps.some.outputs.emu_c6 }}
       emu_esp32v3: ${{ github.event_name != 'pull_request' && 'true' || steps.some.outputs.emu_esp32v3 }}
       emu_esp32s3: ${{ github.event_name != 'pull_request' && 'true' || steps.some.outputs.emu_esp32s3 }}
+      emu_ref_recipe: ${{ github.event_name != 'pull_request' && 'true' || steps.some.outputs.emu_ref_recipe }}
+      emu_esp32v3_fw: ${{ github.event_name != 'pull_request' && 'true' || steps.some.outputs.emu_esp32v3_fw }}
     steps:
       # Default quantifier ("some"): a filter is true when ANY changed file
       # matches one of its globs. Each list is the *dependency closure* of what
@@ -314,7 +343,10 @@ jobs:
             # commit, cost a shared-crate bump gains nothing from re-paying
             # here when `firmware-size` already rebuilds the shipped image for
             # exactly that case. Caching prebuilt ELFs instead of building them
-            # was considered and rejected (DD27).
+            # was considered and rejected (DD27) while the builds were ~69 s;
+            # by 2026-09 they (plus a pinned release lp-cli) were ~13 min of a
+            # 20-30 min critical-path job, so emu-c6 now caches the OUTPUTS —
+            # see its "Restore pinned reference builds" step.
             emu_c6:
               - 'lp-emu/**'
               - 'lp-fw/fw-esp32c6/**'
@@ -368,6 +400,32 @@ jobs:
             # change, which is the point: the two machines are the two sides
             # of the extraction M2 did, and a change that moves one and not
             # the other is exactly what nobody would notice.
+            # emu_ref_recipe gates emu-c6's `--verify` reproducibility rebuild
+            # of a pinned reference image. The images are pinned at historical
+            # commits, so no source change in a PR can move their bytes — only
+            # the recipe that builds them or the toolchain it builds with can.
+            # Everything else reuses the cached image (see emu-c6's
+            # "Restore pinned reference builds" step). Pushes to main always
+            # run it.
+            emu_ref_recipe:
+              - 'scripts/emu/build-reference-*.sh'
+              - 'scripts/emu/elf-section-digest.py'
+              - 'rust-toolchain.toml'
+            # emu_esp32v3_fw is the classic's half of the same rule. Its
+            # reference image is built at HEAD, not at a frozen pin (R7), so
+            # the "pinned sources" are the classic's firmware tree — the part
+            # of it this job's own `emu_esp32v3` filter can see (lp-core and
+            # friends never fire that job at all, DD77). A PR that fires the
+            # job without touching these (emulator, scripts, justfile,
+            # workflow) cannot move the image's bytes and skips the
+            # `--verify` rebuild. The Xtensa toolchain version is pinned in
+            # THIS file, which is deliberately not listed (every workflow
+            # edit would pay the rebuild): a toolchain bump's verify happens
+            # on main.
+            emu_esp32v3_fw:
+              - 'lp-fw/fw-esp32v3/**'
+              - 'lp-fw/fw-esp32-common/**'
+              - '.github/actions/xtensa-toolchain/**'
             emu_esp32v3:
               - 'lp-emu/**'
               - 'lp-fw/fw-esp32v3/**'
@@ -492,40 +550,45 @@ jobs:
 
       - name: Run sccache
         uses: mozilla/sccache-action@v0.0.10
-
-      # One rust-cache entry per toolchain family (`shared-key`), not per
-      # job. With cache-targets false the entry IS the cargo registry, and
-      # keying on the job id (the default) had produced twelve ~500 MB copies
-      # of the same registry — 5.8 GB of the repo's 10 GB Actions-cache
-      # budget, measured 2026-09-08 at 11.7 GB used — which is what kept
-      # evicting the stories job's 1 GB entry (missed on 2 of 3 main runs
-      # that day, 620 s of `cargo install` each time) and everyone's sccache
-      # objects. The x64 nightly jobs share `x64-nightly`, the Xtensa
-      # firmware pair `xtensa-fw`, validate-xtensa `xtensa-host`, the ARM
-      # job `arm64-nightly`. rust-cache still adds an env hash (installed
-      # toolchains + CARGO_*/RUST* env), so a family's members keep those
-      # identical or the key silently splits. On main every member attempts
-      # the save; the first wins and the rest log "already exists". save-if
-      # main-only: GitHub scopes cache RESTORE so a PR can only see its own
-      # ref's caches plus main's, and evicts LRU past the 10GB repo cap;
-      # saving only on main keeps one shared warm baseline every PR can
-      # restore.
-      - name: Cache cargo registry and build artifacts
-        uses: Swatinem/rust-cache@v2
         with:
-          workspaces: lp2025 -> target
-          # target/ itself is NOT cached: sccache re-materializes crate
-          # compiles content-addressed (91% hit rate measured on this PR's
-          # warm run), and the 2-3GB-per-job target payloads pushed the repo
-          # past its 10GB Actions-cache budget, which LRU-evicts into
-          # thrash. Build scripts re-run each time — small next to the
-          # eviction cost. The registry stays cached; ~/.cargo/bin does not
-          # (cache-bin false): every tool comes prebuilt via cargo-binstall
-          # in seconds, so a shared entry never depends on which job saved it.
-          cache-targets: false
-          cache-bin: false
-          shared-key: x64-nightly
-          save-if: ${{ github.ref == 'refs/heads/main' }}
+          version: v0.18.0
+
+      # ONE cargo-registry entry for the whole repo, and THIS job on main is
+      # its only writer; every other job (and both deploy workflows) restores
+      # it read-only through .github/actions/cargo-registry, whose header has
+      # the full story. Short form: the registry is the same bytes for every
+      # toolchain and arch, yet it used to live in seven rust-cache "family"
+      # entries of ~517 MB each, re-saved together on every Cargo.toml edit
+      # that reached main (~3.1 GB a time) — which, with the sccache write
+      # rate, had shrunk the repo's LRU horizon to ~15 minutes on 2026-09-25
+      # (docs/debt/actions-cache-budget.md).
+      #
+      # On main the restore is exact-key only, and on a miss `cargo fetch`
+      # downloads everything this lockfile resolves to (all targets) before
+      # the save, so the one entry is a fresh superset for every job instead
+      # of whichever job happened to save first, and never accretes old crate
+      # versions. It saves before linting so a red lint still publishes it.
+      - name: Restore cargo registry
+        id: registry
+        uses: ./lp2025/.github/actions/cargo-registry
+        with:
+          exact: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: Fetch the whole lockfile (main, registry miss)
+        if: github.ref == 'refs/heads/main' && steps.registry.outputs.cache-hit != 'true'
+        run: cd lp2025 && cargo fetch --locked
+
+      # Paths must match the restore action's byte for byte: they are part of
+      # the cache version, and a mismatch silently never restores.
+      - name: Save cargo registry (main only)
+        if: github.ref == 'refs/heads/main' && steps.registry.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+          key: ${{ steps.registry.outputs.key }}
 
       - name: Install just
         uses: extractions/setup-just@v3
@@ -606,17 +669,12 @@ jobs:
 
       - name: Run sccache
         uses: mozilla/sccache-action@v0.0.10
-
-      # Shared `xtensa-fw` entry with firmware-esp32v3; see the lint job's
-      # cache step for the shared-key rationale.
-      - name: Cache cargo registry and build artifacts
-        uses: Swatinem/rust-cache@v2
         with:
-          workspaces: lp2025 -> target
-          cache-targets: false
-          cache-bin: false
-          shared-key: xtensa-fw
-          save-if: ${{ github.ref == 'refs/heads/main' }}
+          version: v0.18.0
+
+      # The repo's one registry entry, read-only (see the lint job).
+      - name: Restore cargo registry
+        uses: ./lp2025/.github/actions/cargo-registry
 
       - name: Install just
         uses: extractions/setup-just@v3
@@ -710,19 +768,14 @@ jobs:
 
       - name: Run sccache
         uses: mozilla/sccache-action@v0.0.10
-
-      # `lp2025 -> target`, mirroring firmware-xtensa: this crate is a
-      # repo-root workspace member (M3-P1 folded it in) and writes into the
-      # shared root target/, so the cache key must be the repo root. Shared
-      # `xtensa-fw` entry with firmware-xtensa; see the lint job's cache step.
-      - name: Cache cargo registry and build artifacts
-        uses: Swatinem/rust-cache@v2
         with:
-          workspaces: lp2025 -> target
-          cache-targets: false
-          cache-bin: false
-          shared-key: xtensa-fw
-          save-if: ${{ github.ref == 'refs/heads/main' }}
+          version: v0.18.0
+
+      # The repo's one registry entry, read-only (see the lint job). This
+      # crate is a repo-root workspace member (M3-P1 folded it in), so the
+      # root Cargo.lock covers it.
+      - name: Restore cargo registry
+        uses: ./lp2025/.github/actions/cargo-registry
 
       - name: Install just
         uses: extractions/setup-just@v3
@@ -837,18 +890,12 @@ jobs:
       # workflow by firmware-size.
       - name: Run sccache
         uses: mozilla/sccache-action@v0.0.10
-
-      # `xtensa-host` entry of its own: this job installs nightly AND the esp
-      # fork, so its env hash never matches the firmware pair's anyway; see
-      # the lint job's cache step for the shared-key rationale.
-      - name: Cache cargo registry and build artifacts
-        uses: Swatinem/rust-cache@v2
         with:
-          workspaces: lp2025 -> target
-          cache-targets: false
-          cache-bin: false
-          shared-key: xtensa-host
-          save-if: ${{ github.ref == 'refs/heads/main' }}
+          version: v0.18.0
+
+      # The repo's one registry entry, read-only (see the lint job).
+      - name: Restore cargo registry
+        uses: ./lp2025/.github/actions/cargo-registry
 
       - name: Install just
         uses: extractions/setup-just@v3
@@ -1064,9 +1111,10 @@ jobs:
     if: needs.detect-changes.outputs.firmware == 'true'
     env:
       CARGO_INCREMENTAL: "0"
-      # The firmware profile ignores these two; they are here so this job's
-      # rust-cache env hash matches the rest of the `x64-nightly` family
-      # (see the lint job's cache step).
+      # The firmware profile ignores these two. They were added to match a
+      # rust-cache env hash that no longer exists (the registry is one
+      # entry now, see the lint job); they stay because sccache hashes
+      # CARGO_* env too, and dropping them would re-key this job's objects.
       CARGO_PROFILE_DEV_DEBUG: "false"
       CARGO_PROFILE_TEST_DEBUG: "false"
       SCCACHE_GHA_ENABLED: "true"
@@ -1097,16 +1145,12 @@ jobs:
 
       - name: Run sccache
         uses: mozilla/sccache-action@v0.0.10
-
-      # Shared `x64-nightly` entry; see the lint job's cache step.
-      - name: Cache cargo registry and build artifacts
-        uses: Swatinem/rust-cache@v2
         with:
-          workspaces: lp2025 -> target
-          cache-targets: false
-          cache-bin: false
-          shared-key: x64-nightly
-          save-if: ${{ github.ref == 'refs/heads/main' }}
+          version: v0.18.0
+
+      # The repo's one registry entry, read-only (see the lint job).
+      - name: Restore cargo registry
+        uses: ./lp2025/.github/actions/cargo-registry
 
       - name: Install just
         uses: extractions/setup-just@v3
@@ -1244,30 +1288,18 @@ jobs:
 
       - name: Run sccache
         uses: mozilla/sccache-action@v0.0.10
-
-      # Shared `x64-nightly` rust-cache entry; save-if main-only (see the lint
-      # job's cache step for both). The reference-image builds happen
-      # inside a detached worktree under lp2025/target/emu-ref/, which is
-      # still under this workspace root, so sccache (content-addressed) still
-      # covers them even though target/ itself is not cached.
-      #
-      # cache-on-failure (2026-09-08): this job's own post-cache save step
-      # was silently skipped on every run this job overran on, because
-      # rust-cache's default post-if is `success()` — a step failure or a
-      # timeout cancellation both make that false, so a cancelled run (see
-      # timeout-minutes above) never published this job's cache, and main
-      # ran cold on every subsequent run. cache-on-failure widens the
-      # post-if to `success() || cache-on-failure`, so a future overrun
-      # still saves what got built before the cutoff.
-      - name: Cache cargo registry and build artifacts
-        uses: Swatinem/rust-cache@v2
         with:
-          workspaces: lp2025 -> target
-          cache-targets: false
-          cache-bin: false
-          shared-key: x64-nightly
-          save-if: ${{ github.ref == 'refs/heads/main' }}
-          cache-on-failure: true
+          version: v0.18.0
+
+      # The repo's one registry entry, read-only (see the lint job). The
+      # reference builds happen inside
+      # detached worktrees under lp2025/target/emu-ref/ with their own target
+      # dirs and `--remap-path-prefix` flags, and sccache MISSES them in
+      # practice (measured 2026-09-23: the pinned release lp-cli alone was
+      # 8m19s on every run) — which is what the reference-build cache below
+      # is for.
+      - name: Restore cargo registry
+        uses: ./lp2025/.github/actions/cargo-registry
 
       - name: Install just
         uses: extractions/setup-just@v3
@@ -1285,17 +1317,100 @@ jobs:
       - name: Install espflash (prebuilt — the merged image's bootloader)
         run: cargo binstall --no-confirm --locked espflash@3.3.0
 
-      # The reference image is reproducible (L4): the same sha256 on this
-      # runner and on a Mac, for the same pinned firmware commit. This step is
+      # **The pinned reference builds, cached as OUTPUTS** (2026-09-23). The
+      # suite below boots firmware images built at pinned historical commits
+      # (d6cfaa205, 735af98ae) and uploads with a release `lp-cli` pinned at
+      # 13b04dd0b (the proto-20 client, #785). Built cold, those were ~13 min
+      # of this job on every run: 8m19s for the lp-cli, ~4.5 min for five
+      # images. Their bytes depend only on the pinned commit, the recipe
+      # scripts and the toolchain, so they are cached here — the binaries and
+      # their SHA256SUMS/PROVENANCE sidecars only, never the worktrees, target
+      # dirs or merged.bin (rebuilt in seconds, and it depends on espflash).
+      #
+      # A cache hit looks like a previous build: both scripts return early
+      # when `target/emu-ref/<commit>-<slug>/<binary>` already exists.
+      #
+      # The key is `emu-ref-c6-<runner os/arch>-<hash of recipe + toolchain>-
+      # <hash of the set of <commit>-<slug> dirs>`. Restore matches on the
+      # prefix only (the newest entry for this runner + recipe + toolchain),
+      # and the save step at the end of this job computes the last part from
+      # what is on disk then. So a new pin needs no edit here: the run that
+      # first builds it saves a new entry, and the images it restored stay
+      # valid because their directory names ARE their commit + feature set
+      # (`build-reference-image.sh`'s slug table; the spike is fixed per
+      # commit and the script refuses a mismatched one). A recipe or
+      # toolchain change misses outright and rebuilds everything cold. The
+      # runner is in the key because the bytes are NOT reproducible across
+      # hosts (docs/debt/reference-images-are-not-reproducible-across-hosts.md):
+      # a hit must only ever hand this runner image what this runner image
+      # built.
+      #
+      # Budget: the repo's 10 GB Actions cache (see the note above `jobs:`).
+      # An entry is written only when the set changes, so main holds one and
+      # a PR saves its own only while main has none or when it adds a pin.
+      # Measured size is in the PR that added this (#797).
+      - name: Reference-build cache key
+        id: emu-ref-key
+        env:
+          RECIPE_HASH: ${{ hashFiles('lp2025/scripts/emu/build-reference-*.sh', 'lp2025/rust-toolchain.toml') }}
+        run: echo "prefix=emu-ref-c6-${{ runner.os }}-${{ runner.arch }}-$RECIPE_HASH-" >> "$GITHUB_OUTPUT"
+
+      - name: Restore pinned reference builds
+        id: emu-ref-restore
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            lp2025/target/emu-ref/*/fw-esp32c6
+            lp2025/target/emu-ref/*/SHA256SUMS
+            lp2025/target/emu-ref/*/PROVENANCE
+            lp2025/target/emu-ref/*-lp-cli/lp-cli
+            !lp2025/target/emu-ref/wt-*
+          key: ${{ steps.emu-ref-key.outputs.prefix }}restore-by-prefix
+          restore-keys: ${{ steps.emu-ref-key.outputs.prefix }}
+
+      # The reference image is reproducible (L4): the same sha256 on every
+      # run of this runner, for the same pinned firmware commit. This step is
       # what keeps that true — it builds the memfs image twice, in two cold
-      # worktrees at different paths, and fails if the bytes differ.
+      # worktrees at different paths, and fails if the bytes differ. When the
+      # image came out of the cache it ALSO fails if the fresh build differs
+      # from the cached bytes: that is the check that the cache has not gone
+      # stale against its own recipe.
       #
       # One image, not all three: the claim is about the recipe, and the other
-      # two go through the same code path. It runs BEFORE the suite so its
-      # first build is the one the tests then use (the script publishes to the
-      # path they resolve), which is why it does not simply double the job.
+      # two go through the same code path.
+      #
+      # **It runs only on pushes to main, or on a PR that changes the recipe
+      # (`scripts/emu/build-reference-*.sh`, `elf-section-digest.py`) or
+      # `rust-toolchain.toml`** — the `emu_ref_recipe` gate (2026-09-24). The
+      # image it verifies is pinned by the recipe itself (the script's C6
+      # `default_commit`), so "the pinned commit changed" is a recipe change
+      # and is covered by the same gate. What a PR gives up: a
+      # reproducibility break from anything else — in practice a runner-image
+      # change, since the pinned commits' sources cannot change — is caught
+      # post-merge, on main, where every gate is forced on. That trade buys
+      # ~3 min off the critical-path job on every other PR.
+      #
+      # It can never compare a binary with itself: `--verify` skips the
+      # script's "already built" early return, and both of its builds happen
+      # in fresh worktrees (the cache holds no worktrees), so on a hit it is
+      # two cold builds checked against each other AND against the cached
+      # bytes.
       - name: Reference image reproducibility (--verify)
-        run: cd lp2025 && ./scripts/emu/build-reference-image.sh --verify esp32c6,server,radio,spike_uart0_link,memory_fs
+        id: emu-ref-verify
+        if: needs.detect-changes.outputs.emu_ref_recipe == 'true'
+        run: |
+          cd lp2025
+          commit="$(sed -n 's/^ *default_commit="\([0-9a-f]\{7,\}\)".*/\1/p' scripts/emu/build-reference-image.sh | head -1)"
+          [[ -n "$commit" ]] || { echo "::error::could not read the C6 default_commit from build-reference-image.sh"; exit 1; }
+          elf="target/emu-ref/$commit-boot-idle-memfs/fw-esp32c6"
+          cached=""
+          if [[ -f "$elf" ]]; then cached="$(sha256sum "$elf" | cut -d' ' -f1)"; echo "cached $elf: $cached"; fi
+          ./scripts/emu/build-reference-image.sh --verify esp32c6,server,radio,spike_uart0_link,memory_fs
+          fresh="$(sha256sum "$elf" | cut -d' ' -f1)"
+          if [[ -n "$cached" && "$cached" != "$fresh" ]]; then
+            echo "::error::cached reference image $cached != fresh build $fresh: the reference-build cache is stale against its recipe"
+            exit 1
+          fi
 
       - name: Emulator C6 boot tests + replays
         run: cd lp2025 && just test-emu-c6-boot
@@ -1415,6 +1530,45 @@ jobs:
       - name: Tab host smoke (node + the page's WASI shim)
         run: cd lp2025 && node scripts/emu/tab-smoke.mjs
 
+      # Second half of the reference-build cache (see the restore step): name
+      # what is on disk now, and save it if that is not what was restored.
+      # Last, because the boot suite AND the differential-oracle step above
+      # both resolve pinned images. It runs even when a test failed — every
+      # counted directory holds a finished binary (the scripts publish by
+      # `mv`/`cp` only after a successful build), so a red PR's rerun still
+      # starts warm — but never after a failed `--verify`, whose recipe is by
+      # definition not trustworthy, and never on a cancelled run.
+      - name: Name the pinned reference-build set
+        id: emu-ref-set
+        if: ${{ !cancelled() && steps.emu-ref-verify.outcome != 'failure' }}
+        run: |
+          cd lp2025
+          dirs=""
+          if [[ -d target/emu-ref ]]; then
+            dirs="$(cd target/emu-ref && for d in */; do
+              d="${d%/}"
+              case "$d" in wt-*) continue ;; esac
+              if [[ -f "$d/fw-esp32c6" && -f "$d/SHA256SUMS" ]] || [[ -x "$d/lp-cli" ]]; then echo "$d"; fi
+            done | sort)"
+          fi
+          echo "reference builds on disk:"
+          echo "${dirs:-(none)}"
+          if [[ -z "$dirs" ]]; then echo "key=" >> "$GITHUB_OUTPUT"; exit 0; fi
+          set_hash="$(echo "$dirs" | sha256sum | cut -c1-16)"
+          echo "key=${{ steps.emu-ref-key.outputs.prefix }}$set_hash" >> "$GITHUB_OUTPUT"
+
+      - name: Save pinned reference builds
+        if: ${{ !cancelled() && steps.emu-ref-set.outputs.key != '' && steps.emu-ref-set.outputs.key != steps.emu-ref-restore.outputs.cache-matched-key }}
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            lp2025/target/emu-ref/*/fw-esp32c6
+            lp2025/target/emu-ref/*/SHA256SUMS
+            lp2025/target/emu-ref/*/PROVENANCE
+            lp2025/target/emu-ref/*-lp-cli/lp-cli
+            !lp2025/target/emu-ref/wt-*
+          key: ${{ steps.emu-ref-set.outputs.key }}
+
       - name: sccache stats
         if: always()
         shell: bash
@@ -1446,9 +1600,22 @@ jobs:
   #     identity;
   #   * the reference image **twice**, for `--verify`.
   #
+  # **Two parallel jobs since 2026-09-24**, split along the recipe's own seam
+  # (`test-emu-esp32v3-gate` = `-boot` + `-reference`): this one builds the
+  # three in-tree images and runs the suite (~13 min of the old ~22), plus the
+  # heap ratchet, whose firmware rebuild is incremental on top of those
+  # images; `emu-esp32v3-ref` below runs the lints, the replays, the registry
+  # parity test, the reference image and the translated-core cell. Nothing
+  # crosses between them — the reference image is built in its own detached
+  # worktree, never from the in-tree firmware — so no artifact is passed and
+  # the split's only cost is a second toolchain install (~1.5 min of runner
+  # time). This job keeps the old check name; the other one is new.
+  #
   # `fetch-depth: 0` for the same reason as emu-c6: the reference build does
   # `git worktree add --detach` at a pinned commit, which a depth-1 checkout
-  # cannot serve.
+  # cannot serve. (That is the other job's step now; kept here too because
+  # the image's build script may read history and 5 s is cheaper than
+  # finding out.)
   emu-esp32v3:
     name: Emulator ESP32v3 (x64)
     runs-on: ubuntu-24.04
@@ -1510,22 +1677,12 @@ jobs:
 
       - name: Run sccache
         uses: mozilla/sccache-action@v0.0.10
-
-      # Its own shared-key: this job builds both a host test tree on the
-      # repo nightly AND an Xtensa firmware on the fork, so it matches
-      # neither `x64-nightly` nor `xtensa-fw` cleanly and would evict from
-      # whichever it borrowed. save-if main-only, cache-on-failure for the
-      # reason emu-c6's step gives: a cancelled run must still publish what
-      # it built.
-      - name: Cache cargo registry and build artifacts
-        uses: Swatinem/rust-cache@v2
         with:
-          workspaces: lp2025 -> target
-          cache-targets: false
-          cache-bin: false
-          shared-key: emu-esp32v3
-          save-if: ${{ github.ref == 'refs/heads/main' }}
-          cache-on-failure: true
+          version: v0.18.0
+
+      # The repo's one registry entry, read-only (see the lint job).
+      - name: Restore cargo registry
+        uses: ./lp2025/.github/actions/cargo-registry
 
       - name: Install just
         uses: extractions/setup-just@v3
@@ -1539,14 +1696,131 @@ jobs:
       - name: Install espflash (prebuilt — the merged image's bootloader)
         run: cargo binstall --no-confirm --locked espflash@3.3.0
 
-      # Since M5 P6 the recipe also runs the two host test commands: `cargo
+      # Part 1 of `test-emu-esp32v3-gate`: the shipped, `rmt-chase` and
+      # `frame-dump` images, the merged chip image, and the whole suite with
+      # the `#[ignore]`d half included. Parts 2–4 are the other job's.
+      - name: Emulator ESP32v3 boot suite (both boot paths, rmt-chase, frame-dump)
+        run: cd lp2025 && just test-emu-esp32v3-boot
+
+      # The classic's half of the heap-budget record's chip section (M5 P5).
+      # It lives here rather than in `Heap budget (esp32c6 chip)` because it
+      # needs the Xtensa toolchain this job already installs — a cold espup
+      # install is ~8 minutes, and the other job is path-gated on `emu_c6`,
+      # which does not fire for `lp-fw/fw-esp32v3/**` at all.
+      #
+      # In THIS half of the split rather than the reference half because the
+      # boot step above has just built the same firmware tree, so the
+      # ratchet's rebuild is incremental (44 s on the runner, run
+      # 35969291379); in the other job it would be a cold ~3-minute build.
+      #
+      # Cost, measured on an M2 Max with a warm cargo cache: 24 s all in — a
+      # 22 s `fw-esp32v3` rebuild (the recipe touches `src/main.rs`, because
+      # this crate's cfg-dependent codegen does not always retrigger on a
+      # feature flip) plus a 0.2 s boot that ends on its own `[JIT] used=`
+      # line at 119 ms of emulated time. The release `lp-emu-esp32v3`
+      # binary the ratchet runs is the one expense this job does not already
+      # pay; it is a much smaller dependency tree than `lp-cli`'s.
+      - name: Heap budget ratchet — the classic's own ledger
+        run: cd lp2025 && just heap-budget-check-chips-v3
+
+      - name: sccache stats
+        if: always()
+        shell: bash
+        run: |
+          if command -v sccache >/dev/null; then
+            { echo '#### sccache'; echo '```'; sccache --show-stats; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+  # The other half of the classic's gate — see `emu-esp32v3` above for the
+  # split. Same path gate, same toolchains, same cache key (the rust-cache
+  # entry is registry-only, `cache-targets: false`, so the two jobs can share
+  # it), and the same 35-minute budget, which this half sits far inside.
+  emu-esp32v3-ref:
+    name: Emulator ESP32v3 reference (x64)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    needs: detect-changes
+    if: needs.detect-changes.outputs.emu_esp32v3 == 'true'
+    env:
+      CARGO_INCREMENTAL: "0"
+      CARGO_PROFILE_DEV_DEBUG: "false"
+      CARGO_PROFILE_TEST_DEBUG: "false"
+      SCCACHE_GHA_ENABLED: "true"
+      RUSTC_WRAPPER: sccache
+    steps:
+      - name: Install system deps (libudev for serialport/espflash)
+        run: |
+          sudo rm -f /etc/apt/sources.list.d/*chrome* /etc/apt/sources.list.d/*google*
+          sudo apt-get update || echo "apt-get update reported errors; continuing — the install below is the real gate"
+          sudo apt-get install -y libudev-dev pkg-config
+
+      - name: Checkout lp2025
+        uses: actions/checkout@v4
+        with:
+          path: lp2025
+          # build-reference-image.sh does `git worktree add --detach` at a
+          # pinned commit; a shallow checkout has no history to detach to.
+          fetch-depth: 0
+
+      - name: Checkout lp-regalloc2
+        uses: actions/checkout@v4
+        with:
+          repository: PhotomancerArt/lp-regalloc2
+          path: lp-regalloc2
+
+      # Both toolchains, in that order, the Xtensa one NOT default — the
+      # sibling job's comment has the reason.
+      - name: Install Rust toolchain (host)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: nightly-2026-04-27
+          components: rust-src
+
+      # Same version and buildtargets as `firmware-esp32v3` and `emu-esp32v3`;
+      # keep all three in sync.
+      - name: Install Xtensa Rust toolchain
+        uses: ./lp2025/.github/actions/xtensa-toolchain
+        with:
+          version: 1.95.0.0
+          buildtargets: esp32
+          default: false
+
+      - name: Run sccache
+        uses: mozilla/sccache-action@v0.0.10
+
+      - name: Cache cargo registry and build artifacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: lp2025 -> target
+          cache-targets: false
+          cache-bin: false
+          shared-key: emu-esp32v3
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+          cache-on-failure: true
+
+      - name: Install just
+        uses: extractions/setup-just@v3
+
+      # Since M5 P6 the gate also runs the two host test commands: `cargo
       # test -p lp-emu-validate` (which owns `tests/v3_replays.rs`, the four
       # committed transcript pairs) and `cargo test -p lp-cli --test
       # validate_registry_parity`. They are IN THE RECIPE rather than extra
       # steps here, so that the gate a human runs and the gate CI runs stay
       # one thing.
-      - name: Emulator ESP32v3 gate (both boot paths, the replays, the reference image)
-        run: cd lp2025 && just test-emu-esp32v3-gate
+      #
+      # The recipe's `--verify` reproducibility rebuild (~2.5 min, a second
+      # cold Xtensa build) runs only on pushes to main or when the recipe,
+      # the toolchain file or the classic's firmware changed
+      # (`emu_ref_recipe` / `emu_esp32v3_fw`, 2026-09-24). Otherwise
+      # LP_EMU_REF_VERIFY=0 builds the reference image once — the
+      # translated-core cell below still needs it. The trade: a
+      # reproducibility break from anything else is caught post-merge, on
+      # main. This image is NOT cached like emu-c6's: it is built at HEAD,
+      # so there is no pinned commit to key an entry on.
+      - name: Emulator ESP32v3 gate, reference half (lints, replays, registry parity, the reference image)
+        env:
+          LP_EMU_REF_VERIFY: ${{ (needs.detect-changes.outputs.emu_ref_recipe == 'true' || needs.detect-changes.outputs.emu_esp32v3_fw == 'true') && '1' || '0' }}
+        run: cd lp2025 && just test-emu-esp32v3-reference
 
       # **The translator's identity cell** (M7 XD14, P07): `--jit` against
       # `--interpreter` on the pinned `boot-idle` image, five readings
@@ -1558,32 +1832,13 @@ jobs:
       # at ~3 minutes on the runner and a step is where that number can be
       # read. It is still one `just` recipe a human runs the same way.
       #
-      # It comes AFTER the gate step because the gate builds the reference
-      # image at HEAD that this reuses, so the only thing this pays for is the
-      # release `lp-emu-esp32v3 --features jit` binary and ~25 s of cranelift.
-      # Measured end to end on an M2 Max with the image already built: 27.8 s.
+      # It comes AFTER the gate step, in THIS job, because that step builds
+      # the reference image at HEAD that this reuses, so the only thing this
+      # pays for is the release `lp-emu-esp32v3 --features jit` binary and
+      # ~25 s of cranelift. Measured end to end on an M2 Max with the image
+      # already built: 27.8 s.
       - name: Translated-core identity cell (--jit vs --interpreter, boot-idle)
         run: cd lp2025 && just test-emu-xt-jit-image
-
-      # The classic's half of the heap-budget record's chip section (M5 P5).
-      # It lives here rather than in `Heap budget (esp32c6 chip)` because it
-      # needs the Xtensa toolchain this job already installs — a cold espup
-      # install is ~8 minutes, and the other job is path-gated on `emu_c6`,
-      # which does not fire for `lp-fw/fw-esp32v3/**` at all.
-      #
-      # Cost, measured on an M2 Max with a warm cargo cache: 24 s all in — a
-      # 22 s `fw-esp32v3` rebuild (the recipe touches `src/main.rs`, because
-      # this crate's cfg-dependent codegen does not always retrigger on a
-      # feature flip) plus a 0.2 s boot that ends on its own `[JIT] used=`
-      # line at 119 ms of emulated time. The C6's arm in the other job is ~8
-      # minutes (its comment's own figure: a release `lp-cli`, a firmware
-      # build and the profile captures), so the classic's arm is well under
-      # it — but the two are not in the same job, so the comparison is about
-      # size and not about a shared budget. The release `lp-emu-esp32v3`
-      # binary the ratchet runs is the one expense this job does not already
-      # pay; it is a much smaller dependency tree than `lp-cli`'s.
-      - name: Heap budget ratchet — the classic's own ledger
-        run: cd lp2025 && just heap-budget-check-chips-v3
 
       - name: sccache stats
         if: always()
@@ -1693,20 +1948,12 @@ jobs:
 
       - name: Run sccache
         uses: mozilla/sccache-action@v0.0.10
-
-      # Its own shared-key, for the classic job's reason: this job builds both
-      # a host test tree on the repo nightly AND an Xtensa firmware on the
-      # fork, so it matches neither `x64-nightly` nor `xtensa-fw` cleanly and
-      # would evict from whichever it borrowed.
-      - name: Cache cargo registry and build artifacts
-        uses: Swatinem/rust-cache@v2
         with:
-          workspaces: lp2025 -> target
-          cache-targets: false
-          cache-bin: false
-          shared-key: emu-esp32s3
-          save-if: ${{ github.ref == 'refs/heads/main' }}
-          cache-on-failure: true
+          version: v0.18.0
+
+      # The repo's one registry entry, read-only (see the lint job).
+      - name: Restore cargo registry
+        uses: ./lp2025/.github/actions/cargo-registry
 
       - name: Install just
         uses: extractions/setup-just@v3
@@ -1816,19 +2063,12 @@ jobs:
 
       - name: Run sccache
         uses: mozilla/sccache-action@v0.0.10
-
-      # Shared `x64-nightly` rust-cache entry; save-if main-only (see the lint
-      # job's cache step for both). cache-on-failure for the same reason as
-      # emu-c6: an overrun must still publish what it built.
-      - name: Cache cargo registry and build artifacts
-        uses: Swatinem/rust-cache@v2
         with:
-          workspaces: lp2025 -> target
-          cache-targets: false
-          cache-bin: false
-          shared-key: x64-nightly
-          save-if: ${{ github.ref == 'refs/heads/main' }}
-          cache-on-failure: true
+          version: v0.18.0
+
+      # The repo's one registry entry, read-only (see the lint job).
+      - name: Restore cargo registry
+        uses: ./lp2025/.github/actions/cargo-registry
 
       - name: Install just
         uses: extractions/setup-just@v3
@@ -1914,25 +2154,12 @@ jobs:
 
       - name: Run sccache
         uses: mozilla/sccache-action@v0.0.10
-
-      # Shared `x64-nightly` entry; save-if main-only (see the lint job's
-      # cache step for both).
-      - name: Cache cargo registry and build artifacts
-        uses: Swatinem/rust-cache@v2
         with:
-          workspaces: lp2025 -> target
-          # target/ itself is NOT cached: sccache re-materializes crate
-          # compiles content-addressed (91% hit rate measured on this PR's
-          # warm run), and the 2-3GB-per-job target payloads pushed the repo
-          # past its 10GB Actions-cache budget, which LRU-evicts into
-          # thrash. Build scripts re-run each time — small next to the
-          # eviction cost. The registry stays cached; ~/.cargo/bin does not
-          # (cache-bin false): every tool comes prebuilt via cargo-binstall
-          # in seconds, so a shared entry never depends on which job saved it.
-          cache-targets: false
-          cache-bin: false
-          shared-key: x64-nightly
-          save-if: ${{ github.ref == 'refs/heads/main' }}
+          version: v0.18.0
+
+      # The repo's one registry entry, read-only (see the lint job).
+      - name: Restore cargo registry
+        uses: ./lp2025/.github/actions/cargo-registry
 
       - name: Install just
         uses: extractions/setup-just@v3
@@ -2028,26 +2255,14 @@ jobs:
 
       - name: Run sccache
         uses: mozilla/sccache-action@v0.0.10
-
-      # `arm64-nightly` entry of its own (a different host arch is a
-      # different registry payload). save-if main-only: see the lint job's
-      # cache step for the rationale.
-      - name: Cache cargo registry and build artifacts
-        uses: Swatinem/rust-cache@v2
         with:
-          workspaces: lp2025 -> target
-          # target/ itself is NOT cached: sccache re-materializes crate
-          # compiles content-addressed (91% hit rate measured on this PR's
-          # warm run), and the 2-3GB-per-job target payloads pushed the repo
-          # past its 10GB Actions-cache budget, which LRU-evicts into
-          # thrash. Build scripts re-run each time — small next to the
-          # eviction cost. The registry stays cached; ~/.cargo/bin does not
-          # (cache-bin false): every tool comes prebuilt via cargo-binstall
-          # in seconds, so a shared entry never depends on which job saved it.
-          cache-targets: false
-          cache-bin: false
-          shared-key: arm64-nightly
-          save-if: ${{ github.ref == 'refs/heads/main' }}
+          version: v0.18.0
+
+      # The repo's one registry entry, read-only (see the lint job). The
+      # registry is .crate files and index JSON, not host code, so the entry
+      # the x64 lint job saves serves this ARM runner too.
+      - name: Restore cargo registry
+        uses: ./lp2025/.github/actions/cargo-registry
 
       - name: Install just
         uses: extractions/setup-just@v3
@@ -2110,25 +2325,12 @@ jobs:
 
       - name: Run sccache
         uses: mozilla/sccache-action@v0.0.10
-
-      # Shared `x64-nightly` entry; save-if main-only (see the lint job's
-      # cache step for both).
-      - name: Cache cargo registry and build artifacts
-        uses: Swatinem/rust-cache@v2
         with:
-          workspaces: lp2025 -> target
-          # target/ itself is NOT cached: sccache re-materializes crate
-          # compiles content-addressed (91% hit rate measured on this PR's
-          # warm run), and the 2-3GB-per-job target payloads pushed the repo
-          # past its 10GB Actions-cache budget, which LRU-evicts into
-          # thrash. Build scripts re-run each time — small next to the
-          # eviction cost. The registry stays cached; ~/.cargo/bin does not
-          # (cache-bin false): every tool comes prebuilt via cargo-binstall
-          # in seconds, so a shared entry never depends on which job saved it.
-          cache-targets: false
-          cache-bin: false
-          shared-key: x64-nightly
-          save-if: ${{ github.ref == 'refs/heads/main' }}
+          version: v0.18.0
+
+      # The repo's one registry entry, read-only (see the lint job).
+      - name: Restore cargo registry
+        uses: ./lp2025/.github/actions/cargo-registry
 
       - name: Install just
         uses: extractions/setup-just@v3
@@ -2610,3 +2812,48 @@ jobs:
         with:
           path: ~/chrome
           key: ${{ steps.chrome_cache.outputs.cache-primary-key }}
+
+  # A red MAIN names its suspects. CI validates each PR against its own
+  # branch, never the merge result, so two independently-green PRs can merge
+  # into a red main and the blame lands on whichever merged last
+  # (docs/debt/two-green-prs-can-red-main.md). Main pushes force every gate
+  # on, so a main run is the canary; this job makes it say which PRs landed
+  # since the last green main run, so the diagnosis starts in the right place.
+  # It never runs on a pull_request, and it exits 0: the run is already red.
+  red-main-suspects:
+    name: Red main suspects
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    needs:
+      - detect-changes
+      - lint
+      - firmware-xtensa
+      - firmware-esp32v3
+      - validate-xtensa
+      - firmware-size
+      - emu-c6
+      - emu-esp32v3
+      - emu-esp32v3-ref
+      - emu-esp32s3
+      - heap-budget-chips
+      - validate-x64
+      - validate-gfx
+      - validate-browser
+      - validate-stories
+    if: failure() && github.event_name == 'push' && github.ref == 'refs/heads/main'
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Name the PRs merged since the last green main
+        # Diagnostic only: a failure here must not add a second red job to a
+        # run that is already red for a real reason.
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: scripts/ci/red-main-suspects.sh "$GITHUB_SHA"
