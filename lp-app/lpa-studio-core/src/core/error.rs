@@ -41,6 +41,10 @@ pub enum UiError {
     Cancelled(String),
     /// The device is reachable but is not currently running LightPlayer.
     NoFirmwareDetected(String),
+    /// The device refused: this link's login does not reach the tier the
+    /// action needs (a Bluetooth link at play, asked to edit). The message
+    /// is the sentence the UI shows.
+    NotPermitted(String),
 }
 
 impl UiError {
@@ -56,7 +60,8 @@ impl UiError {
             | Self::Protocol(message)
             | Self::Browser(message)
             | Self::Cancelled(message)
-            | Self::NoFirmwareDetected(message) => message,
+            | Self::NoFirmwareDetected(message)
+            | Self::NotPermitted(message) => message,
         }
     }
 }
@@ -74,6 +79,7 @@ impl fmt::Display for UiError {
             Self::Browser(message) => write!(f, "browser error: {message}"),
             Self::Cancelled(message) => f.write_str(message),
             Self::NoFirmwareDetected(message) => write!(f, "{message}"),
+            Self::NotPermitted(message) => f.write_str(message),
         }
     }
 }

@@ -54,7 +54,7 @@ pub(crate) const SLOT_VERB_LABEL: &str = "start a board here";
 
 /// The add slot's quiet second verb and its menu (spike 2a).
 ///
-/// Deliberately quiet beside "It's connected": the common case is a board
+/// Deliberately quiet beside "via USB": the common case is a board
 /// on the desk, and this is the other way a card can appear.
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]

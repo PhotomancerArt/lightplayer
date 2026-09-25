@@ -6,6 +6,13 @@
 // `LAB_NOTIFY_CMD` is the channel for every test in this file, and it appends
 // a line to a file in the temp home, so "how many notifications" is "how many
 // lines".
+//
+// Every lab here runs on the manual clock (clock.mjs): the grace and the floor
+// are crossed by `lab.advance`, never by sleeping, and a count is read only
+// once `/status` says no send the lab decided on is still in flight. Sleeping
+// 300 ms and counting lines is what the suite did before, and on a loaded
+// runner the stub sender's shell had not always run by then
+// (docs/defects/2026-09-25-emu-lab-cooldown-tests-measured-wall-clock.md).
 'use strict';
 
 import { test } from 'node:test';
@@ -14,12 +21,34 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-import { startServer } from './helpers.mjs';
+import { startServer, until, MANUAL_CLOCK } from './helpers.mjs';
 import { fakeDevice } from './fake-device.mjs';
 import { readNotifyConfig } from '../notify.mjs';
 
-const FAST = { LAB_TICK_MS: '20', LAB_COOLDOWN_MS: '0', LAB_LOST_MS: '100000' };
-const TICKS = (n = 12) => new Promise((r) => setTimeout(r, 20 * n));
+const FAST = { ...MANUAL_CLOCK, LAB_COOLDOWN_MS: '0', LAB_LOST_MS: '100000' };
+
+/// Move the lab's time forward `ms`, then wait until every notification the
+/// lab decided on along the way has reached the stub sender, so the caller
+/// can count lines.
+async function elapse(lab, ms) {
+  await lab.advance(ms);
+  await settled(lab);
+}
+/// Resolve once the server has seen the device's last stream close, so the
+/// next advance runs with nobody present.
+async function gone(lab, id) {
+  await until('the server to see ' + id + ' leave', async () => {
+    const s = await api(lab, '/status').then((r) => r.json());
+    const d = s.devices.find((x) => x.id === id);
+    return d && d.streams === 0;
+  });
+}
+async function settled(lab) {
+  await until('the lab\'s notification sends to finish', async () => {
+    const s = await api(lab, '/status').then((r) => r.json());
+    return s.notify.sending === 0;
+  });
+}
 
 function tempHome(notify) {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'emu-lab-notify-'));
@@ -58,7 +87,11 @@ test('a job queued with no device present sends exactly one notification, and sa
   const lab = await startServer(home, { ...FAST, ...stubEnv(home) });
   try {
     const j = await queue(lab, { note: 'F2' });
-    await TICKS(15);
+    // The grace is 150 ms from the tick that first saw the job waiting — the
+    // one the queue call ran — so it holds at 149 and gives at 150.
+    await elapse(lab, 149);
+    assert.deepEqual(calls(home), [], 'nothing inside the grace');
+    await elapse(lab, 1);
     const lines = calls(home);
     assert.equal(lines.length, 1, 'expected one notification, got ' + JSON.stringify(lines));
     const [title, body] = lines[0].split('|');
@@ -78,7 +111,7 @@ test('a job queued with no device present sends exactly one notification, and sa
     // `cmd`, not `ntfy`: the stub stood in for the channel and the state says so.
     assert.match(st.lastResult, /^queue waiting, no device: cmd 0/);
     // It keeps being true, tick after tick, and stays one notification.
-    await TICKS(20);
+    await elapse(lab, 400);
     assert.equal(calls(home).length, 1);
   } finally { await lab.stop(); }
 });
@@ -91,7 +124,7 @@ test('a device present takes the presses and nothing is notified', async () => {
     const j = await queue(lab, { repeats: 3 });
     const w = await api(lab, '/wait?job=' + j.id + '&timeout=10').then((r) => r.json());
     assert.equal(w.job.state, 'done');
-    await TICKS(15);
+    await elapse(lab, 300);
     assert.deepEqual(calls(home), [], 'a present device must produce no notification');
     // It never even had a state to write: armed, nothing waiting on nobody.
     assert.ok(!fs.existsSync(path.join(home, 'notify.json')), 'no notify state was written');
@@ -111,7 +144,7 @@ test('three jobs queued in a burst with no device are one notification, naming a
     const a = await queue(lab, { note: 'one' });
     const b = await queue(lab, { note: 'two' });
     const c = await queue(lab, { note: 'three' });
-    await TICKS(25);
+    await elapse(lab, 500);
     const lines = calls(home);
     assert.equal(lines.length, 1, 'a burst is one episode, got ' + JSON.stringify(lines));
     assert.equal(lines[0].split('|')[0], 'emu-lab: 3 jobs waiting');
@@ -124,11 +157,11 @@ test('a restart on the same home does not re-send what it already sent', async (
   let lab = await startServer(home, { ...FAST, ...stubEnv(home) });
   try {
     await queue(lab);
-    await TICKS(15);
+    await elapse(lab, 300);
     assert.equal(calls(home).length, 1);
     await lab.stop();
     lab = await startServer(home, { ...FAST, ...stubEnv(home) });
-    await TICKS(25);
+    await elapse(lab, 500);
     assert.equal(calls(home).length, 1, 'the state file survived the restart');
   } finally { await lab.stop(); }
 });
@@ -139,15 +172,16 @@ test('a device arriving re-arms it: the next absence with work waiting notifies 
   const lab = await startServer(home, { ...FAST, ...stubEnv(home) });
   try {
     await queue(lab, { repeats: 4, spacingMs: 100000 });   // spacing it will never finish
-    await TICKS(15);
+    await elapse(lab, 300);
     assert.equal(calls(home).length, 1);
     // Join: present, so the arm comes back even though the job still waits.
     const dev = await fakeDevice(lab, { pressMs: 10 });
-    await TICKS(10);
+    await elapse(lab, 200);
     assert.equal(JSON.parse(fs.readFileSync(path.join(home, 'notify.json'), 'utf8')).armed, true, 'a present device re-arms');
     assert.equal(calls(home).length, 1, 'and sends nothing while it is there');
     await dev.stop();
-    await TICKS(25);
+    await gone(lab, dev.id);
+    await elapse(lab, 500);
     assert.equal(calls(home).length, 2, 'the device left with work still waiting');
   } finally { await lab.stop(); }
 });
@@ -157,12 +191,13 @@ test('the floor holds a second notification back however the arming went', async
   const lab = await startServer(home, { ...FAST, ...stubEnv(home) });
   try {
     await queue(lab, { repeats: 4, spacingMs: 100000 });
-    await TICKS(15);
+    await elapse(lab, 300);
     assert.equal(calls(home).length, 1);
     const dev = await fakeDevice(lab, { pressMs: 10 });
-    await TICKS(10);
+    await elapse(lab, 200);
     await dev.stop();
-    await TICKS(25);
+    await gone(lab, dev.id);
+    await elapse(lab, 500);
     assert.equal(calls(home).length, 1, 'inside the floor, a re-arm sends nothing');
   } finally { await lab.stop(); }
 });
@@ -172,7 +207,7 @@ test('no notify block in config.json is off, stub sender or not (E-outward)', as
   const lab = await startServer(home, { ...FAST, ...stubEnv(home) });
   try {
     await queue(lab);
-    await TICKS(25);
+    await elapse(lab, 500);
     assert.deepEqual(calls(home), []);
     const s = await api(lab, '/status').then((r) => r.json());
     assert.equal(s.notify.configured, false);
@@ -210,7 +245,7 @@ test('notify test sends one on demand and does not spend the arm', async () => {
     assert.equal(calls(home)[0].split('|')[0], 'emu-lab: test');
     // Still armed: a test must not cost the real notification.
     const j = await queue(lab);
-    await TICKS(20);
+    await elapse(lab, 400);
     const lines = calls(home);
     assert.equal(lines.length, 2);
     assert.ok(lines[1].includes(j.id));
@@ -243,7 +278,7 @@ test('the waiting push names who queued the jobs, and says nothing extra when no
     await queue(lab, { by: 'emu-lab-join-wording-77' });
     await queue(lab, { by: 'emu-lab-polish-d1a04a-bb' });   // the same name twice is one name
     await queue(lab, {});                                    // and an unsigned job adds nothing
-    await TICKS(15);
+    await elapse(lab, 300);
     const lines = calls(home);
     assert.equal(lines.length, 1, 'expected one notification, got ' + JSON.stringify(lines));
     const body = lines[0].split('|')[1];
@@ -256,7 +291,7 @@ test('with no names on the waiting jobs the body gains no clause', async () => {
   const lab = await startServer(home, { ...FAST, ...stubEnv(home) });
   try {
     await queue(lab, {});
-    await TICKS(15);
+    await elapse(lab, 300);
     const body = calls(home)[0].split('|')[1];
     assert.doesNotMatch(body, /queued by/);
   } finally { await lab.stop(); }

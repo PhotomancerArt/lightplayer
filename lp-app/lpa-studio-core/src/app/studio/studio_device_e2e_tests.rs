@@ -631,6 +631,9 @@ struct DeviceBench {
     sims: Option<Rc<SimDeviceTransport>>,
     sim_restarts: Rc<Cell<usize>>,
     started: std::time::Instant,
+    /// Where the access controller.s conversations report back (BLE M6):
+    /// the actor.s queue, drained by [`Self::step`].
+    access_rx: crate::app::studio::studio_view_channel::CommandReceiver,
 }
 
 /// `Rc<RefCell<Vec<..>>>` spelled once.
@@ -762,6 +765,8 @@ impl DeviceBench {
             let inbox = Rc::clone(&inbox);
             move |input| inbox.borrow_mut().push_back(input)
         });
+        let (access_tx, access_rx) = crate::app::studio::studio_view_channel::command_channel();
+        controller.set_access_command_sender(access_tx);
         let flash_plan: Rc<Cell<FlashPlan>> = Rc::new(Cell::new(FlashPlan::default()));
         let manifest_writes: Rc<RefCell<Vec<String>>> = Rc::new(RefCell::new(Vec::new()));
         let push_plan: Rc<Cell<PushPlan>> = Rc::new(Cell::new(PushPlan::default()));
@@ -793,6 +798,7 @@ impl DeviceBench {
             sims: None,
             sim_restarts: Rc::new(Cell::new(0)),
             started: std::time::Instant::now(),
+            access_rx,
         };
         (bench, tasks)
     }
@@ -805,6 +811,13 @@ impl DeviceBench {
         let queued: Vec<DeviceInput> = self.inbox.borrow_mut().drain(..).collect();
         for input in queued {
             self.controller.fold_device_input(input);
+        }
+        while self.access_rx.peek_any(|_| true) {
+            for command in drive(self.access_rx.recv_coalesced()).unwrap_or_default() {
+                if let crate::StudioCommand::Access(command) = command {
+                    self.controller.apply_access_command(command);
+                }
+            }
         }
         drive(self.controller.settle_device_records());
     }
@@ -3068,6 +3081,136 @@ fn a_board_running_another_project_stops_the_open_until_push_here_answers_it() {
         "the lens landed on the named BOARD: {:?}",
         view.lens
     );
+}
+
+/// Yona, 2026-09-24: `/p/…?on=mac:` loaded fresh in a browser that forgets
+/// Web Serial grants on reload. The console said "waiting for the device
+/// before opening it: missing session: this board is not connected" and
+/// the page said nothing at all, because nothing in a page can reach a
+/// board it holds no port for — only a click on `requestPort()` can.
+///
+/// The hold now tells the opening frame WHICH board and WHY; the frame
+/// turns `NotConnected` into its "Connect this board" button.
+#[test]
+fn a_fresh_page_names_the_board_it_cannot_reach() {
+    use crate::app::open_progress::{DeviceWaitReason, OpenStage, open_stage};
+
+    let device = empty_light_player("dev000000daqf6dvvr8");
+    let (bench, _tasks) = identified(&device, "usb-fresh-1");
+    let key = library_package(&bench, "Choker", SIM_TARGET);
+    // The page comes back with the board still on the desk: a fresh
+    // controller, and the same board behind a port it holds no grant for.
+    let (mut page, _tasks) = DeviceBench::reloaded(
+        &bench,
+        &empty_light_player("dev000000daqf6dvvr8"),
+        "usb-fresh-1",
+    );
+    drop(bench);
+    page.settle_library();
+    page.open_on_device(&key, BENCH_BOARD_MAC, false)
+        .expect("a held open is not a refusal");
+
+    let OpenStage::WaitingForDevice(wait) = open_stage() else {
+        panic!(
+            "the frame is told why it waits, not left at Starting: {:?}",
+            open_stage()
+        );
+    };
+    assert_eq!(wait.reason, DeviceWaitReason::NotConnected);
+    assert_eq!(wait.device.uid, "dev000000daqf6dvvr8");
+    assert!(
+        wait.device.id.is_some(),
+        "the remembered row is a roster device — what Reconnect aims at"
+    );
+}
+
+/// The other half of the frame's Connect: a held open on a board whose
+/// port is closed says so, and the Connect gesture it offers is all it
+/// takes for the open to land — no reload, no trip to Devices.
+#[test]
+fn connecting_the_board_a_held_open_waits_on_lands_the_open() {
+    use crate::app::open_progress::{DeviceWaitReason, OpenStage, open_stage};
+
+    let device = empty_light_player("dev000000daqf6dvvr8");
+    let (mut bench, tasks) = identified(&device, "usb-fresh-3");
+    let key = library_package(&bench, "Choker", SIM_TARGET);
+    bench.settle_library();
+    let board = bench.view().devices[0].id;
+    bench.gesture(DeviceAction::Disconnect { device: board });
+    bench.run_until(&tasks, "the port to close", |bench| {
+        bench.view().devices[0].state_label != "Ready"
+    });
+
+    bench
+        .open_on_device(&key, BENCH_BOARD_MAC, false)
+        .expect("a held open is not a refusal");
+    let OpenStage::WaitingForDevice(wait) = open_stage() else {
+        panic!("held, and told why: {:?}", open_stage());
+    };
+    assert_eq!(wait.reason, DeviceWaitReason::PortClosed);
+
+    bench.gesture(DeviceAction::Connect { device: board });
+    let deadline = std::time::Instant::now() + REAL_TIME_LIMIT;
+    while bench.controller.view().open_project_uid.is_none() {
+        bench.step(&tasks);
+        drive(bench.controller.try_pending_device_lens());
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the held open never landed; stage {:?}, roster {:?}",
+            open_stage(),
+            bench.view()
+        );
+        std::thread::sleep(Duration::from_millis(1));
+    }
+    assert_eq!(
+        bench.controller.view().open_project_uid.as_deref(),
+        Some(key.as_str())
+    );
+    assert_eq!(
+        open_stage(),
+        OpenStage::Idle,
+        "a landed open stops narrating"
+    );
+}
+
+/// The frame's Cancel on a held open: the hold is let go and nothing is
+/// left narrating, so a board that shows up later is not opened behind the
+/// person's back.
+#[test]
+fn cancelling_a_held_open_lets_the_board_go() {
+    use crate::app::open_progress::{OpenStage, open_stage};
+
+    let device = empty_light_player("dev000000daqf6dvvr8");
+    let (bench, _tasks) = identified(&device, "usb-fresh-2");
+    let key = library_package(&bench, "Choker", SIM_TARGET);
+    // The page comes back with the board still on the desk: a fresh
+    // controller, and the same board behind a port it holds no grant for.
+    let (mut page, tasks) = DeviceBench::reloaded(
+        &bench,
+        &empty_light_player("dev000000daqf6dvvr8"),
+        "usb-fresh-2",
+    );
+    drop(bench);
+    page.settle_library();
+    page.open_on_device(&key, BENCH_BOARD_MAC, false)
+        .expect("a held open is not a refusal");
+    assert!(page.controller.pending_device_lens_for_test().is_some());
+
+    crate::cancel_open();
+    drive(page.controller.dispatch(UiAction::from_op(
+        crate::RuntimeOp::NODE_ID,
+        crate::RuntimeOp::CancelOpen,
+    )))
+    .expect("cancel never fails");
+    assert_eq!(
+        page.controller.pending_device_lens_for_test(),
+        None,
+        "nothing is left to land when the board shows up"
+    );
+    assert_eq!(open_stage(), OpenStage::Idle);
+    page.step(&tasks);
+    drive(page.controller.try_pending_device_lens());
+    assert_eq!(page.controller.view().open_project_uid, None);
 }
 
 /// A MAC nothing answers to is not a failure and not a guess: the hint is
@@ -5512,4 +5655,196 @@ fn opening_a_project_under_a_board_lens_never_touches_the_board() {
         "the open reached for a sim of the project\'s target: {:?}",
         bench.view()
     );
+}
+
+/// M5's twin-row guard, end to end: the same board (same base MAC, no
+/// stamped uid — the registry's shared `mac:` key, where twin rows have
+/// happened before) heard over USB and then over Bluetooth is ONE card and
+/// ONE registry row, and the row's transport follows the live link.
+#[test]
+fn a_board_seen_over_usb_and_over_bluetooth_is_one_registry_row() {
+    let board = || {
+        FakeEsp32Device::new(FakeDeviceScript::new(FakeBootState::LightPlayer(
+            FakeLightPlayerState::new().with_base_mac("a0:f2:62:87:b4:8c"),
+        )))
+    };
+    let usb_side = board();
+    let (mut bench, tasks) = DeviceBench::granted(&usb_side, "usb-twin");
+    bench.run_until(&tasks, "the USB board to identify", |bench| {
+        bench
+            .view()
+            .devices
+            .first()
+            .is_some_and(|card| card.state_label == "Ready")
+    });
+    let rows = bench.registry();
+    assert_eq!(rows.len(), 1, "{rows:?}");
+    assert_eq!(rows[0].uid, "mac:a0:f2:62:87:b4:8c", "{rows:?}");
+    assert_eq!(rows[0].transport, "USB");
+
+    // The shipped build's shape: a sim half, and now a Bluetooth half whose
+    // one present device is the same board. Installing arms a sweep.
+    bench
+        .controller
+        .set_device_sim_transport(Rc::new(SimDeviceTransport::new(Rc::new(
+            ScriptedSimSource {
+                device: board(),
+                restarts: Rc::new(Cell::new(0)),
+                manifests: Rc::new(RefCell::new(Vec::new())),
+            },
+        ))));
+    bench
+        .controller
+        .set_ble_transport(Rc::new(crate::BleDeviceTransport::new(Rc::new(
+            OneBleBoard {
+                device: board(),
+                device_id: "QkxFLWlk".to_string(),
+            },
+        ))));
+    bench.run_until(&tasks, "the Bluetooth link to merge in", |bench| {
+        bench.view().pending.is_empty()
+            && bench
+                .registry()
+                .first()
+                .is_some_and(|row| row.transport == "Bluetooth")
+    });
+
+    let cards = bench.view().devices;
+    assert_eq!(cards.len(), 1, "one board, one card: {cards:?}");
+    assert_eq!(
+        cards[0].firmware_blocked.as_deref(),
+        Some(lpa_devices::view::FIRMWARE_NEEDS_USB),
+        "reached over Bluetooth, the card says why it cannot flash"
+    );
+    let rows = bench.registry();
+    assert_eq!(rows.len(), 1, "one row, never a twin: {rows:?}");
+    assert_eq!(rows[0].uid, "mac:a0:f2:62:87:b4:8c");
+
+    // A Bluetooth link holds nothing until its hello says what it holds
+    // (BLE M6): the lens waits for that. This board's link is trusted (the
+    // fake answers as a USB link would), so the check grants edit.
+    bench.run_until(&tasks, "the Bluetooth link's access to be read", |bench| {
+        bench
+            .controller
+            .device_roster_view()
+            .access
+            .get(&cards[0].id)
+            .and_then(|access| access.line.as_deref())
+            == Some("Connected — edit")
+    });
+
+    // The editor over Bluetooth is authoring: the device cadence. Play is
+    // the idle-budgeted mode: while a Play surface holds its lease, an
+    // untouched lens reads once a minute.
+    bench
+        .open_lens(&rows[0].uid)
+        .expect("the board opens in the editor over Bluetooth");
+    let session = bench
+        .controller
+        .runtime_pool_for_test()
+        .attached_session()
+        .expect("a device session");
+    assert_eq!(session.transport(), crate::LinkTransport::Ble);
+    assert_eq!(
+        bench.controller.lens_refresh_gap_for_test(),
+        Some(crate::DEVICE_REFRESH_INTERVAL)
+    );
+    drive(
+        bench
+            .controller
+            .dispatch(crate::PlayViewOp::action_for(true)),
+    )
+    .expect("the lease");
+    assert_eq!(
+        bench.controller.lens_refresh_gap_for_test(),
+        Some(crate::app::studio::BLE_PLAY_IDLE_REFRESH_INTERVAL)
+    );
+    drive(
+        bench
+            .controller
+            .dispatch(crate::PlayViewOp::action_for(false)),
+    )
+    .expect("the lease");
+    assert_eq!(
+        bench.controller.lens_refresh_gap_for_test(),
+        Some(crate::DEVICE_REFRESH_INTERVAL)
+    );
+}
+
+/// iPhone/Bluefy's shape: a sim half and a Bluetooth half, and NO serial
+/// transport, because the browser has no Web Serial. The roster is still
+/// reachable, but the view says USB is not — which is what keeps the add
+/// slot's USB verb away. Installing a serial transport (Web Serial, or the
+/// `?emu=` shim) is exactly what turns it back on.
+#[test]
+fn a_build_without_web_serial_says_usb_is_unavailable() {
+    let board = || {
+        FakeEsp32Device::new(FakeDeviceScript::new(FakeBootState::LightPlayer(
+            FakeLightPlayerState::new().with_base_mac("a0:f2:62:87:b4:8c"),
+        )))
+    };
+    let mut controller = StudioController::new(|| 0.0);
+    controller.set_device_sim_transport(Rc::new(SimDeviceTransport::new(Rc::new(
+        ScriptedSimSource {
+            device: board(),
+            restarts: Rc::new(Cell::new(0)),
+            manifests: Rc::new(RefCell::new(Vec::new())),
+        },
+    ))));
+    controller.set_ble_transport(Rc::new(crate::BleDeviceTransport::new(Rc::new(
+        OneBleBoard {
+            device: board(),
+            device_id: "QkxFLWlk".to_string(),
+        },
+    ))));
+    assert!(
+        !controller.device_roster_view().usb_available,
+        "sims and Bluetooth, but no port to reach"
+    );
+
+    let usb_side = board();
+    let (bench, _tasks) = DeviceBench::granted(&usb_side, "usb-1");
+    assert!(
+        bench.controller.device_roster_view().usb_available,
+        "a serial transport is installed"
+    );
+}
+
+/// One Bluetooth board, always present: a fake-device link at a `ble:`
+/// endpoint, and the real `M!` io over the same fake.
+struct OneBleBoard {
+    device: FakeEsp32Device,
+    device_id: String,
+}
+
+impl crate::BleLinkSource for OneBleBoard {
+    fn present(&self) -> Vec<GrantedLink> {
+        let info = crate::ble_link_info(&self.device_id, "LP-b48c");
+        vec![GrantedLink {
+            link: Box::new(fake_device_link(info.clone(), &self.device)),
+            info,
+        }]
+    }
+
+    fn restore(&self) {}
+
+    fn request(&self) -> DeviceTransportFuture<Result<Option<GrantedLink>, String>> {
+        Box::pin(core::future::ready(Ok(None)))
+    }
+
+    fn forget(&self, _device_id: &str) -> DeviceTransportFuture<Result<(), String>> {
+        Box::pin(core::future::ready(Ok(())))
+    }
+
+    fn client_io(
+        &self,
+        _device_id: &str,
+        tap: Option<LensLineTap>,
+    ) -> Result<Box<dyn lpa_client::ClientIo>, String> {
+        let io = FakeDeviceIo::new(&self.device);
+        Ok(Box::new(match tap {
+            Some(tap) => io.with_tap(tap),
+            None => io,
+        }))
+    }
 }

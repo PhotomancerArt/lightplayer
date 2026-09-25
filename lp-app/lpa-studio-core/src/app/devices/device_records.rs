@@ -63,6 +63,8 @@ pub fn transport_label_for_endpoint(endpoint: &str) -> &'static str {
         LinkProviderKind::BrowserWorker
     } else if endpoint.starts_with(super::sim_record::EMU_ENDPOINT_PREFIX) {
         LinkProviderKind::EmulatorTab
+    } else if endpoint.starts_with(super::sim_record::BLE_ENDPOINT_PREFIX) {
+        LinkProviderKind::BrowserBle
     } else {
         LinkProviderKind::BrowserSerialEsp32
     };
@@ -209,6 +211,11 @@ pub fn record_from_registry_row(row: &RegisteredDevice, fallback_device_id: u64)
         board_id: row.board_id.clone(),
         chip: row.chip.clone(),
         firmware: row.firmware.clone(),
+        // The row.s transport column is the last live link.s label; it is
+        // how a remembered Bluetooth board.s Reconnect finds the right
+        // chooser (BLE M6).
+        last_over_bluetooth: row.transport
+            == transport_label_for_endpoint(super::sim_record::BLE_ENDPOINT_PREFIX),
     }
 }
 
@@ -231,6 +238,7 @@ mod tests {
             board_id: Some("seeed/xiao-esp32-c6".to_string()),
             chip: Some("esp32c6".to_string()),
             firmware: Some("fw-esp32c6 abc1234".to_string()),
+            last_over_bluetooth: false,
         }
     }
 
@@ -264,6 +272,21 @@ mod tests {
             back.identity.endpoint, None,
             "the endpoint is a per-page fingerprint, never persisted"
         );
+    }
+
+    /// A board last reached over Bluetooth comes back KNOWING it: the
+    /// endpoint is not persisted, but the transport column is, and it is
+    /// what sends a remembered board.s Reconnect to the Bluetooth chooser.
+    #[test]
+    fn a_bluetooth_board_is_remembered_as_one() {
+        let mut over_ble = record();
+        over_ble.identity.endpoint = Some(lpa_devices::identity::EndpointKey(
+            "ble:QkxFLWlk".to_string(),
+        ));
+        let row = registry_row_from_record(&over_ble).unwrap();
+        assert!(record_from_registry_row(&row, 1).last_over_bluetooth);
+        let row = registry_row_from_record(&record()).unwrap();
+        assert!(!record_from_registry_row(&row, 1).last_over_bluetooth);
     }
 
     /// The column says how the device is reached, and the link is what

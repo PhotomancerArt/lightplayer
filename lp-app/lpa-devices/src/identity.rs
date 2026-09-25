@@ -34,6 +34,24 @@ pub struct MacAddress(pub String);
 #[serde(transparent)]
 pub struct EndpointKey(pub String);
 
+/// The endpoint scheme a Bluetooth (Web Bluetooth / NUS) link is reached at:
+/// `ble:<the browser's device id>`.
+///
+/// Defined HERE, beside the key it prefixes, because the model needs exactly
+/// two facts about a Bluetooth link and both are about the endpoint: a
+/// re-grant goes through the Bluetooth chooser rather than the USB one, and
+/// firmware cannot be written over it (there are no reset lines and no ROM
+/// downloader on the far side of a GATT service). Serial endpoints carry no
+/// prefix; `sim:`/`emu:` are studio-core's and the model never reads them.
+pub const BLE_ENDPOINT_PREFIX: &str = "ble:";
+
+impl EndpointKey {
+    /// Whether this endpoint is a Bluetooth link (see [`BLE_ENDPOINT_PREFIX`]).
+    pub fn is_bluetooth(&self) -> bool {
+        self.0.starts_with(BLE_ENDPOINT_PREFIX)
+    }
+}
+
 /// What a peer said about itself on the wire. Hellos always carry this;
 /// heartbeats carry it too once the firmware stamps identity into them
 /// (vision R4), which is what lets a mid-stream attach resolve identity

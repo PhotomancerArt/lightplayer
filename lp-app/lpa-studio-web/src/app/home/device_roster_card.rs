@@ -128,10 +128,10 @@ use dioxus::prelude::*;
 use lpa_studio_core::{
     DeviceAction, DeviceActivityView, DeviceCardFeedView, DeviceEscape, DeviceFeedOp, DeviceId,
     DeviceLoadedProject, DeviceStatus, DeviceView, DevicesOp, FeedLiveness, FirmwareVerb,
-    PendingLinkView, UiAction, UiExampleCard, UiPackageCard, UiRuntimeBand, UiStatus,
-    device_escape_action_for, device_firmware_line, device_identity_line, device_status_kind,
-    firmware_face_preview_sentence, firmware_verb, pending_escape_action, pending_firmware_line,
-    pending_identity_rows,
+    PendingLinkView, RESET_NEEDS_USB, UiAction, UiExampleCard, UiPackageCard, UiRuntimeBand,
+    UiStatus, blocked_erase_action, device_escape_action_for, device_firmware_line,
+    device_identity_line, device_status_kind, firmware_face_preview_sentence, firmware_verb,
+    pending_escape_action, pending_firmware_line, pending_identity_rows,
 };
 
 use super::device_pick_popover::{
@@ -178,6 +178,14 @@ pub(crate) fn DeviceRosterCard(
     /// why a real card's height is unchanged by this phase.
     #[props(default)]
     runtime: Option<UiRuntimeBand>,
+    /// The device.s access facts (BLE M6): the login line over Bluetooth,
+    /// and the device access panel where this link may write the store.
+    /// Joined at the app view; `None` for a board with neither.
+    #[props(default)]
+    access: Option<lpa_studio_core::UiDeviceAccess>,
+    /// Stories only: mount the Bluetooth panel open.
+    #[props(default)]
+    access_panel_open: bool,
     /// Open the header's ⋯ menu immediately (stories only).
     #[props(default = false)]
     menu_initially_open: bool,
@@ -206,6 +214,10 @@ pub(crate) fn DeviceRosterCard(
     // LightPlayer — one click when its board resolved, the pick once when
     // it did not. `None` while an activity runs (the row is withdrawn).
     let verb = firmware_verb(&card);
+    // A board reached over Bluetooth: the firmware verbs are DRAWN, disabled,
+    // with the reason under them ("Firmware updates need USB") — never
+    // hidden, so the question is answered where it is asked (M5 S6).
+    let firmware_blocked = card.firmware_blocked.clone();
     let offer_flash = matches!(verb, Some(FirmwareVerb::Flash));
     let update_action = verb.as_ref().and_then(|verb| verb.update_action(device));
     // The empty face: a LightPlayer that has REPORTED nothing loaded. A
@@ -259,7 +271,15 @@ pub(crate) fn DeviceRosterCard(
         .map(|activity| activity_zone(activity.kind));
     let project_line = project_line_text(&card, busy_zone);
     let firmware_line = firmware_line_text(&card, identity_line.board.as_deref(), busy_zone);
-    let device_line = device_line_text(&card, busy_zone);
+    let device_line = match access.as_ref().and_then(|access| access.line.as_deref()) {
+        // Over Bluetooth the login leads: it is what decides what the
+        // card can do, and at 375 px the freshness is what truncates.
+        Some(login) => format!("{login} · {}", device_line_text(&card, busy_zone)),
+        None => device_line_text(&card, busy_zone),
+    };
+    let on_access = super::access_ui_context::access_handler();
+    let log_in = access.as_ref().and_then(|access| access.log_in.clone());
+    let access_panel = access.as_ref().and_then(|access| access.panel.clone());
     // The fault takes the project line only when no project work is
     // running: the push's own narration outranks it (the terminal keeps the
     // fault either way).
@@ -421,6 +441,27 @@ pub(crate) fn DeviceRosterCard(
                         }
                     } else if card.activity.is_some() {
                         // Withdrawn at its height while other work runs.
+                    } else if let Some(reason) = firmware_blocked.as_deref() {
+                        if let Some(verb) = verb.as_ref() {
+                            ActionButton {
+                                key: "{\"firmware-blocked\"}",
+                                action: verb.blocked_action(device, reason),
+                                running: false,
+                                variant: ActionButtonVariant::Quiet,
+                                on_action,
+                            }
+                        }
+                        span { class: "tw:min-w-0 tw:flex-1" }
+                        if idle && linked && !offer_flash {
+                            // Its reason is the verb's, said once beside it.
+                            ActionButton {
+                                key: "{\"factory-reset-blocked\"}",
+                                action: blocked_erase_action(device, ""),
+                                running: false,
+                                variant: ActionButtonVariant::Quiet,
+                                on_action,
+                            }
+                        }
                     } else {
                         match verb {
                             // The blank board's face: the chip-filtered
@@ -503,8 +544,42 @@ pub(crate) fn DeviceRosterCard(
             // activity's Cancel, in every state — including Forget
             // mid-activity, which the shipped system could not do.
             footer { class: device_zone_class(),
-                div { class: "ux-armed-dim tw:grid tw:min-w-0",
-                    p { class: info_line_class(), title: "{device_line}", "{device_line}" }
+                // The info line, with the access verbs at its end (BLE M6):
+                // "Unlock" / "Unlock for edit" opens the password sheet, and
+                // "Bluetooth" opens the device access panel in the top
+                // layer. On the LINE rather than in the verb row, because a
+                // Bluetooth card's row already holds Reset-with-its-reason,
+                // Disconnect and Forget, and at 375 px a fourth chip
+                // overlaps them; the line truncates its freshness first.
+                div { class: "tw:flex tw:min-w-0 tw:items-center tw:gap-2",
+                    div { class: "ux-armed-dim tw:grid tw:min-w-0 tw:flex-1",
+                        p { class: info_line_class(), title: "{device_line}", "{device_line}" }
+                    }
+                    if idle && linked {
+                        if let Some(label) = log_in.clone() {
+                            button {
+                                class: LINE_VERB_CLASS,
+                                r#type: "button",
+                                onclick: move |_| on_access.call(lpa_studio_core::AccessCommand::LogIn { device }),
+                                "{label}"
+                            }
+                        }
+                        if let Some(panel) = access_panel.clone() {
+                            DetailPopover {
+                                icon: StudioIconName::More,
+                                label: "Bluetooth".to_string(),
+                                title: "Who can reach this piece over Bluetooth".to_string(),
+                                placement: PopoverPlacement::TopEnd,
+                                initially_open: access_panel_open,
+                                trigger: rsx! { "Bluetooth" },
+                                trigger_class: LINE_VERB_CLASS.to_string(),
+                                trigger_open_class: LINE_VERB_CLASS.to_string(),
+                                crate::base::DetailSection {
+                                    super::device_access_panel::DeviceAccessPanel { panel, on_access }
+                                }
+                            }
+                        }
+                    }
                 }
                 div { class: verb_row_class(),
                     if busy_zone == Some(ZoneKind::Device) {
@@ -518,11 +593,13 @@ pub(crate) fn DeviceRosterCard(
                             }
                         }
                     }
-                    // The one device verb that never asks a question.
+                    // The one device verb that never asks a question. It
+                    // pulses the chip's reset lines, which a Bluetooth link
+                    // does not have — so over one it is drawn disabled.
                     if idle && linked {
                         ActionButton {
                             key: "{\"reset-board\"}",
-                            action: DevicesOp::action_for(DeviceAction::ResetBoard { device }),
+                            action: reset_action(device, firmware_blocked.is_some()),
                             running: false,
                             variant: ActionButtonVariant::Quiet,
                             on_action,
@@ -649,6 +726,11 @@ pub(crate) fn DeviceRenameSection(
 /// (`CARD_MENU_TRIGGER_CLASS`), so the two cards' menus read as one
 /// control. Resets UA button chrome itself — Tailwind preflight is not
 /// loaded.
+/// A verb that rides the Device zone's 17px info line (BLE M6's "Unlock"
+/// and "Bluetooth"): text with a dotted underline, no chrome, so it fits
+/// the line's height and reads as something to press.
+const LINE_VERB_CLASS: &str = "tw:flex-none tw:cursor-pointer tw:appearance-none tw:border-0 tw:bg-transparent tw:p-0 tw:text-xs tw:font-semibold tw:leading-[17px] tw:text-strong-foreground tw:underline tw:decoration-dotted tw:underline-offset-2 tw:hover:decoration-solid ux-focus-ring";
+
 const HEADER_MENU_TRIGGER_CLASS: &str = "tw:grid tw:h-5 tw:w-5 tw:flex-none tw:cursor-pointer tw:appearance-none tw:place-items-center tw:rounded tw:border-0 tw:bg-transparent tw:p-0 tw:text-muted-foreground tw:transition-colors tw:hover:bg-white/10 tw:hover:text-strong-foreground";
 
 /// The rename form's field — the project card's rename input, verbatim.
@@ -745,7 +827,19 @@ pub(crate) fn PendingLinkCard(
                         div { class: progress_slot_class(false) }
                     }
                     div { class: verb_row_class(),
-                        if pending.needs_firmware() {
+                        if let Some(reason) = pending.firmware_blocked.as_deref().filter(|_| pending.needs_firmware()) {
+                            // A Bluetooth link that settles on "needs
+                            // firmware" cannot carry it: Flash is DRAWN,
+                            // disabled, with the reason — as on the settled
+                            // card — never the live board pick.
+                            ActionButton {
+                                key: "{\"firmware-blocked\"}",
+                                action: FirmwareVerb::Flash.blocked_action(pending.device, reason),
+                                running: false,
+                                variant: ActionButtonVariant::Quiet,
+                                on_action,
+                            }
+                        } else if pending.needs_firmware() {
                             // The same popover the device card's firmware
                             // zone wears: a blank chip's only chip fact is
                             // its ROM boot banner.
@@ -772,12 +866,12 @@ pub(crate) fn PendingLinkCard(
                     // The silent-board recovery: a chip parked in ROM
                     // download-wait prints nothing, so identify can never
                     // settle — a hardware reset reboots it into honest boot
-                    // output (G1 2026-08-31, the erased C6).
+                    // output (G1 2026-08-31, the erased C6). A Bluetooth
+                    // link has no reset lines, so there it is drawn
+                    // disabled with the reason, as on the settled card.
                     ActionButton {
                         key: "{\"reset-board\"}",
-                        action: DevicesOp::action_for(DeviceAction::ResetBoard {
-                            device: pending.device,
-                        }),
+                        action: pending_reset_action(&pending),
                         running: false,
                         variant: ActionButtonVariant::Quiet,
                         on_action,
@@ -855,6 +949,24 @@ enum ZoneKind {
     Project,
     Firmware,
     Device,
+}
+
+/// Reset, as both cards draw it: the one device verb that never asks a
+/// question, drawn DISABLED with [`RESET_NEEDS_USB`] when the link cannot
+/// carry it — a Bluetooth link has no reset lines, whether it is still
+/// identifying or long settled.
+fn reset_action(device: DeviceId, over_bluetooth: bool) -> UiAction {
+    let action = DevicesOp::action_for(DeviceAction::ResetBoard { device });
+    if over_bluetooth {
+        action.disabled(RESET_NEEDS_USB)
+    } else {
+        action
+    }
+}
+
+/// The pending card's Reset (see [`reset_action`]).
+fn pending_reset_action(pending: &PendingLinkView) -> UiAction {
+    reset_action(pending.device, pending.is_over_bluetooth())
 }
 
 /// Which zone an activity narrates in — the rule that decides which bar
@@ -975,6 +1087,11 @@ fn preview_sentence(card: &DeviceView) -> String {
     }
     if card.loaded_project == DeviceLoadedProject::Empty {
         return "Nothing loaded — no picture until something runs.".to_string();
+    }
+    // The card's live picture is not streamed over Bluetooth (M5: that air
+    // time is the board's ESP-NOW's too), so "coming" would be a promise.
+    if card.is_over_bluetooth() {
+        return "No live picture over Bluetooth — open Play to see and control it.".to_string();
     }
     "No picture yet — the live feed is coming.".to_string()
 }
@@ -1322,6 +1439,53 @@ mod tests {
         assert!(!fault_line_class().contains("status-error"));
     }
 
+    /// A Bluetooth link has no reset lines in ANY card state: the pending
+    /// card (still identifying) and the settled card both draw Reset
+    /// disabled with the same reason, while a USB link keeps it live.
+    #[test]
+    fn reset_is_disabled_over_bluetooth_in_every_card_state() {
+        let usb_pending = PendingLinkView {
+            link: lpa_studio_core::DeviceLinkId(7),
+            device: DeviceId(107),
+            title: "New device".to_string(),
+            state_label: "New device found — identifying…".to_string(),
+            detail: None,
+            can_adopt: true,
+            firmware_face: lpa_studio_core::DeviceFirmwareFace::Unknown,
+            detected_chip: None,
+            mac: None,
+            firmware_blocked: None,
+            escapes: vec![DeviceEscape::Forget],
+        };
+        let ble_pending = PendingLinkView {
+            firmware_blocked: Some(lpa_studio_core::FIRMWARE_NEEDS_USB.to_string()),
+            ..usb_pending.clone()
+        };
+        for action in [
+            pending_reset_action(&ble_pending),
+            reset_action(DeviceId(1), true),
+        ] {
+            assert_eq!(
+                action.meta().enablement,
+                lpa_studio_core::ActionEnablement::Disabled {
+                    reason: RESET_NEEDS_USB.to_string()
+                }
+            );
+        }
+        assert!(
+            pending_reset_action(&usb_pending)
+                .meta()
+                .enablement
+                .is_enabled()
+        );
+        assert!(
+            reset_action(DeviceId(1), false)
+                .meta()
+                .enablement
+                .is_enabled()
+        );
+    }
+
     /// Both readings of the project line occupy the SAME fixed row: a board
     /// that starts reporting a fault must not make its card taller (AC2).
     #[test]
@@ -1444,6 +1608,7 @@ mod tests {
             last_outcome: None,
             terminal: Vec::new(),
             terminal_dropped: 0,
+            firmware_blocked: None,
             escapes: vec![DeviceEscape::Forget],
         }
     }

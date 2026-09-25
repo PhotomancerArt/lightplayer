@@ -10,7 +10,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-import { startServer, readSse } from './helpers.mjs';
+import { startServer, readSse, until } from './helpers.mjs';
 
 let lab;
 
@@ -64,6 +64,14 @@ test('/status needs the token; with it lists the fixture build and no devices', 
   assert.equal((await fetch(lab.url + '/healthz')).status, 200);
 });
 
+// The manual clock is a test seam, and only a test seam: a server started the
+// way launchd starts it has no route that moves its time.
+test('/test/clock does not exist on a server on the real clock', async () => {
+  const auth = { Authorization: 'Bearer ' + lab.token, 'Content-Type': 'application/json' };
+  assert.equal((await fetch(lab.url + '/test/clock', { headers: auth })).status, 404);
+  assert.equal((await fetch(lab.url + '/test/clock', { method: 'POST', headers: auth, body: JSON.stringify({ advanceMs: 1000 }) })).status, 404);
+});
+
 test('presence: stream open + visible = present; hidden or closed = not', async () => {
   const ac = new AbortController();
   const sse = await readSse(lab.url + '/events?device=d1&t=' + lab.token, ac.signal);
@@ -93,8 +101,8 @@ test('presence: stream open + visible = present; hidden or closed = not', async 
   await new Promise((r) => setTimeout(r, 5));
   ac.abort();
   await sse.closed;
-  await new Promise((r) => setTimeout(r, 50));
-  d = await status();
+  // The client's end closing is not the server seeing it: wait for the server.
+  d = await until('the server to see the stream close', async () => { const x = await status(); return x.streams === 0 ? x : null; });
   assert.equal(d.present, false, 'closed stream is not present');
   assert.equal(d.streams, 0);
   assert.notEqual(d.lastSeen, seenBefore, 'lastSeen updated on close');

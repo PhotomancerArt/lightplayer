@@ -9,9 +9,20 @@ import { fileURLToPath } from 'node:url';
 
 const SERVER = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'server.mjs');
 
+/// The epoch a manual-clock lab starts at: a fixed instant, so a test's
+/// timestamps are the same on every run.
+export const MANUAL_EPOCH_MS = Date.parse('2026-09-25T00:00:00.000Z');
+
+/// The env that starts a lab on the manual clock (clock.mjs): time stands
+/// still until the test calls `lab.advance(ms)`. The tick period is the
+/// production one on purpose — every advance ends in a tick of its own, so
+/// nothing a test asserts waits on a period.
+export const MANUAL_CLOCK = { LAB_CLOCK: 'manual', LAB_CLOCK_START_MS: String(MANUAL_EPOCH_MS) };
+
 /// Start `server.mjs` with `LAB_HOME=<home>` and `LAB_PORT=0`; resolve once it
 /// prints its listen line. `env` adds to the child's environment (tests use
-/// `LAB_COOLDOWN_MS` and `LAB_TICK_MS` to run the queue at test speed).
+/// `LAB_COOLDOWN_MS` and `LAB_TICK_MS` to run the queue at test speed, and
+/// `MANUAL_CLOCK` to step its time instead of sleeping through it).
 export function startServer(home, env = {}) {
   return new Promise((resolve, reject) => {
     const child = spawn(process.execPath, [SERVER], {
@@ -26,8 +37,25 @@ export function startServer(home, env = {}) {
       if (m) {
         const token = fs.readFileSync(path.join(home, 'token'), 'utf8').trim();
         const exited = new Promise((r) => child.on('exit', r));
+        const call = (p, opts = {}) => fetch(m[1] + p, { ...opts, headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json', ...(opts.headers || {}) } });
         resolve({
           url: m[1], token, home, child,
+          /// True when this lab runs on the manual clock.
+          manual: env.LAB_CLOCK === 'manual',
+          /// Manual clock only: move the server's time forward by `ms`. The
+          /// timers due on the way fire, then one tick runs at the new time,
+          /// all before this resolves. Resolves with the server's new now.
+          async advance(ms) {
+            const r = await call('/test/clock', { method: 'POST', body: JSON.stringify({ advanceMs: ms }) });
+            if (r.status !== 200) throw new Error('advance ' + ms + ': ' + r.status + ' ' + await r.text());
+            return (await r.json()).now;
+          },
+          /// Manual clock only: the server's now, in epoch ms.
+          async now() {
+            const r = await call('/test/clock');
+            if (r.status !== 200) throw new Error('clock: ' + r.status);
+            return (await r.json()).now;
+          },
           /// Resolves once the child is gone — a test that edits the home or
           /// restarts on it must not race the old process's last tick.
           stop() { child.kill('SIGTERM'); return exited; },
@@ -38,6 +66,18 @@ export function startServer(home, env = {}) {
     child.on('exit', (code) => reject(new Error('server exited ' + code + '\n' + err)));
     setTimeout(() => reject(new Error('server did not listen in 5 s\n' + err)), 5000).unref();
   });
+}
+
+/// Poll a predicate until it holds; throws with `what` on timeout. The
+/// timeout is a liveness bound only — no assertion rests on how long it took.
+export async function until(what, fn, timeoutMs = 10000) {
+  const end = Date.now() + timeoutMs;
+  for (;;) {
+    const v = await fn();
+    if (v) return v;
+    if (Date.now() > end) throw new Error('timed out waiting for ' + what);
+    await new Promise((r) => setTimeout(r, 10));
+  }
 }
 
 /// Open an SSE stream and hand back `next(event)` — resolves with the parsed

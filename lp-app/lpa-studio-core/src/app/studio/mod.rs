@@ -3,6 +3,7 @@ pub mod console_command;
 /// registry) and the incoming lamp extent (the upstream node's produced
 /// control product) — the facts the project walk cannot see.
 mod output_face_decoration;
+pub mod play_view_op;
 pub mod refresh_cadence;
 pub mod studio_actor;
 /// End-to-end agent-flow tests: scripted fake model over the real agent →
@@ -66,11 +67,13 @@ pub use crate::core::log::{
 pub use crate::core::notice::UiNotices;
 pub use crate::core::notice::{UiNotice, UiNoticeLevel};
 pub use console_command::ConsoleCommand;
+pub use play_view_op::PlayViewOp;
 pub use refresh_cadence::{
-    DEVICE_CARD_FEED_INTERVAL, DEVICE_HEARTBEAT_INTERVAL, DEVICE_REFRESH_INTERVAL,
-    FRAME_STALE_AFTER_SECS, PASSIVE_PREEMPTIONS_BEFORE_PROMOTION, PASSIVE_REFRESH_BACKOFF_BASE,
-    PASSIVE_REFRESH_BACKOFF_MAX, RefreshCadence, SIMULATOR_REFRESH_INTERVAL,
-    VERDICT_CHASE_INTERVAL, VERDICT_CHASE_TICKS,
+    BLE_PLAY_IDLE_REFRESH_INTERVAL, DEVICE_CARD_FEED_INTERVAL, DEVICE_HEARTBEAT_INTERVAL,
+    DEVICE_REFRESH_INTERVAL, FRAME_STALE_AFTER_SECS, PASSIVE_PREEMPTIONS_BEFORE_PROMOTION,
+    PASSIVE_REFRESH_BACKOFF_BASE, PASSIVE_REFRESH_BACKOFF_MAX, RefreshCadence,
+    SIMULATOR_REFRESH_INTERVAL, VERDICT_CHASE_INTERVAL, VERDICT_CHASE_TICKS,
+    lens_refresh_gap_policy,
 };
 pub use studio_actor::{StudioActor, StudioActorOptions, StudioHandle};
 pub use studio_command::StudioCommand;

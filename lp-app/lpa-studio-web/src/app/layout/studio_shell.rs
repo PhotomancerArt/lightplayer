@@ -90,6 +90,11 @@ pub fn StudioShell(
         // consumed by the web shell's unload gate; the project pane
         // computes its own dirty affordances from the editor view
         dirty: _,
+        // the web app renders the password sheet and provides the project.s
+        // Bluetooth list by context (BLE M6)
+        login_prompt: _,
+        project_access: _,
+        lens_access_line,
     } = view;
 
     // The mismatch page outranks the opening frame: the open it was
@@ -145,6 +150,7 @@ pub fn StudioShell(
                     panel: face.panel,
                     preview: face.preview,
                     auto_save: face.auto_save,
+                    access_line: lens_access_line.clone(),
                     on_panel: panel_gesture_actions(on_action),
                     on_action,
                 }

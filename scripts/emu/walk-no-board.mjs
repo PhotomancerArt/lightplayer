@@ -74,7 +74,7 @@ const STEP_DEADLINE_MS = 180_000;
 /// It is separate from `STEP_DEADLINE_MS` because conflating them makes a
 /// slow download look like a board that never answered: the first step's
 /// deadline was spent watching a progress bar, the screenshot said `Loading
-/// Studio…`, and the verdict said the card never offered `It's connected`
+/// Studio…`, and the verdict said the card never offered `It's connected` (today's `via USB`)
 /// (measured 2026-09-10 on the tab lane, with the machine otherwise busy).
 /// Wait for the app to exist, then start timing the board.
 const STUDIO_LOAD_DEADLINE_MS = 420_000;
@@ -303,7 +303,7 @@ async function main() {
 
     // 1. FLASH — Studio's own esptool-js flow, into a chip with nothing on it.
     await step("flash", "Studio flashes the packaged firmware into a blank board", async () => {
-      await driver.clickWhenReady("It's connected", { timeoutMs: STEP_DEADLINE_MS });
+      await driver.clickWhenReady("via USB", { timeoutMs: STEP_DEADLINE_MS });
       await driver.pickBoard(options.board, { timeoutMs: STEP_DEADLINE_MS });
       await driver.waitFor(
         `(document.querySelector('#main')?.innerText || '').includes('needs firmware')`,

@@ -53,11 +53,14 @@ function describeBacking(backing) {
   return /^wss?:\/\//.test(text) ? `Emulated boards on ${text}` : `Emulated boards ${text}`;
 }
 
-export function createPicker({ backingUrl = "" } = {}) {
-  return (candidates) => choose(candidates, backingUrl);
+/// `kind: "bluetooth"` is `?ble=emu`'s chooser: the same boards, asked for
+/// the way Chrome's Bluetooth chooser asks ("wants to pair"), each named by
+/// the name it advertises.
+export function createPicker({ backingUrl = "", kind = "serial" } = {}) {
+  return (candidates) => choose(candidates, backingUrl, kind);
 }
 
-function choose(candidates, backingUrl) {
+function choose(candidates, backingUrl, kind = "serial") {
   return new Promise((resolve) => {
     const overlay = document.createElement("div");
     overlay.id = "lp-emu-picker";
@@ -88,7 +91,10 @@ function choose(candidates, backingUrl) {
     const header = document.createElement("div");
     style(header, { padding: "14px 16px 10px", borderBottom: `1px solid ${PALETTE.edge}` });
     const title = document.createElement("div");
-    title.textContent = `${location.host} wants to connect to a serial port`;
+    title.textContent =
+      kind === "bluetooth"
+        ? `${location.host} wants to pair with a Bluetooth device`
+        : `${location.host} wants to connect to a serial port`;
     style(title, { fontSize: "13px", fontWeight: "600" });
     const subtitle = document.createElement("div");
     // The picker says what it is. The card it leads to will not, by design.
@@ -112,7 +118,7 @@ function choose(candidates, backingUrl) {
     };
 
     for (const board of candidates) {
-      list.append(row(board, () => finish(board.boardId)));
+      list.append(row(board, () => finish(board.boardId), kind));
     }
 
     const footer = document.createElement("div");
@@ -151,7 +157,7 @@ function choose(candidates, backingUrl) {
   });
 }
 
-function row(board, onPick) {
+function row(board, onPick, kind = "serial") {
   const button = document.createElement("button");
   button.type = "button";
   button.className = "lp-emu-picker-board";
@@ -183,7 +189,10 @@ function row(board, onPick) {
   // The same label Studio's own `labelForPort` builds for a native-USB ESP32,
   // with the board id after it — the emulator's ids are the thing a person
   // picking between two boards actually reads.
-  name.textContent = `ESP32 Serial (303a:1001) — ${board.boardId}`;
+  name.textContent =
+    kind === "bluetooth"
+      ? `${board.name ?? "LightPlayer"} — ${board.boardId}`
+      : `ESP32 Serial (303a:1001) — ${board.boardId}`;
   style(name, { fontWeight: "600" });
 
   const detail = document.createElement("div");
@@ -350,6 +359,36 @@ export function installFailureBanner({ backingUrl, error }) {
   banner.append(head, said, url, reason, retry);
   document.body.append(banner);
   return { element: banner };
+}
+
+/// One more line on the dev banner, for `?ble=emu`: the honesty about what
+/// the Bluetooth polyfill proves belongs at page level, like the banner's
+/// own. A page with no banner (yet) gets it the moment the banner exists.
+export function noteBluetooth(text) {
+  const place = () => {
+    const banner = document.getElementById("lp-emu-banner");
+    if (!banner) {
+      return false;
+    }
+    if (document.getElementById("lp-emu-banner-ble")) {
+      return true;
+    }
+    const line = document.createElement("div");
+    line.id = "lp-emu-banner-ble";
+    line.textContent = text;
+    style(line, { marginTop: "6px", color: PALETTE.warn });
+    banner.append(line);
+    return true;
+  };
+  if (place()) {
+    return;
+  }
+  const watch = new MutationObserver(() => {
+    if (place()) {
+      watch.disconnect();
+    }
+  });
+  watch.observe(document.body, { childList: true });
 }
 
 function boardRow(bus, board, refresh) {

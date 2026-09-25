@@ -87,6 +87,18 @@ browser-serial-esp32 = [
     "dep:wasm-bindgen",
     "dep:wasm-bindgen-futures",
 ]
+# Web Bluetooth (M5 of the BLE remote-control plan): the same line protocol
+# over a Nordic UART GATT service. `device-link` for the `Link` it
+# implements, `device-session` for the `lpa_client::ClientIo` a push or the
+# editor lens speaks through. No `web-sys` Bluetooth features: the JS module
+# owns the device, exactly as `browser_serial.js` owns the port.
+browser-ble = [
+    "device-link",
+    "device-session",
+    "dep:js-sys",
+    "dep:wasm-bindgen",
+    "dep:wasm-bindgen-futures",
+]
 # `lpa-devices`' transport contract (`Link`), implemented over this crate's
 # transports (`device_link`). The model defines the trait, `lpa-link` adapts
 # to it, and `device_link::wire` is the ONE place the two frame vocabularies
