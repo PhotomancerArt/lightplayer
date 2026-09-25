@@ -219,7 +219,8 @@ impl PushActivity {
             | LinkEvent::Line(_)
             | LinkEvent::ResetOutcome { .. }
             | LinkEvent::Error(_)
-            | LinkEvent::Passthrough { .. } => ActivityStep::nothing(),
+            | LinkEvent::Passthrough { .. }
+            | LinkEvent::WireNote(_) => ActivityStep::nothing(),
         }
     }
 }

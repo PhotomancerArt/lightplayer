@@ -2,9 +2,11 @@
 //!
 //! The state machine, its two thresholds and its two log lines live in
 //! [`fw_esp32_common::serial::usb_connection`], which is chip-free and
-//! host-tested. What is genuinely a C6 fact is here and is only two things:
+//! host-tested. What is genuinely a C6 fact is here:
 //! reading and clearing `USB_DEVICE.int_raw.sof`, and reading the device
-//! clock. The S3 keeps the same pair for the same reason.
+//! clock — plus the two IN-endpoint register touches the io_task's gate
+//! injects ([`UsbSerialJtagInEndpoint`]). The S3 keeps the same
+//! facts for the same reason.
 
 use fw_esp32_common::serial::link_counters::NEVER;
 use fw_esp32_common::serial::usb_connection::UsbLinkState;
@@ -54,6 +56,30 @@ impl UsbConnectionMonitor {
     /// host application is draining the port.
     pub fn is_connected(&self) -> bool {
         self.link.is_connected()
+    }
+}
+
+/// This chip's USB-Serial-JTAG register touches for the io_task's
+/// IN-endpoint gate ([`fw_esp32_common::serial::in_endpoint`]).
+#[cfg(not(feature = "spike_uart0_link"))]
+pub struct UsbSerialJtagInEndpoint;
+
+#[cfg(not(feature = "spike_uart0_link"))]
+impl fw_esp32_common::serial::in_endpoint::InEndpointRegs for UsbSerialJtagInEndpoint {
+    #[inline]
+    fn in_ep_free() -> bool {
+        esp_hal::peripherals::USB_DEVICE::regs()
+            .ep1_conf()
+            .read()
+            .serial_in_ep_data_free()
+            .bit_is_set()
+    }
+
+    #[inline]
+    fn clear_serial_in_empty() {
+        esp_hal::peripherals::USB_DEVICE::regs()
+            .int_clr()
+            .write(|w| w.serial_in_empty().clear_bit_by_one());
     }
 }
 

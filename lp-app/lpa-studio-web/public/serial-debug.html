@@ -549,11 +549,15 @@
         els.portLabel.textContent = controller ? controller.label : "No port selected";
       }
 
+      const rawDecoder = new TextDecoder();
+
       function subscribeController() {
         unsubscribeController?.();
         unsubscribeController = controller.subscribe((event) => {
           if (event.type === "raw") {
-            appendText(event.text);
+            // The controller hands out BYTES (packed frames are binary); this
+            // page is a text console, so it decodes for display only.
+            appendText(rawDecoder.decode(event.bytes, { stream: true }));
           } else if (event.type === "log") {
             logSystem(`[${event.source}] ${event.text}`);
           } else if (event.type === "error") {

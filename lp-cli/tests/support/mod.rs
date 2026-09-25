@@ -81,8 +81,22 @@ impl Serve {
     /// Start a server from whole `--board` specs, so a test can ask for a
     /// `kind=` other than the default (plan two M5's `kind=rom-up`).
     pub fn start_specs(specs: &[String], extra: &[&str], dir: PathBuf) -> Serve {
+        Serve::start_specs_with_env(specs, extra, dir, &[])
+    }
+
+    /// [`Serve::start_specs`] with extra environment for the server (the
+    /// wire tap's `LP_EMU_WIRE_TAP`).
+    pub fn start_specs_with_env(
+        specs: &[String],
+        extra: &[&str],
+        dir: PathBuf,
+        env: &[(&str, &Path)],
+    ) -> Serve {
         std::fs::create_dir_all(&dir).expect("the scratch dir");
         let mut command = Command::new(env!("CARGO_BIN_EXE_lp-cli"));
+        for (key, value) in env {
+            command.env(key, value);
+        }
         command.args(["emu", "serve", "--listen", "127.0.0.1:0"]);
         for spec in specs {
             command.arg("--board");

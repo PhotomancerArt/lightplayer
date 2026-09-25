@@ -137,6 +137,7 @@ pub fn request_label(request: &ClientRequest) -> &'static str {
         ClientRequest::SetLogLevel { .. } => "server.set_log_level",
         ClientRequest::Reboot => "server.reboot",
         ClientRequest::ClearFaults => "server.clear_faults",
+        ClientRequest::SetEncoding { .. } => "server.set_encoding",
         ClientRequest::LoginBegin => "access.login_begin",
         ClientRequest::LoginAnswer { .. } => "access.login_answer",
         ClientRequest::AccessList => "access.list",

@@ -6,6 +6,7 @@ members = [
     "lp-base/lp-recovery",
     "lp-base/lp-bootctl",
     "lp-base/lpfs",
+    "lp-base/lp-json-pack",
     # lp-app workspace members
     "lp-core/lpc-access",
     "lp-core/lpc-history",
@@ -132,6 +133,7 @@ default-members = [
     "lp-base/lp-recovery",
     "lp-base/lp-bootctl",
     "lp-base/lpfs",
+    "lp-base/lp-json-pack",
     # lp-app workspace members
     "lp-core/lpc-access",
     "lp-core/lpc-history",
@@ -251,6 +253,7 @@ cranelift-frontend = { git = "https://github.com/PhotomancerArt/lp-cranelift", b
 cranelift-module = { git = "https://github.com/PhotomancerArt/lp-cranelift", branch = "main", version = "0.127.0", default-features = false }
 cranelift-object = { git = "https://github.com/PhotomancerArt/lp-cranelift", branch = "main", version = "0.127.0" }
 lp-collection = { path = "lp-base/lp-collection", default-features = false }
+lp-json-pack = { path = "lp-base/lp-json-pack", default-features = false }
 lp-recovery = { path = "lp-base/lp-recovery", default-features = false }
 
 # Common dependencies
@@ -523,7 +526,13 @@ esp-hal = { path = "third_party/esp-hal" }
 naga = { path = "third_party/naga" }
 # no_std pp-rs fork for naga `glsl-in` on bare-metal (https://github.com/PhotomancerArt/pp-rs)
 pp-rs = { path = "third_party/pp-rs" }
-# no_std JSON serializer patch: preserve serde_json::RawValue as raw JSON.
+# ser-write 0.3.1 fork: a provided `SerWrite::token` hook (declines by
+# default) so a sink can take the serializer's structural tokens instead of
+# its JSON text. See third_party/ser-write/README-LP.md.
+ser-write = { path = "third_party/ser-write" }
+# no_std JSON serializer patch: preserve serde_json::RawValue as raw JSON, and
+# offer each output site to the sink as a token. See
+# third_party/ser-write-json/README-LP.md.
 ser-write-json = { path = "third_party/ser-write-json" }
 
 #####################################

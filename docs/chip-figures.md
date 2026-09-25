@@ -149,7 +149,7 @@ this checkout; "ref" a pinned reference commit.
 | v3 | `determinism.single_core_prefix.{cycles,instructions,idle_skips}` | `PREFIX_CYCLES`/`_INSTRUCTIONS`/`_IDLE_SKIPS` | `the_single_core_prefix_is_unchanged` | boot-path code; the `stack_probe::paint` loop walks `.bss` |
 | v3 | `boot_idle.path_high_water_gap` (positional) | `PATH_HIGH_WATER_GAP` | `the_two_paths_report_the_same_memory_figures` | layout |
 | s3 | `stack_total_bytes` | `37256` ×3 in `boot_idle.rs` | `the_ledger_triple_is_elicited_by_a_stop_all_on_the_wire` | statics |
-| c6 | `hello.proto` | `"proto":24` in `usb_attached.rs` ×2, `usb_control.rs` | `g2_1_…`, `g2_3_…`, `g3_1_…` | `WIRE_PROTO_VERSION` bumps |
+| c6 | `hello.proto` | `"proto":24` in `usb_attached.rs` ×2, `usb_control.rs` | `g2_1_…`, `g3_1_…` (`g2_3_…` no longer sees a hello: behind the IN-endpoint gate nothing past `[INIT]` is tried) | `WIRE_PROTO_VERSION` bumps |
 | c6 | `heartbeat.total_bytes` | `"totalBytes":301536` in `usb_attached.rs` | `g2_1_…` | a heap-region change |
 | all | chip heap records | already records | the heap-budget gate | [heap-budget-gate.md](heap-budget-gate.md) |
 | — | engine heap records | already records | the heap-budget gate | engine allocations |

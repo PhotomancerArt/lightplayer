@@ -4,12 +4,14 @@
 //! cannot give it: a REAL protocol exchange (request out, decoded response
 //! body back). The model's frame mirror is deliberately lossy — a response
 //! body surfaces there as a label — so anything that wants the body speaks
-//! `lpa-client` below the mirror, on the raw `M!` line framing the JS
-//! controller already does.
+//! `lpa-client` below the mirror, on the port's own reader (the same
+//! `WireReader` the model's link pump drains, so a frame that straddles the
+//! handover is read whole and the packed-reply opt-in is the port's, not the
+//! drainer's).
 //!
 //! # Exclusive borrow, or two readers fight
 //!
-//! `takeLines` drains a shared buffer. While this io runs, the effects layer
+//! `take_reads` drains a shared buffer. While this io runs, the effects layer
 //! MUST have paused the model's link pump for the same port (that is the
 //! coarse-effect discipline: borrow the wire exclusively, run, give it
 //! back). Two drainers would each get half the frames, and the halves would
@@ -32,6 +34,7 @@ use lpc_wire::{ClientMessage, TransportError, WireServerMessage};
 use wasm_bindgen::{JsCast, JsValue};
 use wasm_bindgen_futures::JsFuture;
 
+use crate::device_link::wire_reader::WireRead;
 use crate::provider::management_event::{LinkManagementEvent, LinkManagementEventSink};
 use crate::providers::browser_serial_esp32::browser_serial;
 use crate::{LinkError, LinkManagementProgress};
@@ -187,11 +190,10 @@ pub fn lens_client_io(
     })
 }
 
-/// `ClientIo` over one port's raw line framing.
+/// `ClientIo` over one port's reader.
 struct PortLineIo {
     port_id: u32,
-    /// Frames drained but not yet handed out (one `takeLines` batch can
-    /// carry several).
+    /// Frames drained but not yet handed out (one drain can carry several).
     pending: Vec<WireServerMessage>,
     events: LinkManagementEventSink,
     /// The lens tap: every drained line, verbatim, before decoding, and
@@ -250,18 +252,34 @@ impl ClientIo for PortLineIo {
                     return Err(TransportError::Other(first));
                 }
             }
-            for line in browser_serial::take_lines(self.port_id) {
-                if let Some(tap) = &self.tap {
-                    tap(LensTapLine::Line(line.clone()));
-                }
-                match line.strip_prefix("M!") {
-                    Some(json) => match lpc_wire::json::from_str::<WireServerMessage>(json) {
-                        Ok(message) => self.pending.push(message),
-                        Err(error) => self.events.emit(LinkManagementEvent::log(format!(
-                            "malformed frame: {error}"
-                        ))),
-                    },
-                    None => self.events.emit(LinkManagementEvent::log(line)),
+            for read in browser_serial::take_reads(self.port_id) {
+                match read {
+                    WireRead::Line(line) => {
+                        if let Some(tap) = &self.tap {
+                            tap(LensTapLine::Line(line.clone()));
+                        }
+                        self.events.emit(LinkManagementEvent::log(line));
+                    }
+                    // A message in either form is its `M!` line to the tap
+                    // (the fold cannot tell the two apart, and must not),
+                    // and is decoded once, by the reader.
+                    WireRead::Frame(frame) => {
+                        if let Some(tap) = &self.tap {
+                            tap(LensTapLine::Line(frame.to_line()));
+                        }
+                        match frame.message {
+                            Ok(message) => self.pending.push(message),
+                            Err(error) => self.events.emit(LinkManagementEvent::log(format!(
+                                "malformed frame: {error}"
+                            ))),
+                        }
+                    }
+                    WireRead::Error(error) => self.events.emit(LinkManagementEvent::log(format!(
+                        "undeliverable frame: {error}"
+                    ))),
+                    // Sends are written by the reader's owner; notes wait for
+                    // the link pump (`take_reads` never hands out either).
+                    WireRead::Send(_) | WireRead::Note(_) => {}
                 }
             }
             if !self.pending.is_empty() {

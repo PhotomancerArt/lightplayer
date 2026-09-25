@@ -437,6 +437,16 @@ fn table_rows() -> Vec<Row> {
             ClientRequest::LoginAnswer { macs: vec![] },
             Required::Public,
         ),
+        // How this link's replies are written, not what they say (plan
+        // `lp-json-pack`): asked before a login, so public.
+        row(
+            "setEncoding",
+            ClientRequest::SetEncoding {
+                encoding: lpc_wire::WireEncoding::Packed,
+                dictionary: lpc_wire::WIRE_DICTIONARY_FINGERPRINT,
+            },
+            Required::Public,
+        ),
         row(
             "projectRead",
             ClientRequest::ProjectRead {

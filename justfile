@@ -2614,6 +2614,21 @@ _test-parallel: test-rust test-filetests test-emu-lab
 
 test-rust-core:
     cargo test
+    # lp-json-pack's corpus tests need its host features (`required-features`),
+    # which the plain workspace run never turns on. No dependencies: cheap.
+    cargo test -p lp-json-pack --all-features
+
+# The vendored serializer forks' own tests: upstream's, plus the LP token
+# hook's. `third_party/ser-write` and `third_party/ser-write-json` are their
+# own workspaces (not members, so the root's lints and `cargo fmt --all` stay
+# off upstream code), which is why this is `--manifest-path`, not `-p`. They
+# resolve their own dependencies, so this is a local check, not a CI job; the
+# hook's behaviour on the wire types is covered by `cargo test -p lpc-wire
+# --features ser-write-json`, which CI runs through `test-rust-core`.
+test-ser-write:
+    CARGO_TARGET_DIR="$PWD/target" cargo test --manifest-path third_party/ser-write/Cargo.toml
+    CARGO_TARGET_DIR="$PWD/target" cargo test --manifest-path third_party/ser-write-json/Cargo.toml
+    rm -f third_party/ser-write/Cargo.lock third_party/ser-write-json/Cargo.lock
 
 # The lps-probe wall-clock perf sanity: the number behind the probe
 # worker-offload follow-up (docs/adr/2026-07-25-shader-probe-experiment-api.md).
@@ -2790,10 +2805,22 @@ test-glsl-filetests:
 # Warm ~1s, cold ~47s locally; it runs beside clippy, the Lint job's long
 # pole. See docs/debt/wasm-cloud-check-not-in-just-check.md.
 [parallel]
-check-lint: fmt-check clippy check-wasm-cloud check-lpc-engine-gates check-studio-core-minimal lint-serde-content lint-browser-test-harness lint-classic-capture lint-pcb-export lint-schemars-fw lint-upgrade-fw lint-emu-fence lint-nested-patches lint-emu-regnames lint-torture-corpus lint-vec-corpus lint-tw-utilities lint-red-main-needs
+check-lint: fmt-check clippy check-wasm-cloud check-lpc-engine-gates wire-dict-check check-studio-core-minimal lint-serde-content lint-browser-test-harness lint-classic-capture lint-pcb-export lint-schemars-fw lint-upgrade-fw lint-emu-fence lint-nested-patches lint-emu-regnames lint-torture-corpus lint-vec-corpus lint-tw-utilities lint-red-main-needs
 
 [parallel]
 check: check-lint schema-check fw-manifest-check-emu
+
+# The wire's JSON Pack dictionary (lp-core/lpc-wire/src/wire_dictionary.rs),
+# generated from the wire types by a host-only tracer (feature `wire-dict-gen`,
+# never enabled by firmware) and ranked by the committed traffic sample.
+# `wire-dict-check` fails when the committed file is stale, and when the
+# dictionary changed while WIRE_PROTO_VERSION did not: a dictionary change is a
+# wire change. `wire-dict` refuses to write in that case too.
+wire-dict:
+    cargo run -q -p lpc-wire --features wire-dict-gen --bin wire-dict
+
+wire-dict-check:
+    cargo run -q -p lpc-wire --features wire-dict-gen --bin wire-dict -- --check
 
 # Guard against serde Content-machinery reintroduction (tag/untagged/flatten).
 # See docs/adr/2026-07-04-json-only-artifacts.md and the script's allowlist.
@@ -2945,13 +2972,14 @@ test-emu-c6-boot:
     cargo test -p lp-emu-validate --test band_contract
     just test-emu-serve
 
-# lp-cli's two emulator-backed tests. Both resolve the ELF through
+# lp-cli's emulator-backed tests. Both resolve the ELF through
 # `lp_emu_esp32c6::test_support` under `LP_EMU_BUILD_FW=1` — a plain
 # `cargo build`, not a reference image, so no espflash and no git history.
 # CI's `Heap budget (esp32c6 chip)` job runs this half.
 test-emu-c6-cli:
     cargo test -p lp-cli --test validate_registry_parity
     LP_EMU_BUILD_FW=1 cargo test -p lp-cli --test emu_usb_hello -- --include-ignored
+    LP_EMU_BUILD_FW=1 cargo test -p lp-cli --test emu_usb_json_pack -- --include-ignored --nocapture
 
 # The classic ESP32 (v3) machine's own suite (plan three, M3).
 #

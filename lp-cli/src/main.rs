@@ -11,7 +11,7 @@ mod server;
 
 use commands::{
     create, dev, emu, firmware, fwcheck, hardware, profile, project, schema, serve, shader_debug,
-    shader_lpir, upload, validate,
+    shader_lpir, upload, validate, wire,
 };
 
 #[derive(Parser)]
@@ -92,6 +92,8 @@ enum Cli {
     Project(project::ProjectCli),
     /// Generate or verify the checked-in schemas/ tree (JSON Schemas + slot shape dumps).
     Schema(schema::SchemaCli),
+    /// Tools over a board's link bytes (`wire unpack`: packed frames → `M!` lines).
+    Wire(wire::WireCli),
     /// Compile a GLSL file to LPIR text (stdout). Uses the same Naga → LPIR path as the JIT.
     ShaderLpir {
         /// Path to a `.glsl` file (filetest-style snippet; LPFX preamble is applied like `lps-frontend::compile`)
@@ -143,6 +145,7 @@ fn main() -> Result<()> {
         Cli::Hardware(cli) => hardware::handle_hardware(cli),
         Cli::Project(cli) => project::handle_project(cli),
         Cli::Schema(cli) => schema::handle_schema(cli),
+        Cli::Wire(cli) => wire::handle_wire(cli),
         Cli::Profile(cli) => match cli.subcommand {
             Some(profile::ProfileSubcommand::Diff(args)) => profile::handle_profile_diff(args),
             Some(profile::ProfileSubcommand::Function(args)) => {

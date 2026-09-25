@@ -483,6 +483,9 @@ impl Evidence {
             // proves nothing the heartbeat does not, so it moves nothing —
             // not `frames_seen`, not freshness, not the terminal.
             LinkEvent::Passthrough { .. } => {}
+            // The transport narrating the link's encoding: journaled (that
+            // is the point of it), and not evidence of anything.
+            LinkEvent::WireNote(_) => {}
         }
         notes
     }

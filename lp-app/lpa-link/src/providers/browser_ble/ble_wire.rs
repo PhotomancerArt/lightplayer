@@ -3,28 +3,38 @@
 //! The link (`device_link::browser_ble`) and a conversation that borrows the
 //! wire (`BleClientIo`: a push, the editor lens) both drain the same JS
 //! buffer — never at once, because the effects layer pauses the link's pump
-//! for the length of a borrow. The ONE [`LineSplitter`] lives here, beside
-//! the buffer, so a line that straddles the hand-over is still re-joined
-//! whole instead of being cut in two between two splitters.
+//! for the length of a borrow. The ONE [`WireStream`] lives here, beside
+//! the buffer, so a line or a packed frame that straddles the hand-over is
+//! still re-joined whole instead of being cut in two between two splitters.
+//! This link never asks the board to pack (no `SetEncoding`), but the
+//! stream reads a packed frame anyway and hands it on as its `M!{json}` line.
 
 use std::cell::RefCell;
 
-use crate::device_link::demux::LineSplitter;
+use lpc_wire::{WireChunk, WireStream};
 
 use super::browser_ble;
 
 /// A session's stream. Cheap to share (`Rc`); holds no JS value.
-#[derive(Debug)]
 pub struct BleWire {
     session: u32,
-    splitter: RefCell<LineSplitter>,
+    stream: RefCell<WireStream>,
+}
+
+impl std::fmt::Debug for BleWire {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("BleWire")
+            .field("session", &self.session)
+            .field("pending_bytes", &self.stream.borrow().pending_bytes())
+            .finish()
+    }
 }
 
 impl BleWire {
     pub fn new(session: u32) -> Self {
         Self {
             session,
-            splitter: RefCell::new(LineSplitter::default()),
+            stream: RefCell::new(WireStream::new()),
         }
     }
 
@@ -60,7 +70,18 @@ impl BleWire {
         if bytes.is_empty() {
             return Ok(Vec::new());
         }
-        Ok(self.splitter.borrow_mut().push(&bytes))
+        let mut lines = Vec::new();
+        for chunk in self.stream.borrow_mut().push_collect(&bytes) {
+            match chunk {
+                WireChunk::Line(line) => lines.push(line),
+                WireChunk::Frame(frame) => lines.push(frame.to_line()),
+                // This link never asks for packed replies, so a frame that
+                // fails to decode is line noise, not a message: drop it, as a
+                // garbled JSON line is dropped when it fails to parse.
+                WireChunk::Error(_) => {}
+            }
+        }
+        Ok(lines)
     }
 
     /// Every error the session recorded since the last call.
@@ -71,7 +92,7 @@ impl BleWire {
     /// Drop a partial line: a new connection is not the rest of the old
     /// one's last line.
     pub fn clear_partial(&self) {
-        self.splitter.borrow_mut().clear();
+        self.stream.borrow_mut().clear();
     }
 }
 
