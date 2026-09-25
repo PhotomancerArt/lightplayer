@@ -10,6 +10,7 @@
 //! [`lpc_cloud_api::MemberInfo`] and is stored as-is on a
 //! [`member_record::MemberRecord`].
 
+pub mod account_access;
 pub mod caller;
 pub mod cloud_project;
 pub mod cloud_user;

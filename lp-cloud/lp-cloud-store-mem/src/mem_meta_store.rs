@@ -4,7 +4,8 @@ use alloc::collections::BTreeMap;
 use alloc::string::String;
 use alloc::vec::Vec;
 use lp_cloud_domain::{
-    CloudProject, CloudUser, MemberRecord, MetaStore, ProjectRefs, SessionRecord, StoredEvent,
+    AccountAccess, CloudProject, CloudUser, MemberRecord, MetaStore, ProjectRefs, SessionRecord,
+    StoredEvent,
 };
 use lpc_cloud_api::SidecarMeta;
 use lpc_history::{ContentHash, HistoryEvent, PrefixedUid};
@@ -20,6 +21,7 @@ pub struct MemMetaStore {
     users: BTreeMap<PrefixedUid, CloudUser>,
     users_by_google_sub: BTreeMap<String, PrefixedUid>,
     users_by_email: BTreeMap<String, PrefixedUid>,
+    account_access: BTreeMap<PrefixedUid, AccountAccess>,
     sessions: BTreeMap<ContentHash, SessionRecord>,
     projects: BTreeMap<PrefixedUid, CloudProject>,
     members: BTreeMap<(PrefixedUid, String), MemberRecord>,
@@ -86,6 +88,16 @@ impl MetaStore for MemMetaStore {
         });
         users.truncate(limit);
         users
+    }
+
+    // ---- account access ---------------------------------------------
+
+    fn put_account_access(&mut self, access: AccountAccess) {
+        self.account_access.insert(access.user, access);
+    }
+
+    fn account_access(&self, user: PrefixedUid) -> Option<AccountAccess> {
+        self.account_access.get(&user).cloned()
     }
 
     // ---- sessions ----------------------------------------------------

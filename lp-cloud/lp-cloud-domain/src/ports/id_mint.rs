@@ -18,4 +18,11 @@ pub trait IdMint {
 
     /// A fresh random session token (256 bits).
     fn session_token(&mut self) -> [u8; SESSION_TOKEN_LEN];
+
+    /// Fill `out` with fresh random bytes — the account device key's secret
+    /// and salts ([`crate::model::account_access::AccountAccess`]). The
+    /// secret is a credential that unlocks devices, so the same
+    /// cryptographic-quality rule as [`session_token`](Self::session_token)
+    /// applies.
+    fn random_bytes(&mut self, out: &mut [u8]);
 }

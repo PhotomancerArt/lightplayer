@@ -20,14 +20,15 @@ use lp_cloud_domain::{
 use lp_cloud_store_mem::{MemClock, MemIdMint, MemMetaStore};
 use lpc_cloud_api::request::{
     AddMember, ArchiveProject, GetEvents, GetHeads, GetProject, HaveBlobs, PublishProject,
-    PushCommit, RemoveMember, RestoreProject, RevokeSession, SetAccess, UpdateMe,
+    PushCommit, RemoveMember, RestoreProject, RevokeSession, SetAccess, SetAccountPassword,
+    UpdateMe,
 };
 use lpc_cloud_api::response::{
     Events, MissingBlobs, ProjectInfo, ProjectList, PushResult, UserInfo,
 };
 use lpc_cloud_api::{
-    Access, Ack, Actor, CloudError, CloudRequest, CloudResponse, MemberRole, PushOutcome,
-    SidecarMeta,
+    Access, AccountAccessInfo, AccountPasswordTier, Ack, Actor, CloudError, CloudRequest,
+    CloudResponse, MemberRole, PushOutcome, SidecarMeta,
 };
 use lpc_history::{ContentHash, EventKind, HistoryEvent, PrefixedUid, UidPrefix};
 
@@ -1253,6 +1254,197 @@ fn login_options_reports_the_dev_picker_only_when_enabled() {
     assert_eq!(choices, vec!["one@example.com", "two@example.com"]);
 }
 
+// ---- account device access (BLE easy access, D7) -------------------
+
+/// The record is minted on the first ask and stable after: a second ask
+/// (and a second browser) sees the same key, with no passwords by default.
+#[test]
+fn account_access_is_minted_on_first_ask_and_stable_after() {
+    let mut svc = service();
+    let actor = signed_in(&mut svc, "g-1", "one@example.com");
+    assert!(svc.store().account_access(uid_of(actor)).is_none());
+
+    let first = account_access(&mut svc, actor, CloudRequest::GetAccountAccess).unwrap();
+    let second = account_access(&mut svc, actor, CloudRequest::GetAccountAccess).unwrap();
+    assert_eq!(first, second, "the second ask sees the stored record");
+    assert_eq!(first.play_password, None, "no play password by default");
+    assert_eq!(first.edit_password, None, "no edit password by default");
+    assert!(first.previous_key_salts.is_empty());
+    let salts = [
+        first.key_salt,
+        first.play_password_salt,
+        first.edit_password_salt,
+    ];
+    assert!(
+        salts[0] != salts[1] && salts[1] != salts[2] && salts[0] != salts[2],
+        "every holder gets its own salt: the board keys entries by salt"
+    );
+    assert_ne!(first.key_secret, [0u8; 32], "the secret came from the mint");
+    assert!(svc.store().account_access(uid_of(actor)).is_some());
+}
+
+#[test]
+fn account_passwords_set_and_clear_per_tier_without_moving_their_salts() {
+    let mut svc = service();
+    let actor = signed_in(&mut svc, "g-1", "one@example.com");
+    let minted = account_access(&mut svc, actor, CloudRequest::GetAccountAccess).unwrap();
+
+    let play = account_access(
+        &mut svc,
+        actor,
+        set_password(AccountPasswordTier::Play, Some(" friends ")),
+    )
+    .unwrap();
+    assert_eq!(
+        play.play_password.as_deref(),
+        Some(" friends "),
+        "not trimmed"
+    );
+    assert_eq!(play.edit_password, None);
+
+    let edit = account_access(
+        &mut svc,
+        actor,
+        set_password(AccountPasswordTier::Edit, Some("crew")),
+    )
+    .unwrap();
+    assert_eq!(edit.play_password.as_deref(), Some(" friends "));
+    assert_eq!(edit.edit_password.as_deref(), Some("crew"));
+
+    let cleared = account_access(
+        &mut svc,
+        actor,
+        set_password(AccountPasswordTier::Play, None),
+    )
+    .unwrap();
+    assert_eq!(cleared.play_password, None);
+    assert_eq!(cleared.edit_password.as_deref(), Some("crew"));
+
+    let emptied = account_access(
+        &mut svc,
+        actor,
+        set_password(AccountPasswordTier::Edit, Some("")),
+    )
+    .unwrap();
+    assert_eq!(emptied.edit_password, None, "an empty password clears it");
+
+    for answer in [&play, &edit, &cleared, &emptied] {
+        assert_eq!(answer.key_salt, minted.key_salt);
+        assert_eq!(answer.key_secret, minted.key_secret);
+        assert_eq!(answer.play_password_salt, minted.play_password_salt);
+        assert_eq!(answer.edit_password_salt, minted.edit_password_salt);
+    }
+    assert_eq!(
+        account_access(&mut svc, actor, CloudRequest::GetAccountAccess).unwrap(),
+        emptied,
+        "the last write is what is stored"
+    );
+}
+
+#[test]
+fn an_account_password_over_the_length_cap_is_refused() {
+    let mut svc = service();
+    let actor = signed_in(&mut svc, "g-1", "one@example.com");
+    let too_long = "x".repeat(129);
+    let answer = svc.handle(
+        actor,
+        set_password(AccountPasswordTier::Play, Some(&too_long)),
+    );
+    assert!(matches!(answer, Err(CloudError::InvalidRequest { .. })));
+}
+
+#[test]
+fn resetting_the_account_key_rotates_it_and_records_the_old_salt() {
+    let mut svc = service();
+    let actor = signed_in(&mut svc, "g-1", "one@example.com");
+    let minted = account_access(
+        &mut svc,
+        actor,
+        set_password(AccountPasswordTier::Play, Some("p")),
+    )
+    .unwrap();
+
+    let reset = account_access(&mut svc, actor, CloudRequest::ResetAccountKey).unwrap();
+    assert_ne!(reset.key_salt, minted.key_salt);
+    assert_ne!(reset.key_secret, minted.key_secret);
+    assert_eq!(reset.previous_key_salts, vec![minted.key_salt]);
+    assert_eq!(
+        reset.play_password.as_deref(),
+        Some("p"),
+        "passwords survive"
+    );
+    assert_eq!(reset.play_password_salt, minted.play_password_salt);
+    assert_eq!(reset.edit_password_salt, minted.edit_password_salt);
+
+    let mut retired = vec![minted.key_salt, reset.key_salt];
+    for _ in 0..4 {
+        let next = account_access(&mut svc, actor, CloudRequest::ResetAccountKey).unwrap();
+        retired.push(next.key_salt);
+    }
+    let last = account_access(&mut svc, actor, CloudRequest::GetAccountAccess).unwrap();
+    assert_eq!(last.key_salt, retired.pop().unwrap());
+    assert_eq!(
+        last.previous_key_salts,
+        retired[retired.len() - 4..].to_vec(),
+        "the last four retired salts, oldest first"
+    );
+}
+
+/// A guest has no login to come back through, so an account key tied to it
+/// could never reach a second browser: every account-access call refuses it.
+#[test]
+fn a_guest_account_is_refused_account_access() {
+    let mut svc = service();
+    let guest = Actor::User(svc.begin_guest_user().uid);
+    for request in account_access_requests() {
+        assert_eq!(
+            svc.handle(guest, request.clone()),
+            Err(CloudError::NotAuthenticated),
+            "{request:?}"
+        );
+    }
+    assert!(svc.store().account_access(uid_of(guest)).is_none());
+}
+
+#[test]
+fn an_anonymous_caller_is_refused_account_access() {
+    let mut svc = service();
+    for request in account_access_requests() {
+        assert_eq!(
+            svc.handle(Actor::Anonymous, request.clone()),
+            Err(CloudError::NotAuthenticated),
+            "{request:?}"
+        );
+    }
+}
+
+/// Keyed on the caller's uid, so by construction nobody reaches another
+/// account's record — asserted anyway, since this record unlocks devices.
+#[test]
+fn one_account_never_sees_or_changes_anothers_access() {
+    let mut svc = service();
+    let alice = signed_in(&mut svc, "g-1", "alice@example.com");
+    let bob = signed_in(&mut svc, "g-2", "bob@example.com");
+
+    let alices = account_access(
+        &mut svc,
+        alice,
+        set_password(AccountPasswordTier::Edit, Some("a")),
+    )
+    .unwrap();
+    let bobs = account_access(&mut svc, bob, CloudRequest::GetAccountAccess).unwrap();
+    assert_ne!(bobs.key_salt, alices.key_salt);
+    assert_ne!(bobs.key_secret, alices.key_secret);
+    assert_eq!(bobs.edit_password, None, "alice's password is not bob's");
+
+    account_access(&mut svc, bob, CloudRequest::ResetAccountKey).unwrap();
+    assert_eq!(
+        account_access(&mut svc, alice, CloudRequest::GetAccountAccess).unwrap(),
+        alices,
+        "bob's reset did not touch alice's record"
+    );
+}
+
 // ---- helpers ------------------------------------------------------
 
 /// The cast for the access tests: one project, its owner, one member,
@@ -1332,6 +1524,47 @@ fn service() -> Service {
 
 fn project_uid() -> PrefixedUid {
     PrefixedUid::mint(UidPrefix::Project, &[1u8; 16])
+}
+
+/// A real (Google) sign-in, as an actor.
+fn signed_in(svc: &mut Service, google_sub: &str, email: &str) -> Actor {
+    let user = svc.upsert_user(google_sub, email, "Someone", "google", None, None, None);
+    Actor::User(user.uid)
+}
+
+fn uid_of(actor: Actor) -> PrefixedUid {
+    match actor {
+        Actor::User(uid) => uid,
+        Actor::Anonymous => panic!("an anonymous actor has no uid"),
+    }
+}
+
+/// Ask an account-access call and unwrap the `AccountAccessInfo` it answers.
+fn account_access(
+    svc: &mut Service,
+    actor: Actor,
+    request: CloudRequest,
+) -> Result<AccountAccessInfo, CloudError> {
+    match svc.handle(actor, request)? {
+        CloudResponse::AccountAccessInfo(info) => Ok(info),
+        other => panic!("expected AccountAccessInfo, got {other:?}"),
+    }
+}
+
+fn set_password(tier: AccountPasswordTier, password: Option<&str>) -> CloudRequest {
+    CloudRequest::SetAccountPassword(SetAccountPassword {
+        tier,
+        password: password.map(str::to_string),
+    })
+}
+
+/// Every account-access call, for the refusal tests.
+fn account_access_requests() -> [CloudRequest; 3] {
+    [
+        CloudRequest::GetAccountAccess,
+        set_password(AccountPasswordTier::Play, Some("p")),
+        CloudRequest::ResetAccountKey,
+    ]
 }
 
 /// Version `n`'s content hash.
