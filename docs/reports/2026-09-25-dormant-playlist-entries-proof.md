@@ -191,6 +191,14 @@ trend down across the switches.
 
 ## 4. Switch latency (reported, not gated)
 
+**When these were measured.** Every latency in this section was taken at
+`5b09557cf`, before P6b's phasor fix (`543bf0fa4`) and before the final
+phase's typed absent-option read. Neither was re-run. P6b removes work
+from every tick (section 2's side effect: more frames in the same cycles),
+and the absent-option change removes a failing bus walk per playlist per
+frame, so both are expected to shorten the figures below rather than
+lengthen them. That is an expectation, not a measurement.
+
 **On the emulated C6** (`lp-emu:esp32c6:t1`, the 280 s run above). The pad
 shows each switch as a stall in the WS281x frame stream (steady interval
 9.40 ms): about 150 ms with no frame while the old entry unloads and the new

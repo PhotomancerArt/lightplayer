@@ -148,7 +148,9 @@ silently destroyed.)
   (channel-level → scope-level → everything).
 - Both are runtime pokes on the playlist-activate pattern: nothing
   staged, nothing dirty, no overlay interaction. Studio, play mode,
-  phones, and future hardware inputs all speak exactly these two ops.
+  phones, and future hardware inputs all speak exactly these two ops for
+  every control. (Play mode's one other command is not a control: picking
+  which playlist entry plays, P12.)
 
 > Status: implemented 2026-08-02. `WireProjectCommand::PanelWrite` /
 > `PanelClear` (project-level arms — they address a scope, not a node),
@@ -219,6 +221,26 @@ applying restored panel state is non-conforming.
 > itself in the file, so the choice survives a reboot instead of quietly
 > re-enabling overnight.
 >
+> **Dormant playlist entries** (2026-09-25,
+> `docs/adr/2026-09-25-parent-owned-child-residency.md`). A playlist keeps
+> only its playing entry loaded, so most entries' scopes have no live node
+> for most of the time, and their knobs must survive that — across an
+> unload and across a reboot. Nothing about the file changed: it was
+> already keyed by persist path. What changed is who may hold an entry:
+>
+> - **Restore** accepts every *authored* entry's sink scope, not just the
+>   scopes a live node inhabits now (the drop that was
+>   `docs/defects/2026-09-25-panel-restore-drops-dormant-entry-knobs.md`).
+> - **A writer in an entry's sink scope** is keyed by the playlist's id,
+>   which a switch does not change, so it simply waits for the entry.
+> - **A writer in a scope owned by a node inside the entry** (a pattern
+>   module's own knobs) is keyed by an id the next load replaces. It is
+>   *parked* by persist path when the entry unloads and re-engaged when it
+>   loads; restore parks the ones whose entry is dormant at boot.
+>
+> An engaged writer for a dormant entry therefore persists, restores and
+> reappears exactly as if the entry had stayed loaded.
+
 > **Prerequisite that made this safe:** a write inside the project fs
 > fires an FsEvent back at the artifact-refresh path, so `/.lp/**` is
 > filtered out of project changes before anything reads the batch —
@@ -230,8 +252,43 @@ applying restored panel state is non-conforming.
 
 Play mode renders **panels only** — the root module's panel, which
 recursively presents nested module groups (modules.md R8) — no faces, no
-authoring surfaces. It speaks only P8's two ops plus reads. Anything
-play mode can do, an end user is allowed to do.
+authoring surfaces. It speaks P8's two ops plus reads, and one more
+runtime command, `PlaylistActivateEntry` (below). Anything play mode can
+do, an end user is allowed to do.
+
+**The one exception: picking a pattern.** Choosing which playlist entry
+plays is not a value on a channel. It is a switch the playlist makes —
+hold the frame, unload the old entry, load the new one, fade — and the
+playlist already had a runtime command for it, the one P8 cites as the
+pattern ("the playlist-activate pattern": nothing staged, nothing dirty).
+Modelling a pick as a panel write would mean a writer with no value to
+hold, a persisted "current entry" that fights the tour, and a Clear that
+means nothing. So the Pattern instrument's tap and its next/previous send
+`PlaylistActivateEntry` (Studio picks the key for next/previous; there is
+no next/previous command). Everything else the instrument does is a panel
+write.
+
+**The Pattern instrument** (2026-09-25; multi-pattern vision D15/D21;
+`lpa-studio-core` `UiPatternPicker`). A playlist holding a set of patterns
+shows, between the shared knobs and the playing pattern's own knobs:
+
+- the set's names in authored order, the playing one marked, with a failed
+  entry and a skipped one shown as such — **tap** a name to play it
+  (`PlaylistActivateEntry`; a dormant entry loads, a failed one is retried);
+- **the tour**: a switch and a step time. It is the playlist's `tour`
+  option, consumed from `bus:playlist.tour` and panel-shown: the authored
+  value is the default, a Play-mode write (a whole `PlaylistTour` value:
+  off is `Hold`, on is a cycle at a step from a fixed ladder) overrides it,
+  and it persists in `.lp/panel.json` like any writer (P11);
+- **per-pattern on/off**, where off means "skip it in the tour". It is the
+  playlist's `skip` option on `bus:playlist.skip`: one whole `u32` list with
+  one writer, rewritten with one key flipped, because the bus has no
+  read-modify-write. A skipped pattern can still be tapped;
+- **next / previous**: an activate of the adjacent enabled key, wrapping.
+
+Clear on the tour or the skip list returns it to the authored default. Two
+playlists in one module share the one `playlist.tour` / `playlist.skip`
+pair of their scope (a known limit, not a design).
 
 > Status: implemented 2026-08-03 — mounted at
 > `/p/<slug>-<uid>/play` and `/device/<uid>/play`, the same session as
