@@ -581,6 +581,7 @@ class VirtualSerialPort {
     if (this.opened) {
       this.opened = false;
       this._detachStreams();
+      this._releaseByteChannel();
     }
   }
 
@@ -591,7 +592,20 @@ class VirtualSerialPort {
     this.dead = true;
     if (this.opened) {
       this._errorStream(reason);
+      this._releaseByteChannel();
     }
+  }
+
+  // A dead generation's open port goes with it: on a real board the unplug
+  // takes the port away, and nobody can `close()` a dead port afterwards
+  // (it answers "already closed"). Left open, the byte channel is shared by
+  // the NEXT generation's `EmulatorPort`, whose `open()` then refuses with
+  // "already open in this page" — the replugged card sat at "Attached — not
+  // listening" forever (docs/defects/2026-09-24-emulated-replug-leaves-the-old-byte-channel-open.md).
+  _releaseByteChannel() {
+    this.emulator.close().catch((error) => {
+      console.warn(`[emu] ${this.boardId}: closing the dead port's byte channel failed`, error);
+    });
   }
 
   _attachStreams() {

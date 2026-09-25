@@ -1277,6 +1277,77 @@ fn unplugging_mid_lens_closes_the_editor_and_leaves_an_honest_card() {
     );
 }
 
+/// The 2026-09-24 walk, Studio's half: the editor is a lens on the board,
+/// the cable comes out (the hotplug DISCONNECT edge, the way a replug under
+/// the shim or Chrome delivers it), the page drops to the gallery, and the
+/// cable goes back in on the SAME endpoint (the session id survives a
+/// replug). The card must come back to Ready and the project must open
+/// again — never park at "Attached — not listening" with a board that is
+/// talking.
+///
+/// The walk's own failure was below this layer: the shim left the dead
+/// generation's byte channel open, so the replugged port's `open()` was
+/// refused (`docs/defects/2026-09-24-emulated-replug-leaves-the-old-byte-channel-open.md`,
+/// pinned by `a_port_open_across_a_replug_reopens_on_the_new_generation` in
+/// lpa-link's conformance suite). This row pins that nothing ABOVE the port
+/// strands the card on the same walk.
+#[test]
+fn a_replug_under_the_lens_comes_back_ready_and_opens_again() {
+    let device = empty_light_player("dev000000daqf6dvvr8");
+    let (mut bench, tasks) = identified(&device, "usb-lens-8");
+    bench.run_until(&tasks, "the board to report nothing loaded", |bench| {
+        bench
+            .view()
+            .devices
+            .first()
+            .is_some_and(|card| card.loaded_project == lpa_devices::view::LoadedProject::Empty)
+    });
+    let card = bench.view().devices[0].clone();
+    bench.push_gesture(card.id, bundled_example());
+    bench.run_until(&tasks, "the push to finish", |bench| {
+        bench
+            .view()
+            .devices
+            .first()
+            .is_some_and(|card| card.activity.is_none() && card.last_outcome.is_some())
+    });
+    let uid = bench.registry()[0].uid.clone();
+    bench.open_lens(&uid).expect("opens");
+    assert!(bench.lens_device_uid().is_some());
+
+    // The cable comes out under the lens: the port dies AND the bus says so.
+    device.set_failure_plan(
+        lpa_link::providers::fake_device::FakeFailurePlan::none()
+            .with_disconnect_after_bytes(device.served_bytes()),
+    );
+    bench.granted.set(false);
+    bench
+        .controller
+        .note_device_hotplug(crate::app::studio::studio_command::DeviceHotplug::Disconnected);
+    bench.run_until(&tasks, "the lens to close on the departure", |bench| {
+        bench.lens_device_uid().is_none()
+    });
+
+    // …and goes back in: same endpoint, a live wire, the connect edge.
+    device.set_failure_plan(lpa_link::providers::fake_device::FakeFailurePlan::none());
+    bench.granted.set(true);
+    bench
+        .controller
+        .note_device_hotplug(crate::app::studio::studio_command::DeviceHotplug::Connected);
+    bench.run_until(&tasks, "the replugged board to come back Ready", |bench| {
+        bench
+            .view()
+            .devices
+            .first()
+            .is_some_and(|card| card.activity.is_none() && card.state_label == "Ready")
+    });
+    assert_eq!(bench.view().devices.len(), 1, "one board, one card");
+    bench
+        .open_lens(&uid)
+        .expect("the replugged board opens again");
+    assert_eq!(bench.lens_device_uid().as_deref(), Some(uid.as_str()));
+}
+
 /// One wire, one owner: a card verb that needs the board's wire while the
 /// editor is a lens on it closes the editor first, then RUNS — the card's
 /// verbs always work; the editor is what yields.

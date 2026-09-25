@@ -441,13 +441,12 @@ async function main() {
         { timeoutMs: STEP_DEADLINE_MS, what: "the banner to report the board attached again" },
       );
       // …and then what Studio makes of it, REPORTED rather than asserted.
-      // M3's G1 packet already flagged this as a product question for Yona
-      // ("replug → Attached, not listening"): Studio re-derives on the
-      // hotplug edge but does not re-open a port it had adopted, and it is
-      // the SAME code path on hardware. If the emulated replug reproduces
-      // the hardware behaviour faithfully, that is a walk that has moved off
-      // hardware — which is exactly G2's first question — so the walk record
-      // wants the answer either way, not a green tick.
+      // M3's G1 packet flagged "replug → Attached, not listening" as a
+      // product question. It was a shim bug instead: the unplug left the dead
+      // port's byte channel open, so the replugged port's open() was refused
+      // (docs/defects/2026-09-24-emulated-replug-leaves-the-old-byte-channel-open.md).
+      // Since that fix this should read "Ready"; "not listening" here is a
+      // regression worth chasing, not the expected answer.
       const settled = await driver
         .waitFor(
           `(() => { const t = document.querySelector('#main')?.innerText || "";
