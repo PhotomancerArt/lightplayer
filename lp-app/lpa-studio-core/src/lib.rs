@@ -71,9 +71,9 @@ pub use app::studio::PlayViewOp;
 // the gallery card's "for <board>" badge both read it.
 pub use app::access::{
     AccessAdded, AccessCommand, AccessPersist, AccessTier, AccountKeys, BrowserKey,
-    DEFAULT_KDF_ITERATIONS, DeviceAccessChange, NewSecret, SecretKind, UiAccessEntry,
-    UiAccessPanel, UiAccessSecret, UiDeviceAccess, UiLoginPrompt, UiProjectAccess,
-    not_permitted_sentence, tier_word,
+    DEFAULT_KDF_ITERATIONS, DeviceAccessChange, NewSecret, PLAY_ONLY_SENTENCE, SecretKind,
+    UiAccessEntry, UiAccessPanel, UiAccessSecret, UiDeviceAccess, UiLoginPrompt, UiProjectAccess,
+    UiUnlockOffer, not_permitted_sentence, tier_word,
 };
 pub use app::frame_feed::{
     CLOSE_INSPECTION_SAMPLE_FORMAT, CardFeedApply, CardFeedState, PREVIEW_SAMPLE_FORMAT,

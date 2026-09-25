@@ -14,10 +14,21 @@ pub struct UiDeviceAccess {
     pub over_bluetooth: bool,
     /// The login line ("Unlocked by Yona's MacBook"), for a Bluetooth link.
     pub line: Option<String>,
-    /// Offer "Unlock" (nothing granted) or "Unlock for edit" (play).
-    pub log_in: Option<String>,
+    /// What the card offers to unlock with, over Bluetooth: the sheet
+    /// ("Unlock", nothing granted) or a way to edit (unlocked for play).
+    pub unlock: Option<UiUnlockOffer>,
     /// The device access panel, when this link may write the device store.
     pub panel: Option<UiAccessPanel>,
+}
+
+/// What a Bluetooth card offers when its unlock is not the whole story.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum UiUnlockOffer {
+    /// Nothing Studio holds unlocked it: "Unlock" opens the sheet.
+    Locked,
+    /// Unlocked for play only: "Editing needs an edit password, or plug it
+    /// in by USB", with "Enter a password".
+    PlayOnly,
 }
 
 /// The device access panel: "Who has access", read from the board.
@@ -61,6 +72,8 @@ pub struct UiAccessEntry {
     pub is_this_browser: bool,
     /// One of the signed-in account's entries (its key or a password).
     pub is_account: bool,
+    /// When it was added (epoch seconds), when the adding client said.
+    pub added_at: Option<u64>,
 }
 
 /// One password, as the panel and the project list show it.
@@ -95,7 +108,7 @@ pub struct UiProjectAccess {
 pub fn prompt_sentence(reason: &super::PromptReason, device_name: &str) -> String {
     use super::PromptReason;
     match reason {
-        PromptReason::NoPasswordKnown => format!("{device_name} asks for its device password."),
+        PromptReason::NoPasswordKnown => "This device needs a password to unlock it.".to_string(),
         PromptReason::Refused { retry_after_ms } => match *retry_after_ms {
             0 => format!("That device password didn't unlock {device_name}."),
             ms => format!(
@@ -103,12 +116,14 @@ pub fn prompt_sentence(reason: &super::PromptReason, device_name: &str) -> Strin
                 ms.div_ceil(1_000)
             ),
         },
-        PromptReason::NeedsEdit => {
-            format!("This needs an edit device password. {device_name} is unlocked for play only.")
-        }
+        PromptReason::NeedsEdit => PLAY_ONLY_SENTENCE.to_string(),
         PromptReason::Asked => format!("Unlock {device_name} with another device password."),
     }
 }
+
+/// What a device unlocked for play says about editing — on the card and on
+/// the sheet it opens.
+pub const PLAY_ONLY_SENTENCE: &str = "Editing needs an edit password, or plug it in by USB.";
 
 /// The card's login line for a Bluetooth link.
 pub fn access_line(phase: &super::AccessPhase) -> Option<String> {
@@ -182,14 +197,19 @@ mod tests {
         );
         assert!(sentence.contains("in 4 s"), "{sentence}");
         assert!(!sentence.to_lowercase().contains("failed"));
-        assert!(
-            prompt_sentence(&PromptReason::NeedsEdit, "Choker").contains("edit device password")
+        assert_eq!(
+            prompt_sentence(&PromptReason::NeedsEdit, "Choker"),
+            "Editing needs an edit password, or plug it in by USB."
+        );
+        assert_eq!(
+            prompt_sentence(&PromptReason::NoPasswordKnown, "Choker"),
+            "This device needs a password to unlock it."
         );
     }
 
-    /// G3: the device's door says "Unlock" and "device password", never
-    /// "log in" — that is the cloud account's word, and its password must
-    /// not be typed here.
+    /// G3 / AC8: the device's door speaks of the device and its password,
+    /// never "log in" or the account — those are the cloud account's words,
+    /// and its password must not be typed here.
     #[test]
     fn the_sheet_asks_for_a_device_password_never_a_login() {
         for reason in [
@@ -199,8 +219,15 @@ mod tests {
             PromptReason::Refused { retry_after_ms: 0 },
         ] {
             let sentence = prompt_sentence(&reason, "Choker");
-            assert!(sentence.contains("device password"), "{sentence}");
-            assert!(!sentence.to_lowercase().contains("log"), "{sentence}");
+            let lower = sentence.to_lowercase();
+            assert!(lower.contains("password"), "{sentence}");
+            assert!(
+                lower.contains("device") || lower.contains("choker") || lower.contains("usb"),
+                "{sentence}"
+            );
+            assert!(!lower.contains("log"), "{sentence}");
+            assert!(!lower.contains("account"), "{sentence}");
+            assert!(!lower.contains("piece"), "{sentence}");
         }
         for tier in [Tier::Play, Tier::Edit] {
             let sentence = super::super::not_permitted_sentence(tier);

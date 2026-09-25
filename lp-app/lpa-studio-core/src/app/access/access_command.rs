@@ -29,6 +29,11 @@ pub enum AccessCommand {
     /// <platform>` when signed in, else `<Browser> on <platform>`). Applies
     /// until the user renames it; send it again when sign-in changes it.
     BrowserNameDefault(String),
+    /// A name for this browser's key only while it still has none of its
+    /// own (the minted placeholder): `<Browser> on <platform>` at boot,
+    /// before — or without — an answer about who is signed in. Never
+    /// replaces a default or a rename.
+    BrowserNamePlaceholder(String),
     /// The user renamed this browser's key. Devices re-label it on their
     /// next USB connect.
     RenameBrowser(String),
@@ -45,6 +50,9 @@ pub enum AccessCommand {
     Dismiss { device: DeviceId },
     /// The card's "Unlock" / "Unlock for edit": open the sheet.
     LogIn { device: DeviceId },
+    /// A password shared by link (`/unlock#…`): remember it, so the next
+    /// device that offers it unlocks with no screen.
+    RememberPassword(String),
     /// Settings' "Forget remembered passwords".
     ForgetRememberedPasswords,
     /// A change to the device's access list, over its link (USB, or a
@@ -100,6 +108,9 @@ impl core::fmt::Debug for AccessCommand {
             Self::BrowserNameDefault(name) => {
                 f.debug_tuple("BrowserNameDefault").field(name).finish()
             }
+            Self::BrowserNamePlaceholder(name) => {
+                f.debug_tuple("BrowserNamePlaceholder").field(name).finish()
+            }
             Self::RenameBrowser(name) => f.debug_tuple("RenameBrowser").field(name).finish(),
             Self::AccountKeys(keys) => f.debug_tuple("AccountKeys").field(keys).finish(),
             Self::SubmitPassword {
@@ -112,6 +123,7 @@ impl core::fmt::Debug for AccessCommand {
                 .finish(),
             Self::Dismiss { device } => f.debug_struct("Dismiss").field("device", device).finish(),
             Self::LogIn { device } => f.debug_struct("LogIn").field("device", device).finish(),
+            Self::RememberPassword(_) => f.write_str("RememberPassword(<redacted>)"),
             Self::ForgetRememberedPasswords => f.write_str("ForgetRememberedPasswords"),
             Self::Change { device, change } => f
                 .debug_struct("Change")

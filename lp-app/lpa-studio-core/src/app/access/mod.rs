@@ -63,7 +63,8 @@ pub use login_attempt::{LoginAttemptOutcome, try_login};
 pub use login_key_cache::{DEFAULT_KDF_ITERATIONS, LoginKeyCache};
 pub use remembered_passwords::{MAX_REMEMBERED_PASSWORDS, RememberedPasswords};
 pub use ui_access_view::{
-    UiAccessEntry, UiAccessPanel, UiAccessSecret, UiDeviceAccess, UiLoginPrompt, UiProjectAccess,
+    PLAY_ONLY_SENTENCE, UiAccessEntry, UiAccessPanel, UiAccessSecret, UiDeviceAccess,
+    UiLoginPrompt, UiProjectAccess, UiUnlockOffer,
 };
 
 /// The access tier, as the UI names it.

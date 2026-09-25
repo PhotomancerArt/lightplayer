@@ -48,7 +48,8 @@ use super::login_attempt::{LoginAttemptOutcome, try_login};
 use super::login_key_cache::{DEFAULT_KDF_ITERATIONS, LoginKeyCache};
 use super::remembered_passwords::RememberedPasswords;
 use super::ui_access_view::{
-    UiAccessEntry, UiAccessPanel, UiDeviceAccess, UiLoginPrompt, access_line, prompt_sentence,
+    UiAccessEntry, UiAccessPanel, UiDeviceAccess, UiLoginPrompt, UiUnlockOffer, access_line,
+    prompt_sentence,
 };
 use crate::app::devices::device_effects::{DeviceEffects, DeviceTaskFuture, DeviceTimerFuture};
 
@@ -387,6 +388,16 @@ impl AccessController {
                     self.browser_changed();
                 }
             }
+            AccessCommand::BrowserNamePlaceholder(name) => {
+                self.ensure_browser_key(random, &name);
+                if self
+                    .browser
+                    .as_mut()
+                    .is_some_and(|key| key.offer_placeholder_name(&name))
+                {
+                    self.browser_changed();
+                }
+            }
             AccessCommand::RenameBrowser(name) => {
                 self.ensure_browser_key(random, &name);
                 if self.browser.as_mut().is_some_and(|key| key.rename(&name)) {
@@ -428,6 +439,12 @@ impl AccessController {
                         tier: Tier::Play, ..
                     } => session.needs_edit(),
                     _ => session.ask(),
+                }
+            }
+            AccessCommand::RememberPassword(password) => {
+                if !password.is_empty() {
+                    self.remembered.remember(&password, now_secs);
+                    self.persist_passwords();
                 }
             }
             AccessCommand::ForgetRememberedPasswords => {
@@ -774,11 +791,11 @@ impl AccessController {
                     .then(|| access_line(&phase))
                     .flatten()
             });
-        let log_in = session.and_then(|session| match &session.phase {
-            AccessPhase::Locked => Some("Unlock".to_string()),
+        let unlock = session.and_then(|session| match &session.phase {
+            AccessPhase::Locked => Some(UiUnlockOffer::Locked),
             AccessPhase::Granted {
                 tier: Tier::Play, ..
-            } => Some("Unlock for edit".to_string()),
+            } => Some(UiUnlockOffer::PlayOnly),
             _ => None,
         });
         let panel = self.panel(device);
@@ -788,7 +805,7 @@ impl AccessController {
         Some(UiDeviceAccess {
             over_bluetooth,
             line,
-            log_in: log_in.filter(|_| over_bluetooth),
+            unlock: unlock.filter(|_| over_bluetooth),
             panel,
         })
     }
@@ -838,6 +855,7 @@ impl AccessController {
                             .account
                             .as_ref()
                             .is_some_and(|account| account.owns_salt(&entry.salt)),
+                        added_at: entry.added_at,
                     })
                     .collect()
             })
@@ -1086,6 +1104,41 @@ mod tests {
             }
         );
         assert_eq!(board.answers(), 1);
+    }
+
+    /// A password shared by link is remembered (and persisted), so the next
+    /// device offering it unlocks with no screen.
+    #[test]
+    fn a_shared_password_is_remembered_and_then_unlocks() {
+        let mut access = controller();
+        let persisted = Rc::new(RefCell::new(Vec::new()));
+        let sink = Rc::clone(&persisted);
+        access.set_on_persist(move |document| sink.borrow_mut().push(document));
+        access.apply(
+            AccessCommand::RememberPassword("maple-otter-42".to_string()),
+            &Roster::new(Default::default()),
+            &DeviceEffects::new(),
+            Millis(0),
+            5.0,
+            &counter(),
+        );
+        assert_eq!(access.remembered().len(), 1);
+        assert!(
+            persisted
+                .borrow()
+                .iter()
+                .any(|document| matches!(document, AccessPersist::Passwords(_)))
+        );
+        let board = FakeBoard::locked(&[("friends", Tier::Play, "maple-otter-42")]);
+        let session = unlock(&access, &board, &["maple-otter-42"]);
+        assert_eq!(
+            session.phase,
+            AccessPhase::Granted {
+                tier: Tier::Play,
+                label: Some("friends".to_string())
+            }
+        );
+        assert_eq!(board.failures(), 0);
     }
 
     /// Nothing held is on the board and nothing is remembered: the sheet

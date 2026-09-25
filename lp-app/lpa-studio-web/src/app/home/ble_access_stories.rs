@@ -1,31 +1,178 @@
-//! Bluetooth access stories (BLE M6, G3): the password sheet, the device
-//! access panel's states, the add slot's per-browser Bluetooth notes, a card
-//! reached over Bluetooth (flash disabled with its reason, the login line),
-//! the account default setting, and the project's Bluetooth list.
+//! Bluetooth access stories (plan ble-easy-access, P4; the spike's
+//! sections): the card's Connections group, "Who has access", the Unlock
+//! sheet, the play-only prompt, the "can now unlock" toast, Share, the
+//! friend's page, and Settings — plus the add slot per browser and a
+//! Bluetooth link still identifying, which this plan did not change.
 //!
 //! Every one of these is also captured at the phone width (the story
-//! harness's `sm` viewport), which is where G3 reviews them.
+//! harness's `sm` viewport), which is where G1 reviews them.
 
 use dioxus::prelude::*;
 use lpa_studio_core::{
-    AccessTier, DeviceEscape, DeviceId, DeviceLinkId, DeviceLoadedProject, DeviceStatus,
-    DeviceView, FIRMWARE_NEEDS_USB, PendingLinkView, SecretKind, UiAccessEntry, UiAccessPanel,
-    UiAccessSecret, UiDeviceAccess, UiDeviceSettingsView, UiLoginPrompt, UiProjectAccess,
+    AccessAdded, AccessTier, DeviceEscape, DeviceId, DeviceLinkId, DeviceLoadedProject,
+    DeviceStatus, DeviceView, FIRMWARE_NEEDS_USB, PendingLinkView, SecretKind, UiAccessEntry,
+    UiAccessPanel, UiDeviceAccess, UiDeviceSettingsView, UiLoginPrompt, UiUnlockOffer,
 };
 use lpa_studio_web_story_macros::story;
+use lpc_cloud_api::AccountAccessInfo;
 
+use crate::app::home::access_added_toast::AccessAddedToast;
+use crate::app::home::access_settings_section::AccessSettingsSection;
 use crate::app::home::ble_reach::BleReach;
-use crate::app::home::bluetooth_settings_section::BluetoothSettingsSection;
+use crate::app::home::browser_identity::BrowserPlatform;
 use crate::app::home::device_access_panel::DeviceAccessPanel;
 use crate::app::home::device_roster_card::{DeviceRosterCard, PendingLinkCard};
 use crate::app::home::devices_page::AddDeviceCard;
-use crate::app::home::login_sheet::LoginSheet;
-use crate::app::project::project_bluetooth_section::ProjectBluetoothSection;
+use crate::app::home::share_access_sheet::ShareAccessSheet;
+use crate::app::home::unlock_link::UnlockLink;
+use crate::app::home::unlock_page::UnlockPage;
+use crate::app::home::unlock_sheet::UnlockSheet;
+use crate::cloud::account_access::AccountAccessState;
+
+// --- 1 · Connections ------------------------------------------------------
 
 #[story(
-    description = "The device-password sheet (BLE M6, G3 copy: Unlock, never Log in — log in is the cloud account, and a user must not type that password here), titled \"Unlock PLAYFUL choker\", three reasons. Top: a piece asked and Studio knew nothing to try (no default, none remembered). Middle: the passwords tried were refused, and the piece's backoff is said as a time, never as \"failed\". Bottom: an edit was refused on a play login. Remember on this browser is on by default; Not now closes it and the card keeps an Unlock verb. On a phone it rises from the bottom; on a wide window it is a centred card."
+    description = "The device card's Connections group over USB, Bluetooth ON (the default): a USB row (\"connected\"), a Bluetooth row that is only the icon, the word and a switch, and \"Who has access · 4 ›\" under them, which opens the list. The old \"Bluetooth\" and \"Unlock for edit\" verbs are gone from the Device zone."
 )]
-fn ble_login_sheet() -> Element {
+fn ble_connections_usb_on() -> Element {
+    rsx! {
+        div { class: CARD_FRAME,
+            DeviceRosterCard {
+                card: usb_card(),
+                projects: Vec::new(),
+                examples: Vec::new(),
+                open_uid: Some("dev000000daqf6dvvqz".to_string()),
+                access: Some(usb_access(Some(true), false, typical())),
+                on_action: |_| {},
+            }
+        }
+    }
+}
+
+#[story(
+    description = "Over USB with Bluetooth OFF (left), and just after flipping it on (right): the board reads the switch at boot, so Studio restarts it to apply, and the row says \"Restarting to turn Bluetooth on…\" (the switch waits) until the device says hello again."
+)]
+fn ble_connections_usb_off_and_restarting() -> Element {
+    rsx! {
+        div { class: "tw:grid tw:gap-3 tw:p-3 tw:sm:grid-cols-2",
+            DeviceRosterCard {
+                card: usb_card(),
+                projects: Vec::new(),
+                examples: Vec::new(),
+                open_uid: Some("dev000000daqf6dvvqz".to_string()),
+                access: Some(usb_access(Some(false), false, typical())),
+                on_action: |_| {},
+            }
+            DeviceRosterCard {
+                card: usb_card(),
+                projects: Vec::new(),
+                examples: Vec::new(),
+                open_uid: Some("dev000000daqf6dvvqz".to_string()),
+                access: Some(usb_access(Some(true), true, typical())),
+                on_action: |_| {},
+            }
+        }
+    }
+}
+
+#[story(
+    description = "A device reached over Bluetooth, unlocked at edit by this phone's own key (no screen was shown): the line says \"Unlocked by Yona's iPhone\"; USB reads \"not connected\"; the Bluetooth switch is LOCKED on with \"connected this way — turn off by USB\" (you cannot turn off the radio you are talking over). Firmware and Reset are drawn disabled with \"… need USB\"."
+)]
+fn ble_connections_over_bluetooth() -> Element {
+    let mut panel = panel(Some(true), false, typical());
+    panel.over_bluetooth = true;
+    panel.can_restart = false;
+    let access = UiDeviceAccess {
+        over_bluetooth: true,
+        line: Some("Unlocked by Yona's iPhone".to_string()),
+        unlock: None,
+        panel: Some(panel),
+    };
+    rsx! {
+        div { class: CARD_FRAME,
+            DeviceRosterCard {
+                card: ble_card(),
+                projects: Vec::new(),
+                examples: Vec::new(),
+                open_uid: Some("dev000000daqf6dvvqz".to_string()),
+                access: Some(access),
+                on_action: |_| {},
+            }
+        }
+    }
+}
+
+// --- 2 · Who has access ---------------------------------------------------
+
+#[story(
+    description = "Who has access, typical: this browser first (marked), your other browser, your account, then a shared play password — only the play entry says \"can play\" and wears the PLAY chip. Then \"Anyone nearby\" with its switch (off). Each row's trash can arms on the first tap. \"+ Add a password\" at the end opens Share; \"USB always gets in.\""
+)]
+fn ble_who_has_access() -> Element {
+    rsx! {
+        div { class: PANEL_FRAME,
+            DeviceAccessPanel {
+                panel: panel(Some(true), false, typical()),
+                device_name: "PLAYFUL choker".to_string(),
+                on_access: |_| {},
+            }
+        }
+    }
+}
+
+#[story(
+    description = "Who has access, crowded, with long names: every row keeps one line and ellipsises its name, never pushing the trash can off the row. Order: this browser, other browsers, accounts, your account's passwords, shared passwords."
+)]
+fn ble_who_has_access_crowded() -> Element {
+    rsx! {
+        div { class: PANEL_FRAME,
+            DeviceAccessPanel {
+                panel: panel(Some(true), false, crowded()),
+                device_name: "PLAYFUL choker".to_string(),
+                on_access: |_| {},
+            }
+        }
+    }
+}
+
+#[story(
+    description = "Who has access with \"Anyone nearby\" ON: anyone in Bluetooth range can play with no password (editing still needs a key). The count on the card's row includes it."
+)]
+fn ble_who_has_access_open() -> Element {
+    rsx! {
+        div { class: PANEL_FRAME,
+            DeviceAccessPanel {
+                panel: panel(Some(true), true, typical()),
+                device_name: "PLAYFUL choker".to_string(),
+                on_access: |_| {},
+            }
+        }
+    }
+}
+
+#[story(
+    description = "One trash can ARMED (the studio's two-tap confirm): red fill, \"Remove\", the quiet 4 s drain under it; the row dims and its second line hides. The can was already as wide as \"Remove\", so nothing moved. A second tap removes; blur or 4 s stands it down."
+)]
+fn ble_who_has_access_armed() -> Element {
+    let entries = typical();
+    let armed = entries[1].salt_id;
+    rsx! {
+        div { class: PANEL_FRAME,
+            DeviceAccessPanel {
+                panel: panel(Some(true), false, entries),
+                device_name: "PLAYFUL choker".to_string(),
+                armed_preview: Some(armed),
+                on_access: |_| {},
+            }
+        }
+    }
+}
+
+// --- 4 · Unlocking over Bluetooth -----------------------------------------
+
+#[story(
+    description = "The Unlock sheet — only when nothing this phone holds matches (the common case has no screen at all). Top: \"This device needs a password to unlock it.\", a \"Device password\" field, Remember on this phone, Not now / Unlock, and the way around it: plug it in by USB once. Bottom: a typed password the device refused, with when it listens again. Never \"log in\", never \"account\"."
+)]
+fn ble_unlock_sheet() -> Element {
     let prompt = |reason: &str, retry: Option<u64>| UiLoginPrompt {
         device: DeviceId(7),
         device_name: "PLAYFUL choker".to_string(),
@@ -35,82 +182,193 @@ fn ble_login_sheet() -> Element {
     };
     rsx! {
         div { class: "tw:grid tw:gap-4 tw:p-3",
-            LoginSheet {
-                prompt: prompt("PLAYFUL choker asks for its device password.", None),
+            UnlockSheet {
+                prompt: prompt("This device needs a password to unlock it.", None),
+                this_word: "phone".to_string(),
+                on_access: |_| {},
+                inline: true,
+            }
+            UnlockSheet {
+                prompt: prompt("That device password didn't unlock PLAYFUL choker. It will listen again in 4 s.", Some(3_500)),
+                this_word: "phone".to_string(),
                 on_access: |_| {},
                 inline: true,
                 typed: Some("s'mores".to_string()),
             }
-            LoginSheet {
-                prompt: prompt("That device password didn't unlock PLAYFUL choker. It will listen again in 4 s.", Some(3_500)),
+        }
+    }
+}
+
+#[story(
+    description = "Unlocked for play only (a friend's shared password): the line says \"Unlocked with friends · play\", and where editing would be, one note says what it needs — \"Editing needs an edit password, or plug it in by USB.\" — with \"Enter a password\", which opens the Unlock sheet. A play link sees no \"Who has access\" row (the board lists only at edit)."
+)]
+fn ble_play_only_prompt() -> Element {
+    let access = UiDeviceAccess {
+        over_bluetooth: true,
+        line: Some("Unlocked with friends · play".to_string()),
+        unlock: Some(UiUnlockOffer::PlayOnly),
+        panel: None,
+    };
+    rsx! {
+        div { class: CARD_FRAME,
+            DeviceRosterCard {
+                card: ble_card(),
+                projects: Vec::new(),
+                examples: Vec::new(),
+                open_uid: Some("dev000000daqf6dvvqz".to_string()),
+                access: Some(access),
+                on_action: |_| {},
+            }
+        }
+    }
+}
+
+// --- 3 · Plugging in adds this browser ------------------------------------
+
+#[story(
+    description = "The toast after plugging a device in by USB (physical connection = access; no prompt): \"Yona's Mac and Yona's account can now unlock PLAYFUL choker over Bluetooth.\" with Undo, which removes exactly those. In the app it sits at the bottom of the page and fades after about ten seconds."
+)]
+fn ble_access_added_toast() -> Element {
+    rsx! {
+        div { class: "tw:grid tw:gap-3 tw:p-3",
+            AccessAddedToast {
+                added: AccessAdded {
+                    device: DeviceId(7),
+                    names: vec!["Yona's Mac".to_string(), "Yona's account".to_string()],
+                    generation: 1,
+                },
+                device_name: "PLAYFUL choker".to_string(),
                 on_access: |_| {},
+                on_dismiss: |_| {},
                 inline: true,
             }
-            LoginSheet {
-                prompt: prompt("This needs an edit device password. PLAYFUL choker is unlocked for play only.", None),
+            AccessAddedToast {
+                added: AccessAdded {
+                    device: DeviceId(7),
+                    names: vec!["Chrome on Mac".to_string()],
+                    generation: 2,
+                },
+                device_name: "PLAYFUL choker".to_string(),
                 on_access: |_| {},
+                on_dismiss: |_| {},
                 inline: true,
             }
         }
     }
 }
 
+// --- 5 · Sharing ------------------------------------------------------------
+
 #[story(
-    description = "The device access panel before the device has answered its list: nothing listed yet, and Turn Bluetooth on (the minimal P3 panel; P4 replaces it)."
+    description = "Share (from \"+ Add a password\"): generated words to say out loud and a real QR — a lightplayer.app/unlock link with the device and password in its #fragment, so the password never reaches a server. Copy link, New words; the label defaults to \"friends\" and the tier to Play; \"Add to the device\"; \"Type my own instead\"."
 )]
-fn ble_access_panel_off() -> Element {
+fn ble_share_words() -> Element {
     rsx! {
         div { class: PANEL_FRAME,
-            DeviceAccessPanel {
-                panel: panel(None, false, Vec::new(), false),
+            ShareAccessSheet {
+                device: DeviceId(7),
+                device_name: "PLAYFUL choker".to_string(),
                 on_access: |_| {},
-                show_passwords: true,
+                on_done: |_| {},
+                words: Some("maple-otter-42".to_string()),
+                origin: Some("https://lightplayer.app".to_string()),
             }
         }
     }
 }
 
 #[story(
-    description = "The device access panel, ON and LOCKED, just after Bluetooth was switched over USB: the board reads the switch once at boot, so the amber note says it turns on at the next restart and offers Restart now. The list is the device's own — this browser's key, the account's, and a shared password — with Add under it."
+    description = "Share with \"Type my own\": a password field (shown) in place of the words; the QR and the link follow what is typed. \"Use words instead\" goes back."
 )]
-fn ble_access_panel_locked() -> Element {
+fn ble_share_typed() -> Element {
     rsx! {
         div { class: PANEL_FRAME,
-            DeviceAccessPanel {
-                panel: panel(
-                    Some(true),
-                    false,
-                    vec![
-                        entry("Yona's MacBook", SecretKind::Browser, AccessTier::Edit, true),
-                        entry("Yona's account", SecretKind::Account, AccessTier::Edit, false),
-                        entry("friends", SecretKind::Password, AccessTier::Play, false),
-                    ],
-                    true,
-                ),
+            ShareAccessSheet {
+                device: DeviceId(7),
+                device_name: "PLAYFUL choker".to_string(),
                 on_access: |_| {},
+                on_done: |_| {},
+                typed: Some("smores by the fire".to_string()),
+                origin: Some("https://lightplayer.app".to_string()),
             }
         }
     }
 }
 
 #[story(
-    description = "The device access panel, ON and OPEN: anyone nearby can play with no password, and editing still needs one — said first, because it is the thing to know about an open piece."
+    description = "The friend's phone after scanning the QR (lightplayer.app/unlock): no account needed — \"Saved on this phone. Connect to PLAYFUL choker to use it.\" and Connect via Bluetooth (the browser's chooser needs a tap). Right: the same page in iPhone Safari, which has no Web Bluetooth — the add slot's own way forward (Bluefy)."
 )]
-fn ble_access_panel_open() -> Element {
+fn ble_friend_page() -> Element {
+    let link = UnlockLink {
+        device_name: "PLAYFUL choker".to_string(),
+        password: "maple-otter-42".to_string(),
+    };
     rsx! {
-        div { class: PANEL_FRAME,
-            DeviceAccessPanel {
-                panel: panel(
-                    Some(true),
-                    true,
-                    vec![entry("Yona's MacBook", SecretKind::Browser, AccessTier::Edit, true)],
-                    false,
-                ),
+        div { class: "tw:grid tw:gap-3 tw:p-3 tw:sm:grid-cols-2",
+            UnlockPage {
+                this_word: "phone".to_string(),
                 on_access: |_| {},
+                on_action: |_| {},
+                link: Some(link.clone()),
+                ble_reach: Some(BleReach::Ready),
+                page_url: Some("https://lightplayer.app/unlock".to_string()),
+            }
+            UnlockPage {
+                this_word: "phone".to_string(),
+                on_access: |_| {},
+                on_action: |_| {},
+                link: Some(link),
+                ble_reach: Some(BleReach::Ios),
+                page_url: Some("https://lightplayer.app/unlock".to_string()),
             }
         }
     }
 }
+
+// --- 6 · Settings -----------------------------------------------------------
+
+#[story(
+    description = "Settings, signed in, with both account passwords set (shown here): this browser's name on your devices (Rename), your account key (Reset account key… is the two-tap confirm), the optional play and edit passwords — Show, Change, trash — and the remembered passwords with Forget them."
+)]
+fn ble_settings_signed_in_passwords() -> Element {
+    rsx! {
+        SettingsAs {
+            account: AccountAccessState::Ready {
+                name: "Yona".to_string(),
+                info: account_info(Some("camp-fire-17"), Some("dome-crew-88")),
+            },
+            passwords_shown: true,
+        }
+    }
+}
+
+#[story(
+    description = "Settings, signed in, no account passwords (the default): each reads \"Not set\" with Set. Any browser signed in as you unlocks your devices without them."
+)]
+fn ble_settings_signed_in_none() -> Element {
+    rsx! {
+        SettingsAs {
+            account: AccountAccessState::Ready {
+                name: "Yona".to_string(),
+                info: account_info(None, None),
+            },
+        }
+    }
+}
+
+#[story(
+    description = "Settings, signed out: this browser's own name (\"Chrome on Mac\") and one line for the account: sign in and your devices unlock from any browser you sign in on."
+)]
+fn ble_settings_signed_out() -> Element {
+    rsx! {
+        SettingsAs {
+            account: AccountAccessState::SignedOut,
+            name: "Chrome on Mac".to_string(),
+        }
+    }
+}
+
+// --- unchanged surfaces -----------------------------------------------------
 
 #[story(
     description = "The add slot, per browser (BLE M5 copy, G3 rework). \"Connect a board\", then \"via USB\" and \"via Bluetooth\" — BOTH always drawn; one this browser cannot drive is DISABLED with its reason under it and a way to continue. Chrome/Edge: both live. Brave: Bluetooth disabled, the flag's address as select-and-copy text (a page cannot open brave://). Firefox and desktop Safari: both disabled, both need Chrome or Edge, and this page's address is given ONCE to open there. iPhone Safari (and Chrome on iOS): USB needs a computer; Bluetooth needs Bluefy — a link to it on the App Store, then this page's address to open in it. Bluefy: USB disabled with the address to open on a computer, Bluetooth live. Bluetooth off: turn it on and reload. Never a generic \"connect failed\"."
@@ -165,82 +423,6 @@ fn ble_add_slot_bluefy() -> Element {
     rsx! { AddSlotAs { reach: BleReach::Ready, usb: false } }
 }
 
-/// Each browser as the real ones pair Bluetooth reach with Web Serial.
-const ADD_SLOT_BROWSERS: [(&str, BleReach, bool); 7] = [
-    ("Chrome / Edge", BleReach::Ready, true),
-    ("Brave", BleReach::Brave, true),
-    ("Firefox", BleReach::Firefox, false),
-    ("Safari (Mac)", BleReach::Safari, false),
-    ("iPhone Safari / Chrome", BleReach::Ios, false),
-    ("Bluefy (iPhone)", BleReach::Ready, false),
-    ("Chrome, Bluetooth off", BleReach::Off, true),
-];
-
-/// The add slot pinned to one browser's answers, with the product's own
-/// address in its copy lines (never the story server's).
-#[component]
-#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
-fn AddSlotAs(reach: BleReach, usb: bool) -> Element {
-    rsx! {
-        div { class: "tw:p-3",
-            AddDeviceCard {
-                ble_reach: Some(reach),
-                usb_available: usb,
-                page_url: Some("https://lightplayer.app/devices".to_string()),
-                on_action: |_| {},
-            }
-        }
-    }
-}
-
-#[story(
-    description = "A piece reached over Bluetooth (BLE M5/M6). The device line leads with the unlock — \"Unlocked with friends · play\" — and the Firmware zone's verbs are drawn DISABLED with the reason under them, \"Firmware updates need USB\"; Reset likewise needs USB. At play the Device zone offers Unlock for edit. Right: the same piece unlocked at edit, where the Bluetooth panel's trigger replaces it."
-)]
-fn ble_device_card_over_bluetooth() -> Element {
-    let play = UiDeviceAccess {
-        over_bluetooth: true,
-        line: Some("Unlocked with friends · play".to_string()),
-        log_in: Some("Unlock for edit".to_string()),
-        panel: None,
-    };
-    let edit = UiDeviceAccess {
-        over_bluetooth: true,
-        line: Some("Unlocked by Yona's MacBook".to_string()),
-        log_in: None,
-        panel: Some(panel(
-            Some(true),
-            false,
-            vec![entry(
-                "Yona's MacBook",
-                SecretKind::Browser,
-                AccessTier::Edit,
-                true,
-            )],
-            false,
-        )),
-    };
-    rsx! {
-        div { class: "tw:grid tw:gap-3 tw:p-3 tw:sm:grid-cols-2",
-            DeviceRosterCard {
-                card: ble_card(),
-                projects: Vec::new(),
-                examples: Vec::new(),
-                open_uid: Some("dev000000daqf6dvvqz".to_string()),
-                access: Some(play),
-                on_action: |_| {},
-            }
-            DeviceRosterCard {
-                card: ble_card(),
-                projects: Vec::new(),
-                examples: Vec::new(),
-                open_uid: Some("dev000000daqf6dvvqz".to_string()),
-                access: Some(edit),
-                on_action: |_| {},
-            }
-        }
-    }
-}
-
 #[story(
     description = "A Bluetooth link still identifying (BLE M6 fix): the pending card's Reset is drawn DISABLED with its reason, \"Reset needs USB\" — a Bluetooth link has no reset lines in any card state, not only once it has settled. Right: a USB link at the same stage, whose Reset stays live (it is the recovery for a silent chip). Below: the Bluetooth link once its check settled on needs-firmware — Flash is drawn DISABLED with \"Firmware updates need USB\", never the live board pick."
 )]
@@ -285,77 +467,269 @@ fn ble_pending_card_over_bluetooth() -> Element {
     }
 }
 
-#[story(
-    description = "The Devices page's Bluetooth settings: how many passwords this browser remembers, with a way to forget them. Local to this browser, never synced. (The default device password is gone; P4 adds this browser's name and the account's passwords here.)"
-)]
-fn ble_bluetooth_settings() -> Element {
+// --- fixtures -------------------------------------------------------------
+
+/// Each browser as the real ones pair Bluetooth reach with Web Serial.
+const ADD_SLOT_BROWSERS: [(&str, BleReach, bool); 7] = [
+    ("Chrome / Edge", BleReach::Ready, true),
+    ("Brave", BleReach::Brave, true),
+    ("Firefox", BleReach::Firefox, false),
+    ("Safari (Mac)", BleReach::Safari, false),
+    ("iPhone Safari / Chrome", BleReach::Ios, false),
+    ("Bluefy (iPhone)", BleReach::Ready, false),
+    ("Chrome, Bluetooth off", BleReach::Off, true),
+];
+
+/// The add slot pinned to one browser's answers, with the product's own
+/// address in its copy lines (never the story server's).
+#[component]
+#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
+fn AddSlotAs(reach: BleReach, usb: bool) -> Element {
+    rsx! {
+        div { class: "tw:p-3",
+            AddDeviceCard {
+                ble_reach: Some(reach),
+                usb_available: usb,
+                page_url: Some("https://lightplayer.app/devices".to_string()),
+                on_action: |_| {},
+            }
+        }
+    }
+}
+
+/// The settings section as the Devices page draws it, on a Mac in Chrome.
+#[component]
+#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
+fn SettingsAs(
+    account: AccountAccessState,
+    #[props(default = "Yona's Mac".to_string())] name: String,
+    #[props(default)] passwords_shown: bool,
+) -> Element {
     rsx! {
         div { class: "tw:p-4",
-            BluetoothSettingsSection {
+            AccessSettingsSection {
                 settings: UiDeviceSettingsView {
-                    browser_name: Some("Yona's MacBook".to_string()),
+                    browser_name: Some(name),
                     remembered_passwords: 2,
                 },
+                account,
+                platform: BrowserPlatform::Mac,
+                browser: "Chrome".to_string(),
                 on_access: |_| {},
+                on_set_password: |_| {},
+                on_reset_key: |_| {},
+                passwords_shown,
             }
         }
     }
 }
 
-#[story(
-    description = "The project's own Bluetooth list (BLE M6 S5), in its settings: names and what each can do, Add under the list, and where it goes — kept in the library, sent only to your own devices with each push, never in a share or an export."
-)]
-fn ble_project_bluetooth_list() -> Element {
-    rsx! {
-        div { class: "tw:max-w-sm tw:p-4",
-            ProjectBluetoothSection {
-                access: UiProjectAccess {
-                    secrets: vec![secret("camp", AccessTier::Play), secret("crew", AccessTier::Edit)],
-                    error: None,
-                },
-                on_access: |_| {},
-            }
-        }
-    }
-}
-
+/// A 320px panel, as the popover draws it.
 const PANEL_FRAME: &str = "tw:m-3 tw:w-[320px] tw:max-w-[calc(100vw-24px)] tw:rounded-md tw:border tw:border-border-strong tw:bg-card-raised tw:px-3";
 
-fn secret(label: &str, tier: AccessTier) -> UiAccessSecret {
-    UiAccessSecret {
-        label: label.to_string(),
-        tier,
-    }
-}
+/// One card, at most the roster column's width.
+const CARD_FRAME: &str = "tw:grid tw:max-w-[420px] tw:p-3";
 
-fn entry(label: &str, kind: SecretKind, tier: AccessTier, is_this_browser: bool) -> UiAccessEntry {
+fn entry(
+    label: &str,
+    kind: SecretKind,
+    tier: AccessTier,
+    is_this_browser: bool,
+    is_account: bool,
+    days_ago: u64,
+) -> UiAccessEntry {
     UiAccessEntry {
         label: label.to_string(),
         kind,
         tier,
         salt_id: [label.len() as u8; 16],
         is_this_browser,
-        is_account: kind == SecretKind::Account,
+        is_account,
+        // 2026-09-24 12:00 UTC, less the age.
+        added_at: Some(1_790_251_200 - days_ago * 86_400),
     }
 }
 
-fn panel(
-    ble_enabled: Option<bool>,
-    open: bool,
-    entries: Vec<UiAccessEntry>,
-    restart_pending: bool,
-) -> UiAccessPanel {
+/// This browser, your phone, your account, a shared play password.
+fn typical() -> Vec<UiAccessEntry> {
+    vec![
+        entry(
+            "Yona's Mac",
+            SecretKind::Browser,
+            AccessTier::Edit,
+            true,
+            false,
+            0,
+        ),
+        entry(
+            "Yona's iPhone",
+            SecretKind::Browser,
+            AccessTier::Edit,
+            false,
+            false,
+            12,
+        ),
+        entry(
+            "Yona's account",
+            SecretKind::Account,
+            AccessTier::Edit,
+            false,
+            true,
+            12,
+        ),
+        entry(
+            "friends",
+            SecretKind::Password,
+            AccessTier::Play,
+            false,
+            false,
+            4,
+        ),
+    ]
+}
+
+/// Long names, every kind, the account's passwords.
+fn crowded() -> Vec<UiAccessEntry> {
+    vec![
+        entry(
+            "friends",
+            SecretKind::Password,
+            AccessTier::Play,
+            false,
+            false,
+            4,
+        ),
+        entry(
+            "Yona's Mac",
+            SecretKind::Browser,
+            AccessTier::Edit,
+            true,
+            false,
+            0,
+        ),
+        entry(
+            "Yona's iPhone",
+            SecretKind::Browser,
+            AccessTier::Edit,
+            false,
+            false,
+            12,
+        ),
+        entry(
+            "Chrome on Windows (DESKTOP-7Q4K2PL)",
+            SecretKind::Browser,
+            AccessTier::Edit,
+            false,
+            false,
+            25,
+        ),
+        entry(
+            "Mireille's Pixel 8 Pro — the one with the cracked screen",
+            SecretKind::Browser,
+            AccessTier::Edit,
+            false,
+            false,
+            53,
+        ),
+        entry(
+            "Yona's account",
+            SecretKind::Account,
+            AccessTier::Edit,
+            false,
+            true,
+            12,
+        ),
+        entry(
+            "Sam Okonkwo-Lindqvist's account",
+            SecretKind::Account,
+            AccessTier::Edit,
+            false,
+            false,
+            53,
+        ),
+        entry(
+            "Yona's play password",
+            SecretKind::Password,
+            AccessTier::Play,
+            false,
+            true,
+            12,
+        ),
+        entry(
+            "Yona's edit password",
+            SecretKind::Password,
+            AccessTier::Edit,
+            false,
+            true,
+            12,
+        ),
+        entry(
+            "burning man 2026 — dusty crew",
+            SecretKind::Password,
+            AccessTier::Play,
+            false,
+            false,
+            31,
+        ),
+        entry(
+            "default",
+            SecretKind::Password,
+            AccessTier::Edit,
+            false,
+            false,
+            60,
+        ),
+    ]
+}
+
+fn panel(ble_enabled: Option<bool>, open: bool, entries: Vec<UiAccessEntry>) -> UiAccessPanel {
     UiAccessPanel {
         device: DeviceId(7),
         count: entries.len() + usize::from(open),
         entries,
         ble_enabled,
         open,
-        restart_pending,
+        restart_pending: false,
         can_restart: true,
         over_bluetooth: false,
         writing: false,
         error: None,
+    }
+}
+
+fn usb_access(
+    ble_enabled: Option<bool>,
+    restart_pending: bool,
+    entries: Vec<UiAccessEntry>,
+) -> UiDeviceAccess {
+    let mut panel = panel(ble_enabled, false, entries);
+    panel.restart_pending = restart_pending;
+    UiDeviceAccess {
+        over_bluetooth: false,
+        line: None,
+        unlock: None,
+        panel: Some(panel),
+    }
+}
+
+fn account_info(play: Option<&str>, edit: Option<&str>) -> AccountAccessInfo {
+    AccountAccessInfo {
+        key_secret: [1; 32],
+        key_salt: [2; 16],
+        play_password_salt: [3; 16],
+        edit_password_salt: [4; 16],
+        play_password: play.map(str::to_string),
+        edit_password: edit.map(str::to_string),
+        previous_key_salts: Vec::new(),
+        updated_at: 0.0,
+    }
+}
+
+/// The catalog choker, running, on a USB cable.
+fn usb_card() -> DeviceView {
+    DeviceView {
+        firmware_blocked: None,
+        ..ble_card()
     }
 }
 

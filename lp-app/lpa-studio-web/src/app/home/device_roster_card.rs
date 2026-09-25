@@ -129,7 +129,7 @@ use lpa_studio_core::{
     DeviceAction, DeviceActivityView, DeviceCardFeedView, DeviceEscape, DeviceFeedOp, DeviceId,
     DeviceLoadedProject, DeviceStatus, DeviceView, DevicesOp, FeedLiveness, FirmwareVerb,
     PendingLinkView, RESET_NEEDS_USB, UiAction, UiExampleCard, UiPackageCard, UiRuntimeBand,
-    UiStatus, blocked_erase_action, device_escape_action_for, device_firmware_line,
+    UiStatus, UiUnlockOffer, blocked_erase_action, device_escape_action_for, device_firmware_line,
     device_identity_line, device_status_kind, firmware_face_preview_sentence, firmware_verb,
     pending_escape_action, pending_firmware_line, pending_identity_rows,
 };
@@ -178,12 +178,12 @@ pub(crate) fn DeviceRosterCard(
     /// why a real card's height is unchanged by this phase.
     #[props(default)]
     runtime: Option<UiRuntimeBand>,
-    /// The device.s access facts (BLE M6): the login line over Bluetooth,
-    /// and the device access panel where this link may write the store.
+    /// The device's access facts: the unlock line over Bluetooth, and the
+    /// Connections group ("Who has access" where this link may see it).
     /// Joined at the app view; `None` for a board with neither.
     #[props(default)]
     access: Option<lpa_studio_core::UiDeviceAccess>,
-    /// Stories only: mount the Bluetooth panel open.
+    /// Stories only: mount "Who has access" open.
     #[props(default)]
     access_panel_open: bool,
     /// Open the header's ⋯ menu immediately (stories only).
@@ -278,8 +278,7 @@ pub(crate) fn DeviceRosterCard(
         None => device_line_text(&card, busy_zone),
     };
     let on_access = super::access_ui_context::access_handler();
-    let log_in = access.as_ref().and_then(|access| access.log_in.clone());
-    let access_panel = access.as_ref().and_then(|access| access.panel.clone());
+    let unlock = access.as_ref().and_then(|access| access.unlock);
     // The fault takes the project line only when no project work is
     // running: the push's own narration outranks it (the terminal keeps the
     // fault either way).
@@ -544,40 +543,48 @@ pub(crate) fn DeviceRosterCard(
             // activity's Cancel, in every state — including Forget
             // mid-activity, which the shipped system could not do.
             footer { class: device_zone_class(),
-                // The info line, with the access verbs at its end (BLE M6):
-                // "Unlock" / "Unlock for edit" opens the password sheet, and
-                // "Bluetooth" opens the device access panel in the top
-                // layer. On the LINE rather than in the verb row, because a
-                // Bluetooth card's row already holds Reset-with-its-reason,
-                // Disconnect and Forget, and at 375 px a fourth chip
-                // overlaps them; the line truncates its freshness first.
+                // Connections (spike §1): USB, the Bluetooth switch, and
+                // "Who has access" where this link may see it. Only a board
+                // Studio talks to as LightPlayer has one.
+                if let Some(access) = access.clone().filter(|_| linked) {
+                    super::connections_group::ConnectionsGroup {
+                        device,
+                        device_name: card.title.clone(),
+                        access,
+                        on_access,
+                        who_open: access_panel_open,
+                    }
+                }
+                // Unlocked for play only: say what editing needs, and the
+                // way to it (the sheet), where the edit verbs are.
+                if idle && linked && unlock == Some(UiUnlockOffer::PlayOnly) {
+                    div { class: "tw:flex tw:min-w-0 tw:flex-wrap tw:items-center tw:gap-x-3 tw:gap-y-1.5 tw:rounded tw:border tw:border-status-warning-border tw:bg-status-warning-bg tw:px-2.5 tw:py-2",
+                        span { class: "tw:min-w-0 tw:flex-1 tw:text-xs tw:leading-snug tw:text-status-warning-foreground",
+                            "{lpa_studio_core::PLAY_ONLY_SENTENCE}"
+                        }
+                        button {
+                            class: quiet_action_class(),
+                            r#type: "button",
+                            onclick: move |_| on_access.call(lpa_studio_core::AccessCommand::LogIn { device }),
+                            "Enter a password"
+                        }
+                    }
+                }
+                // The info line, with "Unlock" at its end when the device
+                // needs a password (it opens the sheet). On the LINE rather
+                // than in the verb row, because a Bluetooth card's row
+                // already holds Reset-with-its-reason, Disconnect and
+                // Forget; the line truncates its freshness first.
                 div { class: "tw:flex tw:min-w-0 tw:items-center tw:gap-2",
                     div { class: "ux-armed-dim tw:grid tw:min-w-0 tw:flex-1",
                         p { class: info_line_class(), title: "{device_line}", "{device_line}" }
                     }
-                    if idle && linked {
-                        if let Some(label) = log_in.clone() {
-                            button {
-                                class: LINE_VERB_CLASS,
-                                r#type: "button",
-                                onclick: move |_| on_access.call(lpa_studio_core::AccessCommand::LogIn { device }),
-                                "{label}"
-                            }
-                        }
-                        if let Some(panel) = access_panel.clone() {
-                            DetailPopover {
-                                icon: StudioIconName::More,
-                                label: "Bluetooth".to_string(),
-                                title: "Who can reach this piece over Bluetooth".to_string(),
-                                placement: PopoverPlacement::TopEnd,
-                                initially_open: access_panel_open,
-                                trigger: rsx! { "Bluetooth" },
-                                trigger_class: LINE_VERB_CLASS.to_string(),
-                                trigger_open_class: LINE_VERB_CLASS.to_string(),
-                                crate::base::DetailSection {
-                                    super::device_access_panel::DeviceAccessPanel { panel, on_access }
-                                }
-                            }
+                    if idle && linked && unlock == Some(UiUnlockOffer::Locked) {
+                        button {
+                            class: LINE_VERB_CLASS,
+                            r#type: "button",
+                            onclick: move |_| on_access.call(lpa_studio_core::AccessCommand::LogIn { device }),
+                            "Unlock"
                         }
                     }
                 }
@@ -726,8 +733,8 @@ pub(crate) fn DeviceRenameSection(
 /// (`CARD_MENU_TRIGGER_CLASS`), so the two cards' menus read as one
 /// control. Resets UA button chrome itself — Tailwind preflight is not
 /// loaded.
-/// A verb that rides the Device zone's 17px info line (BLE M6's "Unlock"
-/// and "Bluetooth"): text with a dotted underline, no chrome, so it fits
+/// A verb that rides the Device zone's 17px info line ("Unlock", when a
+/// device needs a password): text with a dotted underline, no chrome, so it fits
 /// the line's height and reads as something to press.
 const LINE_VERB_CLASS: &str = "tw:flex-none tw:cursor-pointer tw:appearance-none tw:border-0 tw:bg-transparent tw:p-0 tw:text-xs tw:font-semibold tw:leading-[17px] tw:text-strong-foreground tw:underline tw:decoration-dotted tw:underline-offset-2 tw:hover:decoration-solid ux-focus-ring";
 

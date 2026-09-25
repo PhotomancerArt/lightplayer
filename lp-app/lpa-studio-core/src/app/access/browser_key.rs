@@ -98,6 +98,18 @@ impl BrowserKey {
         true
     }
 
+    /// Take `name` only while the key still wears the placeholder it was
+    /// minted with ([`FALLBACK_BROWSER_NAME`]) — the edge's name for when
+    /// it does not know yet who is signed in (offline), which must never
+    /// overwrite a signed-in default like "Yona's Mac". Returns whether the
+    /// name changed.
+    pub fn offer_placeholder_name(&mut self, name: &str) -> bool {
+        if self.name != FALLBACK_BROWSER_NAME {
+            return false;
+        }
+        self.offer_default_name(name)
+    }
+
     /// The user renamed it. A blank name is refused (the name is how people
     /// recognise it on a device). Returns whether the name changed.
     pub fn rename(&mut self, name: &str) -> bool {
@@ -168,5 +180,18 @@ mod tests {
         assert!(key.rename("Studio laptop"));
         assert!(!key.offer_default_name("Chrome on Mac"));
         assert_eq!(key.installable().label, "Studio laptop");
+    }
+
+    /// Offline at boot, the edge offers "<Browser> on <platform>": it names
+    /// a fresh key, and never overwrites a signed-in default.
+    #[test]
+    fn a_placeholder_name_only_replaces_the_placeholder() {
+        let mut key = BrowserKey::mint(&counter(), FALLBACK_BROWSER_NAME);
+        assert!(key.offer_placeholder_name("Chrome on Mac"));
+        assert_eq!(key.installable().label, "Chrome on Mac");
+        let mut named = BrowserKey::mint(&counter(), FALLBACK_BROWSER_NAME);
+        assert!(named.offer_default_name("Yona's Mac"));
+        assert!(!named.offer_placeholder_name("Chrome on Mac"));
+        assert_eq!(named.installable().label, "Yona's Mac");
     }
 }
