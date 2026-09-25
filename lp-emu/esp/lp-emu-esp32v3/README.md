@@ -1319,11 +1319,11 @@ is a **run parameter** and always was.
 ### The heap gate, read from this machine
 
 *M5 P5. `just heap-budget-check-chips-v3`, `scripts/heap-budget-check.sh`,
-`scripts/heap-budget-record.json`.*
+`scripts/heap-budget-record/chips/esp32v3.json`.*
 
-`scripts/heap-budget-record.json`'s `chips` section is what the *firmware*
+`scripts/heap-budget-record/chips/` is what the *firmware*
 costs, as opposed to what a project costs, and since M5 P5 the classic has a
-row in it beside the C6's. The shipped image (`esp32,server,float-f32`) is
+file there beside the C6's. The shipped image (`esp32,server,float-f32`) is
 direct-loaded here and read from its first heartbeat triple:
 
 ```text

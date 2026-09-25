@@ -367,7 +367,7 @@ mod tests {
     #[test]
     fn fluid_node_loaded_from_project_produces_sampleable_visual_product() {
         let fs = LpFsMemory::new();
-        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 10\n}\n")
+        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 11\n}\n")
             .expect("container manifest");
         fs.write_file(
             "/module.json".as_path(),
@@ -477,7 +477,7 @@ mod tests {
     #[test]
     fn fluid_node_consumes_compute_emitter_map_through_bus() {
         let fs = LpFsMemory::new();
-        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 10\n}\n")
+        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 11\n}\n")
             .expect("container manifest");
         fs.write_file(
             "/module.json".as_path(),

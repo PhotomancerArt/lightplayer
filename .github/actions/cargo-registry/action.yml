@@ -1,0 +1,64 @@
+name: Cargo registry cache (one entry, restore-only)
+description: >
+  Restore the repo's single cargo-registry cache entry (~/.cargo/registry and
+  ~/.cargo/git/db) keyed on the root Cargo.lock. Never saves: the lint job on
+  main is the one writer (see pre-merge.yml's lint job).
+
+# WHY ONE ENTRY, AND WHY RESTORE-ONLY
+#
+# The registry is toolchain- and arch-independent: the same .crate files and
+# sparse-index files serve the nightly jobs, the Espressif-fork jobs, the ARM
+# job and the deploy workflows. Until 2026-09-25 each "family" still had its
+# own Swatinem/rust-cache entry (x64-nightly, xtensa-fw, xtensa-host,
+# emu-esp32v3, emu-esp32s3, arm64-nightly, deploy), ~517 MB each, and
+# rust-cache's key hashes every Cargo.toml — so any manifest edit on main
+# re-saved all of them: ~3.1 GB of identical registry per such merge, against
+# a 10 GB repo budget. Measured 2026-09-25 02:15 UTC: 10.86 GB held, the
+# oldest last-access in the whole repo 13 minutes old, i.e. anything not
+# touched every ~15 min was evicted (the emu-ref and stories entries among
+# them). docs/debt/actions-cache-budget.md has the numbers.
+#
+# Key: `cargo-registry-v1-<sha256 of Cargo.lock>`, so only a lockfile change
+# (not a feature or manifest-comment edit) makes a new generation. Restore
+# falls back to the newest `cargo-registry-v1-` entry, so a PR that changes
+# Cargo.lock still restores nearly everything and cargo downloads the rest.
+# `exact: true` disables that fallback — the writer uses it so the entry it
+# saves holds exactly what `cargo fetch` wants for this lockfile, instead of
+# accreting every old crate version forever.
+
+inputs:
+  lockfile:
+    description: Path to the Cargo.lock the key is derived from.
+    default: lp2025/Cargo.lock
+  exact:
+    description: "'true' restores only an exact-key match (the writer's mode)."
+    default: "false"
+
+outputs:
+  key:
+    description: The primary key for this lockfile.
+    value: ${{ steps.key.outputs.key }}
+  cache-hit:
+    description: "'true' when the exact key was restored."
+    value: ${{ steps.restore.outputs.cache-hit }}
+
+runs:
+  using: composite
+  steps:
+    - name: Registry cache key
+      id: key
+      shell: bash
+      run: |
+        h="$(sha256sum "${{ inputs.lockfile }}" | cut -c1-16)"
+        echo "key=cargo-registry-v1-$h" >> "$GITHUB_OUTPUT"
+
+    - name: Restore cargo registry
+      id: restore
+      uses: actions/cache/restore@v4
+      with:
+        path: |
+          ~/.cargo/registry/index/
+          ~/.cargo/registry/cache/
+          ~/.cargo/git/db/
+        key: ${{ steps.key.outputs.key }}
+        restore-keys: ${{ inputs.exact != 'true' && 'cargo-registry-v1-' || '' }}

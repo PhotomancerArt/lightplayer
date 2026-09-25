@@ -4259,6 +4259,20 @@ fn an_effect_that_outlives_its_activity_gives_the_wire_back_and_the_pump_resumes
     });
     let device_id = bench.view().devices[0].id;
 
+    // The precondition the fresh-window assertion below rests on, enforced
+    // rather than assumed: every question the board was asked is answered
+    // and on the wire BEFORE the push borrows it. Identify settles on the
+    // board's unsolicited boot hello while its own hello REQUEST is still in
+    // flight, and the fake's server answers that on a real thread in real
+    // time. On a loaded runner the answer was still inside the server when
+    // the push took the wire; the reopen flushes the wire, not the server,
+    // so the late hello landed in the fresh window and the card read Ready
+    // (CI, 2026-09-25, twice in 30 minutes; 11/96 under local load).
+    // docs/defects/2026-09-25-a-late-hello-answer-reaches-the-fresh-window.md
+    bench.run_until(&tasks, "every request to be answered onto the wire", |_| {
+        device.unanswered_requests() == 0
+    });
+
     // A push that never completes: it takes the wire and keeps it.
     bench.push_gesture(device_id, bundled_example());
     bench.run_until(&tasks, "the push to be visibly running", |bench| {

@@ -29,8 +29,8 @@ on:
 # of merge-to-green.
 #
 # Two main runs in flight share state; each case is fine by construction:
-#   - rust-cache and the stories `actions/cache/save`: same key from both,
-#     the second save logs "already exists" and the job continues.
+#   - the cargo-registry and stories `actions/cache/save`: same key from
+#     both, the second save logs "already exists" and the job continues.
 #   - sccache: content-addressed, concurrent writes are fine.
 #   - the stories snapshot push: each run pushes its own `sha-<sha>` ref (the
 #     baseline authority — story-baseline-lookup.mjs reads only
@@ -48,6 +48,17 @@ env:
   RISC_V_TARGET: riscv32imac-unknown-none-elf
   # Work around rustup rename failures on overlay/cross-device filesystems (ARM runners, Docker)
   RUSTUP_PERMIT_COPY_RENAME: 1
+  # sccache writes objects on main only; PR runs read main's objects and
+  # write none. Only jobs with SCCACHE_GHA_ENABLED consult it. The mode
+  # exists from sccache 0.16 (the `version:` pin on every sccache-action
+  # step keeps it honoured). Why: a PR's entries are visible to that PR
+  # alone, yet they count against the repo's one 10 GB budget — PR #811
+  # wrote 1.4 GB in two hours on 2026-09-25, evicting main's baseline that
+  # every other PR reads. Cost: a re-push of the same PR recompiles the
+  # crates that PR changed (and their dependents) instead of hitting its
+  # own previous push. See the budget note above `jobs:` and
+  # docs/debt/actions-cache-budget.md.
+  SCCACHE_GHA_RW_MODE: ${{ github.ref == 'refs/heads/main' && 'READ_WRITE' || 'READ_ONLY' }}
 
 # CI shape (2026-07-28 restructure — measured baseline: Validate was 39-52 min
 # and dominated every run; 2026-09-08 restructure — baseline in the
@@ -83,8 +94,9 @@ env:
 # fresh checkouts), so before 2026-07-28 every run recompiled all ~64
 # first-party crates from scratch — a no-op PR still paid 25-45 min. sccache
 # (GHA cache backend) now caches individual rustc invocations
-# content-addressed, workspace members included, and writes on every run (PRs
-# too), so unchanged crates are cache hits regardless of mtimes. It does not
+# content-addressed, workspace members included, so unchanged crates are
+# cache hits regardless of mtimes. It writes on main only (PRs read main's
+# objects; `SCCACHE_GHA_RW_MODE` in `env:` above says why). It does not
 # cache build-script execution, linking, or clippy-driver lints of workspace
 # crates (deps still hit). CARGO_INCREMENTAL=0 because sccache cannot cache
 # incremental compiles (and CI never benefited: the incremental state was
@@ -108,9 +120,21 @@ env:
 # The Actions-cache budget (10 GB per repo, LRU) is the constraint every
 # cache decision here answers to. On 2026-09-08 the repo held 11.7 GB in
 # 5,597 entries: 5.8 GB of it was twelve per-job rust-cache copies of the
-# same cargo registry (now one entry per toolchain family, see the lint
-# job's cache step), 4.3 GB sccache objects, 1.07 GB the stories job's
+# same cargo registry, 4.3 GB sccache objects, 1.07 GB the stories job's
 # entry, which that pressure evicted on two of three main runs that day.
+# That fix (one rust-cache entry per toolchain family) was not enough: on
+# 2026-09-25 the repo held 10.86 GB and its OLDEST last-access was 13
+# minutes old — anything not read every ~15 min was gone, the 26 MB
+# emu-ref entry and the stories entry included. The writers were seven
+# ~517 MB registry families re-saved together on every Cargo.toml edit
+# reaching main (~3.1 GB a time) and PR-scoped sccache objects (1.4 GB
+# from one PR in two hours) that no other ref can even read. The rules now:
+#   - every cache is saved from main only; PRs restore main's entries;
+#   - one entry per purpose: ONE cargo registry (lint job writes it, every
+#     job and both deploy workflows restore it), sccache objects, the
+#     stories bundle, Chrome for Testing, the emu-ref builds (the one
+#     exception: a PR adding a reference pin may save its 26 MB entry).
+# Steady state, and the arithmetic, is docs/debt/actions-cache-budget.md.
 # Re-check the listing (`gh api repos/<r>/actions/caches`) before adding any
 # entry over ~100 MB; what it displaces matters more than what it saves.
 #
@@ -196,6 +220,13 @@ jobs:
               - 'lp-core/**'
               - 'third_party/**'
               - 'scripts/**'
+              # The shipped example shaders: `test-filetests` runs the
+              # example-shader compile gate (`just test-example-shaders`),
+              # which compiles every catalog/ + projects/test/ shader on every
+              # filetest target — so a shader-only content edit is a shader
+              # change (docs/debt/example-shaders-not-compile-gated.md).
+              - 'catalog/**'
+              - 'projects/test/**'
               - 'Cargo.toml'
               - 'Cargo.lock'
               - 'rust-toolchain.toml'
@@ -358,6 +389,16 @@ jobs:
               # thing that decides WHICH BYTES the gates run against — ran no
               # gate at all unless it happened to touch something else.
               - 'scripts/emu/**'
+              # The C6's heap-budget ratchet (`heap-budget-chips`) rides this
+              # filter, so the gate's own script, its ELF layout reader and
+              # the C6's record file must fire it — until 2026-09-23 none of
+              # them did, and a C6 record edit ran no C6 chip gate at all. Only
+              # THIS chip's file: since the record split each chip's
+              # re-baseline touches its own file, and the other two chips'
+              # files fire their own jobs.
+              - 'scripts/heap-budget-check.sh'
+              - 'scripts/heap-budget-stack-layout.py'
+              - 'scripts/heap-budget-record/chips/esp32c6.json'
               - 'justfile'
               - '.github/workflows/pre-merge.yml'
             # emu_esp32v3 is the same shape for the CLASSIC ESP32's machine
@@ -415,7 +456,8 @@ jobs:
               # its recorded figures change. Neither filter covered them
               # before, which meant a record edit ran no chip gate at all.
               - 'scripts/heap-budget-check.sh'
-              - 'scripts/heap-budget-record.json'
+              - 'scripts/heap-budget-stack-layout.py'
+              - 'scripts/heap-budget-record/chips/esp32v3.json'
               - 'justfile'
               - '.github/workflows/pre-merge.yml'
               - '.github/actions/**'
@@ -448,7 +490,8 @@ jobs:
               # heap job has none (DD71). So the gate has to fire when the
               # gate's own script or its recorded figures change.
               - 'scripts/heap-budget-check.sh'
-              - 'scripts/heap-budget-record.json'
+              - 'scripts/heap-budget-stack-layout.py'
+              - 'scripts/heap-budget-record/chips/esp32s3.json'
               - 'justfile'
               - '.github/workflows/pre-merge.yml'
               - '.github/actions/**'
@@ -526,40 +569,45 @@ jobs:
 
       - name: Run sccache
         uses: mozilla/sccache-action@v0.0.10
-
-      # One rust-cache entry per toolchain family (`shared-key`), not per
-      # job. With cache-targets false the entry IS the cargo registry, and
-      # keying on the job id (the default) had produced twelve ~500 MB copies
-      # of the same registry — 5.8 GB of the repo's 10 GB Actions-cache
-      # budget, measured 2026-09-08 at 11.7 GB used — which is what kept
-      # evicting the stories job's 1 GB entry (missed on 2 of 3 main runs
-      # that day, 620 s of `cargo install` each time) and everyone's sccache
-      # objects. The x64 nightly jobs share `x64-nightly`, the Xtensa
-      # firmware pair `xtensa-fw`, validate-xtensa `xtensa-host`, the ARM
-      # job `arm64-nightly`. rust-cache still adds an env hash (installed
-      # toolchains + CARGO_*/RUST* env), so a family's members keep those
-      # identical or the key silently splits. On main every member attempts
-      # the save; the first wins and the rest log "already exists". save-if
-      # main-only: GitHub scopes cache RESTORE so a PR can only see its own
-      # ref's caches plus main's, and evicts LRU past the 10GB repo cap;
-      # saving only on main keeps one shared warm baseline every PR can
-      # restore.
-      - name: Cache cargo registry and build artifacts
-        uses: Swatinem/rust-cache@v2
         with:
-          workspaces: lp2025 -> target
-          # target/ itself is NOT cached: sccache re-materializes crate
-          # compiles content-addressed (91% hit rate measured on this PR's
-          # warm run), and the 2-3GB-per-job target payloads pushed the repo
-          # past its 10GB Actions-cache budget, which LRU-evicts into
-          # thrash. Build scripts re-run each time — small next to the
-          # eviction cost. The registry stays cached; ~/.cargo/bin does not
-          # (cache-bin false): every tool comes prebuilt via cargo-binstall
-          # in seconds, so a shared entry never depends on which job saved it.
-          cache-targets: false
-          cache-bin: false
-          shared-key: x64-nightly
-          save-if: ${{ github.ref == 'refs/heads/main' }}
+          version: v0.18.0
+
+      # ONE cargo-registry entry for the whole repo, and THIS job on main is
+      # its only writer; every other job (and both deploy workflows) restores
+      # it read-only through .github/actions/cargo-registry, whose header has
+      # the full story. Short form: the registry is the same bytes for every
+      # toolchain and arch, yet it used to live in seven rust-cache "family"
+      # entries of ~517 MB each, re-saved together on every Cargo.toml edit
+      # that reached main (~3.1 GB a time) — which, with the sccache write
+      # rate, had shrunk the repo's LRU horizon to ~15 minutes on 2026-09-25
+      # (docs/debt/actions-cache-budget.md).
+      #
+      # On main the restore is exact-key only, and on a miss `cargo fetch`
+      # downloads everything this lockfile resolves to (all targets) before
+      # the save, so the one entry is a fresh superset for every job instead
+      # of whichever job happened to save first, and never accretes old crate
+      # versions. It saves before linting so a red lint still publishes it.
+      - name: Restore cargo registry
+        id: registry
+        uses: ./lp2025/.github/actions/cargo-registry
+        with:
+          exact: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: Fetch the whole lockfile (main, registry miss)
+        if: github.ref == 'refs/heads/main' && steps.registry.outputs.cache-hit != 'true'
+        run: cd lp2025 && cargo fetch --locked
+
+      # Paths must match the restore action's byte for byte: they are part of
+      # the cache version, and a mismatch silently never restores.
+      - name: Save cargo registry (main only)
+        if: github.ref == 'refs/heads/main' && steps.registry.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+          key: ${{ steps.registry.outputs.key }}
 
       - name: Install just
         uses: extractions/setup-just@v3
@@ -640,17 +688,12 @@ jobs:
 
       - name: Run sccache
         uses: mozilla/sccache-action@v0.0.10
-
-      # Shared `xtensa-fw` entry with firmware-esp32v3; see the lint job's
-      # cache step for the shared-key rationale.
-      - name: Cache cargo registry and build artifacts
-        uses: Swatinem/rust-cache@v2
         with:
-          workspaces: lp2025 -> target
-          cache-targets: false
-          cache-bin: false
-          shared-key: xtensa-fw
-          save-if: ${{ github.ref == 'refs/heads/main' }}
+          version: v0.18.0
+
+      # The repo's one registry entry, read-only (see the lint job).
+      - name: Restore cargo registry
+        uses: ./lp2025/.github/actions/cargo-registry
 
       - name: Install just
         uses: extractions/setup-just@v3
@@ -744,19 +787,14 @@ jobs:
 
       - name: Run sccache
         uses: mozilla/sccache-action@v0.0.10
-
-      # `lp2025 -> target`, mirroring firmware-xtensa: this crate is a
-      # repo-root workspace member (M3-P1 folded it in) and writes into the
-      # shared root target/, so the cache key must be the repo root. Shared
-      # `xtensa-fw` entry with firmware-xtensa; see the lint job's cache step.
-      - name: Cache cargo registry and build artifacts
-        uses: Swatinem/rust-cache@v2
         with:
-          workspaces: lp2025 -> target
-          cache-targets: false
-          cache-bin: false
-          shared-key: xtensa-fw
-          save-if: ${{ github.ref == 'refs/heads/main' }}
+          version: v0.18.0
+
+      # The repo's one registry entry, read-only (see the lint job). This
+      # crate is a repo-root workspace member (M3-P1 folded it in), so the
+      # root Cargo.lock covers it.
+      - name: Restore cargo registry
+        uses: ./lp2025/.github/actions/cargo-registry
 
       - name: Install just
         uses: extractions/setup-just@v3
@@ -871,18 +909,12 @@ jobs:
       # workflow by firmware-size.
       - name: Run sccache
         uses: mozilla/sccache-action@v0.0.10
-
-      # `xtensa-host` entry of its own: this job installs nightly AND the esp
-      # fork, so its env hash never matches the firmware pair's anyway; see
-      # the lint job's cache step for the shared-key rationale.
-      - name: Cache cargo registry and build artifacts
-        uses: Swatinem/rust-cache@v2
         with:
-          workspaces: lp2025 -> target
-          cache-targets: false
-          cache-bin: false
-          shared-key: xtensa-host
-          save-if: ${{ github.ref == 'refs/heads/main' }}
+          version: v0.18.0
+
+      # The repo's one registry entry, read-only (see the lint job).
+      - name: Restore cargo registry
+        uses: ./lp2025/.github/actions/cargo-registry
 
       - name: Install just
         uses: extractions/setup-just@v3
@@ -1098,9 +1130,10 @@ jobs:
     if: needs.detect-changes.outputs.firmware == 'true'
     env:
       CARGO_INCREMENTAL: "0"
-      # The firmware profile ignores these two; they are here so this job's
-      # rust-cache env hash matches the rest of the `x64-nightly` family
-      # (see the lint job's cache step).
+      # The firmware profile ignores these two. They were added to match a
+      # rust-cache env hash that no longer exists (the registry is one
+      # entry now, see the lint job); they stay because sccache hashes
+      # CARGO_* env too, and dropping them would re-key this job's objects.
       CARGO_PROFILE_DEV_DEBUG: "false"
       CARGO_PROFILE_TEST_DEBUG: "false"
       SCCACHE_GHA_ENABLED: "true"
@@ -1131,16 +1164,12 @@ jobs:
 
       - name: Run sccache
         uses: mozilla/sccache-action@v0.0.10
-
-      # Shared `x64-nightly` entry; see the lint job's cache step.
-      - name: Cache cargo registry and build artifacts
-        uses: Swatinem/rust-cache@v2
         with:
-          workspaces: lp2025 -> target
-          cache-targets: false
-          cache-bin: false
-          shared-key: x64-nightly
-          save-if: ${{ github.ref == 'refs/heads/main' }}
+          version: v0.18.0
+
+      # The repo's one registry entry, read-only (see the lint job).
+      - name: Restore cargo registry
+        uses: ./lp2025/.github/actions/cargo-registry
 
       - name: Install just
         uses: extractions/setup-just@v3
@@ -1278,32 +1307,18 @@ jobs:
 
       - name: Run sccache
         uses: mozilla/sccache-action@v0.0.10
+        with:
+          version: v0.18.0
 
-      # Shared `x64-nightly` rust-cache entry; save-if main-only (see the lint
-      # job's cache step for both). The reference builds happen inside
+      # The repo's one registry entry, read-only (see the lint job). The
+      # reference builds happen inside
       # detached worktrees under lp2025/target/emu-ref/ with their own target
       # dirs and `--remap-path-prefix` flags, and sccache MISSES them in
       # practice (measured 2026-09-23: the pinned release lp-cli alone was
       # 8m19s on every run) — which is what the reference-build cache below
       # is for.
-      #
-      # cache-on-failure (2026-09-08): this job's own post-cache save step
-      # was silently skipped on every run this job overran on, because
-      # rust-cache's default post-if is `success()` — a step failure or a
-      # timeout cancellation both make that false, so a cancelled run (see
-      # timeout-minutes above) never published this job's cache, and main
-      # ran cold on every subsequent run. cache-on-failure widens the
-      # post-if to `success() || cache-on-failure`, so a future overrun
-      # still saves what got built before the cutoff.
-      - name: Cache cargo registry and build artifacts
-        uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: lp2025 -> target
-          cache-targets: false
-          cache-bin: false
-          shared-key: x64-nightly
-          save-if: ${{ github.ref == 'refs/heads/main' }}
-          cache-on-failure: true
+      - name: Restore cargo registry
+        uses: ./lp2025/.github/actions/cargo-registry
 
       - name: Install just
         uses: extractions/setup-just@v3
@@ -1681,22 +1696,12 @@ jobs:
 
       - name: Run sccache
         uses: mozilla/sccache-action@v0.0.10
-
-      # Its own shared-key: this job builds both a host test tree on the
-      # repo nightly AND an Xtensa firmware on the fork, so it matches
-      # neither `x64-nightly` nor `xtensa-fw` cleanly and would evict from
-      # whichever it borrowed. save-if main-only, cache-on-failure for the
-      # reason emu-c6's step gives: a cancelled run must still publish what
-      # it built.
-      - name: Cache cargo registry and build artifacts
-        uses: Swatinem/rust-cache@v2
         with:
-          workspaces: lp2025 -> target
-          cache-targets: false
-          cache-bin: false
-          shared-key: emu-esp32v3
-          save-if: ${{ github.ref == 'refs/heads/main' }}
-          cache-on-failure: true
+          version: v0.18.0
+
+      # The repo's one registry entry, read-only (see the lint job).
+      - name: Restore cargo registry
+        uses: ./lp2025/.github/actions/cargo-registry
 
       - name: Install just
         uses: extractions/setup-just@v3
@@ -1962,20 +1967,12 @@ jobs:
 
       - name: Run sccache
         uses: mozilla/sccache-action@v0.0.10
-
-      # Its own shared-key, for the classic job's reason: this job builds both
-      # a host test tree on the repo nightly AND an Xtensa firmware on the
-      # fork, so it matches neither `x64-nightly` nor `xtensa-fw` cleanly and
-      # would evict from whichever it borrowed.
-      - name: Cache cargo registry and build artifacts
-        uses: Swatinem/rust-cache@v2
         with:
-          workspaces: lp2025 -> target
-          cache-targets: false
-          cache-bin: false
-          shared-key: emu-esp32s3
-          save-if: ${{ github.ref == 'refs/heads/main' }}
-          cache-on-failure: true
+          version: v0.18.0
+
+      # The repo's one registry entry, read-only (see the lint job).
+      - name: Restore cargo registry
+        uses: ./lp2025/.github/actions/cargo-registry
 
       - name: Install just
         uses: extractions/setup-just@v3
@@ -2085,19 +2082,12 @@ jobs:
 
       - name: Run sccache
         uses: mozilla/sccache-action@v0.0.10
-
-      # Shared `x64-nightly` rust-cache entry; save-if main-only (see the lint
-      # job's cache step for both). cache-on-failure for the same reason as
-      # emu-c6: an overrun must still publish what it built.
-      - name: Cache cargo registry and build artifacts
-        uses: Swatinem/rust-cache@v2
         with:
-          workspaces: lp2025 -> target
-          cache-targets: false
-          cache-bin: false
-          shared-key: x64-nightly
-          save-if: ${{ github.ref == 'refs/heads/main' }}
-          cache-on-failure: true
+          version: v0.18.0
+
+      # The repo's one registry entry, read-only (see the lint job).
+      - name: Restore cargo registry
+        uses: ./lp2025/.github/actions/cargo-registry
 
       - name: Install just
         uses: extractions/setup-just@v3
@@ -2183,25 +2173,12 @@ jobs:
 
       - name: Run sccache
         uses: mozilla/sccache-action@v0.0.10
-
-      # Shared `x64-nightly` entry; save-if main-only (see the lint job's
-      # cache step for both).
-      - name: Cache cargo registry and build artifacts
-        uses: Swatinem/rust-cache@v2
         with:
-          workspaces: lp2025 -> target
-          # target/ itself is NOT cached: sccache re-materializes crate
-          # compiles content-addressed (91% hit rate measured on this PR's
-          # warm run), and the 2-3GB-per-job target payloads pushed the repo
-          # past its 10GB Actions-cache budget, which LRU-evicts into
-          # thrash. Build scripts re-run each time — small next to the
-          # eviction cost. The registry stays cached; ~/.cargo/bin does not
-          # (cache-bin false): every tool comes prebuilt via cargo-binstall
-          # in seconds, so a shared entry never depends on which job saved it.
-          cache-targets: false
-          cache-bin: false
-          shared-key: x64-nightly
-          save-if: ${{ github.ref == 'refs/heads/main' }}
+          version: v0.18.0
+
+      # The repo's one registry entry, read-only (see the lint job).
+      - name: Restore cargo registry
+        uses: ./lp2025/.github/actions/cargo-registry
 
       - name: Install just
         uses: extractions/setup-just@v3
@@ -2297,26 +2274,14 @@ jobs:
 
       - name: Run sccache
         uses: mozilla/sccache-action@v0.0.10
-
-      # `arm64-nightly` entry of its own (a different host arch is a
-      # different registry payload). save-if main-only: see the lint job's
-      # cache step for the rationale.
-      - name: Cache cargo registry and build artifacts
-        uses: Swatinem/rust-cache@v2
         with:
-          workspaces: lp2025 -> target
-          # target/ itself is NOT cached: sccache re-materializes crate
-          # compiles content-addressed (91% hit rate measured on this PR's
-          # warm run), and the 2-3GB-per-job target payloads pushed the repo
-          # past its 10GB Actions-cache budget, which LRU-evicts into
-          # thrash. Build scripts re-run each time — small next to the
-          # eviction cost. The registry stays cached; ~/.cargo/bin does not
-          # (cache-bin false): every tool comes prebuilt via cargo-binstall
-          # in seconds, so a shared entry never depends on which job saved it.
-          cache-targets: false
-          cache-bin: false
-          shared-key: arm64-nightly
-          save-if: ${{ github.ref == 'refs/heads/main' }}
+          version: v0.18.0
+
+      # The repo's one registry entry, read-only (see the lint job). The
+      # registry is .crate files and index JSON, not host code, so the entry
+      # the x64 lint job saves serves this ARM runner too.
+      - name: Restore cargo registry
+        uses: ./lp2025/.github/actions/cargo-registry
 
       - name: Install just
         uses: extractions/setup-just@v3
@@ -2379,25 +2344,12 @@ jobs:
 
       - name: Run sccache
         uses: mozilla/sccache-action@v0.0.10
-
-      # Shared `x64-nightly` entry; save-if main-only (see the lint job's
-      # cache step for both).
-      - name: Cache cargo registry and build artifacts
-        uses: Swatinem/rust-cache@v2
         with:
-          workspaces: lp2025 -> target
-          # target/ itself is NOT cached: sccache re-materializes crate
-          # compiles content-addressed (91% hit rate measured on this PR's
-          # warm run), and the 2-3GB-per-job target payloads pushed the repo
-          # past its 10GB Actions-cache budget, which LRU-evicts into
-          # thrash. Build scripts re-run each time — small next to the
-          # eviction cost. The registry stays cached; ~/.cargo/bin does not
-          # (cache-bin false): every tool comes prebuilt via cargo-binstall
-          # in seconds, so a shared entry never depends on which job saved it.
-          cache-targets: false
-          cache-bin: false
-          shared-key: x64-nightly
-          save-if: ${{ github.ref == 'refs/heads/main' }}
+          version: v0.18.0
+
+      # The repo's one registry entry, read-only (see the lint job).
+      - name: Restore cargo registry
+        uses: ./lp2025/.github/actions/cargo-registry
 
       - name: Install just
         uses: extractions/setup-just@v3
@@ -2887,6 +2839,13 @@ jobs:
   # on, so a main run is the canary; this job makes it say which PRs landed
   # since the last green main run, so the diagnosis starts in the right place.
   # It never runs on a pull_request, and it exits 0: the run is already red.
+  #
+  # `needs:` below must list EVERY other job in this file: `failure()` only
+  # sees the jobs named here, so a job left out can go red after this job has
+  # already been skipped. `just lint-red-main-needs`
+  # (scripts/ci/check-red-main-needs.py, part of `just check-lint`, so the
+  # Lint job runs it) fails when one is missing — add a new job here when
+  # you add it to the workflow.
   red-main-suspects:
     name: Red main suspects
     runs-on: ubuntu-24.04
