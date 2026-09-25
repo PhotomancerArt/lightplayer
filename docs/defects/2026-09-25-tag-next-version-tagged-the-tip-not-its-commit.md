@@ -1,7 +1,7 @@
 ---
 status: fixed
 found: 2026-09-25      # ci — a stranded production deploy while shipping #795
-fixed: this change
+fixed: 24bb5f520
 area: scripts/tag-next-version.sh + .github/workflows/main-push.yml
 class: assumed-context
 related:
