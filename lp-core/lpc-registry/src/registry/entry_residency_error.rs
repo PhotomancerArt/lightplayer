@@ -19,10 +19,11 @@ pub enum EntryResidencyError {
         playlist: ArtifactLocation,
         entry: u32,
     },
-    /// Unloading would drop artifacts that carry pending overlay edits. A
-    /// later commit could not write them (their defs would no longer be in
-    /// the inventory), so the unload is refused until they are committed or
-    /// discarded. `entry` is the entry the refused call targeted (for
+    /// Unloading would drop artifacts that carry pending overlay edits a
+    /// commit would write. A later commit could not write them (their defs
+    /// would no longer be in the inventory), so the unload is refused until
+    /// they are committed or discarded. Transient edits (Debug-role
+    /// overrides, produced paths) never refuse: the unload drops them. `entry` is the entry the refused call targeted (for
     /// [`crate::ProjectRegistry::make_only_resident`], the one to load);
     /// `artifacts` are the def files that would have been unloaded.
     PendingEdits {

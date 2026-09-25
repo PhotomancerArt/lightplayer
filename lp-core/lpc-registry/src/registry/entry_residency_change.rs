@@ -17,11 +17,12 @@ use alloc::vec::Vec;
 
 use lpc_model::{
     ArtifactLocation, NodeDefLocation, NodeUseLocation, PlaylistDef, ProjectChangeSummary,
-    ProjectInventory, Revision, resolve_artifact_specifier,
+    ProjectInventory, Revision, resolve_artifact_specifier, slot::SlotPersistence,
 };
 use lpfs::{LpFs, LpPathBuf};
 
 use crate::overlay::inventory_change_summary::change_summary_between;
+use crate::registry::project_registry::resolve_edit_role;
 use crate::{EntryResidency, EntryResidencyError, ParseCtx, ProjectRegistry};
 
 impl ProjectRegistry {
@@ -36,7 +37,9 @@ impl ProjectRegistry {
     /// Returns an empty summary when the entry already had that residency.
     /// Refuses, changing nothing, when the playlist or entry is unknown or
     /// when unloading would drop an artifact that carries pending slot edits
-    /// ([`EntryResidencyError::PendingEdits`]).
+    /// a commit would write ([`EntryResidencyError::PendingEdits`]). Pending
+    /// edits that are only transient (Debug-role overrides, produced paths)
+    /// are discarded with the unload instead: nothing could ever save them.
     pub fn set_entry_resident(
         &mut self,
         fs: &dyn LpFs,
@@ -198,7 +201,8 @@ impl ProjectRegistry {
 
     /// Install `next`, re-derive, and commit the result — or restore the
     /// previous set and refuse when an artifact with pending slot edits would
-    /// leave the inventory (a later commit could not write it).
+    /// leave the inventory (a later commit could not write it). Artifacts
+    /// whose pending edits are all transient leave with their edits dropped.
     fn apply_residency(
         &mut self,
         fs: &dyn LpFs,
@@ -213,13 +217,19 @@ impl ProjectRegistry {
 
         let stranded = self.stranded_slot_edits(&after);
         if !stranded.is_empty() {
-            self.residency = previous;
-            self.release_registered_by(&after);
-            return Err(EntryResidencyError::PendingEdits {
-                playlist,
-                entry,
-                artifacts: stranded,
-            });
+            let (transient, genuine): (Vec<_>, Vec<_>) = stranded
+                .into_iter()
+                .partition(|location| self.carries_only_transient_edits(location, ctx));
+            if !genuine.is_empty() {
+                self.residency = previous;
+                self.release_registered_by(&after);
+                return Err(EntryResidencyError::PendingEdits {
+                    playlist,
+                    entry,
+                    artifacts: genuine,
+                });
+            }
+            self.discard_transient_edits(transient, frame);
         }
 
         self.release_left_behind(&after);
@@ -242,6 +252,55 @@ impl ProjectRegistry {
             })
             .cloned()
             .collect()
+    }
+
+    /// Whether every pending edit on `location` is transient: a Debug-role
+    /// override or a produced path, which commit never writes to the def
+    /// file and a reboot never keeps (the same classifier commit retains
+    /// them by, [`Self::retain_debug_edits`]). An artifact whose def is not
+    /// loaded cannot be classified and counts as carrying real edits.
+    fn carries_only_transient_edits(
+        &self,
+        location: &ArtifactLocation,
+        ctx: &ParseCtx<'_>,
+    ) -> bool {
+        let Some(slot_overlay) = self
+            .overlay
+            .get()
+            .artifact(location)
+            .and_then(|overlay| overlay.as_slot())
+        else {
+            return false;
+        };
+        let Some(def) = self
+            .inventory
+            .defs
+            .get(&NodeDefLocation::artifact_root(location.clone()))
+            .and_then(|entry| entry.state.loaded_def())
+        else {
+            return false;
+        };
+        slot_overlay.edits.keys().all(|path| {
+            resolve_edit_role(def, path, ctx)
+                .map(|resolution| resolution.persistence())
+                .unwrap_or_else(SlotPersistence::for_unresolved_edit)
+                == SlotPersistence::Transient
+        })
+    }
+
+    /// Drop the transient edits of artifacts an unload takes out of the
+    /// inventory. They are debug overrides with no authored meaning, and
+    /// they would not survive a reboot either; refusing the unload over
+    /// them would wedge the playlist on a value nobody can save.
+    fn discard_transient_edits(&mut self, locations: Vec<ArtifactLocation>, frame: Revision) {
+        let mut changed = false;
+        for location in &locations {
+            changed |= self.overlay.get_mut().clear_artifact(location);
+        }
+        if changed {
+            self.overlay.mark_updated(frame);
+        }
+        self.stamp_artifacts_leaving_overlay(locations, frame);
     }
 
     /// Undo the registrations a refused derivation made: locations `after`

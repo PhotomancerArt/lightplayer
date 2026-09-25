@@ -755,7 +755,7 @@ impl ProjectRegistry {
     /// like editing does, so stamp the artifact entry at the current frame.
     /// The stamp is stored in the [`ArtifactStore`], making it sticky across
     /// later derivations without re-stamping.
-    fn stamp_artifacts_leaving_overlay(
+    pub(crate) fn stamp_artifacts_leaving_overlay(
         &mut self,
         covered_before: Vec<ArtifactLocation>,
         frame: Revision,

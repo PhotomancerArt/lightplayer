@@ -192,6 +192,91 @@ fn unloading_an_entry_with_pending_edits_is_refused_and_changes_nothing() {
 }
 
 #[test]
+fn unloading_drops_transient_edits_but_refuses_edits_a_commit_would_write() {
+    let mut scenario = RegistryScenario::empty();
+    scenario.write_container_manifest();
+    scenario.write_file(
+        "/module.json",
+        r#"{ "kind": "Module", "nodes": { "playlist": { "ref": "./playlist.json" } } }"#,
+    );
+    scenario.write_file(
+        "/playlist.json",
+        r#"{
+  "kind": "Playlist",
+  "idle_entry": 1,
+  "entries": {
+    "1": { "name": "one", "node": { "ref": "./one/clock.json" } },
+    "2": { "name": "two", "node": { "ref": "./two/shader.json" } }
+  }
+}"#,
+    );
+    scenario.write_file("/one/clock.json", r#"{ "kind": "Clock" }"#);
+    scenario.write_file(
+        "/two/shader.json",
+        r#"{ "kind": "Shader", "source": { "path": "./shader.glsl" } }"#,
+    );
+    scenario.write_file(
+        "/two/shader.glsl",
+        "vec4 render_2d(vec2 pos) { return vec4(0.0); }",
+    );
+    scenario.load_root("/module.json");
+    let clock_one = artifact("/one/clock.json");
+
+    // `transport.rate` is Debug-role: commit never writes it and a reboot
+    // never keeps it, so it must not hold entry 1 in memory.
+    scenario.apply(MutationOp::PutSlotEdit {
+        artifact: clock_one.clone(),
+        edit: SlotEdit::assign_value(
+            SlotPath::parse("transport.rate").unwrap(),
+            LpValue::F32(2.0),
+        ),
+    });
+    assert!(
+        scenario
+            .registry()
+            .overlay()
+            .get()
+            .contains_artifact(&clock_one)
+    );
+    scenario
+        .make_only_resident("playlist", 2)
+        .expect("a transient override does not refuse the unload");
+    assert!(
+        !scenario
+            .registry()
+            .overlay()
+            .get()
+            .contains_artifact(&clock_one),
+        "the unload dropped the override with its entry"
+    );
+
+    // An edit a commit would write is a real edit: refuse, and keep it.
+    let shader_two = artifact("/two/shader.json");
+    scenario.apply(MutationOp::PutSlotEdit {
+        artifact: shader_two.clone(),
+        edit: SlotEdit::assign_value(SlotPath::parse("render_order").unwrap(), LpValue::I32(3)),
+    });
+    let refused = scenario
+        .make_only_resident("playlist", 1)
+        .expect_err("an edit commit would write refuses the unload");
+    assert_eq!(
+        refused,
+        EntryResidencyError::PendingEdits {
+            playlist: artifact("/playlist.json"),
+            entry: 1,
+            artifacts: vec![shader_two.clone()],
+        }
+    );
+    assert!(
+        scenario
+            .registry()
+            .overlay()
+            .get()
+            .contains_artifact(&shader_two)
+    );
+}
+
+#[test]
 fn residency_targets_must_be_a_loaded_playlist_entry() {
     let (mut scenario, _) = three_entry_project();
 
