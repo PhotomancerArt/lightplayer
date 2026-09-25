@@ -118,6 +118,17 @@ long-lived branch conflict on this file whenever main re-baselined too.
   **on a PR, `just apply-ci-figures <pr>`; `just bless-chips` is for a desk
   change you have not pushed.** Positional figures, which a desk bless could
   never write, now arrive the same way.
+- 2026-09-25 — **a clean 3-way merge wrote the wrong figures.** Merging
+  `origin/main` into the multi-pattern-projects branch (plan P6) conflicted
+  only on `chips/esp32c6.json`'s `commit` stamp; git merged the figures
+  themselves without a conflict and kept main's (`freeBytes` 216,624), but
+  the merged tree boots at the branch's own figures (216,604, `usedBytes`
+  +20, `largestFreeBlock` 196,033), so `heap-budget-check-chips-c6` went red
+  on a tree with no firmware change of its own. Workaround: after a merge
+  that touched a chip record, run the chip's check before trusting the
+  merged numbers, and re-baseline to what the merged tree measures
+  (`just heap-budget-baseline-chips esp32c6`). A record merged as text is
+  not a measurement.
 
 **Exit criteria** — a PR whose only memory effect is a few bytes of statics
 passes the gate without touching the record, and two PRs that each
