@@ -145,6 +145,16 @@ pub fn handle_client_message(
                 "login requests are answered by the access gate, not a handler".into(),
             ));
         }
+        // Likewise the access requests: `tick_and_send` answers them from
+        // the device store, beside the login.
+        lpc_wire::ClientRequest::AccessList
+        | lpc_wire::ClientRequest::AccessAdd { .. }
+        | lpc_wire::ClientRequest::AccessRemove { .. }
+        | lpc_wire::ClientRequest::AccessSetSwitches { .. } => {
+            return Err(ServerError::Core(
+                "access requests are answered beside the access gate, not a handler".into(),
+            ));
+        }
         lpc_wire::ClientRequest::ProjectCommand { handle, command } => {
             ServerMessagePayload::ProjectCommand {
                 response: handle_project_command(project_manager, handle, command)?,
@@ -184,9 +194,33 @@ pub fn handle_client_message(
             project_manager.clear_faults();
             ServerMessagePayload::ClearFaults { ledger_cleared }
         }
+        lpc_wire::ClientRequest::SetEncoding {
+            encoding,
+            dictionary,
+        } => ServerMessagePayload::SetEncoding {
+            encoding: negotiate_encoding(encoding, dictionary, hello.pack_dictionary),
+        },
     };
 
     Ok(WireServerMessage::new(id, response))
+}
+
+/// The encoding a link gets for its `SetEncoding` ask: packed only when the
+/// host asked for it and named the dictionary this server packs with
+/// (`ours`, the hello's `pack_dictionary`; 0 when the embedder cannot pack).
+/// A host with another dictionary would decode a packed frame to wrong names,
+/// so it stays JSON (plan `lp-json-pack`, G6).
+pub fn negotiate_encoding(
+    asked: lpc_wire::WireEncoding,
+    dictionary: u32,
+    ours: u32,
+) -> lpc_wire::WireEncoding {
+    match asked {
+        lpc_wire::WireEncoding::Packed if ours != 0 && dictionary == ours => {
+            lpc_wire::WireEncoding::Packed
+        }
+        _ => lpc_wire::WireEncoding::Json,
+    }
 }
 
 fn handle_project_command(
@@ -652,5 +686,19 @@ mod tests {
         assert_eq!(log::max_level(), log::LevelFilter::Error);
 
         log::set_max_level(original);
+    }
+
+    #[test]
+    fn set_encoding_packs_only_on_a_matching_dictionary_and_a_packing_embedder() {
+        use lpc_wire::{WIRE_DICTIONARY_FINGERPRINT as FP, WireEncoding::*};
+        assert_eq!(negotiate_encoding(Packed, FP, FP), Packed);
+        // A host with another dictionary would decode wrong names: JSON.
+        assert_eq!(negotiate_encoding(Packed, FP ^ 1, FP), Json);
+        // An embedder whose transport cannot pack (host, browser, fw-emu)
+        // says 0 — even to a host that names 0.
+        assert_eq!(negotiate_encoding(Packed, FP, 0), Json);
+        assert_eq!(negotiate_encoding(Packed, 0, 0), Json);
+        // Asking for JSON is always granted.
+        assert_eq!(negotiate_encoding(Json, FP, FP), Json);
     }
 }

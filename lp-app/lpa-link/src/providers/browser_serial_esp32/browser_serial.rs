@@ -1,9 +1,16 @@
-use js_sys::{Array, Promise, Reflect};
+use std::cell::RefCell;
+use std::collections::HashMap;
+
+use js_sys::{Array, Promise, Reflect, Uint8Array};
 use lpa_devices::link::ResetKind;
 use wasm_bindgen::prelude::*;
-use wasm_bindgen_futures::JsFuture;
+use wasm_bindgen_futures::{JsFuture, spawn_local};
 
 use crate::LinkError;
+use crate::device_link::wire_capture::capture_wire_bytes;
+use crate::device_link::wire_reader::{
+    WireRead, WireReader, device_log_level, packed_replies_wanted,
+};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct BrowserSerialPortHandle {
@@ -66,8 +73,8 @@ extern "C" {
     #[wasm_bindgen(js_name = writeLine)]
     fn js_write_line(id: u32, line: &str) -> Promise;
 
-    #[wasm_bindgen(js_name = takeLines)]
-    fn js_take_lines(id: u32) -> Array;
+    #[wasm_bindgen(js_name = takeBytes)]
+    fn js_take_bytes(id: u32) -> JsValue;
 
     #[wasm_bindgen(js_name = takeErrors)]
     fn js_take_errors(id: u32) -> Array;
@@ -195,8 +202,117 @@ pub async fn write_line(id: u32, line: &str) -> Result<(), LinkError> {
         .map_err(js_error)
 }
 
+#[wasm_bindgen]
+extern "C" {
+    #[wasm_bindgen(js_namespace = console, js_name = warn)]
+    fn console_warn(message: &str);
+}
+
+thread_local! {
+    /// One reader per port session, shared by every drainer of that port —
+    /// the model's link pump and, while it holds the wire, a conversation
+    /// (the editor lens, a push). See `device_link::wire_reader`.
+    static PORT_READERS: RefCell<HashMap<u32, PortReader>> = RefCell::new(HashMap::new());
+}
+
+/// A port's reader, the controller buffer generation it is reading, and the
+/// notes it has made that the link pump has not yet taken.
+struct PortReader {
+    generation: Option<u32>,
+    reader: WireReader,
+    notes: Vec<String>,
+}
+
+/// Everything the port has read since the last drain, split: console lines,
+/// wire messages (packed or not) and undeliverable frames, in order.
+///
+/// The JS read pump hands over bytes; this is the only place they become
+/// lines. The packed-reply opt-in rides along: when the port's reader asks
+/// for it (after a hello that says the board packs with this build's
+/// dictionary, and again after a fallback), the request is written from
+/// here, and what it concluded is queued for [`take_wire_notes`].
+pub fn take_reads(id: u32) -> Vec<WireRead> {
+    let taken = js_take_bytes(id);
+    let generation = reflect_value(&taken, "generation")
+        .ok()
+        .and_then(|value| value.as_f64())
+        .map(|value| value as u32);
+    let bytes = reflect_value(&taken, "bytes")
+        .ok()
+        .map(|value| Uint8Array::new(&value).to_vec())
+        .unwrap_or_default();
+    // Dev-only tee (`?wire-capture=1`): every byte the pump read, before any
+    // splitting, in order. A no-op unless the page turned it on.
+    if capture_wire_bytes(&bytes) {
+        console_warn(&format!(
+            "wire capture is full ({} bytes); dropping what the port reads from here on",
+            crate::device_link::wire_capture::WIRE_CAPTURE_CAP
+        ));
+    }
+    let now_ms = js_sys::Date::now() as u64;
+    let mut reads = Vec::new();
+    let mut sends = Vec::new();
+    PORT_READERS.with(|readers| {
+        let mut readers = readers.borrow_mut();
+        let port = readers.entry(id).or_insert_with(|| PortReader {
+            generation,
+            reader: WireReader::new(packed_replies_wanted())
+                .with_device_log_level(device_log_level()),
+            notes: Vec::new(),
+        });
+        if port.generation != generation {
+            // The controller cleared its buffer: a (re)open. What was half
+            // read, and what the board had agreed, belong to the previous
+            // port generation.
+            port.generation = generation;
+            port.reader =
+                WireReader::new(packed_replies_wanted()).with_device_log_level(device_log_level());
+        }
+        let notes = &mut port.notes;
+        port.reader.push(&bytes, now_ms, |read| match read {
+            WireRead::Send(request) => sends.push(request),
+            WireRead::Note(note) => notes.push(note),
+            read => reads.push(read),
+        });
+    });
+    for request in sends {
+        let Ok(json) = lpc_wire::json::to_string(&request) else {
+            continue;
+        };
+        // Fire and forget, like every write the pump does not own: a port
+        // that cannot take it is dying, and the read pump says so.
+        spawn_local(async move {
+            let _ = write_line(id, &format!("M!{json}\n")).await;
+        });
+    }
+    reads
+}
+
+/// What the port's reader has concluded about the link's encoding since the
+/// last ask (at most one note per change). Drained by the model's link pump.
+pub fn take_wire_notes(id: u32) -> Vec<String> {
+    PORT_READERS.with(|readers| {
+        readers
+            .borrow_mut()
+            .get_mut(&id)
+            .map(|port| std::mem::take(&mut port.notes))
+            .unwrap_or_default()
+    })
+}
+
+/// [`take_reads`], as the whole lines the pre-packing wire had: a message is
+/// its `M!{json}` line whichever form it came in, and an undeliverable frame
+/// is dropped (the model's link reports those; this is the legacy
+/// `DeviceSession`'s line tap).
 pub fn take_lines(id: u32) -> Vec<String> {
-    js_array_to_strings(js_take_lines(id))
+    take_reads(id)
+        .into_iter()
+        .filter_map(|read| match read {
+            WireRead::Line(line) => Some(line),
+            WireRead::Frame(frame) => Some(frame.to_line()),
+            _ => None,
+        })
+        .collect()
 }
 
 pub fn take_errors(id: u32) -> Vec<String> {
@@ -234,6 +350,7 @@ pub async fn reset_and_read(
 /// `Ok(false)` = the grant SURVIVES: the id is unknown, or the browser has
 /// no `forget()` — callers decide whether that deserves a warning.
 pub async fn forget(id: u32) -> Result<bool, LinkError> {
+    PORT_READERS.with(|readers| readers.borrow_mut().remove(&id));
     let value = JsFuture::from(js_forget_port(id)).await.map_err(js_error)?;
     Ok(value.as_bool().unwrap_or(false))
 }

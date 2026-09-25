@@ -21,8 +21,11 @@ extern crate alloc;
 extern crate std;
 
 pub mod access;
+pub mod account_access_info;
+pub mod account_password_tier;
 pub mod ack;
 pub mod actor;
+pub mod base64_bytes;
 pub mod call_spec;
 pub mod envelope;
 pub mod error;
@@ -40,6 +43,8 @@ pub mod sidecar_meta;
 pub mod version;
 
 pub use access::Access;
+pub use account_access_info::AccountAccessInfo;
+pub use account_password_tier::AccountPasswordTier;
 pub use ack::Ack;
 pub use actor::Actor;
 pub use call_spec::CloudCallSpec;

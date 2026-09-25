@@ -1163,6 +1163,8 @@ pub struct Esp32C6Builder {
     strip: StripConfig,
     /// Keep the RMT's pulse and word logs (`Rmt::keep_logs`).
     rmt_logs: bool,
+    /// USB-Serial-JTAG's free lag, in emulated nanoseconds (0 = off).
+    usb_in_free_lag_ns: u64,
 }
 
 impl Default for Esp32C6Builder {
@@ -1228,6 +1230,7 @@ impl Esp32C6Builder {
             tx_log: TxLogSink::default(),
             strip: StripConfig::default(),
             rmt_logs: false,
+            usb_in_free_lag_ns: 0,
         }
     }
 
@@ -1656,6 +1659,16 @@ impl Esp32C6Builder {
         self
     }
 
+    /// USB-Serial-JTAG's **free lag** (`--usb-in-free-lag <ns>`): hold
+    /// `serial_in_ep_data_free` at 0 for `ns` emulated nanoseconds after
+    /// each drain's `serial_in_empty`. A hypothesis switch, off by default;
+    /// `lp_emu_esp_common::ip::usb_sj`'s module docs say what it stands for
+    /// and what it does not claim.
+    pub fn usb_in_free_lag_ns(mut self, ns: u64) -> Self {
+        self.usb_in_free_lag_ns = ns;
+        self
+    }
+
     pub fn seed(mut self, seed: u64) -> Self {
         self.seed = seed;
         self
@@ -1789,6 +1802,7 @@ impl Esp32C6Builder {
             tx_log,
             strip,
             rmt_logs,
+            usb_in_free_lag_ns,
         } = self;
 
         let rom_image = match rom {
@@ -2022,6 +2036,23 @@ impl Esp32C6Builder {
             // The staging is what a flasher left behind, not a guest write:
             // the window has just been filled from it, so nothing is stale.
             flash_handle.lock().unwrap().take_written_blocks();
+        }
+
+        if usb_in_free_lag_ns > 0 {
+            let set = bus
+                .peripheral_index("USB_DEVICE")
+                .and_then(|i| {
+                    bus.with_peripheral::<UsbSerialJtag, _>(i, |u, _| {
+                        u.set_in_free_lag_ns(usb_in_free_lag_ns)
+                    })
+                })
+                .is_some();
+            if !set {
+                return Err(BuildError::Io(
+                    "a USB free lag was asked for and this machine has no USB_DEVICE block"
+                        .to_string(),
+                ));
+            }
         }
 
         if rmt_logs {
@@ -3929,6 +3960,14 @@ impl Esp32C6Machine {
         self.usb_host
     }
 
+    /// The USB block's wake measurements (the free-lag hypothesis's
+    /// evidence; see `lp_emu_esp_common::ip::usb_sj::InWakeStats`).
+    pub fn usb_in_wake_stats(&mut self) -> Option<lp_emu_esp_common::ip::usb_sj::InWakeStats> {
+        let index = self.bus.peripheral_index("USB_DEVICE")?;
+        self.bus
+            .with_peripheral::<UsbSerialJtag, _>(index, |u, _| u.in_wake_stats())
+    }
+
     /// The UART0 TCP listener, when `Uart0Sink::Tcp` was chosen.
     pub fn uart0_tcp(&self) -> Option<&lp_emu_esp_common::TcpHost> {
         self.uart0_tcp.as_ref()
@@ -5543,6 +5582,10 @@ impl Esp32C6Machine {
                     in_pending: u.in_fifo().len(),
                     out_queued: u.out_pending(),
                 })),
+                ControlCommand::FreeLag(ns) => {
+                    u.set_in_free_lag_ns(*ns);
+                    Ok(None)
+                }
                 ControlCommand::Wait(_) => Err(
                     "`wait` is a --usb-script command; a client on this socket waits by waiting"
                         .to_string(),

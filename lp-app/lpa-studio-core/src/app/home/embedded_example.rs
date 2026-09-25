@@ -161,7 +161,7 @@ pub fn canonical_example_id(id: &str) -> std::borrow::Cow<'_, str> {
 
 /// Type the generated rows through the manifest parser, once per process.
 /// The handful of owned strings are leaked so the entry stays `Copy` and
-/// `'static` for its ~40 consumers: sixteen entries, once.
+/// `'static` for its ~40 consumers: thirty entries, once.
 ///
 /// A manifest that fails to parse is a panic naming the entry — the
 /// `lp-cli` tree gates guarantee it cannot happen on a green tree.

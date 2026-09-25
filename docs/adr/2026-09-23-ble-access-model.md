@@ -228,9 +228,7 @@ logging in with the same messages against the same access files.
 - ~~`docs/design/device-identity.md` §8 (the auth gap)~~ — updated in M7:
   closed by this ADR.
 
-## Amendments
-
-### 2026-09-24 (M7): what shipped, checked against the text above
+## Amendment 2026-09-24 (M7): what shipped, checked against the text above
 
 - **Wire version.** See Consequences: the login bump is proto 22, not 21.
 - **`Identify` is not built** (plan DD22). It needs a new `ClientRequest`
@@ -254,3 +252,125 @@ logging in with the same messages against the same access files.
   `spike-results.md`: a locked XIAO C6 answered `listLoadedProjects` with
   `notPermitted { needs: play }` before login, from Mac Chrome 153 over CDP),
   **not yet from a phone** — that is the plan's G4 walk.
+## Amendment 2026-09-24: who has access, on the board; Bluetooth on by default
+
+Plan `lp2025/2026-09-24-1953-ble-easy-access` (P1). Yona's rule for it:
+most of the time people should not have to think about access. A physical
+connection is access, and Bluetooth should be one click, or none.
+The whole decision, with Studio's half (key holders, the silent add over
+USB, account keys, the rejected alternatives), is
+`2026-09-24-easy-bluetooth-access.md`; this amendment is the board's half.
+
+### Generated keys, one salt per holder
+
+Most secrets are no longer typed. A browser generates one 32-byte random
+secret and one 16-byte salt for itself. The signed-in account has one of
+each too. Each holder installs the same `(salt, K)` on **every** device it
+touches, with `iterations: 1`: a 256-bit random secret needs no stretching.
+Typed passwords keep the client's PBKDF2 cost. The login protocol does not
+change. A client recognises its own offers in a challenge by salt, so the
+automatic unlock never has to guess and never trips the backoff.
+
+**Accepted consequence.** A salt is visible before login, since every
+challenge offers it. An observer in range can therefore tell that two
+devices share a holder (the same browser or account). A flash dump of one
+device yields that holder's `K`, and that `K` also opens the holder's
+other devices. The threat model above (someone cheeky nearby) accepts
+both. Per-device salts would have needed every browser to keep a record
+for every device.
+
+**Revisit — flagged for any security review (Yona, 2026-09-25).** Yona
+accepts this for now but wants it revisited: "any security analysis would
+flag that for sure. its an acceptable decision now, but we probably should
+revisit it." The fix is to stop sharing one `(salt, K)` across devices. A
+holder could derive a per-device key from its one secret, for example
+`K_dev = HMAC(secret, device uid)` with a fresh salt per device, so one
+dump opens one device. A client would then match offers against the key
+for the device it is talking to, not by a salt shared everywhere. The cost
+is that a phone must know which device it is unlocking before it answers.
+That identity arrives in the hello (`/.lp/device.json`'s uid), so no
+per-device record should be needed. It is a new entry shape and a wire
+change, so it waits for its own plan.
+
+### Access files v2
+
+`SecretEntry` gains `kind` (`browser` | `account` | `password`) and an
+optional `addedAt` (epoch seconds, supplied by the client; the board has no
+wall clock). Both access files go to `version: 2`. The readers still accept
+v1, where each entry reads as `kind: password` with no time, through a
+private v1 shape that keeps `deny_unknown_fields`. Writers always write v2.
+The board decides nothing by kind. It is there for people and for a client
+recognising its own rows. Schemas regenerated.
+
+### The board merges; no client rewrites the store
+
+Before this amendment a client wrote the whole device store with an fs
+write. A second browser's write would erase the first browser's key, and no
+client could list what was installed. Four new requests fix both. All are
+**edit** tier: the classifier names them, and the table test covers them in
+all five link states.
+
+- `AccessList` answers `AccessList { bleEnabled, open, entries }`. Each
+  entry is `{ label, kind, tier, salt, addedAt? }` and **never** `k` or
+  `iterations`. The salt is the entry's identity, and it is already public
+  in every challenge.
+- `AccessAdd { entry }` merges the entry into the store. An entry with the
+  same salt replaces the old one, which is how a rename re-labels. A new
+  entry past `MAX_SECRETS_PER_FILE` is refused.
+- `AccessRemove { salt }` removes that entry. A salt that is not there is
+  a no-op.
+- `AccessSetSwitches { bleEnabled?, open? }` sets the switches. A
+  `bleEnabled` change still applies at the next boot, and the client
+  restarts the device.
+
+Each change answers with the list as it now stands. The server does the
+read-modify-write through its **base** fs (`access_store.rs`). The wire fs
+path stays write-only for access files. Nothing here relaxes it: a raw fs
+write is still possible over a trusted link, but no client needs one now.
+Project sidecars are still honoured and are not listed.
+
+### Bluetooth on by default
+
+This replaces "Locked by default" above for the device store:
+
+- A **missing** store is `DeviceAccessFile::fresh()`: Bluetooth on, not
+  open, no secrets. The radio is up, but nothing gets past the gate until
+  a key is added over USB (Studio adds its keys on a USB connect, P3 of
+  the plan).
+- A **damaged** store is still `locked()`: Bluetooth off. Damage still only
+  takes access away.
+- "Missing" is decided by `file_exists`, not by a read error. Not every fs
+  reports a missing file as `NotFound`.
+
+`WIRE_PROTO_VERSION` 23 → 25 (24 was taken by #785's palette pin first).
+`PROJECT_FORMAT_VERSION` is untouched: the access files are their own
+formats.
+
+## Amendment 2026-09-25: what easy access superseded, and the words
+
+Recorded at the close of the BLE remote-control plan (M7), so this ADR reads
+true on its own. Detail: `2026-09-24-easy-bluetooth-access.md` and plan
+`lp2025/2026-09-24-1953-ble-easy-access`.
+
+- **The wire version the access requests shipped at is 27**, not 25: main
+  took 24–26 while #821 was in flight (#785's palette pin, the pattern
+  space, JSON Pack), and #821 merged at `WIRE_PROTO_VERSION` 27. The cloud
+  API went 3 → 4 for account keys (#819).
+- **Bluetooth is on by default, and locked** (above; Yona's reversal of the
+  plan's PQ2/AC6, DD30). "Locked by default" in the access files section now
+  means *locked*, not *off*: a fresh board answers `Hello` and `Login*` over
+  Bluetooth and nothing else until a key is added over USB.
+- **Typed passwords are the exception.** The normal path is generated keys:
+  one per browser, one per signed-in account, installed silently on a USB
+  connect (with a toast and Undo) and matched by salt, so an automatic unlock
+  never sends a wrong answer. Typed passwords remain for sharing (generated
+  words plus a QR) and as optional account play/edit passwords. The account
+  default password (S6 of `2026-09-24-ble-transport.md`) was removed.
+- **The words are "Unlock", "device password" and "Who has access".** No
+  Studio screen says "log in" about a device; "login" stays the protocol's
+  name (`LoginBegin`, `LoginAnswer`, `LOGIN_DEADLINE_MS`).
+- **Project sidecars** are still honoured by the board but no longer written
+  by Studio; the envelope filter for `.lp/access.json` stays.
+- **The phone walk (G4) passed** on 2026-09-25: Yona's iPhone in Bluefy and
+  his laptop, one board (the PLAYFUL choker, XIAO C6 `10:BD:A3:B0:A5:2C`),
+  one room. Record: `docs/reports/2026-09-25-ble-laptop-desk-walk.md`.

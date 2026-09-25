@@ -20,7 +20,16 @@
 //! |---|---|---|
 //! | session-id stability across open/close/re-enumerate | [`session_ids_are_stable_across_open_and_close`], [`session_ids_are_stable_across_a_re_enumeration`] | `browser_serial.js:89-102` (`sessionForPort`), `:58-84` (`adoptReenumeratedPorts`) |
 //! | close-vs-release semantics | [`a_closed_port_keeps_its_session_and_a_forgotten_one_does_not`] | `browser_serial.js:140-157` (`closePort` keeps the entry), `:159-181` (`forgetPort` deletes it) |
-//! | read-pump error paths | [`the_read_pump_reports_a_lost_device_and_the_port_reopens`] | `browser_esp32_device_controller.js:380-410` (`readPump`) |
+//! | read-pump error paths | [`the_read_pump_reports_a_lost_device_and_the_port_reopens`] | `browser_esp32_device_controller.js` (`readPump`) |
+//!
+//! **Packed frames (plan `lp-json-pack`, P6).** The pump hands Rust BYTES and
+//! Rust splits them (`lpa_link::device_link::wire_reader::WireReader`, the
+//! same reader `browser_serial.rs` keeps per port), because a packed frame
+//! holds any byte and a `TextDecoder` would mangle it.
+//! [`a_packed_frame_split_across_reads_is_read_whole`],
+//! [`a_packed_frame_holding_a_newline_is_not_torn`] and
+//! [`console_text_between_packed_frames_stays_lines`] pin that through the
+//! shipped pump.
 //! | the flash bridge's port acquisition | [`the_flash_bridge_acquires_the_live_generation`] | `browser_serial.js:195-213` (`getPort`'s adoption pass) |
 //!
 //! **What re-enumerates, since plan two M5:** the CABLE, and nothing else.
@@ -41,6 +50,8 @@ use js_sys::{Array, Function, Object, Promise, Reflect};
 use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::JsFuture;
 use wasm_bindgen_test::*;
+
+use lpa_link::device_link::wire_reader::{WireRead, WireReader};
 
 wasm_bindgen_test_configure!(run_in_browser);
 
@@ -90,8 +101,8 @@ extern "C" {
     #[wasm_bindgen(js_name = getPortObject)]
     fn js_get_port(id: u32) -> Promise;
 
-    #[wasm_bindgen(js_name = takeLines)]
-    fn js_take_lines(id: u32) -> Promise;
+    #[wasm_bindgen(js_name = takeBytes)]
+    fn js_take_bytes(id: u32) -> Promise;
 
     #[wasm_bindgen(js_name = takeErrors)]
     fn js_take_errors(id: u32) -> Promise;
@@ -125,6 +136,9 @@ extern "C" {
 
     #[wasm_bindgen(js_name = deliverBytes)]
     fn js_deliver_bytes(board_id: &str, text: &str);
+
+    #[wasm_bindgen(js_name = deliverRawBytes)]
+    fn js_deliver_raw_bytes(board_id: &str, bytes: &[u8]);
 
     #[wasm_bindgen(js_name = dropByteChannel)]
     fn js_drop_byte_channel(board_id: &str);
@@ -695,7 +709,8 @@ async fn the_read_pump_reports_a_lost_device_and_the_port_reopens() {
     open_port(id, false).await.expect("openPort");
     js_deliver_bytes(&board, "M! {\"hello\":\"before\"}\n");
     yield_to_event_loop().await;
-    let lines = strings(js_take_lines(id)).await;
+    let mut reader = PortReader::default();
+    let lines = reader.take_lines(id).await;
     assert!(
         !lines.is_empty(),
         "the read pump delivered no lines before the device was lost"
@@ -717,7 +732,7 @@ async fn the_read_pump_reports_a_lost_device_and_the_port_reopens() {
         .expect("openProtocol after a lost device");
     js_deliver_bytes(&board, "M! {\"hello\":\"after\"}\n");
     yield_to_event_loop().await;
-    let lines_after = strings(js_take_lines(id)).await;
+    let lines_after = reader.take_lines(id).await;
     assert!(
         lines_after.iter().any(|line| line.contains("after")),
         "the session did not read again after the read pump errored: {lines_after:?}"
@@ -976,6 +991,61 @@ async fn hotplug_edges_arrive_from_a_re_enumeration() {
     shim_off().await;
 }
 
+/// A port that was OPEN when the cable came out opens again on the new
+/// generation once it goes back in — and reads.
+///
+/// The 2026-09-24 walk's stuck card
+/// (`docs/defects/2026-09-24-emulated-replug-leaves-the-old-byte-channel-open.md`):
+/// `detach` errored the open port's stream but left the board's byte channel
+/// open underneath it, so the replugged port's `open()` met the old socket
+/// ("already open in this page") and the card sat at "Attached — not
+/// listening" forever. On a real board the unplug takes the port with it,
+/// and so must the shim's.
+#[wasm_bindgen_test]
+async fn a_port_open_across_a_replug_reopens_on_the_new_generation() {
+    if real_backing() {
+        log_skip("this claim is pinned by the scripted half");
+        return;
+    }
+    shim_over(&["c6-a"]).await;
+    let board = board_ids().await.first().cloned().expect("a board");
+    let id = granted_sessions().await[0].id;
+
+    let mut reader = PortReader::default();
+    open_port(id, false)
+        .await
+        .expect("openPort before the replug");
+    yield_to_event_loop().await;
+    let _ = reader.take_lines(id).await;
+
+    JsFuture::from(js_replug_over_the_cable(&board))
+        .await
+        .expect("a replug over the cable");
+    yield_to_event_loop().await;
+    let _ = strings(js_take_errors(id)).await;
+
+    // The next `getGrantedPorts` is what adopts the new generation into the
+    // same session, exactly as Studio's connect-edge sweep does.
+    let after = granted_sessions().await;
+    assert_eq!(ids(&after), vec![id], "the session survived the replug");
+    open_port(id, false)
+        .await
+        .map_err(|error| error_text(&error))
+        .expect("openPort on the replugged generation");
+    yield_to_event_loop().await;
+    let lines = reader.take_lines(id).await;
+    assert!(
+        lines.iter().any(|line| line.contains("hello")),
+        "the replugged port opened but read nothing: {lines:?}"
+    );
+    log(&format!("replug while open: reopened and read {lines:?}"));
+
+    JsFuture::from(js_release_port(id))
+        .await
+        .expect("releasePort");
+    shim_off().await;
+}
+
 /// The bytes go both ways through the real controller: `writeLine` reaches
 /// the board's byte channel unchanged, and what the board says comes back as
 /// lines.
@@ -991,7 +1061,7 @@ async fn bytes_travel_both_ways_through_the_controller() {
 
     open_port(id, false).await.expect("openPort");
     yield_to_event_loop().await;
-    let greeting = strings(js_take_lines(id)).await;
+    let greeting = PortReader::default().take_lines(id).await;
     assert!(
         greeting.iter().any(|line| line.contains("hello")),
         "the board's greeting never reached the read pump: {greeting:?}"
@@ -1042,6 +1112,207 @@ async fn the_production_rust_boundary_enumerates_the_shims_ports() {
     ));
 
     shim_off().await;
+}
+
+// ---------------------------------------------------------------------------
+// Packed frames through the shipped pump (plan `lp-json-pack`, P6)
+// ---------------------------------------------------------------------------
+
+/// A packed frame the board wrote in two halves, drained in between, comes
+/// out once and whole: the reader holds the first half across the drain.
+#[wasm_bindgen_test]
+async fn a_packed_frame_split_across_reads_is_read_whole() {
+    if real_backing() {
+        log_skip("the scripted door is what can split a frame on purpose");
+        return;
+    }
+    shim_over(&["c6-a"]).await;
+    let board = board_ids().await.first().cloned().expect("a board");
+    let id = granted_sessions().await[0].id;
+    open_port(id, false).await.expect("openPort");
+    yield_to_event_loop().await;
+    let mut reader = PortReader::default();
+    reader.take(id).await; // the greeting
+
+    let message = unload_project(7);
+    let frame = packed_frame(&message);
+    let (first, second) = frame.split_at(frame.len() / 2);
+    js_deliver_raw_bytes(&board, first);
+    yield_to_event_loop().await;
+    // The frame's own leading `\n` ends an empty line; nothing else may
+    // come out of half a frame — not a frame, not a torn-frame error.
+    let half = reader.take(id).await;
+    assert!(
+        half.iter()
+            .all(|read| matches!(read, WireRead::Line(line) if line.is_empty())),
+        "half a frame came out as something: {half:?}"
+    );
+    js_deliver_raw_bytes(&board, second);
+    yield_to_event_loop().await;
+    let reads = reader.take(id).await;
+
+    let frames = packed_frames(&reads);
+    assert_eq!(frames, [json_of(&message)], "{reads:?}");
+    log(&format!(
+        "packed: a {} B frame split {}+{} across two drains came out once, whole",
+        frame.len(),
+        first.len(),
+        second.len()
+    ));
+    shim_off().await;
+}
+
+/// A packed frame holding `0x0A` bytes — which a line splitter, or a
+/// TextDecoder-then-split pump, cuts in pieces — is one frame.
+#[wasm_bindgen_test]
+async fn a_packed_frame_holding_a_newline_is_not_torn() {
+    if real_backing() {
+        log_skip("the scripted door is what writes a chosen frame");
+        return;
+    }
+    shim_over(&["c6-a"]).await;
+    let board = board_ids().await.first().cloned().expect("a board");
+    let id = granted_sessions().await[0].id;
+    open_port(id, false).await.expect("openPort");
+    yield_to_event_loop().await;
+    let mut reader = PortReader::default();
+    reader.take(id).await;
+
+    // Id 10 is a 0x0A byte inside the frame body, and COBS leaves every
+    // non-zero byte alone.
+    let message = unload_project(10);
+    let frame = packed_frame(&message);
+    assert!(
+        frame[1..].contains(&b'\n'),
+        "the frame body holds a 0x0A: {frame:02x?}"
+    );
+    js_deliver_raw_bytes(&board, &frame);
+    yield_to_event_loop().await;
+    let reads = reader.take(id).await;
+
+    assert_eq!(packed_frames(&reads), [json_of(&message)], "{reads:?}");
+    assert!(
+        !reads.iter().any(|read| matches!(read, WireRead::Error(_))),
+        "{reads:?}"
+    );
+    log("packed: a frame holding 0x0A came out as one frame");
+    shim_off().await;
+}
+
+/// Console text before, between and after packed frames stays lines, in
+/// order; the frames between them stay frames.
+#[wasm_bindgen_test]
+async fn console_text_between_packed_frames_stays_lines() {
+    if real_backing() {
+        log_skip("the scripted door is what interleaves on purpose");
+        return;
+    }
+    shim_over(&["c6-a"]).await;
+    let board = board_ids().await.first().cloned().expect("a board");
+    let id = granted_sessions().await[0].id;
+    open_port(id, false).await.expect("openPort");
+    yield_to_event_loop().await;
+    let mut reader = PortReader::default();
+    reader.take(id).await;
+
+    let (a, b) = (unload_project(3), unload_project(4));
+    let bytes = [
+        b"[INIT] boot\r\n".to_vec(),
+        packed_frame(&a),
+        b"[log] between\n".to_vec(),
+        packed_frame(&b),
+        b"[log] after\n".to_vec(),
+    ]
+    .concat();
+    js_deliver_raw_bytes(&board, &bytes);
+    yield_to_event_loop().await;
+    let reads = reader.take(id).await;
+
+    let order: Vec<String> = reads
+        .iter()
+        .filter_map(|read| match read {
+            WireRead::Line(line) if !line.is_empty() => Some(line.clone()),
+            WireRead::Frame(frame) if frame.packed => Some(frame.json.clone()),
+            WireRead::Line(_) => None,
+            other => Some(format!("unexpected {other:?}")),
+        })
+        .collect();
+    assert_eq!(
+        order,
+        [
+            "[INIT] boot".to_string(),
+            json_of(&a),
+            "[log] between".to_string(),
+            json_of(&b),
+            "[log] after".to_string(),
+        ]
+    );
+    log("packed: console lines and packed frames came out interleaved, in order");
+    shim_off().await;
+}
+
+/// The Rust half of the pump, as `browser_serial.rs` keeps it per port: the
+/// shipped controller's bytes through one [`WireReader`], reset when the
+/// controller's buffer generation moves (a reopen).
+#[derive(Default)]
+struct PortReader {
+    reader: Option<(u32, WireReader)>,
+}
+
+impl PortReader {
+    async fn take(&mut self, id: u32) -> Vec<WireRead> {
+        let taken = JsFuture::from(js_take_bytes(id)).await.expect("takeBytes");
+        let generation = number(&taken, "generation").expect("a generation") as u32;
+        let bytes = Reflect::get(&taken, &JsValue::from_str("bytes"))
+            .map(|value| js_sys::Uint8Array::new(&value).to_vec())
+            .expect("bytes");
+        if self.reader.as_ref().map(|(at, _)| *at) != Some(generation) {
+            self.reader = Some((generation, WireReader::new(false)));
+        }
+        let (_, reader) = self.reader.as_mut().expect("a reader");
+        let mut reads = Vec::new();
+        reader.push(&bytes, 0, |read| reads.push(read));
+        reads
+    }
+
+    /// [`Self::take`] as the lines the pre-packing pump produced.
+    async fn take_lines(&mut self, id: u32) -> Vec<String> {
+        self.take(id)
+            .await
+            .into_iter()
+            .filter_map(|read| match read {
+                WireRead::Line(line) => Some(line),
+                WireRead::Frame(frame) => Some(frame.to_line()),
+                _ => None,
+            })
+            .collect()
+    }
+}
+
+fn unload_project(id: u64) -> lpc_wire::WireServerMessage {
+    lpc_wire::WireServerMessage::new(id, lpc_wire::ServerMsgBody::UnloadProject)
+}
+
+fn json_of(message: &lpc_wire::WireServerMessage) -> String {
+    lpc_wire::json::to_string(message).expect("json")
+}
+
+/// `\n 0x00 'P' COBS 0x00`, with the firmware's own frame writer.
+fn packed_frame(message: &lpc_wire::WireServerMessage) -> Vec<u8> {
+    let mut framed = vec![0u8; 4096];
+    let n = lpc_wire::ser_packed_frame_to(&mut framed, message).expect("a packed frame");
+    framed.truncate(n);
+    framed
+}
+
+fn packed_frames(reads: &[WireRead]) -> Vec<String> {
+    reads
+        .iter()
+        .filter_map(|read| match read {
+            WireRead::Frame(frame) if frame.packed => Some(frame.json.clone()),
+            _ => None,
+        })
+        .collect()
 }
 
 /// Let queued microtasks, stream callbacks and the read pump run. Not a delay

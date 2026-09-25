@@ -392,6 +392,8 @@ impl LinkProvider for HostSerialEsp32Provider {
                 buffer: Arc::clone(&observed_lines),
                 inner: self.options.line_observer.clone(),
             })),
+            // `LP_WIRE_ENCODING`, or packed.
+            wire_encoding: None,
         };
         // Port opening happens here (the provider owns the endpoint→port
         // mapping); the transport machinery below the byte-stream seam is

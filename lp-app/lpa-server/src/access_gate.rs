@@ -10,7 +10,7 @@
 //! |---|---|
 //! | Public | `Hello`, `LoginBegin`, `LoginAnswer` |
 //! | Play | `ProjectRead`; `ProjectCommand` `PanelWrite`/`PanelClear`/`ReadOverlay`/`ReadInventory`; `ListAvailableProjects`, `ListLoadedProjects`; read-only fs (`Read`, `ListDir`, `ChangesSince`, `HashPackage`) inside the projects directory |
-//! | Edit | everything else: `LoadProject`, `UnloadProject`, `StopAllProjects`, every other `ProjectCommand`, every fs write/delete and every fs read outside the projects directory, `SetLogLevel`, `Reboot`, `ClearFaults` |
+//! | Edit | everything else: `LoadProject`, `UnloadProject`, `StopAllProjects`, every other `ProjectCommand`, every fs write/delete and every fs read outside the projects directory, `SetLogLevel`, `Reboot`, `ClearFaults`, and the access requests (`AccessList`, `AccessAdd`, `AccessRemove`, `AccessSetSwitches`) |
 //!
 //! Separately, and on EVERY link at EVERY tier, the fs handlers never
 //! return an access file's bytes (`handlers::handle_fs_request`,
@@ -56,9 +56,13 @@ impl Required {
 #[must_use]
 pub fn classify(request: &ClientRequest, projects_dir: &str) -> Required {
     match request {
-        ClientRequest::Hello | ClientRequest::LoginBegin | ClientRequest::LoginAnswer { .. } => {
-            Required::Public
-        }
+        // `SetEncoding` picks how this link's replies are written, not what
+        // they say: it grants nothing and reads nothing, so an untrusted link
+        // may ask for it before it logs in (plan `lp-json-pack`).
+        ClientRequest::Hello
+        | ClientRequest::LoginBegin
+        | ClientRequest::LoginAnswer { .. }
+        | ClientRequest::SetEncoding { .. } => Required::Public,
         ClientRequest::ProjectRead { .. }
         | ClientRequest::ListAvailableProjects
         | ClientRequest::ListLoadedProjects => Required::Play,
@@ -69,7 +73,11 @@ pub fn classify(request: &ClientRequest, projects_dir: &str) -> Required {
         | ClientRequest::StopAllProjects
         | ClientRequest::SetLogLevel { .. }
         | ClientRequest::Reboot
-        | ClientRequest::ClearFaults => Required::Edit,
+        | ClientRequest::ClearFaults
+        | ClientRequest::AccessList
+        | ClientRequest::AccessAdd { .. }
+        | ClientRequest::AccessRemove { .. }
+        | ClientRequest::AccessSetSwitches { .. } => Required::Edit,
     }
 }
 
@@ -131,6 +139,10 @@ mod tests {
             ClientRequest::LoginBegin,
             ClientRequest::LoginAnswer {
                 macs: alloc::vec![],
+            },
+            ClientRequest::SetEncoding {
+                encoding: lpc_wire::WireEncoding::Packed,
+                dictionary: 0,
             },
         ] {
             assert_eq!(classify(&request, "/projects"), Required::Public);

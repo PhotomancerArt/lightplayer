@@ -72,6 +72,15 @@ pub enum ServerMsgBody {
     ClearFaults {
         ledger_cleared: bool,
     },
+    /// Answer to [`crate::ClientRequest::SetEncoding`]: the encoding this
+    /// link's replies are written in from the NEXT frame on.
+    ///
+    /// `json` when the host asked for JSON, named a different dictionary, or
+    /// the embedder cannot pack. This frame is always JSON; the transport
+    /// switches after writing it.
+    SetEncoding {
+        encoding: crate::WireEncoding,
+    },
 
     Log {
         level: LogLevel,
@@ -160,6 +169,21 @@ pub enum ServerMsgBody {
     /// say "log in with an edit password" instead of timing out.
     NotPermitted {
         needs: lpc_access::Tier,
+    },
+    /// Who has access to this device: the device store's two switches and
+    /// every secret in it, without `k`. The answer to
+    /// [`crate::ClientRequest::AccessList`] and to each access change
+    /// (`AccessAdd`, `AccessRemove`, `AccessSetSwitches`), which reply with
+    /// the list as it now stands. Edit tier only.
+    ///
+    /// `ble_enabled` is the STORED value: a change applies at the next
+    /// boot, so it can differ from whether the radio is up right now.
+    /// Project sidecars are not listed; this is the device's own list.
+    #[serde(rename_all = "camelCase")]
+    AccessList {
+        ble_enabled: bool,
+        open: bool,
+        entries: Vec<crate::server::AccessEntryInfo>,
     },
 }
 
@@ -486,6 +510,41 @@ mod tests {
         );
     }
 
+    /// The same, for the access list the board sends.
+    #[cfg(feature = "ser-write-json")]
+    #[test]
+    fn access_list_encodes_identically_through_the_device_serializer() {
+        let body = access_list_sample();
+        let mut out = alloc::vec::Vec::new();
+        ser_write_json::ser::to_writer(&mut out, &body).unwrap();
+        assert_eq!(
+            core::str::from_utf8(&out).unwrap(),
+            crate::json::to_string(&body).unwrap()
+        );
+    }
+
+    /// Who has access: camelCase switches, one entry per secret, no key.
+    #[test]
+    fn access_list_round_trips_without_a_key() {
+        let json = crate::json::to_string(&access_list_sample()).unwrap();
+        assert_eq!(
+            json,
+            r#"{"accessList":{"bleEnabled":true,"open":false,"entries":[{"label":"Yona's MacBook","kind":"browser","tier":"edit","salt":"BQUFBQUFBQUFBQUFBQUFBQ==","addedAt":1790000000}]}}"#
+        );
+        match crate::json::from_str::<ServerMsgBody>(&json).unwrap() {
+            ServerMsgBody::AccessList {
+                ble_enabled,
+                open,
+                entries,
+            } => {
+                assert!(ble_enabled);
+                assert!(!open);
+                assert_eq!(entries[0].kind, lpc_access::SecretKind::Browser);
+            }
+            other => panic!("expected an access list, got {other:?}"),
+        }
+    }
+
     #[test]
     fn log_level_trace_round_trips() {
         let json = crate::json::to_string(&LogLevel::Trace).unwrap();
@@ -514,5 +573,22 @@ mod tests {
         let json = crate::json::to_string(&ServerMsgBody::SetLogLevel).unwrap();
         let deserialized: ServerMsgBody = crate::json::from_str(&json).unwrap();
         assert!(matches!(deserialized, ServerMsgBody::SetLogLevel));
+    }
+
+    fn access_list_sample() -> ServerMsgBody {
+        let entry = lpc_access::SecretEntry::from_password(
+            "Yona's MacBook",
+            lpc_access::Tier::Edit,
+            b"k",
+            [5; 16],
+            1,
+        )
+        .with_kind(lpc_access::SecretKind::Browser)
+        .with_added_at(1_790_000_000);
+        ServerMsgBody::AccessList {
+            ble_enabled: true,
+            open: false,
+            entries: alloc::vec![crate::server::AccessEntryInfo::from(&entry)],
+        }
     }
 }

@@ -10,18 +10,20 @@
 //!
 //! # Why hand-written and not a macro
 //!
-//! Eighteen requests, one impl each, all in this file: the pairing table is
+//! Twenty-one requests, one impl each, all in this file: the pairing table is
 //! greppable, and a reader who wants to know what `PushCommit` answers with
 //! reads it here rather than expanding a macro in their head. Revisit if the
 //! vocabulary grows several times over.
 
+use crate::account_access_info::AccountAccessInfo;
 use crate::ack::Ack;
 use crate::login_options::LoginOptionsInfo;
 use crate::me_info::MeInfo;
 use crate::request::{
-    AddMember, ArchiveProject, CloudRequest, GetEvents, GetHeads, GetMe, GetProject, HaveBlobs,
-    ListMyProjects, ListSessions, LoginOptions, PublishProject, PushCommit, RemoveMember,
-    RestoreProject, RevokeSession, SetAccess, UpdateMe, WhoAmI,
+    AddMember, ArchiveProject, CloudRequest, GetAccountAccess, GetEvents, GetHeads, GetMe,
+    GetProject, HaveBlobs, ListMyProjects, ListSessions, LoginOptions, PublishProject, PushCommit,
+    RemoveMember, ResetAccountKey, RestoreProject, RevokeSession, SetAccess, SetAccountPassword,
+    UpdateMe, WhoAmI,
 };
 use crate::response::{
     CloudResponse, Events, Heads, MissingBlobs, ProjectInfo, ProjectList, PushResult, UserInfo,
@@ -240,6 +242,39 @@ impl CloudCallSpec for LoginOptions {
     fn extract(response: CloudResponse) -> Option<LoginOptionsInfo> {
         match response {
             CloudResponse::LoginOptionsInfo(info) => Some(info),
+            _ => None,
+        }
+    }
+}
+
+impl CloudCallSpec for GetAccountAccess {
+    type Response = AccountAccessInfo;
+
+    fn extract(response: CloudResponse) -> Option<AccountAccessInfo> {
+        match response {
+            CloudResponse::AccountAccessInfo(info) => Some(info),
+            _ => None,
+        }
+    }
+}
+
+impl CloudCallSpec for SetAccountPassword {
+    type Response = AccountAccessInfo;
+
+    fn extract(response: CloudResponse) -> Option<AccountAccessInfo> {
+        match response {
+            CloudResponse::AccountAccessInfo(info) => Some(info),
+            _ => None,
+        }
+    }
+}
+
+impl CloudCallSpec for ResetAccountKey {
+    type Response = AccountAccessInfo;
+
+    fn extract(response: CloudResponse) -> Option<AccountAccessInfo> {
+        match response {
+            CloudResponse::AccountAccessInfo(info) => Some(info),
             _ => None,
         }
     }

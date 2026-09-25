@@ -12,12 +12,20 @@
 //!
 //! With every slot taken the board stops advertising, so a third central
 //! simply finds nothing to connect to.
+//!
+//! **A runner error is survivable.** The runner is run again, which resets
+//! the controller; `hci_transport` turns that reset into a `Disconnection
+//! Complete` for every open connection (their tasks end and free their
+//! slots), and the advertiser drops whatever it was waiting on and
+//! advertises again. Before 2026-09-25 the restart left the dead connections
+//! open in the host and the board silent until a USB reboot
+//! (docs/defects/2026-09-25-a-knob-jump-over-bluetooth-kills-the-c6-ble-host.md).
 
 use core::sync::atomic::{AtomicBool, Ordering};
 
 use alloc::boxed::Box;
 use embassy_executor::Spawner;
-use embassy_futures::select::{Either, select};
+use embassy_futures::select::{Either3, select3};
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::signal::Signal;
 use embassy_time::Timer;
@@ -27,12 +35,13 @@ use trouble_host::prelude::*;
 
 use super::advertising;
 use super::ble_connection;
+use super::hci_transport::LpHciTransport;
 use super::nus_service::NusServer;
 use crate::board::esp32c6::board_quirks::BoardQuirksApplied;
 
 /// The HCI controller: esp-radio's BLE blob behind bt-hci's external
 /// controller, 20 command slots (the spike's figure).
-pub type BleController = ExternalController<BleConnector<'static>, 20>;
+pub type BleController = ExternalController<LpHciTransport, 20>;
 /// The host stack, for the life of the image.
 pub type BleStack = Stack<'static, BleController, DefaultPacketPool>;
 /// What the host's calls fail with.
@@ -51,6 +60,9 @@ const L2CAP_CHANNELS_MAX: usize = 2 * RADIO_LINK_SLOTS;
 static SLOT_BUSY: [AtomicBool; RADIO_LINK_SLOTS] = [AtomicBool::new(false), AtomicBool::new(false)];
 /// A connection task ended and gave its slot back.
 static SLOT_FREED: Signal<CriticalSectionRawMutex, ()> = Signal::new();
+/// The host runner failed and is being run again: the controller has been
+/// reset, so whatever the advertiser was doing is gone.
+static HOST_RESTARTED: Signal<CriticalSectionRawMutex, ()> = Signal::new();
 
 /// Bring BLE up and start serving it. Needs the RF-switch quirk to have run
 /// first (`_quirks` is the proof). A controller that fails to start is
@@ -65,7 +77,7 @@ pub fn start(spawner: Spawner, bt: esp_hal::peripherals::BT<'static>, _quirks: B
         }
     };
     let heap_controller = esp_alloc::HEAP.used();
-    let controller: BleController = ExternalController::new(connector);
+    let controller: BleController = ExternalController::new(LpHciTransport::new(connector));
 
     let resources: &'static mut HostResources<
         DefaultPacketPool,
@@ -106,9 +118,15 @@ pub fn start(spawner: Spawner, bt: esp_hal::peripherals::BT<'static>, _quirks: B
 
 #[embassy_executor::task]
 async fn runner_task(mut runner: Runner<'static, BleController, DefaultPacketPool>) {
+    let mut restarts: u32 = 0;
     loop {
         if runner.run().await.is_err() {
-            log::error!("[ble] host runner error — restarting it");
+            restarts = restarts.wrapping_add(1);
+            log::error!(
+                "[ble] host runner error — restarting it (restart {restarts}, heap free {} B)",
+                esp_alloc::HEAP.free()
+            );
+            HOST_RESTARTED.signal(());
             Timer::after_millis(100).await;
         }
     }
@@ -126,14 +144,16 @@ async fn advertise_task(
             SLOT_FREED.wait().await;
             continue;
         };
-        // A name change restarts advertising under the new name.
-        match select(
+        // A name change restarts advertising under the new name; a host
+        // restart restarts it on the reset controller.
+        match select3(
             advertising::advertise(&mut peripheral, server),
             advertising::name_changed(),
+            HOST_RESTARTED.wait(),
         )
         .await
         {
-            Either::First(Ok(conn)) => {
+            Either3::First(Ok(conn)) => {
                 SLOT_BUSY[slot].store(true, Ordering::Relaxed);
                 match connection_task(conn, slot, server, stack) {
                     Ok(token) => spawner.spawn(token),
@@ -145,11 +165,12 @@ async fn advertise_task(
                     }
                 }
             }
-            Either::First(Err(_)) => {
+            Either3::First(Err(_)) => {
                 log::warn!("[ble] advertising failed; retrying in 1 s");
                 Timer::after_secs(1).await;
             }
-            Either::Second(()) => {}
+            Either3::Second(()) => {}
+            Either3::Third(()) => log::warn!("[ble] host restarted — advertising again"),
         }
     }
 }

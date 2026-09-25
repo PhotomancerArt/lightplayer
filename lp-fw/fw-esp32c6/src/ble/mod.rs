@@ -24,6 +24,7 @@ mod advertising;
 mod ble_connection;
 mod ble_task;
 mod conn_params;
+mod hci_transport;
 mod notify_queue;
 mod nus_service;
 

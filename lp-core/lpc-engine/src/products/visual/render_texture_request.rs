@@ -2,7 +2,7 @@
 
 use lps_shared::TextureStorageFormat;
 
-use super::{ConsumerPolicy, VisualSpace};
+use super::{ConsumerPolicy, ScopeGeometry, VisualSpace};
 
 /// Texture render request issued by a consumer that needs a full materialized frame.
 ///
@@ -22,4 +22,9 @@ pub struct RenderTextureRequest {
     /// The consumer's projection policy, honored by the producer when the
     /// spaces disagree.
     pub policy: ConsumerPolicy,
+    /// The consumer's scope geometry in this request's pixel frame, when it
+    /// has lamps to describe. Read only by a pattern-space producer; `None`
+    /// means every texel centre is a lamp. See
+    /// [`VisualSampleStream::scope`](super::VisualSampleStream::scope).
+    pub scope: Option<ScopeGeometry>,
 }

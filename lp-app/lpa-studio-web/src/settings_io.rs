@@ -117,10 +117,22 @@ pub async fn fetch_dev_settings() -> Option<StudioSettings> {
 /// in to pieces over Bluetooth (BLE M6): local only, never synced (PQ8).
 pub const BLE_PASSWORDS_KEY: &str = "lp.ble.passwords.v1";
 
-/// `localStorage` key for what this browser wrote to each piece's device
-/// store (the store is write-only on the device, so this is the only copy
-/// Studio can list).
-pub const BLE_DEVICE_ACCESS_KEY: &str = "lp.ble.device-access.v1";
+/// `localStorage` key for each device's last "Who has access" list, cached
+/// so the panel renders while the device is away. It holds no key.
+pub const ACCESS_DEVICE_LISTS_KEY: &str = "lp.access.device-lists.v1";
+
+/// `localStorage` key for this browser's own device key (a secret, a salt,
+/// and its name), minted once. Local only, never synced (PQ8).
+pub const ACCESS_BROWSER_KEY: &str = "lp.access.browser.v1";
+
+/// `localStorage` key for the signed-in account's device keys, cached so a
+/// phone offline still unlocks (plan D8). Removed on sign-out.
+pub const ACCESS_ACCOUNT_KEY: &str = "lp.access.account.v1";
+
+/// The retired copy of each device store this browser wrote whole (BLE M6).
+/// It carried login-equivalent keys and nothing reads it now: removed at
+/// boot.
+pub const LEGACY_BLE_DEVICE_ACCESS_KEY: &str = "lp.ble.device-access.v1";
 
 /// Read one `localStorage` document. Blocked storage, private mode and a
 /// missing key all read as "nothing stored".
@@ -134,15 +146,32 @@ pub fn load_local(key: &str) -> Option<String> {
 /// still applies for this session.
 pub fn store_access(persist: lpa_studio_core::AccessPersist) {
     let (key, json) = match persist {
-        lpa_studio_core::AccessPersist::Passwords(json) => (BLE_PASSWORDS_KEY, json),
-        lpa_studio_core::AccessPersist::Devices(json) => (BLE_DEVICE_ACCESS_KEY, json),
+        lpa_studio_core::AccessPersist::Passwords(json) => (BLE_PASSWORDS_KEY, Some(json)),
+        lpa_studio_core::AccessPersist::Devices(json) => (ACCESS_DEVICE_LISTS_KEY, Some(json)),
+        lpa_studio_core::AccessPersist::Browser(json) => (ACCESS_BROWSER_KEY, Some(json)),
+        lpa_studio_core::AccessPersist::Account(json) => (ACCESS_ACCOUNT_KEY, json),
     };
     let storage = web_sys::window().and_then(|window| window.local_storage().ok().flatten());
     let Some(storage) = storage else {
         log::warn!("Bluetooth access not saved: localStorage is unavailable");
         return;
     };
-    if let Err(error) = storage.set_item(key, &json) {
+    let result = match json {
+        Some(json) => storage.set_item(key, &json),
+        None => storage.remove_item(key),
+    };
+    if let Err(error) = result {
         log::warn!("Bluetooth access not saved to localStorage: {error:?}");
+    }
+}
+
+/// Remove one `localStorage` document (a retired key). Blocked storage is
+/// nothing to remove.
+pub fn remove_local(key: &str) {
+    let storage = web_sys::window().and_then(|window| window.local_storage().ok().flatten());
+    if let Some(storage) = storage
+        && let Err(error) = storage.remove_item(key)
+    {
+        log::warn!("could not remove {key} from localStorage: {error:?}");
     }
 }

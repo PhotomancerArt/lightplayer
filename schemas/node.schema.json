@@ -586,6 +586,11 @@
           },
           "type": "object"
         },
+        "coords": {
+          "description": "Unset = Pixels: pos arrives in render pixels. Pattern: pos arrives normalized to the lamps (long side -1..1, y up; 0..1 along a strip), with patternExtent, patternPitch and lampCount available as uniforms.",
+          "title": "Coordinates",
+          "type": "string"
+        },
         "float_mode": {
           "description": "Unset = Auto (target default): the target's native representation. Set this only to force one representation regardless of target.",
           "title": "Float mode",

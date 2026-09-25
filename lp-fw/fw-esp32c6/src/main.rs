@@ -476,10 +476,12 @@ fn boot_firmware(spawner: embassy_executor::Spawner) -> FirmwareApp {
     let _ = wifi;
     let hardware_system = Rc::new(hardware_system);
 
-    // BLE (PQ2): off until the device store enables it, read once here. After
-    // the Wi-Fi/ESP-NOW bring-up above (the order M2's Run G proved), after
-    // the board quirks (the token), before the server exists. A board without
-    // the flag never touches the BLE controller.
+    // BLE: on unless the device store turns it off, read once here (a
+    // missing store is `fresh()`: Bluetooth on, locked, no keys; a damaged
+    // one is `locked()`: off). After the Wi-Fi/ESP-NOW bring-up above (the
+    // order M2's Run G proved), after the board quirks (the token), before
+    // the server exists. A board whose store says off never touches the BLE
+    // controller.
     #[cfg(feature = "ble")]
     let ble_started = {
         let store = lpa_server::access_store::read_device_store(base_fs.as_ref());
@@ -489,7 +491,7 @@ fn boot_firmware(spawner: embassy_executor::Spawner) -> FirmwareApp {
         }
         match (store.ble_enabled, board::esp32c6::init::take_bt()) {
             (true, Some(bt)) => {
-                log::info!("[ble] enabled by the device store — starting");
+                log::info!("[ble] enabled (device store, or none: on by default) — starting");
                 ble::start(spawner, bt, quirks_applied);
                 true
             }
@@ -576,6 +578,11 @@ fn boot_firmware(spawner: embassy_executor::Spawner) -> FirmwareApp {
         hardware_registry.manifest().board_id(),
     )));
     server.set_reboot_hook(Some(Rc::new(reboot_now)));
+    // JSON Pack: answer a host's opt-in with what this image's transport
+    // can write (`fw-esp32-common/json-pack`).
+    server.set_packed_encoding_supported(
+        fw_esp32_common::serial::server_msg::PACKED_ENCODING_SUPPORTED,
+    );
     // Login challenges draw from the chip's hardware RNG; the server itself
     // never draws randomness (sans-IO).
     server.set_entropy_source(Some(fill_random));

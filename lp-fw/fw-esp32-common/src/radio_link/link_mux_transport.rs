@@ -21,6 +21,11 @@
 //! 3. **A radio link must log in within [`LOGIN_DEADLINE_MS`]** of opening,
 //!    unless the device is `open` — [`LinkMuxTransport::expire_unauthenticated`],
 //!    driven from the server loop, which holds the clock and the server.
+//!    While the link's own `LoginBegin` challenge is outstanding the deadline
+//!    waits for it — a person is typing a password — but never past that
+//!    challenge's expiry (`lpc_access::CHALLENGE_TTL_MS`), which the server
+//!    enforces: once the challenge expires or its answer is refused, the
+//!    ordinary deadline applies again, and a link already past it closes.
 //!
 //! A radio send that fails does **not** return an error to the server. The
 //! server's `tick_and_send` stops answering the whole batch on the first
@@ -63,6 +68,11 @@ struct RadioLink {
     opened_at_ms: Option<u64>,
     /// It held a tier once; the deadline no longer applies.
     cleared: bool,
+    /// What this link's replies are written in: JSON until the server
+    /// answers its `SetEncoding` opt-in, then what that answer names — the
+    /// same rule the USB transport keeps (plan `lp-json-pack`). A radio link
+    /// that closes takes its encoding with it; the next one starts at JSON.
+    encoding: lpc_wire::WireEncoding,
 }
 
 /// The USB transport plus the radio links, as one [`ServerTransport`].
@@ -105,18 +115,28 @@ impl<U: ServerTransport, D: DelayNs> LinkMuxTransport<U, D> {
     }
 
     /// Close every radio link that has been open for [`LOGIN_DEADLINE_MS`]
-    /// without holding a tier. `now_ms` is the server loop's clock;
-    /// `has_tier` asks the server (`LpServer::link_tier(..).is_some()`).
-    pub fn expire_unauthenticated(&mut self, now_ms: u64, has_tier: impl Fn(Link) -> bool) {
+    /// without holding a tier, unless its own login challenge is still
+    /// outstanding. `now_ms` is the server loop's clock; `has_tier` and
+    /// `login_pending` ask the server (`LpServer::link_tier(..).is_some()`,
+    /// `LpServer::login_pending`).
+    pub fn expire_unauthenticated(
+        &mut self,
+        now_ms: u64,
+        has_tier: impl Fn(Link) -> bool,
+        login_pending: impl Fn(Link) -> bool,
+    ) {
         let mut expired = Vec::new();
         for link in &mut self.radio {
             if link.cleared {
                 continue;
             }
             let opened_at = *link.opened_at_ms.get_or_insert(now_ms);
-            if has_tier(RadioLinkPort::link(link.id)) {
+            let wire_link = RadioLinkPort::link(link.id);
+            if has_tier(wire_link) {
                 link.cleared = true;
-            } else if now_ms.saturating_sub(opened_at) >= LOGIN_DEADLINE_MS {
+            } else if now_ms.saturating_sub(opened_at) >= LOGIN_DEADLINE_MS
+                && !login_pending(wire_link)
+            {
                 expired.push(link.id);
             }
         }
@@ -154,6 +174,7 @@ impl<U: ServerTransport, D: DelayNs> LinkMuxTransport<U, D> {
                         slot,
                         opened_at_ms: None,
                         cleared: false,
+                        encoding: lpc_wire::WireEncoding::Json,
                     });
                     self.opened.push(RadioLinkPort::link(link));
                 }
@@ -185,15 +206,29 @@ impl<U: ServerTransport, D: DelayNs> LinkMuxTransport<U, D> {
         link: LinkId,
         msg: WireServerMessage,
     ) -> Result<(), TransportError> {
-        let Some(slot) = self.radio.iter().find(|l| l.id == link).map(|l| l.slot) else {
+        let Some((slot, link_encoding)) = self
+            .radio
+            .iter()
+            .find(|l| l.id == link)
+            .map(|l| (l.slot, l.encoding))
+        else {
             log::debug!("radio link {link}: gone, skipping frame id={}", msg.id);
             return Ok(());
         };
         let id = msg.id;
+        // The answer to an opt-in is always JSON (the host reads it before it
+        // knows the outcome); the switch it announces applies to every frame
+        // after it, as on the USB transport.
+        let (encoding, switch_to) = match msg.msg {
+            lpc_wire::server::ServerMsgBody::SetEncoding { encoding } => {
+                (lpc_wire::WireEncoding::Json, Some(encoding))
+            }
+            _ => (link_encoding, None),
+        };
         // Same buffer, same exclusivity argument as the USB write: the send
         // below does not return until the radio side is done with it or the
         // lease is revoked.
-        let len = serialize_server_msg(&msg)?;
+        let len = serialize_server_msg(&msg, encoding)?;
         drop(msg);
         let generation = self.generation;
         self.generation = self.generation.wrapping_add(1);
@@ -214,7 +249,15 @@ impl<U: ServerTransport, D: DelayNs> LinkMuxTransport<U, D> {
         // Whatever happened, the buffer is the server's again from here.
         self.port.revoke_frame();
         match outcome {
-            Either::First(Ok(())) => Ok(()),
+            Either::First(Ok(())) => {
+                if let Some(encoding) = switch_to
+                    && let Some(l) = self.radio.iter_mut().find(|l| l.id == link)
+                {
+                    l.encoding = encoding;
+                    log::info!("radio link {link}: replies are now {}", encoding.as_str());
+                }
+                Ok(())
+            }
             Either::First(Err(error)) => {
                 log::error!(
                     "radio link {link}: dropping frame id={id} ({len} B): {error} — closing"
@@ -298,7 +341,11 @@ impl<U: ServerTransport, D: DelayNs> LinkUpkeep for LinkMuxTransport<U, D> {
     }
 
     fn upkeep(&mut self, server: &LpServer, now_ms: u64) {
-        self.expire_unauthenticated(now_ms, |link| server.link_tier(link).is_some());
+        self.expire_unauthenticated(
+            now_ms,
+            |link| server.link_tier(link).is_some(),
+            |link| server.login_pending(link),
+        );
         if let Some(hook) = self.upkeep_hook {
             hook(server, now_ms);
         }
@@ -420,10 +467,10 @@ mod tests {
         let port = leak_port();
         let mut mux = LinkMuxTransport::new(Usb::default(), port, NeverDelay);
         let link = open_link(port, &mut mux, 0);
-        mux.expire_unauthenticated(1_000, |_| false);
-        mux.expire_unauthenticated(1_000 + LOGIN_DEADLINE_MS - 1, |_| false);
+        mux.expire_unauthenticated(1_000, |_| false, |_| false);
+        mux.expire_unauthenticated(1_000 + LOGIN_DEADLINE_MS - 1, |_| false, |_| false);
         assert!(mux.take_closed_links().is_empty());
-        mux.expire_unauthenticated(1_000 + LOGIN_DEADLINE_MS, |_| false);
+        mux.expire_unauthenticated(1_000 + LOGIN_DEADLINE_MS, |_| false, |_| false);
         assert_eq!(mux.take_closed_links(), vec![link]);
         assert_eq!(
             port.slot(0).take_close_request(),
@@ -436,10 +483,46 @@ mod tests {
         let port = leak_port();
         let mut mux = LinkMuxTransport::new(Usb::default(), port, NeverDelay);
         let _link = open_link(port, &mut mux, 0);
-        mux.expire_unauthenticated(0, |_| false);
-        mux.expire_unauthenticated(5_000, |_| true);
-        mux.expire_unauthenticated(60_000, |_| false);
+        mux.expire_unauthenticated(0, |_| false, |_| false);
+        mux.expire_unauthenticated(5_000, |_| true, |_| false);
+        mux.expire_unauthenticated(60_000, |_| false, |_| false);
         assert!(mux.take_closed_links().is_empty());
+    }
+
+    #[test]
+    fn an_outstanding_login_holds_the_deadline_until_it_ends() {
+        let port = leak_port();
+        let mut mux = LinkMuxTransport::new(Usb::default(), port, NeverDelay);
+        let link = open_link(port, &mut mux, 0);
+        mux.expire_unauthenticated(1_000, |_| false, |_| false);
+        // LoginBegin at 9 s; the person is still typing at 10 s and at 38 s.
+        mux.expire_unauthenticated(1_000 + LOGIN_DEADLINE_MS, |_| false, |_| true);
+        mux.expire_unauthenticated(38_000, |_| false, |_| true);
+        assert!(mux.take_closed_links().is_empty());
+        // The challenge expired (the server says so): the link is past its
+        // own deadline, so it closes on the next upkeep.
+        mux.expire_unauthenticated(39_000, |_| false, |_| false);
+        assert_eq!(mux.take_closed_links(), vec![link]);
+        assert_eq!(
+            port.slot(0).take_close_request(),
+            Some("no login within the deadline")
+        );
+    }
+
+    #[test]
+    fn a_login_begun_before_the_deadline_and_refused_does_not_extend_it() {
+        let port = leak_port();
+        let mut mux = LinkMuxTransport::new(Usb::default(), port, NeverDelay);
+        let link = open_link(port, &mut mux, 0);
+        mux.expire_unauthenticated(0, |_| false, |_| false);
+        // Pending at 4 s; refused at 6 s (no longer pending): the ordinary
+        // 10 s deadline still holds and nothing moved it.
+        mux.expire_unauthenticated(4_000, |_| false, |_| true);
+        mux.expire_unauthenticated(6_000, |_| false, |_| false);
+        mux.expire_unauthenticated(LOGIN_DEADLINE_MS - 1, |_| false, |_| false);
+        assert!(mux.take_closed_links().is_empty());
+        mux.expire_unauthenticated(LOGIN_DEADLINE_MS, |_| false, |_| false);
+        assert_eq!(mux.take_closed_links(), vec![link]);
     }
 
     #[test]

@@ -12,6 +12,9 @@ default = []
 std = []
 
 [dependencies]
+# Byte fields (the account device key and its salts) travel as STANDARD
+# padded base64 strings — the repo's one spelling for binary in JSON.
+base64 = { workspace = true }
 lpc-history = { path = "../lpc-history" }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }

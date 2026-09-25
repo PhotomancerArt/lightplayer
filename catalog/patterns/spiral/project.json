@@ -1,0 +1,9 @@
+{
+  "format": 11,
+  "name": "Spiral",
+  "description": "Pinwheel arms of palette colour turning around the centre, twisting outward.",
+  "kind": "pattern",
+  "exports": [
+    "effect"
+  ]
+}

@@ -8,7 +8,7 @@ license.workspace = true
 rust-version.workspace = true
 
 [features]
-default = ["esp32c6", "server", "radio", "ble"]
+default = ["esp32c6", "server", "radio", "ble", "json-pack"]
 esp32c6 = [
     "esp-backtrace/esp32c6",
     "esp-bootloader-esp-idf/esp32c6",
@@ -51,12 +51,18 @@ ble = [
     "dep:heapless",
     "dep:static_cell",
     "dep:embassy-sync-07",
+    "dep:embedded-io-07",
 ]
 naga = ["lpa-server/naga"]
 # NOTE: the former `ws281x_2blocks` feature is gone: the RMT block plan is now
 # computed at driver init from the board manifest's declared WS281x channel
 # count (1 declared channel = the whole 192-word RMT RAM, 2 = one 48-word
 # block each). See `src/output/rmt/c6_rmt.rs::plan_for_declared`.
+
+# JSON Pack (plan `lp-json-pack`, Q4): replies go out packed on a link whose
+# host opted in (`ClientRequest::SetEncoding`); every other link stays JSON.
+# On by default; without it the board answers every opt-in "json".
+json-pack = ["server", "fw-esp32-common/json-pack"]
 
 # Periodic WS281x telemetry over the serial link — OFF by default.
 #
@@ -153,6 +159,11 @@ desk_espnow_meter = ["radio"]
 # active/idle switch) come from `/.lp/ble-exp.txt`, read at boot. See
 # `src/ble/conn_params.rs`, `desk`.
 desk_ble_params = ["ble"]
+# The BLE host-runner recovery drill — OFF by default, never shipped: an ATT
+# write carrying `LP-DESK-FORCE-BLE-HOST-RESTART` fails the host's read the way
+# an unparseable packet does, so a desk board can prove that a runner restart
+# closes its links and advertises again. See `src/ble/hci_transport.rs`.
+desk_ble_fault = ["ble"]
 heap_map_diag = ["lpc-shared"]
 heap_track_diag = ["heap_map_diag", "esp-alloc/alloc-hooks"]
 heap_diag_ble_standin = ["heap_map_diag"]
@@ -276,6 +287,15 @@ fixture-old-proto = ["lpa-server/fixture-old-proto"]
 #   cargo build --profile release-esp32 --features esp32c6,server,radio,spike_uart0_link
 spike_uart0_link = []
 fixture-no-hello = ["lpa-server/fixture-no-hello", "fw-core/fixture-no-hello"]
+# Emulator FIXTURE, never shipped: the io_task writes through esp-hal's raw
+# TX half, WITHOUT the USB-Serial-JTAG IN-endpoint gate
+# (fw_esp32_common::serial::in_endpoint) — the write path as it was before
+# PR #795. Exists so the emulated C6 can show the packed-frame loss the gate
+# fixes, under the link model's free-lag hypothesis
+# (lp-cli/tests/emu_usb_free_lag.rs;
+# docs/defects/2026-09-24-the-real-c6-link-loses-bytes-inside-a-packed-frame.md).
+# Not `test_*`: that prefix selects a harness entrypoint instead of the app.
+fixture-no-in-endpoint-gate = []
 
 [dependencies]
 lp-collection = { workspace = true, features = ["serde"] }
@@ -302,6 +322,9 @@ heapless = { version = "0.9", optional = true }
 # spike module aliases this one in as `embassy_sync`.
 static_cell = { version = "2.1", optional = true }
 embassy-sync-07 = { package = "embassy-sync", version = "0.7", optional = true }
+# bt-hci 0.8's `Transport` names embedded-io 0.7's `ErrorType`; the BLE link's
+# own HCI transport (`ble::hci_transport`) implements it.
+embedded-io-07 = { package = "embedded-io", version = "0.7", optional = true }
 critical-section = "1"
 enumset = "1"
 

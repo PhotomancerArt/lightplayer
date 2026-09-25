@@ -70,9 +70,9 @@ pub use app::studio::PlayViewOp;
 // The project's declared hardware (D41): the web shell's Hardware row and
 // the gallery card's "for <board>" badge both read it.
 pub use app::access::{
-    AccessCommand, AccessPersist, AccessTier, DEFAULT_KDF_ITERATIONS, DeviceAccessChange,
-    NewSecret, UiAccessPanel, UiAccessSecret, UiDeviceAccess, UiLoginPrompt, UiProjectAccess,
-    not_permitted_sentence, tier_word,
+    AccessAdded, AccessCommand, AccessPersist, AccessTier, AccountKeys, BrowserKey,
+    DEFAULT_KDF_ITERATIONS, DeviceAccessChange, PLAY_ONLY_SENTENCE, SecretKind, UiAccessEntry,
+    UiAccessPanel, UiDeviceAccess, UiLoginPrompt, UiUnlockOffer, not_permitted_sentence, tier_word,
 };
 pub use app::frame_feed::{
     CLOSE_INSPECTION_SAMPLE_FORMAT, CardFeedApply, CardFeedState, PREVIEW_SAMPLE_FORMAT,
@@ -175,7 +175,8 @@ pub use app::studio::{
     UiChromeSessionControl, UiChromeSessionStatus, UiConsoleView, UiError, UiLensCard,
     UiLensRuntime, UiLogDraft, UiLogEntry, UiLogLevel, UiLogOrigin, UiLogSource, UiNotice,
     UiNoticeLevel, UiResult, UxActivityTarget, UxUpdate, UxUpdateSink, VERDICT_CHASE_INTERVAL,
-    VERDICT_CHASE_TICKS, ViewPublisher, has_unsaved_work, studio_view_channel,
+    VERDICT_CHASE_TICKS, ViewPublisher, has_unsaved_work, set_device_lens_pause_override,
+    studio_view_channel,
 };
 pub use core::notice::UiNotices;
 pub use core::view::activity_view::UiActivityStep;

@@ -34,8 +34,10 @@
 // # The bytes buffer has exactly one drainer at a time
 //
 // Two consumers read it: the model's pump (`takeBytes`, raw) and an
-// `lpa-client` conversation (`takeLines`, whole lines, the remainder left
-// behind for the pump). They never run together — the effects layer pauses
+// `lpa-client` conversation (`takeBytes` too, handing back what it could not
+// finish with `returnEmuBytes`, so the pump reads the remainder). Nothing here
+// decodes text: a link that opted in carries packed frames, which hold any
+// byte, and the one splitter for them is Rust's (`lpc_wire::WireStream`). They never run together — the effects layer pauses
 // the pump for the duration of a coarse effect, which is the same
 // exclusive-borrow discipline the serial provider's `PortLineIo` documents.
 
@@ -319,30 +321,12 @@ export function takeEmuBytes(id) {
 }
 
 /**
- * Whole lines the board has said, with the trailing partial left in the
- * buffer for whoever drains next.
+ * Put bytes a drainer took but could not finish (a partial line, a partial
+ * packed frame) back at the FRONT of the buffer, for whoever drains next.
  */
-export function takeEmuLines(id) {
-  const e = entry(id);
-  const bytes = drain(e);
-  let end = -1;
-  for (let at = bytes.length - 1; at >= 0; at -= 1) {
-    if (bytes[at] === 0x0a) {
-      end = at;
-      break;
-    }
-  }
-  if (end < 0) {
-    if (bytes.length > 0) e.chunks.push(bytes);
-    return [];
-  }
-  const remainder = bytes.subarray(end + 1);
-  if (remainder.length > 0) e.chunks.push(remainder.slice());
-  return new TextDecoder()
-    .decode(bytes.subarray(0, end))
-    .split("\n")
-    .map((line) => line.replace(/\r$/, ""))
-    .filter((line) => line.length > 0);
+export function returnEmuBytes(id, bytes) {
+  if (bytes.length === 0) return;
+  entry(id).chunks.unshift(bytes.slice());
 }
 
 /** The first failure since the last ask, or `null`. */

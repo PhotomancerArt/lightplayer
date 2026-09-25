@@ -26,6 +26,10 @@ impl IdMint for SecureMint {
         fill(&mut token);
         token
     }
+
+    fn random_bytes(&mut self, out: &mut [u8]) {
+        fill(out);
+    }
 }
 
 fn fill(bytes: &mut [u8]) {
@@ -43,6 +47,10 @@ mod tests {
         let mut mint = SecureMint;
         assert_ne!(mint.uid_bytes(), mint.uid_bytes());
         assert_ne!(mint.session_token(), mint.session_token());
+        let (mut a, mut b) = ([0u8; 32], [0u8; 32]);
+        mint.random_bytes(&mut a);
+        mint.random_bytes(&mut b);
+        assert_ne!(a, b);
     }
 
     #[test]

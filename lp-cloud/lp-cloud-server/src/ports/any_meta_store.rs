@@ -1,7 +1,8 @@
 //! Whichever [`MetaStore`] the configuration named.
 
 use lp_cloud_domain::{
-    CloudProject, CloudUser, MemberRecord, MetaStore, ProjectRefs, SessionRecord, StoredEvent,
+    AccountAccess, CloudProject, CloudUser, MemberRecord, MetaStore, ProjectRefs, SessionRecord,
+    StoredEvent,
 };
 use lpc_cloud_api::SidecarMeta;
 use lpc_history::{ContentHash, HistoryEvent, PrefixedUid};
@@ -47,6 +48,14 @@ impl MetaStore for AnyMetaStore {
 
     fn users(&self, limit: usize) -> Vec<CloudUser> {
         self.0.users(limit)
+    }
+
+    fn put_account_access(&mut self, access: AccountAccess) {
+        self.0.put_account_access(access);
+    }
+
+    fn account_access(&self, user: PrefixedUid) -> Option<AccountAccess> {
+        self.0.account_access(user)
     }
 
     fn put_session(&mut self, session: SessionRecord) {

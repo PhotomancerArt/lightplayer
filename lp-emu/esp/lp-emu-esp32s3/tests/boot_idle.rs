@@ -54,13 +54,14 @@
 //! lost) and woke early on that stale raw bit (one 64-byte packet of the
 //! boot `hello` was lost, until an unrelated timing shift hid it).
 //!
-//! The fix is the firmware's: `fw-esp32s3/src/serial/in_endpoint.rs` waits
-//! for the buffer to be free and clears the stale bit before every io_task
-//! write. So this file pins the **mechanism**, not a byte count that moves
-//! with timing: on every path — a draining host, no host, a closed port, a
-//! scripted cable, a request on the wire — the guest **never writes into a
-//! pending or full buffer** (`Machine::usb_sj_refused() == Some(0)`), and
-//! with a draining host nothing is merely tried at all.
+//! The fix is the firmware's: `fw-esp32-common/src/serial/in_endpoint.rs` (the
+//! io_task gate, shared with the C6) waits for the buffer to be free and clears
+//! the stale bit before every io_task packet. So this file pins the
+//! **mechanism**, not a byte count that moves with timing: on every path — a
+//! draining host, no host, a closed port, a scripted cable, a request on the
+//! wire — the guest **never writes into a pending or full buffer**
+//! (`Machine::usb_sj_refused() == Some(0)`), and with a draining host nothing
+//! is merely tried at all.
 //!
 //! The `[INIT]` chain itself (esp-println, polled) is delivered whole and
 //! is still pinned byte for byte as the stream's prefix.

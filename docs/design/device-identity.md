@@ -259,17 +259,21 @@ Option<RegisteredDevice>` for recognition ("This board was Porch sign
   (associations/history device uids embed MACs) at export. Envelope
   posture today is version+refuse, so nothing regresses now.
   *2026-09-24:* the other half of envelope hygiene, **secrets**, is done.
-  The access sidecar `<project>/.lp/access.json` is left out of zip export
+  An access sidecar `<project>/.lp/access.json` is left out of zip export
   and of the pasted package envelope by name, and cloud push, publish and
-  fork skip it with the rest of `/.lp/`
-  (`docs/adr/2026-09-23-ble-access-model.md`). The device-ref item above is
-  still open.
-- ~~Auth/trust model (BLE feasibility gap).~~ **Closed (2026-09-24)** by
-  `docs/adr/2026-09-23-ble-access-model.md`. Trust belongs to the link, not
-  the identity: USB is trusted, and a radio link holds only what a login
-  with a shared secret grants (play or edit). A MAC still identifies and
-  never authenticates. Networked-transport identity still rides free (any
-  transport with a hello carries `base_mac`).
+  fork skip it with the rest of `/.lp/` (Studio no longer writes one since
+  `docs/adr/2026-09-24-easy-bluetooth-access.md`, but the filter stays).
+  The device-ref item above is still open.
+- ~~Auth/trust model (BLE feasibility gap).~~ **Closed.** Networked-transport
+  identity rides free (any transport with a hello carries `base_mac`);
+  access over an untrusted link is `docs/adr/2026-09-23-ble-access-model.md`
+  (trust belongs to the link: USB is trusted, a radio link holds only what
+  an unlock with a shared secret grants, play or edit; HMAC challenge; the
+  device store) and `docs/adr/2026-09-24-easy-bluetooth-access.md`
+  (generated keys per browser and account, plugging in adds them). Access
+  is not identity: a device's uid and MAC say which board it is, not who
+  may use it. The one place the two would meet is that ADR's Revisit, a
+  per-device key derived from the device uid.
 - Multi-studio registry sync — uids now agree across stores by
   construction; syncing the rows themselves is its own feature.
 - Removing the firmware's `device_uid` hello field / file read

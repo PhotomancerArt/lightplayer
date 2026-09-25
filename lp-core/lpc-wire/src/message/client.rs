@@ -70,6 +70,23 @@ pub enum ClientRequest {
     /// If the failure is still there the node faults again and the device
     /// re-degrades within a heartbeat — the honest answer, not a bug.
     ClearFaults,
+    /// Ask the board to write its replies on THIS link in `encoding`
+    /// (plan `lp-json-pack`, Q1): the per-link opt-in to
+    /// [`WireEncoding::Packed`](crate::WireEncoding::Packed).
+    ///
+    /// `dictionary` is the host's
+    /// [`WIRE_DICTIONARY_FINGERPRINT`](crate::WIRE_DICTIONARY_FINGERPRINT).
+    /// The board packs only when it equals its own and it can pack;
+    /// otherwise it stays JSON. Answered with
+    /// [`crate::server::ServerMsgBody::SetEncoding`], which names the
+    /// encoding now in effect and is itself written as JSON: the switch
+    /// happens after it. The request is always JSON (board→host only).
+    /// The link returns to JSON when it closes or the board resets, so a
+    /// host asks again on every connect.
+    SetEncoding {
+        encoding: crate::WireEncoding,
+        dictionary: u32,
+    },
     /// Begin a login on this link: answered with
     /// [`crate::server::ServerMsgBody::LoginChallenge`] (a fresh nonce and
     /// every installed secret's salt and cost, with no labels), or with
@@ -85,6 +102,34 @@ pub enum ClientRequest {
     /// verdict comes back as [`crate::server::ServerMsgBody::LoginResult`].
     LoginAnswer {
         macs: Vec<lpc_access::LoginMac>,
+    },
+    /// Who has access: answered with
+    /// [`crate::server::ServerMsgBody::AccessList`] — the device store's
+    /// switches and every secret in it, without its key. Edit tier.
+    AccessList,
+    /// Add `entry` to the device store, or replace the entry with the same
+    /// salt (one holder, one salt: this is how a rename re-labels). The
+    /// board merges, so two browsers adding keys never erase each other's.
+    /// A new entry past the store's cap is refused with an error. Answered
+    /// with the list as it now stands. Edit tier.
+    AccessAdd {
+        entry: lpc_access::SecretEntry,
+    },
+    /// Drop the device-store entry with `salt` (base64); nothing happens
+    /// when there is none. Answered with the list. Edit tier.
+    AccessRemove {
+        #[serde(with = "lpc_access::base64_bytes")]
+        salt: [u8; lpc_access::SALT_BYTES],
+    },
+    /// Set either or both device-store switches; an absent one is left as
+    /// it is. `bleEnabled` applies at the next boot (the client restarts
+    /// the device). Answered with the list. Edit tier.
+    #[serde(rename_all = "camelCase")]
+    AccessSetSwitches {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        ble_enabled: Option<bool>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        open: Option<bool>,
     },
 }
 
@@ -262,6 +307,63 @@ mod tests {
             }
             other => panic!("wrong request type: {other:?}"),
         }
+    }
+
+    /// Access requests: the bare unit spelling for the list, the entry in
+    /// its file spelling for add, the salt as base64 for remove, and
+    /// camelCase optional switches (an absent one is omitted).
+    #[test]
+    fn test_access_requests() {
+        let list = crate::json::to_string(&ClientRequest::AccessList).unwrap();
+        assert_eq!(list, r#""accessList""#);
+
+        let entry = lpc_access::SecretEntry::from_password(
+            "friends",
+            lpc_access::Tier::Play,
+            b"pw",
+            [1; 16],
+            1,
+        );
+        let json = crate::json::to_string(&ClientRequest::AccessAdd {
+            entry: entry.clone(),
+        })
+        .unwrap();
+        assert!(
+            json.starts_with(
+                r#"{"accessAdd":{"entry":{"label":"friends","kind":"password","tier":"play","salt":"AQEBAQEBAQEBAQEBAQEBAQ==","iterations":1,"k":""#
+            ),
+            "{json}"
+        );
+        match crate::json::from_str::<ClientRequest>(&json).unwrap() {
+            ClientRequest::AccessAdd { entry: back } => assert_eq!(back, entry),
+            other => panic!("wrong request type: {other:?}"),
+        }
+
+        let remove = ClientRequest::AccessRemove { salt: [1; 16] };
+        let json = crate::json::to_string(&remove).unwrap();
+        assert_eq!(
+            json,
+            r#"{"accessRemove":{"salt":"AQEBAQEBAQEBAQEBAQEBAQ=="}}"#
+        );
+        assert!(matches!(
+            crate::json::from_str::<ClientRequest>(&json).unwrap(),
+            ClientRequest::AccessRemove { salt } if salt == [1; 16]
+        ));
+
+        let switches = ClientRequest::AccessSetSwitches {
+            ble_enabled: Some(false),
+            open: None,
+        };
+        let json = crate::json::to_string(&switches).unwrap();
+        assert_eq!(json, r#"{"accessSetSwitches":{"bleEnabled":false}}"#);
+        assert!(matches!(
+            crate::json::from_str::<ClientRequest>(r#"{"accessSetSwitches":{"open":true}}"#)
+                .unwrap(),
+            ClientRequest::AccessSetSwitches {
+                ble_enabled: None,
+                open: Some(true)
+            }
+        ));
     }
 
     #[test]

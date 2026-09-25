@@ -1,6 +1,6 @@
 use alloc::string::String;
 
-use crate::nodes::shader::{FloatMode, ShaderParamDef, ShaderSlotDef, ShaderSpace};
+use crate::nodes::shader::{FloatMode, ShaderCoords, ShaderParamDef, ShaderSlotDef, ShaderSpace};
 use crate::{
     AssetSlot, BindingDefs, EnumSlot, MapSlot, OptionSlot, RenderOrderSlot, Slotted, ValueSlot,
 };
@@ -32,6 +32,11 @@ pub struct ShaderDef {
     /// answer cell as the coordinate map a 2D consumer receives, and the
     /// studio's `dimensionality` drawer is where it is authored.
     pub space: EnumSlot<ShaderSpace>,
+    /// Optional opt-in to pattern space (`"coords": "pattern"`). Absent (the
+    /// state of every shader authored before the key existed) is
+    /// [`ShaderCoords::Pixels`]: today's pixel `pos` and `outputSize`,
+    /// byte-identical. See [`ShaderCoords`].
+    pub coords: OptionSlot<ValueSlot<ShaderCoords>>,
 }
 
 impl Default for ShaderDef {
@@ -44,6 +49,7 @@ impl Default for ShaderDef {
             param_defs: MapSlot::default(),
             consumed_slots: MapSlot::default(),
             space: EnumSlot::default(),
+            coords: OptionSlot::none(),
         }
     }
 }
@@ -61,6 +67,16 @@ impl ShaderDef {
 
     pub fn kind(&self) -> crate::NodeKind {
         crate::NodeKind::Shader
+    }
+
+    /// The authored coordinate frame; absent reads as
+    /// [`ShaderCoords::Pixels`].
+    #[must_use]
+    pub fn coords(&self) -> ShaderCoords {
+        self.coords
+            .data
+            .as_ref()
+            .map_or(ShaderCoords::Pixels, |slot| *slot.value())
     }
 }
 
@@ -83,6 +99,7 @@ mod tests {
             param_defs: MapSlot::default(),
             consumed_slots: MapSlot::default(),
             space: EnumSlot::default(),
+            coords: OptionSlot::none(),
         };
         assert_eq!(def.kind(), NodeKind::Shader);
     }
@@ -209,6 +226,53 @@ mod tests {
             def.shader_source().artifact_value().unwrap().to_string(),
             "main.glsl"
         );
+    }
+
+    /// The pattern-space opt-in parses from `"coords": "pattern"`, and a def
+    /// without the key reads as Pixels (today's frame).
+    #[test]
+    fn shader_def_parses_the_pattern_space_opt_in() {
+        let def = NodeDef::from_json_str(
+            r#"{ "kind": "Shader", "source": { "path": "main.glsl" }, "coords": "pattern" }"#,
+        )
+        .expect("shader");
+        let NodeDef::Shader(def) = def else {
+            panic!("expected shader");
+        };
+        assert_eq!(def.coords(), ShaderCoords::Pattern);
+
+        let def =
+            NodeDef::from_json_str(r#"{ "kind": "Shader", "source": { "path": "main.glsl" } }"#)
+                .expect("shader");
+        let NodeDef::Shader(def) = def else {
+            panic!("expected shader");
+        };
+        assert!(def.coords.is_none());
+        assert_eq!(def.coords(), ShaderCoords::Pixels);
+    }
+
+    /// Additive and optional: a def that never authored `coords` writes back
+    /// without the key (old files round-trip byte-identically), and an
+    /// authored one writes back as the string it was read from.
+    #[test]
+    fn coords_key_is_written_only_when_authored() {
+        let registry = SlotShapeRegistry::default();
+        let without = NodeDef::Shader(ShaderDef::default())
+            .write_json(&registry)
+            .expect("write");
+        assert!(!without.contains("coords"), "{without}");
+
+        let with = NodeDef::Shader(ShaderDef {
+            coords: OptionSlot::some(ValueSlot::new(ShaderCoords::Pattern)),
+            ..ShaderDef::default()
+        })
+        .write_json(&registry)
+        .expect("write");
+        assert!(with.contains(r#""coords": "pattern""#), "{with}");
+        let NodeDef::Shader(back) = NodeDef::from_json_str(&with).expect("read back") else {
+            panic!("expected shader");
+        };
+        assert_eq!(back.coords(), ShaderCoords::Pattern);
     }
 
     #[test]

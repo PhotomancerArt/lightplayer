@@ -103,6 +103,7 @@ impl Project {
                     time_seconds: 0.0,
                     space: VisualSpace::TwoD,
                     policy: ConsumerPolicy::default(),
+                    scope: None,
                 },
             )
             .expect("render palette shader");

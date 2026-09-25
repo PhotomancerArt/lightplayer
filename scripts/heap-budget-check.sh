@@ -705,6 +705,18 @@ not recorded; $(( st_rep - hi )) B above the high-water band)"
     return "$fail"
 }
 
+# The commit a re-baseline stamps into a record: HEAD on a desk. CI's bless
+# (scripts/ci/figures-patch.py) runs on a pull request's synthetic MERGE ref,
+# whose sha exists nowhere a reader can follow, so it names the PR's head
+# instead through LP_HEAP_BUDGET_COMMIT.
+stamp_commit() {
+    if [ -n "${LP_HEAP_BUDGET_COMMIT:-}" ]; then
+        echo "${LP_HEAP_BUDGET_COMMIT:0:9}"
+    else
+        git rev-parse --short HEAD
+    fi
+}
+
 # Writes the chip's file only when its gated figures moved: a re-baseline that
 # changes nothing must not restamp the file, or two PRs that each re-baseline a
 # DIFFERENT chip would still conflict on the untouched ones' stamps.
@@ -742,7 +754,7 @@ chip_baseline() {
     fi
     local updated
     updated="$(jq -n --argjson e "$existing" --argjson m "$measured" \
-        --arg commit "$(git rev-parse --short HEAD)" --arg date "$(date +%F)" '
+        --arg commit "$(stamp_commit)" --arg date "$(date +%F)" '
         $e | .measured = $m | .recorded = $date | .commit = $commit')"
     # `-a`: the record is committed, and jq's default UTF-8 output would
     # rewrite every em dash in the prose the first time this ran on a host
@@ -907,7 +919,7 @@ baseline)
         fi
         mkdir -p "$(dirname "$rec_file")"
         jq -n --argjson e "$existing" --argjson m "$modes" \
-            --arg date "$(date +%F)" --arg commit "$(git rev-parse --short HEAD)" \
+            --arg date "$(date +%F)" --arg commit "$(stamp_commit)" \
             --arg comment "$ENGINE_COMMENT" '
             {comment: ($e.comment // $comment), recorded: $date, commit: $commit, modes: $m}' \
             | jq -a . >"$rec_file"   # -a: see chip_baseline

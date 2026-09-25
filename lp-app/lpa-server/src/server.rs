@@ -21,6 +21,7 @@ use lpc_wire::{ClientRequest, WireServerMessage};
 
 use crate::access_gate::classify;
 use crate::access_state::{AccessState, EntropySource};
+use crate::access_store;
 use crate::heartbeat_status::HeartbeatStatus;
 use lpfs::{FsEvent, LpFs};
 
@@ -339,6 +340,9 @@ impl LpServer {
                 },
                 hardware,
                 device_uid: None,
+                // No packing until the embedder says its transport can
+                // (`set_packed_encoding_supported`).
+                pack_dictionary: 0,
                 // The held hello is the trusted view; a hello sent on a
                 // particular link is recomputed for that link.
                 auth: lpc_wire::HelloAuth::TRUSTED,
@@ -468,6 +472,15 @@ impl LpServer {
     /// are answered on it).
     pub fn link_tier(&self, link: Link) -> Option<lpc_access::Tier> {
         self.access.tier(link, &*self.base_fs)
+    }
+
+    /// Whether `link`'s own `LoginBegin` challenge is outstanding (see
+    /// `AccessState::login_pending`). A radio edge keeps an unauthenticated
+    /// link open past its login deadline while this holds, so a person
+    /// typing a device password is not cut off; the challenge's own expiry
+    /// (`lpc_access::CHALLENGE_TTL_MS`) bounds it.
+    pub fn login_pending(&self, link: Link) -> bool {
+        self.access.login_pending(link.id)
     }
 
     /// Install the embedder's random-byte source for login challenges. Unset
@@ -813,6 +826,33 @@ impl LpServer {
                         .map_err(|error| ServerError::Core(format!("{error}")))?;
                     response_count += 1;
                 }
+                // Who has access: edit tier (the gate above has already
+                // refused anything less). Read-modify-write of the device
+                // store through the BASE fs, never the wire fs path, which
+                // stays write-only; the answer never carries a key.
+                ClientRequest::AccessList
+                | ClientRequest::AccessAdd { .. }
+                | ClientRequest::AccessRemove { .. }
+                | ClientRequest::AccessSetSwitches { .. } => {
+                    let fs = &*self.base_fs;
+                    let body = match client_msg.msg {
+                        ClientRequest::AccessAdd { entry } => access_store::access_add(fs, entry),
+                        ClientRequest::AccessRemove { salt } => {
+                            access_store::access_remove(fs, &salt)
+                        }
+                        ClientRequest::AccessSetSwitches { ble_enabled, open } => {
+                            access_store::access_set_switches(fs, ble_enabled, open)
+                        }
+                        _ => access_store::access_list(fs),
+                    };
+                    // `open` may have changed; the cached flag is re-read.
+                    self.access.invalidate_device_store();
+                    transport
+                        .send(link.id, WireServerMessage::new(msg_id, body))
+                        .await
+                        .map_err(|error| ServerError::Core(format!("{error}")))?;
+                    response_count += 1;
+                }
                 ClientRequest::ProjectRead { handle, request } => {
                     let sink_frame_budget = self.sink_frame_budget();
                     // Refusal-not-reset: if the heap cannot afford
@@ -1028,6 +1068,26 @@ impl LpServer {
     /// `ClientRequest::Reboot` is refused with an error instead of acked.
     pub fn set_reboot_hook(&mut self, reboot: Option<RebootHook>) {
         self.reboot_hook = reboot;
+    }
+
+    /// Declare that this embedder's transport writes JSON Pack frames on a
+    /// link that opts in (`ClientRequest::SetEncoding`).
+    ///
+    /// The hello then names this build's dictionary
+    /// ([`lpc_wire::ServerHello::pack_dictionary`]), and the server answers
+    /// an opt-in `packed` when the host names the same one; unset, the hello
+    /// says 0 and every opt-in is answered `json`. The server only DECIDES:
+    /// the switch is the transport's, which holds the per-link encoding, sees
+    /// the answer it writes, and resets it when the link closes.
+    ///
+    /// The fact lives in the hello and nowhere else, so it costs the server
+    /// no field of its own.
+    pub fn set_packed_encoding_supported(&mut self, supported: bool) {
+        self.hello.pack_dictionary = if supported {
+            lpc_wire::WIRE_DICTIONARY_FINGERPRINT
+        } else {
+            0
+        };
     }
 
     pub fn memory_stats(&self) -> Option<MemoryStatsFn> {

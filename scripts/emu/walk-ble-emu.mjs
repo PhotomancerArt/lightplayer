@@ -198,10 +198,17 @@ async function main() {
       });
       const reason = await driver.evaluate(`${MAIN_TEXT}.includes('Firmware updates need USB')`);
       if (!reason) throw new Error("the card does not say `Firmware updates need USB`");
+      // The Connections group: over the link it is on, Bluetooth is locked
+      // on and the row says how to turn it off instead.
+      const locked = await driver.waitFor(
+        `${MAIN_TEXT}.includes('turn off by USB') && Boolean(document.querySelector('button[role="switch"][aria-label="Bluetooth"][aria-checked="true"]:disabled'))`,
+        { timeoutMs: STEP_DEADLINE_MS, what: "the Connections group's locked Bluetooth switch" },
+      );
+      if (!locked) throw new Error("the card has no locked Bluetooth switch");
       const endpoint = await driver.evaluate(
         `JSON.stringify(window.__lpEmuBluetooth.describe(${JSON.stringify(BOARD)}))`,
       );
-      return `reason shown; ${endpoint}`;
+      return `reason shown; Bluetooth locked on over itself; ${endpoint}`;
     });
 
     await step("remove", "clear what the board is running, over Bluetooth", async () => {

@@ -1,6 +1,7 @@
 pub mod compute_shader_def;
 pub mod float_mode;
 pub mod shader_budget;
+pub mod shader_coords;
 pub mod shader_def;
 pub mod shader_header_gen;
 pub mod shader_param_def;
@@ -17,6 +18,7 @@ pub use float_mode::FloatMode;
 pub use shader_budget::{
     ShaderBudget, ShaderBudgetError, slot_bytes_estimate, validate_shader_slot_budget,
 };
+pub use shader_coords::ShaderCoords;
 pub use shader_def::ShaderDef;
 pub use shader_header_gen::{
     ShaderHeaderGenError, generate_compute_shader_header, glsl_type_for_lp_type,

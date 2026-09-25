@@ -19,9 +19,10 @@ never readable back over any link.
 | `pbkdf2_sha256.rs` | PBKDF2-HMAC-SHA256 from RFC 8018 — **client side only** |
 | `constant_time_eq.rs` | MAC comparison with no early exit |
 | `tier.rs` | `Tier { Play, Edit }`; edit implies play |
-| `secret_entry.rs` | `SecretEntry { label, tier, salt, iterations, k }` |
-| `project_access_file.rs` | `<project>/.lp/access.json`, `version: 1` |
-| `device_access_file.rs` | root `/.lp/access.json`, `version: 1`; locked by default |
+| `secret_entry.rs` | `SecretEntry { label, kind, tier, salt, iterations, k, addedAt? }` |
+| `secret_kind.rs` | `SecretKind { Browser, Account, Password }` — who holds a secret |
+| `project_access_file.rs` | `<project>/.lp/access.json`, `version: 2` (v1 still reads) |
+| `device_access_file.rs` | root `/.lp/access.json`, `version: 2` (v1 still reads); a missing store is `fresh()` (Bluetooth on, locked), a damaged one `locked()`; merge by salt |
 | `access_file_path.rs` | which paths are access files (the fs gate's predicate) |
 | `access_file_error.rs` | why an access file could not be read (every variant is a refusal) |
 | `base64_bytes.rs` | serde for fixed-size keys, salts and MACs as base64; the wrong length is refused |
