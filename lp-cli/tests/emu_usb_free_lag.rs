@@ -55,10 +55,9 @@
 use std::process::Command;
 
 use lp_emu_esp32c6::test_support::{FwImage, fw_esp32c6_image};
-use lp_json_pack::{DropReason, FRAME_KIND_PACK, FrameScanner, ScanEvent, VecFrameBuffer};
 use lpc_wire::json::to_serial_line;
 use lpc_wire::message::client::{ClientMessage, ClientRequest};
-use lpc_wire::{WIRE_DICTIONARY_FINGERPRINT, WireEncoding};
+use lpc_wire::{PACK_FORMAT_VERSION, WireEncoding};
 
 /// The conversation, by emulated millisecond: the opt-in, the free lag set
 /// (which also restarts the block's wake measurements, so boot is not in
@@ -143,8 +142,11 @@ fn a_free_lag_between_esp_hals_write_and_the_gates_check_tears_only_the_ungated_
         "no packed frame was torn: {}",
         before.summary(&scan_before)
     );
-    // Bytes lost per damaged Hello: a few, not a packet (silicon: ~5).
-    let damaged = REQUESTS as usize - scan_before.replies;
+    // Bytes lost per torn Hello: a few, not a packet (silicon: ~5). Counted
+    // from the torn frames themselves: with learned tables a torn frame
+    // that taught the board a name also costs the frames after it (dropped
+    // as out of step, `scan.desynced`), and those lost no bytes.
+    let damaged = scan_before.torn;
     let per_loss = before.tried.len() / damaged.max(1);
     eprintln!("{damaged} Hellos damaged, {per_loss} bytes lost from each");
     assert!(
@@ -160,6 +162,7 @@ fn a_free_lag_between_esp_hals_write_and_the_gates_check_tears_only_the_ungated_
         after.wake_line()
     );
     assert_eq!(scan_after.torn, 0, "{}", after.summary(&scan_after));
+    assert_eq!(scan_after.desynced, 0, "{}", after.summary(&scan_after));
     assert!(after.tried.is_empty(), "{} B refused", after.tried.len());
     assert_eq!(
         scan_after.replies,
@@ -220,13 +223,14 @@ impl Run {
     fn summary(&self, scan: &Scan) -> String {
         format!(
             "{} B delivered, {} B refused, {} packed frames whole, {} torn ({} bad COBS, {} \
-             undecodable), {} of {REQUESTS} Hellos answered",
+             undecodable), {} dropped out of step, {} of {REQUESTS} Hellos answered",
             self.delivered.len(),
             self.tried.len(),
             scan.whole,
             scan.torn,
             scan.bad_cobs,
             scan.undecodable,
+            scan.desynced,
             scan.replies
         )
     }
@@ -254,7 +258,7 @@ fn converse(elf: &std::path::Path, lag_ns: u64) -> Run {
         OPT_IN_ID,
         ClientRequest::SetEncoding {
             encoding: WireEncoding::Packed,
-            dictionary: WIRE_DICTIONARY_FINGERPRINT,
+            format: PACK_FORMAT_VERSION,
         },
     );
     for n in 0..REQUESTS {
@@ -300,6 +304,9 @@ struct Scan {
     undecodable: usize,
     /// `bad_cobs + undecodable`.
     torn: usize,
+    /// Whole frames dropped because the reader's learned table was out of
+    /// step after an earlier tear (this conversation never re-asks).
+    desynced: usize,
     /// Distinct Hello replies to this conversation's requests, in a packed
     /// frame that decoded.
     replies: usize,
@@ -309,32 +316,31 @@ fn scan(bytes: &[u8]) -> Scan {
     let mut whole = 0;
     let mut bad_cobs = 0;
     let mut undecodable = 0;
+    let mut desynced = 0;
     let mut ids = std::collections::BTreeSet::new();
-    let mut scanner = FrameScanner::new(VecFrameBuffer::new(64 * 1024));
-    scanner.push(bytes, |event| match event {
-        ScanEvent::Text(_) => {}
-        ScanEvent::Frame { kind, payload } => {
-            assert_eq!(kind, FRAME_KIND_PACK);
-            match lpc_wire::decode_packed_to_json(payload) {
-                Ok(json) => {
-                    whole += 1;
-                    let message: lpc_wire::WireServerMessage =
-                        lpc_wire::json::from_str(&json).expect("a decoded frame parses");
-                    if (FIRST_ID..FIRST_ID + REQUESTS).contains(&message.id) {
-                        ids.insert(message.id);
-                    }
-                }
-                Err(_) => undecodable += 1,
+    // One reader for the whole capture: it holds the link's learned table.
+    lpc_wire::WireStream::new().push(bytes, |chunk| match chunk {
+        lpc_wire::WireChunk::Line(_) => {}
+        lpc_wire::WireChunk::Frame(frame) if frame.is_packed() => {
+            whole += 1;
+            let message: lpc_wire::WireServerMessage =
+                lpc_wire::json::from_str(&frame.json).expect("a decoded frame parses");
+            if (FIRST_ID..FIRST_ID + REQUESTS).contains(&message.id) {
+                ids.insert(message.id);
             }
         }
-        ScanEvent::Dropped(DropReason::BadCobs) => bad_cobs += 1,
-        ScanEvent::Dropped(reason) => panic!("a frame was dropped: {reason:?}"),
+        lpc_wire::WireChunk::Frame(_) => {}
+        lpc_wire::WireChunk::Error(error) if error.contains("not valid COBS") => bad_cobs += 1,
+        lpc_wire::WireChunk::Error(error) if error.contains("did not decode") => undecodable += 1,
+        lpc_wire::WireChunk::Error(error) => panic!("a frame was dropped: {error}"),
+        lpc_wire::WireChunk::Desync(_) => desynced += 1,
     });
     Scan {
         whole,
         bad_cobs,
         undecodable,
         torn: bad_cobs + undecodable,
+        desynced,
         replies: ids.len(),
     }
 }

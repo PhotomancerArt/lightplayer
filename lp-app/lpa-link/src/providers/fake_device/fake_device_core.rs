@@ -63,6 +63,8 @@ impl FakeEsp32Device {
                 loaded_projects: Vec::new(),
                 pending_loads: std::collections::BTreeMap::new(),
                 encoding: lpc_wire::WireEncoding::Json,
+                table: lpc_wire::LearnedTable::boxed(),
+                next_table_epoch: 1,
                 packed_frames_emitted: 0,
                 unanswered: std::collections::BTreeSet::new(),
             })),
@@ -279,6 +281,12 @@ pub(crate) struct FakeDeviceCore {
     /// or the device resets — the per-link state shipped firmware holds in
     /// its transport.
     encoding: lpc_wire::WireEncoding,
+    /// The link's learned table while packed, as shipped firmware keeps it
+    /// (`fw_esp32_common::serial::packed_link`): a new epoch, empty, at every
+    /// accepted opt-in.
+    table: Box<lpc_wire::LearnedTable>,
+    /// The epoch the next accepted opt-in starts.
+    next_table_epoch: u8,
     /// Frames written packed, cumulative across boots.
     packed_frames_emitted: usize,
     /// Correlation ids the server has been handed but whose answer has not
@@ -298,6 +306,8 @@ impl FakeDeviceCore {
         self.loaded_projects.clear();
         self.pending_loads.clear();
         self.encoding = lpc_wire::WireEncoding::Json;
+        // A reboot starts the epoch count over, as a board's does.
+        self.next_table_epoch = 1;
         self.unanswered.clear();
         // Dropping a RunningLp phase drops the HostRuntime, which joins the
         // server thread (bounded).
@@ -618,12 +628,13 @@ impl FakeDeviceCore {
         }
         let frame_bytes = match self.encoding {
             lpc_wire::WireEncoding::Json => format!("M!{json}\n").into_bytes(),
-            // `\n 0x00 'P' COBS 0x00`, built by the firmware's own writer
+            // `\n 0x00 'L' COBS 0x00`, built by the firmware's own writer
             // into a buffer with room for the JSON line; a frame that cannot
-            // pack goes out as JSON, as it does on a board.
+            // pack goes out as JSON (the table untouched), as it does on a
+            // board.
             lpc_wire::WireEncoding::Packed => {
                 let mut buf = vec![0u8; json.len() + 64];
-                match lpc_wire::ser_packed_frame_to(&mut buf, frame) {
+                match lpc_wire::ser_learned_frame_to(&mut buf, &mut *self.table, frame) {
                     Ok(n) => {
                         buf.truncate(n);
                         self.packed_frames_emitted += 1;
@@ -645,6 +656,11 @@ impl FakeDeviceCore {
         // for the frames after it.
         if let lpc_wire::ServerMsgBody::SetEncoding { encoding } = &frame.msg {
             self.encoding = *encoding;
+            if *encoding == lpc_wire::WireEncoding::Packed {
+                use lpc_wire::LearnStore;
+                self.table.reset(self.next_table_epoch);
+                self.next_table_epoch = self.next_table_epoch.wrapping_add(1);
+            }
         }
         true
     }

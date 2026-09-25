@@ -46,7 +46,10 @@ pub fn unpack_tap(
         }
     }
     if to_host.in_frame() {
-        report.note(Err("the tap ended inside a packed frame".to_string()), log);
+        report.note(
+            lpc_wire::UnpackEvent::Dropped("the tap ended inside a packed frame".to_string()),
+            log,
+        );
     }
     Ok(())
 }

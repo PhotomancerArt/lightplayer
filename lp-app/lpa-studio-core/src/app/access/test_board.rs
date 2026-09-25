@@ -187,7 +187,7 @@ impl FakeBoardIo {
                 hardware: lpc_wire::HardwareFacts::default(),
                 device_uid: None,
                 // This fake speaks JSON only: 0 names no dictionary.
-                pack_dictionary: 0,
+                pack_format: 0,
                 auth: lpc_wire::HelloAuth {
                     required: !self.trusted,
                     granted: held,
