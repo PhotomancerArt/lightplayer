@@ -206,3 +206,134 @@ impl Drop for SharedLinkClientIo {
             .retain(|(id, _)| id.wrapping_sub(first_id) >= CONVERSATION_ID_STRIDE);
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use core::future::Future;
+    use core::task::{Context, Poll, Waker};
+
+    use lpa_devices::link::{LinkEvent, LinkInfo};
+    use lpc_wire::{ClientRequest, ServerMsgBody, WireServerMessage};
+
+    use super::*;
+
+    /// Regression for
+    /// `docs/defects/2026-09-25-turn-on-bluetooth-reports-a-timeout-the-board-answered.md`:
+    /// the card's frame feed and an access write are two conversations on
+    /// one link, with one inbox. The board answers the write at once; the
+    /// feed, which polls far more often, must not eat that reply, and the
+    /// write must get it instead of waiting out its budget.
+    #[test]
+    fn a_write_reply_is_not_consumed_by_a_concurrent_frame_feed() {
+        let link = silent_link();
+        let inbox: ConversationInbox = Rc::default();
+        let mut feed = io_on(&link, &inbox);
+        let mut write = io_on(&link, &inbox);
+        assert_ne!(
+            feed.first_id, write.first_id,
+            "each conversation owns its slice"
+        );
+
+        let write_id = write.first_id;
+        block_on(write.send(ClientMessage {
+            id: u64::from(write_id),
+            msg: ClientRequest::AccessList,
+        }))
+        .expect("sent");
+        // The pump routes the board's prompt answer into the shared inbox.
+        inbox
+            .borrow_mut()
+            .push_back((write_id, access_list_reply(write_id)));
+
+        // The feed polls first, as it did on the desk.
+        let feed_error = block_on(feed.receive()).expect_err("nothing for the feed");
+        assert!(
+            feed_error.to_string().contains("did not respond"),
+            "{feed_error}"
+        );
+        assert_eq!(
+            inbox.borrow().len(),
+            1,
+            "the write's reply stays in the inbox"
+        );
+
+        let reply = block_on(write.receive()).expect("the write gets its answer");
+        assert_eq!(reply.id, u64::from(write_id));
+        assert!(matches!(reply.msg, ServerMsgBody::AccessList { .. }));
+        assert!(inbox.borrow().is_empty());
+    }
+
+    /// A dropped conversation takes only its own stragglers with it.
+    #[test]
+    fn dropping_a_conversation_leaves_another_conversations_reply() {
+        let link = silent_link();
+        let inbox: ConversationInbox = Rc::default();
+        let feed = io_on(&link, &inbox);
+        let mut write = io_on(&link, &inbox);
+        let (feed_id, write_id) = (feed.first_id, write.first_id);
+        inbox
+            .borrow_mut()
+            .push_back((feed_id, access_list_reply(feed_id)));
+        inbox
+            .borrow_mut()
+            .push_back((write_id, access_list_reply(write_id)));
+
+        drop(feed);
+
+        assert_eq!(inbox.borrow().len(), 1);
+        let reply = block_on(write.receive()).expect("still there");
+        assert_eq!(reply.id, u64::from(write_id));
+    }
+
+    /// A link the test answers by hand: the pump's routing is what this io
+    /// depends on, and the test plays the pump.
+    struct SilentLink(LinkInfo);
+
+    impl Link for SilentLink {
+        fn info(&self) -> &LinkInfo {
+            &self.0
+        }
+        fn submit(&mut self, _command: LinkCommand) {}
+        fn poll_event(&mut self) -> Option<LinkEvent> {
+            None
+        }
+    }
+
+    fn silent_link() -> Rc<RefCell<Box<dyn Link>>> {
+        Rc::new(RefCell::new(Box::new(SilentLink(LinkInfo::default()))))
+    }
+
+    fn io_on(link: &Rc<RefCell<Box<dyn Link>>>, inbox: &ConversationInbox) -> SharedLinkClientIo {
+        let timer: Rc<RefCell<dyn FnMut(Duration) -> DeviceTimerFuture>> =
+            Rc::new(RefCell::new(|_| -> DeviceTimerFuture {
+                Box::pin(core::future::ready(()))
+            }));
+        SharedLinkClientIo::new(Rc::downgrade(link), Rc::clone(inbox), timer)
+    }
+
+    fn access_list_reply(id: u32) -> String {
+        let message = WireServerMessage::new(
+            u64::from(id),
+            ServerMsgBody::AccessList {
+                ble_enabled: true,
+                open: false,
+                entries: Vec::new(),
+            },
+        );
+        format!(
+            "M!{}",
+            lpc_wire::json::to_string(&message).expect("encodes")
+        )
+    }
+
+    /// Every future here is immediately ready (the timer never waits).
+    fn block_on<F: Future>(future: F) -> F::Output {
+        let mut future = core::pin::pin!(future);
+        let mut context = Context::from_waker(Waker::noop());
+        loop {
+            if let Poll::Ready(output) = future.as_mut().poll(&mut context) {
+                return output;
+            }
+        }
+    }
+}
