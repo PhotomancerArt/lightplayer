@@ -12,12 +12,27 @@
 //! advance ([`PlaylistNode::switch_to`]). A failure moves on from the render
 //! or the engine's hooks ([`PlaylistNode::fail_entry`]).
 //!
-//! **The texture path** (`render_texture*`) never holds or fades: it cuts.
-//! Its only consumers are previews — Studio's and fw-browser's texture
-//! previews and a GPU tier's preview surface — while every lamp output
-//! samples through `sample_visual_into` (every fixture in the tree is
-//! `"sampling": "direct"`). So a preview shows the new entry from its first
-//! frame (black while it compiles) and the lamps hold.
+//! **The texture path** (`render_texture*`, plan PD5) has two kinds of
+//! consumer:
+//!
+//! - **lamps**: a fixture authored `"sampling": "texture_area"` — the
+//!   default when a fixture names no sampling, and the declared-strip idiom
+//!   — renders the playlist into a texture and area-samples it. That HOLDS
+//!   and fades like the sample path, with a held texture at the fixture's
+//!   render size ([`super::playlist_held_texture`]). Every fixture shipped in
+//!   `catalog/` and `projects/` is `"direct"` today, which samples through
+//!   `sample_visual_into` (the device, the emulator and fw-browser's lamp
+//!   preview all go through the fixture).
+//! - **canvas previews** with no lamps behind them, through
+//!   `Engine::render_texture_product`: Studio's visual-product probe
+//!   (`project_read_probes.rs` — product previews and thumbnails, the GPU
+//!   tier's GPU-resident read-back included) and fw-browser's canvas preview
+//!   (`fw-browser/src/runtime.rs`, which a project with lamps skips for the
+//!   output-frame read). These CUT: a target of another size than the held
+//!   one renders the live or incoming product, black while it compiles, and
+//!   a preview never makes the playlist allocate a held texture when the
+//!   lamps already held on the sample path. Whether fw-browser should look
+//!   exactly like the device here is plan P8's check (vision D14).
 
 use alloc::format;
 use alloc::string::String;
@@ -42,6 +57,7 @@ use crate::products::visual::{
 };
 
 use super::playlist_held_frame::PlaylistHeldFrame;
+use super::playlist_held_texture::PlaylistHeldTexture;
 use super::playlist_runtime_entry::{next_playable_after, next_playable_in_order};
 use super::playlist_switch::{PlaylistFramePlan, PlaylistSwitch, clamp01};
 use super::{PlaylistEntryReason, PlaylistRuntimeEntry};
@@ -85,6 +101,8 @@ pub struct PlaylistNode {
     /// What this frame's renders show, planned by `produce`.
     plan: PlaylistFramePlan,
     held: PlaylistHeldFrame,
+    /// The same, on the texture path (a `texture_area` fixture).
+    held_texture: PlaylistHeldTexture,
     /// One window of blended samples, alive for a fade (never per frame).
     blend_scratch: Vec<u16>,
     /// The runtime warning naming failed entries (Studio's view of the
@@ -155,6 +173,7 @@ impl PlaylistNode {
             current_ready: false,
             plan: PlaylistFramePlan::Clear,
             held: PlaylistHeldFrame::default(),
+            held_texture: PlaylistHeldTexture::default(),
             blend_scratch: Vec::new(),
             failure_status: None,
             published_paths: PublishedPaths::new(),
@@ -305,6 +324,7 @@ impl PlaylistNode {
     fn end_switch(&mut self) {
         self.switch = None;
         self.held.release();
+        self.held_texture.release();
         self.blend_scratch = Vec::new();
     }
 
@@ -353,7 +373,8 @@ impl PlaylistNode {
             }
         }
 
-        Ok(match (product, self.held.is_held()) {
+        let held = self.held.is_held() || self.held_texture.is_held();
+        Ok(match (product, held) {
             (None, false) => PlaylistFramePlan::Clear,
             (None, true) => PlaylistFramePlan::Held { probe: None },
             (Some(product), false) => {
@@ -650,9 +671,10 @@ impl RenderNode for PlaylistNode {
             .map_err(err_ctx("playlist texture product"))
     }
 
-    /// The texture path cuts (see the module docs): it renders the live or
-    /// incoming product, never the held frame, and never allocates a
-    /// second target.
+    /// The texture path holds and fades like the sample path, at the size of
+    /// the target the switch frame was rendered into (see
+    /// [`super::playlist_held_texture`]); a target of another size — a
+    /// canvas preview — cuts to the live product.
     fn render_texture_into(
         &mut self,
         _product: lpc_model::VisualProduct,
@@ -660,33 +682,63 @@ impl RenderNode for PlaylistNode {
         target: &mut TextureHandle,
         ctx: &mut RenderContext<'_>,
     ) -> Result<(), NodeError> {
-        let probe = match self.plan {
-            PlaylistFramePlan::Live { probe, .. } => probe,
-            PlaylistFramePlan::Held { probe } => probe.is_some(),
-            _ => false,
-        };
-        let Some(product) = self.plan.product() else {
-            ctx.graphics()
-                .ok_or_else(|| NodeError::msg("missing graphics backend"))?
-                .clear_texture(target)
-                .map_err(err_ctx("playlist clear target"))?;
-            return Ok(());
-        };
-        let rendered = ctx.render_texture_into(product, request, target);
-        if probe {
-            match &rendered {
-                Ok(()) => self.probe_current(ctx, product),
-                Err(error) => {
-                    self.fail_entry(self.current_entry, format!("render: {error}"));
-                    return ctx
-                        .graphics()
-                        .ok_or_else(|| NodeError::msg("missing graphics backend"))?
-                        .clear_texture(target)
-                        .map_err(err_ctx("playlist clear target"));
+        let revision = ctx.revision();
+        match self.plan {
+            PlaylistFramePlan::Clear => clear_target(ctx, target),
+            PlaylistFramePlan::Live {
+                product,
+                capture,
+                probe,
+            } => {
+                if !self.render_incoming_texture(product, probe, request, target, ctx)? {
+                    return clear_target(ctx, target);
                 }
+                // Only when the lamps did not already hold on the sample path:
+                // a canvas preview rendered after the tick must not cost a
+                // held texture when the fixture sampled directly.
+                if capture
+                    && !self.held.is_held()
+                    && let Err(error) = self.held_texture.capture(graphics(ctx)?, target)
+                {
+                    log::warn!("playlist: held texture refused ({error}); the switch cuts");
+                }
+                Ok(())
+            }
+            PlaylistFramePlan::Held { probe } => {
+                if let Some(incoming) = probe {
+                    // Rendered for its compile decision; overwritten below
+                    // when a held frame of this size exists.
+                    self.render_incoming_texture(incoming, true, request, target, ctx)?;
+                }
+                if !self.held_texture.show(graphics(ctx)?, target)? && probe.is_none() {
+                    clear_target(ctx, target)?;
+                }
+                Ok(())
+            }
+            PlaylistFramePlan::Blend {
+                product,
+                alpha,
+                capture,
+            } => {
+                if self.held_texture.held_for(target).is_none() {
+                    return ctx.render_texture_into(product, request, target);
+                }
+                let fade = self.held_texture.fade_target(graphics(ctx)?, target)?;
+                ctx.render_texture_into(product, request, fade)?;
+                let (held, fade) = self
+                    .held_texture
+                    .held_and_fade()
+                    .expect("held and fade targets exist");
+                graphics(ctx)?
+                    .blend_textures(held, fade, alpha, target)
+                    .map_err(err_ctx("playlist fade blend"))?;
+                if capture {
+                    self.held_texture
+                        .recapture(graphics(ctx)?, target, revision)?;
+                }
+                Ok(())
             }
         }
-        rendered
     }
 
     fn sample_visual_into(
@@ -727,6 +779,33 @@ impl RenderNode for PlaylistNode {
 }
 
 impl PlaylistNode {
+    /// Render `product` into `target`. When `probe` is set (the current
+    /// entry, not yet confirmed real), ask its readiness after; a render
+    /// error then fails the entry instead of the playlist, and the answer is
+    /// `false` (nothing was rendered).
+    fn render_incoming_texture(
+        &mut self,
+        product: lpc_model::VisualProduct,
+        probe: bool,
+        request: &RenderTextureRequest,
+        target: &mut TextureHandle,
+        ctx: &mut RenderContext<'_>,
+    ) -> Result<bool, NodeError> {
+        match ctx.render_texture_into(product, request, target) {
+            Ok(()) => {
+                if probe {
+                    self.probe_current(ctx, product);
+                }
+                Ok(true)
+            }
+            Err(error) if probe => {
+                self.fail_entry(self.current_entry, format!("render: {error}"));
+                Ok(false)
+            }
+            Err(error) => Err(error),
+        }
+    }
+
     /// One entry, live: pass the stream through, counting what it streams
     /// (the next capture's size) and, on a switch's first frame, copying it
     /// into the held frame.
@@ -972,6 +1051,17 @@ impl PlaylistNode {
             continuation = true;
         }
     }
+}
+
+fn graphics<'a>(ctx: &'a RenderContext<'_>) -> Result<&'a dyn lp_gfx::LpGraphics, NodeError> {
+    ctx.graphics()
+        .ok_or_else(|| NodeError::msg("missing graphics backend"))
+}
+
+fn clear_target(ctx: &RenderContext<'_>, target: &mut TextureHandle) -> Result<(), NodeError> {
+    graphics(ctx)?
+        .clear_texture(target)
+        .map_err(err_ctx("playlist clear target"))
 }
 
 fn detect_triggered_entry(

@@ -3,6 +3,8 @@ mod playlist_entry_reason;
 #[cfg(feature = "node-playlist")]
 mod playlist_held_frame;
 #[cfg(feature = "node-playlist")]
+mod playlist_held_texture;
+#[cfg(feature = "node-playlist")]
 mod playlist_node;
 // Always compiled — see the module doc there for why.
 mod playlist_output_path;

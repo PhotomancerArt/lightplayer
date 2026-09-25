@@ -93,6 +93,39 @@ fn a_switch_holds_the_old_frame_until_the_new_entry_renders_then_fades() {
     );
 }
 
+/// A `texture_area` fixture reaches the playlist through `render_texture`,
+/// not the sample stream: it holds and fades the same way.
+#[test]
+fn a_texture_area_fixture_holds_and_fades_too() {
+    let (fs, mut rt) = boot_texture_area();
+    let idle = steady_idle_frame(&fs, &mut rt);
+
+    activate(&mut rt, GREEN);
+    let frames = run(&fs, &mut rt, 25);
+    print_frames("idle → green (texture_area fixture)", &frames, &idle);
+
+    let held = frames
+        .iter()
+        .take_while(|frame| frame.bytes == idle)
+        .count();
+    assert!(held >= 3, "held {held} frames on the texture path");
+    assert!(
+        frames[..held]
+            .iter()
+            .any(|frame| frame.loaded == [GREEN] && frame.bytes == idle),
+        "the idle frame is shown from the held texture after idle unloaded"
+    );
+    let green = &frames.last().expect("frames").bytes;
+    assert_ne!(green, &idle);
+    assert!(
+        frames[held..].iter().any(|frame| &frame.bytes != green),
+        "a fade runs on the texture path"
+    );
+    for (index, frame) in frames.iter().enumerate() {
+        assert!(!frame.all_zero(), "frame {index} went black");
+    }
+}
+
 #[test]
 fn a_load_failure_skips_to_the_next_entry_and_holds_meanwhile() {
     let (fs, mut rt) = boot();
@@ -202,7 +235,31 @@ impl Frame {
 }
 
 fn boot() -> (LpFsMemory, LoadedProjectRuntime) {
+    boot_with(project_fs())
+}
+
+/// The same project, its fixture rendering the playlist into a texture and
+/// area-sampling it (`"sampling": "texture_area"`): the texture path driving
+/// lamps.
+fn boot_texture_area() -> (LpFsMemory, LoadedProjectRuntime) {
     let fs = project_fs();
+    let fixture =
+        String::from_utf8(include_bytes!("../../../projects/test/basic/fixture.json").to_vec())
+            .expect("utf8");
+    let texture_area = fixture.replacen(
+        "\"sampling\": \"direct\"",
+        "\"sampling\": \"texture_area\"",
+        1,
+    );
+    assert_ne!(
+        texture_area, fixture,
+        "the basic fixture names its sampling"
+    );
+    write(&fs, "/fixture.json", texture_area.as_bytes());
+    boot_with(fs)
+}
+
+fn boot_with(fs: LpFsMemory) -> (LpFsMemory, LoadedProjectRuntime) {
     let services = EngineServices::new(TreePath::parse("/switch.show").expect("path"));
     let mut rt = ProjectLoader::load_from_root(&fs, services).expect("load switch project");
     rt.engine_mut().set_graphics(Some(std::sync::Arc::new(
