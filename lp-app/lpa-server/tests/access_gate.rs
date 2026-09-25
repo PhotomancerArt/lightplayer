@@ -522,6 +522,30 @@ fn table_rows() -> Vec<Row> {
         ),
         row("reboot", ClientRequest::Reboot, Required::Edit),
         row("clearFaults", ClientRequest::ClearFaults, Required::Edit),
+        // Who has access: edit only. Harmless to the rows after them — the
+        // add brings a salt no other row uses, the remove names a salt that
+        // is not there, and the switches row changes neither switch.
+        row("accessList", ClientRequest::AccessList, Required::Edit),
+        row(
+            "accessAdd",
+            ClientRequest::AccessAdd {
+                entry: secret("table row", Tier::Play, b"table", 0xa0),
+            },
+            Required::Edit,
+        ),
+        row(
+            "accessRemove",
+            ClientRequest::AccessRemove { salt: [0xa1; 16] },
+            Required::Edit,
+        ),
+        row(
+            "accessSetSwitches",
+            ClientRequest::AccessSetSwitches {
+                ble_enabled: None,
+                open: None,
+            },
+            Required::Edit,
+        ),
     ];
 
     for (command, needs) in project_commands() {
@@ -1004,6 +1028,7 @@ fn body_name(body: &WireServerMsgBody) -> &'static str {
         WireServerMsgBody::Filesystem(_) => "Filesystem",
         WireServerMsgBody::LoginChallenge { .. } => "LoginChallenge",
         WireServerMsgBody::LoginResult(_) => "LoginResult",
+        WireServerMsgBody::AccessList { .. } => "AccessList",
         _ => "Other",
     }
 }
