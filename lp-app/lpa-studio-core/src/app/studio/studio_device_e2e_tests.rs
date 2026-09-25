@@ -2999,6 +2999,136 @@ fn a_board_running_another_project_stops_the_open_until_push_here_answers_it() {
     );
 }
 
+/// Yona, 2026-09-24: `/p/…?on=mac:` loaded fresh in a browser that forgets
+/// Web Serial grants on reload. The console said "waiting for the device
+/// before opening it: missing session: this board is not connected" and
+/// the page said nothing at all, because nothing in a page can reach a
+/// board it holds no port for — only a click on `requestPort()` can.
+///
+/// The hold now tells the opening frame WHICH board and WHY; the frame
+/// turns `NotConnected` into its "Connect this board" button.
+#[test]
+fn a_fresh_page_names_the_board_it_cannot_reach() {
+    use crate::app::open_progress::{DeviceWaitReason, OpenStage, open_stage};
+
+    let device = empty_light_player("dev000000daqf6dvvr8");
+    let (bench, _tasks) = identified(&device, "usb-fresh-1");
+    let key = library_package(&bench, "Choker", SIM_TARGET);
+    // The page comes back with the board still on the desk: a fresh
+    // controller, and the same board behind a port it holds no grant for.
+    let (mut page, _tasks) = DeviceBench::reloaded(
+        &bench,
+        &empty_light_player("dev000000daqf6dvvr8"),
+        "usb-fresh-1",
+    );
+    drop(bench);
+    page.settle_library();
+    page.open_on_device(&key, BENCH_BOARD_MAC, false)
+        .expect("a held open is not a refusal");
+
+    let OpenStage::WaitingForDevice(wait) = open_stage() else {
+        panic!(
+            "the frame is told why it waits, not left at Starting: {:?}",
+            open_stage()
+        );
+    };
+    assert_eq!(wait.reason, DeviceWaitReason::NotConnected);
+    assert_eq!(wait.device.uid, "dev000000daqf6dvvr8");
+    assert!(
+        wait.device.id.is_some(),
+        "the remembered row is a roster device — what Reconnect aims at"
+    );
+}
+
+/// The other half of the frame's Connect: a held open on a board whose
+/// port is closed says so, and the Connect gesture it offers is all it
+/// takes for the open to land — no reload, no trip to Devices.
+#[test]
+fn connecting_the_board_a_held_open_waits_on_lands_the_open() {
+    use crate::app::open_progress::{DeviceWaitReason, OpenStage, open_stage};
+
+    let device = empty_light_player("dev000000daqf6dvvr8");
+    let (mut bench, tasks) = identified(&device, "usb-fresh-3");
+    let key = library_package(&bench, "Choker", SIM_TARGET);
+    bench.settle_library();
+    let board = bench.view().devices[0].id;
+    bench.gesture(DeviceAction::Disconnect { device: board });
+    bench.run_until(&tasks, "the port to close", |bench| {
+        bench.view().devices[0].state_label != "Ready"
+    });
+
+    bench
+        .open_on_device(&key, BENCH_BOARD_MAC, false)
+        .expect("a held open is not a refusal");
+    let OpenStage::WaitingForDevice(wait) = open_stage() else {
+        panic!("held, and told why: {:?}", open_stage());
+    };
+    assert_eq!(wait.reason, DeviceWaitReason::PortClosed);
+
+    bench.gesture(DeviceAction::Connect { device: board });
+    let deadline = std::time::Instant::now() + REAL_TIME_LIMIT;
+    while bench.controller.view().open_project_uid.is_none() {
+        bench.step(&tasks);
+        drive(bench.controller.try_pending_device_lens());
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the held open never landed; stage {:?}, roster {:?}",
+            open_stage(),
+            bench.view()
+        );
+        std::thread::sleep(Duration::from_millis(1));
+    }
+    assert_eq!(
+        bench.controller.view().open_project_uid.as_deref(),
+        Some(key.as_str())
+    );
+    assert_eq!(
+        open_stage(),
+        OpenStage::Idle,
+        "a landed open stops narrating"
+    );
+}
+
+/// The frame's Cancel on a held open: the hold is let go and nothing is
+/// left narrating, so a board that shows up later is not opened behind the
+/// person's back.
+#[test]
+fn cancelling_a_held_open_lets_the_board_go() {
+    use crate::app::open_progress::{OpenStage, open_stage};
+
+    let device = empty_light_player("dev000000daqf6dvvr8");
+    let (bench, _tasks) = identified(&device, "usb-fresh-2");
+    let key = library_package(&bench, "Choker", SIM_TARGET);
+    // The page comes back with the board still on the desk: a fresh
+    // controller, and the same board behind a port it holds no grant for.
+    let (mut page, tasks) = DeviceBench::reloaded(
+        &bench,
+        &empty_light_player("dev000000daqf6dvvr8"),
+        "usb-fresh-2",
+    );
+    drop(bench);
+    page.settle_library();
+    page.open_on_device(&key, BENCH_BOARD_MAC, false)
+        .expect("a held open is not a refusal");
+    assert!(page.controller.pending_device_lens_for_test().is_some());
+
+    crate::cancel_open();
+    drive(page.controller.dispatch(UiAction::from_op(
+        crate::RuntimeOp::NODE_ID,
+        crate::RuntimeOp::CancelOpen,
+    )))
+    .expect("cancel never fails");
+    assert_eq!(
+        page.controller.pending_device_lens_for_test(),
+        None,
+        "nothing is left to land when the board shows up"
+    );
+    assert_eq!(open_stage(), OpenStage::Idle);
+    page.step(&tasks);
+    drive(page.controller.try_pending_device_lens());
+    assert_eq!(page.controller.view().open_project_uid, None);
+}
+
 /// A MAC nothing answers to is not a failure and not a guess: the hint is
 /// dropped and the open takes its ordinary course (PD14). Nothing stops,
 /// because there is nothing to decide.

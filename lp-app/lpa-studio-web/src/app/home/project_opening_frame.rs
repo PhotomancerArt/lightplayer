@@ -46,8 +46,8 @@
 use dioxus::prelude::*;
 use gloo_timers::future::TimeoutFuture;
 use lpa_studio_core::{
-    ActionPriority, DeviceAction, DeviceOpenProgress, DeviceOpenStep, DeviceWait,
-    DeviceWaitReason, DevicesOp, OpenDevice, OpenStage, RuntimeOp, UiAction,
+    ActionPriority, DeviceAction, DeviceOpenProgress, DeviceOpenStep, DeviceWait, DeviceWaitReason,
+    DevicesOp, OpenDevice, OpenStage, RuntimeOp, UiAction,
 };
 
 use crate::core::{quiet_action_class, solid_action_class};
@@ -526,10 +526,19 @@ pub fn ProjectOpeningFrame(
     }
 
     let stall_note = match (&shown, held >= STALL_NOTE_SECS) {
-        (OpeningState::WaitingForDevice(_), true) => Some(format!("Waiting {held} s so far.")),
-        (OpeningState::OnDevice(progress), true) => {
-            Some(format!("Still {} — {held} s on this step.", progress.step.doing()))
+        // Waiting on the PERSON (a click, a cable) is not a stall.
+        (OpeningState::WaitingForDevice(wait), true)
+            if !matches!(
+                wait.reason,
+                DeviceWaitReason::NotConnected | DeviceWaitReason::PortClosed
+            ) =>
+        {
+            Some(format!("Waiting {held} s so far."))
         }
+        (OpeningState::OnDevice(progress), true) => Some(format!(
+            "Still {} — {held} s on this step.",
+            progress.step.doing()
+        )),
         _ => None,
     };
 
@@ -597,7 +606,9 @@ fn DeviceOpenExits(state: OpeningState, on_action: Option<EventHandler<UiAction>
         OpeningState::WaitingForDevice(wait) => match (&wait.reason, device.id) {
             // The chooser: `requestPort()` rides this click's activation.
             (DeviceWaitReason::NotConnected, Some(id)) => {
-                Some(DevicesOp::action_for(DeviceAction::Reconnect { device: id }))
+                Some(DevicesOp::action_for(DeviceAction::Reconnect {
+                    device: id,
+                }))
             }
             (DeviceWaitReason::NotConnected, None) => {
                 Some(DevicesOp::action_for(DeviceAction::AddFromUsb))

@@ -4658,11 +4658,14 @@ impl StudioController {
                 // The board answered the fold's hello but not the lens's
                 // conversation (its own hello, or the attach): no lens, no
                 // session, the wire goes back — the card says the rest.
-                self.push_log(UiLogDraft::new(
-                    UiLogLevel::Warn,
-                    UiLogOrigin::Studio,
-                    format!("could not open the board in the editor: {error}"),
-                ));
+                // (A cancelled open unwinds through here too, quietly.)
+                if !crate::app::open_progress::open_superseded() {
+                    self.push_log(UiLogDraft::new(
+                        UiLogLevel::Warn,
+                        UiLogOrigin::Studio,
+                        format!("could not open the board in the editor: {error}"),
+                    ));
+                }
                 self.close_device_lens();
                 Err(error)
             }
@@ -4998,6 +5001,9 @@ impl StudioController {
         let held_open = self.pending_open.take();
         match landed {
             Ok(_) => crate::app::open_progress::note_open_settled(),
+            // Cancelled from the opening frame: the error is the woken
+            // request, not the board, and the person already left.
+            Err(_) if crate::app::open_progress::open_superseded() => {}
             Err(error) => {
                 self.push_log(UiLogDraft::new(
                     UiLogLevel::Warn,

@@ -457,10 +457,17 @@ mod tests {
         assert!(parked.as_mut().poll(&mut cx).is_pending());
 
         cancel_open();
-        assert!(woke.load(std::sync::atomic::Ordering::SeqCst), "the waker fired");
+        assert!(
+            woke.load(std::sync::atomic::Ordering::SeqCst),
+            "the waker fired"
+        );
         assert!(parked.as_mut().poll(&mut cx).is_ready());
         assert!(open_superseded(), "the running open unwinds quietly");
-        assert_eq!(open_stage(), OpenStage::Idle, "and the frame stops narrating it");
+        assert_eq!(
+            open_stage(),
+            OpenStage::Idle,
+            "and the frame stops narrating it"
+        );
         // A request that starts after the cancel is not cancelled by it.
         let mut fresh = core::pin::pin!(cancelled_since(cancel_epoch()));
         assert!(fresh.as_mut().poll(&mut cx).is_pending());
