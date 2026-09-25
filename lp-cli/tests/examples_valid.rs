@@ -88,6 +88,97 @@ fn checked_in_catalog_entries_rewrite_byte_identically() -> Result<()> {
     Ok(())
 }
 
+/// The playlist's additive fields (`tour`, `skip`, `next_trigger_ids`,
+/// `prev_trigger_ids`, multi-pattern plan P5) never reach a checked-in
+/// playlist that did not author them: the canonical rewrite of every one
+/// carries none of their keys, and rewriting it again is byte-identical.
+///
+/// Playlists live in ref'd node files, which the module-level gate above
+/// never reads. They are not byte-canonical against their checked-in bytes
+/// today — the writer adds the consumed `time` slot's default, which no
+/// checked-in playlist authors — so this pins what P5 can change, not that.
+/// P5 also checked, by building the model before and after its fields, that
+/// the rewrite of every file below is the same bytes on both sides.
+#[test]
+fn checked_in_playlists_never_gain_the_tour_fields() -> Result<()> {
+    use lpc_model::{NodeDef, SlotShapeRegistry};
+
+    const TOUR_KEYS: [&str; 4] = [
+        "\"tour\"",
+        "\"skip\"",
+        "\"next_trigger_ids\"",
+        "\"prev_trigger_ids\"",
+    ];
+
+    let workspace_dir = workspace_dir();
+    let project_dirs = checked_in_project_dirs(&workspace_dir, GATE_ROOTS)?;
+    let registry = SlotShapeRegistry::default();
+
+    let mut checked = Vec::new();
+    let mut failures = Vec::new();
+    for project_dir in project_dirs {
+        for entry in std::fs::read_dir(&project_dir)
+            .with_context(|| format!("read {}", project_dir.display()))?
+        {
+            let path = entry?.path();
+            if path.extension().is_none_or(|ext| ext != "json") {
+                continue;
+            }
+            let text = std::fs::read_to_string(&path)
+                .with_context(|| format!("read {}", path.display()))?;
+            if !text.contains("\"kind\": \"Playlist\"") {
+                continue;
+            }
+            let rel = path
+                .strip_prefix(&workspace_dir)
+                .unwrap_or(&path)
+                .display()
+                .to_string();
+            let rewrite = |text: &str| -> Result<String> {
+                let def = NodeDef::read_json(&registry, text).map_err(anyhow::Error::msg)?;
+                def.write_json(&registry).map_err(anyhow::Error::msg)
+            };
+            let first = match rewrite(&text) {
+                Ok(first) => first,
+                Err(err) => {
+                    failures.push(format!("{rel}: {err}"));
+                    continue;
+                }
+            };
+            for key in TOUR_KEYS {
+                if !text.contains(key) && first.contains(key) {
+                    failures.push(format!("{rel}: the rewrite gained {key}"));
+                }
+            }
+            match rewrite(&first) {
+                Ok(second) if second != first => {
+                    failures.push(format!("{rel}: a second rewrite changed bytes"));
+                }
+                Ok(_) => checked.push(rel),
+                Err(err) => failures.push(format!("{rel}: second rewrite: {err}")),
+            }
+        }
+    }
+
+    println!("playlists checked:");
+    for rel in &checked {
+        println!("  {rel}");
+    }
+    if !failures.is_empty() {
+        anyhow::bail!(
+            "checked-in playlists changed under the tour fields:\n{}",
+            failures.join("\n")
+        );
+    }
+    assert!(
+        checked
+            .iter()
+            .any(|rel| rel.ends_with("catalog/projects/fyeah-sign/playlist.json")),
+        "the gate must reach fyeah-sign's playlist: {checked:?}"
+    );
+    Ok(())
+}
+
 /// Every checked-in project under `roots`, recursively (the catalog nests
 /// entries one bucket deep: `catalog/<bucket>/<slug>`). Every root must
 /// contribute at least one project — a wrong path would otherwise make a
