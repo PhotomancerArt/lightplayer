@@ -220,6 +220,24 @@ impl FirmwareVerb {
         }
     }
 
+    /// This verb as a DISABLED action carrying `reason` — what the card
+    /// draws when the link cannot carry firmware (a board reached over
+    /// Bluetooth: [`DeviceView::firmware_blocked`]). Disabled rather than
+    /// hidden, so "why can't I update this?" is answered where it is asked;
+    /// the action inside is never dispatched.
+    pub fn blocked_action(&self, device: DeviceId, reason: &str) -> UiAction {
+        DevicesOp::action_for(Action::Flash {
+            device,
+            board_id: String::new(),
+            build_id: String::new(),
+            park_first: false,
+            name: None,
+        })
+        .with_label(self.label())
+        .with_summary(self.summary())
+        .disabled(reason)
+    }
+
     /// The one-click Update as a dispatchable action, wearing this verb's
     /// own label rather than the Flash op's default. `None` for the verbs
     /// whose action is the pick's.
@@ -280,6 +298,17 @@ pub fn firmware_verb(view: &DeviceView) -> Option<FirmwareVerb> {
         | FirmwareFace::Foreign { .. }
         | FirmwareFace::Silent => Some(FirmwareVerb::Flash),
     }
+}
+
+/// Why the card's hardware Reset is disabled over a link with no reset
+/// lines (Bluetooth): it pulses DTR/RTS, and GATT has neither.
+pub const RESET_NEEDS_USB: &str = "Reset needs USB";
+
+/// Factory reset as a DISABLED action carrying `reason`, for the same card
+/// state as [`FirmwareVerb::blocked_action`]: erasing is a firmware verb too
+/// (it needs the ROM downloader), so it is refused the same way.
+pub fn blocked_erase_action(device: DeviceId, reason: &str) -> UiAction {
+    DevicesOp::action_for(Action::Erase { device }).disabled(reason)
 }
 
 /// The auto-derived device name: `"<board display_name> · <Mon D>"`, with
@@ -511,6 +540,7 @@ mod tests {
             last_outcome: None,
             terminal: Vec::new(),
             terminal_dropped: 0,
+            firmware_blocked: None,
             escapes: vec![Escape::Disconnect, Escape::Forget],
         };
 
@@ -560,6 +590,7 @@ mod tests {
             last_outcome: None,
             terminal: Vec::new(),
             terminal_dropped: 0,
+            firmware_blocked: None,
             escapes: vec![Escape::Disconnect, Escape::Forget],
         }
     }

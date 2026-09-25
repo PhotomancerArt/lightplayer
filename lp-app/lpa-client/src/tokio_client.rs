@@ -618,6 +618,7 @@ fn client_error_to_anyhow(error: ClientError) -> Error {
         ClientError::UnexpectedResponse { response, .. } => Error::msg(format!(
             "Unexpected response type for project_read: {response}"
         )),
+        error @ ClientError::NotPermitted { .. } => Error::msg(error.to_string()),
     }
 }
 

@@ -836,7 +836,11 @@ pub(crate) fn lens_route(view: &UiStudioView) -> Option<StudioRoute> {
     let on = match transport {
         lpa_studio_core::LinkTransport::Sim => Some(DeviceHint::Sim),
         lpa_studio_core::LinkTransport::Emu => Some(DeviceHint::Emu),
-        lpa_studio_core::LinkTransport::Serial => base_mac.clone().map(DeviceHint::Mac),
+        // A board is its base MAC whichever wire reaches it: over USB or
+        // over Bluetooth, `?on=mac:…` names the same device (M5).
+        lpa_studio_core::LinkTransport::Serial | lpa_studio_core::LinkTransport::Ble => {
+            base_mac.clone().map(DeviceHint::Mac)
+        }
     };
     // A TRANSIENT view session binds its example's bare address (examples
     // vision D2/D4) — checked BEFORE the loaded-project uid, which for a

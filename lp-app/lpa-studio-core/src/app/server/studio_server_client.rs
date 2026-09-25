@@ -365,6 +365,20 @@ impl StudioServerClient {
         Ok(logs)
     }
 
+    /// Run one access step (a hello check or a login) on this session's
+    /// wire — the lens's, when the lens holds a Bluetooth board's wire and a
+    /// shared-link conversation could not be answered (BLE M6).
+    pub async fn run_access_step(
+        &mut self,
+        device: lpa_devices::identity::DeviceId,
+        step: crate::app::access::AccessStep,
+        keys: &Rc<RefCell<crate::app::access::LoginKeyCache>>,
+        timer: Rc<RefCell<dyn FnMut(core::time::Duration) -> crate::DeviceTimerFuture>>,
+    ) -> crate::app::access::AccessCommand {
+        crate::app::access::access_controller::run_step(&mut self.client, device, step, keys, timer)
+            .await
+    }
+
     /// Write one file through the server filesystem (`FsRequest::Write`),
     /// addressed from the fs ROOT — device-scoped files that live outside
     /// every project storage dir (identity stamping: `/.lp/device.json`).
@@ -1082,6 +1096,9 @@ fn map_client_error(error: ClientError) -> UiError {
             operation,
             response,
         } => UiError::Protocol(format!("unexpected response for {operation}: {response}")),
+        ClientError::NotPermitted { needs } => {
+            UiError::NotPermitted(crate::app::access::not_permitted_sentence(needs).to_string())
+        }
     }
 }
 

@@ -301,6 +301,14 @@ pub fn App() -> Element {
             controller.load_user_settings_json(&json);
         }
         controller.set_on_user_settings(crate::settings_io::store_user_settings_json);
+        // Bluetooth access memory (BLE M6): remembered passwords and what
+        // this browser wrote to each piece, each under its own key, read
+        // before the actor spawns and written back on change.
+        controller.apply_access_command(lpa_studio_core::AccessCommand::MemoryLoaded {
+            passwords_json: crate::settings_io::load_local(crate::settings_io::BLE_PASSWORDS_KEY),
+            devices_json: crate::settings_io::load_local(crate::settings_io::BLE_DEVICE_ACCESS_KEY),
+        });
+        controller.set_on_access_persist(crate::settings_io::store_access);
         // Node copy produces envelope text in core and writes it here
         // (core never touches `navigator.clipboard`).
         controller.set_on_copy_text(crate::clipboard::write_text);
@@ -383,6 +391,14 @@ pub fn App() -> Element {
             // that one board's link with the reason (D21).
             controller.set_emu_transport(Rc::new(lpa_studio_core::EmuDeviceTransport::new(
                 Rc::new(lpa_studio_core::BrowserEmuLinkSource::resolving()),
+            )));
+            // Bluetooth (M5), installed whether or not this browser HAS Web
+            // Bluetooth: without it the chooser refuses by name and the add
+            // slot explains why (Brave's flag, Bluefy on iPhone), instead of
+            // the verb silently not existing. Nothing connects until a
+            // device is picked, or was granted on an earlier visit.
+            controller.set_ble_transport(Rc::new(lpa_studio_core::BleDeviceTransport::new(
+                Rc::new(lpa_studio_core::BrowserBleSource::new()),
             )));
         }
         let (actor, handle) = StudioActor::new(controller, make_pull_timer);
@@ -978,6 +994,7 @@ pub fn App() -> Element {
                 // browser's listeners carry no argument. Listener lifetime =
                 // page lifetime (forget).
                 install_serial_hotplug(&startup_bridge.tx);
+                install_ble_hotplug(&startup_bridge.tx);
             }
             #[cfg(not(target_arch = "wasm32"))]
             let _ = &startup_bridge;
@@ -1042,9 +1059,30 @@ pub fn App() -> Element {
     let _refresh_task = use_future(move || {
         let refresh_bridge = refresh_bridge.clone();
         async move {
+            // The wait re-reads the published delay in slices, so a delay
+            // that SHRINKS mid-wait is honoured: a lens held in Play over
+            // Bluetooth idles on a minute-long gap (M5), and a knob write's
+            // verdict-chase reads must not wait that minute out. A short
+            // delay (the sim's 33 ms, the device's 150 ms) is one slice, as
+            // before; a long one wakes every quarter second to look, and
+            // sends nothing until it is due.
+            const REFRESH_WAIT_SLICE: core::time::Duration = core::time::Duration::from_millis(250);
             loop {
-                let delay = refresh_bridge.delay.get();
-                TimeoutFuture::new(delay.as_millis() as u32).await;
+                // At least one timer await per tick, even at a zero delay:
+                // the loop must always yield to the browser.
+                let mut waited = core::time::Duration::ZERO;
+                loop {
+                    let slice = refresh_bridge
+                        .delay
+                        .get()
+                        .saturating_sub(waited)
+                        .min(REFRESH_WAIT_SLICE);
+                    TimeoutFuture::new(slice.as_millis() as u32).await;
+                    waited += slice;
+                    if waited >= refresh_bridge.delay.get() {
+                        break;
+                    }
+                }
                 refresh_bridge.tx.send(StudioCommand::RefreshTick);
             }
         }
@@ -1094,6 +1132,34 @@ pub fn App() -> Element {
     // link to a project this library does NOT have never gets here: the
     // route resolution above lands it on Home with a pending intent.
     let current_view = view.read().clone();
+    // Bluetooth access (BLE M6): the password sheet, the device access
+    // panel, the Devices page's Bluetooth settings and the project's
+    // Bluetooth list all sit under the shell; their callbacks and the two
+    // view slices they read ride one context instead of every layer.
+    let access_bridge = bridge.clone();
+    let access_settings_bridge = bridge.clone();
+    let mut device_settings = use_signal(lpa_studio_core::UiDeviceSettingsView::default);
+    let mut project_access = use_signal(|| None::<lpa_studio_core::UiProjectAccess>);
+    use_context_provider(|| crate::app::home::access_ui_context::AccessUi {
+        on_access: Callback::new(move |command| {
+            access_bridge.tx.send(StudioCommand::Access(command));
+        }),
+        on_settings: Callback::new(move |command| {
+            access_settings_bridge
+                .tx
+                .send(StudioCommand::Settings(command));
+        }),
+        device_settings,
+        project_access,
+    });
+    if *device_settings.peek() != current_view.settings.devices {
+        device_settings.set(current_view.settings.devices.clone());
+    }
+    if *project_access.peek() != current_view.project_access {
+        project_access.set(current_view.project_access.clone());
+    }
+    let login_prompt = current_view.login_prompt.clone();
+    let sheet_bridge = bridge.clone();
     let current_route = route.read().clone();
     let opening_frame = matches!(
         current_route,
@@ -1366,6 +1432,17 @@ pub fn App() -> Element {
             // bottom for acts with no other visible consequence (a link on
             // the clipboard, an access level flipped, a project archived).
             ToastHost {}
+            // The password sheet (BLE M6): page-level, over any route, when
+            // a Bluetooth piece needs a password Studio did not have.
+            if let Some(prompt) = login_prompt {
+                crate::app::home::login_sheet::LoginSheet {
+                    key: "{prompt.device.0}",
+                    prompt,
+                    on_access: move |command| {
+                        sheet_bridge.tx.send(StudioCommand::Access(command));
+                    },
+                }
+            }
         }
     }
 }
@@ -2005,6 +2082,35 @@ fn install_serial_hotplug(tx: &CommandSender) {
         disconnect_tx.send(StudioCommand::DeviceHotplug(DeviceHotplug::Disconnected));
     }) as Box<dyn FnMut()>);
     let installed = lpa_link::providers::browser_serial_esp32::install_serial_events(
+        on_connect.as_ref().unchecked_ref(),
+        on_disconnect.as_ref().unchecked_ref(),
+    );
+    if installed {
+        on_connect.forget();
+        on_disconnect.forget();
+    }
+}
+
+/// The Bluetooth presence edges (M5): the same two re-derivation triggers as
+/// Web Serial's hotplug. `connect` is a session becoming present (a reconnect
+/// that succeeded, a page-load restore); `disconnect` is one dropping —
+/// including a drop only noticed when the page was shown again, which is how
+/// iOS delivers them (docs/defects/2026-09-23-bluefy-hidden-page-does-not-see-ble-drops.md).
+#[cfg(target_arch = "wasm32")]
+fn install_ble_hotplug(tx: &CommandSender) {
+    use lpa_studio_core::app::studio::studio_command::DeviceHotplug;
+    use wasm_bindgen::JsCast;
+    use wasm_bindgen::prelude::Closure;
+
+    let connect_tx = tx.clone();
+    let on_connect = Closure::wrap(Box::new(move || {
+        connect_tx.send(StudioCommand::DeviceHotplug(DeviceHotplug::Connected));
+    }) as Box<dyn FnMut()>);
+    let disconnect_tx = tx.clone();
+    let on_disconnect = Closure::wrap(Box::new(move || {
+        disconnect_tx.send(StudioCommand::DeviceHotplug(DeviceHotplug::Disconnected));
+    }) as Box<dyn FnMut()>);
+    let installed = lpa_link::providers::browser_ble::install_ble_events(
         on_connect.as_ref().unchecked_ref(),
         on_disconnect.as_ref().unchecked_ref(),
     );

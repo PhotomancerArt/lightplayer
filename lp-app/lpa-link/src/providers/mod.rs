@@ -13,6 +13,8 @@
 //! - `browser-worker`: browser worker runtime backed by `fw-browser`
 //! - `host-serial-esp32`: ESP32 hardware over host OS serial
 //! - `browser-serial-esp32`: ESP32 hardware over browser Web Serial
+//! - `browser-ble`: a LightPlayer board over browser Web Bluetooth (NUS),
+//!   control only
 //! - `host-websocket`: host-side websocket connection to an existing server
 //! - `browser-websocket`: browser-side websocket connection to an existing server
 //!
@@ -20,6 +22,9 @@
 //! contract. Include it when management details are target-specific, such as
 //! ESP32 flashing, reset, and filesystem behavior.
 
+/// Web Bluetooth (NUS): the line protocol over GATT, control only.
+#[cfg(all(feature = "browser-ble", target_arch = "wasm32"))]
+pub mod browser_ble;
 #[cfg(all(feature = "browser-serial-esp32", target_arch = "wasm32"))]
 pub mod browser_serial_esp32;
 // Where a packaged firmware build's manifest lives. Declared outside the

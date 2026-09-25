@@ -56,6 +56,14 @@ impl<T> ClientOutcome<T> {
     }
 }
 
+/// What a `LoginBegin` got back: a challenge to answer, or a refusal (a
+/// login already in flight on the device, or its backoff running).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum LoginBegun {
+    Challenge(lpc_access::Challenge),
+    Refused(lpc_access::LoginOutcome),
+}
+
 /// A caller-provided sleep future, boxed so [`RequestDeadline`] adds no
 /// generic parameter to [`LpClient`].
 pub type ClientTimerFuture = Pin<Box<dyn Future<Output = ()>>>;
@@ -247,6 +255,12 @@ where
                     if let WireServerMsgBody::Error { error } = &response.msg {
                         return Err(ClientError::Server(error.clone()));
                     }
+                    // A tier refusal is its own error whatever was asked, so
+                    // every caller can say "this needs an edit password"
+                    // rather than "unexpected response".
+                    if let WireServerMsgBody::NotPermitted { needs } = &response.msg {
+                        return Err(ClientError::NotPermitted { needs: *needs });
+                    }
                     return Ok(ClientOutcome::new(response, events));
                 }
                 ResponseDisposition::ServerOriginated { response_id } => {
@@ -290,6 +304,41 @@ where
         match response.value.msg {
             WireServerMsgBody::Hello(hello) => Ok(ClientOutcome::new(hello, events)),
             other => Err(ClientError::unexpected_response("hello", other)),
+        }
+    }
+
+    /// Begin a login on this link: the board answers with a challenge (a
+    /// fresh nonce and every installed secret's salt and cost), or refuses
+    /// while another login is in flight or its backoff is running.
+    pub async fn login_begin(&mut self) -> ClientResult<ClientOutcome<LoginBegun>> {
+        let response = self.send_request(ClientRequest::LoginBegin).await?;
+        let events = response.events;
+        match response.value.msg {
+            WireServerMsgBody::LoginChallenge { nonce, offers } => Ok(ClientOutcome::new(
+                LoginBegun::Challenge(lpc_access::Challenge { nonce, offers }),
+                events,
+            )),
+            WireServerMsgBody::LoginResult(outcome) => {
+                Ok(ClientOutcome::new(LoginBegun::Refused(outcome), events))
+            }
+            other => Err(ClientError::unexpected_response("login.begin", other)),
+        }
+    }
+
+    /// Answer the outstanding challenge with one MAC per offer, in offer
+    /// order: granted (the tier and the matching secret's label) or refused
+    /// (with the board's backoff).
+    pub async fn login_answer(
+        &mut self,
+        macs: Vec<lpc_access::LoginMac>,
+    ) -> ClientResult<ClientOutcome<lpc_access::LoginOutcome>> {
+        let response = self
+            .send_request(ClientRequest::LoginAnswer { macs })
+            .await?;
+        let events = response.events;
+        match response.value.msg {
+            WireServerMsgBody::LoginResult(outcome) => Ok(ClientOutcome::new(outcome, events)),
+            other => Err(ClientError::unexpected_response("login.answer", other)),
         }
     }
 
