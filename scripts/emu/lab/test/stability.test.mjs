@@ -22,7 +22,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { computeReport, stabilityVerdict, controlRowKeys, renderReportMd, DEFAULT_STOP_WHEN_STABLE } from '../report.mjs';
-import { startServer } from './helpers.mjs';
+import { startServer, MANUAL_CLOCK } from './helpers.mjs';
 import { fakeDevice } from './fake-device.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -256,7 +256,10 @@ test('a report carries stopWhenStable and stoppedEarly, and the .md says so', ()
 
 // --- the scheduler ----------------------------------------------------------
 
-const FAST = { LAB_TICK_MS: '20', LAB_COOLDOWN_MS: '0', LAB_LOST_MS: '2000' };
+// The manual clock (clock.mjs): time moves only by the fake device's 10 ms
+// presses, so the 2 s lost bound can never re-send a press that a loaded
+// runner was merely slow to answer.
+const FAST = { ...MANUAL_CLOCK, LAB_COOLDOWN_MS: '0', LAB_LOST_MS: '2000' };
 
 function stageFixture(home, ids) {
   for (const id of ids) {
