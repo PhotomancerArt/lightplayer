@@ -65,7 +65,10 @@ fn losses_never_decode_wrong_and_always_recover() {
         total.add(&r);
     }
     // Losses happened, desyncs happened, and most frames still got through.
-    assert!(total.abandoned > 0 && total.lost > 0 && total.torn > 0, "{total:?}");
+    assert!(
+        total.abandoned > 0 && total.lost > 0 && total.torn > 0,
+        "{total:?}"
+    );
     assert!(total.desyncs > 0, "{total:?}");
     assert!(total.decoded * 10 > total.sent * 7, "{total:?}");
 }

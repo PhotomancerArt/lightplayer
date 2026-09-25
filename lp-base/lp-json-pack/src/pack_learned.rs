@@ -132,14 +132,29 @@ impl LearnedTable {
     };
 
     /// An empty table in epoch 0 on the heap, allocated zeroed so the ~6.9 KB
-    /// never passes through the stack.
+    /// never passes through the stack. Aborts on allocation failure, like
+    /// `Box::new`; see [`Self::try_boxed`].
     #[cfg(feature = "alloc")]
     pub fn boxed() -> alloc::boxed::Box<Self> {
-        let zeroed = alloc::boxed::Box::<Self>::new_zeroed();
-        // SAFETY: every field is an integer or an array of integers, and the
-        // all-zero bit pattern is `Self::NEW` (`SLOT_EMPTY` and `STATE_EMPTY`
-        // are zero, and every other field of `NEW` is a zero integer).
-        unsafe { zeroed.assume_init() }
+        Self::try_boxed()
+            .unwrap_or_else(|| alloc::alloc::handle_alloc_error(core::alloc::Layout::new::<Self>()))
+    }
+
+    /// [`Self::boxed`], or `None` when the heap cannot hold a table: a board
+    /// answers a host's opt-in `json` then, instead of failing.
+    #[cfg(feature = "alloc")]
+    pub fn try_boxed() -> Option<alloc::boxed::Box<Self>> {
+        let layout = core::alloc::Layout::new::<Self>();
+        // SAFETY: `layout` is `Self`'s and not zero-sized. The allocation is
+        // zeroed, and the all-zero bit pattern is `Self::NEW`: every field is
+        // an integer or an array of integers, `SLOT_EMPTY` and `STATE_EMPTY`
+        // are zero, and every other field of `NEW` is a zero integer. The
+        // pointer came from the global allocator with `Self`'s layout, which
+        // is what `Box::from_raw` requires.
+        unsafe {
+            let raw = alloc::alloc::alloc_zeroed(layout).cast::<Self>();
+            (!raw.is_null()).then(|| alloc::boxed::Box::from_raw(raw))
+        }
     }
 
     /// Whether `s` was seen inline before; remembers it if not (and there is
@@ -167,6 +182,12 @@ impl LearnedTable {
         self.text[at..end].copy_from_slice(s);
         self.text_len = end;
         Some(at as u16)
+    }
+}
+
+impl Default for LearnedTable {
+    fn default() -> Self {
+        Self::NEW
     }
 }
 
@@ -278,18 +299,22 @@ pub enum HeaderMismatch {
 /// Read a learned frame's header and check it against `store`. On a match
 /// returns the header length (the value starts there).
 ///
-/// A frame of a **new** epoch whose state is the empty table's is the board's
-/// announced reset: the reader resets `store` to that epoch and decodes it.
+/// A frame coded against the **empty** table is always accepted: it says
+/// the writer's table is empty in that epoch, which is the writer's reset
+/// (after a host's reset request, or a reboot), so the reader resets `store`
+/// to that epoch if it is not already there, and decodes it.
 pub fn read_header(frame: &[u8], store: &mut dyn LearnStore) -> Result<usize, HeaderMismatch> {
     let h = frame
         .get(..LEARN_HEADER_LEN)
         .ok_or(HeaderMismatch::Truncated)?;
     let (epoch, state) = (h[0], u16::from_le_bytes([h[1], h[2]]));
-    if epoch != store.epoch() {
-        if state == fold(STATE_EMPTY) {
+    if state == fold(STATE_EMPTY) {
+        if epoch != store.epoch() || store.mark() != LearnMark::default() {
             store.reset(epoch);
-            return Ok(LEARN_HEADER_LEN);
         }
+        return Ok(LEARN_HEADER_LEN);
+    }
+    if epoch != store.epoch() {
         return Err(HeaderMismatch::Epoch {
             frame: epoch,
             reader: store.epoch(),
@@ -303,6 +328,21 @@ pub fn read_header(frame: &[u8], store: &mut dyn LearnStore) -> Result<usize, He
         });
     }
     Ok(LEARN_HEADER_LEN)
+}
+
+/// Whether `frame` is a writer's reset: coded against the empty table, in
+/// any epoch. A reader that lost step accepts only this until it is back in
+/// step (a stale frame whose folded state happened to match its table must
+/// not be decoded).
+pub fn is_reset_frame(frame: &[u8]) -> bool {
+    frame
+        .get(1..LEARN_HEADER_LEN)
+        .is_some_and(|s| u16::from_le_bytes([s[0], s[1]]) == fold(STATE_EMPTY))
+}
+
+/// The epoch a learned frame names, if it is long enough to name one.
+pub fn frame_epoch(frame: &[u8]) -> Option<u8> {
+    frame.first().copied()
 }
 
 /// One side (keys or values) of a [`LearnedTable`].
@@ -513,8 +553,35 @@ mod tests {
         let n = write_header(&mut h, &board).unwrap();
         assert_eq!(read_header(&h[..n], &mut host), Ok(n));
         assert_eq!(host.epoch(), 2);
-        assert_eq!(read_header(&h[..2], &mut host), Err(HeaderMismatch::Truncated));
+        assert_eq!(
+            read_header(&h[..2], &mut host),
+            Err(HeaderMismatch::Truncated)
+        );
+        board.reset(3);
+        let n = write_header(&mut h, &board).unwrap();
+        assert!(is_reset_frame(&h[..n]));
+        board.learn_key(b"k3");
+        let n = write_header(&mut h, &board).unwrap();
+        assert!(!is_reset_frame(&h[..n]), "not empty");
+        assert!(!is_reset_frame(&h[..2]));
         assert_eq!(write_header(&mut h[..2], &board), None);
+    }
+
+    /// A board that rebooted starts its first epoch again. A host still
+    /// holding that epoch's table from before the reboot must take the empty
+    /// frame as the reset it is, not as a mismatch.
+    #[test]
+    fn an_empty_frame_in_the_readers_own_epoch_resets_it() {
+        let mut host = LearnedTable::NEW;
+        host.reset(1);
+        host.learn_key(b"from before the reboot");
+        let mut board = LearnedTable::NEW;
+        board.reset(1);
+        let mut h = [0u8; 3];
+        write_header(&mut h, &board).unwrap();
+        assert_eq!(read_header(&h, &mut host), Ok(LEARN_HEADER_LEN));
+        assert_eq!(host.mark(), board.mark());
+        assert_eq!(host.find_key(b"from before the reboot"), None);
     }
 
     #[test]

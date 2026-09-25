@@ -12,10 +12,10 @@
 //! form it came in, and says when to write the opt-in:
 //!
 //! - **first**, as soon as a [`ServerHello`](crate::ServerHello) (the boot
-//!   hello or the answer to a `Hello` request) says the board packs with this
-//!   build's dictionary — `pack_dictionary == WIRE_DICTIONARY_FINGERPRINT` and
-//!   the same `proto`. A board that cannot pack (`0`) or packs with another
-//!   dictionary is never asked;
+//!   hello or the answer to a `Hello` request) says the board packs in this
+//!   build's format — `pack_format == PACK_FORMAT_VERSION` and the same
+//!   `proto`. A board that cannot pack (`0`) or packs in another format is
+//!   never asked;
 //! - **again**, when a JSON message arrives on a link that was agreed packed:
 //!   the board fell back. Asks are rate-limited to one per
 //!   [`PACK_REASK_INTERVAL_MS`], so a board that keeps falling back costs one
@@ -23,7 +23,15 @@
 //!   opt-in whose answer never came. A board also sends a single reply as
 //!   JSON when it does not fit its frame buffer packed; that reads as a
 //!   fallback too and costs one redundant opt-in (answered `packed`), which
-//!   is cheaper than telling the two apart.
+//!   is cheaper than telling the two apart;
+//! - **again**, when the reader drops a packed frame because its learned
+//!   table lost step with the board's
+//!   ([`WireChunk::Desync`](crate::WireChunk::Desync)): the owner calls
+//!   [`PackOptIn::desynced`] for every one, and an accepted opt-in starts a
+//!   new table epoch on the board. The same rate limit applies, which is why
+//!   the owner calls it every time rather than once: while the link is out of
+//!   step no message reaches [`PackOptIn::observe`], and a desync inside the
+//!   interval of the last ask must still be asked about when it expires.
 //!
 //! The opt-in goes out with its own id, [`PACK_OPT_IN_REQUEST_ID`], and its
 //! answer is this module's, not the caller's: [`PackOptInStep::deliver`] is
@@ -36,7 +44,8 @@
 
 use crate::message::client::{ClientMessage, ClientRequest};
 use crate::server::ServerMsgBody;
-use crate::{WIRE_DICTIONARY_FINGERPRINT, WIRE_PROTO_VERSION, WireEncoding, WireServerMessage};
+use crate::{WIRE_PROTO_VERSION, WireEncoding, WireServerMessage};
+use lp_json_pack::PACK_FORMAT_VERSION;
 
 /// The id the opt-in is sent with: `2^53 - 1`, far above any request
 /// counter and still exact as a JavaScript number.
@@ -122,8 +131,8 @@ impl PackOptIn {
         let mut deliver = true;
         match &message.msg {
             ServerMsgBody::Hello(hello) => {
-                self.board_can_pack = hello.proto == WIRE_PROTO_VERSION
-                    && hello.pack_dictionary == WIRE_DICTIONARY_FINGERPRINT;
+                self.board_can_pack =
+                    hello.proto == WIRE_PROTO_VERSION && hello.pack_format == PACK_FORMAT_VERSION;
             }
             ServerMsgBody::SetEncoding { encoding } if message.id == PACK_OPT_IN_REQUEST_ID => {
                 deliver = false;
@@ -139,6 +148,18 @@ impl PackOptIn {
             deliver,
             send: self.ask_if_due(now_ms),
         }
+    }
+
+    /// The reader dropped a packed frame because its learned table is out of
+    /// step with the board's ([`WireChunk::Desync`](crate::WireChunk::Desync)),
+    /// at `now_ms`. Returns the opt-in to write when one is due: the board
+    /// answers it with a new, empty table epoch. Call it for every desync;
+    /// the rate limit keeps the asks to one per [`PACK_REASK_INTERVAL_MS`].
+    pub fn desynced(&mut self, now_ms: u64) -> Option<ClientMessage> {
+        if matches!(self.agreement, Agreement::Packed) {
+            self.agreement = Agreement::Json;
+        }
+        self.ask_if_due(now_ms)
     }
 
     /// The link closed or reopened: the board has forgotten the opt-in, and
@@ -161,7 +182,7 @@ impl PackOptIn {
             id: PACK_OPT_IN_REQUEST_ID,
             msg: ClientRequest::SetEncoding {
                 encoding: WireEncoding::Packed,
-                dictionary: WIRE_DICTIONARY_FINGERPRINT,
+                format: PACK_FORMAT_VERSION,
             },
         })
     }
@@ -175,10 +196,10 @@ mod tests {
     use alloc::vec::Vec;
 
     #[test]
-    fn a_board_that_packs_with_our_dictionary_is_asked_at_its_hello() {
+    fn a_board_that_packs_in_our_format_is_asked_at_its_hello() {
         let mut link = PackOptIn::new(true);
 
-        let step = link.observe(&hello(WIRE_DICTIONARY_FINGERPRINT), false, 0);
+        let step = link.observe(&hello(PACK_FORMAT_VERSION), false, 0);
 
         assert!(step.deliver, "the hello is the caller's");
         let ask = step.send.expect("asked at the hello");
@@ -187,7 +208,7 @@ mod tests {
             ask.msg,
             ClientRequest::SetEncoding {
                 encoding: WireEncoding::Packed,
-                dictionary: WIRE_DICTIONARY_FINGERPRINT,
+                format: PACK_FORMAT_VERSION,
             }
         ));
         assert_eq!(link.encoding(), WireEncoding::Json);
@@ -204,14 +225,14 @@ mod tests {
 
     #[test]
     fn a_board_that_cannot_pack_or_packs_otherwise_is_never_asked() {
-        for fingerprint in [0, WIRE_DICTIONARY_FINGERPRINT ^ 1] {
+        for format in [0, PACK_FORMAT_VERSION + 1] {
             let mut link = PackOptIn::new(true);
-            assert!(link.observe(&hello(fingerprint), false, 0).send.is_none());
+            assert!(link.observe(&hello(format), false, 0).send.is_none());
             assert!(link.observe(&other(0), false, 60_000).send.is_none());
         }
         // Nor a board on another proto.
         let mut link = PackOptIn::new(true);
-        let mut hello = hello(WIRE_DICTIONARY_FINGERPRINT);
+        let mut hello = hello(PACK_FORMAT_VERSION);
         if let ServerMsgBody::Hello(h) = &mut hello.msg {
             h.proto += 1;
         }
@@ -222,7 +243,7 @@ mod tests {
     fn a_host_that_wants_json_never_asks() {
         let mut link = PackOptIn::wanting(WireEncoding::Json);
         assert!(
-            link.observe(&hello(WIRE_DICTIONARY_FINGERPRINT), false, 0)
+            link.observe(&hello(PACK_FORMAT_VERSION), false, 0)
                 .send
                 .is_none()
         );
@@ -260,7 +281,7 @@ mod tests {
     #[test]
     fn a_refusal_is_not_asked_again_until_the_link_resets() {
         let mut link = PackOptIn::new(true);
-        link.observe(&hello(WIRE_DICTIONARY_FINGERPRINT), false, 0);
+        link.observe(&hello(PACK_FORMAT_VERSION), false, 0);
         let refused = link.observe(&answer(WireEncoding::Json), false, 1);
         assert!(!refused.deliver);
         for t in [10_000, 20_000, 30_000] {
@@ -273,7 +294,7 @@ mod tests {
             "a reset link waits for the next hello"
         );
         assert!(
-            link.observe(&hello(WIRE_DICTIONARY_FINGERPRINT), false, 40_001)
+            link.observe(&hello(PACK_FORMAT_VERSION), false, 40_001)
                 .send
                 .is_some()
         );
@@ -283,7 +304,7 @@ mod tests {
     #[test]
     fn a_reboot_is_a_fallback_and_its_hello_is_delivered() {
         let mut link = agreed_packed_at(0);
-        let step = link.observe(&hello(WIRE_DICTIONARY_FINGERPRINT), false, 10_000);
+        let step = link.observe(&hello(PACK_FORMAT_VERSION), false, 10_000);
         assert!(step.deliver);
         assert!(step.send.is_some());
     }
@@ -297,10 +318,44 @@ mod tests {
         assert!(link.observe(&msg, false, 0).deliver);
     }
 
+    /// A desync on a packed link asks for a reset, once per interval, and
+    /// keeps asking while the link stays out of step — with no message to
+    /// observe in between.
+    #[test]
+    fn a_desync_asks_for_a_reset_at_most_once_per_interval() {
+        let mut link = agreed_packed_at(0);
+        // Inside the first ask's interval: remembered, not asked yet.
+        assert!(link.desynced(500).is_none());
+        assert_eq!(link.encoding(), WireEncoding::Json);
+        let asked_at: Vec<u64> = (1..=14)
+            .map(|half| half * 500)
+            .filter(|&t| link.desynced(t).is_some())
+            .collect();
+        assert_eq!(asked_at, [3_000, 6_000]);
+        let ask = link.desynced(9_000).unwrap();
+        assert!(matches!(
+            ask.msg,
+            ClientRequest::SetEncoding {
+                encoding: WireEncoding::Packed,
+                ..
+            }
+        ));
+        // The board answers `packed` (with a new epoch): in step again.
+        link.observe(&answer(WireEncoding::Packed), false, 9_100);
+        assert_eq!(link.encoding(), WireEncoding::Packed);
+    }
+
+    #[test]
+    fn a_desync_on_a_host_that_wants_json_asks_nothing() {
+        let mut link = PackOptIn::new(false);
+        link.observe(&hello(PACK_FORMAT_VERSION), false, 0);
+        assert!(link.desynced(10_000).is_none());
+    }
+
     fn agreed_packed_at(now_ms: u64) -> PackOptIn {
         let mut link = PackOptIn::new(true);
         assert!(
-            link.observe(&hello(WIRE_DICTIONARY_FINGERPRINT), false, now_ms)
+            link.observe(&hello(PACK_FORMAT_VERSION), false, now_ms)
                 .send
                 .is_some()
         );
@@ -309,7 +364,7 @@ mod tests {
         link
     }
 
-    fn hello(pack_dictionary: u32) -> WireServerMessage {
+    fn hello(pack_format: u8) -> WireServerMessage {
         let hello = ServerHello {
             proto: WIRE_PROTO_VERSION,
             build: BuildFacts {
@@ -321,7 +376,7 @@ mod tests {
             },
             hardware: HardwareFacts::default(),
             device_uid: None,
-            pack_dictionary,
+            pack_format,
             auth: crate::HelloAuth::TRUSTED,
         };
         WireServerMessage::new(0, ServerMsgBody::Hello(hello))

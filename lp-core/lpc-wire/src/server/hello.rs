@@ -35,6 +35,16 @@ use crate::server::hello_auth::HelloAuth;
 ///
 /// # History
 ///
+/// - 28: the learned wire dictionary (plan
+///   `lp2025/2026-09-25-0006-learned-wire-dictionary`) — packed replies are
+///   JSON Pack format 2 *learned* frames (COBS kind `'L'`, a 3-byte table
+///   header) and the static dictionary is gone. `ServerHello.pack_dictionary:
+///   u32` (a dictionary fingerprint) becomes `pack_format: u8`
+///   (`lp_json_pack::PACK_FORMAT_VERSION`, 0 = cannot pack), and
+///   `ClientRequest::SetEncoding { encoding, dictionary }` becomes
+///   `{ encoding, format }`. A required field renamed on both: an old peer
+///   cannot decode either. The rule that a dictionary change needs a bump
+///   went with the dictionary.
 /// - 27: who has access, on the board (BLE easy access, P1) — four
 ///   edit-tier requests, `ClientRequest::AccessList`, `AccessAdd { entry }`,
 ///   `AccessRemove { salt }` and `AccessSetSwitches { bleEnabled?, open? }`,
@@ -275,7 +285,7 @@ use crate::server::hello_auth::HelloAuth;
 /// as `None` on new Studio and a new firmware's extra fields are ignored
 /// by old Studio. Bumping for those would mark every board running
 /// current firmware Incompatible in exchange for nothing.
-pub const WIRE_PROTO_VERSION: u32 = 27;
+pub const WIRE_PROTO_VERSION: u32 = 28;
 
 /// Unsolicited/boot-time server identity, version, and capability report.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -294,14 +304,15 @@ pub struct ServerHello {
     /// hello, and `ClientRequest::Hello` answers re-read it, so a
     /// post-stamp request reports the new uid. `None` means unstamped.
     pub device_uid: Option<String>,
-    /// The fingerprint of the JSON Pack dictionary this build packs with
-    /// ([`crate::WIRE_DICTIONARY_FINGERPRINT`]), or 0 when this embedder
-    /// does not pack at all (hosts, the browser, `fw-emu`, an ESP image
-    /// without `json-pack`). A host that asks for packed names its own, and
-    /// the board packs only on a match; this makes a mismatch visible in
-    /// logs and on the device card before anyone asks, and tells a host
-    /// seeing 0 not to ask.
-    pub pack_dictionary: u32,
+    /// The JSON Pack format this build packs in
+    /// ([`lp_json_pack::PACK_FORMAT_VERSION`]), or 0 when this embedder does
+    /// not pack at all (hosts, the browser, `fw-emu`, an ESP image without
+    /// `json-pack`). A host that asks for packed names its own, and the board
+    /// packs only on a match; this makes a mismatch visible in logs and on
+    /// the device card before anyone asks, and tells a host seeing 0 not to
+    /// ask. There is no dictionary to agree on: each packed link learns its
+    /// names (see [`crate::wire_encoding`]).
+    pub pack_format: u8,
     /// What the link this hello is sent on may do — computed per link, so
     /// the same device answers a USB client and an unauthenticated radio
     /// client differently. See [`HelloAuth`].
@@ -506,7 +517,7 @@ mod tests {
                 ..Default::default()
             },
             device_uid: Some("dev0000000000000001".to_string()),
-            pack_dictionary: crate::WIRE_DICTIONARY_FINGERPRINT,
+            pack_format: lp_json_pack::PACK_FORMAT_VERSION,
             auth: HelloAuth::TRUSTED,
         };
         let json = crate::json::to_string(&hello).unwrap();
@@ -541,7 +552,7 @@ mod tests {
                 ..Default::default()
             },
             device_uid: None,
-            pack_dictionary: crate::WIRE_DICTIONARY_FINGERPRINT,
+            pack_format: lp_json_pack::PACK_FORMAT_VERSION,
             auth: HelloAuth {
                 required: true,
                 granted: None,
@@ -573,7 +584,7 @@ mod tests {
                 ..Default::default()
             },
             device_uid: None,
-            pack_dictionary: crate::WIRE_DICTIONARY_FINGERPRINT,
+            pack_format: lp_json_pack::PACK_FORMAT_VERSION,
             auth: HelloAuth {
                 required: true,
                 granted: None,
@@ -606,7 +617,7 @@ mod tests {
     #[test]
     fn the_proto_version_is_pinned_to_its_history() {
         assert_eq!(
-            WIRE_PROTO_VERSION, 27,
+            WIRE_PROTO_VERSION, 28,
             "if you meant to bump, add the History entry in this file's \
              doc comment and update this pin"
         );

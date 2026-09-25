@@ -117,8 +117,8 @@
 //! in order. A reader checks both before decoding
 //! ([`pack_learned::read_header`]): a mismatch means the two tables have
 //! parted, and the frame is dropped, never decoded against the wrong names. A
-//! frame in a new epoch with the empty table's state is the writer's
-//! announced reset. Learning is tentative until the frame is known sent
+//! frame coded against the empty table, in any epoch, is the writer's reset:
+//! the reader empties its table to match. Learning is tentative until the frame is known sent
 //! (writer) or decoded whole (reader); either side truncates back to a
 //! [`LearnMark`] otherwise.
 //!
