@@ -2250,6 +2250,20 @@ heap-budget-baseline-chips-s3:
 bless-chips *args:
     scripts/bless-chips.sh {{ args }}
 
+# Accept the figure moves CI already measured, without building anything: the
+# `figures-patch-*` artifacts of the PR's latest CI run, applied to this
+# checkout together. CI produces them only when a figure check failed on
+# figures and nothing else (docs/chip-figures.md, "When CI hands back the
+# patch"); the PR's sticky "Pinned firmware figures moved" comment lists what
+# moved. Commit the result with the change that moved it, then push.
+#
+#   just apply-ci-figures          # the current branch's PR
+#   just apply-ci-figures 830
+#
+# Apply the figure patches CI posted for a PR (default: this branch's PR).
+apply-ci-figures pr="":
+    scripts/ci/apply-ci-figures.sh {{ pr }}
+
 # Emit RV32 stack-size metadata for the ESP32 firmware.
 # The direct cargo build can fail at final link on local ESP linker-script setup,
 # but rustc still emits the object containing .stack_sizes before that point.
@@ -2935,7 +2949,7 @@ test-emu-c6: test-emu-c6-boot test-emu-c6-cli
 # dependency, because a socket suite is the slow half and the emulator's own
 # answers should not wait behind it.
 test-emu-c6-boot:
-    LP_EMU_BUILD_FW=1 cargo test -p lp-emu-esp32c6 -- --include-ignored --nocapture
+    LP_EMU_BUILD_FW=1 cargo test -p lp-emu-esp32c6 --no-fail-fast -- --include-ignored --nocapture
     cargo test -p lp-emu-validate --test m3_replays
     cargo test -p lp-emu-validate --test m4_replays
     cargo test -p lp-emu-validate --test m5_replays
@@ -3136,7 +3150,12 @@ test-emu-esp32v3-boot: build-fw-esp32v3
     fi
     export LP_EMU_ESP32V3_FRAME_DUMP_ELF="$dump"
     echo "images: shipped=$shipped chase=$chase frame-dump=$dump"
-    cargo test -p lp-emu-esp32v3 -- --include-ignored
+    # The image variables, for a re-run against these SAME copies without
+    # rebuilding: CI's figure bless (scripts/ci/figures-patch.py) sources it.
+    export -p | grep ' LP_EMU_ESP32V3_' > "$out/images.env"
+    # `--no-fail-fast`: every test binary runs, so one red run names every
+    # moved figure rather than the first binary's.
+    cargo test -p lp-emu-esp32v3 --no-fail-fast -- --include-ignored
 
 # Run an image on the classic ESP32 (v3) machine.
 #
@@ -3208,7 +3227,9 @@ test-emu-esp32s3-boot: build-fw-esp32s3
       echo "espflash is not on PATH: the merged-image tests will SKIP" >&2
       echo "image: shipped=$shipped"
     fi
-    cargo test -p lp-emu-esp32s3 -- --include-ignored
+    # See test-emu-esp32v3-boot: the re-run file, and every binary runs.
+    export -p | grep ' LP_EMU_ESP32S3_' > "$out/images.env"
+    cargo test -p lp-emu-esp32s3 --no-fail-fast -- --include-ignored
 
 # **M6's gate.** What the `Emulator ESP32-S3 (x64)` job runs (M6 P10 added
 # it, path-gated on `emu_esp32s3` and non-required — the filter mirrors

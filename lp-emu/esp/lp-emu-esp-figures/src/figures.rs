@@ -183,6 +183,8 @@ impl Figures {
              These are figures of the firmware IMAGE, not of the machine. If the firmware \
              changed on purpose, accept them with:\n\
              \n    just bless-chips {chip}\n\n\
+             (on a pull request CI has already done that bless and posted the patch: \
+             `just apply-ci-figures <pr>`) \
              and commit the record with the change that moved it. If only the emulator changed, \
              a moved figure is a finding: do not bless it.{positional_note}",
             n = moved.len(),
