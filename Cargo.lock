@@ -5740,6 +5740,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "lp-emu-esp-figures"
+version = "40.0.0"
+dependencies = [
+ "serde_json",
+]
+
+[[package]]
 name = "lp-emu-esp32c6"
 version = "40.0.0"
 dependencies = [
