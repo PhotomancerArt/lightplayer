@@ -13,6 +13,7 @@ mod node_error;
 mod node_runtime;
 pub mod node_tree;
 mod render_node;
+mod residency_request;
 mod runtime_state_shape;
 pub mod scope;
 // Fallible sizing for resident tick-path scratches: used by every node with a
@@ -35,6 +36,7 @@ pub(crate) use node_error::err_ctx;
 pub use node_runtime::{AssetRefreshResult, NodeRuntime, PatchedRun, ProduceResult};
 pub use node_tree::RuntimeNodeTree;
 pub use render_node::RenderNode;
+pub use residency_request::ResidencyRequest;
 pub use runtime_state_shape::RuntimeStateShape;
 pub use scope::ScopeRef;
 pub(crate) use scratch::ensure_scratch_len;

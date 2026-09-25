@@ -483,6 +483,28 @@ impl Engine {
         &self.panel_writers
     }
 
+    /// Mutable panel writers, for the engine steps that move writers between
+    /// live scopes and parked ones (entry residency).
+    pub(crate) fn panel_writers_mut(
+        &mut self,
+    ) -> &mut crate::dataflow::panel_writers::PanelWriterStore {
+        &mut self.panel_writers
+    }
+
+    /// Hold a latched panel value for a scope that is not in the tree
+    /// because its playlist entry is dormant, keyed by the scope's persist
+    /// path. It engages when the entry loads (restore of `/.lp/panel.json`,
+    /// multi-pattern vision D12). Nothing resolves differently until then,
+    /// so the resolver is not invalidated.
+    pub fn panel_park(
+        &mut self,
+        persist_path: alloc::string::String,
+        channel: lpc_model::ChannelName,
+        value: lpc_model::LpValue,
+    ) {
+        self.panel_writers.park(persist_path, channel, value);
+    }
+
     /// The published timebases and their phasors (probes, tests). Runtime
     /// state only — never persisted, never authored.
     pub fn timebases(&self) -> &crate::dataflow::timebase::TimebaseStore {
