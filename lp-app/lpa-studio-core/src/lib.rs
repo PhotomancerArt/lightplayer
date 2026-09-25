@@ -70,8 +70,9 @@ pub use app::studio::PlayViewOp;
 // The project's declared hardware (D41): the web shell's Hardware row and
 // the gallery card's "for <board>" badge both read it.
 pub use app::access::{
-    AccessCommand, AccessPersist, AccessTier, DEFAULT_KDF_ITERATIONS, DeviceAccessChange,
-    NewSecret, UiAccessPanel, UiAccessSecret, UiDeviceAccess, UiLoginPrompt, UiProjectAccess,
+    AccessAdded, AccessCommand, AccessPersist, AccessTier, AccountKeys, BrowserKey,
+    DEFAULT_KDF_ITERATIONS, DeviceAccessChange, NewSecret, SecretKind, UiAccessEntry,
+    UiAccessPanel, UiAccessSecret, UiDeviceAccess, UiLoginPrompt, UiProjectAccess,
     not_permitted_sentence, tier_word,
 };
 pub use app::frame_feed::{

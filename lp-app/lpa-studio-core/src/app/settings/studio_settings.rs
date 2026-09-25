@@ -30,26 +30,6 @@ pub const DEFAULT_OPENROUTER_MODEL: &str = "anthropic/claude-sonnet-5";
 #[serde(default)]
 pub struct StudioSettings {
     pub agent: AgentSettings,
-    /// Pieces reached over Bluetooth (BLE M6).
-    #[serde(skip_serializing_if = "DeviceSettings::is_empty")]
-    pub devices: DeviceSettings,
-}
-
-/// Device settings: the account default password (PQ8: local only, never
-/// synced — the same posture as the agent keys beside it).
-#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
-#[serde(default)]
-pub struct DeviceSettings {
-    /// Pre-filled whenever Bluetooth is turned on for a piece, and tried
-    /// first when one asks for a login.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub default_password: Option<String>,
-}
-
-impl DeviceSettings {
-    pub fn is_empty(&self) -> bool {
-        self.default_password.is_none()
-    }
 }
 
 /// Agent (shader-assistant) settings.

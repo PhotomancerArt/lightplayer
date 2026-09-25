@@ -298,14 +298,21 @@ pub fn App() -> Element {
             controller.load_user_settings_json(&json);
         }
         controller.set_on_user_settings(crate::settings_io::store_user_settings_json);
-        // Bluetooth access memory (BLE M6): remembered passwords and what
-        // this browser wrote to each piece, each under its own key, read
-        // before the actor spawns and written back on change.
+        // Access memory: remembered passwords, each device's last list,
+        // this browser's key and the account's cached keys, each under its
+        // own key, read before the actor spawns and written back on change.
+        // The persist hook goes first: a first boot mints this browser's
+        // key while loading, and it must be saved.
+        controller.set_on_access_persist(crate::settings_io::store_access);
+        crate::settings_io::remove_local(crate::settings_io::LEGACY_BLE_DEVICE_ACCESS_KEY);
         controller.apply_access_command(lpa_studio_core::AccessCommand::MemoryLoaded {
             passwords_json: crate::settings_io::load_local(crate::settings_io::BLE_PASSWORDS_KEY),
-            devices_json: crate::settings_io::load_local(crate::settings_io::BLE_DEVICE_ACCESS_KEY),
+            devices_json: crate::settings_io::load_local(
+                crate::settings_io::ACCESS_DEVICE_LISTS_KEY,
+            ),
+            browser_json: crate::settings_io::load_local(crate::settings_io::ACCESS_BROWSER_KEY),
+            account_json: crate::settings_io::load_local(crate::settings_io::ACCESS_ACCOUNT_KEY),
         });
-        controller.set_on_access_persist(crate::settings_io::store_access);
         // Node copy produces envelope text in core and writes it here
         // (core never touches `navigator.clipboard`).
         controller.set_on_copy_text(crate::clipboard::write_text);
@@ -1122,17 +1129,11 @@ pub fn App() -> Element {
     // Bluetooth list all sit under the shell; their callbacks and the two
     // view slices they read ride one context instead of every layer.
     let access_bridge = bridge.clone();
-    let access_settings_bridge = bridge.clone();
     let mut device_settings = use_signal(lpa_studio_core::UiDeviceSettingsView::default);
     let mut project_access = use_signal(|| None::<lpa_studio_core::UiProjectAccess>);
     use_context_provider(|| crate::app::home::access_ui_context::AccessUi {
         on_access: Callback::new(move |command| {
             access_bridge.tx.send(StudioCommand::Access(command));
-        }),
-        on_settings: Callback::new(move |command| {
-            access_settings_bridge
-                .tx
-                .send(StudioCommand::Settings(command));
         }),
         device_settings,
         project_access,

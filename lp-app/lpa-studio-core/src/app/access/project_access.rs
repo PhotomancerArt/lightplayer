@@ -6,7 +6,7 @@
 //! share and publish skip it (M3), and a device will not read it back. The
 //! library copy is the source; Studio reads and writes it here.
 
-use lpc_access::{ProjectAccessFile, SALT_BYTES};
+use lpc_access::{ProjectAccessFile, SALT_BYTES, SecretEntry};
 use lpc_model::AsLpPath;
 use lpfs::LpFs;
 
@@ -41,19 +41,24 @@ pub fn add_project_secret(
     salt: [u8; SALT_BYTES],
     iterations: u32,
 ) -> Result<(), String> {
-    let current = read_project_access(fs)?;
-    let store = super::device_access_record::apply_access_change(
-        Some(&lpc_access::DeviceAccessFile {
-            version: lpc_access::DeviceAccessFile::VERSION,
-            secrets: current.secrets,
-            ble_enabled: false,
-            open: false,
-        }),
-        &super::DeviceAccessChange::Add(secret.clone()),
+    super::device_access_record::check_new_password(&secret.label, &secret.password)?;
+    let label = secret.label.trim();
+    let mut current = read_project_access(fs)?;
+    current.secrets.retain(|entry| entry.label != label);
+    if current.secrets.len() >= lpc_access::MAX_SECRETS_PER_FILE {
+        return Err(format!(
+            "a project holds at most {} passwords — remove one first",
+            lpc_access::MAX_SECRETS_PER_FILE
+        ));
+    }
+    current.secrets.push(SecretEntry::from_password(
+        label,
+        secret.tier,
+        secret.password.as_bytes(),
         salt,
         iterations,
-    )?;
-    write(fs, ProjectAccessFile::new(store.secrets))
+    ));
+    write(fs, current)
 }
 
 /// Remove one password by label.

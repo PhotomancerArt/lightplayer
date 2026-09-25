@@ -95,6 +95,8 @@ pub fn StudioShell(
         login_prompt: _,
         project_access: _,
         lens_access_line,
+        // the web app raises the "added to <device>" toast (P4)
+        access_added: _,
     } = view;
 
     // The mismatch page outranks the opening frame: the open it was

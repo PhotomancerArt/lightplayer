@@ -1,6 +1,10 @@
 //! Deriving login keys in the client, once per `(salt, iterations,
 //! password)` per session.
 //!
+//! A held key's secret (this browser's, the account's) goes through the
+//! same cache as a password: it is derived at one iteration, so its entry is
+//! cheap, but it keeps one road for every `K`.
+//!
 //! The board stores `K = PBKDF2-HMAC-SHA256(password, salt, iterations)` and
 //! only ever runs the HMAC; the deliberate cost is paid HERE, in Studio's
 //! wasm (`lpc-access`'s own PBKDF2, compiled in). One derivation per offer a
@@ -28,7 +32,7 @@ pub const DEFAULT_KDF_ITERATIONS: u32 = 60_000;
 /// The session's derived keys.
 #[derive(Default)]
 pub struct LoginKeyCache {
-    keys: HashMap<([u8; SALT_BYTES], u32, String), [u8; KEY_BYTES]>,
+    keys: HashMap<([u8; SALT_BYTES], u32, Vec<u8>), [u8; KEY_BYTES]>,
 }
 
 impl LoginKeyCache {
@@ -40,11 +44,21 @@ impl LoginKeyCache {
     /// Returns whether it had to derive (the caller yields to the page
     /// between derivations, so a many-offer challenge never freezes it).
     pub fn key_for(&mut self, offer: &LoginOffer, password: &str) -> ([u8; KEY_BYTES], bool) {
-        let slot = (offer.salt, offer.iterations, password.to_string());
+        self.key_for_material(offer, password.as_bytes())
+    }
+
+    /// The key for `offer` under raw secret `material` (a held key's secret,
+    /// or a password's bytes).
+    pub fn key_for_material(
+        &mut self,
+        offer: &LoginOffer,
+        material: &[u8],
+    ) -> ([u8; KEY_BYTES], bool) {
+        let slot = (offer.salt, offer.iterations, material.to_vec());
         if let Some(key) = self.keys.get(&slot) {
             return (*key, false);
         }
-        let key = derive_login_key(password.as_bytes(), &offer.salt, offer.iterations);
+        let key = derive_login_key(material, &offer.salt, offer.iterations);
         self.keys.insert(slot, key);
         (key, true)
     }
@@ -52,7 +66,7 @@ impl LoginKeyCache {
     /// Whether `password` under `offer` is already derived.
     pub fn has(&self, offer: &LoginOffer, password: &str) -> bool {
         self.keys
-            .contains_key(&(offer.salt, offer.iterations, password.to_string()))
+            .contains_key(&(offer.salt, offer.iterations, password.as_bytes().to_vec()))
     }
 
     /// Forget every derived key (Settings' "Forget remembered passwords"

@@ -166,8 +166,12 @@ pub struct UiStudioView {
     /// settings. `None` without a library project open.
     pub project_access: Option<crate::app::access::UiProjectAccess>,
     /// The editor lens.s login line when its board is reached over
-    /// Bluetooth ("Unlocked as camp — play"), for Play.s header.
+    /// Bluetooth ("Unlocked by Yona's MacBook"), for Play.s header.
     pub lens_access_line: Option<String>,
+    /// What the last USB connect added to a device on its own (plan D6),
+    /// for the toast with Undo (`AccessCommand::UndoAutoAdd`). A new
+    /// `generation` is a new toast.
+    pub access_added: Option<crate::app::access::AccessAdded>,
 }
 
 impl UiStudioView {
@@ -190,6 +194,7 @@ impl UiStudioView {
             login_prompt: None,
             project_access: None,
             lens_access_line: None,
+            access_added: None,
         }
     }
 
@@ -199,14 +204,17 @@ impl UiStudioView {
         self
     }
 
-    /// The access slice (BLE M6): the sheet and the project.s list.
+    /// The access slice (BLE M6): the sheet, the project.s list, and what
+    /// a USB connect added.
     pub fn with_access(
         mut self,
         login_prompt: Option<crate::app::access::UiLoginPrompt>,
         project_access: Option<crate::app::access::UiProjectAccess>,
+        access_added: Option<crate::app::access::AccessAdded>,
     ) -> Self {
         self.login_prompt = login_prompt;
         self.project_access = project_access;
+        self.access_added = access_added;
         self
     }
 

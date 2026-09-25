@@ -153,16 +153,10 @@ pub fn DevicesPage(
                 }
             }
 
-            // The account default password and the remembered ones (BLE M6
-            // S3): where Bluetooth is turned on for a piece.
+            // The passwords this browser remembers (BLE M6 S3).
             if let Some(settings) = bluetooth {
                 super::bluetooth_settings_section::BluetoothSettingsSection {
                     settings,
-                    on_settings: move |command| {
-                        if let Some(ui) = access_ui {
-                            ui.on_settings.call(command);
-                        }
-                    },
                     on_access: move |command| {
                         if let Some(ui) = access_ui {
                             ui.on_access.call(command);

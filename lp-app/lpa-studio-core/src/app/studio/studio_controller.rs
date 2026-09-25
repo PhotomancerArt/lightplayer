@@ -973,14 +973,14 @@ impl StudioController {
             command => {
                 let now = self.device_now();
                 let now_secs = (self.now_secs)();
-                let salt = (self.random)();
+                let random = Rc::clone(&self.random);
                 let follow_up = self.access.apply(
                     command,
                     self.devices.roster(),
                     self.devices.effects(),
                     now,
                     now_secs,
-                    salt,
+                    &*random,
                 );
                 if let Some(crate::app::access::access_controller::AccessFollowUp::Restart(
                     device,
@@ -1014,15 +1014,18 @@ impl StudioController {
         self.mark_dirty();
     }
 
-    /// Start whatever login conversation a Bluetooth device needs now.
+    /// Start whatever access conversation a device needs now: unlocking a
+    /// Bluetooth link, reading its list, adding keys over USB.
     pub(crate) fn drive_device_access(&mut self) {
         let now = self.device_now();
-        let default_password = self.settings.device_default_password().map(str::to_string);
+        let now_secs = (self.now_secs)();
+        let random = Rc::clone(&self.random);
         self.access.drive(
             self.devices.roster(),
             self.devices.effects(),
             now,
-            default_password.as_deref(),
+            now_secs,
+            &*random,
         );
     }
 
@@ -1066,6 +1069,7 @@ impl StudioController {
     fn settings_view(&self) -> crate::app::settings::UiSettingsView {
         let mut view = self.settings.ui_view();
         view.devices.remembered_passwords = self.access.remembered().len();
+        view.devices.browser_name = self.access.browser_key().map(|key| key.name.clone());
         view
     }
 
@@ -1073,7 +1077,7 @@ impl StudioController {
     fn lens_access_line(&self) -> Option<String> {
         let device = self.pool.attached_session()?.attachment().device;
         let device = self.devices.roster().device(device)?;
-        self.access.device_view(device, None)?.line
+        self.access.device_view(device)?.line
     }
 
     /// The password sheet, when a Bluetooth piece needs one.
@@ -1375,7 +1379,6 @@ impl StudioController {
         // a serial transport; without one the add slot keeps its USB verb
         // out of the primary position (iPhone, Bluefy, Firefox, Safari).
         view.usb_available = self.serial_transport.is_some();
-        let default_password = self.settings.device_default_password();
         view.access = self
             .devices
             .roster()
@@ -1383,7 +1386,7 @@ impl StudioController {
             .iter()
             .filter_map(|device| {
                 self.access
-                    .device_view(device, default_password)
+                    .device_view(device)
                     .map(|access| (device.id, access))
             })
             .collect();
@@ -1513,12 +1516,6 @@ impl StudioController {
             SettingsCommand::SetAgentPriceOutputPerMtok(value) => {
                 self.settings.set_agent_price_output_per_mtok(value);
                 self.persist_user_settings();
-            }
-            SettingsCommand::SetDeviceDefaultPassword(password) => {
-                self.settings.set_device_default_password(password);
-                self.persist_user_settings();
-                // A new default may open a piece that is waiting on one.
-                self.drive_device_access();
             }
             SettingsCommand::RequestModels { force } => self.request_agent_models(force),
             SettingsCommand::ModelsLoaded {
@@ -2052,7 +2049,11 @@ impl StudioController {
                 .with_session(self.session_control())
                 .with_open_mismatch(self.open_mismatch.as_deref().cloned())
                 .with_settings(self.settings_view())
-                .with_access(self.login_prompt_view(), None);
+                .with_access(
+                    self.login_prompt_view(),
+                    None,
+                    self.access.access_added().cloned(),
+                );
         }
         // gallery-always (D24): home covers every no-project state, so the
         // pane layout exists only for an open project
@@ -2102,7 +2103,11 @@ impl StudioController {
             .with_lens_card(self.lens_card())
             .with_session(self.session_control())
             .with_settings(self.settings_view())
-            .with_access(self.login_prompt_view(), self.project_access_view())
+            .with_access(
+                self.login_prompt_view(),
+                self.project_access_view(),
+                self.access.access_added().cloned(),
+            )
             .with_lens_access_line(self.lens_access_line())
             .with_dirty(dirty)
     }

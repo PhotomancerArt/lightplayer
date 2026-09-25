@@ -7,13 +7,12 @@
 //! so those surfaces render inert (or are handed fixtures directly).
 
 use dioxus::prelude::*;
-use lpa_studio_core::{AccessCommand, SettingsCommand, UiDeviceSettingsView, UiProjectAccess};
+use lpa_studio_core::{AccessCommand, UiDeviceSettingsView, UiProjectAccess};
 
 /// See the module doc.
 #[derive(Clone, Copy)]
 pub(crate) struct AccessUi {
     pub on_access: Callback<AccessCommand>,
-    pub on_settings: Callback<SettingsCommand>,
     pub device_settings: Signal<UiDeviceSettingsView>,
     pub project_access: Signal<Option<UiProjectAccess>>,
 }

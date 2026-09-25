@@ -9,8 +9,8 @@
 use dioxus::prelude::*;
 use lpa_studio_core::{
     AccessTier, DeviceEscape, DeviceId, DeviceLinkId, DeviceLoadedProject, DeviceStatus,
-    DeviceView, FIRMWARE_NEEDS_USB, PendingLinkView, UiAccessPanel, UiAccessSecret, UiDeviceAccess,
-    UiDeviceSettingsView, UiLoginPrompt, UiProjectAccess,
+    DeviceView, FIRMWARE_NEEDS_USB, PendingLinkView, SecretKind, UiAccessEntry, UiAccessPanel,
+    UiAccessSecret, UiDeviceAccess, UiDeviceSettingsView, UiLoginPrompt, UiProjectAccess,
 };
 use lpa_studio_web_story_macros::story;
 
@@ -56,7 +56,7 @@ fn ble_login_sheet() -> Element {
 }
 
 #[story(
-    description = "The device access panel, OFF (or never set from this browser): Turn on, locked — the account default password pre-filled (shown here; it is hidden by default), named \"default\" at edit — or, as an explicit second choice, open with no password, play only."
+    description = "The device access panel before the device has answered its list: nothing listed yet, and Turn Bluetooth on (the minimal P3 panel; P4 replaces it)."
 )]
 fn ble_access_panel_off() -> Element {
     rsx! {
@@ -71,7 +71,7 @@ fn ble_access_panel_off() -> Element {
 }
 
 #[story(
-    description = "The device access panel, ON and LOCKED, just after it was turned on over USB: the board reads the Bluetooth switch once at boot, so the amber note says it turns on at the next restart and offers Restart now. The passwords are the ones THIS browser wrote, by name and what they can do; Add sits under the list, where the new row appears; the panel says plainly the piece may hold others from another browser, and Replace all is the way back."
+    description = "The device access panel, ON and LOCKED, just after Bluetooth was switched over USB: the board reads the switch once at boot, so the amber note says it turns on at the next restart and offers Restart now. The list is the device's own — this browser's key, the account's, and a shared password — with Add under it."
 )]
 fn ble_access_panel_locked() -> Element {
     rsx! {
@@ -80,7 +80,11 @@ fn ble_access_panel_locked() -> Element {
                 panel: panel(
                     Some(true),
                     false,
-                    vec![secret("default", AccessTier::Edit), secret("camp", AccessTier::Play)],
+                    vec![
+                        entry("Yona's MacBook", SecretKind::Browser, AccessTier::Edit, true),
+                        entry("Yona's account", SecretKind::Account, AccessTier::Edit, false),
+                        entry("friends", SecretKind::Password, AccessTier::Play, false),
+                    ],
                     true,
                 ),
                 on_access: |_| {},
@@ -96,7 +100,12 @@ fn ble_access_panel_open() -> Element {
     rsx! {
         div { class: PANEL_FRAME,
             DeviceAccessPanel {
-                panel: panel(Some(true), true, vec![secret("default", AccessTier::Edit)], false),
+                panel: panel(
+                    Some(true),
+                    true,
+                    vec![entry("Yona's MacBook", SecretKind::Browser, AccessTier::Edit, true)],
+                    false,
+                ),
                 on_access: |_| {},
             }
         }
@@ -185,23 +194,28 @@ fn AddSlotAs(reach: BleReach, usb: bool) -> Element {
 }
 
 #[story(
-    description = "A piece reached over Bluetooth (BLE M5/M6). The device line leads with the unlock — \"Unlocked as camp — play\" — and the Firmware zone's verbs are drawn DISABLED with the reason under them, \"Firmware updates need USB\"; Reset likewise needs USB. At play the Device zone offers Unlock for edit. Right: the same piece unlocked at edit, where the Bluetooth panel's trigger replaces it."
+    description = "A piece reached over Bluetooth (BLE M5/M6). The device line leads with the unlock — \"Unlocked with friends · play\" — and the Firmware zone's verbs are drawn DISABLED with the reason under them, \"Firmware updates need USB\"; Reset likewise needs USB. At play the Device zone offers Unlock for edit. Right: the same piece unlocked at edit, where the Bluetooth panel's trigger replaces it."
 )]
 fn ble_device_card_over_bluetooth() -> Element {
     let play = UiDeviceAccess {
         over_bluetooth: true,
-        line: Some("Unlocked as camp — play".to_string()),
+        line: Some("Unlocked with friends · play".to_string()),
         log_in: Some("Unlock for edit".to_string()),
         panel: None,
     };
     let edit = UiDeviceAccess {
         over_bluetooth: true,
-        line: Some("Unlocked as default — edit".to_string()),
+        line: Some("Unlocked by Yona's MacBook".to_string()),
         log_in: None,
         panel: Some(panel(
             Some(true),
             false,
-            vec![secret("default", AccessTier::Edit)],
+            vec![entry(
+                "Yona's MacBook",
+                SecretKind::Browser,
+                AccessTier::Edit,
+                true,
+            )],
             false,
         )),
     };
@@ -272,19 +286,17 @@ fn ble_pending_card_over_bluetooth() -> Element {
 }
 
 #[story(
-    description = "The Devices page's Bluetooth settings (BLE M6 S3): the account default password with Show/Hide (shown here), what it is for in one line, and how many passwords this browser remembers with a way to forget them. Local to this browser, never synced."
+    description = "The Devices page's Bluetooth settings: how many passwords this browser remembers, with a way to forget them. Local to this browser, never synced. (The default device password is gone; P4 adds this browser's name and the account's passwords here.)"
 )]
 fn ble_bluetooth_settings() -> Element {
     rsx! {
         div { class: "tw:p-4",
             BluetoothSettingsSection {
                 settings: UiDeviceSettingsView {
-                    default_password: Some("glitter-otter".to_string()),
+                    browser_name: Some("Yona's MacBook".to_string()),
                     remembered_passwords: 2,
                 },
-                on_settings: |_| {},
                 on_access: |_| {},
-                show_password: true,
             }
         }
     }
@@ -316,22 +328,34 @@ fn secret(label: &str, tier: AccessTier) -> UiAccessSecret {
     }
 }
 
+fn entry(label: &str, kind: SecretKind, tier: AccessTier, is_this_browser: bool) -> UiAccessEntry {
+    UiAccessEntry {
+        label: label.to_string(),
+        kind,
+        tier,
+        salt_id: [label.len() as u8; 16],
+        is_this_browser,
+        is_account: kind == SecretKind::Account,
+    }
+}
+
 fn panel(
     ble_enabled: Option<bool>,
     open: bool,
-    secrets: Vec<UiAccessSecret>,
+    entries: Vec<UiAccessEntry>,
     restart_pending: bool,
 ) -> UiAccessPanel {
     UiAccessPanel {
         device: DeviceId(7),
+        count: entries.len() + usize::from(open),
+        entries,
         ble_enabled,
         open,
-        secrets,
         restart_pending,
         can_restart: true,
+        over_bluetooth: false,
         writing: false,
         error: None,
-        default_password: Some("glitter-otter".to_string()),
     }
 }
 
