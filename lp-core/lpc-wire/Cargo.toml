@@ -44,3 +44,9 @@ required-features = ["wire-dict-gen"]
 
 [lints]
 workspace = true
+
+# SPIKE (learned-wire-dictionary): replay a session through each dictionary option.
+[[bin]]
+name = "learned-replay"
+path = "src/bin/learned_replay.rs"
+required-features = ["ser-write-json", "wire-dict-gen"]

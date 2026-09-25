@@ -168,6 +168,31 @@ pub fn ser_wire_to<T: Serialize + ?Sized>(
     }
 }
 
+/// SPIKE: write `value` packed against `dict ++ learned` (header first),
+/// learning as it goes. On error the table is truncated back to where it
+/// stood; the caller truncates it too if the frame is then not sent.
+pub fn ser_learned_to<T: Serialize + ?Sized>(
+    buf: &mut [u8],
+    dict: &'static lp_json_pack::Dictionary,
+    learned: &mut dyn lp_json_pack::LearnStore,
+    value: &T,
+) -> Result<usize, WireWriteError> {
+    let mark = learned.mark();
+    let r = {
+        let mut sink = PackSink::with_learned(buf, dict, &mut *learned);
+        let serialized = ser_write_json_to(&mut sink, value);
+        match (sink.finish(), serialized) {
+            (Ok(n), Ok(())) => Ok(n),
+            (Err(PackError::Full), _) => Err(WireWriteError::Full),
+            _ => Err(WireWriteError::Unpackable),
+        }
+    };
+    if r.is_err() {
+        learned.truncate(mark);
+    }
+    r
+}
+
 /// A [`SerWrite`] sink that discards output and counts bytes.
 ///
 /// Writing never fails, so [`SerWrite::Error`] is [`core::convert::Infallible`].

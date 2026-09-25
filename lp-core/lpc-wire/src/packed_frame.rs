@@ -43,6 +43,33 @@ pub fn ser_packed_frame_to<T: Serialize + ?Sized>(
     Ok(1 + framed)
 }
 
+/// SPIKE: the COBS frame kind of a learned-table frame.
+pub const FRAME_KIND_LEARNED: u8 = b'L';
+
+/// SPIKE: [`ser_packed_frame_to`] for a learned-table frame (`\n 0x00 'L'
+/// COBS(header + packed) 0x00`), coded against `dict ++ learned`. On error the
+/// table is as it was.
+pub fn ser_learned_frame_to<T: Serialize + ?Sized>(
+    buf: &mut [u8],
+    dict: &'static lp_json_pack::Dictionary,
+    learned: &mut dyn lp_json_pack::LearnStore,
+    value: &T,
+) -> Result<usize, WireWriteError> {
+    let (lead, body) = buf.split_first_mut().ok_or(WireWriteError::Full)?;
+    *lead = b'\n';
+    let headroom = in_place_headroom(body.len());
+    let room = body.get_mut(headroom..).ok_or(WireWriteError::Full)?;
+    let mark = learned.mark();
+    let n = crate::ser_write::ser_learned_to(room, dict, &mut *learned, value)?;
+    match frame_in_place(body, FRAME_KIND_LEARNED, headroom, n) {
+        Some(framed) => Ok(1 + framed),
+        None => {
+            learned.truncate(mark);
+            Err(WireWriteError::Full)
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

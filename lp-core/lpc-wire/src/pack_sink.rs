@@ -23,7 +23,7 @@
 //! field names, variant names and `String`s); the corpus test over recorded
 //! traffic would catch one.
 
-use lp_json_pack::{Dictionary, PackEncoder, PackError, PackLexer};
+use lp_json_pack::{Dictionary, LearnStore, PackEncoder, PackError, PackLexer};
 use ser_write_json::SerWrite;
 use ser_write_json::ser_write::Token;
 
@@ -51,6 +51,19 @@ impl<'a> PackSink<'a> {
     pub fn with_dictionary(out: &'a mut [u8], dict: &'static Dictionary) -> Self {
         Self {
             enc: PackEncoder::new(out, dict),
+            lexer: PackLexer::new(),
+            lexing: false,
+        }
+    }
+
+    /// SPIKE: a sink coded against `dict ++ learned`, learning as it goes.
+    pub fn with_learned(
+        out: &'a mut [u8],
+        dict: &'static Dictionary,
+        learned: &'a mut dyn LearnStore,
+    ) -> Self {
+        Self {
+            enc: PackEncoder::with_learned(out, dict, learned),
             lexer: PackLexer::new(),
             lexing: false,
         }

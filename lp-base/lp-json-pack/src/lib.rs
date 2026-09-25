@@ -138,6 +138,7 @@ pub mod pack_dictionary;
 #[cfg(feature = "alloc")]
 pub mod pack_dictionary_builder;
 pub mod pack_encoder;
+pub mod pack_learned;
 #[cfg(feature = "lex")]
 pub mod pack_lexer;
 pub mod pack_tags;
@@ -149,11 +150,12 @@ pub use cobs_frame::{
 pub use frame_scanner::{DropReason, FrameBuffer, FrameScanner, ScanEvent, SliceFrameBuffer};
 #[cfg(feature = "alloc")]
 pub use frame_scanner::{VecFrameBuffer, VecFrameScanner};
-pub use pack_decoder::{DecodeError, JsonOut, JsonOutFull, SliceJsonOut, decode};
+pub use pack_decoder::{DecodeError, JsonOut, JsonOutFull, SliceJsonOut, decode, decode_learned};
 pub use pack_dictionary::{Dictionary, DictionaryError, PACK_FORMAT_VERSION, PackStrings};
 #[cfg(feature = "alloc")]
 pub use pack_dictionary_builder::{DictionaryBuilder, OwnedDictionary};
 pub use pack_encoder::PackEncoder;
+pub use pack_learned::{HeaderMismatch, LearnMark, LearnStore, LearnedTable};
 #[cfg(feature = "lex")]
 pub use pack_lexer::PackLexer;
 

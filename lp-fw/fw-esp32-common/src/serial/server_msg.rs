@@ -137,7 +137,21 @@ fn serialize_server_msg_packed(
             SERVER_MSG_JSON_BUFFER_SIZE,
         )
     };
-    let len = lpc_wire::ser_packed_frame_to(buf, msg)?;
+    #[cfg(feature = "spike-learned")]
+    let len = {
+        // SAFETY: single writer by protocol, as FRAME_BUF.
+        let table = unsafe { &mut *core::ptr::addr_of_mut!(spike::LEARNED) };
+        lpc_wire::ser_learned_frame_to(buf, &lp_json_pack::Dictionary::EMPTY, table, msg)?
+    };
+    #[cfg(not(feature = "spike-learned"))]
+    let len = {
+        #[cfg(feature = "spike-learned-trace")]
+        let t0 = spike::instret();
+        let len = lpc_wire::ser_packed_frame_to(buf, msg)?;
+        #[cfg(feature = "spike-learned-trace")]
+        spike::trace(msg, len, spike::instret().wrapping_sub(t0));
+        len
+    };
     debug_assert!(
         len <= lpc_wire::ser_write_json_len(msg) + 4,
         "a packed frame outgrew its JSON line"
@@ -362,5 +376,69 @@ pub fn project_read_event_kind(event: &lpc_wire::ProjectReadEvent) -> &'static s
         },
         lpc_wire::ProjectReadEvent::End { .. } => "end",
         lpc_wire::ProjectReadEvent::Error { .. } => "error",
+    }
+}
+
+/// SPIKE (plan `lp2025/2026-09-25-0006-learned-wire-dictionary`).
+#[cfg(any(feature = "spike-learned", feature = "spike-learned-trace"))]
+mod spike {
+    /// The device-sized learned table the spike measures (see the plan's
+    /// RAM section): 3 KB of text, 288 keys, 128 values learned on second
+    /// sighting.
+    pub type Table = lp_json_pack::LearnedTable<
+        3072,
+        288,
+        512,
+        128,
+        256,
+        { lp_json_pack::pack_learned::VALUES_SECOND_SIGHTING },
+        512,
+    >;
+
+    /// One link's table. Single writer by protocol, like `FRAME_BUF`.
+    pub static mut LEARNED: Table = Table::NEW;
+
+    /// `minstret` (the emulator counts retired instructions exactly).
+    #[cfg(feature = "spike-learned-trace")]
+    pub fn instret() -> u32 {
+        let v: u32;
+        // SAFETY: reading a counter CSR has no side effects.
+        unsafe { core::arch::asm!("csrr {0}, minstret", out(reg) v) };
+        v
+    }
+
+    #[cfg(feature = "spike-learned-trace")]
+    static mut SCRATCH: [u8; super::SERVER_MSG_JSON_BUFFER_SIZE] =
+        [0; super::SERVER_MSG_JSON_BUFFER_SIZE];
+
+    /// Encode `msg` again against the learned table into a scratch buffer and
+    /// log both encodes: `[lwtrace] id= static_len= static_insns=
+    /// learned_len= learned_insns= keys= values= text=`.
+    #[cfg(feature = "spike-learned-trace")]
+    pub fn trace(msg: &lpc_wire::WireServerMessage, static_len: usize, static_insns: u32) {
+        use lp_json_pack::LearnStore;
+        // SAFETY: single writer by protocol, as FRAME_BUF.
+        let (buf, table) = unsafe {
+            (
+                &mut *core::ptr::addr_of_mut!(SCRATCH),
+                &mut *core::ptr::addr_of_mut!(LEARNED),
+            )
+        };
+        let t0 = instret();
+        let r = lpc_wire::ser_learned_frame_to(buf, &lp_json_pack::Dictionary::EMPTY, table, msg);
+        let insns = instret().wrapping_sub(t0);
+        let m = table.mark();
+        log::info!(
+            "[lwtrace] id={} static_len={} static_insns={} learned_len={} learned_insns={} keys={} values={} text={} seen={}",
+            msg.id,
+            static_len,
+            static_insns,
+            r.map_or(0, |n| n),
+            insns,
+            m.keys,
+            m.values,
+            m.text,
+            m.seen
+        );
     }
 }

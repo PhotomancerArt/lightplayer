@@ -73,7 +73,7 @@ pub use pack_opt_in::{PACK_OPT_IN_REQUEST_ID, PACK_REASK_INTERVAL_MS, PackOptIn,
 #[cfg(feature = "ser-write-json")]
 pub use pack_sink::PackSink;
 #[cfg(feature = "ser-write-json")]
-pub use packed_frame::ser_packed_frame_to;
+pub use packed_frame::{FRAME_KIND_LEARNED, ser_learned_frame_to, ser_packed_frame_to};
 pub use packed_json_decode::{PackedDecodeError, decode_packed_to_json};
 pub use project::{
     NodeRuntimeStatus, WireChannelSampleFormat, WireColorLayout, WireProjectHandle,
@@ -97,8 +97,8 @@ pub use project_overlay::{
 };
 #[cfg(feature = "ser-write-json")]
 pub use ser_write::{
-    CountingSerWrite, ErasedWriteError, WireWriteError, ser_wire_to, ser_write_json_fnv64,
-    ser_write_json_len, ser_write_json_to,
+    CountingSerWrite, ErasedWriteError, WireWriteError, ser_learned_to, ser_wire_to,
+    ser_write_json_fnv64, ser_write_json_len, ser_write_json_to,
 };
 pub use server::{
     AvailableProject, BuildFacts, FAULT_MESSAGE_CAP_BYTES, FAULT_NODES_CAP, FaultedNodeWire,

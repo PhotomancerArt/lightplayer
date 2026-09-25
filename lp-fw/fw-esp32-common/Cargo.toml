@@ -15,6 +15,7 @@ workspace = true
 # .cargo/config.toml, no panic-strategy assumptions. Chip facts arrive by injection
 # (memory-stats fn, RMT RAM base, flash Storage impl, manifest fallback).
 [dependencies]
+lp-json-pack = { workspace = true, optional = true }
 fw-core = { path = "../fw-core", default-features = false }
 lp-collection = { workspace = true, features = ["serde"] }
 lpc-hardware = { path = "../../lp-core/lpc-hardware", default-features = false }
@@ -59,6 +60,12 @@ default = []
 # whose host opted in (`ClientRequest::SetEncoding`). Without it the board
 # answers every opt-in "json". On by default in all three chip crates (Q4).
 json-pack = ["server"]
+# SPIKE (learned-wire-dictionary): packed replies use a per-connection learned
+# table and no static dictionary (for the flash number; hosts cannot read it).
+spike-learned = ["json-pack", "dep:lp-json-pack"]
+# SPIKE: packed replies stay static; each is also encoded learned into a
+# scratch buffer, and both encodes' minstret deltas are logged `[lwtrace]`.
+spike-learned-trace = ["json-pack", "dep:lp-json-pack"]
 server = ["dep:littlefs-rust", "dep:lp-recovery", "dep:lpa-server", "dep:lpc-model", "dep:lpc-wire", "dep:lpfs", "dep:ser-write-json"]
 
 [dev-dependencies]

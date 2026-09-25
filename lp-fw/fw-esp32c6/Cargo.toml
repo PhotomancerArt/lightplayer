@@ -62,6 +62,9 @@ naga = ["lpa-server/naga"]
 # host opted in (`ClientRequest::SetEncoding`); every other link stays JSON.
 # On by default; without it the board answers every opt-in "json".
 json-pack = ["server", "fw-esp32-common/json-pack"]
+# SPIKE (learned-wire-dictionary), see fw-esp32-common.
+spike-learned = ["json-pack", "fw-esp32-common/spike-learned"]
+spike-learned-trace = ["json-pack", "fw-esp32-common/spike-learned-trace"]
 
 # Periodic WS281x telemetry over the serial link — OFF by default.
 #
