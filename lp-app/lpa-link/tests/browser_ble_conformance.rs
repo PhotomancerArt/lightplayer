@@ -244,7 +244,10 @@ async fn a_phantom_drop_is_torn_down_and_the_reconnect_is_a_fresh_link() {
     let device = pick().await;
     let wire = BleWire::new(device.session);
     let before = stats("c6-a").await;
-    assert_eq!(before.link_opens, 1, "the pick opened the board's link: {before:?}");
+    assert_eq!(
+        before.link_opens, 1,
+        "the pick opened the board's link: {before:?}"
+    );
 
     // Bluefy (G4, 2026-09-25): the page is told its link is gone while iOS
     // keeps the radio link up. The board never sees a drop.
