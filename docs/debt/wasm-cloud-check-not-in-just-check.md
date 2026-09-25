@@ -68,6 +68,16 @@ a fresh checkout still works).
   CI's Lint job runs `just check-lint`, not `just check`, so this adds no
   CI cost. A fresh checkout needs nothing extra — the recipe depends on
   `install-wasm32-target`. Retiring — exit criteria met.
+- 2026-09-24 — the **CI half** closed, after retirement: "adds no CI
+  cost" above was also "adds no CI coverage". The Lint job runs `just
+  check-lint`, and the only CI compile of this combination was the stories
+  job's `dx build`, whose `studio` path gate does not list
+  `lp-app/lpa-cloud-client/**` — so a PR touching only this crate (or a dep
+  outside the studio list) got no wasm32 signal before merge. Moved
+  `check-wasm-cloud` from `check` into `check-lint` (`check` still reaches
+  it through `check-lint`), so it runs in the Lint job on the `core` gate,
+  i.e. every non-docs PR, parallel to clippy. Measured locally cold 49.9 s
+  (load ~114), warm 1.3 s; the CI Lint-job delta is recorded on the PR.
 
 **Exit criteria** — either `check-wasm-cloud` joins `just check`'s chain
 (measured for added wall-clock time first — wasm32 compiles are not
