@@ -996,7 +996,9 @@ async fn a_port_open_across_a_replug_reopens_on_the_new_generation() {
     let board = board_ids().await.first().cloned().expect("a board");
     let id = granted_sessions().await[0].id;
 
-    open_port(id, false).await.expect("openPort before the replug");
+    open_port(id, false)
+        .await
+        .expect("openPort before the replug");
     yield_to_event_loop().await;
     let _ = strings(js_take_lines(id)).await;
 
