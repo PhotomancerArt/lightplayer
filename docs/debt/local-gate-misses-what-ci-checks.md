@@ -75,6 +75,20 @@ can abort `just test` before it is reached
   is still outside the local gate and still the residue this entry
   tracks.
 
+- 2026-09-25 — the **chip-emulator** side of the same gap, and a
+  workaround for it. The three chip suites (`test-emu-{c6,esp32v3,esp32s3}-boot`)
+  and the chip heap ratchets only run in path-gated CI jobs, and
+  reproducing one of their failures on a desk started with a firmware build:
+  5–15 minutes of cross-compile and tens of GB of `target/` per worktree,
+  on a desk already running other sessions' builds (load average 92 the
+  afternoon this was written). Those jobs now upload the images they built
+  (`ci-images-<chip>`, 7 days), and **`just fetch-ci-images <pr|sha|run>`
+  + `export LP_CI_IMAGES=…`** runs the same recipes — and `bless-chips` —
+  against CI's own bytes with no firmware build, refusing a set whose
+  firmware sources are not the checkout's (`docs/ci-images.md`). This does
+  not close the hole (the local gate still runs no chip suite); it makes
+  the CI-only check cheap to reproduce once CI has run.
+
 **Exit criteria** — one recipe (`just check-studio`, or folding the four
 into `check-lint` when they are fast enough) that a Studio-touching
 change can run and be believed, plus the wasm build in whatever gate a
