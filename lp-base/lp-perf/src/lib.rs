@@ -32,7 +32,7 @@ pub const EVENT_SERVER_BOOT: &str = "server-boot";
 pub const EVENT_PROJECT_READ: &str = "project-read";
 /// One playlist entry's subtree leaving the engine at the pre-tick
 /// residency step (`Engine::apply_residency`): registry re-derive, runtime
-/// subtree removal. Its window is what a tour's heap trace frames.
+/// subtree removal. Its window is what a cycle's heap trace frames.
 pub const EVENT_ENTRY_UNLOAD: &str = "entry-unload";
 /// One playlist entry's subtree entering the engine at the pre-tick
 /// residency step: registry re-derive, spine, attach, re-bind. The entry's

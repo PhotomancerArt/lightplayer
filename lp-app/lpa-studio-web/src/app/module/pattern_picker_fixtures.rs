@@ -14,7 +14,7 @@ use lpa_studio_core::{
     ProjectNodeAddress, UiAction, UiPanelControl, UiPanelControlState, UiPanelControlView,
     UiPanelEmit, UiPanelGroup, UiPanelTarget, UiPanelWidget, UiSlotFieldState, UiSlotValue,
 };
-use lpc_model::{FromLpValue, PlaylistTour};
+use lpc_model::{FromLpValue, PlaylistCycle};
 
 use super::module_fixtures::{
     PIECE_SCOPE, PLAYING_PATTERN_SCOPE, at_default, fader, knob, scope_target, swatch,
@@ -71,28 +71,28 @@ pub(crate) fn set_facts(names: &[&str], active: u32) -> PatternPickerFacts {
             })
             .collect(),
         active: Some(active),
-        tour: PlaylistTour::Hold,
-        authored_tour: None,
+        cycle: PlaylistCycle::Hold,
+        authored_cycle: None,
         default_fade: Some(1.5),
         skip: Vec::new(),
         failed: Vec::new(),
-        tour_target: Some(target(lpc_model::PLAYLIST_TOUR_CHANNEL)),
+        cycle_target: Some(target(lpc_model::PLAYLIST_CYCLE_CHANNEL)),
         skip_target: Some(target(lpc_model::PLAYLIST_SKIP_CHANNEL)),
     }
 }
 
-/// A running tour, as authored in the playlist file.
-pub(crate) fn authored_tour(step_seconds: f32) -> PlaylistTour {
-    PlaylistTour::Cycle {
+/// A running cycle, as authored in the playlist file.
+pub(crate) fn authored_cycle(step_seconds: f32) -> PlaylistCycle {
+    PlaylistCycle::Cycle {
         step_seconds,
         fade_seconds: 1.5,
     }
 }
 
-/// Mark the panel as holding the tour (a Play-mode write), so the tour
+/// Mark the panel as holding the cycle (a Play-mode write), so the cycle
 /// controls wear the engaged gold.
-pub(crate) fn tour_held(mut facts: PatternPickerFacts) -> PatternPickerFacts {
-    if let Some(target) = facts.tour_target.as_mut() {
+pub(crate) fn cycle_held(mut facts: PatternPickerFacts) -> PatternPickerFacts {
+    if let Some(target) = facts.cycle_target.as_mut() {
         target.engaged = true;
     }
     facts
@@ -127,7 +127,7 @@ pub(crate) fn pattern_group(facts: &PatternPickerFacts) -> UiPanelGroup {
     let picker = derive_pattern_picker(facts.clone());
     let held =
         |target: &Option<UiPanelTarget>| target.as_ref().is_some_and(|target| target.engaged);
-    let state = if held(&facts.tour_target) || held(&facts.skip_target) {
+    let state = if held(&facts.cycle_target) || held(&facts.skip_target) {
         UiPanelControlState::Engaged
     } else {
         UiPanelControlState::ReadDefault
@@ -140,7 +140,7 @@ pub(crate) fn pattern_group(facts: &PatternPickerFacts) -> UiPanelGroup {
         label: "Pattern".to_string(),
         address: None,
         value: UiSlotValue::string(playing),
-        panel_target: picker.tour_target.clone(),
+        panel_target: picker.cycle_target.clone(),
         widget: UiPanelWidget::PatternPicker { picker },
         emit: UiPanelEmit::Value,
         live_value: None,
@@ -151,13 +151,13 @@ pub(crate) fn pattern_group(facts: &PatternPickerFacts) -> UiPanelGroup {
         aspects: Vec::new(),
     };
     UiPanelGroup::new("Pattern", "/playful.module/playlist.playlist").with_controls(vec![
-        UiPanelControlView::new(lpc_model::PLAYLIST_TOUR_CHANNEL, control)
+        UiPanelControlView::new(lpc_model::PLAYLIST_CYCLE_CHANNEL, control)
             .with_state(state, None::<String>),
     ])
 }
 
 /// Apply one of the picker's own actions to the facts, the way the device
-/// answers it: an activate plays that entry, a tour or skip write replaces
+/// answers it: an activate plays that entry, a cycle or skip write replaces
 /// the value and the panel holds it. The walkable story's whole engine.
 pub(crate) fn apply_picker_action(facts: &mut PatternPickerFacts, action: &UiAction) {
     if let Some(op) = action.op_as::<lpa_studio_core::PlaylistActivateOp>() {
@@ -168,10 +168,10 @@ pub(crate) fn apply_picker_action(facts: &mut PatternPickerFacts, action: &UiAct
         return;
     };
     match op.channel.as_str() {
-        lpc_model::PLAYLIST_TOUR_CHANNEL => {
-            if let Ok(tour) = PlaylistTour::from_lp_value(&op.value) {
-                facts.tour = tour;
-                *facts = tour_held(facts.clone());
+        lpc_model::PLAYLIST_CYCLE_CHANNEL => {
+            if let Ok(cycle) = PlaylistCycle::from_lp_value(&op.value) {
+                facts.cycle = cycle;
+                *facts = cycle_held(facts.clone());
             }
         }
         lpc_model::PLAYLIST_SKIP_CHANNEL => {

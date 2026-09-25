@@ -1,4 +1,4 @@
-use super::{PlaylistEntry, PlaylistTour};
+use super::{PlaylistCycle, PlaylistEntry};
 use crate::{
     BindingDefs, ControlMessage, MapSlot, OptionSlot, PositiveF32, PositiveF32Slot, Slotted,
     TimeProductSlot, U32ListSlot, ValueSlot,
@@ -34,12 +34,12 @@ pub struct PlaylistDef {
     /// How the playlist walks its entries over time: hold (absent, the
     /// playlist as it always was) or cycle `{ step_seconds, fade_seconds }`
     /// (vision D13). The authored value is the default; Play mode overrides
-    /// it with a remembered panel write on `bus:playlist.tour`, which is why
+    /// it with a remembered panel write on `bus:playlist.cycle`, which is why
     /// the default binding is promoted to the panel (plan A1).
-    #[slot(consumed, default_bind = "bus:playlist.tour", panel = "show")]
-    pub tour: OptionSlot<ValueSlot<PlaylistTour>>,
+    #[slot(consumed, default_bind = "bus:playlist.cycle", panel = "show")]
+    pub cycle: OptionSlot<ValueSlot<PlaylistCycle>>,
 
-    /// Entry keys switched off in the tour, and ignored by triggers and
+    /// Entry keys switched off in the cycle, and ignored by triggers and
     /// next/prev. The authored list is the default; a panel write on
     /// `bus:playlist.skip` replaces it (plan A1).
     ///
@@ -69,7 +69,7 @@ impl Default for PlaylistDef {
             trigger: MapSlot::default(),
             idle_entry: default_idle_entry(),
             default_fade: default_fade(),
-            tour: OptionSlot::none(),
+            cycle: OptionSlot::none(),
             skip: OptionSlot::none(),
             next_trigger_ids: OptionSlot::none(),
             prev_trigger_ids: OptionSlot::none(),
@@ -166,11 +166,11 @@ mod tests {
     }
 
     #[test]
-    fn playlist_def_parses_tour_skip_and_step_triggers() {
+    fn playlist_def_parses_cycle_skip_and_step_triggers() {
         let def = NodeDef::from_json_str(
             r#"{
   "kind": "Playlist",
-  "tour": { "kind": "cycle", "step_seconds": 20, "fade_seconds": 1.5 },
+  "cycle": { "kind": "cycle", "step_seconds": 20, "fade_seconds": 1.5 },
   "skip": [3, 5],
   "next_trigger_ids": [7],
   "prev_trigger_ids": [8, 9]
@@ -182,8 +182,8 @@ mod tests {
             panic!("playlist def");
         };
         assert_eq!(
-            *def.tour.data.as_ref().expect("tour").value(),
-            PlaylistTour::Cycle {
+            *def.cycle.data.as_ref().expect("cycle").value(),
+            PlaylistCycle::Cycle {
                 step_seconds: 20.0,
                 fade_seconds: 1.5
             }
@@ -197,23 +197,26 @@ mod tests {
     /// The additive fields are absent by default, so a playlist authored
     /// before them reads — and writes back — unchanged.
     #[test]
-    fn playlist_def_omits_absent_tour_fields() {
+    fn playlist_def_omits_absent_cycle_fields() {
         let def = PlaylistDef::default();
-        assert!(def.tour.data.is_none());
+        assert!(def.cycle.data.is_none());
         assert!(def.skip.data.is_none());
         assert!(def.next_trigger_ids.data.is_none());
         assert!(def.prev_trigger_ids.data.is_none());
     }
 
-    /// Tour and skip are consumed, default-bound to their playlist channels
+    /// Cycle and skip are consumed, default-bound to their playlist channels
     /// and promoted to the panel: the authored value is the default, and a
     /// Play-mode panel write overrides it (plan A1).
     #[test]
-    fn tour_and_skip_are_panel_public_default_bindings() {
+    fn cycle_and_skip_are_panel_public_default_bindings() {
         let SlotShape::Record { fields, .. } = PlaylistDef::slot_shape() else {
             panic!("record shape");
         };
-        for (name, channel) in [("tour", "bus:playlist.tour"), ("skip", "bus:playlist.skip")] {
+        for (name, channel) in [
+            ("cycle", "bus:playlist.cycle"),
+            ("skip", "bus:playlist.skip"),
+        ] {
             let field = fields
                 .iter()
                 .find(|field| field.name.as_str() == name)
@@ -227,13 +230,13 @@ mod tests {
     /// The runtime playlist reads these two paths by name
     /// (`lpc-engine`'s `read_absent_as_none`).
     #[test]
-    fn tour_and_skip_values_live_at_their_some_paths() {
+    fn cycle_and_skip_values_live_at_their_some_paths() {
         let registry = crate::SlotShapeRegistry::default();
         let view = crate::PlaylistDefView::compile(&registry).expect("playlist def view");
 
         assert_eq!(
-            view.tour().some_path(),
-            &crate::SlotPath::parse("tour.some").unwrap()
+            view.cycle().some_path(),
+            &crate::SlotPath::parse("cycle.some").unwrap()
         );
         assert_eq!(
             view.skip().some_path(),

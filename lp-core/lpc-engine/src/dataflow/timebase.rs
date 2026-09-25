@@ -639,7 +639,7 @@ impl TimebaseStore {
     /// Why not leave it to [`Self::sweep`]'s idle horizon: that window exists
     /// for consumers that skip a frame or two and come back, and a removed
     /// node never comes back under the same id. Waiting it out kept a
-    /// touring playlist's last few patterns' phasors alive (several KB on a
+    /// cycling playlist's last few patterns' phasors alive (several KB on a
     /// device) and made an unloaded entry present in the store for 120 ticks
     /// after it was gone everywhere else (multi-pattern AC1). A woken entry
     /// starts fresh anyway (vision Q6), so there is no phase worth keeping.

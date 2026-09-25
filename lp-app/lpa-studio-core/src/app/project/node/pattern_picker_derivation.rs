@@ -1,7 +1,7 @@
 //! Deriving the Play-mode Pattern instrument ([`crate::UiPatternPicker`]).
 //!
 //! The controller gathers the facts — the playlist face's entry strip, the
-//! playing key, the tour and skip values (live before authored), the failed
+//! playing key, the cycle and skip values (live before authored), the failed
 //! keys out of the playlist's warning, and the two channels' write targets —
 //! and [`derive_pattern_picker`] turns them into names, states and ready
 //! actions. Keeping this pure is what lets the rules below be tested without
@@ -13,21 +13,21 @@
 //!   wrapping, passing over skipped and failed entries (plan PD7 — Studio
 //!   picks the key and sends an activate; there is no wire command).
 //! - **On/off** = the whole skip list, rewritten with one key flipped.
-//! - **Tour** = the whole `PlaylistTour`: off is `Hold`; on is a cycle at
+//! - **Cycle** = the whole `PlaylistCycle`: off is `Hold`; on is a cycle at
 //!   the authored step (or [`DEFAULT_STEP_SECONDS`]); the step moves along
 //!   [`STEP_LADDER_SECONDS`].
 
-use lpc_model::{PlaylistTour, ToLpValue};
+use lpc_model::{PlaylistCycle, ToLpValue};
 
 use crate::{
     ControllerId, PanelWriteOp, PlaylistActivateOp, ProjectController, ProjectNodeAddress,
     UiAction, UiPanelTarget, UiPatternEntryState, UiPatternPicker, UiPatternPickerEntry,
 };
 
-/// The step a tour starts at when nothing authored one.
+/// The step a cycle starts at when nothing authored one.
 pub const DEFAULT_STEP_SECONDS: f32 = 20.0;
 
-/// The fade a tour starts with when the playlist authored no fade at all.
+/// The fade a cycle starts with when the playlist authored no fade at all.
 const FALLBACK_FADE_SECONDS: f32 = 1.5;
 
 /// The step times the instrument's shorter/longer buttons move between.
@@ -55,20 +55,20 @@ pub struct PatternPickerFacts {
     pub entries: Vec<PatternPickerEntryFacts>,
     /// The playing key.
     pub active: Option<u32>,
-    /// The tour the playlist runs now (live before authored).
-    pub tour: PlaylistTour,
-    /// The authored tour, which is where a switched-on tour takes its step
+    /// The cycle the playlist runs now (live before authored).
+    pub cycle: PlaylistCycle,
+    /// The authored cycle, which is where a switched-on cycle takes its step
     /// and fade from.
-    pub authored_tour: Option<PlaylistTour>,
-    /// The playlist's authored `default_fade`, for a tour switched on over
+    pub authored_cycle: Option<PlaylistCycle>,
+    /// The playlist's authored `default_fade`, for a cycle switched on over
     /// an authored hold.
     pub default_fade: Option<f32>,
     /// The skipped keys (live before authored).
     pub skip: Vec<u32>,
     /// The keys the playlist's warning names as failed.
     pub failed: Vec<u32>,
-    /// The tour channel's write target.
-    pub tour_target: Option<UiPanelTarget>,
+    /// The cycle channel's write target.
+    pub cycle_target: Option<UiPanelTarget>,
     /// The skip channel's write target.
     pub skip_target: Option<UiPanelTarget>,
 }
@@ -79,12 +79,12 @@ pub fn derive_pattern_picker(facts: PatternPickerFacts) -> UiPatternPicker {
         playlist,
         entries,
         active,
-        tour,
-        authored_tour,
+        cycle,
+        authored_cycle,
         default_fade,
         skip,
         failed,
-        tour_target,
+        cycle_target,
         skip_target,
     } = facts;
 
@@ -118,7 +118,7 @@ pub fn derive_pattern_picker(facts: PatternPickerFacts) -> UiPatternPicker {
                 panel_write_action(
                     target,
                     toggled_skip(&skip, entry.key).to_lp_value(),
-                    format!("{verb} {} in the tour", entry.name),
+                    format!("{verb} {} in the cycle", entry.name),
                 )
             });
             UiPatternPickerEntry {
@@ -132,23 +132,23 @@ pub fn derive_pattern_picker(facts: PatternPickerFacts) -> UiPatternPicker {
         })
         .collect();
 
-    let touring = !tour.is_frozen();
-    let tour_toggle = tour_target.as_ref().map(|target| {
-        let (value, label) = if touring {
-            (PlaylistTour::Hold, "Stop the tour")
+    let cycling = !cycle.is_frozen();
+    let cycle_toggle = cycle_target.as_ref().map(|target| {
+        let (value, label) = if cycling {
+            (PlaylistCycle::Hold, "Stop the cycle")
         } else {
             (
-                started_tour(authored_tour, default_fade),
-                "Tour the patterns",
+                started_cycle(authored_cycle, default_fade),
+                "Cycle the patterns",
             )
         };
         panel_write_action(target, value.to_lp_value(), label.to_string())
     });
     let step_write = |step: Option<f32>| -> Option<UiAction> {
-        let (target, step) = (tour_target.as_ref()?, step?);
-        let value = PlaylistTour::Cycle {
+        let (target, step) = (cycle_target.as_ref()?, step?);
+        let value = PlaylistCycle::Cycle {
             step_seconds: step,
-            fade_seconds: tour.fade_seconds(),
+            fade_seconds: cycle.fade_seconds(),
         };
         Some(panel_write_action(
             target,
@@ -156,17 +156,17 @@ pub fn derive_pattern_picker(facts: PatternPickerFacts) -> UiPatternPicker {
             format!("Step every {}", format_step_seconds(step)),
         ))
     };
-    let running = tour.running_step_seconds();
+    let running = cycle.running_step_seconds();
     let step_shorter = step_write(running.and_then(shorter_step));
     let step_longer = step_write(running.and_then(longer_step));
 
     UiPatternPicker {
         entries,
         active,
-        tour,
-        tour_target,
+        cycle,
+        cycle_target,
         skip_target,
-        tour_toggle,
+        cycle_toggle,
         step_shorter,
         step_longer,
         prev,
@@ -237,20 +237,20 @@ pub fn toggled_skip(skip: &[u32], key: u32) -> Vec<u32> {
     next
 }
 
-/// The tour a switched-on tour starts as: the authored cycle when it runs,
+/// The cycle a switched-on cycle starts as: the authored cycle when it runs,
 /// else a cycle at [`DEFAULT_STEP_SECONDS`] with the authored fade (the
 /// cycle's own, else the playlist's `default_fade`).
-pub fn started_tour(authored: Option<PlaylistTour>, default_fade: Option<f32>) -> PlaylistTour {
-    if let Some(tour) = authored
-        && !tour.is_frozen()
+pub fn started_cycle(authored: Option<PlaylistCycle>, default_fade: Option<f32>) -> PlaylistCycle {
+    if let Some(cycle) = authored
+        && !cycle.is_frozen()
     {
-        return tour;
+        return cycle;
     }
     let fade_seconds = match authored {
-        Some(PlaylistTour::Cycle { fade_seconds, .. }) => fade_seconds,
+        Some(PlaylistCycle::Cycle { fade_seconds, .. }) => fade_seconds,
         _ => default_fade.unwrap_or(FALLBACK_FADE_SECONDS),
     };
-    PlaylistTour::Cycle {
+    PlaylistCycle::Cycle {
         step_seconds: DEFAULT_STEP_SECONDS,
         fade_seconds,
     }
@@ -399,37 +399,37 @@ mod tests {
     }
 
     #[test]
-    fn a_started_tour_keeps_what_was_authored() {
-        let authored = PlaylistTour::Cycle {
+    fn a_started_cycle_keeps_what_was_authored() {
+        let authored = PlaylistCycle::Cycle {
             step_seconds: 45.0,
             fade_seconds: 3.0,
         };
-        assert_eq!(started_tour(Some(authored), Some(1.0)), authored);
+        assert_eq!(started_cycle(Some(authored), Some(1.0)), authored);
         // An authored hold: the default step, the playlist's own fade.
         assert_eq!(
-            started_tour(Some(PlaylistTour::Hold), Some(2.5)),
-            PlaylistTour::Cycle {
+            started_cycle(Some(PlaylistCycle::Hold), Some(2.5)),
+            PlaylistCycle::Cycle {
                 step_seconds: DEFAULT_STEP_SECONDS,
                 fade_seconds: 2.5
             }
         );
         // An authored frozen cycle keeps its fade.
         assert_eq!(
-            started_tour(
-                Some(PlaylistTour::Cycle {
+            started_cycle(
+                Some(PlaylistCycle::Cycle {
                     step_seconds: 0.0,
                     fade_seconds: 4.0
                 }),
                 Some(1.0)
             ),
-            PlaylistTour::Cycle {
+            PlaylistCycle::Cycle {
                 step_seconds: DEFAULT_STEP_SECONDS,
                 fade_seconds: 4.0
             }
         );
         assert_eq!(
-            started_tour(None, None),
-            PlaylistTour::Cycle {
+            started_cycle(None, None),
+            PlaylistCycle::Cycle {
                 step_seconds: DEFAULT_STEP_SECONDS,
                 fade_seconds: FALLBACK_FADE_SECONDS
             }
@@ -554,19 +554,19 @@ mod tests {
     }
 
     #[test]
-    fn the_tour_switch_and_step_write_the_whole_tour() {
+    fn the_cycle_switch_and_step_write_the_whole_cycle() {
         let holding = derive_pattern_picker(facts(|facts| {
-            facts.authored_tour = Some(PlaylistTour::Cycle {
+            facts.authored_cycle = Some(PlaylistCycle::Cycle {
                 step_seconds: 30.0,
                 fade_seconds: 2.0,
             });
         }));
-        assert!(!holding.touring());
-        let (channel, value) = written(holding.tour_toggle.as_ref());
-        assert_eq!(channel, "playlist.tour");
+        assert!(!holding.cycling());
+        let (channel, value) = written(holding.cycle_toggle.as_ref());
+        assert_eq!(channel, "playlist.cycle");
         assert_eq!(
-            PlaylistTour::from_lp_value(&value).expect("tour"),
-            PlaylistTour::Cycle {
+            PlaylistCycle::from_lp_value(&value).expect("cycle"),
+            PlaylistCycle::Cycle {
                 step_seconds: 30.0,
                 fade_seconds: 2.0
             },
@@ -574,29 +574,29 @@ mod tests {
         );
         assert!(holding.step_shorter.is_none() && holding.step_longer.is_none());
 
-        let touring = derive_pattern_picker(facts(|facts| {
-            facts.tour = PlaylistTour::Cycle {
+        let cycling = derive_pattern_picker(facts(|facts| {
+            facts.cycle = PlaylistCycle::Cycle {
                 step_seconds: 20.0,
                 fade_seconds: 1.5,
             };
         }));
-        assert!(touring.touring());
+        assert!(cycling.cycling());
         assert_eq!(
-            PlaylistTour::from_lp_value(&written(touring.tour_toggle.as_ref()).1).expect("tour"),
-            PlaylistTour::Hold,
+            PlaylistCycle::from_lp_value(&written(cycling.cycle_toggle.as_ref()).1).expect("cycle"),
+            PlaylistCycle::Hold,
             "switching off holds"
         );
         assert_eq!(
-            PlaylistTour::from_lp_value(&written(touring.step_longer.as_ref()).1).expect("tour"),
-            PlaylistTour::Cycle {
+            PlaylistCycle::from_lp_value(&written(cycling.step_longer.as_ref()).1).expect("cycle"),
+            PlaylistCycle::Cycle {
                 step_seconds: 30.0,
                 fade_seconds: 1.5
             },
             "a step keeps the fade"
         );
         assert_eq!(
-            PlaylistTour::from_lp_value(&written(touring.step_shorter.as_ref()).1).expect("tour"),
-            PlaylistTour::Cycle {
+            PlaylistCycle::from_lp_value(&written(cycling.step_shorter.as_ref()).1).expect("cycle"),
+            PlaylistCycle::Cycle {
                 step_seconds: 15.0,
                 fade_seconds: 1.5
             }
@@ -623,12 +623,12 @@ mod tests {
                 })
                 .collect(),
             active: Some(1),
-            tour: PlaylistTour::Hold,
-            authored_tour: None,
+            cycle: PlaylistCycle::Hold,
+            authored_cycle: None,
             default_fade: Some(1.5),
             skip: Vec::new(),
             failed: Vec::new(),
-            tour_target: Some(target(lpc_model::PLAYLIST_TOUR_CHANNEL)),
+            cycle_target: Some(target(lpc_model::PLAYLIST_CYCLE_CHANNEL)),
             skip_target: Some(target(lpc_model::PLAYLIST_SKIP_CHANNEL)),
         };
         edit(&mut facts);
@@ -648,7 +648,7 @@ mod tests {
             .and_then(|action| action.op_as::<PanelWriteOp>())
             .expect("a panel write");
         let channel = match op.channel.as_str() {
-            lpc_model::PLAYLIST_TOUR_CHANNEL => lpc_model::PLAYLIST_TOUR_CHANNEL,
+            lpc_model::PLAYLIST_CYCLE_CHANNEL => lpc_model::PLAYLIST_CYCLE_CHANNEL,
             lpc_model::PLAYLIST_SKIP_CHANNEL => lpc_model::PLAYLIST_SKIP_CHANNEL,
             other => panic!("unexpected channel {other}"),
         };

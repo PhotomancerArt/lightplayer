@@ -82,8 +82,8 @@
         }
       },
       {
-        "default_bind": "bus:playlist.tour",
-        "name": "tour",
+        "default_bind": "bus:playlist.cycle",
+        "name": "cycle",
         "panel": "show",
         "semantics": {
           "direction": "consumed"
@@ -95,10 +95,10 @@
               "value": {
                 "shape": {
                   "editor": "plain",
-                  "id": 13352735,
+                  "id": 2840056141,
                   "meta": {
                     "description": "Hold, or cycle through the enabled entries: seconds per entry and the fade between them.",
-                    "label": "Tour"
+                    "label": "Cycle"
                   },
                   "ty": {
                     "struct": {
@@ -116,7 +116,7 @@
                           "ty": "f32"
                         }
                       ],
-                      "name": "PlaylistTour"
+                      "name": "PlaylistCycle"
                     }
                   }
                 }

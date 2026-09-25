@@ -233,7 +233,7 @@ mod tests {
         assert_eq!(allocs.allocs, 0, "{allocs:?}");
         let other = ResolveError::from(super::SessionResolveError::UnresolvedConsumedSlot {
             node,
-            slot: lpc_model::SlotPath::parse("tour.some").expect("path"),
+            slot: lpc_model::SlotPath::parse("cycle.some").expect("path"),
         });
         assert!(!other.is_absent_option());
         assert!(other.message.contains("unresolved consumed slot"));

@@ -29,7 +29,7 @@ pub struct RuntimeNodeTree<N> {
     /// so storage tracks the *live* node count. The dense `Vec<Option<_>>`
     /// this replaced left a `None` tombstone per removed id forever, and
     /// dormant playlist entries remove and re-attach a subtree on every
-    /// pattern switch — a tour grew slot storage without bound
+    /// pattern switch — a cycle grew slot storage without bound
     /// (`docs/defects/2026-09-25-node-tree-tombstones-grow-per-reload.md`).
     /// Ids stay monotonic and are never reused ([`Self::next_id`]), so a new
     /// node appends at the end, iteration stays in id order, and lookup is

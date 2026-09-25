@@ -34,7 +34,7 @@ allocated and still holds when the window closes;
 `measurements/retained.py` in the planning directory computes the same
 figure from the trace and agrees to the byte). The 25-entry project is the
 committed tryout; the 5-entry variant is the same directory with the
-playlist cut to entries 1–5 (same modules, same tour), not committed.
+playlist cut to entries 1–5 (same modules, same cycle), not committed.
 
 | project | entries | `project-load` retained | commit |
 |---|---:|---:|---|
@@ -63,19 +63,19 @@ is (D1): no tree node, no bindings, no parsed module, no shader.
 The first frame's `retained` is 44,475 B at both 5 and 25 entries: the
 frame never sees a dormant entry.
 
-## 2. Two full tours (AC4)
+## 2. Two full cycles (AC4)
 
-**Method.** fw-emu, `lp-cli profile p6-v/tour --collect alloc --mode all
---max-cycles 35000000000`, on a scratch copy of the tryout whose tour step is
-4 s and fade 0.5 s (not committed; the committed project tours at 30 s).
+**Method.** fw-emu, `lp-cli profile p6-v/cycle --collect alloc --mode all
+--max-cycles 35000000000`, on a scratch copy of the tryout whose cycle step is
+4 s and fade 0.5 s (not committed; the committed project cycles at 30 s).
 The step had to be that long for a reason worth knowing: under the alloc
 collector every allocation is expensive in emulated cycles, and fw-emu's
-clock follows cycles, so at a 1 s step the tour moved on before each new
+clock follows cycles, so at a 1 s step the cycle moved on before each new
 entry's deferred compile ran and only the first shader ever compiled. At
 4 s every entry compiles and renders. P3's `entry-unload` / `entry-load`
 markers window each switch.
 
-The live heap is replayed from the trace (`proof/tour-switches.csv` has
+The live heap is replayed from the trace (`proof/cycle-switches.csv` has
 every switch). "Retained at the end of a pass" is the live heap at the
 first `entry-unload` of the next pass, the same point in the cycle each
 time (the idle entry, Soft Noise, has played and is about to be replaced).
@@ -149,8 +149,8 @@ therefore switch 1; the highest peak in passes 1–2 is 292,230 B of fw-emu's
 uploaded project files in its memory filesystem, so its absolute figures
 include the files; the C6's (section 3) do not.
 
-The chart is `proof/tour-heap.svg` in the planning directory (the P6b run;
-P6's is `proof/tour-heap-p6-5b09557cf.svg`): live heap at every frame end,
+The chart is `proof/cycle-heap.svg` in the planning directory (the P6b run;
+P6's is `proof/cycle-heap-p6-5b09557cf.svg`): live heap at every frame end,
 switches marked, the peak per switch as dots.
 
 ## 3. The emulated C6 (AC3)
@@ -166,8 +166,8 @@ read from the console after `lp-cli wire unpack`.
   the deploy went through, and the post-deploy check (`project.read` until
   a frame renders with no node error) printed `Project uploaded and
   running.`
-- **It tours:** eight compiles in the run: the first entry, then one per
-  30 s tour step (7 switches), each succeeding (18–28 ms compile, 3,020–3,960 B
+- **It cycles:** eight compiles in the run: the first entry, then one per
+  30 s cycle step (7 switches), each succeeding (18–28 ms compile, 3,020–3,960 B
   of code). No node error, no reboot, `no unmapped accesses`.
 
 | when (emulated uptime) | free heap | largest free block |
@@ -219,7 +219,7 @@ pattern to the first frame after the compile:
 Median **≈ 190 ms** emulated t1. The lamps hold their last colours through
 the stall (a WS281x string latches), so it reads as a pause, not a blackout.
 
-**On fw-emu** (`--collect events`, no alloc collector, the 4 s-step tour
+**On fw-emu** (`--collect events`, no alloc collector, the 4 s-step cycle
 variant, esp32c6 cycle model, cycles ÷ 160 MHz): from the `entry-unload`
 that begins a switch to the end of the first frame after the new shader's
 compile, over 2 frames, 51 switches: min 149.8, median 160.6, max 178.7 ms.
@@ -237,7 +237,7 @@ The two emulators agree on the shape and roughly on the size.
 2. *fw-emu via `lp-cli profile`:* the profile workload drives frames only,
    and fw-emu's button driver is virtual with no way to inject a press, so
    a real press cannot be traced. **A proxy instead**: a scratch copy of
-   fyeah-sign with a 3 s tour (not committed) switches idle ⇄ blast through
+   fyeah-sign with a 3 s cycle (not committed) switches idle ⇄ blast through
    the same unload → load → compile path a trigger takes. Idle → blast:
    **119.7–127.4 ms** (median ≈ 126 ms) from the switch's `entry-unload` to
    the end of blast's first frame, over 2 frames; blast → idle ≈ 148 ms.
@@ -254,7 +254,7 @@ The second stop of each pattern (entries 14–25) points at the same
 `./modules/<pattern>/module.json` as the first. The registry handles one
 def used at two sites: `lp-cli`'s `examples_valid` loads the tryout with
 **every** entry resident at once (`load_from_root_with_every_entry_resident`)
-and passes, and both tour traces load and unload every shared module twice
+and passes, and both cycle traces load and unload every shared module twice
 per pass with no failure and byte-identical heap outside the phasor store.
 Only one entry is resident on a device at any time anyway.
 
@@ -283,12 +283,12 @@ stops should carry different authored settings is left to the final gate.
   instruction; fw-emu's clock follows its cycle model. Neither is graded by
   a transcript for time. Do not gate on any of them.
 - **A real press.** No button was pressed anywhere: the fyeah figure is a
-  tour-driven proxy, and the C6 cannot take fyeah-sign at all yet (open
+  cycle-driven proxy, and the C6 cannot take fyeah-sign at all yet (open
   defect above).
 - **Flash reads of a real part.** The C6 run was a direct boot on the
   emulator's flash model; a board's flash timing is not modelled at t1.
 - **Studio.** Nothing here went through Studio or its Play-mode picker;
-  switches were tour-driven. The picker is covered by P7's stories and the
+  switches were cycle-driven. The picker is covered by P7's stories and the
   final gate.
 - **fw-emu's filesystem is in RAM**, so its absolute free-heap figures are
   lower than a device's by the project's file bytes; only the windowed
@@ -301,8 +301,8 @@ stops should carry different authored settings is left to the final gate.
 lp-cli profile catalog/projects/playful-choker-tryout --collect alloc --mode startup --max-cycles 800000000
 lp-cli profile <5-entry copy> --collect alloc --mode startup --max-cycles 800000000
 
-# AC4 (a copy with "tour": {"kind":"cycle","step_seconds":4,"fade_seconds":0.5})
-lp-cli profile <tour copy> --collect alloc --mode all --max-cycles 35000000000
+# AC4 (a copy with "cycle": {"kind":"cycle","step_seconds":4,"fade_seconds":0.5})
+lp-cli profile <cycle copy> --collect alloc --mode all --max-cycles 35000000000
 
 # AC3 and the C6 latency
 cd lp-fw/fw-esp32c6 && cargo build --target riscv32imac-unknown-none-elf --profile release-esp32 --features esp32c6,frame-dump
@@ -312,6 +312,6 @@ lp-cli upload catalog/projects/playful-choker-tryout serial:tcp://127.0.0.1:<por
 lp-cli wire unpack < console.txt | grep heartbeat
 ```
 
-The analysis scripts (the tour replay, the whole-heap stack diff, the
+The analysis scripts (the cycle replay, the whole-heap stack diff, the
 per-site trend, the frame-stream stalls) and the chart and per-switch table
 are in the planning directory's `proof/`.

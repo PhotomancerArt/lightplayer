@@ -7,7 +7,7 @@
   },
   "idle_entry": 1,
   "default_fade": 1.5,
-  "tour": {
+  "cycle": {
     "kind": "cycle",
     "step_seconds": 30.0,
     "fade_seconds": 1.5

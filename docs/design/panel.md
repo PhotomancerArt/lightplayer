@@ -262,7 +262,7 @@ hold the frame, unload the old entry, load the new one, fade — and the
 playlist already had a runtime command for it, the one P8 cites as the
 pattern ("the playlist-activate pattern": nothing staged, nothing dirty).
 Modelling a pick as a panel write would mean a writer with no value to
-hold, a persisted "current entry" that fights the tour, and a Clear that
+hold, a persisted "current entry" that fights the cycle, and a Clear that
 means nothing. So the Pattern instrument's tap and its next/previous send
 `PlaylistActivateEntry` (Studio picks the key for next/previous; there is
 no next/previous command). Everything else the instrument does is a panel
@@ -275,19 +275,19 @@ shows, between the shared knobs and the playing pattern's own knobs:
 - the set's names in authored order, the playing one marked, with a failed
   entry and a skipped one shown as such — **tap** a name to play it
   (`PlaylistActivateEntry`; a dormant entry loads, a failed one is retried);
-- **the tour**: a switch and a step time. It is the playlist's `tour`
-  option, consumed from `bus:playlist.tour` and panel-shown: the authored
-  value is the default, a Play-mode write (a whole `PlaylistTour` value:
+- **the cycle**: a switch and a step time. It is the playlist's `cycle`
+  option, consumed from `bus:playlist.cycle` and panel-shown: the authored
+  value is the default, a Play-mode write (a whole `PlaylistCycle` value:
   off is `Hold`, on is a cycle at a step from a fixed ladder) overrides it,
   and it persists in `.lp/panel.json` like any writer (P11);
-- **per-pattern on/off**, where off means "skip it in the tour". It is the
+- **per-pattern on/off**, where off means "skip it in the cycle". It is the
   playlist's `skip` option on `bus:playlist.skip`: one whole `u32` list with
   one writer, rewritten with one key flipped, because the bus has no
   read-modify-write. A skipped pattern can still be tapped;
 - **next / previous**: an activate of the adjacent enabled key, wrapping.
 
-Clear on the tour or the skip list returns it to the authored default. Two
-playlists in one module share the one `playlist.tour` / `playlist.skip`
+Clear on the cycle or the skip list returns it to the authored default. Two
+playlists in one module share the one `playlist.cycle` / `playlist.skip`
 pair of their scope (a known limit, not a design).
 
 > Status: implemented 2026-08-03 — mounted at

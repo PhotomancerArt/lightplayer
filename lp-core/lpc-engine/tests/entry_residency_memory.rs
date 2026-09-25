@@ -1,6 +1,6 @@
 //! Retained heap across repeated playlist entry switches.
 //!
-//! A tour switches entries for as long as the piece runs, so a switch must
+//! A cycle switches entries for as long as the piece runs, so a switch must
 //! give back everything it took: the unloaded subtree's nodes, bindings,
 //! registry rows and artifact locations, and whatever the load re-derived.
 //! What this pins: after a warm-up, a hundred more `1 → 2 → 1` cycles
@@ -10,7 +10,7 @@
 //!
 //! The entry shaders are attached but never demanded (the stand-in owner
 //! renders nothing), so no JIT code is compiled here: this is the engine
-//! and registry bookkeeping of a switch. Compiled code across a tour is
+//! and registry bookkeeping of a switch. Compiled code across a cycle is
 //! plan P6's measurement on the emulated C6.
 //!
 //! ```bash

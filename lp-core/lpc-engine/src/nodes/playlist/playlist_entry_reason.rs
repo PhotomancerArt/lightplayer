@@ -22,8 +22,8 @@ pub enum PlaylistEntryReason {
     /// Its load or first compile failed. Timed advance and triggers skip it
     /// until the project reloads; an explicit activate tries it again.
     Failed(String),
-    /// Switched off in the tour: named in the playlist's `skip` list
-    /// (authored, or written by Play mode). The tour, triggers and next/prev
+    /// Switched off in the cycle: named in the playlist's `skip` list
+    /// (authored, or written by Play mode). The cycle, triggers and next/prev
     /// pass it over; an explicit activate still plays it.
     Disabled,
 }

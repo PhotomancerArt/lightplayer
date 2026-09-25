@@ -78,7 +78,7 @@ pub use binding::{
     BusSlotRef, BusSlotRefError, NodeSlotRef, NodeSlotRefError,
 };
 pub use bus::{
-    ChannelName, PALETTE_CHANNEL, PLAYLIST_SKIP_CHANNEL, PLAYLIST_TOUR_CHANNEL,
+    ChannelName, PALETTE_CHANNEL, PLAYLIST_CYCLE_CHANNEL, PLAYLIST_SKIP_CHANNEL,
     PRIMARY_CONTROL_CHANNEL, PRIMARY_VISUAL_CHANNEL, WELL_KNOWN_CHANNELS, WellKnownChannel,
     well_known_channel,
 };
@@ -132,8 +132,8 @@ pub use nodes::{
     MirrorMode, ModuleDef, ModuleDefView, NodeDefParseError, NodeStarter, OUTPUT_NAME_MAX_LEN,
     OutputDef, OutputDefView, OutputDriverOptionsConfig, OutputDriverOptionsConfigView, OutputName,
     OutputNameError, OutputPortDef, OutputPortDefView, PATTERN_EXPORT_FOLDER,
-    PLAYLIST_TOUR_SHAPE_NAME, PatchConfig, PathSpec, PlayState, PlaylistDef, PlaylistDefView,
-    PlaylistEntry, PlaylistEntryView, PlaylistState, PlaylistStateView, PlaylistTour,
+    PLAYLIST_CYCLE_SHAPE_NAME, PatchConfig, PathSpec, PlayState, PlaylistCycle, PlaylistDef,
+    PlaylistDefView, PlaylistEntry, PlaylistEntryView, PlaylistState, PlaylistStateView,
     ProjectionShape, ProvenanceDef, STARTER_SHADER_GLSL, STARTER_STEM_PLACEHOLDER, ScalarHint,
     ScalarHintView, ShaderBudget, ShaderBudgetError, ShaderCoords, ShaderDef, ShaderDefView,
     ShaderHeaderGenError, ShaderMapKeyDef, ShaderParamDef, ShaderParamDefView, ShaderSlotDef,
@@ -142,7 +142,7 @@ pub use nodes::{
     TextureFormat, TextureState, TextureStateView, VisualConsumerSpace,
     format_playlist_failure_status, generate_compute_shader_header, glsl_type_for_lp_type,
     next_output_name, node_def_asset_refs, parse_playlist_failed_entries, pattern_project_files_1d,
-    pattern_project_files_2d, playlist_tour_lp_type, resolve_artifact_specifier,
+    pattern_project_files_2d, playlist_cycle_lp_type, resolve_artifact_specifier,
     rewrite_node_def_asset_refs, shader_panel_step, slot_bytes_estimate, starter_def_for_kind,
     starter_for_kind, starter_project_files, validate_shader_slot_budget,
 };

@@ -7,7 +7,7 @@
 //!    the two step buttons. The step targets are chosen in core (the
 //!    neighbouring enabled pattern, wrapping), so a button with nowhere to
 //!    go is simply absent.
-//! 2. **Tour.** A switch and, while it runs, the step time with shorter /
+//! 2. **Cycle.** A switch and, while it runs, the step time with shorter /
 //!    longer buttons. Step times are a short ladder (`20 s`, `30 s`, …), so
 //!    they are squared blocks, not a drag.
 //! 3. **The set.** Every pattern's name in authored order — a scrolling
@@ -16,10 +16,10 @@
 //!    ACTIVE colour); a failed one says so in the error family; a skipped
 //!    one is dimmed and dashed.
 //! 4. **On/off per pattern.** A squared block at the end of each row: off
-//!    means the tour, next and prev pass it by. A tap still plays it.
+//!    means the cycle, next and prev pass it by. A tap still plays it.
 //!
 //! Everything a gesture sends is a ready [`UiAction`] on the picker — this
-//! component decides nothing. While the panel holds the tour or the switch
+//! component decides nothing. While the panel holds the cycle or the switch
 //! set, those controls wear the engaged gold and a reset glyph releases
 //! them (panel.md P2: clear is always one obvious gesture).
 //!
@@ -52,8 +52,8 @@ pub fn PatternPicker(
         .playing()
         .map(|entry| entry.name.clone())
         .unwrap_or_else(|| "—".to_string());
-    let tour_held = picker
-        .tour_target
+    let cycle_held = picker
+        .cycle_target
         .as_ref()
         .is_some_and(|target| target.engaged);
     let skip_held = picker
@@ -89,15 +89,15 @@ pub fn PatternPicker(
                     on_action,
                 }
             }
-            // 2. tour
-            TourRow { picker: picker.clone(), held: tour_held, on_action, on_panel }
+            // 2. cycle
+            CycleRow { picker: picker.clone(), held: cycle_held, on_action, on_panel }
             // 3 + 4. the set, with its on/off blocks
             div { class: "tw:grid tw:min-w-0 tw:gap-1",
                 div { class: "tw:flex tw:min-w-0 tw:items-center tw:gap-1.5",
                     span { class: "tw:text-[0.6rem] tw:font-bold tw:uppercase tw:tracking-[0.12em] tw:text-subtle-foreground",
                         "{picker.entries.len()} patterns"
                     }
-                    span { class: "tw:ml-auto tw:text-[0.6rem] tw:text-dim-foreground", "in tour" }
+                    span { class: "tw:ml-auto tw:text-[0.6rem] tw:text-dim-foreground", "in cycle" }
                     if skip_held && let Some(target) = picker.skip_target.clone() {
                         ResetGlyph {
                             target,
@@ -121,17 +121,17 @@ pub fn PatternPicker(
     }
 }
 
-/// The tour switch, and the step while it runs.
+/// The cycle switch, and the step while it runs.
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
-fn TourRow(
+fn CycleRow(
     picker: UiPatternPicker,
     held: bool,
     #[props(default)] on_action: Option<EventHandler<UiAction>>,
     #[props(default)] on_panel: Option<EventHandler<PanelGesture>>,
 ) -> Element {
-    let touring = picker.touring();
-    let switch_class = match (touring, held) {
+    let cycling = picker.cycling();
+    let switch_class = match (cycling, held) {
         (true, true) => {
             "tw:inline-flex tw:h-8 tw:flex-none tw:cursor-pointer tw:appearance-none tw:items-center tw:gap-1.5 tw:rounded-xs tw:border tw:border-status-engaged-border tw:bg-status-engaged-bg tw:px-2.5 tw:text-xs tw:font-bold tw:text-status-engaged-foreground"
         }
@@ -145,12 +145,12 @@ fn TourRow(
             "tw:inline-flex tw:h-8 tw:flex-none tw:cursor-pointer tw:appearance-none tw:items-center tw:gap-1.5 tw:rounded-xs tw:border tw:border-border tw:bg-transparent tw:px-2.5 tw:text-xs tw:text-muted-foreground"
         }
     };
-    let pip_class = if touring {
+    let pip_class = if cycling {
         "tw:h-2.5 tw:w-2.5 tw:flex-none tw:rounded-[1px] tw:bg-muted-foreground"
     } else {
         "tw:h-2.5 tw:w-2.5 tw:flex-none tw:rounded-[1px] tw:border tw:border-dim-foreground"
     };
-    let toggle = picker.tour_toggle.clone();
+    let toggle = picker.cycle_toggle.clone();
     let step = picker
         .step_seconds()
         .map(lpa_studio_core::app::project::node::pattern_picker_derivation::format_step_seconds);
@@ -161,9 +161,9 @@ fn TourRow(
                 class: switch_class,
                 r#type: "button",
                 role: "switch",
-                aria_checked: "{touring}",
+                aria_checked: "{cycling}",
                 disabled: toggle.is_none(),
-                title: if touring { "Touring — tap to stay on the playing pattern" } else { "Holding — tap to tour the patterns" },
+                title: if cycling { "Cycling — tap to stay on the playing pattern" } else { "Holding — tap to cycle the patterns" },
                 onclick: move |event| {
                     event.stop_propagation();
                     if let (Some(action), Some(handler)) = (toggle.clone(), on_action) {
@@ -171,7 +171,7 @@ fn TourRow(
                     }
                 },
                 span { class: pip_class }
-                "Tour"
+                "Cycle"
             }
             if let Some(step) = step {
                 ActionBlock {
@@ -192,10 +192,10 @@ fn TourRow(
             } else {
                 span { class: "tw:text-xs tw:text-dim-foreground", "staying on the playing pattern" }
             }
-            if held && let Some(target) = picker.tour_target.clone() {
+            if held && let Some(target) = picker.cycle_target.clone() {
                 ResetGlyph {
                     target,
-                    title: "Reset the tour — the playlist's own setting plays again",
+                    title: "Reset the cycle — the playlist's own setting plays again",
                     on_panel,
                 }
             }
@@ -253,7 +253,7 @@ fn PatternRow(
             "{} failed to load on the device — tap to try it again",
             entry.name
         ),
-        UiPatternEntryState::Skipped => format!("Play {} (it is off in the tour)", entry.name),
+        UiPatternEntryState::Skipped => format!("Play {} (it is off in the cycle)", entry.name),
         UiPatternEntryState::Available => format!("Play {}", entry.name),
     };
     let play = entry.play.clone();
@@ -268,9 +268,9 @@ fn PatternRow(
         (false, false) => "tw:h-3.5 tw:w-3.5 tw:rounded-[1px] tw:border tw:border-dim-foreground",
     };
     let switch_label = if entry.enabled {
-        format!("{} is on in the tour — tap to skip it", entry.name)
+        format!("{} is on in the cycle — tap to skip it", entry.name)
     } else {
-        format!("{} is off in the tour — tap to include it", entry.name)
+        format!("{} is off in the cycle — tap to include it", entry.name)
     };
 
     rsx! {

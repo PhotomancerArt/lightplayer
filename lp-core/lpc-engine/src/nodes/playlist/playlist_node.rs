@@ -9,16 +9,16 @@
 //!
 //! **Where a switch is decided:** `produce`, in the consumed `time` slot's
 //! domain — an activate command first, then an entry trigger, then a
-//! next/prev trigger, then the tour or (when the tour is off) the timed
+//! next/prev trigger, then the cycle or (when the cycle is off) the timed
 //! advance ([`PlaylistNode::switch_to`]). A failure moves on from the render
 //! or the engine's hooks ([`PlaylistNode::fail_entry`]).
 //!
-//! **Touring** (vision D13, plan A1–A3): with a running
-//! [`lpc_model::PlaylistTour::Cycle`] the playlist walks its enabled entries
+//! **Cycling** (vision D13, plan A1–A3): with a running
+//! [`lpc_model::PlaylistCycle::Cycle`] the playlist walks its enabled entries
 //! in key order, one step each, as a pure function of the consumed `time`
-//! and an anchor ([`super::playlist_tour_position`]); the idle entry is an
+//! and an anchor ([`super::playlist_cycle_position`]); the idle entry is an
 //! ordinary stop. A pick, a trigger or next/prev re-anchors there. A held,
-//! frozen or absent tour is the playlist exactly as before: the idle entry,
+//! frozen or absent cycle is the playlist exactly as before: the idle entry,
 //! triggers and per-entry durations (D17). The skip list marks entries
 //! [`PlaylistEntryReason::Disabled`] either way.
 //!
@@ -51,7 +51,7 @@ use lp_collection::VecMap;
 
 use lp_gfx::TextureHandle;
 use lpc_model::{
-    ControlMessage, FromLpValue, NodeId, NodeRuntimeStatus, PlaylistState, PlaylistTour,
+    ControlMessage, FromLpValue, NodeId, NodeRuntimeStatus, PlaylistCycle, PlaylistState,
     SlotAccess, SlotData, SlotPath, SlotShapeRegistry, SlotShapeRegistryError, U32List,
 };
 use lps_shared::TextureStorageFormat;
@@ -66,13 +66,13 @@ use crate::products::visual::{
     RenderTextureRequest, TextureRenderProduct, VisualReadiness, VisualSampleStream,
 };
 
+use super::playlist_cycle_position::{PlaylistCycleAnchor, cycle_entry_at};
 use super::playlist_held_frame::PlaylistHeldFrame;
 use super::playlist_held_texture::PlaylistHeldTexture;
 use super::playlist_runtime_entry::{
     next_playable_after, next_playable_in_order, prev_playable_before,
 };
 use super::playlist_switch::{PlaylistFramePlan, PlaylistSwitch, clamp01};
-use super::playlist_tour_position::{PlaylistTourAnchor, tour_entry_at};
 use super::{PlaylistEntryReason, PlaylistRuntimeEntry};
 
 pub struct PlaylistNode {
@@ -86,10 +86,10 @@ pub struct PlaylistNode {
     /// Trigger message ids that step to the next / previous enabled entry.
     next_trigger_ids: Vec<u32>,
     prev_trigger_ids: Vec<u32>,
-    /// The tour this playlist last read (authored default or panel write).
-    tour: PlaylistTour,
-    /// Where the tour counts from; set by a pick, a trigger or next/prev.
-    anchor: Option<PlaylistTourAnchor>,
+    /// The cycle this playlist last read (authored default or panel write).
+    cycle: PlaylistCycle,
+    /// Where the cycle counts from; set by a pick, a trigger or next/prev.
+    anchor: Option<PlaylistCycleAnchor>,
     /// The skipped entry keys this playlist last read.
     skip: Vec<u32>,
     state: PlaylistState,
@@ -178,7 +178,7 @@ impl PlaylistNode {
             entries,
             next_trigger_ids: Vec::new(),
             prev_trigger_ids: Vec::new(),
-            tour: PlaylistTour::Hold,
+            cycle: PlaylistCycle::Hold,
             anchor: None,
             skip: Vec::new(),
             state: PlaylistState::new(
@@ -294,8 +294,8 @@ impl PlaylistNode {
         self.switch_to_with_fade(target, time, self.fade_after(self.current_entry));
     }
 
-    /// [`Self::switch_to`] with an explicit fade: the tour's steps fade by
-    /// the tour's `fade_seconds`.
+    /// [`Self::switch_to`] with an explicit fade: the cycle's steps fade by
+    /// the cycle's `fade_seconds`.
     fn switch_to_with_fade(&mut self, target: u32, time: f32, fade: f32) {
         self.switch_time = time;
         if target == self.current_entry {
@@ -311,11 +311,11 @@ impl PlaylistNode {
     }
 
     /// An explicit choice of `target` — an activate command, a trigger, or
-    /// next/prev: switch there and count the tour from it (vision D13: the
-    /// tour carries on from the pick).
+    /// next/prev: switch there and count the cycle from it (vision D13: the
+    /// cycle carries on from the pick).
     fn pick(&mut self, target: u32, time: f32) {
         self.switch_to(target, time);
-        self.anchor = Some(PlaylistTourAnchor::new(target, time));
+        self.anchor = Some(PlaylistCycleAnchor::new(target, time));
     }
 
     /// The entry `steps` enabled stops away from `from` (negative is
@@ -332,29 +332,29 @@ impl PlaylistNode {
         (at != from).then_some(at)
     }
 
-    /// The stops changed under a running tour (a skip or a failure): count
-    /// from the entry playing now, keeping the step phase, so the tour does
+    /// The stops changed under a running cycle (a skip or a failure): count
+    /// from the entry playing now, keeping the step phase, so the cycle does
     /// not jump and the entry playing keeps the rest of its step.
-    fn rebase_tour(&mut self) {
-        if let (Some(step), Some(anchor)) = (self.tour.running_step_seconds(), self.anchor) {
+    fn rebase_cycle(&mut self) {
+        if let (Some(step), Some(anchor)) = (self.cycle.running_step_seconds(), self.anchor) {
             self.anchor = Some(anchor.rebased_on(self.current_entry, step, self.frame_time));
         }
     }
 
-    /// A tour read this frame: a change of value re-anchors at the entry
-    /// playing now, so turning the tour on (or re-timing it) starts a fresh
+    /// A cycle read this frame: a change of value re-anchors at the entry
+    /// playing now, so turning the cycle on (or re-timing it) starts a fresh
     /// step instead of jumping.
-    fn apply_tour(&mut self, tour: PlaylistTour, time: f32) {
-        if tour == self.tour {
+    fn apply_cycle(&mut self, cycle: PlaylistCycle, time: f32) {
+        if cycle == self.cycle {
             return;
         }
-        self.tour = tour;
-        self.anchor = Some(PlaylistTourAnchor::new(self.current_entry, time));
+        self.cycle = cycle;
+        self.anchor = Some(PlaylistCycleAnchor::new(self.current_entry, time));
     }
 
     /// A skip list read this frame: mark skipped entries `Disabled` and
     /// clear the mark from the rest. A failure outranks a skip. The entry
-    /// playing is marked too but keeps playing until the tour's next step.
+    /// playing is marked too but keeps playing until the cycle's next step.
     fn apply_skip(&mut self, skip: Vec<u32>) {
         if skip == self.skip {
             return;
@@ -372,20 +372,20 @@ impl PlaylistNode {
             };
         }
         self.skip = skip;
-        self.rebase_tour();
+        self.rebase_cycle();
     }
 
-    /// The consumed `tour` and `skip`: the authored defaults, or what Play
+    /// The consumed `cycle` and `skip`: the authored defaults, or what Play
     /// mode wrote on their channels. Absent reads as a hold and no skips.
-    fn read_tour_and_skip(
+    fn read_cycle_and_skip(
         &self,
         ctx: &mut TickContext<'_>,
-    ) -> Result<(PlaylistTour, Vec<u32>), NodeError> {
-        let tour = read_absent_as_none::<PlaylistTour>(ctx, "tour.some")?.unwrap_or_default();
+    ) -> Result<(PlaylistCycle, Vec<u32>), NodeError> {
+        let cycle = read_absent_as_none::<PlaylistCycle>(ctx, "cycle.some")?.unwrap_or_default();
         let skip = read_absent_as_none::<U32List>(ctx, "skip.some")?
             .map(|list| list.0)
             .unwrap_or_default();
-        Ok((tour, skip))
+        Ok((cycle, skip))
     }
 
     /// `index` failed to load, compile or produce: mark it, and if it was
@@ -398,7 +398,7 @@ impl PlaylistNode {
         }
         self.failure_status = failure_status(&self.entries);
         if index != self.current_entry {
-            self.rebase_tour();
+            self.rebase_cycle();
             return;
         }
         let Some(next) = next_playable_after(&self.entries, index) else {
@@ -414,7 +414,7 @@ impl PlaylistNode {
         self.current_ready = false;
         self.switch = Some(PlaylistSwitch::holding(fade));
         self.pending_request = self.request_for(next);
-        self.rebase_tour();
+        self.rebase_cycle();
     }
 
     /// A readiness answer for the current entry, asked after rendering it.
@@ -545,9 +545,9 @@ impl NodeRuntime for PlaylistNode {
             ctx.resolve_consumed_slot_value::<lpc_model::TimeProduct>(&self.published_paths.time)?;
         let time = ctx.time_product_seconds(product)?;
         self.frame_time = time;
-        let (tour, skip) = self.read_tour_and_skip(ctx)?;
+        let (cycle, skip) = self.read_cycle_and_skip(ctx)?;
         self.apply_skip(skip);
-        self.apply_tour(tour, time);
+        self.apply_cycle(cycle, time);
         // Trigger detection always runs (it also advances the per-message
         // dedup state), but an explicit activate command wins a same-frame
         // race against a trigger message.
@@ -568,14 +568,14 @@ impl NodeRuntime for PlaylistNode {
             if let Some(target) = self.stepped_from(self.current_entry, triggered.steps) {
                 self.pick(target, time);
             }
-        } else if let Some(step) = self.tour.running_step_seconds() {
-            // Touring: where the tour is, is a pure function of the clock
+        } else if let Some(step) = self.cycle.running_step_seconds() {
+            // Cycling: where the cycle is, is a pure function of the clock
             // and the anchor. Idle has no special role here (plan A2).
             if let Some(anchor) = self.anchor
-                && let Some(target) = tour_entry_at(&self.entries, anchor, step, time)
+                && let Some(target) = cycle_entry_at(&self.entries, anchor, step, time)
                 && target != self.current_entry
             {
-                self.switch_to_with_fade(target, time, self.tour.fade_seconds());
+                self.switch_to_with_fade(target, time, self.cycle.fade_seconds());
             }
         } else if self.current_entry != self.idle_entry
             && let Some(duration) = self.duration(self.current_entry)
@@ -731,9 +731,12 @@ impl NodeRuntime for PlaylistNode {
         if let Some(kept) = request.unload {
             self.current_entry = kept;
         }
-        // A running tour counts on from the kept entry: asking again every
+        // A running cycle counts on from the kept entry: asking again every
         // frame would meet the same refusal every frame.
-        self.anchor = Some(PlaylistTourAnchor::new(self.current_entry, self.frame_time));
+        self.anchor = Some(PlaylistCycleAnchor::new(
+            self.current_entry,
+            self.frame_time,
+        ));
         self.current_ready = false;
         self.end_switch();
     }

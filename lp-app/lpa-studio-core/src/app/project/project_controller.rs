@@ -5208,7 +5208,7 @@ impl ProjectController {
     /// `None` for a playlist with no entries or a card no controller backs.
     /// The group carries no reset target: its channels live in the
     /// enclosing module's scope, and a group reset there would clear every
-    /// shared knob too. The control's own reset clears the tour, and the
+    /// shared knob too. The control's own reset clears the cycle, and the
     /// instrument offers the skip list's.
     fn pattern_picker_group(
         &self,
@@ -5228,21 +5228,21 @@ impl ProjectController {
         let address = ProjectNodeAddress::parse(&card.detail).ok()?;
         let node = self.node(&address)?;
         let playlist = node.target().node_id;
-        let tour_target =
-            self.playlist_channel_target(graph, playlist, lpc_model::PLAYLIST_TOUR_CHANNEL);
+        let cycle_target =
+            self.playlist_channel_target(graph, playlist, lpc_model::PLAYLIST_CYCLE_CHANNEL);
         let skip_target =
             self.playlist_channel_target(graph, playlist, lpc_model::PLAYLIST_SKIP_CHANNEL);
 
         // Live before authored, the swatch's rule — but "live" only when a
         // writer actually holds the channel (or a write is on its way): an
-        // unwritten channel's reading is not a statement about the tour.
-        let authored_tour = def_slot_value(node, &["tour", "some"])
-            .and_then(|value| lpc_model::PlaylistTour::from_lp_value(value).ok());
-        let tour = tour_target
+        // unwritten channel's reading is not a statement about the cycle.
+        let authored_cycle = def_slot_value(node, &["cycle", "some"])
+            .and_then(|value| lpc_model::PlaylistCycle::from_lp_value(value).ok());
+        let cycle = cycle_target
             .as_ref()
             .and_then(|target| self.written_channel_value(graph, target))
-            .and_then(|value| lpc_model::PlaylistTour::from_lp_value(value).ok())
-            .or(authored_tour)
+            .and_then(|value| lpc_model::PlaylistCycle::from_lp_value(value).ok())
+            .or(authored_cycle)
             .unwrap_or_default();
         let skip = skip_target
             .as_ref()
@@ -5280,15 +5280,15 @@ impl ProjectController {
                 })
                 .collect(),
             active: face.active,
-            tour,
-            authored_tour,
+            cycle,
+            authored_cycle,
             default_fade,
             skip,
             failed,
-            tour_target: tour_target.clone(),
+            cycle_target: cycle_target.clone(),
             skip_target,
         });
-        let (mut state, mut source) = match tour_target.as_ref() {
+        let (mut state, mut source) = match cycle_target.as_ref() {
             Some(target) => self.panel_control_state(graph, target.scope, target),
             None => (crate::UiPanelControlState::ReadDefault, None),
         };
@@ -5315,7 +5315,7 @@ impl ProjectController {
             emit: crate::UiPanelEmit::Value,
             live_value: None,
             live_gradient: None,
-            panel_target: tour_target,
+            panel_target: cycle_target,
             wires: Vec::new(),
             unit: None,
             state: crate::UiSlotFieldState::editable(),
@@ -5327,7 +5327,7 @@ impl ProjectController {
         Some(
             crate::UiPanelGroup::new("Pattern", card.detail.clone()).with_controls(vec![
                 crate::UiPanelControlView {
-                    channel: lpc_model::PLAYLIST_TOUR_CHANNEL.to_string(),
+                    channel: lpc_model::PLAYLIST_CYCLE_CHANNEL.to_string(),
                     control,
                     state,
                     source,
@@ -5337,7 +5337,7 @@ impl ProjectController {
     }
 
     /// The write target of one of a playlist's own consumed channels
-    /// (`playlist.tour`, `playlist.skip`): the scope its binding resolves in,
+    /// (`playlist.cycle`, `playlist.skip`): the scope its binding resolves in,
     /// read off the binding graph so it holds whether the binding is the
     /// shape's default or authored.
     fn playlist_channel_target(

@@ -278,24 +278,24 @@ fn writing_panel_state_does_not_rebuild_the_project() {
 }
 
 /// A playlist's Play-mode controls (multi-pattern plan P5) are records, not
-/// scalars: the tour is a `PlaylistTour` struct and the skip list a `u32`
+/// scalars: the cycle is a `PlaylistCycle` struct and the skip list a `u32`
 /// array. Both are ordinary `LpValue`s in panel.json, so they persist and
 /// restore like a fader — and a file written before they existed (every
 /// other test here) restores unchanged.
 #[test]
-fn a_playlist_tour_and_skip_list_survive_a_reboot() {
-    use lpc_model::{PlaylistTour, ToLpValue};
+fn a_playlist_cycle_and_skip_list_survive_a_reboot() {
+    use lpc_model::{PlaylistCycle, ToLpValue};
 
-    let tour = PlaylistTour::Cycle {
+    let cycle = PlaylistCycle::Cycle {
         step_seconds: 20.0,
         fade_seconds: 1.5,
     }
     .to_lp_value();
     let skip = alloc::vec![3u32, 5].to_lp_value();
 
-    let mut harness = Harness::new("panel-persist-playlist-tour");
+    let mut harness = Harness::new("panel-persist-playlist-cycle");
     harness.load();
-    harness.write_panel_value("playlist.tour", tour.clone());
+    harness.write_panel_value("playlist.cycle", cycle.clone());
     harness.write_panel_value("playlist.skip", skip.clone());
     harness.advance(PANEL_STATE_WRITE_INTERVAL_MS);
 
@@ -308,8 +308,8 @@ fn a_playlist_tour_and_skip_list_survive_a_reboot() {
     assert_eq!(
         saved,
         [
+            (String::from("playlist.cycle"), cycle.clone()),
             (String::from("playlist.skip"), skip.clone()),
-            (String::from("playlist.tour"), tour.clone()),
         ]
     );
 
@@ -324,8 +324,8 @@ fn a_playlist_tour_and_skip_list_survive_a_reboot() {
     assert_eq!(
         restored,
         [
+            (String::from("playlist.cycle"), cycle),
             (String::from("playlist.skip"), skip),
-            (String::from("playlist.tour"), tour),
         ],
         "both writers are back before the first frame"
     );

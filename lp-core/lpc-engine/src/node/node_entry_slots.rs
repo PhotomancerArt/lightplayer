@@ -4,7 +4,7 @@
 //! [`NodeId`]. Ids are never reused, so every removed node left a `None`
 //! tombstone behind for good, and dormant playlist entries — which remove
 //! and re-attach a subtree on every pattern switch — would have grown it
-//! without bound over a tour
+//! without bound over a cycle
 //! (`docs/defects/2026-09-25-node-tree-tombstones-grow-per-reload.md`).
 //!
 //! Here a removed entry is dropped with its slot, so storage tracks the live

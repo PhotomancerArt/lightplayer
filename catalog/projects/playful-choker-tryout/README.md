@@ -40,11 +40,11 @@ each entry remembers its own knob values once you change them (the
 remembered values are per entry, not per module), so the second stop is the
 place to keep a second setting of a pattern you like.
 
-## The tour
+## The cycle
 
-It tours by default: `"tour": { "kind": "cycle", "step_seconds": 30,
+It cycles by default: `"cycle": { "kind": "cycle", "step_seconds": 30,
 "fade_seconds": 1.5 }` on the playlist. Every entry plays 30 s and hands
-over with a 1.5 s fade, in entry order, and wraps. The tour follows the
+over with a 1.5 s fade, in entry order, and wraps. The cycle follows the
 clock, so the clock's speed and pause move it too.
 
 A switch holds the last frame the choker showed, unloads the pattern that
@@ -56,16 +56,16 @@ into it. The lamps never go dark.
 In Studio, connected to the choker, open **Play**. The **Pattern** row lists
 the 25 names:
 
-- **tap a name** to play it now; while touring, the tour carries on from
+- **tap a name** to play it now; while cycling, the cycle carries on from
   there;
-- **the tour switch** turns the tour off (hold the current pattern) or back
+- **the cycle switch** turns the cycle off (hold the current pattern) or back
   on, and its step sets the seconds per pattern;
-- **the per-pattern switch** takes a pattern out of the tour (it can still
+- **the per-pattern switch** takes a pattern out of the cycle (it can still
   be tapped);
 - **next / previous** step through the list.
 
 These are remembered on the choker, like the other knobs. The authored
-defaults in `playlist.json` (tour on, 30 s, nothing skipped) are what a
+defaults in `playlist.json` (cycle on, 30 s, nothing skipped) are what a
 fresh upload starts from.
 
 There is no button on the choker (the playlist's `trigger` input is left
@@ -89,15 +89,15 @@ post-deploy check, and leaves:
 | when | free heap | largest free block |
 |---|---|---|
 | after the first shader compiles | 105,456 B | 76,980 B |
-| after 7 tour switches (lowest seen) | 91,284 B | 56,750 B |
-| after 7 tour switches (at the end) | 98,400 B | 66,304 B |
+| after 7 cycle switches (lowest seen) | 91,284 B | 56,750 B |
+| after 7 cycle switches (at the end) | 98,400 B | 66,304 B |
 
-The full method, and a heap trace across two full tours, are in
+The full method, and a heap trace across two full cycles, are in
 `docs/reports/2026-09-25-dormant-playlist-entries-proof.md`.
 
 ## What it needs
 
-Firmware with dormant playlist entries and touring (the
+Firmware with dormant playlist entries and cycling (the
 multi-pattern-projects work) and the pattern-space rule (`"coords":
 "pattern"`). Older firmware loads every entry at once and will not fit 25.
 Flash a current build, e.g. `just flash-fw-esp32c6 <port>`, then push the

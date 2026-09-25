@@ -1,4 +1,4 @@
-//! The [`PlaylistTour`] value: how a playlist walks its entries over time.
+//! The [`PlaylistCycle`] value: how a playlist walks its entries over time.
 //!
 //! It is the palette's `Static | Cycle` ([`crate::GradientConfig`]) for
 //! patterns (multi-pattern vision D13), and it follows the same rules:
@@ -8,8 +8,8 @@
 //!   value only says how fast to walk and how long each hand-off fades.
 //! - **`step_seconds <= 0` (or non-finite) is frozen**, the same rule and
 //!   the same words as [`crate::GradientConfig::is_frozen`]:
-//!   [`PlaylistTour::is_frozen`] is the one place it lives here. A frozen
-//!   tour behaves exactly like [`PlaylistTour::Hold`] — the playlist's
+//!   [`PlaylistCycle::is_frozen`] is the one place it lives here. A frozen
+//!   cycle behaves exactly like [`PlaylistCycle::Hold`] — the playlist's
 //!   idle entry, triggers and per-entry durations, unchanged (vision D17).
 //!
 //! Storage is a flattened record, because [`LpValue`] has no union: both
@@ -17,7 +17,7 @@
 //! (hold ⇒ zero timings).
 //!
 //! ```json
-//! "tour": { "kind": "cycle", "step_seconds": 20, "fade_seconds": 1.5 }
+//! "cycle": { "kind": "cycle", "step_seconds": 20, "fade_seconds": 1.5 }
 //! ```
 
 use alloc::string::{String, ToString};
@@ -31,24 +31,24 @@ use crate::{
     ValueEditorHint, ValueRootError,
 };
 
-/// Native shape name for [`PlaylistTour`].
-pub const PLAYLIST_TOUR_SHAPE_NAME: &str = "lp::playlist::PlaylistTour";
+/// Native shape name for [`PlaylistCycle`].
+pub const PLAYLIST_CYCLE_SHAPE_NAME: &str = "lp::playlist::PlaylistCycle";
 
-/// The record name [`PlaylistTour`] storage carries.
-const STRUCT_NAME: &str = "PlaylistTour";
+/// The record name [`PlaylistCycle`] storage carries.
+const STRUCT_NAME: &str = "PlaylistCycle";
 
-/// Wire tag for [`PlaylistTour::Hold`] in [`LpValue`] storage.
+/// Wire tag for [`PlaylistCycle::Hold`] in [`LpValue`] storage.
 const HOLD_KIND_TAG: &str = "hold";
 
-/// Wire tag for [`PlaylistTour::Cycle`] in [`LpValue`] storage.
+/// Wire tag for [`PlaylistCycle::Cycle`] in [`LpValue`] storage.
 const CYCLE_KIND_TAG: &str = "cycle";
 
 /// How a playlist walks its entries over time — the palette's
 /// Static|Cycle, for patterns (vision D13).
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
-pub enum PlaylistTour {
+pub enum PlaylistCycle {
     /// Stay where the playlist is: the idle entry, triggers and per-entry
-    /// durations, exactly as a playlist without a tour behaves.
+    /// durations, exactly as a playlist without a cycle behaves.
     #[default]
     Hold,
     /// Walk every enabled entry in key order, one step each, wrapping.
@@ -61,10 +61,10 @@ pub enum PlaylistTour {
     },
 }
 
-impl PlaylistTour {
-    /// Whether this tour holds still.
+impl PlaylistCycle {
+    /// Whether this cycle holds still.
     ///
-    /// [`PlaylistTour::Hold`] always does; a cycle does when its step is
+    /// [`PlaylistCycle::Hold`] always does; a cycle does when its step is
     /// non-positive or non-finite. The one place the frozen rule is decided
     /// for playlists — everything downstream asks here.
     #[must_use]
@@ -94,7 +94,7 @@ impl PlaylistTour {
     }
 }
 
-impl ToLpValue for PlaylistTour {
+impl ToLpValue for PlaylistCycle {
     fn to_lp_value(&self) -> LpValue {
         let (kind, step_seconds, fade_seconds) = match self {
             Self::Hold => (HOLD_KIND_TAG, 0.0, 0.0),
@@ -114,13 +114,13 @@ impl ToLpValue for PlaylistTour {
     }
 }
 
-impl FromLpValue for PlaylistTour {
+impl FromLpValue for PlaylistCycle {
     fn from_lp_value(value: &LpValue) -> Result<Self, ValueRootError> {
         let LpValue::Struct { name, fields } = value else {
-            return Err(ValueRootError::new("expected PlaylistTour struct"));
+            return Err(ValueRootError::new("expected PlaylistCycle struct"));
         };
         if name.as_deref() != Some(STRUCT_NAME) || fields.len() != 3 {
-            return Err(ValueRootError::new("expected PlaylistTour struct"));
+            return Err(ValueRootError::new("expected PlaylistCycle struct"));
         }
         let kind: String = read_field(fields, 0, STRUCT_NAME, "kind")?;
         let step_seconds: f32 = read_field(fields, 1, STRUCT_NAME, "step_seconds")?;
@@ -132,13 +132,13 @@ impl FromLpValue for PlaylistTour {
                 fade_seconds,
             }),
             other => Err(ValueRootError::new(alloc::format!(
-                "unknown PlaylistTour.kind {other:?}"
+                "unknown PlaylistCycle.kind {other:?}"
             ))),
         }
     }
 }
 
-const PLAYLIST_TOUR_STATIC_TYPE: StaticLpType = StaticLpType::Struct {
+const PLAYLIST_CYCLE_STATIC_TYPE: StaticLpType = StaticLpType::Struct {
     name: Some(STRUCT_NAME),
     fields: &[
         StaticModelStructMember {
@@ -156,17 +156,17 @@ const PLAYLIST_TOUR_STATIC_TYPE: StaticLpType = StaticLpType::Struct {
     ],
 };
 
-const PLAYLIST_TOUR_STATIC_META: StaticSlotMeta = StaticSlotMeta {
-    label: Some("Tour"),
+const PLAYLIST_CYCLE_STATIC_META: StaticSlotMeta = StaticSlotMeta {
+    label: Some("Cycle"),
     description: Some(
         "Hold, or cycle through the enabled entries: seconds per entry and the fade between them.",
     ),
     unit: None,
 };
 
-/// The canonical [`PlaylistTour`] storage recipe.
+/// The canonical [`PlaylistCycle`] storage recipe.
 #[must_use]
-pub fn playlist_tour_lp_type() -> LpType {
+pub fn playlist_cycle_lp_type() -> LpType {
     LpType::Struct {
         name: Some(STRUCT_NAME.to_string()),
         fields: Vec::from([
@@ -186,23 +186,23 @@ pub fn playlist_tour_lp_type() -> LpType {
     }
 }
 
-impl SlotValue for PlaylistTour {
-    const SHAPE_ID: SlotShapeId = SlotShapeId::from_static_name(PLAYLIST_TOUR_SHAPE_NAME);
+impl SlotValue for PlaylistCycle {
+    const SHAPE_ID: SlotShapeId = SlotShapeId::from_static_name(PLAYLIST_CYCLE_SHAPE_NAME);
     const STATIC_VALUE_SHAPE_DESCRIPTOR: Option<StaticSlotValueShape> =
         Some(StaticSlotValueShape {
-            id: <PlaylistTour as SlotValue>::SHAPE_ID,
-            ty: PLAYLIST_TOUR_STATIC_TYPE,
-            meta: PLAYLIST_TOUR_STATIC_META,
+            id: <PlaylistCycle as SlotValue>::SHAPE_ID,
+            ty: PLAYLIST_CYCLE_STATIC_TYPE,
+            meta: PLAYLIST_CYCLE_STATIC_META,
             editor: StaticValueEditorHint::Plain,
         });
 
     fn value_shape() -> SlotValueShape {
         SlotValueShape {
-            id: <PlaylistTour as SlotValue>::SHAPE_ID,
-            ty: playlist_tour_lp_type(),
+            id: <PlaylistCycle as SlotValue>::SHAPE_ID,
+            ty: playlist_cycle_lp_type(),
             meta: SlotMeta {
-                label: PLAYLIST_TOUR_STATIC_META.label.map(ToString::to_string),
-                description: PLAYLIST_TOUR_STATIC_META
+                label: PLAYLIST_CYCLE_STATIC_META.label.map(ToString::to_string),
+                description: PLAYLIST_CYCLE_STATIC_META
                     .description
                     .map(ToString::to_string),
                 unit: None,
@@ -212,14 +212,14 @@ impl SlotValue for PlaylistTour {
     }
 }
 
-impl StaticSlotShape for PlaylistTour {
+impl StaticSlotShape for PlaylistCycle {
     const SHAPE_ID: SlotShapeId = <Self as SlotValue>::SHAPE_ID;
     const STATIC_SLOT_SHAPE_DESCRIPTOR: Option<&'static StaticSlotShapeDescriptor> =
         Some(&StaticSlotShapeDescriptor::Value {
             shape: StaticSlotValueShape {
-                id: <PlaylistTour as SlotValue>::SHAPE_ID,
-                ty: PLAYLIST_TOUR_STATIC_TYPE,
-                meta: PLAYLIST_TOUR_STATIC_META,
+                id: <PlaylistCycle as SlotValue>::SHAPE_ID,
+                ty: PLAYLIST_CYCLE_STATIC_TYPE,
+                meta: PLAYLIST_CYCLE_STATIC_META,
                 editor: StaticValueEditorHint::Plain,
             },
         });
@@ -229,7 +229,7 @@ impl StaticSlotShape for PlaylistTour {
     }
 
     fn shape_name() -> Option<&'static str> {
-        Some(PLAYLIST_TOUR_SHAPE_NAME)
+        Some(PLAYLIST_CYCLE_SHAPE_NAME)
     }
 }
 
@@ -237,8 +237,8 @@ impl StaticSlotShape for PlaylistTour {
 mod tests {
     use super::*;
 
-    fn cycle(step_seconds: f32) -> PlaylistTour {
-        PlaylistTour::Cycle {
+    fn cycle(step_seconds: f32) -> PlaylistCycle {
+        PlaylistCycle::Cycle {
             step_seconds,
             fade_seconds: 0.5,
         }
@@ -246,10 +246,10 @@ mod tests {
 
     #[test]
     fn the_default_is_hold_and_hold_is_frozen() {
-        assert_eq!(PlaylistTour::default(), PlaylistTour::Hold);
-        assert!(PlaylistTour::Hold.is_frozen());
-        assert_eq!(PlaylistTour::Hold.running_step_seconds(), None);
-        assert_eq!(PlaylistTour::Hold.fade_seconds(), 0.0);
+        assert_eq!(PlaylistCycle::default(), PlaylistCycle::Hold);
+        assert!(PlaylistCycle::Hold.is_frozen());
+        assert_eq!(PlaylistCycle::Hold.running_step_seconds(), None);
+        assert_eq!(PlaylistCycle::Hold.fade_seconds(), 0.0);
     }
 
     #[test]
@@ -270,10 +270,10 @@ mod tests {
 
     #[test]
     fn both_variants_round_trip_through_lp_value() {
-        for tour in [PlaylistTour::Hold, cycle(2.0), cycle(0.0)] {
+        for cycle in [PlaylistCycle::Hold, cycle(2.0), cycle(0.0)] {
             assert_eq!(
-                PlaylistTour::from_lp_value(&tour.to_lp_value()).unwrap(),
-                tour
+                PlaylistCycle::from_lp_value(&cycle.to_lp_value()).unwrap(),
+                cycle
             );
         }
     }
@@ -281,9 +281,9 @@ mod tests {
     #[test]
     fn storage_is_a_flattened_three_field_record() {
         let LpValue::Struct { name, fields } = cycle(8.0).to_lp_value() else {
-            panic!("PlaylistTour storage must be a Struct");
+            panic!("PlaylistCycle storage must be a Struct");
         };
-        assert_eq!(name.as_deref(), Some("PlaylistTour"));
+        assert_eq!(name.as_deref(), Some("PlaylistCycle"));
         assert_eq!(
             fields,
             Vec::from([
@@ -300,20 +300,20 @@ mod tests {
             unreachable!()
         };
         fields[0].1 = LpValue::String("shuffle".to_string());
-        let error = PlaylistTour::from_lp_value(&LpValue::Struct { name, fields }).unwrap_err();
+        let error = PlaylistCycle::from_lp_value(&LpValue::Struct { name, fields }).unwrap_err();
         assert!(error.message.contains("shuffle"), "{}", error.message);
     }
 
     #[test]
-    fn static_and_dynamic_playlist_tour_shapes_agree() {
-        let dynamic = <PlaylistTour as SlotValue>::value_shape();
+    fn static_and_dynamic_playlist_cycle_shapes_agree() {
+        let dynamic = <PlaylistCycle as SlotValue>::value_shape();
         let static_shape =
-            <PlaylistTour as SlotValue>::STATIC_VALUE_SHAPE_DESCRIPTOR.expect("static descriptor");
+            <PlaylistCycle as SlotValue>::STATIC_VALUE_SHAPE_DESCRIPTOR.expect("static descriptor");
 
         assert_eq!(static_shape.to_owned_value_shape(), dynamic);
         assert_eq!(
             dynamic.id,
-            SlotShapeId::from_static_name(PLAYLIST_TOUR_SHAPE_NAME)
+            SlotShapeId::from_static_name(PLAYLIST_CYCLE_SHAPE_NAME)
         );
     }
 }

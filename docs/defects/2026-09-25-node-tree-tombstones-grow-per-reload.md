@@ -9,9 +9,9 @@ related:
 ---
 # The node tree kept a tombstone for every removed node, so each reload grew it
 
-**Symptom** — found in planning, before any tour ran. Dormant playlist
+**Symptom** — found in planning, before any cycle ran. Dormant playlist
 entries remove the playing entry's subtree and attach the next one on
-every pattern switch, so a tour would grow the tree's slot storage by the
+every pattern switch, so a cycle would grow the tree's slot storage by the
 size of one subtree per switch, forever. The new test measures it on the
 host: three nodes attached and removed 100 times after a warm-up retained
 **145,152 B** more heap under the old storage, and **0 B** under the new

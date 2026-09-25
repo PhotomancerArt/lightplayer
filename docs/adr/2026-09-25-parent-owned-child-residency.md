@@ -69,7 +69,7 @@ The planning discovery (`lp2025/2026-09-24-2351-multi-pattern-projects`,
      re-derive, then remove the runtime subtree. The subtree's phasors, a
      removed clock's timebase and their scrub history leave with it, as does
      the entry's own sink-scope phasors (without that, a departed pattern's
-     phasors lingered 120 ticks, and heap over a tour depended on which ones
+     phasors lingered 120 ticks, and heap over a cycle depended on which ones
      had not expired yet).
    - **Then load**: registry re-derive, project the spine, attach the
      subtree, then re-wire the whole projection (asset consumers, every
@@ -106,7 +106,7 @@ The planning discovery (`lp2025/2026-09-24-2351-multi-pattern-projects`,
     (D11). A shader keeps its last good compiled program across a bad edit
     for as long as the node lives. A dormant entry has no node, so there is
     nothing to keep: its compiled code is freed with it, which is what stops
-    code piling up over a tour. And you have to load to edit: opening or
+    code piling up over a cycle. And you have to load to edit: opening or
     editing an entry in Studio loads and plays it, so an edit always lands on
     a live node and keep-last-good applies exactly as before.
 
@@ -132,21 +132,21 @@ The planning discovery (`lp2025/2026-09-24-2351-multi-pattern-projects`,
   being held. When both paths are in use, each holds its own frame.
 - **A failure marks the entry and moves on** (plan PD9). A load or compile
   failure marks that entry failed, the playlist moves to the next enabled
-  entry while still holding the frame, and the tour skips a failed entry
+  entry while still holding the frame, and the cycle skips a failed entry
   until the project reloads or the entry is edited. Activating a failed
   entry retries it, so fix-then-open works.
 - **`active_entry` names the loaded entry**: it moves to a new entry when
   that entry's child is live, not when the switch is decided.
-- **Touring** (D13, plan PD6, A1–A3): `tour` (`Hold` or `Cycle { step,
+- **Cycling** (D13, plan PD6, A1–A3): `cycle` (`Hold` or `Cycle { step,
   fade }`, step ≤ 0 frozen) and `skip` (a list of keys) are optional def
-  fields, consumed from `bus:playlist.tour` / `bus:playlist.skip`: the
+  fields, consumed from `bus:playlist.cycle` / `bus:playlist.skip`: the
   authored value is the default, a Play-mode panel write overrides it and
-  persists. The tour position is a pure function of the playlist's consumed
+  persists. The cycle position is a pure function of the playlist's consumed
   clock plus an anchor a pick, trigger or next/prev sets, so it follows the
-  clock's speed and pause. While touring, the idle entry is an ordinary stop;
-  with the tour off, idle and its triggers behave exactly as before (D17).
+  clock's speed and pause. While cycling, the idle entry is an ordinary stop;
+  with the cycle off, idle and its triggers behave exactly as before (D17).
   Next/prev are trigger ids on the playlist (D20).
-- **Absent is typed.** "Nothing authored and nothing written" for `tour` and
+- **Absent is typed.** "Nothing authored and nothing written" for `cycle` and
   `skip` is an allocation-free `ResolveError::is_absent_option`, remembered
   by the resolver until the graph changes shape, not a matched error string
   (the fixture's `power` and the shader's float-mode pin read the same way).
@@ -169,15 +169,15 @@ The planning discovery (`lp2025/2026-09-24-2351-multi-pattern-projects`,
   `docs/reports/2026-09-25-dormant-playlist-entries-proof.md`):
   - a dormant entry costs **343 B** of heap at load, against ~17.6 KB loaded
     (fw-emu `lp-cli profile --mode startup`, 5 vs 25 entries);
-  - retained heap after a second full 25-entry tour equals the first to the
+  - retained heap after a second full 25-entry cycle equals the first to the
     byte (**0 B**; fw-emu, after the phasor fix);
-  - the 25-entry tryout uploads and tours on `lp-emu:esp32c6:t1` with
+  - the 25-entry tryout uploads and cycles on `lp-emu:esp32c6:t1` with
     105,456 B free after the first compile and 91,284 B at its lowest;
   - a switch shows a pause of about **190 ms** (emulated t1: ~150 ms unload
     and load, one held frame, ~40 ms compile). It reads as a pause, not a
     blackout, because the held frame stays up.
 - **The flash cost** of the whole mechanism on the C6 image is about 32 KB
-  (residency +14.6 KB, the switch +6.9 KB, touring +7.2 KB, the typed absent
+  (residency +14.6 KB, the switch +6.9 KB, cycling +7.2 KB, the typed absent
   read +3.1 KB); headroom stays above 240 KB against the 64 KB floor. The
   residency step was not audited for duplicate monomorphizations.
 - **A triggered entry pays a load and a compile on every trigger** (A6).
@@ -224,7 +224,7 @@ The planning discovery (`lp2025/2026-09-24-2351-multi-pattern-projects`,
   entry, parents other than Playlist, and sending the dormancy reason over
   the wire are the vision's future work.
 - The per-node overhead trim (D18) is its own plan.
-- Two playlists in one module share one `playlist.tour` / `playlist.skip`
+- Two playlists in one module share one `playlist.cycle` / `playlist.skip`
   pair.
 - An absent option read through a compiled def-view reader still formats a
   `NodeError` per read; only the by-path reads are allocation-free.

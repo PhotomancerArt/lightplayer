@@ -88,7 +88,7 @@ fn checked_in_catalog_entries_rewrite_byte_identically() -> Result<()> {
     Ok(())
 }
 
-/// The playlist's additive fields (`tour`, `skip`, `next_trigger_ids`,
+/// The playlist's additive fields (`cycle`, `skip`, `next_trigger_ids`,
 /// `prev_trigger_ids`, multi-pattern plan P5) never reach a checked-in
 /// playlist that did not author them: the canonical rewrite of every one
 /// carries none of their keys, and rewriting it again is byte-identical.
@@ -100,11 +100,11 @@ fn checked_in_catalog_entries_rewrite_byte_identically() -> Result<()> {
 /// P5 also checked, by building the model before and after its fields, that
 /// the rewrite of every file below is the same bytes on both sides.
 #[test]
-fn checked_in_playlists_never_gain_the_tour_fields() -> Result<()> {
+fn checked_in_playlists_never_gain_the_cycle_fields() -> Result<()> {
     use lpc_model::{NodeDef, SlotShapeRegistry};
 
-    const TOUR_KEYS: [&str; 4] = [
-        "\"tour\"",
+    const CYCLE_KEYS: [&str; 4] = [
+        "\"cycle\"",
         "\"skip\"",
         "\"next_trigger_ids\"",
         "\"prev_trigger_ids\"",
@@ -145,7 +145,7 @@ fn checked_in_playlists_never_gain_the_tour_fields() -> Result<()> {
                     continue;
                 }
             };
-            for key in TOUR_KEYS {
+            for key in CYCLE_KEYS {
                 if !text.contains(key) && first.contains(key) {
                     failures.push(format!("{rel}: the rewrite gained {key}"));
                 }
@@ -166,7 +166,7 @@ fn checked_in_playlists_never_gain_the_tour_fields() -> Result<()> {
     }
     if !failures.is_empty() {
         anyhow::bail!(
-            "checked-in playlists changed under the tour fields:\n{}",
+            "checked-in playlists changed under the cycle fields:\n{}",
             failures.join("\n")
         );
     }

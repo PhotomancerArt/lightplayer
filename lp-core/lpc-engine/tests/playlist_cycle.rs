@@ -1,4 +1,4 @@
-//! Touring and next/prev, end to end (multi-pattern plan P5, vision D13,
+//! Cycling and next/prev, end to end (multi-pattern plan P5, vision D13,
 //! D17, D20; plan A1–A3).
 //!
 //! A real project (clock → playlist → fixture → output, the fixture being
@@ -13,7 +13,7 @@
 //! broken (a `ref` to a missing file).
 //!
 //! ```bash
-//! cargo test -p lpc-engine --test playlist_tour -- --nocapture
+//! cargo test -p lpc-engine --test playlist_cycle -- --nocapture
 //! ```
 
 use std::rc::Rc;
@@ -25,7 +25,7 @@ use lpc_hardware::{
     HardwareSystem, HwAddress, HwRegistry, VirtualButtonDriver, default_esp32c6_hardware_manifest,
 };
 use lpc_model::{
-    ChannelName, LpValue, NodeId, NodeRuntimeStatus, NodeUseLocation, PlaylistTour, SlotPath,
+    ChannelName, LpValue, NodeId, NodeRuntimeStatus, NodeUseLocation, PlaylistCycle, SlotPath,
     ToLpValue, TreePath,
 };
 use lpc_wire::WireNodeCommand;
@@ -49,7 +49,7 @@ const HALF_SECOND: usize = 32;
 #[test]
 fn a_cycle_walks_the_entries_in_key_order_and_wraps() {
     let mut show = Show::boot(Authored {
-        tour: r#""tour": { "kind": "cycle", "step_seconds": 0.5, "fade_seconds": 0.1 },"#,
+        cycle: r#""cycle": { "kind": "cycle", "step_seconds": 0.5, "fade_seconds": 0.1 },"#,
         ..Authored::default()
     });
 
@@ -71,7 +71,7 @@ fn a_cycle_walks_the_entries_in_key_order_and_wraps() {
 #[test]
 fn a_cycle_passes_over_skipped_and_failed_entries() {
     let mut show = Show::boot(Authored {
-        tour: r#""tour": { "kind": "cycle", "step_seconds": 0.5, "fade_seconds": 0.1 },"#,
+        cycle: r#""cycle": { "kind": "cycle", "step_seconds": 0.5, "fade_seconds": 0.1 },"#,
         skip: r#""skip": [3],"#,
         broken_entry: true,
         ..Authored::default()
@@ -94,9 +94,9 @@ fn a_cycle_passes_over_skipped_and_failed_entries() {
 }
 
 #[test]
-fn a_pick_while_touring_jumps_and_the_tour_carries_on_from_it() {
+fn a_pick_while_cycling_jumps_and_the_cycle_carries_on_from_it() {
     let mut show = Show::boot(Authored {
-        tour: r#""tour": { "kind": "cycle", "step_seconds": 0.5, "fade_seconds": 0.1 },"#,
+        cycle: r#""cycle": { "kind": "cycle", "step_seconds": 0.5, "fade_seconds": 0.1 },"#,
         ..Authored::default()
     });
     // A quarter of the way into green's step.
@@ -121,21 +121,21 @@ fn a_pick_while_touring_jumps_and_the_tour_carries_on_from_it() {
     );
 }
 
-/// A held, frozen or absent tour is the playlist exactly as before P5: the
+/// A held, frozen or absent cycle is the playlist exactly as before P5: the
 /// idle entry stays, an activate (a trigger's twin) plays its entry for its
 /// duration, the timed advance walks the later entries, and the playlist
 /// returns to idle.
 #[test]
-fn frozen_hold_and_absent_tours_play_the_playlist_as_before() {
+fn frozen_hold_and_absent_cycles_play_the_playlist_as_before() {
     let mut runs = Vec::new();
-    for tour in [
+    for cycle in [
         "",
-        r#""tour": { "kind": "hold", "step_seconds": 0, "fade_seconds": 0 },"#,
-        r#""tour": { "kind": "cycle", "step_seconds": 0, "fade_seconds": 0.1 },"#,
-        r#""tour": { "kind": "cycle", "step_seconds": -1, "fade_seconds": 0.1 },"#,
+        r#""cycle": { "kind": "hold", "step_seconds": 0, "fade_seconds": 0 },"#,
+        r#""cycle": { "kind": "cycle", "step_seconds": 0, "fade_seconds": 0.1 },"#,
+        r#""cycle": { "kind": "cycle", "step_seconds": -1, "fade_seconds": 0.1 },"#,
     ] {
         let mut show = Show::boot(Authored {
-            tour,
+            cycle,
             durations: true,
             ..Authored::default()
         });
@@ -144,8 +144,8 @@ fn frozen_hold_and_absent_tours_play_the_playlist_as_before() {
         let triggered = show.run(HALF_SECOND * 6);
         let mut frames = resting;
         frames.extend(triggered);
-        println!("tour {tour:?}: {:?}", visited(&frames));
-        runs.push((tour, frames));
+        println!("cycle {cycle:?}: {:?}", visited(&frames));
+        runs.push((cycle, frames));
     }
 
     let (_, absent) = &runs[0];
@@ -154,28 +154,28 @@ fn frozen_hold_and_absent_tours_play_the_playlist_as_before() {
         [IDLE, GREEN, BLUE, RED, IDLE],
         "idle rests; each entry plays its duration; back to idle"
     );
-    for (tour, frames) in &runs[1..] {
+    for (cycle, frames) in &runs[1..] {
         assert_eq!(
             frames, absent,
-            "tour {tour:?} must be frame-for-frame the playlist without a tour"
+            "cycle {cycle:?} must be frame-for-frame the playlist without a cycle"
         );
     }
 }
 
-/// The tour follows the clock (plan A3): at rate 2× a step takes half the
-/// frames, and a paused clock holds the tour where it is.
+/// The cycle follows the clock (plan A3): at rate 2× a step takes half the
+/// frames, and a paused clock holds the cycle where it is.
 #[test]
-fn the_tour_follows_the_clock_rate_and_pause() {
-    let tour = r#""tour": { "kind": "cycle", "step_seconds": 1.0, "fade_seconds": 0.1 },"#;
+fn the_cycle_follows_the_clock_rate_and_pause() {
+    let cycle = r#""cycle": { "kind": "cycle", "step_seconds": 1.0, "fade_seconds": 0.1 },"#;
 
     let mut normal = Show::boot(Authored {
-        tour,
+        cycle,
         ..Authored::default()
     });
     let normal_frames = normal.run(HALF_SECOND * 9);
 
     let mut fast = Show::boot(Authored {
-        tour,
+        cycle,
         ..Authored::default()
     });
     fast.clock_write("clock.rate", LpValue::F32(2.0));
@@ -207,7 +207,7 @@ fn the_tour_follows_the_clock_rate_and_pause() {
     let paused = fast.run(HALF_SECOND * 8);
     assert!(
         paused.iter().all(|loaded| *loaded == [playing]),
-        "a paused clock freezes the tour on {playing}: {:?}",
+        "a paused clock freezes the cycle on {playing}: {:?}",
         visited(&paused)
     );
     fast.clock_write(
@@ -218,32 +218,32 @@ fn the_tour_follows_the_clock_rate_and_pause() {
     assert!(resumed.len() > 1, "playing again, it moves on: {resumed:?}");
 }
 
-/// With the tour on, the idle entry is an ordinary stop the tour moves on
+/// With the cycle on, the idle entry is an ordinary stop the cycle moves on
 /// from (plan A2); with it off, the playlist rests on idle as always.
 #[test]
-fn idle_is_an_ordinary_stop_while_touring() {
-    let mut touring = Show::boot(Authored {
-        tour: r#""tour": { "kind": "cycle", "step_seconds": 0.5, "fade_seconds": 0.1 },"#,
+fn idle_is_an_ordinary_stop_while_cycling() {
+    let mut cycling = Show::boot(Authored {
+        cycle: r#""cycle": { "kind": "cycle", "step_seconds": 0.5, "fade_seconds": 0.1 },"#,
         ..Authored::default()
     });
-    let walk = touring.visited(HALF_SECOND * 11);
+    let walk = cycling.visited(HALF_SECOND * 11);
     assert_eq!(
         walk.iter().filter(|entry| **entry == IDLE).count(),
         3,
         "idle is visited each pass and left each time: {walk:?}"
     );
-    assert_ne!(walk.last(), Some(&IDLE), "the tour never rests on idle");
+    assert_ne!(walk.last(), Some(&IDLE), "the cycle never rests on idle");
 
     let mut resting = Show::boot(Authored::default());
     assert_eq!(resting.visited(HALF_SECOND * 11), [IDLE]);
 }
 
 /// Both Play-mode controls take a panel write over the authored default
-/// (plan A1): the skip list, and the tour itself.
+/// (plan A1): the skip list, and the cycle itself.
 #[test]
 fn an_authored_skip_is_honoured_and_a_panel_write_overrides_it() {
     let mut show = Show::boot(Authored {
-        tour: r#""tour": { "kind": "cycle", "step_seconds": 0.5, "fade_seconds": 0.1 },"#,
+        cycle: r#""cycle": { "kind": "cycle", "step_seconds": 0.5, "fade_seconds": 0.1 },"#,
         skip: r#""skip": [2, 3],"#,
         ..Authored::default()
     });
@@ -259,8 +259,8 @@ fn an_authored_skip_is_honoured_and_a_panel_write_overrides_it() {
         "the panel's list replaces the authored one: {overridden:?}"
     );
 
-    // The tour, too: a panel hold stops the walk where it is.
-    show.playlist_write("playlist.tour", PlaylistTour::Hold.to_lp_value());
+    // The cycle, too: a panel hold stops the walk where it is.
+    show.playlist_write("playlist.cycle", PlaylistCycle::Hold.to_lp_value());
     let held = visited(&show.run(HALF_SECOND * 6));
     assert!(held.len() <= 2, "held: {held:?}");
 }
@@ -269,7 +269,7 @@ fn an_authored_skip_is_honoured_and_a_panel_write_overrides_it() {
 #[test]
 fn skipping_the_playing_entry_waits_for_the_next_step() {
     let mut show = Show::boot(Authored {
-        tour: r#""tour": { "kind": "cycle", "step_seconds": 0.5, "fade_seconds": 0.1 },"#,
+        cycle: r#""cycle": { "kind": "cycle", "step_seconds": 0.5, "fade_seconds": 0.1 },"#,
         ..Authored::default()
     });
     show.visited(HALF_SECOND + 4);
@@ -292,7 +292,7 @@ fn skipping_the_playing_entry_waits_for_the_next_step() {
 #[test]
 fn skipping_every_entry_holds_the_current_one() {
     let mut show = Show::boot(Authored {
-        tour: r#""tour": { "kind": "cycle", "step_seconds": 0.5, "fade_seconds": 0.1 },"#,
+        cycle: r#""cycle": { "kind": "cycle", "step_seconds": 0.5, "fade_seconds": 0.1 },"#,
         skip: r#""skip": [1, 2, 3, 4],"#,
         ..Authored::default()
     });
@@ -300,7 +300,7 @@ fn skipping_every_entry_holds_the_current_one() {
 }
 
 /// A `Button` → `bus:trigger` wiring (the fyeah-sign pattern) steps through
-/// the entries with `next_trigger_ids` / `prev_trigger_ids`, with the tour
+/// the entries with `next_trigger_ids` / `prev_trigger_ids`, with the cycle
 /// off — and passes over a skipped entry.
 #[test]
 fn next_and_prev_buttons_step_through_the_entries() {
@@ -325,20 +325,20 @@ fn next_and_prev_buttons_step_through_the_entries() {
 }
 
 /// Nothing authored and nothing written costs a steady frame nothing that an
-/// authored tour and skip list do not: "absent" is recognised by type, not by
+/// authored cycle and skip list do not: "absent" is recognised by type, not by
 /// formatting and searching an error message every frame per playlist.
 #[test]
-fn an_absent_tour_and_skip_cost_a_steady_frame_nothing_extra() {
+fn an_absent_cycle_and_skip_cost_a_steady_frame_nothing_extra() {
     let mut per_frame = Vec::new();
-    for (tour, skip) in [
+    for (cycle, skip) in [
         ("", ""),
         (
-            r#""tour": { "kind": "hold", "step_seconds": 0, "fade_seconds": 0 },"#,
+            r#""cycle": { "kind": "hold", "step_seconds": 0, "fade_seconds": 0 },"#,
             r#""skip": [],"#,
         ),
     ] {
         let mut show = Show::boot(Authored {
-            tour,
+            cycle,
             skip,
             ..Authored::default()
         });
@@ -354,7 +354,7 @@ fn an_absent_tour_and_skip_cost_a_steady_frame_nothing_extra() {
     println!("allocations over {HALF_SECOND} steady frames, absent vs authored: {per_frame:?}");
     assert!(
         per_frame[0] <= per_frame[1],
-        "an absent tour and skip list must allocate nothing an authored one does not: \
+        "an absent cycle and skip list must allocate nothing an authored one does not: \
          {per_frame:?}"
     );
 }
@@ -364,8 +364,8 @@ fn an_absent_tour_and_skip_cost_a_steady_frame_nothing_extra() {
 /// What a test authors on the playlist.
 #[derive(Default)]
 struct Authored {
-    /// A `"tour": …,` line, or nothing.
-    tour: &'static str,
+    /// A `"cycle": …,` line, or nothing.
+    cycle: &'static str,
     /// A `"skip": […],` line, or nothing.
     skip: &'static str,
     /// Green, blue and red play 0.5 s each (the timed advance).
@@ -390,9 +390,9 @@ impl Show {
         hardware.add_button_driver(Box::new(driver));
         let hardware = Rc::new(hardware);
         let button_service: Rc<dyn ButtonService> = hardware.clone();
-        let mut services = EngineServices::new(TreePath::parse("/tour.show").expect("path"));
+        let mut services = EngineServices::new(TreePath::parse("/cycle.show").expect("path"));
         services.set_button_service(Some(button_service));
-        let mut rt = ProjectLoader::load_from_root(&fs, services).expect("load tour project");
+        let mut rt = ProjectLoader::load_from_root(&fs, services).expect("load cycle project");
         rt.engine_mut().set_graphics(Some(std::sync::Arc::new(
             lp_gfx_lpvm::TargetLpvmGraphics::new(lp_shader::ShaderFrontend::LpsGlsl),
         )));
@@ -578,7 +578,7 @@ fn project_fs(authored: &Authored) -> LpFsMemory {
   }},
   "idle_entry": 1,
   "default_fade": 0.1,
-  {tour}
+  {cycle}
   {skip}
   "next_trigger_ids": [7],
   "prev_trigger_ids": [8],
@@ -589,7 +589,7 @@ fn project_fs(authored: &Authored) -> LpFsMemory {
     "4": {{ "name": "red", {duration}"node": {{ "ref": "./red.json" }} }}{broken}
   }}
 }}"#,
-            tour = authored.tour,
+            cycle = authored.cycle,
             skip = authored.skip,
         )
         .as_bytes(),

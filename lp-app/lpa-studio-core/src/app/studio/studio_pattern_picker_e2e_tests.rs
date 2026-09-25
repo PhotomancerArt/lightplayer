@@ -13,7 +13,7 @@
 //! - the Play-mode order: shared knobs, then the Pattern group, then the
 //!   playing pattern's own knobs — and those knobs are the pattern MODULE's
 //!   (director ruling 2);
-//! - tap, next/prev, on/off and the tour switch all reach the device and
+//! - tap, next/prev, on/off and the cycle switch all reach the device and
 //!   read back;
 //! - a pattern that fails to compile reads Failed, through the warning the
 //!   engine writes with `lpc_model`'s formatter (director ruling 1).
@@ -25,7 +25,7 @@ use std::sync::Arc;
 
 use lp_gfx_lpvm::TargetLpvmGraphics;
 use lpa_server::{LpGraphics, LpServer};
-use lpc_model::{AsLpPath, PlaylistTour};
+use lpc_model::{AsLpPath, PlaylistCycle};
 use lpc_shared::output::MemoryOutputProvider;
 use lpfs::LpFsMemory;
 
@@ -82,16 +82,16 @@ fn the_pattern_instrument_sits_between_the_shared_knobs_and_the_patterns_own() {
          reads), dormant ones included, in key order"
     );
     assert_eq!(picker.active, Some(1));
-    assert_eq!(picker.tour, PlaylistTour::Hold, "nothing authored: hold");
-    let tour_target = picker
-        .tour_target
+    assert_eq!(picker.cycle, PlaylistCycle::Hold, "nothing authored: hold");
+    let cycle_target = picker
+        .cycle_target
         .clone()
-        .expect("the tour is on a channel");
-    assert_eq!(tour_target.channel, lpc_model::PLAYLIST_TOUR_CHANNEL);
+        .expect("the cycle is on a channel");
+    assert_eq!(cycle_target.channel, lpc_model::PLAYLIST_CYCLE_CHANNEL);
     let skip_target = picker.skip_target.clone().expect("so is the skip list");
     assert_eq!(skip_target.channel, lpc_model::PLAYLIST_SKIP_CHANNEL);
     assert_eq!(
-        tour_target.scope,
+        cycle_target.scope,
         root_panel(&view).target.expect("the root panel's scope"),
         "the playlist's channels live in the module that holds it"
     );
@@ -139,7 +139,7 @@ fn the_pattern_instruments_gestures_drive_the_real_playlist() {
     );
     assert_eq!(activated(picker(&view).prev.as_ref().expect("prev")), 1);
 
-    // -- on/off: switch Scanner off; the tour and next pass it by ---------
+    // -- on/off: switch Scanner off; the cycle and next pass it by ---------
     let toggle = picker(&view).entries[2].toggle.clone().expect("a switch");
     let op = toggle
         .op_as::<PanelWriteOp>()
@@ -176,14 +176,14 @@ fn the_pattern_instruments_gestures_drive_the_real_playlist() {
         "a held switch set holds the instrument, so the panel's reset sees it"
     );
 
-    // -- tour: switch it on; the playlist reads it back -------------------
-    let tour = picker_now.tour_toggle.clone().expect("a tour switch");
-    session.act(tour);
-    session.refresh_until("the tour runs", |view| picker(view).touring());
+    // -- cycle: switch it on; the playlist reads it back -------------------
+    let cycle = picker_now.cycle_toggle.clone().expect("a cycle switch");
+    session.act(cycle);
+    session.refresh_until("the cycle runs", |view| picker(view).cycling());
     let picker_now = picker(&session.view);
     assert_eq!(
-        picker_now.tour,
-        PlaylistTour::Cycle {
+        picker_now.cycle,
+        PlaylistCycle::Cycle {
             step_seconds: 20.0,
             fade_seconds: 0.25,
         },

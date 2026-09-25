@@ -1,21 +1,21 @@
 //! An unloaded entry's phasors leave with it (multi-pattern plan P6b, AC1,
 //! AC4).
 //!
-//! A real project (clock → playlist → fixture → output) tours between an
+//! A real project (clock → playlist → fixture → output) cycles between an
 //! idle shader and the catalog's `pulse` pattern, whose shader consumes a
 //! `phasor` uniform — so while pulse plays, the engine's timebase store
 //! holds an integrator keyed by pulse's shader. The store's own idle horizon
 //! (`PHASOR_IDLE_TICKS`, 120 ticks) used to keep it long after the entry
-//! was gone: a touring playlist carried its last few patterns' phasors that
+//! was gone: a cycling playlist carried its last few patterns' phasors that
 //! way (P6 measured it as the whole of AC4's pass-to-pass difference). What
 //! this pins: right after the residency step that unloads pulse, the store
 //! holds nothing keyed by, read by, or scoped to any node that was in it,
 //! on the first pass and on the second.
 //!
 //! No whole-heap assertion here: on the host, this harness's live heap moves
-//! by several KB from one tour cycle to the next with shader-compile and
+//! by several KB from one cycle cycle to the next with shader-compile and
 //! graphics activity (measured while writing this), which would drown a
-//! phasor's few dozen bytes. The retained-heap proof is P6's fw-emu tour
+//! phasor's few dozen bytes. The retained-heap proof is P6's fw-emu cycle
 //! (`docs/reports/2026-09-25-dormant-playlist-entries-proof.md`), and the
 //! engine's bookkeeping of a switch is pinned by `entry_residency_memory`.
 //!
@@ -33,7 +33,7 @@ use lpfs::{AsLpPath, LpFs, LpFsMemory};
 const IDLE: u32 = 1;
 const PULSE: u32 = 2;
 
-/// Frames in one tour step (0.5 s at 16 ms a frame) plus slack; a cycle is
+/// Frames in one cycle step (0.5 s at 16 ms a frame) plus slack; a cycle is
 /// two steps.
 const FRAMES_PER_CYCLE: usize = 2 * 32 + 8;
 
@@ -46,8 +46,8 @@ fn an_unloaded_entry_leaves_no_phasor_behind() {
         lp_gfx_lpvm::TargetLpvmGraphics::new(lp_shader::ShaderFrontend::LpsGlsl),
     )));
 
-    let first = tour_until_pulse_unloads(&mut rt, &fs);
-    let second = tour_until_pulse_unloads(&mut rt, &fs);
+    let first = cycle_until_pulse_unloads(&mut rt, &fs);
+    let second = cycle_until_pulse_unloads(&mut rt, &fs);
 
     let while_playing = second.phasors_while_playing;
     for (pass, stats) in [("first", first), ("second", second)] {
@@ -74,7 +74,7 @@ struct PassStats {
 /// Tick (residency step, then tick, as every edge does) until pulse is
 /// unloaded; read the store just before that step and straight after it,
 /// before the tick's own sweep can run. Then one more tick.
-fn tour_until_pulse_unloads(rt: &mut LoadedProjectRuntime, fs: &LpFsMemory) -> PassStats {
+fn cycle_until_pulse_unloads(rt: &mut LoadedProjectRuntime, fs: &LpFsMemory) -> PassStats {
     let mut before: Option<(Vec<NodeId>, usize)> = None;
     for _ in 0..FRAMES_PER_CYCLE {
         let playing = entry_child(rt.engine(), PULSE).map(|child| {
@@ -103,7 +103,7 @@ fn tour_until_pulse_unloads(rt: &mut LoadedProjectRuntime, fs: &LpFsMemory) -> P
         }
         rt.tick(16).expect("tick");
     }
-    panic!("pulse did not unload within one tour cycle");
+    panic!("pulse did not unload within one cycle cycle");
 }
 
 fn playlist_id(engine: &Engine) -> NodeId {
@@ -183,7 +183,7 @@ fn phasors_of(engine: &Engine, subtree: &[NodeId]) -> Vec<PhasorKey> {
     keys
 }
 
-/// Clock, a two-entry touring playlist (idle shader, the catalog's `pulse`
+/// Clock, a two-entry cycling playlist (idle shader, the catalog's `pulse`
 /// pattern module), and `projects/test/basic`'s fixture and output.
 fn project_fs() -> LpFsMemory {
     let fs = LpFsMemory::new();
@@ -213,7 +213,7 @@ fn project_fs() -> LpFsMemory {
   },
   "idle_entry": 1,
   "default_fade": 0.1,
-  "tour": { "kind": "cycle", "step_seconds": 0.5, "fade_seconds": 0.1 },
+  "cycle": { "kind": "cycle", "step_seconds": 0.5, "fade_seconds": 0.1 },
   "entries": {
     "1": { "name": "idle", "node": { "ref": "./idle.json" } },
     "2": { "name": "pulse", "node": { "ref": "./pulse/module.json" } }

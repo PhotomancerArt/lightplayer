@@ -203,7 +203,7 @@ holds the full context.
 | One key per holder on every device: a browser or account installs the same `(salt, K)` everywhere, so salts link devices to a holder and one flash dump opens that holder's other devices (likely fix: `K_dev = HMAC(secret, device uid)`, a fresh salt per device) | `2026-09-24-easy-bluetooth-access` (Revisit); `2026-09-23-ble-access-model` (2026-09-24 amendment) | Any security review of device access, or a threat model beyond "someone cheeky nearby" |
 | A keep-resident policy for triggered playlist entries (today fyeah-sign's blast loads and compiles on every press, ~120–200 ms emulated) | `2026-09-25-parent-owned-child-residency` | A trigger's delay is judged too slow on a real piece, or a second triggered project appears |
 | Per-node overhead trim (shared settings copy, GLSL text not resident, cheaper Module wrapper) | `2026-09-25-parent-owned-child-residency` | The loaded entry, not the dormant ones, becomes what limits a C6 project |
-| One `playlist.tour` / `playlist.skip` pair per scope, shared by two playlists in one module | `2026-09-25-parent-owned-child-residency` | A project wants two independently touring playlists in one module |
+| One `playlist.cycle` / `playlist.skip` pair per scope, shared by two playlists in one module | `2026-09-25-parent-owned-child-residency` | A project wants two independently cycling playlists in one module |
 
 ## Relationship To Shared Planning
 
