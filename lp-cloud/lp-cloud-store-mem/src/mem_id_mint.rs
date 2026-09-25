@@ -46,6 +46,16 @@ impl IdMint for MemIdMint {
         token[16..].copy_from_slice(&self.step());
         token
     }
+
+    fn random_bytes(&mut self, out: &mut [u8]) {
+        // A short last chunk takes the counter's LOW bytes — its high bytes
+        // are zero for any realistic test run, and a zero tail would make
+        // two draws look alike.
+        for chunk in out.chunks_mut(16) {
+            let step = self.step();
+            chunk.copy_from_slice(&step[16 - chunk.len()..]);
+        }
+    }
 }
 
 #[cfg(test)]
@@ -60,6 +70,10 @@ mod tests {
         assert_ne!(first, second);
         let token = mint.session_token();
         assert_ne!(token[..16], token[16..]);
+        let mut bytes = [0u8; 40];
+        mint.random_bytes(&mut bytes);
+        assert_ne!(bytes[..16], bytes[16..32]);
+        assert_ne!(bytes[32..], [0u8; 8]);
     }
 
     #[test]

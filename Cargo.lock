@@ -6326,6 +6326,7 @@ dependencies = [
 name = "lpc-cloud-api"
 version = "40.0.0"
 dependencies = [
+ "base64 0.22.1",
  "lpc-history",
  "serde",
  "serde_json",
