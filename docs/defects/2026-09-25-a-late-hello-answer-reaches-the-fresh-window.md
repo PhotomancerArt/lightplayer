@@ -1,7 +1,7 @@
 ---
 status: fixed
 found: 2026-09-25      # ci — Validate (x64) on #814 and #816, about 30 minutes apart
-fixed: this change
+fixed: PR #820
 area: lp-app/lpa-studio-core/src/app/studio/studio_device_e2e_tests.rs (`an_effect_that_outlives_its_activity_gives_the_wire_back_and_the_pump_resumes`) × lp-app/lpa-link/src/providers/fake_device/fake_device_core.rs
 class: unenforced-test-precondition
 related: [2026-09-08-a-stray-hello-answered-a-request-that-never-asked.md, lp-app/lpa-devices/src/activity/identify.rs]
