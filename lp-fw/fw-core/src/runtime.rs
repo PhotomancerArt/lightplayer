@@ -10,7 +10,7 @@ use alloc::vec::Vec;
 
 use lpa_server::{LpServer, ServerError};
 use lpc_shared::time::TimeProvider;
-use lpc_shared::transport::{Incoming, ServerTransport};
+use lpc_shared::transport::{Incoming, Link, ServerTransport};
 use lpc_wire::{TransportError, WireServerMessage};
 
 /// Result of draining currently available client messages from a transport.
@@ -59,17 +59,32 @@ pub async fn send_unsolicited_hello<T: ServerTransport>(
     // Each link reads its own `auth`: a trusted link and an untrusted one
     // on the same device are told different things.
     for link in transport.links() {
-        transport
-            .send(
-                link.id,
-                WireServerMessage::new(
-                    0,
-                    lpc_wire::server::ServerMsgBody::Hello(server.hello_for_link(link)),
-                ),
-            )
-            .await?;
+        send_hello_to_link(server, transport, link).await?;
     }
     Ok(())
+}
+
+/// Send the unsolicited hello (id 0) to one `link` — the one owed to a link
+/// that opens after the loop started serving (a radio connection), which
+/// [`send_unsolicited_hello`] never saw.
+pub async fn send_hello_to_link<T: ServerTransport>(
+    server: &LpServer,
+    transport: &mut T,
+    link: Link,
+) -> Result<(), TransportError> {
+    // Silent in a FIXTURE build, for `send_unsolicited_hello`'s reason.
+    if cfg!(feature = "fixture-no-hello") {
+        return Ok(());
+    }
+    transport
+        .send(
+            link.id,
+            WireServerMessage::new(
+                0,
+                lpc_wire::server::ServerMsgBody::Hello(server.hello_for_link(link)),
+            ),
+        )
+        .await
 }
 
 /// Drain all currently available client messages from `transport`.
