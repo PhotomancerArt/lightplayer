@@ -1,37 +1,41 @@
-//! The playlist crossfade's per-frame cost, measured across a transition.
+//! The playlist switch's memory, measured across a transition.
 //!
-//! While a transition runs, the playlist samples both entries and blends
-//! them. Until 2026-09-06 it created and freed two count-sized RGBA16
-//! sample-outs EVERY frame — 16 B/lamp of churn through the classic's
-//! infallible allocator (the shape of
+//! History: until 2026-09-06 the crossfade created and freed two
+//! count-sized RGBA16 sample-outs EVERY frame — 16 B/lamp of churn through
+//! the classic's infallible allocator (the shape of
 //! `docs/defects/2026-08-29-flash-write-wedges-under-zook-playback.md`), and
 //! on the host a leak outright, because the wasmtime backend's bump
-//! allocator never frees. Then the handles lived on the node for the
-//! transition's life; since bounded sample batches
-//! (`docs/adr/2026-09-06-direct-sampling-bounded-batches.md`) the playlist
-//! holds ONE window-sized sample-out (`min(lamps, 128) × 8` B) and blends
-//! batch by batch, so the transition's residency stopped scaling with lamps
-//! as well.
+//! allocator never frees. Bounded sample batches
+//! (`docs/adr/2026-09-06-direct-sampling-bounded-batches.md`) cut that to
+//! one window-sized sample-out per transition. Since the one-entry switch
+//! (multi-pattern plan P4) only one entry is ever loaded: a switch captures
+//! the frame it showed, unloads the old entry, loads the new one, holds the
+//! captured frame until the new entry renders, then fades from it.
 //!
-//! What this probe pins: across every steady frame of a transition, the
-//! graphics backend receives **zero** `create_sample_out` calls, at two lamp
-//! counts — so the per-frame transient no longer scales with lamps. The
-//! transition's first frame allocates the window (plus whatever the
-//! newly-activated entry's own shader keeps resident on first use); a later
-//! transition between two warm entries allocates exactly one window-sized
-//! handle, proving the previous transition's end freed it.
+//! What this probe pins, at two lamp counts, for both transitions:
 //!
-//! Counted, not weighed: the host graphics backend is wasmtime and its
-//! sample-outs live in wasm linear memory, which the tracking allocator
-//! below cannot see (`docs/reports/2026-09-02-per-lamp-memory-table.md`,
-//! "Instruments"). The host-heap transient is still printed per tick, and
-//! the emulator profile has no trigger path to reach a crossfade, so the
-//! backend call count is the honest instrument.
+//! - the graphics backend receives **zero** `create_sample_out` calls on
+//!   every frame — the held frame is replayed and the fade is blended
+//!   through the consumer's own window;
+//! - the capture frame keeps a lamp-sized host copy (`lamps × 8` B), once;
+//! - every fade frame after the first costs exactly what a steady frame of
+//!   the incoming entry costs — no per-frame allocation;
+//! - the switch's end frees the held frame and the window-sized fade
+//!   scratch together.
+//!
+//! Sample-outs are counted, not weighed: the host graphics backend is
+//! wasmtime and its sample-outs live in wasm linear memory, which the
+//! tracking allocator below cannot see
+//! (`docs/reports/2026-09-02-per-lamp-memory-table.md`, "Instruments"). The
+//! held frame and the scratch are host `Vec`s, so the tracking allocator does
+//! see those.
 //!
 //! Fixture: `projects/test/button-playlist` (idle → active on trigger 1, 0.12 s
 //! fade out of idle, 0.8 s fade out of active), copied to a temp dir with
-//! its ring scaled ×K. The transition is driven through the runtime command
-//! channel (`PlaylistActivateEntry`), the same path a wire client uses.
+//! its ring scaled ×K. It loads with the product's residency (only the idle
+//! entry), and every frame runs the residency step before the tick, as every
+//! edge does. The transition is driven through the runtime command channel
+//! (`PlaylistActivateEntry`), the same path a wire client uses.
 //!
 //! ```bash
 //! cargo test -p lpc-engine --test playlist_crossfade_memory -- --nocapture
@@ -49,7 +53,7 @@ use lp_gfx::{
     ShaderCompileOptions, ShaderSemantics, TextureData, TextureHandle,
 };
 use lpc_engine::{Engine, EngineServices, ProjectLoader};
-use lpc_model::{ArtifactLocation, NodeDefLocation, NodeId, NodeUseLocation, SlotPath, TreePath};
+use lpc_model::{ArtifactLocation, NodeDefLocation, NodeId, TreePath};
 use lpc_registry::ProjectRegistry;
 use lpc_shared::output::MemoryOutputProvider;
 use lpc_wire::WireNodeCommand;
@@ -367,6 +371,7 @@ struct Tick {
 }
 
 struct Run {
+    fs: LpFsStd,
     engine: Engine,
     registry: ProjectRegistry,
     counters: Arc<SampleOutCounters>,
@@ -377,16 +382,10 @@ impl Run {
     fn load(dir: &Path) -> Self {
         let fs = LpFsStd::new(dir.to_path_buf());
         let services = EngineServices::new(TreePath::parse("/probe.show").expect("root path"));
-        // The run switches to entry 2 and back, so both entries are loaded
-        // up front (only the idle entry is resident by default).
-        let playlist_use = NodeUseLocation::root()
-            .child(SlotPath::parse("nodes[playlist]").expect("playlist use"));
-        let mut rt = ProjectLoader::load_from_root_with_resident_entries(
-            &fs,
-            services,
-            &[(playlist_use, 2)],
-        )
-        .unwrap_or_else(|e| panic!("load {}: {e}", dir.display()));
+        // The product's residency: only the idle entry is loaded, and every
+        // switch unloads one entry and loads the other at the pre-tick step.
+        let mut rt = ProjectLoader::load_from_root(&fs, services)
+            .unwrap_or_else(|e| panic!("load {}: {e}", dir.display()));
         let counters = Arc::new(SampleOutCounters::default());
         let graphics: Arc<dyn LpGraphics> = Arc::new(CountingGraphics {
             inner: lp_gfx_lpvm::TargetLpvmGraphics::new(lp_shader::ShaderFrontend::LpsGlsl),
@@ -406,6 +405,7 @@ impl Run {
             .copied()
             .expect("the playlist node is mounted from /playlist.json");
         Self {
+            fs,
             engine,
             registry,
             counters,
@@ -413,10 +413,16 @@ impl Run {
         }
     }
 
+    /// One frame the way every edge runs it: the residency step, then the
+    /// tick. A switch's unload and load land in the frame after it is
+    /// decided, and are counted there.
     fn tick(&mut self) -> Tick {
         let live_before = live();
         reset_peak();
         self.counters.take();
+        self.engine
+            .apply_residency(&self.fs, &mut self.registry)
+            .expect("residency step");
         self.engine.tick(&self.registry, 16).expect("tick");
         let (sample_out_calls, sample_out_bytes) = self.counters.take();
         Tick {
@@ -437,10 +443,12 @@ impl Run {
     }
 }
 
-/// The frames a transition of `fade_seconds` covers at 16 ms ticks: the
-/// switch frame (alpha 0) through the last frame with alpha < 1.
+/// The frames a switch with a `fade_seconds` fade covers at 16 ms ticks:
+/// the fade's frames, plus the hold before it (the capture frame, the load
+/// and the incoming shader's deferral, its compile window) and a few after
+/// its end, so the frame that frees the held buffer is always inside.
 fn transition_frames(fade_seconds: f32) -> usize {
-    ((fade_seconds / 0.016).ceil() as usize).max(1)
+    ((fade_seconds / 0.016).ceil() as usize).max(1) + 8
 }
 
 fn print_ticks(label: &str, ticks: &[Tick]) {
@@ -477,23 +485,21 @@ fn measure(scale: u32) -> (u32, Vec<Tick>, Vec<Tick>) {
         "x{scale}: a steady idle frame must not allocate sample-outs"
     );
 
-    // idle → active: 0.12 s fade out of entry 1, the active shader's first
-    // compile lands inside this window.
+    // idle → active: 0.12 s fade out of entry 1. The idle entry unloads,
+    // the active one loads, and its shader's first compile lands inside
+    // the switch.
     run.activate(2);
-    let first: Vec<Tick> = (0..transition_frames(0.12) + 4)
-        .map(|_| run.tick())
-        .collect();
+    let first: Vec<Tick> = (0..transition_frames(0.12)).map(|_| run.tick()).collect();
     print_ticks(&format!("x{scale} ({lamps} lamps): idle → active"), &first);
 
     // Let the active entry settle, then active → idle: 0.8 s fade out of
-    // entry 2, both shaders warm.
+    // entry 2. Only one entry is ever loaded, so the idle entry is loaded
+    // and compiled afresh.
     for _ in 0..4 {
         run.tick();
     }
     run.activate(1);
-    let second: Vec<Tick> = (0..transition_frames(0.8) + 4)
-        .map(|_| run.tick())
-        .collect();
+    let second: Vec<Tick> = (0..transition_frames(0.8)).map(|_| run.tick()).collect();
     print_ticks(&format!("x{scale} ({lamps} lamps): active → idle"), &second);
 
     let _ = std::fs::remove_dir_all(&dir);
@@ -506,51 +512,69 @@ fn playlist_crossfade_memory() {
 
     for scale in [10u32, 20] {
         let (lamps, first, second) = measure(scale);
-        // The crossfade holds ONE window-sized sample-out, not two
-        // count-sized ones: sampling streams through a bounded batch
-        // (`docs/adr/2026-09-06-direct-sampling-bounded-batches.md`), so the
-        // handle is `min(lamps, batch capacity) × 8` bytes — 1,024 B at
-        // every scale here — and the per-transition cost stopped scaling
-        // with lamps at all.
+        // The fade blends through a window-sized host scratch, never a
+        // lamp-sized one: sampling streams through a bounded batch
+        // (`docs/adr/2026-09-06-direct-sampling-bounded-batches.md`).
         let window = lamps.min(lp_gfx_lpvm::CPU_SAMPLE_BATCH_POINTS) as usize;
-        let per_handle = window * 8;
         assert!(
             window < lamps as usize,
             "x{scale}: the probe must run past one window to prove the point"
         );
+        // The held frame: one RGBA16 sample per lamp.
+        let held = lamps as usize * 8;
+        let scratch = window * 8;
 
-        // The transition's first frame allocates the playlist's window (and
-        // possibly the freshly-compiled entry's own resident buffers).
-        let opening = first[0];
-        assert!(
-            opening.sample_out_calls >= 1 && opening.sample_out_bytes >= per_handle,
-            "x{scale}: the first transition frame must allocate the crossfade window \
-             ({opening:?}, expected ≥ 1 call / ≥ {per_handle} B)"
-        );
-        // Every later frame of the transition: zero. This is the claim —
-        // the per-frame graphics transient does not scale with lamps.
-        for (index, tick) in first.iter().enumerate().skip(1) {
-            assert_eq!(
-                tick.sample_out_calls, 0,
-                "x{scale}: idle→active frame {index} allocated a sample-out ({tick:?})"
-            );
-        }
+        for (label, ticks) in [("idle→active", &first), ("active→idle", &second)] {
+            // The switch never asks the graphics backend for a sample-out:
+            // the held frame is replayed and the fade blended through the
+            // consumer's own window. Before the one-entry switch, every
+            // transition opened with a window-sized sample-out.
+            for (index, tick) in ticks.iter().enumerate() {
+                assert_eq!(
+                    tick.sample_out_calls, 0,
+                    "x{scale}: {label} frame {index} allocated a sample-out ({tick:?})"
+                );
+            }
 
-        // Between two warm entries the opening frame allocates EXACTLY the
-        // one window — which also proves the previous transition's end
-        // freed it — and nothing after.
-        let opening = second[0];
-        assert_eq!(
-            (opening.sample_out_calls, opening.sample_out_bytes),
-            (1, per_handle),
-            "x{scale}: active→idle must open with exactly one {per_handle}-byte sample-out \
-             ({opening:?})"
-        );
-        for (index, tick) in second.iter().enumerate().skip(1) {
-            assert_eq!(
-                tick.sample_out_calls, 0,
-                "x{scale}: active→idle frame {index} allocated a sample-out ({tick:?})"
+            // The capture frame keeps a lamp-sized copy of what it showed —
+            // allocated once, on that frame, never per frame.
+            assert!(
+                ticks[0].host_resident >= held as i64,
+                "x{scale}: {label}'s capture frame must keep the {held}-byte held frame \
+                 ({:?})",
+                ticks[0]
             );
+
+            // The switch's end frees the held frame and the fade's scratch
+            // together: the buffer lives only while a switch runs.
+            let released = ticks
+                .iter()
+                .skip(1)
+                .position(|tick| tick.host_resident <= -((held + scratch) as i64));
+            let released = released.unwrap_or_else(|| {
+                panic!(
+                    "x{scale}: {label} never freed its {held}-byte held frame and \
+                     {scratch}-byte scratch: {ticks:?}"
+                )
+            }) + 1;
+
+            // The fade's first frame sizes its window scratch once; every fade
+            // frame after it costs exactly what a steady frame of the incoming
+            // entry costs (the last frame here, after the switch is over) —
+            // the fade adds no per-frame allocation (defect
+            // 2026-08-29-flash-write-wedges-under-zook-playback).
+            let sized = ticks
+                .iter()
+                .position(|tick| tick.host_resident == scratch as i64)
+                .unwrap_or_else(|| panic!("x{scale}: {label} never sized its fade scratch"));
+            let steady = ticks.last().expect("ticks").host_transient;
+            for (index, tick) in ticks.iter().enumerate().take(released).skip(sized + 1) {
+                assert_eq!(
+                    tick.host_transient, steady,
+                    "x{scale}: {label} fade frame {index} allocated beyond a steady frame \
+                     ({tick:?}, steady transient {steady} B)"
+                );
+            }
         }
     }
 }

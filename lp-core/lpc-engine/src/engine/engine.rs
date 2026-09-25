@@ -3802,14 +3802,7 @@ mod tests {
                 Revision::new(1),
             )
             .expect("add node");
-        let entries = alloc::vec![PlaylistRuntimeEntry {
-            index: 1,
-            child: NodeId::new(99),
-            output_slot: SlotPath::parse("output").expect("path"),
-            duration: None,
-            fade_after: None,
-            trigger_ids: None,
-        }];
+        let entries = alloc::vec![PlaylistRuntimeEntry::dormant(1).loaded(NodeId::new(99))];
         eng.attach_runtime_node(
             node,
             Box::new(PlaylistNode::new(node, 1, 0.0, entries)),
@@ -3823,7 +3816,7 @@ mod tests {
         let err = eng
             .handle_node_command(node, &WireNodeCommand::PlaylistActivateEntry { entry: 9 })
             .expect_err("unknown entry rejected");
-        assert!(err.to_string().contains("no loaded entry 9"), "{err}");
+        assert!(err.to_string().contains("no entry 9"), "{err}");
 
         let err = eng
             .handle_node_command(
