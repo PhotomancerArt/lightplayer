@@ -1,6 +1,6 @@
 # ADR: Access over untrusted links — shared secrets, HMAC login, tiers by link
 
-- **Status:** Proposed
+- **Status:** Accepted (shipped in PR #794, 2026-09-24; see Amendments)
 - **Date:** 2026-09-23
 - **Deciders:** Photomancer
 - **Supersedes:** None
@@ -183,8 +183,10 @@ logging in with the same messages against the same access files.
 - Every `ServerTransport` implementer changed shape (link-tagged receive,
   link-addressed send). Single-link transports report one trusted link and
   behave exactly as before.
-- `WIRE_PROTO_VERSION` 20 → 21: new login and refusal messages and a
-  required `auth` on the hello.
+- `WIRE_PROTO_VERSION` bumped for new login and refusal messages and a
+  required `auth` on the hello. Written as 20 → 21; it shipped as **21 → 22**,
+  because lean-wire (#791) landed first and took 21 (the plan's merge-order
+  rule: whoever lands second bumps again).
 - A new wire request cannot ship unclassified: the compiler refuses it, and
   the host table test (`lpa-server/tests/access_gate.rs`) enumerates every
   variant from serde's own variant lists against five link states.
@@ -217,9 +219,38 @@ logging in with the same messages against the same access files.
 
 ## Follow-ups
 
-- M4 (the BLE link) is the first `Untrusted` transport: a link mux in
-  `fw-esp32-common`, unauthenticated-connection timeout and count, and the
-  `Identify` request if cheap.
+- ~~M4 (the BLE link) is the first `Untrusted` transport~~ — shipped in PR
+  #810: the link mux in `fw-esp32-common`, a 10 s unauthenticated-connection
+  drop and at most two connections
+  (`docs/adr/2026-09-24-ble-transport.md`). `Identify` was **not** built
+  (below).
 - M6 (Studio) writes the device store and sidecars and runs the login.
-- `docs/design/device-identity.md` §8 (the auth gap) is closed by this ADR;
-  M7 updates it.
+- ~~`docs/design/device-identity.md` §8 (the auth gap)~~ — updated in M7:
+  closed by this ADR.
+
+## Amendments
+
+### 2026-09-24 (M7): what shipped, checked against the text above
+
+- **Wire version.** See Consequences: the login bump is proto 22, not 21.
+- **`Identify` is not built** (plan DD22). It needs a new `ClientRequest`
+  (so a wire bump), a per-device rate limit and an output-stage hook in the
+  engine. When it lands it is classified `Play`, like the panel. Until then
+  a wrong-device connect is caught by the advertised name
+  (`LP-<project name>`, or the last four MAC hex digits), not by a blink.
+- **Enabling BLE takes a reboot** (plan DD23). The firmware reads
+  `bleEnabled` from the device store once, at boot
+  (`docs/adr/2026-09-24-ble-transport.md`, decision 4), so the edit-tier write
+  that enables it is not enough on its own. The write-only and locked-by-default
+  rules above are unchanged by it.
+- **Two connections allowed, one gates** (plan DD12). The transport admits two
+  BLE links, and each holds its own grant, but nothing in this slice was
+  tested or gated on the second one. The 2-connection heap figure has never
+  been measured on the product image.
+- The tiers, the classifier, the write-only rule and `AccessGuardedFs` shipped
+  as written; `lpa-server/tests/access_gate.rs` and
+  `tests/access_file_resource.rs` are the proof. The end-to-end refusal was
+  seen on silicon from a desktop central (Run J in the plan's
+  `spike-results.md`: a locked XIAO C6 answered `listLoadedProjects` with
+  `notPermitted { needs: play }` before login, from Mac Chrome 153 over CDP),
+  **not yet from a phone** — that is the plan's G4 walk.

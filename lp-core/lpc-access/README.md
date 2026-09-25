@@ -23,6 +23,8 @@ never readable back over any link.
 | `project_access_file.rs` | `<project>/.lp/access.json`, `version: 1` |
 | `device_access_file.rs` | root `/.lp/access.json`, `version: 1`; locked by default |
 | `access_file_path.rs` | which paths are access files (the fs gate's predicate) |
+| `access_file_error.rs` | why an access file could not be read (every variant is a refusal) |
+| `base64_bytes.rs` | serde for fixed-size keys, salts and MACs as base64; the wrong length is refused |
 | `login_state.rs` | begin → challenge → answer → verdict; one login in flight |
 | `rate_limit.rs` | per-device backoff: 3 free, then 2 s doubling to 60 s |
 

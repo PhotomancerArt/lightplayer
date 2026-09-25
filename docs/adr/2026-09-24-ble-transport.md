@@ -68,7 +68,8 @@ firmware transport that carries the second kind of link.
    boot. A board without the flag never touches the BT peripheral, and no
    emulated board has it, so no emulator gate meets BLE init — radio is not
    modelled. The `ble` Cargo feature is in the default image; the bytes are in
-   every image, the behaviour is not.
+   every image, the behaviour is not. Because the flag is read only at boot,
+   **enabling or disabling BLE takes a reboot** (plan DD23).
 
 5. **A link opens when the central subscribes.** Until the central enables
    notifications on TX, trouble-host silently skips a notification, so no
@@ -143,8 +144,11 @@ firmware transport that carries the second kind of link.
   or off. The C6 emulator maps the arbiter's register block as an
   accept-and-remember stub (`COEX`, `0x600A_F400`).
 - **Traffic classes (Yona, 2026-09-24).** ESP-NOW must hold near its
-  alone-figure in **steady state** — BLE enabled and a phone connected but
-  idle; that is the M4 desk check's stop condition. **Discrete panel work**
+  alone-figure in **steady state**. As first written, steady state included a
+  phone connected but idle, and that was the M4 desk check's stop condition;
+  the desk runs met it, and Yona re-ruled: **steady state is BLE enabled with
+  no phone connected**, and a connected phone is an operating state (see
+  Amendment). **Discrete panel work**
   (knobs, brightness, a shader switch) may cost ESP-NOW minor interruptions;
   it is measured and reported, not gated. **Continuous interactive input** —
   drawing on an XY pad, BLE MIDI — is a different, real-time class with its
@@ -176,9 +180,70 @@ firmware transport that carries the second kind of link.
 
 ## Follow-ups
 
-- The heap/stack ruling (PR #810) and this ADR's amendment.
+- ~~The heap/stack ruling (PR #810)~~ — ruled and recorded (Consequences,
+  and `2026-09-02-esp32c6-ram-split.md`, Amendment, including the heap
+  placement fix).
 - M5: the Studio side (Web Bluetooth transport, chunked writes, "cannot
   flash"), which amends this ADR.
 - Continuous-input class (XY pad, BLE MIDI): its own measurement before it
   rides this transport.
 - `Identify` (PQ7's replacement) was not built in M4; see the plan's notes.
+- Whether peripheral latency 4 is steady-state safe (Amendment): a longer run,
+  or a longer supervision timeout, before it replaces latency 0.
+- The knob round trip on the desk-meter image (Runs K/L, 102–399 ms median at
+  15 ms) was slower than on the shipped image (Run J, 93 ms). Unexplained.
+- Board-to-Studio idle traffic over BLE is mostly the firmware's heartbeat
+  and console lines. Quieter logging on radio links is unbuilt.
+- The two-connection heap figure has never been measured on the product
+  image (DD12: the second connection is allowed, nothing gates on it).
+
+## Amendment (2026-09-24): steady state re-ruled after the desk runs
+
+**The stop condition was met.** With a central connected, logged in and idle
+at the granted 15 ms / latency 0 / 4 s, ESP-NOW receive loss on the BLE board
+was about 8–9 %, against ~0.5 % with BLE off and ~1.2 % with BLE enabled and
+only advertising. No connection parameter tried brought connected-idle loss
+near the BLE-off figure while keeping the link.
+
+Setup, for every number here: two XIAO ESP32-C6 boards on one USB hub ~10 cm
+apart on Yona's desk (one BLE board, one ESP-NOW peer), ESP-NOW on channel 11
+at 50 Hz each way, the PLAYFUL Choker loaded, and the MacBook's own Chrome 153
+as the central, driven over CDP. **Not a phone, not Bluefy.** The loss windows
+ran the `desk_espnow_meter` image (never shipped); Runs K and L added
+`desk_ble_params`. Raw data and the full tables are in the plan's
+`spike-results.md`, Runs J, K and L.
+
+| config (granted) | ESP-NOW in-loss | link drops (`0x08`) |
+|---|---|---|
+| BLE off | 0.42–0.70 % (Run L pooled 0.57 %) | — |
+| BLE on, advertising, no connection | 1.23 % (Run J) | — |
+| connected idle, 15 ms / latency 0 / 4 s (shipped) | 8.45 % (J); 8.32 % (K); 8.83 % pooled over 3 windows (L) | 0 in ~15 min over 5 windows (K+L); 2 in Run J |
+| connected idle, 15 ms / latency 4 / 4 s | 3.73 % (K); 4.53 % pooled (L) | 3 in ~15 min over 5 windows |
+| connected idle, 30–100 ms intervals | 1.7–1.9 % at best (K) | a drop every few minutes |
+
+**Ruled (Yona, 2026-09-24 evening; plan E8):**
+
+- **Steady state is BLE enabled with no phone connected** (~1.2 % against
+  ~0.5 % with BLE off). That is the class-1 figure ESP-NOW must hold.
+- **A connected phone is an operating state**, in class 2 with discrete panel
+  work. Its ~9 % ESP-NOW loss is accepted, measured and reported, not gated.
+- **The parameters stay 15 ms / latency 0 / 4 s.** Latency 4 halves the loss,
+  but its supervision-timeout drops cluster; link stability is worth more than
+  loss once connected is not steady state (director DD28). Latency 4 stays an
+  experiment knob: the `desk_ble_params` feature (never shipped) reads
+  interval, latency, timeout and an optional active/idle switch from
+  `/.lp/ble-exp.txt` at boot, so a desk run changes them with a file write and
+  a reboot.
+
+**Flash at the merged head.** The ledger row's 324,320 B headroom was measured
+on M4's own branch. After it merged `origin/main` (whose own changes saved
+flash), the head `9bfac876d` measured an image of 2,810,960 B and a headroom of
+**334,768 B** (`just fw-esp32c6-size-check`, PR #810). The `ble` delta itself
+is unchanged.
+
+**The heap cut's placement cost.** The 24,000 B heap cut left a BLE-enabled
+board unable to switch from the choker to Zook dome (largest free block
+65,534 B < the 64 KiB load gate, with 212 KB free). This was fixed by
+placement, not size: the radio blobs' C heap fills the reclaimed `dram2_seg`
+region first. See `2026-09-02-esp32c6-ram-split.md` ("Placement") and
+`docs/defects/2026-09-24-ble-enabled-c6-refuses-a-project-switch-after-the-heap-cut.md`.

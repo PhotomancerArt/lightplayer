@@ -543,6 +543,14 @@ does not model. The full reasoning, in Yona's words, is
   reporting, Brave grant revocation, the real chooser) is the shim's residue
   (`docs/adr/2026-09-09-studio-device-stack-over-a-virtual-serial-port.md`,
   rule 3).
+- **Radio is the named exception: the emulator has no BLE.** No emulated
+  board enables it (the device store's `bleEnabled` is read at boot, and
+  nothing sets it), so a BLE claim comes from host tests (the access gate:
+  `lpa-server/tests/access_gate.rs`) plus a desk walk through
+  `spikes/ble-lab`. Its wire mode speaks the product's own link, and an agent
+  can drive it with no human using the Mac's Chrome as the central over CDP.
+  Its README is the runbook. A desk number names the board, the distance and
+  the central: Mac Chrome is not Bluefy on an iPhone.
 - **When you do a hardware walk, do the emulator walk first**, and what
   hardware checks is **parity**. If hardware disagrees with the emulator, fix
   the *emulator* first — file a fidelity defect under `docs/defects/` (e.g.
