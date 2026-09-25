@@ -1,7 +1,7 @@
 # The heap-budget ratchet gate
 
 `just heap-budget-check` measures per-window heap budget figures for the
-projects listed in `scripts/heap-budget-record.json` by running
+projects recorded under `scripts/heap-budget-record/engine/` by running
 `lp-cli profile --collect alloc` on the RV32 emulator — once in `--mode startup`
 and once in `--mode steady-render` per project — and fails if any figure grew
 beyond the recorded value (default margin 0%).
@@ -140,18 +140,39 @@ allocated at tick/output-open time, so a per-LED regression shows up as
 
 ### The record
 
+The record is a **directory, one file per project and per chip**, each with
+its own `recorded`/`commit` stamp:
+
+```text
+scripts/heap-budget-record/
+  engine/projects/test/basic.json          ← the path below engine/ IS the project path
+  engine/catalog/patterns/meteor.json
+  engine/catalog/projects/zook-dome.json
+  chips/esp32c6.json                       ← "The second source", below
+  chips/esp32v3.json
+  chips/esp32s3.json
+```
+
+An engine file:
+
 ```json
 {
-  "projects": {
-    "projects/test/basic": {
-      "modes": {
-        "startup":       { "windows": { "server-boot": {…}, "project-load": {…}, "shader-compile": {…}, "shader-link": {…}, "frame": {…} } },
-        "steady-render": { "windows": { "frame": { "transient": …, "retained": …, "largest_alloc": …, "alloc_count": …, "alloc_bytes": … } } }
-      }
-    }
+  "comment": "…",
+  "recorded": "2026-09-23",
+  "commit": "690b9fee8",
+  "modes": {
+    "startup":       { "windows": { "server-boot": {…}, "project-load": {…}, "shader-compile": {…}, "shader-link": {…}, "frame": {…} } },
+    "steady-render": { "windows": { "frame": { "transient": …, "retained": …, "largest_alloc": …, "alloc_count": …, "alloc_bytes": … } } }
   }
 }
 ```
+
+It was one `scripts/heap-budget-record.json` until 2026-09-23. With one file
+and one stamp, every re-baseline rewrote the same lines, and two PRs that each
+re-baselined anything always conflicted — 37 of that file's 67 commits were
+re-baselines. A baseline now rewrites a file **only when its figures moved**,
+so re-baselines of different projects or chips touch disjoint files
+(`docs/adr/2026-09-23-heap-budget-record-split-and-derived-stack.md`).
 
 `check` compares every figure the record holds, generically: a figure added to
 the record ratchets from then on. A recorded window missing from the
@@ -159,9 +180,10 @@ measurement fails (the instrument or the instrumented path broke).
 `largest_free_at_close` is the one figure with an inverted rule — see
 "Ratchet, not ceiling" below.
 
-To add a project, add its key under `projects` (an empty object is enough)
-and run `just heap-budget-baseline`; the baseline reads the project list from
-the record. Recorded today: `projects/test/basic` (the smallest real project),
+To add a project, run `just heap-budget-baseline <project path>` — naming a
+project with no file creates `engine/<project path>.json`. A bare
+`just heap-budget-baseline` re-measures every recorded project (the list is the
+files under `engine/`) and rewrites only the ones that moved. Recorded today: `projects/test/basic` (the smallest real project),
 `catalog/patterns/meteor` (a compute-shader project with a struct-valued map slot —
 the per-frame churn case) and `catalog/projects/zook-dome` (1,500 lamps on four
 strips — the per-lamp case, and the classic ESP32's target envelope).
@@ -192,7 +214,7 @@ emulator has no firmware in it — it is `lp-cli profile` running the render
 engine on a host — so it can say what a project's windows cost and nothing at
 all about what the firmware around them costs.
 
-`scripts/heap-budget-record.json`'s `chips` section is the other half. It comes
+`scripts/heap-budget-record/chips/<chip>.json` is the other half. It comes
 from the **SoC** emulator (`lp-emu/esp/lp-emu-esp32c6`, plan
 `2026-09-06-1001-esp-emulator`): the shipped `fw-esp32c6` image — the bytes a
 board is flashed with — booted whole, run to its first heartbeat, and read from
@@ -219,12 +241,14 @@ trigger as `lp-emu-esp32v3/tests/boot_idle.rs` and as the desk sitting — and
 takes the first triple. It is the single thing most likely to be got wrong by
 copying the C6's arm.
 
-Five figures, each with its own direction, and one band:
+Five recorded figures, each with its own direction, one band, and one
+figure that is derived rather than recorded:
 
 | figure | direction | why |
 |---|---|---|
-| `totalBytes` | **exact** | the heap region's size. A change is a linker-script or memory-map change, never a budget. |
-| `stackTotal` | **exact** | the main task's stack, same reasoning. |
+| `totalBytes` | **exact** | the heap's size. Every region on all three chips is a fixed-size static or a constant address span, so a change is a memory-map change, never a budget. |
+| `stackTop` | **exact** | `_stack_start`, read off the ELF: the top of RWDATA (`ORIGIN + LENGTH`). The one end of the main stack that only a linker-script or memory-map change moves. |
+| `stackTotal` | **derived** | not in the record — see "The stack's size is derived" below. |
 | `usedBytes` | ratchet on **growth** | what the firmware holds resident at idle. |
 | `freeBytes` | ratchet on **shrinking** | the same fact from the other side; both are recorded so a change that moves one and not the other is visibly wrong. |
 | `largestFreeBlock` | ratchet on **shrinking** | the contiguity proxy — the read gate on device refuses on this, not on free bytes (`docs/defects/2026-09-04-read-gate-refuses-on-largest-block-proxy.md`). |
@@ -240,6 +264,32 @@ lands on a different instruction of a differently laid-out image has a
 different deepest point (11,432 B here, 11,560 B on a runner). See
 `docs/debt/reference-images-are-not-reproducible-across-hosts.md`. The band is
 the measured spread with room; it is never widened to make a run pass.
+
+### The stack's size is derived, not recorded
+
+On all three chips esp-hal's `ld/sections/stack.x` opens `.stack` at
+`_stack_end` right after `.data`/`.bss` and closes it at the top of RWDATA, so
+the main task's stack is the **residual** of RWDATA after the statics. Its
+size therefore moves by every byte of static data — 8 B of new `.data` moves it
+by 8 — and until 2026-09-23 it was graded `exact` on the premise that "a change
+is a linker-script change", which forced a re-baseline for any PR that added a
+static table.
+
+What the gate checks instead, on every run, with
+`scripts/heap-budget-stack-layout.py` reading the ELF's own section headers and
+symbol table:
+
+1. the heartbeat's `of <total> B` equals `_stack_start − _stack_end` — the
+   probe reports the layout it runs on;
+2. fewer than 4 B lie between the end of the last allocated section below the
+   stack and `_stack_end` (`.stack` is `ALIGN(4)`) — the stack is exactly what
+   the statics leave, which is the premise that makes deriving it sound;
+3. the derived total still exceeds the top of the recorded high-water band;
+4. `stackTop` equals the record (the table above).
+
+A mismatch in any of these is a finding, not a re-baseline. Statics growth on
+its own is no longer gated here: it is visible as the stack shrinking, which
+the run prints (`… B above the high-water band`).
 
 ### Silicon, printed beside it
 
@@ -287,11 +337,21 @@ fails when it **shrinks** below the record instead of when it grows past it —
 same PR:
 
 ```bash
-just heap-budget-baseline
+just heap-budget-baseline                   # every recorded project
+just heap-budget-baseline catalog/patterns/meteor   # one
+just heap-budget-baseline-chips esp32c6     # one chip
 ```
 
-which regenerates `scripts/heap-budget-record.json` from the current tree, so
-the growth appears in the PR diff where a reviewer sees it. Same shape as
+**`just bless-chips [chip…]` does all of it in one command**: every chip heap
+record above *and* the chip emulator tests' own pinned firmware figures
+(`lp-emu/esp/figures/<chip>.json` — the main stack's size, boot chains, cycle
+counts), one chip at a time, plus the engine records. See
+[chip-figures.md](chip-figures.md) for what is and is not a figure, the record
+format, and the positional-figure rule.
+
+Each baseline re-measures from the current tree and rewrites only the files whose
+figures moved, so the growth appears in the PR diff where a reviewer sees it
+and an untouched project or chip keeps its stamp. Same shape as
 `just fw-esp32v3-size-check`, with one difference: that gate compares against
 a real limit (the partition size); this one compares against last-measured.
 

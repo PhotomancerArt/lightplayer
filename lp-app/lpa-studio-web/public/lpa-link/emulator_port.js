@@ -287,12 +287,13 @@ export class EmulatorPort {
     for (const pending of this._pending.splice(0, this._pending.length)) {
       pending.reject(new Error(`emulated board ${this.boardId}: port disposed`));
     }
-    if (bytes) {
-      await closeSocket(bytes);
-    }
-    if (control) {
-      await closeSocket(control);
-    }
+    // Both closes are STARTED before either is awaited. This runs from
+    // `pagehide`, where nothing after the first `await` is promised to run:
+    // awaiting the byte socket's close handshake first (it used to) left the
+    // control socket — the door's one-client claim — open behind a page that
+    // was already gone
+    // (docs/defects/2026-09-24-a-departed-page-kept-the-doors-boards.md).
+    await Promise.all([bytes, control].filter(Boolean).map(closeSocket));
   }
 
   // --- internals -----------------------------------------------------------

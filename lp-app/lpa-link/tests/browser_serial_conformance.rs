@@ -976,6 +976,60 @@ async fn hotplug_edges_arrive_from_a_re_enumeration() {
     shim_off().await;
 }
 
+/// A port that was OPEN when the cable came out opens again on the new
+/// generation once it goes back in — and reads.
+///
+/// The 2026-09-24 walk's stuck card
+/// (`docs/defects/2026-09-24-emulated-replug-leaves-the-old-byte-channel-open.md`):
+/// `detach` errored the open port's stream but left the board's byte channel
+/// open underneath it, so the replugged port's `open()` met the old socket
+/// ("already open in this page") and the card sat at "Attached — not
+/// listening" forever. On a real board the unplug takes the port with it,
+/// and so must the shim's.
+#[wasm_bindgen_test]
+async fn a_port_open_across_a_replug_reopens_on_the_new_generation() {
+    if real_backing() {
+        log_skip("this claim is pinned by the scripted half");
+        return;
+    }
+    shim_over(&["c6-a"]).await;
+    let board = board_ids().await.first().cloned().expect("a board");
+    let id = granted_sessions().await[0].id;
+
+    open_port(id, false)
+        .await
+        .expect("openPort before the replug");
+    yield_to_event_loop().await;
+    let _ = strings(js_take_lines(id)).await;
+
+    JsFuture::from(js_replug_over_the_cable(&board))
+        .await
+        .expect("a replug over the cable");
+    yield_to_event_loop().await;
+    let _ = strings(js_take_errors(id)).await;
+
+    // The next `getGrantedPorts` is what adopts the new generation into the
+    // same session, exactly as Studio's connect-edge sweep does.
+    let after = granted_sessions().await;
+    assert_eq!(ids(&after), vec![id], "the session survived the replug");
+    open_port(id, false)
+        .await
+        .map_err(|error| error_text(&error))
+        .expect("openPort on the replugged generation");
+    yield_to_event_loop().await;
+    let lines = strings(js_take_lines(id)).await;
+    assert!(
+        lines.iter().any(|line| line.contains("hello")),
+        "the replugged port opened but read nothing: {lines:?}"
+    );
+    log(&format!("replug while open: reopened and read {lines:?}"));
+
+    JsFuture::from(js_release_port(id))
+        .await
+        .expect("releasePort");
+    shim_off().await;
+}
+
 /// The bytes go both ways through the real controller: `writeLine` reaches
 /// the board's byte channel unchanged, and what the board says comes back as
 /// lines.

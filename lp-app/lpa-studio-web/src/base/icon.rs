@@ -4,7 +4,7 @@ use dioxus_icons::lucide::{
     ChevronRight, CircleAlert, CircleCheck, CircleDot, CircleMinus, CircleQuestionMark, Clock,
     Copy, Cpu, Download, Droplet, Ellipsis, Eraser, Eye, Flag, FlaskConical, Folder, Funnel, Hash,
     History, Image, Info, KeyRound, Laptop, Lightbulb, Link, Link2, Link2Off, ListMusic, Locate,
-    LocateFixed, Lock, LockOpen, Maximize2, Minimize2, MonitorPlay, MousePointerClick, Pencil,
+    LocateFixed, Lock, LockOpen, Maximize2, Minimize2, MonitorPlay, MousePointerClick, Pencil, Pin,
     Play, Plus, Radio, RadioTower, Route, Save, Settings, Smartphone, Sparkles, SquareArrowRight,
     SquareTerminal, Trash2, TriangleAlert, Undo2, Upload, Usb, Users, Waypoints, X, Zap,
 };
@@ -30,6 +30,7 @@ pub fn StudioIcon(name: StudioIconName, size: u32) -> Element {
         StudioIconName::ChildValue => rsx! { SquareArrowRight { size } },
         StudioIconName::NodeTreeItem => rsx! { Boxes { size } },
         StudioIconName::Edited => rsx! { Pencil { size } },
+        StudioIconName::Pin => rsx! { Pin { size } },
         StudioIconName::Info => rsx! { Info { size } },
         StudioIconName::History => rsx! { History { size } },
         StudioIconName::Help => rsx! { CircleQuestionMark { size } },
@@ -143,6 +144,9 @@ pub enum StudioIconName {
     ChildValue,
     NodeTreeItem,
     Edited,
+    /// Pushpin: "show only this one" — a cycle member held in place of the
+    /// walk (the palette chooser's member chips).
+    Pin,
     Info,
     /// Clock with a counter-clockwise arrow: the document's history.
     History,

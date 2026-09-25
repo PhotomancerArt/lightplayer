@@ -1290,6 +1290,77 @@ fn unplugging_mid_lens_closes_the_editor_and_leaves_an_honest_card() {
     );
 }
 
+/// The 2026-09-24 walk, Studio's half: the editor is a lens on the board,
+/// the cable comes out (the hotplug DISCONNECT edge, the way a replug under
+/// the shim or Chrome delivers it), the page drops to the gallery, and the
+/// cable goes back in on the SAME endpoint (the session id survives a
+/// replug). The card must come back to Ready and the project must open
+/// again — never park at "Attached — not listening" with a board that is
+/// talking.
+///
+/// The walk's own failure was below this layer: the shim left the dead
+/// generation's byte channel open, so the replugged port's `open()` was
+/// refused (`docs/defects/2026-09-24-emulated-replug-leaves-the-old-byte-channel-open.md`,
+/// pinned by `a_port_open_across_a_replug_reopens_on_the_new_generation` in
+/// lpa-link's conformance suite). This row pins that nothing ABOVE the port
+/// strands the card on the same walk.
+#[test]
+fn a_replug_under_the_lens_comes_back_ready_and_opens_again() {
+    let device = empty_light_player("dev000000daqf6dvvr8");
+    let (mut bench, tasks) = identified(&device, "usb-lens-8");
+    bench.run_until(&tasks, "the board to report nothing loaded", |bench| {
+        bench
+            .view()
+            .devices
+            .first()
+            .is_some_and(|card| card.loaded_project == lpa_devices::view::LoadedProject::Empty)
+    });
+    let card = bench.view().devices[0].clone();
+    bench.push_gesture(card.id, bundled_example());
+    bench.run_until(&tasks, "the push to finish", |bench| {
+        bench
+            .view()
+            .devices
+            .first()
+            .is_some_and(|card| card.activity.is_none() && card.last_outcome.is_some())
+    });
+    let uid = bench.registry()[0].uid.clone();
+    bench.open_lens(&uid).expect("opens");
+    assert!(bench.lens_device_uid().is_some());
+
+    // The cable comes out under the lens: the port dies AND the bus says so.
+    device.set_failure_plan(
+        lpa_link::providers::fake_device::FakeFailurePlan::none()
+            .with_disconnect_after_bytes(device.served_bytes()),
+    );
+    bench.granted.set(false);
+    bench
+        .controller
+        .note_device_hotplug(crate::app::studio::studio_command::DeviceHotplug::Disconnected);
+    bench.run_until(&tasks, "the lens to close on the departure", |bench| {
+        bench.lens_device_uid().is_none()
+    });
+
+    // …and goes back in: same endpoint, a live wire, the connect edge.
+    device.set_failure_plan(lpa_link::providers::fake_device::FakeFailurePlan::none());
+    bench.granted.set(true);
+    bench
+        .controller
+        .note_device_hotplug(crate::app::studio::studio_command::DeviceHotplug::Connected);
+    bench.run_until(&tasks, "the replugged board to come back Ready", |bench| {
+        bench
+            .view()
+            .devices
+            .first()
+            .is_some_and(|card| card.activity.is_none() && card.state_label == "Ready")
+    });
+    assert_eq!(bench.view().devices.len(), 1, "one board, one card");
+    bench
+        .open_lens(&uid)
+        .expect("the replugged board opens again");
+    assert_eq!(bench.lens_device_uid().as_deref(), Some(uid.as_str()));
+}
+
 /// One wire, one owner: a card verb that needs the board's wire while the
 /// editor is a lens on it closes the editor first, then RUNS — the card's
 /// verbs always work; the editor is what yields.
@@ -3012,6 +3083,136 @@ fn a_board_running_another_project_stops_the_open_until_push_here_answers_it() {
     );
 }
 
+/// Yona, 2026-09-24: `/p/…?on=mac:` loaded fresh in a browser that forgets
+/// Web Serial grants on reload. The console said "waiting for the device
+/// before opening it: missing session: this board is not connected" and
+/// the page said nothing at all, because nothing in a page can reach a
+/// board it holds no port for — only a click on `requestPort()` can.
+///
+/// The hold now tells the opening frame WHICH board and WHY; the frame
+/// turns `NotConnected` into its "Connect this board" button.
+#[test]
+fn a_fresh_page_names_the_board_it_cannot_reach() {
+    use crate::app::open_progress::{DeviceWaitReason, OpenStage, open_stage};
+
+    let device = empty_light_player("dev000000daqf6dvvr8");
+    let (bench, _tasks) = identified(&device, "usb-fresh-1");
+    let key = library_package(&bench, "Choker", SIM_TARGET);
+    // The page comes back with the board still on the desk: a fresh
+    // controller, and the same board behind a port it holds no grant for.
+    let (mut page, _tasks) = DeviceBench::reloaded(
+        &bench,
+        &empty_light_player("dev000000daqf6dvvr8"),
+        "usb-fresh-1",
+    );
+    drop(bench);
+    page.settle_library();
+    page.open_on_device(&key, BENCH_BOARD_MAC, false)
+        .expect("a held open is not a refusal");
+
+    let OpenStage::WaitingForDevice(wait) = open_stage() else {
+        panic!(
+            "the frame is told why it waits, not left at Starting: {:?}",
+            open_stage()
+        );
+    };
+    assert_eq!(wait.reason, DeviceWaitReason::NotConnected);
+    assert_eq!(wait.device.uid, "dev000000daqf6dvvr8");
+    assert!(
+        wait.device.id.is_some(),
+        "the remembered row is a roster device — what Reconnect aims at"
+    );
+}
+
+/// The other half of the frame's Connect: a held open on a board whose
+/// port is closed says so, and the Connect gesture it offers is all it
+/// takes for the open to land — no reload, no trip to Devices.
+#[test]
+fn connecting_the_board_a_held_open_waits_on_lands_the_open() {
+    use crate::app::open_progress::{DeviceWaitReason, OpenStage, open_stage};
+
+    let device = empty_light_player("dev000000daqf6dvvr8");
+    let (mut bench, tasks) = identified(&device, "usb-fresh-3");
+    let key = library_package(&bench, "Choker", SIM_TARGET);
+    bench.settle_library();
+    let board = bench.view().devices[0].id;
+    bench.gesture(DeviceAction::Disconnect { device: board });
+    bench.run_until(&tasks, "the port to close", |bench| {
+        bench.view().devices[0].state_label != "Ready"
+    });
+
+    bench
+        .open_on_device(&key, BENCH_BOARD_MAC, false)
+        .expect("a held open is not a refusal");
+    let OpenStage::WaitingForDevice(wait) = open_stage() else {
+        panic!("held, and told why: {:?}", open_stage());
+    };
+    assert_eq!(wait.reason, DeviceWaitReason::PortClosed);
+
+    bench.gesture(DeviceAction::Connect { device: board });
+    let deadline = std::time::Instant::now() + REAL_TIME_LIMIT;
+    while bench.controller.view().open_project_uid.is_none() {
+        bench.step(&tasks);
+        drive(bench.controller.try_pending_device_lens());
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the held open never landed; stage {:?}, roster {:?}",
+            open_stage(),
+            bench.view()
+        );
+        std::thread::sleep(Duration::from_millis(1));
+    }
+    assert_eq!(
+        bench.controller.view().open_project_uid.as_deref(),
+        Some(key.as_str())
+    );
+    assert_eq!(
+        open_stage(),
+        OpenStage::Idle,
+        "a landed open stops narrating"
+    );
+}
+
+/// The frame's Cancel on a held open: the hold is let go and nothing is
+/// left narrating, so a board that shows up later is not opened behind the
+/// person's back.
+#[test]
+fn cancelling_a_held_open_lets_the_board_go() {
+    use crate::app::open_progress::{OpenStage, open_stage};
+
+    let device = empty_light_player("dev000000daqf6dvvr8");
+    let (bench, _tasks) = identified(&device, "usb-fresh-2");
+    let key = library_package(&bench, "Choker", SIM_TARGET);
+    // The page comes back with the board still on the desk: a fresh
+    // controller, and the same board behind a port it holds no grant for.
+    let (mut page, tasks) = DeviceBench::reloaded(
+        &bench,
+        &empty_light_player("dev000000daqf6dvvr8"),
+        "usb-fresh-2",
+    );
+    drop(bench);
+    page.settle_library();
+    page.open_on_device(&key, BENCH_BOARD_MAC, false)
+        .expect("a held open is not a refusal");
+    assert!(page.controller.pending_device_lens_for_test().is_some());
+
+    crate::cancel_open();
+    drive(page.controller.dispatch(UiAction::from_op(
+        crate::RuntimeOp::NODE_ID,
+        crate::RuntimeOp::CancelOpen,
+    )))
+    .expect("cancel never fails");
+    assert_eq!(
+        page.controller.pending_device_lens_for_test(),
+        None,
+        "nothing is left to land when the board shows up"
+    );
+    assert_eq!(open_stage(), OpenStage::Idle);
+    page.step(&tasks);
+    drive(page.controller.try_pending_device_lens());
+    assert_eq!(page.controller.view().open_project_uid, None);
+}
+
 /// A MAC nothing answers to is not a failure and not a guess: the hint is
 /// dropped and the open takes its ordinary course (PD14). Nothing stops,
 /// because there is nothing to decide.
@@ -4258,6 +4459,20 @@ fn an_effect_that_outlives_its_activity_gives_the_wire_back_and_the_pump_resumes
             .is_some_and(|card| card.loaded_project == lpa_devices::view::LoadedProject::Empty)
     });
     let device_id = bench.view().devices[0].id;
+
+    // The precondition the fresh-window assertion below rests on, enforced
+    // rather than assumed: every question the board was asked is answered
+    // and on the wire BEFORE the push borrows it. Identify settles on the
+    // board's unsolicited boot hello while its own hello REQUEST is still in
+    // flight, and the fake's server answers that on a real thread in real
+    // time. On a loaded runner the answer was still inside the server when
+    // the push took the wire; the reopen flushes the wire, not the server,
+    // so the late hello landed in the fresh window and the card read Ready
+    // (CI, 2026-09-25, twice in 30 minutes; 11/96 under local load).
+    // docs/defects/2026-09-25-a-late-hello-answer-reaches-the-fresh-window.md
+    bench.run_until(&tasks, "every request to be answered onto the wire", |_| {
+        device.unanswered_requests() == 0
+    });
 
     // A push that never completes: it takes the wire and keeps it.
     bench.push_gesture(device_id, bundled_example());

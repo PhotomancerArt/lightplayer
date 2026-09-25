@@ -50,6 +50,7 @@ fn a_realistic_gradient_config_is_a_small_fraction_of_a_frame() {
                 set: vec![ramp(8); 4],
                 step_seconds: 20.0,
                 fade_seconds: 0.5,
+                pinned: None,
             },
             PROJECT_READ_FRAME_MAX_BYTES / 4,
         ),
@@ -74,6 +75,7 @@ fn even_the_maximal_legal_cycle_fits_one_frame_with_headroom() {
         set: vec![ramp(24); 8],
         step_seconds: 20.0,
         fade_seconds: 0.5,
+        pinned: None,
     };
     let len = lpc_wire::ser_write_json_len(&config.to_lp_value());
     assert!(

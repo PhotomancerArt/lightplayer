@@ -435,6 +435,8 @@ pub enum GradientError {
     TooManyCycleEntries(usize),
     /// The cycle entry at this index is itself invalid.
     CycleEntry(usize),
+    /// A cycle is pinned to this index, which is past the end of its set.
+    PinnedOutOfRange(usize),
 }
 
 impl fmt::Display for GradientError {
@@ -469,6 +471,9 @@ impl fmt::Display for GradientError {
                 crate::MAX_CYCLE_SET
             ),
             Self::CycleEntry(index) => write!(f, "gradient cycle entry {index} is invalid"),
+            Self::PinnedOutOfRange(index) => {
+                write!(f, "gradient cycle is pinned to entry {index}, past its set")
+            }
         }
     }
 }

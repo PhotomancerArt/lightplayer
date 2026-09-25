@@ -1,0 +1,281 @@
+{
+  "record": {
+    "fields": [
+      {
+        "name": "source",
+        "shape": {
+          "custom": {
+            "codec": 2355797192,
+            "meta": {},
+            "shape": {
+              "value": {
+                "shape": {
+                  "editor": "plain",
+                  "id": 177956922,
+                  "meta": {},
+                  "ty": "string"
+                }
+              }
+            }
+          }
+        }
+      },
+      {
+        "name": "render_order",
+        "shape": {
+          "value": {
+            "shape": {
+              "editor": {
+                "number": {
+                  "step": 1.0
+                }
+              },
+              "id": 1231123999,
+              "meta": {},
+              "ty": "i32"
+            }
+          }
+        }
+      },
+      {
+        "name": "bindings",
+        "shape": {
+          "map": {
+            "key": "string",
+            "meta": {},
+            "value": {
+              "ref": {
+                "id": 1885459118
+              }
+            }
+          }
+        }
+      },
+      {
+        "name": "float_mode",
+        "shape": {
+          "option": {
+            "meta": {},
+            "some": {
+              "value": {
+                "shape": {
+                  "editor": {
+                    "dropdown": {
+                      "options": [
+                        {
+                          "label": "Float (f32)",
+                          "value": "float"
+                        },
+                        {
+                          "label": "Fixed (Q32)",
+                          "value": "fixed"
+                        }
+                      ]
+                    }
+                  },
+                  "id": 4255570002,
+                  "meta": {
+                    "description": "Unset = Auto (target default): the target's native representation. Set this only to force one representation regardless of target.",
+                    "label": "Float mode"
+                  },
+                  "ty": "string"
+                }
+              }
+            }
+          }
+        }
+      },
+      {
+        "name": "param_defs",
+        "shape": {
+          "map": {
+            "key": "string",
+            "meta": {},
+            "value": {
+              "ref": {
+                "id": 3712581622
+              }
+            }
+          }
+        }
+      },
+      {
+        "name": "consumed",
+        "shape": {
+          "map": {
+            "key": "string",
+            "meta": {},
+            "value": {
+              "ref": {
+                "id": 90603770
+              }
+            }
+          }
+        }
+      },
+      {
+        "name": "space",
+        "shape": {
+          "enum": {
+            "meta": {},
+            "variants": [
+              {
+                "name": "TwoD",
+                "shape": {
+                  "record": {
+                    "fields": [
+                      {
+                        "name": "in_1d",
+                        "shape": {
+                          "enum": {
+                            "meta": {},
+                            "variants": [
+                              {
+                                "name": "Default",
+                                "shape": {
+                                  "unit": {
+                                    "meta": {}
+                                  }
+                                }
+                              }
+                            ]
+                          }
+                        }
+                      }
+                    ],
+                    "meta": {}
+                  }
+                }
+              },
+              {
+                "name": "OneD",
+                "shape": {
+                  "record": {
+                    "fields": [
+                      {
+                        "name": "in_2d",
+                        "shape": {
+                          "enum": {
+                            "meta": {},
+                            "variants": [
+                              {
+                                "name": "Project",
+                                "shape": {
+                                  "record": {
+                                    "fields": [
+                                      {
+                                        "name": "shape",
+                                        "shape": {
+                                          "enum": {
+                                            "meta": {},
+                                            "variants": [
+                                              {
+                                                "name": "ExtrudeX",
+                                                "shape": {
+                                                  "unit": {
+                                                    "meta": {}
+                                                  }
+                                                }
+                                              },
+                                              {
+                                                "name": "ExtrudeY",
+                                                "shape": {
+                                                  "unit": {
+                                                    "meta": {}
+                                                  }
+                                                }
+                                              },
+                                              {
+                                                "name": "Radial",
+                                                "shape": {
+                                                  "unit": {
+                                                    "meta": {}
+                                                  }
+                                                }
+                                              },
+                                              {
+                                                "name": "Angular",
+                                                "shape": {
+                                                  "unit": {
+                                                    "meta": {}
+                                                  }
+                                                }
+                                              }
+                                            ]
+                                          }
+                                        }
+                                      },
+                                      {
+                                        "name": "mirror",
+                                        "shape": {
+                                          "enum": {
+                                            "meta": {},
+                                            "variants": [
+                                              {
+                                                "name": "Normal",
+                                                "shape": {
+                                                  "unit": {
+                                                    "meta": {}
+                                                  }
+                                                }
+                                              },
+                                              {
+                                                "name": "Mirrored",
+                                                "shape": {
+                                                  "unit": {
+                                                    "meta": {}
+                                                  }
+                                                }
+                                              }
+                                            ]
+                                          }
+                                        }
+                                      },
+                                      {
+                                        "name": "flip",
+                                        "shape": {
+                                          "enum": {
+                                            "meta": {},
+                                            "variants": [
+                                              {
+                                                "name": "Normal",
+                                                "shape": {
+                                                  "unit": {
+                                                    "meta": {}
+                                                  }
+                                                }
+                                              },
+                                              {
+                                                "name": "Flipped",
+                                                "shape": {
+                                                  "unit": {
+                                                    "meta": {}
+                                                  }
+                                                }
+                                              }
+                                            ]
+                                          }
+                                        }
+                                      }
+                                    ],
+                                    "meta": {}
+                                  }
+                                }
+                              }
+                            ]
+                          }
+                        }
+                      }
+                    ],
+                    "meta": {}
+                  }
+                }
+              }
+            ]
+          }
+        }
+      }
+    ],
+    "meta": {}
+  }
+}

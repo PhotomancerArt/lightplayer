@@ -1,0 +1,19 @@
+{
+  "kind": "Shader",
+  "source": "active.glsl",
+  "render_order": 0,
+  "bindings": {
+    "time": {
+      "source": "node:..#entry_time"
+    }
+  },
+  "consumed": {
+    "time": {
+      "kind": "value",
+      "value": "f32",
+      "default": 0,
+      "label": "",
+      "description": ""
+    }
+  }
+}

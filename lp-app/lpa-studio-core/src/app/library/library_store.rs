@@ -818,7 +818,7 @@ mod tests {
         vec![
             (
                 "project.json".to_string(),
-                br#"{"format":10,"name":"demo"}"#.to_vec(),
+                br#"{"format":11,"name":"demo"}"#.to_vec(),
             ),
             (
                 "module.json".to_string(),
@@ -889,7 +889,7 @@ mod tests {
         let store = store();
         let files = vec![(
             "project.json".to_string(),
-            br#"{"format":10,"name":"porch","target":"seeed/xiao-esp32-c6"}"#.to_vec(),
+            br#"{"format":11,"name":"porch","target":"seeed/xiao-esp32-c6"}"#.to_vec(),
         )];
 
         let summary = store

@@ -2268,7 +2268,9 @@ fn resolve_palette_input(
 /// A static config never queries the timebase — there is one gradient and no
 /// phase to read, so a shader whose palette does not cycle costs no timebase
 /// work at all. A cycle makes exactly **one** query, for the whole set's
-/// pass; see [`palette_eval`](super::palette_eval).
+/// pass; see [`palette_eval`](super::palette_eval). A *pinned* cycle still
+/// makes it: the answer is ignored, but the phasor keeps its place in time so
+/// an unpin lands where time says rather than where the pin began.
 fn palette_cycle_position_for(
     ctx: &mut TickContext<'_>,
     config: &GradientConfig,
