@@ -394,6 +394,10 @@ fn boot_firmware(spawner: embassy_executor::Spawner) -> FirmwareApp {
     // because the paint runs on the main stack and the arena is `.bss`, not
     // stack. Mirrors the classic's placement exactly.
     stack_probe::paint();
+    // PROOF, REVERTED IN THIS PR: 64 B of `.bss` that moves the pinned figures.
+    static PROOF_BSS: [core::sync::atomic::AtomicU32; 16] =
+        [const { core::sync::atomic::AtomicU32::new(0) }; 16];
+    let _ = core::hint::black_box(&PROOF_BSS);
     esp_println::println!("[INIT] fw-esp32s3 boot");
     esp_println::println!("[INIT] chip=esp32s3 arch=xtensa heap={HEAP_SIZE}");
 
