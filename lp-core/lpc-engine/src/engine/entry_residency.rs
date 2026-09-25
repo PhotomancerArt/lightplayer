@@ -187,6 +187,11 @@ impl Engine {
             self.park_owned_panel_writers(child)?;
             self.remove_runtime_subtree(child, frame)?;
         }
+        // The entry's own sink scope is owned by the playlist, which stays,
+        // so the subtree removal above cannot tell its channel phasors are
+        // dead. Only the entry's nodes read that scope (it is a sink), and a
+        // woken entry starts its phase fresh (vision Q6).
+        self.forget_scope_phasors(ScopeRef::Sink { owner, entry });
         Ok(Ok(()))
     }
 

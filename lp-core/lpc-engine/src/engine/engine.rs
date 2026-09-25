@@ -337,9 +337,23 @@ impl Engine {
             self.project_runtime_index.remove_runtime_node(id);
         }
         self.demand_roots.retain(|root| !ids.contains(root));
+        // The removed nodes' phasors, and those of the scopes they owned,
+        // go now rather than after the store's idle horizon: a removed id
+        // never asks again, so waiting only keeps dead state on the heap
+        // (see `TimebaseStore::forget_removed`).
+        self.timebases
+            .forget_removed(|id| ids.contains(&id), |scope| ids.contains(&scope.owner()));
         self.tree.remove_subtree(node, frame)?;
         self.resolver.invalidate_structure();
         Ok(())
+    }
+
+    /// Drop every phasor keyed to `scope` now, for a scope that outlives
+    /// its owner's children but not their readings (a playlist entry's
+    /// sink, when the entry unloads).
+    pub(crate) fn forget_scope_phasors(&mut self, scope: crate::node::ScopeRef) {
+        self.timebases
+            .forget_removed(|_| false, |candidate| *candidate == scope);
     }
 
     pub(crate) fn reattach_runtime_node(
