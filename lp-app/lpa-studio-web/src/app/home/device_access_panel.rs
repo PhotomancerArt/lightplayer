@@ -104,7 +104,7 @@ fn OnSection(
     rsx! {
         div { class: "tw:grid tw:gap-1",
             p { class: "tw:m-0 tw:text-[11px] tw:font-bold tw:uppercase tw:tracking-wide tw:text-dim-foreground",
-                "Passwords set from this browser"
+                "Device passwords set from this browser"
             }
             if panel.secrets.is_empty() {
                 p { class: HELP_CLASS, "None yet." }
@@ -140,10 +140,10 @@ fn OnSection(
                     TierChoice { tier }
                 }
                 PasswordField { value: password, initially_shown: show_passwords }
-                button { class: quiet_action_class(), r#type: "submit", disabled: busy, "Add password" }
+                button { class: quiet_action_class(), r#type: "submit", disabled: busy, "Add device password" }
             }
             p { class: HELP_CLASS,
-                "The piece may also hold passwords added from another browser. Saving from here replaces them."
+                "The piece may also hold device passwords added from another browser. Saving from here replaces them."
             }
             button {
                 class: TEXT_BUTTON_CLASS,
@@ -163,7 +163,7 @@ fn OnSection(
             }
             span { class: "tw:grid tw:gap-0.5",
                 span { "Open, no password (play only)" }
-                span { class: HELP_CLASS, "Anyone nearby can turn its knobs. Editing still needs a password." }
+                span { class: HELP_CLASS, "Anyone nearby can turn its knobs. Editing still needs a device password." }
             }
         }
         button {
@@ -225,7 +225,7 @@ fn TurnOnForm(
                 onclick: move |_| on_change.call(DeviceAccessChange::Enable { secret: None, open: true }),
                 "Turn on open, no password (play only)"
             }
-            p { class: HELP_CLASS, "Anyone nearby can turn its knobs. Editing still needs a password." }
+            p { class: HELP_CLASS, "Anyone nearby can turn its knobs. Editing still needs a device password." }
         }
     }
 }
@@ -238,9 +238,11 @@ pub(crate) fn state_sentence(panel: &UiAccessPanel) -> &'static str {
             "Not set from this browser. Bluetooth is off unless someone turned it on elsewhere."
         }
         (Some(false), _, _) => "Off. This piece is reached by USB only.",
-        (Some(true), true, _) => "On and open: anyone nearby can play. Editing needs a password.",
-        (Some(true), false, true) => "On, but no password is set here — add one.",
-        (Some(true), false, false) => "On and locked: only these passwords reach it.",
+        (Some(true), true, _) => {
+            "On and open: anyone nearby can play. Editing needs a device password."
+        }
+        (Some(true), false, true) => "On, but no device password is set here — add one.",
+        (Some(true), false, false) => "On and locked: only these device passwords reach it.",
     }
 }
 

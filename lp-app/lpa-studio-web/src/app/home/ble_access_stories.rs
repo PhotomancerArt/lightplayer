@@ -23,7 +23,7 @@ use crate::app::home::login_sheet::LoginSheet;
 use crate::app::project::project_bluetooth_section::ProjectBluetoothSection;
 
 #[story(
-    description = "The password sheet (BLE M6), three reasons. Top: a piece asked and Studio knew nothing to try (no default, none remembered). Middle: the passwords tried were refused, and the piece's backoff is said as a time, never as \"failed\". Bottom: an edit was refused on a play login. Remember on this browser is on by default; Not now closes it and the card keeps a Log in verb. On a phone it rises from the bottom; on a wide window it is a centred card."
+    description = "The device-password sheet (BLE M6, G3 copy: Unlock, never Log in — log in is the cloud account, and a user must not type that password here), titled \"Unlock PLAYFUL choker\", three reasons. Top: a piece asked and Studio knew nothing to try (no default, none remembered). Middle: the passwords tried were refused, and the piece's backoff is said as a time, never as \"failed\". Bottom: an edit was refused on a play login. Remember on this browser is on by default; Not now closes it and the card keeps an Unlock verb. On a phone it rises from the bottom; on a wide window it is a centred card."
 )]
 fn ble_login_sheet() -> Element {
     let prompt = |reason: &str, retry: Option<u64>| UiLoginPrompt {
@@ -36,18 +36,18 @@ fn ble_login_sheet() -> Element {
     rsx! {
         div { class: "tw:grid tw:gap-4 tw:p-3",
             LoginSheet {
-                prompt: prompt("PLAYFUL choker asks for a password.", None),
+                prompt: prompt("PLAYFUL choker asks for its device password.", None),
                 on_access: |_| {},
                 inline: true,
                 typed: Some("s'mores".to_string()),
             }
             LoginSheet {
-                prompt: prompt("That password didn't open PLAYFUL choker. It will listen again in 4 s.", Some(3_500)),
+                prompt: prompt("That device password didn't unlock PLAYFUL choker. It will listen again in 4 s.", Some(3_500)),
                 on_access: |_| {},
                 inline: true,
             }
             LoginSheet {
-                prompt: prompt("This needs an edit password. You're logged in to PLAYFUL choker to play only.", None),
+                prompt: prompt("This needs an edit device password. PLAYFUL choker is unlocked for play only.", None),
                 on_access: |_| {},
                 inline: true,
             }
@@ -104,7 +104,7 @@ fn ble_access_panel_open() -> Element {
 }
 
 #[story(
-    description = "The add slot, per browser (BLE M5 copy, G3 rework). \"Connect a board\", then \"via USB\" and \"via Bluetooth\" — BOTH always drawn; one this browser cannot drive is DISABLED with its reason under it and a way to continue. Chrome/Edge: both live. Brave: Bluetooth disabled, the flag's address as select-and-copy text (a page cannot open brave://). Firefox and desktop Safari: both disabled, both need Chrome or Edge, and this page's address is given ONCE to open there. iPhone Safari (and Chrome on iOS): USB needs a computer; Bluetooth needs Bluefy — a link to it on the App Store, then this page's address to open in it. Bluefy: USB disabled with the address to open on a computer, Bluetooth live and solid. Bluetooth off: turn it on and reload. Never a generic \"connect failed\"."
+    description = "The add slot, per browser (BLE M5 copy, G3 rework). \"Connect a board\", then \"via USB\" and \"via Bluetooth\" — BOTH always drawn; one this browser cannot drive is DISABLED with its reason under it and a way to continue. Chrome/Edge: both live. Brave: Bluetooth disabled, the flag's address as select-and-copy text (a page cannot open brave://). Firefox and desktop Safari: both disabled, both need Chrome or Edge, and this page's address is given ONCE to open there. iPhone Safari (and Chrome on iOS): USB needs a computer; Bluetooth needs Bluefy — a link to it on the App Store, then this page's address to open in it. Bluefy: USB disabled with the address to open on a computer, Bluetooth live. Bluetooth off: turn it on and reload. Never a generic \"connect failed\"."
 )]
 fn ble_add_slot_by_browser() -> Element {
     rsx! {
@@ -122,7 +122,7 @@ fn ble_add_slot_by_browser() -> Element {
 }
 
 #[story(
-    description = "The add slot in Chrome or Edge on a computer (G3): \"Connect a board\", both buttons live — via USB the spectrum Primary, via Bluetooth the outline beside it — and \"start a board here\" below."
+    description = "The add slot in Chrome or Edge on a computer (G3): \"Connect a board\", both buttons live, one full-width column — via USB the spectrum Primary, via Bluetooth the Secondary under it — and \"start a board here\" below."
 )]
 fn ble_add_slot_chrome() -> Element {
     rsx! { AddSlotAs { reach: BleReach::Ready, usb: true } }
@@ -150,7 +150,7 @@ fn ble_add_slot_iphone_safari() -> Element {
 }
 
 #[story(
-    description = "The add slot in Bluefy on iPhone (G3): Web Bluetooth but no Web Serial. via USB DISABLED with its reason and this page's address to open on a computer; via Bluetooth live, and the slot's solid verb."
+    description = "The add slot in Bluefy on iPhone (G3): Web Bluetooth but no Web Serial. via USB DISABLED with its reason and this page's address to open on a computer; via Bluetooth live."
 )]
 fn ble_add_slot_bluefy() -> Element {
     rsx! { AddSlotAs { reach: BleReach::Ready, usb: false } }
@@ -185,18 +185,18 @@ fn AddSlotAs(reach: BleReach, usb: bool) -> Element {
 }
 
 #[story(
-    description = "A piece reached over Bluetooth (BLE M5/M6). The device line leads with the login — \"Logged in as camp — play\" — and the Firmware zone's verbs are drawn DISABLED with the reason under them, \"Firmware updates need USB\"; Reset likewise needs USB. At play the Device zone offers Log in for edit. Right: the same piece logged in at edit, where the Bluetooth panel's trigger replaces it."
+    description = "A piece reached over Bluetooth (BLE M5/M6). The device line leads with the unlock — \"Unlocked as camp — play\" — and the Firmware zone's verbs are drawn DISABLED with the reason under them, \"Firmware updates need USB\"; Reset likewise needs USB. At play the Device zone offers Unlock for edit. Right: the same piece unlocked at edit, where the Bluetooth panel's trigger replaces it."
 )]
 fn ble_device_card_over_bluetooth() -> Element {
     let play = UiDeviceAccess {
         over_bluetooth: true,
-        line: Some("Logged in as camp — play".to_string()),
-        log_in: Some("Log in for edit".to_string()),
+        line: Some("Unlocked as camp — play".to_string()),
+        log_in: Some("Unlock for edit".to_string()),
         panel: None,
     };
     let edit = UiDeviceAccess {
         over_bluetooth: true,
-        line: Some("Logged in as default — edit".to_string()),
+        line: Some("Unlocked as default — edit".to_string()),
         log_in: None,
         panel: Some(panel(
             Some(true),

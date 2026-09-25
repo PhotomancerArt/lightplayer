@@ -545,7 +545,7 @@ pub(crate) fn DeviceRosterCard(
             // mid-activity, which the shipped system could not do.
             footer { class: device_zone_class(),
                 // The info line, with the access verbs at its end (BLE M6):
-                // "Log in" / "Log in for edit" opens the password sheet, and
+                // "Unlock" / "Unlock for edit" opens the password sheet, and
                 // "Bluetooth" opens the device access panel in the top
                 // layer. On the LINE rather than in the verb row, because a
                 // Bluetooth card's row already holds Reset-with-its-reason,
@@ -726,7 +726,7 @@ pub(crate) fn DeviceRenameSection(
 /// (`CARD_MENU_TRIGGER_CLASS`), so the two cards' menus read as one
 /// control. Resets UA button chrome itself — Tailwind preflight is not
 /// loaded.
-/// A verb that rides the Device zone's 17px info line (BLE M6's "Log in"
+/// A verb that rides the Device zone's 17px info line (BLE M6's "Unlock"
 /// and "Bluetooth"): text with a dotted underline, no chrome, so it fits
 /// the line's height and reads as something to press.
 const LINE_VERB_CLASS: &str = "tw:flex-none tw:cursor-pointer tw:appearance-none tw:border-0 tw:bg-transparent tw:p-0 tw:text-xs tw:font-semibold tw:leading-[17px] tw:text-strong-foreground tw:underline tw:decoration-dotted tw:underline-offset-2 tw:hover:decoration-solid ux-focus-ring";

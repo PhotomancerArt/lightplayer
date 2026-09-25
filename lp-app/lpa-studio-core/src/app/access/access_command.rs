@@ -19,7 +19,7 @@ pub enum AccessCommand {
         passwords_json: Option<String>,
         devices_json: Option<String>,
     },
-    /// The sheet's Log in: try this password on the device's link.
+    /// The sheet's Unlock: try this password on the device's link.
     SubmitPassword {
         device: DeviceId,
         password: String,
@@ -27,7 +27,7 @@ pub enum AccessCommand {
     },
     /// The sheet's Not now.
     Dismiss { device: DeviceId },
-    /// The card's "Log in" / "Log in for edit": open the sheet.
+    /// The card's "Unlock" / "Unlock for edit": open the sheet.
     LogIn { device: DeviceId },
     /// Settings' "Forget remembered passwords".
     ForgetRememberedPasswords,

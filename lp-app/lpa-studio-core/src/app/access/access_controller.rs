@@ -467,10 +467,10 @@ impl AccessController {
                     .flatten()
             });
         let log_in = session.and_then(|session| match &session.phase {
-            AccessPhase::Locked => Some("Log in".to_string()),
+            AccessPhase::Locked => Some("Unlock".to_string()),
             AccessPhase::Granted {
                 tier: Tier::Play, ..
-            } => Some("Log in for edit".to_string()),
+            } => Some("Unlock for edit".to_string()),
             _ => None,
         });
         let panel = self.panel(device, default_password);
@@ -784,6 +784,6 @@ mod tests {
             refused,
             lpa_client::ClientError::NotPermitted { needs: Tier::Edit }
         );
-        assert!(super::super::not_permitted_sentence(Tier::Edit).contains("edit password"));
+        assert!(super::super::not_permitted_sentence(Tier::Edit).contains("edit device password"));
     }
 }

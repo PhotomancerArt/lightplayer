@@ -54,8 +54,10 @@ impl fmt::Display for ClientError {
             // The sentence a person reads: every caller that shows an
             // error (a push outcome, an action log) says what to do.
             Self::NotPermitted { needs } => f.write_str(match needs {
-                lpc_access::Tier::Edit => "This needs an edit password — log in again with one.",
-                lpc_access::Tier::Play => "This needs a password — log in first.",
+                lpc_access::Tier::Edit => {
+                    "This needs an edit device password — unlock again with one."
+                }
+                lpc_access::Tier::Play => "This needs a device password — unlock first.",
             }),
         }
     }

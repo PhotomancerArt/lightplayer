@@ -12,7 +12,7 @@ use lpa_studio_core::AccessTier;
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 pub(crate) fn PasswordField(
     value: Signal<String>,
-    #[props(default = "Password".to_string())] label: String,
+    #[props(default = "Device password".to_string())] label: String,
     /// Stories: start shown.
     #[props(default)]
     initially_shown: bool,
@@ -54,7 +54,7 @@ pub(crate) fn TierChoice(tier: Signal<AccessTier>) -> Element {
     rsx! {
         div { class: "tw:flex tw:flex-none tw:overflow-hidden tw:rounded tw:border tw:border-border",
             role: "group",
-            aria_label: "What this password can do",
+            aria_label: "What this device password can do",
             button {
                 class: segment_class(tier() == AccessTier::Play),
                 r#type: "button",

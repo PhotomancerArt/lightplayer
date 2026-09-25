@@ -166,7 +166,7 @@ pub struct UiStudioView {
     /// settings. `None` without a library project open.
     pub project_access: Option<crate::app::access::UiProjectAccess>,
     /// The editor lens.s login line when its board is reached over
-    /// Bluetooth ("Logged in as camp — play"), for Play.s header.
+    /// Bluetooth ("Unlocked as camp — play"), for Play.s header.
     pub lens_access_line: Option<String>,
 }
 

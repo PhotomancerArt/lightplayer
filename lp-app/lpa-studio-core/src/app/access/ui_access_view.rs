@@ -12,9 +12,9 @@ use lpc_access::Tier;
 pub struct UiDeviceAccess {
     /// Reached over Bluetooth right now.
     pub over_bluetooth: bool,
-    /// The login line ("Logged in as camp — play"), for a Bluetooth link.
+    /// The login line ("Unlocked as camp — play"), for a Bluetooth link.
     pub line: Option<String>,
-    /// Offer "Log in" (nothing granted) or "Log in for edit" (play).
+    /// Offer "Unlock" (nothing granted) or "Unlock for edit" (play).
     pub log_in: Option<String>,
     /// The device access panel, when this link may write the device store.
     pub panel: Option<UiAccessPanel>,
@@ -59,7 +59,7 @@ pub struct UiLoginPrompt {
     pub reason: String,
     /// The board's backoff, when a refusal set one.
     pub retry_after_ms: Option<u64>,
-    /// A login is running (the button reads "Logging in…").
+    /// A login is running (the button reads "Unlocking…").
     pub busy: bool,
 }
 
@@ -75,18 +75,18 @@ pub struct UiProjectAccess {
 pub fn prompt_sentence(reason: &super::PromptReason, device_name: &str) -> String {
     use super::PromptReason;
     match reason {
-        PromptReason::NoPasswordKnown => format!("{device_name} asks for a password."),
+        PromptReason::NoPasswordKnown => format!("{device_name} asks for its device password."),
         PromptReason::Refused { retry_after_ms } => match *retry_after_ms {
-            0 => format!("That password didn't open {device_name}."),
+            0 => format!("That device password didn't unlock {device_name}."),
             ms => format!(
-                "That password didn't open {device_name}. It will listen again in {} s.",
+                "That device password didn't unlock {device_name}. It will listen again in {} s.",
                 ms.div_ceil(1_000)
             ),
         },
         PromptReason::NeedsEdit => {
-            format!("This needs an edit password. You're logged in to {device_name} to play only.")
+            format!("This needs an edit device password. {device_name} is unlocked for play only.")
         }
-        PromptReason::Asked => format!("Log in to {device_name} with another password."),
+        PromptReason::Asked => format!("Unlock {device_name} with another device password."),
     }
 }
 
@@ -95,11 +95,11 @@ pub fn access_line(phase: &super::AccessPhase) -> Option<String> {
     use super::AccessPhase;
     Some(match phase {
         AccessPhase::Unknown | AccessPhase::Checking => "Connecting over Bluetooth…".to_string(),
-        AccessPhase::LoggingIn => "Logging in…".to_string(),
+        AccessPhase::LoggingIn => "Unlocking…".to_string(),
         AccessPhase::Granted {
             tier,
             label: Some(label),
-        } => format!("Logged in as {label} — {}", super::tier_word(*tier)),
+        } => format!("Unlocked as {label} — {}", super::tier_word(*tier)),
         AccessPhase::Granted {
             tier: Tier::Play,
             label: None,
@@ -108,9 +108,9 @@ pub fn access_line(phase: &super::AccessPhase) -> Option<String> {
             tier: Tier::Edit,
             label: None,
         } => "Connected — edit".to_string(),
-        AccessPhase::Locked => "Needs a password".to_string(),
+        AccessPhase::Locked => "Needs a device password".to_string(),
         AccessPhase::Unreachable => {
-            "Bluetooth has no password here — connect by USB to set one".to_string()
+            "Bluetooth has no device password here — connect by USB to set one".to_string()
         }
     })
 }
@@ -128,7 +128,7 @@ mod tests {
                 label: Some("camp".to_string())
             })
             .as_deref(),
-            Some("Logged in as camp — play")
+            Some("Unlocked as camp — play")
         );
         assert_eq!(
             access_line(&AccessPhase::Granted {
@@ -150,6 +150,30 @@ mod tests {
         );
         assert!(sentence.contains("in 4 s"), "{sentence}");
         assert!(!sentence.to_lowercase().contains("failed"));
-        assert!(prompt_sentence(&PromptReason::NeedsEdit, "Choker").contains("edit password"));
+        assert!(
+            prompt_sentence(&PromptReason::NeedsEdit, "Choker").contains("edit device password")
+        );
+    }
+
+    /// G3: the device's door says "Unlock" and "device password", never
+    /// "log in" — that is the cloud account's word, and its password must
+    /// not be typed here.
+    #[test]
+    fn the_sheet_asks_for_a_device_password_never_a_login() {
+        for reason in [
+            PromptReason::NoPasswordKnown,
+            PromptReason::NeedsEdit,
+            PromptReason::Asked,
+            PromptReason::Refused { retry_after_ms: 0 },
+        ] {
+            let sentence = prompt_sentence(&reason, "Choker");
+            assert!(sentence.contains("device password"), "{sentence}");
+            assert!(!sentence.to_lowercase().contains("log"), "{sentence}");
+        }
+        for tier in [Tier::Play, Tier::Edit] {
+            let sentence = super::super::not_permitted_sentence(tier);
+            assert!(sentence.contains("device password"), "{sentence}");
+            assert!(!sentence.to_lowercase().contains("log in"), "{sentence}");
+        }
     }
 }

@@ -29,7 +29,7 @@ pub(crate) fn LoginSheet(
     let password = use_signal(|| typed.clone().unwrap_or_default());
     let mut remember = use_signal(|| true);
     let busy = prompt.busy;
-    let submit_label = if busy { "Logging in…" } else { "Log in" };
+    let submit_label = if busy { "Unlocking…" } else { "Unlock" };
     let frame_class = if inline {
         INLINE_FRAME_CLASS
     } else {
@@ -39,7 +39,7 @@ pub(crate) fn LoginSheet(
         div { class: frame_class,
             role: "dialog",
             aria_modal: "true",
-            aria_label: "Log in to {prompt.device_name}",
+            aria_label: "Unlock {prompt.device_name}",
             form {
                 class: SHEET_CLASS,
                 onsubmit: move |event| {
@@ -55,7 +55,7 @@ pub(crate) fn LoginSheet(
                     });
                 },
                 h2 { class: "tw:m-0 tw:text-base tw:font-bold tw:text-strong-foreground",
-                    "Log in to {prompt.device_name}"
+                    "Unlock {prompt.device_name}"
                 }
                 p { class: "tw:m-0 tw:text-sm tw:leading-snug tw:text-muted-foreground", "{prompt.reason}" }
                 PasswordField { value: password, autofocus: true }
@@ -68,7 +68,7 @@ pub(crate) fn LoginSheet(
                     "Remember on this browser"
                 }
                 p { class: HELP_CLASS,
-                    "Studio tries remembered passwords first on the next piece that asks."
+                    "Studio tries remembered device passwords first on the next piece that asks."
                 }
                 div { class: "tw:flex tw:items-center tw:justify-end tw:gap-2 tw:pt-1",
                     button {

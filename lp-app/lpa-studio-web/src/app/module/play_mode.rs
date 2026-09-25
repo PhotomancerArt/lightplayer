@@ -34,7 +34,7 @@ pub fn PlayModeSurface(
     /// reachable in play mode. `None` hides the switch.
     #[props(default = Some(true))]
     auto_save: Option<bool>,
-    /// How this piece is reached, when it is over Bluetooth ("Logged in
+    /// How this piece is reached, when it is over Bluetooth ("Unlocked
     /// as camp — play"): the one line a phone on a piece.s panel needs to
     /// know why an edit might ask for a password (BLE M6).
     #[props(default)]

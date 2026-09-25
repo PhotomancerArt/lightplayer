@@ -56,8 +56,8 @@ pub use lpc_access::Tier as AccessTier;
 /// action error, the card's push outcome and the sheet.
 pub fn not_permitted_sentence(needs: lpc_access::Tier) -> &'static str {
     match needs {
-        lpc_access::Tier::Edit => "This needs an edit password — log in again with one.",
-        lpc_access::Tier::Play => "This needs a password — log in first.",
+        lpc_access::Tier::Edit => "This needs an edit device password — unlock again with one.",
+        lpc_access::Tier::Play => "This needs a device password — unlock first.",
     }
 }
 

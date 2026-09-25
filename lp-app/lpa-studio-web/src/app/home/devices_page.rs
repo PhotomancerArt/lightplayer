@@ -225,20 +225,18 @@ pub(crate) fn AddDeviceCard(
             p { class: "tw:m-0 tw:text-center tw:text-sm tw:font-semibold tw:text-strong-foreground",
                 "Connect a board"
             }
-            div { class: "tw:grid tw:w-full tw:max-w-64 tw:justify-items-center tw:gap-3 tw:text-center",
+            // One column, both buttons the full width of it, so the two
+            // paths read as a pair whatever each says under it. USB wears
+            // the Primary spectrum ring, Bluetooth the Secondary tier.
+            div { class: "tw:grid tw:w-full tw:max-w-64 tw:gap-3 tw:text-center",
                 TransportOffer {
                     action: usb_action,
-                    variant: ActionButtonVariant::Solid,
                     note: verbs.usb.note,
                     page_url: page_url.clone(),
                     on_action,
                 }
-                // With no USB here (Bluefy) Bluetooth is the slot's live
-                // path, so it wears the solid tier; beside a live USB
-                // button it is the quieter outline.
                 TransportOffer {
                     action: ble_action,
-                    variant: if verbs.usb.enabled { ActionButtonVariant::Outline } else { ActionButtonVariant::Solid },
                     note: verbs.ble.note,
                     page_url,
                     on_action,
@@ -257,7 +255,6 @@ pub(crate) fn AddDeviceCard(
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 fn TransportOffer(
     action: UiAction,
-    variant: ActionButtonVariant,
     note: Option<ReachNote>,
     page_url: String,
     on_action: EventHandler<UiAction>,
@@ -267,12 +264,12 @@ fn TransportOffer(
         ReachCopy::ThisPage => page_url.clone(),
     });
     rsx! {
-        div { class: "tw:grid tw:w-full tw:justify-items-center tw:gap-1",
-            ActionButton { action, running: false, variant, on_action }
+        div { class: "tw:grid tw:w-full tw:gap-1",
+            ActionButton { action, running: false, on_action }
             if let Some(note) = note {
                 if let Some(link) = note.link {
                     a {
-                        class: "tw:text-xs tw:font-semibold tw:text-strong-foreground tw:underline tw:underline-offset-2",
+                        class: "tw:justify-self-center tw:text-xs tw:font-semibold tw:text-strong-foreground tw:underline tw:underline-offset-2",
                         href: link.href,
                         target: "_blank",
                         rel: "noopener",
@@ -285,7 +282,7 @@ fn TransportOffer(
                     }
                 }
                 if let Some(copy) = copy {
-                    code { class: "tw:select-all tw:[overflow-wrap:anywhere] tw:rounded-sm tw:bg-card-muted tw:px-1.5 tw:py-0.5 tw:font-mono tw:text-[11px] tw:text-strong-foreground",
+                    code { class: "tw:justify-self-center tw:select-all tw:[overflow-wrap:anywhere] tw:rounded-sm tw:bg-card-muted tw:px-1.5 tw:py-0.5 tw:font-mono tw:text-[11px] tw:text-strong-foreground",
                         "{copy}"
                     }
                 }

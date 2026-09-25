@@ -30,7 +30,7 @@ pub(crate) fn ProjectBluetoothSection(
                 "Who can use this piece over Bluetooth"
             }
             if access.secrets.is_empty() {
-                p { class: HELP_CLASS, "No passwords of its own yet — the piece's own settings decide." }
+                p { class: HELP_CLASS, "No device passwords of its own yet — the piece's own settings decide." }
             }
             ul { class: "tw:m-0 tw:grid tw:list-none tw:p-0",
                 for secret in access.secrets.iter().cloned() {
@@ -63,7 +63,7 @@ pub(crate) fn ProjectBluetoothSection(
                     TierChoice { tier }
                 }
                 PasswordField { value: password, initially_shown: show_password }
-                button { class: quiet_action_class(), r#type: "submit", "Add password" }
+                button { class: quiet_action_class(), r#type: "submit", "Add device password" }
             }
             if let Some(error) = access.error.clone() {
                 p { class: "tw:m-0 tw:text-xs tw:text-status-error-foreground", "{error}" }

@@ -16,7 +16,7 @@
 //! Automatic tries are spent once per device, not once per connect: a board
 //! that refused them will refuse them again, and burning its backoff on
 //! every silent reconnect would lock out the password the user is about to
-//! type. A user gesture (a typed password, "Log in") re-arms it.
+//! type. A user gesture (a typed password, "Unlock") re-arms it.
 //!
 //! An **open** device grants play with no login; it is connected at play and
 //! never prompted until an edit is refused (`NotPermitted { needs: Edit }`),
