@@ -27,6 +27,7 @@
 //   POST /jobs/<id>/presses/<n>/result        the page's press result (legacy shape + taint fields)
 //   POST /jobs/<id>/presses/<n>/deferred      the page received the press hidden; it will run when visible
 //   GET  /wait?job=<id>|device=any|<name>|queue=idle [&timeout=3600]   ONE blocking call (D10)
+//   GET|POST /test/clock {advanceMs}         tests only: exists under LAB_CLOCK=manual (see clock.mjs), 404 in life
 //
 // The token is the guard, not the interface: the server binds 0.0.0.0 because
 // the LAN and the tunnel both reach it, and every write and the presence
@@ -49,10 +50,25 @@ import { execFileSync } from 'node:child_process';
 
 import { computeReport, renderReportMd, stabilityVerdict, DEFAULT_STOP_WHEN_STABLE } from './report.mjs';
 import { createNotifier } from './notify.mjs';
+import { realClock, createManualClock } from './clock.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const HOME = path.resolve(process.env.LAB_HOME || path.join(os.homedir(), '.photomancer', 'emu-lab'));
 const STARTED = Date.now();
+
+// Every time the scheduler reasons about — press sent/end, cooldown, spacing,
+// lost and drop bounds, TTL, the notifier's grace — and every timestamp it
+// writes comes from `clock`, never `Date.now()`. In life it is the real clock.
+// `LAB_CLOCK=manual` (tests only) swaps in one that stands still until
+// `POST /test/clock {advanceMs}` moves it, so a test checks the cooldown as an
+// equality instead of measuring a wall-clock gap on a loaded runner. The
+// transport's own timers — the SSE keepalive, a /wait's timeout, the exit
+// after SIGTERM — and the process uptime stay on the real clock: they are
+// about sockets and processes, not about the queue.
+const clock = process.env.LAB_CLOCK === 'manual'
+  ? createManualClock(process.env.LAB_CLOCK_START_MS !== undefined ? Number(process.env.LAB_CLOCK_START_MS) : Date.now())
+  : realClock;
+const isoNow = () => new Date(clock.now()).toISOString();
 
 // --- the home: directories, config, token ------------------------------------
 
@@ -94,7 +110,7 @@ const logPath = path.join(HOME, 'log', 'server.log');
 // Append-only, one generation: past 50 MB on start it becomes server.log.1.
 try { if (fs.statSync(logPath).size > 50 * 1024 * 1024) fs.renameSync(logPath, logPath + '.1'); } catch { /* no log yet */ }
 function log(line) {
-  const l = new Date().toISOString() + ' ' + line;
+  const l = isoNow() + ' ' + line;
   try { fs.appendFileSync(logPath, l + '\n'); } catch { /* the log is a courtesy, never a failure */ }
   if (!process.env.LAB_QUIET) process.stderr.write('emu-lab: ' + line + '\n');
 }
@@ -219,7 +235,7 @@ function readDevice(id) { return readJsonFile(devicePath(id)); }
 function saveDevice(d) { writeJsonFile(devicePath(d.id), d); return d; }
 function touchDevice(id, patch) {
   const d = readDevice(id) || { id, name: null, ua: null, cores: null, deviceMemory: null, lastState: null, lastSeen: null, lastPressEndAt: null, lastPressDurationMs: null, lastStreamClosedAt: null };
-  Object.assign(d, patch, { lastSeen: new Date().toISOString() });
+  Object.assign(d, patch, { lastSeen: isoNow() });
   return saveDevice(d);
 }
 
@@ -269,7 +285,7 @@ function openEvents(req, res, url) {
   // clears it: the drop rule below never fires while one is open, and a
   // flicker (SSE reconnects constantly) leaves no stale timestamp behind.
   const d = touchDevice(id, { lastStreamClosedAt: null });
-  sseWrite(res, 'hello', { serverTime: new Date().toISOString(), config: { cooldownMs: COOLDOWN_MS, cooldown: { factor: COOLDOWN_FACTOR, floorMs: COOLDOWN_FLOOR_MS, ceilMs: COOLDOWN_MS } }, device: d });
+  sseWrite(res, 'hello', { serverTime: isoNow(), config: { cooldownMs: COOLDOWN_MS, cooldown: { factor: COOLDOWN_FACTOR, floorMs: COOLDOWN_FLOOR_MS, ceilMs: COOLDOWN_MS } }, device: d });
   // ngrok and Safari both drop a silent stream; a comment every 15 s is the
   // cheapest thing that keeps both honest.
   const ka = setInterval(() => { try { res.write(': keepalive\n\n'); } catch { /* closing */ } }, 15000);
@@ -282,7 +298,7 @@ function openEvents(req, res, url) {
     // When the LAST stream goes the device can no longer be told anything and
     // can no longer post a result, so the moment is recorded on the device
     // file: `tick` ages a `sent` press from it (B), and a restart keeps it.
-    touchDevice(id, gone ? { lastStreamClosedAt: new Date().toISOString() } : {});
+    touchDevice(id, gone ? { lastStreamClosedAt: isoNow() } : {});
     log('device ' + id + ' stream closed');
     hooks.onPresenceChange(id);
   };
@@ -312,7 +328,7 @@ async function postState(req, res, id) {
 /// names it from its own clock — never a client name — and two writes in one
 /// millisecond get `-2`, `-3` rather than a collision or an overwrite (`wx`).
 function writeResult(payload) {
-  const at = new Date().toISOString();
+  const at = isoNow();
   const stem = 'result-' + at.replace(/[:.]/g, '-');
   let name = stem + '.json';
   for (let n = 2; ; n++) {
@@ -335,7 +351,7 @@ async function postManualResult(req, res, url) {
   const body = await readJson(req, config.maxResultBytes);
   checkResultPayload(body);
   const device = url.searchParams.get('device');
-  const payload = { ...body, manual: true, device: isId(device) ? device : null, receivedAt: new Date().toISOString() };
+  const payload = { ...body, manual: true, device: isId(device) ? device : null, receivedAt: isoNow() };
   const file = writeResult(payload);
   log('manual result from ' + (payload.device || '?') + ' -> results/' + file + ' (' + body.results.length + ' rows)');
   send(res, 200, { ok: true, file: 'results/' + file });
@@ -363,7 +379,7 @@ function hasBuild(id) { return isId(id) && fs.existsSync(path.join(HOME, 'builds
 
 function status() {
   return {
-    serverTime: new Date().toISOString(),
+    serverTime: isoNow(),
     uptimeS: Math.round((Date.now() - STARTED) / 1000),
     home: HOME,
     port: PORT,
@@ -387,7 +403,7 @@ function status() {
 // notify.mjs; the tick below hands it the waiting jobs and the head count, and
 // the arm resets through `onPresenceChange` like everything else that cares
 // about presence.
-const notifier = createNotifier({ home: HOME, configPath, log });
+const notifier = createNotifier({ home: HOME, configPath, log, now: clock.now });
 
 // --- the queue (D3, D5, D19, D20, D23) ----------------------------------------
 //
@@ -464,7 +480,7 @@ for (const f of fs.readdirSync(path.join(HOME, 'jobs')).filter((f) => f.endsWith
 if (jobs.size) log('loaded ' + jobs.size + ' job(s) from ' + path.join(HOME, 'jobs'));
 
 function newJobId() {
-  const d = new Date();
+  const d = new Date(clock.now());
   const pad = (n) => String(n).padStart(2, '0');
   return 'j-' + d.getUTCFullYear() + pad(d.getUTCMonth() + 1) + pad(d.getUTCDate()) + '-' + pad(d.getUTCHours()) + pad(d.getUTCMinutes()) + '-' + crypto.randomBytes(2).toString('hex');
 }
@@ -521,7 +537,7 @@ function makeJob(body) {
   return {
     id: newJobId(), kind: 'bench', builds, rows, repeats, spacingMs, device, ttlMs, retryTainted, stopWhenStable, by,
     note: typeof body.note === 'string' ? body.note.slice(0, 200) : null,
-    createdAt: new Date().toISOString(), state: 'queued', boundDevice: null, boundDeviceName: null, boundDeviceUa: null,
+    createdAt: isoNow(), state: 'queued', boundDevice: null, boundDeviceName: null, boundDeviceUa: null,
     presses, stoppedEarly: [], lastPressEndAt: null, reportAt: null, retriesUsed: 0, error: null,
   };
 }
@@ -612,7 +628,7 @@ function markLost(j, p, why) {
 const lastQueueSent = new Map();
 function queueViewFor(deviceId) {
   return Array.from(jobs.values())
-    .filter((j) => !TERMINAL.has(j.state) || (j.reportAt && Date.now() - Date.parse(j.reportAt) < 3600000))
+    .filter((j) => !TERMINAL.has(j.state) || (j.reportAt && clock.now() - Date.parse(j.reportAt) < 3600000))
     .filter((j) => (j.device === 'any' || j.device === deviceId || deviceNameMatches(j.device, deviceId)) && (!j.boundDevice || j.boundDevice === deviceId))
     .map((j) => ({
       id: j.id, state: j.state, builds: j.builds, by: j.by ?? null, note: j.note,
@@ -668,7 +684,7 @@ function evaluateStability(j) {
     j.stoppedEarly.push({
       build: b, afterPress: v.afterPress, row: j.stopWhenStable.row, pct: j.stopWhenStable.pct, minPresses: j.stopWhenStable.minPresses,
       rows: v.rows.map((r) => ({ key: r.key, window: r.window, spreadPct: r.spreadPct })),
-      why: v.why, at: new Date().toISOString(), skipped: 0,
+      why: v.why, at: isoNow(), skipped: 0,
     });
     changed = true;
     log('job ' + j.id + ' build ' + b + ' stable after ' + v.afterPress + ' press(es): ' + v.why);
@@ -701,7 +717,7 @@ function finalize(j, state) {
   fs.mkdirSync(jobDir(j.id), { recursive: true });
   writeJsonFile(path.join(jobDir(j.id), 'report.json'), report);
   fs.writeFileSync(path.join(jobDir(j.id), 'report.md'), renderReportMd(report) + '\n');
-  j.reportAt = new Date().toISOString();
+  j.reportAt = isoNow();
   saveJob(j);
   log('job ' + j.id + ' ' + state + '; report at ' + path.join(jobDir(j.id), 'report.md'));
 }
@@ -713,7 +729,7 @@ const lastCooldownSent = new Map();
 /// pending press of the first job that passes the four conditions (D3,
 /// D19, D20) — or tell the device when its next press is due.
 function tick() {
-  const now = Date.now();
+  const now = clock.now();
   const waiting = [];
   for (const j of jobs.values()) {
     if (TERMINAL.has(j.state)) continue;
@@ -754,7 +770,7 @@ function tick() {
       const due = Math.max(cooldownEnd, spacingEnd);
       if (due > now) { if (nextAt === null || due < nextAt) { nextAt = due; nextJob = j.id; } continue; }
       // Send it. Binding happens on the first press a device takes (D20).
-      press.state = 'sent'; press.sentAt = new Date().toISOString();
+      press.state = 'sent'; press.sentAt = isoNow();
       if (!j.boundDevice) { j.boundDevice = d.id; j.boundDeviceName = d.name; j.boundDeviceUa = d.ua; }
       j.state = 'running';
       saveJob(j);
@@ -776,7 +792,7 @@ function tick() {
   // still waiting with nobody to run it (F2).
   notifier.check(waiting, here.length);
 }
-setInterval(tick, TICK_MS).unref();
+clock.setInterval(tick, TICK_MS).unref();
 
 function jobCounts() {
   const c = { queued: 0, running: 0, done: 0 };
@@ -819,7 +835,7 @@ async function postPressResult(req, res, id, n) {
   const body = await readJson(req, config.maxResultBytes);
   checkResultPayload(body);
   const device = body.device || j.boundDevice;
-  const at = new Date().toISOString();
+  const at = isoNow();
   const payload = { ...body, job: j.id, press: p.n, buildId: p.build, device, receivedAt: at, manual: false };
   writeJsonFile(path.join(jobDir(j.id), 'presses', p.n + '.json'), payload);
   const file = writeResult(payload);
@@ -854,7 +870,7 @@ async function postPressResult(req, res, id, n) {
 async function postPressDeferred(req, res, id, n) {
   const { j, p } = findPress(id, n);
   await readJson(req, 4096).catch(() => ({}));
-  if (p.state === 'sent') { p.state = 'deferred'; p.deferredAt = new Date().toISOString(); saveJob(j); log('job ' + j.id + ' press ' + p.n + ' deferred (page hidden)'); }
+  if (p.state === 'sent') { p.state = 'deferred'; p.deferredAt = isoNow(); saveJob(j); log('job ' + j.id + ' press ' + p.n + ' deferred (page hidden)'); }
   send(res, 200, { ok: true, state: p.state });
 }
 
@@ -968,6 +984,20 @@ async function handle(req, res) {
   }
 
   if (m === 'GET' && p === '/events') return openEvents(req, res, url);
+  // Tests only: the route exists when the server was started on the manual
+  // clock, and is a 404 in life. Moving time runs the timers that fell due
+  // and then one tick at the new time, the way a real second would.
+  if (clock.manual && p === '/test/clock') {
+    if (m === 'GET') return send(res, 200, { now: clock.now() });
+    if (m === 'POST') {
+      const body = await readJson(req, 4096);
+      const ms = Number(body && body.advanceMs);
+      if (!Number.isFinite(ms) || ms < 0) return send(res, 400, { error: 'advanceMs must be a number >= 0' });
+      const fired = clock.advance(ms);
+      tick();
+      return send(res, 200, { now: clock.now(), fired });
+    }
+  }
   if (m === 'GET' && p === '/status') return send(res, 200, status());
   if (m === 'POST' && p === '/notify/test') {
     const r = await notifier.sendTest();

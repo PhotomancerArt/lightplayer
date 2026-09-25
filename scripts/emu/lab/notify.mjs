@@ -135,6 +135,10 @@ export function createNotifier({ home, configPath, log, now = () => Date.now() }
   // server` — which would cut a press in flight. Nothing else in the config
   // reloads; the port and the cooldown are still start-time.
   let cfg = null, mtime = null, lastWhy = null;
+  // Sends decided but not yet answered. The send is fire-and-forget from the
+  // tick, so this is how a test on the manual clock knows every decision it
+  // caused has reached the channel before it counts them.
+  let sending = 0;
   function current() {
     let m = null;
     try { m = fs.statSync(configPath).mtimeMs; } catch { m = null; }
@@ -249,7 +253,8 @@ export function createNotifier({ home, configPath, log, now = () => Date.now() }
       const { title, body } = compose(waiting);
       // Who queued them, appended as its own clause so the body above stays
       // whatever it says (D-by).
-      send(c, title, body + queuedByClause(waiting), 'queue waiting, no device').catch(() => { /* recorded in state */ });
+      sending++;
+      send(c, title, body + queuedByClause(waiting), 'queue waiting, no device').catch(() => { /* recorded in state */ }).finally(() => { sending--; });
     },
 
     /// `lab.sh notify test`: one send now, whatever the gate thinks. It does
@@ -276,6 +281,7 @@ export function createNotifier({ home, configPath, log, now = () => Date.now() }
         waitingSince: st.waitingSince === null ? null : new Date(st.waitingSince).toISOString(),
         lastResult: st.lastResult,
         lastError: st.lastError,
+        sending,
       };
     },
   };
