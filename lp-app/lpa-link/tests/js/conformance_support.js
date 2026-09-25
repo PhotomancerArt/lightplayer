@@ -651,3 +651,84 @@ export function canShadowNavigatorSerial() {
   const removed = nav.serial !== sentinel;
   return JSON.stringify({ shadowed, removedAgain: removed });
 }
+
+// --- the Bluetooth half (`tests/browser_ble_conformance.rs`, M5) -----------
+//
+// `?ble=emu`'s polyfill (`/lpa-link/virtual_bluetooth.js`) over the SAME
+// scripted door the serial half runs against: one plumbing, as in the page.
+// `browser_ble.js` is NOT loaded here — the Rust suite drives it through the
+// library's own bindings, so the one instance of its session map under test
+// is the one Studio ships. This module only installs the polyfill and pokes
+// the door.
+
+let bluetoothShim = null;
+
+async function bluetoothModule() {
+  bluetoothShim ??= await import("/lpa-link/virtual_bluetooth.js");
+  return bluetoothShim;
+}
+
+/// The serial bus over a scripted door, then `navigator.bluetooth` over it.
+export async function installBluetoothScripted(boardIds) {
+  await installScripted(boardIds);
+  const { bus } = await polyfill();
+  (await bluetoothModule()).install(bus());
+}
+
+export async function uninstallBluetooth() {
+  (await bluetoothModule()).uninstall();
+  await uninstallShim();
+}
+
+/// Take `navigator.bluetooth` away entirely (a Firefox, a Safari).
+export function hideBluetooth() {
+  Object.defineProperty(globalThis.navigator, "bluetooth", {
+    value: undefined,
+    configurable: true,
+  });
+}
+
+/// Make `getAvailability()` answer false (Bluetooth off / not permitted).
+export async function bluetoothUnavailable() {
+  const polyfilled = (await bluetoothModule()).bluetooth();
+  polyfilled.getAvailability = async () => false;
+}
+
+/// Bytes on the air for a board, both ways, as JSON.
+export async function bleStatsJson(boardId) {
+  const polyfilled = (await bluetoothModule()).bluetooth();
+  return JSON.stringify(polyfilled?.stats(boardId) ?? null);
+}
+
+/// Drop the connection with no event (iOS holds drops back while hidden).
+export async function bleSilentDrop(boardId) {
+  (await bluetoothModule()).bluetooth().silentDrop(boardId);
+}
+
+/// The next GATT connect to this board never settles.
+export async function bleHangNextConnect(boardId) {
+  (await bluetoothModule()).bluetooth().hangNextConnect(boardId);
+}
+
+/// Shorten M4's unauthenticated-link timeout for one test (the runner gives
+/// the whole suite ~20 s, and the bounded-connect test already spends 10).
+export async function bleUnauthTimeout(ms) {
+  (await bluetoothModule()).bluetooth().unauthTimeoutMs = ms;
+}
+
+/// The board goes out of range (the cable, on this bus).
+export async function bleOutOfRange(boardId) {
+  const { bus } = await polyfill();
+  await bus().detach(boardId);
+}
+
+/// …and comes back.
+export async function bleBackInRange(boardId) {
+  const { bus } = await polyfill();
+  await bus().attach(boardId);
+}
+
+/// Wait `ms` (the suite never asserts on a duration; this only yields).
+export function tick(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}

@@ -276,9 +276,16 @@ lpa-link-browser-test: install-wasm32-target
         echo "wasm-bindgen-test-runner not found. Install: cargo install wasm-bindgen-cli --version 0.2.114"
         exit 1
     fi
+    # Two suites, one runner: Web Serial over `?emu=`'s polyfill, and (M5)
+    # Web Bluetooth over `?ble=emu`'s, both against the scripted door. The
+    # Bluetooth suite spends a real 10 s proving a hung GATT connect is
+    # bounded, against the runner's default 20 s for a whole suite, so the
+    # budget is raised rather than the bound faked.
+    WASM_BINDGEN_TEST_TIMEOUT="${WASM_BINDGEN_TEST_TIMEOUT:-60}" \
     CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUNNER="$PWD/scripts/wasm-serial-test-runner.sh" \
         cargo test -p lpa-link --target wasm32-unknown-unknown \
-            --features browser-serial-esp32 --test browser_serial_conformance
+            --features browser-serial-esp32,browser-ble \
+            --test browser_serial_conformance --test browser_ble_conformance
 
 # The SAME assertions against boards hosted IN THE TAB — one Worker per
 # board, each holding the emulator's own wasm, and no server anywhere
@@ -2223,6 +2230,26 @@ heap-budget-baseline-chips-v3:
 heap-budget-baseline-chips-s3:
     LP_EMU_BUILD_FW=1 scripts/heap-budget-check.sh chips-baseline esp32s3
 
+# ONE command for "the firmware changed and a pinned number moved": re-record
+# every firmware-derived figure for the named targets — esp32c6, esp32v3,
+# esp32s3, engine — or all four. Per chip, the chip's heap record (through
+# `heap-budget-baseline-chips*`) AND the chip emulator tests' figure record,
+# `lp-emu/esp/figures/<chip>.json` (the chip's boot suite run with
+# LP_EMU_BLESS=1). One target at a time, each building its own firmware
+# sequentially. Ends with the records' `git diff --stat`: commit it with the
+# change that moved it.
+#
+#   just bless-chips                  # everything
+#   just bless-chips esp32s3          # one chip
+#   just bless-chips --check esp32v3  # the same gates, rewriting nothing
+#
+# A bless rewrites FIGURES only — never silicon-matched values, transcripts,
+# pinned reference images or structural constants, which stay literals in
+# the tests. If only the emulator changed, a moved figure is a finding: do not
+# bless it. docs/chip-figures.md.
+bless-chips *args:
+    scripts/bless-chips.sh {{ args }}
+
 # Emit RV32 stack-size metadata for the ESP32 firmware.
 # The direct cargo build can fail at final link on local ESP linker-script setup,
 # but rustc still emits the object containing .stack_sizes before that point.
@@ -4038,6 +4065,14 @@ device-scenario *args:
 #   node scripts/emu/trace-diff.mjs <silicon>.jsonl <emulated>.emu.jsonl
 walk-no-board *args:
     node scripts/emu/walk-no-board.mjs {{ args }}
+
+# The Bluetooth twin (M5 of the BLE remote-control plan): add over Bluetooth
+# → identify → push → Play → idle → knob, over `?ble=emu` against an emulated
+# C6, and the idle bytes/s a connected Play-mode Studio puts on a `ble:` link.
+# Needs a Studio on this worktree's port, like walk-no-board. Not CI.
+# Proves the transport, the UI and Play — not access enforcement.
+walk-ble-emu *args:
+    node scripts/emu/walk-ble-emu.mjs {{ args }}
 
 # The hardware-validation system: payloads, configurations, transcripts,
 # replay. `just validate list` with no other args; `replay <transcript>

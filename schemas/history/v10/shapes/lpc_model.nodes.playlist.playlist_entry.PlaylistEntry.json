@@ -1,0 +1,121 @@
+{
+  "record": {
+    "fields": [
+      {
+        "name": "name",
+        "shape": {
+          "option": {
+            "meta": {},
+            "some": {
+              "value": {
+                "shape": {
+                  "editor": "plain",
+                  "id": 2612013983,
+                  "meta": {},
+                  "ty": "string"
+                }
+              }
+            }
+          }
+        }
+      },
+      {
+        "name": "trigger_ids",
+        "shape": {
+          "option": {
+            "meta": {},
+            "some": {
+              "value": {
+                "shape": {
+                  "editor": "plain",
+                  "id": 1028734941,
+                  "meta": {},
+                  "ty": {
+                    "list": "u32"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      {
+        "name": "duration",
+        "shape": {
+          "option": {
+            "meta": {},
+            "some": {
+              "value": {
+                "shape": {
+                  "editor": {
+                    "number": {
+                      "min": 0.0
+                    }
+                  },
+                  "id": 2960302901,
+                  "meta": {},
+                  "ty": "f32"
+                }
+              }
+            }
+          }
+        }
+      },
+      {
+        "name": "fade_after",
+        "shape": {
+          "option": {
+            "meta": {},
+            "some": {
+              "value": {
+                "shape": {
+                  "editor": {
+                    "number": {
+                      "min": 0.0
+                    }
+                  },
+                  "id": 2960302901,
+                  "meta": {},
+                  "ty": "f32"
+                }
+              }
+            }
+          }
+        }
+      },
+      {
+        "name": "node",
+        "shape": {
+          "enum": {
+            "encoding": "external",
+            "meta": {},
+            "variants": [
+              {
+                "name": "unset",
+                "shape": {
+                  "unit": {
+                    "meta": {}
+                  }
+                }
+              },
+              {
+                "name": "ref",
+                "shape": {
+                  "value": {
+                    "shape": {
+                      "editor": "path",
+                      "id": 2244609540,
+                      "meta": {},
+                      "ty": "string"
+                    }
+                  }
+                }
+              }
+            ]
+          }
+        }
+      }
+    ],
+    "meta": {}
+  }
+}

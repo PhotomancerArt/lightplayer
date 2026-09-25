@@ -63,6 +63,13 @@ pub enum LinkTransport {
     /// A serial port: the 150 ms floor and the focused-only subscription
     /// exist because of it.
     Serial,
+    /// A Bluetooth link (`ble:<device id>`, M5): a wire like serial while
+    /// someone is AUTHORING — the same floor, the same focused-only
+    /// subscription — and the one transport with an IDLE budget. Its air
+    /// time is shared with the board's ESP-NOW (G1 Run G), so a lens held in
+    /// Play mode that nobody is touching does not keep pulling (see
+    /// `StudioController::lens_refresh_gap`).
+    Ble,
 }
 
 impl LinkTransport {
@@ -76,7 +83,16 @@ impl LinkTransport {
         if crate::uid_from_emu_endpoint(endpoint).is_some() {
             return Self::Emu;
         }
+        if crate::device_id_from_ble_endpoint(endpoint).is_some() {
+            return Self::Ble;
+        }
         Self::Serial
+    }
+
+    /// Whether this is a bandwidth-bound WIRE (serial, Bluetooth), as
+    /// opposed to an in-process channel.
+    pub fn is_wire(self) -> bool {
+        matches!(self, Self::Serial | Self::Ble)
     }
 }
 
@@ -324,7 +340,9 @@ impl RuntimeSession {
     pub fn cadence_interval(&self) -> Duration {
         match self.transport() {
             LinkTransport::Sim => RefreshCadence::simulator().interval(),
-            LinkTransport::Emu | LinkTransport::Serial => RefreshCadence::device().interval(),
+            LinkTransport::Emu | LinkTransport::Serial | LinkTransport::Ble => {
+                RefreshCadence::device().interval()
+            }
         }
     }
 

@@ -40,6 +40,7 @@
 //! test-emu-c6` runs them.
 
 use lp_emu_esp_common::trace::SharedBuffer;
+use lp_emu_esp_figures::Figures;
 use lp_emu_esp32c6::control::parse_usb_script;
 use lp_emu_esp32c6::machine::{
     AppSource, Esp32C6Builder, Esp32C6Machine, Outcome, StopCondition, TimeGrade,
@@ -222,9 +223,26 @@ fn g3_1_the_cable_comes_out_at_six_seconds_and_the_link_comes_back_at_nine() {
 
     let delivered = r.m.usb_sj().text();
     // Before the unplug: the boot, the hello, the first heartbeat.
+    const HELLO_PROTO: &str = "\nM!{\"id\":0,\"msg\":{\"hello\":{\"proto\":";
     let hello = delivered
-        .find("\nM!{\"id\":0,\"msg\":{\"hello\":{\"proto\":24,")
+        .find(HELLO_PROTO)
         .expect("the unsolicited hello reached the host");
+    // The wire protocol version is the image's (every breaking wire change
+    // bumps it), so it is a figure: `hello.proto` in
+    // `lp-emu/esp/figures/esp32c6.json`, re-recorded by `just bless-chips`.
+    let proto = &delivered[hello + HELLO_PROTO.len()..];
+    let digits = proto
+        .find(|c: char| !c.is_ascii_digit())
+        .unwrap_or(proto.len());
+    let mut figures = Figures::new(
+        "esp32c6",
+        "usb_control::g3_1_the_cable_comes_out_at_six_seconds_and_the_link_comes_back_at_nine",
+    );
+    figures.int(
+        "hello.proto",
+        proto[..digits].parse::<i64>().expect("the proto version"),
+    );
+    figures.verify();
     let first_beat = heartbeat_at(&delivered, 5_000).expect("the 5 s heartbeat reached the host");
     assert!(
         delivered.starts_with("[INIT] Initializing board...\n"),

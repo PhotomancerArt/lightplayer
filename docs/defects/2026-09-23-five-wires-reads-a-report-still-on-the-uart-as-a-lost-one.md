@@ -104,3 +104,42 @@ group was finished with a line missing, and fails by name).
 
 The lesson above applied only halfway: the in-flight allowance has to reach
 back to the burst's very first byte, not to its first newline.
+
+## Recurrence — 2026-09-25, before the burst's first byte (PR #808)
+
+On PR #808's `frame-dump` image (pattern space, CI run 36113518918) the
+deadline lands earlier still: every pad carried exactly 1,980 complete
+frames and the console ended on the whole 1920 group — **no byte** of frame
+1980's burst had left UART0, so neither `reached` nor the in-flight tail had
+anything to read:
+
+```
+gpio18: the pad carried 1980 frames while the guest's last report was frame 1920 — more than the one report period (60) a deadline can fall inside, so summary lines are being lost
+```
+
+The local image of the same commit renders a slightly different number of
+frames in the window (1,975 at 10 s; macOS vs CI build), so the stream was
+timed on it by stepping the machine 5 µs at a time past 10 s. Frame 1980
+ended on gpio18 at 10,012,357 µs and on gpio13 (the second wave) at
+10,013,168 µs; frame 1981 started on gpio18 at 10,014,335 µs; the burst's
+first byte left UART0 at **10,015,275 µs**, and `frame=1980 ` was whole at
+10,015,925 µs. The report reaches the wire ~2.9 ms after its frame, after
+the pads have started the next one — the logger's latency, before the
+UART's. Moving the gate's deadline to 10,013,500 µs reproduced CI's message
+byte for byte; nothing is lost (routing, checksums and the quantum
+comparison all pass, and the burst arrives whole).
+
+Fixed in the test's reading, with no bound or constant moved: `reported`
+does not guess that latency. When the pads are a report period past
+`counted`, it runs the machine on past the deadline in 100 µs slices until
+the report's number is on the wire (the pads' counts stay the deadline's);
+a lost report still fails in `reached` when the next burst arrives without
+it, and the run stops once the pads are two periods past. The determinism
+claim now runs before the checksums, since it compares the deadline's cycle
+and instruction counts. At the reproduced deadline the walk reads every
+wire at 1980 against 1,980 pad frames; at 10 s on #808's local image and on
+`origin/main` `0468c4cda` it passes unchanged (1920/1,975 and 1980/1,981).
+
+The lesson, a third time: the in-flight allowance has to reach back past
+the burst's first byte to the moment the guest counted the frame — which a
+console read at the deadline cannot see, so the test has to wait for it.

@@ -103,6 +103,7 @@ impl Project {
                     time_seconds: 0.0,
                     space: VisualSpace::TwoD,
                     policy: ConsumerPolicy::default(),
+                    scope: None,
                 },
             )
             .expect("render palette shader");
@@ -210,7 +211,7 @@ fn shader_json(bind_palette: bool) -> String {
 /// the slot's own default (private).
 fn palette_fs(bind_palette: bool, second_shader: bool) -> LpFsMemory {
     let fs = LpFsMemory::new();
-    write(&fs, "/project.json", "{ \"format\": 10 }\n");
+    write(&fs, "/project.json", "{ \"format\": 11 }\n");
     write(&fs, "/palette.glsl", PALETTE_GLSL);
     write(
         &fs,
@@ -294,6 +295,7 @@ fn four_solids(step_seconds: f32, fade_seconds: f32) -> GradientConfig {
         ],
         step_seconds,
         fade_seconds,
+        pinned: None,
     }
 }
 

@@ -37,7 +37,9 @@ pub mod transport_ws;
 pub mod wire_encoding_env;
 
 // Re-export main types
-pub use client::{ClientOutcome, ClientTimerFuture, LpClient, RequestDeadline};
+pub use client::{
+    ClientOutcome, ClientTimerFuture, DeployStep, LoginBegun, LpClient, RequestDeadline,
+};
 pub use client_error::{ClientError, ClientResult};
 pub use client_event::ClientEvent;
 pub use client_io::ClientIo;

@@ -251,11 +251,25 @@ impl StudioServerClient {
         files: &[(String, Vec<u8>)],
         expected_hash: &str,
     ) -> Result<LoadedLibraryProject, UiError> {
+        use crate::app::open_progress::{DeviceOpenStep, note_deploy_step};
         let deploy = self
             .client
-            .replace_and_load_project(storage_id, files)
+            .replace_and_load_project_observed(storage_id, files, &mut |step| {
+                note_deploy_step(match step {
+                    lpa_client::DeployStep::Clearing => DeviceOpenStep::Clearing,
+                    lpa_client::DeployStep::Writing {
+                        sent_bytes,
+                        total_bytes,
+                    } => DeviceOpenStep::Uploading {
+                        sent_bytes,
+                        total_bytes,
+                    },
+                    lpa_client::DeployStep::Loading => DeviceOpenStep::Loading,
+                })
+            })
             .await
             .map_err(map_client_error)?;
+        note_deploy_step(DeviceOpenStep::Reading);
         let handle = deploy.value;
         let mut logs = self.absorb_events(deploy.events);
 
@@ -349,6 +363,20 @@ impl StudioServerClient {
         let mut logs = self.absorb_events(outcome.events);
         logs.extend(self.take_pending_logs());
         Ok(logs)
+    }
+
+    /// Run one access step (a hello check or a login) on this session's
+    /// wire — the lens's, when the lens holds a Bluetooth board's wire and a
+    /// shared-link conversation could not be answered (BLE M6).
+    pub async fn run_access_step(
+        &mut self,
+        device: lpa_devices::identity::DeviceId,
+        step: crate::app::access::AccessStep,
+        keys: &Rc<RefCell<crate::app::access::LoginKeyCache>>,
+        timer: Rc<RefCell<dyn FnMut(core::time::Duration) -> crate::DeviceTimerFuture>>,
+    ) -> crate::app::access::AccessCommand {
+        crate::app::access::access_controller::run_step(&mut self.client, device, step, keys, timer)
+            .await
     }
 
     /// Write one file through the server filesystem (`FsRequest::Write`),
@@ -1068,6 +1096,9 @@ fn map_client_error(error: ClientError) -> UiError {
             operation,
             response,
         } => UiError::Protocol(format!("unexpected response for {operation}: {response}")),
+        ClientError::NotPermitted { needs } => {
+            UiError::NotPermitted(crate::app::access::not_permitted_sentence(needs).to_string())
+        }
     }
 }
 

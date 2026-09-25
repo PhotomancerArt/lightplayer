@@ -302,6 +302,7 @@ mod tests {
             set: vec![ramp(), ramp()],
             step_seconds: 20.0,
             fade_seconds: 0.5,
+            pinned: None,
         };
         let action = palette_write_action(&target(), address(), &config);
 

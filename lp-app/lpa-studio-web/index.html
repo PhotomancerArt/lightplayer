@@ -424,6 +424,8 @@
                 // that is merely disposed; `pagehide` ends both.
                 let tabBacking = null;
 
+                // 250 ms doubling: 0.25 + 0.5 + 1 + 2 + 4 ≈ 8 s of patience.
+                const EMU_INSTALL_RETRIES = 5;
                 const ready = (async () => {
                     const [shim, chrome] = await Promise.all([
                         import("/lpa-link/virtual_serial.js"),
@@ -466,7 +468,29 @@
                         tabBacking = tab.tabBacking({ moduleUrl, jitHostUrl });
                         options.backing = tabBacking;
                     }
-                    const bus = await shim.createBus(httpBase, options);
+                    // A 409 at load is almost always the page this one
+                    // replaced: its sockets are closing, and the door frees
+                    // the claim the moment it hears them go. Try again for a
+                    // few seconds before calling it held; anything else
+                    // (no server, a bad URL) fails on the first try.
+                    let bus;
+                    for (let attempt = 0; ; attempt += 1) {
+                        try {
+                            bus = await shim.createBus(httpBase, options);
+                            break;
+                        } catch (error) {
+                            const held = error?.name === "NetworkError";
+                            if (!held || attempt >= EMU_INSTALL_RETRIES) {
+                                whenBody(() =>
+                                    chrome.installFailureBanner({ backingUrl: label, error }),
+                                );
+                                throw error;
+                            }
+                            await new Promise((resolve) =>
+                                setTimeout(resolve, 250 * 2 ** attempt),
+                            );
+                        }
+                    }
                     // The bus is where a re-enumeration and the banner's
                     // cable buttons raise their edges; the façade is what
                     // Studio listened to. Forward, one for one.
@@ -502,6 +526,11 @@
                 ready.catch((error) => {
                     console.error(`[emu] the shim over ${label} did not install:`, error);
                 });
+                // `?ble=emu` (below) reaches the SAME boards over a
+                // `navigator.bluetooth` polyfill, through this bus — one
+                // plumbing, not two. A page-internal contract like the rest.
+                window.__lpEmuReady = ready;
+                window.__lpEmuLabel = label;
 
                 // Hand the boards back when this page goes away. The door
                 // admits ONE client per board and answers a second with 409
@@ -522,6 +551,91 @@
                 });
                 window.addEventListener("pageshow", (event) => {
                     if (event.persisted) window.location.reload();
+                });
+            })();
+        </script>
+        <!--
+          DEV-ONLY BLUETOOTH SEAM (`?ble=emu`, M5 of the BLE remote-control plan).
+
+          With `?ble=emu` beside `?emu=<ws://host:port | tab>`, `navigator.bluetooth`
+          in this page is a polyfill (`/lpa-link/virtual_bluetooth.js`) whose NUS
+          service pipes bytes to the SAME emulated boards the `?emu=` bus holds,
+          and Studio's Bluetooth stack — `browser_ble.js`, the Rust link and
+          transport, the device card, Play mode — runs against it unchanged.
+          It implements exactly the GATT subset `browser_ble.js` calls.
+
+          ⚠️ What it proves: the transport, the UI and Play mode. NOT access
+          enforcement — the emulated firmware sees its USB link, which it trusts,
+          so every request is answered at the edit tier. The banner says so.
+
+          Same shape as `?emu=`: without the flag nothing is fetched; with it,
+          a synchronous façade stands on `navigator.bluetooth` and resolves
+          behind. It needs `?emu=` — the boards are that backing's — and says so
+          once when it is missing.
+        -->
+        <script>
+            (() => {
+                const raw = new URLSearchParams(window.location.search).get("ble");
+                if (raw === null) return;
+                if (raw.trim() !== "emu") {
+                    console.warn(`ble ignored (only \`emu\` is understood): ${raw}`);
+                    return;
+                }
+                const busReady = window.__lpEmuReady;
+                if (!busReady) {
+                    console.warn(
+                        "?ble=emu needs ?emu=<ws://host:port | tab>: the Bluetooth " +
+                            "polyfill reaches that backing's emulated boards",
+                    );
+                    return;
+                }
+                const label = window.__lpEmuLabel ?? "";
+
+                class LpEmuBluetoothFacade extends EventTarget {
+                    async requestDevice(options) {
+                        return (await ready).requestDevice(options);
+                    }
+                    async getDevices() {
+                        return (await ready).getDevices();
+                    }
+                    async getAvailability() {
+                        return (await ready).getAvailability();
+                    }
+                }
+                const facade = new LpEmuBluetoothFacade();
+                Object.defineProperty(navigator, "bluetooth", {
+                    value: facade,
+                    configurable: true,
+                    enumerable: true,
+                    writable: false,
+                });
+
+                const ready = (async () => {
+                    const bus = await busReady;
+                    const [shim, chrome] = await Promise.all([
+                        import("/lpa-link/virtual_bluetooth.js"),
+                        import("/lpa-link/emulator_picker.js"),
+                    ]);
+                    const bluetooth = shim.createBluetooth(bus, {
+                        picker: chrome.createPicker({ backingUrl: label, kind: "bluetooth" }),
+                    });
+                    window.__lpEmuBluetooth = bluetooth;
+                    const note = () =>
+                        chrome.noteBluetooth(
+                            "navigator.bluetooth is a polyfill over these boards. Their " +
+                                "link is USB, which the board trusts: this proves the " +
+                                "transport, the UI and Play mode, not access enforcement.",
+                        );
+                    if (document.body) note();
+                    else document.addEventListener("DOMContentLoaded", note, { once: true });
+                    console.info(`[ble] navigator.bluetooth is a polyfill over ${label}`);
+                    return bluetooth;
+                })();
+                ready.catch((error) => {
+                    console.error("[ble] the Bluetooth polyfill did not install:", error);
+                });
+                window.addEventListener("pagehide", () => {
+                    ready.then((bluetooth) => bluetooth.dispose()).catch(() => {});
                 });
             })();
         </script>

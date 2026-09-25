@@ -73,6 +73,7 @@ fn sim_lens_device_view() -> lpa_studio_core::DeviceView {
         last_outcome: None,
         terminal: Vec::new(),
         terminal_dropped: 0,
+        firmware_blocked: None,
         escapes: vec![
             lpa_studio_core::DeviceEscape::Disconnect,
             lpa_studio_core::DeviceEscape::Forget,

@@ -4197,6 +4197,7 @@ dependencies = [
  "lp-riscv-emu",
  "lp-riscv-inst",
  "lpa-client",
+ "lpc-mapping",
  "lpc-model",
  "lpc-shared",
  "lpc-view",
@@ -5741,6 +5742,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "lp-emu-esp-figures"
+version = "40.0.0"
+dependencies = [
+ "serde_json",
+]
+
+[[package]]
 name = "lp-emu-esp32c6"
 version = "40.0.0"
 dependencies = [
@@ -5749,6 +5757,7 @@ dependencies = [
  "log",
  "lp-emu-core",
  "lp-emu-esp-common",
+ "lp-emu-esp-figures",
  "lp-emu-jit",
  "lp-emu-validate",
  "lp-riscv-emu",
@@ -5767,6 +5776,7 @@ dependencies = [
  "log",
  "lp-emu-core",
  "lp-emu-esp-common",
+ "lp-emu-esp-figures",
  "lp-ws281x",
  "lp-xt-emu",
  "lp-xt-inst",
@@ -5781,6 +5791,7 @@ dependencies = [
  "log",
  "lp-emu-core",
  "lp-emu-esp-common",
+ "lp-emu-esp-figures",
  "lp-ws281x",
  "lp-xt-emu",
  "lp-xt-inst",
@@ -6088,6 +6099,7 @@ dependencies = [
  "lp-riscv-elf",
  "lp-riscv-emu",
  "lp-riscv-inst",
+ "lpc-access",
  "lpc-model",
  "lpc-shared",
  "lpc-view",

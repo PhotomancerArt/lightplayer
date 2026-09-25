@@ -11,6 +11,7 @@
 //! | wasm + `browser-serial-esp32` | `BrowserSerialTransport` (`browser_transport.rs`) over `BrowserSerialEsp32Provider` |
 //! | any build that can run sims | `SimDeviceTransport` (`sim_transport.rs`) over the sims this tab powered on |
 //! | wasm + `emulator-tab` | `EmuDeviceTransport` (`emu_transport.rs`) over the emulated boards this tab powered on, via `BrowserEmuLinkSource` |
+//! | wasm + `browser-ble` | `BrowserBleTransport` (`browser_ble_transport.rs`) over Web Bluetooth (NUS), a control-only link |
 //! | any two or three of the above | `CompositeDeviceTransport` (`composite_transport.rs`), routing by the link's endpoint — the effects layer holds ONE transport, on purpose |
 //! | a browser without Web Serial (Safari, Firefox), and the host | the composite with no serial half: the roster still fills with sims, and only the chooser degrades |
 //! | host tests | a fake over `lpa_link::device_link::fake` (see `device_roster`'s tests) |
@@ -151,6 +152,20 @@ pub trait DeviceTransport {
     /// Pop the platform's chooser and return what the user picked. `Ok(None)`
     /// = the user cancelled, which is not a failure.
     fn request_grant(&self) -> DeviceTransportFuture<Result<Option<GrantedLink>, String>>;
+
+    /// Pop the platform's BLUETOOTH chooser and return what the user picked
+    /// (`Ok(None)` = cancelled). A sibling of [`Self::request_grant`] rather
+    /// than a parameter to it: the serial chooser is a port chooser, and the
+    /// two are different browser prompts.
+    ///
+    /// Defaults to a refusal that names why, so every transport that has no
+    /// Bluetooth half (sims, emus, a serial-only build, the host) says so
+    /// instead of pretending the user cancelled.
+    fn request_ble_grant(&self) -> DeviceTransportFuture<Result<Option<GrantedLink>, String>> {
+        Box::pin(core::future::ready(Err(
+            "this browser cannot reach Bluetooth devices".to_string(),
+        )))
+    }
 
     /// Hand a grant back so the port stops being ours (the provider's
     /// `forget_endpoint`). Best-effort: a grant that cannot be revoked is

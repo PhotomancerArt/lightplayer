@@ -42,6 +42,11 @@ pub enum LinkProviderKind {
     /// An ESP32-C6 emulated in this tab's own Worker, running the shipped
     /// firmware image over an emulated USB-Serial-JTAG link.
     EmulatorTab,
+    /// Browser Web Bluetooth provider: the same `M!{json}` line protocol,
+    /// carried over a Nordic UART (NUS) GATT service. Control only — there
+    /// is no reset line and no ROM downloader on the far side of a GATT
+    /// link, so it can never flash.
+    BrowserBle,
 }
 
 impl LinkProviderKind {
@@ -69,6 +74,7 @@ impl LinkProviderKind {
             Self::BrowserWorker => "Browser worker",
             Self::BrowserSerialEsp32 => "Browser serial ESP32",
             Self::EmulatorTab => "Emulated board in this tab",
+            Self::BrowserBle => "Browser Bluetooth",
         }
     }
 
@@ -89,6 +95,7 @@ impl LinkProviderKind {
             Self::BrowserWorker => Some("sim"),
             Self::EmulatorTab => Some("emu"),
             Self::HostProcess => Some("host"),
+            Self::BrowserBle => Some("Bluetooth"),
         }
     }
 
@@ -111,6 +118,13 @@ impl LinkProviderKind {
             Self::EmulatorTab => LinkCapabilities::esp32_serial_base()
                 .with_flash()
                 .with_device_erase(),
+            // Logs and diagnostics ride the line protocol; everything that
+            // needs the chip's reset lines or its ROM downloader does not
+            // exist here: no `Reset`, `FlashFirmware`, `EraseDeviceFlash`,
+            // `WriteBootControl`, or raw-filesystem access (M5 S1).
+            Self::BrowserBle => LinkCapabilities::default()
+                .with(LinkOperation::ReadLogs)
+                .with(LinkOperation::ReadDiagnostics),
         }
     }
 

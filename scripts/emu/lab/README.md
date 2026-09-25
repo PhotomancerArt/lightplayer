@@ -744,3 +744,17 @@ keeps it from drifting — and then the scheduler against the fake device (a
 flat table stops at press 4, a wandering one runs to `repeats`, an A/B stops
 per build, a tainted press cannot close the window). Nothing here needs a
 package.json, and nothing may gain one.
+
+**No test here measures wall-clock time.** The server reads every instant
+the scheduler reasons about through `clock.mjs`; a test that asserts how long
+something waited starts its lab with `MANUAL_CLOCK` (`LAB_CLOCK=manual`, from
+`test/helpers.mjs`), where time stands still until `lab.advance(ms)` moves it
+(a test-only `POST /test/clock` that is a 404 in life). The fake device spends
+its `pressMs` by advancing that clock, so the server measures exactly the
+burn it was given, and the cooldown, spacing, lost, drop and notify-grace
+tests check equalities off the server's own press record — including "still
+pending one millisecond before". A wall-clock gap measured from the client
+went red on a loaded CI runner on 2026-09-25
+(`docs/defects/2026-09-25-emu-lab-cooldown-tests-measured-wall-clock.md`);
+`clock.test.mjs` covers the clock itself. Wall-clock timeouts are fine as
+liveness bounds (`until`), never as the thing asserted.

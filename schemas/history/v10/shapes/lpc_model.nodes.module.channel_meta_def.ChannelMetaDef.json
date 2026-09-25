@@ -1,0 +1,79 @@
+{
+  "record": {
+    "fields": [
+      {
+        "name": "label",
+        "shape": {
+          "option": {
+            "meta": {},
+            "some": {
+              "value": {
+                "shape": {
+                  "editor": "plain",
+                  "id": 2612013983,
+                  "meta": {},
+                  "ty": "string"
+                }
+              }
+            }
+          }
+        }
+      },
+      {
+        "name": "unit",
+        "shape": {
+          "option": {
+            "meta": {},
+            "some": {
+              "value": {
+                "shape": {
+                  "editor": "plain",
+                  "id": 2612013983,
+                  "meta": {},
+                  "ty": "string"
+                }
+              }
+            }
+          }
+        }
+      },
+      {
+        "name": "min",
+        "shape": {
+          "option": {
+            "meta": {},
+            "some": {
+              "value": {
+                "shape": {
+                  "editor": "plain",
+                  "id": 2605450937,
+                  "meta": {},
+                  "ty": "f32"
+                }
+              }
+            }
+          }
+        }
+      },
+      {
+        "name": "max",
+        "shape": {
+          "option": {
+            "meta": {},
+            "some": {
+              "value": {
+                "shape": {
+                  "editor": "plain",
+                  "id": 2605450937,
+                  "meta": {},
+                  "ty": "f32"
+                }
+              }
+            }
+          }
+        }
+      }
+    ],
+    "meta": {}
+  }
+}

@@ -36,7 +36,11 @@ export async function fakeDevice(lab, opts = {}) {
       try { p = await sse.next('press', 60000); } catch { return; }
       const sentAt = Date.now();
       if (deferOn.has(p.press)) await post('/jobs/' + p.job + '/presses/' + p.press + '/deferred', { reason: 'hidden' });
-      await new Promise((r) => setTimeout(r, pressMs));
+      // The press's burn. On the manual clock the device spends it by moving
+      // the server's time, so the server measures exactly `pressMs`; on the
+      // real clock it sleeps it and the server measures whatever that took.
+      if (lab.manual) await lab.advance(pressMs);
+      else await new Promise((r) => setTimeout(r, pressMs));
       const rows = numbers(p.build, p.press).map((r) => {
         const [slug, grade, mode, fn] = r.key.split('/');
         return { slug, grade, mode, fnBlocks: mode === 'jit' ? Number(fn) : null, timeout: '5500ms', realtime: r.realtime, nsPerInstr: r.nsPerInstr ?? 10, wallMs: 5000, uartSha256: r.uartSha256 ?? '2407828f80684331deadbeef', tainted: taintOn.has(p.press), taintReasons: taintOn.has(p.press) ? ['hidden'] : [] };

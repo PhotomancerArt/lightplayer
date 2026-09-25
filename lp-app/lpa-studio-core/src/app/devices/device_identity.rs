@@ -318,6 +318,7 @@ mod tests {
             last_outcome: None,
             terminal: Vec::new(),
             terminal_dropped: 0,
+            firmware_blocked: None,
             escapes: vec![Escape::Forget],
         }
     }
@@ -639,6 +640,7 @@ mod tests {
             firmware_face: FirmwareFace::Unknown,
             detected_chip: None,
             mac: None,
+            firmware_blocked: None,
             escapes: vec![Escape::Forget],
         }
     }

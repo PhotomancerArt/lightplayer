@@ -1,12 +1,12 @@
 use dioxus::prelude::*;
 use dioxus_icons::lucide::{
-    Activity, ArrowUpRight, Asterisk, Bot, Boxes, ChartLine, Check, ChevronDown, ChevronRight,
-    CircleAlert, CircleDot, CircleMinus, CircleQuestionMark, Clock, Copy, Cpu, Download, Droplet,
-    Ellipsis, Eraser, Eye, Flag, FlaskConical, Folder, Funnel, Hash, History, Image, Info,
-    Lightbulb, Link, Link2, Link2Off, ListMusic, Locate, LocateFixed, Lock, Maximize2, Minimize2,
-    MonitorPlay, MousePointerClick, Pencil, Play, Plus, Radio, Route, Save, Settings, Sparkles,
-    SquareArrowRight, SquareTerminal, Trash2, TriangleAlert, Undo2, Upload, Usb, Users, Waypoints,
-    X, Zap,
+    Activity, ArrowUpRight, Asterisk, Bluetooth, Bot, Boxes, ChartLine, Check, ChevronDown,
+    ChevronRight, CircleAlert, CircleDot, CircleMinus, CircleQuestionMark, Clock, Copy, Cpu,
+    Download, Droplet, Ellipsis, Eraser, Eye, Flag, FlaskConical, Folder, Funnel, Hash, History,
+    Image, Info, Lightbulb, Link, Link2, Link2Off, ListMusic, Locate, LocateFixed, Lock, Maximize2,
+    Minimize2, MonitorPlay, MousePointerClick, Pencil, Pin, Play, Plus, Radio, Route, Save,
+    Settings, Sparkles, SquareArrowRight, SquareTerminal, Trash2, TriangleAlert, Undo2, Upload,
+    Usb, Users, Waypoints, X, Zap,
 };
 
 #[component]
@@ -15,6 +15,7 @@ pub fn StudioIcon(name: StudioIconName, size: u32) -> Element {
     match name {
         StudioIconName::Play => rsx! { Play { size } },
         StudioIconName::Usb => rsx! { Usb { size } },
+        StudioIconName::Bluetooth => rsx! { Bluetooth { size } },
         StudioIconName::Simulator => rsx! { MonitorPlay { size } },
         StudioIconName::Test => rsx! { FlaskConical { size } },
         StudioIconName::StatusRunning => rsx! { Play { size } },
@@ -29,6 +30,7 @@ pub fn StudioIcon(name: StudioIconName, size: u32) -> Element {
         StudioIconName::ChildValue => rsx! { SquareArrowRight { size } },
         StudioIconName::NodeTreeItem => rsx! { Boxes { size } },
         StudioIconName::Edited => rsx! { Pencil { size } },
+        StudioIconName::Pin => rsx! { Pin { size } },
         StudioIconName::Info => rsx! { Info { size } },
         StudioIconName::History => rsx! { History { size } },
         StudioIconName::Help => rsx! { CircleQuestionMark { size } },
@@ -95,6 +97,7 @@ pub fn action_icon_name(icon: Option<&str>) -> Option<StudioIconName> {
     match icon {
         Some("play") => Some(StudioIconName::Play),
         Some("usb") => Some(StudioIconName::Usb),
+        Some("bluetooth") => Some(StudioIconName::Bluetooth),
         Some("test-tube") => Some(StudioIconName::Test),
         Some("save") => Some(StudioIconName::Save),
         Some("revert") => Some(StudioIconName::Revert),
@@ -114,6 +117,7 @@ pub fn action_icon_name(icon: Option<&str>) -> Option<StudioIconName> {
 pub enum StudioIconName {
     Play,
     Usb,
+    Bluetooth,
     /// The sim runtime's card glyph — where a device card shows its
     /// transport, a sim card shows this instead (D36).
     Simulator,
@@ -132,6 +136,9 @@ pub enum StudioIconName {
     ChildValue,
     NodeTreeItem,
     Edited,
+    /// Pushpin: "show only this one" — a cycle member held in place of the
+    /// walk (the palette chooser's member chips).
+    Pin,
     Info,
     /// Clock with a counter-clockwise arrow: the document's history.
     History,

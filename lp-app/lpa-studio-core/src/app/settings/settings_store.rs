@@ -84,6 +84,22 @@ impl SettingsStore {
         self.user.agent.openrouter_api_key = normalized(key);
     }
 
+    /// Set or clear the account default device password. Blank clears it;
+    /// a password is otherwise kept exactly as typed (never trimmed — a
+    /// space is a character someone may have meant).
+    pub fn set_device_default_password(&mut self, password: Option<String>) {
+        self.user.devices.default_password = password.filter(|p| !p.is_empty());
+    }
+
+    /// The effective account default device password (user, then host).
+    pub fn device_default_password(&self) -> Option<&str> {
+        self.user.devices.default_password.as_deref().or(self
+            .host
+            .devices
+            .default_password
+            .as_deref())
+    }
+
     /// Set or clear the user's model override (trimmed; empty ⇒ clear).
     pub fn set_agent_model(&mut self, model: Option<String>) {
         self.user.agent.model = normalized(model);
@@ -480,6 +496,10 @@ impl SettingsStore {
                 models_error,
                 price_input_override: self.user.agent.price_input_per_mtok.map(format_rate),
                 price_output_override: self.user.agent.price_output_per_mtok.map(format_rate),
+            },
+            devices: crate::app::settings::UiDeviceSettingsView {
+                default_password: self.device_default_password().map(str::to_string),
+                remembered_passwords: 0,
             },
         }
     }
