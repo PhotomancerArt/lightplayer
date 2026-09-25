@@ -171,7 +171,17 @@ class VirtualSerial extends EventTarget {
     const boards = only?.length ? only.map((id) => ({ id })) : await this.list();
     for (const board of boards) {
       const id = board?.id ?? board;
-      const emulator = await this.backing.connect(id, board);
+      let emulator;
+      try {
+        emulator = await this.backing.connect(id, board);
+      } catch (error) {
+        // One board refused (a 409: its control channel is still held).
+        // Hand back the boards already connected before failing — a bus
+        // that never installs must not keep their control channels, or
+        // the NEXT attempt meets a 409 of this page's own making.
+        await this.dispose();
+        throw error;
+      }
       const port = this.mint(id, emulator, board);
       this.boardIds.push(id);
       // A page with a chooser starts with no grants: Chrome hands a fresh
@@ -449,9 +459,14 @@ class VirtualSerial extends EventTarget {
     this.generations = [];
     this.boardIds = [];
     this.granted.clear();
-    for (const emulator of emulators) {
-      await emulator.dispose();
-    }
+    // Every board's sockets are closed in THIS turn, never one board after
+    // another's close handshake. `dispose` runs from `pagehide`, and a page
+    // entering the back/forward cache is frozen before any handshake
+    // completes: awaiting board by board closed c6-a's byte channel and then
+    // stopped, and c6-b's and c6-c's control channels stayed held — every
+    // later load of `?emu=` met a 409 until the browser itself went away
+    // (docs/defects/2026-09-24-a-departed-page-kept-the-doors-boards.md).
+    await Promise.all([...emulators].map((emulator) => emulator.dispose()));
   }
 }
 
