@@ -229,6 +229,9 @@ logging in with the same messages against the same access files.
 Plan `lp2025/2026-09-24-1953-ble-easy-access` (P1). Yona's rule for it:
 most of the time people should not have to think about access. A physical
 connection is access, and Bluetooth should be one click, or none.
+The whole decision, with Studio's half (key holders, the silent add over
+USB, account keys, the rejected alternatives), is
+`2026-09-24-easy-bluetooth-access.md`; this amendment is the board's half.
 
 ### Generated keys, one salt per holder
 
@@ -311,5 +314,6 @@ This replaces "Locked by default" above for the device store:
 - "Missing" is decided by `file_exists`, not by a read error. Not every fs
   reports a missing file as `NotFound`.
 
-`WIRE_PROTO_VERSION` 23 → 24. `PROJECT_FORMAT_VERSION` is untouched: the
-access files are their own formats.
+`WIRE_PROTO_VERSION` 23 → 25 (24 was taken by #785's palette pin first).
+`PROJECT_FORMAT_VERSION` is untouched: the access files are their own
+formats.

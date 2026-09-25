@@ -70,7 +70,7 @@ fn groups_wrapped() -> Element {
 }
 
 #[story(
-    description = "Play over Bluetooth, phone width (BLE M6): the same panel, with one line under the title saying how the piece is reached — \"Unlocked as camp — play\" — so a knob that works and an edit that asks for a device password are both expected. Idle, the page reads the piece once a minute and nothing more (M5's lean Play)."
+    description = "Play over Bluetooth, phone width (BLE M6): the same panel, with one line under the title saying how the piece is reached — \"Unlocked with camp · play\" — so a knob that works and an edit that asks for a device password are both expected. Idle, the page reads the piece once a minute and nothing more (M5's lean Play)."
 )]
 fn mobile_over_bluetooth() -> Element {
     let face = held_root_face();
@@ -80,7 +80,7 @@ fn mobile_over_bluetooth() -> Element {
                 panel: face.panel,
                 preview: face.preview,
                 auto_save: face.auto_save,
-                access_line: Some("Unlocked as camp — play".to_string()),
+                access_line: Some("Unlocked with camp · play".to_string()),
                 on_panel: move |_| {},
                 on_action: move |_| {},
             }

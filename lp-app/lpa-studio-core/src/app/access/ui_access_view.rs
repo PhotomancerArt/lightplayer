@@ -12,42 +12,68 @@ use lpc_access::Tier;
 pub struct UiDeviceAccess {
     /// Reached over Bluetooth right now.
     pub over_bluetooth: bool,
-    /// The login line ("Unlocked as camp — play"), for a Bluetooth link.
+    /// The login line ("Unlocked by Yona's MacBook"), for a Bluetooth link.
     pub line: Option<String>,
-    /// Offer "Unlock" (nothing granted) or "Unlock for edit" (play).
-    pub log_in: Option<String>,
+    /// What the card offers to unlock with, over Bluetooth: the sheet
+    /// ("Unlock", nothing granted) or a way to edit (unlocked for play).
+    pub unlock: Option<UiUnlockOffer>,
     /// The device access panel, when this link may write the device store.
     pub panel: Option<UiAccessPanel>,
 }
 
-/// The device access panel.
+/// What a Bluetooth card offers when its unlock is not the whole story.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum UiUnlockOffer {
+    /// Nothing Studio holds unlocked it: "Unlock" opens the sheet.
+    Locked,
+    /// Unlocked for play only: "Editing needs an edit password, or plug it
+    /// in by USB", with "Enter a password".
+    PlayOnly,
+}
+
+/// The device access panel: "Who has access", read from the board.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct UiAccessPanel {
     pub device: DeviceId,
-    /// What this browser last wrote: `Some(on)`, or `None` when it never
-    /// wrote this device's store (Bluetooth may be anything, most likely
-    /// off — the board's default).
+    /// Every entry on the device, in the board's order (the last listing;
+    /// empty until the device has answered one).
+    pub entries: Vec<UiAccessEntry>,
+    /// The "Who has access · N" count: the entries, plus one for "Anyone
+    /// nearby" when the device is open.
+    pub count: usize,
+    /// The device's STORED Bluetooth switch: `None` until it has answered a
+    /// listing. A change applies at its next boot.
     pub ble_enabled: Option<bool>,
+    /// "Anyone nearby can play".
     pub open: bool,
-    /// The passwords this browser wrote, by label and tier.
-    pub secrets: Vec<UiAccessSecret>,
-    /// Bluetooth was switched since the board last restarted.
+    /// Bluetooth was switched since the device last restarted.
     pub restart_pending: bool,
     /// "Restart now" works here (a USB link has the reset lines).
     pub can_restart: bool,
-    /// A write is in flight.
+    /// Reached over Bluetooth: the Bluetooth switch is locked on ("turn off
+    /// by USB").
+    pub over_bluetooth: bool,
+    /// A change is in flight.
     pub writing: bool,
-    /// The last write's failure, in words.
+    /// The last change's failure, in words.
     pub error: Option<String>,
-    /// The account default, to pre-fill the password field.
-    pub default_password: Option<String>,
 }
 
-/// One password, as the panel and the project list show it.
+/// One row of "Who has access".
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct UiAccessSecret {
+pub struct UiAccessEntry {
     pub label: String,
+    pub kind: lpc_access::SecretKind,
     pub tier: Tier,
+    /// The entry's identity on the board: what
+    /// [`super::DeviceAccessChange::Remove`] names.
+    pub salt_id: [u8; lpc_access::SALT_BYTES],
+    /// This browser's own key.
+    pub is_this_browser: bool,
+    /// One of the signed-in account's entries (its key or a password).
+    pub is_account: bool,
+    /// When it was added (epoch seconds), when the adding client said.
+    pub added_at: Option<u64>,
 }
 
 /// The password sheet.
@@ -63,19 +89,11 @@ pub struct UiLoginPrompt {
     pub busy: bool,
 }
 
-/// The open project's Bluetooth list (the sidecar).
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct UiProjectAccess {
-    pub secrets: Vec<UiAccessSecret>,
-    /// The last change's failure, in words.
-    pub error: Option<String>,
-}
-
 /// The sheet's sentence for why it is open.
 pub fn prompt_sentence(reason: &super::PromptReason, device_name: &str) -> String {
     use super::PromptReason;
     match reason {
-        PromptReason::NoPasswordKnown => format!("{device_name} asks for its device password."),
+        PromptReason::NoPasswordKnown => "This device needs a password to unlock it.".to_string(),
         PromptReason::Refused { retry_after_ms } => match *retry_after_ms {
             0 => format!("That device password didn't unlock {device_name}."),
             ms => format!(
@@ -83,12 +101,14 @@ pub fn prompt_sentence(reason: &super::PromptReason, device_name: &str) -> Strin
                 ms.div_ceil(1_000)
             ),
         },
-        PromptReason::NeedsEdit => {
-            format!("This needs an edit device password. {device_name} is unlocked for play only.")
-        }
+        PromptReason::NeedsEdit => PLAY_ONLY_SENTENCE.to_string(),
         PromptReason::Asked => format!("Unlock {device_name} with another device password."),
     }
 }
+
+/// What a device unlocked for play says about editing — on the card and on
+/// the sheet it opens.
+pub const PLAY_ONLY_SENTENCE: &str = "Editing needs an edit password, or plug it in by USB.";
 
 /// The card's login line for a Bluetooth link.
 pub fn access_line(phase: &super::AccessPhase) -> Option<String> {
@@ -97,17 +117,24 @@ pub fn access_line(phase: &super::AccessPhase) -> Option<String> {
         AccessPhase::Unknown | AccessPhase::Checking => "Connecting over Bluetooth…".to_string(),
         AccessPhase::LoggingIn => "Unlocking…".to_string(),
         AccessPhase::Granted {
-            tier,
+            tier: Tier::Edit,
             label: Some(label),
-        } => format!("Unlocked as {label} — {}", super::tier_word(*tier)),
+        } => format!("Unlocked by {label}"),
+        AccessPhase::Granted {
+            tier: Tier::Play,
+            label: Some(label),
+        } => format!("Unlocked with {label} · play"),
         AccessPhase::Granted {
             tier: Tier::Play,
             label: None,
         } => "Open — play, no password".to_string(),
+        // Unlocked at edit with no name to give (a trusted link, or a
+        // re-check that found the link already unlocked): the same word as
+        // every other unlocked state, never a second label for it.
         AccessPhase::Granted {
             tier: Tier::Edit,
             label: None,
-        } => "Connected — edit".to_string(),
+        } => "Unlocked".to_string(),
         AccessPhase::Locked => "Needs a device password".to_string(),
         AccessPhase::Unreachable => {
             "Bluetooth has no device password here — connect by USB to set one".to_string()
@@ -121,14 +148,22 @@ mod tests {
     use super::*;
 
     #[test]
-    fn the_login_line_names_the_label_and_the_tier() {
+    fn the_login_line_names_the_label_and_a_play_tier() {
         assert_eq!(
             access_line(&AccessPhase::Granted {
                 tier: Tier::Play,
-                label: Some("camp".to_string())
+                label: Some("friends".to_string())
             })
             .as_deref(),
-            Some("Unlocked as camp — play")
+            Some("Unlocked with friends · play")
+        );
+        assert_eq!(
+            access_line(&AccessPhase::Granted {
+                tier: Tier::Edit,
+                label: Some("Yona's MacBook".to_string())
+            })
+            .as_deref(),
+            Some("Unlocked by Yona's MacBook")
         );
         assert_eq!(
             access_line(&AccessPhase::Granted {
@@ -137,6 +172,15 @@ mod tests {
             })
             .as_deref(),
             Some("Open — play, no password")
+        );
+        assert_eq!(
+            access_line(&AccessPhase::Granted {
+                tier: Tier::Edit,
+                label: None
+            })
+            .as_deref(),
+            Some("Unlocked"),
+            "one word for unlocked, with or without a name"
         );
     }
 
@@ -150,14 +194,19 @@ mod tests {
         );
         assert!(sentence.contains("in 4 s"), "{sentence}");
         assert!(!sentence.to_lowercase().contains("failed"));
-        assert!(
-            prompt_sentence(&PromptReason::NeedsEdit, "Choker").contains("edit device password")
+        assert_eq!(
+            prompt_sentence(&PromptReason::NeedsEdit, "Choker"),
+            "Editing needs an edit password, or plug it in by USB."
+        );
+        assert_eq!(
+            prompt_sentence(&PromptReason::NoPasswordKnown, "Choker"),
+            "This device needs a password to unlock it."
         );
     }
 
-    /// G3: the device's door says "Unlock" and "device password", never
-    /// "log in" — that is the cloud account's word, and its password must
-    /// not be typed here.
+    /// G3 / AC8: the device's door speaks of the device and its password,
+    /// never "log in" or the account — those are the cloud account's words,
+    /// and its password must not be typed here.
     #[test]
     fn the_sheet_asks_for_a_device_password_never_a_login() {
         for reason in [
@@ -167,8 +216,15 @@ mod tests {
             PromptReason::Refused { retry_after_ms: 0 },
         ] {
             let sentence = prompt_sentence(&reason, "Choker");
-            assert!(sentence.contains("device password"), "{sentence}");
-            assert!(!sentence.to_lowercase().contains("log"), "{sentence}");
+            let lower = sentence.to_lowercase();
+            assert!(lower.contains("password"), "{sentence}");
+            assert!(
+                lower.contains("device") || lower.contains("choker") || lower.contains("usb"),
+                "{sentence}"
+            );
+            assert!(!lower.contains("log"), "{sentence}");
+            assert!(!lower.contains("account"), "{sentence}");
+            assert!(!lower.contains("piece"), "{sentence}");
         }
         for tier in [Tier::Play, Tier::Edit] {
             let sentence = super::super::not_permitted_sentence(tier);

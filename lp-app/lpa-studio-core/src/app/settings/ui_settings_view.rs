@@ -15,12 +15,13 @@ pub struct UiSettingsView {
     pub devices: UiDeviceSettingsView,
 }
 
-/// The settings UI.s Devices section (BLE M6).
+/// The settings UI.s Devices section: this browser's key, and the
+/// passwords it remembers.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct UiDeviceSettingsView {
-    /// The account default password, for the show/hide field. Carried raw:
-    /// the field shows it on request, and the Bluetooth panel pre-fills it.
-    pub default_password: Option<String>,
+    /// The name this browser's key has on your devices ("Yona's MacBook"),
+    /// renameable (`AccessCommand::RenameBrowser`).
+    pub browser_name: Option<String>,
     /// How many passwords this browser remembers (for "Forget remembered
     /// passwords").
     pub remembered_passwords: usize,

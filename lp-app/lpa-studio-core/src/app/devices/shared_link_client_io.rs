@@ -30,6 +30,17 @@
 //!   already abandons stray ids, so a straggler from a cancelled pull is a
 //!   quiet discard rather than a wrong answer.
 //!
+//! # Several conversations on one link
+//!
+//! The card's frame feed and the access controller (reading a device's
+//! list, adding this browser's key on a USB connect) can each hold a
+//! conversation on the same link at once, and the link has ONE inbox. So
+//! every io claims its own slice of the app range
+//! ([`CONVERSATION_ID_STRIDE`] ids) when it is made, its client mints ids
+//! only there, and `receive` takes only the replies in its slice — another
+//! conversation's reply stays in the inbox for its owner instead of being
+//! read, and discarded, as a stranger's.
+//!
 //! [`APP_CONVERSATION_ID_BASE`]: lpa_devices::link::APP_CONVERSATION_ID_BASE
 //! [`LinkEvent::Passthrough`]: lpa_devices::link::LinkEvent::Passthrough
 
@@ -55,14 +66,38 @@ const RECEIVE_POLL: Duration = Duration::from_millis(20);
 const RESPONSE_BUDGET: Duration = Duration::from_secs(5);
 
 /// Replies in the app range, routed here by the pump (or the lens tap) for
-/// the conversation on this link: `(request id, the raw M! line)`.
+/// the conversations on this link: `(request id, the raw M! line)`.
 pub type ConversationInbox = Rc<RefCell<VecDeque<(u32, String)>>>;
+
+/// How many request ids one conversation owns (see the module doc). A
+/// long-lived conversation (the frame feed keeps one per connection) mints
+/// 16 M requests before it would reach the next slice.
+pub const CONVERSATION_ID_STRIDE: u32 = 0x0100_0000;
+
+/// The app range's slices, `APP_CONVERSATION_ID_BASE..0x8000_0000`.
+const CONVERSATION_SLICES: u32 = (0x8000_0000 - APP_CONVERSATION_ID_BASE) / CONVERSATION_ID_STRIDE;
+
+thread_local! {
+    static NEXT_SLICE: core::cell::Cell<u32> = const { core::cell::Cell::new(0) };
+}
+
+/// Claim the next slice of the app range (cycling; 64 slices).
+fn claim_slice() -> u32 {
+    let slice = NEXT_SLICE.with(|next| {
+        let slice = next.get();
+        next.set((slice + 1) % CONVERSATION_SLICES);
+        slice
+    });
+    APP_CONVERSATION_ID_BASE + slice * CONVERSATION_ID_STRIDE
+}
 
 /// `ClientIo` over one link's shared wire.
 pub struct SharedLinkClientIo {
     link: Weak<RefCell<Box<dyn Link>>>,
     inbox: ConversationInbox,
     timer: Rc<RefCell<dyn FnMut(Duration) -> DeviceTimerFuture>>,
+    /// The first id of this conversation's slice.
+    first_id: u32,
 }
 
 impl SharedLinkClientIo {
@@ -71,14 +106,25 @@ impl SharedLinkClientIo {
         inbox: ConversationInbox,
         timer: Rc<RefCell<dyn FnMut(Duration) -> DeviceTimerFuture>>,
     ) -> Self {
-        Self { link, inbox, timer }
+        Self {
+            link,
+            inbox,
+            timer,
+            first_id: claim_slice(),
+        }
     }
 
-    /// An `lpa-client` over this io whose request ids start in the app
-    /// range, so the transport routes its replies here and nothing it
-    /// mints can collide with the model's own ids.
+    /// An `lpa-client` over this io whose request ids start in its own
+    /// slice of the app range, so the transport routes its replies here and
+    /// nothing it mints can collide with the model's ids or another
+    /// conversation's.
     pub fn into_client(self) -> LpClient<SharedLinkClientIo> {
-        LpClient::new(self).with_request_ids_from(u64::from(APP_CONVERSATION_ID_BASE))
+        let first = u64::from(self.first_id);
+        LpClient::new(self).with_request_ids_from(first)
+    }
+
+    fn owns(&self, id: u32) -> bool {
+        id.wrapping_sub(self.first_id) < CONVERSATION_ID_STRIDE
     }
 
     /// Whether the link this io speaks through still exists.
@@ -109,7 +155,13 @@ impl ClientIo for SharedLinkClientIo {
     async fn receive(&mut self) -> Result<WireServerMessage, TransportError> {
         let mut waited = Duration::ZERO;
         loop {
-            let next = self.inbox.borrow_mut().pop_front();
+            let next = {
+                let mut inbox = self.inbox.borrow_mut();
+                inbox
+                    .iter()
+                    .position(|(id, _)| self.owns(*id))
+                    .and_then(|at| inbox.remove(at))
+            };
             if let Some((_, line)) = next {
                 let json = line.strip_prefix("M!").unwrap_or(&line);
                 match lpc_wire::json::from_str::<WireServerMessage>(json) {
@@ -141,5 +193,147 @@ impl ClientIo for SharedLinkClientIo {
     async fn close(&mut self) -> Result<(), TransportError> {
         // The port belongs to the model's link.
         Ok(())
+    }
+}
+
+impl Drop for SharedLinkClientIo {
+    /// Replies nobody will read again (a straggler after a timeout) leave
+    /// with their conversation.
+    fn drop(&mut self) {
+        let first_id = self.first_id;
+        self.inbox
+            .borrow_mut()
+            .retain(|(id, _)| id.wrapping_sub(first_id) >= CONVERSATION_ID_STRIDE);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use core::future::Future;
+    use core::task::{Context, Poll, Waker};
+
+    use lpa_devices::link::{LinkEvent, LinkInfo};
+    use lpc_wire::{ClientRequest, ServerMsgBody, WireServerMessage};
+
+    use super::*;
+
+    /// Regression for
+    /// `docs/defects/2026-09-25-turn-on-bluetooth-reports-a-timeout-the-board-answered.md`:
+    /// the card's frame feed and an access write are two conversations on
+    /// one link, with one inbox. The board answers the write at once; the
+    /// feed, which polls far more often, must not eat that reply, and the
+    /// write must get it instead of waiting out its budget.
+    #[test]
+    fn a_write_reply_is_not_consumed_by_a_concurrent_frame_feed() {
+        let link = silent_link();
+        let inbox: ConversationInbox = Rc::default();
+        let mut feed = io_on(&link, &inbox);
+        let mut write = io_on(&link, &inbox);
+        assert_ne!(
+            feed.first_id, write.first_id,
+            "each conversation owns its slice"
+        );
+
+        let write_id = write.first_id;
+        block_on(write.send(ClientMessage {
+            id: u64::from(write_id),
+            msg: ClientRequest::AccessList,
+        }))
+        .expect("sent");
+        // The pump routes the board's prompt answer into the shared inbox.
+        inbox
+            .borrow_mut()
+            .push_back((write_id, access_list_reply(write_id)));
+
+        // The feed polls first, as it did on the desk.
+        let feed_error = block_on(feed.receive()).expect_err("nothing for the feed");
+        assert!(
+            feed_error.to_string().contains("did not respond"),
+            "{feed_error}"
+        );
+        assert_eq!(
+            inbox.borrow().len(),
+            1,
+            "the write's reply stays in the inbox"
+        );
+
+        let reply = block_on(write.receive()).expect("the write gets its answer");
+        assert_eq!(reply.id, u64::from(write_id));
+        assert!(matches!(reply.msg, ServerMsgBody::AccessList { .. }));
+        assert!(inbox.borrow().is_empty());
+    }
+
+    /// A dropped conversation takes only its own stragglers with it.
+    #[test]
+    fn dropping_a_conversation_leaves_another_conversations_reply() {
+        let link = silent_link();
+        let inbox: ConversationInbox = Rc::default();
+        let feed = io_on(&link, &inbox);
+        let mut write = io_on(&link, &inbox);
+        let (feed_id, write_id) = (feed.first_id, write.first_id);
+        inbox
+            .borrow_mut()
+            .push_back((feed_id, access_list_reply(feed_id)));
+        inbox
+            .borrow_mut()
+            .push_back((write_id, access_list_reply(write_id)));
+
+        drop(feed);
+
+        assert_eq!(inbox.borrow().len(), 1);
+        let reply = block_on(write.receive()).expect("still there");
+        assert_eq!(reply.id, u64::from(write_id));
+    }
+
+    /// A link the test answers by hand: the pump's routing is what this io
+    /// depends on, and the test plays the pump.
+    struct SilentLink(LinkInfo);
+
+    impl Link for SilentLink {
+        fn info(&self) -> &LinkInfo {
+            &self.0
+        }
+        fn submit(&mut self, _command: LinkCommand) {}
+        fn poll_event(&mut self) -> Option<LinkEvent> {
+            None
+        }
+    }
+
+    fn silent_link() -> Rc<RefCell<Box<dyn Link>>> {
+        Rc::new(RefCell::new(Box::new(SilentLink(LinkInfo::default()))))
+    }
+
+    fn io_on(link: &Rc<RefCell<Box<dyn Link>>>, inbox: &ConversationInbox) -> SharedLinkClientIo {
+        let timer: Rc<RefCell<dyn FnMut(Duration) -> DeviceTimerFuture>> =
+            Rc::new(RefCell::new(|_| -> DeviceTimerFuture {
+                Box::pin(core::future::ready(()))
+            }));
+        SharedLinkClientIo::new(Rc::downgrade(link), Rc::clone(inbox), timer)
+    }
+
+    fn access_list_reply(id: u32) -> String {
+        let message = WireServerMessage::new(
+            u64::from(id),
+            ServerMsgBody::AccessList {
+                ble_enabled: true,
+                open: false,
+                entries: Vec::new(),
+            },
+        );
+        format!(
+            "M!{}",
+            lpc_wire::json::to_string(&message).expect("encodes")
+        )
+    }
+
+    /// Every future here is immediately ready (the timer never waits).
+    fn block_on<F: Future>(future: F) -> F::Output {
+        let mut future = core::pin::pin!(future);
+        let mut context = Context::from_waker(Waker::noop());
+        loop {
+            if let Poll::Ready(output) = future.as_mut().poll(&mut context) {
+                return output;
+            }
+        }
     }
 }

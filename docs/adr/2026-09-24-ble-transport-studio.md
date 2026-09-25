@@ -128,3 +128,15 @@ connected-idle, 7–30 % under traffic.
   re-measured at the M7 walk.
 - The Web Bluetooth conformance suite (`browser_ble_conformance.rs`) runs in
   `just lpa-link-browser-test` beside the serial one.
+
+## Amendment 2026-09-25: items 6 and 7 replaced
+
+`2026-09-24-easy-bluetooth-access.md` replaces two decisions above.
+Studio no longer logs in with an account default password (item 6): it
+unlocks with keys it holds, matched by salt (this browser's, the account's,
+the account's optional passwords), then one remembered password, then the
+sheet. And the device store is no longer written whole from a local record
+(item 7): the board merges changes and lists every key (`AccessList`,
+`AccessAdd`, `AccessRemove`, `AccessSetSwitches`), and Studio caches only
+the last list it read (`lp.access.device-lists.v1`, no keys). The login
+protocol, the tiers and the enforcement on the board are unchanged.

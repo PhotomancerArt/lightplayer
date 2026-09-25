@@ -46,10 +46,11 @@
 use dioxus::prelude::*;
 use gloo_timers::future::TimeoutFuture;
 use lpa_studio_core::{
-    ActionPriority, DeviceAction, DeviceOpenProgress, DeviceOpenStep, DeviceWait, DeviceWaitReason,
-    DevicesOp, OpenDevice, OpenStage, RuntimeOp, UiAction,
+    AccessCommand, ActionPriority, DeviceAction, DeviceOpenProgress, DeviceOpenStep, DeviceWait,
+    DeviceWaitReason, DevicesOp, OpenDevice, OpenStage, RuntimeOp, UiAction,
 };
 
+use crate::app::home::access_ui_context::access_handler;
 use crate::core::{quiet_action_class, solid_action_class};
 use crate::router::StudioRoute;
 
@@ -93,11 +94,14 @@ pub enum OpeningState {
     /// The project is going onto a board, one wire step at a time.
     OnDevice(DeviceOpenProgress),
     /// The open ended. `message` is the mapped `UiError` wording; `retry`
-    /// runs the same open again; `device` is the board it was on, if any.
+    /// runs the same open again; `device` is the board it was on, if any;
+    /// `needs_unlock` when the board refused the link's tier, so the way
+    /// on is Unlock rather than a Reset.
     Failed {
         message: String,
         retry: UiAction,
         device: Option<OpenDevice>,
+        needs_unlock: bool,
     },
 }
 
@@ -377,6 +381,7 @@ pub fn opening_state(probe: &OpenProbe) -> OpeningState {
             message: failure.message.clone(),
             retry: failure.retry.clone(),
             device: failure.device.clone(),
+            needs_unlock: failure.needs_unlock,
         };
     }
     // A held open parks nothing — the actor is free while the board is
@@ -513,6 +518,7 @@ pub fn ProjectOpeningFrame(
         message,
         retry,
         device,
+        needs_unlock,
     } = &shown
     {
         return rsx! {
@@ -520,6 +526,7 @@ pub fn ProjectOpeningFrame(
                 message: message.clone(),
                 retry: retry.clone(),
                 device: device.clone(),
+                needs_unlock: *needs_unlock,
                 on_action,
             }
         };
@@ -780,16 +787,23 @@ pub(crate) fn OpenFailureNotice(
     /// and the way back is Devices rather than Explore.
     #[props(default)]
     device: Option<OpenDevice>,
+    /// The board refused the link's tier (a Bluetooth link unlocked for
+    /// play): the notice offers Unlock instead of a Reset, because the
+    /// board is fine.
+    #[props(default)]
+    needs_unlock: bool,
     on_action: Option<EventHandler<UiAction>>,
 ) -> Element {
     let (back_href, back_label) = match device {
         Some(_) => (StudioRoute::Devices.path(), "Back to devices"),
         None => (StudioRoute::Explore.path(), "Back to Explore"),
     };
-    let reset = device
-        .as_ref()
-        .and_then(|device| device.id)
+    let board = device.as_ref().and_then(|device| device.id);
+    let unlock = board.filter(|_| needs_unlock);
+    let reset = board
+        .filter(|_| !needs_unlock)
         .map(|id| DevicesOp::action_for(DeviceAction::ResetBoard { device: id }));
+    let on_access = access_handler();
     rsx! {
         section { class: "tw:grid tw:max-w-[560px] tw:gap-3.5",
             div { class: "tw:grid tw:gap-2 tw:rounded-lg tw:border tw:border-status-error-border tw:bg-status-error-bg tw:p-4",
@@ -810,6 +824,15 @@ pub(crate) fn OpenFailureNotice(
                         }
                     },
                     "Retry"
+                }
+                if let Some(device) = unlock {
+                    button {
+                        r#type: "button",
+                        class: solid_action_class(ActionPriority::Secondary),
+                        title: "Unlock with an edit password; Retry once it is unlocked.",
+                        onclick: move |_| on_access.call(AccessCommand::LogIn { device }),
+                        "Unlock"
+                    }
                 }
                 if let Some(reset) = reset {
                     button {
@@ -956,6 +979,7 @@ mod tests {
                 message: "the device did not start".to_string(),
                 retry: retry_action(),
                 device: None,
+                needs_unlock: false,
             }),
             ..OpenProbe::default()
         });
@@ -1010,7 +1034,30 @@ mod tests {
             message: "engine wasm fetch/compile failed".to_string(),
             retry: retry_action(),
             device: None,
+            needs_unlock: false,
         };
         assert_eq!(label.observe(failed.clone()), failed);
+    }
+
+    /// A board's tier refusal reaches the page as one Unlock answers.
+    #[test]
+    fn a_refused_open_carries_its_unlock() {
+        let state = opening_state(&OpenProbe {
+            in_flight: false,
+            stage: OpenStage::Failed(OpenFailure {
+                message: "This needs an edit device password — unlock again with one.".to_string(),
+                retry: retry_action(),
+                device: None,
+                needs_unlock: true,
+            }),
+            ..OpenProbe::default()
+        });
+        assert!(matches!(
+            state,
+            OpeningState::Failed {
+                needs_unlock: true,
+                ..
+            }
+        ));
     }
 }
