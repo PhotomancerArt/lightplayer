@@ -54,6 +54,8 @@ const S = {
   connectedAt: 0, drops: 0,
   onPacket: null,      // a command's packet sink; otherwise packets are logged
   rxPackets: 0, rxBytes: 0,
+  // Wire mode (BLE M4): the product board speaks `M!{json}\n` over NUS.
+  wire: { on: false, buf: "", nextId: 1, pending: new Map(), unsolicited: [], lines: 0, badLines: 0 },
 };
 
 /* ============================== logging =============================== */
@@ -94,7 +96,8 @@ async function attach() {
   S.tx.addEventListener("characteristicvaluechanged", (e) => {
     const v = new Uint8Array(e.target.value.buffer.slice(0));
     S.rxPackets++; S.rxBytes += v.length;
-    if (S.onPacket) S.onPacket(v); else show(`← ${v.length} B ${dec.decode(v).slice(0, 120)}`);
+    if (S.wire.on) wireFeed(v);
+    else if (S.onPacket) S.onPacket(v); else show(`← ${v.length} B ${dec.decode(v).slice(0, 120)}`);
   });
   await S.tx.startNotifications();
   S.connected = true; S.connectedAt = Date.now();
@@ -139,6 +142,74 @@ function nextPacket(ms = 5000) {
   });
 }
 function need() { if (!S.connected) throw new Error("not connected"); }
+/* ============================== wire mode ============================= */
+// The product firmware (fw-esp32c6 with BLE enabled) carries the wire over
+// NUS: server frames arrive as notifications chunked to the MTU and are
+// re-joined here on newlines; requests go out as `M!{json}\n`, written in
+// 180-byte chunks WITH response (the spike's lesson: pace the writes).
+const b64e = (u8) => btoa(String.fromCharCode(...u8));
+const b64d = (s) => Uint8Array.from(atob(s), (c) => c.charCodeAt(0));
+function wireFeed(v) {
+  const W = S.wire;
+  W.buf += dec.decode(v, { stream: true });
+  let nl;
+  while ((nl = W.buf.indexOf("\n")) >= 0) {
+    const line = W.buf.slice(0, nl); W.buf = W.buf.slice(nl + 1);
+    if (!line.startsWith("M!")) continue;
+    let frame;
+    try { frame = JSON.parse(line.slice(2)); } catch { W.badLines++; continue; }
+    W.lines++;
+    const p = frame.id ? W.pending.get(frame.id) : null;
+    if (p) {
+      p.frames.push(frame);
+      if (frame.seq === undefined || frame.fin === true) { W.pending.delete(frame.id); p.resolve(); }
+    } else {
+      const kind = typeof frame.msg === "string" ? frame.msg : Object.keys(frame.msg ?? {})[0];
+      W.unsolicited.push({ t: Date.now(), id: frame.id, kind, bytes: line.length, msg: kind === "heartbeat" ? undefined : frame.msg });
+      if (W.unsolicited.length > 200) W.unsolicited.shift();
+      show(`⇐ ${kind} (${line.length} B)`, "meta");
+    }
+  }
+}
+async function wireWrite(text) {
+  const bytes = enc.encode(text);
+  for (let i = 0; i < bytes.length; i += 180) await S.rx.writeValueWithResponse(bytes.slice(i, i + 180));
+  return bytes.length;
+}
+async function wireReq(msg, timeoutMs = 10000) {
+  need();
+  const W = S.wire;
+  const id = W.nextId++;
+  const entry = { frames: [] };
+  const done = new Promise((resolve, reject) => {
+    entry.resolve = resolve;
+    setTimeout(() => { W.pending.delete(id); reject(new Error(`no reply to id ${id} in ${timeoutMs} ms`)); }, timeoutMs);
+  });
+  W.pending.set(id, entry);
+  const t0 = performance.now();
+  const bytes = await wireWrite("M!" + JSON.stringify({ id, msg }) + "\n");
+  await done;
+  return { id, bytes, rttMs: +(performance.now() - t0).toFixed(1), frames: entry.frames };
+}
+async function wireLogin(password, timeoutMs) {
+  const begin = await wireReq("loginBegin", timeoutMs);
+  const ch = begin.frames[0]?.msg?.loginChallenge;
+  if (!ch) return { ok: false, step: "loginBegin", reply: begin.frames[0]?.msg, rttMs: begin.rttMs };
+  const nonce = b64d(ch.nonce);
+  const t0 = performance.now();
+  const macs = [];
+  for (const offer of ch.offers) {
+    const base = await crypto.subtle.importKey("raw", enc.encode(password), "PBKDF2", false, ["deriveBits"]);
+    const k = await crypto.subtle.deriveBits(
+      { name: "PBKDF2", hash: "SHA-256", salt: b64d(offer.salt), iterations: offer.iterations }, base, 256);
+    const hk = await crypto.subtle.importKey("raw", k, { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+    macs.push(b64e(new Uint8Array(await crypto.subtle.sign("HMAC", hk, nonce))));
+  }
+  const deriveMs = +(performance.now() - t0).toFixed(1);
+  const answer = await wireReq({ loginAnswer: { macs } }, timeoutMs);
+  const result = answer.frames[0]?.msg?.loginResult;
+  return { ok: !!result?.granted, result, offers: ch.offers.length, deriveMs, beginRttMs: begin.rttMs, answerRttMs: answer.rttMs };
+}
 
 /* ============================== commands ============================== */
 async function execute(cmd) {
@@ -228,6 +299,24 @@ async function execute(cmd) {
         queuedMs: Math.round(queuedMs),
       };
     }
+    case "wire":
+      // Switch the page between the spike's text protocol and the wire.
+      S.wire.on = !!cmd.on; S.wire.buf = "";
+      return { ok: true, wire: S.wire.on };
+    case "req": {
+      // One wire request; the reply frames (a stream's until `fin`).
+      const r = await wireReq(cmd.msg, cmd.timeoutMs ?? 10000);
+      const maxChars = cmd.maxChars ?? 2000;
+      return { ok: true, id: r.id, bytes: r.bytes, rttMs: r.rttMs, frames: r.frames.length,
+               reply: JSON.stringify(r.frames.map((f) => f.msg)).slice(0, maxChars) };
+    }
+    case "login":
+      return await wireLogin(cmd.password ?? "", cmd.timeoutMs ?? 15000);
+    case "unsolicited": {
+      const out = S.wire.unsolicited.slice(-(cmd.n ?? 20));
+      if (cmd.clear) S.wire.unsolicited = [];
+      return { ok: true, lines: S.wire.lines, badLines: S.wire.badLines, frames: out };
+    }
     case "clear":
       logEl.innerHTML = ""; S.events = []; return { ok: true };
     case "eval": {
@@ -276,7 +365,7 @@ function boot() {
   }
   $("btn-join").onclick = async () => {
     try {
-      S.device = await navigator.bluetooth.requestDevice({ filters: [{ namePrefix: "LP-BLE" }], optionalServices: [NUS] });
+      S.device = await navigator.bluetooth.requestDevice({ filters: [{ namePrefix: "LP-" }, { services: [NUS] }], optionalServices: [NUS] });
       S.device.addEventListener("gattserverdisconnected", onDisconnected);
       event("joined", { device: S.device.name });
       await attach();

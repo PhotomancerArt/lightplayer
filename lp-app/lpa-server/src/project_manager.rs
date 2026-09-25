@@ -207,6 +207,7 @@ impl ProjectManager {
         project.flush_panel_state();
         let name = project.name();
         self.name_to_handle.remove(name);
+        self.release_tables_if_empty();
 
         Ok(())
     }
@@ -222,7 +223,24 @@ impl ProjectManager {
         }
         self.projects.clear();
         self.name_to_handle.clear();
+        self.release_tables_if_empty();
         Ok(())
+    }
+
+    /// With no project loaded, give the tables' memory back instead of
+    /// keeping their capacity. They are first grown by the insert at the end
+    /// of `load_project`, after the project has taken the memory below them,
+    /// so a kept table (3.7 KB for `projects`: a `Project` is stored inline)
+    /// sits in the middle of the space the project frees and splits it; a
+    /// device then refused the next project on contiguity with 200 KB free
+    /// (docs/defects/2026-09-24-ble-enabled-c6-refuses-a-project-switch-after-the-heap-cut.md).
+    fn release_tables_if_empty(&mut self) {
+        if self.projects.is_empty() {
+            self.projects = HashMap::new();
+        }
+        if self.name_to_handle.is_empty() {
+            self.name_to_handle = HashMap::new();
+        }
     }
 
     /// Get a project by handle

@@ -44,7 +44,7 @@ const DELIVERED_IN_ORDER: &[&str] = &[
     "ESP-NOW radio ready",
     "[RECOVERY] boot complete",
     "M!{\"id\":0,\"msg\":{\"heartbeat\":{",
-    "\"totalBytes\":325536",
+    "\"totalBytes\":301536",
     "[stack] heartbeat: high-water",
 ];
 
