@@ -517,6 +517,12 @@ esp-storage = { path = "third_party/esp-storage" }
 # so the RMT refill interrupt's dispatch never fetches from flash. See
 # third_party/esp-hal/README-LP.md and docs/debt/classic-iram-handlers-reach-flash.md.
 esp-hal = { path = "third_party/esp-hal" }
+# esp-radio 0.18.0 fork: the NPL controllers' (C6's) ACL receive path copies
+# every mbuf of a chained packet, not only the first — a knob write over
+# Bluetooth arrived 8 B short and killed the C6's BLE host. See
+# third_party/esp-radio/README-LP.md and
+# docs/defects/2026-09-25-a-knob-jump-over-bluetooth-kills-the-c6-ble-host.md.
+esp-radio = { path = "third_party/esp-radio" }
 # naga 29.0.0 fork: glsl-in lowers `&&`/`||` with side-effecting right operands
 # to control flow so they short-circuit per the GLSL spec (upstream evaluates
 # eagerly). See third_party/naga/README-LP.md; candidate for an upstream PR.
