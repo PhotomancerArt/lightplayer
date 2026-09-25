@@ -705,6 +705,11 @@ export async function bleSilentDrop(boardId) {
   (await bluetoothModule()).bluetooth().silentDrop(boardId);
 }
 
+/// Tell the page its link dropped while the radio link stays up (Bluefy).
+export async function blePhantomDrop(boardId) {
+  (await bluetoothModule()).bluetooth().phantomDrop(boardId);
+}
+
 /// The next GATT connect to this board never settles.
 export async function bleHangNextConnect(boardId) {
   (await bluetoothModule()).bluetooth().hangNextConnect(boardId);

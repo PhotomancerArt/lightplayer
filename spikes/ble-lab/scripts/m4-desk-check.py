@@ -10,6 +10,11 @@ Preconditions (see ../README.md, "Wire mode"):
     BLE_LAB_PORT=<port> python3 spikes/ble-lab/scripts/m4-desk-check.py \
         --password desk-lab [--idle-min 10] [--skip-drop]
 
+    # just the long-write checks (docs/defects/2026-09-25-a-long-bluetooth-
+    # write-is-acknowledged-and-lost.md); no password, `hello` is answered
+    # at every tier — run it inside the first 10 s of a link:
+    BLE_LAB_PORT=<port> python3 spikes/ble-lab/scripts/m4-desk-check.py --only-long-writes
+
     # just the knob-jump checks (docs/defects/2026-09-25-a-knob-jump-over-
     # bluetooth-kills-the-c6-ble-host.md); `--force-restart` needs an image
     # built with `desk_ble_fault`:
@@ -130,7 +135,64 @@ return { lo, hi, ok, bad, drops: lab.S.drops - drops0, connected: lab.S.connecte
 
 
 def console_faults(lines: list[str]) -> list[str]:
-    return [l for l in lines if "error parsing packet" in l or "host runner error" in l]
+    return [
+        l
+        for l in lines
+        if "error parsing packet" in l
+        or "host runner error" in l
+        or "error sending outbound pdu" in l
+        or "long write refused" in l
+    ]
+
+
+# `hello` padded to an exact length, written either as ONE ATT write (over
+# MTU − 3 that is a long write: Prepare Write segments + Execute Write) or in
+# `chunk`-byte writes. Answered at every tier, so no login is needed.
+LONG_WRITE_JS = r"""
+const W = lab.S.wire;
+async function hello(size, chunk) {
+  const id = W.nextId++;
+  let text = 'M!' + JSON.stringify({ id, msg: 'hello' });
+  text = text.slice(0, -1) + ' '.repeat(Math.max(0, size - 1 - text.length)) + '}';
+  const bytes = lab.enc.encode(text + '\n');
+  const e = { frames: [] };
+  const answered = new Promise((res) => { e.resolve = () => res(true); setTimeout(() => res(false), 3000); });
+  W.pending.set(id, e);
+  const t0 = performance.now();
+  let err = null;
+  try {
+    for (let i = 0; i < bytes.length; i += chunk) await lab.S.rx.writeValueWithResponse(bytes.slice(i, i + chunk));
+  } catch (x) { err = String(x.message || x); }
+  const ok = await answered;
+  W.pending.delete(id);
+  return { size: bytes.length, chunk, ok, ms: +(performance.now() - t0).toFixed(0), err };
+}
+const drops0 = lab.S.drops, out = [];
+for (const [size, chunk] of %s) out.push(await hello(size, chunk));
+return { out, drops: lab.S.drops - drops0, connected: lab.S.connected };
+"""
+
+# (line bytes, write size): three long writes up to the ATT maximum, then a
+# long line in Studio's 180-byte writes and in the board's full 244.
+LONG_WRITE_CASES = [[300, 300], [400, 400], [512, 512], [600, 180], [600, 244]]
+
+
+def long_write_checks() -> int:
+    """A long write to RX reaches the server (the 2026-09-25 defect: the board
+    acknowledged its segments and dropped the bytes, and a max-size segment's
+    reply restarted the BLE host). Returns 0 when every case was answered."""
+    js = LONG_WRITE_JS % json.dumps(LONG_WRITE_CASES)
+    r, lines = evaluate(js, 30_000)
+    faults = console_faults(lines + console(200))
+    out = r.get("out") or []
+    passed = (
+        len(out) == len(LONG_WRITE_CASES)
+        and all(case.get("ok") and not case.get("err") for case in out)
+        and r.get("drops") == 0
+        and not faults
+    )
+    record("long-writes", passed=passed, faults=faults[:6], **r)
+    return 0 if passed else 1
 
 
 def knob_checks(args) -> int:
@@ -190,7 +252,7 @@ def knob_checks(args) -> int:
 
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--password", required=True)
+    ap.add_argument("--password", help="the device password (every mode but --only-long-writes)")
     ap.add_argument("--idle-min", type=float, default=10.0)
     ap.add_argument("--skip-drop", action="store_true", help="skip the 10 s unauthenticated drop")
     ap.add_argument("--rtt-n", type=int, default=20)
@@ -201,7 +263,11 @@ def main() -> int:
                     help="desk_ble_fault images only: force a host-runner restart and prove it comes back")
     ap.add_argument("--only-knob-burst", action="store_true",
                     help="log in, run the knob-jump checks (and --force-restart), stop")
+    ap.add_argument("--only-long-writes", action="store_true",
+                    help="no login: long writes and chunked long lines are answered, stop")
     args = ap.parse_args()
+    if not args.only_long_writes and not args.password:
+        ap.error("--password is required unless --only-long-writes")
 
     status = cmd({"op": "status"})
     record("status", device=status.get("device"), connected=status.get("connected"))
@@ -209,6 +275,9 @@ def main() -> int:
         record("abort", reason="no BLE link: a human must Join first")
         return 1
     cmd({"op": "wire", "on": True})
+
+    if args.only_long_writes:
+        return long_write_checks()
 
     if args.only_knob_burst:
         r = cmd({"op": "login", "password": args.password})
@@ -289,6 +358,10 @@ def main() -> int:
     # 7. A knob jump with the preview poll in flight, and every write length
     #    (the 2026-09-25 defect).
     if knob_checks(args) != 0:
+        return 1
+
+    # 7b. A long write, and a long line in Studio's 180-byte writes.
+    if long_write_checks() != 0:
         return 1
 
     # 8. The idle window: the link held, and the [COEX] lines to read loss off.
