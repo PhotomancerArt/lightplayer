@@ -78,8 +78,8 @@ pub use binding::{
     BusSlotRef, BusSlotRefError, NodeSlotRef, NodeSlotRefError,
 };
 pub use bus::{
-    ChannelName, PALETTE_CHANNEL, PRIMARY_CONTROL_CHANNEL, PRIMARY_VISUAL_CHANNEL,
-    WELL_KNOWN_CHANNELS, WellKnownChannel, well_known_channel,
+    ChannelName, PALETTE_CHANNEL, PLAYLIST_SKIP_CHANNEL, PLAYLIST_TOUR_CHANNEL, PRIMARY_CONTROL_CHANNEL,
+    PRIMARY_VISUAL_CHANNEL, WELL_KNOWN_CHANNELS, WellKnownChannel, well_known_channel,
 };
 pub use color::{
     COLORSPACE_SHAPE_NAME, Colorspace, GRADIENT_CONFIG_SHAPE_NAME, GRADIENT_SHAPE_NAME, Gradient,
@@ -132,7 +132,7 @@ pub use nodes::{
     OutputDef, OutputDefView, OutputDriverOptionsConfig, OutputDriverOptionsConfigView, OutputName,
     OutputNameError, OutputPortDef, OutputPortDefView, PATTERN_EXPORT_FOLDER, PatchConfig,
     PathSpec, PlayState, PlaylistDef, PlaylistDefView, PlaylistEntry, PlaylistEntryView,
-    PlaylistState, PlaylistStateView, ProjectionShape, ProvenanceDef, STARTER_SHADER_GLSL,
+    PLAYLIST_TOUR_SHAPE_NAME, PlaylistState, PlaylistStateView, PlaylistTour, playlist_tour_lp_type, ProjectionShape, ProvenanceDef, STARTER_SHADER_GLSL,
     STARTER_STEM_PLACEHOLDER, ScalarHint, ScalarHintView, ShaderBudget, ShaderBudgetError,
     ShaderCoords, ShaderDef, ShaderDefView, ShaderHeaderGenError, ShaderMapKeyDef, ShaderParamDef,
     ShaderParamDefView, ShaderSlotDef, ShaderSlotKind, ShaderSlotMappingDef, ShaderSlotMappingKind,

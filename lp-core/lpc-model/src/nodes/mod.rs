@@ -41,8 +41,8 @@ pub use pattern_project::{
     PATTERN_EXPORT_FOLDER, pattern_project_files_1d, pattern_project_files_2d,
 };
 pub use playlist::{
-    PlaylistDef, PlaylistDefView, PlaylistEntry, PlaylistEntryView, PlaylistState,
-    PlaylistStateView,
+    PLAYLIST_TOUR_SHAPE_NAME, PlaylistDef, PlaylistDefView, PlaylistEntry, PlaylistEntryView,
+    PlaylistState, PlaylistStateView, PlaylistTour, playlist_tour_lp_type,
 };
 pub use projection_shape::{FlipMode, MirrorMode, ProjectionShape};
 pub use provenance_def::ProvenanceDef;

@@ -1014,6 +1014,30 @@
         "kind": {
           "const": "Playlist"
         },
+        "next_trigger_ids": {
+          "items": {
+            "maximum": 4294967295,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "type": "array"
+        },
+        "prev_trigger_ids": {
+          "items": {
+            "maximum": 4294967295,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "type": "array"
+        },
+        "skip": {
+          "items": {
+            "maximum": 4294967295,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "type": "array"
+        },
         "time": {
           "additionalProperties": false,
           "properties": {
@@ -1047,6 +1071,28 @@
               "type": "object"
             }
           },
+          "type": "object"
+        },
+        "tour": {
+          "additionalProperties": false,
+          "description": "Hold, or cycle through the enabled entries: seconds per entry and the fade between them.",
+          "properties": {
+            "fade_seconds": {
+              "type": "number"
+            },
+            "kind": {
+              "type": "string"
+            },
+            "step_seconds": {
+              "type": "number"
+            }
+          },
+          "required": [
+            "kind",
+            "step_seconds",
+            "fade_seconds"
+          ],
+          "title": "Tour",
           "type": "object"
         },
         "trigger": {
