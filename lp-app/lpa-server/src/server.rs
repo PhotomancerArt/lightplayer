@@ -21,6 +21,7 @@ use lpc_wire::{ClientRequest, WireServerMessage};
 
 use crate::access_gate::classify;
 use crate::access_state::{AccessState, EntropySource};
+use crate::access_store;
 use crate::heartbeat_status::HeartbeatStatus;
 use lpfs::{FsEvent, LpFs};
 
@@ -473,6 +474,15 @@ impl LpServer {
         self.access.tier(link, &*self.base_fs)
     }
 
+    /// Whether `link`'s own `LoginBegin` challenge is outstanding (see
+    /// `AccessState::login_pending`). A radio edge keeps an unauthenticated
+    /// link open past its login deadline while this holds, so a person
+    /// typing a device password is not cut off; the challenge's own expiry
+    /// (`lpc_access::CHALLENGE_TTL_MS`) bounds it.
+    pub fn login_pending(&self, link: Link) -> bool {
+        self.access.login_pending(link.id)
+    }
+
     /// Install the embedder's random-byte source for login challenges. Unset
     /// (the default) = `LoginBegin` is refused: a challenge must never be
     /// predictable. The firmware wires its hardware RNG; hosts that serve
@@ -810,6 +820,33 @@ impl LpServer {
                 }
                 ClientRequest::LoginAnswer { macs } => {
                     let body = self.access.answer_login(link.id, &macs);
+                    transport
+                        .send(link.id, WireServerMessage::new(msg_id, body))
+                        .await
+                        .map_err(|error| ServerError::Core(format!("{error}")))?;
+                    response_count += 1;
+                }
+                // Who has access: edit tier (the gate above has already
+                // refused anything less). Read-modify-write of the device
+                // store through the BASE fs, never the wire fs path, which
+                // stays write-only; the answer never carries a key.
+                ClientRequest::AccessList
+                | ClientRequest::AccessAdd { .. }
+                | ClientRequest::AccessRemove { .. }
+                | ClientRequest::AccessSetSwitches { .. } => {
+                    let fs = &*self.base_fs;
+                    let body = match client_msg.msg {
+                        ClientRequest::AccessAdd { entry } => access_store::access_add(fs, entry),
+                        ClientRequest::AccessRemove { salt } => {
+                            access_store::access_remove(fs, &salt)
+                        }
+                        ClientRequest::AccessSetSwitches { ble_enabled, open } => {
+                            access_store::access_set_switches(fs, ble_enabled, open)
+                        }
+                        _ => access_store::access_list(fs),
+                    };
+                    // `open` may have changed; the cached flag is re-read.
+                    self.access.invalidate_device_store();
                     transport
                         .send(link.id, WireServerMessage::new(msg_id, body))
                         .await

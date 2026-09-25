@@ -5730,7 +5730,7 @@ fn a_board_seen_over_usb_and_over_bluetooth_is_one_registry_row() {
             .access
             .get(&cards[0].id)
             .and_then(|access| access.line.as_deref())
-            == Some("Connected — edit")
+            == Some("Unlocked")
     });
 
     // The editor over Bluetooth is authoring: the device cadence. Play is

@@ -2769,20 +2769,6 @@ impl ProjectController {
             .is_some_and(|active| active.transient.is_some())
     }
 
-    /// The OPEN library project's package filesystem, for the sidecars that
-    /// live beside its content (`/.lp/access.json`). `None` for no project,
-    /// or a transient view session — someone else's document, whose
-    /// sidecar is not the viewer's to write.
-    pub(crate) fn active_package_fs(
-        &self,
-    ) -> Option<std::rc::Rc<std::cell::RefCell<dyn lpfs::LpFs>>> {
-        let active = self.library.as_ref()?.active.as_ref()?;
-        if active.transient.is_some() {
-            return None;
-        }
-        Some(std::rc::Rc::clone(&active.handle.package_fs))
-    }
-
     /// Completed fork-at-save count (see the field).
     pub(crate) fn transient_fork_generation(&self) -> u64 {
         self.transient_fork_generation

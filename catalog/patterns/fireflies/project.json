@@ -1,0 +1,9 @@
+{
+  "format": 11,
+  "name": "Fireflies",
+  "description": "A few soft glows drift slowly over near-black, each pulsing on its own rhythm.",
+  "kind": "pattern",
+  "exports": [
+    "effect"
+  ]
+}

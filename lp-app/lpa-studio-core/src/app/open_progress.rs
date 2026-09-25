@@ -58,7 +58,7 @@ use core::future::Future;
 use core::pin::Pin;
 use core::task::{Context, Poll, Waker};
 
-use crate::{DeviceId, UiAction};
+use crate::{DeviceId, UiAction, UiError};
 
 /// How far the open in flight has got, as far as the CORE can see.
 ///
@@ -98,6 +98,10 @@ pub struct OpenFailure {
     /// The board the open was on when it failed, when it was on one — the
     /// failure page then offers to reset it.
     pub device: Option<OpenDevice>,
+    /// The board refused the open for its access tier (`NotPermitted`): the
+    /// way on is Unlock, not a Reset — the board is fine, the link is not
+    /// allowed to edit.
+    pub needs_unlock: bool,
 }
 
 /// The board an open is aimed at, as the opening frame names it.
@@ -250,7 +254,34 @@ pub(crate) fn note_open_settled() {
 /// not respond within 20.0s" alone does not tell anyone whether the board
 /// was receiving files or compiling them.
 pub(crate) fn note_open_failed(message: impl Into<String>, retry: UiAction) {
-    let message = message.into();
+    fail(message.into(), retry, false);
+}
+
+/// [`note_open_failed`] for an open that ended in a mapped error: a tier
+/// refusal (`UiError::NotPermitted`) marks the failure as one Unlock
+/// answers.
+pub(crate) fn note_open_failed_with(error: &UiError, retry: UiAction) {
+    fail(
+        error.message().to_string(),
+        retry,
+        matches!(error, UiError::NotPermitted(_)),
+    );
+}
+
+/// The device a standing open failure was refused on for its tier, if that
+/// is how the last open ended.
+pub fn refused_open_device() -> Option<DeviceId> {
+    match open_stage() {
+        OpenStage::Failed(OpenFailure {
+            needs_unlock: true,
+            device: Some(device),
+            ..
+        }) => device.id,
+        _ => None,
+    }
+}
+
+fn fail(message: String, retry: UiAction, needs_unlock: bool) {
     let (message, device) = match open_stage() {
         OpenStage::OnDevice(progress) => (
             format!(
@@ -267,6 +298,7 @@ pub(crate) fn note_open_failed(message: impl Into<String>, retry: UiAction) {
         message,
         retry,
         device,
+        needs_unlock,
     }));
 }
 
@@ -491,6 +523,40 @@ mod tests {
         assert_eq!(open_stage(), OpenStage::Idle, "Retry clears the error");
         note_open_started();
         assert_eq!(open_stage(), OpenStage::Starting);
+    }
+
+    /// A tier refusal is not a broken board: the page offers Unlock, and
+    /// the refused device is the one the sheet rises on.
+    #[test]
+    fn a_refused_open_on_a_board_asks_for_unlock_not_a_reset() {
+        reset_for_test();
+        note_open_requested();
+        note_open_started();
+        note_device_step(&board(), DeviceOpenStep::Clearing);
+        note_open_failed_with(
+            &UiError::NotPermitted("This needs an edit device password.".to_string()),
+            open_action("prjx"),
+        );
+        let OpenStage::Failed(failure) = open_stage() else {
+            panic!("failed stage expected");
+        };
+        assert!(failure.needs_unlock);
+        assert_eq!(refused_open_device(), Some(DeviceId(7)));
+
+        // Any other failure keeps the Reset.
+        reset_for_test();
+        note_open_requested();
+        note_open_started();
+        note_device_step(&board(), DeviceOpenStep::Loading);
+        note_open_failed_with(
+            &UiError::Transport("device did not respond within 20.0s".to_string()),
+            open_action("prjx"),
+        );
+        let OpenStage::Failed(failure) = open_stage() else {
+            panic!("failed stage expected");
+        };
+        assert!(!failure.needs_unlock);
+        assert_eq!(refused_open_device(), None);
     }
 
     fn board() -> OpenDevice {

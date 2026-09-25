@@ -42,8 +42,8 @@
 use std::path::Path;
 
 use lp_cloud_domain::{
-    CloudProject, CloudUser, HeadRef, MemberRecord, MemberRole, MetaStore, ProjectRefs,
-    SessionRecord, StoredEvent,
+    AccountAccess, CloudProject, CloudUser, HeadRef, MemberRecord, MemberRole, MetaStore,
+    ProjectRefs, SessionRecord, StoredEvent,
 };
 use lpc_cloud_api::{Access, SidecarMeta};
 use lpc_history::{ContentHash, HistoryEvent, PrefixedUid};
@@ -286,6 +286,47 @@ impl MetaStore for SqliteMetaStore {
              FROM users ORDER BY created_at, uid LIMIT ?1",
             params![limit as i64],
             decode_user,
+        )
+    }
+
+    // ---- account access ----------------------------------------------
+
+    fn put_account_access(&mut self, access: AccountAccess) {
+        self.execute(
+            "MetaStore::put_account_access",
+            "INSERT INTO account_access\n\
+                 (user_uid, key_secret, key_salt, play_password_salt, edit_password_salt, play_password, edit_password, previous_key_salts, updated_at)\n\
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)\n\
+             ON CONFLICT (user_uid) DO UPDATE SET\n\
+                 key_secret = excluded.key_secret,\n\
+                 key_salt = excluded.key_salt,\n\
+                 play_password_salt = excluded.play_password_salt,\n\
+                 edit_password_salt = excluded.edit_password_salt,\n\
+                 play_password = excluded.play_password,\n\
+                 edit_password = excluded.edit_password,\n\
+                 previous_key_salts = excluded.previous_key_salts,\n\
+                 updated_at = excluded.updated_at",
+            params![
+                access.user.to_string(),
+                access.key_secret.as_slice(),
+                access.key_salt.as_slice(),
+                access.play_password_salt.as_slice(),
+                access.edit_password_salt.as_slice(),
+                access.play_password,
+                access.edit_password,
+                access.previous_key_salts.concat(),
+                access.updated_at,
+            ],
+        );
+    }
+
+    fn account_access(&self, user: PrefixedUid) -> Option<AccountAccess> {
+        self.query_one(
+            "MetaStore::account_access",
+            "SELECT user_uid, key_secret, key_salt, play_password_salt, edit_password_salt, play_password, edit_password, previous_key_salts, updated_at\n\
+             FROM account_access WHERE user_uid = ?1",
+            params![user.to_string()],
+            decode_account_access,
         )
     }
 
@@ -564,6 +605,43 @@ fn decode_user(row: &Row<'_>) -> rusqlite::Result<CloudUser> {
         created_at: row.get(8)?,
         anonymous: row.get(9)?,
     })
+}
+
+fn decode_account_access(row: &Row<'_>) -> rusqlite::Result<AccountAccess> {
+    let previous: Vec<u8> = row.get(7)?;
+    if previous.len() % 16 != 0 {
+        fatal::<(), _>(
+            "decoding account_access.previous_key_salts",
+            Err(format!(
+                "{} bytes is not a whole number of 16-byte salts",
+                previous.len()
+            )),
+        );
+    }
+    Ok(AccountAccess {
+        user: parse_uid(&row.get::<_, String>(0)?),
+        key_secret: fixed_bytes("account_access.key_secret", row.get(1)?),
+        key_salt: fixed_bytes("account_access.key_salt", row.get(2)?),
+        play_password_salt: fixed_bytes("account_access.play_password_salt", row.get(3)?),
+        edit_password_salt: fixed_bytes("account_access.edit_password_salt", row.get(4)?),
+        play_password: row.get(5)?,
+        edit_password: row.get(6)?,
+        previous_key_salts: previous
+            .chunks_exact(16)
+            .map(|chunk| fixed_bytes("account_access.previous_key_salts", chunk.to_vec()))
+            .collect(),
+        updated_at: row.get(8)?,
+    })
+}
+
+/// A BLOB column that must hold exactly `N` bytes. Anything else is a
+/// corrupted row, and fatal like every other decode failure here.
+fn fixed_bytes<const N: usize>(column: &str, bytes: Vec<u8>) -> [u8; N] {
+    let length = bytes.len();
+    fatal(
+        &format!("decoding {column}"),
+        <[u8; N]>::try_from(bytes).map_err(|_| format!("expected {N} bytes, found {length}")),
+    )
 }
 
 fn decode_session(row: &Row<'_>) -> rusqlite::Result<SessionRecord> {

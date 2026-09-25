@@ -90,11 +90,12 @@ pub fn StudioShell(
         // consumed by the web shell's unload gate; the project pane
         // computes its own dirty affordances from the editor view
         dirty: _,
-        // the web app renders the password sheet and provides the project.s
-        // Bluetooth list by context (BLE M6)
+        // the web app renders the Unlock sheet; Studio no longer shows the
+        // project's own Bluetooth list (plan D9)
         login_prompt: _,
-        project_access: _,
         lens_access_line,
+        // the web app raises the "can now unlock" toast
+        access_added: _,
     } = view;
 
     // The mismatch page outranks the opening frame: the open it was

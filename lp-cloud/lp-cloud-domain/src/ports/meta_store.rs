@@ -5,6 +5,7 @@ use alloc::vec::Vec;
 use lpc_cloud_api::SidecarMeta;
 use lpc_history::{ContentHash, HistoryEvent, PrefixedUid};
 
+use crate::model::account_access::AccountAccess;
 use crate::model::cloud_project::CloudProject;
 use crate::model::cloud_user::CloudUser;
 use crate::model::member_record::MemberRecord;
@@ -12,8 +13,9 @@ use crate::model::project_refs::ProjectRefs;
 use crate::model::session_record::SessionRecord;
 use crate::model::stored_event::StoredEvent;
 
-/// Everything the service remembers: users, sessions, projects, membership,
-/// head refs, sidecars, the per-project event log, and the blob index.
+/// Everything the service remembers: users, their device access, sessions,
+/// projects, membership, head refs, sidecars, the per-project event log, and
+/// the blob index.
 ///
 /// # Why one trait
 ///
@@ -62,6 +64,15 @@ pub trait MetaStore {
     /// picker's candidate list (P3): a deployment with the picker on shows
     /// its earliest-seeded profiles, not an arbitrary sample.
     fn users(&self, limit: usize) -> Vec<CloudUser>;
+
+    // ---- account access ---------------------------------------------
+
+    /// Insert or replace an account's device key and passwords, keyed by
+    /// [`AccountAccess::user`] (whose row must already exist).
+    fn put_account_access(&mut self, access: AccountAccess);
+
+    /// An account's device key and passwords, if it has asked for them yet.
+    fn account_access(&self, user: PrefixedUid) -> Option<AccountAccess>;
 
     // ---- sessions ----------------------------------------------------
 

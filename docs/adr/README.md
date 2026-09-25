@@ -200,6 +200,7 @@ holds the full context.
 | The Xtensa core never joined the block cache — `XtSlot` exists and implements `Slot`, but `lp_xt_emu::Emulator::run_loop` still single-steps | `2026-09-09-emulator-block-cache` | The Xtensa emulator plan reaches its own translator/speed milestone |
 | ROM-up boards neither cache nor translate (the same boot mode blocks both, and every Studio-in-a-tab emulated board is ROM-up) | `2026-09-09-emulator-block-cache`; `2026-09-11-emulator-wasm-translator` (DD19) | ROM-up translation is taken on |
 | The rejected poll-loop skip's deferral to "a block-boundary check" is unclaimed — the shape holds (a poll loop is a self-looping block), nothing was built, and in a translated core the check would have to be translator-emitted | `2026-09-09-emulator-block-cache` (§9); `2026-09-08-emulator-poll-loop-skip` (Rejected) | A workload appears whose spin is not console drain |
+| One key per holder on every device: a browser or account installs the same `(salt, K)` everywhere, so salts link devices to a holder and one flash dump opens that holder's other devices (likely fix: `K_dev = HMAC(secret, device uid)`, a fresh salt per device) | `2026-09-24-easy-bluetooth-access` (Revisit); `2026-09-23-ble-access-model` (2026-09-24 amendment) | Any security review of device access, or a threat model beyond "someone cheeky nearby" |
 
 ## Relationship To Shared Planning
 

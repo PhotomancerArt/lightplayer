@@ -1,56 +1,75 @@
-//! Access over Bluetooth, Studio's side (BLE M6): logging in, remembering
-//! passwords, and writing who may reach a piece.
+//! Access over Bluetooth, Studio's side: unlocking, the keys this browser
+//! holds, and "Who has access" on each device.
 //!
 //! The board enforces tiers (`lpc-access`, `lpa-server`'s classifier, M4's
-//! BLE link); Studio's job is to make logging in effortless and refusals
-//! legible:
+//! BLE link); Studio's job is to make access something nobody has to think
+//! about: plugging a device in by USB installs this browser's key (and the
+//! account's), and from then on Bluetooth unlocks with no screen, matching
+//! the board's offers by salt.
 //!
 //! | concept | file |
 //! |---|---|
-//! | login on connect, per device, pure | [`access_session`] |
-//! | one login conversation over a link | [`login_attempt`] |
+//! | this browser's key | [`browser_key`] |
+//! | the signed-in account's keys | [`account_keys`] |
+//! | every key held, and the entry each installs | [`key_holder`] |
+//! | unlock on connect, per device, pure | [`access_session`] |
+//! | one unlock conversation over a link | [`login_attempt`] |
 //! | the client-side KDF and its session cache | [`login_key_cache`] |
 //! | passwords this browser remembers | [`remembered_passwords`] |
-//! | what this browser wrote to each device store | [`device_access_record`] |
-//! | the project sidecar (`<project>/.lp/access.json`) | [`project_access`] |
+//! | the device's list: read, add, remove, switch | [`device_access_ops`] |
+//! | each device's last list, cached; panel changes | [`device_access_record`] |
+//! | what a USB connect added on its own | [`access_added`] |
 //! | the controller that runs all of it | [`access_controller`] |
 //! | its inputs, and what the UI reads | [`access_command`], [`ui_access_view`] |
 //!
 //! Decision records: `docs/adr/2026-09-23-ble-access-model.md` (the model),
-//! `docs/adr/2026-09-24-ble-transport-studio.md` (the Studio transport and
-//! this UX).
+//! `docs/adr/2026-09-24-ble-transport-studio.md` (the Studio transport),
+//! `docs/adr/2026-09-24-easy-bluetooth-access.md` (key holders, the silent
+//! add over USB, and this UX). The board still honours a project's own
+//! `.lp/access.json`; Studio no longer writes one.
 
+pub mod access_added;
 pub mod access_command;
 pub mod access_controller;
 pub mod access_session;
+pub mod account_keys;
+pub mod browser_key;
+pub mod device_access_ops;
 pub mod device_access_record;
+pub mod key_holder;
 pub mod login_attempt;
 pub mod login_key_cache;
-pub mod project_access;
 pub mod remembered_passwords;
 pub mod ui_access_view;
 
 #[cfg(test)]
 pub(crate) mod test_board;
 
+pub use access_added::AccessAdded;
 pub use access_command::AccessCommand;
 pub use access_controller::{AccessController, AccessPersist};
 pub use access_session::{
     AUTO_LOGIN_ATTEMPTS, AccessPhase, AccessSession, AccessStep, LoginWindow, PromptReason,
     TypedPassword,
 };
-pub use device_access_record::{
-    DeviceAccessChange, DeviceAccessRecord, DeviceAccessRecords, NewSecret,
-};
-pub use login_attempt::{LoginAttemptOutcome, try_passwords};
+pub use account_keys::AccountKeys;
+pub use browser_key::BrowserKey;
+pub use device_access_ops::{AccessListing, AccessOp};
+pub use device_access_record::{DeviceAccessChange, DeviceAccessRecord, DeviceAccessRecords};
+pub use key_holder::{HeldKey, KeyHolder};
+pub use login_attempt::{LoginAttemptOutcome, try_login};
 pub use login_key_cache::{DEFAULT_KDF_ITERATIONS, LoginKeyCache};
 pub use remembered_passwords::{MAX_REMEMBERED_PASSWORDS, RememberedPasswords};
 pub use ui_access_view::{
-    UiAccessPanel, UiAccessSecret, UiDeviceAccess, UiLoginPrompt, UiProjectAccess,
+    PLAY_ONLY_SENTENCE, UiAccessEntry, UiAccessPanel, UiDeviceAccess, UiLoginPrompt, UiUnlockOffer,
 };
 
 /// The access tier, as the UI names it.
 pub use lpc_access::Tier as AccessTier;
+
+/// Who holds an entry (browser, account, password), as "Who has access"
+/// shows it.
+pub use lpc_access::SecretKind;
 
 /// What an action refused for want of a tier says. One sentence, used by the
 /// action error, the card's push outcome and the sheet.

@@ -1,0 +1,8 @@
+{
+  "format": 1,
+  "sample_diameter": 1.0,
+  "canvas": [0.0, 0.0, 20.0, 20.0],
+  "objects": [
+    { "name": "ring", "shape": { "ring": { "center": [10, 10], "radius": 9, "outer_count": 24, "rings": 1, "order": "outer_first", "start_angle_deg": 0 } } }
+  ]
+}

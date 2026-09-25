@@ -61,13 +61,14 @@ pub fn DevicesPage(
     /// half of D44 worth reviewing.
     #[props(default)]
     target_pick_open: bool,
-    /// Stories only: the Bluetooth settings section.s view (the app reads it
+    /// Stories only: the access settings section's view (the app reads it
     /// from its access context).
     #[props(default)]
     bluetooth_settings: Option<lpa_studio_core::UiDeviceSettingsView>,
     on_action: EventHandler<UiAction>,
 ) -> Element {
     let access_ui = super::access_ui_context::use_access_ui();
+    let account_ui = crate::cloud::account_access::use_account_access_ui();
     let bluetooth =
         bluetooth_settings.or_else(|| access_ui.map(|ui| ui.device_settings.read().clone()));
     let devices = home.devices.clone();
@@ -153,19 +154,29 @@ pub fn DevicesPage(
                 }
             }
 
-            // The account default password and the remembered ones (BLE M6
-            // S3): where Bluetooth is turned on for a piece.
+            // Unlocking your devices: this browser's name, the account's
+            // key and passwords, remembered passwords (spike §6).
             if let Some(settings) = bluetooth {
-                super::bluetooth_settings_section::BluetoothSettingsSection {
+                super::access_settings_section::AccessSettingsSection {
                     settings,
-                    on_settings: move |command| {
-                        if let Some(ui) = access_ui {
-                            ui.on_settings.call(command);
-                        }
-                    },
+                    account: account_ui
+                        .map(|ui| ui.state.read().clone())
+                        .unwrap_or(crate::cloud::account_access::AccountAccessState::SignedOut),
+                    platform: super::browser_identity::detect_platform(),
+                    browser: super::browser_identity::detect_browser().to_string(),
                     on_access: move |command| {
                         if let Some(ui) = access_ui {
                             ui.on_access.call(command);
+                        }
+                    },
+                    on_set_password: move |change| {
+                        if let Some(ui) = account_ui {
+                            ui.set_password.call(change);
+                        }
+                    },
+                    on_reset_key: move |_| {
+                        if let Some(ui) = account_ui {
+                            ui.reset_key.call(());
                         }
                     },
                 }
@@ -253,7 +264,7 @@ pub(crate) fn AddDeviceCard(
 /// out, and the text to select and copy — shown in full, never folded.
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
-fn TransportOffer(
+pub(crate) fn TransportOffer(
     action: UiAction,
     note: Option<ReachNote>,
     page_url: String,

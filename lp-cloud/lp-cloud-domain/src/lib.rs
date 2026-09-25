@@ -49,6 +49,7 @@ pub mod push_validation;
 
 pub use cloud_service::CloudService;
 pub use lpc_cloud_api::MemberRole;
+pub use model::account_access::{AccountAccess, MAX_PREVIOUS_KEY_SALTS};
 pub use model::caller::Caller;
 pub use model::cloud_project::CloudProject;
 pub use model::cloud_user::CloudUser;

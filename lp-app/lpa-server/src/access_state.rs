@@ -92,6 +92,16 @@ impl AccessState {
         }
     }
 
+    /// Whether `link` began the device's one outstanding login and its
+    /// challenge has not expired: the radio edge holds that link's login
+    /// deadline open while this is true, and no longer. An answer, refused
+    /// or granted, ends it (`answer_login` clears the owner), and so does
+    /// the challenge's expiry (`advance_clock`).
+    #[must_use]
+    pub fn login_pending(&self, link: LinkId) -> bool {
+        self.login_owner == Some(link) && self.login.in_flight(self.clock_ms)
+    }
+
     /// The tier `link` holds now. A trusted link never touches the fs.
     #[inline(never)]
     pub fn tier(&self, link: Link, fs: &dyn LpFs) -> Option<Tier> {

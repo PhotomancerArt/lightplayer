@@ -43,8 +43,6 @@ pub enum SettingsCommand {
     SetAgentPriceInputPerMtok(Option<String>),
     /// Set or clear the $/MTok output-rate override.
     SetAgentPriceOutputPerMtok(Option<String>),
-    /// Set or clear the account default device password (BLE M6).
-    SetDeviceDefaultPassword(Option<String>),
     /// Fetch (or, with `force`, re-fetch) the selected provider's model
     /// list for the settings dropdown. Sent when the settings surface
     /// opens (its refresh affordance forces); credential changes trigger

@@ -415,7 +415,7 @@ fn an_empty_library_still_offers_the_built_in_patterns() {
         .collect();
     assert_eq!(
         labels.len(),
-        7,
+        20,
         "every catalog pattern is offered, none excluded: {labels:?}"
     );
     assert!(

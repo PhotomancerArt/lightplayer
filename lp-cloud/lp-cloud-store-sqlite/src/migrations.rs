@@ -45,6 +45,10 @@ const MIGRATIONS: &[Migration] = &[
         name: "0004_guest_users",
         sql: include_str!("../migrations/0004_guest_users.sql"),
     },
+    Migration {
+        name: "0005_account_access",
+        sql: include_str!("../migrations/0005_account_access.sql"),
+    },
 ];
 
 /// Bring a database up to the current schema and report the version it
@@ -154,6 +158,7 @@ mod tests {
             "events",
             "sidecars",
             "blob_index",
+            "account_access",
         ] {
             assert!(table_exists(&conn, table), "missing table {table}");
         }
@@ -256,6 +261,51 @@ mod tests {
             .collect();
         roles.sort();
         assert_eq!(roles, vec!["editor".to_string(), "owner".to_string()]);
+    }
+
+    /// The upgrade path 0005 exists for: a database at 0004 gains the empty
+    /// `account_access` table, its accounts survive untouched with no access
+    /// row (the record is minted lazily), and the new table's foreign key
+    /// holds — a row for an account that does not exist is refused.
+    #[test]
+    fn migrating_from_0004_to_0005_adds_an_empty_account_access_table() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch("PRAGMA foreign_keys = ON;").unwrap();
+        assert_eq!(apply(&mut conn, &MIGRATIONS[..4]).unwrap(), 4);
+        conn.execute(
+            "INSERT INTO users (uid, google_sub, email, display_name, created_at)\n\
+             VALUES ('usrx', 'g-1', 'x@example.com', 'X', 1.0)",
+            [],
+        )
+        .unwrap();
+        assert!(!table_exists(&conn, "account_access"));
+
+        assert_eq!(run_migrations(&mut conn).unwrap(), latest_version());
+
+        let email: String = conn
+            .query_row("SELECT email FROM users WHERE uid = 'usrx'", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(email, "x@example.com", "the pre-existing row survived");
+        let rows: i64 = conn
+            .query_row("SELECT count(*) FROM account_access", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(rows, 0, "nothing is backfilled: access is minted lazily");
+
+        let insert = |uid: &str| {
+            conn.execute(
+                "INSERT INTO account_access (user_uid, key_secret, key_salt, play_password_salt,\n\
+                     edit_password_salt, play_password, edit_password, previous_key_salts, updated_at)\n\
+                 VALUES (?1, x'00', x'00', x'00', x'00', NULL, NULL, x'', 2.0)",
+                [uid],
+            )
+        };
+        insert("usrx").expect("a row for an existing account");
+        assert!(
+            insert("usrnobody").is_err(),
+            "a row for a missing account is refused"
+        );
     }
 
     #[test]

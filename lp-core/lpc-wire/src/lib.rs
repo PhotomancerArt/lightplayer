@@ -101,10 +101,10 @@ pub use ser_write::{
     ser_write_json_len, ser_write_json_to,
 };
 pub use server::{
-    AvailableProject, BuildFacts, FAULT_MESSAGE_CAP_BYTES, FAULT_NODES_CAP, FaultedNodeWire,
-    FsRequest, FsResponse, HardwareFacts, HardwareIdentity, HeartbeatIdentity, HelloAuth,
-    HelloIdentity, LinkCounters, LoadedProject, MemoryStats, ProjectFaultWire, SampleStats,
-    ServerConfig, ServerHello, ServerMsgBody, WIRE_PROTO_VERSION,
+    AccessEntryInfo, AvailableProject, BuildFacts, FAULT_MESSAGE_CAP_BYTES, FAULT_NODES_CAP,
+    FaultedNodeWire, FsRequest, FsResponse, HardwareFacts, HardwareIdentity, HeartbeatIdentity,
+    HelloAuth, HelloIdentity, LinkCounters, LoadedProject, MemoryStats, ProjectFaultWire,
+    SampleStats, ServerConfig, ServerHello, ServerMsgBody, WIRE_PROTO_VERSION,
 };
 pub use slot::{
     WireSlotChange, WireSlotData, WireSlotFullSync, WireSlotPatch, WireSlotRootSnapshot,
