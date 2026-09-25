@@ -361,12 +361,12 @@ classic's three-line heap ledger, in the classic's exact field names and
 order, so that one comparator reads all three chips:
 
 ```text
-[stack] heartbeat: high-water 21504 B of 37272 B (15768 B headroom)
+[stack] heartbeat: high-water 21504 B of 37248 B (15744 B headroom)
 [MEM] free=203112 used=42648 largest_free=196608 retry_saves=0
 [JIT] used=0 peak=0 cap=0 spans=0 peak_spans=0 allocs=0 frees=0 fails=0 largest_free=0
 ```
 
-(Figures illustrative; `37272` is this image's measured main stack.) Two
+(Figures illustrative; `37248` is this image's measured main stack.) Two
 fields are **structural** on this chip and invent nothing: `retry_saves` is
 always `0` because there is no OOM retry allocator here, and the whole `[JIT]`
 line is zeros because the S3 JITs out of the heap through SRAM1's I-bus alias
