@@ -35,7 +35,8 @@ does each of the four things below: on `visibilitychange → visible` every
 session re-reads `gatt.connected` (`recheckAll`), so a drop the hidden page
 never heard is handled then, and a lost or parked session restarts its
 reconnect on the held `BluetoothDevice`; the link carries no long-lived HTTP
-stream. Decision record: `docs/adr/2026-09-24-ble-transport-studio.md` §3.
+stream. Decision record: `docs/adr/2026-09-24-ble-transport.md` S3 (folded from
+`2026-09-24-ble-transport-studio.md` §3).
 What the fix had to do:
 - treat `visibilitychange → visible` as "state unknown": re-read the link
   before showing it as connected;
@@ -54,7 +55,12 @@ reconnected after both a page-initiated drop (954 ms) and a board reboot
 in `lp-app/lpa-link/tests/browser_ble_conformance.rs` (`just
 lpa-link-browser-test`), driving `recheckAll` without a real hide/show. The
 phone half — lock the phone, reboot the board, unlock, see the drop and the
-reconnect — is a step of the M7 desk walk (G4), not yet run.
+reconnect — was planned as a step of the G4 phone walk (2026-09-25); G4
+kept no record of it, so it is still not run as its own check. G4 did find
+the inverse on the same phone: Bluefy reporting a drop while iOS kept the
+radio link up, fixed by tearing every drop down with `gatt.disconnect()`
+(`docs/defects/2026-09-25-a-long-bluetooth-write-is-acknowledged-and-lost.md`,
+#834).
 
 **Lesson** — on iOS, "the page is connected" is only true while the page
 runs. Any BLE UI on a phone must re-derive link state when it is shown

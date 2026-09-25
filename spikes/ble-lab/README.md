@@ -76,6 +76,31 @@ For ESP-NOW loss beside the product server, build the desk meter:
 `[COEX]` counter in place of the ESP-NOW driver; never shipped). Run it on
 both boards and read the `[COEX]` lines from the console as in M2.
 
+`scripts/m4-desk-check.py` runs M4's whole desk battery after one Join:
+refusal before login, the 10 s unauthenticated drop, wrong password and
+backoff, login, request round trips, granted parameters, and an idle window
+(the knob round trip is `lab.py`'s `knob_rtt`, not part of it). It
+prints one JSON record per check. It does not judge ESP-NOW loss; that comes
+from the `[COEX]` lines over the window it prints.
+
+```bash
+BLE_LAB_PORT=$P python3 spikes/ble-lab/scripts/m4-desk-check.py --password desk-lab [--idle-min 10] [--skip-drop]
+```
+
+For connection-parameter experiments, add `desk_ble_params` to the features
+(never shipped). The board then reads its requested parameters from
+`/.lp/ble-exp.txt` at boot, so a run changes them with a file write and a
+reboot, not a reflash:
+
+```text
+interval_us latency timeout_ms [idle_after_ms idle_interval_us idle_latency]
+```
+
+With no file, the board asks for the shipped 15 ms / latency 0 / 4 s. This
+is how the M4 runs K and L measured latency 4 against latency 0 (the plan's
+`spike-results.md`; ruling in `docs/adr/2026-09-24-ble-transport.md`,
+Amendment).
+
 ## No phone, no human: the Mac's own Chrome as the central
 
 `scripts/cdp-central.mjs` answers the Join chooser over the Chrome DevTools
@@ -117,7 +142,7 @@ Expose the lab on the tailnet, on a port other than 443: the perf lab
 
 ```bash
 tailscale serve --bg --https=8443 http://127.0.0.1:$P
-# phone: https://<desk>.<tailnet>.ts.net:8443/  → Join → LP-BLE-…
+# phone: https://<desk>.<tailnet>.ts.net:8443/  → Join → LP-BLE-… (spike image) or LP-… (product)
 tailscale serve --https=8443 off              # when done: --bg is a setting, not a process
 ```
 

@@ -111,3 +111,23 @@ instrumented.
 run and did the wrong thing twice (no disconnect, then events routed to a dead
 connection). And a parse error with an empty reason is a question nobody can
 answer: the first instrumented reproduction named the cause in one line.
+
+## Run M evidence, as first filed (M7 laptop walk, before the fix)
+
+Kept from the entry as it was filed on the walk, as the record of what was
+seen before the cause was known.
+
+- **2 of 2 with `End`**, at 09:52 and 09:57 UTC (02:52 and 02:57 PDT) on 2026-09-25, each from a
+  fresh boot and a fresh unlock.
+- In the same session, on the same link, a one-step knob change (`ArrowUp`,
+  1 → 1.04, read back from the board) and a brightness change (0.2 → 0.8)
+  went through with no error. The fix above explains why: `1.04`'s f32 JSON
+  is longer than `4.0`'s, so that write fell outside the 182–187 B window.
+- Before the drop the board advertised on the random static address
+  `9F:F2:64:5D:AB:00`; the restarted host printed `A2:F2:62:87:B4:8D`. The
+  walk read this as the restart not reusing the original setup. It was a
+  misreading (Root cause 2): that is the controller's public address,
+  printed at every bring-up.
+- The `[hci] error parsing packet:` line's reason was empty in that build,
+  and `?ble=emu` could not have caught it: the emulated path goes through
+  neither the controller nor `trouble-host`.

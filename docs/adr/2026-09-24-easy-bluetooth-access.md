@@ -3,14 +3,17 @@
 - **Status:** Proposed
 - **Date:** 2026-09-24
 - **Deciders:** Photomancer
-- **Supersedes:** in part, items 6 and 7 of
-  `2026-09-24-ble-transport-studio.md` (log in with an account default
-  password; the device store written whole, never read)
+- **Supersedes:** in part, Studio decisions S6 and S7 of
+  `2026-09-24-ble-transport.md` (items 6 and 7 of
+  `2026-09-24-ble-transport-studio.md` when this was written, since folded
+  in): log in with an account default password; the device store written
+  whole, never read
 - **Superseded by:** None
 
 ## Context
 
-The BLE slice (`2026-09-23-ble-access-model.md`, `2026-09-24-ble-transport.md`,
+The BLE slice (`2026-09-23-ble-access-model.md` and
+`2026-09-24-ble-transport.md`, whose Studio side was then its own file,
 `2026-09-24-ble-transport-studio.md`) shipped access with typed passwords.
 Every step needed a person: turn Bluetooth on over USB, choose a password,
 type it on the phone. Studio kept the passwords it had written and rewrote
