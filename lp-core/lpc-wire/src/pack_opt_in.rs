@@ -156,6 +156,13 @@ impl PackOptIn {
     /// answers it with a new, empty table epoch. Call it for every desync;
     /// the rate limit keeps the asks to one per [`PACK_REASK_INTERVAL_MS`].
     pub fn desynced(&mut self, now_ms: u64) -> Option<ClientMessage> {
+        // A learned frame on the link is itself proof the board packs, even
+        // before this link has seen a hello: a replug can deliver frames of
+        // the previous link's table to a fresh reader, and a board still
+        // packed would then have its hello dropped too, leaving nothing to
+        // learn `board_can_pack` from. (A board in another format would
+        // answer `json`, and is not asked again.)
+        self.board_can_pack = true;
         if matches!(self.agreement, Agreement::Packed) {
             self.agreement = Agreement::Json;
         }
@@ -343,6 +350,21 @@ mod tests {
         // The board answers `packed` (with a new epoch): in step again.
         link.observe(&answer(WireEncoding::Packed), false, 9_100);
         assert_eq!(link.encoding(), WireEncoding::Packed);
+    }
+
+    /// A fresh reader on a replugged link sees a packed frame of the old
+    /// link's table before any hello: it asks for the reset anyway.
+    #[test]
+    fn a_desync_before_any_hello_still_asks() {
+        let mut link = PackOptIn::new(true);
+        let ask = link.desynced(0).expect("asked without a hello");
+        assert!(matches!(
+            ask.msg,
+            ClientRequest::SetEncoding {
+                encoding: WireEncoding::Packed,
+                format: PACK_FORMAT_VERSION,
+            }
+        ));
     }
 
     #[test]
