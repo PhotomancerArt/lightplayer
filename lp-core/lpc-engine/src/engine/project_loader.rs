@@ -4624,16 +4624,11 @@ mod tests {
             );
         }
 
-        // (active entry, loaded entries), repeats collapsed: the switch
-        // frame selects blast while idle is still loaded (the held frame is
-        // captured then), the next frame has only blast loaded, and blast's
-        // end brings idle back the same way — twice, identically.
-        let one_press = [
-            (2, alloc::vec![1]),
-            (2, alloc::vec![2]),
-            (1, alloc::vec![2]),
-            (1, alloc::vec![1]),
-        ];
+        // (active entry, loaded entries), repeats collapsed: never two
+        // entries loaded, and `active_entry` names the loaded one — blast
+        // from the frame it loads on, idle again once blast's duration ends
+        // and idle is back — twice, identically.
+        let one_press = [(2, alloc::vec![2]), (1, alloc::vec![1])];
         let mut expected = alloc::vec![(1, alloc::vec![1])];
         expected.extend(one_press.iter().cloned());
         expected.extend(one_press.iter().cloned());

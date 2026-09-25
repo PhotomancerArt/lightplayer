@@ -56,8 +56,11 @@ pub struct PlaylistNode {
     entries: Vec<PlaylistRuntimeEntry>,
     state: PlaylistState,
     /// The selected entry: the one playing, or the one a switch is bringing
-    /// in. Published as `active_entry`.
+    /// in.
     current_entry: u32,
+    /// The published `active_entry`: the selected entry once its child is
+    /// loaded, until then the one before.
+    active_entry: u32,
     switch_time: f32,
     /// The playlist clock at this frame's `produce`.
     frame_time: f32,
@@ -139,6 +142,7 @@ impl PlaylistNode {
                 idle_entry,
             ),
             current_entry: idle_entry,
+            active_entry: idle_entry,
             switch_time: 0.0,
             frame_time: 0.0,
             last_seen_triggers: VecMap::new(),
@@ -162,7 +166,7 @@ impl PlaylistNode {
         self.runtime_entry(index).map(|entry| &entry.reason)
     }
 
-    /// The selected entry (published as `active_entry`).
+    /// The selected entry (published as `active_entry` once it is loaded).
     pub fn current_entry(&self) -> u32 {
         self.current_entry
     }
@@ -433,9 +437,16 @@ impl NodeRuntime for PlaylistNode {
         self.state
             .entry_progress
             .set_with_version(ctx.revision(), entry_progress);
+        // `active_entry` names the entry whose child is live: it moves to a
+        // new entry once that entry is loaded (the frame after the switch is
+        // decided), so it never names a dormant entry or one whose load
+        // failed. Studio's "one live surface" keys on it.
+        if self.is_loaded(self.current_entry) {
+            self.active_entry = self.current_entry;
+        }
         self.state
             .active_entry
-            .set_with_version(ctx.revision(), self.current_entry);
+            .set_with_version(ctx.revision(), self.active_entry);
         ctx.publish_runtime_slot(&self.state, &self.published_paths.entry_time)?;
         ctx.publish_runtime_slot(&self.state, &self.published_paths.entry_progress)?;
         ctx.publish_runtime_slot(&self.state, &self.published_paths.active_entry)?;
