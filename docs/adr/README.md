@@ -204,6 +204,10 @@ holds the full context.
 | A keep-resident policy for triggered playlist entries (today fyeah-sign's blast loads and compiles on every press, ~120–200 ms emulated) | `2026-09-25-parent-owned-child-residency` | A trigger's delay is judged too slow on a real piece, or a second triggered project appears |
 | Per-node overhead trim (shared settings copy, GLSL text not resident, cheaper Module wrapper) | `2026-09-25-parent-owned-child-residency` | The loaded entry, not the dormant ones, becomes what limits a C6 project |
 | One `playlist.cycle` / `playlist.skip` pair per scope, shared by two playlists in one module | `2026-09-25-parent-owned-child-residency` | A project wants two independently cycling playlists in one module |
+| The vendored esp-radio 0.18 fork (chained ACL mbuf copy + a parse warning that names the packet) | `2026-09-24-ble-transport` (2026-09-25 amendment, #831) | An esp-radio release copies chained mbufs itself: drop `third_party/esp-radio` and its `[patch.crates-io]` line |
+| Continuous interactive input over BLE (XY pad, BLE MIDI) is a separate real-time class | `2026-09-24-ble-transport` (Consequences, Follow-ups) | A design puts continuous input on the BLE transport: measure ESP-NOW loss under that load first |
+| Peripheral latency 4 halves connected-idle ESP-NOW loss but its supervision drops cluster; it stays a `desk_ble_params` knob | `2026-09-24-ble-transport` (2026-09-24 amendment) | A longer run, or a longer supervision timeout, before it could replace latency 0 |
+| `Identify` (blink the board you are connecting to) was not built | `2026-09-23-ble-access-model` (M7 amendment) | The next PR that bumps the wire anyway |
 
 ## Relationship To Shared Planning
 
