@@ -277,6 +277,60 @@ fn writing_panel_state_does_not_rebuild_the_project() {
     );
 }
 
+/// A playlist's Play-mode controls (multi-pattern plan P5) are records, not
+/// scalars: the tour is a `PlaylistTour` struct and the skip list a `u32`
+/// array. Both are ordinary `LpValue`s in panel.json, so they persist and
+/// restore like a fader — and a file written before they existed (every
+/// other test here) restores unchanged.
+#[test]
+fn a_playlist_tour_and_skip_list_survive_a_reboot() {
+    use lpc_model::{PlaylistTour, ToLpValue};
+
+    let tour = PlaylistTour::Cycle {
+        step_seconds: 20.0,
+        fade_seconds: 1.5,
+    }
+    .to_lp_value();
+    let skip = alloc::vec![3u32, 5].to_lp_value();
+
+    let mut harness = Harness::new("panel-persist-playlist-tour");
+    harness.load();
+    harness.write_panel_value("playlist.tour", tour.clone());
+    harness.write_panel_value("playlist.skip", skip.clone());
+    harness.advance(PANEL_STATE_WRITE_INTERVAL_MS);
+
+    let saved = harness.state_file().expect("panel state written");
+    let saved: Vec<(String, LpValue)> = saved
+        .entries
+        .into_iter()
+        .map(|entry| (entry.channel, entry.value))
+        .collect();
+    assert_eq!(
+        saved,
+        [
+            (String::from("playlist.skip"), skip.clone()),
+            (String::from("playlist.tour"), tour.clone()),
+        ]
+    );
+
+    let mut rebooted = harness.reboot();
+    let (engine, _) = rebooted.project().runtime_read_parts();
+    let mut restored: Vec<(String, LpValue)> = engine
+        .panel_writers()
+        .iter()
+        .map(|((_, channel), writer)| (channel.0.clone(), writer.value.clone()))
+        .collect();
+    restored.sort_by(|a, b| a.0.cmp(&b.0));
+    assert_eq!(
+        restored,
+        [
+            (String::from("playlist.skip"), skip),
+            (String::from("playlist.tour"), tour),
+        ],
+        "both writers are back before the first frame"
+    );
+}
+
 #[test]
 fn panel_state_inherits_the_framework_tier_exclusions() {
     // `/.lp/` is already outside the canonical package hash and outside
@@ -369,11 +423,15 @@ impl Harness {
     }
 
     fn write_panel(&mut self, channel: &str, value: f32) {
+        self.write_panel_value(channel, LpValue::F32(value));
+    }
+
+    fn write_panel_value(&mut self, channel: &str, value: LpValue) {
         let scope = self.scope();
         self.project().panel_write(&WirePanelWriteRequest {
             scope,
             channel: channel.to_string(),
-            value: LpValue::F32(value),
+            value,
             ttl_ms: None,
         });
     }
