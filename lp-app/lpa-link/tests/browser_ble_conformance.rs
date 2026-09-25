@@ -15,9 +15,10 @@
 //! |---|---|
 //! | the GATT subset the provider calls is the polyfill's whole surface | [`a_picked_device_is_connected_present_and_wears_a_ble_endpoint`] |
 //! | lines re-join across notifications through the ONE `LineSplitter` | [`a_line_split_across_notifications_arrives_whole`] |
-//! | writes are chunked to ≤ 244 B and awaited, in order | [`a_long_line_goes_out_in_awaited_244_byte_writes`] |
+//! | writes are chunked to ≤ 180 B and awaited, in order | [`a_long_line_goes_out_in_awaited_180_byte_writes`] |
 //! | a drop is a departure, then a reconnect with no gesture | [`a_drop_is_a_departure_and_the_session_reconnects_by_itself`] |
 //! | a drop the page never heard is found by the visibility re-check | [`a_drop_the_page_never_heard_is_found_on_the_recheck`] |
+//! | a drop tears the radio link down, so the reconnect is a fresh link | [`a_phantom_drop_is_torn_down_and_the_reconnect_is_a_fresh_link`] |
 //! | every connect is bounded | [`a_connect_that_never_settles_fails_by_name`] |
 //! | close is ours: the session stays, reopening needs no chooser | [`a_closed_link_stays_present_and_reopens_without_the_chooser`] |
 //! | no reset over GATT | [`a_reset_over_bluetooth_fails_by_name`] |
@@ -65,6 +66,9 @@ extern "C" {
 
     #[wasm_bindgen(js_name = bleSilentDrop)]
     fn js_ble_silent_drop(board_id: &str) -> Promise;
+
+    #[wasm_bindgen(js_name = blePhantomDrop)]
+    fn js_ble_phantom_drop(board_id: &str) -> Promise;
 
     #[wasm_bindgen(js_name = bleHangNextConnect)]
     fn js_ble_hang_next_connect(board_id: &str) -> Promise;
@@ -131,7 +135,7 @@ async fn a_line_split_across_notifications_arrives_whole() {
 }
 
 #[wasm_bindgen_test]
-async fn a_long_line_goes_out_in_awaited_244_byte_writes() {
+async fn a_long_line_goes_out_in_awaited_180_byte_writes() {
     polyfill_over(&["c6-a"]).await;
     let device = pick().await;
     let mut link = open_link(&device).await;
@@ -151,8 +155,8 @@ async fn a_long_line_goes_out_in_awaited_244_byte_writes() {
         "the board received the whole line, in order"
     );
     let after = stats("c6-a").await;
-    // 601 bytes → 244 + 244 + 113.
-    assert_eq!(after.writes - before.writes, 3, "{before:?} → {after:?}");
+    // 601 bytes → 180 + 180 + 180 + 61.
+    assert_eq!(after.writes - before.writes, 4, "{before:?} → {after:?}");
     assert_eq!(after.written - before.written, 601);
 
     polyfill_off().await;
@@ -230,6 +234,52 @@ async fn a_drop_the_page_never_heard_is_found_on_the_recheck() {
         tick(20).await;
     }
     assert!(wire.is_connected(), "reconnected after the re-check");
+
+    polyfill_off().await;
+}
+
+#[wasm_bindgen_test]
+async fn a_phantom_drop_is_torn_down_and_the_reconnect_is_a_fresh_link() {
+    polyfill_over(&["c6-a"]).await;
+    let device = pick().await;
+    let wire = BleWire::new(device.session);
+    let before = stats("c6-a").await;
+    assert_eq!(before.link_opens, 1, "the pick opened the board's link: {before:?}");
+
+    // Bluefy (G4, 2026-09-25): the page is told its link is gone while iOS
+    // keeps the radio link up. The board never sees a drop.
+    JsFuture::from(js_ble_phantom_drop("c6-a")).await.unwrap();
+    ble::recheck_all("the page was shown again");
+    assert!(
+        wire.take_errors()
+            .unwrap()
+            .iter()
+            .any(|error| error.starts_with("bluetooth link lost")),
+        "the page reads it as a drop"
+    );
+
+    // The drop is made real: the board's side closes…
+    let torn = stats("c6-a").await;
+    assert_eq!(
+        torn.link_closes,
+        before.link_closes + 1,
+        "the page tore the radio link down: {before:?} → {torn:?}"
+    );
+
+    // …so the reconnect is a NEW link, the one the board owes a hello.
+    for _ in 0..300 {
+        if wire.is_connected() {
+            break;
+        }
+        tick(20).await;
+    }
+    assert!(wire.is_connected(), "reconnected");
+    let after = stats("c6-a").await;
+    assert_eq!(
+        after.link_opens,
+        before.link_opens + 1,
+        "a fresh link, not the old one: {before:?} → {after:?}"
+    );
 
     polyfill_off().await;
 }
@@ -521,6 +571,9 @@ struct Stats {
     written: u32,
     writes: u32,
     connects: u32,
+    /// The board's side of the link opening and closing.
+    link_opens: u32,
+    link_closes: u32,
 }
 
 async fn stats(board: &str) -> Stats {
@@ -540,5 +593,7 @@ async fn stats(board: &str) -> Stats {
         written: field("written"),
         writes: field("writes"),
         connects: field("connects"),
+        link_opens: field("linkOpens"),
+        link_closes: field("linkCloses"),
     }
 }
