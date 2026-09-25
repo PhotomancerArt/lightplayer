@@ -37,10 +37,13 @@ pub const SIMULATOR_REFRESH_INTERVAL: Duration = Duration::from_millis(33);
 /// device is connected). Under completion-based pacing this is idle time
 /// BETWEEN pulls, not a period — a slow serial pull can no longer stack
 /// behind the timer — so it is far tighter than the retired 750 ms fixed
-/// interval. Tune at the hardware feel-walk if 150 ms proves too chatty
-/// for a busy device. Retired web constant
-/// `DEVICE_PROJECT_REFRESH_INTERVAL_MS`.
-pub const DEVICE_REFRESH_INTERVAL: Duration = Duration::from_millis(150);
+/// interval. **75 ms since 2026-09-24**, chosen by feel on a real XIAO C6
+/// at the JSON Pack desk sitting (lp2025/2026-09-23-1701-lp-json-pack, G1),
+/// between 150, 75 and 33: a packed steady lens reply is ~0.7 KB against
+/// ~2.4 KB of JSON, so the link time per read fell from ~27 ms to ~8 ms at
+/// ~90 KB/s and the old 150 ms gap had become most of each read's cycle.
+/// Retired web constant `DEVICE_PROJECT_REFRESH_INTERVAL_MS`.
+pub const DEVICE_REFRESH_INTERVAL: Duration = Duration::from_millis(75);
 
 /// The most a [`set_device_lens_pause_override`] may ask for. The override
 /// is a probe for the gap between reads, not a way to switch the lens off.
@@ -125,7 +128,9 @@ pub const DEVICE_HEARTBEAT_INTERVAL: Duration = Duration::from_secs(2);
 /// COMPLETING and the next one starting, while a card's ▶ Play tab is
 /// selected on a Ready device.
 ///
-/// Same figure as [`DEVICE_REFRESH_INTERVAL`], and for the same reason —
+/// The lens's pre-2026-09-24 figure, kept at 150 ms when the lens
+/// ([`DEVICE_REFRESH_INTERVAL`]) went to 75 — the card was not part of the
+/// G1 feel test. The reasoning is the lens's —
 /// under completion-based pacing the number is idle time, not a period, so
 /// the frame size sets the real rate. One frame is `lamps × 3 × 2` bytes
 /// before base64 (×4/3 after) on a link that carries every other protocol
