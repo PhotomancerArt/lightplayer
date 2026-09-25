@@ -36,6 +36,13 @@
 # that moved them, and say what moved them. If only the EMULATOR changed, a
 # moved figure is a finding: do not bless it.
 #
+# **With `LP_CI_IMAGES` set** (`just fetch-ci-images`), every chip step runs
+# against CI's own images and builds no firmware: the recipes and the C6 line
+# below go through `scripts/ci/ci-images.py`, which refuses images whose
+# firmware sources are not this checkout's. POSITIONAL figures are still
+# written only under GITHUB_ACTIONS=true, even though these ARE CI's bytes —
+# CI stays the one writer of those (docs/ci-images.md).
+#
 # See docs/chip-figures.md.
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -47,7 +54,7 @@ for arg in "$@"; do
     case "$arg" in
     --check) check=1 ;;
     -h | --help)
-        sed -n '2,40p' "$0" | sed 's/^# \{0,1\}//'
+        sed -n '2,46p' "$0" | sed 's/^# \{0,1\}//'
         exit 0
         ;;
     esp32c6 | esp32v3 | esp32s3 | engine) targets+=("$arg") ;;
@@ -65,7 +72,7 @@ done
 # A firmware build writes gigabytes under target/; on a shared desk a full disk
 # is the failure that wastes the most time, so say so before starting.
 free_gib="$(df -g . 2>/dev/null | awk 'NR==2 {print $4}' || true)"
-if [ -n "$free_gib" ] && [ "$free_gib" -lt 100 ]; then
+if [ -z "${LP_CI_IMAGES:-}" ] && [ -n "$free_gib" ] && [ "$free_gib" -lt 100 ]; then
     echo "bless-chips: only ${free_gib} GiB free here; a firmware build wants more than 100." >&2
     echo "bless-chips: continuing, but check 'df -h' if a build dies with ENOSPC." >&2
 fi
@@ -103,7 +110,7 @@ for t in "${targets[@]}"; do
             run "esp32c6 heap" just heap-budget-baseline-chips esp32c6
         fi
         run "esp32c6 figures" env LP_EMU_BUILD_FW=1 \
-            cargo test -p lp-emu-esp32c6 -- --include-ignored
+            scripts/ci/ci-images.py with esp32c6 -- cargo test -p lp-emu-esp32c6 -- --include-ignored
         ;;
     esp32v3)
         # The recipe builds the shipped, rmt-chase and frame-dump images one

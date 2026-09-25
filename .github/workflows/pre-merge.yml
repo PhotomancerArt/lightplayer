@@ -1441,6 +1441,40 @@ jobs:
         shell: bash
         run: cd lp2025 && just test-emu-c6-boot 2>&1 | tee "$RUNNER_TEMP/figures-tests.log"
 
+      # **CI's images, for a desk that wants no firmware build** (docs/ci-images.md).
+      # The images the step above built and booted — ELFs, merged chips, the
+      # pinned reference images and their sidecars, never target dirs or
+      # worktrees — packed with a manifest (commit, run, features/profile, the
+      # git tree id of every firmware source path, and each file's sha256) and
+      # uploaded as `ci-images-<chip>` for seven days. `just fetch-ci-images`
+      # downloads them and `LP_CI_IMAGES` points the same recipes at them; it
+      # refuses a set whose firmware sources are not the local checkout's.
+      #
+      # `!cancelled()`: a RED run's images are the ones most worth having — they
+      # reproduce the failure locally without a build. The pack takes what is
+      # there; the upload runs only when the pack did.
+      #
+      # Public repo, so artifact storage is not billed; it is still kept lean
+      # (no intermediates, compression 9, 7-day retention). Size and upload
+      # time per job are in the PR that added this.
+      - name: Pack CI images (ci-images-esp32c6)
+        id: ci-images-pack
+        if: ${{ !cancelled() }}
+        env:
+          LP_CI_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: cd lp2025 && python3 scripts/ci/ci-images.py pack esp32c6 "$RUNNER_TEMP/ci-images-esp32c6"
+
+      - name: Upload CI images (ci-images-esp32c6)
+        if: ${{ !cancelled() && steps.ci-images-pack.outcome == 'success' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: ci-images-esp32c6
+          path: ${{ runner.temp }}/ci-images-esp32c6
+          retention-days: 7
+          compression-level: 9
+          overwrite: true
+          if-no-files-found: error
+
       # The emulator perf lab's own tests (scripts/emu/lab/, `node --test`):
       # the real lab server on port 0 in a temp home, a fake page client
       # driving the queue at test speed, the DD41 report against the G-M7B
@@ -1759,6 +1793,25 @@ jobs:
         shell: bash
         run: cd lp2025 && just test-emu-esp32v3-boot 2>&1 | tee "$RUNNER_TEMP/figures-tests.log"
 
+      # CI's images for `just fetch-ci-images` — see the same step in emu-c6.
+      - name: Pack CI images (ci-images-esp32v3)
+        id: ci-images-pack
+        if: ${{ !cancelled() }}
+        env:
+          LP_CI_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: cd lp2025 && python3 scripts/ci/ci-images.py pack esp32v3 "$RUNNER_TEMP/ci-images-esp32v3"
+
+      - name: Upload CI images (ci-images-esp32v3)
+        if: ${{ !cancelled() && steps.ci-images-pack.outcome == 'success' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: ci-images-esp32v3
+          path: ${{ runner.temp }}/ci-images-esp32v3
+          retention-days: 7
+          compression-level: 9
+          overwrite: true
+          if-no-files-found: error
+
       # The classic's half of the heap-budget record's chip section (M5 P5).
       # It lives here rather than in `Heap budget (esp32c6 chip)` because it
       # needs the Xtensa toolchain this job already installs — a cold espup
@@ -2072,6 +2125,25 @@ jobs:
         id: figures_tests
         shell: bash
         run: cd lp2025 && just test-emu-esp32s3-gate 2>&1 | tee "$RUNNER_TEMP/figures-tests.log"
+
+      # CI's images for `just fetch-ci-images` — see the same step in emu-c6.
+      - name: Pack CI images (ci-images-esp32s3)
+        id: ci-images-pack
+        if: ${{ !cancelled() }}
+        env:
+          LP_CI_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: cd lp2025 && python3 scripts/ci/ci-images.py pack esp32s3 "$RUNNER_TEMP/ci-images-esp32s3"
+
+      - name: Upload CI images (ci-images-esp32s3)
+        if: ${{ !cancelled() && steps.ci-images-pack.outcome == 'success' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: ci-images-esp32s3
+          path: ${{ runner.temp }}/ci-images-esp32s3
+          retention-days: 7
+          compression-level: 9
+          overwrite: true
+          if-no-files-found: error
 
       # The S3's half of the heap-budget record's chip section (M6 P10). It
       # lives here rather than in `Heap budget (esp32c6 chip)` because it
