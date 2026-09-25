@@ -707,7 +707,7 @@ fn the_ledger_triple_is_elicited_by_a_stop_all_on_the_wire() {
     //
     // `<total>` is the main stack's size, `_stack_start − _stack_end`: the
     // residual of RWDATA after `.data`/`.bss`, so it moves with every byte
-    // of statics the image gains or loses — five times between 2026-09-23
+    // of statics the image gains or loses — four times on main between 2026-09-23
     // and 2026-09-24 (37,280 → 37,272 → 37,296 → 37,280 → 37,256), none of
     // them a change to the stop-all path. It is a **figure**:
     // `stack_total_bytes` in `lp-emu/esp/figures/esp32s3.json`, exactly as

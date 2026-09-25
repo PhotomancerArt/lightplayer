@@ -63,19 +63,18 @@ figures.verify();
 **every** one that moved, not only the first:
 
 ```text
-2 pinned firmware figures moved (esp32v3, determinism::the_single_core_prefix_is_unchanged):
-  determinism.single_core_prefix.cycles: 3251009 → 3251065 (+56)
-  init_chain.prefix: text moved (8 → 8 lines)
-      line 4: "[INIT] main stack 45344 B" → "[INIT] main stack 45328 B"
-recorded in lp-emu/esp/figures/esp32v3.json
-These are figures of the firmware IMAGE, not of the machine. If the firmware changed on
-purpose, accept them with:
+1 pinned firmware figure moved (esp32s3, boot_idle::the_ledger_triple_is_elicited_by_a_stop_all_on_the_wire):
+  stack_total_bytes: 37256 → 37192 (-64)
+recorded in lp-emu/esp/figures/esp32s3.json
+These are figures of the firmware IMAGE, not of the machine. If the firmware changed on purpose, accept them with:
 
-    just bless-chips esp32v3
+    just bless-chips esp32s3
 
-and commit the record with the change that moved it. If only the emulator changed, a moved
-figure is a finding: do not bless it.
+and commit the record with the change that moved it. If only the emulator changed, a moved figure is a finding: do not bless it.
 ```
+
+(That is a real run: 64 B of `.bss` added to `fw-esp32s3`. A text figure that
+moved reports its lines — `line 4: "[INIT] main stack 45344 B" → "…"`.)
 
 With `LP_EMU_BLESS=1` (which `bless-chips` sets) `verify()` writes the observed
 values into the record instead, under the file's own lock (tests in one binary
@@ -171,6 +170,17 @@ sha256s exactly (543 B `05b27095…`, 804 B `92c857b2…`, 703 B `c0951fb6…`).
 | c6 `boot_idle.rs`, `upload_walk*.rs`, `rom_up_boot.rs`, `harness_parity.rs` | heartbeat memory, stack totals, load/compile lines, flash census | pinned reference images (`d6cfaa205`, `735af98ae`) and silicon transcripts |
 | c6 `boot.rs`, `boot_no_radio.rs`, `usb_control.rs`, `rmt_chase*.rs` | 7 app segments, RWDT config, 64-byte packets, payload configs | layout identity, firmware configuration, protocol constants |
 | all | `lp-emu/transcripts/**`, `walks/*.script` | recorded evidence; walks are re-captured on a project-format bump, never blessed |
+
+## A finding from the proof run: `totalBytes` is not purely a memory map
+
+The heap gate grades `totalBytes` **exact**, as "the chip's memory map, not a
+budget". Adding 64 B of `.bss` to `fw-esp32s3` moved the S3's `totalBytes`
+245,756 → 245,760 (and `freeBytes`/`largestFreeBlock` by the same 4 B): the
+heap is a fixed-size static, but where `.bss` puts it changes the alignment
+padding `esp_alloc` loses at its start. So a statics-only change can move it by
+a few bytes. `bless-chips` re-records it with everything else; the grade is
+unchanged here, and whether it should become "exact modulo alignment" is a
+question for the heap gate, not this doc.
 
 ## When not to bless
 
