@@ -45,9 +45,12 @@ Mac found the two firmware defects below, both of which make a page request
 vanish with the board silent. **The phone confirmed the cause.** With only
 the firmware half flashed and the deployed Studio (still 244 B writes, no
 teardown), Yona connected from Bluefy and "now everything seems to be
-working": editing held. So Bluefy's large writes were taking the long-write
-path, even though the board had logged the phone's ATT MTU as 251 (which
-244 B would fit). Why iOS chose a long write there is not known.
+working": editing held. The firmware half has two changes: long writes are
+reassembled, and the ATT MTU is 247 rather than 251. The phone run does not
+say which one it needed. The likely reading is that Bluefy's larger writes
+were going out as long writes and vanishing, even though the board had
+logged the phone's ATT MTU as 251, which a 244 B write fits. Why iOS would
+choose a long write there is not known.
 
 Seen once, not explained: on that confirmation the phone's first connect said
 "no response" and the retry worked. At the time the agent's lab page (Mac
