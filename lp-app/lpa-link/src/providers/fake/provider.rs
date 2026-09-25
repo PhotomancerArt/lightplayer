@@ -246,6 +246,7 @@ impl FakeProvider {
         let options = HardwareSerialOptions {
             reset_after_open: true,
             line_observer: Some(Arc::new(BufferedLineObserver(Arc::clone(&lines)))),
+            ..HardwareSerialOptions::default()
         };
         let stream = crate::providers::fake_device::FakeDeviceByteStream::new(device.clone());
         let transport = create_hardware_serial_transport_pair_with_options(

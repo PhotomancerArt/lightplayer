@@ -340,6 +340,9 @@ impl LpServer {
                 },
                 hardware,
                 device_uid: None,
+                // No packing until the embedder says its transport can
+                // (`set_packed_encoding_supported`).
+                pack_dictionary: 0,
                 // The held hello is the trusted view; a hello sent on a
                 // particular link is recomputed for that link.
                 auth: lpc_wire::HelloAuth::TRUSTED,
@@ -1056,6 +1059,26 @@ impl LpServer {
     /// `ClientRequest::Reboot` is refused with an error instead of acked.
     pub fn set_reboot_hook(&mut self, reboot: Option<RebootHook>) {
         self.reboot_hook = reboot;
+    }
+
+    /// Declare that this embedder's transport writes JSON Pack frames on a
+    /// link that opts in (`ClientRequest::SetEncoding`).
+    ///
+    /// The hello then names this build's dictionary
+    /// ([`lpc_wire::ServerHello::pack_dictionary`]), and the server answers
+    /// an opt-in `packed` when the host names the same one; unset, the hello
+    /// says 0 and every opt-in is answered `json`. The server only DECIDES:
+    /// the switch is the transport's, which holds the per-link encoding, sees
+    /// the answer it writes, and resets it when the link closes.
+    ///
+    /// The fact lives in the hello and nowhere else, so it costs the server
+    /// no field of its own.
+    pub fn set_packed_encoding_supported(&mut self, supported: bool) {
+        self.hello.pack_dictionary = if supported {
+            lpc_wire::WIRE_DICTIONARY_FINGERPRINT
+        } else {
+            0
+        };
     }
 
     pub fn memory_stats(&self) -> Option<MemoryStatsFn> {

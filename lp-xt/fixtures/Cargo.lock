@@ -138,6 +138,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "lp-json-pack"
+version = "40.0.0"
+
+[[package]]
 name = "lp-xt-emu-guest"
 version = "0.1.0"
 
@@ -213,8 +217,10 @@ version = "40.0.0"
 dependencies = [
  "base64",
  "lp-collection",
+ "lp-json-pack",
  "lpc-access",
  "lpc-model",
+ "ryu-js",
  "ser-write-json",
  "serde",
  "serde_json",
@@ -344,8 +350,6 @@ checksum = "04d056b875a9d2e6cb9a61d127afee9ac5999b9f87bcb32079d1318e505be714"
 [[package]]
 name = "ser-write"
 version = "0.3.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "167f92a96f0940635714bd76ee19d502a12540bc4ab7c1c6a28356e62f2a8098"
 dependencies = [
  "tinyvec",
 ]

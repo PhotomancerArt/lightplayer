@@ -642,6 +642,9 @@ impl BrowserFirmwareRuntime {
             time_seconds: project.engine().frame_time().total_ms as f32 / 1000.0,
             space: VisualSpace::TwoD,
             policy: ConsumerPolicy::default(),
+            // The browser canvas has no lamps behind it: a pattern-space
+            // shader sees every texel centre as one.
+            scope: None,
         };
         match project.render_visual_texture(product, &request) {
             Ok(texture) => Ok(Some(texture)),

@@ -12,7 +12,7 @@
 //! |---|---|
 //! | `browser_ble.js` | the `BluetoothDevice`, the bounded connect, the awaited chunked writes, the reconnect loop, visibility re-checks, presence edges |
 //! | `browser_ble.rs` | the bindings and the session descriptor ([`BleDevice`]) |
-//! | `ble_wire.rs` | [`BleWire`] — a session's byte stream and its one `LineSplitter`, shared by the link and a borrowing conversation |
+//! | `ble_wire.rs` | [`BleWire`] — a session's byte stream and its one `WireStream`, shared by the link and a borrowing conversation |
 //! | `ble_client_io.rs` | [`BleClientIo`] — `lpa-client`'s io over the wire, for push/remove/manifest writes and the editor lens |
 //!
 //! The model's `Link` over this lives in `device_link::browser_ble`.

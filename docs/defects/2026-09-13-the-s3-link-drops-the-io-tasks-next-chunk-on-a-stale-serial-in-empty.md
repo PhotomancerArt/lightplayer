@@ -2,9 +2,10 @@
 status: fixed
 found: 2026-09-13      # live-debugging (M6 P06 of lp2025/2026-09-10-0021-xtensa-emulator)
 area: fw-esp32s3 serial/io_task (and, latent, fw-esp32c6's) × esp-hal 1.1.1 usb_serial_jtag::write_async (the link model lp-emu/esp/lp-emu-esp-common/src/ip/usb_sj.rs was right)
-fixed: this change     # firmware-side gate in fw-esp32s3 serial/in_endpoint.rs (PR #805); the C6 is a follow-up, see the 2026-09-24 note
+fixed: this change     # firmware-side gate, PR #805 (S3); moved to fw-esp32-common serial/in_endpoint.rs and ported to the C6 in PR #795, see the second 2026-09-24 note
 class: backend-contract-divergence
 related:
+  - docs/defects/2026-09-24-the-real-c6-link-loses-bytes-inside-a-packed-frame.md
   - lp2025/2026-09-10-0021-xtensa-emulator/m6/p06-flash-cache-and-rom-up.md
   - lp2025/2026-09-10-0021-xtensa-emulator/m6/p05-the-link-and-the-hello.md
   - lp-emu/esp/lp-emu-esp32s3/tests/boot_idle.rs
@@ -168,6 +169,46 @@ port-closed / scripted variants; `tests/boot.rs::
 the_shipped_image_gets_past_esp_hal_init_and_crosses_the_console` pins the
 same 64 bytes at 300 ms.
 
+**2026-09-23 — the boot hello no longer shows it; the mechanism is
+unchanged.** On `feat/lp-json-pack` (PR #795: a token hook in the vendored
+`ser-write-json`, struct-field prefix helpers moved `#[inline(never)]`,
+base64 blobs streamed through `collect_str`) the shipped image delivers the
+whole `hello` on both boot paths — direct `1586 bytes reached the host; 0
+bytes were merely tried`, ROM-up `3732 … 0` — where `origin/main`
+(a9429460f), run by the same emulator binary, still reads `1524 … 64` and
+`3670 … 64` with the packet above on the tried stream. The `USB_DEVICE`
+trace (direct, 300 ms, `ALIAS`/byte lines removed) shows why. The io_task's
+first poll clears `serial_in_empty` as it takes the link, and it is a race
+against the drain of the `[INIT]` chain's last 1-byte packet:
+
+```
+origin/main:
+cyc=4396066 pc=0x4208d5e0 W4 USB_DEVICE+0x014 int_clr = 0x00000008   (io_task poll)
+cyc=4396206 pc=0x4208d6b2 USB_DEVICE IN packet of 1 bytes delivered … serial_in_empty raised
+cyc=28398267 pc=0x4208d7eb R4 USB_DEVICE+0x008 int_raw = 0x0000030a   (stale bit 3)
+feat/lp-json-pack:
+cyc=4396360 pc=0x420fb8c5 USB_DEVICE IN packet of 1 bytes delivered … serial_in_empty raised
+cyc=4400882 pc=0x4208d488 W4 USB_DEVICE+0x014 int_clr = 0x00000008   (io_task poll)
+cyc=28403083 pc=0x4208d693 R4 USB_DEVICE+0x008 int_raw = 0x00000302   (bit 3 clear)
+```
+
+On main the clear lands 140 cycles *before* the drain re-raises the bit, so
+the bit is stale when the hello's write future arms. On the branch the main
+task is still inside `ser_write_json::ser::format_escaped_str_contents` when
+the packet drains (the slower JSON path delays the io_task's first poll),
+the clear lands 4,522 cycles *after* the drain, and the hello's first chunk
+waits the full 100 µs (`int_st` at 28,428,827, 24,291 cycles after its
+`int_ena = 0x08`). Nothing in esp-hal, esp-println or the link model
+changed: this is timing, and the defect is **latent** at the hello. Its
+live witness is the stop-all reply — `the_ledger_triple_is_elicited_by_a_stop_all_on_the_wire`
+still reads it on the tried stream (37 bytes) on this branch. When this
+branch merged `origin/main` (2026-09-24) it took M3's hello pins above
+(0 tried, pointing at the dated note before this one) rather than its own
+near-identical ones, which additionally named the once-dropped packet; the
+merged image stays on the no-drop side and `just test-emu-esp32s3-gate`
+passes on it. Emulator:
+`lp-emu-esp32s3` built from this worktree at d5f29f337 (t1).
+
 **2026-09-24 — the documents settle it: silicon refuses, the model was
 right, and the fix is the firmware's.**
 
@@ -254,6 +295,26 @@ packet, so `usb_attached.rs::g2_3_…`, `usb_control.rs::g3_1b_…` and
 against silicon (`usb-negative-control`) — would all move. That is a
 change to a silicon-graded behaviour, and it wants its own PR and a desk
 re-check of the negative control, not a rider on this one.
+
+**2026-09-24 (later) — the C6 now has the gate, via PR #795.** A real
+XIAO C6 lost ~5 bytes inside a packed frame while JSON lost none on the same
+board (`docs/defects/2026-09-24-the-real-c6-link-loses-bytes-inside-a-packed-frame.md`),
+so #795 merged this PR and ported the gate. There is **one** gate now:
+`InEndpoint` moved to `lp-fw/fw-esp32-common/src/serial/in_endpoint.rs`,
+generic over the TX half, with the two register touches injected
+(`InEndpointRegs`, implemented as `UsbSerialJtagInEndpoint` beside each
+chip's `board/<chip>/usb_connection.rs`); `fw-esp32s3/src/serial/in_endpoint.rs`
+is deleted and both io_tasks wrap their TX half in the shared type. The
+classic v3 (UART, no USB-Serial-JTAG) never names it. One change rode
+along: the gate now hands esp-hal **at most one 64-byte packet per
+`write`**, so it sits in front of every packet rather than every 256-byte
+`ChunkedWriter` chunk (esp-hal's own inner loop checks nothing between
+packets). Image cost on the merged tree: C6 +288 B, S3 +464 B, v3 0. The
+three C6 tests named above were re-pinned to what the gated image does —
+waits where there were commits into the held packet — each naming this
+entry; none replays a transcript, and a desk re-capture of
+`usb-negative-control` on a gated image is owed to confirm the host-visible
+half is unchanged.
 
 *What a board would add.* Nothing is needed to close this — the refusal is
 documented and the fix removes the firmware's dependence on what happens

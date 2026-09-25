@@ -25,6 +25,7 @@
 //! previews at that rate (see the simulator-clock ADR), while a real device
 //! polls calmly.
 
+use core::sync::atomic::{AtomicU32, Ordering};
 use core::time::Duration;
 
 /// Fast completion-gap for the self-ticking browser sim: the UI re-reads
@@ -36,10 +37,52 @@ pub const SIMULATOR_REFRESH_INTERVAL: Duration = Duration::from_millis(33);
 /// device is connected). Under completion-based pacing this is idle time
 /// BETWEEN pulls, not a period — a slow serial pull can no longer stack
 /// behind the timer — so it is far tighter than the retired 750 ms fixed
-/// interval. Tune at the hardware feel-walk if 150 ms proves too chatty
-/// for a busy device. Retired web constant
-/// `DEVICE_PROJECT_REFRESH_INTERVAL_MS`.
-pub const DEVICE_REFRESH_INTERVAL: Duration = Duration::from_millis(150);
+/// interval. **75 ms since 2026-09-24**, chosen by feel on a real XIAO C6
+/// at the JSON Pack desk sitting (lp2025/2026-09-23-1701-lp-json-pack, G1),
+/// between 150, 75 and 33: a packed steady lens reply is ~0.7 KB against
+/// ~2.4 KB of JSON, so the link time per read fell from ~27 ms to ~8 ms at
+/// ~90 KB/s and the old 150 ms gap had become most of each read's cycle.
+/// Retired web constant `DEVICE_PROJECT_REFRESH_INTERVAL_MS`.
+pub const DEVICE_REFRESH_INTERVAL: Duration = Duration::from_millis(75);
+
+/// The most a [`set_device_lens_pause_override`] may ask for. The override
+/// is a probe for the gap between reads, not a way to switch the lens off.
+pub const DEVICE_LENS_PAUSE_OVERRIDE_MAX: Duration = Duration::from_millis(1_000);
+
+/// `u32::MAX` = no override. See [`set_device_lens_pause_override`].
+static DEVICE_LENS_PAUSE_OVERRIDE_MS: AtomicU32 = AtomicU32::new(u32::MAX);
+
+/// A dev-only override for [`DEVICE_REFRESH_INTERVAL`] — the lens's pause
+/// between a device read completing and the next one starting — for the
+/// JSON Pack cadence probe (plan `lp-json-pack`, D2): Studio's
+/// `?lens-pause-ms=N` sets it at page load so the same build can be felt at
+/// 150, 75 and 33 ms. Clamped to 0–[`DEVICE_LENS_PAUSE_OVERRIDE_MAX`];
+/// `None` clears it. Returns the pause now in force.
+///
+/// Not a setting: no UI, no persistence, and it moves nothing but the lens
+/// cadence of a device session ([`RefreshCadence::device`]) — not the card's
+/// frame feed, not the sim, not the heartbeat.
+pub fn set_device_lens_pause_override(ms: Option<u64>) -> Duration {
+    let stored = match ms {
+        Some(ms) => clamp_lens_pause(ms).as_millis() as u32,
+        None => u32::MAX,
+    };
+    DEVICE_LENS_PAUSE_OVERRIDE_MS.store(stored, Ordering::Relaxed);
+    device_refresh_interval()
+}
+
+/// A requested lens pause, clamped to 0–[`DEVICE_LENS_PAUSE_OVERRIDE_MAX`].
+pub fn clamp_lens_pause(ms: u64) -> Duration {
+    Duration::from_millis(ms).min(DEVICE_LENS_PAUSE_OVERRIDE_MAX)
+}
+
+/// [`DEVICE_REFRESH_INTERVAL`], or the dev override when one is set.
+pub fn device_refresh_interval() -> Duration {
+    match DEVICE_LENS_PAUSE_OVERRIDE_MS.load(Ordering::Relaxed) {
+        u32::MAX => DEVICE_REFRESH_INTERVAL,
+        ms => Duration::from_millis(u64::from(ms)),
+    }
+}
 
 /// How many passive runs in a row an arriving-command stream may cancel
 /// before the next one is promoted to foreground standing and allowed to
@@ -120,7 +163,9 @@ pub const DEVICE_HEARTBEAT_INTERVAL: Duration = Duration::from_secs(2);
 /// COMPLETING and the next one starting, while a card's ▶ Play tab is
 /// selected on a Ready device.
 ///
-/// Same figure as [`DEVICE_REFRESH_INTERVAL`], and for the same reason —
+/// The lens's pre-2026-09-24 figure, kept at 150 ms when the lens
+/// ([`DEVICE_REFRESH_INTERVAL`]) went to 75 — the card was not part of the
+/// G1 feel test. The reasoning is the lens's —
 /// under completion-based pacing the number is idle time, not a period, so
 /// the frame size sets the real rate. One frame is `lamps × 3 × 2` bytes
 /// before base64 (×4/3 after) on a link that carries every other protocol
@@ -181,10 +226,12 @@ pub struct RefreshCadence {
 }
 
 impl RefreshCadence {
-    /// The default (device) cadence, used before a sim connects.
-    pub const fn device() -> Self {
+    /// The default (device) cadence, used before a sim connects:
+    /// [`DEVICE_REFRESH_INTERVAL`], unless the dev-only lens-pause override is
+    /// set ([`set_device_lens_pause_override`]).
+    pub fn device() -> Self {
         Self {
-            interval: DEVICE_REFRESH_INTERVAL,
+            interval: device_refresh_interval(),
         }
     }
 
@@ -226,6 +273,17 @@ mod tests {
             RefreshCadence::default().interval(),
             DEVICE_REFRESH_INTERVAL
         );
+    }
+
+    /// The override itself is process-wide, so it is never SET in a test:
+    /// tests run in parallel and every device-cadence assertion would race
+    /// it. The clamp is what there is to get wrong.
+    #[test]
+    fn the_lens_pause_override_is_clamped_to_a_second() {
+        assert_eq!(clamp_lens_pause(75), Duration::from_millis(75));
+        assert_eq!(clamp_lens_pause(0), Duration::ZERO);
+        assert_eq!(clamp_lens_pause(60_000), DEVICE_LENS_PAUSE_OVERRIDE_MAX);
+        assert_eq!(device_refresh_interval(), DEVICE_REFRESH_INTERVAL);
     }
 
     /// Play over Bluetooth, untouched, reads once a minute; a knob write's

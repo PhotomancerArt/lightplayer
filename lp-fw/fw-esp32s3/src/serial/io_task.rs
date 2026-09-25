@@ -27,7 +27,8 @@ use fw_esp32_common::serial::chunked_write::{ChunkedWriter, WritePolicy};
 use log;
 
 use crate::board::esp32s3::usb_connection::UsbConnectionMonitor;
-use crate::serial::in_endpoint::InEndpoint;
+use crate::board::esp32s3::usb_connection::UsbSerialJtagInEndpoint;
+use fw_esp32_common::serial::in_endpoint::InEndpoint;
 
 /// Static message channels for MessageRouter
 static INCOMING_MSG: Channel<CriticalSectionRawMutex, String, 32> = Channel::new();
@@ -106,9 +107,9 @@ pub async fn io_task(usb_device: esp_hal::peripherals::USB_DEVICE<'static>) {
     let usb_serial_async = usb_serial.into_async();
     let (mut rx, tx) = usb_serial_async.split();
     // esp-println shares the IN endpoint; the gate waits for it to be free
-    // and clears the stale `serial_in_empty` before every write (see
-    // `serial::in_endpoint`).
-    let mut tx = InEndpoint::new(tx);
+    // and clears the stale `serial_in_empty` before every packet (see
+    // `fw_esp32_common::serial::in_endpoint`, shared with the C6).
+    let mut tx = InEndpoint::<_, UsbSerialJtagInEndpoint>::new(tx);
 
     Timer::after(Duration::from_millis(100)).await;
 

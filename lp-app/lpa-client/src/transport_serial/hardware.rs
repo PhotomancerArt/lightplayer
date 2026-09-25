@@ -5,13 +5,17 @@
 //! loops continuously; port opening belongs to the caller (the
 //! `host-serial-esp32` link provider opens native ports, the fake device
 //! provides an in-memory stream).
+//!
+//! Replies are read through [`WireStream`] (JSON lines and packed frames
+//! alike), and the thread asks the board to pack on its own (see the module
+//! docs of [`crate::transport_serial`], and `LP_WIRE_ENCODING`).
 
 use log;
-use lpc_wire::WireServerMessage;
+use lpc_wire::{PackOptIn, WireChunk, WireEncoding, WireServerMessage, WireStream};
 use lpc_wire::{TransportError, messages::ClientMessage};
 use std::sync::Arc;
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tokio::sync::{mpsc, oneshot};
 
 use crate::stream::{ByteStreamError, DeviceByteStream};
@@ -27,8 +31,12 @@ pub struct HardwareSerialOptions {
     /// Reset the ESP32 after opening the serial port, so boot logs are captured
     /// by this transport.
     pub reset_after_open: bool,
-    /// Receives every complete serial line, including protocol lines.
+    /// Receives every complete serial line, including protocol lines. A
+    /// packed frame is observed as the `M!{json}` line it stands for.
     pub line_observer: Option<Arc<dyn SerialLineObserver>>,
+    /// The encoding to ask the board for. `None` reads `LP_WIRE_ENCODING`
+    /// ([`crate::wire_encoding_env`]): packed unless it says `json`.
+    pub wire_encoding: Option<WireEncoding>,
 }
 
 /// Serial I/O thread loop
@@ -53,10 +61,17 @@ fn serial_thread_loop(
         }
     }
 
-    let mut read_buffer = Vec::new();
+    let mut wire = WireStream::new();
+    let mut opt_in = PackOptIn::wanting(
+        options
+            .wire_encoding
+            .unwrap_or_else(crate::wire_encoding_env::requested_wire_encoding),
+    );
+    // The opt-in's clock: any monotonic milliseconds will do.
+    let started = Instant::now();
     let mut connection_lost = false;
 
-    loop {
+    'serial: loop {
         // Check for shutdown signal (non-blocking)
         if shutdown_rx.try_recv().is_ok() {
             log::debug!("Serial thread: Shutdown signal received");
@@ -70,53 +85,30 @@ fn serial_thread_loop(
 
         // Process incoming client messages (non-blocking)
         while let Ok(msg) = client_rx.try_recv() {
-            // Frame as one `M!{json}\n` line (the shared framer).
-            let data = match lpc_wire::json::to_serial_line(&msg) {
-                Ok(line) => line.into_bytes(),
-                Err(e) => {
-                    log::warn!("Serial thread: Failed to serialize client message: {e}");
-                    continue;
-                }
-            };
-
-            log::debug!(
-                "Serial thread: Writing client message id={} ({} bytes) to serial",
-                msg.id,
-                data.len()
-            );
-
-            // Write to the stream (bounded — see `DeviceByteStream::write_all`)
-            match stream.write_all(&data) {
-                Ok(()) => {}
-                // The device stopped draining its receive FIFO. Drop the
-                // frame and keep the link: this is what an unresponsive
-                // board looks like from the write side, and the readiness
-                // engine's own deadline is what gets to classify it. Tearing
-                // the link down here reported a repairable board as `Gone`,
-                // a state management never runs from (bench, 2026-09-08).
-                Err(ByteStreamError::WriteStalled) => {
-                    log::warn!(
-                        "Serial thread: {stream_label} is not accepting output; \
-                         dropped message id={}",
-                        msg.id
-                    );
-                    // And stop draining. Everything queued behind this frame
-                    // is equally undeliverable, and each attempt costs the
-                    // port's full write timeout — readiness leaves ~30 of
-                    // them behind a silent board, which is minutes of writes
-                    // nobody will read, past any close's join budget. The
-                    // outer pass re-checks the shutdown signal immediately.
-                    //
-                    // Deliberately keyed on the STALL and not on shutdown: a
-                    // peer that is still accepting gets the queue it was
-                    // already being handed (the studio device bench depends
-                    // on a close mid-drain finishing what it started), and a
-                    // peer that is not gets abandoned at the first frame it
-                    // refused.
-                    break;
-                }
-                Err(e) => {
-                    log::error!("Serial thread: Write error: {e}");
+            match write_message(stream.as_mut(), &stream_label, &msg) {
+                WriteOutcome::Written => {}
+                // The device stopped draining its receive FIFO. The frame
+                // was dropped and the link kept: this is what an
+                // unresponsive board looks like from the write side, and
+                // the readiness engine's own deadline is what gets to
+                // classify it. Tearing the link down here reported a
+                // repairable board as `Gone`, a state management never runs
+                // from (bench, 2026-09-08).
+                //
+                // And stop draining. Everything queued behind this frame is
+                // equally undeliverable, and each attempt costs the port's
+                // full write timeout — readiness leaves ~30 of them behind a
+                // silent board, which is minutes of writes nobody will read,
+                // past any close's join budget. The outer pass re-checks the
+                // shutdown signal immediately.
+                //
+                // Deliberately keyed on the STALL and not on shutdown: a
+                // peer that is still accepting gets the queue it was already
+                // being handed (the studio device bench depends on a close
+                // mid-drain finishing what it started), and a peer that is
+                // not gets abandoned at the first frame it refused.
+                WriteOutcome::Stalled => break,
+                WriteOutcome::Lost => {
                     connection_lost = true;
                     break;
                 }
@@ -125,68 +117,71 @@ fn serial_thread_loop(
 
         // Read available data from the stream (non-blocking / short timeout)
         let mut temp_buf = [0u8; 256];
-        match stream.read_available(&mut temp_buf) {
+        let chunks = match stream.read_available(&mut temp_buf) {
             Ok(0) => {
                 // No data available - small delay to avoid busy loop
                 std::thread::sleep(Duration::from_millis(10));
                 continue;
             }
-            Ok(n) => {
-                read_buffer.extend_from_slice(&temp_buf[..n]);
-            }
+            Ok(n) => wire.push_collect(&temp_buf[..n]),
             Err(e) => {
                 log::error!("Serial thread: Read error: {e}");
                 connection_lost = true;
                 break;
             }
-        }
+        };
 
-        // Process complete lines
-        while let Some(newline_pos) = read_buffer.iter().position(|&b| b == b'\n') {
-            let line_bytes: Vec<u8> = read_buffer.drain(..=newline_pos).collect();
-            let line_str = match std::str::from_utf8(&line_bytes[..line_bytes.len() - 1]) {
-                Ok(s) => s,
+        for chunk in chunks {
+            let frame = match chunk {
+                WireChunk::Line(line) => {
+                    if line.is_empty() {
+                        continue;
+                    }
+                    if let Some(observer) = &options.line_observer {
+                        observer.observe_line(&line);
+                    }
+                    eprintln!("[serial] {line}");
+                    continue;
+                }
+                WireChunk::Error(error) => {
+                    log::warn!("Serial thread: {error}");
+                    continue;
+                }
+                WireChunk::Frame(frame) => frame,
+            };
+            if let Some(observer) = &options.line_observer {
+                observer.observe_line(&frame.to_line());
+            }
+            let msg = match lpc_wire::json::from_str::<WireServerMessage>(&frame.json) {
+                Ok(msg) => msg,
                 Err(e) => {
-                    log::warn!("Serial thread: Invalid UTF-8 in line: {e}");
+                    log::warn!(
+                        "Serial thread: Failed to parse JSON message: {e} | json: {}",
+                        frame.json
+                    );
+                    // Continue - don't crash on parse errors
                     continue;
                 }
             };
-            let line_str = line_str.trim_end_matches('\r');
-            if line_str.is_empty() {
-                continue;
-            }
+            log::debug!(
+                "Serial thread: Parsed server message id={} ({} bytes, {})",
+                msg.id,
+                frame.json.len(),
+                if frame.is_packed() { "packed" } else { "json" }
+            );
 
-            if let Some(observer) = &options.line_observer {
-                observer.observe_line(line_str);
-            }
-
-            // Check for M! prefix
-            if let Some(json_str) = line_str.strip_prefix("M!") {
-                // Parse JSON message (strip M! prefix)
-                match lpc_wire::json::from_str::<WireServerMessage>(json_str) {
-                    Ok(msg) => {
-                        log::debug!(
-                            "Serial thread: Parsed server message id={} ({} bytes)",
-                            msg.id,
-                            line_bytes.len()
-                        );
-
-                        // Send via server_tx
-                        if server_tx.send(msg).is_err() {
-                            log::debug!("Serial thread: server_tx closed, exiting");
-                            break;
-                        }
-                    }
-                    Err(e) => {
-                        log::warn!(
-                            "Serial thread: Failed to parse JSON message: {e} | json: {json_str}"
-                        );
-                        // Continue - don't crash on parse errors
-                    }
+            let now_ms = u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX);
+            let step = opt_in.observe(&msg, frame.is_packed(), now_ms);
+            if let Some(ask) = step.send {
+                log::debug!("Serial thread: asking {stream_label} to pack its replies");
+                if let WriteOutcome::Lost = write_message(stream.as_mut(), &stream_label, &ask) {
+                    connection_lost = true;
+                    break;
                 }
-            } else {
-                // Non-M! line - log with prefix
-                eprintln!("[serial] {line_str}");
+            }
+            if step.deliver && server_tx.send(msg).is_err() {
+                log::debug!("Serial thread: server_tx closed, exiting");
+                break 'serial;
             }
         }
     }
@@ -205,6 +200,50 @@ fn serial_thread_loop(
     drop(stream);
 
     log::debug!("Serial thread: Exiting ({stream_label} released)");
+}
+
+/// How one write to the board went.
+enum WriteOutcome {
+    Written,
+    /// The board is not accepting input; the message was dropped.
+    Stalled,
+    /// The stream failed; the link is gone.
+    Lost,
+}
+
+/// Frame `msg` as one `M!{json}\n` line (the shared framer) and write it,
+/// bounded (see [`DeviceByteStream::write_all`]).
+fn write_message(
+    stream: &mut dyn DeviceByteStream,
+    stream_label: &str,
+    msg: &ClientMessage,
+) -> WriteOutcome {
+    let data = match lpc_wire::json::to_serial_line(msg) {
+        Ok(line) => line.into_bytes(),
+        Err(e) => {
+            log::warn!("Serial thread: Failed to serialize client message: {e}");
+            return WriteOutcome::Written;
+        }
+    };
+    log::debug!(
+        "Serial thread: Writing client message id={} ({} bytes) to serial",
+        msg.id,
+        data.len()
+    );
+    match stream.write_all(&data) {
+        Ok(()) => WriteOutcome::Written,
+        Err(ByteStreamError::WriteStalled) => {
+            log::warn!(
+                "Serial thread: {stream_label} is not accepting output; dropped message id={}",
+                msg.id
+            );
+            WriteOutcome::Stalled
+        }
+        Err(e) => {
+            log::error!("Serial thread: Write error: {e}");
+            WriteOutcome::Lost
+        }
+    }
 }
 
 /// How the DTR/RTS lines reach the chip's reset, which decides the dance.

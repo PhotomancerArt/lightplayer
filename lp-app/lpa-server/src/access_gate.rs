@@ -56,9 +56,13 @@ impl Required {
 #[must_use]
 pub fn classify(request: &ClientRequest, projects_dir: &str) -> Required {
     match request {
-        ClientRequest::Hello | ClientRequest::LoginBegin | ClientRequest::LoginAnswer { .. } => {
-            Required::Public
-        }
+        // `SetEncoding` picks how this link's replies are written, not what
+        // they say: it grants nothing and reads nothing, so an untrusted link
+        // may ask for it before it logs in (plan `lp-json-pack`).
+        ClientRequest::Hello
+        | ClientRequest::LoginBegin
+        | ClientRequest::LoginAnswer { .. }
+        | ClientRequest::SetEncoding { .. } => Required::Public,
         ClientRequest::ProjectRead { .. }
         | ClientRequest::ListAvailableProjects
         | ClientRequest::ListLoadedProjects => Required::Play,
@@ -135,6 +139,10 @@ mod tests {
             ClientRequest::LoginBegin,
             ClientRequest::LoginAnswer {
                 macs: alloc::vec![],
+            },
+            ClientRequest::SetEncoding {
+                encoding: lpc_wire::WireEncoding::Packed,
+                dictionary: 0,
             },
         ] {
             assert_eq!(classify(&request, "/projects"), Required::Public);

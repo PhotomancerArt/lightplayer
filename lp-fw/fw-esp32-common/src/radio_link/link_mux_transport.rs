@@ -63,6 +63,11 @@ struct RadioLink {
     opened_at_ms: Option<u64>,
     /// It held a tier once; the deadline no longer applies.
     cleared: bool,
+    /// What this link's replies are written in: JSON until the server
+    /// answers its `SetEncoding` opt-in, then what that answer names — the
+    /// same rule the USB transport keeps (plan `lp-json-pack`). A radio link
+    /// that closes takes its encoding with it; the next one starts at JSON.
+    encoding: lpc_wire::WireEncoding,
 }
 
 /// The USB transport plus the radio links, as one [`ServerTransport`].
@@ -154,6 +159,7 @@ impl<U: ServerTransport, D: DelayNs> LinkMuxTransport<U, D> {
                         slot,
                         opened_at_ms: None,
                         cleared: false,
+                        encoding: lpc_wire::WireEncoding::Json,
                     });
                     self.opened.push(RadioLinkPort::link(link));
                 }
@@ -185,15 +191,29 @@ impl<U: ServerTransport, D: DelayNs> LinkMuxTransport<U, D> {
         link: LinkId,
         msg: WireServerMessage,
     ) -> Result<(), TransportError> {
-        let Some(slot) = self.radio.iter().find(|l| l.id == link).map(|l| l.slot) else {
+        let Some((slot, link_encoding)) = self
+            .radio
+            .iter()
+            .find(|l| l.id == link)
+            .map(|l| (l.slot, l.encoding))
+        else {
             log::debug!("radio link {link}: gone, skipping frame id={}", msg.id);
             return Ok(());
         };
         let id = msg.id;
+        // The answer to an opt-in is always JSON (the host reads it before it
+        // knows the outcome); the switch it announces applies to every frame
+        // after it, as on the USB transport.
+        let (encoding, switch_to) = match msg.msg {
+            lpc_wire::server::ServerMsgBody::SetEncoding { encoding } => {
+                (lpc_wire::WireEncoding::Json, Some(encoding))
+            }
+            _ => (link_encoding, None),
+        };
         // Same buffer, same exclusivity argument as the USB write: the send
         // below does not return until the radio side is done with it or the
         // lease is revoked.
-        let len = serialize_server_msg(&msg)?;
+        let len = serialize_server_msg(&msg, encoding)?;
         drop(msg);
         let generation = self.generation;
         self.generation = self.generation.wrapping_add(1);
@@ -214,7 +234,15 @@ impl<U: ServerTransport, D: DelayNs> LinkMuxTransport<U, D> {
         // Whatever happened, the buffer is the server's again from here.
         self.port.revoke_frame();
         match outcome {
-            Either::First(Ok(())) => Ok(()),
+            Either::First(Ok(())) => {
+                if let Some(encoding) = switch_to
+                    && let Some(l) = self.radio.iter_mut().find(|l| l.id == link)
+                {
+                    l.encoding = encoding;
+                    log::info!("radio link {link}: replies are now {}", encoding.as_str());
+                }
+                Ok(())
+            }
             Either::First(Err(error)) => {
                 log::error!(
                     "radio link {link}: dropping frame id={id} ({len} B): {error} — closing"

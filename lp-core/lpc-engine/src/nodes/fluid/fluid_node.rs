@@ -461,6 +461,7 @@ mod tests {
                     time_seconds: 0.0,
                     space: VisualSpace::TwoD,
                     policy: ConsumerPolicy::default(),
+                    scope: None,
                 },
             )
             .expect("render fluid texture");
@@ -632,6 +633,7 @@ void tick() {
                     time_seconds: 0.0,
                     space: VisualSpace::TwoD,
                     policy: ConsumerPolicy::default(),
+                    scope: None,
                 },
             )
             .expect("render fluid texture");

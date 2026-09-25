@@ -60,6 +60,10 @@ default-features = false
 
 [dependencies.ser-write]
 version = "0.3"
+# LP fork: the vendored ser-write carries the token hook this crate calls. The
+# root workspace patches it in anyway; the path makes this crate's own tests
+# (`just test-ser-write`) build against it too.
+path = "../ser-write"
 default-features = false
 
 [dependencies.serde]

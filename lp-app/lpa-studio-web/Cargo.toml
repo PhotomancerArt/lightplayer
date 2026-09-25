@@ -21,7 +21,7 @@ gloo-timers = { version = "0.3", features = ["futures"] }
 js-sys = "0.3"
 log = { workspace = true }
 lpa-client = { path = "../lpa-client", default-features = false }
-lpa-link = { path = "../lpa-link", features = ["browser-worker", "browser-ble"] }
+lpa-link = { path = "../lpa-link", features = ["browser-worker", "device-link", "browser-ble"] }
 lpa-agent = { path = "../lpa-agent" }
 # `emulator-tab` is what compiles `browser_emu_source.rs` into the shipped
 # wasm: without it the emu transport has a model half and no platform half,

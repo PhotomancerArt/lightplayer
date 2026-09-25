@@ -37,7 +37,7 @@ path = "src/main.rs"
 workspace = true
 
 [features]
-default = ["esp32", "server", "float-f32"]
+default = ["esp32", "server", "float-f32", "json-pack"]
 # Chip selection, mirroring fw-esp32s3's `esp32s3` feature: crates whose chip
 # feature is not named on their dependency line get it here, so there is one
 # place to change. `esp-rtos?/esp32` is a weak dependency feature — it must not
@@ -75,6 +75,11 @@ server = [
     "dep:lp-ws281x",
     "dep:fw-core",
 ]
+
+# JSON Pack (plan `lp-json-pack`, Q4): replies go out packed on a link whose
+# host opted in (`ClientRequest::SetEncoding`); every other link stays JSON.
+# On by default; without it the board answers every opt-in "json".
+json-pack = ["server", "fw-esp32-common/json-pack"]
 
 # Periodic WS281x telemetry over the serial link — OFF by default.
 #

@@ -4220,6 +4220,7 @@ mod tests {
                     time_seconds: 0.0,
                     space: VisualSpace::TwoD,
                     policy: ConsumerPolicy::default(),
+                    scope: None,
                 },
             )
             .expect("fluid texture");
@@ -4857,6 +4858,7 @@ mod tests {
                 time_seconds: 0.0,
                 space: VisualSpace::TwoD,
                 policy: ConsumerPolicy::default(),
+                scope: None,
             },
         )
         .expect("texture")

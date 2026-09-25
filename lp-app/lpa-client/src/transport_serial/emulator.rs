@@ -10,11 +10,11 @@ use log;
 use lp_emu_core::TimeMode;
 use lp_riscv_elf::format_backtrace;
 use lp_riscv_emu::Riscv32Emulator;
-use lpc_wire::WireServerMessage;
+use lpc_wire::{PackOptIn, WireChunk, WireServerMessage, WireStream};
 use lpc_wire::{TransportError, messages::ClientMessage};
 use std::sync::{Arc, Mutex};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tokio::sync::{mpsc, oneshot};
 
 #[cfg(test)]
@@ -54,7 +54,12 @@ fn emulator_thread_loop(
     server_tx: mpsc::UnboundedSender<WireServerMessage>,
     mut shutdown_rx: oneshot::Receiver<()>,
 ) {
-    let mut read_buffer = Vec::new();
+    // Console lines, `M!` lines and packed frames alike. `fw-emu` stays
+    // JSON (its hello names no dictionary, so the opt-in is never sent), but
+    // the reader is the one every serial transport shares.
+    let mut wire = WireStream::new();
+    let mut opt_in = PackOptIn::wanting(crate::wire_encoding_env::requested_wire_encoding());
+    let started = Instant::now();
 
     // Pace idle yields only when the guest is on the wall clock.
     let pace_idle_yields = match emulator.lock() {
@@ -209,51 +214,50 @@ fn emulator_thread_loop(
                 "Emulator thread: Drained {} bytes from serial output",
                 output.len()
             );
-            read_buffer.extend_from_slice(&output);
         }
 
-        // Parse complete messages (newline-terminated)
-        while let Some(newline_pos) = read_buffer.iter().position(|&b| b == b'\n') {
-            let message_bytes = read_buffer.drain(..=newline_pos).collect::<Vec<_>>();
-            let message_str = match std::str::from_utf8(&message_bytes[..message_bytes.len() - 1]) {
-                Ok(s) => s,
+        for chunk in wire.push_collect(&output) {
+            let frame = match chunk {
+                WireChunk::Line(line) => {
+                    // Non-M! lines are server logs.
+                    if !line.is_empty() {
+                        eprintln!("[serial] {line}");
+                    }
+                    continue;
+                }
+                WireChunk::Error(error) => {
+                    log::warn!("Emulator thread: {error}");
+                    continue;
+                }
+                WireChunk::Frame(frame) => frame,
+            };
+            let msg = match lpc_wire::json::from_str::<WireServerMessage>(&frame.json) {
+                Ok(msg) => msg,
                 Err(e) => {
-                    log::warn!("Emulator thread: Invalid UTF-8 in message: {e}");
+                    log::warn!(
+                        "Emulator thread: Failed to parse JSON message: {e} | json: {}",
+                        frame.json
+                    );
+                    // Continue - don't crash on parse errors
                     continue;
                 }
             };
-            if message_str.is_empty() {
-                continue;
-            }
-
-            // Check for M! prefix - protocol messages; non-M! lines are server logs
-            if !message_str.starts_with("M!") {
-                eprintln!("[serial] {message_str}");
-                continue;
-            }
-
-            // Parse JSON message (strip M! prefix)
-            let json_str = message_str.strip_prefix("M!").unwrap_or(message_str);
-            match lpc_wire::json::from_str::<WireServerMessage>(json_str) {
-                Ok(msg) => {
-                    log::debug!(
-                        "Emulator thread: Parsed server message id={} ({} bytes)",
-                        msg.id,
-                        message_bytes.len()
-                    );
-
-                    // Send via server_tx
-                    if server_tx.send(msg).is_err() {
-                        log::debug!("Emulator thread: server_tx closed, exiting");
-                        break;
-                    }
+            log::debug!(
+                "Emulator thread: Parsed server message id={} ({} bytes)",
+                msg.id,
+                frame.json.len()
+            );
+            let now_ms = u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX);
+            let step = opt_in.observe(&msg, frame.is_packed(), now_ms);
+            if let Some(ask) = step.send {
+                match (lpc_wire::json::to_serial_line(&ask), emulator.lock()) {
+                    (Ok(line), Ok(mut emu)) => emu.serial_write(line.as_bytes()),
+                    _ => log::warn!("Emulator thread: could not write the pack opt-in"),
                 }
-                Err(e) => {
-                    log::warn!(
-                        "Emulator thread: Failed to parse JSON message: {e} | json: {json_str}"
-                    );
-                    // Continue - don't crash on parse errors
-                }
+            }
+            if step.deliver && server_tx.send(msg).is_err() {
+                log::debug!("Emulator thread: server_tx closed, exiting");
+                break;
             }
         }
 

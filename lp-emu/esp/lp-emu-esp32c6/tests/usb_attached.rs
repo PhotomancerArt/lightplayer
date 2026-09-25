@@ -9,9 +9,11 @@
 //!   data point) — recorded, not gated.
 //! - **G2-3** attached-idle from boot (`Attached { draining: false }`): the
 //!   vehicle-neutral signature of the firmware's "host not draining" latch —
-//!   two `wr_done` commits ≥ 250 ms apart with nothing delivered before 2 s,
-//!   then one-byte (`0x0a`) probe commits every ≈ 2 s; `TIMED_OUT == 1`; the
-//!   delivered log empty; liveness from `idle_skips` and the RWDT feeds.
+//!   write attempts ≥ 250 ms apart with nothing delivered before 2 s, then a
+//!   probe every ≈ 2 s; `TIMED_OUT == 1`; the delivered log empty; liveness
+//!   from `idle_skips` and the RWDT feeds. Since the IN-endpoint gate
+//!   (2026-09-24) those attempts are waits for a free buffer, not commits
+//!   into the held one — see the test.
 //! - **G2-4** determinism: G2-1 twice → identical delivered logs and cycle
 //!   counts.
 //!
@@ -33,6 +35,7 @@ const GATE_US: u64 = 5_500_000;
 const MS: u64 = 1_000 * memmap::CYCLES_PER_US;
 const TIMED_OUT: &str = "esp_println::serial_jtag_printer::TIMED_OUT";
 const SERIAL_OUT_RECV_PKT: u32 = 1 << 2;
+const SERIAL_IN_EMPTY: u32 = 1 << 3;
 
 /// The hello's opening, up to its protocol version.
 const HELLO_PROTO: &str = "\nM!{\"id\":0,\"msg\":{\"hello\":{\"proto\":";
@@ -240,23 +243,35 @@ fn g2_1_attached_and_draining_from_boot_delivers_the_boot_the_hello_and_a_heartb
 #[test]
 #[ignore = "needs the fw-esp32c6 ELF; run through `just test-emu-c6`"]
 fn g2_3_attached_idle_from_boot_shows_the_not_draining_signature_and_the_probe() {
-    let Some(r) = run(UsbHost::Attached { draining: false }) else {
+    let Some(mut r) = run(UsbHost::Attached { draining: false }) else {
         return;
     };
-    // Nothing reached a host. The first `[INIT]` line is committed and
-    // HELD in the endpoint for the whole run (a closed port never takes
-    // it), so it is on neither log; what was merely tried starts with the
-    // hello's first 64-byte chunk, dropped into the committed FIFO.
+    // ⚠️ Re-pinned 2026-09-24 for the io_task's IN-endpoint gate
+    // (`fw_esp32_common::serial::in_endpoint`, PR #805, ported to the C6 for
+    // docs/defects/2026-09-24-the-real-c6-link-loses-bytes-inside-a-packed-frame.md).
+    // Before it, esp-hal 1.1.1's `write_async` wrote the io_task's chunks
+    // and `\n` probes straight into the held `[INIT]` packet: the signature
+    // was the hello's first 64-byte chunk on the tried stream, three
+    // protocol commits 250 ms apart, then a one-byte probe commit every
+    // ≈ 2 s. With the gate every one of those writes **waits** for a buffer
+    // that never frees, so the same signature shows as the gate's waits —
+    // an `int_ena = serial_in_empty` arm per attempt, at the same instants —
+    // and nothing past the `[INIT]` line is ever committed.
+    //
+    // This test does not replay a transcript. The M6 silicon capture it
+    // was shaped after (`lp-emu/transcripts/esp32c6/usb-negative-control/
+    // silicon-esp32c6-2026-09-07-b18360ea6.txt`) is what a host read after
+    // opening the port, and records nothing of what the firmware committed
+    // while it was closed. A desk re-capture of that payload on a gated
+    // image is still owed, to confirm the host-visible half is unchanged.
+    //
+    // Nothing reached a host, and nothing was written into the held packet.
     assert!(r.m.usb_sj().is_empty(), "{:?}", r.m.usb_sj().text());
-    let tried = r.m.usb_sj_tried().text();
-    assert!(tried.starts_with(HELLO_PROTO), "{tried:?}");
-    let mut figures = Figures::new(
-        "esp32c6",
-        "usb_attached::g2_3_attached_idle_from_boot_shows_the_not_draining_signature_and_the_probe",
+    assert!(
+        r.m.usb_sj_tried().is_empty(),
+        "the io_task wrote into the held packet past the gate: {:?}",
+        r.m.usb_sj_tried().text()
     );
-    figures.int("hello.proto", leading_int(&tried[HELLO_PROTO.len()..]));
-    figures.verify();
-    assert!(!tried.contains("[INIT]"), "{tried:?}");
     assert!(
         r.lines
             .iter()
@@ -272,53 +287,76 @@ fn g2_3_attached_idle_from_boot_shows_the_not_draining_signature_and_the_probe()
 
     // The commits: `wr_done` writes with the `ep1` writes since the previous
     // one. A `wr_done` with nothing pushed is esp-println's `Printer::flush`
-    // on the `TIMED_OUT` path (a flush of nothing, one per formatted
-    // fragment) — counted, not a commit.
-    let mut commits: Vec<(Cycles, usize, Vec<u8>)> = Vec::new();
+    // on the `TIMED_OUT` path — counted, not a commit. The only commit is
+    // the held boot line.
+    let mut commits: Vec<(Cycles, usize)> = Vec::new();
     let mut empty_flushes = 0usize;
-    let mut pushed: Vec<u8> = Vec::new();
+    let mut pushed = 0usize;
     for l in &r.lines {
         if l.contains("W4 USB_DEVICE+0x000 ep1 ") {
-            pushed.push(value_of(l) as u8);
+            pushed += 1;
         } else if l.contains("W4 USB_DEVICE+0x004 ep1_conf") && value_of(l) & 1 != 0 {
-            if pushed.is_empty() {
+            if pushed == 0 {
                 empty_flushes += 1;
             } else {
-                commits.push((cycle_of(l), pushed.len(), std::mem::take(&mut pushed)));
+                commits.push((cycle_of(l), std::mem::take(&mut pushed)));
             }
         }
     }
-    // Before 2 s: the boot line, then at least two protocol commits with
-    // the 250 ms write timeout between them — the two timeouts that latch
-    // "not draining".
-    let early: Vec<&(Cycles, usize, Vec<u8>)> =
-        commits.iter().filter(|c| c.0 < 2_000 * MS).collect();
-    assert!(early.len() >= 3, "{} commits before 2 s", early.len());
+    assert_eq!(
+        commits.iter().map(|c| c.1).collect::<Vec<_>>(),
+        vec![28],
+        "only the boot line is committed"
+    );
+    assert_eq!(pushed, 0, "bytes pushed and never committed");
+
+    // The gate's waits: each io_task write attempt arms `serial_in_empty`
+    // (esp-hal's `flush`, awaiting a drain) and is abandoned by the
+    // chunk timeout. Before 2 s: at least three attempts with the 250 ms
+    // write timeout between them — the two timeouts that latch "not
+    // draining".
+    let waits: Vec<Cycles> = r
+        .lines
+        .iter()
+        .filter(|l| l.contains("W4 USB_DEVICE+0x010 int_ena"))
+        .filter(|l| value_of(l) & SERIAL_IN_EMPTY != 0)
+        .map(|l| cycle_of(l))
+        .collect();
+    let early: Vec<Cycles> = waits.iter().copied().filter(|c| *c < 2_000 * MS).collect();
+    assert!(early.len() >= 3, "{} waits before 2 s", early.len());
     let timeouts = early
         .windows(2)
-        .filter(|w| w[1].0 - w[0].0 >= 250 * MS && w[1].0 - w[0].0 < 260 * MS)
+        .filter(|w| w[1] - w[0] >= 250 * MS && w[1] - w[0] < 260 * MS)
         .count();
     assert!(
         timeouts >= 2,
         "fewer than two 250 ms write timeouts before 2 s: {:?}",
-        early.iter().map(|c| (c.0 / MS, c.1)).collect::<Vec<_>>()
+        early.iter().map(|c| c / MS).collect::<Vec<_>>()
     );
-    // After the latch: one-byte `\n` probes, ≈ 2 s apart, and nothing else.
-    let late: Vec<&(Cycles, usize, Vec<u8>)> =
-        commits.iter().filter(|c| c.0 >= 2_500 * MS).collect();
-    assert!(!late.is_empty(), "no probe after 2.5 s");
-    for c in &late {
-        assert_eq!(
-            (c.1, c.2.as_slice()),
-            (1, &b"\n"[..]),
-            "a non-probe commit at {} ms",
-            c.0 / MS
-        );
-    }
+    // After the latch: the probe, ≈ 2 s apart — now a wait, not a commit.
+    let late: Vec<Cycles> = waits.iter().copied().filter(|c| *c >= 2_000 * MS).collect();
+    assert!(late.len() >= 2, "fewer than two probes after 2 s: {late:?}");
     for w in late.windows(2) {
-        let gap = (w[1].0 - w[0].0) / MS;
+        let gap = (w[1] - w[0]) / MS;
         assert!((1_800..=2_300).contains(&gap), "probe gap {gap} ms");
     }
+    // And the firmware's own account: one latch, never a recovery.
+    let mut stamp = |sym: &str| {
+        r.m.peek_symbol(&format!("fw_esp32_common::serial::link_counters::{sym}"))
+            .unwrap_or_else(|| panic!("the image carries {sym}"))
+            .1
+    };
+    let (count, latched, again) = (
+        stamp("NOT_DRAINING_COUNT"),
+        stamp("HOST_NOT_DRAINING_MS"),
+        stamp("HOST_DRAINING_AGAIN_MS"),
+    );
+    assert_eq!(count, 1, "one latch");
+    assert!(
+        u64::from(latched) < 2_000,
+        "the latch lands before the first probe: {latched} ms"
+    );
+    assert_eq!(again, u32::MAX, "never recovered");
     assert_alive(&r);
     // io_task is sequential: while its writes time out it never reaches
     // `read_serial`, and after the latch it is not connected — so the RX
@@ -330,21 +368,11 @@ fn g2_3_attached_idle_from_boot_shows_the_not_draining_signature_and_the_probe()
         .any(|l| value_of(l) & SERIAL_OUT_RECV_PKT != 0);
     assert!(!rx_armed, "int_ena.serial_out_recv_pkt was written set");
 
-    println!("G2-3 commits (ms, bytes), plus {empty_flushes} empty flushes:");
-    for c in &commits {
-        println!(
-            "  {:>5} ms  {} byte(s){}",
-            c.0 / MS,
-            c.1,
-            if c.1 == 1 && c.2 == b"\n" && c.0 >= 2_500 * MS {
-                "  (probe)"
-            } else if c.1 == 1 && c.2 == b"\n" {
-                "  (a log line's leading newline, timed out)"
-            } else {
-                ""
-            }
-        );
-    }
+    println!(
+        "G2-3 gated waits (ms): {:?}; commits {:?}, plus {empty_flushes} empty flushes",
+        waits.iter().map(|c| c / MS).collect::<Vec<_>>(),
+        commits.iter().map(|c| (c.0 / MS, c.1)).collect::<Vec<_>>()
+    );
     println!(
         "G2-3 TIMED_OUT = {:?}, {} idle skips, delivered {} B, tried {} B",
         r.timed_out,

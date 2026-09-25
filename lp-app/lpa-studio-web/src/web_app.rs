@@ -275,6 +275,9 @@ pub fn App() -> Element {
         install_log_sink();
         let mut controller = StudioController::new(now_secs);
         controller.set_on_entry(log_to_js_console);
+        // Dev-only wire flags (`?lens-pause-ms=`, `?wire=json`): before any
+        // device connects, so every reader and cadence built after takes them.
+        crate::dev_url_flags::install();
         // Device event trace (M0): persist lifecycle records across
         // refreshes and stream to a capture sink when the URL asks.
         crate::device_events_io::install(&mut controller);

@@ -72,6 +72,15 @@ pub enum ServerMsgBody {
     ClearFaults {
         ledger_cleared: bool,
     },
+    /// Answer to [`crate::ClientRequest::SetEncoding`]: the encoding this
+    /// link's replies are written in from the NEXT frame on.
+    ///
+    /// `json` when the host asked for JSON, named a different dictionary, or
+    /// the embedder cannot pack. This frame is always JSON; the transport
+    /// switches after writing it.
+    SetEncoding {
+        encoding: crate::WireEncoding,
+    },
 
     Log {
         level: LogLevel,
