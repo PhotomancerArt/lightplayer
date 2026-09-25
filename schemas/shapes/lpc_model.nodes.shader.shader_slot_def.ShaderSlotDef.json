@@ -130,6 +130,10 @@
                         {
                           "name": "fade_seconds",
                           "ty": "f32"
+                        },
+                        {
+                          "name": "pinned",
+                          "ty": "i32"
                         }
                       ],
                       "name": "GradientConfig"

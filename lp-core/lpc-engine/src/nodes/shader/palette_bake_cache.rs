@@ -490,6 +490,7 @@ mod tests {
             ],
             step_seconds: 4.0,
             fade_seconds: 1.0,
+            pinned: None,
         };
         let period = config.full_cycle_seconds();
         let frames = (period * 60.0) as u32;

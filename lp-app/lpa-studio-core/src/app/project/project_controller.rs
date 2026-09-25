@@ -1000,10 +1000,7 @@ impl ProjectController {
     /// (no placements yet), or while any of its lamps reach no wire, it
     /// rides as before. A sim lens keeps it: nothing crosses a cable there.
     pub fn always_live_products(&self) -> Vec<UiProductRef> {
-        let device = matches!(
-            self.lens_transport,
-            Some(crate::LinkTransport::Emu | crate::LinkTransport::Serial)
-        );
+        let device = self.lens_is_device();
         let visual = if device {
             None
         } else {
@@ -2769,6 +2766,20 @@ impl ProjectController {
             .as_ref()
             .and_then(|context| context.active.as_ref())
             .is_some_and(|active| active.transient.is_some())
+    }
+
+    /// The OPEN library project's package filesystem, for the sidecars that
+    /// live beside its content (`/.lp/access.json`). `None` for no project,
+    /// or a transient view session — someone else's document, whose
+    /// sidecar is not the viewer's to write.
+    pub(crate) fn active_package_fs(
+        &self,
+    ) -> Option<std::rc::Rc<std::cell::RefCell<dyn lpfs::LpFs>>> {
+        let active = self.library.as_ref()?.active.as_ref()?;
+        if active.transient.is_some() {
+            return None;
+        }
+        Some(std::rc::Rc::clone(&active.handle.package_fs))
     }
 
     /// Completed fork-at-save count (see the field).
@@ -4764,7 +4775,9 @@ impl ProjectController {
             // device lens, the bytes you would be editing are not the ones
             // in front of you, so the row disables and says so (planning
             // Q4).
-            device_session: self.lens_transport == Some(crate::LinkTransport::Serial),
+            device_session: self
+                .lens_transport
+                .is_some_and(crate::LinkTransport::is_wire),
         })
     }
 
@@ -5476,9 +5489,13 @@ impl ProjectController {
                 // Studio's own open-time selection is not a request: until
                 // the user selects something, a device lens streams no
                 // node's products on its account (lean-wire P5, ruling B).
-                Some(crate::LinkTransport::Emu | crate::LinkTransport::Serial) | None => {
-                    !self.focus_is_automatic && self.is_focused_node(node)
-                }
+                // A Bluetooth link is the narrowest wire of all.
+                Some(
+                    crate::LinkTransport::Emu
+                    | crate::LinkTransport::Serial
+                    | crate::LinkTransport::Ble,
+                )
+                | None => !self.focus_is_automatic && self.is_focused_node(node),
             },
             ProjectProductSubscriptionIntent::Subscribed => true,
             ProjectProductSubscriptionIntent::Unsubscribed => false,
@@ -5710,12 +5727,16 @@ impl ProjectController {
         self.lens_transport = transport;
     }
 
-    /// Whether the lens runs over a device wire (serial, or the emu running
-    /// the device's firmware) rather than an in-page sim.
+    /// Whether the lens runs over a device wire (serial, Bluetooth, or the
+    /// emu running the device's firmware) rather than an in-page sim.
     fn lens_is_device(&self) -> bool {
         matches!(
             self.lens_transport,
-            Some(crate::LinkTransport::Emu | crate::LinkTransport::Serial)
+            Some(
+                crate::LinkTransport::Emu
+                    | crate::LinkTransport::Serial
+                    | crate::LinkTransport::Ble
+            )
         )
     }
 
@@ -5734,9 +5755,11 @@ impl ProjectController {
         match self.lens_transport {
             // The emu runs the DEVICE's own firmware over a wire with the
             // device's bandwidth, so it takes the device tier too.
-            Some(crate::LinkTransport::Emu | crate::LinkTransport::Serial) => {
-                crate::UiProductPreviewFrame::VISUAL_DEVICE
-            }
+            Some(
+                crate::LinkTransport::Emu
+                | crate::LinkTransport::Serial
+                | crate::LinkTransport::Ble,
+            ) => crate::UiProductPreviewFrame::VISUAL_DEVICE,
             Some(crate::LinkTransport::Sim) | None => crate::UiProductPreviewFrame::VISUAL_DEFAULT,
         }
     }

@@ -224,6 +224,9 @@ where
         // same command queue the UI feeds; hand the controller a sender
         // before it takes ownership.
         controller.set_agent_command_sender(tx.clone());
+        // Access conversations (login on connect, device-store writes)
+        // report back on the same queue.
+        controller.set_access_command_sender(tx.clone());
         // The agent host bridge polls its engine-verdict cell on the SAME
         // platform timer the pull deadlines use (boxed for the dyn seam).
         let mut agent_timer = make_timer.clone();
@@ -306,6 +309,9 @@ where
         for command in plan.settings {
             self.controller.apply_settings_command(command);
         }
+        for command in plan.access {
+            self.controller.apply_access_command(command);
+        }
         for feedback in plan.agent {
             self.controller.apply_agent_feedback(feedback);
         }
@@ -325,6 +331,9 @@ where
         for action in plan.actions {
             self.run_action(action).await;
         }
+        // A login step parked because the editor lens holds that board.s
+        // wire runs through the lens.s own client (BLE M6).
+        self.controller.run_access_lens_step().await;
         if plan.tick {
             // One tick command fans into the lens-bound project pull plus
             // the slow per-session status heartbeats. Heartbeats issue no
@@ -427,7 +436,12 @@ where
                     self.controller_log(UiLogDraft::from_notice(notice));
                 }
             }
-            Err(error) => self.controller_log(UiLogDraft::from_error(error)),
+            Err(error) => {
+                // A tier refusal opens the password sheet with its reason,
+                // rather than ending as one more log line (BLE M6).
+                self.controller.note_action_error(&error);
+                self.controller_log(UiLogDraft::from_error(error));
+            }
         }
     }
 
@@ -618,6 +632,7 @@ struct CommandPlan {
     /// Settings mutations/loads, applied synchronously in queue order
     /// (each is a distinct gesture or layer arrival; never coalesced).
     settings: Vec<crate::SettingsCommand>,
+    access: Vec<crate::app::access::AccessCommand>,
     /// Agent run feedback, applied synchronously in queue order (event
     /// order is the transcript order; never coalesced).
     agent: Vec<crate::AgentFeedback>,
@@ -645,6 +660,7 @@ impl CommandPlan {
         let mut device = Vec::new();
         let mut console = Vec::new();
         let mut settings = Vec::new();
+        let mut access = Vec::new();
         let mut agent = Vec::new();
         let mut actions = Vec::new();
         let mut tick = false;
@@ -678,6 +694,7 @@ impl CommandPlan {
                 // two level changes).
                 StudioCommand::Console(command) => console.push(command),
                 StudioCommand::Settings(command) => settings.push(command),
+                StudioCommand::Access(command) => access.push(command),
                 StudioCommand::Agent(feedback) => agent.push(feedback),
                 // Coalesce: many queued ticks collapse to one pull.
                 StudioCommand::RefreshTick => tick = true,
@@ -688,6 +705,7 @@ impl CommandPlan {
             device,
             console,
             settings,
+            access,
             agent,
             actions,
             tick,

@@ -596,7 +596,7 @@ that already have the Xtensa toolchain)."
             if [ "$meas_v" != "$rec" ]; then
                 echo "::error::heap-budget: ${CHIP_ID} ${f} changed: ${meas_v} != recorded ${rec}. \
 This figure is the chip's memory map, not a budget — a change is a finding. Intentional? \
-Re-baseline with 'just heap-budget-baseline-chips ${CHIP_ID}' in this PR."
+Re-baseline with 'just heap-budget-baseline-chips ${CHIP_ID}' in this PR ('just bless-chips ${CHIP_ID}' does it together with the chip's test figures)."
                 fail=1
             else
                 echo "  ok: ${f}: ${meas_v}"
@@ -607,7 +607,7 @@ Re-baseline with 'just heap-budget-baseline-chips ${CHIP_ID}' in this PR."
             if [ "$meas_v" -gt "$allowed" ]; then
                 echo "::error::heap-budget: ${CHIP_ID} ${f} grew: ${meas_v} > recorded ${rec} \
 (margin ${margin}%). The firmware's own resident cost went up. Intentional? Re-baseline with \
-'just heap-budget-baseline-chips ${CHIP_ID}' in this PR."
+'just heap-budget-baseline-chips ${CHIP_ID}' in this PR ('just bless-chips ${CHIP_ID}' does it together with the chip's test figures)."
                 fail=1
             elif [ "$meas_v" -lt "$rec" ]; then
                 echo "  improved: ${f}: ${rec} -> ${meas_v} (lock it in with 'just heap-budget-baseline-chips ${CHIP_ID}')"
@@ -619,7 +619,7 @@ Re-baseline with 'just heap-budget-baseline-chips ${CHIP_ID}' in this PR."
             allowed=$(awk -v r="$rec" -v m="$margin" 'BEGIN { printf "%d", r * (1 - m / 100) }')
             if [ "$meas_v" -lt "$allowed" ]; then
                 echo "::error::heap-budget: ${CHIP_ID} ${f} shrank: ${meas_v} < recorded ${rec} \
-(margin ${margin}%). Intentional? Re-baseline with 'just heap-budget-baseline-chips ${CHIP_ID}' in this PR."
+(margin ${margin}%). Intentional? Re-baseline with 'just heap-budget-baseline-chips ${CHIP_ID}' in this PR ('just bless-chips ${CHIP_ID}' does it together with the chip's test figures)."
                 fail=1
             elif [ "$meas_v" -gt "$rec" ]; then
                 echo "  improved: ${f}: ${rec} -> ${meas_v} (lock it in with 'just heap-budget-baseline-chips ${CHIP_ID}')"

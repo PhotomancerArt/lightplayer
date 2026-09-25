@@ -76,10 +76,14 @@ pub fn GradientValueDisplay(
 /// Shared by the read surfaces' [`GradientValueDisplay`] and the panel's
 /// swatch control (M4 P3), which puts its own compact chip in the control's
 /// readout slot instead of a summary line.
+///
+/// A pinned cycle draws its pinned member alone, full width: while the pin
+/// holds, that one palette is what the value does, and the summary or chip
+/// beside the band is what says the rest of the set is still there.
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 pub fn GradientStripBand(config: GradientConfig) -> Element {
-    let gradients: Vec<Gradient> = config.gradients().to_vec();
+    let gradients: Vec<Gradient> = band_gradients(&config);
     rsx! {
         div { class: "tw:flex tw:min-w-0 tw:items-stretch tw:gap-0.5",
             for gradient in gradients {
@@ -88,6 +92,15 @@ pub fn GradientStripBand(config: GradientConfig) -> Element {
                 }
             }
         }
+    }
+}
+
+/// The segments a band draws: the pinned member alone when a pin holds,
+/// otherwise every member in authored order.
+fn band_gradients(config: &GradientConfig) -> Vec<Gradient> {
+    match config.pinned_gradient() {
+        Some(pinned) => vec![pinned.clone()],
+        None => config.gradients().to_vec(),
     }
 }
 
@@ -163,6 +176,7 @@ mod tests {
             set: vec![ramp(2), ramp(3)],
             step_seconds: 4.0,
             fade_seconds: 0.25,
+            pinned: None,
         };
         let value = UiSlotValue::from_lp_value(&cycle.to_lp_value());
         assert_eq!(gradient_parts(&value.kind), Some(cycle));
@@ -188,8 +202,21 @@ mod tests {
             set: vec![ramp(2), ramp(3), ramp(4)],
             step_seconds: 4.0,
             fade_seconds: 0.25,
+            pinned: None,
         };
-        assert_eq!(config.gradients().len(), 3);
-        assert_eq!(GradientConfig::Static(ramp(3)).gradients().len(), 1);
+        assert_eq!(band_gradients(&config).len(), 3);
+        assert_eq!(band_gradients(&GradientConfig::Static(ramp(3))).len(), 1);
+    }
+
+    /// A pinned cycle draws only the member that is showing.
+    #[test]
+    fn a_pinned_cycle_displays_only_its_pinned_member() {
+        let config = GradientConfig::Cycle {
+            set: vec![ramp(2), ramp(3), ramp(4)],
+            step_seconds: 4.0,
+            fade_seconds: 0.25,
+            pinned: Some(1),
+        };
+        assert_eq!(band_gradients(&config), vec![ramp(3)]);
     }
 }

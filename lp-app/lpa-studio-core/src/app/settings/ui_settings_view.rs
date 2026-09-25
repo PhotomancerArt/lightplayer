@@ -12,6 +12,18 @@ use crate::app::settings::studio_settings::DEFAULT_AGENT_MODEL;
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct UiSettingsView {
     pub agent: UiAgentSettingsView,
+    pub devices: UiDeviceSettingsView,
+}
+
+/// The settings UI.s Devices section (BLE M6).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct UiDeviceSettingsView {
+    /// The account default password, for the show/hide field. Carried raw:
+    /// the field shows it on request, and the Bluetooth panel pre-fills it.
+    pub default_password: Option<String>,
+    /// How many passwords this browser remembers (for "Forget remembered
+    /// passwords").
+    pub remembered_passwords: usize,
 }
 
 impl Default for UiSettingsView {
@@ -43,6 +55,7 @@ impl Default for UiSettingsView {
                 price_input_override: None,
                 price_output_override: None,
             },
+            devices: UiDeviceSettingsView::default(),
         }
     }
 }

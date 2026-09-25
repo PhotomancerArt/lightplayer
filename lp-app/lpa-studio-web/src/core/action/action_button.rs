@@ -145,7 +145,9 @@ pub fn ActionButton(
                     span { class: "tw:inline-flex", "{rest_label}" }
                 }
             }
-            if let Some(reason) = disabled_reason.as_ref() {
+            // An empty reason is a verb whose reason is said once beside it
+            // (a row of verbs disabled for the same cause).
+            if let Some(reason) = disabled_reason.as_ref().filter(|reason| !reason.is_empty()) {
                 p { class: "tw:m-0 tw:text-xs tw:leading-snug tw:text-dim-foreground", "{reason}" }
             }
         }

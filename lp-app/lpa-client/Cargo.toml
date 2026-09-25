@@ -9,6 +9,8 @@ rust-version.workspace = true
 [dependencies]
 lpc-model = { path = "../../lp-core/lpc-model" }
 lpc-wire = { path = "../../lp-core/lpc-wire" }
+# The tier a `NotPermitted` refusal names, and the login challenge/MAC types.
+lpc-access = { path = "../../lp-core/lpc-access" }
 lpc-shared = { path = "../../lp-core/lpc-shared", optional = true }
 tokio = { version = "1", features = ["full"], optional = true }
 anyhow = { version = "1", optional = true }

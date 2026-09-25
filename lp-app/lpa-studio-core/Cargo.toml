@@ -126,6 +126,14 @@ emulator-tab = [
     "dep:wasm-bindgen-futures",
     "dep:web-sys",
 ]
+# Web Bluetooth (M5 of the BLE remote-control plan): the platform half
+# (`app/devices/browser_ble_source.rs`) over `lpa-link`'s `browser_ble`
+# provider. wasm-only; the transport it plugs into (`ble_transport.rs`) is
+# host-tested and pays nothing for this.
+browser-ble = [
+    "lpa-link/browser-ble",
+    "dep:wasm-bindgen-futures",
+]
 
 [lints]
 workspace = true

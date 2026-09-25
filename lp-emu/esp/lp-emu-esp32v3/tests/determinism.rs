@@ -26,6 +26,7 @@
 //! build. `just test-emu-esp32v3-boot` builds the ELF, runs `espflash` on it
 //! and names both files.
 
+use lp_emu_esp_figures::Figures;
 use lp_emu_esp32v3::flash::FlashBacking;
 use lp_emu_esp32v3::machine::{
     AppSource, BootMode, CORE_QUANTUM_DEFAULT, Esp32V3Builder, Machine, Outcome, StopCondition,
@@ -292,6 +293,15 @@ fn the_snapshot_carries_the_state_that_is_not_a_register() {
 /// phase file asks for — byte-identical output, the same cycle count, the
 /// same instruction count and the same idle-skip count.
 ///
+/// **They are figures, recorded in `lp-emu/esp/figures/esp32v3.json`** under
+/// `determinism.single_core_prefix.*` (the bytes under `init_chain.prefix`,
+/// shared with `boot_idle.rs`). Every move below but the first was the
+/// *image*, not the machine — the boot path's code and the `.bss` the
+/// `stack_probe::paint` loop walks — so accepting one is
+/// `just bless-chips esp32v3`, and still exactly as strict: any move fails,
+/// naming old → new. A move with an unchanged image is the machine's, and a
+/// finding. The history of the moves, with their causes:
+///
 /// ⚠️ **M4 P3b moved the instruction count by six: 3,245,157 → 3,245,151.**
 /// Not the loop — the hart. Poll point (c) had been zeroing the hart's
 /// asserted-line mask on every MMIO store, so a line raised by a store was
@@ -319,7 +329,7 @@ fn the_snapshot_carries_the_state_that_is_not_a_register() {
 /// not inferred; which of the branch's commits did it was not bisected).
 /// 852 × 7 = 5,964, and the other five are straight-line code in
 /// `boot_firmware`. The bytes changed by one line for the `.bss` reason
-/// (see `PREFIX_SHA256`); the skip count did not move.
+/// (see `init_chain.prefix`); the skip count did not move.
 ///
 /// Then **+3 more when M3 merged over lean-wire (PR #791): 3,251,027 →
 /// 3,251,030 cycles, 3,251,007 → 3,251,010 instructions.** Again the image,
@@ -337,20 +347,11 @@ fn the_snapshot_carries_the_state_that_is_not_a_register() {
 /// Then **−21 with lean-wire's follow-ups (#804): 3,251,030 → 3,251,009
 /// cycles, 3,251,010 → 3,250,989 instructions**, in the same change that
 /// left the main stack 16 B smaller (`45360 B` → `45344 B`, the one line of
-/// the 543 bytes that moved; see `PREFIX_SHA256`). A smaller stack is fewer
+/// the 543 bytes that moved; see `init_chain.prefix`). A smaller stack is fewer
 /// `stack_probe::paint` iterations, which is the likely home of the drop,
 /// but it was NOT isolated per symbol with `LP_EMU_XT_BLOCKPROF`, unlike
 /// the entries above. Skips did not move.
-const PREFIX_CYCLES: u64 = 3_251_009;
-const PREFIX_INSTRUCTIONS: u64 = 3_250_989;
-const PREFIX_IDLE_SKIPS: u64 = 0;
-const PREFIX_BYTES: usize = 543;
-/// Moved by the BLE plan's M3 (access core): one line of the 543 bytes,
-/// `[INIT] main stack 45280 B` → `45360 B` (the server loop's future in
-/// `.bss` shrank 80 B). See `boot_idle.rs`'s `PREFIX_SHA256`. Was `ea8bae30…`.
-/// Moved again by lean-wire's follow-ups (#804): `45360 B` → `45344 B`.
-/// Was `465c8d52…`.
-const PREFIX_SHA256: &str = "05b270952a2b0bd2f3bf5f4c6a6e9e412c4eb79ea809c35e03435b9200a4c542";
+const PREFIX_KEY: &str = "init_chain.prefix";
 
 /// **The single-core safety net.** A run in which core 1 never starts is
 /// the run M3 produced: same bytes, same sha, same cycles, same
@@ -376,14 +377,19 @@ fn the_single_core_prefix_is_unchanged() {
         "{outcome:?}"
     );
     assert!(m.core_stalled(1), "core 1 was never started in this run");
-    let bytes = m.uart0().bytes();
-    assert_eq!(bytes.len(), PREFIX_BYTES);
-    assert_eq!(format!("{:x}", Sha256::digest(&bytes)), PREFIX_SHA256);
-    assert_eq!(
-        (m.cycles(), m.instructions(), m.idle_skips()),
-        (PREFIX_CYCLES, PREFIX_INSTRUCTIONS, PREFIX_IDLE_SKIPS),
-        "the three counters origin/main's single-hart loop produced"
+    let mut figures = Figures::new(
+        "esp32v3",
+        "determinism::the_single_core_prefix_is_unchanged",
     );
+    figures
+        .utf8(PREFIX_KEY, &m.uart0().bytes())
+        .int("determinism.single_core_prefix.cycles", m.cycles())
+        .int(
+            "determinism.single_core_prefix.instructions",
+            m.instructions(),
+        )
+        .int("determinism.single_core_prefix.idle_skips", m.idle_skips());
+    figures.verify();
     assert_eq!(m.core_instructions(1), 0);
 }
 

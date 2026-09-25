@@ -67,6 +67,41 @@ pub const DEVICE_REFRESH_INTERVAL: Duration = Duration::from_millis(150);
 /// connection.
 pub const PASSIVE_PREEMPTIONS_BEFORE_PROMOTION: u8 = 1;
 
+/// Completion-gap for a lens held in PLAY mode over a Bluetooth link, while
+/// nobody is touching it (M5, "keep Play over BLE lean").
+///
+/// Play over BLE is the steady state — a phone sitting on the piece's panel
+/// — and a held BLE connection's air time is shared with the board's
+/// ESP-NOW (G1 Run G: 1–5 % receive loss connected-idle, 7–30 % under
+/// traffic). So an idle Play lens does not stream: one read when it opens,
+/// the quick verdict-chase reads after each accepted knob or fader write
+/// ([`VERDICT_CHASE_INTERVAL`] × [`VERDICT_CHASE_TICKS`]), and otherwise one
+/// read a minute so the panel cannot drift far from the board. The editor
+/// over BLE is authoring and keeps [`DEVICE_REFRESH_INTERVAL`]; continuous
+/// controls (XY pads, MIDI) are a future real-time class, not this one.
+pub const BLE_PLAY_IDLE_REFRESH_INTERVAL: Duration = Duration::from_secs(60);
+
+/// The lens's passive-pull gap, as a pure function of the facts that decide
+/// it: the session's own cadence, whether it is a Bluetooth link held in
+/// Play mode, a post-write verdict chase (which only ever tightens), and
+/// the session's failure backoff (which only ever stretches).
+pub fn lens_refresh_gap_policy(
+    cadence: Duration,
+    ble_play: bool,
+    chase: Option<Duration>,
+    backoff: Duration,
+) -> Duration {
+    let gap = match ble_play {
+        true => BLE_PLAY_IDLE_REFRESH_INTERVAL,
+        false => cadence,
+    };
+    let gap = match chase {
+        Some(chase) => gap.min(chase),
+        None => gap,
+    };
+    gap.saturating_add(backoff)
+}
+
 /// Slack applied when deciding whether a passive pull is due: the UI timer
 /// truncates the published delay to whole milliseconds, so a tick can fire
 /// a hair "early". Anything within this window counts as due instead of
@@ -191,6 +226,34 @@ mod tests {
             RefreshCadence::default().interval(),
             DEVICE_REFRESH_INTERVAL
         );
+    }
+
+    /// Play over Bluetooth, untouched, reads once a minute; a knob write's
+    /// verdict chase brings the quick reads back for its few ticks; the
+    /// editor over Bluetooth (authoring) keeps the device cadence.
+    #[test]
+    fn an_idle_play_lens_over_bluetooth_does_not_stream() {
+        let device = DEVICE_REFRESH_INTERVAL;
+        let none = Duration::ZERO;
+
+        assert_eq!(
+            lens_refresh_gap_policy(device, true, None, none),
+            BLE_PLAY_IDLE_REFRESH_INTERVAL
+        );
+        assert_eq!(
+            lens_refresh_gap_policy(device, true, Some(VERDICT_CHASE_INTERVAL), none),
+            VERDICT_CHASE_INTERVAL,
+            "a write's chase still confirms it quickly"
+        );
+        assert_eq!(lens_refresh_gap_policy(device, false, None, none), device);
+        assert_eq!(
+            lens_refresh_gap_policy(device, true, None, Duration::from_secs(3)),
+            BLE_PLAY_IDLE_REFRESH_INTERVAL + Duration::from_secs(3),
+            "backoff still stretches"
+        );
+        // One read a minute is the whole idle budget: well under one pull
+        // per heartbeat the board sends on its own (every 5 s).
+        assert!(BLE_PLAY_IDLE_REFRESH_INTERVAL >= Duration::from_secs(30));
     }
 
     #[test]

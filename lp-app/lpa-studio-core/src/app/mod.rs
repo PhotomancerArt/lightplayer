@@ -1,3 +1,4 @@
+pub mod access;
 pub mod agent;
 pub mod bus;
 pub mod devices;
