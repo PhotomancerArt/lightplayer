@@ -2,7 +2,7 @@
 //! not have, refused the ones it tried, or refused an edit at play.
 //!
 //! Page-level, so it rises over whatever the user is looking at — the
-//! devices page after "Add over Bluetooth", or Play when a piece dropped
+//! devices page after "via Bluetooth", or Play when a piece dropped
 //! and came back. On a phone it is a bottom sheet (the thumb's reach); on a
 //! wide window a centred card. It never appears for a piece that let
 //! Studio in with a password it already knew.

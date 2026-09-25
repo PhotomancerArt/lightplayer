@@ -104,28 +104,81 @@ fn ble_access_panel_open() -> Element {
 }
 
 #[story(
-    description = "The add slot, per browser (BLE M5 copy, M6 story). Chrome: both verbs. Bluefy on iPhone: no Web Serial, so NO USB verb — Add over Bluetooth is the slot's verb, with a quiet line saying where USB works. Brave: the flag's address as select-and-copy text (a page cannot open brave://). iPhone/iPad Safari: open it in Bluefy, and no USB verb. Safari and Firefox (no Web Serial either): use Chrome. Bluetooth off: say so. Never a generic \"connect failed\"."
+    description = "The add slot, per browser (BLE M5 copy, G3 rework). \"Connect a board\", then \"via USB\" and \"via Bluetooth\" — BOTH always drawn; one this browser cannot drive is DISABLED with its reason under it and a way to continue. Chrome/Edge: both live. Brave: Bluetooth disabled, the flag's address as select-and-copy text (a page cannot open brave://). Firefox and desktop Safari: both disabled, both need Chrome or Edge, and this page's address is given ONCE to open there. iPhone Safari (and Chrome on iOS): USB needs a computer; Bluetooth needs Bluefy — a link to it on the App Store, then this page's address to open in it. Bluefy: USB disabled with the address to open on a computer, Bluetooth live and solid. Bluetooth off: turn it on and reload. Never a generic \"connect failed\"."
 )]
 fn ble_add_slot_by_browser() -> Element {
-    // (Bluetooth reach, whether this browser has Web Serial) — as the real
-    // browsers pair them.
     rsx! {
         div { class: "tw:grid tw:gap-3 tw:p-3 tw:sm:grid-cols-2",
-            for (reach , usb) in [
-                (BleReach::Ready, true),
-                (BleReach::Ready, false),
-                (BleReach::Brave, true),
-                (BleReach::Ios, false),
-                (BleReach::Safari, false),
-                (BleReach::Off, true),
-                (BleReach::Unsupported, false),
-            ] {
-                AddDeviceCard {
-                    key: "{reach:?}-{usb}",
-                    ble_reach: Some(reach),
-                    usb_available: usb,
-                    on_action: |_| {},
+            for (browser , reach , usb) in ADD_SLOT_BROWSERS {
+                div { key: "{browser}", class: "tw:grid tw:content-start tw:gap-1.5",
+                    p { class: "tw:m-0 tw:text-[11px] tw:font-semibold tw:tracking-wide tw:text-dim-foreground tw:uppercase",
+                        "{browser}"
+                    }
+                    AddSlotAs { reach, usb }
                 }
+            }
+        }
+    }
+}
+
+#[story(
+    description = "The add slot in Chrome or Edge on a computer (G3): \"Connect a board\", both buttons live — via USB the spectrum Primary, via Bluetooth the outline beside it — and \"start a board here\" below."
+)]
+fn ble_add_slot_chrome() -> Element {
+    rsx! { AddSlotAs { reach: BleReach::Ready, usb: true } }
+}
+
+#[story(
+    description = "The add slot in Brave (G3): via USB live; via Bluetooth DISABLED — \"Brave keeps Bluetooth behind a flag.\" — with the flag's address as select-and-copy text, because a page cannot open a brave:// link."
+)]
+fn ble_add_slot_brave() -> Element {
+    rsx! { AddSlotAs { reach: BleReach::Brave, usb: true } }
+}
+
+#[story(
+    description = "The add slot in Firefox (G3): both buttons DISABLED — USB needs Chrome or Edge on a computer, Bluetooth needs Chrome or Edge — and this page's address, once, as select-and-copy text to open there."
+)]
+fn ble_add_slot_firefox() -> Element {
+    rsx! { AddSlotAs { reach: BleReach::Firefox, usb: false } }
+}
+
+#[story(
+    description = "The add slot in Safari on iPhone — and Chrome on iPhone, which is the same WebKit (G3): via USB DISABLED (it needs a computer, with this page's address to open there); via Bluetooth DISABLED with the way through: \"Get Bluefy on the App Store\", then this page's address to open in Bluefy."
+)]
+fn ble_add_slot_iphone_safari() -> Element {
+    rsx! { AddSlotAs { reach: BleReach::Ios, usb: false } }
+}
+
+#[story(
+    description = "The add slot in Bluefy on iPhone (G3): Web Bluetooth but no Web Serial. via USB DISABLED with its reason and this page's address to open on a computer; via Bluetooth live, and the slot's solid verb."
+)]
+fn ble_add_slot_bluefy() -> Element {
+    rsx! { AddSlotAs { reach: BleReach::Ready, usb: false } }
+}
+
+/// Each browser as the real ones pair Bluetooth reach with Web Serial.
+const ADD_SLOT_BROWSERS: [(&str, BleReach, bool); 7] = [
+    ("Chrome / Edge", BleReach::Ready, true),
+    ("Brave", BleReach::Brave, true),
+    ("Firefox", BleReach::Firefox, false),
+    ("Safari (Mac)", BleReach::Safari, false),
+    ("iPhone Safari / Chrome", BleReach::Ios, false),
+    ("Bluefy (iPhone)", BleReach::Ready, false),
+    ("Chrome, Bluetooth off", BleReach::Off, true),
+];
+
+/// The add slot pinned to one browser's answers, with the product's own
+/// address in its copy lines (never the story server's).
+#[component]
+#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
+fn AddSlotAs(reach: BleReach, usb: bool) -> Element {
+    rsx! {
+        div { class: "tw:p-3",
+            AddDeviceCard {
+                ble_reach: Some(reach),
+                usb_available: usb,
+                page_url: Some("https://lightplayer.app/devices".to_string()),
+                on_action: |_| {},
             }
         }
     }
@@ -175,7 +228,7 @@ fn ble_device_card_over_bluetooth() -> Element {
 }
 
 #[story(
-    description = "A Bluetooth link still identifying (BLE M6 fix): the pending card's Reset is drawn DISABLED with its reason, \"Reset needs USB\" — a Bluetooth link has no reset lines in any card state, not only once it has settled. Right: a USB link at the same stage, whose Reset stays live (it is the recovery for a silent chip)."
+    description = "A Bluetooth link still identifying (BLE M6 fix): the pending card's Reset is drawn DISABLED with its reason, \"Reset needs USB\" — a Bluetooth link has no reset lines in any card state, not only once it has settled. Right: a USB link at the same stage, whose Reset stays live (it is the recovery for a silent chip). Below: the Bluetooth link once its check settled on needs-firmware — Flash is drawn DISABLED with \"Firmware updates need USB\", never the live board pick."
 )]
 fn ble_pending_card_over_bluetooth() -> Element {
     let usb = PendingLinkView {
@@ -198,10 +251,22 @@ fn ble_pending_card_over_bluetooth() -> Element {
         firmware_blocked: Some(FIRMWARE_NEEDS_USB.to_string()),
         ..usb.clone()
     };
+    // The same Bluetooth link once its check SETTLED on "needs firmware"
+    // (a peer that never says hello): Flash is drawn disabled, never the
+    // live board pick — the link cannot carry firmware.
+    let ble_needs_firmware = PendingLinkView {
+        link: DeviceLinkId(10),
+        device: DeviceId(110),
+        state_label: "Doesn't answer as LightPlayer".to_string(),
+        detail: None,
+        firmware_face: lpa_studio_core::DeviceFirmwareFace::NoHello,
+        ..ble.clone()
+    };
     rsx! {
         div { class: "tw:grid tw:gap-3 tw:p-3 tw:sm:grid-cols-2",
             PendingLinkCard { pending: ble, on_action: |_| {} }
             PendingLinkCard { pending: usb, on_action: |_| {} }
+            PendingLinkCard { pending: ble_needs_firmware, on_action: |_| {} }
         }
     }
 }

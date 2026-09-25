@@ -827,7 +827,19 @@ pub(crate) fn PendingLinkCard(
                         div { class: progress_slot_class(false) }
                     }
                     div { class: verb_row_class(),
-                        if pending.needs_firmware() {
+                        if let Some(reason) = pending.firmware_blocked.as_deref().filter(|_| pending.needs_firmware()) {
+                            // A Bluetooth link that settles on "needs
+                            // firmware" cannot carry it: Flash is DRAWN,
+                            // disabled, with the reason — as on the settled
+                            // card — never the live board pick.
+                            ActionButton {
+                                key: "{\"firmware-blocked\"}",
+                                action: FirmwareVerb::Flash.blocked_action(pending.device, reason),
+                                running: false,
+                                variant: ActionButtonVariant::Quiet,
+                                on_action,
+                            }
+                        } else if pending.needs_firmware() {
                             // The same popover the device card's firmware
                             // zone wears: a blank chip's only chip fact is
                             // its ROM boot banner.

@@ -132,25 +132,23 @@ impl ControllerOp for DevicesOp {
             _ => {}
         }
         match &self.action {
-            // The slot now offers two ways a card can appear — this one and
-            // "start a board here" (D44) — so the verb says which of the
-            // two the user is claiming: the board is here and CONNECTED,
-            // as opposed to one Studio is about to start. The USB
-            // specifics stay in the summary; a future network path gets its
-            // own verb beside it instead of a mode switch.
+            // The add slot reads "Connect a board" and then its two paths
+            // (G3, 2026-09-24): the heading carries the goal, so each
+            // button names only HOW — "via USB", "via Bluetooth", each
+            // with its icon. "start a board here" (D44) stays the slot's
+            // detour below them.
             Action::AddFromUsb => ActionMeta::new(
-                "It's connected",
+                "via USB",
                 "Pick the USB port your LightPlayer board is plugged into.",
                 ActionPriority::Primary,
             )
             .with_icon("usb"),
-            // The sibling verb the comment above anticipated: the same
-            // claim ("the board is here"), over a different path. It says
-            // what the path cannot do up front, because a user who adds a
-            // piece over Bluetooth and then looks for "Update firmware" is
-            // owed the reason before, not after.
+            // The sibling path. Its summary says what Bluetooth cannot do
+            // up front, because a user who adds a piece over Bluetooth and
+            // then looks for "Update firmware" is owed the reason before,
+            // not after.
             Action::AddFromBle => ActionMeta::new(
-                "Add over Bluetooth",
+                "via Bluetooth",
                 "Pick your LightPlayer piece from the browser's Bluetooth list. \
                  Play and edit work over Bluetooth; firmware updates need USB.",
                 ActionPriority::Secondary,
@@ -410,13 +408,15 @@ mod tests {
         }
     }
 
-    /// D44: the slot's core verb claims the board is HERE, because the
-    /// slot's other verb starts one that is not.
+    /// G3: under the slot's "Connect a board" heading, each transport's
+    /// verb names only its path; USB stays the Primary.
     #[test]
-    fn the_add_slots_verb_says_the_board_is_connected() {
+    fn the_add_slots_verbs_name_their_path() {
         let meta = DevicesOp::new(Action::AddFromUsb).default_action_meta();
+        let ble = DevicesOp::new(Action::AddFromBle).default_action_meta();
 
-        assert_eq!(meta.label, "It's connected");
+        assert_eq!(meta.label, "via USB");
+        assert_eq!(ble.label, "via Bluetooth");
         assert_eq!(meta.priority, ActionPriority::Primary);
         assert!(
             meta.summary.contains("USB port"),

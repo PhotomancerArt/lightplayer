@@ -185,8 +185,8 @@ async function main() {
     const visibility = await driver.evaluate(`document.visibilityState`);
     console.log(`  studio is up — page visibility: ${visibility}\n`);
 
-    await step("add", "Add over Bluetooth, and pick the board in the pairing chooser", async () => {
-      await driver.clickWhenReady("Add over Bluetooth", { timeoutMs: STEP_DEADLINE_MS });
+    await step("add", "Connect a board via Bluetooth, and pick the board in the pairing chooser", async () => {
+      await driver.clickWhenReady("via Bluetooth", { timeoutMs: STEP_DEADLINE_MS });
       const picked = await driver.pickBoard(BOARD, { timeoutMs: STEP_DEADLINE_MS });
       return `paired with ${picked}`;
     });

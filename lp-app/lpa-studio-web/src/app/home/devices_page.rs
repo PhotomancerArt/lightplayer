@@ -39,6 +39,7 @@ use lpa_studio_core::{
 use crate::app::home::ble_reach::{BleReach, use_ble_reach};
 use crate::app::home::device_roster_card::{DeviceRosterCard, PendingLinkCard};
 use crate::app::home::play_feed_text::frame_age_label;
+use crate::app::home::reach_note::{ReachCopy, ReachNote, USB_UNAVAILABLE, this_page_url};
 use crate::app::home::target_pick_popover::TargetPickPopover;
 use crate::app::home::{device_grid_class, section_title_class};
 use crate::app::node::lamp_view::LampView;
@@ -178,19 +179,17 @@ pub fn DevicesPage(
 /// layout whether it is the first board or the fifth (clear minimalism,
 /// G1 ruling) — so there is no separate empty-state block to jump around.
 ///
-/// The CTA wears the default Solid/Primary tier: the Outline override was
-/// the round-1 dodge for the too-bold gradient fill, and the spike gate
-/// (2026-08-31, "1F for the primary") made Primary the spectrum outline
-/// the slot wanted all along.
+/// # "Connect a board", two transports, one detour (D44, M5, G3)
 ///
-/// # Two verbs, one slot (D44, spike 2a)
-///
-/// The house rule taken literally: the slot where the next card appears
-/// offers both ways a card can appear. **"It's connected"** stays the
-/// spectrum CTA — a board on the desk is the common case — and **"start a
-/// board here ▾"** is the quiet second verb that opens the target menu. Its
-/// panel floats in the top layer, so the slot is the same height open or
-/// shut and the grid never reflows.
+/// The heading says the goal; the two buttons say only the path —
+/// **via USB** (the spectrum Primary: a board on the desk is the common
+/// case) and **via Bluetooth**. Both are ALWAYS drawn (G3, 2026-09-24): a
+/// transport this browser cannot drive is DISABLED with its reason under
+/// it and a way to continue — the Bluefy link, the Brave flag, this page's
+/// address to open where it works — rather than hidden, so a phone visitor
+/// learns USB exists and where it works. Below them, **start a board here
+/// ▾** is the quiet detour that opens the target menu; its panel floats in
+/// the top layer, so the slot is the same height open or shut.
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 pub(crate) fn AddDeviceCard(
@@ -202,59 +201,47 @@ pub(crate) fn AddDeviceCard(
     #[props(default = None)]
     ble_reach: Option<BleReach>,
     /// Whether this browser can reach a USB port (Web Serial, or the
-    /// `?emu=` shim). Where it cannot — iPhone, Bluefy, Firefox, Safari —
-    /// the USB verb is not offered: it could only fail there.
+    /// `?emu=` shim that polyfills it). Where it cannot — iPhone, Bluefy,
+    /// Firefox, Safari — the USB button is drawn disabled with its reason.
     #[props(default = true)]
     usb_available: bool,
+    /// Stories only: the address the copy lines show, pinned so a capture
+    /// does not print the story server's own URL. Real surfaces read the
+    /// page's.
+    #[props(default = None)]
+    page_url: Option<String>,
     on_action: EventHandler<UiAction>,
 ) -> Element {
     let asked = use_ble_reach();
     let ble = ble_reach.unwrap_or_else(|| asked());
-    let ble_note = ble.note();
     let verbs = add_slot_verbs(usb_available, ble);
+    let page_url = page_url.unwrap_or_else(this_page_url);
+    let usb_action = transport_action(DeviceAction::AddFromUsb, verbs.usb.enabled, verbs.usb.note);
+    let ble_action = transport_action(DeviceAction::AddFromBle, verbs.ble.enabled, verbs.ble.note);
     rsx! {
         div { class: "tw:flex tw:min-h-40 tw:flex-col tw:items-center tw:justify-center tw:gap-3 tw:rounded-md tw:border tw:border-dashed tw:border-border-strong tw:bg-transparent tw:px-5 tw:py-6",
             // The invitation is transport-OPEN: connecting is the goal, and
-            // the USB specifics live in the verb's own summary, so a
-            // network path can join later as a sibling verb rather than a
-            // rewrite.
-            p { class: "tw:m-0 tw:max-w-56 tw:text-center tw:text-xs tw:leading-relaxed tw:text-muted-foreground",
-                "Connect a LightPlayer board to control\u{a0}it."
+            // each button names only its path.
+            p { class: "tw:m-0 tw:text-center tw:text-sm tw:font-semibold tw:text-strong-foreground",
+                "Connect a board"
             }
-            if verbs.usb {
-                ActionButton {
-                    action: DevicesOp::action_for(DeviceAction::AddFromUsb),
-                    running: false,
+            div { class: "tw:grid tw:w-full tw:max-w-64 tw:justify-items-center tw:gap-3 tw:text-center",
+                TransportOffer {
+                    action: usb_action,
+                    variant: ActionButtonVariant::Solid,
+                    note: verbs.usb.note,
+                    page_url: page_url.clone(),
                     on_action,
                 }
-            }
-            // The sibling verb the line above anticipated (M5): the same
-            // claim over Bluetooth. Where this browser cannot, the slot says
-            // exactly why and what to do instead — never a verb that fails.
-            // With no USB here (Bluefy) it is the slot's primary verb.
-            if verbs.ble {
-                ActionButton {
-                    action: DevicesOp::action_for(DeviceAction::AddFromBle),
-                    running: false,
-                    variant: if verbs.usb { ActionButtonVariant::Outline } else { ActionButtonVariant::Solid },
+                // With no USB here (Bluefy) Bluetooth is the slot's live
+                // path, so it wears the solid tier; beside a live USB
+                // button it is the quieter outline.
+                TransportOffer {
+                    action: ble_action,
+                    variant: if verbs.usb.enabled { ActionButtonVariant::Outline } else { ActionButtonVariant::Solid },
+                    note: verbs.ble.note,
+                    page_url,
                     on_action,
-                }
-            }
-            if let Some(note) = ble_note {
-                div { class: "tw:grid tw:max-w-64 tw:gap-1 tw:text-center",
-                    p { class: "tw:m-0 tw:text-xs tw:leading-relaxed tw:text-dim-foreground",
-                        "{note.text}"
-                    }
-                    if let Some(copy) = note.copy {
-                        code { class: "tw:select-all tw:[overflow-wrap:anywhere] tw:rounded-sm tw:bg-card-muted tw:px-1.5 tw:py-0.5 tw:font-mono tw:text-[11px] tw:text-strong-foreground",
-                            "{copy}"
-                        }
-                    }
-                }
-            }
-            if let Some(line) = verbs.usb_note {
-                p { class: "tw:m-0 tw:max-w-64 tw:text-center tw:text-xs tw:leading-relaxed tw:text-dim-foreground",
-                    "{line}"
                 }
             }
             span { class: add_slot_or_class(), "or" }
@@ -263,33 +250,110 @@ pub(crate) fn AddDeviceCard(
     }
 }
 
-/// What the add slot offers, decided apart from the component so it is
-/// testable: USB only where this browser can reach a port, Bluetooth only
-/// where it is ready, and a quiet line saying why USB is absent when it is.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) struct AddSlotVerbs {
-    /// "It's connected" — the USB claim.
-    pub usb: bool,
-    /// "Add over Bluetooth".
-    pub ble: bool,
-    /// Said instead of the USB verb, where there is none.
-    pub usb_note: Option<&'static str>,
-}
-
-/// The line the slot says where the USB verb would stand.
-pub(crate) const USB_UNAVAILABLE_NOTE: &str = "USB needs Chrome or Edge on a computer.";
-
-pub(crate) fn add_slot_verbs(usb_available: bool, ble: BleReach) -> AddSlotVerbs {
-    AddSlotVerbs {
-        usb: usb_available,
-        ble: ble.offers_verb(),
-        usb_note: (!usb_available).then_some(USB_UNAVAILABLE_NOTE),
+/// One transport's button and, when it is disabled, the way forward under
+/// it: the reason (the button's own disabled reason), an optional link
+/// out, and the text to select and copy — shown in full, never folded.
+#[component]
+#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
+fn TransportOffer(
+    action: UiAction,
+    variant: ActionButtonVariant,
+    note: Option<ReachNote>,
+    page_url: String,
+    on_action: EventHandler<UiAction>,
+) -> Element {
+    let copy = note.and_then(|note| note.copy).map(|copy| match copy {
+        ReachCopy::Text(text) => text.to_string(),
+        ReachCopy::ThisPage => page_url.clone(),
+    });
+    rsx! {
+        div { class: "tw:grid tw:w-full tw:justify-items-center tw:gap-1",
+            ActionButton { action, running: false, variant, on_action }
+            if let Some(note) = note {
+                if let Some(link) = note.link {
+                    a {
+                        class: "tw:text-xs tw:font-semibold tw:text-strong-foreground tw:underline tw:underline-offset-2",
+                        href: link.href,
+                        target: "_blank",
+                        rel: "noopener",
+                        "{link.label}"
+                    }
+                }
+                if let Some(lead) = note.copy_lead.filter(|_| copy.is_some()) {
+                    p { class: "tw:m-0 tw:text-xs tw:leading-snug tw:text-dim-foreground",
+                        "{lead}"
+                    }
+                }
+                if let Some(copy) = copy {
+                    code { class: "tw:select-all tw:[overflow-wrap:anywhere] tw:rounded-sm tw:bg-card-muted tw:px-1.5 tw:py-0.5 tw:font-mono tw:text-[11px] tw:text-strong-foreground",
+                        "{copy}"
+                    }
+                }
+            }
+        }
     }
 }
 
-/// The "or" between the slot's two verbs: the quietest possible separator,
-/// because the two offers are not equal — one is the common case and the
-/// other is the deliberate detour.
+/// The add-slot button for one transport: the op's own label and icon,
+/// disabled with the note's reason where this browser cannot drive it.
+/// Disabled with no note is the Bluetooth answer still on its way — a
+/// button that could only fail must not be live for that moment either.
+fn transport_action(action: DeviceAction, enabled: bool, note: Option<ReachNote>) -> UiAction {
+    let action = DevicesOp::action_for(action);
+    if enabled {
+        action
+    } else {
+        action.disabled(note.map_or("", |note| note.reason))
+    }
+}
+
+/// What the add slot offers, decided apart from the component so it is
+/// testable: both buttons, each enabled only where this browser can drive
+/// it, each with its note where it cannot.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) struct AddSlotVerbs {
+    /// "via USB".
+    pub usb: TransportVerb,
+    /// "via Bluetooth".
+    pub ble: TransportVerb,
+}
+
+/// One transport's button state.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) struct TransportVerb {
+    pub enabled: bool,
+    /// Said under the disabled button: why, and how to go on.
+    pub note: Option<ReachNote>,
+}
+
+pub(crate) fn add_slot_verbs(usb_available: bool, ble: BleReach) -> AddSlotVerbs {
+    let ble_note = ble.note();
+    let mut usb_note = (!usb_available).then_some(USB_UNAVAILABLE);
+    // Firefox, desktop Safari: BOTH paths send you to Chrome or Edge, with
+    // the same "open this page there" — say the address once, under the
+    // lower button, rather than twice in a row.
+    if let (Some(usb), Some(ble)) = (usb_note.as_mut(), ble_note)
+        && usb.copy == ble.copy
+        && usb.copy_lead == ble.copy_lead
+    {
+        usb.copy_lead = None;
+        usb.copy = None;
+    }
+    AddSlotVerbs {
+        usb: TransportVerb {
+            enabled: usb_available,
+            note: usb_note,
+        },
+        ble: TransportVerb {
+            enabled: ble.offers_verb(),
+            note: ble_note,
+        },
+    }
+}
+
+/// The "or" before the slot's detour: the quietest possible separator,
+/// because the offers are not equal — connecting a board is the common
+/// case and starting one here is the deliberate detour.
 fn add_slot_or_class() -> &'static str {
     "tw:text-[10px] tw:tracking-wide tw:text-dim-foreground tw:uppercase"
 }
@@ -598,49 +662,118 @@ mod tests {
         }
     }
 
-    /// D44: the slot offers BOTH ways a card can appear, and each verb's
-    /// words come from the place that owns them — core's action vocabulary
-    /// for the board already connected, the target menu for the one Studio
-    /// is about to start.
+    /// D44 + G3: the slot offers BOTH ways a card can appear, and each
+    /// verb's words come from the place that owns them — core's action
+    /// vocabulary for the two transports under "Connect a board", the target
+    /// menu for the board Studio is about to start.
     #[test]
     fn the_add_slot_offers_both_ways_a_card_can_appear() {
-        let connected = DevicesOp::action_for(DeviceAction::AddFromUsb);
+        let usb = DevicesOp::action_for(DeviceAction::AddFromUsb);
+        let ble = DevicesOp::action_for(DeviceAction::AddFromBle);
 
-        assert_eq!(connected.meta().label, "It's connected");
+        assert_eq!(usb.meta().label, "via USB");
+        assert_eq!(usb.meta().icon.as_deref(), Some("usb"));
+        assert_eq!(ble.meta().label, "via Bluetooth");
+        assert_eq!(ble.meta().icon.as_deref(), Some("bluetooth"));
         assert_eq!(
             crate::app::home::target_pick_popover::SLOT_VERB_LABEL,
             "start a board here"
         );
-        assert_ne!(
-            connected.meta().label,
-            crate::app::home::target_pick_popover::SLOT_VERB_LABEL,
-            "two offers, two verbs"
-        );
     }
 
-    /// iPhone, Bluefy, Firefox, Safari: no Web Serial, so the USB verb is
-    /// not offered at all — Bluetooth, where ready, becomes the slot's verb,
-    /// and a quiet line says where USB works instead.
+    /// G3: both buttons are ALWAYS drawn. Where this browser cannot drive a
+    /// transport its button is disabled with the reason, plus a way to go
+    /// on — never hidden, never a verb that can only fail.
     #[test]
-    fn without_web_serial_the_add_slot_offers_no_usb_verb() {
-        let bluefy = add_slot_verbs(false, BleReach::Ready);
-        assert!(!bluefy.usb, "no USB verb where it could only fail");
-        assert!(bluefy.ble, "the Bluetooth path stays");
-        assert_eq!(bluefy.usb_note, Some(USB_UNAVAILABLE_NOTE));
-
-        let ios_safari = add_slot_verbs(false, BleReach::Ios);
-        assert!(!ios_safari.usb);
-        assert!(!ios_safari.ble);
-        assert!(BleReach::Ios.note().unwrap().text.contains("Bluefy"));
-
+    fn a_transport_this_browser_cannot_drive_is_disabled_with_a_way_forward() {
+        // Chrome/Edge on a computer: both live, nothing to explain.
         let chrome = add_slot_verbs(true, BleReach::Ready);
         assert_eq!(
             chrome,
             AddSlotVerbs {
-                usb: true,
-                ble: true,
-                usb_note: None
+                usb: TransportVerb {
+                    enabled: true,
+                    note: None
+                },
+                ble: TransportVerb {
+                    enabled: true,
+                    note: None
+                },
             }
+        );
+
+        // Bluefy: no Web Serial. USB disabled, says where it works and
+        // gives this page's address to open there; Bluetooth live.
+        let bluefy = add_slot_verbs(false, BleReach::Ready);
+        assert!(!bluefy.usb.enabled);
+        assert_eq!(bluefy.usb.note, Some(USB_UNAVAILABLE));
+        assert_eq!(
+            USB_UNAVAILABLE.reason,
+            "USB needs Chrome or Edge on a computer."
+        );
+        assert_eq!(USB_UNAVAILABLE.copy, Some(ReachCopy::ThisPage));
+        assert!(bluefy.ble.enabled);
+        assert_eq!(bluefy.ble.note, None);
+
+        // iPhone Safari / Chrome on iOS: both disabled; Bluetooth points to
+        // Bluefy on the App Store and then this page, USB keeps its own.
+        let ios = add_slot_verbs(false, BleReach::Ios);
+        assert!(!ios.usb.enabled && !ios.ble.enabled);
+        let ble_note = ios.ble.note.expect("the Bluefy path");
+        assert_eq!(
+            ble_note.link.map(|link| link.href),
+            Some(crate::app::home::reach_note::BLUEFY_APP_STORE_URL)
+        );
+        assert_eq!(ios.usb.note, Some(USB_UNAVAILABLE));
+
+        // Brave on a computer: USB live, Bluetooth disabled with the flag.
+        let brave = add_slot_verbs(true, BleReach::Brave);
+        assert!(brave.usb.enabled && !brave.ble.enabled);
+        assert_eq!(
+            brave.ble.note.and_then(|note| note.copy),
+            Some(ReachCopy::Text(
+                crate::app::home::ble_reach::BRAVE_BLUETOOTH_FLAG
+            ))
+        );
+
+        // Firefox / desktop Safari: both go to Chrome or Edge — the page's
+        // address is said ONCE (under Bluetooth), not twice in a row.
+        let firefox = add_slot_verbs(false, BleReach::Firefox);
+        let usb_note = firefox.usb.note.expect("USB still says why");
+        assert_eq!(usb_note.reason, USB_UNAVAILABLE.reason);
+        assert_eq!(usb_note.copy, None, "the address is not repeated");
+        assert_eq!(
+            firefox.ble.note.and_then(|note| note.copy),
+            Some(ReachCopy::ThisPage)
+        );
+
+        // The answer still on its way: disabled, nothing said yet.
+        let checking = add_slot_verbs(true, BleReach::Checking);
+        assert_eq!(
+            checking.ble,
+            TransportVerb {
+                enabled: false,
+                note: None
+            }
+        );
+    }
+
+    /// The disabled button carries the note's reason as its own disabled
+    /// reason, so it is said directly under the button.
+    #[test]
+    fn a_disabled_transport_button_carries_its_reason() {
+        let action = transport_action(DeviceAction::AddFromUsb, false, Some(USB_UNAVAILABLE));
+        assert_eq!(
+            action.meta().enablement,
+            lpa_studio_core::ActionEnablement::Disabled {
+                reason: USB_UNAVAILABLE.reason.to_string()
+            }
+        );
+        assert!(
+            transport_action(DeviceAction::AddFromBle, true, None)
+                .meta()
+                .enablement
+                .is_enabled()
         );
     }
 

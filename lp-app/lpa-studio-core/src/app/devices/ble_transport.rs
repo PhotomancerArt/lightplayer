@@ -93,7 +93,8 @@ impl DeviceTransport for BleDeviceTransport {
         // Never reached through the composite (the port chooser is
         // serial's); a direct caller is told which verb it meant.
         Box::pin(core::future::ready(Err(
-            "a Bluetooth device is added with Add over Bluetooth, not the port chooser".to_string(),
+            "a Bluetooth device is added with the add slot's via Bluetooth, not the port chooser"
+                .to_string(),
         )))
     }
 
