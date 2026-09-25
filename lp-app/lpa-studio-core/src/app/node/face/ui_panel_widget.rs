@@ -63,4 +63,17 @@ pub enum UiPanelWidget {
         /// panel copy and the card copy can never disagree.
         transport: crate::UiClockTransport,
     },
+    /// A playlist's Pattern instrument (multi-pattern vision D15): the
+    /// set's names with tap-to-play, the tour switch and step, per-pattern
+    /// on/off, next/prev.
+    ///
+    /// Like [`Self::Transport`] it is a whole instrument with several
+    /// gestures, but its gestures are not all panel writes — tap and
+    /// next/prev are `PlaylistActivateOp` runtime commands — so each one
+    /// rides the picker as a ready action rather than as a
+    /// [`crate::UiPanelWire`].
+    PatternPicker {
+        /// Names, states, tour and every gesture's action.
+        picker: crate::UiPatternPicker,
+    },
 }

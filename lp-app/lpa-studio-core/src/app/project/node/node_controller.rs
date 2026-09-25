@@ -1173,7 +1173,11 @@ fn node_status_view(entry: &TreeEntryView) -> ProjectNodeStatusView {
     }
 }
 
-fn human_label(raw: &str) -> String {
+/// A node name as Studio labels its card: `noise_soft` → `Noise soft`.
+/// Node names cannot carry spaces or dashes, so this is also how a playlist
+/// entry's authored `name` reads in the Play-mode Pattern instrument
+/// (multi-pattern vision Q9: a display name, never the folder key).
+pub(in crate::app::project) fn human_label(raw: &str) -> String {
     let normalized = raw.replace(['_', '-'], " ");
     let mut chars = normalized.chars();
     let Some(first) = chars.next() else {

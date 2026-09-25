@@ -905,17 +905,19 @@ fn the_active_playlist_entrys_controls_bubble_onto_the_module_panel() {
     );
     assert_eq!(
         face.panel.groups.len(),
-        2,
-        "two groups: the clock's instrument, then the active entry"
+        3,
+        "three groups: the clock's instrument, the playlist's Pattern \
+         instrument (multi-pattern P7), then the active entry"
     );
     assert_eq!(
         face.panel.groups[0].label, "Clock",
         "the instrument group leads (G2 feedback 2026-08-08)"
     );
-    let entry_group = &face.panel.groups[1];
+    assert_eq!(face.panel.groups[1].label, "Pattern");
+    let entry_group = &face.panel.groups[2];
     assert_eq!(
-        entry_group.label, "idle",
-        "the group wears the ACTIVE entry's name"
+        entry_group.label, "Idle",
+        "the group wears the ACTIVE entry's name, read the way its card is"
     );
     let entry_scope = entry_group
         .target
@@ -969,7 +971,7 @@ fn the_active_playlist_entrys_controls_bubble_onto_the_module_panel() {
     let snapshot = view.try_recv().expect("panel write emits a snapshot");
 
     let face = module_face(&snapshot);
-    let glow = &face.panel.groups[1].controls[0];
+    let glow = &face.panel.groups[2].controls[0];
     assert_eq!(
         glow.state,
         crate::UiPanelControlState::Engaged,

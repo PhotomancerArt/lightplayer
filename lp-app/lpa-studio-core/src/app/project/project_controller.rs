@@ -5204,10 +5204,193 @@ impl ProjectController {
                 self.collect_playlist_entry_groups(graph, &child.children, out);
                 continue;
             };
+            // Vision D15/D21: shared knobs (already above), then the Pattern
+            // instrument, then the playing pattern's own knobs.
+            if let Some(group) = self.pattern_picker_group(graph, child, face) {
+                out.push(group);
+            }
             if let Some(group) = self.playlist_entry_group(graph, child, face) {
                 out.push(group);
             }
         }
+    }
+
+    /// One playlist's Pattern instrument, as a group of one control
+    /// (multi-pattern vision D15; [`crate::UiPatternPicker`]).
+    ///
+    /// `None` for a playlist with no entries or a card no controller backs.
+    /// The group carries no reset target: its channels live in the
+    /// enclosing module's scope, and a group reset there would clear every
+    /// shared knob too. The control's own reset clears the tour, and the
+    /// instrument offers the skip list's.
+    fn pattern_picker_group(
+        &self,
+        graph: &lpc_wire::WireBindingGraph,
+        card: &crate::UiNodeChild,
+        face: &crate::UiPlaylistFace,
+    ) -> Option<crate::UiPanelGroup> {
+        use lpc_model::FromLpValue;
+
+        use super::node::pattern_picker_derivation::{
+            PatternPickerEntryFacts, PatternPickerFacts, derive_pattern_picker,
+        };
+
+        if face.entries.is_empty() {
+            return None;
+        }
+        let address = ProjectNodeAddress::parse(&card.detail).ok()?;
+        let node = self.node(&address)?;
+        let playlist = node.target().node_id;
+        let tour_target =
+            self.playlist_channel_target(graph, playlist, lpc_model::PLAYLIST_TOUR_CHANNEL);
+        let skip_target =
+            self.playlist_channel_target(graph, playlist, lpc_model::PLAYLIST_SKIP_CHANNEL);
+
+        // Live before authored, the swatch's rule — but "live" only when a
+        // writer actually holds the channel (or a write is on its way): an
+        // unwritten channel's reading is not a statement about the tour.
+        let authored_tour = def_slot_value(node, &["tour", "some"])
+            .and_then(|value| lpc_model::PlaylistTour::from_lp_value(value).ok());
+        let tour = tour_target
+            .as_ref()
+            .and_then(|target| self.written_channel_value(graph, target))
+            .and_then(|value| lpc_model::PlaylistTour::from_lp_value(value).ok())
+            .or(authored_tour)
+            .unwrap_or_default();
+        let skip = skip_target
+            .as_ref()
+            .and_then(|target| self.written_channel_value(graph, target))
+            .and_then(|value| Vec::<u32>::from_lp_value(value).ok())
+            .or_else(|| {
+                def_slot_value(node, &["skip", "some"])
+                    .and_then(|value| Vec::<u32>::from_lp_value(value).ok())
+            })
+            .unwrap_or_default();
+        // The device keeps each entry's failure to itself (plan PD10); its
+        // one outward sign is the playlist's warning, read with the parser
+        // paired to the engine's formatter (director ruling 1).
+        let failed = match (node.status().tone, node.status().detail.as_deref()) {
+            (crate::ProjectNodeStatusTone::Warning, Some(detail)) => {
+                lpc_model::parse_playlist_failed_entries(detail)
+            }
+            _ => Vec::new(),
+        };
+        let default_fade = match def_slot_value(node, &["default_fade"]) {
+            Some(lpc_model::LpValue::F32(seconds)) => Some(*seconds),
+            _ => None,
+        };
+
+        let picker = derive_pattern_picker(PatternPickerFacts {
+            playlist: address,
+            entries: face
+                .entries
+                .iter()
+                .map(|entry| PatternPickerEntryFacts {
+                    key: entry.key,
+                    // The entry's authored `name` is a node name
+                    // (`noise_soft`); it reads the way its card does.
+                    name: super::node::human_node_label(&entry.name),
+                })
+                .collect(),
+            active: face.active,
+            tour,
+            authored_tour,
+            default_fade,
+            skip,
+            failed,
+            tour_target: tour_target.clone(),
+            skip_target,
+        });
+        let (state, source) = match tour_target.as_ref() {
+            Some(target) => self.panel_control_state(graph, target.scope, target),
+            None => (crate::UiPanelControlState::ReadDefault, None),
+        };
+        let playing = picker
+            .playing()
+            .map(|entry| entry.name.clone())
+            .unwrap_or_default();
+        let control = crate::UiPanelControl {
+            label: "Pattern".to_string(),
+            address: None,
+            value: crate::UiSlotValue::string(playing),
+            widget: crate::UiPanelWidget::PatternPicker { picker },
+            emit: crate::UiPanelEmit::Value,
+            live_value: None,
+            live_gradient: None,
+            panel_target: tour_target,
+            wires: Vec::new(),
+            unit: None,
+            state: crate::UiSlotFieldState::editable(),
+            aspects: vec![
+                crate::UiSlotAspect::new(crate::UiSlotAspectKind::TypeInfo, "Pattern")
+                    .with_row(crate::UiSlotAspectRow::new("Playlist", card.label.clone())),
+            ],
+        };
+        Some(
+            crate::UiPanelGroup::new("Pattern", card.detail.clone()).with_controls(vec![
+                crate::UiPanelControlView {
+                    channel: lpc_model::PLAYLIST_TOUR_CHANNEL.to_string(),
+                    control,
+                    state,
+                    source,
+                },
+            ]),
+        )
+    }
+
+    /// The write target of one of a playlist's own consumed channels
+    /// (`playlist.tour`, `playlist.skip`): the scope its binding resolves in,
+    /// read off the binding graph so it holds whether the binding is the
+    /// shape's default or authored.
+    fn playlist_channel_target(
+        &self,
+        graph: &lpc_wire::WireBindingGraph,
+        playlist: NodeId,
+        channel: &str,
+    ) -> Option<crate::UiPanelTarget> {
+        graph.bindings.iter().find_map(|binding| {
+            if binding.node != playlist
+                || binding.direction != lpc_wire::WireBindingDirection::Consumes
+            {
+                return None;
+            }
+            let lpc_wire::WireBindingEndpoint::Bus {
+                scope: Some(scope),
+                channel: bound,
+            } = &binding.endpoint
+            else {
+                return None;
+            };
+            (bound == channel).then(|| crate::UiPanelTarget {
+                scope: *scope,
+                channel: bound.clone(),
+                engaged: self.panel_engaged(graph, scope, bound),
+            })
+        })
+    }
+
+    /// A channel's value when something WRITES it — a pending panel echo
+    /// first, else the probe's reading of a channel that has a provider.
+    /// `None` for an unwritten channel, whose reading says nothing the
+    /// authored default does not.
+    fn written_channel_value<'a>(
+        &'a self,
+        graph: &'a lpc_wire::WireBindingGraph,
+        target: &crate::UiPanelTarget,
+    ) -> Option<&'a lpc_model::LpValue> {
+        if let Some(value) = self.pending_panel_write(Some(&target.scope), &target.channel) {
+            return Some(value);
+        }
+        let (_, channel) = graph_channel(graph, Some(&target.scope), &target.channel)?;
+        if channel.providers.is_empty() {
+            return None;
+        }
+        graph_channel_value(
+            graph,
+            self.binding_graph_values(),
+            Some(&target.scope),
+            &target.channel,
+        )
     }
 
     /// One playlist's ACTIVE-entry group: the entry's own controls, labeled
@@ -5232,20 +5415,36 @@ impl ProjectController {
         // live surface rule), so the shown child IS the entry's card.
         let entry_card = card.children.first()?;
         let controls = self.scoped_panel_controls(graph, scope, core::slice::from_ref(entry_card));
-        if controls.is_empty() {
-            return None;
-        }
+        // The same display name the Pattern instrument above it shows.
         let label = face
             .entries
             .iter()
             .find(|candidate| candidate.key == entry)
-            .map(|candidate| candidate.name.clone())
+            .map(|candidate| super::node::human_node_label(&candidate.name))
             .unwrap_or_else(|| entry_card.label.clone());
-        Some(
-            crate::UiPanelGroup::new(label, entry_card.detail.clone())
-                .with_target(scope)
-                .with_controls(controls),
-        )
+        // A PATTERN entry is a module (`catalog/patterns/*`, imported into
+        // `modules/`), and a module owns its scope: its knobs bind there,
+        // not in the entry's sink, so the sink walk above finds none of
+        // them (director ruling 2, from P3). The module's own finished panel
+        // is what "this pattern's knobs" means. It keeps its own target, so
+        // its reset clears the module's writers — the scope the knobs
+        // actually live in.
+        let module_panel = match entry_card.face.as_ref() {
+            Some(crate::UiNodeFace::Module(module)) if !module.panel.is_empty() => {
+                Some(module.panel.clone())
+            }
+            _ => None,
+        };
+        match (controls.is_empty(), module_panel) {
+            (true, None) => None,
+            (true, Some(panel)) => Some(crate::UiPanelGroup { label, ..panel }),
+            (false, module_panel) => Some(
+                crate::UiPanelGroup::new(label, entry_card.detail.clone())
+                    .with_target(scope)
+                    .with_controls(controls)
+                    .with_groups(module_panel.into_iter().collect()),
+            ),
+        }
     }
 
     /// Whether `owner` is the project's root module — the one card that

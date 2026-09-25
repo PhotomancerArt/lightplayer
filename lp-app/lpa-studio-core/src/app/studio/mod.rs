@@ -47,6 +47,10 @@ mod studio_node_crud_e2e_tests;
 /// in the same batch, and while the open is parked holding its lock.
 #[cfg(test)]
 mod studio_open_supersede_e2e_tests;
+/// End-to-end Pattern instrument tests (multi-pattern P7): the Play-mode
+/// picker over a set of dormant pattern entries on a real server.
+#[cfg(test)]
+mod studio_pattern_picker_e2e_tests;
 pub mod studio_snapshot;
 /// End-to-end transient-open tests (examples vision D2): an embedded
 /// example runs as a memory-backed view session; the library sees nothing.
