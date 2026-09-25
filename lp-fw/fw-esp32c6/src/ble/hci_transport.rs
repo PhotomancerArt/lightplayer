@@ -72,8 +72,10 @@ impl Transport for LpHciTransport {
             log::warn!("[ble] controller reset: telling the host connection {handle} is gone");
             let event = disconnection_complete(handle, RESET_DISCONNECT_REASON);
             rx[..DISCONNECTION_COMPLETE_LEN].copy_from_slice(&event);
-            return ControllerToHostPacket::from_hci_bytes_complete(&rx[..DISCONNECTION_COMPLETE_LEN])
-                .map_err(|_| BleConnectorError::Unknown);
+            return ControllerToHostPacket::from_hci_bytes_complete(
+                &rx[..DISCONNECTION_COMPLETE_LEN],
+            )
+            .map_err(|_| BleConnectorError::Unknown);
         }
 
         let packet = Transport::read(&self.inner, rx).await?;

@@ -34,8 +34,8 @@ use fw_esp32_common::radio_link::RADIO_LINK_SLOTS;
 use trouble_host::prelude::*;
 
 use super::advertising;
-use super::hci_transport::LpHciTransport;
 use super::ble_connection;
+use super::hci_transport::LpHciTransport;
 use super::nus_service::NusServer;
 use crate::board::esp32c6::board_quirks::BoardQuirksApplied;
 

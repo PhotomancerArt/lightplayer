@@ -237,9 +237,15 @@ fn a_login_is_pending_only_for_its_link_until_it_expires_or_is_answered() {
     assert!(rig.server.login_pending(BLE_A));
     assert!(!rig.server.login_pending(BLE_B));
     rig.idle(CHALLENGE_TTL_MS as u32 - 1_000);
-    assert!(rig.server.login_pending(BLE_A), "still inside the challenge's life");
+    assert!(
+        rig.server.login_pending(BLE_A),
+        "still inside the challenge's life"
+    );
     rig.idle(1_000);
-    assert!(!rig.server.login_pending(BLE_A), "expired with the challenge");
+    assert!(
+        !rig.server.login_pending(BLE_A),
+        "expired with the challenge"
+    );
 
     // A refused answer ends it at once.
     let mut refused = Rig::for_state(LinkState::UntrustedNone);

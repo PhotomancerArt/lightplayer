@@ -120,7 +120,15 @@ impl<const N: usize> HciConnectionLedger<N> {
 #[must_use]
 pub fn disconnection_complete(handle: u16, reason: u8) -> [u8; DISCONNECTION_COMPLETE_LEN] {
     let [lo, hi] = handle.to_le_bytes();
-    [H4_EVENT, EVT_DISCONNECTION_COMPLETE, 4, 0x00, lo, hi, reason]
+    [
+        H4_EVENT,
+        EVT_DISCONNECTION_COMPLETE,
+        4,
+        0x00,
+        lo,
+        hi,
+        reason,
+    ]
 }
 
 /// A connection handle is 12 bits; the rest of the field is flags.
@@ -140,7 +148,9 @@ mod tests {
         observe(&mut ledger, &le_connection_complete(0x0A, 0x0001));
         assert_eq!(ledger.open_count(), 2);
 
-        assert!(HciConnectionLedger::<2>::is_reset_command(&[0x01, 0x03, 0x0C, 0x00]));
+        assert!(HciConnectionLedger::<2>::is_reset_command(&[
+            0x01, 0x03, 0x0C, 0x00
+        ]));
         let open: Vec<u16> = ledger.take_open().collect();
         assert_eq!(open, [0x0000, 0x0001]);
         assert_eq!(ledger.open_count(), 0);
@@ -194,8 +204,12 @@ mod tests {
     #[test]
     fn only_a_reset_command_is_a_reset() {
         // LE Set Advertising Enable (0x200A) and an event that ends in 03 0C.
-        assert!(!HciConnectionLedger::<2>::is_reset_command(&[0x01, 0x0A, 0x20, 0x01, 0x01]));
-        assert!(!HciConnectionLedger::<2>::is_reset_command(&[0x04, 0x03, 0x0C]));
+        assert!(!HciConnectionLedger::<2>::is_reset_command(&[
+            0x01, 0x0A, 0x20, 0x01, 0x01
+        ]));
+        assert!(!HciConnectionLedger::<2>::is_reset_command(&[
+            0x04, 0x03, 0x0C
+        ]));
         assert!(!HciConnectionLedger::<2>::is_reset_command(&[0x01]));
     }
 
