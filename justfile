@@ -2582,6 +2582,15 @@ _test-parallel: test-rust test-filetests test-emu-lab
 test-rust-core:
     cargo test
 
+# The lps-probe wall-clock perf sanity: the number behind the probe
+# worker-offload follow-up (docs/adr/2026-07-25-shader-probe-experiment-api.md).
+# `#[ignore]`d in the default suite because it measures machine load as much as
+# code — see docs/debt/lps-probe-perf-test-load-sensitive.md. Trust the result
+# only when the printed load average shows no competing work.
+perf-probe:
+    uptime
+    cargo test -p lps-probe --lib perf_4096 -- --ignored --nocapture
+
 # Host Xtensa execution (`lpvm-native/emu-xt`): the ISA-parameterized rt_emu
 # engine running compiled Xtensa code on lp-xt-emu, differentially checked
 # against rv32. Separate invocation because `emu-xt` is not a default feature
