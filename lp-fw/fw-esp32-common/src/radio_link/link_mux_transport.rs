@@ -45,6 +45,7 @@ use lpc_wire::{TransportError, WireServerMessage};
 
 use super::radio_link_port::{RADIO_LINK_SLOTS, RadioLinkEvent, RadioLinkPort, RadioWriteRequest};
 use crate::link_upkeep::LinkUpkeep;
+use crate::serial::packed_link::PackedLink;
 use crate::serial::server_msg::serialize_server_msg;
 use crate::transport::parse_wire_line;
 
@@ -59,7 +60,6 @@ pub const RADIO_WRITE_DEADLINE_MS: u32 = 5_000;
 pub const LOGIN_DEADLINE_MS: u64 = 10_000;
 
 /// One open radio link, as the mux tracks it.
-#[derive(Debug, Clone, Copy)]
 struct RadioLink {
     id: LinkId,
     slot: usize,
@@ -68,11 +68,12 @@ struct RadioLink {
     opened_at_ms: Option<u64>,
     /// It held a tier once; the deadline no longer applies.
     cleared: bool,
-    /// What this link's replies are written in: JSON until the server
-    /// answers its `SetEncoding` opt-in, then what that answer names — the
-    /// same rule the USB transport keeps (plan `lp-json-pack`). A radio link
-    /// that closes takes its encoding with it; the next one starts at JSON.
-    encoding: lpc_wire::WireEncoding,
+    /// What this link's replies are written in, and its learned table while
+    /// packed: JSON until the server answers its `SetEncoding` opt-in, then
+    /// what that answer names — the same rule the USB transport keeps (plan
+    /// `lp-json-pack`). A radio link that closes takes its encoding and table
+    /// with it; the next one starts at JSON.
+    packed: PackedLink,
 }
 
 /// The USB transport plus the radio links, as one [`ServerTransport`].
@@ -174,7 +175,7 @@ impl<U: ServerTransport, D: DelayNs> LinkMuxTransport<U, D> {
                         slot,
                         opened_at_ms: None,
                         cleared: false,
-                        encoding: lpc_wire::WireEncoding::Json,
+                        packed: PackedLink::new(),
                     });
                     self.opened.push(RadioLinkPort::link(link));
                 }
@@ -204,31 +205,28 @@ impl<U: ServerTransport, D: DelayNs> LinkMuxTransport<U, D> {
     async fn send_radio(
         &mut self,
         link: LinkId,
-        msg: WireServerMessage,
+        mut msg: WireServerMessage,
     ) -> Result<(), TransportError> {
-        let Some((slot, link_encoding)) = self
-            .radio
-            .iter()
-            .find(|l| l.id == link)
-            .map(|l| (l.slot, l.encoding))
-        else {
+        let Some(radio) = self.radio.iter_mut().find(|l| l.id == link) else {
             log::debug!("radio link {link}: gone, skipping frame id={}", msg.id);
             return Ok(());
         };
+        let slot = radio.slot;
         let id = msg.id;
         // The answer to an opt-in is always JSON (the host reads it before it
-        // knows the outcome); the switch it announces applies to every frame
-        // after it, as on the USB transport.
-        let (encoding, switch_to) = match msg.msg {
-            lpc_wire::server::ServerMsgBody::SetEncoding { encoding } => {
-                (lpc_wire::WireEncoding::Json, Some(encoding))
-            }
-            _ => (link_encoding, None),
+        // knows the outcome; `table_for` gives it no table); the switch it
+        // announces applies to every frame after it, as on the USB
+        // transport. A `packed` answer needs a table first.
+        radio.packed.prepare_answer(&mut msg.msg);
+        let switch_to = match msg.msg {
+            lpc_wire::server::ServerMsgBody::SetEncoding { encoding } => Some(encoding),
+            _ => None,
         };
         // Same buffer, same exclusivity argument as the USB write: the send
         // below does not return until the radio side is done with it or the
-        // lease is revoked.
-        let len = serialize_server_msg(&msg, encoding)?;
+        // lease is revoked. A failed write closes the link, table and all, so
+        // there is no learning to roll back.
+        let len = serialize_server_msg(&msg, radio.packed.table_for(&msg.msg))?;
         drop(msg);
         let generation = self.generation;
         self.generation = self.generation.wrapping_add(1);
@@ -253,7 +251,7 @@ impl<U: ServerTransport, D: DelayNs> LinkMuxTransport<U, D> {
                 if let Some(encoding) = switch_to
                     && let Some(l) = self.radio.iter_mut().find(|l| l.id == link)
                 {
-                    l.encoding = encoding;
+                    l.packed.answered(encoding);
                     log::info!("radio link {link}: replies are now {}", encoding.as_str());
                 }
                 Ok(())

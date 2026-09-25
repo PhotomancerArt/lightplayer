@@ -28,7 +28,7 @@
 //! wait until the buffer is free, then clear the now-stale `serial_in_empty`,
 //! so the only thing that can raise it is the drain of the packet this write
 //! commits. It wraps the io_task's **whole** TX half, so every byte the task
-//! writes — a JSON `M!` line, a packed `\n 0x00 'P' COBS 0x00` frame
+//! writes — a JSON `M!` line, a packed `\n 0x00 'L' COBS 0x00` frame
 //! ([`super::server_msg`]), each `ChunkedWriter` chunk of either, the log
 //! lines and the not-draining probe — passes the gate.
 //!
