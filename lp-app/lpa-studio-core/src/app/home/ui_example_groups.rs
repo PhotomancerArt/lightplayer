@@ -116,18 +116,18 @@ mod tests {
         assert!(example_groups(&[]).is_empty());
     }
 
-    /// The catalog itself: sixteen entries, nine pieces and seven patterns
+    /// The catalog itself: thirty entries, ten pieces and twenty patterns
     /// (fault-demo is a test rig: its unbounded loop has no fuel meter on a
     /// GPU tier — `docs/defects/2026-09-06-gpu-tier-executes-unbounded-shaders.md`).
     #[test]
-    fn the_catalog_splits_nine_and_seven() {
+    fn the_catalog_splits_ten_and_twenty() {
         let cards: Vec<UiExampleCard> = crate::app::home::embedded_examples()
             .iter()
             .map(UiExampleCard::from_embedded)
             .collect();
         let groups = example_groups(&cards);
         assert_eq!(groups.len(), 2);
-        assert_eq!(groups[0].cards.len(), 9, "{:?}", groups[0]);
-        assert_eq!(groups[1].cards.len(), 7, "{:?}", groups[1]);
+        assert_eq!(groups[0].cards.len(), 10, "{:?}", groups[0]);
+        assert_eq!(groups[1].cards.len(), 20, "{:?}", groups[1]);
     }
 }
