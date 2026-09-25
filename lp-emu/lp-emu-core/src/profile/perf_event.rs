@@ -19,6 +19,8 @@ pub static KNOWN_EVENT_NAMES: &[&str] = &[
     "project-load",
     "project-read",
     "server-boot",
+    "entry-unload",
+    "entry-load",
     "profile:start",
     "profile:end",
 ];
@@ -105,6 +107,8 @@ mod tests {
             "project-load",
             "project-read",
             "server-boot",
+            "entry-unload",
+            "entry-load",
         ] {
             assert_eq!(
                 intern_known_name(name),
