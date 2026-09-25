@@ -1,6 +1,10 @@
 //! Chip-generic serial helpers.
 
 pub mod chunked_write;
+// The USB-Serial-JTAG IN-endpoint gate. Chip-free (the register touches are
+// injected); the C6 and S3 io_tasks wrap their TX half in it, the classic v3
+// (UART, no USB-Serial-JTAG) never names it.
+pub mod in_endpoint;
 // Ungated on purpose since M6 P1b, though only `server` builds have a
 // heartbeat to report it in: the connection stamps are written by
 // `usb_connection`, which every native-USB image links whatever else it

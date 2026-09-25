@@ -1,9 +1,11 @@
 ---
-status: open
+status: fixed
 found: 2026-09-13      # live-debugging (M6 P06 of lp2025/2026-09-10-0021-xtensa-emulator)
-area: lp-emu/esp/lp-emu-esp-common/src/ip/usb_sj.rs (the USB-Serial-JTAG link model) × esp-hal 1.1.1 usb_serial_jtag::write_async × fw-esp32s3 serial/io_task
+area: fw-esp32s3 serial/io_task (and, latent, fw-esp32c6's) × esp-hal 1.1.1 usb_serial_jtag::write_async (the link model lp-emu/esp/lp-emu-esp-common/src/ip/usb_sj.rs was right)
+fixed: this change     # firmware-side gate, PR #805 (S3); moved to fw-esp32-common serial/in_endpoint.rs and ported to the C6 in PR #795, see the second 2026-09-24 note
 class: backend-contract-divergence
 related:
+  - docs/defects/2026-09-24-the-real-c6-link-loses-bytes-inside-a-packed-frame.md
   - lp2025/2026-09-10-0021-xtensa-emulator/m6/p06-flash-cache-and-rom-up.md
   - lp2025/2026-09-10-0021-xtensa-emulator/m6/p05-the-link-and-the-hello.md
   - lp-emu/esp/lp-emu-esp32s3/tests/boot_idle.rs
@@ -68,7 +70,8 @@ The reply's loss is the same shape one packet earlier: the triple's last
 inside the drain latency.
 
 **Which side is wrong is not yet known**, and that is why this is open
-rather than fixed here:
+rather than fixed here (*settled 2026-09-24 from the documents: silicon
+refuses; see the dated note below*):
 
 - If **silicon** also refuses a write while the IN packet is pending, then
   esp-hal's future is wrong on hardware too and the same bytes vanish on
@@ -133,12 +136,29 @@ are re-pinned to **0 tried**, pointing here; a future image that falls back
 across the 140-cycle edge flips them back to 64, and that is this entry,
 not a new finding.
 
-**Fix** — none yet. Not P06's: the phase's scope is the flash, the cache
-window, SHA and the ROM-up boot, and the link belongs to P05's model in
-the shared crate.
+**Fix** — (2026-09-24) in the firmware, not the model and not esp-hal:
+`serial::in_endpoint::InEndpoint` in `fw-esp32s3` wraps
+esp-hal's async TX half and, before every io_task write, waits until
+`serial_in_ep_data_free` reads 1 (clear the raw `serial_in_empty`,
+recheck, else esp-hal's `flush`, which arms on a bit now only a real drain
+can raise) and then clears the — by then stale — raw bit, so the one thing
+that completes esp-hal's write future is the drain of the packet this
+write commits. Nothing in esp-hal is patched. Cost: +480 B `.text` and
++24 B `.bss` on the S3 image. The C6 is **not** changed here (below).
 
-**Regression coverage** —
-`lp-emu/esp/lp-emu-esp32s3/tests/boot_idle.rs` pins the behaviour where it
+**Regression coverage** — (2026-09-24, the mechanism rather than a byte
+count) the link model's own tests in `lp-emu-esp-common`
+`ip/usb_sj.rs` —
+`a_write_into_a_pending_packet_is_refused_and_lands_on_the_tried_stream`,
+`a_stale_serial_in_empty_wakes_esp_hals_write_future_at_once_and_the_next_chunk_is_refused`
+and `the_in_endpoint_gate_delivers_every_byte_on_both_shapes` — pin the
+contract and both failure shapes at the registers, independent of any
+image's timing. The S3 machine grew `Machine::usb_sj_refused()` (bytes
+written into a pending or full buffer), and its `tests/boot_idle.rs`
+and `tests/boot.rs` assert it is 0 on every host path — draining, absent,
+closed-then-opened, scripted, and the stop-all whose reply is now
+delivered. What follows is the pre-fix coverage, kept for the history:
+`lp-emu/esp/lp-emu-esp32s3/tests/boot_idle.rs` pinned the behaviour where it
 shows, with this entry named beside each assertion, so that the fix flips
 them rather than a reader's memory:
 `the_shipped_image_prints_its_init_chain_out_of_the_link` (exactly one
@@ -188,6 +208,151 @@ near-identical ones, which additionally named the once-dropped packet; the
 merged image stays on the no-drop side and `just test-emu-esp32s3-gate`
 passes on it. Emulator:
 `lp-emu-esp32s3` built from this worktree at d5f29f337 (t1).
+
+**2026-09-24 — the documents settle it: silicon refuses, the model was
+right, and the fix is the firmware's.**
+
+*The question* was whether the EP1 IN buffer accepts a write while a
+previous packet is pending (committed with `wr_done`, not yet taken by the
+host). What the sources say:
+
+- **ESP32-C3 TRM v1.3, §30.3.2 "CDC-ACM Firmware Interface Functional
+  Description", p. 767** (read from the PDF; the same USB-Serial-JTAG IP
+  block the C6 and S3 carry): the send buffer is filled while
+  `SERIAL_IN_EP_DATA_FREE` is 1; a flush happens on the 64th byte or on
+  `WR_DONE`; after a flush of either kind the buffer is "unavailable for
+  firmware to write into" until the host has read all of it, and only then
+  does `SERIAL_IN_EMPTY_INT` fire to say another 64 bytes fit. One buffer,
+  refused while pending. The register chapter (Register 30.6
+  `USB_SERIAL_JTAG_EP1_CONF_REG`, p. 777) gives `WR_DONE` and
+  `SERIAL_IN_EP_DATA_FREE` the same reading.
+- **The C6 and S3 PACs** (`esp32c6-0.23.2`, `esp32s3-0.35.2`, generated from
+  Espressif's SVDs): `SERIAL_IN_EP_DATA_FREE` is documented, word for word
+  alike on both chips, as 0 from `WR_DONE` until the host has read the
+  data; `EP1.RDWR_BYTE` says to write "up to 64 bytes" when
+  `SERIAL_IN_EMPTY_INT` is set.
+- **ESP-IDF's LL driver** (`components/esp_hal_usb/esp32s3/include/hal/usb_serial_jtag_ll.h`,
+  Apache-2.0, esp-idf master `188e3e55b`):
+  `usb_serial_jtag_ll_write_txfifo` checks `serial_in_ep_data_free` before
+  **every** byte and stops when it reads 0 — the vendor's own writer never
+  writes a pending buffer.
+- **The seven-bit `in_ep1_st` address is not a second buffer.** In the C3
+  TRM's Register 30.9/30.10 (p. 779) every IN endpoint's status register —
+  `IN_EP0_ST` for the 64-byte control endpoint included — has the same
+  7-bit `WR_ADDR`/`RD_ADDR` pair, and a count of 0…64 needs seven bits.
+  Suggestive was all it ever was.
+- **Silicon corroboration, from upstream.** esp-hal PR #6104 (merged
+  2026-08-12, `ab45d33cf6`, shipped in esp-hal **1.2.0**), "prevent async
+  data loss under bidirectional load", reproduced truncated frames on a
+  physical ESP32-C3 and traced half of them to exactly this: a completed
+  write future "treated as sufficient proof that the TX FIFO was writable"
+  when an early interrupt had woken it. Their fix re-checks
+  `SERIAL_IN_EP_DATA_FREE` after the wake. That is one of our two shapes,
+  on silicon, with the loss observed.
+
+⚠️ The C6 and S3 TRMs themselves were **not** read this session: both PDFs
+exceed the fetch tool's 10 MB limit and downloading them needs Yona's say.
+The C3 TRM is the same IP and the C6/S3 PAC text agrees with it word for
+word; if anybody wants the citation on the chips' own manuals, it is the
+"CDC-ACM Firmware Interface Functional Description" subsection of each
+USB Serial/JTAG chapter. **What the documents do not say** is what
+silicon does with a byte written anyway (discarded, or overwriting the
+pending packet): the model discards it onto the tried stream, graded
+`modeled`. The fix below makes the firmware never find out.
+
+*So the model is right and esp-hal 1.1.1 is wrong twice:*
+`write_async` pushes a chunk without reading `serial_in_ep_data_free` (the
+stop-all reply's shape — esp-println's packet still pending), and its
+write future arms `serial_in_empty` without clearing a stale raw (the
+hello's shape — woken before its own packet drains, so the next chunk goes
+into a pending buffer). esp-hal 1.2.0 fixes the second (#6104's re-check)
+and **not the first**; upstream `main` at `5edb7b89c` still writes the
+first chunk of every `write_async` without a free check.
+
+*The fix* is the firmware gate above, in the S3's io_task. Emulator runs
+(`lp-emu-esp32s3` built from this branch, `t1`): the shipped image
+delivers the whole hello with `0 bytes merely tried` and **0 refused** on
+both boot paths, and a stop-all's reply `M!{"id":1,"msg":"stopAllProjects"}`
+now reaches the host; with no host or a closed port the io_task waits
+instead of writing into the held packet (host-absent tried 22 B —
+esp-println's one line — where it was 22 + 64 + 2). The S3 image's `.bss`
+grew 24 B, so its stack total is 37,272 B (was 37,296), re-baselined in
+`scripts/heap-budget-record.json`.
+
+*The C6 is latent, and deliberately left for its own change.* It has the
+same driver and the same second writer (esp-println carries its `[INIT]`
+chain, panics, and the watchdog and stress lines), but no C6 run has lost
+a protocol byte to it (only its `\n` probes into a held packet, which
+are harmless): its logs ride the io_task, so a stop-all's reply does not
+follow an esp-println packet (checked on this branch: stop-all on the shipped C6
+image, 0 bytes tried, the reply delivered). The same gate was built and
+run against the C6 (+272 B image, headroom 714,576 B) and it changes the
+C6's measured not-draining signature: with the port closed or no host, the
+io_task no longer writes its first chunk and its `\n` probes into the held
+packet, so `usb_attached.rs::g2_3_…`, `usb_control.rs::g3_1b_…` and
+`host_absent.rs` — whose assertions are the M6 transcripts' shape, recorded
+against silicon (`usb-negative-control`) — would all move. That is a
+change to a silicon-graded behaviour, and it wants its own PR and a desk
+re-check of the negative control, not a rider on this one.
+
+**2026-09-24 (later) — the C6 now has the gate, via PR #795.** A real
+XIAO C6 lost ~5 bytes inside a packed frame while JSON lost none on the same
+board (`docs/defects/2026-09-24-the-real-c6-link-loses-bytes-inside-a-packed-frame.md`),
+so #795 merged this PR and ported the gate. There is **one** gate now:
+`InEndpoint` moved to `lp-fw/fw-esp32-common/src/serial/in_endpoint.rs`,
+generic over the TX half, with the two register touches injected
+(`InEndpointRegs`, implemented as `UsbSerialJtagInEndpoint` beside each
+chip's `board/<chip>/usb_connection.rs`); `fw-esp32s3/src/serial/in_endpoint.rs`
+is deleted and both io_tasks wrap their TX half in the shared type. The
+classic v3 (UART, no USB-Serial-JTAG) never names it. One change rode
+along: the gate now hands esp-hal **at most one 64-byte packet per
+`write`**, so it sits in front of every packet rather than every 256-byte
+`ChunkedWriter` chunk (esp-hal's own inner loop checks nothing between
+packets). Image cost on the merged tree: C6 +288 B, S3 +464 B, v3 0. The
+three C6 tests named above were re-pinned to what the gated image does —
+waits where there were commits into the held packet — each naming this
+entry; none replays a transcript, and a desk re-capture of
+`usb-negative-control` on a gated image is owed to confirm the host-visible
+half is unchanged.
+
+*What a board would add.* Nothing is needed to close this — the refusal is
+documented and the fix removes the firmware's dependence on what happens
+past it. P09's S3 desk sitting (the hello and a stop-all reply captured
+byte for byte) is the natural confirmation that the gated image delivers
+both whole on silicon; record it there, not as a precondition here.
+
+*Upstream (drafted, not filed — Yona files upstream):*
+
+> **usb_serial_jtag: `write_async` writes the first chunk without checking
+> `SERIAL_IN_EP_DATA_FREE`**
+>
+> esp-hal 1.2.0 / main `5edb7b89c`, `esp-hal/src/usb/usb_serial_jtag.rs`.
+> `UsbSerialJtagTx::write_async` pushes each 64-byte chunk into EP1 and
+> sets `WR_DONE`, then waits (`wait_tx_ready`) for the FIFO to be free
+> again. The wait after each chunk is correct since #6104, but nothing
+> checks that the FIFO is free **before the first chunk**. The driver
+> assumes it is the endpoint's only writer; when another writer shares the
+> endpoint — `esp-println` with the `jtag-serial` feature is the common
+> case, and a blocking `UsbSerialJtag` or `esp-backtrace` are others — a
+> `write_async` that starts while that writer's last packet is still
+> pending writes into a buffer the TRM says is unavailable until the host
+> reads it (ESP32-C3 TRM §30.3.2), and those bytes are lost.
+>
+> Suggested fix: call `wait_tx_ready()` (or an equivalent check of
+> `SERIAL_IN_EP_DATA_FREE` that waits on `SERIAL_IN_EMPTY` only when it
+> reads 0) at the top of each chunk, and clear the `SERIAL_IN_EMPTY` raw
+> bit before `WR_DONE` so the wake that follows is this packet's drain
+> rather than a latch left by the other writer. We work around it with a
+> wrapper that does both before delegating to `write_async`.
+
+*Follow-up left open*: the S3 walk's workarounds for this defect
+(`scripts/emu/m4-walk.sh`'s `--no-wait` and lit-frame evidence,
+`walks/shader-oracle.script` waiting on `Stopped all projects` instead of
+the reply's `"id":1,`, and the `the_walk_is_the_c6s_captured_bytes` test's
+one tolerated line) can now be re-pointed at the plain calls; that change
+wants a run of `just walk-esp32s3-emu` to prove it, and is not in this PR.
+Upgrading to esp-hal 1.2.0 would make half of the gate redundant; the other
+half stays until upstream checks the first chunk.
 
 **Lesson** — an interrupt raw bit is state, and a driver that arms an
 enable without clearing the raw first is asserting "nothing has happened

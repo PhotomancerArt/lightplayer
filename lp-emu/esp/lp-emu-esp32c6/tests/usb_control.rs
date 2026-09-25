@@ -12,7 +12,9 @@
 //! - **G3-1b** the same unplug with the port held closed to 13 s — long
 //!   enough for the firmware to have something to say while nobody is
 //!   reading. That is where the transition is actually visible: a 64-byte
-//!   packet committed and **held**, bytes dropped past it, delivery within
+//!   packet committed and **held**, nothing written past it (the io_task's
+//!   IN-endpoint gate waits; before 2026-09-24 bytes were dropped past it),
+//!   delivery within
 //!   the drain latency of the `open`, and then the firmware's own
 //!   `[io_task] host draining again` line — the recovery half of the pair
 //!   P1 exists to measure, reproduced with no rig, because a control
@@ -325,15 +327,27 @@ fn g3_1b_a_port_held_closed_after_the_replug_holds_a_packet_until_it_opens() {
         "something reached a host that was not reading:\n{}",
         r.window(6_000.0, 13_000.0)
     );
-    // Bytes written past the committed packet are dropped, and the model
-    // says so once rather than pretending they went.
+    // Nothing is written past the committed packet. ⚠️ Re-pinned 2026-09-24
+    // for the io_task's IN-endpoint gate (`fw_esp32_common::serial::
+    // in_endpoint`, PR #805, ported to the C6 for
+    // docs/defects/2026-09-24-the-real-c6-link-loses-bytes-inside-a-packed-frame.md):
+    // before it, esp-hal 1.1.1's `write_async` kept writing the rest of the
+    // heartbeat and the `\n` probes into the held packet and the model
+    // dropped them (`(host attached-idle): byte … dropped`) — this used to
+    // assert that line was present. With the gate the io_task waits for a
+    // free buffer and its chunk timeout fires instead, so there is no such
+    // line. What a host sees after the open is the M6 silicon capture's
+    // shape (`lp-emu/transcripts/esp32c6/usb-negative-control/`), checked
+    // below; the capture itself records nothing from while the port was
+    // closed, so nothing here contradicts it — but it was taken on a
+    // pre-gate image, and a desk re-capture on a gated image is owed.
     assert!(
-        r.lines
+        !r.lines
             .iter()
             .any(|(ms, line)| (9_000.0..13_000.0).contains(ms)
                 && line.contains("(host attached-idle): byte")
                 && line.contains("dropped")),
-        "no dropped byte recorded while the port was closed:\n{}",
+        "a byte was written into the held packet past the IN-endpoint gate:\n{}",
         r.window(10_000.0, 11_000.0)
     );
 
@@ -374,9 +388,10 @@ fn g3_1b_a_port_held_closed_after_the_replug_holds_a_packet_until_it_opens() {
     assert!(again < beat, "the recovery line precedes the heartbeat");
 
     // What the held packet itself was: the first 64 bytes of the 10 s
-    // heartbeat frame. Everything the firmware wrote behind it went into a
-    // committed endpoint and was lost, so that heartbeat never arrives
-    // whole — the drops above are those bytes.
+    // heartbeat frame. The rest of that frame waited behind it until the
+    // chunk timeout abandoned the write, so that heartbeat never arrives
+    // whole (before the IN-endpoint gate the rest was written into the held
+    // packet and dropped instead — the same host-visible result).
     assert!(
         heartbeat_at(&delivered, 10_000).is_none(),
         "the heartbeat written into a closed port arrived whole, which would mean the \
@@ -402,7 +417,8 @@ fn g3_1b_a_port_held_closed_after_the_replug_holds_a_packet_until_it_opens() {
     // Not "strictly after the open", which is what this first said and what
     // CI caught. After the latch the firmware's only traffic is one `\n`
     // every `PROBE_INTERVAL` (io_task, 2 s), and while the port is closed
-    // even that byte is dropped into the still-committed endpoint. So which
+    // even that byte waits on the still-committed endpoint until its
+    // timeout (before the IN-endpoint gate it was dropped into it). So which
     // millisecond the recovery lands on is decided by where that 2 s grid
     // falls relative to the open, and the grid is anchored at io_task's
     // start — a few milliseconds of boot that differ between two builds of

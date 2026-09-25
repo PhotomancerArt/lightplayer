@@ -71,6 +71,26 @@
 //! `ChunkedWriter` chunks below 64 and writes `wr_done` itself, which is why
 //! M6 never reached the case.
 //!
+//! **One send buffer, and a write into a pending packet is refused.** The
+//! block holds a single 64-byte IN buffer. After a flush — `wr_done` or the
+//! 64th byte, either way — the send buffer is "unavailable for firmware to
+//! write into" until the host has read all of it, and only then does
+//! `SERIAL_IN_EMPTY_INT` fire to say another 64 bytes fit (ESP32-C3 TRM v1.3
+//! §30.3.2 "CDC-ACM Firmware Interface Functional Description", p. 767 — the same IP
+//! block; its register chapter, the esp32c6 0.23.2 PAC and the esp32s3 0.35.2
+//! PAC describe `SERIAL_IN_EP_DATA_FREE` in the same words, and ESP-IDF's
+//! `usb_serial_jtag_ll_write_txfifo` gates every byte on that bit). So the
+//! model commits one packet and holds `serial_in_ep_data_free` at 0 until the
+//! host takes it — that part is **documented**. What silicon does with a byte
+//! written anyway (dropped here, onto the `tried` stream) is not stated
+//! anywhere and stays **modeled**. The seven-bit `in_ep1_st` address fields
+//! are not evidence of a second buffer: every endpoint's status register
+//! (`in_ep0_st`…`in_ep3_st`, the 64-byte control endpoint included) has the
+//! same 7-bit `wr_addr`/`rd_addr` pair, and counting 0…64 takes seven bits.
+//! The 2026-09-13 defect is two writers breaking this contract — esp-hal's
+//! `write_async` never reads the free bit — not the model; its register-level
+//! tests are under "one send buffer, two writers" below.
+//!
 //! Two things distinguish the draining state from esp-emu's model (spike
 //! report §4: `INT_RAW = 0xA` with `INT_CLR` ignored, `EP1_CONF = 0x2` for
 //! ever): `sof` **clears** on `int_clr` and returns on the next frame, and a
@@ -137,7 +157,7 @@
 //!
 //! | grade | registers | why |
 //! |---|---|---|
-//! | `measured` | `ep1`, `ep1_conf`, `int_raw`, `int_st`, `int_ena`, `int_clr` | the transitions those transcripts prove: SOF present while attached and absent when the cable is out; `serial_in_ep_data_free` returning only once a host has drained the packet; `serial_in_empty` completing esp-hal's write future; `serial_out_recv_pkt` on host bytes (`lp-cli`'s hello, `emu_usb_hello`); and the whole path exercised byte for byte by both drivers |
+//! | `measured` | `ep1`, `ep1_conf`, `int_raw`, `int_st`, `int_ena`, `int_clr` | the transitions those transcripts prove: SOF present while attached and absent when the cable is out; `serial_in_ep_data_free` returning only once a host has drained the packet (measured through esp-println's polled path and one writer at a time; a write *into* the pending packet is the "one send buffer" paragraph's — documented refusal, modeled fate); `serial_in_empty` completing esp-hal's write future; `serial_out_recv_pkt` on host bytes (`lp-cli`'s hello, `emu_usb_hello`); and the whole path exercised byte for byte by both drivers |
 //! | `documented` | `fram_num` (the SOF period is the USB full-speed frame), `conf0` (the PAC bit map; never written by the shipped image on the C6) | a document states the behaviour; nothing measured it |
 //! | `modeled` | everything else — listed under "Modeled registers" below | our reading of the PAC and the drivers |
 //!
@@ -2026,6 +2046,166 @@ mod tests {
         expect.extend(vec![b'3'; 64]);
         assert_eq!(delivered.bytes(), expect);
         assert_eq!(u.dropped(), 64, "nothing more dropped");
+    }
+
+    // ---- one send buffer, two writers (the 2026-09-13 defect) ---------------
+    //
+    // `docs/defects/2026-09-13-the-s3-link-drops-the-io-tasks-next-chunk-on-a-stale-serial-in-empty.md`.
+    // The block has ONE send buffer, unwritable from a flush until the host
+    // has read it all (ESP32-C3 TRM v1.3 §30.3.2, p. 767 — the same IP as the
+    // C6's and the S3's; see the module docs).
+    // These pin the mechanism at the registers, independent of any image's
+    // timing: what a write into a pending packet does, what wakes esp-hal's
+    // write future early, and the firmware-side gate that makes both moot.
+
+    /// esp-hal 1.1.1 `write_async`, one chunk: push with no free check,
+    /// `wr_done`, then `UsbSerialJtagWriteFuture::new` sets the enable
+    /// **without clearing the raw** and the future waits for the ISR. Returns
+    /// the cycles from the commit to the ISR — the future's wake.
+    fn esp_hal_write_chunk(sb: &mut Sandbox, u: &mut UsbSerialJtag, chunk: &[u8]) -> u64 {
+        for &b in chunk {
+            sb.write(u, EP1, u32::from(b));
+        }
+        sb.write(u, EP1_CONF, EP1_CONF_WR_DONE);
+        let ena = sb.read(u, INT_ENA) | INT_SERIAL_IN_EMPTY;
+        sb.write(u, INT_ENA, ena);
+        let committed_at = sb.now;
+        wait_for_isr(sb, u);
+        sb.now - committed_at
+    }
+
+    /// Poll until the block's source is high, then run esp-hal's
+    /// `async_interrupt_handler`: drop the enable, clear both raws.
+    fn wait_for_isr(sb: &mut Sandbox, u: &mut UsbSerialJtag) {
+        let deadline = sb.now + 10 * IN_DRAIN_LATENCY_CYCLES;
+        while !sb.irq.level(SOURCE) {
+            assert!(sb.now < deadline, "the write future never woke");
+            let next = sb.now + POLL_CYCLES;
+            sb.run_to(u, next);
+        }
+        let ena = sb.read(u, INT_ENA) & !INT_SERIAL_IN_EMPTY;
+        sb.write(u, INT_ENA, ena);
+        sb.write(u, INT_CLR, INT_SERIAL_IN_EMPTY | INT_SERIAL_OUT_RECV_PKT);
+    }
+
+    /// The firmware's gate (`fw-esp32-common`
+    /// `serial::in_endpoint::InEndpoint::ready`, used by the C6 and S3), register
+    /// for register: wait until the buffer is free — clear, recheck, else esp-hal's
+    /// `flush_tx_async` — then clear the now-stale `serial_in_empty`.
+    fn in_endpoint_ready(sb: &mut Sandbox, u: &mut UsbSerialJtag) {
+        let free = |sb: &mut Sandbox, u: &mut UsbSerialJtag| sb.read(u, EP1_CONF) & 0b010 != 0;
+        if !free(sb, u) {
+            sb.write(u, INT_CLR, INT_SERIAL_IN_EMPTY);
+            if !free(sb, u) {
+                let ena = sb.read(u, INT_ENA) | INT_SERIAL_IN_EMPTY;
+                sb.write(u, INT_ENA, ena);
+                wait_for_isr(sb, u);
+            }
+        }
+        sb.write(u, INT_CLR, INT_SERIAL_IN_EMPTY);
+    }
+
+    /// A draining host, esp-hal's `UsbSerialJtag::new` done, and one
+    /// esp-println line printed and flushed. Returns the rig and the line.
+    fn two_writers_rig() -> (Rig, &'static [u8]) {
+        let mut r = rig_with(
+            HostState::Attached { draining: true },
+            ScriptedSource::new(),
+        );
+        sb_new_driver(&mut r);
+        let line: &'static [u8] = b"[INIT] Server loop entered; first frame pending\n";
+        let mut timed_out = false;
+        esp_println_write_timed(&mut r.sb, &mut r.u, line, &mut timed_out);
+        assert!(!timed_out);
+        (r, line)
+    }
+
+    fn sb_new_driver(r: &mut Rig) {
+        r.sb.write(
+            &mut r.u,
+            INT_CLR,
+            INT_SERIAL_IN_EMPTY | INT_SERIAL_OUT_RECV_PKT,
+        );
+        r.sb.write(&mut r.u, INT_ENA, 0);
+    }
+
+    fn frame(n: usize) -> Vec<u8> {
+        (0..n).map(|i| b'A' + (i % 26) as u8).collect()
+    }
+
+    #[test]
+    fn a_write_into_a_pending_packet_is_refused_and_lands_on_the_tried_stream() {
+        // The stop-all reply's shape: esp-println's last packet is committed
+        // and the io_task's first chunk follows inside the drain.
+        let (mut r, line) = two_writers_rig();
+        assert!(r.u.committed(), "esp-println's packet is pending");
+        let reply = b"M!{\"id\":1,\"msg\":\"stopAllProjects\"}\n";
+        esp_hal_write_chunk(&mut r.sb, &mut r.u, reply);
+        let end = r.sb.now + IN_DRAIN_LATENCY_CYCLES;
+        r.sb.run_to(&mut r.u, end);
+        assert_eq!(r.u.dropped(), reply.len() as u64, "every byte refused");
+        assert_eq!(r.tried.bytes(), reply, "and observed, not delivered");
+        assert_eq!(r.delivered.bytes(), line, "the host got the line only");
+    }
+
+    #[test]
+    fn a_stale_serial_in_empty_wakes_esp_hals_write_future_at_once_and_the_next_chunk_is_refused() {
+        // The boot hello's shape: esp-println's packet drains, its raw
+        // `serial_in_empty` stays set (nobody listens, nobody clears), and
+        // esp-hal's future arms onto it.
+        let (mut r, line) = two_writers_rig();
+        let end = r.sb.now + IN_DRAIN_LATENCY_CYCLES;
+        r.sb.run_to(&mut r.u, end);
+        assert!(!r.u.committed());
+        assert_eq!(
+            r.sb.read(&mut r.u, INT_RAW) & INT_SERIAL_IN_EMPTY,
+            INT_SERIAL_IN_EMPTY,
+            "the stale raw"
+        );
+        let hello = frame(128);
+        let woke = esp_hal_write_chunk(&mut r.sb, &mut r.u, &hello[..64]);
+        assert!(
+            woke < IN_DRAIN_LATENCY_CYCLES,
+            "the future woke {woke} cycles after the commit, before any drain"
+        );
+        assert!(r.u.committed(), "chunk one is still pending");
+        esp_hal_write_chunk(&mut r.sb, &mut r.u, &hello[64..]);
+        let end = r.sb.now + 2 * IN_DRAIN_LATENCY_CYCLES;
+        r.sb.run_to(&mut r.u, end);
+        assert_eq!(r.u.dropped(), 64);
+        assert_eq!(r.tried.bytes(), &hello[64..], "chunk two, refused whole");
+        let mut expect = line.to_vec();
+        expect.extend_from_slice(&hello[..64]);
+        assert_eq!(r.delivered.bytes(), expect);
+    }
+
+    #[test]
+    fn the_in_endpoint_gate_delivers_every_byte_on_both_shapes() {
+        // The same two shapes through the firmware's gate: nothing refused,
+        // nothing merely tried, every chunk woken by its own drain.
+        for drained_first in [false, true] {
+            let (mut r, line) = two_writers_rig();
+            if drained_first {
+                let end = r.sb.now + IN_DRAIN_LATENCY_CYCLES;
+                r.sb.run_to(&mut r.u, end);
+            }
+            let msg = frame(300);
+            for chunk in msg.chunks(64) {
+                in_endpoint_ready(&mut r.sb, &mut r.u);
+                let woke = esp_hal_write_chunk(&mut r.sb, &mut r.u, chunk);
+                assert!(
+                    (IN_DRAIN_LATENCY_CYCLES..IN_DRAIN_LATENCY_CYCLES + POLL_CYCLES)
+                        .contains(&woke),
+                    "woken {woke} cycles after the commit: by this chunk's own drain \
+                     (drained_first={drained_first})"
+                );
+            }
+            assert_eq!(r.u.dropped(), 0, "drained_first={drained_first}");
+            assert!(r.tried.is_empty(), "drained_first={drained_first}");
+            let mut expect = line.to_vec();
+            expect.extend_from_slice(&msg);
+            assert_eq!(r.delivered.bytes(), expect, "drained_first={drained_first}");
+        }
     }
 
     #[test]

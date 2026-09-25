@@ -210,7 +210,7 @@
         "totalBytes": 325536,
         "largestFreeBlock": 198746,
         "stackHighWater": 11716,
-        "stackTotal": 71096,
+        "stackTotal": 71072,
         "stackHighWaterBand": [
           11200,
           12300
@@ -304,7 +304,7 @@
         "totalBytes": 245756,
         "largestFreeBlock": 230990,
         "stackHighWater": 12432,
-        "stackTotal": 37248,
+        "stackTotal": 37224,
         "stackHighWaterBand": [
           11900,
           13000

@@ -61,8 +61,8 @@ document says what silicon does with bytes written into a pending buffer,
 so a partial loss is plausible.
 
 **The test that would tell us:** repeat the capture on a C6 image carrying
-#805's IN-endpoint gate (`lp-fw/fw-esp32s3/src/serial/in_endpoint.rs`,
-ported). If the loss goes away, it was this race.
+#805's IN-endpoint gate (ported, below: now
+`lp-fw/fw-esp32-common/src/serial/in_endpoint.rs`). If the loss goes away, it was this race.
 
 **Packed vs JSON on the same board (2026-09-24, same afternoon).** The
 same XIAO and the same image, Studio at a 150 ms lens pause, captured with
@@ -81,9 +81,44 @@ That leaves the board's packed write path. Packed frames skip the measuring
 pass and go out sooner, in smaller writes, which is the pattern that would
 trigger the stale-`serial_in_empty` race above more often. Not yet proven.
 
+**Fix applied, pending hardware confirmation (2026-09-24, PR #795).**
+#795 merged #805 and ported its gate to the C6. There is one gate, in
+`lp-fw/fw-esp32-common/src/serial/in_endpoint.rs`, generic over the TX
+half with the two register touches injected per chip
+(`UsbSerialJtagInEndpoint` in `board/<chip>/usb_connection.rs`). The C6 and
+S3 io_tasks wrap their whole TX half in it, so every byte the io_task writes
+passes it: JSON `M!` lines, packed frames out of `FRAME_BUF`
+(`lpc_wire::ser_packed_frame_to`), log lines and probes. The gate also hands
+esp-hal at most one 64-byte packet per `write`, so it runs before **every
+packet** of a multi-chunk frame, not just before each 256-byte
+`ChunkedWriter` chunk. esp-hal's inner loop checks nothing between packets.
+Cost: C6 image +288 B (2,478,832 → 2,479,120 B, headroom 666,608 B);
+`.bss` +24 B, so the C6 stack total is 71,072 B (was 71,096), re-baselined
+in `scripts/heap-budget-record.json`. Heap figures unchanged.
+
+Emulator evidence (`lp-emu-esp32c6` from this worktree, `t1`, emulated
+only): `emu_usb_json_pack` decodes every packed frame, and
+`walk-esp32c6-emu` passes, on the gated image. **A loss could not be
+reproduced without the gate.** After boot, the shipped C6 has a single
+writer on the IN endpoint: esp-println carries only the `[INIT]` chain and
+the panic path, and every log line rides the io_task. esp-hal's own write
+future then always wakes on its own packet's drain, so the model never
+refuses a write and the gate is a no-op in steady state. The pre-gate branch
+passed the same tests. Three C6 tests that pinned the pre-gate writes into a
+held packet (`usb_attached::g2_3`, `usb_control::g3_1b`, `host_absent`)
+were re-pinned to the gate's waits, and none replays a transcript.
+
+That is a reason for doubt. On the emulator's model, the stale-
+`serial_in_empty` race needs a second writer, and the C6 has none in steady
+state. So if the desk re-capture still shows short packed frames, the cause
+is something the model doesn't have. Candidates: silicon raising
+`serial_in_empty` at a moment other than the drain, the exact-64-byte packet
+followed by a redundant `wr_done`, or a host-side cause after all.
+
 **What is not known yet.**
-- Whether #805's IN-endpoint gate, ported to the C6, makes the packed loss
-  go away (the test that would tell us, above).
+- Whether the gate makes the packed loss go away on silicon. The test is the
+  G1 capture repeated on a gated image: three lens pauses, ~1,400 frames,
+  `lp-cli wire unpack --sizes`.
 - Whether anything else on the packed write path (the in-place frame build
   in `FRAME_BUF`, the chunking of `\n` + frame) also contributes.
 
