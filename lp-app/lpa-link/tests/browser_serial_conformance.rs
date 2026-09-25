@@ -1011,11 +1011,12 @@ async fn a_port_open_across_a_replug_reopens_on_the_new_generation() {
     let board = board_ids().await.first().cloned().expect("a board");
     let id = granted_sessions().await[0].id;
 
+    let mut reader = PortReader::default();
     open_port(id, false)
         .await
         .expect("openPort before the replug");
     yield_to_event_loop().await;
-    let _ = strings(js_take_lines(id)).await;
+    let _ = reader.take_lines(id).await;
 
     JsFuture::from(js_replug_over_the_cable(&board))
         .await
@@ -1032,7 +1033,7 @@ async fn a_port_open_across_a_replug_reopens_on_the_new_generation() {
         .map_err(|error| error_text(&error))
         .expect("openPort on the replugged generation");
     yield_to_event_loop().await;
-    let lines = strings(js_take_lines(id)).await;
+    let lines = reader.take_lines(id).await;
     assert!(
         lines.iter().any(|line| line.contains("hello")),
         "the replugged port opened but read nothing: {lines:?}"
