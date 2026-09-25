@@ -107,6 +107,12 @@ pub enum ControlCommand {
     /// Report every pad the machine has anything to say about. Answered by
     /// [`ControlReply::Pins`].
     Pins,
+    /// USB-Serial-JTAG's free lag, in emulated nanoseconds (`0` switches it
+    /// off) — a **hypothesis** switch, not a host action
+    /// (`lp_emu_esp_common::ip::usb_sj`, "The free lag"). Setting it also
+    /// restarts the block's wake measurements, so a script can switch the
+    /// lag on after boot and measure only what follows.
+    FreeLag(u64),
 }
 
 impl ControlCommand {
@@ -136,6 +142,7 @@ impl ControlCommand {
             ControlCommand::Wait(_) => "wait",
             ControlCommand::Pin { .. } => "pin",
             ControlCommand::Pins => "pins",
+            ControlCommand::FreeLag(_) => "free-lag",
         }
     }
 
@@ -158,6 +165,7 @@ impl ControlCommand {
         "wait",
         "pin",
         "pins",
+        "free-lag",
     ];
 
     /// Parse one line. The caller has already dropped comments and blanks.
@@ -245,6 +253,16 @@ impl ControlCommand {
                     pad: n,
                     level: parse_level("pin", value)?,
                 })
+            }
+            "free-lag" => {
+                let [value] = rest[..] else {
+                    return Err("`free-lag` takes one argument, nanoseconds".to_string());
+                };
+                let ns: u64 = value
+                    .trim_end_matches("ns")
+                    .parse()
+                    .map_err(|e| format!("`free-lag {value}`: {e}"))?;
+                Ok(ControlCommand::FreeLag(ns))
             }
             "wait" => {
                 let [value] = rest[..] else {
@@ -722,6 +740,7 @@ mod tests {
                 },
             ),
             ("pins", ControlCommand::Pins),
+            ("free-lag 11500", ControlCommand::FreeLag(11_500)),
         ];
         for (line, want) in cases {
             assert_eq!(&ControlCommand::parse(line).unwrap(), want, "`{line}`");

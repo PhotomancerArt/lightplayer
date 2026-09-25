@@ -62,6 +62,10 @@ impl UsbConnectionMonitor {
 /// This chip's USB-Serial-JTAG register touches for the io_task's
 /// IN-endpoint gate ([`fw_esp32_common::serial::in_endpoint`]).
 #[cfg(not(feature = "spike_uart0_link"))]
+#[cfg_attr(
+    feature = "fixture-no-in-endpoint-gate",
+    allow(dead_code, reason = "the fixture writes without the gate")
+)]
 pub struct UsbSerialJtagInEndpoint;
 
 #[cfg(not(feature = "spike_uart0_link"))]

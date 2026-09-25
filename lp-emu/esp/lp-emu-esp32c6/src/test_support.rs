@@ -174,6 +174,15 @@ impl FwImage {
         default_features: true,
     };
 
+    /// The shipped image with the io_task's USB-Serial-JTAG IN-endpoint
+    /// gate taken out — the write path as it was before PR #795
+    /// (`fw-esp32c6`'s `fixture-no-in-endpoint-gate`). Only the free-lag
+    /// test builds it: it is the "before" half of that pair.
+    pub const NO_IN_ENDPOINT_GATE: FwImage = FwImage {
+        features: &["esp32c6", "server", "radio", "fixture-no-in-endpoint-gate"],
+        default_features: true,
+    };
+
     pub fn slug(&self) -> String {
         slug(self.features)
     }
