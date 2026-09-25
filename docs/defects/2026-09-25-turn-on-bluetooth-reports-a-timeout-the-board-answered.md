@@ -1,6 +1,7 @@
 ---
-status: open
+status: fixed
 found: 2026-09-25      # how: hardware-walk (M7 S1 laptop desk walk, Run M: desk XIAO C6 over USB, Studio at main 23b7db5b3 served locally in Brave, the bench serial grant)
+fixed: 2026-09-25      # PR #824 (easy-access Studio): 0f259f403 (per-conversation id slices), c189b635b (regression tests)
 area: lpa-studio-core access_controller::write_store × devices/shared_link_client_io (one ConversationInbox per link) × device_frame_feed
 class: state-conflation
 related:
@@ -43,12 +44,24 @@ not even unique to one conversation. The lab script
 (`spikes/ble-lab/scripts/provision-access.py`) writes the same file on the
 same port and gets its reply at once, because it is the only reader.
 
-**Fix** — none yet. The inbox has to route by conversation, not per link, or
-the feed has to stand down while another conversation runs.
+**Fix** — PR #824 (the easy-access Studio PR). Every conversation on a
+shared link now claims its own slice of the app id range
+(`CONVERSATION_ID_STRIDE` ids) when its io is made; its client mints ids only
+there, and `receive` takes only the replies in its slice
+(`lpa-studio-core/src/app/devices/shared_link_client_io.rs`, "Several
+conversations on one link"). Another conversation's reply stays in the inbox
+for its owner instead of being read and discarded as a stranger's. The same
+PR replaced the panel's whole-file write with the board-merged
+`AccessSetSwitches` / `AccessAdd` requests
+(`docs/adr/2026-09-24-easy-bluetooth-access.md`), and Studio now restarts the
+device itself after a Bluetooth toggle over USB, so the "needs a Reset nobody
+mentions" half is gone too.
 
-**Regression coverage** — none: the access tests run against `FakeBoard`
-with no frame feed beside them, and the emulated walk (`walk-ble-emu`) never
-turns Bluetooth on from the panel.
+**Regression coverage** — `shared_link_client_io::tests::a_write_reply_is_not_consumed_by_a_concurrent_frame_feed`
+(two conversations on one link, the feed polling; the write gets its reply)
+and `shared_link_client_io::tests::dropping_a_conversation_leaves_another_conversations_reply`.
+Not re-walked on silicon as its own step; the G4 walk (2026-09-25) turned
+access on over USB on the easy-access build without seeing it.
 
 **Lesson** — a mailbox shared by two readers is a race, and the reader that
 polls more often wins. The shared-link io's own doc says a stray id is
