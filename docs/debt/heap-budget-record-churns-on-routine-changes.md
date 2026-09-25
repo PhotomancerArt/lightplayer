@@ -119,6 +119,20 @@ long-lived branch conflict on this file whenever main re-baselined too.
   change you have not pushed.** Positional figures, which a desk bless could
   never write, now arrive the same way.
 
+- 2026-09-25 — **a band move is still a desk bless** (learned wire
+  dictionary, PR #835). The main-task stack high-water moved out of its band
+  on the C6 (13,188 → 13,812 B) and S3 (12,432 → 13,008 B), with every heap
+  figure byte-identical to `main`. Bisected to the lpc-wire/firmware change
+  (the codec-only commit measured `main`'s figure); an in-place hash clear
+  and out-of-line cold paths left it unchanged, and CI measured the same
+  values, so it reads as the layout sensitivity this gate documents rather
+  than a new deep frame. CI's figure jobs labelled both "not a figure move"
+  (a value leaving its band is an ordinary failure), so no patch came back:
+  it took a local `just bless-chips` of all three chips (≈25 min of
+  sequential firmware builds), redone once after merging `main` because
+  `main`'s own C6 change moved the C6 figures again. Workaround: merge
+  `origin/main` BEFORE blessing.
+
 **Exit criteria** — a PR whose only memory effect is a few bytes of statics
 passes the gate without touching the record, and two PRs that each
 legitimately re-baseline different chips/projects do not conflict. Likely
