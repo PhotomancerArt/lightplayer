@@ -13,13 +13,13 @@ use lpc_registry::ProjectRegistry;
 use lpc_wire::{
     BindingGraphProbeRequest, BindingGraphProbeResult, ControlProductGeometry,
     ControlProductProbeRequest, ControlProductProbeResult, GeometryDisplayLayout, OutputFrameEntry,
-    OutputFrameGeometry, OutputFrameGeometryRead, OutputFrameProbeRequest, OutputFrameProbeResult,
+    OutputFrameGeometry, OutputFrameProbeRequest, OutputFrameProbeResult,
     RenderProductProbeRequest, RenderProductProbeResult, RevisionGateRead, RevisionGateResult,
     TimebaseProbeRequest, TimebaseProbeResult, WireBindingDirection, WireBindingEndpoint,
     WireBindingGraph, WireBindingGraphRead, WireBindingOrigin, WireBusChannel, WireBusChannelValue,
     WireBusChannelValues, WireCellProjection, WireChannelSampleFormat, WireConsumerPolicy,
     WireEffectiveBinding, WirePhasorOrigin, WirePhasorRow, WireProjectionOrigin,
-    WireProjectionShape, WireVisualSpace,
+    WireProjectionShape, WireVisualSpace, linear16_to_srgb8,
 };
 use lps_shared::TextureStorageFormat;
 
@@ -212,6 +212,10 @@ impl Engine {
     /// Public (unlike the sibling probes) so host-level tests can assert
     /// the effective graph directly — the binding index is load-time
     /// materialized state with no other read surface.
+    ///
+    /// Out of line, like [`Self::read_project_output_frame_probe`]: see the
+    /// note there.
+    #[inline(never)]
     pub fn read_project_binding_graph_probe(
         &mut self,
         registry: &ProjectRegistry,
@@ -396,11 +400,9 @@ impl Engine {
         let revision = self.stamp_binding_structure(lpc_wire::ser_write_json_fnv64(&graph));
         graph.revision = revision;
 
-        let structure = match request.structure {
+        let structure = match &request.structure {
             RevisionGateRead::None => RevisionGateResult::Omitted,
-            RevisionGateRead::IfChanged {
-                known_revision: Some(known),
-            } if known == revision => RevisionGateResult::Unchanged { revision },
+            read if read.holds(None, revision) => RevisionGateResult::Unchanged { revision },
             RevisionGateRead::Always | RevisionGateRead::IfChanged { .. } => {
                 RevisionGateResult::Changed(graph)
             }
@@ -518,16 +520,14 @@ impl Engine {
         sample_layout: ControlLayout,
         display_layout: Option<ControlDisplayLayout>,
     ) -> RevisionGateResult<ControlProductGeometry> {
-        let known_revision = match read {
-            RevisionGateRead::None => return RevisionGateResult::Omitted,
-            RevisionGateRead::Always => None,
-            RevisionGateRead::IfChanged { known_revision } => known_revision,
-        };
+        if matches!(read, RevisionGateRead::None) {
+            return RevisionGateResult::Omitted;
+        }
         let sample_revision = self.stamp_control_sample_layout(product, &sample_layout);
         let revision = display_layout.as_ref().map_or(sample_revision, |layout| {
             sample_revision.max(layout.revision())
         });
-        if known_revision == Some(revision) {
+        if read.holds(None, revision) {
             return RevisionGateResult::Unchanged { revision };
         }
         let display_layout = match display_layout {
@@ -562,6 +562,18 @@ impl Engine {
     /// bytes clone is deliberate and accepted — it is one more copy of a
     /// buffer that already exists, where a render call would be a whole
     /// frame's work.
+    ///
+    /// # Out of line, for flash
+    ///
+    /// This probe and [`Self::read_project_binding_graph_probe`] are the two
+    /// largest probe bodies, and inlined into the project-read `async fn`
+    /// they were copied more than once into the firmware's `tick_and_send`
+    /// state machine. Keeping BOTH out of line took 7,738 B off the
+    /// ESP32-C6 image; either one alone saved only a few hundred bytes, so
+    /// do not drop one of the pair without re-measuring
+    /// (`just fw-esp32c6-size-check`; `docs/adr/2026-07-28-esp32c6-flash-budget.md`).
+    /// One call per probe per read costs nothing measurable.
+    #[inline(never)]
     pub fn read_project_output_frame_probe(
         &mut self,
         registry: &ProjectRegistry,
@@ -618,13 +630,14 @@ impl Engine {
                 RuntimeChannelSampleFormat::U16 => WireChannelSampleFormat::U16,
             };
             // The client's precision, never wider than what was published:
-            // a `U16` buffer asked for `U8` is rounded to nearest; anything
-            // else travels verbatim. No ask, no bytes.
+            // a `U16` buffer is encoded in whatever the client asked for
+            // (rounded to linear `U8`, or to `Srgb8` display codes); a `U8`
+            // buffer travels verbatim. No ask, no bytes.
             let (sample_format, bytes) = match (request.samples, published) {
                 (None, _) => (None, Vec::new()),
-                (Some(WireChannelSampleFormat::U8), WireChannelSampleFormat::U16) => (
-                    Some(WireChannelSampleFormat::U8),
-                    encode_unorm16_le_bytes(&buffer.value().bytes(), WireChannelSampleFormat::U8),
+                (Some(asked), WireChannelSampleFormat::U16) => (
+                    Some(asked),
+                    encode_unorm16_le_bytes(&buffer.value().bytes(), asked),
                 ),
                 (Some(_), published) => (Some(published), buffer.value().bytes().into_owned()),
             };
@@ -672,10 +685,10 @@ impl Engine {
         &mut self,
         registry: &ProjectRegistry,
         candidate: &PublishedOutputCandidate,
-        read: &OutputFrameGeometryRead,
+        read: &RevisionGateRead,
         layout_bytes_spent: &mut usize,
     ) -> RevisionGateResult<OutputFrameGeometry> {
-        if matches!(read, OutputFrameGeometryRead::None) || candidate.fragments.is_empty() {
+        if matches!(read, RevisionGateRead::None) || candidate.fragments.is_empty() {
             return RevisionGateResult::Omitted;
         }
         let parts = self.output_frame_display_parts(registry, candidate);
@@ -683,7 +696,7 @@ impl Engine {
             .revision
             .max(candidate.placement_revision)
             .max(candidate.sample_layout_revision);
-        if read.holds(candidate.node, revision) {
+        if read.holds(Some(candidate.node), revision) {
             return RevisionGateResult::Unchanged { revision };
         }
 
@@ -906,23 +919,17 @@ fn wire_output_placement(fragment: &OutputFragment) -> lpc_wire::WireOutputPlace
     }
 }
 
+/// Linear RGBA16 texels to RGB display codes: the same correctly rounded
+/// sRGB8 encoding the `Srgb8` channel-sample format uses
+/// (`lpc_wire::linear16_to_srgb8`), integer-only, so one table serves both.
 fn rgba16_linear_to_srgb8(bytes: &[u8]) -> alloc::vec::Vec<u8> {
     let mut out = alloc::vec::Vec::with_capacity(bytes.len() / 8 * 3);
     for px in bytes.chunks_exact(8) {
-        out.push(linear_unorm16_to_srgb8(u16::from_le_bytes([px[0], px[1]])));
-        out.push(linear_unorm16_to_srgb8(u16::from_le_bytes([px[2], px[3]])));
-        out.push(linear_unorm16_to_srgb8(u16::from_le_bytes([px[4], px[5]])));
+        out.push(linear16_to_srgb8(u16::from_le_bytes([px[0], px[1]])));
+        out.push(linear16_to_srgb8(u16::from_le_bytes([px[2], px[3]])));
+        out.push(linear16_to_srgb8(u16::from_le_bytes([px[4], px[5]])));
     }
     out
-}
-
-/// Encode one linear unorm16 sample as sRGB8 via the generated lookup
-/// table — an index instead of a per-sample `libm::powf`, which dominated
-/// on-device probe cost (thousands of calls per frame). Within 1 u8 LSB of
-/// the exact float transfer (see [`srgb8_lut`](super::srgb8_lut) and the
-/// exhaustive test below).
-fn linear_unorm16_to_srgb8(value: u16) -> u8 {
-    super::srgb8_lut::LINEAR16_TO_SRGB8[(value >> 4) as usize]
 }
 
 /// The render-product probe's `(projection, origin)` pair: `Some` exactly
@@ -1103,31 +1110,6 @@ mod tests {
     use super::*;
     use crate::engine::test_support::{EngineTestBuilder, bus, output, produced_slot};
 
-    /// The exact float transfer the LUT replaces (the pre-LUT
-    /// implementation, kept as the test reference).
-    fn linear_unorm16_to_srgb8_reference(value: u16) -> u8 {
-        let linear = value as f32 / u16::MAX as f32;
-        let srgb = if linear <= 0.003_130_8 {
-            linear * 12.92
-        } else {
-            1.055 * libm::powf(linear, 1.0 / 2.4) - 0.055
-        };
-        (srgb.clamp(0.0, 1.0) * 255.0 + 0.5) as u8
-    }
-
-    #[test]
-    fn srgb8_lut_matches_float_reference_within_one_lsb() {
-        for value in 0..=u16::MAX {
-            let lut = linear_unorm16_to_srgb8(value);
-            let reference = linear_unorm16_to_srgb8_reference(value);
-            let error = (i16::from(lut) - i16::from(reference)).abs();
-            assert!(
-                error <= 1,
-                "lut diverges at {value}: lut={lut} reference={reference}"
-            );
-        }
-    }
-
     #[test]
     fn binding_graph_probe_reports_bindings_channels_and_values() {
         let mut h = EngineTestBuilder::new()
@@ -1242,12 +1224,8 @@ mod tests {
         let (graph, _) = h.binding_graph(true);
 
         h.tick(10).expect("tick");
-        let read = gated_binding_graph_read(
-            &mut h,
-            RevisionGateRead::IfChanged {
-                known_revision: Some(graph.revision),
-            },
-        );
+        let read =
+            gated_binding_graph_read(&mut h, RevisionGateRead::if_changed(Some(graph.revision)));
         assert_eq!(
             read.structure,
             RevisionGateResult::Unchanged {
@@ -1266,7 +1244,7 @@ mod tests {
         // A client that holds nothing, or a stale revision, gets it all.
         for known_revision in [None, Some(graph.revision.next())] {
             let read =
-                gated_binding_graph_read(&mut h, RevisionGateRead::IfChanged { known_revision });
+                gated_binding_graph_read(&mut h, RevisionGateRead::if_changed(known_revision));
             assert_eq!(read.structure, RevisionGateResult::Changed(graph.clone()));
         }
         assert_eq!(

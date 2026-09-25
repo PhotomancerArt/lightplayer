@@ -1347,25 +1347,27 @@ fn the_direct_load_mounts_the_flash_filesystem() {
 /// `_stack_start - _stack_end` on both sides, not inferred from the hash.
 /// The old pins were `3f91b2e2…` and `660ac8dd…`.
 ///
-/// **Re-measured on the merge of `origin/main` (BLE M3's access core: the server loop's
-/// future in `.bss` shrank 80 B, 45,280 -> 45,360) into `lp-json-pack` (the
-/// link epoch and the transport's per-link encoding: +24 B of statics,
-/// 45,280 -> 45,256 on its own). Measured on the merged image, not summed:
-/// `_stack_start - _stack_end` = `0x3ffe0000 - 0x3ffd4ef8` = 45,320 B
-/// (read off the ELF, same lengths). M3's pins were `b1e5c61c…` and
+/// **And by lean-wire's follow-ups (#804), same lengths.** `[INIT] main
+/// stack 45360 B` became `45344 B` (−16 B, matching the S3's `[stack]`
+/// total in the same change). The old pins were `b1e5c61c…` and
 /// `50ca9bf9…`.
+///
+/// **Re-measured on the merge of `origin/main` (lean-wire's follow-ups #804, 45,360 -> 45,344, and the IN-endpoint gate #805) into `lp-json-pack` (the link epoch and the transport's per-link encoding: +24 B of statics on its own), same lengths.** Measured on the merged
+/// image, not summed: `_stack_start - _stack_end` = `0x3ffe0000 - 0x3ffd4f08`
+/// = 45,304 B (`[INIT] main stack 45344 B` -> `45304 B`). #804's pins were
+/// `92c857b2…` and `c0951fb6…`.
 ///
 /// A blank chip: the P3 prefix, the `[ERROR] no lpfs partition …` fallback,
 /// and the dual-core tail.
 const INIT_CHAIN_BLANK_SHA256: &str =
-    "c5abb848a20534327e7f75523184650d0a682047c6bdc6ab30c4738b5dd54d23";
+    "8a368284c672fcb4ea35e32e5be7ef7cce2fd867dce0add1908f9ba6a930fe92";
 const INIT_CHAIN_BLANK_LEN: usize = 804;
 
 /// The merged image: the same prefix plus `[INIT] flash filesystem mounted`,
 /// and **fewer** bytes than the blank-chip chain, because the error line it
 /// replaces is longer than the success line.
 const INIT_CHAIN_MERGED_SHA256: &str =
-    "44dcf3d599d81d21573a5e7456b5dd108194820d90f233bb5fea9e27aef7f461";
+    "56989cf41cb0c54646a810d471851c35078265845aad3d5d6d5045c78079277a";
 const INIT_CHAIN_MERGED_LEN: usize = 703;
 
 /// The boot threshold, pinned on both chips.

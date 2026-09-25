@@ -52,14 +52,15 @@ const PREFIX_BYTES: usize = 543;
 /// shrank 80 B when heartbeats became per link — read off both ELFs'
 /// `_stack_start - _stack_end`, not inferred. The old pin was `ea8bae30…`.
 ///
-/// ⚠️ **Moved again by the merge of `origin/main` (BLE M3's access core: the server loop's
-/// future in `.bss` shrank 80 B, 45,280 -> 45,360) into `lp-json-pack` (the
-/// link epoch and the transport's per-link encoding: +24 B of statics,
-/// 45,280 -> 45,256 on its own). Measured on the merged image, not summed:
-/// `_stack_start - _stack_end` = `0x3ffe0000 - 0x3ffd4ef8` = 45,320 B.**
-/// Same 543 bytes, one line: `[INIT] main stack 45360 B` -> `45320 B`. M3's
-/// pin was `465c8d52…`.
-const PREFIX_SHA256: &str = "c79000363d9823b04e6ba6bbb6c4425ef70cb87379c31ceb33f4740d8d111c5d";
+/// ⚠️ **Moved by lean-wire's follow-ups (#804), same 543 bytes:**
+/// `[INIT] main stack 45360 B` became `45344 B` (−16 B, the same −16 the
+/// S3's `[stack]` total moved in that change). The old pin was `465c8d52…`.
+///
+/// ⚠️ **Moved again by the merge of `origin/main` (lean-wire's follow-ups #804, 45,360 -> 45,344, and the IN-endpoint gate #805) into `lp-json-pack` (the link epoch and the transport's per-link encoding: +24 B of statics on its own). Measured on the merged image, not summed:
+/// `_stack_start - _stack_end` = `0x3ffe0000 - 0x3ffd4f08` = 45,304 B.** Same
+/// 543 bytes, one line: `[INIT] main stack 45344 B` -> `45304 B`. #804's pin
+/// was `05b27095…`.
+const PREFIX_SHA256: &str = "365c9e6d6b24f128edd9445d9bdc0227ad3bc46c2e679a002030713a7fd5b7d4";
 
 /// Run the shipped image, direct-loaded, under `--strict-bus`, stopping at
 /// the first complete line containing `exit_on`.
@@ -134,9 +135,10 @@ fn the_init_chain_comes_out_of_the_wire_byte_for_byte() {
         "[INIT] chip=esp32 arch=xtensa heap=15072+112640+98304+15536=241552",
         "[INIT] heap regions: 0 0x3ffe0440+15072 (ROM PRO stack)",
         // 45,280 until the BLE plan's M3 shrank the server loop's future (in
-        // `.bss`) by 80 B (45,360); 45,320 on the merge with lp-json-pack's
-        // statics, read off the ELF. See PREFIX_SHA256.
-        "[INIT] main stack 45320 B",
+        // `.bss`) by 80 B; 45,344 after lean-wire's follow-ups; 45,304 on the
+        // merge with lp-json-pack's statics, read off the ELF. See
+        // PREFIX_SHA256.
+        "[INIT] main stack 45304 B",
         "[RECOVERY] boot: cause=power-on level=green safe_mode=false prior_boot_complete=true",
         "[INIT] runtime started",
         "[INIT] I/O task spawned (uart0 921600 8N1, swi2 executor prio2, timg0t1 pacer 1ms)",
@@ -468,7 +470,7 @@ fn the_two_paths_report_the_same_memory_figures() {
         "and it is the same stack, reported the same way"
     );
     assert!(
-        a[0].contains(" of 45320 B ") && b[0].contains(" of 45320 B "),
+        a[0].contains(" of 45304 B ") && b[0].contains(" of 45304 B "),
         "the stack's size is the same on both paths: {a:?} vs {b:?}"
     );
     // The one figure the boot banner carries too, so the triple can be read

@@ -223,7 +223,7 @@ fn g3_1_the_cable_comes_out_at_six_seconds_and_the_link_comes_back_at_nine() {
     let delivered = r.m.usb_sj().text();
     // Before the unplug: the boot, the hello, the first heartbeat.
     let hello = delivered
-        .find("\nM!{\"id\":0,\"msg\":{\"hello\":{\"proto\":23,")
+        .find("\nM!{\"id\":0,\"msg\":{\"hello\":{\"proto\":24,")
         .expect("the unsolicited hello reached the host");
     let first_beat = heartbeat_at(&delivered, 5_000).expect("the 5 s heartbeat reached the host");
     assert!(

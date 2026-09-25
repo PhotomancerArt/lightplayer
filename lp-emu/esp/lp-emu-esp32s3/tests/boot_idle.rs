@@ -703,7 +703,7 @@ fn the_ledger_triple_is_elicited_by_a_stop_all_on_the_wire() {
     assert_eq!(stack.len(), 1, "one [stack] line per stop-all:\n{text}");
     assert_eq!(mem.len(), 2, "[MEM] before and after the stop:\n{text}");
     assert_eq!(jit.len(), 2, "[JIT] before and after the stop:\n{text}");
-    // `[stack] heartbeat: high-water <used> B of 37224 B (<headroom> B headroom)`
+    // `[stack] heartbeat: high-water <used> B of 37216 B (<headroom> B headroom)`
     //
     // Re-baselined 2026-09-23 (lean-wire P7): 37,280 → 37,272 (−8 B). The
     // wire-side `RevisionGateRead`/`RevisionGateResult` gate and the
@@ -718,32 +718,37 @@ fn the_ledger_triple_is_elicited_by_a_stop_all_on_the_wire() {
     // the stack: 37,272 → 37,296 (+24 B, the same +24 the access gate cost
     // before lean-wire, 37,280 → 37,304). Measured on the merged tree.
     //
-    // Then the merge of `origin/main` (M3) into `lp-json-pack`: 37,296 →
-    // 37,248 (−48 B). lp-json-pack's link epoch and the transport's per-link
-    // encoding add statics, and `.bss` takes them from the stack; measured on
-    // the merged image as its ELF's `_stack_start − _stack_end`
-    // (`0x3fcdb700 − 0x3fcd2580`), not summed from the two branches.
+    // Then lean-wire's follow-ups (#804) left the stack 16 B less:
+    // 37,296 → 37,280, the same −16 B the classic's `[INIT] main stack` line
+    // moved (45,360 → 45,344) in the same change. Measured by CI on the
+    // merged tree; not attributed to one symbol.
     //
     // Then 2026-09-24, the io_task's IN-endpoint gate ([`LINK_DEFECT`]):
     // `.bss` grew by 24 B (the io_task's statically-allocated future holds
-    // the gate's await state), 37,296 → 37,272 on
-    // its own branch; merged into `lp-json-pack` (#805 into #795) the same
-    // −24 B lands on 37,248 → 37,224, measured on the merged image's ELF.
-    // The stop-all path is unchanged.
+    // the gate's await state), 37,280 → 37,256 (measured 37,296 → 37,272
+    // before #804's −16 B merged under it); the stop-all path is unchanged.
+    // Measured on the merged tree with `just heap-budget-baseline-chips-s3`.
+    //
+    // Then the merge of `origin/main` (#804 + #805 above) into `lp-json-pack`:
+    // 37,256 → 37,216 (−40 B). lp-json-pack's link epoch and the transport's
+    // per-link encoding add statics (−48 B on its own before #805; the gate's
+    // +24 B future state was already in both), and `.bss` takes them from the
+    // stack. Measured on the merged image as its ELF's
+    // `_stack_start − _stack_end` (`0x3fcdb700 − 0x3fcd25a0`), not summed.
     let words: Vec<&str> = stack[0].split_whitespace().collect();
     let used: u32 = words[3].parse().expect("high-water bytes");
     assert_eq!(
         &words[4..7],
-        &["B", "of", "37224"],
-        "the S3's 37,224 B total: {}",
+        &["B", "of", "37216"],
+        "the S3's 37,216 B total: {}",
         stack[0]
     );
     let headroom: u32 = words[8]
         .trim_start_matches('(')
         .parse()
         .expect("headroom bytes");
-    assert_eq!(used + headroom, 37_224, "{}", stack[0]);
-    assert!(used > 0 && used < 37_224, "{}", stack[0]);
+    assert_eq!(used + headroom, 37_216, "{}", stack[0]);
+    assert!(used > 0 && used < 37_216, "{}", stack[0]);
     for line in &mem {
         assert!(
             line.contains(" used=") && line.contains(" largest_free="),
@@ -771,7 +776,7 @@ fn the_ledger_triple_is_elicited_by_a_stop_all_on_the_wire() {
     );
     assert!(
         !text.contains("[INIT] main stack"),
-        "the S3 prints no `main stack` line; its 37,224 B total is in every `[stack]` \
+        "the S3 prints no `main stack` line; its 37,216 B total is in every `[stack]` \
          line's `of <total> B` instead"
     );
 

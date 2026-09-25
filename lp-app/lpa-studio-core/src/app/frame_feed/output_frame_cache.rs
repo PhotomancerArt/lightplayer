@@ -59,8 +59,8 @@ use lpc_model::{
     ControlSampleLayout, ControlSampleSpan, NodeId, Revision,
 };
 use lpc_wire::{
-    KnownOutputFrameGeometry, OutputFrameEntry, OutputFrameGeometry, OutputFrameGeometryRead,
-    RevisionGateResult, WireOutputPlacement,
+    KnownRevision, OutputFrameEntry, OutputFrameGeometry, RevisionGateRead, RevisionGateResult,
+    WireOutputPlacement,
 };
 
 use crate::{UiControlProductPreview, UiControlSampleFormat};
@@ -256,24 +256,21 @@ impl OutputFrameCache {
     /// list — never seen, or dropped — gets its geometry outright, which is
     /// how a new output or a deferred one asks `Always` while its neighbours
     /// answer `Unchanged`. `Always` while nothing is held at all.
-    pub fn geometry_read(&self) -> OutputFrameGeometryRead {
-        let known: Vec<KnownOutputFrameGeometry> = self
+    pub fn geometry_read(&self) -> RevisionGateRead {
+        let known: Vec<KnownRevision> = self
             .outputs
             .iter()
             .filter_map(|(node, output)| {
-                output
-                    .geometry
-                    .as_ref()
-                    .map(|geometry| KnownOutputFrameGeometry {
-                        node: *node,
-                        revision: geometry.revision,
-                    })
+                output.geometry.as_ref().map(|geometry| KnownRevision {
+                    node: Some(*node),
+                    revision: geometry.revision,
+                })
             })
             .collect();
         if known.is_empty() {
-            return OutputFrameGeometryRead::Always;
+            return RevisionGateRead::Always;
         }
-        OutputFrameGeometryRead::IfChanged { known }
+        RevisionGateRead::IfChanged { known }
     }
 
     /// Drop every output's cached geometry, keeping the frames: the next read
@@ -495,7 +492,7 @@ mod tests {
     #[test]
     fn the_first_read_asks_always_and_later_ones_list_what_they_hold() {
         let mut cache = OutputFrameCache::default();
-        assert_eq!(cache.geometry_read(), OutputFrameGeometryRead::Always);
+        assert_eq!(cache.geometry_read(), RevisionGateRead::Always);
 
         cache.apply(&[with_layout(
             entry(4, 1, vec![1, 0, 2, 0, 3, 0]),
@@ -505,7 +502,7 @@ mod tests {
 
         assert_eq!(
             cache.geometry_read(),
-            OutputFrameGeometryRead::IfChanged {
+            RevisionGateRead::IfChanged {
                 known: vec![known(4, 11)],
             }
         );
@@ -610,7 +607,7 @@ mod tests {
 
         assert_eq!(
             cache.geometry_read(),
-            OutputFrameGeometryRead::IfChanged {
+            RevisionGateRead::IfChanged {
                 known: vec![known(4, GEOMETRY_REVISION)],
             },
             "the refusal is held, not re-asked"
@@ -652,7 +649,7 @@ mod tests {
         );
         assert_eq!(
             cache.geometry_read(),
-            OutputFrameGeometryRead::IfChanged {
+            RevisionGateRead::IfChanged {
                 known: vec![known(4, 11)],
             },
             "output 5 is off the list, so the engine sends its geometry"
@@ -661,7 +658,7 @@ mod tests {
         // An `Unchanged` naming a revision this cache never held is no
         // better than nothing: it is dropped and asked for again too.
         cache.apply(&[unchanged(entry(4, 2, vec![3, 0, 3, 0, 3, 0]), 99)]);
-        assert_eq!(cache.geometry_read(), OutputFrameGeometryRead::Always);
+        assert_eq!(cache.geometry_read(), RevisionGateRead::Always);
         assert_eq!(
             cache
                 .frame(NodeId::new(4))
@@ -686,7 +683,7 @@ mod tests {
 
         cache.forget_geometry();
 
-        assert_eq!(cache.geometry_read(), OutputFrameGeometryRead::Always);
+        assert_eq!(cache.geometry_read(), RevisionGateRead::Always);
         assert!(cache.frame(NodeId::new(4)).is_some());
     }
 
@@ -910,9 +907,9 @@ mod tests {
     /// The geometry revision [`entry`] sends by default.
     const GEOMETRY_REVISION: i64 = 1;
 
-    fn known(node: u32, revision: i64) -> KnownOutputFrameGeometry {
-        KnownOutputFrameGeometry {
-            node: NodeId::new(node),
+    fn known(node: u32, revision: i64) -> KnownRevision {
+        KnownRevision {
+            node: Some(NodeId::new(node)),
             revision: Revision::new(revision),
         }
     }

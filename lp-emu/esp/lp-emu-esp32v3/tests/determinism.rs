@@ -334,26 +334,33 @@ fn the_snapshot_carries_the_state_that_is_not_a_register() {
 /// which is what the two-cycle shift upstream of it buys. Bytes, sha and
 /// skips did not move.
 ///
-/// Then **−98 each on the merge of `origin/main` (M3) into `lp-json-pack`:
-/// 3,251,030 → 3,250,932 cycles, 3,251,010 → 3,250,912 instructions.** Again
-/// the image, measured on the merged tree with the same lp-emu: the two
-/// branches' statics combine to a main stack of 45,320 B (M3 alone 45,360,
-/// lp-json-pack alone 45,256; the merged ELF's `_stack_start − _stack_end`),
-/// so the `stack_probe::paint` loop above starts 40 B (10 words) higher —
-/// 70 of the 98 at its 7 instructions a word. The other 28 were not
-/// attributed per symbol; the skip count did not move, and the bytes moved by
-/// the one `main stack` line (see `PREFIX_SHA256`).
-const PREFIX_CYCLES: u64 = 3_250_932;
-const PREFIX_INSTRUCTIONS: u64 = 3_250_912;
+/// Then **−21 with lean-wire's follow-ups (#804): 3,251,030 → 3,251,009
+/// cycles, 3,251,010 → 3,250,989 instructions**, in the same change that
+/// left the main stack 16 B smaller (`45360 B` → `45344 B`, the one line of
+/// the 543 bytes that moved; see `PREFIX_SHA256`). A smaller stack is fewer
+/// `stack_probe::paint` iterations, which is the likely home of the drop,
+/// but it was NOT isolated per symbol with `LP_EMU_XT_BLOCKPROF`, unlike
+/// the entries above. Skips did not move.
+///
+/// Then **−93 each on the merge of `origin/main` (lean-wire's follow-ups #804, 45,360 -> 45,344, and the IN-endpoint gate #805) into `lp-json-pack` (the link epoch and the transport's per-link encoding: +24 B of statics on its own): 3,251,009 → 3,250,916 cycles,
+/// 3,250,989 → 3,250,896 instructions.** Measured on the merged tree with the
+/// same lp-emu: the merged ELF's main stack is 45,304 B (#804 alone 45,344),
+/// so the `stack_probe::paint` loop starts 40 B (10 words) higher — 70 of the
+/// 93 at its 7 instructions a word. The other 23 were not attributed per
+/// symbol; the skip count did not move, and the bytes moved by the one
+/// `main stack` line (see `PREFIX_SHA256`).
+const PREFIX_CYCLES: u64 = 3_250_916;
+const PREFIX_INSTRUCTIONS: u64 = 3_250_896;
 const PREFIX_IDLE_SKIPS: u64 = 0;
 const PREFIX_BYTES: usize = 543;
 /// Moved by the BLE plan's M3 (access core): one line of the 543 bytes,
 /// `[INIT] main stack 45280 B` → `45360 B` (the server loop's future in
 /// `.bss` shrank 80 B). See `boot_idle.rs`'s `PREFIX_SHA256`. Was `ea8bae30…`.
-/// Then `45360 B` -> `45320 B` on the merge with `lp-json-pack` (+24 B of
-/// statics; the merged ELF's `_stack_start - _stack_end`). M3's pin was
-/// `465c8d52…`.
-const PREFIX_SHA256: &str = "c79000363d9823b04e6ba6bbb6c4425ef70cb87379c31ceb33f4740d8d111c5d";
+/// Moved again by lean-wire's follow-ups (#804): `45360 B` → `45344 B`.
+/// Was `465c8d52…`.
+/// Then `45344 B` → `45304 B` on the merge with `lp-json-pack` (its statics;
+/// the merged ELF's `_stack_start - _stack_end`). #804's pin was `05b27095…`.
+const PREFIX_SHA256: &str = "365c9e6d6b24f128edd9445d9bdc0227ad3bc46c2e679a002030713a7fd5b7d4";
 
 /// **The single-core safety net.** A run in which core 1 never starts is
 /// the run M3 produced: same bytes, same sha, same cycles, same

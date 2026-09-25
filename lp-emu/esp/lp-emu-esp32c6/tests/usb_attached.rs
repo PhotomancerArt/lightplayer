@@ -40,14 +40,14 @@ const SERIAL_IN_EMPTY: u32 = 1 << 3;
 /// esp-println line that precedes everything).
 const DELIVERED_IN_ORDER: &[&str] = &[
     "[INIT] Initializing board...\n",
-    "\nM!{\"id\":0,\"msg\":{\"hello\":{\"proto\":23,",
+    "\nM!{\"id\":0,\"msg\":{\"hello\":{\"proto\":24,",
     "\"boardId\":\"seeed/xiao-esp32-c6\"",
     "\"baseMac\":\"a0:f2:62:87:b4:8c\"",
     "Esp32C6RmtWs281xDriver: 2 WS281x channels for 2 declared",
     "ESP-NOW radio ready",
     "[RECOVERY] boot complete",
     "M!{\"id\":0,\"msg\":{\"heartbeat\":{",
-    "\"totalBytes\":325536",
+    "\"totalBytes\":301536",
     "[stack] heartbeat: high-water",
 ];
 

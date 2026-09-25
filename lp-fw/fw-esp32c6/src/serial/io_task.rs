@@ -213,6 +213,7 @@ async fn read_serial<R: Read>(
             conn.note_host_active();
             read_buffer.extend_from_slice(&temp_buf[..n]);
             process_read_buffer(read_buffer, router);
+            release_read_buffer_if_idle(read_buffer);
         }
         _ => {}
     }
@@ -254,6 +255,21 @@ async fn drain_server_write_request<W: Write>(tx: &mut W, conn: &mut UsbConnecti
 /// Process read buffer and extract complete lines
 ///
 /// Looks for newlines, extracts lines starting with `M!`, and pushes to incoming queue.
+/// Above this, an emptied read buffer gives its memory back.
+const READ_BUFFER_KEEP: usize = 1024;
+
+/// Once every complete line has been handed on and nothing partial is left,
+/// drop a buffer that a long line (an upload's file chunk: several KB) grew.
+/// The buffer lives for the whole boot and is reallocated wherever the heap
+/// has room at the time — while a project runs, above the project's memory —
+/// so kept capacity split the heap the project later freed
+/// (docs/defects/2026-09-24-ble-enabled-c6-refuses-a-project-switch-after-the-heap-cut.md).
+fn release_read_buffer_if_idle(read_buffer: &mut Vec<u8>) {
+    if read_buffer.is_empty() && read_buffer.capacity() > READ_BUFFER_KEEP {
+        *read_buffer = Vec::new();
+    }
+}
+
 fn process_read_buffer(read_buffer: &mut Vec<u8>, router: &MessageRouter) {
     // Find newlines and process complete lines
     while let Some(newline_pos) = read_buffer.iter().position(|&b| b == b'\n') {

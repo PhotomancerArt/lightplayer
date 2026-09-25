@@ -8,7 +8,7 @@ license.workspace = true
 rust-version.workspace = true
 
 [features]
-default = ["esp32c6", "server", "radio", "json-pack"]
+default = ["esp32c6", "server", "radio", "ble", "json-pack"]
 esp32c6 = [
     "esp-backtrace/esp32c6",
     "esp-bootloader-esp-idf/esp32c6",
@@ -33,6 +33,25 @@ radio = [
     "esp-rtos/esp-alloc",
     "esp-rtos/esp-radio",
 ]  # Root-owned ESP-NOW radio capability
+# The BLE link (plan `ble-remote-control` M4, docs/adr/2026-09-24-ble-transport.md):
+# the wire over a Nordic-UART GATT service, one untrusted link per connection.
+# In the default image, but INERT until the device store (`/.lp/access.json`)
+# says `bleEnabled: true` — read once at boot; nothing initialises the BLE
+# controller otherwise, so a BLE-off board (and every emulated one) runs as
+# before. `esp-radio/coex` is what lets BLE share the one radio with
+# Wi-Fi/ESP-NOW (M2 Run G). Measure both sides of this gate with
+# `just fw-esp32c6-size-check` (on) and the same build with
+# `--no-default-features --features esp32c6,server,radio` (off).
+ble = [
+    "radio",
+    "esp-radio/ble",
+    "esp-radio/coex",
+    "dep:trouble-host",
+    "dep:bt-hci",
+    "dep:heapless",
+    "dep:static_cell",
+    "dep:embassy-sync-07",
+]
 naga = ["lpa-server/naga"]
 # NOTE: the former `ws281x_2blocks` feature is gone: the RMT block plan is now
 # computed at driver init from the board manifest's declared WS281x channel
@@ -120,6 +139,28 @@ bench_project_rocaille = ["bench_render_loop"]
 # returns). Use with `ws281x_telemetry`; `touch src/main.rs` after flipping.
 stress_s2 = ["radio"]  # WiFi scan loop (repeated active scans, station mode)
 stress_s3 = ["radio"]  # ESP-NOW broadcast chatter, max payload, back to back
+# BLE M4's desk ESP-NOW loss meter beside the product server — OFF by default,
+# never shipped. Same shape as the stress builds: replaces the ESP-NOW radio
+# driver registration with M2's `test_ble_coex` counter (same frame, same
+# `[COEX]` line). See `src/desk_espnow_meter.rs`.
+desk_espnow_meter = ["radio"]
+# Heap diagnostics — OFF by default, never shipped. `heap_map_diag` logs the
+# heap's holes and live spans by address (`[heapmap]`, `src/heap_map.rs`);
+# `heap_track_diag` adds the backtrace of every live allocation at or above
+# main-region offset `LP_HEAP_TRACK_FROM` (build-time, decimal; this build
+# gives the heap only 16 KiB of the reclaimed segment and keeps its table in
+# the rest);
+# `heap_diag_ble_standin` leaks BLE's boot-time heap (Run I: 19,436 + 3,500 +
+# 1,372 B) where BLE would start, for an emulated board, which never starts
+# BLE. Written for docs/defects/2026-09-24-ble-enabled-c6-refuses-a-project-switch-after-the-heap-cut.md.
+# BLE M4 round 3's connection-parameter experiment (Run K) — OFF by default,
+# never shipped: the requested interval / latency / timeout (and an
+# active/idle switch) come from `/.lp/ble-exp.txt`, read at boot. See
+# `src/ble/conn_params.rs`, `desk`.
+desk_ble_params = ["ble"]
+heap_map_diag = ["lpc-shared"]
+heap_track_diag = ["heap_map_diag", "esp-alloc/alloc-hooks"]
+heap_diag_ble_standin = ["heap_map_diag"]
 # The `rmt-chase` payload's harness: a 256-LED white chase on GPIO18 through
 # the shipping `lp-ws281x` refill path, three passes, one `rmt-frame` record
 # per frame. The pattern, the checksum and the record live in fw-checks as
@@ -205,7 +246,14 @@ test_espnow_broadcast = ["dep:fw-checks", "fw-checks/check-espnow-broadcast", "r
 # sent, and prints heap at each bring-up stage. No server, no WiFi init — it
 # answers "can this chip, on this esp-radio, talk BLE at all, and what does
 # the controller cost". Never shipped.
-test_ble = ["radio", "esp-radio/ble", "dep:trouble-host", "dep:bt-hci", "dep:heapless", "dep:static_cell", "dep:embassy-sync-07"]
+test_ble = ["ble"]
+# test_ble plus Wi-Fi/ESP-NOW brought up the product's way, and an ESP-NOW
+# loss meter between two boards (plan `ble-remote-control`, M2 Runs G/H).
+# `esp-radio/coex` is what lets the two stacks share the one radio (the `ble`
+# feature already enables it; named here too so the harness says so).
+# Build-time knobs: LP_COEX_BLE=0, LP_COEX_RF_SWITCH=0, LP_COEX_HZ (see
+# src/tests/test_ble_coex.rs). Never shipped.
+test_ble_coex = ["test_ble", "esp-radio/coex"]
 
 # FIXTURE builds — test scaffolding, never shipped. Make this CURRENT
 # build misreport its hello so a current Studio classifies it Incompatible,
@@ -245,8 +293,11 @@ esp-hal = { version = "1.1.0", features = ["log-04", "unstable"] }
 esp-rtos = { version = "0.3.0", features = ["embassy", "log-04"] }
 esp-radio = { version = "0.18.0", optional = true, features = ["esp-now", "log-04", "unstable", "wifi"] }
 esp-println = { version = "0.17.0", default-features = false, features = ["esp32c6", "jtag-serial", "log-04"] }
-esp-alloc = { version = "0.10.0", features = ["internal-heap-stats"] }
-# BLE spike only (`test_ble`). trouble-host 0.6 is the release on bt-hci 0.8,
+# `compat` (esp-alloc's C `malloc` family) is OFF: `src/c_heap.rs` provides
+# those symbols, placing the radio blobs' allocations in the reclaimed segment
+# first (docs/defects/2026-09-24-ble-enabled-c6-refuses-a-project-switch-after-the-heap-cut.md).
+esp-alloc = { version = "0.10.0", default-features = false, features = ["global-allocator", "internal-heap-stats"] }
+# The BLE link (`ble`) and its spike (`test_ble`). trouble-host 0.6 is the release on bt-hci 0.8,
 # which is what esp-radio 0.18's `BleConnector` implements.
 trouble-host = { version = "0.6.0", optional = true, default-features = false, features = ["derive", "gatt", "peripheral", "log", "connection-params-update", "default-packet-pool", "default-packet-pool-mtu-255"] }
 bt-hci = { version = "0.8.0", optional = true, default-features = false }
@@ -257,6 +308,7 @@ heapless = { version = "0.9", optional = true }
 static_cell = { version = "2.1", optional = true }
 embassy-sync-07 = { package = "embassy-sync", version = "0.7", optional = true }
 critical-section = "1"
+enumset = "1"
 
 fw-core = { path = "../fw-core", default-features = false }
 fw-esp32-common = { path = "../fw-esp32-common" }

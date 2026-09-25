@@ -1,10 +1,13 @@
 ---
-status: carried
+status: retired
 since: 2026-07-29
 logged: 2026-07-29
 area: catalog/**/*.glsl, projects/test/**/*.glsl, CI (just check / build-ci), lps-filetests
 related:
   - docs/defects/2026-07-29-uniform-struct-array-runtime-index.md
+  - docs/defects/2026-09-24-gpu-tier-refuses-the-control-message-array-idiom.md
+  - lp-shader/lps-filetests/tests/example_shaders_compile.rs
+  - PR #812
 ---
 # Shipped example shaders are not compile-gated on non-host targets
 
@@ -29,7 +32,7 @@ example in Studio. It presents as a runtime shader-compile error on a node
 that otherwise mounted and "runs", which is easy to read as a preview
 glitch rather than broken shipped content.
 
-**Workarounds**
+**Workarounds** (historical — the gate below replaced them)
 - When authoring example GLSL, copy the shape of an existing example that
   is already known-good on device rather than inventing one; the uniform
   struct-array idiom in `projects/test/events/shader.glsl` is the reference.
@@ -43,6 +46,24 @@ glitch rather than broken shipped content.
   The meteor example's render shader indexed a uniform struct array with a
   runtime value; the construct failed on 4 of 5 targets while every
   automated gate stayed green.
+- 2026-09-24 — paid down and retired by PR #812
+  (`ci: compile-gate the shipped example shaders on every target`).
+  `lp-shader/lps-filetests/tests/example_shaders_compile.rs`, run by
+  `just test-example-shaders` (chained into `test-filetests`, so CI runs it
+  behind the `shader` gate, whose filter now includes `catalog/**` and
+  `projects/test/**`), loads every catalog/ and projects/test/ project,
+  composes each shader def the way its node does, and compiles it on all 13
+  `ALL_TARGETS` — compile-only, failing on any rejection outside an
+  `ALLOWED_FAILURES` entry that names a filed defect. Its first run found a
+  new one: the GPU tier refuses the `ControlMessage` uniform-array idiom in
+  `projects/test/{events,button}`
+  ([gpu-tier-refuses-the-control-message-array-idiom](../defects/2026-09-24-gpu-tier-refuses-the-control-message-array-idiom.md),
+  open, allowlisted). Re-introducing the meteor defect's runtime index into
+  a copy of the meteor pattern failed the gate on 8 targets (every Naga
+  frontend target; `lps-glsl` and the GPU tier accept it). 711 compiles in
+  ~9 s locally on a loaded desk. One residue, by design: where the Xtensa
+  builtins image is absent (CI's Validate job has no esp toolchain) the xt
+  targets run full codegen but skip the link, with a loud note.
 
 **Exit criteria** — extend the filetest runner (or add a small harness) to
 compile every `catalog/**/*.glsl` and `projects/test/**/*.glsl` for `ALL_TARGETS`, run-free

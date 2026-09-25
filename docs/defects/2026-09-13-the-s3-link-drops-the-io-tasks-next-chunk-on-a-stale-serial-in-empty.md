@@ -276,7 +276,8 @@ both boot paths, and a stop-all's reply `M!{"id":1,"msg":"stopAllProjects"}`
 now reaches the host; with no host or a closed port the io_task waits
 instead of writing into the held packet (host-absent tried 22 B —
 esp-println's one line — where it was 22 + 64 + 2). The S3 image's `.bss`
-grew 24 B, so its stack total is 37,272 B (was 37,296), re-baselined in
+grew 24 B, so its stack total is 37,256 B (was 37,280 on main after
+#804; 37,272 against 37,296 before that merged), re-baselined in
 `scripts/heap-budget-record.json`.
 
 *The C6 is latent, and deliberately left for its own change.* It has the
