@@ -223,3 +223,80 @@ logging in with the same messages against the same access files.
 - M6 (Studio) writes the device store and sidecars and runs the login.
 - `docs/design/device-identity.md` §8 (the auth gap) is closed by this ADR;
   M7 updates it.
+
+## Amendment 2026-09-24: who has access, on the board; Bluetooth on by default
+
+Plan `lp2025/2026-09-24-1953-ble-easy-access` (P1). Yona's rule for it:
+most of the time people should not have to think about access. A physical
+connection is access, and Bluetooth should be one click, or none.
+
+### Generated keys, one salt per holder
+
+Most secrets are no longer typed. A browser generates one 32-byte random
+secret and one 16-byte salt for itself. The signed-in account has one of
+each too. Each holder installs the same `(salt, K)` on **every** device it
+touches, with `iterations: 1`: a 256-bit random secret needs no stretching.
+Typed passwords keep the client's PBKDF2 cost. The login protocol does not
+change. A client recognises its own offers in a challenge by salt, so the
+automatic unlock never has to guess and never trips the backoff.
+
+**Accepted consequence.** A salt is visible before login, since every
+challenge offers it. An observer in range can therefore tell that two
+devices share a holder (the same browser or account). A flash dump of one
+device yields that holder's `K`, and that `K` also opens the holder's
+other devices. The threat model above (someone cheeky nearby) accepts
+both. Per-device salts would have needed every browser to keep a record
+for every device.
+
+### Access files v2
+
+`SecretEntry` gains `kind` (`browser` | `account` | `password`) and an
+optional `addedAt` (epoch seconds, supplied by the client; the board has no
+wall clock). Both access files go to `version: 2`. The readers still accept
+v1, where each entry reads as `kind: password` with no time, through a
+private v1 shape that keeps `deny_unknown_fields`. Writers always write v2.
+The board decides nothing by kind. It is there for people and for a client
+recognising its own rows. Schemas regenerated.
+
+### The board merges; no client rewrites the store
+
+Before this amendment a client wrote the whole device store with an fs
+write. A second browser's write would erase the first browser's key, and no
+client could list what was installed. Four new requests fix both. All are
+**edit** tier: the classifier names them, and the table test covers them in
+all five link states.
+
+- `AccessList` answers `AccessList { bleEnabled, open, entries }`. Each
+  entry is `{ label, kind, tier, salt, addedAt? }` and **never** `k` or
+  `iterations`. The salt is the entry's identity, and it is already public
+  in every challenge.
+- `AccessAdd { entry }` merges the entry into the store. An entry with the
+  same salt replaces the old one, which is how a rename re-labels. A new
+  entry past `MAX_SECRETS_PER_FILE` is refused.
+- `AccessRemove { salt }` removes that entry. A salt that is not there is
+  a no-op.
+- `AccessSetSwitches { bleEnabled?, open? }` sets the switches. A
+  `bleEnabled` change still applies at the next boot, and the client
+  restarts the device.
+
+Each change answers with the list as it now stands. The server does the
+read-modify-write through its **base** fs (`access_store.rs`). The wire fs
+path stays write-only for access files. Nothing here relaxes it: a raw fs
+write is still possible over a trusted link, but no client needs one now.
+Project sidecars are still honoured and are not listed.
+
+### Bluetooth on by default
+
+This replaces "Locked by default" above for the device store:
+
+- A **missing** store is `DeviceAccessFile::fresh()`: Bluetooth on, not
+  open, no secrets. The radio is up, but nothing gets past the gate until
+  a key is added over USB (Studio adds its keys on a USB connect, P3 of
+  the plan).
+- A **damaged** store is still `locked()`: Bluetooth off. Damage still only
+  takes access away.
+- "Missing" is decided by `file_exists`, not by a read error. Not every fs
+  reports a missing file as `NotFound`.
+
+`WIRE_PROTO_VERSION` 23 → 24. `PROJECT_FORMAT_VERSION` is untouched: the
+access files are their own formats.

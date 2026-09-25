@@ -273,6 +273,7 @@ fn body_label(body: &ServerMsgBody) -> &'static str {
         ServerMsgBody::LoginChallenge { .. } => "LoginChallenge",
         ServerMsgBody::LoginResult(_) => "LoginResult",
         ServerMsgBody::NotPermitted { .. } => "NotPermitted",
+        ServerMsgBody::AccessList { .. } => "AccessList",
     }
 }
 

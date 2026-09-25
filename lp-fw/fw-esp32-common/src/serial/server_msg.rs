@@ -243,6 +243,9 @@ pub fn server_message_detail(msg: &lpc_wire::WireServerMessage) -> String {
         lpc_wire::server::ServerMsgBody::NotPermitted { needs } => {
             format!("NotPermitted needs={needs:?}")
         }
+        lpc_wire::server::ServerMsgBody::AccessList { entries, .. } => {
+            format!("AccessList entries={}", entries.len())
+        }
     }
 }
 

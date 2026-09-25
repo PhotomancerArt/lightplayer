@@ -708,7 +708,7 @@ fn the_ledger_triple_is_elicited_by_a_stop_all_on_the_wire() {
     assert_eq!(stack.len(), 1, "one [stack] line per stop-all:\n{text}");
     assert_eq!(mem.len(), 2, "[MEM] before and after the stop:\n{text}");
     assert_eq!(jit.len(), 2, "[JIT] before and after the stop:\n{text}");
-    // `[stack] heartbeat: high-water <used> B of 37280 B (<headroom> B headroom)`
+    // `[stack] heartbeat: high-water <used> B of 37272 B (<headroom> B headroom)`
     //
     // Re-baselined 2026-09-23 (lean-wire P7): 37,280 → 37,272 (−8 B). The
     // wire-side `RevisionGateRead`/`RevisionGateResult` gate and the
@@ -731,7 +731,7 @@ fn the_ledger_triple_is_elicited_by_a_stop_all_on_the_wire() {
     let used: u32 = words[3].parse().expect("high-water bytes");
     assert_eq!(
         &words[4..7],
-        &["B", "of", "37280"],
+        &["B", "of", "37272"],
         "the S3's 37,280 B total: {}",
         stack[0]
     );
@@ -739,8 +739,8 @@ fn the_ledger_triple_is_elicited_by_a_stop_all_on_the_wire() {
         .trim_start_matches('(')
         .parse()
         .expect("headroom bytes");
-    assert_eq!(used + headroom, 37_280, "{}", stack[0]);
-    assert!(used > 0 && used < 37_280, "{}", stack[0]);
+    assert_eq!(used + headroom, 37_272, "{}", stack[0]);
+    assert!(used > 0 && used < 37_272, "{}", stack[0]);
     for line in &mem {
         assert!(
             line.contains(" used=") && line.contains(" largest_free="),
