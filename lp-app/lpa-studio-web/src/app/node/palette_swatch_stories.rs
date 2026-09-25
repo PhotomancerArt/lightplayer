@@ -83,6 +83,7 @@ fn modes() -> Element {
         },
         step_seconds: 0.0,
         fade_seconds: 0.0,
+        pinned: None,
     };
     rsx! {
         SwatchStoryCard {
@@ -108,6 +109,48 @@ fn modes() -> Element {
                 control: palette_swatch_control(
                     "Frozen",
                     &frozen,
+                    UiSlotFieldState::editable(),
+                    false,
+                ),
+                on_action: move |_| {},
+            }
+        }
+    }
+}
+
+#[story(
+    description = "A PINNED cycle beside the same cycle unpinned: while a member is pinned the palette plays as if the set held only that one, so the band draws the pinned palette alone at full width, and the readout says `↻ 4 · pinned` — the set is still there, one click away in the chooser, it is just not what the lights are doing."
+)]
+fn pinned() -> Element {
+    let pinned = match palette_cycle() {
+        GradientConfig::Cycle {
+            set,
+            step_seconds,
+            fade_seconds,
+            ..
+        } => GradientConfig::Cycle {
+            set,
+            step_seconds,
+            fade_seconds,
+            pinned: Some(1),
+        },
+        held => held,
+    };
+    rsx! {
+        SwatchStoryCard {
+            PanelControl {
+                control: palette_swatch_control(
+                    "Cycling",
+                    &palette_cycle(),
+                    UiSlotFieldState::editable(),
+                    false,
+                ),
+                on_action: move |_| {},
+            }
+            PanelControl {
+                control: palette_swatch_control(
+                    "Pinned",
+                    &pinned,
                     UiSlotFieldState::editable(),
                     false,
                 ),

@@ -1,0 +1,59 @@
+{
+  "record": {
+    "fields": [
+      {
+        "name": "kind",
+        "shape": {
+          "value": {
+            "shape": {
+              "editor": "plain",
+              "id": 3102355672,
+              "meta": {},
+              "ty": "string"
+            }
+          }
+        }
+      },
+      {
+        "name": "len",
+        "shape": {
+          "value": {
+            "shape": {
+              "editor": "plain",
+              "id": 3065358156,
+              "meta": {},
+              "ty": "u32"
+            }
+          }
+        }
+      },
+      {
+        "name": "key",
+        "shape": {
+          "value": {
+            "shape": {
+              "editor": "plain",
+              "id": 2612013983,
+              "meta": {},
+              "ty": "string"
+            }
+          }
+        }
+      },
+      {
+        "name": "empty_key",
+        "shape": {
+          "value": {
+            "shape": {
+              "editor": "plain",
+              "id": 3065358156,
+              "meta": {},
+              "ty": "u32"
+            }
+          }
+        }
+      }
+    ],
+    "meta": {}
+  }
+}

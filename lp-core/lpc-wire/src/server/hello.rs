@@ -35,8 +35,9 @@ use crate::server::hello_auth::HelloAuth;
 ///
 /// # History
 ///
-/// - 24: JSON Pack (plan `lp-json-pack`; bumped again after the BLE M3
-///   access core took 22, and again after lean-wire follow-ups took 23) — a board writes its replies
+/// - 25: JSON Pack (plan `lp-json-pack`; bumped again after the BLE M3
+///   access core took 22, again after lean-wire follow-ups took 23, and
+///   again after the gradient pin took 24) — a board writes its replies
 ///   PACKED on a link whose host opted in: `ClientRequest::SetEncoding {
 ///   encoding, dictionary }` + its `ServerMsgBody::SetEncoding { encoding }`
 ///   answer, and `ServerHello` gains `pack_dictionary`, the fingerprint of
@@ -45,6 +46,13 @@ use crate::server::hello_auth::HelloAuth;
 ///   decode either, which is what earns the bump. From here on the
 ///   dictionary is part of the wire: `just wire-dict-check` fails a
 ///   dictionary change that does not bump this constant.
+/// - 24: `GradientConfig` gained a fifth storage field, `pinned` (an
+///   `i32`, `-1` for none) — the palette chooser's "show just this one"
+///   pin on a cycle; bumped again after lean-wire took 21 and 23 and BLE M3
+///   took 22. Every slot value, panel write and inventory frame that
+///   carries a palette changes shape, and the reader requires all five
+///   fields, so an old peer cannot decode a new palette (or the reverse).
+///   Rides with project format 11.
 /// - 23: one list-shaped revision gate (lean-wire follow-ups; bumped
 ///   again after BLE M3 took 22). The
 ///   output-frame probe's own per-output gate (`OutputFrameGeometryRead` +
@@ -246,7 +254,7 @@ use crate::server::hello_auth::HelloAuth;
 /// as `None` on new Studio and a new firmware's extra fields are ignored
 /// by old Studio. Bumping for those would mark every board running
 /// current firmware Incompatible in exchange for nothing.
-pub const WIRE_PROTO_VERSION: u32 = 24;
+pub const WIRE_PROTO_VERSION: u32 = 25;
 
 /// Unsolicited/boot-time server identity, version, and capability report.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -577,7 +585,7 @@ mod tests {
     #[test]
     fn the_proto_version_is_pinned_to_its_history() {
         assert_eq!(
-            WIRE_PROTO_VERSION, 24,
+            WIRE_PROTO_VERSION, 25,
             "if you meant to bump, add the History entry in this file's \
              doc comment and update this pin"
         );
