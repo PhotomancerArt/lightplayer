@@ -73,6 +73,50 @@ impl ProjectRegistry {
         self.apply_residency(fs, next, playlist_artifact, entry, frame, ctx)
     }
 
+    /// Load every entry of every playlist — including playlists inside the
+    /// entries this loads — and re-derive. Returns the summary across the
+    /// whole operation.
+    ///
+    /// For host tooling that must see every authored file: gates that compile
+    /// or validate each shader, Studio's all-entries check (vision D19). A
+    /// device holds one entry per playlist and never calls this.
+    pub fn make_every_entry_resident(
+        &mut self,
+        fs: &dyn LpFs,
+        frame: Revision,
+        ctx: &ParseCtx<'_>,
+    ) -> ProjectChangeSummary {
+        let before = self.inventory.clone();
+        loop {
+            let mut changed = false;
+            for (use_location, node) in &self.inventory.tree.nodes {
+                let Some(playlist) = self
+                    .inventory
+                    .defs
+                    .get(&node.def_location)
+                    .and_then(|entry| entry.state.loaded_def())
+                    .and_then(|def| def.as_playlist())
+                else {
+                    continue;
+                };
+                let idle_entry = *playlist.idle_entry.value();
+                for key in playlist.entries.entries.keys() {
+                    changed |= self
+                        .residency
+                        .set_resident(use_location, *key, true, idle_entry);
+                }
+            }
+            if !changed {
+                break;
+            }
+            // Loading only adds; nothing leaves, so no pending edit can be
+            // stranded.
+            let after = self.derive_inventory(fs, frame, ctx);
+            self.inventory = after;
+        }
+        change_summary_between(&before, &self.inventory)
+    }
+
     /// The dormant playlist entry an artifact outside the inventory belongs
     /// to, if one can be named without loading it.
     ///

@@ -49,7 +49,7 @@ use lp_gfx::{
     ShaderCompileOptions, ShaderSemantics, TextureData, TextureHandle,
 };
 use lpc_engine::{Engine, EngineServices, ProjectLoader};
-use lpc_model::{ArtifactLocation, NodeDefLocation, NodeId, TreePath};
+use lpc_model::{ArtifactLocation, NodeDefLocation, NodeId, NodeUseLocation, SlotPath, TreePath};
 use lpc_registry::ProjectRegistry;
 use lpc_shared::output::MemoryOutputProvider;
 use lpc_wire::WireNodeCommand;
@@ -377,8 +377,16 @@ impl Run {
     fn load(dir: &Path) -> Self {
         let fs = LpFsStd::new(dir.to_path_buf());
         let services = EngineServices::new(TreePath::parse("/probe.show").expect("root path"));
-        let mut rt = ProjectLoader::load_from_root(&fs, services)
-            .unwrap_or_else(|e| panic!("load {}: {e}", dir.display()));
+        // The run switches to entry 2 and back, so both entries are loaded
+        // up front (only the idle entry is resident by default).
+        let playlist_use = NodeUseLocation::root()
+            .child(SlotPath::parse("nodes[playlist]").expect("playlist use"));
+        let mut rt = ProjectLoader::load_from_root_with_resident_entries(
+            &fs,
+            services,
+            &[(playlist_use, 2)],
+        )
+        .unwrap_or_else(|e| panic!("load {}: {e}", dir.display()));
         let counters = Arc::new(SampleOutCounters::default());
         let graphics: Arc<dyn LpGraphics> = Arc::new(CountingGraphics {
             inner: lp_gfx_lpvm::TargetLpvmGraphics::new(lp_shader::ShaderFrontend::LpsGlsl),

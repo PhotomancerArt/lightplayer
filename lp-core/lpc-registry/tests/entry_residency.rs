@@ -214,6 +214,47 @@ fn residency_targets_must_be_a_loaded_playlist_entry() {
     );
 }
 
+#[test]
+fn make_every_entry_resident_loads_nested_playlists_too() {
+    let (mut scenario, _) = three_entry_project();
+    // Entry 3 becomes a playlist of its own, with a dormant second entry.
+    scenario.replace_file_and_refresh(
+        "/three/shader.json",
+        r#"{
+  "kind": "Playlist",
+  "idle_entry": 1,
+  "entries": {
+    "1": { "name": "inner-idle", "node": { "ref": "./inner_idle.json" } },
+    "2": { "name": "inner-two", "node": { "ref": "./inner_two.json" } }
+  }
+}"#,
+    );
+    for name in ["inner_idle", "inner_two"] {
+        scenario.write_file(&format!("/three/{name}.json"), r#"{ "kind": "Clock" }"#);
+    }
+
+    let changes = scenario.make_every_entry_resident();
+
+    let inner = entry_use(3);
+    let inner_two = inner.child(SlotPath::parse("entries[2].node").unwrap());
+    assert!(changes.uses.added.contains(&entry_use(2)));
+    assert!(changes.uses.added.contains(&entry_use(3)));
+    assert!(changes.uses.added.contains(&inner_two));
+    assert!(changes.uses.removed.is_empty());
+    let registry = scenario.registry();
+    for entry in 1..=3 {
+        assert!(
+            registry
+                .inventory()
+                .tree
+                .nodes
+                .contains_key(&entry_use(entry))
+        );
+    }
+    assert!(registry.def(&root_def("/three/inner_two.json")).is_some());
+    assert!(scenario.make_every_entry_resident().is_empty());
+}
+
 /// A module with a clock and a three-entry playlist (idle = 1). Each entry is
 /// a shader in its own directory with its own GLSL source.
 fn three_entry_project() -> (RegistryScenario, lpc_registry::LoadResult) {

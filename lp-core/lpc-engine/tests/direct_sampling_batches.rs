@@ -24,7 +24,7 @@ use lp_gfx::{
     ShaderCompileOptions, ShaderSemantics, TextureData, TextureHandle,
 };
 use lpc_engine::{Engine, EngineServices, ProjectLoader};
-use lpc_model::{ArtifactLocation, NodeDefLocation, TreePath};
+use lpc_model::{ArtifactLocation, NodeDefLocation, NodeUseLocation, SlotPath, TreePath};
 use lpc_registry::ProjectRegistry;
 use lpc_wire::WireNodeCommand;
 use lpfs::LpFsStd;
@@ -298,10 +298,17 @@ fn graphics(capacity: u32) -> Arc<dyn LpGraphics> {
     })
 }
 
-fn load(dir: &Path, root: &str, capacity: u32) -> (Engine, ProjectRegistry) {
+/// `resident` names playlist entries to load beyond each playlist's idle
+/// entry (the only one resident by default).
+fn load(
+    dir: &Path,
+    root: &str,
+    capacity: u32,
+    resident: &[(NodeUseLocation, u32)],
+) -> (Engine, ProjectRegistry) {
     let fs = LpFsStd::new(dir.to_path_buf());
     let services = EngineServices::new(TreePath::parse(root).expect("root path"));
-    let mut rt = ProjectLoader::load_from_root(&fs, services)
+    let mut rt = ProjectLoader::load_from_root_with_resident_entries(&fs, services, resident)
         .unwrap_or_else(|e| panic!("load {}: {e:?}", dir.display()));
     rt.engine_mut().set_graphics(Some(graphics(capacity)));
     rt.into_parts()
@@ -331,7 +338,7 @@ fn render_example(project: &str, capacity: u32) -> Frames {
         "/{}.show",
         project.rsplit('/').next().unwrap().replace('-', "_")
     );
-    let (mut engine, registry) = load(&dir, &root, capacity);
+    let (mut engine, registry) = load(&dir, &root, capacity, &[]);
     (0..TICKS)
         .map(|tick| {
             engine
@@ -345,7 +352,11 @@ fn render_example(project: &str, capacity: u32) -> Frames {
 /// `button-playlist` (241 lamps, two batches) driven into a transition, so
 /// every captured frame after the switch is a crossfade of two entries.
 fn render_crossfade(dir: &Path, capacity: u32) -> Frames {
-    let (mut engine, registry) = load(dir, "/probe.show", capacity);
+    // Entry 2 is switched to below, so it is loaded up front with the idle
+    // entry.
+    let playlist_use =
+        NodeUseLocation::root().child(SlotPath::parse("nodes[playlist]").expect("playlist use"));
+    let (mut engine, registry) = load(dir, "/probe.show", capacity, &[(playlist_use, 2)]);
     let playlist = engine
         .project_runtime_index()
         .runtime_nodes_for_def(&NodeDefLocation::artifact_root(ArtifactLocation::file(

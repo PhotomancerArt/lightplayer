@@ -116,6 +116,13 @@ pub(super) enum ProjectedNodeOwnership {
 /// Loads the authored project artifact tree into a core engine-backed runtime.
 pub struct ProjectLoader;
 
+/// Playlist entries to make resident at load, beyond each playlist's idle
+/// entry.
+enum EntryPreload<'a> {
+    Listed(&'a [(lpc_model::NodeUseLocation, u32)]),
+    Every,
+}
+
 impl ProjectLoader {
     pub fn load_from_root(
         root: &dyn LpFs,
@@ -128,6 +135,66 @@ impl ProjectLoader {
         root: &dyn LpFs,
         services: EngineServices,
         project_specifier: ArtifactSpec,
+    ) -> Result<LoadedProjectRuntime, ProjectLoadError> {
+        Self::load_project_artifact_with_resident_entries(root, services, project_specifier, &[])
+    }
+
+    /// [`Self::load_from_root`] with extra playlist entries resident.
+    ///
+    /// At load, each playlist has only its idle entry resident; every other
+    /// entry is dormant and absent from the registry and the tree (see
+    /// `lpc_registry::EntryResidency`). `resident` names more entries to load
+    /// up front, as `(playlist use location, entry key)`.
+    pub fn load_from_root_with_resident_entries(
+        root: &dyn LpFs,
+        services: EngineServices,
+        resident: &[(lpc_model::NodeUseLocation, u32)],
+    ) -> Result<LoadedProjectRuntime, ProjectLoadError> {
+        Self::load_project_artifact_with_resident_entries(
+            root,
+            services,
+            ArtifactSpec::path("/module.json"),
+            resident,
+        )
+    }
+
+    /// [`Self::load_from_root`] with every entry of every playlist resident.
+    ///
+    /// For host gates that must reach every authored file (shader compile
+    /// sweeps, validity checks). A device loads one entry per playlist.
+    pub fn load_from_root_with_every_entry_resident(
+        root: &dyn LpFs,
+        services: EngineServices,
+    ) -> Result<LoadedProjectRuntime, ProjectLoadError> {
+        Self::load_project_artifact_preloading(
+            root,
+            services,
+            ArtifactSpec::path("/module.json"),
+            EntryPreload::Every,
+        )
+    }
+
+    /// [`Self::load_project_artifact`] with extra playlist entries resident
+    /// (see [`Self::load_from_root_with_resident_entries`]).
+    pub fn load_project_artifact_with_resident_entries(
+        root: &dyn LpFs,
+        services: EngineServices,
+        project_specifier: ArtifactSpec,
+        resident: &[(lpc_model::NodeUseLocation, u32)],
+    ) -> Result<LoadedProjectRuntime, ProjectLoadError> {
+        Self::load_project_artifact_preloading(
+            root,
+            services,
+            project_specifier,
+            EntryPreload::Listed(resident),
+        )
+    }
+
+    fn load_project_artifact_preloading(
+        root: &dyn LpFs,
+        services: EngineServices,
+        project_specifier: ArtifactSpec,
+        preload: EntryPreload<'_>,
     ) -> Result<LoadedProjectRuntime, ProjectLoadError> {
         let project_path = resolve_project_specifier(&project_specifier)?;
         let project_root = services.project_root().clone();
@@ -144,6 +211,21 @@ impl ProjectLoader {
                 error: e.to_string(),
             })?;
         Self::validate_loaded_root(&registry, &load_result.root, project_path.as_path())?;
+        match preload {
+            EntryPreload::Listed(resident) => {
+                for (playlist, entry) in resident {
+                    registry
+                        .set_entry_resident(root, playlist, *entry, true, frame, &ctx)
+                        .map_err(|e| ProjectLoadError::ProjectParse {
+                            file: project_path.as_str().to_string(),
+                            error: format!("load playlist entry {entry}: {e}"),
+                        })?;
+                }
+            }
+            EntryPreload::Every => {
+                registry.make_every_entry_resident(root, frame, &ctx);
+            }
+        }
 
         let projected_nodes =
             Self::build_runtime_spine(&registry, &mut runtime, project_specifier.clone(), frame)?;
@@ -3030,8 +3112,12 @@ mod tests {
         services.set_button_service(Some(button_service));
         services.set_time_provider(Some(time_provider));
 
-        let mut rt =
-            ProjectLoader::load_from_root(fs, services).expect("load button playlist example");
+        let mut rt = ProjectLoader::load_from_root_with_resident_entries(
+            fs,
+            services,
+            &all_playlist_entries(fs),
+        )
+        .expect("load button playlist example");
         rt.set_graphics(Some(Arc::new(lp_gfx_lpvm::TargetLpvmGraphics::new(
             lp_shader::ShaderFrontend::LpsGlsl,
         ))));
@@ -3543,7 +3629,12 @@ mod tests {
         // invisible to any enclosing read by construction.
         let fs = playlist_project_fs();
         let services = EngineServices::new(TreePath::parse("/playlist.show").expect("path"));
-        let rt = ProjectLoader::load_from_root(&fs, services).expect("load playlist");
+        let rt = ProjectLoader::load_from_root_with_resident_entries(
+            &fs,
+            services,
+            &all_playlist_entries(&fs),
+        )
+        .expect("load playlist");
         let root = rt.tree().root();
         let playlist = rt
             .tree()
@@ -3587,7 +3678,12 @@ mod tests {
     fn playlist_entries_load_as_children_and_bind_root_trigger() {
         let fs = playlist_project_fs();
         let services = EngineServices::new(TreePath::parse("/playlist.show").expect("path"));
-        let rt = ProjectLoader::load_from_root(&fs, services).expect("load playlist");
+        let rt = ProjectLoader::load_from_root_with_resident_entries(
+            &fs,
+            services,
+            &all_playlist_entries(&fs),
+        )
+        .expect("load playlist");
         let root = rt.tree().root();
         let playlist = rt
             .tree()
@@ -3633,7 +3729,12 @@ mod tests {
         let button_service: Rc<dyn ButtonService> = hardware.clone();
         let mut services = EngineServices::new(TreePath::parse("/button_playlist.show").unwrap());
         services.set_button_service(Some(button_service));
-        let mut rt = ProjectLoader::load_from_root(&fs, services).expect("load playlist");
+        let mut rt = ProjectLoader::load_from_root_with_resident_entries(
+            &fs,
+            services,
+            &all_playlist_entries(&fs),
+        )
+        .expect("load playlist");
         let playlist = rt
             .tree()
             .lookup_sibling(rt.tree().root(), NodeName::parse("playlist").unwrap())
@@ -4356,8 +4457,12 @@ mod tests {
         services.set_button_service(Some(button_service));
         services.set_time_provider(Some(time_provider));
 
-        let mut rt =
-            ProjectLoader::load_from_root(fs, services).expect("load button playlist example");
+        let mut rt = ProjectLoader::load_from_root_with_resident_entries(
+            fs,
+            services,
+            &all_playlist_entries(fs),
+        )
+        .expect("load button playlist example");
         rt.set_graphics(Some(Arc::new(lp_gfx_lpvm::TargetLpvmGraphics::new(
             lp_shader::ShaderFrontend::LpsGlsl,
         ))));
@@ -4975,12 +5080,35 @@ mod tests {
         let button_service: Rc<dyn ButtonService> = hardware.clone();
         let mut services = EngineServices::new(TreePath::parse("/button_playlist.show").unwrap());
         services.set_button_service(Some(button_service));
-        let rt = ProjectLoader::load_from_root(fs, services).expect("load playlist");
+        let rt = ProjectLoader::load_from_root_with_resident_entries(
+            fs,
+            services,
+            &all_playlist_entries(fs),
+        )
+        .expect("load playlist");
         let playlist = rt
             .tree()
             .lookup_sibling(rt.tree().root(), NodeName::parse("playlist").unwrap())
             .expect("playlist");
         (rt, playlist, control)
+    }
+
+    /// Every entry of the `nodes[playlist]` playlist in `/playlist.json`, as
+    /// resident-entry requests. Only a playlist's idle entry is resident by
+    /// default; tests that exercise the other entries load them up front.
+    fn all_playlist_entries(fs: &dyn LpFs) -> Vec<(lpc_model::NodeUseLocation, u32)> {
+        let bytes = fs
+            .read_file("/playlist.json".as_path())
+            .expect("playlist.json");
+        let json: serde_json::Value = serde_json::from_slice(&bytes).expect("playlist json");
+        let playlist = lpc_model::NodeUseLocation::root()
+            .child(SlotPath::parse("nodes[playlist]").expect("playlist use"));
+        json["entries"]
+            .as_object()
+            .expect("playlist entries")
+            .keys()
+            .map(|key| (playlist.clone(), key.parse().expect("entry key")))
+            .collect()
     }
 
     fn resolve_playlist_u32(rt: &mut LoadedProjectRuntime, playlist: NodeId, slot: &str) -> u32 {
@@ -5828,7 +5956,12 @@ mod tests {
         let fs = examples_fyeah_sign_fs();
         let fs: &dyn LpFs = &fs;
         let services = EngineServices::new(TreePath::parse("/fyeah.show").expect("path"));
-        let rt = ProjectLoader::load_from_root(fs, services).expect("load fyeah sign");
+        let rt = ProjectLoader::load_from_root_with_resident_entries(
+            fs,
+            services,
+            &all_playlist_entries(fs),
+        )
+        .expect("load fyeah sign");
         let default_publishers = rt
             .tree()
             .bindings()

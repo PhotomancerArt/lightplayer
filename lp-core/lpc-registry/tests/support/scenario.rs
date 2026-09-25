@@ -131,6 +131,16 @@ impl RegistryScenario {
             .make_only_resident(&self.fs, &playlist_use(playlist), entry, frame, &ctx)
     }
 
+    /// Load every entry of every playlist.
+    pub fn make_every_entry_resident(&mut self) -> ProjectChangeSummary {
+        let frame = self.next_revision();
+        let ctx = ParseCtx {
+            shapes: &self.shapes,
+        };
+        self.registry
+            .make_every_entry_resident(&self.fs, frame, &ctx)
+    }
+
     pub fn apply_batch(&mut self, batch: MutationCmdBatch) -> MutationBatchResults {
         let frame = self.next_revision();
         let ctx = ParseCtx {

@@ -18,7 +18,9 @@ fn checked_in_catalog_entries_load_as_core_projects() -> Result<()> {
         let root_path = example_root_path(rel)?;
         let services = EngineServices::new(root_path);
 
-        if let Err(err) = ProjectLoader::load_from_root(&fs, services) {
+        // Every playlist entry, not only the idle one a device loads: this gate
+        // is about every checked-in file.
+        if let Err(err) = ProjectLoader::load_from_root_with_every_entry_resident(&fs, services) {
             failures.push(format!("{}: {err}", rel.display()));
         }
     }
