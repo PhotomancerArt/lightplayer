@@ -2178,8 +2178,11 @@ heap-budget-baseline project="": install-rv32-target
 # build: the required test job must not start one, so `heap-budget-check`
 # prints a named SKIP there and the path-gated jobs that build firmware anyway
 # run these, where a skip would be a failure.
+#
+# Under `LP_CI_IMAGES` each arm boots CI's image for its chip instead of
+# building one (docs/ci-images.md); a bare invocation then wants all three.
 heap-budget-check-chips margin_pct="0" chip="": install-rv32-target
-    LP_EMU_BUILD_FW=1 scripts/heap-budget-check.sh chips {{ margin_pct }} {{ chip }}
+    LP_EMU_BUILD_FW=1 scripts/ci/ci-images.py with "{{ chip }}" -- scripts/heap-budget-check.sh chips {{ margin_pct }} {{ chip }}
 
 # The C6's arm alone — CI's `Heap budget (esp32c6 chip)` job, which has the
 # riscv32 target and no Xtensa toolchain.
@@ -2198,7 +2201,7 @@ heap-budget-check-chips-c6 margin_pct="0": (heap-budget-check-chips margin_pct "
 # No `install-rv32-target`: nothing in this arm is riscv32. The machine is a
 # host binary and the image is Xtensa.
 heap-budget-check-chips-v3 margin_pct="0":
-    LP_EMU_BUILD_FW=1 scripts/heap-budget-check.sh chips {{ margin_pct }} esp32v3
+    LP_EMU_BUILD_FW=1 scripts/ci/ci-images.py with esp32v3 -- scripts/heap-budget-check.sh chips {{ margin_pct }} esp32v3
 
 # The S3's arm alone — CI's `Emulator ESP32-S3 (x64)` job (M6 P10).
 #
@@ -2211,24 +2214,24 @@ heap-budget-check-chips-v3 margin_pct="0":
 # No `install-rv32-target`, for the classic's reason: nothing in this arm is
 # riscv32.
 heap-budget-check-chips-s3 margin_pct="0":
-    LP_EMU_BUILD_FW=1 scripts/heap-budget-check.sh chips {{ margin_pct }} esp32s3
+    LP_EMU_BUILD_FW=1 scripts/ci/ci-images.py with esp32s3 -- scripts/heap-budget-check.sh chips {{ margin_pct }} esp32s3
 
 # Re-measure the chip figures into scripts/heap-budget-record/chips/<chip>.json
 # — every chip, or the one named. A chip whose gated figures did not move keeps
 # its file and stamp untouched.
 heap-budget-baseline-chips chip="": install-rv32-target
-    LP_EMU_BUILD_FW=1 scripts/heap-budget-check.sh chips-baseline {{ chip }}
+    LP_EMU_BUILD_FW=1 scripts/ci/ci-images.py with "{{ chip }}" -- scripts/heap-budget-check.sh chips-baseline {{ chip }}
 
 # Re-measure the classic's alone. Its band is measured on ONE host today (see
 # `stack_band_note` in its record file); a runner's figure is M5 P6's to add.
 heap-budget-baseline-chips-v3:
-    LP_EMU_BUILD_FW=1 scripts/heap-budget-check.sh chips-baseline esp32v3
+    LP_EMU_BUILD_FW=1 scripts/ci/ci-images.py with esp32v3 -- scripts/heap-budget-check.sh chips-baseline esp32v3
 
 # Re-measure the S3's alone. Its band is measured on ONE host today (see
 # `stack_band_note` in its record file); a runner's figure is the first green
 # `Emulator ESP32-S3 (x64)` run's to add.
 heap-budget-baseline-chips-s3:
-    LP_EMU_BUILD_FW=1 scripts/heap-budget-check.sh chips-baseline esp32s3
+    LP_EMU_BUILD_FW=1 scripts/ci/ci-images.py with esp32s3 -- scripts/heap-budget-check.sh chips-baseline esp32s3
 
 # ONE command for "the firmware changed and a pinned number moved": re-record
 # every firmware-derived figure for the named targets — esp32c6, esp32v3,
@@ -2263,6 +2266,24 @@ bless-chips *args:
 # Apply the figure patches CI posted for a PR (default: this branch's PR).
 apply-ci-figures pr="":
     scripts/ci/apply-ci-figures.sh {{ pr }}
+
+# Download the firmware images a CI run built for the chip emulator suites
+# (the `ci-images-<chip>` artifacts), verify their sha256s, and print the
+# `export LP_CI_IMAGES=…` that makes `test-emu-*-boot`, `heap-budget-*-chips*`
+# and `bless-chips` use them instead of building firmware. Refuses (exit 1) when
+# the images' firmware sources differ from this checkout's, unless `--force`.
+#
+#   just fetch-ci-images                 # the newest green main run, every chip
+#   just fetch-ci-images 830 esp32s3     # a PR's newest run, one chip
+#   just fetch-ci-images <sha>|<run-id>
+#
+# docs/ci-images.md.
+fetch-ci-images *args:
+    scripts/ci/ci-images.py fetch {{ args }}
+
+# What `LP_CI_IMAGES` holds and whether it matches this checkout.
+ci-images-status *args:
+    scripts/ci/ci-images.py status {{ args }}
 
 # Emit RV32 stack-size metadata for the ESP32 firmware.
 # The direct cargo build can fail at final link on local ESP linker-script setup,
@@ -2975,8 +2996,13 @@ test-emu-c6: test-emu-c6-boot test-emu-c6-cli
 # built it — anywhere else in CI they would only skip. Last, not a
 # dependency, because a socket suite is the slow half and the emulator's own
 # answers should not wait behind it.
+#
+# With `LP_CI_IMAGES` set (`just fetch-ci-images`), every image is CI's own and
+# nothing is built: `scripts/ci/ci-images.py with esp32c6` points
+# `LP_EMU_C6_IMAGE_DIR` at the fetched set, after refusing it if its firmware
+# sources are not this checkout's (docs/ci-images.md). Unset, it is a no-op.
 test-emu-c6-boot:
-    LP_EMU_BUILD_FW=1 cargo test -p lp-emu-esp32c6 --no-fail-fast -- --include-ignored --nocapture
+    LP_EMU_BUILD_FW=1 scripts/ci/ci-images.py with esp32c6 -- cargo test -p lp-emu-esp32c6 --no-fail-fast -- --include-ignored --nocapture
     cargo test -p lp-emu-validate --test m3_replays
     cargo test -p lp-emu-validate --test m4_replays
     cargo test -p lp-emu-validate --test m5_replays
@@ -2992,9 +3018,9 @@ test-emu-c6-boot:
 # CI's `Heap budget (esp32c6 chip)` job runs this half.
 test-emu-c6-cli:
     cargo test -p lp-cli --test validate_registry_parity
-    LP_EMU_BUILD_FW=1 cargo test -p lp-cli --test emu_usb_hello -- --include-ignored
-    LP_EMU_BUILD_FW=1 cargo test -p lp-cli --test emu_usb_json_pack -- --include-ignored --nocapture
-    LP_EMU_BUILD_FW=1 cargo test -p lp-cli --test emu_usb_free_lag -- --include-ignored --nocapture
+    LP_EMU_BUILD_FW=1 scripts/ci/ci-images.py with esp32c6 -- cargo test -p lp-cli --test emu_usb_hello -- --include-ignored
+    LP_EMU_BUILD_FW=1 scripts/ci/ci-images.py with esp32c6 -- cargo test -p lp-cli --test emu_usb_json_pack -- --include-ignored --nocapture
+    LP_EMU_BUILD_FW=1 scripts/ci/ci-images.py with esp32c6 -- cargo test -p lp-cli --test emu_usb_free_lag -- --include-ignored --nocapture
 
 # The classic ESP32 (v3) machine's own suite (plan three, M3).
 #
@@ -3077,7 +3103,12 @@ test-emu-esp32v3-reference:
     cargo test -p lp-emu-validate
     cargo test -p lp-cli --test validate_registry_parity
     commit="$(git rev-parse --short HEAD)"
-    if [[ "${LP_EMU_REF_VERIFY:-1}" == 0 ]]; then
+    if [[ -n "${LP_CI_IMAGES:-}" ]]; then
+        # The reference image IS this half's firmware build, and its claim
+        # (two cold builds, one sha256) is about the recipe on the host that
+        # runs it — which CI's images cannot stand in for. Say so; do not fake it.
+        echo "test-emu-esp32v3-reference: LP_CI_IMAGES is set — the reference-image build and its --verify are SKIPPED (a claim about this host's build; CI's 'Emulator ESP32v3 reference' job makes it)" >&2
+    elif [[ "${LP_EMU_REF_VERIFY:-1}" == 0 ]]; then
         echo "test-emu-esp32v3-reference: LP_EMU_REF_VERIFY=0 — one reference build, no reproducibility rebuild"
         scripts/emu/build-reference-image.sh --chip esp32 \
             esp32,server,float-f32 "$commit" none
@@ -3110,9 +3141,23 @@ test-emu-esp32v3-reference:
 # installs it; `cargo install espflash` or the release tarball). With it
 # absent the merged image is not built, the variable is not set, and the
 # tests that need one print a SKIP notice rather than failing.
-test-emu-esp32v3-boot: build-fw-esp32v3
+#
+# With `LP_CI_IMAGES` set (`just fetch-ci-images`), all five images are CI's
+# own — the shipped, rmt-chase and frame-dump ELFs, the merged chip and the
+# pinned reference pair — and nothing is built; the fetched set is refused if
+# its firmware sources are not this checkout's (docs/ci-images.md).
+#
+# The recipe writes `target/lp-emu-esp32v3/images.env` (the variables it set)
+# so CI can pack exactly those files as the `ci-images-esp32v3` artifact.
+test-emu-esp32v3-boot:
     #!/usr/bin/env bash
     set -euo pipefail
+    if [[ -n "${LP_CI_IMAGES:-}" ]]; then
+      ci_env="$(scripts/ci/ci-images.py env esp32v3)"
+      eval "$ci_env"
+      exec cargo test -p lp-emu-esp32v3 --no-fail-fast -- --include-ignored
+    fi
+    just build-fw-esp32v3
     built={{ justfile_directory() }}/target/xtensa-esp32-none-elf/release-esp32v3/fw-esp32v3
     out={{ justfile_directory() }}/target/lp-emu-esp32v3
     merged="$out/merged.bin"
@@ -3236,9 +3281,19 @@ test-emu-esp32s3:
 # and the tests that need one print a SKIP notice rather than failing —
 # which, since P06, is every test in `tests/boot_idle.rs` and most of
 # `tests/rom_up_boot.rs`.
-test-emu-esp32s3-boot: build-fw-esp32s3
+#
+# With `LP_CI_IMAGES` set (`just fetch-ci-images`), the ELF and the merged chip
+# are CI's own and nothing is built; see `test-emu-esp32v3-boot`, which also
+# explains the `images.env` this writes.
+test-emu-esp32s3-boot:
     #!/usr/bin/env bash
     set -euo pipefail
+    if [[ -n "${LP_CI_IMAGES:-}" ]]; then
+      ci_env="$(scripts/ci/ci-images.py env esp32s3)"
+      eval "$ci_env"
+      exec cargo test -p lp-emu-esp32s3 --no-fail-fast -- --include-ignored
+    fi
+    just build-fw-esp32s3
     built={{ justfile_directory() }}/target/xtensa-esp32s3-none-elf/release-esp32s3/fw-esp32s3
     out={{ justfile_directory() }}/target/lp-emu-esp32s3
     merged="$out/merged.bin"
@@ -3362,7 +3417,14 @@ test-emu-xt-jit-image slug="boot-idle" window="100ms" blocks="12000":
     cargo build --release -p lp-emu-esp32v3 --features jit
     commit="$(git rev-parse --short HEAD)"
     elf="target/emu-ref/$commit-{{ slug }}/fw-esp32v3"
-    if [[ ! -f "$elf" ]]; then
+    if [[ -n "${LP_CI_IMAGES:-}" && "{{ slug }}" == boot-idle ]]; then
+        # CI's shipped image: the same feature set, built in-tree rather than in
+        # a detached worktree. The cell compares two cores on ONE image, so any
+        # faithful build of it answers the same question.
+        ci_env="$(scripts/ci/ci-images.py env esp32v3)"
+        eval "$ci_env"
+        elf="$LP_EMU_ESP32V3_ELF"
+    elif [[ ! -f "$elf" ]]; then
         # The feature set per slug is `bench-esp32v3.sh`'s table; only the
         # default slug is built here, because the other two are 60-second
         # runs nobody wants in a per-PR gate.
@@ -3535,9 +3597,13 @@ test-emu-jit-image slug="harness" grade="t2" window="20ms":
 #
 # Serial on purpose: each test holds N emulated boards and a port, and a
 # loaded box is where a socket test goes flaky.
+#
+# Under `LP_CI_IMAGES` the images are CI's, but `emu_serve_walk`'s pinned
+# proto-20 `lp-cli` is a HOST binary and still builds locally (a Linux build is
+# no use on a Mac) unless `LP_EMU_REF_CLI` names one.
 test-emu-serve:
-    LP_EMU_BUILD_FW=1 cargo test -p lp-cli --test emu_serve_door -- --include-ignored --test-threads=1
-    LP_EMU_BUILD_FW=1 cargo test -p lp-cli --test emu_serve_walk -- --include-ignored --test-threads=1
+    LP_EMU_BUILD_FW=1 scripts/ci/ci-images.py with esp32c6 -- cargo test -p lp-cli --test emu_serve_door -- --include-ignored --test-threads=1
+    LP_EMU_BUILD_FW=1 scripts/ci/ci-images.py with esp32c6 -- cargo test -p lp-cli --test emu_serve_walk -- --include-ignored --test-threads=1
 
 # The hardware walk, with the emulator where the board goes.
 #

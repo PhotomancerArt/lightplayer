@@ -252,6 +252,24 @@ a few bytes. `bless-chips` re-records it with everything else; the grade is
 unchanged here, and whether it should become "exact modulo alignment" is a
 question for the heap gate, not this doc.
 
+## Blessing against CI's images (no firmware build)
+
+`bless-chips` builds each chip's firmware first. It does not have to: fetch the
+images CI built for this commit and point the run at them.
+
+```bash
+just fetch-ci-images <pr>             # prints: export LP_CI_IMAGES=…/target/ci-images/<commit12>
+export LP_CI_IMAGES=…
+just bless-chips esp32v3              # both halves, on CI's bytes, in seconds
+just bless-chips --check              # or just check every chip
+```
+
+The heap records and the figure records are both read off CI's images. The
+fetched set is refused if its firmware sources differ from this checkout
+(a firmware edit you have not pushed yet is exactly that), so this is for an
+emulator-side change, or for re-running what CI ran. `[positional]` figures
+are still written only by CI. Everything else is in [ci-images.md](ci-images.md).
+
 ## When not to bless
 
 - **Only the emulator changed.** A figure is a figure of the image; if the image

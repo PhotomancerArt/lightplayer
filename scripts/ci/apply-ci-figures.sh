@@ -87,3 +87,8 @@ git --no-pager diff --cached --stat -- "${records[@]}"
 echo
 echo "apply-ci-figures: applied ${#patches[@]} patch(es) from run $run_id and staged them."
 echo "apply-ci-figures: review 'git diff --cached', commit with the change that moved them, and push."
+# The same run built the images those figures were read off. To re-check the
+# applied records against exactly those bytes, with no firmware build
+# (docs/ci-images.md):
+echo "apply-ci-figures: to re-check them locally on the SAME run's images, no firmware build:"
+echo "  just fetch-ci-images $run_id && LP_CI_IMAGES=<printed dir> just bless-chips --check"
