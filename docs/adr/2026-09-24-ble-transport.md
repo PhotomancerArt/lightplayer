@@ -36,6 +36,8 @@ firmware transport that carries the second kind of link.
    the 16 KiB frame budget plus margin, an over-long line dropped whole) and
    notifies each server frame back in `MTU − 3` chunks (`chunk_spans`). No new
    message, no BLE-specific framing, no wire-version bump for the transport.
+   *Amended 2026-09-25 (#834, below): a long write (Prepare/Execute) is
+   reassembled too, and the ATT MTU is 247, not 251.*
 
 2. **Trust belongs to the link.** USB is `LinkId::PRIMARY`, trusted (physical
    possession is the recovery path). Each BLE connection is a fresh `LinkId` —
@@ -263,6 +265,8 @@ S3. **Reconnect is silent; visibility is "state unknown".** `browser_ble.js`
    bounded (10 s); every write asks for a response and is awaited, in
    ≤ 244-byte chunks. The one-tap route back is the offline card's Reconnect,
    which opens the Bluetooth chooser.
+   *Amended 2026-09-25 (#834, below): writes are 180-byte chunks, and every
+   drop calls `gatt.disconnect()`.*
 
 S4. **Play over Bluetooth is lean when idle.** Play is the steady state (a
    phone on a piece's panel) and its air time is shared with ESP-NOW, so while
@@ -451,3 +455,58 @@ Defect: `docs/defects/2026-09-25-a-knob-jump-over-bluetooth-kills-the-c6-ble-hos
   --only-knob-burst` writes every length 178–244 B and forces a restart on a
   `desk_ble_fault` image; `?ble=emu` could not have found either fault, since
   the emulated path goes through neither the controller nor trouble-host.
+
+## Amendment 2026-09-25: editing from the phone (#834) — long writes, MTU 247, teardown on every drop, 180-byte chunks
+
+Found at G4 (Yona, iPhone in Bluefy, the PLAYFUL choker): knobs worked, but
+**editing any setting over Bluetooth sent Studio back to `/devices` with no
+error**, and a reconnect said the board "never said hello". The board's
+console saw no error and no drop. Three mechanisms, all fixed in #834
+(merged `97efd6624`). Defect:
+`docs/defects/2026-09-25-a-long-bluetooth-write-is-acknowledged-and-lost.md`.
+
+- **Long writes reach the server (decision 1).** A central may send a value
+  longer than MTU − 3 as Prepare Write requests plus one Execute Write.
+  trouble-host 0.6 answers both itself and never hands either to the
+  connection as a write. So a long write whose segments fit RX was
+  acknowledged and **dropped**, and one whose segments did not was refused
+  with no log line. `fw-esp32-common::radio_link::prepared_write` (host-tested)
+  now queues a connection's segments, in order and at most 512 B, and gives
+  the whole value to the line joiner on Execute. A bad offset or an oversized
+  value is refused with the matching ATT error, and the refusal is logged.
+- **ATT MTU 247, not 251.** The host's ATT MTU is its packet size − 4, and a
+  255 B packet pool made it 251. The C6 controller's largest ACL packet is
+  251 B, so a full-MTU reply (251 + 4 L2CAP) failed trouble-host's send, and
+  that failure **restarts the whole BLE host**. The pool is now 251 B
+  (`default-packet-pool-mtu-251`). Notifications stay 244 B, so nothing else
+  changes size. This corrects the Context's "ATT MTU 251", which was the
+  spike's figure.
+- **Phantom drops on iOS, and the teardown rule (S3, new rule 5 in
+  `browser_ble.js`).** Bluefy told the page its link was gone while iOS kept
+  the radio connection up: the board logged the disconnect only when the tab
+  closed, ~20 minutes later. Studio handled a drop by reconnecting without
+  ever calling `gatt.disconnect()`, so the reconnect rode the old link, the
+  board saw no new link, and it never sent the hello it owes one. **Every
+  drop, and every failed write, now calls `gatt.disconnect()`**, so a
+  reconnect is always a fresh link. A failed write while the browser still
+  calls the link up is a drop too: the rest of that line is lost, and a half
+  line in the board's joiner would poison the next one.
+- **Writes are 180-byte chunks (S3), was 244.** 180 B fits one ATT value at
+  iOS's common MTU of 185 as well as the board's 247, so no write depends on
+  the long-write path. Cost on the Mac, 2 KB with response at 15 ms: median
+  about 3.9 → 3.2 KB/s (runs vary 2.5–6.4).
+- **`?ble=emu` (S5)** models the phantom drop (`phantomDrop`), and the
+  conformance test `a_phantom_drop_is_torn_down_and_the_reconnect_is_a_fresh_link`
+  fails with the teardown removed.
+- **Evidence.** Phone (Yona, 2026-09-25): the choker with #834's firmware
+  half and the deployed Studio of the time (244 B writes, no teardown): "now
+  everything seems to be working", editing held. So the firmware half alone
+  cleared it on this phone; the run does not say which of the two firmware
+  changes it needed. The Studio half (180 B, teardown) ran on the Mac over
+  CDP and in the conformance suite, not yet on the phone. Silicon, Mac Chrome
+  over CDP: ten panel writes in a row, each one 300–480 B long write, all
+  accepted; a page-side disconnect, a fresh `link2` in 1,077 ms, hello in
+  122 ms. Cost: +208 B of flash.
+- **Not fixed here:** the board still drops an unparseable request without
+  replying, which is how a proto-26 image left Studio waiting on
+  `accessList` (plan DD35, deferred to the wire version-skew work).

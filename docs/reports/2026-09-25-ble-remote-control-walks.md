@@ -39,15 +39,15 @@ One open issue: **editing any setting over Bluetooth from the phone sent
 Studio back to `/devices`, with no error on screen**, every time. A
 reconnect then said the board "never said hello", and the board seemed to
 need a reset. The Mac was fine, over USB and over Bluetooth. Three causes,
-all fixed in #834:
+all fixed in #834 (merged `97efd6624`):
 
 - trouble-host acknowledged a long ATT write and dropped its bytes;
 - an ATT MTU of 251 let a full-size reply overflow the controller's
   packets;
 - Studio's drop never disconnected the radio, while iOS kept the link up.
 
-Defect: `docs/defects/2026-09-25-a-long-bluetooth-write-is-acknowledged-and-lost.md`
-(on #834).
+Defect:
+`docs/defects/2026-09-25-a-long-bluetooth-write-is-acknowledged-and-lost.md`.
 
 **Phone confirmation of #834:** the choker with #834's firmware half and
 the deployed Studio (still 244 B writes, no teardown). Yona: "now
@@ -55,7 +55,8 @@ everything seems to be working", and editing held. The first connect of
 that session said "no response" and the retry worked. At the time an
 agent's lab page held the board's other connection slot and was
 reconnecting every ~12 s. **The Studio half of #834 (180 B writes, teardown
-on every drop) has not run on the phone yet;** it needs a deploy.
+on every drop) had not run on the phone when this was written;** it ran on
+the Mac over CDP and in the `?ble=emu` conformance suite.
 
 ### Not recorded
 

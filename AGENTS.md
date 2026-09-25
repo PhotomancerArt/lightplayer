@@ -605,8 +605,8 @@ GATT subset over the same emulated boards, so Studio's `ble:` link, the
 device card and Play run unchanged; `just walk-ble-emu` is its walk. It
 models the firmware's link rules as far as the page can see them: the link
 opens when the central subscribes, each link gets its own hello, an
-unauthenticated link is dropped after 10 s, and (with #834) Bluefy's
-phantom drop, where the page hears a disconnect while the radio link stays
+unauthenticated link is dropped after 10 s, and Bluefy's phantom
+drop, where the page hears a disconnect while the radio link stays
 up. **Trust caveat: it proves the transport, the UI and Play, not access.**
 The emulated board sees its trusted USB link, so every request is answered
 at the edit tier, and it never runs the C6's BLE controller or trouble-host:
