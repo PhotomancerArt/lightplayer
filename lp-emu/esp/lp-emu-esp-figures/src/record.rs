@@ -136,8 +136,10 @@ mod tests {
     fn render_is_sorted_one_figure_per_line_and_round_trips() {
         let mut r = Record::default();
         r.entries.insert("z.cycles".into(), Value::Int(3_251_009));
-        r.entries.insert("_about".into(), Value::Str("prose — kept".into()));
-        r.entries.insert("a.chain".into(), Value::text("one\ntwo \"q\"\n"));
+        r.entries
+            .insert("_about".into(), Value::Str("prose — kept".into()));
+        r.entries
+            .insert("a.chain".into(), Value::text("one\ntwo \"q\"\n"));
         r.entries.insert("m.gap".into(), Value::Int(-96));
         let text = r.render();
         assert_eq!(

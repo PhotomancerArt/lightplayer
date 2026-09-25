@@ -16,9 +16,9 @@ const DIR_ENV: &str = "LP_EMU_FIGURES_DIR";
 
 /// `lp-emu/esp/figures/<chip>.json` — inside the MIT fence, beside the chips.
 pub fn record_path(chip: &str) -> PathBuf {
-    let dir = std::env::var_os(DIR_ENV).map(PathBuf::from).unwrap_or_else(|| {
-        PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/../figures"))
-    });
+    let dir = std::env::var_os(DIR_ENV)
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/../figures")));
     dir.join(format!("{chip}.json"))
 }
 
@@ -34,8 +34,15 @@ pub fn record_path(chip: &str) -> PathBuf {
 pub struct Figures {
     chip: String,
     test: String,
-    observed: Vec<(String, Value)>,
+    observed: Vec<Observed>,
     verified: bool,
+}
+
+struct Observed {
+    key: String,
+    value: Value,
+    /// See [`Figures::positional_int`].
+    positional: bool,
 }
 
 impl Figures {
@@ -58,18 +65,41 @@ impl Figures {
         let v = value
             .try_into()
             .unwrap_or_else(|_| panic!("figure `{key}`: {value:?} does not fit an i64"));
-        self.observe(key, Value::Int(v))
+        self.observe(key, Value::Int(v), false)
+    }
+
+    /// An integer figure that depends on **where the build put the code** —
+    /// a stack high-water, which is the deepest point an interrupt happened
+    /// to land. Such a figure is reproducible within one build environment
+    /// and not between two: the tree's image embeds the checkout's absolute
+    /// paths and the host rustc's own build
+    /// (`docs/debt/reference-images-are-not-reproducible-across-hosts.md`),
+    /// so a desk worktree and a CI runner can read different values off the
+    /// same commit.
+    ///
+    /// Checked exactly like [`int`](Self::int), against the record, which
+    /// holds **CI's** value. A bless on a desk does not rewrite it (it would
+    /// record a number CI cannot reproduce); a bless under
+    /// `GITHUB_ACTIONS=true` does. A desk failure on one of these says so.
+    pub fn positional_int<T>(&mut self, key: &str, value: T) -> &mut Self
+    where
+        T: TryInto<i64> + Copy + std::fmt::Debug,
+    {
+        let v = value
+            .try_into()
+            .unwrap_or_else(|_| panic!("figure `{key}`: {value:?} does not fit an i64"));
+        self.observe(key, Value::Int(v), true)
     }
 
     /// A one-line string figure (a digest, a single line).
     pub fn string(&mut self, key: &str, value: &str) -> &mut Self {
-        self.observe(key, Value::Str(value.to_owned()))
+        self.observe(key, Value::Str(value.to_owned()), false)
     }
 
     /// A text figure, recorded line by line so a moved line is a one-line
     /// diff in the record and a one-line report here.
     pub fn text(&mut self, key: &str, value: &str) -> &mut Self {
-        self.observe(key, Value::text(value))
+        self.observe(key, Value::text(value), false)
     }
 
     /// A byte-stream figure that must be text. Byte-for-byte as strict as a
@@ -96,15 +126,19 @@ impl Figures {
         }
     }
 
-    fn observe(&mut self, key: &str, value: Value) -> &mut Self {
-        if let Some((_, earlier)) = self.observed.iter().find(|(k, _)| k == key) {
+    fn observe(&mut self, key: &str, value: Value, positional: bool) -> &mut Self {
+        if let Some(earlier) = self.observed.iter().find(|o| o.key == key) {
             assert_eq!(
-                earlier, &value,
+                earlier.value, value,
                 "figure `{key}` observed twice in one test with two values"
             );
             return self;
         }
-        self.observed.push((key.to_owned(), value));
+        self.observed.push(Observed {
+            key: key.to_owned(),
+            value,
+            positional,
+        });
         self
     }
 
@@ -118,14 +152,31 @@ impl Figures {
             return;
         }
         let record = load(&self.chip).unwrap_or_else(|e| panic!("{e}"));
+        let mut positional_moved = false;
         let moved: Vec<String> = self
             .observed
             .iter()
-            .filter_map(|(key, now)| describe_move(key, record.get(key), now))
+            .filter_map(|o| {
+                let line = describe_move(&o.key, record.get(&o.key), &o.value)?;
+                positional_moved |= o.positional;
+                Some(if o.positional {
+                    format!("{line}   [positional]")
+                } else {
+                    line
+                })
+            })
             .collect();
         if moved.is_empty() {
             return;
         }
+        let positional_note = if positional_moved {
+            "\n[positional] figures depend on where the build put the code, so the record holds \
+             CI's value and a desk build can legitimately read another. A desk bless leaves them \
+             alone; take the new value from CI's failure (or bless under GITHUB_ACTIONS=true). \
+             docs/chip-figures.md."
+        } else {
+            ""
+        };
         panic!(
             "{n} pinned firmware figure{s} moved ({chip}, {test}):\n{list}\n\
              recorded in {path}\n\
@@ -133,7 +184,7 @@ impl Figures {
              changed on purpose, accept them with:\n\
              \n    just bless-chips {chip}\n\n\
              and commit the record with the change that moved it. If only the emulator changed, \
-             a moved figure is a finding: do not bless it.",
+             a moved figure is a finding: do not bless it.{positional_note}",
             n = moved.len(),
             s = if moved.len() == 1 { "" } else { "s" },
             chip = self.chip,
@@ -159,15 +210,24 @@ impl Figures {
         let mut text = String::new();
         file.read_to_string(&mut text)
             .unwrap_or_else(|e| panic!("bless: read {}: {e}", path.display()));
-        let mut record = Record::parse(&text)
-            .unwrap_or_else(|e| panic!("bless: {}: {e}", path.display()));
+        let mut record =
+            Record::parse(&text).unwrap_or_else(|e| panic!("bless: {}: {e}", path.display()));
         let mut changed = false;
-        for (key, now) in &self.observed {
-            if let Some(line) = describe_move(key, record.get(key), now) {
-                eprintln!("bless {}:{line}", self.chip);
-                record.entries.insert(key.clone(), now.clone());
-                changed = true;
+        for o in &self.observed {
+            let Some(line) = describe_move(&o.key, record.get(&o.key), &o.value) else {
+                continue;
+            };
+            if o.positional && !in_ci() {
+                eprintln!(
+                    "bless {}:{line}   [positional: NOT written on a desk — the record holds \
+                     CI's value; see docs/chip-figures.md]",
+                    self.chip
+                );
+                continue;
             }
+            eprintln!("bless {}:{line}", self.chip);
+            record.entries.insert(o.key.clone(), o.value.clone());
+            changed = true;
         }
         if changed {
             let out = record.render();
@@ -192,6 +252,12 @@ impl Drop for Figures {
 
 fn blessing() -> bool {
     std::env::var(BLESS_ENV).is_ok_and(|v| v == "1")
+}
+
+/// A CI runner — the build environment whose positional figures the record
+/// holds.
+fn in_ci() -> bool {
+    std::env::var("GITHUB_ACTIONS").is_ok_and(|v| v == "true")
 }
 
 fn load(chip: &str) -> Result<Record, String> {
@@ -251,7 +317,10 @@ mod tests {
 
     #[test]
     fn describe_names_old_new_and_the_delta() {
-        assert_eq!(describe_move("k", Some(&Value::Int(5)), &Value::Int(5)), None);
+        assert_eq!(
+            describe_move("k", Some(&Value::Int(5)), &Value::Int(5)),
+            None
+        );
         assert_eq!(
             describe_move("k", Some(&Value::Int(45_344)), &Value::Int(45_328)).unwrap(),
             "  k: 45344 → 45328 (-16)"

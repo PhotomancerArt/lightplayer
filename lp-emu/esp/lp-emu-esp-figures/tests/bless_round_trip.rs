@@ -15,6 +15,7 @@ fn check_fails_bless_writes_check_passes() {
     unsafe {
         std::env::set_var("LP_EMU_FIGURES_DIR", &dir);
         std::env::remove_var(BLESS_ENV);
+        std::env::remove_var("GITHUB_ACTIONS");
     }
     let path = record_path("chipx");
     std::fs::write(
@@ -34,11 +35,11 @@ fn check_fails_bless_writes_check_passes() {
 
     // 1. A check: fails, naming all three, old → new, and the command.
     let err = std::panic::catch_unwind(|| observe().verify()).expect_err("moved figures fail");
-    let msg = err
-        .downcast_ref::<String>()
-        .cloned()
-        .unwrap_or_default();
-    assert!(msg.contains("3 pinned firmware figures moved (chipx, t::boot)"), "{msg}");
+    let msg = err.downcast_ref::<String>().cloned().unwrap_or_default();
+    assert!(
+        msg.contains("3 pinned firmware figures moved (chipx, t::boot)"),
+        "{msg}"
+    );
     assert!(msg.contains("boot.cycles: 100 → 116 (+16)"), "{msg}");
     assert!(
         msg.contains("line 2: \"main stack 45344 B\" → \"main stack 45328 B\""),
@@ -64,7 +65,44 @@ fn check_fails_bless_writes_check_passes() {
     unsafe { std::env::set_var(BLESS_ENV, "1") };
     observe().verify();
     unsafe { std::env::remove_var(BLESS_ENV) };
-    assert_eq!(std::fs::metadata(&path).unwrap().modified().unwrap(), before);
+    assert_eq!(
+        std::fs::metadata(&path).unwrap().modified().unwrap(),
+        before
+    );
+
+    // 4. A positional figure: checked exactly, tagged in the failure, and a
+    //    desk bless leaves CI's value alone.
+    let positional = || {
+        let mut f = Figures::new("chipx", "t::gap");
+        f.positional_int("boot.gap", -64i64);
+        f
+    };
+    std::fs::write(&path, "{\n  \"boot.gap\": -96\n}\n").unwrap();
+    let err = std::panic::catch_unwind(|| positional().verify()).expect_err("a moved gap fails");
+    let msg = err.downcast_ref::<String>().cloned().unwrap_or_default();
+    assert!(
+        msg.contains("boot.gap: -96 → -64 (+32)   [positional]"),
+        "{msg}"
+    );
+    assert!(msg.contains("the record holds CI's value"), "{msg}");
+    unsafe { std::env::set_var(BLESS_ENV, "1") };
+    positional().verify();
+    assert_eq!(
+        std::fs::read_to_string(&path).unwrap(),
+        "{\n  \"boot.gap\": -96\n}\n",
+        "a desk bless does not write a positional figure"
+    );
+    unsafe { std::env::set_var("GITHUB_ACTIONS", "true") };
+    positional().verify();
+    unsafe {
+        std::env::remove_var(BLESS_ENV);
+        std::env::remove_var("GITHUB_ACTIONS");
+    }
+    assert_eq!(
+        std::fs::read_to_string(&path).unwrap(),
+        "{\n  \"boot.gap\": -64\n}\n",
+        "CI's bless does"
+    );
 
     let _ = std::fs::remove_dir_all(&dir);
 }

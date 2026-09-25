@@ -84,6 +84,24 @@ long-lived branch conflict on this file whenever main re-baselined too.
   five moves were `stackTotal`-only, which the split record no longer
   stores: the classic's and the S3's files needed no edit at all, which is
   the exit criterion met on real traffic.
+- 2026-09-25 — **the same churn, one layer out.** The split fixed the heap
+  record, but the chip emulator tests pinned the same figures as literals:
+  over the week to 2026-09-25 the classic's boot tests went red 16 times
+  (`the_single_core_prefix_is_unchanged` 8,
+  `the_heartbeats_memory_figures_are_the_desk_boards` 5 — already paid down
+  on 2026-09-23 by pinning it to the `75486b114` reference image, and it
+  stays an EXACT pin, `the_init_chain_is_the_golden_bytes` 3), the S3's 11
+  (`the_ledger_triple_is_elicited_by_a_stop_all_on_the_wire` 8), against 10
+  C6-chip and 8 engine heap-ratchet failures — mostly `[INIT] main stack` and
+  `of <n> B` moving with statics, in a boot chain's sha, a cycle count, or a
+  literal `37_256`. Each chip re-recorded a different way, some by hand.
+  Paid down by `docs/adr/2026-09-25-chip-figures-live-in-records.md`: those
+  pins move to `lp-emu/esp/figures/<chip>.json` (exact as before; the failure
+  names each figure old → new) and `just bless-chips [chip…]` re-records them
+  and every heap record in one command. Found on the way: the classic's
+  `PATH_HIGH_WATER_GAP` reads −64 on a desk worktree against CI's −96 at one
+  commit (positional; `docs/chip-figures.md`), so that test was already red
+  on a desk.
 
 **Exit criteria** — a PR whose only memory effect is a few bytes of statics
 passes the gate without touching the record, and two PRs that each
