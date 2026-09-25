@@ -6685,6 +6685,21 @@ impl ProjectController {
                 }
             }
         }
+        // The all-entries check (D19): the library copy now holds every
+        // file the save just wrote, so this is the point to walk every
+        // playlist entry — not only the one the running project keeps
+        // resident — and warn about any that fail to load. Never a
+        // refusal: a work-in-progress must still save.
+        if pulled {
+            if let Some(active) = self.library.as_ref().and_then(|ctx| ctx.active.as_ref()) {
+                let issues = crate::app::project::entry_check::entries_failing_to_load(
+                    &*active.handle.package_fs.borrow(),
+                );
+                if let Some(notice) = crate::app::project::entry_check::issues_notice(&issues) {
+                    notices = notices.with_notice(notice);
+                }
+            }
+        }
         // D7: on a TRANSIENT session the explicit save is the fork moment —
         // the memory copy (which now holds the committed save) installs
         // into the real library and the session becomes an ordinary one.
