@@ -71,6 +71,22 @@ pub(super) fn next_playable_after(entries: &[PlaylistRuntimeEntry], key: u32) ->
         .or_else(|| playable().min())
 }
 
+/// The previous playable entry before `key`, in key order, wrapping round,
+/// never `key` itself — the playlist's "previous" trigger. `None` when no
+/// other entry is playable.
+pub(super) fn prev_playable_before(entries: &[PlaylistRuntimeEntry], key: u32) -> Option<u32> {
+    let playable = || {
+        entries
+            .iter()
+            .filter(|entry| entry.index != key && entry.reason.is_playable())
+            .map(|entry| entry.index)
+    };
+    playable()
+        .filter(|candidate| *candidate < key)
+        .max()
+        .or_else(|| playable().max())
+}
+
 /// The next playable entry after `key` in key order, WITHOUT wrapping — the
 /// timed advance's step (after the last entry the playlist returns to idle
 /// instead).
@@ -103,6 +119,16 @@ mod tests {
         entries[1].reason = PlaylistEntryReason::Failed(String::from("missing file"));
 
         assert_eq!(next_playable_after(&entries, 1), None);
+    }
+
+    #[test]
+    fn prev_playable_before_skips_disabled_entries_and_wraps() {
+        let mut entries = entries(&[1, 2, 3, 4]);
+        entries[1].reason = PlaylistEntryReason::Disabled;
+
+        assert_eq!(prev_playable_before(&entries, 3), Some(1), "2 is disabled");
+        assert_eq!(prev_playable_before(&entries, 1), Some(4), "wraps round");
+        assert_eq!(prev_playable_before(&entries[..1], 1), None, "nothing else");
     }
 
     #[test]

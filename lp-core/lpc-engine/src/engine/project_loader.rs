@@ -857,25 +857,31 @@ impl ProjectLoader {
             }
             #[cfg(feature = "node-playlist")]
             {
-                let (idle_entry, default_fade, entries) = {
+                let (idle_entry, default_fade, entries, next_ids, prev_ids) = {
                     let NodeDef::Playlist(config) = projected_node_config(registry, node)? else {
                         continue;
+                    };
+                    let ids = |slot: &lpc_model::OptionSlot<lpc_model::U32ListSlot>| {
+                        slot.data
+                            .as_ref()
+                            .map(|ids| ids.value().0.clone())
+                            .unwrap_or_default()
                     };
                     (
                         config.effective_idle_entry(),
                         config.default_fade.value().0,
                         playlist_runtime_entries(projected_nodes, node.id, config),
+                        ids(&config.next_trigger_ids),
+                        ids(&config.prev_trigger_ids),
                     )
                 };
                 runtime
                     .attach_runtime_node(
                         node.id,
-                        Box::new(PlaylistNode::new(
-                            node.id,
-                            idle_entry,
-                            default_fade,
-                            entries,
-                        )),
+                        Box::new(
+                            PlaylistNode::new(node.id, idle_entry, default_fade, entries)
+                                .with_step_triggers(next_ids, prev_ids),
+                        ),
                         frame,
                     )
                     .map_err(|e| ProjectLoadError::InvalidProjectReference {

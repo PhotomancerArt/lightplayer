@@ -8,9 +8,19 @@
 //! sequence and [`super::playlist_held_frame`] for the buffer.
 //!
 //! **Where a switch is decided:** `produce`, in the consumed `time` slot's
-//! domain — an activate command first, then a trigger, then the timed
+//! domain — an activate command first, then an entry trigger, then a
+//! next/prev trigger, then the tour or (when the tour is off) the timed
 //! advance ([`PlaylistNode::switch_to`]). A failure moves on from the render
 //! or the engine's hooks ([`PlaylistNode::fail_entry`]).
+//!
+//! **Touring** (vision D13, plan A1–A3): with a running
+//! [`lpc_model::PlaylistTour::Cycle`] the playlist walks its enabled entries
+//! in key order, one step each, as a pure function of the consumed `time`
+//! and an anchor ([`super::playlist_tour_position`]); the idle entry is an
+//! ordinary stop. A pick, a trigger or next/prev re-anchors there. A held,
+//! frozen or absent tour is the playlist exactly as before: the idle entry,
+//! triggers and per-entry durations (D17). The skip list marks entries
+//! [`PlaylistEntryReason::Disabled`] either way.
 //!
 //! **The texture path** (`render_texture*`, plan PD5) has two kinds of
 //! consumer:
@@ -41,8 +51,9 @@ use lp_collection::VecMap;
 
 use lp_gfx::TextureHandle;
 use lpc_model::{
-    ControlMessage, FromLpValue, NodeId, NodeRuntimeStatus, PlaylistState, SlotAccess, SlotData,
-    SlotPath, SlotShapeRegistry, SlotShapeRegistryError,
+    ControlMessage, FromLpValue, NodeId, NodeRuntimeStatus, PlaylistDefView, PlaylistState,
+    PlaylistTour, SlotAccess, SlotData, SlotPath, SlotShapeRegistry, SlotShapeRegistryError,
+    U32List,
 };
 use lps_shared::TextureStorageFormat;
 
@@ -58,8 +69,11 @@ use crate::products::visual::{
 
 use super::playlist_held_frame::PlaylistHeldFrame;
 use super::playlist_held_texture::PlaylistHeldTexture;
-use super::playlist_runtime_entry::{next_playable_after, next_playable_in_order};
+use super::playlist_runtime_entry::{
+    next_playable_after, next_playable_in_order, prev_playable_before,
+};
 use super::playlist_switch::{PlaylistFramePlan, PlaylistSwitch, clamp01};
+use super::playlist_tour_position::{PlaylistTourAnchor, tour_entry_at};
 use super::{PlaylistEntryReason, PlaylistRuntimeEntry};
 
 pub struct PlaylistNode {
@@ -68,8 +82,19 @@ pub struct PlaylistNode {
     /// ([`lpc_model::PlaylistDef::effective_idle_entry`]).
     idle_entry: u32,
     default_fade: f32,
-    /// Every authored entry, loaded or not (plan PD4).
+    /// Every authored entry, loaded or not (plan PD4), sorted by key.
     entries: Vec<PlaylistRuntimeEntry>,
+    /// Trigger message ids that step to the next / previous enabled entry.
+    next_trigger_ids: Vec<u32>,
+    prev_trigger_ids: Vec<u32>,
+    /// The tour this playlist last read (authored default or panel write).
+    tour: PlaylistTour,
+    /// Where the tour counts from; set by a pick, a trigger or next/prev.
+    anchor: Option<PlaylistTourAnchor>,
+    /// The skipped entry keys this playlist last read.
+    skip: Vec<u32>,
+    /// Compiled readers for the def's consumed `tour` and `skip`.
+    def_view: Option<PlaylistDefView>,
     state: PlaylistState,
     /// The selected entry: the one playing, or the one a switch is bringing
     /// in.
@@ -143,8 +168,9 @@ impl PlaylistNode {
         node_id: NodeId,
         idle_entry: u32,
         default_fade: f32,
-        entries: Vec<PlaylistRuntimeEntry>,
+        mut entries: Vec<PlaylistRuntimeEntry>,
     ) -> Self {
+        entries.sort_by_key(|entry| entry.index);
         let pending_request = entries
             .iter()
             .find(|entry| entry.index == idle_entry && entry.child.is_none())
@@ -153,6 +179,12 @@ impl PlaylistNode {
             idle_entry,
             default_fade,
             entries,
+            next_trigger_ids: Vec::new(),
+            prev_trigger_ids: Vec::new(),
+            tour: PlaylistTour::Hold,
+            anchor: None,
+            skip: Vec::new(),
+            def_view: None,
             state: PlaylistState::new(
                 lpc_model::VisualProduct::new(node_id, 0),
                 0.0,
@@ -178,6 +210,15 @@ impl PlaylistNode {
             failure_status: None,
             published_paths: PublishedPaths::new(),
         }
+    }
+
+    /// The authored next/prev trigger ids (`PlaylistDef::next_trigger_ids`
+    /// and `prev_trigger_ids`).
+    #[must_use]
+    pub fn with_step_triggers(mut self, next: Vec<u32>, prev: Vec<u32>) -> Self {
+        self.next_trigger_ids = next;
+        self.prev_trigger_ids = prev;
+        self
     }
 
     /// The per-entry reason of `index` (device-only, plan PD10).
@@ -254,11 +295,16 @@ impl PlaylistNode {
     /// before. Otherwise the frame this runs on captures what the last frame
     /// showed, and the playlist asks for the new entry.
     fn switch_to(&mut self, target: u32, time: f32) {
+        self.switch_to_with_fade(target, time, self.fade_after(self.current_entry));
+    }
+
+    /// [`Self::switch_to`] with an explicit fade: the tour's steps fade by
+    /// the tour's `fade_seconds`.
+    fn switch_to_with_fade(&mut self, target: u32, time: f32, fade: f32) {
         self.switch_time = time;
         if target == self.current_entry {
             return;
         }
-        let fade = self.fade_after(self.current_entry);
         self.current_entry = target;
         self.current_ready = false;
         // Something was live last frame (the old entry, or a fade): that is
@@ -266,6 +312,87 @@ impl PlaylistNode {
         self.capture_pending = self.shown_entry.is_some();
         self.switch = Some(PlaylistSwitch::holding(fade));
         self.pending_request = self.request_for(target);
+    }
+
+    /// An explicit choice of `target` — an activate command, a trigger, or
+    /// next/prev: switch there and count the tour from it (vision D13: the
+    /// tour carries on from the pick).
+    fn pick(&mut self, target: u32, time: f32) {
+        self.switch_to(target, time);
+        self.anchor = Some(PlaylistTourAnchor::new(target, time));
+    }
+
+    /// The entry `steps` enabled stops away from `from` (negative is
+    /// previous), wrapping; `None` when nothing else can play.
+    fn stepped_from(&self, from: u32, steps: i32) -> Option<u32> {
+        let mut at = from;
+        for _ in 0..steps.unsigned_abs() {
+            at = if steps > 0 {
+                next_playable_after(&self.entries, at)?
+            } else {
+                prev_playable_before(&self.entries, at)?
+            };
+        }
+        (at != from).then_some(at)
+    }
+
+    /// The stops changed under a running tour (a skip or a failure): count
+    /// from the entry playing now, keeping the step phase, so the tour does
+    /// not jump and the entry playing keeps the rest of its step.
+    fn rebase_tour(&mut self) {
+        if let (Some(step), Some(anchor)) = (self.tour.running_step_seconds(), self.anchor) {
+            self.anchor = Some(anchor.rebased_on(self.current_entry, step, self.frame_time));
+        }
+    }
+
+    /// A tour read this frame: a change of value re-anchors at the entry
+    /// playing now, so turning the tour on (or re-timing it) starts a fresh
+    /// step instead of jumping.
+    fn apply_tour(&mut self, tour: PlaylistTour, time: f32) {
+        if tour == self.tour {
+            return;
+        }
+        self.tour = tour;
+        self.anchor = Some(PlaylistTourAnchor::new(self.current_entry, time));
+    }
+
+    /// A skip list read this frame: mark skipped entries `Disabled` and
+    /// clear the mark from the rest. A failure outranks a skip. The entry
+    /// playing is marked too but keeps playing until the tour's next step.
+    fn apply_skip(&mut self, skip: Vec<u32>) {
+        if skip == self.skip {
+            return;
+        }
+        for entry in &mut self.entries {
+            let skipped = skip.contains(&entry.index);
+            entry.reason = match (&entry.reason, skipped) {
+                (PlaylistEntryReason::Failed(_), _) => continue,
+                (_, true) => PlaylistEntryReason::Disabled,
+                (PlaylistEntryReason::Disabled, false) if entry.child.is_some() => {
+                    PlaylistEntryReason::Loaded
+                }
+                (PlaylistEntryReason::Disabled, false) => PlaylistEntryReason::NotPlaying,
+                (_, false) => continue,
+            };
+        }
+        self.skip = skip;
+        self.rebase_tour();
+    }
+
+    /// The consumed `tour` and `skip`: the authored defaults, or what Play
+    /// mode wrote on their channels. Absent reads as a hold and no skips.
+    fn read_tour_and_skip(
+        &mut self,
+        ctx: &mut TickContext<'_>,
+    ) -> Result<(PlaylistTour, Vec<u32>), NodeError> {
+        let view = PlaylistDefView::get_or_compile(&mut self.def_view, ctx.slot_shapes())
+            .map_err(err_ctx("compile playlist def view"))?;
+        let tour = read_absent_as_none::<PlaylistTour>(ctx, view.tour().some_accessor())?
+            .unwrap_or_default();
+        let skip = read_absent_as_none::<U32List>(ctx, view.skip().some_accessor())?
+            .map(|list| list.0)
+            .unwrap_or_default();
+        Ok((tour, skip))
     }
 
     /// `index` failed to load, compile or produce: mark it, and if it was
@@ -278,6 +405,7 @@ impl PlaylistNode {
         }
         self.failure_status = failure_status(&self.entries);
         if index != self.current_entry {
+            self.rebase_tour();
             return;
         }
         let Some(next) = next_playable_after(&self.entries, index) else {
@@ -293,6 +421,7 @@ impl PlaylistNode {
         self.current_ready = false;
         self.switch = Some(PlaylistSwitch::holding(fade));
         self.pending_request = self.request_for(next);
+        self.rebase_tour();
     }
 
     /// A readiness answer for the current entry, asked after rendering it.
@@ -423,15 +552,38 @@ impl NodeRuntime for PlaylistNode {
             ctx.resolve_consumed_slot_value::<lpc_model::TimeProduct>(&self.published_paths.time)?;
         let time = ctx.time_product_seconds(product)?;
         self.frame_time = time;
+        let (tour, skip) = self.read_tour_and_skip(ctx)?;
+        self.apply_skip(skip);
+        self.apply_tour(tour, time);
         // Trigger detection always runs (it also advances the per-message
         // dedup state), but an explicit activate command wins a same-frame
         // race against a trigger message.
-        let triggered_entry =
-            detect_triggered_entry(ctx, &self.entries, &mut self.last_seen_triggers)?;
+        let triggered = detect_triggers(
+            ctx,
+            &self.entries,
+            TriggerIds {
+                next: &self.next_trigger_ids,
+                prev: &self.prev_trigger_ids,
+            },
+            &mut self.last_seen_triggers,
+        )?;
         if let Some(entry) = self.pending_activate.take() {
-            self.switch_to(entry, time);
-        } else if let Some(entry) = triggered_entry {
-            self.switch_to(entry, time);
+            self.pick(entry, time);
+        } else if let Some(entry) = triggered.entry {
+            self.pick(entry, time);
+        } else if triggered.steps != 0 {
+            if let Some(target) = self.stepped_from(self.current_entry, triggered.steps) {
+                self.pick(target, time);
+            }
+        } else if let Some(step) = self.tour.running_step_seconds() {
+            // Touring: where the tour is, is a pure function of the clock
+            // and the anchor. Idle has no special role here (plan A2).
+            if let Some(anchor) = self.anchor
+                && let Some(target) = tour_entry_at(&self.entries, anchor, step, time)
+                && target != self.current_entry
+            {
+                self.switch_to_with_fade(target, time, self.tour.fade_seconds());
+            }
         } else if self.current_entry != self.idle_entry
             && let Some(duration) = self.duration(self.current_entry)
             && time - self.switch_time >= duration
@@ -552,7 +704,11 @@ impl NodeRuntime for PlaylistNode {
         };
         runtime_entry.child = Some(child);
         runtime_entry.output_slot = output_slot.clone();
-        runtime_entry.reason = PlaylistEntryReason::Loaded;
+        // A skipped entry can still load (picked explicitly, or playing out
+        // its step): it stays marked.
+        if runtime_entry.reason != PlaylistEntryReason::Disabled {
+            runtime_entry.reason = PlaylistEntryReason::Loaded;
+        }
         if entry == self.current_entry {
             self.current_ready = false;
         }
@@ -582,6 +738,9 @@ impl NodeRuntime for PlaylistNode {
         if let Some(kept) = request.unload {
             self.current_entry = kept;
         }
+        // A running tour counts on from the kept entry: asking again every
+        // frame would meet the same refusal every frame.
+        self.anchor = Some(PlaylistTourAnchor::new(self.current_entry, self.frame_time));
         self.current_ready = false;
         self.end_switch();
     }
@@ -1064,11 +1223,27 @@ fn clear_target(ctx: &RenderContext<'_>, target: &mut TextureHandle) -> Result<(
         .map_err(err_ctx("playlist clear target"))
 }
 
-fn detect_triggered_entry(
+/// The authored step trigger ids, matched beside the entries' own.
+struct TriggerIds<'a> {
+    next: &'a [u32],
+    prev: &'a [u32],
+}
+
+/// What this frame's fresh trigger messages ask for.
+#[derive(Default)]
+struct TriggeredAction {
+    /// An entry trigger (the lowest entry claiming any fresh id).
+    entry: Option<u32>,
+    /// Net next (+) / prev (-) presses among ids no entry claims.
+    steps: i32,
+}
+
+fn detect_triggers(
     ctx: &mut TickContext<'_>,
     entries: &[PlaylistRuntimeEntry],
+    step_ids: TriggerIds<'_>,
     last_seen: &mut VecMap<u32, u32>,
-) -> Result<Option<u32>, NodeError> {
+) -> Result<TriggeredAction, NodeError> {
     let production = ctx
         .resolve(&QueryKey::ConsumedSlot {
             node: ctx.node_id(),
@@ -1076,9 +1251,9 @@ fn detect_triggered_entry(
         })
         .map_err(|e| NodeError::msg(format!("resolve playlist trigger: {e:?}")))?;
     let SlotData::Map(map) = production.data() else {
-        return Ok(None);
+        return Ok(TriggeredAction::default());
     };
-    let mut triggered: Option<u32> = None;
+    let mut action = TriggeredAction::default();
     for data in map.entries.values() {
         let Some(message) = control_message_from_slot_data(data)? else {
             continue;
@@ -1087,8 +1262,8 @@ fn detect_triggered_entry(
         if previous == Some(message.seq()) {
             continue;
         }
-        // Triggers route by AUTHORED ids, loaded or not; a failed entry
-        // ignores its trigger.
+        // Triggers route by AUTHORED ids, loaded or not; a failed or skipped
+        // entry ignores its trigger.
         let entry = entries
             .iter()
             .filter(|entry| {
@@ -1100,12 +1275,41 @@ fn detect_triggered_entry(
             })
             .map(|entry| entry.index)
             .min();
-        triggered = match (triggered, entry) {
+        action.entry = match (action.entry, entry) {
             (Some(current), Some(candidate)) => Some(current.min(candidate)),
             (current, candidate) => current.or(candidate),
         };
+        if entry.is_none() {
+            if step_ids.next.contains(&message.id()) {
+                action.steps += 1;
+            }
+            if step_ids.prev.contains(&message.id()) {
+                action.steps -= 1;
+            }
+        }
     }
-    Ok(triggered)
+    Ok(action)
+}
+
+/// Read an optional consumed slot's `some` value, `None` when it is absent.
+///
+/// An option nobody authored and nobody wrote on its channel resolves as an
+/// unresolved consumed slot, not as "option slot is none": the authored
+/// default read cannot tell the two apart (the fixture's `power` read meets
+/// the same thing). The accessor is compiled from `PlaylistDef`'s own shape,
+/// so the path exists and "unresolved" can only mean absent. Any other
+/// error — a written value of the wrong shape — is still an error.
+fn read_absent_as_none<T: FromLpValue>(
+    ctx: &mut TickContext<'_>,
+    accessor: &lpc_model::SlotAccessor,
+) -> Result<Option<T>, NodeError> {
+    match ctx.resolve_consumed_slot_accessor_value::<T>(accessor) {
+        Ok(value) => Ok(Some(value)),
+        Err(NodeError::Message(message)) if message.contains("unresolved consumed slot") => {
+            Ok(None)
+        }
+        Err(error) => Err(error),
+    }
 }
 
 fn control_message_from_slot_data(data: &SlotData) -> Result<Option<ControlMessage>, NodeError> {
@@ -1374,6 +1578,52 @@ mod tests {
             2,
             "idle failed: the next playable after it"
         );
+    }
+
+    #[test]
+    fn a_skip_list_marks_entries_disabled_and_a_failure_outranks_it() {
+        let mut node = playlist_with_entries(&[1, 2, 3]);
+        node.fail_entry(3, String::from("bad glsl"));
+
+        node.apply_skip(alloc::vec![1, 2, 3]);
+        assert_eq!(node.entry_reason(1), Some(&PlaylistEntryReason::Disabled));
+        assert_eq!(node.entry_reason(2), Some(&PlaylistEntryReason::Disabled));
+        assert!(matches!(
+            node.entry_reason(3),
+            Some(PlaylistEntryReason::Failed(_))
+        ));
+
+        node.apply_skip(Vec::new());
+        assert_eq!(
+            node.entry_reason(1),
+            Some(&PlaylistEntryReason::Loaded),
+            "entry 1 is loaded: unskipped, it is Loaded again"
+        );
+        assert_eq!(node.entry_reason(2), Some(&PlaylistEntryReason::NotPlaying));
+    }
+
+    #[test]
+    fn a_skipped_entry_that_loads_stays_disabled() {
+        let mut node = playlist_with_entries(&[1, 2]);
+        node.apply_skip(alloc::vec![2]);
+
+        node.entry_loaded(2, NodeId::new(102), &SlotPath::parse("output").unwrap());
+
+        assert_eq!(node.entry_reason(2), Some(&PlaylistEntryReason::Disabled));
+        assert!(node.is_loaded(2));
+    }
+
+    #[test]
+    fn next_and_prev_step_over_disabled_entries_and_wrap() {
+        let mut node = playlist_with_entries(&[1, 2, 3, 4]);
+        node.apply_skip(alloc::vec![3]);
+
+        assert_eq!(node.stepped_from(2, 1), Some(4));
+        assert_eq!(node.stepped_from(4, 1), Some(1), "wraps");
+        assert_eq!(node.stepped_from(1, -1), Some(4), "wraps back");
+        assert_eq!(node.stepped_from(1, 2), Some(4), "two presses in a frame");
+        node.apply_skip(alloc::vec![2, 3, 4]);
+        assert_eq!(node.stepped_from(1, 1), None, "nothing else can play");
     }
 
     /// `Critical` is the survival broadcast between ticks: drop the blend
