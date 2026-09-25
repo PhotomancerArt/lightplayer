@@ -1,0 +1,24 @@
+{
+  "record": {
+    "fields": [
+      {
+        "name": "value",
+        "shape": {
+          "value": {
+            "shape": {
+              "editor": {
+                "number": {
+                  "min": 0.0
+                }
+              },
+              "id": 2960302901,
+              "meta": {},
+              "ty": "f32"
+            }
+          }
+        }
+      }
+    ],
+    "meta": {}
+  }
+}

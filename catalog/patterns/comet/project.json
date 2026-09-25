@@ -1,5 +1,5 @@
 {
-  "format": 10,
+  "format": 11,
   "name": "Comet",
   "description": "A bright head sweeping the strip with a trail fading behind it, as a true 1D shader. Ported from WLED's Lighthouse.",
   "kind": "pattern",
