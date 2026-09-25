@@ -18,6 +18,7 @@ use alloc::vec::Vec;
 use lpc_history::{ContentHash, HistoryEvent};
 use serde::{Deserialize, Serialize};
 
+use crate::account_access_info::AccountAccessInfo;
 use crate::ack::Ack;
 use crate::actor::Actor;
 use crate::head_info::{HeadInfo, PushOutcome};
@@ -55,6 +56,8 @@ pub enum CloudResponse {
     Ack(Ack),
     /// See [`crate::login_options::LoginOptionsInfo`].
     LoginOptionsInfo(LoginOptionsInfo),
+    /// See [`crate::account_access_info::AccountAccessInfo`].
+    AccountAccessInfo(AccountAccessInfo),
 }
 
 /// Answers [`crate::request::WhoAmI`].
@@ -193,6 +196,12 @@ impl From<Ack> for CloudResponse {
 impl From<LoginOptionsInfo> for CloudResponse {
     fn from(response: LoginOptionsInfo) -> Self {
         CloudResponse::LoginOptionsInfo(response)
+    }
+}
+
+impl From<AccountAccessInfo> for CloudResponse {
+    fn from(response: AccountAccessInfo) -> Self {
+        CloudResponse::AccountAccessInfo(response)
     }
 }
 
@@ -375,5 +384,32 @@ mod tests {
             serde_json::to_string(&resp).unwrap(),
             r#"{"loginOptionsInfo":{"oidc":[],"devPicker":null}}"#
         );
+    }
+
+    /// The `AccountAccessInfo` family pinned: the variant name wraps the
+    /// payload whose own literal is pinned in `account_access_info.rs`.
+    #[test]
+    fn pinned_json_literal_account_access_info() {
+        let resp = CloudResponse::AccountAccessInfo(AccountAccessInfo {
+            key_secret: [0u8; 32],
+            key_salt: [0u8; 16],
+            play_password_salt: [0u8; 16],
+            edit_password_salt: [0u8; 16],
+            play_password: None,
+            edit_password: None,
+            previous_key_salts: vec![[1u8; 16]],
+            updated_at: 0.0,
+        });
+        let json = serde_json::to_string(&resp).unwrap();
+        assert!(
+            json.starts_with(r#"{"accountAccessInfo":{"keySecret":""#),
+            "{json}"
+        );
+        assert!(
+            json.ends_with(r#""previousKeySalts":["AQEBAQEBAQEBAQEBAQEBAQ=="],"updatedAt":0.0}}"#),
+            "{json}"
+        );
+        let back: CloudResponse = serde_json::from_str(&json).unwrap();
+        assert_eq!(back, resp);
     }
 }

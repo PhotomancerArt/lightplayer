@@ -22,6 +22,7 @@ use lpc_history::{ContentHash, HistoryEvent, PrefixedUid};
 use serde::{Deserialize, Serialize};
 
 use crate::access::Access;
+use crate::account_password_tier::AccountPasswordTier;
 use crate::sidecar_meta::SidecarMeta;
 
 /// A client→service request. See [`crate::response::CloudResponse`] for the
@@ -67,6 +68,12 @@ pub enum CloudRequest {
     RevokeSession(RevokeSession),
     /// See [`LoginOptions`].
     LoginOptions,
+    /// See [`GetAccountAccess`].
+    GetAccountAccess,
+    /// See [`SetAccountPassword`].
+    SetAccountPassword(SetAccountPassword),
+    /// See [`ResetAccountKey`].
+    ResetAccountKey,
 }
 
 /// Who is the caller? Answered with [`crate::response::UserInfo`]; never
@@ -233,6 +240,33 @@ pub struct RevokeSession {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct LoginOptions;
 
+/// The caller's account device key and optional account passwords, minted
+/// on first ask. Answered with
+/// [`crate::account_access_info::AccountAccessInfo`]. Requires a signed-in
+/// account; a guest account is refused (it has no login to come back
+/// through, so a key tied to it would be unreachable from any other
+/// browser).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct GetAccountAccess;
+
+/// Set or clear one of the account's two optional device passwords.
+/// `None` clears it; length limits are service policy. Answered with the
+/// updated [`crate::account_access_info::AccountAccessInfo`].
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SetAccountPassword {
+    /// Which password: play or edit.
+    pub tier: AccountPasswordTier,
+    /// The new password, or `None` to clear it.
+    pub password: Option<String>,
+}
+
+/// Replace the account key with a fresh secret and salt. The old salt is
+/// kept on [`crate::account_access_info::AccountAccessInfo::previous_key_salts`]
+/// so a client can remove the retired entries from devices. Answered with
+/// the updated [`crate::account_access_info::AccountAccessInfo`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ResetAccountKey;
+
 impl From<WhoAmI> for CloudRequest {
     fn from(_: WhoAmI) -> Self {
         CloudRequest::WhoAmI
@@ -338,6 +372,24 @@ impl From<RevokeSession> for CloudRequest {
 impl From<LoginOptions> for CloudRequest {
     fn from(_: LoginOptions) -> Self {
         CloudRequest::LoginOptions
+    }
+}
+
+impl From<GetAccountAccess> for CloudRequest {
+    fn from(_: GetAccountAccess) -> Self {
+        CloudRequest::GetAccountAccess
+    }
+}
+
+impl From<SetAccountPassword> for CloudRequest {
+    fn from(request: SetAccountPassword) -> Self {
+        CloudRequest::SetAccountPassword(request)
+    }
+}
+
+impl From<ResetAccountKey> for CloudRequest {
+    fn from(_: ResetAccountKey) -> Self {
+        CloudRequest::ResetAccountKey
     }
 }
 
@@ -554,5 +606,37 @@ mod tests {
             serde_json::to_string(&req).unwrap(),
             r#"{"revokeSession":{"id":"abc123"}}"#
         );
+    }
+
+    /// Pinned JSON literals for the vocabulary-v4 account-access calls.
+    #[test]
+    fn pinned_json_literal_account_access_calls() {
+        assert_eq!(
+            serde_json::to_string(&CloudRequest::GetAccountAccess).unwrap(),
+            "\"getAccountAccess\""
+        );
+        assert_eq!(
+            serde_json::to_string(&CloudRequest::ResetAccountKey).unwrap(),
+            "\"resetAccountKey\""
+        );
+        let set = CloudRequest::SetAccountPassword(SetAccountPassword {
+            tier: AccountPasswordTier::Play,
+            password: Some("friends".to_string()),
+        });
+        assert_eq!(
+            serde_json::to_string(&set).unwrap(),
+            r#"{"setAccountPassword":{"tier":"play","password":"friends"}}"#
+        );
+        let clear = CloudRequest::SetAccountPassword(SetAccountPassword {
+            tier: AccountPasswordTier::Edit,
+            password: None,
+        });
+        assert_eq!(
+            serde_json::to_string(&clear).unwrap(),
+            r#"{"setAccountPassword":{"tier":"edit","password":null}}"#
+        );
+        let back: CloudRequest =
+            serde_json::from_str(&serde_json::to_string(&set).unwrap()).unwrap();
+        assert_eq!(back, set);
     }
 }

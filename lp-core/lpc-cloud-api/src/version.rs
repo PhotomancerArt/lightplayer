@@ -24,7 +24,11 @@ use crate::error::CloudError;
 /// (`none`/`view`/`edit`), `SetVisibility` → `SetAccess`, `ArchiveProject`/
 /// `RestoreProject`, `ProjectMeta.archived`, `ProjectInfo.members`,
 /// `MemberRole::Member` → `Editor`.
-pub const CLOUD_API_VERSION: u32 = 3;
+///
+/// v4 = the account device key and optional account passwords (2026-09-24):
+/// `GetAccountAccess`, `SetAccountPassword`, `ResetAccountKey`, answered by
+/// [`AccountAccessInfo`](crate::account_access_info::AccountAccessInfo).
+pub const CLOUD_API_VERSION: u32 = 4;
 
 /// Refuse a call whose declared version does not match [`CLOUD_API_VERSION`].
 ///
