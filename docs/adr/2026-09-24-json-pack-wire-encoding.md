@@ -248,6 +248,21 @@ compatibility window, multiple co-resident dictionaries, or an OTA path is
 future work, out of scope here, and connects to the BLE remote-control
 vision's own version-skew questions.
 
+**The intended next step is an in-band dictionary** (Yona, 2026-09-24:
+follow-up, not before merge). When the host's fingerprint does not match,
+the board would send its dictionary once per connection, and the host
+would cache it by fingerprint. Build-to-build dictionary agreement then
+disappears, and only message-shape agreement is left for the version-skew
+work to solve. This protocol already leaves room for it: `SetEncoding`
+carries the host's fingerprint, `ServerHello.pack_dictionary` names the
+board's, and a mismatch is answered in JSON, so the follow-up adds a reply
+rather than replacing the handshake. The decoder already accepts a
+dictionary built at runtime (`OwnedDictionary`, behind `alloc`). A
+per-connection learned table (HPACK-style) is the larger alternative. It is
+not ruled out, but the torn frames seen on real hardware make its resync
+cost a design question of its own. The options are recorded in the plan's
+notes and were sent to the wire-version-skew vision.
+
 ### Measurements
 
 All emulated numbers are on the tree at `3ba73b8f9` (lp-emu last changed at
