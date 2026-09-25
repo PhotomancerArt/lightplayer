@@ -19,7 +19,9 @@
 //! The registry only records the answer and re-derives.
 //!
 //! The default, for a playlist with no explicit set, is its authored
-//! `idle_entry` only. The default is read from the effective playlist def at
+//! `idle_entry` only — or its first entry by key when `idle_entry` names no
+//! authored entry ([`lpc_model::PlaylistDef::effective_idle_entry`], which
+//! the runtime playlist uses too). The default is read from the effective playlist def at
 //! derivation time, so nothing is stored for a playlist that was never
 //! switched. Sets are keyed by the playlist's [`NodeUseLocation`] and dropped
 //! when that use leaves the tree.

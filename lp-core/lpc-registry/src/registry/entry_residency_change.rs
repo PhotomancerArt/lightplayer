@@ -102,7 +102,7 @@ impl ProjectRegistry {
                 else {
                     continue;
                 };
-                let idle_entry = *playlist.idle_entry.value();
+                let idle_entry = playlist.effective_idle_entry();
                 for key in playlist.entries.entries.keys() {
                     changed |= self
                         .residency
@@ -142,7 +142,7 @@ impl ProjectRegistry {
                 continue;
             };
             let playlist_file = node.def_location.artifact.file_path();
-            let idle_entry = *playlist.idle_entry.value();
+            let idle_entry = playlist.effective_idle_entry();
             for (key, entry) in &playlist.entries.entries {
                 if self.residency.is_resident(use_location, *key, idle_entry) {
                     continue;
@@ -196,7 +196,7 @@ impl ProjectRegistry {
                 entry,
             });
         }
-        Ok((artifact, *def.idle_entry.value()))
+        Ok((artifact, def.effective_idle_entry()))
     }
 
     /// Install `next`, re-derive, and commit the result — or restore the

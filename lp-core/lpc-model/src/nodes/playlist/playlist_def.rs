@@ -54,6 +54,22 @@ impl PlaylistDef {
     pub fn kind(&self) -> crate::NodeKind {
         crate::NodeKind::Playlist
     }
+
+    /// The entry this playlist plays when nothing else chose one: its
+    /// authored `idle_entry` when that names an authored entry, otherwise the
+    /// first authored entry by key — a dangling `idle_entry` plays the first
+    /// entry rather than nothing (multi-pattern plan, director ruling DD7).
+    /// With no entries at all, the authored value.
+    ///
+    /// This is the entry the registry makes resident at load and the entry
+    /// the runtime playlist treats as idle, so the two always agree.
+    pub fn effective_idle_entry(&self) -> u32 {
+        let idle = *self.idle_entry.value();
+        if self.entries.entries.contains_key(&idle) {
+            return idle;
+        }
+        self.entries.entries.keys().copied().min().unwrap_or(idle)
+    }
 }
 
 fn default_time() -> TimeProductSlot {
@@ -127,5 +143,40 @@ mod tests {
         assert_eq!(def.kind_name(), "playlist");
         assert_eq!(def.variant_name(), "Playlist");
         assert!(def.as_playlist().is_some());
+    }
+
+    #[test]
+    fn effective_idle_entry_falls_back_to_the_first_authored_key() {
+        let parse = |json: &str| {
+            let NodeDef::Playlist(def) = NodeDef::from_json_str(json).expect("playlist") else {
+                panic!("playlist def");
+            };
+            def
+        };
+        let entries = r#""entries": {
+            "3": { "node": { "ref": "./c.json" } },
+            "2": { "node": { "ref": "./b.json" } }
+        }"#;
+
+        let authored = parse(&alloc::format!(
+            r#"{{ "kind": "Playlist", "idle_entry": 3, {entries} }}"#
+        ));
+        assert_eq!(
+            authored.effective_idle_entry(),
+            3,
+            "an authored idle entry wins"
+        );
+
+        let dangling = parse(&alloc::format!(
+            r#"{{ "kind": "Playlist", "idle_entry": 9, {entries} }}"#
+        ));
+        assert_eq!(dangling.effective_idle_entry(), 2, "dangling → lowest key");
+
+        let empty = parse(r#"{ "kind": "Playlist", "idle_entry": 9 }"#);
+        assert_eq!(
+            empty.effective_idle_entry(),
+            9,
+            "no entries → authored value"
+        );
     }
 }

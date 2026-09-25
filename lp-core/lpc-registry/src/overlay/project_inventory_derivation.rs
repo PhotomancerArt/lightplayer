@@ -149,7 +149,7 @@ impl InventoryDerivation<'_, '_> {
         // resident set (`idle_entry` only) is read from it.
         let idle_entry = def
             .as_playlist()
-            .map(|playlist| *playlist.idle_entry.value());
+            .map(|playlist| playlist.effective_idle_entry());
 
         for site in def.invocation_sites() {
             match &site.invocation {
