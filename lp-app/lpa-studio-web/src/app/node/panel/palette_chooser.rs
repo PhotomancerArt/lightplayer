@@ -624,7 +624,7 @@ fn PinMemberButton(name: String, pinned: bool, on_pin: EventHandler<()>) -> Elem
     let tone = if pinned {
         "tw:rounded-xs tw:bg-strong-foreground tw:text-page"
     } else {
-        "tw:text-subtle-foreground tw:hover:text-strong-foreground"
+        "tw:bg-transparent tw:text-subtle-foreground tw:hover:text-strong-foreground"
     };
     let (title, label) = if pinned {
         ("Resume cycling", format!("Unpin {name}"))
@@ -633,7 +633,10 @@ fn PinMemberButton(name: String, pinned: bool, on_pin: EventHandler<()>) -> Elem
     };
     rsx! {
         button {
-            class: "tw:inline-flex tw:flex-none tw:cursor-pointer tw:appearance-none tw:items-center tw:border-0 tw:bg-transparent tw:p-1 {tone}",
+            // No `bg-transparent` in the base: it sorts after the pinned
+            // fill in the generated CSS and would win, so each tone owns its
+            // own background.
+            class: "tw:inline-flex tw:flex-none tw:cursor-pointer tw:appearance-none tw:items-center tw:border-0 tw:p-1 {tone}",
             r#type: "button",
             title,
             aria_label: label,
