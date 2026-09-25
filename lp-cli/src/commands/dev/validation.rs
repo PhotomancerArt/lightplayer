@@ -67,8 +67,8 @@ pub fn check_every_entry(project_dir: &PathBuf) -> Result<Vec<String>> {
     // An arbitrary, fixed anchor: this loader instance never ticks or
     // resolves against a real show tree, so the path's content doesn't
     // matter, only that it parses.
-    let root_path = TreePath::parse("/upload_check.show")
-        .expect("static anchor path is a valid TreePath");
+    let root_path =
+        TreePath::parse("/upload_check.show").expect("static anchor path is a valid TreePath");
     let services = EngineServices::new(root_path);
 
     let runtime = ProjectLoader::load_from_root_with_every_entry_resident(&fs, services)
