@@ -97,6 +97,8 @@ texel centres map to ±1, and the pitch is one texel.
 - The ESP32-C6 image grows by 8,992 B against main at 1cd1f7d4e
   (2,448,880 → 2,457,872 B; headroom 687,856 B). Against the earlier mains it
   was measured on, the growth was 9,040 B (8fe93d9db) and 8,864 B.
+  Re-measured on main 0b73e5285 (after #785): 2,810,320 → 2,819,440 B,
+  +9,120 B; headroom 326,288 B.
 - The wire proto bumps (24 → 25; lean-wire's follow-ups took 23 and the
   gradient-cycle pin took 24): the on-disk
   key is additive, but an old peer refuses a shader def carrying a field it
