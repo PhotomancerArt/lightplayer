@@ -200,6 +200,15 @@ class VirtualBluetooth extends EventTarget {
     this.devices.get(boardId)?.gatt.drop("dropped while nobody was listening", { quiet: true });
   }
 
+  /// Tell the page its link is gone while the RADIO link stays up — Bluefy
+  /// on iOS (G4, 2026-09-25): `gatt.connected` goes false and no event
+  /// fires, but the board's side of the link stays open until the page calls
+  /// `gatt.disconnect()`. A reconnect before that rides the old link.
+  phantomDrop(boardId) {
+    const gatt = this.devices.get(boardId)?.gatt;
+    if (gatt) gatt.connected = false;
+  }
+
   /// The next `connect()` for this board never settles (Chrome, Run B).
   hangNextConnect(boardId) {
     this.deviceFor(boardId).gatt.hangNext = true;
@@ -247,7 +256,17 @@ class VirtualGattServer {
     this.offError = null;
     this.unauthTimer = null;
     this.lineTail = "";
-    this.stats = { written: 0, writes: 0, notified: 0, notifications: 0, connects: 0 };
+    // `linkOpens`/`linkCloses`: the BOARD's side of the link (the port under
+    // it opened or closed), which a phantom drop leaves open.
+    this.stats = {
+      written: 0,
+      writes: 0,
+      notified: 0,
+      notifications: 0,
+      connects: 0,
+      linkOpens: 0,
+      linkCloses: 0,
+    };
   }
 
   async connect() {
@@ -278,6 +297,7 @@ class VirtualGattServer {
     const emulator = port.emulator;
     await emulator.open();
     this.emulator = emulator;
+    this.stats.linkOpens += 1;
     this.lineTail = "";
     this.offBytes = emulator.onBytes((bytes) => {
       this.watchAuth(bytes);
@@ -324,9 +344,12 @@ class VirtualGattServer {
   }
 
   drop(_why, { quiet = false } = {}) {
-    if (!this.connected) {
+    // A phantom-dropped link is not `connected` but still holds the board's
+    // side; a drop (the page's disconnect) closes it all the same.
+    if (!this.connected && !this.emulator) {
       return;
     }
+    const wasConnected = this.connected;
     this.connected = false;
     clearTimeout(this.unauthTimer);
     this.unauthTimer = null;
@@ -337,8 +360,11 @@ class VirtualGattServer {
     this.offError = null;
     const emulator = this.emulator;
     this.emulator = null;
+    if (emulator) {
+      this.stats.linkCloses += 1;
+    }
     emulator?.close().catch(() => {});
-    if (!quiet) {
+    if (!quiet && wasConnected) {
       this.device.dispatchEvent(new Event("gattserverdisconnected"));
     }
   }

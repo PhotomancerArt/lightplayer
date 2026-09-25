@@ -19,12 +19,15 @@
 //!   read-back, and the subscribe deadline — a central that never enables
 //!   notifications is disconnected after the same 10 s a link gets to log in.
 
+use alloc::vec::Vec;
 use embassy_futures::select::{Either4, select4};
 use embassy_time::{Duration, Instant, Timer};
 use fw_esp32_common::radio_link::line_joiner::LineJoiner;
+use fw_esp32_common::radio_link::prepared_write::{PrepareRefused, PreparedWrite};
 use fw_esp32_common::radio_link::{
     LOGIN_DEADLINE_MS, RADIO_LINE_CAP, RADIO_LINK_PORT, RadioLinkEvent,
 };
+use trouble_host::att::{AttClient, AttReq};
 use trouble_host::prelude::*;
 
 use super::ble_task::BleStack;
@@ -58,6 +61,7 @@ pub async fn serve(
     conn_params::log_granted(link, &conn, "at connect");
 
     let mut joiner = LineJoiner::new(RADIO_LINE_CAP);
+    let mut prepared = PreparedWrite::new();
     let mut opened = false;
     let mut closing = false;
     let mut params_request_at = Some(connected_at + PARAMS_REQUEST_AFTER);
@@ -99,16 +103,12 @@ pub async fn serve(
         match select4(conn.next(), write, slot_port.close_requested(), timer).await {
             Either4::First(GattConnectionEvent::Disconnected { reason }) => break reason,
             Either4::First(GattConnectionEvent::Gatt { event }) => {
-                let rx_bytes = match &event {
-                    GattEvent::Write(w) if w.handle() == server.uart.rx.handle => {
-                        let mut bytes =
-                            heapless::Vec::<u8, { super::nus_service::NUS_VALUE_MAX }>::new();
-                        let _ = bytes.extend_from_slice(w.data());
-                        Some(bytes)
-                    }
-                    _ => None,
+                let (rx_bytes, refuse) = rx_write(&event, server, &mut prepared, link);
+                let reply = match refuse {
+                    Some(code) => event.reject(code),
+                    None => event.accept(),
                 };
-                match event.accept() {
+                match reply {
                     Ok(reply) => reply.send().await,
                     Err(_) => log::warn!("[ble] {link}: GATT reply failed"),
                 }
@@ -228,6 +228,60 @@ pub async fn serve(
         reason.into_inner(),
         esp_alloc::HEAP.used()
     );
+}
+
+/// What a GATT event writes to RX, and the ATT error to refuse it with.
+///
+/// A plain write (with or without response) carries its bytes. A long write
+/// arrives as `Prepare Write`s, queued in `prepared`, and one `Execute Write`
+/// that hands the whole value over; trouble-host reports both as "other"
+/// events and would otherwise answer them with success and drop the bytes
+/// (docs/defects/2026-09-25-a-long-bluetooth-write-is-acknowledged-and-lost.md).
+/// A segment the queue refuses is refused to the central with the matching
+/// ATT error, so the page's write fails loudly instead of vanishing.
+fn rx_write(
+    event: &GattEvent<'_, '_, DefaultPacketPool>,
+    server: &NusServer<'_>,
+    prepared: &mut PreparedWrite,
+    link: lpc_shared::transport::LinkId,
+) -> (Option<Vec<u8>>, Option<AttErrorCode>) {
+    let rx_handle = server.uart.rx.handle;
+    match event {
+        GattEvent::Write(w) if w.handle() == rx_handle => (Some(w.data().to_vec()), None),
+        GattEvent::Other(other) => match other.payload().incoming() {
+            AttClient::Request(AttReq::PrepareWrite {
+                handle,
+                offset,
+                value,
+            }) if handle == rx_handle => match prepared.prepare(offset, value) {
+                Ok(()) => (None, None),
+                Err(refused) => {
+                    log::warn!(
+                        "[ble] {link}: long write refused at offset {offset} ({} B queued): {}",
+                        prepared.queued(),
+                        match refused {
+                            PrepareRefused::InvalidOffset => "offset out of order",
+                            PrepareRefused::QueueFull => "longer than 512 B",
+                        }
+                    );
+                    let code = match refused {
+                        PrepareRefused::InvalidOffset => AttErrorCode::INVALID_OFFSET,
+                        PrepareRefused::QueueFull => AttErrorCode::PREPARE_QUEUE_FULL,
+                    };
+                    (None, Some(code))
+                }
+            },
+            AttClient::Request(AttReq::ExecuteWrite { flags }) => {
+                let value = prepared.execute(flags);
+                if let Some(value) = &value {
+                    log::debug!("[ble] {link}: long write of {} B executed", value.len());
+                }
+                (value, None)
+            }
+            _ => (None, None),
+        },
+        _ => (None, None),
+    }
 }
 
 /// Run K's active/idle switch: when to ask for the idle parameters, if at all.

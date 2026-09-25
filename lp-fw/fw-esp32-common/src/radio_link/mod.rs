@@ -8,6 +8,7 @@
 //!   open, so a controller reset can close them in the host too;
 //! - [`line_joiner`]: written chunks → `M!` lines (host → board);
 //! - [`line_chunker`]: one framed line → notify-sized values (board → host);
+//! - [`prepared_write`]: an ATT long write (Prepare … Execute) → its bytes;
 //! - [`radio_link_port`]: the channels the radio side and the mux meet on;
 //! - [`link_mux_transport`]: USB plus the radio links as one server transport.
 //!
@@ -18,6 +19,7 @@ pub mod line_chunker;
 pub mod line_joiner;
 #[cfg(feature = "server")]
 pub mod link_mux_transport;
+pub mod prepared_write;
 #[cfg(feature = "server")]
 pub mod radio_link_port;
 
