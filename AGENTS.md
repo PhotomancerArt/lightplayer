@@ -853,6 +853,8 @@ renders, and drives a WS281x waveform onto a pad that a decoder reads back at
 the datasheet's ±150 ns. It is the configuration `lp-emu:esp32c6:t1` (and
 `:t2`) in the validation system above.
 
+**No firmware build needed to run a chip suite:** `just fetch-ci-images [pr|sha|run]` + `export LP_CI_IMAGES=…` runs `test-emu-*-boot`, the chip heap ratchets and `bless-chips` against CI's own images, refusing them if their firmware sources are not your checkout's (`docs/ci-images.md`).
+
 ```bash
 lp-cli emu run --merged <chip.bin> --link 127.0.0.1:5591 --monitor   # a C6 you can talk to
 lp-cli upload projects/test/basic serial:tcp://127.0.0.1:5591        # …in another terminal
