@@ -1286,12 +1286,11 @@ fn detect_triggers(
 
 /// Read an optional consumed slot's `some` value, `None` when it is absent.
 ///
-/// An option nobody authored and nobody wrote on its channel resolves as an
-/// unresolved consumed slot, not as "option slot is none": the authored
-/// default read cannot tell the two apart (the fixture's `power` read meets
-/// the same thing). `path` is one of `PlaylistDef`'s own option fields
-/// (pinned by the tests), so "unresolved" can only mean absent. Any other
-/// error — a written value of the wrong shape — is still an error.
+/// An option nobody authored and nobody wrote on its channel comes back as
+/// the typed [`crate::dataflow::resolver::ResolveError::is_absent_option`],
+/// which allocates nothing: this runs every frame per playlist. Any other
+/// error — an unresolved slot, a written value of the wrong shape — is still
+/// an error.
 ///
 /// A static path is interned by the resolver once per structural epoch; a
 /// compiled `PlaylistDefView` for the same two reads measured 4,192 B more
@@ -1302,7 +1301,7 @@ fn read_absent_as_none<T: FromLpValue>(
 ) -> Result<Option<T>, NodeError> {
     let production = match ctx.resolve_static_consumed(path) {
         Ok(production) => production,
-        Err(error) if error.message.contains("unresolved consumed slot") => return Ok(None),
+        Err(error) if error.is_absent_option() => return Ok(None),
         Err(error) => {
             return Err(NodeError::msg(format!(
                 "resolve playlist {path}: {}",

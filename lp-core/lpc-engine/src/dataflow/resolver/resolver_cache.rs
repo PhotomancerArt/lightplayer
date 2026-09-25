@@ -9,6 +9,11 @@
 //!   of slot data, so re-doing it every frame was one of the larger costs.
 //! - **routes** — [`ResolvedRoute`], the decision about *how* a query is
 //!   answered. See that type's documentation.
+//! - **absent options** — one bit per query: this consumed slot names the
+//!   `some` of an authored option that holds nothing, with nothing written on
+//!   its channel. As structural as an authored-def read, and the answer an
+//!   optional field nobody authored gives every frame, so it is remembered
+//!   rather than re-derived through a failing bus walk each time.
 //!
 //! The two value tables are behind the `resolver-payload-cache` gate; the
 //! route table and the intern table are not. That is the line between the
@@ -41,6 +46,10 @@ pub struct ResolverCache {
     values: Vec<Option<(FrameStamp, Production)>>,
     structural: Vec<Option<Production>>,
     routes: Vec<Option<Rc<ResolvedRoute>>>,
+    /// Bitset over [`QueryId`]: queries known to resolve to an absent
+    /// option. A decision, like a route, so it is kept whatever
+    /// [`Self::set_retain_payloads`] says.
+    absent: Vec<u32>,
     /// Whether [`Self::insert`] stores payloads at all — see
     /// [`Self::set_retain_payloads`].
     retain_payloads: bool,
@@ -53,6 +62,7 @@ impl Default for ResolverCache {
             values: Vec::new(),
             structural: Vec::new(),
             routes: Vec::new(),
+            absent: Vec::new(),
             retain_payloads: cfg!(feature = "resolver-payload-cache"),
         }
     }
@@ -116,6 +126,7 @@ impl ResolverCache {
         self.values.clear();
         self.structural.clear();
         self.routes.clear();
+        self.absent.clear();
         // Ids are reassigned from zero after an epoch change, so the tables
         // must not keep entries addressed by the old numbering.
     }
@@ -153,6 +164,22 @@ impl ResolverCache {
         self.routes[id.index()] = Some(route);
     }
 
+    /// Whether `id` is known to resolve to an absent option this epoch.
+    pub fn is_absent(&self, id: QueryId) -> bool {
+        let (word, bit) = absent_bit(id);
+        self.absent.get(word).is_some_and(|bits| bits & bit != 0)
+    }
+
+    /// Remember that `id` resolves to an absent option until the graph
+    /// changes shape.
+    pub fn insert_absent(&mut self, id: QueryId) {
+        let (word, bit) = absent_bit(id);
+        if self.absent.len() <= word {
+            self.absent.resize(word + 1, 0);
+        }
+        self.absent[word] |= bit;
+    }
+
     /// Whether anything is cached for the current frame. Used by tests that
     /// assert a fresh resolver starts empty.
     pub fn is_empty(&self) -> bool {
@@ -162,6 +189,10 @@ impl ResolverCache {
                 .iter()
                 .all(|slot| !matches!(slot, Some((stamp, _)) if *stamp == self.frame))
     }
+}
+
+fn absent_bit(id: QueryId) -> (usize, u32) {
+    (id.index() / 32, 1 << (id.index() % 32))
 }
 
 fn grow_to<T>(table: &mut Vec<Option<T>>, index: usize) {
@@ -251,6 +282,29 @@ mod tests {
                 binding: BindingRef::new(NodeId::new(0), 0),
             }
         ));
+    }
+
+    #[test]
+    fn absent_options_survive_frames_but_not_invalidation() {
+        let mut table = QueryInternTable::new();
+        let mut cache = ResolverCache::new();
+        cache.set_retain_payloads(false);
+        let keys: Vec<QueryId> = (0..40)
+            .map(|n| id(&mut table, &alloc::format!("opt{n}")))
+            .collect();
+
+        cache.insert_absent(keys[33]);
+        cache.begin_frame();
+        assert!(
+            cache.is_absent(keys[33]),
+            "an absent authored option cannot appear without a structural change, \
+             and it is a decision, kept without payload retention"
+        );
+        assert!(!cache.is_absent(keys[1]));
+        assert!(!cache.is_absent(keys[32]));
+
+        cache.invalidate_structure();
+        assert!(!cache.is_absent(keys[33]));
     }
 
     #[test]

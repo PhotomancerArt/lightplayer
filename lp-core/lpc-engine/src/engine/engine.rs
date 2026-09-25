@@ -1601,12 +1601,15 @@ impl EngineResolveHost<'_> {
             return Ok(Production::new(product, ProductionSource::Default));
         }
 
-        let product = self.read_authored_def_product(node, slot).map_err(|_| {
-            SessionResolveError::UnresolvedConsumedSlot {
-                node,
-                slot: slot.clone(),
-            }
-        })?;
+        let product = self
+            .read_authored_def_product(node, slot)
+            .map_err(|err| match err {
+                SessionResolveError::AbsentOption { .. } => err,
+                _ => SessionResolveError::UnresolvedConsumedSlot {
+                    node,
+                    slot: slot.clone(),
+                },
+            })?;
         Ok(Production::new(product, ProductionSource::Default))
     }
 
@@ -1625,9 +1628,12 @@ impl EngineResolveHost<'_> {
                 })?;
         let product = self
             .read_authored_def_product_by_accessor(node, accessor)
-            .map_err(|_| SessionResolveError::UnresolvedConsumedSlot {
-                node,
-                slot: accessor.path().clone(),
+            .map_err(|err| match err {
+                SessionResolveError::AbsentOption { .. } => err,
+                _ => SessionResolveError::UnresolvedConsumedSlot {
+                    node,
+                    slot: accessor.path().clone(),
+                },
             })?;
         Ok(Production::new(product, ProductionSource::Default))
     }
@@ -2132,8 +2138,14 @@ impl EngineResolveHost<'_> {
         slot: &SlotPath,
     ) -> Result<SlotData, SessionResolveError> {
         let def = self.loaded_node_def(node)?;
-        let (data, shape) = lookup_slot_data_and_shape(def, self.slot_shapes, slot)
-            .map_err(|e| SessionResolveError::other(format!("authored def lookup: {e}")))?;
+        let (data, shape) =
+            lookup_slot_data_and_shape(def, self.slot_shapes, slot).map_err(|e| {
+                if e.is_option_none() {
+                    SessionResolveError::AbsentOption { node }
+                } else {
+                    SessionResolveError::other(format!("authored def lookup: {e}"))
+                }
+            })?;
         Ok(lpc_wire::snapshot_slot_shape(shape, data, self.slot_shapes))
     }
 
@@ -2143,9 +2155,13 @@ impl EngineResolveHost<'_> {
         accessor: &SlotAccessor,
     ) -> Result<SlotData, SessionResolveError> {
         let def = self.loaded_node_def(node)?;
-        let data = accessor
-            .access(def, self.slot_shapes)
-            .map_err(|e| SessionResolveError::other(format!("authored def accessor: {e}")))?;
+        let data = accessor.access(def, self.slot_shapes).map_err(|e| {
+            if e.is_option_none() {
+                SessionResolveError::AbsentOption { node }
+            } else {
+                SessionResolveError::other(format!("authored def accessor: {e}"))
+            }
+        })?;
         let (_, shape) = lookup_slot_data_and_shape(def, self.slot_shapes, accessor.path())
             .map_err(|e| SessionResolveError::other(format!("authored def accessor shape: {e}")))?;
         Ok(lpc_wire::snapshot_slot_shape(shape, data, self.slot_shapes))

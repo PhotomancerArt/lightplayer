@@ -324,6 +324,41 @@ fn next_and_prev_buttons_step_through_the_entries() {
     );
 }
 
+/// Nothing authored and nothing written costs a steady frame nothing that an
+/// authored tour and skip list do not: "absent" is recognised by type, not by
+/// formatting and searching an error message every frame per playlist.
+#[test]
+fn an_absent_tour_and_skip_cost_a_steady_frame_nothing_extra() {
+    let mut per_frame = Vec::new();
+    for (tour, skip) in [
+        ("", ""),
+        (
+            r#""tour": { "kind": "hold", "step_seconds": 0, "fade_seconds": 0 },"#,
+            r#""skip": [],"#,
+        ),
+    ] {
+        let mut show = Show::boot(Authored {
+            tour,
+            skip,
+            ..Authored::default()
+        });
+        show.run(HALF_SECOND * 2);
+        let before = alloc_count::allocs();
+        for tick in 0..HALF_SECOND {
+            show.rt
+                .tick_with_residency(&show.fs, 16)
+                .unwrap_or_else(|e| panic!("tick {tick}: {e}"));
+        }
+        per_frame.push(alloc_count::allocs() - before);
+    }
+    println!("allocations over {HALF_SECOND} steady frames, absent vs authored: {per_frame:?}");
+    assert!(
+        per_frame[0] <= per_frame[1],
+        "an absent tour and skip list must allocate nothing an authored one does not: \
+         {per_frame:?}"
+    );
+}
+
 // ---- fixture ----------------------------------------------------------------
 
 /// What a test authors on the playlist.
@@ -605,4 +640,49 @@ fn shader(fs: &LpFsMemory, name: &str, glsl: &str) {
 
 fn write(fs: &LpFsMemory, path: &str, bytes: &[u8]) {
     fs.write_file(path.as_path(), bytes).expect("write fixture");
+}
+
+/// Allocation requests on the current thread, for the steady-frame test.
+/// Thread-local, so the other tests running in parallel do not count.
+mod alloc_count {
+    use std::alloc::{GlobalAlloc, Layout, System};
+    use std::cell::Cell;
+
+    struct CountingAlloc;
+
+    thread_local! {
+        static ALLOCS: Cell<u64> = const { Cell::new(0) };
+    }
+
+    #[global_allocator]
+    static COUNTING: CountingAlloc = CountingAlloc;
+
+    pub fn allocs() -> u64 {
+        ALLOCS.try_with(Cell::get).unwrap_or(0)
+    }
+
+    fn bump() {
+        let _ = ALLOCS.try_with(|c| c.set(c.get() + 1));
+    }
+
+    unsafe impl GlobalAlloc for CountingAlloc {
+        unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
+            bump();
+            unsafe { System.alloc(layout) }
+        }
+
+        unsafe fn alloc_zeroed(&self, layout: Layout) -> *mut u8 {
+            bump();
+            unsafe { System.alloc_zeroed(layout) }
+        }
+
+        unsafe fn realloc(&self, ptr: *mut u8, layout: Layout, new_size: usize) -> *mut u8 {
+            bump();
+            unsafe { System.realloc(ptr, layout, new_size) }
+        }
+
+        unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
+            unsafe { System.dealloc(ptr, layout) }
+        }
+    }
 }

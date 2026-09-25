@@ -4,22 +4,44 @@ use crate::{
     MapSlotAccess, MapSlotAccessMut, SlotAccess, SlotAccessMut, SlotDataAccess, SlotDataAccessMut,
     SlotMapKey, SlotPath, SlotPathSegment, SlotShapeLookup, SlotShapeView,
 };
+use alloc::borrow::Cow;
 use alloc::format;
 use alloc::string::String;
 
 /// Error returned while resolving a [`SlotPath`] against a slot object.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SlotLookupError {
-    pub message: String,
+    pub message: Cow<'static, str>,
+    option_none: bool,
 }
 
 impl SlotLookupError {
-    fn new(message: impl Into<String>) -> Self {
+    fn new(message: impl Into<Cow<'static, str>>) -> Self {
         Self {
             message: message.into(),
+            option_none: false,
         }
     }
+
+    /// The path went through an option's `some` and the option is `None`.
+    /// Allocation-free: a reader asks this of an absent optional field every
+    /// frame.
+    fn option_none() -> Self {
+        Self {
+            message: Cow::Borrowed(OPTION_NONE_MESSAGE),
+            option_none: true,
+        }
+    }
+
+    /// True when the path is well-formed and simply names the `some` of an
+    /// option that holds nothing — an absent value, not a broken path.
+    pub fn is_option_none(&self) -> bool {
+        self.option_none
+    }
 }
+
+/// The text of an absent-option error, shared by lookups and accessors.
+pub(crate) const OPTION_NONE_MESSAGE: &str = "option slot is none";
 
 impl core::fmt::Display for SlotLookupError {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
@@ -102,7 +124,7 @@ fn lookup_in_shape<'a>(
         {
             let data = option
                 .data()
-                .ok_or_else(|| SlotLookupError::new("option slot is none"))?;
+                .ok_or_else(|| SlotLookupError::option_none())?;
             lookup_in_shape(
                 data,
                 shape.option_some().expect("option some checked above"),
@@ -173,7 +195,7 @@ fn lookup_in_shape_with_shape<'a, 's>(
         {
             let data = option
                 .data()
-                .ok_or_else(|| SlotLookupError::new("option slot is none"))?;
+                .ok_or_else(|| SlotLookupError::option_none())?;
             lookup_in_shape_with_shape(
                 data,
                 shape.option_some().expect("option some checked above"),
@@ -255,7 +277,7 @@ fn lookup_in_shape_mut<'a>(
         {
             let data = option
                 .data_mut()
-                .ok_or_else(|| SlotLookupError::new("option slot is none"))?;
+                .ok_or_else(|| SlotLookupError::option_none())?;
             lookup_in_shape_mut(
                 data,
                 shape.option_some().expect("option some checked above"),
