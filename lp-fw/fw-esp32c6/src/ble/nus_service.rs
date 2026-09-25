@@ -5,7 +5,8 @@
 //! samples) talk to the product unchanged:
 //!
 //! - `6E400002-…` RX: the host writes `M!{json}\n` bytes here, in chunks of at
-//!   most one ATT value (write or write-without-response);
+//!   most one ATT value (write or write-without-response), or as a long write
+//!   (Prepare … Execute), which `ble_connection` re-assembles;
 //! - `6E400003-…` TX: the board notifies framed server lines back, chunked to
 //!   the connection's MTU.
 
@@ -18,8 +19,12 @@ use heapless::Vec;
 use trouble_host::prelude::*;
 
 /// The largest value one characteristic holds, and so one notification's
-/// payload: with the 255-byte packet pool the ATT MTU tops out near 247, and
-/// the spike measured 251 → 244 is the ceiling.
+/// payload: ATT MTU 247 − 3. The host's ATT MTU is its packet size − 4, and
+/// the packet pool is 251 bytes — the controller's largest ACL packet — so
+/// no ATT PDU the board sends can outgrow what the controller takes
+/// (docs/defects/2026-09-25-a-long-bluetooth-write-is-acknowledged-and-lost.md:
+/// with a 255-byte pool the MTU was 251, and a 251-byte Prepare Write
+/// Response failed the host's send and restarted it).
 pub const NUS_VALUE_MAX: usize = 244;
 
 /// The NUS service UUID, little-endian as it goes on air in the scan
