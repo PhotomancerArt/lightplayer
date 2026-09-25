@@ -29,6 +29,11 @@ lpc-wire = { path = "../lp-core/lpc-wire" }
 lpa-server = { path = "../lp-app/lpa-server" }
 # `project upgrade`: offline format migration for authored project packages.
 lpa-upgrade = { path = "../lp-app/lpa-upgrade" }
+# `pattern preview`: loads an in-memory pattern-on-swatch project straight into
+# the host engine and resolves the swatch mapping for its lamp positions. Both
+# were already dev-dependencies (and in lpa-server's graph); this promotes them.
+lpc-engine = { path = "../lp-core/lpc-engine" }
+lpc-mapping = { path = "../lp-core/lpc-mapping" }
 lp-gfx-lpvm = { path = "../lp-gfx/lp-gfx-lpvm" }
 lpa-link = { path = "../lp-app/lpa-link", features = ["host-process", "host-serial-esp32"] }
 lpc-hardware = { path = "../lp-core/lpc-hardware", features = ["schema-gen"] }
@@ -100,8 +105,6 @@ tempfile = "3"
 # Corpus conformance test (tests/schema_conformance.rs); same pinning as
 # lpc-model's schema_gen dev-dep.
 jsonschema = { version = "0.46", default-features = false }
-lpc-engine = { path = "../lp-core/lpc-engine" }
-lpc-mapping = { path = "../lp-core/lpc-mapping" }
 lpa-server = { path = "../lp-app/lpa-server" }
 lpc-hardware = { path = "../lp-core/lpc-hardware" }
 lpc-shared = { path = "../lp-core/lpc-shared" }

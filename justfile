@@ -4194,6 +4194,37 @@ demo project="projects/test/basic":
 pcb-map2d table exports *args:
     python3 scripts/pcb-export-to-map2d.py --strokes "{{ table }}" --exports "{{ exports }}" {{ args }}
 
+# The pattern review page: every catalog pattern (or the pattern dirs given)
+# animating as lamp dots on every swatch in scripts/pattern-review/swatches/,
+# in ONE self-contained page at target/pattern-review/index.html.
+#
+#   just pattern-review                                  # all catalog/patterns/*
+#   just pattern-review catalog/patterns/plasma catalog/patterns/comet
+#
+# Renders on the HOST engine (lpvm-wasm under wasmtime, Q32 unless a shader
+# pins float_mode) — never a device fps claim. PREVIEW_SECONDS / PREVIEW_FPS
+# override the recording (default 5 s at 24 fps). A pattern that fails still
+# gets a row, with the error in its cells; the recipe exits nonzero after
+# building the page so the failure is not silent.
+pattern-review *patterns:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    patterns=({{ patterns }})
+    if [ ${#patterns[@]} -eq 0 ]; then
+        patterns=(catalog/patterns/*/)
+    fi
+    swatches=()
+    for s in scripts/pattern-review/swatches/*.map2d.json; do swatches+=(--swatch "$s"); done
+    rm -rf target/pattern-review/frames
+    cargo build -q -p lp-cli || exit 1
+    target/debug/lp-cli pattern preview "${patterns[@]}" "${swatches[@]}" \
+        --out target/pattern-review/frames \
+        --seconds "${PREVIEW_SECONDS:-5}" --fps "${PREVIEW_FPS:-24}"
+    status=$?
+    node scripts/pattern-review/build-page.mjs target/pattern-review/frames target/pattern-review/index.html || exit 1
+    echo "file://$PWD/target/pattern-review/index.html"
+    exit $status
+
 # Requires: ESP32-C6 device connected via USB. Builds the default lps-glsl frontend path.
 # Usage: just demo-esp32c6-host [project-dir]
 demo-esp32c6-host project="projects/test/basic": install-rv32-target

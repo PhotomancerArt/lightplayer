@@ -4,6 +4,7 @@ pub mod emu;
 pub mod firmware;
 pub mod fwcheck;
 pub mod hardware;
+pub mod pattern;
 pub mod profile;
 pub mod project;
 pub mod schema;
