@@ -1,5 +1,6 @@
 pub(crate) mod base_value_display;
 pub mod commit_error;
+pub mod entry_issue_check;
 pub mod entry_residency;
 mod entry_residency_change;
 pub mod entry_residency_error;
