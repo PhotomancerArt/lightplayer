@@ -109,7 +109,19 @@ The planning discovery (`lp2025/2026-09-24-2351-multi-pattern-projects`,
 
 - P4: the playlist produces requests, holds the lamp-sized frame, handles
   failure.
-- P5: touring and next/prev.
+- P5: touring and next/prev — landed. What P5 decided, for P9 to fold in:
+  - The tour and the skip list are consumed slots default-bound to
+    `bus:playlist.tour` / `bus:playlist.skip` with `panel = "show"`: the
+    authored value is the default, a Play-mode panel write overrides it and
+    persists in `/.lp/panel.json` like any writer (plan A1). No wire change:
+    both values are ordinary `LpValue`s (a named struct, a `u32` array).
+  - The skip list is one whole value with one writer (Studio's picker), not
+    a channel per entry, because the bus has no read-modify-write primitive.
+  - Tour position is a pure function of the playlist's consumed `time` and
+    an anchor that a pick, a trigger or next/prev sets, so it follows the
+    clock's rate and pause (A3). A skip or a failure rebases the anchor on
+    the entry playing, keeping the step phase.
+  - A held, frozen or absent tour is the pre-P5 playlist frame for frame.
 - P6: the 25-entry proof. `entry-unload` / `entry-load` perf markers window
   each switch.
 - P9: finalise this ADR with the measured numbers.
