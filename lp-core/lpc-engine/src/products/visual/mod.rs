@@ -1,6 +1,7 @@
 //! Visual-product handle and minimal sample request/result shapes.
 
 pub mod coordinates;
+mod pattern_space;
 mod render_texture_request;
 mod sample_request;
 mod sample_result;
@@ -14,6 +15,7 @@ pub use coordinates::{
     shape_coord, texel_center_to_uv_q16, texture_uv_q16_to_texel,
 };
 pub use lpc_model::VisualProduct;
+pub use pattern_space::{PatternAxis, PatternFrame, ScopeGeometry};
 pub use render_texture_request::RenderTextureRequest;
 pub use sample_request::{TextureSampleBatch, TextureUvSamplePoint, VisualSampleStream};
 pub use sample_result::{VisualSample, VisualSampleBatchResult};

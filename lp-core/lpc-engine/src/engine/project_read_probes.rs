@@ -88,6 +88,9 @@ impl Engine {
             time_seconds: self.frame_time().total_ms as f32 / 1000.0,
             space,
             policy,
+            // A canvas preview has no lamps behind it: a pattern-space
+            // shader sees every texel centre as one.
+            scope: None,
         };
         let revision = self.revision();
         let product = request.product;

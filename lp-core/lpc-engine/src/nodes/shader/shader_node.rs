@@ -20,9 +20,9 @@ use lp_gfx::{
 };
 use lpc_model::{
     AssetLocation, FloatMode, FromLpValue, GradientConfig, MapSlot, NodeId, NodeRuntimeStatus,
-    OptionSlot, PhasorConfig, Revision, ShaderDef, ShaderMapKeyDef, ShaderSlotDef, ShaderSlotKind,
-    ShaderSlotMappingDef, ShaderSlotMappingKind, ShaderState, ShaderValueShapeRef, SlotAccess,
-    SlotPath, SlotShapeRegistry, SlotShapeRegistryError, TimeProduct, ValueSlot,
+    OptionSlot, PhasorConfig, Revision, ShaderCoords, ShaderDef, ShaderMapKeyDef, ShaderSlotDef,
+    ShaderSlotKind, ShaderSlotMappingDef, ShaderSlotMappingKind, ShaderState, ShaderValueShapeRef,
+    SlotAccess, SlotPath, SlotShapeRegistry, SlotShapeRegistryError, TimeProduct, ValueSlot,
 };
 use lpc_registry::AssetText;
 use lps_shared::LpsValueF32;
@@ -36,8 +36,9 @@ use crate::node::{
 };
 use crate::products::visual::VisualSampleStream;
 use crate::products::visual::{
-    CellProjection, ProductSpaceInfo, RenderTextureRequest, TextureRenderProduct, VisualProduct,
-    VisualReadiness, VisualSpace, coordinates, resolve_1d_to_2d_with_origin,
+    CellProjection, PatternFrame, ProductSpaceInfo, RenderTextureRequest, ScopeGeometry,
+    TextureRenderProduct, VisualProduct, VisualReadiness, VisualSpace, coordinates,
+    resolve_1d_to_2d_with_origin,
 };
 use crate::shader_abi::uniforms::{VisualUniform, build_uniforms};
 
@@ -55,6 +56,12 @@ use super::shader_input_materialize::materialize_shader_input;
 const TIME_CHANNEL: &str = "time";
 /// The authored representation pin, read through the option's `some` branch.
 const FLOAT_MODE_PIN_PATH: &str = "float_mode.some";
+/// The authored pattern-space opt-in, read at the OPTION itself rather than
+/// through its `some` branch: an absent `some` is an unresolved slot, and an
+/// unresolved read formats its error every tick — every shader that never
+/// authored the key (all of them, today) would pay allocations per frame for
+/// it. The option root resolves on both sides.
+const COORDS_PATH: &str = "coords";
 /// Default max semantic errors forwarded from the GLSL to LPIR front end.
 const SHADER_COMPILE_MAX_ERRORS: usize = 20;
 
@@ -98,6 +105,19 @@ pub struct ShaderNode {
     /// in: it selects a coordinate map at the sampling boundary, so a
     /// change costs no recompile.
     space_answer_2: Option<CellProjection>,
+    /// The frame `pos` arrives in (`ShaderDef::coords`). Pattern space is a
+    /// host-side transform on the sample coordinates plus three uniforms,
+    /// never compiled in, so a change costs no recompile — re-read per tick
+    /// like the answer cell.
+    coords: ShaderCoords,
+    /// Pattern-space texture fill: the window of transformed texel
+    /// coordinates, `min(texels, batch capacity)` points.
+    pattern_fill_points: Option<lp_gfx::SamplePointsHandle>,
+    /// Pattern-space texture fill: the window's samples.
+    pattern_fill_samples: Option<lp_gfx::SampleOutHandle>,
+    /// Pattern-space texture fill: the whole target's RGBA16 bytes, written
+    /// in one `write_texture`. Persistent (the tick-alloc rule).
+    pattern_fill_texels: Vec<u8>,
     /// Scratch point buffer for projected sampling: the consumer's own
     /// buffer is a *cache* keyed on (mapping, size) that must survive the
     /// frame, so a projection writes its mapped coordinates here instead
@@ -188,6 +208,7 @@ pub struct ShaderNode {
 impl ShaderNode {
     pub fn new(node_id: NodeId, def: ShaderDef, source: AssetText) -> Self {
         let visual_uniforms = default_uniforms(&def.consumed_slots);
+        let coords = def.coords();
         Self {
             node_id,
             source_location: source.location,
@@ -197,6 +218,10 @@ impl ShaderNode {
             float_mode: def.float_mode.data.as_ref().map(|slot| *slot.value()),
             space: entry_space_for(def.space.value()),
             space_answer_2: space_answer_2_for(def.space.value()),
+            coords,
+            pattern_fill_points: None,
+            pattern_fill_samples: None,
+            pattern_fill_texels: Vec::new(),
             projected_points: None,
             projected_samples: None,
             projected_channels: Vec::new(),
@@ -436,6 +461,9 @@ impl ShaderNode {
         if let Some(next_answer) = try_read_authored_space_answer_2(ctx) {
             self.space_answer_2 = next_answer;
         }
+        // Absent reads as Pixels: removing the key is a real gesture back to
+        // today's frame. No recompile — the transform is host-side.
+        self.coords = read_authored_coords(ctx)?;
         Ok(())
     }
 
@@ -621,6 +649,137 @@ impl ShaderNode {
             primary: self.declared_space(),
             in_2d: self.space_answer_2,
         }
+    }
+
+    /// The pattern-space frame for a request in `requested` space of
+    /// `width` × `height`, or `None` when this shader did not opt in.
+    ///
+    /// The frame maps the coordinates in the SHADER's space — after any
+    /// projection — so it follows the declared space:
+    ///
+    /// - 2D shader, 2D request: the consumer's lamp box, or every texel
+    ///   centre when it lent none;
+    /// - 2D shader, 1D request: the centre scanline is a straight strip of
+    ///   `width` texel centres, so pattern `pos` runs x −1…1 at y 0;
+    /// - 1D shader, 1D request: lamp 0 → 0, lamp N−1 → 1;
+    /// - 1D shader, 2D request: the projection cell's strip coordinate
+    ///   itself, 0…1.
+    fn pattern_frame(
+        &self,
+        requested: VisualSpace,
+        width: u32,
+        height: u32,
+        scope: Option<ScopeGeometry>,
+    ) -> Option<PatternFrame> {
+        if !self.coords.is_pattern() {
+            return None;
+        }
+        Some(match (self.declared_space(), requested) {
+            (VisualSpace::TwoD, VisualSpace::TwoD) => PatternFrame::two_d(
+                &scope.unwrap_or_else(|| ScopeGeometry::texel_centres(width, height)),
+            ),
+            (VisualSpace::TwoD, VisualSpace::OneD) => {
+                PatternFrame::two_d(&ScopeGeometry::texel_centres(width, height))
+            }
+            (VisualSpace::OneD, VisualSpace::OneD) => PatternFrame::one_d_strip(width),
+            (VisualSpace::OneD, VisualSpace::TwoD) => PatternFrame::one_d_projected(
+                width,
+                scope.map_or(width.saturating_mul(height), |scope| scope.lamp_count),
+            ),
+        })
+    }
+
+    /// Materialize a pattern-space shader's texture: every texel centre of
+    /// the request, mapped into the shader's own space (projecting when the
+    /// spaces disagree, exactly as [`Self::render_projected_texture`] does)
+    /// and then into pattern space, sampled a bounded window at a time.
+    ///
+    /// Direct sampling and texture-area sampling therefore hand the program
+    /// the same pattern coordinates for the same point — the texels are
+    /// placed through the same lamp-box fit the lamps are.
+    fn render_pattern_texture(
+        &mut self,
+        request: &RenderTextureRequest,
+        target: &mut TextureHandle,
+        frame: PatternFrame,
+        uniforms: &LpsValueF32,
+        ctx: &mut RenderContext<'_>,
+    ) -> Result<(), NodeError> {
+        if request.format != lps_shared::TextureStorageFormat::Rgba16Unorm {
+            return Err(NodeError::msg(format!(
+                "pattern-space texture fill needs an Rgba16Unorm target, got {:?}",
+                request.format
+            )));
+        }
+        let graphics = ctx
+            .graphics()
+            .ok_or_else(|| NodeError::msg("missing graphics backend"))?;
+        let (width, height) = (request.width, request.height);
+        let texels = u32::try_from(u64::from(width) * u64::from(height))
+            .map_err(|_| NodeError::msg("pattern-space texture fill target is too large"))?;
+        if texels == 0 {
+            return Ok(());
+        }
+        let capacity = texels.min(graphics.sample_batch_capacity()).max(1);
+        let declared = self.declared_space();
+        let texel_coords = TexelCoords {
+            declared,
+            requested: request.space,
+            width,
+            height,
+            cell: (declared == VisualSpace::OneD && request.space == VisualSpace::TwoD)
+                .then(|| resolve_1d_to_2d_with_origin(self.space_info(), request.policy).0),
+        };
+        ensure_scratch_len(
+            &mut self.pattern_fill_texels,
+            texels as usize * 8,
+            "pattern-space texture texels",
+        )?;
+        let Self {
+            shader,
+            pattern_fill_points,
+            pattern_fill_samples,
+            pattern_fill_texels,
+            ..
+        } = self;
+        let shader = shader
+            .as_mut()
+            .ok_or_else(|| NodeError::msg("shader missing after compile"))?;
+        let points = ensure_projected_points(pattern_fill_points, graphics, capacity)?;
+        let samples = ensure_projected_samples(pattern_fill_samples, graphics, capacity)?;
+        shader
+            .bind_uniforms(uniforms)
+            .map_err(err_ctx("shader bind uniforms"))?;
+        let mut next = 0u32;
+        while next < texels {
+            let n = capacity.min(texels - next);
+            {
+                let words = graphics
+                    .sample_points_data_mut(points)
+                    .map_err(err_ctx("pattern texture points"))?;
+                texel_coords.fill(next, n, words);
+                frame.map_points_in_place(words, n as usize);
+            }
+            match shader.sample_rgba16_bound(points, samples, n) {
+                Ok(()) => {}
+                Err(GfxError::FuelExhausted(trap)) => {
+                    return fuel_exhausted_failure_at(&trap, next);
+                }
+                Err(error) => return Err(err_ctx("shader pattern texture sample")(error)),
+            }
+            let channels = graphics
+                .sample_out_data(samples)
+                .map_err(err_ctx("read pattern texture samples"))?;
+            let base = next as usize * 8;
+            for (index, channel) in channels[..n as usize * 4].iter().enumerate() {
+                let at = base + index * 2;
+                pattern_fill_texels[at..at + 2].copy_from_slice(&channel.to_le_bytes());
+            }
+            next += n;
+        }
+        graphics
+            .write_texture(target, &pattern_fill_texels[..texels as usize * 8])
+            .map_err(err_ctx("write pattern texture"))
     }
 
     /// Fill a texture target whose space disagrees with this shader's.
@@ -1366,6 +1525,23 @@ fn try_read_static_authored_value<T: lpc_model::FromLpValue>(
         .map_err(|e| NodeError::msg(alloc::format!("shader path {path:?}: {e}")))
 }
 
+/// The authored `coords` option: `Pixels` when absent (or unreadable, which
+/// is how a runtime built without a def view answers), else its value.
+fn read_authored_coords(ctx: &mut TickContext<'_>) -> Result<ShaderCoords, NodeError> {
+    let Ok(production) = ctx.resolve_static_consumed(COORDS_PATH) else {
+        return Ok(ShaderCoords::Pixels);
+    };
+    let lpc_model::SlotData::Option(option) = production.data() else {
+        return Err(NodeError::msg("shader path \"coords\" is not an option"));
+    };
+    match option.data.as_deref() {
+        None => Ok(ShaderCoords::Pixels),
+        Some(lpc_model::SlotData::Value(value)) => ShaderCoords::from_lp_value(value.value())
+            .map_err(|e| NodeError::msg(alloc::format!("shader path \"coords\": {e}"))),
+        Some(_) => Err(NodeError::msg("shader path \"coords\" is not a value")),
+    }
+}
+
 /// Read one authored field of one consumed uniform through its cached key.
 ///
 /// The key is built on first use and kept for the life of the uniform
@@ -1630,10 +1806,20 @@ impl RenderNode for ShaderNode {
             return Ok(());
         }
         self.ensure_palette_uniforms(ctx)?;
-        let uniforms = build_uniforms(request.width, request.height, &self.visual_uniforms);
-        // Both arms below bind the program's uniforms for a texture-sized
+        let pattern =
+            self.pattern_frame(request.space, request.width, request.height, request.scope);
+        let uniforms = build_uniforms(
+            request.width,
+            request.height,
+            pattern.as_ref(),
+            &self.visual_uniforms,
+        );
+        // Every arm below binds the program's uniforms for a texture-sized
         // `outputSize`: whatever a sample stream had bound is gone.
         self.bound_uniforms = None;
+        if let Some(frame) = pattern {
+            return self.render_pattern_texture(request, target, frame, &uniforms, ctx);
+        }
         if self.declared_space() != request.space {
             return self.render_projected_texture(request, target, &uniforms, ctx);
         }
@@ -1695,15 +1881,23 @@ impl RenderNode for ShaderNode {
         // bind group on the GPU tier). The key survives across the
         // crossfade's one-batch inner streams within a frame; `produce`,
         // texture renders and recompiles reset it.
+        let pattern = self.pattern_frame(
+            stream.space,
+            stream.output_width,
+            stream.output_height,
+            stream.scope,
+        );
         let key = BoundUniformsKey {
             output_width: stream.output_width,
             output_height: stream.output_height,
             time_bits: stream.time_seconds.to_bits(),
+            pattern,
         };
         if self.bound_uniforms != Some(key) {
             let uniforms = build_uniforms(
                 stream.output_width,
                 stream.output_height,
+                pattern.as_ref(),
                 &self.visual_uniforms,
             );
             let shader = self
@@ -1753,9 +1947,25 @@ impl RenderNode for ShaderNode {
         // Sample index of the batch's first point, for a fuel trap's report.
         let mut streamed = 0u32;
         stream.drive(graphics, |points, samples, n| {
-            let result = match projection {
-                None => shader.sample_rgba16_bound(points, samples, n),
-                Some(projection) => {
+            let result = match (projection, pattern) {
+                (None, None) => shader.sample_rgba16_bound(points, samples, n),
+                (None, Some(frame)) => {
+                    // Pattern space, same space: map the stream's window
+                    // into our own — never in place, the window is the
+                    // consumer's (a crossfade hands one batch to two
+                    // producers).
+                    let mapped_points =
+                        ensure_projected_points(projected_points, graphics, capacity)?;
+                    let source = graphics
+                        .sample_points_data_mut(points)
+                        .map_err(err_ctx("stream sample points"))?;
+                    let mapped = graphics
+                        .sample_points_data_mut(mapped_points)
+                        .map_err(err_ctx("pattern sample points"))?;
+                    frame.map_points(source, n as usize, mapped);
+                    shader.sample_rgba16_bound(mapped_points, samples, n)
+                }
+                (Some(projection), pattern) => {
                     // Map the batch host-side, straight from the stream's
                     // window into the projected window: two distinct
                     // handles, both borrowed in place, nothing copied.
@@ -1774,6 +1984,9 @@ impl RenderNode for ShaderNode {
                         output_height,
                         mapped,
                     );
+                    if let Some(frame) = pattern {
+                        frame.map_points_in_place(mapped, n as usize);
+                    }
                     shader.sample_rgba16_bound(projected, samples, n)
                 }
             };
@@ -1825,11 +2038,61 @@ impl RenderNode for ShaderNode {
 
 /// The uniforms a sample stream binds, as the key that lets the next
 /// stream in the same frame skip the bind (see `ShaderNode::bound_uniforms`).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 struct BoundUniformsKey {
     output_width: u32,
     output_height: u32,
     time_bits: u32,
+    /// The pattern-space frame the scope intrinsics were bound for; `None`
+    /// for a pixel-space shader.
+    pattern: Option<PatternFrame>,
+}
+
+/// The shader-space pixel coordinates of a texture request's texel centres —
+/// the pattern-space texture fill's source, before the pattern map. Native
+/// spaces get the texel centre itself (the texture synth's own convention);
+/// a disagreeing pair gets the projection `render_projected_texture` uses.
+struct TexelCoords {
+    declared: VisualSpace,
+    requested: VisualSpace,
+    width: u32,
+    height: u32,
+    /// The negotiated cell for a 1D shader on a 2D request.
+    cell: Option<CellProjection>,
+}
+
+impl TexelCoords {
+    /// Write texels `first .. first + n` (row-major) into `words`, packed for
+    /// the shader's space.
+    fn fill(&self, first: u32, n: u32, words: &mut [i32]) {
+        let half = coordinates::Q16_ONE / 2;
+        let centre = |index: u32| ((index as i32) << 16) + half;
+        for (slot, texel) in (first..first + n).enumerate() {
+            let (x, y) = (texel % self.width, texel / self.width);
+            match (self.declared, self.requested) {
+                (VisualSpace::TwoD, VisualSpace::TwoD) => {
+                    words[slot * 2] = centre(x);
+                    words[slot * 2 + 1] = centre(y);
+                }
+                (VisualSpace::OneD, VisualSpace::OneD) => words[slot] = centre(x),
+                (VisualSpace::OneD, VisualSpace::TwoD) => {
+                    let u = (x as f32 + 0.5) / self.width as f32;
+                    let v = (y as f32 + 0.5) / self.height as f32;
+                    let t = match self.cell {
+                        Some(cell) => coordinates::project_2d_to_1d(cell, u, v),
+                        None => u,
+                    };
+                    words[slot] = normalized_f32_to_pixel_q16(t, self.width);
+                }
+                (VisualSpace::TwoD, VisualSpace::OneD) => {
+                    let t = (x as f32 + 0.5) / self.width as f32;
+                    let (u, v) = coordinates::centre_scanline(t);
+                    words[slot * 2] = normalized_f32_to_pixel_q16(u, self.width);
+                    words[slot * 2 + 1] = normalized_f32_to_pixel_q16(v, self.height);
+                }
+            }
+        }
+    }
 }
 
 /// How a batch of a stream whose space disagrees with the shader's is
@@ -3089,6 +3352,7 @@ mod tests {
                     time_seconds: 0.5,
                     space: VisualSpace::TwoD,
                     policy: ConsumerPolicy::default(),
+                    scope: None,
                 },
             )
             .expect("render succeeds once the reconciled record supplies `speed`");
@@ -3160,6 +3424,7 @@ mod tests {
             time_seconds: 0.5,
             space: VisualSpace::TwoD,
             policy: ConsumerPolicy::default(),
+            scope: None,
         };
         // First render requests a compile window (deferral); the second
         // compiles under the at-most-once progress guarantee.
@@ -3215,6 +3480,7 @@ mod tests {
                     time_seconds: 0.5,
                     space: VisualSpace::TwoD,
                     policy: ConsumerPolicy::default(),
+                    scope: None,
                 },
             )
             .expect("warm-up render");
@@ -3229,6 +3495,7 @@ mod tests {
                     time_seconds: 0.5,
                     space: VisualSpace::TwoD,
                     policy: ConsumerPolicy::default(),
+                    scope: None,
                 },
             )
             .expect("render texture");
@@ -3286,6 +3553,7 @@ mod tests {
                 space,
                 policy: ConsumerPolicy::default(),
                 continuation: false,
+                scope: None,
             },
             ctx,
         )
@@ -3367,6 +3635,7 @@ mod tests {
                     time_seconds: 0.0,
                     space: VisualSpace::TwoD,
                     policy: ConsumerPolicy::default(),
+                    scope: None,
                 },
                 &mut ctx,
             )
@@ -3428,6 +3697,7 @@ mod tests {
                         time_seconds: time_ms as f32 / 1000.0,
                         space: VisualSpace::TwoD,
                         policy: ConsumerPolicy::default(),
+                        scope: None,
                     },
                 )
                 .expect("render texture");
@@ -3467,6 +3737,7 @@ mod tests {
                     time_seconds: 0.5,
                     space: VisualSpace::TwoD,
                     policy: ConsumerPolicy::default(),
+                    scope: None,
                 },
             )
             .expect("warm-up render");
@@ -3481,6 +3752,7 @@ mod tests {
                     time_seconds: 0.5,
                     space: VisualSpace::TwoD,
                     policy: ConsumerPolicy::default(),
+                    scope: None,
                 },
             )
             .expect("fallback render");
@@ -3513,6 +3785,7 @@ mod tests {
                     time_seconds: 0.6,
                     space: VisualSpace::TwoD,
                     policy: ConsumerPolicy::default(),
+                    scope: None,
                 },
             )
             .expect("cached fallback render");
@@ -3556,6 +3829,7 @@ mod tests {
             time_seconds: 0.0,
             space: VisualSpace::TwoD,
             policy: ConsumerPolicy::default(),
+            scope: None,
         };
         let mut texture = graphics.create_render_target(4, 4).expect("texture");
 
@@ -3655,6 +3929,7 @@ mod tests {
             time_seconds: 0.0,
             space: VisualSpace::TwoD,
             policy: ConsumerPolicy::default(),
+            scope: None,
         };
 
         let mut texture = graphics.create_render_target(4, 4).expect("texture");
@@ -3735,6 +4010,7 @@ mod tests {
                 time_seconds: 0.0,
                 space: VisualSpace::TwoD,
                 policy: ConsumerPolicy::default(),
+                scope: None,
             };
             let mut texture = graphics.create_render_target(4, 4).expect("texture");
             node.render_texture_into(
@@ -3935,6 +4211,7 @@ mod tests {
             time_seconds: 0.0,
             space: VisualSpace::TwoD,
             policy: ConsumerPolicy::default(),
+            scope: None,
         };
         let mut texture = graphics.create_render_target(4, 4).expect("texture");
         node.render_texture_into(
@@ -4234,6 +4511,45 @@ mod authored_sync_tests {
             "a steady authored-def sync must allocate nothing, made {} requests ({} B)",
             churn.allocs, churn.bytes
         );
+    }
+
+    /// The pattern-space opt-in follows the authored option both ways, with
+    /// no recompile: authoring `"coords": "pattern"` lands on the next tick,
+    /// and removing the key goes back to pixels.
+    #[test]
+    fn the_coords_opt_in_lands_and_leaves_without_a_recompile() {
+        let mut node = node_with_two_value_uniforms();
+        let mut resolver = authored_view();
+        let shapes = SlotShapeRegistry::default();
+        sync_once(&mut node, &mut resolver, &shapes, 1);
+        assert_eq!(node.coords, ShaderCoords::Pixels);
+        node.needs_compile = false;
+
+        resolver.set_static(
+            COORDS_PATH,
+            Production::new(
+                SlotData::Option(lpc_model::SlotOptionDyn::some(SlotData::Value(
+                    WithRevision::new(Revision::new(2), LpValue::String(String::from("pattern"))),
+                ))),
+                ProductionSource::Default,
+            ),
+        );
+        sync_once(&mut node, &mut resolver, &shapes, 2);
+        assert_eq!(node.coords, ShaderCoords::Pattern);
+        assert!(
+            !node.needs_compile,
+            "the transform is host-side: no recompile"
+        );
+
+        resolver.set_static(
+            COORDS_PATH,
+            Production::new(
+                SlotData::Option(lpc_model::SlotOptionDyn::none()),
+                ProductionSource::Default,
+            ),
+        );
+        sync_once(&mut node, &mut resolver, &shapes, 3);
+        assert_eq!(node.coords, ShaderCoords::Pixels);
     }
 
     /// The same guarantee for the value pass the visual node runs right
@@ -4628,6 +4944,15 @@ mod authored_sync_tests {
             FLOAT_MODE_PIN_PATH,
             Production::leaf(
                 WithRevision::new(Revision::new(1), LpValue::String(String::from("fixed"))),
+                ProductionSource::Default,
+            ),
+        );
+        // An unauthored `coords` option: the option root resolves to `none`
+        // in a loaded project, which is why the node reads it there.
+        view.set_static(
+            COORDS_PATH,
+            Production::new(
+                SlotData::Option(lpc_model::SlotOptionDyn::none()),
                 ProductionSource::Default,
             ),
         );

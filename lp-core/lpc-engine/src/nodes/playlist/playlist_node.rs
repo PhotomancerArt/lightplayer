@@ -531,6 +531,7 @@ impl RenderNode for PlaylistNode {
                         space: stream.space,
                         policy: stream.policy,
                         continuation,
+                        scope: stream.scope,
                     },
                 )?;
             }
@@ -553,6 +554,7 @@ impl RenderNode for PlaylistNode {
                         space: stream.space,
                         policy: stream.policy,
                         continuation,
+                        scope: stream.scope,
                     },
                 )?;
             }

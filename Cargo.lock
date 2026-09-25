@@ -4197,6 +4197,7 @@ dependencies = [
  "lp-riscv-emu",
  "lp-riscv-inst",
  "lpa-client",
+ "lpc-mapping",
  "lpc-model",
  "lpc-shared",
  "lpc-view",

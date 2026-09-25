@@ -386,6 +386,52 @@ fn in_flight_report(console: &str) -> Option<usize> {
     digits.parse().ok()
 }
 
+/// [`counted`], once the guest has finished the report the deadline cut off:
+/// the frame every wire's guest counter had reached, against `carried`, the
+/// most frames any pad carried by the deadline.
+///
+/// ⚠️ A deadline can land before a burst's **first byte**. The guest formats
+/// a report only after the frame's send completes, and the line then waits
+/// its turn in the logger before UART0 carries any of it — on the #808
+/// image (2026-09-25) frame 1980 ended on gpio18 at 10,012,357 µs, gpio13 at
+/// 10,013,168 µs, and the burst's first byte left at 10,015,275 µs, after the
+/// pads had started frame 1981. A deadline in that gap leaves no text to
+/// read, and the pad a report period and up to one frame past [`counted`].
+/// That latency is the logger's, not a number this test may assume, so it is
+/// not guessed: when the pads are a period ahead, the machine runs on past
+/// the deadline, a slice at a time, until the report's number is on the wire.
+/// Nothing but the console is read from the extra run — the pads' counts stay
+/// the deadline's.
+///
+/// A report that was really lost still fails: the next burst then arrives
+/// with the group before it missing, and [`reached`] names it. The run stops
+/// anyway once the pads carry two report periods past the last group, and
+/// the bound in the caller fails by name.
+fn reported(r: &mut Run, wires: &[u32], carried: usize) -> usize {
+    /// A stepping granularity, not a tolerance: ~9 bytes at 921,600 baud.
+    const SLICE_US: u64 = 100;
+    let mut console = r.text.clone();
+    loop {
+        let claimed = counted(&console, wires).unwrap_or_else(|lost| panic!("{lost}"));
+        let live = PADS.iter().map(|p| r.m.frames(*p).len()).max().unwrap_or(0);
+        if claimed + REPORT_EVERY_FRAMES > carried || live >= claimed + 2 * REPORT_EVERY_FRAMES {
+            return claimed;
+        }
+        let at = r.m.cycles() + SLICE_US * memmap::CYCLES_PER_US;
+        let outcome = r.m.run_until(&StopCondition {
+            stop_cycle: Some(at),
+            wall_timeout: Some(WALL_TIMEOUT),
+            ..Default::default()
+        });
+        assert!(
+            matches!(outcome, Outcome::Deadline { .. }),
+            "the run past the deadline, waiting for frame {}'s report, ended {outcome:?}",
+            claimed + REPORT_EVERY_FRAMES
+        );
+        console = deinterleave(&r.m.uart0().text());
+    }
+}
+
 /// A frame without its clock: everything the wire carried, and nothing about
 /// when. What two runs at two different `--core-quantum` values must agree on
 /// exactly — see
@@ -482,7 +528,8 @@ fn run(elf: &Path, quantum: u64, dir: &Path) -> Run {
 ///
 /// So the run happens here, once, and each claim below is a function that
 /// reads it. **Nothing is dropped**: every assertion the three tests made is
-/// still made, in the same order, under its own name — which is still the
+/// still made (the checksums now after the determinism, see below), under its
+/// own name — which is still the
 /// name that appears in a failure, because a panic names the function it came
 /// from. What is gone is two machine runs, and only that.
 ///
@@ -497,10 +544,14 @@ fn the_five_wire_walk_holds_on_routing_checksums_and_determinism() {
         Err(reason) => return skip_notice("five_wires", &reason),
     };
     let dir = scratch("five-wires");
-    let r = run(&elf, 256, &dir);
+    let mut r = run(&elf, 256, &dir);
     five_wires_share_four_slots_and_the_fifth_re_muxes_a_signal(&r);
-    every_wire_checksum_equals_the_guests_own_summary_line(&r);
+    // ⚠️ Determinism before the checksums: the checksum claim may run this
+    // machine past its deadline to let a cut-off report finish ([`reported`]),
+    // and the determinism claim compares its cycle and instruction counts at
+    // the deadline against a second run's.
     the_second_wave_decodes_the_same_frames_across_two_runs_and_two_quanta(&elf, &dir, &r);
+    every_wire_checksum_equals_the_guests_own_summary_line(&mut r);
     let _ = std::fs::remove_dir_all(&dir);
 }
 
@@ -729,7 +780,7 @@ fn the_second_wave_decodes_the_same_frames_across_two_runs_and_two_quanta(
 /// All of it needs the render to survive: the summary lines are printed once
 /// every `REPORT_EVERY_FRAMES = 60` frames, and until M4 P4b (#711) the guest
 /// died long before the sixtieth.
-fn every_wire_checksum_equals_the_guests_own_summary_line(r: &Run) {
+fn every_wire_checksum_equals_the_guests_own_summary_line(r: &mut Run) {
     println!(
         "five_wires: outcome {:?}, {} us emulated, unmapped {}",
         r.outcome,
@@ -837,8 +888,15 @@ fn every_wire_checksum_equals_the_guests_own_summary_line(r: &Run) {
     // (`docs/defects/2026-09-23-five-wires-reads-a-report-still-on-the-uart-as-a-lost-one.md`).
     // [`reached`] accepts a short group only as the cut-off tail of the
     // stream; a report missing anywhere else still fails here.
+    //
+    // ⚠️ And a deadline can land before the burst's first byte: the guest
+    // formats a report after the frame's send completes, and on the #808
+    // image its first byte left UART0 2.9 ms after the frame ended on gpio18 —
+    // after the pads had started the NEXT frame. There is no text to read
+    // then, so [`reported`] lets the guest finish the report instead.
     let wires: Vec<u32> = per_wire.iter().map(|(_, crc, _)| *crc).collect();
-    let claimed = counted(&r.text, &wires).unwrap_or_else(|lost| panic!("{lost}"));
+    let carried = r.frames.iter().map(|(_, f)| f.len()).max().unwrap_or(0);
+    let claimed = reported(r, &wires, carried);
     for (pad, frames) in &r.frames {
         let decoded = frames.len();
         println!(

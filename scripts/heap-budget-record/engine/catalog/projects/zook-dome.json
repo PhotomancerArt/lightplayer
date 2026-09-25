@@ -1,7 +1,7 @@
 {
   "comment": "What this project costs TODAY on the RV32 ENGINE emulator (`lp-cli profile --collect alloc`), per profile mode; steady-render records only the frame window. A ratchet, not a target. The file's path under scripts/heap-budget-record/engine/ IS the project path. Regenerate with `just heap-budget-baseline` (every project) or `just heap-budget-baseline <project>`; see docs/heap-budget-gate.md.",
   "recorded": "2026-09-25",
-  "commit": "59323b16c",
+  "commit": "94f024d9f",
   "modes": {
     "startup": {
       "windows": {
@@ -15,22 +15,22 @@
           "holes_at_close": 3
         },
         "project-load": {
-          "transient": 46364,
-          "retained": 42187,
+          "transient": 46532,
+          "retained": 42259,
           "largest_alloc": 12000,
-          "alloc_count": 3592,
-          "alloc_bytes": 226841,
-          "largest_free_at_close": 223984,
+          "alloc_count": 3656,
+          "alloc_bytes": 230525,
+          "largest_free_at_close": 223872,
           "holes_at_close": 24
         },
         "frame": {
-          "transient": 86856,
-          "retained": 33068,
+          "transient": 87126,
+          "retained": 33338,
           "largest_alloc": 20480,
-          "alloc_count": 9888,
-          "alloc_bytes": 488151,
-          "largest_free_at_close": 192984,
-          "holes_at_close": 18
+          "alloc_count": 9897,
+          "alloc_bytes": 488513,
+          "largest_free_at_close": 192568,
+          "holes_at_close": 22
         },
         "shader-compile": {
           "transient": 22858,
@@ -38,8 +38,8 @@
           "largest_alloc": 7424,
           "alloc_count": 615,
           "alloc_bytes": 84359,
-          "largest_free_at_close": 174104,
-          "holes_at_close": 22
+          "largest_free_at_close": 173720,
+          "holes_at_close": 23
         },
         "shader-link": {
           "transient": 2865,
@@ -47,8 +47,8 @@
           "largest_alloc": 2780,
           "alloc_count": 6,
           "alloc_bytes": 2911,
-          "largest_free_at_close": 174104,
-          "holes_at_close": 29
+          "largest_free_at_close": 173720,
+          "holes_at_close": 26
         }
       }
     },
@@ -60,8 +60,8 @@
           "largest_alloc": 384,
           "alloc_count": 175,
           "alloc_bytes": 5826,
-          "largest_free_at_close": 174104,
-          "holes_at_close": 29
+          "largest_free_at_close": 173720,
+          "holes_at_close": 32
         }
       }
     }
