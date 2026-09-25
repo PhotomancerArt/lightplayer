@@ -4071,7 +4071,21 @@ impl StudioController {
             let id = id.clone();
             return self.deploy_docs_example(&id, updates).await;
         }
-        crate::app::open_progress::note_preparing_project();
+        // A board narrates its own steps (upload, load, read back); a sim's
+        // are a blink, and "Preparing the project…" is all there is to say.
+        let on_board = self
+            .pool
+            .lens_session()
+            .map(|session| session.attachment())
+            .filter(|attachment| attachment.transport != crate::LinkTransport::Sim)
+            .map(|attachment| attachment.uid.clone());
+        match on_board {
+            Some(uid) => crate::app::open_progress::note_device_step(
+                &self.open_device_at(&uid),
+                crate::app::open_progress::DeviceOpenStep::Clearing,
+            ),
+            None => crate::app::open_progress::note_preparing_project(),
+        }
         emit_activity(
             &updates,
             UxActivityTarget::pane(ProjectController::NODE_ID),
@@ -4532,6 +4546,10 @@ impl StudioController {
                 self.close_device_lens();
                 Ok(UiNotices::new())
             }
+            crate::RuntimeOp::CancelOpen => {
+                self.cancel_open();
+                Ok(UiNotices::new())
+            }
         }
     }
 
@@ -4579,10 +4597,17 @@ impl StudioController {
                     UiLogOrigin::Studio,
                     format!("waiting for the device before opening it: {error}"),
                 ));
+                self.note_open_waiting_for_device(uid);
                 return Ok(UiNotices::new().with_notice(UiNotice::info("Waiting for the device")));
             }
         };
         self.pending_device_lens = None;
+        if self.pending_open.is_some() && attachment.transport != crate::LinkTransport::Sim {
+            crate::app::open_progress::note_device_step(
+                &self.open_device_at(uid),
+                crate::app::open_progress::DeviceOpenStep::Connecting,
+            );
+        }
         emit_activity(
             &updates,
             UxActivityTarget::pane(ProjectController::NODE_ID),
@@ -4633,11 +4658,14 @@ impl StudioController {
                 // The board answered the fold's hello but not the lens's
                 // conversation (its own hello, or the attach): no lens, no
                 // session, the wire goes back — the card says the rest.
-                self.push_log(UiLogDraft::new(
-                    UiLogLevel::Warn,
-                    UiLogOrigin::Studio,
-                    format!("could not open the board in the editor: {error}"),
-                ));
+                // (A cancelled open unwinds through here too, quietly.)
+                if !crate::app::open_progress::open_superseded() {
+                    self.push_log(UiLogDraft::new(
+                        UiLogLevel::Warn,
+                        UiLogOrigin::Studio,
+                        format!("could not open the board in the editor: {error}"),
+                    ));
+                }
                 self.close_device_lens();
                 Err(error)
             }
@@ -4776,8 +4804,81 @@ impl StudioController {
         })?;
         Ok(lpa_client::RequestDeadline::new(
             lpa_link::device_session::DEFAULT_REQUEST_TOTAL_DEADLINE,
-            move |duration| (timer.borrow_mut())(duration),
+            move |duration| {
+                // The opening frame's Cancel ends the wait NOW: a board that
+                // is not answering would otherwise hold the actor — and the
+                // Reset queued behind the Cancel — for the whole budget.
+                let epoch = crate::app::open_progress::cancel_epoch();
+                let timer = (timer.borrow_mut())(duration);
+                let cancelled = crate::app::open_progress::cancelled_since(epoch);
+                Box::pin(async move {
+                    let mut timer = timer;
+                    let mut cancelled = core::pin::pin!(cancelled);
+                    core::future::poll_fn(|cx| {
+                        if timer.as_mut().poll(cx).is_ready()
+                            || cancelled.as_mut().poll(cx).is_ready()
+                        {
+                            return core::task::Poll::Ready(());
+                        }
+                        core::task::Poll::Pending
+                    })
+                    .await;
+                }) as lpa_client::ClientTimerFuture
+            },
         ))
+    }
+
+    /// The board at `uid` as the opening frame names it.
+    fn open_device_at(&self, uid: &str) -> crate::app::open_progress::OpenDevice {
+        let facts = self.lens_facts_at_address(uid);
+        crate::app::open_progress::OpenDevice {
+            id: facts.as_ref().map(|facts| facts.device),
+            uid: uid.to_string(),
+            name: facts
+                .map(|facts| facts.name)
+                .unwrap_or_else(|| "The board".to_string()),
+        }
+    }
+
+    /// Tell the opening frame why an open is held — only for an open that
+    /// is actually waiting (a `/device/` address holds a lens with no open
+    /// behind it, and has the gallery card to say so), and only for a
+    /// board: a sim is started by this tab, and the tick wakes it.
+    fn note_open_waiting_for_device(&self, uid: &str) {
+        use crate::app::open_progress::{DeviceWait, DeviceWaitReason};
+        if self.pending_open.is_none() || self.is_runtime_device(uid) {
+            return;
+        }
+        let reason = match self.lens_facts_at_address(uid) {
+            None => DeviceWaitReason::Unknown,
+            Some(facts) if facts.link.is_none() => DeviceWaitReason::NotConnected,
+            Some(facts) if !facts.open => DeviceWaitReason::PortClosed,
+            Some(facts) if facts.hello.is_none() => DeviceWaitReason::Identifying,
+            Some(_) => DeviceWaitReason::Busy,
+        };
+        crate::app::open_progress::note_waiting_for_device(DeviceWait {
+            device: self.open_device_at(uid),
+            reason,
+        });
+    }
+
+    /// The opening frame's Cancel, actor-side. By the time this runs the
+    /// open it cancels has already unwound (its parked request was woken by
+    /// [`crate::cancel_open`], and a superseded open returns quietly), or it
+    /// was never running at all — a HELD open is only these two fields.
+    fn cancel_open(&mut self) {
+        let lens_was_the_open = self.pending_open.take().is_some();
+        self.open_mismatch = None;
+        if lens_was_the_open || self.pending_device_lens.is_some() {
+            self.close_device_lens();
+        }
+        crate::app::open_progress::note_open_settled();
+        self.push_log(UiLogDraft::new(
+            UiLogLevel::Info,
+            UiLogOrigin::Studio,
+            "the open was cancelled".to_string(),
+        ));
+        self.mark_dirty();
     }
 
     /// Close the device lens, if one is open: quiesce the mirror, drop the
@@ -4887,7 +4988,10 @@ impl StudioController {
             return;
         }
         if self.device_lens_attachment(&uid).is_err() {
-            // Still loading, identifying, or booting: keep holding.
+            // Still loading, identifying, or booting: keep holding — and
+            // keep the frame's reason current (not connected → identifying
+            // is the whole of a "Connect this board" click).
+            self.note_open_waiting_for_device(&uid);
             return;
         }
         let landed = self.open_device_lens(&uid, UxUpdateSink::noop()).await;
@@ -4897,6 +5001,9 @@ impl StudioController {
         let held_open = self.pending_open.take();
         match landed {
             Ok(_) => crate::app::open_progress::note_open_settled(),
+            // Cancelled from the opening frame: the error is the woken
+            // request, not the board, and the person already left.
+            Err(_) if crate::app::open_progress::open_superseded() => {}
             Err(error) => {
                 self.push_log(UiLogDraft::new(
                     UiLogLevel::Warn,

@@ -1,7 +1,8 @@
 //! Verbs that act on the attached RUNTIME rather than on a project.
 //!
-//! Three of them, all lens-scoped: open the editor on a device, close it,
-//! and set the runtime's log level (the console's runtime-level selector).
+//! Four of them, all lens-scoped: open the editor on a device, close it,
+//! give up on an open still in flight, and set the runtime's log level (the
+//! console's runtime-level selector).
 //! None is device-specific, so they get their own small op rather than
 //! riding a project op.
 //!
@@ -30,6 +31,12 @@ pub enum RuntimeOp {
     /// give the wire back to the roster. The device itself stays on its
     /// card — nothing about the board changes.
     CloseDeviceLens,
+    /// Give up on the open in flight: the opening frame's Cancel. Drops a
+    /// held open (a board that is not here yet), closes a lens the open had
+    /// already taken, and forgets the pending package. The page-side half —
+    /// waking the request the open is parked on — is
+    /// [`cancel_open`](crate::cancel_open), which runs first.
+    CancelOpen,
 }
 
 impl RuntimeOp {
@@ -57,6 +64,11 @@ impl ControllerOp for RuntimeOp {
                 "Close the editor on this board and give its wire back.",
                 ActionPriority::Tertiary,
             ),
+            Self::CancelOpen => ActionMeta::new(
+                "Cancel",
+                "Stop opening this project and give the board back.",
+                ActionPriority::Secondary,
+            ),
         }
     }
 
@@ -73,7 +85,7 @@ impl ControllerOp for RuntimeOp {
             },
             // Tears the session down; it owns the connection for the
             // duration, so it carries no deadline.
-            Self::CloseDeviceLens => ActionClass::Recovery,
+            Self::CloseDeviceLens | Self::CancelOpen => ActionClass::Recovery,
         }
     }
 

@@ -561,8 +561,20 @@ pub fn App() -> Element {
                     // `/devices` would close the question before it was
                     // read. It is not an open that ended, it is an open
                     // waiting for an answer.
+                    //
+                    // A FAILED open keeps it for the same reason: the
+                    // opening frame's failure notice (the step it stopped
+                    // on, Retry, Reset the board) is rendered by that
+                    // address. Sending it to `/devices` is what made a
+                    // board that rebooted mid-open read as a page that
+                    // silently gave up (2026-09-24).
+                    let open_failed = matches!(
+                        lpa_studio_core::open_stage(),
+                        lpa_studio_core::OpenStage::Failed(_)
+                    );
                     let open_ended = next.home.is_some()
                         && !opening_now
+                        && !open_failed
                         && next.open_mismatch.is_none()
                         && loop_saw_opening.get()
                         && !loop_pending_route_open.get();
