@@ -2967,7 +2967,20 @@ test-emu-esp32v3:
 # `lp-cli` build plus the oracle, its claim is a gate artefact rather than a
 # per-PR gate, and the C6's `walk-esp32c6-emu` is not in CI either (M5 ruling
 # R6).
-test-emu-esp32v3-gate: test-emu-esp32v3-boot
+#
+# CI runs the two halves as two PARALLEL jobs (2026-09-24): part 1 is
+# `test-emu-esp32v3-boot` in `Emulator ESP32v3 (x64)`, parts 2–4 are
+# `test-emu-esp32v3-reference` in `Emulator ESP32v3 reference (x64)`. Neither
+# reads what the other builds — the reference image comes out of its own
+# detached worktree, never the in-tree firmware — so the split costs a second
+# toolchain install and nothing else. This recipe is still both, in order:
+# a human runs exactly what CI runs.
+test-emu-esp32v3-gate: test-emu-esp32v3-boot test-emu-esp32v3-reference
+
+# Parts 2–4 of the gate above: the lints, the replays and the registry parity
+# test, then the reference image (`--verify` unless `LP_EMU_REF_VERIFY=0`).
+# No in-tree firmware build — CI's second v3 job runs this on its own.
+test-emu-esp32v3-reference:
     #!/usr/bin/env bash
     set -euo pipefail
     just lint-emu-fence
@@ -2976,7 +2989,7 @@ test-emu-esp32v3-gate: test-emu-esp32v3-boot
     cargo test -p lp-cli --test validate_registry_parity
     commit="$(git rev-parse --short HEAD)"
     if [[ "${LP_EMU_REF_VERIFY:-1}" == 0 ]]; then
-        echo "test-emu-esp32v3-gate: LP_EMU_REF_VERIFY=0 — one reference build, no reproducibility rebuild"
+        echo "test-emu-esp32v3-reference: LP_EMU_REF_VERIFY=0 — one reference build, no reproducibility rebuild"
         scripts/emu/build-reference-image.sh --chip esp32 \
             esp32,server,float-f32 "$commit" none
     else
