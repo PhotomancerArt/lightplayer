@@ -2900,6 +2900,7 @@ jobs:
       - firmware-size
       - emu-c6
       - emu-esp32v3
+      - emu-esp32v3-ref
       - emu-esp32s3
       - heap-budget-chips
       - validate-x64
