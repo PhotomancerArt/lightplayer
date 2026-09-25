@@ -1,5 +1,5 @@
 ---
-status: open
+status: fixed
 found: 2026-09-24      # hardware walk: the JSON Pack desk sitting (G1 of lp2025/2026-09-23-1701-lp-json-pack)
 area: fw-esp32c6 USB-Serial-JTAG write path (esp-hal usb_serial_jtag) × lp-emu-esp-common ip/usb_sj.rs (the link model)
 class: fidelity
@@ -114,6 +114,22 @@ state. So if the desk re-capture still shows short packed frames, the cause
 is something the model doesn't have. Candidates: silicon raising
 `serial_in_empty` at a moment other than the drain, the exact-64-byte packet
 followed by a redundant `wr_done`, or a host-side cause after all.
+
+**Confirmed on hardware (2026-09-25, `035fe5fed`).** The same XIAO, flashed
+with the gated image. Studio's lens ran packed at the new 75 ms pause for 8
+minutes with `?wire-capture=1&device-log=info`:
+
+| image | packed frames | wire bytes | lost/damaged |
+|---|---:|---:|---:|
+| before the gate (all packed runs above) | ~1,400 | ~0.95 MB | 4 |
+| with the gate | **1,327** | 948 KB | **0** |
+
+At the pre-gate rate, 0 in 1,327 would happen by chance about 1 time in 50.
+The gate is the fix. The emulator never showed the loss, because after boot
+the C6 has a single writer and its link model never refuses a write in steady
+state. So the fidelity half stays true: the model has no path to this loss on
+the C6. A model change is follow-up work, not part of this fix. Capture:
+`g1c-gated-packed-75.bin` in the plan directory.
 
 **What is not known yet.**
 - Whether the gate makes the packed loss go away on silicon. The test is the
