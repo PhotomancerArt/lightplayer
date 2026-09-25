@@ -584,6 +584,25 @@ mod tests {
     }
 
     #[test]
+    fn swap_remove_across_chunk_boundary() {
+        // The removed index sits in the first chunk while the last element
+        // (the one that replaces it) sits in a later chunk, so this pins the
+        // cross-chunk path in `chunk_and_offset`/`swap_remove` that a
+        // single-chunk case can't exercise.
+        let mut v = chunked_vec_new();
+        let n = CHUNK * 2 + 3;
+        for i in 0..n {
+            v.push(i as i32);
+        }
+        let last_value = v[n - 1];
+        let removed = v.swap_remove(1);
+        assert_eq!(removed, Some(1));
+        assert_eq!(v.len(), n - 1);
+        assert_eq!(v[1], last_value);
+        v.assert_inner_vecs_within_limit();
+    }
+
+    #[test]
     fn binary_search_by() {
         let mut v = chunked_vec_new();
         for i in [1, 3, 5, 7, 9] {
