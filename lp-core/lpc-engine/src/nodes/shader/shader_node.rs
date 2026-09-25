@@ -37,7 +37,7 @@ use crate::node::{
 use crate::products::visual::VisualSampleStream;
 use crate::products::visual::{
     CellProjection, ProductSpaceInfo, RenderTextureRequest, TextureRenderProduct, VisualProduct,
-    VisualSpace, coordinates, resolve_1d_to_2d_with_origin,
+    VisualReadiness, VisualSpace, coordinates, resolve_1d_to_2d_with_origin,
 };
 use crate::shader_abi::uniforms::{VisualUniform, build_uniforms};
 
@@ -1794,6 +1794,32 @@ impl RenderNode for ShaderNode {
     ) -> Result<ProductSpaceInfo, NodeError> {
         validate_shader_visual_product(self.node_id, product)?;
         Ok(self.space_info())
+    }
+
+    /// Ready once a program exists (keep-last-good included: a recompile
+    /// after an edit renders the previous program meanwhile). Before the
+    /// first program, pending while the compile waits for its window, and
+    /// failed once that compile failed or was denied — only an edit or a
+    /// cleared fault brings the shader back.
+    fn visual_readiness(
+        &mut self,
+        product: VisualProduct,
+        _ctx: &mut RenderContext<'_>,
+    ) -> Result<VisualReadiness, NodeError> {
+        validate_shader_visual_product(self.node_id, product)?;
+        if self.shader.is_some() {
+            return Ok(VisualReadiness::Ready);
+        }
+        Ok(
+            match self
+                .compile_fault
+                .as_deref()
+                .or(self.compilation_error.as_deref())
+            {
+                Some(reason) => VisualReadiness::Failed(String::from(reason)),
+                None => VisualReadiness::Pending,
+            },
+        )
     }
 }
 

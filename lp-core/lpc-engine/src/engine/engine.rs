@@ -26,13 +26,14 @@ use crate::node::RuntimeNodeEntry;
 use crate::node::catch_node_panic::catch_node_panic_framed;
 use crate::node::{
     ControlRenderContext, ControlRenderServices, NodeCall, NodeCallKey, NodeError,
-    NodeResourceInitContext, NodeRuntime, ProduceResult, RenderContext, TickContext,
+    NodeResourceInitContext, NodeRuntime, ProduceResult, RenderContext, RenderNode, TickContext,
     VisualRenderServices,
 };
 use crate::node::{NodeEntryState, RuntimeNodeTree};
 use crate::products::control::{ControlLayout, ControlRenderRequest, ControlRenderTarget};
 use crate::products::visual::{
-    ProductSpaceInfo, RenderTextureRequest, TextureRenderProduct, VisualProduct, VisualSampleStream,
+    ProductSpaceInfo, RenderTextureRequest, TextureRenderProduct, VisualProduct, VisualReadiness,
+    VisualSampleStream,
 };
 use crate::resource::{RuntimeBufferId, RuntimeBufferStore};
 use lp_gfx::{LpGraphics, TextureHandle};
@@ -2275,20 +2276,54 @@ impl EngineResolveHost<'_> {
 
     /// Answer the product-space query (plan D17) by routing it to the
     /// producing node, exactly like a render call.
-    ///
-    /// The node is taken out of the tree for the duration for the same
-    /// reason the render paths take it: a forwarding producer (playlist,
-    /// module) answers by asking the engine about *its* upstream product,
-    /// which re-enters this host.
     fn visual_node_space(
         &mut self,
         product: VisualProduct,
     ) -> Result<ProductSpaceInfo, SessionResolveError> {
+        // Not a render node at all: nothing to project, and the caller's
+        // real error comes from the render call itself.
+        self.visual_node_query(
+            product,
+            "visual space",
+            ProductSpaceInfo::two_d(),
+            |render_node, ctx| render_node.visual_space(product, ctx),
+        )
+    }
+
+    /// Answer the readiness query (`RenderNode::visual_readiness`) by
+    /// routing it to the producing node, like [`Self::visual_node_space`].
+    fn visual_node_readiness(
+        &mut self,
+        product: VisualProduct,
+    ) -> Result<VisualReadiness, SessionResolveError> {
+        // Not a render node: nothing to wait for.
+        self.visual_node_query(
+            product,
+            "visual readiness",
+            VisualReadiness::Ready,
+            |render_node, ctx| render_node.visual_readiness(product, ctx),
+        )
+    }
+
+    /// Route a metadata query to the node producing `product`.
+    ///
+    /// The node is taken out of the tree for the duration for the same
+    /// reason the render paths take it: a forwarding producer (playlist,
+    /// module) answers by asking the engine about *its* upstream product,
+    /// which re-enters this host. `not_render` answers for a node with no
+    /// render capability.
+    fn visual_node_query<T>(
+        &mut self,
+        product: VisualProduct,
+        what: &'static str,
+        not_render: T,
+        query: impl FnOnce(&mut dyn RenderNode, &mut RenderContext<'_>) -> Result<T, NodeError>,
+    ) -> Result<T, SessionResolveError> {
         let node_id = product.node();
         let revision = self.frame_revision;
         let mut node_runtime = {
             let entry = self.tree.get_mut(node_id).ok_or_else(|| {
-                SessionResolveError::other(format!("visual space: unknown node {node_id:?}"))
+                SessionResolveError::other(format!("{what}: unknown node {node_id:?}"))
             })?;
             let old_changed_at = entry.state.changed_at();
             let executing = NodeEntryState::Executing {
@@ -2311,7 +2346,7 @@ impl EngineResolveHost<'_> {
                         Some(label) => format!(
                             "node {node_id:?} is already executing {label}; re-entry through EngineSession is unsupported"
                         ),
-                        None => format!("visual space: node {node_id:?} not alive"),
+                        None => format!("{what}: node {node_id:?} not alive"),
                     }));
                 }
             }
@@ -2332,20 +2367,18 @@ impl EngineResolveHost<'_> {
                     catch_node_panic_framed(
                         lp_recovery::FrameKind::NodeRender,
                         &recovery_name,
-                        || render_node.visual_space(product, &mut ctx),
+                        || query(render_node, &mut ctx),
                     )
                 }
-                // Not a render node at all: nothing to project, and the
-                // caller's real error comes from the render call itself.
-                None => Ok(ProductSpaceInfo::two_d()),
+                None => Ok(not_render),
             }
         };
 
         let entry = self.tree.get_mut(node_id).ok_or_else(|| {
-            SessionResolveError::other(format!("visual space: unknown node {node_id:?}"))
+            SessionResolveError::other(format!("{what}: unknown node {node_id:?}"))
         })?;
         entry.set_state(NodeEntryState::Alive(node_runtime), revision);
-        result.map_err(|e| SessionResolveError::other(format!("visual space: {e}")))
+        result.map_err(|e| SessionResolveError::other(format!("{what}: {e}")))
     }
 
     fn render_node_texture(
@@ -3094,6 +3127,14 @@ impl VisualRenderServices for EngineResolveHost<'_> {
     ) -> Result<ProductSpaceInfo, NodeError> {
         self.visual_node_space(product)
             .map_err(|e| NodeError::msg(format!("visual space: {e}")))
+    }
+
+    fn visual_product_readiness(
+        &mut self,
+        product: VisualProduct,
+    ) -> Result<VisualReadiness, NodeError> {
+        self.visual_node_readiness(product)
+            .map_err(|e| NodeError::msg(format!("{e}")))
     }
 
     fn render_texture(

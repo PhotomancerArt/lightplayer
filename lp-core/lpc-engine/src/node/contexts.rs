@@ -15,7 +15,8 @@ use crate::products::control::{
     ControlLayout, ControlProduct, ControlRenderRequest, ControlRenderTarget,
 };
 use crate::products::visual::{
-    ProductSpaceInfo, RenderTextureRequest, TextureRenderProduct, VisualProduct, VisualSampleStream,
+    ProductSpaceInfo, RenderTextureRequest, TextureRenderProduct, VisualProduct, VisualReadiness,
+    VisualSampleStream,
 };
 use crate::resource::{RuntimeBuffer, RuntimeBufferId, RuntimeBufferStore};
 use lp_gfx::{LpGraphics, TextureHandle};
@@ -784,6 +785,20 @@ pub trait VisualRenderServices: TimebaseRead {
         Ok(ProductSpaceInfo::two_d())
     }
 
+    /// Whether a visual product's latest render was real
+    /// ([`crate::node::RenderNode::visual_readiness`]), routed like
+    /// `visual_product_space`.
+    ///
+    /// Defaulted to ready so node-level test fakes keep compiling; the
+    /// engine host overrides it.
+    fn visual_product_readiness(
+        &mut self,
+        product: VisualProduct,
+    ) -> Result<VisualReadiness, NodeError> {
+        let _ = product;
+        Ok(VisualReadiness::Ready)
+    }
+
     fn render_texture(
         &mut self,
         product: VisualProduct,
@@ -888,6 +903,19 @@ impl<'a> RenderContext<'a> {
             .as_mut()
             .ok_or_else(|| NodeError::msg("render context has no visual render services"))?
             .visual_product_space(product)
+    }
+
+    /// Whether an upstream visual product's latest render was real — asked
+    /// after rendering it, by nodes that hold a frame (playlist) or forward
+    /// a product (module, playlist).
+    pub fn visual_product_readiness(
+        &mut self,
+        product: VisualProduct,
+    ) -> Result<VisualReadiness, NodeError> {
+        self.services
+            .as_mut()
+            .ok_or_else(|| NodeError::msg("render context has no visual render services"))?
+            .visual_product_readiness(product)
     }
 
     pub fn render_texture(
