@@ -1,0 +1,8 @@
+{
+  "format": 1,
+  "sample_diameter": 0.8,
+  "canvas": [0.0, 0.0, 16.0, 16.0],
+  "objects": [
+    { "name": "matrix", "shape": { "grid": { "origin": [0.5, 0.5], "cols": 16, "rows": 16, "pitch": 1.0, "routing": "snake", "start_corner": "tl" } } }
+  ]
+}

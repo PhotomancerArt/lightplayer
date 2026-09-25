@@ -1,0 +1,9 @@
+{
+  "format": 11,
+  "name": "Colour Wipe",
+  "description": "Each palette colour in turn wipes across the piece behind a bright leading edge.",
+  "kind": "pattern",
+  "exports": [
+    "effect"
+  ]
+}

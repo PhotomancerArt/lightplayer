@@ -302,7 +302,7 @@ fn board_display_schema() -> Result<Value> {
 }
 
 /// Schema for the project access sidecar, `<project>/.lp/access.json`.
-/// Plain serde; a persisted format of its own (`version: 1`), outside the
+/// Plain serde; a persisted format of its own (`version: 2`), outside the
 /// project format and its `PROJECT_FORMAT_VERSION`.
 fn project_access_schema() -> Result<Value> {
     let schema = schemars::schema_for!(lpc_access::ProjectAccessFile);
@@ -310,7 +310,7 @@ fn project_access_schema() -> Result<Value> {
 }
 
 /// Schema for the device access store, root `/.lp/access.json`. Plain serde;
-/// its own persisted format (`version: 1`).
+/// its own persisted format (`version: 2`).
 fn device_access_schema() -> Result<Value> {
     let schema = schemars::schema_for!(lpc_access::DeviceAccessFile);
     serde_json::to_value(&schema).context("serializing device access schema")

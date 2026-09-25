@@ -7,8 +7,8 @@
 //! check on the ground both adapters share.
 
 use lp_cloud_domain::{
-    CloudProject, CloudUser, HeadRef, MemberRecord, MemberRole, MetaStore, ProjectRefs,
-    SessionRecord,
+    AccountAccess, CloudProject, CloudUser, HeadRef, MemberRecord, MemberRole, MetaStore,
+    ProjectRefs, SessionRecord,
 };
 use lpc_cloud_api::{Access, SidecarMeta};
 use lpc_history::{ContentHash, EventKind, HistoryEvent, PrefixedUid, UidPrefix};
@@ -121,5 +121,21 @@ pub fn sample_event(at: f64) -> HistoryEvent {
     HistoryEvent {
         at,
         kind: EventKind::Created,
+    }
+}
+
+/// An account-access record for `user`, every byte field distinct so a
+/// column swapped in an adapter's SQL cannot round-trip by accident.
+pub fn sample_account_access(user: PrefixedUid) -> AccountAccess {
+    AccountAccess {
+        user,
+        key_secret: [0x11; 32],
+        key_salt: [0x22; 16],
+        play_password_salt: [0x33; 16],
+        edit_password_salt: [0x44; 16],
+        play_password: None,
+        edit_password: Some("crew only".to_string()),
+        previous_key_salts: vec![[0x55; 16], [0x66; 16]],
+        updated_at: 12.5,
     }
 }

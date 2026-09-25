@@ -1,15 +1,20 @@
 //! Login on connect: one pure state machine per Bluetooth device.
 //!
-//! The board enforces tiers (M3/M4); Studio's job is to make logging in
+//! The board enforces tiers (M3/M4); Studio's job is to make unlocking
 //! effortless and refusals legible. So when a `ble:` link says hello, Studio
 //! asks the link's own hello what it holds (`auth.required`, `auth.granted`)
-//! and, when that is nothing, logs in:
+//! and, when that is nothing, unlocks:
 //!
-//! 1. the account default password, then the remembered ones (most recently
-//!    successful first) — **at most [`AUTO_LOGIN_ATTEMPTS`] answers per
-//!    connect**, because each wrong one feeds the board's backoff;
-//! 2. then a prompt (the password sheet), whose password is tried on the
-//!    link as it stands, or on the next one if the board dropped this one
+//! 1. with a key this browser holds — its own, the account's, an account
+//!    password — matched by salt against the board's challenge, so it is
+//!    one answer and never a wrong one (`login_attempt.rs`);
+//! 2. only when none of those is on the board, the remembered passwords
+//!    (most recently successful first) — **at most [`AUTO_LOGIN_ATTEMPTS`]
+//!    answers per device**, because each wrong one feeds the board's
+//!    backoff;
+//! 3. then a prompt (the Unlock sheet), whose password is tried on the
+//!    link as it stands — answering the challenge step 1 left open, when
+//!    nothing matched — or on the next one if the board dropped this one
 //!    meanwhile (an unauthenticated link is dropped after 10 s, and Web
 //!    Bluetooth reconnects it silently).
 //!
@@ -27,10 +32,21 @@
 
 use lpa_devices::link::LinkId;
 use lpa_devices::time::Millis;
-use lpc_access::Tier;
+use lpc_access::{Challenge, SALT_BYTES, Tier};
 
-/// Answers sent automatically per connect before prompting.
-pub const AUTO_LOGIN_ATTEMPTS: usize = 2;
+use super::device_access_ops::AccessOp;
+use super::key_holder::HeldKey;
+
+/// Remembered passwords sent automatically per device before prompting
+/// (only when no held key is on the board). One: a held key never guesses,
+/// so this is the only automatic answer that can be wrong, and the board's
+/// three free failures are left for the person typing.
+pub const AUTO_LOGIN_ATTEMPTS: usize = 1;
+
+/// How long a challenge left open is answered instead of beginning again.
+/// The board keeps one for `lpc_access::CHALLENGE_TTL_MS` (30 s); this stays
+/// clear of it by Studio's own clock.
+pub const CHALLENGE_REUSE_MS: u64 = 25_000;
 
 /// One connection window: the link, and when this window's hello was heard.
 /// A reconnect is a new window, and the board treats it as a new link that
@@ -63,7 +79,8 @@ pub enum AccessPhase {
 /// Why the password sheet is open.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum PromptReason {
-    /// Nothing this browser knows was tried (no default, none remembered).
+    /// Nothing this browser holds is on the device, and no remembered
+    /// password was left to try.
     NoPasswordKnown,
     /// The passwords tried were refused. `retry_after_ms` is the board's
     /// backoff at the time.
@@ -90,16 +107,35 @@ impl core::fmt::Debug for TypedPassword {
     }
 }
 
-/// What the controller should do next for one device.
+/// A conversation the controller runs on one device's link.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum AccessStep {
     /// Ask this window's hello what the link holds.
     Check(LoginWindow),
-    /// Try these passwords, in order, on this window.
+    /// Unlock this window: with the `held` keys the board offers, else
+    /// these passwords, in order. `challenge` is one this window left open.
     Login {
         window: LoginWindow,
+        held: Vec<HeldKey>,
         passwords: Vec<String>,
         typed: Option<TypedPassword>,
+        challenge: Option<Challenge>,
+    },
+    /// Read the device's access list, and install the `held` keys it is
+    /// missing and remove the `stale` salts (a USB connect; no keys for a
+    /// Bluetooth link at edit, which only lists).
+    Sync {
+        window: LoginWindow,
+        held: Vec<HeldKey>,
+        stale: Vec<[u8; SALT_BYTES]>,
+        added_at: u64,
+    },
+    /// Change the device's access list (the panel, or Undo). `bluetooth` is
+    /// the switch it sets, if any.
+    Change {
+        ops: Vec<AccessOp>,
+        added_at: u64,
+        bluetooth: Option<bool>,
     },
 }
 
@@ -120,6 +156,9 @@ pub struct AccessSession {
     pub busy: bool,
     /// The board's backoff runs until this (Studio's clock, ms).
     pub retry_at: Option<Millis>,
+    /// A challenge this device's board issued and nothing answered yet
+    /// (nothing held matched): the window, the challenge, and when.
+    challenge: Option<(LoginWindow, Challenge, Millis)>,
 }
 
 impl Default for AccessSession {
@@ -134,6 +173,7 @@ impl Default for AccessSession {
             last_refusal: None,
             busy: false,
             retry_at: None,
+            challenge: None,
         }
     }
 }
@@ -155,12 +195,13 @@ impl AccessSession {
         }
     }
 
-    /// The next conversation to run, if any. `default_password` and
-    /// `remembered` are this browser's, in the order they are tried.
+    /// The next conversation to run, if any. `held` are the keys this
+    /// browser holds; `remembered` its passwords, in the order they are
+    /// tried.
     pub fn next_step(
         &self,
         now: Millis,
-        default_password: Option<&str>,
+        held: &[HeldKey],
         remembered: &[&str],
     ) -> Option<AccessStep> {
         let window = self.window?;
@@ -181,10 +222,19 @@ impl AccessSession {
                 _ => false,
             };
             if !satisfied {
+                let challenge = self
+                    .challenge
+                    .as_ref()
+                    .filter(|(at_window, _, at)| {
+                        *at_window == window && now.0.saturating_sub(at.0) < CHALLENGE_REUSE_MS
+                    })
+                    .map(|(_, challenge, _)| challenge.clone());
                 return Some(AccessStep::Login {
                     window,
+                    held: Vec::new(),
                     passwords: vec![typed.password.clone()],
                     typed: Some(typed.clone()),
+                    challenge,
                 });
             }
         }
@@ -193,14 +243,39 @@ impl AccessSession {
         }
         match self.phase {
             AccessPhase::Locked if !self.auto_spent => {
-                let passwords = auto_candidates(default_password, remembered);
-                if passwords.is_empty() {
+                let passwords = auto_candidates(remembered);
+                if passwords.is_empty() && held.is_empty() {
                     return None;
                 }
                 Some(AccessStep::Login {
                     window,
+                    held: held.to_vec(),
                     passwords,
                     typed: None,
+                    challenge: None,
+                })
+            }
+            // The sheet is up on a locked link and nothing holds a challenge
+            // on this window (a reconnect, or a typed password was refused):
+            // begin one now and hold it, so the password being typed answers
+            // it rather than beginning at submit. A board that counts its
+            // unlock deadline from connect keeps a link with a challenge
+            // outstanding (up to the challenge's own life), which is the
+            // Studio half of Run M's "~10 s to type a password". One per
+            // window: a held challenge is never begun over.
+            AccessPhase::Locked
+                if self.prompt.is_some()
+                    && !self
+                        .challenge
+                        .as_ref()
+                        .is_some_and(|(at_window, _, _)| *at_window == window) =>
+            {
+                Some(AccessStep::Login {
+                    window,
+                    held: Vec::new(),
+                    passwords: Vec::new(),
+                    typed: None,
+                    challenge: None,
                 })
             }
             _ => None,
@@ -209,11 +284,32 @@ impl AccessSession {
 
     /// A conversation for `window` started.
     pub fn started(&mut self, step: &AccessStep) {
-        self.busy = true;
-        if matches!(step, AccessStep::Login { .. }) {
-            self.phase = AccessPhase::LoggingIn;
-        } else if self.phase_window != self.window {
-            self.phase = AccessPhase::Checking;
+        match step {
+            AccessStep::Login {
+                held,
+                passwords,
+                typed,
+                ..
+            } => {
+                self.busy = true;
+                // An open challenge is answered by this login, or dropped.
+                self.challenge = None;
+                // Holding a challenge for the sheet answers nothing: the
+                // device stays locked, and the sheet does not read
+                // "Unlocking…".
+                if !(held.is_empty() && passwords.is_empty() && typed.is_none()) {
+                    self.phase = AccessPhase::LoggingIn;
+                }
+            }
+            AccessStep::Check(_) => {
+                self.busy = true;
+                if self.phase_window != self.window {
+                    self.phase = AccessPhase::Checking;
+                }
+            }
+            // The access list's conversations are the controller's; they
+            // never move the login.
+            AccessStep::Sync { .. } | AccessStep::Change { .. } => {}
         }
     }
 
@@ -321,6 +417,18 @@ impl AccessSession {
                     self.phase = AccessPhase::Locked;
                 }
             }
+            Outcome::NothingMatched { challenge } => {
+                // Nothing was answered: no wrong answer on the board's
+                // count. The sheet asks, and its password answers this.
+                if same_window {
+                    self.phase_window = Some(window);
+                    self.phase = AccessPhase::Locked;
+                    self.challenge = Some((window, challenge.clone(), now));
+                }
+                if self.prompt.is_none() {
+                    self.prompt = Some(PromptReason::NoPasswordKnown);
+                }
+            }
             Outcome::NoPasswords => {
                 if was_typed {
                     self.typed = None;
@@ -368,14 +476,11 @@ impl AccessSession {
     }
 }
 
-/// The automatic tries for a connect: the account default, then the
-/// remembered passwords most-recent first, without repeats, capped.
-pub fn auto_candidates(default_password: Option<&str>, remembered: &[&str]) -> Vec<String> {
+/// The automatic password tries for a device: the remembered passwords
+/// most-recent first, without repeats, capped.
+pub fn auto_candidates(remembered: &[&str]) -> Vec<String> {
     let mut out: Vec<String> = Vec::new();
-    for password in default_password
-        .into_iter()
-        .chain(remembered.iter().copied())
-    {
+    for password in remembered.iter().copied() {
         if password.is_empty() || out.iter().any(|known| known == password) {
             continue;
         }
@@ -389,48 +494,39 @@ pub fn auto_candidates(default_password: Option<&str>, remembered: &[&str]) -> V
 
 #[cfg(test)]
 mod tests {
+    use super::super::key_holder::{InstallableKey, KeyHolder};
     use super::super::login_attempt::LoginAttemptOutcome;
     use super::*;
+    use lpc_access::SecretKind;
 
-    fn window(link: u64, at: u64) -> LoginWindow {
-        LoginWindow {
-            link: LinkId(link),
-            hello_at: Millis(at),
-        }
+    #[test]
+    fn remembered_passwords_are_tried_most_recent_first_without_repeats_capped() {
+        assert_eq!(auto_candidates(&["camp", "camp", "mine"]), ["camp"]);
+        assert!(auto_candidates(&[""]).is_empty());
+        assert!(auto_candidates(&[]).is_empty());
     }
 
     #[test]
-    fn the_default_goes_first_then_remembered_without_repeats_capped_at_two() {
-        assert_eq!(
-            auto_candidates(Some("dflt"), &["dflt", "camp", "mine"]),
-            ["dflt", "camp"]
-        );
-        assert_eq!(auto_candidates(None, &["camp"]), ["camp"]);
-        assert!(auto_candidates(Some(""), &[]).is_empty());
-    }
-
-    #[test]
-    fn a_locked_link_is_checked_then_logged_in_with_what_the_browser_knows() {
+    fn a_locked_link_is_checked_then_unlocked_with_what_the_browser_holds() {
         let mut session = AccessSession::default();
         let w = window(1, 10);
+        let held = [held_key()];
         session.observe(Some(w));
-        let step = session
-            .next_step(Millis(10), Some("dflt"), &["camp"])
-            .unwrap();
+        let step = session.next_step(Millis(10), &held, &["camp"]).unwrap();
         assert_eq!(step, AccessStep::Check(w));
         session.started(&step);
         assert_eq!(session.phase, AccessPhase::Checking);
         session.checked(w, true, None, true);
         assert_eq!(session.phase, AccessPhase::Locked);
-        let step = session
-            .next_step(Millis(20), Some("dflt"), &["camp"])
-            .unwrap();
+        let step = session.next_step(Millis(20), &held, &["camp"]).unwrap();
         assert_eq!(
             step,
             AccessStep::Login {
                 window: w,
-                passwords: vec!["dflt".to_string(), "camp".to_string()],
-                typed: None
+                held: held.to_vec(),
+                passwords: vec!["camp".to_string()],
+                typed: None,
+                challenge: None,
             }
         );
         session.started(&step);
@@ -438,9 +534,9 @@ mod tests {
         session.logged_in(
             w,
             &LoginAttemptOutcome::Granted {
-                tier: Tier::Play,
-                label: "camp".to_string(),
-                password_index: 1,
+                tier: Tier::Edit,
+                label: "Yona's MacBook".to_string(),
+                password_index: None,
             },
             false,
             Millis(30),
@@ -448,12 +544,12 @@ mod tests {
         assert_eq!(
             session.phase,
             AccessPhase::Granted {
-                tier: Tier::Play,
-                label: Some("camp".to_string())
+                tier: Tier::Edit,
+                label: Some("Yona's MacBook".to_string())
             }
         );
         assert_eq!(session.prompt, None);
-        assert_eq!(session.next_step(Millis(40), Some("dflt"), &[]), None);
+        assert_eq!(session.next_step(Millis(40), &held, &[]), None);
     }
 
     #[test]
@@ -463,7 +559,7 @@ mod tests {
         session.observe(Some(first));
         session.started(&AccessStep::Check(first));
         session.checked(first, true, None, true);
-        let step = session.next_step(Millis(11), Some("dflt"), &[]).unwrap();
+        let step = session.next_step(Millis(11), &[], &["camp"]).unwrap();
         session.started(&step);
         session.logged_in(
             first,
@@ -486,14 +582,143 @@ mod tests {
         session.observe(None);
         let second = window(2, 12_000);
         session.observe(Some(second));
-        let step = session
-            .next_step(Millis(12_000), Some("dflt"), &[])
-            .unwrap();
+        let step = session.next_step(Millis(12_000), &[], &["camp"]).unwrap();
         assert_eq!(step, AccessStep::Check(second));
         session.started(&step);
         session.checked(second, true, None, true);
-        assert_eq!(session.next_step(Millis(12_001), Some("dflt"), &[]), None);
         assert!(session.prompt.is_some(), "the sheet stays up");
+        // What the new window gets is a challenge held for the sheet: a
+        // begin with nothing to answer it with.
+        let step = session.next_step(Millis(12_001), &[], &["camp"]).unwrap();
+        assert!(
+            matches!(&step, AccessStep::Login { held, passwords, typed: None, .. }
+                if held.is_empty() && passwords.is_empty()),
+            "no refused password is re-sent: {step:?}"
+        );
+    }
+
+    /// Run M: the board drops a link nothing unlocked about 10 s after it
+    /// connects, while the sheet is still being typed into. With the sheet
+    /// up, each window begins one challenge and holds it (the device stays
+    /// locked, the sheet is not busy), so the typed password answers it;
+    /// a held challenge is never begun over.
+    #[test]
+    fn with_the_sheet_up_each_window_holds_one_challenge_for_the_typed_password() {
+        let mut session = AccessSession::default();
+        let first = window(1, 10);
+        session.observe(Some(first));
+        session.started(&AccessStep::Check(first));
+        session.checked(first, true, None, false);
+        assert_eq!(session.prompt, Some(PromptReason::NoPasswordKnown));
+
+        let hold = session.next_step(Millis(20), &[], &[]).unwrap();
+        session.started(&hold);
+        assert_eq!(
+            session.phase,
+            AccessPhase::Locked,
+            "holding is not unlocking"
+        );
+        let challenge = lpc_access::Challenge {
+            nonce: [2; 32],
+            offers: Vec::new(),
+        };
+        session.logged_in(
+            first,
+            &LoginAttemptOutcome::NothingMatched {
+                challenge: challenge.clone(),
+            },
+            false,
+            Millis(30),
+        );
+        assert_eq!(
+            session.next_step(Millis(40), &[], &[]),
+            None,
+            "one challenge per window"
+        );
+
+        // The link drops and comes back: the sheet is still up, and the new
+        // window holds its own.
+        session.observe(None);
+        let second = window(2, 11_000);
+        session.observe(Some(second));
+        let check = session.next_step(Millis(11_000), &[], &[]).unwrap();
+        session.started(&check);
+        session.checked(second, true, None, false);
+        assert!(session.prompt.is_some());
+        let hold = session.next_step(Millis(11_010), &[], &[]).unwrap();
+        assert!(matches!(&hold, AccessStep::Login { window, .. } if *window == second));
+        session.started(&hold);
+        session.logged_in(
+            second,
+            &LoginAttemptOutcome::NothingMatched {
+                challenge: challenge.clone(),
+            },
+            false,
+            Millis(11_020),
+        );
+
+        // Submit answers the held challenge.
+        session.type_password(TypedPassword {
+            password: "pw".to_string(),
+            remember: false,
+        });
+        assert!(matches!(
+            session.next_step(Millis(11_030), &[], &[]),
+            Some(AccessStep::Login { challenge: Some(held), typed: Some(_), .. }) if held == challenge
+        ));
+
+        // Dismissed, nothing is begun.
+        let mut dismissed = session.clone();
+        dismissed.typed = None;
+        dismissed.challenge = None;
+        dismissed.dismiss();
+        assert_eq!(dismissed.next_step(Millis(11_040), &[], &[]), None);
+    }
+
+    /// Nothing matched: the sheet asks, and the typed password answers the
+    /// challenge the board left open — but only while it is fresh, and only
+    /// on the window it was issued on.
+    #[test]
+    fn a_challenge_nothing_answered_is_kept_for_the_typed_password() {
+        let mut session = AccessSession::default();
+        let w = window(1, 10);
+        session.observe(Some(w));
+        session.started(&AccessStep::Check(w));
+        session.checked(w, true, None, true);
+        let step = session.next_step(Millis(11), &[held_key()], &[]).unwrap();
+        session.started(&step);
+        let challenge = lpc_access::Challenge {
+            nonce: [1; 32],
+            offers: Vec::new(),
+        };
+        session.logged_in(
+            w,
+            &LoginAttemptOutcome::NothingMatched {
+                challenge: challenge.clone(),
+            },
+            false,
+            Millis(100),
+        );
+        assert_eq!(session.prompt, Some(PromptReason::NoPasswordKnown));
+        assert_eq!(session.phase, AccessPhase::Locked);
+        session.type_password(TypedPassword {
+            password: "pw".to_string(),
+            remember: false,
+        });
+        let typed_challenge =
+            |session: &AccessSession, now: u64| match session.next_step(Millis(now), &[], &[]) {
+                Some(AccessStep::Login { challenge, .. }) => challenge,
+                other => panic!("{other:?}"),
+            };
+        assert_eq!(typed_challenge(&session, 200), Some(challenge.clone()));
+        assert_eq!(
+            typed_challenge(&session, 100 + CHALLENGE_REUSE_MS),
+            None,
+            "stale: begin again"
+        );
+        let mut elsewhere = session.clone();
+        elsewhere.observe(Some(window(2, 150)));
+        assert_eq!(typed_challenge(&elsewhere, 200), None, "another window");
     }
 
     #[test]
@@ -511,10 +736,10 @@ mod tests {
             password: "s3cret".to_string(),
             remember: true,
         });
-        assert_eq!(session.next_step(Millis(50), None, &[]), None, "no link up");
+        assert_eq!(session.next_step(Millis(50), &[], &[]), None, "no link up");
         let second = window(2, 900);
         session.observe(Some(second));
-        let step = session.next_step(Millis(900), None, &[]).unwrap();
+        let step = session.next_step(Millis(900), &[], &[]).unwrap();
         assert!(
             matches!(&step, AccessStep::Login { passwords, typed: Some(_), .. } if passwords == &["s3cret".to_string()])
         );
@@ -533,7 +758,7 @@ mod tests {
             remember: false,
         });
         assert!(
-            session.next_step(Millis(1_500), None, &[]).is_some(),
+            session.next_step(Millis(1_500), &[], &[]).is_some(),
             "a new password clears the wait: the user saw the backoff"
         );
     }
@@ -553,7 +778,7 @@ mod tests {
             }
         );
         assert_eq!(session.prompt, None);
-        assert_eq!(session.next_step(Millis(20), Some("dflt"), &[]), None);
+        assert_eq!(session.next_step(Millis(20), &[held_key()], &[]), None);
 
         session.needs_edit();
         assert_eq!(session.prompt, Some(PromptReason::NeedsEdit));
@@ -561,14 +786,14 @@ mod tests {
             password: "edit-pw".to_string(),
             remember: true,
         });
-        let step = session.next_step(Millis(30), None, &[]).unwrap();
+        let step = session.next_step(Millis(30), &[], &[]).unwrap();
         session.started(&step);
         session.logged_in(
             w,
             &LoginAttemptOutcome::Granted {
                 tier: Tier::Edit,
                 label: "mine".to_string(),
-                password_index: 0,
+                password_index: Some(0),
             },
             true,
             Millis(40),
@@ -597,6 +822,27 @@ mod tests {
                 label: None
             }
         );
-        assert_eq!(session.next_step(Millis(20), Some("x"), &["y"]), None);
+        assert_eq!(session.next_step(Millis(20), &[held_key()], &["y"]), None);
+    }
+
+    fn window(link: u64, at: u64) -> LoginWindow {
+        LoginWindow {
+            link: LinkId(link),
+            hello_at: Millis(at),
+        }
+    }
+
+    fn held_key() -> HeldKey {
+        HeldKey {
+            holder: KeyHolder::Browser,
+            key: InstallableKey {
+                label: "Yona's MacBook".to_string(),
+                kind: SecretKind::Browser,
+                tier: Tier::Edit,
+                salt: [5; 16],
+                iterations: 1,
+                material: vec![5; 32],
+            },
+        }
     }
 }

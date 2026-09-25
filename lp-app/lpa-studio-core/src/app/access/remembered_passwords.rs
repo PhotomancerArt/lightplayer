@@ -12,9 +12,10 @@
 
 use serde::{Deserialize, Serialize};
 
-/// How many passwords one browser remembers. Automatic login tries at most
-/// two per connect anyway ([`super::AUTO_LOGIN_ATTEMPTS`]); the rest are for
-/// the NEXT piece, which may know a different one.
+/// How many passwords one browser remembers. Automatic unlock tries them
+/// only when no key this browser holds is on the device, and at most
+/// [`super::AUTO_LOGIN_ATTEMPTS`] of them; the rest are for the NEXT
+/// device, which may know a different one.
 pub const MAX_REMEMBERED_PASSWORDS: usize = 8;
 
 /// The persisted list, most recently successful first.

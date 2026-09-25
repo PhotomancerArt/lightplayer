@@ -4,6 +4,8 @@
 //! module owns everything about a radio link that is not a radio fact, so it
 //! is host-tested here and shared by any chip that grows one:
 //!
+//! - [`hci_connection_ledger`]: which BLE connections the controller holds
+//!   open, so a controller reset can close them in the host too;
 //! - [`line_joiner`]: written chunks → `M!` lines (host → board);
 //! - [`line_chunker`]: one framed line → notify-sized values (board → host);
 //! - [`radio_link_port`]: the channels the radio side and the mux meet on;
@@ -11,6 +13,7 @@
 //!
 //! See `docs/adr/2026-09-24-ble-transport.md`.
 
+pub mod hci_connection_ledger;
 pub mod line_chunker;
 pub mod line_joiner;
 #[cfg(feature = "server")]

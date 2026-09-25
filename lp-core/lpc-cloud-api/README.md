@@ -8,7 +8,8 @@ cloud sync service exchange, as pure Rust types: `CloudRequest`,
 supporting building blocks (`Access`, `Actor`, `ProjectMeta`,
 `MemberInfo`/`MemberRole`, `HeadInfo`/`PushOutcome`, `SidecarMeta`, `MeInfo`,
 `SessionInfo`/`SessionList`,
-`Ack`, `LoginOptionsInfo`/`OidcOption`/`DevPickerOptions`/`DevChoice`). It
+`Ack`, `LoginOptionsInfo`/`OidcOption`/`DevPickerOptions`/`DevChoice`,
+`AccountAccessInfo`/`AccountPasswordTier`). It
 carries no transport, no IO, and no logic beyond the version-refusal helper
 in `version.rs`. The blob *transfer* encoding is out of scope entirely —
 blobs move over a separate plain-HTTP plane — this crate only carries the
@@ -16,16 +17,18 @@ hashes (`HaveBlobs`, `MissingBlobs`) that plane is keyed by.
 
 `no_std` + `alloc`. Depends on `lpc-history` for `PrefixedUid` (uids and the
 `Actor::User` identity) and `ContentHash` (blob/tree hashes), and for
-`HistoryEvent`, which a `PushCommit` carries verbatim.
+`HistoryEvent`, which a `PushCommit` carries verbatim; and on `base64` for the
+byte fields of `AccountAccessInfo` (STANDARD, padded — `lpc-access`'s spelling).
 
 ## Every message is a struct; the pairing is a compile-time fact
 
-Each of the eighteen requests is a struct in `request.rs` (`GetProject { uid }`,
+Each of the twenty-one requests is a struct in `request.rs` (`GetProject { uid }`,
 `PushCommit { .. }`, and the payload-free `WhoAmI` / `ListMyProjects` /
-`GetMe` / `ListSessions` / `LoginOptions`); each response is a struct — most
-directly in `response.rs` (`ProjectInfo`, `Heads`, `MissingBlobs`, …), a few
-(`MeInfo`, `SessionInfo`/`SessionList`, `Ack`, `LoginOptionsInfo`) in their
-own concept file for the same reason `ProjectMeta`/`HeadInfo`/`SidecarMeta`
+`GetMe` / `ListSessions` / `LoginOptions` / `GetAccountAccess` /
+`ResetAccountKey`); each response is a struct — most directly in
+`response.rs` (`ProjectInfo`, `Heads`, `MissingBlobs`, …), a few (`MeInfo`,
+`SessionInfo`/`SessionList`, `Ack`, `LoginOptionsInfo`, `AccountAccessInfo`)
+in their own concept file for the same reason `ProjectMeta`/`HeadInfo`/`SidecarMeta`
 are. `CloudRequest` and `CloudResponse` are the closed sets of them — a unit
 variant where the message carries nothing, a newtype variant wrapping the
 struct otherwise. The per-message structs stay behind their own module
@@ -33,7 +36,7 @@ rather than being re-exported at the crate root: `Events` and `Heads` only
 read unambiguously with their module in front.
 
 `CloudCallSpec` (in `call_spec.rs`) is the pairing table — one hand-written
-impl per request naming its `Response` and how to `extract` it. Eighteen
+impl per request naming its `Response` and how to `extract` it. Twenty-one
 impls in one greppable file, deliberately not a macro. It is what lets a client
 write `call(port, GetProject { uid })` and get a `ProjectInfo` back, and what
 lets the service's handlers return the concrete response type; the "what if
@@ -71,9 +74,12 @@ alias, or a best-effort partial-compat decode. `version::check_version` is
 the one place that decision is made; both client and server call it before
 trusting a call or reply body.
 
-`CLOUD_API_VERSION` is `3` as of 2026-08-07: v2 added the account/session/
+`CLOUD_API_VERSION` is `4` as of 2026-09-24: v2 added the account/session/
 login-options calls (`GetMe`, `UpdateMe`, `ListSessions`, `RevokeSession`,
 `LoginOptions`); v3 replaced `Visibility { Private, Link }` with
 `Access { None, View, Edit }` (`SetVisibility` → `SetAccess`), added
 `ArchiveProject`/`RestoreProject`, `ProjectMeta.archived` and
-`ProjectInfo.members`, and renamed `MemberRole::Member` to `Editor`.
+`ProjectInfo.members`, and renamed `MemberRole::Member` to `Editor`; v4
+(2026-09-24) added the account device key and optional account passwords
+(`GetAccountAccess`, `SetAccountPassword`, `ResetAccountKey`, answered by
+`AccountAccessInfo`).

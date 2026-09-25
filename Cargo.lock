@@ -3288,8 +3288,6 @@ dependencies = [
 [[package]]
 name = "esp-radio"
 version = "0.18.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "23fbff98b06a96b6ce3791ecec5c668524052a068e23aacd23afe17ddba844ce"
 dependencies = [
  "allocator-api2 0.3.1",
  "bt-hci",
@@ -4038,6 +4036,7 @@ dependencies = [
  "embassy-sync 0.7.2",
  "embassy-sync 0.8.0",
  "embassy-time",
+ "embedded-io 0.7.1",
  "embedded-io-async 0.6.1",
  "embedded-storage",
  "enumset",
@@ -6300,6 +6299,7 @@ dependencies = [
  "lps-builtin-completions",
  "lps-glsl",
  "pulldown-cmark",
+ "qrcodegen",
  "serde",
  "serde_json",
  "sha2",
@@ -6346,6 +6346,7 @@ dependencies = [
 name = "lpc-cloud-api"
 version = "40.0.0"
 dependencies = [
+ "base64 0.22.1",
  "lpc-history",
  "serde",
  "serde_json",
@@ -8351,6 +8352,12 @@ name = "pxfm"
 version = "0.1.28"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b5a041e753da8b807c9255f28de81879c78c876392ff2469cde94799b2896b9d"
+
+[[package]]
+name = "qrcodegen"
+version = "1.8.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4339fc7a1021c9c1621d87f5e3505f2805c8c105420ba2f2a4df86814590c142"
 
 [[package]]
 name = "quick-xml"

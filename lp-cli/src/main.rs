@@ -10,8 +10,8 @@ mod messages;
 mod server;
 
 use commands::{
-    create, dev, emu, firmware, fwcheck, hardware, profile, project, schema, serve, shader_debug,
-    shader_lpir, upload, validate, wire,
+    create, dev, emu, firmware, fwcheck, hardware, pattern, profile, project, schema, serve,
+    shader_debug, shader_lpir, upload, validate, wire,
 };
 
 #[derive(Parser)]
@@ -90,6 +90,8 @@ enum Cli {
     Hardware(hardware::HardwareCli),
     /// Classify or upgrade a project directory's on-disk format.
     Project(project::ProjectCli),
+    /// Render catalog patterns on standard lamp shapes (host engine).
+    Pattern(pattern::PatternCli),
     /// Generate or verify the checked-in schemas/ tree (JSON Schemas + slot shape dumps).
     Schema(schema::SchemaCli),
     /// Tools over a board's link bytes (`wire unpack`: packed frames → `M!` lines).
@@ -144,6 +146,7 @@ fn main() -> Result<()> {
         Cli::Create { dir, name } => create::handle_create(create::CreateArgs { dir, name }),
         Cli::Hardware(cli) => hardware::handle_hardware(cli),
         Cli::Project(cli) => project::handle_project(cli),
+        Cli::Pattern(cli) => pattern::handle_pattern(cli),
         Cli::Schema(cli) => schema::handle_schema(cli),
         Cli::Wire(cli) => wire::handle_wire(cli),
         Cli::Profile(cli) => match cli.subcommand {

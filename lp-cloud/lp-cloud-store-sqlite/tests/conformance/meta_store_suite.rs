@@ -4,13 +4,15 @@
 //! Instantiate the whole battery for an adapter with
 //! [`meta_store_conformance_tests!`].
 
-use lp_cloud_domain::{CloudProject, CloudUser, MemberRole, MetaStore, SessionRecord};
+use lp_cloud_domain::{
+    AccountAccess, CloudProject, CloudUser, MemberRole, MetaStore, SessionRecord,
+};
 use lpc_cloud_api::Access;
 use lpc_history::ContentHash;
 
 use crate::conformance::fixtures::{
-    project_uid, sample_event, sample_head, sample_member, sample_refs, sample_session,
-    sample_sidecar, sample_user, seed_project, seed_user, user_uid,
+    project_uid, sample_account_access, sample_event, sample_head, sample_member, sample_refs,
+    sample_session, sample_sidecar, sample_user, seed_project, seed_user, user_uid,
 };
 
 /// Generate the whole `MetaStore` battery as `#[test]` functions.
@@ -31,6 +33,9 @@ macro_rules! meta_store_conformance_tests {
             sessions_for_user_lists_all_and_isolates_by_account,
             users_are_ordered_oldest_first_and_capped_at_the_limit,
             profile_fields_and_session_metadata_round_trip,
+            account_access_is_absent_until_put,
+            account_access_round_trips,
+            replacing_account_access_overwrites_every_field,
             projects_round_trip_by_uid,
             projects_round_trip_every_access_level_and_the_archive_stamp,
             replacing_a_project_keeps_its_members_refs_events_and_sidecar,
@@ -206,6 +211,47 @@ pub fn profile_fields_and_session_metadata_round_trip(store: &mut dyn MetaStore)
     };
     store.put_session(session.clone());
     assert_eq!(store.session(session.token_hash), Some(session));
+}
+
+// ---- account access ---------------------------------------------------
+
+/// An account that has never asked has no record — minting is the
+/// domain's job, never the store's.
+pub fn account_access_is_absent_until_put(store: &mut dyn MetaStore) {
+    let user = seed_user(store, 1);
+    assert_eq!(store.account_access(user), None);
+    assert_eq!(store.account_access(user_uid(9)), None);
+}
+
+pub fn account_access_round_trips(store: &mut dyn MetaStore) {
+    let alice = seed_user(store, 1);
+    let bob = seed_user(store, 2);
+    let access = sample_account_access(alice);
+    store.put_account_access(access.clone());
+
+    assert_eq!(store.account_access(alice), Some(access));
+    assert_eq!(store.account_access(bob), None, "keyed by account");
+}
+
+/// A second put replaces the whole record: a cleared password comes back
+/// cleared, and a shorter salt history comes back shorter.
+pub fn replacing_account_access_overwrites_every_field(store: &mut dyn MetaStore) {
+    let user = seed_user(store, 1);
+    store.put_account_access(sample_account_access(user));
+    let replaced = AccountAccess {
+        key_secret: [0x77; 32],
+        key_salt: [0x88; 16],
+        play_password_salt: [0x99; 16],
+        edit_password_salt: [0xaa; 16],
+        play_password: Some("friends".to_string()),
+        edit_password: None,
+        previous_key_salts: vec![],
+        updated_at: 99.0,
+        ..sample_account_access(user)
+    };
+    store.put_account_access(replaced.clone());
+
+    assert_eq!(store.account_access(user), Some(replaced));
 }
 
 // ---- projects ---------------------------------------------------------

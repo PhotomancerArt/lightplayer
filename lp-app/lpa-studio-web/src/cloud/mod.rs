@@ -14,6 +14,7 @@
 //! - [`shared_open`] — somebody else's `/p/` link becoming a tracking copy
 //!   in the library (P6), or the calm not-found line on Home.
 
+pub mod account_access;
 pub mod account_memory;
 pub mod fetch_cloud_port;
 pub mod session_state;

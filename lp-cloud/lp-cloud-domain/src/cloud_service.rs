@@ -4,18 +4,20 @@ use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 use lpc_cloud_api::request::{
     AddMember, ArchiveProject, GetEvents, GetHeads, GetProject, HaveBlobs, PublishProject,
-    PushCommit, RemoveMember, RestoreProject, RevokeSession, SetAccess, UpdateMe,
+    PushCommit, RemoveMember, RestoreProject, RevokeSession, SetAccess, SetAccountPassword,
+    UpdateMe,
 };
 use lpc_cloud_api::response::{
     Events, Heads, MissingBlobs, ProjectInfo, ProjectList, PushResult, UserInfo,
 };
 use lpc_cloud_api::{
-    Access, Ack, Actor, CloudError, CloudRequest, CloudResponse, DevChoice, DevPickerOptions,
-    HeadInfo, LoginOptionsInfo, MeInfo, MemberInfo, MemberRole, OidcOption, SessionInfo,
-    SessionList, SidecarMeta,
+    Access, AccountAccessInfo, AccountPasswordTier, Ack, Actor, CloudError, CloudRequest,
+    CloudResponse, DevChoice, DevPickerOptions, HeadInfo, LoginOptionsInfo, MeInfo, MemberInfo,
+    MemberRole, OidcOption, SessionInfo, SessionList, SidecarMeta,
 };
 use lpc_history::{ContentHash, PrefixedUid, UidPrefix};
 
+use crate::model::account_access::AccountAccess;
 use crate::model::caller::Caller;
 use crate::model::cloud_project::CloudProject;
 use crate::model::cloud_user::CloudUser;
@@ -32,6 +34,11 @@ use crate::push_validation::validate_push_events;
 /// for any real name, short enough that a client cannot use the field to
 /// smuggle a document into the account table.
 const MAX_NAME_LEN: usize = 200;
+
+/// Longest account password `SetAccountPassword` will store. A device
+/// password is typed on a phone or shared as words; this only stops the
+/// field from being used as storage.
+const MAX_ACCOUNT_PASSWORD_LEN: usize = 128;
 
 /// How many accounts the dev picker offers at once (`MetaStore::users`'s
 /// `limit`). Local dev only, and generous: a seeded-profile picker with
@@ -142,6 +149,11 @@ impl<S: MetaStore, C: Clock, I: IdMint> CloudService<S, C, I> {
                 self.revoke_session(caller, request).map(Into::into)
             }
             CloudRequest::LoginOptions => self.login_options().map(Into::into),
+            CloudRequest::GetAccountAccess => self.get_account_access(caller).map(Into::into),
+            CloudRequest::SetAccountPassword(request) => {
+                self.set_account_password(caller, request).map(Into::into)
+            }
+            CloudRequest::ResetAccountKey => self.reset_account_key(caller).map(Into::into),
         }
     }
 
@@ -684,6 +696,75 @@ impl<S: MetaStore, C: Clock, I: IdMint> CloudService<S, C, I> {
         Ok(LoginOptionsInfo { oidc, dev_picker })
     }
 
+    // ---- account device access ----------------------------------------
+
+    /// The caller's account device key and optional passwords, minted on
+    /// the first ask.
+    fn get_account_access(&mut self, caller: Caller) -> Result<AccountAccessInfo, CloudError> {
+        let user = self.require_signed_in(caller.actor)?;
+        Ok(self.account_access_or_mint(user.uid).info())
+    }
+
+    /// Set or clear one of the caller's two account passwords. The tier's
+    /// salt does not move, so the device entry it names is replaced, not
+    /// duplicated. `None` or an empty string clears the password; one over
+    /// [`MAX_ACCOUNT_PASSWORD_LEN`] characters is refused.
+    fn set_account_password(
+        &mut self,
+        caller: Caller,
+        SetAccountPassword { tier, password }: SetAccountPassword,
+    ) -> Result<AccountAccessInfo, CloudError> {
+        let user = self.require_signed_in(caller.actor)?;
+        let password = normalize_account_password(password)?;
+        let mut access = self.account_access_or_mint(user.uid);
+        match tier {
+            AccountPasswordTier::Play => access.play_password = password,
+            AccountPasswordTier::Edit => access.edit_password = password,
+        }
+        access.updated_at = self.clock.now();
+        self.store.put_account_access(access.clone());
+        Ok(access.info())
+    }
+
+    /// Replace the caller's account key with a fresh secret and salt,
+    /// keeping the old salt so clients can remove its device entries.
+    fn reset_account_key(&mut self, caller: Caller) -> Result<AccountAccessInfo, CloudError> {
+        let user = self.require_signed_in(caller.actor)?;
+        let mut access = self.account_access_or_mint(user.uid);
+        let (key_secret, key_salt) = (self.random::<32>(), self.random::<16>());
+        access.rotate_key(key_secret, key_salt, self.clock.now());
+        self.store.put_account_access(access.clone());
+        Ok(access.info())
+    }
+
+    /// The account's stored access record, or a freshly minted one (stored
+    /// before it is returned, so a second ask sees the same key).
+    fn account_access_or_mint(&mut self, user: PrefixedUid) -> AccountAccess {
+        if let Some(existing) = self.store.account_access(user) {
+            return existing;
+        }
+        let access = AccountAccess {
+            user,
+            key_secret: self.random::<32>(),
+            key_salt: self.random::<16>(),
+            play_password_salt: self.random::<16>(),
+            edit_password_salt: self.random::<16>(),
+            play_password: None,
+            edit_password: None,
+            previous_key_salts: Vec::new(),
+            updated_at: self.clock.now(),
+        };
+        self.store.put_account_access(access.clone());
+        access
+    }
+
+    /// `N` bytes from the mint port.
+    fn random<const N: usize>(&mut self) -> [u8; N] {
+        let mut bytes = [0u8; N];
+        self.mint.random_bytes(&mut bytes);
+        bytes
+    }
+
     /// [`CloudUser`] → [`MeInfo`]: the one place `provider_label` is derived,
     /// so `GetMe` and `UpdateMe`'s answer never disagree on it.
     fn me_info(&self, user: CloudUser) -> MeInfo {
@@ -711,6 +792,20 @@ impl<S: MetaStore, C: Clock, I: IdMint> CloudService<S, C, I> {
             Actor::Anonymous => Err(CloudError::NotAuthenticated),
             Actor::User(uid) => self.store.user(uid).ok_or(CloudError::NotAuthenticated),
         }
+    }
+
+    /// The caller's account if it is a real sign-in, or `NotAuthenticated`.
+    ///
+    /// A guest account ([`CloudUser::anonymous`]) is refused like an
+    /// anonymous caller: it has no login to come back through, so a device
+    /// key tied to it could never reach a second browser — which is the
+    /// whole point of an account key.
+    fn require_signed_in(&self, actor: Actor) -> Result<CloudUser, CloudError> {
+        let user = self.require_user(actor)?;
+        if user.anonymous {
+            return Err(CloudError::NotAuthenticated);
+        }
+        Ok(user)
     }
 
     /// Read access: the link opens the project at [`Access::View`] or above,
@@ -940,6 +1035,21 @@ fn normalize_name(name: Option<String>) -> Result<Option<String>, CloudError> {
         Err(invalid("name must be at most 200 characters"))
     } else {
         Ok(Some(trimmed.to_string()))
+    }
+}
+
+/// Normalize a `SetAccountPassword` value. A password is not trimmed —
+/// every character the account holder typed is part of it — but an empty
+/// one clears the field, and one over [`MAX_ACCOUNT_PASSWORD_LEN`]
+/// characters is refused.
+fn normalize_account_password(password: Option<String>) -> Result<Option<String>, CloudError> {
+    match password {
+        None => Ok(None),
+        Some(password) if password.is_empty() => Ok(None),
+        Some(password) if password.chars().count() > MAX_ACCOUNT_PASSWORD_LEN => {
+            Err(invalid("account password must be at most 128 characters"))
+        }
+        Some(password) => Ok(Some(password)),
     }
 }
 

@@ -424,8 +424,6 @@ pub fn ProjectDetailSections(
         history: _,
     } = content;
     let status_class = node_status_label_class(status.kind);
-    let bluetooth = crate::app::home::access_ui_context::use_access_ui()
-        .and_then(|ui| (ui.project_access)().map(|access| (ui, access)));
 
     rsx! {
         DetailSection {
@@ -447,17 +445,6 @@ pub fn ProjectDetailSections(
                     root_slots,
                     rename_uid: library_identity.map(|(uid, _slug)| uid),
                     on_action,
-                }
-            }
-        }
-        // Who may use this piece over Bluetooth (BLE M6 S5): only for a
-        // library project, whose package holds the list. The app provides
-        // it by context; a story or a device-hosted project has none.
-        if let Some((ui, access)) = bluetooth.clone() {
-            DetailSection { title: "Bluetooth",
-                crate::app::project::project_bluetooth_section::ProjectBluetoothSection {
-                    access,
-                    on_access: move |command| ui.on_access.call(command),
                 }
             }
         }

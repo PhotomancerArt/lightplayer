@@ -132,3 +132,7 @@ lightningcss = { version = "1.0.0-alpha.72", default-features = false }
 # features never reach `dx build`, which builds no dev-deps; `just
 # check-wasm-cloud` gates the bundle's combination separately.
 lpa-cloud-client = { path = "../lpa-cloud-client" }
+# The QR encoder's oracle (plan D15): `base/qr` is written from the spec, and
+# its tests compare every module against this MIT encoder. Test-only: the
+# shipped bundle carries none of it.
+qrcodegen = "1.8"

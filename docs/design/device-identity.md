@@ -260,7 +260,14 @@ Option<RegisteredDevice>` for recognition ("This board was Porch sign
   posture today is version+refuse, so nothing regresses now.
 - Auth/trust model (BLE feasibility gap). Networked-transport
   identity rides free (any transport with a hello carries `base_mac`),
-  but authenticating it is separate work.
+  but authenticating it is separate work. **Since decided:** access over
+  an untrusted link is `docs/adr/2026-09-23-ble-access-model.md` (tiers
+  by link, HMAC login, the device store) and
+  `docs/adr/2026-09-24-easy-bluetooth-access.md` (generated keys per
+  browser and account, plugging in adds them). Access is not identity:
+  a device's uid and MAC say which board it is, not who may use it. The
+  one place the two would meet is that ADR's Revisit, a per-device key
+  derived from the device uid.
 - Multi-studio registry sync — uids now agree across stores by
   construction; syncing the rows themselves is its own feature.
 - Removing the firmware's `device_uid` hello field / file read

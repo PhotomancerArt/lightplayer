@@ -700,3 +700,14 @@ hours), and neither is an exit path on its own.
      **pid**, found from the process you started or from `lsof -nP
      -iTCP:<port>` on the port you own — a pattern match has no worktree
      boundary.
+
+- 2026-09-25 — **story discovery killed at 120 s under a load average of
+  ~200** (ble-easy-access P4, `just studio-story-pngs ble-access`, macOS,
+  many sibling agents building). The `--dump-dom` discovery Chrome did not
+  exit within `STUDIO_STORY_DISCOVERY_TIMEOUT_MS` on all attempts; nothing
+  story-specific. Re-running the script directly against the already-built
+  site (`STUDIO_STORY_SITE_DIR=target/dx/lpa-studio-web/release/web/public
+  node lp-app/lpa-studio-web/scripts/studio-story-pngs.mjs pngs <filter>`)
+  with `STUDIO_STORY_DISCOVERY_TIMEOUT_MS=600000`,
+  `STUDIO_STORY_PNGS_CONCURRENCY=1` and `STUDIO_STORY_CDP_TIMEOUT_MS=240000`
+  skips the rebuild and gives discovery the room the load takes.
