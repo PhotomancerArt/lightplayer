@@ -35,9 +35,9 @@ use crate::server::hello_auth::HelloAuth;
 ///
 /// # History
 ///
-/// - 25: JSON Pack (plan `lp-json-pack`; bumped again after the BLE M3
-///   access core took 22, again after lean-wire follow-ups took 23, and
-///   again after the gradient pin took 24) — a board writes its replies
+/// - 26: JSON Pack (plan `lp-json-pack`; bumped again after the BLE M3
+///   access core took 22, lean-wire follow-ups took 23, the gradient pin
+///   took 24 and pattern space took 25) — a board writes its replies
 ///   PACKED on a link whose host opted in: `ClientRequest::SetEncoding {
 ///   encoding, dictionary }` + its `ServerMsgBody::SetEncoding { encoding }`
 ///   answer, and `ServerHello` gains `pack_dictionary`, the fingerprint of
@@ -46,6 +46,15 @@ use crate::server::hello_auth::HelloAuth;
 ///   decode either, which is what earns the bump. From here on the
 ///   dictionary is part of the wire: `just wire-dict-check` fails a
 ///   dictionary change that does not bump this constant.
+/// - 25: pattern space (bumped again after lean-wire follow-ups took 23
+///   and the gradient-cycle pin took 24;
+///   `docs/adr/2026-09-24-pattern-space.md`) — the
+///   shader def gains an optional `coords` key (`"pixels"` | `"pattern"`).
+///   Additive on disk, but NOT on the wire: an old peer refuses a shader def
+///   carrying a field it does not know, so a project frame holding an
+///   opted-in shader fails to decode there. An opted-in shader's `pos` and
+///   the new `patternExtent` / `patternPitch` / `lampCount` intrinsics also
+///   change what the same def renders.
 /// - 24: `GradientConfig` gained a fifth storage field, `pinned` (an
 ///   `i32`, `-1` for none) — the palette chooser's "show just this one"
 ///   pin on a cycle; bumped again after lean-wire took 21 and 23 and BLE M3
@@ -254,7 +263,7 @@ use crate::server::hello_auth::HelloAuth;
 /// as `None` on new Studio and a new firmware's extra fields are ignored
 /// by old Studio. Bumping for those would mark every board running
 /// current firmware Incompatible in exchange for nothing.
-pub const WIRE_PROTO_VERSION: u32 = 25;
+pub const WIRE_PROTO_VERSION: u32 = 26;
 
 /// Unsolicited/boot-time server identity, version, and capability report.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -585,7 +594,7 @@ mod tests {
     #[test]
     fn the_proto_version_is_pinned_to_its_history() {
         assert_eq!(
-            WIRE_PROTO_VERSION, 25,
+            WIRE_PROTO_VERSION, 26,
             "if you meant to bump, add the History entry in this file's \
              doc comment and update this pin"
         );

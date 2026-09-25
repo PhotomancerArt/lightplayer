@@ -316,6 +316,7 @@ impl ShaderBuilder {
             param_defs: MapSlot::default(),
             consumed_slots: default_visual_consumed_slots(),
             space: EnumSlot::default(),
+            coords: OptionSlot::none(),
         };
 
         let json = authored_node_json(&slot_shape_registry(), &NodeDef::Shader(config));

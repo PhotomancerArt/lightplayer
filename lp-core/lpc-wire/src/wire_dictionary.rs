@@ -23,7 +23,7 @@
 use lp_json_pack::{Dictionary, PackStrings};
 
 /// The `WIRE_PROTO_VERSION` this dictionary was generated at.
-pub const WIRE_DICTIONARY_PROTO: u32 = 25;
+pub const WIRE_DICTIONARY_PROTO: u32 = 26;
 
 /// [`WIRE_DICTIONARY`]'s `fingerprint()`, as generated.
 pub const WIRE_DICTIONARY_FINGERPRINT: u32 = 0x28ec2da6;
