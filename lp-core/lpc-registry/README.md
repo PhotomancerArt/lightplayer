@@ -74,9 +74,11 @@ every dormant entry as added on the next edit.
 - Every re-derivation unregisters artifact-store locations that backed the
   previous inventory and back nothing now (unless an overlay entry still
   covers them), and drops residency sets for playlists that left the tree.
-- Unloading is refused (`EntryResidencyError::PendingEdits`) while a def
-  that would leave carries pending slot edits: `commit_overlay` could not
-  write it without its effective def.
+- Unloading drops edits that are only transient (Debug-role overrides,
+  produced paths: a commit never writes them). It is refused
+  (`EntryResidencyError::PendingEdits`) while a def that would leave carries
+  edits a commit would write: `commit_overlay` could not write them without
+  its effective def.
 - An edit to a dormant entry's files is rejected as `UnknownArtifact` with a
   message naming the entry ("entry 2 ("blast") of playlist /playlist.json is
   not loaded; load it to edit it").
