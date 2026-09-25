@@ -62,6 +62,7 @@ impl FakeEsp32Device {
                 reboots_performed: 0,
                 loaded_projects: Vec::new(),
                 pending_loads: std::collections::BTreeMap::new(),
+                unanswered: std::collections::BTreeSet::new(),
             })),
         }
     }
@@ -135,6 +136,23 @@ impl FakeEsp32Device {
     /// state's boot.
     pub fn reset_runtime(&self) {
         self.lock().reset_current();
+    }
+
+    /// How many requests the fake's server has been handed whose answer has
+    /// not yet reached the byte wire.
+    ///
+    /// The server runs on a REAL thread and answers in real time, so an
+    /// answer can still be inside the server when the reader stops reading.
+    /// A reopen flushes the byte wire, not the server, so such an answer is
+    /// delivered into the NEXT observation window — true speech from the
+    /// board, but one a test that asserts a silent fresh window must rule
+    /// out first. Zero means every answer is on the wire or already read
+    /// (docs/defects/2026-09-25-a-late-hello-answer-reaches-the-fresh-window.md).
+    ///
+    /// Answers the script swallows (`drop_responses`, `suppress_hello`) are
+    /// never emitted, so they stay counted here.
+    pub fn unanswered_requests(&self) -> usize {
+        self.lock().unanswered.len()
     }
 
     /// Toggle correlated-response dropping at runtime (no reboot): lets a
@@ -248,6 +266,9 @@ pub(crate) struct FakeDeviceCore {
     /// `LoadProject` requests in flight, by correlation id, so the reply can
     /// be paired with the path it loaded.
     pending_loads: std::collections::BTreeMap<u64, lpc_model::LpPathBuf>,
+    /// Correlation ids the server has been handed but whose answer has not
+    /// yet reached the byte wire. Backs [`FakeEsp32Device::unanswered_requests`].
+    unanswered: std::collections::BTreeSet<u64>,
 }
 
 impl FakeDeviceCore {
@@ -261,6 +282,7 @@ impl FakeDeviceCore {
         self.last_heartbeat = None;
         self.loaded_projects.clear();
         self.pending_loads.clear();
+        self.unanswered.clear();
         // Dropping a RunningLp phase drops the HostRuntime, which joins the
         // server thread (bounded).
         self.phase = FakePhase::fresh(&self.script.boot);
@@ -466,6 +488,7 @@ impl FakeDeviceCore {
                 continue;
             }
             self.note_server_frame(&frame);
+            self.unanswered.remove(&frame.id);
             if !self.emit_wire_frame(&frame) {
                 return;
             }
@@ -713,6 +736,9 @@ impl FakeDeviceCore {
         let FakePhase::RunningLp { runtime } = &self.phase else {
             return;
         };
+        if message.id != 0 {
+            self.unanswered.insert(message.id);
+        }
         let transport = runtime.client_transport();
         let sent = poll_once(async {
             let mut transport = transport.lock().await;
