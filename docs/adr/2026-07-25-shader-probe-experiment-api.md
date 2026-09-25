@@ -117,7 +117,10 @@ not inherit.
 - Perf (measured): ~0.6 ms/eval in debug wasm-class code; a max-size
   experiment (4096 render evals + health + two compiles) ≈ 2.6 s. Fine
   on the main thread for modest experiments; worker offload is
-  advisable-not-existential (follow-up).
+  advisable-not-existential (follow-up). Re-measure with
+  `just perf-probe` — the timed test is `#[ignore]`d in the default
+  suite since 2026-09-24 because it is load-sensitive
+  (`docs/debt/lps-probe-perf-test-load-sensitive.md`).
 - **The interpreter has no fuel/loop cap** (the 2026-07-20 fuel ADR
   covered rv32/wasmtime/browser-wasm, and its follow-ups flagged the
   interp gap "if interp leaves opt-in oracle duty"). lps-probe is

@@ -2589,6 +2589,15 @@ _test-parallel: test-rust test-filetests test-emu-lab
 test-rust-core:
     cargo test
 
+# The lps-probe wall-clock perf sanity: the number behind the probe
+# worker-offload follow-up (docs/adr/2026-07-25-shader-probe-experiment-api.md).
+# `#[ignore]`d in the default suite because it measures machine load as much as
+# code — see docs/debt/lps-probe-perf-test-load-sensitive.md. Trust the result
+# only when the printed load average shows no competing work.
+perf-probe:
+    uptime
+    cargo test -p lps-probe --lib perf_4096 -- --ignored --nocapture
+
 # Host Xtensa execution (`lpvm-native/emu-xt`): the ISA-parameterized rt_emu
 # engine running compiled Xtensa code on lp-xt-emu, differentially checked
 # against rv32. Separate invocation because `emu-xt` is not a default feature
@@ -2735,11 +2744,17 @@ test-glsl-filetests:
 # drift class is caught by the per-chip firmware jobs' manifest checks
 # (which need chip builds this gate deliberately avoids). Note the narrow
 # residue: drift unique to the emu fixture itself is only caught locally.
+#
+# `check-wasm-cloud` is also local-full-gate only: it closes the wasm32
+# blind spot for one crate/feature combination (lpa-cloud-client without
+# `in-process`). Warm ~1s, cold ~47s. CI compiles it only inside the stories
+# job's dx build, whose path gate does not include lpa-cloud-client.
+# See docs/debt/wasm-cloud-check-not-in-just-check.md.
 [parallel]
-check-lint: fmt-check clippy check-lpc-engine-gates check-studio-core-minimal lint-serde-content lint-browser-test-harness lint-classic-capture lint-pcb-export lint-schemars-fw lint-upgrade-fw lint-emu-fence lint-emu-regnames lint-torture-corpus lint-vec-corpus lint-tw-utilities
+check-lint: fmt-check clippy check-lpc-engine-gates check-studio-core-minimal lint-serde-content lint-browser-test-harness lint-classic-capture lint-pcb-export lint-schemars-fw lint-upgrade-fw lint-emu-fence lint-nested-patches lint-emu-regnames lint-torture-corpus lint-vec-corpus lint-tw-utilities
 
 [parallel]
-check: check-lint schema-check fw-manifest-check-emu
+check: check-lint schema-check fw-manifest-check-emu check-wasm-cloud
 
 # Guard against serde Content-machinery reintroduction (tag/untagged/flatten).
 # See docs/adr/2026-07-04-json-only-artifacts.md and the script's allowlist.
@@ -2812,6 +2827,14 @@ lint-upgrade-fw:
 # fence lives in the script, one line of reason each.
 lint-emu-fence:
     ./scripts/check-emu-fence.sh
+
+# A `[patch]` table applies only to its own workspace, so a nested workspace
+# (lp-xt/fixtures) that reaches a crate the root patches must repeat the entry
+# or it silently builds against crates.io. Reads manifests and lockfiles only
+# (no network, no esp toolchain); exclusions and their reasons live in the
+# script. docs/debt/nested-workspaces-miss-root-patches.md.
+lint-nested-patches:
+    ./scripts/check-nested-patches.sh
 
 # The ESP32-C6 machine's boot tests, which need firmware ELFs, plus the M3
 # replays of the committed transcripts.
@@ -2923,7 +2946,11 @@ test-emu-esp32v3:
 #      worktrees at two different paths, one sha256. It is last because it is
 #      the slow half (two full Xtensa firmware builds, ~2 minutes each cold on
 #      an M2 Max) and because a failure there is a claim about the *recipe*
-#      rather than about the machine.
+#      rather than about the machine. `LP_EMU_REF_VERIFY=0` builds the image
+#      ONCE instead (the translated-core cell after this recipe still needs
+#      it): CI sets it on a PR that changes neither the recipe nor the
+#      classic's firmware, because such a PR cannot move the image's bytes
+#      (2026-09-24, #797). Pushes to main always verify.
 #
 # Parts 3 and 4 are here rather than as extra steps in the CI job on purpose:
 # the gate a human runs and the gate CI runs are one thing, and a step that
@@ -2940,7 +2967,20 @@ test-emu-esp32v3:
 # `lp-cli` build plus the oracle, its claim is a gate artefact rather than a
 # per-PR gate, and the C6's `walk-esp32c6-emu` is not in CI either (M5 ruling
 # R6).
-test-emu-esp32v3-gate: test-emu-esp32v3-boot
+#
+# CI runs the two halves as two PARALLEL jobs (2026-09-24): part 1 is
+# `test-emu-esp32v3-boot` in `Emulator ESP32v3 (x64)`, parts 2–4 are
+# `test-emu-esp32v3-reference` in `Emulator ESP32v3 reference (x64)`. Neither
+# reads what the other builds — the reference image comes out of its own
+# detached worktree, never the in-tree firmware — so the split costs a second
+# toolchain install and nothing else. This recipe is still both, in order:
+# a human runs exactly what CI runs.
+test-emu-esp32v3-gate: test-emu-esp32v3-boot test-emu-esp32v3-reference
+
+# Parts 2–4 of the gate above: the lints, the replays and the registry parity
+# test, then the reference image (`--verify` unless `LP_EMU_REF_VERIFY=0`).
+# No in-tree firmware build — CI's second v3 job runs this on its own.
+test-emu-esp32v3-reference:
     #!/usr/bin/env bash
     set -euo pipefail
     just lint-emu-fence
@@ -2948,8 +2988,14 @@ test-emu-esp32v3-gate: test-emu-esp32v3-boot
     cargo test -p lp-emu-validate
     cargo test -p lp-cli --test validate_registry_parity
     commit="$(git rev-parse --short HEAD)"
-    scripts/emu/build-reference-image.sh --verify --chip esp32 \
-        esp32,server,float-f32 "$commit" none
+    if [[ "${LP_EMU_REF_VERIFY:-1}" == 0 ]]; then
+        echo "test-emu-esp32v3-reference: LP_EMU_REF_VERIFY=0 — one reference build, no reproducibility rebuild"
+        scripts/emu/build-reference-image.sh --chip esp32 \
+            esp32,server,float-f32 "$commit" none
+    else
+        scripts/emu/build-reference-image.sh --verify --chip esp32 \
+            esp32,server,float-f32 "$commit" none
+    fi
 
 # The boot half: build the shipped `fw-esp32v3` image, the `rmt-chase` harness
 # image and the `frame-dump` image, then run the whole suite with the
