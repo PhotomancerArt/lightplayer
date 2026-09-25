@@ -169,14 +169,16 @@ The core is IO-free state machines; async belongs to platform edges. See
   server means pre-hello firmware and is itself the mismatch signal. Never
   use error-text sniffing or silent format probing. See
   `docs/adr/2026-07-14-wire-hello-versioning.md`.
-- **A board's packed-wire dictionary (`lp-json-pack`/`lpc-wire`) is part of
-  the wire, not a side artifact.** A dictionary change is a wire change:
-  regenerate it with `just wire-dict` and bump `WIRE_PROTO_VERSION` in the
-  same change. `just wire-dict-check` (in `check-lint`, so in CI) fails both
-  when the committed dictionary is stale against the wire types and when the
-  dictionary changed without the version bump — the same proto number must
-  always mean the same dictionary. See
-  `docs/adr/2026-09-24-json-pack-wire-encoding.md`.
+- **Packed replies carry no static dictionary.** Each packed link learns
+  its names as frames go by (JSON Pack format 2, a per-link learned table
+  in `lp-json-pack`/`lpc-wire`), so a new wire field or variant needs
+  nothing done for packing. What both ends must agree on is
+  `lp_json_pack::PACK_FORMAT_VERSION` (the tag table, the learning rule and
+  the table's capacities): **bump it, and `WIRE_PROTO_VERSION`, when you
+  change any of those**. Every host reader keeps **one** `WireStream` per
+  link for the link's whole life, and answers a `WireChunk::Desync` with
+  `PackOptIn::desynced` (the board's reset). See
+  `docs/adr/2026-09-25-learned-wire-dictionary.md`.
 
 ## Persisted-format compatibility (the wire rule does NOT apply here)
 
@@ -243,7 +245,7 @@ runtime.
 | `lp-engine`      | Shader runtime, node graph             | yes              |
 | `lpc-access`     | Access core: secrets, tiers, HMAC login, backoff (sans-IO) | yes |
 | `lp-server`      | Project management, client connections | yes              |
-| `lp-json-pack`   | JSON Pack: a compact binary form of JSON that decodes back to byte-identical JSON text (`lp-base/`, generic, dictionary injected) | yes |
+| `lp-json-pack`   | JSON Pack: a compact binary form of JSON that decodes back to byte-identical JSON text (`lp-base/`, generic; names coded against an injected seed and a per-connection learned table) | yes |
 | `lpa-devices`    | Device model: event fold, no IO, no UI | no (host + wasm) |
 | `fw-esp32c6`       | ESP32 firmware                         | yes (bare metal) |
 | `fw-emu`         | RISC-V emulator firmware (CI)          | yes (bare metal) |
@@ -596,9 +598,10 @@ page load by `lpa-studio-web/src/dev_url_flags.rs`; no UI, no persistence):
 (`DEVICE_REFRESH_INTERVAL`, 150 ms; clamped to 0–1000 ms; nothing else moves),
 and `?wire=json` stops the page asking boards to pack their replies, so JSON
 and JSON Pack can be compared on one build. Studio otherwise asks every board
-whose hello offers this build's pack dictionary; what the board answered is one
+whose hello offers this build's pack format; what the board answered is one
 `WireNote` line in the device's journal (`wire: replies packed …` or `wire:
-replies stay JSON — <why>`). See
+replies stay JSON — <why>`), and a packed link whose learned table lost step
+says so once (`wire: packed reply dropped …`, then `wire: back in step …`). See
 `docs/adr/2026-09-09-studio-device-stack-over-a-virtual-serial-port.md`.
 
 Two more exist for a hardware sitting, where Web Serial's exclusive hold on the

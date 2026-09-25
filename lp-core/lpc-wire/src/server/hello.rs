@@ -65,9 +65,8 @@ use crate::server::hello_auth::HelloAuth;
 ///   answer, and `ServerHello` gains `pack_dictionary`, the fingerprint of
 ///   the generated wire dictionary (`WIRE_DICTIONARY_FINGERPRINT`). New
 ///   variants on both enums and a required hello field: an old peer cannot
-///   decode either, which is what earns the bump. From here on the
-///   dictionary is part of the wire: `just wire-dict-check` fails a
-///   dictionary change that does not bump this constant.
+///   decode either, which is what earns the bump. (The dictionary, and the
+///   check that tied it to this constant, went at 28.)
 /// - 25: pattern space (bumped again after lean-wire follow-ups took 23
 ///   and the gradient-cycle pin took 24;
 ///   `docs/adr/2026-09-24-pattern-space.md`) — the
