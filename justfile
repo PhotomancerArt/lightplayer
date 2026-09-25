@@ -2770,16 +2770,18 @@ test-glsl-filetests:
 # (which need chip builds this gate deliberately avoids). Note the narrow
 # residue: drift unique to the emu fixture itself is only caught locally.
 #
-# `check-wasm-cloud` is also local-full-gate only: it closes the wasm32
-# blind spot for one crate/feature combination (lpa-cloud-client without
-# `in-process`). Warm ~1s, cold ~47s. CI compiles it only inside the stories
-# job's dx build, whose path gate does not include lpa-cloud-client.
-# See docs/debt/wasm-cloud-check-not-in-just-check.md.
+# `check-wasm-cloud` rides in `check-lint`, so CI's Lint job runs it on the
+# `core` gate (every non-docs PR): it closes the wasm32 blind spot for one
+# crate/feature combination (lpa-cloud-client without `in-process`). Before
+# it moved here CI compiled that combination only inside the stories job's
+# dx build, whose `studio` path gate does not include lpa-cloud-client.
+# Warm ~1s, cold ~47s locally; it runs beside clippy, the Lint job's long
+# pole. See docs/debt/wasm-cloud-check-not-in-just-check.md.
 [parallel]
-check-lint: fmt-check clippy check-lpc-engine-gates wire-dict-check check-studio-core-minimal lint-serde-content lint-browser-test-harness lint-classic-capture lint-pcb-export lint-schemars-fw lint-upgrade-fw lint-emu-fence lint-nested-patches lint-emu-regnames lint-torture-corpus lint-vec-corpus lint-tw-utilities lint-red-main-needs
+check-lint: fmt-check clippy check-wasm-cloud check-lpc-engine-gates wire-dict-check check-studio-core-minimal lint-serde-content lint-browser-test-harness lint-classic-capture lint-pcb-export lint-schemars-fw lint-upgrade-fw lint-emu-fence lint-nested-patches lint-emu-regnames lint-torture-corpus lint-vec-corpus lint-tw-utilities lint-red-main-needs
 
 [parallel]
-check: check-lint schema-check fw-manifest-check-emu check-wasm-cloud
+check: check-lint schema-check fw-manifest-check-emu
 
 # The wire's JSON Pack dictionary (lp-core/lpc-wire/src/wire_dictionary.rs),
 # generated from the wire types by a host-only tracer (feature `wire-dict-gen`,
