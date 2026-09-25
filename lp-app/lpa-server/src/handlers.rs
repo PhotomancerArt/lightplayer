@@ -145,6 +145,16 @@ pub fn handle_client_message(
                 "login requests are answered by the access gate, not a handler".into(),
             ));
         }
+        // Likewise the access requests: `tick_and_send` answers them from
+        // the device store, beside the login.
+        lpc_wire::ClientRequest::AccessList
+        | lpc_wire::ClientRequest::AccessAdd { .. }
+        | lpc_wire::ClientRequest::AccessRemove { .. }
+        | lpc_wire::ClientRequest::AccessSetSwitches { .. } => {
+            return Err(ServerError::Core(
+                "access requests are answered beside the access gate, not a handler".into(),
+            ));
+        }
         lpc_wire::ClientRequest::ProjectCommand { handle, command } => {
             ServerMessagePayload::ProjectCommand {
                 response: handle_project_command(project_manager, handle, command)?,

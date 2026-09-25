@@ -11,7 +11,7 @@
 //!   only the HMAC. The password never crosses a link and is never stored.
 //! - **One login at a time, with backoff** ([`LoginState`],
 //!   [`RateLimit`]), both per device.
-//! - **Two persisted files**, both `version: 1`: the project sidecar
+//! - **Two persisted files**, both `version: 2` (v1 still reads): the project sidecar
 //!   ([`ProjectAccessFile`], `<project>/.lp/access.json`) and the device
 //!   store ([`DeviceAccessFile`], root `/.lp/access.json`). Neither is ever
 //!   readable over any link ([`is_access_file_path`]).
@@ -42,6 +42,7 @@ pub mod pbkdf2_sha256;
 pub mod project_access_file;
 pub mod rate_limit;
 pub mod secret_entry;
+pub mod secret_kind;
 pub mod tier;
 
 pub use access_file_error::AccessFileError;
@@ -57,6 +58,7 @@ pub use pbkdf2_sha256::{derive_login_key, pbkdf2_sha256};
 pub use project_access_file::ProjectAccessFile;
 pub use rate_limit::RateLimit;
 pub use secret_entry::{KEY_BYTES, SALT_BYTES, SecretEntry};
+pub use secret_kind::SecretKind;
 pub use tier::Tier;
 
 /// Most secrets one access file may hold. The login challenge offers every

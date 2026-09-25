@@ -672,7 +672,16 @@ const STACK_HIGH_WATER_GAP: u64 = 640;
 /// fell by 3,328 B — `direct` 16460 → 13132 — and that part IS named: the
 /// embassy main task's `poll` frame shrank from `entry a1, 4304` to `976`;
 /// see `determinism.rs`'s `PREFIX_CYCLES`. The 32 B move of the gap is not.)
-const PATH_HIGH_WATER_GAP: i64 = -96;
+///
+/// ⚠️ **Re-measured by BLE easy access (P1, 2026-09-24): −96 → −64**
+/// (`direct 13132`, `rom-up 13068`, of a 45,344 B stack). The classic's image
+/// changed only by the new access requests (their handlers and the device
+/// store's merge, answered beside the login in `tick_and_send`); the stack's
+/// size did not move, and the memory-transfer fields still agree between the
+/// paths to the byte (`free=223504 used=18048 largest_free=106485`). The
+/// ROM-up path's heartbeat lands at another point in the pacer's phase; not
+/// isolated further.
+const PATH_HIGH_WATER_GAP: i64 = -64;
 
 /// **G2 (e).** Every memory-class field of the idle heartbeat, this machine
 /// against the desk board, on the same image and the same request.

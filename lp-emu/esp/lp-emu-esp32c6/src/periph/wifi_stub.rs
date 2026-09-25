@@ -775,9 +775,11 @@ impl WifiStub {
 
     /// `COEX`: `0x600A_F400..0x600A_F800`, the coexistence arbiter, as a
     /// plain accept-and-remember block with the touch log, `I2C_MST_MEM`'s
-    /// shape. No override list: nothing has been seen to spin on it. An
-    /// image with BLE off never gives the arbiter anything to arbitrate, and
-    /// no emulated board turns BLE on (radio is not modelled).
+    /// shape. No override list: nothing has been seen to spin on it —
+    /// including since 2026-09-24, when a board with no device store started
+    /// booting with BLE on, and the shipped image's BLE controller and host
+    /// came up and advertised under `--strict-bus` with no new override. The
+    /// air is still not modelled: nothing ever connects over BLE.
     pub fn coex() -> Self {
         Self {
             name: "COEX",

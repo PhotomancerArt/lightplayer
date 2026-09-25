@@ -10,7 +10,7 @@
 //! |---|---|
 //! | Public | `Hello`, `LoginBegin`, `LoginAnswer` |
 //! | Play | `ProjectRead`; `ProjectCommand` `PanelWrite`/`PanelClear`/`ReadOverlay`/`ReadInventory`; `ListAvailableProjects`, `ListLoadedProjects`; read-only fs (`Read`, `ListDir`, `ChangesSince`, `HashPackage`) inside the projects directory |
-//! | Edit | everything else: `LoadProject`, `UnloadProject`, `StopAllProjects`, every other `ProjectCommand`, every fs write/delete and every fs read outside the projects directory, `SetLogLevel`, `Reboot`, `ClearFaults` |
+//! | Edit | everything else: `LoadProject`, `UnloadProject`, `StopAllProjects`, every other `ProjectCommand`, every fs write/delete and every fs read outside the projects directory, `SetLogLevel`, `Reboot`, `ClearFaults`, and the access requests (`AccessList`, `AccessAdd`, `AccessRemove`, `AccessSetSwitches`) |
 //!
 //! Separately, and on EVERY link at EVERY tier, the fs handlers never
 //! return an access file's bytes (`handlers::handle_fs_request`,
@@ -69,7 +69,11 @@ pub fn classify(request: &ClientRequest, projects_dir: &str) -> Required {
         | ClientRequest::StopAllProjects
         | ClientRequest::SetLogLevel { .. }
         | ClientRequest::Reboot
-        | ClientRequest::ClearFaults => Required::Edit,
+        | ClientRequest::ClearFaults
+        | ClientRequest::AccessList
+        | ClientRequest::AccessAdd { .. }
+        | ClientRequest::AccessRemove { .. }
+        | ClientRequest::AccessSetSwitches { .. } => Required::Edit,
     }
 }
 
