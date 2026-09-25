@@ -12,6 +12,16 @@ chunk the byte pump carried: `<unix_us> <'>'|'<'> <len>\\n<len bytes>\\n`,
 `>` host -> board and `<` board -> host. This script reassembles lines per
 direction and classifies each `M!{json}` line by message kind.
 
+A board that was asked to pack (JSON Pack) writes packed frames
+(`\\n 0x00 'P' COBS 0x00`) into the `<` chunks, and the tap annotates each
+one with a `P` record carrying the `M!{json}` line it stands for and the
+frame's size on the wire (`E` for one that did not decode). This script
+strips the frames out of `<` (they are 0x00-delimited) and reads the `P`
+records in their place, so a packed message is classified by its JSON and
+sized by its packed bytes: every size below is WIRE bytes, and the summary
+adds a `json` column with what the same messages take as `M!` lines. The
+ledger slices the JSON, so its paths are JSON bytes either way.
+
 Project reads are labelled by their request's shape, so the two that
 interleave on a live link (the lens and the device card) are kept apart:
 
@@ -97,29 +107,52 @@ def parse_args():
 
 
 def read_records(path):
-    """[(unix_us, dir, bytes)] in tap order."""
+    """[(unix_us, dir, bytes, wire_len)] in tap order. `dir` is `>`, `<`, or
+    an annotation: `P` (a packed frame's `M!` line; `wire_len` is the
+    frame's own size) or `E` (a packed frame that did not decode)."""
     data = open(path, "rb").read()
     records = []
     i = 0
     while i < len(data):
         nl = data.index(b"\n", i)
-        us, direction, length = data[i:nl].split(b" ")
+        fields = data[i:nl].split(b" ")
+        us, direction, length = fields[:3]
+        wire_len = int(fields[3]) if len(fields) > 3 else None
         length = int(length)
-        records.append((int(us), chr(direction[0]), data[nl + 1 : nl + 1 + length]))
+        records.append(
+            (int(us), chr(direction[0]), data[nl + 1 : nl + 1 + length], wire_len)
+        )
         i = nl + 1 + length + 1
     return records
 
 
 def reassemble_lines(records):
-    """[(unix_us, dir, line_bytes_with_newline)]: a line is stamped with the
-    chunk that completed it."""
+    """[(unix_us, dir, line_bytes_with_newline, wire_bytes)]: a line is
+    stamped with the chunk that completed it. A packed frame's line comes
+    from its `P` record and is sized by the frame; every other line's wire
+    size is its length."""
     pending = {">": b"", "<": b""}
+    in_frame = False
     lines = []
-    for us, direction, chunk in records:
-        pending[direction] += chunk
+    for us, direction, chunk, wire_len in records:
+        if direction == "P":
+            lines.append((us, "<", chunk, wire_len))
+            continue
+        if direction == "E":
+            continue
+        if direction == "<":
+            # Every 0x00 opens or closes a packed frame; keep what is outside.
+            parts = chunk.split(b"\x00")
+            for n, part in enumerate(parts):
+                if not in_frame:
+                    pending["<"] += part
+                if n < len(parts) - 1:
+                    in_frame = not in_frame
+        else:
+            pending[direction] += chunk
         while b"\n" in pending[direction]:
             line, pending[direction] = pending[direction].split(b"\n", 1)
-            lines.append((us, direction, line + b"\n"))
+            lines.append((us, direction, line + b"\n", len(line) + 1))
     return lines
 
 
@@ -137,7 +170,7 @@ def parse_message(line):
 def read_labels(lines):
     """{request id: label} from the host's projectRead requests."""
     labels = {}
-    for _, direction, line in lines:
+    for _, direction, line, _wire in lines:
         if direction != ">":
             continue
         message, _ = parse_message(line)
@@ -198,29 +231,48 @@ def print_summary(records, lines, labels, args):
     span = max((t1 - t0) / 1e6, 1e-6)
     print(
         f"span {span:.1f} s (after skipping {args.skip_seconds:g} s), "
-        f"{len(records)} chunks in the whole tap"
+        f"{sum(1 for r in records if r[1] in '<>')} chunks in the whole tap"
     )
     sizes = collections.defaultdict(list)
-    for us, direction, line in lines:
-        sizes[(direction, kind_of(line, labels))].append(len(line))
+    json_sizes = collections.defaultdict(int)
+    for us, direction, line, wire in lines:
+        key = (direction, kind_of(line, labels))
+        sizes[key].append(wire)
+        json_sizes[key] += len(line)
+    packed = [r for r in records if r[1] == "P"]
+    errors = [r for r in records if r[1] == "E"]
     totals = {">": 0, "<": 0}
-    print(f"{'dir':3} {'kind':46} {'n':>5} {'min':>6} {'med':>6} {'max':>6} {'total':>9}")
+    json_column = f" {'json':>9}" if packed else ""
+    print(
+        f"{'dir':3} {'kind':46} {'n':>5} {'min':>6} {'med':>6} {'max':>6} {'total':>9}"
+        + json_column
+    )
     for (direction, kind), values in sorted(sizes.items(), key=lambda kv: -sum(kv[1])):
         values.sort()
         totals[direction] += sum(values)
+        json_cell = f" {json_sizes[(direction, kind)]:9}" if packed else ""
         print(
             f"{direction:3} {kind:46} {len(values):5} {values[0]:6} "
-            f"{values[len(values) // 2]:6} {values[-1]:6} {sum(values):9}"
+            f"{values[len(values) // 2]:6} {values[-1]:6} {sum(values):9}" + json_cell
         )
     print(
         f"host->board {totals['>']} B = {totals['>'] / span:.0f} B/s ; "
         f"board->host {totals['<']} B = {totals['<'] / span:.0f} B/s over {span:.1f} s"
     )
+    if packed:
+        wire = sum(r[3] for r in packed)
+        json = sum(len(r[2]) for r in packed)
+        print(
+            f"{len(packed)} packed frames in the whole tap: {wire} B on the wire, "
+            f"{json} B as M! lines ({wire / max(json, 1):.1%})"
+        )
+    if errors:
+        print(f"{len(errors)} packed frames did not decode (E records)")
     print_read_units(lines, labels)
     if args.timeline:
         per_second = collections.defaultdict(lambda: [0, 0])
-        for us, direction, line in lines:
-            per_second[int((us - t0) / 1e6)][0 if direction == ">" else 1] += len(line)
+        for us, direction, line, wire in lines:
+            per_second[int((us - t0) / 1e6)][0 if direction == ">" else 1] += wire
         print("second  host->board  board->host")
         for second in sorted(per_second):
             up, down = per_second[second]
@@ -248,7 +300,7 @@ def print_read_units(lines, labels):
 def read_units(lines, labels):
     """{(label, id): (line bytes, frame count)} over board->host projectRead lines."""
     units = {}
-    for _, direction, line in lines:
+    for _, direction, line, wire in lines:
         if direction != "<":
             continue
         message, _ = parse_message(line)
@@ -259,7 +311,7 @@ def read_units(lines, labels):
             continue
         key = (labels.get(message.get("id"), "other"), message.get("id"))
         size, frames = units.get(key, (0, 0))
-        units[key] = (size + len(line), frames + 1)
+        units[key] = (size + wire, frames + 1)
     return units
 
 
@@ -311,7 +363,7 @@ def ledger_units(lines, labels, kind):
     """[[raw_json_bytes, ...]]: one list per unit of `kind`."""
     if kind in ("lens", "card", "sync", "other"):
         grouped = collections.OrderedDict()
-        for _, direction, line in lines:
+        for _, direction, line, _wire in lines:
             if direction != "<":
                 continue
             message, raw = parse_message(line)
@@ -325,7 +377,7 @@ def ledger_units(lines, labels, kind):
             grouped.setdefault(message.get("id"), []).append(raw)
         return list(grouped.values())
     units = []
-    for _, direction, line in lines:
+    for _, direction, line, _wire in lines:
         if direction != "<":
             continue
         this_kind = kind_of(line, labels)

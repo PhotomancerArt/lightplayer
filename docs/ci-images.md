@@ -102,10 +102,19 @@ still does not write them (docs/chip-figures.md, "Positional figures"), even
 though the bytes are CI's. With CI's images a positional failure on the desk
 does read CI's value, which is the value to copy.
 
-When CI has already measured the move, `just apply-ci-figures` (the
-`figures-patch-*` artifacts) is cheaper still — nothing runs at all. Fetch the
-images when you need to *run* something: to debug a failure, try an emulator
-change against a known image, or bless after an emulator-side edit.
+The two CI hand-backs are one pair, from one run:
+
+- **`just apply-ci-figures <pr>`** (`figures-patch-*`) is the cheaper one when
+  CI has already blessed a figure-only move: nothing runs at all.
+- **`just fetch-ci-images <run>`** (`ci-images-*`) is for when you need to
+  *run* something: debug a failure that is not a figure move, try an emulator
+  change against a known image, bless after an emulator-side edit, or re-check
+  an applied patch.
+
+`apply-ci-figures` names its run id when it finishes; `just fetch-ci-images
+<that run>` then `just bless-chips --check` re-checks the applied records
+against the very bytes they were read from. The patch touches only records,
+never a firmware source path, so it cannot trip the refusal.
 
 ## The C6's image directory
 
@@ -121,6 +130,7 @@ still win.
 
 - `scripts/ci/ci-images.py` — `pack` (CI), `fetch`, `env`/`with` (the recipes'
   hook, a no-op when `LP_CI_IMAGES` is unset), `status`.
+- `scripts/ci/apply-ci-figures.sh` — ends by naming the fetch for its own run.
 - `.github/workflows/pre-merge.yml` — the `Pack CI images` / `Upload CI images`
   steps in `emu-c6`, `emu-esp32v3`, `emu-esp32s3`.
 - `justfile` — `fetch-ci-images`, `ci-images-status`, and the `LP_CI_IMAGES`

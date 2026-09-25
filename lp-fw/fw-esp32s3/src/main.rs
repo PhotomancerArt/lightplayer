@@ -518,6 +518,11 @@ fn boot_firmware(spawner: embassy_executor::Spawner) -> FirmwareApp {
         hardware_registry.manifest().board_id(),
     )));
     server.set_reboot_hook(Some(Rc::new(reboot_now)));
+    // JSON Pack: answer a host's opt-in with what this image's transport
+    // can write (`fw-esp32-common/json-pack`).
+    server.set_packed_encoding_supported(
+        fw_esp32_common::serial::server_msg::PACKED_ENCODING_SUPPORTED,
+    );
     // The one feature the server cannot see: whether the shader engine
     // linked into THIS image does native f32 math (`float-f32` is a fact of
     // this crate's Cargo graph, invisible from `Arc<dyn LpGraphics>`).

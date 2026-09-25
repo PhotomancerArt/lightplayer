@@ -77,6 +77,9 @@ env:
 #                   ├─ emu-esp32v3       (the classic ESP32 machine's gate: boot suite + heap)
 #                   ├─ emu-esp32v3-ref   (…its other half: replays + reference image + jit cell)
 #                   └─ heap-budget-chips (chip heap ratchet + lp-cli emu tests)
+#   (the figure jobs)  ─ figures-comment   (PRs: ONE sticky comment naming the
+#                                           figures that moved, and the patch
+#                                           that accepts them — see below)
 #   (all of the above) ─ red-main-suspects (main pushes, on failure only:
 #                                           names the PRs since the last green main)
 #
@@ -1431,8 +1434,12 @@ jobs:
             exit 1
           fi
 
+      # `tee` + `shell: bash` (pipefail): the log is what the figure-patch
+      # step below reads to decide whether a failure was a moved figure.
       - name: Emulator C6 boot tests + replays
-        run: cd lp2025 && just test-emu-c6-boot
+        id: figures_tests
+        shell: bash
+        run: cd lp2025 && just test-emu-c6-boot 2>&1 | tee "$RUNNER_TEMP/figures-tests.log"
 
       # **CI's images, for a desk that wants no firmware build** (docs/ci-images.md).
       # The images the step above built and booted — ELFs, merged chips, the
@@ -1622,6 +1629,35 @@ jobs:
             !lp2025/target/emu-ref/wt-*
           key: ${{ steps.emu-ref-set.outputs.key }}
 
+      # A moved FIGURE hands back its patch (docs/chip-figures.md, "When CI
+      # hands back the patch"). Only on a failed figure check, so a green run
+      # pays nothing: re-run the failed tests as a bless against the images
+      # this job already built (`test_support`'s cache — no rebuild), and
+      # publish the records' diff if and only if that bless passed, which
+      # proves every non-figure assertion held. The job stays red; the
+      # `figures-comment` job posts the summary and the apply command.
+      - name: Figure moves — bless what failed, diff the records
+        id: figures_patch
+        if: failure() && steps.figures_tests.outcome == 'failure'
+        timeout-minutes: 15
+        shell: bash
+        env:
+          FIGURES_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          cd lp2025
+          scripts/ci/figures-patch.py bless --name "Emulator C6 boot tests" \
+            --log "$RUNNER_TEMP/figures-tests.log" \
+            --cargo-test "LP_EMU_BUILD_FW=1 cargo test -p lp-emu-esp32c6"
+          scripts/ci/figures-patch.py collect --job emu-c6 --job-name "Emulator C6 (x64)"
+
+      - name: Upload the figure patch
+        if: failure() && steps.figures_patch.outcome == 'success'
+        uses: actions/upload-artifact@v4
+        with:
+          name: figures-patch-emu-c6
+          path: ${{ runner.temp }}/figures-patch/
+          retention-days: 14
+
       - name: sccache stats
         if: always()
         shell: bash
@@ -1753,7 +1789,9 @@ jobs:
       # `frame-dump` images, the merged chip image, and the whole suite with
       # the `#[ignore]`d half included. Parts 2–4 are the other job's.
       - name: Emulator ESP32v3 boot suite (both boot paths, rmt-chase, frame-dump)
-        run: cd lp2025 && just test-emu-esp32v3-boot
+        id: figures_tests
+        shell: bash
+        run: cd lp2025 && just test-emu-esp32v3-boot 2>&1 | tee "$RUNNER_TEMP/figures-tests.log"
 
       # CI's images for `just fetch-ci-images` — see the same step in emu-c6.
       - name: Pack CI images (ci-images-esp32v3)
@@ -1792,8 +1830,52 @@ jobs:
       # line at 119 ms of emulated time. The release `lp-emu-esp32v3`
       # binary the ratchet runs is the one expense this job does not already
       # pay; it is a much smaller dependency tree than `lp-cli`'s.
+      #
+      # It runs even when the boot suite failed (and only then besides
+      # success): a statics change moves both, and one red run should name —
+      # and patch — both.
       - name: Heap budget ratchet — the classic's own ledger
-        run: cd lp2025 && just heap-budget-check-chips-v3
+        id: figures_heap
+        if: success() || steps.figures_tests.outcome == 'failure'
+        shell: bash
+        run: cd lp2025 && just heap-budget-check-chips-v3 2>&1 | tee "$RUNNER_TEMP/figures-heap.log"
+
+      # A moved FIGURE hands back its patch — see `emu-c6`'s step of the same
+      # name. The suite re-runs against the image COPIES the boot step named
+      # (`target/lp-emu-esp32v3/images.env`), so nothing is rebuilt; the heap
+      # re-baseline rebuilds incrementally, as the ratchet above did.
+      - name: Figure moves — bless what failed, diff the records
+        id: figures_patch
+        if: failure() && (steps.figures_tests.outcome == 'failure' || steps.figures_heap.outcome == 'failure')
+        timeout-minutes: 15
+        shell: bash
+        env:
+          TESTS: ${{ steps.figures_tests.outcome }}
+          HEAP: ${{ steps.figures_heap.outcome }}
+          FIGURES_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          LP_HEAP_BUDGET_COMMIT: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          cd lp2025
+          if [ "$TESTS" = failure ]; then
+            scripts/ci/figures-patch.py bless --name "Emulator ESP32v3 boot suite" \
+              --log "$RUNNER_TEMP/figures-tests.log" \
+              --cargo-test "set -a; . target/lp-emu-esp32v3/images.env; set +a; cargo test -p lp-emu-esp32v3"
+          fi
+          if [ "$HEAP" = failure ]; then
+            scripts/ci/figures-patch.py bless --name "Heap budget ratchet (esp32v3)" \
+              --log "$RUNNER_TEMP/figures-heap.log" \
+              --heap-bless "just heap-budget-baseline-chips-v3" \
+              --heap-check "just heap-budget-check-chips-v3"
+          fi
+          scripts/ci/figures-patch.py collect --job emu-esp32v3 --job-name "Emulator ESP32v3 (x64)"
+
+      - name: Upload the figure patch
+        if: failure() && steps.figures_patch.outcome == 'success'
+        uses: actions/upload-artifact@v4
+        with:
+          name: figures-patch-emu-esp32v3
+          path: ${{ runner.temp }}/figures-patch/
+          retention-days: 14
 
       - name: sccache stats
         if: always()
@@ -2040,7 +2122,9 @@ jobs:
         run: cargo binstall --no-confirm --locked espflash@3.3.0
 
       - name: Emulator ESP32-S3 gate (both boot paths, the pads, the replays)
-        run: cd lp2025 && just test-emu-esp32s3-gate
+        id: figures_tests
+        shell: bash
+        run: cd lp2025 && just test-emu-esp32s3-gate 2>&1 | tee "$RUNNER_TEMP/figures-tests.log"
 
       # CI's images for `just fetch-ci-images` — see the same step in emu-c6.
       - name: Pack CI images (ci-images-esp32s3)
@@ -2073,8 +2157,49 @@ jobs:
       # `fw-esp32s3` rebuild (the walk's `frame-dump` build shares this target
       # path, so naming the features is what makes the shipped image come
       # back) plus a sub-second boot that ends on its own `[JIT] used=` line.
+      #
+      # It runs even when the gate failed, for the classic's reason: a statics
+      # change moves both, and one red run should patch both.
       - name: Heap budget ratchet — the S3's own ledger
-        run: cd lp2025 && just heap-budget-check-chips-s3
+        id: figures_heap
+        if: success() || steps.figures_tests.outcome == 'failure'
+        shell: bash
+        run: cd lp2025 && just heap-budget-check-chips-s3 2>&1 | tee "$RUNNER_TEMP/figures-heap.log"
+
+      # A moved FIGURE hands back its patch — see `emu-c6`'s step of the same
+      # name, and `emu-esp32v3`'s for the image copies it re-runs against.
+      - name: Figure moves — bless what failed, diff the records
+        id: figures_patch
+        if: failure() && (steps.figures_tests.outcome == 'failure' || steps.figures_heap.outcome == 'failure')
+        timeout-minutes: 15
+        shell: bash
+        env:
+          TESTS: ${{ steps.figures_tests.outcome }}
+          HEAP: ${{ steps.figures_heap.outcome }}
+          FIGURES_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          LP_HEAP_BUDGET_COMMIT: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          cd lp2025
+          if [ "$TESTS" = failure ]; then
+            scripts/ci/figures-patch.py bless --name "Emulator ESP32-S3 gate" \
+              --log "$RUNNER_TEMP/figures-tests.log" \
+              --cargo-test "set -a; . target/lp-emu-esp32s3/images.env; set +a; cargo test -p lp-emu-esp32s3"
+          fi
+          if [ "$HEAP" = failure ]; then
+            scripts/ci/figures-patch.py bless --name "Heap budget ratchet (esp32s3)" \
+              --log "$RUNNER_TEMP/figures-heap.log" \
+              --heap-bless "just heap-budget-baseline-chips-s3" \
+              --heap-check "just heap-budget-check-chips-s3"
+          fi
+          scripts/ci/figures-patch.py collect --job emu-esp32s3 --job-name "Emulator ESP32-S3 (x64)"
+
+      - name: Upload the figure patch
+        if: failure() && steps.figures_patch.outcome == 'success'
+        uses: actions/upload-artifact@v4
+        with:
+          name: figures-patch-emu-esp32s3
+          path: ${{ runner.temp }}/figures-patch/
+          retention-days: 14
 
       - name: sccache stats
         if: always()
@@ -2165,6 +2290,7 @@ jobs:
         uses: extractions/setup-just@v3
 
       - name: Emulator-backed lp-cli tests
+        id: cli_tests
         run: cd lp2025 && just test-emu-c6-cli
 
       # The shipped image booted whole, read from the allocator figures its
@@ -2175,8 +2301,40 @@ jobs:
       # `-c6` and not the bare `heap-budget-check-chips` since M5 P5: that one
       # now does BOTH chips, and this job has no Xtensa toolchain. The
       # classic's arm rides `Emulator ESP32v3 (x64)`, which does.
+      #
+      # It runs even when the lp-cli tests failed, so a red run still says
+      # whether the C6's heap figures moved (and hands back their patch).
       - name: Heap budget ratchet — the C6's own ledger
-        run: cd lp2025 && just heap-budget-check-chips-c6
+        id: figures_heap
+        if: success() || steps.cli_tests.outcome == 'failure'
+        shell: bash
+        run: cd lp2025 && just heap-budget-check-chips-c6 2>&1 | tee "$RUNNER_TEMP/figures-heap.log"
+
+      # A moved FIGURE hands back its patch — see `emu-c6`'s step of the same
+      # name. The re-baseline measures the image the ratchet just built.
+      - name: Figure moves — bless what failed, diff the records
+        id: figures_patch
+        if: failure() && steps.figures_heap.outcome == 'failure'
+        timeout-minutes: 15
+        shell: bash
+        env:
+          FIGURES_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          LP_HEAP_BUDGET_COMMIT: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          cd lp2025
+          scripts/ci/figures-patch.py bless --name "Heap budget ratchet (esp32c6)" \
+            --log "$RUNNER_TEMP/figures-heap.log" \
+            --heap-bless "just heap-budget-baseline-chips esp32c6" \
+            --heap-check "just heap-budget-check-chips-c6"
+          scripts/ci/figures-patch.py collect --job heap-budget-chips --job-name "Heap budget (esp32c6 chip)"
+
+      - name: Upload the figure patch
+        if: failure() && steps.figures_patch.outcome == 'success'
+        uses: actions/upload-artifact@v4
+        with:
+          name: figures-patch-heap-budget-chips
+          path: ${{ runner.temp }}/figures-patch/
+          retention-days: 14
 
       - name: sccache stats
         if: always()
@@ -2291,7 +2449,35 @@ jobs:
       # Runs after the tests: fw-emu reuses warm deps and lp-cli is the
       # test-built binary (LP_CLI, exported by the step above).
       - name: Heap budget ratchet
-        run: cd lp2025 && just heap-budget-check
+        id: figures_heap
+        shell: bash
+        run: cd lp2025 && just heap-budget-check 2>&1 | tee "$RUNNER_TEMP/figures-heap.log"
+
+      # A moved engine figure hands back its patch — see `emu-c6`'s step of
+      # the same name. The re-baseline profiles with the same LP_CLI binary.
+      - name: Figure moves — bless what failed, diff the records
+        id: figures_patch
+        if: failure() && steps.figures_heap.outcome == 'failure'
+        timeout-minutes: 15
+        shell: bash
+        env:
+          FIGURES_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          LP_HEAP_BUDGET_COMMIT: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          cd lp2025
+          scripts/ci/figures-patch.py bless --name "Heap budget ratchet (engine)" \
+            --log "$RUNNER_TEMP/figures-heap.log" \
+            --heap-bless "just heap-budget-baseline" \
+            --heap-check "just heap-budget-check"
+          scripts/ci/figures-patch.py collect --job validate-x64 --job-name "Validate (x64)"
+
+      - name: Upload the figure patch
+        if: failure() && steps.figures_patch.outcome == 'success'
+        uses: actions/upload-artifact@v4
+        with:
+          name: figures-patch-validate-x64
+          path: ${{ runner.temp }}/figures-patch/
+          retention-days: 14
 
       - name: sccache stats
         if: always()
@@ -2904,6 +3090,66 @@ jobs:
           path: ~/chrome
           key: ${{ steps.chrome_cache.outputs.cache-primary-key }}
 
+  # ONE sticky PR comment for every moved firmware figure in this run
+  # (docs/chip-figures.md, "When CI hands back the patch"). Each figure job
+  # that failed on a figure check uploads a `figures-patch-<job>` artifact —
+  # the records' diff when the failure was figures and nothing else, or a
+  # summary saying it was not a figure move. This job gathers them into one
+  # comment: each moved figure old -> new per chip, and
+  # `just apply-ci-figures <pr>`, which downloads and applies them all. It
+  # never pushes; the figure jobs stay red until someone applies and pushes.
+  #
+  # It runs on every same-repo PR run so a comment from an earlier push is
+  # rewritten once the figures match; with no failure and no earlier comment
+  # it posts nothing. ~15 s, off the critical path (it starts after the jobs
+  # it reads). Fork PRs get a read-only token and cannot comment: they keep
+  # the artifacts, which `apply-ci-figures` reads the same way. Not on
+  # cancelled runs, whose results a newer push has superseded.
+  figures-comment:
+    name: Figure moves comment
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    needs:
+      - emu-c6
+      - emu-esp32v3
+      - emu-esp32s3
+      - heap-budget-chips
+      - validate-x64
+    # …and only when at least one of them ran, so a PR that runs none of
+    # them (docs-only, say) still runs nothing.
+    if: >-
+      !cancelled() && github.event_name == 'pull_request' &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      (needs.emu-c6.result != 'skipped' || needs.emu-esp32v3.result != 'skipped' ||
+       needs.emu-esp32s3.result != 'skipped' || needs.heap-budget-chips.result != 'skipped' ||
+       needs.validate-x64.result != 'skipped')
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: scripts/ci
+          persist-credentials: false
+
+      # Nothing to download is the green case, not an error.
+      - name: Download the figure patches
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          pattern: figures-patch-*
+          path: ${{ runner.temp }}/figures
+
+      - name: Post or update the figures comment
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/figures"
+          python3 scripts/ci/figures-patch.py comment --dir "$RUNNER_TEMP/figures" \
+            --repo "$GITHUB_REPOSITORY" --pr "$PR_NUMBER" --sha "$HEAD_SHA"
+
   # A red MAIN names its suspects. CI validates each PR against its own
   # branch, never the merge result, so two independently-green PRs can merge
   # into a red main and the blame lands on whichever merged last
@@ -2938,6 +3184,7 @@ jobs:
       - validate-gfx
       - validate-browser
       - validate-stories
+      - figures-comment
     if: failure() && github.event_name == 'push' && github.ref == 'refs/heads/main'
     permissions:
       contents: read

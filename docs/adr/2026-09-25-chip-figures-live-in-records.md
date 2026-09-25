@@ -106,7 +106,11 @@ to keep every check exactly as strict.
 - A CI job that runs the three chips' gates with `LP_EMU_BLESS=1` under
   `GITHUB_ACTIONS=true` and uploads the records' diff as a patch artifact, so
   an author accepts a move without building any firmware — and the only way to
-  bless positional figures without copying them from a log.
+  bless positional figures without copying them from a log. **Done in PR
+  #829** — as steps of the existing figure jobs rather than a job of its own,
+  run only when a figure check failed, plus a sticky PR comment and
+  `just apply-ci-figures <pr>` (docs/chip-figures.md, "When CI hands back the
+  patch").
 - Record an image identity beside the figures (a digest of the ELF's loadable
   sections), so a failure can say "the image is unchanged — this is the
   emulator" instead of asking the reader to know.

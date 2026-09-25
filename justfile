@@ -2253,6 +2253,20 @@ heap-budget-baseline-chips-s3:
 bless-chips *args:
     scripts/bless-chips.sh {{ args }}
 
+# Accept the figure moves CI already measured, without building anything: the
+# `figures-patch-*` artifacts of the PR's latest CI run, applied to this
+# checkout together. CI produces them only when a figure check failed on
+# figures and nothing else (docs/chip-figures.md, "When CI hands back the
+# patch"); the PR's sticky "Pinned firmware figures moved" comment lists what
+# moved. Commit the result with the change that moved it, then push.
+#
+#   just apply-ci-figures          # the current branch's PR
+#   just apply-ci-figures 830
+#
+# Apply the figure patches CI posted for a PR (default: this branch's PR).
+apply-ci-figures pr="":
+    scripts/ci/apply-ci-figures.sh {{ pr }}
+
 # Download the firmware images a CI run built for the chip emulator suites
 # (the `ci-images-<chip>` artifacts), verify their sha256s, and print the
 # `export LP_CI_IMAGES=…` that makes `test-emu-*-boot`, `heap-budget-*-chips*`
@@ -2635,6 +2649,21 @@ _test-parallel: test-rust test-filetests test-emu-lab
 
 test-rust-core:
     cargo test
+    # lp-json-pack's corpus tests need its host features (`required-features`),
+    # which the plain workspace run never turns on. No dependencies: cheap.
+    cargo test -p lp-json-pack --all-features
+
+# The vendored serializer forks' own tests: upstream's, plus the LP token
+# hook's. `third_party/ser-write` and `third_party/ser-write-json` are their
+# own workspaces (not members, so the root's lints and `cargo fmt --all` stay
+# off upstream code), which is why this is `--manifest-path`, not `-p`. They
+# resolve their own dependencies, so this is a local check, not a CI job; the
+# hook's behaviour on the wire types is covered by `cargo test -p lpc-wire
+# --features ser-write-json`, which CI runs through `test-rust-core`.
+test-ser-write:
+    CARGO_TARGET_DIR="$PWD/target" cargo test --manifest-path third_party/ser-write/Cargo.toml
+    CARGO_TARGET_DIR="$PWD/target" cargo test --manifest-path third_party/ser-write-json/Cargo.toml
+    rm -f third_party/ser-write/Cargo.lock third_party/ser-write-json/Cargo.lock
 
 # The lps-probe wall-clock perf sanity: the number behind the probe
 # worker-offload follow-up (docs/adr/2026-07-25-shader-probe-experiment-api.md).
@@ -2811,10 +2840,22 @@ test-glsl-filetests:
 # Warm ~1s, cold ~47s locally; it runs beside clippy, the Lint job's long
 # pole. See docs/debt/wasm-cloud-check-not-in-just-check.md.
 [parallel]
-check-lint: fmt-check clippy check-wasm-cloud check-lpc-engine-gates check-studio-core-minimal lint-serde-content lint-browser-test-harness lint-classic-capture lint-pcb-export lint-schemars-fw lint-upgrade-fw lint-emu-fence lint-nested-patches lint-emu-regnames lint-torture-corpus lint-vec-corpus lint-tw-utilities lint-red-main-needs
+check-lint: fmt-check clippy check-wasm-cloud check-lpc-engine-gates wire-dict-check check-studio-core-minimal lint-serde-content lint-browser-test-harness lint-classic-capture lint-pcb-export lint-schemars-fw lint-upgrade-fw lint-emu-fence lint-nested-patches lint-emu-regnames lint-torture-corpus lint-vec-corpus lint-tw-utilities lint-red-main-needs
 
 [parallel]
 check: check-lint schema-check fw-manifest-check-emu
+
+# The wire's JSON Pack dictionary (lp-core/lpc-wire/src/wire_dictionary.rs),
+# generated from the wire types by a host-only tracer (feature `wire-dict-gen`,
+# never enabled by firmware) and ranked by the committed traffic sample.
+# `wire-dict-check` fails when the committed file is stale, and when the
+# dictionary changed while WIRE_PROTO_VERSION did not: a dictionary change is a
+# wire change. `wire-dict` refuses to write in that case too.
+wire-dict:
+    cargo run -q -p lpc-wire --features wire-dict-gen --bin wire-dict
+
+wire-dict-check:
+    cargo run -q -p lpc-wire --features wire-dict-gen --bin wire-dict -- --check
 
 # Guard against serde Content-machinery reintroduction (tag/untagged/flatten).
 # See docs/adr/2026-07-04-json-only-artifacts.md and the script's allowlist.
@@ -2961,7 +3002,7 @@ test-emu-c6: test-emu-c6-boot test-emu-c6-cli
 # `LP_EMU_C6_IMAGE_DIR` at the fetched set, after refusing it if its firmware
 # sources are not this checkout's (docs/ci-images.md). Unset, it is a no-op.
 test-emu-c6-boot:
-    LP_EMU_BUILD_FW=1 scripts/ci/ci-images.py with esp32c6 -- cargo test -p lp-emu-esp32c6 -- --include-ignored --nocapture
+    LP_EMU_BUILD_FW=1 scripts/ci/ci-images.py with esp32c6 -- cargo test -p lp-emu-esp32c6 --no-fail-fast -- --include-ignored --nocapture
     cargo test -p lp-emu-validate --test m3_replays
     cargo test -p lp-emu-validate --test m4_replays
     cargo test -p lp-emu-validate --test m5_replays
@@ -2971,13 +3012,14 @@ test-emu-c6-boot:
     cargo test -p lp-emu-validate --test band_contract
     just test-emu-serve
 
-# lp-cli's two emulator-backed tests. Both resolve the ELF through
+# lp-cli's emulator-backed tests. Both resolve the ELF through
 # `lp_emu_esp32c6::test_support` under `LP_EMU_BUILD_FW=1` — a plain
 # `cargo build`, not a reference image, so no espflash and no git history.
 # CI's `Heap budget (esp32c6 chip)` job runs this half.
 test-emu-c6-cli:
     cargo test -p lp-cli --test validate_registry_parity
     LP_EMU_BUILD_FW=1 scripts/ci/ci-images.py with esp32c6 -- cargo test -p lp-cli --test emu_usb_hello -- --include-ignored
+    LP_EMU_BUILD_FW=1 scripts/ci/ci-images.py with esp32c6 -- cargo test -p lp-cli --test emu_usb_json_pack -- --include-ignored --nocapture
 
 # The classic ESP32 (v3) machine's own suite (plan three, M3).
 #
@@ -3112,7 +3154,7 @@ test-emu-esp32v3-boot:
     if [[ -n "${LP_CI_IMAGES:-}" ]]; then
       ci_env="$(scripts/ci/ci-images.py env esp32v3)"
       eval "$ci_env"
-      exec cargo test -p lp-emu-esp32v3 -- --include-ignored
+      exec cargo test -p lp-emu-esp32v3 --no-fail-fast -- --include-ignored
     fi
     just build-fw-esp32v3
     built={{ justfile_directory() }}/target/xtensa-esp32-none-elf/release-esp32v3/fw-esp32v3
@@ -3181,8 +3223,12 @@ test-emu-esp32v3-boot:
     fi
     export LP_EMU_ESP32V3_FRAME_DUMP_ELF="$dump"
     echo "images: shipped=$shipped chase=$chase frame-dump=$dump"
+    # The image variables, for a re-run against these SAME copies without
+    # rebuilding: CI's figure bless (scripts/ci/figures-patch.py) sources it.
     export -p | grep ' LP_EMU_ESP32V3_' > "$out/images.env"
-    cargo test -p lp-emu-esp32v3 -- --include-ignored
+    # `--no-fail-fast`: every test binary runs, so one red run names every
+    # moved figure rather than the first binary's.
+    cargo test -p lp-emu-esp32v3 --no-fail-fast -- --include-ignored
 
 # Run an image on the classic ESP32 (v3) machine.
 #
@@ -3244,7 +3290,7 @@ test-emu-esp32s3-boot:
     if [[ -n "${LP_CI_IMAGES:-}" ]]; then
       ci_env="$(scripts/ci/ci-images.py env esp32s3)"
       eval "$ci_env"
-      exec cargo test -p lp-emu-esp32s3 -- --include-ignored
+      exec cargo test -p lp-emu-esp32s3 --no-fail-fast -- --include-ignored
     fi
     just build-fw-esp32s3
     built={{ justfile_directory() }}/target/xtensa-esp32s3-none-elf/release-esp32s3/fw-esp32s3
@@ -3264,8 +3310,9 @@ test-emu-esp32s3-boot:
       echo "espflash is not on PATH: the merged-image tests will SKIP" >&2
       echo "image: shipped=$shipped"
     fi
+    # See test-emu-esp32v3-boot: the re-run file, and every binary runs.
     export -p | grep ' LP_EMU_ESP32S3_' > "$out/images.env"
-    cargo test -p lp-emu-esp32s3 -- --include-ignored
+    cargo test -p lp-emu-esp32s3 --no-fail-fast -- --include-ignored
 
 # **M6's gate.** What the `Emulator ESP32-S3 (x64)` job runs (M6 P10 added
 # it, path-gated on `emu_esp32s3` and non-required — the filter mirrors

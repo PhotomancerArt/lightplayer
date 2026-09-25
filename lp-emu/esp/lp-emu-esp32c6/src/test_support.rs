@@ -94,7 +94,8 @@ static BUILD_LOCK: Mutex<()> = Mutex::new(());
 pub const FW_TARGET: &str = "riscv32imac-unknown-none-elf";
 pub const FW_PROFILE: &str = "release-esp32";
 
-/// The shipped feature set: `default = ["esp32c6", "server", "radio"]`.
+/// The shipped feature set: `default = ["esp32c6", "server", "radio",
+/// "json-pack"]` ([`FwImage::SHIPPED`] builds with the defaults on).
 pub const SHIPPED_FEATURES: &[&str] = &["esp32c6", "server", "radio"];
 
 /// One firmware image: a feature set, with or without the defaults.

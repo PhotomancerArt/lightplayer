@@ -76,6 +76,11 @@ impl UsbLinkState {
             self.no_sof_count = 0;
         } else {
             self.no_sof_count = self.no_sof_count.saturating_add(1);
+            if !self.always_enumerated && self.no_sof_count == DISCONNECT_THRESHOLD {
+                // The cable just went: a new link starts at the next
+                // enumeration (see `link_epoch`).
+                crate::serial::link_epoch::bump();
+            }
             if !self.is_enumerated() {
                 // Physical disconnect resets the draining latch: the next
                 // enumeration starts from a clean slate. Deliberately NOT a
@@ -94,6 +99,9 @@ impl UsbLinkState {
         if self.write_timeouts >= NOT_DRAINING_THRESHOLD && self.host_draining {
             self.host_draining = false;
             crate::serial::link_counters::note_host_not_draining(now_ms);
+            // On USB-Serial-JTAG this is how a closed port looks: whoever
+            // opens it next is a new link (see `link_epoch`).
+            crate::serial::link_epoch::bump();
             log::info!("[io_task] host not draining; dropping protocol writes");
         }
     }
@@ -130,7 +138,7 @@ impl UsbLinkState {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::serial::link_counters;
+    use crate::serial::{link_counters, link_epoch};
 
     /// The whole negative control, on the host — and deliberately **one**
     /// test function.
@@ -146,6 +154,9 @@ mod tests {
             None,
             "nothing may have latched before this test runs"
         );
+
+        // The link epoch rides a module global too; only this test moves it.
+        let epoch_at_start = link_epoch::current();
 
         // --- phase 1: attached, nobody reading -----------------------------
         let mut link = UsbLinkState::new(false);
@@ -169,8 +180,14 @@ mod tests {
         );
 
         // Two in a row is.
+        assert_eq!(link_epoch::current(), epoch_at_start, "no link lost yet");
         link.note_write_timeout(1_350);
         assert!(!link.is_connected(), "latched");
+        assert_eq!(
+            link_epoch::current(),
+            epoch_at_start + 1,
+            "a host that stopped draining closed its link"
+        );
         assert!(link.needs_probe(), "and the probe path opens");
         assert_eq!(link_counters::host_not_draining_ms(), Some(1_350));
         assert_eq!(
@@ -216,10 +233,16 @@ mod tests {
              pair is read together, never as a duration on its own"
         );
 
-        for _ in 0..DISCONNECT_THRESHOLD {
+        assert_eq!(link_epoch::current(), epoch_at_start + 2);
+        for _ in 0..DISCONNECT_THRESHOLD + 5 {
             link.poll_with(false);
         }
         assert!(!link.is_enumerated(), "cable gone");
+        assert_eq!(
+            link_epoch::current(),
+            epoch_at_start + 3,
+            "losing the cable ends the link, once however long it stays out"
+        );
         assert!(!link.needs_probe(), "no cable, no probe");
         assert_eq!(
             link_counters::host_draining_again_ms(),
@@ -240,5 +263,10 @@ mod tests {
         }
         assert!(uart.is_enumerated());
         assert!(uart.is_connected());
+        assert_eq!(
+            link_epoch::current(),
+            epoch_at_start + 3,
+            "no cable, no cable loss"
+        );
     }
 }

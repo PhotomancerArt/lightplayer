@@ -1,0 +1,45 @@
+[package]
+name = "lp-json-pack"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "JSON Pack: a compact binary form of JSON that decodes back to byte-identical JSON text (no_std, no alloc, injected dictionary)"
+
+[lints]
+workspace = true
+
+[features]
+default = []
+# The JSON-text lexer: text in, pack events out (RawValue text on the device,
+# capture tools on the host).
+lex = []
+# Owning conveniences for hosts: a Vec-backed frame scanner, `JsonOut` for
+# `Vec<u8>`, and the dictionary builder.
+alloc = []
+# Host-only conveniences: the `json-pack` tool.
+std = ["alloc", "lex"]
+
+[dependencies]
+
+[dev-dependencies]
+# The f32 test prints values exactly as ser-write-json does.
+ryu-js = { version = "1.0", default-features = false }
+
+[[bin]]
+name = "json-pack"
+path = "src/bin/json-pack.rs"
+required-features = ["std"]
+
+[[test]]
+name = "fixture_round_trip"
+required-features = ["std"]
+
+[[test]]
+name = "fixture_framing"
+required-features = ["std"]
+
+[[test]]
+name = "f32_text"
+required-features = ["lex"]

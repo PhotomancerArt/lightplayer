@@ -12,9 +12,6 @@ pub mod usb_serial;
 // of harnesses in here); when one does, widen this the way the C6 does rather
 // than reaching for `fw_harness` alone.
 #[cfg(all(feature = "esp32s3", not(fw_harness)))]
-pub mod in_endpoint;
-
-#[cfg(all(feature = "esp32s3", not(fw_harness)))]
 pub mod io_task;
 
 #[cfg(all(feature = "esp32s3", not(fw_harness)))]

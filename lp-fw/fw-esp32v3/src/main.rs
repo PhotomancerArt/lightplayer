@@ -1096,6 +1096,11 @@ fn boot_firmware() -> FirmwareApp {
     server.set_total_led_budget(total_led_budget);
     server.set_read_headroom_probe(Some(read_headroom_probe));
     server.set_reboot_hook(Some(Rc::new(reboot_now)));
+    // JSON Pack: answer a host's opt-in with what this image's transport
+    // can write (`fw-esp32-common/json-pack`).
+    server.set_packed_encoding_supported(
+        fw_esp32_common::serial::server_msg::PACKED_ENCODING_SUPPORTED,
+    );
     fw_esp32_common::output::wire_stats_source::install(collect_wire_stats);
 
     // Auto-load a project at boot — unless repeated incomplete boots put us in

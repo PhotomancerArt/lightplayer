@@ -125,8 +125,9 @@ esp-println and the io_task are two writers on it. Until 2026-09-24
 esp-hal's `write_async` — which reads no free bit and arms
 `serial_in_empty` without clearing the raw esp-println's drains leave set —
 lost one 64-byte packet of the `hello` and a stop-all's whole reply into a
-pending buffer. `fw-esp32s3/src/serial/in_endpoint.rs` now waits for a free
-buffer and clears that bit before every io_task write, and the tests assert
+pending buffer. The io_task gate (`fw-esp32-common/src/serial/in_endpoint.rs`,
+shared with the C6) now waits for a free buffer and clears that bit before
+every io_task packet, and the tests assert
 the mechanism on every host path: `Machine::usb_sj_refused() == Some(0)` (see
 `docs/defects/2026-09-13-the-s3-link-drops-the-io-tasks-next-chunk-on-a-stale-serial-in-empty.md`).
 A blank chip (no `--flash`) boots too: no partition table, `using memory FS`, and the same server
