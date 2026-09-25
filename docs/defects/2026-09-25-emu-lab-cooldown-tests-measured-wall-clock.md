@@ -76,8 +76,18 @@ refusals). `/test/clock does not exist on a server on the real clock` in
 now sensitive enough to catch a 1 ms change. Lowering the floor clamp to
 `FLOOR - 1` fails `a press shorter than the floor waits the floor` with
 `press 2 still waits 1 ms before it is owed`. The old test tolerated an 80 ms
-error in either direction. The same 8×3 load run after the fix: see the PR
-for the numbers.
+error in either direction. Under load on the same desk, same day:
+
+| suite | parallel copies × rounds | load avg | failed runs |
+| --- | --- | --- | --- |
+| before (`0b73e5285`) | 8 × 3 | ~100 | 5 / 24 |
+| after | 8 × 3 | ~100 | 0 / 24 |
+| after | 16 × 3 | ~159 | 0 / 48 |
+| before (`0b73e5285`) | 16 × 3 | ~186 | 11 / 48 |
+
+The last row ran right after the third, so its load was somewhat higher. It
+failed the same three tests as before. Five back-to-back serial
+`just test-emu-lab` runs after the fix passed 80/80 each.
 
 **Lesson** — a test of a rule about time must run on the clock the rule is
 enforced on, and read its answer where the rule is enforced. Measuring from
