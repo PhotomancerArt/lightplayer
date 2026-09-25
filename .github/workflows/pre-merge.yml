@@ -65,6 +65,8 @@ env:
 #                   ├─ emu-c6            (the C6 SoC emulator's own suite)
 #                   ├─ emu-esp32v3       (the classic ESP32 machine's gate)
 #                   └─ heap-budget-chips (chip heap ratchet + lp-cli emu tests)
+#   (all of the above) ─ red-main-suspects (main pushes, on failure only:
+#                                           names the PRs since the last green main)
 #
 # Every job is path-gated, including lint/validate via the `core` filter, so a
 # docs-only PR runs nothing but detect-changes — with one carve-out:
@@ -2610,3 +2612,47 @@ jobs:
         with:
           path: ~/chrome
           key: ${{ steps.chrome_cache.outputs.cache-primary-key }}
+
+  # A red MAIN names its suspects. CI validates each PR against its own
+  # branch, never the merge result, so two independently-green PRs can merge
+  # into a red main and the blame lands on whichever merged last
+  # (docs/debt/two-green-prs-can-red-main.md). Main pushes force every gate
+  # on, so a main run is the canary; this job makes it say which PRs landed
+  # since the last green main run, so the diagnosis starts in the right place.
+  # It never runs on a pull_request, and it exits 0: the run is already red.
+  red-main-suspects:
+    name: Red main suspects
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    needs:
+      - detect-changes
+      - lint
+      - firmware-xtensa
+      - firmware-esp32v3
+      - validate-xtensa
+      - firmware-size
+      - emu-c6
+      - emu-esp32v3
+      - emu-esp32s3
+      - heap-budget-chips
+      - validate-x64
+      - validate-gfx
+      - validate-browser
+      - validate-stories
+    if: failure() && github.event_name == 'push' && github.ref == 'refs/heads/main'
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Name the PRs merged since the last green main
+        # Diagnostic only: a failure here must not add a second red job to a
+        # run that is already red for a real reason.
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: scripts/ci/red-main-suspects.sh "$GITHUB_SHA"
