@@ -89,11 +89,22 @@ fn with_no_host_the_printer_times_out_once_and_the_rx_path_is_never_armed() {
             .iter()
             .any(|l| l.contains("USB_DEVICE wr_done:") && l.contains("no host will drain them"))
     );
-    // `io_task`'s probe write after the seal is dropped and noted.
+    // `io_task` never writes into the sealed endpoint. Until 2026-09-24 its
+    // first write went straight into esp-println's committed packet and the
+    // model dropped and noted it (`ep1 write with the IN FIFO committed (host
+    // absent)`) — esp-hal 1.1.1's `write_async` reads no free bit. The
+    // io_task's TX half is now behind the IN-endpoint gate
+    // (`fw_esp32_common::serial::in_endpoint`, PR #805, ported to the C6 for
+    // docs/defects/2026-09-24-the-real-c6-link-loses-bytes-inside-a-packed-frame.md):
+    // it waits for a free buffer, its 250 ms chunk timeout fires instead,
+    // and nothing is written. This is not a transcript comparison — the
+    // `usb-host-absent` transcripts are text a host would see, and with no
+    // host both images show nothing — so no capture is owed for this line.
     assert!(
-        lines
+        !lines
             .iter()
-            .any(|l| l.contains("ep1 write with the IN FIFO committed (host absent)"))
+            .any(|l| l.contains("ep1 write with the IN FIFO committed")),
+        "the io_task wrote into the sealed endpoint past the IN-endpoint gate"
     );
 
     // Idle in `wfi` with the tick and the RWDT feeds alive to the end.

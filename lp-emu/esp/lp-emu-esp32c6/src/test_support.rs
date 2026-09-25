@@ -85,7 +85,8 @@ static BUILD_LOCK: Mutex<()> = Mutex::new(());
 pub const FW_TARGET: &str = "riscv32imac-unknown-none-elf";
 pub const FW_PROFILE: &str = "release-esp32";
 
-/// The shipped feature set: `default = ["esp32c6", "server", "radio"]`.
+/// The shipped feature set: `default = ["esp32c6", "server", "radio",
+/// "json-pack"]` ([`FwImage::SHIPPED`] builds with the defaults on).
 pub const SHIPPED_FEATURES: &[&str] = &["esp32c6", "server", "radio"];
 
 /// One firmware image: a feature set, with or without the defaults.
@@ -161,6 +162,15 @@ impl FwImage {
     /// the payload exists to record.
     pub const RMT_CHASE: FwImage = FwImage {
         features: &["esp32c6", "test_rmt", "ws281x_telemetry"],
+        default_features: true,
+    };
+
+    /// The shipped image with the io_task's USB-Serial-JTAG IN-endpoint
+    /// gate taken out — the write path as it was before PR #795
+    /// (`fw-esp32c6`'s `fixture-no-in-endpoint-gate`). Only the free-lag
+    /// test builds it: it is the "before" half of that pair.
+    pub const NO_IN_ENDPOINT_GATE: FwImage = FwImage {
+        features: &["esp32c6", "server", "radio", "fixture-no-in-endpoint-gate"],
         default_features: true,
     };
 

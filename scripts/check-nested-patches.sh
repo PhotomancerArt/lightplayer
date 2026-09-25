@@ -58,6 +58,7 @@ EXCLUDED = {
     # workspace here — the root consumes them as path crates.
     "third_party/naga": "upstream fork's own workspace; it is the patch target",
     "third_party/pp-rs": "upstream fork's own workspace; it is the patch target",
+    "third_party/ser-write": "upstream fork's own workspace; it is the patch target",
     "third_party/ser-write-json": "upstream fork's own workspace; it is the patch target",
     # One-off experiments. Not built by CI, and a spike's lockfile records
     # what it measured on its day; a root fork added later should not force

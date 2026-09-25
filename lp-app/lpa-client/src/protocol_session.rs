@@ -423,6 +423,7 @@ mod tests {
                 },
                 hardware: Default::default(),
                 device_uid: Some("dev000000daqf6dvvt2".to_string()),
+                pack_dictionary: lpc_wire::WIRE_DICTIONARY_FINGERPRINT,
                 auth: lpc_wire::HelloAuth::TRUSTED,
             }),
         )

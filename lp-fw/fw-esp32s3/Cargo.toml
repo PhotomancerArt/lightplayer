@@ -9,7 +9,7 @@ rust-version.workspace = true
 description = "LightPlayer firmware for ESP32-S3 (Xtensa LX7)."
 
 [features]
-default = ["esp32s3", "server", "float-f32"]
+default = ["esp32s3", "server", "float-f32", "json-pack"]
 esp32s3 = [
     "esp-backtrace/esp32s3",
     "esp-bootloader-esp-idf/esp32s3",
@@ -37,6 +37,11 @@ server = [
     "dep:lpc-wire",
     "dep:lpc-model",
 ]
+
+# JSON Pack (plan `lp-json-pack`, Q4): replies go out packed on a link whose
+# host opted in (`ClientRequest::SetEncoding`); every other link stays JSON.
+# On by default; without it the board answers every opt-in "json".
+json-pack = ["server", "fw-esp32-common/json-pack"]
 
 # Print every transmitted WS281x frame to the serial log: one full hex dump per
 # channel after open/resize, then a periodic checksum and lit-LED count. This is

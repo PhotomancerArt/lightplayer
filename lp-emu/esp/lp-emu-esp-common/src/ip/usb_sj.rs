@@ -91,6 +91,89 @@
 //! `write_async` never reads the free bit — not the model; its register-level
 //! tests are under "one send buffer, two writers" below.
 //!
+//! **What happens to a refused byte is not known, and neither is the loss's
+//! size.** The model drops every byte written while the buffer is not free,
+//! one byte at a time, and keeps every byte written after it frees. So a
+//! write that begins inside the pending window and outlasts it loses its
+//! *head* and delivers its tail: a partial loss. Whether silicon drops the
+//! bytes, drops the whole write, overwrites the pending packet, or something
+//! else is not written anywhere (TRM §30.3.2 says only that the buffer is
+//! "unavailable for firmware to write into"). The one silicon observation, the
+//! C6's packed-frame loss (below), lost **~5 bytes** of a frame made only of
+//! whole 64-byte packets. That fits "refused bytes are dropped, and the window
+//! ended partway through a write". It does not prove it: the loss could not be
+//! located inside the frame, so a whole-write loss of some other short write
+//! is not excluded.
+//!
+//! # The free lag (a hypothesis switch, off by default)
+//!
+//! In the model a drain raises `serial_in_empty` and returns
+//! `serial_in_ep_data_free` **at the same cycle**. With one writer on the
+//! endpoint, which is the shipped C6 after boot, that makes a loss impossible.
+//! esp-hal's write future wakes only on a drain, so every packet it writes
+//! finds the buffer free. Yet the real C6 lost a few bytes inside ~0.3 % of
+//! its packed frames, silently, until PR #795's IN-endpoint gate
+//! (`fw-esp32-common/src/serial/in_endpoint.rs`) went in, and none after
+//! (`docs/defects/2026-09-24-the-real-c6-link-loses-bytes-inside-a-packed-frame.md`).
+//!
+//! [`UsbSerialJtag::set_in_free_lag_ns`] (`--usb-in-free-lag <ns>`, or the
+//! control verb `free-lag <ns>`) opens a gap between the two. The drain
+//! raises `serial_in_empty` as always, but the buffer stays unwritable for the
+//! lag, and no second edge marks the lag's end. [`InWakeStats`] times, for
+//! every drain, the guest's next `ep1` write and next `ep1_conf` read. On the
+//! C6 image, in steady state, with packed Hellos
+//! (`lp-cli/tests/emu_usb_free_lag.rs`, `lp-emu:esp32c6:t1`, emulated time):
+//!
+//! | image | after a drain, at the soonest |
+//! |---|---|
+//! | without the gate (`fixture-no-in-endpoint-gate`) | esp-hal writes the next packet at **1,877 cycles** |
+//! | shipped, with the gate | the gate reads `ep1_conf` at **1,903 cycles**, then writes at 1,977 |
+//!
+//! That is the timing condition. esp-hal's `write_async` writes a frame's next
+//! packet straight out of its wake, with no check in between. The gate's check
+//! comes 26 cycles later, and the gate writes nothing until the buffer is free.
+//! A lag inside those 26 cycles catches esp-hal's write and never the gate's:
+//! the ungated image loses the first 3 bytes of each later packet, 6 bytes
+//! from each 3-packet Hello, and nothing on the device notices. The gated
+//! image delivers every frame. The cycle counts are `t1`'s, one per
+//! instruction, so the 26 is an instruction count, not a silicon time; what
+//! transfers is the order.
+//!
+//! **A lag past the gate's check makes the gate worse, not better.** With no
+//! second edge, a gate that finds the buffer not free clears the raw bit and
+//! waits for an edge that never comes, until the firmware's 250 ms chunk
+//! timeout. From 12 µs of lag the gated image stalls on every packet; at 11 µs
+//! it stalls during boot, where wakes are quicker. The gated desk run had
+//! **zero** chunk timeouts in 1,327 frames. So if this is silicon's mechanism,
+//! its lag almost never outlasts the gate's check. That is consistent with how
+//! rare the loss was (~0.3 % of messages), but it is not evidence for it.
+//!
+//! It is a **hypothesis**, graded nothing:
+//!
+//! - no document gives silicon such a gap, and nobody has measured one;
+//! - it is the one path found that produces the symptom's *shape* with a
+//!   single writer: a short frame, a few bytes, nothing logged;
+//! - ESP-IDF's own driver does not trust the edge either. Its ISR re-checks
+//!   that the FIFO is writable after `SERIAL_IN_EMPTY` and ignores the
+//!   interrupt if it is not (`esp-idf` v5.4,
+//!   `components/esp_driver_usb_serial_jtag/src/usb_serial_jtag.c`,
+//!   `usb_serial_jtag_isr_handler_default`; read as behaviour, Apache-2.0).
+//!   It blames a second writer, but the check covers a lag just the same;
+//! - it does **not** explain why JSON lost nothing on the same board. The
+//!   wake-to-write path is the same for both encodings, and in the emulator a
+//!   JSON line is torn the same way: at an 11 µs lag, the boot hello (JSON)
+//!   lost 10 bytes at the head of each later packet.
+//!
+//! A second edge when the lag ends ("a new one will come if the buffer is
+//! empty again", the same ISR's comment) was considered and not built.
+//! esp-hal's ISR has already cleared the enable by then, so that edge would sit
+//! stale and wake the *next* packet's future at once. That write lands in a
+//! pending packet and loses all 64 bytes: a whole-packet cascade, which the
+//! silicon capture does not show.
+//!
+//! So the lag stays at 0 everywhere except the test that switches it on, and
+//! a transcript, not this paragraph, is what could ever promote it.
+//!
 //! Two things distinguish the draining state from esp-emu's model (spike
 //! report §4: `INT_RAW = 0xA` with `INT_CLR` ignored, `EP1_CONF = 0x2` for
 //! ever): `sof` **clears** on `int_clr` and returns on the next frame, and a
@@ -397,6 +480,85 @@ const EV_SOF: u16 = 0;
 const EV_IN_DELIVER: u16 = 1;
 const EV_OUT_POLL: u16 = 2;
 const EV_OUT_LAND: u16 = 3;
+const EV_IN_FREE: u16 = 4;
+
+/// How soon, after a drain, the guest touches the IN endpoint again — the
+/// free-lag hypothesis's evidence (module docs, "The free lag").
+///
+/// For every drain (a delivered IN packet), the cycles until the guest's
+/// next `ep1` write and its next `ep1_conf` read. esp-hal's `write_async`
+/// writes its next packet without reading `ep1_conf`; the firmware's gate
+/// reads `ep1_conf` before it writes. So on the ungated image `write` is
+/// esp-hal's wake-to-write path, and on the gated one `free_read` is the
+/// gate's wake-to-check path. A lag between the two is caught by the first
+/// and not by the second. Measured from the last
+/// [`UsbSerialJtag::set_in_free_lag_ns`], or from power-on.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct InWakeStats {
+    /// The chip's clock, for printing cycles as time.
+    pub cycles_per_us: u64,
+    /// Drains measured.
+    pub drains: u64,
+    /// Drain → the next `ep1` write.
+    pub write: WakeSpan,
+    /// Drain → the next `ep1_conf` read.
+    pub free_read: WakeSpan,
+    /// The free lag in force, in cycles.
+    pub lag_cycles: u64,
+    /// Bytes refused inside the lag.
+    pub refused_in_lag: u64,
+}
+
+/// A count and the shortest and longest of a set of cycle spans.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct WakeSpan {
+    pub count: u64,
+    pub min: u64,
+    pub max: u64,
+}
+
+impl WakeSpan {
+    fn note(&mut self, cycles: u64) {
+        if self.count == 0 {
+            self.min = cycles;
+            self.max = cycles;
+        } else {
+            self.min = self.min.min(cycles);
+            self.max = self.max.max(cycles);
+        }
+        self.count += 1;
+    }
+}
+
+impl core::fmt::Display for InWakeStats {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        let ns = |cycles: u64| cycles * 1_000 / self.cycles_per_us.max(1);
+        let span = |f: &mut core::fmt::Formatter<'_>, what: &str, s: &WakeSpan| {
+            if s.count == 0 {
+                write!(f, "no {what}")
+            } else {
+                write!(
+                    f,
+                    "next {what} {}..{} ns ({} cycles min, {} measured)",
+                    ns(s.min),
+                    ns(s.max),
+                    s.min,
+                    s.count
+                )
+            }
+        };
+        write!(f, "after {} drains: ", self.drains)?;
+        span(f, "ep1 write", &self.write)?;
+        f.write_str("; ")?;
+        span(f, "ep1_conf read", &self.free_read)?;
+        write!(
+            f,
+            "; free lag {} ns, {} bytes refused inside it",
+            ns(self.lag_cycles),
+            self.refused_in_lag
+        )
+    }
+}
 
 /// The host's side of the cable.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -482,6 +644,21 @@ pub struct UsbSerialJtag {
     /// Committed packets a bus reset dropped.
     dropped_packets: u64,
     in_delivered: u64,
+    /// The **free lag**, in this chip's cycles: how long after a drain's
+    /// `serial_in_empty` the send buffer stays unwritable. 0 — the default,
+    /// and every gate's setting — is the drain and the free bit at the same
+    /// cycle. See [`set_in_free_lag_ns`](Self::set_in_free_lag_ns).
+    in_free_lag_cycles: u64,
+    /// While the free lag runs: the cycle `serial_in_ep_data_free` returns.
+    in_free_due: Option<u64>,
+    /// Bytes refused because they were written inside the free lag (a
+    /// subset of [`dropped`](Self::dropped)).
+    dropped_in_lag: u64,
+    /// The last drain's cycle, until the guest's next `ep1` write / next
+    /// `ep1_conf` read takes it ([`InWakeStats`]).
+    drain_for_write: Option<u64>,
+    drain_for_read: Option<u64>,
+    wake: InWakeStats,
 
     // Interrupts and frames.
     int_raw: u32,
@@ -540,6 +717,15 @@ impl UsbSerialJtag {
             dropped: 0,
             dropped_packets: 0,
             in_delivered: 0,
+            in_free_lag_cycles: 0,
+            in_free_due: None,
+            dropped_in_lag: 0,
+            drain_for_write: None,
+            drain_for_read: None,
+            wake: InWakeStats {
+                cycles_per_us: cfg.cycles_per_us,
+                ..InWakeStats::default()
+            },
             int_raw: INT_SERIAL_IN_EMPTY,
             fram_num: 0,
             sof_due: 0,
@@ -596,6 +782,45 @@ impl UsbSerialJtag {
     /// Bytes delivered to the host stream so far.
     pub fn in_delivered(&self) -> u64 {
         self.in_delivered
+    }
+
+    /// Bytes refused because they were written inside the free lag.
+    pub fn dropped_in_lag(&self) -> u64 {
+        self.dropped_in_lag
+    }
+
+    /// Hold `serial_in_ep_data_free` at 0 for `ns` emulated nanoseconds
+    /// after each drain's `serial_in_empty` — **a hypothesis switch, off by
+    /// default** (module docs, "The free lag"). The raw bit is raised at the
+    /// drain as always, so esp-hal's write future wakes there; a byte written
+    /// before the lag ends is refused like any byte written into a pending
+    /// packet. No second `serial_in_empty` marks the end of the lag.
+    ///
+    /// Also restarts the [`InWakeStats`], so what they report is what
+    /// happened under this lag.
+    pub fn set_in_free_lag_ns(&mut self, ns: u64) {
+        self.in_free_lag_cycles = ns.saturating_mul(self.cfg.cycles_per_us) / 1_000;
+        self.wake = InWakeStats {
+            cycles_per_us: self.cfg.cycles_per_us,
+            ..InWakeStats::default()
+        };
+        self.drain_for_write = None;
+        self.drain_for_read = None;
+        self.dropped_in_lag = 0;
+    }
+
+    /// How soon, after each drain, the guest touched the endpoint again.
+    pub fn in_wake_stats(&self) -> InWakeStats {
+        InWakeStats {
+            lag_cycles: self.in_free_lag_cycles,
+            refused_in_lag: self.dropped_in_lag,
+            ..self.wake
+        }
+    }
+
+    /// The free lag in this chip's cycles (0 = off).
+    pub fn in_free_lag_cycles(&self) -> u64 {
+        self.in_free_lag_cycles
     }
 
     pub fn fram_num(&self) -> u16 {
@@ -846,7 +1071,20 @@ impl UsbSerialJtag {
     // ---- the pieces ------------------------------------------------------
 
     fn in_free(&self) -> bool {
-        !self.committed && self.in_fifo.len() < IN_FIFO_DEPTH
+        !self.committed && self.in_free_due.is_none() && self.in_fifo.len() < IN_FIFO_DEPTH
+    }
+
+    /// The free lag ends: the send buffer is writable again. Nothing is
+    /// raised — the drain already raised `serial_in_empty`.
+    fn end_free_lag(&mut self, cx: &mut BusCx<'_>) {
+        if self.in_free_due.take().is_none() {
+            return;
+        }
+        let line = format!(
+            "cyc={} pc=0x{:08x} USB_DEVICE free lag over: serial_in_ep_data_free = 1",
+            cx.now, cx.pc
+        );
+        cx.trace.note(&line);
     }
 
     fn out_avail(&self) -> bool {
@@ -879,6 +1117,9 @@ impl UsbSerialJtag {
             self.regs.poke(hr.bus_reset_st, hr.bus_reset_st_reset);
         }
         self.fram_num = 0;
+        if self.in_free_due.take().is_some() {
+            cx.sched.cancel(event_id(self.index, EV_IN_FREE));
+        }
         if self.committed {
             let n = self.in_fifo.len();
             self.dropped_packets += 1;
@@ -928,9 +1169,23 @@ impl UsbSerialJtag {
         self.committed = false;
         self.committed_at = None;
         self.raise(INT_SERIAL_IN_EMPTY | INT_IN_TOKEN_REC_IN_EP1);
+        self.wake.drains += 1;
+        self.drain_for_write = Some(cx.now);
+        self.drain_for_read = Some(cx.now);
+        let free = if self.in_free_lag_cycles > 0 {
+            let due = cx.now.saturating_add(self.in_free_lag_cycles);
+            self.in_free_due = Some(due);
+            cx.sched.schedule_at(due, event_id(self.index, EV_IN_FREE));
+            format!(
+                "serial_in_ep_data_free = 0 for the {}-cycle free lag",
+                self.in_free_lag_cycles
+            )
+        } else {
+            "serial_in_ep_data_free = 1".to_string()
+        };
         let line = format!(
             "cyc={} pc=0x{:08x} USB_DEVICE IN packet of {} bytes delivered to the host \
-             (serial_in_ep_data_free = 1, serial_in_empty raised)",
+             ({free}, serial_in_empty raised)",
             cx.now,
             cx.pc,
             bytes.len()
@@ -1073,6 +1328,9 @@ impl UsbSerialJtag {
     }
 
     fn push_in(&mut self, byte: u8, cx: &mut BusCx<'_>) {
+        if let Some(drained) = self.drain_for_write.take() {
+            self.wake.write.note(cx.now.saturating_sub(drained));
+        }
         if self.in_free() {
             self.in_fifo.push(byte);
             if !self.host.attached() {
@@ -1099,16 +1357,26 @@ impl UsbSerialJtag {
             }
             return;
         }
-        if self.dropped == 0 {
+        let in_lag = !self.committed && self.in_free_due.is_some();
+        if self.dropped == 0 || (in_lag && self.dropped_in_lag == 0) {
             let line = format!(
                 "cyc={} pc=0x{:08x} USB_DEVICE ep1 write with the IN FIFO {} (host {}): byte \
                  0x{byte:02x} dropped",
                 cx.now,
                 cx.pc,
-                if self.committed { "committed" } else { "full" },
+                if self.committed {
+                    "committed"
+                } else if in_lag {
+                    "inside the free lag"
+                } else {
+                    "full"
+                },
                 self.host
             );
             cx.trace.note(&line);
+        }
+        if in_lag {
+            self.dropped_in_lag += 1;
         }
         self.dropped += 1;
         self.observe(&[byte], cx);
@@ -1201,6 +1469,11 @@ impl Peripheral for UsbSerialJtag {
 
     fn read(&mut self, off: u32, width: Width, cx: &mut BusCx<'_>) -> u32 {
         let word = off & !3;
+        if word == EP1_CONF
+            && let Some(drained) = self.drain_for_read.take()
+        {
+            self.wake.free_read.note(cx.now.saturating_sub(drained));
+        }
         if word == EP1 {
             // A pop is a side effect: only lane 0 carries the byte.
             if off & 3 == 0 {
@@ -1251,6 +1524,7 @@ impl Peripheral for UsbSerialJtag {
                     self.land_out(cx);
                 }
             }
+            EV_IN_FREE => self.end_free_lag(cx),
             _ => {}
         }
     }
@@ -1303,6 +1577,22 @@ impl Peripheral for UsbSerialJtag {
         out.extend_from_slice(&self.out_underruns.to_le_bytes());
         out.extend_from_slice(&self.out_landed.to_le_bytes());
         out.extend_from_slice(&signals.to_le_bytes());
+        out.extend_from_slice(&self.in_free_lag_cycles.to_le_bytes());
+        out.extend_from_slice(&opt(self.in_free_due).to_le_bytes());
+        out.extend_from_slice(&self.dropped_in_lag.to_le_bytes());
+        out.extend_from_slice(&opt(self.drain_for_write).to_le_bytes());
+        out.extend_from_slice(&opt(self.drain_for_read).to_le_bytes());
+        for v in [
+            self.wake.drains,
+            self.wake.write.count,
+            self.wake.write.min,
+            self.wake.write.max,
+            self.wake.free_read.count,
+            self.wake.free_read.min,
+            self.wake.free_read.max,
+        ] {
+            out.extend_from_slice(&v.to_le_bytes());
+        }
         out.extend_from_slice(&(self.in_fifo.len() as u32).to_le_bytes());
         out.extend_from_slice(&self.in_fifo);
         out.extend_from_slice(&(self.out_pkt.len() as u32).to_le_bytes());
@@ -1339,6 +1629,24 @@ impl Peripheral for UsbSerialJtag {
             log::warn!("USB_DEVICE: load_state blob too short, ignored");
             return;
         };
+        let (Some(in_free_lag), Some(in_free_due), Some(dropped_in_lag)) =
+            (r.u64(), r.u64(), r.u64())
+        else {
+            log::warn!("USB_DEVICE: load_state blob too short, ignored");
+            return;
+        };
+        let (Some(drain_for_write), Some(drain_for_read)) = (r.u64(), r.u64()) else {
+            log::warn!("USB_DEVICE: load_state blob too short, ignored");
+            return;
+        };
+        let mut wake = [0u64; 7];
+        for v in &mut wake {
+            let Some(read) = r.u64() else {
+                log::warn!("USB_DEVICE: load_state blob too short, ignored");
+                return;
+            };
+            *v = read;
+        }
         let take = |r: &mut Reader<'_>| -> Option<Vec<u8>> {
             let len = r.u32()? as usize;
             if r.0.len() < len {
@@ -1381,6 +1689,26 @@ impl Peripheral for UsbSerialJtag {
         self.last_dtr = line(signals);
         self.last_rts = line(signals >> 2);
         self.dtr_high_seen = signals & (1 << 4) != 0;
+        self.in_free_lag_cycles = in_free_lag;
+        self.in_free_due = opt(in_free_due);
+        self.dropped_in_lag = dropped_in_lag;
+        self.drain_for_write = opt(drain_for_write);
+        self.drain_for_read = opt(drain_for_read);
+        self.wake = InWakeStats {
+            cycles_per_us: self.cfg.cycles_per_us,
+            drains: wake[0],
+            write: WakeSpan {
+                count: wake[1],
+                min: wake[2],
+                max: wake[3],
+            },
+            free_read: WakeSpan {
+                count: wake[4],
+                min: wake[5],
+                max: wake[6],
+            },
+            ..InWakeStats::default()
+        };
         self.in_fifo = in_fifo;
         self.out_pkt = out_pkt.into();
         self.out_staging = out_staging.into();
@@ -2088,9 +2416,9 @@ mod tests {
         sb.write(u, INT_CLR, INT_SERIAL_IN_EMPTY | INT_SERIAL_OUT_RECV_PKT);
     }
 
-    /// The firmware's gate (`fw-esp32s3`
-    /// `serial::in_endpoint::InEndpoint::ready`), register for register: wait
-    /// until the buffer is free — clear, recheck, else esp-hal's
+    /// The firmware's gate (`fw-esp32-common`
+    /// `serial::in_endpoint::InEndpoint::ready`, used by the C6 and S3), register
+    /// for register: wait until the buffer is free — clear, recheck, else esp-hal's
     /// `flush_tx_async` — then clear the now-stale `serial_in_empty`.
     fn in_endpoint_ready(sb: &mut Sandbox, u: &mut UsbSerialJtag) {
         let free = |sb: &mut Sandbox, u: &mut UsbSerialJtag| sb.read(u, EP1_CONF) & 0b010 != 0;
@@ -2206,6 +2534,80 @@ mod tests {
             expect.extend_from_slice(&msg);
             assert_eq!(r.delivered.bytes(), expect, "drained_first={drained_first}");
         }
+    }
+
+    #[test]
+    fn a_free_lag_refuses_the_head_of_a_packet_written_on_the_drains_edge() {
+        // One writer, esp-hal's shape: packet one drains, its future wakes
+        // on the edge, and packet two is written at once. With the lag off
+        // every byte lands; with it on, the bytes written before the lag
+        // ends are refused and the rest of the packet is delivered.
+        for lag_ns in [0, 400] {
+            let mut r = rig_with(
+                HostState::Attached { draining: true },
+                ScriptedSource::new(),
+            );
+            sb_new_driver(&mut r);
+            r.u.set_in_free_lag_ns(lag_ns);
+            let msg = frame(128);
+            esp_hal_write_chunk(&mut r.sb, &mut r.u, &msg[..64]);
+            // Straight on, a byte every 10 cycles (100 ns here): the lag
+            // covers the first four.
+            for &b in &msg[64..] {
+                r.sb.write(&mut r.u, EP1, u32::from(b));
+                let next = r.sb.now + 10;
+                r.sb.run_to(&mut r.u, next);
+            }
+            r.sb.write(&mut r.u, EP1_CONF, EP1_CONF_WR_DONE);
+            let end = r.sb.now + 2 * IN_DRAIN_LATENCY_CYCLES;
+            r.sb.run_to(&mut r.u, end);
+            let stats = r.u.in_wake_stats();
+            assert_eq!(stats.drains, 2, "lag {lag_ns}");
+            if lag_ns == 0 {
+                assert_eq!(r.u.dropped(), 0);
+                assert_eq!(r.delivered.bytes(), msg);
+            } else {
+                let lost = r.u.dropped_in_lag() as usize;
+                assert_eq!(lost, 4, "the head of packet two, not the packet");
+                assert_eq!(r.u.dropped(), lost as u64);
+                assert_eq!(r.tried.bytes(), &msg[64..64 + lost]);
+                let mut expect = msg[..64].to_vec();
+                expect.extend_from_slice(&msg[64 + lost..]);
+                assert_eq!(r.delivered.bytes(), expect);
+                assert_eq!(stats.refused_in_lag, lost as u64);
+            }
+        }
+    }
+
+    #[test]
+    fn the_wake_stats_time_the_next_write_and_the_next_free_check_from_the_drain() {
+        let mut r = rig_with(
+            HostState::Attached { draining: true },
+            ScriptedSource::new(),
+        );
+        sb_new_driver(&mut r);
+        r.u.set_in_free_lag_ns(0);
+        esp_hal_write_chunk(&mut r.sb, &mut r.u, b"one packet");
+        let drained = r.sb.now;
+        let check = drained + 30;
+        r.sb.run_to(&mut r.u, check);
+        let _ = r.sb.read(&mut r.u, EP1_CONF);
+        let write = drained + 50;
+        r.sb.run_to(&mut r.u, write);
+        r.sb.write(&mut r.u, EP1, u32::from(b'x'));
+        let stats = r.u.in_wake_stats();
+        assert_eq!(stats.drains, 1);
+        assert_eq!(stats.free_read.count, 1);
+        assert_eq!(stats.write.count, 1);
+        // The ISR poll lands a few cycles after the drain itself.
+        assert!(
+            (30..30 + POLL_CYCLES).contains(&stats.free_read.min),
+            "{stats:?}"
+        );
+        assert!(
+            (50..50 + POLL_CYCLES).contains(&stats.write.min),
+            "{stats:?}"
+        );
     }
 
     #[test]

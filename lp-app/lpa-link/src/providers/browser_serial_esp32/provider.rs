@@ -219,6 +219,25 @@ impl BrowserSerialEsp32Provider {
         Ok(browser_serial::take_lines(port_id))
     }
 
+    /// Everything the port read since the last drain, split frame-first
+    /// (console lines, wire messages in either form, undeliverable frames).
+    /// The packed-reply opt-in is written from inside; see
+    /// `browser_serial::take_reads`.
+    pub fn take_reads(
+        &self,
+        session_id: &LinkSessionId,
+    ) -> Result<Vec<crate::device_link::wire_reader::WireRead>, LinkError> {
+        let port_id = self.session_port_id(session_id)?;
+        Ok(browser_serial::take_reads(port_id))
+    }
+
+    /// What the port's reader concluded about the link's encoding since the
+    /// last ask — one note per change.
+    pub fn take_wire_notes(&self, session_id: &LinkSessionId) -> Result<Vec<String>, LinkError> {
+        let port_id = self.session_port_id(session_id)?;
+        Ok(browser_serial::take_wire_notes(port_id))
+    }
+
     pub fn take_errors(&self, session_id: &LinkSessionId) -> Result<Vec<String>, LinkError> {
         let port_id = self.session_port_id(session_id)?;
         Ok(browser_serial::take_errors(port_id))

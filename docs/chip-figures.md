@@ -22,6 +22,14 @@ two chips' builds in parallel on the shared desk), and ends with the records'
 `git diff --stat`. Commit the diff **with the change that moved it**, and say in
 the commit what moved it.
 
+On a pull request you usually do not need to run it: when a figure moves, CI
+has already blessed it against the images it built and posted the patch
+([below](#when-ci-hands-back-the-patch)):
+
+```bash
+just apply-ci-figures <pr>        # download CI's figure patches and apply them; then commit and push
+```
+
 ## What a figure is, and what is not
 
 Every pinned number is one of two kinds, and the kind decides where it lives.
@@ -123,16 +131,78 @@ One flat JSON object per chip, written by exactly one writer
 - keys starting with `_` are prose, kept and never checked.
 
 Identical figures always render identical bytes, and a bless that changes
-nothing does not touch the file. That is what makes the next step possible: a
-CI job can run the gates with `LP_EMU_BLESS=1` (as `GITHUB_ACTIONS=true`, so
-positional figures are written too) and upload `git diff -- lp-emu/esp/figures
-scripts/heap-budget-record` as a patch, and the author applies it instead of
-rebuilding anything. Nothing here does that yet; the format is shaped so it can.
+nothing does not touch the file. That is what lets CI hand back a patch
+instead of a log: the next section.
 
 Record keys are `<test file>.<figure>` when one test file owns them, and bare
 (`main_stack_bytes`, `init_chain.prefix`) when several tests read the same
 fact. A key no test observes any more is not pruned automatically — delete it
 in the change that stopped observing it.
+
+## When CI hands back the patch
+
+Every job that checks figures — `Emulator C6 (x64)`, `Emulator ESP32v3 (x64)`,
+`Emulator ESP32-S3 (x64)`, `Heap budget (esp32c6 chip)`, and the engine ratchet
+in `Validate (x64)` — tees its figure checks' output, and when one of them
+fails it runs one more step, `Figure moves — bless what failed, diff the
+records` (`scripts/ci/figures-patch.py`):
+
+1. **Is this even a figure failure?** A test step whose output names no
+   `pinned firmware figure`, or a heap step with any `::error::heap-budget:`
+   line that does not offer a re-baseline (the band, the derived `stackTotal`,
+   a missing window), is recorded as **not a figure move** and nothing is
+   re-run.
+2. **Bless exactly what failed, against what was built.** The failed tests are
+   re-run by name, under `LP_EMU_BLESS=1` and `GITHUB_ACTIONS=true` (so
+   `[positional]` figures are written — CI is the one place they should be),
+   against the same images: the C6 through `test_support`'s cache, the classic
+   and the S3 through the copies their boot recipes name in
+   `target/lp-emu-esp32{v3,s3}/images.env`. No firmware is rebuilt; a heap
+   re-baseline rebuilds incrementally, as its ratchet just did. A failed heap
+   ratchet is re-baselined and then **checked again**.
+3. **Only a clean bless is a patch.** A bless rewrites figures and asserts
+   everything else, so a bless that passes proves every other assertion in
+   those tests held; the heap re-check proves the same for the ratchet. If
+   either fails — an EXACT pin, a transcript, a structural check, an ordinary
+   test failure — the step is *not a figure move*, and the job gets **no
+   patch at all**, even for its other steps' figures. A clean bless that
+   changed no record means the failure did not reproduce: also no patch.
+4. The job uploads `figures-patch-<job>` (`figures.patch`, a
+   `git diff --full-index` of the records; `summary.json`, each moved figure
+   old → new; the bless logs' tails) and **stays red**. Nothing is committed or
+   pushed.
+
+The `figures-comment` job then posts or rewrites **one** sticky comment on the
+PR (marker `<!-- lp-figures-patch -->`): per job, a table of chip / record /
+figure / old / new, the command that applies it, and a line for every failure
+that was *not a figure move*. A later run with no figure failures rewrites it
+to say the figures match. Fork PRs get a read-only token, so no comment — the
+artifacts are still there, and the apply command reads them the same way.
+
+To accept:
+
+```bash
+just apply-ci-figures <pr>    # every figures-patch-* of the PR's latest run on its head, one `git apply`
+git commit -m "chore(figures): accept the moves from <what moved them>"   # then push
+```
+
+It stages the records and prints the stat; if `main` moved a record since the
+run, a plain apply fails and it retries with `--3way`. The same rule as a desk
+bless holds: **if only the emulator changed, do not apply** — the comment says
+so too. Heap records CI re-baselined are stamped with the PR's head commit
+(`LP_HEAP_BUDGET_COMMIT`), not the merge ref CI actually ran on.
+
+Cost on a green run: nothing but `tee` and one ~15 s comment job that starts
+after the figure jobs finish (and does not run at all when none of them ran).
+The recipes' figure suites now run `--no-fail-fast`, so one red run reports
+every test binary's moved figures, not the first binary's.
+
+Proven on PR #829: 64 B of `.bss` in `fw-esp32s3` and `fw-esp32v3` failed two
+jobs, whose bless steps took 10 s and 4 s (nothing rebuilt) and produced the
+S3's `stack_total_bytes` 37,256 → 37,192 and the classic's six moves (the
+`[INIT] main stack` line in three boot chains, `main_stack_bytes`, the
+single-core prefix's cycles and instructions); `just apply-ci-figures 829`
+applied both patches with no local build, and the next run was green.
 
 ## The inventory (2026-09-25)
 
@@ -149,7 +219,7 @@ this checkout; "ref" a pinned reference commit.
 | v3 | `determinism.single_core_prefix.{cycles,instructions,idle_skips}` | `PREFIX_CYCLES`/`_INSTRUCTIONS`/`_IDLE_SKIPS` | `the_single_core_prefix_is_unchanged` | boot-path code; the `stack_probe::paint` loop walks `.bss` |
 | v3 | `boot_idle.path_high_water_gap` (positional) | `PATH_HIGH_WATER_GAP` | `the_two_paths_report_the_same_memory_figures` | layout |
 | s3 | `stack_total_bytes` | `37256` ×3 in `boot_idle.rs` | `the_ledger_triple_is_elicited_by_a_stop_all_on_the_wire` | statics |
-| c6 | `hello.proto` | `"proto":24` in `usb_attached.rs` ×2, `usb_control.rs` | `g2_1_…`, `g2_3_…`, `g3_1_…` | `WIRE_PROTO_VERSION` bumps |
+| c6 | `hello.proto` | `"proto":24` in `usb_attached.rs` ×2, `usb_control.rs` | `g2_1_…`, `g3_1_…` (`g2_3_…` no longer sees a hello: behind the IN-endpoint gate nothing past `[INIT]` is tried) | `WIRE_PROTO_VERSION` bumps |
 | c6 | `heartbeat.total_bytes` | `"totalBytes":301536` in `usb_attached.rs` | `g2_1_…` | a heap-region change |
 | all | chip heap records | already records | the heap-budget gate | [heap-budget-gate.md](heap-budget-gate.md) |
 | — | engine heap records | already records | the heap-budget gate | engine allocations |
@@ -189,3 +259,4 @@ question for the heap gate, not this doc.
   history in `determinism.rs` shows what explaining one looks like).
 - **An EXACT pin failed.** Nothing to bless — read it.
 - **A positional figure failed on a desk.** CI's value is the record's; see above.
+  On a PR, `just apply-ci-figures` carries it.
