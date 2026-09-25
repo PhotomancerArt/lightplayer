@@ -73,6 +73,13 @@ repair is not buried inside unrelated work, and say so on the PR.
   2026-09-03, so 269 "suspects") and the right page on the next. The script
   asks the API per first-parent sha instead of trusting a listing.
 
+- **2026-09-25** — C6 chip heap figures drifted on main: firmware landed after
+  #795's proto-27 re-bless (#824's BLE HCI transport among others), each PR
+  green against the figures it saw, and the combination moved
+  `measured.freeBytes` 216,624 → 216,604 (-20 B). It surfaced as a red
+  `Heap budget (esp32c6 chip)` on #833, a scripts-only PR, and was taken
+  there with `just apply-ci-figures 833`.
+
 **Paying down (2026-09-24, #800)** — option (1) landed in a cheaper form than
 a schedule: main pushes already force every gate on, so every main run *is*
 the canary. The `red-main-suspects` job at the end of `pre-merge.yml` runs

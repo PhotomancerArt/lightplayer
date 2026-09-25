@@ -23,6 +23,9 @@ on:
   # already has one.
   workflow_dispatch:
 
+# Runs queue one at a time, oldest first, so each merge's run tags its own
+# commit in merge order. `tag-next-version.sh` is race-safe on its own too (it
+# claims a number by pushing a new ref and retries if one was taken).
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: false
@@ -41,10 +44,12 @@ jobs:
         with:
           fetch-depth: 0
 
+      # Tags $GITHUB_SHA — THIS run's commit, which deploy-cloud.yml later
+      # checks out as workflow_run.head_sha — never the current tip of main.
+      # A commit that is already tagged (a re-run) exits 0 and keeps its tag.
       - name: Generate and push tag
         env:
           BRANCH: main
-          CI: "true"
         run: ./scripts/tag-next-version.sh
 
       - name: Get app version
@@ -70,6 +75,11 @@ jobs:
           APP_VERSION: ${{ needs.tag-next-version.outputs.app_version }}
         run: |
           TAG="v${APP_VERSION}"
+          # A re-run of an already-tagged commit already has its release.
+          if gh release view "${TAG}" >/dev/null 2>&1; then
+            echo "Release ${TAG} already exists; nothing to do"
+            exit 0
+          fi
           PREV_TAG=$(git tag -l 'v*' --sort=-version:refname | grep -v "^${TAG}$" | head -n1 || true)
           if [[ -n "$PREV_TAG" ]] && [[ -n "$TAG" ]]; then
             NOTES=$(git log "${PREV_TAG}..${TAG}" --pretty=format:"- %s (%h)" --no-merges || echo "(no commits)")

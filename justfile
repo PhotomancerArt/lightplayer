@@ -2840,7 +2840,7 @@ test-glsl-filetests:
 # Warm ~1s, cold ~47s locally; it runs beside clippy, the Lint job's long
 # pole. See docs/debt/wasm-cloud-check-not-in-just-check.md.
 [parallel]
-check-lint: fmt-check clippy check-wasm-cloud check-lpc-engine-gates wire-dict-check check-studio-core-minimal lint-serde-content lint-browser-test-harness lint-classic-capture lint-pcb-export lint-schemars-fw lint-upgrade-fw lint-emu-fence lint-nested-patches lint-emu-regnames lint-torture-corpus lint-vec-corpus lint-tw-utilities lint-red-main-needs
+check-lint: fmt-check clippy check-wasm-cloud check-lpc-engine-gates wire-dict-check check-studio-core-minimal lint-serde-content lint-browser-test-harness lint-classic-capture lint-pcb-export lint-schemars-fw lint-upgrade-fw lint-emu-fence lint-nested-patches lint-emu-regnames lint-torture-corpus lint-vec-corpus lint-tw-utilities lint-red-main-needs lint-tag-next-version
 
 [parallel]
 check: check-lint schema-check fw-manifest-check-emu
@@ -2943,6 +2943,11 @@ lint-nested-patches:
 # stdlib python, ~0.1 s.
 lint-red-main-needs:
     python3 scripts/ci/check-red-main-needs.py
+
+# Main push's version tagger, against throwaway git repos: each run tags its
+# own commit, a tagged commit is a no-op, and a lost tag race retries.
+lint-tag-next-version:
+    ./scripts/tag-next-version-test.sh
 
 # The ESP32-C6 machine's boot tests, which need firmware ELFs, plus the M3
 # replays of the committed transcripts.
