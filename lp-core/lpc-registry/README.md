@@ -54,6 +54,36 @@ front and then act atomically, staging through the crate-private
   existing ops (`RemoveSlotEdit` at the site + `ClearArtifact` per staged
   delete).
 
+## Playlist Entry Residency
+
+The registry owns which playlist entries are loaded
+(`registry/entry_residency.rs`). A **dormant** entry is absent everywhere:
+derivation stops at its `Ref` invocation, so it contributes no tree node, def
+or asset row, and its ref is never registered in the artifact store. Only the
+playlist's own def remembers it. The default for a playlist with no explicit
+set is its `idle_entry` alone.
+
+The residency lives here, not in the engine, because every mutation
+re-derives the whole inventory: an engine-only notion of dormancy would see
+every dormant entry as added on the next edit.
+
+- `set_entry_resident` / `make_only_resident` change the set, re-derive, and
+  return the same `ProjectChangeSummary` an edit returns (uses, defs and
+  assets added or removed). The playlist asks; the tick owner applies the
+  request before the engine ticks.
+- Every re-derivation unregisters artifact-store locations that backed the
+  previous inventory and back nothing now (unless an overlay entry still
+  covers them), and drops residency sets for playlists that left the tree.
+- Unloading is refused (`EntryResidencyError::PendingEdits`) while a def
+  that would leave carries pending slot edits: `commit_overlay` could not
+  write it without its effective def.
+- An edit to a dormant entry's files is rejected as `UnknownArtifact` with a
+  message naming the entry ("entry 2 ("blast") of playlist /playlist.json is
+  not loaded; load it to edit it").
+- `make_every_entry_resident` loads everything, nested playlists included —
+  for host gates and checks that must reach every authored file, never for
+  a device.
+
 ## Commit Filtering (Debug vs Persisted)
 
 `commit_overlay` materializes persisted edits into node-def artifacts and
