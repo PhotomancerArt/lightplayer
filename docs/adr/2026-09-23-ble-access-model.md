@@ -373,4 +373,4 @@ true on its own. Detail: `2026-09-24-easy-bluetooth-access.md` and plan
   by Studio; the envelope filter for `.lp/access.json` stays.
 - **The phone walk (G4) passed** on 2026-09-25: Yona's iPhone in Bluefy and
   his laptop, one board (the PLAYFUL choker, XIAO C6 `10:BD:A3:B0:A5:2C`),
-  one room. Record: `docs/reports/2026-09-25-ble-laptop-desk-walk.md`.
+  one room. Record: `docs/reports/2026-09-25-ble-remote-control-walks.md`.
