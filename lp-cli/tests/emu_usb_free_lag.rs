@@ -25,15 +25,24 @@
 //! its ISR re-checks the FIFO is writable after `SERIAL_IN_EMPTY` and ignores
 //! the interrupt if not. The model's docs record it that way.
 //!
-//! The pair, same lag, same conversation:
+//! One test, three steps, each running the ungated image
+//! (`FwImage::NO_IN_ENDPOINT_GATE`, the firmware's
+//! `fixture-no-in-endpoint-gate`) beside the shipped, gated one through the
+//! same conversation:
 //!
-//! 1. the image **without** the gate (`FwImage::NO_IN_ENDPOINT_GATE`, the
-//!    firmware's `fixture-no-in-endpoint-gate`) tears packed frames, and
-//!    each loss is shorter than a packet;
-//! 2. the **shipped** image, gate in, delivers every frame whole, and its
-//!    waits stay short of the firmware's 250 ms chunk timeout;
-//! 3. with the lag off, the ungated image loses nothing — the model's
-//!    default still has no path to this loss, which is the finding.
+//! 1. **no lag**: neither loses a byte, which is the finding that the model's
+//!    default has no path to this loss. The block measures how soon after a
+//!    drain each image touches the endpoint: the ungated one's next `ep1`
+//!    write, the gated one's next `ep1_conf` read;
+//! 2. **the timing condition**: the ungated write comes sooner than the gated
+//!    check;
+//! 3. **a lag between the two**: the ungated image tears packed frames, by
+//!    less than a packet each; the gated image delivers every frame and never
+//!    waits out a chunk timeout.
+//!
+//! The lag is chosen from step 1's measurements, not written down, so a
+//! firmware change that moves either path moves the lag with it. Step 2 is
+//! the one that must keep holding.
 //!
 //! It lives in `lp-cli` for the reason `emu_usb_json_pack.rs` does: the
 //! requests are framed and the frames decoded by `lpc-wire` and
@@ -51,14 +60,12 @@ use lpc_wire::json::to_serial_line;
 use lpc_wire::message::client::{ClientMessage, ClientRequest};
 use lpc_wire::{WIRE_DICTIONARY_FINGERPRINT, WireEncoding};
 
-/// The free lag the pair runs at, in emulated nanoseconds. `LP_EMU_FREE_LAG_NS`
-/// overrides it, for sweeping.
-const FREE_LAG_NS: u64 = 1_000;
-
-/// The conversation, by emulated millisecond: the opt-in, then a Hello every
-/// [`EVERY_MS`]. A packed Hello is three packets, so every reply gives
-/// esp-hal's loop two wakes to write straight into.
+/// The conversation, by emulated millisecond: the opt-in, the free lag set
+/// (which also restarts the block's wake measurements, so boot is not in
+/// them), then a Hello every [`EVERY_MS`]. A packed Hello is three packets,
+/// so every reply gives esp-hal's loop two wakes to write straight into.
 const OPT_IN_AT_MS: u64 = 1_500;
+const LAG_AT_MS: u64 = 1_900;
 const FIRST_AT_MS: u64 = 2_000;
 const EVERY_MS: u64 = 20;
 const REQUESTS: u64 = 40;
@@ -67,79 +74,112 @@ const FIRST_ID: u64 = 10;
 
 #[test]
 #[ignore = "needs two built fw-esp32c6 ELFs and a release emulator; `just test-emu-c6` runs it"]
-fn without_the_gate_a_free_lag_tears_packed_frames_by_a_few_bytes() {
-    let Some(elf) = image(&FwImage::NO_IN_ENDPOINT_GATE) else {
+fn a_free_lag_between_esp_hals_write_and_the_gates_check_tears_only_the_ungated_image() {
+    let (Some(ungated), Some(gated)) = (
+        image(&FwImage::NO_IN_ENDPOINT_GATE),
+        image(&FwImage::SHIPPED),
+    ) else {
         return;
     };
-    let run = converse(&elf, free_lag_ns());
-    let scan = scan(&run.delivered);
-    eprintln!("free lag, no gate: {}", run.summary(&scan));
-    assert!(
-        scan.torn > 0,
-        "no packed frame was torn: {}",
-        run.summary(&scan)
-    );
-    assert!(!run.tried.is_empty(), "no byte was refused");
-    // A few bytes per loss, not a packet: the silicon symptom's shape.
-    let per_loss = run.tried.len() / scan.torn;
-    assert!(
-        per_loss < 64,
-        "{per_loss} refused bytes per torn frame — a whole packet or more: {}",
-        run.summary(&scan)
-    );
-    assert!(
-        run.stderr.contains("inside the free lag"),
-        "the refusals were not the lag's:\n{}",
-        run.stderr
-    );
-}
 
-#[test]
-#[ignore = "needs a built fw-esp32c6 ELF and a release emulator; `just test-emu-c6` runs it"]
-fn with_the_gate_the_same_free_lag_loses_nothing() {
-    let Some(elf) = image(&FwImage::SHIPPED) else {
-        return;
-    };
-    let run = converse(&elf, free_lag_ns());
-    let scan = scan(&run.delivered);
-    eprintln!("free lag, gated: {}", run.summary(&scan));
-    assert_eq!(scan.torn, 0, "{}", run.summary(&scan));
-    assert!(
-        run.tried.is_empty(),
-        "{} bytes refused",
-        run.tried.len()
+    // 1. No lag: neither image loses a byte (the model's default has no
+    //    path to this loss), and each says how soon it touches the
+    //    endpoint after a drain.
+    let (before, after) = both(&ungated, &gated, 0);
+    for (name, run) in [("ungated", &before), ("gated", &after)] {
+        let scan = scan(&run.delivered);
+        eprintln!(
+            "no lag, {name}: {} | {}",
+            run.summary(&scan),
+            run.wake_line()
+        );
+        assert_eq!(scan.torn, 0, "{name}: {}", run.summary(&scan));
+        assert!(
+            run.tried.is_empty(),
+            "{name}: {} B refused",
+            run.tried.len()
+        );
+        assert_eq!(
+            scan.replies,
+            REQUESTS as usize,
+            "{name}: {}",
+            run.summary(&scan)
+        );
+    }
+
+    // 2. The timing condition: esp-hal writes a frame's next packet sooner
+    //    after the drain than the gate reads `serial_in_ep_data_free`.
+    let write = before
+        .span("ep1 write")
+        .expect("the ungated image wrote after a drain");
+    let check = after
+        .span("ep1_conf read")
+        .expect("the gated image checked the buffer after a drain");
+    // (The ungated image reads `ep1_conf` too, later: esp-hal's RX drain
+    // tests `serial_out_ep_data_avail` in the same register. Not a free
+    // check, so its `ep1_conf` span is not the comparison.)
+    eprintln!(
+        "esp-hal writes {write} ns after a drain at the soonest; the gate checks at {check} ns"
     );
+    assert!(
+        write < check,
+        "esp-hal's write ({write} ns) is not sooner than the gate's check ({check} ns)"
+    );
+
+    // 3. A lag between the two: the ungated image tears packed frames by a
+    //    few bytes; the gated one delivers every frame and never waits one
+    //    out.
+    let lag = (write + check) / 2;
+    let (before, after) = both(&ungated, &gated, lag);
+
+    let scan_before = scan(&before.delivered);
+    eprintln!(
+        "free lag {lag} ns, ungated: {} | {}",
+        before.summary(&scan_before),
+        before.wake_line()
+    );
+    assert!(
+        scan_before.torn > 0,
+        "no packed frame was torn: {}",
+        before.summary(&scan_before)
+    );
+    // Bytes lost per damaged Hello: a few, not a packet (silicon: ~5).
+    let damaged = REQUESTS as usize - scan_before.replies;
+    let per_loss = before.tried.len() / damaged.max(1);
+    eprintln!("{damaged} Hellos damaged, {per_loss} bytes lost from each");
+    assert!(
+        (1..64).contains(&per_loss),
+        "{per_loss} refused bytes per damaged Hello — not a partial packet: {}",
+        before.summary(&scan_before)
+    );
+
+    let scan_after = scan(&after.delivered);
+    eprintln!(
+        "free lag {lag} ns, gated: {} | {}",
+        after.summary(&scan_after),
+        after.wake_line()
+    );
+    assert_eq!(scan_after.torn, 0, "{}", after.summary(&scan_after));
+    assert!(after.tried.is_empty(), "{} B refused", after.tried.len());
     assert_eq!(
-        scan.replies,
+        scan_after.replies,
         REQUESTS as usize,
-        "every Hello answered, packed: {}",
-        run.summary(&scan)
+        "{}",
+        after.summary(&scan_after)
     );
     assert!(
-        !String::from_utf8_lossy(&run.delivered).contains("timed out"),
+        !String::from_utf8_lossy(&after.delivered).contains("timed out"),
         "the gate waited out a chunk timeout"
     );
 }
 
-#[test]
-#[ignore = "needs a built fw-esp32c6 ELF and a release emulator; `just test-emu-c6` runs it"]
-fn without_the_gate_and_without_the_lag_the_model_loses_nothing() {
-    let Some(elf) = image(&FwImage::NO_IN_ENDPOINT_GATE) else {
-        return;
-    };
-    let run = converse(&elf, 0);
-    let scan = scan(&run.delivered);
-    eprintln!("no lag, no gate: {}", run.summary(&scan));
-    assert_eq!(scan.torn, 0, "{}", run.summary(&scan));
-    assert!(run.tried.is_empty(), "{} bytes refused", run.tried.len());
-    assert_eq!(scan.replies, REQUESTS as usize, "{}", run.summary(&scan));
-}
-
-fn free_lag_ns() -> u64 {
-    std::env::var("LP_EMU_FREE_LAG_NS")
-        .ok()
-        .map(|v| v.parse().expect("LP_EMU_FREE_LAG_NS: nanoseconds"))
-        .unwrap_or(FREE_LAG_NS)
+/// The ungated and the gated image, side by side, at one lag.
+fn both(ungated: &std::path::Path, gated: &std::path::Path, lag_ns: u64) -> (Run, Run) {
+    std::thread::scope(|s| {
+        let a = s.spawn(|| converse(ungated, lag_ns));
+        let b = s.spawn(|| converse(gated, lag_ns));
+        (a.join().unwrap(), b.join().unwrap())
+    })
 }
 
 fn image(image: &FwImage) -> Option<std::path::PathBuf> {
@@ -162,20 +202,38 @@ struct Run {
 }
 
 impl Run {
+    /// The emulator's wake line (`usb-sj: after N drains: …`).
+    fn wake_line(&self) -> &str {
+        self.stderr
+            .lines()
+            .find(|l| l.starts_with("usb-sj: after "))
+            .unwrap_or("no wake line")
+    }
+
+    /// The soonest `next <what>` after a drain, in ns, from the wake line.
+    fn span(&self, what: &str) -> Option<u64> {
+        let line = self.wake_line();
+        let rest = &line[line.find(&format!("next {what} "))? + what.len() + 6..];
+        rest.split("..").next()?.parse().ok()
+    }
+
     fn summary(&self, scan: &Scan) -> String {
         format!(
-            "{} B delivered, {} B refused, {} packed frames whole, {} torn, {} of {REQUESTS} \
-             Hellos answered",
+            "{} B delivered, {} B refused, {} packed frames whole, {} torn ({} bad COBS, {} \
+             undecodable), {} of {REQUESTS} Hellos answered",
             self.delivered.len(),
             self.tried.len(),
             scan.whole,
             scan.torn,
+            scan.bad_cobs,
+            scan.undecodable,
             scan.replies
         )
     }
 }
 
-/// The conversation on `elf` with the model's free lag at `lag_ns`.
+/// The conversation on `elf`, the model's free lag set to `lag_ns` at
+/// [`LAG_AT_MS`].
 fn converse(elf: &std::path::Path, lag_ns: u64) -> Run {
     let dir = tempfile::tempdir().expect("a temp dir");
     let script_path = dir.path().join("free-lag.usb-script");
@@ -190,6 +248,7 @@ fn converse(elf: &std::path::Path, lag_ns: u64) -> Run {
         format!("{ms}  {}\n", hex.join(" "))
     };
     let mut script = String::from("0  attach\n0  open\n");
+    script += &format!("{LAG_AT_MS}  free-lag {lag_ns}\n");
     script += &send(
         OPT_IN_AT_MS,
         OPT_IN_ID,
@@ -199,7 +258,11 @@ fn converse(elf: &std::path::Path, lag_ns: u64) -> Run {
         },
     );
     for n in 0..REQUESTS {
-        script += &send(FIRST_AT_MS + n * EVERY_MS, FIRST_ID + n, ClientRequest::Hello);
+        script += &send(
+            FIRST_AT_MS + n * EVERY_MS,
+            FIRST_ID + n,
+            ClientRequest::Hello,
+        );
     }
     std::fs::write(&script_path, &script).expect("writing the script");
 
@@ -211,7 +274,6 @@ fn converse(elf: &std::path::Path, lag_ns: u64) -> Run {
         .args(["--usb-script", script_path.to_str().expect("a utf-8 path")])
         .args(["--usb-sj", &format!("file:{}", delivered.display())])
         .args(["--usb-sj-tried", &format!("file:{}", tried.display())])
-        .args(["--usb-in-free-lag", &lag_ns.to_string()])
         .args(["--timeout", &format!("{end_ms}ms"), "--wall-timeout", "300"])
         .arg("--strict-bus")
         .output()
@@ -232,6 +294,11 @@ fn converse(elf: &std::path::Path, lag_ns: u64) -> Run {
 /// The packed frames on the link, as a host reader counts them.
 struct Scan {
     whole: usize,
+    /// Frames whose body was not valid COBS.
+    bad_cobs: usize,
+    /// Frames that were valid COBS and did not decode.
+    undecodable: usize,
+    /// `bad_cobs + undecodable`.
     torn: usize,
     /// Distinct Hello replies to this conversation's requests, in a packed
     /// frame that decoded.
@@ -240,7 +307,8 @@ struct Scan {
 
 fn scan(bytes: &[u8]) -> Scan {
     let mut whole = 0;
-    let mut torn = 0;
+    let mut bad_cobs = 0;
+    let mut undecodable = 0;
     let mut ids = std::collections::BTreeSet::new();
     let mut scanner = FrameScanner::new(VecFrameBuffer::new(64 * 1024));
     scanner.push(bytes, |event| match event {
@@ -256,15 +324,17 @@ fn scan(bytes: &[u8]) -> Scan {
                         ids.insert(message.id);
                     }
                 }
-                Err(_) => torn += 1,
+                Err(_) => undecodable += 1,
             }
         }
-        ScanEvent::Dropped(DropReason::BadCobs) => torn += 1,
+        ScanEvent::Dropped(DropReason::BadCobs) => bad_cobs += 1,
         ScanEvent::Dropped(reason) => panic!("a frame was dropped: {reason:?}"),
     });
     Scan {
         whole,
-        torn,
+        bad_cobs,
+        undecodable,
+        torn: bad_cobs + undecodable,
         replies: ids.len(),
     }
 }

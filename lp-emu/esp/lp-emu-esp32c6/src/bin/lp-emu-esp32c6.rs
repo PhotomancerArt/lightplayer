@@ -1440,6 +1440,11 @@ fn report(machine: &mut Esp32C6Machine, outcome: &Outcome) {
             None => String::new(),
         }
     );
+    if let Some(stats) = machine.usb_in_wake_stats()
+        && stats.drains > 0
+    {
+        eprintln!("usb-sj: {stats}");
+    }
     if let Some(tcp) = machine.control_tcp() {
         eprintln!(
             "control: {} listened, {} client(s) attached, {} command(s) applied",

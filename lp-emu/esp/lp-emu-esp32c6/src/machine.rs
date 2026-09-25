@@ -3960,6 +3960,14 @@ impl Esp32C6Machine {
         self.usb_host
     }
 
+    /// The USB block's wake measurements (the free-lag hypothesis's
+    /// evidence; see `lp_emu_esp_common::ip::usb_sj::InWakeStats`).
+    pub fn usb_in_wake_stats(&mut self) -> Option<lp_emu_esp_common::ip::usb_sj::InWakeStats> {
+        let index = self.bus.peripheral_index("USB_DEVICE")?;
+        self.bus
+            .with_peripheral::<UsbSerialJtag, _>(index, |u, _| u.in_wake_stats())
+    }
+
     /// The UART0 TCP listener, when `Uart0Sink::Tcp` was chosen.
     pub fn uart0_tcp(&self) -> Option<&lp_emu_esp_common::TcpHost> {
         self.uart0_tcp.as_ref()
@@ -5574,6 +5582,10 @@ impl Esp32C6Machine {
                     in_pending: u.in_fifo().len(),
                     out_queued: u.out_pending(),
                 })),
+                ControlCommand::FreeLag(ns) => {
+                    u.set_in_free_lag_ns(*ns);
+                    Ok(None)
+                }
                 ControlCommand::Wait(_) => Err(
                     "`wait` is a --usb-script command; a client on this socket waits by waiting"
                         .to_string(),
