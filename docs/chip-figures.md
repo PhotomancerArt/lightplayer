@@ -197,6 +197,13 @@ after the figure jobs finish (and does not run at all when none of them ran).
 The recipes' figure suites now run `--no-fail-fast`, so one red run reports
 every test binary's moved figures, not the first binary's.
 
+Proven on PR #829: 64 B of `.bss` in `fw-esp32s3` and `fw-esp32v3` failed two
+jobs, whose bless steps took 10 s and 4 s (nothing rebuilt) and produced the
+S3's `stack_total_bytes` 37,256 → 37,192 and the classic's six moves (the
+`[INIT] main stack` line in three boot chains, `main_stack_bytes`, the
+single-core prefix's cycles and instructions); `just apply-ci-figures 829`
+applied both patches with no local build, and the next run was green.
+
 ## The inventory (2026-09-25)
 
 What was pinned, where, and which kind it is. "Tree" means the image built from

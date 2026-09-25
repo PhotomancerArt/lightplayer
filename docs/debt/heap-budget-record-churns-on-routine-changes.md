@@ -102,6 +102,22 @@ long-lived branch conflict on this file whenever main re-baselined too.
   `PATH_HIGH_WATER_GAP` reads −64 on a desk worktree against CI's −96 at one
   commit (positional; `docs/chip-figures.md`), so that test was already red
   on a desk.
+- 2026-09-25 — **the accept step, paid down** by PR #829. After #826 a moved
+  figure still cost a local firmware rebuild, a bless, a push and another
+  ~20-minute CI wait. Now each figure job (`emu-c6`, `emu-esp32v3`,
+  `emu-esp32s3`, `heap-budget-chips`, the engine ratchet in `validate-x64`)
+  re-runs exactly what failed as a bless against the images it already
+  built, uploads `figures-patch-<job>` only when that bless passed, and
+  `figures-comment` posts one sticky PR comment (each figure old → new);
+  `just apply-ci-figures <pr>` applies every job's patch at once. The jobs
+  stay red and nothing is pushed for you; an EXACT pin or ordinary failure
+  gets no patch and is labelled "not a figure move". Proof, on the PR
+  itself: 64 B of `.bss` in `fw-esp32s3` + `fw-esp32v3` → run
+  36117736744 red with both patches (bless steps 10 s and 4 s — no rebuild),
+  applied in one command with no local build, then green. Workaround now:
+  **on a PR, `just apply-ci-figures <pr>`; `just bless-chips` is for a desk
+  change you have not pushed.** Positional figures, which a desk bless could
+  never write, now arrive the same way.
 
 **Exit criteria** — a PR whose only memory effect is a few bytes of statics
 passes the gate without touching the record, and two PRs that each
