@@ -5,10 +5,13 @@
 `catalog/projects/playful-choker-tryout` (25 entries) · **Engine** branch
 `feat/multi-pattern-projects-p6`, measured at `5b09557cf` (every engine and
 firmware source byte there is the same at the report's own commit; later
-commits touch only the catalog, heap-budget records and docs) ·
+P6 commits touch only the catalog, heap-budget records and docs; P6b's
+`543bf0fa4` changes the engine, and section 2 is re-measured on it) ·
 **Emulators** fw-emu (`lp-cli profile`, the RV32 engine emulator) and
 `configuration=lp-emu:esp32c6:t1`, lp-emu at `5b09557cf` (its emulator
-sources equal `origin/main` `7190618fc`'s, plus P3's two perf-event names)
+sources equal `origin/main` `7190618fc`'s, plus P3's two perf-event names).
+Section 2 was re-measured for P6b on fw-emu built from `543bf0fa4` (and its
+parent `307000b61`), the same `lp-cli profile` emulator
 
 Every number below is emulated. Memory figures transfer to silicon; the
 times are reports, never gates.
@@ -19,7 +22,7 @@ times are reports, never gates.
 |---|---|---|---|
 | AC2: heap per dormant entry at load | ≤ 512 B | **343 B** (was ~17.6 KB) | met |
 | AC3: 25 entries upload and play on the emulated C6 | post-deploy check passes | passes; 105,456 B free after the first compile; 7 switches, no failure | met |
-| AC4: retained heap, end of pass 2 − end of pass 1 | ≤ 256 B | **+1,344 B**, all of it one bounded side store (below) | **missed as stated**; no leak found |
+| AC4: retained heap, end of pass 2 − end of pass 1 | ≤ 256 B | **0 B** after P6b (P6 measured +1,344 B, all of it departed entries' phasors in the timebase store) | met; whole live heap byte-identical at the two points |
 | AC5: never black across a switch | — | the pad holds a lit frame through all 7 C6 switches; the run's only all-dark frames (4) are mid-Fireflies, a near-black pattern, 15 s after its switch | consistent |
 
 ## 1. Heap at load: 5 versus 25 entries (AC2)
@@ -69,63 +72,86 @@ The step had to be that long for a reason worth knowing: under the alloc
 collector every allocation is expensive in emulated cycles, and fw-emu's
 clock follows cycles, so at a 1 s step the tour moved on before each new
 entry's deferred compile ran and only the first shader ever compiled. At
-4 s every entry compiles and renders (59 compiles, 732 frames, 58
-switches). P3's `entry-unload` / `entry-load` markers window each switch.
+4 s every entry compiles and renders. P3's `entry-unload` / `entry-load`
+markers window each switch.
 
 The live heap is replayed from the trace (`proof/tour-switches.csv` has
 every switch). "Retained at the end of a pass" is the live heap at the
 first `entry-unload` of the next pass, the same point in the cycle each
-time (the idle entry, Soft Noise, has played and is about to be replaced):
+time (the idle entry, Soft Noise, has played and is about to be replaced).
 
-| point | live heap |
-|---|---:|
-| end of pass 1 (switch 26's unload) | 249,343 B |
-| end of pass 2 (switch 51's unload) | 250,687 B |
-| **difference** | **+1,344 B** |
+It was measured three times, the same project, command and pass boundaries
+each time:
 
-**Target ≤ 256 B: missed as stated.** Attributed in full by diffing the
-whole live heap, by call stack, at the end of switch 26's and switch 51's
-load windows (same entry loaded at both): the only stack that differs is
+| engine | end of pass 1 (switch 26's unload) | end of pass 2 (switch 51's unload) | difference |
+|---|---:|---:|---:|
+| P6, `5b09557cf` | 249,343 B | 250,687 B | +1,344 B |
+| `307000b61`, the P6b fix's parent | 254,694 B | 254,694 B | 0 B, by alignment (below) |
+| **P6b, `543bf0fa4`** | **252,260 B** | **252,260 B** | **0 B** |
+
+**Target ≤ 256 B: met with P6b.** P6's difference was attributed in full by
+diffing the whole live heap, by call stack, at the end of switch 26's and
+switch 51's load windows (same entry loaded at both): the only stack that
+differed was
 
 ```
 +1344 B  +15 allocs  ResolveHost::time_product_phasor < TickResolver::time_product_phasor
                      < shader_node::resolve_or_default_input < NodeRuntime::produce
 ```
 
-and everything else in the heap is **byte-identical** at the two points
-(212,138 B outside that site at both). The site is the engine's
+with everything else byte-identical. That site is the engine's
 `TimebaseStore`: a shader's own phasors (`PhasorKey::Private { node, slot }`)
-stay alive for `PHASOR_IDLE_TICKS` = 120 store ticks after their last
-query, so an unloaded entry's phasors outlive the entry by 120 ticks and
-then despawn. Traced at every switch, the site plateaus instead of
-climbing:
+stayed alive for `PHASOR_IDLE_TICKS` = 120 store ticks after their last
+query, so an unloaded entry's phasors outlived the entry by 120 ticks, and
+at any moment the store held the last few departed patterns' phasors: 56–81
+allocations, 2.5–4.0 KB, at each switch. Bounded, but it made the pass
+difference depend on which entries fell inside the last 120 ticks, and it
+kept an unloaded entry present in the store when it was gone everywhere
+else (AC1).
 
-| switches | live allocations at the site | live bytes |
-|---|---|---|
-| 1–11 (filling) | 6 → 66 | 370 → 2,808 |
-| 12–35 | 56–71 | 2,516–2,954 |
-| 36–58 | 61–81 | 2,952–4,000 |
+**The fix (P6b).** `Engine::remove_runtime_subtree` now drops, at once,
+every phasor whose key belongs to the removed subtree (a `Private` key's
+node, or a `Shared` key's scope owned by a removed node), a removed clock's
+whole timebase, their scrub-log history, and removed readers' entries in a
+surviving phasor's readings (`TimebaseStore::forget_removed`). An entry
+unload also drops its own sink scope's phasors, which the playlist owns and
+the subtree removal therefore cannot see. `PHASOR_IDLE_TICKS` keeps its
+original job, consumers that skip a frame or two. The store's maps keep
+their capacity (`VecMap` never shrinks), which is bounded by the most
+phasors live at once, and is the same at both pass boundaries.
 
-The number lingering depends on how many ticks each entry happened to play
-(which entries fall inside the last 120 ticks, and their phasor counts), so
-the "same point" differs by an entry or so from pass to pass. Nothing
-accumulates per switch: no tombstones, no leaked compiled code, no tree
-slots (the tree and registry figures are identical to the byte). The
-remainder is a bounded side store, not growth. The plan's "stated
-tolerance" could be written as "≤ 256 B outside the timebase store's
-120-tick despawn window"; that is a ruling for the gate, and this phase did
-not change the window, the method, or the project to meet it.
+**After it.** The whole-live-heap stack diff at switch 26's and switch
+51's load ends finds **no differing stack**: 217,561 B in 2,115
+allocations at both. The phasor site holds **one allocation, 224 B**, at
+every one of the 60 switches (not identified further; it never changes),
+where its parent commit held 51–76 allocations (2,358–3,104 B) after the
+fill.
+
+Why the parent commit also shows 0 B: its store held 66 allocations
+(2,804 B) of departed entries' phasors at both boundary points, so the two
+readings matched by alignment, not by design; P6's run, on an older tree,
+did not match. The fix removes the dependency. Absolute figures moved
+between `5b09557cf` and `307000b61` (the P8 and `origin/main` merges lie
+between them; not attributed further), so compare the rows only through
+their own differences.
+
+One side effect, measured and not investigated: in the same 35 G cycles the
+P6b build ran 911 frames and 60 switches where its parent ran 773 and 59;
+the fix is the only difference between the two builds, which suggests the
+dead phasors also cost cycles every tick (not profiled).
 
 **Peak per switch.** From each switch's unload to the next switch's unload,
 the peak live heap sits **25,904 B** above the live heap just before the
-unload, for every one of the 58 switches (switch 1, from the idle entry,
-+25,976 B). The largest switch is therefore switch 1; the highest peak in
-passes 1–2 is 289,759 B of fw-emu's 327,680 B heap. fw-emu keeps the
+unload, for every one of the 60 switches of the P6b run (and of the 58 of
+P6's; switch 1, from the idle entry, +25,976 B). The largest switch is
+therefore switch 1; the highest peak in passes 1–2 is 292,230 B of fw-emu's
+327,680 B heap (P6's run: 289,759 B). fw-emu keeps the
 uploaded project files in its memory filesystem, so its absolute figures
 include the files; the C6's (section 3) do not.
 
-The chart is `proof/tour-heap.svg` in the planning directory: live heap at
-every frame end, switches marked, the peak per switch as dots.
+The chart is `proof/tour-heap.svg` in the planning directory (the P6b run;
+P6's is `proof/tour-heap-p6-5b09557cf.svg`): live heap at every frame end,
+switches marked, the peak per switch as dots.
 
 ## 3. The emulated C6 (AC3)
 
