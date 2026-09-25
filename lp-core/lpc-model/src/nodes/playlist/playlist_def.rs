@@ -219,11 +219,7 @@ mod tests {
                 .find(|field| field.name.as_str() == name)
                 .unwrap_or_else(|| panic!("{name} field"));
             assert_eq!(field.semantics.direction, SlotDirection::Consumed, "{name}");
-            assert_eq!(
-                field.default_bind.as_deref(),
-                Some(channel),
-                "{name}"
-            );
+            assert_eq!(field.default_bind.as_deref(), Some(channel), "{name}");
             assert!(field.panel.is_some(), "{name} is promoted to the panel");
         }
     }

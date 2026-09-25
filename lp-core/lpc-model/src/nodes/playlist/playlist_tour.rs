@@ -307,8 +307,8 @@ mod tests {
     #[test]
     fn static_and_dynamic_playlist_tour_shapes_agree() {
         let dynamic = <PlaylistTour as SlotValue>::value_shape();
-        let static_shape = <PlaylistTour as SlotValue>::STATIC_VALUE_SHAPE_DESCRIPTOR
-            .expect("static descriptor");
+        let static_shape =
+            <PlaylistTour as SlotValue>::STATIC_VALUE_SHAPE_DESCRIPTOR.expect("static descriptor");
 
         assert_eq!(static_shape.to_owned_value_shape(), dynamic);
         assert_eq!(
