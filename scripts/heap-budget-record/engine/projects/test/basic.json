@@ -1,7 +1,7 @@
 {
   "comment": "What this project costs TODAY on the RV32 ENGINE emulator (`lp-cli profile --collect alloc`), per profile mode; steady-render records only the frame window. A ratchet, not a target. The file's path under scripts/heap-budget-record/engine/ IS the project path. Regenerate with `just heap-budget-baseline` (every project) or `just heap-budget-baseline <project>`; see docs/heap-budget-gate.md.",
   "recorded": "2026-09-25",
-  "commit": "ee31515e4",
+  "commit": "59323b16c",
   "modes": {
     "startup": {
       "windows": {
@@ -16,11 +16,11 @@
         },
         "project-load": {
           "transient": 41460,
-          "retained": 37082,
+          "retained": 37114,
           "largest_alloc": 4365,
           "alloc_count": 3696,
-          "alloc_bytes": 228550,
-          "largest_free_at_close": 215144,
+          "alloc_bytes": 228582,
+          "largest_free_at_close": 215112,
           "holes_at_close": 24
         },
         "frame": {
@@ -29,7 +29,7 @@
           "largest_alloc": 20480,
           "alloc_count": 3161,
           "alloc_bytes": 281511,
-          "largest_free_at_close": 179728,
+          "largest_free_at_close": 179696,
           "holes_at_close": 11
         },
         "shader-compile": {
@@ -38,7 +38,7 @@
           "largest_alloc": 13092,
           "alloc_count": 2305,
           "alloc_bytes": 274380,
-          "largest_free_at_close": 132752,
+          "largest_free_at_close": 132720,
           "holes_at_close": 15
         },
         "shader-link": {
@@ -47,7 +47,7 @@
           "largest_alloc": 8192,
           "alloc_count": 17,
           "alloc_bytes": 8844,
-          "largest_free_at_close": 132752,
+          "largest_free_at_close": 132720,
           "holes_at_close": 51
         }
       }
@@ -60,7 +60,7 @@
           "largest_alloc": 400,
           "alloc_count": 204,
           "alloc_bytes": 6029,
-          "largest_free_at_close": 132752,
+          "largest_free_at_close": 132720,
           "holes_at_close": 23
         }
       }
