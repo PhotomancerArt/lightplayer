@@ -197,3 +197,15 @@ test. A transcript that shows it is what would change either.
 
 **Evidence.** `~/.photomancer/planning/lp2025/2026-09-23-1701-lp-json-pack/g1-{150,75,33}.bin`
 (raw captures), with `.txt`/`.sizes` from `lp-cli wire unpack --sizes`.
+
+**Readers counted each such loss twice (fixed 2026-09-25).** The frame
+scanner's resync rule, built for a torn *write* (a start with no end), took
+the damaged frame's closing `0x00` as the next frame's start. With both
+delimiters intact, the wire's next `\n` lead became a kind byte and the next
+frame's opening `0x00` ended an empty phantom frame: a second `BadCobs` drop
+for one loss, in `WireStream`, `lp-cli wire unpack --sizes` and the emu wire
+tap alike. The scanner now holds a guessed start to account: a guessed frame
+that is not valid COBS and whose kind differs from the torn frame's comes out
+as text, byte for byte, not as a drop
+(`lp-base/lp-json-pack/src/frame_scanner.rs`,
+`a_frame_short_of_bytes_mid_body_is_one_drop`).
