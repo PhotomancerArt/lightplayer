@@ -3863,9 +3863,7 @@ mod tests {
                     ControlProductProbeRequest {
                         product,
                         sample_format: WireChannelSampleFormat::U16,
-                        geometry: RevisionGateRead::IfChanged {
-                            known_revision: Some(known_revision),
-                        },
+                        geometry: RevisionGateRead::if_changed(Some(known_revision)),
                     },
                 )],
             },

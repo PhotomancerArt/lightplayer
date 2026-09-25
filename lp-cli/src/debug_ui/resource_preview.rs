@@ -76,7 +76,9 @@ fn render_output_channel_preview(
         "output buffer  {sample_format:?}  {channels} channels"
     ));
     match sample_format {
-        WireChannelSampleFormat::U8 => {
+        // One byte per sample, shown as-is (an `Srgb8` code is already a
+        // display value; a resource buffer is never published in it).
+        WireChannelSampleFormat::U8 | WireChannelSampleFormat::Srgb8 => {
             render_rgb_swatches(
                 ui,
                 bytes

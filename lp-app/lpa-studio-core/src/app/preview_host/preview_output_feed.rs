@@ -33,7 +33,7 @@
 //! read is a host-driven pull with its own pacing and offline story. This one
 //! rides a frame the preview host already schedules, so it owns neither.
 
-use lpc_wire::{OutputFrameEntry, OutputFrameGeometryRead};
+use lpc_wire::{OutputFrameEntry, RevisionGateRead};
 
 use crate::UiControlProductPreview;
 use crate::app::frame_feed::OutputFrameCache;
@@ -76,7 +76,7 @@ impl PreviewOutputFeed {
     /// all), otherwise the per-output geometry gate
     /// ([`OutputFrameCache::geometry_read`]) — every output's held geometry
     /// revision (refusals included), `Always` while none is held.
-    pub fn next_read(&self) -> Option<OutputFrameGeometryRead> {
+    pub fn next_read(&self) -> Option<RevisionGateRead> {
         if self.control_first == Some(false) {
             return None;
         }
@@ -117,7 +117,7 @@ mod tests {
         ControlSampleLayout, ControlSampleSpan, NodeId, Revision,
     };
     use lpc_wire::{
-        GeometryDisplayLayout, KnownOutputFrameGeometry, OutputFrameGeometry, RevisionGateResult,
+        GeometryDisplayLayout, KnownRevision, OutputFrameGeometry, RevisionGateResult,
         WireChannelSampleFormat,
     };
 
@@ -128,7 +128,7 @@ mod tests {
     #[test]
     fn a_project_that_is_not_control_first_stops_the_asking() {
         let mut feed = PreviewOutputFeed::default();
-        assert_eq!(feed.next_read(), Some(OutputFrameGeometryRead::Always));
+        assert_eq!(feed.next_read(), Some(RevisionGateRead::Always));
 
         feed.apply(false, &[]);
 
@@ -184,9 +184,9 @@ mod tests {
 
         assert_eq!(
             feed.next_read(),
-            Some(OutputFrameGeometryRead::IfChanged {
-                known: vec![KnownOutputFrameGeometry {
-                    node: NodeId::new(4),
+            Some(RevisionGateRead::IfChanged {
+                known: vec![KnownRevision {
+                    node: Some(NodeId::new(4)),
                     revision: Revision::new(11),
                 }],
             })
@@ -229,9 +229,9 @@ mod tests {
 
         assert_eq!(
             feed.next_read(),
-            Some(OutputFrameGeometryRead::IfChanged {
-                known: vec![KnownOutputFrameGeometry {
-                    node: NodeId::new(4),
+            Some(RevisionGateRead::IfChanged {
+                known: vec![KnownRevision {
+                    node: Some(NodeId::new(4)),
                     revision: Revision::new(1),
                 }],
             })
@@ -303,7 +303,7 @@ mod tests {
 
         assert_eq!(feed.control_first(), Some(true));
         assert_eq!(feed.frame().expect("last frame").revision, 1);
-        assert_eq!(feed.next_read(), Some(OutputFrameGeometryRead::Always));
+        assert_eq!(feed.next_read(), Some(RevisionGateRead::Always));
     }
 
     fn entry(node: u32, revision: i64, bytes: Vec<u8>) -> OutputFrameEntry {

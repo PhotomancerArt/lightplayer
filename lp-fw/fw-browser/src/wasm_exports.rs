@@ -1,6 +1,6 @@
 //! wasm-bindgen exports used by `fw-browser-worker.js`.
 
-use lpc_wire::OutputFrameGeometryRead;
+use lpc_wire::RevisionGateRead;
 use lpvm_wasm::rt_browser::init_host_exports;
 use wasm_bindgen::prelude::*;
 
@@ -185,7 +185,7 @@ pub fn render_bus_texture_rgba8(
 /// Read the runtime's published output frame as the worker's
 /// `preview_output_frame` message JSON.
 ///
-/// `geometry_json` is a serialized `lpc_wire::OutputFrameGeometryRead` — the
+/// `geometry_json` is a serialized `lpc_wire::RevisionGateRead` — the
 /// same per-output geometry gate the device-card feed pulls with, so a steady
 /// card asks `always` once and `if_changed` thereafter and the geometry
 /// crosses the boundary only when it actually moved. The samples themselves are the
@@ -199,7 +199,7 @@ pub fn read_output_frame_json(
     frame_id: u32,
     geometry_json: &str,
 ) -> Result<String, String> {
-    let geometry: OutputFrameGeometryRead = serde_json::from_str(geometry_json)
+    let geometry: RevisionGateRead = serde_json::from_str(geometry_json)
         .map_err(|error| format!("parse output frame geometry read: {error}"))?;
     runtime_registry::with_runtime_mut(runtime_id, |runtime| {
         let (control_first, outputs) = runtime.read_output_frame(geometry);

@@ -165,6 +165,14 @@ pub const PWR_OVERRIDES: &[(u32, u32, u32, &str)] = &[];
 /// them.
 pub const I2C_MST_MEM_COARSE_NAMES: &[(u32, u32, &str)] = &[(0x0000, 0x0400, "cmd_mem")];
 
+/// Coarse names for the fourth block, `COEX` (`memmap::periph::COEX`,
+/// `0x600A_F400..0x600A_F800`): the Wi-Fi/BLE coexistence arbiter. Not in
+/// the PAC. BLE M4's finding: the shipped image, once it linked
+/// `esp-radio/coex`, stopped strict on `W4 0x600af400` from the coex blob's
+/// `coex_hw_clear_reg` at Wi-Fi init. No register in it is named, because
+/// nothing documents them; the block remembers what it is written.
+pub const COEX_COARSE_NAMES: &[(u32, u32, &str)] = &[(0x0000, 0x0400, "coex")];
+
 /// `WIFI_PWR + 0x3700` (`0x600A_D000`): a free-running **microsecond
 /// counter**, the one register in either block that is live rather than
 /// remembered. Evidence: the blob's `wait_i2c_sdm_stable`
@@ -755,6 +763,26 @@ impl WifiStub {
             name: "I2C_MST_MEM",
             names: I2C_MST_MEM_COARSE_NAMES,
             regs: RegFile::new("I2C_MST_MEM", crate::memmap::periph::I2C_MST_MEM_LEN),
+            touched: BTreeSet::new(),
+            tx_handoffs: Vec::new(),
+            tx_capture_armed: false,
+            rx_int_event_bits: RX_INT_EVENT_BITS,
+            index: 0,
+            tx_completion_armed: false,
+            rx_write_cursor: None,
+        }
+    }
+
+    /// `COEX`: `0x600A_F400..0x600A_F800`, the coexistence arbiter, as a
+    /// plain accept-and-remember block with the touch log, `I2C_MST_MEM`'s
+    /// shape. No override list: nothing has been seen to spin on it. An
+    /// image with BLE off never gives the arbiter anything to arbitrate, and
+    /// no emulated board turns BLE on (radio is not modelled).
+    pub fn coex() -> Self {
+        Self {
+            name: "COEX",
+            names: COEX_COARSE_NAMES,
+            regs: RegFile::new("COEX", crate::memmap::periph::COEX_LEN),
             touched: BTreeSet::new(),
             tx_handoffs: Vec::new(),
             tx_capture_armed: false,

@@ -52,7 +52,6 @@ pub(crate) mod steady_frame_alloc_tests;
 mod shader_palette_tests;
 #[cfg(all(test, feature = "node-clock", feature = "node-shader"))]
 mod shader_timebase_tests;
-mod srgb8_lut;
 mod state_root_stamps;
 mod state_root_values_hash;
 #[cfg(test)]
@@ -67,6 +66,10 @@ pub(crate) mod test_support;
     feature = "node-shader"
 ))]
 mod timebase_tests;
+// A real shader compiled by a render probe mid-read, on `projects/test/basic`.
+#[cfg(all(test, feature = "node-shader"))]
+mod tree_entry_delta_tests;
+mod tree_entry_stamps;
 
 pub use engine::Engine;
 // Consumed by fixture node tests directly and by `output_flush_tests`; both
