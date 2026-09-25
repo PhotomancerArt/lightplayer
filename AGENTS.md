@@ -894,6 +894,7 @@ just walk-esp32c6-emu                           # THE WALK (see below) — minut
 just test-emu-c6                                # its gates (builds firmware)
 just heap-budget-check-chips                    # the firmware's own heap ledger, ratcheted
 just bless-chips [esp32c6|esp32v3|esp32s3|engine]   # a firmware change moved a pinned figure: re-record them all (docs/chip-figures.md)
+just apply-ci-figures [pr]                      # …or take the patch CI already blessed on the PR (its sticky "figures moved" comment) — no firmware build
 just emu-c6 <elf> --strict-bus --timeout 6s     # the workshop binary, thirty flags
 LP_EMU_WIRE_TAP=<dir> just studio-dev-emu; just wire-tap-stat <dir>/c6-a.tap --ledger   # exact wire bytes of a real Studio session, by JSON path — the tool for any wire-size claim
 lp-cli wire unpack --sizes < capture.bin > capture.txt   # rewrite packed frames (JSON Pack) back to `M!{json}` lines, with a per-frame/total size report on stderr
