@@ -95,12 +95,13 @@ fn sample_format_from_name(name: &str) -> Option<UiControlSampleFormat> {
 /// Encode a composed frame captured at `captured_at` as sidecar bytes.
 ///
 /// Always stored at `u16`: an 8-bit live frame (the card's transport
-/// precision, lean-wire P5) is widened by ×257 first, so the sidecar format
-/// is exactly what version 1 has always been.
+/// precision, lean-wire P5; sRGB-encoded since the follow-ups) is decoded to
+/// linear unorm16 first, so the sidecar format is exactly what version 1 has
+/// always been.
 pub fn encode(frame: &UiControlProductPreview, captured_at: f64) -> Vec<u8> {
     let bytes: Vec<u8> = match frame.sample_format {
         UiControlSampleFormat::U16 => frame.bytes.to_vec(),
-        UiControlSampleFormat::U8 => (0..frame.bytes.len())
+        UiControlSampleFormat::U8 | UiControlSampleFormat::Srgb8 => (0..frame.bytes.len())
             .flat_map(|index| frame.unorm16_sample(index).unwrap_or(0).to_le_bytes())
             .collect(),
     };
@@ -279,6 +280,19 @@ mod tests {
         let (decoded, _) = decode(&encoded).expect("decodes");
         assert_eq!(decoded.sample_format, UiControlSampleFormat::U16);
         assert_eq!(decoded.bytes.as_ref(), [0, 0, 1, 1, 255, 255]);
+    }
+
+    /// The card's live frame arrives sRGB-encoded; it is stored as the
+    /// linear unorm16 its codes decode to, so the sidecar stays linear.
+    #[test]
+    fn an_srgb8_frame_is_stored_linear_at_sixteen_bits() {
+        let mut display = frame(false);
+        display.sample_format = UiControlSampleFormat::Srgb8;
+        display.bytes = Rc::from(vec![0_u8, 1, 255]);
+
+        let (decoded, _) = decode(&encode(&display, 5.0)).expect("decodes");
+        assert_eq!(decoded.sample_format, UiControlSampleFormat::U16);
+        assert_eq!(decoded.bytes.as_ref(), [0, 0, 20, 0, 255, 255]);
     }
 
     #[test]

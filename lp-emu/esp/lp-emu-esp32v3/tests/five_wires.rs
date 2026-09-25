@@ -336,6 +336,56 @@ fn reached(summaries: &[Summary], wires: &[u32]) -> Result<usize, String> {
     Ok(*last_n)
 }
 
+/// [`reached`], plus the one burst no complete line of which is on the wire
+/// yet: the frame every wire's guest counter had reached, read off `console`.
+///
+/// ⚠️ A deadline can land inside the **first** line of a burst. Then the
+/// burst has no complete line, [`reached`] reads the group before it, and
+/// the pad — which carried the frames since — is a report period and a frame
+/// ahead of it (2026-09-24: `frame=1980 leds=16` was the console's last text,
+/// the pad carried 1,981). That line is still not *parsed* — its checksum may
+/// be cut — but its `frame=` number, once the character after it has
+/// arrived, is the guest's own count, and the guest prints a burst only
+/// after counting that frame on every wire. It is accepted only as the burst
+/// straight after a **whole** last group: after a short one it would mean
+/// that group was not cut off but lost.
+fn counted(console: &str, wires: &[u32]) -> Result<usize, String> {
+    let parsed = summaries(console);
+    let claimed = reached(&parsed, wires)?;
+    let Some(next) = in_flight_report(console) else {
+        return Ok(claimed);
+    };
+    if next != claimed + REPORT_EVERY_FRAMES {
+        return Ok(claimed);
+    }
+    let last = parsed
+        .iter()
+        .filter(|s| s.n as usize == claimed && wires.contains(&s.crc))
+        .count();
+    if last != wires.len() {
+        return Err(format!(
+            "frame {claimed}: the report group has {last} of {} lines and frame {next}'s burst \
+             began after it — a report was lost, not cut off",
+            wires.len()
+        ));
+    }
+    Ok(next)
+}
+
+/// The `frame=` of the summary line still leaving UART0 at the deadline — the
+/// text after the console's last newline — when that much of it arrived:
+/// the number is whole only once the character after it is on the wire.
+fn in_flight_report(console: &str) -> Option<usize> {
+    const MARK: &str = "[OUT] frame=";
+    let tail = console.rsplit('\n').next()?;
+    let rest = &tail[tail.find(MARK)? + MARK.len()..];
+    let digits = rest.split(|c: char| !c.is_ascii_digit()).next()?;
+    if digits.is_empty() || digits.len() == rest.len() {
+        return None;
+    }
+    digits.parse().ok()
+}
+
 /// A frame without its clock: everything the wire carried, and nothing about
 /// when. What two runs at two different `--core-quantum` values must agree on
 /// exactly — see
@@ -788,7 +838,7 @@ fn every_wire_checksum_equals_the_guests_own_summary_line(r: &Run) {
     // [`reached`] accepts a short group only as the cut-off tail of the
     // stream; a report missing anywhere else still fails here.
     let wires: Vec<u32> = per_wire.iter().map(|(_, crc, _)| *crc).collect();
-    let claimed = reached(&summaries, &wires).unwrap_or_else(|lost| panic!("{lost}"));
+    let claimed = counted(&r.text, &wires).unwrap_or_else(|lost| panic!("{lost}"));
     for (pad, frames) in &r.frames {
         let decoded = frames.len();
         println!(
@@ -928,6 +978,43 @@ fn a_report_burst_the_run_stopped_inside_is_in_flight_not_lost() {
     console.push_str(&line(1980, WIRES[0]));
     console.push_str("[INFO] f: [OUT] frame=1980 leds=16 crc=0xda7f");
     assert_eq!(reached(&summaries(&console), &WIRES), Ok(1980));
+}
+
+/// **The same deadline one line earlier** (2026-09-24, PR #810's image): it
+/// lands inside the burst's FIRST line, so no line of frame 1980 is complete
+/// and the groups end at 1920 while the pad carried 1,981 frames. The cut
+/// line's `frame=` is read — once the character after it is on the wire —
+/// and its checksum never is.
+#[test]
+fn a_burst_cut_in_its_first_line_is_in_flight_not_lost() {
+    let mut console = groups_through(1920, &WIRES);
+    console.push_str("[INFO] fw_esp32v3::output::rmt::frame_dump: [OUT] frame=1980 leds=16");
+    assert_eq!(reached(&summaries(&console), &WIRES), Ok(1920));
+    assert_eq!(counted(&console, &WIRES), Ok(1980));
+    // Cut in the number itself: `frame=19` could be 1980 or 19xx — not read.
+    let mut console = groups_through(1920, &WIRES);
+    console.push_str("[INFO] f: [OUT] frame=19");
+    assert_eq!(counted(&console, &WIRES), Ok(1920));
+    // A frame that is not the next burst is not evidence of anything.
+    let mut console = groups_through(1920, &WIRES);
+    console.push_str("[INFO] f: [OUT] frame=2100 leds=16");
+    assert_eq!(counted(&console, &WIRES), Ok(1920));
+}
+
+/// …and it does not excuse a short group: a burst that began after it means
+/// that group was finished with a line missing.
+#[test]
+fn a_burst_in_flight_after_a_short_group_is_a_lost_report() {
+    let mut console = groups_through(1860, &WIRES);
+    for crc in [WIRES[0], WIRES[1]] {
+        console.push_str(&line(1920, crc));
+    }
+    console.push_str("[INFO] f: [OUT] frame=1980 leds=16");
+    let lost = counted(&console, &WIRES).unwrap_err();
+    assert!(
+        lost.contains("frame 1920") && lost.contains("a report was lost"),
+        "{lost}"
+    );
 }
 
 /// **The teeth.** A report missing from a group that later groups followed,

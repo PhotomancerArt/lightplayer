@@ -73,6 +73,12 @@ it wrong is a red CI run on a correct change.
   espflash splits the app into six segments where silicon's had five. Any gate
   on image layout rather than memory content needs a re-record or a documented
   split.
+- 2026-09-24 (#797, CI speed) — emu-c6 now caches the pinned reference
+  builds' outputs, keyed on runner OS/arch + recipe + toolchain so a hit only
+  ever returns bytes this runner image built; `--verify` (both C6 and the
+  classic) runs on PRs only when the recipe, `rust-toolchain.toml` or the
+  classic's firmware changes, and always on main. A within-host
+  reproducibility break from anything else is now caught post-merge.
 
 **Exit criteria** — one build environment for the reference images: a pinned
 container (`Dockerfile.ci`, or a pinned image in the gated `emu-c6` job) that

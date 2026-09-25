@@ -26,5 +26,22 @@ def echo(n=20):
         if d.get("rttMs") is not None: r.append(d["rttMs"])
     r.sort(); 
     return {"n":len(r),"min":r[0],"median":statistics.median(r),"p90":r[int(len(r)*0.9)-1],"max":r[-1]} if r else {"n":0}
+# ---- wire mode (BLE M4): the product image speaks M!{json}\n over NUS ----
+def wire(on=True): return cmd({"op":"wire","on":on})
+def req(msg, timeout=10000, max_chars=2000): return cmd({"op":"req","msg":msg,"timeoutMs":timeout,"maxChars":max_chars}, timeout/1000)
+def login(password, timeout=15000): return cmd({"op":"login","password":password,"timeoutMs":timeout}, timeout/1000)
+def unsolicited(n=20, clear=False): return cmd({"op":"unsolicited","n":n,"clear":clear})
+def knob_rtt(project_handle, panel_write, values, timeout=10000):
+    """A PanelWrite round trip per value: the Play-mode knob turn.
+
+    `panel_write` is a `WirePanelWriteRequest` as JSON ({"scope":…, "channel":…,
+    "value":…}); take it from Studio's own traffic or serialize one in a host
+    test — its `value` is replaced by each of `values` (wire-form LpValues)."""
+    out = []
+    for v in values:
+        msg = {"projectCommand":{"handle":project_handle,"command":{"panelWrite":{**panel_write,"value":v}}}}
+        d = req(msg, timeout, 300)
+        out.append({"value": v, "ok": d.get("ok"), "rttMs": d.get("rttMs"), "reply": d.get("reply")})
+    return out
 if __name__=="__main__":
     print(eval(sys.argv[1]))

@@ -708,7 +708,7 @@ fn the_ledger_triple_is_elicited_by_a_stop_all_on_the_wire() {
     assert_eq!(stack.len(), 1, "one [stack] line per stop-all:\n{text}");
     assert_eq!(mem.len(), 2, "[MEM] before and after the stop:\n{text}");
     assert_eq!(jit.len(), 2, "[JIT] before and after the stop:\n{text}");
-    // `[stack] heartbeat: high-water <used> B of 37296 B (<headroom> B headroom)`
+    // `[stack] heartbeat: high-water <used> B of 37280 B (<headroom> B headroom)`
     //
     // Re-baselined 2026-09-23 (lean-wire P7): 37,280 → 37,272 (−8 B). The
     // wire-side `RevisionGateRead`/`RevisionGateResult` gate and the
@@ -722,20 +722,25 @@ fn the_ledger_triple_is_elicited_by_a_stop_all_on_the_wire() {
     // loop's future, which lives in `.bss`, and with it what `.bss` leaves
     // the stack: 37,272 → 37,296 (+24 B, the same +24 the access gate cost
     // before lean-wire, 37,280 → 37,304). Measured on the merged tree.
+    //
+    // Then lean-wire's follow-ups (#804) left the stack 16 B less:
+    // 37,296 → 37,280, the same −16 B the classic's `[INIT] main stack` line
+    // moved (45,360 → 45,344) in the same change. Measured by CI on the
+    // merged tree; not attributed to one symbol.
     let words: Vec<&str> = stack[0].split_whitespace().collect();
     let used: u32 = words[3].parse().expect("high-water bytes");
     assert_eq!(
         &words[4..7],
-        &["B", "of", "37296"],
-        "the S3's 37,296 B total: {}",
+        &["B", "of", "37280"],
+        "the S3's 37,280 B total: {}",
         stack[0]
     );
     let headroom: u32 = words[8]
         .trim_start_matches('(')
         .parse()
         .expect("headroom bytes");
-    assert_eq!(used + headroom, 37_296, "{}", stack[0]);
-    assert!(used > 0 && used < 37_296, "{}", stack[0]);
+    assert_eq!(used + headroom, 37_280, "{}", stack[0]);
+    assert!(used > 0 && used < 37_280, "{}", stack[0]);
     for line in &mem {
         assert!(
             line.contains(" used=") && line.contains(" largest_free="),
@@ -763,7 +768,7 @@ fn the_ledger_triple_is_elicited_by_a_stop_all_on_the_wire() {
     );
     assert!(
         !text.contains("[INIT] main stack"),
-        "the S3 prints no `main stack` line; its 37,296 B total is in every `[stack]` \
+        "the S3 prints no `main stack` line; its 37,280 B total is in every `[stack]` \
          line's `of <total> B` instead"
     );
 

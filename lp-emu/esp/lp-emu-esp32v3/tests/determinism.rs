@@ -333,14 +333,24 @@ fn the_snapshot_carries_the_state_that_is_not_a_register() {
 /// call's wait retires one more of the loop's instructions before it exits,
 /// which is what the two-cycle shift upstream of it buys. Bytes, sha and
 /// skips did not move.
-const PREFIX_CYCLES: u64 = 3_251_030;
-const PREFIX_INSTRUCTIONS: u64 = 3_251_010;
+///
+/// Then **−21 with lean-wire's follow-ups (#804): 3,251,030 → 3,251,009
+/// cycles, 3,251,010 → 3,250,989 instructions**, in the same change that
+/// left the main stack 16 B smaller (`45360 B` → `45344 B`, the one line of
+/// the 543 bytes that moved; see `PREFIX_SHA256`). A smaller stack is fewer
+/// `stack_probe::paint` iterations, which is the likely home of the drop,
+/// but it was NOT isolated per symbol with `LP_EMU_XT_BLOCKPROF`, unlike
+/// the entries above. Skips did not move.
+const PREFIX_CYCLES: u64 = 3_251_009;
+const PREFIX_INSTRUCTIONS: u64 = 3_250_989;
 const PREFIX_IDLE_SKIPS: u64 = 0;
 const PREFIX_BYTES: usize = 543;
 /// Moved by the BLE plan's M3 (access core): one line of the 543 bytes,
 /// `[INIT] main stack 45280 B` → `45360 B` (the server loop's future in
 /// `.bss` shrank 80 B). See `boot_idle.rs`'s `PREFIX_SHA256`. Was `ea8bae30…`.
-const PREFIX_SHA256: &str = "465c8d520e705c194205b6d60045946b576b01df361850322f57f14ac0a11f11";
+/// Moved again by lean-wire's follow-ups (#804): `45360 B` → `45344 B`.
+/// Was `465c8d52…`.
+const PREFIX_SHA256: &str = "05b270952a2b0bd2f3bf5f4c6a6e9e412c4eb79ea809c35e03435b9200a4c542";
 
 /// **The single-core safety net.** A run in which core 1 never starts is
 /// the run M3 produced: same bytes, same sha, same cycles, same

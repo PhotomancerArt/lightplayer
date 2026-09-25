@@ -53,8 +53,16 @@ pub enum WireColorLayout {
 #[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case")]
 pub enum WireChannelSampleFormat {
+    /// Linear unorm8: `round(v / 257)` of the 16-bit sample. What a buffer
+    /// published at 8 bits holds.
     U8,
+    /// Linear unorm16, little-endian: what the engine renders and publishes.
     U16,
+    /// sRGB-encoded 8-bit display code of the linear 16-bit sample,
+    /// correctly rounded (`project::srgb8_sample_codec`). Same bytes as `U8`,
+    /// with the codes spent where a screen shows the difference: the darks.
+    /// A transport format only — no buffer is published in it.
+    Srgb8,
 }
 
 /// Metadata bundled with resource summaries (no raw bytes).
