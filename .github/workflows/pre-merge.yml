@@ -2832,6 +2832,13 @@ jobs:
   # on, so a main run is the canary; this job makes it say which PRs landed
   # since the last green main run, so the diagnosis starts in the right place.
   # It never runs on a pull_request, and it exits 0: the run is already red.
+  #
+  # `needs:` below must list EVERY other job in this file: `failure()` only
+  # sees the jobs named here, so a job left out can go red after this job has
+  # already been skipped. `just lint-red-main-needs`
+  # (scripts/ci/check-red-main-needs.py, part of `just check-lint`, so the
+  # Lint job runs it) fails when one is missing — add a new job here when
+  # you add it to the workflow.
   red-main-suspects:
     name: Red main suspects
     runs-on: ubuntu-24.04
