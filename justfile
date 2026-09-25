@@ -2939,7 +2939,11 @@ test-emu-esp32v3:
 #      worktrees at two different paths, one sha256. It is last because it is
 #      the slow half (two full Xtensa firmware builds, ~2 minutes each cold on
 #      an M2 Max) and because a failure there is a claim about the *recipe*
-#      rather than about the machine.
+#      rather than about the machine. `LP_EMU_REF_VERIFY=0` builds the image
+#      ONCE instead (the translated-core cell after this recipe still needs
+#      it): CI sets it on a PR that changes neither the recipe nor the
+#      classic's firmware, because such a PR cannot move the image's bytes
+#      (2026-09-24, #797). Pushes to main always verify.
 #
 # Parts 3 and 4 are here rather than as extra steps in the CI job on purpose:
 # the gate a human runs and the gate CI runs are one thing, and a step that
@@ -2964,8 +2968,14 @@ test-emu-esp32v3-gate: test-emu-esp32v3-boot
     cargo test -p lp-emu-validate
     cargo test -p lp-cli --test validate_registry_parity
     commit="$(git rev-parse --short HEAD)"
-    scripts/emu/build-reference-image.sh --verify --chip esp32 \
-        esp32,server,float-f32 "$commit" none
+    if [[ "${LP_EMU_REF_VERIFY:-1}" == 0 ]]; then
+        echo "test-emu-esp32v3-gate: LP_EMU_REF_VERIFY=0 — one reference build, no reproducibility rebuild"
+        scripts/emu/build-reference-image.sh --chip esp32 \
+            esp32,server,float-f32 "$commit" none
+    else
+        scripts/emu/build-reference-image.sh --verify --chip esp32 \
+            esp32,server,float-f32 "$commit" none
+    fi
 
 # The boot half: build the shipped `fw-esp32v3` image, the `rmt-chase` harness
 # image and the `frame-dump` image, then run the whole suite with the
