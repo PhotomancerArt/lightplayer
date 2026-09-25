@@ -30,6 +30,17 @@
 //!   already abandons stray ids, so a straggler from a cancelled pull is a
 //!   quiet discard rather than a wrong answer.
 //!
+//! # Several conversations on one link
+//!
+//! The card's frame feed and the access controller (reading a device's
+//! list, adding this browser's key on a USB connect) can each hold a
+//! conversation on the same link at once, and the link has ONE inbox. So
+//! every io claims its own slice of the app range
+//! ([`CONVERSATION_ID_STRIDE`] ids) when it is made, its client mints ids
+//! only there, and `receive` takes only the replies in its slice — another
+//! conversation's reply stays in the inbox for its owner instead of being
+//! read, and discarded, as a stranger's.
+//!
 //! [`APP_CONVERSATION_ID_BASE`]: lpa_devices::link::APP_CONVERSATION_ID_BASE
 //! [`LinkEvent::Passthrough`]: lpa_devices::link::LinkEvent::Passthrough
 
@@ -55,14 +66,38 @@ const RECEIVE_POLL: Duration = Duration::from_millis(20);
 const RESPONSE_BUDGET: Duration = Duration::from_secs(5);
 
 /// Replies in the app range, routed here by the pump (or the lens tap) for
-/// the conversation on this link: `(request id, the raw M! line)`.
+/// the conversations on this link: `(request id, the raw M! line)`.
 pub type ConversationInbox = Rc<RefCell<VecDeque<(u32, String)>>>;
+
+/// How many request ids one conversation owns (see the module doc). A
+/// long-lived conversation (the frame feed keeps one per connection) mints
+/// 16 M requests before it would reach the next slice.
+pub const CONVERSATION_ID_STRIDE: u32 = 0x0100_0000;
+
+/// The app range's slices, `APP_CONVERSATION_ID_BASE..0x8000_0000`.
+const CONVERSATION_SLICES: u32 = (0x8000_0000 - APP_CONVERSATION_ID_BASE) / CONVERSATION_ID_STRIDE;
+
+thread_local! {
+    static NEXT_SLICE: core::cell::Cell<u32> = const { core::cell::Cell::new(0) };
+}
+
+/// Claim the next slice of the app range (cycling; 64 slices).
+fn claim_slice() -> u32 {
+    let slice = NEXT_SLICE.with(|next| {
+        let slice = next.get();
+        next.set((slice + 1) % CONVERSATION_SLICES);
+        slice
+    });
+    APP_CONVERSATION_ID_BASE + slice * CONVERSATION_ID_STRIDE
+}
 
 /// `ClientIo` over one link's shared wire.
 pub struct SharedLinkClientIo {
     link: Weak<RefCell<Box<dyn Link>>>,
     inbox: ConversationInbox,
     timer: Rc<RefCell<dyn FnMut(Duration) -> DeviceTimerFuture>>,
+    /// The first id of this conversation's slice.
+    first_id: u32,
 }
 
 impl SharedLinkClientIo {
@@ -71,14 +106,25 @@ impl SharedLinkClientIo {
         inbox: ConversationInbox,
         timer: Rc<RefCell<dyn FnMut(Duration) -> DeviceTimerFuture>>,
     ) -> Self {
-        Self { link, inbox, timer }
+        Self {
+            link,
+            inbox,
+            timer,
+            first_id: claim_slice(),
+        }
     }
 
-    /// An `lpa-client` over this io whose request ids start in the app
-    /// range, so the transport routes its replies here and nothing it
-    /// mints can collide with the model's own ids.
+    /// An `lpa-client` over this io whose request ids start in its own
+    /// slice of the app range, so the transport routes its replies here and
+    /// nothing it mints can collide with the model's ids or another
+    /// conversation's.
     pub fn into_client(self) -> LpClient<SharedLinkClientIo> {
-        LpClient::new(self).with_request_ids_from(u64::from(APP_CONVERSATION_ID_BASE))
+        let first = u64::from(self.first_id);
+        LpClient::new(self).with_request_ids_from(first)
+    }
+
+    fn owns(&self, id: u32) -> bool {
+        id.wrapping_sub(self.first_id) < CONVERSATION_ID_STRIDE
     }
 
     /// Whether the link this io speaks through still exists.
@@ -109,7 +155,13 @@ impl ClientIo for SharedLinkClientIo {
     async fn receive(&mut self) -> Result<WireServerMessage, TransportError> {
         let mut waited = Duration::ZERO;
         loop {
-            let next = self.inbox.borrow_mut().pop_front();
+            let next = {
+                let mut inbox = self.inbox.borrow_mut();
+                inbox
+                    .iter()
+                    .position(|(id, _)| self.owns(*id))
+                    .and_then(|at| inbox.remove(at))
+            };
             if let Some((_, line)) = next {
                 let json = line.strip_prefix("M!").unwrap_or(&line);
                 match lpc_wire::json::from_str::<WireServerMessage>(json) {
@@ -141,5 +193,16 @@ impl ClientIo for SharedLinkClientIo {
     async fn close(&mut self) -> Result<(), TransportError> {
         // The port belongs to the model's link.
         Ok(())
+    }
+}
+
+impl Drop for SharedLinkClientIo {
+    /// Replies nobody will read again (a straggler after a timeout) leave
+    /// with their conversation.
+    fn drop(&mut self) {
+        let first_id = self.first_id;
+        self.inbox
+            .borrow_mut()
+            .retain(|(id, _)| id.wrapping_sub(first_id) >= CONVERSATION_ID_STRIDE);
     }
 }
