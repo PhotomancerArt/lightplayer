@@ -44,6 +44,19 @@ async fn handle_upload_async(args: UploadArgs) -> Result<()> {
 
     let (project_uid, _project_name) = validation::validate_local_project(&dir)?;
 
+    // Check every entry, not only the one the device will load (D19): the
+    // device only finds a broken dormant pattern when it is picked, and
+    // upload has every file on the host right here.
+    let entry_issues = validation::check_every_entry(&dir)?;
+    if !entry_issues.is_empty() {
+        anyhow::bail!(
+            "Refusing to upload: {} pattern{} failed to load:\n{}",
+            entry_issues.len(),
+            if entry_issues.len() == 1 { "" } else { "s" },
+            entry_issues.join("\n")
+        );
+    }
+
     let host_spec = HostSpecifier::parse(&args.host).with_context(|| {
         format!(
             "Failed to parse host specifier: {}. Examples: serial:auto, ws://localhost:2812/",

@@ -26,6 +26,10 @@ notify = "6"
 # so the (non-default) schema-gen features are safe to enable unconditionally.
 lpc-model = { path = "../lp-core/lpc-model", features = ["schema-gen"] }
 lpc-wire = { path = "../lp-core/lpc-wire" }
+# `upload`'s pre-deploy all-entries check (D19): loads every playlist entry
+# host-side, the same as `lp-cli/tests/examples_valid.rs`'s coverage gate.
+lpc-engine = { path = "../lp-core/lpc-engine" }
+lpc-registry = { path = "../lp-core/lpc-registry" }
 lpa-server = { path = "../lp-app/lpa-server" }
 # `project upgrade`: offline format migration for authored project packages.
 lpa-upgrade = { path = "../lp-app/lpa-upgrade" }
