@@ -1,6 +1,14 @@
 // P3: the queue — spacing from the END of the previous press (D19), A/B
 // interleave bound to one device (D20), taint retry (D23), TTL, the device
 // filter, waits, restart safety — driven by a fake page client at test speed.
+//
+// Every test that asserts HOW LONG the scheduler waited runs its own lab on
+// the manual clock (clock.mjs) and reads the answer off the server's own press
+// record: time moves only when the test (or the fake device, spending its
+// press) says so, so a wait is an equality, and "not yet" one millisecond
+// before it is checkable too. Nothing here measures a wall-clock gap — that
+// is what reddened main on 2026-09-25
+// (docs/defects/2026-09-25-emu-lab-cooldown-tests-measured-wall-clock.md).
 'use strict';
 
 import { test, before, after } from 'node:test';
@@ -9,13 +17,16 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-import { startServer } from './helpers.mjs';
+import { startServer, until, MANUAL_CLOCK } from './helpers.mjs';
 import { fakeDevice } from './fake-device.mjs';
 
 // `LAB_COOLDOWN_MS: '0'` is the cooldown OFF — the ceiling of 0 short-circuits
 // the burn-proportional model (C), the way it short-circuited the flat wait
-// before it. Every timing assertion in this file below rests on that.
-const FAST = { LAB_TICK_MS: '20', LAB_COOLDOWN_MS: '0', LAB_LOST_MS: '400' };
+// before it. The shared lab runs on the real clock, so its lost bound is set
+// far past anything a loaded runner can take to answer a press: a bound that
+// a slow answer can cross re-sends presses under the tests' feet. The tests
+// of the lost bound itself run their own lab on the manual clock.
+const FAST = { LAB_TICK_MS: '20', LAB_COOLDOWN_MS: '0', LAB_LOST_MS: '60000' };
 
 function stageFixture(home, ids) {
   for (const id of ids) {
@@ -45,18 +56,34 @@ async function ownLab(env) {
   return l;
 }
 
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-/// Poll a predicate at test speed; throws with the last value on timeout.
-async function until(what, fn, timeoutMs = 5000) {
-  const end = Date.now() + timeoutMs;
-  let last;
-  for (;;) {
-    last = await fn();
-    if (last) return last;
-    if (Date.now() > end) throw new Error('timed out waiting for ' + what);
-    await sleep(20);
-  }
+/// The lab env on the manual clock: cooldown off and bounds far out unless a
+/// test pins its own.
+const MANUAL = { ...MANUAL_CLOCK, LAB_COOLDOWN_MS: '0', LAB_LOST_MS: '60000' };
+
+/// What the server waited between the END of press n-1 and the SEND of press
+/// n, from its own press record — the two instants the spacing and cooldown
+/// rules are stated between, on the clock they are enforced on.
+const serverGap = (job, n) => Date.parse(job.presses[n - 1].sentAt) - Date.parse(job.presses[n - 2].resultAt);
+
+/// Press n-1 has ended; walk the manual clock to the millisecond before press
+/// n is owed (`waitMs` after that end) and check it is still pending, then one
+/// more and check it went. Returns the job as it stood once press n was sent.
+async function stepToPress(l, jobId, n, waitMs) {
+  const prev = await until('press ' + (n - 1) + ' to end', async () => {
+    const j = await l.job(jobId);
+    return j.presses[n - 2].resultAt ? j : null;
+  });
+  assert.equal(prev.presses[n - 1].state, 'pending', 'press ' + n + ' is not sent the instant press ' + (n - 1) + ' ends');
+  const due = Date.parse(prev.presses[n - 2].resultAt) + waitMs;
+  const now = await l.now();
+  if (due - 1 > now) await l.advance(due - 1 - now);
+  if (waitMs > 0) assert.equal((await l.job(jobId)).presses[n - 1].state, 'pending', 'press ' + n + ' still waits 1 ms before it is owed');
+  await l.advance(1);
+  const sent = await l.job(jobId);
+  assert.notEqual(sent.presses[n - 1].state, 'pending', 'press ' + n + ' goes the moment it is owed');
+  return sent;
 }
+
 const waitJob = async (id, timeout = 10) => { const r = await api('/wait?job=' + id + '&timeout=' + timeout); return { status: r.status, body: await r.json() }; };
 
 before(async () => {
@@ -68,33 +95,41 @@ after(() => lab && lab.stop());
 
 test('a single-build 3-press job: presses in order, never before spacing from the previous END; report matches', async () => {
   const table = [0.863, 0.945, 1.008];
-  const dev = await fakeDevice(lab, { pressMs: 30, numbers: (b, n) => [{ key: 'render-basic/t2/jit/8', realtime: table[Math.ceil(n / 1) - 1] }, { key: 'render-basic/t2/interp', realtime: 0.5 }] });
-  const { status, body: j } = await queue({ builds: ['aaa1111'], rows: 'gate-rows', repeats: 3, spacingMs: 150, ttlMs: 60000 });
-  assert.equal(status, 201);
-  assert.equal(j.presses.length, 3);
-  assert.equal(j.state, 'queued');
-  const w = await waitJob(j.id);
-  assert.equal(w.status, 200);
-  assert.equal(w.body.job.state, 'done');
-  assert.deepEqual(dev.answered.map((a) => a.press), [1, 2, 3]);
-  for (let i = 1; i < dev.answered.length; i++) {
-    const gap = dev.answered[i].sentAt - dev.answered[i - 1].answeredAt;
-    assert.ok(gap >= 150 - 25, 'press ' + (i + 1) + ' sent ' + gap + ' ms after the previous END (spacing 150)');
-  }
-  const rep = w.body.report;
-  assert.deepEqual(rep.perBuild.aaa1111.rows['render-basic/t2/jit/8'].seq, table);
-  assert.equal(rep.perBuild.aaa1111.rows['render-basic/t2/jit/8'].best, 1.008);
-  assert.equal(rep.perBuild.aaa1111.rows['render-basic/t2/jit/8'].median, 0.945);
-  assert.equal(rep.device.id, dev.id);
-  assert.ok(fs.existsSync(path.join(home, 'jobs', j.id, 'report.md')));
-  assert.equal(fs.readdirSync(path.join(home, 'jobs', j.id, 'presses')).length, 3);
-  // The legacy result files carry the job keys (D12).
-  const legacy = fs.readdirSync(path.join(home, 'results')).filter((f) => f.startsWith('result-'));
-  assert.equal(legacy.length, 3);
-  const one = JSON.parse(fs.readFileSync(path.join(home, 'results', legacy[0]), 'utf8'));
-  assert.equal(one.job, j.id);
-  assert.ok(Array.isArray(one.results));
-  await dev.stop();
+  const l = await ownLab(MANUAL);
+  try {
+    const dev = await fakeDevice(l, { pressMs: 30, numbers: (b, n) => [{ key: 'render-basic/t2/jit/8', realtime: table[n - 1] }, { key: 'render-basic/t2/interp', realtime: 0.5 }] });
+    const { status, body: j } = await l.queue({ builds: ['aaa1111'], rows: 'gate-rows', repeats: 3, spacingMs: 150, ttlMs: 60000 });
+    assert.equal(status, 201);
+    assert.equal(j.presses.length, 3);
+    assert.equal(j.state, 'queued');
+    // Spacing is from the previous press's END (D19): the device spends 30 ms
+    // on each, and the next is owed exactly 150 ms after it answered.
+    for (const n of [2, 3]) {
+      const sent = await stepToPress(l, j.id, n, 150);
+      assert.equal(serverGap(sent, n), 150, 'press ' + n + ' sent 150 ms after the previous END');
+    }
+    const r = await apiOn(l, '/wait?job=' + j.id + '&timeout=10');
+    assert.equal(r.status, 200);
+    const w = await r.json();
+    assert.equal(w.job.state, 'done');
+    assert.deepEqual(dev.answered.map((a) => a.press), [1, 2, 3]);
+    const done = await l.job(j.id);
+    assert.deepEqual(done.presses.map((p) => p.durationMs), [30, 30, 30], 'the server measured the burn the device spent');
+    const rep = w.report;
+    assert.deepEqual(rep.perBuild.aaa1111.rows['render-basic/t2/jit/8'].seq, table);
+    assert.equal(rep.perBuild.aaa1111.rows['render-basic/t2/jit/8'].best, 1.008);
+    assert.equal(rep.perBuild.aaa1111.rows['render-basic/t2/jit/8'].median, 0.945);
+    assert.equal(rep.device.id, dev.id);
+    assert.ok(fs.existsSync(path.join(l.home, 'jobs', j.id, 'report.md')));
+    assert.equal(fs.readdirSync(path.join(l.home, 'jobs', j.id, 'presses')).length, 3);
+    // The legacy result files carry the job keys (D12).
+    const legacy = fs.readdirSync(path.join(l.home, 'results')).filter((f) => f.startsWith('result-'));
+    assert.equal(legacy.length, 3);
+    const one = JSON.parse(fs.readFileSync(path.join(l.home, 'results', legacy[0]), 'utf8'));
+    assert.equal(one.job, j.id);
+    assert.ok(Array.isArray(one.results));
+    await dev.stop();
+  } finally { await l.stop(); }
 });
 
 test('an A/B 2×3 job runs A B A B A B and stays bound to the first device even when a second joins (D20)', async () => {
@@ -102,8 +137,9 @@ test('an A/B 2×3 job runs A B A B A B and stays bound to the first device even 
   let dev2 = null;
   const { body: j } = await queue({ builds: ['aaa1111', 'bbb2222'], rows: 'gate-rows', repeats: 3, spacingMs: 40, ttlMs: 60000 });
   assert.deepEqual(j.presses.map((p) => p.build), ['aaa1111', 'bbb2222', 'aaa1111', 'bbb2222', 'aaa1111', 'bbb2222']);
-  // A second device joins after press 1 is out.
-  await new Promise((r) => setTimeout(r, 60));
+  // A second device joins after press 1 is out — and has been answered, so
+  // the job is bound before the second device exists.
+  await until('press 1 to reach the first device', async () => dev1.answered.length >= 1);
   dev2 = await fakeDevice(lab, { name: 'second', pressMs: 5 });
   const w = await waitJob(j.id);
   assert.equal(w.body.job.state, 'done');
@@ -208,8 +244,7 @@ test('restart: a press that was sent when the server died is re-sent once and th
     beforeAnswer: async (p) => { if (p.press === 2 && !killed) { killed = true; await lab.stop(); throw new Error('server killed under press 2'); } },
   });
   const { body: j } = await queue({ builds: ['aaa1111'], repeats: 3, spacingMs: 0, ttlMs: 60000 });
-  await new Promise((r) => setTimeout(r, 400));
-  assert.equal(killed, true);
+  await until('the server to be killed under press 2', async () => killed);
   const onDisk = JSON.parse(fs.readFileSync(path.join(home, 'jobs', j.id + '.json'), 'utf8'));
   assert.equal(onDisk.presses[1].state, 'sent', 'press 2 was in flight when the server died');
   await dev.stop().catch(() => {});
@@ -230,15 +265,31 @@ test('restart: a press that was sent when the server died is re-sent once and th
 });
 
 test('lost: a sent press with no result is re-sent once, then failed', async () => {
-  let seen = 0;
-  const dev = await fakeDevice(lab, { pressMs: 5, beforeAnswer: async () => { seen++; throw new Error('never answers'); } });
-  const { body: j } = await queue({ builds: ['aaa1111'], repeats: 1, spacingMs: 0, ttlMs: 60000 });
-  const w = await waitJob(j.id, 5);
-  assert.equal(w.status, 200);
-  assert.equal(w.body.job.state, 'done');
-  assert.equal(w.body.job.presses.failed, 1);
-  assert.equal(seen, 2, 'sent twice, never a third time');
-  await dev.stop().catch(() => {});
+  // The wall bound at 400 ms of the lab's own time, the drop window out of
+  // reach: the device stays connected and never answers.
+  const l = await ownLab({ ...MANUAL, LAB_LOST_MS: '400' });
+  try {
+    let seen = 0;
+    const dev = await fakeDevice(l, { pressMs: 5, beforeAnswer: async () => { seen++; throw new Error('never answers'); } });
+    const { body: j } = await l.queue({ builds: ['aaa1111'], repeats: 1, spacingMs: 0, ttlMs: 60000 });
+    await until('press 1 to reach the device', async () => seen === 1);
+    // The device spent its 5 ms before going quiet; the bound runs from the send.
+    const sentAt = Date.parse((await l.job(j.id)).presses[0].sentAt);
+    await l.advance(sentAt + 400 - await l.now());
+    assert.equal((await l.job(j.id)).presses[0].state, 'sent', 'AT the bound is not past it');
+    await l.advance(1);
+    await until('the re-send to reach the device', async () => seen === 2);
+    const resent = await l.job(j.id);
+    assert.equal(resent.presses[0].resends, 1);
+    await l.advance(Date.parse(resent.presses[0].sentAt) + 401 - await l.now());
+    const r = await apiOn(l, '/wait?job=' + j.id + '&timeout=10');
+    assert.equal(r.status, 200);
+    const w = await r.json();
+    assert.equal(w.job.state, 'done');
+    assert.equal(w.job.presses.failed, 1);
+    assert.equal(seen, 2, 'sent twice, never a third time');
+    await dev.stop().catch(() => {});
+  } finally { await l.stop(); }
 });
 
 // B: the observed failure was a press sent to a phone whose tab went away
@@ -246,10 +297,18 @@ test('lost: a sent press with no result is re-sent once, then failed', async () 
 // 3120 s on that job) could retire it, so the phone came back and sat idle
 // for 40 minutes. A page with no stream cannot post a result, so a closed
 // stream past the drop window is the press's answer.
+/// Resolve once the server has recorded the device's last stream closing —
+/// the instant the drop window is measured from.
+const streamClosedAt = (l, id) => until('the server to see ' + id + '\'s stream close', async () => {
+  const st = await apiOn(l, '/status').then((r) => r.json());
+  const d = st.devices.find((x) => x.id === id);
+  return d && d.streams === 0 && d.lastStreamClosedAt ? Date.parse(d.lastStreamClosedAt) : null;
+});
+
 test('drop: a press whose device goes away before any result is lost at the drop window, not the wall bound (B)', async () => {
   // A wall bound a minute out, a drop window a quarter-second out: inside
   // this test only the drop rule can fire.
-  const l = await ownLab({ LAB_TICK_MS: '20', LAB_COOLDOWN_MS: '0', LAB_LOST_MS: '60000', LAB_DROP_LOST_MS: '250' });
+  const l = await ownLab({ ...MANUAL, LAB_LOST_MS: '60000', LAB_DROP_LOST_MS: '250' });
   try {
     let seen = 0;
     const dev = await fakeDevice(l, { pressMs: 5, beforeAnswer: async () => { seen++; throw new Error('the tab went away'); } });
@@ -259,10 +318,12 @@ test('drop: a press whose device goes away before any result is lost at the drop
     assert.equal(sent.presses[0].state, 'sent');
     assert.equal(sent.boundDevice, dev.id);
     await dev.stop().catch(() => {});
-    const back = await until('press 1 back to pending', async () => {
-      const cur = await l.job(j.id);
-      return cur.presses[0].state === 'pending' ? cur : null;
-    }, 5000);
+    const closed = await streamClosedAt(l, dev.id);
+    await l.advance(closed + 250 - await l.now());
+    assert.equal((await l.job(j.id)).presses[0].state, 'sent', 'AT the window is not past it');
+    await l.advance(1);
+    const back = await l.job(j.id);
+    assert.equal(back.presses[0].state, 'pending', 'one past the window, the press is lost');
     assert.equal(back.presses[0].resends, 1, 'lost once, one re-send owed');
     const logged = fs.readFileSync(path.join(l.home, 'log', 'server.log'), 'utf8');
     assert.match(logged, /press 1 lost \(device stream closed .* no result\)/, 'the drop rule named it, not the wall bound');
@@ -279,7 +340,7 @@ test('drop: a press whose device goes away before any result is lost at the drop
 });
 
 test('drop: a stream flicker shorter than the window leaves the press sent (B)', async () => {
-  const l = await ownLab({ LAB_TICK_MS: '20', LAB_COOLDOWN_MS: '0', LAB_LOST_MS: '60000', LAB_DROP_LOST_MS: '1500' });
+  const l = await ownLab({ ...MANUAL, LAB_LOST_MS: '60000', LAB_DROP_LOST_MS: '1500' });
   try {
     let seen = 0;
     const quiet = async () => { seen++; throw new Error('running it, no result yet'); };
@@ -287,11 +348,17 @@ test('drop: a stream flicker shorter than the window leaves the press sent (B)',
     const { body: j } = await l.queue({ builds: ['aaa1111'], repeats: 1, spacingMs: 0, ttlMs: 60000 });
     await until('press 1 to reach the device', async () => seen === 1);
     await dev.stop().catch(() => {});
-    // Back well inside the window, the way an SSE stream reconnects.
+    // The precondition, established rather than hoped for: the server SAW the
+    // stream go, so the drop clock was running when the device came back.
+    const closed = await streamClosedAt(l, dev.id);
+    await l.advance(1000);
+    // Back inside the window, the way an SSE stream reconnects.
     const again = await fakeDevice(l, { id: dev.id, pressMs: 5, beforeAnswer: quiet });
-    // Now past the window measured from the FIRST close: only a cleared drop
-    // clock keeps the press alive here.
-    await sleep(2200);
+    const st = await apiOn(l, '/status').then((r) => r.json());
+    assert.equal(st.devices.find((x) => x.id === dev.id).lastStreamClosedAt, null, 'a stream again clears the drop clock');
+    // Now well past the window measured from the FIRST close: only a cleared
+    // drop clock keeps the press alive here.
+    await l.advance(closed + 2200 - await l.now());
     const cur = await l.job(j.id);
     assert.equal(cur.presses[0].state, 'sent', 'a flicker is not a device that went away');
     assert.equal(cur.presses[0].resends, 0);
@@ -301,11 +368,15 @@ test('drop: a stream flicker shorter than the window leaves the press sent (B)',
 });
 
 test('drop: a stream that stays open past the wall bound still hits the wall rule (B)', async () => {
-  const l = await ownLab({ LAB_TICK_MS: '20', LAB_COOLDOWN_MS: '0', LAB_LOST_MS: '400', LAB_DROP_LOST_MS: '60000' });
+  const l = await ownLab({ ...MANUAL, LAB_LOST_MS: '400', LAB_DROP_LOST_MS: '60000' });
   try {
     let seen = 0;
     const dev = await fakeDevice(l, { pressMs: 5, beforeAnswer: async () => { seen++; throw new Error('never answers'); } });
     const { body: j } = await l.queue({ builds: ['aaa1111'], repeats: 1, spacingMs: 0, ttlMs: 60000 });
+    await until('press 1 to reach the device', async () => seen === 1);
+    await l.advance(401);
+    await until('the re-send to reach the device', async () => seen === 2);
+    await l.advance(401);
     const r = await apiOn(l, '/wait?job=' + j.id + '&timeout=10');
     assert.equal(r.status, 200);
     const wb = await r.json();
@@ -321,31 +392,33 @@ test('drop: a stream that stays open past the wall bound still hits the wall rul
 
 // C: the cooldown is sized by the burn (DD5/DD6). Every test below pins the
 // floor and the ceiling apart from the press it uses, so the number the
-// scheduler actually waited names which of the three rules fired.
-const COOLDOWN_ENV = { LAB_TICK_MS: '20', LAB_LOST_MS: '60000' };
-/// The gap between the END of press n and the SEND of press n+1 — the wait the
-/// cooldown bought, measured the way the first test in this file measures
-/// spacing.
-const gapAfter = (dev, n) => dev.answered[n].sentAt - dev.answered[n - 1].answeredAt;
+// scheduler actually waited names which of the three rules fired. They run on
+// the manual clock: the device's burn is exactly its `pressMs`, and the wait is
+// read off the server's press record to the millisecond.
+const COOLDOWN_ENV = { ...MANUAL_CLOCK, LAB_LOST_MS: '60000' };
+
+/// Queue a 2-press job on `l`, let the device burn press 1, and step the clock
+/// to the cooldown the test expects. Returns the job once press 2 is sent.
+async function cooldownAfterOnePress(l, expectMs) {
+  const { body: j } = await l.queue({ builds: ['aaa1111'], repeats: 2, spacingMs: 0, ttlMs: 60000 });
+  return { j, sent: await stepToPress(l, j.id, 2, expectMs) };
+}
 
 test('cooldown: a press is followed by ~1× its own duration, not the ceiling and not the floor (C)', async () => {
-  // A 100 ms floor and a 4 s ceiling around a ~800 ms press: only the
+  // A 100 ms floor and a 4 s ceiling around an 800 ms press: only the
   // proportional rule can land in between.
   const l = await ownLab({ ...COOLDOWN_ENV, LAB_COOLDOWN_MS: '4000', LAB_COOLDOWN_FLOOR_MS: '100' });
   try {
     const dev = await fakeDevice(l, { pressMs: 800 });
-    await l.queue({ builds: ['aaa1111'], repeats: 2, spacingMs: 0, ttlMs: 60000 });
-    await until('both presses answered', async () => dev.answered.length === 2, 20000);
-    const gap = gapAfter(dev, 1);
-    assert.ok(gap >= 700, 'press 2 waited about the 800 ms burn, not the 100 ms floor (waited ' + gap + ' ms)');
-    assert.ok(gap <= 2000, 'and nowhere near the 4 s ceiling (waited ' + gap + ' ms)');
+    const { sent } = await cooldownAfterOnePress(l, 800);
+    assert.equal(sent.presses[0].durationMs, 800, 'the burn the server measured is the one the device spent');
+    assert.equal(serverGap(sent, 2), 800, 'press 2 waited the 800 ms burn, not the 100 ms floor or the 4 s ceiling');
     const st = await apiOn(l, '/status').then((r) => r.json());
     assert.equal(st.config.cooldownFactor, 1);
     assert.equal(st.config.cooldownFloorMs, 100);
     assert.equal(st.config.cooldownMs, 4000, 'cooldownMs is the ceiling');
     const row = st.devices.find((x) => x.id === dev.id);
-    assert.ok(row.lastPressDurationMs >= 700 && row.lastPressDurationMs <= 2000, 'the burn is on the device record (' + row.lastPressDurationMs + ' ms)');
-    assert.equal(row.cooldownMs, Math.round(row.lastPressDurationMs), 'factor 1: the cooldown IS the burn');
+    assert.equal(row.cooldownMs, row.lastPressDurationMs, 'factor 1: the cooldown IS the burn (' + row.lastPressDurationMs + ' ms)');
     await dev.stop();
   } finally { await l.stop(); }
 });
@@ -354,11 +427,11 @@ test('cooldown: a press shorter than the floor waits the floor (C)', async () =>
   const l = await ownLab({ ...COOLDOWN_ENV, LAB_COOLDOWN_MS: '4000', LAB_COOLDOWN_FLOOR_MS: '600' });
   try {
     const dev = await fakeDevice(l, { pressMs: 5 });
-    await l.queue({ builds: ['aaa1111'], repeats: 2, spacingMs: 0, ttlMs: 60000 });
-    await until('both presses answered', async () => dev.answered.length === 2, 20000);
-    const gap = gapAfter(dev, 1);
-    assert.ok(gap >= 520, 'a 5 ms press still rests the 600 ms floor (waited ' + gap + ' ms)');
-    assert.ok(gap <= 1600, 'the floor, not the ceiling (waited ' + gap + ' ms)');
+    const { j, sent } = await cooldownAfterOnePress(l, 600);
+    assert.equal(sent.presses[0].durationMs, 5);
+    assert.equal(serverGap(sent, 2), 600, 'a 5 ms press still rests the 600 ms floor');
+    // Press 2 is on the device now; once it answers the device owes the floor again.
+    await until('press 2 to end', async () => (await l.job(j.id)).presses[1].state === 'done');
     const st = await apiOn(l, '/status').then((r) => r.json());
     assert.equal(st.devices.find((x) => x.id === dev.id).cooldownMs, 600);
     await dev.stop();
@@ -369,32 +442,35 @@ test('cooldown: a press longer than the ceiling waits the ceiling, not more (C)'
   const l = await ownLab({ ...COOLDOWN_ENV, LAB_COOLDOWN_MS: '300', LAB_COOLDOWN_FLOOR_MS: '50' });
   try {
     const dev = await fakeDevice(l, { pressMs: 900 });
-    await l.queue({ builds: ['aaa1111'], repeats: 2, spacingMs: 0, ttlMs: 60000 });
-    await until('both presses answered', async () => dev.answered.length === 2, 20000);
-    const gap = gapAfter(dev, 1);
-    assert.ok(gap >= 250, 'the ceiling is still a wait (waited ' + gap + ' ms)');
-    assert.ok(gap <= 700, 'clamped to the 300 ms ceiling, not the ~900 ms burn (waited ' + gap + ' ms)');
+    const { j, sent } = await cooldownAfterOnePress(l, 300);
+    assert.equal(sent.presses[0].durationMs, 900);
+    assert.equal(serverGap(sent, 2), 300, 'clamped to the 300 ms ceiling, not the 900 ms burn');
+    await until('press 2 to end', async () => (await l.job(j.id)).presses[1].state === 'done');
     const st = await apiOn(l, '/status').then((r) => r.json());
     assert.equal(st.devices.find((x) => x.id === dev.id).cooldownMs, 300);
     await dev.stop();
   } finally { await l.stop(); }
 });
 
-// The whole FAST suite above runs on `LAB_COOLDOWN_MS: '0'` and would not
+// Every FAST lab in this suite runs on `LAB_COOLDOWN_MS: '0'` and would not
 // finish in its timeouts if 0 had stopped meaning OFF, but that is an
-// implication, so here it is said out loud.
+// implication, so here it is said out loud — on the manual clock, where "back
+// to back" is a gap of exactly zero.
 test('cooldown: LAB_COOLDOWN_MS=0 is still OFF — presses go back to back (C)', async () => {
-  const dev = await fakeDevice(lab, { name: 'no-cooldown', pressMs: 5 });
-  const { body: j } = await queue({ builds: ['aaa1111'], repeats: 3, spacingMs: 0, ttlMs: 60000, device: 'no-cooldown' });
-  const w = await waitJob(j.id);
-  assert.equal(w.body.job.state, 'done');
-  for (let i = 1; i < dev.answered.length; i++) {
-    assert.ok(gapAfter(dev, i) <= 400, 'press ' + (i + 1) + ' followed press ' + i + ' at once (' + gapAfter(dev, i) + ' ms)');
-  }
-  const st = await api('/status').then((r) => r.json());
-  assert.equal(st.config.cooldownMs, 0, '/status reports the effective ceiling, which is off');
-  assert.equal(st.devices.find((x) => x.id === dev.id).cooldownMs, 0);
-  await dev.stop();
+  const l = await ownLab(MANUAL);
+  try {
+    const dev = await fakeDevice(l, { name: 'no-cooldown', pressMs: 5 });
+    const { body: j } = await l.queue({ builds: ['aaa1111'], repeats: 3, spacingMs: 0, ttlMs: 60000 });
+    const r = await apiOn(l, '/wait?job=' + j.id + '&timeout=10');
+    assert.equal(r.status, 200);
+    assert.equal((await r.json()).job.state, 'done');
+    const done = await l.job(j.id);
+    for (const n of [2, 3]) assert.equal(serverGap(done, n), 0, 'press ' + n + ' went the instant press ' + (n - 1) + ' ended');
+    const st = await apiOn(l, '/status').then((r2) => r2.json());
+    assert.equal(st.config.cooldownMs, 0, '/status reports the effective ceiling, which is off');
+    assert.equal(st.devices.find((x) => x.id === dev.id).cooldownMs, 0);
+    await dev.stop();
+  } finally { await l.stop(); }
 });
 
 test('cooldown: the burn survives a restart, so the next press still waits 1× it, not the ceiling (C)', async () => {
@@ -404,16 +480,16 @@ test('cooldown: the burn survives a restart, so the next press still waits 1× i
   try {
     const dev = await fakeDevice(l, { pressMs: 800 });
     await l.queue({ builds: ['aaa1111'], repeats: 1, spacingMs: 0, ttlMs: 60000 });
-    await until('the press to land', async () => dev.answered.length === 1, 20000);
+    await until('the press to land', async () => dev.answered.length === 1);
     await dev.stop();
     const onDisk = JSON.parse(fs.readFileSync(path.join(l.home, 'devices', dev.id + '.json'), 'utf8'));
-    assert.ok(onDisk.lastPressDurationMs >= 700, 'the burn is on the device FILE (' + onDisk.lastPressDurationMs + ' ms)');
+    assert.equal(onDisk.lastPressDurationMs, 800, 'the burn is on the device FILE');
     await l.stop();
     l2 = await startServer(l.home, env);
     const st = await apiOn(l2, '/status').then((r) => r.json());
     const row = st.devices.find((x) => x.id === dev.id);
-    assert.equal(row.lastPressDurationMs, onDisk.lastPressDurationMs, 'the restarted server remembers it');
-    assert.equal(row.cooldownMs, Math.round(onDisk.lastPressDurationMs), 'and still owes 1× it, not the 4 s ceiling');
+    assert.equal(row.lastPressDurationMs, 800, 'the restarted server remembers it');
+    assert.equal(row.cooldownMs, 800, 'and still owes 1× it, not the 4 s ceiling');
   } finally { if (l2) await l2.stop(); await l.stop().catch(() => {}); }
 });
 

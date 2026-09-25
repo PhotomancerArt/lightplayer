@@ -956,18 +956,58 @@ where
         project_id: &str,
         files: &[(String, Vec<u8>)],
     ) -> ClientResult<ClientOutcome<WireProjectHandle>> {
+        self.replace_and_load_project_observed(project_id, files, &mut |_| {})
+            .await
+    }
+
+    /// [`Self::replace_and_load_project`], reporting each step as it starts
+    /// and every write as it lands — what an opening page narrates while a
+    /// board takes the project (the load is the long step on a C6: it
+    /// compiles every shader).
+    pub async fn replace_and_load_project_observed(
+        &mut self,
+        project_id: &str,
+        files: &[(String, Vec<u8>)],
+        on_step: &mut dyn FnMut(DeployStep),
+    ) -> ClientResult<ClientOutcome<WireProjectHandle>> {
         let mut events = Vec::new();
+        on_step(DeployStep::Clearing);
         let stop = self.send_request(ClientRequest::StopAllProjects).await?;
         events.extend(stop.events);
         validate_project_deploy_response(&ClientRequest::StopAllProjects, &stop.value.msg)?;
+        let cleared = self.delete_project_dir(project_id).await?;
+        events.extend(cleared.events);
 
-        let deploy_files: Vec<ProjectDeployFile> = files
-            .iter()
-            .map(|(path, bytes)| ProjectDeployFile::new(path.clone(), bytes.clone()))
-            .collect();
-        let replace = self.replace_project_files(project_id, deploy_files).await?;
-        events.extend(replace.events);
+        let total_bytes: u64 = files.iter().map(|(_, bytes)| bytes.len() as u64).sum();
+        let mut sent_bytes = 0u64;
+        on_step(DeployStep::Writing {
+            sent_bytes,
+            total_bytes,
+        });
+        let writes = project_write_requests(
+            project_id,
+            files
+                .iter()
+                .map(|(path, bytes)| ProjectDeployFile::new(path.clone(), bytes.clone())),
+        );
+        for request in writes {
+            let written = match &request {
+                ClientRequest::Filesystem(
+                    FsRequest::Write { data, .. } | FsRequest::WriteChunk { data, .. },
+                ) => data.len() as u64,
+                _ => 0,
+            };
+            let outcome = self.send_request(request.clone()).await?;
+            events.extend(outcome.events);
+            validate_project_deploy_response(&request, &outcome.value.msg)?;
+            sent_bytes += written;
+            on_step(DeployStep::Writing {
+                sent_bytes,
+                total_bytes,
+            });
+        }
 
+        on_step(DeployStep::Loading);
         let request = ClientRequest::LoadProject {
             path: crate::project_deploy::project_load_path(project_id),
         };
@@ -986,6 +1026,17 @@ where
         let hash = crate::file_sync_ops::validate_hash_package_response(&outcome.value.msg)?;
         Ok(ClientOutcome::new(hash, outcome.events))
     }
+}
+
+/// One step of [`LpClient::replace_and_load_project_observed`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DeployStep {
+    /// Stopping what runs and deleting the old project directory.
+    Clearing,
+    /// Writing the files: `sent_bytes` of `total_bytes` acknowledged.
+    Writing { sent_bytes: u64, total_bytes: u64 },
+    /// `LoadProject` is in flight — the server builds the project.
+    Loading,
 }
 
 #[cfg(test)]

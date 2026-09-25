@@ -106,7 +106,8 @@ pub use app::node::{
 };
 pub use app::open_priority::{UserOpenGuard, begin_user_open, user_open_in_flight};
 pub use app::open_progress::{
-    OpenFailure, OpenStage, current_open_generation, note_open_requested, open_stage,
+    DeviceOpenProgress, DeviceOpenStep, DeviceWait, DeviceWaitReason, OpenDevice, OpenFailure,
+    OpenStage, cancel_open, current_open_generation, note_open_requested, open_stage,
     open_superseded,
 };
 #[cfg(all(feature = "browser-worker", target_arch = "wasm32"))]
