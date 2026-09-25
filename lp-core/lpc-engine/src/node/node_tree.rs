@@ -1,4 +1,5 @@
-//! The node tree container: flat slot storage with path and sibling indices.
+//! The node tree container: sparse id-keyed entry storage with path and
+//! sibling indices.
 //!
 //! See `docs/roadmaps/2026-04-28-node-runtime/design/01-tree.md` §NodeTree.
 
@@ -12,6 +13,7 @@ use lpc_wire::WireChildKind;
 use crate::dataflow::binding::{BindingDraft, BindingEntry, BindingError, BindingRef};
 
 use crate::node::node_binding_index::{NodeBindingIndex, binding_by_ref};
+use crate::node::node_entry_slots::NodeEntrySlots;
 use crate::node::{RuntimeNodeEntry, TreeError};
 
 /// The node tree container.
@@ -21,7 +23,18 @@ use crate::node::{RuntimeNodeEntry, TreeError};
 /// `Box<dyn Node>`.
 #[derive(Debug)]
 pub struct RuntimeNodeTree<N> {
-    nodes: Vec<Option<RuntimeNodeEntry<N>>>,
+    /// Live entries only, sorted by [`NodeId`].
+    ///
+    /// Sparse on purpose: a removed node's entry is dropped with its slot,
+    /// so storage tracks the *live* node count. The dense `Vec<Option<_>>`
+    /// this replaced left a `None` tombstone per removed id forever, and
+    /// dormant playlist entries remove and re-attach a subtree on every
+    /// pattern switch — a tour grew slot storage without bound
+    /// (`docs/defects/2026-09-25-node-tree-tombstones-grow-per-reload.md`).
+    /// Ids stay monotonic and are never reused ([`Self::next_id`]), so a new
+    /// node appends at the end, iteration stays in id order, and lookup is
+    /// O(1) until a removal shifts later entries (see `NodeEntrySlots`).
+    nodes: NodeEntrySlots<N>,
     by_path: VecMap<TreePath, NodeId>,
     by_sibling: VecMap<(NodeId, NodeName), NodeId>,
     binding_index: NodeBindingIndex,
@@ -35,8 +48,8 @@ impl<N> RuntimeNodeTree<N> {
         let root_id = NodeId::new(0);
         let root_entry = RuntimeNodeEntry::new(root_id, root_path.clone(), None, None, frame);
 
-        let mut nodes = Vec::new();
-        nodes.push(Some(root_entry));
+        let mut nodes = NodeEntrySlots::new();
+        nodes.push(root_entry);
 
         let mut by_path = VecMap::new();
         by_path.insert(root_path, root_id);
@@ -58,14 +71,12 @@ impl<N> RuntimeNodeTree<N> {
 
     /// Get a reference to an entry by id.
     pub fn get(&self, id: NodeId) -> Option<&RuntimeNodeEntry<N>> {
-        self.nodes.get(id.0 as usize).and_then(|opt| opt.as_ref())
+        self.nodes.get(id)
     }
 
     /// Get a mutable reference to an entry by id.
     pub fn get_mut(&mut self, id: NodeId) -> Option<&mut RuntimeNodeEntry<N>> {
-        self.nodes
-            .get_mut(id.0 as usize)
-            .and_then(|opt| opt.as_mut())
+        self.nodes.get_mut(id)
     }
 
     /// Look up a node by its path.
@@ -78,14 +89,14 @@ impl<N> RuntimeNodeTree<N> {
         self.by_sibling.get(&(parent, name)).copied()
     }
 
-    /// Iterate over all live entries (skips tombstones).
+    /// Iterate over all live entries, in id order.
     pub fn entries(&self) -> impl Iterator<Item = &RuntimeNodeEntry<N>> {
-        self.nodes.iter().filter_map(|opt| opt.as_ref())
+        self.nodes.iter()
     }
 
-    /// Iterate over all live entries mutably (skips tombstones).
+    /// Iterate over all live entries mutably, in id order.
     pub fn entries_mut(&mut self) -> impl Iterator<Item = &mut RuntimeNodeEntry<N>> {
-        self.nodes.iter_mut().filter_map(|opt| opt.as_mut())
+        self.nodes.iter_mut()
     }
 
     /// Add a child to a parent node.
@@ -135,12 +146,8 @@ impl<N> RuntimeNodeTree<N> {
             frame,
         );
 
-        // Ensure nodes vec is large enough
-        let idx = child_id.0 as usize;
-        if idx >= self.nodes.len() {
-            self.nodes.resize_with(idx + 1, || None);
-        }
-        self.nodes[idx] = Some(child_entry);
+        // Ids are monotonic, so the new entry lands at the end.
+        self.nodes.push(child_entry);
 
         // Update indices
         self.by_path.insert(child_path, child_id);
@@ -157,7 +164,8 @@ impl<N> RuntimeNodeTree<N> {
 
     /// Remove a subtree (depth-first, children-first).
     ///
-    /// Tombstones every descendant slot. Forbidden on root.
+    /// Drops every descendant's entry, releasing its storage; the removed
+    /// ids are never handed out again. Forbidden on root.
     pub fn remove_subtree(&mut self, id: NodeId, frame: Revision) -> Result<(), TreeError> {
         if id == self.root {
             return Err(TreeError::RootMutation);
@@ -178,16 +186,12 @@ impl<N> RuntimeNodeTree<N> {
             self.remove_subtree(child_id, frame)?;
         }
 
-        // Tombstone this entry
-        let idx = id.0 as usize;
-        if let Some(slot) = self.nodes.get_mut(idx) {
-            if let Some(e) = slot.take() {
-                // Remove from indices
-                self.by_path.remove(&e.path);
-                if let Some(name) = e.path.0.last().map(|seg| seg.name.clone()) {
-                    if let Some(p) = e.parent {
-                        self.by_sibling.remove(&(p, name));
-                    }
+        // Drop this entry and remove it from the indices
+        if let Some(e) = self.nodes.remove(id) {
+            self.by_path.remove(&e.path);
+            if let Some(name) = e.path.0.last().map(|seg| seg.name.clone()) {
+                if let Some(p) = e.parent {
+                    self.by_sibling.remove(&(p, name));
                 }
             }
         }
@@ -200,7 +204,7 @@ impl<N> RuntimeNodeTree<N> {
             }
         }
 
-        // Also remove from by_path in case the entry was already tombstoned above
+        // Also remove from by_path in case the entry was already gone above
         self.by_path.remove(&path);
         self.rebuild_binding_index()
             .expect("removing bindings cannot introduce binding conflicts");
@@ -565,9 +569,9 @@ impl<N> RuntimeNodeTree<N> {
         (nodes, bindings, newest)
     }
 
-    /// Get the number of live entries (excludes tombstones).
+    /// Get the number of live entries.
     pub fn len(&self) -> usize {
-        self.nodes.iter().filter(|opt| opt.is_some()).count()
+        self.nodes.len()
     }
 
     /// Returns true if the tree has no live entries (only possible if root was removed, which is forbidden).
@@ -838,7 +842,7 @@ mod tests {
     }
 
     #[test]
-    fn tree_remove_subtree_tombstones_entry() {
+    fn tree_remove_subtree_drops_entry() {
         let mut tree = make_tree();
         let root = tree.root();
         let cfg = spine_placeholder();
@@ -936,7 +940,7 @@ mod tests {
     }
 
     #[test]
-    fn tree_entries_iterator_skips_tombstones() {
+    fn tree_entries_iterator_skips_removed_entries() {
         let mut tree = make_tree();
         let root = tree.root();
 

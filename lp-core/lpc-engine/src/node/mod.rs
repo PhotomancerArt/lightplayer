@@ -7,6 +7,7 @@ mod control_node;
 mod node_binding_index;
 mod node_call;
 pub mod node_entry;
+mod node_entry_slots;
 pub mod node_entry_state;
 mod node_error;
 mod node_runtime;

@@ -246,6 +246,10 @@ genuinely fits none of these, and define it here in one line.
   exercises silently diverges from what the real system would do there.
   Not a wrong answer today; a gap named before something depends on the
   answer it would give.
+- **`dense-over-monotonic-ids`** — storage indexed by position with an id
+  that is never reused is sized by every id ever minted, not by what is
+  alive, so removal leaves a tombstone that is never reclaimed. Harmless
+  while removal is rare; a leak the day a feature makes removal routine.
 
 ## Index
 
@@ -356,6 +360,7 @@ a fifth still lands somewhere the new `Fault` status and pattern don't reach.
 
 | Class | Date | Entry | Status | Area |
 | --- | --- | --- | --- | --- |
+| dense-over-monotonic-ids | 2026-09-25 | [node-tree-tombstones-grow-per-reload](2026-09-25-node-tree-tombstones-grow-per-reload.md) | fixed | lpc-engine `RuntimeNodeTree`: entries were a `Vec<Option<_>>` indexed by never-reused `NodeId`, so `remove_subtree` left a tombstone per node and a dormant-entry tour (remove + attach per switch) would grow slot storage forever (145,152 B over 100 three-node reloads on the host). Now `NodeEntrySlots`, live entries sorted by id with an O(1) id-position guess: removed entries are dropped, ids stay monotonic; `node_tree_reload_memory` pins 0 B growth |
 | unenforced-test-precondition | 2026-09-25 | [emu-lab-cooldown-tests-measured-wall-clock](2026-09-25-emu-lab-cooldown-tests-measured-wall-clock.md) | fixed | scripts/emu/lab queue/notify/stability tests × `server.mjs`'s scheduler: the cooldown, spacing, lost, drop and notify-grace tests asserted wall-clock gaps measured from the fake device's side of the socket, so a loaded runner's lag came off the gap (`waited 504 ms` against a 600 ms floor, main red at a7daa7ef5; 5/24 runs locally under load). The scheduler now reads an injected clock (`clock.mjs`) and the tests step a manual one and assert exact waits off the server's own press record |
 | unenforced-test-precondition | 2026-09-25 | [a-late-hello-answer-reaches-the-fresh-window](2026-09-25-a-late-hello-answer-reaches-the-fresh-window.md) | fixed | lpa-studio-core device e2e bench × the lpa-link fake board: `an_effect_that_outlives_its_activity…` assumed no hello could reach the window after the eviction's reopen, but the fake's real-thread server answers identify's id-1 ask in real time. Under load that answer was still inside the server when the hung push took the wire, and the reopen flushes only the byte wire, so the card read Ready (CI on #814 and #816; 11/96 locally under load). The test now waits for `FakeEsp32Device::unanswered_requests() == 0` before the push |
 | assumed-context | 2026-09-24 | [board-open-waits-silently-with-no-way-out](2026-09-24-board-open-waits-silently-with-no-way-out.md) | fixed | Studio's opening frame × the device-lens hold × web_app route sync: a board open showed "Opening project…" with no steps and no exit; a fresh `/p/…?on=mac:` page held forever on a board it had no port for (only a click can grant one); a board that rebooted mid-open sent the page to `/devices` silently. Not a firmware crash (the capture's USB write timeout is a dropped heartbeat). Now staged (upload bytes, compile), with Connect / Reset / Cancel |
