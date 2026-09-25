@@ -426,6 +426,25 @@ impl ProjectRegistry {
         let (site_artifact, entry_path) = self.validate_remove_site(site, ctx)?;
         let before = self.inventory().clone();
 
+        // P8 (D19 sibling): a removed subtree may contain, or itself be, a
+        // playlist with dormant entries. Derivation stops at a dormant
+        // entry (PD1), so `defs.removed`/`assets.removed` below would never
+        // name its files — removal would leave them orphaned on disk
+        // forever, the one case `remove_node`'s own doc comment claims but
+        // does not deliver ("everything that left the effective inventory").
+        // Widen residency to every entry everywhere, take the diff against
+        // THAT baseline, then narrow back to exactly what was resident
+        // before this call — never permanently, and never visible in the
+        // outcome: `changes` below is still measured from the ORIGINAL
+        // `before`, so a dormant entry elsewhere that this widened only to
+        // compute the diff nets out to no change at all. A dormant entry
+        // that fails to load still gets a `NodeDefState`/`AssetState` error
+        // row rather than vanishing, so it is `removed` (and swept) exactly
+        // like a loaded one — removal never fails because an entry is
+        // broken.
+        let residency_before = self.residency.clone();
+        self.make_every_entry_resident(fs, frame, ctx);
+
         // Pending edits at or under the removed entry are swept by the slot
         // overlay's `Remove` canonicalization; record them before staging.
         let mut swept_pending_edits = self
@@ -513,6 +532,13 @@ impl ProjectRegistry {
                 )
             })?;
             staged_deletes.push(artifact);
+        }
+
+        // Narrow residency back to exactly what it was before this call —
+        // the widening above was only to compute a correct diff.
+        if self.residency != residency_before {
+            self.residency = residency_before;
+            self.inventory = self.derive_inventory(fs, frame, ctx);
         }
 
         let changes = change_summary_between(&before, self.inventory());
@@ -1289,9 +1315,10 @@ mod tests {
     fn remove_playlist_entry_removes_whole_entry_and_leaves_siblings() {
         let shapes = SlotShapeRegistry::default();
         let (fs, mut registry) = playlist_two_entry_project(&shapes);
-        // Removal stages deletes for what leaves the inventory, so the entry
-        // must be loaded for its files to be found.
-        make_resident(&fs, &mut registry, &shapes, 2);
+        // Entry 2 ("blast") is DORMANT here — only the idle entry (1) is
+        // resident at load — and stays dormant the whole test: `remove_node`
+        // widens residency internally just to compute the diff (P8), so the
+        // entry does not need to be loaded first for its files to be found.
         let site = NodeAttachSite::Slot {
             artifact: ArtifactLocation::file("/playlist.json"),
             path: SlotPath::parse("entries[2].node").unwrap(),
@@ -1319,10 +1346,63 @@ mod tests {
             ]
         );
         assert!(registry.def(&root_def("/idle.json")).is_some());
+        // The entry was dormant both before and after this call (P8: the
+        // widen used to compute `staged_deletes` above is narrowed back
+        // before `changes` is measured), so it was never in the
+        // CALLER-VISIBLE effective tree to begin with — `uses.removed`
+        // correctly stays silent about it. The files swept above are the
+        // only externally-visible proof the removal reached it at all.
         let child_use = NodeUseLocation::root()
             .child(SlotPath::parse("nodes[playlist]").unwrap())
             .child(SlotPath::parse("entries[2].node").unwrap());
-        assert!(outcome.changes.uses.removed.contains(&child_use));
+        assert!(!outcome.changes.uses.removed.contains(&child_use));
+    }
+
+    /// P8 director ruling: removing a playlist WHOLESALE sweeps every
+    /// entry's files, including a dormant one's — not just the resident
+    /// idle entry's. Before the fix, `blast.json`/`.glsl` (entry 2, never
+    /// made resident) would have been orphaned on disk forever.
+    #[test]
+    fn remove_whole_playlist_sweeps_a_dormant_entrys_files_too() {
+        let shapes = SlotShapeRegistry::default();
+        let (fs, mut registry) = playlist_two_entry_project(&shapes);
+
+        let outcome =
+            remove(&fs, &mut registry, &shapes, &project_nodes("playlist")).expect("remove ok");
+
+        assert!(
+            registry.def(&root_def("/playlist.json")).is_none(),
+            "the playlist itself leaves the inventory"
+        );
+        let mut staged = outcome.staged_deletes.clone();
+        staged.sort_by_key(|artifact| artifact.file_path().to_string());
+        assert_eq!(
+            staged,
+            vec![
+                ArtifactLocation::file("/blast.glsl"),
+                ArtifactLocation::file("/blast.json"),
+                ArtifactLocation::file("/idle.json"),
+                ArtifactLocation::file("/playlist.json"),
+            ],
+            "the idle entry's files AND the dormant entry's files are both \
+             swept, not just the resident one's"
+        );
+        // Residency is scoped to computing the diff, never left widened —
+        // moot for THIS playlist (it is gone), but a sibling playlist
+        // elsewhere in the project must not have been touched. The
+        // simplest witness available here: no leftover explicit residency
+        // entry survives for the now-nonexistent playlist.
+        assert!(
+            registry
+                .residency()
+                .explicit_set(&NodeUseLocation::root().child(SlotPath::parse("nodes[playlist]").unwrap()))
+                .is_none()
+                || registry
+                    .residency()
+                    .explicit_set(&NodeUseLocation::root().child(SlotPath::parse("nodes[playlist]").unwrap()))
+                    == Some(&[1][..]),
+            "residency was narrowed back to what it was before the call"
+        );
     }
 
     #[test]
