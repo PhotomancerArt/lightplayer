@@ -410,7 +410,9 @@ impl<const N: usize, const H: usize> Side<N, H> {
 
     fn rebuild(&mut self, text: &[u8], count: usize) {
         self.count = count.min(self.count);
-        self.hash = [SLOT_EMPTY; H];
+        // In place: an array literal here would be a temporary of the whole
+        // hash on the caller's stack (1 KB for the keys).
+        self.hash.fill(SLOT_EMPTY);
         for i in 0..self.count {
             self.index(text, i);
         }
