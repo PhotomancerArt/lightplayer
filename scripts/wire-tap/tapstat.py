@@ -13,7 +13,7 @@ chunk the byte pump carried: `<unix_us> <'>'|'<'> <len>\\n<len bytes>\\n`,
 direction and classifies each `M!{json}` line by message kind.
 
 A board that was asked to pack (JSON Pack) writes packed frames
-(`\\n 0x00 'P' COBS 0x00`) into the `<` chunks, and the tap annotates each
+(`\\n 0x00 'L' COBS 0x00`) into the `<` chunks, and the tap annotates each
 one with a `P` record carrying the `M!{json}` line it stands for and the
 frame's size on the wire (`E` for one that did not decode). This script
 strips the frames out of `<` (they are 0x00-delimited) and reads the `P`

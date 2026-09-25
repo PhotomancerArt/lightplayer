@@ -383,6 +383,131 @@ fn an_opted_in_client_through_the_door_gets_packed_frames_and_unpack_restores_js
     );
 }
 
+/// A packed frame torn in flight (the door's `LP_EMU_WIRE_TEAR` fault, the
+/// loss the real C6 link showed): the client's reader notices at the next
+/// frame's header, drops what it cannot read, asks for a reset through
+/// [`PackOptIn::desynced`], and decodes every packed reply after the board's
+/// reset byte for byte (plan `lp2025/2026-09-25-0006-learned-wire-dictionary`).
+#[test]
+#[ignore = "needs a built fw-esp32c6 ELF; `just test-emu-c6` runs it"]
+fn a_torn_packed_frame_desyncs_the_reader_until_the_board_resets() {
+    const ASK_AGAIN: Duration = Duration::from_secs(1);
+    let elf = match fw_esp32c6_image(&FwImage::SHIPPED) {
+        Ok(path) => path,
+        Err(reason) => {
+            eprintln!("emu_usb_json_pack: skipped — {reason}");
+            return;
+        }
+    };
+    // The link's first packed frame loses 5 bytes: it taught the board every
+    // name it carried, so every frame after it is out of step on the host.
+    let serve = Serve::start_specs_with_env(
+        &[format!("c6-a={}", elf.display())],
+        &[],
+        support::scratch(),
+        &[("LP_EMU_WIRE_TEAR", std::path::Path::new("1"))],
+    );
+    let mut socket = serve.bytes("c6-a");
+    socket
+        .get_mut()
+        .set_read_timeout(Some(Duration::from_millis(200)))
+        .expect("a read timeout");
+
+    let started = Instant::now();
+    let mut wire = WireStream::new();
+    let mut opt_in = PackOptIn::new(true);
+    let mut next_id = 10;
+    let mut asked_at: Option<Instant> = None;
+    let mut opt_ins = 0;
+    let mut torn = 0;
+    let mut desynced = 0;
+    // Packed replies decoded after the first desync.
+    let mut recovered: Vec<String> = Vec::new();
+    let deadline = Instant::now() + support::NET;
+
+    while recovered.len() < 3 {
+        assert!(
+            Instant::now() < deadline,
+            "no recovery within the wall net: {torn} torn, {desynced} desynced, \
+             {opt_ins} opt-ins, {} recovered",
+            recovered.len()
+        );
+        // A steady trickle of requests: the board's replies are what the
+        // reader learns from (and loses step on).
+        if asked_at.is_none_or(|at| at.elapsed() >= ASK_AGAIN) {
+            send(&mut socket, next_id, ClientRequest::Hello);
+            next_id += 1;
+            asked_at = Some(Instant::now());
+        }
+        let bytes = match socket.read() {
+            Ok(Message::Binary(bytes)) => bytes,
+            Ok(Message::Close(_)) => panic!("the byte endpoint closed"),
+            Ok(_) => continue,
+            Err(tungstenite::Error::Io(e))
+                if matches!(
+                    e.kind(),
+                    std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
+                ) =>
+            {
+                continue;
+            }
+            Err(e) => panic!("reading the byte endpoint: {e}"),
+        };
+        let now_ms = started.elapsed().as_millis() as u64;
+        for chunk in wire.push_collect(&bytes) {
+            let ask = match chunk {
+                WireChunk::Line(_) => None,
+                WireChunk::Error(error) => {
+                    eprintln!("json-pack tear: dropped: {error}");
+                    torn += 1;
+                    None
+                }
+                WireChunk::Desync(dropped) => {
+                    eprintln!("json-pack tear: out of step: {}", dropped.reason);
+                    desynced += 1;
+                    opt_in.desynced(now_ms)
+                }
+                WireChunk::Frame(frame) => {
+                    let message: WireServerMessage =
+                        lpc_wire::json::from_str(&frame.json).expect("a decoded frame parses");
+                    // Byte-exact where the host serializer prints what the
+                    // board's does (no floats; a heartbeat's differ).
+                    if matches!(message.msg, ServerMsgBody::Hello(_)) {
+                        assert_eq!(
+                            lpc_wire::json::to_string(&message).unwrap(),
+                            frame.json,
+                            "a decoded frame is byte-exact"
+                        );
+                    }
+                    let packed = frame.is_packed();
+                    if packed && desynced > 0 {
+                        recovered.push(frame.json);
+                    }
+                    opt_in.observe(&message, packed, now_ms).send
+                }
+            };
+            if let Some(ask) = ask {
+                opt_ins += 1;
+                send(&mut socket, ask.id, ask.msg);
+            }
+        }
+    }
+    drop(socket);
+    serve.shutdown();
+
+    assert!(torn + desynced > 0, "the tear was noticed");
+    assert!(desynced > 0, "the frames after the tear were out of step");
+    assert!(
+        opt_ins >= 2,
+        "the opt-in, then the reset request: {opt_ins}"
+    );
+    eprintln!(
+        "json-pack tear: {torn} torn, {desynced} dropped out of step, {opt_ins} opt-ins, \
+         then {} packed replies decoded",
+        recovered.len()
+    );
+}
+
 /// How a message came over the link.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Form {
