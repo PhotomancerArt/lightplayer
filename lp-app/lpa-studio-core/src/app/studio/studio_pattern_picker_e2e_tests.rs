@@ -164,6 +164,17 @@ fn the_pattern_instruments_gestures_drive_the_real_playlist() {
             .is_some_and(|target| target.engaged),
         "the panel holds the skip list"
     );
+    let panel = root_panel(&session.view);
+    let pattern = panel
+        .groups
+        .iter()
+        .find(|group| group.label == "Pattern")
+        .expect("the Pattern group");
+    assert_eq!(
+        pattern.controls[0].state,
+        crate::UiPanelControlState::Engaged,
+        "a held switch set holds the instrument, so the panel's reset sees it"
+    );
 
     // -- tour: switch it on; the playlist reads it back -------------------
     let tour = picker_now.tour_toggle.clone().expect("a tour switch");

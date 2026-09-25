@@ -5301,10 +5301,21 @@ impl ProjectController {
             tour_target: tour_target.clone(),
             skip_target,
         });
-        let (state, source) = match tour_target.as_ref() {
+        let (mut state, mut source) = match tour_target.as_ref() {
             Some(target) => self.panel_control_state(graph, target.scope, target),
             None => (crate::UiPanelControlState::ReadDefault, None),
         };
+        // One instrument, two channels: a held switch set is the panel
+        // holding this control too, so the panel's held count (and its
+        // reset) see it.
+        if picker
+            .skip_target
+            .as_ref()
+            .is_some_and(|target| target.engaged)
+        {
+            state = crate::UiPanelControlState::Engaged;
+            source = None;
+        }
         let playing = picker
             .playing()
             .map(|entry| entry.name.clone())
