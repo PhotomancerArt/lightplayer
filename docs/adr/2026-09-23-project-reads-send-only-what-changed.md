@@ -50,7 +50,10 @@ introduces one generic pair used by every probe with a static/moving split:
 enum RevisionGateRead {
     None,
     Always,
-    IfChanged { known_revision: Option<Revision> },
+    // Proto 23 (lean-wire follow-ups F1): a list, so the per-output
+    // output-frame gate is this same type. `node` names the output; a
+    // single-half probe lists at most one entry with no node.
+    IfChanged { known: Vec<KnownRevision /* { node?, revision } */> },
 }
 
 enum RevisionGateResult<T> {
@@ -61,7 +64,7 @@ enum RevisionGateResult<T> {
 ```
 
 A client asks `Always` once, caches `T` and its revision, then asks
-`IfChanged { known_revision }` on every later read. While the revision
+`IfChanged` with the revision it holds on every later read. While the revision
 holds, the engine answers `Unchanged { revision }` — a handful of bytes —
 and only the moving half travels. **One revision covers the whole gated
 half**: it moves whenever any piece of it does, and it is never the
@@ -258,12 +261,178 @@ table, the live-tap corroboration, and the BLE-rate estimate.
   a saving that is two orders of magnitude below the lens's own rate. Not
   worth it at this plan's scale; revisit if BLE's own budget ever makes the
   heartbeat material.
-- Tree deltas (368 B, every read: `entry_changed` fires because every
+- ~~Tree deltas (368 B, every read: `entry_changed` fires because every
   engine call takes a runtime out and puts it back with
-  `set_state(.., frame)`) were investigated and left alone (P6): gating on
-  a tree-visible-change-only stamp broke
-  `studio_agent_e2e_tests::a_declared_space_mismatch_is_repaired_by_declare_space_end_to_end`,
-  because a mid-read render-probe status stamp needs the per-frame re-bump
-  to ever reach a client. Fixing it needs mid-read status stamps fenced
-  past the served revision and an agent test keyed on something other than
-  `change_frame`. Not done; left as a P6 follow-up.
+  `set_state(.., frame)`) were investigated and left alone (P6)~~ —
+  **resolved** by the lean-wire follow-ups plan's F3 (see the 2026-09-24
+  amendment below): content-stamped `entry_changed`, with the mid-read
+  status stamped past the served revision so
+  `a_declared_space_mismatch_is_repaired_by_declare_space_end_to_end` stays
+  green without the per-frame re-bump this follow-up used to need.
+
+## Amended 2026-09-24 (lean-wire follow-ups, #804)
+
+`~/.photomancer/planning/lp2025/2026-09-23-2120-lean-wire-followups/plan.md`
+(F1–F3) closed three of this ADR's own follow-ups: the per-output revision
+gate's own request shape, the U8 ask policy's darks trade-off, and the tree
+deltas follow-up above. One more wire bump, `WIRE_PROTO_VERSION` 22 → 23 (21
+→ 22 was this same plan's F1; 22 was taken by the BLE M3 access-core plan
+landing first).
+
+### One list-shaped revision gate (F1)
+
+The output-frame probe used to carry its own per-output gate type
+(`OutputFrameGeometryRead` / `KnownOutputFrameGeometry`), separate from the
+single-half `RevisionGateRead` every other gated probe used. F1 deleted it:
+`RevisionGateRead::IfChanged` now carries `known: Vec<KnownRevision>`
+(`KnownRevision { node: Option<NodeId>, revision }` —
+`lp-core/lpc-wire/src/messages/project_read/probe/revision_gate.rs`), and
+the output-frame probe lists one `KnownRevision` per output it holds, naming
+the node; every single-half probe (a control product's geometry, the
+binding graph's structure) lists at most one, with no node. The engine
+answers every probe through the same `RevisionGateRead::holds(node,
+revision)` check. This is the "one gate, one or many gated halves" shape
+this ADR's Decision section already named as the target; F1 is what made it
+literally one Rust type instead of two answering the same question. A
+steady single-half request grows ~10 B (`known: [{"revision":N}]` vs the old
+`known_revision: N`), but requests never rode the read-size ratchet, and one
+request shape is also one deserializer on the device — 1,584 B of ESP32-C6
+flash recovered. `#[inline(never)]` on the two largest probe bodies,
+`Engine::read_project_output_frame_probe` and
+`read_project_binding_graph_probe`, recovered another 7,738 B: both are
+inlined into the project-read `async fn`, and through it into the
+firmware's `tick_and_send` state machine more than once, so each was being
+monomorphized/copied at every one of those call sites. The pair is
+load-bearing together — either alone saved only 194–728 B — so the doc
+comment on `read_project_output_frame_probe` warns not to drop one without
+re-measuring (`just fw-esp32c6-size-check`). Between the two changes, F1 won
+back 9,328 B of the 14,064 B lean-wire itself had spent, headroom
+714,848 B → 724,176 B.
+
+### Srgb8 previews, the shared codec (F2)
+
+Studio's live previews now default to `WireChannelSampleFormat::Srgb8`
+(`PREVIEW_SAMPLE_FORMAT = Srgb8` in `frame_feed/preview_sample_format.rs`),
+not the linear `U8` this ADR's "one-copy, U8 ask policy" section described.
+Linear `U8` is unchanged as a wire format — it is still what a buffer
+*published* at 8 bits carries — but nothing asks Studio to display it
+raw any more; `CLOSE_INSPECTION_SAMPLE_FORMAT = U16` is unchanged. This
+closes the trade-off P5's own U8 ask policy left open: 8-bit-linear halves
+the wire bytes per sample but crushes shadow detail, because a linear ramp
+spends most of its 256 codes on highlights. On the PLAYFUL choker (60 s at
+brightness 0.2, the darkest part of a typical scene), Studio's on-screen
+darks measured:
+
+| | U16 | linear U8 | Srgb8 |
+|---|---:|---:|---:|
+| distinct on-screen levels | 125 | 52 | **125** |
+| lowest on-screen steps | 0, 1, 2, 3, 4 … | 0, 13, 22, 28, 34 … | **0, 1, 2, 3, 4 …** |
+| samples differing on screen from U16 | — | 63.2% | **0%** |
+
+Srgb8 costs the same bytes as U8 (one byte per sample) but recovers all 125
+of U16's on-screen levels by spending those 256 codes on an sRGB-shaped
+curve instead of a linear one — exactly the curve the display already uses,
+so decoding it back to linear and re-encoding for the screen is a lossless
+round trip in practice (0% of samples differ from what U16 would have
+shown). One codec serves both the wire and the engine's own render-texture
+preview path: `lpc-wire::{linear16_to_srgb8, srgb8_to_linear16}`
+(`lp-core/lpc-wire/src/project/srgb8_sample_codec.rs`), replacing the
+engine's separate 4,096 B `srgb8_lut.rs` (which was within 1 LSB of exact,
+not exact) — texture previews are now correctly rounded as a side effect.
+Net firmware cost: +2,800 B (the 4 KB LUT left, 766 B of new encode tables
+plus the new match arms came in), headroom 724,176 B → 726,976 B.
+
+`lp-fw/fw-browser/src/texture_convert.rs` still builds its own 64 K f32
+lookup table for the in-browser sim's sRGB conversion — a second copy of
+the same transfer function, host/wasm-only. It is proven to agree with the
+wire encoder bit-for-bit (`lamp_view`'s test compares the two across all
+65,536 inputs), so it is a known duplicate rather than a correctness risk.
+Left alone: unifying it would mean `fw-browser` taking a dependency on
+`lpc-wire`'s codec (or extracting a third crate) for a host-only path that
+costs it nothing on any device image, so it stays out of scope here as F2
+originally scoped it.
+
+### Content-stamped tree deltas (F3)
+
+The tree-deltas follow-up above is resolved: `entry_changed`'s
+`change_frame` is no longer the per-tick stamp every take/put-back of a
+node's runtime used to re-bump — new `TreeEntryStamps`
+(`lp-core/lpc-engine/src/engine/tree_entry_stamps.rs`) hashes what a delta
+would actually carry (status, plus wire state with `Executing` read as
+`Alive`) and keeps one `ContentStamp` per entry, refreshed once per read
+right before the tree streams. A steady read now sends no `entry_changed`
+for an unchanged entry at all.
+
+The mid-read case — a render probe compiling a shader and setting `Error`
+status *after* the read has already sent its tree for revision `R` — is
+what broke every earlier attempt at this cut (P6's note above). F3's fix is
+a fence: `TreeEntryStamps` remembers the newest revision a refresh has
+`served`. A change a refresh finds is stamped `now` only when no read has
+served `now` yet; otherwise it is stamped `served + 1`, one revision ahead,
+so the client's next `since` (which is `R`) is older than the stamp and the
+change is guaranteed to arrive on the next read instead of being silently
+absorbed into a revision already sent. This is the same "one revision
+ahead" idea `state_root_stamps` already used for P6's slot-root gating,
+applied to tree deltas. With the fence disabled, both of its own unit tests
+fail, and `a_declared_space_mismatch_is_repaired_by_declare_space_end_to_end`
+is the end-to-end proof it still holds: a render probe compiling mid-read
+at revision 12 has its `Error` land on the *next* read at that same
+revision, not the one it compiled during.
+
+Studio's own agent verdict wait was rewired off this stamp rather than kept
+coupled to it: `AgentEngineStatus.revision` is now the synced
+`ProjectView::revision` of the read the status is as of, not the entry's
+`change_frame` (which, now that it only moves on a real change, would never
+advance for an edit that leaves the node `ok`). The bridge's
+`pre_stage_revision` became a `VerdictFence` (`Open | FirstRead { staged_at
+} | SecondRead { first_read }`): the verdict is read from the read *after*
+the first one past the stage, because that first read's tree can go out
+before its own render probe has compiled the edit. This costs one extra
+lens read (~150–250 ms) inside the wait's 1,500 ms budget, and is correct
+by construction rather than by poll timing. No wire shape changed for any
+of this — `WIRE_PROTO_VERSION` did not move for F3.
+
+Read sizes (`lens_read_wire_size`, the same oracle this ADR's Numbers table
+used), after all of F1–F3:
+
+| Read | This ADR's "After" | After F1–F3 | Cut |
+|---|---:|---:|---:|
+| Choker lens, steady | 2,369 B | **2,003 B** | 15% more |
+| Choker lens, first | 9,951 B | 9,588 B | 4% more |
+| small-dome lens, steady | 28,556 B (2 frames) | **27,968 B** (2 frames) | 2% more |
+| small-dome lens, first | 77,670 B (7 frames) | 77,085 B (7 frames) | 1% more |
+
+Firmware: F3 cost 464 B (the stamps, the refresh walk, two FNV
+instantiations), headroom 726,976 B → 726,512 B. Total across F1–F3 against
+the ebf63d463 baseline this ADR was written against: +8,864 B of headroom
+recovered, most of the shape this ADR already described, at smaller bytes.
+
+### Wire-bump fallout (F1, proto 22 → 23)
+
+Same fallout list this ADR's own Consequences section names, walked again
+for this bump: the four `manifest-core.expected.json` files, the
+`usb_attached.rs` / `usb_control.rs` hello pins, `hello.rs`'s proto history.
+No walk `.script` file or committed transcript under `lp-emu/esp/*/walks/`,
+`lp-emu-validate/walks/` or `lp-emu/transcripts/` embeds the old
+`known_revision` shape or a request naming `u8`/`srgb8` sample formats —
+confirmed by grep, not just by the diff being empty for those paths. The
+handful of transcripts that do carry a `"sample_format"` field
+(`lp-emu/transcripts/esp32c6/{upload-walk,meteor-walk-usb,shader-oracle-walk}/*.txt`)
+are pre-lean-wire historical captures (commits `d6cfaa205`, `681ea97ca`,
+dated 2026-09-07) all reading `"u16"` — untouched by this plan's ask-policy
+or gate-shape changes, and, as this ADR's own P7 fallout pass already
+established for the same files, replayed by `m4_replays.rs` / `m5_replays.rs`
+/ `m6_replays.rs` as historical facts about those old captures, never
+against a live current build. `lp-cli/tests/emu_serve_walk.rs`'s pinned
+proto-20 reference client is unaffected by any of F1–F3's wire changes for
+the same reason P7 recorded: it is built from a fully detached historical
+commit. The host-side heap-budget ratchet (`scripts/heap-budget-record.json`)
+was re-baselined for the same reason P7 re-baselined it for lean-wire
+itself: the new wire types (`RevisionGateRead`/`Result`, `KnownRevision`,
+the `Srgb8` variant, `TreeEntryStamps`) reach the host engine's own
+project-load path, moving `project-load.{retained,largest_alloc,alloc_bytes}`
+by 100–200 B and every stage's `largest_free_at_close` by ~128 B across all
+three catalog fixtures — the same shape of drift, not a new one. The chip
+halves of the heap-budget ratchet were left to CI's `LP_EMU_BUILD_FW=1`
+jobs, which build the firmware images this workspace gate deliberately does
+not build itself.

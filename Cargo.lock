@@ -1978,6 +1978,7 @@ checksum = "9ed9a281f7bc9b7576e61468ba615a66a5c8cfdff42420a70aa82701a3b1e292"
 dependencies = [
  "block-buffer",
  "crypto-common",
+ "subtle",
 ]
 
 [[package]]
@@ -3962,10 +3963,12 @@ dependencies = [
  "critical-section",
  "embassy-sync 0.8.0",
  "log",
+ "lp-gfx",
  "lpa-server",
  "lpc-model",
  "lpc-shared",
  "lpc-wire",
+ "lpfs",
  "pollster",
  "ser-write-json",
  "serde",
@@ -4003,6 +4006,7 @@ dependencies = [
 name = "fw-esp32-common"
 version = "40.0.0"
 dependencies = [
+ "critical-section",
  "embassy-futures",
  "embassy-sync 0.8.0",
  "embassy-time",
@@ -4036,6 +4040,7 @@ dependencies = [
  "embassy-time",
  "embedded-io-async 0.6.1",
  "embedded-storage",
+ "enumset",
  "esp-alloc",
  "esp-backtrace",
  "esp-bootloader-esp-idf",
@@ -4699,6 +4704,15 @@ name = "hexf-parse"
 version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "dfa686283ad6dd069f105e5ab091b04c62850d3e4cf5d67debad1933f55023df"
+
+[[package]]
+name = "hmac"
+version = "0.12.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6c49c37c09c17a53d937dfbb742eb3a961d65a994e6bcdcf37e7399d0cc8ab5e"
+dependencies = [
+ "digest",
+]
 
 [[package]]
 name = "http"
@@ -5587,6 +5601,7 @@ dependencies = [
  "lpa-link",
  "lpa-server",
  "lpa-upgrade",
+ "lpc-access",
  "lpc-engine",
  "lpc-hardware",
  "lpc-mapping",
@@ -6178,6 +6193,7 @@ dependencies = [
  "lp-perf",
  "lp-recovery",
  "lpa-client",
+ "lpc-access",
  "lpc-engine",
  "lpc-hardware",
  "lpc-history",
@@ -6210,6 +6226,7 @@ dependencies = [
  "lpa-link",
  "lpa-server",
  "lpa-upgrade",
+ "lpc-access",
  "lpc-engine",
  "lpc-history",
  "lpc-mapping",
@@ -6289,6 +6306,19 @@ dependencies = [
  "lpfs",
  "serde",
  "serde_json",
+]
+
+[[package]]
+name = "lpc-access"
+version = "40.0.0"
+dependencies = [
+ "base64 0.22.1",
+ "hmac",
+ "pbkdf2",
+ "schemars",
+ "serde",
+ "serde_json",
+ "sha2",
 ]
 
 [[package]]
@@ -6444,6 +6474,7 @@ version = "40.0.0"
 dependencies = [
  "base64 0.22.1",
  "lp-collection 1.0.0",
+ "lpc-access",
  "lpc-model",
  "schemars",
  "ser-write-json",
@@ -6546,6 +6577,9 @@ dependencies = [
  "lp-riscv-elf",
  "lp-riscv-inst",
  "lp-shader",
+ "lpc-engine",
+ "lpc-model",
+ "lpfs",
  "lpir",
  "lps-builtins",
  "lps-builtins-xt-image",
@@ -7901,6 +7935,16 @@ name = "pathdiff"
 version = "0.2.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "df94ce210e5bc13cb6651479fa48d14f601d9858cfe0467f43ae157023b938d3"
+
+[[package]]
+name = "pbkdf2"
+version = "0.12.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f8ed6a7761f76e3b9f92dfb0a60a6a6477c61024b775147ff0973a02653abaf2"
+dependencies = [
+ "digest",
+ "hmac",
+]
 
 [[package]]
 name = "percent-encoding"

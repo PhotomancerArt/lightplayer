@@ -20,9 +20,8 @@ pub use control_product_probe::{
 };
 pub use geometry_gate::GeometryDisplayLayout;
 pub use output_frame_probe::{
-    KnownOutputFrameGeometry, OutputFrameEntry, OutputFrameEntryHeader, OutputFrameGeometry,
-    OutputFrameGeometryRead, OutputFrameProbeRequest, OutputFrameProbeResult,
-    OutputFrameProbeResultHeader, WireOutputPlacement,
+    OutputFrameEntry, OutputFrameEntryHeader, OutputFrameGeometry, OutputFrameProbeRequest,
+    OutputFrameProbeResult, OutputFrameProbeResultHeader, WireOutputPlacement,
 };
 pub use project_probe::{ProjectProbeRequest, ProjectProbeResult, ProjectProbeResultHeader};
 pub use render_product_probe::{
@@ -30,7 +29,7 @@ pub use render_product_probe::{
     WireCellProjection, WireConsumerPolicy, WireProjectionOrigin, WireProjectionShape,
     WireVisualSpace,
 };
-pub use revision_gate::{RevisionGateRead, RevisionGateResult};
+pub use revision_gate::{KnownRevision, RevisionGateRead, RevisionGateResult};
 pub use timebase_probe::{
     TimebaseProbeRequest, TimebaseProbeResult, WirePhasorOrigin, WirePhasorReading, WirePhasorRow,
 };

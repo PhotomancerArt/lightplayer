@@ -33,6 +33,9 @@
 # Project: projects/test/shader-oracle (the host oracle's own project;
 # clock-free, 64 LEDs on D10 = gpio9 on this board)
 # Link: USB-Serial-JTAG, host attached from power-on
+# Project format 11: the C6 walk was re-captured for the format bump and its
+# body moved by one byte (project.json's format stamp, 10 -> 11); this file
+# follows it, so the payloads stay the C6's, byte for byte.
 
 after "[RECOVERY] boot complete (first frame served)" "M!{\"id\":18446744073709551615,\"msg\":\"hello\"}\n"
 after "\"id\":18446744073709551615," "M!{\"id\":1,\"msg\":\"stopAllProjects\"}\n"
@@ -123,7 +126,7 @@ then +20ms "hite_point\\\": [\\n      1,\\n      1,\\n      1\\n    ],\\n    \\\
 then +20ms "rpolation_enabled\\\": false,\\n    \\\"dithering_enabled\\\": false,\\n"
 then +20ms "    \\\"lut_enabled\\\": false\\n  }\\n}\\n\"}}}}\n"
 after "\"id\":6," "M!{\"id\":7,\"msg\":{\"filesystem\":{\"write\":{\"path\":\"/projects/Shader"
-then +20ms " oracle/project.json\",\"data\":\"{\\n  \\\"format\\\": 10,\\n  \\\"name\\\": "
+then +20ms " oracle/project.json\",\"data\":\"{\\n  \\\"format\\\": 11,\\n  \\\"name\\\": "
 then +20ms "\\\"Shader oracle\\\"\\n}\\n\"}}}}\n"
 after "\"id\":7," "M!{\"id\":8,\"msg\":{\"filesystem\":{\"write\":{\"path\":\"/projects/Shader"
 then +20ms " oracle/shader.glsl\",\"data\":\"// Deterministic, time-invariant te"

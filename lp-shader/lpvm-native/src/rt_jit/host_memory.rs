@@ -58,7 +58,19 @@ impl LpvmMemory for NativeHostMemory {
         let guest = buffer.guest_base();
         let size = buffer.size();
         let align = buffer.align();
-        let removed = self.live.lock().remove(&guest);
+        let removed = {
+            let mut live = self.live.lock();
+            let removed = live.remove(&guest);
+            // The last buffer gone: give the table's memory back. This
+            // memory lives as long as the engine (every project on the
+            // device), and its table grows while a project runs — above the
+            // project's memory — so a kept table splits the heap the project
+            // frees (docs/defects/2026-09-24-ble-enabled-c6-refuses-a-project-switch-after-the-heap-cut.md).
+            if live.is_empty() {
+                *live = VecMap::new();
+            }
+            removed
+        };
         if removed.is_none() {
             return;
         }

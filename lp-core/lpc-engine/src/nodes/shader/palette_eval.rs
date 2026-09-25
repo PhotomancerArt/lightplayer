@@ -86,7 +86,8 @@ pub fn palette_phasor_config(config: &GradientConfig) -> PhasorConfig {
 /// Where `phase` puts `config` in its cycle.
 ///
 /// `phase` is the store's raw wrapped `[0,1)` ramp. A static config ignores
-/// it entirely — there is one gradient and it is always shown.
+/// it entirely — there is one gradient and it is always shown — and so does
+/// a pinned cycle, which shows its pinned entry the same way.
 #[must_use]
 pub fn palette_cycle_position(config: &GradientConfig, phase: f32) -> PaletteCyclePosition {
     let count = config.gradients().len();
@@ -100,6 +101,7 @@ pub fn palette_cycle_position(config: &GradientConfig, phase: f32) -> PaletteCyc
     let GradientConfig::Cycle {
         step_seconds,
         fade_seconds,
+        pinned,
         ..
     } = config
     else {
@@ -109,6 +111,15 @@ pub fn palette_cycle_position(config: &GradientConfig, phase: f32) -> PaletteCyc
             mix_steps: 0,
         };
     };
+    // `pinned_gradient` is the model's one reading of the pin: it is `None`
+    // for an out-of-range index, which then walks as unpinned.
+    if let (Some(index), Some(_)) = (*pinned, config.pinned_gradient()) {
+        return PaletteCyclePosition {
+            from: index,
+            to: index,
+            mix_steps: 0,
+        };
+    }
 
     let phase = wrap_unit(phase);
     let position = phase * count as f32;
@@ -314,6 +325,45 @@ mod tests {
     }
 
     #[test]
+    fn a_pinned_cycle_is_its_pinned_entry_alone_at_every_phase() {
+        // A fade is authored, so an unpinned walk WOULD dissolve somewhere in
+        // this sweep; pinned, nothing moves.
+        let config = pinned(cycle(4, 2.0, 1.5), 2);
+
+        for step in 0..64 {
+            let position = palette_cycle_position(&config, step as f32 / 64.0);
+            assert_eq!(
+                position,
+                PaletteCyclePosition {
+                    from: 2,
+                    to: 2,
+                    mix_steps: 0,
+                },
+                "step {step}"
+            );
+        }
+        let (from, to) =
+            palette_cycle_gradients(&config, palette_frame_zero(&config)).expect("gradients");
+        assert_eq!((from.stops[0].c[0], to.stops[0].c[0]), (2.0, 2.0));
+
+        // The phasor keeps its period so an unpin lands where time says.
+        assert_eq!(palette_phasor_config(&config).period_seconds, 8.0);
+    }
+
+    #[test]
+    fn an_out_of_range_pin_walks_as_unpinned() {
+        let walked = cycle(3, 2.0, 0.0);
+        let bad_pin = pinned(walked.clone(), 3);
+
+        for phase in [0.0, 0.4, 0.8] {
+            assert_eq!(
+                palette_cycle_position(&bad_pin, phase),
+                palette_cycle_position(&walked, phase)
+            );
+        }
+    }
+
+    #[test]
     fn frame_zero_is_the_start_of_the_first_entry() {
         assert_eq!(
             palette_frame_zero(&cycle(4, 2.0, 0.5)),
@@ -397,6 +447,25 @@ mod tests {
             set: (0..count).map(|index| gradient(index as f32)).collect(),
             step_seconds,
             fade_seconds,
+            pinned: None,
+        }
+    }
+
+    fn pinned(config: GradientConfig, index: usize) -> GradientConfig {
+        let GradientConfig::Cycle {
+            set,
+            step_seconds,
+            fade_seconds,
+            ..
+        } = config
+        else {
+            panic!("only a cycle can be pinned");
+        };
+        GradientConfig::Cycle {
+            set,
+            step_seconds,
+            fade_seconds,
+            pinned: Some(index),
         }
     }
 }

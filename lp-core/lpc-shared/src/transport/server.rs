@@ -13,10 +13,11 @@ use alloc::format;
 use alloc::string::String;
 use alloc::vec;
 use alloc::vec::Vec;
-use lpc_wire::{
-    PROJECT_READ_FRAME_MAX_BYTES, ProjectReadEvent, TransportError, WireServerMessage,
-    messages::ClientMessage,
-};
+use lpc_wire::{PROJECT_READ_FRAME_MAX_BYTES, ProjectReadEvent, TransportError, WireServerMessage};
+
+use super::incoming::Incoming;
+use super::link::Link;
+use super::link_id::LinkId;
 
 /// Sink for semantic project-read events.
 ///
@@ -47,31 +48,47 @@ pub trait ProjectReadEventSink {
 ///
 /// # Examples
 ///
+/// # Links
+///
+/// A transport carries one or more **links** (client connections). Every
+/// received message is tagged with the [`LinkId`] it arrived on and that
+/// link's [`super::LinkTrust`] ([`Incoming`]); every send names the link it
+/// is for. Trust is decided HERE, by the transport — the firmware knows
+/// whether a byte came off the USB cable or the radio — and never by a
+/// message. A single-link transport (USB today, the host, the browser
+/// worker, the emulator) reports exactly [`Link::PRIMARY`], trusted, and
+/// ignores the id on send.
+///
+/// # Examples
+///
 /// ```rust,no_run
-/// use lpc_shared::transport::ServerTransport;
-/// use lpc_wire::{ClientMessage, TransportError};
+/// use lpc_shared::transport::{Incoming, Link, LinkId, ServerTransport};
+/// use lpc_wire::TransportError;
 /// use lpc_wire::WireServerMessage;
 ///
 /// struct MyTransport;
 ///
 /// impl ServerTransport for MyTransport {
-///     async fn send(&mut self, msg: WireServerMessage) -> Result<(), TransportError> {
-///         // Send message (transport handles serialization)
+///     async fn send(&mut self, _link: LinkId, msg: WireServerMessage) -> Result<(), TransportError> {
+///         // One link: the id is always `LinkId::PRIMARY`.
 ///         let _ = msg;
 ///         Ok(())
 ///     }
 ///
-///     async fn receive(&mut self) -> Result<Option<ClientMessage>, TransportError> {
-///         // Receive message (transport handles deserialization)
+///     async fn receive(&mut self) -> Result<Option<Incoming>, TransportError> {
+///         // Wrap each decoded message: `Incoming::primary(msg)`.
 ///         Ok(None)
 ///     }
 ///
-///     async fn receive_all(&mut self) -> Result<Vec<ClientMessage>, TransportError> {
+///     async fn receive_all(&mut self) -> Result<Vec<Incoming>, TransportError> {
 ///         Ok(Vec::new())
 ///     }
 ///
+///     fn links(&self) -> Vec<Link> {
+///         vec![Link::PRIMARY]
+///     }
+///
 ///     async fn close(&mut self) -> Result<(), TransportError> {
-///         // Close the transport connection
 ///         Ok(())
 ///     }
 /// }
@@ -84,13 +101,31 @@ pub trait ServerTransport {
     /// underlying transport write path. Implementations must not report success
     /// for a best-effort handoff that can still drop the message later without
     /// surfacing an error to this future.
-    async fn send(&mut self, msg: WireServerMessage) -> Result<(), TransportError>;
+    ///
+    /// `link` names the link the message is for: a reply goes to the link
+    /// its request came in on. A single-link transport ignores it.
+    async fn send(&mut self, link: LinkId, msg: WireServerMessage) -> Result<(), TransportError>;
 
-    /// Receive a client message (non-blocking). Returns `Ok(None)` if no message is available.
-    async fn receive(&mut self) -> Result<Option<ClientMessage>, TransportError>;
+    /// Receive a client message (non-blocking), tagged with its link.
+    /// Returns `Ok(None)` if no message is available.
+    async fn receive(&mut self) -> Result<Option<Incoming>, TransportError>;
 
     /// Receive all available client messages (non-blocking)
-    async fn receive_all(&mut self) -> Result<Vec<ClientMessage>, TransportError>;
+    async fn receive_all(&mut self) -> Result<Vec<Incoming>, TransportError>;
+
+    /// The links open right now, with their trust — where unsolicited
+    /// frames (the hello, the heartbeat) go. A single-link transport
+    /// returns `[Link::PRIMARY]`.
+    fn links(&self) -> Vec<Link>;
+
+    /// Links that closed since the last call, so the server can drop their
+    /// sessions (a login grant must not outlive its connection).
+    ///
+    /// A single-link transport never closes its link — reconnecting the USB
+    /// cable is the same trusted link — so the default reports none.
+    fn take_closed_links(&mut self) -> Vec<LinkId> {
+        Vec::new()
+    }
 
     /// Close the transport connection
     async fn close(&mut self) -> Result<(), TransportError>;
@@ -134,6 +169,8 @@ pub trait ServerTransport {
 /// worst case: both `seq` and `fin` present), so the budget is never optimistic.
 pub struct ProjectReadStreamSink<'a, T> {
     transport: &'a mut T,
+    /// The link the read's request came in on; every frame goes back there.
+    link: LinkId,
     id: u64,
     sequence: u32,
     pending_events: Vec<ProjectReadEvent>,
@@ -151,14 +188,15 @@ impl<'a, T> ProjectReadStreamSink<'a, T>
 where
     T: ServerTransport,
 {
-    pub fn new(transport: &'a mut T, id: u64) -> Self {
-        Self::with_max_bytes(transport, id, PROJECT_READ_FRAME_MAX_BYTES)
+    pub fn new(transport: &'a mut T, link: LinkId, id: u64) -> Self {
+        Self::with_max_bytes(transport, link, id, PROJECT_READ_FRAME_MAX_BYTES)
     }
 
-    pub fn with_max_bytes(transport: &'a mut T, id: u64, max_bytes: usize) -> Self {
+    pub fn with_max_bytes(transport: &'a mut T, link: LinkId, id: u64, max_bytes: usize) -> Self {
         let empty_frame_len = Self::measure_empty_frame_len(id, 0);
         Self {
             transport,
+            link,
             id,
             sequence: 0,
             pending_events: Vec::new(),
@@ -193,14 +231,17 @@ where
         self.pending_events_len = 0;
         let sequence = self.sequence;
         self.transport
-            .send(WireServerMessage::stream_frame(
-                self.id,
-                sequence,
-                true,
-                lpc_wire::server::ServerMsgBody::ProjectRead {
-                    events: vec![ProjectReadEvent::Error { message }],
-                },
-            ))
+            .send(
+                self.link,
+                WireServerMessage::stream_frame(
+                    self.id,
+                    sequence,
+                    true,
+                    lpc_wire::server::ServerMsgBody::ProjectRead {
+                        events: vec![ProjectReadEvent::Error { message }],
+                    },
+                ),
+            )
             .await?;
         self.advance_sequence();
         Ok(())
@@ -265,12 +306,15 @@ where
         let events = core::mem::take(&mut self.pending_events);
         self.pending_events_len = 0;
         self.transport
-            .send(WireServerMessage::stream_frame(
-                self.id,
-                sequence,
-                fin,
-                lpc_wire::server::ServerMsgBody::ProjectRead { events },
-            ))
+            .send(
+                self.link,
+                WireServerMessage::stream_frame(
+                    self.id,
+                    sequence,
+                    fin,
+                    lpc_wire::server::ServerMsgBody::ProjectRead { events },
+                ),
+            )
             .await?;
         self.advance_sequence();
         Ok(())
@@ -332,7 +376,7 @@ mod tests {
     use core::task::{Context, Poll, RawWaker, RawWakerVTable, Waker};
 
     use lpc_model::Revision;
-    use lpc_wire::{ClientMessage, ProjectReadEvent};
+    use lpc_wire::ProjectReadEvent;
 
     use super::*;
 
@@ -345,7 +389,12 @@ mod tests {
         let mut transport = CollectingTransport::default();
 
         block_on(async {
-            let mut sink = ProjectReadStreamSink::with_max_bytes(&mut transport, 9, max_bytes);
+            let mut sink = ProjectReadStreamSink::with_max_bytes(
+                &mut transport,
+                LinkId::PRIMARY,
+                9,
+                max_bytes,
+            );
             sink.send_project_read_event(event).await.unwrap();
             sink.finish().await.unwrap();
         });
@@ -370,7 +419,12 @@ mod tests {
         let mut transport = CollectingTransport::default();
 
         block_on(async {
-            let mut sink = ProjectReadStreamSink::with_max_bytes(&mut transport, 9, max_bytes);
+            let mut sink = ProjectReadStreamSink::with_max_bytes(
+                &mut transport,
+                LinkId::PRIMARY,
+                9,
+                max_bytes,
+            );
             sink.send_project_read_event(begin).await.unwrap();
             sink.send_project_read_event(end).await.unwrap();
             sink.finish().await.unwrap();
@@ -394,7 +448,12 @@ mod tests {
         let mut transport = CollectingTransport::default();
 
         block_on(async {
-            let mut sink = ProjectReadStreamSink::with_max_bytes(&mut transport, 9, max_bytes);
+            let mut sink = ProjectReadStreamSink::with_max_bytes(
+                &mut transport,
+                LinkId::PRIMARY,
+                9,
+                max_bytes,
+            );
             sink.send_project_read_event(event).await.unwrap();
             assert!(sink.transport.sent.is_empty());
             sink.finish().await.unwrap();
@@ -415,7 +474,12 @@ mod tests {
         let mut transport = CollectingTransport::default();
 
         block_on(async {
-            let mut sink = ProjectReadStreamSink::with_max_bytes(&mut transport, 9, usize::MAX);
+            let mut sink = ProjectReadStreamSink::with_max_bytes(
+                &mut transport,
+                LinkId::PRIMARY,
+                9,
+                usize::MAX,
+            );
             sink.finish().await.unwrap();
         });
 
@@ -433,7 +497,12 @@ mod tests {
         let mut transport = CollectingTransport::default();
 
         let error = block_on(async {
-            let mut sink = ProjectReadStreamSink::with_max_bytes(&mut transport, 9, max_bytes);
+            let mut sink = ProjectReadStreamSink::with_max_bytes(
+                &mut transport,
+                LinkId::PRIMARY,
+                9,
+                max_bytes,
+            );
             sink.send_project_read_event(event).await.unwrap_err()
         });
 
@@ -455,7 +524,12 @@ mod tests {
         let mut transport = CollectingTransport::default();
 
         block_on(async {
-            let mut sink = ProjectReadStreamSink::with_max_bytes(&mut transport, 9, max_bytes);
+            let mut sink = ProjectReadStreamSink::with_max_bytes(
+                &mut transport,
+                LinkId::PRIMARY,
+                9,
+                max_bytes,
+            );
             // The oversized event cannot fit an empty frame: signalable failure.
             let error = sink.send_project_read_event(event).await.unwrap_err();
             assert!(transport_error_is_signalable(&error));
@@ -504,7 +578,12 @@ mod tests {
         let mut transport = FailingOnceTransport::default();
 
         block_on(async {
-            let mut sink = ProjectReadStreamSink::with_max_bytes(&mut transport, 9, max_bytes);
+            let mut sink = ProjectReadStreamSink::with_max_bytes(
+                &mut transport,
+                LinkId::PRIMARY,
+                9,
+                max_bytes,
+            );
             sink.send_project_read_event(begin).await.unwrap();
             // `end` does not fit alongside `begin`, forcing a flush of
             // `[begin]`, which fails. The batch is consumed by the failed send
@@ -530,7 +609,12 @@ mod tests {
         let mut transport = FailingSequenceTransport::new(3);
 
         block_on(async {
-            let mut sink = ProjectReadStreamSink::with_max_bytes(&mut transport, 9, max_bytes);
+            let mut sink = ProjectReadStreamSink::with_max_bytes(
+                &mut transport,
+                LinkId::PRIMARY,
+                9,
+                max_bytes,
+            );
             sink.send_project_read_event(event.clone()).await.unwrap();
             sink.send_project_read_event(event.clone()).await.unwrap();
             sink.send_project_read_event(event.clone()).await.unwrap();
@@ -550,17 +634,26 @@ mod tests {
     }
 
     impl ServerTransport for CollectingTransport {
-        async fn send(&mut self, msg: WireServerMessage) -> Result<(), TransportError> {
+        async fn send(
+            &mut self,
+            link: LinkId,
+            msg: WireServerMessage,
+        ) -> Result<(), TransportError> {
+            let _ = link;
             self.sent.push(msg);
             Ok(())
         }
 
-        async fn receive(&mut self) -> Result<Option<ClientMessage>, TransportError> {
+        async fn receive(&mut self) -> Result<Option<Incoming>, TransportError> {
             Ok(None)
         }
 
-        async fn receive_all(&mut self) -> Result<Vec<ClientMessage>, TransportError> {
+        async fn receive_all(&mut self) -> Result<Vec<Incoming>, TransportError> {
             Ok(Vec::new())
+        }
+
+        fn links(&self) -> Vec<Link> {
+            vec![Link::PRIMARY]
         }
 
         async fn close(&mut self) -> Result<(), TransportError> {
@@ -575,20 +668,28 @@ mod tests {
     }
 
     impl ServerTransport for FailingOnceTransport {
-        async fn send(&mut self, msg: WireServerMessage) -> Result<(), TransportError> {
+        async fn send(
+            &mut self,
+            link: LinkId,
+            msg: WireServerMessage,
+        ) -> Result<(), TransportError> {
             if !self.failed {
                 self.failed = true;
                 return Err(TransportError::Other("synthetic send failure".into()));
             }
-            self.inner.send(msg).await
+            self.inner.send(link, msg).await
         }
 
-        async fn receive(&mut self) -> Result<Option<ClientMessage>, TransportError> {
+        async fn receive(&mut self) -> Result<Option<Incoming>, TransportError> {
             self.inner.receive().await
         }
 
-        async fn receive_all(&mut self) -> Result<Vec<ClientMessage>, TransportError> {
+        async fn receive_all(&mut self) -> Result<Vec<Incoming>, TransportError> {
             self.inner.receive_all().await
+        }
+
+        fn links(&self) -> Vec<Link> {
+            vec![Link::PRIMARY]
         }
 
         async fn close(&mut self) -> Result<(), TransportError> {
@@ -611,22 +712,30 @@ mod tests {
     }
 
     impl ServerTransport for FailingSequenceTransport {
-        async fn send(&mut self, msg: WireServerMessage) -> Result<(), TransportError> {
+        async fn send(
+            &mut self,
+            link: LinkId,
+            msg: WireServerMessage,
+        ) -> Result<(), TransportError> {
             if !matches!(msg.msg, lpc_wire::server::ServerMsgBody::ProjectRead { .. }) {
-                return self.inner.send(msg).await;
+                return self.inner.send(link, msg).await;
             }
             if msg.seq == self.fail_sequence {
                 return Err(TransportError::Other("synthetic sequence failure".into()));
             }
-            self.inner.send(msg).await
+            self.inner.send(link, msg).await
         }
 
-        async fn receive(&mut self) -> Result<Option<ClientMessage>, TransportError> {
+        async fn receive(&mut self) -> Result<Option<Incoming>, TransportError> {
             self.inner.receive().await
         }
 
-        async fn receive_all(&mut self) -> Result<Vec<ClientMessage>, TransportError> {
+        async fn receive_all(&mut self) -> Result<Vec<Incoming>, TransportError> {
             self.inner.receive_all().await
+        }
+
+        fn links(&self) -> Vec<Link> {
+            vec![Link::PRIMARY]
         }
 
         async fn close(&mut self) -> Result<(), TransportError> {

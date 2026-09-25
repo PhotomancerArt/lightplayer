@@ -184,18 +184,20 @@ impl UiProductRef {
     }
 }
 
-/// Element format of a Studio control preview's samples: LINEAR unorm, 8 or
-/// 16 bits per sample.
+/// Element format of a Studio control preview's samples.
 ///
-/// Live previews arrive at `U8` — the transport precision Studio asks for
-/// (the screen draws 8-bit anyway); `U16` is what a published buffer holds
-/// and what a close inspection would ask for. Consumers read samples through
-/// [`UiControlProductPreview::unorm16_sample`], which widens `U8` by ×257, so
-/// no decode path cares which one arrived.
+/// Live previews arrive at `Srgb8` — the transport precision Studio asks for
+/// (`PREVIEW_SAMPLE_FORMAT`): 8 bits, sRGB-encoded, so the codes land where
+/// the screen shows them. `U16` (linear) is what a published buffer holds and
+/// what a close inspection would ask for; `U8` (linear) is what an output
+/// that publishes 8-bit sends verbatim. Consumers read samples through
+/// [`UiControlProductPreview::unorm16_sample`], which decodes every format to
+/// linear unorm16, so no decode path cares which one arrived.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum UiControlSampleFormat {
     U8,
     U16,
+    Srgb8,
 }
 
 impl UiControlSampleFormat {
@@ -203,7 +205,7 @@ impl UiControlSampleFormat {
     #[must_use]
     pub const fn bytes_per_sample(self) -> usize {
         match self {
-            Self::U8 => 1,
+            Self::U8 | Self::Srgb8 => 1,
             Self::U16 => 2,
         }
     }
@@ -214,6 +216,7 @@ impl UiControlSampleFormat {
         match format {
             lpc_wire::WireChannelSampleFormat::U8 => Self::U8,
             lpc_wire::WireChannelSampleFormat::U16 => Self::U16,
+            lpc_wire::WireChannelSampleFormat::Srgb8 => Self::Srgb8,
         }
     }
 }
@@ -236,8 +239,8 @@ pub struct UiControlProductPreview {
     /// unchanged across ticks, and the per-tick preview rebuild must not
     /// deep-copy it.
     pub display_layout: Option<Rc<ControlDisplayLayout>>,
-    /// Native sample bytes: one per sample at `U8`, two little-endian at
-    /// `U16`. Read them through [`Self::unorm16_sample`].
+    /// Native sample bytes: one per sample at `U8` and `Srgb8`, two
+    /// little-endian at `U16`. Read them through [`Self::unorm16_sample`].
     ///
     /// Shared (`Rc<[u8]>`) so cloning a preview into a view is a refcount bump,
     /// not a deep copy of the payload — the DTO tree is rebuilt often and these
@@ -246,13 +249,19 @@ pub struct UiControlProductPreview {
 }
 
 impl UiControlProductPreview {
-    /// Sample `index` as linear unorm16, whatever format it arrived in: an
-    /// 8-bit level `k` widens to `k · 257`, so 255 is full scale and every
-    /// decode path downstream stays 16-bit. `None` past the buffer.
+    /// Sample `index` as linear unorm16, whatever format it arrived in: a
+    /// linear 8-bit level `k` widens to `k · 257`, an sRGB8 code decodes
+    /// through the inverse transfer (`lpc_wire::srgb8_to_linear16`, which
+    /// re-encodes to the same code), so 255 is full scale either way and
+    /// every decode path downstream stays 16-bit. `None` past the buffer.
     #[must_use]
     pub fn unorm16_sample(&self, index: usize) -> Option<u16> {
         match self.sample_format {
             UiControlSampleFormat::U8 => self.bytes.get(index).map(|&v| u16::from(v) * 257),
+            UiControlSampleFormat::Srgb8 => self
+                .bytes
+                .get(index)
+                .map(|&code| lpc_wire::srgb8_to_linear16(code)),
             UiControlSampleFormat::U16 => {
                 let at = index.checked_mul(2)?;
                 let lo = *self.bytes.get(at)?;
@@ -691,5 +700,19 @@ mod tests {
         assert_eq!(wide.unorm16_sample(0), Some(0x1234));
         assert_eq!(wide.unorm16_sample(1), Some(u16::MAX));
         assert_eq!(wide.unorm16_sample(2), None, "a half sample is no sample");
+
+        // sRGB8 codes decode through the inverse transfer: code 1 is linear
+        // 20/65535 (not 257), and every code re-encodes to itself.
+        let display = preview(UiControlSampleFormat::Srgb8, &[0, 1, 255]);
+        assert_eq!(display.unorm16_sample(0), Some(0));
+        assert_eq!(display.unorm16_sample(1), Some(20));
+        assert_eq!(display.unorm16_sample(2), Some(u16::MAX));
+        assert_eq!(display.unorm16_sample(3), None);
+        let every_code: Vec<u8> = (0..=u8::MAX).collect();
+        let every = preview(UiControlSampleFormat::Srgb8, &every_code);
+        for code in 0..=u8::MAX {
+            let linear = every.unorm16_sample(usize::from(code)).expect("in range");
+            assert_eq!(lpc_wire::linear16_to_srgb8(linear), code, "code {code}");
+        }
     }
 }

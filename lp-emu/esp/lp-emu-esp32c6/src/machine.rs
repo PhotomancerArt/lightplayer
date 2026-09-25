@@ -394,6 +394,10 @@ pub const PERIPHERAL_REGISTRATION_ORDER: &[&str] = &[
     // The analog I2C master's command memory (P6, G6-2 finding 1): libphy
     // fills it right after its first radio-window writes.
     "I2C_MST_MEM",
+    // The Wi-Fi/BLE coexistence arbiter's registers (BLE M4): the coex blob's
+    // `coex_hw_*` reaches them at radio init once the image links
+    // `esp-radio/coex`, which the shipped image does from M4 on.
+    "COEX",
     // M7: the two SDIO-slave blocks only the mask ROM touches — `HINF`'s
     // device id and the one `SLC` word `ets_spi_download_disabled` reads.
     // Last, not first, even though a ROM-up boot meets them before

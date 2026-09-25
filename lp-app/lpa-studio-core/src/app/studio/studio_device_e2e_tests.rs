@@ -1844,10 +1844,10 @@ fn a_fed_boards_last_frame_survives_a_reload() {
     let live = feed.frame().expect("the feed's frame");
     // The packed layout form quantizes lamp centers, so the picture is
     // compared by what a slot would draw from it, not bit for bit.
-    // The card pulls at 8 bits and the sidecar stores 16 (widened by ×257),
-    // so the samples are compared as the lamp decode reads them.
+    // The card pulls sRGB8 and the sidecar stores linear 16 (each code
+    // decoded), so the samples are compared as the lamp decode reads them.
     assert_eq!(stored.revision, live.revision);
-    assert_eq!(live.sample_format, crate::UiControlSampleFormat::U8);
+    assert_eq!(live.sample_format, crate::UiControlSampleFormat::Srgb8);
     assert_eq!(stored.sample_format, crate::UiControlSampleFormat::U16);
     assert_eq!(stored.extent, live.extent);
     let samples = |frame: &crate::UiControlProductPreview| -> Vec<Option<u16>> {
@@ -4245,6 +4245,20 @@ fn an_effect_that_outlives_its_activity_gives_the_wire_back_and_the_pump_resumes
             .is_some_and(|card| card.loaded_project == lpa_devices::view::LoadedProject::Empty)
     });
     let device_id = bench.view().devices[0].id;
+
+    // The precondition the fresh-window assertion below rests on, enforced
+    // rather than assumed: every question the board was asked is answered
+    // and on the wire BEFORE the push borrows it. Identify settles on the
+    // board's unsolicited boot hello while its own hello REQUEST is still in
+    // flight, and the fake's server answers that on a real thread in real
+    // time. On a loaded runner the answer was still inside the server when
+    // the push took the wire; the reopen flushes the wire, not the server,
+    // so the late hello landed in the fresh window and the card read Ready
+    // (CI, 2026-09-25, twice in 30 minutes; 11/96 under local load).
+    // docs/defects/2026-09-25-a-late-hello-answer-reaches-the-fresh-window.md
+    bench.run_until(&tasks, "every request to be answered onto the wire", |_| {
+        device.unanswered_requests() == 0
+    });
 
     // A push that never completes: it takes the wire and keeps it.
     bench.push_gesture(device_id, bundled_example());

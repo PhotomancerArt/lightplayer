@@ -150,13 +150,20 @@ impl<'a> EngineProjectReadSource<'a> {
                 // unbounded event exists (the applier `extend`s across events).
                 let mut batch: alloc::vec::Vec<lpc_wire::WireTreeDelta> = alloc::vec::Vec::new();
                 let mut batch_len = 0usize;
-                let selected_deltas = crate::node::tree_deltas_since_iter(
-                    self.engine.tree(),
-                    since_rev,
-                )
-                .filter(|delta| {
-                    super::project_read_nodes::selection_includes(&selection, delta.node_id())
-                });
+                // `change_frame` is the entry's content stamp, not its own
+                // put-back stamp: a steady read sends no `entry_changed`
+                // (see `tree_entry_stamps`).
+                self.engine.refresh_tree_entry_stamps();
+                let engine = &*self.engine;
+                let selected_deltas =
+                    crate::node::tree_deltas_since_iter(engine.tree(), since_rev, move |entry| {
+                        engine
+                            .tree_entry_changed_at(entry.id)
+                            .unwrap_or(entry.created_at)
+                    })
+                    .filter(|delta| {
+                        super::project_read_nodes::selection_includes(&selection, delta.node_id())
+                    });
                 for delta in selected_deltas {
                     let delta_len = lpc_wire::ser_write_json_len(&delta);
                     if !batch.is_empty()
@@ -890,7 +897,7 @@ mod tests {
         let mut fs = lpfs::LpFsMemory::new();
         // Both halves: the container manifest gates the load (D-A refuses a
         // project without one), the root module carries the def.
-        fs.write_file_mut(lpfs::LpPath::new("/project.json"), br#"{"format": 10}"#)
+        fs.write_file_mut(lpfs::LpPath::new("/project.json"), br#"{"format": 11}"#)
             .expect("write container manifest");
         fs.write_file_mut(lpfs::LpPath::new("/module.json"), br#"{"kind": "Module"}"#)
             .expect("write root module");
@@ -1298,7 +1305,7 @@ mod tests {
         let mut fs = lpfs::LpFsMemory::new();
         fs.write_file_mut(
             lpfs::LpPath::new("/project.json"),
-            b"{\n  \"format\": 10\n}\n",
+            b"{\n  \"format\": 11\n}\n",
         )
         .expect("write container manifest");
         fs.write_file_mut(
@@ -1407,7 +1414,7 @@ mod tests {
         let mut fs = lpfs::LpFsMemory::new();
         fs.write_file_mut(
             lpfs::LpPath::new("/project.json"),
-            b"{\n  \"format\": 10\n}\n",
+            b"{\n  \"format\": 11\n}\n",
         )
         .expect("write container manifest");
         fs.write_file_mut(
