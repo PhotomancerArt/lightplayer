@@ -10,6 +10,7 @@ use crate::app::project::agent_support::{
 };
 use crate::app::project::device_bind::{BindOutcome, PulledPackage, RunningPackage};
 use crate::app::project::edit_journal::{EditJournal, EditStep};
+use crate::app::project::node::node_face_builder;
 use crate::app::project::slot::{
     AssetEditEntry, AssetEditKey, AssetEditState, BindingFactEditOp, BindingFactOverrides,
     SlotEditEntry, SlotEditEntrySource, SlotEditJoin,
@@ -27,7 +28,7 @@ use crate::{
     ProjectState, ProjectSync, ProjectSyncPhase, ProjectSyncRun, ProjectSyncSummary, SlotEditOp,
     StudioOverlayMutation, StudioProjectRead, StudioProjectReadOutcome, StudioServerClient,
     UiAction, UiAssetContent, UiAssetContentBody, UiAssetEditor, UiError, UiIssue, UiLogDraft,
-    UiLogLevel, UiLogOrigin, UiMetric, UiNodeView, UiNotice, UiPaneAction, UiPaneView,
+    UiLogLevel, UiLogOrigin, UiMetric, UiNodeTabBody, UiNodeView, UiNotice, UiPaneAction, UiPaneView,
     UiPendingEdit, UiPendingEditKind, UiPendingEditPhase, UiProductRef, UiResult, UiShaderError,
     UiShaderUniform, UiSlotAsset, UiStatus, UiViewContent, UxUpdateSink,
 };
@@ -6391,12 +6392,35 @@ impl ProjectController {
         op: PlaylistActivateOp,
     ) -> Result<ProjectEditRun, UiError> {
         let handle_id = self.ready_handle_id()?;
-        let node_id = self
-            .node(&op.node)
-            .map(|node| node.target().node_id)
-            .ok_or_else(|| {
-                UiError::Project(format!("no node at {} to activate an entry on", op.node))
-            })?;
+        let node = self.node(&op.node).ok_or_else(|| {
+            UiError::Project(format!("no node at {} to activate an entry on", op.node))
+        })?;
+        let node_id = node.target().node_id;
+        // Load-to-edit (D11): the entry may still be dormant, so its card
+        // is not among `node`'s children yet. Name the tree segment its
+        // child will land under (the same naming rule the strip's chips
+        // already match a mounted child against) and wait for it — the
+        // same `pending_focus` mechanism a freshly created node's card
+        // uses, reused here because it is exactly the same wait: "the
+        // named child under this parent has not landed in a synced view
+        // yet".
+        if let Some(expected_name) = node
+            .ui_node()
+            .tabs
+            .iter()
+            .find_map(|tab| match &tab.body {
+                UiNodeTabBody::Sections(sections) => {
+                    node_face_builder::playlist_entry_expected_child_name(sections, op.entry)
+                }
+                UiNodeTabBody::Text { .. } => None,
+            })
+        {
+            self.pending_focus = Some(PendingNodeFocus {
+                parent: op.node.clone(),
+                name: expected_name,
+                shape_guided: false,
+            });
+        }
         let run = server
             .node_command(
                 handle_id,
@@ -6409,9 +6433,13 @@ impl ProjectController {
                 self.verdict_chase_ticks = VERDICT_CHASE_TICKS;
                 UiNotices::new()
             }
-            WireNodeCommandResponse::Rejected { reason } => UiNotices::new().with_notice(
-                UiNotice::warning(format!("Couldn't activate entry {}: {reason}", op.entry)),
-            ),
+            WireNodeCommandResponse::Rejected { reason } => {
+                self.pending_focus = None;
+                UiNotices::new().with_notice(UiNotice::warning(format!(
+                    "Couldn't activate entry {}: {reason}",
+                    op.entry
+                )))
+            }
         };
         Ok(ProjectEditRun {
             notices,

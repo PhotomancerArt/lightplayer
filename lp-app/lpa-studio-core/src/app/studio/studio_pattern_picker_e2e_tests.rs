@@ -199,6 +199,60 @@ fn the_pattern_instruments_gestures_drive_the_real_playlist() {
     });
 }
 
+/// P8, D11: activating a dormant entry — from the strip chip's action, the
+/// same `PlaylistActivateOp` the Pattern picker's tap sends — loads AND
+/// opens the entry's card. `aurora` starts dormant (Soft Noise is idle);
+/// tapping it plays it, and once its subtree lands in a synced view, its
+/// card is the focused one, with no second click.
+#[test]
+fn activating_a_dormant_entry_loads_it_and_opens_its_card() {
+    let mut session = Session::connect();
+
+    assert!(
+        node_focused(&session.view, "Aurora").is_none(),
+        "aurora starts dormant: absent from the tree entirely (AC1)"
+    );
+
+    let tap = picker(&session.view).entries[1]
+        .play
+        .clone()
+        .expect("tap to play aurora");
+    session.act(tap);
+    session.refresh_until("aurora's card lands, focused", |view| {
+        node_focused(view, "Aurora") == Some(true)
+    });
+
+    // The card is really open, not just marked focused in passing: its
+    // own knob panel is the group the switch already proved follows.
+    assert_eq!(root_panel(&session.view).groups[2].label, "Aurora");
+}
+
+/// Depth-first search of the project editor's card tree by label: `None`
+/// when no node (top-level card or nested child) carries it, `Some(focused)`
+/// when one does.
+fn node_focused(view: &UiStudioView, label: &str) -> Option<bool> {
+    fn walk_children(children: &[crate::UiNodeChild], label: &str) -> Option<bool> {
+        for child in children {
+            if child.label == label {
+                return Some(child.focused);
+            }
+            if let Some(found) = walk_children(&child.children, label) {
+                return Some(found);
+            }
+        }
+        None
+    }
+    for node in &project_editor(view).nodes {
+        if node.header.title == label {
+            return Some(node.focused);
+        }
+        if let Some(found) = walk_children(&node.children, label) {
+            return Some(found);
+        }
+    }
+    None
+}
+
 #[test]
 fn a_pattern_that_fails_to_compile_reads_failed() {
     let mut session = Session::connect();
