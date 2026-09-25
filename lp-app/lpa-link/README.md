@@ -116,6 +116,8 @@ Browser providers own their browser resource bindings:
 - `browser-worker` owns the JavaScript module Worker wrapper and lifecycle.
 - `browser-serial-esp32` owns Web Serial permission/open/release/close and ESP32
   probe/flash bindings.
+- `browser-ble` owns the Web Bluetooth `BluetoothDevice`, its GATT connection
+  and the Nordic UART characteristics (see "Web Bluetooth" below).
 
 For hardware links, `DeviceSession` (below) owns the adaptation into
 `lpa-client::ClientIo` — apps consume its readiness-gated channel rather
@@ -227,6 +229,7 @@ and `fake-device`):
 | `device_link::fake` | `FakeDeviceLink` = `ByteStreamLink<FakeDeviceByteStream>`: the model's host test vehicle |
 | `device_link::browser_serial` | `BrowserSerialLink` — a WRAPPER over `BrowserSerialEsp32Provider` and the shipped JS controller (wasm only) |
 | `device_link::browser_worker` | `BrowserWorkerLink` — a `fw-browser` worker as a device, i.e. the **sim** (wasm only) |
+| `device_link::browser_ble` | `BrowserBleLink` — a Web Bluetooth (NUS) session as a device link; `Close` really disconnects, there is no reset (wasm only) |
 | `device_link::browser_worker_io` | `BrowserWorkerLinkIo` — that worker's protocol channel as an `lpa_client::ClientIo`, for the exclusive-borrow conversations (wasm only) |
 
 The browser adapter is where the executor lives: Web Serial is promise-shaped,
@@ -313,6 +316,7 @@ preconfigured instance for the kind, so scripted state survives re-opens.
 | `browser-worker` | `providers::browser_worker::BrowserWorkerProvider` | `fw-browser` Web Worker | browser worker runtime | logs, diagnostics, worker lifecycle | implemented; owns Worker wrapper/lifecycle |
 | `host-serial-esp32` | `providers::host_serial_esp32::HostSerialEsp32Provider` | ESP32 over host serial | physical serial device | connect (optional reset-after-open), logs, diagnostics; future reset/flash/raw filesystem | implemented for discovery/connect; returns host `LinkServerConnection` |
 | `browser-serial-esp32` | `providers::browser_serial_esp32::BrowserSerialEsp32Provider` | ESP32 over Web Serial | physical serial device | connect, provision firmware, erase to blank, reset, logs, diagnostics; future raw filesystem | implemented for browser Web Serial/probe/flash/erase ownership |
+| `browser-ble` | `providers::browser_ble` (`BleDevice`, `BleWire`, `BleClientIo`) | a board's BLE link through Web Bluetooth (Chrome, Brave, Bluefy on iPhone) | Bluetooth device, endpoint `ble:<Web Bluetooth device id>` | none: no reset, flash, erase, boot control or raw filesystem (`LinkProviderKind::BrowserBle`'s capabilities) | implemented (BLE M5); `lpa-client` conversations over the same wire |
 | `host-websocket` | future `providers::host_websocket::HostWebsocketProvider` | already-running server over host networking | remote endpoint | host-side discovery/connect/status; limited management | future |
 | `browser-websocket` | future `providers::browser_websocket::BrowserWebsocketProvider` | already-running server over browser networking | remote endpoint | browser permission/discovery/connect/status; limited management | future |
 | `host-webserver` | future `providers::host_webserver::HostWebserverProvider` | host service owning `fw-host` runtimes | service-managed runtime endpoint | create/stop runtimes, logs, diagnostics | future |
@@ -334,6 +338,42 @@ envelope (the worker's boot runtime) and `CreateRuntime` (every later one):
 - `identity` — the synthetic MAC the host minted for this device, when it
   has one. `fw-browser` reports it in its hello, which is what lets a sim be
   folded like silicon.
+
+### Web Bluetooth (`browser-ble`)
+
+A board's Bluetooth link is **just another transport**: the same `M!{json}`
+lines USB carries, written to the board's Nordic UART RX characteristic in
+chunks and read back from TX notifications, re-joined into lines by the same
+`LineSplitter` every byte transport uses. The module layout follows Web
+Serial's: `browser_ble.js` owns the `BluetoothDevice`, the bounded connect,
+the awaited chunked writes, the reconnect loop, the visibility re-checks and
+the presence edges; `browser_ble.rs` binds it with no `web-sys` Bluetooth
+features; `ble_wire.rs` is a session's one byte stream, shared by the model's
+link and a borrowing conversation; `ble_client_io.rs` is `lpa-client`'s io
+over it (push, project removal, manifest writes, the editor lens).
+
+Things to know before changing it:
+
+- **The rules live in `browser_ble.js`'s header comment**, each with the
+  measurement behind it (awaited writes with response, the chunk size, the
+  bounded connect, a hidden page not hearing its link drop). Change a rule
+  there, with its evidence, not here.
+- **The endpoint id is never identity.** A Web Bluetooth device id is opaque
+  and per origin; the hello's base MAC is the device. A board on USB and on
+  Bluetooth at once is one device.
+- **A Bluetooth link is untrusted.** The board grants it nothing but `Hello`
+  and the login messages until it unlocks (`docs/adr/2026-09-23-ble-access-model.md`);
+  Studio's unlock runs above this crate.
+- **It cannot flash.** `LinkProviderKind::BrowserBle` carries no management
+  capability, and the effects that need USB refuse by name.
+- **wasm only, so `just test` never sees it.** The browser half is pinned by
+  `tests/browser_ble_conformance.rs`, which `just lpa-link-browser-test` runs
+  against the `?ble=emu` polyfill (`lpa-studio-web/public/lpa-link/virtual_bluetooth.js`).
+  That polyfill proves the transport and the UI, not access and not the
+  radio: it never runs the board's BLE controller.
+
+The decision record is `docs/adr/2026-09-24-ble-transport.md` (decisions 1–10
+for the firmware, S1–S7 for Studio).
 
 The ESP32 serial providers are intentionally ESP32-specific. Flashing,
 resetting, boot-mode handling, and raw filesystem access are target-family
