@@ -112,3 +112,37 @@ pub async fn fetch_dev_settings() -> Option<StudioSettings> {
         }
     }
 }
+
+/// `localStorage` key for the passwords this browser remembers for logging
+/// in to pieces over Bluetooth (BLE M6): local only, never synced (PQ8).
+pub const BLE_PASSWORDS_KEY: &str = "lp.ble.passwords.v1";
+
+/// `localStorage` key for what this browser wrote to each piece's device
+/// store (the store is write-only on the device, so this is the only copy
+/// Studio can list).
+pub const BLE_DEVICE_ACCESS_KEY: &str = "lp.ble.device-access.v1";
+
+/// Read one `localStorage` document. Blocked storage, private mode and a
+/// missing key all read as "nothing stored".
+pub fn load_local(key: &str) -> Option<String> {
+    let storage = web_sys::window()?.local_storage().ok()??;
+    storage.get_item(key).ok()?
+}
+
+/// Persist one access document under its own key (the controller's
+/// `on_access_persist` hook). A failure only warns: what the page holds
+/// still applies for this session.
+pub fn store_access(persist: lpa_studio_core::AccessPersist) {
+    let (key, json) = match persist {
+        lpa_studio_core::AccessPersist::Passwords(json) => (BLE_PASSWORDS_KEY, json),
+        lpa_studio_core::AccessPersist::Devices(json) => (BLE_DEVICE_ACCESS_KEY, json),
+    };
+    let storage = web_sys::window().and_then(|window| window.local_storage().ok().flatten());
+    let Some(storage) = storage else {
+        log::warn!("Bluetooth access not saved: localStorage is unavailable");
+        return;
+    };
+    if let Err(error) = storage.set_item(key, &json) {
+        log::warn!("Bluetooth access not saved to localStorage: {error:?}");
+    }
+}

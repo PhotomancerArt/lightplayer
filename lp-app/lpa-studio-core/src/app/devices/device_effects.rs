@@ -459,7 +459,8 @@ impl DeviceEffects {
         match command {
             Command::Link { link, command } => self.submit(link, command),
             Command::StartTimer { timer, after_ms } => self.start_timer(timer, after_ms),
-            Command::RequestUsbGrant => self.request_grant(),
+            Command::RequestUsbGrant => self.request_grant(GrantChooser::Usb),
+            Command::RequestBleGrant => self.request_grant(GrantChooser::Bluetooth),
             Command::PersistRecord(record) => self.writes.persist.push(record),
             Command::DeleteRecord(device) => {
                 // A forgotten device takes its unsent payload with it.
@@ -690,19 +691,23 @@ impl DeviceEffects {
         }));
     }
 
-    fn request_grant(&mut self) {
+    fn request_grant(&mut self, chooser: GrantChooser) {
         let (Some(transport), Some(spawn), Some(sink)) = (
             self.transport.clone(),
             self.spawn.clone(),
             self.sink.clone(),
         ) else {
-            log::warn!("a USB grant was requested with no device transport installed");
+            log::warn!("a device grant was requested with no device transport installed");
             return;
         };
         let link = self.mint_link_id();
         let register = self.registrar();
         spawn(Box::pin(async move {
-            match transport.request_grant().await {
+            let picked = match chooser {
+                GrantChooser::Usb => transport.request_grant().await,
+                GrantChooser::Bluetooth => transport.request_ble_grant().await,
+            };
+            match picked {
                 // The chooser was dismissed: no port, no news, no error.
                 Ok(None) => {}
                 Ok(Some(granted)) => register(link, granted, sink),
@@ -957,6 +962,20 @@ fn port_is_gone(message: &str) -> bool {
     message.contains("device has been lost")
         || message.contains("serial port disconnected")
         || message.contains("serial port is not open")
+        // The Bluetooth link's own death notice (`browser_ble.js`): the GATT
+        // connection dropped. The session reconnects on its own and announces
+        // the device again through the hotplug edge; until then this link is
+        // gone, not merely closed.
+        || message.contains("bluetooth link lost")
+}
+
+/// Which platform chooser a grant request pops.
+#[derive(Clone, Copy, Debug)]
+enum GrantChooser {
+    /// Web Serial's port chooser.
+    Usb,
+    /// Web Bluetooth's device chooser.
+    Bluetooth,
 }
 
 /// Release a wire borrow, but only if `effect_id` is the one holding it.

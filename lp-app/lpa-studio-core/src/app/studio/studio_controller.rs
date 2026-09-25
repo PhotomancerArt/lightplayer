@@ -135,6 +135,13 @@ pub struct StudioController {
     /// an emu on and off, and asking it how fast it is running, are not part
     /// of the `DeviceTransport` vocabulary and must not become part of it.
     emu_transport: Option<Rc<crate::EmuDeviceTransport>>,
+    /// The transport that reaches BLUETOOTH devices (M5), when this build
+    /// has one. `dyn`-free for symmetry with the other two halves.
+    ble_transport: Option<Rc<crate::BleDeviceTransport>>,
+    /// How many Play surfaces are mounted on the lens right now (the
+    /// `PlayViewOp` lease). Play is the one mode with an idle read budget
+    /// over Bluetooth; everything else is authoring.
+    play_views: u32,
     /// The `/device-sims/<uid>.json` sidecars, read off the library
     /// snapshot at settle. The sole "this device is a runtime" fact — for
     /// BOTH kinds, keyed by uid, with the sidecar's own `kind` saying
@@ -250,6 +257,11 @@ pub struct StudioController {
     /// injected platform facilities (spawner, provider factory); runs are
     /// spawned tasks reporting back through the actor's command queue.
     agent: crate::AgentController,
+    /// Access over Bluetooth (BLE M6): login on connect, remembered
+    /// passwords, and the device-store writes.
+    access: crate::app::access::AccessController,
+    /// The last project Bluetooth-list change that failed, in words.
+    project_access_error: Option<String>,
 }
 
 /// Which device an open lands on — the model half of the URL's `?on=`
@@ -388,6 +400,8 @@ impl StudioController {
             serial_transport: None,
             sim_transport: None,
             emu_transport: None,
+            ble_transport: None,
+            play_views: 0,
             device_sims: std::collections::BTreeMap::new(),
             pool: RuntimePool::new(),
             project: ProjectController::new(),
@@ -419,6 +433,8 @@ impl StudioController {
             on_user_settings: None,
             on_copy_text: None,
             agent: crate::AgentController::new(),
+            access: crate::app::access::AccessController::new(),
+            project_access_error: None,
         }
     }
 
@@ -545,6 +561,18 @@ impl StudioController {
         self.install_device_transport();
     }
 
+    /// Install the transport that serves BLUETOOTH devices (M5). Install
+    /// before the actor takes ownership, beside the others.
+    ///
+    /// A Studio build installs it even on a browser without Web Bluetooth:
+    /// the chooser then refuses with the reason, and the Add verb's copy
+    /// explains it (Brave's flag, Safari → Bluefy), instead of the verb
+    /// silently not existing.
+    pub fn set_ble_transport(&mut self, transport: Rc<crate::BleDeviceTransport>) {
+        self.ble_transport = Some(transport);
+        self.install_device_transport();
+    }
+
     /// (Re)install whichever transport this build's halves add up to, and
     /// arm the first sweep: a page that CAN see devices should show what it
     /// already has, without the user asking twice.
@@ -558,6 +586,12 @@ impl StudioController {
                 let composite = match &self.emu_transport {
                     Some(emu) => {
                         composite.with_emu(Rc::clone(emu) as Rc<dyn crate::DeviceTransport>)
+                    }
+                    None => composite,
+                };
+                let composite = match &self.ble_transport {
+                    Some(ble) => {
+                        composite.with_ble(Rc::clone(ble) as Rc<dyn crate::DeviceTransport>)
                     }
                     None => composite,
                 };
@@ -884,7 +918,191 @@ impl StudioController {
     /// Install the platform task spawner for device IO (`spawn_local` on
     /// wasm). Install before the actor takes ownership.
     pub fn set_device_spawner(&mut self, spawner: impl Fn(crate::DeviceTaskFuture) + 'static) {
-        self.devices.effects_mut().set_spawner(spawner);
+        // One spawner, two users: the effects layer and the access
+        // controller's login conversations run on the same device IO seam.
+        let spawner: Rc<dyn Fn(crate::DeviceTaskFuture)> = Rc::new(spawner);
+        let shared = Rc::clone(&spawner);
+        self.devices
+            .effects_mut()
+            .set_spawner(move |future| shared(future));
+        self.access.set_spawner(spawner);
+    }
+
+    /// Install the hook that persists the access documents (the web edge
+    /// writes each to its own `localStorage` key).
+    pub fn set_on_access_persist(
+        &mut self,
+        hook: impl Fn(crate::app::access::AccessPersist) + 'static,
+    ) {
+        self.access.set_on_persist(hook);
+    }
+
+    /// Where access conversations report back (called by `StudioActor::new`).
+    pub(crate) fn set_access_command_sender(
+        &mut self,
+        tx: crate::app::studio::studio_view_channel::CommandSender,
+    ) {
+        self.access.set_command_sender(tx);
+    }
+
+    /// Apply one access command (the password sheet, the access panel, a
+    /// finished conversation), then drive every login again.
+    pub fn apply_access_command(&mut self, command: crate::app::access::AccessCommand) {
+        use crate::app::access::AccessCommand;
+        match command {
+            AccessCommand::ProjectSecretAdd(secret) => {
+                let salt = (self.random)();
+                self.project_access_error = self
+                    .with_active_package_fs(|fs| {
+                        crate::app::access::project_access::add_project_secret(
+                            fs,
+                            &secret,
+                            salt,
+                            crate::app::access::DEFAULT_KDF_ITERATIONS,
+                        )
+                    })
+                    .err();
+            }
+            AccessCommand::ProjectSecretRevoke { label } => {
+                self.project_access_error = self
+                    .with_active_package_fs(|fs| {
+                        crate::app::access::project_access::revoke_project_secret(fs, &label)
+                    })
+                    .err();
+            }
+            command => {
+                let now = self.device_now();
+                let now_secs = (self.now_secs)();
+                let salt = (self.random)();
+                let follow_up = self.access.apply(
+                    command,
+                    self.devices.roster(),
+                    self.devices.effects(),
+                    now,
+                    now_secs,
+                    salt,
+                );
+                if let Some(crate::app::access::access_controller::AccessFollowUp::Restart(
+                    device,
+                )) = follow_up
+                {
+                    self.fold_device_input(crate::DeviceInput::Action(
+                        lpa_devices::Action::ResetBoard { device },
+                    ));
+                }
+            }
+        }
+        self.drive_device_access();
+        self.mark_dirty();
+    }
+
+    /// An action failed. A tier refusal (`NotPermitted`) on the editor's
+    /// board opens the password sheet with "This needs an edit password",
+    /// never a silent failure.
+    pub fn note_action_error(&mut self, error: &UiError) {
+        if !matches!(error, UiError::NotPermitted(_)) {
+            return;
+        }
+        let Some(device) = self
+            .pool
+            .attached_session()
+            .map(|session| session.attachment().device)
+        else {
+            return;
+        };
+        self.access.note_needs_edit(device);
+        self.mark_dirty();
+    }
+
+    /// Start whatever login conversation a Bluetooth device needs now.
+    pub(crate) fn drive_device_access(&mut self) {
+        let now = self.device_now();
+        let default_password = self.settings.device_default_password().map(str::to_string);
+        self.access.drive(
+            self.devices.roster(),
+            self.devices.effects(),
+            now,
+            default_password.as_deref(),
+        );
+    }
+
+    /// Run a login step the access controller parked because the editor
+    /// lens holds that board's wire: through the lens's own client, which
+    /// is the only reader of that wire while it is attached.
+    pub async fn run_access_lens_step(&mut self) {
+        let Some((device, step)) = self.access.take_lens_step() else {
+            return;
+        };
+        let keys = self.access.keys();
+        let Some(timer) = self.devices.effects().timer_factory() else {
+            return;
+        };
+        let result = match self.pool.attached_session_mut() {
+            Some(session) => match session.client_mut() {
+                Ok(client) => client.run_access_step(device, step, &keys, timer).await,
+                Err(_) => return,
+            },
+            None => return,
+        };
+        self.apply_access_command(result);
+    }
+
+    /// Run `write` against the OPEN library project's package filesystem —
+    /// the project's own exclusive-locked handle (the seam
+    /// `set_module_export` uses).
+    fn with_active_package_fs(
+        &self,
+        write: impl FnOnce(&dyn lpfs::LpFs) -> Result<(), String>,
+    ) -> Result<(), String> {
+        let fs = self
+            .project
+            .active_package_fs()
+            .ok_or_else(|| "open a project from your library first".to_string())?;
+        let fs = fs.borrow();
+        write(&*fs)
+    }
+
+    /// The settings slice, with the access controller's count joined in.
+    fn settings_view(&self) -> crate::app::settings::UiSettingsView {
+        let mut view = self.settings.ui_view();
+        view.devices.remembered_passwords = self.access.remembered().len();
+        view
+    }
+
+    /// The lens board's login line, when it is reached over Bluetooth.
+    fn lens_access_line(&self) -> Option<String> {
+        let device = self.pool.attached_session()?.attachment().device;
+        let device = self.devices.roster().device(device)?;
+        self.access.device_view(device, None)?.line
+    }
+
+    /// The password sheet, when a Bluetooth piece needs one.
+    fn login_prompt_view(&self) -> Option<crate::app::access::UiLoginPrompt> {
+        let roster = self.devices.roster();
+        self.access.prompt(|device| {
+            roster
+                .device(device)
+                .map(lpa_devices::Device::title)
+                .unwrap_or_else(|| "This piece".to_string())
+        })
+    }
+
+    /// The open library project's Bluetooth list, for its settings.
+    fn project_access_view(&self) -> Option<crate::app::access::UiProjectAccess> {
+        let fs = self.project.active_package_fs()?;
+        let fs = fs.borrow();
+        let (secrets, read_error) =
+            match crate::app::access::project_access::read_project_access(&*fs) {
+                Ok(file) => (
+                    crate::app::access::project_access::project_access_secrets(&file),
+                    None,
+                ),
+                Err(error) => (Vec::new(), Some(error)),
+            };
+        Some(crate::app::access::UiProjectAccess {
+            secrets,
+            error: self.project_access_error.clone().or(read_error),
+        })
     }
 
     /// Install the platform timer factory device waits run on (called by
@@ -922,6 +1140,9 @@ impl StudioController {
         self.drop_device_lens_if_wireless();
         // A forgotten device takes its feed (and last frame) with it.
         self.device_feeds.retain_devices(self.devices.roster());
+        // A Bluetooth link that opened, said hello or dropped may need a
+        // login conversation (BLE M6).
+        self.drive_device_access();
         self.mark_dirty();
     }
 
@@ -1150,6 +1371,22 @@ impl StudioController {
             (self.now_secs)(),
         );
         view.runtime_bands = self.runtime_bands(&view);
+        // Web Serial (or the `?emu=` shim that polyfills it) is what built
+        // a serial transport; without one the add slot keeps its USB verb
+        // out of the primary position (iPhone, Bluefy, Firefox, Safari).
+        view.usb_available = self.serial_transport.is_some();
+        let default_password = self.settings.device_default_password();
+        view.access = self
+            .devices
+            .roster()
+            .devices()
+            .iter()
+            .filter_map(|device| {
+                self.access
+                    .device_view(device, default_password)
+                    .map(|access| (device.id, access))
+            })
+            .collect();
         view
     }
 
@@ -1276,6 +1513,12 @@ impl StudioController {
             SettingsCommand::SetAgentPriceOutputPerMtok(value) => {
                 self.settings.set_agent_price_output_per_mtok(value);
                 self.persist_user_settings();
+            }
+            SettingsCommand::SetDeviceDefaultPassword(password) => {
+                self.settings.set_device_default_password(password);
+                self.persist_user_settings();
+                // A new default may open a piece that is waiting on one.
+                self.drive_device_access();
             }
             SettingsCommand::RequestModels { force } => self.request_agent_models(force),
             SettingsCommand::ModelsLoaded {
@@ -1484,13 +1727,26 @@ impl StudioController {
     /// The effective minimum gap between passive pulls on the lens session:
     /// the kind cadence, tightened by a post-apply verdict chase, stretched
     /// by that session's failure backoff.
+    ///
+    /// A Bluetooth lens held in Play mode is the one idle-budgeted case
+    /// (M5): see [`BLE_PLAY_IDLE_REFRESH_INTERVAL`](crate::app::studio::BLE_PLAY_IDLE_REFRESH_INTERVAL).
     fn lens_refresh_gap(&self, session: &crate::RuntimeSession) -> Duration {
-        let gap = session.cadence_interval();
-        let gap = match self.project.verdict_chase_interval() {
-            Some(chase) => gap.min(chase),
-            None => gap,
-        };
-        gap.saturating_add(session.backoff_delay())
+        let ble_play = session.transport() == crate::LinkTransport::Ble && self.play_views > 0;
+        crate::app::studio::lens_refresh_gap_policy(
+            session.cadence_interval(),
+            ble_play,
+            self.project.verdict_chase_interval(),
+            session.backoff_delay(),
+        )
+    }
+
+    /// The lens's current passive-pull gap (tests: the Play-over-Bluetooth
+    /// idle budget is a fact about this number).
+    #[cfg(test)]
+    pub(crate) fn lens_refresh_gap_for_test(&self) -> Option<Duration> {
+        self.pool
+            .lens_session()
+            .map(|session| self.lens_refresh_gap(session))
     }
 
     /// Whether the lens session's next passive pull is due. Early ticks (the
@@ -1795,7 +2051,8 @@ impl StudioController {
                 .with_lens(self.lens_runtime())
                 .with_session(self.session_control())
                 .with_open_mismatch(self.open_mismatch.as_deref().cloned())
-                .with_settings(self.settings.ui_view());
+                .with_settings(self.settings_view())
+                .with_access(self.login_prompt_view(), None);
         }
         // gallery-always (D24): home covers every no-project state, so the
         // pane layout exists only for an open project
@@ -1844,7 +2101,9 @@ impl StudioController {
             )
             .with_lens_card(self.lens_card())
             .with_session(self.session_control())
-            .with_settings(self.settings.ui_view())
+            .with_settings(self.settings_view())
+            .with_access(self.login_prompt_view(), self.project_access_view())
+            .with_lens_access_line(self.lens_access_line())
             .with_dirty(dirty)
     }
 
@@ -1899,7 +2158,11 @@ impl StudioController {
                 // face ("flash", "erase") mean what they say on it — which
                 // is also what `DeviceFace::from_transport` already answers
                 // for an `emu` registry row.
-                crate::LinkTransport::Emu | crate::LinkTransport::Serial => crate::DeviceFace::Wire,
+                // A Bluetooth link is a wire too; the card says what it
+                // cannot do (`DeviceView::firmware_blocked`).
+                crate::LinkTransport::Emu
+                | crate::LinkTransport::Serial
+                | crate::LinkTransport::Ble => crate::DeviceFace::Wire,
             },
             key: format!("device:{}", attachment.uid),
             device: Some(attachment.device),
@@ -2350,6 +2613,14 @@ impl StudioController {
         if node_id.as_str() == crate::SimCreateOp::NODE_ID {
             let op = action.into_op::<crate::SimCreateOp>()?;
             return self.execute_sim_create_op(op).await;
+        }
+        if node_id.as_str() == crate::PlayViewOp::NODE_ID {
+            let op = action.into_op::<crate::PlayViewOp>()?;
+            self.play_views = match op.shown {
+                true => self.play_views.saturating_add(1),
+                false => self.play_views.saturating_sub(1),
+            };
+            return Ok(UiNotices::new());
         }
         if node_id.as_str() == crate::DeviceFeedOp::NODE_ID {
             let op = action.into_op::<crate::DeviceFeedOp>()?;
@@ -3838,7 +4109,7 @@ impl StudioController {
         let held = match attachment.transport {
             crate::LinkTransport::Sim => crate::RuntimeKind::Sim,
             crate::LinkTransport::Emu => crate::RuntimeKind::Emu,
-            crate::LinkTransport::Serial => return None,
+            crate::LinkTransport::Serial | crate::LinkTransport::Ble => return None,
         };
         (attachment.board_id.as_deref() == Some(target.board_id())
             && prefer.is_none_or(|wanted| wanted == held))
@@ -3903,7 +4174,7 @@ impl StudioController {
             && let Some(held) = match session.transport() {
                 crate::LinkTransport::Sim => Some(crate::RuntimeKind::Sim),
                 crate::LinkTransport::Emu => Some(crate::RuntimeKind::Emu),
-                crate::LinkTransport::Serial => None,
+                crate::LinkTransport::Serial | crate::LinkTransport::Ble => None,
             }
             && prefer.is_none_or(|wanted| wanted == held)
             && self
@@ -4627,6 +4898,8 @@ impl StudioController {
             // The same `M!` line framing over the same serial-shaped wire;
             // the only difference is which side of the USB the chip is on.
             crate::LinkTransport::Emu | crate::LinkTransport::Serial => "usb-serial",
+            // The same `M!` line framing, over a NUS GATT service.
+            crate::LinkTransport::Ble => "ble-nus",
         };
         let client = crate::StudioServerClient::from_lens_io(io, deadline, protocol);
         let id = self.pool.install(crate::RuntimePayload::Device(attachment));
@@ -4700,6 +4973,17 @@ impl StudioController {
         if facts.busy {
             return Err(UiError::MissingSession(
                 "this board is busy with an activity; wait for it to finish".to_string(),
+            ));
+        }
+        // A Bluetooth link holds nothing until it logs in (BLE M6): the
+        // board answers only hello and login on it, so a lens attached
+        // before the login lands would read nothing and starve the login
+        // of its wire. Held until the link holds a tier.
+        if let Some(device) = self.devices.roster().device(facts.device)
+            && !self.access.link_is_granted(device)
+        {
+            return Err(UiError::MissingSession(
+                "this piece is logging in over Bluetooth".to_string(),
             ));
         }
         Ok(crate::DeviceLensAttachment {

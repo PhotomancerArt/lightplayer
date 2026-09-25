@@ -33,6 +33,8 @@ pub use app::agent::{
 pub use app::bus::{
     UiBusChannelPreview, UiBusChannelView, UiBusSiteOrigin, UiBusSiteView, UiBusView,
 };
+#[cfg(all(feature = "browser-ble", target_arch = "wasm32"))]
+pub use app::devices::BrowserBleSource;
 #[cfg(all(feature = "emulator-tab", target_arch = "wasm32"))]
 pub use app::devices::BrowserEmuLinkSource;
 #[cfg(all(feature = "browser-serial-esp32", target_arch = "wasm32"))]
@@ -40,29 +42,38 @@ pub use app::devices::BrowserSerialTransport;
 #[cfg(all(feature = "browser-worker", target_arch = "wasm32"))]
 pub use app::devices::BrowserSimLinkSource;
 pub use app::devices::{
-    Backing, CompletedPush, CompositeDeviceTransport, DEVICE_FEED_PARK_AFTER_FAILURES,
-    DEVICE_FRAME_SNAPSHOT_INTERVAL_SECS, DeviceCardFeedView, DeviceEffectCall, DeviceEffectFacts,
-    DeviceEffectProgress, DeviceEffects, DeviceFace, DeviceFeedOp, DeviceFrameFeed,
-    DeviceFrameFeeds, DeviceIdentityFirmware, DeviceIdentityLine, DevicePushOp, DeviceRoster,
-    DeviceRosterView, DeviceTaskFuture, DeviceTimerFuture, DeviceTransport, DeviceTransportFuture,
-    DevicesOp, EMU_TRANSPORT, EmuBacking, EmuDeviceTransport, EmuLinkSource, EmuRuntimeControl,
-    EmuSession, FeedLiveness, FirmwareVerb, FlashBoardChoice, FlashOffer, GrantedLink, JournalLine,
-    LensLineTap, LensTapEvent, NewSimRecord, PushOffer, PushPayload, PushSource, PushSourceChoice,
-    PushSourceGroup, RememberedView, RosterSplit, RuntimeKind, SIM_TRANSPORT, SimBacking,
-    SimCreateOp, SimDeviceTransport, SimLinkSource, SimRecord, SimRuntimeControl, SimSession,
-    SimTier, StagedPush, TargetChoice, TargetGroup, TargetOffer, TargetScope, UiRuntimeBand,
-    backing_for, delete_sim_record, device_card_feed_view, device_card_feed_views, device_chip,
-    device_escape_action, device_escape_action_for, device_firmware_line, device_identity_line,
-    device_status_kind, emu_endpoint, emu_link_info, emu_offered_for, feed_liveness,
-    firmware_face_preview_sentence, firmware_verb, first_bundled_example_id, flash_offer,
-    flash_offer_for, mint_sim_identity, new_sim_record, pending_escape_action,
-    pending_firmware_line, pending_identity_rows, push_offer, read_sim_record, reflash_choice,
-    sim_device_name, sim_endpoint, sim_link_info, split_roster, target_offer,
-    transport_label_for_endpoint, uid_from_emu_endpoint, uid_from_sim_endpoint, write_sim_record,
+    BLE_ENDPOINT_PREFIX, Backing, BleDeviceTransport, BleLinkSource, CompletedPush,
+    CompositeDeviceTransport, DEVICE_FEED_PARK_AFTER_FAILURES, DEVICE_FRAME_SNAPSHOT_INTERVAL_SECS,
+    DeviceCardFeedView, DeviceEffectCall, DeviceEffectFacts, DeviceEffectProgress, DeviceEffects,
+    DeviceFace, DeviceFeedOp, DeviceFrameFeed, DeviceFrameFeeds, DeviceIdentityFirmware,
+    DeviceIdentityLine, DevicePushOp, DeviceRoster, DeviceRosterView, DeviceTaskFuture,
+    DeviceTimerFuture, DeviceTransport, DeviceTransportFuture, DevicesOp, EMU_TRANSPORT,
+    EmuBacking, EmuDeviceTransport, EmuLinkSource, EmuRuntimeControl, EmuSession, FeedLiveness,
+    FirmwareVerb, FlashBoardChoice, FlashOffer, GrantedLink, JournalLine, LensLineTap,
+    LensTapEvent, NewSimRecord, PushOffer, PushPayload, PushSource, PushSourceChoice,
+    PushSourceGroup, RESET_NEEDS_USB, RememberedView, RosterSplit, RuntimeKind, SIM_TRANSPORT,
+    SimBacking, SimCreateOp, SimDeviceTransport, SimLinkSource, SimRecord, SimRuntimeControl,
+    SimSession, SimTier, StagedPush, TargetChoice, TargetGroup, TargetOffer, TargetScope,
+    UiRuntimeBand, backing_for, ble_endpoint, ble_link_info, blocked_erase_action,
+    delete_sim_record, device_card_feed_view, device_card_feed_views, device_chip,
+    device_escape_action, device_escape_action_for, device_firmware_line,
+    device_id_from_ble_endpoint, device_identity_line, device_status_kind, emu_endpoint,
+    emu_link_info, emu_offered_for, feed_liveness, firmware_face_preview_sentence, firmware_verb,
+    first_bundled_example_id, flash_offer, flash_offer_for, mint_sim_identity, new_sim_record,
+    pending_escape_action, pending_firmware_line, pending_identity_rows, push_offer,
+    read_sim_record, reflash_choice, sim_device_name, sim_endpoint, sim_link_info, split_roster,
+    target_offer, transport_label_for_endpoint, uid_from_emu_endpoint, uid_from_sim_endpoint,
+    write_sim_record,
 };
 pub use app::docs_host::DocsSimHost;
+pub use app::studio::PlayViewOp;
 // The project's declared hardware (D41): the web shell's Hardware row and
 // the gallery card's "for <board>" badge both read it.
+pub use app::access::{
+    AccessCommand, AccessPersist, AccessTier, DEFAULT_KDF_ITERATIONS, DeviceAccessChange,
+    NewSecret, UiAccessPanel, UiAccessSecret, UiDeviceAccess, UiLoginPrompt, UiProjectAccess,
+    not_permitted_sentence, tier_word,
+};
 pub use app::frame_feed::{
     CLOSE_INSPECTION_SAMPLE_FORMAT, CardFeedApply, CardFeedState, PREVIEW_SAMPLE_FORMAT,
 };
@@ -149,7 +160,7 @@ pub use app::settings::{
     AgentProvider, AgentProviderGuidance, AgentSettings, BrowserFacts, COMMON_LOCAL_SERVERS,
     DEFAULT_AGENT_MODEL, FindingKind, LocalModelProbeState, LocalServer, ProbeFinding, ProbeLevel,
     ProbeOutcome, ProbeSummary, SettingsCommand, SettingsLayer, SettingsStore, StudioSettings,
-    UiAgentSettingsView, UiModelOption, UiSettingsView, provider_guidance,
+    UiAgentSettingsView, UiDeviceSettingsView, UiModelOption, UiSettingsView, provider_guidance,
 };
 pub use app::share::{
     NODE_KIND, NodeEnvelope, PACKAGE_KIND, PackageEnvelope, SHARE_FORMAT_VERSION, ShareError,
@@ -180,7 +191,7 @@ pub use core::{
 /// and dispatches it without a second dependency edge. The model is the ONE
 /// device vocabulary — there is no `Ui*` mirror of it, on purpose.
 pub use lpa_devices::view::{
-    ActivityView as DeviceActivityView, DeviceView, Escape as DeviceEscape,
+    ActivityView as DeviceActivityView, DeviceView, Escape as DeviceEscape, FIRMWARE_NEEDS_USB,
     FirmwareFace as DeviceFirmwareFace, LoadedProject as DeviceLoadedProject, OutcomeView,
     PendingLinkView, RosterView,
 };

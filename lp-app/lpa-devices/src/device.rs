@@ -253,6 +253,10 @@ impl Device {
             .hello()
             .and_then(|hello| hello.firmware.clone())
             .or(record.firmware);
+        record.last_over_bluetooth = match &self.identity.endpoint {
+            Some(endpoint) => endpoint.is_bluetooth(),
+            None => record.last_over_bluetooth,
+        };
         self.record = Some(record.clone());
         record
     }
@@ -277,6 +281,13 @@ impl Device {
         (board_id.is_some() && board_id != record.board_id.as_deref())
             || (firmware.is_some() && firmware != record.firmware.as_deref())
             || (chip.is_some() && chip != record.chip.as_deref())
+            // Reached a different way than the record says: the chooser a
+            // later Reconnect opens depends on it.
+            || self
+                .identity
+                .endpoint
+                .as_ref()
+                .is_some_and(|endpoint| endpoint.is_bluetooth() != record.last_over_bluetooth)
     }
 
     /// Fold an event without journaling the input itself. The roster uses
@@ -617,6 +628,7 @@ impl Device {
             // remove the entry, and the link verbs address links.
             Action::Forget { .. }
             | Action::AddFromUsb
+            | Action::AddFromBle
             | Action::Reconnect { .. }
             | Action::AdoptLink { .. }
             | Action::DismissLink { .. } => Vec::new(),

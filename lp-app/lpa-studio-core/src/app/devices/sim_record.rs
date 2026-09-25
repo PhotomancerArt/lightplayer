@@ -131,6 +131,47 @@ pub const SIM_ENDPOINT_PREFIX: &str = "sim:";
 /// [`SIM_ENDPOINT_PREFIX`], for the transport that serves emulated boards.
 pub const EMU_ENDPOINT_PREFIX: &str = "emu:";
 
+/// The endpoint scheme a Bluetooth link is reached at: `ble:<device id>`.
+///
+/// The model owns the constant (it needs two facts about a Bluetooth link —
+/// which chooser re-grants it, and that it cannot carry firmware), and this
+/// re-export keeps the three schemes the effects layer routes by in one
+/// place.
+///
+/// The id after the scheme is Web Bluetooth's `BluetoothDevice.id`: opaque,
+/// per ORIGIN, and stable for as long as the browser keeps the permission.
+/// What G1 Run F measured in Bluefy 3.9.3 (iOS 18.7): the id is a UUID
+/// (`C31ED9CA-D7C1-53DA-BC08-673E76B57B46` for the desk XIAO),
+/// `navigator.bluetooth.getDevices()` returns the granted board with that
+/// same id, and a held `BluetoothDevice` survives both a page-caused drop
+/// and a board reboot. Desktop Chrome mints a base64 id instead. Neither is
+/// identity — the hello's base MAC is (device-identity.md §2) — which is why
+/// a board seen over USB and over Bluetooth is one registry row.
+pub use lpa_devices::identity::BLE_ENDPOINT_PREFIX;
+
+/// The endpoint key a Bluetooth device with this browser id is reached at.
+pub fn ble_endpoint(device_id: &str) -> EndpointKey {
+    EndpointKey(format!("{BLE_ENDPOINT_PREFIX}{device_id}"))
+}
+
+/// The browser device id inside a Bluetooth endpoint key, or `None` for any
+/// other endpoint.
+pub fn device_id_from_ble_endpoint(endpoint: &str) -> Option<&str> {
+    endpoint.strip_prefix(BLE_ENDPOINT_PREFIX)
+}
+
+/// The [`LinkInfo`] a Bluetooth device's link wears: its advertised name as
+/// the label, `ble:<device id>` as the endpoint, and no USB facts — identity
+/// is the hello's base MAC, as on every other transport.
+pub fn ble_link_info(device_id: &str, name: &str) -> LinkInfo {
+    LinkInfo {
+        label: name.to_string(),
+        endpoint: ble_endpoint(device_id),
+        usb: None,
+        serial_number: None,
+    }
+}
+
 /// `/device-sims/<uid>.json`.
 pub fn sim_record_path(uid: &str) -> String {
     format!("{DEVICE_SIMS_DIR}/{uid}.json")
