@@ -850,11 +850,25 @@ fn every_wire_checksum_equals_the_guests_own_summary_line(r: &Run) {
             "gpio{pad}: the guest counted {claimed} frames and the pad carried only \
              {decoded} — frames were lost between the driver and the wire"
         );
+        // ⚠️ The upper bound counts **complete** frames and allows the whole
+        // period: a deadline can land after frame `claimed + 60` is on every
+        // pad (the guest reports a frame only once its send completes) but
+        // before the first byte of that frame's report reaches UART0 — the
+        // report is still in the logger — and by then the next frame may be
+        // half out on the pad. 2026-09-24 (BLE easy access, P1): the
+        // console's last text was the whole 1920 group and nothing after it,
+        // and gpio18 carried 1,980 complete frames plus one cut by the
+        // deadline. A lost report still fails once the pad has completed one
+        // more frame past it; inside that one gap a lost report and a late
+        // one read the same on the console, and the bound cannot tell them
+        // apart by construction.
+        let complete = frames.iter().filter(|f| f.is_complete()).count();
         assert!(
-            decoded < claimed + REPORT_EVERY_FRAMES,
-            "gpio{pad}: the pad carried {decoded} frames while the guest's last report was \
-             frame {claimed} — more than the one report period ({REPORT_EVERY_FRAMES}) a \
-             deadline can fall inside, so summary lines are being lost"
+            complete <= claimed + REPORT_EVERY_FRAMES,
+            "gpio{pad}: the pad carried {complete} complete frames while the guest's last \
+             report was frame {claimed} — more than the one report period \
+             ({REPORT_EVERY_FRAMES}) a deadline can fall inside, so summary lines are being \
+             lost"
         );
     }
 }

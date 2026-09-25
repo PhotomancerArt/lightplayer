@@ -104,3 +104,20 @@ group was finished with a line missing, and fails by name).
 
 The lesson above applied only halfway: the in-flight allowance has to reach
 back to the burst's very first byte, not to its first newline.
+
+## Recurrence — 2026-09-24, before the burst's first byte (BLE easy access, P1)
+
+On the BLE-easy-access image (new edit-tier access requests on the board)
+the deadline lands one step earlier still: the console's last text is the
+whole frame-1920 group with **nothing** of frame 1980's burst after it,
+while gpio18 has carried 1,980 complete frames and a 1,981st cut by the
+deadline. The guest reports a frame only after its send completes, so the
+report of frame 1980 was already in the logger with no byte on UART0 yet.
+Nothing is lost.
+
+Fixed in the bound, not the reading: the upper check now counts the pad's
+**complete** frames and allows the whole period (`complete <= claimed +
+60`, where it was `frames.len() < claimed + 60`). A lost report still fails
+once the pad has completed one frame past it; inside that single gap a lost
+report and one still in the logger cannot be told apart from the console,
+which is what the bound now says.
