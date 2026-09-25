@@ -34,6 +34,15 @@
 //!    tree it is built from is a detached worktree at that commit.
 //! 3. Building it, and only with `LP_EMU_BUILD_FW=1`.
 //!
+//! **`LP_EMU_C6_IMAGE_DIR`** replaces rungs 2 and 3 with a directory of
+//! images someone else built — CI's own, fetched by `just fetch-ci-images`
+//! (`docs/ci-images.md`): `<dir>/tree/<SLUG>/fw-esp32c6` for a feature-set
+//! ELF, `<dir>/emu-ref/<commit>-<slug>/{fw-esp32c6,merged.bin}` for a
+//! reference image. With it set nothing is ever built, and an image the
+//! directory does not hold **panics** rather than skipping: a test that
+//! skipped there would be a green run against nothing. The explicit
+//! per-image variables in rung 1 still win.
+//!
 //! The conventional `target/<triple>/release-esp32/fw-esp32c6` is **never**
 //! trusted: every feature set builds to that one path, so whatever is there
 //! is whatever was built last — P5 found the shipped-image test running
@@ -376,6 +385,15 @@ pub fn fw_esp32c6_image(image: &FwImage) -> Result<PathBuf, String> {
     if *image == FwImage::SHIPPED {
         vars.push("LP_EMU_C6_ELF".to_string());
     }
+    if let Some(dir) = ci_image_dir() {
+        let rel = Path::new("tree").join(&slug).join("fw-esp32c6");
+        return from_env_or_ci_image_dir(
+            &vars,
+            &dir,
+            &rel,
+            &format!("fw-esp32c6 ELF for `{slug}`"),
+        );
+    }
     let root = workspace_root().ok_or("could not find the workspace root")?;
     let conventional = conventional_path(&root);
 
@@ -451,6 +469,53 @@ fn cargo_build_fw(root: &Path, image: &FwImage) -> Result<(), String> {
 /// Print the reason a boot test is skipping, in one recognisable shape.
 pub fn skip_notice(test: &str, reason: &str) {
     println!("SKIP {test}: {reason}");
+}
+
+/// `LP_EMU_C6_IMAGE_DIR`, when set: a directory of already-built images (CI's,
+/// through `just fetch-ci-images`). See the module docs.
+pub fn ci_image_dir() -> Option<PathBuf> {
+    std::env::var_os("LP_EMU_C6_IMAGE_DIR")
+        .filter(|v| !v.is_empty())
+        .map(PathBuf::from)
+}
+
+/// [`resolve`]'s first rung (an explicit variable wins), then the file at
+/// `rel` under the image directory — with no build and no skip after it.
+fn from_env_or_ci_image_dir(
+    env_vars: &[String],
+    dir: &Path,
+    rel: &Path,
+    what: &str,
+) -> Result<PathBuf, String> {
+    for var in env_vars {
+        if let Ok(from_env) = std::env::var(var) {
+            let from_env = PathBuf::from(from_env);
+            if from_env.is_file() {
+                return Ok(from_env);
+            }
+            return Err(format!(
+                "{var} points at {}, which is not a file",
+                from_env.display()
+            ));
+        }
+    }
+    Ok(from_ci_image_dir(dir, rel, what))
+}
+
+/// The file at `rel` under [`ci_image_dir`], which MUST be there: the
+/// directory was asked for, so a missing image is a failed test and never a
+/// skip, and nothing is built in its place.
+fn from_ci_image_dir(dir: &Path, rel: &Path, what: &str) -> PathBuf {
+    let path = dir.join(rel);
+    assert!(
+        path.is_file(),
+        "LP_EMU_C6_IMAGE_DIR={} holds no {what} (looked for {}). The fetched CI images do not \
+         include it: fetch a run that built it (`just fetch-ci-images`), or unset \
+         LP_EMU_C6_IMAGE_DIR to build it locally.",
+        dir.display(),
+        path.display()
+    );
+    path
 }
 
 /// The firmware commit the committed C6 transcripts and the spike report's
@@ -587,9 +652,16 @@ impl ReferenceImage {
 /// under `target/emu-ref/` and builds there; it holds the cross-process lock
 /// the module docs describe, and publishes by `mv`.
 pub fn reference_image(image: &ReferenceImage) -> Result<PathBuf, String> {
+    let slug = image.slug;
+    if let Some(dir) = ci_image_dir() {
+        let rel = Path::new("emu-ref")
+            .join(format!("{}-{}", image.commit, slug))
+            .join("fw-esp32c6");
+        let what = format!("reference image `{slug}` at {}", image.commit);
+        return from_env_or_ci_image_dir(&[image.env_var()], &dir, &rel, &what);
+    }
     let root = workspace_root().ok_or("could not find the workspace root")?;
     let path = image.conventional_path(&root);
-    let slug = image.slug;
     resolve(
         &format!("the reference image `{slug}` at {}", image.commit),
         &[image.env_var()],
@@ -823,6 +895,10 @@ mod tests {
 pub fn merged_image(image: &ReferenceImage) -> Result<PathBuf, String> {
     let elf = reference_image(image)?;
     let merged = elf.with_file_name("merged.bin");
+    if let Some(dir) = ci_image_dir() {
+        let rel = merged.strip_prefix(&dir).unwrap_or(&merged).to_path_buf();
+        return Ok(from_ci_image_dir(&dir, &rel, "merged flash image"));
+    }
     let root = workspace_root().ok_or("could not find the workspace root")?;
     let script = root.join("scripts/emu/build-merged-image.sh");
     resolve(
