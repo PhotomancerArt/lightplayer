@@ -2697,6 +2697,17 @@ test-all: test test-gfx
 
 test-filetests:
     scripts/filetests.sh
+    just test-example-shaders
+
+# Compile gate over the shipped example shaders: every catalog/ and
+# projects/test/ shader, composed the way its node composes it, compiled (not
+# run) on every filetest target (ALL_TARGETS); any rejection fails. Workspace
+# `cargo test` selection, not `-p`, so it reuses the build `test-rust-core`
+# just made instead of re-unifying features. Needs the rv32 builtins image
+# (`build-rv32-builtins`); without the Xtensa image the xt targets run codegen
+# only. See docs/debt/example-shaders-not-compile-gated.md.
+test-example-shaders:
+    cargo test --test example_shaders_compile -- --ignored --nocapture
 
 # Crash-recovery emulator suite (slow: builds fw-emu with build-std/unwind
 # and simulates multiple reboots). Marked #[ignore]; run explicitly.
@@ -2746,7 +2757,7 @@ test-glsl-filetests:
 # Warm ~1s, cold ~47s locally; it runs beside clippy, the Lint job's long
 # pole. See docs/debt/wasm-cloud-check-not-in-just-check.md.
 [parallel]
-check-lint: fmt-check clippy check-wasm-cloud check-lpc-engine-gates check-studio-core-minimal lint-serde-content lint-browser-test-harness lint-classic-capture lint-pcb-export lint-schemars-fw lint-upgrade-fw lint-emu-fence lint-nested-patches lint-emu-regnames lint-torture-corpus lint-vec-corpus lint-tw-utilities
+check-lint: fmt-check clippy check-wasm-cloud check-lpc-engine-gates check-studio-core-minimal lint-serde-content lint-browser-test-harness lint-classic-capture lint-pcb-export lint-schemars-fw lint-upgrade-fw lint-emu-fence lint-nested-patches lint-emu-regnames lint-torture-corpus lint-vec-corpus lint-tw-utilities lint-red-main-needs
 
 [parallel]
 check: check-lint schema-check fw-manifest-check-emu
@@ -2830,6 +2841,13 @@ lint-emu-fence:
 # script. docs/debt/nested-workspaces-miss-root-patches.md.
 lint-nested-patches:
     ./scripts/check-nested-patches.sh
+
+# pre-merge.yml's `red-main-suspects` job must `needs:` every other job, or a
+# red main can finish before a failing job does and name no suspects. The
+# list is hand-maintained; this names any job missing from it. Offline,
+# stdlib python, ~0.1 s.
+lint-red-main-needs:
+    python3 scripts/ci/check-red-main-needs.py
 
 # The ESP32-C6 machine's boot tests, which need firmware ELFs, plus the M3
 # replays of the committed transcripts.
@@ -2962,7 +2980,20 @@ test-emu-esp32v3:
 # `lp-cli` build plus the oracle, its claim is a gate artefact rather than a
 # per-PR gate, and the C6's `walk-esp32c6-emu` is not in CI either (M5 ruling
 # R6).
-test-emu-esp32v3-gate: test-emu-esp32v3-boot
+#
+# CI runs the two halves as two PARALLEL jobs (2026-09-24): part 1 is
+# `test-emu-esp32v3-boot` in `Emulator ESP32v3 (x64)`, parts 2–4 are
+# `test-emu-esp32v3-reference` in `Emulator ESP32v3 reference (x64)`. Neither
+# reads what the other builds — the reference image comes out of its own
+# detached worktree, never the in-tree firmware — so the split costs a second
+# toolchain install and nothing else. This recipe is still both, in order:
+# a human runs exactly what CI runs.
+test-emu-esp32v3-gate: test-emu-esp32v3-boot test-emu-esp32v3-reference
+
+# Parts 2–4 of the gate above: the lints, the replays and the registry parity
+# test, then the reference image (`--verify` unless `LP_EMU_REF_VERIFY=0`).
+# No in-tree firmware build — CI's second v3 job runs this on its own.
+test-emu-esp32v3-reference:
     #!/usr/bin/env bash
     set -euo pipefail
     just lint-emu-fence
@@ -2971,7 +3002,7 @@ test-emu-esp32v3-gate: test-emu-esp32v3-boot
     cargo test -p lp-cli --test validate_registry_parity
     commit="$(git rev-parse --short HEAD)"
     if [[ "${LP_EMU_REF_VERIFY:-1}" == 0 ]]; then
-        echo "test-emu-esp32v3-gate: LP_EMU_REF_VERIFY=0 — one reference build, no reproducibility rebuild"
+        echo "test-emu-esp32v3-reference: LP_EMU_REF_VERIFY=0 — one reference build, no reproducibility rebuild"
         scripts/emu/build-reference-image.sh --chip esp32 \
             esp32,server,float-f32 "$commit" none
     else
