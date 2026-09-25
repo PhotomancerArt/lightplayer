@@ -5,6 +5,11 @@
 - **Deciders:** Photomancer
 - **Supersedes:** None
 - **Superseded by:** None
+- **Amended by:** `2026-09-25-learned-wire-dictionary.md` — the static
+  dictionary, its generator, `wire-dict-check` and the fingerprint handshake
+  are gone; each packed link learns its names (JSON Pack format 2, proto
+  28). The sections below that describe the dictionary are kept as the
+  record of what shipped first, each marked where it no longer holds.
 
 ## Context
 
@@ -105,6 +110,10 @@ unconditionally:
   shim for an old wire form — JSON stays a first-class, live encoding on
   every link that never asks, which is why this is not the "capability
   fallback" AGENTS.md's wire-compatibility rule forbids.
+- *Amended 2026-09-25:* the two layers below are replaced. Board and host
+  agree on `PACK_FORMAT_VERSION` alone (`ServerHello.pack_format`,
+  `SetEncoding { encoding, format }`); there is no dictionary to agree on.
+  See `2026-09-25-learned-wire-dictionary.md`.
 - **How the board and host stay in agreement (Yona's G6 concern: "how do we
   know firmware and Studio agree? Studio version may very well not be the
   same as the firmware.").** Two layers:
@@ -155,6 +164,10 @@ running a real device); the marker makes that class of miss structurally
 impossible.
 
 ### The generated dictionary, versioned by `WIRE_PROTO_VERSION`
+
+*Amended 2026-09-25: deleted, with `just wire-dict` / `wire-dict-check`.
+Packed links learn their names per connection;
+`2026-09-25-learned-wire-dictionary.md`.*
 
 `schemas/` does not describe the wire — it covers persisted artifacts, and
 only the ~86 `lpc-wire` types that derive `JsonSchema`. The dictionary
@@ -247,6 +260,13 @@ sufficient for the reflash-in-lockstep world this plan ships into; a
 compatibility window, multiple co-resident dictionaries, or an OTA path is
 future work, out of scope here, and connects to the BLE remote-control
 vision's own version-skew questions.
+
+*Amended 2026-09-25: the next step taken was the per-connection learned
+table, not the in-band dictionary (Yona, G0 of
+`lp2025/2026-09-25-0006-learned-wire-dictionary`); the torn-frame resync
+cost turned out small. Build-to-build dictionary agreement is gone, and
+only `PACK_FORMAT_VERSION` must match. See
+`2026-09-25-learned-wire-dictionary.md`.*
 
 **The intended next step is an in-band dictionary** (Yona, 2026-09-24:
 follow-up, not before merge). When the host's fingerprint does not match,
