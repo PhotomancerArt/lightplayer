@@ -35,7 +35,8 @@ does each of the four things below: on `visibilitychange → visible` every
 session re-reads `gatt.connected` (`recheckAll`), so a drop the hidden page
 never heard is handled then, and a lost or parked session restarts its
 reconnect on the held `BluetoothDevice`; the link carries no long-lived HTTP
-stream. Decision record: `docs/adr/2026-09-24-ble-transport-studio.md` §3.
+stream. Decision record: `docs/adr/2026-09-24-ble-transport.md` S3 (folded from
+`2026-09-24-ble-transport-studio.md` §3).
 What the fix had to do:
 - treat `visibilitychange → visible` as "state unknown": re-read the link
   before showing it as connected;
