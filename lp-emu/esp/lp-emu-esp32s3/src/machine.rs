@@ -2405,6 +2405,22 @@ impl Machine {
             .with_peripheral::<UsbSerialJtag, _>(index, |u, _| u.host())
     }
 
+    /// Bytes the guest wrote into the IN endpoint while its one send buffer
+    /// was pending (committed, not yet taken by the host) or full — writes
+    /// the block refuses. `None` on a machine with no block.
+    ///
+    /// This is the mechanism counter for
+    /// `docs/defects/2026-09-13-the-s3-link-drops-the-io-tasks-next-chunk-on-a-stale-serial-in-empty.md`:
+    /// a firmware that honours the one-buffer contract keeps it at 0 on
+    /// every path, whatever the host does and whatever the timing, where
+    /// [`usb_sj_tried`](Self::usb_sj_tried) also holds bytes a host merely
+    /// never took.
+    pub fn usb_sj_refused(&mut self) -> Option<u64> {
+        let index = self.usb_index?;
+        self.bus
+            .with_peripheral::<UsbSerialJtag, _>(index, |u, _| u.dropped())
+    }
+
     /// Drive the link from the host's side, outside a run — what a test uses
     /// instead of a socket or a script.
     pub fn apply_control_now(&mut self, command: &ControlCommand) -> ControlReply {
