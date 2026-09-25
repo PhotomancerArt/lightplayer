@@ -702,7 +702,7 @@ fn the_ledger_triple_is_elicited_by_a_stop_all_on_the_wire() {
     assert_eq!(stack.len(), 1, "one [stack] line per stop-all:\n{text}");
     assert_eq!(mem.len(), 2, "[MEM] before and after the stop:\n{text}");
     assert_eq!(jit.len(), 2, "[JIT] before and after the stop:\n{text}");
-    // `[stack] heartbeat: high-water <used> B of 37256 B (<headroom> B headroom)`
+    // `[stack] heartbeat: high-water <used> B of 37248 B (<headroom> B headroom)`
     //
     // Re-baselined 2026-09-23 (lean-wire P7): 37,280 → 37,272 (−8 B). The
     // wire-side `RevisionGateRead`/`RevisionGateResult` gate and the
@@ -727,20 +727,25 @@ fn the_ledger_triple_is_elicited_by_a_stop_all_on_the_wire() {
     // the gate's await state), 37,280 → 37,256 (measured 37,296 → 37,272
     // before #804's −16 B merged under it); the stop-all path is unchanged.
     // Measured on the merged tree with `just heap-budget-baseline-chips-s3`.
+    //
+    // Then 2026-09-25, BLE easy access (P1, wire 25): the four access
+    // requests (`AccessList`/`AccessAdd`/`AccessRemove`/`AccessSetSwitches`)
+    // grew the server loop's `.bss` future by 8 B, 37,256 → 37,248. Measured
+    // on the tree merged with main.
     let words: Vec<&str> = stack[0].split_whitespace().collect();
     let used: u32 = words[3].parse().expect("high-water bytes");
     assert_eq!(
         &words[4..7],
-        &["B", "of", "37256"],
-        "the S3's 37,256 B total: {}",
+        &["B", "of", "37248"],
+        "the S3's 37,248 B total: {}",
         stack[0]
     );
     let headroom: u32 = words[8]
         .trim_start_matches('(')
         .parse()
         .expect("headroom bytes");
-    assert_eq!(used + headroom, 37_256, "{}", stack[0]);
-    assert!(used > 0 && used < 37_256, "{}", stack[0]);
+    assert_eq!(used + headroom, 37_248, "{}", stack[0]);
+    assert!(used > 0 && used < 37_248, "{}", stack[0]);
     for line in &mem {
         assert!(
             line.contains(" used=") && line.contains(" largest_free="),
@@ -768,7 +773,7 @@ fn the_ledger_triple_is_elicited_by_a_stop_all_on_the_wire() {
     );
     assert!(
         !text.contains("[INIT] main stack"),
-        "the S3 prints no `main stack` line; its 37,256 B total is in every `[stack]` \
+        "the S3 prints no `main stack` line; its 37,248 B total is in every `[stack]` \
          line's `of <total> B` instead"
     );
 
