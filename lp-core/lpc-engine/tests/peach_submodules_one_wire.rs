@@ -21,8 +21,8 @@ use lpc_engine::node::NodeEntryState;
 use lpc_engine::{EngineServices, ProjectLoader};
 use lpc_model::TreePath;
 use lpc_wire::{
-    GeometryDisplayLayout, OutputFrameGeometry, OutputFrameGeometryRead, OutputFrameProbeRequest,
-    OutputFrameProbeResult, RevisionGateResult,
+    GeometryDisplayLayout, OutputFrameGeometry, OutputFrameProbeRequest, OutputFrameProbeResult,
+    RevisionGateRead, RevisionGateResult,
 };
 use lpfs::LpFsStd;
 
@@ -109,7 +109,7 @@ fn the_published_display_layout_draws_every_lamp_of_both_fixtures() {
         let result = engine.read_project_output_frame_probe(
             registry,
             OutputFrameProbeRequest {
-                geometry: OutputFrameGeometryRead::Always,
+                geometry: RevisionGateRead::Always,
                 samples: Some(lpc_wire::WireChannelSampleFormat::U16),
             },
         );

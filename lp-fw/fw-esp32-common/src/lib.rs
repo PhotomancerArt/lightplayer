@@ -24,7 +24,10 @@ pub mod chip_identity;
 #[cfg(feature = "server")]
 pub mod hardware;
 #[cfg(feature = "server")]
+pub mod link_upkeep;
+#[cfg(feature = "server")]
 pub mod lp_fs;
+pub mod radio_link;
 #[cfg(feature = "server")]
 pub mod server_loop;
 #[cfg(feature = "server")]

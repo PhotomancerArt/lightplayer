@@ -2451,7 +2451,7 @@ clippy-fw-esp32c6-harnesses: install-rv32-target
     # radio capability alone, test_ble the radio plus the BLE host, and
     # test_f32_softfloat the compiler alone (plus `float-f32`, which no other
     # configuration in this crate turns on).
-    for feature in test_espnow test_ble test_f32_softfloat; do
+    for feature in test_espnow test_ble test_ble_coex test_f32_softfloat; do
         echo "==> fw-esp32c6 harness: $feature (--no-default-features)"
         cargo clippy --target {{ rv32_target }} --profile {{ fw_esp32c6_profile }} \
             --no-default-features --features "$feature,esp32c6" -- --no-deps -D warnings
@@ -2581,6 +2581,15 @@ _test-parallel: test-rust test-filetests test-emu-lab
 
 test-rust-core:
     cargo test
+
+# The lps-probe wall-clock perf sanity: the number behind the probe
+# worker-offload follow-up (docs/adr/2026-07-25-shader-probe-experiment-api.md).
+# `#[ignore]`d in the default suite because it measures machine load as much as
+# code — see docs/debt/lps-probe-perf-test-load-sensitive.md. Trust the result
+# only when the printed load average shows no competing work.
+perf-probe:
+    uptime
+    cargo test -p lps-probe --lib perf_4096 -- --ignored --nocapture
 
 # Host Xtensa execution (`lpvm-native/emu-xt`): the ISA-parameterized rt_emu
 # engine running compiled Xtensa code on lp-xt-emu, differentially checked
@@ -2728,11 +2737,17 @@ test-glsl-filetests:
 # drift class is caught by the per-chip firmware jobs' manifest checks
 # (which need chip builds this gate deliberately avoids). Note the narrow
 # residue: drift unique to the emu fixture itself is only caught locally.
+#
+# `check-wasm-cloud` is also local-full-gate only: it closes the wasm32
+# blind spot for one crate/feature combination (lpa-cloud-client without
+# `in-process`). Warm ~1s, cold ~47s. CI compiles it only inside the stories
+# job's dx build, whose path gate does not include lpa-cloud-client.
+# See docs/debt/wasm-cloud-check-not-in-just-check.md.
 [parallel]
-check-lint: fmt-check clippy check-lpc-engine-gates check-studio-core-minimal lint-serde-content lint-browser-test-harness lint-classic-capture lint-pcb-export lint-schemars-fw lint-upgrade-fw lint-emu-fence lint-emu-regnames lint-torture-corpus lint-vec-corpus lint-tw-utilities
+check-lint: fmt-check clippy check-lpc-engine-gates check-studio-core-minimal lint-serde-content lint-browser-test-harness lint-classic-capture lint-pcb-export lint-schemars-fw lint-upgrade-fw lint-emu-fence lint-nested-patches lint-emu-regnames lint-torture-corpus lint-vec-corpus lint-tw-utilities
 
 [parallel]
-check: check-lint schema-check fw-manifest-check-emu
+check: check-lint schema-check fw-manifest-check-emu check-wasm-cloud
 
 # Guard against serde Content-machinery reintroduction (tag/untagged/flatten).
 # See docs/adr/2026-07-04-json-only-artifacts.md and the script's allowlist.
@@ -2805,6 +2820,14 @@ lint-upgrade-fw:
 # fence lives in the script, one line of reason each.
 lint-emu-fence:
     ./scripts/check-emu-fence.sh
+
+# A `[patch]` table applies only to its own workspace, so a nested workspace
+# (lp-xt/fixtures) that reaches a crate the root patches must repeat the entry
+# or it silently builds against crates.io. Reads manifests and lockfiles only
+# (no network, no esp toolchain); exclusions and their reasons live in the
+# script. docs/debt/nested-workspaces-miss-root-patches.md.
+lint-nested-patches:
+    ./scripts/check-nested-patches.sh
 
 # The ESP32-C6 machine's boot tests, which need firmware ELFs, plus the M3
 # replays of the committed transcripts.
@@ -3012,6 +3035,22 @@ test-emu-esp32v3-boot: build-fw-esp32v3
           --partition-table {{ fw_esp32v3_dir }}/partitions.csv \
           --flash-size {{ v3_flash_size }} "$shipped" "$merged"
       export LP_EMU_ESP32V3_MERGED="$merged"
+      # The PINNED reference image (BLE M3, ruling DD8): the bytes lab task L1
+      # flashed onto the desk board before the silicon memory capture, so
+      # `boot_idle.rs`'s G2 (e) comparison is same-image on both sides rather
+      # than this tree against `75486b114`. Cached under target/emu-ref/ by
+      # the script, so a second run pays only for the merge.
+      ref_commit=75486b114
+      ref_dir={{ justfile_directory() }}/target/emu-ref/$ref_commit-boot-idle
+      scripts/emu/build-reference-image.sh --chip esp32 esp32,server,float-f32 \
+          "$ref_commit" none
+      # The partition table of THAT commit, not this tree's.
+      git show "$ref_commit:{{ fw_esp32v3_dir }}/partitions.csv" > "$ref_dir/partitions.csv"
+      espflash save-image --chip esp32 --merge \
+          --partition-table "$ref_dir/partitions.csv" \
+          --flash-size {{ v3_flash_size }} "$ref_dir/fw-esp32v3" "$ref_dir/merged.bin"
+      export LP_EMU_ESP32V3_REF_ELF="$ref_dir/fw-esp32v3"
+      export LP_EMU_ESP32V3_REF_MERGED="$ref_dir/merged.bin"
     else
       echo "espflash is not on PATH: the merged-image tests will SKIP" >&2
     fi

@@ -23,10 +23,10 @@ use lpc_model::{
     MutationOp, Revision, SlotEdit, SlotPath,
 };
 use lpc_shared::output::MemoryOutputProvider;
-use lpc_shared::transport::ServerTransport;
+use lpc_shared::transport::{Incoming, Link, LinkId, ServerTransport};
 use lpc_wire::{
     ClientMessage, ClientRequest, ProjectReadEvent, ProjectReadQuery, ProjectReadQueryEvent,
-    ProjectReadRequest, RuntimeReadQuery, TransportError, WireMessage, WireOverlayCommitRequest,
+    ProjectReadRequest, RuntimeReadQuery, TransportError, WireOverlayCommitRequest,
     WireOverlayMutationRequest, WireProjectHandle, WireServerMessage, WireServerMsgBody,
 };
 use lpfs::LpFsMemory;
@@ -165,7 +165,7 @@ fn runtime_overlay_changed_at(
         queries: vec![ProjectReadQuery::Runtime(RuntimeReadQuery)],
         probes: Vec::new(),
     };
-    let message = WireMessage::Client(ClientMessage {
+    let message = Incoming::primary(ClientMessage {
         id: msg_id,
         msg: ClientRequest::ProjectRead { handle, request },
     });
@@ -217,17 +217,21 @@ struct VecTransport {
 }
 
 impl ServerTransport for VecTransport {
-    async fn send(&mut self, msg: WireServerMessage) -> Result<(), TransportError> {
+    async fn send(&mut self, _link: LinkId, msg: WireServerMessage) -> Result<(), TransportError> {
         self.sent.push(msg);
         Ok(())
     }
 
-    async fn receive(&mut self) -> Result<Option<ClientMessage>, TransportError> {
+    async fn receive(&mut self) -> Result<Option<Incoming>, TransportError> {
         Ok(None)
     }
 
-    async fn receive_all(&mut self) -> Result<Vec<ClientMessage>, TransportError> {
+    async fn receive_all(&mut self) -> Result<Vec<Incoming>, TransportError> {
         Ok(Vec::new())
+    }
+
+    fn links(&self) -> Vec<Link> {
+        vec![Link::PRIMARY]
     }
 
     async fn close(&mut self) -> Result<(), TransportError> {

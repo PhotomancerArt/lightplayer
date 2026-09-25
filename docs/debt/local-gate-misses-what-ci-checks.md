@@ -65,6 +65,15 @@ can abort `just test` before it is reached
   Closed by wiring `fw-manifest-check-emu` (the one manifest check that
   needs no chip toolchain) into `just check`; the esp32 variants remain
   CI-only, so emu-fixture-specific drift is the local-only residue.
+- 2026-09-24 — the **wasm32** hole narrowed, not closed: paid down
+  `docs/debt/wasm-cloud-check-not-in-just-check.md` by wiring
+  `check-wasm-cloud` (a bare `cargo check -p lpa-cloud-client
+  --no-default-features --target wasm32-unknown-unknown`, warm ~1s, cold
+  ~47s) into `just check`'s chain. This covers one crate/feature
+  combination only — the real wasm32 deploy target
+  (`lpa-studio-web`/`just studio-web-build`, minutes, a full `dx build`)
+  is still outside the local gate and still the residue this entry
+  tracks.
 
 **Exit criteria** — one recipe (`just check-studio`, or folding the four
 into `check-lint` when they are fast enough) that a Studio-touching

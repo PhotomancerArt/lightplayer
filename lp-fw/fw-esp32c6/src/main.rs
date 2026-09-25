@@ -63,7 +63,12 @@ fn on_alloc_error(layout: Layout) -> ! {
     recovery::panic_path::stage_oom_and_reset(layout)
 }
 
+#[cfg(all(feature = "ble", not(fw_harness)))]
+mod ble;
 mod board;
+mod c_heap;
+#[cfg(all(feature = "desk_espnow_meter", not(fw_harness)))]
+mod desk_espnow_meter;
 #[cfg(not(fw_harness))]
 use fw_esp32_common::boot;
 #[cfg(any(
@@ -74,6 +79,8 @@ use fw_esp32_common::boot;
     feature = "test_gpio_input",
 ))]
 mod hardware;
+#[cfg(all(feature = "heap_map_diag", not(fw_harness)))]
+mod heap_map;
 pub use fw_esp32_common::logger;
 // jit_fns (JIT host-log symbol) now lives in fw-esp32-common; linked via the
 // extern reference from the JIT builtin table.
@@ -116,7 +123,11 @@ use fw_esp32_common::lp_fs;
 
 #[cfg(all(
     feature = "radio",
-    not(any(feature = "stress_s2", feature = "stress_s3")),
+    not(any(
+        feature = "stress_s2",
+        feature = "stress_s3",
+        feature = "desk_espnow_meter"
+    )),
     not(fw_harness)
 ))]
 use hardware::espnow_radio_driver::Esp32EspNowRadioDriver;
@@ -167,6 +178,8 @@ mod tests {
     pub mod rmt_rx;
     #[cfg(feature = "test_ble")]
     pub mod test_ble;
+    #[cfg(feature = "test_ble_coex")]
+    pub mod test_ble_coex;
     #[cfg(feature = "test_button")]
     pub mod test_button;
     #[cfg(feature = "test_dither")]
@@ -212,7 +225,18 @@ fn heartbeat_memory_stats() -> Option<lpc_wire::server::MemoryStats> {
 
 #[cfg(not(fw_harness))]
 fn read_headroom_probe() -> Option<u32> {
+    #[cfg(feature = "heap_map_diag")]
+    heap_map::log_periodic("probe");
     Some(recovery::panic_path::largest_free_block().min(u32::MAX as usize) as u32)
+}
+
+/// The login challenge's randomness: the C6's hardware RNG. Its output is
+/// true-random while the radio runs (the product's default image brings
+/// ESP-NOW up), and still unpredictable enough for a single-use 32-byte
+/// nonce when it does not — a nonce needs uniqueness, not secrecy.
+#[cfg(not(fw_harness))]
+fn fill_random(buf: &mut [u8]) {
+    esp_hal::rng::Rng::new().read(buf);
 }
 
 /// The `ClientRequest::Reboot` action: the chip reset the chip-agnostic
@@ -237,10 +261,22 @@ fn esp32_memory_stats() -> Option<(u32, u32)> {
     ))
 }
 
+/// The server's transport: USB alone, or — with the `ble` feature — the link
+/// mux carrying USB plus up to two BLE links. The mux is there whether or not
+/// the device store turns BLE on; with BLE off no radio link ever opens and
+/// every frame takes the USB path it always did.
+#[cfg(all(feature = "ble", not(fw_harness)))]
+type AppTransport = fw_esp32_common::radio_link::LinkMuxTransport<
+    transport::StreamingMessageRouterTransport,
+    embassy_time::Delay,
+>;
+#[cfg(all(not(feature = "ble"), not(fw_harness)))]
+type AppTransport = transport::StreamingMessageRouterTransport;
+
 #[cfg(not(fw_harness))]
 struct FirmwareApp {
     server: LpServer,
-    transport: transport::StreamingMessageRouterTransport,
+    transport: AppTransport,
     time_provider: Esp32TimeProvider,
     watchdog: recovery::watchdog::WatchdogFeeder,
     /// What `auto_load_project` cost, in cycles — parse, resolve, map and
@@ -384,7 +420,7 @@ fn boot_firmware(spawner: embassy_executor::Spawner) -> FirmwareApp {
     // Before any radio init: the XIAO C6's RF switch is dead until its pins
     // are driven. Keyed on the manifest in effect, compiled-in fallback
     // included; any other board id is left alone.
-    apply_board_quirks(hardware_manifest.board_id());
+    let quirks_applied = apply_board_quirks(hardware_manifest.board_id());
     let hardware_registry = Rc::new(HwRegistry::new(hardware_manifest));
     let mut hardware_system = HardwareSystem::new(Rc::clone(&hardware_registry));
     // How many outputs appear is decided in one place: the board manifest's
@@ -403,7 +439,11 @@ fn boot_firmware(spawner: embassy_executor::Spawner) -> FirmwareApp {
     ))));
     #[cfg(all(
         feature = "radio",
-        not(any(feature = "stress_s2", feature = "stress_s3"))
+        not(any(
+            feature = "stress_s2",
+            feature = "stress_s3",
+            feature = "desk_espnow_meter"
+        ))
     ))]
     {
         let radio_driver = Esp32EspNowRadioDriver::new(Rc::clone(&hardware_registry), wifi)
@@ -420,12 +460,57 @@ fn boot_firmware(spawner: embassy_executor::Spawner) -> FirmwareApp {
     // own its controller/interface. See `stress.rs`.
     #[cfg(any(feature = "stress_s2", feature = "stress_s3"))]
     stress::start(spawner, wifi);
+    // The desk's ESP-NOW loss meter (BLE M4's steady-state check): the radio
+    // becomes a sequence-numbered broadcaster and counter instead of a driver,
+    // for the same reason. Never shipped. See `desk_espnow_meter.rs`.
+    #[cfg(feature = "desk_espnow_meter")]
+    desk_espnow_meter::start(spawner, wifi);
     #[cfg(all(
         not(feature = "radio"),
-        not(any(feature = "stress_s2", feature = "stress_s3"))
+        not(any(
+            feature = "stress_s2",
+            feature = "stress_s3",
+            feature = "desk_espnow_meter"
+        ))
     ))]
     let _ = wifi;
     let hardware_system = Rc::new(hardware_system);
+
+    // BLE (PQ2): off until the device store enables it, read once here. After
+    // the Wi-Fi/ESP-NOW bring-up above (the order M2's Run G proved), after
+    // the board quirks (the token), before the server exists. A board without
+    // the flag never touches the BLE controller.
+    #[cfg(feature = "ble")]
+    let ble_started = {
+        let store = lpa_server::access_store::read_device_store(base_fs.as_ref());
+        #[cfg(feature = "desk_ble_params")]
+        if let Ok(bytes) = base_fs.read_file(ble::desk_params_path().as_path()) {
+            ble::configure_desk_params(core::str::from_utf8(&bytes).unwrap_or(""));
+        }
+        match (store.ble_enabled, board::esp32c6::init::take_bt()) {
+            (true, Some(bt)) => {
+                log::info!("[ble] enabled by the device store — starting");
+                ble::start(spawner, bt, quirks_applied);
+                true
+            }
+            (true, None) => {
+                log::error!("[ble] enabled, but the BT peripheral is gone — BLE off");
+                false
+            }
+            (false, _) => {
+                log::info!("[ble] off (device store: bleEnabled=false)");
+                #[cfg(feature = "heap_diag_ble_standin")]
+                for size in [19_436usize, 3_500, 1_372] {
+                    core::mem::forget(alloc::vec![0u8; size]);
+                }
+                false
+            }
+        }
+    };
+    #[cfg(feature = "heap_map_diag")]
+    heap_map::log("after-ble");
+    #[cfg(not(feature = "ble"))]
+    let _ = quirks_applied;
 
     // Initialize output provider
     esp_println::println!("[INIT] Creating output provider...");
@@ -491,6 +576,9 @@ fn boot_firmware(spawner: embassy_executor::Spawner) -> FirmwareApp {
         hardware_registry.manifest().board_id(),
     )));
     server.set_reboot_hook(Some(Rc::new(reboot_now)));
+    // Login challenges draw from the chip's hardware RNG; the server itself
+    // never draws randomness (sans-IO).
+    server.set_entropy_source(Some(fill_random));
     esp_println::println!("[INIT] LpServer created");
 
     // Auto-load project at boot (from config or lexical-first) — unless
@@ -545,6 +633,21 @@ fn boot_firmware(spawner: embassy_executor::Spawner) -> FirmwareApp {
     // Boot frame ends here; the boot-complete milestone is marked by the
     // server loop after the first successful frame.
     drop(boot_guard);
+
+    // USB plus the radio links. The advertised-name hook only when BLE runs.
+    #[cfg(feature = "ble")]
+    let transport = {
+        let mux = fw_esp32_common::radio_link::LinkMuxTransport::new(
+            transport,
+            &fw_esp32_common::radio_link::RADIO_LINK_PORT,
+            embassy_time::Delay,
+        );
+        if ble_started {
+            mux.with_upkeep_hook(ble::refresh_advertised_name)
+        } else {
+            mux
+        }
+    };
 
     FirmwareApp {
         server,

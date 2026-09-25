@@ -183,8 +183,9 @@ pub(crate) fn lamp_cells_scale_extremes() -> Element {
 }
 
 /// A deterministic control preview over `positions` (normalized), with a
-/// fixed rainbow riding LINEAR unorm8 bytes — what a live preview carries
-/// over the wire and what `LampView` decodes (the roster ▶ stories' rule).
+/// fixed rainbow in linear light, riding sRGB8 codes — what a live preview
+/// carries over the wire and what `LampView` decodes (the roster ▶ stories'
+/// rule).
 fn lamp_story_preview(
     width_hint: u32,
     height_hint: u32,
@@ -205,13 +206,13 @@ fn lamp_story_preview(
         for channel in 0..3_u32 {
             let turn = (phase + channel as f32 / 3.0) * core::f32::consts::TAU;
             let level = (turn.sin() * 0.5 + 0.5).powi(2);
-            bytes.push((level * 255.0).round() as u8);
+            bytes.push(lpc_wire::linear16_to_srgb8((level * 65535.0).round() as u16));
         }
     }
     UiControlProductPreview {
         revision: 7,
         extent: ControlExtent::new(1, count * 3),
-        sample_format: UiControlSampleFormat::U8,
+        sample_format: UiControlSampleFormat::Srgb8,
         sample_layout: ControlSampleLayout {
             spans: vec![ControlSampleSpan {
                 row: 0,

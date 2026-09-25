@@ -1,6 +1,6 @@
 //! In-memory server transport for browser worker protocol frames.
 
-use lpc_shared::transport::ServerTransport;
+use lpc_shared::transport::{Incoming, Link, LinkId, ServerTransport};
 use lpc_wire::{ClientMessage, TransportError, WireServerMessage};
 
 /// Queue-backed transport between `BrowserFirmwareRuntime` and `LpServer`.
@@ -32,7 +32,7 @@ impl BrowserServerTransport {
 }
 
 impl ServerTransport for BrowserServerTransport {
-    async fn send(&mut self, msg: WireServerMessage) -> Result<(), TransportError> {
+    async fn send(&mut self, _link: LinkId, msg: WireServerMessage) -> Result<(), TransportError> {
         if self.closed {
             return Err(TransportError::ConnectionLost);
         }
@@ -40,22 +40,29 @@ impl ServerTransport for BrowserServerTransport {
         Ok(())
     }
 
-    async fn receive(&mut self) -> Result<Option<ClientMessage>, TransportError> {
+    async fn receive(&mut self) -> Result<Option<Incoming>, TransportError> {
         if self.closed {
             return Err(TransportError::ConnectionLost);
         }
         Ok(if self.incoming.is_empty() {
             None
         } else {
-            Some(self.incoming.remove(0))
+            Some(Incoming::primary(self.incoming.remove(0)))
         })
     }
 
-    async fn receive_all(&mut self) -> Result<Vec<ClientMessage>, TransportError> {
+    async fn receive_all(&mut self) -> Result<Vec<Incoming>, TransportError> {
         if self.closed {
             return Err(TransportError::ConnectionLost);
         }
-        Ok(core::mem::take(&mut self.incoming))
+        Ok(core::mem::take(&mut self.incoming)
+            .into_iter()
+            .map(Incoming::primary)
+            .collect())
+    }
+
+    fn links(&self) -> Vec<Link> {
+        vec![Link::PRIMARY]
     }
 
     async fn close(&mut self) -> Result<(), TransportError> {

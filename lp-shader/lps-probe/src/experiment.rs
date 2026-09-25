@@ -1103,27 +1103,35 @@ mod tests {
         assert_eq!(v.rows[0].value, vec![1.0]);
     }
 
-    /// Perf sanity: ~100-line shader, 4096 `render` evals through one grid
-    /// probe. Prints the duration — this number decides whether P5 needs a
-    /// worker offload.
+    /// The perf fixture, in the gate without the stopwatch: the ~100-line
+    /// shader compiles and a small grid probe over it reduces to stats. Keeps
+    /// `perf_shader_100_lines` from rotting while the timed test below sits
+    /// out of the default suite.
     #[test]
+    fn perf_shader_100_lines_compiles_and_probes() {
+        let result = run_experiment(&perf_shader_100_lines(), &perf_grid_spec(8));
+        assert_eq!(result.shader, ShaderCompileOutcome::Ok);
+        assert!(matches!(
+            result.probes.get(&"grid".to_owned()),
+            Some(ProbeOutcome::Stats(_))
+        ));
+    }
+
+    /// Perf sanity: ~100-line shader, 4096 `render` evals through one grid
+    /// probe. Prints the duration — this number decides whether probe
+    /// evaluation needs a worker offload (the follow-up in
+    /// `docs/adr/2026-07-25-shader-probe-experiment-api.md`).
+    ///
+    /// Wall-clock, so it measures the machine as much as the code: six
+    /// incidents in `docs/debt/lps-probe-perf-test-load-sensitive.md`, one of
+    /// which hid a real compile break by aborting `test-rust-core` before the
+    /// later recipes ran. Out of the default suite — run it with
+    /// `just perf-probe` on a quiet machine (the recipe prints `uptime`).
+    #[test]
+    #[ignore = "wall-clock and load-sensitive; run via `just perf-probe` (docs/debt/lps-probe-perf-test-load-sensitive.md)"]
     fn perf_4096_render_evals_under_10s_debug() {
         let src = perf_shader_100_lines();
-        let mut p = probe(
-            "grid",
-            ProbeType::Vec4,
-            "render_2d(pos)",
-            ProbeDomain::Grid {
-                nx: 64,
-                ny: 64,
-                rect: None,
-            },
-        );
-        p.reduce = ProbeReduce::Stats;
-        let spec = ExperimentSpec {
-            probes: vec![p],
-            ..ExperimentSpec::default()
-        };
+        let spec = perf_grid_spec(64);
         let start = std::time::Instant::now();
         let result = run_experiment(&src, &spec);
         let elapsed = std::time::Instant::now() - start;
@@ -1139,6 +1147,25 @@ mod tests {
             elapsed < std::time::Duration::from_secs(10),
             "perf bound exceeded: {elapsed:?}"
         );
+    }
+
+    /// One `render_2d(pos)` grid probe, `n`×`n` sites, reduced to stats.
+    fn perf_grid_spec(n: u16) -> ExperimentSpec {
+        let mut p = probe(
+            "grid",
+            ProbeType::Vec4,
+            "render_2d(pos)",
+            ProbeDomain::Grid {
+                nx: n,
+                ny: n,
+                rect: None,
+            },
+        );
+        p.reduce = ProbeReduce::Stats;
+        ExperimentSpec {
+            probes: vec![p],
+            ..ExperimentSpec::default()
+        }
     }
 
     /// A ~100-line shader with helpers, loops, and mild trig — realistic

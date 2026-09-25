@@ -7,7 +7,7 @@
 extern crate alloc;
 
 use alloc::vec::Vec;
-use lpc_shared::transport::ServerTransport;
+use lpc_shared::transport::{Incoming, Link, LinkId, ServerTransport};
 use lpc_wire::WireServerMessage;
 use lpc_wire::{ClientMessage, TransportError};
 
@@ -37,21 +37,28 @@ impl FakeTransport {
 }
 
 impl ServerTransport for FakeTransport {
-    async fn send(&mut self, msg: WireServerMessage) -> Result<(), TransportError> {
+    async fn send(&mut self, _link: LinkId, msg: WireServerMessage) -> Result<(), TransportError> {
         log::debug!("FakeTransport: Would send message id={}", msg.id);
         Ok(())
     }
 
-    async fn receive(&mut self) -> Result<Option<ClientMessage>, TransportError> {
+    async fn receive(&mut self) -> Result<Option<Incoming>, TransportError> {
         Ok(if self.message_queue.is_empty() {
             None
         } else {
-            Some(self.message_queue.remove(0))
+            Some(Incoming::primary(self.message_queue.remove(0)))
         })
     }
 
-    async fn receive_all(&mut self) -> Result<Vec<ClientMessage>, TransportError> {
-        Ok(core::mem::take(&mut self.message_queue))
+    async fn receive_all(&mut self) -> Result<Vec<Incoming>, TransportError> {
+        Ok(core::mem::take(&mut self.message_queue)
+            .into_iter()
+            .map(Incoming::primary)
+            .collect())
+    }
+
+    fn links(&self) -> Vec<Link> {
+        alloc::vec![Link::PRIMARY]
     }
 
     async fn close(&mut self) -> Result<(), TransportError> {

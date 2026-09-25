@@ -16,8 +16,8 @@ use lpc_engine::{Engine, EngineServices, ProjectLoader};
 use lpc_model::{NodeRuntimeStatus, Revision, TreePath};
 use lpc_registry::{ParseCtx, ProjectRegistry};
 use lpc_wire::{
-    GeometryDisplayLayout, KnownOutputFrameGeometry, OutputFrameEntry, OutputFrameGeometry,
-    OutputFrameGeometryRead, OutputFrameProbeRequest, OutputFrameProbeResult, RevisionGateResult,
+    GeometryDisplayLayout, KnownRevision, OutputFrameEntry, OutputFrameGeometry,
+    OutputFrameProbeRequest, OutputFrameProbeResult, RevisionGateRead, RevisionGateResult,
 };
 use lpfs::{AsLpPath, FsEvent, FsEventKind, LpFs, LpFsMemory, LpPathBuf};
 
@@ -577,7 +577,7 @@ fn published_display_layout(
 
 /// The first output's whole geometry bundle, asked for outright.
 fn published_geometry(engine: &mut Engine, registry: &ProjectRegistry) -> OutputFrameGeometry {
-    let entry = output_entries(engine, registry, OutputFrameGeometryRead::Always)
+    let entry = output_entries(engine, registry, RevisionGateRead::Always)
         .into_iter()
         .next()
         .expect("one published output");
@@ -591,7 +591,7 @@ fn published_geometry(engine: &mut Engine, registry: &ProjectRegistry) -> Output
 fn output_entries(
     engine: &mut Engine,
     registry: &ProjectRegistry,
-    geometry: OutputFrameGeometryRead,
+    geometry: RevisionGateRead,
 ) -> Vec<OutputFrameEntry> {
     let OutputFrameProbeResult::Frame { outputs } = engine.read_project_output_frame_probe(
         registry,
@@ -718,7 +718,7 @@ fn geometry_answer(
     engine: &mut Engine,
     registry: &ProjectRegistry,
 ) -> Option<RevisionGateResult<OutputFrameGeometry>> {
-    output_entries(engine, registry, OutputFrameGeometryRead::Always)
+    output_entries(engine, registry, RevisionGateRead::Always)
         .into_iter()
         .next()
         .map(|entry| entry.geometry)
@@ -776,10 +776,10 @@ fn re_patching_moves_the_geometry_revision_and_resends_the_placements() {
     let (mut engine, mut registry) = load(&fs);
     tick(&mut engine, &registry, SETTLE_TICKS);
     let before = published_geometry(&mut engine, &registry);
-    let node = output_entries(&mut engine, &registry, OutputFrameGeometryRead::None)[0].node;
-    let known = OutputFrameGeometryRead::IfChanged {
-        known: vec![KnownOutputFrameGeometry {
-            node,
+    let node = output_entries(&mut engine, &registry, RevisionGateRead::None)[0].node;
+    let known = RevisionGateRead::IfChanged {
+        known: vec![KnownRevision {
+            node: Some(node),
             revision: before.revision,
         }],
     };
@@ -969,13 +969,13 @@ fn the_header_total_gates_layouts_across_outputs() {
     };
     engine.set_display_layout_budget(Some(one * 2 + one / 2));
 
-    let outputs = output_entries(&mut engine, &registry, OutputFrameGeometryRead::Always);
+    let outputs = output_entries(&mut engine, &registry, RevisionGateRead::Always);
     assert_eq!(outputs.len(), 3, "all three frames flow regardless");
     let answered: Vec<_> = outputs
         .iter()
         .filter_map(|entry| match &entry.geometry {
-            RevisionGateResult::Changed(geometry) => Some(KnownOutputFrameGeometry {
-                node: entry.node,
+            RevisionGateResult::Changed(geometry) => Some(KnownRevision {
+                node: Some(entry.node),
                 revision: geometry.revision,
             }),
             _ => None,
@@ -997,7 +997,7 @@ fn the_header_total_gates_layouts_across_outputs() {
     let outputs = output_entries(
         &mut engine,
         &registry,
-        OutputFrameGeometryRead::IfChanged { known: answered },
+        RevisionGateRead::IfChanged { known: answered },
     );
     let deferred_entry = outputs
         .iter()

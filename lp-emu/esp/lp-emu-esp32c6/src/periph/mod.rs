@@ -237,6 +237,13 @@ pub fn boot_set(
             base::I2C_MST_MEM_LEN,
             Box::new(wifi_stub::WifiStub::i2c_mst_mem()),
         ),
+        // The coexistence arbiter, reached at Wi-Fi init by an image that
+        // links `esp-radio/coex` (the shipped one, from BLE M4 on).
+        (
+            base::COEX,
+            base::COEX_LEN,
+            Box::new(wifi_stub::WifiStub::coex()),
+        ),
         // M7: blocks only the mask ROM touches. They are last because the
         // application never reaches them, so a `--map` reader meets the
         // boot set in the order an app boot does and finds the ROM's own

@@ -1,5 +1,5 @@
 ---
-status: carried
+status: retired
 since: 2026-08-01
 logged: 2026-08-01
 area: lps-probe/tests
@@ -94,3 +94,19 @@ feature/recipe (perf job), switches to a load-insensitive proxy (eval
 count / instruction budget), or gains enough isolation that a dev server
 plus a sibling build cannot fail it. The measurement itself must survive
 — it gates the P5 worker-offload decision.
+
+**Paydown** — 2026-09-24 (PR "test: take lps-probe perf_4096 out of the
+default gate"): `perf_4096_render_evals_under_10s_debug` is now
+`#[ignore]`d, so `cargo test` / `just test` / CI no longer run it — the
+first exit-criteria option (opt-in recipe). `just perf-probe` prints
+`uptime` and runs it (`cargo test -p lps-probe --lib perf_4096 --
+--ignored --nocapture`); the 10 s bound and the printed duration are
+unchanged, so the worker-offload measurement survives and the ADR's perf
+note points at the recipe. What stays in the gate is the fixture without
+the stopwatch: `perf_shader_100_lines_compiles_and_probes` compiles the
+same ~100-line shader and reduces an 8×8 grid probe to stats, so the
+shader cannot rot unnoticed. A deterministic proxy (interpreter fuel /
+op count) was considered and not taken: it would catch LPIR lowering
+bloat but not the frontend-compile or interpreter-speed regressions the
+wall-clock number actually reports, so it would not guard the same
+thing. Exit criteria met; status retired.
