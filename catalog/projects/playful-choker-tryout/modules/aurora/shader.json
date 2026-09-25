@@ -1,0 +1,71 @@
+{
+  "kind": "Shader",
+  "source": "shader.glsl",
+  "render_order": 0,
+  "coords": "pattern",
+  "bindings": {
+    "output": {
+      "target": "bus:visual.out"
+    },
+    "detail": {
+      "source": "bus:detail"
+    },
+    "palette": {
+      "source": "bus:palette"
+    }
+  },
+  "consumed": {
+    "detail": {
+      "kind": "value",
+      "value": "f32",
+      "default": 1,
+      "min": 0.25,
+      "max": 4,
+      "label": "Detail",
+      "description": "Folds along the ribbons: 1 is about one fold per half-piece; 2 doubles them"
+    },
+    "swayPhase": {
+      "kind": "phasor",
+      "value": "f32",
+      "phasor": {
+        "period_seconds": 70.0,
+        "waveform": "ramp",
+        "phase_offset": 0.0
+      },
+      "default": 0,
+      "label": "Sway",
+      "description": "Position on the ribbons' closed sway loop (0-1)"
+    },
+    "streakPhase": {
+      "kind": "phasor",
+      "value": "f32",
+      "phasor": {
+        "period_seconds": 23.0,
+        "waveform": "ramp",
+        "phase_offset": 0.0
+      },
+      "default": 0,
+      "label": "Streaks",
+      "description": "Drift of the curtain streaks along the ribbons (0-1)"
+    },
+    "palette": {
+      "kind": "palette",
+      "value": "sampler2D",
+      "label": "Palette",
+      "description": "The ribbons' colours; its dark end is the night sky behind them",
+      "gradient": {
+        "kind": "static",
+        "step_seconds": 0.0,
+        "fade_seconds": 0.0,
+        "pinned": -1,
+        "set": [
+          {
+            "space": "oklab",
+            "method": "smooth",
+            "stops": "(0.211231,-0.016952,-0.039276) (0.424831,-0.077734,0.009904) (0.7418,-0.148559,0.051566) (0.505359,0.073042,-0.197466) (0.233098,-0.010245,-0.067005)"
+          }
+        ]
+      }
+    }
+  }
+}

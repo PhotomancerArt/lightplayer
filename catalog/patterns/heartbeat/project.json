@@ -1,0 +1,9 @@
+{
+  "format": 11,
+  "name": "Heartbeat",
+  "description": "The whole piece beats lub-dub, each beat spreading out from the centre, drifting slowly through the palette.",
+  "kind": "pattern",
+  "exports": [
+    "effect"
+  ]
+}

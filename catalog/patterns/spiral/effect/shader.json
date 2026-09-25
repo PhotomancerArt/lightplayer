@@ -1,0 +1,83 @@
+{
+  "kind": "Shader",
+  "source": "shader.glsl",
+  "render_order": 0,
+  "coords": "pattern",
+  "bindings": {
+    "output": {
+      "target": "bus:visual.out"
+    },
+    "detail": {
+      "source": "bus:detail"
+    },
+    "arms": {
+      "source": "bus:arms"
+    },
+    "palette": {
+      "source": "bus:palette"
+    }
+  },
+  "consumed": {
+    "detail": {
+      "kind": "value",
+      "value": "f32",
+      "default": 1,
+      "min": 0.25,
+      "max": 4,
+      "label": "Detail",
+      "description": "Twist of the arms: 1 is about a turn from centre to edge; 2 winds them twice as tight"
+    },
+    "arms": {
+      "kind": "value",
+      "value": "f32",
+      "default": 3,
+      "min": 1,
+      "max": 8,
+      "label": "Arms",
+      "description": "Number of pinwheel arms"
+    },
+    "turnPhase": {
+      "kind": "phasor",
+      "value": "f32",
+      "phasor": {
+        "period_seconds": 6.0,
+        "waveform": "ramp",
+        "phase_offset": 0.0
+      },
+      "default": 0,
+      "label": "Turn",
+      "description": "Rotation: one arm spacing per cycle (0-1)"
+    },
+    "huePhase": {
+      "kind": "phasor",
+      "value": "f32",
+      "phasor": {
+        "period_seconds": 40.0,
+        "waveform": "ramp",
+        "phase_offset": 0.0
+      },
+      "default": 0,
+      "label": "Hue",
+      "description": "Slow walk of the colours around the palette loop (0-1)"
+    },
+    "palette": {
+      "kind": "palette",
+      "value": "sampler2D",
+      "label": "Palette",
+      "description": "Colours around the circle; a ramp whose ends match loops seamlessly",
+      "gradient": {
+        "kind": "static",
+        "step_seconds": 0.0,
+        "fade_seconds": 0.0,
+        "pinned": -1,
+        "set": [
+          {
+            "space": "oklab",
+            "method": "linear",
+            "stops": "(0.7636,0.1313,0.0501) (0.6905,0.225,-0.0628) (0.6383,0.2493,-0.1553) (0.6345,0.1689,-0.192) (0.6799,0.0349,-0.1699) (0.7497,-0.0739,-0.111) (0.8193,-0.1352,-0.0356) (0.8731,-0.1588,0.043) (0.9034,-0.1541,0.1144) (0.9065,-0.1243,0.1662) (0.882,-0.0664,0.1809) (0.8322,0.0225,0.1413) (0.7636,0.1313,0.0501)"
+          }
+        ]
+      }
+    }
+  }
+}
