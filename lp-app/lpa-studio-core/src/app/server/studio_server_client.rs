@@ -251,11 +251,25 @@ impl StudioServerClient {
         files: &[(String, Vec<u8>)],
         expected_hash: &str,
     ) -> Result<LoadedLibraryProject, UiError> {
+        use crate::app::open_progress::{DeviceOpenStep, note_deploy_step};
         let deploy = self
             .client
-            .replace_and_load_project(storage_id, files)
+            .replace_and_load_project_observed(storage_id, files, &mut |step| {
+                note_deploy_step(match step {
+                    lpa_client::DeployStep::Clearing => DeviceOpenStep::Clearing,
+                    lpa_client::DeployStep::Writing {
+                        sent_bytes,
+                        total_bytes,
+                    } => DeviceOpenStep::Uploading {
+                        sent_bytes,
+                        total_bytes,
+                    },
+                    lpa_client::DeployStep::Loading => DeviceOpenStep::Loading,
+                })
+            })
             .await
             .map_err(map_client_error)?;
+        note_deploy_step(DeviceOpenStep::Reading);
         let handle = deploy.value;
         let mut logs = self.absorb_events(deploy.events);
 
