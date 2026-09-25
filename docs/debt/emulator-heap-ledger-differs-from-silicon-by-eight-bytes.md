@@ -46,8 +46,8 @@ half-hour each new reader spends satisfying themselves that the caveat is
 bounded.
 
 **Workarounds** — none needed. State the gap; never tune toward it. The
-figures live beside each other in `scripts/heap-budget-record.json` under
-`chips.esp32c6`, `measured` (this tree, from the emulator) next to
+figures live beside each other in `scripts/heap-budget-record/chips/esp32c6.json`
+(`chips.esp32c6` of the one-file record before 2026-09-23), `measured` (this tree, from the emulator) next to
 `silicon_reference` (the committed transcript, with its commit).
 
 **Incident log**

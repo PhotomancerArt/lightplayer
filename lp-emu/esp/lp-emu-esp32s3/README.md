@@ -113,25 +113,23 @@ M!{"id":0,"msg":{"hello":{…}}}
 [INFO] fw_esp32s3: [fw-esp32s3] hardware manifest: seeed/xiao-esp32-s3-plus (XIAO ESP32-S3 Plus)
 …
 [INFO] fw_esp32_common::server_loop: [RECOVERY] boot complete (first frame served)
-usb-sj: host attached at power-on; 1524 bytes reached the host; 64 bytes were merely tried
+usb-sj: host attached at power-on; 1586 bytes reached the host; 0 bytes were merely tried
 flash: 8388608 (8 MiB), backing Copy("merged.bin"), jedec 0x001740ef; 491 commands (478 reads, 4 page programs, 2 sector erases, …); cache fills 34
 run: cycles=480000000 … unmapped=0 (reads 0, writes 0, 0 sites) …
 ```
 
-⚠️ **`64 bytes were merely tried` is a finding, not noise.** One packet of
-the io_task's `hello` — and a stop-all's reply — is dropped by the link
-model, because esp-hal's write future arms `serial_in_empty` without
-clearing the raw bit esp-println's polled path left set, and wakes 342
-cycles after the commit, inside the modelled 100 µs drain. Which side
-silicon agrees with is not yet measured (the `in_ep1_st` write pointer is
-seven bits wide on this part — room for two packets). Filed as
-`docs/defects/2026-09-13-the-s3-link-drops-the-io-tasks-next-chunk-on-a-stale-serial-in-empty.md`
-and pinned in `tests/boot_idle.rs` where it shows, so the fix flips
-assertions rather than a reader's memory. (2026-09-23: on the BLE plan's
-M3 image the hello's trigger is lost to a race and the run says `0 bytes
-were merely tried`; the stop-all reply still shows it. The defect entry's
-dated note has why.) A blank chip (no `--flash`)
-boots too: no partition table, `using memory FS`, and the same server
+**`0 bytes were merely tried` is a mechanism, not luck.** The block has one
+64-byte IN buffer that firmware may not write from a flush until the host
+has read it (the TRM; `lp-emu-esp-common`'s `ip/usb_sj.rs` cites it), and
+esp-println and the io_task are two writers on it. Until 2026-09-24
+esp-hal's `write_async` — which reads no free bit and arms
+`serial_in_empty` without clearing the raw esp-println's drains leave set —
+lost one 64-byte packet of the `hello` and a stop-all's whole reply into a
+pending buffer. `fw-esp32s3/src/serial/in_endpoint.rs` now waits for a free
+buffer and clears that bit before every io_task write, and the tests assert
+the mechanism on every host path: `Machine::usb_sj_refused() == Some(0)` (see
+`docs/defects/2026-09-13-the-s3-link-drops-the-io-tasks-next-chunk-on-a-stale-serial-in-empty.md`).
+A blank chip (no `--flash`) boots too: no partition table, `using memory FS`, and the same server
 loop — `tests/boot.rs` pins that reading.
 
 ⚠️ **The heap line is a single number**, `heap=245760` (`HEAP_SIZE = 240 *
@@ -548,20 +546,15 @@ stack, no analog anything, no silicon — **no S3 board has been read at all**
 (M6 P09 owns that), so nothing this walk prints is a measurement of hardware.
 And two things it carries rather than hides:
 
-- `LP_WALK_BOOT=direct`, the fast path everywhere else, **cannot complete an
-  upload on this chip today**. The deploy's `stopAllProjects` reply lands on
-  the link's *tried* stream — the open defect
+- The walk still carries the workarounds for
   `docs/defects/2026-09-13-the-s3-link-drops-the-io-tasks-next-chunk-on-a-stale-serial-in-empty.md`
-  (DD103) — and `lp-cli` waits for a reply the host never got. The ROM-up
-  default loses only one 64-byte packet of the `hello`'s feature list, which
-  `lp-cli` survives (none at all since the BLE plan's M3 image — a race,
-  see the entry's 2026-09-23 note). Giving the direct path a flash chip removes its `lpfs`
-  error line and does **not** bring the reply back, so that log line is not
-  the trigger.
-- For the same defect the ROM-up walk asks `lp-cli upload` for the deploy ack
-  (`--no-wait`) and takes its "is it running?" evidence from lit frames on the
-  pad instead of from a `projectRead` stream the link is known to mangle. Both
-  are re-pointed at the plain calls the day the defect closes.
+  (DD103), which the firmware's IN-endpoint gate fixed on 2026-09-24: it
+  asks `lp-cli upload` for no deploy ack (`--no-wait`), takes its "is it
+  running?" evidence from lit frames on the pad rather than a `projectRead`
+  stream, `walks/shader-oracle.script` waits on the handler's log line
+  rather than the stop-all reply, and `LP_WALK_BOOT=direct` is documented as
+  unable to complete an upload. Re-pointing them at the plain calls is the
+  walk's own follow-up, to be proved by a run of the walk.
 
 It builds a firmware image, a merged image and a release `lp-cli`, then runs
 eight emulated seconds, so it costs minutes rather than seconds and belongs in
@@ -571,7 +564,7 @@ a session rather than in a PR gate (R6/DD49). What it proves per tick is
 
 `just heap-budget-check-chips-s3` is the other thing that reads this machine
 for a gate: the shipped image's own first-heartbeat allocator figures,
-ratcheted into `scripts/heap-budget-record.json`. ⚠️ Its triple is
+ratcheted into `scripts/heap-budget-record/chips/esp32s3.json`. ⚠️ Its triple is
 **elicited** (`walks/s3-stop-all.script`), as the classic's is and as the
 C6's is not, and it is measured on a **direct load with no flash chip**, so
 the firmware runs on its memory FS — the record's `boot_shape` says what that
