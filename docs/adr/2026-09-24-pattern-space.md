@@ -1,6 +1,7 @@
 # ADR: Pattern space — a shader can see the lamps, not a texture
 
-- **Status:** Proposed (reviewed by Yona at G-morning, pattern-library plan)
+- **Status:** Accepted 2026-09-24 — accepted by Yona at the pattern review
+  (reviewed by Yona at G-morning, pattern-library plan)
 - **Date:** 2026-09-24
 - **Deciders:** Photomancer
 - **Supersedes:** None
@@ -96,7 +97,8 @@ texel centres map to ±1, and the pitch is one texel.
 - The ESP32-C6 image grows by 8,992 B against main at 1cd1f7d4e
   (2,448,880 → 2,457,872 B; headroom 687,856 B). Against the earlier mains it
   was measured on, the growth was 9,040 B (8fe93d9db) and 8,864 B.
-- The wire proto bumps (23 → 24; lean-wire's follow-ups took 23): the on-disk
+- The wire proto bumps (24 → 25; lean-wire's follow-ups took 23 and the
+  gradient-cycle pin took 24): the on-disk
   key is additive, but an old peer refuses a shader def carrying a field it
   does not know.
 
