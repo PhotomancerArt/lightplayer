@@ -140,11 +140,11 @@ pub use nodes::{
     ShaderSlotKind, ShaderSlotMappingDef, ShaderSlotMappingKind, ShaderSpace, ShaderState,
     ShaderStateView, ShaderValueShapeRef, SpaceAnswer1, SpaceAnswer2, TextureDef, TextureDefView,
     TextureFormat, TextureState, TextureStateView, VisualConsumerSpace,
-    generate_compute_shader_header, glsl_type_for_lp_type, next_output_name, node_def_asset_refs,
-    pattern_project_files_1d, pattern_project_files_2d, playlist_tour_lp_type,
-    resolve_artifact_specifier, rewrite_node_def_asset_refs, shader_panel_step,
-    slot_bytes_estimate, starter_def_for_kind, starter_for_kind, starter_project_files,
-    validate_shader_slot_budget,
+    format_playlist_failure_status, generate_compute_shader_header, glsl_type_for_lp_type,
+    next_output_name, node_def_asset_refs, parse_playlist_failed_entries, pattern_project_files_1d,
+    pattern_project_files_2d, playlist_tour_lp_type, resolve_artifact_specifier,
+    rewrite_node_def_asset_refs, shader_panel_step, slot_bytes_estimate, starter_def_for_kind,
+    starter_for_kind, starter_project_files, validate_shader_slot_budget,
 };
 pub use product::{
     ControlDisplayLayout, ControlExtent, ControlLamp2d, ControlLayout2d, ControlPathSpan2d,

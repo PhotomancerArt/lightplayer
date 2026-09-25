@@ -42,7 +42,8 @@ pub use pattern_project::{
 };
 pub use playlist::{
     PLAYLIST_TOUR_SHAPE_NAME, PlaylistDef, PlaylistDefView, PlaylistEntry, PlaylistEntryView,
-    PlaylistState, PlaylistStateView, PlaylistTour, playlist_tour_lp_type,
+    PlaylistState, PlaylistStateView, PlaylistTour, format_playlist_failure_status,
+    parse_playlist_failed_entries, playlist_tour_lp_type,
 };
 pub use projection_shape::{FlipMode, MirrorMode, ProjectionShape};
 pub use provenance_def::ProvenanceDef;

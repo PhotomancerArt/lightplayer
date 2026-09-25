@@ -1346,20 +1346,16 @@ fn resolve_entry_product(
     lpc_model::VisualProduct::from_lp_value(value.value()).map_err(err_ctx("playlist child output"))
 }
 
-/// The playlist's runtime warning: every failed entry and why.
+/// The playlist's runtime warning: every failed entry and why. The text is
+/// `lpc_model`'s ([`lpc_model::format_playlist_failure_status`]), because
+/// Studio reads the failed keys back out of it with the paired parser.
 fn failure_status(entries: &[PlaylistRuntimeEntry]) -> Option<String> {
-    let mut status: Option<String> = None;
-    for entry in entries {
-        let PlaylistEntryReason::Failed(reason) = &entry.reason else {
-            continue;
-        };
-        let line = format!("entry {} failed ({reason})", entry.index);
-        status = Some(match status {
-            None => line,
-            Some(previous) => format!("{previous}; {line}"),
-        });
-    }
-    status
+    lpc_model::format_playlist_failure_status(entries.iter().filter_map(
+        |entry| match &entry.reason {
+            PlaylistEntryReason::Failed(reason) => Some((entry.index, reason.as_str())),
+            _ => None,
+        },
+    ))
 }
 
 // Texture crossfade blending lives behind `LpGraphics::blend_textures`
@@ -1553,6 +1549,25 @@ mod tests {
         node.fail_entry(1, String::from("bad glsl"));
 
         assert_eq!(node.residency_request(), None, "nothing left: no spin");
+    }
+
+    /// Studio's Pattern instrument reads the failed keys back out of the
+    /// warning with the paired `lpc_model` parser; this is the producer's
+    /// half of that contract.
+    #[test]
+    fn the_failure_warning_names_every_failed_key_to_the_shared_parser() {
+        let mut node = playlist_with_entries(&[1, 2, 3]);
+        node.fail_entry(3, String::from("compile: x = 1; y (line 2)"));
+        node.fail_entry(2, String::from("load: missing file"));
+
+        let Some(NodeRuntimeStatus::Warn(text)) = node.runtime_status() else {
+            panic!("a failure is a warning");
+        };
+        assert_eq!(
+            lpc_model::parse_playlist_failed_entries(&text),
+            [2, 3],
+            "key order, whatever order they failed in: {text}"
+        );
     }
 
     #[test]
