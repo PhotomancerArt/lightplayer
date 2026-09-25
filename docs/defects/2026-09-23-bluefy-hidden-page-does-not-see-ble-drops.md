@@ -1,7 +1,8 @@
 ---
-status: open
+status: fixed
 found: 2026-09-23      # how: hardware-walk (M2 desk sitting 1, spikes/ble-lab, Bluefy on iPhone)
-area: Studio's future Web Bluetooth link (M5 of the ble-remote-control plan); spikes/ble-lab/index.html today
+fixed: bcd6e4dbd
+area: lpa-link browser_ble (Studio's Web Bluetooth link, BLE M5); spikes/ble-lab/index.html
 class: assumed-context
 related:
   - lp2025/2026-09-23-1428-ble-remote-control/ (spike-results.md, Run F)
@@ -28,7 +29,14 @@ and no board reboot, the BLE connection **survived**: no drop, and `upMs`
 ran continuously 162318 → 212484. What goes missing is only the page's
 *knowledge* of events while it cannot run.
 
-**Fix** — none yet. What Studio's BLE link (M5) must do:
+**Fix** — M5 of the ble-remote-control plan (`bcd6e4dbd`, Studio's Web
+Bluetooth link, `lp-app/lpa-link/src/providers/browser_ble/browser_ble.js`)
+does each of the four things below: on `visibilitychange → visible` every
+session re-reads `gatt.connected` (`recheckAll`), so a drop the hidden page
+never heard is handled then, and a lost or parked session restarts its
+reconnect on the held `BluetoothDevice`; the link carries no long-lived HTTP
+stream. Decision record: `docs/adr/2026-09-24-ble-transport-studio.md` §3.
+What the fix had to do:
 - treat `visibilitychange → visible` as "state unknown": re-read the link
   before showing it as connected;
 - run its reconnect on becoming visible, not only on
@@ -42,9 +50,11 @@ exists and returned the granted device, and the held `BluetoothDevice`
 reconnected after both a page-initiated drop (954 ms) and a board reboot
 (803 ms). So a one-tap "Reconnect" is a fallback, not the main path.
 
-**Regression coverage** — none: this needs a phone. A walk step (lock the phone,
-reboot the board, unlock, check that the UI shows the drop and reconnects)
-belongs in M5's desk check.
+**Regression coverage** — `a_drop_the_page_never_heard_is_found_on_the_recheck`
+in `lp-app/lpa-link/tests/browser_ble_conformance.rs` (`just
+lpa-link-browser-test`), driving `recheckAll` without a real hide/show. The
+phone half — lock the phone, reboot the board, unlock, see the drop and the
+reconnect — is a step of the M7 desk walk (G4), not yet run.
 
 **Lesson** — on iOS, "the page is connected" is only true while the page
 runs. Any BLE UI on a phone must re-derive link state when it is shown

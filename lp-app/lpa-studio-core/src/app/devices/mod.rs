@@ -12,6 +12,7 @@
 //! | `StartTimer` | [`DeviceEffects`] → one spawned future per timer on the app's timer factory |
 //! | `PersistRecord` / `DeleteRecord` | [`DeviceRoster`] → the kept `places::device_registry`, through the library host's locked catalog |
 //! | `RequestUsbGrant` | [`DeviceTransport::request_grant`] → the platform chooser |
+//! | `RequestBleGrant` | [`DeviceTransport::request_ble_grant`] → the platform's Bluetooth chooser |
 //! | `RevokeGrant` | [`DeviceTransport::revoke_grant`] → the provider's `forget_endpoint` |
 //! | `RunEffect` | [`DeviceEffects::run_effect`] → the wire, borrowed exclusively: esptool for a flash, the `lpa-client` conversation for a push |
 //!
@@ -35,6 +36,13 @@
 //! the miniature of this module; the discipline (drain the wire, then the due
 //! timers, generation-stamped) is the same.
 
+/// The Bluetooth transport (M5): a control-only link, host-tested through
+/// its source seam.
+pub mod ble_transport;
+/// Bluetooth devices backed by the page's Web Bluetooth. wasm-only, and only
+/// when the studio is built with the provider that owns them.
+#[cfg(all(feature = "browser-ble", target_arch = "wasm32"))]
+pub mod browser_ble_source;
 /// Emus backed by the tab's emulator Worker. wasm-only, and only when the
 /// studio is built with the module that owns them.
 #[cfg(all(feature = "emulator-tab", target_arch = "wasm32"))]
@@ -71,7 +79,11 @@ pub mod sim_create_op;
 pub mod sim_record;
 pub mod sim_transport;
 pub mod target_offer;
+pub mod wire_conversation;
 
+pub use ble_transport::{BleDeviceTransport, BleLinkSource};
+#[cfg(all(feature = "browser-ble", target_arch = "wasm32"))]
+pub use browser_ble_source::BrowserBleSource;
 #[cfg(all(feature = "emulator-tab", target_arch = "wasm32"))]
 pub use browser_emu_source::BrowserEmuLinkSource;
 #[cfg(all(feature = "browser-worker", target_arch = "wasm32"))]
@@ -95,8 +107,9 @@ pub use device_firmware_face::{
     device_firmware_line, firmware_face_preview_sentence, pending_firmware_line,
 };
 pub use device_flash::{
-    FirmwareVerb, FlashBoardChoice, FlashOffer, derive_flash_name, firmware_verb, flash_offer,
-    flash_offer_for, reflash_choice, taken_device_titles,
+    FirmwareVerb, FlashBoardChoice, FlashOffer, RESET_NEEDS_USB, blocked_erase_action,
+    derive_flash_name, firmware_verb, flash_offer, flash_offer_for, reflash_choice,
+    taken_device_titles,
 };
 pub use device_frame_feed::{DEVICE_FEED_PARK_AFTER_FAILURES, DeviceFrameFeed, DeviceFrameFeeds};
 pub use device_frame_snapshot::DEVICE_FRAME_SNAPSHOT_INTERVAL_SECS;
@@ -128,9 +141,10 @@ pub use runtime_band::{UiRuntimeBand, speed_word};
 pub use shared_link_client_io::{ConversationInbox, SharedLinkClientIo};
 pub use sim_create_op::{SimCreateOp, sim_device_name};
 pub use sim_record::{
-    NewSimRecord, RuntimeKind, SimRecord, delete_sim_record, emu_endpoint, emu_link_info,
-    mint_sim_identity, new_sim_record, read_sim_record, sim_endpoint, sim_link_info,
-    uid_from_emu_endpoint, uid_from_sim_endpoint, write_sim_record,
+    BLE_ENDPOINT_PREFIX, NewSimRecord, RuntimeKind, SimRecord, ble_endpoint, ble_link_info,
+    delete_sim_record, device_id_from_ble_endpoint, emu_endpoint, emu_link_info, mint_sim_identity,
+    new_sim_record, read_sim_record, sim_endpoint, sim_link_info, uid_from_emu_endpoint,
+    uid_from_sim_endpoint, write_sim_record,
 };
 pub use sim_transport::{
     SimBacking, SimDeviceTransport, SimLinkSource, SimRuntimeControl, SimSession, SimTier,

@@ -23,6 +23,7 @@
 //! | `byte_stream` | the sync `DeviceByteStream` seam → `Link` (host) |
 //! | `fake` | the scripted `FakeEsp32Device` → `Link` (host tests) |
 //! | `browser_serial` | the Web Serial provider → `Link` (wasm) |
+//! | `browser_ble` | a Web Bluetooth (NUS) session → `Link` (wasm) |
 //! | `browser_worker` | a `fw-browser` worker → `Link`, i.e. the sim as a device (wasm) |
 //! | `browser_worker_io` | that worker's protocol channel → `lpa_client::ClientIo` (wasm) |
 //!
@@ -50,6 +51,9 @@ pub mod fake;
 
 #[cfg(all(feature = "browser-serial-esp32", target_arch = "wasm32"))]
 pub mod browser_serial;
+
+#[cfg(all(feature = "browser-ble", target_arch = "wasm32"))]
+pub mod browser_ble;
 
 /// The sim as a `Link`. wasm-only like the provider it wraps
 /// (`providers/mod.rs`), and it needs the model's contract to implement.

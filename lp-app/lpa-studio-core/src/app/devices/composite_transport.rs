@@ -8,11 +8,12 @@
 //! the only thing it honestly can — the link's own endpoint.
 //!
 //! ```text
-//!   discover_granted ──► serial ∪ sim ∪ emu    (all three, every sweep)
-//!   request_grant    ──► serial                (a chooser is a port chooser)
-//!   run_effect       ──► endpoint "sim:…" ? sim : "emu:…" ? emu : serial
-//!   revoke_grant     ──► same rule
-//!   lens_client_io   ──► same rule
+//!   discover_granted  ──► serial ∪ sim ∪ emu ∪ ble   (every half, every sweep)
+//!   request_grant     ──► serial                     (a chooser is a port chooser)
+//!   request_ble_grant ──► ble                        (the Bluetooth chooser)
+//!   run_effect        ──► endpoint "sim:…" ? sim : "emu:…" ? emu : "ble:…" ? ble : serial
+//!   revoke_grant      ──► same rule
+//!   lens_client_io    ──► same rule
 //! ```
 //!
 //! # Why the endpoint and not a kind
@@ -46,7 +47,9 @@ use super::device_transport::{
     DeviceEffectCall, DeviceEffectFacts, DeviceEffectProgress, DeviceTransport,
     DeviceTransportFuture, GrantedLink, LensLineTap,
 };
-use super::sim_record::{uid_from_emu_endpoint, uid_from_sim_endpoint};
+use super::sim_record::{
+    device_id_from_ble_endpoint, uid_from_emu_endpoint, uid_from_sim_endpoint,
+};
 
 /// Serial, sim and emu, behind one trait.
 pub struct CompositeDeviceTransport {
@@ -55,6 +58,10 @@ pub struct CompositeDeviceTransport {
     sim: Rc<dyn DeviceTransport>,
     /// `None` where this build ships no emulator module (D21).
     emu: Option<Rc<dyn DeviceTransport>>,
+    /// `None` where this build cannot reach Bluetooth at all. A Studio build
+    /// installs it even on a browser WITHOUT Web Bluetooth, so the Add verb
+    /// can explain why (Brave's flag, Safari → Bluefy) rather than vanish.
+    ble: Option<Rc<dyn DeviceTransport>>,
 }
 
 impl CompositeDeviceTransport {
@@ -64,6 +71,7 @@ impl CompositeDeviceTransport {
             serial,
             sim,
             emu: None,
+            ble: None,
         }
     }
 
@@ -72,6 +80,13 @@ impl CompositeDeviceTransport {
     /// what the browser can do.
     pub fn with_emu(mut self, emu: Rc<dyn DeviceTransport>) -> Self {
         self.emu = Some(emu);
+        self
+    }
+
+    /// Add the Bluetooth half (M5). Separate for the same reason as
+    /// [`Self::with_emu`]: it depends on what this build ships.
+    pub fn with_ble(mut self, ble: Rc<dyn DeviceTransport>) -> Self {
+        self.ble = Some(ble);
         self
     }
 
@@ -89,6 +104,14 @@ impl CompositeDeviceTransport {
                 .clone()
                 .ok_or_else(|| "this build ships no emulator".to_string());
         }
+        // A `ble:` endpoint routed to serial would try to open a PORT named
+        // after a Bluetooth device id — refused by name instead.
+        if device_id_from_ble_endpoint(&info.endpoint.0).is_some() {
+            return self
+                .ble
+                .clone()
+                .ok_or_else(|| "this build cannot reach Bluetooth devices".to_string());
+        }
         self.serial
             .clone()
             .ok_or_else(|| "this build cannot talk to USB devices".to_string())
@@ -97,11 +120,19 @@ impl CompositeDeviceTransport {
 
 impl DeviceTransport for CompositeDeviceTransport {
     fn label(&self) -> &'static str {
-        match (self.serial.is_some(), self.emu.is_some()) {
-            (true, true) => "browser Web Serial + sim + emu",
-            (true, false) => "browser Web Serial + sim",
-            (false, true) => "sim + emu",
-            (false, false) => "sim only",
+        match (
+            self.serial.is_some(),
+            self.emu.is_some(),
+            self.ble.is_some(),
+        ) {
+            (true, true, true) => "browser Web Serial + sim + emu + Bluetooth",
+            (true, true, false) => "browser Web Serial + sim + emu",
+            (true, false, true) => "browser Web Serial + sim + Bluetooth",
+            (true, false, false) => "browser Web Serial + sim",
+            (false, true, true) => "sim + emu + Bluetooth",
+            (false, true, false) => "sim + emu",
+            (false, false, true) => "sim + Bluetooth",
+            (false, false, false) => "sim only",
         }
     }
 
@@ -109,6 +140,7 @@ impl DeviceTransport for CompositeDeviceTransport {
         let serial = self.serial.clone();
         let sim = Rc::clone(&self.sim);
         let emu = self.emu.clone();
+        let ble = self.ble.clone();
         Box::pin(async move {
             // A serial discovery that FAILED says nothing about which boards
             // exist, and the departure sweep detaches on the answer — so the
@@ -124,6 +156,9 @@ impl DeviceTransport for CompositeDeviceTransport {
             if let Some(emu) = &emu {
                 granted.extend(emu.discover_granted().await?);
             }
+            if let Some(ble) = &ble {
+                granted.extend(ble.discover_granted().await?);
+            }
             Ok(granted)
         })
     }
@@ -135,6 +170,15 @@ impl DeviceTransport for CompositeDeviceTransport {
         match &self.serial {
             Some(serial) => serial.request_grant(),
             None => self.sim.request_grant(),
+        }
+    }
+
+    fn request_ble_grant(&self) -> DeviceTransportFuture<Result<Option<GrantedLink>, String>> {
+        match &self.ble {
+            Some(ble) => ble.request_ble_grant(),
+            None => Box::pin(core::future::ready(Err(
+                "this build cannot reach Bluetooth devices".to_string(),
+            ))),
         }
     }
 
@@ -245,6 +289,11 @@ mod tests {
 
         fn request_grant(&self) -> DeviceTransportFuture<Result<Option<GrantedLink>, String>> {
             self.note("request_grant");
+            Box::pin(core::future::ready(Ok(None)))
+        }
+
+        fn request_ble_grant(&self) -> DeviceTransportFuture<Result<Option<GrantedLink>, String>> {
+            self.note("request_ble_grant");
             Box::pin(core::future::ready(Ok(None)))
         }
 
@@ -372,6 +421,76 @@ mod tests {
             calls.borrow().as_slice(),
             ["emu:effect", "sim:effect", "serial:effect"]
         );
+    }
+
+    /// The Bluetooth half is a fourth: its sweep joins the union, a `ble:`
+    /// endpoint routes to it, and the Bluetooth chooser reaches it and only
+    /// it — the serial chooser is untouched.
+    #[test]
+    fn a_ble_half_joins_discovery_routing_and_owns_its_chooser() {
+        let calls = Rc::new(RefCell::new(Vec::new()));
+        let transport = composite(&calls, true).with_ble(Rc::new(SpyTransport::new(
+            "ble",
+            &calls,
+            &["ble:QkxFLWlk"],
+        )));
+
+        let granted = block_on(transport.discover_granted()).expect("every half answered");
+        let endpoints: Vec<String> = granted
+            .iter()
+            .map(|grant| grant.info.endpoint.0.clone())
+            .collect();
+        assert_eq!(
+            endpoints,
+            vec![
+                "usb-1".to_string(),
+                "sim:dev1".to_string(),
+                "ble:QkxFLWlk".to_string()
+            ]
+        );
+        assert_eq!(transport.label(), "browser Web Serial + sim + Bluetooth");
+
+        calls.borrow_mut().clear();
+        block_on(transport.run_effect(
+            link_at("ble:QkxFLWlk").info,
+            DeviceEffectCall::EraseFlash,
+            Rc::new(|_, _| {}),
+        ))
+        .expect("the ble half answered");
+        let _ = transport.lens_client_io(link_at("ble:QkxFLWlk").info, Rc::new(|_| {}));
+        block_on(transport.request_ble_grant()).unwrap();
+        block_on(transport.request_grant()).unwrap();
+
+        assert_eq!(
+            calls.borrow().as_slice(),
+            [
+                "ble:effect",
+                "ble:lens",
+                "ble:request_ble_grant",
+                "serial:request_grant"
+            ]
+        );
+    }
+
+    /// With no Bluetooth half, a `ble:` endpoint and the Bluetooth chooser
+    /// are both refused by name, and nothing reaches serial.
+    #[test]
+    fn a_ble_endpoint_in_a_build_with_no_bluetooth_is_refused_by_name() {
+        let calls = Rc::new(RefCell::new(Vec::new()));
+        let transport = composite(&calls, true);
+
+        let refused = block_on(transport.run_effect(
+            link_at("ble:QkxFLWlk").info,
+            DeviceEffectCall::EraseFlash,
+            Rc::new(|_, _| {}),
+        ))
+        .expect_err("there is no ble half");
+        assert!(refused.contains("Bluetooth"), "{refused}");
+        let Err(chooser) = block_on(transport.request_ble_grant()) else {
+            panic!("there is no Bluetooth chooser");
+        };
+        assert!(chooser.contains("Bluetooth"), "{chooser}");
+        assert!(calls.borrow().is_empty(), "nothing else was asked");
     }
 
     /// A build with no emulator refuses an `emu:` endpoint BY NAME. Routing

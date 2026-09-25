@@ -99,6 +99,17 @@ pub(crate) struct FeedTarget {
 /// `None` is the common case (no board, nothing running, an activity, a
 /// borrowed wire); the caller stamps the attempt and moves on.
 pub(crate) fn feed_target(device: &Device, effects: &DeviceEffects) -> Option<FeedTarget> {
+    // No live card picture over Bluetooth (M5): a picture every 150 ms is a
+    // stream on a link whose air time the board shares with ESP-NOW, and a
+    // card is not what anyone is controlling. The card keeps its last frame.
+    if device
+        .identity
+        .endpoint
+        .as_ref()
+        .is_some_and(|endpoint| endpoint.is_bluetooth())
+    {
+        return None;
+    }
     let evidence = &device.evidence;
     if !evidence.presence.is_open()
         || !evidence.classification.is_light_player()
