@@ -1,5 +1,5 @@
 ---
-status: fixed          # the two mechanisms below; that they are the iPhone symptom's cause is NOT yet confirmed on the phone (see Symptom)
+status: fixed          # confirmed on the phone (Yona, 2026-09-25) with the firmware half alone
 found: 2026-09-25      # how: hardware-walk (G4, Yona, iPhone + Bluefy on deployed Studio) then live-debugging (choker console; Mac Chrome over CDP)
 fixed: this change     # PR #834 (claude/ble-phone-edit-drop): fb0b2ed59 (firmware), 6676bf59e (Studio transport)
 area: fw-esp32c6 ble (ble_connection, nus_service, trouble-host packet pool) × fw-esp32-common radio_link::prepared_write × lpa-link browser_ble.js
@@ -40,12 +40,21 @@ matching `a34cfee65`:
   hello".
 
 The phone's own console was never captured (Bluefy has no dev tools; neither
-Safari Web Inspector nor a Tailscale-served lab was run), so **why the
-page's requests went unanswered on the phone is not proven**. The board
-logged the phone's ATT MTU as 251, which Studio's 244 B writes fit.
-Chasing it on the Mac found the two defects below, both of which make a
-page request vanish with the board silent. Whether Bluefy hits the first is
-what the owed phone confirmation will show.
+Safari Web Inspector nor a Tailscale-served lab was run). Chasing it on the
+Mac found the two firmware defects below, both of which make a page request
+vanish with the board silent. **The phone confirmed the cause.** With only
+the firmware half flashed and the deployed Studio (still 244 B writes, no
+teardown), Yona connected from Bluefy and "now everything seems to be
+working": editing held. So Bluefy's large writes were taking the long-write
+path, even though the board had logged the phone's ATT MTU as 251 (which
+244 B would fit). Why iOS chose a long write there is not known.
+
+Seen once, not explained: on that confirmation the phone's first connect said
+"no response" and the retry worked. At the time the agent's lab page (Mac
+Chrome) held the board's other slot and was reconnecting every ~12 s (each of
+its unauthenticated links was closed at 10 s), so it competed for the
+advertising slot. No board log of that moment survived (the lab's console
+reader had stopped).
 
 **Root cause** — three mechanisms.
 
@@ -113,8 +122,13 @@ what the owed phone confirmation will show.
   in 360–465 ms. Before the fix, the long writes failed ("GATT operation
   failed for unknown reason"), and in the first fix build (RX grown to 248 B
   on the 255 pool) a 300 B one restarted the host.
-- Not covered: Bluefy itself. The phone confirmation is owed (the director
-  holds it).
+- Silicon, Mac (choker, Mac Chrome over CDP, clean image `f7b722bfa`, board
+  open so Play tier): 10 Scale panel writes in a row, each ONE 300–480 B
+  write (a long write), all `accepted`, 240–831 ms. Then the page dropped
+  the link (`link1 … reason=0x13`), reconnected as `link2` in 1,077 ms, and
+  its hello was answered in 122 ms. No reset.
+- Phone: confirmed working by Yona with the firmware half (above). The
+  Studio half (teardown, 180 B writes) reaches the phone at the next deploy.
 
 **Lesson** — a BLE host library that "handles" a GATT procedure for you can
 still leave you out of it. trouble-host's attribute server answered Prepare
