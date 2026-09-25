@@ -1371,6 +1371,10 @@ impl StudioController {
             (self.now_secs)(),
         );
         view.runtime_bands = self.runtime_bands(&view);
+        // Web Serial (or the `?emu=` shim that polyfills it) is what built
+        // a serial transport; without one the add slot keeps its USB verb
+        // out of the primary position (iPhone, Bluefy, Firefox, Safari).
+        view.usb_available = self.serial_transport.is_some();
         let default_password = self.settings.device_default_password();
         view.access = self
             .devices

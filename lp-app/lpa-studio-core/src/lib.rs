@@ -190,7 +190,7 @@ pub use core::{
 /// and dispatches it without a second dependency edge. The model is the ONE
 /// device vocabulary — there is no `Ui*` mirror of it, on purpose.
 pub use lpa_devices::view::{
-    ActivityView as DeviceActivityView, DeviceView, Escape as DeviceEscape,
+    ActivityView as DeviceActivityView, DeviceView, Escape as DeviceEscape, FIRMWARE_NEEDS_USB,
     FirmwareFace as DeviceFirmwareFace, LoadedProject as DeviceLoadedProject, OutcomeView,
     PendingLinkView, RosterView,
 };

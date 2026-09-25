@@ -8,16 +8,16 @@
 
 use dioxus::prelude::*;
 use lpa_studio_core::{
-    AccessTier, DeviceEscape, DeviceId, DeviceLoadedProject, DeviceStatus, DeviceView,
-    UiAccessPanel, UiAccessSecret, UiDeviceAccess, UiDeviceSettingsView, UiLoginPrompt,
-    UiProjectAccess,
+    AccessTier, DeviceEscape, DeviceId, DeviceLinkId, DeviceLoadedProject, DeviceStatus,
+    DeviceView, FIRMWARE_NEEDS_USB, PendingLinkView, UiAccessPanel, UiAccessSecret, UiDeviceAccess,
+    UiDeviceSettingsView, UiLoginPrompt, UiProjectAccess,
 };
 use lpa_studio_web_story_macros::story;
 
 use crate::app::home::ble_reach::BleReach;
 use crate::app::home::bluetooth_settings_section::BluetoothSettingsSection;
 use crate::app::home::device_access_panel::DeviceAccessPanel;
-use crate::app::home::device_roster_card::DeviceRosterCard;
+use crate::app::home::device_roster_card::{DeviceRosterCard, PendingLinkCard};
 use crate::app::home::devices_page::AddDeviceCard;
 use crate::app::home::login_sheet::LoginSheet;
 use crate::app::project::project_bluetooth_section::ProjectBluetoothSection;
@@ -104,20 +104,28 @@ fn ble_access_panel_open() -> Element {
 }
 
 #[story(
-    description = "The add slot's Bluetooth half, per browser (BLE M5 copy, M6 story). Chrome: the verb. Brave: the flag's address as select-and-copy text (a page cannot open brave://). iPhone/iPad: open it in Bluefy. Safari and Firefox: use Chrome. Bluetooth off: say so. Never a generic \"connect failed\"."
+    description = "The add slot, per browser (BLE M5 copy, M6 story). Chrome: both verbs. Bluefy on iPhone: no Web Serial, so NO USB verb — Add over Bluetooth is the slot's verb, with a quiet line saying where USB works. Brave: the flag's address as select-and-copy text (a page cannot open brave://). iPhone/iPad Safari: open it in Bluefy, and no USB verb. Safari and Firefox (no Web Serial either): use Chrome. Bluetooth off: say so. Never a generic \"connect failed\"."
 )]
 fn ble_add_slot_by_browser() -> Element {
+    // (Bluetooth reach, whether this browser has Web Serial) — as the real
+    // browsers pair them.
     rsx! {
         div { class: "tw:grid tw:gap-3 tw:p-3 tw:sm:grid-cols-2",
-            for reach in [
-                BleReach::Ready,
-                BleReach::Brave,
-                BleReach::Ios,
-                BleReach::Safari,
-                BleReach::Off,
-                BleReach::Unsupported,
+            for (reach , usb) in [
+                (BleReach::Ready, true),
+                (BleReach::Ready, false),
+                (BleReach::Brave, true),
+                (BleReach::Ios, false),
+                (BleReach::Safari, false),
+                (BleReach::Off, true),
+                (BleReach::Unsupported, false),
             ] {
-                AddDeviceCard { key: "{reach:?}", ble_reach: Some(reach), on_action: |_| {} }
+                AddDeviceCard {
+                    key: "{reach:?}-{usb}",
+                    ble_reach: Some(reach),
+                    usb_available: usb,
+                    on_action: |_| {},
+                }
             }
         }
     }
@@ -162,6 +170,38 @@ fn ble_device_card_over_bluetooth() -> Element {
                 access: Some(edit),
                 on_action: |_| {},
             }
+        }
+    }
+}
+
+#[story(
+    description = "A Bluetooth link still identifying (BLE M6 fix): the pending card's Reset is drawn DISABLED with its reason, \"Reset needs USB\" — a Bluetooth link has no reset lines in any card state, not only once it has settled. Right: a USB link at the same stage, whose Reset stays live (it is the recovery for a silent chip)."
+)]
+fn ble_pending_card_over_bluetooth() -> Element {
+    let usb = PendingLinkView {
+        link: DeviceLinkId(8),
+        device: DeviceId(108),
+        title: "Fake ESP32 (usb-8)".to_string(),
+        state_label: "New device found — identifying…".to_string(),
+        detail: Some("found 2 s ago".to_string()),
+        can_adopt: true,
+        firmware_face: lpa_studio_core::DeviceFirmwareFace::Unknown,
+        detected_chip: None,
+        mac: None,
+        firmware_blocked: None,
+        escapes: vec![DeviceEscape::Forget],
+    };
+    let ble = PendingLinkView {
+        link: DeviceLinkId(9),
+        device: DeviceId(109),
+        title: "PLAYFUL choker".to_string(),
+        firmware_blocked: Some(FIRMWARE_NEEDS_USB.to_string()),
+        ..usb.clone()
+    };
+    rsx! {
+        div { class: "tw:grid tw:gap-3 tw:p-3 tw:sm:grid-cols-2",
+            PendingLinkCard { pending: ble, on_action: |_| {} }
+            PendingLinkCard { pending: usb, on_action: |_| {} }
         }
     }
 }

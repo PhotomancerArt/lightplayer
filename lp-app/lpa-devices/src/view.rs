@@ -208,6 +208,13 @@ pub struct PendingLinkView {
     /// the board is, and the pending card's identity row must not pass one
     /// off as the other.
     pub mac: Option<String>,
+    /// Why this link cannot carry firmware or a reset, when it cannot — the
+    /// same reason [`DeviceView::firmware_blocked`] carries, read here off
+    /// the LINK's own endpoint because a pending link has no bound identity
+    /// yet. A Bluetooth link that is still identifying has no reset lines
+    /// either, so its card must not offer an enabled Reset.
+    #[serde(default)]
+    pub firmware_blocked: Option<String>,
     /// Dismiss, expressed as [`Escape::Forget`].
     pub escapes: Vec<Escape>,
 }
@@ -439,6 +446,13 @@ impl DeviceView {
 }
 
 impl PendingLinkView {
+    /// Whether this link is a Bluetooth one — no reset lines, no ROM
+    /// downloader — which is how the pending card knows to draw Reset
+    /// disabled.
+    pub fn is_over_bluetooth(&self) -> bool {
+        self.firmware_blocked.as_deref() == Some(FIRMWARE_NEEDS_USB)
+    }
+
     /// The flash face on a pending link — only ever on a SETTLED verdict
     /// (an unsettled link projects [`FirmwareFace::Unknown`]).
     pub fn needs_firmware(&self) -> bool {
@@ -618,6 +632,11 @@ pub fn pending_link_view(entry: &PendingLink, now: Millis) -> PendingLinkView {
         },
         detected_chip: entry.evidence().detected_chip().map(str::to_string),
         mac: entry.identity().mac.as_ref().map(|mac| mac.0.clone()),
+        firmware_blocked: entry
+            .info
+            .endpoint
+            .is_bluetooth()
+            .then(|| FIRMWARE_NEEDS_USB.to_string()),
         escapes: vec![Escape::Forget],
     }
 }

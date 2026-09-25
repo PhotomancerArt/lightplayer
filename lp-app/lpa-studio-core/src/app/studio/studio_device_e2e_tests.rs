@@ -5556,6 +5556,45 @@ fn a_board_seen_over_usb_and_over_bluetooth_is_one_registry_row() {
     );
 }
 
+/// iPhone/Bluefy's shape: a sim half and a Bluetooth half, and NO serial
+/// transport, because the browser has no Web Serial. The roster is still
+/// reachable, but the view says USB is not — which is what keeps the add
+/// slot's USB verb away. Installing a serial transport (Web Serial, or the
+/// `?emu=` shim) is exactly what turns it back on.
+#[test]
+fn a_build_without_web_serial_says_usb_is_unavailable() {
+    let board = || {
+        FakeEsp32Device::new(FakeDeviceScript::new(FakeBootState::LightPlayer(
+            FakeLightPlayerState::new().with_base_mac("a0:f2:62:87:b4:8c"),
+        )))
+    };
+    let mut controller = StudioController::new(|| 0.0);
+    controller.set_device_sim_transport(Rc::new(SimDeviceTransport::new(Rc::new(
+        ScriptedSimSource {
+            device: board(),
+            restarts: Rc::new(Cell::new(0)),
+            manifests: Rc::new(RefCell::new(Vec::new())),
+        },
+    ))));
+    controller.set_ble_transport(Rc::new(crate::BleDeviceTransport::new(Rc::new(
+        OneBleBoard {
+            device: board(),
+            device_id: "QkxFLWlk".to_string(),
+        },
+    ))));
+    assert!(
+        !controller.device_roster_view().usb_available,
+        "sims and Bluetooth, but no port to reach"
+    );
+
+    let usb_side = board();
+    let (bench, _tasks) = DeviceBench::granted(&usb_side, "usb-1");
+    assert!(
+        bench.controller.device_roster_view().usb_available,
+        "a serial transport is installed"
+    );
+}
+
 /// One Bluetooth board, always present: a fake-device link at a `ble:`
 /// endpoint, and the real `M!` io over the same fake.
 struct OneBleBoard {

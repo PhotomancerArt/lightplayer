@@ -640,6 +640,7 @@ mod tests {
             firmware_face: FirmwareFace::Unknown,
             detected_chip: None,
             mac: None,
+            firmware_blocked: None,
             escapes: vec![Escape::Forget],
         }
     }

@@ -530,6 +530,7 @@ fn powered_off_sim_fixture() -> DeviceRosterView {
     DeviceRosterView {
         access: Default::default(),
         transport_available: true,
+        usb_available: true,
         feeds: Default::default(),
         runtime_bands: [(id, UiRuntimeBand::sim("seeed/xiao-esp32-c6", Some("cpu")))]
             .into_iter()
@@ -826,6 +827,7 @@ fn roster_fixture() -> DeviceRosterView {
     DeviceRosterView {
         access: Default::default(),
         transport_available: true,
+        usb_available: true,
         feeds: Default::default(),
         runtime_bands: Default::default(),
         // The running card has earned a registry row, so it has an editor
@@ -846,6 +848,7 @@ fn roster_fixture() -> DeviceRosterView {
                     firmware_face: lpa_studio_core::DeviceFirmwareFace::Unknown,
                     detected_chip: Some("esp32c6".to_string()),
                     mac: None,
+                    firmware_blocked: None,
                     escapes: vec![DeviceEscape::Forget],
                 },
                 PendingLinkView {
@@ -860,6 +863,7 @@ fn roster_fixture() -> DeviceRosterView {
                     firmware_face: lpa_studio_core::DeviceFirmwareFace::Blank,
                     detected_chip: Some("esp32c6".to_string()),
                     mac: None,
+                    firmware_blocked: None,
                     escapes: vec![DeviceEscape::Forget],
                 },
             ],
@@ -1150,6 +1154,7 @@ fn roster_page_fixture() -> DeviceRosterView {
     DeviceRosterView {
         access: Default::default(),
         transport_available: true,
+        usb_available: true,
         feeds: Default::default(),
         runtime_bands: Default::default(),
         open_addresses: full.open_addresses,

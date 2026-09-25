@@ -599,11 +599,7 @@ pub(crate) fn DeviceRosterCard(
                     if idle && linked {
                         ActionButton {
                             key: "{\"reset-board\"}",
-                            action: match firmware_blocked.as_deref() {
-                                Some(_) => DevicesOp::action_for(DeviceAction::ResetBoard { device })
-                                    .disabled(RESET_NEEDS_USB),
-                                None => DevicesOp::action_for(DeviceAction::ResetBoard { device }),
-                            },
+                            action: reset_action(device, firmware_blocked.is_some()),
                             running: false,
                             variant: ActionButtonVariant::Quiet,
                             on_action,
@@ -858,12 +854,12 @@ pub(crate) fn PendingLinkCard(
                     // The silent-board recovery: a chip parked in ROM
                     // download-wait prints nothing, so identify can never
                     // settle — a hardware reset reboots it into honest boot
-                    // output (G1 2026-08-31, the erased C6).
+                    // output (G1 2026-08-31, the erased C6). A Bluetooth
+                    // link has no reset lines, so there it is drawn
+                    // disabled with the reason, as on the settled card.
                     ActionButton {
                         key: "{\"reset-board\"}",
-                        action: DevicesOp::action_for(DeviceAction::ResetBoard {
-                            device: pending.device,
-                        }),
+                        action: pending_reset_action(&pending),
                         running: false,
                         variant: ActionButtonVariant::Quiet,
                         on_action,
@@ -941,6 +937,24 @@ enum ZoneKind {
     Project,
     Firmware,
     Device,
+}
+
+/// Reset, as both cards draw it: the one device verb that never asks a
+/// question, drawn DISABLED with [`RESET_NEEDS_USB`] when the link cannot
+/// carry it — a Bluetooth link has no reset lines, whether it is still
+/// identifying or long settled.
+fn reset_action(device: DeviceId, over_bluetooth: bool) -> UiAction {
+    let action = DevicesOp::action_for(DeviceAction::ResetBoard { device });
+    if over_bluetooth {
+        action.disabled(RESET_NEEDS_USB)
+    } else {
+        action
+    }
+}
+
+/// The pending card's Reset (see [`reset_action`]).
+fn pending_reset_action(pending: &PendingLinkView) -> UiAction {
+    reset_action(pending.device, pending.is_over_bluetooth())
 }
 
 /// Which zone an activity narrates in — the rule that decides which bar
@@ -1411,6 +1425,53 @@ mod tests {
         // line is for a failed OUTCOME, and this board is running.
         assert_ne!(fault_line_class(), info_line_class());
         assert!(!fault_line_class().contains("status-error"));
+    }
+
+    /// A Bluetooth link has no reset lines in ANY card state: the pending
+    /// card (still identifying) and the settled card both draw Reset
+    /// disabled with the same reason, while a USB link keeps it live.
+    #[test]
+    fn reset_is_disabled_over_bluetooth_in_every_card_state() {
+        let usb_pending = PendingLinkView {
+            link: lpa_studio_core::DeviceLinkId(7),
+            device: DeviceId(107),
+            title: "New device".to_string(),
+            state_label: "New device found — identifying…".to_string(),
+            detail: None,
+            can_adopt: true,
+            firmware_face: lpa_studio_core::DeviceFirmwareFace::Unknown,
+            detected_chip: None,
+            mac: None,
+            firmware_blocked: None,
+            escapes: vec![DeviceEscape::Forget],
+        };
+        let ble_pending = PendingLinkView {
+            firmware_blocked: Some(lpa_studio_core::FIRMWARE_NEEDS_USB.to_string()),
+            ..usb_pending.clone()
+        };
+        for action in [
+            pending_reset_action(&ble_pending),
+            reset_action(DeviceId(1), true),
+        ] {
+            assert_eq!(
+                action.meta().enablement,
+                lpa_studio_core::ActionEnablement::Disabled {
+                    reason: RESET_NEEDS_USB.to_string()
+                }
+            );
+        }
+        assert!(
+            pending_reset_action(&usb_pending)
+                .meta()
+                .enablement
+                .is_enabled()
+        );
+        assert!(
+            reset_action(DeviceId(1), false)
+                .meta()
+                .enablement
+                .is_enabled()
+        );
     }
 
     /// Both readings of the project line occupy the SAME fixed row: a board

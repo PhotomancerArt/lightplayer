@@ -133,7 +133,11 @@ pub fn DevicesPage(
                         // Adding lives IN the roster, at the insertion point
                         // (the house rule: add buttons sit where the new
                         // entry will appear, never in headers).
-                        AddDeviceCard { pick_open: target_pick_open, on_action }
+                        AddDeviceCard {
+                            pick_open: target_pick_open,
+                            usb_available: devices.usb_available,
+                            on_action,
+                        }
                     }
                 }
 
@@ -197,11 +201,17 @@ pub(crate) fn AddDeviceCard(
     /// browser (`use_ble_reach`).
     #[props(default = None)]
     ble_reach: Option<BleReach>,
+    /// Whether this browser can reach a USB port (Web Serial, or the
+    /// `?emu=` shim). Where it cannot — iPhone, Bluefy, Firefox, Safari —
+    /// the USB verb is not offered: it could only fail there.
+    #[props(default = true)]
+    usb_available: bool,
     on_action: EventHandler<UiAction>,
 ) -> Element {
     let asked = use_ble_reach();
     let ble = ble_reach.unwrap_or_else(|| asked());
     let ble_note = ble.note();
+    let verbs = add_slot_verbs(usb_available, ble);
     rsx! {
         div { class: "tw:flex tw:min-h-40 tw:flex-col tw:items-center tw:justify-center tw:gap-3 tw:rounded-md tw:border tw:border-dashed tw:border-border-strong tw:bg-transparent tw:px-5 tw:py-6",
             // The invitation is transport-OPEN: connecting is the goal, and
@@ -211,19 +221,22 @@ pub(crate) fn AddDeviceCard(
             p { class: "tw:m-0 tw:max-w-56 tw:text-center tw:text-xs tw:leading-relaxed tw:text-muted-foreground",
                 "Connect a LightPlayer board to control\u{a0}it."
             }
-            ActionButton {
-                action: DevicesOp::action_for(DeviceAction::AddFromUsb),
-                running: false,
-                on_action,
+            if verbs.usb {
+                ActionButton {
+                    action: DevicesOp::action_for(DeviceAction::AddFromUsb),
+                    running: false,
+                    on_action,
+                }
             }
             // The sibling verb the line above anticipated (M5): the same
             // claim over Bluetooth. Where this browser cannot, the slot says
             // exactly why and what to do instead — never a verb that fails.
-            if ble.offers_verb() {
+            // With no USB here (Bluefy) it is the slot's primary verb.
+            if verbs.ble {
                 ActionButton {
                     action: DevicesOp::action_for(DeviceAction::AddFromBle),
                     running: false,
-                    variant: ActionButtonVariant::Outline,
+                    variant: if verbs.usb { ActionButtonVariant::Outline } else { ActionButtonVariant::Solid },
                     on_action,
                 }
             }
@@ -239,9 +252,38 @@ pub(crate) fn AddDeviceCard(
                     }
                 }
             }
+            if let Some(line) = verbs.usb_note {
+                p { class: "tw:m-0 tw:max-w-64 tw:text-center tw:text-xs tw:leading-relaxed tw:text-dim-foreground",
+                    "{line}"
+                }
+            }
             span { class: add_slot_or_class(), "or" }
             TargetPickPopover { initially_open: pick_open, on_action }
         }
+    }
+}
+
+/// What the add slot offers, decided apart from the component so it is
+/// testable: USB only where this browser can reach a port, Bluetooth only
+/// where it is ready, and a quiet line saying why USB is absent when it is.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) struct AddSlotVerbs {
+    /// "It's connected" — the USB claim.
+    pub usb: bool,
+    /// "Add over Bluetooth".
+    pub ble: bool,
+    /// Said instead of the USB verb, where there is none.
+    pub usb_note: Option<&'static str>,
+}
+
+/// The line the slot says where the USB verb would stand.
+pub(crate) const USB_UNAVAILABLE_NOTE: &str = "USB needs Chrome or Edge on a computer.";
+
+pub(crate) fn add_slot_verbs(usb_available: bool, ble: BleReach) -> AddSlotVerbs {
+    AddSlotVerbs {
+        usb: usb_available,
+        ble: ble.offers_verb(),
+        usb_note: (!usb_available).then_some(USB_UNAVAILABLE_NOTE),
     }
 }
 
@@ -549,6 +591,7 @@ mod tests {
             access: Default::default(),
             roster,
             transport_available,
+            usb_available: transport_available,
             open_addresses: Default::default(),
             feeds: Default::default(),
             runtime_bands: Default::default(),
@@ -572,6 +615,32 @@ mod tests {
             connected.meta().label,
             crate::app::home::target_pick_popover::SLOT_VERB_LABEL,
             "two offers, two verbs"
+        );
+    }
+
+    /// iPhone, Bluefy, Firefox, Safari: no Web Serial, so the USB verb is
+    /// not offered at all — Bluetooth, where ready, becomes the slot's verb,
+    /// and a quiet line says where USB works instead.
+    #[test]
+    fn without_web_serial_the_add_slot_offers_no_usb_verb() {
+        let bluefy = add_slot_verbs(false, BleReach::Ready);
+        assert!(!bluefy.usb, "no USB verb where it could only fail");
+        assert!(bluefy.ble, "the Bluetooth path stays");
+        assert_eq!(bluefy.usb_note, Some(USB_UNAVAILABLE_NOTE));
+
+        let ios_safari = add_slot_verbs(false, BleReach::Ios);
+        assert!(!ios_safari.usb);
+        assert!(!ios_safari.ble);
+        assert!(BleReach::Ios.note().unwrap().text.contains("Bluefy"));
+
+        let chrome = add_slot_verbs(true, BleReach::Ready);
+        assert_eq!(
+            chrome,
+            AddSlotVerbs {
+                usb: true,
+                ble: true,
+                usb_note: None
+            }
         );
     }
 

@@ -1437,6 +1437,38 @@ mod tests {
         );
     }
 
+    /// A Bluetooth link still identifying has no reset lines either: its
+    /// pending card carries the same reason a bound Bluetooth card does, in
+    /// every stage before the hello — attached, opened, and a settled verdict
+    /// alike — while a USB link beside it carries none.
+    #[test]
+    fn a_pending_bluetooth_link_says_it_cannot_reset_or_flash() {
+        let mut roster = Roster::new(RosterConfig::default());
+        roster.handle(Millis(0), attach(LinkId(1), "ble:QkxFLWlk"));
+        roster.handle(Millis(0), attach(LinkId(2), "usb-1"));
+        let blocked = |roster: &Roster, link: LinkId| {
+            let entry = roster
+                .pending()
+                .iter()
+                .find(|entry| entry.link == link)
+                .expect("still pending");
+            crate::view::pending_link_view(entry, Millis(10))
+        };
+        let ble = blocked(&roster, LinkId(1));
+        assert!(ble.is_over_bluetooth(), "attached, not yet open");
+        assert_eq!(
+            ble.firmware_blocked.as_deref(),
+            Some(crate::view::FIRMWARE_NEEDS_USB)
+        );
+        assert!(!blocked(&roster, LinkId(2)).is_over_bluetooth());
+
+        roster.handle(Millis(5), opened(LinkId(1), "ble:QkxFLWlk"));
+        assert!(
+            blocked(&roster, LinkId(1)).is_over_bluetooth(),
+            "opened, still identifying"
+        );
+    }
+
     fn roster_proto(roster: &Roster) -> HelloFacts {
         HelloFacts {
             proto: roster.config().expected_proto,
