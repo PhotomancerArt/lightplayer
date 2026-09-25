@@ -47,6 +47,11 @@ cargo test -p lpa-studio-web --features stories
 just studio-web-build
 ```
 
+For wasm32 alone, `cargo check -p lpa-studio-web --target
+wasm32-unknown-unknown` is the cheap stand-in for `just studio-web-build`
+(warm under a second; ~3.5 min cold). lpa-link's browser providers are
+already in `check-lint` (`check-wasm-link`).
+
 Also run `just test-studio-host` explicitly: an `lps-probe` perf flake
 can abort `just test` before it is reached
 (`docs/debt/lps-probe-perf-test-load-sensitive.md`).
@@ -88,6 +93,41 @@ can abort `just test` before it is reached
   firmware sources are not the checkout's (`docs/ci-images.md`). This does
   not close the hole (the local gate still runs no chip suite); it makes
   the CI-only check cheap to reproduce once CI has run.
+
+- 2026-09-25 — the **wasm32** hole bit again, and narrowed a second time.
+  PR #835 (learned wire dictionary) added `lpc_wire::WireChunk::Desync`;
+  it passed a full host `cargo check --workspace … --tests` and every
+  reader crate's tests, then broke Studio's `dx serve` on a
+  non-exhaustive match in `lpa-link/src/providers/browser_ble/ble_wire.rs`.
+  lpa-link's four browser providers (`browser-ble`,
+  `browser-serial-esp32`, `browser-worker`, `emulator-tab`) compile only
+  for wasm32, and CI's `studio` path gate (the only CI dx build)
+  deliberately excludes `lpc-wire`, so neither gate saw it. **Paid down**
+  with `check-wasm-link` (`cargo check -p lpa-link --target
+  wasm32-unknown-unknown --features <all four>`), wired into `check-lint`
+  beside `check-wasm-cloud`, so CI's Lint job runs it on every non-docs
+  PR. Measured on this desk (M2 Max, load 33–40): cold 58.7 s wall (143 s
+  user) in a fresh worktree, warm no-op 0.43 s, 3.6 s after touching
+  `lpc-wire`. Proved by re-creating the incident: a probe variant in
+  `WireChunk` fails `just check-wasm-link` at `ble_wire.rs:75` while host
+  `cargo check -p lpa-link --tests` stays green.
+  Considered and **not** chosen as the single check: `cargo check -p
+  lpa-studio-web --target wasm32-unknown-unknown`, which covers lpa-link
+  (it enables all four providers through lpa-studio-core) plus Studio's
+  own wasm-only code — cold 3 min 23 s (453 s user), 22 s after touching
+  `lpc-wire`. Too heavy for a Lint job already long-poled on clippy; it is
+  the recommended **workaround** in place of `just studio-web-build` for
+  Studio's own wasm halves (below). Measuring it found that
+  `lpa-studio-core/build.rs` watched the absent `catalog/templates/`, and
+  cargo treats a missing `rerun-if-changed` path as always stale: every
+  build re-ran the script and recompiled lpa-studio-core and lpa-studio-web
+  (a no-op wasm32 check took 7–11 s). Fixed in the same change — the
+  no-op is now 0.7 s, on host builds too. Residue: Studio's own wasm-only
+  code (`lpa-studio-core`'s browser sources, `lpa-studio-web`) is still
+  compiled in CI only by the `studio`-gated stories job.
+  Exit criteria re-read: **not met** — there is still no single
+  `check-studio` recipe, and the Studio wasm build still rides only the
+  stories job; this entry stays `carried`.
 
 **Exit criteria** — one recipe (`just check-studio`, or folding the four
 into `check-lint` when they are fast enough) that a Studio-touching
