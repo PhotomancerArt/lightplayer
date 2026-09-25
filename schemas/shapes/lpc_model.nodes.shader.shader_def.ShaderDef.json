@@ -274,6 +274,40 @@
             ]
           }
         }
+      },
+      {
+        "name": "coords",
+        "shape": {
+          "option": {
+            "meta": {},
+            "some": {
+              "value": {
+                "shape": {
+                  "editor": {
+                    "dropdown": {
+                      "options": [
+                        {
+                          "label": "Pixels",
+                          "value": "pixels"
+                        },
+                        {
+                          "label": "Pattern space",
+                          "value": "pattern"
+                        }
+                      ]
+                    }
+                  },
+                  "id": 791728574,
+                  "meta": {
+                    "description": "Unset = Pixels: pos arrives in render pixels. Pattern: pos arrives normalized to the lamps (long side -1..1, y up; 0..1 along a strip), with patternExtent, patternPitch and lampCount available as uniforms.",
+                    "label": "Coordinates"
+                  },
+                  "ty": "string"
+                }
+              }
+            }
+          }
+        }
       }
     ],
     "meta": {}

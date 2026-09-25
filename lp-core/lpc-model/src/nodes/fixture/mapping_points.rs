@@ -217,6 +217,44 @@ impl Iterator for MappingCenters<'_> {
     }
 }
 
+/// Visit every lamp centre of `mapping` in visit order, unclamped, telling
+/// the visitor whether it opens a new strand: `f(starts_strand, center)`.
+///
+/// A strand is one physical run of wire — a `PathPoints` path, or one
+/// span of a document-resolved mapping (a rotational `repeat` object
+/// contributes one per instance). Same visit order as [`mapping_centers`],
+/// which is what lets scope geometry (the pattern-space lamp box and
+/// consecutive-lamp pitch) be computed in one O(n), O(1)-memory pass over
+/// exactly the coordinates the sampler will stream.
+pub fn for_each_mapping_center_in_strands<'a>(
+    mapping: impl Into<MappingRef<'a>>,
+    mut f: impl FnMut(bool, [f32; 2]),
+) {
+    match mapping.into() {
+        MappingRef::Slots(MappingConfig::PathPoints { paths, .. }) => {
+            for path_spec in paths.entries.values() {
+                let PathSpec::PointList { points, .. } = path_spec.value();
+                for (offset, (_, point)) in points.entries.iter().enumerate() {
+                    f(offset == 0, point.value().0);
+                }
+            }
+        }
+        MappingRef::Slots(MappingConfig::Unset | MappingConfig::Map2d { .. }) => {}
+        MappingRef::Compact(compact) => {
+            let mut visit_index = 0usize;
+            for span in &compact.spans {
+                let end = visit_index
+                    .saturating_add(span.count as usize)
+                    .min(compact.points.len());
+                for (offset, center) in compact.points[visit_index..end].iter().enumerate() {
+                    f(offset == 0, *center);
+                }
+                visit_index = end;
+            }
+        }
+    }
+}
+
 /// Generate mapping points from either mapping representation.
 ///
 /// A thin exact-capacity wrapper over [`for_each_mapping_point`] — kept for
@@ -380,6 +418,27 @@ mod tests {
                 mapping_point_count(mapping),
                 "{name}: count"
             );
+            // The strand walker visits the same centres in the same order,
+            // and opens a strand exactly where a path / span begins.
+            let mut stranded = alloc::vec::Vec::new();
+            let mut starts = 0usize;
+            for_each_mapping_center_in_strands(mapping, |starts_strand, center| {
+                starts += usize::from(starts_strand);
+                stranded.push(center);
+            });
+            assert_eq!(
+                stranded,
+                mapping_centers(mapping).collect::<alloc::vec::Vec<_>>(),
+                "{name}: strand walk"
+            );
+            let expected_starts = match name {
+                "unset" => 0,
+                // Four paths, one of them empty.
+                "sparse slots" => 3,
+                // Two spans; the second is clamped to the two points left.
+                _ => 2,
+            };
+            assert_eq!(starts, expected_starts, "{name}: strand starts");
         }
     }
 

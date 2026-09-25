@@ -35,9 +35,9 @@ use crate::products::control::{
     ControlSpan,
 };
 use crate::products::visual::{
-    CellProjection, ConsumerPolicy, RenderTextureRequest, TextureRenderProduct, TextureSampleBatch,
-    TextureUvSamplePoint, VisualProduct, VisualSample, VisualSpace, normalized_f32_to_q16,
-    normalized_q16_to_pixel_q16, texel_center_to_uv_q16,
+    CellProjection, ConsumerPolicy, RenderTextureRequest, ScopeGeometry, TextureRenderProduct,
+    TextureSampleBatch, TextureUvSamplePoint, VisualProduct, VisualSample, VisualSpace,
+    normalized_f32_to_q16, normalized_q16_to_pixel_q16, texel_center_to_uv_q16,
 };
 use lpc_model::NodeRuntimeStatus;
 use lpc_model::nodes::fixture::{FixturePower, preset_for};
@@ -183,6 +183,12 @@ pub struct FixtureNode {
     /// 4 B/lamp list. Coordinates are regenerated transiently from the
     /// mapping when the sample-point buffer needs rewriting.
     direct_channels: Option<(Revision, DirectChannels)>,
+    /// The mapping's scope geometry (lamp box, pitch, count) in render-target
+    /// pixels, keyed on `(mapping_version, width, height)`: computed once per
+    /// mapping load in one O(n), O(1)-memory pass, and lent to the visual on
+    /// every 2D request so a pattern-space shader sees the lamps rather than
+    /// the texture. `None` inside for a mapping with no lamps.
+    scope_geometry: Option<(Revision, u32, u32, Option<ScopeGeometry>)>,
     display_layout_revision: Option<(FixtureDisplayLayoutKey, Revision)>,
     /// Current-limit scale for the NEXT frame, in Q16. Demand for a frame is
     /// only known once that frame is rendered, so the scale always trails it
@@ -237,6 +243,7 @@ impl FixtureNode {
             sample_batch: None,
             precomputed: None,
             direct_channels: None,
+            scope_geometry: None,
             display_layout_revision: None,
             power_scale_q16: power_limit::UNITY_SCALE_Q16,
             power_estimate_ma: 0,
@@ -467,6 +474,30 @@ impl FixtureNode {
                 m.entries.len()
             );
             self.precomputed = Some((width, height, mapping_ver, m.entries));
+        }
+    }
+
+    /// The mapping's scope geometry at `width` × `height`, computed once per
+    /// `(mapping_version, width, height)` — the load-time pass, deferred to
+    /// the first render that needs it so every load path (map2d document,
+    /// hand-authored `PathPoints`, def sync, asset refresh) gets it by
+    /// bumping the one version it already bumps.
+    fn scope_geometry(&mut self, width: u32, height: u32) -> Option<ScopeGeometry> {
+        let version = self.mapping_version;
+        match self.scope_geometry {
+            Some((cached_version, cached_width, cached_height, scope))
+                if cached_version == version
+                    && cached_width == width
+                    && cached_height == height =>
+            {
+                scope
+            }
+            _ => {
+                let scope =
+                    ScopeGeometry::from_mapping(self.mapping.as_mapping_ref(), width, height);
+                self.scope_geometry = Some((version, width, height, scope));
+                scope
+            }
         }
     }
 
@@ -1199,6 +1230,12 @@ impl FixtureNode {
             settings.strip_order_meaningful,
             fixture_carries_2d_coords(self.mapping.as_mapping_ref(), area_rows),
         );
+        // Scope geometry rides every 2D request; a 1D request's scope is the
+        // strip itself, which the producer derives from the lamp count.
+        let scope = match request_space {
+            VisualSpace::TwoD => self.scope_geometry(settings.width, settings.height),
+            VisualSpace::OneD => None,
+        };
         if self.sampling == FixtureSamplingConfig::Direct {
             let channels = self
                 .direct_channels
@@ -1214,6 +1251,7 @@ impl FixtureNode {
                 target,
                 settings,
                 request_space,
+                scope,
                 ctx,
                 power,
             );
@@ -1235,6 +1273,7 @@ impl FixtureNode {
                 time_seconds: ctx.time_seconds(),
                 space: VisualSpace::OneD,
                 policy: settings.consume_policy,
+                scope: None,
             };
             let texture =
                 ensure_fixture_render_target(&mut self.render_target, &texture_request, ctx)?;
@@ -1286,6 +1325,7 @@ impl FixtureNode {
             time_seconds: ctx.time_seconds(),
             space: VisualSpace::TwoD,
             policy: settings.consume_policy,
+            scope,
         };
         let texture = ensure_fixture_render_target(&mut self.render_target, &texture_request, ctx)?;
         ctx.render_texture_into(visual_product, &texture_request, texture)?;
@@ -1681,6 +1721,7 @@ fn render_direct_fixture_control(
     mut target: ControlRenderTarget<'_>,
     settings: FixtureRenderSettings,
     space: VisualSpace,
+    scope: Option<ScopeGeometry>,
     ctx: &mut ControlRenderContext<'_>,
     power: &mut PowerPass,
 ) -> Result<ControlLayout, NodeError> {
@@ -1761,6 +1802,7 @@ fn render_direct_fixture_control(
             visual_product,
             (output_width, output_height),
             space,
+            scope,
             ctx,
         )?,
         DirectChannels::Explicit(list) => stream_direct_lamps(
@@ -1774,6 +1816,7 @@ fn render_direct_fixture_control(
             visual_product,
             (output_width, output_height),
             space,
+            scope,
             ctx,
         )?,
     };
@@ -1797,6 +1840,7 @@ fn stream_direct_lamps<I: Iterator<Item = u32>>(
     visual_product: VisualProduct,
     (output_width, output_height): (u32, u32),
     space: VisualSpace,
+    scope: Option<ScopeGeometry>,
     ctx: &mut ControlRenderContext<'_>,
 ) -> Result<usize, NodeError> {
     let time_seconds = ctx.time_seconds();
@@ -1828,6 +1872,7 @@ fn stream_direct_lamps<I: Iterator<Item = u32>>(
             space,
             policy: settings.consume_policy,
             continuation: false,
+            scope,
         },
     )?;
     Ok(written_samples)
@@ -5516,6 +5561,7 @@ vec4 render_2d(vec2 pos) { return vec4(pos.x / outputSize.x, pos.y / outputSize.
                         space: VisualSpace::OneD,
                         policy: ConsumerPolicy::AUTO,
                         continuation: false,
+                        scope: None,
                     },
                     &mut ctx,
                 )
@@ -5552,6 +5598,7 @@ vec4 render_2d(vec2 pos) { return vec4(pos.x / outputSize.x, pos.y / outputSize.
             time_seconds: 0.0,
             space: VisualSpace::TwoD,
             policy: ConsumerPolicy::AUTO,
+            scope: None,
         };
         let mut texture = graphics.create_render_target(4, 4).expect("target");
         {
@@ -5602,6 +5649,7 @@ vec4 render_2d(vec2 pos) { return vec4(pos.x / outputSize.x, pos.y / outputSize.
             time_seconds: 0.0,
             space: VisualSpace::OneD,
             policy: ConsumerPolicy::AUTO,
+            scope: None,
         };
         let mut texture = graphics.create_render_target(WIDTH, 1).expect("target");
         {

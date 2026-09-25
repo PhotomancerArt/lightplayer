@@ -1,5 +1,5 @@
 {
   "_about": "Firmware-derived figures the ESP32-C6 emulator tests pin, read off THIS TREE's fw-esp32c6 image (test_support's FwImage::SHIPPED). Exact: a moved figure fails its test, naming old -> new. Re-record with `just bless-chips esp32c6` and commit the diff with the change that moved it; never hand-edit. Figures read off the pinned reference images (d6cfaa205, 735af98ae) or against silicon are NOT here (they stay literals, and a bless cannot reach them). See docs/chip-figures.md.",
   "heartbeat.total_bytes": 301536,
-  "hello.proto": 24
+  "hello.proto": 25
 }
