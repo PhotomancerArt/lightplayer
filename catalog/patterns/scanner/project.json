@@ -1,5 +1,5 @@
 {
-  "format": 10,
+  "format": 11,
   "name": "Scanner",
   "description": "A soft bar sweeping back and forth along the piece with a fading tail behind it.",
   "kind": "pattern",

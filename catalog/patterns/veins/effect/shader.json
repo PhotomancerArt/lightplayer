@@ -57,6 +57,7 @@
         "kind": "static",
         "step_seconds": 0.0,
         "fade_seconds": 0.0,
+        "pinned": -1,
         "set": [
           {
             "space": "oklab",

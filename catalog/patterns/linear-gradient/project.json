@@ -1,5 +1,5 @@
 {
-  "format": 10,
+  "format": 11,
   "name": "Linear Gradient",
   "description": "The palette laid across the piece at an angle and scrolling, mirrored so it never jumps.",
   "kind": "pattern",
