@@ -92,7 +92,9 @@ pub fn gradient_config_value(value: &LpValue) -> Option<GradientConfig> {
 /// `cycle · N palettes · every <step> s · <fade> s fade` — the Step voice
 /// the M4 P6 gate picked (plain seconds, the number the slider actually
 /// moves through) — and a frozen cycle says `held` instead of a rate it
-/// does not have.
+/// does not have. A pinned cycle says which member it is showing
+/// (`cycle · N palettes · pinned to #k`, 1-based) instead of either: while
+/// pinned, the rate is not what the palette is doing.
 #[must_use]
 pub fn format_gradient_summary(config: &GradientConfig) -> String {
     match config {
@@ -101,8 +103,15 @@ pub fn format_gradient_summary(config: &GradientConfig) -> String {
             set,
             step_seconds,
             fade_seconds,
+            pinned,
         } => {
             let count = set.len();
+            if let (Some(index), Some(_)) = (pinned, config.pinned_gradient()) {
+                return format!(
+                    "cycle \u{b7} {count} palettes \u{b7} pinned to #{}",
+                    index + 1
+                );
+            }
             if config.is_frozen() {
                 return format!("cycle \u{b7} {count} palettes \u{b7} held");
             }
@@ -121,7 +130,8 @@ pub fn format_gradient_summary(config: &GradientConfig) -> String {
 /// A held palette states its stop count (`5 stops`); a cycle states its
 /// size and step (`\u{21bb} 4 \u{b7} 4 s` — the P6 gate's Step voice,
 /// trimmed of the row's `every`), or `\u{21bb} 4 \u{b7} held` when the
-/// step is frozen. The colorspace, interpolation method, and
+/// step is frozen, or `\u{21bb} 4 \u{b7} pinned` when one member is
+/// pinned. The colorspace, interpolation method, and
 /// fade — everything [`format_gradient_summary`] says and this does not —
 /// stay one click away in the control's detail popup, because a control
 /// panel is read at a glance while it is being played.
@@ -137,6 +147,9 @@ pub fn format_gradient_chip(config: &GradientConfig) -> String {
             set, step_seconds, ..
         } => {
             let count = set.len();
+            if config.pinned_gradient().is_some() {
+                return format!("\u{21bb} {count} \u{b7} pinned");
+            }
             if config.is_frozen() {
                 return format!("\u{21bb} {count} \u{b7} held");
             }
@@ -366,6 +379,7 @@ mod tests {
             set: vec![ramp(2), ramp(3)],
             step_seconds: 20.0,
             fade_seconds: 0.5,
+            pinned: None,
         };
         assert_eq!(gradient_config_value(&cycle.to_lp_value()), Some(cycle));
         // Ordinary structs keep their generic display.
@@ -393,6 +407,7 @@ mod tests {
                     set: vec![ramp(2), ramp(3), ramp(4)],
                     step_seconds: 20.0,
                     fade_seconds: 0.5,
+                    pinned: None,
                 }
                 .to_lp_value()
             ),
@@ -405,8 +420,20 @@ mod tests {
                 set: vec![ramp(2), ramp(2)],
                 step_seconds: 0.0,
                 fade_seconds: 0.0,
+                pinned: None,
             }),
             "cycle \u{b7} 2 palettes \u{b7} held"
+        );
+        // A pinned cycle names the member it shows, not the rate it is
+        // ignoring — and a pin beats a freeze.
+        assert_eq!(
+            format_gradient_summary(&GradientConfig::Cycle {
+                set: vec![ramp(2), ramp(3), ramp(4)],
+                step_seconds: 0.0,
+                fade_seconds: 0.5,
+                pinned: Some(1),
+            }),
+            "cycle \u{b7} 3 palettes \u{b7} pinned to #2"
         );
     }
 
@@ -424,6 +451,7 @@ mod tests {
                 set: vec![ramp(2), ramp(3), ramp(4), ramp(5)],
                 step_seconds: 20.0,
                 fade_seconds: 0.5,
+                pinned: None,
             }),
             "\u{21bb} 4 \u{b7} 20 s"
         );
@@ -433,8 +461,18 @@ mod tests {
                 set: vec![ramp(2), ramp(3)],
                 step_seconds: 0.0,
                 fade_seconds: 0.0,
+                pinned: None,
             }),
             "\u{21bb} 2 \u{b7} held"
+        );
+        assert_eq!(
+            format_gradient_chip(&GradientConfig::Cycle {
+                set: vec![ramp(2), ramp(3), ramp(4), ramp(5)],
+                step_seconds: 20.0,
+                fade_seconds: 0.5,
+                pinned: Some(3),
+            }),
+            "\u{21bb} 4 \u{b7} pinned"
         );
     }
 
@@ -452,6 +490,7 @@ mod tests {
                     set: vec![ramp(2), ramp(3)],
                     step_seconds: 20.0,
                     fade_seconds: 0.5,
+                    pinned: None,
                 }
                 .to_lp_value()
             )

@@ -920,6 +920,7 @@ mod tests {
             ],
             step_seconds: 20.0,
             fade_seconds: 0.5,
+            pinned: None,
         };
         let ty = crate::gradient_config_lp_type();
         let value = config.to_lp_value();

@@ -396,6 +396,7 @@ mod tests {
             set: vec![ramp(0.2), ramp(0.7)],
             step_seconds: 20.0,
             fade_seconds: 0.5,
+            pinned: None,
         };
         let nodes = nodes_with_slots(vec![
             gradient_slot("Palette", &GradientConfig::Static(ramp(0.9))),

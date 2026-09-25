@@ -63,6 +63,7 @@
         "kind": "cycle",
         "step_seconds": 16.0,
         "fade_seconds": 4.0,
+        "pinned": -1,
         "set": [
           {
             "space": "srgb",

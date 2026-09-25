@@ -31,3 +31,12 @@ stride/offset numbers, so the value side follows automatically.
 
 **Trigger to revisit.** GPU preview tier becoming a default surface, or the
 first buffer-consuming visual shader that must run on wgpu.
+
+**Incident log**
+- 2026-09-24 — shipped content is already in the gap: the example-shader
+  compile gate's first run found `projects/test/events/shader.glsl`
+  (`uniform ControlMessage events[8]`) and `projects/test/button/shader.glsl`
+  (`held[1]`) — an 8-byte scalar-only struct — refused on `wgpu.f32` while
+  every CPU target compiles them. Filed as
+  [gpu-tier-refuses-the-control-message-array-idiom](../defects/2026-09-24-gpu-tier-refuses-the-control-message-array-idiom.md);
+  both pairs sit in the gate's `ALLOWED_FAILURES` until the tier-side fix.
