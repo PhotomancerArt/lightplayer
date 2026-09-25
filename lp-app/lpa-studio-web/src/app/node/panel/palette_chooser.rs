@@ -615,12 +615,14 @@ fn CycleMemberChip(
 }
 
 /// A member chip's pin. Unpinned it is as quiet as the ✎ beside it; pinned
-/// it is solid, so the one palette showing can be found at a glance.
+/// it is a FILLED chip — the icon knocked out of a strong-foreground square —
+/// so the one palette showing can be found at a glance (the visual gate
+/// found a brighter outline alone too subtle).
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 fn PinMemberButton(name: String, pinned: bool, on_pin: EventHandler<()>) -> Element {
     let tone = if pinned {
-        "tw:text-strong-foreground"
+        "tw:rounded-xs tw:bg-strong-foreground tw:text-page"
     } else {
         "tw:text-subtle-foreground tw:hover:text-strong-foreground"
     };
