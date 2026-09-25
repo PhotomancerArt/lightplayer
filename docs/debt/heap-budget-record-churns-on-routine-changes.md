@@ -62,6 +62,28 @@ long-lived branch conflict on this file whenever main re-baselined too.
   the PR), and re-baselines of different chips/projects touch disjoint
   files. The workarounds above describe the one-file record and no longer
   apply.
+- 2026-09-24 — while #798 was open, main re-baselined the one-file record
+  five more times, and #798 conflicted on it (modify/delete) when it merged
+  main. The churn this entry describes, in one day:
+  - #805 (`e92197125`): the S3 IN-endpoint gate added statics; S3
+    `stackTotal` 37,296 → 37,272, heap figures identical.
+  - #804 (`14b358121`): lean-wire follow-ups; engine `retained`/`alloc_bytes`
+    +128 B on all three projects' `project-load` (a real budget move), and
+    every `largest_free_at_close` −128 B beside it.
+  - #804 (`aeabfe8b6`): a 16 B statics move shifted all three chips' stack —
+    C6 71,152 → 71,136, classic 45,360 → 45,344, S3 37,296 → 37,280 — plus
+    the emulator tests that pin those numbers.
+  - #810 (`f1bed47e6`): BLE on the C6 + the heap cut; C6 `totalBytes`
+    325,536 → 301,536, `stackTotal` 71,136 → 62,664, high-water band
+    11,100..12,200 → 12,400..13,500 (a real budget move).
+  - #805 (`c2239e8e0`, its merge of main): both S3 moves together → S3
+    `stackTotal` 37,256, and `boot_idle.rs`'s pin with it.
+  Resolved in #798's merge by deleting the monolith and regenerating the
+  split files that moved with `just heap-budget-baseline` /
+  `heap-budget-baseline-chips` — no numbers hand-carried. Four of those
+  five moves were `stackTotal`-only, which the split record no longer
+  stores: the classic's and the S3's files needed no edit at all, which is
+  the exit criterion met on real traffic.
 
 **Exit criteria** — a PR whose only memory effect is a few bytes of statics
 passes the gate without touching the record, and two PRs that each
