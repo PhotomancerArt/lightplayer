@@ -132,16 +132,68 @@ the C6. A model change is follow-up work, not part of this fix. Capture:
 `g1c-gated-packed-75.bin` in the plan directory.
 
 **What is not known yet.**
-- Whether the gate makes the packed loss go away on silicon. The test is the
-  G1 capture repeated on a gated image: three lens pauses, ~1,400 frames,
-  `lp-cli wire unpack --sizes`.
+- ~~Whether the gate makes the packed loss go away on silicon.~~ It does:
+  0 of 1,327 (above, 2026-09-25).
 - Whether anything else on the packed write path (the in-place frame build
   in `FRAME_BUF`, the chunking of `\n` + frame) also contributes.
+- Why JSON lost nothing. See the fidelity section: the emulator's candidate
+  mechanism tears JSON lines too.
 
-**Why the emulator misses it.** The link model delivers every byte a write
-commits, and drops a byte only in the one committed-FIFO case the S3 defect
-names. It has no path that produces a short frame at this rate. Per the
-emulator-first rule, the fix starts in the model once the mechanism is known.
+**Fidelity: what the emulator now reproduces, and what it does not
+(2026-09-25, PR #832).** The link model raised `serial_in_empty` and returned
+`serial_in_ep_data_free` at the same cycle. With one writer, that made this
+loss impossible, gate or no gate. The missing timing condition is **the gap
+between esp-hal's write and the gate's check**. After a drain, esp-hal's
+`write_async` writes a frame's next 64-byte packet straight out of its wake,
+with no check. The gate reads `serial_in_ep_data_free` a little later on its
+own path and writes nothing until the buffer is free. The model measures both
+paths now (`InWakeStats`). On the C6 image in steady state (`lp-emu:esp32c6:t1`,
+emulated time, cycles at one per instruction), the soonest esp-hal write comes
+**1,877 cycles** after a drain and the gate's soonest check at **1,903**.
+
+The model grew a switch for the gap: the *free lag*, a hypothesis and off by
+default (`--usb-in-free-lag <ns>`, control verb `free-lag <ns>`). The drain
+raises `serial_in_empty` as always, and the buffer stays unwritable for the
+lag. A lag between the two paths reproduces the symptom:
+
+| image (lag set between the two paths) | packed Hellos | bytes lost |
+|---|---|---|
+| without the gate (`fixture-no-in-endpoint-gate`, the pre-#795 write path) | 40 of 40 damaged | **6 each**: the first 3 bytes of each later packet, nothing logged |
+| shipped, with the gate | 40 of 40 whole | 0 |
+| either, lag 0 (the default) | 40 of 40 whole | 0 |
+
+`lp-cli/tests/emu_usb_free_lag.rs` in `just test-emu-c6` asserts the order of
+the two paths and picks the lag from the measurements, so a firmware change
+that moves either path moves the lag with it.
+
+What this does **not** establish:
+
+- **That silicon has such a lag.** No document says so, and nothing measured
+  one. It is the only single-writer path found to the symptom's shape: a
+  short frame, a few bytes, silent. ESP-IDF's own ISR re-checks that the FIFO
+  is writable after `SERIAL_IN_EMPTY` instead of trusting the edge, which is
+  suggestive and no more.
+- **Partial or whole-packet loss.** The model drops each byte written while
+  the buffer is not free and keeps the rest, so a write that outlasts the lag
+  loses only its head. TRM §30.3.2 says only that the buffer is "unavailable
+  for firmware to write into". What silicon does with such bytes is undocumented.
+  The ~5 bytes on the desk fit a partial loss, but the gap could not be
+  located inside the torn frame: 277 of its 1,597 offsets are consistent
+  with the COBS walk. So a whole loss of some other short write is not
+  excluded.
+- **Why JSON lost nothing.** esp-hal's wake-to-write path does not depend on
+  the encoding. In the emulator, at an 11 µs lag, the boot hello (a JSON
+  line) lost 10 bytes at the head of each later packet. So on this model,
+  JSON should have lost bytes on the desk too, and it lost none in 1,270
+  lines. Either the lag is rarer than packed traffic's rate can show against
+  JSON's (~1 in 40 by chance, above), or the mechanism is something else.
+- **A lag past the gate's check.** With no second edge, the gate then waits
+  for an edge that never comes, until the 250 ms chunk timeout: from 12 µs
+  the gated image stalls on every packet. The gated desk run had zero
+  timeouts, so silicon's lag, if it exists, almost never outlasts the check.
+
+The grade stays `modeled`, and the lag stays off everywhere but that one
+test. A transcript that shows it is what would change either.
 
 **Evidence.** `~/.photomancer/planning/lp2025/2026-09-23-1701-lp-json-pack/g1-{150,75,33}.bin`
 (raw captures), with `.txt`/`.sizes` from `lp-cli wire unpack --sizes`.
