@@ -470,6 +470,15 @@ impl LpServer {
         self.access.tier(link, &*self.base_fs)
     }
 
+    /// Whether `link`'s own `LoginBegin` challenge is outstanding (see
+    /// `AccessState::login_pending`). A radio edge keeps an unauthenticated
+    /// link open past its login deadline while this holds, so a person
+    /// typing a device password is not cut off; the challenge's own expiry
+    /// (`lpc_access::CHALLENGE_TTL_MS`) bounds it.
+    pub fn login_pending(&self, link: Link) -> bool {
+        self.access.login_pending(link.id)
+    }
+
     /// Install the embedder's random-byte source for login challenges. Unset
     /// (the default) = `LoginBegin` is refused: a challenge must never be
     /// predictable. The firmware wires its hardware RNG; hosts that serve
