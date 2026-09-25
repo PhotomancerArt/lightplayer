@@ -916,17 +916,16 @@ mod tests {
         )
         .expect("create accepted");
 
-        assert!(
-            outcome
-                .changes
-                .defs
-                .added
-                .contains(&root_def("/active.json"))
-        );
+        // A new playlist entry is dormant (only the idle entry is resident by
+        // default), so create alone derives nothing for it; loading it
+        // discovers the child def.
         let child_use = NodeUseLocation::root()
             .child(SlotPath::parse("nodes[playlist]").unwrap())
             .child(SlotPath::parse("entries[2].node").unwrap());
-        assert!(outcome.changes.uses.added.contains(&child_use));
+        assert!(!outcome.changes.uses.added.contains(&child_use));
+        let loaded = make_resident(&fs, &mut registry, &shapes, 2);
+        assert!(loaded.defs.added.contains(&root_def("/active.json")));
+        assert!(loaded.uses.added.contains(&child_use));
 
         // The playlist base file was rewritten with the new entry while the
         // existing entry survived.
@@ -1290,6 +1289,9 @@ mod tests {
     fn remove_playlist_entry_removes_whole_entry_and_leaves_siblings() {
         let shapes = SlotShapeRegistry::default();
         let (fs, mut registry) = playlist_two_entry_project(&shapes);
+        // Removal stages deletes for what leaves the inventory, so the entry
+        // must be loaded for its files to be found.
+        make_resident(&fs, &mut registry, &shapes, 2);
         let site = NodeAttachSite::Slot {
             artifact: ArtifactLocation::file("/playlist.json"),
             path: SlotPath::parse("entries[2].node").unwrap(),
@@ -1401,6 +1403,9 @@ mod tests {
     fn remove_container_sweeps_descendant_pending_edits() {
         let shapes = SlotShapeRegistry::default();
         let (fs, mut registry) = playlist_two_entry_project(&shapes);
+        // Removal stages deletes for what leaves the inventory, so every
+        // entry must be loaded for its files to be found.
+        make_resident(&fs, &mut registry, &shapes, 2);
         // Pending edit on a child of the playlist, not on the playlist
         // itself: the container removal must sweep the descendant too.
         registry
@@ -1773,6 +1778,27 @@ mod tests {
             )
             .expect("load project root");
         registry
+    }
+
+    /// Load entry `entry` of the `nodes[playlist]` playlist (fixtures here
+    /// have one playlist; only its idle entry is resident at load).
+    fn make_resident(
+        fs: &LpFsMemory,
+        registry: &mut ProjectRegistry,
+        shapes: &SlotShapeRegistry,
+        entry: u32,
+    ) -> lpc_model::ProjectChangeSummary {
+        let playlist = NodeUseLocation::root().child(SlotPath::parse("nodes[playlist]").unwrap());
+        registry
+            .set_entry_resident(
+                fs,
+                &playlist,
+                entry,
+                true,
+                Revision::new(2),
+                &ParseCtx { shapes },
+            )
+            .expect("entry becomes resident")
     }
 
     fn project_nodes(key: &str) -> NodeAttachSite {

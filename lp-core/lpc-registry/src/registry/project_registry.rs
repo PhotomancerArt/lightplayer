@@ -20,17 +20,20 @@ use crate::overlay::inventory_change_summary::change_summary_between;
 use crate::overlay::project_inventory_derivation::derive_effective_inventory;
 use crate::registry::base_value_display;
 use crate::{
-    ArtifactStore, CommitError, LoadResult, ParseCtx, RegistryError,
+    ArtifactStore, CommitError, EntryResidency, LoadResult, ParseCtx, RegistryError,
     asset::{AssetBytes, AssetReadError, AssetText},
     overlay::{EditApplyError, serialize_slot_draft, synthesize_move_edits},
 };
 
 /// Canonical registry for a loaded project.
 pub struct ProjectRegistry {
-    artifacts: ArtifactStore,
-    overlay: WithRevision<ProjectOverlay>,
-    inventory: ProjectInventory,
+    pub(super) artifacts: ArtifactStore,
+    pub(super) overlay: WithRevision<ProjectOverlay>,
+    pub(super) inventory: ProjectInventory,
     root: Option<NodeDefLocation>,
+    /// Which playlist entries derivation walks (see
+    /// [`crate::registry::entry_residency`]).
+    pub(super) residency: EntryResidency,
 }
 
 impl ProjectRegistry {
@@ -47,6 +50,7 @@ impl ProjectRegistry {
             overlay: WithRevision::new(Revision::default(), ProjectOverlay::new()),
             inventory: ProjectInventory::new(),
             root: None,
+            residency: EntryResidency::new(),
         }
     }
 
@@ -763,7 +767,24 @@ impl ProjectRegistry {
         }
     }
 
+    /// Re-derive the effective inventory and drop what the previous one held
+    /// that the new one does not (see [`Self::release_left_behind`]).
+    ///
+    /// `self.inventory` must still be the previous inventory when this runs;
+    /// every caller assigns the result afterwards.
     pub(crate) fn derive_inventory(
+        &mut self,
+        fs: &dyn LpFs,
+        frame: Revision,
+        ctx: &ParseCtx<'_>,
+    ) -> ProjectInventory {
+        let after = self.derive_inventory_unreleased(fs, frame, ctx);
+        self.release_left_behind(&after);
+        after
+    }
+
+    /// Derivation alone: registers what it walks, releases nothing.
+    pub(super) fn derive_inventory_unreleased(
         &mut self,
         fs: &dyn LpFs,
         frame: Revision,
@@ -773,10 +794,35 @@ impl ProjectRegistry {
             &mut self.artifacts,
             self.root.as_ref(),
             &self.overlay,
+            &self.residency,
             fs,
             frame,
             ctx,
         )
+    }
+
+    /// Drop registry state the previous inventory held and `after` does not.
+    ///
+    /// - Artifact-store locations that backed a def or asset in the previous
+    ///   inventory and back nothing in `after` are unregistered, unless an
+    ///   overlay entry still covers them (a staged delete or body replace
+    ///   must stay committable). Without this, a playlist entry going dormant
+    ///   would leave its locations behind forever (AC1).
+    /// - Residency sets for playlists whose use left the tree are dropped, so
+    ///   a playlist that comes back starts from its default.
+    pub(super) fn release_left_behind(&mut self, after: &ProjectInventory) {
+        let kept = inventory_artifacts(after);
+        for location in inventory_artifacts(&self.inventory) {
+            if kept.contains(&location) || self.overlay.get().contains_artifact(&location) {
+                continue;
+            }
+            // Registered by the derivation that produced the previous
+            // inventory; an absent entry only means another path already
+            // released it.
+            let _ = self.artifacts.unregister(&location);
+        }
+        self.residency
+            .retain_playlists(|playlist| after.tree.nodes.contains_key(playlist));
     }
 
     /// Validate one command against the effective inventory before it
@@ -1329,6 +1375,13 @@ impl ProjectRegistry {
         crate::overlay::parse_def_bytes(&bytes, ctx).ok()
     }
 
+    /// The effective def entry a mutation targets.
+    ///
+    /// An artifact of a dormant playlist entry is not in the inventory; that
+    /// rejection names the entry instead of a bare unknown artifact, because
+    /// the fix is to load the entry first (vision D11: you have to load to
+    /// edit). The reason stays [`MutationRejectionReason::UnknownArtifact`]
+    /// so the wire enum is unchanged.
     fn def_entry_for_mutation(
         &self,
         artifact: &ArtifactLocation,
@@ -1337,10 +1390,11 @@ impl ProjectRegistry {
             .defs
             .get(&NodeDefLocation::artifact_root(artifact.clone()))
             .ok_or_else(|| {
-                MutationRejection::new(
-                    MutationRejectionReason::UnknownArtifact,
-                    format!("unknown artifact {}", artifact.file_path()),
-                )
+                let message = match self.dormant_entry_owning(artifact) {
+                    Some(dormant) => dormant.not_loaded_message(),
+                    None => format!("unknown artifact {}", artifact.file_path()),
+                };
+                MutationRejection::new(MutationRejectionReason::UnknownArtifact, message)
             })
     }
 
@@ -1599,6 +1653,22 @@ fn is_strictly_under(ancestor: &SlotPath, descendant: &SlotPath) -> bool {
     let ancestor = ancestor.segments();
     let descendant = descendant.segments();
     ancestor.len() < descendant.len() && descendant.starts_with(ancestor)
+}
+
+/// Every artifact location backing a def or asset row of `inventory`.
+fn inventory_artifacts(inventory: &ProjectInventory) -> Vec<ArtifactLocation> {
+    let mut locations: Vec<ArtifactLocation> = inventory
+        .defs
+        .keys()
+        .map(|location| location.artifact.clone())
+        .collect();
+    for source in inventory.assets.keys() {
+        let lpc_model::AssetLocation::Artifact { location } = source;
+        if !locations.contains(location) {
+            locations.push(location.clone());
+        }
+    }
+    locations
 }
 
 impl Default for ProjectRegistry {
