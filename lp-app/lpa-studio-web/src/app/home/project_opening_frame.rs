@@ -651,6 +651,7 @@ fn DeviceOpenExits(state: OpeningState, on_action: Option<EventHandler<UiAction>
                 on_action.call(then);
             }
         }
+        crate::route_recording::note_route_reason("open-cancelled");
         crate::router::navigate_push(&StudioRoute::Devices);
     };
     rsx! {

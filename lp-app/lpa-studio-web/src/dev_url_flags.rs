@@ -9,7 +9,7 @@
 //! | `?wire-capture=1` | tee every raw byte the Web Serial read pump hands to Rust into a 16 MiB in-memory buffer; `lpWireCapture()` in the console downloads it as `wire-capture-<unix-ms>.bin` (`lpa_link::device_link::wire_capture`) |
 //! | `?device-log=<level>` | once per link, after the board's hello and the packed-reply opt-in, ask it for `trace`/`debug`/`info`/`warn`/`error` logging (`SetLogLevel`) |
 //!
-//! Validated the way `?capture-sink=` is (`device_events_io.rs`): a query is
+//! Validated the way `?record=` is (`device_events_io.rs`): a query is
 //! user input, a value that does not parse reads as no flag, and the page
 //! says so once in the console. Both are documented beside `?emu=` in
 //! `AGENTS.md` ("Studio against an emulated board").

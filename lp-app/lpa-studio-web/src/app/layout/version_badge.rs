@@ -425,7 +425,7 @@ const POPUP_CLASS: &str = "tw:grid tw:w-[min(320px,calc(100vw-24px))] tw:overflo
 
 /// Fetch and deserialize same-origin static JSON. Any failure (404 in dev,
 /// network error, parse error) resolves to `None` — the caller degrades.
-async fn fetch_json<T: serde::de::DeserializeOwned>(path: &str) -> Option<T> {
+pub(crate) async fn fetch_json<T: serde::de::DeserializeOwned>(path: &str) -> Option<T> {
     let response = gloo_net::http::Request::get(path).send().await.ok()?;
     if !response.ok() {
         return None;

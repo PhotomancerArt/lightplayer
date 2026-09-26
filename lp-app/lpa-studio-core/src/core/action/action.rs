@@ -48,6 +48,12 @@ impl UiAction {
         &self.meta
     }
 
+    /// Format the operation alone (not the render metadata) with `Debug` —
+    /// the session recorder's view of what was asked for.
+    pub fn fmt_op(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        core::fmt::Debug::fmt(&self.op, f)
+    }
+
     /// Return the sync-engine scheduling class for this action's operation.
     ///
     /// Delegates to the operation's [`ControllerOp::action_class`], so the class

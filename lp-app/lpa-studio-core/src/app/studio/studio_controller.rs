@@ -1575,6 +1575,14 @@ impl StudioController {
         self.device_events.borrow().to_jsonl()
     }
 
+    /// A recording handle onto the device event log, stamped by this
+    /// controller's clock — for producers outside the controller: the
+    /// actor's command feed and action outcomes, the open-stage observer,
+    /// and the web edge's route and toast records.
+    pub fn device_event_recorder(&self) -> crate::DeviceEventRecorder {
+        crate::DeviceEventRecorder::new(Rc::clone(&self.device_events), Rc::clone(&self.now_secs))
+    }
+
     /// Read access to the device event log (tests, diagnostics).
     pub fn device_events(&self) -> std::cell::Ref<'_, DeviceEventLog> {
         self.device_events.borrow()
@@ -2289,9 +2297,34 @@ impl StudioController {
     /// stamped entry.
     pub fn push_log(&mut self, draft: UiLogDraft) {
         let entry = draft.stamp((self.now_secs)());
+        self.record_log_error(&entry);
         self.notify_entry(&entry);
         self.logs.push(entry);
         self.mark_dirty();
+    }
+
+    /// Mirror a warn- or error-level Studio log entry into the device
+    /// event log as an `error` record (the session recorder), at the
+    /// entry's own stamp. Device console lines do not come through here —
+    /// they are the board's words, not Studio's.
+    fn record_log_error(&self, entry: &UiLogEntry) {
+        if entry.level < UiLogLevel::Warn {
+            return;
+        }
+        let source = match &entry.source.detail {
+            Some(detail) => format!("{}:{detail}", entry.source.origin.label()),
+            None => entry.source.origin.label().to_string(),
+        };
+        self.device_events.borrow_mut().record(DeviceEventRecord {
+            t: entry.timestamp,
+            session: None,
+            endpoint: None,
+            kind: DeviceEventKind::Error {
+                level: entry.level.label().to_string(),
+                source,
+                message: entry.message.clone(),
+            },
+        });
     }
 
     /// Stamp a batch of one SESSION's drained lines into that session's
@@ -2333,6 +2366,7 @@ impl StudioController {
         let timestamp = (self.now_secs)();
         for draft in drafts {
             let entry = draft.stamp(timestamp);
+            self.record_log_error(&entry);
             self.notify_entry(&entry);
             self.logs.push(entry);
         }
@@ -7222,6 +7256,32 @@ mod tests {
         assert_eq!(logs[0].timestamp, 101.0);
         assert_eq!(logs[1].timestamp, 102.0);
         assert_eq!(logs[1].source.detail.as_deref(), Some("browser-serial"));
+    }
+
+    #[test]
+    fn warn_and_error_logs_are_mirrored_as_error_records_at_their_own_stamp() {
+        let mut studio = StudioController::new(|| 9.0);
+        studio.push_log(UiLogDraft::new(
+            UiLogLevel::Info,
+            UiLogOrigin::Studio,
+            "quiet",
+        ));
+        studio.push_log(UiLogDraft::new(
+            UiLogLevel::Error,
+            crate::UiLogSource::with_detail(UiLogOrigin::Link, "browser-serial"),
+            "port lost",
+        ));
+        let records: Vec<_> = studio.device_events().iter().cloned().collect();
+        assert_eq!(records.len(), 1, "info stays out of the event log");
+        assert_eq!(records[0].t, 9.0);
+        assert_eq!(
+            records[0].kind,
+            DeviceEventKind::Error {
+                level: "error".to_string(),
+                source: "link:browser-serial".to_string(),
+                message: "port lost".to_string(),
+            }
+        );
     }
 
     #[test]

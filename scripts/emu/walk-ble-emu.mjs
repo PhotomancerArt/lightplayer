@@ -99,7 +99,7 @@ async function main() {
   });
   const url =
     studioUrlFor({ studioPort: port, doorAddr: door.addr, sinkUrl: "http://127.0.0.1:9/none" }).replace(
-      /&capture-sink=[^&]*/,
+      /&record=[^&]*/,
       "",
     ) + "&ble=emu";
 

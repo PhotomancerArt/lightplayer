@@ -49,6 +49,9 @@ pub fn next_borrowed_wire_request_id_base() -> u64 {
     NEXT_BORROWED_WIRE_BASE.fetch_add(BORROWED_WIRE_ID_STRIDE, Ordering::Relaxed)
 }
 
+/// The next [`ProtocolSession::conversation`] number, process-wide.
+static NEXT_CONVERSATION: AtomicU64 = AtomicU64::new(1);
+
 /// How many abandoned request ids the session remembers for stale-response
 /// classification. Late frames of an abandoned request arrive during the
 /// request(s) immediately following it (the transport is ordered), so only
@@ -72,6 +75,10 @@ pub struct ProtocolSession {
     /// correct-by-design discards and classify as
     /// [`ResponseDisposition::StaleAbandoned`], not `Uncorrelated`.
     abandoned_request_ids: Vec<u64>,
+    /// This session's number among every session the process made — how
+    /// an observer tells two clients' request `1`s apart (see
+    /// [`crate::client_observer`]).
+    conversation: u64,
 }
 
 impl ProtocolSession {
@@ -90,7 +97,13 @@ impl ProtocolSession {
             next_request_id: first_request_id,
             first_request_id,
             abandoned_request_ids: Vec::new(),
+            conversation: NEXT_CONVERSATION.fetch_add(1, Ordering::Relaxed),
         }
+    }
+
+    /// This session's process-unique number (never 0), for observers.
+    pub fn conversation(&self) -> u64 {
+        self.conversation
     }
 
     pub fn next_request_id(&mut self) -> u64 {

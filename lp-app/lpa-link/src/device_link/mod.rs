@@ -22,6 +22,7 @@
 //! | [`demux`] | whole serial lines → `LinkEvent`s (the `M!` demux) |
 //! | [`wire_reader`] | one port's bytes → lines and messages, and the packed-reply opt-in |
 //! | [`wire_capture`] | dev-only: a capped tee of every raw byte the browser port reads |
+//! | [`wire_tap`] | the session recorder's tap on every raw byte chunk a browser transport writes or reads |
 //! | `byte_stream` | the sync `DeviceByteStream` seam → `Link` (host) |
 //! | `fake` | the scripted `FakeEsp32Device` → `Link` (host tests) |
 //! | `browser_serial` | the Web Serial provider → `Link` (wasm) |
@@ -38,6 +39,7 @@ pub mod demux;
 pub mod wire;
 pub mod wire_capture;
 pub mod wire_reader;
+pub mod wire_tap;
 
 #[cfg(any(
     feature = "host-process",

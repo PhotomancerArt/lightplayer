@@ -8,11 +8,22 @@
 //! policy (what a reset means, when a write is applied, which drainer gets
 //! the bytes) lives in the JS beside it, where the awaits are.
 
+use std::cell::RefCell;
+use std::collections::HashMap;
+
 use js_sys::{Promise, Uint8Array};
 use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::JsFuture;
 
 use crate::LinkError;
+use crate::device_link::wire_tap::{WireTapDir, tap_wire};
+
+thread_local! {
+    /// Per port: how many bytes at the front of the next drain were handed
+    /// back by [`EmulatorTabPort::return_bytes`] — already tapped once, so
+    /// the recorder's tap skips them the second time round.
+    static RETURNED: RefCell<HashMap<u32, usize>> = RefCell::new(HashMap::new());
+}
 
 #[wasm_bindgen(module = "/src/providers/emulator_tab/emulator_tab_bridge.js")]
 extern "C" {
@@ -150,6 +161,7 @@ impl EmulatorTabPort {
 
     /// Queue bytes for the board.
     pub fn write(&self, bytes: &[u8]) -> Result<(), LinkError> {
+        tap_wire(WireTapDir::Tx, "emu-tab", self.id, bytes);
         js_write(self.id, bytes).map_err(js_error)
     }
 
@@ -160,13 +172,33 @@ impl EmulatorTabPort {
 
     /// Everything the board has said since the last drain.
     pub fn take_bytes(&self) -> Result<Vec<u8>, LinkError> {
-        Ok(js_take_bytes(self.id).map_err(js_error)?.to_vec())
+        let bytes = js_take_bytes(self.id).map_err(js_error)?.to_vec();
+        let seen = RETURNED.with(|returned| {
+            let mut returned = returned.borrow_mut();
+            let Some(pending) = returned.get_mut(&self.id) else {
+                return 0;
+            };
+            let seen = (*pending).min(bytes.len());
+            *pending -= seen;
+            if *pending == 0 {
+                returned.remove(&self.id);
+            }
+            seen
+        });
+        tap_wire(WireTapDir::Rx, "emu-tab", self.id, &bytes[seen..]);
+        Ok(bytes)
     }
 
     /// Put bytes back at the front of the buffer, for the next drainer: the
     /// unfinished tail of what [`Self::take_bytes`] handed out.
     pub fn return_bytes(&self, bytes: &[u8]) -> Result<(), LinkError> {
-        js_return_bytes(self.id, bytes).map_err(js_error)
+        js_return_bytes(self.id, bytes).map_err(js_error)?;
+        if !bytes.is_empty() {
+            RETURNED.with(|returned| {
+                *returned.borrow_mut().entry(self.id).or_insert(0) += bytes.len();
+            });
+        }
+        Ok(())
     }
 
     /// The first failure the queued work hit since the last ask.
