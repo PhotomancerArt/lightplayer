@@ -1,8 +1,8 @@
 //! The committed traffic sample, for tests: recorded Studio ↔ PLAYFUL choker
 //! wire lines on the emulated C6 (provenance in the fixture's README).
 //!
-//! The same file ranks the wire dictionary (`wire_dictionary_gen`) and drives
-//! `lp-json-pack`'s codec tests, so there is one sample of real traffic.
+//! The same file drives `lp-json-pack`'s codec tests, so there is one sample
+//! of real traffic.
 
 /// The sample: one `<dir> M!{json}` line each, `<` board→host, `>` host→board.
 pub(crate) const TRAFFIC: &str =

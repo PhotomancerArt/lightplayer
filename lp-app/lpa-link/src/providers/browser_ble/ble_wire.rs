@@ -76,9 +76,10 @@ impl BleWire {
                 WireChunk::Line(line) => lines.push(line),
                 WireChunk::Frame(frame) => lines.push(frame.to_line()),
                 // This link never asks for packed replies, so a frame that
-                // fails to decode is line noise, not a message: drop it, as a
+                // fails to decode (or names a table this reader never
+                // learned) is line noise, not a message: drop it, as a
                 // garbled JSON line is dropped when it fails to parse.
-                WireChunk::Error(_) => {}
+                WireChunk::Error(_) | WireChunk::Desync(_) => {}
             }
         }
         Ok(lines)

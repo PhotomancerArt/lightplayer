@@ -14,9 +14,11 @@
 //! back as [`WireRead::Send`] for the caller to write.
 //!
 //! It also says, once per change, what the link's encoding is and why
-//! ([`WireRead::Note`]) — a board that stays on JSON because its dictionary
+//! ([`WireRead::Note`]) — a board that stays on JSON because its pack format
 //! is not this build's is otherwise invisible, since every reader decodes
-//! both forms.
+//! both forms. And when the stream's learned table loses step with the
+//! board's (a packed frame lost in flight), it drops frames until the board
+//! resets, asks for that reset through the opt-in, and says so once.
 //!
 //! One dev-only rider ([`WireReader::with_device_log_level`], Studio's
 //! `?device-log=<level>`): once the board has said hello and the opt-in is
@@ -28,9 +30,9 @@ use std::cell::Cell;
 
 use lpc_wire::server::api::LogLevel;
 use lpc_wire::{
-    ClientMessage, ClientRequest, PACK_OPT_IN_REQUEST_ID, PackOptIn, ServerMsgBody,
-    WIRE_DICTIONARY_FINGERPRINT, WIRE_PROTO_VERSION, WIRE_STREAM_MAX_FRAME, WireChunk,
-    WireEncoding, WireServerMessage, WireStream,
+    ClientMessage, ClientRequest, PACK_FORMAT_VERSION, PACK_OPT_IN_REQUEST_ID, PackOptIn,
+    ServerMsgBody, WIRE_PROTO_VERSION, WIRE_STREAM_MAX_FRAME, WireChunk, WireEncoding,
+    WireServerMessage, WireStream,
 };
 
 thread_local! {
@@ -128,6 +130,11 @@ pub struct WireReader {
     fallback_noted: bool,
     /// Packed frames since the link last (re)opened, for the notes.
     packed_frames: u64,
+    /// Packed frames dropped since the link last (re)opened because the
+    /// learned table was out of step.
+    desynced_frames: u64,
+    /// Whether the current out-of-step episode has been noted (once each).
+    desync_noted: bool,
     /// The dev log level to ask for, once per link (`None`: never ask).
     device_log: Option<LogLevel>,
     /// Where the dev log-level request stands on this link.
@@ -157,6 +164,8 @@ impl WireReader {
             told: Told::Nothing,
             fallback_noted: false,
             packed_frames: 0,
+            desynced_frames: 0,
+            desync_noted: false,
             device_log: None,
             device_log_step: DeviceLogStep::WaitingForHello,
         }
@@ -175,6 +184,12 @@ impl WireReader {
         self.opt_in.encoding()
     }
 
+    /// Packed frames dropped on this link because the learned table was out
+    /// of step with the board's.
+    pub fn desynced_frames(&self) -> u64 {
+        self.desynced_frames
+    }
+
     /// Feed bytes as they arrive (any split) at `now_ms`, calling `on` for
     /// everything they complete, in stream order.
     pub fn push(&mut self, bytes: &[u8], now_ms: u64, mut on: impl FnMut(WireRead)) {
@@ -185,14 +200,37 @@ impl WireReader {
             told,
             fallback_noted,
             packed_frames,
+            desynced_frames,
+            desync_noted,
             device_log,
             device_log_step,
         } = self;
         stream.push(bytes, |chunk| match chunk {
             WireChunk::Line(line) => on(WireRead::Line(line)),
             WireChunk::Error(error) => on(WireRead::Error(error)),
+            WireChunk::Desync(dropped) => {
+                *desynced_frames += 1;
+                if !*desync_noted {
+                    *desync_noted = true;
+                    on(WireRead::Note(format!(
+                        "wire: packed reply dropped ({} B) — {}; asking the board to reset its \
+                         table",
+                        dropped.wire_len, dropped.reason
+                    )));
+                }
+                // Every time: the opt-in's rate limit decides when it goes.
+                if let Some(request) = opt_in.desynced(now_ms) {
+                    on(WireRead::Send(request));
+                }
+            }
             WireChunk::Frame(frame) => {
                 let packed = frame.is_packed();
+                if packed && *desync_noted {
+                    *desync_noted = false;
+                    on(WireRead::Note(format!(
+                        "wire: back in step after {desynced_frames} dropped packed reply(ies)"
+                    )));
+                }
                 let message = lpc_wire::json::from_str::<WireServerMessage>(&frame.json)
                     .map_err(|error| format!("malformed M! frame: {error}"));
                 let Ok(decoded) = &message else {
@@ -317,17 +355,17 @@ fn note_for(
                 hello.proto, WIRE_PROTO_VERSION
             ),
         ),
-        ServerMsgBody::Hello(hello) if hello.pack_dictionary == 0 => (
+        ServerMsgBody::Hello(hello) if hello.pack_format == 0 => (
             Told::StaysJson,
-            "wire: replies stay JSON — the board does not pack (its hello offers no dictionary)"
+            "wire: replies stay JSON — the board does not pack (its hello offers no pack format)"
                 .to_string(),
         ),
-        ServerMsgBody::Hello(hello) if hello.pack_dictionary != WIRE_DICTIONARY_FINGERPRINT => (
+        ServerMsgBody::Hello(hello) if hello.pack_format != PACK_FORMAT_VERSION => (
             Told::StaysJson,
             format!(
-                "wire: replies stay JSON — the board packs with dictionary {:#010x}, this build \
-                 with {WIRE_DICTIONARY_FINGERPRINT:#010x}",
-                hello.pack_dictionary
+                "wire: replies stay JSON — the board packs JSON Pack v{}, this build \
+                 v{PACK_FORMAT_VERSION}",
+                hello.pack_format
             ),
         ),
         ServerMsgBody::SetEncoding {
@@ -338,9 +376,7 @@ fn note_for(
         ),
         _ if before == WireEncoding::Json && after == WireEncoding::Packed => (
             Told::Packed,
-            format!(
-                "wire: replies packed (JSON Pack, dictionary {WIRE_DICTIONARY_FINGERPRINT:#010x})"
-            ),
+            format!("wire: replies packed (JSON Pack v{PACK_FORMAT_VERSION}, learned)"),
         ),
         // A board that drops the opt-in (a de-enumerate, a reboot, a host
         // that stopped draining) is asked again by `PackOptIn`; the first
@@ -408,7 +444,7 @@ mod tests {
         let mut reader = WireReader::new(true);
         let mut reads = Vec::new();
 
-        reader.push(&json_line(&hello(WIRE_DICTIONARY_FINGERPRINT)), 0, |r| {
+        reader.push(&json_line(&hello(PACK_FORMAT_VERSION)), 0, |r| {
             reads.push(r)
         });
         assert!(matches!(&reads[0], WireRead::Send(ask) if ask.id == PACK_OPT_IN_REQUEST_ID));
@@ -432,23 +468,19 @@ mod tests {
     }
 
     #[test]
-    fn a_board_with_another_dictionary_stays_json_and_says_so_once() {
+    fn a_board_in_another_pack_format_stays_json_and_says_so_once() {
         let mut reader = WireReader::new(true);
         let mut notes = Vec::new();
         for t in [0, 10_000] {
-            reader.push(
-                &json_line(&hello(WIRE_DICTIONARY_FINGERPRINT ^ 1)),
-                t,
-                |r| {
-                    assert!(!matches!(r, WireRead::Send(_)), "never asked");
-                    if let WireRead::Note(note) = r {
-                        notes.push(note);
-                    }
-                },
-            );
+            reader.push(&json_line(&hello(PACK_FORMAT_VERSION + 1)), t, |r| {
+                assert!(!matches!(r, WireRead::Send(_)), "never asked");
+                if let WireRead::Note(note) = r {
+                    notes.push(note);
+                }
+            });
         }
         assert_eq!(notes.len(), 1, "{notes:?}");
-        assert!(notes[0].contains("stay JSON") && notes[0].contains("dictionary"));
+        assert!(notes[0].contains("stay JSON") && notes[0].contains("JSON Pack v"));
     }
 
     #[test]
@@ -462,11 +494,7 @@ mod tests {
     #[test]
     fn a_refusal_is_noted() {
         let mut reader = WireReader::new(true);
-        notes_of(
-            &mut reader,
-            &json_line(&hello(WIRE_DICTIONARY_FINGERPRINT)),
-            0,
-        );
+        notes_of(&mut reader, &json_line(&hello(PACK_FORMAT_VERSION)), 0);
         let notes = notes_of(&mut reader, &json_line(&answer(WireEncoding::Json)), 1);
         assert_eq!(notes.len(), 1);
         assert!(notes[0].contains("answered the opt-in with `json`"));
@@ -475,11 +503,7 @@ mod tests {
     #[test]
     fn a_fallback_is_noted_once_and_packing_again_is_news() {
         let mut reader = WireReader::new(true);
-        notes_of(
-            &mut reader,
-            &json_line(&hello(WIRE_DICTIONARY_FINGERPRINT)),
-            0,
-        );
+        notes_of(&mut reader, &json_line(&hello(PACK_FORMAT_VERSION)), 0);
         notes_of(&mut reader, &json_line(&answer(WireEncoding::Packed)), 1);
 
         let fell = notes_of(&mut reader, &json_line(&other(0)), 5_000);
@@ -493,11 +517,96 @@ mod tests {
         assert!(notes_of(&mut reader, &json_line(&other(0)), 20_000).is_empty());
     }
 
+    /// A packed reply that taught the board new names is lost in flight: the
+    /// reader drops what follows, notes it once, re-asks through the opt-in
+    /// (rate-limited), and is back in step at the board's reset.
+    #[test]
+    fn a_lost_packed_reply_desyncs_asks_for_a_reset_and_recovers() {
+        use lpc_wire::LearnStore;
+        let mut reader = WireReader::new(true);
+        notes_of(&mut reader, &json_line(&hello(PACK_FORMAT_VERSION)), 0);
+        notes_of(&mut reader, &json_line(&answer(WireEncoding::Packed)), 1);
+        let mut board = lp_json_pack_table();
+        board.reset(1);
+        let log = |id, text: &str| {
+            WireServerMessage::new(
+                id,
+                ServerMsgBody::Log {
+                    level: LogLevel::Info,
+                    message: text.to_string(),
+                },
+            )
+        };
+        let mut reads = Vec::new();
+        reader.push(&packed_on(&mut board, &log(1, "a")), 10, |r| reads.push(r));
+        assert!(
+            reads
+                .iter()
+                .any(|r| matches!(r, WireRead::Frame(f) if f.packed))
+        );
+
+        let _lost = packed_on(&mut board, &log(2, "b"));
+        reads.clear();
+        reader.push(&packed_on(&mut board, &log(3, "c")), 1_000, |r| {
+            reads.push(r)
+        });
+        assert!(
+            reads
+                .iter()
+                .any(|r| matches!(r, WireRead::Note(n) if n.contains("dropped"))),
+            "{reads:?}"
+        );
+        assert!(
+            !reads.iter().any(|r| matches!(r, WireRead::Frame(_))),
+            "{reads:?}"
+        );
+        // Inside the opt-in's interval: not asked yet.
+        assert!(
+            !reads.iter().any(|r| matches!(r, WireRead::Send(_))),
+            "{reads:?}"
+        );
+
+        reads.clear();
+        reader.push(&packed_on(&mut board, &log(4, "d")), 3_500, |r| {
+            reads.push(r)
+        });
+        assert!(
+            reads
+                .iter()
+                .any(|r| matches!(r, WireRead::Send(ask) if ask.id == PACK_OPT_IN_REQUEST_ID)),
+            "{reads:?}"
+        );
+        assert!(
+            !reads.iter().any(|r| matches!(r, WireRead::Note(_))),
+            "noted once per episode: {reads:?}"
+        );
+        assert_eq!(reader.desynced_frames(), 2);
+
+        // The board answers and resets its table.
+        reader.push(&json_line(&answer(WireEncoding::Packed)), 3_600, |_| {});
+        board.reset(2);
+        reads.clear();
+        reader.push(&packed_on(&mut board, &log(5, "e")), 3_700, |r| {
+            reads.push(r)
+        });
+        assert!(
+            reads
+                .iter()
+                .any(|r| matches!(r, WireRead::Note(n) if n.contains("back in step"))),
+            "{reads:?}"
+        );
+        assert!(
+            reads
+                .iter()
+                .any(|r| matches!(r, WireRead::Frame(f) if f.packed))
+        );
+    }
+
     #[test]
     fn a_host_that_wants_json_never_asks_and_never_notes() {
         let mut reader = WireReader::new(false);
         let mut reads = Vec::new();
-        reader.push(&json_line(&hello(WIRE_DICTIONARY_FINGERPRINT)), 0, |r| {
+        reader.push(&json_line(&hello(PACK_FORMAT_VERSION)), 0, |r| {
             reads.push(r)
         });
         assert!(
@@ -509,11 +618,7 @@ mod tests {
     #[test]
     fn clear_forgets_the_opt_in_and_the_partial_frame() {
         let mut reader = WireReader::new(true);
-        notes_of(
-            &mut reader,
-            &json_line(&hello(WIRE_DICTIONARY_FINGERPRINT)),
-            0,
-        );
+        notes_of(&mut reader, &json_line(&hello(PACK_FORMAT_VERSION)), 0);
         notes_of(&mut reader, &json_line(&answer(WireEncoding::Packed)), 1);
         let frame = packed(&other(9));
         reader.push(&frame[..frame.len() / 2], 2, |_| {});
@@ -568,7 +673,7 @@ mod tests {
         };
         reader.push(&json_line(&other(1)), 0, |r| on(r, &mut sends));
         assert!(sends.is_empty(), "nothing before the hello");
-        reader.push(&json_line(&hello(WIRE_DICTIONARY_FINGERPRINT)), 0, |r| {
+        reader.push(&json_line(&hello(PACK_FORMAT_VERSION)), 0, |r| {
             on(r, &mut sends)
         });
         assert_eq!(sends, [PACK_OPT_IN_REQUEST_ID], "the opt-in first, alone");
@@ -619,14 +724,25 @@ mod tests {
         format!("M!{}\n", lpc_wire::json::to_string(message).unwrap()).into_bytes()
     }
 
+    /// A packed reply coded against a fresh table: the first frame after the
+    /// board's reset, which a reader takes in any state.
     fn packed(message: &WireServerMessage) -> Vec<u8> {
+        packed_on(&mut lp_json_pack_table(), message)
+    }
+
+    /// The next packed reply of a link whose board table is `table`.
+    fn packed_on(table: &mut lpc_wire::LearnedTable, message: &WireServerMessage) -> Vec<u8> {
         let mut framed = vec![0u8; 4096];
-        let n = lpc_wire::ser_packed_frame_to(&mut framed, message).unwrap();
+        let n = lpc_wire::ser_learned_frame_to(&mut framed, table, message).unwrap();
         framed.truncate(n);
         framed
     }
 
-    fn hello(pack_dictionary: u32) -> WireServerMessage {
+    fn lp_json_pack_table() -> lpc_wire::LearnedTable {
+        lpc_wire::LearnedTable::default()
+    }
+
+    fn hello(pack_format: u8) -> WireServerMessage {
         let hello = ServerHello {
             proto: WIRE_PROTO_VERSION,
             build: BuildFacts {
@@ -638,7 +754,7 @@ mod tests {
             },
             hardware: HardwareFacts::default(),
             device_uid: None,
-            pack_dictionary,
+            pack_format,
             auth: lpc_wire::HelloAuth::TRUSTED,
         };
         WireServerMessage::new(0, ServerMsgBody::Hello(hello))

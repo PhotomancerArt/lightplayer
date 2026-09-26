@@ -11,6 +11,7 @@
 use crate::pack_base64::encode_base64;
 use crate::pack_decimal::{DECIMAL_TEXT_MAX, layout_decimal};
 use crate::pack_dictionary::Dictionary;
+use crate::pack_learned::{HeaderMismatch, LEARN_KEY_MAX_LEN, LearnStore, read_header};
 use crate::pack_tags as tag;
 use crate::pack_varint::{read_varint, unzigzag};
 use crate::{MAX_BACKREFS, is_backref_candidate};
@@ -93,6 +94,8 @@ pub enum DecodeError {
     Trailing,
     /// The [`JsonOut`] is full.
     OutputFull,
+    /// A learned frame whose header does not match the reader's table.
+    Learned(HeaderMismatch),
 }
 
 impl From<JsonOutFull> for DecodeError {
@@ -111,12 +114,57 @@ pub fn decode(dict: &Dictionary, packed: &[u8], out: &mut impl JsonOut) -> Resul
         backref_len: [0; MAX_BACKREFS],
         backref_count: 0,
         out,
+        learned: None,
     };
     d.run()?;
     if d.pos != packed.len() {
         return Err(DecodeError::Trailing);
     }
     Ok(())
+}
+
+/// Decode one learned frame (header, then one value) coded against
+/// `dict ++ learned`, learning as the encoder did. On any error the table is
+/// truncated back to where it stood, so a frame that did not decode defined
+/// nothing. The output may hold a partial value on error.
+pub fn decode_learned(
+    dict: &Dictionary,
+    learned: &mut dyn LearnStore,
+    packed: &[u8],
+    out: &mut impl JsonOut,
+) -> Result<(), DecodeError> {
+    let start = read_header(packed, learned).map_err(DecodeError::Learned)?;
+    let mark = learned.mark();
+    let mut d = Decoder {
+        dict,
+        input: packed,
+        pos: start,
+        backref_at: [0; MAX_BACKREFS],
+        backref_len: [0; MAX_BACKREFS],
+        backref_count: 0,
+        out,
+        learned: Some(learned),
+    };
+    let r = d.run().and_then(|()| {
+        if d.pos != packed.len() {
+            Err(DecodeError::Trailing)
+        } else {
+            Ok(())
+        }
+    });
+    if r.is_err()
+        && let Some(l) = d.learned
+    {
+        l.truncate(mark);
+    }
+    r
+}
+
+/// A string the decoder found: in the frame or dictionary, or copied out of
+/// the learned table.
+enum Text<'a> {
+    Borrowed(&'a [u8]),
+    Copied([u8; LEARN_KEY_MAX_LEN], usize),
 }
 
 struct Decoder<'a, 'o, O: JsonOut> {
@@ -127,6 +175,7 @@ struct Decoder<'a, 'o, O: JsonOut> {
     backref_len: [u16; MAX_BACKREFS],
     backref_count: usize,
     out: &'o mut O,
+    learned: Option<&'o mut dyn LearnStore>,
 }
 
 impl<'a, O: JsonOut> Decoder<'a, '_, O> {
@@ -154,7 +203,7 @@ impl<'a, O: JsonOut> Decoder<'a, '_, O> {
                         self.emit(b",")?;
                     }
                     let key = self.key(k)?;
-                    self.string(key)?;
+                    self.text(key)?;
                     self.emit(b":")?;
                 } else {
                     if self.peek()? == tag::ARRAY_END {
@@ -193,21 +242,58 @@ impl<'a, O: JsonOut> Decoder<'a, '_, O> {
         }
     }
 
-    fn key(&mut self, k: u8) -> Result<&'a [u8], DecodeError> {
+    fn key(&mut self, k: u8) -> Result<Text<'a>, DecodeError> {
         match k {
-            0..=0xEF => self.dict.key(usize::from(k)).ok_or(DecodeError::BadIndex),
+            0..=0xEF => self.dict_text(usize::from(k), true),
             tag::KEY_DICT_WIDE_BASE..=tag::KEY_DICT_WIDE_MAX => {
                 let lo = self.byte()?;
                 let i = tag::KEY_DICT_INLINE_COUNT
                     + ((usize::from(k - tag::KEY_DICT_WIDE_BASE) << 8) | usize::from(lo));
-                self.dict.key(i).ok_or(DecodeError::BadIndex)
+                self.dict_text(i, true)
             }
             tag::KEY_INLINE => {
                 let n = self.length()?;
-                self.inline(n)
+                let s = self.inline(n)?;
+                if let Some(l) = self.learned.as_deref_mut() {
+                    l.learn_key(s);
+                }
+                Ok(Text::Borrowed(s))
             }
-            tag::KEY_BACKREF => self.backref(),
+            tag::KEY_BACKREF => self.backref().map(Text::Borrowed),
             _ => Err(DecodeError::BadTag(k)),
+        }
+    }
+
+    /// Code `i` of the key or value table: the dictionary first, then the
+    /// learned table after it.
+    fn dict_text(&self, i: usize, is_key: bool) -> Result<Text<'a>, DecodeError> {
+        let (n, hit) = if is_key {
+            (self.dict.keys.len(), self.dict.key(i))
+        } else {
+            (self.dict.values.len(), self.dict.value(i))
+        };
+        if let Some(s) = hit {
+            return Ok(Text::Borrowed(s));
+        }
+        let l = self.learned.as_deref().ok_or(DecodeError::BadIndex)?;
+        let s = if is_key { l.key(i - n) } else { l.value(i - n) }.ok_or(DecodeError::BadIndex)?;
+        let mut buf = [0u8; LEARN_KEY_MAX_LEN];
+        buf.get_mut(..s.len())
+            .ok_or(DecodeError::BadIndex)?
+            .copy_from_slice(s);
+        Ok(Text::Copied(buf, s.len()))
+    }
+
+    fn text(&mut self, t: Text<'_>) -> Result<(), DecodeError> {
+        match t {
+            Text::Borrowed(s) => self.string(s),
+            Text::Copied(buf, n) => self.string(&buf[..n]),
+        }
+    }
+
+    fn learn_value(&mut self, s: &[u8]) {
+        if let Some(l) = self.learned.as_deref_mut() {
+            l.learn_value(s);
         }
     }
 
@@ -216,11 +302,17 @@ impl<'a, O: JsonOut> Decoder<'a, '_, O> {
             0..=tag::UINT_INLINE_MAX => self.int(false, u64::from(t)),
             0x40..=0x7F => {
                 let i = usize::from(t - tag::VALUE_DICT_INLINE_BASE);
-                let s = self.dict.value(i).ok_or(DecodeError::BadIndex)?;
-                self.string(s)
+                let s = self.dict_text(i, false)?;
+                self.text(s)
+            }
+            tag::VALUE_DICT_HIGH_BASE..=0xFF => {
+                let i = tag::VALUE_DICT_INLINE_COUNT + usize::from(t - tag::VALUE_DICT_HIGH_BASE);
+                let s = self.dict_text(i, false)?;
+                self.text(s)
             }
             0x80..=0x9F => {
                 let s = self.inline(usize::from(t - tag::STR_INLINE_BASE))?;
+                self.learn_value(s);
                 self.string(s)
             }
             tag::NULL => self.emit(b"null"),
@@ -242,6 +334,7 @@ impl<'a, O: JsonOut> Decoder<'a, '_, O> {
             tag::STRING => {
                 let n = self.length()?;
                 let s = self.inline(n)?;
+                self.learn_value(s);
                 self.string(s)
             }
             tag::BLOB => {
@@ -256,10 +349,10 @@ impl<'a, O: JsonOut> Decoder<'a, '_, O> {
             tag::VALUE_DICT => {
                 let i = usize::try_from(self.varint()?)
                     .ok()
-                    .and_then(|i| i.checked_add(tag::VALUE_DICT_INLINE_COUNT))
+                    .and_then(|i| i.checked_add(tag::VALUE_CODE_SHORT_COUNT))
                     .ok_or(DecodeError::BadIndex)?;
-                let s = self.dict.value(i).ok_or(DecodeError::BadIndex)?;
-                self.string(s)
+                let s = self.dict_text(i, false)?;
+                self.text(s)
             }
             tag::BACKREF => {
                 let s = self.backref()?;

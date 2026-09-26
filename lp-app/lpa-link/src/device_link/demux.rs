@@ -3,7 +3,7 @@
 //! ([`lpc_wire::WireStream`]).
 //!
 //! On a serial wire, protocol messages and console output share one byte
-//! stream: an `M!`-prefixed line IS a frame, a packed frame (`0x00 'P' COBS
+//! stream: an `M!`-prefixed line IS a frame, a packed frame (`0x00 'L' COBS
 //! 0x00`, on a link that opted in) is one too, and everything else is device
 //! output. Both matter to the model — frames are peer evidence, lines are how
 //! a blank chip or somebody else's firmware gets diagnosed — so neither is
@@ -59,6 +59,12 @@ pub fn demux_chunk(chunk: WireChunk) -> LinkEvent {
         WireChunk::Line(line) => LinkEvent::Line(line),
         WireChunk::Frame(frame) => demux_frame_json(&frame.json),
         WireChunk::Error(error) => LinkEvent::Error(error),
+        // This path does not opt in, so it cannot ask for a reset; a
+        // dropped reply is an anomaly like a torn one.
+        WireChunk::Desync(dropped) => LinkEvent::Error(format!(
+            "packed reply dropped ({} B): {}",
+            dropped.wire_len, dropped.reason
+        )),
     }
 }
 
@@ -185,7 +191,8 @@ mod tests {
                 lpc_wire::WireServerMessage::new(id, lpc_wire::ServerMsgBody::UnloadProject);
             let json = lpc_wire::json::to_string(&message).unwrap();
             let mut framed = vec![0u8; 256];
-            let n = lpc_wire::ser_packed_frame_to(&mut framed, &message).unwrap();
+            let mut table = lpc_wire::LearnedTable::default();
+            let n = lpc_wire::ser_learned_frame_to(&mut framed, &mut table, &message).unwrap();
 
             let mut stream = WireStream::new();
             let mut events = VecDeque::new();

@@ -147,6 +147,24 @@ fn serial_thread_loop(
                     log::warn!("Serial thread: {error}");
                     continue;
                 }
+                WireChunk::Desync(dropped) => {
+                    log::warn!(
+                        "Serial thread: packed reply dropped ({} B): {}",
+                        dropped.wire_len,
+                        dropped.reason
+                    );
+                    let now_ms = u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX);
+                    if let Some(ask) = opt_in.desynced(now_ms) {
+                        log::debug!("Serial thread: asking {stream_label} to reset its table");
+                        if let WriteOutcome::Lost =
+                            write_message(stream.as_mut(), &stream_label, &ask)
+                        {
+                            connection_lost = true;
+                            break;
+                        }
+                    }
+                    continue;
+                }
                 WireChunk::Frame(frame) => frame,
             };
             if let Some(observer) = &options.line_observer {

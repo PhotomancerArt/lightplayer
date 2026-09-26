@@ -519,7 +519,7 @@ mod tests {
                 ..Default::default()
             },
             device_uid: None,
-            pack_dictionary: lpc_wire::WIRE_DICTIONARY_FINGERPRINT,
+            pack_format: lpc_wire::PACK_FORMAT_VERSION,
             auth: lpc_wire::HelloAuth::TRUSTED,
         }
     }

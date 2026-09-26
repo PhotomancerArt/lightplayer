@@ -229,6 +229,21 @@ fn emulator_thread_loop(
                     log::warn!("Emulator thread: {error}");
                     continue;
                 }
+                WireChunk::Desync(dropped) => {
+                    log::warn!(
+                        "Emulator thread: packed reply dropped ({} B): {}",
+                        dropped.wire_len,
+                        dropped.reason
+                    );
+                    let now_ms = u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX);
+                    if let Some(ask) = opt_in.desynced(now_ms) {
+                        match (lpc_wire::json::to_serial_line(&ask), emulator.lock()) {
+                            (Ok(line), Ok(mut emu)) => emu.serial_write(line.as_bytes()),
+                            _ => log::warn!("Emulator thread: could not write the pack opt-in"),
+                        }
+                    }
+                    continue;
+                }
                 WireChunk::Frame(frame) => frame,
             };
             let msg = match lpc_wire::json::from_str::<WireServerMessage>(&frame.json) {

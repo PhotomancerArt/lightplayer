@@ -1297,10 +1297,13 @@ fn json_of(message: &lpc_wire::WireServerMessage) -> String {
     lpc_wire::json::to_string(message).expect("json")
 }
 
-/// `\n 0x00 'P' COBS 0x00`, with the firmware's own frame writer.
+/// `\n 0x00 'L' COBS 0x00`, with the firmware's own frame writer, coded as
+/// the first frame after a table reset (which any reader takes).
 fn packed_frame(message: &lpc_wire::WireServerMessage) -> Vec<u8> {
     let mut framed = vec![0u8; 4096];
-    let n = lpc_wire::ser_packed_frame_to(&mut framed, message).expect("a packed frame");
+    let mut table = lpc_wire::LearnedTable::default();
+    let n =
+        lpc_wire::ser_learned_frame_to(&mut framed, &mut table, message).expect("a packed frame");
     framed.truncate(n);
     framed
 }

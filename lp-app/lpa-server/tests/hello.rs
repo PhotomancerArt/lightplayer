@@ -86,8 +86,8 @@ fn server_with_injected_hello() -> (
     let hello = server.hello();
     assert_eq!(hello.proto, WIRE_PROTO_VERSION);
     assert_eq!(
-        hello.pack_dictionary, 0,
-        "an embedder that never said it can pack does not name a dictionary"
+        hello.pack_format, 0,
+        "an embedder that never said it can pack does not name a pack format"
     );
     assert_eq!(hello.build.package, "hello-test");
     assert_eq!(hello.build.commit, "abc123456789");

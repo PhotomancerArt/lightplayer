@@ -112,7 +112,7 @@ pub struct FakeLightPlayerState {
     pub project_dir: String,
     /// Answer `ClientRequest::SetEncoding` the way shipped firmware does
     /// (plan `lp-json-pack`): the hello names this build's dictionary, an
-    /// opted-in link gets packed frames (`\n 0x00 'P' COBS 0x00`) until the
+    /// opted-in link gets packed frames (`\n 0x00 'L' COBS 0x00`) until the
     /// port reopens or the device resets. On by default, as it is on every
     /// ESP firmware; `false` is a board that cannot pack (hello `0`).
     pub packs: bool,
