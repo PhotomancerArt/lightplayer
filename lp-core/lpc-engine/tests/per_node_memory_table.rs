@@ -499,11 +499,7 @@ fn derived(phases: &[Phase]) -> Vec<(i64, i64)> {
         phase_of(phases, PHASES[1]),
         (
             frames.iter().map(|p| p.resident()).sum(),
-            frames
-                .iter()
-                .map(|p| p.transient())
-                .max()
-                .unwrap_or(0),
+            frames.iter().map(|p| p.transient()).max().unwrap_or(0),
         ),
         (ticks[compile].resident(), ticks[compile].transient()),
     ]

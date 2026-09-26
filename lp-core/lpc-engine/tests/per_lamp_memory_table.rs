@@ -372,10 +372,7 @@ fn print_slopes(label: &str, a: (&Fixture, &[Phase]), b: (&Fixture, &[Phase])) {
             "{:<34} {:>16.2} {:>16.2}",
             pa.label,
             slope((a.0.lamps, pa.resident()), (b.0.lamps, pb.resident())),
-            slope(
-                (a.0.lamps, pa.transient()),
-                (b.0.lamps, pb.transient())
-            ),
+            slope((a.0.lamps, pa.transient()), (b.0.lamps, pb.transient())),
         );
     }
 }
@@ -428,10 +425,7 @@ fn per_lamp_memory_table() {
         let (pa, pb) = (find(a.1), find(b.1));
         (
             slope((a.0.lamps, pa.resident()), (b.0.lamps, pb.resident())),
-            slope(
-                (a.0.lamps, pa.transient()),
-                (b.0.lamps, pb.transient()),
-            ),
+            slope((a.0.lamps, pa.transient()), (b.0.lamps, pb.transient())),
         )
     };
     for pair in [("zook", "zook-2x"), ("dome-scale", "dome-scale-2x")] {
