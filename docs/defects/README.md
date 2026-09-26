@@ -246,6 +246,11 @@ genuinely fits none of these, and define it here in one line.
   exercises silently diverges from what the real system would do there.
   Not a wrong answer today; a gap named before something depends on the
   answer it would give.
+- **`wake-quantum-throttle`** — a task that services a stream takes a
+  fixed quantum (one packet, one line) per scheduler wake, so throughput is
+  bounded by how often it is woken rather than by the link, and anything
+  that makes wakes rarer (a longer frame, a slower emulator) turns into
+  latency proportional to message size.
 
 ## Index
 
@@ -356,6 +361,7 @@ a fifth still lands somewhere the new `Fault` status and pattern don't reach.
 
 | Class | Date | Entry | Status | Area |
 | --- | --- | --- | --- | --- |
+| wake-quantum-throttle | 2026-09-25 | [c6-takes-requests-in-at-one-packet-per-frame](2026-09-25-c6-takes-requests-in-at-one-packet-per-frame.md) | fixed | fw-esp32c6 `serial/io_task.rs` `read_serial`: the USB read took one 64 B OUT packet per wake, and `io_task` wakes about once per server-loop frame, so a 600 B Studio lens request took ~10 frames to arrive (emulated C6: round trip linear in request bytes, 0.37 ms/B wall; 354 → 92 ms for 600 B once the read drains the burst). Yona's "Studio feels sluggish on a device" on #827's emulated C6 |
 | state-conflation | 2026-09-25 | [turn-on-bluetooth-reports-a-timeout-the-board-answered](2026-09-25-turn-on-bluetooth-reports-a-timeout-the-board-answered.md) | fixed (PR #824) | lpa-studio-core access write × the link's one `ConversationInbox` × the card's frame feed: Turn on Bluetooth said `device did not respond within 5.0s` (4 of 4) while a wire tap showed the board's `error:null` reply 192 ms later; the feed, polling the same inbox, popped and dropped it. Each conversation on a shared link now owns its own id slice, and `receive` takes only its own replies |
 | assumed-context | 2026-09-25 | [tag-next-version-tagged-the-tip-not-its-commit](2026-09-25-tag-next-version-tagged-the-tip-not-its-commit.md) | fixed | scripts/tag-next-version.sh: Main push `git pull`ed and tagged main's tip, so two close merges left the first commit untagged and its workflow_run deploy failed `--require-tag`; now tags its own `$GITHUB_SHA`, a tagged commit is a no-op, a lost number race retries |
 | unenforced-test-precondition | 2026-09-25 | [emu-lab-cooldown-tests-measured-wall-clock](2026-09-25-emu-lab-cooldown-tests-measured-wall-clock.md) | fixed | scripts/emu/lab queue/notify/stability tests × `server.mjs`'s scheduler: the cooldown, spacing, lost, drop and notify-grace tests asserted wall-clock gaps measured from the fake device's side of the socket, so a loaded runner's lag came off the gap (`waited 504 ms` against a 600 ms floor, main red at a7daa7ef5; 5/24 runs locally under load). The scheduler now reads an injected clock (`clock.mjs`) and the tests step a manual one and assert exact waits off the server's own press record |
