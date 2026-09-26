@@ -37,7 +37,8 @@ use crate::node::{
 use crate::products::visual::VisualSampleStream;
 use crate::products::visual::{
     CellProjection, PatternFrame, ProductSpaceInfo, RenderTextureRequest, ScopeGeometry,
-    TextureRenderProduct, VisualProduct, VisualSpace, coordinates, resolve_1d_to_2d_with_origin,
+    TextureRenderProduct, VisualProduct, VisualReadiness, VisualSpace, coordinates,
+    resolve_1d_to_2d_with_origin,
 };
 use crate::shader_abi::uniforms::{VisualUniform, build_uniforms};
 
@@ -435,11 +436,11 @@ impl ShaderNode {
 
     /// Re-read the authored representation pin.
     ///
-    /// Read through the option's `some` branch rather than through a compiled
-    /// option reader: an absent pin reads as an *unresolved slot* rather than
-    /// as the "option slot is none" a reader recognises (the same reason
-    /// `FixtureNode` reads `power.some` by path), and absent is now the
-    /// common case — every unpinned shader.
+    /// Read through the option's `some` branch by path, as `FixtureNode`
+    /// reads `power.some`: absent is the common case — every unpinned
+    /// shader — and an absent option resolves to the typed, allocation-free
+    /// `ResolveError::is_absent_option`, remembered by the resolver until the
+    /// graph changes shape.
     fn update_config_from_view(&mut self, ctx: &mut TickContext<'_>) -> Result<(), NodeError> {
         let next_float_mode =
             try_read_static_authored_value::<FloatMode>(ctx, FLOAT_MODE_PIN_PATH)?;
@@ -2007,6 +2008,32 @@ impl RenderNode for ShaderNode {
         validate_shader_visual_product(self.node_id, product)?;
         Ok(self.space_info())
     }
+
+    /// Ready once a program exists (keep-last-good included: a recompile
+    /// after an edit renders the previous program meanwhile). Before the
+    /// first program, pending while the compile waits for its window, and
+    /// failed once that compile failed or was denied — only an edit or a
+    /// cleared fault brings the shader back.
+    fn visual_readiness(
+        &mut self,
+        product: VisualProduct,
+        _ctx: &mut RenderContext<'_>,
+    ) -> Result<VisualReadiness, NodeError> {
+        validate_shader_visual_product(self.node_id, product)?;
+        if self.shader.is_some() {
+            return Ok(VisualReadiness::Ready);
+        }
+        Ok(
+            match self
+                .compile_fault
+                .as_deref()
+                .or(self.compilation_error.as_deref())
+            {
+                Some(reason) => VisualReadiness::Failed(String::from(reason)),
+                None => VisualReadiness::Pending,
+            },
+        )
+    }
 }
 
 /// The uniforms a sample stream binds, as the key that lets the next
@@ -2327,7 +2354,7 @@ fn resolve_time_product(ctx: &mut TickContext<'_>) -> Result<TimeProduct, String
     let scope = ctx.bus_read_scope();
     let production = ctx
         .resolve_static_bus(scope, TIME_CHANNEL)
-        .map_err(|e| e.message)?;
+        .map_err(|e| e.message.into_owned())?;
     let value = production
         .value_leaf()
         .ok_or_else(|| String::from("bus:time is not a value"))?;
@@ -2418,7 +2445,7 @@ fn resolve_phasor_config(
     };
     let driven = ctx
         .resolve(own_key)
-        .map_err(|e| e.message)
+        .map_err(|e| e.message.into_owned())
         .and_then(|production| {
             production
                 .value_leaf()
@@ -2618,7 +2645,7 @@ fn resolve_gradient_config(
     };
     let driven = ctx
         .resolve(own_key)
-        .map_err(|e| e.message)
+        .map_err(|e| e.message.into_owned())
         .and_then(|production| {
             production
                 .value_leaf()
@@ -2693,7 +2720,7 @@ pub(super) fn resolve_or_default_input(
     let (production, mut failure) = match ctx.resolve(own) {
         Ok(production) => (Some(production), None),
         Err(e) if unwritten_channel_at_rest(slot, &e) => (None, None),
-        Err(e) => (None, Some(e.message)),
+        Err(e) => (None, Some(e.message.into_owned())),
     };
     let materialized = materialize_shader_input(
         name,
@@ -2828,7 +2855,7 @@ mod input_status_policy_tests {
     use super::*;
 
     fn error(message: &str) -> ResolveError {
-        ResolveError::new(message)
+        ResolveError::new(String::from(message))
     }
 
     /// The whole policy on one screen: only the no-provider shape, and only

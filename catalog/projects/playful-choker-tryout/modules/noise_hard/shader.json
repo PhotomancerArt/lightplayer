@@ -1,0 +1,71 @@
+{
+  "kind": "Shader",
+  "source": "shader.glsl",
+  "render_order": 0,
+  "coords": "pattern",
+  "bindings": {
+    "output": {
+      "target": "bus:visual.out"
+    },
+    "detail": {
+      "source": "bus:detail"
+    },
+    "steps": {
+      "source": "bus:steps"
+    },
+    "palette": {
+      "source": "bus:palette"
+    }
+  },
+  "consumed": {
+    "detail": {
+      "kind": "value",
+      "value": "f32",
+      "default": 1,
+      "min": 0.25,
+      "max": 4,
+      "label": "Detail",
+      "description": "Band shape size: 1 is a few shapes across the piece; 2 halves them"
+    },
+    "steps": {
+      "kind": "value",
+      "value": "f32",
+      "default": 4,
+      "min": 2,
+      "max": 8,
+      "label": "Steps",
+      "description": "How many flat colour bands the noise is cut into"
+    },
+    "slidePhase": {
+      "kind": "phasor",
+      "value": "f32",
+      "phasor": {
+        "period_seconds": 110.0,
+        "waveform": "ramp",
+        "phase_offset": 0.0
+      },
+      "default": 0,
+      "label": "Slide",
+      "description": "Position on the field's closed slide loop (0-1)"
+    },
+    "palette": {
+      "kind": "palette",
+      "value": "sampler2D",
+      "label": "Palette",
+      "description": "The bands step through this ramp from its dark end up",
+      "gradient": {
+        "kind": "static",
+        "step_seconds": 0.0,
+        "fade_seconds": 0.0,
+        "pinned": -1,
+        "set": [
+          {
+            "space": "oklab",
+            "method": "linear",
+            "stops": "(0.22,0.03,-0.1) (0.45,0.16,-0.12) (0.63,0.19,0.03) (0.76,0.08,0.14) (0.86,0.0,0.16)"
+          }
+        ]
+      }
+    }
+  }
+}

@@ -111,8 +111,8 @@ byte-identical patch files, opposite declarations — see
 [the peach](../docs/user-guide/the-peach.md)), `fiber-headband` (a real,
 battery-powered wearable), `rocaille` (a real 2D piece on a
 hand-authored mapping), `playful-choker` (a real PCB wearable) and
-`playful-choker-tryout` (the choker's rig with five pattern-space
-candidates on a playlist, for wearing them; see its README).
+`playful-choker-tryout` (the choker's rig with the first pattern set as
+25 entries on one cycling playlist, for wearing them; see its README).
 
 **Patterns** (`patterns/`): `plasma` (the smallest non-empty panel; also
 the docs' live figure), `plasma-duo` (one shader, two fixtures — its

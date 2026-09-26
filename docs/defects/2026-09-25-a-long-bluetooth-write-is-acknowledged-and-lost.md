@@ -1,7 +1,7 @@
 ---
 status: fixed          # confirmed on the phone (Yona, 2026-09-25) with the firmware half alone
 found: 2026-09-25      # how: hardware-walk (G4, Yona, iPhone + Bluefy on deployed Studio) then live-debugging (choker console; Mac Chrome over CDP)
-fixed: this change     # PR #834 (claude/ble-phone-edit-drop): fb0b2ed59 (firmware), 6676bf59e (Studio transport)
+fixed: 2026-09-25      # PR #834, merged 97efd6624 (claude/ble-phone-edit-drop): fb0b2ed59 (firmware), 6676bf59e (Studio transport)
 area: fw-esp32c6 ble (ble_connection, nus_service, trouble-host packet pool) × fw-esp32-common radio_link::prepared_write × lpa-link browser_ble.js
 class: untested-path
 related:

@@ -1,8 +1,11 @@
 use lpc_model::{
     AssetLocation, CommitResult, MutationBatchResults, MutationCmdBatch, MutationOp,
-    MutationResult, Revision, SlotShapeRegistry,
+    MutationResult, NodeUseLocation, ProjectChangeSummary, Revision, SlotPath, SlotShapeRegistry,
 };
-use lpc_registry::{AssetBytes, AssetReadError, AssetText, LoadResult, ParseCtx, ProjectRegistry};
+use lpc_registry::{
+    AssetBytes, AssetReadError, AssetText, EntryResidencyError, LoadResult, ParseCtx,
+    ProjectRegistry,
+};
 use lpfs::{FsEvent, FsEventKind, LpFsMemory, LpPath, LpPathBuf};
 
 use super::TestProject;
@@ -92,6 +95,52 @@ impl RegistryScenario {
             .expect("apply overlay mutation")
     }
 
+    /// Load or unload entry `entry` of the playlist used at root child
+    /// `nodes[<playlist>]`.
+    pub fn set_entry_resident(
+        &mut self,
+        playlist: &str,
+        entry: u32,
+        resident: bool,
+    ) -> Result<ProjectChangeSummary, EntryResidencyError> {
+        let frame = self.next_revision();
+        let ctx = ParseCtx {
+            shapes: &self.shapes,
+        };
+        self.registry.set_entry_resident(
+            &self.fs,
+            &playlist_use(playlist),
+            entry,
+            resident,
+            frame,
+            &ctx,
+        )
+    }
+
+    /// Make `entry` the only loaded entry of root child `nodes[<playlist>]`.
+    pub fn make_only_resident(
+        &mut self,
+        playlist: &str,
+        entry: u32,
+    ) -> Result<ProjectChangeSummary, EntryResidencyError> {
+        let frame = self.next_revision();
+        let ctx = ParseCtx {
+            shapes: &self.shapes,
+        };
+        self.registry
+            .make_only_resident(&self.fs, &playlist_use(playlist), entry, frame, &ctx)
+    }
+
+    /// Load every entry of every playlist.
+    pub fn make_every_entry_resident(&mut self) -> ProjectChangeSummary {
+        let frame = self.next_revision();
+        let ctx = ParseCtx {
+            shapes: &self.shapes,
+        };
+        self.registry
+            .make_every_entry_resident(&self.fs, frame, &ctx)
+    }
+
     pub fn apply_batch(&mut self, batch: MutationCmdBatch) -> MutationBatchResults {
         let frame = self.next_revision();
         let ctx = ParseCtx {
@@ -149,4 +198,10 @@ impl RegistryScenario {
         self.next_revision += 1;
         revision
     }
+}
+
+/// Use location of root child `nodes[<name>]`.
+pub fn playlist_use(name: &str) -> NodeUseLocation {
+    NodeUseLocation::root()
+        .child(SlotPath::parse(&format!("nodes[{name}]")).expect("playlist slot path"))
 }

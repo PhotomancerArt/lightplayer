@@ -3,6 +3,7 @@
 use core::ops::{Deref, DerefMut};
 
 use lpc_registry::ProjectRegistry;
+use lpfs::LpFs;
 
 use super::{Engine, EngineError};
 
@@ -41,13 +42,40 @@ impl LoadedProjectRuntime {
         (self.engine, self.registry)
     }
 
+    /// Disjoint mutable borrows, for the write paths that take both
+    /// ([`Engine::apply_project_changes`], [`Engine::apply_residency`]).
+    pub fn split_mut(&mut self) -> (&mut Engine, &mut ProjectRegistry) {
+        (&mut self.engine, &mut self.registry)
+    }
+
     /// Disjoint borrows for read paths that resolve against the registry.
     pub fn read_parts(&mut self) -> (&mut Engine, &ProjectRegistry) {
         (&mut self.engine, &self.registry)
     }
 
+    /// Tick the engine. This helper owns no filesystem, so it cannot run the
+    /// pre-tick residency step itself: an embedder whose project has
+    /// playlists calls [`Self::apply_residency`] first, or uses
+    /// [`Self::tick_with_residency`]. The product's edges tick through
+    /// `lpa-server`'s `Project::tick`, which always does.
     pub fn tick(&mut self, delta_ms: u32) -> Result<(), EngineError> {
         self.engine.tick(&self.registry, delta_ms)
+    }
+
+    /// The pre-tick residency step ([`Engine::apply_residency`]) against this
+    /// runtime's own registry.
+    pub fn apply_residency(
+        &mut self,
+        fs: &dyn LpFs,
+    ) -> Result<super::ResidencyApplied, EngineError> {
+        self.engine.apply_residency(fs, &mut self.registry)
+    }
+
+    /// [`Self::apply_residency`], then [`Self::tick`] — the order every edge
+    /// uses.
+    pub fn tick_with_residency(&mut self, fs: &dyn LpFs, delta_ms: u32) -> Result<(), EngineError> {
+        self.apply_residency(fs)?;
+        self.tick(delta_ms)
     }
 
     #[cfg(test)]

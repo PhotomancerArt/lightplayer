@@ -4,7 +4,7 @@ use alloc::vec::Vec;
 
 use crate::dataflow::resolver::production::Production;
 use crate::dataflow::resolver::query_key::QueryKey;
-use crate::dataflow::resolver::resolve_error::{ResolveError, SessionResolveError};
+use crate::dataflow::resolver::resolve_error::ResolveError;
 use crate::dataflow::resolver::resolve_host::ResolveHost;
 use crate::dataflow::resolver::resolve_session::ResolveSession;
 use crate::dataflow::timebase::PhasorKey;
@@ -214,7 +214,7 @@ impl<'sess, 'resolver, 'host> TickResolver for SessionHostResolver<'sess, 'resol
     fn resolve(&mut self, query: &QueryKey) -> Result<Production, ResolveError> {
         self.session
             .resolve(self.host, query)
-            .map_err(|e: SessionResolveError| ResolveError::new(alloc::format!("{e}")))
+            .map_err(ResolveError::from)
     }
 
     fn resolve_static_consumed(
@@ -224,7 +224,7 @@ impl<'sess, 'resolver, 'host> TickResolver for SessionHostResolver<'sess, 'resol
     ) -> Result<Production, ResolveError> {
         self.session
             .resolve_static_consumed(self.host, node, path)
-            .map_err(|e: SessionResolveError| ResolveError::new(alloc::format!("{e}")))
+            .map_err(ResolveError::from)
     }
 
     fn resolve_static_bus(
@@ -234,7 +234,7 @@ impl<'sess, 'resolver, 'host> TickResolver for SessionHostResolver<'sess, 'resol
     ) -> Result<Production, ResolveError> {
         self.session
             .resolve_static_bus(self.host, scope, channel)
-            .map_err(|e: SessionResolveError| ResolveError::new(alloc::format!("{e}")))
+            .map_err(ResolveError::from)
     }
 
     fn intern_key(&mut self, query: &QueryKey) -> alloc::rc::Rc<QueryKey> {
@@ -279,7 +279,7 @@ impl<'sess, 'resolver, 'host> TickResolver for SessionHostResolver<'sess, 'resol
     ) -> Result<ControlLayout, ResolveError> {
         self.host
             .render_control(product, request, target)
-            .map_err(|e: SessionResolveError| ResolveError::new(alloc::format!("{e}")))
+            .map_err(ResolveError::from)
     }
 
     fn control_patch_placement(
@@ -310,7 +310,7 @@ impl<'sess, 'resolver, 'host> TickResolver for SessionHostResolver<'sess, 'resol
     ) -> Result<TextureRenderProduct, ResolveError> {
         self.host
             .render_texture(product, request)
-            .map_err(|e: SessionResolveError| ResolveError::new(alloc::format!("{e}")))
+            .map_err(ResolveError::from)
     }
 
     fn runtime_buffer_mut(
@@ -320,7 +320,7 @@ impl<'sess, 'resolver, 'host> TickResolver for SessionHostResolver<'sess, 'resol
     ) -> Result<&mut RuntimeBuffer, ResolveError> {
         self.host
             .runtime_buffer_mut(id, frame)
-            .map_err(|e: SessionResolveError| ResolveError::new(alloc::format!("{e}")))
+            .map_err(ResolveError::from)
     }
 
     fn publish_timebase(
@@ -337,13 +337,13 @@ impl<'sess, 'resolver, 'host> TickResolver for SessionHostResolver<'sess, 'resol
     fn time_product_seconds(&self, product: TimeProduct) -> Result<f32, ResolveError> {
         self.host
             .time_product_seconds(product)
-            .map_err(|e: SessionResolveError| ResolveError::new(alloc::format!("{e}")))
+            .map_err(ResolveError::from)
     }
 
     fn time_product_delta(&self, product: TimeProduct) -> Result<f32, ResolveError> {
         self.host
             .time_product_delta(product)
-            .map_err(|e: SessionResolveError| ResolveError::new(alloc::format!("{e}")))
+            .map_err(ResolveError::from)
     }
 
     fn time_product_phasor(
@@ -355,6 +355,6 @@ impl<'sess, 'resolver, 'host> TickResolver for SessionHostResolver<'sess, 'resol
     ) -> Result<(f32, u32), ResolveError> {
         self.host
             .time_product_phasor(product, key, config, reader)
-            .map_err(|e: SessionResolveError| ResolveError::new(alloc::format!("{e}")))
+            .map_err(ResolveError::from)
     }
 }

@@ -207,6 +207,20 @@ impl Engine {
             }
         }
 
+        self.rewire_projection(registry, frame)?;
+        Ok(result)
+    }
+
+    /// Re-derive everything that is wired across nodes after the runtime
+    /// tree changed shape: asset consumers, the whole binding index, and the
+    /// resolver's cached structure. Shared by edits
+    /// ([`Self::apply_project_changes`]) and entry residency
+    /// ([`Self::apply_residency`]).
+    pub(super) fn rewire_projection(
+        &mut self,
+        registry: &mut ProjectRegistry,
+        frame: lpc_model::Revision,
+    ) -> Result<(), ProjectLoadError> {
         self.project_runtime_index_mut()
             .rebuild_asset_consumers(&registry.inventory().tree);
 
@@ -216,13 +230,14 @@ impl Engine {
         // no longer registers bindings (the loader's binding phase is
         // separate). Rebuild the whole index from current defs — cheap
         // (dozens of entries) and by construction identical to a fresh load
-        // (incremental binding apply, Option C).
+        // (incremental binding apply, Option C). A subset would lose the
+        // cross-node lookups a binding resolves through.
         let projected_nodes = ProjectLoader::ensure_runtime_spine(registry, self, frame)?;
         self.clear_bindings(frame);
         ProjectLoader::register_projected_bindings(registry, self, &projected_nodes, frame)?;
 
         self.resolver_mut().invalidate_structure();
-        Ok(result)
+        Ok(())
     }
 
     fn refresh_project_asset_consumers(

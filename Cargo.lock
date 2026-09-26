@@ -5608,6 +5608,7 @@ dependencies = [
  "lpc-hardware",
  "lpc-mapping",
  "lpc-model",
+ "lpc-registry",
  "lpc-shared",
  "lpc-view",
  "lpc-wire",

@@ -208,6 +208,11 @@ fn deleting_referenced_fixture_mapping_doc_reports_asset_entered_error() {
 #[test]
 fn removing_playlist_reference_removes_child_def_and_its_asset() {
     let (mut scenario, _) = RegistryScenario::load_fixture("fyeah-sign");
+    // Only the idle entry is resident at load; load the blast entry so its
+    // removal from the playlist is observable.
+    scenario
+        .set_entry_resident("playlist", 2, true)
+        .expect("blast becomes resident");
 
     let changes = scenario.replace_file_and_refresh(
         "/playlist.json",

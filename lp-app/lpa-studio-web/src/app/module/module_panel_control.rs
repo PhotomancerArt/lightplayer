@@ -131,7 +131,10 @@ pub fn ModulePanelControl(
     // The Transport is wider still: a whole instrument, not a control in a
     // column. It takes the panel row's full width and wraps below the
     // narrow controls at phone widths rather than squeezing the tape.
-    let is_instrument = matches!(control.widget, UiPanelWidget::Transport { .. });
+    let is_instrument = matches!(
+        control.widget,
+        UiPanelWidget::Transport { .. } | UiPanelWidget::PatternPicker { .. }
+    );
     let column_class = if is_instrument {
         INSTRUMENT_CLASS
     } else if is_wide {
@@ -216,6 +219,7 @@ pub fn ModulePanelControl(
                 readout_class,
                 label,
                 on_action,
+                on_panel,
             }
         }
     }
@@ -234,6 +238,10 @@ fn ModulePanelControlBody(
     /// the top-layer visual.
     label: Element,
     #[props(default)] on_action: Option<EventHandler<UiAction>>,
+    /// Panel gestures (reset) for an instrument that carries its own resets
+    /// (the Pattern instrument); `None` on the popup's top-layer copy.
+    #[props(default)]
+    on_panel: Option<EventHandler<PanelGesture>>,
 ) -> Element {
     let engaged = state.engaged();
     let following = matches!(state, UiPanelControlState::ReadFollowing);
@@ -355,6 +363,14 @@ fn ModulePanelControlBody(
                     wires: control.wires.clone(),
                     on_action,
                 }
+            }
+        }
+        // The playlist's Pattern instrument: the group's legend already
+        // names it, and it carries its own per-channel resets, so it takes
+        // no label row and no readout.
+        UiPanelWidget::PatternPicker { picker } => {
+            rsx! {
+                super::PatternPicker { picker, on_action, on_panel }
             }
         }
         UiPanelWidget::Toggle => {

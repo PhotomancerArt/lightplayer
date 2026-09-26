@@ -62,7 +62,9 @@ use crate::node::ScopeRef;
 ///
 /// ~2 s at 60 fps. Long enough that a consumer skipped for a frame or two
 /// (a playlist entry off-screen, a paused preview) keeps its phase; short
-/// enough that a deleted shader's phasors do not accumulate on a device.
+/// enough that a consumer which silently stopped asking does not hold its
+/// integrator forever. A consumer that LEFT THE TREE does not wait for this:
+/// [`TimebaseStore::forget_removed`] drops its phasors when it goes.
 pub const PHASOR_IDLE_TICKS: u32 = 120;
 
 /// Cap on recorded readings per phasor.
@@ -624,6 +626,58 @@ impl TimebaseStore {
             true
         });
         self.tick = self.tick.wrapping_add(1);
+        dropped
+    }
+
+    /// Drop, now, everything that belonged to nodes which just left the
+    /// tree: timebases whose clock `is_removed`, `Private` phasors whose node
+    /// `is_removed`, `Shared` phasors whose scope `is_dead_scope`, and the
+    /// breakpoint history of each (`scrub-log`). A surviving phasor also
+    /// loses the readings of removed readers, so a long-lived shared clock
+    /// face does not keep naming consumers that are gone.
+    ///
+    /// Why not leave it to [`Self::sweep`]'s idle horizon: that window exists
+    /// for consumers that skip a frame or two and come back, and a removed
+    /// node never comes back under the same id. Waiting it out kept a
+    /// cycling playlist's last few patterns' phasors alive (several KB on a
+    /// device) and made an unloaded entry present in the store for 120 ticks
+    /// after it was gone everywhere else (multi-pattern AC1). A woken entry
+    /// starts fresh anyway (vision Q6), so there is no phase worth keeping.
+    ///
+    /// Map capacity is kept (`VecMap` never shrinks on removal); it is bounded
+    /// by the most phasors ever live at once, not by how many ever existed.
+    ///
+    /// Returns the number of phasors and entries dropped.
+    pub fn forget_removed(
+        &mut self,
+        is_removed: impl Fn(NodeId) -> bool,
+        is_dead_scope: impl Fn(&ScopeRef) -> bool,
+    ) -> usize {
+        let mut dropped = 0;
+        self.entries.retain(|clock, entry| {
+            if is_removed(*clock) {
+                dropped += 1 + entry.phasors.len();
+                return false;
+            }
+            let before = entry.phasors.len();
+            entry.phasors.retain(|key, state| {
+                let gone = match key {
+                    PhasorKey::Private { node, .. } => is_removed(*node),
+                    PhasorKey::Shared { scope, .. } => is_dead_scope(scope),
+                };
+                if !gone {
+                    state.readings.retain(|reading| !is_removed(reading.node));
+                }
+                !gone
+            });
+            dropped += before - entry.phasors.len();
+            #[cfg(feature = "scrub-log")]
+            {
+                let phasors = &entry.phasors;
+                entry.logs.retain(|key, _| phasors.get(key).is_some());
+            }
+            true
+        });
         dropped
     }
 
@@ -1283,6 +1337,79 @@ mod tests {
         }
 
         assert_eq!(store.entry(CLOCK).unwrap().phasor_count(), 1);
+    }
+
+    /// A removed subtree's phasors go at once, not after the idle horizon:
+    /// private ones by node, shared ones by dead scope, a removed clock's
+    /// whole timebase — and a survivor forgets its removed readers.
+    #[test]
+    fn forgetting_removed_nodes_drops_their_phasors_now() {
+        let mut store = store_with_delta(0.25);
+        store.set_timebase(NodeId(2), 0.0, 0.25, Revision::new(1));
+        let config = PhasorConfig::with_period(1.0);
+        let removed = [NodeId(2), NodeId(5), NodeId(6)];
+        let private = |node: u32| PhasorKey::Private {
+            node: NodeId(node),
+            slot: SlotPath::parse("phase").expect("slot path"),
+        };
+        let shared = |scope: ScopeRef| PhasorKey::Shared {
+            scope,
+            channel: ChannelName("speed".into()),
+        };
+        let dead_module = shared(ScopeRef::Module { owner: NodeId(5) });
+        let dead_sink = shared(ScopeRef::Sink {
+            owner: NodeId(3),
+            entry: 2,
+        });
+        let live_sink = shared(ScopeRef::Sink {
+            owner: NodeId(3),
+            entry: 1,
+        });
+        for key in [&private(5), &private(9), &dead_module, &dead_sink] {
+            store.phasor_tick(CLOCK, key, &config, (NodeId(6), &reader()));
+        }
+        // A surviving shared phasor read by a removed and a live node.
+        store.phasor_tick(CLOCK, &live_sink, &config, (NodeId(6), &reader()));
+        store.phasor_tick(CLOCK, &live_sink, &config, (NodeId(9), &reader()));
+        store.phasor_tick(NodeId(2), &private(9), &config, (NodeId(9), &reader()));
+
+        let dropped = store.forget_removed(
+            |id| removed.contains(&id),
+            |scope| {
+                removed.contains(&scope.owner())
+                    || *scope
+                        == ScopeRef::Sink {
+                            owner: NodeId(3),
+                            entry: 2,
+                        }
+            },
+        );
+
+        // Clock 2's entry and its phasor, plus private(5), the module's and
+        // the sink's shared phasors.
+        assert_eq!(dropped, 2 + 3);
+        assert!(
+            store.entry(NodeId(2)).is_none(),
+            "a removed clock's timebase"
+        );
+        let entry = store.entry(CLOCK).unwrap();
+        let mut keys: alloc::vec::Vec<_> = entry.phasors().map(|(key, _)| key.clone()).collect();
+        keys.sort();
+        let mut want = alloc::vec![private(9), live_sink.clone()];
+        want.sort();
+        assert_eq!(keys, want);
+        let readers: alloc::vec::Vec<_> = readings_of(&store, &live_sink)
+            .into_iter()
+            .map(|reading| reading.node)
+            .collect();
+        assert_eq!(readers, [NodeId(9)], "the removed reader is forgotten");
+        #[cfg(feature = "scrub-log")]
+        for key in [&private(5), &dead_module, &dead_sink] {
+            assert!(
+                entry.breakpoints(key).is_empty(),
+                "a forgotten phasor's history goes with it: {key:?}"
+            );
+        }
     }
 
     #[test]

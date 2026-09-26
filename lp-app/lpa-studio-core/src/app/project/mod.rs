@@ -30,6 +30,7 @@ pub(crate) mod device_bind;
 pub mod dirty_summary;
 pub(crate) mod edit_journal;
 pub(crate) mod editor_meta_op;
+pub(crate) mod entry_check;
 pub mod export_lint;
 pub mod loaded_project_choice;
 pub mod node;

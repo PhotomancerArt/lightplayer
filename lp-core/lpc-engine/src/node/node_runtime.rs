@@ -4,7 +4,7 @@ use crate::nodes::OutputFragment;
 use crate::products::control::ControlLayout;
 use crate::resource::RuntimeBufferId;
 use lpc_model::{
-    AssetLocation, NodeRuntimeStatus, Revision, SlotAccess, SlotPath, SlotShapeRegistry,
+    AssetLocation, NodeId, NodeRuntimeStatus, Revision, SlotAccess, SlotPath, SlotShapeRegistry,
     SlotShapeRegistryError,
 };
 use lpc_wire::WireNodeCommand;
@@ -13,6 +13,7 @@ use super::contexts::{
     AssetRefreshContext, DestroyCtx, MemPressureCtx, NodeResourceInitContext, TickContext,
 };
 use super::node_error::NodeError;
+use super::residency_request::ResidencyRequest;
 use super::{ControlNode, RenderNode};
 use crate::engine::memory_pressure::PressureLevel;
 
@@ -158,6 +159,39 @@ pub trait NodeRuntime {
     /// for the tick at `revision`. A node that deferred heavy work may run
     /// it during this frame's render; the window expires with the frame.
     fn open_compile_window(&mut self, _revision: Revision) {}
+
+    /// Load/unload of this node's own children, applied by the engine at the
+    /// pre-tick step ([`crate::Engine::apply_residency`]). Only the playlist
+    /// implements it (multi-pattern vision D3).
+    ///
+    /// Polled once per tick, before the tick. Taking the request clears it:
+    /// the engine answers every request it takes, through
+    /// [`Self::entry_unloaded`] / [`Self::entry_loaded`] /
+    /// [`Self::entry_load_failed`], or [`Self::residency_refused`] when it
+    /// changed nothing.
+    fn residency_request(&mut self) -> Option<ResidencyRequest> {
+        None
+    }
+
+    /// The engine loaded entry `entry`: its child is `child`, alive and
+    /// bound, and its visual output is `output_slot` on that child. Called at
+    /// the pre-tick step, so the child can be demanded in the tick that
+    /// follows.
+    fn entry_loaded(&mut self, _entry: u32, _child: NodeId, _output_slot: &SlotPath) {}
+
+    /// The engine unloaded entry `entry`: its child subtree is gone from the
+    /// tree, and its ids are never reused.
+    fn entry_unloaded(&mut self, _entry: u32) {}
+
+    /// Loading entry `entry` failed (parse, derive or attach). Nothing of it
+    /// is attached; `reason` says why. The tick goes on.
+    fn entry_load_failed(&mut self, _entry: u32, _reason: &str) {}
+
+    /// The engine refused the whole `request` and changed nothing: the
+    /// entry to unload carries edits a commit would write, so unloading it
+    /// would strand them (and loading the other without unloading would hold
+    /// two entries at once). The owner keeps playing what it has.
+    fn residency_refused(&mut self, _request: ResidencyRequest, _reason: &str) {}
 
     /// Current runtime health, when the node has a more specific status than "ok".
     ///

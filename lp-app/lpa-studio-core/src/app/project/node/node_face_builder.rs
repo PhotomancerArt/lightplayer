@@ -1117,6 +1117,35 @@ fn playlist_face(
     Some((face, Some(active_child)))
 }
 
+/// The tree segment name `entry`'s child will mount under, by the same
+/// naming rule [`playlist_entry`] matches a mounted child against: the
+/// authored entry `name`, else `entry_<key>`. Used to wait for a just-
+/// activated dormant entry's card to land (P8, D11) — the entry may have
+/// no mounted child yet, so this reads the authored name straight from the
+/// `entries` config row rather than from `children`.
+pub(crate) fn playlist_entry_expected_child_name(
+    sections: &[UiNodeSection],
+    entry: u32,
+) -> Option<String> {
+    let rows = config_rows(sections);
+    let UiConfigSlotBody::Record(entries_map) = rows
+        .iter()
+        .find(|row| row.key == "entries")
+        .map(|row| &row.body)?
+    else {
+        return None;
+    };
+    let row = entries_map
+        .fields
+        .iter()
+        .find(|row| map_entry_name(row).parse::<u32>().ok() == Some(entry))?;
+    let UiConfigSlotBody::Record(record) = &row.body else {
+        return None;
+    };
+    let authored_name = string_field(&record.fields, "name").filter(|name| !name.is_empty());
+    Some(authored_name.unwrap_or_else(|| format!("entry_{entry}")))
+}
+
 /// One `entries[<key>]` record row → its strip entry plus the index of its
 /// mounted child DTO (matched by the loader's naming rule: the authored
 /// entry `name`, else `entry_<key>`). Dangling entries (no mounted child)

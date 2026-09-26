@@ -554,6 +554,15 @@ does not model. The full reasoning, in Yona's words, is
   reporting, Brave grant revocation, the real chooser) is the shim's residue
   (`docs/adr/2026-09-09-studio-device-stack-over-a-virtual-serial-port.md`,
   rule 3).
+- **Radio is the named exception: the emulator has no BLE air.** Since
+  Bluetooth went on by default, an emulated board with no device store
+  starts the BLE controller and advertises, but no central ever answers, so
+  nothing connects. A BLE claim comes from host tests (the access gate:
+  `lpa-server/tests/access_gate.rs`), `?ble=emu` for Studio's transport and
+  UI (below), plus a desk walk through `spikes/ble-lab`. Its wire mode speaks the product's own link, and an agent
+  can drive it with no human using the Mac's Chrome as the central over CDP.
+  Its README is the runbook. A desk number names the board, the distance and
+  the central: Mac Chrome is not Bluefy on an iPhone.
 - **When you do a hardware walk, do the emulator walk first**, and what
   hardware checks is **parity**. If hardware disagrees with the emulator, fix
   the *emulator* first — file a fidelity defect under `docs/defects/` (e.g.
@@ -591,6 +600,22 @@ grants itself.
 The door admits **one client per board** (a second gets 409), so one Studio tab
 per `emu serve`, and use `?on=` (a different, orthogonal flag) if you want a
 second lens on the same session.
+
+**`?ble=emu`** (beside `?emu=`) does the same for Bluetooth: it replaces
+`navigator.bluetooth` with `public/lpa-link/virtual_bluetooth.js`, the NUS
+GATT subset over the same emulated boards, so Studio's `ble:` link, the
+device card and Play run unchanged; `just walk-ble-emu` is its walk. It
+models the firmware's link rules as far as the page can see them: the link
+opens when the central subscribes, each link gets its own hello, an
+unauthenticated link is dropped after 10 s, and Bluefy's phantom
+drop, where the page hears a disconnect while the radio link stays
+up. **Trust caveat: it proves the transport, the UI and Play, not access.**
+The emulated board sees its trusted USB link, so every request is answered
+at the edit tier, and it never runs the C6's BLE controller or trouble-host:
+the two faults the real walks found (a chained ACL packet cut short, a long
+write acknowledged and dropped) were invisible to it. Access enforcement is
+proven by `lpa-server/tests/access_gate.rs` and the desk check
+(`spikes/ble-lab`). See `docs/adr/2026-09-24-ble-transport.md`, S5.
 
 Two more dev-only flags tune the device wire for a measurement (read once at
 page load by `lpa-studio-web/src/dev_url_flags.rs`; no UI, no persistence):

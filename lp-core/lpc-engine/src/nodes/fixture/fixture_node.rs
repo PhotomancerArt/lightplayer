@@ -661,10 +661,10 @@ impl NodeRuntime for FixtureNode {
                 def.gamma_correction().get_or(ctx, true)?,
             )
         };
-        // Read through the option's `some` branch rather than the def view's
-        // option reader: `power` is absent from every project authored before
-        // it existed, and that reads as an unresolved slot rather than as the
-        // "option slot is none" the view's reader recognises.
+        // Read through the option's `some` branch by path: `power` is absent
+        // from every project authored before it existed, and an absent option
+        // comes back as the typed `is_absent_option` error, which
+        // `try_read_def_value` reads as `None` without allocating.
         //
         // Absent falls back to the default guard rather than to unlimited — the
         // fixture most in need of a current limit is the one whose author has
@@ -1040,8 +1040,11 @@ fn try_read_def_value<T: lpc_model::FromLpValue>(
 ) -> Result<Option<T>, NodeError> {
     let production = match ctx.resolve_static_consumed(path) {
         Ok(production) => production,
+        // An absent option: the common case for `power.some`, every frame.
+        // Typed, so it costs no parse and no shape walk.
+        Err(e) if e.is_absent_option() => return Ok(None),
         Err(e) => {
-            // "Absent" (no def loaded, inactive enum variant, option none) is
+            // "Absent" (no def loaded, inactive enum variant) is
             // expected and reads as None; a path that cannot exist in the
             // FixtureDef shape is a code bug and must not be swallowed.
             let slot = SlotPath::parse(path).map_err(|e| {

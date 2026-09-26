@@ -33,6 +33,13 @@ pub const CLOCK_PLAY_STATE_CHANNEL: &str = "clock.play_state";
 /// See [`CLOCK_RATE_CHANNEL`].
 pub const CLOCK_SCRUB_CHANNEL: &str = "clock.scrub";
 
+/// A playlist's cycle (`PlaylistDef::cycle`): hold, or cycle
+/// `{ step_seconds, fade_seconds }`. The Play-mode pattern instrument writes
+/// it whole.
+pub const PLAYLIST_CYCLE_CHANNEL: &str = "playlist.cycle";
+/// A playlist's skipped entry keys (`PlaylistDef::skip`), one whole list.
+pub const PLAYLIST_SKIP_CHANNEL: &str = "playlist.skip";
+
 /// One well-known channel: canonical name, semantic kind, and the docs the
 /// picker surfaces.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -99,6 +106,20 @@ pub const WELL_KNOWN_CHANNELS: &[WellKnownChannel] = &[
         name: CLOCK_SCRUB_CHANNEL,
         kind: Kind::Duration,
         doc: "Clock scrub offset in signed seconds off live.",
+        carries_product: false,
+    },
+    // A playlist's two Play-mode controls. Nearest-fit kinds again: both
+    // are records a picker chooses from, not scalars.
+    WellKnownChannel {
+        name: PLAYLIST_CYCLE_CHANNEL,
+        kind: Kind::Choice,
+        doc: "Playlist cycle: hold, or cycle { step_seconds, fade_seconds } through the enabled entries.",
+        carries_product: false,
+    },
+    WellKnownChannel {
+        name: PLAYLIST_SKIP_CHANNEL,
+        kind: Kind::Choice,
+        doc: "Playlist entry keys switched off in the cycle (one whole list).",
         carries_product: false,
     },
     WellKnownChannel {

@@ -118,6 +118,38 @@ long-lived branch conflict on this file whenever main re-baselined too.
   **on a PR, `just apply-ci-figures <pr>`; `just bless-chips` is for a desk
   change you have not pushed.** Positional figures, which a desk bless could
   never write, now arrive the same way.
+- 2026-09-25 — **a clean 3-way merge wrote the wrong figures.** Merging
+  `origin/main` into the multi-pattern-projects branch (plan P6) conflicted
+  only on `chips/esp32c6.json`'s `commit` stamp; git merged the figures
+  themselves without a conflict and kept main's (`freeBytes` 216,624), but
+  the merged tree boots at the branch's own figures (216,604, `usedBytes`
+  +20, `largestFreeBlock` 196,033), so `heap-budget-check-chips-c6` went red
+  on a tree with no firmware change of its own. Workaround: after a merge
+  that touched a chip record, run the chip's check before trusting the
+  merged numbers, and re-baseline to what the merged tree measures
+  (`just heap-budget-baseline-chips esp32c6`). A record merged as text is
+  not a measurement.
+- 2026-09-25 — **the multi-pattern-projects PR (#827) re-blessed the S3 and
+  the classic three times in one day**, with no memory budget moving: P4 in
+  its main merge (DD8), P8 (`75899cd93`, both chips), and P8 again after its
+  own main merge (`bcbcd2c7f` S3 stack 37,200 → 37,152, `0acb47bbd` classic
+  main stack 45,288 → 45,240). Every one was the main stack moving with
+  statics, carried in the boot-line figures. The engine records were also
+  re-baselined twice (+32 B parked panel writers, +96 B after a main merge)
+  and the C6 chip record three times (`dbad20254`, `20635e7f8`, `4b076bf10`,
+  one of them the merge-as-text case above). Two things made each of these
+  dearer than the paydowns assume:
+  - **desk ≠ CI on positional figures.** The classic's
+    `PATH_HIGH_WATER_GAP` read differently on the desk than in CI, so a desk
+    bless could not produce CI's number and the v3 `--check` stayed red
+    locally after a correct bless (`docs/chip-figures.md` says so; it still
+    cost an agent a cycle to learn).
+  - **a per-chip bless runs past the agent harness's ~590 s foreground
+    limit.** `just bless-chips esp32c6` was moved to the background by the
+    harness, and the agent that started it stopped there and never came back
+    (P8's first run, twice). Workaround: bless one chip per command and
+    prebuild its image first; on a PR prefer `just apply-ci-figures <pr>`,
+    which needs no local build at all.
 
 - 2026-09-25 — **a band move is still a desk bless** (learned wire
   dictionary, PR #835). The main-task stack high-water moved out of its band
