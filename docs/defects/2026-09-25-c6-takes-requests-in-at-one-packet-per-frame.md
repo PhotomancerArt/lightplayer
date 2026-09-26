@@ -47,7 +47,9 @@ guest ms to first reply byte) is the candidate for a chip test.
 
 **Lesson** — a read loop's quantum per wake is a throughput cap, and on a
 cooperative executor the wake rate is the frame rate. fw-esp32s3's
-`io_task` has the identical one-packet `read_serial` and is not changed
-here (no S3 emulator boot yet to measure it). A remaining ~0.07 ms/B slope
+`io_task` had the identical one-packet `read_serial` and has since been
+ported to the same burst drain (`READ_BURST_GAP` / `READ_BURST_MAX`), by
+analogy to the C6 measurement above — there is no S3 emulator boot of the
+shipped image to measure it directly. A remaining ~0.07 ms/B slope
 after the fix, and tick-before-messages (a request waits one full render
 after it lands), are the next firmware-side costs.
