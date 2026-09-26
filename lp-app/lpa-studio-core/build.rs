@@ -51,10 +51,14 @@ fn main() {
     );
     for bucket in BUCKET_ORDER {
         let bucket_dir = catalog_root.join(bucket);
-        println!("cargo:rerun-if-changed={}", bucket_dir.display());
+        // A missing bucket (`templates/`, today) must not be watched: cargo
+        // treats a missing rerun-if-changed path as always stale, which
+        // re-ran this script and recompiled this crate and every dependent on
+        // every build. Creating it touches `catalog/`, watched above.
         if !bucket_dir.is_dir() {
             continue;
         }
+        println!("cargo:rerun-if-changed={}", bucket_dir.display());
         for entry_dir in sorted_dirs(&bucket_dir) {
             println!("cargo:rerun-if-changed={}", entry_dir.display());
             let slug = entry_dir

@@ -784,6 +784,17 @@ studio-firmware-package-served:
 check-wasm-cloud: install-wasm32-target
     cargo check -p lpa-cloud-client --no-default-features --target {{ wasm32_target }}
 
+# Cheap wasm-compile gate for lpa-link's browser-only providers (full gate:
+# studio-web-build).
+#
+# `browser_ble`, `browser_serial_esp32`, `browser_worker` and `emulator_tab`
+# compile for wasm32 only, so a host `cargo check --workspace --tests` never
+# sees them — a new `lpc_wire` enum variant once passed every host check and
+# broke `dx serve` on a non-exhaustive match in `ble_wire.rs`. Cold ~1 min,
+# warm under a second. See docs/debt/local-gate-misses-what-ci-checks.md.
+check-wasm-link: install-wasm32-target
+    cargo check -p lpa-link --target {{ wasm32_target }} --features browser-ble,browser-serial-esp32,browser-worker,emulator-tab
+
 studio-web-build: install-wasm32-target studio-firmware-package-served
     #!/usr/bin/env bash
     set -euo pipefail
@@ -2839,8 +2850,13 @@ test-glsl-filetests:
 # dx build, whose `studio` path gate does not include lpa-cloud-client.
 # Warm ~1s, cold ~47s locally; it runs beside clippy, the Lint job's long
 # pole. See docs/debt/wasm-cloud-check-not-in-just-check.md.
+#
+# `check-wasm-link` rides beside it for the same reason: lpa-link's four
+# browser providers compile only for wasm32, and the stories job's `studio`
+# gate does not list the wire crates (lpc-wire) whose changes break them.
+# Warm ~0.4s (3.6s after touching lpc-wire), cold ~59s locally.
 [parallel]
-check-lint: fmt-check clippy check-wasm-cloud check-lpc-engine-gates wire-dict-check check-studio-core-minimal lint-serde-content lint-browser-test-harness lint-classic-capture lint-pcb-export lint-schemars-fw lint-upgrade-fw lint-emu-fence lint-nested-patches lint-emu-regnames lint-torture-corpus lint-vec-corpus lint-tw-utilities lint-red-main-needs lint-tag-next-version
+check-lint: fmt-check clippy check-wasm-cloud check-wasm-link check-lpc-engine-gates wire-dict-check check-studio-core-minimal lint-serde-content lint-browser-test-harness lint-classic-capture lint-pcb-export lint-schemars-fw lint-upgrade-fw lint-emu-fence lint-nested-patches lint-emu-regnames lint-torture-corpus lint-vec-corpus lint-tw-utilities lint-red-main-needs lint-tag-next-version
 
 [parallel]
 check: check-lint schema-check fw-manifest-check-emu
