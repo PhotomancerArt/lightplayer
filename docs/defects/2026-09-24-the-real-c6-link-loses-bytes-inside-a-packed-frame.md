@@ -197,3 +197,18 @@ test. A transcript that shows it is what would change either.
 
 **Evidence.** `~/.photomancer/planning/lp2025/2026-09-23-1701-lp-json-pack/g1-{150,75,33}.bin`
 (raw captures), with `.txt`/`.sizes` from `lp-cli wire unpack --sizes`.
+
+## 2026-09-26 — seen again, on a second board, with the gate
+
+At the learned wire dictionary's hardware sitting (PR #835; a second XIAO
+ESP32-C6, MAC `10:bd:a3:b0:8e:30`, this branch's image with the IN-endpoint
+gate; Studio headless in Brave, lens at 75 ms, `?wire-capture=1`), two or
+three packed frames of ~1,140 arrived torn in the Web Serial capture,
+mid-connection, with no reset or reload near them (captures and analysis in
+`~/.photomancer/planning/lp2025/2026-09-25-0006-learned-wire-dictionary/wire-tap/scripts/rec/g1-hw-2/`).
+The gate's 0-of-1,327 on the choker's board does not hold on this one, or not
+under this load. With learned frames each tear was caught at the next
+frame's header and recovered within one or two opt-in round trips, with no
+frame decoded against a diverged table — the loss is survivable, but it is
+not gone. Whether the second board, the lens pace, or the host (a laptop on
+the road, not the bench Mac's hub) is the variable is not known.
