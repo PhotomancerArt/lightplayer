@@ -21,6 +21,14 @@
   PLAYFUL choker (73 LEDs on a C6): the unfocused shader's texture probe
   rode every 150 ms pull and dragged the board's frame rate down. The sim
   lens is unchanged. See `ProjectController::always_live_products`.
+  Measured on the C6 emulator (time grade T3, the real `fw-esp32c6` image,
+  PLAYFUL uploaded, `lp-cli/examples/probe_load.rs`, three interleaved
+  rounds of 40 reads per arm, Studio's gap-after-completion cadence): the
+  board rendered 41.4 fps with no probe, 38.0 fps with the fixture's control
+  probe alone (what a device lens pulls now), and 34.8 fps with the shader's
+  16×16 render probe added (what it pulled before) — the render probe cost
+  about 8 % of the board's frame rate and made each pull ~55 ms of guest
+  time longer, at 3.6 KB per read instead of 2.4 KB.
 
 ## Context
 
