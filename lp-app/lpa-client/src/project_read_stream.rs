@@ -94,7 +94,12 @@ impl ProjectReadStream {
         // batch of read events.
         let disposition =
             protocol.response_disposition(&message, self.request_id, PendingAsk::Other);
-        observe_frame(self.request_id, &message, &disposition);
+        observe_frame(
+            protocol.conversation(),
+            self.request_id,
+            &message,
+            &disposition,
+        );
         match disposition {
             ResponseDisposition::Matched => self.accept_matched(message),
             ResponseDisposition::ServerOriginated { .. } | ResponseDisposition::Unsolicited => {

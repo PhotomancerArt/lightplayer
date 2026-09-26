@@ -271,6 +271,7 @@ where
     Cancel: CancelSignal + ?Sized,
 {
     let request_id = protocol.next_request_id();
+    let conversation = protocol.conversation();
     let budget = deadline.budget();
     if let Err(error) = io
         .send(ClientMessage {
@@ -280,10 +281,11 @@ where
         .await
     {
         let error = ClientError::from(error);
-        observe_outcome(request_id, failed(&error));
+        observe_outcome(conversation, request_id, failed(&error));
         return PullOutcome::Failed(error);
     }
     observe(|| ClientObservation::Sent {
+        conversation,
         id: request_id,
         kind: "project.read",
     });
@@ -304,7 +306,7 @@ where
         // those must classify as expected stale drops, not protocol warnings.
         if cancel.is_cancelled() {
             protocol.abandon_request(request_id);
-            observe_outcome(request_id, RequestOutcome::Cancelled);
+            observe_outcome(conversation, request_id, RequestOutcome::Cancelled);
             return PullOutcome::Cancelled;
         }
 
@@ -320,7 +322,7 @@ where
                         log::debug!(
                             "project read id={request_id}: complete ({frames} frames, {streamed_events} events)"
                         );
-                        observe_outcome(request_id, RequestOutcome::Answered);
+                        observe_outcome(conversation, request_id, RequestOutcome::Answered);
                         return PullOutcome::Completed { events, observed };
                     }
                     Err(error) => {
@@ -328,7 +330,7 @@ where
                             "project read id={request_id}: stream error after {frames} frames: {error:?}"
                         );
                         let error = stream_error(error);
-                        observe_outcome(request_id, failed(&error));
+                        observe_outcome(conversation, request_id, failed(&error));
                         return PullOutcome::Failed(error);
                     }
                 }
@@ -338,7 +340,7 @@ where
                     "project read id={request_id}: transport error after {frames} frames: {error}"
                 );
                 let error = ClientError::from(error);
-                observe_outcome(request_id, failed(&error));
+                observe_outcome(conversation, request_id, failed(&error));
                 return PullOutcome::Failed(error);
             }
             ReceiveOutcome::DeadlineElapsed => {
@@ -348,7 +350,11 @@ where
                     "project read id={request_id}: quiet-gap deadline elapsed after {frames} frames                      — the device stopped streaming (a device reset mid-read looks exactly like this;                      check the device console for a [RECOVERY] line)"
                 );
                 protocol.abandon_request(request_id);
-                observe_outcome(request_id, RequestOutcome::TimedOut { budget });
+                observe_outcome(
+                    conversation,
+                    request_id,
+                    RequestOutcome::TimedOut { budget },
+                );
                 return PullOutcome::TimedOut;
             }
         }
@@ -387,8 +393,9 @@ where
 }
 
 /// Report how project read `request_id` ended.
-fn observe_outcome(request_id: u64, outcome: RequestOutcome) {
+fn observe_outcome(conversation: u64, request_id: u64, outcome: RequestOutcome) {
     observe(|| ClientObservation::Outcome {
+        conversation,
         id: request_id,
         outcome,
     });

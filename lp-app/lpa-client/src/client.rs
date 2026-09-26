@@ -197,7 +197,7 @@ where
             .map(|deadline| (deadline.budget(), deadline.request_timer()));
         let Some((budget, timer)) = deadline else {
             let result = self.correlate_request(request_id, request).await;
-            observe_result(request_id, &result);
+            observe_result(self.protocol.conversation(), request_id, &result);
             return result;
         };
         let raced = {
@@ -218,14 +218,16 @@ where
         };
         match raced {
             Some(result) => {
-                observe_result(request_id, &result);
+                observe_result(self.protocol.conversation(), request_id, &result);
                 result
             }
             None => {
                 // The server may still deliver this response; mark it so a
                 // late arrival is an expected stale drop, not a warning.
                 self.protocol.abandon_request(request_id);
+                let conversation = self.protocol.conversation();
                 observe(|| ClientObservation::Outcome {
+                    conversation,
                     id: request_id,
                     outcome: RequestOutcome::TimedOut { budget },
                 });
@@ -256,7 +258,9 @@ where
             })
             .await
             .map_err(ClientError::from)?;
+        let conversation = self.protocol.conversation();
         observe(|| ClientObservation::Sent {
+            conversation,
             id: request_id,
             kind,
         });
@@ -267,7 +271,7 @@ where
             let disposition = self
                 .protocol
                 .response_disposition(&response, request_id, asked);
-            observe_frame(request_id, &response, &disposition);
+            observe_frame(conversation, request_id, &response, &disposition);
             match disposition {
                 ResponseDisposition::Matched => {
                     if let WireServerMsgBody::Error { error } = &response.msg {
@@ -1058,8 +1062,9 @@ pub enum DeployStep {
 }
 
 /// Report how a single-response request ended.
-fn observe_result<T>(request_id: u64, result: &ClientResult<T>) {
+fn observe_result<T>(conversation: u64, request_id: u64, result: &ClientResult<T>) {
     observe(|| ClientObservation::Outcome {
+        conversation,
         id: request_id,
         outcome: match result {
             Ok(_) => RequestOutcome::Answered,
@@ -1367,24 +1372,31 @@ mod tests {
         crate::client_observer::set_client_observer(None);
 
         // Heartbeats (id 0) are traffic, not answers: none are reported.
+        // Every observation names this client's conversation.
+        let c = seen.borrow()[0].conversation();
+        assert_ne!(c, 0);
         assert_eq!(
             *seen.borrow(),
             vec![
                 ClientObservation::Sent {
+                    conversation: c,
                     id: 1,
                     kind: "project.stop-all"
                 },
                 ClientObservation::Outcome {
+                    conversation: c,
                     id: 1,
                     outcome: RequestOutcome::TimedOut {
                         budget: Duration::from_millis(30)
                     },
                 },
                 ClientObservation::Sent {
+                    conversation: c,
                     id: 2,
                     kind: "project.stop-all"
                 },
                 ClientObservation::Frame {
+                    conversation: c,
                     id: 2,
                     response_id: 1,
                     seq: 0,
@@ -1392,6 +1404,7 @@ mod tests {
                     disposition: crate::FrameDisposition::StaleAbandoned,
                 },
                 ClientObservation::Frame {
+                    conversation: c,
                     id: 2,
                     response_id: 2,
                     seq: 0,
@@ -1399,6 +1412,7 @@ mod tests {
                     disposition: crate::FrameDisposition::Matched,
                 },
                 ClientObservation::Outcome {
+                    conversation: c,
                     id: 2,
                     outcome: RequestOutcome::Answered,
                 },
@@ -1426,14 +1440,17 @@ mod tests {
         crate::client_observer::set_client_observer(None);
 
         let seen = seen.borrow();
+        let c = seen[0].conversation();
         assert_eq!(
             seen[..2],
             [
                 ClientObservation::Sent {
+                    conversation: c,
                     id: 1,
                     kind: "project.read"
                 },
                 ClientObservation::Frame {
+                    conversation: c,
                     id: 1,
                     response_id: 1,
                     seq: 1,
@@ -1448,6 +1465,7 @@ mod tests {
                 ClientObservation::Outcome {
                     id: 1,
                     outcome: RequestOutcome::Failed { error },
+                    ..
                 } if error.contains("expected project read frame seq 0, got 1")
             ),
             "the seq failure must be the read's outcome, got {:?}",

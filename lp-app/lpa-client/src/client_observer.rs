@@ -39,13 +39,19 @@ use lpc_wire::{ClientRequest, FsRequest, WireServerMessage};
 
 use crate::protocol_session::ResponseDisposition;
 
-/// One thing a client did or saw, for request `id`.
+/// One thing a client did or saw, for request `id` of client
+/// `conversation` ([`ProtocolSession::conversation`](crate::protocol_session::ProtocolSession::conversation)).
 #[derive(Clone, Debug, PartialEq)]
 pub enum ClientObservation {
     /// The request went out. `kind` names the request, never its payload.
-    Sent { id: u64, kind: &'static str },
+    Sent {
+        conversation: u64,
+        id: u64,
+        kind: &'static str,
+    },
     /// A frame arrived while request `id` waited.
     Frame {
+        conversation: u64,
         id: u64,
         /// The id the frame carried.
         response_id: u64,
@@ -54,7 +60,31 @@ pub enum ClientObservation {
         disposition: FrameDisposition,
     },
     /// What became of request `id`. Reported once.
-    Outcome { id: u64, outcome: RequestOutcome },
+    Outcome {
+        conversation: u64,
+        id: u64,
+        outcome: RequestOutcome,
+    },
+}
+
+impl ClientObservation {
+    /// The client conversation it belongs to: request ids are per client
+    /// (two clients each send a request `1`), so `(conversation, id)` is
+    /// what names one request.
+    pub fn conversation(&self) -> u64 {
+        match self {
+            Self::Sent { conversation, .. }
+            | Self::Frame { conversation, .. }
+            | Self::Outcome { conversation, .. } => *conversation,
+        }
+    }
+
+    /// The request id it is about.
+    pub fn id(&self) -> u64 {
+        match self {
+            Self::Sent { id, .. } | Self::Frame { id, .. } | Self::Outcome { id, .. } => *id,
+        }
+    }
 }
 
 /// How a frame that arrived during a request was classified.
@@ -135,6 +165,7 @@ pub(crate) fn observe(build: impl FnOnce() -> ClientObservation) {
 /// the unsolicited id (heartbeats, logs) are traffic, not answers, and are
 /// not reported.
 pub(crate) fn observe_frame(
+    conversation: u64,
     request_id: u64,
     response: &WireServerMessage,
     disposition: &ResponseDisposition,
@@ -148,6 +179,7 @@ pub(crate) fn observe_frame(
         ResponseDisposition::Uncorrelated { .. } => FrameDisposition::Uncorrelated,
     };
     observe(|| ClientObservation::Frame {
+        conversation,
         id: request_id,
         response_id: response.id,
         seq: response.seq,
@@ -209,22 +241,15 @@ mod tests {
         set_client_observer(Some(Rc::new(move |observation: &ClientObservation| {
             sink.borrow_mut().push(observation.clone());
         })));
-        observe(|| ClientObservation::Sent {
-            id: 4,
+        let sent = |id| ClientObservation::Sent {
+            conversation: 1,
+            id,
             kind: "hello",
-        });
+        };
+        observe(|| sent(4));
         set_client_observer(None);
-        observe(|| ClientObservation::Sent {
-            id: 5,
-            kind: "hello",
-        });
-        assert_eq!(
-            *seen.borrow(),
-            vec![ClientObservation::Sent {
-                id: 4,
-                kind: "hello"
-            }]
-        );
+        observe(|| sent(5));
+        assert_eq!(*seen.borrow(), vec![sent(4)]);
     }
 
     #[test]
