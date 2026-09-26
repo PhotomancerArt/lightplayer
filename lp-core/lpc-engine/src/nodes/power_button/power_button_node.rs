@@ -503,8 +503,15 @@ mod tests {
     impl Harness {
         fn load(fields: &str) -> Self {
             let fs = LpFsMemory::new();
-            fs.write_file("/project.json".as_path(), b"{\n  \"format\": 10\n}\n")
-                .expect("container manifest");
+            fs.write_file(
+                "/project.json".as_path(),
+                format!(
+                    "{{\n  \"format\": {}\n}}\n",
+                    lpc_model::PROJECT_FORMAT_VERSION
+                )
+                .as_bytes(),
+            )
+            .expect("container manifest");
             fs.write_file(
                 "/module.json".as_path(),
                 br#"{ "kind": "Module", "nodes": { "power": { "ref": "./power.json" } } }"#,

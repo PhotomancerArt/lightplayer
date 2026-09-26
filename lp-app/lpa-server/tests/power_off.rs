@@ -74,7 +74,11 @@ impl Rig {
         let fs = LpFsMemory::new();
         fs.write_file(
             "/projects/p/project.json".as_path(),
-            b"{\n  \"format\": 10\n}\n",
+            format!(
+                "{{\n  \"format\": {}\n}}\n",
+                lpc_model::PROJECT_FORMAT_VERSION
+            )
+            .as_bytes(),
         )
         .unwrap();
         fs.write_file(
