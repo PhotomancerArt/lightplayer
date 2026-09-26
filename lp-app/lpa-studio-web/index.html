@@ -365,8 +365,8 @@
           and an own property shadows it — proven in real Chrome by the M2
           conformance suite, which asserts both the shadowing and its removal.
 
-          The flag is validated the way `capture_sink_url()` validates
-          `?capture-sink=` (`src/device_events_io.rs`): a query is user input,
+          The flag is validated the way `sink_from_location()` validates
+          `?record=` (`src/device_events_io.rs`): a query is user input,
           an unknown value reads as no value, and the page says so once.
         -->
         <script>

@@ -167,6 +167,9 @@ pub fn App() -> Element {
     use_hook(move || {
         router::replace(&route.peek().clone());
     });
+    // The session recorder's route feed: every change of `route`, with the
+    // reason the programmatic sites below note before they set it.
+    crate::route_recording::use_route_recorder(route);
     // The library's `prj…` uids and what hardware each project declares,
     // latched from the last view whose library had actually MOUNTED. `None`
     // means the library has not spoken yet: an empty roster from an
@@ -550,11 +553,13 @@ pub fn App() -> Element {
                             // (uid → slug, identity landing): same place,
                             // no duplicate entries
                             router::replace(&target);
+                            crate::route_recording::note_route_reason("lens-sync (replace)");
                         } else {
                             // an open from a page (gallery card, Explore
                             // example): a real navigation, so a real
                             // history entry (back returns to that page)
                             router::navigate(&target);
+                            crate::route_recording::note_route_reason("lens-sync (open)");
                         }
                         route.set(target);
                     }
@@ -602,6 +607,14 @@ pub fn App() -> Element {
                         && loop_saw_opening.get()
                         && !loop_pending_route_open.get();
                     if open_ended {
+                        // The kick the recorder exists to explain: say
+                        // which evidence fired it.
+                        crate::route_recording::note_route_reason(format!(
+                            "open-ended: home view shown, no open in flight, \
+                             open stage {}, no mismatch, saw_opening, no route \
+                             open pending",
+                            lpa_studio_core::open_stage_label(&lpa_studio_core::open_stage())
+                        ));
                         router::replace(&StudioRoute::Devices);
                         route.set(StudioRoute::Devices);
                     }
@@ -627,6 +640,7 @@ pub fn App() -> Element {
                         && current.device_hint() != target.device_hint()
                     {
                         let healed = current.with_device_hint(target.device_hint().cloned());
+                        crate::route_recording::note_route_reason("hint-heal");
                         router::replace(&healed);
                         route.set(healed);
                     }
@@ -661,6 +675,7 @@ pub fn App() -> Element {
                         on: on.clone(),
                     };
                     if canonical != current {
+                        crate::route_recording::note_route_reason("slug-heal");
                         router::replace(&canonical);
                         route.set(canonical);
                     }
@@ -783,6 +798,11 @@ pub fn App() -> Element {
                 // (a push, like the Refuse path — restoring what the back
                 // consumed leaves history as it was).
                 if !unsaved_gate::confirm_discarding_unsaved(TRANSIENT_LEAVE_PROMPT) {
+                    crate::route_recording::record_route_rollback(
+                        &new_route,
+                        &old,
+                        "leaving discards a transient session",
+                    );
                     router::navigate(&old);
                     return true;
                 }
@@ -808,6 +828,7 @@ pub fn App() -> Element {
                     nav_leaving.set(false);
                 }
             }
+            crate::route_recording::note_route_reason_if_unset("browser-nav");
             route.set(new_route.clone());
             match &new_route {
                 StudioRoute::Project { uid, on, .. } => {
@@ -828,6 +849,11 @@ pub fn App() -> Element {
                         && nav_unsaved.get()
                         && !unsaved_gate::confirm_discarding_unsaved(OPEN_DISCARDS_PROMPT)
                     {
+                        crate::route_recording::record_route_rollback(
+                            &new_route,
+                            &old,
+                            "unsaved work kept",
+                        );
                         router::navigate(&old);
                         return true;
                     }
@@ -863,6 +889,11 @@ pub fn App() -> Element {
                         && nav_unsaved.get()
                         && !unsaved_gate::confirm_discarding_unsaved(OPEN_DISCARDS_PROMPT)
                     {
+                        crate::route_recording::record_route_rollback(
+                            &new_route,
+                            &old,
+                            "unsaved work kept",
+                        );
                         router::navigate(&old);
                         return true;
                     }
@@ -905,6 +936,11 @@ pub fn App() -> Element {
                         && nav_unsaved.get()
                         && !unsaved_gate::confirm_discarding_unsaved(OPEN_DISCARDS_PROMPT)
                     {
+                        crate::route_recording::record_route_rollback(
+                            &new_route,
+                            &old,
+                            "unsaved work kept",
+                        );
                         router::navigate(&old);
                         return true;
                     }
@@ -1244,6 +1280,7 @@ pub fn App() -> Element {
                 // staying here would be a lie. Home, with a real history
                 // entry — back returns to where the user was.
                 let mut route = route;
+                crate::route_recording::note_route_reason("archived");
                 router::navigate(&StudioRoute::Home);
                 route.set(StudioRoute::Home);
             });
@@ -1472,6 +1509,9 @@ pub fn App() -> Element {
             // bottom for acts with no other visible consequence (a link on
             // the clipboard, an access level flipped, a project archived).
             ToastHost {}
+            // While the page carries `?record=`: the session recorder's
+            // pill, on every route (a recording must never be invisible).
+            crate::app::layout::RecordingBadge {}
             // "<name> can now unlock <device> over Bluetooth", after a USB
             // connect added keys on its own (plan D6): at the bottom, with
             // Undo. A new generation is a new toast.
@@ -1812,6 +1852,7 @@ fn resolve_project_route(
     };
     let Some(target) = target else {
         shared_project.set(router::PendingSharedProject(Some(uid)));
+        crate::route_recording::note_route_reason("shared-project (not in library)");
         route.set(StudioRoute::Home);
         return true;
     };
@@ -1824,6 +1865,7 @@ fn resolve_project_route(
     // device on every reload that the app has already declined once.
     let current = route.peek().clone();
     if let Some(dropped) = resolved.dropped_hint_route(&current) {
+        crate::route_recording::note_route_reason("hint-dropped");
         router::replace(&dropped);
         route.set(dropped);
     }
