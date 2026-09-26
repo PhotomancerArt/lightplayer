@@ -4,7 +4,7 @@
     "[INIT] fw-esp32v3 boot",
     "[INIT] chip=esp32 arch=xtensa heap=15072+112640+98304+15536=241552 (ROM PRO stack + dram_seg arena + SRAM1 tail + ROM APP stack)",
     "[INIT] heap regions: 0 0x3ffe0440+15072 (ROM PRO stack), 1 .bss+112640 (dram_seg arena), 2 0x3ffe8000+98304 (SRAM1 tail), 3 0x3ffe4350+15536 (ROM APP stack, after core bind)",
-    "[INIT] main stack 45240 B",
+    "[INIT] main stack 45224 B",
     "[RECOVERY] boot: cause=power-on level=green safe_mode=false prior_boot_complete=true",
     "[INIT] runtime started",
     "[INIT] I/O task spawned (uart0 921600 8N1, swi2 executor prio2, timg0t1 pacer 1ms)",
@@ -17,7 +17,7 @@
     "[INIT] fw-esp32v3 boot",
     "[INIT] chip=esp32 arch=xtensa heap=15072+112640+98304+15536=241552 (ROM PRO stack + dram_seg arena + SRAM1 tail + ROM APP stack)",
     "[INIT] heap regions: 0 0x3ffe0440+15072 (ROM PRO stack), 1 .bss+112640 (dram_seg arena), 2 0x3ffe8000+98304 (SRAM1 tail), 3 0x3ffe4350+15536 (ROM APP stack, after core bind)",
-    "[INIT] main stack 45240 B",
+    "[INIT] main stack 45224 B",
     "[RECOVERY] boot: cause=power-on level=green safe_mode=false prior_boot_complete=true",
     "[INIT] runtime started",
     "[INIT] I/O task spawned (uart0 921600 8N1, swi2 executor prio2, timg0t1 pacer 1ms)",
@@ -27,18 +27,18 @@
     "[INIT] JIT code region: sram0 ibus 0x4008"
   ],
   "boot_idle.path_high_water_gap": -96,
-  "determinism.single_core_prefix.cycles": 3250804,
+  "determinism.single_core_prefix.cycles": 3250751,
   "determinism.single_core_prefix.idle_skips": 0,
-  "determinism.single_core_prefix.instructions": 3250784,
+  "determinism.single_core_prefix.instructions": 3250731,
   "init_chain.prefix": [
     "[INIT] fw-esp32v3 boot",
     "[INIT] chip=esp32 arch=xtensa heap=15072+112640+98304+15536=241552 (ROM PRO stack + dram_seg arena + SRAM1 tail + ROM APP stack)",
     "[INIT] heap regions: 0 0x3ffe0440+15072 (ROM PRO stack), 1 .bss+112640 (dram_seg arena), 2 0x3ffe8000+98304 (SRAM1 tail), 3 0x3ffe4350+15536 (ROM APP stack, after core bind)",
-    "[INIT] main stack 45240 B",
+    "[INIT] main stack 45224 B",
     "[RECOVERY] boot: cause=power-on level=green safe_mode=false prior_boot_complete=true",
     "[INIT] runtime started",
     "[INIT] I/O task spawned (uart0 921600 8N1, swi2 executor prio2, timg0t1 pacer 1ms)",
     ""
   ],
-  "main_stack_bytes": 45240
+  "main_stack_bytes": 45224
 }
