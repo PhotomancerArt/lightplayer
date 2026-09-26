@@ -11,7 +11,7 @@
 //      serving on this worktree's canonical port (reusing a live server or
 //      starting `just studio-dev` itself), then loops scenarios until `q` —
 //      setup (foreground, capture tab CLOSED so the port is free) → the tab
-//      opens at hand-off with `?capture-sink=` streaming to one persistent
+//      opens at hand-off with `?record=` streaming to one persistent
 //      sink → printed steps → capture → validate. Enter-through is the
 //      happy path: next uncaptured scenario, first serial port.
 //
@@ -709,7 +709,7 @@ async function runOne(spec, state, argPort, studioUrl) {
   const failures = validate(spec, records);
   if (records.length === 0) {
     rmSync(partial, { force: true });
-    console.log("\n✗ nothing arrived — is the sitting's tab open (with ?capture-sink=), and did the scenario touch the device?");
+    console.log("\n✗ nothing arrived — is the sitting's tab open (with ?record=), and did the scenario touch the device?");
     if (existsSync(file)) {
       console.log(`  (the previous capture at ${path.relative(ROOT, file)} is untouched)`);
     }
@@ -855,7 +855,7 @@ async function runOneEmulated(spec, state, studio, sinkUrl, options) {
   const failures = validate(spec, records);
   if (records.length === 0) {
     rmSync(partial, { force: true });
-    console.log("\n✗ nothing arrived at the sink — did the page carry ?capture-sink=?");
+    console.log("\n✗ nothing arrived at the sink — did the page carry ?record=?");
     return { id: spec.id, ok: false, failures: spec.expect, records: 0, stepError, door, registry };
   }
   if (failures.length || stepError) {
@@ -931,7 +931,7 @@ async function sitting(initialId, argPort) {
   const { sink, state } = startSink();
   await new Promise((resolve) => sink.listen(0, "127.0.0.1", resolve));
   const sinkUrl = `http://127.0.0.1:${sink.address().port}/ingest`;
-  const studioUrl = `http://localhost:${studio.port}/?capture-sink=${encodeURIComponent(sinkUrl)}`;
+  const studioUrl = `http://localhost:${studio.port}/?record=${encodeURIComponent(sinkUrl)}`;
   // Deliberately NOT opened here: Studio's load-time auto-connect sweep
   // takes the serial port the moment the tab exists, which is exactly
   // when setup needs the port free (sitting feedback, 2026-08-03 — "the

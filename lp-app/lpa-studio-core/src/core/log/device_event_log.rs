@@ -101,6 +101,47 @@ pub enum DeviceEventKind {
     ///
     /// Additive, per this module's JSONL contract.
     Journal { scope: String, entry: String },
+    /// A warn- or error-level Studio log entry, or an open that failed
+    /// (session recorder, 2026-09-26). `level` is the log level's label
+    /// (`warn` / `error`); `source` names who said it (the log origin plus
+    /// its detail, or `open` for an open failure).
+    ///
+    /// Additive, per this module's JSONL contract.
+    Error {
+        level: String,
+        source: String,
+        message: String,
+    },
+    /// The open in flight changed stage (`starting`, `preparing-project`,
+    /// `on-device:loading`, `failed`, …) — so a hang reads as "stage X
+    /// began at t, and nothing after". Additive.
+    Open { stage: String },
+    /// A Studio command entered the actor's queue (a UI action, a device
+    /// gesture, a console/settings change). `name` is the variant path
+    /// (`Action/home/OpenPackage`); `detail` is a bounded `Debug`
+    /// rendering, empty for commands that can carry secrets. Additive.
+    Command { name: String, detail: String },
+    /// A dispatched UI action finished: `outcome` is `ok` or `error`,
+    /// `elapsed_ms` is measured on the injected clock, and `error` carries
+    /// the error's message when it failed. Additive.
+    Action {
+        name: String,
+        outcome: String,
+        elapsed_ms: f64,
+        error: Option<String>,
+    },
+    /// The page's route changed (web edge). `reason` names the
+    /// programmatic cause when one is known (`open-ended`, `boot`,
+    /// `archive`, `refused-nav`, …); a plain navigation carries none.
+    /// Additive.
+    Route {
+        from: String,
+        to: String,
+        reason: Option<String>,
+    },
+    /// A toast line was shown (web edge): `level` is `info` or `warn`.
+    /// Additive.
+    Toast { level: String, message: String },
 }
 
 impl DeviceEventKind {
@@ -180,6 +221,52 @@ impl Serialize for DeviceEventRecord {
                 map.serialize_entry("kind", "journal")?;
                 map.serialize_entry("scope", scope)?;
                 map.serialize_entry("entry", entry)?;
+            }
+            DeviceEventKind::Error {
+                level,
+                source,
+                message,
+            } => {
+                map.serialize_entry("kind", "error")?;
+                map.serialize_entry("level", level)?;
+                map.serialize_entry("source", source)?;
+                map.serialize_entry("message", message)?;
+            }
+            DeviceEventKind::Open { stage } => {
+                map.serialize_entry("kind", "open")?;
+                map.serialize_entry("stage", stage)?;
+            }
+            DeviceEventKind::Command { name, detail } => {
+                map.serialize_entry("kind", "command")?;
+                map.serialize_entry("name", name)?;
+                map.serialize_entry("detail", detail)?;
+            }
+            DeviceEventKind::Action {
+                name,
+                outcome,
+                elapsed_ms,
+                error,
+            } => {
+                map.serialize_entry("kind", "action")?;
+                map.serialize_entry("name", name)?;
+                map.serialize_entry("outcome", outcome)?;
+                map.serialize_entry("elapsed_ms", elapsed_ms)?;
+                if let Some(error) = error {
+                    map.serialize_entry("error", error)?;
+                }
+            }
+            DeviceEventKind::Route { from, to, reason } => {
+                map.serialize_entry("kind", "route")?;
+                map.serialize_entry("from", from)?;
+                map.serialize_entry("to", to)?;
+                if let Some(reason) = reason {
+                    map.serialize_entry("reason", reason)?;
+                }
+            }
+            DeviceEventKind::Toast { level, message } => {
+                map.serialize_entry("kind", "toast")?;
+                map.serialize_entry("level", level)?;
+                map.serialize_entry("message", message)?;
             }
         }
         map.end()
@@ -332,6 +419,31 @@ impl DeviceEventRecorder {
         log.borrow_mut().record(record);
     }
 
+    /// Record one event already stamped by the caller — a producer that
+    /// read the clock for its own entry (a log line) reuses that stamp
+    /// rather than reading the clock twice.
+    pub fn record_at(
+        &self,
+        t: f64,
+        session: Option<&str>,
+        endpoint: Option<&str>,
+        kind: DeviceEventKind,
+    ) {
+        let Some(log) = &self.log else { return };
+        log.borrow_mut().record(DeviceEventRecord {
+            t,
+            session: session.map(str::to_string),
+            endpoint: endpoint.map(str::to_string),
+            kind,
+        });
+    }
+
+    /// The recorder's clock reading now (0 for [`Self::noop`]) — for
+    /// producers that measure an elapsed time on the same clock.
+    pub fn now(&self) -> f64 {
+        (self.clock)()
+    }
+
     /// Whether capture mode is on (producers may skip building raw-traffic
     /// records entirely when it is off).
     pub fn capture(&self) -> bool {
@@ -450,6 +562,121 @@ mod tests {
             },
         });
         assert_eq!(seen.borrow().len(), 1);
+    }
+
+    fn line_of(kind: DeviceEventKind) -> serde_json::Value {
+        let record = DeviceEventRecord {
+            t: 3.0,
+            session: None,
+            endpoint: None,
+            kind,
+        };
+        serde_json::from_str(&serde_json::to_string(&record).unwrap()).unwrap()
+    }
+
+    #[test]
+    fn error_records_serialize_flat() {
+        let line = line_of(DeviceEventKind::Error {
+            level: "error".to_string(),
+            source: "studio".to_string(),
+            message: "open failed".to_string(),
+        });
+        assert_eq!(line["kind"], "error");
+        assert_eq!(line["level"], "error");
+        assert_eq!(line["source"], "studio");
+        assert_eq!(line["message"], "open failed");
+        assert_eq!(line["t"], 3.0);
+    }
+
+    #[test]
+    fn open_records_serialize_flat() {
+        let line = line_of(DeviceEventKind::Open {
+            stage: "on-device:loading".to_string(),
+        });
+        assert_eq!(line["kind"], "open");
+        assert_eq!(line["stage"], "on-device:loading");
+    }
+
+    #[test]
+    fn command_records_serialize_flat() {
+        let line = line_of(DeviceEventKind::Command {
+            name: "Action/home/OpenPackage".to_string(),
+            detail: "OpenPackage { key: \"x\" }".to_string(),
+        });
+        assert_eq!(line["kind"], "command");
+        assert_eq!(line["name"], "Action/home/OpenPackage");
+        assert_eq!(line["detail"], "OpenPackage { key: \"x\" }");
+    }
+
+    #[test]
+    fn action_records_serialize_flat_and_omit_an_absent_error() {
+        let ok = line_of(DeviceEventKind::Action {
+            name: "home/OpenPackage".to_string(),
+            outcome: "ok".to_string(),
+            elapsed_ms: 12.5,
+            error: None,
+        });
+        assert_eq!(ok["kind"], "action");
+        assert_eq!(ok["name"], "home/OpenPackage");
+        assert_eq!(ok["outcome"], "ok");
+        assert_eq!(ok["elapsed_ms"], 12.5);
+        assert!(ok.get("error").is_none());
+
+        let failed = line_of(DeviceEventKind::Action {
+            name: "home/OpenPackage".to_string(),
+            outcome: "error".to_string(),
+            elapsed_ms: 20_000.0,
+            error: Some("the device did not respond".to_string()),
+        });
+        assert_eq!(failed["outcome"], "error");
+        assert_eq!(failed["error"], "the device did not respond");
+    }
+
+    #[test]
+    fn route_records_serialize_flat_and_omit_an_absent_reason() {
+        let kicked = line_of(DeviceEventKind::Route {
+            from: "/p/x-prj1".to_string(),
+            to: "/devices".to_string(),
+            reason: Some("open-ended".to_string()),
+        });
+        assert_eq!(kicked["kind"], "route");
+        assert_eq!(kicked["from"], "/p/x-prj1");
+        assert_eq!(kicked["to"], "/devices");
+        assert_eq!(kicked["reason"], "open-ended");
+
+        let plain = line_of(DeviceEventKind::Route {
+            from: "/".to_string(),
+            to: "/devices".to_string(),
+            reason: None,
+        });
+        assert!(plain.get("reason").is_none());
+    }
+
+    #[test]
+    fn toast_records_serialize_flat() {
+        let line = line_of(DeviceEventKind::Toast {
+            level: "warn".to_string(),
+            message: "Not saved".to_string(),
+        });
+        assert_eq!(line["kind"], "toast");
+        assert_eq!(line["level"], "warn");
+        assert_eq!(line["message"], "Not saved");
+    }
+
+    #[test]
+    fn recorder_record_at_keeps_the_callers_stamp() {
+        let log = Rc::new(RefCell::new(DeviceEventLog::new()));
+        let recorder = DeviceEventRecorder::new(Rc::clone(&log), Rc::new(|| 99.0));
+        recorder.record_at(
+            7.0,
+            None,
+            None,
+            DeviceEventKind::Open {
+                stage: "starting".to_string(),
+            },
+        );
+        assert_eq!(log.borrow().iter().next().unwrap().t, 7.0);
+        assert_eq!(recorder.now(), 99.0);
     }
 
     #[test]

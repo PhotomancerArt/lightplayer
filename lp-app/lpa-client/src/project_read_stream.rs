@@ -29,6 +29,7 @@
 use lpc_wire::{ProjectReadEvent, WireServerMessage, WireServerMsgBody};
 
 use crate::client_event::ClientEvent;
+use crate::client_observer::observe_frame;
 use crate::protocol_session::{PendingAsk, ProtocolSession, ResponseDisposition};
 
 /// Failure while collecting a project-read stream.
@@ -91,7 +92,15 @@ impl ProjectReadStream {
         // A read never asks for a hello, so a hello (or a heartbeat, or a
         // log) under this stream's id is another id space's frame, not a
         // batch of read events.
-        match protocol.response_disposition(&message, self.request_id, PendingAsk::Other) {
+        let disposition =
+            protocol.response_disposition(&message, self.request_id, PendingAsk::Other);
+        observe_frame(
+            protocol.conversation(),
+            self.request_id,
+            &message,
+            &disposition,
+        );
+        match disposition {
             ResponseDisposition::Matched => self.accept_matched(message),
             ResponseDisposition::ServerOriginated { .. } | ResponseDisposition::Unsolicited => {
                 Ok(ClientEvent::from_unsolicited_message(message).map_or(

@@ -42,6 +42,7 @@ use lpc_wire::{
 use crate::client_error::ClientError;
 use crate::client_event::ClientEvent;
 use crate::client_io::ClientIo;
+use crate::client_observer::{ClientObservation, RequestOutcome, observe};
 use crate::project_read_stream::{
     ProjectReadStream, ProjectReadStreamError, ProjectReadStreamStep,
 };
@@ -270,6 +271,8 @@ where
     Cancel: CancelSignal + ?Sized,
 {
     let request_id = protocol.next_request_id();
+    let conversation = protocol.conversation();
+    let budget = deadline.budget();
     if let Err(error) = io
         .send(ClientMessage {
             id: request_id,
@@ -277,8 +280,15 @@ where
         })
         .await
     {
-        return PullOutcome::Failed(ClientError::from(error));
+        let error = ClientError::from(error);
+        observe_outcome(conversation, request_id, failed(&error));
+        return PullOutcome::Failed(error);
     }
+    observe(|| ClientObservation::Sent {
+        conversation,
+        id: request_id,
+        kind: "project.read",
+    });
 
     let mut stream = ProjectReadStream::new(request_id);
     let mut observed = Vec::new();
@@ -296,6 +306,7 @@ where
         // those must classify as expected stale drops, not protocol warnings.
         if cancel.is_cancelled() {
             protocol.abandon_request(request_id);
+            observe_outcome(conversation, request_id, RequestOutcome::Cancelled);
             return PullOutcome::Cancelled;
         }
 
@@ -311,13 +322,16 @@ where
                         log::debug!(
                             "project read id={request_id}: complete ({frames} frames, {streamed_events} events)"
                         );
+                        observe_outcome(conversation, request_id, RequestOutcome::Answered);
                         return PullOutcome::Completed { events, observed };
                     }
                     Err(error) => {
                         log::warn!(
                             "project read id={request_id}: stream error after {frames} frames: {error:?}"
                         );
-                        return PullOutcome::Failed(stream_error(error));
+                        let error = stream_error(error);
+                        observe_outcome(conversation, request_id, failed(&error));
+                        return PullOutcome::Failed(error);
                     }
                 }
             }
@@ -325,7 +339,9 @@ where
                 log::warn!(
                     "project read id={request_id}: transport error after {frames} frames: {error}"
                 );
-                return PullOutcome::Failed(ClientError::from(error));
+                let error = ClientError::from(error);
+                observe_outcome(conversation, request_id, failed(&error));
+                return PullOutcome::Failed(error);
             }
             ReceiveOutcome::DeadlineElapsed => {
                 // Same contract as cancellation: the request is abandoned and
@@ -334,6 +350,11 @@ where
                     "project read id={request_id}: quiet-gap deadline elapsed after {frames} frames                      — the device stopped streaming (a device reset mid-read looks exactly like this;                      check the device console for a [RECOVERY] line)"
                 );
                 protocol.abandon_request(request_id);
+                observe_outcome(
+                    conversation,
+                    request_id,
+                    RequestOutcome::TimedOut { budget },
+                );
                 return PullOutcome::TimedOut;
             }
         }
@@ -369,6 +390,21 @@ where
         Poll::Pending
     })
     .await
+}
+
+/// Report how project read `request_id` ended.
+fn observe_outcome(conversation: u64, request_id: u64, outcome: RequestOutcome) {
+    observe(|| ClientObservation::Outcome {
+        conversation,
+        id: request_id,
+        outcome,
+    });
+}
+
+fn failed(error: &ClientError) -> RequestOutcome {
+    RequestOutcome::Failed {
+        error: error.to_string(),
+    }
 }
 
 fn stream_error(error: ProjectReadStreamError) -> ClientError {

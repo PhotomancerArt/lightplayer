@@ -681,6 +681,51 @@ fn focus_action_issues_no_read() {
 }
 
 // ---------------------------------------------------------------------------
+// Session recorder: every sent command is recorded (ticks are not), and each
+// dispatched action records its outcome.
+// ---------------------------------------------------------------------------
+#[test]
+fn sent_commands_and_action_outcomes_reach_the_device_event_log() {
+    let (mut controller, _handle) = connected_controller();
+    let seen = Rc::new(RefCell::new(Vec::new()));
+    controller.set_on_device_event({
+        let seen = Rc::clone(&seen);
+        move |record| seen.borrow_mut().push(record.kind.clone())
+    });
+    let (actor, studio_handle) = StudioActor::new(controller, immediate_timer());
+    let StudioHandle { tx, view: _view, .. } = studio_handle;
+
+    let target = ProjectEditorTarget::node_tree();
+    tx.send(StudioCommand::RefreshTick);
+    tx.send(StudioCommand::Action(UiAction::from_op(
+        target.node_id(),
+        ProjectEditorOp::Focus,
+    )));
+    tx.send(StudioCommand::Shutdown);
+    drive(actor.run());
+
+    let seen = seen.borrow();
+    let names: Vec<&str> = seen
+        .iter()
+        .filter_map(|kind| match kind {
+            crate::DeviceEventKind::Command { name, .. } => Some(name.as_str()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(names.len(), 2, "the tick is not recorded: {names:?}");
+    assert!(names[0].starts_with("Action/") && names[0].ends_with("/Focus"), "{names:?}");
+    assert_eq!(names[1], "Shutdown");
+    assert!(
+        seen.iter().any(|kind| matches!(
+            kind,
+            crate::DeviceEventKind::Action { name, outcome, .. }
+                if name.ends_with("/Focus") && outcome == "ok"
+        )),
+        "the Focus action's outcome is recorded: {seen:?}"
+    );
+}
+
+// ---------------------------------------------------------------------------
 // Scenario 7: the controller log ring wraps at the core cap.
 // ---------------------------------------------------------------------------
 #[test]

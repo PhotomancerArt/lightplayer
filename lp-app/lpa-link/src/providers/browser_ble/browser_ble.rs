@@ -11,6 +11,8 @@ use js_sys::{Array, Function, Promise, Reflect};
 use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::JsFuture;
 
+use crate::device_link::wire_tap::{WireTapDir, tap_wire};
+
 #[wasm_bindgen(module = "/src/providers/browser_ble/browser_ble.js")]
 extern "C" {
     #[wasm_bindgen(js_name = isSupported)]
@@ -182,11 +184,19 @@ pub(crate) async fn disconnect(session: u32) {
 }
 
 pub(crate) fn write(session: u32, bytes: &[u8]) -> Result<bool, String> {
-    js_write(session, bytes).map_err(|error| error_message(&error))
+    let queued = js_write(session, bytes).map_err(|error| error_message(&error))?;
+    // Only what the link took: a link that is down answers `false` and the
+    // bytes never left.
+    if queued {
+        tap_wire(WireTapDir::Tx, "ble", session, bytes);
+    }
+    Ok(queued)
 }
 
 pub(crate) fn take_bytes(session: u32) -> Result<Vec<u8>, String> {
-    js_take_bytes(session).map_err(|error| error_message(&error))
+    let bytes = js_take_bytes(session).map_err(|error| error_message(&error))?;
+    tap_wire(WireTapDir::Rx, "ble", session, &bytes);
+    Ok(bytes)
 }
 
 pub(crate) fn take_errors(session: u32) -> Result<Vec<String>, String> {

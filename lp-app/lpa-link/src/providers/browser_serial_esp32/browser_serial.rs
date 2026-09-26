@@ -11,6 +11,7 @@ use crate::device_link::wire_capture::capture_wire_bytes;
 use crate::device_link::wire_reader::{
     WireRead, WireReader, device_log_level, packed_replies_wanted,
 };
+use crate::device_link::wire_tap::{WireTapDir, tap_wire};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct BrowserSerialPortHandle {
@@ -196,6 +197,7 @@ pub async fn open(
 }
 
 pub async fn write_line(id: u32, line: &str) -> Result<(), LinkError> {
+    tap_wire(WireTapDir::Tx, "serial", id, line.as_bytes());
     JsFuture::from(js_write_line(id, line))
         .await
         .map(|_| ())
@@ -249,6 +251,7 @@ pub fn take_reads(id: u32) -> Vec<WireRead> {
             crate::device_link::wire_capture::WIRE_CAPTURE_CAP
         ));
     }
+    tap_wire(WireTapDir::Rx, "serial", id, &bytes);
     let now_ms = js_sys::Date::now() as u64;
     let mut reads = Vec::new();
     let mut sends = Vec::new();

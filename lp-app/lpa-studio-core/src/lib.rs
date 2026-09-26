@@ -109,7 +109,7 @@ pub use app::open_priority::{UserOpenGuard, begin_user_open, user_open_in_flight
 pub use app::open_progress::{
     DeviceOpenProgress, DeviceOpenStep, DeviceWait, DeviceWaitReason, OpenDevice, OpenFailure,
     OpenStage, cancel_open, current_open_generation, note_open_requested, open_stage,
-    open_superseded,
+    open_stage_label, open_superseded, record_open_stages,
 };
 #[cfg(all(feature = "browser-worker", target_arch = "wasm32"))]
 pub use app::preview_host::{PreviewHost, PreviewSlotHandle};
@@ -179,6 +179,7 @@ pub use app::studio::{
     VERDICT_CHASE_TICKS, ViewPublisher, has_unsaved_work, set_device_lens_pause_override,
     studio_view_channel,
 };
+pub use core::log::{DeviceEventKind, DeviceEventRecorder};
 pub use core::notice::UiNotices;
 pub use core::view::activity_view::UiActivityStep;
 pub use core::view::activity_view::UiActivityStepState;

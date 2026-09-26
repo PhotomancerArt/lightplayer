@@ -19,7 +19,7 @@
 //     satisfies the SAME list a board satisfied. Loosening one to make the
 //     emulator pass is the failure this lane exists to make visible.
 //   * The device-event record shape. The trace is Studio's own output,
-//     streamed to the same `?capture-sink=`; this lane never writes a record
+//     streamed to the same `?record=`; this lane never writes a record
 //     Studio did not emit, with the single exception of the provenance
 //     `journal` line the runner prepends (OQ3) — which is the kind's own
 //     existing shape, is written by the runner and says so, and is skipped by
@@ -32,7 +32,7 @@
 // directory — that is what makes `blank` mean blank. The PAGE still comes
 // from the worktree's own canonical `just studio-dev` (the runner's standing
 // rule: never a substitute server), and the two are joined by `?emu=<url>` in
-// the query string, which composes with `?capture-sink=` because nothing
+// the query string, which composes with `?record=` because nothing
 // reads anything else's flag.
 
 import { spawn } from "node:child_process";
@@ -250,7 +250,7 @@ async function runStep(step, ctx) {
 export function studioUrlFor({ studioPort, doorAddr = null, sinkUrl, route = "/devices" }) {
   const query = new URLSearchParams();
   query.set("emu", doorAddr ? `ws://${doorAddr}` : "tab");
-  query.set("capture-sink", sinkUrl);
+  query.set("record", sinkUrl);
   return `http://localhost:${studioPort}${route}?${query.toString()}`;
 }
 

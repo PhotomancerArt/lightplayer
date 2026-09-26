@@ -13,7 +13,7 @@ just device-scenario run s1-blank-flash --port /dev/cu.usbmodem11201
 (a backgrounded espflash has died silently mid-write before), releases the
 port, prints the exact browser steps, and starts a local HTTP capture sink.
 Open the running `just studio-dev` URL with the printed
-`?capture-sink=…` parameter appended — Studio's device event log (M0)
+`?record=…` parameter appended — Studio's device event log (M0)
 streams every lifecycle event and raw serial line to the runner, which
 writes `lp-app/lpa-link/testdata/device-traces/<id>.jsonl` as it arrives
 and validates it against the spec's `expect` list when you press Enter.
@@ -80,7 +80,7 @@ scenario has two halves and each one changes:
 **One `emu serve` per scenario**, on an ephemeral port, so `blank` means blank.
 The **page** still comes from the worktree's own canonical `just studio-dev` —
 never a substitute server — and the two are joined by `?emu=<url>`, which
-composes with `?capture-sink=` because nothing reads anything else's flag.
+composes with `?record=` because nothing reads anything else's flag.
 
 ## The `emulated` block
 
