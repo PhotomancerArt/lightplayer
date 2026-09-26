@@ -1009,6 +1009,44 @@ pub(crate) fn replace_with_query_param(route: &StudioRoute, key: &str, value: &s
     }
 }
 
+/// The page-load flags a link or a programmatic push must carry over from
+/// the current address: each is read once, when the page loads, so a move
+/// that dropped one would leave the running page unchanged and silently
+/// change what the NEXT load is — a refresh that stops recording
+/// (`?record=`), or that swaps the emulated boards for the real Web Serial
+/// or Bluetooth (`?emu=`, `?ble=`).
+const PAGE_LOAD_FLAGS: [&str; 3] = ["record", "emu", "ble"];
+
+/// `url` (a path, maybe with a query) with every [`PAGE_LOAD_FLAGS`] entry
+/// of `current_search` it does not already set appended.
+#[cfg_attr(
+    not(target_arch = "wasm32"),
+    allow(
+        dead_code,
+        reason = "called by the wasm URL writers; host builds only run the unit tests"
+    )
+)]
+fn with_page_flags(url: &str, current_search: &str) -> String {
+    let (path, query) = url.split_once('?').unwrap_or((url, ""));
+    let has = |key: &str| {
+        query
+            .split('&')
+            .any(|pair| pair.split_once('=').map_or(pair, |(name, _)| name) == key)
+    };
+    let mut params: Vec<&str> = query.split('&').filter(|pair| !pair.is_empty()).collect();
+    for pair in current_search.trim_start_matches('?').split('&') {
+        let key = pair.split_once('=').map_or(pair, |(name, _)| name);
+        if PAGE_LOAD_FLAGS.contains(&key) && !has(key) {
+            params.push(pair);
+        }
+    }
+    if params.is_empty() {
+        path.to_string()
+    } else {
+        format!("{path}?{}", params.join("&"))
+    }
+}
+
 /// Programmatic same-session navigation: push the route and wake the
 /// route listener (a manual `push_state` fires no `popstate`, so one is
 /// dispatched by hand — the listener treats it like any back/forward).
@@ -1017,7 +1055,12 @@ pub(crate) fn navigate_push(route: &StudioRoute) {
     let Some(window) = web_sys::window() else {
         return;
     };
-    write_history(&window, HistoryWrite::Push, &route.path());
+    let search = window.location().search().unwrap_or_default();
+    write_history(
+        &window,
+        HistoryWrite::Push,
+        &with_page_flags(&route.path(), &search),
+    );
     if let Ok(event) = web_sys::Event::new("popstate") {
         let _ = window.dispatch_event(&event);
     }
@@ -1206,6 +1249,8 @@ pub(crate) fn install_route_listener(
             // not reload the page.
             event.prevent_default();
             let current = current_url(&window);
+            let search = window.location().search().unwrap_or_default();
+            let url = with_page_flags(&url, &search);
             if url == current {
                 return;
             }
@@ -1311,9 +1356,29 @@ impl Drop for RouteListener {
 
 #[cfg(test)]
 mod tests {
-    use lpa_studio_core::{UiConsoleView, UiPaneView, UiStatus, UiViewContent};
-
     use super::*;
+
+    #[test]
+    fn a_move_keeps_the_page_load_flags_and_nothing_else() {
+        let current =
+            "?emu=ws://127.0.0.1:1&record=http%3A%2F%2F127.0.0.1%3A2%2Fingest&on=mac:aa&x=1";
+        assert_eq!(
+            with_page_flags("/devices", current),
+            "/devices?emu=ws://127.0.0.1:1&record=http%3A%2F%2F127.0.0.1%3A2%2Fingest"
+        );
+        // The link's own query wins, and keeps its order.
+        assert_eq!(
+            with_page_flags("/p/x-prjy?on=mac:bb&emu=tab", current),
+            "/p/x-prjy?on=mac:bb&emu=tab&record=http%3A%2F%2F127.0.0.1%3A2%2Fingest"
+        );
+        assert_eq!(with_page_flags("/devices", ""), "/devices");
+        assert_eq!(
+            with_page_flags("/devices?on=mac:aa", "?x=1"),
+            "/devices?on=mac:aa"
+        );
+    }
+
+    use lpa_studio_core::{UiConsoleView, UiPaneView, UiStatus, UiViewContent};
 
     /// Every route, once, so the round-trip and the legacy-hash tests below
     /// stay in step with the table in the module header.
