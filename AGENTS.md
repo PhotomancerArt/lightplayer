@@ -640,6 +640,13 @@ opt-in; the answer is a `dev: …` `WireNote` line, never a frame. Both cover
 Web Serial ports (a real board, `?emu=ws://…`), not the in-tab board
 (`?emu=tab`).
 
+`?record=<url>` records a whole Studio session — errors, route changes,
+commands, open stages, the device journal, every request and its outcome,
+and the raw bytes of every transport — to `lp-cli record serve` on this
+machine (loopback or private-LAN sinks only; anything else is refused with
+a visible note), and `lp-cli record timeline <file>` reads it back. The
+runbook is `docs/recording-a-studio-session.md`.
+
 ### Running the device walk yourself
 
 With a dev server already up on this worktree's port:
