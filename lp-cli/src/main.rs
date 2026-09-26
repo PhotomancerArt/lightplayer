@@ -96,7 +96,7 @@ enum Cli {
     Schema(schema::SchemaCli),
     /// Tools over a board's link bytes (`wire unpack`: packed frames → `M!` lines).
     Wire(wire::WireCli),
-    /// Receive Studio session recordings (`?record=`): `record serve`.
+    /// Receive and read Studio session recordings (`?record=`): `record serve`, `record timeline`.
     Record(record::RecordCli),
     /// Compile a GLSL file to LPIR text (stdout). Uses the same Naga → LPIR path as the JIT.
     ShaderLpir {

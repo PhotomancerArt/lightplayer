@@ -11,6 +11,7 @@ use super::serve::{Recorder, record_query};
 pub fn handle_record(cli: RecordCli) -> Result<()> {
     match cli.subcommand {
         RecordSubcommand::Serve(args) => handle_serve(&args),
+        RecordSubcommand::Timeline(args) => super::timeline::handle_timeline(&args),
     }
 }
 

@@ -4,6 +4,8 @@
 pub mod args;
 pub mod handler;
 pub mod serve;
+pub mod timeline;
+pub mod wire_streams;
 
 pub use args::RecordCli;
 pub use handler::handle_record;
