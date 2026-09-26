@@ -95,9 +95,14 @@ unsafe impl GlobalAlloc for TrackingAlloc {
 #[global_allocator]
 static ALLOC: TrackingAlloc = TrackingAlloc;
 
-/// This thread's live heap.
-fn live() -> usize {
-    LIVE.try_with(Cell::get).unwrap_or(0).max(0) as usize
+/// This thread's live heap. Signed (see [`LIVE`]): a phase boundary's
+/// absolute value can be negative if this thread has, net, freed more than
+/// it allocated (typically memory another thread allocated). Only the
+/// *difference* between two readings — what every caller below takes — is
+/// meaningful; do not clamp this to zero, or two negative readings collapse
+/// to an identical zero and hide a real delta between them.
+fn live() -> i64 {
+    LIVE.try_with(Cell::get).unwrap_or(0) as i64
 }
 
 fn reset_peak() {
@@ -105,9 +110,10 @@ fn reset_peak() {
     let _ = PEAK.try_with(|peak| peak.set(level));
 }
 
-/// This thread's peak live heap since the last [`reset_peak`].
-fn peak() -> usize {
-    PEAK.try_with(Cell::get).unwrap_or(0).max(0) as usize
+/// This thread's peak live heap since the last [`reset_peak`]. Signed, same
+/// as [`live`].
+fn peak() -> i64 {
+    PEAK.try_with(Cell::get).unwrap_or(0) as i64
 }
 
 fn workspace_dir() -> PathBuf {
@@ -291,17 +297,21 @@ fn fixtures() -> Vec<Fixture> {
 #[derive(Clone, Copy)]
 struct Phase {
     label: &'static str,
-    live_before: usize,
-    step_peak: usize,
-    live_after: usize,
+    live_before: i64,
+    step_peak: i64,
+    live_after: i64,
 }
 
 impl Phase {
     fn resident(&self) -> i64 {
-        self.live_after as i64 - self.live_before as i64
+        self.live_after - self.live_before
     }
-    fn transient(&self) -> usize {
-        self.step_peak.saturating_sub(self.live_before)
+    /// By construction `step_peak >= live_before` (the peak is reset to
+    /// `live_before` right before the phase runs, then only rises); `max(0)`
+    /// is a safety net, not a clamp on a value that can legitimately go
+    /// negative the way [`live`]'s absolute reading can.
+    fn transient(&self) -> i64 {
+        (self.step_peak - self.live_before).max(0)
     }
 }
 
@@ -402,7 +412,7 @@ fn phase_of(phases: &[Phase], phase: &str) -> (i64, i64) {
         .iter()
         .find(|p| p.label.starts_with(phase))
         .unwrap_or_else(|| panic!("phase {phase} recorded"));
-    (p.resident(), p.transient() as i64)
+    (p.resident(), p.transient())
 }
 
 /// Which axis a pair of runs differs along — the one the slope divides by.
@@ -446,8 +456,8 @@ fn print_slopes(label: &str, axis: Axis, a: (&Fixture, &[Phase]), b: (&Fixture, 
             pa.label,
             slope((axis.of(a.0), pa.resident()), (axis.of(b.0), pb.resident())),
             slope(
-                (axis.of(a.0), pa.transient() as i64),
-                (axis.of(b.0), pb.transient() as i64)
+                (axis.of(a.0), pa.transient()),
+                (axis.of(b.0), pb.transient())
             ),
         );
     }
@@ -491,11 +501,11 @@ fn derived(phases: &[Phase]) -> Vec<(i64, i64)> {
             frames.iter().map(|p| p.resident()).sum(),
             frames
                 .iter()
-                .map(|p| p.transient() as i64)
+                .map(|p| p.transient())
                 .max()
                 .unwrap_or(0),
         ),
-        (ticks[compile].resident(), ticks[compile].transient() as i64),
+        (ticks[compile].resident(), ticks[compile].transient()),
     ]
 }
 
@@ -628,7 +638,7 @@ fn per_node_memory_table() {
             fixture.label
         );
         let after_drop = phases.last().expect("phases").live_after;
-        let above_floor = after_drop as i64 - floor as i64;
+        let above_floor = after_drop - floor;
         assert!(
             above_floor <= 16 * 1024,
             "{}: {above_floor} B above the process floor after dropping the engine",

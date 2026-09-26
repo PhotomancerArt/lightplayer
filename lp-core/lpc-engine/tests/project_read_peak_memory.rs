@@ -82,16 +82,21 @@ fn measure_lock() -> std::sync::MutexGuard<'static, ()> {
         .unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
-/// Reset the peak to the current live level; returns that baseline.
-fn reset_peak() -> usize {
-    let level = LIVE.try_with(Cell::get).unwrap_or(0);
-    let _ = PEAK.try_with(|peak| peak.set(level));
-    level.max(0) as usize
+/// Reset the peak to the current live level; returns that baseline. Signed
+/// (see [`LIVE`]): the absolute level can be negative if this thread has,
+/// net, freed more than it allocated. Only the *difference*
+/// [`peak_above`] takes from it is meaningful — do not clamp this to zero,
+/// or two negative readings collapse to an identical zero and hide a real
+/// difference between them.
+fn reset_peak() -> i64 {
+    let level = LIVE.try_with(Cell::get).unwrap_or(0) as i64;
+    let _ = PEAK.try_with(|peak| peak.set(level as isize));
+    level
 }
 
-fn peak_above(baseline: usize) -> usize {
-    let peak = PEAK.try_with(Cell::get).unwrap_or(0);
-    (peak.max(0) as usize).saturating_sub(baseline)
+fn peak_above(baseline: i64) -> i64 {
+    let peak = PEAK.try_with(Cell::get).unwrap_or(0) as i64;
+    peak - baseline
 }
 
 /// Keeps every event alive for the duration of the stream.
@@ -312,7 +317,7 @@ fn studio_shaped_read_streams_below_materialized() {
     // at ~2.3x. Peak is O(largest atom), NOT O(project) — if this trips,
     // some producer regressed to materialize-first (or a genuinely bigger
     // atom appeared; raise deliberately, with a measurement, never casually).
-    const STUDIO_SHAPED_STREAMED_PEAK_CEILING_BYTES: usize = 32 * 1024;
+    const STUDIO_SHAPED_STREAMED_PEAK_CEILING_BYTES: i64 = 32 * 1024;
     let baseline = reset_peak();
     let mut sink = DroppingSink::default();
     block_on(async {

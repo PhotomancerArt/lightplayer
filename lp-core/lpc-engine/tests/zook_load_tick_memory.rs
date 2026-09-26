@@ -70,9 +70,14 @@ unsafe impl GlobalAlloc for TrackingAlloc {
 #[global_allocator]
 static ALLOC: TrackingAlloc = TrackingAlloc;
 
-/// This thread's live heap.
-fn live() -> usize {
-    LIVE.try_with(Cell::get).unwrap_or(0).max(0) as usize
+/// This thread's live heap. Signed (see [`LIVE`]): a phase boundary's
+/// absolute value can be negative if this thread has, net, freed more than
+/// it allocated (typically memory another thread allocated). Only the
+/// *difference* between two readings — what every caller below takes — is
+/// meaningful; do not clamp this to zero, or two negative readings collapse
+/// to an identical zero and hide a real delta between them.
+fn live() -> i64 {
+    LIVE.try_with(Cell::get).unwrap_or(0) as i64
 }
 
 fn reset_peak() {
@@ -80,17 +85,18 @@ fn reset_peak() {
     let _ = PEAK.try_with(|peak| peak.set(level));
 }
 
-/// This thread's peak live heap since the last [`reset_peak`].
-fn peak() -> usize {
-    PEAK.try_with(Cell::get).unwrap_or(0).max(0) as usize
+/// This thread's peak live heap since the last [`reset_peak`]. Signed, same
+/// as [`live`].
+fn peak() -> i64 {
+    PEAK.try_with(Cell::get).unwrap_or(0) as i64
 }
 
 #[derive(Clone, Copy)]
 struct Phase {
     label: &'static str,
-    live_before: usize,
-    step_peak: usize,
-    live_after: usize,
+    live_before: i64,
+    step_peak: i64,
+    live_after: i64,
 }
 
 fn workspace_dir() -> PathBuf {
@@ -167,8 +173,8 @@ fn zook_dome_load_and_tick_memory_phases() {
             p.live_before - baseline.min(p.live_before),
             p.step_peak - baseline.min(p.step_peak),
             p.live_after - baseline.min(p.live_after),
-            p.step_peak.saturating_sub(p.live_before),
-            p.live_after as i64 - p.live_before as i64,
+            (p.step_peak - p.live_before).max(0),
+            p.live_after - p.live_before,
         );
     }
 
@@ -182,7 +188,7 @@ fn zook_dome_load_and_tick_memory_phases() {
             .iter()
             .find(|p| p.label.starts_with(label_prefix))
             .unwrap_or_else(|| panic!("phase {label_prefix} recorded"));
-        p.live_after as i64 - p.live_before as i64
+        p.live_after - p.live_before
     };
     let load_resident = resident("load project");
     let tick1_resident = resident("tick 1");
@@ -199,7 +205,7 @@ fn zook_dome_load_and_tick_memory_phases() {
     let steady: i64 = phases
         .iter()
         .filter(|p| matches!(p.label, "tick 4" | "tick 5" | "tick 6"))
-        .map(|p| p.live_after as i64 - p.live_before as i64)
+        .map(|p| p.live_after - p.live_before)
         .sum();
     assert!(
         steady <= 4 * 1024,
