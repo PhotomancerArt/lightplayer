@@ -8,10 +8,10 @@ use wasm_bindgen_futures::{JsFuture, spawn_local};
 
 use crate::LinkError;
 use crate::device_link::wire_capture::capture_wire_bytes;
-use crate::device_link::wire_tap::{WireTapDir, tap_wire};
 use crate::device_link::wire_reader::{
     WireRead, WireReader, device_log_level, packed_replies_wanted,
 };
+use crate::device_link::wire_tap::{WireTapDir, tap_wire};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct BrowserSerialPortHandle {

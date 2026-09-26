@@ -8,6 +8,7 @@ pub mod client;
 pub mod client_error;
 pub mod client_event;
 pub mod client_io;
+pub mod client_observer;
 pub mod device_push;
 pub mod device_remove;
 pub mod device_stamp;
@@ -43,6 +44,9 @@ pub use client::{
 pub use client_error::{ClientError, ClientResult};
 pub use client_event::ClientEvent;
 pub use client_io::ClientIo;
+pub use client_observer::{
+    ClientObservation, ClientObserver, FrameDisposition, RequestOutcome, set_client_observer,
+};
 pub use device_push::{PushReport, push_project};
 pub use device_remove::{READY_ATTEMPTS, RemoveReport, remove_project, wait_until_ready};
 pub use device_stamp::{MANIFEST_CHUNK_BYTES, write_file_in_chunks};

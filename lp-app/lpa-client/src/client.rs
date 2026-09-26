@@ -21,6 +21,9 @@ use lpc_wire::{
 use crate::client_error::{ClientError, ClientResult};
 use crate::client_event::ClientEvent;
 use crate::client_io::ClientIo;
+use crate::client_observer::{
+    ClientObservation, RequestOutcome, observe, observe_frame, request_kind,
+};
 use crate::project_deploy::{
     ProjectDeployFile, project_deploy_requests, project_write_requests,
     validate_project_deploy_response,
@@ -193,7 +196,9 @@ where
             .as_ref()
             .map(|deadline| (deadline.budget(), deadline.request_timer()));
         let Some((budget, timer)) = deadline else {
-            return self.correlate_request(request_id, request).await;
+            let result = self.correlate_request(request_id, request).await;
+            observe_result(request_id, &result);
+            return result;
         };
         let raced = {
             let mut timer = timer;
@@ -212,11 +217,18 @@ where
             .await
         };
         match raced {
-            Some(result) => result,
+            Some(result) => {
+                observe_result(request_id, &result);
+                result
+            }
             None => {
                 // The server may still deliver this response; mark it so a
                 // late arrival is an expected stale drop, not a warning.
                 self.protocol.abandon_request(request_id);
+                observe(|| ClientObservation::Outcome {
+                    id: request_id,
+                    outcome: RequestOutcome::TimedOut { budget },
+                });
                 Err(ClientError::from(lpc_wire::TransportError::Other(format!(
                     "device did not respond within {:.1}s",
                     budget.as_secs_f64()
@@ -236,6 +248,7 @@ where
         // What this request asks for travels with it: a `Hello` answers
         // `ClientRequest::Hello` and nothing else, whatever id it carries.
         let asked = PendingAsk::of(&request);
+        let kind = request_kind(&request);
         self.io
             .send(ClientMessage {
                 id: request_id,
@@ -243,14 +256,19 @@ where
             })
             .await
             .map_err(ClientError::from)?;
+        observe(|| ClientObservation::Sent {
+            id: request_id,
+            kind,
+        });
 
         let mut events = Vec::new();
         loop {
             let response = self.io.receive().await.map_err(ClientError::from)?;
-            match self
+            let disposition = self
                 .protocol
-                .response_disposition(&response, request_id, asked)
-            {
+                .response_disposition(&response, request_id, asked);
+            observe_frame(request_id, &response, &disposition);
+            match disposition {
                 ResponseDisposition::Matched => {
                     if let WireServerMsgBody::Error { error } = &response.msg {
                         return Err(ClientError::Server(error.clone()));
@@ -1039,6 +1057,19 @@ pub enum DeployStep {
     Loading,
 }
 
+/// Report how a single-response request ended.
+fn observe_result<T>(request_id: u64, result: &ClientResult<T>) {
+    observe(|| ClientObservation::Outcome {
+        id: request_id,
+        outcome: match result {
+            Ok(_) => RequestOutcome::Answered,
+            Err(error) => RequestOutcome::Failed {
+                error: error.to_string(),
+            },
+        },
+    });
+}
+
 #[cfg(test)]
 mod tests {
     use std::collections::VecDeque;
@@ -1312,6 +1343,127 @@ mod tests {
                 ..
             }
         ));
+    }
+
+    #[tokio::test]
+    async fn the_observer_hears_each_send_its_frames_and_how_it_ended() {
+        let seen = observe_into_vec();
+        let io = PacedIo::heartbeating(Duration::from_millis(2));
+        let mut client = LpClient::new(io.clone())
+            .with_request_deadline(test_deadline(Duration::from_millis(30)));
+
+        client
+            .send_request(ClientRequest::StopAllProjects)
+            .await
+            .unwrap_err();
+        io.serve([
+            WireServerMessage::new(1, WireServerMsgBody::StopAllProjects),
+            WireServerMessage::new(2, WireServerMsgBody::StopAllProjects),
+        ]);
+        client
+            .send_request(ClientRequest::StopAllProjects)
+            .await
+            .expect("answered");
+        crate::client_observer::set_client_observer(None);
+
+        // Heartbeats (id 0) are traffic, not answers: none are reported.
+        assert_eq!(
+            *seen.borrow(),
+            vec![
+                ClientObservation::Sent {
+                    id: 1,
+                    kind: "project.stop-all"
+                },
+                ClientObservation::Outcome {
+                    id: 1,
+                    outcome: RequestOutcome::TimedOut {
+                        budget: Duration::from_millis(30)
+                    },
+                },
+                ClientObservation::Sent {
+                    id: 2,
+                    kind: "project.stop-all"
+                },
+                ClientObservation::Frame {
+                    id: 2,
+                    response_id: 1,
+                    seq: 0,
+                    fin: true,
+                    disposition: crate::FrameDisposition::StaleAbandoned,
+                },
+                ClientObservation::Frame {
+                    id: 2,
+                    response_id: 2,
+                    seq: 0,
+                    fin: true,
+                    disposition: crate::FrameDisposition::Matched,
+                },
+                ClientObservation::Outcome {
+                    id: 2,
+                    outcome: RequestOutcome::Answered,
+                },
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn the_observer_hears_a_read_stream_that_skipped_its_first_frame() {
+        let seen = observe_into_vec();
+        let io = ScriptedClientIo::new([project_read_frame(
+            1,
+            1,
+            true,
+            [ProjectReadEvent::End {
+                revision: Revision::new(7),
+            }],
+        )]);
+        let mut client = LpClient::new(io);
+
+        client
+            .project_read(WireProjectHandle::new(3), empty_project_read_request())
+            .await
+            .unwrap_err();
+        crate::client_observer::set_client_observer(None);
+
+        let seen = seen.borrow();
+        assert_eq!(
+            seen[..2],
+            [
+                ClientObservation::Sent {
+                    id: 1,
+                    kind: "project.read"
+                },
+                ClientObservation::Frame {
+                    id: 1,
+                    response_id: 1,
+                    seq: 1,
+                    fin: true,
+                    disposition: crate::FrameDisposition::Matched,
+                },
+            ]
+        );
+        assert!(
+            matches!(
+                &seen[2],
+                ClientObservation::Outcome {
+                    id: 1,
+                    outcome: RequestOutcome::Failed { error },
+                } if error.contains("expected project read frame seq 0, got 1")
+            ),
+            "the seq failure must be the read's outcome, got {:?}",
+            seen[2]
+        );
+        assert_eq!(seen.len(), 3);
+    }
+
+    /// Install an observer on this test's thread that keeps everything.
+    fn observe_into_vec() -> Rc<std::cell::RefCell<Vec<ClientObservation>>> {
+        let seen = Rc::new(std::cell::RefCell::new(Vec::new()));
+        let sink = Rc::clone(&seen);
+        crate::client_observer::set_client_observer(Some(Rc::new(
+            move |observation: &ClientObservation| sink.borrow_mut().push(observation.clone()),
+        )));
+        seen
     }
 
     struct ScriptedClientIo {

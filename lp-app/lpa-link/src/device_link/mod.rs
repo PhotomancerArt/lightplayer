@@ -38,8 +38,8 @@
 pub mod demux;
 pub mod wire;
 pub mod wire_capture;
-pub mod wire_tap;
 pub mod wire_reader;
+pub mod wire_tap;
 
 #[cfg(any(
     feature = "host-process",
