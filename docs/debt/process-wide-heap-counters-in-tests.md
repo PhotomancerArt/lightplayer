@@ -57,12 +57,17 @@ process-wide counter.
   assertions unchanged. Evidence on an M2 Max: 200 / 50 / 30 sequential
   runs, then 2000 / 400 / 200 runs 48 / 32 / 32 at a time (load average up
   to 38), with no failures.
+- 2026-09-26 — auto-queue ticket `2026-09-26-heap-counters-engine-tests`:
+  converted the four remaining `lpc-engine/tests` probes
+  (`per_lamp_memory_table.rs`, `per_node_memory_table.rs`,
+  `project_read_peak_memory.rs`, `zook_load_tick_memory.rs`) to the same
+  `thread_local!` `const` `Cell<isize>` pattern, `try_with` throughout;
+  every assertion and threshold left unchanged. `project_read_peak_memory.rs`
+  kept its `MEASURE_LOCK` mutex (no longer needed for correctness once the
+  counters are per-thread, but harmless, and removing it was out of this
+  ticket's scope). See the PR for per-test pass evidence.
 
 **Exit criteria** — no host heap test counts through a process-wide
-counter. Still process-wide on 2026-09-25:
-`lp-core/lpc-engine/tests/per_lamp_memory_table.rs`,
-`per_node_memory_table.rs`, `project_read_peak_memory.rs`,
-`zook_load_tick_memory.rs`, and
-`lp-shader/lpvm-native/tests/support/peak_alloc.rs`. Retire when those
-are converted, or when each is shown to measure only across threads it
-owns.
+counter. Still process-wide on 2026-09-26:
+`lp-shader/lpvm-native/tests/support/peak_alloc.rs`. Retire when that is
+converted, or shown to measure only across threads it owns.
