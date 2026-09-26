@@ -14,9 +14,9 @@
 //! prints both numbers so a bench session can quote them.
 
 use std::alloc::{GlobalAlloc, Layout, System};
+use std::cell::Cell;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicUsize, Ordering};
 
 use lpc_engine::{Engine, EngineProjectReadSource, EngineServices, ProjectLoader};
 use lpc_model::TreePath;
@@ -30,21 +30,39 @@ use lpfs::LpFsStd;
 
 struct TrackingAlloc;
 
-static LIVE: AtomicUsize = AtomicUsize::new(0);
-static PEAK: AtomicUsize = AtomicUsize::new(0);
+thread_local! {
+    /// Net bytes this thread allocated minus the bytes it freed. Signed: a
+    /// thread may free what another allocated. `const`-initialised with no
+    /// destructor, so reaching it from inside the allocator never allocates.
+    static LIVE: Cell<isize> = const { Cell::new(0) };
+    /// The highest `LIVE` this thread has reached since the last reset.
+    static PEAK: Cell<isize> = const { Cell::new(0) };
+}
+
+fn add_live(delta: isize) {
+    // `try_with`: a thread tearing down may still allocate or free.
+    let _ = LIVE.try_with(|live| {
+        let level = live.get() + delta;
+        live.set(level);
+        let _ = PEAK.try_with(|peak| {
+            if level > peak.get() {
+                peak.set(level);
+            }
+        });
+    });
+}
 
 unsafe impl GlobalAlloc for TrackingAlloc {
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
         let ptr = unsafe { System.alloc(layout) };
         if !ptr.is_null() {
-            let live = LIVE.fetch_add(layout.size(), Ordering::Relaxed) + layout.size();
-            PEAK.fetch_max(live, Ordering::Relaxed);
+            add_live(layout.size() as isize);
         }
         ptr
     }
 
     unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
-        LIVE.fetch_sub(layout.size(), Ordering::Relaxed);
+        add_live(-(layout.size() as isize));
         unsafe { System.dealloc(ptr, layout) }
     }
 }
@@ -52,9 +70,10 @@ unsafe impl GlobalAlloc for TrackingAlloc {
 #[global_allocator]
 static ALLOC: TrackingAlloc = TrackingAlloc;
 
-/// The LIVE/PEAK counters are process-global, so concurrently running tests
-/// would corrupt each other's baselines. Every test holds this for its whole
-/// body.
+/// The LIVE/PEAK counters are thread-local (each `#[test]` runs on its own
+/// libtest thread), so this lock is no longer needed to keep tests from
+/// corrupting each other's baselines. It stays so `--nocapture` output from
+/// concurrent tests never interleaves mid measurement.
 static MEASURE_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 fn measure_lock() -> std::sync::MutexGuard<'static, ()> {
@@ -65,13 +84,14 @@ fn measure_lock() -> std::sync::MutexGuard<'static, ()> {
 
 /// Reset the peak to the current live level; returns that baseline.
 fn reset_peak() -> usize {
-    let live = LIVE.load(Ordering::Relaxed);
-    PEAK.store(live, Ordering::Relaxed);
-    live
+    let level = LIVE.try_with(Cell::get).unwrap_or(0);
+    let _ = PEAK.try_with(|peak| peak.set(level));
+    level.max(0) as usize
 }
 
 fn peak_above(baseline: usize) -> usize {
-    PEAK.load(Ordering::Relaxed).saturating_sub(baseline)
+    let peak = PEAK.try_with(Cell::get).unwrap_or(0);
+    (peak.max(0) as usize).saturating_sub(baseline)
 }
 
 /// Keeps every event alive for the duration of the stream.

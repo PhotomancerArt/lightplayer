@@ -33,9 +33,9 @@
 //! set, tick 2 is the compile, ticks 3–6 are steady state.
 
 use std::alloc::{GlobalAlloc, Layout, System};
+use std::cell::Cell;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicUsize, Ordering};
 
 use lpc_engine::{EngineServices, ProjectLoader};
 use lpc_model::TreePath;
@@ -44,21 +44,39 @@ use lpfs::LpFsStd;
 
 struct TrackingAlloc;
 
-static LIVE: AtomicUsize = AtomicUsize::new(0);
-static PEAK: AtomicUsize = AtomicUsize::new(0);
+thread_local! {
+    /// Net bytes this thread allocated minus the bytes it freed. Signed: a
+    /// thread may free what another allocated. `const`-initialised with no
+    /// destructor, so reaching it from inside the allocator never allocates.
+    static LIVE: Cell<isize> = const { Cell::new(0) };
+    /// The highest `LIVE` this thread has reached since the last reset.
+    static PEAK: Cell<isize> = const { Cell::new(0) };
+}
+
+fn add_live(delta: isize) {
+    // `try_with`: a thread tearing down may still allocate or free.
+    let _ = LIVE.try_with(|live| {
+        let level = live.get() + delta;
+        live.set(level);
+        let _ = PEAK.try_with(|peak| {
+            if level > peak.get() {
+                peak.set(level);
+            }
+        });
+    });
+}
 
 unsafe impl GlobalAlloc for TrackingAlloc {
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
         let ptr = unsafe { System.alloc(layout) };
         if !ptr.is_null() {
-            let live = LIVE.fetch_add(layout.size(), Ordering::Relaxed) + layout.size();
-            PEAK.fetch_max(live, Ordering::Relaxed);
+            add_live(layout.size() as isize);
         }
         ptr
     }
 
     unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
-        LIVE.fetch_sub(layout.size(), Ordering::Relaxed);
+        add_live(-(layout.size() as isize));
         unsafe { System.dealloc(ptr, layout) }
     }
 }
@@ -66,16 +84,19 @@ unsafe impl GlobalAlloc for TrackingAlloc {
 #[global_allocator]
 static ALLOC: TrackingAlloc = TrackingAlloc;
 
+/// This thread's live heap.
 fn live() -> usize {
-    LIVE.load(Ordering::Relaxed)
+    LIVE.try_with(Cell::get).unwrap_or(0).max(0) as usize
 }
 
 fn reset_peak() {
-    PEAK.store(live(), Ordering::Relaxed);
+    let level = LIVE.try_with(Cell::get).unwrap_or(0);
+    let _ = PEAK.try_with(|peak| peak.set(level));
 }
 
+/// This thread's peak live heap since the last [`reset_peak`].
 fn peak() -> usize {
-    PEAK.load(Ordering::Relaxed)
+    PEAK.try_with(Cell::get).unwrap_or(0).max(0) as usize
 }
 
 fn workspace_dir() -> PathBuf {
