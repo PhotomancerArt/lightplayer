@@ -77,6 +77,14 @@ its generator, its CI gate and its tie to proto bumps.
   step frame, and `PackOptIn::desynced` asks for the reset even before that
   link's hello, because a learned frame on the link is itself proof the
   board packs.
+- **Every Hello reply starts a new, empty epoch.** A quick port reopen
+  (Studio does one after a push) never bumps the board's link epoch, so the
+  board can stay packed while the host's new reader holds a fresh table.
+  Found by running the G1 protocol on the emulator: identify's Hello reply
+  was among the frames the fresh reader dropped, and the card read
+  "pre-hello firmware". A Hello is how a host begins a conversation, so the
+  board resets its table before answering one; that reply is coded against
+  the empty table, which any reader accepts.
 - **Why a state hash and not an entry count** (found during the spike):
   after a torn frame the two sides can learn *different* entries at the same
   index while their counts stay equal, and the next reference would decode
