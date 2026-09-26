@@ -1,0 +1,71 @@
+{"seq":0,"branch":"claude/studio-flight-recorder","href":"http://127.0.0.1:23997/?emu=ws://127.0.0.1:22496&record=http%3A%2F%2F127.0.0.1%3A63298%2Fingest","kind":"session","recording":"cb2049916715f0a2","t":1790459333.864,"user_agent":"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.0.0 Safari/537.36"}
+{"seq":2,"t":1790459333.933,"kind":"route","from":"","to":"/","reason":"boot"}
+{"seq":515,"t":1790459344.023,"kind":"route","from":"/","to":"/devices","reason":"browser-nav"}
+{"seq":519,"t":1790459351.472,"endpoint":"roster","kind":"journal","scope":"roster","entry":"Input(Event(LinkAttached { link: LinkId(9), info: LinkInfo { label: \"ESP32 Serial (303a:1001)\", endpoint: EndpointKey(\"browser-serial-esp32-port-1\"), usb: Some(UsbIds { vendor: 12346, product: 4097 }), serial_number: None } }))"}
+{"seq":520,"t":1790459351.472,"endpoint":"roster","kind":"journal","scope":"roster","entry":"Note(PendingLinkOpened { link: LinkId(9) })"}
+{"seq":521,"t":1790459351.472,"endpoint":"device:1","kind":"journal","scope":"device:1","entry":"Note(IdentityPromoted { binding: Endpoint, value: \"browser-serial-esp32-port-1\" })"}
+{"seq":522,"t":1790459351.472,"endpoint":"device:1","kind":"journal","scope":"device:1","entry":"Note(ActivityStarted { kind: Identify })"}
+{"seq":523,"b64":"W0lOSVRdIEluaXRpYWxpemluZyBib2FyZC4uLg==","dir":"rx","kind":"wire","len":28,"port":"1","t":1790459351.493,"transport":"serial"}
+{"seq":524,"t":1790459351.494,"endpoint":"device:1","kind":"journal","scope":"device:1","entry":"Input(Event(Link { link: LinkId(9), event: Opened { info: LinkInfo { label: \"ESP32 Serial (303a:1001)\", endpoint: EndpointKey(\"browser-serial-esp32-port-1\"), usb: Some(UsbIds { vendor: 12346, product: 4097 }), serial_number: None } } }))"}
+{"seq":525,"b64":"TSF7ImlkIjoxLCJtc2ciOiJoZWxsbyJ9Cg==","dir":"tx","kind":"wire","len":25,"port":"1","t":1790459351.496,"transport":"serial"}
+{"seq":526,"b64":"CgpbSU5GT10gZndfZXNwMzJfY29tbW9uOjpzZXJpYWw6OnVzYl9jb25uZWN0aW9uOiBbaW9fdGFza10gaG9zdCBkcmFpbmluZyBhZ2FpbjsgcmVzdW1pbmcgcHJvdG9jb2wgd3JpdGVzDQoKTSF7ImlkIjoxLCJtc2ciOnsiaGVsbG8iOnsicHJvdG8iOjI3LCJidWlsZCI6eyJmZWF0dXJlcyI6WyJub2RlLmJ1dHRvbiIsIm5vZGUuY2xvY2siLCJub2RlLmZsdWlkIiwibm9kZS5maXh0dXJlIiwibm9kZS5wbGF5bGlzdCIsIm5vZGUucmFkaW8iLCJub2RlLnNoYWRlciIsIm5vZGUudGV4dHVyZSIsInN2Yy5idXR0b24iLCJzdmMucmFkaW8tZXNwbm93IiwiZ2Z4Lmxwdm0iXSwicGFja2FnZSI6ImZ3LWVzcDMyYzYiLCJjb21taXQiOiI3ZDVjOTc5MDZmMGMiLCJkaXJ0eSI6ZmFsc2UsInByb2ZpbGUiOiJyZWxlYXNlLWVzcDMyIn0sImhhcmR3YXJlIjp7InJhZGlvIjp0cnVlLCJ0b3RhbExlZEJ1ZGdldCI6bnVsbCwiYnV0dG9uIjp0cnVlLCJib2FyZElkIjoic2VlZWQveGlhby1lc3AzMi1jNiIsImJhc2VNYWMiOiJhMDpmMjo2Mjo4NzpiNDo4YyIsImNoaXBSZXZpc2lvbiI6IjAuMiIsImV1aTY0IjoiYTA6ZjI6NjI6ODc6YjQ6OGM6MDA6MDAifSwiZGV2aWNlVWlkIjpudWxsLCJwYWNrRGljdGlvbmFyeSI6MzcwNTAxNDA3LCJhdXRoIjp7InJlcXVpcmVkIjpmYWxzZSwiZ3JhbnRlZCI6ImVkaXQifX19fQo=","dir":"rx","kind":"wire","len":680,"port":"1","t":1790459351.515,"transport":"serial"}
+{"seq":527,"b64":"TSF7ImlkIjo5MDA3MTk5MjU0NzQwOTkxLCJtc2ciOnsic2V0RW5jb2RpbmciOnsiZW5jb2RpbmciOiJwYWNrZWQiLCJkaWN0aW9uYXJ5IjozNzA1MDE0MDd9fX0K","dir":"tx","kind":"wire","len":93,"port":"1","t":1790459351.516,"transport":"serial"}
+{"seq":528,"t":1790459351.516,"endpoint":"device:1","kind":"journal","scope":"device:1","entry":"Input(Event(Link { link: LinkId(9), event: Line(\"[INIT] Initializing board...\") }))"}
+{"seq":529,"t":1790459351.516,"endpoint":"device:1","kind":"journal","scope":"device:1","entry":"Input(Event(Link { link: LinkId(9), event: Line(\"\") }))"}
+{"seq":530,"t":1790459351.516,"endpoint":"device:1","kind":"journal","scope":"device:1","entry":"Input(Event(Link { link: LinkId(9), event: Line(\"[INFO] fw_esp32_common::serial::usb_connection: [io_task] host draining again; resuming protocol writes\") }))"}
+{"seq":531,"t":1790459351.516,"endpoint":"device:1","kind":"journal","scope":"device:1","entry":"Input(Event(Link { link: LinkId(9), event: Line(\"\") }))"}
+{"seq":532,"t":1790459351.517,"endpoint":"device:1","kind":"journal","scope":"device:1","entry":"Input(Event(Link { link: LinkId(9), event: Frame(ServerFrame { request_id: 1, body: Hello(HelloFacts { proto: 27, identity: PeerIdentity { uid: None, mac: Some(MacAddress(\"a0:f2:62:87:b4:8c\")), name: None }, firmware: Some(\"fw-esp32c6 7d5c97906f0c\"), board_id: Some(\"seeed/xiao-esp32-c6\") }) }) }))"}
+{"seq":533,"t":1790459351.517,"endpoint":"device:1","kind":"journal","scope":"device:1","entry":"Note(IdentityPromoted { binding: Mac, value: \"a0:f2:62:87:b4:8c\" })"}
+{"seq":534,"t":1790459351.517,"endpoint":"device:1","kind":"journal","scope":"device:1","entry":"Note(ActivityEnded { kind: Identify, outcome: Succeeded { summary: \"seeed/xiao-esp32-c6 · fw-esp32c6 7d5c97906f0c\" } })"}
+{"seq":535,"t":1790459351.517,"endpoint":"roster","kind":"journal","scope":"roster","entry":"Note(DeviceCreated { device: DeviceId(1), from_record: false })"}
+{"seq":536,"t":1790459351.517,"endpoint":"roster","kind":"journal","scope":"roster","entry":"Note(LinkRouted { link: LinkId(9), to: DeviceId(1) })"}
+{"seq":537,"t":1790459351.519,"endpoint":"device:1","kind":"journal","scope":"device:1","entry":"Input(Action(SetName { device: DeviceId(1), name: \"XIAO ESP32-C6 · Sep 26\" }))"}
+{"seq":538,"conversation":11,"id":1073741824,"kind":"request","phase":"sent","request":"access.list","t":1790459351.521}
+{"seq":539,"b64":"TSF7ImlkIjoxMDczNzQxODI0LCJtc2ciOiJhY2Nlc3NMaXN0In0K","dir":"tx","kind":"wire","len":39,"port":"1","t":1790459351.522,"transport":"serial"}
+{"seq":540,"t":1790459351.536,"kind":"command","name":"LibraryChanged","detail":""}
+{"seq":541,"b64":"Ck0heyJpZCI6OTAwNzE5OTI1NDc0MDk5MSwibXNnIjp7InNldEVuY29kaW5nIjp7ImVuY29kaW5nIjoicGFja2VkIn19fQoKW0lORk9dIGZ3X2VzcDMyX2NvbW1vbjo6dHJhbnNwb3J0OiBTdHJlYW1pbmdNZXNzYWdlUm91dGVyVHJhbnNwb3J0OiByZXBsaWVzIGFyZSBub3cgcGFja2VkDQoKAFAZoAymgICAgAQNoN+g8AGl8GekdKGi////AA==","dir":"rx","kind":"wire","len":193,"port":"1","t":1790459351.536,"transport":"serial"}
+{"seq":542,"conversation":11,"disposition":"matched","fin":true,"frame_seq":0,"id":1073741824,"kind":"request","phase":"frame","response_id":1073741824,"since_sent_ms":23.0,"t":1790459351.544}
+{"seq":543,"conversation":11,"id":1073741824,"kind":"request","latency_ms":23.0,"outcome":"answered","phase":"outcome","request":"access.list","t":1790459351.544}
+{"seq":544,"conversation":11,"id":1073741825,"kind":"request","phase":"sent","request":"access.add","t":1790459351.545}
+{"seq":545,"b64":"TSF7ImlkIjoxMDczNzQxODI1LCJtc2ciOnsiYWNjZXNzQWRkIjp7ImVudHJ5Ijp7ImxhYmVsIjoiQ2hyb21lIG9uIE1hYyIsImtpbmQiOiJicm93c2VyIiwidGllciI6ImVkaXQiLCJzYWx0IjoieTg1WHdsZzVocndsK1FzUzBTZnhidz09IiwiaXRlcmF0aW9ucyI6MSwiayI6IjduWGUzSTZodmJJOG5aaFNXcC8yOW90Tzl6T0tQNTNKZzlRSkpNeE91N1U9IiwiYWRkZWRBdCI6MTc5MDQ1OTM1MX19fX0K","dir":"tx","kind":"wire","len":228,"port":"1","t":1790459351.545,"transport":"serial"}
+{"seq":546,"b64":"CgBQU6AMpoGAgIAEDaDfoPABpfBnpHShoPBDjUNocm9tZSBvbiBNYWMBrAvwt1bwoJh5ODVYd2xnNWhyd2wrUXNTMFNmeGJ3PT3jptf74NUG/6L///8A","dir":"rx","kind":"wire","len":87,"port":"1","t":1790459351.559,"transport":"serial"}
+{"seq":547,"conversation":11,"disposition":"matched","fin":true,"frame_seq":0,"id":1073741825,"kind":"request","phase":"frame","response_id":1073741825,"since_sent_ms":21.0,"t":1790459351.566}
+{"seq":548,"conversation":11,"id":1073741825,"kind":"request","latency_ms":21.0,"outcome":"answered","phase":"outcome","request":"access.add","t":1790459351.566}
+{"seq":908,"t":1790459364.268,"kind":"error","level":"warn","source":"studio:lpa_studio_core::app::studio::studio_controller","message":"push not banked: missing session: library: invalid device uid \"mac:a0:f2:62:87:b4:8c\": unknown uid prefix"}
+{"seq":7819,"t":1790459677.269,"kind":"route","from":"/devices","to":"/device/mac:a0:f2:62:87:b4:8c","reason":"browser-nav"}
+{"seq":7851,"t":1790459677.734,"kind":"route","from":"/device/mac:a0:f2:62:87:b4:8c","to":"/p/playful-choker-prj1zq7spg01322azmq?on=mac:a0:f2:62:87:b4:8c","reason":"slug-heal"}
+{"seq":8298,"t":1790459691.216,"kind":"toast","level":"info","message":"Closed XIAO ESP32-C6 · Sep 26 — the board keeps running"}
+{"seq":8300,"t":1790459691.234,"kind":"route","from":"/p/playful-choker-prj1zq7spg01322azmq?on=mac:a0:f2:62:87:b4:8c","to":"/","reason":"browser-nav"}
+{"seq":8356,"t":1790459697.437,"kind":"open","stage":"starting"}
+{"seq":8357,"t":1790459697.443,"kind":"route","from":"/","to":"/p/playful-choker-prj1zq7spg01322azmq?on=mac:a0:f2:62:87:b4:8c","reason":"browser-nav"}
+{"seq":8358,"t":1790459697.458,"kind":"open","stage":"on-device:connecting"}
+{"seq":8370,"t":1790459697.699,"kind":"open","stage":"on-device:clearing"}
+{"seq":8381,"t":1790459698.032,"kind":"open","stage":"on-device:uploading"}
+{"seq":8472,"t":1790459698.662,"kind":"open","stage":"on-device:loading"}
+{"seq":8478,"t":1790459698.812,"kind":"open","stage":"on-device:reading"}
+{"seq":8531,"t":1790459699.942,"kind":"route","from":"/p/playful-choker-prj1zq7spg01322azmq?on=mac:a0:f2:62:87:b4:8c","to":"/p/playful-choker-prj1zq7spg01322azmq/play?on=mac:a0:f2:62:87:b4:8c","reason":"browser-nav"}
+{"seq":8533,"t":1790459699.95,"kind":"open","stage":"idle"}
+{"seq":8535,"t":1790459699.969,"kind":"error","level":"warn","source":"studio:lpa_studio_core::app::studio::studio_controller","message":"open on a named device not banked: unsupported action: This project is open in this tab — close it before changing it"}
+{"seq":9829,"t":1790459738.556,"kind":"route","from":"/p/playful-choker-prj1zq7spg01322azmq/play?on=mac:a0:f2:62:87:b4:8c","to":"/p/playful-choker-prj1zq7spg01322azmq?on=mac:a0:f2:62:87:b4:8c","reason":"browser-nav"}
+{"seq":9835,"t":1790459738.591,"kind":"toast","level":"info","message":"Closed XIAO ESP32-C6 · Sep 26 — the board keeps running"}
+{"seq":9836,"t":1790459738.607,"kind":"route","from":"/p/playful-choker-prj1zq7spg01322azmq?on=mac:a0:f2:62:87:b4:8c","to":"/devices","reason":"browser-nav"}
+{"seq":9837,"b64":"CgBQEqAMpuOBgJAQDaAUoC+hoA6gCqaOf///oAagAxYCoBKgDqAKQjqmq3D//////6AGoAMxAqASRP///6AGoA==","dir":"rx","kind":"wire","len":64,"port":"1","t":1790459738.654,"transport":"serial"}
+{"seq":9838,"b64":"AwECoAigDqAKQv//////oAagAwECoAhE////oAagAwICoCKgPqAFpo5/PDw3puMONgo4puuSATUBPwH/QKBCpn07psA+KaAnpsjqBiummMkLKqbgsxIopu6mBf89pf//////oBCgAw4CoBGgFaAxoBuhoAUDDaaOfzCmSRpDD6AToP6mw3D//yCr2wE2CDAhBCMQAhggBCMyCC5EDjUtBioXAxsKAREaAxokBCIgBCMQAhlHDzUdAx4OAhQdAxwmBSQdAx4TAhUNARJfGDp0NS57Ti96WDZ0WDVlTC1jSCp0YTt6UDB0PiV7ZT57UTF3OS14OS15RChpTC5cTC1hSy16Pip6Pip6PipvPCNlRChfSixZSixuSy1hTi9tUDBzTi96Ril2Ni9qHj5nHjt2NTBsSixZRilaQidmTi9wXDh0WjZvTS5mQCVlNCBnJjJfMhxbPiRuTi97VTN2XDh1XTl6TC5vKzT/ov///////6AQoAMBAqARoCGgOaAjoBOgKab9dP//F6BBpv10F6FAoASg8LGGcGF1c2Vk//9AQKAEoAugNKAFAgcaJKAYARmm2wH//////0BAoASgC6BDoAUBBw//////oASgC6BEoAUEBxD/////ov////////+gLqAKpo5///+i////AA==","dir":"rx","kind":"wire","len":493,"port":"1","t":1790459738.675,"transport":"serial"}
+{"seq":9839,"conversation":20,"disposition":"matched","fin":true,"frame_seq":0,"id":4328521955,"kind":"request","phase":"frame","response_id":4328521955,"since_sent_ms":103.0,"t":1790459738.675}
+{"seq":9840,"conversation":20,"id":4328521955,"kind":"request","latency_ms":103.0,"outcome":"answered","phase":"outcome","request":"project.read","t":1790459738.675}
+{"seq":9841,"t":1790459738.679,"endpoint":"device:1","kind":"journal","scope":"device:1","entry":"Input(Event(Link { link: LinkId(9), event: Line(\"\") }))"}
+{"seq":9842,"t":1790459738.681,"session":"runtime-2","kind":"pool","action":"remove","detail":"device lens closed"}
+{"seq":9843,"t":1790459738.681,"kind":"action","name":"studio|runtime/CloseDeviceLens","outcome":"ok","elapsed_ms":2.000093460083008}
+{"seq":9844,"t":1790459738.681,"endpoint":"device:1","kind":"journal","scope":"device:1","entry":"Input(Event(LinkBorrow { link: LinkId(9), held: false }))"}
+{"seq":9845,"t":1790459738.691,"kind":"command","name":"Action/studio|device-feed/DeviceFeedOp","detail":"DeviceFeedOp { device: DeviceId(1), wanted: false }"}
+{"seq":9846,"t":1790459738.7,"kind":"action","name":"studio|device-feed/DeviceFeedOp","outcome":"ok","elapsed_ms":0.0}
+{"seq":9847,"t":1790459738.703,"kind":"command","name":"Action/studio|device-feed/DeviceFeedOp","detail":"DeviceFeedOp { device: DeviceId(1), wanted: true }"}
+{"seq":9848,"t":1790459738.703,"kind":"action","name":"studio|device-feed/DeviceFeedOp","outcome":"ok","elapsed_ms":0.0}
+{"seq":9849,"conversation":15,"id":1090520149,"kind":"request","phase":"sent","request":"project.read","t":1790459738.705}
+{"seq":9850,"b64":"TSF7ImlkIjoxMDkwNTIwMTQ5LCJtc2ciOnsicHJvamVjdFJlYWQiOnsiaGFuZGxlIjoxLCJyZXF1ZXN0Ijp7InNpbmNlIjpudWxsLCJwcm9iZXMiOlt7Im91dHB1dF9mcmFtZSI6eyJnZW9tZXRyeSI6eyJpZl9jaGFuZ2VkIjp7Imtub3duIjpbeyJub2RlIjozLCJyZXZpc2lvbiI6MjB9XX19LCJzYW1wbGVzIjoic3JnYjgifX1dfX19fQo=","dir":"tx","kind":"wire","len":191,"port":"1","t":1790459738.706,"transport":"serial"}
+{"seq":9851,"t":1790459738.708,"kind":"command","name":"LibraryChanged","detail":""}
+{"seq":9852,"b64":"CgBQLaAMptWIgIgEDaB3oHebUHJvamVjdCBub3QgZm91bmQ6IGhhbmRsZSAx////AA==","dir":"rx","kind":"wire","len":49,"port":"1","t":1790459738.77,"transport":"serial"}
+{"seq":9853,"conversation":15,"disposition":"matched","fin":true,"frame_seq":0,"id":1090520149,"kind":"request","phase":"frame","response_id":1090520149,"since_sent_ms":85.0,"t":1790459738.79}
+{"seq":9854,"conversation":15,"error":"server error: Project not found: handle 1","id":1090520149,"kind":"request","latency_ms":85.0,"outcome":"failed","phase":"outcome","request":"project.read","t":1790459738.79}
+{"seq":9855,"t":1790459738.79,"kind":"error","level":"warn","source":"studio:lpa_client::pull_loop","message":"project read id=1090520149: stream error after 1 frames: Server(\"Project not found: handle 1\")"}
+{"seq":9856,"t":1790459738.791,"endpoint":"device:1","kind":"journal","scope":"device:1","entry":"Input(Event(Link { link: LinkId(9), event: Line(\"\") }))"}

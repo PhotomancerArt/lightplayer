@@ -4,7 +4,9 @@
 //! into messages ([`super::wire_streams`]) by default, or shown raw. A
 //! stretch of more than [`SILENCE_GAP_SECS`] in which nothing at all
 //! happened while a request was waiting on its answer gets its own line —
-//! that is what a hang looks like in a recording.
+//! that is what a hang looks like in a recording. A request's single
+//! matched final frame is left out: the outcome line after it says the
+//! same thing.
 
 use std::collections::BTreeMap;
 use std::fmt::Write as _;
@@ -176,7 +178,7 @@ impl Renderer<'_> {
             }
             return;
         }
-        if !self.shows(kind, t) {
+        if !self.shows(kind, t) || is_plain_answer_frame(record) {
             return;
         }
         let line = describe_record(kind, record);
@@ -333,7 +335,9 @@ fn describe_record(kind: &str, record: &Map<String, Value>) -> String {
                 s("href")
             )
         }
-        "command" => format!("CMD      {} {}", s("name"), preview(s("detail"))),
+        "command" => format!("CMD      {} {}", s("name"), preview(s("detail")))
+            .trim_end()
+            .to_string(),
         "action" => {
             let mut line = format!(
                 "ACTION   {} {} ({})",
@@ -415,6 +419,16 @@ fn describe_record(kind: &str, record: &Map<String, Value>) -> String {
             )
         }
     }
+}
+
+/// A request's one final, matched frame: its `outcome` line follows and
+/// says the same, so it is not printed. A stream's earlier frames, and any
+/// frame that did not match its request, are.
+fn is_plain_answer_frame(record: &Map<String, Value>) -> bool {
+    str_field(record, "kind") == "request"
+        && str_field(record, "phase") == "frame"
+        && str_field(record, "disposition") == "matched"
+        && record.get("fin") == Some(&Value::Bool(true))
 }
 
 fn describe_request(record: &Map<String, Value>) -> String {
