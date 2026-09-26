@@ -12,6 +12,7 @@ mod library_host_opfs;
 mod local_model_probe;
 mod local_store;
 mod openrouter_oauth;
+mod record_lines;
 mod record_sink;
 mod route_recording;
 mod router;

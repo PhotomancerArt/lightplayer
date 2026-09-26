@@ -24,6 +24,12 @@
 //!    `session` record (build, browser, page), and `pagehide` beacons out
 //!    whatever the last 250 ms had not sent yet.
 //!
+//! While recording, two more taps feed the sink ONLY (`record_lines.rs`
+//! has the shapes and says why): every raw byte chunk a transport writes
+//! or reads (`wire` lines, from `lpa_link`'s wire tap) and every client
+//! request's send, frames and outcome (`request` lines, from
+//! `lpa_client`'s observer), stamped here.
+//!
 //! It also holds the web edge's recording handle ([`record`]): route
 //! changes and toasts land in the same log, whether or not a sink is set.
 //!
@@ -161,6 +167,7 @@ pub(crate) fn install(controller: &mut StudioController) {
             });
             queue_session_line_when_ready();
             install_pagehide_beacon();
+            install_recording_taps();
         }
         Some((_, SinkCheck::Refused { host, reason })) => {
             log::warn!("recording refused: {reason}");
@@ -224,6 +231,54 @@ fn on_line(line: String) {
             gloo_timers::callback::Timeout::new(FLUSH_DELAY_MS, flush_sink).forget();
         }
     });
+}
+
+/// Queue one line for the sink alone — not the ring, not localStorage —
+/// with the next `seq`. A no-op when there is no sink.
+#[cfg(target_arch = "wasm32")]
+fn queue_sink_only_line(line: String) {
+    TRACE.with(|trace| {
+        let mut trace = trace.borrow_mut();
+        let trace = &mut *trace;
+        let Some(sink) = trace.sink.as_mut() else {
+            return;
+        };
+        trace
+            .sink_queue
+            .push(crate::record_sink::with_seq(&line, sink.next_seq));
+        sink.next_seq += 1;
+        if !trace.sink_flush_scheduled {
+            trace.sink_flush_scheduled = true;
+            gloo_timers::callback::Timeout::new(FLUSH_DELAY_MS, flush_sink).forget();
+        }
+    });
+}
+
+/// While recording: every transport's raw bytes become `wire` lines and
+/// every client request's send/frames/outcome become `request` lines,
+/// stamped on the page clock, straight to the sink.
+#[cfg(target_arch = "wasm32")]
+fn install_recording_taps() {
+    use lpa_link::device_link::wire_tap::{WireTapChunk, set_wire_tap};
+
+    set_wire_tap(Some(Box::new(|chunk: WireTapChunk<'_>| {
+        queue_sink_only_line(crate::record_lines::wire_line(
+            crate::web_app::now_secs(),
+            chunk.dir.as_str(),
+            chunk.transport,
+            chunk.port,
+            chunk.bytes,
+        ));
+    })));
+    let requests = RefCell::new(crate::record_lines::RequestLines::new());
+    lpa_client::set_client_observer(Some(std::rc::Rc::new(
+        move |observation: &lpa_client::ClientObservation| {
+            let line = requests
+                .borrow_mut()
+                .line(crate::web_app::now_secs(), observation);
+            queue_sink_only_line(line);
+        },
+    )));
 }
 
 /// Coalesced localStorage write of the whole current-session buffer.
