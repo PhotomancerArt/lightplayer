@@ -7,6 +7,7 @@ pub mod hardware;
 pub mod pattern;
 pub mod profile;
 pub mod project;
+pub mod record;
 pub mod schema;
 pub mod serve;
 pub mod shader_debug;
