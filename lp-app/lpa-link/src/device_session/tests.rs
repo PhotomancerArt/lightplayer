@@ -1076,11 +1076,8 @@ async fn a_packing_board_reaches_ready_and_its_frames_fold_like_json() {
         0,
         "a board that cannot pack is never asked, and stays JSON"
     );
-    assert_eq!(
-        packed.hello.pack_dictionary,
-        lpc_wire::WIRE_DICTIONARY_FINGERPRINT
-    );
-    assert_eq!(json.hello.pack_dictionary, 0);
+    assert_eq!(packed.hello.pack_format, lpc_wire::PACK_FORMAT_VERSION);
+    assert_eq!(json.hello.pack_format, 0);
     assert_eq!(packed.projects, json.projects);
     assert!(!packed.projects.is_empty());
 }

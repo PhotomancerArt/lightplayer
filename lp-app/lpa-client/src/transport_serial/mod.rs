@@ -7,7 +7,7 @@
 //!
 //! Every serial transport reads the board's stream through
 //! [`lpc_wire::WireStream`], so console lines, `M!{json}` lines and packed
-//! frames (`\n 0x00 'P' COBS 0x00`) all arrive, whichever the board is
+//! frames (`\n 0x00 'L' COBS 0x00`) all arrive, whichever the board is
 //! writing. Each one also **asks for packed** on connect: when the board's
 //! hello names this build's dictionary it writes
 //! `ClientRequest::SetEncoding` itself — after the hello, before the traffic

@@ -12,6 +12,7 @@
 
 use crate::pack_decimal::{PackNumber, classify_number};
 use crate::pack_dictionary::Dictionary;
+use crate::pack_learned::LearnStore;
 use crate::pack_tags as tag;
 use crate::pack_varint::{VARINT_MAX_LEN, write_varint, zigzag};
 use crate::{MAX_BACKREFS, PackError, is_backref_candidate};
@@ -31,6 +32,8 @@ pub struct PackEncoder<'a> {
     backref_len: [u16; MAX_BACKREFS],
     backref_count: usize,
     failed: Option<PackError>,
+    /// The link's learned table, coded after `dict` ([`crate::pack_learned`]).
+    learned: Option<&'a mut dyn LearnStore>,
 }
 
 /// What a key or string becomes.
@@ -51,7 +54,26 @@ impl<'a> PackEncoder<'a> {
             backref_len: [0; MAX_BACKREFS],
             backref_count: 0,
             failed: None,
+            learned: None,
         }
+    }
+
+    /// A learned frame coded against `dict ++ learned`, learning as it goes.
+    /// The header is written first. If the frame is then not sent, the caller
+    /// truncates `learned` to the [`LearnMark`](crate::LearnMark) it took
+    /// before this call.
+    pub fn with_learned(
+        out: &'a mut [u8],
+        dict: &'static Dictionary,
+        learned: &'a mut dyn LearnStore,
+    ) -> Self {
+        let mut e = Self::new(out, dict);
+        match crate::pack_learned::write_header(e.out, &*learned) {
+            Some(n) => e.len = n,
+            None => e.failed = Some(PackError::Full),
+        }
+        e.learned = Some(learned);
+        e
     }
 
     /// Bytes written so far.
@@ -111,7 +133,11 @@ impl<'a> PackEncoder<'a> {
                 TextCode::Backref(n) => e.put_tagged_varint(tag::KEY_BACKREF, n as u64),
                 TextCode::Inline => {
                     e.put_tagged_varint(tag::KEY_INLINE, k.len() as u64)?;
-                    e.put_text(k)
+                    e.put_text(k)?;
+                    if let Some(l) = e.learned.as_deref_mut() {
+                        l.learn_key(k);
+                    }
+                    Ok(())
                 }
             }
         })
@@ -130,7 +156,11 @@ impl<'a> PackEncoder<'a> {
                     } else {
                         e.put_tagged_varint(tag::STRING, v.len() as u64)?;
                     }
-                    e.put_text(v)
+                    e.put_text(v)?;
+                    if let Some(l) = e.learned.as_deref_mut() {
+                        l.learn_value(v);
+                    }
+                    Ok(())
                 }
             }
         })
@@ -275,6 +305,14 @@ impl<'a> PackEncoder<'a> {
                     e.out.copy_within(text_at..text_at + n, start + h);
                     e.len = start + h + n;
                     e.remember(start + h, n);
+                    if let Some(l) = e.learned.as_deref_mut() {
+                        let t = &e.out[start + h..start + h + n];
+                        if is_key {
+                            l.learn_key(t);
+                        } else {
+                            l.learn_value(t);
+                        }
+                    }
                     Ok(())
                 }
             }
@@ -319,6 +357,18 @@ impl<'a> PackEncoder<'a> {
         if let Some(i) = found {
             return TextCode::Dict(i);
         }
+        if let Some(l) = self.learned.as_deref() {
+            let (base, hit) = if is_key {
+                (self.dict.keys.len(), l.find_key(text))
+            } else {
+                (self.dict.values.len(), l.find_value(text))
+            };
+            if let Some(i) = hit.map(|i| base + i)
+                && (!is_key || i < tag::KEY_DICT_MAX)
+            {
+                return TextCode::Dict(i);
+            }
+        }
         match self.find_backref(text) {
             Some(r) => TextCode::Backref(r),
             None => TextCode::Inline,
@@ -358,7 +408,10 @@ impl<'a> PackEncoder<'a> {
         if i < tag::VALUE_DICT_INLINE_COUNT {
             return self.put(tag::VALUE_DICT_INLINE_BASE + i as u8);
         }
-        self.put_tagged_varint(tag::VALUE_DICT, (i - tag::VALUE_DICT_INLINE_COUNT) as u64)
+        if i < tag::VALUE_CODE_SHORT_COUNT {
+            return self.put(tag::VALUE_DICT_HIGH_BASE + (i - tag::VALUE_DICT_INLINE_COUNT) as u8);
+        }
+        self.put_tagged_varint(tag::VALUE_DICT, (i - tag::VALUE_CODE_SHORT_COUNT) as u64)
     }
 
     fn put_uint(&mut self, v: u64) -> Result<(), PackError> {

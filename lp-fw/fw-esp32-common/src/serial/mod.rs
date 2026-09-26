@@ -21,3 +21,8 @@ pub mod usb_connection;
 /// every firmware's `serial::io_task`.
 #[cfg(feature = "server")]
 pub mod server_msg;
+
+/// One link's packed-reply state: the encoding, and the learned table that
+/// lives only while a host has the link packed.
+#[cfg(feature = "server")]
+pub mod packed_link;

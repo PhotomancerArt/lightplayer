@@ -3,7 +3,7 @@
 use std::io::{Read, Write};
 
 use anyhow::{Context, Result};
-use lpc_wire::{UnpackedFrame, WireUnpacker};
+use lpc_wire::{UnpackEvent, WireUnpacker};
 
 use super::args::{UnpackArgs, WireCli, WireSubcommand};
 use super::tap_unpack::unpack_tap;
@@ -54,21 +54,23 @@ pub fn unpack_stream(
     }
     if unpacker.in_frame() {
         report.note(
-            Err("the stream ended inside a packed frame".to_string()),
+            UnpackEvent::Dropped("the stream ended inside a packed frame".to_string()),
             log,
         );
     }
     Ok(())
 }
 
-/// What `wire unpack` saw: packed frames, their sizes, and the frames it
-/// could not deliver. Errors always reach stderr; per-frame sizes only with
+/// What `wire unpack` saw: packed frames, their sizes, the frames it could
+/// not read (a capture that starts mid-connection), and the frames it could
+/// not deliver. Errors always reach stderr; per-frame sizes only with
 /// `--sizes`.
 pub struct UnpackReport {
     sizes: bool,
     frames: usize,
     packed_bytes: usize,
     json_bytes: usize,
+    unreadable: usize,
     errors: usize,
 }
 
@@ -79,14 +81,15 @@ impl UnpackReport {
             frames: 0,
             packed_bytes: 0,
             json_bytes: 0,
+            unreadable: 0,
             errors: 0,
         }
     }
 
-    /// One rewritten frame, or why one was dropped.
-    pub fn note(&mut self, frame: Result<UnpackedFrame, String>, log: &mut impl Write) {
-        match frame {
-            Ok(frame) => {
+    /// What happened to one packed frame.
+    pub fn note(&mut self, event: UnpackEvent, log: &mut impl Write) {
+        match event {
+            UnpackEvent::Unpacked(frame) => {
                 self.frames += 1;
                 self.packed_bytes += frame.wire_len;
                 self.json_bytes += frame.json_line_len;
@@ -98,7 +101,25 @@ impl UnpackReport {
                     );
                 }
             }
-            Err(error) => {
+            UnpackEvent::Unreadable(frame) => {
+                self.unreadable += 1;
+                if self.unreadable == 1 {
+                    let _ = writeln!(
+                        log,
+                        "wire unpack: learned frames before the board's next table reset cannot \
+                         be read (the capture starts mid-connection, or a frame before them was \
+                         lost); each is written as a `<learned frame: table unknown …>` line"
+                    );
+                }
+                if self.sizes {
+                    let _ = writeln!(
+                        log,
+                        "unreadable {} packed {} ({})",
+                        self.unreadable, frame.wire_len, frame.reason
+                    );
+                }
+            }
+            UnpackEvent::Dropped(error) => {
                 self.errors += 1;
                 let _ = writeln!(log, "wire unpack: {error}");
             }
@@ -110,8 +131,8 @@ impl UnpackReport {
         if self.sizes {
             writeln!(
                 log,
-                "total frames {} packed {} json {} errors {}",
-                self.frames, self.packed_bytes, self.json_bytes, self.errors
+                "total frames {} packed {} json {} unreadable {} errors {}",
+                self.frames, self.packed_bytes, self.json_bytes, self.unreadable, self.errors
             )
             .context("writing stderr")?;
         }
@@ -156,7 +177,7 @@ pub(crate) mod tests {
             String::from_utf8(log).unwrap(),
             format!(
                 "frame 1 packed {wire} json {json}\nframe 2 packed {wire} json {json}\n\
-                 total frames 2 packed {} json {} errors 0\n",
+                 total frames 2 packed {} json {} unreadable 0 errors 0\n",
                 2 * wire,
                 2 * json
             )
@@ -177,7 +198,8 @@ pub(crate) mod tests {
         );
     }
 
-    /// `\n 0x00 'P' COBS 0x00` for a message, and the `\nM!{json}\n` it
+    /// `\n 0x00 'L' COBS 0x00` for a message, coded as the first frame after
+    /// a table reset (so any reader takes it), and the `\nM!{json}\n` it
     /// stands for (the leading `\n` is the firmware's, and passes through).
     pub(crate) fn packed_and_json(id: u64) -> (Vec<u8>, String) {
         let message = lpc_wire::WireServerMessage::new(
@@ -188,7 +210,8 @@ pub(crate) mod tests {
             },
         );
         let mut framed = vec![0u8; 512];
-        let n = lpc_wire::ser_packed_frame_to(&mut framed, &message).unwrap();
+        let mut table = lpc_wire::LearnedTable::default();
+        let n = lpc_wire::ser_learned_frame_to(&mut framed, &mut table, &message).unwrap();
         framed.truncate(n);
         let json = lpc_wire::json::to_string(&message).unwrap();
         (framed, format!("\nM!{json}\n"))

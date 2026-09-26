@@ -15,8 +15,9 @@
 //! where `<dir>` is `>` for host → board and `<` for board → host. Chunks are
 //! whatever the pump read, not lines; the reader reassembles lines.
 //!
-//! A board that was asked to pack (plan `lp-json-pack`) writes packed frames
-//! (`\n 0x00 'P' COBS 0x00`) into the `<` chunks, recorded as they came. So
+//! A board that was asked to pack (plan `lp-json-pack`) writes learned packed
+//! frames (`\n 0x00 'L' COBS 0x00`) into the `<` chunks, recorded as they
+//! came. So
 //! that a table can set each message's packed bytes beside its JSON ones,
 //! the tap also decodes the board's stream as it goes and, after the chunk
 //! that completed a packed frame, appends an annotation:
@@ -27,8 +28,11 @@
 //! ```
 //!
 //! `P` carries the `M!{json}\n` line the frame stands for and the frame's
-//! own `wire_len` (`0x00 'P' COBS 0x00`); `E` is a frame that could not be
-//! delivered, never dropped silently. The `<` chunks stay the exact wire
+//! own `wire_len` (`0x00 'L' COBS 0x00`); `E` is a frame that could not be
+//! delivered, never dropped silently — torn, or dropped because the tap's
+//! learned table lost step with the board's (`desync: …`). The tap decodes
+//! with one table per board connection, from its first byte, as a host
+//! does: a door reconnect is a new link, and a new tap stream. The `<` chunks stay the exact wire
 //! bytes, so a byte count over them is still exact; a reader that wants
 //! JSON strips the frames from `<` (they are `0x00`-delimited) and reads the
 //! `P` records in their place, which is what `scripts/wire-tap/tapstat.py`
@@ -135,13 +139,24 @@ fn annotate(out: &mut impl Write, unix_us: u128, chunk: &WireChunk) -> std::io::
             out.write_all(line.as_bytes())?;
             out.write_all(b"\n")
         }
-        WireChunk::Error(error) => {
-            writeln!(out, "{unix_us} E {}", error.len())?;
-            out.write_all(error.as_bytes())?;
-            out.write_all(b"\n")
-        }
+        WireChunk::Error(error) => write_error(out, unix_us, error),
+        WireChunk::Desync(dropped) => write_error(
+            out,
+            unix_us,
+            &format!(
+                "desync: a {} B packed frame dropped: {}",
+                dropped.wire_len, dropped.reason
+            ),
+        ),
         WireChunk::Line(_) => Ok(()),
     }
+}
+
+/// An `E` record: a packed frame that could not be delivered, and why.
+fn write_error(out: &mut impl Write, unix_us: u128, error: &str) -> std::io::Result<()> {
+    writeln!(out, "{unix_us} E {}", error.len())?;
+    out.write_all(error.as_bytes())?;
+    out.write_all(b"\n")
 }
 
 /// One record, in the tap's format.
@@ -176,7 +191,8 @@ mod tests {
         let message = lpc_wire::WireServerMessage::new(7, lpc_wire::ServerMsgBody::UnloadProject);
         let json = lpc_wire::json::to_string(&message).unwrap();
         let mut framed = vec![0u8; 256];
-        let n = lpc_wire::ser_packed_frame_to(&mut framed, &message).unwrap();
+        let mut table = lpc_wire::LearnedTable::default();
+        let n = lpc_wire::ser_learned_frame_to(&mut framed, &mut table, &message).unwrap();
         let framed = &framed[..n];
 
         let dir = tempfile::tempdir().unwrap();

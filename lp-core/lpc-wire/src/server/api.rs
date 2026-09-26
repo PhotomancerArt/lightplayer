@@ -75,9 +75,10 @@ pub enum ServerMsgBody {
     /// Answer to [`crate::ClientRequest::SetEncoding`]: the encoding this
     /// link's replies are written in from the NEXT frame on.
     ///
-    /// `json` when the host asked for JSON, named a different dictionary, or
+    /// `json` when the host asked for JSON, named a different pack format, or
     /// the embedder cannot pack. This frame is always JSON; the transport
-    /// switches after writing it.
+    /// switches after writing it, and a `packed` answer starts a new
+    /// learned-table epoch.
     SetEncoding {
         encoding: crate::WireEncoding,
     },

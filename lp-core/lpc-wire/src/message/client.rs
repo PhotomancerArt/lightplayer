@@ -74,18 +74,21 @@ pub enum ClientRequest {
     /// (plan `lp-json-pack`, Q1): the per-link opt-in to
     /// [`WireEncoding::Packed`](crate::WireEncoding::Packed).
     ///
-    /// `dictionary` is the host's
-    /// [`WIRE_DICTIONARY_FINGERPRINT`](crate::WIRE_DICTIONARY_FINGERPRINT).
-    /// The board packs only when it equals its own and it can pack;
-    /// otherwise it stays JSON. Answered with
-    /// [`crate::server::ServerMsgBody::SetEncoding`], which names the
-    /// encoding now in effect and is itself written as JSON: the switch
-    /// happens after it. The request is always JSON (board→host only).
-    /// The link returns to JSON when it closes or the board resets, so a
-    /// host asks again on every connect.
+    /// `format` is the host's
+    /// [`PACK_FORMAT_VERSION`](lp_json_pack::PACK_FORMAT_VERSION). The board
+    /// packs only when it equals its own and it can pack; otherwise it stays
+    /// JSON. Answered with [`crate::server::ServerMsgBody::SetEncoding`],
+    /// which names the encoding now in effect and is itself written as JSON:
+    /// the switch happens after it. The request is always JSON (board→host
+    /// only). The link returns to JSON when it closes or the board resets, so
+    /// a host asks again on every connect.
+    ///
+    /// An accepted `packed` always starts a new learned-table epoch with an
+    /// empty table, so this is also the request a host sends when its table
+    /// lost step with the board's ([`crate::wire_encoding`]).
     SetEncoding {
         encoding: crate::WireEncoding,
-        dictionary: u32,
+        format: u8,
     },
     /// Begin a login on this link: answered with
     /// [`crate::server::ServerMsgBody::LoginChallenge`] (a fresh nonce and
