@@ -18,10 +18,13 @@ fn main() {
         .join("fixtures")
         .join("elf")
         .join("lps-builtins-xt-app.elf");
-    println!("cargo:rerun-if-changed={}", elf_path.display());
+    // Sampled before `watch_elf` may create the directory: the retry in
+    // `copy_image` must still see a fresh clone as fresh.
+    let elf_dir_existed = elf_path.parent().is_some_and(|d| d.is_dir());
+    watch_elf(&elf_path);
 
     let copied = std::path::Path::new(&out_dir).join("lps-builtins-xt-app.elf");
-    if let Err(reason) = copy_image(&elf_path, &copied) {
+    if let Err(reason) = copy_image(&elf_path, &copied, elf_dir_existed) {
         println!(
             "cargo:warning=lps-builtins-xt-app.elf unusable at {} ({reason}) — run \
              scripts/build-builtins-xt.sh; the Xtensa host-emulation path will be unavailable",
@@ -52,18 +55,21 @@ fn main() {
 /// as "not built" would embed an empty slice and surface minutes later as every
 /// Xtensa test skipping or failing at once. See
 /// `docs/defects/2026-07-29-builtins-elf-uplift-race.md`.
-fn copy_image(src: &std::path::Path, dst: &std::path::Path) -> Result<(), String> {
+fn copy_image(
+    src: &std::path::Path,
+    dst: &std::path::Path,
+    elf_dir_existed: bool,
+) -> Result<(), String> {
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(RETRY_BUDGET_SECS);
     loop {
         let reason = match try_copy_image(src, dst) {
             Ok(()) => return Ok(()),
             Err(reason) => reason,
         };
-        // Only a workspace that already has an elf/ directory can have a build
+        // Only a workspace that already had an elf/ directory can have a build
         // racing us; without one there is nothing to wait for, so report
         // "missing" immediately rather than stalling every fresh clone.
-        let elf_dir_exists = src.parent().is_some_and(|d| d.is_dir());
-        if !elf_dir_exists || std::time::Instant::now() >= deadline {
+        if !elf_dir_existed || std::time::Instant::now() >= deadline {
             return Err(reason);
         }
         std::thread::sleep(std::time::Duration::from_millis(20));
@@ -71,6 +77,45 @@ fn copy_image(src: &std::path::Path, dst: &std::path::Path) -> Result<(), String
 }
 
 const RETRY_BUDGET_SECS: u64 = 2;
+
+/// Declare `rerun-if-changed` for the builtins ELF path.
+///
+/// Cargo treats a `rerun-if-changed` path that does not exist as *always*
+/// stale, so watching the ELF path itself while it is absent reruns this
+/// script — and recompiles everything above lps-builtins-xt-image — on every
+/// cargo invocation in a checkout that has not built the image. When the ELF
+/// is absent, watch its directory instead (creating it, since cargo also
+/// treats a missing directory as stale). Cargo scans a watched directory
+/// recursively, so the ELF appearing — or being relinked by the
+/// remove-then-hardlink uplift, which changes the directory — reruns us.
+/// Once the ELF exists, the next run watches the file itself again.
+///
+/// Twin of `watch_builtins_exe` in `lp-shader/lpvm-cranelift/build.rs`
+/// (build scripts cannot share code without a new dependency).
+fn watch_elf(exe: &std::path::Path) {
+    if exe.exists() {
+        println!("cargo:rerun-if-changed={}", exe.display());
+        return;
+    }
+    let dir = exe.parent().expect("exe path has a parent");
+    if !dir.is_dir() {
+        if let Err(e) = std::fs::create_dir_all(dir) {
+            // Cannot make a stable watch; fall back to the always-stale one
+            // so a later build of the ELF is never missed.
+            println!("cargo:warning=could not create {} ({e})", dir.display());
+            println!("cargo:rerun-if-changed={}", exe.display());
+            return;
+        }
+        // A directory created during this run is newer than cargo's record
+        // of it, which would cost one more rerun on the next build. Backdate
+        // it; anything written into it later still moves its mtime. This runs
+        // before the copy attempt, so an ELF landing in between is either
+        // read by the copy or seen by the watch. Best effort: on failure the
+        // cost is that one extra rerun.
+        let _ = std::fs::File::open(dir).and_then(|f| f.set_modified(std::time::UNIX_EPOCH));
+    }
+    println!("cargo:rerun-if-changed={}", dir.display());
+}
 
 /// One attempt: read, verify it is a whole ELF image, then write it out.
 fn try_copy_image(src: &std::path::Path, dst: &std::path::Path) -> Result<(), String> {
