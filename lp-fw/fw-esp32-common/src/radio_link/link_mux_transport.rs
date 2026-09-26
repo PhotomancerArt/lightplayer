@@ -226,6 +226,7 @@ impl<U: ServerTransport, D: DelayNs> LinkMuxTransport<U, D> {
         // below does not return until the radio side is done with it or the
         // lease is revoked. A failed write closes the link, table and all, so
         // there is no learning to roll back.
+        radio.packed.prepare_reply(&msg.msg);
         let len = serialize_server_msg(&msg, radio.packed.table_for(&msg.msg))?;
         drop(msg);
         let generation = self.generation;

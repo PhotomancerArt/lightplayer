@@ -102,6 +102,7 @@ impl StreamingMessageRouterTransport {
         // knows the outcome; `table_for` gives it no table); the switch it
         // announces happens in `send`, after it is written. A packed frame's
         // learning is tentative until the io task reports it written.
+        self.packed.prepare_reply(&msg.msg);
         let tentative = self.packed.tentative();
         // Fills the shared static frame buffer; sending the LENGTH hands the
         // buffer to the io task, and awaiting the matching result below is

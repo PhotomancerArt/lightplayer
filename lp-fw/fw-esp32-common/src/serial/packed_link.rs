@@ -16,6 +16,15 @@
 //! to [`PackedLink::rolled_back`] when the write fails. Every accepted
 //! opt-in starts a new table epoch with an empty table — which is also how a
 //! host whose table lost step asks for a fresh start.
+//!
+//! So does every **Hello reply**: a Hello is how a host begins a conversation
+//! (identify, a reconnect), and a host that reopened the port holds a fresh
+//! table the board cannot know about — a quick reopen never bumps the link
+//! epoch. A reply coded against the empty table is one any reader takes
+//! (`lp_json_pack::pack_learned::read_header`), so identify's own answer is
+//! never among the frames a fresh reader has to drop. Found by the emulated
+//! G1 sitting: after a push, Studio reopened the port and its identify timed
+//! out on a dropped Hello reply ("pre-hello firmware").
 
 use alloc::boxed::Box;
 use lp_json_pack::{LearnMark, LearnStore, LearnedTable};
@@ -66,6 +75,20 @@ impl PackedLink {
         match self.encoding {
             WireEncoding::Packed => self.table.as_deref_mut().map(|t| t as &mut dyn LearnStore),
             WireEncoding::Json => None,
+        }
+    }
+
+    /// Before `msg` is serialized: a Hello reply on a packed link starts a new
+    /// epoch with an empty table (see the module docs). Call before
+    /// [`Self::tentative`], so an abandoned Hello reply rolls back to the
+    /// empty table, not past it.
+    pub fn prepare_reply(&mut self, msg: &ServerMsgBody) {
+        if self.encoding == WireEncoding::Packed
+            && matches!(msg, ServerMsgBody::Hello(_))
+            && let Some(table) = self.table.as_deref_mut()
+        {
+            table.reset(self.next_epoch);
+            self.next_epoch = self.next_epoch.wrapping_add(1);
         }
     }
 
@@ -193,6 +216,28 @@ mod tests {
         assert_eq!(link.table_for(&heartbeat()).unwrap().mark(), before);
     }
 
+    /// A host that reopened the port has a fresh table: the board's Hello
+    /// reply must be one it can read, so it starts a new, empty epoch.
+    #[test]
+    fn a_hello_reply_starts_a_new_empty_epoch() {
+        let mut link = packed_link();
+        send(&mut link, 1);
+        let hello = ServerMsgBody::Hello(hello_body());
+        link.prepare_reply(&hello);
+        let table = link.table_for(&hello).unwrap();
+        assert_eq!(table.epoch(), 2);
+        assert_eq!(table.mark(), lp_json_pack::LearnMark::default());
+        // Anything else leaves the table alone.
+        send(&mut link, 2);
+        let before = link.table_for(&heartbeat()).unwrap().mark();
+        link.prepare_reply(&heartbeat());
+        assert_eq!(link.table_for(&heartbeat()).unwrap().mark(), before);
+        // And on a JSON link a Hello does nothing.
+        let mut json = PackedLink::new();
+        json.prepare_reply(&hello);
+        assert!(json.table.is_none());
+    }
+
     #[test]
     fn a_dropped_answer_frees_a_table_not_yet_in_use() {
         let mut link = PackedLink::new();
@@ -227,6 +272,23 @@ mod tests {
         let mut buf = alloc::vec![0u8; 512];
         let table = link.table_for(&msg.msg).expect("packed");
         ser_learned_frame_to(&mut buf, table, &msg).unwrap();
+    }
+
+    fn hello_body() -> lpc_wire::ServerHello {
+        lpc_wire::ServerHello {
+            proto: lpc_wire::WIRE_PROTO_VERSION,
+            build: lpc_wire::BuildFacts {
+                features: alloc::vec![],
+                package: alloc::string::String::from("fw-esp32c6"),
+                commit: alloc::string::String::from("unknown"),
+                dirty: false,
+                profile: alloc::string::String::from("release-esp32"),
+            },
+            hardware: lpc_wire::HardwareFacts::default(),
+            device_uid: None,
+            pack_format: lpc_wire::PACK_FORMAT_VERSION,
+            auth: lpc_wire::HelloAuth::TRUSTED,
+        }
     }
 
     fn heartbeat() -> ServerMsgBody {

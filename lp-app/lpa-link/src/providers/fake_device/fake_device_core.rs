@@ -633,6 +633,14 @@ impl FakeDeviceCore {
             // pack goes out as JSON (the table untouched), as it does on a
             // board.
             lpc_wire::WireEncoding::Packed => {
+                // A Hello reply starts a new, empty epoch, as the firmware's
+                // `PackedLink::prepare_reply` does: a reopened port's fresh
+                // reader must be able to read identify's answer.
+                if matches!(frame.msg, lpc_wire::ServerMsgBody::Hello(_)) {
+                    use lpc_wire::LearnStore;
+                    self.table.reset(self.next_table_epoch);
+                    self.next_table_epoch = self.next_table_epoch.wrapping_add(1);
+                }
                 let mut buf = vec![0u8; json.len() + 64];
                 match lpc_wire::ser_learned_frame_to(&mut buf, &mut *self.table, frame) {
                     Ok(n) => {
