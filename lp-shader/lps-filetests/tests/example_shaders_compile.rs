@@ -336,8 +336,11 @@ fn project_inputs(
     let fs = LpFsStd::new(dir.to_path_buf());
     let root_path = TreePath::parse(&format!("/{}.show", rel_dir.replace(['/', '-'], "_")))
         .map_err(|e| format!("{rel_dir}: root path: {e}"))?;
-    let runtime = ProjectLoader::load_from_root(&fs, EngineServices::new(root_path))
-        .map_err(|e| format!("{rel_dir}: project does not load: {e}"))?;
+    let runtime = ProjectLoader::load_from_root_with_every_entry_resident(
+        &fs,
+        EngineServices::new(root_path),
+    )
+    .map_err(|e| format!("{rel_dir}: project does not load: {e}"))?;
     let (engine, registry) = runtime.into_parts();
 
     for entry in registry.inventory().defs.values() {

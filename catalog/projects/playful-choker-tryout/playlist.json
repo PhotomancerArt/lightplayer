@@ -7,6 +7,11 @@
   },
   "idle_entry": 1,
   "default_fade": 1.5,
+  "cycle": {
+    "kind": "cycle",
+    "step_seconds": 30.0,
+    "fade_seconds": 1.5
+  },
   "entries": {
     "1": {
       "name": "noise_soft",
@@ -45,6 +50,166 @@
       "fade_after": 1.5,
       "node": {
         "ref": "./modules/fireflies/module.json"
+      }
+    },
+    "6": {
+      "name": "color_wipe",
+      "duration": 30.0,
+      "fade_after": 1.5,
+      "node": {
+        "ref": "./modules/color_wipe/module.json"
+      }
+    },
+    "7": {
+      "name": "heartbeat",
+      "duration": 30.0,
+      "fade_after": 1.5,
+      "node": {
+        "ref": "./modules/heartbeat/module.json"
+      }
+    },
+    "8": {
+      "name": "noise_hard",
+      "duration": 30.0,
+      "fade_after": 1.5,
+      "node": {
+        "ref": "./modules/noise_hard/module.json"
+      }
+    },
+    "9": {
+      "name": "ripples",
+      "duration": 30.0,
+      "fade_after": 1.5,
+      "node": {
+        "ref": "./modules/ripples/module.json"
+      }
+    },
+    "10": {
+      "name": "spiral",
+      "duration": 30.0,
+      "fade_after": 1.5,
+      "node": {
+        "ref": "./modules/spiral/module.json"
+      }
+    },
+    "11": {
+      "name": "veins",
+      "duration": 30.0,
+      "fade_after": 1.5,
+      "node": {
+        "ref": "./modules/veins/module.json"
+      }
+    },
+    "12": {
+      "name": "radial_gradient",
+      "duration": 30.0,
+      "fade_after": 1.5,
+      "node": {
+        "ref": "./modules/radial_gradient/module.json"
+      }
+    },
+    "13": {
+      "name": "linear_gradient",
+      "duration": 30.0,
+      "fade_after": 1.5,
+      "node": {
+        "ref": "./modules/linear_gradient/module.json"
+      }
+    },
+    "14": {
+      "name": "noise_soft_2",
+      "duration": 30.0,
+      "fade_after": 1.5,
+      "node": {
+        "ref": "./modules/noise_soft/module.json"
+      }
+    },
+    "15": {
+      "name": "aurora_2",
+      "duration": 30.0,
+      "fade_after": 1.5,
+      "node": {
+        "ref": "./modules/aurora/module.json"
+      }
+    },
+    "16": {
+      "name": "twinkle_2",
+      "duration": 30.0,
+      "fade_after": 1.5,
+      "node": {
+        "ref": "./modules/twinkle/module.json"
+      }
+    },
+    "17": {
+      "name": "scanner_2",
+      "duration": 30.0,
+      "fade_after": 1.5,
+      "node": {
+        "ref": "./modules/scanner/module.json"
+      }
+    },
+    "18": {
+      "name": "fireflies_2",
+      "duration": 30.0,
+      "fade_after": 1.5,
+      "node": {
+        "ref": "./modules/fireflies/module.json"
+      }
+    },
+    "19": {
+      "name": "color_wipe_2",
+      "duration": 30.0,
+      "fade_after": 1.5,
+      "node": {
+        "ref": "./modules/color_wipe/module.json"
+      }
+    },
+    "20": {
+      "name": "heartbeat_2",
+      "duration": 30.0,
+      "fade_after": 1.5,
+      "node": {
+        "ref": "./modules/heartbeat/module.json"
+      }
+    },
+    "21": {
+      "name": "noise_hard_2",
+      "duration": 30.0,
+      "fade_after": 1.5,
+      "node": {
+        "ref": "./modules/noise_hard/module.json"
+      }
+    },
+    "22": {
+      "name": "ripples_2",
+      "duration": 30.0,
+      "fade_after": 1.5,
+      "node": {
+        "ref": "./modules/ripples/module.json"
+      }
+    },
+    "23": {
+      "name": "spiral_2",
+      "duration": 30.0,
+      "fade_after": 1.5,
+      "node": {
+        "ref": "./modules/spiral/module.json"
+      }
+    },
+    "24": {
+      "name": "veins_2",
+      "duration": 30.0,
+      "fade_after": 1.5,
+      "node": {
+        "ref": "./modules/veins/module.json"
+      }
+    },
+    "25": {
+      "name": "radial_gradient_2",
+      "duration": 30.0,
+      "fade_after": 1.5,
+      "node": {
+        "ref": "./modules/radial_gradient/module.json"
       }
     }
   }

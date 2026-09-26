@@ -23,6 +23,7 @@ mod module_face;
 mod module_panel;
 mod module_panel_control;
 mod panel_gesture;
+mod pattern_picker;
 mod play_mode;
 
 #[cfg(feature = "stories")]
@@ -31,6 +32,10 @@ pub(crate) mod module_face_stories;
 pub(crate) mod module_fixtures;
 #[cfg(feature = "stories")]
 pub(crate) mod panel_state_stories;
+#[cfg(feature = "stories")]
+pub(crate) mod pattern_picker_fixtures;
+#[cfg(feature = "stories")]
+pub(crate) mod pattern_picker_stories;
 #[cfg(feature = "stories")]
 pub(crate) mod play_mode_stories;
 #[cfg(feature = "stories")]
@@ -42,4 +47,5 @@ pub use module_face::{ExportFindingRow, ModuleFace};
 pub use module_panel::{ModulePanel, NestedPanelGroup};
 pub use module_panel_control::ModulePanelControl;
 pub use panel_gesture::{PanelGesture, panel_gesture_actions};
+pub use pattern_picker::PatternPicker;
 pub use play_mode::PlayModeSurface;

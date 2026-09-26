@@ -84,6 +84,19 @@ fn load(fs: &LpFsMemory) -> LoadedProjectRuntime {
     ProjectLoader::load_from_root(fs, services).expect("load scope project")
 }
 
+/// Loads [`project_fs`] with both playlist entries: only the idle entry (1)
+/// is resident by default, and the scope model under test needs entry 7's
+/// sink too.
+fn load_both_entries(fs: &LpFsMemory) -> LoadedProjectRuntime {
+    let services = EngineServices::new(TreePath::parse("/scope_test.show").expect("path"));
+    ProjectLoader::load_from_root_with_resident_entries(
+        fs,
+        services,
+        &[(use_location("nodes[list]"), 7)],
+    )
+    .expect("load scope project")
+}
+
 fn use_location(path: &str) -> NodeUseLocation {
     NodeUseLocation::root().child(SlotPath::parse(path).expect("slot path"))
 }
@@ -108,7 +121,7 @@ fn scope_table(engine: &lpc_engine::Engine) -> Vec<(String, Option<String>, bool
 #[test]
 fn scope_is_queryable_after_load_with_sink_entries_modeled() {
     let fs = project_fs();
-    let rt = load(&fs);
+    let rt = load_both_entries(&fs);
     let engine = rt.engine();
     let tree = engine.tree();
     let root = tree.root();
@@ -181,10 +194,10 @@ fn load_and_trivial_apply_produce_identical_scope_tables() {
     // entry points — a project must never wear different scopes after an
     // edit than after a reload.
     let fs = project_fs();
-    let baseline = scope_table(load(&fs).engine());
+    let baseline = scope_table(load_both_entries(&fs).engine());
 
     let fs = project_fs();
-    let rt = load(&fs);
+    let rt = load_both_entries(&fs);
     let (mut engine, mut registry) = rt.into_parts();
     // Trivial content change: touch the clock def body.
     fs.write_file(
@@ -238,14 +251,14 @@ fn load_and_apply_produce_identical_bus_wiring() {
     }
 
     let fs = project_fs();
-    let baseline = winner_table(load(&fs).engine());
+    let baseline = winner_table(load_both_entries(&fs).engine());
     assert!(
         !baseline.is_empty(),
         "the wiring table must actually cover channels"
     );
 
     let fs = project_fs();
-    let rt = load(&fs);
+    let rt = load_both_entries(&fs);
     let (mut engine, mut registry) = rt.into_parts();
     fs.write_file(
         "/clock.json".as_path(),
@@ -279,7 +292,7 @@ fn failed_defs_still_carry_scope() {
     let fs = project_fs();
     fs.write_file("/clock.json".as_path(), b"not valid json {{{")
         .expect("break clock def");
-    let rt = load(&fs);
+    let rt = load_both_entries(&fs);
     let engine = rt.engine();
     let tree = engine.tree();
     let root_scope = tree
@@ -295,7 +308,7 @@ fn failed_defs_still_carry_scope() {
 #[test]
 fn scope_persist_paths_are_tree_path_stable() {
     let fs = project_fs();
-    let rt = load(&fs);
+    let rt = load_both_entries(&fs);
     let engine = rt.engine();
     let tree = engine.tree();
     let root_scope = tree.scope_introduced_by(tree.root()).expect("root scope");
@@ -523,7 +536,7 @@ fn panel_writer_survives_apply_project_changes() {
     // ALL bindings from defs (clear + re-register), and an engaged panel
     // writer must ride through untouched — still engaged, still winning.
     let fs = project_fs();
-    let rt = load(&fs);
+    let rt = load_both_entries(&fs);
     let (mut engine, mut registry) = rt.into_parts();
     let root_scope = engine
         .tree()

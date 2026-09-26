@@ -469,8 +469,10 @@ fn playlist_entry_click_activates_on_the_real_server() {
 
     // Click: the activate op rides the runtime command channel to the real
     // server (nothing staged — no overlay row, no dirty state); the
-    // playlist validates and queues the switch, applying it on the next
-    // engine frame (every in-process message ticks one).
+    // playlist validates and queues the switch. Every in-process message
+    // ticks one engine frame, BEFORE it is handled: the next frame decides
+    // the switch, and the frame after loads the (dormant) entry at the
+    // pre-tick residency step — `active_entry` names it from then on.
     handle.tx.send(StudioCommand::Action(activate));
     drive(actor.run_one_batch_for_test());
     let snapshot = view.try_recv().expect("dispatch emits a snapshot");
@@ -480,6 +482,14 @@ fn playlist_entry_click_activates_on_the_real_server() {
         "an activate poke stages nothing in the overlay"
     );
 
+    handle.tx.send(project_action(ProjectOp::RefreshProject));
+    drive(actor.run_one_batch_for_test());
+    let snapshot = view.try_recv().expect("refresh emits a snapshot");
+    assert_eq!(
+        playlist_face(&snapshot).active,
+        Some(1),
+        "the switch frame still plays the idle entry: the active one is dormant until it loads"
+    );
     handle.tx.send(project_action(ProjectOp::RefreshProject));
     drive(actor.run_one_batch_for_test());
     let snapshot = view.try_recv().expect("refresh emits a snapshot");
@@ -557,7 +567,7 @@ fn playlist_activate_rejects_an_unknown_entry_gracefully() {
         snapshot.console.entries.iter().any(|entry| {
             entry.level == UiLogLevel::Warn
                 && entry.message.contains("Couldn't activate entry 9")
-                && entry.message.contains("no loaded entry 9")
+                && entry.message.contains("no entry 9")
         }),
         "the rejection reason surfaces as a console warning: {:?}",
         snapshot.console.entries
@@ -572,7 +582,8 @@ fn playlist_activate_rejects_an_unknown_entry_gracefully() {
     assert_eq!(face.active, Some(1), "the active entry is untouched");
     assert_eq!(playlist.children.len(), 1);
 
-    // The channel still works after a rejection: a valid activate lands.
+    // The channel still works after a rejection: a valid activate lands
+    // (the dormant entry loads the frame after the switch is decided).
     handle.tx.send(StudioCommand::Action(UiAction::from_op(
         ControllerId::new(ProjectController::NODE_ID),
         PlaylistActivateOp { node, entry: 2 },
@@ -580,19 +591,23 @@ fn playlist_activate_rejects_an_unknown_entry_gracefully() {
     drive(actor.run_one_batch_for_test());
     handle.tx.send(project_action(ProjectOp::RefreshProject));
     drive(actor.run_one_batch_for_test());
+    let _ = view.try_recv().expect("refresh emits a snapshot");
+    handle.tx.send(project_action(ProjectOp::RefreshProject));
+    drive(actor.run_one_batch_for_test());
     let snapshot = view.try_recv().expect("refresh emits a snapshot");
     assert_eq!(playlist_face(&snapshot).active, Some(2));
 }
 
 #[test]
-fn playlist_with_unresolvable_active_entry_keeps_all_children() {
-    // The runtime status names entry 9, which exists neither in the strip
-    // nor as a mounted child (authored dangling `idle_entry`) — the face
-    // must not derive and the card falls back to today's full rendering
-    // (never a blank card). The missing-status arm is unit-covered in
-    // `node_face_builder` (the in-process server publishes the state root,
-    // `active_entry` included, from the moment the project loads, so
-    // status absence is not reachable end-to-end).
+fn playlist_with_a_dangling_idle_entry_plays_its_first_entry() {
+    // The authored `idle_entry` (9) names no entry. Only one entry is ever
+    // loaded, so "the idle entry" must mean one that exists: the first
+    // authored entry by key plays instead (multi-pattern plan, director
+    // ruling DD7), the registry makes it resident, and the runtime names it
+    // as ACTIVE — so the face derives with its one live surface. The
+    // unresolvable-ACTIVE fallback (never a blank card) is unit-covered in
+    // `node_face_builder`; it is no longer reachable end-to-end from an
+    // authored file.
     let server = Rc::new(RefCell::new(playlist_e2e_server(9)));
     let io = InProcessServerIo {
         server: Rc::clone(&server),
@@ -611,12 +626,17 @@ fn playlist_with_unresolvable_active_entry_keeps_all_children() {
     let snapshot = view.try_recv().expect("connect emits a snapshot");
 
     let playlist = node_by_kind(&snapshot, "Playlist");
-    assert_eq!(playlist.face, None, "unresolvable ACTIVE → no face");
+    assert_eq!(
+        playlist_face(&snapshot).active,
+        Some(1),
+        "the first entry is the one playing"
+    );
     assert_eq!(
         playlist.children.len(),
-        2,
-        "fallback emits all children exactly as today"
+        1,
+        "one live surface: the first entry's child, the only one loaded"
     );
+    assert_eq!(playlist.children[0].label, "Idle");
 }
 
 #[test]
@@ -885,17 +905,19 @@ fn the_active_playlist_entrys_controls_bubble_onto_the_module_panel() {
     );
     assert_eq!(
         face.panel.groups.len(),
-        2,
-        "two groups: the clock's instrument, then the active entry"
+        3,
+        "three groups: the clock's instrument, the playlist's Pattern \
+         instrument (multi-pattern P7), then the active entry"
     );
     assert_eq!(
         face.panel.groups[0].label, "Clock",
         "the instrument group leads (G2 feedback 2026-08-08)"
     );
-    let entry_group = &face.panel.groups[1];
+    assert_eq!(face.panel.groups[1].label, "Pattern");
+    let entry_group = &face.panel.groups[2];
     assert_eq!(
-        entry_group.label, "idle",
-        "the group wears the ACTIVE entry's name"
+        entry_group.label, "Idle",
+        "the group wears the ACTIVE entry's name, read the way its card is"
     );
     let entry_scope = entry_group
         .target
@@ -949,7 +971,7 @@ fn the_active_playlist_entrys_controls_bubble_onto_the_module_panel() {
     let snapshot = view.try_recv().expect("panel write emits a snapshot");
 
     let face = module_face(&snapshot);
-    let glow = &face.panel.groups[1].controls[0];
+    let glow = &face.panel.groups[2].controls[0];
     assert_eq!(
         glow.state,
         crate::UiPanelControlState::Engaged,

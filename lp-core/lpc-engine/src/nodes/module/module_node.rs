@@ -22,7 +22,9 @@ use crate::node::{
     DestroyCtx, MemPressureCtx, NodeError, NodeRuntime, PressureLevel, ProduceResult,
     RenderContext, RenderNode, ScopeRef, TickContext, err_ctx,
 };
-use crate::products::visual::{RenderTextureRequest, TextureRenderProduct, VisualSampleStream};
+use crate::products::visual::{
+    RenderTextureRequest, TextureRenderProduct, VisualReadiness, VisualSampleStream,
+};
 use lpc_model::{SlotAccess, SlotShapeRegistry, SlotShapeRegistryError};
 
 use super::ModuleMirrorState;
@@ -143,6 +145,19 @@ impl RenderNode for ModuleNode {
             return Ok(crate::products::visual::ProductSpaceInfo::two_d());
         };
         ctx.visual_product_space(mirrored)
+    }
+
+    /// A mirror is as ready as what it mirrors; mirroring nothing renders
+    /// black for good, which is not a wait.
+    fn visual_readiness(
+        &mut self,
+        _product: VisualProduct,
+        ctx: &mut RenderContext<'_>,
+    ) -> Result<VisualReadiness, NodeError> {
+        let Some(mirrored) = self.mirrored else {
+            return Ok(VisualReadiness::Ready);
+        };
+        ctx.visual_product_readiness(mirrored)
     }
 
     fn render_texture(

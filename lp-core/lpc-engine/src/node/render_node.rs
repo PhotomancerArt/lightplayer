@@ -3,7 +3,8 @@
 use lp_gfx::TextureHandle;
 
 use crate::products::visual::{
-    ProductSpaceInfo, RenderTextureRequest, TextureRenderProduct, VisualProduct, VisualSampleStream,
+    ProductSpaceInfo, RenderTextureRequest, TextureRenderProduct, VisualProduct, VisualReadiness,
+    VisualSampleStream,
 };
 
 use super::{NodeError, RenderContext, err_ctx};
@@ -24,6 +25,23 @@ pub trait RenderNode {
         _ctx: &mut RenderContext<'_>,
     ) -> Result<ProductSpaceInfo, NodeError> {
         Ok(ProductSpaceInfo::two_d())
+    }
+
+    /// Whether this product's latest render was its real output, or a
+    /// placeholder while a first compile waits for its window. Asked AFTER a
+    /// render in the same frame (the compile decision is made inside the
+    /// render), by a consumer holding a frame across a switch (the
+    /// playlist).
+    ///
+    /// The default is [`VisualReadiness::Ready`]: a producer with no compile
+    /// renders for real from its first frame. Nodes that only forward a
+    /// product (playlist, module) forward this too.
+    fn visual_readiness(
+        &mut self,
+        _product: VisualProduct,
+        _ctx: &mut RenderContext<'_>,
+    ) -> Result<VisualReadiness, NodeError> {
+        Ok(VisualReadiness::Ready)
     }
 
     fn render_texture(

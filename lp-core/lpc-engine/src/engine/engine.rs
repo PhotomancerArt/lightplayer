@@ -26,13 +26,14 @@ use crate::node::RuntimeNodeEntry;
 use crate::node::catch_node_panic::catch_node_panic_framed;
 use crate::node::{
     ControlRenderContext, ControlRenderServices, NodeCall, NodeCallKey, NodeError,
-    NodeResourceInitContext, NodeRuntime, ProduceResult, RenderContext, TickContext,
+    NodeResourceInitContext, NodeRuntime, ProduceResult, RenderContext, RenderNode, TickContext,
     VisualRenderServices,
 };
 use crate::node::{NodeEntryState, RuntimeNodeTree};
 use crate::products::control::{ControlLayout, ControlRenderRequest, ControlRenderTarget};
 use crate::products::visual::{
-    ProductSpaceInfo, RenderTextureRequest, TextureRenderProduct, VisualProduct, VisualSampleStream,
+    ProductSpaceInfo, RenderTextureRequest, TextureRenderProduct, VisualProduct, VisualReadiness,
+    VisualSampleStream,
 };
 use crate::resource::{RuntimeBufferId, RuntimeBufferStore};
 use lp_gfx::{LpGraphics, TextureHandle};
@@ -336,9 +337,23 @@ impl Engine {
             self.project_runtime_index.remove_runtime_node(id);
         }
         self.demand_roots.retain(|root| !ids.contains(root));
+        // The removed nodes' phasors, and those of the scopes they owned,
+        // go now rather than after the store's idle horizon: a removed id
+        // never asks again, so waiting only keeps dead state on the heap
+        // (see `TimebaseStore::forget_removed`).
+        self.timebases
+            .forget_removed(|id| ids.contains(&id), |scope| ids.contains(&scope.owner()));
         self.tree.remove_subtree(node, frame)?;
         self.resolver.invalidate_structure();
         Ok(())
+    }
+
+    /// Drop every phasor keyed to `scope` now, for a scope that outlives
+    /// its owner's children but not their readings (a playlist entry's
+    /// sink, when the entry unloads).
+    pub(crate) fn forget_scope_phasors(&mut self, scope: crate::node::ScopeRef) {
+        self.timebases
+            .forget_removed(|_| false, |candidate| *candidate == scope);
     }
 
     pub(crate) fn reattach_runtime_node(
@@ -481,6 +496,28 @@ impl Engine {
     /// The engaged panel writers (probes, persistence).
     pub fn panel_writers(&self) -> &crate::dataflow::panel_writers::PanelWriterStore {
         &self.panel_writers
+    }
+
+    /// Mutable panel writers, for the engine steps that move writers between
+    /// live scopes and parked ones (entry residency).
+    pub(crate) fn panel_writers_mut(
+        &mut self,
+    ) -> &mut crate::dataflow::panel_writers::PanelWriterStore {
+        &mut self.panel_writers
+    }
+
+    /// Hold a latched panel value for a scope that is not in the tree
+    /// because its playlist entry is dormant, keyed by the scope's persist
+    /// path. It engages when the entry loads (restore of `/.lp/panel.json`,
+    /// multi-pattern vision D12). Nothing resolves differently until then,
+    /// so the resolver is not invalidated.
+    pub fn panel_park(
+        &mut self,
+        persist_path: alloc::string::String,
+        channel: lpc_model::ChannelName,
+        value: lpc_model::LpValue,
+    ) {
+        self.panel_writers.park(persist_path, channel, value);
     }
 
     /// The published timebases and their phasors (probes, tests). Runtime
@@ -1564,12 +1601,15 @@ impl EngineResolveHost<'_> {
             return Ok(Production::new(product, ProductionSource::Default));
         }
 
-        let product = self.read_authored_def_product(node, slot).map_err(|_| {
-            SessionResolveError::UnresolvedConsumedSlot {
-                node,
-                slot: slot.clone(),
-            }
-        })?;
+        let product = self
+            .read_authored_def_product(node, slot)
+            .map_err(|err| match err {
+                SessionResolveError::AbsentOption { .. } => err,
+                _ => SessionResolveError::UnresolvedConsumedSlot {
+                    node,
+                    slot: slot.clone(),
+                },
+            })?;
         Ok(Production::new(product, ProductionSource::Default))
     }
 
@@ -1588,9 +1628,12 @@ impl EngineResolveHost<'_> {
                 })?;
         let product = self
             .read_authored_def_product_by_accessor(node, accessor)
-            .map_err(|_| SessionResolveError::UnresolvedConsumedSlot {
-                node,
-                slot: accessor.path().clone(),
+            .map_err(|err| match err {
+                SessionResolveError::AbsentOption { .. } => err,
+                _ => SessionResolveError::UnresolvedConsumedSlot {
+                    node,
+                    slot: accessor.path().clone(),
+                },
             })?;
         Ok(Production::new(product, ProductionSource::Default))
     }
@@ -2095,8 +2138,14 @@ impl EngineResolveHost<'_> {
         slot: &SlotPath,
     ) -> Result<SlotData, SessionResolveError> {
         let def = self.loaded_node_def(node)?;
-        let (data, shape) = lookup_slot_data_and_shape(def, self.slot_shapes, slot)
-            .map_err(|e| SessionResolveError::other(format!("authored def lookup: {e}")))?;
+        let (data, shape) =
+            lookup_slot_data_and_shape(def, self.slot_shapes, slot).map_err(|e| {
+                if e.is_option_none() {
+                    SessionResolveError::AbsentOption { node }
+                } else {
+                    SessionResolveError::other(format!("authored def lookup: {e}"))
+                }
+            })?;
         Ok(lpc_wire::snapshot_slot_shape(shape, data, self.slot_shapes))
     }
 
@@ -2106,9 +2155,13 @@ impl EngineResolveHost<'_> {
         accessor: &SlotAccessor,
     ) -> Result<SlotData, SessionResolveError> {
         let def = self.loaded_node_def(node)?;
-        let data = accessor
-            .access(def, self.slot_shapes)
-            .map_err(|e| SessionResolveError::other(format!("authored def accessor: {e}")))?;
+        let data = accessor.access(def, self.slot_shapes).map_err(|e| {
+            if e.is_option_none() {
+                SessionResolveError::AbsentOption { node }
+            } else {
+                SessionResolveError::other(format!("authored def accessor: {e}"))
+            }
+        })?;
         let (_, shape) = lookup_slot_data_and_shape(def, self.slot_shapes, accessor.path())
             .map_err(|e| SessionResolveError::other(format!("authored def accessor shape: {e}")))?;
         Ok(lpc_wire::snapshot_slot_shape(shape, data, self.slot_shapes))
@@ -2253,20 +2306,54 @@ impl EngineResolveHost<'_> {
 
     /// Answer the product-space query (plan D17) by routing it to the
     /// producing node, exactly like a render call.
-    ///
-    /// The node is taken out of the tree for the duration for the same
-    /// reason the render paths take it: a forwarding producer (playlist,
-    /// module) answers by asking the engine about *its* upstream product,
-    /// which re-enters this host.
     fn visual_node_space(
         &mut self,
         product: VisualProduct,
     ) -> Result<ProductSpaceInfo, SessionResolveError> {
+        // Not a render node at all: nothing to project, and the caller's
+        // real error comes from the render call itself.
+        self.visual_node_query(
+            product,
+            "visual space",
+            ProductSpaceInfo::two_d(),
+            |render_node, ctx| render_node.visual_space(product, ctx),
+        )
+    }
+
+    /// Answer the readiness query (`RenderNode::visual_readiness`) by
+    /// routing it to the producing node, like [`Self::visual_node_space`].
+    fn visual_node_readiness(
+        &mut self,
+        product: VisualProduct,
+    ) -> Result<VisualReadiness, SessionResolveError> {
+        // Not a render node: nothing to wait for.
+        self.visual_node_query(
+            product,
+            "visual readiness",
+            VisualReadiness::Ready,
+            |render_node, ctx| render_node.visual_readiness(product, ctx),
+        )
+    }
+
+    /// Route a metadata query to the node producing `product`.
+    ///
+    /// The node is taken out of the tree for the duration for the same
+    /// reason the render paths take it: a forwarding producer (playlist,
+    /// module) answers by asking the engine about *its* upstream product,
+    /// which re-enters this host. `not_render` answers for a node with no
+    /// render capability.
+    fn visual_node_query<T>(
+        &mut self,
+        product: VisualProduct,
+        what: &'static str,
+        not_render: T,
+        query: impl FnOnce(&mut dyn RenderNode, &mut RenderContext<'_>) -> Result<T, NodeError>,
+    ) -> Result<T, SessionResolveError> {
         let node_id = product.node();
         let revision = self.frame_revision;
         let mut node_runtime = {
             let entry = self.tree.get_mut(node_id).ok_or_else(|| {
-                SessionResolveError::other(format!("visual space: unknown node {node_id:?}"))
+                SessionResolveError::other(format!("{what}: unknown node {node_id:?}"))
             })?;
             let old_changed_at = entry.state.changed_at();
             let executing = NodeEntryState::Executing {
@@ -2289,7 +2376,7 @@ impl EngineResolveHost<'_> {
                         Some(label) => format!(
                             "node {node_id:?} is already executing {label}; re-entry through EngineSession is unsupported"
                         ),
-                        None => format!("visual space: node {node_id:?} not alive"),
+                        None => format!("{what}: node {node_id:?} not alive"),
                     }));
                 }
             }
@@ -2310,20 +2397,18 @@ impl EngineResolveHost<'_> {
                     catch_node_panic_framed(
                         lp_recovery::FrameKind::NodeRender,
                         &recovery_name,
-                        || render_node.visual_space(product, &mut ctx),
+                        || query(render_node, &mut ctx),
                     )
                 }
-                // Not a render node at all: nothing to project, and the
-                // caller's real error comes from the render call itself.
-                None => Ok(ProductSpaceInfo::two_d()),
+                None => Ok(not_render),
             }
         };
 
         let entry = self.tree.get_mut(node_id).ok_or_else(|| {
-            SessionResolveError::other(format!("visual space: unknown node {node_id:?}"))
+            SessionResolveError::other(format!("{what}: unknown node {node_id:?}"))
         })?;
         entry.set_state(NodeEntryState::Alive(node_runtime), revision);
-        result.map_err(|e| SessionResolveError::other(format!("visual space: {e}")))
+        result.map_err(|e| SessionResolveError::other(format!("{what}: {e}")))
     }
 
     fn render_node_texture(
@@ -3074,6 +3159,14 @@ impl VisualRenderServices for EngineResolveHost<'_> {
             .map_err(|e| NodeError::msg(format!("visual space: {e}")))
     }
 
+    fn visual_product_readiness(
+        &mut self,
+        product: VisualProduct,
+    ) -> Result<VisualReadiness, NodeError> {
+        self.visual_node_readiness(product)
+            .map_err(|e| NodeError::msg(format!("{e}")))
+    }
+
     fn render_texture(
         &mut self,
         product: VisualProduct,
@@ -3739,14 +3832,7 @@ mod tests {
                 Revision::new(1),
             )
             .expect("add node");
-        let entries = alloc::vec![PlaylistRuntimeEntry {
-            index: 1,
-            child: NodeId::new(99),
-            output_slot: SlotPath::parse("output").expect("path"),
-            duration: None,
-            fade_after: None,
-            trigger_ids: None,
-        }];
+        let entries = alloc::vec![PlaylistRuntimeEntry::dormant(1).loaded(NodeId::new(99))];
         eng.attach_runtime_node(
             node,
             Box::new(PlaylistNode::new(node, 1, 0.0, entries)),
@@ -3760,7 +3846,7 @@ mod tests {
         let err = eng
             .handle_node_command(node, &WireNodeCommand::PlaylistActivateEntry { entry: 9 })
             .expect_err("unknown entry rejected");
-        assert!(err.to_string().contains("no loaded entry 9"), "{err}");
+        assert!(err.to_string().contains("no entry 9"), "{err}");
 
         let err = eng
             .handle_node_command(

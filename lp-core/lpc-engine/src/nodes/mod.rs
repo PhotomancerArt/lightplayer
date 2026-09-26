@@ -38,7 +38,7 @@ pub use output::output_node::{
 pub use placeholder::CorePlaceholderNode;
 pub use playlist::playlist_output_path;
 #[cfg(feature = "node-playlist")]
-pub use playlist::{PlaylistNode, PlaylistRuntimeEntry};
+pub use playlist::{PlaylistEntryReason, PlaylistNode, PlaylistRuntimeEntry};
 #[cfg(feature = "node-radio")]
 pub use radio::{ControlRadioNode, control_radio_input_path, control_radio_output_path};
 #[cfg(feature = "node-shader")]

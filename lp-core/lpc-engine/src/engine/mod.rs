@@ -5,6 +5,7 @@ mod control_geometry_stamps;
 mod engine;
 mod engine_error;
 mod engine_services;
+mod entry_residency;
 pub mod error;
 mod frame_num;
 mod frame_time;
@@ -40,6 +41,7 @@ mod project_read_runtime;
 mod project_read_shapes;
 mod project_read_stream;
 mod project_runtime_index;
+mod residency_applied;
 #[cfg(test)]
 mod resolution_persistence_tests;
 // Compute-shader nodes reading a clock's timebase through `bus:time`.
@@ -86,6 +88,7 @@ pub use project_fault::{FaultPresentation, ProjectFault};
 pub use project_loader::{ProjectLoadError, ProjectLoader};
 pub use project_read_stream::{EngineProjectReadSource, ProjectReadEventStreamError};
 pub use project_runtime_index::ProjectRuntimeIndex;
+pub use residency_applied::{EntryResidencyEvent, ResidencyApplied};
 
 #[cfg(test)]
 pub(crate) use engine::resolve_with_engine_host;

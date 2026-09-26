@@ -7,12 +7,13 @@
 //! registry revision it was compiled from.
 
 use crate::slot::SlotReadContext;
+use crate::slot::slot_lookup::OPTION_NONE_MESSAGE;
 use crate::{
     FromLpValue, Revision, SlotAccess, SlotDataAccess, SlotName, SlotPath, SlotPathSegment,
     SlotShapeId, SlotShapeLookup, SlotShapeView,
 };
+use alloc::borrow::Cow;
 use alloc::format;
-use alloc::string::String;
 use alloc::vec::Vec;
 
 /// Indexed, registry-revision-checked access to one slot path.
@@ -36,7 +37,8 @@ pub enum SlotAccessorStep {
 /// Error returned while compiling or using a [`SlotAccessor`].
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SlotAccessorError {
-    message: String,
+    message: Cow<'static, str>,
+    option_none: bool,
 }
 
 impl SlotAccessor {
@@ -171,7 +173,7 @@ impl SlotAccessor {
                 (SlotAccessorStep::OptionSome, SlotDataAccess::Option(option)) => {
                     data = option
                         .data()
-                        .ok_or_else(|| SlotAccessorError::new("option slot is none"))?;
+                        .ok_or_else(|| SlotAccessorError::option_none())?;
                 }
                 (SlotAccessorStep::OptionSome, _) => {
                     return Err(SlotAccessorError::new(
@@ -231,10 +233,25 @@ impl SlotAccessor {
 }
 
 impl SlotAccessorError {
-    fn new(message: impl Into<String>) -> Self {
+    fn new(message: impl Into<Cow<'static, str>>) -> Self {
         Self {
             message: message.into(),
+            option_none: false,
         }
+    }
+
+    /// See [`crate::SlotLookupError::is_option_none`]; allocation-free.
+    fn option_none() -> Self {
+        Self {
+            message: Cow::Borrowed(OPTION_NONE_MESSAGE),
+            option_none: true,
+        }
+    }
+
+    /// True when the accessor went through an option's `some` and the option
+    /// holds nothing — an absent value, not a broken path.
+    pub fn is_option_none(&self) -> bool {
+        self.option_none
     }
 }
 

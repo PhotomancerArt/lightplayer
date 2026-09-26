@@ -25,6 +25,9 @@ pub use lpc_model::{
 };
 pub use overlay::{EditApplyError, serialize_slot_draft};
 pub use registry::commit_error::CommitError;
+pub use registry::entry_issue_check::EntryIssue;
+pub use registry::entry_residency::EntryResidency;
+pub use registry::entry_residency_error::EntryResidencyError;
 pub use registry::load_result::LoadResult;
 pub use registry::node_authoring::{CreateNodeOutcome, RemoveNodeOutcome};
 pub use registry::parse_ctx::ParseCtx;

@@ -94,7 +94,7 @@ fn example_compiler_inputs(example: &str) -> Vec<CompilerInput> {
     let slug = example.rsplit('/').next().unwrap_or(example);
     let fs = LpFsStd::new(root.clone());
     let services = EngineServices::new(TreePath::parse("/probe.show").expect("root path"));
-    let rt = ProjectLoader::load_from_root(&fs, services)
+    let rt = ProjectLoader::load_from_root_with_every_entry_resident(&fs, services)
         .unwrap_or_else(|e| panic!("load {example}: {e}"));
     let (engine, registry) = rt.into_parts();
     let mut inputs = Vec::new();

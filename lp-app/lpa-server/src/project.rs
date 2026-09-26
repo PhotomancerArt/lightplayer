@@ -125,7 +125,7 @@ impl Project {
         backtrace::set_oom_context("project new: restore panel state");
         let panel_auto_save = {
             let fs_ref = fs.borrow();
-            panel_state::restore(&*fs_ref, &mut runtime)
+            panel_state::restore(&*fs_ref, &mut runtime, &registry)
         };
 
         backtrace::set_oom_context("project new: build wrapper");
@@ -207,14 +207,27 @@ impl Project {
     }
 
     pub fn tick(&mut self, delta_ms: u32) -> Result<(), ServerError> {
-        let registry = &self.registry;
         let runtime = self
             .runtime
             .as_mut()
             .expect("project runtime is only absent while reloading");
-        let result = runtime
-            .tick(registry, delta_ms)
+        // The pre-tick residency step (plan PD2): playlist entries load and
+        // unload here, where the fs and a mutable registry are in hand and
+        // no render borrow is live. Every edge — fw-esp32c6, fw-emu,
+        // fw-browser, the host server — ticks through this one call. A load
+        // that fails is reported to its playlist, never to the tick.
+        let residency = {
+            let fs_ref = self.fs.borrow();
+            runtime
+                .apply_residency(&*fs_ref, &mut self.registry)
+                .map_err(|e| ServerError::Core(format!("entry residency: {e}")))
+        };
+        // The frame still ticks when the step errs (never-black: the
+        // outputs flush what they have); the step's error is the verdict.
+        let ticked = runtime
+            .tick(&self.registry, delta_ms)
             .map_err(|e| ServerError::Core(format!("{e}")));
+        let result = residency.and(ticked);
         // Persistence rides the tick, throttled — a failed frame still
         // gets its panel state written, since a crash loop is exactly
         // when losing the user's dim would hurt most.
@@ -676,7 +689,7 @@ impl Project {
         backtrace::set_oom_context("project reload: restore panel state");
         self.panel_auto_save = {
             let fs_ref = self.fs.borrow();
-            panel_state::restore(&*fs_ref, &mut runtime)
+            panel_state::restore(&*fs_ref, &mut runtime, &registry)
         };
         self.panel_state_saved_mutations = runtime.panel_writers().mutations();
         self.panel_state_age_ms = 0;
