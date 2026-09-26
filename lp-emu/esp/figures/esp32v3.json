@@ -26,7 +26,7 @@
     "[INIT] heap region 3 live: 0x3ffe4350+15536 (ROM APP stack)",
     "[INIT] JIT code region: sram0 ibus 0x4008"
   ],
-  "boot_idle.path_high_water_gap": -64,
+  "boot_idle.path_high_water_gap": 32,
   "determinism.single_core_prefix.cycles": 3250238,
   "determinism.single_core_prefix.idle_skips": 0,
   "determinism.single_core_prefix.instructions": 3250218,
