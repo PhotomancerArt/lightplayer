@@ -49,7 +49,7 @@ use lp_json_pack::{
     frame as cobs_frame, max_framed_len,
 };
 
-use crate::wire_encoding::{FRAME_KIND_LEARNED, WIRE_SEED};
+use crate::wire_encoding::{FRAME_KIND_LEARNED, FRAME_KIND_RESYNC, WIRE_SEED};
 
 /// The largest packed-frame body a host reader holds (COBS bytes). The
 /// firmware's frame buffer is a few tens of KB; a body past this is a torn
@@ -170,7 +170,11 @@ impl WireStream {
                 text.extend_from_slice(t);
                 drain_lines(text, &mut on);
             }
-            ScanEvent::Frame { kind, payload } => on(reader.frame(kind, payload)),
+            ScanEvent::Frame { kind, payload } => {
+                if let Some(chunk) = reader.frame(kind, payload) {
+                    on(chunk);
+                }
+            }
             ScanEvent::Dropped(reason) => on(WireChunk::Error(dropped_message(reason))),
         });
     }
@@ -240,8 +244,17 @@ impl LearnedReader {
         }
     }
 
-    /// One scanned frame → its chunk, learning as the board did.
-    fn frame(&mut self, kind: u8, payload: &[u8]) -> WireChunk {
+    /// One scanned frame → its chunk, learning as the board did; `None` for
+    /// the board's resync marker ([`crate::RESYNC_SEQUENCE`]), which carries
+    /// nothing.
+    fn frame(&mut self, kind: u8, payload: &[u8]) -> Option<WireChunk> {
+        if kind == FRAME_KIND_RESYNC && payload.is_empty() {
+            return None;
+        }
+        Some(self.learned_frame(kind, payload))
+    }
+
+    fn learned_frame(&mut self, kind: u8, payload: &[u8]) -> WireChunk {
         if kind != FRAME_KIND_LEARNED {
             return WireChunk::Error(format!(
                 "a frame of unknown kind 0x{kind:02x} ({} bytes)",
@@ -379,7 +392,8 @@ impl WireUnpacker {
         scanner.push(bytes, |event| match event {
             ScanEvent::Text(t) => out.extend_from_slice(t),
             ScanEvent::Frame { kind, payload } => match reader.frame(kind, payload) {
-                WireChunk::Frame(frame) => {
+                None => {}
+                Some(WireChunk::Frame(frame)) => {
                     let WireForm::Packed { wire_len } = frame.form else {
                         unreachable!("a scanned frame is packed");
                     };
@@ -391,12 +405,12 @@ impl WireUnpacker {
                         json_line_len: frame.json_line_len(),
                     }));
                 }
-                WireChunk::Desync(desynced) => {
+                Some(WireChunk::Desync(desynced)) => {
                     out.extend_from_slice(unreadable_marker(&desynced).as_bytes());
                     on_frame(UnpackEvent::Unreadable(desynced));
                 }
-                WireChunk::Error(error) => on_frame(UnpackEvent::Dropped(error)),
-                WireChunk::Line(_) => unreachable!("a scanned frame is never a line"),
+                Some(WireChunk::Error(error)) => on_frame(UnpackEvent::Dropped(error)),
+                Some(WireChunk::Line(_)) => unreachable!("a scanned frame is never a line"),
             },
             ScanEvent::Dropped(reason) => on_frame(UnpackEvent::Dropped(dropped_message(reason))),
         });
@@ -569,6 +583,57 @@ mod tests {
                 })],
                 "step {step}"
             );
+        }
+    }
+
+    /// A page closed mid-reply: the next connection's reader meets half a
+    /// packed frame with no closing `00`, then the board's JSON (which has
+    /// none). Without the resync marker the reader stays inside the frame and
+    /// the JSON is swallowed; with it, from every state the torn frame can
+    /// leave the scanner in, the next line reads.
+    #[test]
+    fn the_resync_marker_frees_a_reader_left_inside_a_torn_frame() {
+        let hello = json_line(&message(1, "hello after the tear"));
+        let whole = packed(&message(9, "a reply the page never finished reading"));
+        // Half a frame whose body is not valid COBS: cut inside a COBS run.
+        let bad = whole[..whole.len() / 2].to_vec();
+        // A frame body that IS valid COBS: `00 'L' 01` (an empty body).
+        let valid = b"
+ L"
+        .to_vec();
+        // Nothing dangling: the reader is reading text.
+        let clean = b"
+"
+        .to_vec();
+
+        // Without the marker, the JSON after a torn frame is lost.
+        let stuck = WireStream::new().push_collect(&[bad.clone(), hello.clone()].concat());
+        assert!(
+            !stuck.iter().any(|c| matches!(c, WireChunk::Frame(_))),
+            "{stuck:?}"
+        );
+
+        for (name, lead) in [("bad cobs", bad), ("valid cobs", valid), ("clean", clean)] {
+            let bytes = [lead, crate::RESYNC_SEQUENCE.to_vec(), hello.clone()].concat();
+            let chunks = WireStream::new().push_collect(&bytes);
+            assert!(
+                chunks.iter().any(|c| matches!(
+                    c,
+                    WireChunk::Frame(f) if !f.is_packed() && f.json.contains("hello after the tear")
+                )),
+                "{name}: {chunks:?}"
+            );
+            // The marker itself says nothing: no error for it.
+            assert!(
+                !chunks
+                    .iter()
+                    .any(|c| matches!(c, WireChunk::Error(e) if e.contains("0x52"))),
+                "{name}: {chunks:?}"
+            );
+            // And the byte unpacker writes nothing for it.
+            let mut out = Vec::new();
+            WireUnpacker::new().push(&bytes, &mut out, |_| {});
+            assert!(!out.contains(&0), "{name}");
         }
     }
 

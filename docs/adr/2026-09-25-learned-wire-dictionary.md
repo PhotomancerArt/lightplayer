@@ -94,6 +94,19 @@ its generator, its CI gate and its tie to proto bumps.
   link goes back to JSON. A board running a show with nobody attached pays
   nothing. No heap for it: the answer becomes `json`.
 
+### The resync marker (framing, found at the hardware sitting)
+
+A packed frame ends only at its closing `00`. A write the board abandons
+part-way (the host stopped draining) can leave half a frame in the link, and
+a reader stays inside it for as long as no `00` arrives — which, once the
+board has fallen back to JSON, is never. So the board sends
+`00 00 'R' 01 00` (`lpc_wire::RESYNC_SEQUENCE`) before its next bytes after
+any failed write, from the one write loop every chip's replies and log lines
+use. By the frame scanner's existing rules it ends in "reading text" from any
+state; readers drop the empty `'R'` frame. It predates learned frames (#795
+had the same framing) and is recorded in
+`docs/defects/2026-09-26-a-half-written-packed-frame-swallowed-the-next-connection.md`.
+
 ### Captures
 
 A learned capture decodes **from its connection's start** (or from the

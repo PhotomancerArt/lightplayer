@@ -48,6 +48,29 @@ use serde::{Deserialize, Serialize};
 /// (`\n 0x00 'L' COBS(header + packed) 0x00`).
 pub const FRAME_KIND_LEARNED: u8 = b'L';
 
+/// The COBS frame kind of the board's **resync marker**: an empty frame the
+/// board writes after a write it could not finish, so a reader left inside
+/// the half-written frame gets back to reading text.
+pub const FRAME_KIND_RESYNC: u8 = b'R';
+
+/// What a board writes, before its next bytes, after a write that failed or
+/// timed out: `00 00 'R' 01 00`. A reader's frame scanner reads text again
+/// after it from **any** state (`lp_json_pack::FrameScanner`'s resync rules):
+///
+/// - inside a torn frame whose bytes are not valid COBS (the usual case): the
+///   first `00` closes it, and is taken as the start of the next frame;
+/// - inside a torn frame whose bytes happen to be valid COBS: the first `00`
+///   closes it (a garbage frame, dropped), the second starts the next one;
+/// - reading text: the first `00` starts a frame;
+///
+/// and from there the second `00` leaves every path at a frame start
+/// ("`00 00` is not a frame"), so `'R' 01 00` is one empty frame of kind
+/// [`FRAME_KIND_RESYNC`] that readers drop silently. Found at the learned
+/// wire dictionary's hardware sitting: a page closed mid-reply left half a
+/// packed frame in the link, the next connection's reader stayed inside it,
+/// and the board's JSON (which has no `00`) went unread for minutes.
+pub const RESYNC_SEQUENCE: [u8; 5] = [0, 0, FRAME_KIND_RESYNC, 1, 0];
+
 /// The wire packs with no seed: every name is learned per link
 /// (`lp_json_pack::pack_learned`).
 pub(crate) static WIRE_SEED: Dictionary = Dictionary::EMPTY;
