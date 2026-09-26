@@ -7,9 +7,27 @@
 
 use alloc::format;
 use alloc::string::String;
+use core::sync::atomic::{AtomicBool, Ordering::Relaxed};
 use embassy_time::{Duration, Instant};
 use embedded_hal_async::delay::DelayNs;
 use embedded_io_async::Write;
+
+/// The board's resync marker, `00 00 'R' 01 00` (`lpc_wire::RESYNC_SEQUENCE`,
+/// which carries the proof that a host's frame scanner reads text again after
+/// it from any state; a test below pins the two equal).
+///
+/// Written before the next bytes after any write that failed or timed out:
+/// such a write may have left half a packed frame in the link, with no closing
+/// `00`, and a reader stuck inside it would swallow everything after it —
+/// the JSON a board falls back to has no `00` to end it. Found at the learned
+/// wire dictionary's hardware sitting (a page closed mid-reply; the next
+/// connection read "Nothing from this board yet" for minutes).
+pub const RESYNC_SEQUENCE: [u8; 5] = [0, 0, b'R', 1, 0];
+
+/// Whether a write failed since the last resync marker went out whole. One
+/// flag for the link, not per writer: [`ChunkedWriter`]s are made per write.
+/// A bare relaxed atomic, like `link_counters`, so any executor may touch it.
+static RESYNC_OWED: AtomicBool = AtomicBool::new(false);
 
 /// How a link chunks and bounds its writes.
 ///
@@ -207,11 +225,24 @@ impl<'a, W: Write, F: FnMut(), D: DelayNs> ChunkedWriter<'a, W, F, D> {
     /// The per-chunk timeout comes from the `delay` seam, not `embassy_time`
     /// directly — see [`ChunkedWriter::new`] for why that distinction is
     /// load-bearing on the v3.
+    ///
+    /// After a failed write, the next write first sends [`RESYNC_SEQUENCE`]
+    /// (bounded by the same timeout); the debt is paid only once the whole
+    /// marker went out, and a marker cut short is simply sent again whole —
+    /// it converges from any scanner state, a partial one included.
     pub async fn try_write_all_with(
         &mut self,
         data: &[u8],
         timeout: Duration,
     ) -> Result<(), WriteFailure> {
+        if RESYNC_OWED.load(Relaxed) {
+            self.write_chunks(&RESYNC_SEQUENCE, timeout).await?;
+            RESYNC_OWED.store(false, Relaxed);
+        }
+        self.write_chunks(data, timeout).await
+    }
+
+    async fn write_chunks(&mut self, data: &[u8], timeout: Duration) -> Result<(), WriteFailure> {
         use embassy_futures::select::{Either, select};
         let started = Instant::now();
         let timeout_ms = timeout.as_millis().max(1) as u32;
@@ -232,6 +263,9 @@ impl<'a, W: Write, F: FnMut(), D: DelayNs> ChunkedWriter<'a, W, F, D> {
                         continue;
                     }
                 };
+            // Some of these bytes may be on the wire: a reader may now be
+            // inside a frame that will never close.
+            RESYNC_OWED.store(true, Relaxed);
             return Err(WriteFailure {
                 chunk_index,
                 chunks_total,
@@ -242,5 +276,16 @@ impl<'a, W: Write, F: FnMut(), D: DelayNs> ChunkedWriter<'a, W, F, D> {
             });
         }
         Ok(())
+    }
+}
+
+#[cfg(all(test, feature = "server"))]
+mod tests {
+    use super::*;
+
+    /// The board's copy of the marker is the one the host side proves.
+    #[test]
+    fn the_resync_marker_is_the_wires() {
+        assert_eq!(RESYNC_SEQUENCE, lpc_wire::RESYNC_SEQUENCE);
     }
 }

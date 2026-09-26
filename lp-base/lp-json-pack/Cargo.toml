@@ -43,3 +43,7 @@ required-features = ["std"]
 [[test]]
 name = "f32_text"
 required-features = ["lex"]
+
+[[test]]
+name = "learned_loss"
+required-features = ["std"]

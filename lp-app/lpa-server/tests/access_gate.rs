@@ -474,7 +474,7 @@ fn table_rows() -> Vec<Row> {
             "setEncoding",
             ClientRequest::SetEncoding {
                 encoding: lpc_wire::WireEncoding::Packed,
-                dictionary: lpc_wire::WIRE_DICTIONARY_FINGERPRINT,
+                format: lpc_wire::PACK_FORMAT_VERSION,
             },
             Required::Public,
         ),

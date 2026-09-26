@@ -143,7 +143,7 @@ emulator-tab = [
 fake-device = [
     "device-link",
     # The fake packs its replies the way shipped firmware does, with the
-    # firmware's own frame writer (`lpc_wire::ser_packed_frame_to`).
+    # firmware's own frame writer (`lpc_wire::ser_learned_frame_to`).
     "lpc-wire/ser-write-json",
     "device-session-host",
     "dep:fw-host",

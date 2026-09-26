@@ -142,7 +142,7 @@ mod tests {
             },
             ClientRequest::SetEncoding {
                 encoding: lpc_wire::WireEncoding::Packed,
-                dictionary: 0,
+                format: 0,
             },
         ] {
             assert_eq!(classify(&request, "/projects"), Required::Public);

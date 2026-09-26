@@ -1,5 +1,5 @@
-//! The wire serializer's sinks: the byte counter, and [`ser_wire_to`], which
-//! writes a message as JSON or packed.
+//! The wire serializer's sinks: the byte counter, and [`ser_learned_to`],
+//! which writes a message packed against a link's learned table.
 //!
 //! ESP32 writes outbound messages with the vendored `ser-write-json` crate
 //! (`ryu-js` float formatting), not `serde_json` (`ryu`). Those two serializers
@@ -15,14 +15,13 @@
 //! the `ser-write-json` feature) so the shared frame batcher can budget against
 //! the same serializer that actually writes the bytes.
 
-use lp_json_pack::PackError;
+use lp_json_pack::{LearnStore, PackError};
 use ser_write_json::SerWrite;
 use ser_write_json::ser::to_writer;
-use ser_write_json::ser_write::{SliceWriter, Token};
+use ser_write_json::ser_write::Token;
 use serde::Serialize;
 
 use crate::pack_sink::PackSink;
-use crate::wire_encoding::WireEncoding;
 
 /// Error from a type-erased wire serialization.
 ///
@@ -117,12 +116,12 @@ pub fn ser_write_json_to<W: SerWrite, T: Serialize + ?Sized>(
     to_writer(&mut erased, value).map_err(|_| ErasedWriteError)
 }
 
-/// Why [`ser_wire_to`] wrote nothing usable.
+/// Why [`ser_learned_to`] wrote nothing usable.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WireWriteError {
-    /// The buffer is too small for the message in this encoding.
+    /// The buffer is too small for the message packed.
     Full,
-    /// Packed only: the message holds text (a `RawValue`) that the packed form
+    /// The message holds text (a `RawValue`) that the packed form
     /// cannot reproduce byte for byte, or the value failed to serialize. Send
     /// it as JSON.
     Unpackable,
@@ -137,35 +136,36 @@ impl core::fmt::Display for WireWriteError {
     }
 }
 
-/// Write `value` into `buf` in `encoding`, and return the bytes written.
+/// Write `value` into `buf` as one learned JSON Pack frame's payload (the
+/// 3-byte table header, then the value; unframed: the transport adds `0x00
+/// 'L' COBS … 0x00`, see [`ser_learned_frame_to`](crate::ser_learned_frame_to)),
+/// coded against the link's `table`, which learns as it goes. It decodes back
+/// to exactly the JSON text the `M!` line would carry.
 ///
-/// [`WireEncoding::Json`] writes exactly the `M!` line's JSON text;
-/// [`WireEncoding::Packed`] writes one JSON Pack frame's payload (unframed:
-/// the transport adds `0x00 'P' COBS … 0x00`) that decodes back to that same
-/// text. Both go through [`ser_write_json_to`], so each wire type still has
-/// one serializer instantiation.
-pub fn ser_wire_to<T: Serialize + ?Sized>(
+/// On error `table` is as it was. On success it holds this frame's learning,
+/// which the caller must roll back (to a [`LearnMark`](lp_json_pack::LearnMark)
+/// taken before this call) if the frame is then not sent. Goes through
+/// [`ser_write_json_to`], so each wire type still has one serializer
+/// instantiation.
+pub fn ser_learned_to<T: Serialize + ?Sized>(
     buf: &mut [u8],
-    encoding: WireEncoding,
+    table: &mut dyn LearnStore,
     value: &T,
 ) -> Result<usize, WireWriteError> {
-    match encoding {
-        WireEncoding::Json => {
-            let mut writer = SliceWriter::new(buf);
-            // The slice writer's one failure mode is a full buffer.
-            ser_write_json_to(&mut writer, value).map_err(|_| WireWriteError::Full)?;
-            Ok(writer.len())
+    let mark = table.mark();
+    let written = {
+        let mut sink = PackSink::new(buf, &mut *table);
+        let serialized = ser_write_json_to(&mut sink, value);
+        match (sink.finish(), serialized) {
+            (Ok(n), Ok(())) => Ok(n),
+            (Err(PackError::Full), _) => Err(WireWriteError::Full),
+            _ => Err(WireWriteError::Unpackable),
         }
-        WireEncoding::Packed => {
-            let mut sink = PackSink::new(buf);
-            let serialized = ser_write_json_to(&mut sink, value);
-            match (sink.finish(), serialized) {
-                (Ok(n), Ok(())) => Ok(n),
-                (Err(PackError::Full), _) => Err(WireWriteError::Full),
-                _ => Err(WireWriteError::Unpackable),
-            }
-        }
+    };
+    if written.is_err() {
+        table.truncate(mark);
     }
+    written
 }
 
 /// A [`SerWrite`] sink that discards output and counts bytes.

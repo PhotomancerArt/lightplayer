@@ -4,12 +4,13 @@
 //! its replies with `ClientRequest::SetEncoding` and then talked to. What
 //! the capture must show, in order:
 //!
-//! 1. the boot hello as JSON, carrying `packDictionary`;
-//! 2. an opt-in naming a **different** dictionary answered `json`, and the
+//! 1. the boot hello as JSON, carrying `packFormat`;
+//! 2. an opt-in naming a **different** pack format answered `json`, and the
 //!    link staying JSON;
-//! 3. an opt-in naming this build's dictionary answered `packed` — the
-//!    answer itself still a JSON line — and every reply after it a packed
-//!    frame that decodes, through `lpc-wire`, to a correlated message;
+//! 3. an opt-in naming this build's format answered `packed` — the answer
+//!    itself still a JSON line — and every reply after it a learned packed
+//!    frame that decodes, through one `lpc-wire` reader holding the link's
+//!    table, to a correlated message;
 //! 4. the firmware's own console lines between those frames, whole;
 //! 5. after the cable is pulled and plugged back in, JSON again: the host
 //!    that asked is gone, so the next host gets today's `M!{json}` lines.
@@ -34,19 +35,18 @@ use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
 use lp_emu_esp32c6::test_support::{FwImage, fw_esp32c6_image};
-use lp_json_pack::{FRAME_KIND_PACK, FrameScanner, ScanEvent, VecFrameBuffer};
 use lpc_wire::json::to_serial_line;
 use lpc_wire::message::client::{ClientMessage, ClientRequest};
 use lpc_wire::server::ServerMsgBody;
 use lpc_wire::{
-    PackOptIn, WIRE_DICTIONARY_FINGERPRINT, WireChunk, WireEncoding, WireServerMessage, WireStream,
+    PACK_FORMAT_VERSION, PackOptIn, WireChunk, WireEncoding, WireServerMessage, WireStream,
 };
 use support::Serve;
 use tungstenite::Message;
 
 /// The conversation, by emulated millisecond. The boot hello goes out at
 /// ~143 ms and the server is serving well before the first line.
-const WRONG_DICTIONARY_AT_MS: u64 = 1_500;
+const WRONG_FORMAT_AT_MS: u64 = 1_500;
 const OPT_IN_AT_MS: u64 = 2_000;
 const PACKED_HELLO_AT_MS: u64 = 2_500;
 const PACKED_LIST_AT_MS: u64 = 3_000;
@@ -69,9 +69,9 @@ fn an_opted_in_link_gets_packed_frames_until_the_cable_is_pulled() {
     let script_path = dir.path().join("json-pack.usb-script");
     let capture = dir.path().join("delivered.bin");
 
-    let set_encoding = |dictionary| ClientRequest::SetEncoding {
+    let set_encoding = |format| ClientRequest::SetEncoding {
         encoding: WireEncoding::Packed,
-        dictionary,
+        format,
     };
     // Each request framed by the single framer, written as the hex bytes an
     // emulator script carries (see `emu_usb_hello.rs` for why hex).
@@ -82,12 +82,8 @@ fn an_opted_in_link_gets_packed_frames_until_the_cable_is_pulled() {
     };
     let script = [
         "0  attach\n0  open\n".to_string(),
-        send(
-            WRONG_DICTIONARY_AT_MS,
-            1,
-            set_encoding(WIRE_DICTIONARY_FINGERPRINT ^ 1),
-        ),
-        send(OPT_IN_AT_MS, 2, set_encoding(WIRE_DICTIONARY_FINGERPRINT)),
+        send(WRONG_FORMAT_AT_MS, 1, set_encoding(PACK_FORMAT_VERSION + 1)),
+        send(OPT_IN_AT_MS, 2, set_encoding(PACK_FORMAT_VERSION)),
         send(PACKED_HELLO_AT_MS, 3, ClientRequest::Hello),
         send(PACKED_LIST_AT_MS, 4, ClientRequest::ListLoadedProjects),
         format!("{DETACH_AT_MS}  detach\n{ATTACH_AT_MS}  attach\n{OPEN_AT_MS}  open\n"),
@@ -138,7 +134,7 @@ fn an_opted_in_link_gets_packed_frames_until_the_cable_is_pulled() {
             .unwrap_or_else(|| panic!("no {what} reply with id {id} in the capture"))
     };
 
-    // 1. The boot hello: JSON, naming this build's dictionary.
+    // 1. The boot hello: JSON, naming this build's pack format.
     let (form, boot) = &messages[0];
     assert_eq!(
         *form,
@@ -149,12 +145,12 @@ fn an_opted_in_link_gets_packed_frames_until_the_cable_is_pulled() {
         ServerMsgBody::Hello(hello) => {
             assert_eq!(boot.id, 0);
             assert_eq!(hello.proto, lpc_wire::WIRE_PROTO_VERSION);
-            assert_eq!(hello.pack_dictionary, WIRE_DICTIONARY_FINGERPRINT);
+            assert_eq!(hello.pack_format, PACK_FORMAT_VERSION);
         }
         other => panic!("the first message is not the boot hello: {other:?}"),
     }
 
-    // 2. The wrong dictionary: answered json, and the link stays JSON.
+    // 2. The wrong format: answered json, and the link stays JSON.
     let wrong = find(1, "setEncoding");
     assert_eq!(messages[wrong].0, Form::Json);
     assert_encoding(&messages[wrong].1, WireEncoding::Json);
@@ -300,6 +296,7 @@ fn an_opted_in_client_through_the_door_gets_packed_frames_and_unpack_restores_js
             let frame = match chunk {
                 WireChunk::Frame(frame) => frame,
                 WireChunk::Error(error) => panic!("a packed frame did not decode: {error}"),
+                WireChunk::Desync(dropped) => panic!("a clean link lost step: {dropped:?}"),
                 WireChunk::Line(_) => continue,
             };
             let message: WireServerMessage =
@@ -350,7 +347,10 @@ fn an_opted_in_client_through_the_door_gets_packed_frames_and_unpack_restores_js
         stderr.contains(&format!("total frames {packed_seen} packed ")),
         "{stderr}"
     );
-    assert!(stderr.trim_end().ends_with("errors 0"), "{stderr}");
+    assert!(
+        stderr.trim_end().ends_with("unreadable 0 errors 0"),
+        "{stderr}"
+    );
 
     // 3. The door's tap recorded the frames raw and annotated each; after
     //    `wire unpack --tap` it reads like a tap of a link that never packed.
@@ -383,6 +383,134 @@ fn an_opted_in_client_through_the_door_gets_packed_frames_and_unpack_restores_js
     );
 }
 
+/// A packed frame torn in flight (the door's `LP_EMU_WIRE_TEAR` fault, the
+/// loss the real C6 link showed): the client's reader notices at the next
+/// frame's header, drops what it cannot read, asks for a reset through
+/// [`PackOptIn::desynced`], and decodes every packed reply after the board's
+/// reset byte for byte (plan `lp2025/2026-09-25-0006-learned-wire-dictionary`).
+#[test]
+#[ignore = "needs a built fw-esp32c6 ELF; `just test-emu-c6` runs it"]
+fn a_torn_packed_frame_desyncs_the_reader_until_the_board_resets() {
+    const ASK_AGAIN: Duration = Duration::from_secs(1);
+    let elf = match fw_esp32c6_image(&FwImage::SHIPPED) {
+        Ok(path) => path,
+        Err(reason) => {
+            eprintln!("emu_usb_json_pack: skipped — {reason}");
+            return;
+        }
+    };
+    // The link's first packed frame loses 5 bytes: it taught the board every
+    // name it carried, so every frame after it is out of step on the host.
+    let serve = Serve::start_specs_with_env(
+        &[format!("c6-a={}", elf.display())],
+        &[],
+        support::scratch(),
+        &[("LP_EMU_WIRE_TEAR", std::path::Path::new("1"))],
+    );
+    let mut socket = serve.bytes("c6-a");
+    socket
+        .get_mut()
+        .set_read_timeout(Some(Duration::from_millis(200)))
+        .expect("a read timeout");
+
+    let started = Instant::now();
+    let mut wire = WireStream::new();
+    let mut opt_in = PackOptIn::new(true);
+    let mut next_id = 10;
+    let mut asked_at: Option<Instant> = None;
+    let mut opt_ins = 0;
+    let mut torn = 0;
+    let mut desynced = 0;
+    // Packed replies decoded after the first desync.
+    let mut recovered: Vec<String> = Vec::new();
+    let deadline = Instant::now() + support::NET;
+
+    while recovered.len() < 3 {
+        assert!(
+            Instant::now() < deadline,
+            "no recovery within the wall net: {torn} torn, {desynced} desynced, \
+             {opt_ins} opt-ins, {} recovered",
+            recovered.len()
+        );
+        // A steady trickle of requests: the board's replies are what the
+        // reader learns from (and loses step on). Not `Hello`: a Hello reply
+        // starts a new table epoch on its own (PackedLink::prepare_reply),
+        // which would recover the reader without the reset request this
+        // test is about.
+        if asked_at.is_none_or(|at| at.elapsed() >= ASK_AGAIN) {
+            send(&mut socket, next_id, ClientRequest::ListLoadedProjects);
+            next_id += 1;
+            asked_at = Some(Instant::now());
+        }
+        let bytes = match socket.read() {
+            Ok(Message::Binary(bytes)) => bytes,
+            Ok(Message::Close(_)) => panic!("the byte endpoint closed"),
+            Ok(_) => continue,
+            Err(tungstenite::Error::Io(e))
+                if matches!(
+                    e.kind(),
+                    std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
+                ) =>
+            {
+                continue;
+            }
+            Err(e) => panic!("reading the byte endpoint: {e}"),
+        };
+        let now_ms = started.elapsed().as_millis() as u64;
+        for chunk in wire.push_collect(&bytes) {
+            let ask = match chunk {
+                WireChunk::Line(_) => None,
+                WireChunk::Error(error) => {
+                    eprintln!("json-pack tear: dropped: {error}");
+                    torn += 1;
+                    None
+                }
+                WireChunk::Desync(dropped) => {
+                    eprintln!("json-pack tear: out of step: {}", dropped.reason);
+                    desynced += 1;
+                    opt_in.desynced(now_ms)
+                }
+                WireChunk::Frame(frame) => {
+                    let message: WireServerMessage =
+                        lpc_wire::json::from_str(&frame.json).expect("a decoded frame parses");
+                    // Byte-exact where the host serializer prints what the
+                    // board's does (no floats; a heartbeat's differ).
+                    if matches!(message.msg, ServerMsgBody::Hello(_)) {
+                        assert_eq!(
+                            lpc_wire::json::to_string(&message).unwrap(),
+                            frame.json,
+                            "a decoded frame is byte-exact"
+                        );
+                    }
+                    let packed = frame.is_packed();
+                    if packed && desynced > 0 {
+                        recovered.push(frame.json);
+                    }
+                    opt_in.observe(&message, packed, now_ms).send
+                }
+            };
+            if let Some(ask) = ask {
+                opt_ins += 1;
+                send(&mut socket, ask.id, ask.msg);
+            }
+        }
+    }
+    drop(socket);
+    serve.shutdown();
+
+    assert!(torn + desynced > 0, "the tear was noticed");
+    assert!(desynced > 0, "the frames after the tear were out of step");
+    assert!(
+        opt_ins >= 2,
+        "the opt-in, then the reset request: {opt_ins}"
+    );
+    eprintln!(
+        "json-pack tear: {torn} torn, {desynced} dropped out of step, {opt_ins} opt-ins, \
+         then {} packed replies decoded",
+        recovered.len()
+    );
+}
+
 /// How a message came over the link.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Form {
@@ -401,44 +529,19 @@ enum Item {
     Console(String),
 }
 
-/// Split the delivered bytes into lines and frames, the way a host reader
-/// does: frames out of the byte stream first, then the text between them
-/// into lines.
+/// Split the delivered bytes into lines and frames the way a host reader
+/// does: one [`WireStream`] for the whole capture, which learns the link's
+/// table as the frames go by.
 fn split_link(bytes: &[u8]) -> Vec<Item> {
     let mut items = Vec::new();
-    let mut text = Vec::new();
-    let flush_lines = |text: &mut Vec<u8>, items: &mut Vec<Item>, all: bool| {
-        while let Some(nl) = text.iter().position(|&b| b == b'\n') {
-            let line: Vec<u8> = text.drain(..=nl).collect();
-            let line = String::from_utf8(line).expect("console text is UTF-8");
-            let line = line.trim_end_matches(['\r', '\n']);
-            if let Some(json) = line.strip_prefix("M!") {
-                items.push(Item::Json(json.to_string()));
-            } else if !line.is_empty() {
-                items.push(Item::Console(line.to_string()));
-            }
-        }
-        if all && !text.is_empty() {
-            let rest = String::from_utf8(std::mem::take(text)).expect("UTF-8");
-            items.push(Item::Console(rest));
-        }
-    };
-    let mut scanner = FrameScanner::new(VecFrameBuffer::new(64 * 1024));
-    scanner.push(bytes, |event| match event {
-        ScanEvent::Text(t) => {
-            text.extend_from_slice(t);
-            flush_lines(&mut text, &mut items, false);
-        }
-        ScanEvent::Frame { kind, payload } => {
-            assert_eq!(kind, FRAME_KIND_PACK);
-            // A frame follows its own `\n`, so no text is pending.
-            flush_lines(&mut text, &mut items, true);
-            let json = lpc_wire::decode_packed_to_json(payload).expect("a packed frame decodes");
-            items.push(Item::Packed(json));
-        }
-        ScanEvent::Dropped(reason) => panic!("a frame was dropped: {reason:?}"),
+    WireStream::new().push(bytes, |chunk| match chunk {
+        WireChunk::Line(line) if line.is_empty() => {}
+        WireChunk::Line(line) => items.push(Item::Console(line)),
+        WireChunk::Frame(frame) if frame.is_packed() => items.push(Item::Packed(frame.json)),
+        WireChunk::Frame(frame) => items.push(Item::Json(frame.json)),
+        WireChunk::Error(error) => panic!("a frame was dropped: {error}"),
+        WireChunk::Desync(dropped) => panic!("a clean capture lost step: {dropped:?}"),
     });
-    flush_lines(&mut text, &mut items, true);
     items
 }
 

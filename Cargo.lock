@@ -4015,6 +4015,7 @@ dependencies = [
  "littlefs-rust",
  "log",
  "lp-collection 1.0.0",
+ "lp-json-pack",
  "lp-recovery",
  "lpa-server",
  "lpc-hardware",

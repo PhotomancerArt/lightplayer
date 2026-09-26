@@ -46,6 +46,9 @@ lp-recovery = { path = "../../lp-base/lp-recovery", default-features = false, op
 lpa-server = { path = "../../lp-app/lpa-server", default-features = false, optional = true }
 lpc-model = { path = "../../lp-core/lpc-model", default-features = false, optional = true }
 lpc-wire = { path = "../../lp-core/lpc-wire", default-features = false, optional = true, features = ["ser-write-json"] }
+# The learned table a packed link keeps (`serial::packed_link`); `alloc` for
+# its zeroed, fallible heap allocation at opt-in.
+lp-json-pack = { workspace = true, optional = true, features = ["alloc"] }
 lpfs = { path = "../../lp-base/lpfs", default-features = false, optional = true }
 # `serial::server_msg`'s `StackJsonWriter` implements this crate's `SerWrite`
 # trait, so it must be a direct dependency and not just `lpc-wire`'s. Same
@@ -59,7 +62,7 @@ default = []
 # whose host opted in (`ClientRequest::SetEncoding`). Without it the board
 # answers every opt-in "json". On by default in all three chip crates (Q4).
 json-pack = ["server"]
-server = ["dep:littlefs-rust", "dep:lp-recovery", "dep:lpa-server", "dep:lpc-model", "dep:lpc-wire", "dep:lpfs", "dep:ser-write-json"]
+server = ["dep:littlefs-rust", "dep:lp-json-pack", "dep:lp-recovery", "dep:lpa-server", "dep:lpc-model", "dep:lpc-wire", "dep:lpfs", "dep:ser-write-json"]
 
 [dev-dependencies]
 # Host tests of the link mux run embassy-sync channels, whose

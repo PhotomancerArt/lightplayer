@@ -23,11 +23,11 @@
 //! field names, variant names and `String`s); the corpus test over recorded
 //! traffic would catch one.
 
-use lp_json_pack::{Dictionary, PackEncoder, PackError, PackLexer};
+use lp_json_pack::{LearnStore, PackEncoder, PackError, PackLexer};
 use ser_write_json::SerWrite;
 use ser_write_json::ser_write::Token;
 
-use crate::wire_dictionary::WIRE_DICTIONARY;
+use crate::wire_encoding::WIRE_SEED;
 
 /// A [`SerWrite`] that packs what the wire serializer offers into a
 /// caller-owned buffer. Errors are sticky: after `Full` every later call
@@ -41,16 +41,12 @@ pub struct PackSink<'a> {
 }
 
 impl<'a> PackSink<'a> {
-    /// A sink writing one frame from the start of `out`, coded against the
-    /// wire's [`WIRE_DICTIONARY`].
-    pub fn new(out: &'a mut [u8]) -> Self {
-        Self::with_dictionary(out, &WIRE_DICTIONARY)
-    }
-
-    /// A sink coded against another dictionary (tests and measurements).
-    pub fn with_dictionary(out: &'a mut [u8], dict: &'static Dictionary) -> Self {
+    /// A sink writing one learned frame (header first) from the start of
+    /// `out`, coded against the link's `table`, which learns as the frame is
+    /// written. The caller rolls `table` back if the frame is not sent.
+    pub fn new(out: &'a mut [u8], table: &'a mut dyn LearnStore) -> Self {
         Self {
-            enc: PackEncoder::new(out, dict),
+            enc: PackEncoder::with_learned(out, &WIRE_SEED, table),
             lexer: PackLexer::new(),
             lexing: false,
         }
@@ -130,39 +126,44 @@ impl SerWrite for PackSink<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ser_write::{WireWriteError, ser_wire_to};
+    use crate::ser_write::{WireWriteError, ser_learned_to};
     use crate::slot::{WireSlotData, WireSlotRootSnapshot};
     use crate::test_traffic::{TrafficDirection, TrafficLine, traffic_lines};
     use crate::{
-        ClientMessage, ProjectReadEvent, ProjectReadNodeEvent, ProjectReadQueryEvent, WireEncoding,
-        WireServerMessage, decode_packed_to_json, ser_write_json_to,
+        ClientMessage, ProjectReadEvent, ProjectReadNodeEvent, ProjectReadQueryEvent,
+        WireServerMessage, ser_write_json_to,
     };
-    use alloc::string::ToString;
+    use alloc::string::{String, ToString};
     use alloc::vec;
     use alloc::vec::Vec;
-    use lp_json_pack::DictionaryBuilder;
+    use lp_json_pack::{LearnedTable, decode_learned};
     use lpc_model::{Revision, SlotShapeId};
 
-    /// The corpus through the real types: every recorded line parses, packs
-    /// through `PackSink`, and decodes back to the byte-identical line; the
-    /// JSON path writes the line itself.
+    /// The corpus through the real types, in order, through one board table
+    /// and one host table: every recorded line parses, packs through
+    /// `PackSink`, and decodes back to the byte-identical line.
     #[test]
     fn recorded_traffic_packs_and_decodes_byte_for_byte() {
         let mut buf = vec![0u8; 1 << 16];
+        let mut board = LearnedTable::NEW;
+        let mut host = LearnedTable::NEW;
         let (mut json_total, mut packed_total, mut lines) = (0, 0, 0);
         for line in traffic_lines() {
-            let n = pack_line(&line, WireEncoding::Packed, &mut buf).unwrap();
-            let back = decode_packed_to_json(&buf[..n]).unwrap();
-            assert_eq!(back, line.json, "line {}", line.index);
-            let m = pack_line(&line, WireEncoding::Json, &mut buf).unwrap();
-            assert_eq!(&buf[..m], line.json.as_bytes(), "line {}", line.index);
+            let n = pack_line(&line, &mut board, &mut buf).unwrap();
+            assert_eq!(
+                decode(&mut host, &buf[..n]),
+                line.json,
+                "line {}",
+                line.index
+            );
             json_total += line.json.len();
             packed_total += n;
             lines += 1;
         }
         assert!(lines > 100, "{lines} lines");
-        // 174,742 → 55,802 B (31.9 %) on the proto-22 sample (the proto-21
-        // one: 135,131 → 47,432 B, 35.1 %): a ratchet.
+        assert_eq!(board.mark(), host.mark());
+        // A ratchet. The static dictionary this replaced packed the proto-22
+        // sample to 31.9 %; learned, a name costs its inline bytes once.
         assert!(
             packed_total * 25 < json_total * 9,
             "{packed_total} vs {json_total}"
@@ -176,11 +177,13 @@ mod tests {
     fn the_token_path_packs_what_the_lexer_packs() {
         let mut by_tokens = vec![0u8; 1 << 16];
         let mut by_lexer = vec![0u8; 1 << 16];
+        let mut a_table = LearnedTable::NEW;
+        let mut b_table = LearnedTable::NEW;
         for line in traffic_lines() {
-            let mut sink = NoBlobs(PackSink::new(&mut by_tokens));
+            let mut sink = NoBlobs(PackSink::new(&mut by_tokens, &mut a_table));
             serialize_line(&line, &mut sink);
             let a = sink.0.finish().unwrap();
-            let mut enc = PackEncoder::new(&mut by_lexer, &WIRE_DICTIONARY);
+            let mut enc = PackEncoder::with_learned(&mut by_lexer, &WIRE_SEED, &mut b_table);
             enc.json_value(line.json.as_bytes()).unwrap();
             let b = enc.finish().unwrap();
             assert_eq!(&by_tokens[..a], &by_lexer[..b], "line {}", line.index);
@@ -191,9 +194,8 @@ mod tests {
     fn a_raw_value_mixes_with_tokens_in_one_frame() {
         // Slot data is pre-serialized JSON written verbatim: lexed, into the
         // frame the typed envelope's tokens are building, back-references and
-        // all. Its keys are not wire vocabulary, so they go inline.
+        // all.
         let raw = r#"{"zz_unknown_key":"a repeated slot value","gain":1.5,"xs":[1,-2,3.25e-7],"again":"a repeated slot value"}"#;
-        assert_eq!(WIRE_DICTIONARY.find_key(b"zz_unknown_key"), None);
         let event = ProjectReadEvent::Query {
             index: 1,
             event: ProjectReadQueryEvent::Nodes(ProjectReadNodeEvent::SlotRoot(
@@ -220,124 +222,72 @@ mod tests {
         let json = crate::json::to_string(&msg).unwrap();
         assert!(json.contains(raw));
         let mut buf = [0u8; 512];
-        let n = ser_wire_to(&mut buf, WireEncoding::Packed, &msg).unwrap();
-        assert_eq!(decode_packed_to_json(&buf[..n]).unwrap(), json);
+        let mut board = LearnedTable::NEW;
+        let n = ser_learned_to(&mut buf, &mut board, &msg).unwrap();
+        assert_eq!(decode(&mut LearnedTable::default(), &buf[..n]), json);
         // The name and the raw value's two copies became one inline text and
         // two back-references.
         let text = b"a repeated slot value";
         let copies = buf[..n].windows(text.len()).filter(|w| w == text).count();
         assert_eq!(copies, 1);
+        // The raw value's keys were learned like any other.
+        assert!(board.find_key(b"zz_unknown_key").is_some());
     }
 
     #[test]
-    fn a_short_buffer_is_full_never_a_panic() {
+    fn a_short_buffer_is_full_never_a_panic_and_learns_nothing() {
         let line = traffic_lines()
             .filter(|l| l.direction == TrafficDirection::BoardToHost)
             .max_by_key(|l| l.json.len())
             .unwrap();
         let mut buf = vec![0u8; 1 << 16];
-        let n = pack_line(&line, WireEncoding::Packed, &mut buf).unwrap();
+        let n = pack_line(&line, &mut LearnedTable::default(), &mut buf).unwrap();
         for size in 0..n {
             let mut short = vec![0u8; size];
+            let mut table = LearnedTable::NEW;
             assert_eq!(
-                pack_line(&line, WireEncoding::Packed, &mut short),
+                pack_line(&line, &mut table, &mut short),
                 Err(WireWriteError::Full),
                 "size {size} of {n}"
             );
+            assert_eq!(table.mark(), LearnedTable::NEW.mark(), "size {size}");
         }
-        let json_len = line.json.len();
-        let mut short = vec![0u8; json_len - 1];
-        assert_eq!(
-            pack_line(&line, WireEncoding::Json, &mut short),
-            Err(WireWriteError::Full)
-        );
     }
 
     #[test]
-    fn text_the_codec_cannot_reproduce_is_unpackable() {
+    fn text_the_codec_cannot_reproduce_is_unpackable_and_learns_nothing() {
         // Whitespace inside a RawValue: valid JSON, but not byte-identical
         // after a round trip, so the lexer refuses it and the frame goes JSON.
         let data = WireSlotData::from_json_string(r#"{"a": 1}"#.to_string()).unwrap();
         let mut buf = [0u8; 64];
+        let mut table = LearnedTable::NEW;
         assert_eq!(
-            ser_wire_to(&mut buf, WireEncoding::Packed, &data),
+            ser_learned_to(&mut buf, &mut table, &data),
             Err(WireWriteError::Unpackable)
         );
-        let n = ser_wire_to(&mut buf, WireEncoding::Json, &data).unwrap();
-        assert_eq!(&buf[..n], br#"{"a": 1}"#);
+        assert_eq!(table.mark(), LearnedTable::NEW.mark());
     }
 
-    /// The generated dictionary against one harvested from the sample itself
-    /// (the spike's approach: every key, and every value seen twice, ranked by
-    /// count; trained on the test set, so optimistic).
-    ///
-    /// The harvested one also holds this board's and this project's own
-    /// strings (its MAC address, file paths, node names, build stamp), which a
-    /// dictionary compiled into every firmware must not. So the bar is set
-    /// against the harvested dictionary's *wire vocabulary* (its entries the
-    /// generated one also has, in the harvested order): within 2 %. Against the
-    /// whole harvested one it is a ratchet, with the instance strings as the
-    /// measured gap.
+    /// What learning costs and buys over the sample: the first sighting of
+    /// a name is inline, the rest are codes, so later replies of a class are
+    /// smaller than the first.
     #[test]
-    fn the_generated_dictionary_packs_within_two_percent_of_a_harvested_one() {
-        let mut builder = DictionaryBuilder::new();
-        for line in traffic_lines() {
-            builder.observe_json(line.json.as_bytes());
-        }
-        let mut owned = builder.build(2);
-        owned.values.retain(|v| v.len() <= 48);
-        let harvested = owned.leak();
-        let mut vocabulary = owned.clone();
-        vocabulary
-            .keys
-            .retain(|k| WIRE_DICTIONARY.find_key(k.as_bytes()).is_some());
-        vocabulary
-            .values
-            .retain(|v| WIRE_DICTIONARY.find_value(v.as_bytes()).is_some());
-        let vocabulary = vocabulary.leak();
-        let json: usize = traffic_lines().map(|l| l.json.len()).sum();
-        let generated = packed_total(&WIRE_DICTIONARY);
-        let sampled = packed_total(harvested);
-        let sampled_vocabulary = packed_total(vocabulary);
-        let project_reads: Vec<TrafficLine> = traffic_lines()
-            .filter(|l| l.json.contains(r#""projectRead":{"events""#))
-            .collect();
-        std::println!(
-            "{json} B of JSON packs to: {generated} B with the wire dictionary \
-             ({} keys, {} values); {sampled} B harvested ({} keys, {} values); \
-             {sampled_vocabulary} B harvested, wire vocabulary only ({} keys, {} values). \
-             Project-read replies: {} B -> {} B.",
-            WIRE_DICTIONARY.keys.len(),
-            WIRE_DICTIONARY.values.len(),
-            harvested.keys.len(),
-            harvested.values.len(),
-            vocabulary.keys.len(),
-            vocabulary.values.len(),
-            project_reads.iter().map(|l| l.json.len()).sum::<usize>(),
-            project_reads
-                .iter()
-                .map(|l| pack_with(l, &WIRE_DICTIONARY))
-                .sum::<usize>(),
-        );
-        assert!(
-            generated * 100 <= sampled_vocabulary * 102,
-            "generated {generated} B vs harvested vocabulary {sampled_vocabulary} B"
-        );
-        assert!(
-            generated * 100 <= sampled * 105,
-            "generated {generated} B vs harvested {sampled} B"
-        );
-    }
-
-    fn packed_total(dict: &'static Dictionary) -> usize {
-        traffic_lines().map(|l| pack_with(&l, dict)).sum()
-    }
-
-    fn pack_with(line: &TrafficLine, dict: &'static Dictionary) -> usize {
+    fn a_repeated_reply_class_packs_smaller_the_second_time() {
         let mut buf = vec![0u8; 1 << 16];
-        let mut sink = PackSink::with_dictionary(&mut buf, dict);
-        serialize_line(line, &mut sink);
-        sink.finish().unwrap()
+        let mut table = LearnedTable::NEW;
+        let heartbeats: Vec<usize> = traffic_lines()
+            .filter(|l| l.json.contains(r#""heartbeat":"#))
+            .map(|l| pack_line(&l, &mut table, &mut buf).unwrap())
+            .collect();
+        assert!(heartbeats.len() > 3, "{heartbeats:?}");
+        let (first, steady) = (heartbeats[0], heartbeats[heartbeats.len() - 1]);
+        assert!(steady * 2 < first, "{heartbeats:?}");
+    }
+
+    fn decode(host: &mut LearnedTable, packed: &[u8]) -> String {
+        let mut out = Vec::new();
+        decode_learned(&WIRE_SEED, host, packed, &mut out).unwrap();
+        String::from_utf8(out).unwrap()
     }
 
     /// Declines blobs, so they are written as base64 text and lexed.
@@ -374,17 +324,17 @@ mod tests {
 
     fn pack_line(
         line: &TrafficLine,
-        encoding: WireEncoding,
+        table: &mut LearnedTable,
         buf: &mut [u8],
     ) -> Result<usize, WireWriteError> {
         match line.direction {
             TrafficDirection::BoardToHost => {
                 let msg: WireServerMessage = crate::json::from_str(line.json).unwrap();
-                ser_wire_to(buf, encoding, &msg)
+                ser_learned_to(buf, table, &msg)
             }
             TrafficDirection::HostToBoard => {
                 let msg: ClientMessage = crate::json::from_str(line.json).unwrap();
-                ser_wire_to(buf, encoding, &msg)
+                ser_learned_to(buf, table, &msg)
             }
         }
     }
