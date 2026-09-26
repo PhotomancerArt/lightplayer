@@ -586,6 +586,10 @@ fn boot_firmware(spawner: embassy_executor::Spawner) -> FirmwareApp {
     // Login challenges draw from the chip's hardware RNG; the server itself
     // never draws randomness (sans-IO).
     server.set_entropy_source(Some(fill_random));
+    // A PowerButton node deep-sleeps the chip through this (EXT1 wake).
+    server.set_power_platform(Some(Rc::new(
+        crate::hardware::power::Esp32C6PowerPlatform::new(Rc::clone(&hardware_system)),
+    )));
     esp_println::println!("[INIT] LpServer created");
 
     // Auto-load project at boot (from config or lexical-first) — unless

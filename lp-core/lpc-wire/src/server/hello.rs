@@ -35,6 +35,10 @@ use crate::server::hello_auth::HelloAuth;
 ///
 /// # History
 ///
+/// - 29: the `PowerButton` node kind (deep-sleep power-off, PR #787) —
+///   `NodeKind::PowerButton` / `"PowerButton"` in inventory frames and the
+///   `node.power-button` build feature on the hello: an older peer rejects
+///   both as unknown variants.
 /// - 28: the learned wire dictionary (plan
 ///   `lp2025/2026-09-25-0006-learned-wire-dictionary`) — packed replies are
 ///   JSON Pack format 2 *learned* frames (COBS kind `'L'`, a 3-byte table
@@ -284,7 +288,7 @@ use crate::server::hello_auth::HelloAuth;
 /// as `None` on new Studio and a new firmware's extra fields are ignored
 /// by old Studio. Bumping for those would mark every board running
 /// current firmware Incompatible in exchange for nothing.
-pub const WIRE_PROTO_VERSION: u32 = 28;
+pub const WIRE_PROTO_VERSION: u32 = 29;
 
 /// Unsolicited/boot-time server identity, version, and capability report.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -616,7 +620,7 @@ mod tests {
     #[test]
     fn the_proto_version_is_pinned_to_its_history() {
         assert_eq!(
-            WIRE_PROTO_VERSION, 28,
+            WIRE_PROTO_VERSION, 29,
             "if you meant to bump, add the History entry in this file's \
              doc comment and update this pin"
         );

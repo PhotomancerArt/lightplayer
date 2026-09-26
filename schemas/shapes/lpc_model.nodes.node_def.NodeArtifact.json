@@ -19,6 +19,14 @@
         }
       },
       {
+        "name": "PowerButton",
+        "shape": {
+          "ref": {
+            "id": 1590289769
+          }
+        }
+      },
+      {
         "name": "Clock",
         "shape": {
           "ref": {

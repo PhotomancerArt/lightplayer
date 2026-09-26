@@ -17,6 +17,8 @@ use core::cell::RefCell;
 use hashbrown::HashMap;
 #[cfg(feature = "latent-read-back")]
 use lpc_engine::LatentReadBackSource;
+#[cfg(feature = "node-power-button")]
+use lpc_engine::PowerService;
 use lpc_engine::{ButtonService, LpGraphics, RadioService};
 use lpc_model::{LpPath, LpPathBuf};
 use lpc_shared::backtrace;
@@ -39,6 +41,10 @@ pub struct ProjectManager {
     /// has one (the browser GPU tier); see `Self::set_latent_read_back`.
     #[cfg(feature = "latent-read-back")]
     latent_read_back: Option<Arc<dyn LatentReadBackSource>>,
+    /// Power-off service handed to every project this manager loads. Only
+    /// in builds with the power-button runtime (see `LpServer::power`).
+    #[cfg(feature = "node-power-button")]
+    power_service: Option<Rc<dyn PowerService>>,
 }
 
 impl ProjectManager {
@@ -54,6 +60,8 @@ impl ProjectManager {
             projects_base_dir: projects_base_dir.to_path_buf(),
             #[cfg(feature = "latent-read-back")]
             latent_read_back: None,
+            #[cfg(feature = "node-power-button")]
+            power_service: None,
         }
     }
 
@@ -66,6 +74,16 @@ impl ProjectManager {
             project.set_latent_read_back(source.clone());
         }
         self.latent_read_back = source;
+    }
+
+    /// Install the power-off service for every project loaded from now on,
+    /// and for those already loaded.
+    #[cfg(feature = "node-power-button")]
+    pub fn set_power_service(&mut self, power_service: Option<Rc<dyn PowerService>>) {
+        for project in self.projects.values_mut() {
+            project.set_power_service(power_service.clone());
+        }
+        self.power_service = power_service;
     }
 
     /// Create a new project
@@ -150,6 +168,13 @@ impl ProjectManager {
                 if self.latent_read_back.is_some() {
                     project.set_latent_read_back(self.latent_read_back.clone());
                 }
+                project
+            };
+
+            #[cfg(feature = "node-power-button")]
+            let project = {
+                let mut project = project;
+                project.set_power_service(self.power_service.clone());
                 project
             };
 

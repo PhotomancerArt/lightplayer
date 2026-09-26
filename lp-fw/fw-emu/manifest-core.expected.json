@@ -12,11 +12,12 @@
     "node.fluid",
     "node.fixture",
     "node.playlist",
+    "node.power-button",
     "node.radio",
     "node.shader",
     "node.texture",
     "gfx.lpvm"
   ],
   "limits": {},
-  "wireProto": 28
+  "wireProto": 29
 }

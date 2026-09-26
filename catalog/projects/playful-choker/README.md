@@ -49,3 +49,34 @@ committed files still match the exports after touching the generator:
 just pcb-map2d playful-choker <design-folder>           # regenerate both files
 just pcb-map2d playful-choker <design-folder> --check   # byte-identical, or fail
 ```
+
+## Soft power off (not wired in yet)
+
+The choker's slide switch cuts VBUS to the LED strip's +5V. That darkens the
+LEDs but leaves the C6 running. To make the same switch put the chip into deep
+sleep and wake it again, the chip needs to see which way the switch is:
+
+- **One resistor, about 22 kΩ** (20–27 kΩ), from the strip's switched +5V to
+  **D0**. Nothing else. The pin's internal pull-down (~45 kΩ) makes a divider:
+  about 3.3 V when on, 0 V when off, and the pin never sees 5 V. It must be D0,
+  D1 or D2: on the XIAO C6 only those can wake the chip.
+- Then add a `PowerButton` in switch mode to `module.json`'s `nodes`
+  (`"power": { "ref": "./power.json" }`) as `power.json`:
+
+  ```json
+  {
+    "kind": "PowerButton",
+    "endpoint": "button:local:D0",
+    "mode": "switch"
+  }
+  ```
+
+Switch off → the LEDs are dark, and a quarter-second later the C6 deep-sleeps.
+Switch on → it wakes, boots and runs the project. While a computer is on the
+USB port (Studio, or just a laptop) it stays awake with the switch off, so it
+does not drop off Studio mid-edit. A USB power bank does not count as a
+computer.
+
+It is not in this project yet because, without the resistor fitted, D0 reads
+low and the choker would go to sleep as soon as it boots. See
+`docs/adr/2026-06-16-power-button-runtime-event.md`.

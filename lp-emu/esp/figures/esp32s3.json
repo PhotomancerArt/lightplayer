@@ -1,4 +1,4 @@
 {
   "_about": "Firmware-derived figures the ESP32-S3 emulator tests pin, read off THIS TREE's fw-esp32s3 image (its default features). Exact: a moved figure fails its test, naming old -> new. Re-record with `just bless-chips esp32s3` and commit the diff with the change that moved it; never hand-edit. See docs/chip-figures.md.",
-  "stack_total_bytes": 36848
+  "stack_total_bytes": 36784
 }

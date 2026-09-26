@@ -4,6 +4,8 @@ extern crate alloc;
 
 use crate::error::ServerError;
 use crate::handlers;
+#[cfg(feature = "node-power-button")]
+use crate::power_off::{PowerOffQueue, PowerPlatform};
 use crate::project_manager::ProjectManager;
 use crate::project_read_source::ServerProjectReadSource;
 use alloc::{boxed::Box, format, rc::Rc, string::ToString, sync::Arc, vec::Vec};
@@ -152,6 +154,15 @@ pub struct LpServer {
     /// Optional embedder reset action backing `ClientRequest::Reboot`.
     /// Unset (hosts/browser) = the request is refused, not acked.
     reboot_hook: Option<RebootHook>,
+    /// Power-off queue shared with every project's engine, when the embedder
+    /// installed a [`PowerPlatform`]. Unset = power buttons report no service.
+    ///
+    /// Only in builds that carry the power-button runtime: this struct lives
+    /// in the firmware's statically allocated main task, so a field here is
+    /// `.bss` on every chip — and the classic's silicon-parity pins read the
+    /// main stack that is left over.
+    #[cfg(feature = "node-power-button")]
+    power: Option<Rc<PowerOffQueue>>,
     /// Optional time provider for perf timing (e.g. shader comp). ESP32/emu pass, others None.
     time_provider: Option<Rc<dyn TimeProvider>>,
     /// Optional hardware button service for input nodes.
@@ -325,6 +336,8 @@ impl LpServer {
             memory_stats,
             read_headroom_probe: None,
             reboot_hook: None,
+            #[cfg(feature = "node-power-button")]
+            power: None,
             time_provider,
             button_service,
             radio_service,
@@ -726,7 +739,29 @@ impl LpServer {
             }
         }
 
+        #[cfg(feature = "node-power-button")]
+        self.power_off_if_requested()?;
         Ok(())
+    }
+
+    /// Carry out a power-off a node queued during this frame: unload every
+    /// project (closing their outputs, which leaves the LEDs dark), then hand
+    /// over to the platform. On hardware the platform call does not return.
+    #[cfg(feature = "node-power-button")]
+    fn power_off_if_requested(&mut self) -> Result<(), ServerError> {
+        let Some(power) = self.power.clone() else {
+            return Ok(());
+        };
+        let Some(request) = power.take_pending() else {
+            return Ok(());
+        };
+        log::info!("LpServer::power_off: unloading projects before power-off: {request:?}");
+        self.project_manager.unload_all_projects()?;
+        log::info!("LpServer::power_off: entering platform power-off");
+        power
+            .platform()
+            .enter_power_off(&request)
+            .map_err(|e| ServerError::Core(format!("power off: {e}")))
     }
 
     /// Tick projects and send incoming-message responses through a transport.
@@ -1064,6 +1099,20 @@ impl LpServer {
         self.read_headroom_probe = probe;
     }
 
+    /// Install the embedder's power-off capability (see [`PowerPlatform`]).
+    /// Every loaded project's power buttons can then request a power-off,
+    /// which the server carries out at the end of the frame. Unset = power
+    /// buttons report that there is no power service.
+    #[cfg(feature = "node-power-button")]
+    pub fn set_power_platform(&mut self, platform: Option<Rc<dyn PowerPlatform>>) {
+        let power = platform.map(|platform| Rc::new(PowerOffQueue::new(platform)));
+        let service = power
+            .clone()
+            .map(|power| power as Rc<dyn lpc_engine::PowerService>);
+        self.project_manager.set_power_service(service);
+        self.power = power;
+    }
+
     /// Install the embedder's reset action (see [`RebootHook`]). Unset =
     /// `ClientRequest::Reboot` is refused with an error instead of acked.
     pub fn set_reboot_hook(&mut self, reboot: Option<RebootHook>) {
@@ -1346,6 +1395,7 @@ fn graphics_feature(backend_name: &str) -> Option<lpc_model::LpFeature> {
             | LpFeature::NodeFluid
             | LpFeature::NodeFixture
             | LpFeature::NodePlaylist
+            | LpFeature::NodePowerButton
             | LpFeature::NodeRadio
             | LpFeature::NodeShader
             | LpFeature::NodeTexture

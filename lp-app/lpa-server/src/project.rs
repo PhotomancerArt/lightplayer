@@ -9,7 +9,9 @@ use alloc::{boxed::Box, format, rc::Rc, string::String, sync::Arc, vec::Vec};
 use core::cell::RefCell;
 #[cfg(feature = "latent-read-back")]
 use lpc_engine::LatentReadBackSource;
-use lpc_engine::{ButtonService, Engine, EngineServices, LpGraphics, ProjectLoader, RadioService};
+use lpc_engine::{
+    ButtonService, Engine, EngineServices, LpGraphics, PowerService, ProjectLoader, RadioService,
+};
 use lpc_hardware::HwEndpointSpec;
 use lpc_model::{LpPath, LpPathBuf, TreePath, current_revision};
 use lpc_registry::{ParseCtx, ProjectRegistry};
@@ -40,6 +42,8 @@ pub struct Project {
     button_service: Option<Rc<dyn ButtonService>>,
     /// Shared radio service used by engine services and manual recovery reloads.
     radio_service: Option<Rc<dyn RadioService>>,
+    /// Power-off service, applied to every engine this project builds.
+    power_service: Option<Rc<dyn PowerService>>,
     /// Optional memory stats callback for project load/reload checkpoints.
     memory_stats: Option<MemoryStatsFn>,
     /// Graphics backend used by shader runtime nodes.
@@ -138,6 +142,7 @@ impl Project {
             time_provider,
             button_service,
             radio_service,
+            power_service: None,
             memory_stats,
             graphics,
             #[cfg(feature = "latent-read-back")]
@@ -204,6 +209,17 @@ impl Project {
             .as_mut()
             .expect("project runtime is only absent while reloading");
         (runtime, &self.registry)
+    }
+
+    /// Install the power-off service on this project's engine, and on every
+    /// engine a reload builds after it.
+    pub fn set_power_service(&mut self, power_service: Option<Rc<dyn PowerService>>) {
+        if let Some(runtime) = self.runtime.as_mut() {
+            runtime
+                .services_mut()
+                .set_power_service(power_service.clone());
+        }
+        self.power_service = power_service;
     }
 
     pub fn tick(&mut self, delta_ms: u32) -> Result<(), ServerError> {
@@ -681,6 +697,9 @@ impl Project {
         runtime.set_graphics(Some(self.graphics.clone()));
         #[cfg(feature = "latent-read-back")]
         runtime.set_latent_read_back(self.latent_read_back.clone());
+        runtime
+            .services_mut()
+            .set_power_service(self.power_service.clone());
         // Reload rebuilds the Engine — and with it an empty writer store —
         // so panel state must be restored here too, on the same
         // before-first-frame rule as `new()`. (`apply_project_changes`

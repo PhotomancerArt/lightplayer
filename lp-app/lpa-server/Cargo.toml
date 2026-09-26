@@ -10,6 +10,7 @@ rust-version.workspace = true
 default = [
     "std",
     "node-button",
+    "node-power-button",
     "node-radio",
     "node-fluid",
     "node-fixture",
@@ -43,7 +44,7 @@ std = [
 #
 # `lpc-engine` is taken with `default-features = false` below, so without
 # these a consumer of `lpa-server` would silently get NO node runtimes at
-# all (see the trap note on the dependency line). All eight forward to the
+# all (see the trap note on the dependency line). All nine forward to the
 # matching `lpc-engine/node-*` feature and are in `default` above, so any
 # consumer taking lpa-server's defaults (the studio, `lp-cli`, tests) still
 # gets every node kind — nothing changes for them. A constrained firmware
@@ -53,6 +54,7 @@ std = [
 # off — `lpa-server` forcing every gate on unconditionally would make that
 # impossible from firmware.
 node-button = ["lpc-engine/node-button"]
+node-power-button = ["lpc-engine/node-power-button"]
 node-radio = ["lpc-engine/node-radio"]
 node-fluid = ["lpc-engine/node-fluid"]
 node-fixture = ["lpc-engine/node-fixture"]
@@ -96,14 +98,14 @@ fixture-no-hello = []
 [dependencies]
 # `default-features = false` here means lpa-server takes none of
 # `lpc-engine`'s defaults automatically — including its node-* gates, all
-# eight of which are default-on over there. The `node-*` features above are
+# nine of which are default-on over there. The `node-*` features above are
 # what supply them: they forward into the matching `lpc-engine/node-*`
 # feature and are all in lpa-server's own `default`, so nothing changes for
 # a normal consumer. **The trap**: any crate depending on `lpa-server` (or
 # `lpc-engine` directly) with `default-features = false` gets NO node
 # runtimes unless it lists the gates it wants — this bit `fw-emu` and this
 # crate itself when the gates first landed (2026-07-30). Anyone adding a
-# ninth node gate to `lpc-engine` must add the forwarding feature here too.
+# tenth node gate to `lpc-engine` must add the forwarding feature here too.
 lpc-engine = { path = "../../lp-core/lpc-engine", default-features = false }
 # Tiers, the login machine and the access files: the access gate's vocabulary.
 lpc-access = { path = "../../lp-core/lpc-access" }
@@ -139,7 +141,7 @@ lpvm-native = { path = "../../lp-shader/lpvm-native", default-features = false, 
 lpc-hardware = { path = "../../lp-core/lpc-hardware", default-features = false, features = ["std"] }
 # Same forwarding as the main [dependencies] entry above — `cargo test
 # -p lpa-server` builds with lpa-server's own default features (std + all
-# eight node-* gates) unless told otherwise, which forward into this dev
+# nine node-* gates) unless told otherwise, which forward into this dev
 # instance of lpc-engine too (Cargo unifies features across dep kinds for
 # the same resolved package). No explicit feature list needed here.
 lpc-engine = { path = "../../lp-core/lpc-engine", default-features = false }

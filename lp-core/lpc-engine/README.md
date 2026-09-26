@@ -70,6 +70,7 @@ its own Cargo feature, all default-on:
 | Feature | Runtime(s) it gates |
 |---|---|
 | `node-button` | `ButtonNode` |
+| `node-power-button` | `PowerButtonNode` |
 | `node-radio` | `ControlRadioNode` |
 | `node-fluid` | `FluidNode` |
 | `node-fixture` | `FixtureNode` |
@@ -134,6 +135,7 @@ break the product."). Disabling `node-shader` removes the *Shader* and
 | `node-playlist` | 14,304 B | |
 | `node-radio` | 12,240 B | |
 | `node-button` | 6,704 B | |
+| `node-power-button` | 5,824 B | measured 2026-09-22 against a 2,434,080 B image, after the table above |
 | `node-texture` | 3,856 B | |
 | `node-clock` | 3,488 B | |
 

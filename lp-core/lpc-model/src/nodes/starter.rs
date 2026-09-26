@@ -257,6 +257,7 @@ mod tests {
     const ALL_KINDS: &[NodeKind] = &[
         NodeKind::Module,
         NodeKind::Button,
+        NodeKind::PowerButton,
         NodeKind::Clock,
         NodeKind::Texture,
         NodeKind::Shader,

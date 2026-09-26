@@ -1,0 +1,99 @@
+{
+  "record": {
+    "fields": [
+      {
+        "name": "bindings",
+        "shape": {
+          "map": {
+            "key": "string",
+            "meta": {},
+            "value": {
+              "ref": {
+                "id": 1885459118
+              }
+            }
+          }
+        }
+      },
+      {
+        "name": "endpoint",
+        "shape": {
+          "value": {
+            "shape": {
+              "editor": "plain",
+              "id": 397552907,
+              "meta": {},
+              "ty": "string"
+            }
+          }
+        }
+      },
+      {
+        "name": "mode",
+        "shape": {
+          "value": {
+            "shape": {
+              "editor": {
+                "dropdown": {
+                  "options": [
+                    {
+                      "label": "Hold to power off",
+                      "value": "hold"
+                    },
+                    {
+                      "label": "On/off switch",
+                      "value": "switch"
+                    }
+                  ]
+                }
+              },
+              "id": 2104287469,
+              "meta": {},
+              "ty": "string"
+            }
+          }
+        }
+      },
+      {
+        "name": "id",
+        "shape": {
+          "value": {
+            "shape": {
+              "editor": "plain",
+              "id": 3065358156,
+              "meta": {},
+              "ty": "u32"
+            }
+          }
+        }
+      },
+      {
+        "name": "stable_ms",
+        "shape": {
+          "value": {
+            "shape": {
+              "editor": "plain",
+              "id": 3065358156,
+              "meta": {},
+              "ty": "u32"
+            }
+          }
+        }
+      },
+      {
+        "name": "hold_ms",
+        "shape": {
+          "value": {
+            "shape": {
+              "editor": "plain",
+              "id": 3065358156,
+              "meta": {},
+              "ty": "u32"
+            }
+          }
+        }
+      }
+    ],
+    "meta": {}
+  }
+}

@@ -5,8 +5,9 @@ use dioxus_icons::lucide::{
     Copy, Cpu, Download, Droplet, Ellipsis, Eraser, Eye, Flag, FlaskConical, Folder, Funnel, Hash,
     History, Image, Info, KeyRound, Laptop, Lightbulb, Link, Link2, Link2Off, ListMusic, Locate,
     LocateFixed, Lock, LockOpen, Maximize2, Minimize2, MonitorPlay, MousePointerClick, Pencil, Pin,
-    Play, Plus, Radio, RadioTower, Route, Save, Settings, Smartphone, Sparkles, SquareArrowRight,
-    SquareTerminal, Trash2, TriangleAlert, Undo2, Upload, Usb, Users, Waypoints, X, Zap,
+    Play, Plus, Power, Radio, RadioTower, Route, Save, Settings, Smartphone, Sparkles,
+    SquareArrowRight, SquareTerminal, Trash2, TriangleAlert, Undo2, Upload, Usb, Users, Waypoints,
+    X, Zap,
 };
 
 #[component]
@@ -57,6 +58,7 @@ pub fn StudioIcon(name: StudioIconName, size: u32) -> Element {
             NodeKindIcon::Texture => rsx! { Image { size } },
             NodeKindIcon::Radio => rsx! { Radio { size } },
             NodeKindIcon::Button => rsx! { MousePointerClick { size } },
+            NodeKindIcon::PowerButton => rsx! { Power { size } },
             NodeKindIcon::Fluid => rsx! { Droplet { size } },
             NodeKindIcon::Visual => rsx! { Eye { size } },
             NodeKindIcon::Generic => rsx! { Boxes { size } },
@@ -265,6 +267,7 @@ pub enum NodeKindIcon {
     Texture,
     Radio,
     Button,
+    PowerButton,
     Fluid,
     Visual,
     Generic,
@@ -287,6 +290,7 @@ pub fn node_kind_icon(kind_label: &str) -> StudioIconName {
         "Texture" | "texture" => NodeKindIcon::Texture,
         "Control Radio" | "Radio" | "radio" => NodeKindIcon::Radio,
         "Button" | "button" => NodeKindIcon::Button,
+        "Power button" | "power_button" => NodeKindIcon::PowerButton,
         "Fluid" | "fluid" => NodeKindIcon::Fluid,
         "Visual" => NodeKindIcon::Visual,
         _ => NodeKindIcon::Generic,
@@ -313,6 +317,7 @@ mod tests {
             "fluid",
             "compute_shader",
             "button",
+            "power_button",
             "radio",
         ] {
             assert_ne!(
