@@ -29,8 +29,13 @@ fn main() {
         .join(target)
         .join(&profile)
         .join("lps-builtins-emu-app");
-    println!("cargo:rerun-if-changed={}", exe_path_release.display());
-    println!("cargo:rerun-if-changed={}", exe_path_profile.display());
+    // Sampled before `watch_builtins_exe` may create the directory: the
+    // retry in `copy_builtins_exe` must still see a fresh clone as fresh.
+    let rv32_dir_existed = exe_path_release.parent().is_some_and(|d| d.is_dir());
+    watch_builtins_exe(&exe_path_release);
+    if exe_path_profile != exe_path_release {
+        watch_builtins_exe(&exe_path_profile);
+    }
 
     let exe_path = if exe_path_release.exists() {
         exe_path_release
@@ -41,7 +46,7 @@ fn main() {
     };
 
     let copied = std::path::Path::new(&out_dir).join("lps-builtins-emu-app");
-    if let Err(reason) = copy_builtins_exe(&exe_path, &copied) {
+    if let Err(reason) = copy_builtins_exe(&exe_path, &copied, rv32_dir_existed) {
         println!(
             "cargo:warning=lps-builtins-emu-app unusable at {} ({reason}) — run scripts/build-builtins.sh",
             exe_path.display()
@@ -76,7 +81,11 @@ fn main() {
 /// empty slice and surfaced minutes later as every `NativeEmuEngine` test
 /// failing instantly with "builtins ... not found at build time".
 /// See docs/defects/2026-07-29-builtins-elf-uplift-race.md.
-fn copy_builtins_exe(src: &std::path::Path, dst: &std::path::Path) -> Result<(), String> {
+fn copy_builtins_exe(
+    src: &std::path::Path,
+    dst: &std::path::Path,
+    rv32_dir_existed: bool,
+) -> Result<(), String> {
     let deadline =
         std::time::Instant::now() + std::time::Duration::from_secs(BUILTINS_RETRY_BUDGET_SECS);
     loop {
@@ -87,12 +96,47 @@ fn copy_builtins_exe(src: &std::path::Path, dst: &std::path::Path) -> Result<(),
         // Only a workspace that has already produced rv32 release artifacts can
         // have a build racing us; on a fresh clone the directory is absent and
         // there is nothing to wait for, so report "missing" immediately.
-        let rv32_dir_exists = src.parent().is_some_and(|d| d.is_dir());
-        if !rv32_dir_exists || std::time::Instant::now() >= deadline {
+        if !rv32_dir_existed || std::time::Instant::now() >= deadline {
             return Err(reason);
         }
         std::thread::sleep(std::time::Duration::from_millis(20));
     }
+}
+
+/// Declare `rerun-if-changed` for one candidate ELF path.
+///
+/// Cargo treats a `rerun-if-changed` path that does not exist as *always*
+/// stale, so watching the ELF path itself while it is absent reruns this
+/// script — and recompiles everything above lpvm-cranelift — on every cargo
+/// invocation in a checkout that has not built the builtins. When the ELF is
+/// absent, watch its directory instead (creating it, since cargo also treats
+/// a missing directory as stale). Cargo scans a watched directory
+/// recursively, so the ELF appearing — or being relinked by the
+/// remove-then-hardlink uplift, which changes the directory — reruns us.
+/// Once the ELF exists, the next run watches the file itself again.
+fn watch_builtins_exe(exe: &std::path::Path) {
+    if exe.exists() {
+        println!("cargo:rerun-if-changed={}", exe.display());
+        return;
+    }
+    let dir = exe.parent().expect("exe path has a parent");
+    if !dir.is_dir() {
+        if let Err(e) = std::fs::create_dir_all(dir) {
+            // Cannot make a stable watch; fall back to the always-stale one
+            // so a later build of the ELF is never missed.
+            println!("cargo:warning=could not create {} ({e})", dir.display());
+            println!("cargo:rerun-if-changed={}", exe.display());
+            return;
+        }
+        // A directory created during this run is newer than cargo's record
+        // of it, which would cost one more rerun on the next build. Backdate
+        // it; anything written into it later still moves its mtime. This runs
+        // before the copy attempt, so an ELF landing in between is either
+        // read by the copy or seen by the watch. Best effort: on failure the
+        // cost is that one extra rerun.
+        let _ = std::fs::File::open(dir).and_then(|f| f.set_modified(std::time::UNIX_EPOCH));
+    }
+    println!("cargo:rerun-if-changed={}", dir.display());
 }
 
 const BUILTINS_RETRY_BUDGET_SECS: u64 = 2;
