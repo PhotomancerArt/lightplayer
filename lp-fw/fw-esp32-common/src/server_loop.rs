@@ -253,10 +253,6 @@ pub async fn run_server_loop<T: ServerTransport + LinkUpkeep>(
     }
 }
 
-/// What this loop measured for one heartbeat: the embedder's half. A plain
-/// function (not an `async` one, not a closure over the loop's state) so it
-/// adds nothing to the loop future's frame — see [`run_server_loop`] on why
-/// that matters on the C6.
 /// The hello each newly opened link is owed (a single-link transport never
 /// owes one). A failure is logged and not retried: the link's own `Hello`
 /// request still gets an answer.
@@ -271,6 +267,10 @@ async fn send_owed_hellos<T: ServerTransport + LinkUpkeep>(server: &LpServer, tr
     }
 }
 
+/// What this loop measured for one heartbeat: the embedder's half. A plain
+/// function (not an `async` one, not a closure over the loop's state) so it
+/// adds nothing to the loop future's frame — see [`run_server_loop`] on why
+/// that matters on the C6.
 #[inline(never)]
 fn heartbeat_status(
     server: &LpServer,
