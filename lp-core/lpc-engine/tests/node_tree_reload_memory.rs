@@ -16,10 +16,14 @@
 //! cargo test -p lpc-engine --test node_tree_reload_memory -- --nocapture
 //! ```
 //!
-//! ⚠️ One `#[test]` per binary — the allocator counter is process-wide.
+//! The counter is **per thread**: it sees only the test's own allocations.
+//! A process-wide counter also saw the libtest harness's main thread, which
+//! allocates its running-test map and timeout queue right *after* spawning
+//! the test thread — about 900 B that a loaded runner can land between the
+//! two readings (`docs/debt/process-wide-heap-counters-in-tests.md`).
 
 use std::alloc::{GlobalAlloc, Layout, System};
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::cell::Cell;
 
 use lpc_engine::node::RuntimeNodeTree;
 use lpc_model::{ArtifactSpec, NodeId, NodeInvocation, NodeName, Revision, TreePath};
@@ -48,7 +52,7 @@ fn reloading_a_subtree_retains_no_heap() {
     println!(
         "live heap after warm-up: {warm} B; after {RELOADS} more reloads: {after} B \
          (growth {} B); next id {warm_next_id} -> {}",
-        after as isize - warm as isize,
+        after - warm,
         tree.next_id()
     );
 
@@ -95,21 +99,32 @@ fn add(tree: &mut RuntimeNodeTree<()>, parent: NodeId, name: &str, ty: &str, fra
 
 // ---- host-heap tracking -------------------------------------------------
 
+/// Counts the live heap of the thread that allocates, and only that thread.
 struct TrackingAlloc;
 
-static LIVE: AtomicUsize = AtomicUsize::new(0);
+thread_local! {
+    /// Net bytes this thread allocated minus the bytes it freed. Signed: a
+    /// thread may free what another allocated. `const`-initialised with no
+    /// destructor, so reaching it from inside the allocator never allocates.
+    static LIVE: Cell<isize> = const { Cell::new(0) };
+}
+
+fn add_live(delta: isize) {
+    // `try_with`: a thread tearing down may still allocate or free.
+    let _ = LIVE.try_with(|live| live.set(live.get() + delta));
+}
 
 unsafe impl GlobalAlloc for TrackingAlloc {
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
         let ptr = unsafe { System.alloc(layout) };
         if !ptr.is_null() {
-            LIVE.fetch_add(layout.size(), Ordering::Relaxed);
+            add_live(layout.size() as isize);
         }
         ptr
     }
 
     unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
-        LIVE.fetch_sub(layout.size(), Ordering::Relaxed);
+        add_live(-(layout.size() as isize));
         unsafe { System.dealloc(ptr, layout) }
     }
 }
@@ -117,6 +132,7 @@ unsafe impl GlobalAlloc for TrackingAlloc {
 #[global_allocator]
 static ALLOC: TrackingAlloc = TrackingAlloc;
 
-fn live() -> usize {
-    LIVE.load(Ordering::Relaxed)
+/// This thread's live heap.
+fn live() -> isize {
+    LIVE.with(Cell::get)
 }

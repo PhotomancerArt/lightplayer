@@ -17,12 +17,16 @@
 //! cargo test -p lpc-engine --test entry_residency_memory -- --nocapture
 //! ```
 //!
-//! ⚠️ One `#[test]` per binary — the allocator counters are process-wide.
+//! The counters are **per thread**: they see only the test's own
+//! allocations. Process-wide counters also saw the libtest harness's main
+//! thread, which allocates its running-test map and timeout queue right
+//! *after* spawning the test thread — bytes a loaded runner can land between
+//! two readings (`docs/debt/process-wide-heap-counters-in-tests.md`).
 
 mod entry_residency_support;
 
 use std::alloc::{GlobalAlloc, Layout, System};
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::cell::Cell;
 
 use entry_residency_support::{IDLE, Owner, PATTERN, load, loaded_entries, project_fs};
 use lpc_engine::node::ResidencyRequest;
@@ -60,15 +64,15 @@ fn a_hundred_switch_cycles_retain_no_heap() {
     assert_eq!(loaded_entries(rt.engine()), vec![IDLE]);
 
     // A step with nothing to do: the steady state of every tick.
-    let allocs_before = ALLOCS.load(Ordering::Relaxed);
+    let allocs_before = allocs();
     let applied = rt.apply_residency(&fs).expect("no-op step");
-    let allocs = ALLOCS.load(Ordering::Relaxed) - allocs_before;
+    let allocs = allocs() - allocs_before;
     assert!(applied.is_empty());
 
     println!(
         "live heap after warm-up: {warm} B; after {CYCLES} more 1→2→1 cycles: {after} B \
          (growth {} B); allocations in a no-request step: {allocs}",
-        after as isize - warm as isize,
+        after - warm,
     );
     assert!(
         after <= warm,
@@ -80,23 +84,35 @@ fn a_hundred_switch_cycles_retain_no_heap() {
 
 // ---- host-heap tracking -------------------------------------------------
 
+/// Counts the heap of the thread that allocates, and only that thread.
 struct TrackingAlloc;
 
-static LIVE: AtomicUsize = AtomicUsize::new(0);
-static ALLOCS: AtomicUsize = AtomicUsize::new(0);
+thread_local! {
+    /// Net bytes this thread allocated minus the bytes it freed. Signed: a
+    /// thread may free what another allocated. `const`-initialised with no
+    /// destructor, so reaching it from inside the allocator never allocates.
+    static LIVE: Cell<isize> = const { Cell::new(0) };
+    /// Allocation requests on this thread.
+    static ALLOCS: Cell<usize> = const { Cell::new(0) };
+}
+
+fn add_live(delta: isize) {
+    // `try_with`: a thread tearing down may still allocate or free.
+    let _ = LIVE.try_with(|live| live.set(live.get() + delta));
+}
 
 unsafe impl GlobalAlloc for TrackingAlloc {
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
         let ptr = unsafe { System.alloc(layout) };
         if !ptr.is_null() {
-            LIVE.fetch_add(layout.size(), Ordering::Relaxed);
-            ALLOCS.fetch_add(1, Ordering::Relaxed);
+            add_live(layout.size() as isize);
+            let _ = ALLOCS.try_with(|allocs| allocs.set(allocs.get() + 1));
         }
         ptr
     }
 
     unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
-        LIVE.fetch_sub(layout.size(), Ordering::Relaxed);
+        add_live(-(layout.size() as isize));
         unsafe { System.dealloc(ptr, layout) }
     }
 }
@@ -104,6 +120,12 @@ unsafe impl GlobalAlloc for TrackingAlloc {
 #[global_allocator]
 static ALLOC: TrackingAlloc = TrackingAlloc;
 
-fn live() -> usize {
-    LIVE.load(Ordering::Relaxed)
+/// This thread's live heap.
+fn live() -> isize {
+    LIVE.with(Cell::get)
+}
+
+/// This thread's allocation requests so far.
+fn allocs() -> usize {
+    ALLOCS.with(Cell::get)
 }

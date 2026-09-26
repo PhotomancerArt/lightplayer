@@ -41,9 +41,16 @@
 //! cargo test -p lpc-engine --test playlist_crossfade_memory -- --nocapture
 //! ```
 //!
-//! ⚠️ One `#[test]` per binary — the allocator counters are process-wide.
+//! The host-heap counters are **per thread**: they see only the test's own
+//! allocations. Process-wide counters also saw every other thread — the
+//! libtest harness's main thread, which allocates its running-test map and
+//! timeout queue right *after* spawning the test thread, and whatever
+//! helper threads the graphics backend runs — so a loaded runner moved a
+//! tick's figures by bytes that were not the engine's
+//! (`docs/debt/process-wide-heap-counters-in-tests.md`).
 
 use std::alloc::{GlobalAlloc, Layout, System};
+use std::cell::Cell;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -62,23 +69,38 @@ use lps_shared::{LpsValueF32, TextureStorageFormat};
 
 // ---- host-heap tracking (what the classic's allocator would see) --------
 
+/// Counts the heap of the thread that allocates, and only that thread.
 struct TrackingAlloc;
 
-static LIVE: AtomicUsize = AtomicUsize::new(0);
-static PEAK: AtomicUsize = AtomicUsize::new(0);
+thread_local! {
+    /// Net bytes this thread allocated minus the bytes it freed. Signed: a
+    /// thread may free what another allocated. `const`-initialised with no
+    /// destructor, so reaching it from inside the allocator never allocates.
+    static LIVE: Cell<isize> = const { Cell::new(0) };
+    /// The highest `LIVE` since the last [`reset_peak`].
+    static PEAK: Cell<isize> = const { Cell::new(0) };
+}
+
+fn add_live(delta: isize) {
+    // `try_with`: a thread tearing down may still allocate or free.
+    let _ = LIVE.try_with(|live| {
+        let now = live.get() + delta;
+        live.set(now);
+        let _ = PEAK.try_with(|peak| peak.set(peak.get().max(now)));
+    });
+}
 
 unsafe impl GlobalAlloc for TrackingAlloc {
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
         let ptr = unsafe { System.alloc(layout) };
         if !ptr.is_null() {
-            let live = LIVE.fetch_add(layout.size(), Ordering::Relaxed) + layout.size();
-            PEAK.fetch_max(live, Ordering::Relaxed);
+            add_live(layout.size() as isize);
         }
         ptr
     }
 
     unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
-        LIVE.fetch_sub(layout.size(), Ordering::Relaxed);
+        add_live(-(layout.size() as isize));
         unsafe { System.dealloc(ptr, layout) }
     }
 }
@@ -86,16 +108,17 @@ unsafe impl GlobalAlloc for TrackingAlloc {
 #[global_allocator]
 static ALLOC: TrackingAlloc = TrackingAlloc;
 
-fn live() -> usize {
-    LIVE.load(Ordering::Relaxed)
+/// This thread's live heap.
+fn live() -> isize {
+    LIVE.with(Cell::get)
 }
 
 fn reset_peak() {
-    PEAK.store(live(), Ordering::Relaxed);
+    PEAK.with(|peak| peak.set(live()));
 }
 
-fn peak() -> usize {
-    PEAK.load(Ordering::Relaxed)
+fn peak() -> isize {
+    PEAK.with(Cell::get)
 }
 
 // ---- graphics-memory counting (what the device's JIT arena would see) ---
@@ -426,8 +449,8 @@ impl Run {
         self.engine.tick(&self.registry, 16).expect("tick");
         let (sample_out_calls, sample_out_bytes) = self.counters.take();
         Tick {
-            host_transient: peak().saturating_sub(live_before),
-            host_resident: live() as i64 - live_before as i64,
+            host_transient: (peak() - live_before) as usize,
+            host_resident: (live() - live_before) as i64,
             sample_out_calls,
             sample_out_bytes,
         }
