@@ -12,7 +12,7 @@
 //! ```text
 //! {"t":…,"kind":"wire","dir":"tx"|"rx","transport":"serial"|"ble"|"emu-tab","port":"3","len":N,"b64":"…"}
 //! {"t":…,"kind":"request","phase":"sent","conversation":C,"id":N,"request":"project.read"}
-//! {"t":…,"kind":"request","phase":"frame","conversation":C,"id":N,"response_id":M,"seq":S,"fin":B,"disposition":"matched"|"stale"|"prior-owner"|"uncorrelated"|"server-originated","since_sent_ms"?:F}
+//! {"t":…,"kind":"request","phase":"frame","conversation":C,"id":N,"response_id":M,"frame_seq":S,"fin":B,"disposition":"matched"|"stale"|"prior-owner"|"uncorrelated"|"server-originated","since_sent_ms"?:F}
 //! {"t":…,"kind":"request","phase":"outcome","conversation":C,"id":N,"request"?:"…","outcome":"answered"|"failed"|"timed-out"|"cancelled","latency_ms"?:F,"error"?:"…","budget_ms"?:F}
 //! ```
 //!
@@ -90,7 +90,7 @@ impl RequestLines {
                 line.insert("phase".into(), json!("frame"));
                 insert_key(&mut line, key);
                 line.insert("response_id".into(), json!(response_id));
-                line.insert("seq".into(), json!(seq));
+                line.insert("frame_seq".into(), json!(seq));
                 line.insert("fin".into(), json!(fin));
                 line.insert("disposition".into(), json!(disposition.as_str()));
                 if let Some((sent, _)) = self.sent.get(&key) {
@@ -201,7 +201,7 @@ mod tests {
         ));
         assert_eq!(frame["phase"], "frame");
         assert_eq!(frame["response_id"], 7);
-        assert_eq!(frame["seq"], 1);
+        assert_eq!(frame["frame_seq"], 1);
         assert_eq!(frame["fin"], false);
         assert_eq!(frame["disposition"], "matched");
         assert_eq!(frame["since_sent_ms"], 250.0);
