@@ -1,7 +1,7 @@
 ---
 status: fixed
 found: 2026-09-25      # report (Yona, reviewing PR #827 on an emulated C6) + live-debugging
-fixed: this change
+fixed: 0456f590f (PR #836)
 area: fw-esp32c6 serial/io_task.rs
 class: wake-quantum-throttle
 related: [docs/adr/2026-09-24-json-pack-wire-encoding.md, "planning lp2025/2026-09-25-1410-studio-device-sluggishness"]
@@ -24,8 +24,7 @@ spent ~10 frames arriving before the server saw it. Measured on the emulated
 C6 (`lp-emu:esp32c6:t1`, #827 head, `playful-choker-tryout`): round trip is
 linear in request bytes at 0.37 ms/B of wall = 0.128 guest ms/B = 64 B per
 9.1 guest-ms frame. The emulator (0.35–0.45× real time) multiplies this; it
-does not cause it. The mechanism is firmware-side, so a real C6 should show
-it too (not yet checked on a board).
+does not cause it. The mechanism is firmware-side, so a real C6 shows it too.
 
 **Fix** — `read_serial` drains the burst: after the first packet it keeps
 reading while the next one follows within 500 µs (`READ_BURST_GAP`), up to
@@ -39,6 +38,9 @@ median of 15:
 | 600 B lens read | 354 ms | 92 ms |
 | 1,200 B | 402 ms | 133 ms |
 | 2,400 B | 764 ms | 219 ms |
+
+**Confirmed** — Yona, 2026-09-26: Studio against both the emulated C6 and a
+real C6 with #836 and #827 merged is "much better"; the feel check passed.
 
 **Regression coverage** — none automated yet: the rig
 (`rtt_rig.py` in the planning dir's `measurements/`) is a desk tool, and
