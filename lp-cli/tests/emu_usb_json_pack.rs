@@ -433,9 +433,12 @@ fn a_torn_packed_frame_desyncs_the_reader_until_the_board_resets() {
             recovered.len()
         );
         // A steady trickle of requests: the board's replies are what the
-        // reader learns from (and loses step on).
+        // reader learns from (and loses step on). Not `Hello`: a Hello reply
+        // starts a new table epoch on its own (PackedLink::prepare_reply),
+        // which would recover the reader without the reset request this
+        // test is about.
         if asked_at.is_none_or(|at| at.elapsed() >= ASK_AGAIN) {
-            send(&mut socket, next_id, ClientRequest::Hello);
+            send(&mut socket, next_id, ClientRequest::ListLoadedProjects);
             next_id += 1;
             asked_at = Some(Instant::now());
         }
