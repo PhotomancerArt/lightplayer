@@ -12,7 +12,7 @@
 
 use std::collections::HashMap;
 
-use lpc_wire::WireUnpacker;
+use lpc_wire::{UnpackEvent, WireUnpacker};
 use serde_json::Value;
 
 /// One (transport, port, direction) byte stream.
@@ -80,6 +80,13 @@ struct StreamState {
     text: Vec<u8>,
 }
 
+/// Where the unpacker's `<learned frame: …>` marker line starts in `out`.
+fn find_marker(out: &[u8]) -> Option<usize> {
+    const MARKER: &[u8] = b"<learned frame:";
+    out.windows(MARKER.len())
+        .rposition(|window| window == MARKER)
+}
+
 impl StreamState {
     fn push(&mut self, bytes: &[u8]) -> Vec<WireItem> {
         let mut items = Vec::new();
@@ -94,13 +101,24 @@ impl StreamState {
                     frame = Some(result)
                 });
             match frame {
-                Some(Ok(frame)) => {
+                Some(UnpackEvent::Unpacked(frame)) => {
                     let split = out.len().saturating_sub(frame.json_line_len);
                     self.take_text(&out[..split], &mut items);
                     let line = &out[split..];
                     items.push(message_item(line, Some(frame.wire_len)));
                 }
-                Some(Err(error)) => {
+                Some(UnpackEvent::Unreadable(frame)) => {
+                    // The unpacker wrote a `<learned frame: …>` marker line in
+                    // the frame's place; show the frame as undecodable instead.
+                    let split = find_marker(&out).unwrap_or(out.len());
+                    self.take_text(&out[..split], &mut items);
+                    items.push(WireItem::Undecodable(format!(
+                        "learned frame, table unknown ({} B; the recording starts \
+                         mid-connection or an earlier frame was lost)",
+                        frame.wire_len
+                    )));
+                }
+                Some(UnpackEvent::Dropped(error)) => {
                     self.take_text(&out, &mut items);
                     items.push(WireItem::Undecodable(error));
                 }
