@@ -250,6 +250,11 @@ genuinely fits none of these, and define it here in one line.
   that is never reused is sized by every id ever minted, not by what is
   alive, so removal leaves a tombstone that is never reclaimed. Harmless
   while removal is rare; a leak the day a feature makes removal routine.
+- **`wake-quantum-throttle`** — a task that services a stream takes a
+  fixed quantum (one packet, one line) per scheduler wake, so throughput is
+  bounded by how often it is woken rather than by the link, and anything
+  that makes wakes rarer (a longer frame, a slower emulator) turns into
+  latency proportional to message size.
 
 ## Index
 
@@ -360,6 +365,7 @@ a fifth still lands somewhere the new `Fault` status and pattern don't reach.
 
 | Class | Date | Entry | Status | Area |
 | --- | --- | --- | --- | --- |
+| wake-quantum-throttle | 2026-09-25 | [c6-takes-requests-in-at-one-packet-per-frame](2026-09-25-c6-takes-requests-in-at-one-packet-per-frame.md) | fixed | fw-esp32c6 `serial/io_task.rs` `read_serial`: the USB read took one 64 B OUT packet per wake, and `io_task` wakes about once per server-loop frame, so a 600 B Studio lens request took ~10 frames to arrive (emulated C6: round trip linear in request bytes, 0.37 ms/B wall; 354 → 92 ms for 600 B once the read drains the burst). Yona's "Studio feels sluggish on a device" on #827's emulated C6 |
 | state-conflation | 2026-09-25 | [turn-on-bluetooth-reports-a-timeout-the-board-answered](2026-09-25-turn-on-bluetooth-reports-a-timeout-the-board-answered.md) | fixed (PR #824) | lpa-studio-core access write × the link's one `ConversationInbox` × the card's frame feed: Turn on Bluetooth said `device did not respond within 5.0s` (4 of 4) while a wire tap showed the board's `error:null` reply 192 ms later; the feed, polling the same inbox, popped and dropped it. Each conversation on a shared link now owns its own id slice, and `receive` takes only its own replies |
 | assumed-context | 2026-09-25 | [tag-next-version-tagged-the-tip-not-its-commit](2026-09-25-tag-next-version-tagged-the-tip-not-its-commit.md) | fixed | scripts/tag-next-version.sh: Main push `git pull`ed and tagged main's tip, so two close merges left the first commit untagged and its workflow_run deploy failed `--require-tag`; now tags its own `$GITHUB_SHA`, a tagged commit is a no-op, a lost number race retries |
 | assumed-context | 2026-09-25 | [panel-restore-drops-dormant-entry-knobs](2026-09-25-panel-restore-drops-dormant-entry-knobs.md) | fixed | lpa-server `panel_state::restore` × lpc-engine `PanelWriterStore`: restore kept a persisted writer only if a live node inhabited its scope, so a reboot forgot every dormant playlist entry's knobs; and a pattern module's knob is keyed by the module's runtime id (`ScopeRef::Module`), so an unload and reload orphaned it in memory. Restore now accepts every authored entry's sink scope and parks writers for scopes inside a dormant entry by persist path; the residency step parks and re-engages them. File format unchanged |
