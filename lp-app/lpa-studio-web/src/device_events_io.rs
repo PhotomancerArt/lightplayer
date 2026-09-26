@@ -113,6 +113,9 @@ struct SinkState {
     recording: String,
     /// When the page started recording (the `session` line's stamp).
     started: f64,
+    /// The page's address when it started recording. The `session` line
+    /// waits for the build facts, and by then a route may have moved.
+    href: String,
     /// The next line's `seq` (0 is the `session` line's).
     next_seq: u64,
     /// Whether the `session` line has been queued; nothing is sent before.
@@ -157,6 +160,9 @@ pub(crate) fn install(controller: &mut StudioController) {
                     url: crate::record_sink::with_session_param(&url, &recording),
                     recording: recording.clone(),
                     started: crate::web_app::now_secs(),
+                    href: web_sys::window()
+                        .and_then(|window| window.location().href().ok())
+                        .unwrap_or_default(),
                     next_seq: 1,
                     session_line_queued: false,
                 });
@@ -402,10 +408,7 @@ fn queue_session_line(info: Option<crate::app::layout::version_badge::VersionInf
                 .as_ref()
                 .and_then(|window| window.navigator().user_agent().ok())
                 .unwrap_or_default(),
-            href: window
-                .as_ref()
-                .and_then(|window| window.location().href().ok())
-                .unwrap_or_default(),
+            href: sink.href.clone(),
         };
         let line = crate::record_sink::with_seq(&crate::record_sink::session_line(&facts), 0);
         trace.sink_queue.insert(0, line);
