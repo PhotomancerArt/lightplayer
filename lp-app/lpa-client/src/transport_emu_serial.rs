@@ -9,9 +9,11 @@ use log;
 use lp_emu_core::MemoryAccessKind;
 use lp_riscv_elf::format_backtrace;
 use lp_riscv_emu::Riscv32Emulator;
-use lpc_wire::WireServerMessage;
+use lpc_wire::{PackOptIn, WireChunk, WireServerMessage, WireStream};
 use lpc_wire::{TransportError, json, messages::ClientMessage};
+use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
+use std::time::Instant;
 
 /// Serial ClientTransport that communicates with firmware running in emulator
 ///
@@ -20,8 +22,14 @@ use std::sync::{Arc, Mutex};
 pub struct SerialEmuClientTransport {
     /// Emulator instance (shared, mutex-protected)
     emulator: Arc<Mutex<Riscv32Emulator>>,
-    /// Buffer for partial messages (when reading from serial)
-    read_buffer: Vec<u8>,
+    /// The board's stream, split frame-first (JSON lines and packed frames).
+    wire: WireStream,
+    /// Chunks split off the stream and not yet handed out.
+    pending: VecDeque<WireChunk>,
+    /// When to ask the board to pack (never, on `fw-emu`: its hello names no
+    /// dictionary).
+    opt_in: PackOptIn,
+    started: Instant,
     /// Symbol map for backtrace (optional)
     symbol_map: Option<HashMap<String, u32>>,
     /// Code end address for backtrace symbolication
@@ -36,7 +44,10 @@ impl SerialEmuClientTransport {
     pub fn new(emulator: Arc<Mutex<Riscv32Emulator>>) -> Self {
         Self {
             emulator,
-            read_buffer: Vec::new(),
+            wire: WireStream::new(),
+            pending: VecDeque::new(),
+            opt_in: PackOptIn::wanting(crate::wire_encoding_env::requested_wire_encoding()),
+            started: Instant::now(),
             symbol_map: None,
             code_end: 0,
         }
@@ -49,9 +60,10 @@ impl SerialEmuClientTransport {
         self
     }
 
-    /// Read a complete JSON message from serial output
+    /// Read the next complete message from serial output.
     ///
-    /// Messages are newline-terminated JSON.
+    /// `M!{json}` lines and packed frames alike; every other line is a server
+    /// log and skipped.
     fn read_message(&mut self) -> Result<Option<WireServerMessage>, TransportError> {
         // Drain serial output from emulator
         let output = {
@@ -67,52 +79,60 @@ impl SerialEmuClientTransport {
                 "SerialEmuClientTransport::read_message: Drained {} bytes from serial output",
                 output.len()
             );
-            self.read_buffer.extend_from_slice(&output);
+            let pending = &mut self.pending;
+            self.wire.push(&output, |chunk| pending.push_back(chunk));
         }
 
-        // Process complete lines (newline-terminated); skip non-M! lines (server logs)
-        while let Some(newline_pos) = self.read_buffer.iter().position(|&b| b == b'\n') {
-            let message_bytes = self.read_buffer.drain(..=newline_pos).collect::<Vec<_>>();
-            let message_str = std::str::from_utf8(&message_bytes[..message_bytes.len() - 1])
-                .map_err(|e| TransportError::Serialization(format!("Invalid UTF-8: {e}")))?;
-
-            if !message_str.starts_with("M!") {
-                log::trace!(
-                    "SerialEmuClientTransport: Skipping non-message line ({} bytes)",
-                    message_bytes.len()
-                );
-                continue;
-            }
-
-            let json_str = message_str.strip_prefix("M!").unwrap_or(message_str);
-            log::trace!(
-                "SerialEmuClientTransport: Parsing message ({} bytes)",
-                message_bytes.len()
-            );
-
-            match json::from_str::<WireServerMessage>(json_str) {
-                Ok(message) => {
-                    log::debug!(
-                        "SerialEmuClientTransport: Received message id={} ({} bytes): {}",
-                        message.id,
-                        message_bytes.len(),
-                        message_str
+        while let Some(chunk) = self.pending.pop_front() {
+            let frame = match chunk {
+                WireChunk::Line(line) => {
+                    log::trace!(
+                        "SerialEmuClientTransport: Skipping non-message line ({} bytes)",
+                        line.len()
                     );
-                    return Ok(Some(message));
+                    continue;
                 }
+                WireChunk::Error(error) => {
+                    log::warn!("SerialEmuClientTransport: {error}");
+                    continue;
+                }
+                WireChunk::Frame(frame) => frame,
+            };
+            let message = match json::from_str::<WireServerMessage>(&frame.json) {
+                Ok(message) => message,
                 Err(e) => {
                     log::warn!(
-                        "SerialEmuClientTransport: Failed to parse M! line: {e} | {message_str}"
+                        "SerialEmuClientTransport: Failed to parse M! line: {e} | {}",
+                        frame.json
                     );
+                    continue;
                 }
+            };
+            log::debug!(
+                "SerialEmuClientTransport: Received message id={} ({} bytes): M!{}",
+                message.id,
+                frame.json.len(),
+                frame.json
+            );
+            let now_ms = u64::try_from(self.started.elapsed().as_millis()).unwrap_or(u64::MAX);
+            let step = self.opt_in.observe(&message, frame.is_packed(), now_ms);
+            if let Some(ask) = step.send {
+                let line = json::to_serial_line(&ask)
+                    .map_err(|e| TransportError::Serialization(e.to_string()))?;
+                self.emulator
+                    .lock()
+                    .map_err(|_| TransportError::ConnectionLost)?
+                    .serial_write(line.as_bytes());
+            }
+            if step.deliver {
+                return Ok(Some(message));
             }
         }
 
-        if !self.read_buffer.is_empty() {
+        if self.wire.pending_bytes() > 0 {
             log::trace!(
-                "SerialEmuClientTransport: Partial message buffered ({} bytes): {:?}",
-                self.read_buffer.len(),
-                String::from_utf8_lossy(&self.read_buffer)
+                "SerialEmuClientTransport: Partial message buffered ({} bytes)",
+                self.wire.pending_bytes()
             );
         }
         Ok(None)

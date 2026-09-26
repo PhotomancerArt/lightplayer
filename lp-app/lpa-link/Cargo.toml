@@ -62,6 +62,8 @@ web-sys = { version = "0.3", optional = true, features = [
 
 [dev-dependencies]
 tokio = { version = "1", features = ["macros", "rt", "time"] }
+# The demux tests write packed frames with the firmware's own frame writer.
+lpc-wire = { path = "../../lp-core/lpc-wire", features = ["ser-write-json"] }
 # golden-trace replay (tests/trace_replay.rs) parses the device-event JSONL
 serde_json = { workspace = true }
 
@@ -87,6 +89,18 @@ browser-serial-esp32 = [
     "dep:wasm-bindgen",
     "dep:wasm-bindgen-futures",
 ]
+# Web Bluetooth (M5 of the BLE remote-control plan): the same line protocol
+# over a Nordic UART GATT service. `device-link` for the `Link` it
+# implements, `device-session` for the `lpa_client::ClientIo` a push or the
+# editor lens speaks through. No `web-sys` Bluetooth features: the JS module
+# owns the device, exactly as `browser_serial.js` owns the port.
+browser-ble = [
+    "device-link",
+    "device-session",
+    "dep:js-sys",
+    "dep:wasm-bindgen",
+    "dep:wasm-bindgen-futures",
+]
 # `lpa-devices`' transport contract (`Link`), implemented over this crate's
 # transports (`device_link`). The model defines the trait, `lpa-link` adapts
 # to it, and `device_link::wire` is the ONE place the two frame vocabularies
@@ -96,7 +110,7 @@ browser-serial-esp32 = [
 # `fake-device` in.
 device-link = ["dep:lpa-devices", "dep:lpc-wire"]
 # The worker envelope speaks the wire's published-frame vocabulary
-# (`OutputFrameEntry`, `ControlDisplayLayoutRead`) so the preview host and the
+# (`OutputFrameEntry`, `RevisionGateRead`) so the preview host and the
 # device card feed read output frames through one set of types.
 browser-worker = [
     "dep:lpc-wire",
@@ -128,6 +142,9 @@ emulator-tab = [
 ]
 fake-device = [
     "device-link",
+    # The fake packs its replies the way shipped firmware does, with the
+    # firmware's own frame writer (`lpc_wire::ser_packed_frame_to`).
+    "lpc-wire/ser-write-json",
     "device-session-host",
     "dep:fw-host",
     "dep:littlefs-rust",

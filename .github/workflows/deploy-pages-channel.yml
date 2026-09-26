@@ -123,22 +123,23 @@ jobs:
           buildtargets: esp32s3,esp32
           default: false
 
-      # target/ is deliberately NOT cached (cache-targets: false): multi-GB
-      # target payloads get LRU-evicted from the repo's 10 GB Actions-cache
-      # budget before they are ever restored (see deploy-cloud.yml). sccache
-      # re-materializes crate compiles content-addressed instead. `shared-key`
-      # is shared with deploy-cloud.yml on purpose: the two build the same
-      # artifact from the same tree.
-      - name: Cache cargo registry
-        uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: lp2025 -> target
-          cache-targets: false
-          cache-bin: false
-          shared-key: deploy
+      # target/ is deliberately NOT cached: multi-GB target payloads get
+      # LRU-evicted from the repo's 10 GB Actions-cache budget before they
+      # are ever restored (the old `cloud-cargo` entry was, every deploy).
+      # sccache re-materializes crate compiles content-addressed instead,
+      # same shape as pre-merge.yml. The registry is the repo's ONE
+      # cargo-registry entry, restored read-only — pre-merge's lint job on
+      # main is its only writer (this workflow used to save its own
+      # ~517 MB `deploy` copy of the same bytes;
+      # docs/debt/actions-cache-budget.md). `@main` for the reason the
+      # xtensa-toolchain step above gives.
+      - name: Restore cargo registry
+        uses: PhotomancerArt/lightplayer/.github/actions/cargo-registry@main
 
       - name: Run sccache
         uses: mozilla/sccache-action@v0.0.10
+        with:
+          version: v0.18.0
 
       - name: Install just
         uses: extractions/setup-just@v3

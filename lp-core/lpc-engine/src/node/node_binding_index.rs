@@ -9,7 +9,7 @@ use crate::dataflow::binding::{
     BindingEntry, BindingError, BindingRef, BindingSource, BindingTarget, channels_touched,
 };
 
-use super::RuntimeNodeEntry;
+use super::node_entry_slots::NodeEntrySlots;
 
 #[derive(Clone, Debug, Default)]
 pub(super) struct NodeBindingIndex {
@@ -20,12 +20,10 @@ pub(super) struct NodeBindingIndex {
 }
 
 impl NodeBindingIndex {
-    pub(super) fn rebuild<N>(
-        entries: &[Option<RuntimeNodeEntry<N>>],
-    ) -> Result<Self, BindingError> {
+    pub(super) fn rebuild<N>(entries: &NodeEntrySlots<N>) -> Result<Self, BindingError> {
         let mut index = Self::default();
 
-        for entry in entries.iter().filter_map(|entry| entry.as_ref()) {
+        for entry in entries.iter() {
             for (binding_index, binding) in entry.bindings.value().iter().enumerate() {
                 let binding_ref = BindingRef::new(entry.id, binding_index);
                 index.insert_binding(binding_ref, binding)?;
@@ -105,11 +103,10 @@ impl NodeBindingIndex {
 }
 
 pub(super) fn binding_by_ref<N>(
-    entries: &[Option<RuntimeNodeEntry<N>>],
+    entries: &NodeEntrySlots<N>,
     binding_ref: BindingRef,
 ) -> Option<&BindingEntry> {
     entries
-        .get(binding_ref.owner.0 as usize)
-        .and_then(|entry| entry.as_ref())
+        .get(binding_ref.owner)
         .and_then(|entry| entry.bindings.value().get(binding_ref.index))
 }

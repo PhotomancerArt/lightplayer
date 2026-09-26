@@ -1,6 +1,6 @@
 //! wasm-bindgen exports used by `fw-browser-worker.js`.
 
-use lpc_wire::ControlDisplayLayoutRead;
+use lpc_wire::RevisionGateRead;
 use lpvm_wasm::rt_browser::init_host_exports;
 use wasm_bindgen::prelude::*;
 
@@ -185,10 +185,10 @@ pub fn render_bus_texture_rgba8(
 /// Read the runtime's published output frame as the worker's
 /// `preview_output_frame` message JSON.
 ///
-/// `display_layout_json` is a serialized `lpc_wire::ControlDisplayLayoutRead`
-/// — the same geometry gate the device-card feed pulls with, so a steady card
-/// asks `always` once and `if_changed` thereafter and the layout crosses the
-/// boundary only when it actually moved. The samples themselves are the
+/// `geometry_json` is a serialized `lpc_wire::RevisionGateRead` — the
+/// same per-output geometry gate the device-card feed pulls with, so a steady
+/// card asks `always` once and `if_changed` thereafter and the geometry
+/// crosses the boundary only when it actually moved. The samples themselves are the
 /// published buffers (u16 LE, post-finalize); nothing is rendered.
 ///
 /// The whole message — discriminator, correlation id, control-first fact —
@@ -197,12 +197,12 @@ pub fn render_bus_texture_rgba8(
 pub fn read_output_frame_json(
     runtime_id: u32,
     frame_id: u32,
-    display_layout_json: &str,
+    geometry_json: &str,
 ) -> Result<String, String> {
-    let display_layout: ControlDisplayLayoutRead = serde_json::from_str(display_layout_json)
-        .map_err(|error| format!("parse display layout read: {error}"))?;
+    let geometry: RevisionGateRead = serde_json::from_str(geometry_json)
+        .map_err(|error| format!("parse output frame geometry read: {error}"))?;
     runtime_registry::with_runtime_mut(runtime_id, |runtime| {
-        let (control_first, outputs) = runtime.read_output_frame(display_layout);
+        let (control_first, outputs) = runtime.read_output_frame(geometry);
         serde_json::to_string(&PreviewOutputFrameMessage::new(
             runtime_id,
             frame_id,

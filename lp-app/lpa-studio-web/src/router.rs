@@ -20,6 +20,8 @@
 //! /explore              the explore section (placeholder until modpacks)
 //! /account              the signed-in account's profile page (identity,
 //!                       account, sessions); signed out it asks you in
+//! /unlock#<dev>&<pw>    a shared device password lands here (the Share
+//!                       QR): saved in this browser, then Connect
 //! /p/<slug>-prj<uid>    THE project route (identity vision D1/D9): the
 //!                       editor as a lens on the sim session running that
 //!                       project, and the share link, at ONE address — the
@@ -206,6 +208,11 @@ pub(crate) enum StudioRoute {
     /// reached from the identity dropdown, not the tab row — and renders
     /// an invitation to sign in rather than a 404 when nobody is.
     Account,
+    /// Where a shared device password lands (`/unlock#<device>&<password>`,
+    /// the Share sheet's QR): the page saves it in this browser and offers
+    /// Connect. The fragment is read and cleared at boot, before the router
+    /// writes the address (`unlock_page::capture_unlock_fragment`).
+    Unlock,
     /// **The** project address (`/p/<slug>-prj…`, identity vision
     /// D1/D9/D10): the editor as a lens on THE sim session running this
     /// project when the library has it, and the share link somebody else
@@ -381,6 +388,7 @@ impl StudioRoute {
             Some("projects") if segments.next().is_none() => StudioRoute::Projects,
             Some("explore") if segments.next().is_none() => StudioRoute::Explore,
             Some("account") if segments.next().is_none() => StudioRoute::Account,
+            Some("unlock") if segments.next().is_none() => StudioRoute::Unlock,
             Some("boards") => {
                 let rest: Vec<&str> = segments.collect();
                 if rest == ["edit"] {
@@ -445,6 +453,7 @@ impl StudioRoute {
             StudioRoute::Projects => "/projects".to_string(),
             StudioRoute::Explore => "/explore".to_string(),
             StudioRoute::Account => "/account".to_string(),
+            StudioRoute::Unlock => "/unlock".to_string(),
             StudioRoute::Project {
                 uid,
                 slug,
@@ -836,7 +845,11 @@ pub(crate) fn lens_route(view: &UiStudioView) -> Option<StudioRoute> {
     let on = match transport {
         lpa_studio_core::LinkTransport::Sim => Some(DeviceHint::Sim),
         lpa_studio_core::LinkTransport::Emu => Some(DeviceHint::Emu),
-        lpa_studio_core::LinkTransport::Serial => base_mac.clone().map(DeviceHint::Mac),
+        // A board is its base MAC whichever wire reaches it: over USB or
+        // over Bluetooth, `?on=mac:…` names the same device (M5).
+        lpa_studio_core::LinkTransport::Serial | lpa_studio_core::LinkTransport::Ble => {
+            base_mac.clone().map(DeviceHint::Mac)
+        }
     };
     // A TRANSIENT view session binds its example's bare address (examples
     // vision D2/D4) — checked BEFORE the loaded-project uid, which for a
@@ -1311,6 +1324,7 @@ mod tests {
             StudioRoute::Projects,
             StudioRoute::Explore,
             StudioRoute::Account,
+            StudioRoute::Unlock,
             StudioRoute::Project {
                 uid: share_uid(),
                 slug: Some("2026-07-09-1421-basic".to_string()),

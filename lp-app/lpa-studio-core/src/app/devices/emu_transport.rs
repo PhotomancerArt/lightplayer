@@ -43,18 +43,13 @@ use std::rc::Rc;
 
 use lpa_devices::link::LinkInfo;
 use lpa_link::providers::browser_serial_esp32_options::BrowserSerialEsp32Options;
-use lpc_model::AsLpPath;
 
 use super::device_transport::{
     DeviceEffectCall, DeviceEffectFacts, DeviceEffectProgress, DeviceTransport,
     DeviceTransportFuture, GrantedLink, LensLineTap,
 };
 use super::sim_record::uid_from_emu_endpoint;
-
-/// Where the board runtime manifest lives on a device — the same path the
-/// serial arm writes (`browser_transport.rs`), because it is the same
-/// firmware reading it at the same moment in its boot.
-const DEVICE_HARDWARE_MANIFEST_PATH: &str = "/hardware.json";
+use super::wire_conversation::{is_wire_conversation, run_wire_conversation};
 
 /// One emulated board, as the transport needs to know it.
 ///
@@ -304,14 +299,12 @@ impl DeviceTransport for EmuDeviceTransport {
         // Built before the future, like the sim's: an io is a borrow of the
         // wire, and a failure to take it is the effect's failure, not a
         // step inside it.
-        let io = match call {
-            DeviceEffectCall::PushProject { .. }
-            | DeviceEffectCall::RemoveProject { .. }
-            | DeviceEffectCall::WriteHardwareManifest { .. } => match control.client_io(None) {
+        let io = match is_wire_conversation(&call) {
+            true => match control.client_io(None) {
                 Ok(io) => Some(io),
                 Err(error) => return Box::pin(core::future::ready(Err(error))),
             },
-            _ => None,
+            false => None,
         };
         let manifest_url = match &call {
             DeviceEffectCall::FlashFirmware { build_id } => {
@@ -345,91 +338,13 @@ impl DeviceTransport for EmuDeviceTransport {
                         ..Default::default()
                     })
                 }
-                // The REAL write, not the sim's restart: this board has a
-                // filesystem and a loader that reads `/hardware.json` at
-                // boot, so the verb's promise ("effective next boot") is
-                // kept the way it is kept on silicon. The wait and the
-                // chunking are the serial arm's, for the serial arm's
-                // reasons — a board formatting its littlefs does not answer
-                // writes, and one big frame OOMs a decode.
-                DeviceEffectCall::WriteHardwareManifest { manifest_json } => {
+                // Manifest, push and removal are the REAL conversations, on
+                // the board's own wire — the same body a Bluetooth link runs
+                // (`wire_conversation.rs`), so a green push here means what
+                // it means on a board.
+                conversation => {
                     let io = io.ok_or_else(|| "the emu has no channel".to_string())?;
-                    let mut client = lpa_client::LpClient::new(io).on_borrowed_wire();
-                    let mut report = |label: String, percent: Option<u8>| progress(label, percent);
-                    lpa_client::wait_until_ready(
-                        &mut client,
-                        lpa_client::READY_ATTEMPTS,
-                        &mut report,
-                    )
-                    .await
-                    .map_err(|error| {
-                        format!("the board never became ready to write to: {error}")
-                    })?;
-                    lpa_client::write_file_in_chunks(
-                        &mut client,
-                        DEVICE_HARDWARE_MANIFEST_PATH.as_path(),
-                        manifest_json.as_bytes(),
-                        lpa_client::MANIFEST_CHUNK_BYTES,
-                        &mut report,
-                    )
-                    .await
-                    .map_err(|error| format!("device file write failed: {error}"))?;
-                    Ok(DeviceEffectFacts {
-                        summary: "board manifest written".to_string(),
-                        ..Default::default()
-                    })
-                }
-                // The push and the removal are the REAL conversations, on
-                // the board's own wire: `lpa-client`'s, the same functions
-                // the serial provider runs below its own seam. Nothing
-                // about the stop/write/load order or the hash check is
-                // special-cased, which is what makes a green push here mean
-                // the same thing it means on a board.
-                DeviceEffectCall::PushProject {
-                    files,
-                    expected_hash,
-                    fallback_storage_id,
-                } => {
-                    let io = io.ok_or_else(|| "the emu has no channel".to_string())?;
-                    let mut client = lpa_client::LpClient::new(io).on_borrowed_wire();
-                    let mut report = |label: String, percent: Option<u8>| progress(label, percent);
-                    let report = lpa_client::push_project(
-                        &mut client,
-                        &files,
-                        &expected_hash,
-                        &fallback_storage_id,
-                        &mut report,
-                    )
-                    .await
-                    .map_err(|error| error.to_string())?;
-                    Ok(DeviceEffectFacts {
-                        summary: format!("project sent to {}", report.storage_id),
-                        ..Default::default()
-                    })
-                }
-                DeviceEffectCall::RemoveProject {
-                    fallback_storage_id,
-                } => {
-                    let io = io.ok_or_else(|| "the emu has no channel".to_string())?;
-                    let mut client = lpa_client::LpClient::new(io).on_borrowed_wire();
-                    let mut report = |label: String, percent: Option<u8>| progress(label, percent);
-                    let report =
-                        lpa_client::remove_project(&mut client, &fallback_storage_id, &mut report)
-                            .await
-                            .map_err(|error| error.to_string())?;
-                    Ok(DeviceEffectFacts {
-                        summary: match report.was_loaded {
-                            true => format!("removed {}", report.storage_id),
-                            // Under-claim, as on a board: it had already
-                            // stopped reporting the project, so "removed"
-                            // would be a claim about something never seen.
-                            false => format!(
-                                "the board reported nothing loaded; cleared {}",
-                                report.storage_id
-                            ),
-                        },
-                        ..Default::default()
-                    })
+                    run_wire_conversation(io, conversation, progress).await
                 }
             }
         })

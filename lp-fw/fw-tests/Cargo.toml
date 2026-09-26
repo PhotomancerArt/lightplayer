@@ -35,6 +35,8 @@ env_logger = { workspace = true }
 serial_test = "3.0"
 tempfile = "3"
 lp-cli = { path = "../../lp-cli" }
+# The pattern-space emu test computes its expectations from the map document.
+lpc-mapping = { path = "../../lp-core/lpc-mapping" }
 
 [lints]
 workspace = true

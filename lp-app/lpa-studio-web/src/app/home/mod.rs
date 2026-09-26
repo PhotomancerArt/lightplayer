@@ -4,9 +4,20 @@
 //! cards they share. One combined gallery page lived here until the
 //! chrome C reorg split it.
 
+pub(crate) mod access_added_toast;
+pub(crate) mod access_entry_row;
+pub(crate) mod access_fields;
+pub(crate) mod access_settings_section;
+pub(crate) mod access_ui_context;
+#[cfg(feature = "stories")]
+pub(crate) mod ble_access_stories;
+pub(crate) mod ble_reach;
 pub(crate) mod brand_hero;
+pub(crate) mod browser_identity;
 pub(crate) mod card_footer;
 pub(crate) mod card_thumb;
+pub(crate) mod connections_group;
+pub(crate) mod device_access_panel;
 pub(crate) mod device_pick_popover;
 pub(crate) mod device_roster_card;
 pub(crate) mod device_terminal;
@@ -36,6 +47,9 @@ pub mod project_opening_frame;
 #[cfg(feature = "stories")]
 pub(crate) mod project_opening_frame_stories;
 pub mod projects_page;
+pub(crate) mod reach_note;
+pub(crate) mod share_access_sheet;
+pub(crate) mod share_words;
 pub(crate) mod target_pick_popover;
 /// Poster capture is the wasm thumb path; host builds of this crate render
 /// no live preview at all and only run the cache's unit tests.
@@ -47,6 +61,9 @@ pub(crate) mod target_pick_popover;
     )
 )]
 pub(crate) mod thumb_poster;
+pub(crate) mod unlock_link;
+pub(crate) mod unlock_page;
+pub(crate) mod unlock_sheet;
 
 pub use devices_page::DevicesPage;
 pub use explore_page::ExplorePage;

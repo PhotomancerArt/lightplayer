@@ -55,4 +55,13 @@ ser-write-json = { version = "0.3", optional = true, default-features = false, f
 
 [features]
 default = []
+# JSON Pack (plan `lp-json-pack`): write replies as packed frames on a link
+# whose host opted in (`ClientRequest::SetEncoding`). Without it the board
+# answers every opt-in "json". On by default in all three chip crates (Q4).
+json-pack = ["server"]
 server = ["dep:littlefs-rust", "dep:lp-recovery", "dep:lpa-server", "dep:lpc-model", "dep:lpc-wire", "dep:lpfs", "dep:ser-write-json"]
+
+[dev-dependencies]
+# Host tests of the link mux run embassy-sync channels, whose
+# `CriticalSectionRawMutex` needs an implementation on the host.
+critical-section = { workspace = true, features = ["std"] }

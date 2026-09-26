@@ -42,8 +42,9 @@ pub use pattern_project::{
     PATTERN_EXPORT_FOLDER, pattern_project_files_1d, pattern_project_files_2d,
 };
 pub use playlist::{
-    PlaylistDef, PlaylistDefView, PlaylistEntry, PlaylistEntryView, PlaylistState,
-    PlaylistStateView,
+    PLAYLIST_CYCLE_SHAPE_NAME, PlaylistCycle, PlaylistDef, PlaylistDefView, PlaylistEntry,
+    PlaylistEntryView, PlaylistState, PlaylistStateView, format_playlist_failure_status,
+    parse_playlist_failed_entries, playlist_cycle_lp_type,
 };
 pub use power_button::{
     PowerButtonDef, PowerButtonDefView, PowerButtonMode, PowerButtonState, PowerButtonStateView,
@@ -53,11 +54,11 @@ pub use provenance_def::ProvenanceDef;
 pub use radio::{ControlRadioDef, ControlRadioDefView, ControlRadioState, ControlRadioStateView};
 pub use shader::{
     ComputeShaderDef, ComputeShaderDefView, FloatMode, ScalarHint, ScalarHintView, ShaderBudget,
-    ShaderBudgetError, ShaderDef, ShaderDefView, ShaderHeaderGenError, ShaderMapKeyDef,
-    ShaderParamDef, ShaderParamDefView, ShaderSlotDef, ShaderSlotKind, ShaderSlotMappingDef,
-    ShaderSlotMappingKind, ShaderSpace, ShaderState, ShaderStateView, ShaderValueShapeRef,
-    SpaceAnswer1, SpaceAnswer2, generate_compute_shader_header, glsl_type_for_lp_type,
-    shader_panel_step, slot_bytes_estimate, validate_shader_slot_budget,
+    ShaderBudgetError, ShaderCoords, ShaderDef, ShaderDefView, ShaderHeaderGenError,
+    ShaderMapKeyDef, ShaderParamDef, ShaderParamDefView, ShaderSlotDef, ShaderSlotKind,
+    ShaderSlotMappingDef, ShaderSlotMappingKind, ShaderSpace, ShaderState, ShaderStateView,
+    ShaderValueShapeRef, SpaceAnswer1, SpaceAnswer2, generate_compute_shader_header,
+    glsl_type_for_lp_type, shader_panel_step, slot_bytes_estimate, validate_shader_slot_budget,
 };
 pub use starter::{
     NodeStarter, STARTER_SHADER_GLSL, STARTER_STEM_PLACEHOLDER, node_def_asset_refs,

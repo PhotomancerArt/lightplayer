@@ -151,6 +151,7 @@ mod tests {
                 model: Some("claude-sonnet-5".to_string()),
                 ..AgentSettings::default()
             },
+            ..StudioSettings::default()
         };
         let json = settings.to_json_string();
         assert!(!json.contains("anthropic_api_key"));

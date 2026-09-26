@@ -35,10 +35,10 @@ pub mod shader_abi;
 
 pub use engine::error::Error;
 pub use engine::{
-    ButtonService, Engine, EngineError, EngineProjectReadSource, EngineServices, FaultPresentation,
-    FrameNum, FrameTime, OutputFlushError, PowerError, PowerOffRequest, PowerService,
-    PowerWakeLevel, ProjectFault, ProjectLoadError, ProjectLoader, ProjectReadEventStreamError,
-    RadioService, RuntimeApplyResult,
+    ButtonService, Engine, EngineError, EngineProjectReadSource, EngineServices,
+    EntryResidencyEvent, FaultPresentation, FrameNum, FrameTime, OutputFlushError, PowerError,
+    PowerOffRequest, PowerService, PowerWakeLevel, ProjectFault, ProjectLoadError, ProjectLoader,
+    ProjectReadEventStreamError, RadioService, ResidencyApplied, RuntimeApplyResult,
 };
 pub use features::supported_features;
 // Graphics seam re-exports: the traits/handles live in `lp-gfx`; the
@@ -46,5 +46,5 @@ pub use features::supported_features;
 // by hosts, injected via `Engine::set_graphics`). `ShaderFrontend` is the
 // host's explicit GLSL-frontend product decision, passed when constructing
 // the backend.
-pub use lp_gfx::{GfxError, LpGraphics, LpShader, ShaderCompileOptions};
+pub use lp_gfx::{GfxError, LatentReadBackSource, LpGraphics, LpShader, ShaderCompileOptions};
 pub use lp_shader::ShaderFrontend;

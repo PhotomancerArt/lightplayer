@@ -481,6 +481,7 @@ impl SettingsStore {
                 price_input_override: self.user.agent.price_input_per_mtok.map(format_rate),
                 price_output_override: self.user.agent.price_output_per_mtok.map(format_rate),
             },
+            devices: crate::app::settings::UiDeviceSettingsView::default(),
         }
     }
 }

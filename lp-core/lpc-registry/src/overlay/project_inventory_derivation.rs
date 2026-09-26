@@ -7,20 +7,27 @@ use alloc::vec::Vec;
 use lpc_model::{
     ArtifactLocation, AssetBodyOrigin, AssetBodyOverlay, AssetContentType, AssetEntry,
     AssetLocation, AssetState, NodeDefEntry, NodeDefLocation, NodeDefState, NodeInvocation,
-    NodeUseLocation, ProjectInventory, ProjectNode, ProjectNodeOrigin, ProjectOverlay,
-    ReferencedAsset, Revision, WithRevision, resolve_artifact_specifier,
+    NodeUseLocation, ProjectInventory, ProjectNode, ProjectNodeOrigin, ProjectNodePlacement,
+    ProjectOverlay, ReferencedAsset, Revision, WithRevision, resolve_artifact_specifier,
 };
 use lpfs::{LpFs, LpPath};
 
 use crate::{
-    ArtifactError, ArtifactReadFailure, ArtifactStore, ParseCtx,
+    ArtifactError, ArtifactReadFailure, ArtifactStore, EntryResidency, ParseCtx,
     overlay::{EditApplyError, apply_slot_overlay_to_def, parse_def_bytes},
 };
 
+/// Walk the effective project from `root` into a fresh inventory.
+///
+/// A playlist entry that `residency` reports dormant is not walked at all: its
+/// ref is not resolved or registered, its def is not parsed, and it
+/// contributes no tree node, def, or asset row. See
+/// [`crate::registry::entry_residency`].
 pub(crate) fn derive_effective_inventory(
     artifacts: &mut ArtifactStore,
     root: Option<&NodeDefLocation>,
     overlay: &WithRevision<ProjectOverlay>,
+    residency: &EntryResidency,
     fs: &dyn LpFs,
     frame: Revision,
     ctx: &ParseCtx<'_>,
@@ -28,6 +35,7 @@ pub(crate) fn derive_effective_inventory(
     let mut derivation = InventoryDerivation {
         artifacts,
         overlay,
+        residency,
         fs,
         frame,
         ctx,
@@ -52,6 +60,7 @@ pub(crate) fn derive_effective_inventory(
 struct InventoryDerivation<'a, 'ctx> {
     artifacts: &'a mut ArtifactStore,
     overlay: &'a WithRevision<ProjectOverlay>,
+    residency: &'a EntryResidency,
     fs: &'a dyn LpFs,
     frame: Revision,
     ctx: &'a ParseCtx<'ctx>,
@@ -135,10 +144,24 @@ impl InventoryDerivation<'_, '_> {
             }
         }
 
+        // A playlist's dormant entries stop here (PD1). The playlist def is
+        // this `def`, visited before its invocation sites, so the default
+        // resident set (`idle_entry` only) is read from it.
+        let idle_entry = def
+            .as_playlist()
+            .map(|playlist| playlist.effective_idle_entry());
+
         for site in def.invocation_sites() {
             match &site.invocation {
                 NodeInvocation::Unset => {}
                 NodeInvocation::Ref(_) => {
+                    if let (ProjectNodePlacement::PlaylistEntry { entry, .. }, Some(idle_entry)) =
+                        (&site.role, idle_entry)
+                    {
+                        if !self.residency.is_resident(key, *entry, idle_entry) {
+                            continue;
+                        }
+                    }
                     let child_location = self.resolve_ref_invocation(
                         location.artifact.file_path().as_path(),
                         &site.invocation,

@@ -1,8 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use lpc_model::{
-    NodeId, PlaylistDef, Revision, SlotData, SlotShapeLookup, SlotShapeView, TreePath,
-};
+use lpc_model::{NodeId, PlaylistDef, SlotData, SlotShapeLookup, SlotShapeView, TreePath};
 use lpc_view::{ProjectView, SlotMirrorView, TreeEntryView};
 use lpc_wire::{NodeRuntimeStatus, WireEntryState};
 
@@ -66,10 +64,6 @@ pub struct NodeController {
     label: String,
     kind: String,
     status: ProjectNodeStatusView,
-    /// The engine frame the status last changed at (`TreeEntryView::
-    /// change_frame`, retained so "status newer than my apply" is an exact
-    /// Revision test — the agent bridge's engine-verdict wait keys on it).
-    status_frame: Revision,
     issues: Vec<String>,
     state: NodeControllerState,
     children: Vec<NodeController>,
@@ -91,7 +85,6 @@ impl NodeController {
             label: String::new(),
             kind: String::new(),
             status: ProjectNodeStatusView::new("Unknown", None, ProjectNodeStatusTone::Neutral),
-            status_frame: Revision::new(0),
             issues: Vec::new(),
             state: NodeControllerState::new(),
             children: Vec::new(),
@@ -134,11 +127,6 @@ impl NodeController {
     /// Current node status.
     pub fn status(&self) -> &ProjectNodeStatusView {
         &self.status
-    }
-
-    /// The engine frame [`Self::status`] last changed at.
-    pub fn status_frame(&self) -> Revision {
-        self.status_frame
     }
 
     /// Mirror/application issues attached to this node controller.
@@ -386,7 +374,6 @@ impl NodeController {
         self.label = node_label(entry);
         self.kind = node_kind_label(&entry.path);
         self.status = node_status_view(entry);
-        self.status_frame = entry.change_frame;
         self.issues.clear();
         self.parent = parent_address(entry, view, &mut self.issues);
 
@@ -599,7 +586,11 @@ impl NodeController {
                     UiProductTrackingState::Paused
                 } else {
                     base_tracking
-                }
+                };
+                // Not live → the way to make it live is to select this
+                // node: a device lens streams the selected node only.
+                product.show_live = (product.tracking != UiProductTrackingState::Tracking)
+                    .then(|| node_focus_action(self));
             }
             sections.push(UiNodeSection::ProducedProducts(products));
         }
@@ -1182,7 +1173,11 @@ fn node_status_view(entry: &TreeEntryView) -> ProjectNodeStatusView {
     }
 }
 
-fn human_label(raw: &str) -> String {
+/// A node name as Studio labels its card: `noise_soft` → `Noise soft`.
+/// Node names cannot carry spaces or dashes, so this is also how a playlist
+/// entry's authored `name` reads in the Play-mode Pattern instrument
+/// (multi-pattern vision Q9: a display name, never the folder key).
+pub(in crate::app::project) fn human_label(raw: &str) -> String {
     let normalized = raw.replace(['_', '-'], " ");
     let mut chars = normalized.chars();
     let Some(first) = chars.next() else {

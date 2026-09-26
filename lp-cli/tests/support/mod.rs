@@ -20,6 +20,10 @@ use tungstenite::{Message, WebSocket};
 /// is slow, and a flake in a socket test costs more than a slow one.
 pub const NET: Duration = Duration::from_secs(60);
 
+/// The request id [`Serve::hello`] asks with. Any non-zero id: 0 is the
+/// board's own unsolicited frames.
+const HELLO_REQUEST_ID: u64 = 7;
+
 /// How long to keep asking `/boards` or `state` before giving up on an
 /// outcome that has not appeared.
 const POLL: Duration = Duration::from_millis(100);
@@ -77,8 +81,22 @@ impl Serve {
     /// Start a server from whole `--board` specs, so a test can ask for a
     /// `kind=` other than the default (plan two M5's `kind=rom-up`).
     pub fn start_specs(specs: &[String], extra: &[&str], dir: PathBuf) -> Serve {
+        Serve::start_specs_with_env(specs, extra, dir, &[])
+    }
+
+    /// [`Serve::start_specs`] with extra environment for the server (the
+    /// wire tap's `LP_EMU_WIRE_TAP`).
+    pub fn start_specs_with_env(
+        specs: &[String],
+        extra: &[&str],
+        dir: PathBuf,
+        env: &[(&str, &Path)],
+    ) -> Serve {
         std::fs::create_dir_all(&dir).expect("the scratch dir");
         let mut command = Command::new(env!("CARGO_BIN_EXE_lp-cli"));
+        for (key, value) in env {
+            command.env(key, value);
+        }
         command.args(["emu", "serve", "--listen", "127.0.0.1:0"]);
         for spec in specs {
             command.arg("--board");
@@ -212,23 +230,68 @@ impl Serve {
         Control(self.try_control(id).expect("the control endpoint accepted"))
     }
 
-    /// The board's hello, read off a fresh byte client. The board says one
-    /// periodically, so this is "wait for the next one" rather than "wait
-    /// for the first" — which is also what a browser does.
+    /// The board's hello, asked for on a fresh byte client — which is what a
+    /// browser and `lp-cli` do: open the port, send `ClientRequest::Hello`,
+    /// read the answer.
+    ///
+    /// Asked, not waited for. The board's own unsolicited hello is its first
+    /// frame after boot, and a port nobody had open when it was written
+    /// dropped it, as a board on a desk does
+    /// (`docs/defects/2026-09-23-emulated-usb-port-drains-with-no-client-attached.md`).
+    /// The request is repeated on a short wall cadence until one is answered:
+    /// the firmware may still be latched "not draining" for the instant after
+    /// the open, and drops what it writes until its probe gets through. The
+    /// cadence is a retry, never an assertion.
     ///
     /// A frame boundary is not a line boundary: a WebSocket frame carries
     /// whatever the link had ready, so this waits for a **whole** line —
     /// a `\n` after the `"hello"` — rather than for the first frame the word
     /// appears in.
     pub fn hello(&self, id: &str) -> String {
+        const ASK_AGAIN: Duration = Duration::from_secs(2);
         let mut bytes = self.bytes(id);
-        let text = read_until(&mut bytes, |text| {
+        bytes
+            .get_mut()
+            .set_read_timeout(Some(ASK_AGAIN))
+            .expect("a read timeout");
+        let request = lpc_wire::json::to_serial_line(&lpc_wire::ClientMessage {
+            id: HELLO_REQUEST_ID,
+            msg: lpc_wire::ClientRequest::Hello,
+        })
+        .expect("a hello frames");
+        let answered = |text: &str| {
             text.match_indices("\"hello\"")
                 .any(|(at, _)| text[at..].contains('\n'))
-        });
+        };
+
+        let deadline = Instant::now() + NET;
+        let mut text = String::new();
+        while Instant::now() < deadline && !answered(&text) {
+            bytes
+                .send(Message::Binary(request.clone().into_bytes()))
+                .expect("writing the hello request");
+            let asked = Instant::now();
+            while Instant::now() < asked + ASK_AGAIN && !answered(&text) {
+                match bytes.read() {
+                    Ok(Message::Binary(more)) => text.push_str(&String::from_utf8_lossy(&more)),
+                    Ok(Message::Text(more)) => text.push_str(&more),
+                    Ok(Message::Ping(_) | Message::Pong(_) | Message::Frame(_)) => {}
+                    Ok(Message::Close(_)) => panic!("the byte endpoint closed:\n{}", tail(&text)),
+                    Err(tungstenite::Error::Io(e))
+                        if matches!(
+                            e.kind(),
+                            std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
+                        ) =>
+                    {
+                        break;
+                    }
+                    Err(e) => panic!("reading the byte endpoint: {e}\n{}", tail(&text)),
+                }
+            }
+        }
         text.lines()
             .find(|line| line.contains("\"hello\""))
-            .unwrap_or_default()
+            .unwrap_or_else(|| panic!("the board never answered a hello:\n{}", tail(&text)))
             .to_string()
     }
 
@@ -261,6 +324,23 @@ impl Serve {
             std::thread::sleep(POLL);
         }
         panic!("`state` never reported `{needle}`; last was: {last}");
+    }
+
+    /// Ask `state` until the board's own clock — the reply's `us=`, guest
+    /// microseconds since power-on — has reached `at_least`, then hand the
+    /// reply back. Emulated time, not the host's: the wall net only ends a
+    /// run that never gets there.
+    pub fn wait_for_guest_micros(&self, control: &mut Control, at_least: u64) -> String {
+        let deadline = Instant::now() + NET;
+        let mut last = String::new();
+        while Instant::now() < deadline {
+            last = control.cmd("state");
+            if state_field(&last, "us").is_some_and(|now| now >= at_least) {
+                return last;
+            }
+            std::thread::sleep(POLL);
+        }
+        panic!("the board's clock never reached {at_least} us; last `state` was: {last}");
     }
 
     pub fn wait_for_reboot(&self, id: &str, at_least: u64) {
@@ -335,6 +415,15 @@ impl Control {
         }
         panic!("no reply to `{line}` within the wall net")
     }
+}
+
+/// A numeric `key=<n>` field of a control reply (`state`'s `us=`,
+/// `in_pending=`, …), or `None` if the reply has no such field.
+pub fn state_field(reply: &str, key: &str) -> Option<u64> {
+    reply
+        .split_whitespace()
+        .find_map(|word| word.strip_prefix(key)?.strip_prefix('='))
+        .and_then(|value| value.parse().ok())
 }
 
 /// Read frames off a byte client until `done` says the text so far is

@@ -8,7 +8,12 @@ use support::{RegistryScenario, artifact_asset, root_def};
 
 #[test]
 fn fyeah_sign_graph_contains_project_children_playlist_entries_and_asset_consumers() {
-    let (scenario, _) = RegistryScenario::load_fixture("fyeah-sign");
+    let (mut scenario, _) = RegistryScenario::load_fixture("fyeah-sign");
+    // Only the idle entry is resident at load; load the blast entry so the
+    // graph covers both playlist entries.
+    scenario
+        .set_entry_resident("playlist", 2, true)
+        .expect("blast becomes resident");
     let graph = &scenario.registry().inventory().tree;
 
     let root = NodeUseLocation::root();
@@ -172,7 +177,7 @@ fn load_inline_project(
     let shapes = lpc_model::SlotShapeRegistry::default();
     let ctx = ParseCtx { shapes: &shapes };
     let mut fs = LpFsMemory::new();
-    fs.write_file_mut(LpPath::new("/project.json"), b"{\n  \"format\": 10\n}\n")
+    fs.write_file_mut(LpPath::new("/project.json"), b"{\n  \"format\": 11\n}\n")
         .unwrap();
     fs.write_file_mut(LpPath::new("/module.json"), project.as_bytes())
         .unwrap();

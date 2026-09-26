@@ -1,4 +1,5 @@
-//! Byte-counting `SerWrite` sink over the wire serializer.
+//! The wire serializer's sinks: the byte counter, and [`ser_wire_to`], which
+//! writes a message as JSON or packed.
 //!
 //! ESP32 writes outbound messages with the vendored `ser-write-json` crate
 //! (`ryu-js` float formatting), not `serde_json` (`ryu`). Those two serializers
@@ -14,9 +15,14 @@
 //! the `ser-write-json` feature) so the shared frame batcher can budget against
 //! the same serializer that actually writes the bytes.
 
+use lp_json_pack::PackError;
 use ser_write_json::SerWrite;
 use ser_write_json::ser::to_writer;
+use ser_write_json::ser_write::{SliceWriter, Token};
 use serde::Serialize;
+
+use crate::pack_sink::PackSink;
+use crate::wire_encoding::WireEncoding;
 
 /// Error from a type-erased wire serialization.
 ///
@@ -38,6 +44,8 @@ impl core::fmt::Display for ErasedWriteError {
 /// is a single type regardless of the underlying writer.
 trait DynSink {
     fn write_all(&mut self, buf: &[u8]) -> Result<(), ErasedWriteError>;
+    /// Forward one structural token; `Ok(false)` means "write the text".
+    fn token(&mut self, token: Token<'_>) -> Result<bool, ErasedWriteError>;
 }
 
 /// Adapts any [`SerWrite`] into a [`DynSink`]. This *is* generic, but it
@@ -49,11 +57,18 @@ impl<W: SerWrite> DynSink for SinkOf<'_, W> {
     fn write_all(&mut self, buf: &[u8]) -> Result<(), ErasedWriteError> {
         self.0.write(buf).map_err(|_| ErasedWriteError)
     }
+
+    fn token(&mut self, token: Token<'_>) -> Result<bool, ErasedWriteError> {
+        self.0.token(token).map_err(|_| ErasedWriteError)
+    }
 }
 
 /// The single [`SerWrite`] type the JSON serializer is ever instantiated over.
 struct ErasedSerWrite<'a> {
     sink: &'a mut dyn DynSink,
+    /// The sink's [`SerWrite::TAKES_TOKENS`], read once: a text sink then
+    /// pays one branch per token instead of a virtual call.
+    takes_tokens: bool,
 }
 
 impl SerWrite for ErasedSerWrite<'_> {
@@ -61,6 +76,14 @@ impl SerWrite for ErasedSerWrite<'_> {
 
     fn write(&mut self, buf: &[u8]) -> Result<(), Self::Error> {
         self.sink.write_all(buf)
+    }
+
+    #[inline]
+    fn token(&mut self, token: Token<'_>) -> Result<bool, Self::Error> {
+        if !self.takes_tokens {
+            return Ok(false);
+        }
+        self.sink.token(token)
     }
 }
 
@@ -78,13 +101,71 @@ impl SerWrite for ErasedSerWrite<'_> {
 ///
 /// The cost is one virtual call per write op. The serializer writes slices
 /// rather than single bytes, so this is not measurable on the streaming path.
+///
+/// A sink with [`SerWrite::TAKES_TOKENS`] also receives the serializer's
+/// structural tokens (see `ser_write::Token`) and writes no text for the ones
+/// it takes; every other sink gets exactly the JSON text.
 pub fn ser_write_json_to<W: SerWrite, T: Serialize + ?Sized>(
     sink: &mut W,
     value: &T,
 ) -> Result<(), ErasedWriteError> {
     let mut adapter = SinkOf(sink);
-    let mut erased = ErasedSerWrite { sink: &mut adapter };
+    let mut erased = ErasedSerWrite {
+        sink: &mut adapter,
+        takes_tokens: W::TAKES_TOKENS,
+    };
     to_writer(&mut erased, value).map_err(|_| ErasedWriteError)
+}
+
+/// Why [`ser_wire_to`] wrote nothing usable.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WireWriteError {
+    /// The buffer is too small for the message in this encoding.
+    Full,
+    /// Packed only: the message holds text (a `RawValue`) that the packed form
+    /// cannot reproduce byte for byte, or the value failed to serialize. Send
+    /// it as JSON.
+    Unpackable,
+}
+
+impl core::fmt::Display for WireWriteError {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.write_str(match self {
+            Self::Full => "wire message does not fit the buffer",
+            Self::Unpackable => "wire message cannot be packed; send it as JSON",
+        })
+    }
+}
+
+/// Write `value` into `buf` in `encoding`, and return the bytes written.
+///
+/// [`WireEncoding::Json`] writes exactly the `M!` line's JSON text;
+/// [`WireEncoding::Packed`] writes one JSON Pack frame's payload (unframed:
+/// the transport adds `0x00 'P' COBS … 0x00`) that decodes back to that same
+/// text. Both go through [`ser_write_json_to`], so each wire type still has
+/// one serializer instantiation.
+pub fn ser_wire_to<T: Serialize + ?Sized>(
+    buf: &mut [u8],
+    encoding: WireEncoding,
+    value: &T,
+) -> Result<usize, WireWriteError> {
+    match encoding {
+        WireEncoding::Json => {
+            let mut writer = SliceWriter::new(buf);
+            // The slice writer's one failure mode is a full buffer.
+            ser_write_json_to(&mut writer, value).map_err(|_| WireWriteError::Full)?;
+            Ok(writer.len())
+        }
+        WireEncoding::Packed => {
+            let mut sink = PackSink::new(buf);
+            let serialized = ser_write_json_to(&mut sink, value);
+            match (sink.finish(), serialized) {
+                (Ok(n), Ok(())) => Ok(n),
+                (Err(PackError::Full), _) => Err(WireWriteError::Full),
+                _ => Err(WireWriteError::Unpackable),
+            }
+        }
+    }
 }
 
 /// A [`SerWrite`] sink that discards output and counts bytes.
@@ -152,6 +233,56 @@ pub fn ser_write_json_len<T: Serialize>(value: &T) -> usize {
     }
 }
 
+/// A 64-bit FNV-1a hash of `value`'s wire encoding, without allocating it.
+///
+/// For content comparison of wire payloads the engine answers repeatedly —
+/// "is this the same structure I answered last time?" — where keeping the
+/// previous answer around to compare against would cost heap on a device.
+/// It hashes exactly the bytes the firmware would write, through the same
+/// erased serializer instantiation as the real write (see
+/// [`ser_write_json_to`]), so a payload type that is written anyway costs no
+/// second serializer.
+///
+/// Not a security boundary: FNV is a non-cryptographic hash, and a collision
+/// (2^-64 per comparison) reads as "unchanged".
+#[must_use]
+pub fn ser_write_json_fnv64<T: Serialize>(value: &T) -> u64 {
+    let mut hasher = Fnv64SerWrite::new();
+    // As in `ser_write_json_len`: the sink is infallible and wire types do not
+    // fail to serialize. A future one that does hashes its prefix, which is
+    // still deterministic.
+    let _ = ser_write_json_to(&mut hasher, value);
+    hasher.hash
+}
+
+/// A [`SerWrite`] sink folding every byte into a 64-bit FNV-1a hash.
+struct Fnv64SerWrite {
+    hash: u64,
+}
+
+impl Fnv64SerWrite {
+    const OFFSET_BASIS: u64 = 0xcbf2_9ce4_8422_2325;
+    const PRIME: u64 = 0x0000_0100_0000_01b3;
+
+    const fn new() -> Self {
+        Self {
+            hash: Self::OFFSET_BASIS,
+        }
+    }
+}
+
+impl SerWrite for Fnv64SerWrite {
+    type Error = core::convert::Infallible;
+
+    fn write(&mut self, buf: &[u8]) -> Result<(), Self::Error> {
+        for byte in buf {
+            self.hash ^= u64::from(*byte);
+            self.hash = self.hash.wrapping_mul(Self::PRIME);
+        }
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -170,6 +301,24 @@ mod tests {
         counter.write(b" world").unwrap();
         assert_eq!(counter.len(), 11);
         assert!(!counter.is_empty());
+    }
+
+    #[test]
+    fn fnv64_hashes_the_wire_bytes() {
+        // FNV-1a 64 of the encoding `"a"` (three bytes: quote, a, quote),
+        // checked against the reference algorithm by hand.
+        let mut reference = Fnv64SerWrite::new();
+        reference.write(b"\"a\"").unwrap();
+        assert_eq!(ser_write_json_fnv64(&"a"), reference.hash);
+        // The empty input is the offset basis — the published vector.
+        assert_eq!(Fnv64SerWrite::new().hash, 0xcbf2_9ce4_8422_2325);
+        let mut a = Fnv64SerWrite::new();
+        a.write(b"a").unwrap();
+        assert_eq!(
+            a.hash, 0xaf63_dc4c_8601_ec8c,
+            "published FNV-1a 64 vector for \"a\""
+        );
+        assert_ne!(ser_write_json_fnv64(&1_u32), ser_write_json_fnv64(&2_u32));
     }
 
     #[test]
@@ -312,32 +461,35 @@ mod cross_serializer_tests {
                     revision: Revision::new(18),
                     extent: ControlExtent::new(1, 30),
                     sample_format: crate::project::WireChannelSampleFormat::U16,
-                    sample_layout: ControlSampleLayout {
-                        spans: Vec::from([ControlSampleSpan {
-                            row: 0,
-                            start: 0,
-                            len: 30,
-                            encoding: ControlSampleEncoding::RgbPixels {
-                                count: 10,
-                                color_order: ColorOrder::Rgb,
-                            },
-                        }]),
-                    },
-                    display_layout: crate::ControlDisplayLayoutProbeResult::Layout(
-                        ControlDisplayLayout::Layout2d(ControlLayout2d::new(
-                            Revision::new(18),
-                            10,
-                            10,
-                            (0..10)
-                                .map(|index| ControlLamp2d {
-                                    lamp_index: index,
-                                    sample_start: index * 3,
-                                    center: [index as f32 / 16.0, index as f32 / 15.0],
-                                    radius: if index < 5 { 1.0 } else { 0.02 },
-                                })
-                                .collect(),
-                        )),
-                    ),
+                    geometry: crate::RevisionGateResult::Changed(crate::ControlProductGeometry {
+                        revision: Revision::new(18),
+                        sample_layout: ControlSampleLayout {
+                            spans: Vec::from([ControlSampleSpan {
+                                row: 0,
+                                start: 0,
+                                len: 30,
+                                encoding: ControlSampleEncoding::RgbPixels {
+                                    count: 10,
+                                    color_order: ColorOrder::Rgb,
+                                },
+                            }]),
+                        },
+                        display_layout: crate::GeometryDisplayLayout::Layout(
+                            ControlDisplayLayout::Layout2d(ControlLayout2d::new(
+                                Revision::new(18),
+                                10,
+                                10,
+                                (0..10)
+                                    .map(|index| ControlLamp2d {
+                                        lamp_index: index,
+                                        sample_start: index * 3,
+                                        center: [index as f32 / 16.0, index as f32 / 15.0],
+                                        radius: if index < 5 { 1.0 } else { 0.02 },
+                                    })
+                                    .collect(),
+                            )),
+                        ),
+                    }),
                     bytes: vec![0u8; 30 * 2],
                 },
             )),
@@ -454,6 +606,142 @@ mod cross_serializer_tests {
             delta < crate::PROJECT_READ_FRAME_SERIAL_MARGIN_BYTES,
             "serde_json vs ser-write-json delta {delta} exceeded serial margin {}",
             crate::PROJECT_READ_FRAME_SERIAL_MARGIN_BYTES,
+        );
+    }
+}
+
+/// The token hook through the erased writer, and JSON byte-identity over
+/// recorded traffic.
+#[cfg(test)]
+mod token_hook_tests {
+    use super::ser_write_json_to;
+    use crate::project::{WireRuntimeBufferMetadataPayload, WireRuntimeBufferPayload};
+    use crate::test_traffic::{TrafficDirection, traffic_lines};
+    use crate::{ClientMessage, WireServerMessage};
+    use alloc::format;
+    use alloc::string::String;
+    use alloc::vec;
+    use alloc::vec::Vec;
+    use lpc_model::{ResourceRef, Revision, RuntimeBufferId};
+    use ser_write_json::SerWrite;
+    use ser_write_json::ser_write::Token;
+
+    /// A sink that takes every token (`take`) or declines every one, and
+    /// records both.
+    struct TokenLog {
+        take: bool,
+        tokens: Vec<String>,
+        text: Vec<u8>,
+    }
+
+    impl SerWrite for TokenLog {
+        type Error = core::convert::Infallible;
+        const TAKES_TOKENS: bool = true;
+
+        fn write(&mut self, buf: &[u8]) -> Result<(), Self::Error> {
+            self.text.extend_from_slice(buf);
+            Ok(())
+        }
+
+        fn token(&mut self, token: Token<'_>) -> Result<bool, Self::Error> {
+            if self.take {
+                self.tokens.push(format!("{token:?}"));
+            }
+            Ok(self.take)
+        }
+    }
+
+    fn payload() -> WireRuntimeBufferPayload {
+        WireRuntimeBufferPayload {
+            resource_ref: ResourceRef::runtime_buffer(RuntimeBufferId::new(3)),
+            revision: Revision::new(2),
+            metadata: WireRuntimeBufferMetadataPayload::Raw,
+            bytes: vec![1, 2, 3],
+        }
+    }
+
+    #[test]
+    fn recorded_traffic_reserializes_byte_for_byte() {
+        let mut lines = 0;
+        for line in traffic_lines() {
+            let mut out = Vec::new();
+            match line.direction {
+                TrafficDirection::BoardToHost => {
+                    let msg: WireServerMessage = crate::json::from_str(line.json).unwrap();
+                    ser_write_json_to(&mut out, &msg).unwrap();
+                }
+                TrafficDirection::HostToBoard => {
+                    let msg: ClientMessage = crate::json::from_str(line.json).unwrap();
+                    ser_write_json_to(&mut out, &msg).unwrap();
+                }
+            }
+            assert_eq!(
+                core::str::from_utf8(&out).unwrap(),
+                line.json,
+                "line {}",
+                line.index
+            );
+            lines += 1;
+        }
+        assert!(
+            lines > 100,
+            "the fixture holds the recorded lines ({lines})"
+        );
+    }
+
+    #[test]
+    fn a_token_sink_behind_the_erased_writer_gets_tokens_and_a_blob() {
+        let mut log = TokenLog {
+            take: true,
+            tokens: Vec::new(),
+            text: Vec::new(),
+        };
+        ser_write_json_to(&mut log, &payload()).unwrap();
+        assert!(
+            log.text.is_empty(),
+            "no text reaches a sink that takes tokens"
+        );
+        let expected = [
+            "MapBegin",
+            "Key(\"ref\")",
+            "Separator",
+            "MapBegin",
+            "Key(\"domain\")",
+            "Separator",
+            "Str(\"runtime_buffer\")",
+            "Separator",
+            "Key(\"id\")",
+            "Separator",
+            "U64(3)",
+            "MapEnd",
+            "Separator",
+            "Key(\"revision\")",
+            "Separator",
+            "I64(2)",
+            "Separator",
+            "Key(\"metadata\")",
+            "Separator",
+            "Str(\"raw\")",
+            "Separator",
+            "Key(\"bytes\")",
+            "Separator",
+            "Blob([1, 2, 3])",
+            "MapEnd",
+        ];
+        assert_eq!(log.tokens, expected);
+    }
+
+    #[test]
+    fn a_token_sink_that_declines_gets_the_json_text() {
+        let mut log = TokenLog {
+            take: false,
+            tokens: Vec::new(),
+            text: Vec::new(),
+        };
+        ser_write_json_to(&mut log, &payload()).unwrap();
+        assert_eq!(
+            core::str::from_utf8(&log.text).unwrap(),
+            r#"{"ref":{"domain":"runtime_buffer","id":3},"revision":2,"metadata":"raw","bytes":"AQID"}"#
         );
     }
 }

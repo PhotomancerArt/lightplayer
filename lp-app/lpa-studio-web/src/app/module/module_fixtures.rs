@@ -44,6 +44,11 @@ pub(crate) const FIRE_SCOPE: &str = "/aurora.module/fire.module";
 pub(crate) const NOISE_PARTY_SCOPE: &str = "/aurora.module/noise_party.module";
 pub(crate) const RIPPLE_SCOPE: &str = "/aurora.module/ripple_interference_cascade.module";
 pub(crate) const COMMON_SCOPE: &str = "/aurora.module/common.module";
+/// The Pattern instrument fixture: a piece's root module, and the playing
+/// pattern MODULE under its playlist — the scope a pattern's own knobs
+/// bind in (multi-pattern P7, director ruling 2).
+pub(crate) const PIECE_SCOPE: &str = "/playful.module";
+pub(crate) const PLAYING_PATTERN_SCOPE: &str = "/playful.module/playlist.playlist/aurora.module";
 
 /// The structured scope behind each fixture scope path — what the real
 /// derivation carries on `UiPanelGroup::target` and every control's
@@ -67,6 +72,8 @@ pub(crate) fn scope_target(scope: &str) -> lpc_wire::WireScopeRef {
         NOISE_PARTY_SCOPE => module(12),
         RIPPLE_SCOPE => module(13),
         COMMON_SCOPE => module(14),
+        PIECE_SCOPE => module(21),
+        PLAYING_PATTERN_SCOPE => module(22),
         "/aurora.module/set.playlist/drift.shader" => sink(0),
         "/aurora.module/set.playlist/whirl.shader" => sink(1),
         other => panic!("unknown fixture scope {other}"),
@@ -85,6 +92,8 @@ pub(crate) fn scope_display(target: &lpc_wire::WireScopeRef) -> &'static str {
             12 => NOISE_PARTY_SCOPE,
             13 => RIPPLE_SCOPE,
             14 => COMMON_SCOPE,
+            21 => PIECE_SCOPE,
+            22 => PLAYING_PATTERN_SCOPE,
             other => panic!("unknown fixture scope owner {other}"),
         },
         lpc_wire::WireScopeRef::Sink { entry: 0, .. } => "/aurora.module/set.playlist/drift.shader",
@@ -103,7 +112,7 @@ fn walk_address(node: &str, slot: &str) -> ProjectSlotAddress {
 }
 
 /// One knob control on a panel.
-fn knob(
+pub(crate) fn knob(
     scope: &str,
     channel: &str,
     label: &str,
@@ -136,7 +145,13 @@ fn knob(
 }
 
 /// One horizontal fader control (the dominant brightness gesture).
-fn fader(scope: &str, channel: &str, label: &str, value: f32, max: f32) -> UiPanelControlView {
+pub(crate) fn fader(
+    scope: &str,
+    channel: &str,
+    label: &str,
+    value: f32,
+    max: f32,
+) -> UiPanelControlView {
     UiPanelControlView::new(
         channel,
         UiPanelControl {
@@ -192,7 +207,7 @@ fn toggle(scope: &str, channel: &str, label: &str, value: bool) -> UiPanelContro
 /// One palette swatch control (M4 P3) — the closed face of the chooser, on
 /// a module panel. Its value is a whole `GradientConfig`, built through the
 /// model's own storage exactly as the projection builds one.
-fn swatch(
+pub(crate) fn swatch(
     scope: &str,
     channel: &str,
     label: &str,
@@ -359,7 +374,7 @@ fn engaged(view: UiPanelControlView, displaced: &str) -> UiPanelControlView {
 }
 
 /// Put a control in Read-at-default with an explicit origin caption.
-fn at_default(view: UiPanelControlView, source: &str) -> UiPanelControlView {
+pub(crate) fn at_default(view: UiPanelControlView, source: &str) -> UiPanelControlView {
     view.with_state(UiPanelControlState::ReadDefault, Some(source))
 }
 
@@ -631,6 +646,7 @@ fn control_wiring() -> UiBusView {
                     kind: UiProductKind::Control,
                     preview: control_preview_product("output").preview,
                     tracking: UiProductTrackingState::Tracking,
+                    show_live: None,
                     frame: UiProductPreviewFrame::VISUAL_DEFAULT,
                 }),
                 ..channel(
@@ -694,6 +710,7 @@ fn both_products_wiring() -> UiBusView {
                 kind: UiProductKind::Visual,
                 preview: aurora_preview(48, 21, 0.0),
                 tracking: UiProductTrackingState::Tracking,
+                show_live: None,
                 frame: UiProductPreviewFrame::new(16, 7),
             }),
             ..channel(

@@ -413,6 +413,21 @@ fn thumb_lamp_frame() -> UiControlProductPreview {
     }
 }
 
+/// [`thumb_lamp_frame`] as a board's card PULLS it: the same sign at 8 bits
+/// per sample (each linear unorm16 level as its sRGB8 code, the engine's
+/// rule), which is what the device card's feed carries over the wire.
+fn live_card_lamp_frame() -> UiControlProductPreview {
+    let frame = thumb_lamp_frame();
+    let bytes: Vec<u8> = (0..frame.extent.sample_count() as usize)
+        .map(|index| lpc_wire::linear16_to_srgb8(frame.unorm16_sample(index).unwrap_or(0)))
+        .collect();
+    UiControlProductPreview {
+        sample_format: UiControlSampleFormat::Srgb8,
+        bytes: bytes.into(),
+        ..frame
+    }
+}
+
 fn gallery(home: UiHomeView) -> Element {
     rsx! {
         section { class: "tw:p-4",
@@ -468,7 +483,7 @@ fn devices_page_story(remembered_open: bool) -> Element {
 }
 
 #[story(
-    description = "The add slot's target menu, open (D44, PD16, D1, spike 2 + 2b). The slot keeps \"It's connected\" as its spectrum CTA — a board on the desk is the common case — and grows a quiet second verb, \"start a board here ▾\", because the slot where the next card appears should offer BOTH ways a card can appear. The menu is two groups: Desktop alone at the top (it is the default target and the one every new project gets), then every catalog board this build can actually start, in catalog order, each row a silhouette · name · tag. The tag is a lowercase WORD — the same word the runtime band and the `?on=` grammar use — rather than a chip or a sentence, and it says what picking that row would START. THE THING TO LOOK AT: the XIAO ESP32-C6 now appears TWICE, because this build can emulate it and sim-versus-emu is the user's choice, never a default Studio flips. `emu` comes first — exact, then fast — and the two rows are otherwise identical, which is the claim: one board, two runtimes. The hint line under the rows has earned its place and explains the two words; it names NO modifier key, because the two rows are the whole of the choice. Picking a row mints a record of that kind, powers it on, and the card lands in the grid next to the slot that made it. The panel floats in the top layer, so the slot is exactly as tall open as shut and the roster never reflows."
+    description = "The add slot's target menu, open (D44, PD16, D1, spike 2 + 2b). The slot keeps \"via USB\" (under \"Connect a board\") as its spectrum CTA — a board on the desk is the common case — and grows a quiet second verb, \"start a board here ▾\", because the slot where the next card appears should offer BOTH ways a card can appear. The menu is two groups: Desktop alone at the top (it is the default target and the one every new project gets), then every catalog board this build can actually start, in catalog order, each row a silhouette · name · tag. The tag is a lowercase WORD — the same word the runtime band and the `?on=` grammar use — rather than a chip or a sentence, and it says what picking that row would START. THE THING TO LOOK AT: the XIAO ESP32-C6 now appears TWICE, because this build can emulate it and sim-versus-emu is the user's choice, never a default Studio flips. `emu` comes first — exact, then fast — and the two rows are otherwise identical, which is the claim: one board, two runtimes. The hint line under the rows has earned its place and explains the two words; it names NO modifier key, because the two rows are the whole of the choice. Picking a row mints a record of that kind, powers it on, and the card lands in the grid next to the slot that made it. The panel floats in the top layer, so the slot is exactly as tall open as shut and the roster never reflows."
 )]
 fn devices_target_pick_open() -> Element {
     rsx! {
@@ -513,7 +528,9 @@ fn powered_off_sim_fixture() -> DeviceRosterView {
     card.freshness_label = Some("last heard 4 min ago".to_string());
     let id = card.id;
     DeviceRosterView {
+        access: Default::default(),
         transport_available: true,
+        usb_available: true,
         feeds: Default::default(),
         runtime_bands: [(id, UiRuntimeBand::sim("seeed/xiao-esp32-c6", Some("cpu")))]
             .into_iter()
@@ -598,7 +615,7 @@ fn devices_card_states() -> Element {
 fn devices_card_live_feed() -> Element {
     let running = card_state_fixtures().remove(0);
     let (_, card, open_uid) = running;
-    let frame = thumb_lamp_frame();
+    let frame = live_card_lamp_frame();
     let feed = |liveness: FeedLiveness, with_layout: bool| DeviceCardFeedView {
         frame: Some(match with_layout {
             true => frame.clone(),
@@ -808,7 +825,9 @@ fn degraded_card_fixture() -> DeviceView {
 /// chip whose only honest verb is round 2\'s.
 fn roster_fixture() -> DeviceRosterView {
     DeviceRosterView {
+        access: Default::default(),
         transport_available: true,
+        usb_available: true,
         feeds: Default::default(),
         runtime_bands: Default::default(),
         // The running card has earned a registry row, so it has an editor
@@ -829,6 +848,7 @@ fn roster_fixture() -> DeviceRosterView {
                     firmware_face: lpa_studio_core::DeviceFirmwareFace::Unknown,
                     detected_chip: Some("esp32c6".to_string()),
                     mac: None,
+                    firmware_blocked: None,
                     escapes: vec![DeviceEscape::Forget],
                 },
                 PendingLinkView {
@@ -843,6 +863,7 @@ fn roster_fixture() -> DeviceRosterView {
                     firmware_face: lpa_studio_core::DeviceFirmwareFace::Blank,
                     detected_chip: Some("esp32c6".to_string()),
                     mac: None,
+                    firmware_blocked: None,
                     escapes: vec![DeviceEscape::Forget],
                 },
             ],
@@ -903,6 +924,7 @@ fn roster_fixture() -> DeviceRosterView {
                         ),
                     ],
                     terminal_dropped: 0,
+                    firmware_blocked: None,
                     escapes: vec![DeviceEscape::Disconnect, DeviceEscape::Forget],
                 },
                 DeviceView {
@@ -948,6 +970,7 @@ fn roster_fixture() -> DeviceRosterView {
                     ],
                     terminal_dropped: 0,
                     // Cancel FIRST: a running activity\'s way out leads.
+                    firmware_blocked: None,
                     escapes: vec![
                         DeviceEscape::Cancel,
                         DeviceEscape::Disconnect,
@@ -995,6 +1018,7 @@ fn roster_fixture() -> DeviceRosterView {
                         ),
                     ],
                     terminal_dropped: 0,
+                    firmware_blocked: None,
                     escapes: vec![DeviceEscape::Disconnect, DeviceEscape::Forget],
                 },
                 // The EMPTY face (M3): a LightPlayer that has SAID it has
@@ -1053,6 +1077,7 @@ fn roster_fixture() -> DeviceRosterView {
                         ),
                     ],
                     terminal_dropped: 0,
+                    firmware_blocked: None,
                     escapes: vec![DeviceEscape::Disconnect, DeviceEscape::Forget],
                 },
                 // The remembered board (D7): known, named, and not on the
@@ -1085,6 +1110,7 @@ fn roster_fixture() -> DeviceRosterView {
                     terminal: Vec::new(),
                     terminal_dropped: 0,
                     // The two verbs an absent board can honestly offer.
+                    firmware_blocked: None,
                     escapes: vec![DeviceEscape::Reconnect, DeviceEscape::Forget],
                 },
             ],
@@ -1126,7 +1152,9 @@ fn roster_page_fixture() -> DeviceRosterView {
     let empty = devices.remove(3);
     let running = devices.remove(0);
     DeviceRosterView {
+        access: Default::default(),
         transport_available: true,
+        usb_available: true,
         feeds: Default::default(),
         runtime_bands: Default::default(),
         open_addresses: full.open_addresses,
@@ -1309,6 +1337,7 @@ fn firmware_face_fixtures() -> Vec<(&'static str, DeviceView, Option<String>)> {
             "ESP-ROM:esp32c6-20220919",
         )],
         terminal_dropped: 0,
+        firmware_blocked: None,
         escapes: vec![DeviceEscape::Disconnect, DeviceEscape::Forget],
     };
     let pre_hello = DeviceView {
@@ -1419,6 +1448,7 @@ fn firmware_face_fixtures() -> Vec<(&'static str, DeviceView, Option<String>)> {
         // The link is still attached (the port was closed, not unplugged),
         // so the projection offers Disconnect — which is also what keeps
         // the terminal and the verb rows drawn at their fixed heights.
+        firmware_blocked: None,
         escapes: vec![DeviceEscape::Disconnect, DeviceEscape::Forget],
     };
 

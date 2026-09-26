@@ -52,6 +52,15 @@ pub struct DeviceRosterView {
     /// build or a browser without Web Serial, and the page says so instead of
     /// showing an empty roster that looks like "no devices".
     pub transport_available: bool,
+    /// Whether this browser can reach a USB port — Web Serial, or the
+    /// `?emu=` shim that stands in for it. `false` on iPhone/iPad (Safari,
+    /// Bluefy), Firefox and Safari, where the roster is still reachable
+    /// (sims, Bluetooth) but the add slot must not offer the USB verb as its
+    /// primary action: that verb could only fail there.
+    ///
+    /// Joined by the controller, which is what knows whether a serial
+    /// transport was installed; the roster's own projection says `false`.
+    pub usb_available: bool,
     /// Each registered device's editor address (round-2 M5): the model's
     /// handle → the registry uid `/device/<uid>` opens it by. A device
     /// without a row (still identifying) has no honest address and no Open.
@@ -66,6 +75,10 @@ pub struct DeviceRosterView {
     /// behind a device, and the model deliberately does not know that a
     /// sim is a sim. Absent = a real board, which wears no band (D38).
     pub runtime_bands: std::collections::BTreeMap<lpa_devices::DeviceId, super::UiRuntimeBand>,
+    /// Each device.s access facts (BLE M6): the login line over Bluetooth,
+    /// and the device access panel where this link may write the store.
+    pub access:
+        std::collections::BTreeMap<lpa_devices::DeviceId, crate::app::access::UiDeviceAccess>,
 }
 
 impl Default for DeviceRosterView {
@@ -76,9 +89,11 @@ impl Default for DeviceRosterView {
                 pending: Vec::new(),
             },
             transport_available: false,
+            usb_available: false,
             open_addresses: std::collections::BTreeMap::new(),
             feeds: std::collections::BTreeMap::new(),
             runtime_bands: std::collections::BTreeMap::new(),
+            access: std::collections::BTreeMap::new(),
         }
     }
 }
@@ -331,11 +346,14 @@ impl DeviceRoster {
         DeviceRosterView {
             roster: roster_view(&self.roster, now),
             transport_available: self.effects.is_wired(),
+            // Joined by the controller (`device_roster_view`).
+            usb_available: false,
             open_addresses: self.keys.clone(),
             // Filled by the controller, which owns the feeds and the
             // sidecars a band is read from.
             feeds: std::collections::BTreeMap::new(),
             runtime_bands: std::collections::BTreeMap::new(),
+            access: std::collections::BTreeMap::new(),
         }
     }
 
@@ -499,6 +517,7 @@ mod tests {
             last_outcome: None,
             terminal: Vec::new(),
             terminal_dropped: 0,
+            firmware_blocked: None,
             escapes: vec![Escape::Reconnect, Escape::Forget],
         }
     }
@@ -525,6 +544,7 @@ mod tests {
             last_outcome: None,
             terminal: Vec::new(),
             terminal_dropped: 0,
+            firmware_blocked: None,
             escapes: vec![Escape::Disconnect, Escape::Forget],
         }
     }
@@ -536,6 +556,7 @@ mod tests {
     #[test]
     fn split_roster_separates_offline_devices_into_remembered() {
         let view = DeviceRosterView {
+            access: Default::default(),
             roster: RosterView {
                 devices: vec![
                     ready_view(1, "Live board"),
@@ -544,6 +565,7 @@ mod tests {
                 pending: Vec::new(),
             },
             transport_available: true,
+            usb_available: true,
             open_addresses: Default::default(),
             // The remembered board's last picture (a sidecar across a
             // reload, or this session's last pull) rides the split.
@@ -590,11 +612,13 @@ mod tests {
     #[test]
     fn split_roster_preserves_connected_order() {
         let view = DeviceRosterView {
+            access: Default::default(),
             roster: RosterView {
                 devices: vec![ready_view(1, "A"), ready_view(2, "B"), ready_view(3, "C")],
                 pending: Vec::new(),
             },
             transport_available: true,
+            usb_available: true,
             open_addresses: Default::default(),
             feeds: std::collections::BTreeMap::new(),
             runtime_bands: std::collections::BTreeMap::new(),

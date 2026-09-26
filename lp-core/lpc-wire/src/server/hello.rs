@@ -20,6 +20,8 @@ use alloc::vec::Vec;
 use lpc_model::LpFeature;
 use serde::{Deserialize, Serialize};
 
+use crate::server::hello_auth::HelloAuth;
+
 /// Wire protocol version spoken by this build of the workspace.
 ///
 /// # Bump rule
@@ -33,6 +35,103 @@ use serde::{Deserialize, Serialize};
 ///
 /// # History
 ///
+/// - 27: who has access, on the board (BLE easy access, P1) — four
+///   edit-tier requests, `ClientRequest::AccessList`, `AccessAdd { entry }`,
+///   `AccessRemove { salt }` and `AccessSetSwitches { bleEnabled?, open? }`,
+///   each answered with the new `ServerMsgBody::AccessList { bleEnabled,
+///   open, entries }` (label, kind, tier, salt, addedAt — never the key).
+///   The device store is merged on the board, by salt, instead of being
+///   rewritten whole by a client. `SecretEntry` (which `AccessAdd` carries)
+///   gains a required `kind` and an optional `addedAt`. New variants on
+///   both enums: an old firmware cannot decode the requests and an old
+///   client cannot decode the answer. See the 2026-09-24 amendment of
+///   `docs/adr/2026-09-23-ble-access-model.md`. Bumped again after
+///   #785 took 24, pattern space took 25 and JSON Pack took 26.
+/// - 26: JSON Pack (plan `lp-json-pack`; bumped again after the BLE M3
+///   access core took 22, lean-wire follow-ups took 23, the gradient pin
+///   took 24 and pattern space took 25) — a board writes its replies
+///   PACKED on a link whose host opted in: `ClientRequest::SetEncoding {
+///   encoding, dictionary }` + its `ServerMsgBody::SetEncoding { encoding }`
+///   answer, and `ServerHello` gains `pack_dictionary`, the fingerprint of
+///   the generated wire dictionary (`WIRE_DICTIONARY_FINGERPRINT`). New
+///   variants on both enums and a required hello field: an old peer cannot
+///   decode either, which is what earns the bump. From here on the
+///   dictionary is part of the wire: `just wire-dict-check` fails a
+///   dictionary change that does not bump this constant.
+/// - 25: pattern space (bumped again after lean-wire follow-ups took 23
+///   and the gradient-cycle pin took 24;
+///   `docs/adr/2026-09-24-pattern-space.md`) — the
+///   shader def gains an optional `coords` key (`"pixels"` | `"pattern"`).
+///   Additive on disk, but NOT on the wire: an old peer refuses a shader def
+///   carrying a field it does not know, so a project frame holding an
+///   opted-in shader fails to decode there. An opted-in shader's `pos` and
+///   the new `patternExtent` / `patternPitch` / `lampCount` intrinsics also
+///   change what the same def renders.
+/// - 24: `GradientConfig` gained a fifth storage field, `pinned` (an
+///   `i32`, `-1` for none) — the palette chooser's "show just this one"
+///   pin on a cycle; bumped again after lean-wire took 21 and 23 and BLE M3
+///   took 22. Every slot value, panel write and inventory frame that
+///   carries a palette changes shape, and the reader requires all five
+///   fields, so an old peer cannot decode a new palette (or the reverse).
+///   Rides with project format 11.
+/// - 23: one list-shaped revision gate (lean-wire follow-ups; bumped
+///   again after BLE M3 took 22). The
+///   output-frame probe's own per-output gate (`OutputFrameGeometryRead` +
+///   `KnownOutputFrameGeometry`) is gone: every probe now asks with
+///   `RevisionGateRead`, whose `IfChanged` changes from `{ known_revision:
+///   Option<Revision> }` to `{ known: Vec<KnownRevision> }`, a
+///   `KnownRevision { node?, revision }` naming the node for the
+///   per-output probe and no node for the single-half ones (the control
+///   product's geometry, the binding graph's structure). A retyped field on
+///   three request messages: an old peer cannot decode the other's
+///   requests, which is what earns the bump. One request shape is also one
+///   deserializer on the device (1,584 B of ESP32-C6 flash). Answers are
+///   unchanged. In the same bump, `WireChannelSampleFormat` gains `Srgb8`
+///   (an sRGB-encoded 8-bit sample, Studio's preview default): an old
+///   server cannot decode a request that asks for it.
+/// - 22: access over untrusted links (BLE remote control, M3; bumped
+///   again after lean-wire took 21) — `ClientRequest::LoginBegin` / `LoginAnswer { macs }` and their answers
+///   `ServerMsgBody::LoginChallenge { nonce, offers }` /
+///   `LoginResult(Granted { tier, label } | Refused { retry_after_ms })`,
+///   plus `ServerMsgBody::NotPermitted { needs }`, the refusal a request
+///   gets when its link's tier is too low. New variants on both enums, and
+///   `ServerHello` gains the REQUIRED `auth: { required, granted }` for the
+///   link it is sent on: an old client cannot decode the new hello and an
+///   old firmware cannot decode a login. The heartbeat also changes MEANING
+///   on an untrusted link that holds no tier — it carries nothing the hello
+///   does not — though no such link exists until the BLE transport lands.
+///   See `docs/adr/2026-09-23-ble-access-model.md`.
+/// - 21: the revision gate (lean-wire) — what a probe answers unchanged on
+///   every read rides behind a revision (`RevisionGateRead` →
+///   `RevisionGateResult<T>`). First, everything static about a probed
+///   buffer rides one revision-gated bundle. `ControlProductProbeRequest`'s
+///   `display_layout: ControlDisplayLayoutRead` becomes `geometry:
+///   RevisionGateRead`, and its preview (and chunk header) replaces
+///   `sample_layout` + `display_layout` with `geometry:
+///   RevisionGateResult<ControlProductGeometry>`. `OutputFrameProbeRequest`
+///   gains a PER-OUTPUT gate (`geometry: OutputFrameGeometryRead`, whose
+///   `IfChanged` listed a known revision per output node; folded into
+///   `RevisionGateRead` at 22), and
+///   `OutputFrameEntry` (and its header) replaces `sample_layout` +
+///   `display_layout` + `placements` with `geometry:
+///   RevisionGateResult<OutputFrameGeometry>`. `ControlDisplayLayoutRead`
+///   and `ControlDisplayLayoutProbeResult` are gone. Renamed and retyped
+///   fields on existing messages: an old peer cannot decode either side,
+///   which is what earns the bump. Second, the binding graph splits into a
+///   gated structure and a per-read value list: `BindingGraphProbeRequest`
+///   gains `structure: RevisionGateRead`; `BindingGraphProbeResult::Graph`
+///   carries a `WireBindingGraphRead { structure:
+///   RevisionGateResult<WireBindingGraph>, values: Option<WireBusChannelValues>
+///   }`; `WireBusChannel` loses `value`; `WireBusChannelValue` becomes an
+///   enum; an engaged panel writer's row is the value-free
+///   `WireBindingEndpoint::PanelWriter`; and `WireBindingGraph::revision` is
+///   the STRUCTURE revision. Third, pixels become the client's ask:
+///   `OutputFrameProbeRequest` gains `samples: Option<WireChannelSampleFormat>`
+///   (`None` = geometry and revisions only; `U8` rounds a `U16` buffer to
+///   nearest), `OutputFrameEntry::sample_format` (and its header's) becomes
+///   `Option`, and the control-product probe answers `U8` as well as `U16`.
+///   A steady lens read of the PLAYFUL choker drops from 10,997 B to 4,911 B
+///   across the first two.
 /// - 20: `ClientRequest::ClearFaults` + its `ServerMsgBody::ClearFaults {
 ///   ledger_cleared }` ack — the studio's Clear faults verb, which forgets
 ///   the crash-recovery ledger and re-arms the engine's faulted nodes.
@@ -176,7 +275,7 @@ use serde::{Deserialize, Serialize};
 /// as `None` on new Studio and a new firmware's extra fields are ignored
 /// by old Studio. Bumping for those would mark every board running
 /// current firmware Incompatible in exchange for nothing.
-pub const WIRE_PROTO_VERSION: u32 = 20;
+pub const WIRE_PROTO_VERSION: u32 = 27;
 
 /// Unsolicited/boot-time server identity, version, and capability report.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -195,6 +294,18 @@ pub struct ServerHello {
     /// hello, and `ClientRequest::Hello` answers re-read it, so a
     /// post-stamp request reports the new uid. `None` means unstamped.
     pub device_uid: Option<String>,
+    /// The fingerprint of the JSON Pack dictionary this build packs with
+    /// ([`crate::WIRE_DICTIONARY_FINGERPRINT`]), or 0 when this embedder
+    /// does not pack at all (hosts, the browser, `fw-emu`, an ESP image
+    /// without `json-pack`). A host that asks for packed names its own, and
+    /// the board packs only on a match; this makes a mismatch visible in
+    /// logs and on the device card before anyone asks, and tells a host
+    /// seeing 0 not to ask.
+    pub pack_dictionary: u32,
+    /// What the link this hello is sent on may do — computed per link, so
+    /// the same device answers a USB client and an unauthenticated radio
+    /// client differently. See [`HelloAuth`].
+    pub auth: HelloAuth,
 }
 
 /// Build facts of the firmware/server binary answering the hello: its
@@ -395,6 +506,8 @@ mod tests {
                 ..Default::default()
             },
             device_uid: Some("dev0000000000000001".to_string()),
+            pack_dictionary: crate::WIRE_DICTIONARY_FINGERPRINT,
+            auth: HelloAuth::TRUSTED,
         };
         let json = crate::json::to_string(&hello).unwrap();
         assert!(json.contains(&alloc::format!("\"proto\":{WIRE_PROTO_VERSION}")));
@@ -428,6 +541,11 @@ mod tests {
                 ..Default::default()
             },
             device_uid: None,
+            pack_dictionary: crate::WIRE_DICTIONARY_FINGERPRINT,
+            auth: HelloAuth {
+                required: true,
+                granted: None,
+            },
         };
         let json = crate::json::to_string(&hello).unwrap();
         let back: ServerHello = crate::json::from_str(&json).unwrap();
@@ -455,6 +573,11 @@ mod tests {
                 ..Default::default()
             },
             device_uid: None,
+            pack_dictionary: crate::WIRE_DICTIONARY_FINGERPRINT,
+            auth: HelloAuth {
+                required: true,
+                granted: None,
+            },
         };
         let frame = ServerMessage::new(0, ServerMsgBody::Hello(hello.clone()));
         let json = crate::json::to_string(&frame).unwrap();
@@ -483,7 +606,7 @@ mod tests {
     #[test]
     fn the_proto_version_is_pinned_to_its_history() {
         assert_eq!(
-            WIRE_PROTO_VERSION, 20,
+            WIRE_PROTO_VERSION, 27,
             "if you meant to bump, add the History entry in this file's \
              doc comment and update this pin"
         );

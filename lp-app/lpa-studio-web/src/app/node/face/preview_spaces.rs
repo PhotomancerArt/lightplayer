@@ -115,7 +115,7 @@ pub fn SpacedProductPreview(
                 preview: product.preview.clone(),
                 tracking: product.tracking,
                 frame: product.frame,
-                focus_action: None,
+                focus_action: product.show_live.clone(),
                 on_action,
             }
         };
@@ -135,14 +135,13 @@ pub fn SpacedProductPreview(
                     preview: view.preview.clone(),
                     tracking: product.tracking,
                     frame: display_frame(&view),
-                    focus_action: None,
+                    focus_action: product.show_live.clone(),
                     on_action,
                 }
                 // Always rendered, whatever the frame turned out to be: a
-                // GPU-resident runtime answers with a no-readback refusal
-                // (`UiProductPreview::Unsupported`, which the frame renders
-                // as its warning message), and the caption is then the only
-                // thing that still says WHICH space was asked for.
+                // pending, refused or failed frame shows no picture, and the
+                // caption is then the only thing that still says WHICH space
+                // was asked for.
                 span { class: CAPTION_CLASS, "{preview_space_caption(view.space, view.meta)}" }
             }
         }

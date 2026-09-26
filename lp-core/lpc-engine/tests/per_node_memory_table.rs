@@ -212,7 +212,7 @@ fn synthetic_from_basic(label: &'static str, pairs: u32, half: bool) -> Fixture 
     .expect("write module.json");
     std::fs::write(
         dir.join("project.json"),
-        format!("{{\n  \"format\": 10,\n  \"name\": \"per-node {label}\"\n}}\n"),
+        format!("{{\n  \"format\": 11,\n  \"name\": \"per-node {label}\"\n}}\n"),
     )
     .expect("write project.json");
 

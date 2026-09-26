@@ -10,6 +10,16 @@ shader/runtime values and portable model or wire values.
 demand-driven path. It owns the `NodeTree`, engine-level `Resolver`, artifact
 store, frame state, slot shape registry, runtime buffers, and demand roots.
 
+**Entry residency:** a parent node can ask for its entry-keyed children to
+be loaded or unloaded (`NodeRuntime::residency_request`; only `PlaylistNode`
+does). `Engine::apply_residency(fs, &mut registry)` applies the request at
+the top of the tick — unload first, then load, rolled back on failure — and
+tells the node through `entry_loaded` / `entry_unloaded` /
+`entry_load_failed` / `residency_refused`. The registry owns which entries
+are resident; the tick owner (`lpa-server` `Project::tick`) calls this step,
+because `tick` itself has no filesystem. See
+`docs/adr/2026-09-25-parent-owned-child-residency.md`.
+
 **Bindings and resolution:** bindings are node-instance data stored on
 `node::NodeEntry` and indexed by `node::NodeTree`. Bus names remain useful
 runtime vocabulary for labeled channels, but resolved values are cached by the

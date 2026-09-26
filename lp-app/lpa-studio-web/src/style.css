@@ -2589,6 +2589,19 @@ label:has(> input:not(:disabled)) {
     font-weight: 700;
 }
 
+.ux-produced-product-overlay .ux-produced-product-overlay-cta {
+    justify-self: center;
+    border: 1px solid var(--studio-color-border-strong);
+    border-radius: 999px;
+    padding: 0.2rem 0.7rem;
+    color: var(--studio-color-text-strong);
+    font-size: 0.75rem;
+}
+
+.ux-produced-product-overlay-button:hover .ux-produced-product-overlay-cta {
+    background: rgba(255, 255, 255, 0.12);
+}
+
 .ux-produced-product-overlay-button {
     cursor: pointer;
     transition: background-color 120ms ease, color 120ms ease;
@@ -6150,7 +6163,7 @@ select:focus-visible {
    the renderer stays decision-free — no armed state ever reaches Rust.
    Only the `.ux-armed-dim` body dims; the footer (the chip and its
    neighbors) keeps full contrast. */
-.ux-armed-scope:has(.ux-armed) {
+.ux-armed-scope:has(.ux-armed:not(.ux-armed-local)) {
     border-color: var(--studio-status-error-border);
     box-shadow: inset 0 0 0 1px var(--studio-status-error-border);
 }
@@ -6161,7 +6174,7 @@ select:focus-visible {
         filter 0.25s;
 }
 
-.ux-armed-scope:has(.ux-armed) .ux-armed-dim {
+.ux-armed-scope:has(.ux-armed:not(.ux-armed-local)) .ux-armed-dim {
     opacity: 0.4;
     filter: saturate(0.3);
 }
@@ -6179,6 +6192,152 @@ select:focus-visible {
 
     .ux-armed-labels > span {
         transition: none;
+    }
+}
+
+/* A LOCAL armed chip (`ux-armed-local`, armed_confirm_button.rs) marks
+   only its own row: "Who has access" dims the entry about to go, never the
+   device card the list sits in. `ux-armed-row-hide` holds its space. */
+.ux-armed-row-dim {
+    transition:
+        opacity 0.25s,
+        filter 0.25s;
+}
+
+.ux-armed-row:has(.ux-armed) .ux-armed-row-dim {
+    opacity: 0.4;
+    filter: saturate(0.3);
+}
+
+.ux-armed-row:has(.ux-armed) .ux-armed-row-hide {
+    visibility: hidden;
+}
+
+/* --------------------------------------------------------------------------
+   The on/off switch (Connections' Bluetooth row, "Anyone nearby"): a
+   `button[role=switch]` whose `aria-checked` is the state, so the dress
+   can never disagree with what a screen reader hears. On wears the good
+   (mint) tone; a locked switch is dimmed and says why beside it.
+   -------------------------------------------------------------------------- */
+.ux-switch {
+    position: relative;
+    flex: none;
+    width: 36px;
+    height: 21px;
+    padding: 0;
+    border: 1px solid var(--studio-color-border-strong);
+    border-radius: 999px;
+    background: var(--studio-status-neutral-bg);
+    cursor: pointer;
+    appearance: none;
+    transition:
+        background-color 0.2s,
+        border-color 0.2s;
+}
+
+.ux-switch::after {
+    content: "";
+    position: absolute;
+    top: 2px;
+    left: 2px;
+    width: 15px;
+    height: 15px;
+    border-radius: 50%;
+    background: var(--studio-color-text-subtle);
+    transition: left 0.2s;
+}
+
+.ux-switch[aria-checked="true"] {
+    border-color: var(--studio-status-good-border);
+    background: color-mix(in srgb, var(--studio-status-good-text) 25%, transparent);
+}
+
+.ux-switch[aria-checked="true"]::after {
+    left: 17px;
+    background: var(--studio-status-good-text);
+}
+
+.ux-switch:disabled {
+    cursor: not-allowed;
+    opacity: 0.5;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .ux-switch,
+    .ux-switch::after {
+        transition: none;
+    }
+}
+
+/* --------------------------------------------------------------------------
+   The "can now unlock" toast (access_added_toast.rs): at the BOTTOM of the
+   page, over the thumb, safe-area aware. Unlike the top confirmation line
+   (`.ux-toast`) it carries a verb (Undo), so it sits where a thumb is and
+   stays long enough to reach it. It fades itself out (CSS, like
+   `.ux-toast`), and `visibility: hidden` at the end takes Undo with it.
+   -------------------------------------------------------------------------- */
+.ux-access-toast {
+    position: fixed;
+    left: 50%;
+    bottom: calc(14px + env(safe-area-inset-bottom, 0px));
+    transform: translateX(-50%);
+    z-index: 80;
+    display: flex;
+    align-items: flex-start;
+    gap: 9px;
+    width: min(440px, calc(100vw - 24px));
+    padding: 10px 12px;
+    border: 1px solid var(--studio-status-good-border);
+    border-radius: var(--studio-radius-sm);
+    background: var(--studio-color-surface-raised);
+    color: var(--studio-color-text);
+    font-size: 12.5px;
+    line-height: 1.45;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+    animation: ux-access-toast-life 12s ease forwards;
+}
+
+/* Stories: the same toast in flow. */
+.ux-access-toast-inline {
+    position: static;
+    transform: none;
+    animation: none;
+}
+
+@keyframes ux-access-toast-life {
+    0% {
+        opacity: 0;
+        transform: translateX(-50%) translateY(12px);
+    }
+
+    3%,
+    90% {
+        opacity: 1;
+        transform: translateX(-50%) translateY(0);
+    }
+
+    100% {
+        opacity: 0;
+        visibility: hidden;
+        transform: translateX(-50%) translateY(6px);
+    }
+}
+
+@keyframes ux-access-toast-fade {
+    0%,
+    90% {
+        opacity: 1;
+    }
+
+    100% {
+        opacity: 0;
+        visibility: hidden;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .ux-access-toast {
+        animation-name: ux-access-toast-fade;
     }
 }
 

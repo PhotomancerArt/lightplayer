@@ -1,7 +1,8 @@
 ---
-status: carried
+status: retired
 since: 2026-08-07
 logged: 2026-08-07
+retired: 2026-09-24
 area: justfile local gate (`just check`) vs the browser wasm target
 related:
   - docs/debt/local-gate-misses-what-ci-checks.md
@@ -57,9 +58,32 @@ a fresh checkout still works).
 - 2026-08-07 — filed at P7 cleanup: `check-wasm-cloud` confirmed absent
   from `just check`'s recipe chain (`check-lint schema-check
   fw-manifest-check-emu`).
+- 2026-09-24 — paydown: measured first, as the exit criteria ask. In a
+  fresh worktree, cold (first-ever wasm32 build of `lpa-cloud-client`'s
+  dep tree, no prior `target/wasm32-unknown-unknown`) 47.06 s wall; warm
+  1.22 s total (`Finished ... in 1.03s`). Warm is the steady state of a
+  local gate, and ~1 s rides free inside `check`'s `[parallel]` chain
+  beside clippy, so it joined the chain directly (`check-lint
+  schema-check fw-manifest-check-emu check-wasm-cloud`). Local gate only:
+  CI's Lint job runs `just check-lint`, not `just check`, so this adds no
+  CI cost. A fresh checkout needs nothing extra — the recipe depends on
+  `install-wasm32-target`. Retiring — exit criteria met.
+- 2026-09-24 — the **CI half** closed, after retirement: "adds no CI
+  cost" above was also "adds no CI coverage". The Lint job runs `just
+  check-lint`, and the only CI compile of this combination was the stories
+  job's `dx build`, whose `studio` path gate does not list
+  `lp-app/lpa-cloud-client/**` — so a PR touching only this crate (or a dep
+  outside the studio list) got no wasm32 signal before merge. Moved
+  `check-wasm-cloud` from `check` into `check-lint` (`check` still reaches
+  it through `check-lint`), so it runs in the Lint job on the `core` gate,
+  i.e. every non-docs PR, parallel to clippy. Measured locally cold 49.9 s
+  (load ~114), warm 1.3 s. CI (#814, run 36085639051): target install
+  3.3 s + check 61 s cold, in parallel with clippy; Lint job 630 s against
+  a 465–839 s baseline (median ~640), so no visible change to its length.
 
 **Exit criteria** — either `check-wasm-cloud` joins `just check`'s chain
 (measured for added wall-clock time first — wasm32 compiles are not
 free), or this entry is retired in favor of a broader Studio-wasm local
 gate that already covers it (see `local-gate-misses-what-ci-checks`'s own
-exit criteria, which this is a special case of).
+exit criteria, which this is a special case of). **Met 2026-09-24**: the
+former.

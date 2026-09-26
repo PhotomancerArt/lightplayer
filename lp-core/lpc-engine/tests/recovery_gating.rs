@@ -139,6 +139,7 @@ fn denied_shader_compile_is_a_fault() {
         time_seconds: 0.0,
         space: VisualSpace::TwoD,
         policy: ConsumerPolicy::default(),
+        scope: None,
     };
     let mut texture =
         lp_gfx::LpGraphics::create_render_target(graphics.as_ref(), 4, 4).expect("render target");

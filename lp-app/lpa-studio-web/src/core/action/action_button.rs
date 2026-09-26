@@ -1,17 +1,8 @@
 use dioxus::prelude::*;
-use gloo_timers::future::TimeoutFuture;
 use lpa_studio_core::{ActionEnablement, ActionPriority, UiAction};
 
+use super::armed_confirm_button::use_armed_confirm;
 use crate::base::{StudioIcon, action_icon_name};
-
-/// How long a two-click confirmation stays ARMED before it stands down on
-/// its own. Long enough to read the changed label, short enough that a
-/// forgotten armed button cannot ambush a later stray click.
-///
-/// Must match `--ux-armed-win` on `.ux-armed-chip` (style.css) — the drain
-/// track animates over that var, and constants can't cross the Rust/CSS
-/// boundary, so these two comments pin them together.
-const ARMED_CONFIRM_WINDOW_MS: u32 = 4_000;
 
 /// How an action renders in its surrounding context. One action model
 /// (label / icon / priority / destructive / confirmation from
@@ -70,8 +61,8 @@ pub fn ActionButton(
     // `.ux-armed-scope:has(.ux-armed)`, so no armed state leaves this
     // component.
     let inline_confirm = confirmation.as_ref().is_some_and(|c| c.inline);
-    let mut armed = use_signal(|| armed_preview);
-    let mut arm_generation = use_signal(|| 0u64);
+    let mut confirm = use_armed_confirm(armed_preview);
+    let armed = confirm.is_armed();
     let armed_title = confirmation
         .as_ref()
         .map(|c| c.message.clone())
@@ -80,13 +71,13 @@ pub fn ActionButton(
         &label,
         confirmation.as_ref().map(|c| c.confirm_label.as_str()),
     );
-    let shown_title = if inline_confirm && armed() {
+    let shown_title = if inline_confirm && armed {
         armed_title
     } else {
         summary
     };
     let shown_class = if inline_confirm {
-        confirm_chip_class(class, armed())
+        confirm_chip_class(class, armed)
     } else {
         class.to_string()
     };
@@ -100,24 +91,13 @@ pub fn ActionButton(
                 title: "{shown_title}",
                 onblur: move |_| {
                     if inline_confirm {
-                        armed.set(false);
+                        confirm.disarm();
                     }
                 },
                 onclick: move |_| {
                     if inline_confirm {
-                        if armed() {
-                            armed.set(false);
+                        if confirm.tap() {
                             on_action.call(action_to_run.clone());
-                        } else {
-                            armed.set(true);
-                            let generation = arm_generation() + 1;
-                            arm_generation.set(generation);
-                            spawn(async move {
-                                TimeoutFuture::new(ARMED_CONFIRM_WINDOW_MS).await;
-                                if arm_generation() == generation {
-                                    armed.set(false);
-                                }
-                            });
                         }
                     } else if confirmation_confirmed(confirmation.as_ref()) {
                         on_action.call(action_to_run.clone());
@@ -145,7 +125,9 @@ pub fn ActionButton(
                     span { class: "tw:inline-flex", "{rest_label}" }
                 }
             }
-            if let Some(reason) = disabled_reason.as_ref() {
+            // An empty reason is a verb whose reason is said once beside it
+            // (a row of verbs disabled for the same cause).
+            if let Some(reason) = disabled_reason.as_ref().filter(|reason| !reason.is_empty()) {
                 p { class: "tw:m-0 tw:text-xs tw:leading-snug tw:text-dim-foreground", "{reason}" }
             }
         }

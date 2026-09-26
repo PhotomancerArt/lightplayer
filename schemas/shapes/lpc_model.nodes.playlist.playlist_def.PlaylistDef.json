@@ -82,6 +82,115 @@
         }
       },
       {
+        "default_bind": "bus:playlist.cycle",
+        "name": "cycle",
+        "panel": "show",
+        "semantics": {
+          "direction": "consumed"
+        },
+        "shape": {
+          "option": {
+            "meta": {},
+            "some": {
+              "value": {
+                "shape": {
+                  "editor": "plain",
+                  "id": 2840056141,
+                  "meta": {
+                    "description": "Hold, or cycle through the enabled entries: seconds per entry and the fade between them.",
+                    "label": "Cycle"
+                  },
+                  "ty": {
+                    "struct": {
+                      "fields": [
+                        {
+                          "name": "kind",
+                          "ty": "string"
+                        },
+                        {
+                          "name": "step_seconds",
+                          "ty": "f32"
+                        },
+                        {
+                          "name": "fade_seconds",
+                          "ty": "f32"
+                        }
+                      ],
+                      "name": "PlaylistCycle"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      {
+        "default_bind": "bus:playlist.skip",
+        "name": "skip",
+        "panel": "show",
+        "semantics": {
+          "direction": "consumed"
+        },
+        "shape": {
+          "option": {
+            "meta": {},
+            "some": {
+              "value": {
+                "shape": {
+                  "editor": "plain",
+                  "id": 1028734941,
+                  "meta": {},
+                  "ty": {
+                    "list": "u32"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      {
+        "name": "next_trigger_ids",
+        "shape": {
+          "option": {
+            "meta": {},
+            "some": {
+              "value": {
+                "shape": {
+                  "editor": "plain",
+                  "id": 1028734941,
+                  "meta": {},
+                  "ty": {
+                    "list": "u32"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      {
+        "name": "prev_trigger_ids",
+        "shape": {
+          "option": {
+            "meta": {},
+            "some": {
+              "value": {
+                "shape": {
+                  "editor": "plain",
+                  "id": 1028734941,
+                  "meta": {},
+                  "ty": {
+                    "list": "u32"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      {
         "name": "entries",
         "shape": {
           "map": {

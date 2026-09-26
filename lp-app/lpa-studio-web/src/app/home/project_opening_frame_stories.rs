@@ -6,7 +6,10 @@
 //! state that cannot be posed here is a state nobody can review.
 
 use dioxus::prelude::*;
-use lpa_studio_core::{ControllerId, HOME_NODE_ID, HomeOp, UiAction};
+use lpa_studio_core::{
+    ControllerId, DeviceId, DeviceOpenProgress, DeviceOpenStep, DeviceWait, DeviceWaitReason,
+    HOME_NODE_ID, HomeOp, OpenDevice, UiAction,
+};
 use lpa_studio_web_story_macros::story;
 
 use crate::app::home::ProjectOpeningFrame;
@@ -70,7 +73,104 @@ fn failed() -> Element {
                 id: "catalog/fyeah-sign".to_string(),
             },
         ),
+        device: None,
+        needs_unlock: false,
     })
+}
+
+#[story(
+    description = "A `/p/…?on=mac:` address loaded fresh in a browser that forgets Web Serial grants on reload (Brave): the board is remembered but this page has no port for it. Only a click can fix that — `requestPort()` needs a user gesture — so the page offers exactly that click instead of waiting silently (Yona, 2026-09-24)."
+)]
+fn board_not_connected() -> Element {
+    frame(OpeningState::WaitingForDevice(DeviceWait {
+        device: choker(),
+        reason: DeviceWaitReason::NotConnected,
+    }))
+}
+
+#[story(
+    description = "Connected, but the board has not said hello — it just reset, or it stopped answering. The stall note starts counting after a few seconds, and Reset the board is the way out that used to need a browser refresh."
+)]
+fn board_not_answering() -> Element {
+    stalled(
+        OpeningState::WaitingForDevice(DeviceWait {
+            device: choker(),
+            reason: DeviceWaitReason::Identifying,
+        }),
+        23,
+    )
+}
+
+#[story(
+    description = "The project going onto the board: the bar is the real byte count of acknowledged writes, the one quantity a board open has."
+)]
+fn board_uploading() -> Element {
+    frame(OpeningState::OnDevice(DeviceOpenProgress {
+        device: choker(),
+        step: DeviceOpenStep::Uploading {
+            sent_bytes: 23_552,
+            total_bytes: 43_741,
+        },
+    }))
+}
+
+#[story(
+    description = "The long step on a C6: the board compiles every shader on its own JIT, and there is no quantity to show. After a few seconds the frame says which step and for how long, so a slow compile does not read as a crash."
+)]
+fn board_loading_stalled() -> Element {
+    stalled(
+        OpeningState::OnDevice(DeviceOpenProgress {
+            device: choker(),
+            step: DeviceOpenStep::Loading,
+        }),
+        14,
+    )
+}
+
+#[story(
+    description = "An open that failed on a board names the step it was on (here the load timed out), offers Retry and Reset the board, and goes back to Devices rather than Explore."
+)]
+fn failed_on_board() -> Element {
+    frame(OpeningState::Failed {
+        message: "XIAO ESP32-C6 · Sep 24 stopped while loading the project on the board \
+                  (compiling its shaders): transport error: Transport error: device did not \
+                  respond within 20.0s"
+            .to_string(),
+        retry: UiAction::from_op(
+            ControllerId::new(HOME_NODE_ID),
+            HomeOp::OpenExample {
+                id: "catalog/fyeah-sign".to_string(),
+            },
+        ),
+        device: Some(choker()),
+        needs_unlock: false,
+    })
+}
+
+#[story(
+    description = "An open the board refused because this Bluetooth link is unlocked for play only. The board is fine, so the way on is Unlock (the sheet asks for an edit password), not Reset the board; Retry once it is unlocked."
+)]
+fn failed_on_board_needs_unlock() -> Element {
+    frame(OpeningState::Failed {
+        message: lpa_studio_core::not_permitted_sentence(lpa_studio_core::AccessTier::Edit)
+            .to_string(),
+        retry: UiAction::from_op(
+            ControllerId::new(HOME_NODE_ID),
+            HomeOp::OpenExample {
+                id: "catalog/fyeah-sign".to_string(),
+            },
+        ),
+        device: Some(choker()),
+        needs_unlock: true,
+    })
+}
+
+fn choker() -> OpenDevice {
+    OpenDevice {
+        id: Some(DeviceId(1)),
+        uid: "devstory".to_string(),
+        name: "XIAO ESP32-C6 · Sep 24".to_string(),
+    }
 }
 
 /// The frame on the canvas the shell gives it.
@@ -78,6 +178,15 @@ fn frame(state: OpeningState) -> Element {
     rsx! {
         section { class: "tw:p-4",
             ProjectOpeningFrame { state }
+        }
+    }
+}
+
+/// The frame with its step held for `secs`.
+fn stalled(state: OpeningState, secs: u64) -> Element {
+    rsx! {
+        section { class: "tw:p-4",
+            ProjectOpeningFrame { state, stalled_secs: secs }
         }
     }
 }

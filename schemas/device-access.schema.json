@@ -1,0 +1,118 @@
+{
+  "$defs": {
+    "SecretEntry": {
+      "additionalProperties": false,
+      "description": "A shared secret the board accepts, stored as the KDF's OUTPUT.\n\n`k = PBKDF2-HMAC-SHA256(password, salt, iterations)` is computed by the\nclient that installs the secret; the password itself is never stored and\nnever crosses a link. `k` is login-equivalent — anyone holding it can\nanswer a challenge — which is accepted (the threat model is someone\ncheeky nearby, not a cracker with the flash chip), and is why no link at\nany tier can read an access file back.\n\n`label` names the secret for people (\"camp\", \"mine\"). It is never\noffered before login; a successful login names the label it matched.\n`kind` and `added_at` are for people too (\"Who has access\"); the board\ngrants by `tier` alone.\n\nThis is the version-2 entry shape. A version-1 file's entries carry no\n`kind` and no `addedAt`; they are read through a private v1 shape and\nbecome `kind: password` with no time.",
+      "properties": {
+        "addedAt": {
+          "description": "When it was added, epoch seconds, as the adding client said\n(caller-supplied: nothing here reads a clock). Absent when unknown,\nwhich every version-1 entry is.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "iterations": {
+          "description": "PBKDF2 iteration count (≥ 1), tuned by the installing client.",
+          "format": "uint32",
+          "minimum": 1,
+          "type": "integer"
+        },
+        "k": {
+          "description": "The derived key `K`, base64 (32 bytes).",
+          "type": "string"
+        },
+        "kind": {
+          "$ref": "#/$defs/SecretKind",
+          "description": "Who holds it: a browser, an account, or a password."
+        },
+        "label": {
+          "description": "Human name for this secret.",
+          "type": "string"
+        },
+        "salt": {
+          "description": "PBKDF2 salt, base64 (16 bytes).",
+          "type": "string"
+        },
+        "tier": {
+          "$ref": "#/$defs/Tier",
+          "description": "What a login with this secret grants."
+        }
+      },
+      "required": [
+        "label",
+        "kind",
+        "tier",
+        "salt",
+        "iterations",
+        "k"
+      ],
+      "type": "object"
+    },
+    "SecretKind": {
+      "description": "Who a [`crate::SecretEntry`] belongs to — what a person sees in \"Who has\naccess\", and nothing the board decides anything by.\n\nThe board treats every kind alike: the login verifies `k` and grants the\nentry's tier whatever its kind. The kind is for people, and for a client\nthat wants to recognise its own entries.\n\n- `browser` — a key a browser generated for itself (32 random bytes,\n  one salt the browser uses on every device, `iterations: 1`).\n- `account` — the signed-in account's key, generated the same way and\n  shared by every browser signed in to that account.\n- `password` — a password a person typed or was given. Every v1 entry\n  reads as this kind: before v2, a password was the only kind there was.",
+      "oneOf": [
+        {
+          "const": "browser",
+          "description": "A key one browser generated for itself.",
+          "type": "string"
+        },
+        {
+          "const": "account",
+          "description": "The signed-in account's key.",
+          "type": "string"
+        },
+        {
+          "const": "password",
+          "description": "A typed or shared password.",
+          "type": "string"
+        }
+      ]
+    },
+    "Tier": {
+      "description": "An access tier. `Edit` implies `Play`: the derived ordering is\n`Play < Edit`, so \"has at least tier X\" is `held >= X`.\n\n- **Play** — the panel (knobs, brightness) plus reads: project reads,\n  project listings, and reading project files over fs.\n- **Edit** — everything: loading projects, authoring, fs writes and\n  deletes, device commands.\n\nNo tier, on any link, reads an access file (`**/.lp/access.json`).\n\nSerialized as `\"play\"` / `\"edit\"`, in the persisted access files and on\nthe wire alike.",
+      "enum": [
+        "play",
+        "edit"
+      ],
+      "type": "string"
+    }
+  },
+  "$id": "https://lightplayer.dev/schemas/device-access.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "The device's own access settings, at the root of its filesystem.\n\nIt holds the device's secrets — browser keys, the account key, typed\npasswords, each a [`SecretEntry`] of its [`crate::SecretKind`] — and two\nswitches:\n\n- `bleEnabled` — whether the BLE link may start.\n- `open` — \"open, no password\" is explicit (D17): it grants **play**\n  to an untrusted link without login, and never edit.\n\n**Bluetooth on, locked, by default.** A device with no store is\n[`Self::fresh`]: BLE on, not open, no secrets — nobody can do anything\nover the radio until a key is added over USB, but the radio is ready\nfor it. A store that fails to parse reads as [`Self::locked`] instead\n(BLE off; the caller logs the error): damage only ever takes access\naway.\n\nVersion 2 (this shape) added each entry's `kind` and `addedAt`. A\nversion-1 file still reads — its entries become `kind: password` with\nno time — and is written back as version 2.",
+  "properties": {
+    "bleEnabled": {
+      "description": "Whether the BLE link may start at all.",
+      "type": "boolean"
+    },
+    "open": {
+      "description": "Whether an untrusted link holds play without logging in.",
+      "type": "boolean"
+    },
+    "secrets": {
+      "description": "The device's secrets.",
+      "items": {
+        "$ref": "#/$defs/SecretEntry"
+      },
+      "type": "array"
+    },
+    "version": {
+      "description": "Format version; always [`DeviceAccessFile::VERSION`] when written.",
+      "format": "uint32",
+      "maximum": 2,
+      "minimum": 2,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "version",
+    "secrets",
+    "bleEnabled",
+    "open"
+  ],
+  "title": "DeviceAccessFile",
+  "type": "object"
+}

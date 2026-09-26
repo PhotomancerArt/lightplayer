@@ -1,7 +1,9 @@
 //! Zip import/export for packages (library-level codec; UI lands in M4).
 //!
 //! Export: every package file including `/.lp/meta.json` (provenance
-//! travels), never `/history/**`, under a single top-level directory named
+//! travels), never `/history/**` and never an access sidecar
+//! (`/.lp/access.json`: the project's login keys stay in the library and
+//! reach a device only by a push), under a single top-level directory named
 //! by the slug (the friendly unzip experience), deflated, deterministic
 //! entry order.
 //!
@@ -38,7 +40,7 @@ pub fn export_package(handle: &PackageHandle) -> Result<Vec<u8>, LibraryError> {
         let mut writer = zip::ZipWriter::new(&mut cursor);
         let options =
             SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated);
-        for (relative, bytes) in &files {
+        for (relative, bytes) in files.iter().filter(|(relative, _)| is_shareable(relative)) {
             writer
                 .start_file(format!("{}/{relative}", handle.slug), options)
                 .map_err(|e| LibraryError::Meta(format!("zip: {e}")))?;
@@ -51,6 +53,15 @@ pub fn export_package(handle: &PackageHandle) -> Result<Vec<u8>, LibraryError> {
             .map_err(|e| LibraryError::Meta(format!("zip: {e}")))?;
     }
     Ok(cursor.into_inner())
+}
+
+/// Whether a package file may leave the library in an export (zip, or the
+/// share envelope). Everything may, except an access sidecar: a zip or a
+/// pasted envelope gets shared, and the keys inside `/.lp/access.json` are
+/// login-equivalent. A device push is not an export — it carries the file,
+/// which is how "secrets travel on deploy".
+pub fn is_shareable(relative_path: &str) -> bool {
+    !lpc_access::is_access_file_path(relative_path)
 }
 
 /// What an import produced.
@@ -211,6 +222,7 @@ pub fn import_json(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use lpc_model::AsLpPath;
     use lpfs::LpFsMemory;
     use std::cell::RefCell;
     use std::rc::Rc;
@@ -234,7 +246,7 @@ mod tests {
                 &[
                     (
                         "project.json".to_string(),
-                        br#"{"format":10,"name":"demo"}"#.to_vec(),
+                        br#"{"format":11,"name":"demo"}"#.to_vec(),
                     ),
                     ("module.json".to_string(), br#"{"kind":"Module"}"#.to_vec()),
                     ("shader.glsl".to_string(), b"void main() {}".to_vec()),
@@ -515,11 +527,17 @@ mod tests {
         assert!(store.list().unwrap().is_empty());
     }
 
+    /// The export keeps provenance (`/.lp/meta.json` and the rest of
+    /// `/.lp`) but never the access sidecar, and never history.
     #[test]
-    fn export_excludes_history_and_includes_sidecar() {
+    fn export_excludes_history_and_the_access_file_but_keeps_other_lp_files() {
         let source_store = store();
         let source = seeded(&source_store);
         let handle = source_store.open(source.uid).unwrap();
+        write_access_sidecar(&handle);
+        handle
+            .apply_update("/.lp/state.json".as_path(), Some(b"{}"))
+            .unwrap();
         let bytes = export_package(&handle).unwrap();
 
         let mut archive = zip::ZipArchive::new(Cursor::new(bytes.as_slice())).unwrap();
@@ -527,6 +545,53 @@ mod tests {
             .map(|i| archive.by_index(i).unwrap().name().to_string())
             .collect();
         assert!(names.iter().any(|n| n.ends_with(".lp/meta.json")));
+        assert!(names.iter().any(|n| n.ends_with(".lp/state.json")));
+        assert!(
+            !names.iter().any(|n| n.ends_with(".lp/access.json")),
+            "the access sidecar left the library in a zip: {names:?}"
+        );
         assert!(!names.iter().any(|n| n.contains("history")));
+    }
+
+    /// A device push is not an export: its payload is every package file,
+    /// the access sidecar included — the one way a project's secrets reach
+    /// a board — and the push's write requests carry it.
+    #[test]
+    fn a_device_push_carries_the_access_file() {
+        let source_store = store();
+        let source = seeded(&source_store);
+        let handle = source_store.open(source.uid).unwrap();
+        write_access_sidecar(&handle);
+
+        // The push payload (`StudioController::read_library_package_files`).
+        let payload = handle.read_all_files().unwrap();
+        assert!(
+            payload.iter().any(|(path, _)| path == ".lp/access.json"),
+            "the push payload dropped the access sidecar"
+        );
+
+        // …and the push conversation writes it (`replace_and_load_project`).
+        let files: Vec<_> = payload
+            .into_iter()
+            .map(|(path, bytes)| lpa_client::ProjectDeployFile::new(path, bytes))
+            .collect();
+        let writes = lpa_client::project_deploy::project_write_requests("demo", files);
+        assert!(
+            writes.iter().any(|request| matches!(
+                request,
+                lpc_wire::ClientRequest::Filesystem(lpc_wire::server::FsRequest::Write { path, .. })
+                    if path.as_str() == "/projects/demo/.lp/access.json"
+            )),
+            "no write of the access sidecar in the push"
+        );
+    }
+
+    fn write_access_sidecar(handle: &PackageHandle) {
+        handle
+            .apply_update(
+                "/.lp/access.json".as_path(),
+                Some(br#"{"version":1,"secrets":[]}"#),
+            )
+            .unwrap();
     }
 }

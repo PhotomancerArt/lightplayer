@@ -12,7 +12,7 @@ use lpfs::{AsLpPath, FsEvent, FsEventKind, LpFs, LpFsMemory, LpPathBuf};
 
 fn project_fs() -> LpFsMemory {
     let fs = LpFsMemory::new();
-    fs.write_file("/project.json".as_path(), b"{\n  \"format\": 10\n}\n")
+    fs.write_file("/project.json".as_path(), b"{\n  \"format\": 11\n}\n")
         .expect("container manifest");
     fs.write_file(
         "/module.json".as_path(),
@@ -84,6 +84,19 @@ fn load(fs: &LpFsMemory) -> LoadedProjectRuntime {
     ProjectLoader::load_from_root(fs, services).expect("load scope project")
 }
 
+/// Loads [`project_fs`] with both playlist entries: only the idle entry (1)
+/// is resident by default, and the scope model under test needs entry 7's
+/// sink too.
+fn load_both_entries(fs: &LpFsMemory) -> LoadedProjectRuntime {
+    let services = EngineServices::new(TreePath::parse("/scope_test.show").expect("path"));
+    ProjectLoader::load_from_root_with_resident_entries(
+        fs,
+        services,
+        &[(use_location("nodes[list]"), 7)],
+    )
+    .expect("load scope project")
+}
+
 fn use_location(path: &str) -> NodeUseLocation {
     NodeUseLocation::root().child(SlotPath::parse(path).expect("slot path"))
 }
@@ -108,7 +121,7 @@ fn scope_table(engine: &lpc_engine::Engine) -> Vec<(String, Option<String>, bool
 #[test]
 fn scope_is_queryable_after_load_with_sink_entries_modeled() {
     let fs = project_fs();
-    let rt = load(&fs);
+    let rt = load_both_entries(&fs);
     let engine = rt.engine();
     let tree = engine.tree();
     let root = tree.root();
@@ -181,10 +194,10 @@ fn load_and_trivial_apply_produce_identical_scope_tables() {
     // entry points — a project must never wear different scopes after an
     // edit than after a reload.
     let fs = project_fs();
-    let baseline = scope_table(load(&fs).engine());
+    let baseline = scope_table(load_both_entries(&fs).engine());
 
     let fs = project_fs();
-    let rt = load(&fs);
+    let rt = load_both_entries(&fs);
     let (mut engine, mut registry) = rt.into_parts();
     // Trivial content change: touch the clock def body.
     fs.write_file(
@@ -238,14 +251,14 @@ fn load_and_apply_produce_identical_bus_wiring() {
     }
 
     let fs = project_fs();
-    let baseline = winner_table(load(&fs).engine());
+    let baseline = winner_table(load_both_entries(&fs).engine());
     assert!(
         !baseline.is_empty(),
         "the wiring table must actually cover channels"
     );
 
     let fs = project_fs();
-    let rt = load(&fs);
+    let rt = load_both_entries(&fs);
     let (mut engine, mut registry) = rt.into_parts();
     fs.write_file(
         "/clock.json".as_path(),
@@ -279,7 +292,7 @@ fn failed_defs_still_carry_scope() {
     let fs = project_fs();
     fs.write_file("/clock.json".as_path(), b"not valid json {{{")
         .expect("break clock def");
-    let rt = load(&fs);
+    let rt = load_both_entries(&fs);
     let engine = rt.engine();
     let tree = engine.tree();
     let root_scope = tree
@@ -295,7 +308,7 @@ fn failed_defs_still_carry_scope() {
 #[test]
 fn scope_persist_paths_are_tree_path_stable() {
     let fs = project_fs();
-    let rt = load(&fs);
+    let rt = load_both_entries(&fs);
     let engine = rt.engine();
     let tree = engine.tree();
     let root_scope = tree.scope_introduced_by(tree.root()).expect("root scope");
@@ -318,7 +331,7 @@ fn e5_depth_2_consumer_resolves_the_sibling_modules_publish() {
     // pinned: writer accounting that omits module publishes works at
     // depth 1 by coincidence and resolves C to ROOT's visual at depth 2.
     let fs = LpFsMemory::new();
-    fs.write_file("/project.json".as_path(), b"{\n  \"format\": 10\n}\n")
+    fs.write_file("/project.json".as_path(), b"{\n  \"format\": 11\n}\n")
         .expect("container manifest");
     fs.write_file(
         "/module.json".as_path(),
@@ -438,7 +451,7 @@ fn r7_authored_export_and_root_module_runtime() {
     // the export's name; the root wears a real module runtime (its output
     // interface exists like any module's).
     let fs = LpFsMemory::new();
-    fs.write_file("/project.json".as_path(), b"{\n  \"format\": 10\n}\n")
+    fs.write_file("/project.json".as_path(), b"{\n  \"format\": 11\n}\n")
         .expect("container manifest");
     fs.write_file(
         "/module.json".as_path(),
@@ -523,7 +536,7 @@ fn panel_writer_survives_apply_project_changes() {
     // ALL bindings from defs (clear + re-register), and an engaged panel
     // writer must ride through untouched — still engaged, still winning.
     let fs = project_fs();
-    let rt = load(&fs);
+    let rt = load_both_entries(&fs);
     let (mut engine, mut registry) = rt.into_parts();
     let root_scope = engine
         .tree()
@@ -570,20 +583,25 @@ fn panel_writer_survives_apply_project_changes() {
     let result = engine.read_project_binding_graph_probe(
         &registry,
         lpc_wire::BindingGraphProbeRequest {
+            structure: lpc_wire::RevisionGateRead::Always,
             include_values: true,
         },
     );
-    let lpc_wire::BindingGraphProbeResult::Graph(graph) = result else {
+    let lpc_wire::BindingGraphProbeResult::Graph(lpc_wire::WireBindingGraphRead {
+        structure: lpc_wire::RevisionGateResult::Changed(graph),
+        values: Some(values),
+    }) = result
+    else {
         panic!("expected graph result");
     };
     let row = graph
         .channels
         .iter()
-        .find(|row| row.name == "time" && !row.scope.is_none())
+        .position(|row| row.name == "time" && !row.scope.is_none())
         .expect("scoped time row");
     assert_eq!(
-        row.value.as_ref().and_then(|value| value.value.clone()),
-        Some(lpc_model::LpValue::F32(42.0)),
+        values.values[row].value(),
+        Some(&lpc_model::LpValue::F32(42.0)),
         "the panel value still wins after apply"
     );
 }

@@ -1,0 +1,71 @@
+{
+  "kind": "Shader",
+  "source": "shader.glsl",
+  "render_order": 0,
+  "coords": "pattern",
+  "bindings": {
+    "output": {
+      "target": "bus:visual.out"
+    },
+    "detail": {
+      "source": "bus:detail"
+    },
+    "thickness": {
+      "source": "bus:thickness"
+    },
+    "palette": {
+      "source": "bus:palette"
+    }
+  },
+  "consumed": {
+    "detail": {
+      "kind": "value",
+      "value": "f32",
+      "default": 1,
+      "min": 0.25,
+      "max": 4,
+      "label": "Detail",
+      "description": "Vein spacing: 1 is about nine lamps between veins; 2 halves it"
+    },
+    "thickness": {
+      "kind": "value",
+      "value": "f32",
+      "default": 1.3,
+      "min": 0.5,
+      "max": 4,
+      "label": "Thickness",
+      "description": "Vein width in lamps"
+    },
+    "crawlPhase": {
+      "kind": "phasor",
+      "value": "f32",
+      "phasor": {
+        "period_seconds": 120.0,
+        "waveform": "ramp",
+        "phase_offset": 0.0
+      },
+      "default": 0,
+      "label": "Crawl",
+      "description": "Position on the vein network's closed crawl loop (0-1)"
+    },
+    "palette": {
+      "kind": "palette",
+      "value": "sampler2D",
+      "label": "Palette",
+      "description": "Veins take their colour from the middle of this ramp; the ground from its dark end",
+      "gradient": {
+        "kind": "static",
+        "step_seconds": 0.0,
+        "fade_seconds": 0.0,
+        "pinned": -1,
+        "set": [
+          {
+            "space": "oklab",
+            "method": "smooth",
+            "stops": "(0.250378,-0.02488,-0.049547)@0 (0.502406,-0.063869,-0.066479)@0.33 (0.745013,-0.10311,-0.03967)@0.66 (0.943718,-0.028184,-0.004253)@1"
+          }
+        ]
+      }
+    }
+  }
+}

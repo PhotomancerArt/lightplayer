@@ -177,6 +177,25 @@ fn cycle_of(count: usize) -> GradientConfig {
             .collect(),
         step_seconds: 4.0,
         fade_seconds: 0.3,
+        pinned: None,
+    }
+}
+
+/// [`cycle_of`] with member `index` pinned.
+fn pinned_cycle_of(count: usize, index: usize) -> GradientConfig {
+    match cycle_of(count) {
+        GradientConfig::Cycle {
+            set,
+            step_seconds,
+            fade_seconds,
+            ..
+        } => GradientConfig::Cycle {
+            set,
+            step_seconds,
+            fade_seconds,
+            pinned: Some(index),
+        },
+        held => held,
     }
 }
 
@@ -201,6 +220,20 @@ fn cycle_tab() -> Element {
     rsx! {
         ChooserStoryCard { catalog: story_catalog(project_rows()),
             ChooserRow { config: cycle_of(3), tab: PaletteChooserTab::Cycle }
+        }
+    }
+}
+
+#[story(
+    description = "The CYCLE tab with one member PINNED: \u{201c}keep these, but right now show me just this one\u{201d}. Every chip carries a pin; the pinned chip wears the strong border and a solid pin, and the others dim because while the pin holds they are not playing. Pressing the same pin unpins (the walk resumes wherever time has got to); pressing another chip's pin moves the pin there — there is only ever one. Step and fade are untouched by a pin, so unpinning needs no re-authoring."
+)]
+fn cycle_tab_pinned() -> Element {
+    rsx! {
+        ChooserStoryCard { catalog: story_catalog(project_rows()),
+            ChooserRow {
+                config: pinned_cycle_of(3, 1),
+                tab: PaletteChooserTab::Cycle,
+            }
         }
     }
 }

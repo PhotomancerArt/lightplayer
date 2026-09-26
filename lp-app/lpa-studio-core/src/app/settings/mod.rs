@@ -38,4 +38,6 @@ pub use settings_command::SettingsCommand;
 pub use settings_layer::SettingsLayer;
 pub use settings_store::SettingsStore;
 pub use studio_settings::{AgentSettings, DEFAULT_AGENT_MODEL, StudioSettings};
-pub use ui_settings_view::{UiAgentSettingsView, UiModelOption, UiSettingsView};
+pub use ui_settings_view::{
+    UiAgentSettingsView, UiDeviceSettingsView, UiModelOption, UiSettingsView,
+};

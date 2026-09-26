@@ -1,6 +1,11 @@
-//! Server-side lazy lifecycle state for node entries.
+//! Server-side lifecycle state for node entries.
 //!
-//! See `docs/roadmaps/2026-04-28-node-runtime/design/01-tree.md` §EntryState.
+//! The archived design (`docs-archive/roadmaps/2026-04-28-node-runtime/design/01-tree.md`
+//! §EntryState) had `Pending` children woken by the resolver and `Failed`
+//! reads falling through to slot defaults. Neither holds: the resolver never
+//! wakes a node, a parent that wants a child loaded asks for it
+//! (`docs/adr/2026-09-25-parent-owned-child-residency.md`), and reading from a
+//! node that is not `Alive` is a hard resolve error.
 
 use alloc::string::String;
 
@@ -14,12 +19,15 @@ use super::NodeCallKey;
 #[derive(Debug)]
 pub enum NodeEntryState<N> {
     /// Artifact handle resolved + refcounted; node not yet instantiated.
+    /// Nothing wakes a `Pending` node on demand.
     Pending,
     /// Node instantiated and ticking.
     Alive(N),
     /// Node payload is temporarily moved out for an engine-dispatched call.
     Executing { call: NodeCallKey },
-    /// Instantiation failed; resolution falls through to slot defaults.
+    /// Instantiation failed. Reading this node's produced slots is a hard
+    /// resolve error ("node … not alive"), like every non-`Alive` state; it
+    /// does not fall through to slot defaults.
     Failed { reason: String },
 }
 

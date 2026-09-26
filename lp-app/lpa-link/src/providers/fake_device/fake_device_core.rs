@@ -62,6 +62,9 @@ impl FakeEsp32Device {
                 reboots_performed: 0,
                 loaded_projects: Vec::new(),
                 pending_loads: std::collections::BTreeMap::new(),
+                encoding: lpc_wire::WireEncoding::Json,
+                packed_frames_emitted: 0,
+                unanswered: std::collections::BTreeSet::new(),
             })),
         }
     }
@@ -74,6 +77,12 @@ impl FakeEsp32Device {
     /// wire — the same ordering real firmware gets.
     pub fn reboot_requests(&self) -> usize {
         self.lock().reboot_requests.load(Ordering::SeqCst)
+    }
+
+    /// Protocol frames this device has written packed, cumulative: nonzero
+    /// once a host opted in (`ClientRequest::SetEncoding`) and was answered.
+    pub fn packed_frames_emitted(&self) -> usize {
+        self.lock().packed_frames_emitted
     }
 
     /// Install (or replace) the stream failure plan. Byte thresholds count
@@ -135,6 +144,23 @@ impl FakeEsp32Device {
     /// state's boot.
     pub fn reset_runtime(&self) {
         self.lock().reset_current();
+    }
+
+    /// How many requests the fake's server has been handed whose answer has
+    /// not yet reached the byte wire.
+    ///
+    /// The server runs on a REAL thread and answers in real time, so an
+    /// answer can still be inside the server when the reader stops reading.
+    /// A reopen flushes the byte wire, not the server, so such an answer is
+    /// delivered into the NEXT observation window — true speech from the
+    /// board, but one a test that asserts a silent fresh window must rule
+    /// out first. Zero means every answer is on the wire or already read
+    /// (docs/defects/2026-09-25-a-late-hello-answer-reaches-the-fresh-window.md).
+    ///
+    /// Answers the script swallows (`drop_responses`, `suppress_hello`) are
+    /// never emitted, so they stay counted here.
+    pub fn unanswered_requests(&self) -> usize {
+        self.lock().unanswered.len()
     }
 
     /// Toggle correlated-response dropping at runtime (no reboot): lets a
@@ -248,6 +274,16 @@ pub(crate) struct FakeDeviceCore {
     /// `LoadProject` requests in flight, by correlation id, so the reply can
     /// be paired with the path it loaded.
     pending_loads: std::collections::BTreeMap<u64, lpc_model::LpPathBuf>,
+    /// The form this link's replies go out in: JSON until the host opts in
+    /// (`ClientRequest::SetEncoding`), and JSON again when the port reopens
+    /// or the device resets — the per-link state shipped firmware holds in
+    /// its transport.
+    encoding: lpc_wire::WireEncoding,
+    /// Frames written packed, cumulative across boots.
+    packed_frames_emitted: usize,
+    /// Correlation ids the server has been handed but whose answer has not
+    /// yet reached the byte wire. Backs [`FakeEsp32Device::unanswered_requests`].
+    unanswered: std::collections::BTreeSet<u64>,
 }
 
 impl FakeDeviceCore {
@@ -261,6 +297,8 @@ impl FakeDeviceCore {
         self.last_heartbeat = None;
         self.loaded_projects.clear();
         self.pending_loads.clear();
+        self.encoding = lpc_wire::WireEncoding::Json;
+        self.unanswered.clear();
         // Dropping a RunningLp phase drops the HostRuntime, which joins the
         // server thread (bounded).
         self.phase = FakePhase::fresh(&self.script.boot);
@@ -356,6 +394,7 @@ impl FakeDeviceCore {
         let project_dir = lp.project_dir.clone();
         let identity = lp.identity.clone();
         let base_mac = lp.base_mac.clone();
+        let packs = lp.packs;
         let reboot_requests = Arc::clone(&self.reboot_requests);
         let hello_identity = lp
             .provenance
@@ -382,6 +421,9 @@ impl FakeDeviceCore {
                 }
             }
             let mut server = create_memory_server_with(fs, hello_identity);
+            // What the ESP firmwares do: the hello names this build's
+            // dictionary and an opt-in naming it is answered `packed`.
+            server.set_packed_encoding_supported(packs);
             // The embedder's reset action (real firmware calls
             // `software_reset()` here). Recording rather than resetting is
             // the point: the server fires this only AFTER the ack frame is
@@ -466,6 +508,7 @@ impl FakeDeviceCore {
                 continue;
             }
             self.note_server_frame(&frame);
+            self.unanswered.remove(&frame.id);
             if !self.emit_wire_frame(&frame) {
                 return;
             }
@@ -557,9 +600,10 @@ impl FakeDeviceCore {
         self.reset_current();
     }
 
-    /// Serialize one protocol frame onto the byte wire as an `M!<json>\n`
-    /// line, applying the frame-level injection knobs (log flood,
-    /// mid-frame cut). Returns `false` when the wire stalled on a cut.
+    /// Serialize one protocol frame onto the byte wire — an `M!<json>\n`
+    /// line, or a packed frame on a link that opted in — applying the
+    /// frame-level injection knobs (log flood, mid-frame cut). Returns
+    /// `false` when the wire stalled on a cut.
     fn emit_wire_frame(&mut self, frame: &lpc_wire::WireServerMessage) -> bool {
         let json = match lpc_wire::json::to_string(frame) {
             Ok(json) => json,
@@ -572,15 +616,36 @@ impl FakeDeviceCore {
             // Logs and frames share the wire on real hardware.
             self.push_line(&flood);
         }
-        let frame_line = format!("M!{json}\n");
+        let frame_bytes = match self.encoding {
+            lpc_wire::WireEncoding::Json => format!("M!{json}\n").into_bytes(),
+            // `\n 0x00 'P' COBS 0x00`, built by the firmware's own writer
+            // into a buffer with room for the JSON line; a frame that cannot
+            // pack goes out as JSON, as it does on a board.
+            lpc_wire::WireEncoding::Packed => {
+                let mut buf = vec![0u8; json.len() + 64];
+                match lpc_wire::ser_packed_frame_to(&mut buf, frame) {
+                    Ok(n) => {
+                        buf.truncate(n);
+                        self.packed_frames_emitted += 1;
+                        buf
+                    }
+                    Err(_) => format!("M!{json}\n").into_bytes(),
+                }
+            }
+        };
         if self.failure.cut_mid_frame_after_frames == Some(self.frames_emitted) {
-            let cut = frame_line.len() / 2;
-            self.push_bytes(&frame_line.as_bytes()[..cut]);
+            let cut = frame_bytes.len() / 2;
+            self.push_bytes(&frame_bytes[..cut]);
             self.stalled_by_cut = true;
             return false;
         }
-        self.push_bytes(frame_line.as_bytes());
+        self.push_bytes(&frame_bytes);
         self.frames_emitted += 1;
+        // The answer to an opt-in goes out in the old form; the switch is
+        // for the frames after it.
+        if let lpc_wire::ServerMsgBody::SetEncoding { encoding } = &frame.msg {
+            self.encoding = *encoding;
+        }
         true
     }
 
@@ -713,6 +778,9 @@ impl FakeDeviceCore {
         let FakePhase::RunningLp { runtime } = &self.phase else {
             return;
         };
+        if message.id != 0 {
+            self.unanswered.insert(message.id);
+        }
         let transport = runtime.client_transport();
         let sent = poll_once(async {
             let mut transport = transport.lock().await;
@@ -755,6 +823,8 @@ impl FakeDeviceCore {
     /// A reopen (baud change) flushes the wire but does not reboot the
     /// device — matching a real port close/reopen.
     pub(crate) fn reopen(&mut self) {
+        // A closed port is a closed link: the next host starts at JSON.
+        self.encoding = lpc_wire::WireEncoding::Json;
         self.out.clear();
         self.out_since = None;
         self.input_buf.clear();

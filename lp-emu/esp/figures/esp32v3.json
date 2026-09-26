@@ -1,0 +1,44 @@
+{
+  "_about": "Firmware-derived figures the classic ESP32 (v3) emulator tests pin, read off THIS TREE's fw-esp32v3 image (esp32,server,float-f32). Exact: a moved figure fails its test, naming old -> new. Re-record with `just bless-chips esp32v3` and commit the diff with the change that moved it; never hand-edit. Figures read against silicon or the pinned 75486b114 reference image are NOT here (they stay literals, and a bless cannot reach them). See docs/chip-figures.md.",
+  "boot.init_chain.blank": [
+    "[INIT] fw-esp32v3 boot",
+    "[INIT] chip=esp32 arch=xtensa heap=15072+112640+98304+15536=241552 (ROM PRO stack + dram_seg arena + SRAM1 tail + ROM APP stack)",
+    "[INIT] heap regions: 0 0x3ffe0440+15072 (ROM PRO stack), 1 .bss+112640 (dram_seg arena), 2 0x3ffe8000+98304 (SRAM1 tail), 3 0x3ffe4350+15536 (ROM APP stack, after core bind)",
+    "[INIT] main stack 45240 B",
+    "[RECOVERY] boot: cause=power-on level=green safe_mode=false prior_boot_complete=true",
+    "[INIT] runtime started",
+    "[INIT] I/O task spawned (uart0 921600 8N1, swi2 executor prio2, timg0t1 pacer 1ms)",
+    "[ERROR] no `lpfs` partition in the flashed table — reflash with --partition-table lp-fw/fw-esp32v3/partitions.csv; using memory FS",
+    "[INIT] RMT ISR on APP core",
+    "[INIT] heap region 3 live: 0x3ffe4350+15536 (ROM APP stack)",
+    "[INIT] JIT code region: sram0 ibus 0x4008"
+  ],
+  "boot.init_chain.merged": [
+    "[INIT] fw-esp32v3 boot",
+    "[INIT] chip=esp32 arch=xtensa heap=15072+112640+98304+15536=241552 (ROM PRO stack + dram_seg arena + SRAM1 tail + ROM APP stack)",
+    "[INIT] heap regions: 0 0x3ffe0440+15072 (ROM PRO stack), 1 .bss+112640 (dram_seg arena), 2 0x3ffe8000+98304 (SRAM1 tail), 3 0x3ffe4350+15536 (ROM APP stack, after core bind)",
+    "[INIT] main stack 45240 B",
+    "[RECOVERY] boot: cause=power-on level=green safe_mode=false prior_boot_complete=true",
+    "[INIT] runtime started",
+    "[INIT] I/O task spawned (uart0 921600 8N1, swi2 executor prio2, timg0t1 pacer 1ms)",
+    "[INIT] flash filesystem mounted",
+    "[INIT] RMT ISR on APP core",
+    "[INIT] heap region 3 live: 0x3ffe4350+15536 (ROM APP stack)",
+    "[INIT] JIT code region: sram0 ibus 0x4008"
+  ],
+  "boot_idle.path_high_water_gap": -96,
+  "determinism.single_core_prefix.cycles": 3250804,
+  "determinism.single_core_prefix.idle_skips": 0,
+  "determinism.single_core_prefix.instructions": 3250784,
+  "init_chain.prefix": [
+    "[INIT] fw-esp32v3 boot",
+    "[INIT] chip=esp32 arch=xtensa heap=15072+112640+98304+15536=241552 (ROM PRO stack + dram_seg arena + SRAM1 tail + ROM APP stack)",
+    "[INIT] heap regions: 0 0x3ffe0440+15072 (ROM PRO stack), 1 .bss+112640 (dram_seg arena), 2 0x3ffe8000+98304 (SRAM1 tail), 3 0x3ffe4350+15536 (ROM APP stack, after core bind)",
+    "[INIT] main stack 45240 B",
+    "[RECOVERY] boot: cause=power-on level=green safe_mode=false prior_boot_complete=true",
+    "[INIT] runtime started",
+    "[INIT] I/O task spawned (uart0 921600 8N1, swi2 executor prio2, timg0t1 pacer 1ms)",
+    ""
+  ],
+  "main_stack_bytes": 45240
+}

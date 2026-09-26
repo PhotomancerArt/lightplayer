@@ -34,10 +34,29 @@ pub fn PlayModeSurface(
     /// reachable in play mode. `None` hides the switch.
     #[props(default = Some(true))]
     auto_save: Option<bool>,
+    /// How this piece is reached, when it is over Bluetooth ("Unlocked
+    /// as camp — play"): the one line a phone on a piece.s panel needs to
+    /// know why an edit might ask for a password (BLE M6).
+    #[props(default)]
+    access_line: Option<String>,
     #[props(default = None)] on_panel: Option<EventHandler<PanelGesture>>,
     #[props(default)] on_action: Option<EventHandler<UiAction>>,
 ) -> Element {
     let title = panel.label.clone();
+    // The Play lease (M5): while this surface is mounted, a lens over a
+    // Bluetooth link reads only when someone touches a control (and once a
+    // minute), instead of streaming — Play over BLE is the steady state,
+    // and the board shares that air time with ESP-NOW.
+    use_effect(move || {
+        if let Some(on_action) = on_action {
+            on_action.call(lpa_studio_core::PlayViewOp::action_for(true));
+        }
+    });
+    use_drop(move || {
+        if let Some(on_action) = on_action {
+            on_action.call(lpa_studio_core::PlayViewOp::action_for(false));
+        }
+    });
 
     rsx! {
         div { class: "tw:grid tw:min-h-full tw:min-w-0 tw:content-start tw:gap-0 tw:bg-page",
@@ -47,6 +66,12 @@ pub fn PlayModeSurface(
                     "play"
                 }
             }
+            if let Some(line) = access_line {
+                p { class: "tw:m-0 tw:truncate tw:border-b tw:border-border-strong tw:px-4 tw:py-1.5 tw:text-xs tw:text-subtle-foreground",
+                    title: "{line}",
+                    "{line}"
+                }
+            }
             if let Some(preview) = preview {
                 div { class: "tw:border-b tw:border-border-strong",
                     ProductPreview {
@@ -54,7 +79,7 @@ pub fn PlayModeSurface(
                         preview: preview.preview.clone(),
                         tracking: preview.tracking,
                         frame: preview.frame,
-                        focus_action: None,
+                        focus_action: preview.show_live.clone(),
                         on_action,
                     }
                 }

@@ -15,6 +15,8 @@ use alloc::{
 };
 use core::cell::RefCell;
 use hashbrown::HashMap;
+#[cfg(feature = "latent-read-back")]
+use lpc_engine::LatentReadBackSource;
 #[cfg(feature = "node-power-button")]
 use lpc_engine::PowerService;
 use lpc_engine::{ButtonService, LpGraphics, RadioService};
@@ -35,6 +37,10 @@ pub struct ProjectManager {
     next_handle_id: u32,
     /// Base directory where projects are stored (relative path)
     projects_base_dir: LpPathBuf,
+    /// The latent readback every project's engine is handed, when the host
+    /// has one (the browser GPU tier); see `Self::set_latent_read_back`.
+    #[cfg(feature = "latent-read-back")]
+    latent_read_back: Option<Arc<dyn LatentReadBackSource>>,
     /// Power-off service handed to every project this manager loads. Only
     /// in builds with the power-button runtime (see `LpServer::power`).
     #[cfg(feature = "node-power-button")]
@@ -52,9 +58,22 @@ impl ProjectManager {
             name_to_handle: HashMap::new(),
             next_handle_id: 1,
             projects_base_dir: projects_base_dir.to_path_buf(),
+            #[cfg(feature = "latent-read-back")]
+            latent_read_back: None,
             #[cfg(feature = "node-power-button")]
             power_service: None,
         }
+    }
+
+    /// Set (or clear) the latent readback the render-product probe uses on a
+    /// backend whose products stay GPU-resident, and hand it to every loaded
+    /// project. Future loads inherit it.
+    #[cfg(feature = "latent-read-back")]
+    pub fn set_latent_read_back(&mut self, source: Option<Arc<dyn LatentReadBackSource>>) {
+        for project in self.projects.values_mut() {
+            project.set_latent_read_back(source.clone());
+        }
+        self.latent_read_back = source;
     }
 
     /// Install the power-off service for every project loaded from now on,
@@ -143,6 +162,14 @@ impl ProjectManager {
                 graphics,
                 loaded_fs_version,
             )?;
+            #[cfg(feature = "latent-read-back")]
+            let project = {
+                let mut project = project;
+                if self.latent_read_back.is_some() {
+                    project.set_latent_read_back(self.latent_read_back.clone());
+                }
+                project
+            };
 
             #[cfg(feature = "node-power-button")]
             let project = {
@@ -205,6 +232,7 @@ impl ProjectManager {
         project.flush_panel_state();
         let name = project.name();
         self.name_to_handle.remove(name);
+        self.release_tables_if_empty();
 
         Ok(())
     }
@@ -220,7 +248,24 @@ impl ProjectManager {
         }
         self.projects.clear();
         self.name_to_handle.clear();
+        self.release_tables_if_empty();
         Ok(())
+    }
+
+    /// With no project loaded, give the tables' memory back instead of
+    /// keeping their capacity. They are first grown by the insert at the end
+    /// of `load_project`, after the project has taken the memory below them,
+    /// so a kept table (3.7 KB for `projects`: a `Project` is stored inline)
+    /// sits in the middle of the space the project frees and splits it; a
+    /// device then refused the next project on contiguity with 200 KB free
+    /// (docs/defects/2026-09-24-ble-enabled-c6-refuses-a-project-switch-after-the-heap-cut.md).
+    fn release_tables_if_empty(&mut self) {
+        if self.projects.is_empty() {
+            self.projects = HashMap::new();
+        }
+        if self.name_to_handle.is_empty() {
+            self.name_to_handle = HashMap::new();
+        }
     }
 
     /// Get a project by handle

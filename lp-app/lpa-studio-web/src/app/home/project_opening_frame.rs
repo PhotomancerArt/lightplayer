@@ -26,6 +26,17 @@
 //!   action; plus `lpa_fs_opfs`'s lock waits for the rare "blocked on a
 //!   background sync" state.
 //!
+//! # A board (2026-09-24)
+//!
+//! An open onto a board has no engine to narrate; it has the board. The
+//! core's [`OpenStage::WaitingForDevice`] and [`OpenStage::OnDevice`] say
+//! which board and which wire step, the upload carries real byte counts,
+//! and a step that has held for [`STALL_NOTE_SECS`] says how long. Every
+//! board state has a way out on the page itself — Cancel, Reset the board,
+//! and for a board this page has no port for, "Connect this board": the
+//! `requestPort()` gesture a fresh page in Brave needs before it can reach
+//! a board at all (Yona, 2026-09-24, JSON Pack sitting).
+//!
 //! Labels are DEBOUNCED ([`OpeningLabel`]): a fast open passes through
 //! three of these states in under a frame, and strobing them would read as
 //! a glitch rather than as progress. A state has to hold for
@@ -34,9 +45,13 @@
 
 use dioxus::prelude::*;
 use gloo_timers::future::TimeoutFuture;
-use lpa_studio_core::{ActionPriority, OpenStage, UiAction};
+use lpa_studio_core::{
+    AccessCommand, ActionPriority, DeviceAction, DeviceOpenProgress, DeviceOpenStep, DeviceWait,
+    DeviceWaitReason, DevicesOp, OpenDevice, OpenStage, RuntimeOp, UiAction,
+};
 
-use crate::core::solid_action_class;
+use crate::app::home::access_ui_context::access_handler;
+use crate::core::{quiet_action_class, solid_action_class};
 use crate::router::StudioRoute;
 
 /// How often the frame re-reads the platform's open signals.
@@ -45,6 +60,11 @@ const POLL_INTERVAL_MS: u32 = 75;
 /// How many consecutive polls a new state must survive before it replaces
 /// the displayed label — the ~150 ms debounce.
 const LABEL_HOLD_TICKS: u8 = 2;
+
+/// How long one board step may hold before the frame says how long it has
+/// been. Shorter than the 20 s request deadline on purpose: the person
+/// should read "still loading, 12 s" before they read a failure.
+const STALL_NOTE_SECS: u64 = 8;
 
 /// What the frame is narrating right now.
 #[derive(Clone, Debug, PartialEq, Default)]
@@ -69,9 +89,20 @@ pub enum OpeningState {
     /// Rare, short, and worth naming — it used to surface as "this project
     /// is open in another tab" with one tab open.
     WaitingForSync,
+    /// The open is held on a board that is not ready for it.
+    WaitingForDevice(DeviceWait),
+    /// The project is going onto a board, one wire step at a time.
+    OnDevice(DeviceOpenProgress),
     /// The open ended. `message` is the mapped `UiError` wording; `retry`
-    /// runs the same open again.
-    Failed { message: String, retry: UiAction },
+    /// runs the same open again; `device` is the board it was on, if any;
+    /// `needs_unlock` when the board refused the link's tier, so the way
+    /// on is Unlock rather than a Reset.
+    Failed {
+        message: String,
+        retry: UiAction,
+        device: Option<OpenDevice>,
+        needs_unlock: bool,
+    },
 }
 
 /// A phase of bringing the engine up, in the boot protocol's own
@@ -138,8 +169,38 @@ impl OpeningState {
             Self::StartingEngine { phase } => Some(phase.label().to_string()),
             Self::PreparingProject => Some("Preparing the project…".to_string()),
             Self::WaitingForSync => Some("Waiting for a background sync to finish…".to_string()),
+            Self::WaitingForDevice(wait) => Some(wait_label(wait)),
+            Self::OnDevice(progress) => Some(step_label(progress)),
             Self::Failed { .. } => Some("This project did not open".to_string()),
         }
+    }
+
+    /// The board this state is about, when it is about one.
+    pub fn device(&self) -> Option<&OpenDevice> {
+        match self {
+            Self::WaitingForDevice(wait) => Some(&wait.device),
+            Self::OnDevice(progress) => Some(&progress.device),
+            Self::Failed { device, .. } => device.as_ref(),
+            _ => None,
+        }
+    }
+
+    /// The unit the stall clock runs in: the state AND, on a board, its
+    /// step — an upload that is still moving is not a stall, but the byte
+    /// count changing is not a new step either.
+    fn stall_key(&self) -> (u8, u8) {
+        let step = match self {
+            Self::WaitingForDevice(wait) => wait.reason.clone() as u8,
+            Self::OnDevice(progress) => match progress.step {
+                DeviceOpenStep::Connecting => 0,
+                DeviceOpenStep::Clearing => 1,
+                DeviceOpenStep::Uploading { .. } => 2,
+                DeviceOpenStep::Loading => 3,
+                DeviceOpenStep::Reading => 4,
+            },
+            _ => 0,
+        };
+        (self.kind(), step)
     }
 
     /// Completion, 0.0–1.0, when the state knows one. Only the engine
@@ -151,6 +212,16 @@ impl OpeningState {
                 received_bytes,
                 total_bytes: Some(total),
             } if *total > 0.0 => Some((received_bytes / total).clamp(0.0, 1.0)),
+            Self::OnDevice(DeviceOpenProgress {
+                step:
+                    DeviceOpenStep::Uploading {
+                        sent_bytes,
+                        total_bytes,
+                    },
+                ..
+            }) if *total_bytes > 0 => {
+                Some((*sent_bytes as f64 / *total_bytes as f64).clamp(0.0, 1.0))
+            }
             _ => None,
         }
     }
@@ -166,7 +237,71 @@ impl OpeningState {
             Self::PreparingProject => 3,
             Self::WaitingForSync => 4,
             Self::Failed { .. } => 5,
+            Self::WaitingForDevice(_) => 6,
+            Self::OnDevice(_) => 7,
         }
+    }
+}
+
+fn wait_label(wait: &DeviceWait) -> String {
+    let name = &wait.device.name;
+    match wait.reason {
+        DeviceWaitReason::NotConnected => format!("{name} is not connected to this page"),
+        DeviceWaitReason::PortClosed => format!("{name}'s port is closed"),
+        DeviceWaitReason::Identifying => format!("Waiting for {name} to answer…"),
+        DeviceWaitReason::Busy => format!("Waiting for {name} to finish what it is doing…"),
+        DeviceWaitReason::Unknown => format!("Looking for {name}…"),
+    }
+}
+
+fn step_label(progress: &DeviceOpenProgress) -> String {
+    let name = &progress.device.name;
+    match progress.step {
+        DeviceOpenStep::Connecting => format!("Connecting to {name}…"),
+        DeviceOpenStep::Clearing => format!("Clearing {name}'s old project…"),
+        DeviceOpenStep::Uploading {
+            sent_bytes,
+            total_bytes,
+        } => format!(
+            "Sending the project to {name}… {} of {}",
+            human_bytes(sent_bytes),
+            human_bytes(total_bytes)
+        ),
+        DeviceOpenStep::Loading => format!("Loading on {name} — compiling its shaders…"),
+        DeviceOpenStep::Reading => format!("Reading the project back from {name}…"),
+    }
+}
+
+/// What a board state explains under its label, when it has more to say.
+fn device_detail(state: &OpeningState) -> Option<&'static str> {
+    match state {
+        OpeningState::WaitingForDevice(wait) => match wait.reason {
+            DeviceWaitReason::NotConnected => Some(
+                "A page may only use a USB board after you pick it, and some browsers (Brave) \
+                 forget that answer on every reload. Connect it and this project opens on it.",
+            ),
+            DeviceWaitReason::PortClosed => {
+                Some("The board is plugged in but this page closed its port.")
+            }
+            DeviceWaitReason::Identifying => Some(
+                "It is connected but has not said hello yet. A board that just reset says it \
+                 within a few seconds; one that stays quiet may need a reset.",
+            ),
+            DeviceWaitReason::Busy | DeviceWaitReason::Unknown => None,
+        },
+        OpeningState::OnDevice(DeviceOpenProgress {
+            step: DeviceOpenStep::Loading,
+            ..
+        }) => Some("The board compiles every shader itself; a large project takes a while."),
+        _ => None,
+    }
+}
+
+fn human_bytes(bytes: u64) -> String {
+    if bytes < 1024 {
+        format!("{bytes} B")
+    } else {
+        format!("{:.1} KB", bytes as f64 / 1024.0)
     }
 }
 
@@ -245,7 +380,17 @@ pub fn opening_state(probe: &OpenProbe) -> OpeningState {
         return OpeningState::Failed {
             message: failure.message.clone(),
             retry: failure.retry.clone(),
+            device: failure.device.clone(),
+            needs_unlock: failure.needs_unlock,
         };
+    }
+    // A held open parks nothing — the actor is free while the board is
+    // away — so it is read before `in_flight`, which a hold never sets.
+    if let OpenStage::WaitingForDevice(wait) = &probe.stage {
+        return OpeningState::WaitingForDevice(wait.clone());
+    }
+    if let OpenStage::OnDevice(progress) = &probe.stage {
+        return OpeningState::OnDevice(progress.clone());
     }
     if !probe.in_flight {
         // A project route with no open running: a boot reopen whose action
@@ -328,6 +473,10 @@ pub fn ProjectOpeningFrame(
     /// page's seam, and what makes every state reviewable.
     #[props(default)]
     state: Option<OpeningState>,
+    /// How long the shown step has held, for a story to pose the stall
+    /// note; live frames measure it themselves.
+    #[props(default)]
+    stalled_secs: Option<u64>,
     /// Where Retry dispatches. Absent in stories, where the button is
     /// present but inert.
     #[props(default)]
@@ -335,6 +484,7 @@ pub fn ProjectOpeningFrame(
 ) -> Element {
     let forced = state.clone();
     let mut polled = use_signal(OpeningState::default);
+    let mut held_secs = use_signal(|| 0u64);
     // One poll loop per mount. It only runs where the frame does — a
     // project route whose project is not up — and stops with it.
     use_future(move || {
@@ -344,25 +494,60 @@ pub fn ProjectOpeningFrame(
                 return;
             }
             let mut label = OpeningLabel::default();
+            let mut stall = StallClock::default();
             loop {
                 let next = label.observe(opening_state(&OpenProbe::read()));
+                let secs = stall.observe(next.stall_key(), now_ms());
                 // The read's borrow is scoped to this `let` on purpose:
                 // held across `set` it would be a runtime borrow panic.
                 let changed = *polled.peek() != next;
                 if changed {
                     polled.set(next);
                 }
+                if *held_secs.peek() != secs {
+                    held_secs.set(secs);
+                }
                 TimeoutFuture::new(POLL_INTERVAL_MS).await;
             }
         }
     });
     let shown = state.unwrap_or_else(|| polled.read().clone());
+    let held = stalled_secs.unwrap_or_else(|| *held_secs.read());
 
-    if let OpeningState::Failed { message, retry } = &shown {
+    if let OpeningState::Failed {
+        message,
+        retry,
+        device,
+        needs_unlock,
+    } = &shown
+    {
         return rsx! {
-            OpenFailureNotice { message: message.clone(), retry: retry.clone(), on_action }
+            OpenFailureNotice {
+                message: message.clone(),
+                retry: retry.clone(),
+                device: device.clone(),
+                needs_unlock: *needs_unlock,
+                on_action,
+            }
         };
     }
+
+    let stall_note = match (&shown, held >= STALL_NOTE_SECS) {
+        // Waiting on the PERSON (a click, a cable) is not a stall.
+        (OpeningState::WaitingForDevice(wait), true)
+            if !matches!(
+                wait.reason,
+                DeviceWaitReason::NotConnected | DeviceWaitReason::PortClosed
+            ) =>
+        {
+            Some(format!("Waiting {held} s so far."))
+        }
+        (OpeningState::OnDevice(progress), true) => Some(format!(
+            "Still {} — {held} s on this step.",
+            progress.step.doing()
+        )),
+        _ => None,
+    };
 
     rsx! {
         section { class: "tw:grid tw:gap-3.5",
@@ -374,8 +559,8 @@ pub fn ProjectOpeningFrame(
                     }
                 }
                 // A bar only where a real quantity exists (the engine
-                // download). Every other phase gets the pulsing dot above,
-                // which claims nothing it cannot know.
+                // download, a board's upload). Every other phase gets the
+                // pulsing dot above, which claims nothing it cannot know.
                 if let Some(fraction) = shown.fraction() {
                     div {
                         class: "tw:h-1 tw:w-full tw:max-w-[420px] tw:overflow-hidden tw:rounded-pill tw:bg-card-subtle",
@@ -389,6 +574,17 @@ pub fn ProjectOpeningFrame(
                         }
                     }
                 }
+                if let Some(detail) = device_detail(&shown) {
+                    p { class: "tw:m-0 tw:max-w-[560px] tw:text-xs tw:leading-normal tw:text-muted-foreground",
+                        "{detail}"
+                    }
+                }
+                if let Some(note) = stall_note {
+                    p { class: "tw:m-0 tw:text-xs tw:text-status-warning-foreground", "{note}" }
+                }
+                if shown.device().is_some() {
+                    DeviceOpenExits { state: shown.clone(), on_action }
+                }
             }
             // a rough silhouette of the editor's three-column layout
             div { class: "tw:grid tw:animate-pulse tw:grid-cols-[minmax(220px,280px)_minmax(0,1fr)_minmax(300px,360px)] tw:gap-3.5 tw:max-[960px]:grid-cols-1",
@@ -401,6 +597,121 @@ pub fn ProjectOpeningFrame(
             }
         }
     }
+}
+
+/// The ways off a board open that is taking too long, or never started.
+///
+/// Its own component for the reason [`OpenFailureNotice`] is: the handlers
+/// are built from props, not from a closure the poll loop rebuilds.
+#[component]
+#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
+fn DeviceOpenExits(state: OpeningState, on_action: Option<EventHandler<UiAction>>) -> Element {
+    let Some(device) = state.device().cloned() else {
+        return rsx! {};
+    };
+    let connect = match &state {
+        OpeningState::WaitingForDevice(wait) => match (&wait.reason, device.id) {
+            // The chooser: `requestPort()` rides this click's activation.
+            (DeviceWaitReason::NotConnected, Some(id)) => {
+                Some(DevicesOp::action_for(DeviceAction::Reconnect {
+                    device: id,
+                }))
+            }
+            (DeviceWaitReason::NotConnected, None) => {
+                Some(DevicesOp::action_for(DeviceAction::AddFromUsb))
+            }
+            (DeviceWaitReason::PortClosed, Some(id)) => {
+                Some(DevicesOp::action_for(DeviceAction::Connect { device: id }))
+            }
+            _ => None,
+        },
+        _ => None,
+    };
+    // A reset needs a wire: a board with no port has nothing to pulse.
+    let reset = match &state {
+        OpeningState::WaitingForDevice(wait)
+            if matches!(
+                wait.reason,
+                DeviceWaitReason::NotConnected | DeviceWaitReason::Unknown
+            ) =>
+        {
+            None
+        }
+        _ => device
+            .id
+            .map(|id| DevicesOp::action_for(DeviceAction::ResetBoard { device: id })),
+    };
+    let cancel_and = move |then: Option<UiAction>| {
+        // Wake the parked request first, so the actor is free for what the
+        // click queues next.
+        lpa_studio_core::cancel_open();
+        if let Some(on_action) = on_action {
+            on_action.call(UiAction::from_op(RuntimeOp::NODE_ID, RuntimeOp::CancelOpen));
+            if let Some(then) = then {
+                on_action.call(then);
+            }
+        }
+        crate::router::navigate_push(&StudioRoute::Devices);
+    };
+    rsx! {
+        div { class: "tw:flex tw:flex-wrap tw:items-center tw:gap-2.5 tw:pt-1",
+            if let Some(connect) = connect {
+                button {
+                    r#type: "button",
+                    class: solid_action_class(ActionPriority::Primary),
+                    onclick: move |_| {
+                        if let Some(on_action) = on_action {
+                            on_action.call(connect.clone());
+                        }
+                    },
+                    "Connect this board"
+                }
+            }
+            if let Some(reset) = reset {
+                button {
+                    r#type: "button",
+                    class: solid_action_class(ActionPriority::Secondary),
+                    title: "Stop opening, reset the board's hardware, and go to Devices.",
+                    onclick: move |_| cancel_and(Some(reset.clone())),
+                    "Reset the board"
+                }
+            }
+            button {
+                r#type: "button",
+                class: quiet_action_class(),
+                title: "Stop opening this project and go to Devices.",
+                onclick: move |_| cancel_and(None),
+                "Cancel"
+            }
+        }
+    }
+}
+
+/// How long the shown step has held, in whole seconds.
+#[derive(Debug, Default)]
+struct StallClock {
+    key: Option<(u8, u8)>,
+    since_ms: f64,
+}
+
+impl StallClock {
+    fn observe(&mut self, key: (u8, u8), now_ms: f64) -> u64 {
+        if self.key != Some(key) {
+            self.key = Some(key);
+            self.since_ms = now_ms;
+        }
+        ((now_ms - self.since_ms).max(0.0) / 1000.0) as u64
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn now_ms() -> f64 {
+    js_sys::Date::now()
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn now_ms() -> f64 {
+    0.0
 }
 
 /// The opening pipeline at card size: the state label plus the engine
@@ -472,9 +783,27 @@ pub(crate) fn OpeningProgressLine() -> Element {
 pub(crate) fn OpenFailureNotice(
     message: String,
     retry: UiAction,
+    /// The board the open failed on: the notice then offers to reset it,
+    /// and the way back is Devices rather than Explore.
+    #[props(default)]
+    device: Option<OpenDevice>,
+    /// The board refused the link's tier (a Bluetooth link unlocked for
+    /// play): the notice offers Unlock instead of a Reset, because the
+    /// board is fine.
+    #[props(default)]
+    needs_unlock: bool,
     on_action: Option<EventHandler<UiAction>>,
 ) -> Element {
-    let explore = StudioRoute::Explore.path();
+    let (back_href, back_label) = match device {
+        Some(_) => (StudioRoute::Devices.path(), "Back to devices"),
+        None => (StudioRoute::Explore.path(), "Back to Explore"),
+    };
+    let board = device.as_ref().and_then(|device| device.id);
+    let unlock = board.filter(|_| needs_unlock);
+    let reset = board
+        .filter(|_| !needs_unlock)
+        .map(|id| DevicesOp::action_for(DeviceAction::ResetBoard { device: id }));
+    let on_access = access_handler();
     rsx! {
         section { class: "tw:grid tw:max-w-[560px] tw:gap-3.5",
             div { class: "tw:grid tw:gap-2 tw:rounded-lg tw:border tw:border-status-error-border tw:bg-status-error-bg tw:p-4",
@@ -496,10 +825,32 @@ pub(crate) fn OpenFailureNotice(
                     },
                     "Retry"
                 }
+                if let Some(device) = unlock {
+                    button {
+                        r#type: "button",
+                        class: solid_action_class(ActionPriority::Secondary),
+                        title: "Unlock with an edit password; Retry once it is unlocked.",
+                        onclick: move |_| on_access.call(AccessCommand::LogIn { device }),
+                        "Unlock"
+                    }
+                }
+                if let Some(reset) = reset {
+                    button {
+                        r#type: "button",
+                        class: solid_action_class(ActionPriority::Secondary),
+                        title: "Reset the board's hardware; Retry once it says hello again.",
+                        onclick: move |_| {
+                            if let Some(on_action) = on_action {
+                                on_action.call(reset.clone());
+                            }
+                        },
+                        "Reset the board"
+                    }
+                }
                 a {
                     class: "tw:text-sm tw:text-muted-foreground tw:no-underline tw:hover:text-strong-foreground",
-                    href: "{explore}",
-                    "Back to Explore"
+                    href: "{back_href}",
+                    "{back_label}"
                 }
             }
         }
@@ -627,10 +978,12 @@ mod tests {
             stage: OpenStage::Failed(OpenFailure {
                 message: "the device did not start".to_string(),
                 retry: retry_action(),
+                device: None,
+                needs_unlock: false,
             }),
             ..OpenProbe::default()
         });
-        let OpeningState::Failed { message, retry } = state else {
+        let OpeningState::Failed { message, retry, .. } = state else {
             panic!("a finished failure must not fall back to the skeleton");
         };
         assert_eq!(message, "the device did not start");
@@ -680,7 +1033,31 @@ mod tests {
         let failed = OpeningState::Failed {
             message: "engine wasm fetch/compile failed".to_string(),
             retry: retry_action(),
+            device: None,
+            needs_unlock: false,
         };
         assert_eq!(label.observe(failed.clone()), failed);
+    }
+
+    /// A board's tier refusal reaches the page as one Unlock answers.
+    #[test]
+    fn a_refused_open_carries_its_unlock() {
+        let state = opening_state(&OpenProbe {
+            in_flight: false,
+            stage: OpenStage::Failed(OpenFailure {
+                message: "This needs an edit device password — unlock again with one.".to_string(),
+                retry: retry_action(),
+                device: None,
+                needs_unlock: true,
+            }),
+            ..OpenProbe::default()
+        });
+        assert!(matches!(
+            state,
+            OpeningState::Failed {
+                needs_unlock: true,
+                ..
+            }
+        ));
     }
 }

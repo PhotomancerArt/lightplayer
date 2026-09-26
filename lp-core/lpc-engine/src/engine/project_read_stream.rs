@@ -150,13 +150,20 @@ impl<'a> EngineProjectReadSource<'a> {
                 // unbounded event exists (the applier `extend`s across events).
                 let mut batch: alloc::vec::Vec<lpc_wire::WireTreeDelta> = alloc::vec::Vec::new();
                 let mut batch_len = 0usize;
-                let selected_deltas = crate::node::tree_deltas_since_iter(
-                    self.engine.tree(),
-                    since_rev,
-                )
-                .filter(|delta| {
-                    super::project_read_nodes::selection_includes(&selection, delta.node_id())
-                });
+                // `change_frame` is the entry's content stamp, not its own
+                // put-back stamp: a steady read sends no `entry_changed`
+                // (see `tree_entry_stamps`).
+                self.engine.refresh_tree_entry_stamps();
+                let engine = &*self.engine;
+                let selected_deltas =
+                    crate::node::tree_deltas_since_iter(engine.tree(), since_rev, move |entry| {
+                        engine
+                            .tree_entry_changed_at(entry.id)
+                            .unwrap_or(entry.created_at)
+                    })
+                    .filter(|delta| {
+                        super::project_read_nodes::selection_includes(&selection, delta.node_id())
+                    });
                 for delta in selected_deltas {
                     let delta_len = lpc_wire::ser_write_json_len(&delta);
                     if !batch.is_empty()
@@ -187,6 +194,10 @@ impl<'a> EngineProjectReadSource<'a> {
                 }
                 if include_slots {
                     lpc_shared::backtrace::set_oom_context("project read: nodes slot roots");
+                    self.engine.refresh_state_root_stamps(
+                        |id| super::project_read_nodes::selection_includes(&selection, id),
+                        matches!(selection, lpc_wire::NodeReadSelection::All),
+                    );
                     // One root materialized at a time: each snapshot is sent
                     // (and freed once flushed) before the next is built, so a
                     // whole-project slot forest never exists in memory at once.
@@ -494,7 +505,7 @@ mod tests {
     use crate::engine::project_read_nodes::{node_def_root_name, node_state_root_name};
     use crate::engine::test_support::{
         CollectingEventSink, EngineTestBuilder, block_on, collect_read_events, output,
-        read_into_view,
+        produced_slot, read_into_view,
     };
     use crate::node::test_placeholder_spine;
     #[cfg(feature = "node-texture")]
@@ -886,7 +897,7 @@ mod tests {
         let mut fs = lpfs::LpFsMemory::new();
         // Both halves: the container manifest gates the load (D-A refuses a
         // project without one), the root module carries the def.
-        fs.write_file_mut(lpfs::LpPath::new("/project.json"), br#"{"format": 10}"#)
+        fs.write_file_mut(lpfs::LpPath::new("/project.json"), br#"{"format": 11}"#)
             .expect("write container manifest");
         fs.write_file_mut(lpfs::LpPath::new("/module.json"), br#"{"kind": "Module"}"#)
             .expect("write root module");
@@ -1091,6 +1102,7 @@ mod tests {
         let probes = match probe_node {
             Some(_) => vec![lpc_wire::ProjectProbeRequest::BindingGraph(
                 lpc_wire::BindingGraphProbeRequest {
+                    structure: lpc_wire::RevisionGateRead::Always,
                     include_values: false,
                 },
             )],
@@ -1169,33 +1181,69 @@ mod tests {
         assert!(roots.is_empty(), "expected no slot roots, got {roots:?}");
     }
 
+    // ---- lean-wire P6: state roots gate on their content ----
+
+    /// Every produce restamps the dummy shader's output with the value it
+    /// already held (as real nodes restamp their product handles). A steady
+    /// read must not resend the root.
     #[test]
-    fn mutating_one_slot_sends_exactly_that_root() {
-        // Snapshot at R_before == 1, then bump only node "a"'s runtime entry to
-        // revision 2. Reading since == 1 must send exactly a's `.state` root and
-        // no other node's root.
+    fn a_restamped_but_unchanged_state_root_rides_no_steady_read() {
+        let mut h = EngineTestBuilder::new()
+            .shader("a", output("outputs[0]", 0.5))
+            .tolerant_fixture("fixture", lpc_wire::NodeRuntimeStatus::Ok)
+            .bind_demand_input("fixture", produced_slot("a", "outputs[0]"))
+            .demand_root("fixture")
+            .build();
+        h.tick(16).expect("tick");
+        let first = nodes_read(&mut h.engine, &h.registry, None);
+        let since = end_revision(&first);
+
+        h.reset_shader_ticks("a");
+        for _ in 0..3 {
+            h.tick(16).expect("tick");
+        }
+        assert!(
+            h.shader_ticks("a") > 0,
+            "the shader produced (and restamped)"
+        );
+        assert!(h.engine.revision() > since, "the engine moved on");
+
+        let steady = nodes_read(&mut h.engine, &h.registry, Some(since));
+        assert!(
+            slot_roots_in(&steady).is_empty(),
+            "no state root: {:?}",
+            slot_roots_in(&steady)
+        );
+    }
+
+    /// The trigger: one node's runtime state holds a different value (a
+    /// runtime swapped in with another output) — exactly that root rides.
+    #[test]
+    fn a_changed_state_value_resends_exactly_that_root() {
         let mut h = EngineTestBuilder::new()
             .shader("a", output("outputs[0]", 0.5))
             .shader("b", output("outputs[0]", 0.5))
             .build();
         let a = h.node("a");
-        let b = h.node("b");
+        h.tick(16).expect("tick");
+        let first = nodes_read(&mut h.engine, &h.registry, None);
+        let since = end_revision(&first);
 
-        // Bump a's runtime `changed_at` to revision 2 (state root gate source).
+        h.tick(16).expect("tick");
+        let revision = h.engine.revision();
         h.engine
-            .tree_mut()
-            .get_mut(a)
-            .expect("node a entry")
-            .set_status(lpc_wire::NodeRuntimeStatus::Ok, Revision::new(2));
+            .attach_runtime_node(
+                a,
+                crate::engine::test_support::dummy_shader_node(
+                    crate::engine::test_support::path("outputs[0]"),
+                    0.75,
+                ),
+                revision,
+            )
+            .expect("swap a's runtime");
 
-        let roots = slot_root_names(&mut h.engine, &h.registry, Some(Revision::new(1)));
-
-        assert_eq!(
-            roots,
-            Vec::from([node_state_root_name(a)]),
-            "expected only a's state root; b={:?}",
-            node_state_root_name(b)
-        );
+        let roots = slot_root_names(&mut h.engine, &h.registry, Some(since));
+        assert_eq!(roots, Vec::from([node_state_root_name(a)]));
     }
 
     #[test]
@@ -1257,7 +1305,7 @@ mod tests {
         let mut fs = lpfs::LpFsMemory::new();
         fs.write_file_mut(
             lpfs::LpPath::new("/project.json"),
-            b"{\n  \"format\": 10\n}\n",
+            b"{\n  \"format\": 11\n}\n",
         )
         .expect("write container manifest");
         fs.write_file_mut(
@@ -1366,7 +1414,7 @@ mod tests {
         let mut fs = lpfs::LpFsMemory::new();
         fs.write_file_mut(
             lpfs::LpPath::new("/project.json"),
-            b"{\n  \"format\": 10\n}\n",
+            b"{\n  \"format\": 11\n}\n",
         )
         .expect("write container manifest");
         fs.write_file_mut(
@@ -1475,6 +1523,46 @@ mod tests {
             Vec::from([node_def_root_name(a), node_def_root_name(b)]),
             "All still yields every def root"
         );
+    }
+
+    /// A nodes-detail read (slots included) at `since`.
+    fn nodes_read(
+        engine: &mut Engine,
+        registry: &ProjectRegistry,
+        since: Option<Revision>,
+    ) -> Vec<ProjectReadEvent> {
+        collect_read_events(
+            engine,
+            registry,
+            ProjectReadRequest {
+                since,
+                queries: Vec::from([ProjectReadQuery::Nodes(NodeReadQuery::detail_all())]),
+                probes: Vec::new(),
+            },
+        )
+    }
+
+    fn end_revision(events: &[ProjectReadEvent]) -> Revision {
+        events
+            .iter()
+            .find_map(|event| match event {
+                ProjectReadEvent::End { revision } => Some(*revision),
+                _ => None,
+            })
+            .expect("a read ends with its revision")
+    }
+
+    fn slot_roots_in(events: &[ProjectReadEvent]) -> Vec<String> {
+        events
+            .iter()
+            .filter_map(|event| match event {
+                ProjectReadEvent::Query {
+                    event: ProjectReadQueryEvent::Nodes(ProjectReadNodeEvent::SlotRoot(root)),
+                    ..
+                } => Some(root.name.clone()),
+                _ => None,
+            })
+            .collect()
     }
 
     /// Collect the `name`s of every `SlotRoot` event from a nodes-detail read at

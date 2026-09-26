@@ -46,8 +46,9 @@ pub fn StudioPane(
     /// Pane title.
     title: String,
     /// Optional action dispatched when the title is activated. When set, the
-    /// title becomes a hoverable selection control (e.g. a node pane whose name
-    /// selects the node) instead of static text.
+    /// header's whole middle band (title, kind, chips, and the space around
+    /// them) becomes the selection control — e.g. a node pane whose header
+    /// selects the node — and the title a keyboard-reachable button.
     #[props(default)]
     title_action: Option<UiAction>,
     /// Optional kind/subtype text after the title.
@@ -76,6 +77,12 @@ pub fn StudioPane(
     let show_body = body.is_some() && !collapsed;
     let surface_class = pane_surface_class(chrome.selected);
     let header_class = pane_header_class(chrome.tone, collapse.is_some(), !show_body);
+    let band_action = title_action.clone();
+    let band_class = if band_action.is_some() {
+        TITLE_BAND_ACTION_CLASS
+    } else {
+        TITLE_BAND_CLASS
+    };
 
     rsx! {
         article {
@@ -89,13 +96,26 @@ pub fn StudioPane(
                 if let Some(collapse) = collapse {
                     PaneCollapseButton { collapse }
                 }
-                div { class: "tw:flex tw:min-w-0 tw:items-center tw:gap-2 tw:px-3",
+                // With a title action the WHOLE middle band of the header is
+                // the target — the grid stretches it to the header's full
+                // height and every pixel between the collapse chevron and
+                // the trailing controls. The title stays a `button` so the
+                // keyboard has a stop; controls inside the band (the
+                // primary slot) stop propagation themselves.
+                div {
+                    class: band_class,
+                    onclick: move |event: MouseEvent| {
+                        if let (Some(action), Some(handler)) = (band_action.clone(), on_action) {
+                            event.stop_propagation();
+                            handler.call(action);
+                        }
+                    },
                     if let Some(primary) = primary {
                         {primary}
                     }
                     if let Some(action) = title_action {
                         button {
-                            class: "tw:m-0 tw:-mx-1 tw:min-w-0 tw:flex-1 tw:truncate tw:rounded-xs tw:border-0 tw:bg-transparent tw:px-1 tw:py-0.5 tw:text-left tw:text-[1.04rem] tw:font-bold tw:leading-tight tw:text-strong-foreground tw:transition-colors tw:hover:bg-card-subtle/70",
+                            class: "tw:m-0 tw:-mx-1 tw:min-w-0 tw:flex-1 tw:cursor-pointer tw:truncate tw:rounded-xs tw:border-0 tw:bg-transparent tw:px-1 tw:py-0.5 tw:text-left tw:text-[1.04rem] tw:font-bold tw:leading-tight tw:text-strong-foreground",
                             r#type: "button",
                             onclick: move |event| {
                                 event.stop_propagation();
@@ -292,6 +312,13 @@ fn pane_surface_class(selected: bool) -> String {
         "tw:grid tw:min-w-0 tw:overflow-hidden tw:rounded-md tw:border {border_class} tw:bg-card tw:p-4"
     )
 }
+
+/// The header's middle band (primary slot, title, kind, chips).
+const TITLE_BAND_CLASS: &str = "tw:flex tw:min-w-0 tw:items-center tw:gap-2 tw:px-3";
+
+/// The same band when it selects the pane: pointer and a hover wash across
+/// its full extent, so the target looks as big as it is.
+const TITLE_BAND_ACTION_CLASS: &str = "tw:flex tw:min-w-0 tw:cursor-pointer tw:items-center tw:gap-2 tw:px-3 tw:transition-colors tw:hover:bg-card-subtle/70";
 
 fn pane_header_class(tone: PaneTone, has_collapse: bool, header_only: bool) -> String {
     let columns_class = if has_collapse {

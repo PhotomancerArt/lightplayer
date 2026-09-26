@@ -72,6 +72,15 @@ pub enum ServerMsgBody {
     ClearFaults {
         ledger_cleared: bool,
     },
+    /// Answer to [`crate::ClientRequest::SetEncoding`]: the encoding this
+    /// link's replies are written in from the NEXT frame on.
+    ///
+    /// `json` when the host asked for JSON, named a different dictionary, or
+    /// the embedder cannot pack. This frame is always JSON; the transport
+    /// switches after writing it.
+    SetEncoding {
+        encoding: crate::WireEncoding,
+    },
 
     Log {
         level: LogLevel,
@@ -140,6 +149,41 @@ pub enum ServerMsgBody {
     /// Error response for any request type
     Error {
         error: String,
+    },
+    /// Answer to [`crate::ClientRequest::LoginBegin`]: a fresh challenge.
+    /// MAC `nonce` under the key derived for each offer, and answer one MAC
+    /// per offer, in this order. Offers carry salt and cost, never labels.
+    LoginChallenge {
+        #[serde(with = "lpc_access::base64_bytes")]
+        nonce: [u8; lpc_access::NONCE_BYTES],
+        offers: Vec<lpc_access::LoginOffer>,
+    },
+    /// The verdict on a login: `granted` (this link now holds `tier`, via the
+    /// secret named `label`) or `refused` (wait `retry_after_ms`, possibly 0,
+    /// before beginning again). Also the answer to a `LoginBegin` that could
+    /// not start one.
+    LoginResult(lpc_access::LoginOutcome),
+    /// The request was refused because this link does not hold `needs`.
+    ///
+    /// A refusal is always a reply, never a dropped message, so a client can
+    /// say "log in with an edit password" instead of timing out.
+    NotPermitted {
+        needs: lpc_access::Tier,
+    },
+    /// Who has access to this device: the device store's two switches and
+    /// every secret in it, without `k`. The answer to
+    /// [`crate::ClientRequest::AccessList`] and to each access change
+    /// (`AccessAdd`, `AccessRemove`, `AccessSetSwitches`), which reply with
+    /// the list as it now stands. Edit tier only.
+    ///
+    /// `ble_enabled` is the STORED value: a change applies at the next
+    /// boot, so it can differ from whether the radio is up right now.
+    /// Project sidecars are not listed; this is the device's own list.
+    #[serde(rename_all = "camelCase")]
+    AccessList {
+        ble_enabled: bool,
+        open: bool,
+        entries: Vec<crate::server::AccessEntryInfo>,
     },
 }
 
@@ -395,6 +439,112 @@ pub struct LinkCounters {
 mod tests {
     use super::*;
 
+    /// The three access answers, spelled as a client decodes them:
+    /// externally tagged, binary as base64, tiers by name.
+    #[test]
+    fn access_answers_round_trip() {
+        let challenge = ServerMsgBody::LoginChallenge {
+            nonce: [7; 32],
+            offers: alloc::vec![lpc_access::LoginOffer {
+                salt: [1; 16],
+                iterations: 120_000,
+            }],
+        };
+        let json = crate::json::to_string(&challenge).unwrap();
+        assert_eq!(
+            json,
+            r#"{"loginChallenge":{"nonce":"BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc=","offers":[{"salt":"AQEBAQEBAQEBAQEBAQEBAQ==","iterations":120000}]}}"#
+        );
+        match crate::json::from_str::<ServerMsgBody>(&json).unwrap() {
+            ServerMsgBody::LoginChallenge { nonce, offers } => {
+                assert_eq!(nonce, [7; 32]);
+                assert_eq!(offers.len(), 1);
+            }
+            other => panic!("expected a challenge, got {other:?}"),
+        }
+
+        let granted = ServerMsgBody::LoginResult(lpc_access::LoginOutcome::Granted {
+            tier: lpc_access::Tier::Play,
+            label: "camp".into(),
+        });
+        let json = crate::json::to_string(&granted).unwrap();
+        assert_eq!(
+            json,
+            r#"{"loginResult":{"granted":{"tier":"play","label":"camp"}}}"#
+        );
+        assert!(matches!(
+            crate::json::from_str::<ServerMsgBody>(&json).unwrap(),
+            ServerMsgBody::LoginResult(lpc_access::LoginOutcome::Granted { .. })
+        ));
+
+        let refused = ServerMsgBody::NotPermitted {
+            needs: lpc_access::Tier::Edit,
+        };
+        let json = crate::json::to_string(&refused).unwrap();
+        assert_eq!(json, r#"{"notPermitted":{"needs":"edit"}}"#);
+        assert!(matches!(
+            crate::json::from_str::<ServerMsgBody>(&json).unwrap(),
+            ServerMsgBody::NotPermitted {
+                needs: lpc_access::Tier::Edit
+            }
+        ));
+    }
+
+    /// The firmware writes frames with `ser-write-json`, not `serde_json`:
+    /// the access answers must come out byte-identical through both.
+    #[cfg(feature = "ser-write-json")]
+    #[test]
+    fn access_answers_encode_identically_through_the_device_serializer() {
+        let body = ServerMsgBody::LoginChallenge {
+            nonce: [9; 32],
+            offers: alloc::vec![lpc_access::LoginOffer {
+                salt: [2; 16],
+                iterations: 1,
+            }],
+        };
+        let mut out = alloc::vec::Vec::new();
+        ser_write_json::ser::to_writer(&mut out, &body).unwrap();
+        assert_eq!(
+            core::str::from_utf8(&out).unwrap(),
+            crate::json::to_string(&body).unwrap()
+        );
+    }
+
+    /// The same, for the access list the board sends.
+    #[cfg(feature = "ser-write-json")]
+    #[test]
+    fn access_list_encodes_identically_through_the_device_serializer() {
+        let body = access_list_sample();
+        let mut out = alloc::vec::Vec::new();
+        ser_write_json::ser::to_writer(&mut out, &body).unwrap();
+        assert_eq!(
+            core::str::from_utf8(&out).unwrap(),
+            crate::json::to_string(&body).unwrap()
+        );
+    }
+
+    /// Who has access: camelCase switches, one entry per secret, no key.
+    #[test]
+    fn access_list_round_trips_without_a_key() {
+        let json = crate::json::to_string(&access_list_sample()).unwrap();
+        assert_eq!(
+            json,
+            r#"{"accessList":{"bleEnabled":true,"open":false,"entries":[{"label":"Yona's MacBook","kind":"browser","tier":"edit","salt":"BQUFBQUFBQUFBQUFBQUFBQ==","addedAt":1790000000}]}}"#
+        );
+        match crate::json::from_str::<ServerMsgBody>(&json).unwrap() {
+            ServerMsgBody::AccessList {
+                ble_enabled,
+                open,
+                entries,
+            } => {
+                assert!(ble_enabled);
+                assert!(!open);
+                assert_eq!(entries[0].kind, lpc_access::SecretKind::Browser);
+            }
+            other => panic!("expected an access list, got {other:?}"),
+        }
+    }
+
     #[test]
     fn log_level_trace_round_trips() {
         let json = crate::json::to_string(&LogLevel::Trace).unwrap();
@@ -423,5 +573,22 @@ mod tests {
         let json = crate::json::to_string(&ServerMsgBody::SetLogLevel).unwrap();
         let deserialized: ServerMsgBody = crate::json::from_str(&json).unwrap();
         assert!(matches!(deserialized, ServerMsgBody::SetLogLevel));
+    }
+
+    fn access_list_sample() -> ServerMsgBody {
+        let entry = lpc_access::SecretEntry::from_password(
+            "Yona's MacBook",
+            lpc_access::Tier::Edit,
+            b"k",
+            [5; 16],
+            1,
+        )
+        .with_kind(lpc_access::SecretKind::Browser)
+        .with_added_at(1_790_000_000);
+        ServerMsgBody::AccessList {
+            ble_enabled: true,
+            open: false,
+            entries: alloc::vec![crate::server::AccessEntryInfo::from(&entry)],
+        }
     }
 }

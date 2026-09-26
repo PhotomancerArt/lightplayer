@@ -7,17 +7,30 @@
 //! polls run in interrupt context on a borrowed stack, and serialization
 //! recursion there corrupted the system on the bench (see
 //! `serial::server_msg`'s module docs and the 2026-08-25 ADR).
+//!
+//! It also holds the one piece of per-link wire state: the encoding a host
+//! opted into (`ClientRequest::SetEncoding`, plan `lp-json-pack`). The
+//! server decides the answer; the transport sees the answer it writes, and
+//! switches after it — which is why the state lives here, beside the link,
+//! and not in the IO-free server: only the transport knows when the link
+//! the answer was for has gone (see [`crate::serial::link_epoch`]).
 
 use alloc::vec::Vec;
 
+use crate::serial::link_epoch;
 use crate::serial::server_msg::serialize_server_msg;
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::channel::Channel;
-use lpc_shared::transport::ServerTransport;
+use lpc_shared::transport::{Incoming, Link, LinkId, ServerTransport};
 use lpc_wire::WireServerMessage;
 use lpc_wire::{ClientMessage, TransportError, json};
 
 /// Server transport that sends WireServerMessage to io_task for serialization.
+///
+/// ONE link — the product's USB serial line — and it is trusted
+/// ([`Link::PRIMARY`]): physical possession is the recovery path. A second
+/// (radio) link arrives as a separate transport behind a mux, never as a
+/// second id here.
 ///
 /// Uses a single in-flight write request/result pair. `send(msg).await` blocks
 /// until io_task reports that the message was fully written or failed.
@@ -30,6 +43,11 @@ pub struct StreamingMessageRouterTransport {
     /// result whose generation does not match, so a result orphaned by a
     /// cancelled send can never be misattributed to the next write.
     generation: u32,
+    /// The encoding this link's host opted into; `Json` until one does.
+    encoding: lpc_wire::WireEncoding,
+    /// The [`link_epoch`] `encoding` was negotiated in. A different epoch
+    /// means the host that asked is gone, and the link is JSON again.
+    encoding_epoch: u32,
 }
 
 impl StreamingMessageRouterTransport {
@@ -49,7 +67,23 @@ impl StreamingMessageRouterTransport {
             server_write_request,
             server_write_result,
             generation: 0,
+            encoding: lpc_wire::WireEncoding::Json,
+            encoding_epoch: link_epoch::current(),
         }
+    }
+
+    /// The encoding the next frame goes out in: the negotiated one, unless
+    /// the link it was negotiated on has closed since.
+    fn link_encoding(&mut self) -> lpc_wire::WireEncoding {
+        let epoch = link_epoch::current();
+        if epoch != self.encoding_epoch {
+            if self.encoding != lpc_wire::WireEncoding::Json {
+                log::info!("StreamingMessageRouterTransport: link closed; replies are JSON again");
+            }
+            self.encoding = lpc_wire::WireEncoding::Json;
+            self.encoding_epoch = epoch;
+        }
+        self.encoding
     }
 }
 
@@ -63,10 +97,17 @@ impl StreamingMessageRouterTransport {
     /// produced for this request.
     async fn write_once(&mut self, msg: WireServerMessage) -> Result<(), TransportError> {
         let id = msg.id;
+        // The answer to an opt-in is always JSON (the host reads it before it
+        // knows the outcome); the switch it announces happens in `send`,
+        // after it is written.
+        let encoding = match msg.msg {
+            lpc_wire::server::ServerMsgBody::SetEncoding { .. } => lpc_wire::WireEncoding::Json,
+            _ => self.link_encoding(),
+        };
         // Fills the shared static frame buffer; sending the LENGTH hands the
         // buffer to the io task, and awaiting the matching result below is
         // what makes reusing it for the next message sound (see FRAME_BUF).
-        let len = serialize_server_msg(&msg)?;
+        let len = serialize_server_msg(&msg, encoding)?;
         let generation = self.generation;
         self.generation = self.generation.wrapping_add(1);
         self.server_write_request
@@ -87,16 +128,32 @@ impl StreamingMessageRouterTransport {
 }
 
 impl ServerTransport for StreamingMessageRouterTransport {
-    async fn send(&mut self, msg: WireServerMessage) -> Result<(), TransportError> {
+    async fn send(&mut self, _link: LinkId, msg: WireServerMessage) -> Result<(), TransportError> {
         let id = msg.id;
         // Captured before the message moves: a failed Error notice must not
         // recurse into another notice.
         let is_error_frame = matches!(msg.msg, lpc_wire::server::ServerMsgBody::Error { .. });
+        let switch_to = match msg.msg {
+            lpc_wire::server::ServerMsgBody::SetEncoding { encoding } => Some(encoding),
+            _ => None,
+        };
         let result = self.write_once(msg).await;
         match &result {
-            Ok(()) => log::debug!(
-                "StreamingMessageRouterTransport: wrote message id={id} through io_task"
-            ),
+            Ok(()) => {
+                log::debug!(
+                    "StreamingMessageRouterTransport: wrote message id={id} through io_task"
+                );
+                // The host has its answer; every frame after it is in the
+                // encoding it names, until this link closes.
+                if let Some(encoding) = switch_to {
+                    self.encoding = encoding;
+                    self.encoding_epoch = link_epoch::current();
+                    log::info!(
+                        "StreamingMessageRouterTransport: replies are now {}",
+                        encoding.as_str()
+                    );
+                }
+            }
             Err(error) => {
                 // io_task has already retried per its link's write policy, so
                 // this drop is final — say so at error level, never as a
@@ -127,40 +184,14 @@ impl ServerTransport for StreamingMessageRouterTransport {
         result
     }
 
-    async fn receive(&mut self) -> Result<Option<ClientMessage>, TransportError> {
+    async fn receive(&mut self) -> Result<Option<Incoming>, TransportError> {
         let receiver = self.incoming.receiver();
         loop {
             match receiver.try_receive() {
                 Ok(msg_line) => {
-                    if !msg_line.starts_with("M!") {
-                        log::trace!("StreamingMessageRouterTransport: Skipping non-message line");
-                        continue;
-                    }
-                    let json_str = msg_line.strip_prefix("M!").unwrap_or(&msg_line);
-                    let json_str = json_str.trim_end_matches('\n');
-                    match json::from_str::<ClientMessage>(json_str) {
-                        Ok(msg) => {
-                            log::debug!(
-                                "StreamingMessageRouterTransport: Received message id={}",
-                                msg.id
-                            );
-                            return Ok(Some(msg));
-                        }
-                        Err(e) => {
-                            // A torn/spliced frame is protocol loss, not
-                            // chatter — WARN with evidence and count it
-                            // (2026-08-26 inbound-loss defect: this drop sat
-                            // at DEBUG and made losses invisible).
-                            let preview_len = json_str.len().min(48);
-                            crate::serial::link_counters::bump_parse_failure();
-                            log::warn!(
-                                "StreamingMessageRouterTransport: dropping unparseable {} B M! \
-                                 line ({e}); prefix: {:?}",
-                                json_str.len(),
-                                &json_str[..preview_len]
-                            );
-                            continue;
-                        }
+                    if let Some(msg) = parse_wire_line(&msg_line) {
+                        // One link, and it is the USB cable: trusted.
+                        return Ok(Some(Incoming::primary(msg)));
                     }
                 }
                 Err(_) => return Ok(None),
@@ -168,7 +199,7 @@ impl ServerTransport for StreamingMessageRouterTransport {
         }
     }
 
-    async fn receive_all(&mut self) -> Result<Vec<ClientMessage>, TransportError> {
+    async fn receive_all(&mut self) -> Result<Vec<Incoming>, TransportError> {
         let mut messages = Vec::new();
         loop {
             match self.receive().await? {
@@ -179,7 +210,60 @@ impl ServerTransport for StreamingMessageRouterTransport {
         Ok(messages)
     }
 
+    fn links(&self) -> Vec<Link> {
+        alloc::vec![Link::PRIMARY]
+    }
+
     async fn close(&mut self) -> Result<(), TransportError> {
         Ok(())
+    }
+}
+
+/// The USB transport has one link, open for the life of the image: no hellos
+/// owed after the first, no deadline to keep.
+impl crate::link_upkeep::LinkUpkeep for StreamingMessageRouterTransport {}
+
+/// One received line → the client message it carries, or `None` for a line
+/// that is not a wire frame (skipped quietly) or does not parse (logged and
+/// counted: a torn or spliced frame is protocol loss, not chatter —
+/// 2026-08-26 inbound-loss defect: this drop sat at DEBUG and made losses
+/// invisible). Shared by every link: USB lines and radio lines parse alike.
+///
+/// `#[inline(always)]` is load-bearing. As an ordinary function it is
+/// codegen'd once, out of line, in this crate, and that standalone
+/// `json::from_str::<ClientMessage>` changed how the deserializer was inlined
+/// into the USB receive path: the main task's `poll` frame grew from
+/// `entry a1, 1024` to `4448` on the S3 and from `976` to `4112` on the
+/// classic, on images with no radio link at all (and the S3's `.data` gained
+/// a duplicated 12 B serde_json constant table, which cost the stack 16 B).
+/// Inlined into each caller, both frames are back to what they were before
+/// the radio links existed.
+#[inline(always)]
+pub fn parse_wire_line(msg_line: &str) -> Option<ClientMessage> {
+    let Some(json_str) = msg_line.strip_prefix("M!") else {
+        log::trace!("transport: skipping non-message line");
+        return None;
+    };
+    let json_str = json_str.trim_end_matches('\n');
+    match json::from_str::<ClientMessage>(json_str) {
+        Ok(msg) => {
+            log::debug!("transport: received message id={}", msg.id);
+            Some(msg)
+        }
+        Err(e) => {
+            // A radio line is arbitrary UTF-8: cut the preview on a char
+            // boundary, never mid-character.
+            let mut preview_len = json_str.len().min(48);
+            while !json_str.is_char_boundary(preview_len) {
+                preview_len -= 1;
+            }
+            crate::serial::link_counters::bump_parse_failure();
+            log::warn!(
+                "transport: dropping unparseable {} B M! line ({e}); prefix: {:?}",
+                json_str.len(),
+                &json_str[..preview_len]
+            );
+            None
+        }
     }
 }

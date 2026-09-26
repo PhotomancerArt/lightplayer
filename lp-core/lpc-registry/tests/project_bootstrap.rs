@@ -25,8 +25,13 @@ fn can_create_fyeah_sign_project_from_empty_fs_with_artifact_body_mutations() {
     );
 
     let load = scenario.load_root("/module.json");
-    assert_eq!(load.changes.defs.added.len(), 9);
-    assert_eq!(load.changes.assets.added.len(), 3);
+    // Only the idle entry is resident at load; the blast entry is loaded
+    // explicitly so every bootstrapped file is checked.
+    assert_eq!(load.changes.defs.added.len(), 8);
+    assert_eq!(load.changes.assets.added.len(), 2);
+    scenario
+        .set_entry_resident("playlist", 2, true)
+        .expect("blast becomes resident");
 
     assert_loaded_def_kinds(
         scenario.registry(),

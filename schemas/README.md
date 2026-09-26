@@ -16,6 +16,9 @@ artifact format). Decision record:
 | `module.schema.json` | JSON Schema for the `module.json` root module node artifact: `kind: "Module"` plus the compiled `ModuleDef` shape. |
 | `node.schema.json` | JSON Schema for any node artifact file — a `oneOf` over every registered node kind, discriminated by the `kind` field. |
 | `hardware.schema.json` | JSON Schema for board hardware manifests (`lp-core/lpc-hardware/boards/**/*.json`, `/hardware.json` device override). |
+| `board-display.schema.json` | JSON Schema for board display sidecars (`*.display.json`, `lpa_boards::BoardDisplayFile`). |
+| `project-access.schema.json` | JSON Schema for the project access sidecar `<project>/.lp/access.json` (`lpc_access::ProjectAccessFile`). Its **own** persisted format with its own `"version": 2` (v2 added each entry's `kind` and optional `addedAt`; v1 files still read, as `kind: password`), outside `PROJECT_FORMAT_VERSION`: `/.lp/` is not part of the project format (hash-excluded, skipped by publish/fork/zip export, write-only over every link). A serde change to it bumps its `VERSION` and ships the reader for the old one with it. |
+| `device-access.schema.json` | JSON Schema for the device access store, root `/.lp/access.json` on a device (`lpc_access::DeviceAccessFile`): the device's secrets (browser keys, the account key, passwords — each with its `kind`), `bleEnabled`, `open`. Own format, `"version": 2` (v1 still reads), same rule as the sidecar. A missing store means Bluetooth on, locked, no keys. |
 | `shapes/*.json` | Serialized `SlotShape` registry dumps — the exact structure the slot codec parses against, including on-disk enum encodings. One file per registered shape; `::` in shape names flattens to `.` in filenames. |
 | `shapes/_index.json` | Human name → raw shape id for every dump. |
 

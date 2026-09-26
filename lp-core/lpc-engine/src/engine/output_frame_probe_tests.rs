@@ -20,9 +20,11 @@ use lpc_model::{
 };
 use lpc_registry::ProjectRegistry;
 use lpc_wire::{
-    ControlDisplayLayoutProbeResult, ControlDisplayLayoutRead, OutputFrameEntry,
+    ControlProductGeometry, ControlProductProbeRequest, ControlProductProbeResult,
+    GeometryDisplayLayout, KnownRevision, OutputFrameEntry, OutputFrameGeometry,
     OutputFrameProbeRequest, OutputFrameProbeResult, ProjectProbeRequest, ProjectProbeResult,
-    ProjectReadRequest, WireChannelSampleFormat, WireChildKind, WireSlotIndex,
+    ProjectReadRequest, RevisionGateRead, RevisionGateResult, WireChannelSampleFormat,
+    WireChildKind, WireSlotIndex, linear16_to_srgb8,
 };
 
 use crate::dataflow::binding::{BindingDraft, BindingPriority, BindingSource, BindingTarget};
@@ -54,7 +56,7 @@ fn output_frame_probe_returns_published_bytes_without_rendering() {
     assert_eq!(published, vec![255, 255, 0, 0, 0, 0], "red lamp, u16 LE");
 
     let renders_before = harness.renders();
-    let entries = harness.read(ControlDisplayLayoutRead::Always);
+    let entries = harness.read(RevisionGateRead::Always);
     assert_eq!(
         harness.renders(),
         renders_before,
@@ -67,17 +69,19 @@ fn output_frame_probe_returns_published_bytes_without_rendering() {
     assert_eq!(entry.bytes, published, "bytes must be the buffer verbatim");
     // `channels` is the buffer's own count: RGB lamps, not raw samples.
     assert_eq!(entry.channels, 1);
-    assert_eq!(entry.sample_format, WireChannelSampleFormat::U16);
+    assert_eq!(entry.sample_format, Some(WireChannelSampleFormat::U16));
 
-    assert_eq!(entry.sample_layout.spans.len(), 1);
-    assert_eq!(entry.sample_layout.spans[0].len, 3);
+    let geometry = changed(entry);
+    assert_eq!(geometry.sample_layout.spans.len(), 1);
+    assert_eq!(geometry.sample_layout.spans[0].len, 3);
+    assert_eq!(geometry.placements.len(), 1, "one fixture on the wire");
 
-    let ControlDisplayLayoutProbeResult::Layout(ControlDisplayLayout::Layout2d(layout)) =
-        &entry.display_layout
+    let GeometryDisplayLayout::Layout(ControlDisplayLayout::Layout2d(layout)) =
+        &geometry.display_layout
     else {
         panic!(
             "expected a 2D display layout, got {:?}",
-            entry.display_layout
+            geometry.display_layout
         );
     };
     assert_eq!(layout.lamps.len(), 1);
@@ -92,10 +96,10 @@ fn output_frame_probe_returns_published_bytes_without_rendering() {
 fn output_frame_probe_revision_moves_on_each_publish() {
     let mut harness = Harness::build([u16::MAX, 0, 0, u16::MAX]);
     harness.tick();
-    let first = harness.read(ControlDisplayLayoutRead::None)[0].revision;
+    let first = harness.read(RevisionGateRead::None)[0].revision;
 
     harness.tick();
-    let second = harness.read(ControlDisplayLayoutRead::None)[0].revision;
+    let second = harness.read(RevisionGateRead::None)[0].revision;
 
     assert!(
         second > first,
@@ -104,33 +108,25 @@ fn output_frame_probe_revision_moves_on_each_publish() {
 
     // And a read that does not tick in between sees the same revision — the
     // read itself must not look like a new frame.
-    let repeat = harness.read(ControlDisplayLayoutRead::None)[0].revision;
+    let repeat = harness.read(RevisionGateRead::None)[0].revision;
     assert_eq!(repeat, second, "a re-read is not a new frame");
 }
 
-/// Geometry gating: `IfChanged` with the layout's own revision answers
-/// `Unchanged`, so a steady feed ships the lamp positions once and the
-/// samples thereafter.
+/// Geometry gating: `IfChanged` with the geometry's own revision answers
+/// `Unchanged` — no sample layout, no display layout, no placements — so a
+/// steady feed ships the whole bundle once and the samples thereafter.
 #[test]
-fn output_frame_probe_if_changed_omits_an_unchanged_layout() {
+fn output_frame_probe_if_changed_omits_unchanged_geometry() {
     let mut harness = Harness::build([0, u16::MAX, 0, u16::MAX]);
     harness.tick();
-
-    let entries = harness.read(ControlDisplayLayoutRead::Always);
-    let ControlDisplayLayoutProbeResult::Layout(layout) = &entries[0].display_layout else {
-        panic!("expected a layout on the first read");
-    };
-    let known_revision = layout.revision();
+    let known = harness.geometry_revision();
 
     harness.tick();
-    let entries = harness.read(ControlDisplayLayoutRead::IfChanged {
-        known_revision: Some(known_revision),
-    });
+    let entries = harness.read(harness.known(known));
     assert_eq!(
-        entries[0].display_layout,
-        ControlDisplayLayoutProbeResult::Unchanged {
-            revision: known_revision
-        },
+        entries[0].geometry,
+        RevisionGateResult::Unchanged { revision: known },
+        "a steady read carries no geometry"
     );
     assert_eq!(
         entries[0].bytes,
@@ -138,21 +134,297 @@ fn output_frame_probe_if_changed_omits_an_unchanged_layout() {
         "samples still ride along when the geometry is gated out"
     );
 
-    // `None` is the cheapest gate of all: no layout work at all.
-    let entries = harness.read(ControlDisplayLayoutRead::None);
-    assert_eq!(
-        entries[0].display_layout,
-        ControlDisplayLayoutProbeResult::Omitted
+    // `None` is the cheapest gate of all: no geometry work at all.
+    let entries = harness.read(RevisionGateRead::None);
+    assert_eq!(entries[0].geometry, RevisionGateResult::Omitted);
+}
+
+/// The gate is per OUTPUT: a revision listed for another node says nothing
+/// about this one, which still gets its geometry.
+#[test]
+fn output_frame_probe_gates_each_output_by_its_own_known_revision() {
+    let mut harness = Harness::build([0, u16::MAX, 0, u16::MAX]);
+    harness.tick();
+    let known = harness.geometry_revision();
+
+    let entries = harness.read(RevisionGateRead::IfChanged {
+        known: vec![KnownRevision {
+            node: Some(NodeId::new(harness.out_id.0 + 100)),
+            revision: known,
+        }],
+    });
+    assert_eq!(changed(&entries[0]).revision, known);
+}
+
+/// Trigger 1 — the SAMPLE layout moves alone. A color-order change regroups
+/// the samples (`RgbPixels::color_order`) without touching the mapping, so
+/// neither the display layout's revision nor the placements move. The
+/// geometry revision must, or a client would decode the new frame with the
+/// old channel order.
+#[test]
+fn a_sample_layout_change_moves_the_geometry_revision() {
+    let mut harness = Harness::build([0, u16::MAX, 0, u16::MAX]);
+    harness.tick();
+    let known = harness.geometry_revision();
+
+    let layout_revision_before =
+        display_layout_revision(&harness.read(harness.known(Revision::default()))[0]);
+
+    harness.set_fixture_literal("color_order", ColorOrder::Grb.to_lp_value());
+    harness.tick();
+
+    let entries = harness.read(harness.known(known));
+    let geometry = changed(&entries[0]);
+    assert!(
+        geometry.revision > known,
+        "moved sample layout, moved revision"
     );
+    assert_eq!(
+        display_layout_revision(&entries[0]),
+        layout_revision_before,
+        "the display layout did NOT move — the sample layout alone moved the bundle"
+    );
+    let lpc_model::ControlSampleEncoding::RgbPixels { color_order, .. } =
+        &geometry.sample_layout.spans[0].encoding
+    else {
+        panic!("rgb spans expected");
+    };
+    assert_eq!(*color_order, ColorOrder::Grb);
+}
+
+/// Trigger 2 — the DISPLAY layout moves. A render-size change moves the
+/// fixture's display-layout revision (its width/height hints) while the
+/// lamp grouping and the wire's cut stay put.
+#[test]
+fn a_display_layout_change_moves_the_geometry_revision() {
+    let mut harness = Harness::build([0, u16::MAX, 0, u16::MAX]);
+    harness.tick();
+    let known = harness.geometry_revision();
+
+    harness.set_fixture_literal(
+        "render_size",
+        Dim2u {
+            width: 8,
+            height: 8,
+        }
+        .to_lp_value(),
+    );
+    harness.tick();
+
+    let entries = harness.read(harness.known(known));
+    let geometry = changed(&entries[0]);
+    assert!(geometry.revision > known);
+    let GeometryDisplayLayout::Layout(ControlDisplayLayout::Layout2d(layout)) =
+        &geometry.display_layout
+    else {
+        panic!("expected a layout, got {:?}", geometry.display_layout);
+    };
+    assert_eq!((layout.width_hint, layout.height_hint), (8, 8));
+}
+
+/// A display layout over the link's budget is still ONE answer per
+/// revision: it arrives as `Unsupported` inside a changed bundle (sample
+/// layout and placements intact), and the next read with that revision is
+/// `Unchanged` — the engine does not rebuild and re-measure the refusal
+/// every read, and the client does not re-ask for it.
+#[test]
+fn a_refused_display_layout_is_cached_like_any_other_geometry() {
+    let mut harness = Harness::build([0, u16::MAX, 0, u16::MAX]);
+    harness.engine.set_display_layout_budget(Some(8));
+    harness.tick();
+
+    let entries = harness.read(RevisionGateRead::Always);
+    let geometry = changed(&entries[0]);
+    assert!(
+        matches!(
+            geometry.display_layout,
+            GeometryDisplayLayout::Unsupported { .. }
+        ),
+        "an 8-byte budget refuses any layout: {:?}",
+        geometry.display_layout
+    );
+    assert_eq!(geometry.sample_layout.spans.len(), 1, "samples still group");
+    let known = geometry.revision;
+
+    harness.tick();
+    let entries = harness.read(harness.known(known));
+    assert_eq!(
+        entries[0].geometry,
+        RevisionGateResult::Unchanged { revision: known }
+    );
+}
+
+/// The control-product probe's gate on the same chain: steady reads are
+/// `Unchanged`, and a sample-layout-only change (color order) moves the
+/// bundle's revision even though the fixture's display-layout revision stays.
+#[test]
+fn control_product_geometry_moves_with_its_sample_layout() {
+    let mut harness = Harness::build([0, u16::MAX, 0, u16::MAX]);
+    harness.tick();
+
+    let first = harness.read_control(RevisionGateRead::Always);
+    let RevisionGateResult::Changed(first) = first else {
+        panic!("expected changed geometry, got {first:?}");
+    };
+    let GeometryDisplayLayout::Layout(layout) = &first.display_layout else {
+        panic!("expected a layout, got {:?}", first.display_layout);
+    };
+    let layout_revision = layout.revision();
+
+    harness.tick();
+    assert_eq!(
+        harness.read_control(RevisionGateRead::if_changed(Some(first.revision))),
+        RevisionGateResult::Unchanged {
+            revision: first.revision
+        },
+        "a steady control read carries no geometry"
+    );
+
+    harness.set_fixture_literal("color_order", ColorOrder::Grb.to_lp_value());
+    harness.tick();
+    let RevisionGateResult::Changed(second) =
+        harness.read_control(RevisionGateRead::if_changed(Some(first.revision)))
+    else {
+        panic!("a regrouped sample layout must come back changed");
+    };
+    assert!(second.revision > first.revision);
+    let GeometryDisplayLayout::Layout(layout) = &second.display_layout else {
+        panic!("expected a layout");
+    };
+    assert_eq!(
+        layout.revision(),
+        layout_revision,
+        "the display layout did not move; the sample layout alone did"
+    );
+}
+
+/// Asked for `U8`, the published `U16` frame travels rounded to nearest —
+/// half the bytes, the same post-finalize values — and says so.
+#[test]
+fn output_frame_probe_rounds_to_u8_when_asked() {
+    let mut harness = Harness::build([u16::MAX, 0, 0, u16::MAX]);
+    harness.tick();
+    assert_eq!(harness.published_bytes(), vec![255, 255, 0, 0, 0, 0]);
+
+    let entries = harness.read_samples(RevisionGateRead::None, Some(WireChannelSampleFormat::U8));
+
+    assert_eq!(entries[0].sample_format, Some(WireChannelSampleFormat::U8));
+    assert_eq!(entries[0].bytes, vec![255, 0, 0], "one sample per byte");
+    assert_eq!(entries[0].channels, 1, "the lamp count does not change");
+}
+
+/// Asked for `Srgb8` (Studio's preview default), the published linear `U16`
+/// frame travels as each sample's correctly rounded sRGB display code.
+#[test]
+fn output_frame_probe_encodes_srgb8_when_asked() {
+    let mut harness = Harness::build([u16::MAX, 0, 0, u16::MAX]);
+    harness.tick();
+    let published: Vec<u16> = harness
+        .published_bytes()
+        .chunks_exact(2)
+        .map(|pair| u16::from_le_bytes([pair[0], pair[1]]))
+        .collect();
+
+    let entries =
+        harness.read_samples(RevisionGateRead::None, Some(WireChannelSampleFormat::Srgb8));
+
+    assert_eq!(
+        entries[0].sample_format,
+        Some(WireChannelSampleFormat::Srgb8)
+    );
+    let encoded: Vec<u8> = published.iter().map(|&v| linear16_to_srgb8(v)).collect();
+    assert_eq!(entries[0].bytes, encoded);
+    assert_eq!(entries[0].bytes, vec![255, 0, 0], "one sample per byte");
+}
+
+/// No samples asked: the entry still answers its revision, channel count and
+/// geometry — what a module face derives from — with no pixel bytes.
+#[test]
+fn output_frame_probe_without_samples_still_carries_geometry() {
+    let mut harness = Harness::build([u16::MAX, 0, 0, u16::MAX]);
+    harness.tick();
+
+    let entries = harness.read_samples(RevisionGateRead::Always, None);
+
+    let entry = &entries[0];
+    assert_eq!(entry.sample_format, None);
+    assert!(entry.bytes.is_empty());
+    assert_eq!(entry.channels, 1);
+    assert_eq!(changed(entry).placements.len(), 1);
+}
+
+/// The control-product preview renders at 16 bits and ships `U8` when asked:
+/// the same samples, rounded.
+#[test]
+fn control_product_probe_rounds_to_u8_when_asked() {
+    let mut harness = Harness::build([0, u16::MAX, 0, u16::MAX]);
+    harness.tick();
+
+    let (_, wide_format, wide) =
+        harness.read_control_preview(RevisionGateRead::None, WireChannelSampleFormat::U16);
+    let (_, narrow_format, narrow) =
+        harness.read_control_preview(RevisionGateRead::None, WireChannelSampleFormat::U8);
+
+    assert_eq!(wide_format, WireChannelSampleFormat::U16);
+    assert_eq!(narrow_format, WireChannelSampleFormat::U8);
+    assert_eq!(narrow.len() * 2, wide.len());
+    let rounded: Vec<u8> = wide
+        .chunks_exact(2)
+        .map(|pair| {
+            super::preview_sample_encoding::unorm16_to_unorm8(u16::from_le_bytes([
+                pair[0], pair[1],
+            ]))
+        })
+        .collect();
+    assert_eq!(narrow, rounded);
+}
+
+/// The control-product preview ships `Srgb8` when asked: the 16-bit render,
+/// each sample encoded as its sRGB display code.
+#[test]
+fn control_product_probe_encodes_srgb8_when_asked() {
+    let mut harness = Harness::build([0, u16::MAX, 0, u16::MAX]);
+    harness.tick();
+
+    let (_, _, wide) =
+        harness.read_control_preview(RevisionGateRead::None, WireChannelSampleFormat::U16);
+    let (_, format, display) =
+        harness.read_control_preview(RevisionGateRead::None, WireChannelSampleFormat::Srgb8);
+
+    assert_eq!(format, WireChannelSampleFormat::Srgb8);
+    let encoded: Vec<u8> = wide
+        .chunks_exact(2)
+        .map(|pair| linear16_to_srgb8(u16::from_le_bytes([pair[0], pair[1]])))
+        .collect();
+    assert_eq!(display, encoded);
+}
+
+/// The display layout's OWN revision inside a changed bundle.
+fn display_layout_revision(entry: &OutputFrameEntry) -> Revision {
+    match &changed(entry).display_layout {
+        GeometryDisplayLayout::Layout(layout) => layout.revision(),
+        other => panic!("expected a display layout, got {other:?}"),
+    }
+}
+
+/// The geometry half of an entry, which the test expects to have CHANGED.
+fn changed(entry: &OutputFrameEntry) -> &OutputFrameGeometry {
+    match &entry.geometry {
+        RevisionGateResult::Changed(geometry) => geometry,
+        other => panic!("expected changed geometry, got {other:?}"),
+    }
 }
 
 /// A shader → fixture → output chain with a counted render path.
 struct Harness {
     engine: Engine,
     registry: ProjectRegistry,
+    sh_id: NodeId,
+    fix_id: NodeId,
     out_id: NodeId,
     sink: RuntimeBufferId,
     renders: Arc<AtomicU32>,
+    fixture_literals: Vec<(&'static str, LpValue)>,
 }
 
 impl Harness {
@@ -220,29 +492,6 @@ impl Harness {
                 frame,
             )
             .expect("attach fixture");
-        for (slot, value) in [
-            (
-                "render_size",
-                Dim2u {
-                    width: 4,
-                    height: 4,
-                }
-                .to_lp_value(),
-            ),
-            ("color_order", ColorOrder::Rgb.to_lp_value()),
-            ("brightness.some", LpValue::U32(255)),
-            ("gamma_correction.some", LpValue::Bool(false)),
-        ] {
-            bind_literal(&mut engine, fix_id, slot, value, frame);
-        }
-        bind_produced(
-            &mut engine,
-            fix_id,
-            fixture_input_path(),
-            sh_id,
-            shader_output_path(),
-            frame,
-        );
 
         let out_id = engine
             .tree_mut()
@@ -263,23 +512,71 @@ impl Harness {
         let sink = engine
             .runtime_output_sink_buffer_id(out_id)
             .expect("output sink buffer");
-        bind_produced(
-            &mut engine,
-            out_id,
-            output_input_path(),
-            fix_id,
-            SlotPath::parse("output").expect("fixture output slot"),
-            frame,
-        );
         engine.add_demand_root(out_id);
 
-        Self {
+        let mut harness = Self {
             engine,
             registry,
+            sh_id,
+            fix_id,
             out_id,
             sink,
             renders,
+            fixture_literals: vec![
+                (
+                    "render_size",
+                    Dim2u {
+                        width: 4,
+                        height: 4,
+                    }
+                    .to_lp_value(),
+                ),
+                ("color_order", ColorOrder::Rgb.to_lp_value()),
+                ("brightness.some", LpValue::U32(255)),
+                ("gamma_correction.some", LpValue::Bool(false)),
+            ],
+        };
+        harness.bind_all(frame);
+        harness
+    }
+
+    /// Register the chain's whole binding set: the fixture's literal
+    /// settings, shader → fixture, fixture → output.
+    fn bind_all(&mut self, frame: Revision) {
+        for (slot, value) in self.fixture_literals.clone() {
+            bind_literal(&mut self.engine, self.fix_id, slot, value, frame);
         }
+        bind_produced(
+            &mut self.engine,
+            self.fix_id,
+            fixture_input_path(),
+            self.sh_id,
+            shader_output_path(),
+            frame,
+        );
+        bind_produced(
+            &mut self.engine,
+            self.out_id,
+            output_input_path(),
+            self.fix_id,
+            SlotPath::parse("output").expect("fixture output slot"),
+            frame,
+        );
+    }
+
+    /// Change one of the fixture's literal settings the way a project apply
+    /// does: bindings are load-time materializations, so the whole set is
+    /// cleared and re-registered rather than a competing binding added.
+    fn set_fixture_literal(&mut self, slot: &'static str, value: LpValue) {
+        let entry = self
+            .fixture_literals
+            .iter_mut()
+            .find(|(name, _)| *name == slot)
+            .expect("a fixture literal the harness binds");
+        entry.1 = value;
+        let frame = self.engine.revision();
+        self.engine.clear_bindings(frame);
+        self.bind_all(frame);
     }
 
     fn tick(&mut self) {
@@ -302,7 +599,85 @@ impl Harness {
             .into_owned()
     }
 
-    fn read(&mut self, display_layout: ControlDisplayLayoutRead) -> Vec<OutputFrameEntry> {
+    /// The output's current geometry revision, read with `Always`.
+    fn geometry_revision(&mut self) -> Revision {
+        let entries = self.read(RevisionGateRead::Always);
+        changed(&entries[0]).revision
+    }
+
+    /// A gate claiming this harness's output geometry at `revision`.
+    fn known(&self, revision: Revision) -> RevisionGateRead {
+        RevisionGateRead::IfChanged {
+            known: vec![KnownRevision {
+                node: Some(self.out_id),
+                revision,
+            }],
+        }
+    }
+
+    /// The fixture's control-product preview geometry, through the real
+    /// read stream.
+    fn read_control(
+        &mut self,
+        geometry: RevisionGateRead,
+    ) -> RevisionGateResult<ControlProductGeometry> {
+        self.read_control_preview(geometry, WireChannelSampleFormat::U16)
+            .0
+    }
+
+    /// The fixture's control-product preview — geometry, the answered sample
+    /// format and its bytes — asked in `sample_format`.
+    fn read_control_preview(
+        &mut self,
+        geometry: RevisionGateRead,
+        sample_format: WireChannelSampleFormat,
+    ) -> (
+        RevisionGateResult<ControlProductGeometry>,
+        WireChannelSampleFormat,
+        Vec<u8>,
+    ) {
+        let results = read_probe_results(
+            &mut self.engine,
+            &self.registry,
+            ProjectReadRequest {
+                since: None,
+                queries: vec![],
+                probes: vec![ProjectProbeRequest::ControlProduct(
+                    ControlProductProbeRequest {
+                        product: lpc_model::ControlProduct::new(
+                            self.fix_id,
+                            0,
+                            lpc_model::ControlExtent::new(1, 3),
+                        ),
+                        sample_format,
+                        geometry,
+                    },
+                )],
+            },
+        );
+        match results.as_slice() {
+            [
+                ProjectProbeResult::ControlProduct(ControlProductProbeResult::Preview {
+                    geometry,
+                    sample_format,
+                    bytes,
+                    ..
+                }),
+            ] => (geometry.clone(), *sample_format, bytes.clone()),
+            other => panic!("expected one control preview, got {other:?}"),
+        }
+    }
+
+    /// A full-precision read: samples verbatim at `U16`.
+    fn read(&mut self, geometry: RevisionGateRead) -> Vec<OutputFrameEntry> {
+        self.read_samples(geometry, Some(WireChannelSampleFormat::U16))
+    }
+
+    fn read_samples(
+        &mut self,
+        geometry: RevisionGateRead,
+        samples: Option<WireChannelSampleFormat>,
+    ) -> Vec<OutputFrameEntry> {
         let results = read_probe_results(
             &mut self.engine,
             &self.registry,
@@ -310,7 +685,8 @@ impl Harness {
                 since: None,
                 queries: vec![],
                 probes: vec![ProjectProbeRequest::OutputFrame(OutputFrameProbeRequest {
-                    display_layout,
+                    geometry,
+                    samples,
                 })],
             },
         );

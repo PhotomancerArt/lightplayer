@@ -26,13 +26,23 @@ notify = "6"
 # so the (non-default) schema-gen features are safe to enable unconditionally.
 lpc-model = { path = "../lp-core/lpc-model", features = ["schema-gen"] }
 lpc-wire = { path = "../lp-core/lpc-wire" }
+# `upload`'s pre-deploy all-entries check (D19): loads every playlist entry
+# host-side, the same as `lp-cli/tests/examples_valid.rs`'s coverage gate.
+# Also used by `pattern preview`, which loads an in-memory pattern-on-swatch
+# project straight into the host engine and resolves the swatch mapping for
+# its lamp positions.
+lpc-engine = { path = "../lp-core/lpc-engine" }
+lpc-registry = { path = "../lp-core/lpc-registry" }
 lpa-server = { path = "../lp-app/lpa-server" }
 # `project upgrade`: offline format migration for authored project packages.
 lpa-upgrade = { path = "../lp-app/lpa-upgrade" }
+lpc-mapping = { path = "../lp-core/lpc-mapping" }
 lp-gfx-lpvm = { path = "../lp-gfx/lp-gfx-lpvm" }
 lpa-link = { path = "../lp-app/lpa-link", features = ["host-process", "host-serial-esp32"] }
 lpc-hardware = { path = "../lp-core/lpc-hardware", features = ["schema-gen"] }
 lpa-boards = { path = "../lp-app/lpa-boards", features = ["schema-gen"] }
+# The two persisted access files (project sidecar, device store).
+lpc-access = { path = "../lp-core/lpc-access", features = ["schema-gen"] }
 # `firmware package`: the bootloader-range guard checks the merged image
 # against the device model's hung-bootloader table.
 lpa-devices = { path = "../lp-app/lpa-devices" }
@@ -98,14 +108,15 @@ tempfile = "3"
 # Corpus conformance test (tests/schema_conformance.rs); same pinning as
 # lpc-model's schema_gen dev-dep.
 jsonschema = { version = "0.46", default-features = false }
-lpc-engine = { path = "../lp-core/lpc-engine" }
-lpc-mapping = { path = "../lp-core/lpc-mapping" }
 lpa-server = { path = "../lp-app/lpa-server" }
 lpc-hardware = { path = "../lp-core/lpc-hardware" }
 lpc-shared = { path = "../lp-core/lpc-shared" }
 lpfs = { path = "../lp-base/lpfs", features = ["std"] }
 lpc-model = { path = "../lp-core/lpc-model" }
-lpc-wire = { path = "../lp-core/lpc-wire" }
+lpc-wire = { path = "../lp-core/lpc-wire", features = ["ser-write-json"] }
+# The frame scanner the JSON Pack emulator test reads the link with
+# (tests/emu_usb_json_pack.rs).
+lp-json-pack = { workspace = true, features = ["alloc"] }
 serde_json = "1"
 
 [features]

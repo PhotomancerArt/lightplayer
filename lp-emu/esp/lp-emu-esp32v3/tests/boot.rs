@@ -7,6 +7,7 @@
 //! The tests that need the shipped image are `#[ignore]`d and run through
 //! `just test-emu-esp32v3-boot`, which builds it and names the file.
 
+use lp_emu_esp_figures::Figures;
 use lp_emu_esp32v3::machine::{
     BootFrame, BootMode, CORES, Esp32V3Builder, Machine, Outcome, RESET_VECTOR_OFS, StopCondition,
     TimeGrade,
@@ -1314,56 +1315,40 @@ fn the_direct_load_mounts_the_flash_filesystem() {
     );
 }
 
-/// The sha256 of the bytes the direct load prints, **pinned** — one golden
-/// per chip, because the chip changes what the firmware finds.
+/// The bytes the direct load prints, **pinned** — one golden per chip,
+/// because the chip changes what the firmware finds.
 ///
 /// P3 measured a 543-byte chain and printed it in
 /// `docs/reports/2026-09-10-esp32v3-strict-boot-inventory.md` §1.1, ending at
 /// `[INIT] I/O task spawned`, because there was no flash chip and the boot
 /// spun at the door of the mount. P7 gave it one, so the chain continues —
-/// and where it goes depends on what is on the part. **Re-measured, not
-/// widened**: each golden is a whole byte stream with a sha, and the cause of
-/// the change is the line that follows `I/O task spawned` in each.
+/// and where it goes depends on what is on the part. Each golden is a whole
+/// byte stream, and the cause of a change is the line that moved.
 ///
 /// Both are properties of **this image**, not of the machine: the desk board
-/// runs a different commit (ruling R7), and a firmware change moves them. A
-/// failure means "the boot printed something else", and the text the test
-/// prints is what says whether that is a regression or a rebuild.
+/// runs a different commit (ruling R7), and a firmware change moves them —
+/// every re-pin since M4 P1 has been one line, `[INIT] main stack <n> B`,
+/// because the main stack is what `.bss` leaves. So they are **figures**:
+/// recorded in `lp-emu/esp/figures/esp32v3.json` (`boot.init_chain.*`), one
+/// JSON line per line of text, compared byte for byte (a stream that is not
+/// UTF-8 fails rather than being compared lossily), and re-recorded by
+/// `just bless-chips esp32v3`. A failure names the lines that moved.
 ///
-/// ⚠️ **Both were re-measured by M4 P1, and both grew by the same 128 bytes.**
-/// The stop is the *wire* completing the anchor line, and what is hashed is
-/// what the guest had put in the FIFO by then — so the stream carries the
-/// constant FIFO lag plus whatever the boot printed inside it. With core 1
-/// running the boot prints two lines the single-core fallback did not
-/// (`[INIT] RMT ISR on APP core` and `[INIT] heap region 3 live: …`), and
-/// they land inside that lag. Re-measured, not widened: the old pins were
-/// `676`/`bfb8d720…` and `575`/`87fb3c41…`, taken when this machine had no
-/// APP core.
-///
-/// Both re-measured 2026-09-22 (PowerButton, PR #787): the one difference is
-/// `[INIT] main stack 45280 B` → `45264 B` — 16 B of new literal pools,
-/// which the classic keeps in RAM, and the stack is what RAM has left.
-/// Verified for both pins by restoring `45280` and getting the old hash.
+/// ⚠️ The stop is the *wire* completing the anchor line, and what is recorded
+/// is what the guest had put in the FIFO by then — so the stream carries the
+/// constant FIFO lag plus whatever the boot printed inside it (with core 1
+/// running, `[INIT] RMT ISR on APP core` and `[INIT] heap region 3 live: …`
+/// land inside that lag; M4 P1). A move with an unchanged image is the
+/// machine's, and a finding — not a bless.
 ///
 /// A blank chip: the P3 prefix, the `[ERROR] no lpfs partition …` fallback,
-/// and the dual-core tail.
-const INIT_CHAIN_BLANK_SHA256: &str =
-    "03f7813b604b9a844c818de0d64d08e1b7a9f334daeaeee66050689a84d80dcd";
-const INIT_CHAIN_BLANK_LEN: usize = 804;
-
-/// The merged image: the same prefix plus `[INIT] flash filesystem mounted`,
-/// and **fewer** bytes than the blank-chip chain, because the error line it
-/// replaces is longer than the success line.
-const INIT_CHAIN_MERGED_SHA256: &str =
-    "9eb6cec1fc50da57840e2528b95da5a5661538d991d3bc78bd1b1476fc712139";
-const INIT_CHAIN_MERGED_LEN: usize = 703;
-
-/// The boot threshold, pinned on both chips.
+/// and the dual-core tail (`boot.init_chain.blank`). The merged image: the
+/// same prefix plus `[INIT] flash filesystem mounted`, and **fewer** bytes
+/// than the blank-chip chain, because the error line it replaces is longer
+/// than the success line (`boot.init_chain.merged`).
 #[test]
 #[ignore = "needs the shipped image; run through `just test-emu-esp32v3-boot`"]
 fn the_init_chain_is_the_golden_bytes() {
-    use sha2::{Digest, Sha256};
-
     let Some((_, outcome, trace)) = direct_traced_until(
         300_000,
         lp_emu_esp32v3::flash::FlashBacking::Blank,
@@ -1372,28 +1357,20 @@ fn the_init_chain_is_the_golden_bytes() {
         return;
     };
     assert!(stopped_on_the_line(&outcome), "{outcome:?}");
-    let bytes = uart0_fifo_bytes(&trace);
-    let text = String::from_utf8_lossy(&bytes).into_owned();
-    assert_eq!(bytes.len(), INIT_CHAIN_BLANK_LEN, "the chain is:\n{text}");
-    assert_eq!(
-        format!("{:x}", Sha256::digest(&bytes)),
-        INIT_CHAIN_BLANK_SHA256,
-        "the chain is:\n{text}"
-    );
+    let mut figures = Figures::new("esp32v3", "boot::the_init_chain_is_the_golden_bytes");
+    figures.utf8("boot.init_chain.blank", &uart0_fifo_bytes(&trace));
 
-    let Some(chip) = merged_chip() else { return };
+    let Some(chip) = merged_chip() else {
+        figures.verify();
+        return;
+    };
     let Some((_, outcome, trace)) = direct_traced_until(300_000, chip, Some(MOUNTED_LINE)) else {
+        figures.verify();
         return;
     };
     assert!(stopped_on_the_line(&outcome), "{outcome:?}");
-    let bytes = uart0_fifo_bytes(&trace);
-    let text = String::from_utf8_lossy(&bytes).into_owned();
-    assert_eq!(bytes.len(), INIT_CHAIN_MERGED_LEN, "the chain is:\n{text}");
-    assert_eq!(
-        format!("{:x}", Sha256::digest(&bytes)),
-        INIT_CHAIN_MERGED_SHA256,
-        "the chain is:\n{text}"
-    );
+    figures.utf8("boot.init_chain.merged", &uart0_fifo_bytes(&trace));
+    figures.verify();
 }
 
 /// **P4's acceptance for the software interrupts.** `swi2` drives the io

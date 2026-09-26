@@ -149,6 +149,13 @@ impl<'a> EngineSession<'a> {
             self.trace.record_cache_hit(query);
             return Ok(pv);
         }
+        if let Some(node) = consumed_query_node(query)
+            && self.resolver.cache().is_absent(id)
+        {
+            self.resolver.counters_mut().cache_hits += 1;
+            self.trace.record_cache_hit(query);
+            return Err(SessionResolveError::AbsentOption { node });
+        }
 
         self.resolver.counters_mut().uncached_resolves += 1;
         self.trace
@@ -156,6 +163,14 @@ impl<'a> EngineSession<'a> {
             .map_err(SessionResolveError::from)?;
         let result = self.resolve_uncached(host, id, query);
         self.trace.exit(id);
+        // Failures are not remembered, but an absent option is not a failure:
+        // it is the authored answer until the graph changes shape. Only this
+        // query's own absence is kept, never one reached through it.
+        if let Err(SessionResolveError::AbsentOption { node }) = &result
+            && consumed_query_node(query) == Some(*node)
+        {
+            self.resolver.cache_mut().insert_absent(id);
+        }
         let result = result?;
         self.resolver.cache_mut().insert(id, result.clone());
         Ok(result)
@@ -557,6 +572,17 @@ fn merge_maps_by_key(
         SlotData::Map(SlotMapDyn::with_revision(keys_revision, entries)),
         ProductionSource::Merged,
     ))
+}
+
+/// The node whose consumed slot `query` reads, for the queries an absent
+/// option can answer.
+fn consumed_query_node(query: &QueryKey) -> Option<NodeId> {
+    match query {
+        QueryKey::ConsumedSlot { node, .. } | QueryKey::ConsumedSlotAccessor { node, .. } => {
+            Some(*node)
+        }
+        QueryKey::Bus { .. } | QueryKey::ProducedSlot { .. } => None,
+    }
 }
 
 fn select_highest_priority_bus_provider(

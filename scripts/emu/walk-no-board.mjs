@@ -74,7 +74,7 @@ const STEP_DEADLINE_MS = 180_000;
 /// It is separate from `STEP_DEADLINE_MS` because conflating them makes a
 /// slow download look like a board that never answered: the first step's
 /// deadline was spent watching a progress bar, the screenshot said `Loading
-/// Studio…`, and the verdict said the card never offered `It's connected`
+/// Studio…`, and the verdict said the card never offered `It's connected` (today's `via USB`)
 /// (measured 2026-09-10 on the tab lane, with the machine otherwise busy).
 /// Wait for the app to exist, then start timing the board.
 const STUDIO_LOAD_DEADLINE_MS = 420_000;
@@ -303,7 +303,7 @@ async function main() {
 
     // 1. FLASH — Studio's own esptool-js flow, into a chip with nothing on it.
     await step("flash", "Studio flashes the packaged firmware into a blank board", async () => {
-      await driver.clickWhenReady("It's connected", { timeoutMs: STEP_DEADLINE_MS });
+      await driver.clickWhenReady("via USB", { timeoutMs: STEP_DEADLINE_MS });
       await driver.pickBoard(options.board, { timeoutMs: STEP_DEADLINE_MS });
       await driver.waitFor(
         `(document.querySelector('#main')?.innerText || '').includes('needs firmware')`,
@@ -441,13 +441,12 @@ async function main() {
         { timeoutMs: STEP_DEADLINE_MS, what: "the banner to report the board attached again" },
       );
       // …and then what Studio makes of it, REPORTED rather than asserted.
-      // M3's G1 packet already flagged this as a product question for Yona
-      // ("replug → Attached, not listening"): Studio re-derives on the
-      // hotplug edge but does not re-open a port it had adopted, and it is
-      // the SAME code path on hardware. If the emulated replug reproduces
-      // the hardware behaviour faithfully, that is a walk that has moved off
-      // hardware — which is exactly G2's first question — so the walk record
-      // wants the answer either way, not a green tick.
+      // M3's G1 packet flagged "replug → Attached, not listening" as a
+      // product question. It was a shim bug instead: the unplug left the dead
+      // port's byte channel open, so the replugged port's open() was refused
+      // (docs/defects/2026-09-24-emulated-replug-leaves-the-old-byte-channel-open.md).
+      // Since that fix this should read "Ready"; "not listening" here is a
+      // regression worth chasing, not the expected answer.
       const settled = await driver
         .waitFor(
           `(() => { const t = document.querySelector('#main')?.innerText || "";

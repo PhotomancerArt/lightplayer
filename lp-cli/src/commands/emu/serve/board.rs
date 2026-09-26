@@ -485,13 +485,17 @@ fn build(
     let mut builder = Esp32C6Builder::new()
         .time_grade(options.grade)
         .strict(options.strict_bus)
-        // `attached` by default, as `emu run` is: the board's boot console
-        // is then on the wire and the first byte client is replayed it.
-        // `attached-idle` is what makes the coupling rule literal — the
-        // client's connect IS the `open` — at the cost of the boot log,
-        // which the firmware does not write while nothing is draining.
-        // Either way `attach` and `detach` stay the cable's, never a
-        // socket's.
+        // `attached-idle` by default: no byte client means nobody has the
+        // port open, so the host is not reading and the firmware's own
+        // not-draining latch drops what it writes, as on silicon. The
+        // client's connect IS the `open`. The boot console is therefore NOT
+        // replayed to the first client — nothing a board would have
+        // discarded is delivered; at most the IN FIFO's 64 bytes are still
+        // waiting when the port opens. What the guest tried to say is kept
+        // for reading as `<id>.console-untaken.log` (see `flush`), never put
+        // on the wire. `attached` (port open from power-on, first client
+        // replayed everything) is an explicit opt-in. Either way `attach`
+        // and `detach` stay the cable's, never a socket's.
         .usb_host(options.usb_host)
         .usb_sj_drain(UsbSjDrain::Auto)
         // PD11, and the one place the default flips: without it a

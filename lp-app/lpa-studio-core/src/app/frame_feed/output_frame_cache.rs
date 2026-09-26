@@ -17,6 +17,24 @@
 //!   the frame's bytes by it and gets that lamp's own colour. Nothing here
 //!   synthesizes geometry: a frame without a layout draws no lamps, which is
 //!   the honest answer.
+//! - **Geometry is cached per output, and samples are drawn only against
+//!   it.** The probe's geometry bundle (sample layout, display layout,
+//!   placements — `lpc_wire::OutputFrameGeometry`) arrives once and then
+//!   answers `Unchanged` under its revision. The rules:
+//!   - `Changed` replaces the output's cached geometry;
+//!   - `Unchanged` keeps it (a revision this cache does not hold drops it);
+//!   - `Omitted` drops it;
+//!   - samples for an output with no cached geometry are NOT drawn — the
+//!     last good frame stays — and the next read asks for that output's
+//!     geometry outright ([`OutputFrameCache::geometry_read`] leaves it off
+//!     the known list).
+//!
+//!   A refused display layout (`Unsupported`) is cached like any other
+//!   answer: the lens keeps drawing samples against the cached sample layout
+//!   with no lamp positions, and the engine answers `Unchanged` instead of
+//!   rebuilding and re-measuring the refusal every read. Dropping the cache
+//!   on a reconnect or project switch is explicit: the owners replace this
+//!   whole cache, or call [`OutputFrameCache::forget_geometry`].
 //! - **The `LampView` `Rc` contract.** The renderer repaints on `Rc` POINTER
 //!   identity, so a genuinely new frame gets a FRESH `bytes` `Rc` while the
 //!   layout keeps a STABLE one across frames whose geometry did not move —
@@ -41,8 +59,8 @@ use lpc_model::{
     ControlSampleLayout, ControlSampleSpan, NodeId, Revision,
 };
 use lpc_wire::{
-    ControlDisplayLayoutProbeResult, ControlDisplayLayoutRead, OutputFrameEntry,
-    WireChannelSampleFormat, WireOutputPlacement,
+    KnownRevision, OutputFrameEntry, OutputFrameGeometry, RevisionGateRead, RevisionGateResult,
+    WireOutputPlacement,
 };
 
 use crate::{UiControlProductPreview, UiControlSampleFormat};
@@ -50,28 +68,49 @@ use crate::{UiControlProductPreview, UiControlSampleFormat};
 /// One output node's cached published frame.
 #[derive(Debug, Default)]
 struct OutputFrameEntryState {
-    /// The geometry every preview of this output shares — one `Rc`, replaced
-    /// only when the engine sends a different layout.
-    layout: Option<Rc<ControlDisplayLayout>>,
-    /// The engine-side revision of `layout`, for `IfChanged` gating.
-    layout_revision: Option<Revision>,
-    /// The engine refused this output's geometry (dome-scale layouts are over
-    /// the serialized-size budget). The lens stops asking: building and
-    /// measuring a refused layout is real work at exactly the scale that can
-    /// least afford it, and the lens has no synthesis to install in its place.
-    layout_refused: bool,
+    /// The geometry the engine last sent for this output, while its revision
+    /// stands. `None` until the first `Changed`, and again after an
+    /// `Omitted` or an `Unchanged` naming a revision this cache does not
+    /// hold — see the module docs.
+    geometry: Option<CachedOutputGeometry>,
     /// The newest frame, as the renderer consumes it.
     frame: Option<UiControlProductPreview>,
-    /// How the newest frame was CUT: one run per producer placed on this
-    /// wire. Kept beside the frame rather than folded into it because it is
-    /// not something the lamp renderer reads — it is what the patch bay
-    /// draws, and the only description of which fixture owns which stretch
-    /// of the strand (D34a).
-    ///
-    /// Replaced on every probe answer, including one whose revision
-    /// repeated: a patch edit re-cuts the wire without republishing bytes,
-    /// which is the same reason the layout is refreshed below.
+}
+
+/// One output's geometry bundle, as the lens keeps it between reads.
+#[derive(Debug)]
+struct CachedOutputGeometry {
+    /// The engine-side revision of the whole bundle, for `IfChanged` gating.
+    revision: Revision,
+    /// How the output's samples group into lamps.
+    sample_layout: ControlSampleLayout,
+    /// The geometry every preview of this output shares — one `Rc`, replaced
+    /// only when the engine sends a new bundle. `None` when the engine
+    /// refused the display layout at this revision (dome-scale layouts are
+    /// over the serialized-size budget): the refusal is cached too, so the
+    /// engine is not asked to rebuild and re-measure it every read.
+    layout: Option<Rc<ControlDisplayLayout>>,
+    /// How the wire is CUT: one run per producer placed on this wire. Kept
+    /// beside the frame rather than folded into it because it is not
+    /// something the lamp renderer reads — it is what the patch bay draws,
+    /// and the only description of which fixture owns which stretch of the
+    /// strand (D34a). A patch edit re-cuts the wire without republishing
+    /// bytes; it moves the bundle's revision, which is how it arrives.
     placements: Vec<WireOutputPlacement>,
+}
+
+impl CachedOutputGeometry {
+    fn from_wire(geometry: &OutputFrameGeometry) -> Self {
+        Self {
+            revision: geometry.revision,
+            sample_layout: geometry.sample_layout.clone(),
+            layout: geometry
+                .display_layout
+                .layout()
+                .map(|layout| Rc::new(layout.clone())),
+            placements: geometry.placements.clone(),
+        }
+    }
 }
 
 /// The cached composed picture — see [`OutputFrameCache::composed_frame`].
@@ -124,7 +163,8 @@ impl OutputFrameCache {
     pub fn placements(&self, node: NodeId) -> &[WireOutputPlacement] {
         self.outputs
             .get(&node)
-            .map_or(&[], |output| output.placements.as_slice())
+            .and_then(|output| output.geometry.as_ref())
+            .map_or(&[], |geometry| geometry.placements.as_slice())
     }
 
     /// Every output that has answered a probe, in node order — the set the
@@ -211,38 +251,35 @@ impl OutputFrameCache {
         Some(frame)
     }
 
-    /// What the next read should ask for.
-    ///
-    /// One gate covers every output on the probe (the request has no node
-    /// selector), so the strictest answer wins: `Always` while ANY output
-    /// still lacks geometry, `None` once every output that could answer has
-    /// refused, and `IfChanged` otherwise. The `IfChanged` revision is the
-    /// MINIMUM across outputs, so an output whose geometry moved still gets
-    /// its new layout while its neighbours answer `Unchanged`.
-    pub fn display_layout_read(&self) -> ControlDisplayLayoutRead {
-        let mut known: Option<Revision> = None;
-        let mut all_refused = true;
-        for output in self.outputs.values() {
-            if output.layout_refused {
-                continue;
-            }
-            all_refused = false;
-            match output.layout_revision {
-                Some(revision) => {
-                    known = Some(known.map_or(revision, |lowest: Revision| lowest.min(revision)));
-                }
-                // This output has never answered with geometry: ask outright.
-                None => return ControlDisplayLayoutRead::Always,
-            }
+    /// What the next read should ask for: every output whose geometry this
+    /// cache holds, with the revision it holds it at. An output left off the
+    /// list — never seen, or dropped — gets its geometry outright, which is
+    /// how a new output or a deferred one asks `Always` while its neighbours
+    /// answer `Unchanged`. `Always` while nothing is held at all.
+    pub fn geometry_read(&self) -> RevisionGateRead {
+        let known: Vec<KnownRevision> = self
+            .outputs
+            .iter()
+            .filter_map(|(node, output)| {
+                output.geometry.as_ref().map(|geometry| KnownRevision {
+                    node: Some(*node),
+                    revision: geometry.revision,
+                })
+            })
+            .collect();
+        if known.is_empty() {
+            return RevisionGateRead::Always;
         }
-        if self.outputs.is_empty() {
-            return ControlDisplayLayoutRead::Always;
-        }
-        if all_refused {
-            return ControlDisplayLayoutRead::None;
-        }
-        ControlDisplayLayoutRead::IfChanged {
-            known_revision: known,
+        RevisionGateRead::IfChanged { known }
+    }
+
+    /// Drop every output's cached geometry, keeping the frames: the next read
+    /// asks for all of it again. For a caller whose claims about the device
+    /// stopped holding (a malformed read stream) while the pictures it
+    /// already drew are still the last honest ones.
+    pub fn forget_geometry(&mut self) {
+        for output in self.outputs.values_mut() {
+            output.geometry = None;
         }
     }
 
@@ -258,58 +295,74 @@ impl OutputFrameCache {
     }
 
     /// Returns whether this entry carried a NEW frame (a moved revision with
-    /// readable bytes) — what [`Self::frames_seen`] counts.
+    /// readable bytes, drawn against cached geometry) — what
+    /// [`Self::frames_seen`] counts.
     fn apply_entry(&mut self, entry: &OutputFrameEntry) -> bool {
         let output = self.outputs.entry(entry.node).or_default();
-        // The cut, always: it is small, ungated, and moves under a repeated
-        // frame revision whenever a patch is edited.
-        if output.placements != entry.placements {
-            output.placements = entry.placements.clone();
-        }
-        match &entry.display_layout {
-            ControlDisplayLayoutProbeResult::Layout(layout) => {
-                output.layout_revision = Some(layout.revision());
-                output.layout_refused = false;
-                output.layout = Some(Rc::new(layout.clone()));
+        let geometry_moved = match &entry.geometry {
+            RevisionGateResult::Changed(geometry) => {
+                output.geometry = Some(CachedOutputGeometry::from_wire(geometry));
+                true
             }
-            // Both mean "what you have still stands" — keep the `Rc`, which is
-            // the whole point of asking `IfChanged`.
-            ControlDisplayLayoutProbeResult::Unchanged { .. }
-            | ControlDisplayLayoutProbeResult::Omitted => {}
-            ControlDisplayLayoutProbeResult::Unsupported { .. } => {
-                output.layout_refused = true;
+            // "What you have still stands" — keep the `Rc`s, which is the
+            // whole point of asking `IfChanged`. A revision this cache does
+            // not hold cannot stand for anything: drop it and ask again.
+            RevisionGateResult::Unchanged { revision } => {
+                if output
+                    .geometry
+                    .as_ref()
+                    .is_none_or(|geometry| geometry.revision != *revision)
+                {
+                    output.geometry = None;
+                }
+                false
             }
-        }
+            // No statement this read (the engine deferred it, or has none
+            // yet): nothing cached can be trusted to match these samples.
+            RevisionGateResult::Omitted => {
+                output.geometry = None;
+                false
+            }
+        };
+        // No geometry, no drawing: the last good frame stays up rather than
+        // new samples being laid out against a guess. The next read asks.
+        let Some(geometry) = output.geometry.as_ref() else {
+            return false;
+        };
 
         let unchanged = output
             .frame
             .as_ref()
             .is_some_and(|frame| frame.revision == entry.revision.0);
-        // U16 is the only format the lamp renderer reads; anything else would
-        // draw as garbage. Keep the last good frame instead.
-        let readable = entry.sample_format == WireChannelSampleFormat::U16
-            && entry.channels > 0
-            && !entry.bytes.is_empty();
+        // No samples (the read asked for geometry only), or a buffer whose
+        // length does not match its own format: nothing to draw. Keep the
+        // last good frame instead.
+        let format = entry.sample_format.map(UiControlSampleFormat::from_wire);
+        let readable = format.is_some_and(|format| {
+            entry.channels > 0
+                && entry.bytes.len() == entry.channels as usize * 3 * format.bytes_per_sample()
+        });
         if unchanged {
             // Geometry may still have moved under a frame that did not: a
             // patch edit re-places the wire without republishing bytes.
-            if let Some(frame) = output.frame.as_mut() {
-                frame.display_layout = output.layout.clone();
+            if geometry_moved && let Some(frame) = output.frame.as_mut() {
+                frame.sample_layout = geometry.sample_layout.clone();
+                frame.display_layout = geometry.layout.clone();
             }
             return false;
         }
-        if !readable {
+        let (true, Some(format)) = (readable, format) else {
             return false;
-        }
+        };
         output.frame = Some(UiControlProductPreview {
             revision: entry.revision.0,
-            // The published buffer is one row of RGB samples: three u16
+            // The published buffer is one row of RGB samples: three
             // channels per lamp.
             extent: ControlExtent::new(1, entry.channels.saturating_mul(3)),
-            sample_format: UiControlSampleFormat::U16,
-            sample_layout: entry.sample_layout.clone(),
+            sample_format: format,
+            sample_layout: geometry.sample_layout.clone(),
             // The ONE geometry Rc, cloned — pointer-stable across frames.
-            display_layout: output.layout.clone(),
+            display_layout: geometry.layout.clone(),
             // A fresh Rc per frame: the renderer's repaint key.
             bytes: Rc::from(entry.bytes.as_slice()),
         });
@@ -321,15 +374,31 @@ impl OutputFrameCache {
 /// given. Each part's samples land at a running offset, and the composed
 /// spans move with them, so a consumer reading a lamp's colour at its
 /// `sample_start` finds exactly that part's bytes.
+///
+/// Parts that all arrived in one format concatenate as they are; a mix (an
+/// output that publishes 8-bit beside ones that publish 16) widens every
+/// part to `U16`, the format no sample loses precision in.
 fn compose_frame(
     parts: &[(NodeId, &UiControlProductPreview)],
     display_layout: Option<Rc<ControlDisplayLayout>>,
 ) -> UiControlProductPreview {
+    let first_format = parts
+        .first()
+        .map_or(UiControlSampleFormat::U16, |(_, part)| part.sample_format);
+    let sample_format = if parts
+        .iter()
+        .all(|(_, part)| part.sample_format == first_format)
+    {
+        first_format
+    } else {
+        UiControlSampleFormat::U16
+    };
     let mut bytes: Vec<u8> = Vec::with_capacity(
         parts
             .iter()
-            .map(|(_, frame)| frame.bytes.len())
-            .sum::<usize>(),
+            .map(|(_, frame)| frame.extent.sample_count() as usize)
+            .sum::<usize>()
+            * sample_format.bytes_per_sample(),
     );
     let mut spans: Vec<ControlSampleSpan> = Vec::new();
     let mut revision = i64::MIN;
@@ -344,13 +413,20 @@ fn compose_frame(
                 encoding: span.encoding.clone(),
             });
         }
-        bytes.extend_from_slice(&part.bytes);
+        if part.sample_format == sample_format {
+            bytes.extend_from_slice(&part.bytes);
+        } else {
+            for index in 0..part.extent.sample_count() as usize {
+                let sample = part.unorm16_sample(index).unwrap_or(0);
+                bytes.extend_from_slice(&sample.to_le_bytes());
+            }
+        }
         offset_samples = offset_samples.saturating_add(part.extent.sample_count());
     }
     UiControlProductPreview {
         revision,
         extent: ControlExtent::new(1, offset_samples),
-        sample_format: UiControlSampleFormat::U16,
+        sample_format,
         sample_layout: ControlSampleLayout { spans },
         display_layout,
         bytes: Rc::from(bytes.as_slice()),
@@ -409,37 +485,40 @@ fn compose_display_layout(
 #[cfg(test)]
 mod tests {
     use lpc_model::{ColorOrder, ControlSampleEncoding};
+    use lpc_wire::{GeometryDisplayLayout, WireChannelSampleFormat};
 
     use super::*;
 
     #[test]
-    fn the_first_read_asks_always_and_later_ones_ask_if_changed() {
+    fn the_first_read_asks_always_and_later_ones_list_what_they_hold() {
         let mut cache = OutputFrameCache::default();
-        assert_eq!(
-            cache.display_layout_read(),
-            ControlDisplayLayoutRead::Always
-        );
+        assert_eq!(cache.geometry_read(), RevisionGateRead::Always);
 
-        let mut first = entry(4, 1, vec![1, 0, 2, 0, 3, 0]);
-        first.display_layout = ControlDisplayLayoutProbeResult::Layout(layout(11));
-        cache.apply(&[first]);
+        cache.apply(&[with_layout(
+            entry(4, 1, vec![1, 0, 2, 0, 3, 0]),
+            11,
+            layout(11),
+        )]);
 
         assert_eq!(
-            cache.display_layout_read(),
-            ControlDisplayLayoutRead::IfChanged {
-                known_revision: Some(Revision::new(11)),
+            cache.geometry_read(),
+            RevisionGateRead::IfChanged {
+                known: vec![known(4, 11)],
             }
         );
     }
 
     /// The layout `Rc` is the renderer's repaint key for the whole lamp
-    /// field: an `Unchanged` answer must hand back the SAME one.
+    /// field: an `Unchanged` answer must hand back the SAME one — and the
+    /// samples still draw, against the cached sample layout.
     #[test]
     fn unchanged_geometry_keeps_its_rc_while_new_bytes_arrive() {
         let mut cache = OutputFrameCache::default();
-        let mut first = entry(4, 1, vec![1, 0, 2, 0, 3, 0]);
-        first.display_layout = ControlDisplayLayoutProbeResult::Layout(layout(11));
-        cache.apply(&[first]);
+        cache.apply(&[with_layout(
+            entry(4, 1, vec![1, 0, 2, 0, 3, 0]),
+            11,
+            layout(11),
+        )]);
         let geometry = Rc::clone(
             cache
                 .frame(NodeId::new(4))
@@ -450,11 +529,7 @@ mod tests {
         );
         let bytes = Rc::clone(&cache.frame(NodeId::new(4)).expect("frame").bytes);
 
-        let mut second = entry(4, 2, vec![9, 0, 8, 0, 7, 0]);
-        second.display_layout = ControlDisplayLayoutProbeResult::Unchanged {
-            revision: Revision::new(11),
-        };
-        cache.apply(&[second]);
+        cache.apply(&[unchanged(entry(4, 2, vec![9, 0, 8, 0, 7, 0]), 11)]);
 
         let frame = cache.frame(NodeId::new(4)).expect("frame");
         assert!(Rc::ptr_eq(
@@ -465,6 +540,8 @@ mod tests {
             !Rc::ptr_eq(&bytes, &frame.bytes),
             "a new frame must carry a fresh bytes Rc"
         );
+        assert_eq!(frame.bytes.as_ref(), [9, 0, 8, 0, 7, 0]);
+        assert_eq!(frame.sample_layout.spans.len(), 1, "drawn from the cache");
     }
 
     /// A patch edit re-places the wire without moving the published bytes:
@@ -474,13 +551,16 @@ mod tests {
     #[test]
     fn a_moved_layout_reaches_a_frame_whose_revision_did_not_move() {
         let mut cache = OutputFrameCache::default();
-        let mut first = entry(4, 5, vec![1, 0, 2, 0, 3, 0]);
-        first.display_layout = ControlDisplayLayoutProbeResult::Layout(layout(11));
-        cache.apply(&[first]);
-
-        let mut repatched = entry(4, 5, vec![1, 0, 2, 0, 3, 0]);
-        repatched.display_layout = ControlDisplayLayoutProbeResult::Layout(layout(12));
-        cache.apply(&[repatched]);
+        cache.apply(&[with_layout(
+            entry(4, 5, vec![1, 0, 2, 0, 3, 0]),
+            11,
+            layout(11),
+        )]);
+        cache.apply(&[with_layout(
+            entry(4, 5, vec![1, 0, 2, 0, 3, 0]),
+            12,
+            layout(12),
+        )]);
 
         let ControlDisplayLayout::Layout2d(layout) = cache
             .frame(NodeId::new(4))
@@ -501,7 +581,11 @@ mod tests {
         assert_eq!(cache.placements(NodeId::new(4)).len(), 1);
 
         let mut repatched = entry(4, 5, vec![1, 0, 2, 0, 3, 0]);
-        repatched.placements[0].reversed = true;
+        let RevisionGateResult::Changed(geometry) = &mut repatched.geometry else {
+            unreachable!("the helper sends geometry");
+        };
+        geometry.revision = Revision::new(2);
+        geometry.placements[0].reversed = true;
         cache.apply(&[repatched]);
 
         assert!(
@@ -511,40 +595,96 @@ mod tests {
         assert_eq!(cache.outputs().collect::<Vec<_>>(), vec![NodeId::new(4)]);
     }
 
+    /// A refused display layout is an ANSWER, cached under its revision
+    /// like a layout: the next read lists it (so the engine says
+    /// `Unchanged` instead of rebuilding and re-measuring the refusal), and
+    /// the frame still draws its samples — with no lamp positions rather
+    /// than guessed ones.
     #[test]
-    fn a_refused_layout_stops_the_asking() {
+    fn a_refused_layout_is_cached_under_its_revision() {
         let mut cache = OutputFrameCache::default();
-        let mut refused = entry(4, 1, vec![1, 0, 2, 0, 3, 0]);
-        refused.display_layout = ControlDisplayLayoutProbeResult::Unsupported {
-            reason: "over the wire budget".to_string(),
-        };
-        cache.apply(&[refused]);
+        cache.apply(&[entry(4, 1, vec![1, 0, 2, 0, 3, 0])]);
 
-        assert_eq!(cache.display_layout_read(), ControlDisplayLayoutRead::None);
+        assert_eq!(
+            cache.geometry_read(),
+            RevisionGateRead::IfChanged {
+                known: vec![known(4, GEOMETRY_REVISION)],
+            },
+            "the refusal is held, not re-asked"
+        );
+        let frame = cache
+            .frame(NodeId::new(4))
+            .expect("the bytes still arrived");
         assert!(
-            cache
-                .frame(NodeId::new(4))
-                .expect("the bytes still arrived")
-                .display_layout
-                .is_none(),
+            frame.display_layout.is_none(),
             "no geometry is drawn rather than a guessed one"
+        );
+
+        cache.apply(&[unchanged(
+            entry(4, 2, vec![4, 0, 5, 0, 6, 0]),
+            GEOMETRY_REVISION,
+        )]);
+        assert_eq!(
+            cache.frame(NodeId::new(4)).expect("frame").bytes.as_ref(),
+            [4, 0, 5, 0, 6, 0],
+            "steady samples keep flowing under the cached refusal"
         );
     }
 
-    /// Two outputs, one still waiting: the shared gate has to keep asking
-    /// outright, or the second output never gets geometry at all.
+    /// Samples for an output with no cached geometry — a new output, a
+    /// reconnect, a deferred bundle — are not drawn, and the next read asks
+    /// for that output's geometry outright (it is left off the known list)
+    /// while its neighbours stay gated.
     #[test]
-    fn one_output_without_geometry_keeps_the_shared_gate_open() {
+    fn samples_without_cached_geometry_are_not_drawn_and_are_asked_for_again() {
         let mut cache = OutputFrameCache::default();
-        let mut answered = entry(4, 1, vec![1, 0, 2, 0, 3, 0]);
-        answered.display_layout = ControlDisplayLayoutProbeResult::Layout(layout(11));
-        let waiting = entry(5, 1, vec![1, 0, 2, 0, 3, 0]);
-        cache.apply(&[answered, waiting]);
+        let answered = with_layout(entry(4, 1, vec![1, 0, 2, 0, 3, 0]), 11, layout(11));
+        let mut deferred = entry(5, 1, vec![9, 0, 8, 0, 7, 0]);
+        deferred.geometry = RevisionGateResult::Omitted;
+        cache.apply(&[answered, deferred]);
 
-        assert_eq!(
-            cache.display_layout_read(),
-            ControlDisplayLayoutRead::Always
+        assert!(
+            cache.frame(NodeId::new(5)).is_none(),
+            "no geometry, no picture — not a guessed one"
         );
+        assert_eq!(
+            cache.geometry_read(),
+            RevisionGateRead::IfChanged {
+                known: vec![known(4, 11)],
+            },
+            "output 5 is off the list, so the engine sends its geometry"
+        );
+
+        // An `Unchanged` naming a revision this cache never held is no
+        // better than nothing: it is dropped and asked for again too.
+        cache.apply(&[unchanged(entry(4, 2, vec![3, 0, 3, 0, 3, 0]), 99)]);
+        assert_eq!(cache.geometry_read(), RevisionGateRead::Always);
+        assert_eq!(
+            cache
+                .frame(NodeId::new(4))
+                .expect("last good frame")
+                .bytes
+                .as_ref(),
+            [1, 0, 2, 0, 3, 0],
+            "the last good frame stays up"
+        );
+    }
+
+    /// Forgetting is explicit, and keeps the pictures: a caller whose claims
+    /// stopped holding asks for every output's geometry again.
+    #[test]
+    fn forgetting_geometry_asks_again_and_keeps_the_frames() {
+        let mut cache = OutputFrameCache::default();
+        cache.apply(&[with_layout(
+            entry(4, 1, vec![1, 0, 2, 0, 3, 0]),
+            11,
+            layout(11),
+        )]);
+
+        cache.forget_geometry();
+
+        assert_eq!(cache.geometry_read(), RevisionGateRead::Always);
+        assert!(cache.frame(NodeId::new(4)).is_some());
     }
 
     /// The lens's frame clock: it counts ENGINE frames, not reads. A
@@ -573,11 +713,76 @@ mod tests {
         ]);
         assert_eq!(cache.frames_seen(), 3);
 
-        // Unreadable bytes leave the last good frame — and the clock.
+        // Unreadable bytes (a length that contradicts the format: six
+        // bytes cannot be one lamp at 8 bits) leave the last good frame —
+        // and the clock.
         let mut garbage = entry(4, 4, vec![9, 0, 8, 0, 7, 0]);
-        garbage.sample_format = WireChannelSampleFormat::U8;
+        garbage.sample_format = Some(WireChannelSampleFormat::U8);
         cache.apply(&[garbage]);
         assert_eq!(cache.frames_seen(), 3);
+    }
+
+    /// An 8-bit frame draws as one: the preview keeps the format it arrived
+    /// in, and the shared decode widens each level to unorm16.
+    #[test]
+    fn an_eight_bit_frame_draws_as_eight_bit() {
+        let mut cache = OutputFrameCache::default();
+        let mut narrow = entry(4, 1, vec![0; 6]);
+        narrow.sample_format = Some(WireChannelSampleFormat::U8);
+        narrow.bytes = vec![255, 128, 0];
+
+        cache.apply(&[narrow]);
+
+        let frame = cache.frame(NodeId::new(4)).expect("an 8-bit frame draws");
+        assert_eq!(frame.sample_format, UiControlSampleFormat::U8);
+        assert_eq!(frame.extent.sample_count(), 3);
+        assert_eq!(frame.unorm16_sample(0), Some(u16::MAX));
+        assert_eq!(frame.unorm16_sample(1), Some(128 * 257));
+        assert_eq!(cache.frames_seen(), 1);
+    }
+
+    /// A geometry-only answer (the read asked for no samples) still caches
+    /// the geometry — placements included — and leaves the last frame and
+    /// the frame clock alone.
+    #[test]
+    fn a_samples_free_answer_keeps_geometry_and_the_last_frame() {
+        let mut cache = OutputFrameCache::default();
+        cache.apply(&[entry(4, 1, vec![1, 0, 2, 0, 3, 0])]);
+
+        let mut bare = entry(4, 2, vec![9, 0, 8, 0, 7, 0]);
+        bare.sample_format = None;
+        bare.bytes = Vec::new();
+        cache.apply(&[bare]);
+
+        assert_eq!(cache.placements(NodeId::new(4)).len(), 1);
+        assert_eq!(
+            cache.frame(NodeId::new(4)).expect("last frame").revision,
+            1,
+            "no samples, no new picture"
+        );
+        assert_eq!(cache.frames_seen(), 1);
+    }
+
+    /// Outputs that arrived in different formats compose at `U16`, each
+    /// 8-bit level widened by ×257, so no part loses precision.
+    #[test]
+    fn mixed_formats_compose_widened_to_sixteen_bits() {
+        let mut cache = OutputFrameCache::default();
+        let wide = with_layout(entry(4, 1, vec![1, 0, 2, 0, 3, 0]), 11, layout_at(11, 0.25));
+        let mut narrow = with_layout(entry(5, 1, vec![0; 6]), 12, layout_at(12, 0.75));
+        narrow.sample_format = Some(WireChannelSampleFormat::U8);
+        narrow.bytes = vec![1, 2, 255];
+        cache.apply(&[wide, narrow]);
+
+        let composed = cache
+            .composed_frame(&[NodeId::new(4), NodeId::new(5)])
+            .expect("composed");
+
+        assert_eq!(composed.sample_format, UiControlSampleFormat::U16);
+        assert_eq!(
+            composed.bytes.as_ref(),
+            [1, 0, 2, 0, 3, 0, 1, 1, 2, 2, 255, 255]
+        );
     }
 
     /// The small-dome regression (2026-08-29): TWO outputs cut from one
@@ -588,10 +793,8 @@ mod tests {
     #[test]
     fn two_outputs_compose_into_one_picture_with_rebased_lamps() {
         let mut cache = OutputFrameCache::default();
-        let mut box_1 = entry(4, 1, vec![1, 0, 2, 0, 3, 0]);
-        box_1.display_layout = ControlDisplayLayoutProbeResult::Layout(layout_at(11, 0.25));
-        let mut box_2 = entry(5, 1, vec![9, 0, 8, 0, 7, 0]);
-        box_2.display_layout = ControlDisplayLayoutProbeResult::Layout(layout_at(12, 0.75));
+        let box_1 = with_layout(entry(4, 1, vec![1, 0, 2, 0, 3, 0]), 11, layout_at(11, 0.25));
+        let box_2 = with_layout(entry(5, 1, vec![9, 0, 8, 0, 7, 0]), 12, layout_at(12, 0.75));
         cache.apply(&[box_1, box_2]);
 
         let composed = cache
@@ -628,9 +831,11 @@ mod tests {
     #[test]
     fn a_single_part_composes_as_itself() {
         let mut cache = OutputFrameCache::default();
-        let mut only = entry(4, 1, vec![1, 0, 2, 0, 3, 0]);
-        only.display_layout = ControlDisplayLayoutProbeResult::Layout(layout(11));
-        cache.apply(&[only]);
+        cache.apply(&[with_layout(
+            entry(4, 1, vec![1, 0, 2, 0, 3, 0]),
+            11,
+            layout(11),
+        )]);
 
         let composed = cache
             .composed_frame(&[NodeId::new(4)])
@@ -649,10 +854,8 @@ mod tests {
     #[test]
     fn unmoved_geometry_keeps_the_composed_layout_rc_across_new_bytes() {
         let mut cache = OutputFrameCache::default();
-        let mut box_1 = entry(4, 1, vec![1, 0, 2, 0, 3, 0]);
-        box_1.display_layout = ControlDisplayLayoutProbeResult::Layout(layout_at(11, 0.25));
-        let mut box_2 = entry(5, 1, vec![9, 0, 8, 0, 7, 0]);
-        box_2.display_layout = ControlDisplayLayoutProbeResult::Layout(layout_at(12, 0.75));
+        let box_1 = with_layout(entry(4, 1, vec![1, 0, 2, 0, 3, 0]), 11, layout_at(11, 0.25));
+        let box_2 = with_layout(entry(5, 1, vec![9, 0, 8, 0, 7, 0]), 12, layout_at(12, 0.75));
         cache.apply(&[box_1, box_2]);
         let nodes = [NodeId::new(4), NodeId::new(5)];
         let first = cache.composed_frame(&nodes).expect("composed");
@@ -662,11 +865,7 @@ mod tests {
         assert!(Rc::ptr_eq(&first.bytes, &repeat.bytes));
 
         // A new frame on one output: fresh bytes, same geometry Rc.
-        let mut next = entry(4, 2, vec![4, 0, 5, 0, 6, 0]);
-        next.display_layout = ControlDisplayLayoutProbeResult::Unchanged {
-            revision: Revision::new(11),
-        };
-        cache.apply(&[next]);
+        cache.apply(&[unchanged(entry(4, 2, vec![4, 0, 5, 0, 6, 0]), 11)]);
         let second = cache.composed_frame(&nodes).expect("composed");
         assert!(
             !Rc::ptr_eq(&first.bytes, &second.bytes),
@@ -688,12 +887,8 @@ mod tests {
     #[test]
     fn a_layout_less_part_keeps_its_neighbours_offsets_honest() {
         let mut cache = OutputFrameCache::default();
-        let mut refused = entry(4, 1, vec![1, 0, 2, 0, 3, 0]);
-        refused.display_layout = ControlDisplayLayoutProbeResult::Unsupported {
-            reason: "over the wire budget".to_string(),
-        };
-        let mut answered = entry(5, 1, vec![9, 0, 8, 0, 7, 0]);
-        answered.display_layout = ControlDisplayLayoutProbeResult::Layout(layout_at(12, 0.75));
+        let refused = entry(4, 1, vec![1, 0, 2, 0, 3, 0]);
+        let answered = with_layout(entry(5, 1, vec![9, 0, 8, 0, 7, 0]), 12, layout_at(12, 0.75));
         cache.apply(&[refused, answered]);
 
         let composed = cache
@@ -707,6 +902,38 @@ mod tests {
             "the answering part's lamp still reads its own stretch"
         );
         assert_eq!(composed.bytes.len(), 12);
+    }
+
+    /// The geometry revision [`entry`] sends by default.
+    const GEOMETRY_REVISION: i64 = 1;
+
+    fn known(node: u32, revision: i64) -> KnownRevision {
+        KnownRevision {
+            node: Some(NodeId::new(node)),
+            revision: Revision::new(revision),
+        }
+    }
+
+    /// The entry with a display layout in its geometry, at `revision`.
+    fn with_layout(
+        mut entry: OutputFrameEntry,
+        revision: i64,
+        layout: ControlDisplayLayout,
+    ) -> OutputFrameEntry {
+        let RevisionGateResult::Changed(geometry) = &mut entry.geometry else {
+            unreachable!("the helper sends geometry");
+        };
+        geometry.revision = Revision::new(revision);
+        geometry.display_layout = GeometryDisplayLayout::Layout(layout);
+        entry
+    }
+
+    /// The entry answering `Unchanged` at `revision` instead of a bundle.
+    fn unchanged(mut entry: OutputFrameEntry, revision: i64) -> OutputFrameEntry {
+        entry.geometry = RevisionGateResult::Unchanged {
+            revision: Revision::new(revision),
+        };
+        entry
     }
 
     fn layout_at(revision: i64, center: f32) -> ControlDisplayLayout {
@@ -729,35 +956,44 @@ mod tests {
         )
     }
 
+    /// A published frame with its whole geometry bundle: one span, one
+    /// auto-flowed producer, and a REFUSED display layout (the bare case —
+    /// [`with_layout`] adds one).
     fn entry(node: u32, revision: i64, bytes: Vec<u8>) -> OutputFrameEntry {
         OutputFrameEntry {
             node: NodeId::new(node),
             revision: Revision::new(revision),
             channels: (bytes.len() / 6) as u32,
-            sample_format: WireChannelSampleFormat::U16,
-            sample_layout: ControlSampleLayout {
-                spans: vec![ControlSampleSpan {
-                    row: 0,
-                    start: 0,
-                    len: (bytes.len() / 2) as u32,
-                    encoding: ControlSampleEncoding::RgbPixels {
-                        count: (bytes.len() / 6) as u32,
-                        color_order: ColorOrder::Rgb,
-                    },
+            sample_format: Some(WireChannelSampleFormat::U16),
+            geometry: RevisionGateResult::Changed(OutputFrameGeometry {
+                revision: Revision::new(GEOMETRY_REVISION),
+                sample_layout: ControlSampleLayout {
+                    spans: vec![ControlSampleSpan {
+                        row: 0,
+                        start: 0,
+                        len: (bytes.len() / 2) as u32,
+                        encoding: ControlSampleEncoding::RgbPixels {
+                            count: (bytes.len() / 6) as u32,
+                            color_order: ColorOrder::Rgb,
+                        },
+                    }],
+                },
+                display_layout: GeometryDisplayLayout::Unsupported {
+                    reason: "no display layout in this fixture".to_string(),
+                },
+                // One auto-flowed producer (a fixture, not the output
+                // itself) taking the whole wire — the shape of an unpatched
+                // project.
+                placements: vec![WireOutputPlacement {
+                    node: NodeId::new(node + 100),
+                    output: 0,
+                    source_lamp: 0,
+                    source_lamps: (bytes.len() / 6) as u32,
+                    wire_lamp: 0,
+                    lamps: (bytes.len() / 6) as u32,
+                    reversed: false,
                 }],
-            },
-            display_layout: ControlDisplayLayoutProbeResult::Omitted,
-            // One auto-flowed producer (a fixture, not the output itself)
-            // taking the whole wire — the shape of an unpatched project.
-            placements: vec![WireOutputPlacement {
-                node: NodeId::new(node + 100),
-                output: 0,
-                source_lamp: 0,
-                source_lamps: (bytes.len() / 6) as u32,
-                wire_lamp: 0,
-                lamps: (bytes.len() / 6) as u32,
-                reversed: false,
-            }],
+            }),
             bytes,
         }
     }

@@ -78,6 +78,58 @@ no reset over a multi-minute soak, ledger green.
   the S3 keep their own splits and have no probe. Port the probe before
   trusting either board's stack margin.
 
+## Amendment (2026-09-24): the main heap region gives 24,000 B to the stack for BLE
+
+Linking BLE (`docs/adr/2026-09-24-ble-transport.md`; the `ble` feature is in
+`default`, so every C6 carries it whether or not its device store enables it)
+moves 36,000 B of static RAM below the main stack: the controller blob's
+IRAM-placed link-layer code, its statics, trouble-host's packet pool and the
+task pools. The stack fell from 71,152 B to 38,680 B (after moving the BLE
+host state to the heap), and meteor's steady-state high-water on the emulator
+was ~35.5 KB — 3 KB of margin where this ADR bought 35 KB.
+
+**Decision (Yona, 2026-09-24): cut the heap, one image for every device** —
+"a stack overflow crashes; a smaller heap only narrows the compile margin".
+The rejected alternative was a separate BLE image, which reverses `ble` in
+`default` and doubles what a board can be flashed with.
+
+1. **Heap in main RAM: 260,000 → 236,000 B.** The `dram2_seg` region is
+   unchanged at 65,536 B. Heap total **301,536 B** (was 325,536 B).
+2. The main stack is **62,664 B** with BLE linked.
+
+Measured on `lp-emu:esp32c6:t1` (the shipped image, BLE linked, disabled —
+the emulator never enables it), 2026-09-24:
+
+| | before the cut (BLE linked) | after |
+|---|---|---|
+| main stack | 38,680 B | 62,664 B |
+| stack high-water, idle (first heartbeat) | 12,916 B | 12,916 B |
+| stack high-water, meteor steady state (~200 s) | 35,496 B (3,184 B headroom) | 33,896 B (28,768 B headroom) |
+| heap free at boot (first heartbeat) | 264,932 B | 240,932 B |
+| free before the shader compile, PLAYFUL Choker | — | 136k free / 157k used |
+| free before the shader compile, Zook dome | — | 155k free / 138k used |
+
+The "before" meteor figure is PR #810's earlier emulator run; the two meteor
+runs are different uploads of the same project, so read the high-water as
+~34–35.5 KB, not as the cut having moved it.
+
+With BLE **enabled** the controller and host take a further ~24 KB of heap
+at 0 connections and ~3.5 KB per connection (silicon, the transport ADR), so
+a BLE-enabled board's compile margin is that much smaller again. The
+emulator numbers above are the BLE-disabled board.
+
+**Placement (2026-09-24, same day).** The cut exposed a contiguity cost the
+table above does not show. A BLE-enabled board refused choker → zook with
+212 KB free, because the load gate reads the largest block and only the main
+region can reach 64 KiB. The fix is placement, not size
+(`docs/defects/2026-09-24-ble-enabled-c6-refuses-a-project-switch-after-the-heap-cut.md`).
+The radio blobs' C heap (`malloc` and friends, `lp-fw/fw-esp32c6/src/c_heap.rs`)
+fills the reclaimed `dram2_seg` region first. That region can never pass
+the gate, so radio blocks there cost the gate nothing, and the main region
+is left to Rust. With BLE up on silicon, 44,584 B of `dram2_seg` holds radio
+allocations. Allocations that a project outlives no longer keep memory they
+grew during the project.
+
 ## Alternatives Considered
 
 - **Grow the stack by shrinking the heap alone (no dram2).** Loses

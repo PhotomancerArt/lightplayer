@@ -27,6 +27,8 @@ use fw_esp32_common::serial::chunked_write::{ChunkedWriter, WritePolicy};
 use log;
 
 use crate::board::esp32s3::usb_connection::UsbConnectionMonitor;
+use crate::board::esp32s3::usb_connection::UsbSerialJtagInEndpoint;
+use fw_esp32_common::serial::in_endpoint::InEndpoint;
 
 /// Static message channels for MessageRouter
 static INCOMING_MSG: Channel<CriticalSectionRawMutex, String, 32> = Channel::new();
@@ -59,6 +61,16 @@ const PROBE_TIMEOUT: Duration = Duration::from_millis(100);
 
 /// Minimum spacing between probe writes while latched not-draining.
 const PROBE_INTERVAL: Duration = Duration::from_millis(2000);
+
+/// Longest wait for the next OUT packet of a burst already arriving. A host
+/// with more to send refills the endpoint within microseconds of the pop, so
+/// a gap this long means the burst is over.
+const READ_BURST_GAP: Duration = Duration::from_micros(500);
+
+/// Most bytes one read pass takes before yielding back to the server loop,
+/// so a host flooding the link cannot hold the executor. Well above a lens
+/// read (600 B) and an upload chunk (~4.7 KB takes two passes).
+const READ_BURST_MAX: usize = 4096;
 
 /// Wrap this board's TX half in the shared chunked writer.
 ///
@@ -103,7 +115,11 @@ pub async fn io_task(usb_device: esp_hal::peripherals::USB_DEVICE<'static>) {
 
     let usb_serial = UsbSerialJtag::new(usb_device);
     let usb_serial_async = usb_serial.into_async();
-    let (mut rx, mut tx) = usb_serial_async.split();
+    let (mut rx, tx) = usb_serial_async.split();
+    // esp-println shares the IN endpoint; the gate waits for it to be free
+    // and clears the stale `serial_in_empty` before every packet (see
+    // `fw_esp32_common::serial::in_endpoint`, shared with the C6).
+    let mut tx = InEndpoint::<_, UsbSerialJtagInEndpoint>::new(tx);
 
     Timer::after(Duration::from_millis(100)).await;
 
@@ -173,6 +189,16 @@ async fn drain_outgoing_messages<W: Write>(
 
 /// Read from serial with timeout, push complete M! lines to incoming queue.
 /// Incoming bytes are proof the host application is alive.
+///
+/// Takes the whole burst the host is sending, not one packet: after the first
+/// read lands, keep reading while the next OUT packet follows within
+/// [`READ_BURST_GAP`], up to [`READ_BURST_MAX`] bytes. The endpoint holds one
+/// 64-byte packet at a time, and this task only runs while the server loop
+/// yields between frames — so reading one packet per wake took a request in at
+/// 64 B per frame, and a 600 B Studio lens read spent ten frames arriving
+/// before the server saw it. Mirrors the C6's `read_serial` (fixed in #836);
+/// the S3 gets the same fix by analogy — there is no S3 emulator boot of the
+/// shipped image to measure it directly.
 async fn read_serial<R: Read>(
     rx: &mut R,
     read_buffer: &mut Vec<u8>,
@@ -180,18 +206,23 @@ async fn read_serial<R: Read>(
     conn: &mut UsbConnectionMonitor,
 ) {
     let mut temp_buf = [0u8; 64];
-    match embassy_futures::select::select(
-        Timer::after(Duration::from_millis(1)),
-        Read::read(rx, &mut temp_buf),
-    )
-    .await
-    {
-        embassy_futures::select::Either::Second(Ok(n)) if n > 0 => {
-            conn.note_host_active();
-            read_buffer.extend_from_slice(&temp_buf[..n]);
-            process_read_buffer(read_buffer, router);
+    let mut wait = Duration::from_millis(1);
+    let mut taken = 0;
+    while taken < READ_BURST_MAX {
+        match embassy_futures::select::select(Timer::after(wait), Read::read(rx, &mut temp_buf))
+            .await
+        {
+            embassy_futures::select::Either::Second(Ok(n)) if n > 0 => {
+                read_buffer.extend_from_slice(&temp_buf[..n]);
+                taken += n;
+                wait = READ_BURST_GAP;
+            }
+            _ => break,
         }
-        _ => {}
+    }
+    if taken > 0 {
+        conn.note_host_active();
+        process_read_buffer(read_buffer, router);
     }
 }
 

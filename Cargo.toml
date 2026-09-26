@@ -6,7 +6,9 @@ members = [
     "lp-base/lp-recovery",
     "lp-base/lp-bootctl",
     "lp-base/lpfs",
+    "lp-base/lp-json-pack",
     # lp-app workspace members
+    "lp-core/lpc-access",
     "lp-core/lpc-history",
     "lp-core/lpc-engine",
     "lp-core/lpc-view",
@@ -90,6 +92,7 @@ members = [
     "lp-emu/lp-xt-jit",
     "lp-emu/lp-emu-validate",
     "lp-emu/esp/lp-emu-esp-common",
+    "lp-emu/esp/lp-emu-esp-figures",
     "lp-emu/esp/lp-emu-esp32c6",
     "lp-emu/esp/lp-emu-esp32v3",
     "lp-emu/esp/lp-emu-esp32s3",
@@ -130,7 +133,9 @@ default-members = [
     "lp-base/lp-recovery",
     "lp-base/lp-bootctl",
     "lp-base/lpfs",
+    "lp-base/lp-json-pack",
     # lp-app workspace members
+    "lp-core/lpc-access",
     "lp-core/lpc-history",
     "lp-core/lpc-engine",
     "lp-core/lpc-view",
@@ -190,6 +195,7 @@ default-members = [
     "lp-emu/lp-xt-jit",
     "lp-emu/lp-emu-validate",
     "lp-emu/esp/lp-emu-esp-common",
+    "lp-emu/esp/lp-emu-esp-figures",
     "lp-emu/esp/lp-emu-esp32c6",
     "lp-emu/esp/lp-emu-esp32v3",
     "lp-emu/esp/lp-emu-esp32s3",
@@ -247,6 +253,7 @@ cranelift-frontend = { git = "https://github.com/PhotomancerArt/lp-cranelift", b
 cranelift-module = { git = "https://github.com/PhotomancerArt/lp-cranelift", branch = "main", version = "0.127.0", default-features = false }
 cranelift-object = { git = "https://github.com/PhotomancerArt/lp-cranelift", branch = "main", version = "0.127.0" }
 lp-collection = { path = "lp-base/lp-collection", default-features = false }
+lp-json-pack = { path = "lp-base/lp-json-pack", default-features = false }
 lp-recovery = { path = "lp-base/lp-recovery", default-features = false }
 
 # Common dependencies
@@ -513,13 +520,25 @@ esp-storage = { path = "third_party/esp-storage" }
 # so the RMT refill interrupt's dispatch never fetches from flash. See
 # third_party/esp-hal/README-LP.md and docs/debt/classic-iram-handlers-reach-flash.md.
 esp-hal = { path = "third_party/esp-hal" }
+# esp-radio 0.18.0 fork: the NPL controllers' (C6's) ACL receive path copies
+# every mbuf of a chained packet, not only the first — a knob write over
+# Bluetooth arrived 8 B short and killed the C6's BLE host. See
+# third_party/esp-radio/README-LP.md and
+# docs/defects/2026-09-25-a-knob-jump-over-bluetooth-kills-the-c6-ble-host.md.
+esp-radio = { path = "third_party/esp-radio" }
 # naga 29.0.0 fork: glsl-in lowers `&&`/`||` with side-effecting right operands
 # to control flow so they short-circuit per the GLSL spec (upstream evaluates
 # eagerly). See third_party/naga/README-LP.md; candidate for an upstream PR.
 naga = { path = "third_party/naga" }
 # no_std pp-rs fork for naga `glsl-in` on bare-metal (https://github.com/PhotomancerArt/pp-rs)
 pp-rs = { path = "third_party/pp-rs" }
-# no_std JSON serializer patch: preserve serde_json::RawValue as raw JSON.
+# ser-write 0.3.1 fork: a provided `SerWrite::token` hook (declines by
+# default) so a sink can take the serializer's structural tokens instead of
+# its JSON text. See third_party/ser-write/README-LP.md.
+ser-write = { path = "third_party/ser-write" }
+# no_std JSON serializer patch: preserve serde_json::RawValue as raw JSON, and
+# offer each output site to the sink as a token. See
+# third_party/ser-write-json/README-LP.md.
 ser-write-json = { path = "third_party/ser-write-json" }
 
 #####################################

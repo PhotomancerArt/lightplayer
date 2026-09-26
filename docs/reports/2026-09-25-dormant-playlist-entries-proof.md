@@ -1,0 +1,317 @@
+# Dormant playlist entries: 25 patterns on the emulated C6
+
+**Date** 2026-09-25 · **Plan** `lp2025/2026-09-24-2351-multi-pattern-projects`
+(P6; acceptance criteria AC2–AC5) · **Project**
+`catalog/projects/playful-choker-tryout` (25 entries) · **Engine** branch
+`feat/multi-pattern-projects-p6`, measured at `5b09557cf` (every engine and
+firmware source byte there is the same at the report's own commit; later
+P6 commits touch only the catalog, heap-budget records and docs; P6b's
+`543bf0fa4` changes the engine, and section 2 is re-measured on it) ·
+**Emulators** fw-emu (`lp-cli profile`, the RV32 engine emulator) and
+`configuration=lp-emu:esp32c6:t1`, lp-emu at `5b09557cf` (its emulator
+sources equal `origin/main` `7190618fc`'s, plus P3's two perf-event names).
+Section 2 was re-measured for P6b on fw-emu built from `543bf0fa4` (and its
+parent `307000b61`), the same `lp-cli profile` emulator
+
+Every number below is emulated. Memory figures transfer to silicon; the
+times are reports, never gates.
+
+## Summary
+
+| criterion | target | measured | verdict |
+|---|---|---|---|
+| AC2: heap per dormant entry at load | ≤ 512 B | **343 B** (was ~17.6 KB) | met |
+| AC3: 25 entries upload and play on the emulated C6 | post-deploy check passes | passes; 105,456 B free after the first compile; 7 switches, no failure | met |
+| AC4: retained heap, end of pass 2 − end of pass 1 | ≤ 256 B | **0 B** after P6b (P6 measured +1,344 B, all of it departed entries' phasors in the timebase store) | met; whole live heap byte-identical at the two points |
+| AC5: never black across a switch | — | the pad holds a lit frame through all 7 C6 switches; the run's only all-dark frames (4) are mid-Fireflies, a near-black pattern, 15 s after its switch | consistent |
+
+## 1. Heap at load: 5 versus 25 entries (AC2)
+
+**Method.** The vision's own: fw-emu,
+`lp-cli profile <dir> --collect alloc --mode startup --max-cycles 800000000`,
+reading the `project-load` window's `retained` bytes (what the load
+allocated and still holds when the window closes;
+`measurements/retained.py` in the planning directory computes the same
+figure from the trace and agrees to the byte). The 25-entry project is the
+committed tryout; the 5-entry variant is the same directory with the
+playlist cut to entries 1–5 (same modules, same cycle), not committed.
+
+| project | entries | `project-load` retained | commit |
+|---|---:|---:|---|
+| tryout before dormancy (vision) | 5 | 112,662 B | `5ab249939` |
+| tryout, this branch, as #809 shipped it | 5 | 44,539 B | `5b09557cf` |
+| 5-entry scratch variant | 5 | 44,539 B | `5b09557cf` |
+| the committed tryout | 25 | 51,399 B | `5b09557cf` |
+
+**Per dormant entry: (51,399 − 44,539) / 20 = 343 B**, against about
+17.6 KB per entry before. The vision's 1-entry figure was 42,351 B, so a
+project now pays about one entry's load plus 343 B per extra entry.
+
+Where the 343 B goes (`stacks.py` + `sdiff.py`, 5 → 25 entries, total
+6,860 B):
+
+| bytes | allocations | site | per entry |
+|---:|---:|---|---:|
+| 4,180 | 40 | `InventoryDerivation::walk_graph_node` clones: the playlist def's own entry records in the registry inventory (name, ref path, duration, fade) | 209 B |
+| 1,280 | 20 | `SlotPath::parse` in `attach_projected_nodes_filtered`: each entry's path in the playlist node | 64 B |
+| 1,280 | 0 (growth) | `attach_projected_nodes_filtered`'s own vector growth: the playlist node's full entry list (PD4) | 64 B |
+| 120 | 20 | `SlotName::parse` under the entry paths | 6 B |
+
+That is the playlist remembering its entries, which is what a dormant entry
+is (D1): no tree node, no bindings, no parsed module, no shader.
+
+The first frame's `retained` is 44,475 B at both 5 and 25 entries: the
+frame never sees a dormant entry.
+
+## 2. Two full cycles (AC4)
+
+**Method.** fw-emu, `lp-cli profile p6-v/cycle --collect alloc --mode all
+--max-cycles 35000000000`, on a scratch copy of the tryout whose cycle step is
+4 s and fade 0.5 s (not committed; the committed project cycles at 30 s).
+The step had to be that long for a reason worth knowing: under the alloc
+collector every allocation is expensive in emulated cycles, and fw-emu's
+clock follows cycles, so at a 1 s step the cycle moved on before each new
+entry's deferred compile ran and only the first shader ever compiled. At
+4 s every entry compiles and renders. P3's `entry-unload` / `entry-load`
+markers window each switch.
+
+The live heap is replayed from the trace (`proof/cycle-switches.csv` has
+every switch). "Retained at the end of a pass" is the live heap at the
+first `entry-unload` of the next pass, the same point in the cycle each
+time (the idle entry, Soft Noise, has played and is about to be replaced).
+
+It was measured three times, the same project, command and pass boundaries
+each time:
+
+| engine | end of pass 1 (switch 26's unload) | end of pass 2 (switch 51's unload) | difference |
+|---|---:|---:|---:|
+| P6, `5b09557cf` | 249,343 B | 250,687 B | +1,344 B |
+| `307000b61`, the P6b fix's parent | 254,694 B | 254,694 B | 0 B, by alignment (below) |
+| **P6b, `543bf0fa4`** | **252,260 B** | **252,260 B** | **0 B** |
+
+**Target ≤ 256 B: met with P6b.** P6's difference was attributed in full by
+diffing the whole live heap, by call stack, at the end of switch 26's and
+switch 51's load windows (same entry loaded at both): the only stack that
+differed was
+
+```
++1344 B  +15 allocs  ResolveHost::time_product_phasor < TickResolver::time_product_phasor
+                     < shader_node::resolve_or_default_input < NodeRuntime::produce
+```
+
+with everything else byte-identical. That site is the engine's
+`TimebaseStore`: a shader's own phasors (`PhasorKey::Private { node, slot }`)
+stayed alive for `PHASOR_IDLE_TICKS` = 120 store ticks after their last
+query, so an unloaded entry's phasors outlived the entry by 120 ticks, and
+at any moment the store held the last few departed patterns' phasors: 56–81
+allocations, 2.5–4.0 KB, at each switch. Bounded, but it made the pass
+difference depend on which entries fell inside the last 120 ticks, and it
+kept an unloaded entry present in the store when it was gone everywhere
+else (AC1).
+
+**The fix (P6b).** `Engine::remove_runtime_subtree` now drops, at once,
+every phasor whose key belongs to the removed subtree (a `Private` key's
+node, or a `Shared` key's scope owned by a removed node), a removed clock's
+whole timebase, their scrub-log history, and removed readers' entries in a
+surviving phasor's readings (`TimebaseStore::forget_removed`). An entry
+unload also drops its own sink scope's phasors, which the playlist owns and
+the subtree removal therefore cannot see. `PHASOR_IDLE_TICKS` keeps its
+original job, consumers that skip a frame or two. The store's maps keep
+their capacity (`VecMap` never shrinks), which is bounded by the most
+phasors live at once, and is the same at both pass boundaries.
+
+**After it.** The whole-live-heap stack diff at switch 26's and switch
+51's load ends finds **no differing stack**: 217,561 B in 2,115
+allocations at both. The phasor site holds **one allocation, 224 B**, at
+every one of the 60 switches (not identified further; it never changes),
+where its parent commit held 51–76 allocations (2,358–3,104 B) after the
+fill.
+
+Why the parent commit also shows 0 B: its store held 66 allocations
+(2,804 B) of departed entries' phasors at both boundary points, so the two
+readings matched by alignment, not by design; P6's run, on an older tree,
+did not match. The fix removes the dependency. Absolute figures moved
+between `5b09557cf` and `307000b61` (the P8 and `origin/main` merges lie
+between them; not attributed further), so compare the rows only through
+their own differences.
+
+One side effect, measured and not investigated: in the same 35 G cycles the
+P6b build ran 911 frames and 60 switches where its parent ran 773 and 59;
+the fix is the only difference between the two builds, which suggests the
+dead phasors also cost cycles every tick (not profiled).
+
+**Peak per switch.** From each switch's unload to the next switch's unload,
+the peak live heap sits **25,904 B** above the live heap just before the
+unload, for every one of the 60 switches of the P6b run (and of the 58 of
+P6's; switch 1, from the idle entry, +25,976 B). The largest switch is
+therefore switch 1; the highest peak in passes 1–2 is 292,230 B of fw-emu's
+327,680 B heap (P6's run: 289,759 B). fw-emu keeps the
+uploaded project files in its memory filesystem, so its absolute figures
+include the files; the C6's (section 3) do not.
+
+The chart is `proof/cycle-heap.svg` in the planning directory (the P6b run;
+P6's is `proof/cycle-heap-p6-5b09557cf.svg`): live heap at every frame end,
+switches marked, the peak per switch as dots.
+
+## 3. The emulated C6 (AC3)
+
+**Method.** `lp-cli emu run --elf <fw-esp32c6, esp32c6+frame-dump,
+release-esp32> --link-kind usb --monitor --time-grade t1 --timeout 280s`
+(direct boot), then `lp-cli upload catalog/projects/playful-choker-tryout
+serial:tcp://…` from the same tree. The free-heap figures are the
+firmware's own heartbeats (`memory.freeBytes`, `memory.largestFreeBlock`),
+read from the console after `lp-cli wire unpack`.
+
+- **Upload:** the host-side all-entries check passed (all 25 entries load),
+  the deploy went through, and the post-deploy check (`project.read` until
+  a frame renders with no node error) printed `Project uploaded and
+  running.`
+- **It cycles:** eight compiles in the run: the first entry, then one per
+  30 s cycle step (7 switches), each succeeding (18–28 ms compile, 3,020–3,960 B
+  of code). No node error, no reboot, `no unmapped accesses`.
+
+| when (emulated uptime) | free heap | largest free block |
+|---|---:|---:|
+| idle firmware, no project (5 s) | 216,604 B | 196,033 B |
+| after the first compile (60 s) | **105,456 B** | **76,980 B** |
+| after switch 1 (90 s) | 96,804 B | 58,575 B |
+| after switch 2 (120 s) | 97,940 B | 66,399 B |
+| after switch 3 (150 s), the lowest | 91,284 B | 56,750 B |
+| after switch 4 (180 s) | 97,496 B | 59,612 B |
+| after switch 5 (210 s) | 96,968 B | 61,539 B |
+| after switch 6 (240 s) | 98,352 B | 68,781 B |
+| after switch 7 (270 s), the end | **98,400 B** | **66,304 B** |
+
+For scale, #809's own README measured the same rig before dormancy (lp-emu
+`14ef539d7`): 88 KB free after the first compile at 5 entries, 24 KB at 8,
+where `lp-cli upload`'s post-deploy read was refused. At 25 entries there is
+now more room than there was at 5. The free heap moves from entry to entry
+with the playing pattern's size (compiled code, uniforms); it does not
+trend down across the switches.
+
+## 4. Switch latency (reported, not gated)
+
+**When these were measured.** Every latency in this section was taken at
+`5b09557cf`, before P6b's phasor fix (`543bf0fa4`) and before the final
+phase's typed absent-option read. Neither was re-run. P6b removes work
+from every tick (section 2's side effect: more frames in the same cycles),
+and the absent-option change removes a failing bus walk per playlist per
+frame, so both are expected to shorten the figures below rather than
+lengthen them. That is an expectation, not a measurement.
+
+**On the emulated C6** (`lp-emu:esp32c6:t1`, the 280 s run above). The pad
+shows each switch as a stall in the WS281x frame stream (steady interval
+9.40 ms): about 150 ms with no frame while the old entry unloads and the new
+one loads, one frame (the held frame), then 35–48 ms more while the new
+shader compiles, then the new pattern. From the last frame of the old
+pattern to the first frame after the compile:
+
+| switch | unload + load stall | compile stall | total |
+|---|---:|---:|---:|
+| 1 | 147.0 ms | 39.7 ms | 186.7 ms |
+| 2 | 150.6 ms | 39.2 ms | 189.8 ms |
+| 3 | 160.4 ms | 38.9 ms | 199.3 ms |
+| 4 | 158.3 ms | 47.6 ms | 205.9 ms |
+| 5 | 153.8 ms | 40.9 ms | 194.7 ms |
+| 6 | 148.5 ms | 34.7 ms | 183.2 ms |
+| 7 | 150.0 ms | 37.9 ms | 187.9 ms |
+
+Median **≈ 190 ms** emulated t1. The lamps hold their last colours through
+the stall (a WS281x string latches), so it reads as a pause, not a blackout.
+
+**On fw-emu** (`--collect events`, no alloc collector, the 4 s-step cycle
+variant, esp32c6 cycle model, cycles ÷ 160 MHz): from the `entry-unload`
+that begins a switch to the end of the first frame after the new shader's
+compile, over 2 frames, 51 switches: min 149.8, median 160.6, max 178.7 ms.
+The two emulators agree on the shape and roughly on the size.
+
+**The fyeah-sign trigger (owed from P4, director DD11).**
+
+1. *Emulated C6 with a pin-script press:* not measurable today. Pushing
+   `catalog/projects/fyeah-sign` to the emulated C6 fails exactly as the
+   open defect describes
+   (`docs/defects/2026-09-10-the-emulated-c6-builds-a-graphics-stage-40x-slower-than-silicon.md`):
+   the console stops after `project new after core project: 159k free`, and
+   the upload fails with `device did not respond within 10.0s`. The press
+   never gets a project to press. Not debugged here.
+2. *fw-emu via `lp-cli profile`:* the profile workload drives frames only,
+   and fw-emu's button driver is virtual with no way to inject a press, so
+   a real press cannot be traced. **A proxy instead**: a scratch copy of
+   fyeah-sign with a 3 s cycle (not committed) switches idle ⇄ blast through
+   the same unload → load → compile path a trigger takes. Idle → blast:
+   **119.7–127.4 ms** (median ≈ 126 ms) from the switch's `entry-unload` to
+   the end of blast's first frame, over 2 frames; blast → idle ≈ 148 ms.
+   fw-emu, esp32c6 cycle model at 160 MHz, emulated. A real press adds the
+   button's own 30 ms debounce (`stable_ms`), which this does not model.
+
+So the answer for the gate's question 6 is: on the emulators, a triggered
+blast now starts roughly 120–200 ms after the switch is decided, where
+before it started on the next frame.
+
+## 5. Layout: one module at two sites
+
+The second stop of each pattern (entries 14–25) points at the same
+`./modules/<pattern>/module.json` as the first. The registry handles one
+def used at two sites: `lp-cli`'s `examples_valid` loads the tryout with
+**every** entry resident at once (`load_from_root_with_every_entry_resident`)
+and passes, and both cycle traces load and unload every shared module twice
+per pass with no failure and byte-identical heap outside the phasor store.
+Only one entry is resident on a device at any time anyway.
+
+A playlist entry's `node` is a path and nothing else (`NodeInvocation::Ref`),
+so two stops sharing a module start from the same knob defaults; each entry
+remembers its own knob values once they are changed (panel writers are
+keyed by the entry's scope). Authored per-stop defaults would need per-stop
+copies of `shader.json`, which this phase did not make; whether the second
+stops should carry different authored settings is left to the final gate.
+
+## 6. Heap-budget ratchet
+
+- **Added:** `scripts/heap-budget-record/engine/catalog/projects/playful-choker-tryout.json`
+  (`project-load` retained 51,399 B, the same figure as section 1).
+- **Engine records** (`meteor`, `zook-dome`, `projects/test/basic`): all
+  pass unchanged. None of them has a multi-entry playlist, so dormancy had
+  nothing to reduce there.
+- **C6 chip record:** re-measured after the `origin/main` merge. The merge
+  had written main's figures as text; the merged tree boots at the branch's
+  own (+20 B used). No firmware change in this phase. Logged in
+  `docs/debt/heap-budget-record-churns-on-routine-changes.md`.
+
+## 7. What the emulators do not cover
+
+- **Wall-clock time.** Every time here is emulated: t1 counts one cycle per
+  instruction; fw-emu's clock follows its cycle model. Neither is graded by
+  a transcript for time. Do not gate on any of them.
+- **A real press.** No button was pressed anywhere: the fyeah figure is a
+  cycle-driven proxy, and the C6 cannot take fyeah-sign at all yet (open
+  defect above).
+- **Flash reads of a real part.** The C6 run was a direct boot on the
+  emulator's flash model; a board's flash timing is not modelled at t1.
+- **Studio.** Nothing here went through Studio or its Play-mode picker;
+  switches were cycle-driven. The picker is covered by P7's stories and the
+  final gate.
+- **fw-emu's filesystem is in RAM**, so its absolute free-heap figures are
+  lower than a device's by the project's file bytes; only the windowed
+  `retained` figures compare across projects.
+
+## 8. Reproducing
+
+```bash
+# AC2 (the scratch 5-entry variant: same dir, playlist cut to entries 1–5)
+lp-cli profile catalog/projects/playful-choker-tryout --collect alloc --mode startup --max-cycles 800000000
+lp-cli profile <5-entry copy> --collect alloc --mode startup --max-cycles 800000000
+
+# AC4 (a copy with "cycle": {"kind":"cycle","step_seconds":4,"fade_seconds":0.5})
+lp-cli profile <cycle copy> --collect alloc --mode all --max-cycles 35000000000
+
+# AC3 and the C6 latency
+cd lp-fw/fw-esp32c6 && cargo build --target riscv32imac-unknown-none-elf --profile release-esp32 --features esp32c6,frame-dump
+lp-cli emu run --elf <fw-esp32c6> --link 127.0.0.1:<port> --link-kind usb --monitor \
+  --time-grade t1 --timeout 280s --console console.txt --dump-frames frames.jsonl
+lp-cli upload catalog/projects/playful-choker-tryout serial:tcp://127.0.0.1:<port>
+lp-cli wire unpack < console.txt | grep heartbeat
+```
+
+The analysis scripts (the cycle replay, the whole-heap stack diff, the
+per-site trend, the frame-stream stalls) and the chart and per-switch table
+are in the planning directory's `proof/`.

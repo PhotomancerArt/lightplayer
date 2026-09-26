@@ -18,7 +18,11 @@ pub mod power;
 // stack belongs to the load generators in `stress.rs` instead.
 #[cfg(all(
     feature = "radio",
-    not(any(feature = "stress_s2", feature = "stress_s3")),
+    not(any(
+        feature = "stress_s2",
+        feature = "stress_s3",
+        feature = "desk_espnow_meter"
+    )),
     any(
         not(fw_harness),
         feature = "test_espnow",

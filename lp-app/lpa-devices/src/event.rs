@@ -47,6 +47,13 @@ impl Input {
 pub enum Action {
     /// "Add a device" — ask the platform for a USB grant.
     AddFromUsb,
+    /// "via Bluetooth" (the add slot) — ask the platform's Bluetooth chooser for a
+    /// device. The sibling of [`Self::AddFromUsb`], not a mode of it: the two
+    /// choosers are different browser prompts with different filters, and a
+    /// picked device folds into the roster exactly like a picked port (a
+    /// `LinkAttached`, then identify, then the identity merge — so a board
+    /// already known over USB is the SAME row).
+    AddFromBle,
     /// "Set up this device" on a still-unidentified pending link. A blank
     /// chip may never identify itself, so user action must be able to create
     /// a device entry on its own.
@@ -202,6 +209,7 @@ impl Action {
             | Self::SetName { device, .. }
             | Self::SetAutoconnect { device, .. } => Some(*device),
             Self::AddFromUsb
+            | Self::AddFromBle
             | Self::Reconnect { .. }
             | Self::AdoptLink { .. }
             | Self::DismissLink { .. } => None,
@@ -307,6 +315,11 @@ pub enum Command {
     },
     /// Ask the platform for a USB device grant (the picker).
     RequestUsbGrant,
+    /// Ask the platform's Bluetooth chooser for a device (Web Bluetooth's
+    /// `requestDevice`). Its own command because it is its own prompt: the
+    /// serial chooser is a PORT chooser and has nothing to say about a GATT
+    /// peripheral.
+    RequestBleGrant,
     PersistRecord(DeviceRecord),
     DeleteRecord(DeviceId),
     /// Hand a grant back so the port stops being ours.
@@ -421,6 +434,7 @@ mod tests {
         }
 
         assert_eq!(Action::AddFromUsb.device(), None);
+        assert_eq!(Action::AddFromBle.device(), None);
         assert_eq!(
             Action::AdoptLink {
                 link: crate::LinkId(1)

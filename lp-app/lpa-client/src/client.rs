@@ -56,6 +56,14 @@ impl<T> ClientOutcome<T> {
     }
 }
 
+/// What a `LoginBegin` got back: a challenge to answer, or a refusal (a
+/// login already in flight on the device, or its backoff running).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum LoginBegun {
+    Challenge(lpc_access::Challenge),
+    Refused(lpc_access::LoginOutcome),
+}
+
 /// A caller-provided sleep future, boxed so [`RequestDeadline`] adds no
 /// generic parameter to [`LpClient`].
 pub type ClientTimerFuture = Pin<Box<dyn Future<Output = ()>>>;
@@ -247,6 +255,12 @@ where
                     if let WireServerMsgBody::Error { error } = &response.msg {
                         return Err(ClientError::Server(error.clone()));
                     }
+                    // A tier refusal is its own error whatever was asked, so
+                    // every caller can say "this needs an edit password"
+                    // rather than "unexpected response".
+                    if let WireServerMsgBody::NotPermitted { needs } = &response.msg {
+                        return Err(ClientError::NotPermitted { needs: *needs });
+                    }
                     return Ok(ClientOutcome::new(response, events));
                 }
                 ResponseDisposition::ServerOriginated { response_id } => {
@@ -290,6 +304,41 @@ where
         match response.value.msg {
             WireServerMsgBody::Hello(hello) => Ok(ClientOutcome::new(hello, events)),
             other => Err(ClientError::unexpected_response("hello", other)),
+        }
+    }
+
+    /// Begin a login on this link: the board answers with a challenge (a
+    /// fresh nonce and every installed secret's salt and cost), or refuses
+    /// while another login is in flight or its backoff is running.
+    pub async fn login_begin(&mut self) -> ClientResult<ClientOutcome<LoginBegun>> {
+        let response = self.send_request(ClientRequest::LoginBegin).await?;
+        let events = response.events;
+        match response.value.msg {
+            WireServerMsgBody::LoginChallenge { nonce, offers } => Ok(ClientOutcome::new(
+                LoginBegun::Challenge(lpc_access::Challenge { nonce, offers }),
+                events,
+            )),
+            WireServerMsgBody::LoginResult(outcome) => {
+                Ok(ClientOutcome::new(LoginBegun::Refused(outcome), events))
+            }
+            other => Err(ClientError::unexpected_response("login.begin", other)),
+        }
+    }
+
+    /// Answer the outstanding challenge with one MAC per offer, in offer
+    /// order: granted (the tier and the matching secret's label) or refused
+    /// (with the board's backoff).
+    pub async fn login_answer(
+        &mut self,
+        macs: Vec<lpc_access::LoginMac>,
+    ) -> ClientResult<ClientOutcome<lpc_access::LoginOutcome>> {
+        let response = self
+            .send_request(ClientRequest::LoginAnswer { macs })
+            .await?;
+        let events = response.events;
+        match response.value.msg {
+            WireServerMsgBody::LoginResult(outcome) => Ok(ClientOutcome::new(outcome, events)),
+            other => Err(ClientError::unexpected_response("login.answer", other)),
         }
     }
 
@@ -907,18 +956,58 @@ where
         project_id: &str,
         files: &[(String, Vec<u8>)],
     ) -> ClientResult<ClientOutcome<WireProjectHandle>> {
+        self.replace_and_load_project_observed(project_id, files, &mut |_| {})
+            .await
+    }
+
+    /// [`Self::replace_and_load_project`], reporting each step as it starts
+    /// and every write as it lands — what an opening page narrates while a
+    /// board takes the project (the load is the long step on a C6: it
+    /// compiles every shader).
+    pub async fn replace_and_load_project_observed(
+        &mut self,
+        project_id: &str,
+        files: &[(String, Vec<u8>)],
+        on_step: &mut dyn FnMut(DeployStep),
+    ) -> ClientResult<ClientOutcome<WireProjectHandle>> {
         let mut events = Vec::new();
+        on_step(DeployStep::Clearing);
         let stop = self.send_request(ClientRequest::StopAllProjects).await?;
         events.extend(stop.events);
         validate_project_deploy_response(&ClientRequest::StopAllProjects, &stop.value.msg)?;
+        let cleared = self.delete_project_dir(project_id).await?;
+        events.extend(cleared.events);
 
-        let deploy_files: Vec<ProjectDeployFile> = files
-            .iter()
-            .map(|(path, bytes)| ProjectDeployFile::new(path.clone(), bytes.clone()))
-            .collect();
-        let replace = self.replace_project_files(project_id, deploy_files).await?;
-        events.extend(replace.events);
+        let total_bytes: u64 = files.iter().map(|(_, bytes)| bytes.len() as u64).sum();
+        let mut sent_bytes = 0u64;
+        on_step(DeployStep::Writing {
+            sent_bytes,
+            total_bytes,
+        });
+        let writes = project_write_requests(
+            project_id,
+            files
+                .iter()
+                .map(|(path, bytes)| ProjectDeployFile::new(path.clone(), bytes.clone())),
+        );
+        for request in writes {
+            let written = match &request {
+                ClientRequest::Filesystem(
+                    FsRequest::Write { data, .. } | FsRequest::WriteChunk { data, .. },
+                ) => data.len() as u64,
+                _ => 0,
+            };
+            let outcome = self.send_request(request.clone()).await?;
+            events.extend(outcome.events);
+            validate_project_deploy_response(&request, &outcome.value.msg)?;
+            sent_bytes += written;
+            on_step(DeployStep::Writing {
+                sent_bytes,
+                total_bytes,
+            });
+        }
 
+        on_step(DeployStep::Loading);
         let request = ClientRequest::LoadProject {
             path: crate::project_deploy::project_load_path(project_id),
         };
@@ -937,6 +1026,17 @@ where
         let hash = crate::file_sync_ops::validate_hash_package_response(&outcome.value.msg)?;
         Ok(ClientOutcome::new(hash, outcome.events))
     }
+}
+
+/// One step of [`LpClient::replace_and_load_project_observed`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DeployStep {
+    /// Stopping what runs and deleting the old project directory.
+    Clearing,
+    /// Writing the files: `sent_bytes` of `total_bytes` acknowledged.
+    Writing { sent_bytes: u64, total_bytes: u64 },
+    /// `LoadProject` is in flight — the server builds the project.
+    Loading,
 }
 
 #[cfg(test)]
@@ -1100,6 +1200,8 @@ mod tests {
                     },
                     hardware: lpc_wire::HardwareFacts::default(),
                     device_uid: None,
+                    pack_dictionary: lpc_wire::WIRE_DICTIONARY_FINGERPRINT,
+                    auth: lpc_wire::HelloAuth::TRUSTED,
                 }),
             ),
             // This conversation's own answer, right behind it.
@@ -1153,6 +1255,8 @@ mod tests {
             },
             hardware: Default::default(),
             device_uid: Some("dev000000daqf6dvvt2".to_string()),
+            pack_dictionary: lpc_wire::WIRE_DICTIONARY_FINGERPRINT,
+            auth: lpc_wire::HelloAuth::TRUSTED,
         }
     }
 

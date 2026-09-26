@@ -152,9 +152,22 @@ struct Summary {
     lit: usize,
 }
 
+/// Every **complete** summary line in `console`, in the order printed.
+///
+/// ⚠️ **A line is complete only once its newline is on the wire.** UART0
+/// carries bytes at baud in emulated time, so when the run stops the last
+/// line can be half out — cut in its `first=` list, or in its `crc=` — and a
+/// cut line would parse as a report of a checksum the guest never printed.
+/// So the text after the last newline is never read (see [`deinterleave`],
+/// which keeps that newline for exactly this).
 fn summaries(console: &str) -> Vec<Summary> {
-    console
-        .lines()
+    let mut segments: Vec<&str> = console.split('\n').collect();
+    // `split` always yields a final segment: empty when the console ends on a
+    // newline, and the line still in flight when it does not.
+    segments.pop();
+    segments
+        .into_iter()
+        .map(|l| l.strip_suffix('\r').unwrap_or(l))
         .filter(|l| l.contains("[OUT] frame="))
         .map(|line| Summary {
             n: field(line, "frame") as u32,
@@ -238,10 +251,185 @@ fn deinterleave(text: &str) -> String {
             None => out.push(line.to_string()),
         }
     }
+    // A cut record whose tail never arrived is the line still in flight, and
+    // it stays unterminated; otherwise the console's own final newline is
+    // kept, so [`summaries`] can tell a finished last line from a half-sent
+    // one. (`tests/shader_oracle_pin.rs`'s copy drops it: nothing there reads
+    // the console's last line.)
+    let ends_complete = text.ends_with('\n') && !cut_open;
     if cut_open {
         out.push(pending);
     }
-    out.join("\n")
+    let mut joined = out.join("\n");
+    if ends_complete {
+        joined.push('\n');
+    }
+    joined
+}
+
+/// How often `frame_dump::report` prints a wire's summary line.
+const REPORT_EVERY_FRAMES: usize = 60;
+
+/// **The frame every wire's guest counter had reached**, read off the
+/// report groups, or the report that was lost.
+///
+/// The render loop reports every wire in one burst every
+/// `REPORT_EVERY_FRAMES` frames — a *group* of one line per wire, all with
+/// the same `frame=`, in output order. So:
+///
+/// * the groups are `REPORT_EVERY_FRAMES` apart, with none missing between
+///   the first and the last;
+/// * **every group but the last** has exactly one line for each wire — a
+///   group that later reports followed is finished, and a wire missing from
+///   it is a lost report;
+/// * **the last group** may be short only by being *cut off*: its lines are a
+///   prefix of the previous group's order. That is a burst the run stopped
+///   inside, with the rest of it still in UART0's FIFO — the guest has
+///   counted that frame on every wire, so every wire reached it. A line
+///   missing from its middle, or a wire appearing twice, is still an error.
+///
+/// `wires` is each wire's checksum in output order. Every wire reached the
+/// same frame — one loop counts them all — so the result is one number.
+fn reached(summaries: &[Summary], wires: &[u32]) -> Result<usize, String> {
+    let mut groups: Vec<(usize, Vec<u32>)> = Vec::new();
+    for s in summaries.iter().filter(|s| wires.contains(&s.crc)) {
+        let n = s.n as usize;
+        match groups.last_mut() {
+            Some((at, crcs)) if *at == n => crcs.push(s.crc),
+            Some((at, _)) if n != *at + REPORT_EVERY_FRAMES => {
+                return Err(format!(
+                    "a report of frame {n} follows the group of frame {at}: groups are \
+                     {REPORT_EVERY_FRAMES} frames apart, so a whole group was lost or a line \
+                     is out of order"
+                ));
+            }
+            _ => groups.push((n, vec![s.crc])),
+        }
+    }
+    let Some((last_n, last)) = groups.last() else {
+        return Err("no summary line reports any of the wires".into());
+    };
+    let whole = |crcs: &[u32]| {
+        let (mut a, mut b) = (crcs.to_vec(), wires.to_vec());
+        a.sort_unstable();
+        b.sort_unstable();
+        a == b
+    };
+    for (n, crcs) in &groups[..groups.len() - 1] {
+        if !whole(crcs) {
+            return Err(format!(
+                "frame {n}: the report group is {crcs:08x?}, not one line per wire \
+                 {wires:08x?}, and later groups followed it — a report was lost"
+            ));
+        }
+    }
+    let order: &[u32] = match groups.len() {
+        1 => wires,
+        k => &groups[k - 2].1,
+    };
+    if !(whole(last) || order.starts_with(last)) {
+        return Err(format!(
+            "frame {last_n}: the last report group is {last:08x?}, which is neither whole nor \
+             the start of a burst in order {order:08x?} — a report was lost, not cut off"
+        ));
+    }
+    Ok(*last_n)
+}
+
+/// [`reached`], plus the one burst no complete line of which is on the wire
+/// yet: the frame every wire's guest counter had reached, read off `console`.
+///
+/// ⚠️ A deadline can land inside the **first** line of a burst. Then the
+/// burst has no complete line, [`reached`] reads the group before it, and
+/// the pad — which carried the frames since — is a report period and a frame
+/// ahead of it (2026-09-24: `frame=1980 leds=16` was the console's last text,
+/// the pad carried 1,981). That line is still not *parsed* — its checksum may
+/// be cut — but its `frame=` number, once the character after it has
+/// arrived, is the guest's own count, and the guest prints a burst only
+/// after counting that frame on every wire. It is accepted only as the burst
+/// straight after a **whole** last group: after a short one it would mean
+/// that group was not cut off but lost.
+fn counted(console: &str, wires: &[u32]) -> Result<usize, String> {
+    let parsed = summaries(console);
+    let claimed = reached(&parsed, wires)?;
+    let Some(next) = in_flight_report(console) else {
+        return Ok(claimed);
+    };
+    if next != claimed + REPORT_EVERY_FRAMES {
+        return Ok(claimed);
+    }
+    let last = parsed
+        .iter()
+        .filter(|s| s.n as usize == claimed && wires.contains(&s.crc))
+        .count();
+    if last != wires.len() {
+        return Err(format!(
+            "frame {claimed}: the report group has {last} of {} lines and frame {next}'s burst \
+             began after it — a report was lost, not cut off",
+            wires.len()
+        ));
+    }
+    Ok(next)
+}
+
+/// The `frame=` of the summary line still leaving UART0 at the deadline — the
+/// text after the console's last newline — when that much of it arrived:
+/// the number is whole only once the character after it is on the wire.
+fn in_flight_report(console: &str) -> Option<usize> {
+    const MARK: &str = "[OUT] frame=";
+    let tail = console.rsplit('\n').next()?;
+    let rest = &tail[tail.find(MARK)? + MARK.len()..];
+    let digits = rest.split(|c: char| !c.is_ascii_digit()).next()?;
+    if digits.is_empty() || digits.len() == rest.len() {
+        return None;
+    }
+    digits.parse().ok()
+}
+
+/// [`counted`], once the guest has finished the report the deadline cut off:
+/// the frame every wire's guest counter had reached, against `carried`, the
+/// most frames any pad carried by the deadline.
+///
+/// ⚠️ A deadline can land before a burst's **first byte**. The guest formats
+/// a report only after the frame's send completes, and the line then waits
+/// its turn in the logger before UART0 carries any of it — on the #808
+/// image (2026-09-25) frame 1980 ended on gpio18 at 10,012,357 µs, gpio13 at
+/// 10,013,168 µs, and the burst's first byte left at 10,015,275 µs, after the
+/// pads had started frame 1981. A deadline in that gap leaves no text to
+/// read, and the pad a report period and up to one frame past [`counted`].
+/// That latency is the logger's, not a number this test may assume, so it is
+/// not guessed: when the pads are a period ahead, the machine runs on past
+/// the deadline, a slice at a time, until the report's number is on the wire.
+/// Nothing but the console is read from the extra run — the pads' counts stay
+/// the deadline's.
+///
+/// A report that was really lost still fails: the next burst then arrives
+/// with the group before it missing, and [`reached`] names it. The run stops
+/// anyway once the pads carry two report periods past the last group, and
+/// the bound in the caller fails by name.
+fn reported(r: &mut Run, wires: &[u32], carried: usize) -> usize {
+    /// A stepping granularity, not a tolerance: ~9 bytes at 921,600 baud.
+    const SLICE_US: u64 = 100;
+    let mut console = r.text.clone();
+    loop {
+        let claimed = counted(&console, wires).unwrap_or_else(|lost| panic!("{lost}"));
+        let live = PADS.iter().map(|p| r.m.frames(*p).len()).max().unwrap_or(0);
+        if claimed + REPORT_EVERY_FRAMES > carried || live >= claimed + 2 * REPORT_EVERY_FRAMES {
+            return claimed;
+        }
+        let at = r.m.cycles() + SLICE_US * memmap::CYCLES_PER_US;
+        let outcome = r.m.run_until(&StopCondition {
+            stop_cycle: Some(at),
+            wall_timeout: Some(WALL_TIMEOUT),
+            ..Default::default()
+        });
+        assert!(
+            matches!(outcome, Outcome::Deadline { .. }),
+            "the run past the deadline, waiting for frame {}'s report, ended {outcome:?}",
+            claimed + REPORT_EVERY_FRAMES
+        );
+        console = deinterleave(&r.m.uart0().text());
+    }
 }
 
 /// A frame without its clock: everything the wire carried, and nothing about
@@ -340,7 +528,8 @@ fn run(elf: &Path, quantum: u64, dir: &Path) -> Run {
 ///
 /// So the run happens here, once, and each claim below is a function that
 /// reads it. **Nothing is dropped**: every assertion the three tests made is
-/// still made, in the same order, under its own name — which is still the
+/// still made (the checksums now after the determinism, see below), under its
+/// own name — which is still the
 /// name that appears in a failure, because a panic names the function it came
 /// from. What is gone is two machine runs, and only that.
 ///
@@ -355,10 +544,14 @@ fn the_five_wire_walk_holds_on_routing_checksums_and_determinism() {
         Err(reason) => return skip_notice("five_wires", &reason),
     };
     let dir = scratch("five-wires");
-    let r = run(&elf, 256, &dir);
+    let mut r = run(&elf, 256, &dir);
     five_wires_share_four_slots_and_the_fifth_re_muxes_a_signal(&r);
-    every_wire_checksum_equals_the_guests_own_summary_line(&r);
+    // ⚠️ Determinism before the checksums: the checksum claim may run this
+    // machine past its deadline to let a cut-off report finish ([`reported`]),
+    // and the determinism claim compares its cycle and instruction counts at
+    // the deadline against a second run's.
     the_second_wave_decodes_the_same_frames_across_two_runs_and_two_quanta(&elf, &dir, &r);
+    every_wire_checksum_equals_the_guests_own_summary_line(&mut r);
     let _ = std::fs::remove_dir_all(&dir);
 }
 
@@ -587,7 +780,7 @@ fn the_second_wave_decodes_the_same_frames_across_two_runs_and_two_quanta(
 /// All of it needs the render to survive: the summary lines are printed once
 /// every `REPORT_EVERY_FRAMES = 60` frames, and until M4 P4b (#711) the guest
 /// died long before the sixtieth.
-fn every_wire_checksum_equals_the_guests_own_summary_line(r: &Run) {
+fn every_wire_checksum_equals_the_guests_own_summary_line(r: &mut Run) {
     println!(
         "five_wires: outcome {:?}, {} us emulated, unmapped {}",
         r.outcome,
@@ -687,15 +880,24 @@ fn every_wire_checksum_equals_the_guests_own_summary_line(r: &Run) {
     // a claim about when the deadline fell, not about dropped frames. The
     // claim that is about dropped frames: the pad carried at least every
     // frame the guest counted, and no more than one report period more.
-    const REPORT_EVERY_FRAMES: usize = 60;
+    //
+    // ⚠️ "The frame the guest counted" is read off the report *groups*, not
+    // off each wire's own highest line: a deadline that lands inside a
+    // group's burst leaves the rest of it in UART0's FIFO, and those wires
+    // read a whole period behind a frame their loop has already counted
+    // (`docs/defects/2026-09-23-five-wires-reads-a-report-still-on-the-uart-as-a-lost-one.md`).
+    // [`reached`] accepts a short group only as the cut-off tail of the
+    // stream; a report missing anywhere else still fails here.
+    //
+    // ⚠️ And a deadline can land before the burst's first byte: the guest
+    // formats a report after the frame's send completes, and on the #808
+    // image its first byte left UART0 2.9 ms after the frame ended on gpio18 —
+    // after the pads had started the NEXT frame. There is no text to read
+    // then, so [`reported`] lets the guest finish the report instead.
+    let wires: Vec<u32> = per_wire.iter().map(|(_, crc, _)| *crc).collect();
+    let carried = r.frames.iter().map(|(_, f)| f.len()).max().unwrap_or(0);
+    let claimed = reported(r, &wires, carried);
     for (pad, frames) in &r.frames {
-        let (_, crc, _) = per_wire.iter().find(|(p, _, _)| p == pad).expect("a wire");
-        let claimed = summaries
-            .iter()
-            .filter(|s| s.crc == *crc)
-            .map(|s| s.n as usize)
-            .max()
-            .expect("a summary line");
         let decoded = frames.len();
         println!(
             "five_wires: gpio{pad}: the guest's last report was frame {claimed}, the pad \
@@ -788,7 +990,7 @@ fn deinterleave_rejoins_a_summary_line_another_record_cut() {
          2254 lit=16\n";
     assert_eq!(
         deinterleave(cut),
-        "[MEM] free=1\n[INFO] f: [OUT] frame=60 leds=16 crc=0x55772254 lit=16"
+        "[MEM] free=1\n[INFO] f: [OUT] frame=60 leds=16 crc=0x55772254 lit=16\n"
     );
     assert_eq!(
         summaries(&deinterleave(cut)),
@@ -799,6 +1001,129 @@ fn deinterleave_rejoins_a_summary_line_another_record_cut() {
             lit: 16
         }]
     );
+}
+
+/// A cut record whose tail never arrived stays unterminated, so the summary
+/// parser never reads it — even when the console's last byte is a newline.
+#[test]
+fn deinterleave_leaves_a_record_whose_tail_never_came_unterminated() {
+    let cut = "[INFO] f: [OUT] frame=60 leds=16 crc=0x5577[MEM] free=1\n";
+    assert_eq!(
+        deinterleave(cut),
+        "[MEM] free=1\n[INFO] f: [OUT] frame=60 leds=16 crc=0x5577"
+    );
+    assert_eq!(summaries(&deinterleave(cut)), vec![]);
+}
+
+/// **The defect's own stream**: the deadline lands inside frame 1980's
+/// burst, after the first line and part-way through the second. The cut line
+/// is not read, and every wire has reached 1980 — which a per-wire highest
+/// line would have read as 1920 for three of them.
+#[test]
+fn a_report_burst_the_run_stopped_inside_is_in_flight_not_lost() {
+    let mut console = groups_through(1920, &WIRES);
+    console.push_str(&line(1980, WIRES[0]));
+    // The second line of the burst, cut in its `first=` list …
+    console.push_str(
+        "[INFO] fw_esp32v3::output::rmt::frame_dump: [OUT] frame=1980 leds=16 \
+         crc=0xda7f5d46 lit=16 first=(100,1,87)",
+    );
+    let parsed = summaries(&console);
+    assert_eq!(parsed.len(), 32 * 5 + 1, "the cut line is not a report");
+    assert_eq!(reached(&parsed, &WIRES), Ok(1980));
+    // … and cut in its checksum, where reading it would invent a crc.
+    let mut console = groups_through(1920, &WIRES);
+    console.push_str(&line(1980, WIRES[0]));
+    console.push_str("[INFO] f: [OUT] frame=1980 leds=16 crc=0xda7f");
+    assert_eq!(reached(&summaries(&console), &WIRES), Ok(1980));
+}
+
+/// **The same deadline one line earlier** (2026-09-24, PR #810's image): it
+/// lands inside the burst's FIRST line, so no line of frame 1980 is complete
+/// and the groups end at 1920 while the pad carried 1,981 frames. The cut
+/// line's `frame=` is read — once the character after it is on the wire —
+/// and its checksum never is.
+#[test]
+fn a_burst_cut_in_its_first_line_is_in_flight_not_lost() {
+    let mut console = groups_through(1920, &WIRES);
+    console.push_str("[INFO] fw_esp32v3::output::rmt::frame_dump: [OUT] frame=1980 leds=16");
+    assert_eq!(reached(&summaries(&console), &WIRES), Ok(1920));
+    assert_eq!(counted(&console, &WIRES), Ok(1980));
+    // Cut in the number itself: `frame=19` could be 1980 or 19xx — not read.
+    let mut console = groups_through(1920, &WIRES);
+    console.push_str("[INFO] f: [OUT] frame=19");
+    assert_eq!(counted(&console, &WIRES), Ok(1920));
+    // A frame that is not the next burst is not evidence of anything.
+    let mut console = groups_through(1920, &WIRES);
+    console.push_str("[INFO] f: [OUT] frame=2100 leds=16");
+    assert_eq!(counted(&console, &WIRES), Ok(1920));
+}
+
+/// …and it does not excuse a short group: a burst that began after it means
+/// that group was finished with a line missing.
+#[test]
+fn a_burst_in_flight_after_a_short_group_is_a_lost_report() {
+    let mut console = groups_through(1860, &WIRES);
+    for crc in [WIRES[0], WIRES[1]] {
+        console.push_str(&line(1920, crc));
+    }
+    console.push_str("[INFO] f: [OUT] frame=1980 leds=16");
+    let lost = counted(&console, &WIRES).unwrap_err();
+    assert!(
+        lost.contains("frame 1920") && lost.contains("a report was lost"),
+        "{lost}"
+    );
+}
+
+/// **The teeth.** A report missing from a group that later groups followed,
+/// a line missing from the middle of the last burst, and a whole missing
+/// group are all losses, and each is refused by name.
+#[test]
+fn a_withheld_report_is_still_a_lost_one() {
+    // gpio14's frame-1920 line withheld, 1980's burst whole after it.
+    let mut console = groups_through(1860, &WIRES);
+    for crc in [WIRES[0], WIRES[1], WIRES[3], WIRES[4]] {
+        console.push_str(&line(1920, crc));
+    }
+    for crc in WIRES {
+        console.push_str(&line(1980, crc));
+    }
+    let lost = reached(&summaries(&console), &WIRES).unwrap_err();
+    assert!(
+        lost.contains("frame 1920") && lost.contains("a report was lost"),
+        "{lost}"
+    );
+
+    // The last burst with its third line missing and the fourth present:
+    // not a burst the run stopped inside.
+    let mut console = groups_through(1920, &WIRES);
+    for crc in [WIRES[0], WIRES[1], WIRES[3]] {
+        console.push_str(&line(1980, crc));
+    }
+    let lost = reached(&summaries(&console), &WIRES).unwrap_err();
+    assert!(
+        lost.contains("frame 1980") && lost.contains("not cut off"),
+        "{lost}"
+    );
+
+    // A whole group gone: 1860 then 1980.
+    let mut console = groups_through(1860, &WIRES);
+    for crc in WIRES {
+        console.push_str(&line(1980, crc));
+    }
+    let lost = reached(&summaries(&console), &WIRES).unwrap_err();
+    assert!(
+        lost.contains("frame 1980 follows the group of frame 1860"),
+        "{lost}"
+    );
+
+    // A wire reporting twice in one finished group is not "one line per wire".
+    let mut console = groups_through(1860, &WIRES);
+    for crc in [WIRES[0], WIRES[1], WIRES[1], WIRES[3], WIRES[4]] {
+        console.push_str(&line(1920, crc));
+    }
+    console.push_str(&line(1980, WIRES[0]));
+    assert!(reached(&summaries(&console), &WIRES).is_err());
 }
 
 /// The pin log's routing notes, read back the way the re-mux gate reads them.
@@ -826,4 +1151,36 @@ fn the_five_pads_are_the_boards_own() {
     assert_eq!(rmt::RMT_SIG_0, 87, "RMT_SIG_0's out_sel on the classic");
     let route = RouteSource::Signal(SignalId(rmt::RMT_SIG_0), false);
     assert_eq!(route, RouteSource::Signal(SignalId(87), false));
+}
+
+// ---------------------------------------------------------------------------
+// Test helpers
+// ---------------------------------------------------------------------------
+
+/// The five checksums of the defect's run, in output order.
+const WIRES: [u32; 5] = [
+    0x19e6_e98d,
+    0xda7f_5d46,
+    0x9da2_5dce,
+    0x373a_63e9,
+    0xe2b7_45a3,
+];
+
+/// One complete summary line, as `frame_dump::report` prints it.
+fn line(n: usize, crc: u32) -> String {
+    format!(
+        "[INFO] fw_esp32v3::output::rmt::frame_dump: [OUT] frame={n} leds=16 crc=0x{crc:08x} \
+         lit=16 first=(1,2,3)\n"
+    )
+}
+
+/// Every report group from frame 60 through `through`, whole and in order.
+fn groups_through(through: usize, wires: &[u32]) -> String {
+    (1..=through / REPORT_EVERY_FRAMES)
+        .flat_map(|k| {
+            wires
+                .iter()
+                .map(move |crc| line(k * REPORT_EVERY_FRAMES, *crc))
+        })
+        .collect()
 }

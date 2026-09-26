@@ -19,6 +19,15 @@
 //! That is the same rule [`crate::PhasorConfig::rate_hz`] states for periods,
 //! and [`GradientConfig::is_frozen`] is the one place it lives here.
 //!
+//! # Pinned
+//!
+//! `pinned: Some(k)` shows entry `k` alone, as if the set held only that
+//! palette: no fade, and φ is ignored. It is the "keep these five, but right
+//! now show me this one" gesture, and it deliberately does **not** touch the
+//! timings — the full-cycle phasor keeps running underneath, so unpinning
+//! lands wherever time says rather than resuming from the pinned entry.
+//! [`GradientConfig::pinned_gradient`] is the one place the rule is read.
+//!
 //! Storage is the flattened recipe described in the [module docs](super) —
 //! [`crate::LpValue`] has no union, so both variants share one struct: the
 //! `kind` tag selects how `set` and the timings read (static ⇒ one-entry
@@ -74,6 +83,9 @@ pub enum GradientConfig {
         step_seconds: f32,
         /// Cross-fade overlap at each hand-off, in seconds.
         fade_seconds: f32,
+        /// The one entry shown instead of the walk, when set — see the
+        /// module docs' *Pinned*. Must index into `set`.
+        pinned: Option<usize>,
     },
 }
 
@@ -103,6 +115,24 @@ impl GradientConfig {
         }
     }
 
+    /// The entry a pinned cycle holds, when it is pinned.
+    ///
+    /// `None` for a static config (there is nothing to pin away from) and
+    /// for an unpinned cycle. An out-of-range pin — which
+    /// [`GradientConfig::validate`] rejects but a hand-built value can
+    /// reach — reads as unpinned rather than panicking.
+    #[must_use]
+    pub fn pinned_gradient(&self) -> Option<&Gradient> {
+        match self {
+            Self::Cycle {
+                set,
+                pinned: Some(index),
+                ..
+            } => set.get(*index),
+            _ => None,
+        }
+    }
+
     /// The gradients this config can resolve to, authored order.
     #[must_use]
     pub fn gradients(&self) -> &[Gradient] {
@@ -122,7 +152,7 @@ impl GradientConfig {
     pub fn validate(&self) -> Result<(), GradientError> {
         match self {
             Self::Static(gradient) => gradient.validate(),
-            Self::Cycle { set, .. } => {
+            Self::Cycle { set, pinned, .. } => {
                 if set.len() < MIN_CYCLE_SET as usize {
                     return Err(GradientError::TooFewCycleEntries(set.len()));
                 }
@@ -133,6 +163,11 @@ impl GradientConfig {
                     gradient
                         .validate()
                         .map_err(|_| GradientError::CycleEntry(index))?;
+                }
+                if let Some(index) = *pinned
+                    && index >= set.len()
+                {
+                    return Err(GradientError::PinnedOutOfRange(index));
                 }
                 Ok(())
             }
@@ -149,19 +184,36 @@ impl Default for GradientConfig {
 
 // --- GradientConfig: hand-rolled flattened record.
 //
-// `LpValue` has no union, so both variants write the same four fields and
-// `kind` says how to read them: static ⇒ a one-entry `set`, timings `0.0`;
-// cycle ⇒ 2..=8 entries. The set's length IS the count.
+// `LpValue` has no union, so both variants write the same five fields and
+// `kind` says how to read them: static ⇒ a one-entry `set`, timings `0.0`,
+// no pin; cycle ⇒ 2..=8 entries. The set's length IS the count. `LpValue`
+// has no option either, so `pinned` is an `i32` with [`NOT_PINNED`] for none.
+
+/// Storage value of `pinned` when nothing is pinned.
+const NOT_PINNED: i32 = -1;
 
 impl ToLpValue for GradientConfig {
     fn to_lp_value(&self) -> LpValue {
-        let (kind, gradients, step_seconds, fade_seconds) = match self {
-            Self::Static(gradient) => (STATIC_KIND_TAG, core::slice::from_ref(gradient), 0.0, 0.0),
+        let (kind, gradients, step_seconds, fade_seconds, pinned) = match self {
+            Self::Static(gradient) => (
+                STATIC_KIND_TAG,
+                core::slice::from_ref(gradient),
+                0.0,
+                0.0,
+                NOT_PINNED,
+            ),
             Self::Cycle {
                 set,
                 step_seconds,
                 fade_seconds,
-            } => (CYCLE_KIND_TAG, set.as_slice(), *step_seconds, *fade_seconds),
+                pinned,
+            } => (
+                CYCLE_KIND_TAG,
+                set.as_slice(),
+                *step_seconds,
+                *fade_seconds,
+                pinned.map_or(NOT_PINNED, |index| index as i32),
+            ),
         };
 
         let set: Vec<LpValue> = gradients.iter().map(ToLpValue::to_lp_value).collect();
@@ -173,6 +225,7 @@ impl ToLpValue for GradientConfig {
                 ("set".to_string(), LpValue::Array(set)),
                 ("step_seconds".to_string(), step_seconds.to_lp_value()),
                 ("fade_seconds".to_string(), fade_seconds.to_lp_value()),
+                ("pinned".to_string(), pinned.to_lp_value()),
             ]),
         }
     }
@@ -183,13 +236,14 @@ impl FromLpValue for GradientConfig {
         let LpValue::Struct { name, fields } = value else {
             return Err(ValueRootError::new("expected GradientConfig struct"));
         };
-        if name.as_deref() != Some("GradientConfig") || fields.len() != 4 {
+        if name.as_deref() != Some("GradientConfig") || fields.len() != 5 {
             return Err(ValueRootError::new("expected GradientConfig struct"));
         }
 
         let kind: String = read_field(fields, 0, "GradientConfig", "kind")?;
         let step_seconds: f32 = read_field(fields, 2, "GradientConfig", "step_seconds")?;
         let fade_seconds: f32 = read_field(fields, 3, "GradientConfig", "fade_seconds")?;
+        let pinned: i32 = read_field(fields, 4, "GradientConfig", "pinned")?;
 
         match kind.as_str() {
             STATIC_KIND_TAG => {
@@ -200,6 +254,9 @@ impl FromLpValue for GradientConfig {
                 set: read_gradient_set(fields, MIN_CYCLE_SET as usize, MAX_CYCLE_SET as usize)?,
                 step_seconds,
                 fade_seconds,
+                // Any negative is "none"; an index past the set is kept so
+                // `validate` can name it rather than silently dropping it.
+                pinned: usize::try_from(pinned).ok(),
             }),
             other => Err(ValueRootError::new(alloc::format!(
                 "unknown GradientConfig.kind {other:?}"
@@ -247,6 +304,10 @@ const GRADIENT_CONFIG_STATIC_TYPE: StaticLpType = StaticLpType::Struct {
             name: "fade_seconds",
             ty: StaticLpType::F32,
         },
+        StaticModelStructMember {
+            name: "pinned",
+            ty: StaticLpType::I32,
+        },
     ],
 };
 
@@ -271,6 +332,10 @@ pub fn gradient_config_lp_type() -> LpType {
             ModelStructMember {
                 name: "fade_seconds".to_string(),
                 ty: LpType::F32,
+            },
+            ModelStructMember {
+                name: "pinned".to_string(),
+                ty: LpType::I32,
             },
         ]),
     }
@@ -346,6 +411,25 @@ mod tests {
             set: swatches(count),
             step_seconds,
             fade_seconds: 0.5,
+            pinned: None,
+        }
+    }
+
+    fn pinned(count: usize, index: usize) -> GradientConfig {
+        let GradientConfig::Cycle {
+            set,
+            step_seconds,
+            fade_seconds,
+            ..
+        } = cycle(count, 2.0)
+        else {
+            unreachable!()
+        };
+        GradientConfig::Cycle {
+            set,
+            step_seconds,
+            fade_seconds,
+            pinned: Some(index),
         }
     }
 
@@ -406,9 +490,57 @@ mod tests {
                 set,
                 step_seconds: 1.0,
                 fade_seconds: 0.0,
+                pinned: None,
             }
             .validate(),
             Err(GradientError::CycleEntry(1))
+        );
+    }
+
+    #[test]
+    fn a_pin_names_one_entry_and_leaves_the_timings_alone() {
+        let config = pinned(4, 2);
+
+        assert_eq!(config.validate(), Ok(()));
+        assert_eq!(config.pinned_gradient(), Some(&swatches(4)[2]));
+        // The phasor keeps running underneath so unpinning lands where time
+        // says — a pin is not a freeze.
+        assert!(!config.is_frozen());
+        assert_eq!(config.full_cycle_seconds(), 8.0);
+
+        assert_eq!(cycle(4, 2.0).pinned_gradient(), None);
+        assert_eq!(GradientConfig::default().pinned_gradient(), None);
+    }
+
+    #[test]
+    fn validate_rejects_a_pin_past_the_set() {
+        assert_eq!(
+            pinned(3, 3).validate(),
+            Err(GradientError::PinnedOutOfRange(3))
+        );
+        assert_eq!(pinned(3, 3).pinned_gradient(), None, "reads as unpinned");
+    }
+
+    #[test]
+    fn storage_writes_minus_one_for_no_pin_and_the_index_for_a_pin() {
+        let pin_field = |config: &GradientConfig| {
+            let LpValue::Struct { fields, .. } = config.to_lp_value() else {
+                panic!("GradientConfig storage must be a Struct");
+            };
+            fields[4].clone()
+        };
+
+        assert_eq!(
+            pin_field(&GradientConfig::default()),
+            ("pinned".to_string(), LpValue::I32(-1))
+        );
+        assert_eq!(
+            pin_field(&cycle(3, 1.0)),
+            ("pinned".to_string(), LpValue::I32(-1))
+        );
+        assert_eq!(
+            pin_field(&pinned(3, 1)),
+            ("pinned".to_string(), LpValue::I32(1))
         );
     }
 
@@ -420,6 +552,8 @@ mod tests {
             cycle(2, 1.0),
             cycle(MAX_CYCLE_SET as usize, 0.25),
             cycle(3, 0.0),
+            pinned(3, 0),
+            pinned(MAX_CYCLE_SET as usize, 7),
         ] {
             assert_eq!(
                 GradientConfig::from_lp_value(&config.to_lp_value()).unwrap(),
@@ -443,6 +577,7 @@ mod tests {
         );
         assert_eq!(fields[2], ("step_seconds".to_string(), LpValue::F32(0.0)));
         assert_eq!(fields[3], ("fade_seconds".to_string(), LpValue::F32(0.0)));
+        assert_eq!(fields[4], ("pinned".to_string(), LpValue::I32(-1)));
 
         let LpValue::Array(set) = &fields[1].1 else {
             panic!("set must be an Array");

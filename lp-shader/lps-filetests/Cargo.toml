@@ -49,6 +49,13 @@ glsl = { git = "https://github.com/PhotomancerArt/glsl-parser.git", branch = "fe
 
 [dev-dependencies]
 libm = "0.2"
+# `tests/example_shaders_compile.rs` loads the shipped example projects and
+# composes each shader def through the engine's own node seams (the compute
+# node's generated header, the pixel node's texture specs and entry space), so
+# it compiles exactly the text the product compiles.
+lpc-engine = { path = "../../lp-core/lpc-engine" }
+lpc-model = { path = "../../lp-core/lpc-model" }
+lpfs = { path = "../../lp-base/lpfs", features = ["std"] }
 
 [[test]]
 name = "filetests"
@@ -58,4 +65,10 @@ harness = true
 # allocator counters). See the file's module doc.
 [[test]]
 name = "compile_peak_memory_corpus"
+harness = true
+
+# Compile gate over the `catalog/` + `projects/test/` shaders on every target
+# (`#[ignore]`d; `just test-example-shaders`).
+[[test]]
+name = "example_shaders_compile"
 harness = true

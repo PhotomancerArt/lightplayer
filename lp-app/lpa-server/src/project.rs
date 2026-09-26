@@ -7,6 +7,8 @@ use crate::panel_state::{self, PANEL_STATE_WRITE_INTERVAL_MS};
 use crate::server::MemoryStatsFn;
 use alloc::{boxed::Box, format, rc::Rc, string::String, sync::Arc, vec::Vec};
 use core::cell::RefCell;
+#[cfg(feature = "latent-read-back")]
+use lpc_engine::LatentReadBackSource;
 use lpc_engine::{
     ButtonService, Engine, EngineServices, LpGraphics, PowerService, ProjectLoader, RadioService,
 };
@@ -46,6 +48,10 @@ pub struct Project {
     memory_stats: Option<MemoryStatsFn>,
     /// Graphics backend used by shader runtime nodes.
     graphics: Arc<dyn LpGraphics>,
+    /// The latent readback the host injected (the browser GPU tier), kept
+    /// here so a reload's fresh engine is handed it too.
+    #[cfg(feature = "latent-read-back")]
+    latent_read_back: Option<Arc<dyn LatentReadBackSource>>,
     /// Canonical project registry: artifacts, overlay, effective defs/assets.
     registry: ProjectRegistry,
     /// The loaded project engine.
@@ -86,6 +92,10 @@ impl Project {
         loaded_fs_version: FsVersion,
     ) -> Result<Self, ServerError> {
         log_memory(memory_stats, "project new start");
+        // Everything the runtime reads goes through this fs, and none of it
+        // may be an access file (`access_guarded_fs`): a project naming
+        // `.lp/access.json` as a resource gets a load error, never the bytes.
+        let fs = crate::access_guarded_fs::AccessGuardedFs::guard(fs);
         backtrace::set_oom_context("project new: root path");
         let root_path = project_root_path(&name)?;
         log_memory(memory_stats, "project new after root path");
@@ -119,7 +129,7 @@ impl Project {
         backtrace::set_oom_context("project new: restore panel state");
         let panel_auto_save = {
             let fs_ref = fs.borrow();
-            panel_state::restore(&*fs_ref, &mut runtime)
+            panel_state::restore(&*fs_ref, &mut runtime, &registry)
         };
 
         backtrace::set_oom_context("project new: build wrapper");
@@ -135,6 +145,8 @@ impl Project {
             power_service: None,
             memory_stats,
             graphics,
+            #[cfg(feature = "latent-read-back")]
+            latent_read_back: None,
             registry,
             runtime: Some(runtime),
             last_fs_version: loaded_fs_version.next(),
@@ -156,6 +168,14 @@ impl Project {
     /// Get the project path
     pub fn path(&self) -> &LpPath {
         &self.path
+    }
+
+    /// Set (or clear) the latent readback this project's engine uses for a
+    /// GPU-resident probe, and keep it for reloads.
+    #[cfg(feature = "latent-read-back")]
+    pub fn set_latent_read_back(&mut self, source: Option<Arc<dyn LatentReadBackSource>>) {
+        self.engine_mut().set_latent_read_back(source.clone());
+        self.latent_read_back = source;
     }
 
     /// Get mutable access to the loaded engine.
@@ -203,14 +223,27 @@ impl Project {
     }
 
     pub fn tick(&mut self, delta_ms: u32) -> Result<(), ServerError> {
-        let registry = &self.registry;
         let runtime = self
             .runtime
             .as_mut()
             .expect("project runtime is only absent while reloading");
-        let result = runtime
-            .tick(registry, delta_ms)
+        // The pre-tick residency step (plan PD2): playlist entries load and
+        // unload here, where the fs and a mutable registry are in hand and
+        // no render borrow is live. Every edge — fw-esp32c6, fw-emu,
+        // fw-browser, the host server — ticks through this one call. A load
+        // that fails is reported to its playlist, never to the tick.
+        let residency = {
+            let fs_ref = self.fs.borrow();
+            runtime
+                .apply_residency(&*fs_ref, &mut self.registry)
+                .map_err(|e| ServerError::Core(format!("entry residency: {e}")))
+        };
+        // The frame still ticks when the step errs (never-black: the
+        // outputs flush what they have); the step's error is the verdict.
+        let ticked = runtime
+            .tick(&self.registry, delta_ms)
             .map_err(|e| ServerError::Core(format!("{e}")));
+        let result = residency.and(ticked);
         // Persistence rides the tick, throttled — a failed frame still
         // gets its panel state written, since a crash loop is exactly
         // when losing the user's dim would hurt most.
@@ -662,6 +695,8 @@ impl Project {
         log_memory(self.memory_stats, "project reload after core project");
         backtrace::set_oom_context("project reload: set graphics");
         runtime.set_graphics(Some(self.graphics.clone()));
+        #[cfg(feature = "latent-read-back")]
+        runtime.set_latent_read_back(self.latent_read_back.clone());
         runtime
             .services_mut()
             .set_power_service(self.power_service.clone());
@@ -673,7 +708,7 @@ impl Project {
         backtrace::set_oom_context("project reload: restore panel state");
         self.panel_auto_save = {
             let fs_ref = self.fs.borrow();
-            panel_state::restore(&*fs_ref, &mut runtime)
+            panel_state::restore(&*fs_ref, &mut runtime, &registry)
         };
         self.panel_state_saved_mutations = runtime.panel_writers().mutations();
         self.panel_state_age_ms = 0;

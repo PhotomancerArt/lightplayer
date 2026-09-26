@@ -169,12 +169,22 @@ The core is IO-free state machines; async belongs to platform edges. See
   server means pre-hello firmware and is itself the mismatch signal. Never
   use error-text sniffing or silent format probing. See
   `docs/adr/2026-07-14-wire-hello-versioning.md`.
+- **A board's packed-wire dictionary (`lp-json-pack`/`lpc-wire`) is part of
+  the wire, not a side artifact.** A dictionary change is a wire change:
+  regenerate it with `just wire-dict` and bump `WIRE_PROTO_VERSION` in the
+  same change. `just wire-dict-check` (in `check-lint`, so in CI) fails both
+  when the committed dictionary is stale against the wire types and when the
+  dictionary changed without the version bump — the same proto number must
+  always mean the same dictionary. See
+  `docs/adr/2026-09-24-json-pack-wire-encoding.md`.
 
 ## Persisted-format compatibility (the wire rule does NOT apply here)
 
 - The wire's "no compatibility" freedom stops at anything **persisted**:
-  project.json / package files, the cloud store, and stamped device
-  identity. Real user data already exists at the current
+  project.json / package files, the cloud store, stamped device
+  identity, and the two access files (`<project>/.lp/access.json`, root
+  `/.lp/access.json` — each its own `version: 1` format with a schema in
+  `schemas/`, outside `PROJECT_FORMAT_VERSION`). Real user data already exists at the current
   `PROJECT_FORMAT_VERSION`, and it does not redeploy in lockstep.
 - **A change to persisted bytes IS a format bump, even when no field is
   added or removed.** The 2026-08-07 uid-format change re-rendered a
@@ -231,7 +241,9 @@ runtime.
 | `lpvm-native`    | LPIR → custom RV32 machine code        | yes              |
 | `lpvm-cranelift` | LPIR → Cranelift → machine code        | yes              |
 | `lp-engine`      | Shader runtime, node graph             | yes              |
+| `lpc-access`     | Access core: secrets, tiers, HMAC login, backoff (sans-IO) | yes |
 | `lp-server`      | Project management, client connections | yes              |
+| `lp-json-pack`   | JSON Pack: a compact binary form of JSON that decodes back to byte-identical JSON text (`lp-base/`, generic, dictionary injected) | yes |
 | `lpa-devices`    | Device model: event fold, no IO, no UI | no (host + wasm) |
 | `fw-esp32c6`       | ESP32 firmware                         | yes (bare metal) |
 | `fw-emu`         | RISC-V emulator firmware (CI)          | yes (bare metal) |
@@ -540,6 +552,15 @@ does not model. The full reasoning, in Yona's words, is
   reporting, Brave grant revocation, the real chooser) is the shim's residue
   (`docs/adr/2026-09-09-studio-device-stack-over-a-virtual-serial-port.md`,
   rule 3).
+- **Radio is the named exception: the emulator has no BLE air.** Since
+  Bluetooth went on by default, an emulated board with no device store
+  starts the BLE controller and advertises, but no central ever answers, so
+  nothing connects. A BLE claim comes from host tests (the access gate:
+  `lpa-server/tests/access_gate.rs`), `?ble=emu` for Studio's transport and
+  UI (below), plus a desk walk through `spikes/ble-lab`. Its wire mode speaks the product's own link, and an agent
+  can drive it with no human using the Mac's Chrome as the central over CDP.
+  Its README is the runbook. A desk number names the board, the distance and
+  the central: Mac Chrome is not Bluefy on an iPhone.
 - **When you do a hardware walk, do the emulator walk first**, and what
   hardware checks is **parity**. If hardware disagrees with the emulator, fix
   the *emulator* first — file a fidelity defect under `docs/defects/` (e.g.
@@ -576,8 +597,48 @@ grants itself.
 
 The door admits **one client per board** (a second gets 409), so one Studio tab
 per `emu serve`, and use `?on=` (a different, orthogonal flag) if you want a
-second lens on the same session. See
+second lens on the same session.
+
+**`?ble=emu`** (beside `?emu=`) does the same for Bluetooth: it replaces
+`navigator.bluetooth` with `public/lpa-link/virtual_bluetooth.js`, the NUS
+GATT subset over the same emulated boards, so Studio's `ble:` link, the
+device card and Play run unchanged; `just walk-ble-emu` is its walk. It
+models the firmware's link rules as far as the page can see them: the link
+opens when the central subscribes, each link gets its own hello, an
+unauthenticated link is dropped after 10 s, and Bluefy's phantom
+drop, where the page hears a disconnect while the radio link stays
+up. **Trust caveat: it proves the transport, the UI and Play, not access.**
+The emulated board sees its trusted USB link, so every request is answered
+at the edit tier, and it never runs the C6's BLE controller or trouble-host:
+the two faults the real walks found (a chained ACL packet cut short, a long
+write acknowledged and dropped) were invisible to it. Access enforcement is
+proven by `lpa-server/tests/access_gate.rs` and the desk check
+(`spikes/ble-lab`). See `docs/adr/2026-09-24-ble-transport.md`, S5.
+
+Two more dev-only flags tune the device wire for a measurement (read once at
+page load by `lpa-studio-web/src/dev_url_flags.rs`; no UI, no persistence):
+`?lens-pause-ms=N` sets the editor lens's pause between device reads
+(`DEVICE_REFRESH_INTERVAL`, 150 ms; clamped to 0–1000 ms; nothing else moves),
+and `?wire=json` stops the page asking boards to pack their replies, so JSON
+and JSON Pack can be compared on one build. Studio otherwise asks every board
+whose hello offers this build's pack dictionary; what the board answered is one
+`WireNote` line in the device's journal (`wire: replies packed …` or `wire:
+replies stay JSON — <why>`). See
 `docs/adr/2026-09-09-studio-device-stack-over-a-virtual-serial-port.md`.
+
+Two more exist for a hardware sitting, where Web Serial's exclusive hold on the
+port means nothing else can read what the board sends:
+`?wire-capture=1` tees every raw byte chunk the Web Serial read pump hands to
+Rust (`browser_serial::take_reads`, before any splitting) into an in-memory
+buffer capped at 16 MiB (one console warning at the cap, then it drops). Run
+`lpWireCapture()` in the page's console to download it as
+`wire-capture-<unix-ms>.bin`; the capture keeps running, and the file is
+exactly what arrived, so `lp-cli wire unpack --sizes < file` reads it.
+`?device-log=<trace|debug|info|warn|error>` asks each board for that log
+level (`SetLogLevel`) once per link, after its hello and the packed-reply
+opt-in; the answer is a `dev: …` `WireNote` line, never a frame. Both cover
+Web Serial ports (a real board, `?emu=ws://…`), not the in-tab board
+(`?emu=tab`).
 
 ### Running the device walk yourself
 
@@ -850,6 +911,8 @@ renders, and drives a WS281x waveform onto a pad that a decoder reads back at
 the datasheet's ±150 ns. It is the configuration `lp-emu:esp32c6:t1` (and
 `:t2`) in the validation system above.
 
+**No firmware build needed to run a chip suite:** `just fetch-ci-images [pr|sha|run]` + `export LP_CI_IMAGES=…` runs `test-emu-*-boot`, the chip heap ratchets and `bless-chips` against CI's own images, refusing them if their firmware sources are not your checkout's (`docs/ci-images.md`).
+
 ```bash
 lp-cli emu run --merged <chip.bin> --link 127.0.0.1:5591 --monitor   # a C6 you can talk to
 lp-cli upload projects/test/basic serial:tcp://127.0.0.1:5591        # …in another terminal
@@ -857,7 +920,12 @@ lp-cli upload projects/test/basic serial:tcp://127.0.0.1:5591        # …in ano
 just walk-esp32c6-emu                           # THE WALK (see below) — minutes, not seconds
 just test-emu-c6                                # its gates (builds firmware)
 just heap-budget-check-chips                    # the firmware's own heap ledger, ratcheted
+just bless-chips [esp32c6|esp32v3|esp32s3|engine]   # a firmware change moved a pinned figure: re-record them all (docs/chip-figures.md)
+just apply-ci-figures [pr]                      # …or take the patch CI already blessed on the PR (its sticky "figures moved" comment) — no firmware build
 just emu-c6 <elf> --strict-bus --timeout 6s     # the workshop binary, thirty flags
+LP_EMU_WIRE_TAP=<dir> just studio-dev-emu; just wire-tap-stat <dir>/c6-a.tap --ledger   # exact wire bytes of a real Studio session, by JSON path — the tool for any wire-size claim
+lp-cli wire unpack --sizes < capture.bin > capture.txt   # rewrite packed frames (JSON Pack) back to `M!{json}` lines, with a per-frame/total size report on stderr
+LP_WIRE_ENCODING=json lp-cli upload projects/test/basic serial:auto   # lp-cli's own serial transports never ask for packed — a JSON-vs-packed comparison, or a link you want to watch as text
 just bench-emu-c6                               # its speed probe (an oracle, never a gate)
 scripts/emu/oracle-sweep.sh <bin-a> <bin-b>     # the identity oracle ACROSS BINARIES: uart + cycles + decoded FRAMES
 just test-emu-jit-image                         # the identity oracle WITHIN one binary: --jit vs --interpreter (CI runs this cell)

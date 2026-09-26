@@ -7,6 +7,7 @@
 //! Adding a step is the only correct response to a format bump — see the
 //! crate README and `just format-bump`.
 
+pub(crate) mod v10_to_v11;
 pub(crate) mod v4_to_v5;
 pub(crate) mod v5_to_v6;
 pub(crate) mod v6_to_v7;
@@ -67,5 +68,10 @@ pub(crate) const STEPS: &[UpgradeStep] = &[
         from: 9,
         to: 10,
         apply: v9_to_v10::apply,
+    },
+    UpgradeStep {
+        from: 10,
+        to: 11,
+        apply: v10_to_v11::apply,
     },
 ];

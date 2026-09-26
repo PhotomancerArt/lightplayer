@@ -118,6 +118,13 @@ pub(super) enum ProjectedNodeOwnership {
 /// Loads the authored project artifact tree into a core engine-backed runtime.
 pub struct ProjectLoader;
 
+/// Playlist entries to make resident at load, beyond each playlist's idle
+/// entry.
+enum EntryPreload<'a> {
+    Listed(&'a [(lpc_model::NodeUseLocation, u32)]),
+    Every,
+}
+
 impl ProjectLoader {
     pub fn load_from_root(
         root: &dyn LpFs,
@@ -130,6 +137,66 @@ impl ProjectLoader {
         root: &dyn LpFs,
         services: EngineServices,
         project_specifier: ArtifactSpec,
+    ) -> Result<LoadedProjectRuntime, ProjectLoadError> {
+        Self::load_project_artifact_with_resident_entries(root, services, project_specifier, &[])
+    }
+
+    /// [`Self::load_from_root`] with extra playlist entries resident.
+    ///
+    /// At load, each playlist has only its idle entry resident; every other
+    /// entry is dormant and absent from the registry and the tree (see
+    /// `lpc_registry::EntryResidency`). `resident` names more entries to load
+    /// up front, as `(playlist use location, entry key)`.
+    pub fn load_from_root_with_resident_entries(
+        root: &dyn LpFs,
+        services: EngineServices,
+        resident: &[(lpc_model::NodeUseLocation, u32)],
+    ) -> Result<LoadedProjectRuntime, ProjectLoadError> {
+        Self::load_project_artifact_with_resident_entries(
+            root,
+            services,
+            ArtifactSpec::path("/module.json"),
+            resident,
+        )
+    }
+
+    /// [`Self::load_from_root`] with every entry of every playlist resident.
+    ///
+    /// For host gates that must reach every authored file (shader compile
+    /// sweeps, validity checks). A device loads one entry per playlist.
+    pub fn load_from_root_with_every_entry_resident(
+        root: &dyn LpFs,
+        services: EngineServices,
+    ) -> Result<LoadedProjectRuntime, ProjectLoadError> {
+        Self::load_project_artifact_preloading(
+            root,
+            services,
+            ArtifactSpec::path("/module.json"),
+            EntryPreload::Every,
+        )
+    }
+
+    /// [`Self::load_project_artifact`] with extra playlist entries resident
+    /// (see [`Self::load_from_root_with_resident_entries`]).
+    pub fn load_project_artifact_with_resident_entries(
+        root: &dyn LpFs,
+        services: EngineServices,
+        project_specifier: ArtifactSpec,
+        resident: &[(lpc_model::NodeUseLocation, u32)],
+    ) -> Result<LoadedProjectRuntime, ProjectLoadError> {
+        Self::load_project_artifact_preloading(
+            root,
+            services,
+            project_specifier,
+            EntryPreload::Listed(resident),
+        )
+    }
+
+    fn load_project_artifact_preloading(
+        root: &dyn LpFs,
+        services: EngineServices,
+        project_specifier: ArtifactSpec,
+        preload: EntryPreload<'_>,
     ) -> Result<LoadedProjectRuntime, ProjectLoadError> {
         let project_path = resolve_project_specifier(&project_specifier)?;
         let project_root = services.project_root().clone();
@@ -146,6 +213,21 @@ impl ProjectLoader {
                 error: e.to_string(),
             })?;
         Self::validate_loaded_root(&registry, &load_result.root, project_path.as_path())?;
+        match preload {
+            EntryPreload::Listed(resident) => {
+                for (playlist, entry) in resident {
+                    registry
+                        .set_entry_resident(root, playlist, *entry, true, frame, &ctx)
+                        .map_err(|e| ProjectLoadError::ProjectParse {
+                            file: project_path.as_str().to_string(),
+                            error: format!("load playlist entry {entry}: {e}"),
+                        })?;
+                }
+            }
+            EntryPreload::Every => {
+                registry.make_every_entry_resident(root, frame, &ctx);
+            }
+        }
 
         let projected_nodes =
             Self::build_runtime_spine(&registry, &mut runtime, project_specifier.clone(), frame)?;
@@ -817,25 +899,31 @@ impl ProjectLoader {
             }
             #[cfg(feature = "node-playlist")]
             {
-                let (idle_entry, default_fade, entries) = {
+                let (idle_entry, default_fade, entries, next_ids, prev_ids) = {
                     let NodeDef::Playlist(config) = projected_node_config(registry, node)? else {
                         continue;
                     };
+                    let ids = |slot: &lpc_model::OptionSlot<lpc_model::U32ListSlot>| {
+                        slot.data
+                            .as_ref()
+                            .map(|ids| ids.value().0.clone())
+                            .unwrap_or_default()
+                    };
                     (
-                        *config.idle_entry.value(),
+                        config.effective_idle_entry(),
                         config.default_fade.value().0,
                         playlist_runtime_entries(projected_nodes, node.id, config),
+                        ids(&config.next_trigger_ids),
+                        ids(&config.prev_trigger_ids),
                     )
                 };
                 runtime
                     .attach_runtime_node(
                         node.id,
-                        Box::new(PlaylistNode::new(
-                            node.id,
-                            idle_entry,
-                            default_fade,
-                            entries,
-                        )),
+                        Box::new(
+                            PlaylistNode::new(node.id, idle_entry, default_fade, entries)
+                                .with_step_triggers(next_ids, prev_ids),
+                        ),
                         frame,
                     )
                     .map_err(|e| ProjectLoadError::InvalidProjectReference {
@@ -1152,44 +1240,52 @@ fn resolve_path_specifier_from_dir(
     }
 }
 
+/// Every AUTHORED entry of a playlist (plan PD4), in key order. Entries
+/// resident at load carry their projected child; the rest are dormant, and
+/// the playlist learns of their children later through its `entry_loaded`
+/// hook.
 #[cfg(feature = "node-playlist")]
 fn playlist_runtime_entries(
     projected_nodes: &[ProjectedNode],
     playlist: NodeId,
     config: &PlaylistDef,
 ) -> Vec<PlaylistRuntimeEntry> {
-    projected_nodes
+    let child_of = |key: u32| {
+        projected_nodes
+            .iter()
+            .find_map(|node| match node.ownership {
+                ProjectedNodeOwnership::PlaylistEntry {
+                    playlist: owner,
+                    entry,
+                } if owner == playlist && entry == key => Some(node.id),
+                _ => None,
+            })
+    };
+    let mut entries: Vec<PlaylistRuntimeEntry> = config
+        .entries
+        .entries
         .iter()
-        .filter_map(|node| match node.ownership {
-            ProjectedNodeOwnership::PlaylistEntry {
-                playlist: owner,
-                entry,
-            } if owner == playlist => Some(PlaylistRuntimeEntry {
-                index: entry,
-                child: node.id,
-                output_slot: SlotPath::parse("output").expect("playlist child output path"),
-                duration: config
-                    .entries
-                    .entries
-                    .get(&entry)
-                    .and_then(|entry| entry.duration.data.as_ref())
-                    .map(|duration| duration.value().0),
-                fade_after: config
-                    .entries
-                    .entries
-                    .get(&entry)
-                    .and_then(|entry| entry.fade_after.data.as_ref())
-                    .map(|fade| fade.value().0),
-                trigger_ids: config
-                    .entries
-                    .entries
-                    .get(&entry)
-                    .and_then(|entry| entry.trigger_ids.data.as_ref())
-                    .map(|ids| ids.value().0.clone()),
-            }),
-            _ => None,
+        .map(|(&key, authored)| {
+            let mut entry = PlaylistRuntimeEntry::dormant(key);
+            entry.duration = authored
+                .duration
+                .data
+                .as_ref()
+                .map(|duration| duration.value().0);
+            entry.fade_after = authored.fade_after.data.as_ref().map(|fade| fade.value().0);
+            entry.trigger_ids = authored
+                .trigger_ids
+                .data
+                .as_ref()
+                .map(|ids| ids.value().0.clone());
+            match child_of(key) {
+                Some(child) => entry.loaded(child),
+                None => entry,
+            }
         })
-        .collect()
+        .collect();
+    entries.sort_by_key(|entry| entry.index);
+    entries
 }
 
 #[cfg(feature = "node-fixture")]
@@ -2410,7 +2506,7 @@ mod tests {
 
     fn fixture_project_fs() -> LpFsMemory {
         let fs = LpFsMemory::new();
-        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 10\n}\n")
+        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 11\n}\n")
             .expect("container manifest");
         fs.write_file(
             "/module.json".as_path(),
@@ -2567,7 +2663,7 @@ mod tests {
 
     fn playlist_project_fs() -> LpFsMemory {
         let fs = LpFsMemory::new();
-        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 10\n}\n")
+        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 11\n}\n")
             .expect("container manifest");
         fs.write_file(
             "/module.json".as_path(),
@@ -2665,7 +2761,7 @@ mod tests {
 
     fn button_playlist_project_fs() -> LpFsMemory {
         let fs = playlist_project_fs();
-        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 10\n}\n")
+        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 11\n}\n")
             .expect("container manifest");
         fs.write_file(
             "/module.json".as_path(),
@@ -3076,8 +3172,12 @@ mod tests {
         services.set_button_service(Some(button_service));
         services.set_time_provider(Some(time_provider));
 
-        let mut rt =
-            ProjectLoader::load_from_root(fs, services).expect("load button playlist example");
+        let mut rt = ProjectLoader::load_from_root_with_resident_entries(
+            fs,
+            services,
+            &all_playlist_entries(fs),
+        )
+        .expect("load button playlist example");
         rt.set_graphics(Some(Arc::new(lp_gfx_lpvm::TargetLpvmGraphics::new(
             lp_shader::ShaderFrontend::LpsGlsl,
         ))));
@@ -3090,10 +3190,13 @@ mod tests {
         assert_eq!(boot_broadcasts, 1, "boot opens one compile window");
 
         // Switch: the active-entry shader has never compiled. The switch
-        // frame defers it; the following tick must broadcast again.
+        // frame captures the held frame (the idle entry, still shown); the
+        // next frame samples the incoming entry, which defers its compile;
+        // the tick after must broadcast again.
         control.set_pressed(HwAddress::gpio(20), true);
         tick_with_test_time(&mut rt, &time, 16, "press candidate");
-        tick_with_test_time(&mut rt, &time, 30, "press stable — switch, deferral");
+        tick_with_test_time(&mut rt, &time, 30, "press stable — switch, capture");
+        tick_with_test_time(&mut rt, &time, 16, "hold — incoming deferral");
         tick_with_test_time(&mut rt, &time, 16, "switch window");
         assert_eq!(
             levels.borrow().len(),
@@ -3175,7 +3278,7 @@ mod tests {
     #[test]
     fn project_loader_loads_inline_clock_and_default_time_product_bus() {
         let fs = LpFsMemory::new();
-        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 10\n}\n")
+        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 11\n}\n")
             .expect("container manifest");
         fs.write_file(
             "/module.json".as_path(),
@@ -3337,7 +3440,7 @@ mod tests {
     #[test]
     fn a_phasor_uniform_rides_the_clocks_default_time_product_with_no_authoring() {
         let fs = LpFsMemory::new();
-        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 10\n}\n")
+        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 11\n}\n")
             .expect("container manifest");
         fs.write_file(
             "/module.json".as_path(),
@@ -3423,7 +3526,7 @@ mod tests {
     #[test]
     fn project_loader_rejects_inline_child_def() {
         let fs = LpFsMemory::new();
-        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 10\n}\n")
+        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 11\n}\n")
             .expect("container manifest");
         fs.write_file(
             "/module.json".as_path(),
@@ -3453,7 +3556,7 @@ mod tests {
     #[test]
     fn top_level_shader_gets_default_visual_output_binding() {
         let fs = LpFsMemory::new();
-        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 10\n}\n")
+        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 11\n}\n")
             .expect("container manifest");
         fs.write_file(
             "/module.json".as_path(),
@@ -3589,7 +3692,12 @@ mod tests {
         // invisible to any enclosing read by construction.
         let fs = playlist_project_fs();
         let services = EngineServices::new(TreePath::parse("/playlist.show").expect("path"));
-        let rt = ProjectLoader::load_from_root(&fs, services).expect("load playlist");
+        let rt = ProjectLoader::load_from_root_with_resident_entries(
+            &fs,
+            services,
+            &all_playlist_entries(&fs),
+        )
+        .expect("load playlist");
         let root = rt.tree().root();
         let playlist = rt
             .tree()
@@ -3633,7 +3741,12 @@ mod tests {
     fn playlist_entries_load_as_children_and_bind_root_trigger() {
         let fs = playlist_project_fs();
         let services = EngineServices::new(TreePath::parse("/playlist.show").expect("path"));
-        let rt = ProjectLoader::load_from_root(&fs, services).expect("load playlist");
+        let rt = ProjectLoader::load_from_root_with_resident_entries(
+            &fs,
+            services,
+            &all_playlist_entries(&fs),
+        )
+        .expect("load playlist");
         let root = rt.tree().root();
         let playlist = rt
             .tree()
@@ -3679,7 +3792,12 @@ mod tests {
         let button_service: Rc<dyn ButtonService> = hardware.clone();
         let mut services = EngineServices::new(TreePath::parse("/button_playlist.show").unwrap());
         services.set_button_service(Some(button_service));
-        let mut rt = ProjectLoader::load_from_root(&fs, services).expect("load playlist");
+        let mut rt = ProjectLoader::load_from_root_with_resident_entries(
+            &fs,
+            services,
+            &all_playlist_entries(&fs),
+        )
+        .expect("load playlist");
         let playlist = rt
             .tree()
             .lookup_sibling(rt.tree().root(), NodeName::parse("playlist").unwrap())
@@ -3829,7 +3947,7 @@ mod tests {
     #[test]
     fn malformed_child_node_json_projects_error_node() {
         let fs = LpFsMemory::new();
-        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 10\n}\n")
+        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 11\n}\n")
             .expect("container manifest");
         fs.write_file(
             "/module.json".as_path(),
@@ -3874,7 +3992,7 @@ mod tests {
     #[test]
     fn missing_module_json_returns_io_error() {
         let fs = LpFsMemory::new();
-        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 10\n}\n")
+        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 11\n}\n")
             .expect("container manifest");
         let root_path = TreePath::parse("/p.show").expect("path");
         let services = EngineServices::new(root_path);
@@ -3894,7 +4012,7 @@ mod tests {
     #[test]
     fn unknown_child_kind_projects_error_node() {
         let fs = LpFsMemory::new();
-        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 10\n}\n")
+        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 11\n}\n")
             .expect("container manifest");
         fs.write_file(
             "/module.json".as_path(),
@@ -4065,7 +4183,7 @@ mod tests {
     #[test]
     fn project_loader_attaches_compute_shader_node() {
         let fs = LpFsMemory::new();
-        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 10\n}\n")
+        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 11\n}\n")
             .expect("container manifest");
         fs.write_file(
             "/module.json".as_path(),
@@ -4266,6 +4384,7 @@ mod tests {
                     time_seconds: 0.0,
                     space: VisualSpace::TwoD,
                     policy: ConsumerPolicy::default(),
+                    scope: None,
                 },
             )
             .expect("fluid texture");
@@ -4402,8 +4521,12 @@ mod tests {
         services.set_button_service(Some(button_service));
         services.set_time_provider(Some(time_provider));
 
-        let mut rt =
-            ProjectLoader::load_from_root(fs, services).expect("load button playlist example");
+        let mut rt = ProjectLoader::load_from_root_with_resident_entries(
+            fs,
+            services,
+            &all_playlist_entries(fs),
+        )
+        .expect("load button playlist example");
         rt.set_graphics(Some(Arc::new(lp_gfx_lpvm::TargetLpvmGraphics::new(
             lp_shader::ShaderFrontend::LpsGlsl,
         ))));
@@ -4432,7 +4555,12 @@ mod tests {
             resolve_playlist_f32(&mut rt, playlist, "entry_progress"),
             0.0
         );
+        // The texture path cuts to the incoming entry (it never holds; see
+        // `playlist_node.rs`), and a never-compiled shader renders black
+        // until its compile window: one more frame, then it is live.
+        tick_with_test_time(&mut rt, &time, 16, "switch window");
         let active_product = resolve_visual_product(&mut rt, playlist, "output");
+        let _deferral = render_test_texture_bytes(&mut rt, active_product);
         let active = render_test_texture_bytes(&mut rt, active_product);
         assert_nonzero_rgb(&active, "active playlist visual");
         assert_ne!(idle, active, "active trigger should change the visual");
@@ -4460,6 +4588,103 @@ mod tests {
             resolve_playlist_f32(&mut rt, playlist, "entry_progress"),
             -1.0
         );
+    }
+
+    /// fyeah-sign keeps its meaning with one entry loaded (vision D17): idle,
+    /// a press plays blast, blast's duration ends it, back to idle — the
+    /// same entry sequence as before, now with blast loaded on the press
+    /// and unloaded after (plan A6: a triggered entry pays its load and
+    /// compile on every trigger).
+    #[test]
+    fn fyeah_sign_trigger_plays_blast_then_returns_to_idle() {
+        let fs = examples_fyeah_sign_fs();
+        let fs: &dyn LpFs = &fs;
+        let registry = Rc::new(HwRegistry::new(default_esp32c6_hardware_manifest()));
+        let driver = VirtualButtonDriver::new(Rc::clone(&registry));
+        let control = driver.clone();
+        let radio_driver = VirtualRadioDriver::new(Rc::clone(&registry), 0);
+        let mut hardware = HardwareSystem::new(registry);
+        hardware.add_button_driver(Box::new(driver));
+        hardware.add_radio_driver(Box::new(radio_driver));
+        let hardware = Rc::new(hardware);
+        let button_service: Rc<dyn ButtonService> = hardware.clone();
+        let radio_service: Rc<dyn RadioService> = hardware.clone();
+        let time = Rc::new(TestTimeProvider::new());
+        let time_provider: Rc<dyn TimeProvider> = time.clone();
+        let mut services = EngineServices::new(TreePath::parse("/fyeah_sign.show").expect("path"));
+        services.set_button_service(Some(button_service));
+        services.set_radio_service(Some(radio_service));
+        services.set_time_provider(Some(time_provider));
+        let mut rt = ProjectLoader::load_from_root(fs, services).expect("load fyeah sign");
+        rt.set_graphics(Some(Arc::new(lp_gfx_lpvm::TargetLpvmGraphics::new(
+            lp_shader::ShaderFrontend::LpsGlsl,
+        ))));
+        let playlist = rt
+            .tree()
+            .lookup_sibling(rt.tree().root(), NodeName::parse("playlist").unwrap())
+            .expect("playlist node");
+        let tick = |rt: &mut LoadedProjectRuntime, delta_ms: u32, label: &str| {
+            time.advance(u64::from(delta_ms));
+            rt.tick_with_residency(fs, delta_ms)
+                .unwrap_or_else(|err| panic!("{label}: {err}"));
+        };
+        let loaded = |rt: &LoadedProjectRuntime| -> Vec<u32> {
+            [1u32, 2]
+                .into_iter()
+                .filter(|entry| {
+                    let scope = crate::node::ScopeRef::Sink {
+                        owner: playlist,
+                        entry: *entry,
+                    };
+                    rt.tree()
+                        .entries()
+                        .any(|node| node.parent == Some(playlist) && node.scope == Some(scope))
+                })
+                .collect()
+        };
+        let mut sequence: Vec<(u32, Vec<u32>)> = Vec::new();
+        let note = |rt: &mut LoadedProjectRuntime, sequence: &mut Vec<(u32, Vec<u32>)>| {
+            let now = (
+                resolve_playlist_u32(rt, playlist, "active_entry"),
+                loaded(rt),
+            );
+            if sequence.last() != Some(&now) {
+                sequence.push(now);
+            }
+        };
+
+        for _ in 0..3 {
+            tick(&mut rt, 16, "idle");
+            note(&mut rt, &mut sequence);
+        }
+        for press in 0..2 {
+            control.set_pressed(HwAddress::gpio(20), true);
+            tick(&mut rt, 16, "press candidate");
+            note(&mut rt, &mut sequence);
+            tick(&mut rt, 30, "press stable");
+            note(&mut rt, &mut sequence);
+            control.set_pressed(HwAddress::gpio(20), false);
+            // Blast lasts 6 s; run 7 s at 100 ms frames.
+            for _ in 0..70 {
+                tick(&mut rt, 100, "blast");
+                note(&mut rt, &mut sequence);
+            }
+            assert_eq!(
+                resolve_playlist_u32(&mut rt, playlist, "active_entry"),
+                1,
+                "press {press}: back on idle after blast's duration"
+            );
+        }
+
+        // (active entry, loaded entries), repeats collapsed: never two
+        // entries loaded, and `active_entry` names the loaded one — blast
+        // from the frame it loads on, idle again once blast's duration ends
+        // and idle is back — twice, identically.
+        let one_press = [(2, alloc::vec![2]), (1, alloc::vec![1])];
+        let mut expected = alloc::vec![(1, alloc::vec![1])];
+        expected.extend(one_press.iter().cloned());
+        expected.extend(one_press.iter().cloned());
+        assert_eq!(sequence, expected);
     }
 
     #[test]
@@ -4653,11 +4878,16 @@ mod tests {
         let result = engine.read_project_binding_graph_probe(
             project_registry,
             lpc_wire::BindingGraphProbeRequest {
+                structure: lpc_wire::RevisionGateRead::Always,
                 include_values: false,
             },
         );
 
-        let lpc_wire::BindingGraphProbeResult::Graph(graph) = result else {
+        let lpc_wire::BindingGraphProbeResult::Graph(lpc_wire::WireBindingGraphRead {
+            structure: lpc_wire::RevisionGateResult::Changed(graph),
+            ..
+        }) = result
+        else {
             panic!("expected binding graph");
         };
         let channel = |name: &str| {
@@ -4718,7 +4948,7 @@ mod tests {
     #[test]
     fn button_node_publishes_held_and_up_from_virtual_d9() {
         let fs = LpFsMemory::new();
-        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 10\n}\n")
+        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 11\n}\n")
             .expect("container manifest");
         fs.write_file(
             "/module.json".as_path(),
@@ -4789,7 +5019,7 @@ mod tests {
     #[test]
     fn control_radio_bidirectional_bus_binding_broadcasts_button_event() {
         let fs = LpFsMemory::new();
-        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 10\n}\n")
+        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 11\n}\n")
             .expect("container manifest");
         fs.write_file(
             "/module.json".as_path(),
@@ -4898,6 +5128,7 @@ mod tests {
                 time_seconds: 0.0,
                 space: VisualSpace::TwoD,
                 policy: ConsumerPolicy::default(),
+                scope: None,
             },
         )
         .expect("texture")
@@ -5016,12 +5247,35 @@ mod tests {
         let button_service: Rc<dyn ButtonService> = hardware.clone();
         let mut services = EngineServices::new(TreePath::parse("/button_playlist.show").unwrap());
         services.set_button_service(Some(button_service));
-        let rt = ProjectLoader::load_from_root(fs, services).expect("load playlist");
+        let rt = ProjectLoader::load_from_root_with_resident_entries(
+            fs,
+            services,
+            &all_playlist_entries(fs),
+        )
+        .expect("load playlist");
         let playlist = rt
             .tree()
             .lookup_sibling(rt.tree().root(), NodeName::parse("playlist").unwrap())
             .expect("playlist");
         (rt, playlist, control)
+    }
+
+    /// Every entry of the `nodes[playlist]` playlist in `/playlist.json`, as
+    /// resident-entry requests. Only a playlist's idle entry is resident by
+    /// default; tests that exercise the other entries load them up front.
+    fn all_playlist_entries(fs: &dyn LpFs) -> Vec<(lpc_model::NodeUseLocation, u32)> {
+        let bytes = fs
+            .read_file("/playlist.json".as_path())
+            .expect("playlist.json");
+        let json: serde_json::Value = serde_json::from_slice(&bytes).expect("playlist json");
+        let playlist = lpc_model::NodeUseLocation::root()
+            .child(SlotPath::parse("nodes[playlist]").expect("playlist use"));
+        json["entries"]
+            .as_object()
+            .expect("playlist entries")
+            .keys()
+            .map(|key| (playlist.clone(), key.parse().expect("entry key")))
+            .collect()
     }
 
     fn resolve_playlist_u32(rt: &mut LoadedProjectRuntime, playlist: NodeId, slot: &str) -> u32 {
@@ -5090,7 +5344,7 @@ mod tests {
     }
 
     fn write_flat_basic_files(fs: &LpFsMemory) {
-        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 10\n}\n")
+        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 11\n}\n")
             .expect("container manifest");
         fs.write_file(
             "/module.json".as_path(),
@@ -5284,7 +5538,7 @@ mod tests {
             entries.push_str(&format!("    \"{name}\": {{ \"ref\": \"./{name}.json\" }}"));
         }
         let module = format!("{{\n  \"kind\": \"Module\",\n  \"nodes\": {{\n{entries}\n  }}\n}}\n");
-        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 10\n}\n")
+        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 11\n}\n")
             .expect("container manifest");
         fs.write_file("/module.json".as_path(), module.as_bytes())
             .expect("module.json");
@@ -5443,10 +5697,15 @@ mod tests {
         let result = engine.read_project_binding_graph_probe(
             project_registry,
             lpc_wire::BindingGraphProbeRequest {
+                structure: lpc_wire::RevisionGateRead::Always,
                 include_values: false,
             },
         );
-        let lpc_wire::BindingGraphProbeResult::Graph(graph) = result else {
+        let lpc_wire::BindingGraphProbeResult::Graph(lpc_wire::WireBindingGraphRead {
+            structure: lpc_wire::RevisionGateResult::Changed(graph),
+            ..
+        }) = result
+        else {
             panic!("expected binding graph");
         };
 
@@ -5864,7 +6123,12 @@ mod tests {
         let fs = examples_fyeah_sign_fs();
         let fs: &dyn LpFs = &fs;
         let services = EngineServices::new(TreePath::parse("/fyeah.show").expect("path"));
-        let rt = ProjectLoader::load_from_root(fs, services).expect("load fyeah sign");
+        let rt = ProjectLoader::load_from_root_with_resident_entries(
+            fs,
+            services,
+            &all_playlist_entries(fs),
+        )
+        .expect("load fyeah sign");
         let default_publishers = rt
             .tree()
             .bindings()
@@ -5958,7 +6222,7 @@ mod tests {
     #[cfg(not(feature = "node-button"))]
     fn disabled_node_kind_still_loads_project() {
         let fs = LpFsMemory::new();
-        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 10\n}\n")
+        fs.write_file("/project.json".as_path(), b"{\n  \"format\": 11\n}\n")
             .expect("container manifest");
         fs.write_file(
             "/module.json".as_path(),

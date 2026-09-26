@@ -135,6 +135,13 @@ pub struct StudioController {
     /// an emu on and off, and asking it how fast it is running, are not part
     /// of the `DeviceTransport` vocabulary and must not become part of it.
     emu_transport: Option<Rc<crate::EmuDeviceTransport>>,
+    /// The transport that reaches BLUETOOTH devices (M5), when this build
+    /// has one. `dyn`-free for symmetry with the other two halves.
+    ble_transport: Option<Rc<crate::BleDeviceTransport>>,
+    /// How many Play surfaces are mounted on the lens right now (the
+    /// `PlayViewOp` lease). Play is the one mode with an idle read budget
+    /// over Bluetooth; everything else is authoring.
+    play_views: u32,
     /// The `/device-sims/<uid>.json` sidecars, read off the library
     /// snapshot at settle. The sole "this device is a runtime" fact — for
     /// BOTH kinds, keyed by uid, with the sidecar's own `kind` saying
@@ -250,6 +257,9 @@ pub struct StudioController {
     /// injected platform facilities (spawner, provider factory); runs are
     /// spawned tasks reporting back through the actor's command queue.
     agent: crate::AgentController,
+    /// Access over Bluetooth (BLE M6): login on connect, remembered
+    /// passwords, and the device-store writes.
+    access: crate::app::access::AccessController,
 }
 
 /// Which device an open lands on — the model half of the URL's `?on=`
@@ -286,6 +296,16 @@ enum NamedDeviceRefusal {
     Unknown,
     /// It is running a different project (D50) — the page, not a push.
     Mismatch(crate::UiOpenMismatch),
+}
+
+/// Where the identity stamped onto an identity-free board came from.
+enum BoardStamp {
+    /// A library copy differs from the board only by its uid: that uid is
+    /// given back, and the copy is bound — nothing is installed.
+    Restored(crate::app::project::device_bind::StampedPackage),
+    /// Nothing here is this project: a fresh uid, and an ordinary adoption
+    /// under it.
+    Minted(crate::app::project::device_bind::StampedPackage),
 }
 
 /// What a home card asked to open.
@@ -378,6 +398,8 @@ impl StudioController {
             serial_transport: None,
             sim_transport: None,
             emu_transport: None,
+            ble_transport: None,
+            play_views: 0,
             device_sims: std::collections::BTreeMap::new(),
             pool: RuntimePool::new(),
             project: ProjectController::new(),
@@ -409,6 +431,7 @@ impl StudioController {
             on_user_settings: None,
             on_copy_text: None,
             agent: crate::AgentController::new(),
+            access: crate::app::access::AccessController::new(),
         }
     }
 
@@ -474,7 +497,7 @@ impl StudioController {
     /// records into its shared bridge cell (P2: the engine-verdict seam;
     /// P3: the params-diff seam). Runs at the end of every processed batch
     /// — cheap while no sessions exist — so a running agent's bounded
-    /// verdict wait observes the status Revision advancing as pulls land,
+    /// verdict wait observes each pull's read revision as it lands,
     /// and its params diff sees acked def edits.
     fn refresh_agent_engine_status(&mut self) {
         let project = &self.project;
@@ -535,6 +558,18 @@ impl StudioController {
         self.install_device_transport();
     }
 
+    /// Install the transport that serves BLUETOOTH devices (M5). Install
+    /// before the actor takes ownership, beside the others.
+    ///
+    /// A Studio build installs it even on a browser without Web Bluetooth:
+    /// the chooser then refuses with the reason, and the Add verb's copy
+    /// explains it (Brave's flag, Safari → Bluefy), instead of the verb
+    /// silently not existing.
+    pub fn set_ble_transport(&mut self, transport: Rc<crate::BleDeviceTransport>) {
+        self.ble_transport = Some(transport);
+        self.install_device_transport();
+    }
+
     /// (Re)install whichever transport this build's halves add up to, and
     /// arm the first sweep: a page that CAN see devices should show what it
     /// already has, without the user asking twice.
@@ -548,6 +583,12 @@ impl StudioController {
                 let composite = match &self.emu_transport {
                     Some(emu) => {
                         composite.with_emu(Rc::clone(emu) as Rc<dyn crate::DeviceTransport>)
+                    }
+                    None => composite,
+                };
+                let composite = match &self.ble_transport {
+                    Some(ble) => {
+                        composite.with_ble(Rc::clone(ble) as Rc<dyn crate::DeviceTransport>)
                     }
                     None => composite,
                 };
@@ -874,7 +915,140 @@ impl StudioController {
     /// Install the platform task spawner for device IO (`spawn_local` on
     /// wasm). Install before the actor takes ownership.
     pub fn set_device_spawner(&mut self, spawner: impl Fn(crate::DeviceTaskFuture) + 'static) {
-        self.devices.effects_mut().set_spawner(spawner);
+        // One spawner, two users: the effects layer and the access
+        // controller's login conversations run on the same device IO seam.
+        let spawner: Rc<dyn Fn(crate::DeviceTaskFuture)> = Rc::new(spawner);
+        let shared = Rc::clone(&spawner);
+        self.devices
+            .effects_mut()
+            .set_spawner(move |future| shared(future));
+        self.access.set_spawner(spawner);
+    }
+
+    /// Install the hook that persists the access documents (the web edge
+    /// writes each to its own `localStorage` key).
+    pub fn set_on_access_persist(
+        &mut self,
+        hook: impl Fn(crate::app::access::AccessPersist) + 'static,
+    ) {
+        self.access.set_on_persist(hook);
+    }
+
+    /// Where access conversations report back (called by `StudioActor::new`).
+    pub(crate) fn set_access_command_sender(
+        &mut self,
+        tx: crate::app::studio::studio_view_channel::CommandSender,
+    ) {
+        self.access.set_command_sender(tx);
+    }
+
+    /// Apply one access command (the password sheet, the access panel, a
+    /// finished conversation), then drive every login again.
+    pub fn apply_access_command(&mut self, command: crate::app::access::AccessCommand) {
+        let now = self.device_now();
+        let now_secs = (self.now_secs)();
+        let random = Rc::clone(&self.random);
+        let follow_up = self.access.apply(
+            command,
+            self.devices.roster(),
+            self.devices.effects(),
+            now,
+            now_secs,
+            &*random,
+        );
+        if let Some(crate::app::access::access_controller::AccessFollowUp::Restart(device)) =
+            follow_up
+        {
+            self.fold_device_input(crate::DeviceInput::Action(
+                lpa_devices::Action::ResetBoard { device },
+            ));
+        }
+        self.drive_device_access();
+        self.mark_dirty();
+    }
+
+    /// An action failed. A tier refusal (`NotPermitted`) opens the unlock
+    /// sheet with "Editing needs an edit password…", never a silent failure.
+    ///
+    /// The sheet rises on the board that refused: an open refused on a
+    /// board names it on its failure page (the lens never landed there, so
+    /// the attached session may be another board or none); anything else
+    /// was refused by the editor's board.
+    pub fn note_action_error(&mut self, error: &UiError) {
+        if !matches!(error, UiError::NotPermitted(_)) {
+            return;
+        }
+        let Some(device) = crate::app::open_progress::refused_open_device().or_else(|| {
+            self.pool
+                .attached_session()
+                .map(|session| session.attachment().device)
+        }) else {
+            return;
+        };
+        self.access.note_needs_edit(device);
+        self.mark_dirty();
+    }
+
+    /// Start whatever access conversation a device needs now: unlocking a
+    /// Bluetooth link, reading its list, adding keys over USB.
+    pub(crate) fn drive_device_access(&mut self) {
+        let now = self.device_now();
+        let now_secs = (self.now_secs)();
+        let random = Rc::clone(&self.random);
+        self.access.drive(
+            self.devices.roster(),
+            self.devices.effects(),
+            now,
+            now_secs,
+            &*random,
+        );
+    }
+
+    /// Run a login step the access controller parked because the editor
+    /// lens holds that board's wire: through the lens's own client, which
+    /// is the only reader of that wire while it is attached.
+    pub async fn run_access_lens_step(&mut self) {
+        let Some((device, step)) = self.access.take_lens_step() else {
+            return;
+        };
+        let keys = self.access.keys();
+        let Some(timer) = self.devices.effects().timer_factory() else {
+            return;
+        };
+        let result = match self.pool.attached_session_mut() {
+            Some(session) => match session.client_mut() {
+                Ok(client) => client.run_access_step(device, step, &keys, timer).await,
+                Err(_) => return,
+            },
+            None => return,
+        };
+        self.apply_access_command(result);
+    }
+
+    /// The settings slice, with the access controller's count joined in.
+    fn settings_view(&self) -> crate::app::settings::UiSettingsView {
+        let mut view = self.settings.ui_view();
+        view.devices.remembered_passwords = self.access.remembered().len();
+        view.devices.browser_name = self.access.browser_key().map(|key| key.name.clone());
+        view
+    }
+
+    /// The lens board's login line, when it is reached over Bluetooth.
+    fn lens_access_line(&self) -> Option<String> {
+        let device = self.pool.attached_session()?.attachment().device;
+        let device = self.devices.roster().device(device)?;
+        self.access.device_view(device)?.line
+    }
+
+    /// The unlock sheet, when a Bluetooth device needs a password.
+    fn login_prompt_view(&self) -> Option<crate::app::access::UiLoginPrompt> {
+        let roster = self.devices.roster();
+        self.access.prompt(|device| {
+            roster
+                .device(device)
+                .map(lpa_devices::Device::title)
+                .unwrap_or_else(|| "This device".to_string())
+        })
     }
 
     /// Install the platform timer factory device waits run on (called by
@@ -912,6 +1086,9 @@ impl StudioController {
         self.drop_device_lens_if_wireless();
         // A forgotten device takes its feed (and last frame) with it.
         self.device_feeds.retain_devices(self.devices.roster());
+        // A Bluetooth link that opened, said hello or dropped may need a
+        // login conversation (BLE M6).
+        self.drive_device_access();
         self.mark_dirty();
     }
 
@@ -1140,6 +1317,21 @@ impl StudioController {
             (self.now_secs)(),
         );
         view.runtime_bands = self.runtime_bands(&view);
+        // Web Serial (or the `?emu=` shim that polyfills it) is what built
+        // a serial transport; without one the add slot keeps its USB verb
+        // out of the primary position (iPhone, Bluefy, Firefox, Safari).
+        view.usb_available = self.serial_transport.is_some();
+        view.access = self
+            .devices
+            .roster()
+            .devices()
+            .iter()
+            .filter_map(|device| {
+                self.access
+                    .device_view(device)
+                    .map(|access| (device.id, access))
+            })
+            .collect();
         view
     }
 
@@ -1474,13 +1666,26 @@ impl StudioController {
     /// The effective minimum gap between passive pulls on the lens session:
     /// the kind cadence, tightened by a post-apply verdict chase, stretched
     /// by that session's failure backoff.
+    ///
+    /// A Bluetooth lens held in Play mode is the one idle-budgeted case
+    /// (M5): see [`BLE_PLAY_IDLE_REFRESH_INTERVAL`](crate::app::studio::BLE_PLAY_IDLE_REFRESH_INTERVAL).
     fn lens_refresh_gap(&self, session: &crate::RuntimeSession) -> Duration {
-        let gap = session.cadence_interval();
-        let gap = match self.project.verdict_chase_interval() {
-            Some(chase) => gap.min(chase),
-            None => gap,
-        };
-        gap.saturating_add(session.backoff_delay())
+        let ble_play = session.transport() == crate::LinkTransport::Ble && self.play_views > 0;
+        crate::app::studio::lens_refresh_gap_policy(
+            session.cadence_interval(),
+            ble_play,
+            self.project.verdict_chase_interval(),
+            session.backoff_delay(),
+        )
+    }
+
+    /// The lens's current passive-pull gap (tests: the Play-over-Bluetooth
+    /// idle budget is a fact about this number).
+    #[cfg(test)]
+    pub(crate) fn lens_refresh_gap_for_test(&self) -> Option<Duration> {
+        self.pool
+            .lens_session()
+            .map(|session| self.lens_refresh_gap(session))
     }
 
     /// Whether the lens session's next passive pull is due. Early ticks (the
@@ -1785,7 +1990,11 @@ impl StudioController {
                 .with_lens(self.lens_runtime())
                 .with_session(self.session_control())
                 .with_open_mismatch(self.open_mismatch.as_deref().cloned())
-                .with_settings(self.settings.ui_view());
+                .with_settings(self.settings_view())
+                .with_access(
+                    self.login_prompt_view(),
+                    self.access.access_added().cloned(),
+                );
         }
         // gallery-always (D24): home covers every no-project state, so the
         // pane layout exists only for an open project
@@ -1834,7 +2043,12 @@ impl StudioController {
             )
             .with_lens_card(self.lens_card())
             .with_session(self.session_control())
-            .with_settings(self.settings.ui_view())
+            .with_settings(self.settings_view())
+            .with_access(
+                self.login_prompt_view(),
+                self.access.access_added().cloned(),
+            )
+            .with_lens_access_line(self.lens_access_line())
             .with_dirty(dirty)
     }
 
@@ -1889,7 +2103,11 @@ impl StudioController {
                 // face ("flash", "erase") mean what they say on it — which
                 // is also what `DeviceFace::from_transport` already answers
                 // for an `emu` registry row.
-                crate::LinkTransport::Emu | crate::LinkTransport::Serial => crate::DeviceFace::Wire,
+                // A Bluetooth link is a wire too; the card says what it
+                // cannot do (`DeviceView::firmware_blocked`).
+                crate::LinkTransport::Emu
+                | crate::LinkTransport::Serial
+                | crate::LinkTransport::Ble => crate::DeviceFace::Wire,
             },
             key: format!("device:{}", attachment.uid),
             device: Some(attachment.device),
@@ -2340,6 +2558,14 @@ impl StudioController {
         if node_id.as_str() == crate::SimCreateOp::NODE_ID {
             let op = action.into_op::<crate::SimCreateOp>()?;
             return self.execute_sim_create_op(op).await;
+        }
+        if node_id.as_str() == crate::PlayViewOp::NODE_ID {
+            let op = action.into_op::<crate::PlayViewOp>()?;
+            self.play_views = match op.shown {
+                true => self.play_views.saturating_add(1),
+                false => self.play_views.saturating_sub(1),
+            };
+            return Ok(UiNotices::new());
         }
         if node_id.as_str() == crate::DeviceFeedOp::NODE_ID {
             let op = action.into_op::<crate::DeviceFeedOp>()?;
@@ -2796,8 +3022,11 @@ impl StudioController {
                 crate::app::open_progress::note_open_settled();
                 Ok(notices)
             }
+            // The actor routes the returned error through
+            // `note_action_error`, which reads the refused board off the
+            // stage set here.
             Err(error) => {
-                crate::app::open_progress::note_open_failed(error.message(), retry);
+                crate::app::open_progress::note_open_failed_with(&error, retry);
                 Err(error)
             }
         }
@@ -3122,9 +3351,45 @@ impl StudioController {
         if let Some(uid) = self.lens_associated_project()
             && self.library_project_named(&uid).is_some()
         {
+            // ...unless the board's manifest carries no uid at all: a
+            // project re-pushed from `catalog/` is not a VERSION of the
+            // associated one (identity is the uid, D17). Adoption recognises
+            // a library copy that differs from it only by its uid and gives
+            // that identity back.
+            if self.lens_runs_identity_free_project().await {
+                return BindOutcome::NoCandidate { running };
+            }
             return self.bind_candidate(&uid, &running).await;
         }
         BindOutcome::NoCandidate { running }
+    }
+
+    /// Whether the lens runtime's `project.json` parses and carries no uid.
+    ///
+    /// One file read, asked only when the association would otherwise be
+    /// read as a version of a library project. Any failure answers `false`:
+    /// the association arm then behaves exactly as it always has.
+    async fn lens_runs_identity_free_project(&mut self) -> bool {
+        let read = {
+            let Ok(server) = self
+                .pool
+                .lens_session_mut()
+                .and_then(crate::RuntimeSession::client_mut)
+            else {
+                return false;
+            };
+            self.project.read_running_manifest(server).await
+        };
+        match read {
+            Ok((bytes, logs)) => {
+                self.record_logs(logs);
+                crate::app::project::device_bind::is_identity_free_manifest(&bytes)
+            }
+            Err(error) => {
+                log::debug!("could not read the board's project.json: {error}");
+                false
+            }
+        }
     }
 
     /// Bind one candidate and say what happened in the console.
@@ -3192,19 +3457,25 @@ impl StudioController {
     /// board flashed from the CLI, a board somebody else pushed to, this
     /// library on a fresh browser. The project exists; it is just not
     /// HERE. Pulling it is the only way the editor can say what it is
-    /// working on, and it is safe to do without asking (D3) because it
-    /// writes only this browser's library: nothing is sent to the board,
-    /// nothing on the board is unloaded, and the running project keeps
-    /// running throughout.
+    /// working on, and it is safe to do without asking (D3): nothing on
+    /// the board is unloaded, and the running project keeps running
+    /// throughout.
+    ///
+    /// **A manifest with no uid** — every `catalog/` project and bundled
+    /// example, pushed straight from the repo — is given one ON THE BOARD
+    /// first ([`Self::stamp_board_identity`]): the stamped `project.json`
+    /// is the ONE thing adoption ever writes to a board, and it lands as
+    /// an incremental refresh, not a reload. Minting only in the library
+    /// would give the copy a different `project.json` from the board's —
+    /// and the manifest is inside the canonical hash, so the two would
+    /// never match. A library copy that differs from the board only by its
+    /// uid gives that uid back instead, so re-pushing from `catalog/` never
+    /// mints a duplicate.
     ///
     /// Two boards are NOT adopted, each with one line and no writes:
     ///
-    /// - **A manifest with no uid.** Minting one would give the library
-    ///   copy a different `project.json` from the board's — and
-    ///   `project.json` is inside the canonical hash, so the copy would
-    ///   hash differently from the thing it is a copy of, and the very
-    ///   next save would trip the save-as-pull tripwire. Identity is
-    ///   preserved or the project is not adopted (D17).
+    /// - **No `project.json`, or one that does not parse.** There is no
+    ///   manifest to carry an identity at all.
     /// - **A uid this library already holds.** The bind already scanned
     ///   every library head for the board's content and found nothing, so
     ///   a library copy under this uid is a DIFFERENT version of the same
@@ -3251,34 +3522,58 @@ impl StudioController {
         };
         self.record_logs(logs);
 
-        let Some(uid) = pulled.uid else {
-            self.push_log(UiLogDraft::new(
-                UiLogLevel::Warn,
-                UiLogOrigin::Studio,
-                format!(
-                    "{device_name} is running a project with no identity of its own, so it was not added to your library — the editor is working on the board's copy"
-                ),
-            ));
-            return BindOutcome::NoCandidate { running: *running };
-        };
-        let uid_text = uid.to_string();
-        if self.library_holds_uid(&uid_text).await {
-            let name = self
-                .library_project_named(&uid_text)
-                .map(|project| project.name)
-                .unwrap_or_else(|| uid_text.clone());
-            self.push_log(UiLogDraft::new(
-                UiLogLevel::Warn,
-                UiLogOrigin::Studio,
-                format!(
-                    "this board is running a different version of {name} ({}) than your library has — nothing was changed on either side",
-                    running.hash.short()
-                ),
-            ));
-            return BindOutcome::NoCandidate { running: *running };
-        }
-
         let name = pulled.name.clone().unwrap_or_else(|| device_name.clone());
+        // Which identity the library copy is installed under, the files it
+        // holds, what the board runs now, and whether the identity was
+        // stamped onto the board by this open.
+        let (uid, files, running, stamped) = match pulled.uid {
+            Some(uid) => {
+                let uid_text = uid.to_string();
+                if self.library_holds_uid(&uid_text).await {
+                    let name = self
+                        .library_project_named(&uid_text)
+                        .map(|project| project.name)
+                        .unwrap_or_else(|| uid_text.clone());
+                    self.push_log(UiLogDraft::new(
+                        UiLogLevel::Warn,
+                        UiLogOrigin::Studio,
+                        format!(
+                            "this board is running a different version of {name} ({}) than your library has — nothing was changed on either side",
+                            running.hash.short()
+                        ),
+                    ));
+                    return BindOutcome::NoCandidate { running: *running };
+                }
+                (uid, pulled.files, *running, false)
+            }
+            None => {
+                let Some(manifest) = pulled.manifest.as_ref() else {
+                    self.push_log(UiLogDraft::new(
+                        UiLogLevel::Warn,
+                        UiLogOrigin::Studio,
+                        format!(
+                            "{device_name} is running a project whose project.json could not be read, so it was not added to your library — the editor is working on the board's copy"
+                        ),
+                    ));
+                    return BindOutcome::NoCandidate { running: *running };
+                };
+                let Some((stamp, fresh)) = self
+                    .stamp_board_identity(&pulled.files, manifest, &name, &device_name)
+                    .await
+                else {
+                    return BindOutcome::NoCandidate { running: *running };
+                };
+                match stamp {
+                    BoardStamp::Restored(stamped) => {
+                        return self
+                            .bind_restored_identity(&stamped, &fresh, &name, &device_name)
+                            .await;
+                    }
+                    BoardStamp::Minted(stamped) => (stamped.uid, stamped.files, fresh, true),
+                }
+            }
+        };
+        let running = &running;
         let provenance = crate::app::library::PackageProvenance::PulledFromDevice {
             // The registry key, which is the board's `dev…` uid whenever
             // it has one (`registry_key` prefers it). A board still keyed
@@ -3292,7 +3587,7 @@ impl StudioController {
         let built = crate::app::project::device_bind::adopt_board_package(
             &name,
             uid,
-            &pulled.files,
+            &files,
             provenance.clone(),
             now,
         );
@@ -3349,11 +3644,14 @@ impl StudioController {
             .await
         {
             Ok(BindOutcome::Bound { uid }) => {
-                self.push_log(UiLogDraft::new(
-                    UiLogLevel::Info,
-                    UiLogOrigin::Studio,
-                    format!("adopted {name} from {device_name} into your library"),
-                ));
+                let said = if stamped {
+                    format!(
+                        "gave {name} on {device_name} its library identity and adopted it into your library"
+                    )
+                } else {
+                    format!("adopted {name} from {device_name} into your library")
+                };
+                self.push_log(UiLogDraft::new(UiLogLevel::Info, UiLogOrigin::Studio, said));
                 BindOutcome::Bound { uid }
             }
             Ok(other) => {
@@ -3375,6 +3673,200 @@ impl StudioController {
                     UiLogLevel::Warn,
                     UiLogOrigin::Studio,
                     format!("{name} was added to your library but would not open: {error}"),
+                ));
+                BindOutcome::NoCandidate { running: *running }
+            }
+        }
+    }
+
+    /// Give an identity-free board its library identity, ON THE BOARD, and
+    /// hand back what it runs now.
+    ///
+    /// The identity is the library's own when a copy there differs from
+    /// the board only by its uid ([`Self::library_identity_for`] — the
+    /// board was re-pushed from `catalog/`, losing its uid but not its
+    /// content), and freshly minted from the injected entropy otherwise.
+    /// Either way the stamped `project.json` is written over the wire —
+    /// the one board write adoption makes, applied as an incremental
+    /// refresh — and the board is asked again what it runs: the answer must
+    /// be exactly the stamped set's hash, or nothing is installed.
+    ///
+    /// Best-effort: every failure is one warn line and `None`, and the open
+    /// carries on unnamed. A failure AFTER the write leaves the board
+    /// carrying a uid, which the next open binds or adopts the ordinary way.
+    async fn stamp_board_identity(
+        &mut self,
+        files: &[(String, Vec<u8>)],
+        manifest: &lpc_model::ProjectManifest,
+        name: &str,
+        device_name: &str,
+    ) -> Option<(BoardStamp, crate::app::project::device_bind::RunningPackage)> {
+        let stamp = match self.library_identity_for(files, manifest).await {
+            Some(stamped) => BoardStamp::Restored(stamped),
+            None => {
+                let uid = lpc_history::PrefixedUid::mint(
+                    lpc_history::UidPrefix::Project,
+                    &(self.random)(),
+                );
+                match crate::app::project::device_bind::mint_identity(files, manifest, uid) {
+                    Ok(stamped) => BoardStamp::Minted(stamped),
+                    Err(error) => {
+                        self.push_log(UiLogDraft::new(
+                            UiLogLevel::Warn,
+                            UiLogOrigin::Studio,
+                            format!(
+                                "could not give {name} on {device_name} a library identity: {error}"
+                            ),
+                        ));
+                        return None;
+                    }
+                }
+            }
+        };
+        let stamped = match &stamp {
+            BoardStamp::Restored(stamped) | BoardStamp::Minted(stamped) => stamped,
+        };
+        let written = {
+            let server = match self
+                .pool
+                .lens_session_mut()
+                .and_then(crate::RuntimeSession::client_mut)
+            {
+                Ok(server) => server,
+                Err(error) => {
+                    log::debug!("no wire to stamp the board's identity over: {error}");
+                    return None;
+                }
+            };
+            match self
+                .project
+                .write_running_manifest(server, &stamped.manifest)
+                .await
+            {
+                Ok(mut logs) => {
+                    self.project
+                        .read_running_package(server)
+                        .await
+                        .map(|(fresh, read_logs)| {
+                            logs.extend(read_logs);
+                            (fresh, logs)
+                        })
+                }
+                Err(error) => Err(error),
+            }
+        };
+        let fresh = match written {
+            Ok((fresh, logs)) => {
+                self.record_logs(logs);
+                fresh
+            }
+            Err(error) => {
+                self.push_log(UiLogDraft::new(
+                    UiLogLevel::Warn,
+                    UiLogOrigin::Studio,
+                    format!(
+                        "could not give {name} on {device_name} its library identity, so it was not added to your library: {error}"
+                    ),
+                ));
+                return None;
+            }
+        };
+        if fresh.hash != stamped.hash {
+            self.push_log(UiLogDraft::new(
+                UiLogLevel::Warn,
+                UiLogOrigin::Studio,
+                format!(
+                    "after its identity was written, {device_name} reports {} rather than the expected {} — {name} was not added to your library",
+                    fresh.hash.short(),
+                    stamped.hash.short()
+                ),
+            ));
+            return None;
+        }
+        Some((stamp, fresh))
+    }
+
+    /// The library identity an identity-free board already has here: a
+    /// package whose manifest is the board's plus a uid, and whose head is
+    /// exactly the board's files with that manifest in place.
+    ///
+    /// One catalog snapshot, like [`Self::library_package_at_hash`]; a
+    /// package that will not open or read is skipped rather than failing
+    /// the sweep.
+    async fn library_identity_for(
+        &mut self,
+        files: &[(String, Vec<u8>)],
+        manifest: &lpc_model::ProjectManifest,
+    ) -> Option<crate::app::project::device_bind::StampedPackage> {
+        use lpc_model::AsLpPath;
+        let host = self.library_host().ok()?;
+        let fs = host.catalog_snapshot().await.ok()?;
+        let store = crate::app::library::LibraryStore::read_only(fs);
+        store.list().ok()?.into_iter().find_map(|summary| {
+            let handle = store.open(summary.uid).ok()?;
+            let library_manifest = handle
+                .package_fs
+                .borrow()
+                .read_file(crate::app::library::package_manifest::MANIFEST_PATH.as_path())
+                .ok()?;
+            let stamped = crate::app::project::device_bind::restamp_identity(
+                files,
+                manifest,
+                &library_manifest,
+            )?;
+            let head = handle.content_hash().ok()?;
+            (stamped.uid == summary.uid && stamped.hash == head).then_some(stamped)
+        })
+    }
+
+    /// Bind a board whose library identity was just stamped back onto it:
+    /// the library already holds this project at this content, so there is
+    /// nothing to install — record the association (D5) and bind.
+    async fn bind_restored_identity(
+        &mut self,
+        stamped: &crate::app::project::device_bind::StampedPackage,
+        running: &crate::app::project::device_bind::RunningPackage,
+        name: &str,
+        device_name: &str,
+    ) -> BindOutcome {
+        let uid_text = stamped.uid.to_string();
+        let name = self
+            .library_project_named(&uid_text)
+            .map(|project| project.name)
+            .unwrap_or_else(|| name.to_string());
+        self.bank_adopted_association(&uid_text, running.hash).await;
+        match self
+            .project
+            .bind_running_to_library(&uid_text, running)
+            .await
+        {
+            Ok(BindOutcome::Bound { uid }) => {
+                self.push_log(UiLogDraft::new(
+                    UiLogLevel::Info,
+                    UiLogOrigin::Studio,
+                    format!(
+                        "recognised {name} on {device_name} as your library's copy and restored its identity"
+                    ),
+                ));
+                BindOutcome::Bound { uid }
+            }
+            Ok(other) => {
+                self.push_log(UiLogDraft::new(
+                    UiLogLevel::Warn,
+                    UiLogOrigin::Studio,
+                    format!(
+                        "{name}'s identity was restored on {device_name} but the editor could not be pointed at it: {other:?}"
+                    ),
+                ));
+                BindOutcome::NoCandidate { running: *running }
+            }
+            Err(error) => {
+                self.push_log(UiLogDraft::new(
+                    UiLogLevel::Warn,
+                    UiLogOrigin::Studio,
+                    format!(
+                        "{name}'s identity was restored on {device_name} but its library copy would not open: {error}"
+                    ),
                 ));
                 BindOutcome::NoCandidate { running: *running }
             }
@@ -3565,7 +4057,7 @@ impl StudioController {
         let held = match attachment.transport {
             crate::LinkTransport::Sim => crate::RuntimeKind::Sim,
             crate::LinkTransport::Emu => crate::RuntimeKind::Emu,
-            crate::LinkTransport::Serial => return None,
+            crate::LinkTransport::Serial | crate::LinkTransport::Ble => return None,
         };
         (attachment.board_id.as_deref() == Some(target.board_id())
             && prefer.is_none_or(|wanted| wanted == held))
@@ -3630,7 +4122,7 @@ impl StudioController {
             && let Some(held) = match session.transport() {
                 crate::LinkTransport::Sim => Some(crate::RuntimeKind::Sim),
                 crate::LinkTransport::Emu => Some(crate::RuntimeKind::Emu),
-                crate::LinkTransport::Serial => None,
+                crate::LinkTransport::Serial | crate::LinkTransport::Ble => None,
             }
             && prefer.is_none_or(|wanted| wanted == held)
             && self
@@ -3798,7 +4290,21 @@ impl StudioController {
             let id = id.clone();
             return self.deploy_docs_example(&id, updates).await;
         }
-        crate::app::open_progress::note_preparing_project();
+        // A board narrates its own steps (upload, load, read back); a sim's
+        // are a blink, and "Preparing the project…" is all there is to say.
+        let on_board = self
+            .pool
+            .lens_session()
+            .map(|session| session.attachment())
+            .filter(|attachment| attachment.transport != crate::LinkTransport::Sim)
+            .map(|attachment| attachment.uid.clone());
+        match on_board {
+            Some(uid) => crate::app::open_progress::note_device_step(
+                &self.open_device_at(&uid),
+                crate::app::open_progress::DeviceOpenStep::Clearing,
+            ),
+            None => crate::app::open_progress::note_preparing_project(),
+        }
         emit_activity(
             &updates,
             UxActivityTarget::pane(ProjectController::NODE_ID),
@@ -4259,6 +4765,10 @@ impl StudioController {
                 self.close_device_lens();
                 Ok(UiNotices::new())
             }
+            crate::RuntimeOp::CancelOpen => {
+                self.cancel_open();
+                Ok(UiNotices::new())
+            }
         }
     }
 
@@ -4306,10 +4816,17 @@ impl StudioController {
                     UiLogOrigin::Studio,
                     format!("waiting for the device before opening it: {error}"),
                 ));
+                self.note_open_waiting_for_device(uid);
                 return Ok(UiNotices::new().with_notice(UiNotice::info("Waiting for the device")));
             }
         };
         self.pending_device_lens = None;
+        if self.pending_open.is_some() && attachment.transport != crate::LinkTransport::Sim {
+            crate::app::open_progress::note_device_step(
+                &self.open_device_at(uid),
+                crate::app::open_progress::DeviceOpenStep::Connecting,
+            );
+        }
         emit_activity(
             &updates,
             UxActivityTarget::pane(ProjectController::NODE_ID),
@@ -4329,6 +4846,8 @@ impl StudioController {
             // The same `M!` line framing over the same serial-shaped wire;
             // the only difference is which side of the USB the chip is on.
             crate::LinkTransport::Emu | crate::LinkTransport::Serial => "usb-serial",
+            // The same `M!` line framing, over a NUS GATT service.
+            crate::LinkTransport::Ble => "ble-nus",
         };
         let client = crate::StudioServerClient::from_lens_io(io, deadline, protocol);
         let id = self.pool.install(crate::RuntimePayload::Device(attachment));
@@ -4360,11 +4879,14 @@ impl StudioController {
                 // The board answered the fold's hello but not the lens's
                 // conversation (its own hello, or the attach): no lens, no
                 // session, the wire goes back — the card says the rest.
-                self.push_log(UiLogDraft::new(
-                    UiLogLevel::Warn,
-                    UiLogOrigin::Studio,
-                    format!("could not open the board in the editor: {error}"),
-                ));
+                // (A cancelled open unwinds through here too, quietly.)
+                if !crate::app::open_progress::open_superseded() {
+                    self.push_log(UiLogDraft::new(
+                        UiLogLevel::Warn,
+                        UiLogOrigin::Studio,
+                        format!("could not open the board in the editor: {error}"),
+                    ));
+                }
                 self.close_device_lens();
                 Err(error)
             }
@@ -4399,6 +4921,17 @@ impl StudioController {
         if facts.busy {
             return Err(UiError::MissingSession(
                 "this board is busy with an activity; wait for it to finish".to_string(),
+            ));
+        }
+        // A Bluetooth link holds nothing until it unlocks (BLE M6): the
+        // board answers only hello and login on it, so a lens attached
+        // before the login lands would read nothing and starve the login
+        // of its wire. Held until the link holds a tier.
+        if let Some(device) = self.devices.roster().device(facts.device)
+            && !self.access.link_is_granted(device)
+        {
+            return Err(UiError::MissingSession(
+                "this device is still unlocking over Bluetooth".to_string(),
             ));
         }
         Ok(crate::DeviceLensAttachment {
@@ -4503,8 +5036,81 @@ impl StudioController {
         })?;
         Ok(lpa_client::RequestDeadline::new(
             lpa_link::device_session::DEFAULT_REQUEST_TOTAL_DEADLINE,
-            move |duration| (timer.borrow_mut())(duration),
+            move |duration| {
+                // The opening frame's Cancel ends the wait NOW: a board that
+                // is not answering would otherwise hold the actor — and the
+                // Reset queued behind the Cancel — for the whole budget.
+                let epoch = crate::app::open_progress::cancel_epoch();
+                let timer = (timer.borrow_mut())(duration);
+                let cancelled = crate::app::open_progress::cancelled_since(epoch);
+                Box::pin(async move {
+                    let mut timer = timer;
+                    let mut cancelled = core::pin::pin!(cancelled);
+                    core::future::poll_fn(|cx| {
+                        if timer.as_mut().poll(cx).is_ready()
+                            || cancelled.as_mut().poll(cx).is_ready()
+                        {
+                            return core::task::Poll::Ready(());
+                        }
+                        core::task::Poll::Pending
+                    })
+                    .await;
+                }) as lpa_client::ClientTimerFuture
+            },
         ))
+    }
+
+    /// The board at `uid` as the opening frame names it.
+    fn open_device_at(&self, uid: &str) -> crate::app::open_progress::OpenDevice {
+        let facts = self.lens_facts_at_address(uid);
+        crate::app::open_progress::OpenDevice {
+            id: facts.as_ref().map(|facts| facts.device),
+            uid: uid.to_string(),
+            name: facts
+                .map(|facts| facts.name)
+                .unwrap_or_else(|| "The board".to_string()),
+        }
+    }
+
+    /// Tell the opening frame why an open is held — only for an open that
+    /// is actually waiting (a `/device/` address holds a lens with no open
+    /// behind it, and has the gallery card to say so), and only for a
+    /// board: a sim is started by this tab, and the tick wakes it.
+    fn note_open_waiting_for_device(&self, uid: &str) {
+        use crate::app::open_progress::{DeviceWait, DeviceWaitReason};
+        if self.pending_open.is_none() || self.is_runtime_device(uid) {
+            return;
+        }
+        let reason = match self.lens_facts_at_address(uid) {
+            None => DeviceWaitReason::Unknown,
+            Some(facts) if facts.link.is_none() => DeviceWaitReason::NotConnected,
+            Some(facts) if !facts.open => DeviceWaitReason::PortClosed,
+            Some(facts) if facts.hello.is_none() => DeviceWaitReason::Identifying,
+            Some(_) => DeviceWaitReason::Busy,
+        };
+        crate::app::open_progress::note_waiting_for_device(DeviceWait {
+            device: self.open_device_at(uid),
+            reason,
+        });
+    }
+
+    /// The opening frame's Cancel, actor-side. By the time this runs the
+    /// open it cancels has already unwound (its parked request was woken by
+    /// [`crate::cancel_open`], and a superseded open returns quietly), or it
+    /// was never running at all — a HELD open is only these two fields.
+    fn cancel_open(&mut self) {
+        let lens_was_the_open = self.pending_open.take().is_some();
+        self.open_mismatch = None;
+        if lens_was_the_open || self.pending_device_lens.is_some() {
+            self.close_device_lens();
+        }
+        crate::app::open_progress::note_open_settled();
+        self.push_log(UiLogDraft::new(
+            UiLogLevel::Info,
+            UiLogOrigin::Studio,
+            "the open was cancelled".to_string(),
+        ));
+        self.mark_dirty();
     }
 
     /// Close the device lens, if one is open: quiesce the mirror, drop the
@@ -4614,7 +5220,10 @@ impl StudioController {
             return;
         }
         if self.device_lens_attachment(&uid).is_err() {
-            // Still loading, identifying, or booting: keep holding.
+            // Still loading, identifying, or booting: keep holding — and
+            // keep the frame's reason current (not connected → identifying
+            // is the whole of a "Connect this board" click).
+            self.note_open_waiting_for_device(&uid);
             return;
         }
         let landed = self.open_device_lens(&uid, UxUpdateSink::noop()).await;
@@ -4624,6 +5233,9 @@ impl StudioController {
         let held_open = self.pending_open.take();
         match landed {
             Ok(_) => crate::app::open_progress::note_open_settled(),
+            // Cancelled from the opening frame: the error is the woken
+            // request, not the board, and the person already left.
+            Err(_) if crate::app::open_progress::open_superseded() => {}
             Err(error) => {
                 self.push_log(UiLogDraft::new(
                     UiLogLevel::Warn,
@@ -4631,11 +5243,15 @@ impl StudioController {
                     format!("could not open the device in the editor: {error}"),
                 ));
                 if let Some(pending) = held_open {
-                    crate::app::open_progress::note_open_failed(
-                        error.message(),
+                    crate::app::open_progress::note_open_failed_with(
+                        &error,
                         pending.retry_action(),
                     );
                 }
+                // A held open lands from the tick, not from an action, so
+                // no dispatch reports its error: a tier refusal raises the
+                // unlock sheet here.
+                self.note_action_error(&error);
             }
         }
     }
@@ -5903,6 +6519,15 @@ impl StudioController {
         &self.pool
     }
 
+    /// The lens session's wire client, for e2e reads and writes of the
+    /// board's own files (what a CLI or a `catalog/` push would do to it).
+    pub(crate) fn lens_client_mut_for_test(&mut self) -> &mut crate::StudioServerClient {
+        self.pool
+            .lens_session_mut()
+            .and_then(crate::RuntimeSession::client_mut)
+            .expect("a lens session with a connected client")
+    }
+
     /// Set the lens session's server protocol state directly (the retired
     /// `ServerController::set_state` seam). Requires a stub session.
     pub(crate) fn set_server_state_for_test(&mut self, state: crate::ServerState) {
@@ -6313,6 +6938,73 @@ mod tests {
             upgraded_from: None,
         };
         assert_eq!(import_message("Pasted", &plain), "Pasted Plasma");
+    }
+
+    /// A project open refused over a play-tier link raises the unlock sheet
+    /// on the board that refused it — the lens never landed there, so the
+    /// attached session cannot name it — and says it needs an edit password.
+    #[test]
+    fn a_refused_open_raises_the_unlock_sheet_on_the_board_that_refused() {
+        use crate::app::access::PromptReason;
+        use crate::app::open_progress::{
+            DeviceOpenStep, OpenDevice, note_device_step, note_open_failed_with,
+            note_open_requested, note_open_started, reset_for_test,
+        };
+
+        reset_for_test();
+        let mut studio = StudioController::new(|| 0.0);
+        // A board reached over Bluetooth: the access controller keeps a
+        // session for it from the moment it is on the roster.
+        studio.fold_device_input(crate::DeviceInput::Event(
+            lpa_devices::Event::LinkAttached {
+                link: lpa_devices::link::LinkId(1),
+                info: lpa_devices::link::LinkInfo {
+                    label: "LP-Choker".to_string(),
+                    endpoint: lpa_devices::identity::EndpointKey("ble:choker".to_string()),
+                    ..Default::default()
+                },
+            },
+        ));
+        studio.fold_device_input(crate::DeviceInput::Action(lpa_devices::Action::AdoptLink {
+            link: lpa_devices::link::LinkId(1),
+        }));
+        studio.drive_device_access();
+        let board = studio.devices.roster().devices()[0].id;
+        let prompt = |studio: &StudioController| {
+            studio
+                .access
+                .session(board)
+                .and_then(|session| session.prompt.clone())
+        };
+        assert_eq!(prompt(&studio), None, "no sheet before the open");
+
+        note_open_requested();
+        note_open_started();
+        note_device_step(
+            &OpenDevice {
+                id: Some(board),
+                uid: "devchoker".to_string(),
+                name: "Choker".to_string(),
+            },
+            DeviceOpenStep::Clearing,
+        );
+        let refused = UiError::NotPermitted(
+            crate::app::access::not_permitted_sentence(lpc_access::Tier::Edit).to_string(),
+        );
+        note_open_failed_with(
+            &refused,
+            UiAction::from_op(
+                crate::ControllerId::new(crate::HOME_NODE_ID),
+                crate::HomeOp::OpenPackage {
+                    key: "prjx".to_string(),
+                    prefer: None,
+                },
+            ),
+        );
+        studio.note_action_error(&refused);
+
+        assert_eq!(prompt(&studio), Some(PromptReason::NeedsEdit));
+        reset_for_test();
     }
 
     #[test]
@@ -7096,7 +7788,7 @@ mod tests {
         assert_eq!(sent[0].id, 1);
         assert_eq!(handle.id(), 7);
         assert_eq!(request.since, None);
-        assert_eq!(request.queries.len(), 4);
+        assert_eq!(request.queries.len(), 3);
 
         let sync = studio
             .project

@@ -21,7 +21,7 @@
 //! 3fcdb700 A _stack_start      ← top, == ORIGIN(dram2_seg)
 //! ```
 //!
-//! — a ~37 KB main stack (37,280 B when this was written), and every byte of it that goes unused is a byte
+//! — a 37,280 B main stack, and every byte of it that goes unused is a byte
 //! `HEAP_SIZE` could have had. Nothing has ever measured how much of it a
 //! workload actually touches; that is what this is for.
 //!

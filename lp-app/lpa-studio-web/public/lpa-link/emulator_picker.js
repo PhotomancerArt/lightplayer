@@ -53,11 +53,14 @@ function describeBacking(backing) {
   return /^wss?:\/\//.test(text) ? `Emulated boards on ${text}` : `Emulated boards ${text}`;
 }
 
-export function createPicker({ backingUrl = "" } = {}) {
-  return (candidates) => choose(candidates, backingUrl);
+/// `kind: "bluetooth"` is `?ble=emu`'s chooser: the same boards, asked for
+/// the way Chrome's Bluetooth chooser asks ("wants to pair"), each named by
+/// the name it advertises.
+export function createPicker({ backingUrl = "", kind = "serial" } = {}) {
+  return (candidates) => choose(candidates, backingUrl, kind);
 }
 
-function choose(candidates, backingUrl) {
+function choose(candidates, backingUrl, kind = "serial") {
   return new Promise((resolve) => {
     const overlay = document.createElement("div");
     overlay.id = "lp-emu-picker";
@@ -88,7 +91,10 @@ function choose(candidates, backingUrl) {
     const header = document.createElement("div");
     style(header, { padding: "14px 16px 10px", borderBottom: `1px solid ${PALETTE.edge}` });
     const title = document.createElement("div");
-    title.textContent = `${location.host} wants to connect to a serial port`;
+    title.textContent =
+      kind === "bluetooth"
+        ? `${location.host} wants to pair with a Bluetooth device`
+        : `${location.host} wants to connect to a serial port`;
     style(title, { fontSize: "13px", fontWeight: "600" });
     const subtitle = document.createElement("div");
     // The picker says what it is. The card it leads to will not, by design.
@@ -112,7 +118,7 @@ function choose(candidates, backingUrl) {
     };
 
     for (const board of candidates) {
-      list.append(row(board, () => finish(board.boardId)));
+      list.append(row(board, () => finish(board.boardId), kind));
     }
 
     const footer = document.createElement("div");
@@ -151,7 +157,7 @@ function choose(candidates, backingUrl) {
   });
 }
 
-function row(board, onPick) {
+function row(board, onPick, kind = "serial") {
   const button = document.createElement("button");
   button.type = "button";
   button.className = "lp-emu-picker-board";
@@ -183,7 +189,10 @@ function row(board, onPick) {
   // The same label Studio's own `labelForPort` builds for a native-USB ESP32,
   // with the board id after it — the emulator's ids are the thing a person
   // picking between two boards actually reads.
-  name.textContent = `ESP32 Serial (303a:1001) — ${board.boardId}`;
+  name.textContent =
+    kind === "bluetooth"
+      ? `${board.name ?? "LightPlayer"} — ${board.boardId}`
+      : `ESP32 Serial (303a:1001) — ${board.boardId}`;
   style(name, { fontWeight: "600" });
 
   const detail = document.createElement("div");
@@ -286,6 +295,100 @@ export function installDevBanner({ bus, backingUrl, facade = null }) {
   banner.append(head, body);
   document.body.append(banner);
   return { element: banner, refresh: render };
+}
+
+/// The banner for a shim that did NOT install. Without it the page boots on
+/// the browser's own `navigator.serial` façade with no emulated boards and
+/// nothing on screen says why — which reads as a Studio bug (2026-09-24: a
+/// reload met the previous page's still-held control channel, 409).
+export function installFailureBanner({ backingUrl, error }) {
+  const banner = document.createElement("div");
+  banner.id = "lp-emu-banner";
+  banner.dataset.state = "failed";
+  style(banner, {
+    position: "fixed",
+    left: "12px",
+    bottom: "12px",
+    zIndex: "10000",
+    maxWidth: "min(520px, calc(100vw - 24px))",
+    padding: "8px 10px",
+    background: PALETTE.panel,
+    border: `1px solid ${PALETTE.edge}`,
+    borderLeft: `3px solid ${PALETTE.warn}`,
+    borderRadius: "8px",
+    boxShadow: "0 10px 30px rgba(0, 0, 0, 0.45)",
+    font: FONT,
+    color: PALETTE.ink,
+  });
+
+  const head = document.createElement("div");
+  const label = document.createElement("span");
+  label.textContent = "EMULATOR NOT CONNECTED";
+  style(label, { color: PALETTE.warn, fontWeight: "700", letterSpacing: "0.06em" });
+  head.append(label);
+
+  const said = document.createElement("div");
+  said.id = "lp-emu-banner-text";
+  // `NetworkError` is the door's 409 (see `portBusy` in emulator_port.js):
+  // something else holds a board. Anything else is the door not answering.
+  const held = error?.name === "NetworkError";
+  said.textContent =
+    "The ?emu= shim did not install, so this page has no emulated boards. " +
+    (held
+      ? "Another tab holds a board (the door admits one client per board): close it and reload."
+      : "Is `just studio-dev-emu` still running on this address?");
+  style(said, { marginTop: "4px", color: PALETTE.dim });
+
+  const url = document.createElement("div");
+  url.id = "lp-emu-banner-url";
+  url.textContent = backingUrl;
+  style(url, { marginTop: "4px", color: PALETTE.accent, wordBreak: "break-all" });
+
+  // Selectable, never clipped: this is the text someone pastes into a bug.
+  const reason = document.createElement("div");
+  reason.id = "lp-emu-banner-error";
+  reason.textContent = String(error?.message ?? error);
+  style(reason, { marginTop: "4px", color: PALETTE.ink, userSelect: "text" });
+
+  const retry = document.createElement("button");
+  retry.type = "button";
+  retry.textContent = "reload";
+  style(retry, { ...buttonStyle(), marginTop: "6px" });
+  retry.addEventListener("click", () => window.location.reload());
+
+  banner.append(head, said, url, reason, retry);
+  document.body.append(banner);
+  return { element: banner };
+}
+
+/// One more line on the dev banner, for `?ble=emu`: the honesty about what
+/// the Bluetooth polyfill proves belongs at page level, like the banner's
+/// own. A page with no banner (yet) gets it the moment the banner exists.
+export function noteBluetooth(text) {
+  const place = () => {
+    const banner = document.getElementById("lp-emu-banner");
+    if (!banner) {
+      return false;
+    }
+    if (document.getElementById("lp-emu-banner-ble")) {
+      return true;
+    }
+    const line = document.createElement("div");
+    line.id = "lp-emu-banner-ble";
+    line.textContent = text;
+    style(line, { marginTop: "6px", color: PALETTE.warn });
+    banner.append(line);
+    return true;
+  };
+  if (place()) {
+    return;
+  }
+  const watch = new MutationObserver(() => {
+    if (place()) {
+      watch.disconnect();
+    }
+  });
+  watch.observe(document.body, { childList: true });
 }
 
 function boardRow(bus, board, refresh) {

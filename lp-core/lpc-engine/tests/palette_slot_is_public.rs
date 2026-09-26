@@ -52,7 +52,7 @@ const PALETTE_GLSL: &str = "layout(binding = 0) uniform vec2 outputSize;\n\
 fn palette_fs(panel: bool) -> LpFsMemory {
     let hint = if panel { r#", "panel": "show""# } else { "" };
     let fs = LpFsMemory::new();
-    write(&fs, "/project.json", "{ \"format\": 10 }\n");
+    write(&fs, "/project.json", "{ \"format\": 11 }\n");
     write(&fs, "/palette.glsl", PALETTE_GLSL);
     write(
         &fs,
@@ -95,10 +95,15 @@ fn probe_graph(panel: bool) -> lpc_wire::WireBindingGraph {
     let probe = engine.read_project_binding_graph_probe(
         registry,
         lpc_wire::BindingGraphProbeRequest {
+            structure: lpc_wire::RevisionGateRead::Always,
             include_values: false,
         },
     );
-    let lpc_wire::BindingGraphProbeResult::Graph(graph) = probe else {
+    let lpc_wire::BindingGraphProbeResult::Graph(lpc_wire::WireBindingGraphRead {
+        structure: lpc_wire::RevisionGateResult::Changed(graph),
+        ..
+    }) = probe
+    else {
         panic!("binding graph probe failed");
     };
     graph

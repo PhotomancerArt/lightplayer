@@ -20,9 +20,12 @@
 //! |---|---|
 //! | [`wire`] | `lpc_wire` frames ⇄ the model's minimal mirror (the ONE meeting point) |
 //! | [`demux`] | whole serial lines → `LinkEvent`s (the `M!` demux) |
+//! | [`wire_reader`] | one port's bytes → lines and messages, and the packed-reply opt-in |
+//! | [`wire_capture`] | dev-only: a capped tee of every raw byte the browser port reads |
 //! | `byte_stream` | the sync `DeviceByteStream` seam → `Link` (host) |
 //! | `fake` | the scripted `FakeEsp32Device` → `Link` (host tests) |
 //! | `browser_serial` | the Web Serial provider → `Link` (wasm) |
+//! | `browser_ble` | a Web Bluetooth (NUS) session → `Link` (wasm) |
 //! | `browser_worker` | a `fw-browser` worker → `Link`, i.e. the sim as a device (wasm) |
 //! | `browser_worker_io` | that worker's protocol channel → `lpa_client::ClientIo` (wasm) |
 //!
@@ -33,6 +36,8 @@
 
 pub mod demux;
 pub mod wire;
+pub mod wire_capture;
+pub mod wire_reader;
 
 #[cfg(any(
     feature = "host-process",
@@ -50,6 +55,9 @@ pub mod fake;
 
 #[cfg(all(feature = "browser-serial-esp32", target_arch = "wasm32"))]
 pub mod browser_serial;
+
+#[cfg(all(feature = "browser-ble", target_arch = "wasm32"))]
+pub mod browser_ble;
 
 /// The sim as a `Link`. wasm-only like the provider it wraps
 /// (`providers/mod.rs`), and it needs the model's contract to implement.

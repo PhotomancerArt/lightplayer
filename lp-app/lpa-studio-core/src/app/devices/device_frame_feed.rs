@@ -99,6 +99,17 @@ pub(crate) struct FeedTarget {
 /// `None` is the common case (no board, nothing running, an activity, a
 /// borrowed wire); the caller stamps the attempt and moves on.
 pub(crate) fn feed_target(device: &Device, effects: &DeviceEffects) -> Option<FeedTarget> {
+    // No live card picture over Bluetooth (M5): a picture every 150 ms is a
+    // stream on a link whose air time the board shares with ESP-NOW, and a
+    // card is not what anyone is controlling. The card keeps its last frame.
+    if device
+        .identity
+        .endpoint
+        .as_ref()
+        .is_some_and(|endpoint| endpoint.is_bluetooth())
+    {
+        return None;
+    }
     let evidence = &device.evidence;
     if !evidence.presence.is_open()
         || !evidence.classification.is_light_player()
@@ -118,6 +129,28 @@ pub(crate) fn feed_target(device: &Device, effects: &DeviceEffects) -> Option<Fe
         loaded_path,
         hello_at: evidence.hello_heard_at(),
     })
+}
+
+/// The card's pull: one output-frame probe, no mirror queries — a picture,
+/// not a `ProjectSync`.
+///
+/// The card draws these pixels, so they ride at the preview precision like
+/// every live preview's. It is never a second copy of the lens's: a card
+/// pulls only while nobody holds the wire ([`feed_target`]), and the lens
+/// holds it for as long as it is open.
+pub(crate) fn card_frame_request(
+    geometry: lpc_wire::RevisionGateRead,
+) -> lpc_wire::ProjectReadRequest {
+    lpc_wire::ProjectReadRequest {
+        since: None,
+        queries: Vec::new(),
+        probes: vec![lpc_wire::ProjectProbeRequest::OutputFrame(
+            lpc_wire::OutputFrameProbeRequest {
+                geometry,
+                samples: Some(crate::app::frame_feed::PREVIEW_SAMPLE_FORMAT),
+            },
+        )],
+    }
 }
 
 /// One open conversation: the client on a link, minting in the app range.
@@ -485,16 +518,7 @@ impl DeviceFrameFeed {
                 return false;
             }
         };
-        let request = lpc_wire::ProjectReadRequest {
-            since: None,
-            queries: Vec::new(),
-            // One probe, no mirror queries: a picture, not a ProjectSync.
-            probes: vec![lpc_wire::ProjectProbeRequest::OutputFrame(
-                lpc_wire::OutputFrameProbeRequest {
-                    display_layout: self.state.display_layout_read(),
-                },
-            )],
-        };
+        let request = card_frame_request(self.state.geometry_read());
         let deadline = ProgressDeadline::new(deadline_budget, make_timer);
         let Some(conversation) = self.conversation.as_mut() else {
             return false;
@@ -604,6 +628,23 @@ impl DeviceFrameFeed {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Card only (no lens on the board): the card asks for its frame's
+    /// pixels at 8 bits, with its geometry gate.
+    #[test]
+    fn the_card_pulls_its_frame_at_the_preview_precision() {
+        let request = card_frame_request(lpc_wire::RevisionGateRead::Always);
+        assert!(request.queries.is_empty());
+        assert_eq!(
+            request.probes,
+            vec![lpc_wire::ProjectProbeRequest::OutputFrame(
+                lpc_wire::OutputFrameProbeRequest {
+                    geometry: lpc_wire::RevisionGateRead::Always,
+                    samples: Some(lpc_wire::WireChannelSampleFormat::Srgb8),
+                }
+            )]
+        );
+    }
 
     #[test]
     fn a_parked_feed_re_arms_when_its_window_changes() {

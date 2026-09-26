@@ -2,6 +2,13 @@
 //!
 //! Provides utilities for flashing firmware, connecting to serial ports,
 //! and communicating with the ESP32 test firmware.
+//!
+//! These helpers read whole `M!{json}` lines and never send the JSON Pack
+//! opt-in (`ClientRequest::SetEncoding`), so the board keeps answering them
+//! in JSON: they are the JSON-encoding side of the USB tests. The packed side
+//! is covered by the emulated C6 (`lp-cli/tests/emu_usb_json_pack.rs`, and
+//! the `emu serve` door test), where every reader goes through
+//! `lpc_wire::WireStream`.
 
 use crate::test_output::{execute_step, is_debug_mode, print_command, print_response, print_step};
 use serialport::SerialPort;

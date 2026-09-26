@@ -697,6 +697,7 @@ mod tests {
             set: alloc::vec![crate::Gradient::default(), crate::Gradient::default()],
             step_seconds: 8.0,
             fade_seconds: 2.0,
+            pinned: None,
         };
         let slot = ShaderSlotDef::palette("Palette", "Baked strip", config.clone());
 
@@ -717,6 +718,7 @@ mod tests {
             set: alloc::vec![crate::Gradient::default(), crate::Gradient::default()],
             step_seconds: 3.0,
             fade_seconds: 0.5,
+            pinned: None,
         };
         let stored = config.to_lp_value();
 

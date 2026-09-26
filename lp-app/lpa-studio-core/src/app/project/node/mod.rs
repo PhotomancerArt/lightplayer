@@ -19,6 +19,7 @@ pub mod node_revert_op;
 pub mod node_share_op;
 pub(in crate::app::project) mod node_space_section;
 pub mod panel_write_op;
+pub mod pattern_picker_derivation;
 pub mod playlist_activate_op;
 pub mod project_node_address;
 pub mod project_node_target;
@@ -26,8 +27,8 @@ pub mod ui_add_node_menu;
 
 pub use module_export_op::ModuleExportOp;
 pub use node_clear_debug_op::NodeClearDebugOp;
-pub(in crate::app::project) use node_controller::root_slot_key;
 pub use node_controller::{NodeController, NodeControllerState, ProjectProductSubscriptionIntent};
+pub(in crate::app::project) use node_controller::{human_label as human_node_label, root_slot_key};
 pub use node_create_op::{NodeCreateOp, UiAttachTarget};
 pub use node_import_op::{ImportSource, NodeImportOp};
 pub use node_remove_op::NodeRemoveOp;

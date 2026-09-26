@@ -107,7 +107,7 @@ impl Bench {
                     let due = self.now().plus_ms(after_ms);
                     self.timers.push((due, timer));
                 }
-                Command::RequestUsbGrant => {}
+                Command::RequestUsbGrant | Command::RequestBleGrant => {}
                 Command::PersistRecord(record) => self.persisted.push(record),
                 Command::DeleteRecord(device) => self.deleted.push(device),
                 Command::RevokeGrant(info) => self.revoked.push(info),

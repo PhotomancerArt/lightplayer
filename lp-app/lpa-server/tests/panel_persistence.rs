@@ -24,7 +24,8 @@ use lpa_server::{LpGraphics, LpServer, Project};
 use lpc_model::{AsLpPath, LpPath, LpPathBuf, LpValue};
 use lpc_shared::output::MemoryOutputProvider;
 use lpc_wire::{
-    BindingGraphProbeRequest, BindingGraphProbeResult, WireBindingGraph, WirePanelClearRequest,
+    BindingGraphProbeRequest, BindingGraphProbeResult, RevisionGateRead, RevisionGateResult,
+    WireBindingGraph, WireBindingGraphRead, WireBusChannelValue, WirePanelClearRequest,
     WirePanelWriteRequest, WireProjectHandle, WireScopeRef,
 };
 use lpfs::{LpFs, LpFsMemory, LpFsView};
@@ -276,6 +277,60 @@ fn writing_panel_state_does_not_rebuild_the_project() {
     );
 }
 
+/// A playlist's Play-mode controls (multi-pattern plan P5) are records, not
+/// scalars: the cycle is a `PlaylistCycle` struct and the skip list a `u32`
+/// array. Both are ordinary `LpValue`s in panel.json, so they persist and
+/// restore like a fader — and a file written before they existed (every
+/// other test here) restores unchanged.
+#[test]
+fn a_playlist_cycle_and_skip_list_survive_a_reboot() {
+    use lpc_model::{PlaylistCycle, ToLpValue};
+
+    let cycle = PlaylistCycle::Cycle {
+        step_seconds: 20.0,
+        fade_seconds: 1.5,
+    }
+    .to_lp_value();
+    let skip = alloc::vec![3u32, 5].to_lp_value();
+
+    let mut harness = Harness::new("panel-persist-playlist-cycle");
+    harness.load();
+    harness.write_panel_value("playlist.cycle", cycle.clone());
+    harness.write_panel_value("playlist.skip", skip.clone());
+    harness.advance(PANEL_STATE_WRITE_INTERVAL_MS);
+
+    let saved = harness.state_file().expect("panel state written");
+    let saved: Vec<(String, LpValue)> = saved
+        .entries
+        .into_iter()
+        .map(|entry| (entry.channel, entry.value))
+        .collect();
+    assert_eq!(
+        saved,
+        [
+            (String::from("playlist.cycle"), cycle.clone()),
+            (String::from("playlist.skip"), skip.clone()),
+        ]
+    );
+
+    let mut rebooted = harness.reboot();
+    let (engine, _) = rebooted.project().runtime_read_parts();
+    let mut restored: Vec<(String, LpValue)> = engine
+        .panel_writers()
+        .iter()
+        .map(|((_, channel), writer)| (channel.0.clone(), writer.value.clone()))
+        .collect();
+    restored.sort_by(|a, b| a.0.cmp(&b.0));
+    assert_eq!(
+        restored,
+        [
+            (String::from("playlist.cycle"), cycle),
+            (String::from("playlist.skip"), skip),
+        ],
+        "both writers are back before the first frame"
+    );
+}
+
 #[test]
 fn panel_state_inherits_the_framework_tier_exclusions() {
     // `/.lp/` is already outside the canonical package hash and outside
@@ -357,7 +412,7 @@ impl Harness {
     }
 
     fn scope(&mut self) -> WireScopeRef {
-        let graph = self.probe();
+        let (graph, _) = self.probe();
         graph
             .channels
             .iter()
@@ -368,36 +423,43 @@ impl Harness {
     }
 
     fn write_panel(&mut self, channel: &str, value: f32) {
+        self.write_panel_value(channel, LpValue::F32(value));
+    }
+
+    fn write_panel_value(&mut self, channel: &str, value: LpValue) {
         let scope = self.scope();
         self.project().panel_write(&WirePanelWriteRequest {
             scope,
             channel: channel.to_string(),
-            value: LpValue::F32(value),
+            value,
             ttl_ms: None,
         });
     }
 
-    fn probe(&mut self) -> WireBindingGraph {
+    /// The whole binding graph, and each channel's value in channel order.
+    fn probe(&mut self) -> (WireBindingGraph, Vec<WireBusChannelValue>) {
         let (engine, registry) = self.project().runtime_read_parts();
         let result = engine.read_project_binding_graph_probe(
             registry,
             BindingGraphProbeRequest {
+                structure: RevisionGateRead::Always,
                 include_values: true,
             },
         );
-        let BindingGraphProbeResult::Graph(graph) = result else {
-            panic!("expected graph result");
+        let BindingGraphProbeResult::Graph(WireBindingGraphRead {
+            structure: RevisionGateResult::Changed(graph),
+            values: Some(values),
+        }) = result
+        else {
+            panic!("expected the whole graph with values, got {result:?}");
         };
-        graph
+        (graph, values.values)
     }
 
     fn channel_value(&mut self, channel: &str) -> Option<LpValue> {
-        self.probe()
-            .channels
-            .iter()
-            .find(|c| c.name == channel)
-            .and_then(|c| c.value.as_ref())
-            .and_then(|value| value.value.clone())
+        let (graph, values) = self.probe();
+        let index = graph.channels.iter().position(|c| c.name == channel)?;
+        values[index].value().cloned()
     }
 
     fn state_path(&self) -> LpPathBuf {
@@ -443,7 +505,7 @@ impl Harness {
         let fs = self.base_fs.borrow();
         fs.write_file(
             self.project_path.join("project.json").as_path(),
-            b"{\n  \"format\": 10\n}\n",
+            b"{\n  \"format\": 11\n}\n",
         )
         .expect("write container manifest");
         fs.write_file(

@@ -109,16 +109,26 @@ and the desktop-class stress fixture; regenerate with `cargo run -p
 lpt-geodome`), `peach-1d` / `peach-2d` (the mapping-and-patching pair:
 byte-identical patch files, opposite declarations — see
 [the peach](../docs/user-guide/the-peach.md)), `fiber-headband` (a real,
-battery-powered wearable) and `rocaille` (a real 2D piece on a
-hand-authored mapping).
+battery-powered wearable), `rocaille` (a real 2D piece on a
+hand-authored mapping), `playful-choker` (a real PCB wearable) and
+`playful-choker-tryout` (the choker's rig with the first pattern set as
+25 entries on one cycling playlist, for wearing them; see its README).
 
 **Patterns** (`patterns/`): `plasma` (the smallest non-empty panel; also
 the docs' live figure), `plasma-duo` (one shader, two fixtures — its
 shader and clock stay byte-identical with `plasma`, test-pinned),
 `meteor` (a compute/render pair over a `node:` binding; the board-project
 generator vendors its export), `pulse` (the hardware-walk subject: if a
-strip is dark under it, that is the wiring), and the three WLED ports
-below.
+strip is dark under it, that is the wiring), the three WLED ports
+below, and the first pattern-space set (`"coords": "pattern"`: the shader
+sees the lamps, centred, long side −1…1, with `patternExtent`,
+`patternPitch` and `lampCount`). Each of those names its family, idea
+source and size/motion rulers in its shader header, binds `bus:detail` and
+`bus:palette`, and has at most two knobs of its own: `noise-soft`,
+`noise-hard`, `veins`, `aurora` (fields); `linear-gradient`,
+`radial-gradient`, `spiral` (gradients); `color-wipe`, `scanner`,
+`ripples` (fronts); `twinkle`, `fireflies` (points); `heartbeat` (whole
+piece).
 
 Not here on purpose: `projects/test/fault-demo`, the shader that faults
 every frame to demonstrate "a fault is never black". Its loop never ends

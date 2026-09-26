@@ -33,6 +33,9 @@ lpa-link = { path = "../lpa-link", features = ["device-session", "device-link"] 
 # lists, and opening an older-but-supported one migrates it in place.
 lpa-upgrade = { path = "../lpa-upgrade" }
 lpc-history = { path = "../../lp-core/lpc-history", default-features = false }
+# Which package files are access files (they never leave the library in an
+# export or a share envelope; a device push does carry them).
+lpc-access = { path = "../../lp-core/lpc-access" }
 # The client-side display-layout fallback resolves map2d documents with the
 # same resolver the engine and the device run (see
 # `app/project/control_display_layout_fallback`).
@@ -40,6 +43,12 @@ lpc-mapping = { path = "../../lp-core/lpc-mapping" }
 lpc-model = { path = "../../lp-core/lpc-model" }
 lpc-view = { path = "../../lp-core/lpc-view" }
 lpc-wire = { path = "../../lp-core/lpc-wire" }
+# The save-time all-entries check (D19): loads the just-saved library copy
+# with every playlist entry resident, the same coverage `lp-cli upload`
+# refuses on — Studio warns instead, since a work-in-progress must still
+# save. no_std + alloc, so this is fine on wasm too.
+lpc-engine = { path = "../../lp-core/lpc-engine" }
+lpc-registry = { path = "../../lp-core/lpc-registry" }
 # Mounts raw `lpfs` images in wasm for the device filesystem backup (see
 # `app/device/filesystem_backup`). Pure Rust, so the browser can do it.
 littlefs-rust = { version = "0.1.0", default-features = false, features = [
@@ -87,12 +96,6 @@ lpa-link = { path = "../lpa-link", features = ["fake-device"] }
 # Scripted model-provider streams in the agent e2e tests.
 futures-util = "0.3"
 lpc-shared = { path = "../../lp-core/lpc-shared", features = ["std"] }
-# Library create → loader round-trip tests drive the real root format gate.
-lpc-registry = { path = "../../lp-core/lpc-registry" }
-# The generated-project gate loads every board's package through the REAL
-# engine loader and validates it against the checked-in JSON Schemas, the
-# same two oracles `lp-cli` holds the checked-in example corpus to.
-lpc-engine = { path = "../../lp-core/lpc-engine" }
 lpc-mapping = { path = "../../lp-core/lpc-mapping" }
 jsonschema = { version = "0.46", default-features = false }
 lpfs = { path = "../../lp-base/lpfs", features = ["std"] }  # std for host tests
@@ -122,6 +125,14 @@ emulator-tab = [
     "dep:wasm-bindgen",
     "dep:wasm-bindgen-futures",
     "dep:web-sys",
+]
+# Web Bluetooth (M5 of the BLE remote-control plan): the platform half
+# (`app/devices/browser_ble_source.rs`) over `lpa-link`'s `browser_ble`
+# provider. wasm-only; the transport it plugs into (`ble_transport.rs`) is
+# host-tested and pays nothing for this.
+browser-ble = [
+    "lpa-link/browser-ble",
+    "dep:wasm-bindgen-futures",
 ]
 
 [lints]

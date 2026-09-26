@@ -119,6 +119,7 @@ fn ProjectNodeTreeItemView(
     // px-2 to 0 and the icon hugs the card edge.
     let indent = 10 + depth * 14;
     let label = item.label;
+    let streaming_live = item.streaming_live;
 
     rsx! {
         li {
@@ -144,7 +145,17 @@ fn ProjectNodeTreeItemView(
                         size: 14,
                     }
                 }
-                span { class: "tw:min-w-0 tw:overflow-hidden tw:text-ellipsis tw:whitespace-nowrap tw:text-sm tw:text-soft-foreground", "{label}" }
+                span { class: "tw:flex tw:min-w-0 tw:items-center tw:gap-1.5",
+                    span { class: "tw:min-w-0 tw:overflow-hidden tw:text-ellipsis tw:whitespace-nowrap tw:text-sm tw:text-soft-foreground", "{label}" }
+                    // The card header's Live chip, at row scale: this is the
+                    // node streaming from the device.
+                    if streaming_live {
+                        span {
+                            class: "tw:h-1.5 tw:w-1.5 tw:flex-none tw:rounded-full tw:bg-status-live-foreground",
+                            title: "Live — the device streams only the selected node",
+                        }
+                    }
+                }
                 // The one-glyph affordance indicator; silent when Info (the
                 // tooltip and the popups carry the words and counts).
                 if let Some(indicator_class) = affordance_indicator_class(affordance) {

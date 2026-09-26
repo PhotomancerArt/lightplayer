@@ -1057,3 +1057,67 @@ async fn dropped_responses_on_a_heartbeating_wire_hit_the_total_deadline() {
         .value;
     assert_eq!(hello.proto, WIRE_PROTO_VERSION);
 }
+
+/// Plan `lp-json-pack` P5: a board that packs is asked to by the host
+/// transport, reaches Ready on its JSON hello, and from then on answers in
+/// packed frames — which fold exactly like the JSON a board that cannot pack
+/// sends for the same requests.
+#[tokio::test]
+async fn a_packing_board_reaches_ready_and_its_frames_fold_like_json() {
+    let packed = session_over(with_a_project(FakeLightPlayerState::new())).await;
+    let json = session_over(with_a_project(FakeLightPlayerState::new()).without_packing()).await;
+
+    assert!(
+        packed.device.packed_frames_emitted() > 0,
+        "the transport opted in and the board packed"
+    );
+    assert_eq!(
+        json.device.packed_frames_emitted(),
+        0,
+        "a board that cannot pack is never asked, and stays JSON"
+    );
+    assert_eq!(
+        packed.hello.pack_dictionary,
+        lpc_wire::WIRE_DICTIONARY_FINGERPRINT
+    );
+    assert_eq!(json.hello.pack_dictionary, 0);
+    assert_eq!(packed.projects, json.projects);
+    assert!(!packed.projects.is_empty());
+}
+
+struct SessionReplies {
+    device: FakeEsp32Device,
+    hello: lpc_wire::ServerHello,
+    projects: Vec<lpc_wire::AvailableProject>,
+}
+
+fn with_a_project(state: FakeLightPlayerState) -> FakeLightPlayerState {
+    state.with_project_files(vec![(
+        "project.json".to_string(),
+        br#"{"format":7,"uid":"prjfakefakefakefake","name":"Fake"}"#.to_vec(),
+    )])
+}
+
+/// Connect to a fake LightPlayer, wait for Ready, and ask it two things.
+async fn session_over(state: FakeLightPlayerState) -> SessionReplies {
+    let (connector, endpoint_id, device) =
+        fake_device_connector(FakeDeviceScript::new(FakeBootState::LightPlayer(state)));
+    let session = DeviceSession::connect(
+        connector,
+        &endpoint_id,
+        test_timers(),
+        DeviceEventSink::noop(),
+    )
+    .await
+    .unwrap();
+    assert!(session.wait_ready().await.is_ready());
+    let mut client = lpa_client::LpClient::new(session.client_io());
+    let hello = client.hello().await.unwrap().value;
+    let projects = client.project_list_available().await.unwrap().value;
+    let _ = session.close().await;
+    SessionReplies {
+        device,
+        hello,
+        projects,
+    }
+}

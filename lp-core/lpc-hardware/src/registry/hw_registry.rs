@@ -119,6 +119,17 @@ impl HwRegistry {
         for address in addresses {
             state.active_by_address.remove(&address);
         }
+        // Emptied tables give their memory back. They are first grown when a
+        // project's output opens — above the project's memory — so kept
+        // capacity outlived the project and split the heap it freed (a
+        // device refused the next project on contiguity:
+        // docs/defects/2026-09-24-ble-enabled-c6-refuses-a-project-switch-after-the-heap-cut.md).
+        if state.active_by_address.is_empty() {
+            state.active_by_address = VecMap::new();
+        }
+        if state.addresses_by_lease.is_empty() {
+            state.addresses_by_lease = VecMap::new();
+        }
         drop(state);
         self.bump_generation();
         Ok(())

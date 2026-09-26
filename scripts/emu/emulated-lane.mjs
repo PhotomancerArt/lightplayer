@@ -151,12 +151,12 @@ async function runStep(step, ctx) {
     case "connect": {
       // The one call `browser_esp32_device_controller.js` makes, answered by
       // the page's own chooser. Studio never learns anything is different.
-      await driver.clickWhenReady("It's connected", { timeoutMs: STEP_DEADLINE_MS });
+      await driver.clickWhenReady("via USB", { timeoutMs: STEP_DEADLINE_MS });
       const picked = await driver.pickBoard(step.board, { timeoutMs: STEP_DEADLINE_MS });
       return `picked ${picked} in the in-page chooser`;
     }
     case "cancel-connect": {
-      await driver.clickWhenReady("It's connected", { timeoutMs: STEP_DEADLINE_MS });
+      await driver.clickWhenReady("via USB", { timeoutMs: STEP_DEADLINE_MS });
       await driver.waitFor(`Boolean(document.querySelector('#lp-emu-picker'))`, {
         timeoutMs: STEP_DEADLINE_MS,
         what: "the chooser",

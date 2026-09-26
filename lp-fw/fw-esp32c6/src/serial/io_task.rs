@@ -28,6 +28,10 @@ use fw_esp32_common::serial::chunked_write::{ChunkedWriter, WritePolicy};
 use log;
 
 use crate::board::esp32c6::usb_connection::UsbConnectionMonitor;
+#[cfg(not(any(feature = "spike_uart0_link", feature = "fixture-no-in-endpoint-gate")))]
+use crate::board::esp32c6::usb_connection::UsbSerialJtagInEndpoint;
+#[cfg(not(any(feature = "spike_uart0_link", feature = "fixture-no-in-endpoint-gate")))]
+use fw_esp32_common::serial::in_endpoint::InEndpoint;
 
 /// Static message channels for MessageRouter
 static INCOMING_MSG: Channel<CriticalSectionRawMutex, String, 32> = Channel::new();
@@ -60,6 +64,16 @@ const PROBE_TIMEOUT: Duration = Duration::from_millis(100);
 
 /// Minimum spacing between probe writes while latched not-draining.
 const PROBE_INTERVAL: Duration = Duration::from_millis(2000);
+
+/// Longest wait for the next OUT packet of a burst already arriving. A host
+/// with more to send refills the endpoint within microseconds of the pop, so
+/// a gap this long means the burst is over.
+const READ_BURST_GAP: Duration = Duration::from_micros(500);
+
+/// Most bytes one read pass takes before yielding back to the server loop,
+/// so a host flooding the link cannot hold the executor. Well above a lens
+/// read (600 B) and an upload chunk (~4.7 KB takes two passes).
+const READ_BURST_MAX: usize = 4096;
 
 /// Wrap this board's TX half in the shared chunked writer.
 ///
@@ -106,7 +120,18 @@ pub async fn io_task(usb_device: esp_hal::peripherals::USB_DEVICE<'static>) {
     let (mut rx, mut tx) = {
         let usb_serial = UsbSerialJtag::new(usb_device);
         let usb_serial_async = usb_serial.into_async();
-        usb_serial_async.split()
+        let (rx, tx) = usb_serial_async.split();
+        // esp-println shares the IN endpoint and esp-hal's writer neither
+        // checks it is free nor clears a stale `serial_in_empty`; the gate
+        // does both before every packet, so every byte this task writes — a
+        // JSON line, every chunk of a packed frame, a probe — waits for a free
+        // buffer (`fw_esp32_common::serial::in_endpoint`; PR #805, and
+        // docs/defects/2026-09-24-the-real-c6-link-loses-bytes-inside-a-packed-frame.md).
+        #[cfg(not(feature = "fixture-no-in-endpoint-gate"))]
+        let tx = InEndpoint::<_, UsbSerialJtagInEndpoint>::new(tx);
+        // The emulator fixture: the pre-#795 write path, esp-hal's TX half
+        // as it comes (see the feature's comment in Cargo.toml).
+        (rx, tx)
     };
     // esp-emu spike: the same task over UART0. Everything below this point
     // is generic over `embedded_io_async::{Read, Write}`, so only the halves
@@ -185,6 +210,14 @@ async fn drain_outgoing_messages<W: Write>(
 
 /// Read from serial with timeout, push complete M! lines to incoming queue.
 /// Incoming bytes are proof the host application is alive.
+///
+/// Takes the whole burst the host is sending, not one packet: after the first
+/// read lands, keep reading while the next OUT packet follows within
+/// [`READ_BURST_GAP`], up to [`READ_BURST_MAX`] bytes. The endpoint holds one
+/// 64-byte packet at a time, and this task only runs while the server loop
+/// yields between frames — so reading one packet per wake took a request in at
+/// 64 B per frame, and a 600 B Studio lens read spent ten frames arriving
+/// before the server saw it.
 async fn read_serial<R: Read>(
     rx: &mut R,
     read_buffer: &mut Vec<u8>,
@@ -192,18 +225,24 @@ async fn read_serial<R: Read>(
     conn: &mut UsbConnectionMonitor,
 ) {
     let mut temp_buf = [0u8; 64];
-    match embassy_futures::select::select(
-        Timer::after(Duration::from_millis(1)),
-        Read::read(rx, &mut temp_buf),
-    )
-    .await
-    {
-        embassy_futures::select::Either::Second(Ok(n)) if n > 0 => {
-            conn.note_host_active();
-            read_buffer.extend_from_slice(&temp_buf[..n]);
-            process_read_buffer(read_buffer, router);
+    let mut wait = Duration::from_millis(1);
+    let mut taken = 0;
+    while taken < READ_BURST_MAX {
+        match embassy_futures::select::select(Timer::after(wait), Read::read(rx, &mut temp_buf))
+            .await
+        {
+            embassy_futures::select::Either::Second(Ok(n)) if n > 0 => {
+                read_buffer.extend_from_slice(&temp_buf[..n]);
+                taken += n;
+                wait = READ_BURST_GAP;
+            }
+            _ => break,
         }
-        _ => {}
+    }
+    if taken > 0 {
+        conn.note_host_active();
+        process_read_buffer(read_buffer, router);
+        release_read_buffer_if_idle(read_buffer);
     }
 }
 
@@ -243,6 +282,21 @@ async fn drain_server_write_request<W: Write>(tx: &mut W, conn: &mut UsbConnecti
 /// Process read buffer and extract complete lines
 ///
 /// Looks for newlines, extracts lines starting with `M!`, and pushes to incoming queue.
+/// Above this, an emptied read buffer gives its memory back.
+const READ_BUFFER_KEEP: usize = 1024;
+
+/// Once every complete line has been handed on and nothing partial is left,
+/// drop a buffer that a long line (an upload's file chunk: several KB) grew.
+/// The buffer lives for the whole boot and is reallocated wherever the heap
+/// has room at the time — while a project runs, above the project's memory —
+/// so kept capacity split the heap the project later freed
+/// (docs/defects/2026-09-24-ble-enabled-c6-refuses-a-project-switch-after-the-heap-cut.md).
+fn release_read_buffer_if_idle(read_buffer: &mut Vec<u8>) {
+    if read_buffer.is_empty() && read_buffer.capacity() > READ_BUFFER_KEEP {
+        *read_buffer = Vec::new();
+    }
+}
+
 fn process_read_buffer(read_buffer: &mut Vec<u8>, router: &MessageRouter) {
     // Find newlines and process complete lines
     while let Some(newline_pos) = read_buffer.iter().position(|&b| b == b'\n') {

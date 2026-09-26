@@ -93,6 +93,12 @@ pub enum LinkEvent {
         request_id: u32,
         line: String,
     },
+    /// The transport's own account of the link — not device output, and not
+    /// evidence: which encoding the board's replies travel in and why (a
+    /// board that stays on JSON because its pack dictionary is not this
+    /// build's is otherwise invisible, since every reader decodes both). At
+    /// most one per change. The fold journals it and moves nothing.
+    WireNote(String),
 }
 
 /// Everything the model can ask a transport to do.

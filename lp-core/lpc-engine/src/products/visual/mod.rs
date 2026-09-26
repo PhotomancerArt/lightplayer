@@ -1,11 +1,13 @@
 //! Visual-product handle and minimal sample request/result shapes.
 
 pub mod coordinates;
+mod pattern_space;
 mod render_texture_request;
 mod sample_request;
 mod sample_result;
 mod space;
 mod texture_product;
+mod visual_readiness;
 
 pub use coordinates::{
     RADIAL_CORNER_REACH, angular, centre_scanline, extrude, mirror, normalized_f32_to_q16,
@@ -13,6 +15,7 @@ pub use coordinates::{
     shape_coord, texel_center_to_uv_q16, texture_uv_q16_to_texel,
 };
 pub use lpc_model::VisualProduct;
+pub use pattern_space::{PatternAxis, PatternFrame, ScopeGeometry};
 pub use render_texture_request::RenderTextureRequest;
 pub use sample_request::{TextureSampleBatch, TextureUvSamplePoint, VisualSampleStream};
 pub use sample_result::{VisualSample, VisualSampleBatchResult};
@@ -21,6 +24,7 @@ pub use space::{
     VisualSpace, resolve_1d_to_2d, resolve_1d_to_2d_with_origin,
 };
 pub use texture_product::{TextureRenderProduct, TextureRenderProductError};
+pub use visual_readiness::VisualReadiness;
 #[cfg(test)]
 mod tests {
     use alloc::vec;

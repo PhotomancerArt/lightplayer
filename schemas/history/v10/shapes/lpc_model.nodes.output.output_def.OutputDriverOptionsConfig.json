@@ -1,0 +1,59 @@
+{
+  "record": {
+    "fields": [
+      {
+        "name": "white_point",
+        "shape": {
+          "value": {
+            "shape": {
+              "editor": "plain",
+              "id": 2618928957,
+              "meta": {},
+              "ty": "vec3"
+            }
+          }
+        }
+      },
+      {
+        "name": "interpolation_enabled",
+        "shape": {
+          "value": {
+            "shape": {
+              "editor": "plain",
+              "id": 1196386242,
+              "meta": {},
+              "ty": "bool"
+            }
+          }
+        }
+      },
+      {
+        "name": "dithering_enabled",
+        "shape": {
+          "value": {
+            "shape": {
+              "editor": "plain",
+              "id": 1196386242,
+              "meta": {},
+              "ty": "bool"
+            }
+          }
+        }
+      },
+      {
+        "name": "lut_enabled",
+        "shape": {
+          "value": {
+            "shape": {
+              "editor": "plain",
+              "id": 1196386242,
+              "meta": {},
+              "ty": "bool"
+            }
+          }
+        }
+      }
+    ],
+    "meta": {}
+  }
+}

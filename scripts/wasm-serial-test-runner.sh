@@ -36,6 +36,7 @@ provider="$repo_root/lp-app/lpa-link/src/providers/browser_serial_esp32"
 for required in \
     "$public/browser_esp32_device_controller.js" \
     "$public/virtual_serial.js" \
+    "$public/virtual_bluetooth.js" \
     "$public/emulator_port.js" \
     "$provider/browser_serial.js" \
     "$provider/browser_esp32_flash.js"; do

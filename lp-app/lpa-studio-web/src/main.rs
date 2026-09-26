@@ -3,6 +3,7 @@ pub mod base;
 mod clipboard;
 pub mod cloud;
 pub mod core;
+mod dev_url_flags;
 mod device_events_io;
 mod device_hint;
 pub mod exploration;
@@ -27,5 +28,8 @@ fn main() {
     // bookmarks, pasted links and the story-capture harness all still speak
     // hash; this keeps them working, and it is remove-never.
     router::install_legacy_hash_shim();
+    // A shared device password rides `/unlock#…`: read and clear it before
+    // the router writes the address.
+    app::home::unlock_page::capture_unlock_fragment();
     dioxus::launch(web_app::App);
 }

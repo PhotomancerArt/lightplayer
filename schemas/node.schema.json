@@ -288,6 +288,11 @@
             "kind": {
               "type": "string"
             },
+            "pinned": {
+              "maximum": 2147483647,
+              "minimum": -2147483648,
+              "type": "integer"
+            },
             "set": {
               "items": {
                 "additionalProperties": false,
@@ -319,7 +324,8 @@
             "kind",
             "set",
             "step_seconds",
-            "fade_seconds"
+            "fade_seconds",
+            "pinned"
           ],
           "type": "object"
         },
@@ -618,6 +624,11 @@
             "$ref": "#/$defs/lpc_model::nodes::shader::shader_slot_def::ShaderSlotDef"
           },
           "type": "object"
+        },
+        "coords": {
+          "description": "Unset = Pixels: pos arrives in render pixels. Pattern: pos arrives normalized to the lamps (long side -1..1, y up; 0..1 along a strip), with patternExtent, patternPitch and lampCount available as uniforms.",
+          "title": "Coordinates",
+          "type": "string"
         },
         "float_mode": {
           "description": "Unset = Auto (target default): the target's native representation. Set this only to force one representation regardless of target.",
@@ -1021,6 +1032,28 @@
           },
           "type": "object"
         },
+        "cycle": {
+          "additionalProperties": false,
+          "description": "Hold, or cycle through the enabled entries: seconds per entry and the fade between them.",
+          "properties": {
+            "fade_seconds": {
+              "type": "number"
+            },
+            "kind": {
+              "type": "string"
+            },
+            "step_seconds": {
+              "type": "number"
+            }
+          },
+          "required": [
+            "kind",
+            "step_seconds",
+            "fade_seconds"
+          ],
+          "title": "Cycle",
+          "type": "object"
+        },
         "default_fade": {
           "description": "Intended non-negative float (not enforced on read).",
           "type": "number"
@@ -1041,6 +1074,30 @@
         },
         "kind": {
           "const": "Playlist"
+        },
+        "next_trigger_ids": {
+          "items": {
+            "maximum": 4294967295,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "type": "array"
+        },
+        "prev_trigger_ids": {
+          "items": {
+            "maximum": 4294967295,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "type": "array"
+        },
+        "skip": {
+          "items": {
+            "maximum": 4294967295,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "type": "array"
         },
         "time": {
           "additionalProperties": false,

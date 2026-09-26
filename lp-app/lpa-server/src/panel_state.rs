@@ -30,9 +30,13 @@ extern crate alloc;
 use alloc::string::String;
 use alloc::vec::Vec;
 
+use alloc::format;
+use alloc::string::ToString;
+
 use lpc_engine::Engine;
 use lpc_engine::node::ScopeRef;
-use lpc_model::{AsLpPath, ChannelName, LpValue};
+use lpc_model::{AsLpPath, ChannelName, LpValue, NodeId};
+use lpc_registry::ProjectRegistry;
 use lpfs::LpFs;
 use serde::{Deserialize, Serialize};
 
@@ -83,8 +87,13 @@ pub struct PanelStateEntry {
 /// Momentary writers are skipped by construction (P14: they despawn, and
 /// a deadline that outlived a reboot would be meaningless). A writer whose
 /// scope owner has vanished is skipped too — it has no stable key.
+///
+/// Writers of a dormant playlist entry are kept (multi-pattern vision
+/// D12): a sink-scope writer's owner is the playlist, which stays, and a
+/// writer whose scope left with the entry is parked by its persist path,
+/// which is exactly the key this file uses.
 pub fn snapshot(engine: &Engine, auto_save: bool) -> PanelStateFile {
-    let mut entries: Vec<PanelStateEntry> = engine
+    let live = engine
         .panel_writers()
         .iter()
         .filter(|(_, writer)| writer.expires_at_ms.is_none())
@@ -94,8 +103,16 @@ pub fn snapshot(engine: &Engine, auto_save: bool) -> PanelStateFile {
                 channel: channel.0.clone(),
                 value: writer.value.clone(),
             })
-        })
-        .collect();
+        });
+    let parked = engine
+        .panel_writers()
+        .parked()
+        .map(|((path, channel), value)| PanelStateEntry {
+            scope: path.clone(),
+            channel: channel.0.clone(),
+            value: value.clone(),
+        });
+    let mut entries: Vec<PanelStateEntry> = live.chain(parked).collect();
     // Deterministic on-disk order: the file is diffed by humans and
     // compared by tests, and writer iteration order is an implementation
     // detail of the store.
@@ -143,38 +160,142 @@ pub fn write(fs: &dyn LpFs, file: &PanelStateFile) {
 /// Returns the restored `auto_save` preference (defaulting to on when
 /// there is no usable file). Entries naming a scope this project no longer
 /// has are dropped — that is the graceful-degradation rule, not an error.
-pub fn restore(fs: &dyn LpFs, engine: &mut Engine) -> bool {
+///
+/// A playlist entry that is dormant at boot is not in the tree, but its
+/// knobs are still the project's (multi-pattern vision D12). So restore
+/// also accepts the sink scope of every AUTHORED entry of each live
+/// playlist, read from the playlist's def, and parks — by persist path —
+/// entries for scopes owned by nodes inside a dormant entry; those engage
+/// when the entry loads ([`Engine::apply_residency`]).
+pub fn restore(fs: &dyn LpFs, engine: &mut Engine, registry: &ProjectRegistry) -> bool {
     let Some(file) = read(fs) else {
         return auto_save_default();
     };
+    let playlists = authored_playlist_entries(engine, registry);
+    let mut restored = 0usize;
     for entry in &file.entries {
-        let Some(scope) = scope_by_persist_path(engine, &entry.scope) else {
+        let channel = ChannelName(entry.channel.clone());
+        if let Some(scope) = scope_by_persist_path(engine, &playlists, &entry.scope) {
+            engine.panel_write(scope, channel, entry.value.clone(), None);
+        } else if is_under_dormant_entry(&playlists, &entry.scope) {
+            engine.panel_park(entry.scope.clone(), channel, entry.value.clone());
+        } else {
             log::debug!(
                 "panel state: dropping entry for unknown scope {}",
                 entry.scope
             );
             continue;
-        };
-        engine.panel_write(
-            scope,
-            ChannelName(entry.channel.clone()),
-            entry.value.clone(),
-            None,
-        );
+        }
+        restored += 1;
     }
     log::info!(
-        "panel state: restored {} engaged control(s) (auto_save={})",
+        "panel state: restored {} of {} engaged control(s) (auto_save={})",
+        restored,
         file.entries.len(),
         file.auto_save
     );
     file.auto_save
 }
 
-/// The scope whose stable persist path is `path`, if this project has one.
-fn scope_by_persist_path(engine: &Engine, path: &str) -> Option<ScopeRef> {
-    engine
+/// One live playlist and the entries its def authors: `(playlist node,
+/// its tree path, [(entry key, entry child name, resident)])`.
+struct AuthoredPlaylist {
+    owner: NodeId,
+    path: String,
+    entries: Vec<(u32, String, bool)>,
+}
+
+/// Every playlist in the tree with the entries its def authors — dormant
+/// ones included, which is the point.
+fn authored_playlist_entries(engine: &Engine, registry: &ProjectRegistry) -> Vec<AuthoredPlaylist> {
+    let mut playlists = Vec::new();
+    for node in engine.tree().entries() {
+        let Some(def) = node
+            .def_location
+            .as_ref()
+            .and_then(|location| registry.def(location))
+            .and_then(|entry| entry.state.loaded_def())
+            .and_then(|def| def.as_playlist())
+        else {
+            continue;
+        };
+        let entries = def
+            .entries
+            .entries
+            .iter()
+            .map(|(key, entry)| {
+                // The loader names an entry's child after the entry, or
+                // `entry_<k>` (`projected_node_name_and_ownership`).
+                let name = entry
+                    .name
+                    .data
+                    .as_ref()
+                    .map(|name| name.value().clone())
+                    .unwrap_or_else(|| format!("entry_{key}"));
+                let resident = node.children.value().iter().any(|child| {
+                    engine.tree().get(*child).is_some_and(|child| {
+                        child.scope
+                            == Some(ScopeRef::Sink {
+                                owner: node.id,
+                                entry: *key,
+                            })
+                    })
+                });
+                (*key, name, resident)
+            })
+            .collect();
+        playlists.push(AuthoredPlaylist {
+            owner: node.id,
+            path: node.path.to_string(),
+            entries,
+        });
+    }
+    playlists
+}
+
+/// The scope whose stable persist path is `path`, if this project has one:
+/// a scope in the tree, or the sink of an authored entry of a live playlist.
+fn scope_by_persist_path(
+    engine: &Engine,
+    playlists: &[AuthoredPlaylist],
+    path: &str,
+) -> Option<ScopeRef> {
+    if let Some(scope) = engine
         .tree()
         .scopes()
         .into_iter()
         .find(|scope| engine.tree().scope_persist_path(*scope).as_deref() == Some(path))
+    {
+        return Some(scope);
+    }
+    playlists.iter().find_map(|playlist| {
+        playlist.entries.iter().find_map(|(key, _, _)| {
+            let scope = ScopeRef::Sink {
+                owner: playlist.owner,
+                entry: *key,
+            };
+            (engine.tree().scope_persist_path(scope).as_deref() == Some(path)).then_some(scope)
+        })
+    })
+}
+
+/// Whether `path` names a scope inside a dormant authored entry: under the
+/// path its child will have (`<playlist path>/<child name>.<kind>…`).
+fn is_under_dormant_entry(playlists: &[AuthoredPlaylist], path: &str) -> bool {
+    playlists.iter().any(|playlist| {
+        let Some(rest) = path
+            .strip_prefix(playlist.path.as_str())
+            .and_then(|rest| rest.strip_prefix('/'))
+        else {
+            return false;
+        };
+        playlist
+            .entries
+            .iter()
+            .filter(|(_, _, resident)| !resident)
+            .any(|(_, name, _)| {
+                rest.strip_prefix(name.as_str())
+                    .is_some_and(|after| after.starts_with('.'))
+            })
+    })
 }

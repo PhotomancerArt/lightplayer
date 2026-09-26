@@ -110,6 +110,12 @@ pub struct FakeLightPlayerState {
     /// [`FAKE_DEVICE_PROJECT_DIR`]; override to mimic a device provisioned
     /// outside Studio (CLI uploads use other dirs under `/projects/`).
     pub project_dir: String,
+    /// Answer `ClientRequest::SetEncoding` the way shipped firmware does
+    /// (plan `lp-json-pack`): the hello names this build's dictionary, an
+    /// opted-in link gets packed frames (`\n 0x00 'P' COBS 0x00`) until the
+    /// port reopens or the device resets. On by default, as it is on every
+    /// ESP firmware; `false` is a board that cannot pack (hello `0`).
+    pub packs: bool,
 }
 
 impl FakeLightPlayerState {
@@ -126,6 +132,7 @@ impl FakeLightPlayerState {
             proto_override: None,
             load_project_at_boot: false,
             project_dir: FAKE_DEVICE_PROJECT_DIR.to_string(),
+            packs: true,
         }
     }
 
@@ -159,6 +166,13 @@ impl FakeLightPlayerState {
     /// the response-starved device of the 2026-08-24 request-idle defect.
     pub fn with_dropped_responses(mut self) -> Self {
         self.drop_responses = true;
+        self
+    }
+
+    /// A board that cannot pack: its hello names no dictionary, and an
+    /// opt-in is answered `json`.
+    pub fn without_packing(mut self) -> Self {
+        self.packs = false;
         self
     }
 

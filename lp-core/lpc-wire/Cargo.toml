@@ -10,13 +10,25 @@ rust-version.workspace = true
 default = ["std"]
 std = ["lpc-model/std"]
 schema-gen = ["std", "dep:schemars", "lpc-model/schema-gen"]
-# Experimental: ser-write-json for streaming serialization (ESP32)
-ser-write-json = ["dep:ser-write-json"]
+# ser-write-json for streaming serialization (ESP32), and the packed sink
+# (`PackSink`, `ser_wire_to`) that rides the same serializer.
+ser-write-json = ["dep:ser-write-json", "dep:ryu-js", "lp-json-pack/lex"]
+# HOST-ONLY: the wire dictionary generator (`just wire-dict`). Never enabled by
+# a firmware crate; see `wire_dictionary_gen`.
+wire-dict-gen = ["std", "lp-json-pack/std"]
 
 [dependencies]
 lp-collection = { workspace = true, features = ["serde"] }
 base64 = { workspace = true }
+# Tiers and the login payloads (offers, MACs, outcomes) ride the wire as-is.
+lpc-access = { path = "../lpc-access" }
 lpc-model = { path = "../lpc-model", default-features = false }
+# The packed encoding's codec. `alloc` for `decode_packed_to_json`; nothing in
+# it allocates on the encode path the device uses.
+lp-json-pack = { workspace = true, features = ["alloc"] }
+# Floats print exactly as ser-write-json prints them (it depends on the same
+# crate), so a packed decimal decodes to the JSON text byte for byte.
+ryu-js = { version = "1.0", optional = true, default-features = false }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 schemars = { workspace = true, optional = true }
@@ -24,6 +36,11 @@ ser-write-json = { version = "0.3", optional = true, default-features = false, f
 
 [dev-dependencies]
 lpc-model = { path = "../lpc-model", default-features = false }
+
+[[bin]]
+name = "wire-dict"
+path = "src/bin/wire_dict.rs"
+required-features = ["wire-dict-gen"]
 
 [lints]
 workspace = true

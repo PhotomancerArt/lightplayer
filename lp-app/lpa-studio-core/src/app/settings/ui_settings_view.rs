@@ -12,6 +12,19 @@ use crate::app::settings::studio_settings::DEFAULT_AGENT_MODEL;
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct UiSettingsView {
     pub agent: UiAgentSettingsView,
+    pub devices: UiDeviceSettingsView,
+}
+
+/// The settings UI.s Devices section: this browser's key, and the
+/// passwords it remembers.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct UiDeviceSettingsView {
+    /// The name this browser's key has on your devices ("Yona's MacBook"),
+    /// renameable (`AccessCommand::RenameBrowser`).
+    pub browser_name: Option<String>,
+    /// How many passwords this browser remembers (for "Forget remembered
+    /// passwords").
+    pub remembered_passwords: usize,
 }
 
 impl Default for UiSettingsView {
@@ -43,6 +56,7 @@ impl Default for UiSettingsView {
                 price_input_override: None,
                 price_output_override: None,
             },
+            devices: UiDeviceSettingsView::default(),
         }
     }
 }

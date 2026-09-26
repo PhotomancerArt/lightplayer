@@ -40,7 +40,7 @@ pub use output::output_node::{
 pub use placeholder::CorePlaceholderNode;
 pub use playlist::playlist_output_path;
 #[cfg(feature = "node-playlist")]
-pub use playlist::{PlaylistNode, PlaylistRuntimeEntry};
+pub use playlist::{PlaylistEntryReason, PlaylistNode, PlaylistRuntimeEntry};
 #[cfg(feature = "node-power-button")]
 pub use power_button::{PowerButtonNode, power_button_click_path};
 #[cfg(feature = "node-radio")]

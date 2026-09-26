@@ -258,9 +258,22 @@ Option<RegisteredDevice>` for recognition ("This board was Porch sign
 - Share-envelope hygiene: strip or pseudonymize device refs
   (associations/history device uids embed MACs) at export. Envelope
   posture today is version+refuse, so nothing regresses now.
-- Auth/trust model (BLE feasibility gap). Networked-transport
-  identity rides free (any transport with a hello carries `base_mac`),
-  but authenticating it is separate work.
+  *2026-09-24:* the other half of envelope hygiene, **secrets**, is done.
+  An access sidecar `<project>/.lp/access.json` is left out of zip export
+  and of the pasted package envelope by name, and cloud push, publish and
+  fork skip it with the rest of `/.lp/` (Studio no longer writes one since
+  `docs/adr/2026-09-24-easy-bluetooth-access.md`, but the filter stays).
+  The device-ref item above is still open.
+- ~~Auth/trust model (BLE feasibility gap).~~ **Closed.** Networked-transport
+  identity rides free (any transport with a hello carries `base_mac`);
+  access over an untrusted link is `docs/adr/2026-09-23-ble-access-model.md`
+  (trust belongs to the link: USB is trusted, a radio link holds only what
+  an unlock with a shared secret grants, play or edit; HMAC challenge; the
+  device store) and `docs/adr/2026-09-24-easy-bluetooth-access.md`
+  (generated keys per browser and account, plugging in adds them). Access
+  is not identity: a device's uid and MAC say which board it is, not who
+  may use it. The one place the two would meet is that ADR's Revisit, a
+  per-device key derived from the device uid.
 - Multi-studio registry sync — uids now agree across stores by
   construction; syncing the rows themselves is its own feature.
 - Removing the firmware's `device_uid` hello field / file read

@@ -48,26 +48,6 @@ pub const IMAGE_ENV: &str = "LP_EMU_ESP32V3_ELF";
 /// both variables, so they agree by construction.
 pub const MERGED_ENV: &str = "LP_EMU_ESP32V3_MERGED";
 
-/// The environment variable naming the **silicon reference image**: the ELF
-/// the committed boot-idle silicon transcript was captured from, rebuilt at
-/// its pinned commit by `scripts/emu/build-reference-image.sh --chip esp32`.
-///
-/// A silicon comparison has to run the bytes the board ran. Today's image is
-/// the wrong input for it: every change that moves the classic's static RAM
-/// (and `.rodata.cst*` literal pools live in RAM on this part) moves the
-/// `main stack` line the board printed, and the transcript can never be
-/// edited to follow. So the tests that grade the machine against the desk
-/// board read this image, and the tests that pin today's image read
-/// [`IMAGE_ENV`].
-pub const SILICON_REF_ENV: &str = "LP_EMU_ESP32V3_SILICON_REF_ELF";
-
-/// The merged chip image built from [`SILICON_REF_ENV`]'s ELF, the way the
-/// desk board was flashed.
-pub const SILICON_REF_MERGED_ENV: &str = "LP_EMU_ESP32V3_SILICON_REF_MERGED";
-
-/// The commit the boot-idle silicon transcript's image was built from.
-pub const SILICON_REF_COMMIT: &str = "75486b114";
-
 /// The environment variable naming the built **`test_rmt` harness** ELF —
 /// the `rmt-chase` payload's classic image (`fw-esp32v3 --features
 /// esp32,test_rmt`, M4 P5).
@@ -100,6 +80,30 @@ pub const IMAGE_TEST_RMT_ENV: &str = "LP_EMU_ESP32V3_TEST_RMT_ELF";
 /// wants reading (a) — the firmware's own record — must be gated on this
 /// one and nothing else.
 pub const IMAGE_FRAME_DUMP_ENV: &str = "LP_EMU_ESP32V3_FRAME_DUMP_ELF";
+
+/// The commit of the **pinned reference image** the classic's silicon
+/// memory capture was taken from — lab task L1's re-flash, ruling R7 (a):
+/// `silicon-esp32v3-2026-09-10-75486b114-921600.txt`, whose sidecar names
+/// the ELF and merged-image sha256s.
+///
+/// A test that sets this machine against that capture must run **these
+/// bytes**, not the tree's: the capture's claim is "same image on both
+/// sides", and a tree build moves every image-derived line (`[INIT] main
+/// stack …`) the moment anything in `.bss` does — which the BLE plan's M3
+/// did, by 80 B, without the machine or the board changing at all.
+pub const REFERENCE_COMMIT: &str = "75486b114";
+
+/// The environment variable naming the pinned reference image's ELF,
+/// `scripts/emu/build-reference-image.sh --chip esp32 esp32,server,float-f32
+/// 75486b114 none` → `target/emu-ref/75486b114-boot-idle/fw-esp32v3`.
+/// [`IMAGE_ENV`]'s rules: set by `just test-emu-esp32v3-boot`, never
+/// guessed from a conventional path.
+pub const REFERENCE_IMAGE_ENV: &str = "LP_EMU_ESP32V3_REF_ELF";
+
+/// The environment variable naming the merged chip image of the reference
+/// ELF (`espflash save-image --chip esp32 --merge`, the file L1 wrote to the
+/// desk board). [`MERGED_ENV`]'s rules, for [`REFERENCE_IMAGE_ENV`]'s ELF.
+pub const REFERENCE_MERGED_ENV: &str = "LP_EMU_ESP32V3_REF_MERGED";
 
 /// The profile and target `fw-esp32v3` is built with (`justfile`:
 /// `build-fw-esp32v3`), for the notice a skipped test prints.
@@ -246,15 +250,18 @@ pub fn merged_chip_image() -> Result<PathBuf, String> {
     }
 }
 
-/// The silicon reference ELF and its merged chip image (see
-/// [`SILICON_REF_ENV`]), if the caller has both. [`fw_esp32v3_image`]'s
-/// rules: `Err(reason)` when either variable is unset, a **panic** when one
-/// names a file that is not there.
-pub fn silicon_reference_images() -> Result<(PathBuf, PathBuf), String> {
-    let resolve = |env: &str| -> Result<PathBuf, String> {
-        let Some(path) = std::env::var_os(env) else {
+/// The pinned reference image ([`REFERENCE_COMMIT`]) and its merged chip
+/// image, if the caller has both. [`fw_esp32v3_image`]'s rules: `Ok` when
+/// both variables name files, `Err(reason)` when either is unset, and a
+/// **panic** when one names a file that is not there.
+pub fn reference_images() -> Result<(PathBuf, PathBuf), String> {
+    let resolve = |var: &str| -> Result<PathBuf, String> {
+        let Some(path) = std::env::var_os(var) else {
             return Err(format!(
-                "{env} is not set. `just test-emu-esp32v3-boot` builds the silicon reference                  image (`scripts/emu/build-reference-image.sh --chip esp32                  esp32,server,float-f32 {SILICON_REF_COMMIT} none`), merges it, and sets it"
+                "{var} is not set. `just test-emu-esp32v3-boot` builds the pinned reference \
+                 image (`scripts/emu/build-reference-image.sh --chip esp32 \
+                 esp32,server,float-f32 {REFERENCE_COMMIT} none`), merges it with `espflash \
+                 save-image`, and sets it; a bare `cargo test` skips every test that needs one"
             ));
         };
         let mut path = PathBuf::from(path);
@@ -266,12 +273,15 @@ pub fn silicon_reference_images() -> Result<(PathBuf, PathBuf), String> {
         }
         assert!(
             path.is_file(),
-            "{env}={} names a file that does not exist",
+            "{var}={} names a file that does not exist",
             path.display()
         );
         Ok(path)
     };
-    Ok((resolve(SILICON_REF_ENV)?, resolve(SILICON_REF_MERGED_ENV)?))
+    Ok((
+        resolve(REFERENCE_IMAGE_ENV)?,
+        resolve(REFERENCE_MERGED_ENV)?,
+    ))
 }
 
 /// The workspace root: the nearest ancestor of this crate's manifest

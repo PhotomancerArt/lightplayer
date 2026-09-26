@@ -26,13 +26,12 @@
 //! build. `just test-emu-esp32v3-boot` builds the ELF, runs `espflash` on it
 //! and names both files.
 
+use lp_emu_esp_figures::Figures;
 use lp_emu_esp32v3::flash::FlashBacking;
 use lp_emu_esp32v3::machine::{
     AppSource, BootMode, CORE_QUANTUM_DEFAULT, Esp32V3Builder, Machine, Outcome, StopCondition,
 };
-use lp_emu_esp32v3::test_support::{
-    fw_esp32v3_image, merged_chip_image, silicon_reference_images, skip_notice,
-};
+use lp_emu_esp32v3::test_support::{fw_esp32v3_image, merged_chip_image, skip_notice};
 use sha2::{Digest, Sha256};
 
 /// Far enough in for the console, the filesystem mount and the io_task, and
@@ -294,6 +293,15 @@ fn the_snapshot_carries_the_state_that_is_not_a_register() {
 /// phase file asks for — byte-identical output, the same cycle count, the
 /// same instruction count and the same idle-skip count.
 ///
+/// **They are figures, recorded in `lp-emu/esp/figures/esp32v3.json`** under
+/// `determinism.single_core_prefix.*` (the bytes under `init_chain.prefix`,
+/// shared with `boot_idle.rs`). Every move below but the first was the
+/// *image*, not the machine — the boot path's code and the `.bss` the
+/// `stack_probe::paint` loop walks — so accepting one is
+/// `just bless-chips esp32v3`, and still exactly as strict: any move fails,
+/// naming old → new. A move with an unchanged image is the machine's, and a
+/// finding. The history of the moves, with their causes:
+///
 /// ⚠️ **M4 P3b moved the instruction count by six: 3,245,157 → 3,245,151.**
 /// Not the loop — the hart. Poll point (c) had been zeroing the hart's
 /// asserted-line mask on every MMIO store, so a line raised by a store was
@@ -303,18 +311,48 @@ fn the_snapshot_carries_the_state_that_is_not_a_register() {
 /// way to the same 543 bytes at the same cycle: the bytes, the sha, the
 /// cycle count and the skip count did not move. Re-pinned with that cause
 /// attached; a further change here is a finding again.
-const PREFIX_CYCLES: u64 = 3_245_171;
-const PREFIX_INSTRUCTIONS: u64 = 3_245_151;
-const PREFIX_IDLE_SKIPS: u64 = 0;
-const PREFIX_BYTES: usize = 543;
-const PREFIX_SHA256: &str = "ea8bae305953ef613f68a97fb84919378f33b37eb5623dcb970e8dce2b7343e7";
-
-/// **Run on the `75486b114` image itself** — the silicon reference image
-/// (`test_support::SILICON_REF_COMMIT`) — because these counters describe
-/// the MACHINE on a fixed input. On today's image they move whenever the
-/// firmware's boot path does (PR #787's 16 B of literal pools moved all of
-/// them), which says nothing about the loop.
 ///
+/// ⚠️ **The BLE plan's M3 (access core) moved both by +5,856: 3,245,171 →
+/// 3,251,027 cycles, 3,245,151 → 3,251,007 instructions.** Not the machine —
+/// the image. Found with `LP_EMU_XT_BLOCKPROF` on `origin/main` (`e226fb283`)
+/// against the branch, both images run to this same line: the whole
+/// difference is `boot_firmware` +5,969, `_xtensa_lx_rt_zero_fill` −60, the
+/// main task's `poll` −49 and the mask ROM −4. Inside `boot_firmware` it is
+/// one 7-instruction loop running 8,424 times instead of 7,572 — the
+/// `stack_probe::paint` loop, which paints from the stack bottom to 1 KiB
+/// below the current `sp`. It paints 852 words more because both ends
+/// moved: the bottom 20 words lower (`.bss` shrank 80 B, which is also the
+/// −60 in `zero_fill`), and the `sp` at the paint 832 words (3,328 B)
+/// higher, because the embassy main task's `poll` frame shrank from `entry
+/// a1, 4304` to `entry a1, 976` — the branch's server-loop changes took
+/// temporaries off that frame (read off both ELFs' `entry` instructions,
+/// not inferred; which of the branch's commits did it was not bisected).
+/// 852 × 7 = 5,964, and the other five are straight-line code in
+/// `boot_firmware`. The bytes changed by one line for the `.bss` reason
+/// (see `init_chain.prefix`); the skip count did not move.
+///
+/// Then **+3 more when M3 merged over lean-wire (PR #791): 3,251,027 →
+/// 3,251,030 cycles, 3,251,007 → 3,251,010 instructions.** Again the image,
+/// and found the same way (`LP_EMU_XT_BLOCKPROF`, the M3 branch's image at
+/// `458d3769e` against the merged tree's, per symbol): `boot_firmware` +2 and
+/// the mask ROM +1, nothing else. `boot_firmware` came out 8 B longer and
+/// its code around the `stack_probe::paint` loop is scheduled differently —
+/// the loop still runs 8,424 times, and two more straight-line instructions
+/// retire once each. The ROM's +1 is `uart_tx_one_char`'s TX-FIFO wait
+/// (0x4000921a–0x40009222, a four-instruction poll entered 672 times): one
+/// call's wait retires one more of the loop's instructions before it exits,
+/// which is what the two-cycle shift upstream of it buys. Bytes, sha and
+/// skips did not move.
+///
+/// Then **−21 with lean-wire's follow-ups (#804): 3,251,030 → 3,251,009
+/// cycles, 3,251,010 → 3,250,989 instructions**, in the same change that
+/// left the main stack 16 B smaller (`45360 B` → `45344 B`, the one line of
+/// the 543 bytes that moved; see `init_chain.prefix`). A smaller stack is fewer
+/// `stack_probe::paint` iterations, which is the likely home of the drop,
+/// but it was NOT isolated per symbol with `LP_EMU_XT_BLOCKPROF`, unlike
+/// the entries above. Skips did not move.
+const PREFIX_KEY: &str = "init_chain.prefix";
+
 /// **The single-core safety net.** A run in which core 1 never starts is
 /// the run M3 produced: same bytes, same sha, same cycles, same
 /// instructions, same skips. The quantum is the loop's window bound now and
@@ -323,13 +361,7 @@ const PREFIX_SHA256: &str = "ea8bae305953ef613f68a97fb84919378f33b37eb5623dcb970
 #[test]
 #[ignore = "needs the shipped image; `just test-emu-esp32v3-boot`"]
 fn the_single_core_prefix_is_unchanged() {
-    let elf = match silicon_reference_images() {
-        Ok((elf, _)) => elf,
-        Err(reason) => {
-            skip_notice("the_single_core_prefix_is_unchanged", &reason);
-            return;
-        }
-    };
+    let Some(elf) = elf() else { return };
     let mut m = Esp32V3Builder::new()
         .boot_mode(BootMode::Direct)
         .app(AppSource::Path(elf))
@@ -345,14 +377,19 @@ fn the_single_core_prefix_is_unchanged() {
         "{outcome:?}"
     );
     assert!(m.core_stalled(1), "core 1 was never started in this run");
-    let bytes = m.uart0().bytes();
-    assert_eq!(bytes.len(), PREFIX_BYTES);
-    assert_eq!(format!("{:x}", Sha256::digest(&bytes)), PREFIX_SHA256);
-    assert_eq!(
-        (m.cycles(), m.instructions(), m.idle_skips()),
-        (PREFIX_CYCLES, PREFIX_INSTRUCTIONS, PREFIX_IDLE_SKIPS),
-        "the three counters origin/main's single-hart loop produced"
+    let mut figures = Figures::new(
+        "esp32v3",
+        "determinism::the_single_core_prefix_is_unchanged",
     );
+    figures
+        .utf8(PREFIX_KEY, &m.uart0().bytes())
+        .int("determinism.single_core_prefix.cycles", m.cycles())
+        .int(
+            "determinism.single_core_prefix.instructions",
+            m.instructions(),
+        )
+        .int("determinism.single_core_prefix.idle_skips", m.idle_skips());
+    figures.verify();
     assert_eq!(m.core_instructions(1), 0);
 }
 

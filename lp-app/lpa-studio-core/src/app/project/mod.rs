@@ -23,15 +23,19 @@
 
 pub(crate) mod agent_support;
 pub mod asset;
+pub(crate) mod binding_graph_cache;
+pub(crate) mod control_geometry_cache;
 pub mod demo_project;
 pub(crate) mod device_bind;
 pub mod dirty_summary;
 pub(crate) mod edit_journal;
 pub(crate) mod editor_meta_op;
+pub(crate) mod entry_check;
 pub mod export_lint;
 pub mod loaded_project_choice;
 pub mod node;
 pub mod node_card_ui_state;
+pub(crate) mod output_lamp_coverage;
 pub(crate) mod patch_bay_derivation;
 pub mod patch_preview;
 pub mod patch_pulse;

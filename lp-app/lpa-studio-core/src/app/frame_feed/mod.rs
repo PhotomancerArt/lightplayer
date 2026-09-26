@@ -39,7 +39,9 @@
 pub mod card_feed;
 pub mod output_frame_cache;
 pub mod output_frame_entries;
+pub mod preview_sample_format;
 
 pub use card_feed::{CardFeedApply, CardFeedState};
 pub use output_frame_cache::OutputFrameCache;
 pub use output_frame_entries::output_frame_entries;
+pub use preview_sample_format::{CLOSE_INSPECTION_SAMPLE_FORMAT, PREVIEW_SAMPLE_FORMAT};

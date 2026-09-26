@@ -631,6 +631,9 @@ struct DeviceBench {
     sims: Option<Rc<SimDeviceTransport>>,
     sim_restarts: Rc<Cell<usize>>,
     started: std::time::Instant,
+    /// Where the access controller.s conversations report back (BLE M6):
+    /// the actor.s queue, drained by [`Self::step`].
+    access_rx: crate::app::studio::studio_view_channel::CommandReceiver,
 }
 
 /// `Rc<RefCell<Vec<..>>>` spelled once.
@@ -762,6 +765,8 @@ impl DeviceBench {
             let inbox = Rc::clone(&inbox);
             move |input| inbox.borrow_mut().push_back(input)
         });
+        let (access_tx, access_rx) = crate::app::studio::studio_view_channel::command_channel();
+        controller.set_access_command_sender(access_tx);
         let flash_plan: Rc<Cell<FlashPlan>> = Rc::new(Cell::new(FlashPlan::default()));
         let manifest_writes: Rc<RefCell<Vec<String>>> = Rc::new(RefCell::new(Vec::new()));
         let push_plan: Rc<Cell<PushPlan>> = Rc::new(Cell::new(PushPlan::default()));
@@ -793,6 +798,7 @@ impl DeviceBench {
             sims: None,
             sim_restarts: Rc::new(Cell::new(0)),
             started: std::time::Instant::now(),
+            access_rx,
         };
         (bench, tasks)
     }
@@ -805,6 +811,13 @@ impl DeviceBench {
         let queued: Vec<DeviceInput> = self.inbox.borrow_mut().drain(..).collect();
         for input in queued {
             self.controller.fold_device_input(input);
+        }
+        while self.access_rx.peek_any(|_| true) {
+            for command in drive(self.access_rx.recv_coalesced()).unwrap_or_default() {
+                if let crate::StudioCommand::Access(command) = command {
+                    self.controller.apply_access_command(command);
+                }
+            }
         }
         drive(self.controller.settle_device_records());
     }
@@ -946,6 +959,70 @@ impl DeviceBench {
         }
     }
 
+    /// The board's `project.json`, read over the lens's own wire from the
+    /// storage dir the editor is connected to.
+    fn board_manifest(&mut self) -> Vec<u8> {
+        let path = self.board_manifest_path();
+        drive(
+            self.controller
+                .lens_client_mut_for_test()
+                .fs_read(path.as_str().as_path()),
+        )
+        .expect("the board's project.json reads")
+        .data
+    }
+
+    /// Overwrite the board's `project.json` behind the editor's back — what
+    /// a CLI or `catalog/` re-push does to it.
+    fn write_board_manifest(&mut self, bytes: &[u8]) {
+        let path = self.board_manifest_path();
+        drive(
+            self.controller
+                .lens_client_mut_for_test()
+                .fs_write(path.as_str().as_path(), bytes),
+        )
+        .expect("the board's project.json writes");
+    }
+
+    fn board_manifest_path(&self) -> String {
+        lpa_client::project_deploy::project_file_path(
+            self.controller
+                .project_for_test()
+                .runtime_storage_id_for_test(),
+            "project.json",
+        )
+    }
+
+    /// The canonical hash the board reports for the dir the editor is on.
+    fn board_hash(&mut self) -> lpc_history::ContentHash {
+        let storage = self
+            .controller
+            .project_for_test()
+            .runtime_storage_id_for_test()
+            .to_string();
+        let (hash, _) = drive(
+            self.controller
+                .lens_client_mut_for_test()
+                .hash_package(&storage),
+        )
+        .expect("the board hashes its project");
+        hash.parse().expect("the board's hash reads")
+    }
+
+    /// The handle of the project the board's server has loaded RIGHT NOW,
+    /// asked over the wire. An unload/reload would mint a new one.
+    fn board_loaded_handle(&mut self) -> Option<u32> {
+        drive(
+            self.controller
+                .lens_client_mut_for_test()
+                .list_loaded_projects(),
+        )
+        .expect("the board lists its loaded projects")
+        .projects
+        .first()
+        .map(|project| project.handle_id)
+    }
+
     /// The newest console line containing `needle`, if the console said it.
     fn console_line_containing(&self, needle: &str) -> Option<String> {
         self.controller
@@ -1015,6 +1092,20 @@ fn opening_the_lens_borrows_the_wire_and_the_card_keeps_folding() {
             .lens_holds_wire(link),
         "the lens holds the borrow"
     );
+    // Lens open, card visible (lean-wire P5): the card pulls nothing while
+    // the lens holds the wire, so the lens read is the only copy of the
+    // board's pixels on the link.
+    {
+        let devices = bench.controller.devices_for_test();
+        assert!(
+            crate::app::devices::device_frame_feed::feed_target(
+                &devices.roster().devices()[0],
+                devices.effects(),
+            )
+            .is_none(),
+            "the card does not pull under the lens"
+        );
+    }
     assert_eq!(
         bench
             .controller
@@ -1081,6 +1172,16 @@ fn opening_the_lens_borrows_the_wire_and_the_card_keeps_folding() {
             .is_some_and(|card| card.state_label == "Ready")
     });
     assert_eq!(bench.view().devices.len(), 1, "the card never left");
+    // Card only: with the lens gone the card is the board's one feed again.
+    let devices = bench.controller.devices_for_test();
+    assert!(
+        crate::app::devices::device_frame_feed::feed_target(
+            &devices.roster().devices()[0],
+            devices.effects(),
+        )
+        .is_some(),
+        "the card pulls again once the lens lets go"
+    );
 }
 
 /// The lens reads the board's BUILD off its own wire at attach (M5
@@ -1187,6 +1288,77 @@ fn unplugging_mid_lens_closes_the_editor_and_leaves_an_honest_card() {
             || card.escapes.contains(&lpa_devices::Escape::Forget),
         "the card offers a way back: {card:?}"
     );
+}
+
+/// The 2026-09-24 walk, Studio's half: the editor is a lens on the board,
+/// the cable comes out (the hotplug DISCONNECT edge, the way a replug under
+/// the shim or Chrome delivers it), the page drops to the gallery, and the
+/// cable goes back in on the SAME endpoint (the session id survives a
+/// replug). The card must come back to Ready and the project must open
+/// again — never park at "Attached — not listening" with a board that is
+/// talking.
+///
+/// The walk's own failure was below this layer: the shim left the dead
+/// generation's byte channel open, so the replugged port's `open()` was
+/// refused (`docs/defects/2026-09-24-emulated-replug-leaves-the-old-byte-channel-open.md`,
+/// pinned by `a_port_open_across_a_replug_reopens_on_the_new_generation` in
+/// lpa-link's conformance suite). This row pins that nothing ABOVE the port
+/// strands the card on the same walk.
+#[test]
+fn a_replug_under_the_lens_comes_back_ready_and_opens_again() {
+    let device = empty_light_player("dev000000daqf6dvvr8");
+    let (mut bench, tasks) = identified(&device, "usb-lens-8");
+    bench.run_until(&tasks, "the board to report nothing loaded", |bench| {
+        bench
+            .view()
+            .devices
+            .first()
+            .is_some_and(|card| card.loaded_project == lpa_devices::view::LoadedProject::Empty)
+    });
+    let card = bench.view().devices[0].clone();
+    bench.push_gesture(card.id, bundled_example());
+    bench.run_until(&tasks, "the push to finish", |bench| {
+        bench
+            .view()
+            .devices
+            .first()
+            .is_some_and(|card| card.activity.is_none() && card.last_outcome.is_some())
+    });
+    let uid = bench.registry()[0].uid.clone();
+    bench.open_lens(&uid).expect("opens");
+    assert!(bench.lens_device_uid().is_some());
+
+    // The cable comes out under the lens: the port dies AND the bus says so.
+    device.set_failure_plan(
+        lpa_link::providers::fake_device::FakeFailurePlan::none()
+            .with_disconnect_after_bytes(device.served_bytes()),
+    );
+    bench.granted.set(false);
+    bench
+        .controller
+        .note_device_hotplug(crate::app::studio::studio_command::DeviceHotplug::Disconnected);
+    bench.run_until(&tasks, "the lens to close on the departure", |bench| {
+        bench.lens_device_uid().is_none()
+    });
+
+    // …and goes back in: same endpoint, a live wire, the connect edge.
+    device.set_failure_plan(lpa_link::providers::fake_device::FakeFailurePlan::none());
+    bench.granted.set(true);
+    bench
+        .controller
+        .note_device_hotplug(crate::app::studio::studio_command::DeviceHotplug::Connected);
+    bench.run_until(&tasks, "the replugged board to come back Ready", |bench| {
+        bench
+            .view()
+            .devices
+            .first()
+            .is_some_and(|card| card.activity.is_none() && card.state_label == "Ready")
+    });
+    assert_eq!(bench.view().devices.len(), 1, "one board, one card");
+    bench
+        .open_lens(&uid)
+        .expect("the replugged board opens again");
+    assert_eq!(bench.lens_device_uid().as_deref(), Some(uid.as_str()));
 }
 
 /// One wire, one owner: a card verb that needs the board's wire while the
@@ -1756,9 +1928,18 @@ fn a_fed_boards_last_frame_survives_a_reload() {
     let live = feed.frame().expect("the feed's frame");
     // The packed layout form quantizes lamp centers, so the picture is
     // compared by what a slot would draw from it, not bit for bit.
+    // The card pulls sRGB8 and the sidecar stores linear 16 (each code
+    // decoded), so the samples are compared as the lamp decode reads them.
     assert_eq!(stored.revision, live.revision);
-    assert_eq!(stored.bytes, live.bytes);
+    assert_eq!(live.sample_format, crate::UiControlSampleFormat::Srgb8);
+    assert_eq!(stored.sample_format, crate::UiControlSampleFormat::U16);
     assert_eq!(stored.extent, live.extent);
+    let samples = |frame: &crate::UiControlProductPreview| -> Vec<Option<u16>> {
+        (0..frame.extent.sample_count() as usize)
+            .map(|index| frame.unorm16_sample(index))
+            .collect()
+    };
+    assert_eq!(samples(&stored), samples(live));
     assert!(stored.display_layout.is_some() && live.display_layout.is_some());
     let live_at = feed
         .frame_age_secs(bench.clock.get())
@@ -2902,6 +3083,136 @@ fn a_board_running_another_project_stops_the_open_until_push_here_answers_it() {
     );
 }
 
+/// Yona, 2026-09-24: `/p/…?on=mac:` loaded fresh in a browser that forgets
+/// Web Serial grants on reload. The console said "waiting for the device
+/// before opening it: missing session: this board is not connected" and
+/// the page said nothing at all, because nothing in a page can reach a
+/// board it holds no port for — only a click on `requestPort()` can.
+///
+/// The hold now tells the opening frame WHICH board and WHY; the frame
+/// turns `NotConnected` into its "Connect this board" button.
+#[test]
+fn a_fresh_page_names_the_board_it_cannot_reach() {
+    use crate::app::open_progress::{DeviceWaitReason, OpenStage, open_stage};
+
+    let device = empty_light_player("dev000000daqf6dvvr8");
+    let (bench, _tasks) = identified(&device, "usb-fresh-1");
+    let key = library_package(&bench, "Choker", SIM_TARGET);
+    // The page comes back with the board still on the desk: a fresh
+    // controller, and the same board behind a port it holds no grant for.
+    let (mut page, _tasks) = DeviceBench::reloaded(
+        &bench,
+        &empty_light_player("dev000000daqf6dvvr8"),
+        "usb-fresh-1",
+    );
+    drop(bench);
+    page.settle_library();
+    page.open_on_device(&key, BENCH_BOARD_MAC, false)
+        .expect("a held open is not a refusal");
+
+    let OpenStage::WaitingForDevice(wait) = open_stage() else {
+        panic!(
+            "the frame is told why it waits, not left at Starting: {:?}",
+            open_stage()
+        );
+    };
+    assert_eq!(wait.reason, DeviceWaitReason::NotConnected);
+    assert_eq!(wait.device.uid, "dev000000daqf6dvvr8");
+    assert!(
+        wait.device.id.is_some(),
+        "the remembered row is a roster device — what Reconnect aims at"
+    );
+}
+
+/// The other half of the frame's Connect: a held open on a board whose
+/// port is closed says so, and the Connect gesture it offers is all it
+/// takes for the open to land — no reload, no trip to Devices.
+#[test]
+fn connecting_the_board_a_held_open_waits_on_lands_the_open() {
+    use crate::app::open_progress::{DeviceWaitReason, OpenStage, open_stage};
+
+    let device = empty_light_player("dev000000daqf6dvvr8");
+    let (mut bench, tasks) = identified(&device, "usb-fresh-3");
+    let key = library_package(&bench, "Choker", SIM_TARGET);
+    bench.settle_library();
+    let board = bench.view().devices[0].id;
+    bench.gesture(DeviceAction::Disconnect { device: board });
+    bench.run_until(&tasks, "the port to close", |bench| {
+        bench.view().devices[0].state_label != "Ready"
+    });
+
+    bench
+        .open_on_device(&key, BENCH_BOARD_MAC, false)
+        .expect("a held open is not a refusal");
+    let OpenStage::WaitingForDevice(wait) = open_stage() else {
+        panic!("held, and told why: {:?}", open_stage());
+    };
+    assert_eq!(wait.reason, DeviceWaitReason::PortClosed);
+
+    bench.gesture(DeviceAction::Connect { device: board });
+    let deadline = std::time::Instant::now() + REAL_TIME_LIMIT;
+    while bench.controller.view().open_project_uid.is_none() {
+        bench.step(&tasks);
+        drive(bench.controller.try_pending_device_lens());
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the held open never landed; stage {:?}, roster {:?}",
+            open_stage(),
+            bench.view()
+        );
+        std::thread::sleep(Duration::from_millis(1));
+    }
+    assert_eq!(
+        bench.controller.view().open_project_uid.as_deref(),
+        Some(key.as_str())
+    );
+    assert_eq!(
+        open_stage(),
+        OpenStage::Idle,
+        "a landed open stops narrating"
+    );
+}
+
+/// The frame's Cancel on a held open: the hold is let go and nothing is
+/// left narrating, so a board that shows up later is not opened behind the
+/// person's back.
+#[test]
+fn cancelling_a_held_open_lets_the_board_go() {
+    use crate::app::open_progress::{OpenStage, open_stage};
+
+    let device = empty_light_player("dev000000daqf6dvvr8");
+    let (bench, _tasks) = identified(&device, "usb-fresh-2");
+    let key = library_package(&bench, "Choker", SIM_TARGET);
+    // The page comes back with the board still on the desk: a fresh
+    // controller, and the same board behind a port it holds no grant for.
+    let (mut page, tasks) = DeviceBench::reloaded(
+        &bench,
+        &empty_light_player("dev000000daqf6dvvr8"),
+        "usb-fresh-2",
+    );
+    drop(bench);
+    page.settle_library();
+    page.open_on_device(&key, BENCH_BOARD_MAC, false)
+        .expect("a held open is not a refusal");
+    assert!(page.controller.pending_device_lens_for_test().is_some());
+
+    crate::cancel_open();
+    drive(page.controller.dispatch(UiAction::from_op(
+        crate::RuntimeOp::NODE_ID,
+        crate::RuntimeOp::CancelOpen,
+    )))
+    .expect("cancel never fails");
+    assert_eq!(
+        page.controller.pending_device_lens_for_test(),
+        None,
+        "nothing is left to land when the board shows up"
+    );
+    assert_eq!(open_stage(), OpenStage::Idle);
+    page.step(&tasks);
+    drive(page.controller.try_pending_device_lens());
+    assert_eq!(page.controller.view().open_project_uid, None);
+}
+
 /// A MAC nothing answers to is not a failure and not a guess: the hint is
 /// dropped and the open takes its ordinary course (PD14). Nothing stops,
 /// because there is nothing to decide.
@@ -3219,8 +3530,9 @@ fn running_board(device: &FakeEsp32Device, endpoint: &str) -> (DeviceBench, Task
 /// exactly what was pulled. Then it binds, which is what lets the address
 /// bar heal into `/p/<slug>-prj…?on=…` (D51).
 ///
-/// Nothing is asked and nothing is sent: adoption writes this browser's
-/// library and touches neither the board nor anyone else's copy.
+/// Nothing is asked, and — the board's manifest already carrying its
+/// identity — nothing is sent: adoption writes this browser's library and
+/// touches neither the board nor anyone else's copy.
 #[test]
 fn opening_a_board_adopts_the_project_this_library_does_not_have() {
     let (project_uid, files) = a_project_from_another_library(0x5a);
@@ -3374,51 +3686,188 @@ fn reopening_an_adopted_board_binds_instead_of_adopting_again() {
     );
 }
 
-/// A board running files that carry no identity is NOT adopted (D17).
-///
-/// Minting a uid for it would give the library copy a different
-/// `project.json` from the board's — and the manifest is inside the
-/// canonical hash, so the copy would not hash like the thing it is a copy
-/// of, and the next save would trip the save-as-pull tripwire. The editor
-/// works on the board's project unnamed, and the console says why.
-#[test]
-fn a_board_running_an_identity_free_project_is_not_adopted() {
+/// The files a board runs after a push straight from the repo: a bundled
+/// example, whose manifest carries NO uid — a uid is minted when a project
+/// ENTERS a library, and every `catalog/` project and bundled example is
+/// uid-free by design.
+fn identity_free_project() -> Vec<(String, Vec<u8>)> {
     let example = crate::app::home::embedded_example::embedded_example(
         crate::first_bundled_example_id().expect("this build bundles examples"),
     )
     .expect("the bundled example resolves");
-    // The bundled example's manifest carries no uid: a uid is minted when
-    // a project ENTERS a library, and this one never did.
     let files = example.files();
     assert!(
         files.iter().any(|(path, bytes)| path == "project.json"
-            && !String::from_utf8_lossy(bytes).contains("\"uid\"")),
+            && lpc_model::ProjectManifest::read_json(&String::from_utf8_lossy(bytes))
+                .is_ok_and(|manifest| manifest.uid.is_none())),
         "the fixture is identity-free by construction"
     );
-    let device = light_player_running("dev000000daqf6dvvr8", files);
+    files
+}
+
+/// The uid a `project.json` carries, if it parses and has one.
+fn manifest_uid(bytes: &[u8]) -> Option<String> {
+    lpc_model::ProjectManifest::read_json(&String::from_utf8_lossy(bytes))
+        .expect("the board's project.json parses")
+        .uid
+}
+
+/// A board running files with no identity — pushed straight from
+/// `catalog/` — is given one ON THE BOARD and then adopted (ADR
+/// 2026-09-22, amended).
+///
+/// Minting only in the library would give the copy a different
+/// `project.json` from the board's, and the manifest is inside the
+/// canonical hash, so the two would never match. So the stamped manifest
+/// is written back over the wire — the one board write adoption makes —
+/// and it lands as an incremental refresh: the server is still running
+/// the very project the editor connected to.
+#[test]
+fn a_board_running_an_identity_free_project_is_stamped_and_adopted() {
+    let device = light_player_running("dev000000daqf6dvvr8", identity_free_project());
     let (mut bench, _tasks, device_uid) = running_board(&device, "usb-adopt-anon");
+    let board_title = bench.view().devices[0].title.clone();
 
-    bench.open_lens(&device_uid).expect("the board still opens");
+    bench.open_lens(&device_uid).expect("the board opens");
 
-    assert!(
-        bench.library().is_empty(),
-        "nothing was written: {:?}",
-        bench.library()
-    );
+    // One project in the library, under an identity minted for it.
+    let library = bench.library();
+    assert_eq!(library.len(), 1, "exactly one project: {library:?}");
+    let project = library[0].uid;
+    let project_uid = project.to_string();
+
+    // The board carries that identity now, byte for byte the library
+    // copy's manifest.
+    let board_manifest = bench.board_manifest();
     assert_eq!(
-        bench.controller.view().open_project_uid,
-        None,
-        "and nothing was named"
+        manifest_uid(&board_manifest).as_deref(),
+        Some(project_uid.as_str()),
+        "the uid was stamped onto the board"
     );
-    assert!(
-        bench.ready_handle().is_some(),
-        "the editor is still working on the board's project"
+    let adopted = bench.store.open(project).expect("the copy opens");
+    assert_eq!(
+        adopted
+            .package_fs
+            .borrow()
+            .read_file("/project.json".as_path())
+            .expect("the library copy has a manifest"),
+        board_manifest,
+        "the board and the library hold the same manifest bytes"
+    );
+    let meta = crate::app::library::package_meta::read_meta(&*adopted.package_fs.borrow())
+        .expect("the sidecar reads")
+        .expect("an adopted copy carries provenance");
+    assert_eq!(
+        meta.provenance,
+        crate::app::library::PackageProvenance::PulledFromDevice {
+            device_uid: device_uid.clone(),
+            device_name: board_title.clone(),
+        },
+    );
+    drop(adopted);
+
+    // Same content on both sides, so the copy is bound and the address
+    // can heal (D51).
+    let head = bench.library_head(project);
+    assert_eq!(bench.board_hash(), head, "the board is at the library head");
+    assert_eq!(
+        bench.controller.view().open_project_uid.as_deref(),
+        Some(project_uid.as_str()),
+        "the adopted project is the open one"
+    );
+    let association = bench.registry()[0]
+        .association
+        .clone()
+        .expect("the adoption is banked");
+    assert_eq!(association.project, project);
+    assert_eq!(association.version, head);
+
+    // No reload: the project the board runs now is the one the editor
+    // connected to before the manifest was written.
+    let connected = bench
+        .ready_handle()
+        .expect("the editor is on a ready project");
+    assert_eq!(
+        bench.board_loaded_handle(),
+        Some(connected),
+        "the stamp was an incremental refresh, not a reload"
     );
     assert!(
         bench
-            .console_line_containing("no identity of its own")
+            .console_line_containing("its library identity and adopted it")
+            .is_some_and(|line| line.contains(&board_title)),
+        "the console says what happened: {:?}",
+        bench.controller.view().console.entries
+    );
+}
+
+/// Re-pushing a project from `catalog/` strips the board's uid again, but
+/// not its content. The next open recognises the library copy that
+/// differs from the board ONLY by that uid, stamps the SAME identity back,
+/// and binds it — no second copy in the library.
+#[test]
+fn a_board_repushed_without_identity_gets_its_library_identity_back() {
+    let files = identity_free_project();
+    let original = files
+        .iter()
+        .find(|(path, _)| path == "project.json")
+        .map(|(_, bytes)| bytes.clone())
+        .expect("the project has a manifest");
+    let device = light_player_running("dev000000daqf6dvvra", files);
+    let (mut bench, tasks, device_uid) = running_board(&device, "usb-adopt-repush");
+
+    bench.open_lens(&device_uid).expect("the board opens");
+    let library = bench.library();
+    assert_eq!(library.len(), 1, "{library:?}");
+    let project = library[0].uid;
+    let project_uid = project.to_string();
+    let head = bench.library_head(project);
+
+    // The re-push: the uid-free manifest lands on the board again.
+    bench.write_board_manifest(&original);
+    assert_eq!(manifest_uid(&bench.board_manifest()), None);
+    assert_ne!(bench.board_hash(), head, "the board lost its identity");
+
+    bench.detach_lens();
+    bench.run_until(&tasks, "the pump to hear the board again", |bench| {
+        bench
+            .view()
+            .devices
+            .first()
+            .is_some_and(|card| card.state_label == "Ready")
+    });
+    bench.settle_library();
+
+    bench.open_lens(&device_uid).expect("the board opens again");
+
+    let library = bench.library();
+    assert_eq!(library.len(), 1, "no second copy was minted: {library:?}");
+    assert_eq!(library[0].uid, project);
+    assert_eq!(
+        manifest_uid(&bench.board_manifest()).as_deref(),
+        Some(project_uid.as_str()),
+        "the SAME identity was stamped back"
+    );
+    assert_eq!(
+        bench.board_hash(),
+        head,
+        "the board is at the library head again"
+    );
+    assert_eq!(
+        bench.library_head(project),
+        head,
+        "the library copy is untouched"
+    );
+    assert_eq!(
+        bench.controller.view().open_project_uid.as_deref(),
+        Some(project_uid.as_str()),
+        "and the copy is bound"
+    );
+    assert!(
+        bench
+            .console_line_containing("restored its identity")
             .is_some(),
-        "the console says why: {:?}",
+        "the console says what happened: {:?}",
         bench.controller.view().console.entries
     );
 }
@@ -4010,6 +4459,20 @@ fn an_effect_that_outlives_its_activity_gives_the_wire_back_and_the_pump_resumes
             .is_some_and(|card| card.loaded_project == lpa_devices::view::LoadedProject::Empty)
     });
     let device_id = bench.view().devices[0].id;
+
+    // The precondition the fresh-window assertion below rests on, enforced
+    // rather than assumed: every question the board was asked is answered
+    // and on the wire BEFORE the push borrows it. Identify settles on the
+    // board's unsolicited boot hello while its own hello REQUEST is still in
+    // flight, and the fake's server answers that on a real thread in real
+    // time. On a loaded runner the answer was still inside the server when
+    // the push took the wire; the reopen flushes the wire, not the server,
+    // so the late hello landed in the fresh window and the card read Ready
+    // (CI, 2026-09-25, twice in 30 minutes; 11/96 under local load).
+    // docs/defects/2026-09-25-a-late-hello-answer-reaches-the-fresh-window.md
+    bench.run_until(&tasks, "every request to be answered onto the wire", |_| {
+        device.unanswered_requests() == 0
+    });
 
     // A push that never completes: it takes the wire and keeps it.
     bench.push_gesture(device_id, bundled_example());
@@ -5192,4 +5655,196 @@ fn opening_a_project_under_a_board_lens_never_touches_the_board() {
         "the open reached for a sim of the project\'s target: {:?}",
         bench.view()
     );
+}
+
+/// M5's twin-row guard, end to end: the same board (same base MAC, no
+/// stamped uid — the registry's shared `mac:` key, where twin rows have
+/// happened before) heard over USB and then over Bluetooth is ONE card and
+/// ONE registry row, and the row's transport follows the live link.
+#[test]
+fn a_board_seen_over_usb_and_over_bluetooth_is_one_registry_row() {
+    let board = || {
+        FakeEsp32Device::new(FakeDeviceScript::new(FakeBootState::LightPlayer(
+            FakeLightPlayerState::new().with_base_mac("a0:f2:62:87:b4:8c"),
+        )))
+    };
+    let usb_side = board();
+    let (mut bench, tasks) = DeviceBench::granted(&usb_side, "usb-twin");
+    bench.run_until(&tasks, "the USB board to identify", |bench| {
+        bench
+            .view()
+            .devices
+            .first()
+            .is_some_and(|card| card.state_label == "Ready")
+    });
+    let rows = bench.registry();
+    assert_eq!(rows.len(), 1, "{rows:?}");
+    assert_eq!(rows[0].uid, "mac:a0:f2:62:87:b4:8c", "{rows:?}");
+    assert_eq!(rows[0].transport, "USB");
+
+    // The shipped build's shape: a sim half, and now a Bluetooth half whose
+    // one present device is the same board. Installing arms a sweep.
+    bench
+        .controller
+        .set_device_sim_transport(Rc::new(SimDeviceTransport::new(Rc::new(
+            ScriptedSimSource {
+                device: board(),
+                restarts: Rc::new(Cell::new(0)),
+                manifests: Rc::new(RefCell::new(Vec::new())),
+            },
+        ))));
+    bench
+        .controller
+        .set_ble_transport(Rc::new(crate::BleDeviceTransport::new(Rc::new(
+            OneBleBoard {
+                device: board(),
+                device_id: "QkxFLWlk".to_string(),
+            },
+        ))));
+    bench.run_until(&tasks, "the Bluetooth link to merge in", |bench| {
+        bench.view().pending.is_empty()
+            && bench
+                .registry()
+                .first()
+                .is_some_and(|row| row.transport == "Bluetooth")
+    });
+
+    let cards = bench.view().devices;
+    assert_eq!(cards.len(), 1, "one board, one card: {cards:?}");
+    assert_eq!(
+        cards[0].firmware_blocked.as_deref(),
+        Some(lpa_devices::view::FIRMWARE_NEEDS_USB),
+        "reached over Bluetooth, the card says why it cannot flash"
+    );
+    let rows = bench.registry();
+    assert_eq!(rows.len(), 1, "one row, never a twin: {rows:?}");
+    assert_eq!(rows[0].uid, "mac:a0:f2:62:87:b4:8c");
+
+    // A Bluetooth link holds nothing until its hello says what it holds
+    // (BLE M6): the lens waits for that. This board's link is trusted (the
+    // fake answers as a USB link would), so the check grants edit.
+    bench.run_until(&tasks, "the Bluetooth link's access to be read", |bench| {
+        bench
+            .controller
+            .device_roster_view()
+            .access
+            .get(&cards[0].id)
+            .and_then(|access| access.line.as_deref())
+            == Some("Unlocked")
+    });
+
+    // The editor over Bluetooth is authoring: the device cadence. Play is
+    // the idle-budgeted mode: while a Play surface holds its lease, an
+    // untouched lens reads once a minute.
+    bench
+        .open_lens(&rows[0].uid)
+        .expect("the board opens in the editor over Bluetooth");
+    let session = bench
+        .controller
+        .runtime_pool_for_test()
+        .attached_session()
+        .expect("a device session");
+    assert_eq!(session.transport(), crate::LinkTransport::Ble);
+    assert_eq!(
+        bench.controller.lens_refresh_gap_for_test(),
+        Some(crate::DEVICE_REFRESH_INTERVAL)
+    );
+    drive(
+        bench
+            .controller
+            .dispatch(crate::PlayViewOp::action_for(true)),
+    )
+    .expect("the lease");
+    assert_eq!(
+        bench.controller.lens_refresh_gap_for_test(),
+        Some(crate::app::studio::BLE_PLAY_IDLE_REFRESH_INTERVAL)
+    );
+    drive(
+        bench
+            .controller
+            .dispatch(crate::PlayViewOp::action_for(false)),
+    )
+    .expect("the lease");
+    assert_eq!(
+        bench.controller.lens_refresh_gap_for_test(),
+        Some(crate::DEVICE_REFRESH_INTERVAL)
+    );
+}
+
+/// iPhone/Bluefy's shape: a sim half and a Bluetooth half, and NO serial
+/// transport, because the browser has no Web Serial. The roster is still
+/// reachable, but the view says USB is not — which is what keeps the add
+/// slot's USB verb away. Installing a serial transport (Web Serial, or the
+/// `?emu=` shim) is exactly what turns it back on.
+#[test]
+fn a_build_without_web_serial_says_usb_is_unavailable() {
+    let board = || {
+        FakeEsp32Device::new(FakeDeviceScript::new(FakeBootState::LightPlayer(
+            FakeLightPlayerState::new().with_base_mac("a0:f2:62:87:b4:8c"),
+        )))
+    };
+    let mut controller = StudioController::new(|| 0.0);
+    controller.set_device_sim_transport(Rc::new(SimDeviceTransport::new(Rc::new(
+        ScriptedSimSource {
+            device: board(),
+            restarts: Rc::new(Cell::new(0)),
+            manifests: Rc::new(RefCell::new(Vec::new())),
+        },
+    ))));
+    controller.set_ble_transport(Rc::new(crate::BleDeviceTransport::new(Rc::new(
+        OneBleBoard {
+            device: board(),
+            device_id: "QkxFLWlk".to_string(),
+        },
+    ))));
+    assert!(
+        !controller.device_roster_view().usb_available,
+        "sims and Bluetooth, but no port to reach"
+    );
+
+    let usb_side = board();
+    let (bench, _tasks) = DeviceBench::granted(&usb_side, "usb-1");
+    assert!(
+        bench.controller.device_roster_view().usb_available,
+        "a serial transport is installed"
+    );
+}
+
+/// One Bluetooth board, always present: a fake-device link at a `ble:`
+/// endpoint, and the real `M!` io over the same fake.
+struct OneBleBoard {
+    device: FakeEsp32Device,
+    device_id: String,
+}
+
+impl crate::BleLinkSource for OneBleBoard {
+    fn present(&self) -> Vec<GrantedLink> {
+        let info = crate::ble_link_info(&self.device_id, "LP-b48c");
+        vec![GrantedLink {
+            link: Box::new(fake_device_link(info.clone(), &self.device)),
+            info,
+        }]
+    }
+
+    fn restore(&self) {}
+
+    fn request(&self) -> DeviceTransportFuture<Result<Option<GrantedLink>, String>> {
+        Box::pin(core::future::ready(Ok(None)))
+    }
+
+    fn forget(&self, _device_id: &str) -> DeviceTransportFuture<Result<(), String>> {
+        Box::pin(core::future::ready(Ok(())))
+    }
+
+    fn client_io(
+        &self,
+        _device_id: &str,
+        tap: Option<LensLineTap>,
+    ) -> Result<Box<dyn lpa_client::ClientIo>, String> {
+        let io = FakeDeviceIo::new(&self.device);
+        Ok(Box::new(match tap {
+            Some(tap) => io.with_tap(tap),
+            None => io,
+        }))
+    }
 }

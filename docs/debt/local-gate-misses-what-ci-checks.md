@@ -65,6 +65,29 @@ can abort `just test` before it is reached
   Closed by wiring `fw-manifest-check-emu` (the one manifest check that
   needs no chip toolchain) into `just check`; the esp32 variants remain
   CI-only, so emu-fixture-specific drift is the local-only residue.
+- 2026-09-24 — the **wasm32** hole narrowed, not closed: paid down
+  `docs/debt/wasm-cloud-check-not-in-just-check.md` by wiring
+  `check-wasm-cloud` (a bare `cargo check -p lpa-cloud-client
+  --no-default-features --target wasm32-unknown-unknown`, warm ~1s, cold
+  ~47s) into `just check`'s chain. This covers one crate/feature
+  combination only — the real wasm32 deploy target
+  (`lpa-studio-web`/`just studio-web-build`, minutes, a full `dx build`)
+  is still outside the local gate and still the residue this entry
+  tracks.
+
+- 2026-09-25 — the **chip-emulator** side of the same gap, and a
+  workaround for it. The three chip suites (`test-emu-{c6,esp32v3,esp32s3}-boot`)
+  and the chip heap ratchets only run in path-gated CI jobs, and
+  reproducing one of their failures on a desk started with a firmware build:
+  5–15 minutes of cross-compile and tens of GB of `target/` per worktree,
+  on a desk already running other sessions' builds (load average 92 the
+  afternoon this was written). Those jobs now upload the images they built
+  (`ci-images-<chip>`, 7 days), and **`just fetch-ci-images <pr|sha|run>`
+  + `export LP_CI_IMAGES=…`** runs the same recipes — and `bless-chips` —
+  against CI's own bytes with no firmware build, refusing a set whose
+  firmware sources are not the checkout's (`docs/ci-images.md`). This does
+  not close the hole (the local gate still runs no chip suite); it makes
+  the CI-only check cheap to reproduce once CI has run.
 
 **Exit criteria** — one recipe (`just check-studio`, or folding the four
 into `check-lint` when they are fast enough) that a Studio-touching
