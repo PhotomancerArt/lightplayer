@@ -58,19 +58,21 @@ cargo run -q -p lp-cli -- record timeline <file> --since 340 --wire raw
 One line per event, timed from the session start:
 
 ```
- +17.657s  REQ      c11#1073741824 access.list sent
- +17.658s  WIRE  →  serial:1  accessList id=1073741824 39 B
- +17.672s  WIRE  ←  serial:1  accessList id=1073741824 28 B packed
- +17.680s  REQ      c11#1073741824 access.list answered in 23.0 ms
-+404.743s  ROUTE    /p/playful-choker-…?on=mac:… → /devices   (browser-nav)
-+404.906s  WIRE  ←  serial:1  error.error id=1090520149 48 B packed
-+404.926s  REQ      c15#1090520149 project.read failed in 85.0 ms: server error: Project not found: handle 1
+ +5.264s  REQ      c11#1073741824 access.list sent
+ +5.264s  WIRE  →  serial:1  accessList id=1073741824 39 B
+ +5.279s  WIRE  ←  serial:1  accessList id=1073741824 71 B packed
+ +5.286s  REQ      c11#1073741824 access.list answered in 22.0 ms
++40.615s  ROUTE    /p/playful-choker-…?on=mac:… → /devices   (browser-nav)
++40.746s  REQ      c15#1090519058 project.read failed in 64.0 ms: server error: Project not found: handle 1
 ```
 
 - `--wire frames` (the default) joins each link's chunks back together and
   decodes them: JSON Pack frames and `M!{json}` lines become a message kind
   with its `id`/`seq`/`fin`, board log text is shown after `|`, and a frame
   that does not decode is shown as `!! undecodable frame`, never dropped.
+  Packed replies use a table the board and page learn as the link runs, so
+  a link's frames decode only when the recording holds that link from its
+  start; a frame read without its table shows as undecodable.
   `--wire raw` shows each chunk's size and first bytes; `--wire off` hides
   them.
 - When nothing at all happened for more than 2 s while a request was waiting
