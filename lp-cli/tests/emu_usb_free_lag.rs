@@ -73,7 +73,7 @@ const FIRST_ID: u64 = 10;
 
 #[test]
 #[ignore = "needs two built fw-esp32c6 ELFs and a release emulator; `just test-emu-c6` runs it"]
-fn a_free_lag_between_esp_hals_write_and_the_gates_check_tears_only_the_ungated_image() {
+fn a_free_lag_tears_neither_image_once_esp_hal_checks_the_free_bit() {
     let (Some(ungated), Some(gated)) = (
         image(&FwImage::NO_IN_ENDPOINT_GATE),
         image(&FwImage::SHIPPED),
@@ -106,74 +106,58 @@ fn a_free_lag_between_esp_hals_write_and_the_gates_check_tears_only_the_ungated_
         );
     }
 
-    // 2. The timing condition: esp-hal writes a frame's next packet sooner
-    //    after the drain than the gate reads `serial_in_ep_data_free`.
+    // 2. The timing condition is gone. Stock esp-hal 1.1.1 wrote a frame's
+    //    next packet straight out of its wake, sooner than the gate read
+    //    `serial_in_ep_data_free`. Upstream #6104 (back-ported in
+    //    `third_party/esp-hal`, README-LP.md's third diff) re-reads that bit
+    //    after every wake and waits until it is set, so the ungated image
+    //    now checks before it writes, and writes no sooner than the gate
+    //    checks.
     let write = before
         .span("ep1 write")
         .expect("the ungated image wrote after a drain");
+    let own_check = before
+        .span("ep1_conf read")
+        .expect("the ungated image read ep1_conf after a drain");
     let check = after
         .span("ep1_conf read")
         .expect("the gated image checked the buffer after a drain");
-    // (The ungated image reads `ep1_conf` too, later: esp-hal's RX drain
-    // tests `serial_out_ep_data_avail` in the same register. Not a free
-    // check, so its `ep1_conf` span is not the comparison.)
     eprintln!(
-        "esp-hal writes {write} ns after a drain at the soonest; the gate checks at {check} ns"
+        "esp-hal checks at {own_check} ns and writes at {write} ns after a drain, at the \
+         soonest; the gate checks at {check} ns"
     );
+    // (`own_check` is printed, not asserted: esp-hal's RX drain reads the
+    // same register for `serial_out_ep_data_avail`, so an `ep1_conf` read
+    // is not proof of a free check. Step 3 is the proof.)
     assert!(
-        write < check,
-        "esp-hal's write ({write} ns) is not sooner than the gate's check ({check} ns)"
+        write >= check,
+        "esp-hal's write ({write} ns) is sooner than the gate's check ({check} ns) again"
     );
 
-    // 3. A lag between the two: the ungated image tears packed frames by a
-    //    few bytes; the gated one delivers every frame and never waits one
-    //    out.
-    let lag = (write + check) / 2;
+    // 3. A lag long enough to catch a write made straight out of the wake
+    //    (the stock driver's, at `write` ns) refuses no byte from either
+    //    image: neither writes into it. What a lag that long costs instead
+    //    is time. The free bit returns with no second edge, so both images'
+    //    writes wait out their 250 ms timeout and abandon the frame
+    //    (measured: the ungated image answers 0 of the Hellos, its one frame
+    //    cut by the timeout, 0 B refused). That is the hypothesis's other
+    //    face, printed here, not this test's claim: the frames it abandons
+    //    are whole-chunk timeouts, not the few-byte tears silicon showed.
+    let lag = write + 1_000;
     let (before, after) = both(&ungated, &gated, lag);
-
-    let scan_before = scan(&before.delivered);
-    eprintln!(
-        "free lag {lag} ns, ungated: {} | {}",
-        before.summary(&scan_before),
-        before.wake_line()
-    );
-    assert!(
-        scan_before.torn > 0,
-        "no packed frame was torn: {}",
-        before.summary(&scan_before)
-    );
-    // Bytes lost per torn Hello: a few, not a packet (silicon: ~5). Counted
-    // from the torn frames themselves: with learned tables a torn frame
-    // that taught the board a name also costs the frames after it (dropped
-    // as out of step, `scan.desynced`), and those lost no bytes.
-    let damaged = scan_before.torn;
-    let per_loss = before.tried.len() / damaged.max(1);
-    eprintln!("{damaged} Hellos damaged, {per_loss} bytes lost from each");
-    assert!(
-        (1..64).contains(&per_loss),
-        "{per_loss} refused bytes per damaged Hello — not a partial packet: {}",
-        before.summary(&scan_before)
-    );
-
-    let scan_after = scan(&after.delivered);
-    eprintln!(
-        "free lag {lag} ns, gated: {} | {}",
-        after.summary(&scan_after),
-        after.wake_line()
-    );
-    assert_eq!(scan_after.torn, 0, "{}", after.summary(&scan_after));
-    assert_eq!(scan_after.desynced, 0, "{}", after.summary(&scan_after));
-    assert!(after.tried.is_empty(), "{} B refused", after.tried.len());
-    assert_eq!(
-        scan_after.replies,
-        REQUESTS as usize,
-        "{}",
-        after.summary(&scan_after)
-    );
-    assert!(
-        !String::from_utf8_lossy(&after.delivered).contains("timed out"),
-        "the gate waited out a chunk timeout"
-    );
+    for (name, run) in [("ungated", &before), ("gated", &after)] {
+        let scan = scan(&run.delivered);
+        eprintln!(
+            "free lag {lag} ns, {name}: {} | {}",
+            run.summary(&scan),
+            run.wake_line()
+        );
+        assert!(
+            run.tried.is_empty(),
+            "{name}: {} B refused inside the lag",
+            run.tried.len()
+        );
+    }
 }
 
 /// The ungated and the gated image, side by side, at one lag.
