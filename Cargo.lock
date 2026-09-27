@@ -4060,6 +4060,7 @@ dependencies = [
  "lp-bootctl",
  "lp-collection 1.0.0",
  "lp-gfx-lpvm",
+ "lp-link",
  "lp-perf",
  "lp-recovery",
  "lp-shader",

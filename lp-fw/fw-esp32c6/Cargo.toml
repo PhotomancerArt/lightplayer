@@ -261,6 +261,19 @@ test_ble = ["ble"]
 # src/tests/test_ble_coex.rs). Never shipped.
 test_ble_coex = ["test_ble", "esp-radio/coex"]
 
+# The comms lab (plan `reliable-device-link` M3): `lp-link` over this chip's
+# own pipes, outside the product — one embassy task per pipe runs the lab's
+# board half (echo, board stream, stats, stall/log/panic on command), and
+# `log`/printf ride the link's log channel. Host half: `lp-cli link lab`,
+# `lp-cli/tests/emu_link_lab.rs`, `spikes/serial-lab` and `spikes/ble-lab`.
+# See `src/tests/comms_lab/mod.rs`. Never shipped.
+#
+# `lpc-shared` for `recovery/panic_path.rs`, as `test_rmt` (M5 P1, DD37).
+test_comms_lab = ["dep:lp-link", "lpc-shared"]
+# The same with the BLE NUS pipe beside USB (datagram framing, one frame per
+# notification / write).
+test_comms_lab_ble = ["test_comms_lab", "ble"]
+
 # FIXTURE builds — test scaffolding, never shipped. Make this CURRENT
 # build misreport its hello so a current Studio classifies it Incompatible,
 # reproducing the s4 device scenario from source instead of from an
@@ -332,6 +345,9 @@ fw-core = { path = "../fw-core", default-features = false }
 fw-esp32-common = { path = "../fw-esp32-common" }
 fw-checks = { path = "../fw-checks", default-features = false, features = ["check-shader-compile"], optional = true }
 lps-q32 = { path = "../../lp-shader/lps-q32", default-features = false }
+# The comms lab's link layer (`test_comms_lab`): no_std + alloc, with the lab
+# protocol and the `log` adapter for its log ring.
+lp-link = { path = "../../lp-base/lp-link", default-features = false, features = ["lab", "log"], optional = true }
 # The portable WS281x driver core. `default-features = false` drops its host
 # `mock` backend (and the `alloc` it needs) — firmware brings its own `RmtHw`.
 # `isr-in-ram`: the refill path lives in `.rwtext` (IRAM). Single-core, so not

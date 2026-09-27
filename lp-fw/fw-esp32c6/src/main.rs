@@ -49,6 +49,10 @@ lpc_model::lp_embed_manifest_core! {
 /// handler that used to live here cost.
 #[panic_handler]
 fn panic_handler(info: &PanicInfo) -> ! {
+    // The comms lab's convention (lp-link, M2): a `0x00` first closes any
+    // frame the panic interrupted, so the panic text arrives as text.
+    #[cfg(feature = "test_comms_lab")]
+    esp_println::print!("\0\r\n");
     recovery::panic_path::stage_and_reset(info)
 }
 
@@ -198,6 +202,8 @@ mod tests {
     pub mod test_rmt;
     #[cfg(feature = "test_usb")]
     pub mod test_usb;
+    #[cfg(feature = "test_comms_lab")]
+    pub mod comms_lab;
     #[cfg(feature = "test_uart_bridge")]
     pub mod uart_bridge;
 }
@@ -708,6 +714,12 @@ async fn main(spawner: embassy_executor::Spawner) {
     {
         use tests::test_usb::run_usb_test;
         run_usb_test(spawner).await;
+    }
+
+    #[cfg(feature = "test_comms_lab")]
+    {
+        use tests::comms_lab::run_comms_lab;
+        run_comms_lab(spawner).await;
     }
 
     #[cfg(feature = "test_json")]
