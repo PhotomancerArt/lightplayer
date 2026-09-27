@@ -27,7 +27,7 @@ use std::sync::Arc;
 use std::task::{Context, Poll, Wake, Waker};
 
 use lp_emu_esp_common::QueueHandle;
-use lp_emu_esp_common::link_faults::LinkFaults;
+use lp_emu_esp_common::link_faults::{FaultCounters, LinkFaults};
 use lp_emu_esp32c6::machine::{
     AppSource, Esp32C6Builder, Esp32C6Machine, Outcome, StopCondition, TimeGrade, UsbHost,
 };
@@ -40,6 +40,10 @@ use lpc_wire::{
 /// slices, so this bounds its reaction time (the lab's own figure).
 const SLICE_US: u64 = 250;
 
+/// Upload-and-list rounds under faults: enough traffic (~1,000 packets each
+/// way) that a 1 % rate injects a handful of faults per run, not one or none.
+const ROUNDS: usize = 5;
+
 /// The longest a request may wait for its answer, in emulated seconds. A
 /// project load compiles every shader on the board; the budget is generous
 /// and only bounds a broken run.
@@ -49,7 +53,7 @@ const ANSWER_BUDGET_S: f64 = 60.0;
 #[ignore = "needs a built fw-esp32c6 ELF; `just test-emu-c6` runs it"]
 fn the_shipped_image_says_hello_and_takes_an_upload_over_lp_link() {
     let Some(elf) = image() else { return };
-    let run = converse(&elf, None);
+    let run = converse(&elf, None, 1);
     eprintln!("\n=== clean ===\n{}", run.summary());
     assert_eq!(run.app_errors, 0, "{}", run.summary());
     assert_eq!(run.host.resets.total, 0, "one session, start to end");
@@ -70,13 +74,42 @@ fn an_upload_under_one_percent_usb_faults_sees_no_app_errors() {
          out-corrupt=0.5%,seed=31",
     )
     .expect("a fault spec");
-    let run = converse(&elf, Some(faults));
+    let run = converse(&elf, Some(faults), ROUNDS);
     eprintln!("\n=== 1% mixed each way ===\n{}", run.summary());
     assert_eq!(run.app_errors, 0, "{}", run.summary());
     assert_eq!(run.host.payload_errors, 0);
     assert!(
         run.host.resends > 0 || run.host.damaged > 0,
         "the injector damaged nothing the link had to recover from: {}",
+        run.summary()
+    );
+    run.assert_injected_both_ways();
+}
+
+/// The macOS shape (M1 of the reliable-link plan): loss that starts inside a
+/// packet and runs through the next several — a kilobyte gone at once, the
+/// way a tty overflowing under Chromium's `PARMRK` lost it — on top of the
+/// 1 % mix, device to host (a run starts in 1 % of packets and eats the next
+/// sixteen). The upload and the reads still see no app error:
+/// every run is resent under the messages.
+#[test]
+#[ignore = "needs a built fw-esp32c6 ELF; `just test-emu-c6` runs it"]
+fn an_upload_through_kilobyte_runs_of_loss_sees_no_app_errors() {
+    let Some(elf) = image() else { return };
+    let faults = LinkFaults::parse(
+        "in-drop=0.25%,in-tail=0.25%,in-corrupt=0.25%,in-run=1%,run-packets=16,\
+         out-drop=0.25%,out-tail=0.25%,out-corrupt=0.5%,seed=47",
+    )
+    .expect("a fault spec");
+    let run = converse(&elf, Some(faults), ROUNDS);
+    eprintln!("\n=== 1% mixed + 16-packet runs ===\n{}", run.summary());
+    assert_eq!(run.app_errors, 0, "{}", run.summary());
+    assert_eq!(run.host.payload_errors, 0);
+    run.assert_injected_both_ways();
+    let (to_host, _) = run.injected.expect("faults were configured");
+    assert!(
+        to_host.runs_started > 0,
+        "no run of loss was injected: {}",
         run.summary()
     );
 }
@@ -90,9 +123,24 @@ struct Run {
     seconds: f64,
     notes: Vec<String>,
     console_lines: usize,
+    /// What the emulator's injector did: (device → host, host → device).
+    injected: Option<(FaultCounters, FaultCounters)>,
 }
 
 impl Run {
+    /// The injector damaged traffic in both directions, so the run's zero
+    /// app errors is a claim about recovery, not about luck.
+    fn assert_injected_both_ways(&self) {
+        let (to_host, to_board) = self.injected.expect("faults were configured");
+        let damaging =
+            |c: &FaultCounters| c.packets_dropped + c.tails_cut + c.bits_flipped + c.runs_started;
+        assert!(
+            damaging(&to_host) > 0 && damaging(&to_board) > 0,
+            "the injector must damage both directions: {}",
+            self.summary()
+        );
+    }
+
     fn summary(&self) -> String {
         let h = &self.host;
         format!(
@@ -110,7 +158,12 @@ impl Run {
             h.resets.total,
             self.console_lines,
             self.notes
-        )
+        ) + &match &self.injected {
+            Some((to_host, to_board)) => {
+                format!("; injected → host: {to_host}; injected → board: {to_board}")
+            }
+            None => String::new(),
+        }
     }
 }
 
@@ -126,7 +179,7 @@ fn image() -> Option<std::path::PathBuf> {
 
 /// Hello, then the whole `projects/test/basic` upload, then the list of
 /// loaded projects — every step a request over the link.
-fn converse(elf: &std::path::Path, faults: Option<LinkFaults>) -> Run {
+fn converse(elf: &std::path::Path, faults: Option<LinkFaults>, rounds: usize) -> Run {
     let mut io = LinkIo::new(elf, faults);
     let mut app_errors = 0u32;
     let mut failed = |what: &str, error: &dyn std::fmt::Display| {
@@ -140,20 +193,22 @@ fn converse(elf: &std::path::Path, faults: Option<LinkFaults>) -> Run {
             Err(error) => failed("hello", &error),
         }
         let files = project_files("projects/test/basic");
-        match block_on(client.replace_and_load_project("emu-link-basic", &files)) {
-            Ok(_) => {}
-            Err(error) => failed("the upload", &error),
-        }
-        match block_on(client.project_list_loaded()) {
-            Ok(loaded) => assert!(
-                loaded
-                    .value
-                    .iter()
-                    .any(|project| project.path.as_str().contains("emu-link-basic")),
-                "the uploaded project is loaded: {:?}",
-                loaded.value
-            ),
-            Err(error) => failed("listing loaded projects", &error),
+        for _ in 0..rounds {
+            match block_on(client.replace_and_load_project("emu-link-basic", &files)) {
+                Ok(_) => {}
+                Err(error) => failed("the upload", &error),
+            }
+            match block_on(client.project_list_loaded()) {
+                Ok(loaded) => assert!(
+                    loaded
+                        .value
+                        .iter()
+                        .any(|project| project.path.as_str().contains("emu-link-basic")),
+                    "the uploaded project is loaded: {:?}",
+                    loaded.value
+                ),
+                Err(error) => failed("listing loaded projects", &error),
+            }
         }
     }
     Run {
@@ -162,6 +217,7 @@ fn converse(elf: &std::path::Path, faults: Option<LinkFaults>) -> Run {
         seconds: io.seconds(),
         notes: io.notes,
         console_lines: io.console_lines,
+        injected: io.machine.usb_fault_counters(),
     }
 }
 
