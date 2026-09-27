@@ -2652,8 +2652,9 @@ test-rust-core:
     # lp-json-pack's corpus tests need its host features (`required-features`),
     # which the plain workspace run never turns on. No dependencies: cheap.
     cargo test -p lp-json-pack --all-features
-    # lp-link's simulator and delivery property need its `sim` feature.
-    cargo test -p lp-link --features sim
+    # lp-link's simulator and delivery property need its `sim` feature; the
+    # comms lab's halves over the simulator need `lab` too.
+    cargo test -p lp-link --features sim,lab
 
 # lp-link (the link-layer prototype, plan lp2025/2026-09-26-1720-reliable-device-link):
 # the delivery property at soak depth, 5,000 fault schedules per ARQ variant
@@ -2669,6 +2670,12 @@ link-bench what="all":
 # baseline that already has alloc and core::fmt.
 link-size:
     lp-base/lp-link/size-probe/measure.sh
+
+# The comms lab on the emulated C6 (plan reliable-device-link, M3): lp-link in
+# the `test_comms_lab` image against `lp-cli link lab`'s host half, with the
+# emulator's USB fault injector, in emulated time. Builds the image.
+link-lab-emu:
+    LP_EMU_BUILD_FW=1 cargo test -p lp-cli --release --test emu_link_lab -- --include-ignored --nocapture --test-threads 1
 
 # The vendored serializer forks' own tests: upstream's, plus the LP token
 # hook's. `third_party/ser-write` and `third_party/ser-write-json` are their

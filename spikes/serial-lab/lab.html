@@ -1,0 +1,153 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Comms lab: Web Serial</title>
+<style>
+  body { font: 13px ui-monospace, monospace; margin: 16px; background: #111; color: #ddd; }
+  pre { white-space: pre-wrap; }
+</style>
+</head>
+<body>
+<h1>Comms lab over Web Serial</h1>
+<p>lp-link and the lab's host half (<code>spikes/link-lab-wasm</code>, the
+same code as <code>lp-cli link lab</code>) against a
+<code>test_comms_lab</code> board, through Chromium's Web Serial. Needs a
+granted port (the bench-block policy, <code>just serial-grant</code>) and
+exactly one Espressif port attached. Query: <code>echo</code>,
+<code>stream</code> (seconds), <code>min</code>, <code>max</code>,
+<code>inflight</code>, <code>seed</code>, <code>logs</code>,
+<code>loglen</code>, <code>stall</code> (a board stall, ms),
+<code>bufferSize</code> (Chrome's default 255), <code>stallEvery</code> /
+<code>stallMs</code> (a busy main thread), <code>name</code>. Plan
+<code>reliable-device-link</code>, M3.</p>
+<pre id="log"></pre>
+<script type="module">
+import init, { LabSession } from "/pkg/link_lab_wasm.js";
+
+const q = new URLSearchParams(location.search);
+const num = (k, d) => Number(q.get(k) ?? d);
+const cfg = {
+  bufferSize: num("bufferSize", 255),
+  stallEvery: num("stallEvery", 0),
+  stallMs: num("stallMs", 0),
+  name: q.get("name") ?? "lab",
+  plan: ["echo", "stream", "min", "max", "inflight", "seed", "logs", "loglen", "stall", "minrto"]
+    .filter((k) => q.has(k)).map((k) => `${k}=${q.get(k)}`).join(" "),
+};
+const logEl = document.getElementById("log");
+const lines = [];
+function log(msg) {
+  const line = `${(performance.now() / 1000).toFixed(3)} ${msg}`;
+  lines.push(line);
+  logEl.textContent += line + "\n";
+  fetch("/page-log", { method: "POST", body: JSON.stringify({ line: `[lab] ${msg}` }) }).catch(() => {});
+}
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+async function main() {
+  await init();
+  log(`config ${JSON.stringify(cfg)} ua=${navigator.userAgent}`);
+  if (!navigator.serial) throw new Error("no navigator.serial");
+  const ports = (await navigator.serial.getPorts()).filter(
+    (p) => (p.getInfo?.().usbVendorId ?? 0) === 0x303a,
+  );
+  log(`granted Espressif ports: ${ports.length}`);
+  if (ports.length !== 1) throw new Error(`want exactly one Espressif port, got ${ports.length}`);
+  const port = ports[0];
+  await port.open({ baudRate: 921600, bufferSize: cfg.bufferSize });
+  log(`opened with bufferSize ${cfg.bufferSize}`);
+  const writer = port.writable.getWriter();
+
+  const nonce = (crypto.getRandomValues(new Uint32Array(1))[0] | 1) >>> 0;
+  const sess = new LabSession("usb", cfg.plan, nonce, performance.now());
+  let readErrors = 0;
+  let bytesIn = 0;
+  let writing = false;
+
+  async function flush() {
+    if (writing) return;
+    writing = true;
+    try {
+      for (;;) {
+        const f = sess.take_frame();
+        if (!f) break;
+        await writer.write(f);
+      }
+    } finally {
+      writing = false;
+    }
+  }
+  function kick() {
+    sess.service(performance.now());
+    flush();
+  }
+
+  let closing = false;
+  const pump = (async () => {
+    while (port.readable && !closing) {
+      const reader = port.readable.getReader();
+      try {
+        for (;;) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          if (!value) continue;
+          bytesIn += value.length;
+          sess.on_bytes(performance.now(), value);
+          kick();
+        }
+      } catch (e) {
+        readErrors += 1;
+        log(`read error ${e?.name}: ${e?.message} at byte ${bytesIn}`);
+      } finally {
+        try { reader.releaseLock(); } catch {}
+      }
+    }
+  })();
+
+  let stalls = 0;
+  let stallTimer = null;
+  if (cfg.stallEvery > 0 && cfg.stallMs > 0) {
+    stallTimer = setInterval(() => {
+      const until = performance.now() + cfg.stallMs;
+      while (performance.now() < until) { /* a long task on the main thread */ }
+      stalls += 1;
+    }, cfg.stallEvery);
+  }
+
+  let lastPhase = "";
+  while (!sess.finished()) {
+    kick();
+    const phase = sess.phase();
+    if (phase !== lastPhase) {
+      log(`phase ${phase}`);
+      lastPhase = phase;
+    }
+    const wait = Math.min(Math.max(sess.next_wake_ms() - performance.now(), 1), 20);
+    await sleep(wait);
+  }
+  if (stallTimer) clearInterval(stallTimer);
+  const text = sess.report_text();
+  log(`done:\n${text}`);
+  const configuration =
+    `web serial (${navigator.userAgent.match(/(Chrome|Brave)\/[\d.]+/)?.[0] ?? "chromium"}, bufferSize ${cfg.bufferSize}` +
+    (stalls ? `, ${stalls} main-thread stalls of ${cfg.stallMs} ms` : "") + `, ${readErrors} read errors)`;
+  const json = sess.report_json(configuration);
+  closing = true;
+  try { await port.readable?.cancel?.(); } catch {}
+  await Promise.race([pump, sleep(1000)]);
+  try { writer.releaseLock(); } catch {}
+  try { await port.close(); } catch (e) { log(`close: ${e}`); }
+  await fetch(`/soak-result?name=${cfg.name}.json`, { method: "POST", body: json });
+  await fetch(`/soak-result?name=${cfg.name}.txt`, { method: "POST", body: lines.join("\n") });
+  document.title = "lab done";
+}
+
+main().catch(async (e) => {
+  log(`FAILED ${e?.name}: ${e?.message}`);
+  await fetch(`/soak-result?name=${cfg.name}.failed.txt`, { method: "POST", body: lines.join("\n") }).catch(() => {});
+  document.title = "lab failed";
+});
+</script>
+</body>
+</html>

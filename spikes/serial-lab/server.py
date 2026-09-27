@@ -81,12 +81,27 @@ class Handler(BaseHTTPRequestHandler):
     # -- routes ----------------------------------------------------------
     def do_GET(self):
         path = self.path.split("?")[0]
-        if path in ("/", "/soak"):
+        if path in ("/", "/soak", "/lab"):
             # /soak: the link soak's raw reader (soak.html; plan
-            # lp2025/2026-09-26-1720-reliable-device-link, M1b).
-            body = (HERE / ("soak.html" if path == "/soak" else "index.html")).read_bytes()
+            # lp2025/2026-09-26-1720-reliable-device-link, M1b). /lab: the
+            # comms lab over Web Serial (lab.html, M3).
+            page = {"/soak": "soak.html", "/lab": "lab.html"}.get(path, "index.html")
+            body = (HERE / page).read_bytes()
             self.send_response(200)
             self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+        elif path.startswith("/pkg/"):
+            # The comms lab's wasm (spikes/link-lab-wasm/build.sh).
+            f = HERE.parent / "link-lab-wasm" / "pkg" / os.path.basename(path)
+            if not f.is_file():
+                self._json(404, {"error": f"no {f.name}: run spikes/link-lab-wasm/build.sh"})
+                return
+            body = f.read_bytes()
+            kind = "application/wasm" if f.suffix == ".wasm" else "text/javascript"
+            self.send_response(200)
+            self.send_header("Content-Type", kind)
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
             self.wfile.write(body)
