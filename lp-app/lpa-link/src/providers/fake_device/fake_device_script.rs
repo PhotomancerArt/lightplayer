@@ -53,7 +53,7 @@ pub enum FakeBootState {
     ForeignFirmware,
     /// LightPlayer firmware: scripted boot output, the real M2-shaped
     /// server-start line, then a REAL host `LpServer` over `LpFsMemory`
-    /// speaking `M!` frames (including the unsolicited wire hello).
+    /// speaking lp-link (a hello first on every link session).
     LightPlayer(FakeLightPlayerState),
 }
 

@@ -2,7 +2,7 @@
 //!
 //! A [`FakeEsp32Device`] is already a byte-level fake — ROM boot output for
 //! blank flash / download mode / foreign firmware, and for the LightPlayer
-//! state a REAL host `LpServer` behind REAL `M!` framing, with failure
+//! state a REAL host `LpServer` behind a REAL lp-link, with failure
 //! injection on the stream. Handed to [`ByteStreamLink`], it becomes a
 //! [`Link`](lpa_devices::link::Link), so a host test drives the whole model
 //! through the same demux, the same frame mapping and the same command

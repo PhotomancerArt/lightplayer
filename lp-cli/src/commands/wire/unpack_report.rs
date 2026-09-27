@@ -48,6 +48,7 @@ impl UnpackReport {
     }
 
     /// Frames that could not be delivered.
+    #[cfg(test)]
     pub fn errors(&self) -> usize {
         self.errors
     }
