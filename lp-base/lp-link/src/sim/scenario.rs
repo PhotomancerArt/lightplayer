@@ -290,15 +290,20 @@ fn offer<A: Arq>(wl: &mut WorkloadState, ep: &mut Endpoint<A>, now: Micros) {
     }
 }
 
-/// The sender's last generation must have been delivered in full.
+/// The sender's last generation must have been delivered in full, on every
+/// channel.
 fn liveness<A: Arq>(sender: &Endpoint<A>, checker: &Checker, dir: &str, v: &mut Vec<String>) {
-    let key = (sender.inc, sender.link.generation());
-    let sent = sender.sent.get(&key).copied().unwrap_or(0);
-    let got = checker.delivered_of(key.0, key.1);
-    if got != sent {
-        v.push(format!(
-            "liveness {dir}: generation {key:?} sent {sent}, delivered {got} after the quiet tail"
-        ));
+    let (inc, generation) = (sender.inc, sender.link.generation());
+    for (&key, &sent) in sender
+        .sent
+        .range((inc, generation, 0)..=(inc, generation, u8::MAX))
+    {
+        let got = checker.delivered_of(key.0, key.1, key.2);
+        if got != sent {
+            v.push(format!(
+                "liveness {dir}: generation {key:?} sent {sent}, delivered {got} after the quiet tail"
+            ));
+        }
     }
     if !sender.link.is_idle() {
         v.push(format!(

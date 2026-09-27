@@ -11,9 +11,13 @@
 //! reset the application has not read yet is superseded by a newer one (with
 //! the session it opened), so at most three of them stand in a row.
 //!
-//! Allocation: a delivered message is copied out of the reassembly buffer
-//! into a `Vec` of exactly its length, the one allocation per message; the
-//! reassembly buffer keeps its capacity (never past `max_message`).
+//! Messages are reassembled per channel: the sender sends the lowest channel
+//! first, so a control message can arrive between two fragments of a proto
+//! one. Within a channel, fragments arrive in order.
+//!
+//! Allocation: a delivered message is copied out of its channel's reassembly
+//! buffer into a `Vec` of exactly its length, the one allocation per message;
+//! the reassembly buffer keeps its capacity (never past `max_message`).
 
 use alloc::collections::VecDeque;
 use alloc::vec::Vec;
@@ -33,15 +37,21 @@ pub struct Fragment<'a> {
     pub data: &'a [u8],
 }
 
-/// A fragment that does not fit the message being reassembled: a bug or a
+/// A fragment that does not fit its channel's message: a continuation with
+/// no message started, or a new message while one is unfinished. A bug, or a
 /// corrupted frame that passed the checksum.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ProtocolError;
 
+/// Channels (the header's 3-bit field).
+const CHANNELS: usize = 8;
+
 pub struct Inbox {
     events: VecDeque<LinkEvent>,
-    partial: Vec<u8>,
-    partial_chan: Option<u8>,
+    /// Per channel: the message being reassembled.
+    partials: [Vec<u8>; CHANNELS],
+    /// Bit `c`: channel `c` is mid-message.
+    open: u8,
     ready_bytes: usize,
     budget: usize,
     max_message: usize,
@@ -51,8 +61,8 @@ impl Inbox {
     pub fn new(budget: usize, max_message: usize) -> Self {
         Inbox {
             events: VecDeque::new(),
-            partial: Vec::new(),
-            partial_chan: None,
+            partials: Default::default(),
+            open: 0,
             ready_bytes: 0,
             budget,
             max_message,
@@ -73,20 +83,25 @@ impl Inbox {
     }
 
     /// RAM held now: queued messages and text (charged), the event queue's
-    /// capacity and the reassembly buffer's.
+    /// capacity and the reassembly buffers'.
     pub fn ram_bytes(&self) -> usize {
-        self.ready_bytes + self.events.capacity() * size_of::<LinkEvent>() + self.partial.capacity()
+        self.ready_bytes
+            + self.events.capacity() * size_of::<LinkEvent>()
+            + self.partials.iter().map(Vec::capacity).sum::<usize>()
     }
 
-    /// Room to take `n` more bytes toward a message (the one being
-    /// reassembled included) and queue it.
-    pub fn has_room(&self, n: usize) -> bool {
-        self.ready_bytes + self.partial.len() + n + EVENT_COST <= self.budget
+    /// Room to take `n` more bytes toward a message on `chan` (the part of it
+    /// already reassembled included) and queue it. Other channels' partial
+    /// messages do not count, so two channels mid-message cannot block each
+    /// other.
+    pub fn has_room(&self, chan: u8, n: usize) -> bool {
+        let partial = self.partials.get(chan as usize).map_or(0, Vec::len);
+        self.ready_bytes + partial + n + EVENT_COST <= self.budget
     }
 
     /// Bytes queued for the application or reassembling (charged).
     pub fn bytes(&self) -> usize {
-        self.ready_bytes + self.partial.len()
+        self.ready_bytes + self.partials.iter().map(Vec::len).sum::<usize>()
     }
 
     pub fn budget(&self) -> usize {
@@ -94,38 +109,44 @@ impl Inbox {
     }
 
     pub fn push_fragment(&mut self, f: Fragment<'_>) -> Result<(), ProtocolError> {
-        if f.first {
-            if self.partial_chan.is_some() {
-                self.abort_partial();
-                return Err(ProtocolError);
-            }
-        } else if self.partial_chan != Some(f.chan) {
-            self.abort_partial();
+        let c = f.chan as usize % CHANNELS;
+        let bit = 1u8 << c;
+        if f.first == (self.open & bit != 0) {
+            // A new message mid-message, or a continuation of nothing.
+            self.abort_all();
             return Err(ProtocolError);
         }
-        if self.partial.len() + f.data.len() > self.max_message {
-            self.abort_partial();
+        if self.partials[c].len() + f.data.len() > self.max_message {
+            self.abort_all();
             return Err(ProtocolError);
         }
         if f.first && f.fin {
             self.deliver(f.chan, f.data.to_vec());
             return Ok(());
         }
-        self.grow_partial(f.data.len());
-        self.partial.extend_from_slice(f.data);
-        self.partial_chan = Some(f.chan);
+        self.grow_partial(c, f.data.len());
+        self.partials[c].extend_from_slice(f.data);
+        self.open |= bit;
         if f.fin {
-            let data = self.partial.as_slice().to_vec();
-            self.abort_partial();
+            let data = self.partials[c].as_slice().to_vec();
+            self.abort(f.chan);
             self.deliver(f.chan, data);
         }
         Ok(())
     }
 
-    /// Drop a half-reassembled message (link reset, or a gap without ARQ).
-    pub fn abort_partial(&mut self) {
-        self.partial.clear();
-        self.partial_chan = None;
+    /// Drop `chan`'s half-reassembled message.
+    pub fn abort(&mut self, chan: u8) {
+        let c = chan as usize % CHANNELS;
+        self.partials[c].clear();
+        self.open &= !(1 << c);
+    }
+
+    /// Drop every half-reassembled message (link reset, a protocol error, or
+    /// a gap without ARQ).
+    pub fn abort_all(&mut self) {
+        self.partials.iter_mut().for_each(Vec::clear);
+        self.open = 0;
     }
 
     /// A best-effort message; the caller checked [`has_room`](Self::has_room).
@@ -183,13 +204,15 @@ impl Inbox {
         self.events.push_back(LinkEvent::Message { channel, data });
     }
 
-    /// Make room for `n` more reassembly bytes: double, but never past
-    /// `max_message` (the caller checked the message fits it).
-    fn grow_partial(&mut self, n: usize) {
-        let need = self.partial.len() + n;
-        if need > self.partial.capacity() {
-            let to = need.max((2 * self.partial.capacity()).min(self.max_message));
-            self.partial.reserve_exact(to - self.partial.len());
+    /// Make room for `n` more bytes in channel `c`'s reassembly buffer:
+    /// double, but never past `max_message` (the caller checked the message
+    /// fits it).
+    fn grow_partial(&mut self, c: usize, n: usize) {
+        let partial = &mut self.partials[c];
+        let need = partial.len() + n;
+        if need > partial.capacity() {
+            let to = need.max((2 * partial.capacity()).min(self.max_message));
+            partial.reserve_exact(to - partial.len());
         }
     }
 }
@@ -232,7 +255,7 @@ mod tests {
             panic!("no message");
         };
         assert_eq!((data.len(), data.capacity()), (310, 310));
-        assert!(inbox.partial.capacity() >= 310, "the buffer is kept");
+        assert!(inbox.partials[1].capacity() >= 310, "the buffer is kept");
         assert_eq!(inbox.bytes(), 0);
     }
 
@@ -244,5 +267,41 @@ mod tests {
         assert!(!inbox.push_text(b"x"));
         inbox.pop();
         assert!(inbox.push_text(b"x"));
+    }
+
+    #[test]
+    fn channels_reassemble_independently() {
+        let mut inbox = Inbox::new(64 * 1024, 4096);
+        let frag = |chan, first, fin, data| Fragment {
+            chan,
+            first,
+            fin,
+            data,
+        };
+        inbox.push_fragment(frag(1, true, false, b"pro")).unwrap();
+        inbox.push_fragment(frag(0, true, false, b"con")).unwrap();
+        inbox.push_fragment(frag(0, false, true, b"trol")).unwrap();
+        inbox.push_fragment(frag(1, false, true, b"to")).unwrap();
+        let msgs: Vec<_> = core::iter::from_fn(|| inbox.pop()).collect();
+        let msg = |channel, data: &[u8]| LinkEvent::Message {
+            channel,
+            data: data.to_vec(),
+        };
+        assert_eq!(msgs, vec![msg(0, b"control"), msg(1, b"proto")]);
+    }
+
+    #[test]
+    fn a_fragment_that_fits_no_message_is_a_protocol_error() {
+        let mut inbox = Inbox::new(64 * 1024, 4096);
+        let frag = |first, fin| Fragment {
+            chan: 1,
+            first,
+            fin,
+            data: b"x",
+        };
+        assert_eq!(inbox.push_fragment(frag(false, true)), Err(ProtocolError));
+        inbox.push_fragment(frag(true, false)).unwrap();
+        assert_eq!(inbox.push_fragment(frag(true, false)), Err(ProtocolError));
+        assert_eq!(inbox.bytes(), 0, "the partial is dropped");
     }
 }

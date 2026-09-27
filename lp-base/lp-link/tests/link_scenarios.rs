@@ -1,11 +1,12 @@
 //! Targeted scenarios: each names one behaviour of the link and checks it
 //! directly (the broad sweep is `delivery_properties`).
 
+use lp_link::frame::{self, FrameKind, Header};
 use lp_link::sim::pipe::Faults;
 use lp_link::sim::{Report, Scenario, Transport, Workload, run};
 use lp_link::{
-    Arq, CH_PROTO, GoBackN, Link, LinkConfig, LinkEvent, LinkState, NoArq, ResetReason,
-    SelectiveRepeat, StopAndWait,
+    Arq, CH_CONTROL, CH_LOG, CH_PROTO, GoBackN, Link, LinkConfig, LinkEvent, LinkState, NoArq,
+    ResetReason, SelectiveRepeat, StopAndWait,
 };
 
 type Gbn = GoBackN<127>;
@@ -224,6 +225,120 @@ fn crc16_lets_some_damage_through_where_crc32c_does_not() {
     // CRC-16 misses about 1 in 65,536 damaged frames: this run damages tens
     // of thousands, so zero is possible; the bench reports the rate.
     let _ = missed[0];
+}
+
+/// Per-channel scheduling: a control message queued behind a 16 KiB proto
+/// reply goes out at the next frame boundary, not after the reply.
+#[test]
+fn a_control_message_overtakes_a_big_proto_message() {
+    let (mut a, mut b) = pair::<SelectiveRepeat>(LinkConfig::usb());
+    let mut now = 0;
+    handshake(&mut a, &mut b, &mut now);
+    let _ = drain(&mut b);
+    a.send(CH_PROTO, &[1; 16 * 1024]).unwrap();
+    for _ in 0..3 {
+        let f = a.poll_transmit(now).unwrap().to_vec();
+        b.on_bytes(now, &f);
+    }
+    a.send(CH_CONTROL, &[2; 20]).unwrap();
+    // One frame at a time from `a`; `b` answers at once.
+    let mut frames = 0;
+    let mut delivered = vec![];
+    while delivered.len() < 2 {
+        now += 100;
+        assert!(frames < 200, "stuck: {delivered:?}");
+        if let Some(f) = a.poll_transmit(now) {
+            let f = f.to_vec();
+            frames += 1;
+            b.on_bytes(now, &f);
+        }
+        while let Some(f) = b.poll_transmit(now) {
+            let f = f.to_vec();
+            a.on_bytes(now, &f);
+        }
+        for ev in drain(&mut b) {
+            if let LinkEvent::Message { channel, data } = ev {
+                delivered.push((channel, data.len(), frames));
+            }
+        }
+    }
+    assert_eq!(delivered[0].0, CH_CONTROL, "{delivered:?}");
+    assert!(
+        delivered[0].2 <= 2,
+        "control went out after {} frames",
+        delivered[0].2
+    );
+    assert_eq!((delivered[1].0, delivered[1].1), (CH_PROTO, 16 * 1024));
+}
+
+/// Fair share for logs: with a proto stream that always has a frame ready and
+/// log lines always waiting, no more than `datagram_every` data frames go in
+/// a row, and every log line arrives.
+#[test]
+fn logs_keep_flowing_beside_a_busy_proto_stream() {
+    let cfg = LinkConfig::usb();
+    let every = cfg.datagram_every as usize;
+    let (mut a, mut b) = pair::<SelectiveRepeat>(cfg);
+    let mut now = 0;
+    handshake(&mut a, &mut b, &mut now);
+    let _ = drain(&mut b);
+    let (mut logs_sent, mut logs_rx, mut proto_rx) = (0, 0, 0);
+    let (mut run, mut longest_run, mut datagrams) = (0, 0, 0);
+    let mut raw = vec![];
+    for ms in 0..500 {
+        now += 1_000;
+        while a.send(CH_PROTO, &[3; 4096]).is_ok() {}
+        for _ in 0..2 {
+            if a.send(CH_LOG, b"a log line").is_ok() {
+                logs_sent += 1;
+            }
+        }
+        // The pipe takes eight frames a millisecond from `a`.
+        for _ in 0..8 {
+            let Some(f) = a.poll_transmit(now) else { break };
+            let f = f.to_vec();
+            raw.clear();
+            frame::unwrap_stream(&f[1..f.len() - 1], &mut raw).unwrap();
+            match Header::parse(&raw).unwrap().kind {
+                FrameKind::Data => run += 1,
+                FrameKind::Datagram => {
+                    datagrams += 1;
+                    run = 0;
+                }
+                FrameKind::Ack | FrameKind::Syn => {}
+            }
+            if ms > 0 {
+                longest_run = longest_run.max(run);
+            }
+            b.on_bytes(now, &f);
+        }
+        while let Some(f) = b.poll_transmit(now) {
+            let f = f.to_vec();
+            a.on_bytes(now, &f);
+        }
+        for ev in drain(&mut b) {
+            match ev {
+                LinkEvent::Message {
+                    channel: CH_LOG, ..
+                } => logs_rx += 1,
+                LinkEvent::Message { data, .. } => proto_rx += data.len(),
+                _ => {}
+            }
+        }
+    }
+    assert!(longest_run <= every, "{longest_run} data frames in a row");
+    assert!(
+        datagrams >= 500 * 8 / (every + 1) - 8,
+        "{datagrams} datagrams"
+    );
+    assert!(
+        logs_rx + 32 >= logs_sent,
+        "{logs_rx} of {logs_sent} logs arrived"
+    );
+    assert!(
+        proto_rx > 500 * 1024,
+        "the proto stream moved: {proto_rx} B"
+    );
 }
 
 fn interactive() -> Workload {

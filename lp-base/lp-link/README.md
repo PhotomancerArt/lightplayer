@@ -37,6 +37,19 @@ wire messages (JSON / learned-dictionary packed, request/response by id)
 pipe:        USB-Serial-JTAG | BLE NUS | UART | UDP | WebSocket
 ```
 
+**Scheduling between channels.** The sender keeps one queue per reliable
+channel and cuts the next frame from the lowest-numbered channel that has
+something waiting: a control message queued behind a 16 KiB proto reply goes
+out at the next frame boundary, not after the reply. Within a channel, order is
+kept. The receiver reassembles one message per channel, so fragments of two
+channels can interleave. Order across channels is not promised; the delivery
+property is per channel. Log datagrams get a fair share: after
+`datagram_every` (default 4) reliable data frames in a row, a queued datagram
+goes next, so a busy proto stream cannot starve the log. All channels still
+share one sequence space, so a *lost* proto frame holds back the control frames
+behind it until it is resent (head-of-line blocking under loss; a per-channel
+sequence space is future work if a measurement ever calls for it).
+
 ## Principles
 
 1. **End to end, because every hop is "reliable" and bytes still get lost.**

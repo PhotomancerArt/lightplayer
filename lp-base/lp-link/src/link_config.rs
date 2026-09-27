@@ -52,6 +52,11 @@ pub struct LinkConfig {
     /// Best-effort messages queued before `Full`: this many `max_payload`
     /// slots, allocated once.
     pub datagram_queue: usize,
+    /// Fair share for best-effort messages (logs): after this many reliable
+    /// data frames in a row, a queued datagram goes next, so a busy proto
+    /// stream cannot starve the log. 0: datagrams go only when no reliable
+    /// frame can.
+    pub datagram_every: u8,
     /// Bit `n` set: channel `n` is reliable.
     pub reliable_channels: u8,
     /// Hold an ACK this long hoping to ride on data.
@@ -100,6 +105,7 @@ impl LinkConfig {
             send_queue: 64,
             max_message: 20 * 1024,
             datagram_queue: 32,
+            datagram_every: 4,
             reliable_channels: (1 << CH_CONTROL) | (1 << CH_PROTO),
             ack_delay: 1_000,
             ack_every: 2,

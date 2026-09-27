@@ -16,8 +16,9 @@ pub struct Endpoint<A: Arq> {
     pub cfg: LinkConfig,
     /// Incarnation: bumped by a reboot.
     pub inc: u16,
-    /// Reliable messages accepted by `send`, per (incarnation, generation).
-    pub sent: BTreeMap<(u16, u32), u32>,
+    /// Reliable messages accepted by `send`, per (incarnation, generation,
+    /// channel).
+    pub sent: BTreeMap<(u16, u32, u8), u32>,
     pub sent_count: u64,
     /// This side's session as its own events have reported it.
     pub rx_gen: u32,
@@ -82,7 +83,7 @@ impl<A: Arq> Endpoint<A> {
     /// Offer a reliable probe message; `false` if the link refused it.
     pub fn send_probe(&mut self, now: Micros, channel: u8, size: usize) -> bool {
         let generation = self.link.generation();
-        let key = (self.inc, generation);
+        let key = (self.inc, generation, channel);
         let idx = *self.sent.get(&key).unwrap_or(&0);
         let p = Probe {
             inc: self.inc,
@@ -142,7 +143,8 @@ impl<A: Arq> Endpoint<A> {
                 }
                 LinkEvent::Message { channel, data } => {
                     if self.cfg.is_reliable(channel) {
-                        checker.on_reliable(now, window_end, (self.inc, self.rx_gen), &data);
+                        let rx = (self.inc, self.rx_gen);
+                        checker.on_reliable(now, window_end, rx, channel, &data);
                     } else {
                         checker.on_log(&data);
                     }

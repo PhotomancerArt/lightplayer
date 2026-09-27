@@ -4,6 +4,10 @@
 //! > order, or the link reports a reset; and once faults stop, everything the
 //! > last session sent arrives.
 //!
+//! Order is per channel: the link sends the lowest-numbered channel first, so
+//! a control message may overtake the rest of a proto message, never one of
+//! its own channel's.
+//!
 //! Each case draws a transport, independent fault rates for each direction
 //! (drops of packets, tails, writes and byte spans; bit flips; duplicates;
 //! delay spikes), up to three board reboots, and a seed for the simulator.

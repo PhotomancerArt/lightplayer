@@ -50,7 +50,7 @@ impl SelectiveRepeat {
     fn deliver_slot0(&mut self, inbox: &mut Inbox) -> Option<RxVerdict> {
         let p = self.phys(0);
         let h = self.held[p]?;
-        if !inbox.has_room(h.len as usize) {
+        if !inbox.has_room(h.chan, h.len as usize) {
             return Some(RxVerdict::NoRoom);
         }
         let at = p * self.slot_len;
@@ -120,7 +120,7 @@ impl Arq for SelectiveRepeat {
         }
         let p = self.phys(d);
         if d == 0 && self.held[p].is_none() {
-            if !inbox.has_room(frag.data.len()) {
+            if !inbox.has_room(frag.chan, frag.data.len()) {
                 return RxVerdict::NoRoom;
             }
             if inbox.push_fragment(frag).is_err() {

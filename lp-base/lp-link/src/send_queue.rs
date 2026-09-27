@@ -4,9 +4,11 @@
 //!
 //! Fragments are taken a frame at a time and copied straight into the
 //! transmit window's slot, so a message's bytes are released as it goes out.
-//! Messages are normally taken oldest first; one taken out of turn (a higher
-//! priority channel overtaking, see [`SendQueue::take`]) leaves a hole that is
-//! reclaimed once everything before it has gone.
+//! The lowest-numbered channel goes first, fragment by fragment, so a control
+//! message overtakes the rest of a big proto message at the next frame
+//! boundary; within a channel, messages keep their order. A message taken out
+//! of ring order leaves a hole that is reclaimed once everything before it
+//! has gone.
 
 use alloc::collections::VecDeque;
 use alloc::vec;
@@ -119,15 +121,14 @@ impl SendQueue {
     }
 
     /// Take the next fragment, at most `out.len()` bytes, into `out`: from the
-    /// oldest unfinished message on the first channel of `order` that has one
-    /// (`order` = `None`: the oldest unfinished message of any channel).
-    pub fn take(&mut self, order: Option<&[u8]>, out: &mut [u8]) -> Option<Taken> {
-        let i = match order {
-            None => self.msgs.iter().position(|m| !m.done())?,
-            Some(order) => order
-                .iter()
-                .find_map(|&c| self.msgs.iter().position(|m| m.chan == c && !m.done()))?,
-        };
+    /// oldest unfinished message on the lowest-numbered channel that has one.
+    pub fn take(&mut self, out: &mut [u8]) -> Option<Taken> {
+        let (i, _) = self
+            .msgs
+            .iter()
+            .enumerate()
+            .filter(|(_, m)| !m.done())
+            .min_by_key(|(_, m)| m.chan)?;
         let cap = self.ring.len();
         let m = &mut self.msgs[i];
         let n = (m.len - m.taken).min(out.len());
@@ -182,14 +183,14 @@ mod tests {
         let mut out = [0u8; 4];
         q.push(1, b"abcdef").unwrap();
         assert_eq!(q.push(1, b"ghijk"), Err(QueueFull), "no room");
-        let t = q.take(None, &mut out).unwrap();
+        let t = q.take(&mut out).unwrap();
         assert_eq!((t.first, t.fin, &out[..t.len]), (true, false, &b"abcd"[..]));
         // Four bytes released: a five-byte message wraps around the end.
         q.push(1, b"ghijk").unwrap();
-        let t = q.take(None, &mut out).unwrap();
+        let t = q.take(&mut out).unwrap();
         assert_eq!((t.first, t.fin, &out[..t.len]), (false, true, &b"ef"[..]));
         let mut got = Vec::new();
-        while let Some(t) = q.take(None, &mut out) {
+        while let Some(t) = q.take(&mut out) {
             got.extend_from_slice(&out[..t.len]);
         }
         assert_eq!(got, b"ghijk");
@@ -202,9 +203,9 @@ mod tests {
         let mut q = SendQueue::new(8, 4);
         q.push(0, b"").unwrap();
         let mut out = [0u8; 4];
-        let t = q.take(None, &mut out).unwrap();
+        let t = q.take(&mut out).unwrap();
         assert_eq!((t.first, t.fin, t.len), (true, true, 0));
-        assert!(q.take(None, &mut out).is_none());
+        assert!(q.take(&mut out).is_none());
     }
 
     #[test]
@@ -213,12 +214,12 @@ mod tests {
         let mut out = [0u8; 4];
         q.push(1, b"proto-msg").unwrap();
         q.push(0, b"ctl").unwrap();
-        let t = q.take(Some(&[0, 1]), &mut out).unwrap();
+        let t = q.take(&mut out).unwrap();
         assert_eq!((t.chan, &out[..t.len]), (0, &b"ctl"[..]));
         // The hole is behind the unfinished proto message: not free yet.
         assert_eq!(q.span, 12);
         let mut got = Vec::new();
-        while let Some(t) = q.take(Some(&[0, 1]), &mut out) {
+        while let Some(t) = q.take(&mut out) {
             got.extend_from_slice(&out[..t.len]);
         }
         assert_eq!(got, b"proto-msg");

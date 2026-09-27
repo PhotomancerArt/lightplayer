@@ -71,6 +71,8 @@ pub struct Link<A: Arq> {
     send_order: u32,
     pending: SendQueue,
     datagrams: DatagramQueue,
+    /// Reliable data frames sent since the last datagram (`datagram_every`).
+    data_run: u8,
     dgram_tx_seq: u8,
     dgram_rx_next: Option<u8>,
     deframer: Deframer,
@@ -119,6 +121,7 @@ impl<A: Arq> Link<A> {
             send_order: 0,
             pending: SendQueue::new(cfg.send_budget, cfg.send_queue),
             datagrams: DatagramQueue::new(cfg.datagram_queue, max_payload),
+            data_run: 0,
             dgram_tx_seq: 0,
             dgram_rx_next: None,
             deframer: Deframer::new(shape.max_cobs, cfg.framing == Framing::Stream)
@@ -446,7 +449,7 @@ impl<A: Arq> Link<A> {
                 }
                 self.counters.datagrams_lost += ahead as u32;
                 self.dgram_rx_next = Some(hdr.seq.wrapping_add(1));
-                if self.inbox.has_room(body.len()) {
+                if self.inbox.has_room(hdr.chan, body.len()) {
                     self.inbox.push_datagram(hdr.chan, body);
                 } else {
                     self.counters.datagrams_dropped += 1;
@@ -621,6 +624,10 @@ impl<A: Arq> Link<A> {
             self.emit_ack();
             return true;
         }
+        let every = self.cfg.datagram_every;
+        if every != 0 && self.data_run >= every && self.emit_datagram() {
+            return true;
+        }
         if let Some(seq) = self.tx.first_unsent() {
             if self
                 .tx
@@ -697,7 +704,7 @@ impl<A: Arq> Link<A> {
     fn next_fragment(&mut self) -> Option<u8> {
         let (pending, n) = (&mut self.pending, self.tx_payload);
         self.tx.push_with(|slot| {
-            let t = pending.take(None, &mut slot[..n])?;
+            let t = pending.take(&mut slot[..n])?;
             Some((t.chan, t.first, t.fin, t.len))
         })
     }
@@ -726,6 +733,7 @@ impl<A: Arq> Link<A> {
                 &mut self.out,
             );
             self.datagrams.pop_front();
+            self.data_run = 0;
             return true;
         }
         false
@@ -748,6 +756,7 @@ impl<A: Arq> Link<A> {
         }
         self.last_data_tx = now;
         self.counters.data_frames_tx += 1;
+        self.data_run = self.data_run.saturating_add(1);
         hdr.chan = e.chan;
         hdr.first = e.first;
         hdr.fin = e.fin;
@@ -871,9 +880,10 @@ impl<A: Arq> Link<A> {
         self.tx.clear();
         self.pending.clear();
         self.datagrams.clear();
+        self.data_run = 0;
         self.dgram_tx_seq = 0;
         self.dgram_rx_next = None;
-        self.inbox.abort_partial();
+        self.inbox.abort_all();
         self.backoff = 0;
         self.peer_win = 0;
         self.ack_due = None;
