@@ -33,6 +33,9 @@ fn main() {
     if all || what == "logs" {
         logs();
     }
+    if all || what == "ram" {
+        ram();
+    }
 }
 
 fn bulk() -> Workload {
@@ -417,4 +420,39 @@ fn logs() {
             );
         }
     }
+}
+
+/// What one link holds on the board, measured: the peak of the reliability
+/// buffers (sent-unacknowledged plus held-out-of-order payload), the frame
+/// scratch buffers, and everything queued (which includes the application's
+/// own send queue, bounded by `send_budget`).
+fn ram() {
+    println!(
+        "\n### RAM per link on the board (peaks over bulk + interactive runs at 1% faults, 3 seeds)\n"
+    );
+    println!(
+        "| transport | variant | reliability buffers B | frame scratch B | all queued B (incl. app send queue) |"
+    );
+    println!("|---|---|---|---|---|");
+    for t in [Transport::Usb, Transport::Ble, Transport::Udp] {
+        ram_row::<SelectiveRepeat>(t);
+        ram_row::<Gbn>(t);
+    }
+}
+
+fn ram_row<A: Arq>(t: Transport) {
+    let (mut window, mut scratch, mut queued) = (0, 0, 0);
+    for seed in SEEDS {
+        for (w, d) in [(bulk(), 10_000_000), (interactive(), 20_000_000)] {
+            let r = run::<A>(&Scenario::new(t, 0.01, w, d, seed));
+            window = window.max(r.board_peak_window);
+            scratch = scratch.max(r.board_peak_scratch);
+            queued = queued.max(r.board_peak_buffered);
+        }
+    }
+    println!(
+        "| {} | {} | {window} | {scratch} | {queued} |",
+        t.name(),
+        A::NAME
+    );
 }

@@ -147,6 +147,32 @@ fn text_outside_frames_passes_through() {
     );
 }
 
+/// The board-side convention for a panic that interrupts a frame: write
+/// `0x00`, then the text. The torn frame fails, the text lands in the
+/// deframer's next "frame", and the idle flush hands it up as console text.
+#[test]
+fn panic_text_after_a_torn_frame_survives_when_it_starts_with_a_delimiter() {
+    let (mut a, mut b) = pair::<SelectiveRepeat>(LinkConfig::usb());
+    let mut now = 0;
+    handshake(&mut a, &mut b, &mut now);
+    let _ = drain(&mut b);
+    a.send(CH_PROTO, &[7; 200]).unwrap();
+    let frame = a.poll_transmit(now).unwrap().to_vec();
+    b.on_bytes(now, &frame[..frame.len() / 2]);
+    b.on_bytes(now, b"\x00panicked at src/main.rs:10: boom\r\n");
+    now += 100_000;
+    let _ = b.poll_transmit(now);
+    let texts: Vec<String> = drain(&mut b)
+        .into_iter()
+        .filter_map(|e| match e {
+            LinkEvent::Text(t) => Some(String::from_utf8(t).unwrap()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(texts.concat(), "panicked at src/main.rs:10: boom\r\n");
+    assert_eq!(b.counters().bad_frames, 1, "the torn frame is counted");
+}
+
 #[test]
 fn a_peer_restart_is_reported_once_on_each_side() {
     let (mut a, mut b) = pair::<Gbn>(LinkConfig::usb());
