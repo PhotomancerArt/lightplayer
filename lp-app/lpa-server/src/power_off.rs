@@ -6,8 +6,11 @@
 //! the chip is refused before anything sleeps, and holds the request until
 //! [`crate::LpServer::advance_frame`] has finished ticking. The server then
 //! unloads every project — which closes their outputs, leaving the LEDs dark
-//! — and calls [`PowerPlatform::enter_power_off`], which does not return on
-//! hardware. See `docs/adr/2026-06-16-power-button-runtime-event.md`.
+//! — and calls [`PowerPlatform::enter_power_off`]. On the C6 that call
+//! returns `Ok` at once: it hands the actual sleep to the USB link task,
+//! which drains the link (up to 1 s) before sleeping, so the process does
+//! not stop on the spot — waking is still a reset either way. See
+//! `docs/adr/2026-06-16-power-button-runtime-event.md`.
 
 extern crate alloc;
 
@@ -31,9 +34,11 @@ pub trait PowerPlatform {
     /// before any project is torn down.
     fn check_power_off(&self, request: &PowerOffRequest) -> Result<(), PowerError>;
 
-    /// Power off until the wake condition in `request`. Does not return on
-    /// success on hardware (waking is a reset); returns only on failure — or,
-    /// for a test double, to record the call.
+    /// Power off until the wake condition in `request`. Waking is always a
+    /// reset, but the call need not block until then: the C6 platform
+    /// returns `Ok` once the sleep is handed to the link task (which drains
+    /// the host's link first) rather than sleeping on the spot. Returns
+    /// `Err` only on failure — or, for a test double, to record the call.
     fn enter_power_off(&self, request: &PowerOffRequest) -> Result<(), PowerError>;
 
     /// Whether a host is attached over the device's own link right now.
