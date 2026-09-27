@@ -110,6 +110,18 @@ impl<const N: usize> LogRing<N> {
         self.len == 0 && self.dropped == 0
     }
 
+    /// Records held (walks the ring).
+    pub fn len(&self) -> usize {
+        let (mut at, mut left, mut n) = (self.head, self.len, 0);
+        while left > 0 {
+            let rec = 2 + self.buf[at] as usize;
+            at = (at + rec) % N;
+            left -= rec;
+            n += 1;
+        }
+        n
+    }
+
     /// Records dropped since boot.
     pub fn dropped_total(&self) -> u32 {
         self.dropped_total

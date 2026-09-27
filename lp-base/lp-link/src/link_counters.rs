@@ -30,7 +30,10 @@ pub struct LinkCounters {
     pub out_of_order: u32,
     /// Data frames refused because the application was not reading.
     pub rx_no_room: u32,
+    /// Best-effort messages refused or discarded locally (queue full, no room).
     pub datagrams_dropped: u32,
+    /// Best-effort messages the peer sent that never arrived (sequence gaps).
+    pub datagrams_lost: u32,
     /// Partial frames flushed after going quiet (a lost tail).
     pub stale_partials: u32,
     pub text_bytes: u32,

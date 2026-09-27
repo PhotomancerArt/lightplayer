@@ -72,6 +72,8 @@ pub struct PipeStats {
 pub struct Pipe {
     pub model: PipeModel,
     pub faults: Faults,
+    /// Everything sent is lost (an outage).
+    pub cut: bool,
     pub stats: PipeStats,
     rng: SimRng,
     wire_free_ns: u64,
@@ -88,6 +90,7 @@ impl Pipe {
         Pipe {
             model,
             faults,
+            cut: false,
             stats: PipeStats::default(),
             rng,
             wire_free_ns: 0,
@@ -135,6 +138,7 @@ impl Pipe {
             self.stats.packets += 1;
             self.stats.bytes += chunk.len() as u64;
             let lost = drop_write
+                || self.cut
                 || self.rng.chance(self.faults.drop_packet)
                 || (i + 1 == n && self.rng.chance(self.faults.drop_tail));
             if lost {

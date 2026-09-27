@@ -30,6 +30,8 @@ pub struct Scenario {
     pub duration: Micros,
     pub quiet_tail: Micros,
     pub board_reboots: Vec<Micros>,
+    /// Both pipes lose everything in `[start, end)`: a cable pulled.
+    pub outage: Option<(Micros, Micros)>,
     pub seed: u64,
 }
 
@@ -53,6 +55,7 @@ impl Scenario {
             duration,
             quiet_tail: 20_000_000,
             board_reboots: Vec::new(),
+            outage: None,
             seed,
         }
     }
@@ -95,6 +98,10 @@ pub struct Report {
     pub logs_written: u64,
     pub logs_delivered: u64,
     pub logs_reported_dropped: u64,
+    /// Log lines the host saw go missing on the wire (datagram gaps).
+    pub logs_seen_lost: u64,
+    /// Log lines that died in the board's ring at a reboot.
+    pub logs_lost_in_ring: u64,
     pub text_bytes: u64,
     pub duration: Micros,
     /// Broken delivery promises and liveness failures. Empty = correct.
@@ -146,6 +153,9 @@ pub fn run<A: Arq>(sc: &Scenario) -> Report {
             "livelock: {steps} steps by t={now} (seed {})",
             sc.seed
         );
+        let out = sc.outage.is_some_and(|(a, b)| now >= a && now < b);
+        up.cut = out;
+        down.cut = out;
         if faults_on && now >= window {
             up.faults = Faults::none();
             down.faults = Faults::none();
@@ -183,6 +193,10 @@ pub fn run<A: Arq>(sc: &Scenario) -> Report {
         consider(host.wake(&up), now + 1);
         consider(board.wake(&down), now + 1);
         consider(reboots.get(reboot_i).copied(), now + 1);
+        if let Some((a, b)) = sc.outage {
+            consider(Some(a), now + 1);
+            consider(Some(b), now + 1);
+        }
         if now < window {
             consider(Some(window), now + 1);
             for t in [wl_host.next_at(), wl_board.next_at()]
@@ -239,6 +253,8 @@ pub fn run<A: Arq>(sc: &Scenario) -> Report {
         logs_written: board.logs_written,
         logs_delivered: check_down.logs,
         logs_reported_dropped: check_down.logs_reported_dropped,
+        logs_seen_lost: host.total_counters().datagrams_lost as u64,
+        logs_lost_in_ring: board.logs_lost_in_ring,
         text_bytes: host.text_bytes + board.text_bytes,
         duration: sc.duration,
         violations,

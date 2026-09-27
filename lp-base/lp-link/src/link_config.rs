@@ -63,6 +63,10 @@ pub struct LinkConfig {
     pub syn_interval: Micros,
     /// Send an empty ACK after this much transmit silence.
     pub keepalive: Micros,
+    /// Nothing heard for this long: the peer is stalled (a cable out, a hung
+    /// page). The session is kept, but logs stay in the ring instead of going
+    /// out to nobody. A few keepalives' worth.
+    pub stall_after: Micros,
     /// Flush a partial frame or unterminated text after this much quiet.
     pub idle_flush: Micros,
 }
@@ -89,7 +93,8 @@ impl LinkConfig {
             max_rto: 1_000_000,
             max_retries: 20,
             syn_interval: 100_000,
-            keepalive: 1_000_000,
+            keepalive: 250_000,
+            stall_after: 1_000_000,
             idle_flush: 50_000,
         }
     }
@@ -111,7 +116,8 @@ impl LinkConfig {
             min_rto: 250_000,
             max_rto: 3_000_000,
             syn_interval: 500_000,
-            keepalive: 2_000_000,
+            keepalive: 1_000_000,
+            stall_after: 3_500_000,
             idle_flush: 500_000,
             ..Self::usb()
         }
@@ -132,7 +138,8 @@ impl LinkConfig {
             min_rto: 20_000,
             max_rto: 3_000_000,
             syn_interval: 300_000,
-            keepalive: 2_000_000,
+            keepalive: 1_000_000,
+            stall_after: 3_500_000,
             idle_flush: 300_000,
             ..Self::usb()
         }

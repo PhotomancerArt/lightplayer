@@ -8,8 +8,10 @@
 //! deterministic from the seeds below, and says nothing about silicon until
 //! M3 repeats it on target.
 
-use lp_link::sim::{Faults, Report, Scenario, Transport, Workload, run};
+use lp_link::sim::sim_rng::SimRng;
+use lp_link::sim::{Report, Scenario, Transport, Workload, run};
 use lp_link::{Arq, CrcKind, Framing, GoBackN, LinkConfig, NoArq, SelectiveRepeat, StopAndWait};
+use lp_link::{cobs, frame};
 
 type Gbn = GoBackN<127>;
 
@@ -251,56 +253,166 @@ fn sweep() {
     }
 }
 
+/// How often damage gets past the receiver, measured directly: frames built
+/// exactly as the link builds them (header, 256 random payload bytes,
+/// keyed checksum, COBS, delimiters), damaged the ways our pipes damage
+/// them, then put through the receiver's own checks (COBS decode, header,
+/// checksum). "none" is the same with no checksum: what the wire has today.
+/// A frame counts as passed only if what it decodes to differs from both
+/// originals (so real damage, not a harmless cut).
 fn crc() {
+    let trials: u64 = std::env::var("CRC_TRIALS")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(4_000_000);
     println!(
-        "\n### Checksum: damage that got through (USB, bulk 20 s, 5 seeds, 30% of packets with a flipped bit, 10% with lost bytes)\n"
+        "\n### Checksum: damaged frames that passed every receiver check ({trials} damaged frames per row)\n"
     );
-    println!("| checksum | bytes per frame | frames rejected | damaged messages delivered |");
-    println!("|---|---|---|---|");
-    for crc in [CrcKind::Crc16, CrcKind::Crc32c] {
-        let (mut rejected, mut missed) = (0u64, 0u64);
-        for seed in 0..5 {
-            let cfg = LinkConfig {
-                crc,
-                ..LinkConfig::usb()
+    println!(
+        "| checksum | bytes/frame | torn (tail lost, next frame spliced on) | bytes lost mid-frame | 1–3 bits flipped | all |"
+    );
+    println!("|---|---|---|---|---|---|");
+    for crc in [None, Some(CrcKind::Crc16), Some(CrcKind::Crc32c)] {
+        let mut rng = SimRng::new(0xC0FFEE);
+        let mut passed = [0u64; 3];
+        let mut tried = [0u64; 3];
+        let (mut raw, mut a, mut b, mut dec) = (vec![], vec![], vec![], vec![]);
+        for i in 0..trials {
+            let key = rng.u32();
+            let kind = (i % 3) as usize;
+            make_frame(&mut rng, crc, key, &mut raw, &mut a);
+            let a_raw = raw.clone();
+            make_frame(&mut rng, crc, key, &mut raw, &mut b);
+            let b_raw = raw.clone();
+            // `a` and `b` are `00 body 00`; work on the bodies.
+            let a_body = &a[1..a.len() - 1];
+            let b_body = &b[1..b.len() - 1];
+            let body: Vec<u8> = match kind {
+                0 => {
+                    let cut = rng.below(a_body.len() as u64 - 1) as usize + 1;
+                    let from = rng.below(b_body.len() as u64 - 1) as usize;
+                    [&a_body[..cut], &b_body[from..]].concat()
+                }
+                1 => {
+                    let len = 1 + rng.below(64) as usize;
+                    let at = rng.below((a_body.len() - len.min(a_body.len() - 1)) as u64) as usize;
+                    let mut v = a_body.to_vec();
+                    v.drain(at..(at + len).min(v.len() - 1));
+                    v
+                }
+                _ => {
+                    let mut v = a_body.to_vec();
+                    for _ in 0..1 + rng.below(3) {
+                        let bit = rng.below(v.len() as u64 * 8);
+                        v[(bit / 8) as usize] ^= 1 << (bit % 8);
+                    }
+                    if v.contains(&0) {
+                        // A flip to 0x00 splits the frame at the deframer:
+                        // the first half is what gets checked.
+                        let z = v.iter().position(|&x| x == 0).unwrap_or(v.len());
+                        v.truncate(z);
+                    }
+                    v
+                }
             };
-            let mut sc =
-                Scenario::new(Transport::Usb, 0.0, bulk(), 20_000_000, seed).with_configs(cfg);
-            sc.faults_down = Faults {
-                corrupt: 0.3,
-                drop_span: 0.1,
-                ..Faults::none()
+            tried[kind] += 1;
+            dec.clear();
+            if body.is_empty() || cobs::decode_into(&body, &mut dec).is_err() {
+                continue;
+            }
+            let ok = match crc {
+                None => frame::Header::parse(&dec).is_some(),
+                Some(c) => {
+                    frame::Header::parse(&dec).is_some() && frame::verify(c, key, &dec).is_some()
+                }
             };
-            let r = run::<SelectiveRepeat>(&sc);
-            rejected += r.host.bad_frames as u64;
-            missed += r.down.undetected_damage;
+            // Damage that decodes back to an intact frame (a redundant
+            // trailing COBS code byte cut off) is not an error.
+            if ok && dec != a_raw && dec != b_raw {
+                passed[kind] += 1;
+            }
         }
-        println!("| {crc:?} | {} | {rejected} | {missed} |", crc.len());
+        let name = crc.map_or("none".to_string(), |c| format!("{c:?}"));
+        let cell = |k: usize| per_million(passed[k], tried[k]);
+        let all = per_million(passed.iter().sum(), tried.iter().sum());
+        println!(
+            "| {name} | {} | {} | {} | {} | {all} |",
+            crc.map_or(0, |c| c.len()),
+            cell(0),
+            cell(1),
+            cell(2)
+        );
     }
 }
 
+fn per_million(n: u64, of: u64) -> String {
+    if n == 0 {
+        format!("0 of {of}")
+    } else {
+        format!("{n} ({:.1} per million)", n as f64 * 1e6 / of as f64)
+    }
+}
+
+fn make_frame(
+    rng: &mut SimRng,
+    crc: Option<CrcKind>,
+    key: u32,
+    raw: &mut Vec<u8>,
+    out: &mut Vec<u8>,
+) {
+    let payload: Vec<u8> = (0..256).map(|_| rng.next_u64() as u8).collect();
+    let hdr = frame::Header {
+        kind: frame::FrameKind::Data,
+        fin: rng.chance(0.5),
+        first: rng.chance(0.5),
+        chan: (rng.below(3)) as u8,
+        seq: rng.next_u64() as u8,
+        ack: rng.next_u64() as u8,
+        win: 8,
+    };
+    match crc {
+        Some(c) => frame::encode(c, key, &hdr, &payload, raw, out),
+        None => {
+            raw.clear();
+            raw.extend_from_slice(&hdr.to_bytes());
+            raw.extend_from_slice(&payload);
+            frame::wrap_stream(raw, out);
+        }
+    }
+}
+
+/// Logs are best effort, but every line is accounted for: delivered, lost on
+/// the wire (the host sees the datagram sequence gap), dropped by the board's
+/// ring while the link was down (the ring says so in its next record), or
+/// lost with the ring at a reboot.
 fn logs() {
     println!(
-        "\n### Logs: best effort, with the board rebooting twice (a log line every 20 ms, 20 s)\n"
+        "\n### Logs: a line every 20 ms for 20 s; the board reboots at 5 s and 12 s; the cable is out 14–17 s\n"
     );
     println!(
-        "| transport | fault rate | lines written | delivered | reported dropped | unaccounted |"
+        "| transport | fault rate | written | delivered | lost on the wire (seen) | dropped by the ring (reported) | lost at reboot | unaccounted |"
     );
-    println!("|---|---|---|---|---|---|");
+    println!("|---|---|---|---|---|---|---|---|");
     for t in [Transport::Usb, Transport::Ble] {
         for p in [0.0, 0.01, 0.05] {
             let mut sc = Scenario::new(t, p, interactive(), 20_000_000, 7);
             sc.board_reboots = vec![5_000_000, 12_000_000];
+            sc.outage = Some((14_000_000, 17_000_000));
             let r = run::<SelectiveRepeat>(&sc);
-            let unaccounted =
-                r.logs_written as i64 - r.logs_delivered as i64 - r.logs_reported_dropped as i64;
+            let unaccounted = r.logs_written as i64
+                - r.logs_delivered as i64
+                - r.logs_seen_lost as i64
+                - r.logs_reported_dropped as i64
+                - r.logs_lost_in_ring as i64;
             println!(
-                "| {} | {} | {} | {} | {} | {} |",
+                "| {} | {} | {} | {} | {} | {} | {} | {} |",
                 t.name(),
                 rate(p),
                 r.logs_written,
                 r.logs_delivered,
+                r.logs_seen_lost,
                 r.logs_reported_dropped,
+                r.logs_lost_in_ring,
                 unaccounted
             );
         }

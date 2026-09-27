@@ -72,6 +72,8 @@ pub struct Link<A: Arq> {
     pending_off: usize,
     pending_bytes: usize,
     datagrams: VecDeque<(u8, Vec<u8>)>,
+    dgram_tx_seq: u8,
+    dgram_rx_next: Option<u8>,
     deframer: Deframer,
     rx_raw: Vec<u8>,
     raw: Vec<u8>,
@@ -118,6 +120,8 @@ impl<A: Arq> Link<A> {
             pending_off: 0,
             pending_bytes: 0,
             datagrams: VecDeque::new(),
+            dgram_tx_seq: 0,
+            dgram_rx_next: None,
             deframer: Deframer::new(max_frame),
             rx_raw: Vec::new(),
             raw: Vec::new(),
@@ -173,8 +177,8 @@ impl<A: Arq> Link<A> {
     /// Move log records from `ring` into the log channel while there is room.
     /// Records stay in the ring (which drops its oldest) while the link is
     /// down, so logging stays cheap and bounded then.
-    pub fn pump_log<const N: usize>(&mut self, ring: &mut LogRing<N>, channel: u8) {
-        if self.state != LinkState::Established {
+    pub fn pump_log<const N: usize>(&mut self, now: Micros, ring: &mut LogRing<N>, channel: u8) {
+        if self.state != LinkState::Established || self.is_stalled(now) {
             return;
         }
         let mut rec = [0u8; 256];
@@ -306,6 +310,13 @@ impl<A: Arq> Link<A> {
         now.saturating_sub(self.last_rx)
     }
 
+    /// Up, but nothing heard for `stall_after`: the other end is not there
+    /// right now. Not a reset (it may come back); a signal for the edge and
+    /// for what is worth sending.
+    pub fn is_stalled(&self, now: Micros) -> bool {
+        self.state == LinkState::Established && self.peer_silent_for(now) >= self.cfg.stall_after
+    }
+
     /// Nothing queued, nothing unacknowledged.
     pub fn is_idle(&self) -> bool {
         self.pending.is_empty() && self.tx.is_empty() && self.datagrams.is_empty()
@@ -386,6 +397,18 @@ impl<A: Arq> Link<A> {
             }
             FrameKind::Datagram => {
                 self.on_ack_fields(now, &hdr, 0, None);
+                // Best effort, but never silent: datagrams carry their own
+                // 8-bit sequence, so a gap is counted and a duplicate dropped.
+                let next = self.dgram_rx_next.unwrap_or(hdr.seq);
+                let ahead = seq_dist(next, hdr.seq);
+                // Only a short way back is a duplicate; anything else is a
+                // gap going forward (a long outage must not read as "old").
+                if ahead >= 224 {
+                    self.counters.duplicates += 1;
+                    return true;
+                }
+                self.counters.datagrams_lost += ahead as u32;
+                self.dgram_rx_next = Some(hdr.seq.wrapping_add(1));
                 if self.inbox.has_room(body.len()) {
                     self.inbox.push_datagram(hdr.chan, body);
                 } else {
@@ -581,7 +604,9 @@ impl<A: Arq> Link<A> {
                 self.counters.datagrams_dropped += 1;
                 continue;
             }
-            let hdr = self.header(FrameKind::Datagram, chan);
+            let mut hdr = self.header(FrameKind::Datagram, chan);
+            hdr.seq = self.dgram_tx_seq;
+            self.dgram_tx_seq = self.dgram_tx_seq.wrapping_add(1);
             self.encode(&hdr, &data);
             return true;
         }
@@ -782,6 +807,8 @@ impl<A: Arq> Link<A> {
         self.pending_off = 0;
         self.pending_bytes = 0;
         self.datagrams.clear();
+        self.dgram_tx_seq = 0;
+        self.dgram_rx_next = None;
         self.inbox.abort_partial();
         self.backoff = 0;
         self.peer_win = 0;

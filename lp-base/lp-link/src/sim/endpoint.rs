@@ -26,6 +26,8 @@ pub struct Endpoint<A: Arq> {
     pub peak_window: usize,
     pub peak_scratch: usize,
     pub logs_written: u64,
+    /// Log lines that died in the ring at a reboot.
+    pub logs_lost_in_ring: u64,
     pub ups: u64,
     pub resets: u64,
     pub text_bytes: u64,
@@ -48,6 +50,7 @@ impl<A: Arq> Endpoint<A> {
             peak_window: 0,
             peak_scratch: 0,
             logs_written: 0,
+            logs_lost_in_ring: 0,
             ups: 0,
             resets: 0,
             text_bytes: 0,
@@ -62,6 +65,7 @@ impl<A: Arq> Endpoint<A> {
         self.link = Link::new(self.cfg.clone(), nonce);
         self.inc += 1;
         self.rx_gen = 0;
+        self.logs_lost_in_ring += self.log_ring.len() as u64;
         self.log_ring = LogRing::new();
     }
 
@@ -102,7 +106,7 @@ impl<A: Arq> Endpoint<A> {
 
     /// Write frames while the pipe takes them.
     pub fn service(&mut self, now: Micros, pipe: &mut Pipe) {
-        self.link.pump_log(&mut self.log_ring, CH_LOG);
+        self.link.pump_log(now, &mut self.log_ring, CH_LOG);
         self.blocked = false;
         loop {
             if !pipe.can_accept(now) {
@@ -180,6 +184,7 @@ fn add_counters(t: &mut LinkCounters, c: &LinkCounters) {
     t.out_of_order += c.out_of_order;
     t.rx_no_room += c.rx_no_room;
     t.datagrams_dropped += c.datagrams_dropped;
+    t.datagrams_lost += c.datagrams_lost;
     t.stale_partials += c.stale_partials;
     t.text_bytes += c.text_bytes;
     t.ups += c.ups;
