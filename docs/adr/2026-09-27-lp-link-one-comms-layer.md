@@ -1,7 +1,7 @@
 # ADR: lp-link — one reliable comms layer under the wire, on every transport
 
-- **Status:** accepted (2026-09-27, by Yona at G1 of
-  `lp2025/2026-09-26-1720-reliable-device-link`)
+- **Status:** implemented on USB (PR #854, 2026-09-27); accepted (2026-09-27,
+  by Yona at G1 of `lp2025/2026-09-26-1720-reliable-device-link`)
 - **Deciders:** Yona
 - **Evidence:** planning dir `2026-09-26-1720-reliable-device-link/reports/`
   (`REPORT.md`, `m1-loss.md`, `m2-link-design.md`, `m3-on-target.md`);
@@ -134,3 +134,34 @@ Persisted formats are untouched.
   under reordering (UDP), respectively.
 - **A third-party ARQ (KCP, MIN) or PPP stack.** Read as specs. We build tiny
   custom code (repo practice), keep it no_std, and control the size.
+
+## Status: implemented on USB (PR #854)
+
+Milestone M2 of the rollout plan (with M4, the link-state UX, folded in) cut
+USB over to `lp-link` on both ends: C6/S3 silicon, their emulators, Studio's
+Web Serial and emulator-tab providers, and `lp-cli`'s native serial and
+`serial:tcp`/`serial:ws` transports. BLE, the classic ESP32's UART and
+`fw-emu` still run the pre-`lp-link` `M!` framing, on schedule for their own
+milestones (M3, M5, and a future one). `WIRE_PROTO_VERSION` moved 29 → 30.
+See `lp-base/lp-link/README.md`'s "Where it runs" for exactly what runs
+where, and the ADR amendments to `2026-09-01-editor-lens-borrows-the-device-
+wire.md`, `2026-09-06-shared-link-conversations-and-the-card-feed.md`,
+`2026-09-24-json-pack-wire-encoding.md` and
+`2026-09-25-learned-wire-dictionary.md` for what changed under each.
+
+Two deviations from the rollout plan, decided by the implementing agent and
+recorded for review in
+`~/.photomancer/planning/lp2025/2026-09-27-0215-lp-link-usb-cutover/notes.md`
+(D2, D3):
+
+- **D2 — the exclusive-borrow / pause-the-pump convention was kept, not
+  retired.** The plan's M2 had asked for it to go; with `lp-link` doing
+  reassembly, the torn-partial hazard the borrow rule guarded against is
+  gone, but rewriting `device_effects.rs` so conversations share the link
+  by request id is a larger Studio-core refactor with no further
+  user-visible gain once the link is reliable. Deferred to a future
+  milestone, **M2b**.
+- **D3 — scope is USB-Serial-JTAG only.** BLE (M3), the classic v3 UART
+  (M5) and `fw-emu` (no hello, lossless by construction) keep `M!` until
+  their own milestones; `fw-esp32-common` keeps the `M!` serializer for
+  them, split into "payload" and "`M!` framing".

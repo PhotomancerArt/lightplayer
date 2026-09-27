@@ -1632,6 +1632,173 @@ fn three_failed_pulls_in_a_row_close_the_lens_as_a_dead_wire() {
     assert_eq!(bench.view().devices.len(), 1, "the card stays");
 }
 
+/// Plan D13: a link RESET under the lens (lp-link restarting its session —
+/// a board reboot, a burst of lost frames) fails the pulls in flight at once
+/// (D9). That is a blip the link comes back from, not a dead wire: the
+/// editor keeps the project, the page says "Reconnecting…", and the board's
+/// first word after the reset ends it and lets the pulls go out again
+/// without the backoff the blip earned.
+#[test]
+fn a_link_reset_under_the_lens_keeps_the_editor_and_says_reconnecting() {
+    let (mut bench, tasks, _device) = lens_on_a_running_board("dev000000daqf6dvvra", "usb-lens-a");
+    let link = lens_link(&bench);
+
+    bench.controller.fold_device_input(DeviceInput::link(
+        link,
+        lpa_devices::link::LinkEvent::WireNote(
+            lpa_link::device_link::port_read_map::link_reset_note(
+                lpc_wire::lp_link::ResetReason::RetryLimit,
+            ),
+        ),
+    ));
+    let strip = bench
+        .controller
+        .view()
+        .lens_reconnecting
+        .expect("the page says it is reconnecting");
+    assert!(
+        strip.headline.starts_with("Reconnecting to "),
+        "{}",
+        strip.headline
+    );
+    assert!(strip.detail.contains("restarted"), "{}", strip.detail);
+
+    // Well past the dead-wire count: the pulls fail, the editor stays.
+    for _ in 0..5 {
+        bench.controller.record_passive_refresh_failure();
+    }
+    assert!(
+        bench.lens_device_uid().is_some(),
+        "a reconnecting link is not a dead wire"
+    );
+    assert!(
+        bench.controller.view().home.is_none(),
+        "the project page stays; nothing routes to Devices"
+    );
+
+    // The board speaks again (its heartbeat, teed through the lens's tap):
+    // the strip goes and the lens's failure streak is forgiven.
+    let deadline = std::time::Instant::now() + REAL_TIME_LIMIT;
+    while bench.controller.view().lens_reconnecting.is_some() {
+        let refresh = UiAction::from_op(ProjectController::NODE_ID, ProjectOp::RefreshProject);
+        let _ = drive(bench.controller.dispatch(refresh));
+        bench.step(&tasks);
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the board's return never cleared the strip"
+        );
+        std::thread::sleep(Duration::from_millis(1));
+    }
+    assert!(bench.lens_device_uid().is_some());
+    let session = bench
+        .controller
+        .runtime_pool_for_test()
+        .lens_session()
+        .expect("the lens session")
+        .consecutive_refresh_failures();
+    assert_eq!(session, 0, "the blip's failures are forgiven");
+}
+
+/// Plan D13: a stall (the link is up, the board silent past the link's
+/// stall time) shows the strip too, and the link's own "answering again"
+/// note ends it.
+#[test]
+fn a_stall_under_the_lens_shows_reconnecting_until_the_board_answers() {
+    let (mut bench, _tasks, _device) = lens_on_a_running_board("dev000000daqf6dvvrb", "usb-lens-b");
+    let link = lens_link(&bench);
+    let note = |text: &str| {
+        DeviceInput::link(
+            link,
+            lpa_devices::link::LinkEvent::WireNote(text.to_string()),
+        )
+    };
+
+    bench
+        .controller
+        .fold_device_input(note(lpa_link::device_link::link_note::LINK_STALLED_NOTE));
+    let strip = bench
+        .controller
+        .view()
+        .lens_reconnecting
+        .expect("a stall says reconnecting");
+    assert!(strip.detail.contains("went quiet"), "{}", strip.detail);
+
+    bench
+        .controller
+        .fold_device_input(note(lpa_link::device_link::link_note::LINK_ANSWERING_NOTE));
+    assert!(bench.controller.view().lens_reconnecting.is_none());
+    assert!(bench.lens_device_uid().is_some());
+}
+
+/// Plan D13's limit: a link that stays in trouble past the grace is a wire
+/// with nobody on it after all, and the dead-wire backstop closes the editor
+/// exactly as it did before (a port that is GONE never waits: see
+/// `a_port_that_dies_under_the_lens_closes_the_editor_through_the_tap`).
+#[test]
+fn a_link_still_down_after_the_grace_closes_the_editor_as_before() {
+    let (mut bench, tasks, _device) = lens_on_a_running_board("dev000000daqf6dvvrc", "usb-lens-c");
+    let link = lens_link(&bench);
+
+    bench.controller.fold_device_input(DeviceInput::link(
+        link,
+        lpa_devices::link::LinkEvent::WireNote(
+            lpa_link::device_link::link_note::LINK_STALLED_NOTE.to_string(),
+        ),
+    ));
+    bench.controller.record_passive_refresh_failure();
+    bench.controller.record_passive_refresh_failure();
+    bench.controller.record_passive_refresh_failure();
+    assert!(bench.lens_device_uid().is_some(), "held within the grace");
+
+    let grace = crate::app::studio::lens_reconnect::LENS_RECONNECT_GRACE.as_secs_f64();
+    bench.clock.set(bench.clock.get() + grace + 1.0);
+    bench.controller.record_passive_refresh_failure();
+    assert!(
+        bench.lens_device_uid().is_none(),
+        "past the grace the backstop is the backstop again"
+    );
+    assert!(bench.controller.view().lens_reconnecting.is_none());
+    bench.step(&tasks);
+    assert_eq!(bench.view().devices.len(), 1, "the card stays");
+}
+
+/// A board running the bundled example with the editor open on it — the
+/// starting point of every lens test above.
+fn lens_on_a_running_board(uid: &str, endpoint: &str) -> (DeviceBench, TaskPool, FakeEsp32Device) {
+    let device = empty_light_player(uid);
+    let (mut bench, tasks) = identified(&device, endpoint);
+    bench.run_until(&tasks, "the board to report nothing loaded", |bench| {
+        bench
+            .view()
+            .devices
+            .first()
+            .is_some_and(|card| card.loaded_project == lpa_devices::view::LoadedProject::Empty)
+    });
+    let card = bench.view().devices[0].clone();
+    bench.push_gesture(card.id, bundled_example());
+    bench.run_until(&tasks, "the push to finish", |bench| {
+        bench
+            .view()
+            .devices
+            .first()
+            .is_some_and(|card| card.activity.is_none() && card.last_outcome.is_some())
+    });
+    let uid = bench.registry()[0].uid.clone();
+    bench.open_lens(&uid).expect("opens");
+    (bench, tasks, device)
+}
+
+/// The link the editor lens is on.
+fn lens_link(bench: &DeviceBench) -> crate::DeviceLinkId {
+    bench
+        .controller
+        .runtime_pool_for_test()
+        .attached_session()
+        .expect("a device session")
+        .attachment()
+        .link
+}
+
 /// An address the roster cannot serve yet is HELD, never refused: the
 /// gallery stays honest, nothing dead is installed, and closing the lens
 /// (leaving the route) lets the intent go.

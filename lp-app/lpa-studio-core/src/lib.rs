@@ -65,6 +65,7 @@ pub use app::devices::{
     target_offer, transport_label_for_endpoint, uid_from_emu_endpoint, uid_from_sim_endpoint,
     write_sim_record,
 };
+pub use app::devices::{LINK_COUNTERS_CAPTION, LinkTrouble, UiLinkCounterRow, link_counter_rows};
 pub use app::docs_host::DocsSimHost;
 pub use app::studio::PlayViewOp;
 // The project's declared hardware (D41): the web shell's Hardware row and
@@ -174,10 +175,10 @@ pub use app::studio::{
     STUDIO_LOG_SINK, StudioActor, StudioActorOptions, StudioCommand, StudioController,
     StudioHandle, StudioLogSink, StudioSnapshot, StudioViewReceiver, StudioViewSender,
     UiChromeSessionControl, UiChromeSessionStatus, UiConsoleView, UiError, UiLensCard,
-    UiLensRuntime, UiLogDraft, UiLogEntry, UiLogLevel, UiLogOrigin, UiLogSource, UiNotice,
-    UiNoticeLevel, UiResult, UxActivityTarget, UxUpdate, UxUpdateSink, VERDICT_CHASE_INTERVAL,
-    VERDICT_CHASE_TICKS, ViewPublisher, has_unsaved_work, set_device_lens_pause_override,
-    studio_view_channel,
+    UiLensReconnecting, UiLensRuntime, UiLogDraft, UiLogEntry, UiLogLevel, UiLogOrigin,
+    UiLogSource, UiNotice, UiNoticeLevel, UiResult, UxActivityTarget, UxUpdate, UxUpdateSink,
+    VERDICT_CHASE_INTERVAL, VERDICT_CHASE_TICKS, ViewPublisher, has_unsaved_work,
+    set_device_lens_pause_override, studio_view_channel,
 };
 pub use core::log::{DeviceEventKind, DeviceEventRecorder};
 pub use core::notice::UiNotices;
@@ -201,8 +202,8 @@ pub use lpa_devices::view::{
 pub use lpa_devices::{
     Action as DeviceAction, ActivityKind as DeviceActivityKind, DeviceId, DeviceStatus,
     EndpointKey as DeviceEndpointKey, Event as DeviceEvent, Input as DeviceInput,
-    LinkId as DeviceLinkId, LinkInfo as DeviceLinkInfo, Millis as DeviceMillis,
-    RosterConfig as DeviceRosterConfig, TerminalKind as DeviceTerminalKind,
+    LinkCounterFacts as DeviceLinkCounters, LinkId as DeviceLinkId, LinkInfo as DeviceLinkInfo,
+    Millis as DeviceMillis, RosterConfig as DeviceRosterConfig, TerminalKind as DeviceTerminalKind,
     TerminalLine as DeviceTerminalLine, WireVersion as DeviceWireVersion,
 };
 

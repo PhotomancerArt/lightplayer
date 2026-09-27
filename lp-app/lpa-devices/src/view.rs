@@ -92,6 +92,10 @@ pub struct DeviceView {
     /// window (the card's live-feed pill: "live · N fps"). `None` until a
     /// heartbeat carried one; a window reset drops it, honestly.
     pub engine_fps: Option<u16>,
+    /// The board's link counters off the latest heartbeat this window (the
+    /// card's link section). `None` until a heartbeat carried them, and on
+    /// a link that reports none.
+    pub link_counters: Option<crate::LinkCounterFacts>,
     /// Whether a project could be sent to this board right now: a
     /// proto-compatible LightPlayer, on a link, with nothing else running.
     /// The empty face's primary verb is drawn only when this is true.
@@ -336,6 +340,7 @@ pub fn device_view(device: &Device, now: Millis) -> DeviceView {
             && device.activity.is_none(),
         loaded_project: loaded,
         engine_fps: device.evidence.engine_fps(),
+        link_counters: device.evidence.link_counters(),
         // An OPEN port, not merely an attached one: the push conversation
         // talks over this port, and a verb that could only fail is worse
         // than no verb. (The fold already implies it — closing a port

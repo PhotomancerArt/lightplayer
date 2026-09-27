@@ -67,6 +67,7 @@ fn sim_lens_device_view() -> lpa_studio_core::DeviceView {
             label: "demo-project".to_string(),
         },
         engine_fps: Some(60),
+        link_counters: None,
         can_receive_project: true,
         can_remove_project: true,
         activity: None,

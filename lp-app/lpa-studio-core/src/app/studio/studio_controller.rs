@@ -36,6 +36,7 @@ use crate::app::home::{HOME_NODE_ID, HomeOp, UiHomeView, home_view_builder};
 use crate::app::library::{CatalogOp, LibraryHost};
 use crate::app::project::device_bind::BindOutcome;
 use crate::app::studio::console_command::ConsoleCommand;
+use crate::app::studio::lens_reconnect::{LENS_RECONNECT_GRACE, LensReconnect, LensReconnectEdge};
 use crate::app::studio::refresh_cadence::RefreshCadence;
 use crate::app::studio::ui_console_view::UiConsoleView;
 use crate::core::log::{
@@ -230,6 +231,13 @@ pub struct StudioController {
     /// moment any open starts — a new gesture supersedes the question the
     /// page was asking, exactly as it supersedes an open in flight.
     open_mismatch: Option<Box<crate::UiOpenMismatch>>,
+    /// Every link's health (stalled, or reset and not yet heard from),
+    /// folded from the link events the model folds (plan D13).
+    link_health: crate::app::devices::LinkHealthMap,
+    /// The editor lens's link riding out a stall or a reset: the page
+    /// shows "Reconnecting…" and failed pulls do not close the editor
+    /// until [`LENS_RECONNECT_GRACE`] has passed.
+    lens_reconnect: Option<LensReconnect>,
     /// Injected randomness for uid minting. The web shell installs crypto
     /// randomness at startup; the default is a clock-derived fallback good
     /// enough for tests.
@@ -422,6 +430,8 @@ impl StudioController {
             library_refresh_pending: false,
             pending_open: None,
             open_mismatch: None,
+            link_health: crate::app::devices::LinkHealthMap::default(),
+            lens_reconnect: None,
             random: Rc::new(clock_fallback_random),
             local_stamp: {
                 let clock = Rc::clone(&now_secs_for_stamp);
@@ -1073,6 +1083,7 @@ impl StudioController {
     /// either a link command (queued on the link) or a spawned future.
     pub fn fold_device_input(&mut self, input: crate::DeviceInput) {
         let now = self.device_now();
+        self.link_health.observe(&input);
         for line in self.devices.handle(now, input) {
             self.record_device_event(
                 None,
@@ -1084,6 +1095,9 @@ impl StudioController {
             );
         }
         self.drop_device_lens_if_wireless();
+        self.link_health
+            .retain(|link| self.devices.link_is_routable(link));
+        self.observe_lens_link();
         // A forgotten device takes its feed (and last frame) with it.
         self.device_feeds.retain_devices(self.devices.roster());
         // A Bluetooth link that opened, said hello or dropped may need a
@@ -1758,15 +1772,78 @@ impl StudioController {
         // the lens answers nothing, exactly like a wire with nobody on it,
         // and this is what closes the editor honestly instead of leaving a
         // mirror over a runtime that is gone.
-        let dead = session.consecutive_refresh_failures() >= LENS_DEAD_WIRE_FAILURES;
-        if dead {
+        let streak = session.consecutive_refresh_failures();
+        // …except while the lens's link is reconnecting (plan D13): a stall
+        // or a reset fails the pulls in flight, and the link comes back on
+        // its own. The pulls keep their backoff; the editor holds on until
+        // the grace runs out, and then the backstop is the backstop again.
+        self.observe_lens_link();
+        let now = (self.now_secs)();
+        let reconnect = self.lens_reconnect;
+        let holding = reconnect.is_some_and(|reconnect| reconnect.holding(now));
+        if streak >= LENS_DEAD_WIRE_FAILURES && !holding {
+            let message = match reconnect {
+                Some(_) => format!(
+                    "the device did not reconnect within {} s; the editor is closed",
+                    LENS_RECONNECT_GRACE.as_secs()
+                ),
+                None => "the device stopped answering the editor; the editor is closed".to_string(),
+            };
             self.push_log(UiLogDraft::new(
                 UiLogLevel::Warn,
                 UiLogOrigin::Studio,
-                "the device stopped answering the editor; the editor is closed".to_string(),
+                message,
             ));
             self.close_device_lens();
         }
+    }
+
+    /// Step the lens's reconnect state against its link's health (plan
+    /// D13). Trouble beginning is logged and shown; trouble ending clears
+    /// the lens's failure streak and backoff, so the next pull goes out at
+    /// once and the editor catches up instead of waiting out a backoff the
+    /// blip earned.
+    fn observe_lens_link(&mut self) {
+        let now = (self.now_secs)();
+        let trouble = self.pool.lens_session().and_then(|session| {
+            let link = session.attachment().link;
+            let health = self.link_health.get(link);
+            health
+                .trouble()
+                .map(|trouble| (link, trouble, health.episode()))
+        });
+        let (next, edge) = LensReconnect::step(self.lens_reconnect, trouble, now);
+        self.lens_reconnect = next;
+        match edge {
+            LensReconnectEdge::Same => {}
+            LensReconnectEdge::Began => {
+                self.push_log(UiLogDraft::new(
+                    UiLogLevel::Info,
+                    UiLogOrigin::Studio,
+                    "reconnecting to the board; the editor stays open meanwhile".to_string(),
+                ));
+                self.mark_dirty();
+            }
+            LensReconnectEdge::Ended => {
+                if let Ok(session) = self.pool.lens_session_mut() {
+                    session.record_refresh_success();
+                }
+                self.push_log(UiLogDraft::new(
+                    UiLogLevel::Info,
+                    UiLogOrigin::Studio,
+                    "the board is back; the editor catches up".to_string(),
+                ));
+                self.mark_dirty();
+            }
+        }
+    }
+
+    /// The "Reconnecting…" strip, while the lens's link is in trouble.
+    fn lens_reconnecting_view(&self) -> Option<crate::UiLensReconnecting> {
+        let reconnect = self.lens_reconnect?;
+        let session = self.pool.lens_session()?;
+        (session.attachment().link == reconnect.link)
+            .then(|| crate::UiLensReconnecting::new(&session.attachment().name, reconnect.trouble))
     }
 
     /// The lens session's current passive-refresh backoff delay (zero
@@ -2057,6 +2134,7 @@ impl StudioController {
                 self.access.access_added().cloned(),
             )
             .with_lens_access_line(self.lens_access_line())
+            .with_lens_reconnecting(self.lens_reconnecting_view())
             .with_dirty(dirty)
     }
 
@@ -5152,6 +5230,7 @@ impl StudioController {
     /// there is none. The device keeps its card and its evidence.
     pub(crate) fn close_device_lens(&mut self) {
         self.pending_device_lens = None;
+        self.lens_reconnect = None;
         let Some(session) = self.pool.attached_session() else {
             return;
         };
