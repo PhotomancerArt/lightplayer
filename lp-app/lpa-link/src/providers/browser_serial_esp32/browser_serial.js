@@ -132,6 +132,17 @@ export function writeBytes(id, bytes) {
   return requireSession(id).writeBytes(bytes);
 }
 
+// Call `callback` (no arguments) whenever the port's read pump buffers bytes,
+// so the Rust link can answer at once: a hidden tab throttles timers to a
+// second or a minute, but a stream read still resolves when data arrives, and
+// a board whose frames go unacknowledged gives up on the session. Returns the
+// function that stops it.
+export function onBytes(id, callback) {
+  return requireSession(id).subscribe((event) => {
+    if (event.type === "raw") callback();
+  });
+}
+
 // `{ generation, open, bytes }`: everything the port read since the last
 // drain, as bytes (the Rust side's lp-link end reads them; see the
 // controller's constructor), and whether the port is open for writing.

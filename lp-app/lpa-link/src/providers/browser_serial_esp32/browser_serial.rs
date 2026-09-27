@@ -12,7 +12,10 @@
 //! [`SERVICE_TICK_CAP`]) pulls the controller's bytes, feeds the link, and
 //! writes its frames with a BYTES write (`writeBytes`) — resends and
 //! acknowledgements happen whether or not anyone is reading. Every
-//! [`take_reads`] services the port once more on the way.
+//! [`take_reads`] services the port once more on the way, and so does every
+//! chunk the read pump buffers (`onBytes`): a hidden tab throttles the loop's
+//! timer to a second or worse, but not a stream read, so the board's frames
+//! are still acknowledged promptly and it does not give up on the session.
 //!
 //! Above the link nothing changed shape (D1): [`take_reads`] hands out the
 //! same [`WireRead`]s the `M!` reader did, to whichever drainer holds the
@@ -103,6 +106,9 @@ extern "C" {
 
     #[wasm_bindgen(js_name = takeBytes, catch)]
     fn js_take_bytes(id: u32) -> Result<JsValue, JsValue>;
+
+    #[wasm_bindgen(js_name = onBytes, catch)]
+    fn js_on_bytes(id: u32, callback: &Closure<dyn FnMut()>) -> Result<js_sys::Function, JsValue>;
 
     #[wasm_bindgen(js_name = takeErrors)]
     fn js_take_errors(id: u32) -> Array;
@@ -267,6 +273,27 @@ struct ServedPort {
     generation: Option<u32>,
     service: LinkPortService,
     running: Rc<Cell<bool>>,
+    /// The read pump's "bytes arrived" subscription, once made.
+    wake: Option<WakeOnBytes>,
+}
+
+/// A subscription to the controller's read pump that services the port.
+struct WakeOnBytes {
+    callback: Option<Closure<dyn FnMut()>>,
+    stop: js_sys::Function,
+}
+
+impl Drop for WakeOnBytes {
+    /// Unsubscribe, and LEAK the closure rather than free it: the port can be
+    /// dropped from inside its own callback (a service pass that finds the
+    /// session gone), and freeing a closure JS is still running is undefined.
+    /// One small closure per port session.
+    fn drop(&mut self) {
+        let _ = self.stop.call0(&JsValue::NULL);
+        if let Some(callback) = self.callback.take() {
+            callback.forget();
+        }
+    }
 }
 
 /// A link for a newly opened port: a fresh nonce, and the page's wire flags
@@ -322,6 +349,7 @@ fn service(id: u32) -> Serviced {
             generation,
             service: fresh_service(),
             running: Rc::default(),
+            wake: None,
         });
         if port.generation != generation {
             // The controller cleared its buffer: a (re)open. The session,
@@ -350,11 +378,41 @@ fn service(id: u32) -> Serviced {
     if !open {
         return Serviced::Closed;
     }
+    wake_on_bytes(id);
     spawn_service_loop(running, move || match service(id) {
         Serviced::Open(wake) => Some(wake),
         Serviced::Gone | Serviced::Closed => None,
     });
     Serviced::Open(wake)
+}
+
+/// Subscribe the port to its read pump's "bytes arrived", once per port
+/// session (see the module docs).
+fn wake_on_bytes(id: u32) {
+    let subscribed = PORTS.with(|ports| {
+        ports
+            .borrow()
+            .get(&id)
+            .is_none_or(|port| port.wake.is_some())
+    });
+    if subscribed {
+        return;
+    }
+    let callback = Closure::<dyn FnMut()>::new(move || {
+        service(id);
+    });
+    let Ok(stop) = js_on_bytes(id, &callback) else {
+        return;
+    };
+    let wake = WakeOnBytes {
+        callback: Some(callback),
+        stop,
+    };
+    PORTS.with(|ports| {
+        if let Some(port) = ports.borrow_mut().get_mut(&id) {
+            port.wake = Some(wake);
+        }
+    });
 }
 
 /// Write one link frame. Fire and forget: the controller's writer queues
