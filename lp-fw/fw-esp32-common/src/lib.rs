@@ -30,5 +30,7 @@ pub mod lp_fs;
 pub mod radio_link;
 #[cfg(feature = "server")]
 pub mod server_loop;
+#[cfg(feature = "soak-link")]
+pub mod soak_link;
 #[cfg(feature = "server")]
 pub mod transport;
