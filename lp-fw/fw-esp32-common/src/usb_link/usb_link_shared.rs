@@ -27,7 +27,7 @@ pub const MAX_MESSAGE: usize = lp_link::MAX_MESSAGE;
 /// payload (256 B) allocated for the link's life; the log ring (4 KB) holds
 /// the rest, and the link task moves at most
 /// [`super::usb_link_task`]'s per-pass count into it.
-const LOG_DATAGRAMS: usize = 8;
+const LOG_DATAGRAMS: usize = 4;
 
 /// Messages the send ring may hold queued. Replies go as external messages
 /// (one at a time, from the frame buffer); the ring carries only the small
@@ -35,9 +35,9 @@ const LOG_DATAGRAMS: usize = 8;
 const SEND_QUEUE: usize = 4;
 
 /// The send ring: the small messages above, plus the transmit window's bytes,
-/// which count against the same budget (8 frames x 256 B while a reply is
+/// which count against the same budget (8 frames x 256 B = 2 KiB while a reply is
 /// going out).
-const SEND_BUDGET: usize = 3 * 1024;
+const SEND_BUDGET: usize = 2560;
 
 /// A reassembly buffer above this is released once its request is delivered
 /// (an upload's chunk grows one to ~6 KB; it must not stay).
