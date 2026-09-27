@@ -3055,6 +3055,7 @@ test-emu-c6-cli:
     LP_EMU_BUILD_FW=1 scripts/ci/ci-images.py with esp32c6 -- cargo test -p lp-cli --test emu_usb_json_pack -- --include-ignored --nocapture
     LP_EMU_BUILD_FW=1 scripts/ci/ci-images.py with esp32c6 -- cargo test -p lp-cli --test emu_usb_free_lag -- --include-ignored --nocapture
     LP_EMU_BUILD_FW=1 scripts/ci/ci-images.py with esp32c6 -- cargo test -p lp-cli --release --test emu_usb_link -- --include-ignored --nocapture
+    LP_EMU_BUILD_FW=1 scripts/ci/ci-images.py with esp32c6 -- cargo test -p lp-cli --release --test emu_usb_link_gates -- --include-ignored --nocapture
 
 # The classic ESP32 (v3) machine's own suite (plan three, M3).
 #
@@ -3656,8 +3657,10 @@ test-emu-serve:
 # NOT in `test-emu-c6`: it builds a firmware image, a merged flash image and a
 # release lp-cli, and then runs the machine for eight emulated seconds — it
 # is a walk, and a walk is something you run, not something every PR pays for.
-# What it proves per-tick lives in `tests/shader_oracle_pin.rs`, which does
-# run there. See docs/reports/2026-09-08-esp32c6-emulator-walk.md.
+# What it proves per-tick lives in `lp-cli/tests/emu_usb_link_gates.rs` (G4-1,
+# moved from lp-emu-esp32c6's shader_oracle_pin.rs when the image went onto
+# lp-link), which runs in `test-emu-c6-cli`. See
+# docs/reports/2026-09-08-esp32c6-emulator-walk.md.
 # `build-rv32-builtins` and not the whole `ci-prereqs`: the host oracle's
 # second engine is `lpvm-native`'s rv32 code generator, which renders black
 # without its builtins image — and a black host frame is not an oracle. The
