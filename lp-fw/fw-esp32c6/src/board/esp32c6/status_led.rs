@@ -76,7 +76,6 @@ pub fn show(state: StatusLedState) {
 /// Play [`StatusLedState::PoweringOff`] to its end, blocking: the power-off
 /// path runs with the executor held, so the task cannot animate it. Leaves
 /// the LED dark.
-#[expect(dead_code, reason = "called from power.rs once PR #787 lands")]
 pub fn play_power_off() {
     show(StatusLedState::PoweringOff);
     let Some(pattern_ms) = StatusLedState::PoweringOff.pattern_ms() else {
