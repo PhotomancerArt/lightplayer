@@ -23,7 +23,9 @@
 //!   visible.
 //!
 //! Sans-IO: time ([`Micros`]) and the nonce are injected; no executor, no
-//! clock, no allocation beyond `alloc` collections. The `sim` feature adds a
+//! clock. RAM is bounded by the config ([`Link::ram_bound`]): buffers are
+//! allocated in [`Link::new`], and steady-state traffic allocates only the
+//! `Vec` each delivered message is handed over in. The `sim` feature adds a
 //! deterministic fault-injecting simulator ([`sim`]) and the `link-bench` tool.
 //!
 //! Design, principles and prior art: `README.md` beside this crate.
@@ -37,6 +39,7 @@ extern crate std;
 pub mod arq;
 pub mod cobs;
 pub mod crc;
+mod datagram_queue;
 pub mod deframer;
 pub mod frame;
 mod inbox;
@@ -48,6 +51,7 @@ mod link_counters;
 mod link_event;
 pub mod log_ring;
 mod rtt_estimator;
+mod send_queue;
 mod seq_num;
 mod tx_queue;
 
@@ -57,11 +61,13 @@ pub mod sim;
 pub use arq::{Arq, GoBackN, NoArq, SelectiveRepeat, StopAndWait};
 pub use crc::CrcKind;
 pub use link::{Link, LinkState, SendError};
-pub use link_config::{CH_CONTROL, CH_LOG, CH_PROTO, Framing, LinkConfig};
+pub use link_config::{CH_CONTROL, CH_LOG, CH_PROTO, Framing, LinkConfig, MAX_MESSAGE};
 pub use link_counters::LinkCounters;
 pub use link_event::{LinkEvent, ResetReason};
 pub use log_ring::LogRing;
 
 /// Time, in microseconds, from any epoch the edge likes. Integer: the C6 has
-/// no FPU (the repo's usual f64 seconds would be soft-float here).
+/// no FPU (the repo's usual f64 seconds would be soft-float here), and the
+/// link only ever takes differences (timers, round trips), never shows a
+/// timestamp. See the README's "Time".
 pub type Micros = u64;

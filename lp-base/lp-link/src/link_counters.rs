@@ -24,6 +24,9 @@ pub struct LinkCounters {
     pub stale_frames: u32,
     /// Frames longer than the maximum, discarded.
     pub oversize_frames: u32,
+    /// Reliable messages longer than `max_message` the peer sent: dropped,
+    /// acknowledged, and the session kept.
+    pub oversize_messages: u32,
     /// Frames that arrived before the link was up.
     pub dropped_unsynced: u32,
     pub duplicates: u32,
@@ -37,6 +40,8 @@ pub struct LinkCounters {
     /// Partial frames flushed after going quiet (a lost tail).
     pub stale_partials: u32,
     pub text_bytes: u32,
+    /// Text bytes dropped because the application was not reading.
+    pub text_dropped: u32,
     pub ups: u32,
     pub resets: u32,
     /// SYNs from the current peer that named a nonce we no longer use.
@@ -66,6 +71,7 @@ impl LinkCounters {
             bad_frames,
             stale_frames,
             oversize_frames,
+            oversize_messages,
             dropped_unsynced,
             duplicates,
             out_of_order,
@@ -74,6 +80,7 @@ impl LinkCounters {
             datagrams_lost,
             stale_partials,
             text_bytes,
+            text_dropped,
             ups,
             resets,
             stale_syns,

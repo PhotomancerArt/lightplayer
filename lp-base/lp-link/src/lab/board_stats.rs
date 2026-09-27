@@ -65,10 +65,10 @@ pub fn counters_kv(c: &LinkCounters, out: &mut String) {
         "link.frames_tx={} link.frames_rx={} link.bytes_tx={} link.bytes_rx={} \
          link.data_frames_tx={} link.retransmits={} link.timeouts={} link.fast_retransmits={} \
          link.probes={} link.bad_frames={} link.stale_frames={} link.oversize_frames={} \
-         link.dropped_unsynced={} link.duplicates={} link.out_of_order={} link.rx_no_room={} \
+         link.oversize_messages={} link.dropped_unsynced={} link.duplicates={} link.out_of_order={} link.rx_no_room={} \
          link.datagrams_dropped={} link.datagrams_lost={} link.stale_partials={} \
-         link.text_bytes={} link.ups={} link.resets={} link.stale_syns={} \
-         link.protocol_errors={}",
+         link.text_bytes={} link.text_dropped={} link.ups={} link.resets={} \
+         link.stale_syns={} link.protocol_errors={}",
         c.frames_tx,
         c.frames_rx,
         c.bytes_tx,
@@ -81,6 +81,7 @@ pub fn counters_kv(c: &LinkCounters, out: &mut String) {
         c.bad_frames,
         c.stale_frames,
         c.oversize_frames,
+        c.oversize_messages,
         c.dropped_unsynced,
         c.duplicates,
         c.out_of_order,
@@ -89,6 +90,7 @@ pub fn counters_kv(c: &LinkCounters, out: &mut String) {
         c.datagrams_lost,
         c.stale_partials,
         c.text_bytes,
+        c.text_dropped,
         c.ups,
         c.resets,
         c.stale_syns,

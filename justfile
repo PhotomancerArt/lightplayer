@@ -2662,7 +2662,14 @@ test-rust-core:
 link-soak cases="5000":
     PROPTEST_CASES={{cases}} cargo test -p lp-link --features sim --release --test delivery_properties
 
-# lp-link's comparison tables (simulated): compare | sweep | crc | logs | all.
+# lp-link's decoder fuzzing at depth: arbitrary bytes, datagrams and crafted
+# frames against a live link, `cases` per framing (release, ~12 s at 20,000).
+# CI runs 256 per framing inside `test-rust-core`.
+link-fuzz cases="20000":
+    PROPTEST_CASES={{cases}} cargo test -p lp-link --release --test decoder_fuzz
+
+# lp-link's tables: compare | sweep | crc | codec | logs | ram | all. The link
+# rows are simulated; `codec` (and the top of `crc`) is host CPU throughput.
 link-bench what="all":
     cargo run -p lp-link --features sim --release --bin link-bench -- {{what}}
 
@@ -2670,6 +2677,15 @@ link-bench what="all":
 # baseline that already has alloc and core::fmt.
 link-size:
     lp-base/lp-link/size-probe/measure.sh
+
+# lp-link builds for the board (riscv32, no_std) and the page (wasm32) with
+# the features those builds turn on, and lints clean with every feature on
+# (`clippy-host` sees only its default features, so the simulator, the lab and
+# the tests behind them were unlinted). Part of `check-lint`.
+check-lp-link-targets: install-rv32-target install-wasm32-target
+    cargo check -p lp-link --target {{ rv32_target }} --features log,lab
+    cargo check -p lp-link --target {{ wasm32_target }} --features log,lab
+    cargo clippy -p lp-link --features sim,lab,log --all-targets -- --no-deps -D warnings
 
 # The comms lab on the emulated C6 (plan reliable-device-link, M3): lp-link in
 # the `test_comms_lab` image against `lp-cli link lab`'s host half, with the
@@ -2864,7 +2880,7 @@ test-glsl-filetests:
 # Warm ~1s, cold ~47s locally; it runs beside clippy, the Lint job's long
 # pole. See docs/debt/wasm-cloud-check-not-in-just-check.md.
 [parallel]
-check-lint: fmt-check clippy check-wasm-cloud check-lpc-engine-gates check-studio-core-minimal lint-serde-content lint-browser-test-harness lint-classic-capture lint-pcb-export lint-schemars-fw lint-upgrade-fw lint-emu-fence lint-nested-patches lint-emu-regnames lint-torture-corpus lint-vec-corpus lint-tw-utilities lint-red-main-needs lint-tag-next-version
+check-lint: fmt-check clippy check-wasm-cloud check-lp-link-targets check-lpc-engine-gates check-studio-core-minimal lint-serde-content lint-browser-test-harness lint-classic-capture lint-pcb-export lint-schemars-fw lint-upgrade-fw lint-emu-fence lint-nested-patches lint-emu-regnames lint-torture-corpus lint-vec-corpus lint-tw-utilities lint-red-main-needs lint-tag-next-version
 
 [parallel]
 check: check-lint schema-check fw-manifest-check-emu
