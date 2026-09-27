@@ -37,6 +37,19 @@ wire messages (JSON / learned-dictionary packed, request/response by id)
 pipe:        USB-Serial-JTAG | BLE NUS | UART | UDP | WebSocket
 ```
 
+**Scheduling between channels.** The sender keeps one queue per reliable
+channel and cuts the next frame from the lowest-numbered channel that has
+something waiting: a control message queued behind a 16 KiB proto reply goes
+out at the next frame boundary, not after the reply. Within a channel, order is
+kept. The receiver reassembles one message per channel, so fragments of two
+channels can interleave. Order across channels is not promised; the delivery
+property is per channel. Log datagrams get a fair share: after
+`datagram_every` (default 4) reliable data frames in a row, a queued datagram
+goes next, so a busy proto stream cannot starve the log. All channels still
+share one sequence space, so a *lost* proto frame holds back the control frames
+behind it until it is resent (head-of-line blocking under loss; a per-channel
+sequence space is future work if a measurement ever calls for it).
+
 ## Principles
 
 1. **End to end, because every hop is "reliable" and bytes still get lost.**
@@ -67,10 +80,89 @@ pipe:        USB-Serial-JTAG | BLE NUS | UART | UDP | WebSocket
 | `link.rs`, `link_config.rs`, `link_event.rs`, `link_counters.rs` | the `Link<A: Arq>` state machine, presets, events, counters |
 | `frame.rs`, `crc.rs`, `cobs.rs`, `deframer.rs` | header and SYN, CRC-32C (keyed with the session), COBS and COBS-FF, stream deframing plus text passthrough |
 | `arq/` | `SelectiveRepeat` (chosen), `GoBackN` (`StopAndWait` = window 1), `NoArq` |
-| `rtt_estimator.rs`, `seq_num.rs`, `tx_queue.rs`, `inbox.rs` | RFC 6298 timer with Karn's rule, sequence arithmetic, send and reassembly queues |
+| `rtt_estimator.rs`, `seq_num.rs` | RFC 6298 timer with Karn's rule, sequence arithmetic |
+| `send_queue.rs`, `tx_queue.rs`, `datagram_queue.rs`, `inbox.rs` | the fixed buffers: messages waiting to be cut into frames, the transmit window, log datagrams waiting to go, and reassembly plus the application's event queue |
 | `log_ring.rs` | the board-side log ring and `link_log!` |
 | `lab/` | the comms-lab soak protocol (`LabBoard`/`LabHost`) |
 | `sim/` (feature `sim`) | the deterministic fault-injecting simulator: USB/BLE/UDP/WS pipe models; drop, corrupt, duplicate, reorder, truncate, stall, reboot |
+
+## Message budget
+
+`max_message` is 17 KiB in every preset (`MAX_MESSAGE`): the wire's one
+message budget, 16 KiB (`PROJECT_READ_FRAME_MAX_BYTES` in
+`lp-core/lpc-wire/src/budget.rs`), plus slack. lp-base cannot depend on
+lp-core, so the edge that wires the link to the wire asserts that the two
+agree. `send()` refuses a longer message with `TooBig`. A longer message
+arriving from a peer with a bigger limit is dropped fragment by fragment to its
+end and counted (`LinkCounters::oversize_messages`); its frames are still
+acknowledged, so the sender is not stuck resending, and the session carries
+on. `LinkConfig::validate` checks that one largest message fits both the send
+budget and the receive budget; every preset passes it.
+
+## Memory
+
+A link's RAM is fixed by its `LinkConfig`. `Link::new` allocates every buffer
+the link needs, and after that the only allocation in steady state is the
+`Vec` each delivered message (or text chunk) is handed to the application in:
+exactly one per message, exactly its length.
+`tests/no_steady_state_alloc.rs` checks this with a counting allocator over
+40,000 steps of two-way traffic with loss and damage.
+
+Allocated once, in `Link::new`:
+
+| buffer | size | holds |
+|---|---|---|
+| send ring (`send_queue.rs`) | `send_budget` bytes + `send_queue` descriptors | reliable messages accepted by `send()`, not yet cut into frames |
+| transmit window (`tx_queue.rs`) | `tx_window × max_payload` | frames sent and not yet acknowledged |
+| reorder buffer (selective repeat) | `rx_window × max_payload` | frames that arrived past a gap |
+| datagram slots (`datagram_queue.rs`) | `datagram_queue × max_payload` | log datagrams waiting to go |
+| frame scratch | about 3 largest encoded frames | encode, decode, deframing |
+
+Grown on demand, up to a limit, and then kept:
+
+| buffer | limit |
+|---|---|
+| reassembly buffer, per reliable channel | `max_message` (it grows by doubling, clamped) |
+| queued events for `recv()` | the receive budget: each queued event is charged its bytes plus 64 (`EVENT_COST`), and a newer reset replaces an unread one |
+
+`Link::ram_bound(&cfg)` adds all of this up for the worst case, and
+`link.ram_bytes()` reports what a link holds now. The simulator checks
+`ram_bytes ≤ ram_bound` in every scenario, including the delivery property's
+random fault schedules. `just link-bench ram` prints both (host, 64-bit; a
+32-bit target's event queue and descriptors are about half the size). With the
+`usb()` preset, a link holds about 43 KB at its busiest in the simulator,
+most of it the 24 KB send ring. The worst case is much larger (about 128 KB
+on the host, about 114 KB on the C6) because it assumes both reliable channels
+are reassembling a `max_message` message while the receive budget is full and
+unread.
+
+The send ring is sized at one largest message plus what queues behind it. When
+it is full, `send()` returns `Full`; it does not grow.
+
+## Time
+
+Time is `Micros`, a `u64` count of microseconds from any epoch the edge likes.
+That is an exception to the repo's rule of caller-supplied `f64` epoch seconds
+(`docs/adr/2026-07-06-sans-io-core.md`), for two reasons: the C6 has no FPU, so
+`f64` arithmetic on every frame would be soft-float, and the link's times are
+relative durations (round trips, retransmit and ACK timers, idle flushes), never
+timestamps shown to anyone. The edge passes its monotonic clock in; nothing in
+the crate reads a clock.
+
+## Fuzzing
+
+`tests/decoder_fuzz.rs` feeds a live link arbitrary input and checks it after
+every step: random bytes in random chunks on a stream, random datagrams, and
+crafted frames that pass the checksum with any header and body (SYNs with
+foreign nonces, data for sequence numbers never sent, fragments that fit no
+message, ACKs for nothing), interleaved with a real peer's traffic. Nothing may
+panic, the link may never hold more than `Link::ram_bound`, and no counter may
+go backwards. When the input stops, the peer and the link must be up again with
+everything acknowledged. It runs 256 cases per framing in the normal test run;
+`just link-fuzz` runs 20,000 (about 12 s in release). It is proptest, not
+cargo-fuzz, so the crate keeps no fuzzing dependency. Its first run found a
+real stall (two channels each mid-way through a large message closed the
+receive window with neither able to finish), now a named scenario test.
 
 ## Prior art (specs only)
 
@@ -100,15 +192,36 @@ for UDP beyond a LAN), QUIC's encryption and migration.
 - Silicon (C6, `test_comms_lab`), 30-minute USB soaks via native readers and
   headless Brave Web Serial: 0 damaged frames and 0 app errors with COBS-FF.
   Plain COBS gave 103–437 damaged frames, all resent.
-- Cost in the C6 product image: +14.2 KB flash, ~6 KB RAM per link plus a
-  4 KB log ring, ~1 s CPU per MB moved.
+- Cost in the C6 product image (M3, before the hardening below): +14.2 KB
+  flash, ~6 KB RAM per link in steady state plus a 4 KB log ring, ~1 s CPU per
+  MB moved (~150 cycles per byte).
+
+After the hardening (plan `lp2025/2026-09-27-0155-lp-link-hardening`):
+
+- CPU, host (`just link-bench codec`, M2 Max, 256-byte frames of random bytes;
+  compare only against each other): CRC-32C 204 → 424 MB/s (byte table);
+  COBS-FF encode 292 → about 1,100–1,350 MB/s and decode 631 → about 1,000
+  MB/s (run copies). Not yet re-measured on the C6.
+- Flash, `just link-size` (selective repeat, riscv32imac, over a baseline with
+  alloc and `core::fmt`): 16.1 KB → 21.5 KB. About 1 KB of that is the CRC
+  table, the rest the fixed buffers, per-channel queues and their checks. The
+  product-image figure above was not re-measured.
+- RAM, `usb()` preset on the C6 (32-bit), by the formula in "Memory": about
+  39 KB allocated in `Link::new` (24 KB send ring, 8 KB datagram slots, 2 KB
+  each for the transmit and reorder windows), 2.7 KB frame scratch, plus what
+  is queued for the application. The simulator's busiest USB run peaks at
+  44 KB on the host. The steady-state figure went up because the buffers are
+  now held for the link's life instead of allocated per message; the
+  allocator no longer sees link traffic at all.
 
 ## Running it
 
 ```bash
-cargo test -p lp-link --features sim   # unit tests + proptests (500 cases per variant)
-just link-soak 5000                    # long proptest run
-just link-bench                        # the comparison tables
-just link-size                         # riscv32 code size probe
-just link-lab-emu                      # the comms lab on the emulated C6
+cargo test -p lp-link --features sim,lab   # unit tests, scenarios, proptests (CI runs this)
+just link-soak 5000                        # the delivery property at depth
+just link-fuzz 20000                       # the decoder fuzzer at depth
+just link-bench                            # the tables; `codec` is CPU throughput
+just link-size                             # riscv32 code size probe
+just check-lp-link-targets                 # riscv32 and wasm32 builds, clippy with every feature
+just link-lab-emu                          # the comms lab on the emulated C6
 ```
