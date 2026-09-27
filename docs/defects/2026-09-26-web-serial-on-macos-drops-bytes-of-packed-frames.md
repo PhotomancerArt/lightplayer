@@ -1,12 +1,15 @@
 ---
-status: open
+status: fixed
 found: 2026-09-26      # live-debugging (a prod recording), then a soak on silicon
+fixed: 86fb8e5e4        # lp-link USB cut-over, PR #854, P4 decision D14
 area: host serial path (Chromium Web Serial on macOS × xnu tty × IOSerialFamily) × the packed wire encoding
 class: assumed-context
 related:
   - docs/defects/2026-09-24-the-real-c6-link-loses-bytes-inside-a-packed-frame.md
   - docs/adr/2026-09-24-json-pack-wire-encoding.md
+  - docs/adr/2026-09-27-lp-link-one-comms-layer.md
   - ~/.photomancer/planning/lp2025/2026-09-26-1720-reliable-device-link/reports/m1-loss.md
+  - ~/.photomancer/planning/lp2025/2026-09-27-0215-lp-link-usb-cutover/
 ---
 # Web Serial on macOS drops bytes of packed frames whenever the page reads late
 
@@ -91,13 +94,27 @@ resent. So a page on a Mac asks for packed replies again, like every other
 page; `?wire=json` remains the dev override. `wire_encoding_default.rs` is
 deleted. The Chromium/Apple bug is untouched — lp-link routes around it.
 
-**Regression coverage** — none in CI (it needs macOS and a board).
-`scripts/link/tty-soak.py --termios chrome` reproduces it on any macOS host
-with a `soak_link` board; `scripts/link/mac-tty-model.py` replays any
-capture through a model of the path and shows the same packed-only loss.
+**Fixed (2026-09-27, PR #854).** This is now closed as fixed, not worked
+around: the cut-over makes the loss structural regardless of encoding (COBS-FF
+keeps `0xFF` off the wire; anything still lost is resent and counted), which
+is why the stopgap above could come back out. The underlying Chromium
+(`PARMRK`/`IGNBRK`) and Apple (the unsigned free-space wrap) bugs are real and
+unfixed by us — upstream reports are still worth sending; nothing here depends
+on them landing.
+
+**Regression coverage** — the firmware soak generator this defect's
+reproduction scripts drove (`soak_link`, `scripts/link/tty-soak.py`,
+`scripts/link/mac-tty-model.py`) was deleted with the cut-over (P2/P3): the
+loss mode it modelled is gone from the USB path along with the `M!` framing
+it soaked. `cargo test -p lp-link --features sim,lab` covers lp-link's own
+loss/resend properties (none of them macOS-specific); no macOS-specific
+regression test exists in CI, as before.
 
 **Lesson** — "the OS serial path is a transparent byte pipe" was an
 assumption, and it held only for bytes that are never `0xFF`. A byte-level
 encoding change is also a change to what the host's line discipline sees.
 The board-side IN-endpoint gate (2026-09-24 defect) was a real fix for a
-real board-side loss, and it made this one look like a regression.
+real board-side loss, and it made this one look like a regression. The
+durable fix was not "stop using bytes the OS mishandles" but "make the link
+end to end reliable regardless of what any one hop does to it" — the same
+principle `docs/adr/2026-09-27-lp-link-one-comms-layer.md` states directly.
