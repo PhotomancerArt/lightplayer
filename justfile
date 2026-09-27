@@ -3009,9 +3009,10 @@ lint-tag-next-version:
 # never arrive as a rebuild. It is listed here as well as running everywhere
 # because this is the job a reader looks in for the C6 emulator's gates.
 #
-# `emu_usb_hello` is in `lp-cli` rather than the emulator because it sends a
-# real `M!` frame, and the single framer for those (`lpc_wire::json::to_serial_line`)
-# is a product crate the fence keeps out of `lp-emu/` — see the test's header.
+# The `emu_usb_*` tests are in `lp-cli` rather than the emulator because since
+# wire proto 30 the shipped image speaks lp-link on USB, and a link host
+# (`lpc_wire::WireLinkPort`, `lp-cli emu run --host-link`) is a product crate
+# the fence keeps out of `lp-emu/` — see `tests/emu_usb_link_gates.rs`.
 #
 # Two halves, because CI runs them in two jobs. The `-p lp-cli` half is a
 # second full test-tree build (features unify differently from
@@ -3051,9 +3052,8 @@ test-emu-c6-boot:
 # CI's `Heap budget (esp32c6 chip)` job runs this half.
 test-emu-c6-cli:
     cargo test -p lp-cli --test validate_registry_parity
-    LP_EMU_BUILD_FW=1 scripts/ci/ci-images.py with esp32c6 -- cargo test -p lp-cli --test emu_usb_hello -- --include-ignored
-    LP_EMU_BUILD_FW=1 scripts/ci/ci-images.py with esp32c6 -- cargo test -p lp-cli --test emu_usb_json_pack -- --include-ignored --nocapture
-    LP_EMU_BUILD_FW=1 scripts/ci/ci-images.py with esp32c6 -- cargo test -p lp-cli --test emu_usb_free_lag -- --include-ignored --nocapture
+    LP_EMU_BUILD_FW=1 scripts/ci/ci-images.py with esp32c6 -- cargo test -p lp-cli --release --test emu_usb_link_pack -- --include-ignored --nocapture
+    LP_EMU_BUILD_FW=1 scripts/ci/ci-images.py with esp32c6 -- cargo test -p lp-cli --release --test emu_usb_free_lag -- --include-ignored --nocapture
     LP_EMU_BUILD_FW=1 scripts/ci/ci-images.py with esp32c6 -- cargo test -p lp-cli --release --test emu_usb_link -- --include-ignored --nocapture
     LP_EMU_BUILD_FW=1 scripts/ci/ci-images.py with esp32c6 -- cargo test -p lp-cli --release --test emu_usb_link_gates -- --include-ignored --nocapture
 

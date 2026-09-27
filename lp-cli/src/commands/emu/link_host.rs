@@ -192,6 +192,20 @@ impl EmuUsbBoard for S3Board {
     }
 }
 
+/// One wire message a hosted link read.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct HostedMessage {
+    pub id: u64,
+    /// It came as a learned packed payload (JSON Pack), not JSON.
+    pub packed: bool,
+    /// Bytes on the link's proto channel.
+    pub wire_len: usize,
+    /// Bytes of its JSON.
+    pub json_len: usize,
+    /// Emulated microseconds since power-on when it was read.
+    pub at_us: u64,
+}
+
 /// A host on an emulated board's link. See the module docs.
 pub struct EmuLinkHost<B: EmuUsbBoard> {
     pub board: B,
@@ -209,6 +223,8 @@ pub struct EmuLinkHost<B: EmuUsbBoard> {
     echo: bool,
     /// Link resets and messages that did not parse: an app error each.
     pub link_errors: u32,
+    /// Every wire message read, in order: how it came and what it cost.
+    pub messages: Vec<HostedMessage>,
     pub notes: Vec<String>,
     /// How long a `receive` waits for an answer, in emulated seconds.
     pub answer_budget_s: f64,
@@ -230,6 +246,7 @@ impl<B: EmuUsbBoard> EmuLinkHost<B> {
             console_sink: None,
             echo: false,
             link_errors: 0,
+            messages: Vec::new(),
             notes: Vec::new(),
             answer_budget_s: 60.0,
             wall_deadline: None,
@@ -317,6 +334,13 @@ impl<B: EmuUsbBoard> EmuLinkHost<B> {
                     self.line(format!("M!{}", payload.json));
                     match payload.message {
                         Ok(message) => {
+                            self.messages.push(HostedMessage {
+                                id: message.id,
+                                packed: payload.packed,
+                                wire_len: payload.wire_len,
+                                json_len: payload.json.len(),
+                                at_us: self.board.micros(),
+                            });
                             if self.queue_messages {
                                 self.pending.push_back(message);
                             }
