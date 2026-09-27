@@ -60,3 +60,7 @@ stock 30 lost wakes in 330.7 s emulated (5.4/min), back-port 0 in 330.5 s.
 clear exactly what it read. The IN-endpoint gate fixed the *stale* raw bit
 (the 2026-09-13 defect); this is the opposite race, a *fresh* one cleared
 too early, and no gate in front of a write can see it.
+
+**Incidents.**
+
+- 2026-09-27 — main went red at a10ef3c8c (#853, a Studio-only change): CI's C6 image hit the lost wake deterministically in three emulator tests (a 250 ms first-write stall dropped the hello).
