@@ -205,13 +205,15 @@ impl BrowserSerialEsp32Provider {
         Ok(())
     }
 
-    pub async fn write_line(
+    /// Send one request (its JSON, no `M!`, no newline) as one message on
+    /// the port's lp-link.
+    pub fn send_client_json(
         &self,
         session_id: &LinkSessionId,
-        line: &str,
+        json: &str,
     ) -> Result<(), LinkError> {
         let port_id = self.session_port_id(session_id)?;
-        browser_serial::write_line(port_id, line).await
+        browser_serial::send_client_json(port_id, json)
     }
 
     pub fn take_lines(&self, session_id: &LinkSessionId) -> Result<Vec<String>, LinkError> {
@@ -219,9 +221,9 @@ impl BrowserSerialEsp32Provider {
         Ok(browser_serial::take_lines(port_id))
     }
 
-    /// Everything the port read since the last drain, split frame-first
-    /// (console lines, wire messages in either form, undeliverable frames).
-    /// The packed-reply opt-in is written from inside; see
+    /// Everything the port's link read since the last drain, in order
+    /// (console lines, wire messages in either form, link resets). The
+    /// packed-reply opt-in is the link port's own; see
     /// `browser_serial::take_reads`.
     pub fn take_reads(
         &self,
@@ -231,8 +233,8 @@ impl BrowserSerialEsp32Provider {
         Ok(browser_serial::take_reads(port_id))
     }
 
-    /// What the port's reader concluded about the link's encoding since the
-    /// last ask — one note per change.
+    /// What the port's link said about itself since the last ask (up, a
+    /// stall, the encoding it settled on) — one note per change.
     pub fn take_wire_notes(&self, session_id: &LinkSessionId) -> Result<Vec<String>, LinkError> {
         let port_id = self.session_port_id(session_id)?;
         Ok(browser_serial::take_wire_notes(port_id))
@@ -529,7 +531,7 @@ impl BrowserSerialEsp32Provider {
     }
 
     /// Write `bytes` to `path` on the device over the app protocol, on the
-    /// raw line framing (round 2's coarse-effect seam; first consumer is
+    /// port's link (round 2's coarse-effect seam; first consumer is
     /// the flash activity's `/hardware.json` stamp, D4).
     ///
     /// ⚠️ The caller owns the exclusive-borrow discipline: the model's link

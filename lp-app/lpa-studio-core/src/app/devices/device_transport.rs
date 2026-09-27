@@ -114,6 +114,10 @@ pub type DeviceEffectProgress = std::rc::Rc<dyn Fn(String, Option<u8>)>;
 pub enum LensTapEvent {
     /// One whole line off the wire.
     Line(String),
+    /// A journal note from the port's link — a link reset (plan D9), which
+    /// the fold hears as a `WireNote` and which fails the link's shared
+    /// conversations.
+    Note(String),
     /// The port failed under the io (unplug, the OS revoking it): the
     /// platform's own message. The pump's rule applies — an error means the
     /// port died, so the fold hears an error AND a close.

@@ -82,6 +82,15 @@ link moves onto `lp-link` (ADR `docs/adr/2026-09-27-lp-link-one-comms-layer.md`)
 whose COBS-FF framing keeps `0xFF` off the wire. The cost meanwhile is JSON's
 size on a Mac: the wire bytes JSON Pack saves (ADR 2026-09-24) are spent again.
 
+**Stopgap removed (2026-09-27, plan `lp2025/2026-09-27-0215-lp-link-usb-cutover`,
+P4, decision D14)** — Studio's Web Serial link is lp-link (`WIRE_PROTO_VERSION`
+30): every byte on the wire is a COBS-FF frame or raw boot text, neither of
+which carries `0xFF` (a panic's text mark is the one deliberate `0xFF`, and it
+is written before any frame), and a frame that is lost or damaged anyway is
+resent. So a page on a Mac asks for packed replies again, like every other
+page; `?wire=json` remains the dev override. `wire_encoding_default.rs` is
+deleted. The Chromium/Apple bug is untouched — lp-link routes around it.
+
 **Regression coverage** — none in CI (it needs macOS and a board).
 `scripts/link/tty-soak.py --termios chrome` reproduces it on any macOS host
 with a `soak_link` board; `scripts/link/mac-tty-model.py` replays any
