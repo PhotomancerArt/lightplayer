@@ -344,10 +344,28 @@ pub fn wire_slot_data_from_slot_access(
     shape_id: SlotShapeId,
     data: SlotDataAccess<'_>,
 ) -> WireSlotData {
-    let mut writer = SlotWriter::new(Vec::new());
+    // RESEARCH (research/frag-reads): size the JSON exactly first, so the
+    // value is one allocation of its own length — not a doubling Vec
+    // (8 KiB for a 7.4 KB mapping) plus a shrink-copy into the RawValue.
+    let mut counter = SlotWriter::new(CountSink(0));
+    write_slot_snapshot_value(registry, shape_id, data, counter.value())
+        .expect("slot sync snapshot counts");
+    let mut writer = SlotWriter::new(Vec::with_capacity(counter.into_inner().0));
     write_slot_snapshot_value(registry, shape_id, data, writer.value())
         .expect("slot sync snapshot writes to vec");
     raw_wire_slot_data(writer.into_inner())
+}
+
+/// Counts the bytes a slot JSON write would produce.
+struct CountSink(usize);
+
+impl lpc_model::slot_codec::SlotWrite for CountSink {
+    type Error = core::convert::Infallible;
+
+    fn write_all(&mut self, bytes: &[u8]) -> Result<(), Self::Error> {
+        self.0 += bytes.len();
+        Ok(())
+    }
 }
 
 fn wire_slot_data_from_slot_shape(
@@ -355,7 +373,10 @@ fn wire_slot_data_from_slot_shape(
     shape: &SlotShape,
     data: SlotDataAccess<'_>,
 ) -> WireSlotData {
-    let mut writer = SlotWriter::new(Vec::new());
+    let mut counter = SlotWriter::new(CountSink(0));
+    write_slot_snapshot_shape_value(registry, shape, data, counter.value())
+        .expect("slot sync snapshot counts");
+    let mut writer = SlotWriter::new(Vec::with_capacity(counter.into_inner().0));
     write_slot_snapshot_shape_value(registry, shape, data, writer.value())
         .expect("slot sync snapshot writes to vec");
     raw_wire_slot_data(writer.into_inner())

@@ -74,7 +74,12 @@ pub type RebootHook = Rc<dyn Fn()>;
 /// frame budget × 2 is the honest floor; a board below it (this one could
 /// not even JIT its shader — recovery gated it after repeated 768 B compile
 /// OOMs) cannot serve any read shape and SHOULD be refused.
-pub const PROJECT_READ_MIN_HEADROOM_BYTES: u32 = 32 * 1024;
+pub const PROJECT_READ_MIN_HEADROOM_BYTES: u32 = 16 * 1024;
+
+/// RESEARCH (research/frag-reads): the volume half of the two-number read
+/// gate — total free heap a read may assume (worst measured read transient
+/// 25 KB on the C6, plus room for the link and radio tasks meanwhile).
+pub const PROJECT_READ_MIN_FREE_BYTES: u32 = 40 * 1024;
 
 /// Minimum heap headroom (largest free block) to attempt a `LoadProject`.
 ///
@@ -895,8 +900,13 @@ impl LpServer {
                     // request with a structured terminal error instead
                     // of letting infallible alloc abort-reset the
                     // board mid-assembly.
+                    let free_now = self
+                        .memory_stats
+                        .and_then(|stats| stats())
+                        .map(|(free, _)| free);
                     if let Some(headroom) = self.read_headroom_probe.and_then(|probe| probe())
-                        && headroom < PROJECT_READ_MIN_HEADROOM_BYTES
+                        && (headroom < PROJECT_READ_MIN_HEADROOM_BYTES
+                            || free_now.is_some_and(|free| free < PROJECT_READ_MIN_FREE_BYTES))
                     {
                         let mut sink = ProjectReadStreamSink::with_max_bytes(
                             transport,
