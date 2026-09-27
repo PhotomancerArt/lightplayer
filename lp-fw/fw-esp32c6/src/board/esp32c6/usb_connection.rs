@@ -8,8 +8,25 @@
 //! injects ([`UsbSerialJtagInEndpoint`]). The S3 keeps the same
 //! facts for the same reason.
 
+use core::sync::atomic::{AtomicBool, Ordering};
 use fw_esp32_common::serial::link_counters::NEVER;
+
 use fw_esp32_common::serial::usb_connection::UsbLinkState;
+
+/// Whether a USB host is enumerating this device, as `io_task` last saw it.
+///
+/// Starts `true`: until the monitor has polled, "a host might be there" is
+/// the safe answer, because the one consumer — the power button's switch
+/// mode — must not drop the link into deep sleep before anyone has looked.
+static HOST_ENUMERATED: AtomicBool = AtomicBool::new(true);
+
+/// Whether a USB host (Studio, a computer) is on the USB-Serial-JTAG port
+/// right now. A charger or power bank sends no SOF, so it does not count.
+/// Read only by the product's power platform (`hardware::power`).
+#[cfg(all(not(fw_harness), feature = "server"))]
+pub fn host_enumerated() -> bool {
+    HOST_ENUMERATED.load(Ordering::Relaxed)
+}
 
 pub struct UsbConnectionMonitor {
     link: UsbLinkState,
@@ -32,6 +49,7 @@ impl UsbConnectionMonitor {
         let sof_received = regs.int_raw().read().sof().bit_is_set();
         regs.int_clr().write(|w| w.sof().clear_bit_by_one());
         self.link.poll_with(sof_received);
+        HOST_ENUMERATED.store(self.link.is_enumerated(), Ordering::Relaxed);
     }
 
     /// A serial write timed out or failed: evidence nobody is draining.

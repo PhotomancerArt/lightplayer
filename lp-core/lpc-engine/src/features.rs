@@ -31,6 +31,7 @@ const fn origin(feature: LpFeature) -> FeatureOrigin {
         LpFeature::NodeFluid => FeatureOrigin::Engine(cfg!(feature = "node-fluid")),
         LpFeature::NodeFixture => FeatureOrigin::Engine(cfg!(feature = "node-fixture")),
         LpFeature::NodePlaylist => FeatureOrigin::Engine(cfg!(feature = "node-playlist")),
+        LpFeature::NodePowerButton => FeatureOrigin::Engine(cfg!(feature = "node-power-button")),
         LpFeature::NodeRadio => FeatureOrigin::Engine(cfg!(feature = "node-radio")),
         LpFeature::NodeShader => FeatureOrigin::Engine(cfg!(feature = "node-shader")),
         LpFeature::NodeTexture => FeatureOrigin::Engine(cfg!(feature = "node-texture")),
@@ -87,18 +88,19 @@ pub const ENGINE_FEATURE_FRAGMENT: &str = lpc_model::lp_const_concat!(
     engine_fragment(LpFeature::ALL[12]),
     engine_fragment(LpFeature::ALL[13]),
     engine_fragment(LpFeature::ALL[14]),
+    engine_fragment(LpFeature::ALL[15]),
 );
 
 // A new LpFeature variant grows ALL past this fragment list — fail the build
 // here until the list above covers it.
-const _: () = assert!(LpFeature::ALL.len() == 15);
+const _: () = assert!(LpFeature::ALL.len() == 16);
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    /// Under the crate's default feature set (all eight node gates on) the
-    /// derivation yields exactly the eight `node.*` features. The expected list
+    /// Under the crate's default feature set (all nine node gates on) the
+    /// derivation yields exactly the nine `node.*` features. The expected list
     /// is written out by hand — independent of the `cfg!` match — so a wrong
     /// gate string or dropped arm in `origin` fails here instead of shipping.
     #[test]
@@ -108,11 +110,12 @@ mod tests {
         feature = "node-fluid",
         feature = "node-fixture",
         feature = "node-playlist",
+        feature = "node-power-button",
         feature = "node-radio",
         feature = "node-shader",
         feature = "node-texture",
     ))]
-    fn default_build_yields_the_eight_node_features() {
+    fn default_build_yields_the_nine_node_features() {
         assert_eq!(
             supported_features(),
             alloc::vec![
@@ -121,6 +124,7 @@ mod tests {
                 LpFeature::NodeFluid,
                 LpFeature::NodeFixture,
                 LpFeature::NodePlaylist,
+                LpFeature::NodePowerButton,
                 LpFeature::NodeRadio,
                 LpFeature::NodeShader,
                 LpFeature::NodeTexture,
