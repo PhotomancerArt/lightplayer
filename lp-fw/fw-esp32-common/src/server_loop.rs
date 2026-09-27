@@ -78,7 +78,7 @@ pub async fn run_server_loop<T: ServerTransport + LinkUpkeep>(
     // check the protocol version before anything else arrives (see
     // docs/adr/2026-07-14-wire-hello-versioning.md).
     if let Err(e) = fw_core::send_unsolicited_hello(&server, &mut transport).await {
-        log::warn!("run_server_loop: failed to send hello: {e:?}");
+        note_send_failure("hello", &e);
     }
 
     let mut last_tick = time_provider.now_ms();
@@ -88,9 +88,6 @@ pub async fn run_server_loop<T: ServerTransport + LinkUpkeep>(
     let startup_time = time_provider.now_ms();
     let mut fps_collector = WindowedStatsCollector::new();
     let mut boot_completed = false;
-    // The link soak variant's traffic source (never in a shipped image).
-    #[cfg(feature = "soak-link")]
-    let mut soak = crate::soak_link::SoakPump::new();
 
     // One legible error line if the previous run ended in a crash; flows to
     // the client through the normal log transport.
@@ -234,15 +231,12 @@ pub async fn run_server_loop<T: ServerTransport + LinkUpkeep>(
             for (link, heartbeat_msg) in heartbeats {
                 // Send heartbeat (non-blocking, ignore errors)
                 if let Err(e) = transport.send(link, heartbeat_msg).await {
-                    log::warn!("run_server_loop: Failed to send heartbeat: {e:?}");
+                    note_send_failure("heartbeat", &e);
                 }
             }
 
             heartbeat_last_sent = current_time;
         }
-
-        #[cfg(feature = "soak-link")]
-        soak.pump(&mut transport, current_time).await;
 
         // Feed the RWDT while the loop and the I/O task are both alive; a
         // hang anywhere stops the feeding and the watchdog resets us with
@@ -265,11 +259,22 @@ pub async fn run_server_loop<T: ServerTransport + LinkUpkeep>(
 async fn send_owed_hellos<T: ServerTransport + LinkUpkeep>(server: &LpServer, transport: &mut T) {
     for link in transport.take_opened_links() {
         if let Err(e) = fw_core::send_hello_to_link(server, transport, link).await {
-            log::warn!(
-                "run_server_loop: failed to send hello to {}: {e:?}",
-                link.id
-            );
+            note_send_failure("hello to a newly opened link", &e);
         }
+    }
+}
+
+/// An unsolicited frame (a hello, a heartbeat) was not sent. No host session
+/// to send it to (`ConnectionLost` — a board with nothing attached, every five
+/// seconds) is routine and counted by the transport; logging it would fill
+/// the log ring a host reads when it does attach. Anything else is news.
+/// A plain function, so the loop futures carry none of it.
+#[inline(never)]
+fn note_send_failure(what: &str, error: &lpc_wire::TransportError) {
+    if matches!(error, lpc_wire::TransportError::ConnectionLost) {
+        log::debug!("run_server_loop: no host session for the {what}");
+    } else {
+        log::warn!("run_server_loop: failed to send the {what}: {error:?}");
     }
 }
 
@@ -368,7 +373,7 @@ pub async fn run_server_loop_bounded<T: ServerTransport + LinkUpkeep>(
     // check the protocol version before anything else arrives (see
     // docs/adr/2026-07-14-wire-hello-versioning.md).
     if let Err(e) = fw_core::send_unsolicited_hello(&server, &mut transport).await {
-        log::warn!("run_server_loop: failed to send hello: {e:?}");
+        note_send_failure("hello", &e);
     }
 
     let mut last_tick = time_provider.now_ms();
@@ -539,7 +544,7 @@ pub async fn run_server_loop_bounded<T: ServerTransport + LinkUpkeep>(
             for (link, heartbeat_msg) in heartbeats {
                 // Send heartbeat (non-blocking, ignore errors)
                 if let Err(e) = transport.send(link, heartbeat_msg).await {
-                    log::warn!("run_server_loop: Failed to send heartbeat: {e:?}");
+                    note_send_failure("heartbeat", &e);
                 }
             }
 

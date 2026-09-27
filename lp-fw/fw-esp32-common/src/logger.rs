@@ -1,7 +1,9 @@
-//! ESP32 logging module
+//! ESP32 logging module: `log` records as raw `[LEVEL] module: message`
+//! lines through an injected write function.
 //!
-//! Provides logging functionality using USB serial directly. Uses our own USB serial instance
-//! that's shared with the transport layer.
+//! The classic ESP32 (`fw-esp32v3`, UART, `M!` lines) and the hardware
+//! harnesses use this. The C6 and S3 product images, whose host link runs
+//! lp-link, log into [`crate::log_ring_logger`] instead.
 
 use alloc::format;
 use core::sync::atomic::{AtomicPtr, Ordering};
@@ -143,17 +145,5 @@ pub fn log_write_bytes(msg: &str) {
         if let Ok(mut io) = serial_io.try_borrow_mut() {
             let _ = io.write(msg.as_bytes());
         }
-    }
-}
-
-/// Write a log message directly (for use from C code, e.g., JIT host functions)
-///
-/// This bypasses the log crate and writes directly to USB serial.
-/// Useful for host functions called from JIT-compiled code.
-pub fn write_log(msg: &str) {
-    let write_fn_ptr = LOG_WRITE_FN.load(Ordering::Acquire);
-    if !write_fn_ptr.is_null() {
-        let write_fn: LogWriteFn = unsafe { core::mem::transmute(write_fn_ptr) };
-        write_fn(msg);
     }
 }
