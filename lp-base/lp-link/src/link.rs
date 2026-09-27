@@ -18,23 +18,24 @@
 //! checksummed under a key derived from both nonces, so a frame from an older
 //! session can never pass for a current one.
 
-use alloc::collections::VecDeque;
 use alloc::vec::Vec;
 use core::mem;
 
 use crate::Micros;
 use crate::arq::{Arq, Feedback, RxVerdict};
 use crate::cobs;
+use crate::datagram_queue::DatagramQueue;
 use crate::deframer::{Deframed, Deframer, IdleFlush};
 use crate::frame::{self, FrameKind, HEADER_LEN, Header, SACK_LEN, SYN_LEN, SynBody};
-use crate::inbox::{Fragment, Inbox};
+use crate::inbox::{EVENT_COST, Fragment, Inbox};
 use crate::link_config::{Framing, LinkConfig};
 use crate::link_counters::LinkCounters;
 use crate::link_event::{LinkEvent, ResetReason};
 use crate::log_ring::LogRing;
 use crate::rtt_estimator::RttEstimator;
+use crate::send_queue::SendQueue;
 use crate::seq_num::seq_dist;
-use crate::tx_queue::{TxEntry, TxQueue};
+use crate::tx_queue::TxQueue;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum LinkState {
@@ -68,10 +69,8 @@ pub struct Link<A: Arq> {
     rtt: RttEstimator,
     backoff: u8,
     send_order: u32,
-    pending: VecDeque<(u8, Vec<u8>)>,
-    pending_off: usize,
-    pending_bytes: usize,
-    datagrams: VecDeque<(u8, Vec<u8>)>,
+    pending: SendQueue,
+    datagrams: DatagramQueue,
     dgram_tx_seq: u8,
     dgram_rx_next: Option<u8>,
     deframer: Deframer,
@@ -93,15 +92,17 @@ pub struct Link<A: Arq> {
     last_tx: Micros,
     last_rx: Micros,
     counters: LinkCounters,
+    /// RAM allocated in `new` and never resized (see [`Link::ram_bound`]).
+    fixed_ram: usize,
 }
 
 impl<A: Arq> Link<A> {
     /// A new link. `nonce` must be random per boot / page load (it is what
     /// tells the peer we restarted).
     pub fn new(cfg: LinkConfig, nonce: u32) -> Self {
-        let body_max = (cfg.max_payload as usize).max(SYN_LEN);
-        let max_frame = cobs::max_encoded_no_ff_len(HEADER_LEN + body_max + cfg.crc.len());
+        let shape = Shape::of::<A>(&cfg);
         let rx_window = cfg.rx_window.min(A::MAX_WINDOW);
+        let max_payload = cfg.max_payload as usize;
         Link {
             state: LinkState::Connecting,
             nonce: nonce.max(1),
@@ -110,23 +111,21 @@ impl<A: Arq> Link<A> {
             peer_max_payload: 0,
             peer_rx_window: 0,
             generation: 0,
-            arq: A::new(rx_window),
-            tx: TxQueue::default(),
+            arq: A::new(rx_window, max_payload),
+            tx: TxQueue::new(shape.tx_window, max_payload),
             inbox: Inbox::new(cfg.rx_budget, cfg.max_message),
             rtt: RttEstimator::new(cfg.initial_rto, cfg.min_rto, cfg.max_rto),
             backoff: 0,
             send_order: 0,
-            pending: VecDeque::new(),
-            pending_off: 0,
-            pending_bytes: 0,
-            datagrams: VecDeque::new(),
+            pending: SendQueue::new(cfg.send_budget, cfg.send_queue),
+            datagrams: DatagramQueue::new(cfg.datagram_queue, max_payload),
             dgram_tx_seq: 0,
             dgram_rx_next: None,
-            deframer: Deframer::new(max_frame)
+            deframer: Deframer::new(shape.max_cobs, cfg.framing == Framing::Stream)
                 .with_text_mark(cfg.escape_ff && cfg.framing == Framing::Stream),
-            rx_raw: Vec::new(),
-            raw: Vec::new(),
-            out: Vec::new(),
+            rx_raw: Vec::with_capacity(shape.max_rx_raw),
+            raw: Vec::with_capacity(shape.max_wire),
+            out: Vec::with_capacity(shape.max_wire),
             tx_payload: 0,
             peer_win: 0,
             ack_due: None,
@@ -141,8 +140,31 @@ impl<A: Arq> Link<A> {
             last_tx: 0,
             last_rx: 0,
             counters: LinkCounters::default(),
+            fixed_ram: shape.fixed_ram,
             cfg,
         }
+    }
+
+    /// The most RAM a link with this config holds, in bytes: its fixed
+    /// buffers (the send ring, the transmit window, the reorder buffer, the
+    /// datagram slots, the frame scratch) plus the inbox's worst case (the
+    /// receive budget, its event queue, and a reassembly buffer of
+    /// `max_message` per reliable channel). A function of the config alone;
+    /// [`ram_bytes`](Self::ram_bytes) never exceeds it.
+    pub fn ram_bound(cfg: &LinkConfig) -> usize {
+        let shape = Shape::of::<A>(cfg);
+        shape.fixed_ram
+            + shape.scratch
+            + Inbox::ram_bound(
+                cfg.rx_budget,
+                cfg.max_message,
+                cfg.reliable_channels.count_ones() as usize,
+            )
+    }
+
+    /// RAM this link holds right now (see [`ram_bound`](Self::ram_bound)).
+    pub fn ram_bytes(&self) -> usize {
+        self.fixed_ram + self.scratch_bytes() + self.inbox.ram_bytes()
     }
 
     // ---- Application side ------------------------------------------------
@@ -157,20 +179,23 @@ impl<A: Arq> Link<A> {
             if payload.len() > self.cfg.max_message {
                 return Err(SendError::TooBig);
             }
-            if self.pending_bytes + self.tx.bytes() + payload.len() > self.cfg.send_budget {
+            if self.pending.live_bytes() + self.tx.bytes() + payload.len() > self.cfg.send_budget
+                || self.pending.push(channel, payload).is_err()
+            {
                 return Err(SendError::Full);
             }
-            self.pending_bytes += payload.len();
-            self.pending.push_back((channel, payload.to_vec()));
         } else {
             if payload.len() > self.cfg.max_payload as usize {
                 return Err(SendError::TooBig);
             }
-            if self.datagrams.len() >= self.cfg.datagram_queue {
+            let queued = self.datagrams.push_with(channel, |slot| {
+                slot[..payload.len()].copy_from_slice(payload);
+                Some(payload.len())
+            });
+            if !queued {
                 self.counters.datagrams_dropped += 1;
                 return Err(SendError::Full);
             }
-            self.datagrams.push_back((channel, payload.to_vec()));
         }
         Ok(())
     }
@@ -182,14 +207,11 @@ impl<A: Arq> Link<A> {
         if self.state != LinkState::Established || self.is_stalled(now) {
             return;
         }
-        let mut rec = [0u8; 256];
-        while self.datagrams.len() < self.cfg.datagram_queue {
-            let limit = rec.len().min(self.tx_payload);
-            let Some(n) = ring.pop_into(&mut rec[..limit]) else {
-                break;
-            };
-            self.datagrams.push_back((channel, rec[..n].to_vec()));
-        }
+        let limit = self.tx_payload;
+        while self
+            .datagrams
+            .push_with(channel, |slot| ring.pop_into(&mut slot[..limit]))
+        {}
     }
 
     /// The next event: a message, text, link up, or reset.
@@ -333,9 +355,9 @@ impl<A: Arq> Link<A> {
     /// Payload bytes held right now: queued to send, unacknowledged, held out
     /// of order, reassembling, and waiting for `recv()`.
     pub fn buffered_bytes(&self) -> usize {
-        self.pending_bytes
+        self.pending.live_bytes()
             + self.tx.bytes()
-            + self.datagrams.iter().map(|(_, d)| d.len()).sum::<usize>()
+            + self.datagrams.bytes()
             + self.arq.reorder_bytes()
             + self.inbox.bytes()
     }
@@ -346,7 +368,8 @@ impl<A: Arq> Link<A> {
         self.tx.bytes() + self.arq.reorder_bytes()
     }
 
-    /// Fixed scratch capacity (frame buffers).
+    /// Frame scratch capacity (encode, decode and deframing buffers), reserved
+    /// in `new`.
     pub fn scratch_bytes(&self) -> usize {
         self.raw.capacity()
             + self.out.capacity()
@@ -381,6 +404,12 @@ impl<A: Arq> Link<A> {
             self.counters.dropped_unsynced += 1;
             return false;
         };
+        if raw.len() > HEADER_LEN + self.cfg.max_payload as usize + crc.len() {
+            // Longer than any frame we agreed to take (a datagram transport
+            // hands frames over whole, unchecked).
+            self.counters.oversize_frames += 1;
+            return false;
+        }
         let Some(body) = frame::verify(crc, self.nonce ^ peer, raw) else {
             if self
                 .prev_key
@@ -533,9 +562,13 @@ impl<A: Arq> Link<A> {
     }
 
     fn flush_text(&mut self) {
-        let text = self.deframer.take_text();
-        self.counters.text_bytes += text.len() as u32;
-        self.inbox.push_event(LinkEvent::Text(text));
+        let text = self.deframer.text();
+        if self.inbox.push_text(text) {
+            self.counters.text_bytes += text.len() as u32;
+        } else {
+            self.counters.text_dropped += text.len() as u32;
+        }
+        self.deframer.clear_text();
     }
 
     // ---- Transmit path ---------------------------------------------------
@@ -601,21 +634,12 @@ impl<A: Arq> Link<A> {
             return true;
         }
         if self.can_send_new()
-            && let Some(entry) = self.next_fragment()
+            && let Some(seq) = self.next_fragment()
         {
-            let seq = self.tx.push(entry);
             self.emit_data(now, seq);
             return true;
         }
-        while let Some((chan, data)) = self.datagrams.pop_front() {
-            if data.len() > self.tx_payload {
-                self.counters.datagrams_dropped += 1;
-                continue;
-            }
-            let mut hdr = self.header(FrameKind::Datagram, chan);
-            hdr.seq = self.dgram_tx_seq;
-            self.dgram_tx_seq = self.dgram_tx_seq.wrapping_add(1);
-            self.encode(&hdr, &data);
+        if self.emit_datagram() {
             return true;
         }
         if ack_ready || now >= self.last_tx + self.cfg.keepalive {
@@ -664,35 +688,54 @@ impl<A: Arq> Link<A> {
         if !A::RELIABLE {
             return true;
         }
-        let window = self.cfg.tx_window.min(A::MAX_WINDOW) as usize;
-        self.tx.len() < window
+        !self.tx.is_full()
             && (seq_dist(self.tx.base(), self.tx.next_seq()) as usize) < self.peer_win as usize
     }
 
-    fn next_fragment(&mut self) -> Option<TxEntry> {
-        let (chan, msg) = self.pending.front()?;
-        let start = self.pending_off;
-        let end = (start + self.tx_payload).min(msg.len());
-        let entry = TxEntry::new(
-            *chan,
-            start == 0,
-            end == msg.len(),
-            msg[start..end].to_vec(),
-        );
-        if entry.fin {
-            self.pending_bytes -= msg.len();
-            self.pending.pop_front();
-            self.pending_off = 0;
-        } else {
-            self.pending_off = end;
+    /// Cut the next fragment of a queued message into the transmit window;
+    /// its sequence number.
+    fn next_fragment(&mut self) -> Option<u8> {
+        let (pending, n) = (&mut self.pending, self.tx_payload);
+        self.tx.push_with(|slot| {
+            let t = pending.take(None, &mut slot[..n])?;
+            Some((t.chan, t.first, t.fin, t.len))
+        })
+    }
+
+    /// Send the oldest queued datagram, if any.
+    fn emit_datagram(&mut self) -> bool {
+        while let Some((chan, data)) = self.datagrams.front() {
+            if data.len() > self.tx_payload {
+                // Queued before the peer's smaller frame size was known.
+                self.datagrams.pop_front();
+                self.counters.datagrams_dropped += 1;
+                continue;
+            }
+            let mut hdr = self.header(FrameKind::Datagram, chan);
+            hdr.seq = self.dgram_tx_seq;
+            self.dgram_tx_seq = self.dgram_tx_seq.wrapping_add(1);
+            let key = self.key();
+            let Some((_, data)) = self.datagrams.front() else {
+                return false;
+            };
+            frame::encode_raw(self.cfg.crc, key, &hdr, data, &mut self.raw);
+            finish(
+                self.cfg.framing,
+                self.cfg.escape_ff,
+                &mut self.raw,
+                &mut self.out,
+            );
+            self.datagrams.pop_front();
+            return true;
         }
-        Some(entry)
+        false
     }
 
     fn emit_data(&mut self, now: Micros, seq: u8) {
         let mut hdr = self.header(FrameKind::Data, 0);
         self.send_order = self.send_order.wrapping_add(1);
-        let Some(e) = self.tx.get_mut(seq) else {
+        let key = self.key();
+        let Some((e, payload)) = self.tx.frame_mut(seq) else {
             return;
         };
         e.sent_at = Some(now);
@@ -709,8 +752,7 @@ impl<A: Arq> Link<A> {
         hdr.first = e.first;
         hdr.fin = e.fin;
         hdr.seq = seq;
-        let key = self.nonce ^ self.peer_nonce.unwrap_or(0);
-        frame::encode_raw(self.cfg.crc, key, &hdr, &e.payload, &mut self.raw);
+        frame::encode_raw(self.cfg.crc, key, &hdr, payload, &mut self.raw);
         finish(
             self.cfg.framing,
             self.cfg.escape_ff,
@@ -791,11 +833,12 @@ impl<A: Arq> Link<A> {
         );
     }
 
-    /// Frames past our ACK we can take now.
+    /// Frames past our ACK we can take now. A frame may complete a message,
+    /// which the inbox charges [`EVENT_COST`] on top of its bytes.
     fn adv_window(&self) -> u8 {
-        let used = self.inbox.ready_bytes() + self.arq.reorder_bytes();
-        let free =
-            self.inbox.budget().saturating_sub(used) / (self.cfg.max_payload as usize).max(1);
+        let used = self.inbox.bytes() + self.arq.reorder_bytes();
+        let per_frame = self.cfg.max_payload as usize + EVENT_COST;
+        let free = self.inbox.budget().saturating_sub(used) / per_frame;
         free.min(self.cfg.rx_window.min(A::MAX_WINDOW) as usize) as u8
     }
 
@@ -812,7 +855,7 @@ impl<A: Arq> Link<A> {
         self.last_rx = now;
         self.last_tx = now;
         self.counters.ups += 1;
-        self.inbox.push_event(LinkEvent::Up {
+        self.inbox.push_lifecycle(LinkEvent::Up {
             generation: self.generation,
         });
     }
@@ -827,8 +870,6 @@ impl<A: Arq> Link<A> {
         self.arq.reset();
         self.tx.clear();
         self.pending.clear();
-        self.pending_off = 0;
-        self.pending_bytes = 0;
         self.datagrams.clear();
         self.dgram_tx_seq = 0;
         self.dgram_rx_next = None;
@@ -843,7 +884,7 @@ impl<A: Arq> Link<A> {
         self.probe_armed = false;
         self.syn_due = Some(now);
         self.counters.resets += 1;
-        self.inbox.push_event(LinkEvent::Reset {
+        self.inbox.push_lifecycle(LinkEvent::Reset {
             reason,
             generation: self.generation,
         });
@@ -865,6 +906,49 @@ fn finish(framing: Framing, escape_ff: bool, raw: &mut Vec<u8>, out: &mut Vec<u8
         Framing::Stream => frame::wrap_stream_plain(raw, out),
         // header ‖ body ‖ crc is exactly one datagram.
         Framing::Datagram => mem::swap(raw, out),
+    }
+}
+
+/// What a config makes a link allocate in `new`.
+struct Shape {
+    /// Frames in the transmit window.
+    tx_window: usize,
+    /// Largest COBS decode (a damaged body can decode longer than a frame).
+    max_rx_raw: usize,
+    /// Largest COBS-FF body between the delimiters.
+    max_cobs: usize,
+    /// Largest frame as written to the transport.
+    max_wire: usize,
+    /// Frame scratch: `raw`, `out`, `rx_raw` and the deframer's buffers.
+    scratch: usize,
+    /// Everything else allocated once: the send ring, the transmit window, the
+    /// reorder buffer, the datagram slots, and the link itself.
+    fixed_ram: usize,
+}
+
+impl Shape {
+    fn of<A: Arq>(cfg: &LinkConfig) -> Self {
+        let max_payload = cfg.max_payload as usize;
+        let tx_window = cfg.tx_window.min(A::MAX_WINDOW).max(1) as usize;
+        // Largest decoded frame: header, body, checksum.
+        let max_raw = HEADER_LEN + max_payload.max(SYN_LEN) + cfg.crc.len();
+        let max_cobs = cobs::max_encoded_no_ff_len(max_raw);
+        let (max_wire, max_rx_raw, deframer) = match cfg.framing {
+            Framing::Stream => (max_cobs + 2, max_cobs, Deframer::ram_bound(max_cobs)),
+            Framing::Datagram => (max_raw, 0, 0),
+        };
+        Shape {
+            tx_window,
+            max_rx_raw,
+            max_cobs,
+            max_wire,
+            scratch: max_rx_raw + 2 * max_wire + deframer,
+            fixed_ram: size_of::<Link<A>>()
+                + SendQueue::ram_bound(cfg.send_budget, cfg.send_queue)
+                + TxQueue::ram_bound(tx_window, max_payload)
+                + A::ram_bound(cfg.rx_window.min(A::MAX_WINDOW), max_payload)
+                + DatagramQueue::ram_bound(cfg.datagram_queue, max_payload),
+        }
     }
 }
 

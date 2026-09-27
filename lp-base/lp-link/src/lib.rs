@@ -23,7 +23,9 @@
 //!   visible.
 //!
 //! Sans-IO: time ([`Micros`]) and the nonce are injected; no executor, no
-//! clock, no allocation beyond `alloc` collections. The `sim` feature adds a
+//! clock. RAM is bounded by the config ([`Link::ram_bound`]): buffers are
+//! allocated in [`Link::new`], and steady-state traffic allocates only the
+//! `Vec` each delivered message is handed over in. The `sim` feature adds a
 //! deterministic fault-injecting simulator ([`sim`]) and the `link-bench` tool.
 //!
 //! Design, principles and prior art: `README.md` beside this crate.
@@ -37,6 +39,7 @@ extern crate std;
 pub mod arq;
 pub mod cobs;
 pub mod crc;
+mod datagram_queue;
 pub mod deframer;
 pub mod frame;
 mod inbox;
@@ -48,6 +51,7 @@ mod link_counters;
 mod link_event;
 pub mod log_ring;
 mod rtt_estimator;
+mod send_queue;
 mod seq_num;
 mod tx_queue;
 

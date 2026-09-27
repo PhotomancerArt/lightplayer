@@ -67,10 +67,50 @@ pipe:        USB-Serial-JTAG | BLE NUS | UART | UDP | WebSocket
 | `link.rs`, `link_config.rs`, `link_event.rs`, `link_counters.rs` | the `Link<A: Arq>` state machine, presets, events, counters |
 | `frame.rs`, `crc.rs`, `cobs.rs`, `deframer.rs` | header and SYN, CRC-32C (keyed with the session), COBS and COBS-FF, stream deframing plus text passthrough |
 | `arq/` | `SelectiveRepeat` (chosen), `GoBackN` (`StopAndWait` = window 1), `NoArq` |
-| `rtt_estimator.rs`, `seq_num.rs`, `tx_queue.rs`, `inbox.rs` | RFC 6298 timer with Karn's rule, sequence arithmetic, send and reassembly queues |
+| `rtt_estimator.rs`, `seq_num.rs` | RFC 6298 timer with Karn's rule, sequence arithmetic |
+| `send_queue.rs`, `tx_queue.rs`, `datagram_queue.rs`, `inbox.rs` | the fixed buffers: messages waiting to be cut into frames, the transmit window, log datagrams waiting to go, and reassembly plus the application's event queue |
 | `log_ring.rs` | the board-side log ring and `link_log!` |
 | `lab/` | the comms-lab soak protocol (`LabBoard`/`LabHost`) |
 | `sim/` (feature `sim`) | the deterministic fault-injecting simulator: USB/BLE/UDP/WS pipe models; drop, corrupt, duplicate, reorder, truncate, stall, reboot |
+
+## Memory
+
+A link's RAM is fixed by its `LinkConfig`. `Link::new` allocates every buffer
+the link needs, and after that the only allocation in steady state is the
+`Vec` each delivered message (or text chunk) is handed to the application in:
+exactly one per message, exactly its length.
+`tests/no_steady_state_alloc.rs` checks this with a counting allocator over
+40,000 steps of two-way traffic with loss and damage.
+
+Allocated once, in `Link::new`:
+
+| buffer | size | holds |
+|---|---|---|
+| send ring (`send_queue.rs`) | `send_budget` bytes + `send_queue` descriptors | reliable messages accepted by `send()`, not yet cut into frames |
+| transmit window (`tx_queue.rs`) | `tx_window × max_payload` | frames sent and not yet acknowledged |
+| reorder buffer (selective repeat) | `rx_window × max_payload` | frames that arrived past a gap |
+| datagram slots (`datagram_queue.rs`) | `datagram_queue × max_payload` | log datagrams waiting to go |
+| frame scratch | about 3 largest encoded frames | encode, decode, deframing |
+
+Grown on demand, up to a limit, and then kept:
+
+| buffer | limit |
+|---|---|
+| reassembly buffer, per reliable channel | `max_message` (it grows by doubling, clamped) |
+| queued events for `recv()` | the receive budget: each queued event is charged its bytes plus 64 (`EVENT_COST`), and a newer reset replaces an unread one |
+
+`Link::ram_bound(&cfg)` adds all of this up for the worst case, and
+`link.ram_bytes()` reports what a link holds now. The simulator checks
+`ram_bytes ≤ ram_bound` in every scenario, including the delivery property's
+random fault schedules. `just link-bench ram` prints both (host, 64-bit; a
+32-bit target's event queue and descriptors are about half the size). With the
+`usb()` preset, a link holds about 43 KB at its busiest in the simulator,
+most of it the 24 KB send ring. The worst case is much larger (about 130 KB
+on the host) because it assumes both reliable channels are reassembling a
+`max_message` message while the receive budget is full and unread.
+
+The send ring is sized at one largest message plus what queues behind it. When
+it is full, `send()` returns `Full`; it does not grow.
 
 ## Prior art (specs only)
 

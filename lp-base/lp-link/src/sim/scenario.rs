@@ -12,7 +12,7 @@ use crate::sim::pipe::{Faults, Pipe, PipeModel, PipeStats};
 use crate::sim::sim_rng::SimRng;
 use crate::sim::transport::Transport;
 use crate::sim::workload::{Send, Workload, WorkloadState};
-use crate::{Arq, LinkConfig, LinkCounters, LinkState, Micros};
+use crate::{Arq, Link, LinkConfig, LinkCounters, LinkState, Micros};
 
 /// A run that takes more steps than this is livelocked.
 const MAX_STEPS: u64 = 50_000_000;
@@ -93,6 +93,8 @@ pub struct Report {
     pub host_peak_window: usize,
     pub board_peak_window: usize,
     pub board_peak_scratch: usize,
+    /// Largest `Link::ram_bytes` on the board, over every incarnation.
+    pub board_peak_ram: usize,
     pub host_resets: u64,
     pub board_resets: u64,
     pub logs_written: u64,
@@ -104,7 +106,8 @@ pub struct Report {
     pub logs_lost_in_ring: u64,
     pub text_bytes: u64,
     pub duration: Micros,
-    /// Broken delivery promises and liveness failures. Empty = correct.
+    /// Broken delivery promises, liveness failures, and a link past its RAM
+    /// bound. Empty = correct.
     pub violations: Vec<String>,
 }
 
@@ -216,6 +219,15 @@ pub fn run<A: Arq>(sc: &Scenario) -> Report {
 
     let mut violations = check_up.violations.clone();
     violations.extend(check_down.violations.iter().cloned());
+    for (name, e) in [("host", &host), ("board", &board)] {
+        let bound = Link::<A>::ram_bound(&e.cfg);
+        if e.peak_ram > bound {
+            violations.push(format!(
+                "ram: the {name} link held {} bytes, past its bound of {bound}",
+                e.peak_ram
+            ));
+        }
+    }
     for (name, st) in [("host", host.link.state()), ("board", board.link.state())] {
         if st != LinkState::Established {
             violations.push(format!(
@@ -248,6 +260,7 @@ pub fn run<A: Arq>(sc: &Scenario) -> Report {
         host_peak_window: host.peak_window,
         board_peak_window: board.peak_window,
         board_peak_scratch: board.peak_scratch,
+        board_peak_ram: board.peak_ram,
         host_resets: host.resets,
         board_resets: board.resets,
         logs_written: board.logs_written,

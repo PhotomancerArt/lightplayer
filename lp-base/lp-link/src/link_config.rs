@@ -37,13 +37,20 @@ pub struct LinkConfig {
     /// reorder buffer; the flow-control ceiling for the others).
     pub rx_window: u8,
     /// Message bytes queued for the application before the advertised window
-    /// closes.
+    /// closes (each queued message is also charged a small fixed cost, see
+    /// `Link::ram_bound`). Not allocated up front: delivered messages are the
+    /// application's `Vec`s.
     pub rx_budget: usize,
-    /// Bytes `send()` queues (pending + unacknowledged) before `Full`.
+    /// Bytes `send()` queues (pending + unacknowledged) before `Full`. The
+    /// pending part is a ring of this size, allocated once in `Link::new`.
     pub send_budget: usize,
+    /// Reliable messages `send()` queues (not yet cut into frames) before
+    /// `Full`.
+    pub send_queue: usize,
     /// Longest reliable message.
     pub max_message: usize,
-    /// Best-effort messages queued before `Full`.
+    /// Best-effort messages queued before `Full`: this many `max_payload`
+    /// slots, allocated once.
     pub datagram_queue: usize,
     /// Bit `n` set: channel `n` is reliable.
     pub reliable_channels: u8,
@@ -84,8 +91,13 @@ impl LinkConfig {
             max_payload: 256,
             tx_window: 8,
             rx_window: 8,
-            rx_budget: 16 * 1024,
-            send_budget: 40 * 1024,
+            // Room for one largest message plus what queues behind it. The
+            // send ring is allocated at `send_budget` for the link's life, so
+            // it is kept near one message: `send()` says `Full` rather than
+            // hold more.
+            rx_budget: 24 * 1024,
+            send_budget: 24 * 1024,
+            send_queue: 64,
             max_message: 20 * 1024,
             datagram_queue: 32,
             reliable_channels: (1 << CH_CONTROL) | (1 << CH_PROTO),

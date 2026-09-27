@@ -37,6 +37,8 @@ pub struct LinkCounters {
     /// Partial frames flushed after going quiet (a lost tail).
     pub stale_partials: u32,
     pub text_bytes: u32,
+    /// Text bytes dropped because the application was not reading.
+    pub text_dropped: u32,
     pub ups: u32,
     pub resets: u32,
     /// SYNs from the current peer that named a nonce we no longer use.
@@ -74,6 +76,7 @@ impl LinkCounters {
             datagrams_lost,
             stale_partials,
             text_bytes,
+            text_dropped,
             ups,
             resets,
             stale_syns,

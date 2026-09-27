@@ -26,7 +26,7 @@ impl<const MAX: u8> Arq for GoBackN<MAX> {
     };
     const MAX_WINDOW: u8 = MAX;
 
-    fn new(_rx_window: u8) -> Self {
+    fn new(_rx_window: u8, _max_payload: usize) -> Self {
         GoBackN { expected: 0 }
     }
 

@@ -25,6 +25,8 @@ pub struct Endpoint<A: Arq> {
     pub peak_buffered: usize,
     pub peak_window: usize,
     pub peak_scratch: usize,
+    /// Largest `Link::ram_bytes` seen, over every incarnation.
+    pub peak_ram: usize,
     pub logs_written: u64,
     /// Log lines that died in the ring at a reboot.
     pub logs_lost_in_ring: u64,
@@ -49,6 +51,7 @@ impl<A: Arq> Endpoint<A> {
             peak_buffered: 0,
             peak_window: 0,
             peak_scratch: 0,
+            peak_ram: 0,
             logs_written: 0,
             logs_lost_in_ring: 0,
             ups: 0,
@@ -121,10 +124,12 @@ impl<A: Arq> Endpoint<A> {
         self.peak_buffered = self.peak_buffered.max(self.link.buffered_bytes());
         self.peak_window = self.peak_window.max(self.link.window_bytes());
         self.peak_scratch = self.peak_scratch.max(self.link.scratch_bytes());
+        self.peak_ram = self.peak_ram.max(self.link.ram_bytes());
     }
 
     /// Hand every event to the checker for the other direction.
     pub fn drain(&mut self, now: Micros, window_end: Micros, checker: &mut Checker) {
+        self.peak_ram = self.peak_ram.max(self.link.ram_bytes());
         while let Some(ev) = self.link.recv() {
             match ev {
                 LinkEvent::Up { generation } => {
@@ -187,6 +192,7 @@ fn add_counters(t: &mut LinkCounters, c: &LinkCounters) {
     t.datagrams_lost += c.datagrams_lost;
     t.stale_partials += c.stale_partials;
     t.text_bytes += c.text_bytes;
+    t.text_dropped += c.text_dropped;
     t.ups += c.ups;
     t.resets += c.resets;
     t.stale_syns += c.stale_syns;

@@ -19,7 +19,7 @@ impl Arq for NoArq {
     const RELIABLE: bool = false;
     const MAX_WINDOW: u8 = 127;
 
-    fn new(_rx_window: u8) -> Self {
+    fn new(_rx_window: u8, _max_payload: usize) -> Self {
         NoArq {
             expected: 0,
             skipping: false,
@@ -27,7 +27,7 @@ impl Arq for NoArq {
     }
 
     fn reset(&mut self) {
-        *self = Self::new(0);
+        *self = Self::new(0, 0);
     }
 
     fn expected(&self) -> u8 {

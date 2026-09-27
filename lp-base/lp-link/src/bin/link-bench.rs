@@ -15,7 +15,9 @@ use std::time::Instant;
 
 use lp_link::sim::sim_rng::SimRng;
 use lp_link::sim::{Report, Scenario, Transport, Workload, run};
-use lp_link::{Arq, CrcKind, Framing, GoBackN, LinkConfig, NoArq, SelectiveRepeat, StopAndWait};
+use lp_link::{
+    Arq, CrcKind, Framing, GoBackN, Link, LinkConfig, NoArq, SelectiveRepeat, StopAndWait,
+};
 use lp_link::{cobs, crc as checksum, frame};
 
 type Gbn = GoBackN<127>;
@@ -506,9 +508,9 @@ fn ram() {
         "\n### RAM per link on the board (peaks over bulk + interactive runs at 1% faults, 3 seeds)\n"
     );
     println!(
-        "| transport | variant | reliability buffers B | frame scratch B | all queued B (incl. app send queue) |"
+        "| transport | variant | reliability buffers B | frame scratch B | all queued B (incl. app send queue) | RAM held B (peak) | RAM bound B |"
     );
-    println!("|---|---|---|---|---|");
+    println!("|---|---|---|---|---|---|---|");
     for t in [Transport::Usb, Transport::Ble, Transport::Udp] {
         ram_row::<SelectiveRepeat>(t);
         ram_row::<Gbn>(t);
@@ -516,18 +518,20 @@ fn ram() {
 }
 
 fn ram_row<A: Arq>(t: Transport) {
-    let (mut window, mut scratch, mut queued) = (0, 0, 0);
+    let (mut window, mut scratch, mut queued, mut held) = (0, 0, 0, 0);
     for seed in SEEDS {
         for (w, d) in [(bulk(), 10_000_000), (interactive(), 20_000_000)] {
             let r = run::<A>(&Scenario::new(t, 0.01, w, d, seed));
             window = window.max(r.board_peak_window);
             scratch = scratch.max(r.board_peak_scratch);
             queued = queued.max(r.board_peak_buffered);
+            held = held.max(r.board_peak_ram);
         }
     }
     println!(
-        "| {} | {} | {window} | {scratch} | {queued} |",
+        "| {} | {} | {window} | {scratch} | {queued} | {held} | {} |",
         t.name(),
-        A::NAME
+        A::NAME,
+        Link::<A>::ram_bound(&t.link_config())
     );
 }
