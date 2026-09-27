@@ -5856,6 +5856,16 @@ impl ProjectController {
         read: crate::StudioProjectRead,
     ) -> Result<Vec<UiLogDraft>, UiError> {
         let mut logs = read.logs;
+        // A stream that is nothing but a terminal `Error` is the board
+        // declining the read (e.g. heap headroom too low) before sending a
+        // byte of it: the mirror is untouched and still trustworthy. Fail the
+        // run (the caller backs off) but keep the mirror, and never answer a
+        // refusal with a heavier since=0 read.
+        if let [lpc_wire::ProjectReadEvent::Error { message }] = read.events.as_slice() {
+            return Err(UiError::Protocol(format!(
+                "board refused the project read: {message}"
+            )));
+        }
         match self.sync_mut()?.apply_project_read_events(read.events) {
             Ok(()) => {}
             // A gated refresh trusts the local mirror to be a faithful prefix
@@ -15366,6 +15376,65 @@ mod tests {
         let sync = project.sync.as_ref().unwrap();
         assert_eq!(sync.overlay_revision(), Revision::new(5));
         assert_eq!(sync.overlay_slot_edits().count(), 1);
+    }
+
+    /// PLAYFUL choker prod recording, 2026-09-26: from +168 s the board
+    /// refused every read for heap. A refusal is the board declining, not a
+    /// corrupt delta: the mirror stays, and no heavier since=0 read follows.
+    #[test]
+    fn a_refused_refresh_keeps_the_mirror_and_never_resyncs_from_zero() {
+        let refused = WireServerMessage::stream_frame(
+            2,
+            0,
+            true,
+            WireServerMsgBody::ProjectRead {
+                events: vec![ProjectReadEvent::Error {
+                    message: "read refused: heap headroom too low".to_string(),
+                }],
+            },
+        );
+        let (mut project, mut client, sent) = ready_project_with_scripted_client(vec![
+            runtime_read_response(1, 10, 0),
+            refused,
+            runtime_read_response(3, 11, 0),
+        ]);
+        assert!(
+            block_on_ready(project.refresh_project(&mut client))
+                .unwrap()
+                .synced
+        );
+
+        let run = block_on_ready(project.refresh_project(&mut client)).unwrap();
+
+        assert!(
+            !run.synced,
+            "a refused read fails the run (so it backs off)"
+        );
+        assert_eq!(
+            sent_kinds(&sent),
+            vec!["project_read", "project_read"],
+            "a refusal sends no since=0 resync in the same tick"
+        );
+
+        // The next pull is still a delta from the kept mirror.
+        assert!(
+            block_on_ready(project.refresh_project(&mut client))
+                .unwrap()
+                .synced
+        );
+        let since: Vec<_> = sent
+            .borrow()
+            .iter()
+            .filter_map(|message| match &message.msg {
+                ClientRequest::ProjectRead { request, .. } => Some(request.since),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            since,
+            vec![None, Some(Revision::new(10)), Some(Revision::new(10))],
+            "the refused pull and the one after it both read from the kept revision"
+        );
     }
 
     #[test]
