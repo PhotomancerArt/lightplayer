@@ -302,6 +302,12 @@ impl Evidence {
         self.observations.engine_fps
     }
 
+    /// The board's link counters, off the latest heartbeat this window that
+    /// carried them.
+    pub fn link_counters(&self) -> Option<crate::LinkCounterFacts> {
+        self.observations.link_counters
+    }
+
     pub fn recovery(&self) -> Option<&RecoveryFacts> {
         self.observations.recovery.as_ref()
     }
@@ -800,6 +806,10 @@ struct Observations {
     /// carried one. Window-scoped; read by the card's live-feed pill.
     #[serde(default)]
     engine_fps: Option<u16>,
+    /// The board's link counters off the latest heartbeat that carried
+    /// them. Window-scoped; read by the card's link section.
+    #[serde(default)]
+    link_counters: Option<crate::LinkCounterFacts>,
     /// The wire-version notice has been journaled for this window.
     #[serde(default)]
     wire_mismatch_noted: bool,
@@ -833,11 +843,15 @@ impl Observations {
                 loaded,
                 recovery,
                 engine_fps,
+                link,
                 ..
             } => {
                 self.frames_seen += 1;
                 if engine_fps.is_some() {
                     self.engine_fps = *engine_fps;
+                }
+                if link.is_some() {
+                    self.link_counters = *link;
                 }
                 // Only a heartbeat that CARRIES the report replaces it:
                 // older firmware sends none, and treating its silence as

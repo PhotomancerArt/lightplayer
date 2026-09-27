@@ -66,12 +66,14 @@ pub mod device_flash;
 pub mod device_frame_feed;
 pub mod device_frame_snapshot;
 pub mod device_identity;
+pub mod device_link_counter_rows;
 pub mod device_push;
 pub mod device_records;
 pub mod device_roster;
 pub mod device_transport;
 pub mod devices_op;
 pub mod emu_transport;
+pub mod link_health;
 pub mod runtime_backing;
 pub mod runtime_band;
 pub mod shared_link_client_io;
@@ -117,6 +119,7 @@ pub use device_identity::{
     DeviceIdentityLine, IdentityFirmware as DeviceIdentityFirmware, IdentityRows, device_chip,
     device_identity_line, pending_identity_rows,
 };
+pub use device_link_counter_rows::{LINK_COUNTERS_CAPTION, UiLinkCounterRow, link_counter_rows};
 pub use device_push::{
     DevicePushOp, PushOffer, PushSource, PushSourceChoice, PushSourceGroup,
     first_bundled_example_id, push_offer,
@@ -136,6 +139,7 @@ pub use devices_op::{DeviceFace, DevicesOp};
 pub use emu_transport::{
     EmuBacking, EmuDeviceTransport, EmuLinkSource, EmuRuntimeControl, EmuSession,
 };
+pub use link_health::{LinkHealth, LinkHealthMap, LinkTrouble};
 pub use runtime_backing::{Backing, EMULATED_TARGETS, backing_for, emu_offered_for};
 pub use runtime_band::{UiRuntimeBand, speed_word};
 pub use shared_link_client_io::{ConversationInbox, SharedLinkClientIo};

@@ -534,6 +534,7 @@ mod tests {
             degraded: None,
             loaded_project: LoadedProject::Empty,
             engine_fps: None,
+            link_counters: None,
             can_receive_project: true,
             can_remove_project: false,
             activity: None,
@@ -581,6 +582,7 @@ mod tests {
             remembered_firmware: None,
             degraded: None,
             engine_fps: None,
+            link_counters: None,
             loaded_project: LoadedProject::Running {
                 label: "studio".to_string(),
             },

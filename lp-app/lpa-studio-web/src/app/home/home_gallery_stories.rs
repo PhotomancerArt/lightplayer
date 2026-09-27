@@ -887,6 +887,7 @@ fn roster_fixture() -> DeviceRosterView {
                     // The RUNNING face (M3): what the board itself reports,
                     // named by the storage dir it runs from.
                     engine_fps: None,
+                    link_counters: None,
                     loaded_project: DeviceLoadedProject::Running {
                         label: "2026-07-09-1421-porch-sign".to_string(),
                     },
@@ -948,6 +949,7 @@ fn roster_fixture() -> DeviceRosterView {
                     degraded: None,
                     loaded_project: DeviceLoadedProject::Unknown,
                     engine_fps: None,
+                    link_counters: None,
                     // Busy: one activity per device, so no second verb.
                     can_receive_project: false,
                     can_remove_project: false,
@@ -992,6 +994,7 @@ fn roster_fixture() -> DeviceRosterView {
                     degraded: None,
                     loaded_project: DeviceLoadedProject::Unknown,
                     engine_fps: None,
+                    link_counters: None,
                     can_receive_project: false,
                     can_remove_project: false,
                     activity: None,
@@ -1041,6 +1044,7 @@ fn roster_fixture() -> DeviceRosterView {
                     degraded: None,
                     loaded_project: DeviceLoadedProject::Empty,
                     engine_fps: None,
+                    link_counters: None,
                     can_receive_project: true,
                     // Nothing on it to remove — the empty face's picker is
                     // the verb here.
@@ -1101,6 +1105,7 @@ fn roster_fixture() -> DeviceRosterView {
                     degraded: None,
                     loaded_project: DeviceLoadedProject::Unknown,
                     engine_fps: None,
+                    link_counters: None,
                     can_receive_project: false,
                     can_remove_project: false,
                     activity: None,
@@ -1231,6 +1236,7 @@ fn firmware_face_fixtures() -> Vec<(&'static str, DeviceView, Option<String>)> {
         },
         degraded: Some("Recovery red: /studio.show/s disabled after repeated crashes".to_string()),
         engine_fps: None,
+        link_counters: None,
         loaded_project: DeviceLoadedProject::Running {
             label: "studio".to_string(),
         },
@@ -1328,6 +1334,7 @@ fn firmware_face_fixtures() -> Vec<(&'static str, DeviceView, Option<String>)> {
         degraded: None,
         loaded_project: DeviceLoadedProject::Unknown,
         engine_fps: None,
+        link_counters: None,
         can_receive_project: false,
         can_remove_project: false,
         activity: None,
@@ -1428,6 +1435,7 @@ fn firmware_face_fixtures() -> Vec<(&'static str, DeviceView, Option<String>)> {
         degraded: None,
         loaded_project: DeviceLoadedProject::Unknown,
         engine_fps: None,
+        link_counters: None,
         can_receive_project: false,
         can_remove_project: false,
         activity: None,
@@ -2011,6 +2019,35 @@ fn devices_card_menu_open() -> Element {
     let card = roster_fixture().roster.devices.remove(0);
     rsx! {
         section { class: "tw:min-h-[560px] tw:p-4",
+            div { class: "tw:w-[400px]",
+                DeviceRosterCard {
+                    card,
+                    open_uid: Some("dev000000daqf6dvvqz".to_string()),
+                    projects: packages(),
+                    examples: examples(),
+                    menu_initially_open: true,
+                    on_action: |_| {},
+                }
+            }
+        }
+    }
+}
+
+#[story(
+    description = "The device card's ⋯ menu with the board's LINK section (plan D13): under Rename, the lp-link counters the board reports on every heartbeat, in the board's own words — frames it had to send again, frames that reached it damaged, times the link restarted and went quiet, and the bytes it sent and received, each in the unit that keeps the number short. On a clean cable every count is 0; here the board has resent 3 frames and restarted once, so those two wear the warning tone. The panel floats, so the fixed-height card pays nothing for it; a link that reports no counters (Bluetooth, a sim) shows Rename alone."
+)]
+fn devices_card_menu_link_counters() -> Element {
+    let mut card = roster_fixture().roster.devices.remove(0);
+    card.link_counters = Some(lpa_studio_core::DeviceLinkCounters {
+        resends: 3,
+        damaged: 0,
+        resets: 1,
+        stalls: 0,
+        bytes_sent: 1_363_149,
+        bytes_received: 38_912,
+    });
+    rsx! {
+        section { class: "tw:min-h-[640px] tw:p-4",
             div { class: "tw:w-[400px]",
                 DeviceRosterCard {
                     card,

@@ -444,7 +444,7 @@ pub fn take_reads(id: u32) -> Vec<WireRead> {
 
 /// What the port's link has said about itself since the last ask (up, a
 /// stall, the packed opt-in's outcome — one note per change). Drained by the
-/// model's link pump.
+/// model's link pump, or by the editor lens's io while it holds the wire.
 pub fn take_wire_notes(id: u32) -> Vec<String> {
     PORTS.with(|ports| {
         ports

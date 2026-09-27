@@ -33,6 +33,7 @@ use lpc_wire::lp_link::{LinkState, Micros};
 use lpc_wire::server::api::LogLevel;
 use lpc_wire::{ClientMessage, LinkCounters, WireLinkPort};
 
+use crate::device_link::link_note::{LINK_ANSWERING_NOTE, LINK_STALLED_NOTE};
 use crate::device_link::port_read_map::{MappedRead, map_port_read};
 use crate::device_link::wire_reader::WireRead;
 
@@ -139,9 +140,9 @@ impl LinkPortService {
             self.stalled = stalled;
             self.notes.push(
                 if stalled {
-                    "link: stalled — the board has gone quiet; holding the session"
+                    LINK_STALLED_NOTE
                 } else {
-                    "link: the board is answering again"
+                    LINK_ANSWERING_NOTE
                 }
                 .to_string(),
             );
