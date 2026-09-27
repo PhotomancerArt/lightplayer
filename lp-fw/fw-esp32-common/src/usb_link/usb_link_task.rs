@@ -43,7 +43,7 @@ pub const FRAMES_PER_PASS: usize = 8;
 pub const IDLE_CAP_US: Micros = 10_000;
 /// Log records moved onto the log channel per pass. Each is popped under its
 /// own short critical section (see [`crate::log_ring_logger::pump`]).
-const LOG_RECORDS_PER_PASS: usize = 8;
+const LOG_RECORDS_PER_PASS: usize = 4;
 /// Shortest spacing of two SOF samples (see
 /// [`crate::serial::usb_connection::DISCONNECT_THRESHOLD`]).
 const SOF_SAMPLE_US: Micros = 2_000;

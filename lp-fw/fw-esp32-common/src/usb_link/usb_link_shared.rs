@@ -15,15 +15,23 @@ use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::signal::Signal;
 use lp_link::{Link, LinkConfig, LinkState, SelectiveRepeat};
 
-/// The board's send budget: payload bytes the link may hold queued or
-/// unacknowledged before `send` refuses.
-///
-/// lp-link's USB preset allows 40 KB. Every queued message is a heap copy
-/// (the `M!` path wrote straight from a static buffer and held none), and a
-/// loaded project leaves the C6 little heap, so the board holds one
-/// `ProjectRead` frame (16.6 KB) plus room for the small messages around it;
-/// the transport waits for room rather than dropping while the host drains.
-pub const SEND_BUDGET: usize = 24 * 1024;
+/// The largest message the board sends or takes: the static frame buffer's
+/// size, which bounds every reply it can serialize (the 16 KiB `ProjectRead`
+/// frame budget plus its serial margin), and the wire's budget for a request.
+#[cfg(feature = "server")]
+pub const MAX_MESSAGE: usize = crate::serial::server_msg::SERVER_MSG_JSON_BUFFER_SIZE;
+#[cfg(not(feature = "server"))]
+pub const MAX_MESSAGE: usize = lp_link::MAX_MESSAGE;
+
+/// Log records the link may hold queued at once. Each slot is a whole frame
+/// payload (256 B) allocated for the link's life; the log ring (4 KB) holds
+/// the rest, and the link task moves at most
+/// [`super::usb_link_task`]'s per-pass count into it.
+const LOG_DATAGRAMS: usize = 8;
+
+/// Replies the link may hold queued (entries, not bytes: the byte budget is
+/// [`MAX_MESSAGE`]).
+const SEND_QUEUE: usize = 16;
 
 /// The link, and the doorbell that wakes its task.
 pub struct UsbLinkShared {
@@ -32,11 +40,25 @@ pub struct UsbLinkShared {
 }
 
 impl UsbLinkShared {
-    /// The board's link configuration: lp-link's USB preset with the board's
-    /// send budget ([`SEND_BUDGET`]).
+    /// The board's link configuration: lp-link's USB preset, its buffers cut
+    /// to what the board needs.
+    ///
+    /// Every buffer is allocated in `Link::new` for the link's life, and the
+    /// preset's (24 KiB send ring, 32 log slots) would hold ~39 KB of a heap a
+    /// loaded project leaves tight (a `ProjectRead` is refused under a 32 KB
+    /// largest free block). The floor is one largest reply in flight: the send
+    /// ring is exactly [`MAX_MESSAGE`], so while a 16 KiB frame is unacknowledged
+    /// the next reply waits for room (the transport waits it out), as the
+    /// one-frame-in-flight `M!` path did. The receive side is lazy (it grows
+    /// with traffic), capped at one largest request.
     pub fn config() -> LinkConfig {
         let mut cfg = LinkConfig::usb();
-        cfg.send_budget = SEND_BUDGET;
+        cfg.max_message = MAX_MESSAGE;
+        cfg.send_budget = MAX_MESSAGE;
+        // Plus the inbox's 64 B queueing charge (`LinkConfig::validate`).
+        cfg.rx_budget = MAX_MESSAGE + 64;
+        cfg.send_queue = SEND_QUEUE;
+        cfg.datagram_queue = LOG_DATAGRAMS;
         cfg
     }
 
@@ -84,5 +106,30 @@ impl UsbLinkShared {
     /// The link task's side of [`Self::ring`].
     pub(crate) async fn doorbell(&self) {
         self.doorbell.wait().await;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The board's cut holds together, carries the largest reply, and costs
+    /// well under the preset. (`--nocapture` prints the figures.)
+    #[test]
+    fn the_board_config_holds_one_largest_reply_and_costs_less_than_the_preset() {
+        let cfg = UsbLinkShared::config();
+        assert_eq!(cfg.validate(), Ok(()));
+        assert!(cfg.max_message >= lpc_wire::PROJECT_READ_FRAME_SERIAL_BUFFER_BYTES);
+        let board = Link::<SelectiveRepeat>::new(cfg.clone(), 1).ram_bytes();
+        let preset = Link::<SelectiveRepeat>::new(LinkConfig::usb(), 1).ram_bytes();
+        let bound = Link::<SelectiveRepeat>::ram_bound(&cfg);
+        extern crate std;
+        std::println!(
+            "usb link RAM at rest: board {board} B, preset {preset} B; board bound {bound} B"
+        );
+        assert!(
+            board + 8 * 1024 < preset,
+            "board {board} B vs preset {preset} B"
+        );
     }
 }
