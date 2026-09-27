@@ -65,7 +65,7 @@ pub use app::devices::{
     target_offer, transport_label_for_endpoint, uid_from_emu_endpoint, uid_from_sim_endpoint,
     write_sim_record,
 };
-pub use app::devices::{LINK_COUNTERS_CAPTION, UiLinkCounterRow, link_counter_rows};
+pub use app::devices::{LINK_COUNTERS_CAPTION, LinkTrouble, UiLinkCounterRow, link_counter_rows};
 pub use app::docs_host::DocsSimHost;
 pub use app::studio::PlayViewOp;
 // The project's declared hardware (D41): the web shell's Hardware row and
