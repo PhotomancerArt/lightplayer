@@ -86,6 +86,19 @@ sequence space is future work if a measurement ever calls for it).
 | `lab/` | the comms-lab soak protocol (`LabBoard`/`LabHost`) |
 | `sim/` (feature `sim`) | the deterministic fault-injecting simulator: USB/BLE/UDP/WS pipe models; drop, corrupt, duplicate, reorder, truncate, stall, reboot |
 
+## Message budget
+
+`max_message` is 17 KiB in every preset (`MAX_MESSAGE`): the wire's one
+message budget, 16 KiB (`PROJECT_READ_FRAME_MAX_BYTES` in
+`lp-core/lpc-wire/src/budget.rs`), plus slack. lp-base cannot depend on
+lp-core, so the edge that wires the link to the wire asserts that the two
+agree. `send()` refuses a longer message with `TooBig`. A longer message
+arriving from a peer with a bigger limit is dropped fragment by fragment to its
+end and counted (`LinkCounters::oversize_messages`); its frames are still
+acknowledged, so the sender is not stuck resending, and the session carries
+on. `LinkConfig::validate` checks that one largest message fits both the send
+budget and the receive budget; every preset passes it.
+
 ## Memory
 
 A link's RAM is fixed by its `LinkConfig`. `Link::new` allocates every buffer

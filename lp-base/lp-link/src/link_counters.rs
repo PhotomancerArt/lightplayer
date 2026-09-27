@@ -24,6 +24,9 @@ pub struct LinkCounters {
     pub stale_frames: u32,
     /// Frames longer than the maximum, discarded.
     pub oversize_frames: u32,
+    /// Reliable messages longer than `max_message` the peer sent: dropped,
+    /// acknowledged, and the session kept.
+    pub oversize_messages: u32,
     /// Frames that arrived before the link was up.
     pub dropped_unsynced: u32,
     pub duplicates: u32,
@@ -68,6 +71,7 @@ impl LinkCounters {
             bad_frames,
             stale_frames,
             oversize_frames,
+            oversize_messages,
             dropped_unsynced,
             duplicates,
             out_of_order,

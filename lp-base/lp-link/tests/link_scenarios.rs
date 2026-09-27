@@ -5,8 +5,8 @@ use lp_link::frame::{self, FrameKind, Header};
 use lp_link::sim::pipe::Faults;
 use lp_link::sim::{Report, Scenario, Transport, Workload, run};
 use lp_link::{
-    Arq, CH_CONTROL, CH_LOG, CH_PROTO, GoBackN, Link, LinkConfig, LinkEvent, LinkState, NoArq,
-    ResetReason, SelectiveRepeat, StopAndWait,
+    Arq, CH_CONTROL, CH_LOG, CH_PROTO, GoBackN, Link, LinkConfig, LinkEvent, LinkState,
+    MAX_MESSAGE, NoArq, ResetReason, SelectiveRepeat, SendError, StopAndWait,
 };
 
 type Gbn = GoBackN<127>;
@@ -339,6 +339,56 @@ fn logs_keep_flowing_beside_a_busy_proto_stream() {
         proto_rx > 500 * 1024,
         "the proto stream moved: {proto_rx} B"
     );
+}
+
+/// The message budget: the wire's 16 KiB frame budget plus slack. Longer is
+/// refused at `send`.
+#[test]
+fn a_message_past_the_budget_is_too_big_to_send() {
+    let (mut a, mut b) = pair::<SelectiveRepeat>(LinkConfig::usb());
+    let mut now = 0;
+    handshake(&mut a, &mut b, &mut now);
+    assert_eq!(MAX_MESSAGE, 17 * 1024);
+    assert_eq!(
+        a.send(CH_PROTO, &vec![0; MAX_MESSAGE + 1]),
+        Err(SendError::TooBig)
+    );
+    assert_eq!(a.send(CH_PROTO, &vec![0; MAX_MESSAGE]), Ok(()));
+}
+
+/// A peer with a bigger limit sends a message past ours: it is dropped and
+/// counted, its frames are still acknowledged (the sender is not stuck
+/// resending), and the session and the next message carry on.
+#[test]
+fn an_oversize_message_is_dropped_without_a_reset() {
+    let big = LinkConfig {
+        max_message: 40 * 1024,
+        send_budget: 48 * 1024,
+        ..LinkConfig::usb()
+    };
+    let mut a = Link::<SelectiveRepeat>::new(big, 0x1111_2222);
+    let mut b = Link::<SelectiveRepeat>::new(LinkConfig::usb(), 0x3333_4444);
+    let mut now = 0;
+    handshake(&mut a, &mut b, &mut now);
+    let _ = drain(&mut b);
+    a.send(CH_PROTO, &[5; 30 * 1024]).unwrap();
+    a.send(CH_PROTO, b"after").unwrap();
+    let mut got = vec![];
+    for _ in 0..200 {
+        now += 1_000;
+        shuttle(&mut a, &mut b, now);
+        got.extend(drain(&mut b));
+    }
+    assert_eq!(
+        got,
+        vec![LinkEvent::Message {
+            channel: CH_PROTO,
+            data: b"after".to_vec()
+        }]
+    );
+    assert_eq!(b.counters().oversize_messages, 1);
+    assert_eq!(a.counters().resets + b.counters().resets, 0);
+    assert!(a.is_idle(), "everything was acknowledged");
 }
 
 fn interactive() -> Workload {

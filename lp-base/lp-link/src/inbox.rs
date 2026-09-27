@@ -15,6 +15,10 @@
 //! first, so a control message can arrive between two fragments of a proto
 //! one. Within a channel, fragments arrive in order.
 //!
+//! A message longer than `max_message` (a peer with a bigger limit) is dropped
+//! and counted, fragment by fragment to its end; the frames are still taken
+//! (and so acknowledged) and the session carries on.
+//!
 //! Allocation: a delivered message is copied out of its channel's reassembly
 //! buffer into a `Vec` of exactly its length, the one allocation per message;
 //! the reassembly buffer keeps its capacity (never past `max_message`).
@@ -52,6 +56,10 @@ pub struct Inbox {
     partials: [Vec<u8>; CHANNELS],
     /// Bit `c`: channel `c` is mid-message.
     open: u8,
+    /// Bit `c`: channel `c` is mid-way through a message too long to keep.
+    dropping: u8,
+    /// Messages dropped for being longer than `max_message`.
+    oversize: u32,
     ready_bytes: usize,
     budget: usize,
     max_message: usize,
@@ -63,6 +71,8 @@ impl Inbox {
             events: VecDeque::new(),
             partials: Default::default(),
             open: 0,
+            dropping: 0,
+            oversize: 0,
             ready_bytes: 0,
             budget,
             max_message,
@@ -95,8 +105,18 @@ impl Inbox {
     /// messages do not count, so two channels mid-message cannot block each
     /// other.
     pub fn has_room(&self, chan: u8, n: usize) -> bool {
-        let partial = self.partials.get(chan as usize).map_or(0, Vec::len);
+        let c = chan as usize % CHANNELS;
+        let partial = self.partials[c].len();
+        if self.dropping & (1 << c) != 0 || partial + n > self.max_message {
+            // It will be dropped, which takes no room.
+            return true;
+        }
         self.ready_bytes + partial + n + EVENT_COST <= self.budget
+    }
+
+    /// Messages dropped so far for being longer than `max_message`.
+    pub fn oversize_messages(&self) -> u32 {
+        self.oversize
     }
 
     /// Bytes queued for the application or reassembling (charged).
@@ -111,14 +131,28 @@ impl Inbox {
     pub fn push_fragment(&mut self, f: Fragment<'_>) -> Result<(), ProtocolError> {
         let c = f.chan as usize % CHANNELS;
         let bit = 1u8 << c;
+        if self.dropping & bit != 0 {
+            if f.first {
+                self.abort_all();
+                return Err(ProtocolError);
+            }
+            if f.fin {
+                self.dropping &= !bit;
+            }
+            return Ok(());
+        }
         if f.first == (self.open & bit != 0) {
             // A new message mid-message, or a continuation of nothing.
             self.abort_all();
             return Err(ProtocolError);
         }
         if self.partials[c].len() + f.data.len() > self.max_message {
-            self.abort_all();
-            return Err(ProtocolError);
+            self.abort(f.chan);
+            self.oversize += 1;
+            if !f.fin {
+                self.dropping |= bit;
+            }
+            return Ok(());
         }
         if f.first && f.fin {
             self.deliver(f.chan, f.data.to_vec());
@@ -140,6 +174,7 @@ impl Inbox {
         let c = chan as usize % CHANNELS;
         self.partials[c].clear();
         self.open &= !(1 << c);
+        self.dropping &= !(1 << c);
     }
 
     /// Drop every half-reassembled message (link reset, a protocol error, or
@@ -147,6 +182,7 @@ impl Inbox {
     pub fn abort_all(&mut self) {
         self.partials.iter_mut().for_each(Vec::clear);
         self.open = 0;
+        self.dropping = 0;
     }
 
     /// A best-effort message; the caller checked [`has_room`](Self::has_room).
@@ -303,5 +339,25 @@ mod tests {
         inbox.push_fragment(frag(true, false)).unwrap();
         assert_eq!(inbox.push_fragment(frag(true, false)), Err(ProtocolError));
         assert_eq!(inbox.bytes(), 0, "the partial is dropped");
+    }
+
+    #[test]
+    fn an_oversize_message_is_dropped_to_its_end_and_counted() {
+        let mut inbox = Inbox::new(64 * 1024, 100);
+        let frag = |first, fin, n| Fragment {
+            chan: 1,
+            first,
+            fin,
+            data: &[7; 60][..n],
+        };
+        inbox.push_fragment(frag(true, false, 60)).unwrap();
+        inbox.push_fragment(frag(false, false, 60)).unwrap();
+        inbox.push_fragment(frag(false, false, 60)).unwrap();
+        inbox.push_fragment(frag(false, true, 10)).unwrap();
+        assert_eq!(inbox.oversize_messages(), 1);
+        assert!(inbox.pop().is_none(), "nothing delivered");
+        // The next message on the channel is whole.
+        inbox.push_fragment(frag(true, true, 5)).unwrap();
+        assert!(matches!(inbox.pop(), Some(LinkEvent::Message { .. })));
     }
 }

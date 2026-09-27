@@ -220,7 +220,9 @@ impl<A: Arq> Link<A> {
     /// The next event: a message, text, link up, or reset.
     pub fn recv(&mut self) -> Option<LinkEvent> {
         let ev = self.inbox.pop()?;
-        match self.arq.drain(&mut self.inbox) {
+        let drained = self.arq.drain(&mut self.inbox);
+        self.counters.oversize_messages = self.inbox.oversize_messages();
+        match drained {
             Ok(0) => {}
             Ok(_) => self.ack_due = Some(0),
             Err(_) => self.protocol_error(),
@@ -506,7 +508,9 @@ impl<A: Arq> Link<A> {
             fin: hdr.fin,
             data: body,
         };
-        match self.arq.on_data(hdr.seq, frag, &mut self.inbox) {
+        let verdict = self.arq.on_data(hdr.seq, frag, &mut self.inbox);
+        self.counters.oversize_messages = self.inbox.oversize_messages();
+        match verdict {
             RxVerdict::InOrder => {
                 self.unacked_rx = self.unacked_rx.saturating_add(1);
                 let due = if self.unacked_rx >= self.cfg.ack_every {

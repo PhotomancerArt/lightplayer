@@ -186,6 +186,7 @@ fn add_counters(t: &mut LinkCounters, c: &LinkCounters) {
     t.bad_frames += c.bad_frames;
     t.stale_frames += c.stale_frames;
     t.oversize_frames += c.oversize_frames;
+    t.oversize_messages += c.oversize_messages;
     t.dropped_unsynced += c.dropped_unsynced;
     t.duplicates += c.duplicates;
     t.out_of_order += c.out_of_order;
