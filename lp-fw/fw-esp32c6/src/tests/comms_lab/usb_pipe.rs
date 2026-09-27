@@ -47,13 +47,20 @@ pub async fn usb_link_task(usb: esp_hal::peripherals::USB_DEVICE<'static>, nonce
                     break;
                 }
                 Err(_) => {
+                    let live_before = edge.write_timeouts_live;
                     edge.note_write_timeout(LabInEndpoint::in_ep_free());
-                    log::warn!(
-                        "usb: a frame write timed out ({} so far) at uptime {} ms; in_ep_free={}",
-                        edge.write_timeouts,
-                        Instant::now().as_millis(),
-                        LabInEndpoint::in_ep_free()
-                    );
+                    // Only a timeout while a host was draining is news; with
+                    // no host every SYN times out, and logging those would
+                    // flush the ring of everything else.
+                    if edge.write_timeouts_live != live_before {
+                        log::warn!(
+                            "usb: a frame write timed out with a host draining ({} so far) at \
+                             uptime {} ms; in_ep_free={}",
+                            edge.write_timeouts_live,
+                            Instant::now().as_millis(),
+                            LabInEndpoint::in_ep_free()
+                        );
+                    }
                     break;
                 }
             }

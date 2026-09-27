@@ -174,7 +174,7 @@ fn print_outcome(o: &LabOutcome) {
     }
     if !o.report.log_tail.is_empty() {
         println!("last log lines:");
-        for l in o.report.log_tail.iter().rev().take(4).rev() {
+        for l in o.report.log_tail.iter() {
             let cut: String = l.chars().take(110).collect();
             println!("  | {cut}");
         }

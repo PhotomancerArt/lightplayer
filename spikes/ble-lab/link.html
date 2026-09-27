@@ -52,7 +52,10 @@ async function run() {
   await wasmReady;
   log(`config ${JSON.stringify(cfg)} ua=${navigator.userAgent}`);
   const device = await navigator.bluetooth.requestDevice({
-    filters: [{ namePrefix: "LP-LAB" }],
+    // By service as well as name: macOS offers the name it CACHED for a
+    // board, which for a board that ran another image is not "LP-LAB-…"
+    // (ble-lab README, 2026-09-24).
+    filters: [{ namePrefix: "LP-" }, { services: [NUS] }],
     optionalServices: [NUS],
   });
   log(`picked ${device.name}`);

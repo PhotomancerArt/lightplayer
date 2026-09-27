@@ -124,7 +124,10 @@ pub async fn run(
                         log::info!("ble: connected, att mtu {}", conn.raw().att_mtu());
                         serve(&server, &conn, &stack, rng.random()).await;
                     }
-                    Err(_) => Timer::after_secs(1).await,
+                    Err(_) => {
+                        log::warn!("ble: advertising failed; retrying in 1 s");
+                        Timer::after_secs(1).await
+                    }
                 }
             }
         },
@@ -162,6 +165,7 @@ async fn advertise<'values, 'server, C: Controller>(
             },
         )
         .await?;
+    log::info!("ble: advertising");
     Ok(advertiser.accept().await?.with_attribute_server(server)?)
 }
 
