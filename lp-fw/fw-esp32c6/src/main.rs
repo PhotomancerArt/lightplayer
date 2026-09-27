@@ -257,15 +257,17 @@ fn fill_random(buf: &mut [u8]) {
 /// The `ClientRequest::Reboot` action: the chip reset the chip-agnostic
 /// server cannot perform itself.
 ///
-/// Called only after the ack frame is written (`LpServer::tick_and_send`),
-/// so the client reads its answer and then this board's boot banner. Not a
-/// crash path: the boot was marked complete on the first served frame, long
-/// before any request could arrive, so this reset never counts toward the
-/// boot-loop safe-mode gate.
+/// Called after the ack is queued (`LpServer::tick_and_send`); on the lp-link
+/// host link queued is not yet delivered, so the reset is left to the link
+/// task, which does it once the host has acknowledged everything (or after a
+/// second) — the client reads its answer, then this board's boot banner.
+/// Not a crash path: the boot was marked complete on the first served frame,
+/// long before any request could arrive, so this reset never counts toward
+/// the boot-loop safe-mode gate.
 #[cfg(not(fw_harness))]
 fn reboot_now() {
     log::info!("[REBOOT] client requested a restart");
-    esp_hal::system::software_reset()
+    fw_esp32_common::usb_link::request_reset_when_drained();
 }
 
 #[cfg(not(fw_harness))]

@@ -25,6 +25,6 @@ pub mod usb_link_task;
 pub mod usb_link_transport;
 
 pub use usb_link_shared::UsbLinkShared;
-pub use usb_link_task::{UsbLinkChip, run_usb_link};
+pub use usb_link_task::{UsbLinkChip, request_reset_when_drained, run_usb_link};
 #[cfg(feature = "server")]
 pub use usb_link_transport::UsbLinkTransport;

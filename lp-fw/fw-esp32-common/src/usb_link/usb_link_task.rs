@@ -25,6 +25,8 @@
 //! no host every SYN simply times out, and a stalled host's replies wait in
 //! the link's send budget.
 
+use core::sync::atomic::{AtomicBool, Ordering::Relaxed};
+
 use embassy_futures::select::{Either3, select3};
 use embassy_time::{Duration, Instant, Timer, with_timeout};
 use embedded_io_async::{Read, Write};
@@ -61,6 +63,27 @@ pub trait UsbLinkChip {
     /// The IN endpoint's send buffer is free — read after a write timed out,
     /// to tell a host that stopped draining from a write that never woke.
     fn in_ep_free(&self) -> bool;
+    /// Reset the chip (a requested reboot, [`request_reset_when_drained`]).
+    fn reset(&mut self) -> !;
+}
+
+/// Longest a requested reset waits for the host to acknowledge what the link
+/// holds.
+const RESET_DRAIN_LIMIT_US: Micros = 1_000_000;
+
+static RESET_WHEN_DRAINED: AtomicBool = AtomicBool::new(false);
+
+/// Reset the chip once the host has everything the link holds — the
+/// `Reboot` request's answer above all.
+///
+/// A reply the server has sent is only *queued* on the link: resetting at
+/// once (what the `M!` path did, once the bytes were written) would take
+/// the answer down with the board, and the host would see a session reset
+/// instead of its reply. So the reboot hook asks, and the link task resets
+/// when the link is idle (everything acknowledged), when no host is up to
+/// acknowledge anything, or after [`RESET_DRAIN_LIMIT_US`] at most.
+pub fn request_reset_when_drained() {
+    RESET_WHEN_DRAINED.store(true, Relaxed);
 }
 
 /// Run the host link on `rx`/`tx` for ever.
@@ -75,6 +98,7 @@ pub async fn run_usb_link<R: Read, W: Write, C: UsbLinkChip>(
     let mut was_stalled = false;
     let mut enumerated = true;
     let mut sof_sampled_at: Micros = 0;
+    let mut reset_asked_at: Option<Micros> = None;
 
     loop {
         chip.note_io_alive();
@@ -136,6 +160,16 @@ pub async fn run_usb_link<R: Read, W: Write, C: UsbLinkChip>(
         }
 
         shared.with_link(|link| usb_link_counters::publish(link.counters()));
+
+        if RESET_WHEN_DRAINED.load(Relaxed) {
+            let now = now_us();
+            let asked = *reset_asked_at.get_or_insert(now);
+            let drained =
+                shared.with_link(|link| link.state() != LinkState::Established || link.is_idle());
+            if drained || now.saturating_sub(asked) >= RESET_DRAIN_LIMIT_US {
+                chip.reset();
+            }
+        }
 
         let wake = if more {
             now_us()

@@ -49,4 +49,8 @@ impl UsbLinkChip for S3UsbChip {
     fn in_ep_free(&self) -> bool {
         UsbSerialJtagInEndpoint::in_ep_free()
     }
+
+    fn reset(&mut self) -> ! {
+        esp_hal::system::software_reset()
+    }
 }
