@@ -43,6 +43,7 @@ use lpa_server::LpServer;
 use lpc_shared::transport::{Incoming, Link, LinkId, ServerTransport};
 use lpc_wire::{TransportError, WireServerMessage};
 
+use super::frame_buf_holder::FrameBufHolder;
 use super::radio_link_port::{RADIO_LINK_SLOTS, RadioLinkEvent, RadioLinkPort, RadioWriteRequest};
 use crate::link_upkeep::LinkUpkeep;
 use crate::serial::packed_link::PackedLink;
@@ -90,7 +91,7 @@ pub struct LinkMuxTransport<U, D> {
     upkeep_hook: Option<fn(&LpServer, u64)>,
 }
 
-impl<U: ServerTransport, D: DelayNs> LinkMuxTransport<U, D> {
+impl<U: ServerTransport + FrameBufHolder, D: DelayNs> LinkMuxTransport<U, D> {
     /// Wrap `primary` (the USB transport) and serve the radio links that
     /// `port` announces. `delay` bounds a radio write.
     pub fn new(primary: U, port: &'static RadioLinkPort, delay: D) -> Self {
@@ -207,8 +208,14 @@ impl<U: ServerTransport, D: DelayNs> LinkMuxTransport<U, D> {
         link: LinkId,
         mut msg: WireServerMessage,
     ) -> Result<(), TransportError> {
-        let Some(radio) = self.radio.iter_mut().find(|l| l.id == link) else {
+        if !self.radio.iter().any(|l| l.id == link) {
             log::debug!("radio link {link}: gone, skipping frame id={}", msg.id);
+            return Ok(());
+        }
+        // The frame buffer is the USB transport's too: it may still be reading
+        // its last reply out of it (see `FrameBufHolder`).
+        self.primary.release_frame_buf().await;
+        let Some(radio) = self.radio.iter_mut().find(|l| l.id == link) else {
             return Ok(());
         };
         let slot = radio.slot;
@@ -277,7 +284,7 @@ impl<U: ServerTransport, D: DelayNs> LinkMuxTransport<U, D> {
     }
 }
 
-impl<U: ServerTransport, D: DelayNs> ServerTransport for LinkMuxTransport<U, D> {
+impl<U: ServerTransport + FrameBufHolder, D: DelayNs> ServerTransport for LinkMuxTransport<U, D> {
     async fn send(&mut self, link: LinkId, msg: WireServerMessage) -> Result<(), TransportError> {
         if link == LinkId::PRIMARY {
             self.primary.send(link, msg).await
@@ -334,7 +341,9 @@ impl<U: ServerTransport, D: DelayNs> ServerTransport for LinkMuxTransport<U, D> 
     }
 }
 
-impl<U: ServerTransport + LinkUpkeep, D: DelayNs> LinkUpkeep for LinkMuxTransport<U, D> {
+impl<U: ServerTransport + FrameBufHolder + LinkUpkeep, D: DelayNs> LinkUpkeep
+    for LinkMuxTransport<U, D>
+{
     /// The primary's owed hello first (the USB link owes one on every
     /// session `Up`), then the radio links'.
     fn take_opened_links(&mut self) -> Vec<Link> {
@@ -618,6 +627,8 @@ mod tests {
         sent: Vec<u64>,
         opened: Vec<Link>,
     }
+
+    impl FrameBufHolder for Usb {}
 
     impl LinkUpkeep for Usb {
         fn take_opened_links(&mut self) -> Vec<Link> {

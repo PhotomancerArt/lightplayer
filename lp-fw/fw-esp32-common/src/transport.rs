@@ -220,6 +220,10 @@ impl ServerTransport for StreamingMessageRouterTransport {
     }
 }
 
+/// Its io task has written (or abandoned) every frame by the time `send`
+/// returns: it never holds the frame buffer between sends.
+impl crate::radio_link::FrameBufHolder for StreamingMessageRouterTransport {}
+
 /// The USB transport has one link, open for the life of the image: no hellos
 /// owed after the first, no deadline to keep.
 impl crate::link_upkeep::LinkUpkeep for StreamingMessageRouterTransport {}

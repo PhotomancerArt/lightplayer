@@ -21,7 +21,9 @@
 //!
 //! Allocation: a delivered message is copied out of its channel's reassembly
 //! buffer into a `Vec` of exactly its length, the one allocation per message;
-//! the reassembly buffer keeps its capacity (never past `max_message`).
+//! the reassembly buffer keeps its capacity (never past `max_message`) up to
+//! `keep` bytes, and is released once its message is out when it grew past
+//! that (`LinkConfig::keep_reassembly`).
 
 use alloc::collections::VecDeque;
 use alloc::vec::Vec;
@@ -63,10 +65,13 @@ pub struct Inbox {
     ready_bytes: usize,
     budget: usize,
     max_message: usize,
+    /// A reassembly buffer above this capacity is released once its message
+    /// is delivered (`LinkConfig::keep_reassembly`).
+    keep: usize,
 }
 
 impl Inbox {
-    pub fn new(budget: usize, max_message: usize) -> Self {
+    pub fn new(budget: usize, max_message: usize, keep: usize) -> Self {
         Inbox {
             events: VecDeque::new(),
             partials: Default::default(),
@@ -76,6 +81,7 @@ impl Inbox {
             ready_bytes: 0,
             budget,
             max_message,
+            keep,
         }
     }
 
@@ -169,6 +175,9 @@ impl Inbox {
         if f.fin {
             let data = self.partials[c].as_slice().to_vec();
             self.abort(f.chan);
+            if self.partials[c].capacity() > self.keep {
+                self.partials[c] = Vec::new();
+            }
             self.deliver(f.chan, data);
         }
         Ok(())
@@ -266,7 +275,7 @@ mod tests {
 
     #[test]
     fn a_newer_reset_supersedes_unread_ones() {
-        let mut inbox = Inbox::new(1024, 256);
+        let mut inbox = Inbox::new(1024, 256, 256);
         let up = |g| LinkEvent::Up { generation: g };
         let reset = |g| LinkEvent::Reset {
             reason: ResetReason::PeerRestarted,
@@ -283,7 +292,7 @@ mod tests {
 
     #[test]
     fn delivered_messages_are_exactly_their_length() {
-        let mut inbox = Inbox::new(64 * 1024, 4096);
+        let mut inbox = Inbox::new(64 * 1024, 4096, 4096);
         let frag = |first, fin, data| Fragment {
             chan: 1,
             first,
@@ -302,7 +311,7 @@ mod tests {
 
     #[test]
     fn text_past_the_budget_is_refused() {
-        let mut inbox = Inbox::new(2 * EVENT_COST + 20, 256);
+        let mut inbox = Inbox::new(2 * EVENT_COST + 20, 256, 256);
         assert!(inbox.push_text(b"0123456789"));
         assert!(inbox.push_text(b"0123456789"));
         assert!(!inbox.push_text(b"x"));
@@ -312,7 +321,7 @@ mod tests {
 
     #[test]
     fn channels_reassemble_independently() {
-        let mut inbox = Inbox::new(64 * 1024, 4096);
+        let mut inbox = Inbox::new(64 * 1024, 4096, 4096);
         let frag = |chan, first, fin, data| Fragment {
             chan,
             first,
@@ -333,7 +342,7 @@ mod tests {
 
     #[test]
     fn a_fragment_that_fits_no_message_is_a_protocol_error() {
-        let mut inbox = Inbox::new(64 * 1024, 4096);
+        let mut inbox = Inbox::new(64 * 1024, 4096, 4096);
         let frag = |first, fin| Fragment {
             chan: 1,
             first,
@@ -348,7 +357,7 @@ mod tests {
 
     #[test]
     fn an_oversize_message_is_dropped_to_its_end_and_counted() {
-        let mut inbox = Inbox::new(64 * 1024, 100);
+        let mut inbox = Inbox::new(64 * 1024, 100, 100);
         let frag = |first, fin, n| Fragment {
             chan: 1,
             first,
@@ -364,5 +373,31 @@ mod tests {
         // The next message on the channel is whole.
         inbox.push_fragment(frag(true, true, 5)).unwrap();
         assert!(matches!(inbox.pop(), Some(LinkEvent::Message { .. })));
+    }
+
+    #[test]
+    fn a_large_reassembly_buffer_is_released_after_delivery_past_keep() {
+        let frag = |first, fin| Fragment {
+            chan: 1,
+            first,
+            fin,
+            data: &[7; 200],
+        };
+        for (keep, kept) in [(64, false), (4096, true)] {
+            let mut inbox = Inbox::new(64 * 1024, 4096, keep);
+            inbox.push_fragment(frag(true, false)).unwrap();
+            inbox.push_fragment(frag(false, false)).unwrap();
+            inbox.push_fragment(frag(false, true)).unwrap();
+            assert!(
+                matches!(inbox.pop(), Some(LinkEvent::Message { data, .. }) if data.len() == 600)
+            );
+            assert_eq!(inbox.partials[1].capacity() >= 600, kept, "keep {keep}");
+            // A small message after it grows only what it needs.
+            inbox.push_fragment(frag(true, false)).unwrap();
+            inbox.push_fragment(frag(false, true)).unwrap();
+            assert!(
+                matches!(inbox.pop(), Some(LinkEvent::Message { data, .. }) if data.len() == 400)
+            );
+        }
     }
 }

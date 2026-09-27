@@ -25,7 +25,9 @@
 //! no host every SYN simply times out, and a stalled host's replies wait in
 //! the link's send budget.
 
-use core::sync::atomic::{AtomicBool, Ordering::Relaxed};
+use core::cell::Cell;
+
+use critical_section::Mutex;
 
 use embassy_futures::select::{Either3, select3};
 use embassy_time::{Duration, Instant, Timer, with_timeout};
@@ -63,27 +65,27 @@ pub trait UsbLinkChip {
     /// The IN endpoint's send buffer is free — read after a write timed out,
     /// to tell a host that stopped draining from a write that never woke.
     fn in_ep_free(&self) -> bool;
-    /// Reset the chip (a requested reboot, [`request_reset_when_drained`]).
-    fn reset(&mut self) -> !;
 }
 
-/// Longest a requested reset waits for the host to acknowledge what the link
-/// holds.
-const RESET_DRAIN_LIMIT_US: Micros = 1_000_000;
+/// Longest a terminal action ([`when_drained`]) waits for the host to
+/// acknowledge what the link holds.
+const DRAIN_LIMIT_US: Micros = 1_000_000;
 
-static RESET_WHEN_DRAINED: AtomicBool = AtomicBool::new(false);
+static WHEN_DRAINED: Mutex<Cell<Option<fn() -> !>>> = Mutex::new(Cell::new(None));
 
-/// Reset the chip once the host has everything the link holds — the
-/// `Reboot` request's answer above all.
+/// Run `action` (a reset, a deep sleep: something that ends this boot) from
+/// the link task once the host has everything the link holds — the answer to
+/// the request that asked for it above all.
 ///
-/// A reply the server has sent is only *queued* on the link: resetting at
-/// once (what the `M!` path did, once the bytes were written) would take
-/// the answer down with the board, and the host would see a session reset
-/// instead of its reply. So the reboot hook asks, and the link task resets
-/// when the link is idle (everything acknowledged), when no host is up to
-/// acknowledge anything, or after [`RESET_DRAIN_LIMIT_US`] at most.
-pub fn request_reset_when_drained() {
-    RESET_WHEN_DRAINED.store(true, Relaxed);
+/// A reply the server has sent is only *queued* on the link: resetting or
+/// sleeping at once (what the `M!` path did, once the bytes were written)
+/// would take the answer and the last log lines down with the board, and the
+/// host would see a session reset instead of its reply. So the platform hook
+/// asks, and the link task acts when the link is idle (everything
+/// acknowledged), when no host is up to acknowledge anything, or after
+/// [`DRAIN_LIMIT_US`] at most. A second request replaces the first.
+pub fn when_drained(action: fn() -> !) {
+    critical_section::with(|cs| WHEN_DRAINED.borrow(cs).set(Some(action)));
 }
 
 /// Run the host link on `rx`/`tx` for ever.
@@ -97,7 +99,7 @@ pub async fn run_usb_link<R: Read, W: Write, C: UsbLinkChip>(
     let mut frame = [0u8; FRAME_BYTES];
     let mut enumerated = true;
     let mut sof_sampled_at: Micros = 0;
-    let mut reset_asked_at: Option<Micros> = None;
+    let mut drain_asked_at: Option<Micros> = None;
 
     loop {
         chip.note_io_alive();
@@ -120,11 +122,12 @@ pub async fn run_usb_link<R: Read, W: Write, C: UsbLinkChip>(
         let mut written = 0;
         loop {
             let next = shared.with_link(|link| {
-                link.poll_transmit(now_us()).map(|f| {
-                    let n = f.len().min(frame.len());
-                    frame[..n].copy_from_slice(&f[..n]);
-                    (n, f.len())
-                })
+                link.poll_transmit_with(now_us(), &mut external_source)
+                    .map(|f| {
+                        let n = f.len().min(frame.len());
+                        frame[..n].copy_from_slice(&f[..n]);
+                        (n, f.len())
+                    })
             });
             let Some((n, len)) = next else { break };
             written += 1;
@@ -156,13 +159,13 @@ pub async fn run_usb_link<R: Read, W: Write, C: UsbLinkChip>(
 
         shared.with_link(|link| usb_link_counters::publish(link.counters()));
 
-        if RESET_WHEN_DRAINED.load(Relaxed) {
+        if let Some(action) = critical_section::with(|cs| WHEN_DRAINED.borrow(cs).get()) {
             let now = now_us();
-            let asked = *reset_asked_at.get_or_insert(now);
+            let asked = *drain_asked_at.get_or_insert(now);
             let drained =
                 shared.with_link(|link| link.state() != LinkState::Established || link.is_idle());
-            if drained || now.saturating_sub(asked) >= RESET_DRAIN_LIMIT_US {
-                chip.reset();
+            if drained || now.saturating_sub(asked) >= DRAIN_LIMIT_US {
+                action();
             }
         }
 
@@ -184,6 +187,23 @@ pub async fn run_usb_link<R: Read, W: Write, C: UsbLinkChip>(
             }
             _ => {}
         }
+    }
+}
+
+/// Where the link reads an external message's bytes: the static frame buffer
+/// the transport serialized the reply into, which it keeps unchanged while
+/// `Link::external_in_flight` holds (see [`super::usb_link_transport`]).
+pub(crate) fn external_source(offset: usize, out: &mut [u8]) {
+    #[cfg(feature = "server")]
+    {
+        let bytes = crate::serial::server_msg::frame_bytes(offset + out.len());
+        out.copy_from_slice(&bytes[offset..]);
+    }
+    // No server, no frame buffer: nothing sends an external message.
+    #[cfg(not(feature = "server"))]
+    {
+        let _ = offset;
+        out.fill(0);
     }
 }
 

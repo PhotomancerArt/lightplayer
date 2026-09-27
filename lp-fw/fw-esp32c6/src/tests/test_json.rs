@@ -79,11 +79,14 @@ pub async fn run_test_json(spawner: embassy_executor::Spawner) -> ! {
             );
 
             // Serialized thread side into the static frame buffer, then
-            // queued on the link, which copies it (no host: dropped).
-            let len = fw_esp32_common::serial::server_payload::serialize_server_payload(&msg, None)
-                .expect("harness heartbeat serializes");
-            let bytes = fw_esp32_common::serial::server_msg::frame_bytes(len);
-            let _ = link.try_send_proto(bytes);
+            // queued on the link, which reads it from there (no host, or the
+            // last one still going out: skipped).
+            if !link.frame_buf_in_use() {
+                let len =
+                    fw_esp32_common::serial::server_payload::serialize_server_payload(&msg, None)
+                        .expect("harness heartbeat serializes");
+                let _ = link.try_send_frame_buf(len);
+            }
 
             frame_count += 1;
             last_send = now;

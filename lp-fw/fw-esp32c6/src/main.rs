@@ -267,7 +267,13 @@ fn fill_random(buf: &mut [u8]) {
 #[cfg(not(fw_harness))]
 fn reboot_now() {
     log::info!("[REBOOT] client requested a restart");
-    fw_esp32_common::usb_link::request_reset_when_drained();
+    fw_esp32_common::usb_link::when_drained(reset_now);
+}
+
+/// The reboot itself, run by the link task once the answer is out.
+#[cfg(not(fw_harness))]
+fn reset_now() -> ! {
+    esp_hal::system::software_reset()
 }
 
 #[cfg(not(fw_harness))]
