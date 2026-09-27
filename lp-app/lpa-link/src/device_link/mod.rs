@@ -27,6 +27,7 @@
 //! | [`wire_tap`] | the session recorder's tap on every raw byte chunk a browser transport writes or reads |
 //! | `byte_stream` | the sync `DeviceByteStream` seam → `Link` (host) |
 //! | `fake` | the scripted `FakeEsp32Device` → `Link` (host tests) |
+//! | `link_port_edge` | the page's clock, nonce and wake loop for a browser link port (wasm) |
 //! | `browser_serial` | the Web Serial provider → `Link` (wasm) |
 //! | `browser_ble` | a Web Bluetooth (NUS) session → `Link` (wasm) |
 //! | `browser_worker` | a `fw-browser` worker → `Link`, i.e. the sim as a device (wasm) |
@@ -54,6 +55,14 @@ pub mod byte_stream;
 
 #[cfg(feature = "fake-device")]
 pub mod fake;
+
+/// The page's clock, nonce and wake loop for the browser link ports (Web
+/// Serial and the tab-hosted board).
+#[cfg(all(
+    any(feature = "browser-serial-esp32", feature = "emulator-tab"),
+    target_arch = "wasm32"
+))]
+pub mod link_port_edge;
 
 #[cfg(all(feature = "browser-serial-esp32", target_arch = "wasm32"))]
 pub mod browser_serial;

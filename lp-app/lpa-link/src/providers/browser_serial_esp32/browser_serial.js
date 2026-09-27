@@ -125,12 +125,16 @@ export async function openPort(id, baudRate, reset = true, resetKind = "normal")
   return requireSession(id).openProtocol({ baudRate, reset, resetKind });
 }
 
-export async function writeLine(id, line) {
-  await requireSession(id).writeLine(line);
+// Write link frames (bytes) to the port. NOT async on purpose: the
+// controller hands the bytes to the port's writer before this returns, so
+// frames written one after another reach the wire in that order.
+export function writeBytes(id, bytes) {
+  return requireSession(id).writeBytes(bytes);
 }
 
-// `{ generation, bytes }`: everything the port read since the last drain,
-// as bytes (the Rust side splits; see the controller's constructor).
+// `{ generation, open, bytes }`: everything the port read since the last
+// drain, as bytes (the Rust side's lp-link end reads them; see the
+// controller's constructor), and whether the port is open for writing.
 export function takeBytes(id) {
   return requireSession(id).takeBytes();
 }

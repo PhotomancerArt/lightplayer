@@ -30,6 +30,14 @@
 //!   already abandons stray ids, so a straggler from a cancelled pull is a
 //!   quiet discard rather than a wrong answer.
 //!
+//! # A link reset fails what is in flight
+//!
+//! Since the device link is lp-link, a reset (the board restarted, a frame
+//! went unanswered too long) ends the session, and whatever was in flight on
+//! it will never be answered. The pump counts resets on the link
+//! ([`LinkResets`]); a `receive` whose request went out before the latest
+//! reset fails at once instead of waiting out its budget (plan D9).
+//!
 //! # Several conversations on one link
 //!
 //! The card's frame feed and the access controller (reading a device's
@@ -54,7 +62,7 @@ use lpa_client::{ClientIo, LpClient};
 use lpa_devices::link::{APP_CONVERSATION_ID_BASE, Link, LinkCommand};
 use lpc_wire::{ClientMessage, TransportError, WireServerMessage};
 
-use super::device_effects::DeviceTimerFuture;
+use super::device_effects::{DeviceTimerFuture, LinkResets};
 
 /// How often `receive` re-checks the inbox. The pump drains the wire every
 /// 20 ms too, so polling faster would only find an empty queue.
@@ -95,6 +103,11 @@ fn claim_slice() -> u32 {
 pub struct SharedLinkClientIo {
     link: Weak<RefCell<Box<dyn Link>>>,
     inbox: ConversationInbox,
+    /// The link's session resets, counted by the pump.
+    resets: LinkResets,
+    /// [`Self::resets`] when the last request went out: a reset since then
+    /// lost it.
+    sent_in_session: u64,
     timer: Rc<RefCell<dyn FnMut(Duration) -> DeviceTimerFuture>>,
     /// The first id of this conversation's slice.
     first_id: u32,
@@ -104,11 +117,15 @@ impl SharedLinkClientIo {
     pub(super) fn new(
         link: Weak<RefCell<Box<dyn Link>>>,
         inbox: ConversationInbox,
+        resets: LinkResets,
         timer: Rc<RefCell<dyn FnMut(Duration) -> DeviceTimerFuture>>,
     ) -> Self {
+        let sent_in_session = resets.get();
         Self {
             link,
             inbox,
+            resets,
+            sent_in_session,
             timer,
             first_id: claim_slice(),
         }
@@ -146,7 +163,9 @@ impl ClientIo for SharedLinkClientIo {
         };
         let json = lpc_wire::json::to_string(&msg)
             .map_err(|error| TransportError::Other(format!("encode failed: {error}")))?;
-        // `SendLine` appends the newline; the `M!` marker is ours.
+        // A conversation's request is spelled as the line it was
+        // (`M!{json}`); a link port sends it as one message.
+        self.sent_in_session = self.resets.get();
         link.borrow_mut()
             .submit(LinkCommand::SendLine(format!("M!{json}")));
         Ok(())
@@ -177,6 +196,14 @@ impl ClientIo for SharedLinkClientIo {
             }
             if !self.is_live() {
                 return Err(TransportError::Other("the port is gone".to_string()));
+            }
+            if self.resets.get() != self.sent_in_session {
+                // Once per reset: the next request goes out on the new
+                // session and is waited for as usual.
+                self.sent_in_session = self.resets.get();
+                return Err(TransportError::Other(
+                    "the device link reset; the request in flight was lost".to_string(),
+                ));
             }
             if waited >= RESPONSE_BUDGET {
                 return Err(TransportError::Other(format!(
@@ -263,6 +290,38 @@ mod tests {
         assert!(inbox.borrow().is_empty());
     }
 
+    /// Plan D9: a link reset after the request went out fails the wait at
+    /// once (a budget-bound wait would say "did not respond" after 5 s), and
+    /// only once — the next request is waited for as usual.
+    #[test]
+    fn a_link_reset_fails_the_request_in_flight_at_once() {
+        let link = silent_link();
+        let inbox: ConversationInbox = Rc::default();
+        let resets: LinkResets = Rc::default();
+        let mut io = io_with_resets(&link, &inbox, &resets);
+        let id = io.first_id;
+        block_on(io.send(ClientMessage {
+            id: u64::from(id),
+            msg: ClientRequest::AccessList,
+        }))
+        .expect("sent");
+
+        resets.set(1);
+        let error = block_on(io.receive()).expect_err("the reset lost it");
+        assert!(error.to_string().contains("link reset"), "{error}");
+
+        block_on(io.send(ClientMessage {
+            id: u64::from(id) + 1,
+            msg: ClientRequest::AccessList,
+        }))
+        .expect("sent");
+        inbox
+            .borrow_mut()
+            .push_back((id + 1, access_list_reply(id + 1)));
+        let reply = block_on(io.receive()).expect("the new session answers");
+        assert_eq!(reply.id, u64::from(id) + 1);
+    }
+
     /// A dropped conversation takes only its own stragglers with it.
     #[test]
     fn dropping_a_conversation_leaves_another_conversations_reply() {
@@ -304,11 +363,24 @@ mod tests {
     }
 
     fn io_on(link: &Rc<RefCell<Box<dyn Link>>>, inbox: &ConversationInbox) -> SharedLinkClientIo {
+        io_with_resets(link, inbox, &Rc::default())
+    }
+
+    fn io_with_resets(
+        link: &Rc<RefCell<Box<dyn Link>>>,
+        inbox: &ConversationInbox,
+        resets: &LinkResets,
+    ) -> SharedLinkClientIo {
         let timer: Rc<RefCell<dyn FnMut(Duration) -> DeviceTimerFuture>> =
             Rc::new(RefCell::new(|_| -> DeviceTimerFuture {
                 Box::pin(core::future::ready(()))
             }));
-        SharedLinkClientIo::new(Rc::downgrade(link), Rc::clone(inbox), timer)
+        SharedLinkClientIo::new(
+            Rc::downgrade(link),
+            Rc::clone(inbox),
+            Rc::clone(resets),
+            timer,
+        )
     }
 
     fn access_list_reply(id: u32) -> String {

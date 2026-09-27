@@ -2,8 +2,9 @@
 //!
 //! This is a WRAPPER, not a second transport. The JS controller
 //! (`browser_esp32_device_controller.js`) still owns the port and the read
-//! pump, the provider's per-port reader (`device_link::wire_reader`, shared
-//! with the lens io) owns the splitting and the packed-reply opt-in, and
+//! pump, the provider's per-port lp-link end (`browser_serial.rs`'s
+//! `LinkPortService`, shared with the lens io) owns the session, the resends
+//! and the packed-reply opt-in, and
 //! [`BrowserSerialEsp32Provider`] still owns the
 //! endpoint, session and grant lifecycle. All this adapter does is turn that
 //! promise-shaped surface into the model's event-queue contract.
@@ -20,8 +21,10 @@
 //!
 //! Reads, notes and errors come back through the provider's synchronous
 //! `take_reads`/`take_wire_notes`/`take_errors`, so [`Link::poll_event`]
-//! needs no future at all: it drains what the JS read pump has already
-//! buffered and demuxes it.
+//! needs no future at all: it drains what the port's link has already
+//! decoded and demuxes it. Writes need none either: a request is queued on
+//! the port's link, and the port's own loop writes the frames. A link reset
+//! arrives as a journal note (`LinkEvent::WireNote`, plan D9).
 //! A JS controller error means the port died underneath us (the shipped
 //! `mark_gone` rule), so it surfaces as an error AND closes the link.
 
@@ -145,7 +148,7 @@ impl BrowserLinkInner {
             LinkCommand::RunReset(kind) => self.run_reset(kind).await,
             LinkCommand::SendFrame(frame) => match client_message(&frame) {
                 Ok(message) => match lpc_wire::json::to_string(&message) {
-                    Ok(json) => self.write_line(&format!("M!{json}\n")).await,
+                    Ok(json) => self.send_json(&json),
                     Err(error) => self.push(LinkEvent::Error(format!(
                         "failed to encode {:?}: {error}",
                         frame.body
@@ -153,7 +156,16 @@ impl BrowserLinkInner {
                 },
                 Err(error) => self.push(LinkEvent::Error(error)),
             },
-            LinkCommand::SendLine(line) => self.write_line(&format!("{line}\n")).await,
+            // A conversation's request, still spelled as the line it was
+            // (`M!{json}`): on the link it is one message. Anything else is
+            // not a request, and a link port has no raw-text channel to the
+            // board.
+            LinkCommand::SendLine(line) => match line.trim_end().strip_prefix("M!") {
+                Some(json) => self.send_json(json),
+                None => self.push(LinkEvent::Error(format!(
+                    "not a request, and the link carries no raw text to the board: {line:?}"
+                ))),
+            },
         }
     }
 
@@ -278,13 +290,14 @@ impl BrowserLinkInner {
         }
     }
 
-    async fn write_line(&self, line: &str) {
+    /// Queue one request on the port's link (written by the port's loop).
+    fn send_json(&self, json: &str) {
         let Some(session) = self.session.borrow().clone() else {
             return self.push(LinkEvent::Error(
                 "write on a link that is not open".to_string(),
             ));
         };
-        if let Err(error) = self.provider.write_line(&session, line).await {
+        if let Err(error) = self.provider.send_client_json(&session, json) {
             self.fail("write", &error);
         }
     }

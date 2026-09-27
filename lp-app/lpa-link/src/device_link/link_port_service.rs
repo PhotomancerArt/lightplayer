@@ -233,11 +233,15 @@ mod tests {
         let reads = bench.host.take_reads();
         let reset_at = reads
             .iter()
-            .position(|read| matches!(read, WireRead::LinkReset(note) if note.contains("restarted")))
+            .position(
+                |read| matches!(read, WireRead::LinkReset(note) if note.contains("restarted")),
+            )
             .unwrap_or_else(|| panic!("no reset read: {reads:?}"));
         let hello_at = reads
             .iter()
-            .position(|read| matches!(read, WireRead::Frame(frame) if frame.json.contains("\"hello\"")))
+            .position(
+                |read| matches!(read, WireRead::Frame(frame) if frame.json.contains("\"hello\"")),
+            )
             .unwrap_or_else(|| panic!("no new hello: {reads:?}"));
         assert!(reset_at < hello_at, "{reads:?}");
     }

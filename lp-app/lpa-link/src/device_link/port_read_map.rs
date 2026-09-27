@@ -34,10 +34,10 @@ pub fn map_port_read(read: PortRead) -> MappedRead {
     match read {
         PortRead::Message(payload) => MappedRead::Read(WireRead::Frame(payload.into())),
         PortRead::Log(line) => MappedRead::Read(WireRead::Line(line)),
-        PortRead::Reset { reason } => MappedRead::Read(WireRead::LinkReset(link_reset_note(reason))),
-        PortRead::Up { generation } => {
-            MappedRead::Note(format!("link: up (session {generation})"))
+        PortRead::Reset { reason } => {
+            MappedRead::Read(WireRead::LinkReset(link_reset_note(reason)))
         }
+        PortRead::Up { generation } => MappedRead::Note(format!("link: up (session {generation})")),
         PortRead::Note(note) => MappedRead::Note(note),
     }
 }

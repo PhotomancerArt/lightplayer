@@ -89,6 +89,11 @@ const MAX_SWEEP_LINKS: usize = 8;
 /// Naming the holder makes every release a no-op unless it is the holder's.
 type BorrowToken = Rc<Cell<Option<EffectId>>>;
 
+/// How many times a link's session has been reset (plan D9): the pump (and
+/// the lens tap) bump it on a link-reset note, and every shared-link
+/// conversation that is waiting on a reply fails when it moves.
+pub type LinkResets = Rc<Cell<u64>>;
+
 /// The borrow holder the editor LENS signs as (round-2 M5).
 ///
 /// A lens is not an activity — it has no reducer, no deadline, no end
@@ -169,6 +174,8 @@ struct LinkSlot {
     /// Replies to app conversations on this wire (the card's frame feed),
     /// routed here by the pump instead of to the fold.
     inbox: ConversationInbox,
+    /// The link's session resets, for those conversations (D9).
+    resets: LinkResets,
 }
 
 /// A link that arrived from a spawned future, waiting to join the routing map.
@@ -178,6 +185,7 @@ struct Arrival {
     handle: Rc<RefCell<Box<dyn Link>>>,
     borrowed: BorrowToken,
     inbox: ConversationInbox,
+    resets: LinkResets,
 }
 
 /// Owns the links, the platform seams, and the spawning.
@@ -303,6 +311,7 @@ impl DeviceEffects {
         let info = slot.info.clone();
         let borrowed = Rc::clone(&slot.borrowed);
         let inbox = Rc::clone(&slot.inbox);
+        let resets = Rc::clone(&slot.resets);
         let tap: super::device_transport::LensLineTap = {
             let sink = Rc::clone(&sink);
             Rc::new(move |event: super::device_transport::LensTapEvent| {
@@ -318,6 +327,17 @@ impl DeviceEffects {
                             }
                             event => sink(Input::link(link, event)),
                         }
+                    }
+                    // The pump's reset rule, replayed: the fold's journal
+                    // hears it, and the shared conversations fail (D9).
+                    LensTapEvent::Note(note) => {
+                        if lpa_link::device_link::port_read_map::is_link_reset_note(&note) {
+                            resets.set(resets.get() + 1);
+                        }
+                        sink(Input::link(
+                            link,
+                            lpa_devices::link::LinkEvent::WireNote(note),
+                        ));
                     }
                     // The pump's mark-gone rule, replayed for the lens: a
                     // port error means the port died underneath us, so the
@@ -418,6 +438,7 @@ impl DeviceEffects {
         Some(SharedLinkClientIo::new(
             Rc::downgrade(&slot.link),
             Rc::clone(&slot.inbox),
+            Rc::clone(&slot.resets),
             timer,
         ))
     }
@@ -443,6 +464,7 @@ impl DeviceEffects {
                     link: arrival.handle,
                     borrowed: arrival.borrowed,
                     inbox: arrival.inbox,
+                    resets: arrival.resets,
                 },
             );
         }
@@ -869,12 +891,14 @@ impl DeviceEffects {
             let handle = Rc::new(RefCell::new(granted.link));
             let borrowed: BorrowToken = Rc::new(Cell::new(None));
             let inbox: ConversationInbox = Rc::new(RefCell::new(VecDeque::new()));
+            let resets: LinkResets = Rc::new(Cell::new(0));
             arrivals.borrow_mut().push(Arrival {
                 link,
                 info: info.clone(),
                 handle: Rc::clone(&handle),
                 borrowed: Rc::clone(&borrowed),
                 inbox: Rc::clone(&inbox),
+                resets: Rc::clone(&resets),
             });
             if let (Some(spawn), Some(timer)) = (spawn.clone(), timer.clone()) {
                 spawn_pump(
@@ -882,8 +906,11 @@ impl DeviceEffects {
                     &timer,
                     link,
                     Rc::downgrade(&handle),
-                    borrowed,
-                    inbox,
+                    PumpShared {
+                        borrowed,
+                        inbox,
+                        resets,
+                    },
                     Rc::clone(&sink),
                 );
             }
@@ -908,15 +935,23 @@ impl DeviceEffects {
 /// transport's demux) goes to the link's `inbox`, never to the fold: frames
 /// are not evidence, and the conversation that asked is the only party that
 /// can read the body.
+///
+/// A link-reset note (plan D9) goes to the fold like any note, and also bumps
+/// the link's `resets`, which fails every shared conversation waiting on a
+/// reply the reset lost.
 fn spawn_pump(
     spawn: &Rc<dyn Fn(DeviceTaskFuture)>,
     timer: &Rc<RefCell<dyn FnMut(Duration) -> DeviceTimerFuture>>,
     link: LinkId,
     handle: Weak<RefCell<Box<dyn Link>>>,
-    borrowed: BorrowToken,
-    inbox: ConversationInbox,
+    shared: PumpShared,
     sink: Rc<dyn Fn(Input)>,
 ) {
+    let PumpShared {
+        borrowed,
+        inbox,
+        resets,
+    } = shared;
     let timer = Rc::clone(timer);
     spawn(Box::pin(async move {
         loop {
@@ -930,6 +965,11 @@ fn spawn_pump(
                 if let lpa_devices::link::LinkEvent::Passthrough { request_id, line } = event {
                     inbox.borrow_mut().push_back((request_id, line));
                     continue;
+                }
+                if let lpa_devices::link::LinkEvent::WireNote(note) = &event
+                    && lpa_link::device_link::port_read_map::is_link_reset_note(note)
+                {
+                    resets.set(resets.get() + 1);
                 }
                 // The browser controller's own death notices ("The device
                 // has been lost", "Serial port disconnected") are a
@@ -953,6 +993,13 @@ fn spawn_pump(
             sleep.await;
         }
     }));
+}
+
+/// What the pump shares with the link's slot.
+struct PumpShared {
+    borrowed: BorrowToken,
+    inbox: ConversationInbox,
+    resets: LinkResets,
 }
 
 /// Whether a link error is the platform saying the port itself is gone —
@@ -1290,6 +1337,7 @@ mod tests {
                 link: Rc::new(RefCell::new(Box::new(QuietLink(LinkInfo::default())))),
                 borrowed: Rc::new(Cell::new(None)),
                 inbox: Rc::new(RefCell::new(VecDeque::new())),
+                resets: Rc::new(Cell::new(0)),
             },
         );
         (effects, inputs, taps)
