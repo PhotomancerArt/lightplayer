@@ -129,6 +129,11 @@ lpc-wire = { path = "../lp-core/lpc-wire", features = ["ser-write-json"] }
 # (tests/emu_usb_json_pack.rs).
 lp-json-pack = { workspace = true, features = ["alloc"] }
 serde_json = "1"
+# The host-side twins of the chip gates that need a link host since wire
+# proto 30 (tests/emu_usb_link_gates.rs): the figures record they pin, and
+# the strip order the pad decoder un-permutes by.
+lp-emu-esp-figures = { path = "../lp-emu/esp/lp-emu-esp-figures" }
+lp-ws281x = { path = "../lp-fw/lp-ws281x", default-features = false }
 
 [features]
 default = ["serial"]
