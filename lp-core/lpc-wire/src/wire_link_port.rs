@@ -40,10 +40,9 @@ use alloc::boxed::Box;
 use alloc::collections::VecDeque;
 use alloc::format;
 use alloc::string::{String, ToString};
-use alloc::vec::Vec;
 
+use crate::console_line::{TextLines, log_record_lines};
 use lp_json_pack::{LearnStore, LearnedTable, PACK_FORMAT_VERSION};
-use lp_link::log_ring::{LEVEL_DEBUG, LEVEL_ERROR, LEVEL_INFO, LEVEL_TRACE, LEVEL_WARN};
 use lp_link::{
     CH_LOG, CH_PROTO, Link, LinkConfig, LinkEvent, LinkState, Micros, ResetReason, SelectiveRepeat,
     SendError,
@@ -103,7 +102,7 @@ pub struct WireLinkPort {
     device_log_sent: bool,
     reads: VecDeque<PortRead>,
     /// Raw text since the last newline.
-    text: Vec<u8>,
+    text: TextLines,
     tally: LinkCounterTally,
     now: Micros,
 }
@@ -121,7 +120,7 @@ impl WireLinkPort {
             opt_in: OptIn::WaitingForHello,
             device_log_sent: false,
             reads: VecDeque::new(),
-            text: Vec::new(),
+            text: TextLines::new(),
             tally: LinkCounterTally::new(),
             now: 0,
         }
@@ -390,39 +389,15 @@ impl WireLinkPort {
     }
 
     fn on_log(&mut self, record: &[u8]) {
-        let Some((&level, text)) = record.split_first() else {
-            return;
-        };
-        let name = match level {
-            LEVEL_ERROR => "ERROR",
-            LEVEL_WARN => "WARN",
-            LEVEL_INFO => "INFO",
-            LEVEL_DEBUG => "DEBUG",
-            LEVEL_TRACE => "TRACE",
-            // The link's own notices ("n log records dropped").
-            _ => "LINK",
-        };
-        let text = String::from_utf8_lossy(text);
-        for line in text.trim_end_matches(['\r', '\n']).split('\n') {
-            let line = line.trim_end_matches('\r');
-            self.reads
-                .push_back(PortRead::Log(format!("[{name}] {line}")));
+        for line in log_record_lines(record) {
+            self.reads.push_back(PortRead::Log(line));
         }
     }
 
     fn on_text(&mut self, bytes: &[u8]) {
-        self.text.extend_from_slice(bytes);
-        let mut start = 0;
-        while let Some(nl) = self.text[start..].iter().position(|&b| b == b'\n') {
-            let mut line = &self.text[start..start + nl];
-            if let Some(stripped) = line.strip_suffix(b"\r") {
-                line = stripped;
-            }
-            let line = String::from_utf8_lossy(line).into_owned();
-            self.reads.push_back(PortRead::Log(line));
-            start += nl + 1;
-        }
-        self.text.drain(..start);
+        let reads = &mut self.reads;
+        self.text
+            .push(bytes, |line| reads.push_back(PortRead::Log(line)));
     }
 }
 
@@ -431,6 +406,7 @@ mod tests {
     use super::*;
     use crate::server::hello::{BuildFacts, HardwareFacts, ServerHello};
     use alloc::vec;
+    use alloc::vec::Vec;
 
     #[test]
     fn the_handshake_brings_the_link_up_and_the_hello_through() {

@@ -17,6 +17,7 @@ extern crate alloc;
 extern crate std;
 
 pub mod budget;
+pub mod console_line;
 pub mod json;
 pub mod link_counter_tally;
 pub mod link_payload;
@@ -42,6 +43,7 @@ pub mod transport_error;
 pub mod tree;
 pub mod wire_encoding;
 pub mod wire_link_port;
+pub mod wire_link_sniffer;
 pub mod wire_stream;
 
 pub use link_counter_tally::LinkCounterTally;
@@ -128,6 +130,7 @@ pub use transport_error::TransportError;
 pub use tree::{WireChildKind, WireEntryState, WireSlotIndex, WireTreeDelta};
 pub use wire_encoding::{FRAME_KIND_LEARNED, FRAME_KIND_RESYNC, RESYNC_SEQUENCE, WireEncoding};
 pub use wire_link_port::{DEVICE_LOG_LEVEL_REQUEST_ID, PortRead, WireLinkPort};
+pub use wire_link_sniffer::{SniffedWire, WireLinkSniffer};
 pub use wire_stream::{
     DesyncedFrame, UnpackEvent, UnpackedFrame, WIRE_STREAM_MAX_FRAME, WireChunk, WireForm,
     WireFrame, WireStream, WireUnpacker,
