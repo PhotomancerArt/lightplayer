@@ -1,17 +1,22 @@
 //! `link-bench`: the M2 comparison tables, as Markdown on stdout.
 //!
 //! ```text
-//! cargo run -p lp-link --features sim --release --bin link-bench -- [compare|sweep|crc|logs|all]
+//! cargo run -p lp-link --features sim --release --bin link-bench -- [compare|sweep|crc|codec|logs|ram|all]
 //! ```
 //!
-//! Every number is simulated (the `sim` pipes in `lp_link::sim::transport`),
-//! deterministic from the seeds below, and says nothing about silicon until
-//! M3 repeats it on target.
+//! Every link number is simulated (the `sim` pipes in
+//! `lp_link::sim::transport`), deterministic from the seeds below, and says
+//! nothing about silicon until M3 repeats it on target. The `codec` rows (and
+//! the checksum rows at the top of `crc`) are host CPU throughput: wall
+//! clock, this machine, so compare them only against each other.
 
-use lp_link::frame;
+use std::hint::black_box;
+use std::time::Instant;
+
 use lp_link::sim::sim_rng::SimRng;
 use lp_link::sim::{Report, Scenario, Transport, Workload, run};
 use lp_link::{Arq, CrcKind, Framing, GoBackN, LinkConfig, NoArq, SelectiveRepeat, StopAndWait};
+use lp_link::{cobs, crc as checksum, frame};
 
 type Gbn = GoBackN<127>;
 
@@ -28,7 +33,11 @@ fn main() {
         sweep();
     }
     if all || what == "crc" {
+        throughput(false);
         crc();
+    }
+    if all || what == "codec" {
+        throughput(true);
     }
     if all || what == "logs" {
         logs();
@@ -346,6 +355,72 @@ fn crc() {
             cell(2)
         );
     }
+}
+
+/// Host CPU throughput of the per-frame byte work, on 256-byte frames of
+/// random bytes (the link's USB payload size): the checksums always, and with
+/// `codec` the COBS-FF encoder and decoder too. MB/s = 10^6 bytes per second.
+fn throughput(codec: bool) {
+    const FRAME: usize = 256;
+    const FRAMES: usize = 4096;
+    let bytes: u64 = std::env::var("CODEC_BYTES")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(256 << 20);
+    let mut rng = SimRng::new(0xB0B);
+    let data: Vec<u8> = (0..FRAME * FRAMES).map(|_| rng.next_u64() as u8).collect();
+    let frames: Vec<&[u8]> = data.chunks(FRAME).collect();
+    let mut encoded = Vec::with_capacity(FRAMES);
+    for f in &frames {
+        let mut out = Vec::new();
+        cobs::encode_no_ff_into(f, &mut out);
+        encoded.push(out);
+    }
+    let rounds = (bytes / (FRAME * FRAMES) as u64).max(1);
+    let moved = (rounds * (FRAME * FRAMES) as u64) as f64;
+    let rate = |run: &mut dyn FnMut()| {
+        let t = Instant::now();
+        for _ in 0..rounds {
+            run();
+        }
+        moved / t.elapsed().as_secs_f64() / 1e6
+    };
+    println!("\n### Byte work per frame: host CPU throughput, 256-byte frames of random bytes\n");
+    println!("| stage | MB/s |");
+    println!("|---|---|");
+    let mut sink = 0u32;
+    let crc32 = rate(&mut || {
+        for f in &frames {
+            sink ^= checksum::crc32c(sink, black_box(f));
+        }
+    });
+    println!("| CRC-32C | {crc32:.0} |");
+    let crc16 = rate(&mut || {
+        for f in &frames {
+            sink ^= checksum::crc16_ccitt(0xFFFF, black_box(f)) as u32;
+        }
+    });
+    println!("| CRC-16/CCITT | {crc16:.0} |");
+    if codec {
+        let mut out = Vec::with_capacity(2 * FRAME + 4);
+        let enc = rate(&mut || {
+            for f in &frames {
+                out.clear();
+                cobs::encode_no_ff_into(black_box(f), &mut out);
+                sink ^= out.len() as u32;
+            }
+        });
+        println!("| COBS-FF encode | {enc:.0} |");
+        let dec = rate(&mut || {
+            for e in &encoded {
+                out.clear();
+                let _ = cobs::decode_no_ff_into(black_box(e), &mut out);
+                sink ^= out.len() as u32;
+            }
+        });
+        println!("| COBS-FF decode | {dec:.0} |");
+    }
+    black_box(sink);
 }
 
 fn per_million(n: u64, of: u64) -> String {
