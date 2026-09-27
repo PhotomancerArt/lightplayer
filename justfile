@@ -3326,7 +3326,12 @@ test-emu-esp32s3-boot:
     if [[ -n "${LP_CI_IMAGES:-}" ]]; then
       ci_env="$(scripts/ci/ci-images.py env esp32s3)"
       eval "$ci_env"
-      exec cargo test -p lp-emu-esp32s3 --no-fail-fast -- --include-ignored
+      status=0
+      cargo test -p lp-emu-esp32s3 --no-fail-fast -- --include-ignored || status=$?
+      # The S3's gates that need a link host since wire proto 30 (lp-cli's:
+      # a link host is a product crate, which the lp-emu fence keeps out).
+      cargo test -p lp-cli --release --test emu_s3_link_gates -- --include-ignored --nocapture || status=$?
+      exit "$status"
     fi
     just build-fw-esp32s3
     built={{ justfile_directory() }}/target/xtensa-esp32s3-none-elf/release-esp32s3/fw-esp32s3
@@ -3348,7 +3353,12 @@ test-emu-esp32s3-boot:
     fi
     # See test-emu-esp32v3-boot: the re-run file, and every binary runs.
     export -p | grep ' LP_EMU_ESP32S3_' > "$out/images.env"
-    cargo test -p lp-emu-esp32s3 --no-fail-fast -- --include-ignored
+    status=0
+    cargo test -p lp-emu-esp32s3 --no-fail-fast -- --include-ignored || status=$?
+    # The S3's gates that need a link host since wire proto 30 (lp-cli's:
+    # a link host is a product crate, which the lp-emu fence keeps out).
+    cargo test -p lp-cli --release --test emu_s3_link_gates -- --include-ignored --nocapture || status=$?
+    exit "$status"
 
 # **M6's gate.** What the `Emulator ESP32-S3 (x64)` job runs (M6 P10 added
 # it, path-gated on `emu_esp32s3` and non-required — the filter mirrors

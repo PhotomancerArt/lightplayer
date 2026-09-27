@@ -320,10 +320,8 @@ fn a_second_boot_from_the_same_chip_mounts_rather_than_reformats() {
         text.contains("[INIT] flash filesystem mounted"),
         "the mount line, mounted this time:\n{text}"
     );
-    assert!(
-        text.contains("[FS] Mount failed (filesystem corrupt), formatting partition..."),
-        "a fresh chip is formatted on its first boot:\n{text}"
-    );
+    // (The `[FS] … formatting partition` line that said so rides the link's
+    // log channel since wire proto 30; the census above is the proof.)
     assert!(
         text.contains("[INIT] fw-esp32 initialized, starting server loop"),
         "the server loop, behind the mount:\n{text}"
@@ -340,10 +338,6 @@ fn a_second_boot_from_the_same_chip_mounts_rather_than_reformats() {
     );
     let text = String::from_utf8_lossy(&second.usb_sj()).into_owned();
     assert!(text.contains("[INIT] flash filesystem mounted"), "{text}");
-    assert!(
-        !text.contains("formatting partition"),
-        "the second boot mounts without a format:\n{text}"
-    );
     // ⚠️ Not asserted here: that the second boot's `flush_flash` writes
     // nothing. A **direct** load *stages* the app into the chip
     // (`loader::stage_image_in_flash` → `FlashImage::stage`), and a stage is
@@ -773,13 +767,15 @@ fn the_rom_up_boot_log_is_the_roms_and_the_bootloaders_line_for_line() {
     // asserts — rather than at a fixed deadline, and print where that was.
     let outcome = machine.run_until(&StopCondition {
         stop_cycle: Some(ROM_UP_GATE_US * memmap::CYCLES_PER_US),
-        exit_on: Some("[RECOVERY] boot complete (first frame served)".into()),
+        // The server loop's boot marker, the last raw line on the USB port
+        // since wire proto 30 (`[RECOVERY] boot complete` rides the link).
+        exit_on: Some("starting server loop... proto=".into()),
         ..Default::default()
     });
     assert!(
         matches!(outcome, Outcome::ExitMatched { .. }),
         "no fault, no reset, no strict stop anywhere in the ROM, the bootloader or the app, \
-         and the app's first frame is served inside {ROM_UP_GATE_US} us: {outcome:?}"
+         and the app reaches its server loop inside {ROM_UP_GATE_US} us: {outcome:?}"
     );
     assert!(
         machine.first_strict_violation().is_none(),
@@ -862,10 +858,9 @@ fn the_rom_up_boot_log_is_the_roms_and_the_bootloaders_line_for_line() {
     let usb = String::from_utf8_lossy(&machine.usb_sj()).into_owned();
     for line in [
         "[INIT] fw-esp32s3 boot",
-        "[INIT] I/O task spawned",
+        "[INIT] USB link task spawned",
         "[INIT] flash filesystem mounted",
         "[INIT] fw-esp32 initialized, starting server loop",
-        "[RECOVERY] boot complete (first frame served)",
     ] {
         assert!(
             usb.contains(line),

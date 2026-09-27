@@ -2192,6 +2192,11 @@ jobs:
             scripts/ci/figures-patch.py bless --name "Emulator ESP32-S3 gate" \
               --log "$RUNNER_TEMP/figures-tests.log" \
               --cargo-test "set -a; . target/lp-emu-esp32s3/images.env; set +a; cargo test -p lp-emu-esp32s3"
+            # The S3's link-side gate (the elicited ledger triple and its
+            # `stack_total_bytes` figure) is lp-cli's since wire proto 30.
+            scripts/ci/figures-patch.py bless --name "S3 link gates (lp-cli)" \
+              --log "$RUNNER_TEMP/figures-tests.log" \
+              --cargo-test "set -a; . target/lp-emu-esp32s3/images.env; set +a; cargo test -p lp-cli --release --test emu_s3_link_gates"
           fi
           if [ "$HEAP" = failure ]; then
             scripts/ci/figures-patch.py bless --name "Heap budget ratchet (esp32s3)" \
