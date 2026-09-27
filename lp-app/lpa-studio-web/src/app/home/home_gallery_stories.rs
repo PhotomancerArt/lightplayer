@@ -887,6 +887,7 @@ fn roster_fixture() -> DeviceRosterView {
                     // The RUNNING face (M3): what the board itself reports,
                     // named by the storage dir it runs from.
                     engine_fps: None,
+                    link_counters: None,
                     loaded_project: DeviceLoadedProject::Running {
                         label: "2026-07-09-1421-porch-sign".to_string(),
                     },
@@ -948,6 +949,7 @@ fn roster_fixture() -> DeviceRosterView {
                     degraded: None,
                     loaded_project: DeviceLoadedProject::Unknown,
                     engine_fps: None,
+                    link_counters: None,
                     // Busy: one activity per device, so no second verb.
                     can_receive_project: false,
                     can_remove_project: false,
@@ -992,6 +994,7 @@ fn roster_fixture() -> DeviceRosterView {
                     degraded: None,
                     loaded_project: DeviceLoadedProject::Unknown,
                     engine_fps: None,
+                    link_counters: None,
                     can_receive_project: false,
                     can_remove_project: false,
                     activity: None,
@@ -1041,6 +1044,7 @@ fn roster_fixture() -> DeviceRosterView {
                     degraded: None,
                     loaded_project: DeviceLoadedProject::Empty,
                     engine_fps: None,
+                    link_counters: None,
                     can_receive_project: true,
                     // Nothing on it to remove — the empty face's picker is
                     // the verb here.
@@ -1101,6 +1105,7 @@ fn roster_fixture() -> DeviceRosterView {
                     degraded: None,
                     loaded_project: DeviceLoadedProject::Unknown,
                     engine_fps: None,
+                    link_counters: None,
                     can_receive_project: false,
                     can_remove_project: false,
                     activity: None,
@@ -1231,6 +1236,7 @@ fn firmware_face_fixtures() -> Vec<(&'static str, DeviceView, Option<String>)> {
         },
         degraded: Some("Recovery red: /studio.show/s disabled after repeated crashes".to_string()),
         engine_fps: None,
+        link_counters: None,
         loaded_project: DeviceLoadedProject::Running {
             label: "studio".to_string(),
         },
@@ -1328,6 +1334,7 @@ fn firmware_face_fixtures() -> Vec<(&'static str, DeviceView, Option<String>)> {
         degraded: None,
         loaded_project: DeviceLoadedProject::Unknown,
         engine_fps: None,
+        link_counters: None,
         can_receive_project: false,
         can_remove_project: false,
         activity: None,
@@ -1428,6 +1435,7 @@ fn firmware_face_fixtures() -> Vec<(&'static str, DeviceView, Option<String>)> {
         degraded: None,
         loaded_project: DeviceLoadedProject::Unknown,
         engine_fps: None,
+        link_counters: None,
         can_receive_project: false,
         can_remove_project: false,
         activity: None,
@@ -1495,6 +1503,7 @@ fn devices_card_sim_faces() -> Element {
         liveness: FeedLiveness::Lens,
         frame_age_secs: Some(2.0),
         engine_fps: None,
+        link_counters: None,
     };
     let faces: Vec<(
         &str,

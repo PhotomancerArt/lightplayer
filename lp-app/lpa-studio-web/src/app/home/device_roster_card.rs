@@ -1636,6 +1636,7 @@ mod tests {
             degraded: None,
             loaded_project: DeviceLoadedProject::Unknown,
             engine_fps: None,
+            link_counters: None,
             can_receive_project: false,
             can_remove_project: false,
             activity: None,
