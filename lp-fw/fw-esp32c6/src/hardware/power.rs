@@ -82,6 +82,12 @@ impl PowerPlatform for Esp32C6PowerPlatform {
         rtc.rwdt.disable();
         rtc.swd.disable();
 
+        // Say "powering off" on the status LED (three flashes, then dark)
+        // while the watchdogs are off: it blocks for under a second. Deep
+        // sleep leaves the pad undriven, so the LED stays dark until the wake
+        // reset lights it again. A no-op on a board with no status LED.
+        crate::board::esp32c6::status_led::play_power_off();
+
         wait_for_non_wake_level(gpio, wake_high);
 
         esp_println::println!(

@@ -248,7 +248,8 @@
       ],
       "aliases": [
         "IO15"
-      ]
+      ],
+      "reserved_reason": "on-board amber user LED — LightPlayer's status light (boot, running, powering off)"
     },
     {
       "address": "/gpio/16",
