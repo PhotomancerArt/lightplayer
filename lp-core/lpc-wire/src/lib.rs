@@ -36,11 +36,12 @@ pub mod ser_write;
 pub mod serde_base64;
 pub mod server;
 pub mod slot;
-#[cfg(test)]
+#[cfg(all(test, feature = "ser-write-json"))]
 mod test_traffic;
 pub mod transport_error;
 pub mod tree;
 pub mod wire_encoding;
+pub mod wire_link_port;
 pub mod wire_stream;
 
 pub use link_counter_tally::LinkCounterTally;
@@ -57,6 +58,10 @@ pub use lp_json_pack::PACK_FORMAT_VERSION;
 /// codes against one with [`ser_learned_frame_to`]; [`WireStream`] keeps the
 /// host's twin itself.
 pub use lp_json_pack::{LearnStore, LearnedTable};
+/// The link layer the device links run on, re-exported so hosts driving a
+/// [`WireLinkPort`] name its types (`Micros`, `ResetReason`, `LinkState`, …)
+/// through one dependency.
+pub use lp_link;
 pub use messages::{
     BindingGraphProbeRequest, BindingGraphProbeResult, ControlProductGeometry,
     ControlProductProbeRequest, ControlProductProbeResult, ControlProductProbeResultHeader,
@@ -122,6 +127,7 @@ pub use slot::{
 pub use transport_error::TransportError;
 pub use tree::{WireChildKind, WireEntryState, WireSlotIndex, WireTreeDelta};
 pub use wire_encoding::{FRAME_KIND_LEARNED, FRAME_KIND_RESYNC, RESYNC_SEQUENCE, WireEncoding};
+pub use wire_link_port::{DEVICE_LOG_LEVEL_REQUEST_ID, PortRead, WireLinkPort};
 pub use wire_stream::{
     DesyncedFrame, UnpackEvent, UnpackedFrame, WIRE_STREAM_MAX_FRAME, WireChunk, WireForm,
     WireFrame, WireStream, WireUnpacker,
