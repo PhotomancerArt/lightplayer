@@ -296,6 +296,16 @@ fixture-no-hello = ["lpa-server/fixture-no-hello", "fw-core/fixture-no-hello"]
 # docs/defects/2026-09-24-the-real-c6-link-loses-bytes-inside-a-packed-frame.md).
 # Not `test_*`: that prefix selects a harness entrypoint instead of the app.
 fixture-no-in-endpoint-gate = []
+# The link soak variant, never shipped (plan
+# lp2025/2026-09-26-1720-reliable-device-link, M1b): the shipped server image
+# plus a traffic source that sends numbered, checksummed `Log` frames through
+# the real transport, io_task, IN-endpoint gate and ChunkedWriter when a host
+# asks (`SOAK! ...` lines), and counts the bytes the io_task wrote. Read with
+# `lp-cli link soak`. See fw_esp32_common::soak_link.
+# Not `test_*`: that prefix replaces the app with a harness.
+#
+#   cargo build --profile release-esp32 --features esp32c6,server,radio,ble,json-pack,soak_link
+soak_link = ["server", "fw-esp32-common/soak-link"]
 
 [dependencies]
 lp-collection = { workspace = true, features = ["serde"] }

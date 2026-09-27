@@ -62,6 +62,9 @@ default = []
 # whose host opted in (`ClientRequest::SetEncoding`). Without it the board
 # answers every opt-in "json". On by default in all three chip crates (Q4).
 json-pack = ["server"]
+# The link soak generator (`soak_link`): a test variant's traffic source,
+# never in a shipped image. See the module docs.
+soak-link = ["server"]
 server = ["dep:littlefs-rust", "dep:lp-json-pack", "dep:lp-recovery", "dep:lpa-server", "dep:lpc-model", "dep:lpc-wire", "dep:lpfs", "dep:ser-write-json"]
 
 [dev-dependencies]
