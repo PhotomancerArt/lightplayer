@@ -42,6 +42,13 @@ detached worktree at a pinned commit, so its images are not affected.
   below. A build-graph change to product firmware is not something to ride
   along on a milestone's closing PR.
 
+- 2026-09-27 (lp-link cut-over rehearsal, PR #854) — a plain
+  `just build-fw-esp32c6` after checking out a commit that touched only
+  `lp-fw/fw-esp32-common/` built the fix but stamped the previous commit
+  (`e726f708303c` for `abfd9d9a0`); the hello named the wrong build until
+  `lp-fw/fw-esp32c6` was touched. A walk that compares builds by the hello's
+  stamp would have compared the wrong ones.
+
 **Exit criteria** — one of:
 
 1. **Watch git.** `cargo:rerun-if-changed=<git-dir>/HEAD` plus the ref file
