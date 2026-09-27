@@ -43,6 +43,16 @@ const SEND_BUDGET: usize = 2560;
 /// (an upload's chunk grows one to ~6 KB; it must not stay).
 const KEEP_REASSEMBLY: usize = 1024;
 
+/// The board's resend-timer floor, above the preset's 40 ms. While a shader
+/// renders slowly (a palette cross-fade: ~80 ms ticks) the link task writes
+/// one frame in 64-byte packets with a tick between them, so a frame's own
+/// write outlasts 40 ms and the board resent frames the host was still
+/// receiving: every frame twice in those stretches, half the throughput
+/// (rehearsal `silicon:esp32c6 10:bd:a3:b0:8e:30`, 2026-09-27, e726f7083).
+/// Real losses are still found early by SACK and the tail probe; this timer is
+/// only the backstop.
+const MIN_RTO_US: u64 = 200_000;
+
 /// The link, and the doorbell that wakes its task.
 pub struct UsbLinkShared {
     link: RefCell<Link<SelectiveRepeat>>,
@@ -72,6 +82,7 @@ impl UsbLinkShared {
         cfg.keep_reassembly = KEEP_REASSEMBLY;
         cfg.send_queue = SEND_QUEUE;
         cfg.datagram_queue = LOG_DATAGRAMS;
+        cfg.min_rto = MIN_RTO_US;
         cfg
     }
 
