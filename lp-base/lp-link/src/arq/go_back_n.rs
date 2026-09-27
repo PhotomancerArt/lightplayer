@@ -26,7 +26,7 @@ impl<const MAX: u8> Arq for GoBackN<MAX> {
     };
     const MAX_WINDOW: u8 = MAX;
 
-    fn new(_rx_window: u8) -> Self {
+    fn new(_rx_window: u8, _max_payload: usize) -> Self {
         GoBackN { expected: 0 }
     }
 
@@ -40,7 +40,7 @@ impl<const MAX: u8> Arq for GoBackN<MAX> {
 
     fn on_data(&mut self, seq: u8, frag: Fragment<'_>, inbox: &mut Inbox) -> RxVerdict {
         if seq == self.expected {
-            if !inbox.has_room(frag.data.len()) {
+            if !inbox.has_room(frag.chan, frag.data.len()) {
                 return RxVerdict::NoRoom;
             }
             if inbox.push_fragment(frag).is_err() {

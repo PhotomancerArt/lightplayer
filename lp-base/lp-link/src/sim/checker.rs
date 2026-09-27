@@ -4,9 +4,12 @@
 //! > Every message sent on a reliable channel is delivered exactly once, in
 //! > order, or the link reports a reset.
 //!
-//! Concretely, for each sender generation (the span between two resets):
-//! the messages delivered are exactly its first *k* messages, in send order,
-//! each once, all inside one receiver session. Messages of a generation that
+//! "In order" is per channel: a higher-priority channel's message may
+//! overtake another channel's (control goes before the rest of a big proto
+//! reply), never one of its own. Concretely, for each sender generation (the
+//! span between two resets) and each channel: the messages delivered are
+//! exactly its first *k* messages on that channel, in send order, each once,
+//! all inside one receiver session. Messages of a generation that
 //! ended in a reset may be missing (that is what the reset reports). The
 //! scenario then checks liveness: once faults stop, the last generation's
 //! messages all arrive.
@@ -24,8 +27,9 @@ pub type RxSession = (u16, u32);
 
 #[derive(Default)]
 pub struct Checker {
-    /// (sender incarnation, sender generation) → (next index, receiver session).
-    streams: BTreeMap<(u16, u32), (u32, RxSession)>,
+    /// (sender incarnation, sender generation, channel) → (next index,
+    /// receiver session).
+    streams: BTreeMap<(u16, u32, u8), (u32, RxSession)>,
     pub delivered: u64,
     pub delivered_bytes: u64,
     /// Delivered before the fault window closed (for goodput).
@@ -40,7 +44,14 @@ pub struct Checker {
 }
 
 impl Checker {
-    pub fn on_reliable(&mut self, now: Micros, window_end: Micros, rx: RxSession, data: &[u8]) {
+    pub fn on_reliable(
+        &mut self,
+        now: Micros,
+        window_end: Micros,
+        rx: RxSession,
+        channel: u8,
+        data: &[u8],
+    ) {
         let Some(p) = Probe::decode(data) else {
             self.undetected_damage += 1;
             self.violations.push(format!(
@@ -49,22 +60,19 @@ impl Checker {
             ));
             return;
         };
-        let entry = self.streams.entry((p.inc, p.gen_)).or_insert((0, rx));
+        let stream = (p.inc, p.gen_, channel);
+        let entry = self.streams.entry(stream).or_insert((0, rx));
         if entry.1 != rx {
             self.violations.push(format!(
-                "t={now}: sender generation {:?} delivered in two receiver sessions ({:?}, {:?})",
-                (p.inc, p.gen_),
-                entry.1,
-                rx
+                "t={now}: sender generation {stream:?} delivered in two receiver sessions ({:?}, {:?})",
+                entry.1, rx
             ));
         }
         if p.idx != entry.0 {
             let what = if p.idx < entry.0 { "duplicate" } else { "gap" };
             self.violations.push(format!(
-                "t={now}: {what}: generation {:?} expected #{}, got #{}",
-                (p.inc, p.gen_),
-                entry.0,
-                p.idx
+                "t={now}: {what}: generation {stream:?} expected #{}, got #{}",
+                entry.0, p.idx
             ));
         }
         entry.0 = entry.0.max(p.idx + 1);
@@ -90,8 +98,8 @@ impl Checker {
         }
     }
 
-    /// Messages of `(inc, gen)` delivered so far.
-    pub fn delivered_of(&self, inc: u16, gen_: u32) -> u32 {
-        self.streams.get(&(inc, gen_)).map_or(0, |e| e.0)
+    /// Messages of `(inc, gen)` on `channel` delivered so far.
+    pub fn delivered_of(&self, inc: u16, gen_: u32, channel: u8) -> u32 {
+        self.streams.get(&(inc, gen_, channel)).map_or(0, |e| e.0)
     }
 }
