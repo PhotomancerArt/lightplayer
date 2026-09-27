@@ -28,8 +28,7 @@ use std::cell::Cell;
 use lpc_wire::server::api::LogLevel;
 use lpc_wire::{
     ClientMessage, ClientRequest, PACK_FORMAT_VERSION, PACK_OPT_IN_REQUEST_ID, PackOptIn,
-    ServerMsgBody, WIRE_PROTO_VERSION, WireChunk, WireEncoding,
-    WireServerMessage, WireStream,
+    ServerMsgBody, WIRE_PROTO_VERSION, WireChunk, WireEncoding, WireServerMessage, WireStream,
 };
 
 thread_local! {
