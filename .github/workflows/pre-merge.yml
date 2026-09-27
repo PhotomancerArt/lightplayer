@@ -501,8 +501,10 @@ jobs:
               - 'scripts/heap-budget-stack-layout.py'
               - 'scripts/heap-budget-record/chips/esp32s3.json'
               # The S3 arm boots through `lp-cli emu run --chip esp32s3
-              # --host-link` since wire proto 30.
+              # --host-link` since wire proto 30, and its link-side gate is
+              # lp-cli's.
               - 'lp-cli/src/commands/emu/**'
+              - 'lp-cli/tests/emu_s3_*.rs'
               - 'justfile'
               - '.github/workflows/pre-merge.yml'
               - '.github/actions/**'
