@@ -94,6 +94,11 @@ lp-emu-validate = { path = "../lp-emu/lp-emu-validate" }
 # reach a product crate — so a product crate reaching in is fine
 # (`just lint-emu-fence`).
 lp-emu-esp32c6 = { path = "../lp-emu/esp/lp-emu-esp32c6" }
+# `lp-cli emu run --chip esp32s3 --host-link`: since wire proto 30 the S3's
+# console IS an lp-link, and only a product crate may host one (the fence), so
+# the heap ratchet's S3 arm and the S3 host-side tests drive the machine from
+# here. Same direction as the C6 line above.
+lp-emu-esp32s3 = { path = "../lp-emu/esp/lp-emu-esp32s3" }
 # `lp-cli emu serve --air`: the `LPA1` air wire codec and `ParticipantId`,
 # which `lp-emu-esp32c6` uses but does not re-export. Same direction as the
 # line above — a product crate reaching INTO the fence, which is fine.
