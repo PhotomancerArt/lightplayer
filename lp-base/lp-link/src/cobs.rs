@@ -92,48 +92,94 @@ const ESC: u8 = 0xFE;
 const ESC_FF: u8 = 0x00;
 const ESC_FE: u8 = 0x01;
 
+/// Data bytes in a full COBS-FF block (code [`FF_FULL`]).
+const FF_BLOCK: usize = FF_FULL as usize - 1;
+
 /// Append the COBS-FF encoding of `src` to `out` (module docs). The appended
 /// bytes hold no `0x00` and no `0xFF`.
+///
+/// Works in runs: it scans for the next byte that needs attention (a `0x00`
+/// that ends a block, or an `0xFE`/`0xFF` to escape), bounded by the room left
+/// in the current block, and copies the run in one `extend_from_slice`.
 pub fn encode_no_ff_into(src: &[u8], out: &mut Vec<u8>) {
-    let mut code_at = out.len();
-    out.push(0);
-    let mut code: u8 = 1;
-    let mut put = |b: u8, out: &mut Vec<u8>| {
-        if b == 0 {
-            out[code_at] = code;
-            code_at = out.len();
-            out.push(0);
-            code = 1;
-        } else {
-            out.push(b);
-            code += 1;
-            if code == FF_FULL {
-                out[code_at] = code;
-                code_at = out.len();
-                out.push(0);
-                code = 1;
-            }
+    out.reserve(max_encoded_no_ff_len(src.len()));
+    let mut block = FfBlock::open(out);
+    let mut rest = src;
+    while !rest.is_empty() {
+        let room = FF_BLOCK - block.len;
+        let lim = rest.len().min(room);
+        let run = rest[..lim]
+            .iter()
+            .position(|&b| b == 0 || b >= ESC)
+            .unwrap_or(lim);
+        out.extend_from_slice(&rest[..run]);
+        block.len += run;
+        if block.len == FF_BLOCK {
+            block.close(out);
         }
-    };
-    for &b in src {
-        match b {
-            0xFF => {
-                put(ESC, out);
-                put(ESC_FF, out);
+        rest = &rest[run..];
+        let Some((&b, tail)) = rest.split_first() else {
+            break;
+        };
+        if run < lim {
+            // `b` is the byte that stopped the scan.
+            match b {
+                0 => block.close(out),
+                0xFF => {
+                    block.put(ESC, out);
+                    block.close(out);
+                }
+                _ => {
+                    block.put(ESC, out);
+                    block.put(ESC_FE, out);
+                }
             }
-            0xFE => {
-                put(ESC, out);
-                put(ESC_FE, out);
-            }
-            _ => put(b, out),
+            rest = tail;
         }
     }
-    out[code_at] = code;
+    block.finish(out);
+}
+
+/// The COBS-FF block being written: where its code byte sits and how many
+/// data bytes follow it so far.
+struct FfBlock {
+    code_at: usize,
+    len: usize,
+}
+
+impl FfBlock {
+    fn open(out: &mut Vec<u8>) -> Self {
+        let code_at = out.len();
+        out.push(0);
+        FfBlock { code_at, len: 0 }
+    }
+
+    /// One non-zero data byte.
+    fn put(&mut self, b: u8, out: &mut Vec<u8>) {
+        out.push(b);
+        self.len += 1;
+        if self.len == FF_BLOCK {
+            self.close(out);
+        }
+    }
+
+    /// End the block and open the next. The code byte says how: a full block
+    /// ([`FF_FULL`]) has no zero after it; any shorter one ended at a zero,
+    /// which the decoder puts back.
+    fn close(&mut self, out: &mut Vec<u8>) {
+        self.finish(out);
+        *self = FfBlock::open(out);
+    }
+
+    fn finish(&self, out: &mut [u8]) {
+        out[self.code_at] = self.len as u8 + 1;
+    }
 }
 
 /// Append the decoding of COBS-FF `src` to `out`.
 pub fn decode_no_ff_into(src: &[u8], out: &mut Vec<u8>) -> Result<(), CobsError> {
     let start = out.len();
+    out.reserve(src.len());
     let mut i = 0;
     while i < src.len() {
         let code = src[i];
@@ -155,22 +201,25 @@ pub fn decode_no_ff_into(src: &[u8], out: &mut Vec<u8>) -> Result<(), CobsError>
             out.push(0);
         }
     }
-    // Undo the escape in place.
+    // Undo the escape in place, a run at a time.
     let (mut r, mut w) = (start, start);
-    while r < out.len() {
-        let b = out[r];
-        if b == ESC {
-            let v = match out.get(r + 1) {
-                Some(&ESC_FF) => 0xFF,
-                Some(&ESC_FE) => 0xFE,
-                _ => return Err(CobsError),
-            };
-            out[w] = v;
-            r += 2;
-        } else {
-            out[w] = b;
-            r += 1;
+    let end = out.len();
+    while r < end {
+        let run = out[r..].iter().position(|&b| b == ESC).unwrap_or(end - r);
+        if w != r {
+            out.copy_within(r..r + run, w);
         }
+        r += run;
+        w += run;
+        if r == end {
+            break;
+        }
+        out[w] = match out.get(r + 1) {
+            Some(&ESC_FF) => 0xFF,
+            Some(&ESC_FE) => 0xFE,
+            _ => return Err(CobsError),
+        };
+        r += 2;
         w += 1;
     }
     out.truncate(w);
@@ -306,5 +355,90 @@ mod tests {
         let mut out = Vec::new();
         assert_eq!(decode_into(&[0x05, 1, 2], &mut out), Err(CobsError));
         assert_eq!(decode_into(&[0x00], &mut out), Err(CobsError));
+    }
+
+    #[test]
+    fn cobs_ff_runs_match_the_bytewise_encoder() {
+        let mut cases: Vec<Vec<u8>> = vec![
+            vec![],
+            vec![0xFE; 253],
+            vec![0xFF; 253],
+            vec![0x41; 252],
+            vec![0x41; 253],
+            vec![0x41; 506],
+        ];
+        for k in 250..=256usize {
+            let mut v = vec![0x41; k];
+            v.push(0xFF);
+            v.push(0);
+            v.push(0xFE);
+            cases.push(v);
+        }
+        let mut x = 0xACE1_2468u32;
+        for len in [1usize, 17, 253, 254, 600, 3000] {
+            for density in [4u32, 64, 256] {
+                cases.push(
+                    (0..len)
+                        .map(|_| {
+                            x ^= x << 13;
+                            x ^= x >> 17;
+                            x ^= x << 5;
+                            // A few specials per `density` bytes.
+                            match x % density {
+                                0 => 0x00,
+                                1 => 0xFE,
+                                2 => 0xFF,
+                                _ => (x >> 8) as u8 | 1,
+                            }
+                        })
+                        .collect(),
+                );
+            }
+        }
+        for src in cases {
+            let (mut runs, mut bytewise) = (vec![7], vec![7]);
+            encode_no_ff_into(&src, &mut runs);
+            encode_no_ff_bytewise(&src, &mut bytewise);
+            assert_eq!(runs, bytewise, "{} bytes", src.len());
+        }
+    }
+
+    /// The encoder before it worked in runs, one byte at a time: the
+    /// reference for the wire form (the lab firmware and hosts speak it).
+    fn encode_no_ff_bytewise(src: &[u8], out: &mut Vec<u8>) {
+        let mut code_at = out.len();
+        out.push(0);
+        let mut code: u8 = 1;
+        let mut put = |b: u8, out: &mut Vec<u8>| {
+            if b == 0 {
+                out[code_at] = code;
+                code_at = out.len();
+                out.push(0);
+                code = 1;
+            } else {
+                out.push(b);
+                code += 1;
+                if code == FF_FULL {
+                    out[code_at] = code;
+                    code_at = out.len();
+                    out.push(0);
+                    code = 1;
+                }
+            }
+        };
+        for &b in src {
+            match b {
+                0xFF => {
+                    put(ESC, out);
+                    put(ESC_FF, out);
+                }
+                0xFE => {
+                    put(ESC, out);
+                    put(ESC_FE, out);
+                }
+                _ => put(b, out),
+            }
+        }
+        out[code_at] = code;
     }
 }

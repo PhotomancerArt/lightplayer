@@ -1,7 +1,13 @@
-//! Frame checksums: CRC-16/CCITT-FALSE and CRC-32C (Castagnoli), both with a
-//! 16-entry ("nibble") table: 32 or 64 bytes of flash, two table lookups per
-//! byte. Written from the polynomial definitions; the check values are the
-//! standard `"123456789"` ones.
+//! Frame checksums: CRC-32C (Castagnoli), the one every preset uses, and
+//! CRC-16/CCITT-FALSE, the measured alternative. Written from the polynomial
+//! definitions; the check values are the standard `"123456789"` ones.
+//!
+//! CRC-32C runs from a 256-entry table (1 KiB of flash, one lookup per byte):
+//! every byte the link moves passes through it twice (sender and receiver),
+//! and the nibble table it replaced took two lookups and twice the shifts.
+//! Slicing-by-8 would be faster again but costs 8 KiB, too much for the C6's
+//! flash budget. CRC-16 keeps its 16-entry nibble table (32 bytes): no preset
+//! uses it, so its speed is not worth flash.
 //!
 //! The link *keys* the checksum with the session (see [`CrcKind::compute`]): a
 //! frame left over from an earlier session fails the check exactly as a
@@ -53,11 +59,13 @@ pub fn crc16_ccitt(init: u16, data: &[u8]) -> u16 {
 pub fn crc32c(key: u32, data: &[u8]) -> u32 {
     let mut crc = !key;
     for &b in data {
-        crc = (crc >> 4) ^ CRC32C_NIBBLES[((crc ^ b as u32) & 0xF) as usize];
-        crc = (crc >> 4) ^ CRC32C_NIBBLES[((crc ^ (b >> 4) as u32) & 0xF) as usize];
+        crc = (crc >> 8) ^ CRC32C_TABLE[((crc ^ b as u32) & 0xFF) as usize];
     }
     !crc
 }
+
+/// The reflected Castagnoli polynomial.
+const CRC32C_POLY: u32 = 0x82F6_3B78;
 
 static CRC16_NIBBLES: [u16; 16] = {
     let mut t = [0u16; 16];
@@ -79,15 +87,17 @@ static CRC16_NIBBLES: [u16; 16] = {
     t
 };
 
-static CRC32C_NIBBLES: [u32; 16] = {
-    let mut t = [0u32; 16];
+/// `CRC32C_TABLE[i]`: the CRC register after shifting byte `i` through eight
+/// rounds of the reflected polynomial.
+static CRC32C_TABLE: [u32; 256] = {
+    let mut t = [0u32; 256];
     let mut i = 0;
-    while i < 16 {
+    while i < 256 {
         let mut c = i as u32;
         let mut k = 0;
-        while k < 4 {
+        while k < 8 {
             c = if c & 1 != 0 {
-                (c >> 1) ^ 0x82F6_3B78
+                (c >> 1) ^ CRC32C_POLY
             } else {
                 c >> 1
             };
@@ -110,6 +120,27 @@ mod tests {
     }
 
     #[test]
+    fn table_crc32c_matches_the_bitwise_definition() {
+        let mut x = 0x2545_F491u32;
+        let mut data = [0u8; 600];
+        for len in [0usize, 1, 2, 3, 7, 64, 255, 256, 259, 600] {
+            for b in &mut data[..len] {
+                x ^= x << 13;
+                x ^= x >> 17;
+                x ^= x << 5;
+                *b = x as u8;
+            }
+            for key in [0, 1, 0xDEAD_BEEF, x] {
+                assert_eq!(
+                    crc32c(key, &data[..len]),
+                    crc32c_bitwise(key, &data[..len]),
+                    "{len} bytes, key {key:#x}"
+                );
+            }
+        }
+    }
+
+    #[test]
     fn key_changes_the_checksum() {
         for kind in [CrcKind::Crc16, CrcKind::Crc32c] {
             assert_ne!(
@@ -117,5 +148,22 @@ mod tests {
                 kind.compute(0x1234_5678, b"frame")
             );
         }
+    }
+
+    /// The definition, one bit at a time: the reference the table must match
+    /// (and the session keying with it, which lab firmware and hosts share).
+    fn crc32c_bitwise(key: u32, data: &[u8]) -> u32 {
+        let mut crc = !key;
+        for &b in data {
+            crc ^= b as u32;
+            for _ in 0..8 {
+                crc = if crc & 1 != 0 {
+                    (crc >> 1) ^ CRC32C_POLY
+                } else {
+                    crc >> 1
+                };
+            }
+        }
+        !crc
     }
 }

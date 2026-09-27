@@ -69,10 +69,17 @@ pub struct Deframer {
 
 impl Deframer {
     /// `max_frame`: the largest COBS body (delimiters excluded) to accept.
-    pub fn new(max_frame: usize) -> Self {
+    /// `reserve`: allocate the buffers now, at their largest (a link on a
+    /// stream does; one on datagrams never feeds its deframer).
+    pub fn new(max_frame: usize, reserve: bool) -> Self {
+        let (buf, text) = if reserve {
+            (max_frame, max_frame.max(TEXT_CHUNK))
+        } else {
+            (0, 0)
+        };
         Deframer {
-            buf: Vec::new(),
-            text: Vec::new(),
+            buf: Vec::with_capacity(buf),
+            text: Vec::with_capacity(text),
             in_frame: false,
             discarding: false,
             max_frame,
@@ -155,6 +162,16 @@ impl Deframer {
         mem::take(&mut self.text)
     }
 
+    /// The text [`push`](Self::push) or [`flush_idle`](Self::flush_idle)
+    /// reported; [`clear_text`](Self::clear_text) once it is handled.
+    pub fn text(&self) -> &[u8] {
+        &self.text
+    }
+
+    pub fn clear_text(&mut self) {
+        self.text.clear();
+    }
+
     /// When an idle flush is due, if anything is pending.
     pub fn idle_deadline(&self, idle: Micros) -> Option<Micros> {
         let pending =
@@ -176,7 +193,8 @@ impl Deframer {
             .iter()
             .all(|&b| matches!(b, 0x20..=0x7E | b'\t' | b'\r' | b'\n'))
         {
-            self.text = mem::take(&mut self.buf);
+            self.text.extend_from_slice(&self.buf);
+            self.buf.clear();
             IdleFlush::Text
         } else {
             self.buf.clear();
@@ -187,6 +205,17 @@ impl Deframer {
     /// Bytes held (for RAM accounting).
     pub fn capacity(&self) -> usize {
         self.buf.capacity() + self.text.capacity()
+    }
+
+    /// [`capacity`](Self::capacity) at its largest: a frame body in `buf`, and
+    /// in `text` a text chunk or a partial frame flushed as text.
+    pub const fn ram_bound(max_frame: usize) -> usize {
+        let text = if max_frame > TEXT_CHUNK {
+            max_frame
+        } else {
+            TEXT_CHUNK
+        };
+        max_frame + text
     }
 }
 
@@ -213,14 +242,14 @@ mod tests {
 
     #[test]
     fn text_frames_and_text() {
-        let mut d = Deframer::new(64);
+        let mut d = Deframer::new(64, false);
         let r = feed(&mut d, b"boot\n\x00\x02\x01\x00hi\n");
         assert_eq!(r, [Deframed::Text, Deframed::Frame, Deframed::Text]);
     }
 
     #[test]
     fn failed_frame_keeps_frame_mode() {
-        let mut d = Deframer::new(64);
+        let mut d = Deframer::new(64, false);
         // First "frame" lost its closing delimiter; its next 0x00 is really the
         // opening of the next frame.
         assert_eq!(d.push(0, 0), Deframed::Nothing);
@@ -238,7 +267,7 @@ mod tests {
 
     #[test]
     fn overflow_is_discarded() {
-        let mut d = Deframer::new(4);
+        let mut d = Deframer::new(4, false);
         d.push(0, 0);
         for _ in 0..10 {
             d.push(0, 7);
@@ -248,7 +277,7 @@ mod tests {
 
     #[test]
     fn a_text_mark_abandons_the_frame_and_the_text_arrives() {
-        let mut d = Deframer::new(64).with_text_mark(true);
+        let mut d = Deframer::new(64, false).with_text_mark(true);
         // A frame cut off mid-way by a panic: 0xFF, the message, then the
         // rebooted board's first frame straight after.
         let r = feed(&mut d, b"\x00\x05ab\xFFpanicked\nROM\n\x00\x02\x01\x00");
@@ -262,14 +291,14 @@ mod tests {
             ]
         );
         // Without the mark honoured, the same bytes are one bad frame.
-        let mut plain = Deframer::new(64);
+        let mut plain = Deframer::new(64, false);
         let r = feed(&mut plain, b"\x00\x05ab\xFFpanicked\n\x00");
         assert_eq!(r, [Deframed::Frame]);
     }
 
     #[test]
     fn idle_partial_printable_becomes_text() {
-        let mut d = Deframer::new(64);
+        let mut d = Deframer::new(64, false);
         d.push(0, 0);
         for &b in b"panic!" {
             d.push(5, b);

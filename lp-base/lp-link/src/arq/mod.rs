@@ -61,8 +61,14 @@ pub trait Arq {
     /// Largest window the variant supports.
     const MAX_WINDOW: u8;
 
-    /// A fresh receiver that takes up to `rx_window` frames past its ack.
-    fn new(rx_window: u8) -> Self;
+    /// A fresh receiver that takes up to `rx_window` frames past its ack, of
+    /// at most `max_payload` bytes each.
+    fn new(rx_window: u8, max_payload: usize) -> Self;
+    /// RAM a receiver of this shape holds, whatever it carries (its reorder
+    /// buffer, allocated in [`new`](Self::new)).
+    fn ram_bound(_rx_window: u8, _max_payload: usize) -> usize {
+        0
+    }
     fn reset(&mut self);
 
     // Receiver.
