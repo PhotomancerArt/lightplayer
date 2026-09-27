@@ -12,6 +12,7 @@
     "node.fluid",
     "node.fixture",
     "node.playlist",
+    "node.power-button",
     "node.radio",
     "node.shader",
     "node.texture",
@@ -22,5 +23,5 @@
   "limits": {
     "flashAppBytes": 3145728
   },
-  "wireProto": 28
+  "wireProto": 29
 }

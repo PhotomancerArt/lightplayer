@@ -7,6 +7,7 @@
 pub enum NodeKind {
     Module,
     Button,
+    PowerButton,
     Clock,
     Texture,
     Shader,
@@ -23,9 +24,10 @@ impl NodeKind {
     /// through this const so call sites stay wildcard-free: adding a
     /// variant without extending it is caught by
     /// [`tests::all_is_total_and_in_declaration_order`].
-    pub const ALL: [NodeKind; 11] = [
+    pub const ALL: [NodeKind; 12] = [
         NodeKind::Module,
         NodeKind::Button,
+        NodeKind::PowerButton,
         NodeKind::Clock,
         NodeKind::Texture,
         NodeKind::Shader,
@@ -51,6 +53,7 @@ impl NodeKind {
         match self {
             NodeKind::Module | NodeKind::Shader | NodeKind::Fluid | NodeKind::Playlist => true,
             NodeKind::Button
+            | NodeKind::PowerButton
             | NodeKind::Clock
             | NodeKind::Texture
             | NodeKind::ComputeShader
@@ -74,15 +77,16 @@ mod tests {
             match kind {
                 NodeKind::Module => 0,
                 NodeKind::Button => 1,
-                NodeKind::Clock => 2,
-                NodeKind::Texture => 3,
-                NodeKind::Shader => 4,
-                NodeKind::ComputeShader => 5,
-                NodeKind::Fluid => 6,
-                NodeKind::Playlist => 7,
-                NodeKind::ControlRadio => 8,
-                NodeKind::Output => 9,
-                NodeKind::Fixture => 10,
+                NodeKind::PowerButton => 2,
+                NodeKind::Clock => 3,
+                NodeKind::Texture => 4,
+                NodeKind::Shader => 5,
+                NodeKind::ComputeShader => 6,
+                NodeKind::Fluid => 7,
+                NodeKind::Playlist => 8,
+                NodeKind::ControlRadio => 9,
+                NodeKind::Output => 10,
+                NodeKind::Fixture => 11,
             }
         }
         for (i, kind) in NodeKind::ALL.iter().enumerate() {

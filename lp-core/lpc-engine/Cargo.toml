@@ -11,6 +11,7 @@ workspace = true
 default = [
     "std",
     "node-button",
+    "node-power-button",
     "node-radio",
     "node-fluid",
     "node-fixture",
@@ -49,6 +50,7 @@ std = [
 # `Output` and `Project` are never gated: `LpServer` requires an output
 # provider, and `Project` is the always-present root placeholder.
 node-button = []
+node-power-button = []
 node-radio = []
 node-fluid = []
 node-fixture = ["dep:lpc-mapping"]

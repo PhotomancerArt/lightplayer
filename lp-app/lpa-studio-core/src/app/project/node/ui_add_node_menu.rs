@@ -28,6 +28,7 @@ const PICKER_KINDS: &[NodeKind] = &[
     NodeKind::Fluid,
     NodeKind::ComputeShader,
     NodeKind::Button,
+    NodeKind::PowerButton,
     NodeKind::ControlRadio,
 ];
 
@@ -366,6 +367,7 @@ mod tests {
             LpFeature::NodeClock,
             LpFeature::NodeFixture,
             LpFeature::NodePlaylist,
+            LpFeature::NodePowerButton,
             LpFeature::NodeShader,
             LpFeature::NodeTexture,
             LpFeature::GfxLpvm,
