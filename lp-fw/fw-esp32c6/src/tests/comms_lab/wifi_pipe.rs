@@ -45,8 +45,10 @@ pub async fn run(
     wifi: esp_hal::peripherals::WIFI<'static>,
     rng: Rng,
 ) {
-    let (Some(ssid), Some(pass)) = (option_env!("LP_LAB_WIFI_SSID"), option_env!("LP_LAB_WIFI_PASS"))
-    else {
+    let (Some(ssid), Some(pass)) = (
+        option_env!("LP_LAB_WIFI_SSID"),
+        option_env!("LP_LAB_WIFI_PASS"),
+    ) else {
         esp_println::println!("[LAB] wifi: built without LP_LAB_WIFI_SSID / LP_LAB_WIFI_PASS");
         return;
     };
@@ -129,7 +131,12 @@ pub async fn run(
             }
         }
         let wake = edge.wake_at(IDLE_CAP_US).max(now_us());
-        match select(socket.recv_from(&mut buf), Timer::at(Instant::from_micros(wake))).await {
+        match select(
+            socket.recv_from(&mut buf),
+            Timer::at(Instant::from_micros(wake)),
+        )
+        .await
+        {
             Either::First(Ok((n, meta))) => {
                 if peer != Some(meta.endpoint) {
                     log::info!("wifi: peer is now {}", meta.endpoint);

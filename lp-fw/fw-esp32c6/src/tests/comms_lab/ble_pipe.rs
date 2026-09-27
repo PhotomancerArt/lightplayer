@@ -96,7 +96,8 @@ pub async fn run(
 
     let mut resources: HostResources<DefaultPacketPool, CONNECTIONS_MAX, L2CAP_CHANNELS_MAX> =
         HostResources::new();
-    let stack = trouble_host::new(controller, &mut resources).set_random_address(Address::random(addr));
+    let stack =
+        trouble_host::new(controller, &mut resources).set_random_address(Address::random(addr));
     let Host {
         mut peripheral,
         mut runner,
@@ -107,7 +108,11 @@ pub async fn run(
         appearance: &appearance::UNKNOWN,
     }))
     .expect("GATT server builds");
-    log::info!("ble: up as {}, heap free {}", name.as_str(), esp_alloc::HEAP.free());
+    log::info!(
+        "ble: up as {}, heap free {}",
+        name.as_str(),
+        esp_alloc::HEAP.free()
+    );
 
     let _ = join(
         async {
@@ -222,8 +227,15 @@ async fn serve<C: BleCtl, P: PacketPool>(
                 supervision_timeout: Duration::from_secs(4),
                 ..Default::default()
             };
-            let ok = conn.raw().update_connection_params(stack, &params).await.is_ok();
-            log::info!("ble: asked for a 15 ms interval: {}", if ok { "sent" } else { "refused" });
+            let ok = conn
+                .raw()
+                .update_connection_params(stack, &params)
+                .await
+                .is_ok();
+            log::info!(
+                "ble: asked for a 15 ms interval: {}",
+                if ok { "sent" } else { "refused" }
+            );
         }
         let wake = match edge.as_ref() {
             Some(e) => e.wake_at(IDLE_CAP_US),
@@ -258,7 +270,9 @@ async fn serve<C: BleCtl, P: PacketPool>(
             Either::First(GattConnectionEvent::RequestConnectionParams(req)) => {
                 let _ = req.accept(None, stack).await;
             }
-            Either::First(GattConnectionEvent::ConnectionParamsUpdated { conn_interval, .. }) => {
+            Either::First(GattConnectionEvent::ConnectionParamsUpdated {
+                conn_interval, ..
+            }) => {
                 log::info!("ble: interval now {} us", conn_interval.as_micros());
             }
             _ => {}

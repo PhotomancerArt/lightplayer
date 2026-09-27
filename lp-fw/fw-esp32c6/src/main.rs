@@ -165,6 +165,8 @@ use server_loop::run_server_loop;
 
 #[cfg(fw_harness)]
 mod tests {
+    #[cfg(feature = "test_comms_lab")]
+    pub mod comms_lab;
     #[cfg(feature = "test_cycle_probe")]
     pub mod cycle_probe;
     #[cfg(feature = "test_espnow_broadcast")]
@@ -205,8 +207,6 @@ mod tests {
     pub mod test_rmt;
     #[cfg(feature = "test_usb")]
     pub mod test_usb;
-    #[cfg(feature = "test_comms_lab")]
-    pub mod comms_lab;
     #[cfg(feature = "test_uart_bridge")]
     pub mod uart_bridge;
 }

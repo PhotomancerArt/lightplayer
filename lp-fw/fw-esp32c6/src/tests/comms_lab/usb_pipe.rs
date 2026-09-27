@@ -75,13 +75,12 @@ pub async fn usb_link_task(usb: esp_hal::peripherals::USB_DEVICE<'static>, nonce
             // emulator's clean link).
             drain_rx(&mut rx, &mut edge, &mut buf).await;
         }
-        let wake = if more { now_us() } else { edge.wake_at(IDLE_CAP_US) };
-        match select(
-            rx.read(&mut buf),
-            Timer::at(Instant::from_micros(wake)),
-        )
-        .await
-        {
+        let wake = if more {
+            now_us()
+        } else {
+            edge.wake_at(IDLE_CAP_US)
+        };
+        match select(rx.read(&mut buf), Timer::at(Instant::from_micros(wake))).await {
             Either::First(Ok(n)) if n > 0 => edge.on_bytes(&buf[..n]),
             _ => {}
         }

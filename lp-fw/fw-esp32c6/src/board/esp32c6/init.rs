@@ -12,7 +12,10 @@ use esp_hal::timer::timg::{TimerGroup, TimerGroupInstance};
 // The BLE spike takes `BT`, which this does not hand out, so it inits alone.
 #[cfg_attr(
     any(feature = "test_ble", feature = "test_comms_lab"),
-    allow(dead_code, reason = "the BLE spike and the comms lab init their own peripherals")
+    allow(
+        dead_code,
+        reason = "the BLE spike and the comms lab init their own peripherals"
+    )
 )]
 pub fn init_board() -> (
     SoftwareInterruptControl<'static>,
@@ -149,7 +152,10 @@ pub fn take_bt() -> Option<esp_hal::peripherals::BT<'static>> {
 /// Starts the Embassy async runtime with the given timer and software interrupt.
 #[cfg_attr(
     any(feature = "test_ble", feature = "test_comms_lab"),
-    allow(dead_code, reason = "the BLE spike and the comms lab init their own peripherals")
+    allow(
+        dead_code,
+        reason = "the BLE spike and the comms lab init their own peripherals"
+    )
 )]
 pub fn start_runtime(
     timg0: TimerGroup<'static, impl TimerGroupInstance>,
