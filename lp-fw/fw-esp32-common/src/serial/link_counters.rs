@@ -106,16 +106,24 @@ pub fn not_draining_count() -> u32 {
 /// Snapshot for the heartbeat. Always `Some` on these targets — a serial
 /// link exists by construction; zeros mean "no loss", which is itself
 /// evidence.
+///
+/// Since `WIRE_PROTO_VERSION` 30 the heartbeat's `link` object is lp-link's
+/// counters (plan `lp2025/2026-09-27-0215-lp-link-usb-cutover`, D7). Links
+/// still on `M!` lines (the classic's UART, BLE, and USB until P2 moves it)
+/// report their loss counters under the nearest lp-link names: a torn line or
+/// an RX error is a damaged frame, a full inbound queue is `rxNoRoom`, a stale
+/// partial line is a stale partial, and a not-draining latch is a stall. The
+/// latch's stamps stay probeable in the statics above but leave the wire.
 #[cfg(feature = "server")]
 pub fn current() -> Option<LinkCounters> {
     Some(LinkCounters {
-        parse_failures: PARSE_FAILURES.load(Relaxed),
-        rx_errors: RX_ERRORS.load(Relaxed),
-        queue_full_drops: QUEUE_FULL_DROPS.load(Relaxed),
-        stale_partial_flushes: STALE_PARTIAL_FLUSHES.load(Relaxed),
-        host_not_draining_ms: host_not_draining_ms(),
-        host_draining_again_ms: host_draining_again_ms(),
-        not_draining_count: not_draining_count(),
+        damaged: PARSE_FAILURES
+            .load(Relaxed)
+            .saturating_add(RX_ERRORS.load(Relaxed)),
+        rx_no_room: QUEUE_FULL_DROPS.load(Relaxed),
+        stale_partials: STALE_PARTIAL_FLUSHES.load(Relaxed),
+        stalls: not_draining_count(),
+        ..LinkCounters::default()
     })
 }
 

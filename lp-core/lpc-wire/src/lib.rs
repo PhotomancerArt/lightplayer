@@ -18,6 +18,7 @@ extern crate std;
 
 pub mod budget;
 pub mod json;
+pub mod link_counter_tally;
 pub mod message;
 pub mod messages;
 pub mod pack_opt_in;
@@ -68,6 +69,7 @@ pub use messages::{
     WireOutputPlacement, WirePhasorOrigin, WirePhasorReading, WirePhasorRow, WireProjectionOrigin,
     WireProjectionShape, WireScopeRef, WireVisualSpace,
 };
+pub use link_counter_tally::LinkCounterTally;
 pub use messages::{ClientMessage, ClientRequest, Message, ServerMessage};
 pub use pack_opt_in::{PACK_OPT_IN_REQUEST_ID, PACK_REASK_INTERVAL_MS, PackOptIn, PackOptInStep};
 #[cfg(feature = "ser-write-json")]
@@ -102,7 +104,7 @@ pub use ser_write::{
 pub use server::{
     AccessEntryInfo, AvailableProject, BuildFacts, FAULT_MESSAGE_CAP_BYTES, FAULT_NODES_CAP,
     FaultedNodeWire, FsRequest, FsResponse, HardwareFacts, HardwareIdentity, HeartbeatIdentity,
-    HelloAuth, HelloIdentity, LinkCounters, LoadedProject, MemoryStats, ProjectFaultWire,
+    HelloAuth, HelloIdentity, LinkCounters, LinkResets, LoadedProject, MemoryStats, ProjectFaultWire,
     SampleStats, ServerConfig, ServerHello, ServerMsgBody, WIRE_PROTO_VERSION,
 };
 pub use slot::{

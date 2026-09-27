@@ -5,14 +5,16 @@ pub mod file_chunk;
 pub mod fs_api;
 pub mod hello;
 pub mod hello_auth;
+pub mod link_counters;
 pub mod output_wire_status;
 pub mod recovery_status;
 
 pub use access_entry_info::AccessEntryInfo;
 pub use api::{
     AvailableProject, FAULT_MESSAGE_CAP_BYTES, FAULT_NODES_CAP, FaultedNodeWire, HeartbeatIdentity,
-    LinkCounters, LoadedProject, MemoryStats, ProjectFaultWire, SampleStats, ServerMsgBody,
+    LoadedProject, MemoryStats, ProjectFaultWire, SampleStats, ServerMsgBody,
 };
+pub use link_counters::{LinkCounters, LinkResets};
 pub use config::ServerConfig;
 pub use file_chunk::{FileChangeKind, FileChunk, FileCursor};
 pub use fs_api::{FsRequest, FsResponse};

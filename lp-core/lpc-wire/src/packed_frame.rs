@@ -80,7 +80,7 @@ mod tests {
             if line.direction != TrafficDirection::BoardToHost {
                 continue;
             }
-            let msg: WireServerMessage = crate::json::from_str(line.json).unwrap();
+            let msg: WireServerMessage = crate::json::from_str(&line.json).unwrap();
             let json_line = line.json.len() + 4; // "\nM!" + "\n"
             // Exactly the JSON line's size: the firmware's buffer budget.
             let mut buf = vec![0u8; json_line];
@@ -105,7 +105,7 @@ mod tests {
         let line = traffic_lines()
             .find(|l| l.direction == TrafficDirection::BoardToHost)
             .unwrap();
-        let msg: WireServerMessage = crate::json::from_str(line.json).unwrap();
+        let msg: WireServerMessage = crate::json::from_str(&line.json).unwrap();
         for size in [0, 1, 2, 3, 8, 32] {
             let mut buf = vec![0u8; size];
             let mut table = LearnedTable::NEW;
