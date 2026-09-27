@@ -18,6 +18,10 @@ std = []
 log = ["dep:log"]
 # The deterministic fault-injecting simulator and the `link-bench` tool.
 sim = ["std"]
+# The comms lab (M3): the soak protocol both ends of an on-target run speak
+# (`lab::LabBoard` in the firmware, `lab::LabHost` in lp-cli, the emulator
+# test and the browser pages). no_std + alloc.
+lab = []
 
 [dependencies]
 log = { workspace = true, optional = true }
@@ -37,3 +41,7 @@ required-features = ["sim"]
 [[test]]
 name = "delivery_properties"
 required-features = ["sim"]
+
+[[test]]
+name = "lab_over_sim"
+required-features = ["sim", "lab"]

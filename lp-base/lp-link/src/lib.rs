@@ -38,6 +38,8 @@ pub mod crc;
 pub mod deframer;
 pub mod frame;
 mod inbox;
+#[cfg(feature = "lab")]
+pub mod lab;
 mod link;
 mod link_config;
 mod link_counters;
