@@ -278,8 +278,7 @@ pub fn App() -> Element {
         install_log_sink();
         let mut controller = StudioController::new(now_secs);
         controller.set_on_entry(log_to_js_console);
-        // Dev-only wire flags (`?lens-pause-ms=`, `?wire=`) and the page's reply
-        // encoding (JSON on macOS Web Serial, `wire_encoding_default`): before any
+        // Dev-only wire flags (`?lens-pause-ms=`, `?wire=`): before any
         // device connects, so every reader and cadence built after takes them.
         crate::dev_url_flags::install();
         // Device event trace (M0): persist lifecycle records across
