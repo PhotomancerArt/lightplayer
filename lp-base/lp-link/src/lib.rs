@@ -67,5 +67,7 @@ pub use link_event::{LinkEvent, ResetReason};
 pub use log_ring::LogRing;
 
 /// Time, in microseconds, from any epoch the edge likes. Integer: the C6 has
-/// no FPU (the repo's usual f64 seconds would be soft-float here).
+/// no FPU (the repo's usual f64 seconds would be soft-float here), and the
+/// link only ever takes differences (timers, round trips), never shows a
+/// timestamp. See the README's "Time".
 pub type Micros = u64;
