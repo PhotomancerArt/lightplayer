@@ -92,6 +92,12 @@ impl LabBoard {
             || self.stats_due
     }
 
+    /// A `stats` reply is owed: the edge builds its `extra` facts for the
+    /// next [`pump`](Self::pump) only then.
+    pub fn stats_due(&self) -> bool {
+        self.stats_due
+    }
+
     /// The edge wrote `n` log lines for a [`BoardAction::Log`].
     pub fn note_logs(&mut self, n: u32) {
         self.stats.logs_written += n;

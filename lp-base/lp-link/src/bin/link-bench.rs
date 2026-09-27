@@ -8,10 +8,10 @@
 //! deterministic from the seeds below, and says nothing about silicon until
 //! M3 repeats it on target.
 
+use lp_link::frame;
 use lp_link::sim::sim_rng::SimRng;
 use lp_link::sim::{Report, Scenario, Transport, Workload, run};
 use lp_link::{Arq, CrcKind, Framing, GoBackN, LinkConfig, NoArq, SelectiveRepeat, StopAndWait};
-use lp_link::{cobs, frame};
 
 type Gbn = GoBackN<127>;
 
@@ -320,7 +320,7 @@ fn crc() {
             };
             tried[kind] += 1;
             dec.clear();
-            if body.is_empty() || cobs::decode_into(&body, &mut dec).is_err() {
+            if body.is_empty() || frame::unwrap_stream(&body, &mut dec).is_err() {
                 continue;
             }
             let ok = match crc {

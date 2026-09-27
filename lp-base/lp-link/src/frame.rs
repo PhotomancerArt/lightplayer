@@ -142,12 +142,18 @@ pub fn encode_raw(crc: CrcKind, key: u32, header: &Header, body: &[u8], raw: &mu
     raw.extend_from_slice(&sum[..crc.len()]);
 }
 
-/// Wrap a raw frame for a byte stream: `0x00 COBS(raw) 0x00` into `out`.
+/// Wrap a raw frame for a byte stream: `0x00 COBS-FF(raw) 0x00` into `out`
+/// (no `0x00` and no `0xFF` between the delimiters; see [`cobs`]).
 pub fn wrap_stream(raw: &[u8], out: &mut Vec<u8>) {
     out.clear();
     out.push(0);
-    cobs::encode_into(raw, out);
+    cobs::encode_no_ff_into(raw, out);
     out.push(0);
+}
+
+/// Undo [`wrap_stream`]'s encoding (the bytes between the delimiters).
+pub fn unwrap_stream(body: &[u8], raw: &mut Vec<u8>) -> Result<(), cobs::CobsError> {
+    cobs::decode_no_ff_into(body, raw)
 }
 
 /// [`encode_raw`] then [`wrap_stream`].
@@ -180,7 +186,7 @@ pub fn verify(crc: CrcKind, key: u32, raw: &[u8]) -> Option<&[u8]> {
 
 /// Largest encoded frame (delimiters included) for a `body`-byte body.
 pub const fn max_encoded_len(body: usize, crc: CrcKind) -> usize {
-    2 + cobs::max_encoded_len(HEADER_LEN + body + crc.len())
+    2 + cobs::max_encoded_no_ff_len(HEADER_LEN + body + crc.len())
 }
 
 #[cfg(test)]
@@ -217,8 +223,9 @@ mod tests {
             encode(crc, 42, &h, b"body\0!", &mut raw, &mut out);
             assert_eq!((out[0], *out.last().unwrap()), (0, 0));
             assert!(!out[1..out.len() - 1].contains(&0));
+            assert!(!out.contains(&0xFF));
             let mut dec = Vec::new();
-            cobs::decode_into(&out[1..out.len() - 1], &mut dec).unwrap();
+            unwrap_stream(&out[1..out.len() - 1], &mut dec).unwrap();
             assert_eq!(verify(crc, 42, &dec), Some(&b"body\0!"[..]));
             assert_eq!(verify(crc, 43, &dec), None, "wrong session key must fail");
         }

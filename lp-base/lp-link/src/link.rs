@@ -100,7 +100,7 @@ impl<A: Arq> Link<A> {
     /// tells the peer we restarted).
     pub fn new(cfg: LinkConfig, nonce: u32) -> Self {
         let body_max = (cfg.max_payload as usize).max(SYN_LEN);
-        let max_frame = cobs::max_encoded_len(HEADER_LEN + body_max + cfg.crc.len());
+        let max_frame = cobs::max_encoded_no_ff_len(HEADER_LEN + body_max + cfg.crc.len());
         let rx_window = cfg.rx_window.min(A::MAX_WINDOW);
         Link {
             state: LinkState::Connecting,
@@ -223,7 +223,7 @@ impl<A: Arq> Link<A> {
                 Deframed::Frame => {
                     let mut raw = mem::take(&mut self.rx_raw);
                     raw.clear();
-                    let ok = match cobs::decode_into(self.deframer.frame(), &mut raw) {
+                    let ok = match frame::unwrap_stream(self.deframer.frame(), &mut raw) {
                         Ok(()) => self.on_frame(now, &raw),
                         Err(_) => {
                             self.counters.bad_frames += 1;
