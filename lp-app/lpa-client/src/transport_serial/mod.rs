@@ -3,24 +3,32 @@
 //! Provides generic async serial transport that can work with emulator or hardware serial.
 //! Factory functions create the appropriate transport for each use case.
 //!
-//! # Wire encoding
+//! # The link
 //!
-//! Every serial transport reads the board's stream through
-//! [`lpc_wire::WireStream`], so console lines, `M!{json}` lines and packed
-//! frames (`\n 0x00 'L' COBS 0x00`) all arrive, whichever the board is
-//! writing. Each one also **asks for packed** on connect: when the board's
-//! hello names this build's dictionary it writes
-//! `ClientRequest::SetEncoding` itself — after the hello, before the traffic
-//! that follows it — swallows the answer, and asks again (at most once per
-//! few seconds) if the board falls back to JSON mid-session
-//! ([`lpc_wire::PackOptIn`]). `LP_WIRE_ENCODING=json` turns the asking off
+//! A board's USB serial link is an lp-link since `WIRE_PROTO_VERSION` 30
+//! (plan `lp2025/2026-09-27-0215-lp-link-usb-cutover`): the hardware
+//! transport ([`create_hardware_serial_transport_pair_with_options`]) runs one
+//! [`lpc_wire::WireLinkPort`] per stream — native ports, emulated boards'
+//! `serial:tcp://` and `serial:ws://` doors, and the fake board alike. Lost or
+//! damaged bytes are resent under the messages, a link reset fails the
+//! requests it lost at once ([`crate::link_reset`]), and on each link session
+//! the transport **asks for packed** replies once the board's hello names
+//! this build's pack format. `LP_WIRE_ENCODING=json` turns the asking off
 //! ([`crate::wire_encoding_env`]).
+//!
+//! The fw-emu transport ([`create_emulator_serial_transport_pair`]) is not a
+//! USB link: fw-emu speaks `M!{json}` lines over a lossless syscall pipe
+//! (plan D3), read through [`lpc_wire::WireStream`].
 
 mod client;
 #[cfg(feature = "serial")]
 mod emulator;
 #[cfg(feature = "serial")]
 mod hardware;
+#[cfg(feature = "serial")]
+mod link_nonce;
+#[cfg(feature = "serial")]
+mod link_pump;
 
 pub use client::AsyncSerialClientTransport;
 #[cfg(feature = "serial")]
@@ -30,3 +38,5 @@ pub use hardware::{
     HardwareSerialOptions, SerialLineObserver, create_hardware_serial_transport_pair,
     create_hardware_serial_transport_pair_with_options,
 };
+#[cfg(feature = "serial")]
+pub use link_nonce::fresh_link_nonce;

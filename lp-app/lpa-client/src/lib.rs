@@ -13,6 +13,7 @@ pub mod device_push;
 pub mod device_remove;
 pub mod device_stamp;
 pub mod file_sync_ops;
+pub mod link_reset;
 #[cfg(feature = "host")]
 pub mod local;
 pub mod project_deploy;
@@ -50,6 +51,7 @@ pub use client_observer::{
 pub use device_push::{PushReport, push_project};
 pub use device_remove::{READY_ATTEMPTS, RemoveReport, remove_project, wait_until_ready};
 pub use device_stamp::{MANIFEST_CHUNK_BYTES, write_file_in_chunks};
+pub use link_reset::{LINK_RESET_PREFIX, is_link_reset, link_reset_error, reset_reason_words};
 #[cfg(feature = "host")]
 pub use local::{
     AsyncLocalClientTransport, AsyncLocalServerTransport, create_local_transport_pair,
