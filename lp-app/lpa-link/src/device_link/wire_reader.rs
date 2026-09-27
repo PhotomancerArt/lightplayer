@@ -1,37 +1,34 @@
-//! One port's reading half: bytes in, lines and wire messages out, and the
-//! packed-reply opt-in kept honest along the way.
+//! What a browser port's reads are, and the page-wide wire flags every
+//! port reads them with.
 //!
-//! [`WireReader`] is [`lpc_wire::WireStream`] (the frame-aware splitter every
-//! host reader shares) plus [`lpc_wire::PackOptIn`] (when to ask a board to
-//! pack its replies, and when to ask again). It exists so a port with **more
-//! than one drainer** keeps one of each: the browser's Web Serial port is
-//! drained by the model's link pump and, while the editor lens or a coarse
-//! effect borrows the wire, by an `lpa-client` conversation. Two splitters
-//! would each tear the frame that straddles the handover; two opt-in states
-//! would disagree about what the board was asked.
+//! Since `WIRE_PROTO_VERSION` 30 a board's USB serial link is an lp-link
+//! (plan `lp2025/2026-09-27-0215-lp-link-usb-cutover`). Each Web Serial port
+//! and each tab-hosted board keeps ONE [`lpc_wire::WireLinkPort`] for its whole
+//! life, serviced by its own loop
+//! ([`LinkPortService`](crate::device_link::link_port_service::LinkPortService));
+//! what the port decoded comes out here as [`WireRead`]s, the shape every
+//! drainer already reads: the model's link pump and, while a coarse effect or
+//! the editor lens borrows the wire, an `lpa-client` conversation (ADR
+//! 2026-09-01's exclusive borrow stays — plan D2 — but a borrower now drains
+//! decoded messages, never raw bytes, so there is no partial to tear).
 //!
-//! Sans-IO: time is the caller's (`now_ms`), and the opt-in request is handed
-//! back as [`WireRead::Send`] for the caller to write.
+//! Two page-wide dev flags live here because every port reads them when it is
+//! made: [`set_packed_replies_wanted`] (Studio's `?wire=json|packed`) and
+//! [`set_device_log_level`] (`?device-log=<level>`).
 //!
-//! It also says, once per change, what the link's encoding is and why
-//! ([`WireRead::Note`]) — a board that stays on JSON because its pack format
-//! is not this build's is otherwise invisible, since every reader decodes
-//! both forms. And when the stream's learned table loses step with the
-//! board's (a packed frame lost in flight), it drops frames until the board
-//! resets, asks for that reset through the opt-in, and says so once.
+//! # The `M!`-era reader
 //!
-//! One dev-only rider ([`WireReader::with_device_log_level`], Studio's
-//! `?device-log=<level>`): once the board has said hello and the opt-in is
-//! settled, the reader asks it once for that log level, and swallows the
-//! answer into a note — the same shape as the opt-in, so no drainer sees a
-//! reply to a request it did not make.
+//! [`WireReader`] is the `M!`-line splitter plus the packed-reply opt-in that
+//! every port kept before the cut-over. Only `ByteStreamLink` (the host/fake
+//! byte-stream link, plan phase P3) still reads through it; it goes when that
+//! link keeps a `WireLinkPort` instead. Nothing in the browser uses it.
 
 use std::cell::Cell;
 
 use lpc_wire::server::api::LogLevel;
 use lpc_wire::{
     ClientMessage, ClientRequest, PACK_FORMAT_VERSION, PACK_OPT_IN_REQUEST_ID, PackOptIn,
-    ServerMsgBody, WIRE_PROTO_VERSION, WIRE_STREAM_MAX_FRAME, WireChunk, WireEncoding,
+    ServerMsgBody, WIRE_PROTO_VERSION, WireChunk, WireEncoding,
     WireServerMessage, WireStream,
 };
 
@@ -71,9 +68,9 @@ pub fn packed_replies_wanted() -> bool {
     PACKED_REPLIES_WANTED.with(Cell::get)
 }
 
-/// The id the dev log-level request goes out with: one below the opt-in's,
-/// so it is as far from any request counter and still exact in JavaScript.
-pub const DEVICE_LOG_LEVEL_REQUEST_ID: u64 = PACK_OPT_IN_REQUEST_ID - 1;
+/// The id the dev log-level request goes out with (a link port's own; see
+/// `lpc_wire::wire_link_port`).
+pub use lpc_wire::DEVICE_LOG_LEVEL_REQUEST_ID;
 
 /// One thing a [`WireReader`] produced, in stream order.
 #[derive(Debug)]
@@ -85,11 +82,19 @@ pub enum WireRead {
     /// A packed frame that could not be delivered (torn, too long, not
     /// decodable). Never silence.
     Error(String),
-    /// Write this request to the board now, as an `M!{json}` line.
+    /// Write this request to the board now, as an `M!{json}` line. Only the
+    /// `M!`-era [`WireReader`] makes these; a link port writes its own.
     Send(ClientMessage),
     /// The link's encoding changed, or was settled, and this says how. At
     /// most one per change; never per frame.
     Note(String),
+    /// The link was reset (the board restarted, a frame went unanswered too
+    /// long, the host asked): every request in flight on it is lost. A
+    /// drainer fails what it is waiting for NOW rather than waiting out its
+    /// budget (plan D9); the model's pump turns it into a journal note. The
+    /// text is that note
+    /// ([`link_reset_note`](crate::device_link::port_read_map::link_reset_note)).
+    LinkReset(String),
 }
 
 /// One wire message and the form it came in.
@@ -120,7 +125,7 @@ enum Told {
     FellBack,
 }
 
-/// One port's reader. See the module docs.
+/// One port's `M!`-era reader (see the module docs: `ByteStreamLink` only).
 pub struct WireReader {
     stream: WireStream,
     opt_in: PackOptIn,
@@ -403,37 +408,6 @@ fn note_for(
     Some(text)
 }
 
-/// The length of the longest prefix of `bytes` that ends on a boundary: after
-/// a newline outside any packed frame, or after a packed frame's closing
-/// `0x00`. For a drainer that hands the rest back for the next one to read
-/// (the tab emulator's conversation io), so a packed frame is never cut —
-/// which a plain "up to the last newline" cut does, since a frame may hold
-/// any byte, `\n` included.
-///
-/// `bytes` must start on a boundary (the previous call's cut). A frame body
-/// longer than [`WIRE_STREAM_MAX_FRAME`] is treated as the torn frame it is
-/// and the whole buffer is released, so a stray `0x00` cannot hold bytes back
-/// forever.
-pub fn complete_prefix_len(bytes: &[u8]) -> usize {
-    let mut cut = 0;
-    let mut frame_start: Option<usize> = None;
-    for (at, &byte) in bytes.iter().enumerate() {
-        match (byte, frame_start) {
-            (0, None) => frame_start = Some(at),
-            (0, Some(_)) => {
-                frame_start = None;
-                cut = at + 1;
-            }
-            (b'\n', None) => cut = at + 1,
-            _ => {}
-        }
-    }
-    match frame_start {
-        Some(start) if bytes.len() - start > WIRE_STREAM_MAX_FRAME => bytes.len(),
-        _ => cut,
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -640,26 +614,6 @@ mod tests {
         let mut reads = Vec::new();
         reader.push(b"M!{\"id\":0,\"msM![INIT] log\n", 0, |r| reads.push(r));
         assert!(matches!(&reads[0], WireRead::Frame(frame) if frame.message.is_err()));
-    }
-
-    #[test]
-    fn the_complete_prefix_never_cuts_a_packed_frame() {
-        let frame = packed(&other(10));
-        let body = &frame[1..];
-        assert!(
-            body.contains(&b'\n'),
-            "id 10 puts a newline byte inside the frame body"
-        );
-        let mut bytes = b"boot line\n".to_vec();
-        bytes.extend_from_slice(&frame);
-        bytes.extend_from_slice(b"half a li");
-
-        // Whole: up to the frame's closing zero, the partial line held back.
-        assert_eq!(complete_prefix_len(&bytes), bytes.len() - "half a li".len());
-        // Cut inside the frame: back to before it, whatever it holds.
-        let inside = 10 + frame.len() - 2;
-        assert_eq!(complete_prefix_len(&bytes[..inside]), 11);
-        assert_eq!(complete_prefix_len(b"no newline"), 0);
     }
 
     #[test]
