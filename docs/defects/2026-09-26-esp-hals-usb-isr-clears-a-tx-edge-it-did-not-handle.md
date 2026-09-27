@@ -63,4 +63,4 @@ too early, and no gate in front of a write can see it.
 
 **Incidents.**
 
-- 2026-09-27 — main went red at a10ef3c8c (#853, a Studio-only change): CI's C6 image hit the lost wake deterministically in three emulator tests (a 250 ms first-write stall dropped the hello).
+- 2026-09-27 — main went red at a10ef3c8c (#853, a Studio-only change): CI's C6 image hit the lost wake deterministically in three emulator tests (a 250 ms first-write stall dropped the hello). Main went green again at c5f973664 by timing luck.
