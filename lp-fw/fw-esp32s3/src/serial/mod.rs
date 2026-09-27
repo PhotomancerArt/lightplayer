@@ -8,11 +8,11 @@
 #[cfg(feature = "esp32s3")]
 pub mod usb_serial;
 
-// The app path owns io_task. No S3 harness names it today (the C6 gates a list
-// of harnesses in here); when one does, widen this the way the C6 does rather
-// than reaching for `fw_harness` alone.
+// The app path owns the host link (lp-link). No S3 harness names it today (the
+// C6 gates a list of harnesses in here); when one does, widen this the way the
+// C6 does rather than reaching for `fw_harness` alone.
 #[cfg(all(feature = "esp32s3", not(fw_harness)))]
-pub mod io_task;
+pub mod usb_link_task;
 
 #[cfg(all(feature = "esp32s3", not(fw_harness)))]
-pub use io_task::io_task;
+pub use usb_link_task::usb_link_task;

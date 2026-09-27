@@ -119,7 +119,8 @@ use {
     fw_esp32_common::hardware::manifest_loader::load_hardware_manifest,
     fw_esp32_common::server_loop::run_server_loop,
     fw_esp32_common::time::Esp32TimeProvider,
-    fw_esp32_common::{boot, logger, lp_fs, transport},
+    fw_esp32_common::usb_link::{UsbLinkShared, UsbLinkTransport},
+    fw_esp32_common::{boot, log_ring_logger, lp_fs},
     hardware::button::Esp32GpioButtonDriver,
     lp_gfx_lpvm::TargetLpvmGraphics,
     lpa_server::{ButtonService, LpGraphics, LpServer},
@@ -128,7 +129,7 @@ use {
     lpfs::LpFsMemory,
     lpfs::lp_path::AsLpPath,
     output::{Esp32OutputProvider, Esp32S3RmtWs281xDriver},
-    serial::io_task,
+    serial::usb_link_task,
 };
 
 esp_bootloader_esp_idf::esp_app_desc!();
@@ -182,7 +183,13 @@ fn panic(info: &core::panic::PanicInfo) -> ! {
         esp_hal::system::software_reset()
     }
     #[cfg(not(fw_harness))]
-    recovery::panic_path::stage_and_reset(info)
+    {
+        // lp-link's text mark (the C6's twin): `0xFF` never occurs inside a
+        // COBS-FF frame, so it abandons whatever frame the panic interrupted
+        // on the host's side, and the report after it arrives as text.
+        esp_println::Printer::write_bytes(&[0xFF, b'\r', b'\n']);
+        recovery::panic_path::stage_and_reset(info)
+    }
 }
 
 /// Harness entrypoint. Harnesses own the peripheral singleton themselves
@@ -371,7 +378,7 @@ fn heartbeat_memory_stats() -> Option<lpc_wire::server::MemoryStats> {
 #[cfg(not(fw_harness))]
 struct FirmwareApp {
     server: LpServer,
-    transport: transport::StreamingMessageRouterTransport,
+    transport: UsbLinkTransport,
     time_provider: Esp32TimeProvider,
     watchdog: recovery::watchdog::WatchdogFeeder,
 }
@@ -406,24 +413,25 @@ fn boot_firmware(spawner: embassy_executor::Spawner) -> FirmwareApp {
     // whenever the I/O task has gone silent, so arming it before there is an
     // I/O task to spawn would reset the board every `BOOT_TIMEOUT_MS` forever.
     // Baseline 0 matches the server loop's time provider, which also starts at
-    // ~0; the first io_task tick re-baselines within milliseconds.
+    // ~0; the first link-task tick re-baselines within milliseconds.
     let watchdog = recovery::watchdog::WatchdogFeeder::start(rwdt, 0);
     let boot_guard = lp_recovery::enter(lp_recovery::FrameKind::Boot, "boot").ok();
 
     start_runtime(timg0, sw_int);
     esp_println::println!("[INIT] runtime started");
 
-    spawner.spawn(io_task(usb_device).unwrap());
-    esp_println::println!("[INIT] I/O task spawned");
+    // The host link runs lp-link over USB-Serial-JTAG (plan
+    // `lp-link-usb-cutover`): a random session nonce per boot, so a host
+    // learns the board restarted.
+    let usb_link = UsbLinkShared::leak(esp_hal::rng::Rng::new().random());
+    spawner.spawn(usb_link_task(usb_device, usb_link).unwrap());
+    esp_println::println!("[INIT] USB link task spawned");
 
-    // From here on `log::*` reaches the host over the same serial link; the
-    // `esp_println!` lines above are the pre-transport ones.
-    logger::init(serial::io_task::log_write_to_outgoing);
+    // From here on `log::*` rides the link's log channel; the `esp_println!`
+    // lines above are raw text outside frames.
+    log_ring_logger::init();
 
-    let (incoming, _) = serial::io_task::get_message_channels();
-    let (write_request, write_result) = serial::io_task::get_server_write_channels();
-    let transport =
-        transport::StreamingMessageRouterTransport::new(incoming, write_request, write_result);
+    let transport = UsbLinkTransport::new(usb_link);
 
     let base_fs = mount_filesystem(flash);
 
