@@ -42,6 +42,9 @@ pub enum LpFeature {
     /// Playlist node runtime.
     #[serde(rename = "node.playlist")]
     NodePlaylist,
+    /// Power-button (deep-sleep power-off) node runtime.
+    #[serde(rename = "node.power-button")]
+    NodePowerButton,
     /// Control-radio node runtime.
     #[serde(rename = "node.radio")]
     NodeRadio,
@@ -78,12 +81,13 @@ impl LpFeature {
     /// Every feature, in declaration order. Iteration over the registry goes
     /// through this const so call sites stay wildcard-free: adding a variant
     /// without extending it is caught by [`tests::all_is_total_and_unique`].
-    pub const ALL: [LpFeature; 15] = [
+    pub const ALL: [LpFeature; 16] = [
         LpFeature::NodeButton,
         LpFeature::NodeClock,
         LpFeature::NodeFluid,
         LpFeature::NodeFixture,
         LpFeature::NodePlaylist,
+        LpFeature::NodePowerButton,
         LpFeature::NodeRadio,
         LpFeature::NodeShader,
         LpFeature::NodeTexture,
@@ -104,6 +108,7 @@ impl LpFeature {
             LpFeature::NodeFluid => "node.fluid",
             LpFeature::NodeFixture => "node.fixture",
             LpFeature::NodePlaylist => "node.playlist",
+            LpFeature::NodePowerButton => "node.power-button",
             LpFeature::NodeRadio => "node.radio",
             LpFeature::NodeShader => "node.shader",
             LpFeature::NodeTexture => "node.texture",
@@ -125,6 +130,7 @@ impl LpFeature {
             NodeKind::Module => None,
             NodeKind::Output => None,
             NodeKind::Button => Some(LpFeature::NodeButton),
+            NodeKind::PowerButton => Some(LpFeature::NodePowerButton),
             NodeKind::Clock => Some(LpFeature::NodeClock),
             NodeKind::Texture => Some(LpFeature::NodeTexture),
             NodeKind::Shader => Some(LpFeature::NodeShader),
@@ -176,16 +182,17 @@ mod tests {
                 LpFeature::NodeFluid => 2,
                 LpFeature::NodeFixture => 3,
                 LpFeature::NodePlaylist => 4,
-                LpFeature::NodeRadio => 5,
-                LpFeature::NodeShader => 6,
-                LpFeature::NodeTexture => 7,
-                LpFeature::SvcButton => 8,
-                LpFeature::SvcRadioEspnow => 9,
-                LpFeature::GfxLpvm => 10,
-                LpFeature::GfxNull => 11,
-                LpFeature::GfxWgpu => 12,
-                LpFeature::DiagUnwind => 13,
-                LpFeature::ShaderF32 => 14,
+                LpFeature::NodePowerButton => 5,
+                LpFeature::NodeRadio => 6,
+                LpFeature::NodeShader => 7,
+                LpFeature::NodeTexture => 8,
+                LpFeature::SvcButton => 9,
+                LpFeature::SvcRadioEspnow => 10,
+                LpFeature::GfxLpvm => 11,
+                LpFeature::GfxNull => 12,
+                LpFeature::GfxWgpu => 13,
+                LpFeature::DiagUnwind => 14,
+                LpFeature::ShaderF32 => 15,
             }
         }
         for (i, feature) in LpFeature::ALL.iter().enumerate() {
@@ -203,6 +210,7 @@ mod tests {
             "node.fluid",
             "node.fixture",
             "node.playlist",
+            "node.power-button",
             "node.radio",
             "node.shader",
             "node.texture",
@@ -223,7 +231,7 @@ mod tests {
         }
     }
 
-    /// Node-kind mapping: gated kinds map onto the eight `node.*` features,
+    /// Node-kind mapping: gated kinds map onto the nine `node.*` features,
     /// ungated kinds map to `None`, and Shader/ComputeShader share a gate —
     /// mirrors `every_node_kind_is_explicitly_gated_or_always_on` in
     /// lpc-engine.
@@ -233,6 +241,7 @@ mod tests {
             (NodeKind::Module, None),
             (NodeKind::Output, None),
             (NodeKind::Button, Some(LpFeature::NodeButton)),
+            (NodeKind::PowerButton, Some(LpFeature::NodePowerButton)),
             (NodeKind::Clock, Some(LpFeature::NodeClock)),
             (NodeKind::Texture, Some(LpFeature::NodeTexture)),
             (NodeKind::Shader, Some(LpFeature::NodeShader)),

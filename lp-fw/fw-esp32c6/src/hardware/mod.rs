@@ -11,6 +11,9 @@
 // driver itself is untouched (E-product).
 #[cfg(any(not(fw_harness), feature = "test_button", feature = "test_gpio_input"))]
 pub mod button;
+// Power-off belongs to the product server loop only.
+#[cfg(all(not(fw_harness), feature = "server"))]
+pub mod power;
 // The radio *driver* is compiled out of P4 stress builds: there the radio
 // stack belongs to the load generators in `stress.rs` instead.
 #[cfg(all(

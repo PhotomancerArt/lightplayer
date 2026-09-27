@@ -16,6 +16,18 @@ pub enum HardwareSubcommand {
     Manifest(ManifestArgs),
     /// Calibrate board-visible GPIO labels with ESP32 firmware.
     Calibrate(CalibrateArgs),
+    /// Write a board manifest to a device's /hardware.json (as Studio's
+    /// flash does). Takes effect on the next boot.
+    Stamp(StampArgs),
+}
+
+#[derive(Debug, Args)]
+pub struct StampArgs {
+    /// The device, e.g. serial:/dev/cu.usbmodem2101 or serial:auto.
+    pub host: String,
+    /// The board manifest JSON to write, e.g.
+    /// lp-core/lpc-hardware/boards/seeed/xiao-esp32-c6.json.
+    pub manifest: PathBuf,
 }
 
 #[derive(Debug, Args)]

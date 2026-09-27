@@ -12,6 +12,9 @@
     },
     "playlist": {
       "ref": "./playlist.json"
+    },
+    "power": {
+      "ref": "./power.json"
     }
   },
   "provenance": {

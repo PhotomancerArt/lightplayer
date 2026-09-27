@@ -10,6 +10,9 @@
     "output": {
       "ref": "./output.json"
     },
+    "power": {
+      "ref": "./power.json"
+    },
     "shader": {
       "ref": "./shader.json"
     }
