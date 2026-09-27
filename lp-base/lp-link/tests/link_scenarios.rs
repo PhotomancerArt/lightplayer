@@ -271,6 +271,48 @@ fn a_control_message_overtakes_a_big_proto_message() {
     assert_eq!((delivered[1].0, delivered[1].1), (CH_PROTO, 16 * 1024));
 }
 
+/// Two channels mid-message at once, each nearly the budget: the window must
+/// stay open for both to finish (found by `decoder_fuzz`: counting partial
+/// messages against the window closed it with neither able to complete).
+#[test]
+fn two_big_messages_on_two_channels_both_arrive() {
+    let (mut a, mut b) = pair::<SelectiveRepeat>(LinkConfig::usb());
+    let mut now = 0;
+    handshake(&mut a, &mut b, &mut now);
+    let _ = drain(&mut b);
+    a.send(CH_PROTO, &[1; 12 * 1024]).unwrap();
+    // Most of the proto message arrives before the control one is queued.
+    let mut frames = 0;
+    while frames < 40 {
+        now += 100;
+        if let Some(f) = a.poll_transmit(now) {
+            let f = f.to_vec();
+            b.on_bytes(now, &f);
+            frames += 1;
+        }
+        while let Some(f) = b.poll_transmit(now) {
+            let f = f.to_vec();
+            a.on_bytes(now, &f);
+        }
+    }
+    a.send(CH_CONTROL, &[2; MAX_MESSAGE - 500]).unwrap();
+    let mut got = vec![];
+    for _ in 0..500 {
+        now += 1_000;
+        shuttle(&mut a, &mut b, now);
+        for ev in drain(&mut b) {
+            if let LinkEvent::Message { channel, data } = ev {
+                got.push((channel, data.len()));
+            }
+        }
+    }
+    assert_eq!(
+        got,
+        vec![(CH_CONTROL, MAX_MESSAGE - 500), (CH_PROTO, 12 * 1024)]
+    );
+    assert!(a.is_idle());
+}
+
 /// Fair share for logs: with a proto stream that always has a frame ready and
 /// log lines always waiting, no more than `datagram_every` data frames go in
 /// a row, and every log line arrives.

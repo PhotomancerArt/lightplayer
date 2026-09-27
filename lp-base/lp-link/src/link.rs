@@ -846,10 +846,16 @@ impl<A: Arq> Link<A> {
         );
     }
 
-    /// Frames past our ACK we can take now. A frame may complete a message,
-    /// which the inbox charges [`EVENT_COST`] on top of its bytes.
+    /// Frames past our ACK we can take now: room left in the receive budget
+    /// once what waits for the application is counted. A frame may complete
+    /// a message, which the inbox charges [`EVENT_COST`] on top of its bytes.
+    ///
+    /// Partial messages do not close the window: they drain only as more
+    /// frames arrive, so counting them could leave two channels mid-message
+    /// and nothing able to move (the fuzzer found it). Each channel's own
+    /// room check counts its partial instead.
     fn adv_window(&self) -> u8 {
-        let used = self.inbox.bytes() + self.arq.reorder_bytes();
+        let used = self.inbox.ready_bytes() + self.arq.reorder_bytes();
         let per_frame = self.cfg.max_payload as usize + EVENT_COST;
         let free = self.inbox.budget().saturating_sub(used) / per_frame;
         free.min(self.cfg.rx_window.min(A::MAX_WINDOW) as usize) as u8

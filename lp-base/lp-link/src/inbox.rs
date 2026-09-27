@@ -119,7 +119,12 @@ impl Inbox {
         self.oversize
     }
 
-    /// Bytes queued for the application or reassembling (charged).
+    /// Bytes queued for the application (charged).
+    pub fn ready_bytes(&self) -> usize {
+        self.ready_bytes
+    }
+
+    /// Bytes queued for the application (charged) or reassembling.
     pub fn bytes(&self) -> usize {
         self.ready_bytes + self.partials.iter().map(Vec::len).sum::<usize>()
     }
