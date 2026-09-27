@@ -189,36 +189,22 @@ fn light_player(uid: &str) -> FakeEsp32Device {
     )))
 }
 
-/// Run a throwaway host link against the device until its hello, so the next
-/// link to open it lands MID-STREAM: the boot banner is already gone, exactly
-/// like connecting to a board that has been running for an hour. (Since
-/// lp-link the board says hello first on every link session, so the next
-/// link hears one too; what it cannot hear is the boot.)
+/// Drain the device's boot text, so the next link to open it lands
+/// MID-STREAM: the boot banner is already gone, exactly like connecting to a
+/// board that has been running for an hour. (Since lp-link a board says
+/// hello first on every link session, so the next link hears one unless the
+/// board is starving its answers; what it can no longer hear is the boot.)
 fn run_past_the_boot_hello(device: &FakeEsp32Device) {
     let mut stream = crate::providers::fake_device::FakeDeviceByteStream::new(device.clone());
-    let mut port = lpc_wire::WireLinkPort::new(0x7E57_0001, false);
-    let started = Instant::now();
-    let now = || started.elapsed().as_micros() as u64;
     let mut buf = [0u8; 4096];
-    let mut seen = Vec::new();
+    let mut seen = String::new();
     let deadline = Instant::now() + RUN_TIMEOUT;
-    loop {
-        while let Some(frame) = port.poll_transmit(now()) {
-            stream.write_all(frame).expect("the fake is alive");
-        }
+    while !seen.contains("starting server loop") {
         let read = stream.read_available(&mut buf).expect("the fake is alive");
-        port.on_bytes(now(), &buf[..read]);
-        while let Some(read) = port.poll_read() {
-            match read {
-                lpc_wire::PortRead::Message(payload) if payload.json.contains("\"hello\"") => {
-                    return;
-                }
-                other => seen.push(format!("{other:?}")),
-            }
-        }
+        seen.push_str(&String::from_utf8_lossy(&buf[..read]));
         assert!(
             Instant::now() < deadline,
-            "the fake never said hello; saw: {seen:?}"
+            "the fake never finished booting; saw: {seen}"
         );
         std::thread::sleep(Duration::from_millis(2));
     }

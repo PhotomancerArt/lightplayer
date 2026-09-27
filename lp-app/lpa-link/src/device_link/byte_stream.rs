@@ -52,7 +52,7 @@
 //!   non-sticky.
 
 use std::collections::VecDeque;
-use std::sync::{Arc, Mutex, MutexGuard};
+use std::sync::{Arc, Mutex, MutexGuard, Weak};
 
 use lpa_devices::link::{Link, LinkCommand, LinkEvent, LinkInfo, ResetKind};
 use lpc_wire::{ClientMessage, LinkCounters, PortRead, WireLinkPort};
@@ -90,6 +90,20 @@ impl<S: DeviceByteStream> Clone for ByteStreamPort<S> {
         Self {
             core: Arc::clone(&self.core),
         }
+    }
+}
+
+/// A [`ByteStreamPort`] that does not keep its link alive: for a registry
+/// that must not outlive the link (the fake board remembers the last link
+/// opened on it this way).
+pub struct WeakByteStreamPort<S: DeviceByteStream> {
+    core: Weak<Mutex<LinkCore<S>>>,
+}
+
+impl<S: DeviceByteStream> WeakByteStreamPort<S> {
+    /// The port, while its link is alive.
+    pub fn upgrade(&self) -> Option<ByteStreamPort<S>> {
+        self.core.upgrade().map(|core| ByteStreamPort { core })
     }
 }
 
@@ -178,6 +192,13 @@ impl<S: DeviceByteStream> ByteStreamLink<S> {
 }
 
 impl<S: DeviceByteStream> ByteStreamPort<S> {
+    /// A handle that does not keep the link alive.
+    pub fn downgrade(&self) -> WeakByteStreamPort<S> {
+        WeakByteStreamPort {
+            core: Arc::downgrade(&self.core),
+        }
+    }
+
     /// Queue one request on the link and write what it produced.
     pub fn send(&self, message: &ClientMessage) -> Result<(), String> {
         let json = lpc_wire::json::to_string(message).map_err(|error| error.to_string())?;

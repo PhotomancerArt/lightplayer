@@ -22,6 +22,8 @@ use lpc_wire::lp_link::{CH_PROTO, Micros};
 use lpc_wire::messages::ClientMessage;
 use lpfs::{LpFs, LpFsMemory};
 
+use crate::device_link::byte_stream::{ByteStreamPort, WeakByteStreamPort};
+use crate::providers::fake_device::FakeDeviceByteStream;
 use crate::providers::fake_device::failure_injection::FakeFailurePlan;
 use crate::providers::fake_device::fake_board_link::{
     FakeBoardLink, FakeLinkInput, FakeSendOutcome,
@@ -43,6 +45,10 @@ const BLANK_FLASH_EMIT_INTERVAL: Duration = Duration::from_millis(100);
 #[derive(Clone)]
 pub struct FakeEsp32Device {
     inner: Arc<Mutex<FakeDeviceCore>>,
+    /// The host's end of the last link attached to this device (see
+    /// `device_link::fake::fake_host_port`). Beside the core, not in it: the
+    /// port locks its link and then the device, never the other way round.
+    host_port: Arc<Mutex<Option<WeakByteStreamPort<FakeDeviceByteStream>>>>,
 }
 
 impl FakeEsp32Device {
@@ -73,6 +79,7 @@ impl FakeEsp32Device {
                 loaded_projects: Vec::new(),
                 pending_loads: std::collections::BTreeMap::new(),
                 packed_frames_emitted: 0,
+                session_hellos: 0,
                 unanswered: std::collections::BTreeSet::new(),
                 clock: Instant::now(),
                 boots: 0,
@@ -82,7 +89,25 @@ impl FakeEsp32Device {
                 cut_armed: false,
                 premature_sniffer: LinkSniffer::usb(),
             })),
+            host_port: Arc::new(Mutex::new(None)),
         }
+    }
+
+    /// Remember the host's end of the link just attached (weakly).
+    pub(crate) fn set_host_port(&self, port: WeakByteStreamPort<FakeDeviceByteStream>) {
+        *self
+            .host_port
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(port);
+    }
+
+    /// The host's end of the last link attached, while it is alive.
+    pub(crate) fn host_port(&self) -> Option<ByteStreamPort<FakeDeviceByteStream>> {
+        self.host_port
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .as_ref()
+            .and_then(WeakByteStreamPort::upgrade)
     }
 
     /// How many `ClientRequest::Reboot`s this device's server has ACCEPTED,
@@ -99,6 +124,13 @@ impl FakeEsp32Device {
     /// host opted in (`ClientRequest::SetEncoding`) and was answered.
     pub fn packed_frames_emitted(&self) -> usize {
         self.lock().packed_frames_emitted
+    }
+
+    /// Link sessions this device has said hello on, cumulative across boots:
+    /// one per host link that came up (a reopened port, a reboot), since the
+    /// board says hello first on every session.
+    pub fn session_hellos(&self) -> usize {
+        self.lock().session_hellos
     }
 
     /// Install (or replace) the stream failure plan. Byte thresholds count
@@ -299,6 +331,8 @@ pub(crate) struct FakeDeviceCore {
     pending_loads: std::collections::BTreeMap<u64, lpc_model::LpPathBuf>,
     /// Replies written packed, cumulative across boots.
     packed_frames_emitted: usize,
+    /// Session hellos sent, cumulative across boots.
+    session_hellos: usize,
     /// The device's clock for its link (any monotonic origin).
     clock: Instant,
     /// Boots so far: each boot's link gets its own nonce.
@@ -561,10 +595,17 @@ impl FakeDeviceCore {
     fn queue_reply(&mut self, frame: lpc_wire::WireServerMessage) {
         if let (0, lpc_wire::ServerMsgBody::Hello(hello)) = (frame.id, &frame.msg) {
             self.boot_hello = Some(hello.clone());
-            let owed = self
-                .link
-                .as_ref()
-                .is_some_and(|link| link.is_up() && !link.hello_sent());
+            // A starved board drops its session hello with every other
+            // answer (see `service_link`).
+            let starved = matches!(
+                &self.script.boot,
+                FakeBootState::LightPlayer(lp) if lp.drop_responses
+            );
+            let owed = !starved
+                && self
+                    .link
+                    .as_ref()
+                    .is_some_and(|link| link.is_up() && !link.hello_sent());
             if owed && !self.outbox.iter().any(is_hello) {
                 self.outbox.push_front(frame);
             }
@@ -629,6 +670,9 @@ impl FakeDeviceCore {
                 FakeSendOutcome::Sent { packed } => {
                     if packed {
                         self.packed_frames_emitted += 1;
+                    }
+                    if frame.id == 0 && is_hello(frame) {
+                        self.session_hellos += 1;
                     }
                     self.outbox.pop_front();
                     if let Some(flood) = self.failure.log_flood_line.clone() {
