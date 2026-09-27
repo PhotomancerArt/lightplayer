@@ -96,6 +96,8 @@ use fw_esp32_common::boot;
 mod hardware;
 #[cfg(all(feature = "heap_map_diag", not(fw_harness)))]
 mod heap_map;
+#[cfg(all(feature = "alloc_watch_diag", not(fw_harness)))]
+mod alloc_watch;
 pub use fw_esp32_common::logger;
 // jit_fns (JIT host-log symbol) now lives in fw-esp32-common; linked via the
 // extern reference from the JIT builtin table.
@@ -229,6 +231,8 @@ fn heartbeat_memory_stats() -> Option<lpc_wire::server::MemoryStats> {
     // Piggybacks on the heartbeat cadence: one scan of the main stack per
     // second, a log line only when the mark grows.
     stack_probe::log_if_grown("heartbeat");
+    #[cfg(feature = "alloc_watch_diag")]
+    alloc_watch::drain();
     esp32_memory_stats().map(|(free_bytes, used_bytes)| lpc_wire::server::MemoryStats {
         free_bytes,
         used_bytes,
@@ -577,6 +581,8 @@ fn boot_firmware(spawner: embassy_executor::Spawner) -> FirmwareApp {
         graphics,
     );
     server.set_read_headroom_probe(Some(read_headroom_probe));
+    #[cfg(feature = "alloc_watch_diag")]
+    alloc_watch::install();
     // Wire hello identity: compile-time provenance from build.rs, injected
     // into the server (sans-IO: the server never reads env/git itself),
     // plus the boot-time read of the root-stamped device identity. The

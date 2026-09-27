@@ -65,6 +65,22 @@ pub async fn run_workload(
     {
         return Ok(outcome);
     }
+    if steps == WorkloadArg::StudioLens {
+        let loaded = client.project_list_loaded().await.unwrap_or_default();
+        let shader = loaded
+            .iter()
+            .find(|p| p.handle == handle)
+            .map(|p| format!("{}/shader.glsl", p.path.as_str()));
+        eprintln!("Sending Studio's recorded read shapes (shader at {shader:?})...");
+        match super::studio_lens::studio_lens(client, emulator_arc, handle, shader).await {
+            Ok(log) => eprintln!("studio-lens: {} reads", log.labels.len()),
+            Err(e) if is_profile_stop_error(&e) => {
+                eprintln!("studio-lens: profile gate stopped the run");
+                return Ok(WorkloadOutcome::ProfileStopped);
+            }
+            Err(e) => eprintln!("studio-lens: failed (continuing): {e:#}"),
+        }
+    }
 
     eprintln!("Driving frames (mode-gated; --max-cycles {max_cycles})...");
     let mut last_print_cycle = 0u64;

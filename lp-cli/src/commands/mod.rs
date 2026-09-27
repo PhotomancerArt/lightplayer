@@ -2,6 +2,7 @@ pub mod create;
 pub mod dev;
 pub mod emu;
 pub mod firmware;
+pub mod frag_drive;
 pub mod fwcheck;
 pub mod hardware;
 pub mod link;

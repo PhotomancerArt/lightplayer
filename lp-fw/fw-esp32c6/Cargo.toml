@@ -167,6 +167,9 @@ desk_ble_fault = ["ble"]
 heap_map_diag = ["lpc-shared"]
 heap_track_diag = ["heap_map_diag", "esp-alloc/alloc-hooks"]
 heap_diag_ble_standin = ["heap_map_diag"]
+# RESEARCH (research/frag-reads; never shipped): per-window allocation census
+# (`src/alloc_watch.rs`). Exclusive with `heap_track_diag` (both own the hooks).
+alloc_watch_diag = ["esp-alloc/alloc-hooks", "lpc-shared", "lp-perf/hook", "dep:heapless"]
 # The `rmt-chase` payload's harness: a 256-LED white chase on GPIO18 through
 # the shipping `lp-ws281x` refill path, three passes, one `rmt-frame` record
 # per frame. The pattern, the checksum and the record live in fw-checks as

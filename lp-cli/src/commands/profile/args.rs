@@ -108,6 +108,10 @@ pub enum WorkloadArg {
     /// pages of 16 nodes, one probe read) issued as soon as the project is
     /// loaded.
     StudioSync,
+    /// RESEARCH (research/frag-reads): Studio's recorded read shapes — the
+    /// staged sync, the editor lens per focus, the card feed — and one edit
+    /// cycle (panel write, then a shader rewrite that recompiles).
+    StudioLens,
 }
 
 /// Heap layout selector for the fragmentation replay.

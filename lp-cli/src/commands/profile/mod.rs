@@ -7,6 +7,7 @@ pub mod output;
 pub mod output_cpu_json;
 pub mod output_speedscope;
 pub mod symbolize;
+pub mod studio_lens;
 pub mod workload;
 
 pub use args::{ProfileCli, ProfileSubcommand};

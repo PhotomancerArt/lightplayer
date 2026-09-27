@@ -335,6 +335,15 @@ impl crate::transport::ClientTransport for SerialEmuClientTransport {
             return Ok(msg);
         }
 
+        // RESEARCH (research/frag-reads): a long request line can take more
+        // than one guest pass to arrive; give it a few more yields.
+        for _ in 0..16 {
+            self.run_until_yield()?;
+            if let Some(msg) = self.read_message()? {
+                return Ok(msg);
+            }
+        }
+
         // No message after yield - firmware should have sent response before yielding
         Err(TransportError::Other(
             "Emulator yielded but no response message received".to_string(),
