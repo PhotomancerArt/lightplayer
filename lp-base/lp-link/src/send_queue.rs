@@ -10,7 +10,6 @@
 //! of ring order leaves a hole that is reclaimed once everything before it
 //! has gone.
 
-use alloc::collections::VecDeque;
 use alloc::vec;
 use alloc::vec::Vec;
 
@@ -35,13 +34,17 @@ pub struct SendQueue {
     span: usize,
     /// Bytes not yet taken (what the send budget counts).
     live: usize,
-    msgs: VecDeque<Pending>,
-    max_msgs: usize,
+    /// Message descriptors in ring order: message `i` (oldest first) is
+    /// `msgs[(first + i) % msgs.len()]`, for `i < count`. A plain slice rather
+    /// than a `VecDeque`: it never grows, so no growth path is linked.
+    msgs: Vec<Pending>,
+    first: usize,
+    count: usize,
 }
 
 /// A queued message: where its bytes start in the ring and how far it has
 /// been taken.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Default)]
 struct Pending {
     chan: u8,
     start: usize,
@@ -67,8 +70,9 @@ impl SendQueue {
             head: 0,
             span: 0,
             live: 0,
-            msgs: VecDeque::with_capacity(max_msgs),
-            max_msgs,
+            msgs: vec![Pending::default(); max_msgs],
+            first: 0,
+            count: 0,
         }
     }
 
@@ -84,11 +88,12 @@ impl SendQueue {
 
     /// Nothing left to take.
     pub fn is_empty(&self) -> bool {
-        self.msgs.iter().all(Pending::done)
+        (0..self.count).all(|i| self.msgs[self.slot(i)].done())
     }
 
     pub fn clear(&mut self) {
-        self.msgs.clear();
+        self.first = 0;
+        self.count = 0;
         self.head = 0;
         self.span = 0;
         self.live = 0;
@@ -96,7 +101,7 @@ impl SendQueue {
 
     pub fn push(&mut self, chan: u8, data: &[u8]) -> Result<(), QueueFull> {
         let cap = self.ring.len();
-        if self.msgs.len() >= self.max_msgs || cap - self.span < data.len() {
+        if self.count >= self.msgs.len() || cap - self.span < data.len() {
             return Err(QueueFull);
         }
         let start = if cap == 0 {
@@ -109,28 +114,32 @@ impl SendQueue {
         self.ring[..data.len() - first].copy_from_slice(&data[first..]);
         self.span += data.len();
         self.live += data.len();
-        self.msgs.push_back(Pending {
+        let slot = self.slot(self.count);
+        self.msgs[slot] = Pending {
             chan,
             start,
             len: data.len(),
             taken: 0,
             released: 0,
             started: false,
-        });
+        };
+        self.count += 1;
         Ok(())
     }
 
     /// Take the next fragment, at most `out.len()` bytes, into `out`: from the
     /// oldest unfinished message on the lowest-numbered channel that has one.
     pub fn take(&mut self, out: &mut [u8]) -> Option<Taken> {
-        let (i, _) = self
-            .msgs
-            .iter()
-            .enumerate()
-            .filter(|(_, m)| !m.done())
-            .min_by_key(|(_, m)| m.chan)?;
+        let mut pick: Option<usize> = None;
+        for i in 0..self.count {
+            let s = self.slot(i);
+            let m = &self.msgs[s];
+            if !m.done() && pick.is_none_or(|p| m.chan < self.msgs[p].chan) {
+                pick = Some(s);
+            }
+        }
         let cap = self.ring.len();
-        let m = &mut self.msgs[i];
+        let m = &mut self.msgs[pick?];
         let n = (m.len - m.taken).min(out.len());
         let at = if cap == 0 {
             0
@@ -157,7 +166,8 @@ impl SendQueue {
     /// message's taken bytes, and every finished message at the front.
     fn release(&mut self) {
         let cap = self.ring.len();
-        while let Some(m) = self.msgs.front_mut() {
+        while self.count > 0 {
+            let m = &mut self.msgs[self.first];
             let r = m.taken - m.released;
             m.released = m.taken;
             self.span -= r;
@@ -167,9 +177,15 @@ impl SendQueue {
             if !m.done() {
                 break;
             }
-            self.msgs.pop_front();
+            self.first = (self.first + 1) % self.msgs.len();
+            self.count -= 1;
         }
-        debug_assert!(!self.msgs.is_empty() || self.span == 0);
+        debug_assert!(self.count > 0 || self.span == 0);
+    }
+
+    /// Where message `i` (oldest first) lives.
+    fn slot(&self, i: usize) -> usize {
+        (self.first + i) % self.msgs.len().max(1)
     }
 }
 
@@ -224,7 +240,7 @@ mod tests {
         }
         assert_eq!(got, b"proto-msg");
         assert_eq!(q.span, 0);
-        assert!(q.msgs.is_empty());
+        assert_eq!(q.count, 0);
     }
 
     #[test]

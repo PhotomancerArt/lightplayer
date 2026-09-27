@@ -2,29 +2,30 @@
 //! one frame's payload each, allocated once. Oldest first; a full queue
 //! refuses, it never grows.
 
-use alloc::collections::VecDeque;
 use alloc::vec;
 use alloc::vec::Vec;
 
 pub struct DatagramQueue {
-    /// `(channel, length)` of each queued datagram, oldest first; datagram
-    /// `i` is in slot `(head + i) % slots`.
-    queued: VecDeque<(u8, u16)>,
+    /// `(channel, length)` of the datagram in each slot; datagram `i` (oldest
+    /// first) is in slot `(head + i) % slots`, for `i < count`.
+    meta: Vec<(u8, u16)>,
     slab: Vec<u8>,
     slot_len: usize,
     slots: usize,
     head: usize,
+    count: usize,
     bytes: usize,
 }
 
 impl DatagramQueue {
     pub fn new(slots: usize, slot_len: usize) -> Self {
         DatagramQueue {
-            queued: VecDeque::with_capacity(slots),
+            meta: vec![(0, 0); slots],
             slab: vec![0; slots * slot_len],
             slot_len,
             slots,
             head: 0,
+            count: 0,
             bytes: 0,
         }
     }
@@ -35,11 +36,11 @@ impl DatagramQueue {
     }
 
     pub fn is_empty(&self) -> bool {
-        self.queued.is_empty()
+        self.count == 0
     }
 
     pub fn is_full(&self) -> bool {
-        self.queued.len() >= self.slots
+        self.count >= self.slots
     }
 
     /// Payload bytes queued.
@@ -48,7 +49,7 @@ impl DatagramQueue {
     }
 
     pub fn clear(&mut self) {
-        self.queued.clear();
+        self.count = 0;
         self.head = 0;
         self.bytes = 0;
     }
@@ -60,27 +61,32 @@ impl DatagramQueue {
         if self.is_full() {
             return false;
         }
-        let slot = (self.head + self.queued.len()) % self.slots;
+        let slot = (self.head + self.count) % self.slots;
         let at = slot * self.slot_len;
         let Some(n) = fill(&mut self.slab[at..at + self.slot_len]) else {
             return false;
         };
         self.bytes += n;
-        self.queued.push_back((chan, n as u16));
+        self.meta[slot] = (chan, n as u16);
+        self.count += 1;
         true
     }
 
     /// The oldest datagram: its channel and bytes.
     pub fn front(&self) -> Option<(u8, &[u8])> {
-        let &(chan, len) = self.queued.front()?;
+        if self.count == 0 {
+            return None;
+        }
+        let (chan, len) = self.meta[self.head];
         let at = self.head * self.slot_len;
         Some((chan, &self.slab[at..at + len as usize]))
     }
 
     pub fn pop_front(&mut self) {
-        if let Some((_, len)) = self.queued.pop_front() {
-            self.bytes -= len as usize;
+        if self.count > 0 {
+            self.bytes -= self.meta[self.head].1 as usize;
             self.head = (self.head + 1) % self.slots;
+            self.count -= 1;
         }
     }
 }
