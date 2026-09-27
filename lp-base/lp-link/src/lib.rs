@@ -6,7 +6,7 @@
 //! What it gives the layers above, over any transport:
 //! - **Frames with a checksum** ([`frame`], [`crc`]): damaged or torn frames
 //!   are detected and dropped, never delivered. On a byte stream frames are
-//!   COBS-encoded between `0x00` delimiters ([`cobs`]) and bytes outside frames
+//!   COBS-FF-encoded (no `0x00` or `0xFF` on the wire) between `0x00` delimiters ([`cobs`]) and bytes outside frames
 //!   pass through as console text; on a datagram transport each datagram is
 //!   one frame.
 //! - **Channels** (0–7), each reliable or best effort ([`LinkConfig`]):
@@ -25,6 +25,8 @@
 //! Sans-IO: time ([`Micros`]) and the nonce are injected; no executor, no
 //! clock, no allocation beyond `alloc` collections. The `sim` feature adds a
 //! deterministic fault-injecting simulator ([`sim`]) and the `link-bench` tool.
+//!
+//! Design, principles and prior art: `README.md` beside this crate.
 
 #![no_std]
 

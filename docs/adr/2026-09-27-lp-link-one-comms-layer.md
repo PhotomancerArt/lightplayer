@@ -42,6 +42,8 @@ horizon (WiFi: UDP / WebSocket).
 
 ## Decision
 
+Design, principles and prior art in one place: `lp-base/lp-link/README.md`.
+
 Put **one sans-IO link layer, `lp-link`** (`lp-base/lp-link`, no_std +
 alloc, time injected), between each byte or datagram pipe and the wire
 messages, on both ends. The board, Studio (wasm), `lp-cli` and the emulator
@@ -114,8 +116,10 @@ Persisted formats are untouched.
   scope until the WiFi plan.
 - `lp-cli wire unpack`, the emulator wire tap and `lp-cli record timeline`
   must learn to decode link frames.
-- Chromium (`IGNBRK` when parity is off), Apple (the unsigned wrap) and
-  esp-hal (the ISR clear) get upstream reports. None of them is relied on.
+- Chromium (`IGNBRK` when parity is off) and Apple (the unsigned wrap) get
+  upstream reports. esp-hal already fixed its ISR clear upstream (esp-hal
+  #6089/#6104, released in 1.2.0), and our 1.1.1 fork takes a back-port.
+  None of them is relied on.
 
 ## Alternatives considered
 
