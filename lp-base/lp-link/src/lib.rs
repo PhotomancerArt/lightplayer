@@ -49,6 +49,7 @@ mod link_event;
 pub mod log_ring;
 mod rtt_estimator;
 mod seq_num;
+pub mod sniffer;
 mod tx_queue;
 
 #[cfg(feature = "sim")]
