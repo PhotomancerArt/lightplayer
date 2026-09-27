@@ -224,3 +224,17 @@ frame's header and recovered within one or two opt-in round trips, with no
 frame decoded against a diverged table — the loss is survivable, but it is
 not gone. Whether the second board, the lens pace, or the host (a laptop on
 the road, not the bench Mac's hub) is the variable is not known.
+
+## 2026-09-26 — the tears seen with the gate are a different, host-side loss
+
+The gated-board tears above (and 11 in a prod session the same day) are
+not this defect coming back. They have a different shape — a run of
+hundreds of bytes starting ~1.2–1.5 KB into a big frame, mid-packet, and
+resuming on a packet boundary — and a different cause, found and
+reproduced on silicon: on macOS, Chromium's Web Serial termios (`PARMRK`)
+makes the tty store every `0xFF` twice, and IOSerialFamily's unsigned
+free-space count then overfills the 1,024-slot tty queue whenever the page
+reads late. JSON has no `0xFF` and is never lost that way, which is also the
+likeliest reading of "JSON lost 0 of 1,270" above. A native reader with raw
+termios lost 0 bytes of ~60 MB of soak frames on the same gated board.
+See `2026-09-26-web-serial-on-macos-drops-bytes-of-packed-frames.md`.
