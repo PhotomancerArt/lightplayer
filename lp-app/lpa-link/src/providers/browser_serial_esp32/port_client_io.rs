@@ -265,6 +265,15 @@ impl ClientIo for PortLineIo {
                     return Err(TransportError::Other(first));
                 }
             }
+            // The link's own notes (up, stalled, answering again) wait for
+            // the model's pump — which is paused while this io holds the
+            // wire. The lens tap is the pump's stand-in, so it hears them
+            // here: Studio's "Reconnecting…" state is made of them (D13).
+            if let Some(tap) = &self.tap {
+                for note in browser_serial::take_wire_notes(self.port_id) {
+                    tap(LensTapLine::Note(note));
+                }
+            }
             for read in browser_serial::take_reads(self.port_id) {
                 match read {
                     WireRead::Line(line) => {
@@ -298,8 +307,8 @@ impl ClientIo for PortLineIo {
                         self.events.emit(LinkManagementEvent::log(note.clone()));
                         self.pending.push_back(Err(note));
                     }
-                    // Notes wait for the link pump; a link port writes its own
-                    // requests (`take_reads` hands out neither).
+                    // A link port writes its own requests, and its notes come
+                    // from `take_wire_notes` (`take_reads` hands out neither).
                     WireRead::Send(_) | WireRead::Note(_) => {}
                 }
             }

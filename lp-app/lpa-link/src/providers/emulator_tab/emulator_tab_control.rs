@@ -32,7 +32,7 @@ use lpc_wire::{ClientMessage, TransportError, WireServerMessage};
 use wasm_bindgen::JsValue;
 
 use super::emulator_tab_bridge::EmulatorTabPort;
-use super::emulator_tab_link_port::{send_client_json, take_reads};
+use super::emulator_tab_link_port::{send_client_json, take_notes, take_reads};
 use crate::LinkError;
 use crate::device_link::link_port_edge::sleep_ms;
 use crate::device_link::wire_reader::WireRead;
@@ -158,6 +158,14 @@ impl ClientIo for EmuLineIo {
             // never asked.
             if let Some(error) = self.port.take_error() {
                 return Err(TransportError::Other(error));
+            }
+            // The link's own notes (up, stalled, answering again) wait for
+            // the model's pump, which is paused while this io holds the
+            // wire; the lens tap stands in for it (D13).
+            if let Some(tap) = &self.tap {
+                for note in take_notes(self.port) {
+                    tap(EmuTapLine::Note(note));
+                }
             }
             let Some(reads) = take_reads(self.port) else {
                 return Err(TransportError::Other(

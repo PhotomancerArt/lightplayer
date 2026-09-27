@@ -21,6 +21,7 @@
 //! | [`wire`] | `lpc_wire` frames ⇄ the model's minimal mirror (the ONE meeting point) |
 //! | [`demux`] | whole serial lines → `LinkEvent`s (the `M!` demux) |
 //! | [`wire_reader`] | what a port's reads are ([`wire_reader::WireRead`]), and the page-wide wire flags |
+//! | [`link_note`] | the link's own journal notes (up, stalled, answering, reset), named |
 //! | [`link_port_service`] | one browser port's lp-link end and its drainers' queues (sans-IO) |
 //! | [`port_read_map`] | a link port's reads → [`wire_reader::WireRead`]s and journal notes |
 //! | [`wire_capture`] | dev-only: a capped tee of every raw byte the browser port reads |
@@ -39,6 +40,7 @@
 //! transports speak the contract.
 
 pub mod demux;
+pub mod link_note;
 pub mod link_port_service;
 pub mod port_read_map;
 pub mod wire;
