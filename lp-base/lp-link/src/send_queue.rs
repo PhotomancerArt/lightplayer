@@ -9,13 +9,24 @@
 //! boundary; within a channel, messages keep their order. A message taken out
 //! of ring order leaves a hole that is reclaimed once everything before it
 //! has gone.
+//!
+//! An **external** message ([`SendQueue::push_external`]) is queued by length
+//! alone: its bytes stay in the caller's buffer, and each fragment is copied
+//! from there (a `source` passed to [`SendQueue::take`]) straight into the
+//! transmit window's slot. It takes no room in the ring, keeps its place in
+//! its channel's order, and there is at most one at a time.
 
 use alloc::vec;
 use alloc::vec::Vec;
 
-/// The ring has no room for the message, or the descriptor queue is full.
+/// The ring has no room for the message, or the descriptor queue is full
+/// (or, for an external message, one is already queued).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct QueueFull;
+
+/// Where an external message's fragments come from: `source(offset, out)`
+/// fills `out` with the message's bytes at `offset..offset + out.len()`.
+pub type ExternalSource<'a> = &'a mut dyn FnMut(usize, &mut [u8]);
 
 /// One fragment taken from the queue (its bytes were copied out).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -54,6 +65,8 @@ struct Pending {
     released: usize,
     /// Its first fragment went out (a zero-length message has one fragment).
     started: bool,
+    /// Its bytes are the caller's, not the ring's.
+    external: bool,
 }
 
 impl Pending {
@@ -122,14 +135,68 @@ impl SendQueue {
             taken: 0,
             released: 0,
             started: false,
+            external: false,
         };
         self.count += 1;
         Ok(())
     }
 
+    /// Queue an external message of `len` bytes on `chan` (see the module
+    /// docs). Refused while another external message is not yet fully taken.
+    pub fn push_external(&mut self, chan: u8, len: usize) -> Result<(), QueueFull> {
+        if self.count >= self.msgs.len() || self.external_untaken() {
+            return Err(QueueFull);
+        }
+        let slot = self.slot(self.count);
+        self.msgs[slot] = Pending {
+            chan,
+            start: 0,
+            len,
+            taken: 0,
+            released: 0,
+            started: false,
+            external: true,
+        };
+        self.count += 1;
+        Ok(())
+    }
+
+    /// An external message has bytes not yet taken: its caller must keep its
+    /// buffer.
+    pub fn external_untaken(&self) -> bool {
+        (0..self.count).any(|i| {
+            let m = &self.msgs[self.slot(i)];
+            m.external && !m.done()
+        })
+    }
+
+    /// Withdraw the external message, if none of it has been taken yet.
+    /// `Err(())`: its first fragment already went out, so the peer holds part
+    /// of it and it cannot be withdrawn without breaking the channel's
+    /// message (wait for it, or reset the link). `Ok` when there was none.
+    pub fn cancel_external(&mut self) -> Result<(), ()> {
+        for i in 0..self.count {
+            let s = self.slot(i);
+            let m = &mut self.msgs[s];
+            if m.external && !m.done() {
+                if m.started {
+                    return Err(());
+                }
+                // Done with nothing taken: never sent, released in turn.
+                m.len = 0;
+                m.started = true;
+                self.release();
+                return Ok(());
+            }
+        }
+        Ok(())
+    }
+
     /// Take the next fragment, at most `out.len()` bytes, into `out`: from the
     /// oldest unfinished message on the lowest-numbered channel that has one.
-    pub fn take(&mut self, out: &mut [u8]) -> Option<Taken> {
+    /// An external message's bytes come from `source`; without one, nothing
+    /// is taken while an external message is next.
+    pub fn take(&mut self, out: &mut [u8], source: Option<ExternalSource<'_>>) -> Option<Taken> {
         let mut pick: Option<usize> = None;
         for i in 0..self.count {
             let s = self.slot(i);
@@ -146,9 +213,13 @@ impl SendQueue {
         } else {
             (m.start + m.taken) % cap
         };
-        let first_part = n.min(cap - at);
-        out[..first_part].copy_from_slice(&self.ring[at..at + first_part]);
-        out[first_part..n].copy_from_slice(&self.ring[..n - first_part]);
+        if m.external {
+            source?(m.taken, &mut out[..n]);
+        } else {
+            let first_part = n.min(cap - at);
+            out[..first_part].copy_from_slice(&self.ring[at..at + first_part]);
+            out[first_part..n].copy_from_slice(&self.ring[..n - first_part]);
+        }
         let taken = Taken {
             chan: m.chan,
             first: !m.started,
@@ -157,7 +228,9 @@ impl SendQueue {
         };
         m.started = true;
         m.taken += n;
-        self.live -= n;
+        if !m.external {
+            self.live -= n;
+        }
         self.release();
         Some(taken)
     }
@@ -168,7 +241,7 @@ impl SendQueue {
         let cap = self.ring.len();
         while self.count > 0 {
             let m = &mut self.msgs[self.first];
-            let r = m.taken - m.released;
+            let r = if m.external { 0 } else { m.taken - m.released };
             m.released = m.taken;
             self.span -= r;
             if cap != 0 {
@@ -199,14 +272,14 @@ mod tests {
         let mut out = [0u8; 4];
         q.push(1, b"abcdef").unwrap();
         assert_eq!(q.push(1, b"ghijk"), Err(QueueFull), "no room");
-        let t = q.take(&mut out).unwrap();
+        let t = q.take(&mut out, None).unwrap();
         assert_eq!((t.first, t.fin, &out[..t.len]), (true, false, &b"abcd"[..]));
         // Four bytes released: a five-byte message wraps around the end.
         q.push(1, b"ghijk").unwrap();
-        let t = q.take(&mut out).unwrap();
+        let t = q.take(&mut out, None).unwrap();
         assert_eq!((t.first, t.fin, &out[..t.len]), (false, true, &b"ef"[..]));
         let mut got = Vec::new();
-        while let Some(t) = q.take(&mut out) {
+        while let Some(t) = q.take(&mut out, None) {
             got.extend_from_slice(&out[..t.len]);
         }
         assert_eq!(got, b"ghijk");
@@ -219,9 +292,9 @@ mod tests {
         let mut q = SendQueue::new(8, 4);
         q.push(0, b"").unwrap();
         let mut out = [0u8; 4];
-        let t = q.take(&mut out).unwrap();
+        let t = q.take(&mut out, None).unwrap();
         assert_eq!((t.first, t.fin, t.len), (true, true, 0));
-        assert!(q.take(&mut out).is_none());
+        assert!(q.take(&mut out, None).is_none());
     }
 
     #[test]
@@ -230,12 +303,12 @@ mod tests {
         let mut out = [0u8; 4];
         q.push(1, b"proto-msg").unwrap();
         q.push(0, b"ctl").unwrap();
-        let t = q.take(&mut out).unwrap();
+        let t = q.take(&mut out, None).unwrap();
         assert_eq!((t.chan, &out[..t.len]), (0, &b"ctl"[..]));
         // The hole is behind the unfinished proto message: not free yet.
         assert_eq!(q.span, 12);
         let mut got = Vec::new();
-        while let Some(t) = q.take(&mut out) {
+        while let Some(t) = q.take(&mut out, None) {
             got.extend_from_slice(&out[..t.len]);
         }
         assert_eq!(got, b"proto-msg");
@@ -249,5 +322,70 @@ mod tests {
         q.push(0, b"a").unwrap();
         q.push(0, b"b").unwrap();
         assert_eq!(q.push(0, b"c"), Err(QueueFull));
+    }
+
+    #[test]
+    fn an_external_message_is_cut_from_its_source_in_channel_order() {
+        let mut q = SendQueue::new(16, 4);
+        let src: Vec<u8> = (0..10).collect();
+        let mut out = [0u8; 4];
+        q.push(1, b"ab").unwrap();
+        q.push_external(1, src.len()).unwrap();
+        q.push(1, b"cd").unwrap();
+        assert_eq!(q.push_external(1, 3), Err(QueueFull), "one at a time");
+        assert_eq!(q.live_bytes(), 4, "the external bytes are not the ring's");
+        let mut source =
+            |off: usize, dst: &mut [u8]| dst.copy_from_slice(&src[off..off + dst.len()]);
+        let mut got = Vec::new();
+        while let Some(t) = q.take(&mut out, Some(&mut source)) {
+            got.extend_from_slice(&out[..t.len]);
+        }
+        let mut want = b"ab".to_vec();
+        want.extend_from_slice(&src);
+        want.extend_from_slice(b"cd");
+        assert_eq!(got, want);
+        assert!(!q.external_untaken());
+        assert!(q.is_empty());
+        assert_eq!((q.span, q.count), (0, 0));
+    }
+
+    #[test]
+    fn without_a_source_an_external_message_waits_and_a_lower_channel_overtakes() {
+        let mut q = SendQueue::new(16, 4);
+        let mut out = [0u8; 4];
+        q.push_external(1, 6).unwrap();
+        assert!(q.take(&mut out, None).is_none(), "no source, nothing taken");
+        q.push(0, b"ctl").unwrap();
+        let t = q.take(&mut out, None).unwrap();
+        assert_eq!((t.chan, &out[..t.len]), (0, &b"ctl"[..]));
+        let mut source = |_: usize, dst: &mut [u8]| dst.fill(9);
+        let t = q.take(&mut out, Some(&mut source)).unwrap();
+        assert_eq!((t.chan, t.first, t.fin, t.len), (1, true, false, 4));
+        assert!(q.external_untaken(), "two bytes still to cut");
+        assert_eq!(q.cancel_external(), Err(()), "started: cannot withdraw");
+        let t = q.take(&mut out, Some(&mut source)).unwrap();
+        assert!(t.fin);
+        assert!(!q.external_untaken());
+        // Once taken it is gone: a new external message is accepted.
+        q.push_external(1, 1).unwrap();
+    }
+
+    #[test]
+    fn an_unstarted_external_message_can_be_withdrawn() {
+        let mut q = SendQueue::new(16, 4);
+        let mut out = [0u8; 4];
+        q.push(1, b"ab").unwrap();
+        q.push_external(1, 8).unwrap();
+        q.push(1, b"cd").unwrap();
+        assert_eq!(q.cancel_external(), Ok(()));
+        assert!(!q.external_untaken());
+        let mut source = |_: usize, _: &mut [u8]| panic!("withdrawn: never read");
+        let mut got = Vec::new();
+        while let Some(t) = q.take(&mut out, Some(&mut source)) {
+            got.extend_from_slice(&out[..t.len]);
+        }
+        assert_eq!(got, b"abcd");
+        assert_eq!((q.span, q.count), (0, 0));
+        assert_eq!(q.cancel_external(), Ok(()), "nothing to withdraw");
     }
 }

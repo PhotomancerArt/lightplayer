@@ -46,14 +46,23 @@ pub struct LinkConfig {
     pub rx_budget: usize,
     /// Bytes `send()` queues (pending + unacknowledged) before `Full`. The
     /// pending part is a ring of this size, allocated once in `Link::new`.
+    /// External messages ([`Link::send_external`](crate::Link::send_external))
+    /// take no room in it; their fragments in the transmit window still count.
     pub send_budget: usize,
     /// Reliable messages `send()` queues (not yet cut into frames) before
     /// `Full`.
     pub send_queue: usize,
-    /// Longest reliable message. `send` refuses a longer one (`TooBig`); a
+    /// Longest reliable message. `send` refuses a longer one, or one longer
+    /// than `send_budget` (`TooBig`); a
     /// longer one arriving (a peer with a bigger limit) is dropped and counted
     /// (`LinkCounters::oversize_messages`), and the session carries on.
     pub max_message: usize,
+    /// After a reassembled message is delivered, a channel's reassembly
+    /// buffer whose capacity is above this is released, so one large message
+    /// does not pin `max_message` bytes for the link's life. The presets keep
+    /// it at `max_message` (a buffer grown once is kept); a RAM-tight board
+    /// sets it small.
+    pub keep_reassembly: usize,
     /// Best-effort messages queued before `Full`: this many `max_payload`
     /// slots, allocated once.
     pub datagram_queue: usize,
@@ -114,6 +123,7 @@ impl LinkConfig {
             // plus 1 KiB of slack. lp-base cannot depend on lp-core, so the
             // edge that wires the link to the wire asserts the two agree.
             max_message: MAX_MESSAGE,
+            keep_reassembly: MAX_MESSAGE,
             datagram_queue: 32,
             datagram_every: 4,
             reliable_channels: (1 << CH_CONTROL) | (1 << CH_PROTO),
@@ -198,16 +208,15 @@ impl LinkConfig {
         channel < 8 && self.reliable_channels & (1 << channel) != 0
     }
 
-    /// The budgets hold together: one largest message fits the send budget
-    /// and, with its queueing charge, the receive budget (a message that can
-    /// never fit would stall the link until it resets); a frame carries a
-    /// payload; the datagram queue has a slot.
+    /// The budgets hold together: one largest message, with its queueing
+    /// charge, fits the receive budget (a message that can never fit would
+    /// stall the link until it resets); a frame carries a payload; the
+    /// datagram queue has a slot. The send budget may be smaller than
+    /// `max_message`: `send` refuses a message longer than it (`TooBig`), and a
+    /// larger one goes by [`Link::send_external`](crate::Link::send_external).
     pub fn validate(&self) -> Result<(), &'static str> {
         if self.max_payload == 0 {
             return Err("max_payload is 0");
-        }
-        if self.max_message > self.send_budget {
-            return Err("max_message does not fit send_budget");
         }
         if self.max_message + crate::inbox::EVENT_COST > self.rx_budget {
             return Err("max_message (plus its queueing charge) does not fit rx_budget");

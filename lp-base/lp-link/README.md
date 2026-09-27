@@ -73,6 +73,35 @@ sequence space is future work if a measurement ever calls for it).
 7. **Small and ours.** No_std + alloc, time injected (`Micros`), no executor.
    Prior art was read as specs only; no code was copied.
 
+## Sending without a copy: external messages
+
+A board that already serializes its reply into a buffer it owns (the
+firmware's 16 KiB frame buffer) should not pay a second 16 KiB for the link's
+send ring. `Link::send_external(channel, len)` queues a reliable message by
+length alone; `poll_transmit_with(now, source)` then copies each fragment
+from the caller's bytes (`source(offset, out)`) straight into the transmit
+window, which keeps them for resends anyway. So:
+
+- nothing lands in the send ring, and `send_budget` can be small (control
+  messages and small replies only; a ring message longer than it is
+  `TooBig`);
+- the caller keeps its buffer unchanged while `external_in_flight()` is
+  true, that is until every byte has been cut into frames; after that the
+  window holds the rest and the buffer is the caller's again;
+- at most one external message at a time (`Full` otherwise); it keeps its
+  place in its channel's order, and a lower channel still overtakes it at a
+  frame boundary;
+- `cancel_external()` withdraws it only before its first fragment is cut.
+  After that the peer may hold part of it, so it can only be finished or
+  abandoned with the session (`restart`, or any reset, which drops it and
+  hands the buffer back).
+
+`poll_transmit` without a source leaves an external message waiting.
+`keep_reassembly` is the receive side's twin: a reassembly buffer grown past
+it is released once its message is delivered, so one large upload does not
+pin `max_message` bytes on a board for the link's life (the presets keep
+`max_message`, today's behaviour).
+
 ## Where things are
 
 | file | concept |
