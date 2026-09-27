@@ -315,6 +315,12 @@ impl<A: Arq> Link<A> {
             + self.inbox.bytes()
     }
 
+    /// Payload bytes the reliability machinery holds: sent but unacknowledged,
+    /// plus received out of order. What the windows cost in RAM.
+    pub fn window_bytes(&self) -> usize {
+        self.tx.bytes() + self.arq.reorder_bytes()
+    }
+
     /// Fixed scratch capacity (frame buffers).
     pub fn scratch_bytes(&self) -> usize {
         self.raw.capacity()
@@ -644,7 +650,7 @@ impl<A: Arq> Link<A> {
             your: self.peer_nonce.unwrap_or(0),
             established: self.state == LinkState::Established,
             max_payload: self.cfg.max_payload,
-            rx_window: self.cfg.rx_window.min(A::MAX_WINDOW),
+            rx_window: self.adv_window(),
         };
         let hdr = Header {
             kind: FrameKind::Syn,

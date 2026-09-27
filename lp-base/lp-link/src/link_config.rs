@@ -100,7 +100,10 @@ impl LinkConfig {
             ack_delay: 15_000,
             ack_every: 4,
             initial_rto: 500_000,
-            min_rto: 60_000,
+            // RTT is quantized by 30 ms connection events and a queued
+            // notification can wait two of them; below ~2x that, timers fire
+            // on frames that are merely queued.
+            min_rto: 250_000,
             max_rto: 3_000_000,
             syn_interval: 500_000,
             keepalive: 2_000_000,
