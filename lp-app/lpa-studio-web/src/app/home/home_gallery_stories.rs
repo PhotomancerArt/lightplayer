@@ -1503,7 +1503,6 @@ fn devices_card_sim_faces() -> Element {
         liveness: FeedLiveness::Lens,
         frame_age_secs: Some(2.0),
         engine_fps: None,
-        link_counters: None,
     };
     let faces: Vec<(
         &str,
@@ -2020,6 +2019,35 @@ fn devices_card_menu_open() -> Element {
     let card = roster_fixture().roster.devices.remove(0);
     rsx! {
         section { class: "tw:min-h-[560px] tw:p-4",
+            div { class: "tw:w-[400px]",
+                DeviceRosterCard {
+                    card,
+                    open_uid: Some("dev000000daqf6dvvqz".to_string()),
+                    projects: packages(),
+                    examples: examples(),
+                    menu_initially_open: true,
+                    on_action: |_| {},
+                }
+            }
+        }
+    }
+}
+
+#[story(
+    description = "The device card's ⋯ menu with the board's LINK section (plan D13): under Rename, the lp-link counters the board reports on every heartbeat, in the board's own words — frames it had to send again, frames that reached it damaged, times the link restarted and went quiet, and the traffic each way in the unit that keeps the number short. On a clean cable every count is 0; here the board has resent 3 frames and restarted once, so those two wear the warning tone. The panel floats, so the fixed-height card pays nothing for it; a link that reports no counters (Bluetooth, a sim) shows Rename alone."
+)]
+fn devices_card_menu_link_counters() -> Element {
+    let mut card = roster_fixture().roster.devices.remove(0);
+    card.link_counters = Some(lpa_studio_core::DeviceLinkCounters {
+        resends: 3,
+        damaged: 0,
+        resets: 1,
+        stalls: 0,
+        bytes_sent: 1_363_149,
+        bytes_received: 38_912,
+    });
+    rsx! {
+        section { class: "tw:min-h-[640px] tw:p-4",
             div { class: "tw:w-[400px]",
                 DeviceRosterCard {
                     card,
