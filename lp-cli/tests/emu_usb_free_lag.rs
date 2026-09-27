@@ -150,6 +150,7 @@ fn a_free_lag_past_esp_hals_write_damages_only_the_ungated_images_frames() {
     );
     // The damage never reaches the app as a corrupt message...
     assert_eq!(before.host.payload_errors, 0, "{}", before.summary());
+    assert_eq!(before.app_errors, 0, "{}", before.summary());
     // ...and resending cannot beat a loss on every packet.
     assert!(
         before.replies < REQUESTS as usize,
@@ -159,9 +160,25 @@ fn a_free_lag_past_esp_hals_write_damages_only_the_ungated_images_frames() {
     );
 
     eprintln!("free lag {lag} ns, gated: {}", after.summary());
-    assert_eq!(after.host.damaged, 0, "{}", after.summary());
+    // The gate's own claim: nothing it wrote landed in the lag.
     assert_eq!(after.tried, 0, "{} B refused", after.tried);
+    // Every frame of the gated image that arrived damaged is one the board
+    // itself gave up on: under the open defect below, a frame's write waits
+    // out its 250 ms bound after its first packet(s) went out, and the host
+    // holds that half frame until the next frame's opening `0x00` closes it
+    // and the CRC fails. (Until the host's partial-frame wait went from the
+    // 50 ms text idle to `LinkConfig::frame_abandon`'s 3 s, e726f7083, the
+    // same half frame was dropped quietly as a stale partial and counted
+    // there — the event is the same, the counter moved.) Damage the board did
+    // not cause itself would exceed its own count of abandoned writes.
+    assert!(
+        after.host.damaged <= after.board_write_timeouts,
+        "a gated frame arrived damaged that the board did not abandon: {}",
+        after.summary()
+    );
     assert_eq!(after.host.payload_errors, 0, "{}", after.summary());
+    // Nothing reached the app corrupt, and the session never reset.
+    assert_eq!(after.app_errors, 0, "{}", after.summary());
     // The open defect's signature, pinned so a fix is noticed: the gate's
     // writes wait out their bound instead of the drain. When the defect is
     // fixed this flips to `after.replies == REQUESTS` and no write timeout.
@@ -215,11 +232,13 @@ impl Run {
     fn summary(&self) -> String {
         format!(
             "lp-emu:esp32c6:t1 — {} of {REQUESTS} Hellos answered, {} B refused; host link {} \
-             damaged, {} resent, {} resets, {} payload errors; board {} write timeouts; \
+             damaged, {} stale partials, {} resent, {} resets, {} payload errors; board {} write \
+             timeouts; \
              next write {:?} ns / next free check {:?} ns after a drain",
             self.replies,
             self.tried,
             self.host.damaged,
+            self.host.stale_partials,
             self.host.resends,
             self.host.resets.total,
             self.host.payload_errors,
