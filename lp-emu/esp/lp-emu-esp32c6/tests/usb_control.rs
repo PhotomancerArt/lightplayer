@@ -3,26 +3,27 @@
 //!
 //! - **G3-1** the s7 shape, scripted: attach + open from cycle zero, the
 //!   cable pulled at 6 s, back in at 9 s, the port re-opened at 9.5 s. The
-//!   delivered log carries the hello and the first heartbeat before 6 s,
-//!   **nothing** between the detach and the re-open, and a full 64-byte
-//!   commit drained plus the 10 s heartbeat after it. P1b's stamps are all
-//!   still their "never" sentinel: through this whole unplug the firmware
-//!   noticed nothing, because its latch resets optimistically on a cable
-//!   loss and it had nothing to write in the 500 ms the port was closed.
+//!   delivered log carries the boot before 6 s, **nothing** between the
+//!   detach and the re-open, and the link task's traffic again after it;
+//!   while the cable was out the link task discarded what it had to send
+//!   (no SOF) rather than writing it.
 //! - **G3-1b** the same unplug with the port held closed to 13 s — long
 //!   enough for the firmware to have something to say while nobody is
-//!   reading. That is where the transition is actually visible: a 64-byte
-//!   packet committed and **held**, nothing written past it (the io_task's
+//!   reading: a packet committed and **held**, nothing written past it (the
 //!   IN-endpoint gate waits; before 2026-09-24 bytes were dropped past it),
-//!   delivery within
-//!   the drain latency of the `open`, and then the firmware's own
-//!   `[io_task] host draining again` line — the recovery half of the pair
-//!   P1 exists to measure, reproduced with no rig, because a control
-//!   channel can open a port at a chosen moment. Its twin, "host not
-//!   draining", is absent from the delivered log, exactly as the monitor's
-//!   own gating predicts (M6 discovery §4) — and P1b's stamp **pair** is
-//!   there to say so on the firmware's own clock (DD38: the pair is the
-//!   claim, never the count).
+//!   delivery within the drain latency of the `open`, held packet first.
+//!
+//! ⚠️ Since wire proto 30 (plan `lp-link-usb-cutover`) the image speaks
+//! lp-link past its boot text, so what crosses the port after the boot is
+//! link frames, and the hello and heartbeats go out only to a host that
+//! brought the link up — which only a product crate may be (the MIT fence).
+//! These gates therefore stop at the port: the cable and the port move when
+//! the script says, bytes cross when a host reads and never otherwise. What
+//! the old G3-1/G3-1b also read off the wire — the hello (and the
+//! `hello.proto` figure), the 5 s and 10 s heartbeats, the io_task's
+//! "draining again" line and the not-draining latch's stamps — went with the
+//! `M!` wire and the latch. The link-level twin, a host on the link through
+//! the same cable pull, is `lp-cli/tests/emu_usb_link_gates.rs`.
 //! - **G3-2** determinism: G3-1 twice, byte-identical delivered logs and
 //!   identical cycle counts. The scripted form only — the socket form is
 //!   host time, and says so.
@@ -40,7 +41,6 @@
 //! test-emu-c6` runs them.
 
 use lp_emu_esp_common::trace::SharedBuffer;
-use lp_emu_esp_figures::Figures;
 use lp_emu_esp32c6::control::parse_usb_script;
 use lp_emu_esp32c6::machine::{
     AppSource, Esp32C6Builder, Esp32C6Machine, Outcome, StopCondition, TimeGrade,
@@ -94,26 +94,15 @@ impl Run {
         self.events("USB_DEVICE IN packet of ", " bytes delivered")
     }
 
-    /// M6 P1b's vehicle, read straight out of the guest's memory: the
-    /// firmware's own account of its link, on its own clock.
-    /// `(host_not_draining_ms, host_draining_again_ms, not_draining_count)`,
-    /// each stamp `None` when it is still the "never" sentinel.
-    ///
-    /// Per DD38 the **pair** is the transition claim, not the count: with no
-    /// host at all the monitor latches once during boot and never recovers,
-    /// so `not_draining_count == 1` alone says nothing.
-    fn link_stamps(&mut self) -> (Option<u32>, Option<u32>, u32) {
-        let read = |m: &mut Esp32C6Machine, name: &str| {
-            m.peek_symbol(&format!("fw_esp32_common::serial::link_counters::{name}"))
-                .unwrap_or_else(|| panic!("the image carries {name}"))
-                .1
-        };
-        let never = |v: u32| (v != u32::MAX).then_some(v);
-        (
-            never(read(&mut self.m, "HOST_NOT_DRAINING_MS")),
-            never(read(&mut self.m, "HOST_DRAINING_AGAIN_MS")),
-            read(&mut self.m, "NOT_DRAINING_COUNT"),
-        )
+    /// The link task's edge counter `name`
+    /// (`fw_esp32_common::usb_link::usb_link_counters`), read straight out
+    /// of the guest's memory.
+    fn link_counter(&mut self, name: &str) -> u32 {
+        let sym = format!("fw_esp32_common::usb_link::usb_link_counters::{name}");
+        self.m
+            .peek_symbol(&sym)
+            .unwrap_or_else(|| panic!("the image carries {sym}"))
+            .1
     }
 
     /// `(millisecond, bytes)` for every `wr_done` that committed a packet.
@@ -170,39 +159,6 @@ fn run(script: &str, micros: u64) -> Option<Run> {
     Some(Run { m, lines, outcome })
 }
 
-/// Where the delivered heartbeat for the `ms` tick starts, if it arrived
-/// whole.
-///
-/// **Not an exact match on `"uptime_ms":10000`, and that mattered twice.**
-/// The firmware's heartbeat rides a 5 s tick of the guest's own clock, and
-/// which millisecond it lands on is a TIMING figure — PD9 says no host gate
-/// runs on emulated microseconds, and a model change that moves an
-/// instruction count by a few thousand moves this by one. The regi2c model
-/// (#612) moved it from 10000 to 10001 on this host while CI's own build of
-/// the same firmware still landed on 10000, so the exact digit was a
-/// host-dependent assertion the whole time.
-///
-/// It broke two claims in opposite directions, and the second is the reason
-/// this helper exists rather than a wider `contains`:
-///
-/// - `g3_1`'s "the 10 s heartbeat reached the re-attached host" went red on
-///   a heartbeat that had in fact arrived;
-/// - `g3_1b`'s "the heartbeat written into a closed port never arrived
-///   whole" went **green for the wrong reason** — a negative assertion that
-///   an exact digit makes vacuous the moment the digit moves. That one would
-///   have hidden a real regression in the committed-endpoint model.
-///
-/// So the tolerance is deliberately small next to the 5 s spacing: it cannot
-/// confuse one tick for its neighbour, and it still fails if the heartbeat is
-/// absent, truncated, or a whole tick late.
-fn heartbeat_at(delivered: &str, ms: u64) -> Option<usize> {
-    /// One tick is 5,000 ms; a hundred is far inside it and far outside the
-    /// millisecond of jitter a model change moves.
-    const TOLERANCE_MS: u64 = 100;
-    (ms.saturating_sub(TOLERANCE_MS)..=ms + TOLERANCE_MS)
-        .find_map(|at| delivered.find(&format!("\"uptime_ms\":{at},")))
-}
-
 #[test]
 #[ignore = "needs a built fw-esp32c6 ELF; `just test-emu-c6` runs it"]
 fn g3_1_the_cable_comes_out_at_six_seconds_and_the_link_comes_back_at_nine() {
@@ -222,33 +178,15 @@ fn g3_1_the_cable_comes_out_at_six_seconds_and_the_link_comes_back_at_nine() {
     assert_eq!(r.m.control_lines(), 5, "and every one of them applied");
 
     let delivered = r.m.usb_sj().text();
-    // Before the unplug: the boot, the hello, the first heartbeat.
-    const HELLO_PROTO: &str = "\nM!{\"id\":0,\"msg\":{\"hello\":{\"proto\":";
-    let hello = delivered
-        .find(HELLO_PROTO)
-        .expect("the unsolicited hello reached the host");
-    // The wire protocol version is the image's (every breaking wire change
-    // bumps it), so it is a figure: `hello.proto` in
-    // `lp-emu/esp/figures/esp32c6.json`, re-recorded by `just bless-chips`.
-    let proto = &delivered[hello + HELLO_PROTO.len()..];
-    let digits = proto
-        .find(|c: char| !c.is_ascii_digit())
-        .unwrap_or(proto.len());
-    let mut figures = Figures::new(
-        "esp32c6",
-        "usb_control::g3_1_the_cable_comes_out_at_six_seconds_and_the_link_comes_back_at_nine",
-    );
-    figures.int(
-        "hello.proto",
-        proto[..digits].parse::<i64>().expect("the proto version"),
-    );
-    figures.verify();
-    let first_beat = heartbeat_at(&delivered, 5_000).expect("the 5 s heartbeat reached the host");
+    // Before the unplug: the boot, to the server loop's boot marker.
     assert!(
         delivered.starts_with("[INIT] Initializing board...\n"),
         "the first line a host attached from cycle zero sees"
     );
-    assert!(hello < first_beat, "the hello precedes the heartbeat");
+    assert!(
+        delivered.contains("starting server loop... proto="),
+        "the boot marker reached the host"
+    );
 
     // The transitions land on the cycles the script asked for, to the cycle.
     for (ms, needle) in [
@@ -279,36 +217,35 @@ fn g3_1_the_cable_comes_out_at_six_seconds_and_the_link_comes_back_at_nine() {
         r.window(6_000.0, 9_500.0)
     );
 
-    // After the re-open, a full packet drains and the 10 s heartbeat lands.
+    // After the re-open, the link task's traffic reaches the host again.
     let after: Vec<(f64, usize)> = r
         .deliveries()
         .into_iter()
         .filter(|(ms, _)| *ms > 9_500.0)
         .collect();
     assert!(
-        after.iter().any(|(_, n)| *n == 64),
-        "no full 64 B commit drained after the re-open: {after:?}"
-    );
-    assert!(
-        heartbeat_at(&delivered, 10_000).is_some(),
-        "the 10 s heartbeat never reached the re-attached host"
+        !after.is_empty(),
+        "nothing drained after the re-open:\n{}",
+        r.window(9_500.0, 12_000.0)
     );
 
     // Liveness: the guest kept running through the whole detached window.
     assert!(r.m.idle_skips() > 1_000, "idle skips {}", r.m.idle_skips());
     assert!(r.m.uart0().is_empty(), "the link is USB, not UART0");
 
-    // P1b's vehicle, and the finding it makes exact: through this whole
-    // unplug the firmware **noticed nothing**. The monitor resets its latch
-    // optimistically on a cable loss, so when SOF returns at 9 s it already
-    // believes it is connected — and it had nothing to write in the 500 ms
-    // before the port re-opened. No write, no timeout, no latch, no
-    // recovery, no stamp of either kind.
-    assert_eq!(
-        r.link_stamps(),
-        (None, None, 0),
-        "the firmware recorded a link transition the register trace says never happened"
+    // The link task's own account: with the cable out there is no SOF, and
+    // it discards what it would have sent rather than writing into an
+    // endpoint nobody will drain. The server's unsolicited hello and
+    // heartbeats had no link to ride and were dropped and counted; nothing
+    // was dropped for a full send budget.
+    let discarded = r.link_counter("FRAMES_DISCARDED_NO_HOST");
+    assert!(
+        discarded > 0,
+        "the link task wrote with no host instead of discarding"
     );
+    assert!(r.link_counter("REPLIES_DROPPED_NO_LINK") >= 1);
+    assert_eq!(r.link_counter("REPLIES_DROPPED_FULL"), 0);
+    eprintln!("G3-1: {discarded} frame(s) discarded while the cable was out");
 }
 
 #[test]
@@ -323,13 +260,14 @@ fn g3_1b_a_port_held_closed_after_the_replug_holds_a_packet_until_it_opens() {
         r.outcome
     );
 
-    // The firmware's next thing to say after the re-attach is the 10 s
-    // heartbeat. It is committed to an endpoint nobody drains and HELD.
+    // After the re-attach the link task has frames to send (its handshake,
+    // on its own timer). The first is committed to an endpoint nobody
+    // drains and HELD.
     let held = r
         .commits()
         .into_iter()
-        .find(|(ms, n)| (9_000.0..13_000.0).contains(ms) && *n == 64)
-        .expect("no 64 B commit while the port was closed");
+        .find(|(ms, _)| (9_000.0..13_000.0).contains(ms))
+        .expect("no commit while the port was closed");
     assert!(
         r.lines.iter().any(|(ms, line)| (*ms - held.0).abs() < 0.01
             && line.contains("the host is attached but not draining (port closed)")),
@@ -376,7 +314,7 @@ fn g3_1b_a_port_held_closed_after_the_replug_holds_a_packet_until_it_opens() {
         .into_iter()
         .find(|(ms, _)| *ms > 13_000.0)
         .expect("nothing was delivered after the port opened");
-    assert_eq!(first.1, 64, "the held packet leaves first");
+    assert_eq!(first.1, held.1, "the held packet leaves first");
     let latency_ms = usb_drain_latency_ms();
     assert!(
         (first.0 - 13_000.0 - latency_ms).abs() < 1.0,
@@ -385,89 +323,16 @@ fn g3_1b_a_port_held_closed_after_the_replug_holds_a_packet_until_it_opens() {
         latency_ms
     );
 
-    // And the firmware's own account of it. `UsbConnectionMonitor` logs two
-    // strings and both go through the queue that `is_connected()` gates, so
-    // on a USB link they behave differently (M6 discovery §4): the
-    // "not draining" line is queued and then dropped by the very latch it
-    // reports, while "draining again" is emitted *after* the latch flips
-    // back and so reaches the host that just opened the port. That
-    // asymmetry is the reason P1 exists, and this is it, reproduced with no
-    // rig at all — because a control channel can open a port at a chosen
-    // moment.
-    let delivered = r.m.usb_sj().text();
-    let again = delivered
-        .find("[io_task] host draining again; resuming protocol writes")
-        .expect("the recovery line never reached the re-opened port");
+    // And the firmware's own account: its frame writes waited on the gate
+    // while the packet was held, and its write bound abandoned them.
+    let timeouts = r.link_counter("WRITE_TIMEOUTS");
     assert!(
-        !delivered.contains("host not draining"),
-        "the self-erasing line reached a host, which contradicts the monitor's own gating"
+        timeouts >= 1,
+        "no write timed out while the port was closed"
     );
-    let beat = heartbeat_at(&delivered, 15_000).expect("no heartbeat after the recovery");
-    assert!(again < beat, "the recovery line precedes the heartbeat");
-
-    // What the held packet itself was: the first 64 bytes of the 10 s
-    // heartbeat frame. The rest of that frame waited behind it until the
-    // chunk timeout abandoned the write, so that heartbeat never arrives
-    // whole (before the IN-endpoint gate the rest was written into the held
-    // packet and dropped instead — the same host-visible result).
-    assert!(
-        heartbeat_at(&delivered, 10_000).is_none(),
-        "the heartbeat written into a closed port arrived whole, which would mean the \
-         committed endpoint took bytes it had no room for"
-    );
-
-    // And P1b's vehicle agrees, on the firmware's own clock. Per DD38 the
-    // PAIR is the claim — with no host at all the monitor latches once
-    // during boot and never recovers, so a count alone proves nothing. Here
-    // both stamps exist, in order, and each lands where the script put it.
-    let (not_draining, again, count) = r.link_stamps();
-    let not_draining = not_draining.expect("the firmware never latched `host not draining`");
-    let again = again.expect("the firmware never recorded a recovery");
-    assert_eq!(count, 1, "exactly one silence in this run");
-    assert!(
-        (9_000..13_000).contains(&not_draining),
-        "the latch is stamped at {not_draining} ms, outside the window the port was closed"
-    );
-    // The recovery is **the first probe that finds the endpoint free**, and
-    // that is the whole assertion: at or after the open, never before it,
-    // and within one probe interval of it.
-    //
-    // Not "strictly after the open", which is what this first said and what
-    // CI caught. After the latch the firmware's only traffic is one `\n`
-    // every `PROBE_INTERVAL` (io_task, 2 s), and while the port is closed
-    // even that byte waits on the still-committed endpoint until its
-    // timeout (before the IN-endpoint gate it was dropped into it). So which
-    // millisecond the recovery lands on is decided by where that 2 s grid
-    // falls relative to the open, and the grid is anchored at io_task's
-    // start — a few milliseconds of boot that differ between two builds of
-    // the firmware. This machine's grid sits at 12,899 / 14,899 ms, so the
-    // open at 13,000 just misses one probe and waits 1,899 ms for the next;
-    // CI's sits within the same millisecond as the open, so it recovers at
-    // 13,000. Both are the same behaviour seen from either side of a
-    // one-millisecond boundary, and pinning either number would be pinning
-    // the build, not the firmware.
-    const PROBE_INTERVAL_MS: u32 = 2_000;
-    assert!(
-        again >= 13_000,
-        "the recovery is stamped at {again} ms, before the port opened at 13,000 ms"
-    );
-    assert!(
-        again > not_draining,
-        "the recovery at {again} ms precedes the latch at {not_draining} ms"
-    );
-    assert!(
-        again <= 13_000 + PROBE_INTERVAL_MS,
-        "the recovery is stamped at {again} ms, more than one {PROBE_INTERVAL_MS} ms probe \
-         interval after the open — the probe is the recovery path (M6 discovery §4), so a \
-         longer gap means something else woke the link"
-    );
-    // The latency itself is the firmware's cadence, not the model's, and is
-    // reported rather than gated (PD9/D13, DD33).
     eprintln!(
-        "G3-1b link stamps: not_draining {not_draining} ms, draining_again {again} ms \
-         ({} ms after the open at 13,000 ms — the first probe of io_task's \
-         {PROBE_INTERVAL_MS} ms grid to find the endpoint free), count {count}",
-        again - 13_000
+        "G3-1b: held {} B at {:.1} ms, delivered at {:.1} ms; {timeouts} write timeouts",
+        held.1, held.0, first.0
     );
 }
 
