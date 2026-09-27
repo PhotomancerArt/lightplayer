@@ -20,7 +20,7 @@ use super::board_stats::{BoardStats, counters_kv};
 use super::lab_command::LabCommand;
 use super::lab_rng::LabRng;
 use super::soak_message::{self, SoakStream};
-use crate::{Arq, CH_CONTROL, CH_PROTO, Link, LinkEvent, SendError};
+use crate::{Arq, CH_CONTROL, CH_PROTO, Link, LinkCounters, LinkEvent, SendError};
 
 /// What only the edge can do, asked for by a command.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -43,6 +43,10 @@ pub struct LabBoard {
     replies: VecDeque<String>,
     stream: Option<Streaming>,
     stats_due: bool,
+    /// The link's counters when `reset-stats` came in: a `stats` reply
+    /// reports the link's counts since then, not since boot.
+    base: LinkCounters,
+    rebase_due: bool,
 }
 
 struct Streaming {
@@ -67,6 +71,8 @@ impl LabBoard {
             replies: VecDeque::new(),
             stream: None,
             stats_due: false,
+            base: LinkCounters::default(),
+            rebase_due: false,
         }
     }
 
@@ -131,11 +137,15 @@ impl LabBoard {
     /// stream messages until the send budget is full. `extra` is appended to a
     /// `stats` reply (the edge's own facts: heap, uptime).
     pub fn pump<A: Arq>(&mut self, link: &mut Link<A>, extra: &str) {
+        if self.rebase_due {
+            self.base = link.counters().clone();
+            self.rebase_due = false;
+        }
         if self.stats_due {
             let mut line = String::from("stats ");
             self.stats.write_kv(&mut line);
             line.push(' ');
-            counters_kv(link.counters(), &mut line);
+            counters_kv(&link.counters().since(&self.base), &mut line);
             if !extra.is_empty() {
                 line.push(' ');
                 line.push_str(extra);
@@ -239,6 +249,7 @@ impl LabBoard {
             LabCommand::Hello => self.replies.push_back(format!("hello {}", self.identity)),
             LabCommand::ResetStats => {
                 self.stats = BoardStats::default();
+                self.rebase_due = true;
                 self.replies.push_back("ok reset-stats".into());
             }
             LabCommand::Stream {

@@ -43,3 +43,41 @@ pub struct LinkCounters {
     pub stale_syns: u32,
     pub protocol_errors: u32,
 }
+
+impl LinkCounters {
+    /// What was counted since `base` (a snapshot taken earlier from the
+    /// same link), field by field.
+    pub fn since(&self, base: &LinkCounters) -> LinkCounters {
+        macro_rules! d {
+            ($($f:ident),*) => {
+                LinkCounters { $($f: self.$f.saturating_sub(base.$f)),* }
+            };
+        }
+        d!(
+            frames_tx,
+            frames_rx,
+            bytes_tx,
+            bytes_rx,
+            data_frames_tx,
+            retransmits,
+            timeouts,
+            fast_retransmits,
+            probes,
+            bad_frames,
+            stale_frames,
+            oversize_frames,
+            dropped_unsynced,
+            duplicates,
+            out_of_order,
+            rx_no_room,
+            datagrams_dropped,
+            datagrams_lost,
+            stale_partials,
+            text_bytes,
+            ups,
+            resets,
+            stale_syns,
+            protocol_errors
+        )
+    }
+}

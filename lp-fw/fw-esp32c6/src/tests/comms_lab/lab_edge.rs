@@ -31,6 +31,10 @@ pub struct LabEdge {
     pub write_timeouts: u32,
     /// Pipe writes that failed outright (BLE: notify refused).
     pub write_errors: u32,
+    /// Peaks since boot: payload bytes the link held (queued, unacknowledged,
+    /// reordering, unread), and of those the reliability windows alone.
+    peak_buffered: usize,
+    peak_window: usize,
 }
 
 pub fn now_us() -> Micros {
@@ -48,6 +52,8 @@ impl LabEdge {
             app_us: 0,
             write_timeouts: 0,
             write_errors: 0,
+            peak_buffered: 0,
+            peak_window: 0,
         }
     }
 
@@ -60,8 +66,8 @@ impl LabEdge {
 
     /// One datagram from a message pipe.
     #[cfg_attr(
-        not(feature = "test_comms_lab_ble"),
-        allow(dead_code, reason = "only the BLE pipe is a message pipe")
+        not(any(feature = "test_comms_lab_ble", feature = "test_comms_lab_wifi")),
+        allow(dead_code, reason = "only the BLE and WiFi pipes are message pipes")
     )]
     pub fn on_datagram(&mut self, frame: &[u8]) {
         let t = now_us();
@@ -89,6 +95,8 @@ impl LabEdge {
         self.app_us += t2 - t;
         lab_logger::pump(&mut self.link, t2);
         self.link_us += now_us() - t2;
+        self.peak_buffered = self.peak_buffered.max(self.link.buffered_bytes());
+        self.peak_window = self.peak_window.max(self.link.window_bytes());
     }
 
     /// The link's next frame, timed as link work. The slice borrows the
@@ -153,7 +161,9 @@ impl LabEdge {
     fn extra(&self) -> String {
         format!(
             "edge.link_us={} edge.app_us={} edge.write_timeouts={} edge.write_errors={} \
-             edge.uptime_ms={} edge.heap_free={} edge.heap_used={} edge.log_ring_dropped={}",
+             edge.uptime_ms={} edge.heap_free={} edge.heap_used={} edge.heap_max={} \
+             edge.peak_link_buffered={} edge.peak_link_window={} edge.link_scratch={} \
+             edge.log_ring_dropped={}",
             self.link_us,
             self.app_us,
             self.write_timeouts,
@@ -161,6 +171,10 @@ impl LabEdge {
             Instant::now().as_millis(),
             esp_alloc::HEAP.free(),
             esp_alloc::HEAP.used(),
+            esp_alloc::HEAP.stats().max_usage,
+            self.peak_buffered,
+            self.peak_window,
+            self.link.scratch_bytes(),
             critical_section::with(|cs| lab_logger::LOG_RING.borrow_ref(cs).dropped_total()),
         )
     }
