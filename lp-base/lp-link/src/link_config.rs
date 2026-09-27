@@ -93,8 +93,17 @@ pub struct LinkConfig {
     /// page). The session is kept, but logs stay in the ring instead of going
     /// out to nobody. A few keepalives' worth.
     pub stall_after: Micros,
-    /// Flush a partial frame or unterminated text after this much quiet.
+    /// Hand up unterminated console text after this much quiet.
     pub idle_flush: Micros,
+    /// Abandon a partial frame after this much quiet (stream framing). Much
+    /// longer than `idle_flush` on purpose: a busy end writes one frame in
+    /// pieces (the C6 yields to an 80 ms render tick between 64-byte USB
+    /// packets; a page's read pump can sit behind a long task), and a frame
+    /// abandoned mid-way is resent only to be split and abandoned again — the
+    /// 2026-09-27 rehearsal saw 4 s stalls every palette cross-fade at 50 ms.
+    /// A frame that really lost its tail is caught anyway, by the next `0x00`
+    /// and the CRC; this only decides when a quiet partial stops waiting.
+    pub frame_abandon: Micros,
     /// Stream framing only: keep `0xFF` off the wire too (COBS-FF, see
     /// [`cobs`](crate::cobs)). On everywhere; off only to measure what
     /// plain COBS costs through Chromium's Web Serial on macOS (M3's A/B).
@@ -144,6 +153,7 @@ impl LinkConfig {
             keepalive: 250_000,
             stall_after: 1_000_000,
             idle_flush: 50_000,
+            frame_abandon: 3_000_000,
             escape_ff: true,
         }
     }

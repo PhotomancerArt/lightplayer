@@ -368,7 +368,9 @@ impl<A: Arq> Link<A> {
     /// delayed ACK, keepalive, SYN, idle flush). New input and `send()` need a
     /// `poll_transmit` too; this does not cover them.
     pub fn poll_timeout(&self) -> Option<Micros> {
-        let mut t = self.deframer.idle_deadline(self.cfg.idle_flush);
+        let mut t = self
+            .deframer
+            .idle_deadline(self.cfg.idle_flush, self.cfg.frame_abandon);
         let mut min = |x: Option<Micros>| {
             if let Some(x) = x {
                 t = Some(t.map_or(x, |t| t.min(x)));
@@ -650,7 +652,7 @@ impl<A: Arq> Link<A> {
     fn service_timers(&mut self, now: Micros) {
         if self
             .deframer
-            .idle_deadline(self.cfg.idle_flush)
+            .idle_deadline(self.cfg.idle_flush, self.cfg.frame_abandon)
             .is_some_and(|t| t <= now)
         {
             match self.deframer.flush_idle() {

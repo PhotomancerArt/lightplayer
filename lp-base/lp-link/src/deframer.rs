@@ -11,8 +11,10 @@
 //! - A frame that fails: its closing `0x00` may really have been the *opening*
 //!   of the next frame (the tail of this one was lost), so stay inside a frame.
 //! - A frame longer than the maximum is discarded up to the next `0x00`.
-//! - A partial frame that goes quiet for the idle time is flushed: as text if
-//!   it is all printable (it was text after all), else dropped and counted.
+//! - A partial frame that goes quiet for the frame-abandon time (seconds, not
+//!   the text idle time: a busy peer writes one frame in pieces) is flushed:
+//!   as text if it is all printable (it was text after all), else dropped and
+//!   counted.
 //!
 //! **The text mark** (COBS-FF framing only): `0xFF` never occurs inside a
 //! COBS-FF frame, so a raw `0xFF` means "text follows": whatever frame was in
@@ -172,11 +174,16 @@ impl Deframer {
         self.text.clear();
     }
 
-    /// When an idle flush is due, if anything is pending.
-    pub fn idle_deadline(&self, idle: Micros) -> Option<Micros> {
-        let pending =
-            !self.text.is_empty() || (self.in_frame && (!self.buf.is_empty() || self.discarding));
-        pending.then_some(self.last_byte_at + idle)
+    /// When an idle flush is due, if anything is pending: pending text after
+    /// `text_idle` of quiet, a partial frame after `frame_idle` (see
+    /// [`LinkConfig::frame_abandon`](crate::LinkConfig::frame_abandon) for why
+    /// the two differ).
+    pub fn idle_deadline(&self, text_idle: Micros, frame_idle: Micros) -> Option<Micros> {
+        if !self.text.is_empty() {
+            return Some(self.last_byte_at + text_idle);
+        }
+        let partial = self.in_frame && (!self.buf.is_empty() || self.discarding);
+        partial.then_some(self.last_byte_at + frame_idle)
     }
 
     pub fn flush_idle(&mut self) -> IdleFlush {
@@ -303,8 +310,19 @@ mod tests {
         for &b in b"panic!" {
             d.push(5, b);
         }
-        assert_eq!(d.idle_deadline(10), Some(15));
+        // A partial frame waits for the frame-abandon time, not the text one.
+        assert_eq!(d.idle_deadline(10, 1000), Some(1005));
         assert_eq!(d.flush_idle(), IdleFlush::Text);
         assert_eq!(d.take_text(), b"panic!");
+    }
+
+    #[test]
+    fn pending_text_flushes_on_the_short_idle() {
+        let mut d = Deframer::new(64, false);
+        for &b in b"boot" {
+            d.push(5, b);
+        }
+        assert_eq!(d.idle_deadline(10, 1000), Some(15));
+        assert_eq!(d.flush_idle(), IdleFlush::Text);
     }
 }

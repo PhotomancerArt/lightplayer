@@ -83,6 +83,12 @@ no trailing newline; the link's own framing already delimits it
 - **A link `Reset` fails in-flight requests at once.** The host surfaces it
   as a link-reset event that ends any pending conversation immediately,
   rather than waiting out an idle timeout.
+- **A slow writer is not a lost frame.** Loose console text is handed up
+  after `idle_flush` (50 ms on USB) of quiet, but a half-received frame waits
+  `frame_abandon` (3 s): the C6 writes a frame in 64-byte packets and yields to
+  a render tick (~80 ms) between them, and a page's read pump can sit behind a
+  long task. At 50 ms each resend of a split frame was abandoned again, and
+  the 2026-09-27 rehearsal saw 4 s stalls on every palette cross-fade.
 
 ### Logs
 

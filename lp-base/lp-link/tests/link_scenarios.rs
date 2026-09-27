@@ -148,9 +148,11 @@ fn text_outside_frames_passes_through() {
     );
 }
 
-/// The board-side convention for a panic that interrupts a frame: write
-/// `0x00`, then the text. The torn frame fails, the text lands in the
-/// deframer's next "frame", and the idle flush hands it up as console text.
+/// The older board-side convention for a panic that interrupts a frame:
+/// write `0x00`, then the text. The torn frame fails, the text lands in the
+/// deframer's next "frame", and once that partial has been quiet for
+/// `frame_abandon` it is handed up as console text. (The product writes the
+/// `0xFF` text mark instead, which needs no timeout at all.)
 #[test]
 fn panic_text_after_a_torn_frame_survives_when_it_starts_with_a_delimiter() {
     let (mut a, mut b) = pair::<SelectiveRepeat>(LinkConfig::usb());
@@ -161,7 +163,7 @@ fn panic_text_after_a_torn_frame_survives_when_it_starts_with_a_delimiter() {
     let frame = a.poll_transmit(now).unwrap().to_vec();
     b.on_bytes(now, &frame[..frame.len() / 2]);
     b.on_bytes(now, b"\x00panicked at src/main.rs:10: boom\r\n");
-    now += 100_000;
+    now += LinkConfig::usb().frame_abandon + 1_000;
     let _ = b.poll_transmit(now);
     let texts: Vec<String> = drain(&mut b)
         .into_iter()
@@ -172,6 +174,37 @@ fn panic_text_after_a_torn_frame_survives_when_it_starts_with_a_delimiter() {
         .collect();
     assert_eq!(texts.concat(), "panicked at src/main.rs:10: boom\r\n");
     assert_eq!(b.counters().bad_frames, 1, "the torn frame is counted");
+}
+
+/// A busy board writes one frame in 64-byte USB packets with a render tick
+/// (~80 ms) between them. The receiver must wait for the rest, not abandon
+/// the partial at the text idle time: the 2026-09-27 rehearsal
+/// (`silicon:esp32c6 10:bd:a3:b0:8e:30`) saw every palette cross-fade stall
+/// the link for 4 s while each resend was split and abandoned again.
+#[test]
+fn a_frame_written_in_slow_pieces_is_received_whole() {
+    let (mut a, mut b) = pair::<SelectiveRepeat>(LinkConfig::usb());
+    let mut now = 0;
+    handshake(&mut a, &mut b, &mut now);
+    let _ = drain(&mut b);
+    a.send(CH_PROTO, &[7; 200]).unwrap();
+    let frame = a.poll_transmit(now).unwrap().to_vec();
+    for piece in frame.chunks(64) {
+        b.on_bytes(now, piece);
+        now += 80_000;
+        // The receiver's timers run between pieces, as they do on a host.
+        while b.poll_transmit(now).is_some() {}
+    }
+    let msgs: Vec<Vec<u8>> = drain(&mut b)
+        .into_iter()
+        .filter_map(|e| match e {
+            LinkEvent::Message { data, .. } => Some(data),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(msgs, vec![vec![7; 200]]);
+    assert_eq!(b.counters().stale_partials, 0, "no partial was abandoned");
+    assert_eq!(b.counters().bad_frames, 0);
 }
 
 #[test]
