@@ -5,11 +5,15 @@ BLE, the classic UART, and later UDP and WebSocket. It sits between a raw pipe
 and the wire messages, on **both** ends: the board, Studio (wasm), `lp-cli`,
 and the emulator tools run the same crate.
 
-> **Status: prototype (design accepted 2026-09-27).** It was built and measured in the investigation
-> `lp2025/2026-09-26-1720-reliable-device-link` and proven on a C6 in the
-> `test_comms_lab` firmware. It is **not yet wired into the product**. The
-> decision is `docs/adr/2026-09-27-lp-link-one-comms-layer.md` (accepted), and
-> the rollout is plan `lp2025/2026-09-26-2215-lp-link-comms-layer`.
+> **Status: in the product, on USB, since this PR** (C6 and S3 silicon and
+> their emulators, Studio's Web Serial and emulator-tab providers, `lp-cli`'s
+> native serial and `serial:tcp`/`serial:ws`). It was built and measured in
+> the investigation `lp2025/2026-09-26-1720-reliable-device-link`, proven on
+> a C6 in the `test_comms_lab` firmware, and cut over in
+> `lp2025/2026-09-27-0215-lp-link-usb-cutover`. BLE, the classic ESP32's UART
+> and `fw-emu` still speak the old `M!`-line framing until their own
+> milestones (M3, M5, and a future one) bring them onto lp-link too. The
+> decision is `docs/adr/2026-09-27-lp-link-one-comms-layer.md`.
 
 ## Why it exists
 
@@ -22,6 +26,70 @@ stream carries `0xFF`
 Our own edges have lost bytes too (esp-hal's USB ISR, BLE long writes, the
 classic UART). lp-link makes delivery reliable end to end, and counts every
 recovery so edge bugs stay visible.
+
+## Where it runs
+
+lp-link itself only frames bytes; the code that owns a port and speaks the
+wire's messages over channel 1 lives at each edge:
+
+- **Board:** `lp-fw/fw-esp32-common/src/usb_link/` — one `Link<SelectiveRepeat>`
+  per boot, driven by `usb_link_task.rs`'s link task, with replies serialized
+  by `usb_link_transport.rs` (`UsbLinkTransport`, a `ServerTransport`). The C6
+  and S3 enable it behind the `usb-link` feature; the classic (v3) does not.
+- **Native host:** `lpc_wire::WireLinkPort` — the one type every native
+  reader drives (a real serial port, `serial:tcp`, `serial:ws`, the fake
+  board double). `lpa-client`'s `transport_serial/link_pump.rs` and `lp-cli`'s
+  tools own the port and poll it.
+- **Studio (wasm):** `lpa-link`'s `LinkPortService` (`device_link/
+  link_port_service.rs`) — one per open port, wrapping the same
+  `WireLinkPort`, for both the Web Serial provider
+  (`providers/browser_serial_esp32/`) and the emulator-tab provider
+  (`emulator_tab_link.rs`).
+- **Tools:** `lpc_wire::WireLinkSniffer` — a passive decoder with no session
+  of its own, for `lp-cli wire unpack`, the emulator's wire tap, and
+  `lp-cli record timeline`.
+
+This is USB only today (D3 of the cut-over plan): BLE, the classic's UART and
+`fw-emu` still run the pre-lp-link `M!`-line framing (`lp-fw/fw-esp32-common`'s
+`server_msg.rs`, `StreamingMessageRouterTransport`) and their own hosts
+(`lpc_wire::WireStream`), unaffected by anything below.
+
+### The proto channel's payload
+
+Channel 1 carries one whole wire message per link message — no `M!` prefix,
+no trailing newline; the link's own framing already delimits it
+(`lpc_wire::link_payload`):
+
+- **Board → host:** the first byte tags the payload. `{` (`PAYLOAD_TAG_JSON`)
+  is plain JSON — the `M!{json}` line's JSON, byte for byte; `L`
+  (`PAYLOAD_TAG_PACKED`, the same byte JSON Pack already uses as its frame
+  kind) is a learned-dictionary packed frame, written *without* COBS (the
+  link already framed it, so there is nothing left to escape).
+- **Host → board:** always JSON. Hosts never pack; the device needs only a
+  decoder.
+- **Packed opt-in, once per `Up`.** `SetEncoding` is an ordinary proto
+  request the host sends after the link comes up; only once the board
+  answers, over the link, may it write `L` frames. A capture or a plain
+  serial monitor that never asks sees nothing but JSON.
+- **The hello is first.** The board's `ServerHello` is the first proto
+  message after every `Up` (and still answers a direct request for it). The
+  boot marker line stays raw text, outside any frame.
+- **Both ends reset the payload state together, with the link.** On `Up` or
+  `Reset` the board's packed mode reverts to JSON and the host drops its
+  learned table; a fresh opt-in follows the next `Up`. There is no
+  cross-session dictionary, no epoch, and no re-ask: a payload that fails to
+  decode restarts the link instead, because over a link this reliable a
+  desync is a bug to count, not a state to recover from mid-session.
+- **A link `Reset` fails in-flight requests at once.** The host surfaces it
+  as a link-reset event that ends any pending conversation immediately,
+  rather than waiting out an idle timeout.
+
+### Logs
+
+The board's `log`/printf output goes into a fixed `LogRing`, drained onto
+channel 2 (best-effort) while the link is up. A host renders each channel-2
+record, and any raw `Text` outside a frame (early boot, the ROM banner, a
+panic), as the same console lines Studio and `lp-cli` always showed.
 
 ## Layering
 
