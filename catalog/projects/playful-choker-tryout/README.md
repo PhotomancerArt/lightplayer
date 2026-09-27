@@ -5,6 +5,9 @@ The PLAYFUL choker's rig (same `fixture.json` at 20 % brightness, same
 pattern-library set on one playlist, so they can be worn and judged.
 The original `playful-choker` project is untouched.
 
+Like it, this project carries the choker's **soft power off**: `power.json`, a
+switch-mode `PowerButton` on D0 (wiring in `../playful-choker/README.md`).
+
 ## What is on it
 
 25 entries: all thirteen patterns of the first set, then a second stop for

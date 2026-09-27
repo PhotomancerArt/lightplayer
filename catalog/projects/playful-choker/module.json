@@ -12,6 +12,9 @@
     },
     "shader": {
       "ref": "./shader.json"
+    },
+    "power": {
+      "ref": "./power.json"
     }
   },
   "provenance": {
