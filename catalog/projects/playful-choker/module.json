@@ -10,11 +10,11 @@
     "output": {
       "ref": "./output.json"
     },
-    "shader": {
-      "ref": "./shader.json"
-    },
     "power": {
       "ref": "./power.json"
+    },
+    "shader": {
+      "ref": "./shader.json"
     }
   },
   "provenance": {
