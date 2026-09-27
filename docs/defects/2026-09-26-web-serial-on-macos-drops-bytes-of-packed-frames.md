@@ -71,6 +71,17 @@ Chromium (open the port with `IGNBRK` when parity is off, or clear `PARMRK`
 unless parity checking is on) and to Apple (the unsigned free-space count).
 Studio cannot set termios itself. Larger `bufferSize` does not help (table).
 
+**Stopgap (2026-09-27)** — Studio asks boards for JSON, not packed replies, on
+real Web Serial when the browser runs on macOS
+(`lp-app/lpa-studio-web/src/wire_encoding_default.rs`; decision 3 at G1 of the
+investigation). JSON never carries `0xFF`, so this path loses nothing (table
+above). Other OSes, `?emu=` pages (the emulator's `navigator.serial` shim has no
+tty), Bluetooth (never packed) and `lp-cli` (native termios) are unchanged, and
+`?wire=packed` turns packing back on for a measurement. It goes when the device
+link moves onto `lp-link` (ADR `docs/adr/2026-09-27-lp-link-one-comms-layer.md`),
+whose COBS-FF framing keeps `0xFF` off the wire. The cost meanwhile is JSON's
+size on a Mac: the wire bytes JSON Pack saves (ADR 2026-09-24) are spent again.
+
 **Regression coverage** — none in CI (it needs macOS and a board).
 `scripts/link/tty-soak.py --termios chrome` reproduces it on any macOS host
 with a `soak_link` board; `scripts/link/mac-tty-model.py` replays any

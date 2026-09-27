@@ -23,6 +23,7 @@ mod settings_io;
 mod stories;
 mod unsaved_gate;
 mod web_app;
+mod wire_encoding_default;
 
 fn main() {
     // Before ANYTHING reads the URL — the router's boot parse, but also the
