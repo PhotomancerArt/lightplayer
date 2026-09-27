@@ -1,59 +1,139 @@
-{"seq":0,"branch":"claude/studio-flight-recorder","href":"http://127.0.0.1:23997/?emu=ws://127.0.0.1:22496&record=http%3A%2F%2F127.0.0.1%3A51117%2Fingest","kind":"session","recording":"cddf7c3ee003561a","t":1790461874.147,"user_agent":"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.0.0 Safari/537.36"}
-{"seq":2,"t":1790461874.211,"kind":"route","from":"","to":"/","reason":"boot"}
-{"seq":515,"t":1790461877.274,"kind":"route","from":"/","to":"/devices","reason":"browser-nav"}
-{"seq":519,"t":1790461879.317,"endpoint":"roster","kind":"journal","scope":"roster","entry":"Input(Event(LinkAttached { link: LinkId(9), info: LinkInfo { label: \"ESP32 Serial (303a:1001)\", endpoint: EndpointKey(\"browser-serial-esp32-port-1\"), usb: Some(UsbIds { vendor: 12346, product: 4097 }), serial_number: None } }))"}
-{"seq":520,"t":1790461879.317,"endpoint":"roster","kind":"journal","scope":"roster","entry":"Note(PendingLinkOpened { link: LinkId(9) })"}
-{"seq":521,"t":1790461879.317,"endpoint":"device:1","kind":"journal","scope":"device:1","entry":"Note(IdentityPromoted { binding: Endpoint, value: \"browser-serial-esp32-port-1\" })"}
-{"seq":522,"t":1790461879.317,"endpoint":"device:1","kind":"journal","scope":"device:1","entry":"Note(ActivityStarted { kind: Identify })"}
-{"seq":523,"b64":"W0lOSVRdIEluaXRpYWxpemluZyBib2FyZC4uLg==","dir":"rx","kind":"wire","len":28,"port":"1","t":1790461879.336,"transport":"serial"}
-{"seq":524,"t":1790461879.338,"endpoint":"device:1","kind":"journal","scope":"device:1","entry":"Input(Event(Link { link: LinkId(9), event: Opened { info: LinkInfo { label: \"ESP32 Serial (303a:1001)\", endpoint: EndpointKey(\"browser-serial-esp32-port-1\"), usb: Some(UsbIds { vendor: 12346, product: 4097 }), serial_number: None } } }))"}
-{"seq":525,"b64":"TSF7ImlkIjoxLCJtc2ciOiJoZWxsbyJ9Cg==","dir":"tx","kind":"wire","len":25,"port":"1","t":1790461879.34,"transport":"serial"}
-{"seq":526,"b64":"AABSAQA=","dir":"rx","kind":"wire","len":5,"port":"1","t":1790461879.381,"transport":"serial"}
-{"seq":527,"b64":"CgpbSU5GT10gZndfZXNwMzJfY29tbW9uOjpzZXJpYWw6OnVzYl9jb25uZWN0aW9uOiBbaW9fdGFza10gaG9zdCBkcmFpbmluZyBhZ2FpbjsgcmVzdW1pbmcgcHJvdG9jb2wgd3JpdGVzDQoKTSF7ImlkIjoxLCJtc2ciOnsiaGVsbG8iOnsicHJvdG8iOjI4LCJidWlsZCI6eyJmZWF0dXJlcyI6WyJub2RlLmJ1dHRvbiIsIm5vZGUuY2xvY2siLCJub2RlLmZsdWlkIiwibm9kZS5maXh0dXJlIiwibm9kZS5wbGF5bGlzdCIsIm5vZGUucmFkaW8iLCJub2RlLnNoYWRlciIsIm5vZGUudGV4dHVyZSIsInN2Yy5idXR0b24iLCJzdmMucmFkaW8tZXNwbm93IiwiZ2Z4Lmxwdm0iXSwicGFja2FnZSI6ImZ3LWVzcDMyYzYiLCJjb21taXQiOiJkZmVhMGYzMDY5MjIiLCJkaXJ0eSI6ZmFsc2UsInByb2ZpbGUiOiJyZWxlYXNlLWVzcDMyIn0sImhhcmR3YXJlIjp7InJhZGlvIjp0cnVlLCJ0b3RhbExlZEJ1ZGdldCI6bnVsbCwiYnV0dG9uIjp0cnVlLCJib2FyZElkIjoic2VlZWQveGlhby1lc3AzMi1jNiIsImJhc2VNYWMiOiJhMDpmMjo2Mjo4NzpiNDo4YyIsImNoaXBSZXZpc2lvbiI6IjAuMiIsImV1aTY0IjoiYTA6ZjI6NjI6ODc6YjQ6OGM6MDA6MDAifSwiZGV2aWNlVWlkIjpudWxsLCJwYWNrRm9ybWF0IjoyLCJhdXRoIjp7InJlcXVpcmVkIjpmYWxzZSwiZ3JhbnRlZCI6ImVkaXQifX19fQo=","dir":"rx","kind":"wire","len":668,"port":"1","t":1790461879.404,"transport":"serial"}
-{"seq":528,"b64":"TSF7ImlkIjo5MDA3MTk5MjU0NzQwOTkxLCJtc2ciOnsic2V0RW5jb2RpbmciOnsiZW5jb2RpbmciOiJwYWNrZWQiLCJmb3JtYXQiOjJ9fX0K","dir":"tx","kind":"wire","len":81,"port":"1","t":1790461879.405,"transport":"serial"}
-{"seq":529,"t":1790461879.406,"endpoint":"device:1","kind":"journal","scope":"device:1","entry":"Input(Event(Link { link: LinkId(9), event: Line(\"[INIT] Initializing board...\") }))"}
-{"seq":530,"t":1790461879.406,"endpoint":"device:1","kind":"journal","scope":"device:1","entry":"Input(Event(Link { link: LinkId(9), event: Line(\"\") }))"}
-{"seq":531,"t":1790461879.406,"endpoint":"device:1","kind":"journal","scope":"device:1","entry":"Input(Event(Link { link: LinkId(9), event: Line(\"[INFO] fw_esp32_common::serial::usb_connection: [io_task] host draining again; resuming protocol writes\") }))"}
-{"seq":532,"t":1790461879.406,"endpoint":"device:1","kind":"journal","scope":"device:1","entry":"Input(Event(Link { link: LinkId(9), event: Line(\"\") }))"}
-{"seq":533,"t":1790461879.407,"endpoint":"device:1","kind":"journal","scope":"device:1","entry":"Input(Event(Link { link: LinkId(9), event: Frame(ServerFrame { request_id: 1, body: Hello(HelloFacts { proto: 28, identity: PeerIdentity { uid: None, mac: Some(MacAddress(\"a0:f2:62:87:b4:8c\")), name: None }, firmware: Some(\"fw-esp32c6 dfea0f306922\"), board_id: Some(\"seeed/xiao-esp32-c6\") }) }) }))"}
-{"seq":534,"t":1790461879.407,"endpoint":"device:1","kind":"journal","scope":"device:1","entry":"Note(IdentityPromoted { binding: Mac, value: \"a0:f2:62:87:b4:8c\" })"}
-{"seq":535,"t":1790461879.407,"endpoint":"device:1","kind":"journal","scope":"device:1","entry":"Note(ActivityEnded { kind: Identify, outcome: Succeeded { summary: \"seeed/xiao-esp32-c6 · fw-esp32c6 dfea0f306922\" } })"}
-{"seq":536,"t":1790461879.407,"endpoint":"roster","kind":"journal","scope":"roster","entry":"Note(DeviceCreated { device: DeviceId(1), from_record: false })"}
-{"seq":537,"t":1790461879.407,"endpoint":"roster","kind":"journal","scope":"roster","entry":"Note(LinkRouted { link: LinkId(9), to: DeviceId(1) })"}
-{"seq":538,"t":1790461879.409,"endpoint":"device:1","kind":"journal","scope":"device:1","entry":"Input(Action(SetName { device: DeviceId(1), name: \"XIAO ESP32-C6 · Sep 26\" }))"}
-{"seq":539,"conversation":11,"id":1073741824,"kind":"request","phase":"sent","request":"access.list","t":1790461879.411}
-{"seq":540,"b64":"TSF7ImlkIjoxMDczNzQxODI0LCJtc2ciOiJhY2Nlc3NMaXN0In0K","dir":"tx","kind":"wire","len":39,"port":"1","t":1790461879.411,"transport":"serial"}
-{"seq":541,"b64":"Ck0heyJpZCI6OTAwNzE5OTI1NDc0MDk5MSwibXNnIjp7InNldEVuY29kaW5nIjp7ImVuY29kaW5nIjoicGFja2VkIn19fQoKW0lORk9dIGZ3X2VzcDMyX2NvbW1vbjo6c2VyaWFsOjpwYWNrZWRfbGluazogcGFja2VkIGxpbms6IHJlcGxpZXMgYXJlIG5vdyBwYWNrZWQgKHRhYmxlIGVwb2NoIDEpDQoKAEwCAQFBoPwCaWSmgICAgAT8A21zZ6D8CmFjY2Vzc0xpc3Sg/ApibGVFbmFibGVkpfwEb3BlbqT8B2VudHJpZXOhov///wA=","dir":"rx","kind":"wire","len":242,"port":"1","t":1790461879.426,"transport":"serial"}
-{"seq":542,"t":1790461879.427,"kind":"command","name":"LibraryChanged","detail":""}
-{"seq":543,"conversation":11,"disposition":"matched","fin":true,"frame_seq":0,"id":1073741824,"kind":"request","phase":"frame","response_id":1073741824,"since_sent_ms":22.0,"t":1790461879.433}
-{"seq":544,"conversation":11,"id":1073741824,"kind":"request","latency_ms":22.0,"outcome":"answered","phase":"outcome","request":"access.list","t":1790461879.433}
-{"seq":545,"conversation":11,"id":1073741825,"kind":"request","phase":"sent","request":"access.add","t":1790461879.434}
-{"seq":546,"b64":"TSF7ImlkIjoxMDczNzQxODI1LCJtc2ciOnsiYWNjZXNzQWRkIjp7ImVudHJ5Ijp7ImxhYmVsIjoiQ2hyb21lIG9uIE1hYyIsImtpbmQiOiJicm93c2VyIiwidGllciI6ImVkaXQiLCJzYWx0IjoiM2R6Si9MSW9sbEFGVmptcEJNUzR1Zz09IiwiaXRlcmF0aW9ucyI6MSwiayI6InI1YjZ0U2N1TkkxR1lRdnY1eHdSOFQ0c0dVK0tLRklMNkE3Y1VuaDBhV2M9IiwiYWRkZWRBdCI6MTc5MDQ2MTg3OX19fX0K","dir":"tx","kind":"wire","len":228,"port":"1","t":1790461879.434,"transport":"serial"}
-{"seq":547,"b64":"CgBMBQH4GKBzpoGAgIAEAaACoAOlBKQFoaD8BWxhYmVsjUNocm9tZSBvbiBNYWP8BGtpbmSHYnJvd3NlcvwEdGllcoRlZGl0/ARzYWx0mDNkekovTElvbGxBRlZqbXBCTVM0dWc9PfwHYWRkZWRBdKa3j+HVBv+i////AA==","dir":"rx","kind":"wire","len":124,"port":"1","t":1790461879.449,"transport":"serial"}
-{"seq":548,"conversation":11,"disposition":"matched","fin":true,"frame_seq":0,"id":1073741825,"kind":"request","phase":"frame","response_id":1073741825,"since_sent_ms":21.0,"t":1790461879.455}
-{"seq":549,"conversation":11,"id":1073741825,"kind":"request","latency_ms":21.0,"outcome":"answered","phase":"outcome","request":"access.add","t":1790461879.455}
-{"seq":550,"t":1790461879.455,"kind":"command","name":"Access/Synced","detail":""}
-{"seq":551,"t":1790461879.482,"kind":"command","name":"LibraryChanged","detail":""}
-{"seq":552,"b64":"CgBMBQH05aABJgGg/AloZWFydGJlYXSg/ANmcHOg/ANhdmeoB4jMzAT8BHNkZXb//ANtaW6oB4jMzAT8A21heKgJh4L+Lf/8C2ZyYW1lX2NvdW50ptDFF/wPbG9hZGVkX3Byb2plY3RzoaL8CXVwdGltZV9tc6aDtRj8Bm1lbW9yeaD8CWZyZWVCeXRlc6bg4gz8CXVzZWRCeXRlc6aA0QX8CnRvdGFsQnl0ZXOm4LMS/BBsYXJnZXN0RnJlZUJsb2NrpubBC//8CHJlY292ZXJ5oPwFbGV2ZWyFZ3JlZW78C3Jlc2V0UmVhc29uiHBvd2VyLW9u/Alib290Q291bnQB/AhzYWZlTW9kZaT8C291dHB1dENsYW1wo/wJbGFzdENyYXNoo/wFcGF0aHMkoaL//AdvdXRwdXRzo/wEbGlua6D8DXBhcnNlRmFpbHVyZXML/AhyeEVycm9ycxH8DnF1ZXVlRnVsbERyb3BzFvwTc3RhbGVQYXJ0aWFsRmx1c2hlc278EWhvc3ROb3REcmFpbmluZ01zpv0G/BNob3N0RHJhaW5pbmdBZ2Fpbk1zpsW3GPwQbm90RHJhaW5pbmdDb3VudAH//AhpZGVudGl0eaD8B2Jhc2VNYWORYTA6ZjI6NjI6ODc6YjQ6OGP/////AApbSU5GT10gZndfZXNwMzJfY29tbW9uOjpzZXJ2ZXJfbG9vcDogW3BlcmZdIGZyYW1lPTM4NTc0NCBmcHM9OTYzIGVsYXBzZWQ9NTAwMG1zIHJlY3Y9MG1zIHRpY2s9MG1zIHNlbmQ9MG1zIHRvdGFsPTBtcyByZXNwb25zZXM9MA0KCltJTkZPXSBmd19lc3AzMmM2OjpzdGFja19wcm9iZTogW3N0YWNrXSBoZWFydGJlYXQ6IGhpZ2gtd2F0ZXIgMTUxMTIgQiBvZiA2MjY0MCBCICg0NzUyOCBCIGhlYWRyb29tKQ0K","dir":"rx","kind":"wire","len":732,"port":"1","t":1790461879.492,"transport":"serial"}
-{"seq":875,"t":1790461884.032,"kind":"error","level":"warn","source":"studio:lpa_studio_core::app::studio::studio_controller","message":"push not banked: missing session: library: invalid device uid \"mac:a0:f2:62:87:b4:8c\": unknown uid prefix"}
-{"seq":993,"t":1790461889.108,"kind":"route","from":"/devices","to":"/device/mac:a0:f2:62:87:b4:8c","reason":"browser-nav"}
-{"seq":1025,"t":1790461889.653,"kind":"route","from":"/device/mac:a0:f2:62:87:b4:8c","to":"/p/playful-choker-prjk73kh54gdkdrj608?on=mac:a0:f2:62:87:b4:8c","reason":"slug-heal"}
-{"seq":1226,"t":1790461895.272,"kind":"toast","level":"info","message":"Closed XIAO ESP32-C6 · Sep 26 — the board keeps running"}
-{"seq":1232,"t":1790461895.295,"kind":"route","from":"/p/playful-choker-prjk73kh54gdkdrj608?on=mac:a0:f2:62:87:b4:8c","to":"/","reason":"browser-nav"}
-{"seq":1274,"t":1790461900.338,"kind":"open","stage":"starting"}
-{"seq":1275,"t":1790461900.344,"kind":"route","from":"/","to":"/p/playful-choker-prjk73kh54gdkdrj608?on=mac:a0:f2:62:87:b4:8c","reason":"browser-nav"}
-{"seq":1276,"t":1790461900.362,"kind":"open","stage":"on-device:connecting"}
-{"seq":1288,"t":1790461900.476,"kind":"open","stage":"on-device:clearing"}
-{"seq":1299,"t":1790461900.674,"kind":"open","stage":"on-device:uploading"}
-{"seq":1390,"t":1790461901.328,"kind":"open","stage":"on-device:loading"}
-{"seq":1396,"t":1790461901.481,"kind":"open","stage":"on-device:reading"}
-{"seq":1446,"t":1790461902.54,"kind":"open","stage":"idle"}
-{"seq":1448,"t":1790461902.55,"kind":"error","level":"warn","source":"studio:lpa_studio_core::app::studio::studio_controller","message":"open on a named device not banked: unsupported action: This project is open in this tab — close it before changing it"}
-{"seq":1595,"t":1790461904.565,"kind":"route","from":"/p/playful-choker-prjk73kh54gdkdrj608?on=mac:a0:f2:62:87:b4:8c","to":"/p/playful-choker-prjk73kh54gdkdrj608/play?on=mac:a0:f2:62:87:b4:8c","reason":"browser-nav"}
-{"seq":1927,"t":1790461914.72,"kind":"route","from":"/p/playful-choker-prjk73kh54gdkdrj608/play?on=mac:a0:f2:62:87:b4:8c","to":"/p/playful-choker-prjk73kh54gdkdrj608?on=mac:a0:f2:62:87:b4:8c","reason":"browser-nav"}
-{"seq":1931,"t":1790461914.746,"kind":"toast","level":"info","message":"Closed XIAO ESP32-C6 · Sep 26 — the board keeps running"}
-{"seq":1932,"t":1790461914.762,"kind":"route","from":"/p/playful-choker-prjk73kh54gdkdrj608?on=mac:a0:f2:62:87:b4:8c","to":"/devices","reason":"browser-nav"}
-{"seq":1947,"conversation":15,"id":1090519058,"kind":"request","phase":"sent","request":"project.read","t":1790461914.829}
-{"seq":1950,"conversation":15,"disposition":"matched","fin":true,"frame_seq":0,"id":1090519058,"kind":"request","phase":"frame","response_id":1090519058,"since_sent_ms":64.0,"t":1790461914.893}
-{"seq":1951,"conversation":15,"error":"server error: Project not found: handle 1","id":1090519058,"kind":"request","latency_ms":64.0,"outcome":"failed","phase":"outcome","request":"project.read","t":1790461914.893}
-{"seq":1952,"t":1790461914.893,"kind":"error","level":"warn","source":"studio:lpa_client::pull_loop","message":"project read id=1090519058: stream error after 1 frames: Server(\"Project not found: handle 1\")"}
+{"seq":0,"branch":"claude/lp-link-usb-cutover-p5","href":"http://localhost:38562/devices?emu=ws://127.0.0.1:56153&record=http%3A%2F%2F127.0.0.1%3A56150%2Fingest","kind":"session","recording":"4cd98d52a7be79e7","t":1790513807.98,"user_agent":"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.0.0 Safari/537.36"}
+{"seq":2,"t":1790513808.049,"kind":"route","from":"","to":"/devices","reason":"boot"}
+{"seq":11,"b64":"AAIDAQEFocnW+AEBAQEBBwEI2w9uhwA=","dir":"tx","kind":"wire","len":23,"port":"1","t":1790513808.104,"transport":"serial"}
+{"seq":12,"b64":"W0lOSVRdIEluaXRpYWxpemluZyBib2FyZC4uLg==","dir":"rx","kind":"wire","len":28,"port":"1","t":1790513808.106,"transport":"serial"}
+{"seq":13,"b64":"AAIDAQEF4rODDQEBAQEBBwEIRlqzOAA=","dir":"rx","kind":"wire","len":23,"port":"1","t":1790513808.106,"transport":"serial"}
+{"seq":14,"b64":"AAIDAQEJocnW+OKzgw0BBwEIbGn77wA=","dir":"tx","kind":"wire","len":23,"port":"1","t":1790513808.106,"transport":"serial"}
+{"seq":15,"b64":"AAIDAQEJ4rODDaHJ1vgBBwEI2SceUgA=","dir":"rx","kind":"wire","len":23,"port":"1","t":1790513808.106,"transport":"serial"}
+{"seq":16,"b64":"AAIDAQEKocnW+OKzgw0BBwEI1MO+MgA=","dir":"tx","kind":"wire","len":23,"port":"1","t":1790513808.107,"transport":"serial"}
+{"seq":17,"b64":"AAICAQYInzmFzgA=","dir":"tx","kind":"wire","len":11,"port":"1","t":1790513808.107,"transport":"serial"}
+{"seq":18,"b64":"AAIDAQEK4rODDaHJ1vgBBwEIYY1bjwA=","dir":"rx","kind":"wire","len":23,"port":"1","t":1790513808.107,"transport":"serial"}
+{"seq":19,"b64":"AAJBAU8IA2Z3X2VzcDMyYzY6IFtmdy1lc3AzMmM2XSBTaGFkZXIgYmFja2VuZDogbmF0aXZlIEpJVCAobHB2bQ==","dir":"rx","kind":"wire","len":64,"port":"1","t":1790513808.107,"transport":"serial"}
+{"seq":20,"b64":"LW5hdGl2ZSBydF9qaXQppCWz5AA=","dir":"rx","kind":"wire","len":20,"port":"1","t":1790513808.107,"transport":"serial"}
+{"seq":22,"b64":"AANBAV4IAmZ3X2VzcDMyX2NvbW1vbjo6bHBfZnM6IFtGU10gTW91bnQgZmFpbGVkIChmaWxlc3lzdGVtIGNvcnJ1cHQpLCBmb3JtYXR0aW5nIHBhcnRpdGlvbi4uLute/XQA","dir":"rx","kind":"wire","len":99,"port":"1","t":1790513808.11,"transport":"serial"}
+{"seq":23,"b64":"AANBAkoIA2Z3X2VzcDMyX2NvbW1vbjo6bHBfZnM6IFtGU10gRm9ybWF0dGVkIGFuZCBtb3VudGVkIGZyZXNoIA==","dir":"rx","kind":"wire","len":64,"port":"1","t":1790513808.11,"transport":"serial"}
+{"seq":24,"b64":"ZmlsZXN5c3RlbRK4oD8A","dir":"rx","kind":"wire","len":15,"port":"1","t":1790513808.112,"transport":"serial"}
+{"seq":25,"b64":"AAIwAf4IeyJpZCI6MCwibXNnIjp7ImhlbGxvIjp7InByb3RvIjozMCwiYnVpbGQiOnsiZmVhdHVyZXMiOlsibg==","dir":"rx","kind":"wire","len":64,"port":"1","t":1790513808.112,"transport":"serial"}
+{"seq":26,"b64":"b2RlLmJ1dHRvbiIsIm5vZGUuY2xvY2siLCJub2RlLmZsdWlkIiwibm9kZS5maXh0dXJlIiwibm9kZS5wbGF5bA==","dir":"rx","kind":"wire","len":64,"port":"1","t":1790513808.112,"transport":"serial"}
+{"seq":27,"b64":"aXN0Iiwibm9kZS5wb3dlci1idXR0b24iLCJub2RlLnJhZGlvIiwibm9kZS5zaGFkZXIiLCJub2RlLnRleHR1cg==","dir":"rx","kind":"wire","len":64,"port":"1","t":1790513808.112,"transport":"serial"}
+{"seq":28,"b64":"ZSIsInN2Yy5idXR0b24iLCJzdmMucmFkaW8tZXNwbm93IiwiZ2Z4Lmxwdm0iXSwicGFja2FnZSI6ImZ3LWVzcA==","dir":"rx","kind":"wire","len":64,"port":"1","t":1790513808.112,"transport":"serial"}
+{"seq":29,"b64":"MzIJYzYiLAiS65MA","dir":"rx","kind":"wire","len":12,"port":"1","t":1790513808.112,"transport":"serial"}
+{"seq":30,"b64":"AAMgAf4IImNvbW1pdCI6IjExMzY2MTRkNTJhOCIsImRpcnR5Ijp0cnVlLCJwcm9maWxlIjoicmVsZWFzZS1lcw==","dir":"rx","kind":"wire","len":64,"port":"1","t":1790513808.112,"transport":"serial"}
+{"seq":31,"b64":"cDMyIn0sImhhcmR3YXJlIjp7InJhZGlvIjp0cnVlLCJ0b3RhbExlZEJ1ZGdldCI6bnVsbCwiYnV0dG9uIjp0cg==","dir":"rx","kind":"wire","len":64,"port":"1","t":1790513808.112,"transport":"serial"}
+{"seq":32,"b64":"dWUsImJvYXJkSWQiOiJzZWVlZC94aWFvLWVzcDMyLWM2IiwiYmFzZU1hYyI6ImEwOmYyOjYyOjg3OmI0OjhjIg==","dir":"rx","kind":"wire","len":64,"port":"1","t":1790513808.112,"transport":"serial"}
+{"seq":33,"b64":"LCJjaGlwUmV2aXNpb24iOiIwLjIiLCJldWk2NCI6ImEwOmYyOjYyOjg3OmI0OjhjOjAwOjAwIn0sImRldmljZQ==","dir":"rx","kind":"wire","len":64,"port":"1","t":1790513808.112,"transport":"serial"}
+{"seq":34,"b64":"VWkJZCI6bmSZpagA","dir":"rx","kind":"wire","len":12,"port":"1","t":1790513808.112,"transport":"serial"}
+{"seq":35,"b64":"AAICBwIIcQnA6QA=","dir":"tx","kind":"wire","len":11,"port":"1","t":1790513808.112,"transport":"serial"}
+{"seq":36,"b64":"AAMoAkYIdWxsLCJwYWNrRm9ybWF0IjoyLCJhdXRoIjp7InJlcXVpcmVkIjpmYWxzZSwiZ3JhbnRlZCI6ImVkaXQifX19fZqXG8oA","dir":"rx","kind":"wire","len":75,"port":"1","t":1790513808.112,"transport":"serial"}
+{"seq":37,"b64":"AAI4VQMIeyJpZCI6OTAwNzE5OTI1NDc0MDk5MSwibXNnIjp7InNldEVuY29kaW5nIjp7ImVuY29kaW5nIjoicGFja2VkIiwiZm9ybWF0IjoyfX19QnvL9wA=","dir":"tx","kind":"wire","len":89,"port":"1","t":1790513808.113,"transport":"serial"}
+{"seq":38,"b64":"AANBA1YIA2Z3X2VzcDMyYzY6IFtmdy1lc3AzMmM2XSBIYXJkd2FyZSBtYW5pZmVzdDogc2VlZWQveGlhby1lc3AzMi1jNiAoWElBTyBFU1AzMi1DNinY2KR1AA==","dir":"rx","kind":"wire","len":91,"port":"1","t":1790513808.113,"transport":"serial"}
+{"seq":39,"b64":"AANBBHsIA2Z3X2VzcDMyYzY6OmJvYXJkOjplc3AzMmM2Ojpib2FyZF9xdWlya3M6IFtmdy1lc3AzMmM2XSBCbw==","dir":"rx","kind":"wire","len":64,"port":"1","t":1790513808.113,"transport":"serial"}
+{"seq":40,"b64":"YXJkIHF1aXJrIGFwcGxpZWQ6IHhpYW8tYzYtcmYtc3dpdGNoIChHUElPMz1MT1cgR1BJTzE0PUxPVyk9Fy5EAA==","dir":"rx","kind":"wire","len":64,"port":"1","t":1790513808.113,"transport":"serial"}
+{"seq":41,"b64":"AANBBVgIA2Z3X2VzcDMyYzY6OmJvYXJkOjplc3AzMmM2OjpzdGF0dXNfbGVkOiBbZnctZXNwMzJjNl0gU3RhdA==","dir":"rx","kind":"wire","len":64,"port":"1","t":1790513808.113,"transport":"serial"}
+{"seq":42,"b64":"dXMgTEVEOiBHUElPMTUgKGxpdCBMT1cpsqSR6AA=","dir":"rx","kind":"wire","len":29,"port":"1","t":1790513808.113,"transport":"serial"}
+{"seq":43,"b64":"AANBBqgIA2Z3X2VzcDMyYzY6Om91dHB1dDo6cm10Ojplc3AzMmM2X3JtdF93czI4MXhfZHJpdmVyOiBFc3AzMg==","dir":"rx","kind":"wire","len":64,"port":"1","t":1790513808.114,"transport":"serial"}
+{"seq":44,"b64":"QzZSbXRXczI4MXhEcml2ZXI6IDIgV1MyODF4IGNoYW5uZWxzIGZvciAyIGRlY2xhcmVkIChjaDBfYmxvY2tzPQ==","dir":"rx","kind":"wire","len":64,"port":"1","t":1790513808.114,"transport":"serial"}
+{"seq":45,"b64":"MSBjaDBfd2luZG93X3dvcmRzPTQ4IGNoMF9oYWxmX3dvcmRzPTI0KQQP0tYA","dir":"rx","kind":"wire","len":45,"port":"1","t":1790513808.114,"transport":"serial"}
+{"seq":46,"b64":"AANBB0oIA2Z3X2VzcDMyYzY6IFtmdy1lc3AzMmM2XSBFU1AtTk9XIHJhZGlvIHJlYWR5OiBkZXZpY2VfaWQ9IA==","dir":"rx","kind":"wire","len":64,"port":"1","t":1790513808.114,"transport":"serial"}
+{"seq":47,"b64":"Y2hhbm5lbD0xMbiRESsA","dir":"rx","kind":"wire","len":15,"port":"1","t":1790513808.114,"transport":"serial"}
+{"seq":48,"b64":"AANBCFQIA2Z3X2VzcDMyYzY6IFtibGVdIGVuYWJsZWQgKGRldmljZSBzdG9yZSwgb3Igbm9uZTogb24gYnkgZA==","dir":"rx","kind":"wire","len":64,"port":"1","t":1790513808.114,"transport":"serial"}
+{"seq":49,"b64":"ZWZhdWx0KSDigJQgc3RhcnRpbmd69W01AA==","dir":"rx","kind":"wire","len":25,"port":"1","t":1790513808.114,"transport":"serial"}
+{"seq":50,"b64":"AANBCXEIA2Z3X2VzcDMyYzY6OmJsZTo6YmxlX3Rhc2s6IFtibGVdIHVwOiBjb250cm9sbGVyICsxOTQzNiBCLA==","dir":"rx","kind":"wire","len":64,"port":"1","t":1790513808.114,"transport":"serial"}
+{"seq":51,"b64":"IGhvc3QgKyBHQVRUICszNTIwIEIsIGhlYXAgdXNlZCA4OTEyNCBCIChzbG90cyAyKcs8z/cA","dir":"rx","kind":"wire","len":54,"port":"1","t":1790513808.114,"transport":"serial"}
+{"seq":52,"b64":"AANBCkMIA2Z3X2VzcDMyX2NvbW1vbjo6Ym9vdDogQm9vdDogc2Nhbm5pbmcgL3Byb2plY3RzIGZvciBwcm9qZQ==","dir":"rx","kind":"wire","len":64,"port":"1","t":1790513808.114,"transport":"serial"}
+{"seq":53,"b64":"Y3RzdXasRAA=","dir":"rx","kind":"wire","len":8,"port":"1","t":1790513808.115,"transport":"serial"}
+{"seq":54,"b64":"AANBC30IAmZ3X2VzcDMyX2NvbW1vbjo6Ym9vdDogQm9vdDogZmFpbGVkIHRvIGxpc3QgL3Byb2plY3RzOiBGaQ==","dir":"rx","kind":"wire","len":64,"port":"1","t":1790513808.115,"transport":"serial"}
+{"seq":55,"b64":"bGVzeXN0ZW0gZXJyb3I6IGxpc3RfZGlyIC9wcm9qZWN0czogbm8gc3VjaCBmaWxlIG9yIGRpcmVjdG9yeRZMVYsA","dir":"rx","kind":"wire","len":66,"port":"1","t":1790513808.115,"transport":"serial"}
+{"seq":56,"b64":"AANBDFIIA2Z3X2VzcDMyX2NvbW1vbjo6c2VydmVyX2xvb3A6IFtSRUNPVkVSWV0gYm9vdCBjb21wbGV0ZSAoZg==","dir":"rx","kind":"wire","len":64,"port":"1","t":1790513808.115,"transport":"serial"}
+{"seq":57,"b64":"aXJzdCBmcmFtZSBzZXJ2ZWQpEw3N3AA=","dir":"rx","kind":"wire","len":23,"port":"1","t":1790513808.115,"transport":"serial"}
+{"seq":58,"b64":"AE9BDQEIA3Ryb3VibGVfaG9zdDo6aG9zdDogW2hvc3RdIHVzaW5nIHBhY2tldCBwb29sIHdpdGggTVRVIDI1MQ==","dir":"rx","kind":"wire","len":64,"port":"1","t":1790513808.115,"transport":"serial"}
+{"seq":59,"b64":"IGNhcGFjaXR5IDE2/PAugwA=","dir":"rx","kind":"wire","len":17,"port":"1","t":1790513808.115,"transport":"serial"}
+{"seq":60,"b64":"AEBBDgEIA3Ryb3VibGVfaG9zdDo6aG9zdDogW2hvc3RdIGZpbHRlciBhY2NlcHQgbGlzdCBzaXplOiAxMm60lw==","dir":"rx","kind":"wire","len":64,"port":"1","t":1790513808.115,"transport":"serial"}
+{"seq":61,"b64":"pgA=","dir":"rx","kind":"wire","len":2,"port":"1","t":1790513808.115,"transport":"serial"}
+{"seq":62,"b64":"AEw4AwEIeyJpZCI6OTAwNzE5OTI1NDc0MDk5MSwibXNnIjp7InNldEVuY29kaW5nIjp7ImVuY29kaW5nIjoicA==","dir":"rx","kind":"wire","len":64,"port":"1","t":1790513808.116,"transport":"serial"}
+{"seq":63,"b64":"YWNrZWQifX19E4OidwA=","dir":"rx","kind":"wire","len":14,"port":"1","t":1790513808.116,"transport":"serial"}
+{"seq":64,"b64":"AEpBDwEIA3Ryb3VibGVfaG9zdDo6aG9zdDogW2hvc3RdIHNldHRpbmcgdHhxIHRvIDI0LCBmcmFnbWVudGluZw==","dir":"rx","kind":"wire","len":64,"port":"1","t":1790513808.116,"transport":"serial"}
+{"seq":65,"b64":"IGF0IDI1NfIqDhkA","dir":"rx","kind":"wire","len":12,"port":"1","t":1790513808.116,"transport":"serial"}
+{"seq":66,"b64":"AFVBEAEIA3Ryb3VibGVfaG9zdDo6aG9zdDogW2hvc3RdIGNvbmZpZ3VyaW5nIGhvc3QgYnVmZmVycyAoMSBwYQ==","dir":"rx","kind":"wire","len":64,"port":"1","t":1790513808.116,"transport":"serial"}
+{"seq":67,"b64":"Y2tldHMgb2Ygc2l6ZSAyNTUplk/1XwA=","dir":"rx","kind":"wire","len":23,"port":"1","t":1790513808.116,"transport":"serial"}
+{"seq":68,"t":1790513808.118,"endpoint":"device:1","kind":"journal","scope":"device:1","entry":"Input(Event(Link { link: LinkId(9), event: Opened { info: LinkInfo { label: \"ESP32 Serial (303a:1001)\", endpoint: EndpointKey(\"browser-serial-esp32-port-1\"), usb: Some(UsbIds { vendor: 12346, product: 4097 }), serial_number: None } } }))"}
+{"seq":71,"t":1790513808.119,"endpoint":"device:1","kind":"journal","scope":"device:1","entry":"Input(Event(Link { link: LinkId(9), event: WireNote(\"link: up (session 0)\") }))"}
+{"seq":72,"b64":"AAICBwQIQ1gPgAA=","dir":"tx","kind":"wire","len":11,"port":"1","t":1790513808.122,"transport":"serial"}
+{"seq":73,"b64":"AB84AQQIeyJpZCI6MSwibXNnIjoiaGVsbG8ifWkWCYcA","dir":"tx","kind":"wire","len":33,"port":"1","t":1790513808.122,"transport":"serial"}
+{"seq":74,"b64":"ADBBEQEIA3Ryb3VibGVfaG9zdDo6aG9zdDogW2hvc3RdIGluaXRpYWxpemVk7EJ4bgA=","dir":"rx","kind":"wire","len":50,"port":"1","t":1790513808.123,"transport":"serial"}
+{"seq":75,"b64":"AEVBEgEIA3Ryb3VibGVfaG9zdDo6aG9zdDogW2hvc3RdIERldmljZSBBZGRyZXNzIEEyOkYyOjYyOjg3OkI0OjhED3xzrgA=","dir":"rx","kind":"wire","len":71,"port":"1","t":1790513808.123,"transport":"serial"}
+{"seq":76,"b64":"AERBEwEIA2Z3X2VzcDMyYzY6OmJsZTo6YWR2ZXJ0aXNpbmc6IFtibGVdIGFkdmVydGlzaW5nIGFzIExQLWI0OA==","dir":"rx","kind":"wire","len":64,"port":"1","t":1790513808.123,"transport":"serial"}
+{"seq":77,"b64":"Y+mCZTsA","dir":"rx","kind":"wire","len":6,"port":"1","t":1790513808.123,"transport":"serial"}
+{"seq":78,"b64":"AIFBFAEIA2Z3X2VzcDMyX2NvbW1vbjo6c2VydmVyX2xvb3A6IFtwZXJmXSBmcmFtZT00ODMxIGZwcz05NjYgZQ==","dir":"rx","kind":"wire","len":64,"port":"1","t":1790513808.123,"transport":"serial"}
+{"seq":79,"b64":"bGFwc2VkPTUwMDBtcyByZWN2PTBtcyB0aWNrPTBtcyBzZW5kPTBtcyB0b3RhbD0wbXMgcmVzcG9uc2VzPTDS8w==","dir":"rx","kind":"wire","len":64,"port":"1","t":1790513808.123,"transport":"serial"}
+{"seq":80,"b64":"HFwA","dir":"rx","kind":"wire","len":3,"port":"1","t":1790513808.123,"transport":"serial"}
+{"seq":81,"b64":"AGZBFQEIA2Z3X2VzcDMyYzY6OnN0YWNrX3Byb2JlOiBbc3RhY2tdIGhlYXJ0YmVhdDogaGlnaC13YXRlciAxMg==","dir":"rx","kind":"wire","len":64,"port":"1","t":1790513808.123,"transport":"serial"}
+{"seq":82,"b64":"OTk2IEIgb2YgNTg5NjggQiAoNDU5NzIgQiBoZWFkcm9vbSk9eHqnAA==","dir":"rx","kind":"wire","len":40,"port":"1","t":1790513808.123,"transport":"serial"}
+{"seq":83,"b64":"AIFBFgEIA2Z3X2VzcDMyX2NvbW1vbjo6c2VydmVyX2xvb3A6IFtwZXJmXSBmcmFtZT05NjU5IGZwcz05NjUgZQ==","dir":"rx","kind":"wire","len":64,"port":"1","t":1790513808.123,"transport":"serial"}
+{"seq":84,"b64":"bGFwc2VkPTUwMDBtcyByZWN2PTBtcyB0aWNrPTBtcyBzZW5kPTBtcyB0b3RhbD0wbXMgcmVzcG9uc2VzPTCNOg==","dir":"rx","kind":"wire","len":64,"port":"1","t":1790513808.124,"transport":"serial"}
+{"seq":85,"b64":"tsoA","dir":"rx","kind":"wire","len":3,"port":"1","t":1790513808.124,"transport":"serial"}
+{"seq":86,"b64":"AFxBFwEIA2Z3X2VzcDMyX2NvbW1vbjo6dXNiX2xpbms6OnVzYl9saW5rX3RyYW5zcG9ydDogW3VzYl9saW5rXQ==","dir":"rx","kind":"wire","len":64,"port":"1","t":1790513808.124,"transport":"serial"}
+{"seq":87,"b64":"IGhvc3QgbGluayB1cCAoc2Vzc2lvbiAwKQlQLugA","dir":"rx","kind":"wire","len":30,"port":"1","t":1790513808.124,"transport":"serial"}
+{"seq":88,"b64":"AGNBGAEIA2Z3X2VzcDMyX2NvbW1vbjo6c2VyaWFsOjpwYWNrZWRfbGluazogcGFja2VkIGxpbms6IHJlcGxpZQ==","dir":"rx","kind":"wire","len":64,"port":"1","t":1790513808.124,"transport":"serial"}
+{"seq":89,"b64":"cyBhcmUgbm93IHBhY2tlZCAodGFibGUgZXBvY2ggMSmvwxR8AA==","dir":"rx","kind":"wire","len":37,"port":"1","t":1790513808.124,"transport":"serial"}
+{"seq":90,"b64":"AEw4AwEIeyJpZCI6OTAwNzE5OTI1NDc0MDk5MSwibXNnIjp7InNldEVuY29kaW5nIjp7ImVuY29kaW5nIjoicA==","dir":"rx","kind":"wire","len":64,"port":"1","t":1790513808.124,"transport":"serial"}
+{"seq":91,"b64":"YWNrZWQifX19E4OidwA=","dir":"rx","kind":"wire","len":14,"port":"1","t":1790513808.124,"transport":"serial"}
+{"seq":92,"b64":"AAICBwQIQ1gPgAA=","dir":"tx","kind":"wire","len":11,"port":"1","t":1790513808.124,"transport":"serial"}
+{"seq":93,"b64":"AAcwBAIITAEB/qD8AmlkAfwDbXNnoPwFaGVsbG+g/AVwcm90bx78BWJ1aWxkoPwIZmVhdHVyZXOhi25vZGUuYg==","dir":"rx","kind":"wire","len":64,"port":"1","t":1790513808.124,"transport":"serial"}
+{"seq":94,"b64":"dXR0b26Kbm9kZS5jbG9ja4pub2RlLmZsdWlkjG5vZGUuZml4dHVyZY1ub2RlLnBsYXlsaXN0kW5vZGUucG93ZQ==","dir":"rx","kind":"wire","len":64,"port":"1","t":1790513808.125,"transport":"serial"}
+{"seq":95,"b64":"ci1idXR0b26Kbm9kZS5yYWRpb4tub2RlLnNoYWRlcoxub2RlLnRleHR1cmWKc3ZjLmJ1dHRvbpBzdmMucmFkaQ==","dir":"rx","kind":"wire","len":64,"port":"1","t":1790513808.125,"transport":"serial"}
+{"seq":96,"b64":"by1lc3Bub3eIZ2Z4Lmxwdm2i/AdwYWNrYWdlimZ3LWVzcDMyYzb8BmNvbW1pdIwxMTM2NjE0ZDUyYTj8BWRpcg==","dir":"rx","kind":"wire","len":64,"port":"1","t":1790513808.125,"transport":"serial"}
+{"seq":97,"b64":"dHml/Adw5AS1Ji4A","dir":"rx","kind":"wire","len":12,"port":"1","t":1790513808.125,"transport":"serial"}
+{"seq":98,"b64":"ABooBQIIcm9maWxljXJlbGVhc2UtZXNwMzL+mPwIaGFyZHdhcmWg/AVyYWRpb6X8DnRvdGFsTGVkQnVkZ2V0ow==","dir":"rx","kind":"wire","len":64,"port":"1","t":1790513808.125,"transport":"serial"}
+{"seq":99,"b64":"/AZidXR0b26l/Adib2FyZElkk3NlZWVkL3hpYW8tZXNwMzItYzb8B2Jhc2VNYWORYTA6ZjI6NjI6ODc6YjQ6OA==","dir":"rx","kind":"wire","len":64,"port":"1","t":1790513808.125,"transport":"serial"}
+{"seq":100,"b64":"Y/wMY2hpcFJldmlzaW9ugzAuMvwFZXVpNjSXYTA6ZjI6NjI6ODc6YjQ6OGM6MDA6MDD+O/wJZGV2aWNlVWlkow==","dir":"rx","kind":"wire","len":64,"port":"1","t":1790513808.125,"transport":"serial"}
+{"seq":101,"b64":"/ApwYWNrRm9ybWF0AvwEYXV0aKD8CHJlcXVpcmVkpPwHZ3JhbnRlZIRlZGl0/gL+Av4C/gVxQaDnAA==","dir":"rx","kind":"wire","len":58,"port":"1","t":1790513808.125,"transport":"serial"}
+{"seq":102,"b64":"AAICBwYIrWhKpwA=","dir":"tx","kind":"wire","len":11,"port":"1","t":1790513808.126,"transport":"serial"}
+{"seq":106,"t":1790513808.133,"endpoint":"device:1","kind":"journal","scope":"device:1","entry":"Note(ActivityEnded { kind: Identify, outcome: Succeeded { summary: \"seeed/xiao-esp32-c6 · fw-esp32c6 1136614d52a8 (dirty)\" } })"}
+{"seq":132,"t":1790513808.135,"endpoint":"device:1","kind":"journal","scope":"device:1","entry":"Input(Event(Link { link: LinkId(9), event: WireNote(\"wire: replies packed (JSON Pack v2, learned)\") }))"}
+{"seq":134,"conversation":2,"id":1073741824,"kind":"request","phase":"sent","request":"access.list","t":1790513808.139}
+{"seq":135,"conversation":4,"id":1090519040,"kind":"request","phase":"sent","request":"access.list","t":1790513808.139}
+{"seq":136,"b64":"AC04AgYIeyJpZCI6MTA3Mzc0MTgyNCwibXNnIjoiYWNjZXNzTGlzdCJ9oicWgwA=","dir":"tx","kind":"wire","len":47,"port":"1","t":1790513808.139,"transport":"serial"}
+{"seq":137,"b64":"AC04AwYIeyJpZCI6MTA5MDUxOTA0MCwibXNnIjoiYWNjZXNzTGlzdCJ9nmyY1QA=","dir":"tx","kind":"wire","len":47,"port":"1","t":1790513808.139,"transport":"serial"}
+{"seq":138,"b64":"AAo4BgMITAEeCaA2poCAgIAEAaD8CmFjY2Vzc0xpc3Sg/ApibGVFbmFibGVkpfwEb3BlbqT8B2VudHJpZXOhog==","dir":"rx","kind":"wire","len":64,"port":"1","t":1790513808.14,"transport":"serial"}
+{"seq":139,"b64":"/gL+Av4FnveHcQA=","dir":"rx","kind":"wire","len":11,"port":"1","t":1790513808.141,"transport":"serial"}
+{"seq":140,"b64":"AAo4BwQITAHi+qATpoCAgIgEAaAXoBilGaQaoaL+Av4C/gXx+yLnAA==","dir":"rx","kind":"wire","len":40,"port":"1","t":1790513808.141,"transport":"serial"}
+{"seq":141,"b64":"AAICBwgIJ/qRUwA=","dir":"tx","kind":"wire","len":11,"port":"1","t":1790513808.142,"transport":"serial"}
+{"seq":142,"conversation":2,"disposition":"matched","fin":true,"frame_seq":0,"id":1073741824,"kind":"request","phase":"frame","response_id":1073741824,"since_sent_ms":21.0,"t":1790513808.16}
+{"seq":143,"conversation":2,"id":1073741824,"kind":"request","latency_ms":21.0,"outcome":"answered","phase":"outcome","request":"access.list","t":1790513808.16}
+{"seq":144,"conversation":2,"id":1073741825,"kind":"request","phase":"sent","request":"access.add","t":1790513808.162}
+{"seq":146,"conversation":4,"disposition":"matched","fin":true,"frame_seq":0,"id":1090519040,"kind":"request","phase":"frame","response_id":1090519040,"since_sent_ms":24.0,"t":1790513808.163}
+{"seq":147,"conversation":4,"id":1090519040,"kind":"request","latency_ms":24.0,"outcome":"answered","phase":"outcome","request":"access.list","t":1790513808.163}
+{"seq":148,"conversation":4,"id":1090519041,"kind":"request","phase":"sent","request":"access.add","t":1790513808.163}
+{"seq":151,"b64":"AAo4CAUITAHi+qBvpoGAgIAEAaAXoBilGaQaoaD8BWxhYmVsjUNocm9tZSBvbiBNYWP8BGtpbmSHYnJvd3Nlcg==","dir":"rx","kind":"wire","len":64,"port":"1","t":1790513808.166,"transport":"serial"}
+{"seq":152,"b64":"/AR0aWVyhGVkaXT8BHNhbHSYKysrUHVKcGwrNWwwQnh4WUdqb1o3Zz09/AdhZGRlZEF0ppCl5NUG/gOi/gL+Ag==","dir":"rx","kind":"wire","len":64,"port":"1","t":1790513808.166,"transport":"serial"}
+{"seq":153,"b64":"/gUo9KaZAA==","dir":"rx","kind":"wire","len":7,"port":"1","t":1790513808.166,"transport":"serial"}
+{"seq":154,"b64":"AAo4CQYITAGyiaBOpoGAgIgEAaAXoBilGaQaoaAbjUNocm9tZSBvbiBNYWMch2Jyb3dzZXIdQB6YKysrUHVKcA==","dir":"rx","kind":"wire","len":64,"port":"1","t":1790513808.17,"transport":"serial"}
+{"seq":156,"b64":"bCs1bDBCeHhZR2pvWjdnPT0fppCl5NUG/gOi/gL+Av4FuWdCHAA=","dir":"rx","kind":"wire","len":38,"port":"1","t":1790513808.17,"transport":"serial"}
+{"seq":157,"b64":"AAo4CQYITAGyiaBOpoGAgIgEAaAXoBilGaQaoaAbjUNocm9tZSBvbiBNYWMch2Jyb3dzZXIdQB6YKysrUHVKcA==","dir":"rx","kind":"wire","len":64,"port":"1","t":1790513808.173,"transport":"serial"}
+{"seq":159,"b64":"bCs1bDBCeHhZR2pvWjdnPT0fppCl5NUG/gOi/gL+Av4FuWdCHAA=","dir":"rx","kind":"wire","len":38,"port":"1","t":1790513808.173,"transport":"serial"}
+{"seq":161,"conversation":2,"disposition":"matched","fin":true,"frame_seq":0,"id":1073741825,"kind":"request","phase":"frame","response_id":1073741825,"since_sent_ms":22.0,"t":1790513808.184}
+{"seq":162,"conversation":2,"id":1073741825,"kind":"request","latency_ms":22.0,"outcome":"answered","phase":"outcome","request":"access.add","t":1790513808.184}
+{"seq":164,"conversation":4,"disposition":"matched","fin":true,"frame_seq":0,"id":1090519041,"kind":"request","phase":"frame","response_id":1090519041,"since_sent_ms":22.0,"t":1790513808.185}
+{"seq":165,"conversation":4,"id":1090519041,"kind":"request","latency_ms":22.0,"outcome":"answered","phase":"outcome","request":"access.add","t":1790513808.185}
+{"seq":769,"t":1790513810.107,"kind":"error","level":"warn","source":"studio:lpa_studio_core::app::studio::studio_controller","message":"push not banked: missing session: library: invalid device uid \"mac:a0:f2:62:87:b4:8c\": unknown uid prefix"}
+{"seq":778,"t":1790513810.134,"endpoint":"device:1","kind":"journal","scope":"device:1","entry":"Note(ActivityEnded { kind: Push, outcome: Succeeded { summary: \"project sent to studio — the board is running studio\" } })"}
+{"seq":1394,"t":1790513825.22,"kind":"route","from":"/devices","to":"/device/mac:a0:f2:62:87:b4:8c","reason":"browser-nav"}
+{"seq":1397,"t":1790513825.224,"session":"runtime-1","kind":"pool","action":"install","detail":"device lens mac:a0:f2:62:87:b4:8c"}
+{"seq":1469,"t":1790513826.14,"kind":"route","from":"/device/mac:a0:f2:62:87:b4:8c","to":"/p/playful-choker-prjb64m0s0r1sya5ke3?on=mac:a0:f2:62:87:b4:8c","reason":"slug-heal"}
+{"seq":3119,"conversation":10,"disposition":"matched","fin":true,"frame_seq":0,"id":4311744601,"kind":"request","phase":"frame","response_id":4311744601,"since_sent_ms":130.0,"t":1790513845.391}
+{"seq":3120,"conversation":10,"id":4311744601,"kind":"request","latency_ms":130.0,"outcome":"answered","phase":"outcome","request":"project.read","t":1790513845.391}
+{"seq":3121,"t":1790513845.422,"kind":"command","name":"DeviceHotplug/Disconnected","detail":""}
+{"seq":3124,"conversation":10,"id":4311744602,"kind":"request","phase":"sent","request":"project.read","t":1790513845.469}
+{"seq":3125,"conversation":10,"error":"transport error: Transport error: The emulated board was detached.","id":4311744602,"kind":"request","latency_ms":0.0,"outcome":"failed","phase":"outcome","request":"project.read","t":1790513845.469}
+{"seq":3126,"t":1790513845.47,"kind":"error","level":"warn","source":"studio:lpa_client::pull_loop","message":"project read id=4311744602: transport error after 0 frames: Transport error: The emulated board was detached."}
+{"seq":3128,"t":1790513845.473,"endpoint":"device:1","kind":"journal","scope":"device:1","entry":"Input(Event(Link { link: LinkId(9), event: Closed { reason: \"The emulated board was detached.\" } }))"}
+{"seq":3129,"t":1790513845.473,"kind":"error","level":"warn","source":"studio","message":"the board under the editor went away; the editor is closed"}
+{"seq":3130,"t":1790513845.474,"session":"runtime-1","kind":"pool","action":"remove","detail":"device lens closed"}
+{"seq":3131,"t":1790513845.474,"endpoint":"device:1","kind":"journal","scope":"device:1","entry":"Input(Event(LinkDetached { link: LinkId(9) }))"}
+{"seq":3133,"t":1790513845.475,"endpoint":"roster","kind":"journal","scope":"roster","entry":"Input(Event(Link { link: LinkId(9), event: Closed { reason: \"Serial port disconnected.\" } }))"}
+{"seq":3134,"t":1790513845.475,"endpoint":"roster","kind":"journal","scope":"roster","entry":"Input(Event(LinkDetached { link: LinkId(9) }))"}
+{"seq":3138,"t":1790513845.491,"kind":"route","from":"/p/playful-choker-prjb64m0s0r1sya5ke3?on=mac:a0:f2:62:87:b4:8c","to":"/devices","reason":"open-ended: home view shown, no open in flight, open stage idle, no mismatch, saw_opening, no route open pending"}
+{"seq":3143,"t":1790513845.683,"endpoint":"roster","kind":"journal","scope":"roster","entry":"Input(Event(LinkDetached { link: LinkId(9) }))"}
+{"seq":3175,"t":1790513851.709,"kind":"command","name":"DeviceHotplug/Connected","detail":""}
+{"seq":3182,"t":1790513851.732,"endpoint":"device:1","kind":"journal","scope":"device:1","entry":"Input(Event(Link { link: LinkId(10), event: Opened { info: LinkInfo { label: \"ESP32 Serial (303a:1001)\", endpoint: EndpointKey(\"browser-serial-esp32-port-1\"), usb: Some(UsbIds { vendor: 12346, product: 4097 }), serial_number: None } } }))"}
