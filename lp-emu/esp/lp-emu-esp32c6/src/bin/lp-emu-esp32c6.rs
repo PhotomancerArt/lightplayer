@@ -107,6 +107,10 @@ OPTIONS:
                             emulated nanoseconds after each drain has raised
                             serial_in_empty (docs/defects/2026-09-24-the-real-
                             c6-link-loses-bytes-inside-a-packed-frame.md) [0]
+    --usb-faults <spec>     a TEST switch, off by default: damage the USB
+                            host link's packets, e.g.
+                            in-drop=0.5%,in-tail=0.5%,in-run=0.1%,out-drop=0.5%,seed=7
+                            (lp_emu_esp_common::link_faults) [none]
     --usb-sj stderr|file:<path>|tcp:<host:port>
                             where the bytes a USB host RECEIVED go — IN
                             packets a draining host took [kept in memory,
@@ -391,6 +395,7 @@ struct Args {
     usb_host: UsbHost,
     usb_sj_drain: UsbSjDrain,
     usb_in_free_lag_ns: u64,
+    usb_faults: Option<lp_emu_esp_common::link_faults::LinkFaults>,
     usb_script: Vec<PathBuf>,
     pin_script: Vec<PathBuf>,
     wires: Vec<(PadId, PadId)>,
@@ -504,6 +509,9 @@ fn run() -> Result<ExitCode, String> {
     }
     if let Some(word) = args.lpperi_clk_en {
         builder = builder.lp_peri_clk_en(word);
+    }
+    if let Some(faults) = args.usb_faults.clone() {
+        builder = builder.usb_faults(faults);
     }
     if let Some(blocks) = args.jit_blocks {
         builder = builder.jit_blocks(blocks);
@@ -784,6 +792,13 @@ fn parse(argv: Vec<String>) -> Result<Args, String> {
                 args.usb_in_free_lag_ns = text.parse().map_err(|_| {
                     format!("--usb-in-free-lag `{text}`: expected nanoseconds, a whole number")
                 })?;
+            }
+            "--usb-faults" => {
+                let text = value("--usb-faults")?;
+                args.usb_faults = Some(
+                    lp_emu_esp_common::link_faults::LinkFaults::parse(&text)
+                        .map_err(|e| format!("--usb-faults: {e}"))?,
+                );
             }
             "--usb-script" => args.usb_script.push(value("--usb-script")?.into()),
             "--pin-script" => args.pin_script.push(value("--pin-script")?.into()),
@@ -1444,6 +1459,9 @@ fn report(machine: &mut Esp32C6Machine, outcome: &Outcome) {
         && stats.drains > 0
     {
         eprintln!("usb-sj: {stats}");
+    }
+    if let Some((to_host, to_device)) = machine.usb_fault_counters() {
+        eprintln!("usb-faults: device→host {to_host}; host→device {to_device}");
     }
     if let Some(tcp) = machine.control_tcp() {
         eprintln!(

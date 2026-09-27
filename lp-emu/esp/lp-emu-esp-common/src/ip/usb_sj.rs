@@ -659,6 +659,9 @@ pub struct UsbSerialJtag {
     drain_for_write: Option<u64>,
     drain_for_read: Option<u64>,
     wake: InWakeStats,
+    /// The link fault injector — a test switch, `None` by default
+    /// ([`crate::link_faults`]). Not in the save-state blob.
+    faults: Option<crate::link_faults::LinkFaults>,
 
     // Interrupts and frames.
     int_raw: u32,
@@ -726,6 +729,7 @@ impl UsbSerialJtag {
                 cycles_per_us: cfg.cycles_per_us,
                 ..InWakeStats::default()
             },
+            faults: None,
             int_raw: INT_SERIAL_IN_EMPTY,
             fram_num: 0,
             sof_due: 0,
@@ -807,6 +811,20 @@ impl UsbSerialJtag {
         self.drain_for_write = None;
         self.drain_for_read = None;
         self.dropped_in_lag = 0;
+    }
+
+    /// Damage what crosses to and from the host — **a test switch, off by
+    /// default** ([`crate::link_faults`]). `None` (or a spec with every rate
+    /// 0) turns it off. The model's own behaviour is unchanged: every byte
+    /// the guest committed still left the IN endpoint, and the injector
+    /// decides what the host then got.
+    pub fn set_faults(&mut self, faults: Option<crate::link_faults::LinkFaults>) {
+        self.faults = faults.filter(|f| !f.is_off());
+    }
+
+    /// The injector and its counters, when one is set.
+    pub fn faults(&self) -> Option<&crate::link_faults::LinkFaults> {
+        self.faults.as_ref()
     }
 
     /// How soon, after each drain, the guest touched the endpoint again.
@@ -1161,7 +1179,10 @@ impl UsbSerialJtag {
         if !self.committed {
             return;
         }
-        let bytes = core::mem::take(&mut self.in_fifo);
+        let mut bytes = core::mem::take(&mut self.in_fifo);
+        if let Some(faults) = self.faults.as_mut() {
+            faults.on_device_to_host(&mut bytes);
+        }
         self.in_delivered += bytes.len() as u64;
         if let Some(id) = self.delivered {
             cx.host.stream(id).write(&bytes);
@@ -1249,8 +1270,21 @@ impl UsbSerialJtag {
         if !self.host.draining() || self.out_avail() {
             return;
         }
-        let n = self.out_staging.len().min(OUT_PACKET_MAX);
-        self.out_pkt.extend(self.out_staging.drain(..n));
+        let mut n = self.out_staging.len().min(OUT_PACKET_MAX);
+        if let Some(faults) = self.faults.as_mut() {
+            let mut packet: Vec<u8> = self.out_staging.drain(..n).collect();
+            faults.on_host_to_device(&mut packet);
+            if packet.is_empty() {
+                // The packet never reached the device: nothing lands, and
+                // whatever waits behind it lands next.
+                self.try_land(cx.now, cx);
+                return;
+            }
+            n = packet.len();
+            self.out_pkt.extend(packet);
+        } else {
+            self.out_pkt.extend(self.out_staging.drain(..n));
+        }
         self.out_landed += n as u64;
         self.out_wr_addr = (n as u32 + OUT_EP_WR_ADDR_BIAS) as u8;
         self.out_rd_addr = 0;
