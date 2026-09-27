@@ -14,7 +14,6 @@ pub use api::{
     AvailableProject, FAULT_MESSAGE_CAP_BYTES, FAULT_NODES_CAP, FaultedNodeWire, HeartbeatIdentity,
     LoadedProject, MemoryStats, ProjectFaultWire, SampleStats, ServerMsgBody,
 };
-pub use link_counters::{LinkCounters, LinkResets};
 pub use config::ServerConfig;
 pub use file_chunk::{FileChangeKind, FileChunk, FileCursor};
 pub use fs_api::{FsRequest, FsResponse};
@@ -22,5 +21,6 @@ pub use hello::{
     BuildFacts, HardwareFacts, HardwareIdentity, HelloIdentity, ServerHello, WIRE_PROTO_VERSION,
 };
 pub use hello_auth::HelloAuth;
+pub use link_counters::{LinkCounters, LinkResets};
 pub use output_wire_status::OutputWireStatus;
 pub use recovery_status::{CrashSummaryWire, RecoveryLevelWire, RecoveryPathWire, RecoveryStatus};

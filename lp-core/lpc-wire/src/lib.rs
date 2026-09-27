@@ -19,6 +19,7 @@ extern crate std;
 pub mod budget;
 pub mod json;
 pub mod link_counter_tally;
+pub mod link_payload;
 pub mod message;
 pub mod messages;
 pub mod pack_opt_in;
@@ -42,6 +43,13 @@ pub mod tree;
 pub mod wire_encoding;
 pub mod wire_stream;
 
+pub use link_counter_tally::LinkCounterTally;
+#[cfg(feature = "ser-write-json")]
+pub use link_payload::{EncodedPayload, encode_server_payload, encode_server_payload_into};
+pub use link_payload::{
+    PAYLOAD_TAG_JSON, PAYLOAD_TAG_PACKED, PayloadError, ServerPayload, decode_client_payload,
+    decode_server_payload, encode_client_payload,
+};
 /// The JSON Pack format a packing board and its host must share; see
 /// [`ServerHello::pack_format`].
 pub use lp_json_pack::PACK_FORMAT_VERSION;
@@ -69,7 +77,6 @@ pub use messages::{
     WireOutputPlacement, WirePhasorOrigin, WirePhasorReading, WirePhasorRow, WireProjectionOrigin,
     WireProjectionShape, WireScopeRef, WireVisualSpace,
 };
-pub use link_counter_tally::LinkCounterTally;
 pub use messages::{ClientMessage, ClientRequest, Message, ServerMessage};
 pub use pack_opt_in::{PACK_OPT_IN_REQUEST_ID, PACK_REASK_INTERVAL_MS, PackOptIn, PackOptInStep};
 #[cfg(feature = "ser-write-json")]
@@ -104,8 +111,8 @@ pub use ser_write::{
 pub use server::{
     AccessEntryInfo, AvailableProject, BuildFacts, FAULT_MESSAGE_CAP_BYTES, FAULT_NODES_CAP,
     FaultedNodeWire, FsRequest, FsResponse, HardwareFacts, HardwareIdentity, HeartbeatIdentity,
-    HelloAuth, HelloIdentity, LinkCounters, LinkResets, LoadedProject, MemoryStats, ProjectFaultWire,
-    SampleStats, ServerConfig, ServerHello, ServerMsgBody, WIRE_PROTO_VERSION,
+    HelloAuth, HelloIdentity, LinkCounters, LinkResets, LoadedProject, MemoryStats,
+    ProjectFaultWire, SampleStats, ServerConfig, ServerHello, ServerMsgBody, WIRE_PROTO_VERSION,
 };
 pub use slot::{
     WireSlotChange, WireSlotData, WireSlotFullSync, WireSlotPatch, WireSlotRootSnapshot,
