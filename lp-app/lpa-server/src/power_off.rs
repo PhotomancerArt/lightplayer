@@ -21,8 +21,10 @@ use lpc_engine::{PowerError, PowerOffRequest, PowerService};
 /// The server is chip-agnostic and sans-IO, so it cannot sleep anything
 /// itself; an embedder that can installs this via
 /// [`crate::LpServer::set_power_platform`]. Embedders that cannot (host,
-/// browser, emulator) leave it unset, and a power button there reports
-/// "no power service" rather than pretending.
+/// browser, emulator) leave it unset, and a power button there is inert: it
+/// reads its pin (hold mode still clicks) but never powers anything off —
+/// so a project carrying one, like the PLAYFUL choker, runs in Studio's
+/// simulator without faulting.
 pub trait PowerPlatform {
     /// Whether `request` could be carried out: the endpoint is a pin this
     /// board can wake from, at a level it supports. Called when the node asks,

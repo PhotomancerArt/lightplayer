@@ -103,7 +103,12 @@ event sink threaded through every tick context. It landed smaller:
   request. `LpServer::advance_frame` takes it after ticking, unloads every
   project and calls `PowerPlatform::enter_power_off`.
 - Embedders without a platform (host, browser, emulator) install none, and a
-  power button there is a node error ("no power service").
+  power button there is **inert**: it reads its pin (hold mode still clicks)
+  but never powers off. The first cut made it a node error, which faulted
+  every project carrying one in Studio's simulator — a switch-mode button with
+  no hardware reads "off" — and CI caught it on the PLAYFUL catalog project. A
+  platform that *refuses* a request (a pin that cannot wake the chip) is still
+  an error.
 
 The rule is the same one: nodes request, the server acts after the frame. A
 second kind of server-level request would earn the generic event channel.

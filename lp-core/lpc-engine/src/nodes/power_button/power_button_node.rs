@@ -82,7 +82,11 @@ impl PowerButtonNode {
 
         let config = self.read_config(ctx)?;
         let now_ms = self.next_now_ms(ctx);
-        self.ensure_input(&config, ctx, now_ms)?;
+        // No button service (a host with no hardware): nothing to read, so
+        // nothing to do. The node is inert rather than failing every frame.
+        if !self.ensure_input(&config, ctx, now_ms)? {
+            return Ok(());
+        }
 
         let event = self
             .input
@@ -165,9 +169,12 @@ impl PowerButtonNode {
             return Ok(());
         }
 
-        let service = ctx
-            .power_service()
-            .ok_or_else(|| NodeError::msg("power button node has no power service"))?;
+        // No power service (Studio's simulator, host tools): the switch is
+        // read but can power nothing off, so a switch that reads "off" there
+        // is not a fault.
+        let Some(service) = ctx.power_service() else {
+            return Ok(());
+        };
         if service.host_attached() {
             if !self.host_hold_logged {
                 log::info!(
@@ -207,19 +214,19 @@ impl PowerButtonNode {
         config: &PowerButtonRuntimeConfig,
         ctx: &TickContext<'_>,
         now_ms: u64,
-    ) -> Result<(), NodeError> {
+    ) -> Result<bool, NodeError> {
         let opened = OpenedPowerButton {
             endpoint: config.endpoint.clone(),
             mode: config.mode,
             stable_ms: config.stable_ms,
         };
         if self.opened.as_ref() == Some(&opened) && self.input.is_some() {
-            return Ok(());
+            return Ok(true);
         }
 
-        let service = ctx
-            .button_service()
-            .ok_or_else(|| NodeError::msg("power button node has no button service"))?;
+        let Some(service) = ctx.button_service() else {
+            return Ok(false);
+        };
         let button_config = match config.mode {
             PowerButtonMode::Hold => ButtonConfig::new(config.stable_ms),
             PowerButtonMode::Switch => ButtonConfig::new(config.stable_ms)
@@ -245,7 +252,7 @@ impl PowerButtonNode {
         self.switch_on = false;
         self.host_hold_logged = false;
         self.power_requested = false;
-        Ok(())
+        Ok(true)
     }
 
     fn next_now_ms(&mut self, ctx: &TickContext<'_>) -> u64 {
@@ -331,9 +338,15 @@ fn request_power_off(
     ctx: &mut TickContext<'_>,
     config: &PowerButtonRuntimeConfig,
 ) -> Result<(), NodeError> {
-    let service = ctx
-        .power_service()
-        .ok_or_else(|| NodeError::msg("power button node has no power service"))?;
+    // Hold mode on a host with no power service: the click still works, the
+    // hold simply does nothing.
+    let Some(service) = ctx.power_service() else {
+        log::info!(
+            "PowerButton: no power service here; not powering off {}",
+            config.endpoint
+        );
+        return Ok(());
+    };
     let request = PowerOffRequest {
         endpoint: config.endpoint.clone(),
         wake_level: match config.mode {
@@ -490,6 +503,33 @@ mod tests {
         assert_eq!(h.power.requests.borrow().len(), 2, "on then off asks again");
     }
 
+    /// Studio's simulator and the host tools have no power service, and some
+    /// hosts no button service either: a switch that reads "off" there must
+    /// not fault the project every frame.
+    #[test]
+    fn without_a_power_or_button_service_the_node_is_inert() {
+        let mut h = Harness::load_with(
+            r#""endpoint": "button:local:D1", "mode": "switch""#,
+            Services::ButtonOnly,
+        );
+        h.run(40, 10);
+        assert!(h.tick_errors.is_empty(), "{:?}", h.tick_errors);
+
+        let mut h = Harness::load_with(
+            r#""endpoint": "button:local:D1", "mode": "switch""#,
+            Services::None,
+        );
+        h.run(40, 10);
+        assert!(h.tick_errors.is_empty(), "{:?}", h.tick_errors);
+    }
+
+    #[derive(Clone, Copy, PartialEq)]
+    enum Services {
+        All,
+        ButtonOnly,
+        None,
+    }
+
     struct Harness {
         rt: LoadedProjectRuntime,
         node: NodeId,
@@ -502,6 +542,10 @@ mod tests {
 
     impl Harness {
         fn load(fields: &str) -> Self {
+            Self::load_with(fields, Services::All)
+        }
+
+        fn load_with(fields: &str, with: Services) -> Self {
             let fs = LpFsMemory::new();
             fs.write_file(
                 "/project.json".as_path(),
@@ -535,8 +579,12 @@ mod tests {
             let time_provider: Rc<dyn TimeProvider> = time.clone();
 
             let mut services = EngineServices::new(TreePath::parse("/power.show").unwrap());
-            services.set_button_service(Some(button_service));
-            services.set_power_service(Some(power_service));
+            if with != Services::None {
+                services.set_button_service(Some(button_service));
+            }
+            if with == Services::All {
+                services.set_power_service(Some(power_service));
+            }
             services.set_time_provider(Some(time_provider));
             let rt = ProjectLoader::load_from_root(&fs, services).expect("load");
             let node = rt

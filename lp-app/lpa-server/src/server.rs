@@ -1102,7 +1102,7 @@ impl LpServer {
     /// Install the embedder's power-off capability (see [`PowerPlatform`]).
     /// Every loaded project's power buttons can then request a power-off,
     /// which the server carries out at the end of the frame. Unset = power
-    /// buttons report that there is no power service.
+    /// buttons are inert (they never request a power-off).
     #[cfg(feature = "node-power-button")]
     pub fn set_power_platform(&mut self, platform: Option<Rc<dyn PowerPlatform>>) {
         let power = platform.map(|platform| Rc::new(PowerOffQueue::new(platform)));
