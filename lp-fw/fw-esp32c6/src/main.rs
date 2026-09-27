@@ -49,13 +49,7 @@ lpc_model::lp_embed_manifest_core! {
 /// handler that used to live here cost.
 #[panic_handler]
 fn panic_handler(info: &PanicInfo) -> ! {
-    // The comms lab's convention (lp-link's text mark, M3): `0xFF` never
-    // occurs inside a COBS-FF frame, so it abandons any frame the panic
-    // interrupted and the panic text (and the ROM banner after the reset)
-    // arrives as text. M2's `0x00` did not survive silicon: the rebooted
-    // board's first frame followed too soon for the idle flush.
-    #[cfg(feature = "test_comms_lab")]
-    esp_println::Printer::write_bytes(&[0xFF, b'\r', b'\n']);
+    write_link_text_mark();
     recovery::panic_path::stage_and_reset(info)
 }
 
@@ -67,7 +61,21 @@ fn panic_handler(info: &PanicInfo) -> ! {
 /// OOM report has to answer, so it gets its own path.
 #[alloc_error_handler]
 fn on_alloc_error(layout: Layout) -> ! {
+    write_link_text_mark();
     recovery::panic_path::stage_oom_and_reset(layout)
+}
+
+/// lp-link's text mark, before any raw text on a dying board: `0xFF` never
+/// occurs inside a COBS-FF frame, so it abandons whatever frame the panic
+/// interrupted on the host's side, and the panic report (and the ROM banner
+/// after the reset) arrives as text. The comms lab proved it on silicon (M3);
+/// its `0x00` predecessor did not survive — the rebooted board's first frame
+/// followed too soon for the idle flush. The images whose host link is
+/// lp-link write it; the other harnesses print plain text and need none.
+#[inline(always)]
+fn write_link_text_mark() {
+    #[cfg(any(not(fw_harness), feature = "test_json", feature = "test_comms_lab"))]
+    esp_println::Printer::write_bytes(&[0xFF, b'\r', b'\n']);
 }
 
 #[cfg(all(feature = "ble", not(fw_harness)))]
@@ -114,8 +122,6 @@ mod stress;
 use fw_esp32_common::server_loop;
 #[cfg(not(fw_harness))]
 use fw_esp32_common::time;
-#[cfg(all(feature = "server", not(fw_harness),))]
-use fw_esp32_common::transport;
 
 // The benchmark images (`bench_render_loop`): the shipped boot with a seeded
 // filesystem and a bounded loop. Not under `tests/` — see `bench/mod.rs`.
@@ -154,7 +160,7 @@ use {
     lpc_shared::output::OutputProvider,
     lpfs::LpFsMemory,
     output::{Esp32C6RmtWs281xDriver, Esp32OutputProvider},
-    serial::io_task,
+    serial::usb_link_task,
     time::Esp32TimeProvider,
 };
 
@@ -251,15 +257,17 @@ fn fill_random(buf: &mut [u8]) {
 /// The `ClientRequest::Reboot` action: the chip reset the chip-agnostic
 /// server cannot perform itself.
 ///
-/// Called only after the ack frame is written (`LpServer::tick_and_send`),
-/// so the client reads its answer and then this board's boot banner. Not a
-/// crash path: the boot was marked complete on the first served frame, long
-/// before any request could arrive, so this reset never counts toward the
-/// boot-loop safe-mode gate.
+/// Called after the ack is queued (`LpServer::tick_and_send`); on the lp-link
+/// host link queued is not yet delivered, so the reset is left to the link
+/// task, which does it once the host has acknowledged everything (or after a
+/// second) — the client reads its answer, then this board's boot banner.
+/// Not a crash path: the boot was marked complete on the first served frame,
+/// long before any request could arrive, so this reset never counts toward
+/// the boot-loop safe-mode gate.
 #[cfg(not(fw_harness))]
 fn reboot_now() {
     log::info!("[REBOOT] client requested a restart");
-    esp_hal::system::software_reset()
+    fw_esp32_common::usb_link::request_reset_when_drained();
 }
 
 #[cfg(not(fw_harness))]
@@ -270,17 +278,17 @@ fn esp32_memory_stats() -> Option<(u32, u32)> {
     ))
 }
 
-/// The server's transport: USB alone, or — with the `ble` feature — the link
-/// mux carrying USB plus up to two BLE links. The mux is there whether or not
-/// the device store turns BLE on; with BLE off no radio link ever opens and
-/// every frame takes the USB path it always did.
+/// The server's transport: the USB host link (lp-link) alone, or — with the
+/// `ble` feature — the link mux carrying it plus up to two BLE links. The mux
+/// is there whether or not the device store turns BLE on; with BLE off no
+/// radio link ever opens and every frame takes the USB path.
 #[cfg(all(feature = "ble", not(fw_harness)))]
 type AppTransport = fw_esp32_common::radio_link::LinkMuxTransport<
-    transport::StreamingMessageRouterTransport,
+    fw_esp32_common::usb_link::UsbLinkTransport,
     embassy_time::Delay,
 >;
 #[cfg(all(not(feature = "ble"), not(fw_harness)))]
-type AppTransport = transport::StreamingMessageRouterTransport;
+type AppTransport = fw_esp32_common::usb_link::UsbLinkTransport;
 
 #[cfg(not(fw_harness))]
 struct FirmwareApp {
@@ -298,9 +306,9 @@ struct FirmwareApp {
 #[cfg(not(fw_harness))]
 #[inline(never)]
 fn boot_firmware(spawner: embassy_executor::Spawner) -> FirmwareApp {
-    // TODO: esp_println writes directly to USB-Serial-JTAG hardware, bypassing
-    // io_task's connection monitor. May block if no USB host is connected during
-    // boot. Hasn't been observed yet but worth investigating if boot hangs occur.
+    // TODO: esp_println writes directly to USB-Serial-JTAG hardware, outside
+    // the link task. May block if no USB host is connected during boot.
+    // Hasn't been observed yet but worth investigating if boot hangs occur.
 
     // Initialize board (clock, heap, runtime) and get hardware peripherals
     esp_println::println!("[INIT] Initializing board...");
@@ -323,25 +331,28 @@ fn boot_firmware(spawner: embassy_executor::Spawner) -> FirmwareApp {
     lp_recovery::set_global(Box::leak(Box::new(recovery_inst)));
     recovery::log_boot_assessment(&boot_assessment);
     // Baseline 0 matches the server loop's time provider, which also starts
-    // at ~0; the first io_task tick re-baselines within milliseconds.
+    // at ~0; the first link-task tick re-baselines within milliseconds.
     let watchdog = recovery::watchdog::WatchdogFeeder::start(rwdt, 0);
     let boot_guard = lp_recovery::enter(lp_recovery::FrameKind::Boot, "boot").ok();
 
     start_runtime(timg0, sw_int);
     esp_println::println!("[INIT] Runtime started");
 
-    // Note: USB serial is handled by I/O task for transport
-    // Logging will go through the transport serial (non-M! messages)
-    // or can be disabled if USB host is not connected
+    // The host link runs lp-link over USB-Serial-JTAG: its task owns the
+    // peripheral, and `log` records ride its log channel from here on. The
+    // `esp_println!` lines before and around this are raw text outside
+    // frames, which a host sees as text (and so does a plain monitor).
     esp_println::println!("[INIT] fw-esp32 starting...");
 
-    // Spawn I/O task (handles serial communication)
-    esp_println::println!("[INIT] Spawning I/O task...");
-    spawner.spawn(io_task(usb_device).unwrap());
-    esp_println::println!("[INIT] I/O task spawned");
+    // The session nonce: random per boot, so a host learns the board
+    // restarted (the RNG is the same one the login challenges draw from).
+    let usb_link =
+        fw_esp32_common::usb_link::UsbLinkShared::leak(esp_hal::rng::Rng::new().random());
+    esp_println::println!("[INIT] Spawning USB link task...");
+    spawner.spawn(usb_link_task(usb_device, usb_link).unwrap());
+    esp_println::println!("[INIT] USB link task spawned");
 
-    // Initialize log crate to write to outgoing serial (host will see these)
-    crate::logger::init(serial::io_task::log_write_to_outgoing);
+    fw_esp32_common::log_ring_logger::init();
 
     // The transcript header, before any record and as early as the logger
     // allows — the same sink-agnostic entry point every other C6 payload uses.
@@ -350,14 +361,9 @@ fn boot_firmware(spawner: embassy_executor::Spawner) -> FirmwareApp {
 
     log::info!("[fw-esp32c6] Shader backend: native JIT (lpvm-native rt_jit)");
 
-    // Create serial transport. Project-read responses stream through io_task;
-    // small messages use the simpler full-message serializer.
-    esp_println::println!("[INIT] Creating StreamingMessageRouterTransport...");
-    let (incoming, _) = serial::io_task::get_message_channels();
-    let (write_request, write_result) = serial::io_task::get_server_write_channels();
-    let transport =
-        transport::StreamingMessageRouterTransport::new(incoming, write_request, write_result);
-    esp_println::println!("[INIT] StreamingMessageRouterTransport created");
+    // The server's side of the host link: whole wire messages on the link's
+    // proto channel.
+    let transport = fw_esp32_common::usb_link::UsbLinkTransport::new(usb_link);
 
     // The RMT peripheral becomes the WS281x driver's, clock and all. 80 MHz
     // with the per-channel divider of 1 gives the 12.5 ns tick

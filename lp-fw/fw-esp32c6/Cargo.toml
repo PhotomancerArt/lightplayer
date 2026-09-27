@@ -308,25 +308,15 @@ fixture-old-proto = ["lpa-server/fixture-old-proto"]
 #   cargo build --profile release-esp32 --features esp32c6,server,radio,spike_uart0_link
 spike_uart0_link = []
 fixture-no-hello = ["lpa-server/fixture-no-hello", "fw-core/fixture-no-hello"]
-# Emulator FIXTURE, never shipped: the io_task writes through esp-hal's raw
-# TX half, WITHOUT the USB-Serial-JTAG IN-endpoint gate
+# Emulator FIXTURE, never shipped: the USB link task writes through esp-hal's
+# raw TX half, WITHOUT the USB-Serial-JTAG IN-endpoint gate
 # (fw_esp32_common::serial::in_endpoint) — the write path as it was before
-# PR #795. Exists so the emulated C6 can show the packed-frame loss the gate
-# fixes, under the link model's free-lag hypothesis
-# (lp-cli/tests/emu_usb_free_lag.rs;
+# PR #795. Exists so the emulated C6 can show the loss the gate fixes, under
+# the link model's free-lag hypothesis (lp-cli/tests/emu_usb_free_lag.rs;
 # docs/defects/2026-09-24-the-real-c6-link-loses-bytes-inside-a-packed-frame.md).
+# Since the link runs lp-link that loss is resent and counted, not seen.
 # Not `test_*`: that prefix selects a harness entrypoint instead of the app.
 fixture-no-in-endpoint-gate = []
-# The link soak variant, never shipped (plan
-# lp2025/2026-09-26-1720-reliable-device-link, M1b): the shipped server image
-# plus a traffic source that sends numbered, checksummed `Log` frames through
-# the real transport, io_task, IN-endpoint gate and ChunkedWriter when a host
-# asks (`SOAK! ...` lines), and counts the bytes the io_task wrote. Read with
-# `lp-cli link soak`. See fw_esp32_common::soak_link.
-# Not `test_*`: that prefix replaces the app with a harness.
-#
-#   cargo build --profile release-esp32 --features esp32c6,server,radio,ble,json-pack,soak_link
-soak_link = ["server", "fw-esp32-common/soak-link"]
 
 [dependencies]
 lp-collection = { workspace = true, features = ["serde"] }
@@ -360,7 +350,9 @@ critical-section = "1"
 enumset = "1"
 
 fw-core = { path = "../fw-core", default-features = false }
-fw-esp32-common = { path = "../fw-esp32-common" }
+# `usb-link`: the host link on lp-link (plan `lp-link-usb-cutover`). Always
+# on: a harness that never spawns the link task links none of it.
+fw-esp32-common = { path = "../fw-esp32-common", features = ["usb-link"] }
 fw-checks = { path = "../fw-checks", default-features = false, features = ["check-shader-compile"], optional = true }
 lps-q32 = { path = "../../lp-shader/lps-q32", default-features = false }
 # The comms lab's link layer (`test_comms_lab`): no_std + alloc, with the lab

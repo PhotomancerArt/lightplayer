@@ -1,19 +1,18 @@
-//! USB-Serial-JTAG connection monitor for ESP32-C6 — the chip half.
+//! USB-Serial-JTAG cable monitor for ESP32-C6 — the chip half.
 //!
-//! The state machine, its two thresholds and its two log lines live in
+//! What a SOF sample means lives in
 //! [`fw_esp32_common::serial::usb_connection`], which is chip-free and
-//! host-tested. What is genuinely a C6 fact is here:
-//! reading and clearing `USB_DEVICE.int_raw.sof`, and reading the device
-//! clock — plus the two IN-endpoint register touches the io_task's gate
-//! injects ([`UsbSerialJtagInEndpoint`]). The S3 keeps the same
-//! facts for the same reason.
+//! host-tested. What is genuinely a C6 fact is here: reading and clearing
+//! `USB_DEVICE.int_raw.sof`, plus the two IN-endpoint register touches the
+//! USB link task's gate injects ([`UsbSerialJtagInEndpoint`]). The S3 keeps
+//! the same facts for the same reason.
 
 use core::sync::atomic::{AtomicBool, Ordering};
-use fw_esp32_common::serial::link_counters::NEVER;
 
 use fw_esp32_common::serial::usb_connection::UsbLinkState;
 
-/// Whether a USB host is enumerating this device, as `io_task` last saw it.
+/// Whether a USB host is enumerating this device, as the link task last saw
+/// it.
 ///
 /// Starts `true`: until the monitor has polled, "a host might be there" is
 /// the safe answer, because the one consumer — the power button's switch
@@ -42,8 +41,8 @@ impl UsbConnectionMonitor {
         }
     }
 
-    /// Sample the SOF raw interrupt bit and update internal state.
-    /// Call once per io_task loop iteration (~2ms).
+    /// Sample the SOF raw interrupt bit and update internal state. The link
+    /// task calls this at most every 2 ms (see `UsbLinkState`).
     pub fn poll(&mut self) {
         let regs = esp_hal::peripherals::USB_DEVICE::regs();
         let sof_received = regs.int_raw().read().sof().bit_is_set();
@@ -52,38 +51,15 @@ impl UsbConnectionMonitor {
         HOST_ENUMERATED.store(self.link.is_enumerated(), Ordering::Relaxed);
     }
 
-    /// A serial write timed out or failed: evidence nobody is draining.
-    pub fn note_write_timeout(&mut self) {
-        self.link.note_write_timeout(now_ms());
-    }
-
-    /// A serial write completed, or bytes arrived from the host: the host
-    /// application is provably alive and draining.
-    pub fn note_host_active(&mut self) {
-        self.link.note_host_active(now_ms());
-    }
-
-    /// Should a probe write be attempted? True while enumerated but latched
-    /// not-draining — the probe is the self-healing path for hosts that
-    /// reopen the port without ever sending bytes (e.g. a passive monitor).
-    pub fn needs_probe(&self) -> bool {
-        self.link.needs_probe()
-    }
-
-    /// Attempt protocol writes only when the cable is enumerated AND the
-    /// host application is draining the port.
-    pub fn is_connected(&self) -> bool {
-        self.link.is_connected()
+    /// A USB host enumerates the board (or the link is not USB at all).
+    pub fn is_enumerated(&self) -> bool {
+        self.link.is_enumerated()
     }
 }
 
-/// This chip's USB-Serial-JTAG register touches for the io_task's
+/// This chip's USB-Serial-JTAG register touches for the link task's
 /// IN-endpoint gate ([`fw_esp32_common::serial::in_endpoint`]).
 #[cfg(not(feature = "spike_uart0_link"))]
-#[cfg_attr(
-    feature = "fixture-no-in-endpoint-gate",
-    allow(dead_code, reason = "the fixture writes without the gate")
-)]
 pub struct UsbSerialJtagInEndpoint;
 
 #[cfg(not(feature = "spike_uart0_link"))]
@@ -103,16 +79,4 @@ impl fw_esp32_common::serial::in_endpoint::InEndpointRegs for UsbSerialJtagInEnd
             .int_clr()
             .write(|w| w.serial_in_empty().clear_bit_by_one());
     }
-}
-
-/// Milliseconds since boot on the device's own clock, saturating one short of
-/// [`NEVER`].
-///
-/// `u32::MAX` is the "never happened" sentinel in the link counters, so an
-/// uptime of 49.7 days must not accidentally spell it. Clamping is the honest
-/// failure here: a stamp that far out is already useless as a latency, and
-/// the alternative — wrapping — would read as a fresh transition.
-fn now_ms() -> u32 {
-    let ms = embassy_time::Instant::now().as_millis();
-    ms.min(u64::from(NEVER) - 1) as u32
 }
