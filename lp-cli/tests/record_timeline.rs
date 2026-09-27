@@ -11,7 +11,12 @@
 use std::path::Path;
 use std::process::Command;
 
+// The fixture is an `M!`-era (proto 28) recording; a USB port's `wire` chunks
+// are read as an lp-link since proto 30, so its wire lines no longer decode.
+// Re-record it from a real emulated session once the lp-link firmware lands
+// (never hand-edit), then un-ignore.
 #[test]
+#[ignore = "needs P2 firmware; un-ignore in P5 (re-record emulated-c6-session.jsonl against the lp-link image)"]
 fn a_real_recording_reads_as_a_timeline() {
     let out = timeline(&[]);
     let lines: Vec<&str> = out.lines().collect();
