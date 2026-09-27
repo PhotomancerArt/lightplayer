@@ -244,7 +244,7 @@ fn workbench_nodes_view() -> Element {
 fn workbench_link_reconnecting() -> Element {
     let view = view_with_surface(None).with_lens_reconnecting(Some(
         lpa_studio_core::UiLensReconnecting::new(
-            "Porch sign",
+            "Desktop sim",
             lpa_studio_core::LinkTrouble::Restarted,
         ),
     ));

@@ -1,6 +1,6 @@
 //! The device card's link section (plan D13): the board's own lp-link
 //! counters, off its heartbeat, in words and units that read at a glance —
-//! "3 frames", "2 times", "412 KB sent · 38 KB received".
+//! "3 frames", "2 times", "412 KB".
 //!
 //! The words are the board's view, because the numbers are: a resend is a
 //! frame the BOARD sent again, a damaged frame is one that reached the board
@@ -14,7 +14,7 @@ use crate::DeviceLinkCounters;
 pub struct UiLinkCounterRow {
     /// "Resent", "Arrived damaged", …
     pub label: &'static str,
-    /// "3 frames", "1 time", "412 KB sent · 38 KB received"
+    /// "3 frames", "1 time", "412 KB"
     pub value: String,
     /// Worth a second look: a recovery the link had to make.
     pub notable: bool,
@@ -31,12 +31,13 @@ pub fn link_counter_rows(counters: &DeviceLinkCounters) -> Vec<UiLinkCounterRow>
         count_row("Restarted", counters.resets, "time", "times"),
         count_row("Went quiet", counters.stalls, "time", "times"),
         UiLinkCounterRow {
-            label: "Traffic",
-            value: format!(
-                "{} sent · {} received",
-                byte_size(counters.bytes_sent),
-                byte_size(counters.bytes_received)
-            ),
+            label: "Sent",
+            value: byte_size(counters.bytes_sent),
+            notable: false,
+        },
+        UiLinkCounterRow {
+            label: "Received",
+            value: byte_size(counters.bytes_received),
             notable: false,
         },
     ]
@@ -77,7 +78,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn a_clean_link_reads_as_zeros_and_traffic() {
+    fn a_clean_link_reads_as_zeros_and_its_traffic() {
         let rows = link_counter_rows(&DeviceLinkCounters {
             bytes_sent: 421_888,
             bytes_received: 38_912,
@@ -94,7 +95,8 @@ mod tests {
                 "Arrived damaged: 0 frames",
                 "Restarted: 0 times",
                 "Went quiet: 0 times",
-                "Traffic: 412 KB sent · 38 KB received",
+                "Sent: 412 KB",
+                "Received: 38 KB",
             ]
         );
         assert!(rows.iter().all(|row| !row.notable));

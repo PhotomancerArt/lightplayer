@@ -2034,7 +2034,7 @@ fn devices_card_menu_open() -> Element {
 }
 
 #[story(
-    description = "The device card's ⋯ menu with the board's LINK section (plan D13): under Rename, the lp-link counters the board reports on every heartbeat, in the board's own words — frames it had to send again, frames that reached it damaged, times the link restarted and went quiet, and the traffic each way in the unit that keeps the number short. On a clean cable every count is 0; here the board has resent 3 frames and restarted once, so those two wear the warning tone. The panel floats, so the fixed-height card pays nothing for it; a link that reports no counters (Bluetooth, a sim) shows Rename alone."
+    description = "The device card's ⋯ menu with the board's LINK section (plan D13): under Rename, the lp-link counters the board reports on every heartbeat, in the board's own words — frames it had to send again, frames that reached it damaged, times the link restarted and went quiet, and the bytes it sent and received, each in the unit that keeps the number short. On a clean cable every count is 0; here the board has resent 3 frames and restarted once, so those two wear the warning tone. The panel floats, so the fixed-height card pays nothing for it; a link that reports no counters (Bluetooth, a sim) shows Rename alone."
 )]
 fn devices_card_menu_link_counters() -> Element {
     let mut card = roster_fixture().roster.devices.remove(0);
