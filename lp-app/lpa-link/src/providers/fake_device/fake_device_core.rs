@@ -1,5 +1,11 @@
 //! The scripted fake ESP32 device: state machine, buffers, and the bridge
 //! to a REAL host `LpServer`.
+//!
+//! Its LightPlayer state speaks what shipped firmware speaks on USB since
+//! `WIRE_PROTO_VERSION` 30: boot text raw, then an lp-link
+//! ([`FakeBoardLink`]) with a hello first on every link session. Its other
+//! states (blank flash, the ROM downloader, foreign firmware) have no link,
+//! only text.
 
 use std::collections::VecDeque;
 use std::future::Future;
@@ -11,10 +17,15 @@ use std::time::{Duration, Instant};
 
 use fw_host::{HostRuntime, create_memory_server_with};
 use lpc_model::AsLpPath;
+use lpc_wire::lp_link::sniffer::{Direction, LinkSniffer, SniffEvent};
+use lpc_wire::lp_link::{CH_PROTO, Micros};
 use lpc_wire::messages::ClientMessage;
 use lpfs::{LpFs, LpFsMemory};
 
 use crate::providers::fake_device::failure_injection::FakeFailurePlan;
+use crate::providers::fake_device::fake_board_link::{
+    FakeBoardLink, FakeLinkInput, FakeSendOutcome,
+};
 use crate::providers::fake_device::fake_device_script::{
     FakeBootState, FakeDeviceScript, FakeLightPlayerState, fake_provenance,
 };
@@ -52,7 +63,6 @@ impl FakeEsp32Device {
                 frames_emitted: 0,
                 stalled_by_cut: false,
                 last_heartbeat: None,
-                input_buf: Vec::new(),
                 premature_input_bytes: 0,
                 premature_input: Vec::new(),
                 failure: FakeFailurePlan::none(),
@@ -62,11 +72,15 @@ impl FakeEsp32Device {
                 reboots_performed: 0,
                 loaded_projects: Vec::new(),
                 pending_loads: std::collections::BTreeMap::new(),
-                encoding: lpc_wire::WireEncoding::Json,
-                table: lpc_wire::LearnedTable::boxed(),
-                next_table_epoch: 1,
                 packed_frames_emitted: 0,
                 unanswered: std::collections::BTreeSet::new(),
+                clock: Instant::now(),
+                boots: 0,
+                link: None,
+                boot_hello: None,
+                outbox: VecDeque::new(),
+                cut_armed: false,
+                premature_sniffer: LinkSniffer::usb(),
             })),
         }
     }
@@ -81,8 +95,8 @@ impl FakeEsp32Device {
         self.lock().reboot_requests.load(Ordering::SeqCst)
     }
 
-    /// Protocol frames this device has written packed, cumulative: nonzero
-    /// once a host opted in (`ClientRequest::SetEncoding`) and was answered.
+    /// Replies this device has written packed, cumulative: nonzero once a
+    /// host opted in (`ClientRequest::SetEncoding`) and was answered.
     pub fn packed_frames_emitted(&self) -> usize {
         self.lock().packed_frames_emitted
     }
@@ -100,18 +114,22 @@ impl FakeEsp32Device {
         self.lock().served_bytes
     }
 
-    /// Bytes written by the host while the device was NOT serving (booting,
-    /// blank flash, ROM downloader…). Real hardware drops these on the
-    /// floor; a nonzero count means the client talked before readiness —
+    /// Bytes of REQUESTS the host wrote while the device was NOT serving
+    /// (booting, blank flash, ROM downloader…). Real hardware drops these on
+    /// the floor; a nonzero count means the client talked before readiness —
     /// exactly the M5 pull-before-readiness hardware bug.
+    ///
+    /// The link's own frames (a host handshaking with a board that is not
+    /// there yet) are not requests and are not counted: the bytes are read
+    /// passively ([`LinkSniffer`]) and only proto-channel messages count.
     pub fn premature_input_bytes(&self) -> usize {
         self.lock().premature_input_bytes
     }
 
-    /// The dropped premature bytes themselves (lossy UTF-8), so a test can
-    /// tell DELIBERATELY loss-tolerant traffic (the readiness hello request,
-    /// re-sent until answered) from a request that must not be lost (the
-    /// M5 pull-before-readiness bug).
+    /// The dropped premature requests, one `M!{json}` line each, so a test
+    /// can tell DELIBERATELY loss-tolerant traffic (the readiness hello
+    /// request, re-sent until answered) from a request that must not be lost
+    /// (the M5 pull-before-readiness bug).
     pub fn premature_input(&self) -> String {
         String::from_utf8_lossy(&self.lock().premature_input).into_owned()
     }
@@ -246,13 +264,16 @@ pub(crate) struct FakeDeviceCore {
     frames_emitted: usize,
     /// A mid-frame cut happened: stop responding, no EOF.
     stalled_by_cut: bool,
+    /// The next frame on the wire is the one the cut tears.
+    cut_armed: bool,
     /// When the last synthetic heartbeat was emitted (scripts with
     /// `heartbeat_interval`; the host server never heartbeats on its own).
     last_heartbeat: Option<Instant>,
-    /// Host→device bytes not yet forming a complete line.
-    input_buf: Vec<u8>,
     premature_input_bytes: usize,
     premature_input: Vec<u8>,
+    /// Reads what the host writes while nothing is serving, for
+    /// [`FakeEsp32Device::premature_input`]. Fresh every boot.
+    premature_sniffer: LinkSniffer,
     failure: FakeFailurePlan,
     dtr_high_seen: bool,
     last_rts: Option<bool>,
@@ -276,19 +297,19 @@ pub(crate) struct FakeDeviceCore {
     /// `LoadProject` requests in flight, by correlation id, so the reply can
     /// be paired with the path it loaded.
     pending_loads: std::collections::BTreeMap<u64, lpc_model::LpPathBuf>,
-    /// The form this link's replies go out in: JSON until the host opts in
-    /// (`ClientRequest::SetEncoding`), and JSON again when the port reopens
-    /// or the device resets — the per-link state shipped firmware holds in
-    /// its transport.
-    encoding: lpc_wire::WireEncoding,
-    /// The link's learned table while packed, as shipped firmware keeps it
-    /// (`fw_esp32_common::serial::packed_link`): a new epoch, empty, at every
-    /// accepted opt-in.
-    table: Box<lpc_wire::LearnedTable>,
-    /// The epoch the next accepted opt-in starts.
-    next_table_epoch: u8,
-    /// Frames written packed, cumulative across boots.
+    /// Replies written packed, cumulative across boots.
     packed_frames_emitted: usize,
+    /// The device's clock for its link (any monotonic origin).
+    clock: Instant,
+    /// Boots so far: each boot's link gets its own nonce.
+    boots: u32,
+    /// This boot's link, once the LightPlayer server runs.
+    link: Option<FakeBoardLink>,
+    /// The server's unsolicited boot hello: what the board says first on
+    /// every link session (D5).
+    boot_hello: Option<lpc_wire::ServerHello>,
+    /// Replies waiting for room on the link, in order.
+    outbox: VecDeque<lpc_wire::WireServerMessage>,
     /// Correlation ids the server has been handed but whose answer has not
     /// yet reached the byte wire. Backs [`FakeEsp32Device::unanswered_requests`].
     unanswered: std::collections::BTreeSet<u64>,
@@ -300,14 +321,17 @@ impl FakeDeviceCore {
     fn reset_current(&mut self) {
         self.out.clear();
         self.out_since = None;
-        self.input_buf.clear();
         self.stalled_by_cut = false;
+        self.cut_armed = false;
         self.last_heartbeat = None;
         self.loaded_projects.clear();
         self.pending_loads.clear();
-        self.encoding = lpc_wire::WireEncoding::Json;
-        // A reboot starts the epoch count over, as a board's does.
-        self.next_table_epoch = 1;
+        // A reboot ends the link: the next boot's has a new nonce, which is
+        // how the host learns the board restarted.
+        self.link = None;
+        self.boot_hello = None;
+        self.outbox.clear();
+        self.premature_sniffer = LinkSniffer::usb();
         self.unanswered.clear();
         // Dropping a RunningLp phase drops the HostRuntime, which joins the
         // server thread (bounded).
@@ -378,8 +402,11 @@ impl FakeDeviceCore {
                 }
                 FakePhase::RunningLp { .. } => {
                     let heartbeat_interval = lp.heartbeat_interval;
+                    self.service_link();
                     self.emit_heartbeat_if_due(heartbeat_interval);
                     self.pump_server_frames();
+                    self.flush_outbox();
+                    self.transmit();
                     self.reboot_if_owed();
                 }
                 FakePhase::Passive { .. } => {}
@@ -462,8 +489,11 @@ impl FakeDeviceCore {
         match start {
             Ok(runtime) => {
                 self.phase = FakePhase::RunningLp { runtime };
-                // The server loop sends the unsolicited id-0 hello as its
-                // first frame; the next `advance()` pumps it onto the wire.
+                // The link comes up with the server, under a nonce of this
+                // boot's own. The server sends its unsolicited id-0 hello
+                // first; it is kept and said first on every link session.
+                self.boots = self.boots.wrapping_add(1);
+                self.link = Some(FakeBoardLink::new(boot_nonce(self.boots)));
             }
             Err(error) => {
                 self.push_line(&format!("[fake-device] server start failed: {error}"));
@@ -475,8 +505,9 @@ impl FakeDeviceCore {
         }
     }
 
-    /// Move any frames the real server produced onto the byte wire as
-    /// `M!<json>\n` lines, applying frame-level injection knobs.
+    /// Take the frames the real server produced: the boot hello is kept for
+    /// every link session, replies queue for the link, and the frame-level
+    /// injection knobs apply.
     fn pump_server_frames(&mut self) {
         loop {
             if self.stalled_by_cut {
@@ -519,10 +550,132 @@ impl FakeDeviceCore {
             }
             self.note_server_frame(&frame);
             self.unanswered.remove(&frame.id);
-            if !self.emit_wire_frame(&frame) {
-                return;
+            self.queue_reply(frame);
+        }
+    }
+
+    /// Queue one server frame for the link. The unsolicited boot hello is
+    /// the board's first word on every session (D5); anything else said
+    /// while no session is up (a heartbeat before the host arrived) has no
+    /// one to reach, as on a board.
+    fn queue_reply(&mut self, frame: lpc_wire::WireServerMessage) {
+        if let (0, lpc_wire::ServerMsgBody::Hello(hello)) = (frame.id, &frame.msg) {
+            self.boot_hello = Some(hello.clone());
+            let owed = self
+                .link
+                .as_ref()
+                .is_some_and(|link| link.is_up() && !link.hello_sent());
+            if owed && !self.outbox.iter().any(is_hello) {
+                self.outbox.push_front(frame);
+            }
+            return;
+        }
+        if self.link.as_ref().is_some_and(FakeBoardLink::is_up) {
+            self.outbox.push_back(frame);
+        }
+    }
+
+    /// Act on what the host said on the link: a new session gets the hello
+    /// first, requests go to the server.
+    fn service_link(&mut self) {
+        if self.stalled_by_cut {
+            return;
+        }
+        let Some(link) = self.link.as_mut() else {
+            return;
+        };
+        for input in link.take_inputs() {
+            match input {
+                FakeLinkInput::Up => {
+                    // Whatever was queued belonged to the session that ended.
+                    self.outbox.clear();
+                    // Pre-hello firmware never says it, and a starved one
+                    // drops it with every other answer.
+                    let suppress_hello = matches!(
+                        &self.script.boot,
+                        FakeBootState::LightPlayer(lp) if lp.suppress_hello || lp.drop_responses
+                    );
+                    if let Some(hello) = self.boot_hello.clone()
+                        && !suppress_hello
+                    {
+                        self.outbox.push_back(lpc_wire::WireServerMessage::new(
+                            0,
+                            lpc_wire::ServerMsgBody::Hello(hello),
+                        ));
+                    }
+                }
+                FakeLinkInput::Request(message) => self.forward_to_server(message),
+                FakeLinkInput::Malformed(error) => {
+                    eprintln!("[fake-device] malformed client frame: {error}");
+                }
             }
         }
+    }
+
+    /// Move queued replies onto the link while it has room, applying the
+    /// frame-level knobs (log flood, mid-frame cut).
+    fn flush_outbox(&mut self) {
+        while !self.stalled_by_cut && !self.cut_armed {
+            let Some(link) = self.link.as_mut() else {
+                return;
+            };
+            let Some(frame) = self.outbox.front() else {
+                return;
+            };
+            if !link.is_up() {
+                return;
+            }
+            match link.send(frame) {
+                FakeSendOutcome::Sent { packed } => {
+                    if packed {
+                        self.packed_frames_emitted += 1;
+                    }
+                    self.outbox.pop_front();
+                    if let Some(flood) = self.failure.log_flood_line.clone() {
+                        // Logs and frames share the wire on real hardware.
+                        self.push_line(&flood);
+                    }
+                    if self.failure.cut_mid_frame_after_frames == Some(self.frames_emitted) {
+                        self.cut_armed = true;
+                    }
+                    self.frames_emitted += 1;
+                }
+                FakeSendOutcome::Full => return,
+                FakeSendOutcome::TooBig => {
+                    eprintln!("[fake-device] a reply too big for one link message was dropped");
+                    self.outbox.pop_front();
+                }
+            }
+        }
+    }
+
+    /// Put the link's frames on the byte wire. An armed cut writes half of
+    /// the next frame and then nothing more, ever: a board hung mid-write.
+    fn transmit(&mut self) {
+        if self.stalled_by_cut {
+            return;
+        }
+        let now = self.now();
+        let Some(link) = self.link.as_mut() else {
+            return;
+        };
+        if self.cut_armed {
+            if let Some(frame) = link.transmit_one(now) {
+                let cut = frame.len() / 2;
+                self.cut_armed = false;
+                self.stalled_by_cut = true;
+                self.push_bytes(&frame[..cut]);
+            }
+            return;
+        }
+        let mut frames = Vec::new();
+        link.transmit(now, |frame| frames.extend_from_slice(frame));
+        self.push_bytes(&frames);
+    }
+
+    /// Microseconds on the device's clock.
+    fn now(&self) -> Micros {
+        u64::try_from(self.clock.elapsed().as_micros()).unwrap_or(u64::MAX)
     }
 
     /// Emit one synthetic unsolicited id-0 heartbeat when the script's
@@ -564,11 +717,11 @@ impl FakeDeviceCore {
                 memory: None,
                 recovery: None,
                 outputs: None,
-                link: None,
+                link: self.link.as_ref().map(FakeBoardLink::counters),
                 identity,
             },
         );
-        self.emit_wire_frame(&frame);
+        self.queue_reply(frame);
     }
 
     /// The identity this device announces on its heartbeats, mirroring
@@ -608,69 +761,6 @@ impl FakeDeviceCore {
         }
         self.reboots_performed = self.reboot_requests.load(Ordering::SeqCst);
         self.reset_current();
-    }
-
-    /// Serialize one protocol frame onto the byte wire — an `M!<json>\n`
-    /// line, or a packed frame on a link that opted in — applying the
-    /// frame-level injection knobs (log flood, mid-frame cut). Returns
-    /// `false` when the wire stalled on a cut.
-    fn emit_wire_frame(&mut self, frame: &lpc_wire::WireServerMessage) -> bool {
-        let json = match lpc_wire::json::to_string(frame) {
-            Ok(json) => json,
-            Err(error) => {
-                eprintln!("[fake-device] failed to serialize frame: {error}");
-                return true;
-            }
-        };
-        if let Some(flood) = self.failure.log_flood_line.clone() {
-            // Logs and frames share the wire on real hardware.
-            self.push_line(&flood);
-        }
-        let frame_bytes = match self.encoding {
-            lpc_wire::WireEncoding::Json => format!("M!{json}\n").into_bytes(),
-            // `\n 0x00 'L' COBS 0x00`, built by the firmware's own writer
-            // into a buffer with room for the JSON line; a frame that cannot
-            // pack goes out as JSON (the table untouched), as it does on a
-            // board.
-            lpc_wire::WireEncoding::Packed => {
-                // A Hello reply starts a new, empty epoch, as the firmware's
-                // `PackedLink::prepare_reply` does: a reopened port's fresh
-                // reader must be able to read identify's answer.
-                if matches!(frame.msg, lpc_wire::ServerMsgBody::Hello(_)) {
-                    use lpc_wire::LearnStore;
-                    self.table.reset(self.next_table_epoch);
-                    self.next_table_epoch = self.next_table_epoch.wrapping_add(1);
-                }
-                let mut buf = vec![0u8; json.len() + 64];
-                match lpc_wire::ser_learned_frame_to(&mut buf, &mut *self.table, frame) {
-                    Ok(n) => {
-                        buf.truncate(n);
-                        self.packed_frames_emitted += 1;
-                        buf
-                    }
-                    Err(_) => format!("M!{json}\n").into_bytes(),
-                }
-            }
-        };
-        if self.failure.cut_mid_frame_after_frames == Some(self.frames_emitted) {
-            let cut = frame_bytes.len() / 2;
-            self.push_bytes(&frame_bytes[..cut]);
-            self.stalled_by_cut = true;
-            return false;
-        }
-        self.push_bytes(&frame_bytes);
-        self.frames_emitted += 1;
-        // The answer to an opt-in goes out in the old form; the switch is
-        // for the frames after it.
-        if let lpc_wire::ServerMsgBody::SetEncoding { encoding } = &frame.msg {
-            self.encoding = *encoding;
-            if *encoding == lpc_wire::WireEncoding::Packed {
-                use lpc_wire::LearnStore;
-                self.table.reset(self.next_table_epoch);
-                self.next_table_epoch = self.next_table_epoch.wrapping_add(1);
-            }
-        }
-        true
     }
 
     /// Serve up to `buf.len()` bytes from the device, applying the failure
@@ -745,29 +835,40 @@ impl FakeDeviceCore {
         // after the boot delay elapsed (but before any read poll) should
         // reach the server, not count as premature.
         self.advance();
-        if !matches!(self.phase, FakePhase::RunningLp { .. }) {
-            self.premature_input_bytes += bytes.len();
-            self.premature_input.extend_from_slice(bytes);
-            return Ok(());
-        }
-        self.input_buf.extend_from_slice(bytes);
-        while let Some(newline) = self.input_buf.iter().position(|&b| b == b'\n') {
-            let line_bytes: Vec<u8> = self.input_buf.drain(..=newline).collect();
-            let Ok(line) = std::str::from_utf8(&line_bytes[..line_bytes.len() - 1]) else {
-                continue;
-            };
-            let line = line.trim_end_matches('\r');
-            let Some(json) = line.strip_prefix("M!") else {
-                continue;
-            };
-            match lpc_wire::json::from_str::<ClientMessage>(json) {
-                Ok(message) => self.forward_to_server(message),
-                Err(error) => {
-                    eprintln!("[fake-device] malformed client frame: {error}");
-                }
+        let now = self.now();
+        match self.link.as_mut() {
+            Some(link) if matches!(self.phase, FakePhase::RunningLp { .. }) => {
+                link.on_bytes(now, bytes);
+                // Answer at once (acknowledgements, the hello on `Up`), as
+                // the board's link task does.
+                self.advance();
             }
+            _ => self.note_premature(now, bytes),
         }
         Ok(())
+    }
+
+    /// Bytes written while nothing serves them: dropped, as on hardware, and
+    /// the requests among them counted.
+    fn note_premature(&mut self, now: Micros, bytes: &[u8]) {
+        let mut requests = Vec::new();
+        self.premature_sniffer
+            .push(Direction::HostToBoard, now, bytes, |event| {
+                if let SniffEvent::Message {
+                    channel: CH_PROTO,
+                    data,
+                    ..
+                } = event
+                {
+                    requests.push(data);
+                }
+            });
+        for data in requests {
+            self.premature_input_bytes += data.len();
+            self.premature_input.extend_from_slice(b"M!");
+            self.premature_input.extend_from_slice(&data);
+            self.premature_input.push(b'\n');
+        }
     }
 
     /// Track what the SERVER said it has loaded, so the synthetic heartbeat
@@ -845,13 +946,12 @@ impl FakeDeviceCore {
     }
 
     /// A reopen (baud change) flushes the wire but does not reboot the
-    /// device — matching a real port close/reopen.
+    /// device — matching a real port close/reopen. The board's link stays:
+    /// the next host's handshake (a new nonce) resets it, and its session
+    /// state with it.
     pub(crate) fn reopen(&mut self) {
-        // A closed port is a closed link: the next host starts at JSON.
-        self.encoding = lpc_wire::WireEncoding::Json;
         self.out.clear();
         self.out_since = None;
-        self.input_buf.clear();
     }
 
     fn push_line(&mut self, line: &str) {
@@ -866,6 +966,18 @@ impl FakeDeviceCore {
         }
         self.out.extend(bytes.iter().copied());
     }
+}
+
+/// The nonce of a boot's link: distinct per device and per boot, so the host
+/// sees every reboot as a new session.
+fn boot_nonce(boot: u32) -> u32 {
+    static DEVICES: AtomicUsize = AtomicUsize::new(0);
+    let device = DEVICES.fetch_add(1, Ordering::Relaxed) as u32;
+    boot.wrapping_mul(0x9E37_79B1) ^ device.wrapping_mul(0x85EB_CA77) ^ 0x5EED_0001
+}
+
+fn is_hello(frame: &lpc_wire::WireServerMessage) -> bool {
+    matches!(frame.msg, lpc_wire::ServerMsgBody::Hello(_))
 }
 
 /// Poll a future exactly once with a no-op waker; `None` when pending.

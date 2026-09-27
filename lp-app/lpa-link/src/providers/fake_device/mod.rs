@@ -22,6 +22,7 @@
 //! disconnect, garble/drop, mid-frame cut, log-flood interleave.
 
 pub mod failure_injection;
+pub(crate) mod fake_board_link;
 pub mod fake_device_core;
 pub mod fake_device_script;
 pub mod fake_device_stream;

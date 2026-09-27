@@ -21,6 +21,8 @@
 //! | [`wire`] | `lpc_wire` frames ⇄ the model's minimal mirror (the ONE meeting point) |
 //! | [`demux`] | whole serial lines → `LinkEvent`s (the `M!` demux) |
 //! | [`wire_reader`] | one port's bytes → lines and messages, and the packed-reply opt-in |
+//! | `port_read_map` | a `WireLinkPort` read (lp-link) → the model's `LinkEvent` or a `WireRead` |
+//! | `link_nonce` | a fresh lp-link nonce per port open |
 //! | [`wire_capture`] | dev-only: a capped tee of every raw byte the browser port reads |
 //! | [`wire_tap`] | the session recorder's tap on every raw byte chunk a browser transport writes or reads |
 //! | `byte_stream` | the sync `DeviceByteStream` seam → `Link` (host) |
@@ -36,6 +38,8 @@
 //! transports speak the contract.
 
 pub mod demux;
+#[cfg(feature = "device-session")]
+pub mod port_read_map;
 pub mod wire;
 pub mod wire_capture;
 pub mod wire_reader;
@@ -51,6 +55,14 @@ pub mod wire_tap;
     feature = "emulator-tab"
 ))]
 pub mod byte_stream;
+
+#[cfg(any(
+    feature = "host-process",
+    feature = "host-serial-esp32",
+    feature = "fake-device",
+    feature = "emulator-tab"
+))]
+pub mod link_nonce;
 
 #[cfg(feature = "fake-device")]
 pub mod fake;

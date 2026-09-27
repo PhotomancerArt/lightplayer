@@ -189,21 +189,36 @@ fn light_player(uid: &str) -> FakeEsp32Device {
     )))
 }
 
-/// Drain whatever the device has already put on the wire, so the next link to
-/// open it lands MID-STREAM: the boot banner and the unsolicited id-0 hello
-/// are already gone, exactly like connecting to a board that has been running
-/// for an hour.
+/// Run a throwaway host link against the device until its hello, so the next
+/// link to open it lands MID-STREAM: the boot banner is already gone, exactly
+/// like connecting to a board that has been running for an hour. (Since
+/// lp-link the board says hello first on every link session, so the next
+/// link hears one too; what it cannot hear is the boot.)
 fn run_past_the_boot_hello(device: &FakeEsp32Device) {
     let mut stream = crate::providers::fake_device::FakeDeviceByteStream::new(device.clone());
+    let mut port = lpc_wire::WireLinkPort::new(0x7E57_0001, false);
+    let started = Instant::now();
+    let now = || started.elapsed().as_micros() as u64;
     let mut buf = [0u8; 4096];
-    let mut seen = String::new();
+    let mut seen = Vec::new();
     let deadline = Instant::now() + RUN_TIMEOUT;
-    while !seen.contains("\"hello\"") {
+    loop {
+        while let Some(frame) = port.poll_transmit(now()) {
+            stream.write_all(frame).expect("the fake is alive");
+        }
         let read = stream.read_available(&mut buf).expect("the fake is alive");
-        seen.push_str(&String::from_utf8_lossy(&buf[..read]));
+        port.on_bytes(now(), &buf[..read]);
+        while let Some(read) = port.poll_read() {
+            match read {
+                lpc_wire::PortRead::Message(payload) if payload.json.contains("\"hello\"") => {
+                    return;
+                }
+                other => seen.push(format!("{other:?}")),
+            }
+        }
         assert!(
             Instant::now() < deadline,
-            "the fake never said hello; saw: {seen}"
+            "the fake never said hello; saw: {seen:?}"
         );
         std::thread::sleep(Duration::from_millis(2));
     }

@@ -483,6 +483,12 @@ impl DeviceShared {
         while matches!(self.state(), DeviceState::Booting) {
             match self.poll_frame() {
                 None => break,
+                // The board rebooted under the gate (its link reset): the
+                // readiness hello it lost is re-asked on the gate's own
+                // cadence, and the new session opens with a hello anyway.
+                Some(Err(error)) if lpa_client::is_link_reset(&error) => {
+                    let _ = error;
+                }
                 Some(Err(_error)) => {
                     self.mark_gone("device stream ended before the session became ready");
                     return;
