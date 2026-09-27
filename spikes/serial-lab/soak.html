@@ -1,0 +1,144 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Link soak reader</title>
+<style>
+  body { font: 13px ui-monospace, monospace; margin: 16px; background: #111; color: #ddd; }
+  pre { white-space: pre-wrap; }
+</style>
+</head>
+<body>
+<h1>Link soak: Web Serial raw reader</h1>
+<p>Reads a <code>soak_link</code> board's bytes through Web Serial, as Studio's
+read pump does, and posts the raw capture to the lab server for
+<code>lp-cli link soak-verify</code>. Needs a granted port (the bench-block
+policy, <code>just serial-grant</code>). Query parameters:
+<code>bufferSize</code> (Chrome's default is 255), <code>seconds</code>,
+<code>min</code>, <code>max</code>, <code>rate</code>, <code>logs</code>,
+<code>encoding</code> (packed|json), <code>stallEvery</code>/<code>stallMs</code>
+(a busy main thread: a synchronous spin of stallMs every stallEvery ms, as a
+long wasm task would be), <code>name</code> (the capture's file name stem).</p>
+<pre id="log"></pre>
+<script>
+const q = new URLSearchParams(location.search);
+const cfg = {
+  bufferSize: Number(q.get("bufferSize") ?? 255),
+  seconds: Number(q.get("seconds") ?? 30),
+  min: Number(q.get("min") ?? 16),
+  max: Number(q.get("max") ?? 16384),
+  rate: Number(q.get("rate") ?? 0),
+  logs: Number(q.get("logs") ?? 0),
+  encoding: q.get("encoding") ?? "packed",
+  stallEvery: Number(q.get("stallEvery") ?? 0),
+  stallMs: Number(q.get("stallMs") ?? 0),
+  name: q.get("name") ?? "soak",
+};
+const logEl = document.getElementById("log");
+const lines = [];
+function log(msg) {
+  const line = `${(performance.now() / 1000).toFixed(3)} ${msg}`;
+  lines.push(line);
+  logEl.textContent += line + "\n";
+  fetch("/page-log", { method: "POST", body: JSON.stringify({ line: `[soak] ${msg}` }) }).catch(() => {});
+}
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+async function main() {
+  log(`config ${JSON.stringify(cfg)} ua=${navigator.userAgent}`);
+  if (!navigator.serial) throw new Error("no navigator.serial");
+  const ports = (await navigator.serial.getPorts()).filter(
+    (p) => (p.getInfo?.().usbVendorId ?? 0) === 0x303a,
+  );
+  log(`granted Espressif ports: ${ports.length}`);
+  if (ports.length !== 1) throw new Error(`want exactly one Espressif port, got ${ports.length}`);
+  const port = ports[0];
+  await port.open({ baudRate: 921600, bufferSize: cfg.bufferSize });
+  log(`opened with bufferSize ${cfg.bufferSize}`);
+  const writer = port.writable.getWriter();
+  const enc = new TextEncoder();
+  const write = (text) => writer.write(enc.encode(text));
+
+  const chunks = [];
+  const chunkSizes = new Map();
+  const errors = [];
+  let total = 0;
+  let closing = false;
+  const pump = (async () => {
+    // Studio's pump shape (browser_esp32_device_controller.js readPump), plus
+    // what it lacks: a recoverable read error (BufferOverrunError) gets a new
+    // reader and the capture goes on, with the error's offset recorded.
+    while (port.readable && !closing) {
+      const reader = port.readable.getReader();
+      try {
+        for (;;) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          if (!value) continue;
+          chunks.push(value.slice());
+          total += value.length;
+          chunkSizes.set(value.length, (chunkSizes.get(value.length) ?? 0) + 1);
+        }
+      } catch (e) {
+        errors.push({ name: e?.name, message: String(e?.message ?? e), offset: total, t: performance.now() });
+        log(`read error ${e?.name}: ${e?.message} at byte ${total}`);
+      } finally {
+        try { reader.releaseLock(); } catch {}
+      }
+      if (closing) break;
+    }
+  })();
+
+  await write(`M!{"id":1,"msg":"hello"}\n`);
+  await sleep(700);
+  if (cfg.encoding === "packed") {
+    await write(`M!{"id":9007199254740991,"msg":{"setEncoding":{"encoding":"packed","format":2}}}\n`);
+    await sleep(500);
+  }
+  await write(`\nSOAK! on=1 min=${cfg.min} max=${cfg.max} rate=${cfg.rate} logs=${cfg.logs} seed=1 budget=20 count=0\n`);
+  log("soak on");
+
+  let stalls = 0;
+  let stallTotal = 0;
+  let timer = null;
+  if (cfg.stallEvery > 0 && cfg.stallMs > 0) {
+    timer = setInterval(() => {
+      const until = performance.now() + cfg.stallMs;
+      while (performance.now() < until) { /* a long task on the main thread */ }
+      stalls += 1;
+      stallTotal += cfg.stallMs;
+    }, cfg.stallEvery);
+  }
+  await sleep(cfg.seconds * 1000);
+  if (timer) clearInterval(timer);
+  await write("\nSOAK! on=0\n");
+  log(`soak off after ${cfg.seconds}s; ${total} B so far, ${stalls} stalls`);
+  await sleep(2500);
+  closing = true;
+  try { await port.readable?.cancel?.(); } catch {}
+  await Promise.race([pump, sleep(1000)]);
+  try { writer.releaseLock(); } catch {}
+  try { await port.close(); } catch (e) { log(`close: ${e}`); }
+
+  const bytes = new Uint8Array(total);
+  let at = 0;
+  for (const c of chunks) { bytes.set(c, at); at += c.length; }
+  const meta = {
+    config: cfg, total, reads: chunks.length, errors, stalls, stallTotal,
+    chunkSizes: Object.fromEntries([...chunkSizes.entries()].sort((a, b) => a[0] - b[0])),
+    userAgent: navigator.userAgent, log: lines,
+  };
+  await fetch(`/soak-result?name=${cfg.name}.bin`, { method: "POST", body: bytes });
+  await fetch(`/soak-result?name=${cfg.name}.meta.json`, { method: "POST", body: JSON.stringify(meta, null, 1) });
+  log(`posted ${total} B in ${chunks.length} reads; errors ${errors.length}`);
+  document.title = "soak done";
+}
+
+main().catch(async (e) => {
+  log(`FAILED ${e?.name}: ${e?.message}`);
+  await fetch(`/soak-result?name=${cfg.name}.failed.txt`, { method: "POST", body: lines.join("\n") }).catch(() => {});
+  document.title = "soak failed";
+});
+</script>
+</body>
+</html>
