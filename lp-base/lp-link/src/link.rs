@@ -122,7 +122,8 @@ impl<A: Arq> Link<A> {
             datagrams: VecDeque::new(),
             dgram_tx_seq: 0,
             dgram_rx_next: None,
-            deframer: Deframer::new(max_frame),
+            deframer: Deframer::new(max_frame)
+                .with_text_mark(cfg.escape_ff && cfg.framing == Framing::Stream),
             rx_raw: Vec::new(),
             raw: Vec::new(),
             out: Vec::new(),
@@ -220,6 +221,7 @@ impl<A: Arq> Link<A> {
                 Deframed::Nothing => {}
                 Deframed::Text => self.flush_text(),
                 Deframed::Overflow => self.counters.oversize_frames += 1,
+                Deframed::Abandoned => self.counters.stale_partials += 1,
                 Deframed::Frame => {
                     let mut raw = mem::take(&mut self.rx_raw);
                     raw.clear();

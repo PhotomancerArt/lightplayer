@@ -88,6 +88,8 @@ pub struct PortPipe<'a> {
     next_stall: u64,
     buf: Vec<u8>,
     configuration: String,
+    /// Every byte read, as read (`--raw-capture`).
+    capture: Option<std::fs::File>,
 }
 
 impl<'a> PortPipe<'a> {
@@ -99,7 +101,16 @@ impl<'a> PortPipe<'a> {
             next_stall: stall.every_ms,
             buf: vec![0u8; 16 * 1024],
             configuration,
+            capture: None,
         }
+    }
+
+    /// Append every byte read to `path`.
+    pub fn capture_to(&mut self, path: &Path) -> Result<()> {
+        self.capture = Some(
+            std::fs::File::create(path).with_context(|| format!("creating {}", path.display()))?,
+        );
+        Ok(())
     }
 
     fn now(&self) -> Micros {
@@ -116,6 +127,10 @@ impl LabPipe for PortPipe<'_> {
         let n = self.port.read(&mut self.buf).context("reading the link")?;
         let t = self.now();
         if n > 0 {
+            if let Some(f) = self.capture.as_mut() {
+                use std::io::Write as _;
+                f.write_all(&self.buf[..n]).context("writing the capture")?;
+            }
             link.on_bytes(t, &self.buf[..n]);
         }
         Ok(t)

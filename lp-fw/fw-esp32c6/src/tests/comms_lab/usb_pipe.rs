@@ -47,7 +47,7 @@ pub async fn usb_link_task(usb: esp_hal::peripherals::USB_DEVICE<'static>, nonce
                     break;
                 }
                 Err(_) => {
-                    edge.write_timeouts += 1;
+                    edge.note_write_timeout(LabInEndpoint::in_ep_free());
                     log::warn!(
                         "usb: a frame write timed out ({} so far) at uptime {} ms; in_ep_free={}",
                         edge.write_timeouts,

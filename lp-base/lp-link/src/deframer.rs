@@ -13,6 +13,14 @@
 //! - A frame longer than the maximum is discarded up to the next `0x00`.
 //! - A partial frame that goes quiet for the idle time is flushed: as text if
 //!   it is all printable (it was text after all), else dropped and counted.
+//!
+//! **The text mark** (COBS-FF framing only): `0xFF` never occurs inside a
+//! COBS-FF frame, so a raw `0xFF` means "text follows": whatever frame was in
+//! progress is abandoned and the deframer is outside a frame again. A panic
+//! handler writes `0xFF` before its message, so the message arrives as text
+//! however fast the rebooted board's first frame follows it (silicon, M3: the
+//! ROM banner and the app's first frame come within milliseconds, too soon
+//! for the idle flush, and a text run that long overflows the frame buffer).
 
 use alloc::vec::Vec;
 use core::mem;
@@ -33,7 +41,12 @@ pub enum Deframed {
     Text,
     /// An over-long frame was discarded.
     Overflow,
+    /// A text mark cut short the frame in progress.
+    Abandoned,
 }
+
+/// The raw byte that starts text (COBS-FF framing; module docs).
+pub const TEXT_MARK: u8 = 0xFF;
 
 /// What an idle flush did.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -51,6 +64,7 @@ pub struct Deframer {
     discarding: bool,
     max_frame: usize,
     last_byte_at: Micros,
+    text_mark: bool,
 }
 
 impl Deframer {
@@ -63,11 +77,29 @@ impl Deframer {
             discarding: false,
             max_frame,
             last_byte_at: 0,
+            text_mark: false,
         }
+    }
+
+    /// Honour [`TEXT_MARK`] (only where frames can never hold `0xFF`).
+    pub fn with_text_mark(mut self, on: bool) -> Self {
+        self.text_mark = on;
+        self
     }
 
     pub fn push(&mut self, now: Micros, b: u8) -> Deframed {
         self.last_byte_at = now;
+        if self.text_mark && b == TEXT_MARK {
+            let abandoned = self.in_frame && (!self.buf.is_empty() || self.discarding);
+            self.in_frame = false;
+            self.discarding = false;
+            self.buf.clear();
+            return if abandoned {
+                Deframed::Abandoned
+            } else {
+                Deframed::Nothing
+            };
+        }
         if b == 0 {
             if !self.in_frame {
                 self.in_frame = true;
@@ -212,6 +244,27 @@ mod tests {
             d.push(0, 7);
         }
         assert_eq!(d.push(0, 0), Deframed::Overflow);
+    }
+
+    #[test]
+    fn a_text_mark_abandons_the_frame_and_the_text_arrives() {
+        let mut d = Deframer::new(64).with_text_mark(true);
+        // A frame cut off mid-way by a panic: 0xFF, the message, then the
+        // rebooted board's first frame straight after.
+        let r = feed(&mut d, b"\x00\x05ab\xFFpanicked\nROM\n\x00\x02\x01\x00");
+        assert_eq!(
+            r,
+            [
+                Deframed::Abandoned,
+                Deframed::Text,
+                Deframed::Text,
+                Deframed::Frame
+            ]
+        );
+        // Without the mark honoured, the same bytes are one bad frame.
+        let mut plain = Deframer::new(64);
+        let r = feed(&mut plain, b"\x00\x05ab\xFFpanicked\n\x00");
+        assert_eq!(r, [Deframed::Frame]);
     }
 
     #[test]

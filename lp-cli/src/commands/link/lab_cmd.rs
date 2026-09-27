@@ -70,11 +70,11 @@ pub fn lab(args: &LabArgs) -> Result<()> {
             String::new()
         };
         let port = port_holder.insert(LabPort::open(&args.target, args.termios)?);
-        Box::new(PortPipe::new(
-            port,
-            stall,
-            format!("{label}, reader: {reader}{stalls}"),
-        ))
+        let mut p = PortPipe::new(port, stall, format!("{label}, reader: {reader}{stalls}"));
+        if let Some(path) = &args.raw_capture {
+            p.capture_to(path)?;
+        }
+        Box::new(p)
     };
     if args.panic_test {
         let p = panic_probe(pipe.as_mut(), host_config(args))?;

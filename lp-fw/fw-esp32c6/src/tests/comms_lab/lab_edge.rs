@@ -27,8 +27,15 @@ pub struct LabEdge {
     pub link_us: u64,
     /// Time inside the lab's own work (soak verify / echo / stream encode).
     pub app_us: u64,
-    /// Pipe writes that timed out (USB: no host draining).
+    /// Pipe writes that timed out (USB: no host draining, or a lost wake).
     pub write_timeouts: u32,
+    /// Of those, the ones while the link was up and hearing its peer: a host
+    /// WAS draining, so the write should not have timed out.
+    pub write_timeouts_live: u32,
+    /// Of the live ones, those that ended with the send buffer free: the
+    /// host took the packet and the write future never woke (the esp-hal
+    /// interrupt-handler defect, docs/defects/2026-09-26-esp-hals-usb-isr-…).
+    pub lost_wakes: u32,
     /// Pipe writes that failed outright (BLE: notify refused).
     pub write_errors: u32,
     /// Peaks since boot: payload bytes the link held (queued, unacknowledged,
@@ -51,6 +58,8 @@ impl LabEdge {
             link_us: 0,
             app_us: 0,
             write_timeouts: 0,
+            write_timeouts_live: 0,
+            lost_wakes: 0,
             write_errors: 0,
             peak_buffered: 0,
             peak_window: 0,
@@ -97,6 +106,19 @@ impl LabEdge {
         self.link_us += now_us() - t2;
         self.peak_buffered = self.peak_buffered.max(self.link.buffered_bytes());
         self.peak_window = self.peak_window.max(self.link.window_bytes());
+    }
+
+    /// A pipe write timed out; `buffer_free`: the pipe's send buffer was
+    /// empty when it did.
+    pub fn note_write_timeout(&mut self, buffer_free: bool) {
+        self.write_timeouts += 1;
+        let now = now_us();
+        if self.link.state() == lp_link::LinkState::Established && !self.link.is_stalled(now) {
+            self.write_timeouts_live += 1;
+            if buffer_free {
+                self.lost_wakes += 1;
+            }
+        }
     }
 
     /// The link's next frame, timed as link work. The slice borrows the
@@ -160,13 +182,16 @@ impl LabEdge {
     /// The edge's own facts for a `stats` reply.
     fn extra(&self) -> String {
         format!(
-            "edge.link_us={} edge.app_us={} edge.write_timeouts={} edge.write_errors={} \
+            "edge.link_us={} edge.app_us={} edge.write_timeouts={} edge.write_timeouts_live={} \
+             edge.lost_wakes={} edge.write_errors={} \
              edge.uptime_ms={} edge.heap_free={} edge.heap_used={} edge.heap_max={} \
              edge.peak_link_buffered={} edge.peak_link_window={} edge.link_scratch={} \
              edge.log_ring_dropped={}",
             self.link_us,
             self.app_us,
             self.write_timeouts,
+            self.write_timeouts_live,
+            self.lost_wakes,
             self.write_errors,
             Instant::now().as_millis(),
             esp_alloc::HEAP.free(),

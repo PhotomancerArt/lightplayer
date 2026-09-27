@@ -151,6 +151,10 @@ pub struct LabArgs {
     #[arg(long)]
     pub json: Option<PathBuf>,
 
+    /// A serial device or socket only: every byte read, as read, to this file.
+    #[arg(long)]
+    pub raw_capture: Option<PathBuf>,
+
     /// Configuration label for a port run (e.g. `silicon:esp32c6 10:bd:a3:b0:8e:30`).
     #[arg(long, default_value = "")]
     pub label: String,
