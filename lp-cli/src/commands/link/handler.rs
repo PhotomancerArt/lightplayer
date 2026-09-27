@@ -77,12 +77,40 @@ impl Port {
         }
     }
 
-    fn write_all(&mut self, bytes: &[u8]) -> std::io::Result<()> {
-        match self {
-            #[cfg(unix)]
-            Port::Serial(p) => p.write_all(bytes),
-            Port::Tcp(s) => s.write_all(bytes),
+    /// Write everything, riding out the short read timeout the port is
+    /// opened with (a board busy writing takes its host bytes late); gives up
+    /// after five seconds without progress.
+    fn write_all(&mut self, mut bytes: &[u8]) -> std::io::Result<()> {
+        let mut stalled_since = Instant::now();
+        while !bytes.is_empty() {
+            let r = match self {
+                #[cfg(unix)]
+                Port::Serial(p) => p.write(bytes),
+                Port::Tcp(s) => s.write(bytes),
+            };
+            match r {
+                Ok(n) if n > 0 => {
+                    bytes = &bytes[n..];
+                    stalled_since = Instant::now();
+                }
+                Ok(_) => {}
+                Err(e)
+                    if matches!(
+                        e.kind(),
+                        std::io::ErrorKind::TimedOut
+                            | std::io::ErrorKind::WouldBlock
+                            | std::io::ErrorKind::Interrupted
+                    ) => {}
+                Err(e) => return Err(e),
+            }
+            if stalled_since.elapsed() > Duration::from_secs(5) {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::TimedOut,
+                    "the board took no host bytes for 5 s",
+                ));
+            }
         }
+        Ok(())
     }
 }
 
@@ -106,6 +134,19 @@ fn soak(args: &SoakArgs) -> Result<()> {
         msg: lpc_wire::message::client::ClientRequest::Hello,
     })?;
     port.write_all(hello.as_bytes())?;
+    if !packed {
+        // A board keeps a link's packed agreement until the link resets, so a
+        // JSON soak right after a packed one must ask for JSON outright.
+        let json_please =
+            lpc_wire::json::to_serial_line(&lpc_wire::message::client::ClientMessage {
+                id: 2,
+                msg: lpc_wire::message::client::ClientRequest::SetEncoding {
+                    encoding: lpc_wire::WireEncoding::Json,
+                    format: lpc_wire::PACK_FORMAT_VERSION,
+                },
+            })?;
+        port.write_all(json_please.as_bytes())?;
+    }
 
     // The encoding settles first (the hello's answer, then the opt-in), with
     // no soak running; then the soak runs for --seconds; then it stops and

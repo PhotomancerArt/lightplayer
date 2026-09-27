@@ -163,7 +163,10 @@ def main():
     pump(start + 0.7)
     if a.encoding == "packed":
         write('M!{"id":9007199254740991,"msg":{"setEncoding":{"encoding":"packed","format":2}}}\n')
-        pump(time.monotonic() + 0.5)
+    else:
+        # the board keeps a packed agreement until the link resets
+        write('M!{"id":2,"msg":{"setEncoding":{"encoding":"json","format":2}}}\n')
+    pump(time.monotonic() + 0.5)
     write(f"\nSOAK! on=1 min={a.min} max={a.max} rate=0 logs=0 seed=1 budget=20 count=0\n")
     t0 = time.monotonic()
     end = t0 + a.seconds

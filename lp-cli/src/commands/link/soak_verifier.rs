@@ -348,14 +348,18 @@ impl SoakTally {
         })
     }
 
-    /// Nothing was lost, torn, damaged or short.
+    /// No soak frame was lost or damaged and the byte ledger balances.
+    ///
+    /// Torn packed frames are not in it on their own: the reader may open
+    /// the port partway through a frame the board was already writing, and
+    /// that first fragment reads as torn. A torn soak frame shows up as a
+    /// missing seq and a ledger deficit, which are.
     pub fn clean(&self) -> bool {
         self.soak_damaged == 0
             && self.soak_missing == 0
-            && self.torn_packed == 0
             && self.torn_json == 0
             && self.desynced == 0
-            && self.ledger_short_intervals == 0
+            && self.ledger_deficit == 0
     }
 }
 
