@@ -314,16 +314,18 @@ fn esp32_memory_stats() -> Option<(u32, u32)> {
     // Structural — see this function's doc comment. No OOM retry allocator on
     // this chip, so the honest count of retries that saved an allocation is 0.
     let retry_saves = 0u32;
-    esp_println::println!(
-        "[MEM] free={free} used={used} largest_free={largest} retry_saves={retry_saves}"
-    );
+    // Through `log`, not `esp_println`: since wire proto 30 the USB port is
+    // an lp-link, and raw text written while the link task has a frame in
+    // the endpoint tears the frame and is lost with it. The log ring rides
+    // the link's log channel.
+    log::info!("[MEM] free={free} used={used} largest_free={largest} retry_saves={retry_saves}");
     // Structural — see this function's doc comment. The S3 JITs into the heap,
     // not into a reserved code region, so there is no arena to report and the
     // residency these fields would carry is already in `used` above. Printed
     // anyway, and unconditionally, because the triple is the unit the replay
     // comparator reads: a chip that prints two lines where another prints
     // three is a diff in the transcript, not a gap in the data.
-    esp_println::println!(
+    log::info!(
         "[JIT] used=0 peak=0 cap=0 spans=0 peak_spans=0 allocs=0 frees=0 fails=0 largest_free=0"
     );
     Some((
