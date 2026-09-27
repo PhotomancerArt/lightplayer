@@ -48,9 +48,13 @@ with #6097 (`wr_done` in the async flush, which #6104's flush builds on),
 into `third_party/esp-hal`; README-LP.md records it as the fork's third diff,
 dropped on upgrade to ≥ 1.2.0. This entry closes when that PR merges.
 
-**Regression coverage.** None yet. `lp-cli/tests/emu_link_lab.rs` reports
-the board's `edge.write_timeouts`; an assertion of 0 there, with the fix,
-would pin it.
+**Regression coverage.** `lp-cli/tests/emu_link_lab.rs` (`just
+link-lab-emu`, `#[ignore]`d, not in CI) asserts the board's
+`edge.lost_wakes` is 0 in every mix. Against the stock 1.1.1 image it fails
+(3 lost wakes in the 16.7 s clean mix, 3 in the stall run); with the
+back-port it passes. A longer soak, `lp-cli link lab emu:<ELF>
+--echo-secs 300 --stream-secs 30 --seed 2` on `lp-emu:esp32c6:t1@7857245078`:
+stock 30 lost wakes in 330.7 s emulated (5.4/min), back-port 0 in 330.5 s.
 
 **Lesson.** A handler that services two sources off one status read must
 clear exactly what it read. The IN-endpoint gate fixed the *stale* raw bit
