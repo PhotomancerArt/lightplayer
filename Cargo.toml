@@ -294,6 +294,10 @@ opt-level = 2
 
 [profile.dev.package.lp-emu-core]
 opt-level = 3
+# lp-link's simulator runs thousands of seeded fault schedules in the default
+# test run (overflow checks stay on): 27 s at opt-level 0, a few at 2.
+[profile.dev.package.lp-link]
+opt-level = 2
 [profile.dev.package.lp-riscv-emu]
 opt-level = 3
 [profile.dev.package.lp-emu-abi]

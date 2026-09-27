@@ -9,7 +9,7 @@
 //! delay spikes), up to three board reboots, and a seed for the simulator.
 //! `sim::checker` states the property precisely.
 //!
-//! Case count: 128 per variant by default (CI, ~8 s in debug). For a soak, set
+//! Case count: 500 per variant by default (CI, ~6 s). For a soak, set
 //! `PROPTEST_CASES`, e.g. `just link-soak` runs 5,000 per variant in release.
 
 use lp_link::sim::{Faults, Scenario, Transport, Workload, run};
@@ -109,7 +109,7 @@ fn config() -> ProptestConfig {
     let cases = std::env::var("PROPTEST_CASES")
         .ok()
         .and_then(|v| v.parse().ok())
-        .unwrap_or(128);
+        .unwrap_or(500);
     ProptestConfig {
         cases,
         failure_persistence: None,
