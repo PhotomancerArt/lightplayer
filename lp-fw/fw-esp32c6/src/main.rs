@@ -421,6 +421,9 @@ fn boot_firmware(spawner: embassy_executor::Spawner) -> FirmwareApp {
     // are driven. Keyed on the manifest in effect, compiled-in fallback
     // included; any other board id is left alone.
     let quirks_applied = apply_board_quirks(hardware_manifest.board_id());
+    // As early as the board is known: steady on (`Booting`) until the server loop
+    // starts. A board with no status LED gets nothing.
+    board::esp32c6::status_led::start(spawner, hardware_manifest.board_id());
     let hardware_registry = Rc::new(HwRegistry::new(hardware_manifest));
     let mut hardware_system = HardwareSystem::new(Rc::clone(&hardware_registry));
     // How many outputs appear is decided in one place: the board manifest's
@@ -785,6 +788,7 @@ async fn main(spawner: embassy_executor::Spawner) {
     #[cfg(not(fw_harness))]
     {
         let app = boot_firmware(spawner);
+        board::esp32c6::status_led::show(lpc_hardware::StatusLedState::Running);
         // Keep the marker substring "fw-esp32c6 initialized, starting server
         // loop" intact: two readiness classifiers grep for it
         // (lpa-studio-core browser_serial_readiness, lp-cli fwcheck). The
