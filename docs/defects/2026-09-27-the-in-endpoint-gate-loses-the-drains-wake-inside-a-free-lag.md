@@ -53,7 +53,12 @@ silicon record (0 of 1,327 packed frames lost, 2026-09-25) before it lands.
 
 **Regression coverage.** `emu_usb_free_lag.rs` pins today's behaviour under
 the lag: the gated image writes nothing into the lag, and its writes time
-out. When the fix lands that assertion flips to "every reply answered, no
+out. A write that times out after its first packet leaves half a frame on
+the host; since the host waits `frame_abandon` (3 s, e726f7083) for the rest
+instead of the 50 ms text idle, that half frame is closed by the next frame
+and counted `damaged` (9 of 9 timeouts at `lp-emu:esp32c6:t1`) where it used
+to be dropped as a stale partial, so the test holds damaged to at most the
+board's own count of abandoned writes. When the fix lands that assertion flips to "every reply answered, no
 write timeout" — the test says so where it asserts.
 
 **Lesson.** Moving the writer onto a different task moved WHEN the gate's
