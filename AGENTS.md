@@ -621,13 +621,9 @@ Two more dev-only flags tune the device wire for a measurement (read once at
 page load by `lpa-studio-web/src/dev_url_flags.rs`; no UI, no persistence):
 `?lens-pause-ms=N` sets the editor lens's pause between device reads
 (`DEVICE_REFRESH_INTERVAL`, 150 ms; clamped to 0–1000 ms; nothing else moves),
-and `?wire=json` / `?wire=packed` override whether the page asks boards to
-pack their replies, so JSON and JSON Pack can be compared on one build.
-**By default Studio asks for JSON on real Web Serial on macOS** (a stopgap until
-the device link moves onto `lp-link`: macOS Web Serial drops bytes of packed
-replies — `docs/defects/2026-09-26-web-serial-on-macos-drops-bytes-of-packed-frames.md`,
-`lpa-studio-web/src/wire_encoding_default.rs`); everywhere else — other OSes,
-`?emu=` pages — it asks every board
+and `?wire=json` stops the page asking boards to pack their replies, so JSON
+and JSON Pack can be compared on one build (`?wire=packed` is the default,
+spelled out). Studio otherwise asks every board
 whose hello offers this build's pack format; what the board answered is one
 `WireNote` line in the device's journal (`wire: replies packed …` or `wire:
 replies stay JSON — <why>`), and a packed link whose learned table lost step

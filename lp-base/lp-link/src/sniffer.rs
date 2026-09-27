@@ -146,7 +146,7 @@ impl LinkSniffer {
     pub fn new(crc: CrcKind, escape_ff: bool) -> Self {
         let max_frame = cobs::max_encoded_no_ff_len(HEADER_LEN + MAX_PAYLOAD + crc.len());
         let stream = || DirStream {
-            deframer: Deframer::new(max_frame).with_text_mark(escape_ff),
+            deframer: Deframer::new(max_frame, false).with_text_mark(escape_ff),
             raw: Vec::new(),
             reassembly: Reassembly::default(),
         };

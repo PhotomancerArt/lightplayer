@@ -36,6 +36,7 @@ use std::rc::Rc;
 use lpa_devices::view::{Escape, RosterView};
 use lpa_link::device_link::fake::{fake_device_link, fake_link_info};
 use lpa_link::device_link::wire::roster_config;
+use lpa_link::device_link::wire_reader::WireRead;
 use lpa_link::providers::fake_device::{
     FakeBootState, FakeDeviceIdentity, FakeDeviceScript, FakeEsp32Device, FakeLightPlayerState,
 };
@@ -472,25 +473,25 @@ impl FakeDeviceIo {
         };
         for read in reads {
             match read {
-                lpc_wire::PortRead::Message(payload) => {
+                WireRead::Frame(frame) => {
                     if let Some(tap) = &self.tap {
-                        tap(LensTapEvent::Line(format!("M!{}", payload.json)));
+                        tap(LensTapEvent::Line(frame.to_line()));
                     }
-                    if let Ok(message) = payload.message {
+                    if let Ok(message) = frame.message {
                         self.pending.push_back(message);
                     }
                 }
-                lpc_wire::PortRead::Log(line) => {
+                WireRead::Line(line) => {
                     if let Some(tap) = &self.tap {
                         tap(LensTapEvent::Line(line));
                     }
                 }
-                lpc_wire::PortRead::Reset { reason } => {
-                    self.reset = Some(lpa_link::device_link::port_read_map::link_reset_line(
-                        reason,
-                    ));
+                // The link reset under the conversation: what it waits for
+                // is lost (D9).
+                WireRead::LinkReset(note) | WireRead::Error(note) => {
+                    self.reset = Some(note);
                 }
-                lpc_wire::PortRead::Up { .. } | lpc_wire::PortRead::Note(_) => {}
+                WireRead::Note(_) => {}
             }
         }
     }

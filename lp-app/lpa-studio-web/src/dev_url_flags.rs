@@ -5,7 +5,7 @@
 //! | flag | what it does |
 //! |---|---|
 //! | `?lens-pause-ms=N` | the editor lens's pause between device reads (`DEVICE_REFRESH_INTERVAL`, 150 ms), clamped to 0–1000 ms — the JSON Pack cadence probe (plan `lp-json-pack`, D2) |
-//! | `?wire=json` / `?wire=packed` | whether this page asks boards to pack their replies, overriding the page's default ([`crate::wire_encoding_default`]: packed, except JSON on macOS Web Serial), so JSON and packed can be measured on one build |
+//! | `?wire=json` / `?wire=packed` | whether this page asks boards to pack their replies (the default is packed, everywhere), so JSON and packed can be measured on one build |
 //! | `?wire-capture=1` | tee every raw byte the Web Serial read pump hands to Rust into a 16 MiB in-memory buffer; `lpWireCapture()` in the console downloads it as `wire-capture-<unix-ms>.bin` (`lpa_link::device_link::wire_capture`) |
 //! | `?device-log=<level>` | once per link, after the board's hello and the packed-reply opt-in, ask it for `trace`/`debug`/`info`/`warn`/`error` logging (`SetLogLevel`) |
 //!
@@ -28,11 +28,8 @@ use lpc_wire::server::api::LogLevel;
 pub struct DevUrlFlags {
     /// `?lens-pause-ms=N`, unclamped (core clamps).
     pub lens_pause_ms: Option<u64>,
-    /// `?wire=json` / `?wire=packed`; `None` takes the page's default.
+    /// `?wire=json` / `?wire=packed`; `None` takes the default (packed).
     pub wire: Option<WireChoice>,
-    /// `?emu=` is present: `navigator.serial` is the emulator's shim, not
-    /// Chromium's.
-    pub emu: bool,
     /// `?wire-capture=1`.
     pub wire_capture: bool,
     /// `?device-log=<level>`.
@@ -65,7 +62,6 @@ impl DevUrlFlags {
                     "packed" => flags.wire = Some(WireChoice::Packed),
                     _ => flags.ignored.push(pair.to_string()),
                 },
-                "emu" if !value.trim().is_empty() => flags.emu = true,
                 "wire-capture" => match value.trim() {
                     "1" | "true" | "" => flags.wire_capture = true,
                     "0" | "false" => flags.wire_capture = false,
@@ -119,7 +115,17 @@ pub fn install() {
             pause.as_millis()
         );
     }
-    crate::wire_encoding_default::install(flags.wire, flags.emu);
+    match flags.wire {
+        Some(WireChoice::Json) => {
+            lpa_link::device_link::wire_reader::set_packed_replies_wanted(false);
+            log::info!("dev flag: this page does not ask boards for packed replies (?wire=json)");
+        }
+        // The default, spelled out: accepted, changes nothing.
+        Some(WireChoice::Packed) => {
+            lpa_link::device_link::wire_reader::set_packed_replies_wanted(true);
+        }
+        None => {}
+    }
     if flags.wire_capture {
         install_wire_capture();
     }
@@ -175,12 +181,10 @@ mod tests {
         let flags = DevUrlFlags::parse("?emu=tab&lens-pause-ms=75&wire=json&on=emu");
         assert_eq!(flags.lens_pause_ms, Some(75));
         assert_eq!(flags.wire, Some(WireChoice::Json));
-        assert!(flags.emu);
         assert!(flags.ignored.is_empty());
 
         let flags = DevUrlFlags::parse("wire=packed");
         assert_eq!(flags.wire, Some(WireChoice::Packed));
-        assert!(!flags.emu);
     }
 
     #[test]
@@ -200,8 +204,7 @@ mod tests {
     fn no_flags_is_the_shipped_page() {
         assert_eq!(DevUrlFlags::parse(""), DevUrlFlags::default());
         assert_eq!(DevUrlFlags::parse("?on=mac:aa"), DevUrlFlags::default());
-        // An empty `?emu=` names no backing, so the page is not emulated.
-        assert!(!DevUrlFlags::parse("?emu=").emu);
+        assert_eq!(DevUrlFlags::parse("?emu=tab"), DevUrlFlags::default());
     }
 
     #[test]

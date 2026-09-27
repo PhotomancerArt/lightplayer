@@ -1,11 +1,12 @@
 //! Targeted scenarios: each names one behaviour of the link and checks it
 //! directly (the broad sweep is `delivery_properties`).
 
+use lp_link::frame::{self, FrameKind, Header};
 use lp_link::sim::pipe::Faults;
 use lp_link::sim::{Report, Scenario, Transport, Workload, run};
 use lp_link::{
-    Arq, CH_PROTO, GoBackN, Link, LinkConfig, LinkEvent, LinkState, NoArq, ResetReason,
-    SelectiveRepeat, StopAndWait,
+    Arq, CH_CONTROL, CH_LOG, CH_PROTO, GoBackN, Link, LinkConfig, LinkEvent, LinkState,
+    MAX_MESSAGE, NoArq, ResetReason, SelectiveRepeat, SendError, StopAndWait,
 };
 
 type Gbn = GoBackN<127>;
@@ -224,6 +225,212 @@ fn crc16_lets_some_damage_through_where_crc32c_does_not() {
     // CRC-16 misses about 1 in 65,536 damaged frames: this run damages tens
     // of thousands, so zero is possible; the bench reports the rate.
     let _ = missed[0];
+}
+
+/// Per-channel scheduling: a control message queued behind a 16 KiB proto
+/// reply goes out at the next frame boundary, not after the reply.
+#[test]
+fn a_control_message_overtakes_a_big_proto_message() {
+    let (mut a, mut b) = pair::<SelectiveRepeat>(LinkConfig::usb());
+    let mut now = 0;
+    handshake(&mut a, &mut b, &mut now);
+    let _ = drain(&mut b);
+    a.send(CH_PROTO, &[1; 16 * 1024]).unwrap();
+    for _ in 0..3 {
+        let f = a.poll_transmit(now).unwrap().to_vec();
+        b.on_bytes(now, &f);
+    }
+    a.send(CH_CONTROL, &[2; 20]).unwrap();
+    // One frame at a time from `a`; `b` answers at once.
+    let mut frames = 0;
+    let mut delivered = vec![];
+    while delivered.len() < 2 {
+        now += 100;
+        assert!(frames < 200, "stuck: {delivered:?}");
+        if let Some(f) = a.poll_transmit(now) {
+            let f = f.to_vec();
+            frames += 1;
+            b.on_bytes(now, &f);
+        }
+        while let Some(f) = b.poll_transmit(now) {
+            let f = f.to_vec();
+            a.on_bytes(now, &f);
+        }
+        for ev in drain(&mut b) {
+            if let LinkEvent::Message { channel, data } = ev {
+                delivered.push((channel, data.len(), frames));
+            }
+        }
+    }
+    assert_eq!(delivered[0].0, CH_CONTROL, "{delivered:?}");
+    assert!(
+        delivered[0].2 <= 2,
+        "control went out after {} frames",
+        delivered[0].2
+    );
+    assert_eq!((delivered[1].0, delivered[1].1), (CH_PROTO, 16 * 1024));
+}
+
+/// Two channels mid-message at once, each nearly the budget: the window must
+/// stay open for both to finish (found by `decoder_fuzz`: counting partial
+/// messages against the window closed it with neither able to complete).
+#[test]
+fn two_big_messages_on_two_channels_both_arrive() {
+    let (mut a, mut b) = pair::<SelectiveRepeat>(LinkConfig::usb());
+    let mut now = 0;
+    handshake(&mut a, &mut b, &mut now);
+    let _ = drain(&mut b);
+    a.send(CH_PROTO, &[1; 12 * 1024]).unwrap();
+    // Most of the proto message arrives before the control one is queued.
+    let mut frames = 0;
+    while frames < 40 {
+        now += 100;
+        if let Some(f) = a.poll_transmit(now) {
+            let f = f.to_vec();
+            b.on_bytes(now, &f);
+            frames += 1;
+        }
+        while let Some(f) = b.poll_transmit(now) {
+            let f = f.to_vec();
+            a.on_bytes(now, &f);
+        }
+    }
+    a.send(CH_CONTROL, &[2; MAX_MESSAGE - 500]).unwrap();
+    let mut got = vec![];
+    for _ in 0..500 {
+        now += 1_000;
+        shuttle(&mut a, &mut b, now);
+        for ev in drain(&mut b) {
+            if let LinkEvent::Message { channel, data } = ev {
+                got.push((channel, data.len()));
+            }
+        }
+    }
+    assert_eq!(
+        got,
+        vec![(CH_CONTROL, MAX_MESSAGE - 500), (CH_PROTO, 12 * 1024)]
+    );
+    assert!(a.is_idle());
+}
+
+/// Fair share for logs: with a proto stream that always has a frame ready and
+/// log lines always waiting, no more than `datagram_every` data frames go in
+/// a row, and every log line arrives.
+#[test]
+fn logs_keep_flowing_beside_a_busy_proto_stream() {
+    let cfg = LinkConfig::usb();
+    let every = cfg.datagram_every as usize;
+    let (mut a, mut b) = pair::<SelectiveRepeat>(cfg);
+    let mut now = 0;
+    handshake(&mut a, &mut b, &mut now);
+    let _ = drain(&mut b);
+    let (mut logs_sent, mut logs_rx, mut proto_rx) = (0, 0, 0);
+    let (mut run, mut longest_run, mut datagrams) = (0, 0, 0);
+    let mut raw = vec![];
+    for ms in 0..500 {
+        now += 1_000;
+        while a.send(CH_PROTO, &[3; 4096]).is_ok() {}
+        for _ in 0..2 {
+            if a.send(CH_LOG, b"a log line").is_ok() {
+                logs_sent += 1;
+            }
+        }
+        // The pipe takes eight frames a millisecond from `a`.
+        for _ in 0..8 {
+            let Some(f) = a.poll_transmit(now) else { break };
+            let f = f.to_vec();
+            raw.clear();
+            frame::unwrap_stream(&f[1..f.len() - 1], &mut raw).unwrap();
+            match Header::parse(&raw).unwrap().kind {
+                FrameKind::Data => run += 1,
+                FrameKind::Datagram => {
+                    datagrams += 1;
+                    run = 0;
+                }
+                FrameKind::Ack | FrameKind::Syn => {}
+            }
+            if ms > 0 {
+                longest_run = longest_run.max(run);
+            }
+            b.on_bytes(now, &f);
+        }
+        while let Some(f) = b.poll_transmit(now) {
+            let f = f.to_vec();
+            a.on_bytes(now, &f);
+        }
+        for ev in drain(&mut b) {
+            match ev {
+                LinkEvent::Message {
+                    channel: CH_LOG, ..
+                } => logs_rx += 1,
+                LinkEvent::Message { data, .. } => proto_rx += data.len(),
+                _ => {}
+            }
+        }
+    }
+    assert!(longest_run <= every, "{longest_run} data frames in a row");
+    assert!(
+        datagrams >= 500 * 8 / (every + 1) - 8,
+        "{datagrams} datagrams"
+    );
+    assert!(
+        logs_rx + 32 >= logs_sent,
+        "{logs_rx} of {logs_sent} logs arrived"
+    );
+    assert!(
+        proto_rx > 500 * 1024,
+        "the proto stream moved: {proto_rx} B"
+    );
+}
+
+/// The message budget: the wire's 16 KiB frame budget plus slack. Longer is
+/// refused at `send`.
+#[test]
+fn a_message_past_the_budget_is_too_big_to_send() {
+    let (mut a, mut b) = pair::<SelectiveRepeat>(LinkConfig::usb());
+    let mut now = 0;
+    handshake(&mut a, &mut b, &mut now);
+    assert_eq!(MAX_MESSAGE, 17 * 1024);
+    assert_eq!(
+        a.send(CH_PROTO, &vec![0; MAX_MESSAGE + 1]),
+        Err(SendError::TooBig)
+    );
+    assert_eq!(a.send(CH_PROTO, &vec![0; MAX_MESSAGE]), Ok(()));
+}
+
+/// A peer with a bigger limit sends a message past ours: it is dropped and
+/// counted, its frames are still acknowledged (the sender is not stuck
+/// resending), and the session and the next message carry on.
+#[test]
+fn an_oversize_message_is_dropped_without_a_reset() {
+    let big = LinkConfig {
+        max_message: 40 * 1024,
+        send_budget: 48 * 1024,
+        ..LinkConfig::usb()
+    };
+    let mut a = Link::<SelectiveRepeat>::new(big, 0x1111_2222);
+    let mut b = Link::<SelectiveRepeat>::new(LinkConfig::usb(), 0x3333_4444);
+    let mut now = 0;
+    handshake(&mut a, &mut b, &mut now);
+    let _ = drain(&mut b);
+    a.send(CH_PROTO, &[5; 30 * 1024]).unwrap();
+    a.send(CH_PROTO, b"after").unwrap();
+    let mut got = vec![];
+    for _ in 0..200 {
+        now += 1_000;
+        shuttle(&mut a, &mut b, now);
+        got.extend(drain(&mut b));
+    }
+    assert_eq!(
+        got,
+        vec![LinkEvent::Message {
+            channel: CH_PROTO,
+            data: b"after".to_vec()
+        }]
+    );
+    assert_eq!(b.counters().oversize_messages, 1);
+    assert_eq!(a.counters().resets + b.counters().resets, 0);
+    assert!(a.is_idle(), "everything was acknowledged");
 }
 
 fn interactive() -> Workload {

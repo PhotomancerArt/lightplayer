@@ -3,8 +3,11 @@
 //! cumulative ACK, as L2CAP ERTM's SREJ and TCP's SACK do. The sender resends
 //! only the holes: early, when a frame sent *after* a hole has been
 //! acknowledged (the RACK idea), or when its timer fires.
+//!
+//! The reorder buffer is fixed RAM: one `max_payload` slot per window
+//! position, allocated in [`Arq::new`].
 
-use alloc::collections::VecDeque;
+use alloc::vec;
 use alloc::vec::Vec;
 
 use crate::Micros;
@@ -13,36 +16,52 @@ use crate::inbox::{Fragment, Inbox, ProtocolError};
 use crate::seq_num::{seq_dist, seq_is_behind};
 use crate::tx_queue::TxQueue;
 
-/// A frame held past a gap.
+/// A frame held past a gap (its payload is in the reorder slot).
+#[derive(Clone, Copy)]
 struct Held {
     chan: u8,
     first: bool,
     fin: bool,
-    data: Vec<u8>,
+    len: u16,
 }
 
 pub struct SelectiveRepeat {
     expected: u8,
-    /// `slots[i]` holds `expected + i` (slot 0 is only ever filled while the
-    /// application has no room for it).
-    slots: VecDeque<Option<Held>>,
+    /// `held[(head + i) % window]` holds `expected + i` (position 0 is only
+    /// ever filled while the application has no room for it).
+    held: Vec<Option<Held>>,
+    /// One `max_payload` slot per window position.
+    slab: Vec<u8>,
+    slot_len: usize,
+    head: usize,
     held_bytes: usize,
 }
 
 impl SelectiveRepeat {
+    fn window(&self) -> usize {
+        self.held.len()
+    }
+
+    /// Where window position `i` (frame `expected + i`) lives.
+    fn phys(&self, i: usize) -> usize {
+        (self.head + i) % self.window()
+    }
+
     fn deliver_slot0(&mut self, inbox: &mut Inbox) -> Option<RxVerdict> {
-        let h = self.slots.front()?.as_ref()?;
-        if !inbox.has_room(h.data.len()) {
+        let p = self.phys(0);
+        let h = self.held[p]?;
+        if !inbox.has_room(h.chan, h.len as usize) {
             return Some(RxVerdict::NoRoom);
         }
+        let at = p * self.slot_len;
         let frag = Fragment {
             chan: h.chan,
             first: h.first,
             fin: h.fin,
-            data: &h.data,
+            data: &self.slab[at..at + h.len as usize],
         };
         let ok = inbox.push_fragment(frag).is_ok();
-        self.held_bytes -= h.data.len();
+        self.held_bytes -= h.len as usize;
         self.advance();
         Some(if ok {
             RxVerdict::InOrder
@@ -52,8 +71,9 @@ impl SelectiveRepeat {
     }
 
     fn advance(&mut self) {
-        self.slots.pop_front();
-        self.slots.push_back(None);
+        let p = self.phys(0);
+        self.held[p] = None;
+        self.head = (self.head + 1) % self.window();
         self.expected = self.expected.wrapping_add(1);
     }
 }
@@ -62,18 +82,27 @@ impl Arq for SelectiveRepeat {
     const NAME: &'static str = "selective-repeat";
     const MAX_WINDOW: u8 = 32;
 
-    fn new(rx_window: u8) -> Self {
+    fn new(rx_window: u8, max_payload: usize) -> Self {
         let n = rx_window.clamp(1, Self::MAX_WINDOW) as usize;
         SelectiveRepeat {
             expected: 0,
-            slots: (0..n).map(|_| None).collect(),
+            held: vec![None; n],
+            slab: vec![0; n * max_payload],
+            slot_len: max_payload,
+            head: 0,
             held_bytes: 0,
         }
     }
 
+    fn ram_bound(rx_window: u8, max_payload: usize) -> usize {
+        let n = rx_window.clamp(1, Self::MAX_WINDOW) as usize;
+        n * (max_payload + size_of::<Option<Held>>())
+    }
+
     fn reset(&mut self) {
         self.expected = 0;
-        self.slots.iter_mut().for_each(|s| *s = None);
+        self.held.iter_mut().for_each(|s| *s = None);
+        self.head = 0;
         self.held_bytes = 0;
     }
 
@@ -86,11 +115,12 @@ impl Arq for SelectiveRepeat {
             return RxVerdict::Duplicate;
         }
         let d = seq_dist(self.expected, seq) as usize;
-        if d >= self.slots.len() {
+        if d >= self.window() {
             return RxVerdict::OutOfWindow;
         }
-        if d == 0 && self.slots[0].is_none() {
-            if !inbox.has_room(frag.data.len()) {
+        let p = self.phys(d);
+        if d == 0 && self.held[p].is_none() {
+            if !inbox.has_room(frag.chan, frag.data.len()) {
                 return RxVerdict::NoRoom;
             }
             if inbox.push_fragment(frag).is_err() {
@@ -102,15 +132,21 @@ impl Arq for SelectiveRepeat {
                 Err(ProtocolError) => RxVerdict::Protocol,
             };
         }
-        if self.slots[d].is_some() {
+        if self.held[p].is_some() {
             return RxVerdict::Duplicate;
         }
+        // The link refuses a body past `max_payload` before it gets here.
+        let at = p * self.slot_len;
+        let Some(slot) = self.slab.get_mut(at..at + frag.data.len()) else {
+            return RxVerdict::OutOfWindow;
+        };
+        slot.copy_from_slice(frag.data);
         self.held_bytes += frag.data.len();
-        self.slots[d] = Some(Held {
+        self.held[p] = Some(Held {
             chan: frag.chan,
             first: frag.first,
             fin: frag.fin,
-            data: frag.data.to_vec(),
+            len: frag.data.len() as u16,
         });
         RxVerdict::Buffered
     }
@@ -128,8 +164,8 @@ impl Arq for SelectiveRepeat {
 
     fn sack(&self) -> u32 {
         let mut bits = 0u32;
-        for (i, s) in self.slots.iter().enumerate().skip(1).take(32) {
-            if s.is_some() {
+        for i in 1..self.window().min(33) {
+            if self.held[self.phys(i)].is_some() {
                 bits |= 1 << (i - 1);
             }
         }

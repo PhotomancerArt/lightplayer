@@ -94,8 +94,11 @@ class ScriptedBoard {
     this.rts = false;
     this.dtrEverHigh = false;
     this.controlLog = [];
-    // Host → device bytes, as they arrived on the byte channel.
+    // Host → device bytes, as they arrived on the byte channel: as text (for
+    // the assertions that read it) and as the bytes themselves (for the
+    // board-side lp-link double the link tests run in Rust).
     this.received = [];
+    this.receivedRaw = [];
     this.control = null;
     this.bytes = null;
     // What the board says the moment an application opens the port. The
@@ -287,9 +290,10 @@ class ScriptedSocket {
       return;
     }
     this.board.draining = true;
-    this.board.received.push(
-      typeof data === "string" ? data : new TextDecoder().decode(new Uint8Array(data)),
-    );
+    const bytes =
+      typeof data === "string" ? new TextEncoder().encode(data) : new Uint8Array(data).slice();
+    this.board.received.push(new TextDecoder().decode(bytes));
+    this.board.receivedRaw.push(bytes);
   }
 
   deliver(bytes) {
@@ -445,6 +449,23 @@ export function receivedBytes(boardId) {
   return (door?.board(boardId)?.received ?? []).join("");
 }
 
+/// What the host wrote at a board since the last take, as the bytes it wrote
+/// (lp-link frames are binary). Taking empties it; `receivedBytes` keeps its
+/// own text copy.
+export function takeReceivedRaw(boardId) {
+  const board = door?.board(boardId);
+  const chunks = board?.receivedRaw.splice(0) ?? [];
+  let total = 0;
+  for (const chunk of chunks) total += chunk.length;
+  const out = new Uint8Array(total);
+  let at = 0;
+  for (const chunk of chunks) {
+    out.set(chunk, at);
+    at += chunk.length;
+  }
+  return out;
+}
+
 export function rebootCount(boardId) {
   return door?.board(boardId)?.reboots ?? -1;
 }
@@ -458,7 +479,7 @@ export function deliverBytes(boardId, text) {
   board.bytes.deliver(new TextEncoder().encode(text));
 }
 
-/// Bytes exactly as given — a packed frame is binary (`0x00`, `0x0A`, bytes
+/// Bytes exactly as given — an lp-link frame is binary (`0x00`, `0x0A`, bytes
 /// that are not UTF-8), which `deliverBytes`' text cannot carry.
 export function deliverRawBytes(boardId, bytes) {
   const board = door?.board(boardId);
@@ -596,9 +617,9 @@ export async function getPortObject(id) {
   return (await load()).serial.getPort(id);
 }
 
-// `{ generation, bytes }` — the shipped pump hands over BYTES and the Rust
-// side splits them (`lpa_link::device_link::wire_reader`), so the suite does
-// exactly what production does with them.
+// `{ generation, open, bytes }` — the shipped pump hands over BYTES and the
+// Rust side's lp-link end reads them (`lpa_link::device_link::link_port_service`),
+// so the suite does exactly what production does with them.
 export async function takeBytes(id) {
   return (await load()).serial.takeBytes(id);
 }
@@ -607,8 +628,8 @@ export async function takeErrors(id) {
   return (await load()).serial.takeErrors(id);
 }
 
-export async function writeLine(id, line) {
-  return (await load()).serial.writeLine(id, line);
+export async function writeBytes(id, bytes) {
+  return (await load()).serial.writeBytes(id, bytes);
 }
 
 // --- DD9: does an own property shadow Chromium's prototype getter? ---------

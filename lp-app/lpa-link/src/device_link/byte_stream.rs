@@ -4,20 +4,22 @@
 //! This is the host-side half of M3's dependency inversion. The seam it wraps
 //! is the same one the real serial transport drives
 //! (`lpa_client::transport_serial::hardware`), so the fake device, a native
-//! port, the tab emulator and anything else that can be a byte pipe all
+//! port, an emulated board over a socket and anything else that can be a byte pipe all
 //! reach the model through one adapter.
 //!
 //! # The link underneath
 //!
 //! Since `WIRE_PROTO_VERSION` 30 a board's USB link is an lp-link (plan
 //! `lp2025/2026-09-27-0215-lp-link-usb-cutover`). Each open port gets one
-//! [`WireLinkPort`] (a fresh nonce per open) for as long as it is open: the
-//! model's requests go in as proto messages, the frames the link wants are
-//! written, and what the board said comes out mapped by
-//! [`port_read_link_event`]: wire messages as frames (or an app
-//! conversation's passthrough), console text as lines, the packed opt-in's
-//! outcome as a wire note, and a link reset as an error-class event (D9).
-//! Lost or damaged bytes never reach the model: the link resends them.
+//! [`LinkPortService`] (a `WireLinkPort`, a fresh nonce per open) for as
+//! long as it is open — the same per-port service the browser's ports use:
+//! the model's requests go in as proto messages, the frames the link wants
+//! are written, and what the board said comes out through
+//! `port_read_map` and [`demux_read`]: wire messages as frames (or an app
+//! conversation's passthrough), console text as lines, and the link's own
+//! story (up, stalled, the opt-in's outcome, a reset — which fails what was
+//! in flight, D9) as wire notes. Lost or damaged bytes never reach the
+//! model: the link resends them.
 //!
 //! # One link, two drainers
 //!
@@ -55,11 +57,13 @@ use std::collections::VecDeque;
 use std::sync::{Arc, Mutex, MutexGuard, Weak};
 
 use lpa_devices::link::{Link, LinkCommand, LinkEvent, LinkInfo, ResetKind};
-use lpc_wire::{ClientMessage, LinkCounters, PortRead, WireLinkPort};
+use lpc_wire::{ClientMessage, LinkCounters};
 
+use crate::device_link::demux::demux_read;
 use crate::device_link::link_nonce::fresh_link_nonce;
-use crate::device_link::port_read_map::port_read_link_event;
+use crate::device_link::link_port_service::LinkPortService;
 use crate::device_link::wire::client_message;
+use crate::device_link::wire_reader::WireRead;
 use crate::stream::{ByteStreamError, DeviceByteStream};
 
 /// Bytes read per `read_available` call.
@@ -113,14 +117,14 @@ enum Queued {
     /// outcome).
     Event(LinkEvent),
     /// Something the board said, mapped when the model takes it.
-    Read(PortRead),
+    Read(WireRead),
 }
 
 /// Everything behind the link, shared by the model's pump and a borrower.
 struct LinkCore<S: DeviceByteStream> {
     stream: S,
     /// The open port's link; `None` while closed.
-    port: Option<WireLinkPort>,
+    service: Option<LinkPortService>,
     /// Whether the port asks the board to pack its replies.
     want_packed: bool,
     clock: LinkClock,
@@ -137,7 +141,7 @@ impl<S: DeviceByteStream> ByteStreamLink<S> {
             info,
             core: Arc::new(Mutex::new(LinkCore {
                 stream,
-                port: None,
+                service: None,
                 want_packed: false,
                 clock: default_clock(),
                 queue: VecDeque::new(),
@@ -171,12 +175,12 @@ impl<S: DeviceByteStream> ByteStreamLink<S> {
 
     /// Whether the port is currently open for traffic.
     pub fn is_open(&self) -> bool {
-        self.core().port.is_some()
+        self.core().service.is_some()
     }
 
     /// The open port's link counters (resends, damaged frames, resets…).
     pub fn link_counters(&self) -> Option<LinkCounters> {
-        self.core().port.as_ref().map(WireLinkPort::counters)
+        self.core().service.as_ref().map(LinkPortService::counters)
     }
 
     /// The same link, for a conversation that borrows the wire.
@@ -211,10 +215,10 @@ impl<S: DeviceByteStream> ByteStreamPort<S> {
     }
 
     /// Service the link and take everything the board has said since the
-    /// last take: wire messages, console lines, notes, resets. The
-    /// transport's own events stay queued for the model. `Err` once the port
-    /// has closed (after the reads that came before it).
-    pub fn take_reads(&self) -> Result<Vec<PortRead>, String> {
+    /// last take: wire messages, console lines, link resets. The link's
+    /// notes and the transport's own events stay queued for the model. `Err`
+    /// once the port has closed (after the reads that came before it).
+    pub fn take_reads(&self) -> Result<Vec<WireRead>, String> {
         let mut core = lock(&self.core);
         core.pump();
         let mut reads = Vec::new();
@@ -224,7 +228,7 @@ impl<S: DeviceByteStream> ByteStreamPort<S> {
                 Queued::Event(event) => core.queue.push_back(Queued::Event(event)),
             }
         }
-        if reads.is_empty() && core.port.is_none() {
+        if reads.is_empty() && core.service.is_none() {
             return Err(core
                 .closed_because
                 .clone()
@@ -240,7 +244,11 @@ impl<S: DeviceByteStream> LinkCore<S> {
             Ok(()) => {
                 // A fresh port is a fresh link session (a new nonce), so the
                 // board starts its per-link state over too.
-                self.port = Some(WireLinkPort::new(fresh_link_nonce(), self.want_packed));
+                self.service = Some(LinkPortService::new(
+                    fresh_link_nonce(),
+                    self.want_packed,
+                    None,
+                ));
                 self.closed_because = None;
                 self.push_event(LinkEvent::Opened { info: info.clone() });
             }
@@ -256,7 +264,7 @@ impl<S: DeviceByteStream> LinkCore<S> {
     /// whole cancel grace before evicting. Bounded, but two seconds of
     /// pointless "cancelling…".
     fn close_port(&mut self, reason: &str) {
-        self.port = None;
+        self.service = None;
         self.closed_because = Some(reason.to_string());
         self.push_event(LinkEvent::Closed {
             reason: reason.to_string(),
@@ -265,11 +273,10 @@ impl<S: DeviceByteStream> LinkCore<S> {
 
     /// Queue one request (bare JSON) on the link and write what it produced.
     fn send_json(&mut self, json: &str) -> Result<(), String> {
-        let Some(port) = self.port.as_mut() else {
+        let Some(service) = self.service.as_mut() else {
             return Err("write on a link that is not open".to_string());
         };
-        port.send_client_json(json)
-            .map_err(|error| format!("the link refused a request ({error:?})"))?;
+        service.send_client_json(json)?;
         self.write_frames();
         Ok(())
     }
@@ -282,22 +289,29 @@ impl<S: DeviceByteStream> LinkCore<S> {
     /// `docs/defects/2026-09-08-serial-close-leaks-the-port-on-a-wedged-device.md`).
     fn write_frames(&mut self) {
         let now = (self.clock)();
-        let Some(port) = self.port.as_mut() else {
+        let Self {
+            stream, service, ..
+        } = self;
+        let Some(service) = service.as_mut() else {
             return;
         };
-        while let Some(frame) = port.poll_transmit(now) {
-            match self.stream.write_all(frame) {
-                Ok(()) => {}
-                Err(ByteStreamError::WriteStalled) => return,
-                Err(ByteStreamError::Closed) => {
-                    self.close_port("device disconnected");
-                    return;
-                }
-                Err(error) => {
-                    self.fail(&error);
-                    return;
-                }
+        // After the first frame the stream would not take, the rest of this
+        // pass is dropped too (the link resends them all).
+        let mut failed: Option<ByteStreamError> = None;
+        service.transmit(now, |frame| {
+            if failed.is_none()
+                && let Err(error) = stream.write_all(frame)
+            {
+                failed = Some(error);
             }
+        });
+        match failed {
+            None | Some(ByteStreamError::WriteStalled) => {}
+            Some(ByteStreamError::Closed) => {
+                self.drain_service();
+                self.close_port("device disconnected");
+            }
+            Some(error) => self.fail(&error),
         }
     }
 
@@ -357,20 +371,21 @@ impl<S: DeviceByteStream> LinkCore<S> {
     /// Service the link: write what it has, read whatever the wire has, and
     /// queue what the board said.
     fn pump(&mut self) {
-        if self.port.is_none() {
+        if self.service.is_none() {
             return;
         }
         self.write_frames();
         let mut buf = [0u8; READ_CHUNK];
         for _ in 0..READS_PER_PUMP {
-            let Some(port) = self.port.as_mut() else {
+            let now = (self.clock)();
+            let Some(service) = self.service.as_mut() else {
                 return;
             };
             match self.stream.read_available(&mut buf) {
                 Ok(0) => break,
-                Ok(read) => port.on_bytes((self.clock)(), &buf[..read]),
+                Ok(read) => service.on_bytes(now, &buf[..read]),
                 Err(ByteStreamError::Closed) => {
-                    self.drain_port();
+                    self.drain_service();
                     self.close_port("device disconnected");
                     return;
                 }
@@ -380,17 +395,27 @@ impl<S: DeviceByteStream> LinkCore<S> {
                 }
             }
         }
-        self.drain_port();
         // Acknowledgements (and the opt-in) for what was just read.
         self.write_frames();
+        self.drain_service();
     }
 
-    fn drain_port(&mut self) {
-        if let Some(port) = self.port.as_mut() {
-            while let Some(read) = port.poll_read() {
-                self.queue.push_back(Queued::Read(read));
-            }
-        }
+    /// Queue what the link has read (for whoever drains) and its notes (for
+    /// the model).
+    fn drain_service(&mut self) {
+        let Some(service) = self.service.as_mut() else {
+            return;
+        };
+        // Reads first: a note (the opt-in's outcome, say) is made while
+        // reading, and belongs after what it was read beside.
+        let reads = service.take_reads();
+        let notes = service.take_notes();
+        self.queue.extend(reads.into_iter().map(Queued::Read));
+        self.queue.extend(
+            notes
+                .into_iter()
+                .map(|note| Queued::Event(LinkEvent::WireNote(note))),
+        );
     }
 
     /// The model's next event, if one is queued.
@@ -398,11 +423,7 @@ impl<S: DeviceByteStream> LinkCore<S> {
         while let Some(queued) = self.queue.pop_front() {
             match queued {
                 Queued::Event(event) => return Some(event),
-                Queued::Read(read) => {
-                    if let Some(event) = port_read_link_event(read) {
-                        return Some(event);
-                    }
-                }
+                Queued::Read(read) => return Some(demux_read(read)),
             }
         }
         None
@@ -475,15 +496,8 @@ fn lock<S: DeviceByteStream>(core: &Mutex<LinkCore<S>>) -> MutexGuard<'_, LinkCo
 /// The link's clock when the caller gives none: microseconds since the link
 /// was made.
 fn default_clock() -> LinkClock {
-    #[cfg(all(target_arch = "wasm32", feature = "emulator-tab"))]
-    {
-        Box::new(|| (js_sys::Date::now() * 1_000.0) as u64)
-    }
-    #[cfg(not(all(target_arch = "wasm32", feature = "emulator-tab")))]
-    {
-        let started = std::time::Instant::now();
-        Box::new(move || u64::try_from(started.elapsed().as_micros()).unwrap_or(u64::MAX))
-    }
+    let started = std::time::Instant::now();
+    Box::new(move || u64::try_from(started.elapsed().as_micros()).unwrap_or(u64::MAX))
 }
 
 #[cfg(test)]
@@ -495,7 +509,7 @@ mod tests {
     use lpa_devices::identity::EndpointKey;
     use lpa_devices::wire::{ClientFrame, ServerFrameBody};
     use lpc_wire::lp_link::{CH_PROTO, LinkConfig, SelectiveRepeat};
-    use lpc_wire::{ClientMessage, PortRead, ServerMsgBody, WireServerMessage};
+    use lpc_wire::{ClientMessage, ServerMsgBody, WireServerMessage};
 
     /// A closed link is silent: nothing is read before the model opens the
     /// port, so a grant that is merely held produces no evidence.
@@ -638,8 +652,9 @@ mod tests {
         );
     }
 
-    /// D9: a board that reboots under the link is an error-class event at
-    /// once, then the new session's hello.
+    /// D9: a board that reboots under the link is a link-reset note at once
+    /// (the effects layer fails shared conversations on it), then the new
+    /// session's hello.
     #[test]
     fn a_board_reboot_is_a_link_reset_then_a_new_hello() {
         let (mut link, board) = open_and_up();
@@ -651,7 +666,7 @@ mod tests {
             .iter()
             .position(|event| matches!(
                 event,
-                LinkEvent::Error(line) if crate::device_link::port_read_map::is_link_reset_line(line)
+                LinkEvent::WireNote(note) if crate::device_link::port_read_map::is_link_reset_note(note)
             ))
             .unwrap_or_else(|| panic!("the reset is surfaced: {events:?}"));
         assert!(
@@ -676,8 +691,8 @@ mod tests {
         let drain = |ids: &mut Vec<u64>| {
             for _ in 0..50 {
                 for read in port.take_reads().unwrap() {
-                    if let PortRead::Message(payload) = read {
-                        ids.push(payload.message.unwrap().id);
+                    if let WireRead::Frame(frame) = read {
+                        ids.push(frame.message.unwrap().id);
                     }
                 }
                 board.tick_ms();

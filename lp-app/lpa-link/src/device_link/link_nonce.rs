@@ -1,26 +1,16 @@
-//! A fresh lp-link nonce per port open, on either side of the wasm line.
+//! A fresh lp-link nonce per host port open.
 //!
 //! A link's nonce is what tells the board this is a new host session (a
-//! reopened port, a reloaded page): it must differ between opens, and it
-//! does not have to be secret.
+//! reopened port, a restarted tool): it must differ between opens, and it
+//! does not have to be secret. The wall clock's nanoseconds, the process id
+//! and a per-process counter, mixed, are enough for that; no RNG dependency.
+//! (The browser's ports mint theirs in `link_port_edge`.)
+
+use std::sync::atomic::{AtomicU32, Ordering};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 /// A nonce for a new host link (never 0).
 pub fn fresh_link_nonce() -> u32 {
-    #[cfg(all(target_arch = "wasm32", feature = "emulator-tab"))]
-    {
-        ((js_sys::Math::random() * f64::from(u32::MAX)) as u32) | 1
-    }
-    #[cfg(not(all(target_arch = "wasm32", feature = "emulator-tab")))]
-    {
-        native_nonce()
-    }
-}
-
-#[cfg(not(all(target_arch = "wasm32", feature = "emulator-tab")))]
-fn native_nonce() -> u32 {
-    use std::sync::atomic::{AtomicU32, Ordering};
-    use std::time::{SystemTime, UNIX_EPOCH};
-
     static OPENS: AtomicU32 = AtomicU32::new(0);
     let nanos = SystemTime::now()
         .duration_since(UNIX_EPOCH)

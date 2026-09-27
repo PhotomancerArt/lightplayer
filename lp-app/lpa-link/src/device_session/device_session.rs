@@ -848,8 +848,7 @@ impl DeviceShared {
             ));
         };
         provider
-            .write_line(&session_id, &format!("M!{frame}\n"))
-            .await
+            .send_client_json(&session_id, &frame)
             .map_err(|error| TransportError::Other(error.to_string()))
     }
 }

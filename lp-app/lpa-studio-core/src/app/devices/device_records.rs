@@ -53,8 +53,8 @@ pub const EMU_TRANSPORT: &str = "emu";
 ///
 /// The label comes from the link's own provider class rather than from a
 /// constant this module chose: a `sim:` endpoint is served by
-/// `BrowserWorkerLink` over the browser-worker provider, an `emu:` one by a
-/// `ByteStreamLink` over the tab emulator, everything else in this build by
+/// `BrowserWorkerLink` over the browser-worker provider, an `emu:` one by
+/// `EmulatorTabLink` over the tab emulator, everything else in this build by
 /// one of the serial kinds. Keeping the answer in `lpa-link`'s table is what
 /// stops the registry column and the link from disagreeing when a fourth
 /// device class arrives.
