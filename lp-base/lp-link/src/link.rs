@@ -223,7 +223,13 @@ impl<A: Arq> Link<A> {
                 Deframed::Frame => {
                     let mut raw = mem::take(&mut self.rx_raw);
                     raw.clear();
-                    let ok = match frame::unwrap_stream(self.deframer.frame(), &mut raw) {
+                    let body = self.deframer.frame();
+                    let decoded = if self.cfg.escape_ff {
+                        frame::unwrap_stream(body, &mut raw)
+                    } else {
+                        frame::unwrap_stream_plain(body, &mut raw)
+                    };
+                    let ok = match decoded {
                         Ok(()) => self.on_frame(now, &raw),
                         Err(_) => {
                             self.counters.bad_frames += 1;
@@ -703,7 +709,12 @@ impl<A: Arq> Link<A> {
         hdr.seq = seq;
         let key = self.nonce ^ self.peer_nonce.unwrap_or(0);
         frame::encode_raw(self.cfg.crc, key, &hdr, &e.payload, &mut self.raw);
-        finish(self.cfg.framing, &mut self.raw, &mut self.out);
+        finish(
+            self.cfg.framing,
+            self.cfg.escape_ff,
+            &mut self.raw,
+            &mut self.out,
+        );
         if !A::RELIABLE {
             self.tx.pop_front();
         }
@@ -739,7 +750,12 @@ impl<A: Arq> Link<A> {
             win: 0,
         };
         frame::encode_raw(self.cfg.crc, 0, &hdr, &body.to_bytes(), &mut self.raw);
-        finish(self.cfg.framing, &mut self.raw, &mut self.out);
+        finish(
+            self.cfg.framing,
+            self.cfg.escape_ff,
+            &mut self.raw,
+            &mut self.out,
+        );
     }
 
     /// A header carrying the current ACK and window. Sending it satisfies any
@@ -765,7 +781,12 @@ impl<A: Arq> Link<A> {
     fn encode(&mut self, hdr: &Header, body: &[u8]) {
         let key = self.key();
         frame::encode_raw(self.cfg.crc, key, hdr, body, &mut self.raw);
-        finish(self.cfg.framing, &mut self.raw, &mut self.out);
+        finish(
+            self.cfg.framing,
+            self.cfg.escape_ff,
+            &mut self.raw,
+            &mut self.out,
+        );
     }
 
     /// Frames past our ACK we can take now.
@@ -836,9 +857,10 @@ impl<A: Arq> Link<A> {
 }
 
 /// Turn the raw frame in `raw` into what goes on the transport, in `out`.
-fn finish(framing: Framing, raw: &mut Vec<u8>, out: &mut Vec<u8>) {
+fn finish(framing: Framing, escape_ff: bool, raw: &mut Vec<u8>, out: &mut Vec<u8>) {
     match framing {
-        Framing::Stream => frame::wrap_stream(raw, out),
+        Framing::Stream if escape_ff => frame::wrap_stream(raw, out),
+        Framing::Stream => frame::wrap_stream_plain(raw, out),
         // header ‖ body ‖ crc is exactly one datagram.
         Framing::Datagram => mem::swap(raw, out),
     }

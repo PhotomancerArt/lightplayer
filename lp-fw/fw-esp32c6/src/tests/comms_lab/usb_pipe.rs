@@ -28,7 +28,10 @@ const IDLE_CAP_US: u64 = 10_000;
 pub async fn usb_link_task(usb: esp_hal::peripherals::USB_DEVICE<'static>, nonce: u32) {
     let (mut rx, tx) = UsbSerialJtag::new(usb).into_async().split();
     let mut tx = InEndpoint::<_, LabInEndpoint>::new(tx);
-    let mut edge = LabEdge::new("usb", LinkConfig::usb(), nonce);
+    let mut cfg = LinkConfig::usb();
+    // The A/B control: plain COBS, 0xFF on the wire (`test_comms_lab_plain_cobs`).
+    cfg.escape_ff = !cfg!(feature = "test_comms_lab_plain_cobs");
+    let mut edge = LabEdge::new("usb", cfg, nonce);
     let mut buf = [0u8; 64];
 
     loop {

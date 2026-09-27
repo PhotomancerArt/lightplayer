@@ -69,6 +69,10 @@ pub struct LinkConfig {
     pub stall_after: Micros,
     /// Flush a partial frame or unterminated text after this much quiet.
     pub idle_flush: Micros,
+    /// Stream framing only: keep `0xFF` off the wire too (COBS-FF, see
+    /// [`cobs`](crate::cobs)). On everywhere; off only to measure what
+    /// plain COBS costs through Chromium's Web Serial on macOS (M3's A/B).
+    pub escape_ff: bool,
 }
 
 impl LinkConfig {
@@ -102,6 +106,7 @@ impl LinkConfig {
             keepalive: 250_000,
             stall_after: 1_000_000,
             idle_flush: 50_000,
+            escape_ff: true,
         }
     }
 

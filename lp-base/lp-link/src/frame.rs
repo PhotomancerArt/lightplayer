@@ -156,6 +156,20 @@ pub fn unwrap_stream(body: &[u8], raw: &mut Vec<u8>) -> Result<(), cobs::CobsErr
     cobs::decode_no_ff_into(body, raw)
 }
 
+/// `0x00 COBS(raw) 0x00`: plain COBS, `0xFF` allowed (the A/B control for
+/// [`wrap_stream`]; `LinkConfig::escape_ff = false`).
+pub fn wrap_stream_plain(raw: &[u8], out: &mut Vec<u8>) {
+    out.clear();
+    out.push(0);
+    cobs::encode_into(raw, out);
+    out.push(0);
+}
+
+/// Undo [`wrap_stream_plain`].
+pub fn unwrap_stream_plain(body: &[u8], raw: &mut Vec<u8>) -> Result<(), cobs::CobsError> {
+    cobs::decode_into(body, raw)
+}
+
 /// [`encode_raw`] then [`wrap_stream`].
 pub fn encode(
     crc: CrcKind,

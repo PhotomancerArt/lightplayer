@@ -43,6 +43,10 @@ impl LabSession {
         if let Some(ms) = get("minrto") {
             cfg.min_rto = ms * 1000;
         }
+        // The A/B control: plain COBS against a `test_comms_lab_plain_cobs` board.
+        if get("plaincobs") == Some(1) {
+            cfg.escape_ff = false;
+        }
         let d = LabPlan::default();
         let plan = LabPlan {
             echo_for: get("echo").map_or(d.echo_for, |s| s * 1_000_000),

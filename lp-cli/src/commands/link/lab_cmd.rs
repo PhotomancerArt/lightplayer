@@ -112,6 +112,7 @@ fn plan_of(args: &LabArgs) -> LabPlan {
 /// The host link's settings: the USB preset, with any tuning override.
 fn host_config(args: &LabArgs) -> LinkConfig {
     let mut cfg = LinkConfig::usb();
+    cfg.escape_ff = !args.plain_cobs;
     if let Some(ms) = args.min_rto_ms {
         cfg.min_rto = ms * 1000;
         cfg.initial_rto = cfg.initial_rto.max(cfg.min_rto);

@@ -32,7 +32,7 @@ const cfg = {
   stallEvery: num("stallEvery", 0),
   stallMs: num("stallMs", 0),
   name: q.get("name") ?? "lab",
-  plan: ["echo", "stream", "min", "max", "inflight", "seed", "logs", "loglen", "stall", "minrto"]
+  plan: ["echo", "stream", "min", "max", "inflight", "seed", "logs", "loglen", "stall", "minrto", "plaincobs"]
     .filter((k) => q.has(k)).map((k) => `${k}=${q.get(k)}`).join(" "),
 };
 const logEl = document.getElementById("log");

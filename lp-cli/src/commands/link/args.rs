@@ -133,6 +133,11 @@ pub struct LabArgs {
     #[arg(long)]
     pub panic_test: bool,
 
+    /// Plain COBS instead of COBS-FF (0xFF on the wire): the A/B control,
+    /// against a `test_comms_lab_plain_cobs` image.
+    #[arg(long)]
+    pub plain_cobs: bool,
+
     /// Override the host link's minimum retransmit timer, ms (tuning).
     #[arg(long)]
     pub min_rto_ms: Option<u64>,

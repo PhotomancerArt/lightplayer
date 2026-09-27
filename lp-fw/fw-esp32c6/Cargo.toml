@@ -273,6 +273,10 @@ test_comms_lab = ["dep:lp-link", "lpc-shared"]
 # The same with the BLE NUS pipe beside USB (datagram framing, one frame per
 # notification / write).
 test_comms_lab_ble = ["test_comms_lab", "ble"]
+# The A/B control for COBS-FF: USB frames in plain COBS, so 0xFF reaches the
+# wire (pair with `lp-cli link lab --plain-cobs`). Measures what Chromium's
+# macOS Web Serial path does to a link that does not escape 0xFF.
+test_comms_lab_plain_cobs = ["test_comms_lab"]
 
 # FIXTURE builds — test scaffolding, never shipped. Make this CURRENT
 # build misreport its hello so a current Studio classifies it Incompatible,
