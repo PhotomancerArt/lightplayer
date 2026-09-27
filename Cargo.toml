@@ -7,6 +7,7 @@ members = [
     "lp-base/lp-bootctl",
     "lp-base/lpfs",
     "lp-base/lp-json-pack",
+    "lp-base/lp-link",
     # lp-app workspace members
     "lp-core/lpc-access",
     "lp-core/lpc-history",
@@ -134,6 +135,7 @@ default-members = [
     "lp-base/lp-bootctl",
     "lp-base/lpfs",
     "lp-base/lp-json-pack",
+    "lp-base/lp-link",
     # lp-app workspace members
     "lp-core/lpc-access",
     "lp-core/lpc-history",
