@@ -1,0 +1,27 @@
+# The comms lab's host half for a browser page: lp-link and its LabHost,
+# compiled to wasm, so Web Serial (spikes/serial-lab/lab.html) and Web
+# Bluetooth (spikes/ble-lab/link.html) run the same link and the same soak
+# plan as `lp-cli link lab`. Plan `reliable-device-link`, M3. Never shipped.
+#
+# Its own workspace: a wasm cdylib the host build must not pick up.
+# `./build.sh` builds it and runs wasm-bindgen (the CLI must match the pin).
+[package]
+name = "link-lab-wasm"
+version = "0.0.0"
+edition = "2024"
+license = "AGPL-3.0-or-later"
+publish = false
+
+[workspace]
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+lp-link = { path = "../../lp-base/lp-link", features = ["lab"] }
+# Pinned to the CLI on the desk (`wasm-bindgen --version`) and the repo's lock.
+wasm-bindgen = "=0.2.114"
+
+[profile.release]
+opt-level = "s"
+lto = true

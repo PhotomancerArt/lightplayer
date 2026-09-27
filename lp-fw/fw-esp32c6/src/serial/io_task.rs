@@ -200,6 +200,8 @@ async fn drain_outgoing_messages<W: Write>(
                     conn.note_write_timeout();
                     break;
                 }
+                #[cfg(feature = "soak_link")]
+                fw_esp32_common::soak_link::note_wire_bytes(1 + msg.len());
                 conn.note_host_active();
             }
             Ok(_) => {}
@@ -264,6 +266,10 @@ async fn drain_server_write_request<W: Write>(tx: &mut W, conn: &mut UsbConnecti
     } else {
         Err(lpc_wire::TransportError::ConnectionLost)
     };
+    #[cfg(feature = "soak_link")]
+    if result.is_ok() {
+        fw_esp32_common::soak_link::note_wire_bytes(len);
+    }
     match &result {
         Ok(()) => conn.note_host_active(),
         // Only a USB write timeout/failure is draining evidence; fail-fast
@@ -305,6 +311,11 @@ fn process_read_buffer(read_buffer: &mut Vec<u8>, router: &MessageRouter) {
 
         // Convert to string
         if let Ok(line_str) = core::str::from_utf8(&line_bytes[..line_bytes.len() - 1]) {
+            // The link soak variant's control and echo lines (never M!).
+            #[cfg(feature = "soak_link")]
+            if fw_esp32_common::soak_link::on_host_line(line_str.trim_end_matches('\r')) {
+                continue;
+            }
             // Check for M! prefix
             if line_str.starts_with("M!") {
                 // Push to incoming queue

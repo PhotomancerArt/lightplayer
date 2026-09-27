@@ -1,0 +1,47 @@
+[package]
+name = "lp-link"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Prototype sans-IO link layer (framing, CRC, channels, ARQ) plus a fault-injecting simulator: an investigation crate, not wired into the product"
+
+[lints]
+workspace = true
+
+[features]
+default = []
+# Host conveniences.
+std = []
+# `log` crate adapter for the log ring (the firmware's `log::Log` backend).
+log = ["dep:log"]
+# The deterministic fault-injecting simulator and the `link-bench` tool.
+sim = ["std"]
+# The comms lab (M3): the soak protocol both ends of an on-target run speak
+# (`lab::LabBoard` in the firmware, `lab::LabHost` in lp-cli, the emulator
+# test and the browser pages). no_std + alloc.
+lab = []
+
+[dependencies]
+log = { workspace = true, optional = true }
+
+[dev-dependencies]
+proptest = { version = "1.11", default-features = false, features = ["std"] }
+
+[[bin]]
+name = "link-bench"
+path = "src/bin/link-bench.rs"
+required-features = ["sim"]
+
+[[test]]
+name = "link_scenarios"
+required-features = ["sim"]
+
+[[test]]
+name = "delivery_properties"
+required-features = ["sim"]
+
+[[test]]
+name = "lab_over_sim"
+required-features = ["sim", "lab"]

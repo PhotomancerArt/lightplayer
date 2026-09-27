@@ -49,6 +49,13 @@ lpc_model::lp_embed_manifest_core! {
 /// handler that used to live here cost.
 #[panic_handler]
 fn panic_handler(info: &PanicInfo) -> ! {
+    // The comms lab's convention (lp-link's text mark, M3): `0xFF` never
+    // occurs inside a COBS-FF frame, so it abandons any frame the panic
+    // interrupted and the panic text (and the ROM banner after the reset)
+    // arrives as text. M2's `0x00` did not survive silicon: the rebooted
+    // board's first frame followed too soon for the idle flush.
+    #[cfg(feature = "test_comms_lab")]
+    esp_println::Printer::write_bytes(&[0xFF, b'\r', b'\n']);
     recovery::panic_path::stage_and_reset(info)
 }
 
@@ -158,6 +165,8 @@ use server_loop::run_server_loop;
 
 #[cfg(fw_harness)]
 mod tests {
+    #[cfg(feature = "test_comms_lab")]
+    pub mod comms_lab;
     #[cfg(feature = "test_cycle_probe")]
     pub mod cycle_probe;
     #[cfg(feature = "test_espnow_broadcast")]
@@ -715,6 +724,12 @@ async fn main(spawner: embassy_executor::Spawner) {
     {
         use tests::test_usb::run_usb_test;
         run_usb_test(spawner).await;
+    }
+
+    #[cfg(feature = "test_comms_lab")]
+    {
+        use tests::comms_lab::run_comms_lab;
+        run_comms_lab(spawner).await;
     }
 
     #[cfg(feature = "test_json")]

@@ -88,6 +88,9 @@ pub async fn run_server_loop<T: ServerTransport + LinkUpkeep>(
     let startup_time = time_provider.now_ms();
     let mut fps_collector = WindowedStatsCollector::new();
     let mut boot_completed = false;
+    // The link soak variant's traffic source (never in a shipped image).
+    #[cfg(feature = "soak-link")]
+    let mut soak = crate::soak_link::SoakPump::new();
 
     // One legible error line if the previous run ended in a crash; flows to
     // the client through the normal log transport.
@@ -237,6 +240,9 @@ pub async fn run_server_loop<T: ServerTransport + LinkUpkeep>(
 
             heartbeat_last_sent = current_time;
         }
+
+        #[cfg(feature = "soak-link")]
+        soak.pump(&mut transport, current_time).await;
 
         // Feed the RWDT while the loop and the I/O task are both alive; a
         // hang anywhere stops the feeding and the watchdog resets us with
