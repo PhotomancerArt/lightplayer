@@ -51,6 +51,10 @@ pub struct LinkConfig {
     pub ack_delay: Micros,
     /// ...but ACK at once after this many unacknowledged frames.
     pub ack_every: u8,
+    /// Resend a hole early once this many frames sent after it are
+    /// acknowledged (selective repeat). 1 on a transport that never reorders;
+    /// more where it does (UDP), so reordering is not mistaken for loss.
+    pub reorder_threshold: u8,
     pub initial_rto: Micros,
     pub min_rto: Micros,
     pub max_rto: Micros,
@@ -79,6 +83,7 @@ impl LinkConfig {
             reliable_channels: (1 << CH_CONTROL) | (1 << CH_PROTO),
             ack_delay: 1_000,
             ack_every: 2,
+            reorder_threshold: 1,
             initial_rto: 50_000,
             min_rto: 10_000,
             max_rto: 1_000_000,
@@ -122,6 +127,7 @@ impl LinkConfig {
             rx_budget: 32 * 1024,
             ack_delay: 5_000,
             ack_every: 4,
+            reorder_threshold: 3,
             initial_rto: 300_000,
             min_rto: 20_000,
             max_rto: 3_000_000,
@@ -137,6 +143,7 @@ impl LinkConfig {
     pub fn ws() -> Self {
         LinkConfig {
             max_payload: 1024,
+            reorder_threshold: 1,
             ..Self::udp()
         }
     }

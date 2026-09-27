@@ -16,6 +16,8 @@ pub struct LinkCounters {
     pub timeouts: u32,
     /// Resends triggered early by a NAK or a selective ACK.
     pub fast_retransmits: u32,
+    /// Tail-loss probes: the newest frame resent after a quiet flight.
+    pub probes: u32,
     /// Frames that failed COBS, header or checksum: damaged on the way.
     pub bad_frames: u32,
     /// Frames that verified only under the previous session's key.

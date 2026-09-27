@@ -50,6 +50,8 @@ pub struct Feedback {
     pub trigger: Option<u8>,
     pub now: Micros,
     pub srtt: Micros,
+    /// Frames acknowledged past a hole before it counts as lost.
+    pub reorder_threshold: u8,
 }
 
 pub trait Arq {

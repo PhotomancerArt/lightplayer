@@ -154,21 +154,34 @@ impl Arq for SelectiveRepeat {
         }
         // The cumulative part was applied, so `base` is the receiver's ack.
         let base = tx.base();
-        let mut newest_held = None;
         for i in 0..32u8 {
             if fb.sack & (1 << i) != 0
                 && let Some(e) = tx.get_mut(base.wrapping_add(1 + i))
             {
                 e.sacked = true;
-                newest_held = newest_held.max(Some(e.sent_order));
             }
         }
-        let Some(newest_held) = newest_held else {
-            return 0;
-        };
+        // A hole is lost once `reorder_threshold` frames sent after it have
+        // arrived (RACK's "a later send got through", with a count as the
+        // reordering allowance). After a resend its order is newer than
+        // every frame held, so the same SACK map cannot trigger it again.
+        let mut held: [u32; 32] = [0; 32];
+        let mut n_held = 0;
+        for e in tx.iter().filter(|e| e.sacked) {
+            if n_held < held.len() {
+                held[n_held] = e.sent_order;
+                n_held += 1;
+            }
+        }
+        let held = &held[..n_held];
+        let need = fb.reorder_threshold.max(1) as usize;
         let mut n = 0;
         for e in tx.iter_mut() {
-            if !e.sacked && e.sent_at.is_some() && e.sent_order < newest_held {
+            if e.sacked || e.sent_at.is_none() {
+                continue;
+            }
+            let after = held.iter().filter(|&&o| o > e.sent_order).count();
+            if after >= need {
                 e.sent_at = None;
                 n += 1;
             }

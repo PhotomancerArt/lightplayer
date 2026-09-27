@@ -85,6 +85,9 @@ pub struct Link<A: Arq> {
     last_adv_win: u8,
     syn_due: Option<Micros>,
     syn_owed: bool,
+    /// A tail-loss probe may fire for the current flight.
+    probe_armed: bool,
+    last_data_tx: Micros,
     last_tx: Micros,
     last_rx: Micros,
     counters: LinkCounters,
@@ -128,6 +131,8 @@ impl<A: Arq> Link<A> {
             last_adv_win: 0,
             syn_due: Some(0),
             syn_owed: false,
+            probe_armed: false,
+            last_data_tx: 0,
             last_tx: 0,
             last_rx: 0,
             counters: LinkCounters::default(),
@@ -269,6 +274,7 @@ impl<A: Arq> Link<A> {
                 min(self.ack_due);
                 if A::RELIABLE {
                     min(self.tx.next_timer(self.rto()));
+                    min(self.probe_deadline());
                 }
                 min(Some(self.last_tx + self.cfg.keepalive));
             }
@@ -479,6 +485,7 @@ impl<A: Arq> Link<A> {
         };
         if acked.frames > 0 {
             self.backoff = 0;
+            self.probe_armed = true;
         }
         if let Some(r) = acked.rtt_sample {
             self.rtt.sample(r);
@@ -489,6 +496,7 @@ impl<A: Arq> Link<A> {
             trigger,
             now,
             srtt: self.rtt.srtt(),
+            reorder_threshold: self.cfg.reorder_threshold,
         };
         self.counters.fast_retransmits += A::on_feedback(&mut self.tx, fb) as u32;
     }
@@ -512,6 +520,12 @@ impl<A: Arq> Link<A> {
                 IdleFlush::Garbage => self.counters.stale_partials += 1,
                 IdleFlush::Nothing => {}
             }
+        }
+        if self.state == LinkState::Established
+            && A::RELIABLE
+            && self.probe_deadline().is_some_and(|t| t <= now)
+        {
+            self.fire_probe();
         }
         if self.state == LinkState::Established && A::RELIABLE {
             let rto = self.rto();
@@ -578,6 +592,41 @@ impl<A: Arq> Link<A> {
         false
     }
 
+    /// When the tail-loss probe fires: two smoothed round trips (plus the
+    /// peer's ACK delay) after the last data frame, if the flight is still
+    /// unacknowledged, nothing is waiting to be resent, and that comes before
+    /// the retransmit timer. The probe resends the newest frame, so the ACK it
+    /// draws reveals any hole behind it (TCP's TLP).
+    fn probe_deadline(&self) -> Option<Micros> {
+        if !self.probe_armed || self.tx.first_unsent().is_some() {
+            return None;
+        }
+        self.tx
+            .iter()
+            .rev()
+            .find(|e| !e.sacked && e.sent_at.is_some())?;
+        let pto = (2 * self.rtt.srtt() + self.cfg.ack_delay).max(self.cfg.min_rto / 2);
+        let t = self.last_data_tx + pto;
+        (self
+            .tx
+            .next_timer(self.rto())
+            .is_none_or(|rto_at| t < rto_at))
+        .then_some(t)
+    }
+
+    fn fire_probe(&mut self) {
+        self.probe_armed = false;
+        if let Some(e) = self
+            .tx
+            .iter_mut()
+            .rev()
+            .find(|e| !e.sacked && e.sent_at.is_some())
+        {
+            e.sent_at = None;
+            self.counters.probes += 1;
+        }
+    }
+
     fn can_send_new(&self) -> bool {
         if !A::RELIABLE {
             return true;
@@ -618,7 +667,10 @@ impl<A: Arq> Link<A> {
         e.sends = e.sends.saturating_add(1);
         if e.sends > 1 {
             self.counters.retransmits += 1;
+        } else {
+            self.probe_armed = true;
         }
+        self.last_data_tx = now;
         self.counters.data_frames_tx += 1;
         hdr.chan = e.chan;
         hdr.first = e.first;
@@ -738,6 +790,7 @@ impl<A: Arq> Link<A> {
         self.ack_trigger = None;
         self.unacked_rx = 0;
         self.syn_owed = false;
+        self.probe_armed = false;
         self.syn_due = Some(now);
         self.counters.resets += 1;
         self.inbox.push_event(LinkEvent::Reset {

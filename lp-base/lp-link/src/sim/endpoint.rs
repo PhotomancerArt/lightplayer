@@ -171,6 +171,7 @@ fn add_counters(t: &mut LinkCounters, c: &LinkCounters) {
     t.retransmits += c.retransmits;
     t.timeouts += c.timeouts;
     t.fast_retransmits += c.fast_retransmits;
+    t.probes += c.probes;
     t.bad_frames += c.bad_frames;
     t.stale_frames += c.stale_frames;
     t.oversize_frames += c.oversize_frames;

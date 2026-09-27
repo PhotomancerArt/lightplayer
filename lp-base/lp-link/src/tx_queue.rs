@@ -131,11 +131,11 @@ impl TxQueue {
         self.entries.front()
     }
 
-    pub fn iter_mut(&mut self) -> impl Iterator<Item = &mut TxEntry> {
+    pub fn iter_mut(&mut self) -> impl DoubleEndedIterator<Item = &mut TxEntry> {
         self.entries.iter_mut()
     }
 
-    pub fn iter(&self) -> impl Iterator<Item = &TxEntry> {
+    pub fn iter(&self) -> impl DoubleEndedIterator<Item = &TxEntry> {
         self.entries.iter()
     }
 
