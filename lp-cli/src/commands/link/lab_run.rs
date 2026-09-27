@@ -126,6 +126,75 @@ impl LabPipe for PortPipe<'_> {
     }
 }
 
+/// A UDP socket to a board's WiFi pipe (one frame per datagram), in
+/// wall-clock time.
+pub struct UdpPipe {
+    sock: std::net::UdpSocket,
+    clock: Instant,
+    buf: Vec<u8>,
+    configuration: String,
+}
+
+impl UdpPipe {
+    pub fn open(addr: &str, configuration: String) -> Result<Self> {
+        let sock = std::net::UdpSocket::bind("0.0.0.0:0").context("binding a UDP socket")?;
+        sock.connect(addr)
+            .with_context(|| format!("udp connect {addr}"))?;
+        sock.set_read_timeout(Some(Duration::from_millis(1)))?;
+        Ok(UdpPipe {
+            sock,
+            clock: Instant::now(),
+            buf: vec![0u8; 2048],
+            configuration,
+        })
+    }
+}
+
+impl LabPipe for UdpPipe {
+    fn step(&mut self, link: &mut HostLink) -> Result<Micros> {
+        let mut t = self.clock.elapsed().as_micros() as Micros;
+        for _ in 0..64 {
+            match self.sock.recv(&mut self.buf) {
+                Ok(n) => {
+                    t = self.clock.elapsed().as_micros() as Micros;
+                    link.on_datagram(t, &self.buf[..n]);
+                    // Drain what is queued without waiting again.
+                    self.sock.set_nonblocking(true)?;
+                }
+                Err(e)
+                    if matches!(
+                        e.kind(),
+                        std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
+                    ) =>
+                {
+                    break;
+                }
+                // A board not listening yet answers with ICMP unreachable.
+                Err(e) if e.kind() == std::io::ErrorKind::ConnectionRefused => break,
+                Err(e) => return Err(e).context("reading the UDP link"),
+            }
+        }
+        self.sock.set_nonblocking(false)?;
+        Ok(t.max(self.clock.elapsed().as_micros() as Micros))
+    }
+
+    fn send(&mut self, frame: &[u8]) -> Result<()> {
+        match self.sock.send(frame) {
+            Ok(_) => Ok(()),
+            Err(e) if e.kind() == std::io::ErrorKind::ConnectionRefused => Ok(()),
+            Err(e) => Err(e).context("writing the UDP link"),
+        }
+    }
+
+    fn seconds(&self) -> f64 {
+        self.clock.elapsed().as_secs_f64()
+    }
+
+    fn configuration(&self) -> String {
+        self.configuration.clone()
+    }
+}
+
 /// The C6 machine in this process, in emulated time.
 pub struct EmuPipe {
     m: Esp32C6Machine,

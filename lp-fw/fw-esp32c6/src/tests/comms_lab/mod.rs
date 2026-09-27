@@ -33,6 +33,8 @@ mod ble_pipe;
 mod lab_edge;
 pub mod lab_logger;
 mod usb_pipe;
+#[cfg(feature = "test_comms_lab_wifi")]
+mod wifi_pipe;
 
 use embassy_time::{Duration, Timer};
 use esp_hal::clock::CpuClock;
@@ -71,6 +73,8 @@ pub async fn run_comms_lab(spawner: embassy_executor::Spawner) -> ! {
 
     #[cfg(feature = "test_comms_lab_ble")]
     ble_pipe::run(peripherals.BT, peripherals.GPIO3, peripherals.GPIO14, rng).await;
+    #[cfg(feature = "test_comms_lab_wifi")]
+    wifi_pipe::run(spawner, peripherals.WIFI, rng).await;
 
     loop {
         Timer::after(Duration::from_secs(3600)).await;

@@ -273,6 +273,10 @@ test_comms_lab = ["dep:lp-link", "lpc-shared"]
 # The same with the BLE NUS pipe beside USB (datagram framing, one frame per
 # notification / write).
 test_comms_lab_ble = ["test_comms_lab", "ble"]
+# The same with a WiFi pipe beside USB: UDP datagrams, one frame each, on
+# the network named at BUILD time by LP_LAB_WIFI_SSID / LP_LAB_WIFI_PASS
+# (`option_env!`; never committed, never logged). See comms_lab/wifi_pipe.rs.
+test_comms_lab_wifi = ["test_comms_lab", "radio", "dep:embassy-net", "dep:static_cell", "dep:heapless"]
 # The A/B control for COBS-FF: USB frames in plain COBS, so 0xFF reaches the
 # wire (pair with `lp-cli link lab --plain-cobs`). Measures what Chromium's
 # macOS Web Serial path does to a link that does not escape 0xFF.
@@ -362,6 +366,8 @@ lps-q32 = { path = "../../lp-shader/lps-q32", default-features = false }
 # The comms lab's link layer (`test_comms_lab`): no_std + alloc, with the lab
 # protocol and the `log` adapter for its log ring.
 lp-link = { path = "../../lp-base/lp-link", default-features = false, features = ["lab", "log"], optional = true }
+# The comms lab's WiFi pipe (`test_comms_lab_wifi`): IPv4, DHCP, UDP.
+embassy-net = { version = "0.9.1", default-features = false, features = ["proto-ipv4", "medium-ethernet", "dhcpv4", "udp"], optional = true }
 # The portable WS281x driver core. `default-features = false` drops its host
 # `mock` backend (and the `alloc` it needs) — firmware brings its own `RmtHw`.
 # `isr-in-ram`: the refill path lives in `.rwtext` (IRAM). Single-core, so not

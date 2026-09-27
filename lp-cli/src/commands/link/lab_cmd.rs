@@ -10,7 +10,7 @@ use lp_link::lab::LabPlan;
 use super::args::LabArgs;
 use super::lab_port::{LabPort, TermiosMode};
 use super::lab_run::{
-    EmuLab, EmuPipe, HostStall, LabOutcome, LabPipe, PortPipe, panic_probe, run_plan,
+    EmuLab, EmuPipe, HostStall, LabOutcome, LabPipe, PortPipe, UdpPipe, panic_probe, run_plan,
 };
 
 pub fn lab(args: &LabArgs) -> Result<()> {
@@ -33,6 +33,16 @@ pub fn lab(args: &LabArgs) -> Result<()> {
             grade,
             slice_us: args.slice_us.max(10),
         })?)
+    } else if let Some(addr) = args.target.strip_prefix("udp://") {
+        let label = if args.label.is_empty() {
+            args.target.clone()
+        } else {
+            args.label.clone()
+        };
+        Box::new(UdpPipe::open(
+            addr,
+            format!("{label}, reader: UDP over WiFi"),
+        )?)
     } else {
         if args.faults.is_some() || args.free_lag_ns > 0 {
             bail!("--faults and --free-lag-ns act on the emulator's link: use an emu: target");
@@ -109,9 +119,14 @@ fn plan_of(args: &LabArgs) -> LabPlan {
     }
 }
 
-/// The host link's settings: the USB preset, with any tuning override.
+/// The host link's settings: the transport's preset (UDP for `udp://`, else
+/// USB), with any tuning override.
 fn host_config(args: &LabArgs) -> LinkConfig {
-    let mut cfg = LinkConfig::usb();
+    let mut cfg = if args.target.starts_with("udp://") {
+        LinkConfig::udp()
+    } else {
+        LinkConfig::usb()
+    };
     cfg.escape_ff = !args.plain_cobs;
     if let Some(ms) = args.min_rto_ms {
         cfg.min_rto = ms * 1000;
