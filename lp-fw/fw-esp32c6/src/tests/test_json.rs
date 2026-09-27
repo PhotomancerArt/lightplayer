@@ -2,13 +2,14 @@
 //!
 //! When `test_json` feature is enabled, validates ser-write-json on ESP32:
 //! - Firmware boots (no ESP32 bootloader segment issues from ser-write-json)
-//! - ServerMessage serializes correctly with ser-write-json (in io_task)
+//! - ServerMessage serializes correctly with ser-write-json (thread side,
+//!   into the static frame buffer, as the product's transport does)
 //! - Output is valid JSON parseable by our deserializer
 //!
-//! Uses shared serial::io_task which drains accountable server write requests
-//! and streams to serial.
+//! The heartbeat goes out as one proto-channel payload on the product's USB
+//! host link (lp-link, `serial::usb_link_task`), so a reader needs an lp-link
+//! host, not a serial monitor.
 //! Run with: just fwtest-json-esp32c6
-//! Flash and connect with screen/minicom to see M! prefixed JSON every second.
 
 extern crate alloc;
 
@@ -19,13 +20,12 @@ use lpfs::lp_path::AsLpPathBuf;
 
 use crate::board::esp32c6::init::{init_board, start_runtime};
 use crate::output::LedChannel;
-use crate::serial::io_task;
+use crate::serial::usb_link_task;
+use fw_esp32_common::usb_link::UsbLinkShared;
 
 /// Run JSON streaming validation test
 ///
-/// Sends Heartbeat ServerMessage through the accountable server write channel
-/// every second. serial::io_task receives and serializes with ser-write-json
-/// directly to USB serial.
+/// Sends a Heartbeat ServerMessage on the USB host link every second.
 pub async fn run_test_json(spawner: embassy_executor::Spawner) -> ! {
     let (_sw_int, timg0, rmt_peripheral, usb_device, gpio18, _flash, _gpio4, _gpio20, _wifi, _rwdt) =
         init_board();
@@ -35,7 +35,8 @@ pub async fn run_test_json(spawner: embassy_executor::Spawner) -> ! {
         .expect("RMT init");
     let mut channel = LedChannel::new(rmt, gpio18, 1).expect("LED channel");
 
-    spawner.spawn(io_task::io_task(usb_device).unwrap());
+    let link = UsbLinkShared::leak(esp_hal::rng::Rng::new().random());
+    spawner.spawn(usb_link_task(usb_device, link).unwrap());
 
     let mut frame_count: u64 = 0;
     let mut last_send = embassy_time::Instant::now();
@@ -77,14 +78,12 @@ pub async fn run_test_json(spawner: embassy_executor::Spawner) -> ! {
                 },
             );
 
-            let (server_write_request, server_write_result) = io_task::get_server_write_channels();
-            // The channel carries the static frame buffer's length;
-            // serialization is the thread side's job (see
-            // fw_esp32_common::serial::server_msg).
-            let len = fw_esp32_common::serial::server_msg::serialize_server_msg(&msg, None)
+            // Serialized thread side into the static frame buffer, then
+            // queued on the link, which copies it (no host: dropped).
+            let len = fw_esp32_common::serial::server_payload::serialize_server_payload(&msg, None)
                 .expect("harness heartbeat serializes");
-            server_write_request.sender().send((0, len)).await;
-            let _ = server_write_result.receiver().receive().await;
+            let bytes = fw_esp32_common::serial::server_msg::frame_bytes(len);
+            let _ = link.try_send_proto(bytes);
 
             frame_count += 1;
             last_send = now;

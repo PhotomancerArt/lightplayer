@@ -20,6 +20,6 @@ pub mod init;
 // The product boot's only, like the quirks.
 #[cfg(not(fw_harness))]
 pub mod status_led;
-// Sole consumer is `serial::io_task`; keep this gate identical to its own.
+// Sole consumer is `serial::usb_link_task`; keep this gate identical to its own.
 #[cfg(any(not(fw_harness), feature = "test_json"))]
 pub mod usb_connection;
