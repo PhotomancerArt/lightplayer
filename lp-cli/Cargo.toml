@@ -58,6 +58,11 @@ lp-perf = { path = "../lp-base/lp-perf", default-features = false }
 lp-riscv-elf = { path = "../lp-riscv/lp-riscv-elf", features = ["std"] }
 lp-riscv-inst = { path = "../lp-riscv/lp-riscv-inst" }
 serialport = "4.8"
+# `link lab --termios chrome`: set the tty's flags the way Chromium's Web
+# Serial does, which serialport does not expose.
+libc = "0.2"
+# `link lab`: the comms lab's host half and the link it drives.
+lp-link = { path = "../lp-base/lp-link", features = ["std", "lab"] }
 # fwcheck flashes locally built check ELFs in-process (M5: no espflash
 # subprocess). Library-only: the `cli` feature and its dep tree stay out.
 espflash = { version = "3.3", default-features = false, features = [

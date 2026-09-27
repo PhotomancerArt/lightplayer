@@ -35,8 +35,15 @@ impl log::Log for RingLogger {
         if !self.enabled(record.metadata()) {
             return;
         }
+        // The module's last path segment, not the whole path: a record is at
+        // most 200 bytes and `fw_esp32c6::tests::comms_lab::` is 30 of them.
+        let target = record.target();
+        let short = target.rsplit("::").next().unwrap_or(target);
         critical_section::with(|cs| {
-            lp_link::log_ring::push_log_record(&mut LOG_RING.borrow_ref_mut(cs), record);
+            LOG_RING.borrow_ref_mut(cs).push_fmt(
+                lp_link::log_ring::level_of(record.level()),
+                format_args!("{}: {}", short, record.args()),
+            );
         });
     }
 

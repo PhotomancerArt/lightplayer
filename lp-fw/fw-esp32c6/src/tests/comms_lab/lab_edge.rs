@@ -59,6 +59,10 @@ impl LabEdge {
     }
 
     /// One datagram from a message pipe.
+    #[cfg_attr(
+        not(feature = "test_comms_lab_ble"),
+        allow(dead_code, reason = "only the BLE pipe is a message pipe")
+    )]
     pub fn on_datagram(&mut self, frame: &[u8]) {
         let t = now_us();
         self.link.on_datagram(t, frame);

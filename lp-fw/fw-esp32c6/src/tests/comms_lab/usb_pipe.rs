@@ -32,6 +32,7 @@ pub async fn usb_link_task(usb: esp_hal::peripherals::USB_DEVICE<'static>, nonce
     let mut buf = [0u8; 64];
 
     loop {
+        drain_rx(&mut rx, &mut edge, &mut buf).await;
         edge.service();
         let mut more = false;
         let mut written = 0;
@@ -44,6 +45,12 @@ pub async fn usb_link_task(usb: esp_hal::peripherals::USB_DEVICE<'static>, nonce
                 }
                 Err(_) => {
                     edge.write_timeouts += 1;
+                    log::warn!(
+                        "usb: a frame write timed out ({} so far) at uptime {} ms; in_ep_free={}",
+                        edge.write_timeouts,
+                        Instant::now().as_millis(),
+                        LabInEndpoint::in_ep_free()
+                    );
                     break;
                 }
             }
@@ -52,6 +59,11 @@ pub async fn usb_link_task(usb: esp_hal::peripherals::USB_DEVICE<'static>, nonce
                 more = true;
                 break;
             }
+            // Take the host's ACKs as they come: a frame is only overdue if
+            // its ACK has not ARRIVED, not if it waits unread in the FIFO
+            // while this task writes (that was every spurious resend on the
+            // emulator's clean link).
+            drain_rx(&mut rx, &mut edge, &mut buf).await;
         }
         let wake = if more { now_us() } else { edge.wake_at(IDLE_CAP_US) };
         match select(
@@ -62,6 +74,16 @@ pub async fn usb_link_task(usb: esp_hal::peripherals::USB_DEVICE<'static>, nonce
         {
             Either::First(Ok(n)) if n > 0 => edge.on_bytes(&buf[..n]),
             _ => {}
+        }
+    }
+}
+
+/// Feed the link whatever the RX FIFO already holds, without waiting.
+async fn drain_rx<R: Read>(rx: &mut R, edge: &mut LabEdge, buf: &mut [u8; 64]) {
+    loop {
+        match select(rx.read(buf), core::future::ready(())).await {
+            Either::First(Ok(n)) if n > 0 => edge.on_bytes(&buf[..n]),
+            _ => return,
         }
     }
 }

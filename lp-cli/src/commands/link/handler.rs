@@ -18,6 +18,7 @@ pub fn handle_link(cli: LinkCli) -> Result<()> {
     match cli.subcommand {
         LinkSubcommand::Soak(args) => soak(&args),
         LinkSubcommand::SoakVerify(args) => soak_verify(&args),
+        LinkSubcommand::Lab(args) => super::lab_cmd::lab(&args),
     }
 }
 
