@@ -7,8 +7,12 @@
 //! - **Send**: each reply is serialized in thread context into the static
 //!   frame buffer as one proto payload ([`crate::serial::server_payload`]:
 //!   JSON, or `L` + a learned packed frame on a link whose host opted in)
-//!   and queued with `Link::send`, which copies it. The link then delivers it
-//!   or resets the session; either way the host learns which.
+//!   and queued as an **external** message (`Link::send_external`): the link
+//!   task cuts its fragments straight from the frame buffer into the
+//!   transmit window, so no reply is copied into the link. The frame buffer
+//!   stays the link's until `Link::external_in_flight` turns false; the next
+//!   reply (or the BLE mux, [`FrameBufHolder`]) waits for that. The link then
+//!   delivers it or resets the session; either way the host learns which.
 //!
 //! Three rules live here because this is the edge that sees the link's
 //! lifecycle (plan `lp-link-usb-cutover`):
@@ -23,11 +27,12 @@
 //!    transport stops taking the host's messages and refuses every other
 //!    send until the owed hello has gone out (the server loop asks for it
 //!    through [`LinkUpkeep::take_opened_links`] at the top of its next pass).
-//! 3. **A full send budget is waited out, then dropped (D8).** While the host
-//!    is draining, a reply the budget cannot take yet waits for room
-//!    ([`SEND_ROOM_WAIT`] at most); a stalled host's reply is dropped at once,
-//!    counted, and the peer told. The old not-draining latch, which dropped
-//!    replies on a write timeout, is gone.
+//! 3. **A busy frame buffer is waited out, then the reply dropped (D8).**
+//!    While the host is draining, a reply waits for the one before it to be
+//!    cut ([`SEND_ROOM_WAIT`] at most); a stalled host's reply is dropped at
+//!    once, counted, and the peer told (a small notice through the send
+//!    ring). The old not-draining latch, which dropped replies on a write
+//!    timeout, is gone.
 
 use alloc::collections::VecDeque;
 use alloc::vec::Vec;
@@ -42,16 +47,24 @@ use super::usb_link_counters;
 use super::usb_link_shared::UsbLinkShared;
 use super::usb_link_task::now_us;
 use crate::link_upkeep::LinkUpkeep;
+use crate::radio_link::FrameBufHolder;
 use crate::serial::packed_link::PackedLink;
-use crate::serial::server_msg::frame_bytes;
 use crate::serial::server_payload::serialize_server_payload;
 
-/// Longest a reply waits for room in the link's send budget while the host
-/// is draining. Past it the reply is dropped as if the host had stalled.
+/// Longest a reply waits for the frame buffer while the host is draining.
+/// Past it the reply is dropped as if the host had stalled.
 pub const SEND_ROOM_WAIT: Duration = Duration::from_secs(3);
+
+/// Longest another user of the frame buffer (the BLE mux) waits for it
+/// before the link gives up the reply it holds (see [`FrameBufHolder`]).
+pub const FRAME_BUF_RELEASE_WAIT: Duration = Duration::from_secs(3);
 
 /// How often a waiting reply looks for room again.
 const SEND_ROOM_POLL: Duration = Duration::from_millis(2);
+
+/// Largest error notice for a dropped reply, serialized on the stack (it
+/// cannot use the frame buffer: the reply it is about may hold it).
+const NOTICE_BYTES: usize = 192;
 
 /// The USB host link's server transport. See the module docs.
 pub struct UsbLinkTransport {
@@ -134,49 +147,110 @@ impl UsbLinkTransport {
         }
     }
 
-    /// Serialize `msg` and queue it: the learned table's step for it is
-    /// rolled back if it is not queued. `wait`: wait for room in the send
-    /// budget while the host drains.
-    async fn write_once(
-        &mut self,
-        msg: &WireServerMessage,
-        wait: bool,
-    ) -> Result<Queued, TransportError> {
+    /// Serialize `msg` into the frame buffer and queue it as an external
+    /// message: the learned table's step for it is rolled back if it is not
+    /// queued. First waits (while the host drains, [`SEND_ROOM_WAIT`] at
+    /// most) for the link to finish reading the reply before it out of the
+    /// buffer; a stalled host's reply is not waited for.
+    async fn write_once(&mut self, msg: &WireServerMessage) -> Result<Queued, TransportError> {
+        let started = Instant::now();
+        loop {
+            let (in_flight, established, stalled) = self.shared.with_link(|link| {
+                (
+                    link.external_in_flight(),
+                    link.state() == LinkState::Established,
+                    link.is_stalled(now_us()),
+                )
+            });
+            if !established {
+                return Ok(Queued::NoSession);
+            }
+            if !in_flight {
+                break;
+            }
+            if stalled || started.elapsed() >= SEND_ROOM_WAIT {
+                return Ok(Queued::Full);
+            }
+            // The host is draining: let the link task cut frames, then look
+            // again.
+            self.shared.ring();
+            Timer::after(SEND_ROOM_POLL).await;
+        }
         let generation = self.shared.with_link(|link| link.generation());
         let tentative = self.packed.tentative();
+        // No await from here until the message is queued: nothing else can
+        // write the buffer in between.
         let len = serialize_server_payload(msg, self.packed.table_for(&msg.msg))?;
-        let started = Instant::now();
-        let queued = loop {
-            let outcome = self.shared.with_link(|link| {
-                if link.state() != LinkState::Established || link.generation() != generation {
-                    return Queued::NoSession;
-                }
-                match link.send(lp_link::CH_PROTO, frame_bytes(len)) {
-                    Ok(()) => Queued::Yes,
-                    Err(SendError::Full) => Queued::Full,
-                    Err(SendError::TooBig | SendError::BadChannel) => Queued::TooBig,
-                }
-            });
-            match outcome {
-                Queued::Full
-                    if wait
-                        && started.elapsed() < SEND_ROOM_WAIT
-                        && !self.shared.with_link(|link| link.is_stalled(now_us())) =>
-                {
-                    // The host is draining: let the link task move frames,
-                    // then look again. The payload stays in the frame
-                    // buffer, which nothing else writes meanwhile.
-                    self.shared.ring();
-                    Timer::after(SEND_ROOM_POLL).await;
-                }
-                outcome => break outcome,
+        let queued = self.shared.with_link(|link| {
+            if link.state() != LinkState::Established || link.generation() != generation {
+                return Queued::NoSession;
             }
-        };
+            match link.send_external(lp_link::CH_PROTO, len) {
+                Ok(()) => Queued::Yes,
+                Err(SendError::Full) => Queued::Full,
+                Err(SendError::TooBig | SendError::BadChannel) => Queued::TooBig,
+            }
+        });
         match queued {
             Queued::Yes => self.shared.ring(),
             _ => self.packed.rolled_back(tentative),
         }
         Ok(queued)
+    }
+
+    /// Tell the host its reply `id` was dropped, through the send ring (the
+    /// frame buffer may be the dropped reply's predecessor's). Best effort:
+    /// `false` if the ring would not take it either.
+    fn send_drop_notice(&mut self, id: u64, error: &TransportError) -> bool {
+        let notice = WireServerMessage::new(
+            id,
+            ServerMsgBody::Error {
+                error: alloc::format!("response id={id} dropped: {error}"),
+            },
+        );
+        let mut buf = [0u8; NOTICE_BYTES];
+        // JSON on any link, packed or not: a host reads either tag.
+        let Ok(encoded) = lpc_wire::encode_server_payload_into(&mut buf, &notice, None) else {
+            return false;
+        };
+        let queued = self.shared.with_link(|link| {
+            link.state() == LinkState::Established
+                && link.send(lp_link::CH_PROTO, &buf[..encoded.len]).is_ok()
+        });
+        if queued {
+            self.shared.ring();
+        }
+        queued
+    }
+}
+
+/// The frame buffer is also the BLE mux's (one static, D3 until M3). Before
+/// the mux serializes a radio frame into it, the USB link must be done
+/// reading it: wait for the reply it holds to be cut ([`FRAME_BUF_RELEASE_WAIT`]
+/// at most); past that — a host that stopped reading mid-reply — withdraw the
+/// reply if none of it went out, else restart the USB session (its host has
+/// been silent for seconds, and fails the reply itself when it comes back,
+/// D9). Either way the buffer is free when this returns.
+impl FrameBufHolder for UsbLinkTransport {
+    async fn release_frame_buf(&mut self) {
+        let started = Instant::now();
+        while self.shared.frame_buf_in_use() {
+            if started.elapsed() >= FRAME_BUF_RELEASE_WAIT {
+                let now = now_us();
+                self.shared.with_link(|link| {
+                    if link.cancel_external().is_err() {
+                        log::warn!(
+                            "[usb_link] the host stopped reading mid-reply and a radio link \
+                             needs the frame buffer: restarting the USB session"
+                        );
+                        link.restart(now);
+                    }
+                });
+                return;
+            }
+            self.shared.ring();
+            Timer::after(SEND_ROOM_POLL).await;
+        }
     }
 }
 
@@ -204,7 +278,7 @@ impl ServerTransport for UsbLinkTransport {
             ServerMsgBody::SetEncoding { encoding } => Some(encoding),
             _ => None,
         };
-        let queued = match self.write_once(&msg, true).await {
+        let queued = match self.write_once(&msg).await {
             Ok(queued) => queued,
             Err(error) => {
                 if switch_to.is_some() {
@@ -241,7 +315,7 @@ impl ServerTransport for UsbLinkTransport {
                 let error = if matches!(queued, Queued::Full) {
                     usb_link_counters::note_reply_dropped_full();
                     TransportError::Other(alloc::format!(
-                        "host link send budget full ({} B held)",
+                        "host link busy: the reply before it is not out ({} B held)",
                         self.shared.with_link(|link| link.buffered_bytes())
                     ))
                 } else {
@@ -256,18 +330,10 @@ impl ServerTransport for UsbLinkTransport {
                 // the request id, so the client fails that call instead of
                 // timing out. Not for Error frames (no recursion), and without
                 // waiting for room.
-                if !is_error_frame {
-                    let notice = WireServerMessage::new(
-                        id,
-                        ServerMsgBody::Error {
-                            error: alloc::format!("response id={id} dropped: {error}"),
-                        },
+                if !is_error_frame && !self.send_drop_notice(id, &error) {
+                    log::error!(
+                        "[usb_link] error notice for id={id} also dropped; peer left waiting"
                     );
-                    if !matches!(self.write_once(&notice, false).await, Ok(Queued::Yes)) {
-                        log::error!(
-                            "[usb_link] error notice for id={id} also dropped; peer left waiting"
-                        );
-                    }
                 }
                 Err(error)
             }
@@ -403,6 +469,9 @@ mod tests {
 
         // A reply goes back; so does a heartbeat now.
         block(board.send(LinkId::PRIMARY, error_reply(7))).unwrap();
+        // The link reads the reply out of the frame buffer as the host drains
+        // it; the next reply waits for that.
+        host.pump(shared);
         block(board.send(LinkId::PRIMARY, heartbeat())).unwrap();
         host.pump(shared);
         let reply: WireServerMessage =
@@ -452,6 +521,7 @@ mod tests {
         let resets_now = tally().resets.peer_restarted;
         assert!(resets_now > resets_before);
         block(board.send(LinkId::PRIMARY, hello())).unwrap();
+        host.pump(shared);
         block(board.send(LinkId::PRIMARY, log_reply(9))).unwrap();
         host.pump(shared);
         assert_eq!(host.next_proto().unwrap()[0], b'{', "the hello");
@@ -471,6 +541,79 @@ mod tests {
         host.pump(shared);
         assert!(block(board.receive()).unwrap().is_none());
         assert!(payload_errors() > before);
+    }
+
+    /// A reply is read out of the frame buffer by the link; the next one
+    /// waits until it has been, and both arrive whole and in order.
+    #[test]
+    fn a_reply_waits_for_the_one_before_it_to_leave_the_frame_buffer() {
+        let _turn = frame_buf_turn();
+        let shared = UsbLinkShared::leak(0x5678_9abc);
+        let mut board = UsbLinkTransport::new(shared);
+        let mut host = HostEnd::new(0x7777_8888);
+        open_session(shared, &mut board, &mut host);
+        let big = WireServerMessage::new(
+            21,
+            ServerMsgBody::Error {
+                error: "x".repeat(9_000),
+            },
+        );
+        block(board.send(LinkId::PRIMARY, big)).unwrap();
+        assert!(shared.frame_buf_in_use(), "the link is still reading it");
+        let (sent, ()) = block(embassy_futures::join::join(
+            board.send(LinkId::PRIMARY, error_reply(22)),
+            async {
+                Timer::after(Duration::from_millis(5)).await;
+                host.pump(shared);
+            },
+        ));
+        sent.unwrap();
+        host.pump(shared);
+        let first: WireServerMessage =
+            lpc_wire::json::from_slice(&host.next_proto().unwrap()).unwrap();
+        let second: WireServerMessage =
+            lpc_wire::json::from_slice(&host.next_proto().unwrap()).unwrap();
+        assert_eq!((first.id, second.id), (21, 22));
+        assert!(!shared.frame_buf_in_use());
+    }
+
+    /// The BLE mux needs the frame buffer while a host has stopped reading:
+    /// a reply none of which went out is withdrawn; one partly out costs the
+    /// USB session. Either way the buffer is free. (Waits out
+    /// `FRAME_BUF_RELEASE_WAIT` twice.)
+    #[test]
+    fn the_frame_buffer_is_given_up_to_a_radio_link_within_its_bound() {
+        let _turn = frame_buf_turn();
+        let shared = UsbLinkShared::leak(0x6789_abcd);
+        let mut board = UsbLinkTransport::new(shared);
+        let mut host = HostEnd::new(0x9999_aaaa);
+        open_session(shared, &mut board, &mut host);
+
+        block(board.send(LinkId::PRIMARY, error_reply(31))).unwrap();
+        block(board.release_frame_buf());
+        assert!(!shared.frame_buf_in_use());
+        assert!(shared.is_established(), "withdrawn: the session carries on");
+
+        let big = WireServerMessage::new(
+            32,
+            ServerMsgBody::Error {
+                error: "y".repeat(4_000),
+            },
+        );
+        block(board.send(LinkId::PRIMARY, big)).unwrap();
+        // One fragment goes out; then the host stops reading.
+        let t = host.now + 2_000;
+        let frame = shared.with_link(|l| {
+            l.poll_transmit_with(t, &mut super::super::usb_link_task::external_source)
+                .map(<[u8]>::to_vec)
+        });
+        assert!(frame.is_some());
+        block(board.release_frame_buf());
+        assert!(!shared.frame_buf_in_use());
+        assert!(
+            !shared.is_established(),
+            "partly out: the session restarted"
+        );
     }
 
     /// Bring a session up and deliver its hello.
@@ -509,8 +652,10 @@ mod tests {
                 self.now += 2_000;
                 let t = self.now;
                 let mut moved = false;
-                while let Some(frame) = shared.with_link(|l| l.poll_transmit(t).map(<[u8]>::to_vec))
-                {
+                while let Some(frame) = shared.with_link(|l| {
+                    l.poll_transmit_with(t, &mut super::super::usb_link_task::external_source)
+                        .map(<[u8]>::to_vec)
+                }) {
                     self.link.on_bytes(t, &frame);
                     moved = true;
                 }

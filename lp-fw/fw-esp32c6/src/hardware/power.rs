@@ -1,8 +1,14 @@
 //! ESP32-C6 power-off: deep sleep with an EXT1 wake on the power button's pin.
 //!
 //! The server decides *when* (after the frame, with every project unloaded);
-//! this decides *whether it can* and then does it. Waking is a reset, so
-//! [`PowerPlatform::enter_power_off`] never returns on success.
+//! this decides *whether it can* and then does it. Waking is a reset.
+//!
+//! [`PowerPlatform::enter_power_off`] does not sleep on the spot: it hands the
+//! sleep to the USB link task ([`fw_esp32_common::usb_link::when_drained`]),
+//! which runs it once the host has acknowledged what the link holds (the
+//! last replies and log lines), no host is up, or a second has passed — the
+//! same drain a reboot gets. So it returns `Ok` and the server loop runs on,
+//! dark (every project is unloaded), for at most that second.
 //!
 //! Only LP GPIO 0–7 can be an EXT1 source on the C6. The board manifest marks
 //! those `deep-sleep-wake`, and a request for any other pin is refused while
@@ -13,6 +19,9 @@ extern crate alloc;
 
 use alloc::format;
 use alloc::rc::Rc;
+use core::cell::Cell;
+
+use critical_section::Mutex;
 
 use esp_hal::delay::Delay;
 use esp_hal::gpio::{AnyPin, Input, InputConfig, Pull, RtcPinWithResistors};
@@ -28,6 +37,10 @@ use lpc_hardware::{HardwareSystem, HwAddress, HwCapability};
 const SETTLE_MS: u64 = 100;
 const POLL_MS: u32 = 5;
 const LOG_EVERY_MS: u64 = 1_000;
+
+/// The sleep the link task runs once drained: the wake pin and whether it
+/// wakes on high.
+static PENDING_SLEEP: Mutex<Cell<Option<(u8, bool)>>> = Mutex::new(Cell::new(None));
 
 /// The C6's power-off, installed on the server with
 /// [`lpa_server::LpServer::set_power_platform`].
@@ -74,7 +87,30 @@ impl PowerPlatform for Esp32C6PowerPlatform {
     fn enter_power_off(&self, request: &PowerOffRequest) -> Result<(), PowerError> {
         let gpio = self.wake_gpio(request)?;
         let wake_high = request.wake_level == PowerWakeLevel::High;
+        log::info!(
+            "[fw-esp32c6] powering off once the host link drains; wake on gpio{gpio} {}",
+            if wake_high { "high" } else { "low" }
+        );
+        critical_section::with(|cs| PENDING_SLEEP.borrow(cs).set(Some((gpio, wake_high))));
+        fw_esp32_common::usb_link::when_drained(sleep_now);
+        Ok(())
+    }
 
+    fn host_attached(&self) -> bool {
+        crate::board::esp32c6::usb_connection::host_enumerated()
+    }
+}
+
+/// Deep sleep on the pending wake pin; run by the link task (see the module
+/// docs). Never returns: waking is a reset.
+fn sleep_now() -> ! {
+    let Some((gpio, wake_high)) = critical_section::with(|cs| PENDING_SLEEP.borrow(cs).get())
+    else {
+        // Unreachable: the request is stored before the sleep is handed
+        // over. A reset is the safe way out.
+        esp_hal::system::software_reset()
+    };
+    {
         // The RTC and super watchdogs live in the LP domain and keep counting
         // through deep sleep: left armed, they would reset the chip awake. The
         // release wait below may also outlast the watchdog's timeout.
@@ -108,10 +144,6 @@ impl PowerPlatform for Esp32C6PowerPlatform {
         let mut pins: [(&mut dyn RtcPinWithResistors, WakeupLevel); 1] = [(&mut pin, level)];
         let ext1 = Ext1WakeupSource::new(&mut pins);
         rtc.sleep_deep(&[&ext1]);
-    }
-
-    fn host_attached(&self) -> bool {
-        crate::board::esp32c6::usb_connection::host_enumerated()
     }
 }
 

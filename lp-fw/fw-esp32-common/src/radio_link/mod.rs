@@ -10,10 +10,14 @@
 //! - [`line_chunker`]: one framed line → notify-sized values (board → host);
 //! - [`prepared_write`]: an ATT long write (Prepare … Execute) → its bytes;
 //! - [`radio_link_port`]: the channels the radio side and the mux meet on;
-//! - [`link_mux_transport`]: USB plus the radio links as one server transport.
+//! - [`link_mux_transport`]: USB plus the radio links as one server transport;
+//! - [`frame_buf_holder`]: the USB transport letting go of the shared frame
+//!   buffer before a radio frame is serialized into it.
 //!
 //! See `docs/adr/2026-09-24-ble-transport.md`.
 
+#[cfg(feature = "server")]
+pub mod frame_buf_holder;
 pub mod hci_connection_ledger;
 pub mod line_chunker;
 pub mod line_joiner;
@@ -23,6 +27,8 @@ pub mod prepared_write;
 #[cfg(feature = "server")]
 pub mod radio_link_port;
 
+#[cfg(feature = "server")]
+pub use frame_buf_holder::FrameBufHolder;
 #[cfg(feature = "server")]
 pub use link_mux_transport::{LOGIN_DEADLINE_MS, LinkMuxTransport, RADIO_WRITE_DEADLINE_MS};
 #[cfg(feature = "server")]

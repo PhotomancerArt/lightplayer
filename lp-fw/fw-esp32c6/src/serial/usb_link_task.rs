@@ -76,8 +76,4 @@ impl UsbLinkChip for C6UsbChip {
         #[cfg(feature = "spike_uart0_link")]
         return true;
     }
-
-    fn reset(&mut self) -> ! {
-        esp_hal::system::software_reset()
-    }
 }
