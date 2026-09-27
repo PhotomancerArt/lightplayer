@@ -128,6 +128,11 @@ pub struct LabArgs {
     #[arg(long, default_value_t = 250)]
     pub slice_us: u64,
 
+    /// Instead of the soak: bring the link up, tell the board to panic, and
+    /// check the panic arrives as raw text, then a reset, then a new session.
+    #[arg(long)]
+    pub panic_test: bool,
+
     /// Override the host link's minimum retransmit timer, ms (tuning).
     #[arg(long)]
     pub min_rto_ms: Option<u64>,

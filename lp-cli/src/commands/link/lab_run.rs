@@ -8,15 +8,20 @@ use std::path::Path;
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, bail};
+use lp_emu_esp_common::QueueHandle;
 use lp_emu_esp_common::link_faults::{FaultCounters, LinkFaults};
 use lp_emu_esp32c6::machine::{
-    AppSource, Esp32C6Builder, Outcome, StopCondition, TimeGrade, UsbHost,
+    AppSource, Esp32C6Builder, Esp32C6Machine, Outcome, StopCondition, TimeGrade, UsbHost,
 };
-use lp_link::lab::{LabHost, LabPlan, LabReport};
-use lp_link::{Link, LinkConfig, LinkCounters, Micros, SelectiveRepeat};
+use lp_link::lab::{LabCommand, LabHost, LabPlan, LabReport};
+use lp_link::{
+    CH_CONTROL, Link, LinkConfig, LinkCounters, LinkEvent, Micros, ResetReason, SelectiveRepeat,
+};
 use serde_json::{Value, json};
 
 use super::lab_port::LabPort;
+
+type HostLink = Link<SelectiveRepeat>;
 
 /// What one lab run found, with what the host's link and (on the emulator)
 /// the fault injector counted.
@@ -38,57 +43,6 @@ pub struct HostStall {
     pub for_ms: u64,
 }
 
-/// Run the plan over `port` in wall-clock time.
-pub fn run_port(
-    port: &mut LabPort,
-    plan: LabPlan,
-    cfg: LinkConfig,
-    stall: HostStall,
-    configuration: String,
-) -> Result<LabOutcome> {
-    let clock = Instant::now();
-    let now = || clock.elapsed().as_micros() as Micros;
-    let nonce = (std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.subsec_nanos())
-        .unwrap_or(7))
-        ^ std::process::id();
-    let mut link = Link::<SelectiveRepeat>::new(cfg, nonce);
-    let limit = total_budget(&plan);
-    let mut host = LabHost::new(plan, now());
-    let mut buf = vec![0u8; 16 * 1024];
-    let mut next_stall = stall.every_ms;
-    while !host.is_finished() {
-        let t = now();
-        if t > limit {
-            bail!("the run overran its {} s budget", limit / 1_000_000);
-        }
-        if stall.every_ms > 0 && t / 1000 >= next_stall {
-            std::thread::sleep(Duration::from_millis(stall.for_ms));
-            next_stall += stall.every_ms;
-        }
-        let n = port.read(&mut buf).context("reading the link")?;
-        let t = now();
-        if n > 0 {
-            link.on_bytes(t, &buf[..n]);
-        }
-        while let Some(ev) = link.recv() {
-            host.on_event(t, ev);
-        }
-        host.drive(t, &mut link);
-        while let Some(frame) = link.poll_transmit(t) {
-            port.write_all(frame).context("writing the link")?;
-        }
-    }
-    Ok(LabOutcome {
-        report: host.report().clone(),
-        host: link.counters().clone(),
-        seconds: clock.elapsed().as_secs_f64(),
-        faults: None,
-        configuration,
-    })
-}
-
 /// How the in-process emulator run is set up.
 pub struct EmuLab<'a> {
     pub elf: &'a Path,
@@ -100,74 +54,270 @@ pub struct EmuLab<'a> {
     pub slice_us: u64,
 }
 
-/// Run the plan against the C6 machine in this process, in emulated time.
-pub fn run_emu(emu: &EmuLab<'_>, plan: LabPlan, cfg: LinkConfig) -> Result<LabOutcome> {
-    let mut builder = Esp32C6Builder::new()
-        .app(AppSource::Path(emu.elf.to_path_buf()))
-        .time_grade(emu.grade)
-        .reboot_on_reset(true)
-        .usb_host(UsbHost::Attached { draining: true })
-        .usb_sj_queue_source()
-        .usb_in_free_lag_ns(emu.free_lag_ns);
-    if let Some(f) = emu.faults.clone() {
-        builder = builder.usb_faults(f);
+/// The pipe under a host link: move what has arrived into the link and say
+/// what time it is; take the link's frames out.
+pub trait LabPipe {
+    fn step(&mut self, link: &mut HostLink) -> Result<Micros>;
+    fn send(&mut self, frame: &[u8]) -> Result<()>;
+    /// Seconds on the pipe's own clock since it opened.
+    fn seconds(&self) -> f64;
+    fn configuration(&self) -> String;
+    fn faults(&mut self) -> Option<(FaultCounters, FaultCounters)> {
+        None
     }
-    let mut m = builder.build().context("building the emulated C6")?;
-    let queue = m
-        .usb_sj_host_handle()
-        .context("the machine has no in-process USB host queue")?;
-    let nonce = (plan.seed as u32).wrapping_mul(0x9E37_79B1) | 1;
-    let mut link = Link::<SelectiveRepeat>::new(cfg, nonce);
-    let limit = total_budget(&plan);
-    let start = m.micros();
-    let mut host = LabHost::new(plan, 0);
-    let wall = Instant::now();
-    while !host.is_finished() {
+    /// Runs on this pipe reproduce from their seed (the emulator), so the
+    /// host's nonce must come from the seed too.
+    fn deterministic(&self) -> bool {
+        false
+    }
+}
+
+/// A serial device or socket, in wall-clock time.
+pub struct PortPipe<'a> {
+    port: &'a mut LabPort,
+    clock: Instant,
+    stall: HostStall,
+    next_stall: u64,
+    buf: Vec<u8>,
+    configuration: String,
+}
+
+impl<'a> PortPipe<'a> {
+    pub fn new(port: &'a mut LabPort, stall: HostStall, configuration: String) -> Self {
+        PortPipe {
+            port,
+            clock: Instant::now(),
+            stall,
+            next_stall: stall.every_ms,
+            buf: vec![0u8; 16 * 1024],
+            configuration,
+        }
+    }
+
+    fn now(&self) -> Micros {
+        self.clock.elapsed().as_micros() as Micros
+    }
+}
+
+impl LabPipe for PortPipe<'_> {
+    fn step(&mut self, link: &mut HostLink) -> Result<Micros> {
+        if self.stall.every_ms > 0 && self.now() / 1000 >= self.next_stall {
+            std::thread::sleep(Duration::from_millis(self.stall.for_ms));
+            self.next_stall += self.stall.every_ms;
+        }
+        let n = self.port.read(&mut self.buf).context("reading the link")?;
+        let t = self.now();
+        if n > 0 {
+            link.on_bytes(t, &self.buf[..n]);
+        }
+        Ok(t)
+    }
+
+    fn send(&mut self, frame: &[u8]) -> Result<()> {
+        self.port.write_all(frame).context("writing the link")
+    }
+
+    fn seconds(&self) -> f64 {
+        self.clock.elapsed().as_secs_f64()
+    }
+
+    fn configuration(&self) -> String {
+        self.configuration.clone()
+    }
+}
+
+/// The C6 machine in this process, in emulated time.
+pub struct EmuPipe {
+    m: Esp32C6Machine,
+    queue: QueueHandle,
+    slice_us: u64,
+    start: Micros,
+    grade: TimeGrade,
+    wall: Instant,
+}
+
+impl EmuPipe {
+    pub fn new(emu: &EmuLab<'_>) -> Result<Self> {
+        let mut builder = Esp32C6Builder::new()
+            .app(AppSource::Path(emu.elf.to_path_buf()))
+            .time_grade(emu.grade)
+            .reboot_on_reset(true)
+            .usb_host(UsbHost::Attached { draining: true })
+            .usb_sj_queue_source()
+            .usb_in_free_lag_ns(emu.free_lag_ns);
+        if let Some(f) = emu.faults.clone() {
+            builder = builder.usb_faults(f);
+        }
+        let m = builder.build().context("building the emulated C6")?;
+        let queue = m
+            .usb_sj_host_handle()
+            .context("the machine has no in-process USB host queue")?;
+        let start = m.micros();
+        Ok(EmuPipe {
+            m,
+            queue,
+            slice_us: emu.slice_us.max(10),
+            start,
+            grade: emu.grade,
+            wall: Instant::now(),
+        })
+    }
+}
+
+impl LabPipe for EmuPipe {
+    fn step(&mut self, link: &mut HostLink) -> Result<Micros> {
         let stop = StopCondition {
-            stop_cycle: Some(m.cycles() + emu.slice_us * lp_emu_esp32c6::memmap::CYCLES_PER_US),
+            stop_cycle: Some(
+                self.m.cycles() + self.slice_us * lp_emu_esp32c6::memmap::CYCLES_PER_US,
+            ),
             ..Default::default()
         };
-        match m.run_until(&stop) {
+        match self.m.run_until(&stop) {
             Outcome::Deadline { .. } => {}
             other => bail!("the emulated board stopped: {other:?}"),
         }
-        let t = m.micros() - start;
-        if t > limit {
-            bail!(
-                "the run overran its {} s emulated budget",
-                limit / 1_000_000
-            );
-        }
-        let bytes = m.take_usb_sj_output();
+        let t = self.m.micros() - self.start;
+        let bytes = self.m.take_usb_sj_output();
         if !bytes.is_empty() {
             link.on_bytes(t, &bytes);
+        }
+        Ok(t)
+    }
+
+    fn send(&mut self, frame: &[u8]) -> Result<()> {
+        self.queue.push(frame);
+        Ok(())
+    }
+
+    fn seconds(&self) -> f64 {
+        (self.m.micros() - self.start) as f64 / 1e6
+    }
+
+    fn configuration(&self) -> String {
+        let grade = match self.grade {
+            TimeGrade::T1 => "t1",
+            TimeGrade::T2 => "t2",
+            _ => "t3",
+        };
+        log::info!(
+            "emulated {:.1} s in {:.1} s wall",
+            self.seconds(),
+            self.wall.elapsed().as_secs_f64()
+        );
+        format!("lp-emu:esp32c6:{grade}@{}", emu_commit())
+    }
+
+    fn faults(&mut self) -> Option<(FaultCounters, FaultCounters)> {
+        self.m.usb_fault_counters()
+    }
+
+    fn deterministic(&self) -> bool {
+        true
+    }
+}
+
+/// A host link: its nonce from the seed on a deterministic pipe, else fresh
+/// per run.
+pub fn host_link(cfg: LinkConfig, seed: u64, deterministic: bool) -> HostLink {
+    if deterministic {
+        return Link::new(cfg, (seed as u32).wrapping_mul(0x9E37_79B1) | 1);
+    }
+    let nonce = (std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.subsec_nanos())
+        .unwrap_or(7))
+        ^ std::process::id()
+        ^ (seed as u32).wrapping_mul(0x9E37_79B1);
+    Link::new(cfg, nonce | 1)
+}
+
+/// Run the plan to its end over `pipe`.
+pub fn run_plan(pipe: &mut dyn LabPipe, plan: LabPlan, cfg: LinkConfig) -> Result<LabOutcome> {
+    let mut link = host_link(cfg, plan.seed, pipe.deterministic());
+    let limit = total_budget(&plan);
+    let t0 = pipe.step(&mut link)?;
+    let mut host = LabHost::new(plan, t0);
+    while !host.is_finished() {
+        let t = pipe.step(&mut link)?;
+        if t > t0 + limit {
+            bail!("the run overran its {} s budget", limit / 1_000_000);
         }
         while let Some(ev) = link.recv() {
             host.on_event(t, ev);
         }
         host.drive(t, &mut link);
         while let Some(frame) = link.poll_transmit(t) {
-            queue.push(frame);
+            pipe.send(frame)?;
         }
     }
-    let seconds = (m.micros() - start) as f64 / 1e6;
-    let faults = m.usb_fault_counters();
-    let grade = match emu.grade {
-        TimeGrade::T1 => "t1",
-        TimeGrade::T2 => "t2",
-        _ => "t3",
-    };
-    log::info!(
-        "emulated {seconds:.1} s in {:.1} s wall",
-        wall.elapsed().as_secs_f64()
-    );
     Ok(LabOutcome {
         report: host.report().clone(),
         host: link.counters().clone(),
-        seconds,
-        faults,
-        configuration: format!("lp-emu:esp32c6:{grade}@{}", emu_commit()),
+        seconds: pipe.seconds(),
+        faults: pipe.faults(),
+        configuration: pipe.configuration(),
     })
+}
+
+/// Run the plan against the C6 machine in this process, in emulated time.
+#[allow(
+    dead_code,
+    reason = "the emulator soak test's entry point (tests/emu_link_lab.rs, through the lib)"
+)]
+pub fn run_emu(emu: &EmuLab<'_>, plan: LabPlan, cfg: LinkConfig) -> Result<LabOutcome> {
+    let mut pipe = EmuPipe::new(emu)?;
+    run_plan(&mut pipe, plan, cfg)
+}
+
+/// What happened when the board was told to panic.
+#[derive(Debug, Default)]
+pub struct PanicProbe {
+    /// The raw text that arrived outside frames after the command.
+    pub text: String,
+    pub reset: Option<ResetReason>,
+    /// The link came back up with the rebooted board.
+    pub up_again: bool,
+    pub seconds_to_up: f64,
+}
+
+/// Bring the link up, tell the board to panic, and watch for the panic's
+/// raw text, the reset, and the link's return.
+pub fn panic_probe(pipe: &mut dyn LabPipe, cfg: LinkConfig) -> Result<PanicProbe> {
+    let mut link = host_link(cfg, 99, pipe.deterministic());
+    let t0 = pipe.step(&mut link)?;
+    let mut up = false;
+    let mut asked_at: Option<Micros> = None;
+    let mut probe = PanicProbe::default();
+    loop {
+        let t = pipe.step(&mut link)?;
+        while let Some(ev) = link.recv() {
+            match ev {
+                LinkEvent::Up { .. } if asked_at.is_none() => up = true,
+                LinkEvent::Up { .. } => {
+                    probe.up_again = true;
+                    probe.seconds_to_up = (t - asked_at.unwrap_or(t)) as f64 / 1e6;
+                }
+                LinkEvent::Reset { reason, .. } if asked_at.is_some() => {
+                    probe.reset.get_or_insert(reason);
+                }
+                LinkEvent::Text(bytes) if asked_at.is_some() => {
+                    probe.text.push_str(&String::from_utf8_lossy(&bytes));
+                }
+                _ => {}
+            }
+        }
+        if up && asked_at.is_none() && t > t0 + 500_000 {
+            link.send(CH_CONTROL, LabCommand::Panic.to_text().as_bytes())
+                .map_err(|e| anyhow::anyhow!("sending panic: {e:?}"))?;
+            asked_at = Some(t);
+        }
+        while let Some(frame) = link.poll_transmit(t) {
+            pipe.send(frame)?;
+        }
+        if probe.up_again || t > t0 + 20_000_000 {
+            return Ok(probe);
+        }
+    }
 }
 
 /// The whole run's ceiling: every phase, plus its reply timeouts.

@@ -9,11 +9,14 @@ use lp_link::lab::LabPlan;
 
 use super::args::LabArgs;
 use super::lab_port::{LabPort, TermiosMode};
-use super::lab_run::{EmuLab, HostStall, LabOutcome, run_emu, run_port};
+use super::lab_run::{
+    EmuLab, EmuPipe, HostStall, LabOutcome, LabPipe, PortPipe, panic_probe, run_plan,
+};
 
 pub fn lab(args: &LabArgs) -> Result<()> {
     let plan = plan_of(args);
-    let outcome = if let Some(elf) = args.target.strip_prefix("emu:") {
+    let mut port_holder: Option<LabPort> = None;
+    let mut pipe: Box<dyn LabPipe + '_> = if let Some(elf) = args.target.strip_prefix("emu:") {
         let faults = match &args.faults {
             Some(spec) => Some(LinkFaults::parse(spec).map_err(anyhow::Error::msg)?),
             None => None,
@@ -23,22 +26,17 @@ pub fn lab(args: &LabArgs) -> Result<()> {
             "t2" => TimeGrade::T2,
             g => bail!("--grade must be t1 or t2, not {g}"),
         };
-        run_emu(
-            &EmuLab {
-                elf: std::path::Path::new(elf),
-                faults,
-                free_lag_ns: args.free_lag_ns,
-                grade,
-                slice_us: args.slice_us.max(10),
-            },
-            plan,
-            host_config(args),
-        )?
+        Box::new(EmuPipe::new(&EmuLab {
+            elf: std::path::Path::new(elf),
+            faults,
+            free_lag_ns: args.free_lag_ns,
+            grade,
+            slice_us: args.slice_us.max(10),
+        })?)
     } else {
         if args.faults.is_some() || args.free_lag_ns > 0 {
             bail!("--faults and --free-lag-ns act on the emulator's link: use an emu: target");
         }
-        let mut port = LabPort::open(&args.target, args.termios)?;
         let reader = match args.termios {
             TermiosMode::Raw => "native raw termios",
             TermiosMode::Chrome => "native Chromium termios (PARMRK, 0xFF fold)",
@@ -48,17 +46,42 @@ pub fn lab(args: &LabArgs) -> Result<()> {
         } else {
             args.label.clone()
         };
-        run_port(
-            &mut port,
-            plan,
-            host_config(args),
-            HostStall {
-                every_ms: args.host_stall_every_ms,
-                for_ms: args.host_stall_ms,
-            },
-            format!("{label}, reader: {reader}"),
-        )?
+        let stall = HostStall {
+            every_ms: args.host_stall_every_ms,
+            for_ms: args.host_stall_ms,
+        };
+        let stalls = if stall.every_ms > 0 {
+            format!(
+                ", host stalls {} ms every {} ms",
+                stall.for_ms, stall.every_ms
+            )
+        } else {
+            String::new()
+        };
+        let port = port_holder.insert(LabPort::open(&args.target, args.termios)?);
+        Box::new(PortPipe::new(
+            port,
+            stall,
+            format!("{label}, reader: {reader}{stalls}"),
+        ))
     };
+    if args.panic_test {
+        let p = panic_probe(pipe.as_mut(), host_config(args))?;
+        println!("configuration: {}", pipe.configuration());
+        println!(
+            "panic probe: reset {:?}, link up again {} ({:.2} s after the command)",
+            p.reset, p.up_again, p.seconds_to_up
+        );
+        println!("raw text after the command ({} B):", p.text.len());
+        for l in p.text.lines().filter(|l| !l.trim().is_empty()).take(12) {
+            println!("  | {l}");
+        }
+        if p.reset.is_none() || !p.up_again || !p.text.to_lowercase().contains("panic") {
+            bail!("the panic did not arrive as text followed by a reset and a new session");
+        }
+        return Ok(());
+    }
+    let outcome = run_plan(pipe.as_mut(), plan, host_config(args))?;
     print_outcome(&outcome);
     if let Some(path) = &args.json {
         std::fs::write(path, serde_json::to_string_pretty(&outcome.to_json())?)
