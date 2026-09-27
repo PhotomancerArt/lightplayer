@@ -37,11 +37,16 @@ writes through the same gate) and a 250 ms chunk timeout; two timeouts in a
 row latch "not draining" there. Whether this is behind any of the product's
 chunk timeouts on silicon is **not** measured.
 
-**Fix (not applied; the plan ships no product change).** Clear only the
-bits handled: `int_clr` with `serial_in_empty` only if `tx`, and
-`serial_out_recv_pkt` only if `rx` — the experiment patch in the plan
-directory. It belongs in `third_party/esp-hal` (README-LP.md's diff list)
-and upstream.
+**Fix (in review, not merged): PR #855.** Upstream esp-hal fixed this in
+#6089 (clear only the handled bits — the same change as the experiment
+patch in the plan directory) and hardened the same driver in #6104 (a lock
+around every async `int_ena` read-modify-write; after each `wr_done`, wait
+for a new `serial_in_empty` and then `serial_in_ep_data_free`), both
+released in esp-hal 1.2.0. PR #855
+(https://github.com/PhotomancerArt/lightplayer/pull/855) back-ports them,
+with #6097 (`wr_done` in the async flush, which #6104's flush builds on),
+into `third_party/esp-hal`; README-LP.md records it as the fork's third diff,
+dropped on upgrade to ≥ 1.2.0. This entry closes when that PR merges.
 
 **Regression coverage.** None yet. `lp-cli/tests/emu_link_lab.rs` reports
 the board's `edge.write_timeouts`; an assertion of 0 there, with the fix,
