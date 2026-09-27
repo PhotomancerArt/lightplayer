@@ -124,6 +124,11 @@ pub struct LabArgs {
     #[arg(long, default_value = "t1")]
     pub grade: String,
 
+    /// `emu:` only: record the board's block census and print the hottest
+    /// blocks (where the link's instructions go).
+    #[arg(long)]
+    pub blockprof: bool,
+
     /// `emu:` only: emulated microseconds per slice between host passes.
     #[arg(long, default_value_t = 250)]
     pub slice_us: u64,

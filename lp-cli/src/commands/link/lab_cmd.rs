@@ -32,6 +32,7 @@ pub fn lab(args: &LabArgs) -> Result<()> {
             free_lag_ns: args.free_lag_ns,
             grade,
             slice_us: args.slice_us.max(10),
+            blockprof: args.blockprof,
         })?)
     } else if let Some(addr) = args.target.strip_prefix("udp://") {
         let label = if args.label.is_empty() {
@@ -93,6 +94,11 @@ pub fn lab(args: &LabArgs) -> Result<()> {
     }
     let outcome = run_plan(pipe.as_mut(), plan, host_config(args))?;
     print_outcome(&outcome);
+    if let Some(lines) = pipe.profile(40) {
+        for l in lines {
+            println!("{l}");
+        }
+    }
     if let Some(path) = &args.json {
         std::fs::write(path, serde_json::to_string_pretty(&outcome.to_json())?)
             .with_context(|| format!("writing {}", path.display()))?;

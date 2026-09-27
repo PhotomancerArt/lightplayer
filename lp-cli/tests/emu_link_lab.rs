@@ -105,6 +105,7 @@ fn run(elf: &std::path::Path, faults: LinkFaults, stall_ms: u32) -> LabOutcome {
             free_lag_ns: 0,
             grade: TimeGrade::T1,
             slice_us: 250,
+            blockprof: false,
         },
         plan,
         LinkConfig::usb(),

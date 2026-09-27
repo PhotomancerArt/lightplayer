@@ -52,6 +52,9 @@ pub struct EmuLab<'a> {
     /// Emulated microseconds per slice: the host services the link between
     /// slices, so this bounds the host's reaction time.
     pub slice_us: u64,
+    /// Record where the board's instructions went (the emulator's block
+    /// census); [`LabPipe::profile`] then names the hottest blocks.
+    pub blockprof: bool,
 }
 
 /// The pipe under a host link: move what has arrived into the link and say
@@ -69,6 +72,11 @@ pub trait LabPipe {
     /// host's nonce must come from the seed too.
     fn deterministic(&self) -> bool {
         false
+    }
+    /// The board's hottest code, when the pipe can see it (the emulator's
+    /// block census).
+    fn profile(&self, _top: usize) -> Option<Vec<String>> {
+        None
     }
 }
 
@@ -213,7 +221,8 @@ impl EmuPipe {
             .reboot_on_reset(true)
             .usb_host(UsbHost::Attached { draining: true })
             .usb_sj_queue_source()
-            .usb_in_free_lag_ns(emu.free_lag_ns);
+            .usb_in_free_lag_ns(emu.free_lag_ns)
+            .blockprof(emu.blockprof);
         if let Some(f) = emu.faults.clone() {
             builder = builder.usb_faults(f);
         }
@@ -282,6 +291,10 @@ impl LabPipe for EmuPipe {
 
     fn deterministic(&self) -> bool {
         true
+    }
+
+    fn profile(&self, top: usize) -> Option<Vec<String>> {
+        self.m.blockprof_report(top)
     }
 }
 
