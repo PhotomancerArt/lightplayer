@@ -1,6 +1,6 @@
 # ADR: lp-link — one reliable comms layer under the wire, on every transport
 
-- **Status:** proposed (2026-09-27; decided at G1 of
+- **Status:** accepted (2026-09-27, by Yona at G1 of
   `lp2025/2026-09-26-1720-reliable-device-link`)
 - **Deciders:** Yona
 - **Evidence:** planning dir `2026-09-26-1720-reliable-device-link/reports/`

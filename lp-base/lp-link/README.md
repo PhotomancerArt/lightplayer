@@ -5,10 +5,10 @@ BLE, the classic UART, and later UDP and WebSocket. It sits between a raw pipe
 and the wire messages, on **both** ends: the board, Studio (wasm), `lp-cli`,
 and the emulator tools run the same crate.
 
-> **Status: prototype.** It was built and measured in the investigation
+> **Status: prototype (design accepted 2026-09-27).** It was built and measured in the investigation
 > `lp2025/2026-09-26-1720-reliable-device-link` and proven on a C6 in the
 > `test_comms_lab` firmware. It is **not yet wired into the product**. The
-> decision is `docs/adr/2026-09-27-lp-link-one-comms-layer.md` (proposed), and
+> decision is `docs/adr/2026-09-27-lp-link-one-comms-layer.md` (accepted), and
 > the rollout is plan `lp2025/2026-09-26-2215-lp-link-comms-layer`.
 
 ## Why it exists
