@@ -11,31 +11,35 @@
 //!
 //! `SharedLinkClientIo` exists for conversations that ride a link the pump
 //! is still draining (the card's frame feed), and it works because the
-//! transport's demux classifies app-range replies BEFORE the mirror. There
-//! is no demux on this side of the seam: the page buffers raw bytes, and
-//! whoever drains gets them. Two drainers would split the board's answers
-//! between them and both halves would look like a dead board — which is
-//! exactly what `port_client_io.rs` says about the serial port, and it is
-//! the io `browser_transport.rs` runs push, remove and the manifest write
-//! through. So this is that shape: one drainer, pump paused, `close` a
-//! no-op because the port belongs to the model's link.
+//! transport's demux classifies app-range replies BEFORE the mirror. This io
+//! drains the board's lp-link end directly (`emulator_tab_link_port`), the
+//! same queue of decoded messages the pump drains — so, as on the serial
+//! port (`port_client_io.rs`), two drainers would split the board's answers
+//! between them and both halves would look like a dead board. This is that
+//! shape: one drainer, pump paused (plan D2), `close` a no-op because the
+//! port belongs to the model's link. What changed with lp-link is only that
+//! the drainer takes whole messages, so nothing is ever handed back.
+//!
+//! A link reset (the board rebooted under the conversation) fails the
+//! request in flight at once (plan D9) and is teed as a journal note.
 
+use std::collections::VecDeque;
 use std::rc::Rc;
 
 use async_trait::async_trait;
-use js_sys::{Function, Promise, Reflect};
 use lpa_client::ClientIo;
 use lpc_wire::{ClientMessage, TransportError, WireServerMessage};
-use wasm_bindgen::{JsCast, JsValue};
-use wasm_bindgen_futures::JsFuture;
+use wasm_bindgen::JsValue;
 
 use super::emulator_tab_bridge::EmulatorTabPort;
+use super::emulator_tab_link_port::{send_client_json, take_reads};
 use crate::LinkError;
-use crate::device_link::wire_reader::{WireRead, WireReader, complete_prefix_len};
+use crate::device_link::link_port_edge::sleep_ms;
+use crate::device_link::wire_reader::WireRead;
 
-/// How often the receive loop re-drains the page's byte buffer. The same
-/// 20 ms the serial io and the model's pump use; faster would only find an
-/// empty queue.
+/// How often the receive loop re-drains the board's link. The same 20 ms
+/// the serial io and the model's pump use; faster would only find an empty
+/// queue.
 const RECEIVE_POLL_MS: u32 = 20;
 
 /// Quiet budget for one response, as on the serial io.
@@ -45,6 +49,15 @@ const RECEIVE_POLL_MS: u32 = 20;
 /// runs at half speed answers in half-speed guest time, not in twice the
 /// wall seconds this bounds.
 const RESPONSE_BUDGET_MS: u32 = 5_000;
+
+/// What the conversation io tees while it holds the wire: a console line or
+/// a message (as its `M!` line, which the fold's demux reads), or a journal
+/// note from the board's link (a reset).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum EmuTapLine {
+    Line(String),
+    Note(String),
+}
 
 /// One running tab-hosted board, for the effects layer.
 #[derive(Clone, Debug)]
@@ -103,25 +116,26 @@ impl EmulatorTabControl {
         self.port.dispose().await
     }
 
-    /// An `lpa-client` io on this board's wire, for the exclusive-borrow
-    /// conversations. `tap` receives every whole line the io drains, so a
-    /// caller that wants the fold to keep hearing the board while it owns
-    /// the wire can have it.
-    pub fn client_io(&self, tap: Option<Rc<dyn Fn(String)>>) -> Box<dyn ClientIo> {
+    /// An `lpa-client` io on this board's link, for the exclusive-borrow
+    /// conversations. `tap` receives every whole line (and link note) the io
+    /// drains, so a caller that wants the fold to keep hearing the board
+    /// while it owns the wire can have it.
+    pub fn client_io(&self, tap: Option<Rc<dyn Fn(EmuTapLine)>>) -> Box<dyn ClientIo> {
         Box::new(EmuLineIo {
             port: self.port,
-            pending: Vec::new(),
+            pending: VecDeque::new(),
             tap,
         })
     }
 }
 
-/// `ClientIo` over one tab board's bytes.
+/// `ClientIo` over one tab board's link.
 struct EmuLineIo {
     port: EmulatorTabPort,
-    /// Frames drained but not yet handed out (one drain can carry several).
-    pending: Vec<WireServerMessage>,
-    tap: Option<Rc<dyn Fn(String)>>,
+    /// Replies drained but not yet handed out, in order — a link reset among
+    /// them as the error it hands out in its place.
+    pending: VecDeque<Result<WireServerMessage, String>>,
+    tap: Option<Rc<dyn Fn(EmuTapLine)>>,
 }
 
 #[async_trait(?Send)]
@@ -129,16 +143,14 @@ impl ClientIo for EmuLineIo {
     async fn send(&mut self, msg: ClientMessage) -> Result<(), TransportError> {
         let json = lpc_wire::json::to_string(&msg)
             .map_err(|error| TransportError::Other(format!("encode failed: {error}")))?;
-        self.port
-            .write(format!("M!{json}\n").as_bytes())
-            .map_err(|error| TransportError::Other(error.to_string()))
+        send_client_json(self.port, &json).map_err(TransportError::Other)
     }
 
     async fn receive(&mut self) -> Result<WireServerMessage, TransportError> {
         let mut waited = 0_u32;
         loop {
-            if !self.pending.is_empty() {
-                return Ok(self.pending.remove(0));
+            if let Some(next) = self.pending.pop_front() {
+                return next.map_err(TransportError::Other);
             }
             // A failure on the page's work queue means the write never
             // reached the board. The conversation fails NOW rather than
@@ -147,40 +159,26 @@ impl ClientIo for EmuLineIo {
             if let Some(error) = self.port.take_error() {
                 return Err(TransportError::Other(error));
             }
-            let bytes = self
-                .port
-                .take_bytes()
-                .map_err(|error| TransportError::Other(error.to_string()))?;
-            // Read up to the last boundary and hand the rest back: the pump
-            // reads it when the wire is returned, so a line or a packed
-            // frame straddling the end of this conversation is read whole
-            // by exactly one of us.
-            let whole = complete_prefix_len(&bytes);
-            self.port
-                .return_bytes(&bytes[whole..])
-                .map_err(|error| TransportError::Other(error.to_string()))?;
-            // A fresh reader per drain: `whole` ends on a boundary, so
-            // nothing is ever held across drains. It never asks — the pump's
-            // reader owns the opt-in, and hears the board again the moment
-            // the wire is returned.
-            let mut reads = Vec::new();
-            WireReader::new(false).push(&bytes[..whole], 0, |read| reads.push(read));
+            let Some(reads) = take_reads(self.port) else {
+                return Err(TransportError::Other(
+                    "the emulated board's port is not open".to_string(),
+                ));
+            };
             for read in reads {
                 match read {
                     // The board talking — boot output, a log — rather than an
-                    // answer. Empty lines are the separator every frame is
-                    // written after, and were never handed to the tap.
+                    // answer.
                     WireRead::Line(line) => {
                         if let Some(tap) = self.tap.as_ref().filter(|_| !line.is_empty()) {
-                            tap(line);
+                            tap(EmuTapLine::Line(line));
                         }
                     }
                     WireRead::Frame(frame) => {
                         if let Some(tap) = &self.tap {
-                            tap(frame.to_line());
+                            tap(EmuTapLine::Line(frame.to_line()));
                         }
                         match frame.message {
-                            Ok(message) => self.pending.push(message),
+                            Ok(message) => self.pending.push_back(Ok(message)),
                             Err(error) => web_sys::console::warn_1(&JsValue::from_str(&format!(
                                 "[emu-link] malformed frame: {error}"
                             ))),
@@ -189,6 +187,13 @@ impl ClientIo for EmuLineIo {
                     WireRead::Error(error) => web_sys::console::warn_1(&JsValue::from_str(
                         &format!("[emu-link] undeliverable frame: {error}"),
                     )),
+                    // Everything in flight is lost: fail it now (D9).
+                    WireRead::LinkReset(note) => {
+                        if let Some(tap) = &self.tap {
+                            tap(EmuTapLine::Note(note.clone()));
+                        }
+                        self.pending.push_back(Err(note));
+                    }
                     WireRead::Send(_) | WireRead::Note(_) => {}
                 }
             }
@@ -211,27 +216,4 @@ impl ClientIo for EmuLineIo {
         // stays open.
         Ok(())
     }
-}
-
-/// One `setTimeout` tick, with no `web-sys` dependency — the twin of
-/// `port_client_io.rs`'s, which is private to the serial provider's own
-/// feature.
-async fn sleep_ms(ms: u32) {
-    let promise = Promise::new(&mut |resolve, _reject| {
-        let global = js_sys::global();
-        let set_timeout = Reflect::get(&global, &JsValue::from_str("setTimeout"))
-            .ok()
-            .and_then(|value| value.dyn_into::<Function>().ok());
-        match set_timeout {
-            Some(set_timeout) => {
-                let _ = set_timeout.call2(&global, &resolve, &JsValue::from_f64(f64::from(ms)));
-            }
-            // No `setTimeout` in this scope: resolve immediately rather
-            // than hang. The loop degrades to a hot poll, still bounded.
-            None => {
-                let _ = resolve.call0(&JsValue::NULL);
-            }
-        }
-    });
-    let _ = JsFuture::from(promise).await;
 }

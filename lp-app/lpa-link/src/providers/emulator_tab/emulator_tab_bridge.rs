@@ -1,15 +1,14 @@
 //! The Rust side of `emulator_tab_bridge.js`: one emulated board in this
 //! tab, behind a handle that is a plain integer.
 //!
-//! Nothing here decides anything. The port's identity is a `u32` because a
-//! [`DeviceByteStream`](lpa_client::stream::DeviceByteStream) is `Send` and
-//! synchronous and a `JsValue` is neither — the same reason
-//! `browser_serial.rs` holds port ids rather than `SerialPort` objects. The
-//! policy (what a reset means, when a write is applied, which drainer gets
-//! the bytes) lives in the JS beside it, where the awaits are.
-
-use std::cell::RefCell;
-use std::collections::HashMap;
+//! Nothing here decides anything. The port's identity is a `u32`: the port
+//! object lives in the page's registry, and a plain `Copy` handle is what the
+//! link, its lp-link end and the control handle can all hold at once — the
+//! same reason `browser_serial.rs` holds port ids rather than `SerialPort`
+//! objects. The
+//! policy (what a reset means, when a write is applied) lives in the JS
+//! beside it, where the awaits are; the one reader of the bytes is the
+//! board's lp-link end (`emulator_tab_link_port.rs`).
 
 use js_sys::{Promise, Uint8Array};
 use wasm_bindgen::prelude::*;
@@ -17,13 +16,6 @@ use wasm_bindgen_futures::JsFuture;
 
 use crate::LinkError;
 use crate::device_link::wire_tap::{WireTapDir, tap_wire};
-
-thread_local! {
-    /// Per port: how many bytes at the front of the next drain were handed
-    /// back by [`EmulatorTabPort::return_bytes`] — already tapped once, so
-    /// the recorder's tap skips them the second time round.
-    static RETURNED: RefCell<HashMap<u32, usize>> = RefCell::new(HashMap::new());
-}
 
 #[wasm_bindgen(module = "/src/providers/emulator_tab/emulator_tab_bridge.js")]
 extern "C" {
@@ -44,9 +36,6 @@ extern "C" {
 
     #[wasm_bindgen(js_name = takeEmuBytes, catch)]
     fn js_take_bytes(id: u32) -> Result<Uint8Array, JsValue>;
-
-    #[wasm_bindgen(js_name = returnEmuBytes, catch)]
-    fn js_return_bytes(id: u32, bytes: &[u8]) -> Result<(), JsValue>;
 
     #[wasm_bindgen(js_name = takeEmuError, catch)]
     fn js_take_error(id: u32) -> Result<Option<String>, JsValue>;
@@ -105,9 +94,9 @@ pub struct EmulatorTabOptions {
 
 /// One emulated board in this tab.
 ///
-/// `Copy` and `Send` because it is an integer: the port object itself lives
-/// in the page (see the module docs), which is what lets a
-/// `DeviceByteStream` hold one.
+/// `Copy` because it is an integer: the port object itself lives in the page
+/// (see the module docs), which is what lets the link, its lp-link end and
+/// the control handle each hold one.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct EmulatorTabPort {
     id: u32,
@@ -148,6 +137,12 @@ impl EmulatorTabPort {
         Ok(Self { id })
     }
 
+    /// The bridge's handle, which also keys this board's link
+    /// (`emulator_tab_link_port`).
+    pub(super) fn id(&self) -> u32 {
+        self.id
+    }
+
     /// Attach the cable if it is out, then open the byte channel. Applied
     /// in order behind whatever is already queued.
     pub fn reopen(&self) -> Result<(), LinkError> {
@@ -170,35 +165,14 @@ impl EmulatorTabPort {
         js_signals(self.id, dtr, rts).map_err(js_error)
     }
 
-    /// Everything the board has said since the last drain.
+    /// Everything the board has said since the last drain. Only the board's
+    /// link reads these (`emulator_tab_link_port`).
     pub fn take_bytes(&self) -> Result<Vec<u8>, LinkError> {
         let bytes = js_take_bytes(self.id).map_err(js_error)?.to_vec();
-        let seen = RETURNED.with(|returned| {
-            let mut returned = returned.borrow_mut();
-            let Some(pending) = returned.get_mut(&self.id) else {
-                return 0;
-            };
-            let seen = (*pending).min(bytes.len());
-            *pending -= seen;
-            if *pending == 0 {
-                returned.remove(&self.id);
-            }
-            seen
-        });
-        tap_wire(WireTapDir::Rx, "emu-tab", self.id, &bytes[seen..]);
-        Ok(bytes)
-    }
-
-    /// Put bytes back at the front of the buffer, for the next drainer: the
-    /// unfinished tail of what [`Self::take_bytes`] handed out.
-    pub fn return_bytes(&self, bytes: &[u8]) -> Result<(), LinkError> {
-        js_return_bytes(self.id, bytes).map_err(js_error)?;
         if !bytes.is_empty() {
-            RETURNED.with(|returned| {
-                *returned.borrow_mut().entry(self.id).or_insert(0) += bytes.len();
-            });
+            tap_wire(WireTapDir::Rx, "emu-tab", self.id, &bytes);
         }
-        Ok(())
+        Ok(bytes)
     }
 
     /// The first failure the queued work hit since the last ask.

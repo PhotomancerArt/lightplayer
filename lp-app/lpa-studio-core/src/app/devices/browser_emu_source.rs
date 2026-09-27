@@ -2,9 +2,9 @@
 //! running emu actually is in the browser.
 //!
 //! The thinnest possible join, like `browser_sim_source.rs`. `lpa-link`'s
-//! `EmulatorTabStream` already turns the page's board into the byte pipe
-//! `ByteStreamLink` drives, and `EmulatorTabControl` already answers the
-//! verbs. What is left here is the two things neither of them can know:
+//! `EmulatorTabLink` already turns the page's board into a `Link` (over the
+//! board's own lp-link end, the same port model as Web Serial's), and
+//! `EmulatorTabControl` already answers the verbs. What is left here is the two things neither of them can know:
 //! which packaged build this target is born flashed with (D22), and that a
 //! running board's control handle is the [`EmuRuntimeControl`] the studio's
 //! transport asks for.
@@ -39,10 +39,10 @@
 
 use std::rc::Rc;
 
-use lpa_link::device_link::byte_stream::ByteStreamLink;
 use lpa_link::providers::browser_serial_esp32_options::BrowserSerialEsp32Options;
 use lpa_link::providers::emulator_tab::{
-    EmulatorTabControl, EmulatorTabOptions, EmulatorTabPort, EmulatorTabStream, delete_emu_flash,
+    EmuTapLine, EmulatorTabControl, EmulatorTabLink, EmulatorTabOptions, EmulatorTabPort,
+    delete_emu_flash,
 };
 
 use super::device_transport::{DeviceTransportFuture, GrantedLink, LensLineTap, LensTapEvent};
@@ -160,17 +160,12 @@ impl EmuLinkSource for BrowserEmuLinkSource {
             persist_key: Some(session.uid.clone()),
         })
         .map_err(|error| error.to_string())?;
-        // The stream and the control share the port, which is what makes
-        // the exclusive borrow mean something: an effect's io drains the
-        // same buffer the paused pump would have.
-        let link = ByteStreamLink::new(info.clone(), EmulatorTabStream::new(port));
-        // Studio asks every board for packed replies (plan `lp-json-pack`);
-        // `?wire=json` is the dev override that keeps a page on JSON.
-        let link = if lpa_link::device_link::wire_reader::packed_replies_wanted() {
-            link.asking_for_packed_replies(|| js_sys::Date::now() as u64)
-        } else {
-            link
-        };
+        // The link and the control share the port — and the board's one
+        // lp-link end — which is what makes the exclusive borrow mean
+        // something: an effect's io drains the same queue the paused pump
+        // would have. Whether it asks for packed replies is the page's
+        // (`?wire=json|packed`), read when the link opens.
+        let link = EmulatorTabLink::new(info.clone(), port);
         Ok(EmuBacking {
             link: GrantedLink {
                 link: Box::new(link),
@@ -229,8 +224,13 @@ impl EmuRuntimeControl for TabRuntimeControl {
     fn client_io(&self, tap: Option<LensLineTap>) -> Result<Box<dyn lpa_client::ClientIo>, String> {
         // The studio's tap vocabulary is its own; `lpa-link` stays
         // independent of it, so the join is one closure.
-        let tap: Option<Rc<dyn Fn(String)>> = tap.map(|tap| {
-            Rc::new(move |line: String| tap(LensTapEvent::Line(line))) as Rc<dyn Fn(String)>
+        let tap: Option<Rc<dyn Fn(EmuTapLine)>> = tap.map(|tap| {
+            Rc::new(move |line: EmuTapLine| {
+                tap(match line {
+                    EmuTapLine::Line(line) => LensTapEvent::Line(line),
+                    EmuTapLine::Note(note) => LensTapEvent::Note(note),
+                })
+            }) as Rc<dyn Fn(EmuTapLine)>
         });
         Ok(self.control.client_io(tap))
     }
