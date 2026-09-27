@@ -402,6 +402,11 @@ jobs:
               - 'scripts/heap-budget-check.sh'
               - 'scripts/heap-budget-stack-layout.py'
               - 'scripts/heap-budget-record/chips/esp32c6.json'
+              # Since wire proto 30 the chip's heap ratchet and its link-side
+              # gates boot the image through lp-cli's in-process link host
+              # (`emu run --host-link`, `tests/emu_usb_link_gates.rs`).
+              - 'lp-cli/src/commands/emu/**'
+              - 'lp-cli/tests/emu_*.rs'
               - 'justfile'
               - '.github/workflows/pre-merge.yml'
             # emu_esp32v3 is the same shape for the CLASSIC ESP32's machine
@@ -495,6 +500,9 @@ jobs:
               - 'scripts/heap-budget-check.sh'
               - 'scripts/heap-budget-stack-layout.py'
               - 'scripts/heap-budget-record/chips/esp32s3.json'
+              # The S3 arm boots through `lp-cli emu run --chip esp32s3
+              # --host-link` since wire proto 30.
+              - 'lp-cli/src/commands/emu/**'
               - 'justfile'
               - '.github/workflows/pre-merge.yml'
               - '.github/actions/**'
@@ -2289,9 +2297,14 @@ jobs:
       - name: Install just
         uses: extractions/setup-just@v3
 
+      # Tee'd for the figure-moves step: since wire proto 30 the C6's
+      # `hello.proto` / `heartbeat.total_bytes` figures are read by
+      # `lp-cli/tests/emu_usb_link_gates.rs` (a link host is a product
+      # crate, so those gates left the emulator's own suite).
       - name: Emulator-backed lp-cli tests
         id: cli_tests
-        run: cd lp2025 && just test-emu-c6-cli
+        shell: bash
+        run: cd lp2025 && just test-emu-c6-cli 2>&1 | tee "$RUNNER_TEMP/figures-cli.log"
 
       # The shipped image booted whole, read from the allocator figures its
       # own first heartbeat reports. It lives in this job and not in the
@@ -2314,18 +2327,27 @@ jobs:
       # name. The re-baseline measures the image the ratchet just built.
       - name: Figure moves — bless what failed, diff the records
         id: figures_patch
-        if: failure() && steps.figures_heap.outcome == 'failure'
+        if: failure() && (steps.figures_heap.outcome == 'failure' || steps.cli_tests.outcome == 'failure')
         timeout-minutes: 15
         shell: bash
         env:
           FIGURES_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
           LP_HEAP_BUDGET_COMMIT: ${{ github.event.pull_request.head.sha || github.sha }}
+          CLI_TESTS: ${{ steps.cli_tests.outcome }}
+          HEAP: ${{ steps.figures_heap.outcome }}
         run: |
           cd lp2025
-          scripts/ci/figures-patch.py bless --name "Heap budget ratchet (esp32c6)" \
-            --log "$RUNNER_TEMP/figures-heap.log" \
-            --heap-bless "just heap-budget-baseline-chips esp32c6" \
-            --heap-check "just heap-budget-check-chips-c6"
+          if [ "$CLI_TESTS" = failure ]; then
+            scripts/ci/figures-patch.py bless --name "C6 link gates (lp-cli)" \
+              --log "$RUNNER_TEMP/figures-cli.log" \
+              --cargo-test "LP_EMU_BUILD_FW=1 cargo test -p lp-cli --release --test emu_usb_link_gates"
+          fi
+          if [ "$HEAP" = failure ]; then
+            scripts/ci/figures-patch.py bless --name "Heap budget ratchet (esp32c6)" \
+              --log "$RUNNER_TEMP/figures-heap.log" \
+              --heap-bless "just heap-budget-baseline-chips esp32c6" \
+              --heap-check "just heap-budget-check-chips-c6"
+          fi
           scripts/ci/figures-patch.py collect --job heap-budget-chips --job-name "Heap budget (esp32c6 chip)"
 
       - name: Upload the figure patch
