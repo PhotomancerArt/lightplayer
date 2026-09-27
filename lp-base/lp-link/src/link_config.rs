@@ -89,7 +89,13 @@ impl LinkConfig {
             ack_every: 2,
             reorder_threshold: 1,
             initial_rto: 50_000,
-            min_rto: 10_000,
+            // 40 ms, not M2's 10: on the emulated C6 under echo + stream
+            // load a frame's round trip reaches 10–20 ms (64-byte packets
+            // queued behind a 2 KB window each way), and at 10 ms 2% of
+            // frames were resent with nothing lost. At 40 ms: 0.06%, the
+            // same goodput. Loss is found early by SACK and the tail probe;
+            // the timer is the backstop. (M3, lp-emu:esp32c6:t1.)
+            min_rto: 40_000,
             max_rto: 1_000_000,
             max_retries: 20,
             syn_interval: 100_000,
