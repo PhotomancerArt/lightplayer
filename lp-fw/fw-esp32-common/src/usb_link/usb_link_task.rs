@@ -95,7 +95,6 @@ pub async fn run_usb_link<R: Read, W: Write, C: UsbLinkChip>(
 ) -> ! {
     let mut buf = [0u8; 64];
     let mut frame = [0u8; FRAME_BYTES];
-    let mut was_stalled = false;
     let mut enumerated = true;
     let mut sof_sampled_at: Micros = 0;
     let mut reset_asked_at: Option<Micros> = None;
@@ -114,11 +113,7 @@ pub async fn run_usb_link<R: Read, W: Write, C: UsbLinkChip>(
         let now = now_us();
         shared.with_link(|link| {
             crate::log_ring_logger::pump(link, now, LOG_RECORDS_PER_PASS);
-            let stalled = link.is_stalled(now);
-            if stalled && !was_stalled {
-                usb_link_counters::note_stall();
-            }
-            was_stalled = stalled;
+            usb_link_counters::note_stalled(link.is_stalled(now));
         });
 
         let mut more = false;

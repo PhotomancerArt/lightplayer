@@ -104,7 +104,6 @@ pub fn frame_bytes(len: usize) -> &'static [u8] {
 ///
 /// The caller must be the buffer's single writer by protocol (see
 /// [`FRAME_BUF`]) and must drop the slice before anyone reads the buffer.
-#[cfg(feature = "json-pack")]
 pub(crate) unsafe fn frame_buf_mut() -> &'static mut [u8] {
     // SAFETY: exclusivity is the caller's contract (above).
     unsafe {

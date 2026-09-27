@@ -33,7 +33,11 @@ all read this one file.
   into packed, so every board→host line is JSON.
 - **Wire shapes:** proto 28. Every line re-parses into the wire types and
   re-serializes byte for byte (`lpc-wire`'s
-  `recorded_traffic_reserializes_byte_for_byte`).
+  `recorded_traffic_reserializes_byte_for_byte`). Proto 30 (lp-link on USB)
+  replaced the heartbeat's `link` object; `lpc-wire`'s loader
+  (`src/test_traffic.rs`) rewrites the 18 heartbeats' `link` objects into
+  the proto-30 shape at load rather than this file being edited. Re-cut the
+  sample from a proto-30 recording and drop that translation.
 - **Cut with:** `sample_tap.py` in this directory
   (`python3 sample_tap.py <recording.tap> choker-lens-sample.txt`). It
   reassembles each direction into lines and samples `M!` lines evenly per

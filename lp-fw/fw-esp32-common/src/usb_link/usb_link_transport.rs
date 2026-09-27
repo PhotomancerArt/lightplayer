@@ -315,29 +315,33 @@ impl LinkUpkeep for UsbLinkTransport {
 /// joins the server loop future's.
 #[inline(never)]
 fn parse_request(data: &[u8]) -> Option<ClientMessage> {
-    let Ok(text) = core::str::from_utf8(data) else {
-        usb_link_counters::note_bad_request();
-        log::warn!(
-            "[usb_link] dropping a {} B proto message that is not UTF-8",
-            data.len()
-        );
-        return None;
+    // `lpc_wire::decode_client_payload` reads the same bytes, but through
+    // `json::from_slice`: a second instantiation of the whole `ClientMessage`
+    // deserializer beside the `from_str` one the BLE links already link,
+    // measured at +102 KB on the C6 image. Same contract (bare JSON, first
+    // byte `{`), one deserializer.
+    let decoded = match (data.first(), core::str::from_utf8(data)) {
+        (Some(&lpc_wire::PAYLOAD_TAG_JSON), Ok(text)) => {
+            lpc_wire::json::from_str::<ClientMessage>(text).map_err(|e| {
+                lpc_wire::PayloadError::BadClientJson(alloc::string::ToString::to_string(&e))
+            })
+        }
+        (Some(&lpc_wire::PAYLOAD_TAG_JSON), Err(_)) => Err(lpc_wire::PayloadError::NotUtf8),
+        (Some(&tag), _) => Err(lpc_wire::PayloadError::UnknownTag(tag)),
+        (None, _) => Err(lpc_wire::PayloadError::Empty),
     };
-    match lpc_wire::json::from_str::<ClientMessage>(text) {
+    match decoded {
         Ok(msg) => {
             log::debug!("[usb_link] received message id={}", msg.id);
             Some(msg)
         }
         Err(e) => {
-            usb_link_counters::note_bad_request();
-            let mut preview = text.len().min(48);
-            while !text.is_char_boundary(preview) {
-                preview -= 1;
-            }
+            usb_link_counters::note_payload_error();
+            let prefix = &data[..data.len().min(48)];
             log::warn!(
                 "[usb_link] dropping a {} B proto message ({e}); prefix: {:?}",
-                text.len(),
-                &text[..preview]
+                data.len(),
+                alloc::string::String::from_utf8_lossy(prefix)
             );
             None
         }
@@ -440,12 +444,13 @@ mod tests {
 
         // The host restarts (a reload): the board resets with it, the new
         // session is owed a hello, and its replies are JSON again.
-        let resets_before = usb_link_counters::edge().resets_peer_restarted;
+        let resets_before = tally().resets.peer_restarted;
         let mut host = HostEnd::new(0x3333_4444);
         host.pump(shared);
         assert!(host.saw_up());
         assert_eq!(board.take_opened_links(), vec![Link::PRIMARY]);
-        assert!(usb_link_counters::edge().resets_peer_restarted > resets_before);
+        let resets_now = tally().resets.peer_restarted;
+        assert!(resets_now > resets_before);
         block(board.send(LinkId::PRIMARY, hello())).unwrap();
         block(board.send(LinkId::PRIMARY, log_reply(9))).unwrap();
         host.pump(shared);
@@ -460,11 +465,12 @@ mod tests {
         let mut board = UsbLinkTransport::new(shared);
         let mut host = HostEnd::new(0x5555_6666);
         open_session(shared, &mut board, &mut host);
-        let before = usb_link_counters::edge().bad_requests;
+        let payload_errors = || tally().payload_errors;
+        let before = payload_errors();
         host.link.send(lp_link::CH_PROTO, b"M!{not json").unwrap();
         host.pump(shared);
         assert!(block(board.receive()).unwrap().is_none());
-        assert!(usb_link_counters::edge().bad_requests > before);
+        assert!(payload_errors() > before);
     }
 
     /// Bring a session up and deliver its hello.
@@ -603,6 +609,13 @@ mod tests {
             lpc_wire::PACK_OPT_IN_REQUEST_ID,
             ServerMsgBody::SetEncoding { encoding },
         )
+    }
+
+    /// The tally's half of the heartbeat counters (the link task, which
+    /// publishes the link's half, does not run here).
+    fn tally() -> lpc_wire::server::LinkCounters {
+        usb_link_counters::publish(&lp_link::LinkCounters::default());
+        usb_link_counters::heartbeat().unwrap()
     }
 
     fn block<F: core::future::Future>(future: F) -> F::Output {

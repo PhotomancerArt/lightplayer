@@ -303,8 +303,18 @@ fn heartbeat_status(
             status
         }),
         outputs: crate::output::wire_stats_source::current(),
-        link: crate::serial::link_counters::current(),
+        link: heartbeat_link_counters(),
     }
+}
+
+/// The host link's counters for the heartbeat: the lp-link USB link's own on
+/// the C6 and S3, the `M!` loss counters on the classic's UART.
+#[inline(always)]
+fn heartbeat_link_counters() -> Option<lpc_wire::server::LinkCounters> {
+    #[cfg(feature = "usb-link")]
+    return crate::usb_link::usb_link_counters::heartbeat();
+    #[cfg(not(feature = "usb-link"))]
+    return crate::serial::link_counters::current();
 }
 
 /// How many frames the loop runs for, and on whose clock.

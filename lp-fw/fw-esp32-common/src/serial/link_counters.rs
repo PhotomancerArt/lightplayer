@@ -45,26 +45,24 @@ pub fn bump_stale_partial_flush() {
     STALE_PARTIAL_FLUSHES.fetch_add(1, Relaxed);
 }
 
-/// Snapshot for the heartbeat. Always `Some` on these targets — a serial
-/// link exists by construction; zeros mean "no loss", which is itself
-/// evidence.
+/// Snapshot for the heartbeat of an image whose host link speaks `M!` (the
+/// classic). Always `Some` on these targets — a serial link exists by
+/// construction; zeros mean "no loss", which is itself evidence.
 ///
-/// ⚠️ **Integration seam (P1, D7).** The wire type is being rewritten to
-/// lp-link's counters in phase P1. On a USB-link image (feature `usb-link`)
-/// the integration step fills it from
-/// `crate::usb_link::usb_link_counters::snapshot()`; until then the three
-/// not-draining fields, whose latch is gone, are reported as never/zero.
+/// Since `WIRE_PROTO_VERSION` 30 the heartbeat's `link` object is lp-link's
+/// counters (D7), and an `M!` link reports its loss under the nearest names:
+/// a torn line or an RX error is a damaged frame, a full inbound queue is
+/// `rxNoRoom`, a stale partial line is a stale partial. A USB-link image
+/// (C6, S3) reports its link's own counters instead
+/// (`crate::usb_link::usb_link_counters::heartbeat`).
 #[cfg(feature = "server")]
 pub fn current() -> Option<LinkCounters> {
     Some(LinkCounters {
-        parse_failures: PARSE_FAILURES.load(Relaxed),
-        rx_errors: RX_ERRORS.load(Relaxed),
-        queue_full_drops: QUEUE_FULL_DROPS.load(Relaxed),
-        stale_partial_flushes: STALE_PARTIAL_FLUSHES.load(Relaxed),
-        // The not-draining latch these reported is gone (D8); P1 replaces
-        // the fields with lp-link's counters.
-        host_not_draining_ms: None,
-        host_draining_again_ms: None,
-        not_draining_count: 0,
+        damaged: PARSE_FAILURES
+            .load(Relaxed)
+            .saturating_add(RX_ERRORS.load(Relaxed)),
+        rx_no_room: QUEUE_FULL_DROPS.load(Relaxed),
+        stale_partials: STALE_PARTIAL_FLUSHES.load(Relaxed),
+        ..LinkCounters::default()
     })
 }
