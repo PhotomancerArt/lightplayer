@@ -94,6 +94,9 @@ struct ScriptedTransport {
     push_plan: Rc<Cell<PushPlan>>,
     /// What a remove effect does. `Real` runs the real conversation too.
     remove_plan: Rc<Cell<RemovePlan>>,
+    /// Every file set a push effect was handed — the bytes Studio sent
+    /// down the wire, captured before the conversation runs.
+    pushed: Rc<RefCell<Vec<Vec<(String, Vec<u8>)>>>>,
 }
 
 /// The scripted outcomes a remove effect can play out. Same three shapes the
@@ -299,6 +302,7 @@ impl DeviceTransport for ScriptedTransport {
                 expected_hash,
                 fallback_storage_id,
             } => {
+                self.pushed.borrow_mut().push(files.clone());
                 let plan = self.push_plan.get();
                 let device = self.device.clone();
                 Box::pin(async move {
@@ -645,6 +649,7 @@ struct DeviceBench {
     manifest_writes: Rc<RefCell<Vec<String>>>,
     push_plan: Rc<Cell<PushPlan>>,
     remove_plan: Rc<Cell<RemovePlan>>,
+    pushed: Rc<RefCell<Vec<Vec<(String, Vec<u8>)>>>>,
     /// The sim half of the transport, when this bench has one. Held so a
     /// row can assert what is RUNNING as opposed to what is remembered.
     sims: Option<Rc<SimDeviceTransport>>,
@@ -790,6 +795,7 @@ impl DeviceBench {
         let manifest_writes: Rc<RefCell<Vec<String>>> = Rc::new(RefCell::new(Vec::new()));
         let push_plan: Rc<Cell<PushPlan>> = Rc::new(Cell::new(PushPlan::default()));
         let remove_plan: Rc<Cell<RemovePlan>> = Rc::new(Cell::new(RemovePlan::default()));
+        let pushed: Rc<RefCell<Vec<Vec<(String, Vec<u8>)>>>> = Rc::new(RefCell::new(Vec::new()));
         controller.set_device_transport(Rc::new(ScriptedTransport {
             device: device.clone(),
             endpoint: endpoint.to_string(),
@@ -800,6 +806,7 @@ impl DeviceBench {
             manifest_writes: Rc::clone(&manifest_writes),
             push_plan: Rc::clone(&push_plan),
             remove_plan: Rc::clone(&remove_plan),
+            pushed: Rc::clone(&pushed),
         }));
 
         let bench = Self {
@@ -814,6 +821,7 @@ impl DeviceBench {
             manifest_writes,
             push_plan,
             remove_plan,
+            pushed,
             sims: None,
             sim_restarts: Rc::new(Cell::new(0)),
             started: std::time::Instant::now(),
@@ -6014,4 +6022,91 @@ impl crate::BleLinkSource for OneBleBoard {
             None => io,
         }))
     }
+}
+
+/// A library project one `PROJECT_FORMAT_VERSION` behind ("upgrades on
+/// open") pushed through the REAL path — `DevicePushOp` → `prepare_push` →
+/// `read_push_payload` → `DeviceEffectCall::PushProject` → the real
+/// `lpa-client` conversation against the fake's `LpServer`. Pins what the
+/// board is handed: the CURRENT format, never the library's old bytes (a
+/// board never migrates, ADR 2026-07-05, and refuses old bytes at boot).
+#[test]
+fn pushing_an_old_format_library_project_sends_the_current_format() {
+    use lpc_model::PROJECT_FORMAT_VERSION;
+
+    let device = empty_light_player("dev000000daqf6dvvr1");
+    let (mut bench, tasks) = identified(&device, "usb-old-format-1");
+    bench.run_until(&tasks, "the board to report nothing loaded", |bench| {
+        bench
+            .view()
+            .devices
+            .first()
+            .is_some_and(|card| card.loaded_project == lpa_devices::view::LoadedProject::Empty)
+    });
+
+    // A real v10 fixture from the upgrader's corpus, installed as-is.
+    let old = PROJECT_FORMAT_VERSION - 1;
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join(format!("../lpa-upgrade/tests/corpus/v{old}/button-sign"));
+    let mut files = Vec::new();
+    for entry in std::fs::read_dir(&dir).expect("the corpus fixture exists") {
+        let entry = entry.unwrap();
+        let name = entry.file_name().to_string_lossy().to_string();
+        if name == "README.md" {
+            continue;
+        }
+        files.push((name, std::fs::read(entry.path()).unwrap()));
+    }
+    let uid = bench
+        .store
+        .install_package(
+            "Old sign",
+            &files,
+            crate::app::library::PackageProvenance::Created,
+            1.0,
+        )
+        .expect("the old package installs")
+        .uid;
+    let before = bench.library_head(uid);
+    bench.settle_library();
+
+    let card = bench.view().devices[0].clone();
+    bench.push_gesture(
+        card.id,
+        crate::PushSource::Library {
+            project_uid: uid.to_string(),
+        },
+    );
+    bench.run_until(&tasks, "the push to finish", |bench| {
+        bench
+            .view()
+            .devices
+            .first()
+            .is_some_and(|card| card.activity.is_none() && card.last_outcome.is_some())
+    });
+
+    let pushed = bench.pushed.borrow().clone();
+    let outcome = bench.view().devices[0].last_outcome.clone();
+    let manifest = pushed.first().and_then(|files| {
+        files
+            .iter()
+            .find(|(path, _)| path.trim_start_matches('/') == "project.json")
+            .map(|(_, bytes)| String::from_utf8_lossy(bytes).to_string())
+    });
+    let manifest = manifest.expect("the push handed the board a project.json");
+    let format = serde_json::from_str::<serde_json::Value>(&manifest).unwrap()["format"].clone();
+    assert_eq!(
+        format,
+        serde_json::json!(PROJECT_FORMAT_VERSION),
+        "the board was handed format {format}, not the current {PROJECT_FORMAT_VERSION}"
+    );
+    assert!(outcome.is_some_and(|o| o.ok), "the push landed");
+    // The migration is SAVED to the library copy (a new head, the old one
+    // kept in history as the undo), so the board's hash check compares
+    // against bytes the library actually has.
+    assert_ne!(
+        bench.library_head(uid),
+        before,
+        "the library copy was upgraded"
+    );
 }
