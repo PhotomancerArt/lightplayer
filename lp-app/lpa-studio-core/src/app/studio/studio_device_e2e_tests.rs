@@ -1380,6 +1380,53 @@ fn a_replug_under_the_lens_comes_back_ready_and_opens_again() {
     assert_eq!(bench.lens_device_uid().as_deref(), Some(uid.as_str()));
 }
 
+/// The replug-under-the-lens flake, made deterministic: a link whose
+/// arrival has landed but whose own `LinkAttached` is still queued behind
+/// another input (here a stale timer fire) must survive that input's fold.
+/// It used to be adopted by the earlier fold and evicted by its
+/// `retain_links` before the model had routed it, so the model's `Open`
+/// found no link and the board sat at Identifying… forever.
+#[test]
+fn a_link_attach_queued_behind_another_input_still_identifies() {
+    let device = empty_light_player("dev000000daqf6dvvr9");
+    let (mut bench, tasks) = DeviceBench::granted(&device, "usb-race-9");
+    let attach_queued = |bench: &DeviceBench| {
+        bench.inbox.borrow().iter().any(|input| {
+            matches!(
+                input,
+                DeviceInput::Event(lpa_devices::event::Event::LinkAttached { .. })
+            )
+        })
+    };
+    // The connect edge sweeps the grant; its arrival lands and its
+    // `LinkAttached` queues — and nothing has folded yet.
+    bench
+        .controller
+        .note_device_hotplug(crate::app::studio::studio_command::DeviceHotplug::Connected);
+    for _ in 0..100 {
+        if attach_queued(&bench) {
+            break;
+        }
+        pump(&tasks);
+    }
+    assert!(attach_queued(&bench), "the sweep queued the link's attach");
+    bench.inbox.borrow_mut().push_front(DeviceInput::Event(
+        lpa_devices::event::Event::TimerFired {
+            timer: lpa_devices::time::TimerId {
+                scope: lpa_devices::journal::Scope::Roster,
+                seq: u64::MAX,
+            },
+        },
+    ));
+    bench.run_until(&tasks, "the board to identify", |bench| {
+        bench
+            .view()
+            .devices
+            .first()
+            .is_some_and(|card| card.activity.is_none() && card.state_label == "Ready")
+    });
+}
+
 /// One wire, one owner: a card verb that needs the board's wire while the
 /// editor is a lens on it closes the editor first, then RUNS — the card's
 /// verbs always work; the editor is what yields.
