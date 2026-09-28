@@ -110,7 +110,8 @@
       ],
       "aliases": [
         "IO3"
-      ]
+      ],
+      "reserved_reason": "board-quirk: XIAO C6 RF switch power (GPIO3) — held LOW at boot, see board_quirk.rs"
     },
     {
       "address": "/gpio/4",
@@ -237,7 +238,8 @@
       ],
       "aliases": [
         "IO14"
-      ]
+      ],
+      "reserved_reason": "board-quirk: XIAO C6 antenna select (GPIO14) — must not be driven by user code, see board_quirk.rs"
     },
     {
       "address": "/gpio/15",
