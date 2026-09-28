@@ -677,9 +677,13 @@ impl LibraryHost for RecordPushCountingHost {
         self.inner.catalog_snapshot()
     }
 
-    fn catalog(&self, op: CatalogOp) -> LocalBoxFuture<'_, Result<CatalogOutcome, LibraryHostError>> {
+    fn catalog(
+        &self,
+        op: CatalogOp,
+    ) -> LocalBoxFuture<'_, Result<CatalogOutcome, LibraryHostError>> {
         if matches!(op, CatalogOp::RecordPush { .. }) {
-            self.record_push_attempts.set(self.record_push_attempts.get() + 1);
+            self.record_push_attempts
+                .set(self.record_push_attempts.get() + 1);
         }
         self.inner.catalog(op)
     }
