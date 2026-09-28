@@ -68,14 +68,15 @@ pub fn demux_chunk(chunk: WireChunk) -> LinkEvent {
     }
 }
 
-/// One [`WireRead`] → the event it is, or `None` for a request the caller
-/// must write ([`WireRead::Send`]) rather than hand to the model.
+/// One [`WireRead`] → the event it is. A link reset is a
+/// [`LinkEvent::WireNote`] (see
+/// [`crate::device_link::port_read_map::is_link_reset_note`]).
 ///
 /// A frame the reader already decoded is not decoded again; one that did not
 /// decode (console text spliced into a JSON line) takes [`demux_line`]'s
 /// resync.
-pub fn demux_read(read: WireRead) -> Option<LinkEvent> {
-    Some(match read {
+pub fn demux_read(read: WireRead) -> LinkEvent {
+    match read {
         WireRead::Line(line) => LinkEvent::Line(line),
         WireRead::Frame(ReadFrame {
             json,
@@ -85,8 +86,10 @@ pub fn demux_read(read: WireRead) -> Option<LinkEvent> {
         WireRead::Frame(ReadFrame { json, .. }) => demux_frame_json(&json),
         WireRead::Error(error) => LinkEvent::Error(error),
         WireRead::Note(note) => LinkEvent::WireNote(note),
-        WireRead::Send(_) => return None,
-    })
+        // A journal line for the fold; the effects layer also reads it as
+        // "fail the shared conversations now" (`is_link_reset_note`, D9).
+        WireRead::LinkReset(note) => LinkEvent::WireNote(note),
+    }
 }
 
 /// An `M!` body (or a decoded packed frame) → the event it is. See
@@ -282,6 +285,16 @@ mod tests {
                 line: "M!{\"id\":1073741826,\"msg\":\"unloadProject\"}".to_string(),
             }
         );
+    }
+
+    #[test]
+    fn a_link_reset_is_a_journal_note_the_effects_layer_can_recognise() {
+        let note = crate::device_link::port_read_map::link_reset_note(
+            lpc_wire::lp_link::ResetReason::RetryLimit,
+        );
+        let event = demux_read(WireRead::LinkReset(note.clone()));
+        assert_eq!(event, LinkEvent::WireNote(note.clone()));
+        assert!(crate::device_link::port_read_map::is_link_reset_note(&note));
     }
 
     #[test]

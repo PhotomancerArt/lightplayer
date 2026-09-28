@@ -518,6 +518,45 @@
           },
           "type": "object"
         },
+        "endpoint": {
+          "type": "string"
+        },
+        "hold_ms": {
+          "maximum": 4294967295,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "id": {
+          "maximum": 4294967295,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "kind": {
+          "const": "PowerButton"
+        },
+        "mode": {
+          "type": "string"
+        },
+        "stable_ms": {
+          "maximum": 4294967295,
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "properties": {
+        "bindings": {
+          "additionalProperties": {
+            "$ref": "#/$defs/lpc_model::binding::binding_def::BindingDef"
+          },
+          "type": "object"
+        },
         "kind": {
           "const": "Clock"
         },

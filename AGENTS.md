@@ -175,10 +175,25 @@ The core is IO-free state machines; async belongs to platform edges. See
   nothing done for packing. What both ends must agree on is
   `lp_json_pack::PACK_FORMAT_VERSION` (the tag table, the learning rule and
   the table's capacities): **bump it, and `WIRE_PROTO_VERSION`, when you
-  change any of those**. Every host reader keeps **one** `WireStream` per
-  link for the link's whole life, and answers a `WireChunk::Desync` with
-  `PackOptIn::desynced` (the board's reset). See
+  change any of those**. On the **remaining `M!` transports** (BLE, the
+  classic ESP32's UART, `fw-emu`) every host reader keeps **one**
+  `WireStream` per link for the link's whole life, and answers a
+  `WireChunk::Desync` with `PackOptIn::desynced` (the board's reset). See
   `docs/adr/2026-09-25-learned-wire-dictionary.md`.
+- **USB is `lp-link` now, not `M!`.** The C6/S3 silicon and their emulators,
+  Studio's Web Serial and emulator-tab providers, and `lp-cli`'s native
+  serial/`serial:tcp`/`serial:ws` all frame the wire with `lp-link`
+  (`lp-base/lp-link`) instead: a 4-byte header, CRC-32C, selective-repeat
+  ARQ and a session handshake, with the wire's own JSON/packed message as
+  channel 1's payload — one whole message per link message, tagged `{` for
+  JSON or `L` for a learned-dictionary packed frame (never `0x00 'L'` COBS
+  framing; the link already delimits it). Because both ends of a link reset
+  together, the learned table resets **with the link**, not with an epoch:
+  there is no cross-session dictionary, no `Desync`/`PackOptIn::desynced`
+  path and no `R` resync marker on USB — a payload that fails to decode
+  restarts the link instead. That machinery (above) still applies, unchanged,
+  to BLE, the classic UART and `fw-emu`. See `lp-base/lp-link/README.md` and
+  `docs/adr/2026-09-27-lp-link-one-comms-layer.md`.
 
 ## Persisted-format compatibility (the wire rule does NOT apply here)
 
@@ -246,6 +261,7 @@ runtime.
 | `lpc-access`     | Access core: secrets, tiers, HMAC login, backoff (sans-IO) | yes |
 | `lp-server`      | Project management, client connections | yes              |
 | `lp-json-pack`   | JSON Pack: a compact binary form of JSON that decodes back to byte-identical JSON text (`lp-base/`, generic; names coded against an injected seed and a per-connection learned table) | yes |
+| `lp-link`        | Sans-IO link layer under the device wire: framing, CRC-32C, channels, selective-repeat ARQ, session handshake (`lp-base/`, generic; one crate on both ends). Runs the product's USB link (board, host, Studio, tools); BLE/classic-UART/fw-emu are still the pre-lp-link `M!` framing | yes |
 | `lpa-devices`    | Device model: event fold, no IO, no UI | no (host + wasm) |
 | `fw-esp32c6`       | ESP32 firmware                         | yes (bare metal) |
 | `fw-emu`         | RISC-V emulator firmware (CI)          | yes (bare metal) |
@@ -622,7 +638,8 @@ page load by `lpa-studio-web/src/dev_url_flags.rs`; no UI, no persistence):
 `?lens-pause-ms=N` sets the editor lens's pause between device reads
 (`DEVICE_REFRESH_INTERVAL`, 150 ms; clamped to 0–1000 ms; nothing else moves),
 and `?wire=json` stops the page asking boards to pack their replies, so JSON
-and JSON Pack can be compared on one build. Studio otherwise asks every board
+and JSON Pack can be compared on one build (`?wire=packed` is the default,
+spelled out). Studio otherwise asks every board
 whose hello offers this build's pack format; what the board answered is one
 `WireNote` line in the device's journal (`wire: replies packed …` or `wire:
 replies stay JSON — <why>`), and a packed link whose learned table lost step
@@ -636,7 +653,9 @@ Rust (`browser_serial::take_reads`, before any splitting) into an in-memory
 buffer capped at 16 MiB (one console warning at the cap, then it drops). Run
 `lpWireCapture()` in the page's console to download it as
 `wire-capture-<unix-ms>.bin`; the capture keeps running, and the file is
-exactly what arrived, so `lp-cli wire unpack --sizes < file` reads it.
+exactly what arrived — a board's USB link is `lp-link` bytes now, and
+`lp-cli wire unpack --sizes < file` decodes them by default (`--lines` reads
+the old `M!`-line framing instead, for a BLE/classic-UART/`fw-emu` capture).
 `?device-log=<trace|debug|info|warn|error>` asks each board for that log
 level (`SetLogLevel`) once per link, after its hello and the packed-reply
 opt-in; the answer is a `dev: …` `WireNote` line, never a frame. Both cover
@@ -934,7 +953,7 @@ just bless-chips [esp32c6|esp32v3|esp32s3|engine]   # a firmware change moved a 
 just apply-ci-figures [pr]                      # …or take the patch CI already blessed on the PR (its sticky "figures moved" comment) — no firmware build
 just emu-c6 <elf> --strict-bus --timeout 6s     # the workshop binary, thirty flags
 LP_EMU_WIRE_TAP=<dir> just studio-dev-emu; just wire-tap-stat <dir>/c6-a.tap --ledger   # exact wire bytes of a real Studio session, by JSON path — the tool for any wire-size claim
-lp-cli wire unpack --sizes < capture.bin > capture.txt   # rewrite packed frames (JSON Pack) back to `M!{json}` lines, with a per-frame/total size report on stderr
+lp-cli wire unpack --sizes < capture.bin > capture.txt   # decode a board's lp-link capture back to `M!{json}` + console lines (`--lines` for an M! transport), with a per-message/total size report on stderr
 LP_WIRE_ENCODING=json lp-cli upload projects/test/basic serial:auto   # lp-cli's own serial transports never ask for packed — a JSON-vs-packed comparison, or a link you want to watch as text
 just bench-emu-c6                               # its speed probe (an oracle, never a gate)
 scripts/emu/oracle-sweep.sh <bin-a> <bin-b>     # the identity oracle ACROSS BINARIES: uart + cycles + decoded FRAMES

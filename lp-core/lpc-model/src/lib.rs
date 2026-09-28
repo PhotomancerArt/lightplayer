@@ -134,6 +134,7 @@ pub use nodes::{
     OutputNameError, OutputPortDef, OutputPortDefView, PATTERN_EXPORT_FOLDER,
     PLAYLIST_CYCLE_SHAPE_NAME, PatchConfig, PathSpec, PlayState, PlaylistCycle, PlaylistDef,
     PlaylistDefView, PlaylistEntry, PlaylistEntryView, PlaylistState, PlaylistStateView,
+    PowerButtonDef, PowerButtonDefView, PowerButtonMode, PowerButtonState, PowerButtonStateView,
     ProjectionShape, ProvenanceDef, STARTER_SHADER_GLSL, STARTER_STEM_PLACEHOLDER, ScalarHint,
     ScalarHintView, ShaderBudget, ShaderBudgetError, ShaderCoords, ShaderDef, ShaderDefView,
     ShaderHeaderGenError, ShaderMapKeyDef, ShaderParamDef, ShaderParamDefView, ShaderSlotDef,

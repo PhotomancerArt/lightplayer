@@ -239,6 +239,29 @@ fn workbench_nodes_view() -> Element {
 }
 
 #[story(
+    description = "The project page while the board's link reconnects (plan D13): the same Nodes view, whole and untouched, with the calm Reconnecting strip over it. Before lp-link, a link reset failed the editor's reads and three failures closed the editor and sent the page to Devices; now the page stays, the strip says what is happening, and it goes the moment the board says hello again. A board that is really gone (unplugged, or silent past 20 s) still closes the editor as before."
+)]
+fn workbench_link_reconnecting() -> Element {
+    let view = view_with_surface(None).with_lens_reconnecting(Some(
+        lpa_studio_core::UiLensReconnecting::new(
+            "Desktop sim",
+            lpa_studio_core::LinkTrouble::Restarted,
+        ),
+    ));
+    rsx! {
+        div { class: "tw:flex tw:h-[720px] tw:flex-col",
+            StudioShell {
+                view,
+                running: true,
+                project_view: ProjectView::Workspace,
+                workbench_hrefs: Some(WorkbenchHrefs::inert_all()),
+                on_action: move |_| {},
+            }
+        }
+    }
+}
+
+#[story(
     description = "The workbench's Map view: the SAME Tree panel now shows the fixture tree (one panel, one ROLE — the view supplies the content, D10) with its summary footer pinned at the dock bottom (D12); the right roster reads Props · Outputs · Device with Props attached. The unified editor's coordinator is the center."
 )]
 fn workbench_mapping_view() -> Element {

@@ -1,6 +1,8 @@
 # ADR: The learned wire dictionary — JSON Pack learns its names per connection
 
-- **Status:** Accepted
+- **Status:** Accepted (amended 2026-09-27 — see the lp-link cut-over note
+  at the end: on USB the table resets with the link, with no epoch, no
+  desync/re-ask and no resync marker)
 - **Date:** 2026-09-25
 - **Deciders:** Photomancer (Yona, G0 of plan `lp2025/2026-09-25-0006-learned-wire-dictionary`)
 - **Supersedes:** None (amends `2026-09-24-json-pack-wire-encoding.md`; supersedes D17 of the wire-version-skew vision)
@@ -219,3 +221,46 @@ after the board's reset.
   rule makes a phantom empty frame); the second is harmless but miscounted.
 - A standing-subscription live view would make an LZ layer worth measuring
   again; a learned table and LZ compose.
+
+## Amended 2026-09-27 — lp-link USB cut-over (PR #854)
+
+On USB (C6/S3 silicon, their emulators, Studio's Web Serial and
+emulator-tab providers, `lp-cli`'s native serial/`serial:tcp`/`serial:ws`)
+the "Commit, rollback and resync" section above no longer applies as
+written: `lp-link` is a reliable link (selective-repeat ARQ, resends, a
+CRC-32C keyed by the session), so the loss it was built to survive
+mid-session — a frame the writer didn't know was gone — cannot reach the
+learned-table layer any more.
+
+- **The table resets with the link, not with an epoch.** Both ends of an
+  `lp-link` session reset together (a boot, a reload, a replug or a give-up
+  all yield `Reset` on both sides at once), so the board's packed mode and
+  the host's learned table both revert to nothing on `Up`, and a fresh
+  opt-in follows. There is no per-frame epoch byte or state-hash header on
+  USB: the link's own frame sequencing already tells the two ends whether
+  they agree on what has been sent.
+- **No `WireChunk::Desync`, no `PackOptIn::desynced` re-ask.** A USB payload
+  that fails to decode counts as a `payload_errors` event and restarts the
+  link (`Link::restart`) rather than asking the host to re-opt-in mid-
+  session — a desync over a link this reliable is a bug to count, not a
+  state to recover through. The opt-in itself still happens once per link
+  `Up`, as the 2026-09-24 ADR's amendment above says.
+- **No `lpc_wire::RESYNC_SEQUENCE` / `'R'` frame.** The resync marker
+  existed because a write the board abandoned mid-frame could leave a
+  reader stuck inside an unterminated frame forever, once the board fell
+  back to silently reverting to JSON. `lp-link` frames are always
+  terminated (COBS-FF between two `0x00`s) and a stalled write is the
+  link's own concern (bounded by the send budget, not by hoping the next
+  write starts clean), so there is nothing for a marker to announce.
+- **Captures decode from the link's own session start**, the same rule as
+  before, just keyed by `lp-link`'s SYN handshake instead of a packed
+  frame's epoch byte: `lp-cli wire unpack` reads from a link's `Session`
+  event, and a frame it cannot read (a capture that starts mid-session) is
+  written as `<unreadable message: …>` and counted, never guessed at.
+
+This section's mechanism — the epoch, the state hash, `WireChunk::Desync`,
+`PackOptIn::desynced` and the `'R'` resync marker — is **unchanged** for
+BLE, the classic ESP32's UART and `fw-emu`, which still ride the
+pre-`lp-link` `M!` wire and still need it. See
+`lp-base/lp-link/README.md` and
+`docs/adr/2026-09-27-lp-link-one-comms-layer.md`.

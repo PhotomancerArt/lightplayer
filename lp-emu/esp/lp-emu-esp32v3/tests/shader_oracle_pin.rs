@@ -317,14 +317,44 @@ fn sha256_of(path: &Path) -> String {
     hex(&Sha256::digest(&bytes))
 }
 
-/// The `rgb=` of the **last** `[OUT] dump frame=` line in a console — the
-/// deferred lit dump, not the open-time black one.
+/// The `rgb=` of the **last** whole `[OUT] dump` in a console — the deferred
+/// lit dump, not the open-time black one.
+///
+/// A dump is `part=i/n` lines (`frame_dump::DUMP_LEDS_PER_PART` LEDs each —
+/// one log record on the lp-link chips is cut at 200 bytes, and the three
+/// chips share one `frame_dump`), so the parts' `rgb=` are joined in order
+/// and only a dump whose parts all arrived counts.
+/// `scripts/frame-dump-hex.sh` is the same reader for the walks.
 fn last_dump_rgb(text: &str) -> Option<String> {
-    text.lines()
-        .filter(|l| l.contains("[OUT] dump frame="))
-        .filter_map(|l| l.split("rgb=").nth(1))
-        .map(|rest| rest.trim().to_string())
-        .next_back()
+    let mut last = None;
+    let mut current = String::new();
+    let mut next_part = 0u32;
+    for line in text.lines().filter(|l| l.contains("[OUT] dump frame=")) {
+        let Some(part) = line
+            .split_whitespace()
+            .find_map(|w| w.strip_prefix("part="))
+            .and_then(|p| p.split_once('/'))
+            .and_then(|(i, n)| Some((i.parse::<u32>().ok()?, n.parse::<u32>().ok()?)))
+        else {
+            continue;
+        };
+        let Some(hex) = line.split("rgb=").nth(1).map(str::trim) else {
+            continue;
+        };
+        if part.0 == 1 {
+            current = hex.to_string();
+            next_part = 2;
+        } else if part.0 == next_part {
+            current.push_str(hex);
+            next_part += 1;
+        } else {
+            next_part = 0;
+        }
+        if part.0 == part.1 && next_part == part.1 + 1 {
+            last = Some(current.clone());
+        }
+    }
+    last
 }
 
 // ---------------------------------------------------------------------------
@@ -689,14 +719,17 @@ fn deinterleave_rejoins_a_record_the_console_cut_in_four() {
     assert_eq!(deinterleave(whole), whole);
 }
 
-/// The dump reader takes the LAST `[OUT] dump` line, which is the deferred
-/// lit one — the first is the open-time black frame.
+/// The dump reader takes the LAST whole `[OUT] dump`, which is the deferred
+/// lit one — the first is the open-time black frame — joining its parts.
 #[test]
 fn the_dump_reader_takes_the_deferred_lit_dump_and_not_the_open_one() {
     let console = "INFO - [OUT] open endpoint=x bytes=192 leds=64 (frame-dump build)\n\
-         INFO - [OUT] dump frame=1 leds=64 shown=64 crc=0x00000000 rgb=0000\n\
+         INFO - [OUT] dump frame=1 leds=64 shown=64 crc=0x00000000 part=1/1 rgb=0000\n\
          INFO - [OUT] frame=60 leds=64 crc=0x55772254 lit=64 first=(50,74,2)\n\
-         INFO - [OUT] dump frame=31 leds=64 shown=64 crc=0x55772254 rgb=324a02\n";
-    assert_eq!(last_dump_rgb(console).as_deref(), Some("324a02"));
+         INFO - [OUT] dump frame=31 leds=64 shown=64 crc=0x55772254 part=1/2 rgb=324a02\n\
+         INFO - [OUT] dump frame=31 leds=64 shown=64 crc=0x55772254 part=2/2 rgb=4c2d05\n\
+         INFO - [OUT] dump frame=90 leds=64 shown=64 crc=0x55772254 part=1/2 rgb=ffffff\n";
+    // The last WHOLE dump: frame 90's second part never arrived.
+    assert_eq!(last_dump_rgb(console).as_deref(), Some("324a024c2d05"));
     assert_eq!(last_dump_rgb("nothing here\n"), None);
 }

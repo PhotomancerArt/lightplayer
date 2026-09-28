@@ -81,10 +81,27 @@ class Handler(BaseHTTPRequestHandler):
     # -- routes ----------------------------------------------------------
     def do_GET(self):
         path = self.path.split("?")[0]
-        if path == "/":
-            body = (HERE / "index.html").read_bytes()
+        if path in ("/", "/soak", "/lab"):
+            # /soak: the link soak's raw reader (soak.html; plan
+            # lp2025/2026-09-26-1720-reliable-device-link, M1b). /lab: the
+            # comms lab over Web Serial (lab.html, M3).
+            page = {"/soak": "soak.html", "/lab": "lab.html"}.get(path, "index.html")
+            body = (HERE / page).read_bytes()
             self.send_response(200)
             self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+        elif path.startswith("/pkg/"):
+            # The comms lab's wasm (spikes/link-lab-wasm/build.sh).
+            f = HERE.parent / "link-lab-wasm" / "pkg" / os.path.basename(path)
+            if not f.is_file():
+                self._json(404, {"error": f"no {f.name}: run spikes/link-lab-wasm/build.sh"})
+                return
+            body = f.read_bytes()
+            kind = "application/wasm" if f.suffix == ".wasm" else "text/javascript"
+            self.send_response(200)
+            self.send_header("Content-Type", kind)
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
             self.wfile.write(body)
@@ -134,6 +151,22 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         global _next_cmd_id
         path = self.path.split("?")[0]
+        if path == "/soak-result":
+            # The soak page's capture or its meta, written under SOAK_OUT
+            # (default ./soak-out) as <name>; raw bytes, never parsed here.
+            query = self.path.split("?")[1] if "?" in self.path else ""
+            name = "capture.bin"
+            for part in query.split("&"):
+                if part.startswith("name="):
+                    name = os.path.basename(part[5:]) or name
+            length = int(self.headers.get("Content-Length", "0"))
+            raw = self.rfile.read(length) if length else b""
+            out = Path(os.environ.get("SOAK_OUT", "soak-out"))
+            out.mkdir(parents=True, exist_ok=True)
+            (out / name).write_bytes(raw)
+            log_line(f"[soak] wrote {out / name} ({len(raw)} B)")
+            self._json(200, {"ok": True, "bytes": len(raw)})
+            return
         body = self._read_body()
         if path == "/cmd":
             timeout_s = float(body.pop("timeoutMs", 30000)) / 1000.0

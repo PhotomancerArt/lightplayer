@@ -23,6 +23,23 @@ pub trait DeviceByteStream: Send {
     /// good returns [`ByteStreamError::Closed`].
     fn read_available(&mut self, buf: &mut [u8]) -> Result<usize, ByteStreamError>;
 
+    /// [`read_available`](Self::read_available), waiting at most `max_wait`
+    /// for the first byte.
+    ///
+    /// A link's timers (acknowledgements within a millisecond, resends within
+    /// tens) cannot sit behind a port's whole read timeout, so the transport
+    /// thread asks for a shorter wait when one is due. The default ignores
+    /// `max_wait`, which is right for streams whose reads never wait (TCP,
+    /// WebSocket, the fake board): the caller sleeps out the rest itself.
+    fn read_available_within(
+        &mut self,
+        buf: &mut [u8],
+        max_wait: core::time::Duration,
+    ) -> Result<usize, ByteStreamError> {
+        let _ = max_wait;
+        self.read_available(buf)
+    }
+
     /// Write all of `bytes` to the device.
     ///
     /// Must return in bounded time — the framing thread that owns the stream

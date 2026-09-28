@@ -69,13 +69,18 @@ pub trait OutputProvider {
     /// - Hardware write failed
     fn write(&self, handle: OutputPortHandle, data: &[u16]) -> Result<(), OutputError>;
 
-    /// Close an output port
+    /// Close an output port.
+    ///
+    /// Physical providers should leave the output in a safe, off state when
+    /// they can — a WS281x strip keeps showing its last frame for as long as
+    /// it has power — before releasing the channel.
     ///
     /// # Arguments
     /// * `handle` - Output port handle from `open()`
     ///
     /// # Returns
-    /// Returns `Ok(())` on success, or `OutputError` if handle is invalid
+    /// Returns `Ok(())` on success, or `OutputError` if the handle is invalid
+    /// or the provider could not write its final off state
     fn close(&self, handle: OutputPortHandle) -> Result<(), OutputError>;
 
     /// Complete every transmission begun by [`write`](OutputProvider::write).

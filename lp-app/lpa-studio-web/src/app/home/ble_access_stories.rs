@@ -780,6 +780,7 @@ fn ble_card() -> DeviceView {
         remembered_firmware: None,
         degraded: None,
         engine_fps: None,
+        link_counters: None,
         loaded_project: DeviceLoadedProject::Running {
             label: "playful-choker".to_string(),
         },

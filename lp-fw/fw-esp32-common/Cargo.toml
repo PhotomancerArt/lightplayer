@@ -28,6 +28,13 @@ embassy-futures = "0.1"
 embedded-hal-async = "1.0"
 embedded-io-async = "0.6"
 log = { workspace = true, default-features = false }
+# `usb_link` (feature `usb-link`): the USB-Serial-JTAG host link runs lp-link
+# (plan `lp-link-usb-cutover`; docs/adr/2026-09-27-lp-link-one-comms-layer.md).
+# no_std + alloc, time and nonce injected; `log` for the log ring's adapter.
+lp-link = { path = "../../lp-base/lp-link", default-features = false, features = ["log"], optional = true }
+# The log ring's lock (`log_ring_logger`): a short critical section around one
+# record push, safe from any context. The chip crate supplies the impl.
+critical-section = { version = "1", optional = true }
 hashbrown = { workspace = true }
 littlefs-rust = { version = "0.1.0", default-features = false, features = ["alloc"], optional = true }
 
@@ -62,9 +69,16 @@ default = []
 # whose host opted in (`ClientRequest::SetEncoding`). Without it the board
 # answers every opt-in "json". On by default in all three chip crates (Q4).
 json-pack = ["server"]
+# The USB-Serial-JTAG host link on lp-link (`usb_link`, `log_ring_logger`):
+# the C6 and S3 turn it on; the classic (UART, `M!` lines until M5) does not.
+# The server transport over it (`usb_link::usb_link_transport`) also needs
+# `server`.
+usb-link = ["dep:lp-link", "dep:critical-section"]
 server = ["dep:littlefs-rust", "dep:lp-json-pack", "dep:lp-recovery", "dep:lpa-server", "dep:lpc-model", "dep:lpc-wire", "dep:lpfs", "dep:ser-write-json"]
 
 [dev-dependencies]
 # Host tests of the link mux run embassy-sync channels, whose
 # `CriticalSectionRawMutex` needs an implementation on the host.
 critical-section = { workspace = true, features = ["std"] }
+# The USB link transport's host tests read the clock and may wait for room.
+embassy-time = { version = "0.5.0", features = ["std", "generic-queue-8"] }

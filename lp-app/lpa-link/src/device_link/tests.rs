@@ -189,21 +189,22 @@ fn light_player(uid: &str) -> FakeEsp32Device {
     )))
 }
 
-/// Drain whatever the device has already put on the wire, so the next link to
-/// open it lands MID-STREAM: the boot banner and the unsolicited id-0 hello
-/// are already gone, exactly like connecting to a board that has been running
-/// for an hour.
+/// Drain the device's boot text, so the next link to open it lands
+/// MID-STREAM: the boot banner is already gone, exactly like connecting to a
+/// board that has been running for an hour. (Since lp-link a board says
+/// hello first on every link session, so the next link hears one unless the
+/// board is starving its answers; what it can no longer hear is the boot.)
 fn run_past_the_boot_hello(device: &FakeEsp32Device) {
     let mut stream = crate::providers::fake_device::FakeDeviceByteStream::new(device.clone());
     let mut buf = [0u8; 4096];
     let mut seen = String::new();
     let deadline = Instant::now() + RUN_TIMEOUT;
-    while !seen.contains("\"hello\"") {
+    while !seen.contains("starting server loop") {
         let read = stream.read_available(&mut buf).expect("the fake is alive");
         seen.push_str(&String::from_utf8_lossy(&buf[..read]));
         assert!(
             Instant::now() < deadline,
-            "the fake never said hello; saw: {seen}"
+            "the fake never finished booting; saw: {seen}"
         );
         std::thread::sleep(Duration::from_millis(2));
     }

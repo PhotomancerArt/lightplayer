@@ -1,11 +1,21 @@
 //! G6-3 / M6 G2-2: the shipped image with no host on USB-Serial-JTAG. The
 //! observable is register and static state, not a log line
 //! (`periph/usb_sj.rs`): esp-println's `TIMED_OUT` latches after its one
-//! 50,000-iteration wait, the connected path never arms
-//! `int_ena.serial_out_recv_pkt`, the **observation** log holds what the
-//! guest tried to print while the **delivered** log is empty (nobody
-//! received anything), and the machine is idle in `wfi` with the tick and
-//! the RWDT feeds alive.
+//! 50,000-iteration wait, the **observation** log holds what the guest tried
+//! to print while the **delivered** log is empty (nobody received anything),
+//! and the machine is idle in `wfi` with the tick and the RWDT feeds alive.
+//!
+//! Since wire proto 30 the USB port belongs to the lp-link task
+//! (`fw_esp32_common::usb_link`, plan `lp-link-usb-cutover`), and two claims
+//! changed with it, both on purpose. The RX path IS armed now
+//! (`int_ena.serial_out_recv_pkt`): the link task listens from boot, because
+//! a host that plugs in later opens the link with a handshake the board has
+//! to hear — the old `io_task` only armed it once it believed a host was
+//! connected. And the old not-draining latch's stamps are gone with the
+//! latch; what stands in their place is the link task's own edge counters:
+//! every frame it would have sent (its handshake, retried on its timer) was
+//! DISCARDED for want of a host (no SOF), none was written, and no write
+//! timed out.
 //!
 //! The image is `esp32c6,server,radio,memory_fs` — the shipped set minus
 //! flash (director note 2; the flash-backed one spins on `SPI1.cmd` until
@@ -24,7 +34,7 @@ const SERIAL_OUT_RECV_PKT: u32 = 1 << 2;
 
 #[test]
 #[ignore = "needs the fw-esp32c6 ELF; run through `just test-emu-c6`"]
-fn with_no_host_the_printer_times_out_once_and_the_rx_path_is_never_armed() {
+fn with_no_host_the_printer_times_out_once_and_the_link_task_discards_its_frames() {
     let elf = match fw_esp32c6_image(&FwImage::SHIPPED) {
         Ok(path) => path,
         Err(reason) => {
@@ -65,19 +75,15 @@ fn with_no_host_the_printer_times_out_once_and_the_rx_path_is_never_armed() {
     assert_eq!(spins.len(), 1, "{spins:?}");
     assert!(spins[0].contains("USB_DEVICE+0x004 ep1_conf = 0x00000000 x10000"));
 
-    // The connected path never armed RX: bit 2 of `int_ena` is clear at the
-    // end and was never written set (esp-emu's `INT_ENA = 0x4`, inverted).
+    // The link task listens from boot: RX is armed (bit 2 of `int_ena`),
+    // with no host to hear. (Before proto 30 the `io_task` armed it only for
+    // a host it believed connected, and this asserted the opposite.)
     let int_ena = m.peek_word(USB_INT_ENA).expect("USB_DEVICE.int_ena");
-    assert_eq!(int_ena & SERIAL_OUT_RECV_PKT, 0, "int_ena = {int_ena:#x}");
-    let armed: Vec<&String> = lines
-        .iter()
-        .filter(|l| l.contains("W4 USB_DEVICE+0x010 int_ena"))
-        .filter(|l| {
-            let v = u32::from_str_radix(l.rsplit("= 0x").next().unwrap(), 16).unwrap();
-            v & SERIAL_OUT_RECV_PKT != 0
-        })
-        .collect();
-    assert!(armed.is_empty(), "{armed:?}");
+    assert_eq!(
+        int_ena & SERIAL_OUT_RECV_PKT,
+        SERIAL_OUT_RECV_PKT,
+        "int_ena = {int_ena:#x}"
+    );
     // What the guest tried to print sits on the observation stream: the
     // first esp-println line, committed by its newline before the FIFO
     // filled. Nothing reached a host: the delivered log is empty.
@@ -89,15 +95,15 @@ fn with_no_host_the_printer_times_out_once_and_the_rx_path_is_never_armed() {
             .iter()
             .any(|l| l.contains("USB_DEVICE wr_done:") && l.contains("no host will drain them"))
     );
-    // `io_task` never writes into the sealed endpoint. Until 2026-09-24 its
-    // first write went straight into esp-println's committed packet and the
-    // model dropped and noted it (`ep1 write with the IN FIFO committed (host
-    // absent)`) — esp-hal 1.1.1's `write_async` reads no free bit. The
-    // io_task's TX half is now behind the IN-endpoint gate
+    // The link task never writes into the sealed endpoint. Until 2026-09-24
+    // the `io_task`'s first write went straight into esp-println's committed
+    // packet and the model dropped and noted it (`ep1 write with the IN FIFO
+    // committed (host absent)`) — esp-hal 1.1.1's `write_async` reads no free
+    // bit. The TX half is behind the IN-endpoint gate
     // (`fw_esp32_common::serial::in_endpoint`, PR #805, ported to the C6 for
-    // docs/defects/2026-09-24-the-real-c6-link-loses-bytes-inside-a-packed-frame.md):
-    // it waits for a free buffer, its 250 ms chunk timeout fires instead,
-    // and nothing is written. This is not a transcript comparison — the
+    // docs/defects/2026-09-24-the-real-c6-link-loses-bytes-inside-a-packed-frame.md),
+    // and since proto 30 the link task does not even reach it with no SOF:
+    // it discards the frame (below). This is not a transcript comparison — the
     // `usb-host-absent` transcripts are text a host would see, and with no
     // host both images show nothing — so no capture is owed for this line.
     assert!(
@@ -126,57 +132,44 @@ fn with_no_host_the_printer_times_out_once_and_the_rx_path_is_never_armed() {
     // UART0 is silent on the shipped image: the console is USB-Serial-JTAG.
     assert!(m.uart0().is_empty());
 
-    // M6 P1b, gate G1b-4 — what the connection stamps say when there is no
-    // host at all, and it is NOT what the phase brief predicted.
-    //
-    // The brief (and the M6 discovery's "absent" row) expected zero: no
-    // enumeration, so `is_connected()` false, so no write, so no timeout, so
-    // no latch. The machine says one, and the machine is right — the monitor
-    // starts OPTIMISTIC (`host_draining = true`, `no_sof_count = 0`) and the
-    // enumeration verdict needs three polls, while one blocked write costs
-    // 250 ms and holds the loop for the whole of it. So:
-    //
-    //   poll 1 -> no_sof 1, still "enumerated", write attempted, 250 ms, timeout
-    //   poll 2 -> no_sof 2, still "enumerated", write attempted, 250 ms, timeout
-    //             => two in a row: LATCH, and the stamp fires
-    //   poll 3 -> no_sof 3, NOT enumerated: the latch is reset to draining
-    //             (a disconnect starts the next enumeration from a clean
-    //             slate) and `is_connected()` is false from here on, so
-    //             nothing is ever written or timed out again.
-    //
-    // The number that matters is therefore not the count but the PAIR. With
-    // no host the link never recovers, because nothing ever drained it:
-    // `HOST_DRAINING_AGAIN_MS` stays at the never-happened sentinel. That is
-    // what makes the silicon figures mean something — a transcript showing
-    // both stamps is showing a transition this configuration cannot produce.
-    let mut stamp = |sym: &str| {
-        m.peek_symbol(sym)
+    // What the link task says about a board with no host at all. It
+    // retries its handshake on its own timer; with no SOF those frames are
+    // discarded before they reach the endpoint. The server's boot hello and
+    // heartbeats have no link to ride, and are dropped and counted.
+    // (Until proto 30 this read the not-draining latch's stamps, which went
+    // with the latch.)
+    let mut counter = |name: &str| {
+        let sym = format!("fw_esp32_common::usb_link::usb_link_counters::{name}");
+        m.peek_symbol(&sym)
             .unwrap_or_else(|| panic!("the image carries {sym}"))
             .1
     };
-    let silences = stamp("fw_esp32_common::serial::link_counters::NOT_DRAINING_COUNT");
-    let latched_at = stamp("fw_esp32_common::serial::link_counters::HOST_NOT_DRAINING_MS");
-    let resumed_at = stamp("fw_esp32_common::serial::link_counters::HOST_DRAINING_AGAIN_MS");
-    const NEVER: u32 = u32::MAX;
-
-    assert_eq!(
-        resumed_at, NEVER,
-        "nothing ever drained this link, so it can never have resumed"
+    let discarded = counter("FRAMES_DISCARDED_NO_HOST");
+    let timeouts = counter("WRITE_TIMEOUTS");
+    let (no_link, full) = (
+        counter("REPLIES_DROPPED_NO_LINK"),
+        counter("REPLIES_DROPPED_FULL"),
     );
-    assert_eq!(
-        silences, 1,
-        "exactly one latch, from the optimistic window before enumeration \
-         lapses; after that `is_connected()` gates every write and no second \
-         silence is possible"
-    );
-    assert_ne!(latched_at, NEVER, "the one latch stamped its instant");
     assert!(
-        u64::from(latched_at) < GATE_US / 1_000,
-        "the latch is inside the run it happened in: {latched_at} ms"
+        discarded > 0,
+        "the link task retries its handshake, and with no host every frame is discarded"
+    );
+    // Before the task has watched long enough to see there is no SOF, its
+    // first write or two wait on the gate and time out (the old monitor had
+    // the same optimistic window); after that every frame is discarded.
+    assert!(
+        timeouts < discarded,
+        "{timeouts} write timeouts against {discarded} discards: the link task kept \
+         writing into an endpoint no host drains"
+    );
+    assert!(
+        no_link >= 1 && full == 0,
+        "the server's unsolicited hello and heartbeats go nowhere with no link, and are \
+         counted as dropped; nothing was dropped for a full send budget"
     );
     println!(
-        "[P1b] host absent: notDrainingCount={silences} \
-         hostNotDrainingMs={latched_at} hostDrainingAgainMs=NEVER"
+        "[lp-link] host absent: {discarded} frame(s) discarded with no host, \
+         {timeouts} write timeouts, {no_link} unsolicited message(s) dropped with no link"
     );
 
     // M5 P1 G1-2: the boot configures two RMT channels (`mem_size 1` each,

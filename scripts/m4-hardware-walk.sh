@@ -340,7 +340,9 @@ hex_of() { echo "$1" | grep -a "^\[$2\] rgb=" | head -1 | cut -d= -f2; }
 # safe-points), and `frame_dump` dumps it before re-arming for the first lit
 # frame. Note this comparison assumes a single-channel output; a multi-channel
 # project prints one dump per wire and must be diffed per slice by hand.
-device_hex="$(strip_ansi "$LOG" | grep -ao 'rgb=[0-9a-f]*' | tail -1 | cut -d= -f2)"
+# A dump is several `part=i/n` lines (a log record on an lp-link board is cut
+# at 200 bytes); scripts/frame-dump-hex.sh joins the last whole one.
+device_hex="$(strip_ansi "$LOG" | "$(dirname "$0")/frame-dump-hex.sh")"
 oracle_hex="$(hex_of "$oracle_out" ORACLE)"
 rv32_hex="$(hex_of "$oracle_out" ORACLE-RV32)"
 

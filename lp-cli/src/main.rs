@@ -10,7 +10,7 @@ mod messages;
 mod server;
 
 use commands::{
-    create, dev, emu, firmware, fwcheck, hardware, pattern, profile, project, record, schema,
+    create, dev, emu, firmware, fwcheck, hardware, link, pattern, profile, project, record, schema,
     serve, shader_debug, shader_lpir, upload, validate, wire,
 };
 
@@ -94,10 +94,12 @@ enum Cli {
     Pattern(pattern::PatternCli),
     /// Generate or verify the checked-in schemas/ tree (JSON Schemas + slot shape dumps).
     Schema(schema::SchemaCli),
-    /// Tools over a board's link bytes (`wire unpack`: packed frames → `M!` lines).
+    /// Tools over a board's link bytes (`wire unpack`: a link capture → `M!{json}` and console lines).
     Wire(wire::WireCli),
     /// Receive and read Studio session recordings (`?record=`): `record serve`, `record timeline`.
     Record(record::RecordCli),
+    /// Measure a board's host link: `link lab` against a `test_comms_lab` image.
+    Link(link::LinkCli),
     /// Compile a GLSL file to LPIR text (stdout). Uses the same Naga → LPIR path as the JIT.
     ShaderLpir {
         /// Path to a `.glsl` file (filetest-style snippet; LPFX preamble is applied like `lps-frontend::compile`)
@@ -152,6 +154,7 @@ fn main() -> Result<()> {
         Cli::Schema(cli) => schema::handle_schema(cli),
         Cli::Wire(cli) => wire::handle_wire(cli),
         Cli::Record(cli) => record::handle_record(cli),
+        Cli::Link(cli) => link::handle_link(cli),
         Cli::Profile(cli) => match cli.subcommand {
             Some(profile::ProfileSubcommand::Diff(args)) => profile::handle_profile_diff(args),
             Some(profile::ProfileSubcommand::Function(args)) => {

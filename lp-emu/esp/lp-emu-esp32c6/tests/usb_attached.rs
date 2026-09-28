@@ -1,19 +1,25 @@
 //! M6 P2's machine-level gates on the shipped image minus flash
 //! (`esp32c6,server,radio,memory_fs`), strict `t1`, 5.5 s:
 //!
-//! - **G2-1** attached-draining from boot: every `[INIT]` line, the hello,
-//!   the boot lines, one heartbeat and the stack line reach the **delivered**
-//!   `usb-sj` log in order; `TIMED_OUT` never latches; the connected path
-//!   arms `int_ena.serial_out_recv_pkt`; no `SPIN` on `USB_DEVICE`. The 5 s
-//!   `freeBytes` is printed for the PR body (DD26/DD30's first same-link
-//!   data point) — recorded, not gated.
-//! - **G2-3** attached-idle from boot (`Attached { draining: false }`): the
-//!   vehicle-neutral signature of the firmware's "host not draining" latch —
-//!   write attempts ≥ 250 ms apart with nothing delivered before 2 s, then a
-//!   probe every ≈ 2 s; `TIMED_OUT == 1`; the delivered log empty; liveness
-//!   from `idle_skips` and the RWDT feeds. Since the IN-endpoint gate
-//!   (2026-09-24) those attempts are waits for a free buffer, not commits
-//!   into the held one — see the test.
+//! - **G2-1** attached-draining from boot: every `[INIT]` line up to the
+//!   boot marker reaches the **delivered** `usb-sj` log in order;
+//!   `TIMED_OUT` never latches; the link task arms
+//!   `int_ena.serial_out_recv_pkt`; no `SPIN` on `USB_DEVICE`.
+//! - **G2-3** attached-idle from boot (`Attached { draining: false }`):
+//!   nothing is delivered and nothing is written past the held boot line;
+//!   `TIMED_OUT == 1`; the link task's frame writes wait on the IN-endpoint
+//!   gate and time out, counted by the firmware; liveness from `idle_skips`
+//!   and the RWDT feeds.
+//!
+//! ⚠️ Since wire proto 30 (plan `lp-link-usb-cutover`) the image speaks
+//! lp-link past its boot text: the hello and the heartbeat go out only once
+//! a host has brought the link up, and only a product crate may be that host
+//! (the MIT fence). So G2-1 stops at the boot marker here, and the rest of
+//! what it used to prove — the hello, the first heartbeat and the stack line
+//! reach a host in order, and the `hello.proto` / `heartbeat.total_bytes`
+//! figures — is `lp-cli/tests/emu_usb_link_gates.rs`, the same image with the
+//! product's own link host. G2-3's old signature was the not-draining latch,
+//! which went with the latch; what it asserts now is the link task's.
 //! - **G2-4** determinism: G2-1 twice → identical delivered logs and cycle
 //!   counts.
 //!
@@ -23,7 +29,6 @@
 use lp_emu_core::sched::Cycles;
 use lp_emu_esp_common::RegGrade;
 use lp_emu_esp_common::trace::SharedBuffer;
-use lp_emu_esp_figures::Figures;
 use lp_emu_esp32c6::machine::{
     AppSource, Esp32C6Builder, Esp32C6Machine, Outcome, StopCondition, TimeGrade, UsbHost,
 };
@@ -37,40 +42,16 @@ const TIMED_OUT: &str = "esp_println::serial_jtag_printer::TIMED_OUT";
 const SERIAL_OUT_RECV_PKT: u32 = 1 << 2;
 const SERIAL_IN_EMPTY: u32 = 1 << 3;
 
-/// The hello's opening, up to its protocol version.
-const HELLO_PROTO: &str = "\nM!{\"id\":0,\"msg\":{\"hello\":{\"proto\":";
-
-/// The delivered log's markers, in order (the P6 hello gate's list plus the
-/// esp-println line that precedes everything). A marker with a figure key is
-/// followed by that figure's digits, checked against
-/// `lp-emu/esp/figures/esp32c6.json`: the wire protocol version (bumped by
-/// every breaking wire change, `lpc-wire`'s `WIRE_PROTO_VERSION`) and the
-/// heap's total (moved by a heap-region change — 325,536 → 301,536 with the
-/// BLE heap cut). Both are the shipped image's, not this machine's, so both
-/// are re-recorded by `just bless-chips esp32c6`.
-const DELIVERED_IN_ORDER: &[(&str, Option<&str>)] = &[
-    ("[INIT] Initializing board...\n", None),
-    (HELLO_PROTO, Some("hello.proto")),
-    ("\"boardId\":\"seeed/xiao-esp32-c6\"", None),
-    ("\"baseMac\":\"a0:f2:62:87:b4:8c\"", None),
-    (
-        "Esp32C6RmtWs281xDriver: 2 WS281x channels for 2 declared",
-        None,
-    ),
-    ("ESP-NOW radio ready", None),
-    ("[RECOVERY] boot complete", None),
-    ("M!{\"id\":0,\"msg\":{\"heartbeat\":{", None),
-    ("\"totalBytes\":", Some("heartbeat.total_bytes")),
-    ("[stack] heartbeat: high-water", None),
+/// The delivered log's markers, in order: the raw boot text a host reads
+/// before the link task owns the port, ending at the boot marker the server
+/// loop prints as it starts.
+const DELIVERED_IN_ORDER: &[&str] = &[
+    "[INIT] Initializing board...\n",
+    "[INIT] Spawning USB link task...",
+    "[INIT] USB link task spawned",
+    "[INIT] LpServer created",
+    "[INIT] fw-esp32 initialized, starting server loop... proto=",
 ];
-
-/// The decimal number at the start of `s`.
-fn leading_int(s: &str) -> i64 {
-    let end = s.find(|c: char| !c.is_ascii_digit()).unwrap_or(s.len());
-    s[..end]
-        .parse()
-        .unwrap_or_else(|_| panic!("no number at the start of {:?}", &s[..s.len().min(40)]))
-}
 
 struct Run {
     m: Esp32C6Machine,
@@ -152,45 +133,26 @@ fn sha256(bytes: &[u8]) -> String {
 
 #[test]
 #[ignore = "needs the fw-esp32c6 ELF; run through `just test-emu-c6`"]
-fn g2_1_attached_and_draining_from_boot_delivers_the_boot_the_hello_and_a_heartbeat() {
+fn g2_1_attached_and_draining_from_boot_delivers_the_boot_to_the_server_loop() {
     let Some(r) = run(UsbHost::Attached { draining: true }) else {
         return;
     };
     let text = r.m.usb_sj().text();
 
     // Everything reached the host, in order; nothing was merely tried.
-    let mut figures = Figures::new(
-        "esp32c6",
-        "usb_attached::g2_1_attached_and_draining_from_boot_delivers_the_boot_the_hello_and_a_heartbeat",
-    );
     let mut from = 0;
-    for (marker, figure) in DELIVERED_IN_ORDER {
+    for marker in DELIVERED_IN_ORDER {
         let at = text[from..]
             .find(marker)
             .unwrap_or_else(|| panic!("{marker:?} not after byte {from} in:\n{text}"));
         from += at + marker.len();
-        if let Some(key) = figure {
-            figures.int(key, leading_int(&text[from..]));
-        }
     }
-    figures.verify();
     let init_lines: Vec<&str> = text.lines().filter(|l| l.starts_with("[INIT] ")).collect();
     assert!(init_lines.len() >= 5, "{init_lines:?}");
-    let hello_at = text.find("M!{\"id\":0,\"msg\":{\"hello\"").unwrap();
-    let last_init_at = text.rfind("[INIT] ").unwrap();
-    assert!(
-        last_init_at < hello_at,
-        "every [INIT] line precedes the hello"
-    );
     assert!(
         r.m.usb_sj_tried().is_empty(),
         "tried: {:?}",
         r.m.usb_sj_tried().text()
-    );
-    assert_eq!(
-        text.matches("\"heartbeat\":{").count(),
-        1,
-        "one heartbeat in 5.5 s"
     );
 
     // esp-println never timed out: the host drained every packet.
@@ -202,7 +164,7 @@ fn g2_1_attached_and_draining_from_boot_delivers_the_boot_the_hello_and_a_heartb
         .collect();
     assert!(usb_spins.is_empty(), "{usb_spins:?}");
 
-    // The connected path armed RX at least once (read_serial's future).
+    // The link task armed RX (its read future).
     let armed = r
         .lines
         .iter()
@@ -217,20 +179,11 @@ fn g2_1_attached_and_draining_from_boot_delivers_the_boot_the_hello_and_a_heartb
     assert!(delivered_notes >= 20, "{delivered_notes} deliveries");
     assert_alive(&r);
 
-    // For the PR body: the first 20 delivered lines, the heap trio's third
-    // figure, and the log's digest.
-    let free = text
-        .split("\"freeBytes\":")
-        .nth(1)
-        .and_then(|s| s.split(',').next())
-        .expect("freeBytes in the heartbeat");
+    // For the PR body: the first 20 delivered lines and the log's digest.
     println!("G2-1 delivered log, first 20 lines:");
     for l in text.lines().take(20) {
         println!("  | {l}");
     }
-    println!(
-        "G2-1 freeBytes at 5 s = {free} (UART0-link 266688; esp-emu 266792) — recorded, not gated"
-    );
     println!(
         "G2-1 delivered {} bytes, sha256 {}, {} cycles, {} idle skips",
         text.len(),
@@ -242,34 +195,31 @@ fn g2_1_attached_and_draining_from_boot_delivers_the_boot_the_hello_and_a_heartb
 
 #[test]
 #[ignore = "needs the fw-esp32c6 ELF; run through `just test-emu-c6`"]
-fn g2_3_attached_idle_from_boot_shows_the_not_draining_signature_and_the_probe() {
+fn g2_3_attached_idle_from_boot_holds_the_boot_line_and_times_the_link_writes_out() {
     let Some(mut r) = run(UsbHost::Attached { draining: false }) else {
         return;
     };
-    // ⚠️ Re-pinned 2026-09-24 for the io_task's IN-endpoint gate
-    // (`fw_esp32_common::serial::in_endpoint`, PR #805, ported to the C6 for
-    // docs/defects/2026-09-24-the-real-c6-link-loses-bytes-inside-a-packed-frame.md).
-    // Before it, esp-hal 1.1.1's `write_async` wrote the io_task's chunks
-    // and `\n` probes straight into the held `[INIT]` packet: the signature
-    // was the hello's first 64-byte chunk on the tried stream, three
-    // protocol commits 250 ms apart, then a one-byte probe commit every
-    // ≈ 2 s. With the gate every one of those writes **waits** for a buffer
-    // that never frees, so the same signature shows as the gate's waits —
-    // an `int_ena = serial_in_empty` arm per attempt, at the same instants —
-    // and nothing past the `[INIT]` line is ever committed.
+    // The port is closed from power-on. esp-println's first packet (the
+    // first `[INIT]` line) commits and is HELD: nobody takes it, so
+    // esp-println waits once and latches `TIMED_OUT`, and everything the
+    // link task has to send waits behind the IN-endpoint gate
+    // (`fw_esp32_common::serial::in_endpoint`, PR #805) for a buffer that
+    // never frees. Until proto 30 the signature here was the io_task's
+    // not-draining latch (write attempts 250 ms apart, then a probe every
+    // 2 s, and the latch's stamps); the latch went with the io_task, and the
+    // link task's own account is its edge counters.
     //
     // This test does not replay a transcript. The M6 silicon capture it
     // was shaped after (`lp-emu/transcripts/esp32c6/usb-negative-control/
     // silicon-esp32c6-2026-09-07-b18360ea6.txt`) is what a host read after
-    // opening the port, and records nothing of what the firmware committed
-    // while it was closed. A desk re-capture of that payload on a gated
-    // image is still owed, to confirm the host-visible half is unchanged.
+    // opening the port on a pre-lp-link image; a desk re-capture on an
+    // lp-link image is owed.
     //
     // Nothing reached a host, and nothing was written into the held packet.
     assert!(r.m.usb_sj().is_empty(), "{:?}", r.m.usb_sj().text());
     assert!(
         r.m.usb_sj_tried().is_empty(),
-        "the io_task wrote into the held packet past the gate: {:?}",
+        "a write went into the held packet past the gate: {:?}",
         r.m.usb_sj_tried().text()
     );
     assert!(
@@ -285,22 +235,14 @@ fn g2_3_attached_idle_from_boot_shows_the_not_draining_signature_and_the_probe()
     // esp-println latched after its one wait, like host-absent.
     assert_eq!(r.timed_out, (1, 1), "TIMED_OUT at 3 s and at the end");
 
-    // The commits: `wr_done` writes with the `ep1` writes since the previous
-    // one. A `wr_done` with nothing pushed is esp-println's `Printer::flush`
-    // on the `TIMED_OUT` path — counted, not a commit. The only commit is
-    // the held boot line.
+    // The only commit is the held boot line.
     let mut commits: Vec<(Cycles, usize)> = Vec::new();
-    let mut empty_flushes = 0usize;
     let mut pushed = 0usize;
     for l in &r.lines {
         if l.contains("W4 USB_DEVICE+0x000 ep1 ") {
             pushed += 1;
-        } else if l.contains("W4 USB_DEVICE+0x004 ep1_conf") && value_of(l) & 1 != 0 {
-            if pushed == 0 {
-                empty_flushes += 1;
-            } else {
-                commits.push((cycle_of(l), std::mem::take(&mut pushed)));
-            }
+        } else if l.contains("W4 USB_DEVICE+0x004 ep1_conf") && value_of(l) & 1 != 0 && pushed > 0 {
+            commits.push((cycle_of(l), std::mem::take(&mut pushed)));
         }
     }
     assert_eq!(
@@ -310,67 +252,46 @@ fn g2_3_attached_idle_from_boot_shows_the_not_draining_signature_and_the_probe()
     );
     assert_eq!(pushed, 0, "bytes pushed and never committed");
 
-    // The gate's waits: each io_task write attempt arms `serial_in_empty`
-    // (esp-hal's `flush`, awaiting a drain) and is abandoned by the
-    // chunk timeout. Before 2 s: at least three attempts with the 250 ms
-    // write timeout between them — the two timeouts that latch "not
-    // draining".
-    let waits: Vec<Cycles> = r
+    // The link task's frame writes wait on the gate (`serial_in_empty`
+    // armed) and are abandoned by its 250 ms write bound; it counts each.
+    let waits = r
         .lines
         .iter()
         .filter(|l| l.contains("W4 USB_DEVICE+0x010 int_ena"))
         .filter(|l| value_of(l) & SERIAL_IN_EMPTY != 0)
-        .map(|l| cycle_of(l))
-        .collect();
-    let early: Vec<Cycles> = waits.iter().copied().filter(|c| *c < 2_000 * MS).collect();
-    assert!(early.len() >= 3, "{} waits before 2 s", early.len());
-    let timeouts = early
-        .windows(2)
-        .filter(|w| w[1] - w[0] >= 250 * MS && w[1] - w[0] < 260 * MS)
         .count();
-    assert!(
-        timeouts >= 2,
-        "fewer than two 250 ms write timeouts before 2 s: {:?}",
-        early.iter().map(|c| c / MS).collect::<Vec<_>>()
-    );
-    // After the latch: the probe, ≈ 2 s apart — now a wait, not a commit.
-    let late: Vec<Cycles> = waits.iter().copied().filter(|c| *c >= 2_000 * MS).collect();
-    assert!(late.len() >= 2, "fewer than two probes after 2 s: {late:?}");
-    for w in late.windows(2) {
-        let gap = (w[1] - w[0]) / MS;
-        assert!((1_800..=2_300).contains(&gap), "probe gap {gap} ms");
-    }
-    // And the firmware's own account: one latch, never a recovery.
-    let mut stamp = |sym: &str| {
-        r.m.peek_symbol(&format!("fw_esp32_common::serial::link_counters::{sym}"))
+    assert!(waits >= 2, "{waits} gated waits");
+    let mut counter = |name: &str| {
+        let sym = format!("fw_esp32_common::usb_link::usb_link_counters::{name}");
+        r.m.peek_symbol(&sym)
             .unwrap_or_else(|| panic!("the image carries {sym}"))
             .1
     };
-    let (count, latched, again) = (
-        stamp("NOT_DRAINING_COUNT"),
-        stamp("HOST_NOT_DRAINING_MS"),
-        stamp("HOST_DRAINING_AGAIN_MS"),
+    let timeouts = counter("WRITE_TIMEOUTS");
+    let (no_link, full) = (
+        counter("REPLIES_DROPPED_NO_LINK"),
+        counter("REPLIES_DROPPED_FULL"),
     );
-    assert_eq!(count, 1, "one latch");
+    assert!(timeouts >= 1, "the link task never timed a write out");
     assert!(
-        u64::from(latched) < 2_000,
-        "the latch lands before the first probe: {latched} ms"
+        no_link >= 1 && full == 0,
+        "the server's unsolicited hello and heartbeats go nowhere with no link, and are \
+         counted as dropped; nothing was dropped for a full send budget"
     );
-    assert_eq!(again, u32::MAX, "never recovered");
     assert_alive(&r);
-    // io_task is sequential: while its writes time out it never reaches
-    // `read_serial`, and after the latch it is not connected — so the RX
-    // path is never armed here, exactly as with no host.
+    // The link task listens whatever the port's state: RX is armed.
     let rx_armed = r
         .lines
         .iter()
         .filter(|l| l.contains("W4 USB_DEVICE+0x010 int_ena"))
         .any(|l| value_of(l) & SERIAL_OUT_RECV_PKT != 0);
-    assert!(!rx_armed, "int_ena.serial_out_recv_pkt was written set");
+    assert!(
+        rx_armed,
+        "int_ena.serial_out_recv_pkt was never written set"
+    );
 
     println!(
-        "G2-3 gated waits (ms): {:?}; commits {:?}, plus {empty_flushes} empty flushes",
-        waits.iter().map(|c| c / MS).collect::<Vec<_>>(),
+        "G2-3 {waits} gated waits, {timeouts} write timeouts; commits {:?}",
         commits.iter().map(|c| (c.0 / MS, c.1)).collect::<Vec<_>>()
     );
     println!(
@@ -464,9 +385,16 @@ fn g4_4_the_shipped_image_crosses_no_modeled_usb_register() {
     assert_eq!(m.bus.blocks_in_strict_grade_scope(), vec!["USB_DEVICE"]);
     // And the run really did do the whole boot, so the pass is not a pass by
     // never getting there.
+    // (The boot marker is the last raw text; the heartbeat after it rides
+    // lp-link since proto 30, which this crate cannot read.)
     assert!(
-        m.usb_sj().text().contains("[stack] heartbeat: high-water"),
-        "the run reached the idle loop"
+        m.usb_sj().text().contains("starting server loop... proto="),
+        "the run reached the server loop"
+    );
+    assert!(
+        m.idle_skips() > 1_000,
+        "and idled in it: {}",
+        m.idle_skips()
     );
 
     // The lists the README publishes, printed for the record.

@@ -4,6 +4,10 @@ use std::time::Duration;
 
 use crate::stream::{ByteStreamError, DeviceByteStream};
 
+/// The port timeout: reads that find nothing and writes the peer does not
+/// drain give up after this.
+const PORT_TIMEOUT: Duration = Duration::from_millis(100);
+
 /// A native OS serial port as a [`DeviceByteStream`].
 ///
 /// Opening (and reopening) uses the exact settings the hardware transport
@@ -99,6 +103,28 @@ impl DeviceByteStream for SerialPortByteStream {
             Err(error) if error.kind() == std::io::ErrorKind::TimedOut => Ok(0),
             Err(error) => Err(ByteStreamError::io(error.to_string())),
         }
+    }
+
+    /// A read under a shorter timeout, then the port's own back, so writes
+    /// keep their full 100 ms (the timeout is one setting for both, and on
+    /// unix a field, not a syscall).
+    fn read_available_within(
+        &mut self,
+        buf: &mut [u8],
+        max_wait: Duration,
+    ) -> Result<usize, ByteStreamError> {
+        let wait = max_wait.clamp(Duration::from_millis(1), PORT_TIMEOUT);
+        if wait == PORT_TIMEOUT {
+            return self.read_available(buf);
+        }
+        self.port
+            .set_timeout(wait)
+            .map_err(|error| ByteStreamError::io(error.to_string()))?;
+        let read = self.read_available(buf);
+        self.port
+            .set_timeout(PORT_TIMEOUT)
+            .map_err(|error| ByteStreamError::io(error.to_string()))?;
+        read
     }
 
     /// Hand `bytes` to the kernel's output queue. Deliberately does NOT
@@ -206,7 +232,7 @@ fn port_builder(port_name: &str, baud_rate: u32) -> serialport::SerialPortBuilde
         .stop_bits(serialport::StopBits::One)
         .parity(serialport::Parity::None)
         .flow_control(serialport::FlowControl::None)
-        .timeout(Duration::from_millis(100))
+        .timeout(PORT_TIMEOUT)
 }
 
 /// Open a serial port as the platform-native type (which exposes the raw fd).

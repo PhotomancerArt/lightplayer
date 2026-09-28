@@ -7,6 +7,7 @@ members = [
     "lp-base/lp-bootctl",
     "lp-base/lpfs",
     "lp-base/lp-json-pack",
+    "lp-base/lp-link",
     # lp-app workspace members
     "lp-core/lpc-access",
     "lp-core/lpc-history",
@@ -134,6 +135,7 @@ default-members = [
     "lp-base/lp-bootctl",
     "lp-base/lpfs",
     "lp-base/lp-json-pack",
+    "lp-base/lp-link",
     # lp-app workspace members
     "lp-core/lpc-access",
     "lp-core/lpc-history",
@@ -292,6 +294,10 @@ opt-level = 2
 
 [profile.dev.package.lp-emu-core]
 opt-level = 3
+# lp-link's simulator runs thousands of seeded fault schedules in the default
+# test run (overflow checks stay on): 27 s at opt-level 0, a few at 2.
+[profile.dev.package.lp-link]
+opt-level = 2
 [profile.dev.package.lp-riscv-emu]
 opt-level = 3
 [profile.dev.package.lp-emu-abi]

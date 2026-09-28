@@ -11,16 +11,14 @@ export class BrowserEsp32DeviceController {
     this.readStopRequested = false;
     this.releasing = false;
     this.closed = true;
-    this.encoder = new TextEncoder();
-    // What the board said, as the bytes it said it in. NOT text: on a link
-    // that opted in (plan `lp-json-pack`) replies are packed frames, which
-    // hold any byte — `0x0A` and invalid UTF-8 included — so a TextDecoder
-    // here would mangle them. Rust splits (`lpc_wire::WireStream`, through
-    // `lpa-link`'s `WireReader`), one splitter for every drainer of the port.
+    // What the board said, as the bytes it said it in. NOT text: the link is
+    // lp-link (COBS frames with a checksum, beside raw boot text), so a
+    // TextDecoder here would mangle it. Rust reads it — one lp-link end per
+    // port (`lpa-link`'s `LinkPortService`), shared by every drainer.
     this.chunks = [];
-    // Bumped on every clearBufferedInput(): the Rust splitter holds a partial
-    // line or frame between drains, and a new generation means that partial
-    // belongs to a port that no longer exists.
+    // Bumped on every clearBufferedInput(): a (re)open. The Rust side starts
+    // a new link session for a new generation (a new nonce): a half-read
+    // frame and the session it belonged to are the old port's.
     this.generation = 0;
     this.errors = [];
     this.listeners = new Set();
@@ -165,15 +163,20 @@ export class BrowserEsp32DeviceController {
     return { logs };
   }
 
-  async writeLine(line) {
+  // Write bytes (lp-link frames) to the port. The writer is called before
+  // this returns, so writes queue in call order; the caller's bytes are
+  // copied first, because a view of wasm memory does not survive the await
+  // inside the stream.
+  writeBytes(bytes) {
     if (!this.writer) {
-      throw new Error("Serial port is not open.");
+      return Promise.reject(new Error("Serial port is not open."));
     }
-    await this.writer.write(this.encoder.encode(line));
+    return this.writer.write(bytes.slice());
   }
 
   // Everything read since the last drain, as ONE Uint8Array, with the
-  // buffer generation it belongs to. See the constructor.
+  // buffer generation it belongs to and whether the port is open for
+  // writing. See the constructor.
   takeBytes() {
     const chunks = this.chunks.splice(0, this.chunks.length);
     let total = 0;
@@ -184,7 +187,7 @@ export class BrowserEsp32DeviceController {
       bytes.set(chunk, at);
       at += chunk.length;
     }
-    return { generation: this.generation, bytes };
+    return { generation: this.generation, open: Boolean(this.writer), bytes };
   }
 
   takeErrors() {

@@ -12,44 +12,63 @@ pub struct WireCli {
 
 #[derive(Debug, Subcommand)]
 pub enum WireSubcommand {
-    /// stdin → stdout: rewrite every packed frame (JSON Pack,
-    /// `\n 0x00 'L' COBS 0x00`) as the `M!{json}` line it stands for, and
-    /// pass every other byte through untouched.
+    /// stdin → stdout: a capture of a board's link, rewritten as lines: each
+    /// wire message as the `M!{json}` line it stands for (JSON or packed),
+    /// each console line (log record or text outside frames) as itself.
     ///
-    /// Makes a capture readable to line tools:
-    /// `lp-cli wire unpack < capture.bin | grep M!`. A frame that does not
-    /// decode is written as nothing and reported on stderr.
+    /// A board's USB link is an lp-link (frames, checksums, resends): the
+    /// capture is read passively, resends are read once, and damaged frames
+    /// (which the link resent) are counted, not written. Read a board's
+    /// output (`?wire-capture=1`, a serial capture) as it is, or the host's
+    /// side with `--from-host`:
+    /// `lp-cli wire unpack < capture.bin | grep M!`.
     ///
-    /// Packed frames are coded against a table the board and its host learn
-    /// as the link runs, so a capture decodes **from its connection's
-    /// start** (or from the board's next table reset). A capture that starts
-    /// mid-connection cannot read the frames before that: each is written as
-    /// `<learned frame: table unknown, epoch N, M bytes>` and counted as
-    /// `unreadable`, never guessed at.
+    /// Packed replies are coded against a table both ends learn as the link
+    /// runs, so a capture decodes them **from a link session's start** (the
+    /// handshake). One that starts mid-session reads its messages unverified
+    /// and cannot read the packed ones before the next session: each is
+    /// written as `<unreadable message: …>` and counted, never guessed at.
+    ///
+    /// `--lines` reads an `M!`-line link instead (BLE, the classic ESP32's
+    /// UART, fw-emu): packed frames rewritten, every other byte passed
+    /// through.
     Unpack(UnpackArgs),
 }
 
 #[derive(Debug, Args)]
 pub struct UnpackArgs {
-    /// Also print, on stderr, one line per packed frame with its size on the
-    /// wire and the size of the JSON line written in its place, then a total:
+    /// Also print, on stderr, one line per message with its size on the
+    /// wire and the size of its `M!{json}` line, then a total:
     ///
-    ///   frame <n> packed <wire_bytes> json <json_line_bytes>
+    ///   message <n> <json|packed> <payload_bytes> json <json_line_bytes>
     ///
-    ///   unreadable <n> packed <wire_bytes> (<why>)
+    ///   total messages <n> packed <n> payload <bytes> json <bytes>
+    ///     unreadable <n> damaged <n> gaps <n> sessions <n>
     ///
-    ///   total frames <n> packed <bytes> json <bytes> unreadable <n> errors <n>
-    ///
-    /// `packed` counts `0x00 'L' COBS 0x00`; `json` counts `M!{json}\n`.
+    /// `payload` counts the message's bytes on the link's proto channel (the
+    /// link's own framing, checksums and acknowledgements are not attributed
+    /// to messages); `json` counts `M!{json}\n`. With `--lines` the lines are
+    /// the old `frame <n> packed <wire_bytes> json <json_line_bytes>` and
+    /// `total frames …`.
     #[arg(long, verbatim_doc_comment)]
     pub sizes: bool,
 
     /// Read and write the `emu serve` wire-tap format
     /// (`<unix_us> <dir> <len>\n<bytes>\n`, `LP_EMU_WIRE_TAP`) instead of a
-    /// raw byte stream: board → host records (`<`) are unpacked, host →
-    /// board records (`>`) pass through, and the tap's own `P`/`E`
-    /// annotations are dropped. The result reads like a tap of a link that
-    /// never packed, for tools that know only `<` and `>`.
-    #[arg(long)]
+    /// raw byte stream: both directions (`<` board → host, `>` host → board)
+    /// are read as the one link they are and written back as lines, and the
+    /// tap's own annotations are dropped. The result reads like a tap of a
+    /// link with no framing, for tools that know only `<` and `>`.
+    #[arg(long, conflicts_with = "lines")]
     pub tap: bool,
+
+    /// The capture is the host's side of the link (its requests), not the
+    /// board's.
+    #[arg(long, conflicts_with_all = ["tap", "lines"])]
+    pub from_host: bool,
+
+    /// The capture is of an `M!`-line link (BLE, the classic ESP32's UART,
+    /// fw-emu), not a USB lp-link.
+    #[arg(long)]
+    pub lines: bool,
 }

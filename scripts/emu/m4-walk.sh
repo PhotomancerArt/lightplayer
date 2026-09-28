@@ -42,8 +42,13 @@
 #
 # The hardware walk flashes twice because espflash's `--monitor` HOLDS the
 # port, so `lp-cli` cannot open it at the same time; round 1 pushes the
-# project, round 2 reflashes to watch it render. The emulator's link is a
-# socket that the machine itself serves, so one run uploads AND watches. The
+# project, round 2 reflashes to watch it render. On the C6 the emulator's
+# runner is also the host on the board's link (`lp-cli emu run --host-link
+# --upload`, since the image went onto lp-link at wire proto 30): one process
+# uploads over the link and keeps hosting it, so the board's log lines — the
+# `[OUT] dump` among them — keep leaving the board after the upload is done.
+# On the S3 the link is a socket the machine serves. Either way one run
+# uploads AND watches. The
 # project surviving a reboot — the thing the second flash also happens to
 # prove — is `lp-emu/esp/lp-emu-esp32c6/tests/flash_persistence.rs`'s gate,
 # not this walk's.
@@ -290,12 +295,19 @@ trap cleanup EXIT
 
 case "$CHIP" in
 esp32c6)
-    echo "==> lp-cli emu run ($BOOT boot, ${TIMEOUT} emulated) on $LINK"
+    # `--host-link`: this process is the host on the board's USB link (lp-link
+    # since wire proto 30) for the whole run, and `--upload` deploys the
+    # project over it once the hello arrives, exactly as `lp-cli upload` does
+    # (deploy, then wait for the project to be running). A client in another
+    # process would take the link's host with it when it left, and the
+    # deferred lit dump thirty frames later would never leave the board —
+    # the trap `--monitor` used to close on the `M!` wire. The console is
+    # the DECODED one: boot text, log lines, and each wire message as `M!`.
+    echo "==> lp-cli emu run ($BOOT boot, ${TIMEOUT} emulated), hosting the link and uploading $PROJECT"
     "$cli" emu run \
         "${boot_args[@]}" \
-        --link "$LINK" \
-        --link-kind usb \
-        --monitor \
+        --host-link \
+        --upload "$PROJECT" \
         --time-grade t1 \
         --timeout "$TIMEOUT" \
         --wall-timeout "$WALL" \
@@ -349,10 +361,10 @@ esac
 
 # The machine listens as soon as it is built, before the ROM has run a single
 # instruction; wait for the port rather than for a log line, so this works the
-# same on both boot paths.
+# same on both boot paths. (The S3 only: the C6's runner hosts its own link.)
 # bash's own /dev/tcp rather than `nc`, whose flags differ between the BSD one
 # macOS ships and the GNU one a CI runner has.
-for _ in $(seq 1 300); do
+[[ "$CHIP" == "esp32s3" ]] && for _ in $(seq 1 300); do
     (exec 3<>"/dev/tcp/${LINK%%:*}/${LINK##*:}") 2>/dev/null && break
     kill -0 "$emu_pid" 2>/dev/null || break
     sleep 0.1
@@ -509,11 +521,25 @@ upload_args=(--wait-timeout "${LP_WALK_CLI_TIMEOUT:-600}")
 
 echo
 echo "===== UPLOAD ====="
-set +e
-"$cli" upload "$PROJECT" "serial:tcp://$LINK" "${upload_args[@]}" \
-    >"$OUT/cli.stdout" 2>"$OUT/cli.stderr"
-cli_status=$?
-set -e
+if [[ "$CHIP" == "esp32c6" ]]; then
+    # In process (`--upload`, above): wait for the runner and read its verdict.
+    echo "==> the runner uploads over its own link; letting it run to its emulated deadline"
+    wait "$emu_pid" && emu_status=0 || emu_status=$?
+    emu_pid=
+    grep -a -m 1 "uploaded and running" "$OUT/emu.stderr" >"$OUT/cli.stdout" || true
+    cp "$OUT/emu.stderr" "$OUT/cli.stderr"
+    if grep -qa "uploaded and running" "$OUT/emu.stderr"; then
+        cli_status=0
+    else
+        cli_status=1
+    fi
+else
+    set +e
+    "$cli" upload "$PROJECT" "serial:tcp://$LINK" "${upload_args[@]}" \
+        >"$OUT/cli.stdout" 2>"$OUT/cli.stderr"
+    cli_status=$?
+    set -e
+fi
 tail -5 "$OUT/cli.stdout" || true
 upload_failed=0
 if [[ $cli_status -ne 0 ]]; then
@@ -604,9 +630,11 @@ fi
 # the machine reach its own emulated deadline rather than killing it — a
 # killed run has no report and no flushed frames.
 echo
-echo "==> letting the machine run on to its emulated deadline"
-wait "$emu_pid" && emu_status=0 || emu_status=$?
-emu_pid=
+if [[ -n "${emu_pid:-}" ]]; then
+    echo "==> letting the machine run on to its emulated deadline"
+    wait "$emu_pid" && emu_status=0 || emu_status=$?
+    emu_pid=
+fi
 if [[ $emu_status -ne 0 ]]; then
     echo "FAIL: the machine did not end cleanly (exit $emu_status)." >&2
     tail -20 "$OUT/emu.stderr" >&2
@@ -714,8 +742,10 @@ rv32_hex="$(hex_of "$oracle_out" ORACLE-RV32)"
 # hardware walk. The first frame after a project load is the compile-window
 # black fallback (ADR 2026-08-03-memory-pressure-at-compile-safe-points), and
 # `frame_dump` dumps it at open before re-arming for the first lit frame.
-device_hex="$(grep -ao 'rgb=[0-9a-f]*' "$console" | tail -1 | cut -d= -f2)"
-dumps="$(grep -ac '\[OUT\] dump frame=' "$console" || true)"
+# A dump is several `part=i/n` lines (a log record on this link is cut at
+# 200 bytes); scripts/frame-dump-hex.sh joins the last whole one.
+device_hex="$("$REPO/scripts/frame-dump-hex.sh" < "$console")"
+dumps="$("$REPO/scripts/frame-dump-hex.sh" --count < "$console")"
 
 # The trap this walk found the first time it ran, and the reason `emu run`
 # grew `--monitor`: the deferred lit dump comes THIRTY frames after the first
@@ -727,9 +757,9 @@ if [[ "$dumps" == "1" && "$device_hex" =~ ^0+$ ]]; then
     echo "FAIL: the only frame dump in the console is the open-time black frame." >&2
     echo "      That is the compile-window fallback; the deferred lit dump fires 30" >&2
     echo "      frames later. Either nothing lit (the DEVICE section says so), or the" >&2
-    echo "      console stopped — check that 'lp-cli emu run --monitor' is still on the" >&2
-    echo "      command line above, since without it a client disconnecting closes the" >&2
-    echo "      port and the guest talks to nobody." >&2
+    echo "      console stopped — check that 'lp-cli emu run --host-link' is still on the" >&2
+    echo "      command line above, since without a host on the link the board's log" >&2
+    echo "      lines never leave it." >&2
     exit 1
 fi
 

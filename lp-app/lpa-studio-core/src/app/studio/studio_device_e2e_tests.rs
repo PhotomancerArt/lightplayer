@@ -36,6 +36,7 @@ use std::rc::Rc;
 use lpa_devices::view::{Escape, RosterView};
 use lpa_link::device_link::fake::{fake_device_link, fake_link_info};
 use lpa_link::device_link::wire::roster_config;
+use lpa_link::device_link::wire_reader::WireRead;
 use lpa_link::providers::fake_device::{
     FakeBootState, FakeDeviceIdentity, FakeDeviceScript, FakeEsp32Device, FakeLightPlayerState,
 };
@@ -401,34 +402,37 @@ impl SimLinkSource for ScriptedSimSource {
     }
 }
 
-/// A `ClientIo` over the fake device's byte wire.
+/// A `ClientIo` over the fake device's link.
 ///
-/// The mirror of `lpa-link`'s browser `PortLineIo`: `M!<json>` lines out,
-/// `M!<json>` lines in, everything else on the wire (boot banner, logs)
-/// dropped. It exists so the bench's push is a real protocol conversation
-/// rather than a scripted outcome — the fake runs an actual `LpServer`, and
-/// the whole point of M3 is that the conversation works.
+/// The mirror of `lpa-link`'s browser borrower: while an effect or the lens
+/// borrows the wire (pause-the-pump), it speaks through the SAME lp-link the
+/// model's pump holds (`fake_host_port`: the link the bench last attached to
+/// the board), requests in and the board's reads out. It exists so the
+/// bench's push is a real protocol conversation rather than a scripted
+/// outcome — the fake runs an actual `LpServer`, and the whole point of M3
+/// is that the conversation works.
 struct FakeDeviceIo {
-    stream: lpa_link::providers::fake_device::FakeDeviceByteStream,
-    /// Bytes read but not yet forming a complete line.
-    partial: String,
+    device: FakeEsp32Device,
     /// Frames decoded but not yet handed out.
     pending: VecDeque<lpc_wire::WireServerMessage>,
-    /// The lens tap (M5): every whole line, verbatim, before decoding.
+    /// The lens tap (M5): every console line, and every message as its
+    /// `M!{json}` line, before the conversation sees it.
     tap: Option<LensLineTap>,
     /// The wire died (an unplug script): every read from here on is EOF,
     /// so receive fails fast instead of waiting out its budget.
     dead: Option<String>,
+    /// The link reset under the conversation (D9): the next receive fails.
+    reset: Option<String>,
 }
 
 impl FakeDeviceIo {
     fn new(device: &FakeEsp32Device) -> Self {
         Self {
-            stream: lpa_link::providers::fake_device::FakeDeviceByteStream::new(device.clone()),
-            partial: String::new(),
+            device: device.clone(),
             pending: VecDeque::new(),
             tap: None,
             dead: None,
+            reset: None,
         }
     }
 
@@ -437,42 +441,57 @@ impl FakeDeviceIo {
         self
     }
 
-    /// Drain whatever the wire has right now into [`Self::pending`].
+    fn port(
+        &self,
+    ) -> Result<
+        lpa_link::device_link::byte_stream::ByteStreamPort<
+            lpa_link::providers::fake_device::FakeDeviceByteStream,
+        >,
+        String,
+    > {
+        lpa_link::device_link::fake::fake_host_port(&self.device)
+            .ok_or_else(|| "no link is attached to the fake board".to_string())
+    }
+
+    /// Drain whatever the link has right now into [`Self::pending`].
     fn drain(&mut self) {
-        let mut buf = [0u8; 8192];
-        loop {
-            let read = match read_available_checked(&mut self.stream, &mut buf) {
-                Ok(read) => read,
-                // The wire died under the lens (an unplug script): the
-                // tap carries it, exactly as the browser io reports the
-                // controller's error.
-                Err(error) => {
-                    if self.dead.is_none() {
-                        if let Some(tap) = &self.tap {
-                            tap(LensTapEvent::PortError(error.clone()));
-                        }
-                        self.dead = Some(error);
+        let reads = match self.port().and_then(|port| port.take_reads()) {
+            Ok(reads) => reads,
+            // The wire died under the lens (an unplug script): the tap
+            // carries it, exactly as the browser io reports the
+            // controller's error.
+            Err(error) => {
+                if self.dead.is_none() {
+                    let error = format!("Serial port disconnected: {error}");
+                    if let Some(tap) = &self.tap {
+                        tap(LensTapEvent::PortError(error.clone()));
                     }
-                    return;
+                    self.dead = Some(error);
                 }
-            };
-            if read == 0 {
                 return;
             }
-            self.partial
-                .push_str(&String::from_utf8_lossy(&buf[..read]));
-            while let Some(newline) = self.partial.find('\n') {
-                let line: String = self.partial.drain(..=newline).collect();
-                let line = line.trim_end_matches(['\n', '\r']);
-                if let Some(tap) = &self.tap {
-                    tap(LensTapEvent::Line(line.to_string()));
+        };
+        for read in reads {
+            match read {
+                WireRead::Frame(frame) => {
+                    if let Some(tap) = &self.tap {
+                        tap(LensTapEvent::Line(frame.to_line()));
+                    }
+                    if let Ok(message) = frame.message {
+                        self.pending.push_back(message);
+                    }
                 }
-                let Some(json) = line.strip_prefix("M!") else {
-                    continue;
-                };
-                if let Ok(message) = lpc_wire::json::from_str::<lpc_wire::WireServerMessage>(json) {
-                    self.pending.push_back(message);
+                WireRead::Line(line) => {
+                    if let Some(tap) = &self.tap {
+                        tap(LensTapEvent::Line(line));
+                    }
                 }
+                // The link reset under the conversation: what it waits for
+                // is lost (D9).
+                WireRead::LinkReset(note) | WireRead::Error(note) => {
+                    self.reset = Some(note);
+                }
+                WireRead::Note(_) => {}
             }
         }
     }
@@ -481,18 +500,15 @@ impl FakeDeviceIo {
 #[async_trait::async_trait(?Send)]
 impl lpa_client::ClientIo for FakeDeviceIo {
     async fn send(&mut self, msg: lpc_wire::ClientMessage) -> Result<(), lpc_wire::TransportError> {
-        use lpa_link::stream::DeviceByteStream;
-        let json = lpc_wire::json::to_string(&msg)
-            .map_err(|error| lpc_wire::TransportError::Other(format!("encode failed: {error}")))?;
-        self.stream
-            .write_all(format!("M!{json}\n").as_bytes())
+        self.port()
+            .and_then(|port| port.send(&msg))
             .map_err(|error| {
                 // Mirror of the browser io: a failed write is the port
                 // dying under the lens.
                 if let Some(tap) = &self.tap {
-                    tap(LensTapEvent::PortError(error.to_string()));
+                    tap(LensTapEvent::PortError(error.clone()));
                 }
-                lpc_wire::TransportError::Other(error.to_string())
+                lpc_wire::TransportError::Other(error)
             })
     }
 
@@ -502,6 +518,9 @@ impl lpa_client::ClientIo for FakeDeviceIo {
             self.drain();
             if let Some(message) = self.pending.pop_front() {
                 return Ok(message);
+            }
+            if let Some(reset) = self.reset.take() {
+                return Err(lpc_wire::TransportError::Other(reset));
             }
             if let Some(error) = &self.dead {
                 return Err(lpc_wire::TransportError::Other(error.clone()));
@@ -1613,6 +1632,173 @@ fn three_failed_pulls_in_a_row_close_the_lens_as_a_dead_wire() {
     assert_eq!(bench.view().devices.len(), 1, "the card stays");
 }
 
+/// Plan D13: a link RESET under the lens (lp-link restarting its session —
+/// a board reboot, a burst of lost frames) fails the pulls in flight at once
+/// (D9). That is a blip the link comes back from, not a dead wire: the
+/// editor keeps the project, the page says "Reconnecting…", and the board's
+/// first word after the reset ends it and lets the pulls go out again
+/// without the backoff the blip earned.
+#[test]
+fn a_link_reset_under_the_lens_keeps_the_editor_and_says_reconnecting() {
+    let (mut bench, tasks, _device) = lens_on_a_running_board("dev000000daqf6dvvra", "usb-lens-a");
+    let link = lens_link(&bench);
+
+    bench.controller.fold_device_input(DeviceInput::link(
+        link,
+        lpa_devices::link::LinkEvent::WireNote(
+            lpa_link::device_link::port_read_map::link_reset_note(
+                lpc_wire::lp_link::ResetReason::RetryLimit,
+            ),
+        ),
+    ));
+    let strip = bench
+        .controller
+        .view()
+        .lens_reconnecting
+        .expect("the page says it is reconnecting");
+    assert!(
+        strip.headline.starts_with("Reconnecting to "),
+        "{}",
+        strip.headline
+    );
+    assert!(strip.detail.contains("restarted"), "{}", strip.detail);
+
+    // Well past the dead-wire count: the pulls fail, the editor stays.
+    for _ in 0..5 {
+        bench.controller.record_passive_refresh_failure();
+    }
+    assert!(
+        bench.lens_device_uid().is_some(),
+        "a reconnecting link is not a dead wire"
+    );
+    assert!(
+        bench.controller.view().home.is_none(),
+        "the project page stays; nothing routes to Devices"
+    );
+
+    // The board speaks again (its heartbeat, teed through the lens's tap):
+    // the strip goes and the lens's failure streak is forgiven.
+    let deadline = std::time::Instant::now() + REAL_TIME_LIMIT;
+    while bench.controller.view().lens_reconnecting.is_some() {
+        let refresh = UiAction::from_op(ProjectController::NODE_ID, ProjectOp::RefreshProject);
+        let _ = drive(bench.controller.dispatch(refresh));
+        bench.step(&tasks);
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the board's return never cleared the strip"
+        );
+        std::thread::sleep(Duration::from_millis(1));
+    }
+    assert!(bench.lens_device_uid().is_some());
+    let session = bench
+        .controller
+        .runtime_pool_for_test()
+        .lens_session()
+        .expect("the lens session")
+        .consecutive_refresh_failures();
+    assert_eq!(session, 0, "the blip's failures are forgiven");
+}
+
+/// Plan D13: a stall (the link is up, the board silent past the link's
+/// stall time) shows the strip too, and the link's own "answering again"
+/// note ends it.
+#[test]
+fn a_stall_under_the_lens_shows_reconnecting_until_the_board_answers() {
+    let (mut bench, _tasks, _device) = lens_on_a_running_board("dev000000daqf6dvvrb", "usb-lens-b");
+    let link = lens_link(&bench);
+    let note = |text: &str| {
+        DeviceInput::link(
+            link,
+            lpa_devices::link::LinkEvent::WireNote(text.to_string()),
+        )
+    };
+
+    bench
+        .controller
+        .fold_device_input(note(lpa_link::device_link::link_note::LINK_STALLED_NOTE));
+    let strip = bench
+        .controller
+        .view()
+        .lens_reconnecting
+        .expect("a stall says reconnecting");
+    assert!(strip.detail.contains("went quiet"), "{}", strip.detail);
+
+    bench
+        .controller
+        .fold_device_input(note(lpa_link::device_link::link_note::LINK_ANSWERING_NOTE));
+    assert!(bench.controller.view().lens_reconnecting.is_none());
+    assert!(bench.lens_device_uid().is_some());
+}
+
+/// Plan D13's limit: a link that stays in trouble past the grace is a wire
+/// with nobody on it after all, and the dead-wire backstop closes the editor
+/// exactly as it did before (a port that is GONE never waits: see
+/// `a_port_that_dies_under_the_lens_closes_the_editor_through_the_tap`).
+#[test]
+fn a_link_still_down_after_the_grace_closes_the_editor_as_before() {
+    let (mut bench, tasks, _device) = lens_on_a_running_board("dev000000daqf6dvvrc", "usb-lens-c");
+    let link = lens_link(&bench);
+
+    bench.controller.fold_device_input(DeviceInput::link(
+        link,
+        lpa_devices::link::LinkEvent::WireNote(
+            lpa_link::device_link::link_note::LINK_STALLED_NOTE.to_string(),
+        ),
+    ));
+    bench.controller.record_passive_refresh_failure();
+    bench.controller.record_passive_refresh_failure();
+    bench.controller.record_passive_refresh_failure();
+    assert!(bench.lens_device_uid().is_some(), "held within the grace");
+
+    let grace = crate::app::studio::lens_reconnect::LENS_RECONNECT_GRACE.as_secs_f64();
+    bench.clock.set(bench.clock.get() + grace + 1.0);
+    bench.controller.record_passive_refresh_failure();
+    assert!(
+        bench.lens_device_uid().is_none(),
+        "past the grace the backstop is the backstop again"
+    );
+    assert!(bench.controller.view().lens_reconnecting.is_none());
+    bench.step(&tasks);
+    assert_eq!(bench.view().devices.len(), 1, "the card stays");
+}
+
+/// A board running the bundled example with the editor open on it — the
+/// starting point of every lens test above.
+fn lens_on_a_running_board(uid: &str, endpoint: &str) -> (DeviceBench, TaskPool, FakeEsp32Device) {
+    let device = empty_light_player(uid);
+    let (mut bench, tasks) = identified(&device, endpoint);
+    bench.run_until(&tasks, "the board to report nothing loaded", |bench| {
+        bench
+            .view()
+            .devices
+            .first()
+            .is_some_and(|card| card.loaded_project == lpa_devices::view::LoadedProject::Empty)
+    });
+    let card = bench.view().devices[0].clone();
+    bench.push_gesture(card.id, bundled_example());
+    bench.run_until(&tasks, "the push to finish", |bench| {
+        bench
+            .view()
+            .devices
+            .first()
+            .is_some_and(|card| card.activity.is_none() && card.last_outcome.is_some())
+    });
+    let uid = bench.registry()[0].uid.clone();
+    bench.open_lens(&uid).expect("opens");
+    (bench, tasks, device)
+}
+
+/// The link the editor lens is on.
+fn lens_link(bench: &DeviceBench) -> crate::DeviceLinkId {
+    bench
+        .controller
+        .runtime_pool_for_test()
+        .attached_session()
+        .expect("a device session")
+        .attachment()
+        .link
+}
+
 /// An address the roster cannot serve yet is HELD, never refused: the
 /// gallery stays honest, nothing dead is installed, and closing the lens
 /// (leaving the route) lets the intent go.
@@ -2238,21 +2424,21 @@ fn memory_store_sharing(store: &LibraryStore) -> LibraryStore {
     )
 }
 
-/// Drain whatever the device has already put on the wire, so the next link to
-/// open it lands MID-STREAM: the boot banner and the unsolicited id-0 hello are
-/// already gone.
+/// Drain the device's boot text, so the next link to open it lands
+/// MID-STREAM: the boot banner is already gone. (Since lp-link a board says
+/// hello first on every link session, so the next link hears one unless the
+/// board is starving its answers; what it can no longer hear is the boot.)
 fn run_past_the_boot_hello(device: &FakeEsp32Device) {
     let mut stream = lpa_link::providers::fake_device::FakeDeviceByteStream::new(device.clone());
     let mut buf = [0u8; 4096];
     let mut seen = String::new();
     let deadline = std::time::Instant::now() + REAL_TIME_LIMIT;
-    while !seen.contains("\"hello\"") {
-        let read =
-            crate::app::studio::studio_device_e2e_tests::read_available(&mut stream, &mut buf);
+    while !seen.contains("starting server loop") {
+        let read = read_available(&mut stream, &mut buf);
         seen.push_str(&String::from_utf8_lossy(&buf[..read]));
         assert!(
             std::time::Instant::now() < deadline,
-            "the fake never said hello; saw: {seen}"
+            "the fake never finished booting; saw: {seen}"
         );
         std::thread::sleep(Duration::from_millis(2));
     }
@@ -2265,18 +2451,6 @@ fn read_available(
 ) -> usize {
     use lpa_link::stream::DeviceByteStream;
     stream.read_available(buf).expect("the fake is alive")
-}
-
-/// The lens io's read: a dead wire is an answer (the port-error tap), not a
-/// panic — an unplug script ends the read path with `Closed`.
-fn read_available_checked(
-    stream: &mut lpa_link::providers::fake_device::FakeDeviceByteStream,
-    buf: &mut [u8],
-) -> Result<usize, String> {
-    use lpa_link::stream::DeviceByteStream;
-    stream
-        .read_available(buf)
-        .map_err(|error| format!("Serial port disconnected: {error:?}"))
 }
 
 /// A LightPlayer board with a stamped identity and a MAC — the everyday case.
@@ -4474,6 +4648,8 @@ fn an_effect_that_outlives_its_activity_gives_the_wire_back_and_the_pump_resumes
         device.unanswered_requests() == 0
     });
 
+    let hellos_before_push = device.session_hellos();
+
     // A push that never completes: it takes the wire and keeps it.
     bench.push_gesture(device_id, bundled_example());
     bench.run_until(&tasks, "the push to be visibly running", |bench| {
@@ -4501,31 +4677,22 @@ fn an_effect_that_outlives_its_activity_gives_the_wire_back_and_the_pump_resumes
 
     // The discriminating proof, and the reason it has to be this and not
     // "ask the board again": the eviction's recovery CYCLES the port
-    // (close, reopen), and a reopen begins a fresh evidence window. Only a
-    // reading pump can deliver those two events, so a card still wearing
-    // the pre-eviction verdict is a card sitting behind a dead pump —
-    // exactly the forty seconds of frozen truth the bench saw. A stale
-    // window would also let the re-identify below settle instantly on a
-    // hello nobody heard, which is why that is the second assertion and
-    // never the first.
+    // (close, reopen), and a reopen is a new lp-link session, on which the
+    // board says hello first (plan lp-link-usb-cutover, D5). Only a reading
+    // pump can bring that session up and deliver its hello, so a new session
+    // hello the fold has heard is a pump that was handed the wire back — a
+    // card sitting behind a dead pump (the forty seconds of frozen truth the
+    // bench saw) would have neither.
     let card = bench.view().devices[0].clone();
+    assert!(
+        device.session_hellos() > hellos_before_push,
+        "the recovery cycled the port: a new link session came up and the board said hello \
+         on it: {card:?}"
+    );
     assert_eq!(
         card.status,
-        lpa_devices::device::DeviceStatus::NotResponding,
-        "the fold saw the port cycle its recovery performed: {card:?}"
-    );
-    // A fresh window states only what it has been told again. The fake
-    // heartbeats through the reopened port, and a heartbeat CARRIES the
-    // loaded report, so the loaded face may already read Empty here — a
-    // fact stated when reported (2026-09-04) — but no hello has been heard
-    // in this window, so the VERB stays withheld: verdicts gate verbs.
-    assert!(
-        !card.can_receive_project,
-        "no hello in the fresh window, so no push verb: {card:?}"
-    );
-    assert!(
-        matches!(card.firmware_face, lpa_devices::view::FirmwareFace::Unknown),
-        "a fresh window carries no verdict it has not earned again: {card:?}"
+        lpa_devices::device::DeviceStatus::Ready,
+        "the fold heard the new session's hello over the returned wire: {card:?}"
     );
 
     // And the wire genuinely works: a re-ask reaches the board and comes
