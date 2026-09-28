@@ -1001,6 +1001,7 @@ impl Device {
             Classification::Incompatible { .. }
             | Classification::Blank
             | Classification::Bootloader
+            | Classification::OlderLightPlayer { .. }
             | Classification::Foreign { .. } => DeviceStatus::NeedsAttention,
             Classification::Quiet { .. } | Classification::Unknown => {
                 if self.evidence.presence.is_open() {

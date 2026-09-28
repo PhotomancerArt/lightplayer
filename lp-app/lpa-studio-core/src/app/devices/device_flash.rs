@@ -293,6 +293,7 @@ pub fn firmware_verb(view: &DeviceView) -> Option<FirmwareVerb> {
         // `wants_flash` covered every other face; the arm keeps the match
         // exhaustive so a new face is a compile error here.
         FirmwareFace::NoHello
+        | FirmwareFace::OlderLightPlayer { .. }
         | FirmwareFace::Blank
         | FirmwareFace::Bootloader
         | FirmwareFace::Foreign { .. }
