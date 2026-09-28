@@ -1,4 +1,4 @@
-//! The io_task's TX half, made safe to share the USB-Serial-JTAG IN endpoint.
+//! The USB link task's TX half, made safe to share the USB-Serial-JTAG IN endpoint.
 //!
 //! The USB-Serial-JTAG block has **one** 64-byte send buffer. Once it is
 //! flushed (`wr_done`, or the 64th byte) firmware cannot write it until the
@@ -27,10 +27,9 @@
 //! [`InEndpoint`] fixes both before every write, without touching esp-hal:
 //! wait until the buffer is free, then clear the now-stale `serial_in_empty`,
 //! so the only thing that can raise it is the drain of the packet this write
-//! commits. It wraps the io_task's **whole** TX half, so every byte the task
-//! writes — a JSON `M!` line, a packed `\n 0x00 'P' COBS 0x00` frame
-//! ([`super::server_msg`]), each `ChunkedWriter` chunk of either, the log
-//! lines and the not-draining probe — passes the gate.
+//! commits. It wraps the link task's **whole** TX half (C6, S3: `usb_link/`),
+//! so every byte the task writes — each lp-link frame, whatever channel it
+//! carries — passes the gate.
 //!
 //! The two register touches are chip facts this crate may not hold (no
 //! esp-hal here — see Cargo.toml's seam rules), so they arrive as

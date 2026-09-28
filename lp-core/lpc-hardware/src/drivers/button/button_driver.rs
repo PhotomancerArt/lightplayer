@@ -8,19 +8,45 @@ use crate::{
 /// Button endpoint configuration.
 ///
 /// `stable_ms` controls how long a raw input level must remain unchanged before
-/// [`ButtonDebouncer`] emits a [`ButtonEvent`].
+/// [`ButtonDebouncer`] emits a [`ButtonEvent`]. `pull` and `active` describe
+/// the wiring: the default is a button to ground (pull-up, active low);
+/// a switch that drives the pin high when on is pull-down, active high.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ButtonConfig {
     stable_ms: u64,
+    pull: ButtonPull,
+    active: ButtonActive,
 }
 
 impl ButtonConfig {
     pub fn new(stable_ms: u64) -> Self {
-        Self { stable_ms }
+        Self {
+            stable_ms,
+            pull: ButtonPull::Up,
+            active: ButtonActive::Low,
+        }
+    }
+
+    pub fn with_pull(mut self, pull: ButtonPull) -> Self {
+        self.pull = pull;
+        self
+    }
+
+    pub fn with_active(mut self, active: ButtonActive) -> Self {
+        self.active = active;
+        self
     }
 
     pub fn stable_ms(&self) -> u64 {
         self.stable_ms
+    }
+
+    pub fn pull(&self) -> ButtonPull {
+        self.pull
+    }
+
+    pub fn active(&self) -> ButtonActive {
+        self.active
     }
 }
 
@@ -28,6 +54,21 @@ impl Default for ButtonConfig {
     fn default() -> Self {
         Self::new(ButtonDebouncer::DEFAULT_STABLE_MS)
     }
+}
+
+/// Internal pull resistor a button input enables.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ButtonPull {
+    Up,
+    Down,
+    None,
+}
+
+/// Pin level that means "pressed" (or, for a switch, "on").
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ButtonActive {
+    Low,
+    High,
 }
 
 /// Opened button input.

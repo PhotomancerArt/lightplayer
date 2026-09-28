@@ -552,15 +552,24 @@ class PacSource:
     def _try_open(self) -> bool:
         home = self._cargo_home()
         stem = f"{self.chip.pac}-{self.chip.version}"
-        dirs = glob.glob(os.path.join(home, "registry", "src", "*", stem))
-        if dirs:
-            self.src_dir = dirs[0]
-            self.origin = self.src_dir
-            return True
+        # Prefer the `.crate` tarball: cargo writes it in one atomic
+        # download, so it is never half-there. A `registry/src/*/<stem>`
+        # directory, by contrast, can be caught mid-extraction by a parallel
+        # `cargo fetch` — that dir exists and glob finds it, but files under
+        # it are still being written, so a register block "has no
+        # src/<block>.rs" for a source that is present, just not yet
+        # complete. Falling back to the unpacked dir only when there is no
+        # tarball avoids ever trusting a source that might still be
+        # mid-write.
         crates = glob.glob(os.path.join(home, "registry", "cache", "*", f"{stem}.crate"))
         if crates:
             self.tar = tarfile.open(crates[0], "r:gz")
             self.origin = crates[0]
+            return True
+        dirs = glob.glob(os.path.join(home, "registry", "src", "*", stem))
+        if dirs:
+            self.src_dir = dirs[0]
+            self.origin = self.src_dir
             return True
         return False
 

@@ -293,6 +293,7 @@ pub fn firmware_verb(view: &DeviceView) -> Option<FirmwareVerb> {
         // `wants_flash` covered every other face; the arm keeps the match
         // exhaustive so a new face is a compile error here.
         FirmwareFace::NoHello
+        | FirmwareFace::OlderLightPlayer { .. }
         | FirmwareFace::Blank
         | FirmwareFace::Bootloader
         | FirmwareFace::Foreign { .. }
@@ -534,6 +535,7 @@ mod tests {
             degraded: None,
             loaded_project: LoadedProject::Empty,
             engine_fps: None,
+            link_counters: None,
             can_receive_project: true,
             can_remove_project: false,
             activity: None,
@@ -581,6 +583,7 @@ mod tests {
             remembered_firmware: None,
             degraded: None,
             engine_fps: None,
+            link_counters: None,
             loaded_project: LoadedProject::Running {
                 label: "studio".to_string(),
             },

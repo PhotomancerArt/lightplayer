@@ -2652,6 +2652,46 @@ test-rust-core:
     # lp-json-pack's corpus tests need its host features (`required-features`),
     # which the plain workspace run never turns on. No dependencies: cheap.
     cargo test -p lp-json-pack --all-features
+    # lp-link's simulator and delivery property need its `sim` feature; the
+    # comms lab's halves over the simulator need `lab` too.
+    cargo test -p lp-link --features sim,lab
+
+# lp-link (the link-layer prototype, plan lp2025/2026-09-26-1720-reliable-device-link):
+# the delivery property at soak depth, 5,000 fault schedules per ARQ variant
+# (release, ~3 min). CI runs 500 per variant inside `test-rust-core`.
+link-soak cases="5000":
+    PROPTEST_CASES={{cases}} cargo test -p lp-link --features sim --release --test delivery_properties
+
+# lp-link's decoder fuzzing at depth: arbitrary bytes, datagrams and crafted
+# frames against a live link, `cases` per framing (release, ~12 s at 20,000).
+# CI runs 256 per framing inside `test-rust-core`.
+link-fuzz cases="20000":
+    PROPTEST_CASES={{cases}} cargo test -p lp-link --release --test decoder_fuzz
+
+# lp-link's tables: compare | sweep | crc | codec | logs | ram | all. The link
+# rows are simulated; `codec` (and the top of `crc`) is host CPU throughput.
+link-bench what="all":
+    cargo run -p lp-link --features sim --release --bin link-bench -- {{what}}
+
+# lp-link's flash cost on riscv32imac (the C6's ISA), per variant, against a
+# baseline that already has alloc and core::fmt.
+link-size:
+    lp-base/lp-link/size-probe/measure.sh
+
+# lp-link builds for the board (riscv32, no_std) and the page (wasm32) with
+# the features those builds turn on, and lints clean with every feature on
+# (`clippy-host` sees only its default features, so the simulator, the lab and
+# the tests behind them were unlinted). Part of `check-lint`.
+check-lp-link-targets: install-rv32-target install-wasm32-target
+    cargo check -p lp-link --target {{ rv32_target }} --features log,lab
+    cargo check -p lp-link --target {{ wasm32_target }} --features log,lab
+    cargo clippy -p lp-link --features sim,lab,log --all-targets -- --no-deps -D warnings
+
+# The comms lab on the emulated C6 (plan reliable-device-link, M3): lp-link in
+# the `test_comms_lab` image against `lp-cli link lab`'s host half, with the
+# emulator's USB fault injector, in emulated time. Builds the image.
+link-lab-emu:
+    LP_EMU_BUILD_FW=1 cargo test -p lp-cli --release --test emu_link_lab -- --include-ignored --nocapture --test-threads 1
 
 # The vendored serializer forks' own tests: upstream's, plus the LP token
 # hook's. `third_party/ser-write` and `third_party/ser-write-json` are their
@@ -2840,22 +2880,10 @@ test-glsl-filetests:
 # Warm ~1s, cold ~47s locally; it runs beside clippy, the Lint job's long
 # pole. See docs/debt/wasm-cloud-check-not-in-just-check.md.
 [parallel]
-check-lint: fmt-check clippy check-wasm-cloud check-lpc-engine-gates wire-dict-check check-studio-core-minimal lint-serde-content lint-browser-test-harness lint-classic-capture lint-pcb-export lint-schemars-fw lint-upgrade-fw lint-emu-fence lint-nested-patches lint-emu-regnames lint-torture-corpus lint-vec-corpus lint-tw-utilities lint-red-main-needs lint-tag-next-version
+check-lint: fmt-check clippy check-wasm-cloud check-lp-link-targets check-lpc-engine-gates check-studio-core-minimal lint-serde-content lint-browser-test-harness lint-classic-capture lint-pcb-export lint-schemars-fw lint-upgrade-fw lint-emu-fence lint-nested-patches lint-emu-regnames lint-torture-corpus lint-vec-corpus lint-tw-utilities lint-red-main-needs lint-tag-next-version
 
 [parallel]
 check: check-lint schema-check fw-manifest-check-emu
-
-# The wire's JSON Pack dictionary (lp-core/lpc-wire/src/wire_dictionary.rs),
-# generated from the wire types by a host-only tracer (feature `wire-dict-gen`,
-# never enabled by firmware) and ranked by the committed traffic sample.
-# `wire-dict-check` fails when the committed file is stale, and when the
-# dictionary changed while WIRE_PROTO_VERSION did not: a dictionary change is a
-# wire change. `wire-dict` refuses to write in that case too.
-wire-dict:
-    cargo run -q -p lpc-wire --features wire-dict-gen --bin wire-dict
-
-wire-dict-check:
-    cargo run -q -p lpc-wire --features wire-dict-gen --bin wire-dict -- --check
 
 # Guard against serde Content-machinery reintroduction (tag/untagged/flatten).
 # See docs/adr/2026-07-04-json-only-artifacts.md and the script's allowlist.
@@ -2981,9 +3009,10 @@ lint-tag-next-version:
 # never arrive as a rebuild. It is listed here as well as running everywhere
 # because this is the job a reader looks in for the C6 emulator's gates.
 #
-# `emu_usb_hello` is in `lp-cli` rather than the emulator because it sends a
-# real `M!` frame, and the single framer for those (`lpc_wire::json::to_serial_line`)
-# is a product crate the fence keeps out of `lp-emu/` — see the test's header.
+# The `emu_usb_*` tests are in `lp-cli` rather than the emulator because since
+# wire proto 30 the shipped image speaks lp-link on USB, and a link host
+# (`lpc_wire::WireLinkPort`, `lp-cli emu run --host-link`) is a product crate
+# the fence keeps out of `lp-emu/` — see `tests/emu_usb_link_gates.rs`.
 #
 # Two halves, because CI runs them in two jobs. The `-p lp-cli` half is a
 # second full test-tree build (features unify differently from
@@ -3023,9 +3052,10 @@ test-emu-c6-boot:
 # CI's `Heap budget (esp32c6 chip)` job runs this half.
 test-emu-c6-cli:
     cargo test -p lp-cli --test validate_registry_parity
-    LP_EMU_BUILD_FW=1 scripts/ci/ci-images.py with esp32c6 -- cargo test -p lp-cli --test emu_usb_hello -- --include-ignored
-    LP_EMU_BUILD_FW=1 scripts/ci/ci-images.py with esp32c6 -- cargo test -p lp-cli --test emu_usb_json_pack -- --include-ignored --nocapture
-    LP_EMU_BUILD_FW=1 scripts/ci/ci-images.py with esp32c6 -- cargo test -p lp-cli --test emu_usb_free_lag -- --include-ignored --nocapture
+    LP_EMU_BUILD_FW=1 scripts/ci/ci-images.py with esp32c6 -- cargo test -p lp-cli --release --test emu_usb_link_pack -- --include-ignored --nocapture
+    LP_EMU_BUILD_FW=1 scripts/ci/ci-images.py with esp32c6 -- cargo test -p lp-cli --release --test emu_usb_free_lag -- --include-ignored --nocapture
+    LP_EMU_BUILD_FW=1 scripts/ci/ci-images.py with esp32c6 -- cargo test -p lp-cli --release --test emu_usb_link -- --include-ignored --nocapture
+    LP_EMU_BUILD_FW=1 scripts/ci/ci-images.py with esp32c6 -- cargo test -p lp-cli --release --test emu_usb_link_gates -- --include-ignored --nocapture
 
 # The classic ESP32 (v3) machine's own suite (plan three, M3).
 #
@@ -3296,7 +3326,12 @@ test-emu-esp32s3-boot:
     if [[ -n "${LP_CI_IMAGES:-}" ]]; then
       ci_env="$(scripts/ci/ci-images.py env esp32s3)"
       eval "$ci_env"
-      exec cargo test -p lp-emu-esp32s3 --no-fail-fast -- --include-ignored
+      status=0
+      cargo test -p lp-emu-esp32s3 --no-fail-fast -- --include-ignored || status=$?
+      # The S3's gates that need a link host since wire proto 30 (lp-cli's:
+      # a link host is a product crate, which the lp-emu fence keeps out).
+      cargo test -p lp-cli --release --test emu_s3_link_gates -- --include-ignored --nocapture || status=$?
+      exit "$status"
     fi
     just build-fw-esp32s3
     built={{ justfile_directory() }}/target/xtensa-esp32s3-none-elf/release-esp32s3/fw-esp32s3
@@ -3318,7 +3353,12 @@ test-emu-esp32s3-boot:
     fi
     # See test-emu-esp32v3-boot: the re-run file, and every binary runs.
     export -p | grep ' LP_EMU_ESP32S3_' > "$out/images.env"
-    cargo test -p lp-emu-esp32s3 --no-fail-fast -- --include-ignored
+    status=0
+    cargo test -p lp-emu-esp32s3 --no-fail-fast -- --include-ignored || status=$?
+    # The S3's gates that need a link host since wire proto 30 (lp-cli's:
+    # a link host is a product crate, which the lp-emu fence keeps out).
+    cargo test -p lp-cli --release --test emu_s3_link_gates -- --include-ignored --nocapture || status=$?
+    exit "$status"
 
 # **M6's gate.** What the `Emulator ESP32-S3 (x64)` job runs (M6 P10 added
 # it, path-gated on `emu_esp32s3` and non-required — the filter mirrors
@@ -3627,8 +3667,10 @@ test-emu-serve:
 # NOT in `test-emu-c6`: it builds a firmware image, a merged flash image and a
 # release lp-cli, and then runs the machine for eight emulated seconds — it
 # is a walk, and a walk is something you run, not something every PR pays for.
-# What it proves per-tick lives in `tests/shader_oracle_pin.rs`, which does
-# run there. See docs/reports/2026-09-08-esp32c6-emulator-walk.md.
+# What it proves per-tick lives in `lp-cli/tests/emu_usb_link_gates.rs` (G4-1,
+# moved from lp-emu-esp32c6's shader_oracle_pin.rs when the image went onto
+# lp-link), which runs in `test-emu-c6-cli`. See
+# docs/reports/2026-09-08-esp32c6-emulator-walk.md.
 # `build-rv32-builtins` and not the whole `ci-prereqs`: the host oracle's
 # second engine is `lpvm-native`'s rv32 code generator, which renders black
 # without its builtins image — and a black host frame is not an oracle. The

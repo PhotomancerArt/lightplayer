@@ -122,6 +122,7 @@ pub const fn feature_fragment(enabled: bool, feature: LpFeature) -> &'static str
             LpFeature::NodeFluid => "\"node.fluid\",",
             LpFeature::NodeFixture => "\"node.fixture\",",
             LpFeature::NodePlaylist => "\"node.playlist\",",
+            LpFeature::NodePowerButton => "\"node.power-button\",",
             LpFeature::NodeRadio => "\"node.radio\",",
             LpFeature::NodeShader => "\"node.shader\",",
             LpFeature::NodeTexture => "\"node.texture\",",

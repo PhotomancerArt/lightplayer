@@ -5,6 +5,14 @@
 - **Deciders:** Photomancer
 - **Supersedes:** None
 - **Superseded by:** None
+- **Amended by:** `2026-09-25-learned-wire-dictionary.md` — the static
+  dictionary, its generator, `wire-dict-check` and the fingerprint handshake
+  are gone; each packed link learns its names (JSON Pack format 2, proto
+  28). The sections below that describe the dictionary are kept as the
+  record of what shipped first, each marked where it no longer holds.
+  Amended again 2026-09-27 (see the note at the end): on USB the framing
+  and per-connection re-ask below are superseded by `lp-link`; they still
+  hold for BLE, the classic ESP32's UART and `fw-emu`.
 
 ## Context
 
@@ -105,6 +113,10 @@ unconditionally:
   shim for an old wire form — JSON stays a first-class, live encoding on
   every link that never asks, which is why this is not the "capability
   fallback" AGENTS.md's wire-compatibility rule forbids.
+- *Amended 2026-09-25:* the two layers below are replaced. Board and host
+  agree on `PACK_FORMAT_VERSION` alone (`ServerHello.pack_format`,
+  `SetEncoding { encoding, format }`); there is no dictionary to agree on.
+  See `2026-09-25-learned-wire-dictionary.md`.
 - **How the board and host stay in agreement (Yona's G6 concern: "how do we
   know firmware and Studio agree? Studio version may very well not be the
   same as the firmware.").** Two layers:
@@ -155,6 +167,10 @@ running a real device); the marker makes that class of miss structurally
 impossible.
 
 ### The generated dictionary, versioned by `WIRE_PROTO_VERSION`
+
+*Amended 2026-09-25: deleted, with `just wire-dict` / `wire-dict-check`.
+Packed links learn their names per connection;
+`2026-09-25-learned-wire-dictionary.md`.*
 
 `schemas/` does not describe the wire — it covers persisted artifacts, and
 only the ~86 `lpc-wire` types that derive `JsonSchema`. The dictionary
@@ -247,6 +263,13 @@ sufficient for the reflash-in-lockstep world this plan ships into; a
 compatibility window, multiple co-resident dictionaries, or an OTA path is
 future work, out of scope here, and connects to the BLE remote-control
 vision's own version-skew questions.
+
+*Amended 2026-09-25: the next step taken was the per-connection learned
+table, not the in-band dictionary (Yona, G0 of
+`lp2025/2026-09-25-0006-learned-wire-dictionary`); the torn-frame resync
+cost turned out small. Build-to-build dictionary agreement is gone, and
+only `PACK_FORMAT_VERSION` must match. See
+`2026-09-25-learned-wire-dictionary.md`.*
 
 **The intended next step is an in-band dictionary** (Yona, 2026-09-24:
 follow-up, not before merge). When the host's fingerprint does not match,
@@ -367,3 +390,31 @@ real C6.
   shows the link itself, not the pull loop, is the constraint again.
 - Structural slot values (G-F4), if flash gets tight enough to be worth
   dropping the device's text lexer.
+
+## Amended 2026-09-27 — lp-link USB cut-over (PR #854)
+
+On USB (C6/S3 silicon, their emulators, Studio's Web Serial and
+emulator-tab providers, `lp-cli`'s native serial/`serial:tcp`/`serial:ws`)
+the "Framing beside console text" section above no longer applies: there
+is no `0x00 'P'` COBS frame riding beside `M!` lines. A packed reply is one
+whole `lp-link` proto-channel message tagged `L`
+(`lpc_wire::PAYLOAD_TAG_PACKED`, the same byte as the frame-kind byte
+above), written without a COBS layer of its own — `lp-link`'s own COBS-FF
+stream framing already delimits it. A JSON reply is tagged `{`.
+
+The opt-in is unchanged in spirit — `SetEncoding` is still an ordinary
+request the host sends, and the board still switches its write path only
+after answering it — but "The host re-asks at most once per 3 s"
+(`PackOptIn`, `PACK_REASK_INTERVAL_MS`) does not run on a USB link. The
+opt-in happens once per link `Up` instead: a link session boundary is
+already the boundary that resets the learned table (see the 2026-09-25
+ADR's amendment below), and unlike the old wire, a USB link no longer
+silently reverts to JSON mid-session — that was the not-draining latch's
+job, which `lp-link`'s stall/reset states now cover. A board that has not
+opted in yet this session simply answers JSON, as before.
+
+This section, and the framing and re-ask machinery it describes, is
+**unchanged** for BLE, the classic ESP32's UART and `fw-emu`, which still
+ride the pre-`lp-link` `M!` / `0x00 'P'` wire. See
+`lp-base/lp-link/README.md` and
+`docs/adr/2026-09-27-lp-link-one-comms-layer.md`.

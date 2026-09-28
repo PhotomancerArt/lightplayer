@@ -12,13 +12,23 @@
 //!   the next frame. That is the torn-write case: a board reset mid-frame
 //!   leaves a start with no end, the boot text runs into the body, and the
 //!   next real frame's opening `0x00` looks like this one's end.
+//! - That start is a guess, and the frame it opens is held to it. When bytes
+//!   are lost from the *middle* of a body instead, both delimiters survive:
+//!   the closing `0x00` really was an end, and what follows it (the next
+//!   frame's leading `\n`, or console text) is not a frame. So a guessed frame
+//!   whose body is not valid COBS and whose kind byte differs from the torn
+//!   frame's comes out as [`ScanEvent::Text`], byte for byte, rather than as
+//!   a second drop; its closing `0x00` is again taken as a start. A guessed
+//!   frame of the torn frame's own kind is taken to be a real frame that was
+//!   torn too, and is reported as [`ScanEvent::Dropped`].
 //! - A frame that outgrows the buffer is reported as [`ScanEvent::Dropped`] and
 //!   skipped to its closing `0x00`.
 //!
 //! A torn frame whose swallowed text happens to be valid COBS comes out as a
 //! `Frame` with a garbage payload (the pack decoder rejects it), and the frame
 //! after it is lost with it; valid COBS from console text is rare, but not
-//! impossible.
+//! impossible. Likewise, a real frame of a *different* kind torn right after
+//! a torn frame comes out as text, not as a second drop.
 
 use crate::cobs_frame::{FRAME_DELIMITER, cobs_decode_in_place};
 
@@ -153,6 +163,11 @@ pub struct FrameScanner<B: FrameBuffer> {
     buf: B,
     state: State,
     kind: u8,
+    /// The current frame's start was guessed: it is a torn frame's closing
+    /// `0x00`.
+    resync: bool,
+    /// The kind byte of the last torn frame, while `resync` holds.
+    torn_kind: u8,
 }
 
 impl<B: FrameBuffer> FrameScanner<B> {
@@ -162,12 +177,16 @@ impl<B: FrameBuffer> FrameScanner<B> {
             buf,
             state: State::Text,
             kind: 0,
+            resync: false,
+            torn_kind: 0,
         }
     }
 
-    /// Whether the scanner is partway through a frame.
+    /// Whether the scanner is partway through a frame. A frame whose start
+    /// was only guessed after a torn one (see the module docs) does not
+    /// count: it is as likely to be text.
     pub fn in_frame(&self) -> bool {
-        self.state != State::Text
+        self.state != State::Text && !self.resync
     }
 
     /// Scan `input`, calling `on` for each event in stream order.
@@ -194,8 +213,11 @@ impl<B: FrameBuffer> FrameScanner<B> {
                         self.kind = b;
                         self.buf.clear();
                         self.state = State::Body;
+                    } else {
+                        // A second 0x00 starts the frame again, and is no
+                        // guess: stay in Kind.
+                        self.resync = false;
                     }
-                    // A second 0x00 starts the frame again: stay in Kind.
                 }
                 State::Body | State::Skip => {
                     let rest = &input[i..];
@@ -212,22 +234,36 @@ impl<B: FrameBuffer> FrameScanner<B> {
                     i += end + 1;
                     if self.state == State::Skip {
                         self.state = State::Text;
+                        self.resync = false;
                         continue;
                     }
                     let kind = self.kind;
                     let body = self.buf.body_mut();
-                    match cobs_decode_in_place(body) {
-                        Some(n) => {
-                            on(ScanEvent::Frame {
-                                kind,
-                                payload: &body[..n],
-                            });
-                            self.state = State::Text;
+                    if self.resync && kind != self.torn_kind && !is_cobs(body) {
+                        // The guessed start was an end: these bytes were
+                        // text, and this 0x00 is the next frame's start.
+                        on(ScanEvent::Text(&[kind]));
+                        if !body.is_empty() {
+                            on(ScanEvent::Text(body));
                         }
-                        None => {
-                            on(ScanEvent::Dropped(DropReason::BadCobs));
-                            // Torn: this 0x00 is the next frame's start.
-                            self.state = State::Kind;
+                        self.state = State::Kind;
+                    } else {
+                        match cobs_decode_in_place(body) {
+                            Some(n) => {
+                                on(ScanEvent::Frame {
+                                    kind,
+                                    payload: &body[..n],
+                                });
+                                self.state = State::Text;
+                                self.resync = false;
+                            }
+                            None => {
+                                on(ScanEvent::Dropped(DropReason::BadCobs));
+                                // Torn: this 0x00 is the next frame's start.
+                                self.state = State::Kind;
+                                self.resync = true;
+                                self.torn_kind = kind;
+                            }
                         }
                     }
                     self.buf.clear();
@@ -235,6 +271,22 @@ impl<B: FrameBuffer> FrameScanner<B> {
             }
         }
     }
+}
+
+/// Whether `body` is valid COBS, without touching it (the check
+/// [`cobs_decode_in_place`] makes, minus the decoding).
+fn is_cobs(body: &[u8]) -> bool {
+    if body.is_empty() {
+        return false;
+    }
+    let mut r = 0;
+    while let Some(&code) = body.get(r) {
+        if code == 0 {
+            return false;
+        }
+        r += usize::from(code);
+    }
+    r == body.len()
 }
 
 #[cfg(test)]
@@ -288,6 +340,15 @@ mod tests {
         let mut out = [0u8; 128];
         let n = frame(FRAME_KIND_PACK, payload, &mut out).unwrap();
         (out, n)
+    }
+
+    /// A frame of `payload` (no zero bytes) with five bytes cut from the
+    /// middle of its body, delimiters kept.
+    fn short_mid_body(payload: &[u8]) -> ([u8; 128], usize) {
+        let (mut f, n) = framed(payload);
+        let mid = n / 2;
+        f.copy_within(mid + 5..n, mid);
+        (f, n - 5)
     }
 
     fn stream(parts: &[&[u8]]) -> ([u8; 512], usize) {
@@ -352,6 +413,64 @@ mod tests {
             assert_eq!(seen.frame(0), b"payload");
             assert_eq!(&seen.text[..seen.text_len], b"after\n");
         }
+    }
+
+    #[test]
+    fn a_frame_short_of_bytes_mid_body_is_one_drop() {
+        // The real C6 loss: both delimiters intact, a few bytes missing from
+        // the middle, and the wire's `\n` lead before every frame.
+        let (lossy, nl) = short_mid_body(b"a lens reply that lost bytes");
+        let (good, ng) = framed(b"payload");
+        let (s, n) = stream(&[b"\n", &lossy[..nl], b"\n", &good[..ng], b"after\n"]);
+        for step in 1..=n {
+            let seen = scan_in_steps(&s[..n], step);
+            assert_eq!(seen.dropped, 1, "step {step}");
+            assert_eq!(seen.frame_count, 1, "step {step}");
+            assert_eq!(seen.frame(0), b"payload");
+            assert_eq!(&seen.text[..seen.text_len], b"\n\nafter\n");
+        }
+    }
+
+    #[test]
+    fn console_text_after_a_frame_short_of_bytes_is_kept() {
+        let (lossy, nl) = short_mid_body(b"a lens reply that lost bytes");
+        let (good, ng) = framed(b"payload");
+        let (s, n) = stream(&[&lossy[..nl], b"[perf] 17 fps\n\n", &good[..ng]]);
+        for step in 1..=n {
+            let seen = scan_in_steps(&s[..n], step);
+            assert_eq!(seen.dropped, 1, "step {step}");
+            assert_eq!(seen.frame_count, 1, "step {step}");
+            assert_eq!(seen.frame(0), b"payload");
+            assert_eq!(&seen.text[..seen.text_len], b"[perf] 17 fps\n\n");
+        }
+    }
+
+    #[test]
+    fn two_frames_short_of_bytes_are_two_drops() {
+        let (lossy, nl) = short_mid_body(b"a lens reply that lost bytes");
+        let (good, ng) = framed(b"payload");
+        let (s, n) = stream(&[b"\n", &lossy[..nl], b"\n", &lossy[..nl], b"\n", &good[..ng]]);
+        for step in 1..=n {
+            let seen = scan_in_steps(&s[..n], step);
+            assert_eq!(seen.dropped, 2, "step {step}");
+            assert_eq!(seen.frame_count, 1, "step {step}");
+            assert_eq!(seen.frame(0), b"payload");
+            assert_eq!(&seen.text[..seen.text_len], b"\n\n\n");
+        }
+    }
+
+    #[test]
+    fn a_stream_ending_after_a_torn_frame_is_not_inside_one() {
+        let (lossy, nl) = short_mid_body(b"a lens reply that lost bytes");
+        let (s, n) = stream(&[&lossy[..nl], b"\n"]);
+        let mut body = [0u8; 64];
+        let mut sc = FrameScanner::new(SliceFrameBuffer::new(&mut body));
+        let mut dropped = 0;
+        sc.push(&s[..n], |e| {
+            dropped += usize::from(e == ScanEvent::Dropped(DropReason::BadCobs))
+        });
+        assert_eq!(dropped, 1);
+        assert!(!sc.in_frame());
     }
 
     #[test]

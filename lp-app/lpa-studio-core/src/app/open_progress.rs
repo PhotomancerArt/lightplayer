@@ -58,7 +58,7 @@ use core::future::Future;
 use core::pin::Pin;
 use core::task::{Context, Poll, Waker};
 
-use crate::{DeviceId, UiAction, UiError};
+use crate::{DeviceEventKind, DeviceEventRecorder, DeviceId, UiAction, UiError};
 
 /// How far the open in flight has got, as far as the CORE can see.
 ///
@@ -189,6 +189,14 @@ thread_local! {
     static CANCEL_EPOCH: Cell<u64> = const { Cell::new(0) };
     /// Requests parked on a cancel that has not come.
     static CANCEL_WAKERS: RefCell<Vec<Waker>> = const { RefCell::new(Vec::new()) };
+    /// The session recorder's stage feed ([`record_open_stages`]), and the
+    /// label it last recorded (so a repeated stage records once).
+    static STAGE_RECORDER: RefCell<Option<StageRecorder>> = const { RefCell::new(None) };
+}
+
+struct StageRecorder {
+    recorder: DeviceEventRecorder,
+    last: Option<String>,
 }
 
 /// The stage the open in flight (or the last failed one) reports.
@@ -376,7 +384,83 @@ impl Future for CancelledSince {
 }
 
 fn set_stage(next: OpenStage) {
+    record_stage(&next);
     STAGE.with(|stage| *stage.borrow_mut() = next);
+}
+
+/// Record every open-stage change from now on into `recorder`'s log (the
+/// session recorder, `?record=`): an `open` record per stage, so a hang
+/// reads as "stage X began at t, and nothing after" — plus an `error`
+/// record carrying the message when an open fails. Called once by the
+/// platform shell; a later call replaces the earlier recorder.
+pub fn record_open_stages(recorder: DeviceEventRecorder) {
+    STAGE_RECORDER.with(|slot| {
+        *slot.borrow_mut() = Some(StageRecorder {
+            recorder,
+            last: None,
+        });
+    });
+}
+
+/// The recorder's name for a stage: `idle`, `starting`,
+/// `preparing-project`, `waiting-for-device:<reason>`,
+/// `on-device:<step>`, `failed`. Upload progress is one stage however many
+/// bytes have gone (its byte counts would otherwise record per chunk).
+pub fn open_stage_label(stage: &OpenStage) -> String {
+    match stage {
+        OpenStage::Idle => "idle".to_string(),
+        OpenStage::Starting => "starting".to_string(),
+        OpenStage::PreparingProject => "preparing-project".to_string(),
+        OpenStage::WaitingForDevice(wait) => {
+            let reason = match wait.reason {
+                DeviceWaitReason::NotConnected => "not-connected",
+                DeviceWaitReason::PortClosed => "port-closed",
+                DeviceWaitReason::Identifying => "identifying",
+                DeviceWaitReason::Busy => "busy",
+                DeviceWaitReason::Unknown => "unknown",
+            };
+            format!("waiting-for-device:{reason}")
+        }
+        OpenStage::OnDevice(progress) => {
+            let step = match progress.step {
+                DeviceOpenStep::Connecting => "connecting",
+                DeviceOpenStep::Clearing => "clearing",
+                DeviceOpenStep::Uploading { .. } => "uploading",
+                DeviceOpenStep::Loading => "loading",
+                DeviceOpenStep::Reading => "reading",
+            };
+            format!("on-device:{step}")
+        }
+        OpenStage::Failed(_) => "failed".to_string(),
+    }
+}
+
+fn record_stage(next: &OpenStage) {
+    STAGE_RECORDER.with(|slot| {
+        let mut slot = slot.borrow_mut();
+        let Some(stage_recorder) = slot.as_mut() else {
+            return;
+        };
+        let label = open_stage_label(next);
+        if stage_recorder.last.as_deref() == Some(label.as_str()) {
+            return;
+        }
+        stage_recorder.last = Some(label.clone());
+        let recorder = stage_recorder.recorder.clone();
+        drop(slot);
+        recorder.record(None, None, DeviceEventKind::Open { stage: label });
+        if let OpenStage::Failed(failure) = next {
+            recorder.record(
+                None,
+                None,
+                DeviceEventKind::Error {
+                    level: "error".to_string(),
+                    source: "open".to_string(),
+                    message: failure.message.clone(),
+                },
+            );
+        }
+    });
 }
 
 /// Forget everything (test-only): the signals are per-thread, and a test
@@ -387,6 +471,7 @@ pub(crate) fn reset_for_test() {
     CANCEL_WAKERS.with(|wakers| wakers.borrow_mut().clear());
     REQUESTED.with(|generation| generation.set(0));
     RUNNING.with(|running| running.set(0));
+    STAGE_RECORDER.with(|slot| *slot.borrow_mut() = None);
 }
 
 #[cfg(test)]
@@ -557,6 +642,56 @@ mod tests {
         };
         assert!(!failure.needs_unlock);
         assert_eq!(refused_open_device(), None);
+    }
+
+    #[test]
+    fn stage_changes_record_once_each_and_a_failure_records_its_message() {
+        reset_for_test();
+        let log = std::rc::Rc::new(RefCell::new(crate::core::log::DeviceEventLog::new()));
+        record_open_stages(DeviceEventRecorder::new(
+            std::rc::Rc::clone(&log),
+            std::rc::Rc::new(|| 5.0),
+        ));
+        note_open_requested();
+        note_open_started();
+        note_device_step(
+            &board(),
+            DeviceOpenStep::Uploading {
+                sent_bytes: 10,
+                total_bytes: 100,
+            },
+        );
+        note_device_step(
+            &board(),
+            DeviceOpenStep::Uploading {
+                sent_bytes: 90,
+                total_bytes: 100,
+            },
+        );
+        note_device_step(&board(), DeviceOpenStep::Loading);
+        note_open_failed("the device did not respond", open_action("prjx"));
+
+        let kinds: Vec<DeviceEventKind> = log.borrow().iter().map(|r| r.kind.clone()).collect();
+        let stage = |s: &str| DeviceEventKind::Open {
+            stage: s.to_string(),
+        };
+        assert_eq!(
+            kinds,
+            vec![
+                stage("starting"),
+                stage("on-device:uploading"),
+                stage("on-device:loading"),
+                stage("failed"),
+                DeviceEventKind::Error {
+                    level: "error".to_string(),
+                    source: "open".to_string(),
+                    message: "Choker stopped while loading the project on the board \
+                              (compiling its shaders): the device did not respond"
+                        .to_string(),
+                },
+            ]
+        );
+        reset_for_test();
     }
 
     fn board() -> OpenDevice {

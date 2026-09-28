@@ -75,9 +75,10 @@ pub enum ServerMsgBody {
     /// Answer to [`crate::ClientRequest::SetEncoding`]: the encoding this
     /// link's replies are written in from the NEXT frame on.
     ///
-    /// `json` when the host asked for JSON, named a different dictionary, or
+    /// `json` when the host asked for JSON, named a different pack format, or
     /// the embedder cannot pack. This frame is always JSON; the transport
-    /// switches after writing it.
+    /// switches after writing it, and a `packed` answer starts a new
+    /// learned-table epoch.
     SetEncoding {
         encoding: crate::WireEncoding,
     },
@@ -129,10 +130,11 @@ pub enum ServerMsgBody {
         /// single-core fallback boots).
         #[serde(default)]
         outputs: Option<Vec<crate::server::OutputWireStatus>>,
-        /// Serial-link loss/corruption counters since boot; absent on
-        /// targets without a lossy byte-stream link (host server, ws).
-        /// Every drop the demux takes is counted here so silent loss has a
-        /// wire-visible trace (2026-08-26 inbound-loss defect).
+        /// The device link's counters (lp-link's: resends, damaged frames,
+        /// resets by reason, stalls, …); absent on targets whose host link
+        /// is not an lp-link (host server, ws, fw-emu). Every recovery the
+        /// link makes is counted here so a lossy edge stays visible
+        /// (lp-link principle 2; `docs/adr/2026-09-27-lp-link-one-comms-layer.md`).
         #[serde(default)]
         link: Option<crate::server::LinkCounters>,
         /// Who this device is, repeated on every heartbeat.
@@ -375,64 +377,6 @@ impl HeartbeatIdentity {
     pub fn is_empty(&self) -> bool {
         self.device_uid.is_none() && self.base_mac.is_none()
     }
-}
-
-/// Serial-link loss/corruption counters, monotonic since boot.
-///
-/// Attached to [`ServerMsgBody::Heartbeat`] so a lost or corrupted inbound
-/// frame is never silent: the drop is counted at the site that takes it and
-/// surfaces on the next heartbeat.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-#[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
-#[serde(rename_all = "camelCase")]
-pub struct LinkCounters {
-    /// Newline-terminated `M!` lines whose JSON failed to parse (torn or
-    /// spliced frames).
-    #[serde(default)]
-    pub parse_failures: u32,
-    /// Hardware RX errors (overflow/parity/framing) that dropped a partial
-    /// line.
-    #[serde(default)]
-    pub rx_errors: u32,
-    /// Parsed `M!` lines dropped because the inbound queue was full.
-    #[serde(default)]
-    pub queue_full_drops: u32,
-    /// Stale partial lines discarded at a session boundary (dead session
-    /// remnants).
-    #[serde(default)]
-    pub stale_partial_flushes: u32,
-    /// Device-clock milliseconds since boot at the most recent moment the
-    /// link latched "the host is not draining me" — the point where protocol
-    /// writes started being dropped instead of attempted.
-    ///
-    /// `None` = never latched this boot, which is what a link that has been
-    /// read from since boot reports. Only targets with a connection monitor
-    /// fill this at all: today that is the two native-USB chips (C6, S3);
-    /// the classic's UART link has no such state and reports `None` forever.
-    ///
-    /// The clock is the **device's own** (`embassy_time::Instant`), not the
-    /// host's, which is the whole point: it is the only witness to a period
-    /// during which, by definition, nothing the device said could reach a
-    /// host. Monotonic since boot and never reset by the latch clearing.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub host_not_draining_ms: Option<u32>,
-    /// Device-clock milliseconds since boot at the most recent moment the
-    /// link decided the host was draining it again — a probe write that
-    /// completed, or bytes arriving. `None` = the link has never recovered
-    /// from a latch this boot (either it never latched, or it still has not
-    /// come back).
-    ///
-    /// Read with [`Self::host_not_draining_ms`]: both present with
-    /// `host_not_draining_ms < host_draining_again_ms` is one complete
-    /// silence, and their difference is how long it lasted on the device's
-    /// clock.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub host_draining_again_ms: Option<u32>,
-    /// How many times the link has latched "not draining" since boot. `0` on
-    /// every target without a connection monitor, and on a link that has been
-    /// drained since the first byte.
-    #[serde(default)]
-    pub not_draining_count: u32,
 }
 
 #[cfg(test)]

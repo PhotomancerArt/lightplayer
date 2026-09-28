@@ -189,12 +189,17 @@ fn g3_3_a_byte_client_and_a_control_client_drive_one_machine() {
     bytes.set_read_timeout(Some(READ_TIMEOUT)).expect("timeout");
     wait_for(&mut control, "draining", "true");
 
-    // And what it then reads is what a host receives: the boot, then the
-    // hello the firmware sends unsolicited.
+    // And what it then reads is what a host receives: the boot text, up to
+    // the boot marker the server loop prints as it starts. (Until wire
+    // proto 30 this read on to the unsolicited `M!` hello. The image now
+    // speaks lp-link past the boot text, and its hello goes out only once a
+    // host has brought the link up — which only a product crate can do, so
+    // that half is `lp-cli/tests/emu_usb_link_gates.rs`'s.)
+    const BOOT_MARKER: &str = "starting server loop... proto=";
     let mut got = Vec::new();
     let mut buf = [0u8; 4096];
     let deadline = Instant::now() + READ_TIMEOUT;
-    while !String::from_utf8_lossy(&got).contains("\"hello\"") && Instant::now() < deadline {
+    while !String::from_utf8_lossy(&got).contains(BOOT_MARKER) && Instant::now() < deadline {
         let n = bytes.read(&mut buf).expect("reading the byte socket");
         assert!(n > 0, "the byte socket closed early");
         got.extend_from_slice(&buf[..n]);
@@ -205,7 +210,7 @@ fn g3_3_a_byte_client_and_a_control_client_drive_one_machine() {
         "the held packet came out first: {:?}",
         &text[..text.len().min(60)]
     );
-    assert!(text.contains("\"hello\""), "the hello never arrived");
+    assert!(text.contains(BOOT_MARKER), "the boot marker never arrived");
 
     // `close` and `open` move the same state the coupling moved.
     assert!(control.cmd("close").starts_with("ok close "));

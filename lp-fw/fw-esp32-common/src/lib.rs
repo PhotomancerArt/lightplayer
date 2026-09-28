@@ -12,6 +12,8 @@
 extern crate alloc;
 
 pub mod jit_fns;
+#[cfg(feature = "usb-link")]
+pub mod log_ring_logger;
 pub mod logger;
 pub mod output;
 pub mod serial;
@@ -32,3 +34,5 @@ pub mod radio_link;
 pub mod server_loop;
 #[cfg(feature = "server")]
 pub mod transport;
+#[cfg(feature = "usb-link")]
+pub mod usb_link;

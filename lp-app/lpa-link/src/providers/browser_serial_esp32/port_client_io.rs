@@ -4,18 +4,26 @@
 //! cannot give it: a REAL protocol exchange (request out, decoded response
 //! body back). The model's frame mirror is deliberately lossy — a response
 //! body surfaces there as a label — so anything that wants the body speaks
-//! `lpa-client` below the mirror, on the port's own reader (the same
-//! `WireReader` the model's link pump drains, so a frame that straddles the
-//! handover is read whole and the packed-reply opt-in is the port's, not the
-//! drainer's).
+//! `lpa-client` below the mirror, on the port's own lp-link end (the same
+//! `LinkPortService` the model's link pump drains: the session, the resends
+//! and the packed-reply opt-in are the port's, not the drainer's, and every
+//! message comes out whole).
 //!
 //! # Exclusive borrow, or two readers fight
 //!
-//! `take_reads` drains a shared buffer. While this io runs, the effects layer
-//! MUST have paused the model's link pump for the same port (that is the
-//! coarse-effect discipline: borrow the wire exclusively, run, give it
-//! back). Two drainers would each get half the frames, and the halves would
-//! both look like a dead device.
+//! `take_reads` drains a shared queue of decoded messages. While this io
+//! runs, the effects layer MUST have paused the model's link pump for the
+//! same port (that is the coarse-effect discipline: borrow the wire
+//! exclusively, run, give it back — plan D2 keeps it over the link). Two
+//! drainers would each get half the replies, and the halves would both look
+//! like a dead device.
+//!
+//! # A link reset fails the request now
+//!
+//! When the port's link resets (the board restarted, a frame went
+//! unanswered too long), every request in flight is lost; `receive` fails at
+//! once with the reset's note instead of waiting out its budget (plan D9),
+//! and the lens tap hears the note so the fold's journal says why.
 //!
 //! Lines that are not `M!` frames (boot output, logs) are forwarded to the
 //! management event sink so the conversation's journal stays honest.
@@ -25,15 +33,14 @@
 //! is handed to the caller verbatim before the io decodes it, so the device
 //! model's fold keeps receiving the evidence its paused pump would have.
 
+use std::collections::VecDeque;
 use std::rc::Rc;
 
 use async_trait::async_trait;
-use js_sys::{Function, Promise, Reflect};
 use lpa_client::{ClientIo, LpClient};
 use lpc_wire::{ClientMessage, TransportError, WireServerMessage};
-use wasm_bindgen::{JsCast, JsValue};
-use wasm_bindgen_futures::JsFuture;
 
+use crate::device_link::link_port_edge::sleep_ms;
 use crate::device_link::wire_reader::WireRead;
 use crate::provider::management_event::{LinkManagementEvent, LinkManagementEventSink};
 use crate::providers::browser_serial_esp32::browser_serial;
@@ -74,7 +81,7 @@ pub async fn write_device_file(
     use lpc_model::AsLpPath;
     let io = PortLineIo {
         port_id,
-        pending: Vec::new(),
+        pending: VecDeque::new(),
         events: events.clone(),
         tap: None,
     };
@@ -111,7 +118,7 @@ pub async fn remove_device_project(
 ) -> Result<lpa_client::RemoveReport, LinkError> {
     let io = PortLineIo {
         port_id,
-        pending: Vec::new(),
+        pending: VecDeque::new(),
         events: events.clone(),
         tap: None,
     };
@@ -152,7 +159,7 @@ pub async fn push_device_project(
 ) -> Result<lpa_client::PushReport, LinkError> {
     let io = PortLineIo {
         port_id,
-        pending: Vec::new(),
+        pending: VecDeque::new(),
         events: events.clone(),
         tap: None,
     };
@@ -184,7 +191,7 @@ pub fn lens_client_io(
 ) -> Box<dyn ClientIo> {
     Box::new(PortLineIo {
         port_id,
-        pending: Vec::new(),
+        pending: VecDeque::new(),
         events,
         tap: Some(tap),
     })
@@ -193,8 +200,11 @@ pub fn lens_client_io(
 /// `ClientIo` over one port's reader.
 struct PortLineIo {
     port_id: u32,
-    /// Frames drained but not yet handed out (one drain can carry several).
-    pending: Vec<WireServerMessage>,
+    /// Replies drained but not yet handed out (one drain can carry several),
+    /// in order — with a link reset among them as the error it hands out in
+    /// its place, so a reply that beat the reset is still delivered and
+    /// whatever was in flight after it fails.
+    pending: VecDeque<Result<WireServerMessage, String>>,
     events: LinkManagementEventSink,
     /// The lens tap: every drained line, verbatim, before decoding, and
     /// every port error the JS controller reports. `None` for the one-shot
@@ -203,12 +213,14 @@ struct PortLineIo {
     tap: Option<Rc<dyn Fn(LensTapLine)>>,
 }
 
-/// What the lens io tees: a line off the wire, or the controller's own
-/// error (the port died — unplug, revocation). Mirrors the studio's
-/// `LensTapEvent`; this crate stays independent of it.
+/// What the lens io tees: a line off the wire, a journal note from the
+/// port's link (a reset — plan D9), or the controller's own error (the port
+/// died — unplug, revocation). Mirrors the studio's `LensTapEvent`; this
+/// crate stays independent of it.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum LensTapLine {
     Line(String),
+    Note(String),
     PortError(String),
 }
 
@@ -217,26 +229,27 @@ impl ClientIo for PortLineIo {
     async fn send(&mut self, msg: ClientMessage) -> Result<(), TransportError> {
         let json = lpc_wire::json::to_string(&msg)
             .map_err(|error| TransportError::Other(format!("encode failed: {error}")))?;
-        browser_serial::write_line(self.port_id, &format!("M!{json}\n"))
-            .await
-            .map_err(|error| {
-                // A write only fails when the port is gone or closed under
-                // us ("Serial port is not open." after an unplug — bench,
-                // 2026-09-02: the read pump ended silently and the write
-                // was the first thing to say so). The lens tap carries it
-                // so the fold hears the port die.
-                if let Some(tap) = &self.tap {
-                    tap(LensTapLine::PortError(error.to_string()));
-                }
-                TransportError::Other(error.to_string())
-            })
+        browser_serial::send_client_json(self.port_id, &json).map_err(|error| {
+            // A send fails when the port is gone or closed under us
+            // ("Serial port is not open." after an unplug — bench,
+            // 2026-09-02: the read pump ended silently and the write was
+            // the first thing to say so), or when the link will not take
+            // the message. The lens tap carries a closed port so the fold
+            // hears it die.
+            if let Some(tap) = &self.tap
+                && error.to_string().contains("not open")
+            {
+                tap(LensTapLine::PortError(error.to_string()));
+            }
+            TransportError::Other(error.to_string())
+        })
     }
 
     async fn receive(&mut self) -> Result<WireServerMessage, TransportError> {
         let mut waited = 0_u32;
         loop {
-            if !self.pending.is_empty() {
-                return Ok(self.pending.remove(0));
+            if let Some(next) = self.pending.pop_front() {
+                return next.map_err(TransportError::Other);
             }
             if let Some(tap) = &self.tap {
                 // The controller's errors are the port dying underneath
@@ -250,6 +263,15 @@ impl ClientIo for PortLineIo {
                         tap(LensTapLine::PortError(error));
                     }
                     return Err(TransportError::Other(first));
+                }
+            }
+            // The link's own notes (up, stalled, answering again) wait for
+            // the model's pump — which is paused while this io holds the
+            // wire. The lens tap is the pump's stand-in, so it hears them
+            // here: Studio's "Reconnecting…" state is made of them (D13).
+            if let Some(tap) = &self.tap {
+                for note in browser_serial::take_wire_notes(self.port_id) {
+                    tap(LensTapLine::Note(note));
                 }
             }
             for read in browser_serial::take_reads(self.port_id) {
@@ -268,7 +290,7 @@ impl ClientIo for PortLineIo {
                             tap(LensTapLine::Line(frame.to_line()));
                         }
                         match frame.message {
-                            Ok(message) => self.pending.push(message),
+                            Ok(message) => self.pending.push_back(Ok(message)),
                             Err(error) => self.events.emit(LinkManagementEvent::log(format!(
                                 "malformed frame: {error}"
                             ))),
@@ -277,9 +299,17 @@ impl ClientIo for PortLineIo {
                     WireRead::Error(error) => self.events.emit(LinkManagementEvent::log(format!(
                         "undeliverable frame: {error}"
                     ))),
-                    // Sends are written by the reader's owner; notes wait for
-                    // the link pump (`take_reads` never hands out either).
-                    WireRead::Send(_) | WireRead::Note(_) => {}
+                    // Everything in flight is lost: fail it now (D9).
+                    WireRead::LinkReset(note) => {
+                        if let Some(tap) = &self.tap {
+                            tap(LensTapLine::Note(note.clone()));
+                        }
+                        self.events.emit(LinkManagementEvent::log(note.clone()));
+                        self.pending.push_back(Err(note));
+                    }
+                    // Notes come from `take_wire_notes` (`take_reads` hands
+                    // out none).
+                    WireRead::Note(_) => {}
                 }
             }
             if !self.pending.is_empty() {
@@ -301,28 +331,4 @@ impl ClientIo for PortLineIo {
         // stays open.
         Ok(())
     }
-}
-
-/// One `setTimeout` tick, with no `web-sys` dependency: the global's
-/// `setTimeout` looked up reflectively works in both window and worker
-/// scopes.
-async fn sleep_ms(ms: u32) {
-    let promise = Promise::new(&mut |resolve, _reject| {
-        let global = js_sys::global();
-        let set_timeout = Reflect::get(&global, &JsValue::from_str("setTimeout"))
-            .ok()
-            .and_then(|value| value.dyn_into::<Function>().ok());
-        match set_timeout {
-            Some(set_timeout) => {
-                let _ = set_timeout.call2(&global, &resolve, &JsValue::from_f64(f64::from(ms)));
-            }
-            // No setTimeout in this scope: resolve immediately rather than
-            // hang. The receive loop degrades to a hot poll, which is still
-            // bounded by its budget.
-            None => {
-                let _ = resolve.call0(&JsValue::NULL);
-            }
-        }
-    });
-    let _ = JsFuture::from(promise).await;
 }

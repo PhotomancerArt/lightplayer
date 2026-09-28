@@ -1,0 +1,141 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Comms lab: BLE</title>
+<style>
+  body { font: 13px ui-monospace, monospace; margin: 16px; background: #111; color: #ddd; }
+  pre { white-space: pre-wrap; }
+  button { font: inherit; padding: 6px 14px; }
+</style>
+</head>
+<body>
+<h1>Comms lab over BLE (NUS)</h1>
+<p>lp-link and the lab's host half (<code>spikes/link-lab-wasm</code>, the
+same code as <code>lp-cli link lab</code>) against a
+<code>test_comms_lab_ble</code> board, one link frame per notification /
+write. Press Join (or drive it with <code>scripts/cdp-central.mjs join
+--prefix LP-LAB --click-expr 'document.getElementById("btn-join").click();
+true'</code>); the run starts once connected and posts its report to
+<code>/lab-result</code>. Query: <code>echo</code>, <code>stream</code>
+(seconds), <code>min</code>, <code>max</code>, <code>inflight</code>,
+<code>seed</code>, <code>logs</code>, <code>loglen</code>, <code>stall</code>,
+<code>payload</code>, <code>wr=1</code> (writes with response),
+<code>name</code>. Plan <code>reliable-device-link</code>, M3.</p>
+<button id="btn-join">Join</button>
+<pre id="log"></pre>
+<script type="module">
+import init, { LabSession } from "/pkg/link_lab_wasm.js";
+
+const NUS = "6e400001-b5a3-f393-e0a9-e50e24dcca9e";
+const RX = "6e400002-b5a3-f393-e0a9-e50e24dcca9e";
+const TX = "6e400003-b5a3-f393-e0a9-e50e24dcca9e";
+const q = new URLSearchParams(location.search);
+const cfg = {
+  name: q.get("name") ?? "ble-lab",
+  withResponse: q.get("wr") === "1",
+  plan: ["echo", "stream", "min", "max", "inflight", "seed", "logs", "loglen", "stall", "payload", "minrto"]
+    .filter((k) => q.has(k)).map((k) => `${k}=${q.get(k)}`).join(" "),
+};
+const logEl = document.getElementById("log");
+const lines = [];
+function log(msg) {
+  const line = `${(performance.now() / 1000).toFixed(3)} ${msg}`;
+  lines.push(line);
+  logEl.textContent += line + "\n";
+  fetch("/page-log", { method: "POST", body: JSON.stringify({ line: `[link] ${msg}` }) }).catch(() => {});
+}
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const wasmReady = init();
+
+async function run() {
+  await wasmReady;
+  log(`config ${JSON.stringify(cfg)} ua=${navigator.userAgent}`);
+  const device = await navigator.bluetooth.requestDevice({
+    // By service as well as name: macOS offers the name it CACHED for a
+    // board, which for a board that ran another image is not "LP-LAB-…"
+    // (ble-lab README, 2026-09-24).
+    filters: [{ namePrefix: "LP-" }, { services: [NUS] }],
+    optionalServices: [NUS],
+  });
+  log(`picked ${device.name}`);
+  let disconnects = 0;
+  device.addEventListener("gattserverdisconnected", () => {
+    disconnects += 1;
+    log("DISCONNECTED");
+  });
+  const gatt = await device.gatt.connect();
+  const svc = await gatt.getPrimaryService(NUS);
+  const rx = await svc.getCharacteristic(RX);
+  const tx = await svc.getCharacteristic(TX);
+
+  const nonce = (crypto.getRandomValues(new Uint32Array(1))[0] | 1) >>> 0;
+  const sess = new LabSession("ble", cfg.plan, nonce, performance.now());
+  let notifications = 0;
+  let writeErrors = 0;
+  let writing = false;
+  async function flush() {
+    if (writing) return;
+    writing = true;
+    try {
+      for (;;) {
+        const f = sess.take_frame();
+        if (!f) break;
+        try {
+          if (cfg.withResponse) await rx.writeValueWithResponse(f);
+          else await rx.writeValueWithoutResponse(f);
+        } catch (e) {
+          writeErrors += 1;
+          if (writeErrors <= 5) log(`write error ${e?.name}: ${e?.message}`);
+        }
+      }
+    } finally {
+      writing = false;
+    }
+  }
+  function kick() {
+    sess.service(performance.now());
+    flush();
+  }
+  tx.addEventListener("characteristicvaluechanged", (ev) => {
+    const v = ev.target.value;
+    notifications += 1;
+    sess.on_datagram(performance.now(), new Uint8Array(v.buffer, v.byteOffset, v.byteLength));
+    kick();
+  });
+  await tx.startNotifications();
+  log("subscribed; the link starts");
+
+  let lastPhase = "";
+  while (!sess.finished() && gatt.connected) {
+    kick();
+    const phase = sess.phase();
+    if (phase !== lastPhase) {
+      log(`phase ${phase}`);
+      lastPhase = phase;
+    }
+    const wait = Math.min(Math.max(sess.next_wake_ms() - performance.now(), 1), 20);
+    await sleep(wait);
+  }
+  const text = sess.report_text();
+  log(`done (${notifications} notifications, ${writeErrors} write errors, ${disconnects} disconnects):\n${text}`);
+  const configuration =
+    `web bluetooth (${navigator.userAgent.match(/(Chrome|Brave)\/[\d.]+/)?.[0] ?? "chromium"}, ` +
+    `${cfg.withResponse ? "writes with response" : "writes without response"}, ` +
+    `${writeErrors} write errors, ${disconnects} disconnects)`;
+  await fetch(`/lab-result?name=${cfg.name}.json`, { method: "POST", body: sess.report_json(configuration) });
+  await fetch(`/lab-result?name=${cfg.name}.txt`, { method: "POST", body: lines.join("\n") });
+  try { gatt.disconnect(); } catch {}
+  document.title = "lab done";
+}
+
+document.getElementById("btn-join").addEventListener("click", () => {
+  run().catch(async (e) => {
+    log(`FAILED ${e?.name}: ${e?.message}`);
+    await fetch(`/lab-result?name=${cfg.name}.failed.txt`, { method: "POST", body: lines.join("\n") }).catch(() => {});
+    document.title = "lab failed";
+  });
+});
+</script>
+</body>
+</html>

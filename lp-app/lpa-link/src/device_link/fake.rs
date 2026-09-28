@@ -2,7 +2,7 @@
 //!
 //! A [`FakeEsp32Device`] is already a byte-level fake — ROM boot output for
 //! blank flash / download mode / foreign firmware, and for the LightPlayer
-//! state a REAL host `LpServer` behind REAL `M!` framing, with failure
+//! state a REAL host `LpServer` behind a REAL lp-link, with failure
 //! injection on the stream. Handed to [`ByteStreamLink`], it becomes a
 //! [`Link`](lpa_devices::link::Link), so a host test drives the whole model
 //! through the same demux, the same frame mapping and the same command
@@ -14,7 +14,7 @@
 
 use lpa_devices::link::LinkInfo;
 
-use crate::device_link::byte_stream::ByteStreamLink;
+use crate::device_link::byte_stream::{ByteStreamLink, ByteStreamPort};
 use crate::providers::fake_device::{FakeDeviceByteStream, FakeEsp32Device};
 
 /// One [`Link`](lpa_devices::link::Link) over a scripted fake device.
@@ -23,8 +23,21 @@ pub type FakeDeviceLink = ByteStreamLink<FakeDeviceByteStream>;
 /// Attach a link to a fake device. The device is shared (clone the handle to
 /// keep scripting it mid-test: `set_drop_responses`, `fake_flash`, …), and it
 /// outlives the link — a reconnect is a new link on the same board.
+///
+/// The device remembers this link (weakly) as its host's, so a test's
+/// conversation that borrows the wire can drain the same link
+/// ([`fake_host_port`]), as a browser borrower drains its port's.
 pub fn fake_device_link(info: LinkInfo, device: &FakeEsp32Device) -> FakeDeviceLink {
-    ByteStreamLink::new(info, FakeDeviceByteStream::new(device.clone()))
+    let link = ByteStreamLink::new(info, FakeDeviceByteStream::new(device.clone()));
+    device.set_host_port(link.port_handle().downgrade());
+    link
+}
+
+/// The link the last [`fake_device_link`] attached to `device`, while it is
+/// alive: the one a borrowing conversation must speak through (there is
+/// never a second reader of a board's bytes).
+pub fn fake_host_port(device: &FakeEsp32Device) -> Option<ByteStreamPort<FakeDeviceByteStream>> {
+    device.host_port()
 }
 
 /// A plausible [`LinkInfo`] for a fake board on a fake port.

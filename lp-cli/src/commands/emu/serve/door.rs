@@ -37,6 +37,7 @@ use tokio_tungstenite::tungstenite::protocol::Role;
 
 use super::board::{Board, format_mac};
 use super::wire_tap::{TapDirection, WireTap};
+use super::wire_tear::WireTear;
 
 /// The largest HTTP request head this door will read before giving up. A
 /// handshake is a few hundred bytes; this is a bound, not a budget.
@@ -362,6 +363,10 @@ async fn pump_bytes(ws: WebSocketStream<TcpStream>, board: &Board) -> Result<()>
     let mut buf = vec![0u8; PUMP_BUF];
     // Off (and free) unless `LP_EMU_WIRE_TAP` names a directory.
     let mut tap = WireTap::from_env(&board.id);
+    // Off (and free) unless `LP_EMU_WIRE_TEAR` asks for a fault; counted
+    // per connection, from its first byte. The tap records what the host
+    // was sent, torn or not.
+    let mut tear = WireTear::from_env()?;
 
     let result = loop {
         tokio::select! {
@@ -385,8 +390,11 @@ async fn pump_bytes(ws: WebSocketStream<TcpStream>, board: &Board) -> Result<()>
             read = link_read.read(&mut buf) => match read {
                 Ok(0) => break Ok(()),
                 Ok(n) => {
-                    tap.record(TapDirection::ToHost, &buf[..n]);
-                    ws_write.send(Message::Binary(buf[..n].to_vec())).await?
+                    let sent = tear.filter(&buf[..n]);
+                    if !sent.is_empty() {
+                        tap.record(TapDirection::ToHost, &sent);
+                        ws_write.send(Message::Binary(sent)).await?
+                    }
                 }
                 Err(e) => break Err(e.into()),
             },

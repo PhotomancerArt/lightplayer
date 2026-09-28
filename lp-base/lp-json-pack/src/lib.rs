@@ -4,8 +4,11 @@
 //! LightPlayer's board sends its wire replies packed (the plan
 //! `lp2025/2026-09-23-1701-lp-json-pack`; the format was built and measured as
 //! "LPBJ" in the `ion-wire` spike). This crate is the generic codec. It knows
-//! no wire vocabulary: the [`Dictionary`] of key names and common strings is
-//! injected by the caller, and `lpc-wire` owns the wire's one.
+//! no wire vocabulary. Names get codes two ways: an injected [`Dictionary`]
+//! (a *seed*, fixed at build time), and a per-connection [`LearnedTable`] that
+//! learns the names a link actually sends ([`pack_learned`]). LightPlayer's
+//! wire uses an empty seed and learns everything (plan
+//! `lp2025/2026-09-25-0006-learned-wire-dictionary`).
 //!
 //! - `#![no_std]`, and no `alloc` on the device path (`default = []`, `lex`).
 //! - [`PackEncoder`]: events in (`begin_map`, `key`, `str`, `u64`, `blob`, …),
@@ -13,7 +16,9 @@
 //! - [`PackLexer`] (feature `lex`): JSON text in, into the same encoder, so
 //!   text and events mix in one frame.
 //! - [`decode`]: one frame → the byte-identical JSON text through a
-//!   [`JsonOut`] sink.
+//!   [`JsonOut`] sink. [`decode_learned`] for a learned frame.
+//! - [`LearnedTable`]: the per-connection table, its frame header and its
+//!   commit/rollback ([`pack_learned`]).
 //! - [`cobs_frame`]: `0x00 'P' COBS(payload) 0x00` framing, in place.
 //! - [`FrameScanner`]: a byte stream → text and decoded frames.
 //! - Features: `lex`; `alloc` (`Vec` sinks and scanner, [`DictionaryBuilder`]);
@@ -21,9 +26,10 @@
 //!
 //! # The format
 //!
-//! One frame holds exactly one JSON value. There is no frame header: which
-//! dictionary a frame is coded against is agreed outside it (on the wire, by
-//! `WIRE_PROTO_VERSION` and a runtime check of [`Dictionary::fingerprint`]).
+//! One frame holds exactly one JSON value. A *static* frame has no header:
+//! which seed it is coded against is agreed outside it. A *learned* frame
+//! starts with a three-byte header (see "Learned frames" below). Both ends
+//! must agree on [`PACK_FORMAT_VERSION`].
 //!
 //! Bytes are read in two positions. **Value position** is every value and
 //! every array element:
@@ -40,11 +46,11 @@
 //! | `A8` / `A9` | decimal, + / −: zigzag-LEB128 exponent, then LEB128 coefficient |
 //! | `AA` | string: LEB128 length, then UTF-8 |
 //! | `AB` | blob: LEB128 length, then raw bytes; decodes to padded standard base64 |
-//! | `AC` | value-dictionary string 64 and up: LEB128 (index − 64) |
+//! | `AC` | value-dictionary string 144 and up: LEB128 (index − 144) |
 //! | `AD` | back-reference: LEB128 n, the n-th inline text or blob of this frame, as a string |
 //! | `AE` | number text escape: LEB128 length, then the number's ASCII verbatim |
 //! | `AF` | blob back-reference: LEB128 n, the n-th inline text or blob of this frame, as base64 |
-//! | `B0..=FF` | unassigned |
+//! | `B0..=FF` | value-dictionary string 64..=143 |
 //!
 //! **Key position**, inside an object before each value:
 //!
@@ -87,6 +93,37 @@
 //!   `ser-write-json` does: `"` and `\` escaped, `\b \t \n \f \r` short, the other
 //!   C0 controls as upper-case `\u00XX`, everything else (including non-ASCII
 //!   UTF-8) as is.
+//!
+//! # Learned frames
+//!
+//! "Dictionary" above means `seed ++ learned`: codes `0..seed.len()` are the
+//! seed's, the codes after them the link's [`LearnedTable`]'s. Nothing in the
+//! byte stream marks a definition. Instead both ends apply one rule to what
+//! goes inline:
+//!
+//! - an inline key (`FC`) of 1..=48 bytes is learned the first time;
+//! - an inline string (`80..=9F`, `AA`) of 2..=31 bytes is learned the
+//!   **second** time it goes inline (a log of first sightings remembers it);
+//! - back-references, blobs and numbers are never learned;
+//! - a table holds 3,072 text bytes, 288 keys and 128 values, and remembers
+//!   512 first sightings; when a limit is reached, that kind of learning
+//!   stops. The 128 values all fit the one-byte value codes.
+//!
+//! The rule and the limits are format ([`PACK_FORMAT_VERSION`] 2).
+//!
+//! A learned frame's payload is `epoch` (1 byte), then a 16-bit fold of the
+//! table's rolling state hash (2 bytes, little-endian), then the value. The
+//! state hash covers every entry learned and every first sighting remembered,
+//! in order. A reader checks both before decoding
+//! ([`pack_learned::read_header`]): a mismatch means the two tables have
+//! parted, and the frame is dropped, never decoded against the wrong names. A
+//! frame coded against the empty table, in any epoch, is the writer's reset:
+//! the reader empties its table to match. Learning is tentative until the frame is known sent
+//! (writer) or decoded whole (reader); either side truncates back to a
+//! [`LearnMark`] otherwise.
+//!
+//! How a link asks for a reset, and which COBS frame kind carries a learned
+//! frame, is the transport's business (`lpc-wire` on LightPlayer's wire).
 //!
 //! # Framing
 //!
@@ -138,6 +175,7 @@ pub mod pack_dictionary;
 #[cfg(feature = "alloc")]
 pub mod pack_dictionary_builder;
 pub mod pack_encoder;
+pub mod pack_learned;
 #[cfg(feature = "lex")]
 pub mod pack_lexer;
 pub mod pack_tags;
@@ -149,11 +187,12 @@ pub use cobs_frame::{
 pub use frame_scanner::{DropReason, FrameBuffer, FrameScanner, ScanEvent, SliceFrameBuffer};
 #[cfg(feature = "alloc")]
 pub use frame_scanner::{VecFrameBuffer, VecFrameScanner};
-pub use pack_decoder::{DecodeError, JsonOut, JsonOutFull, SliceJsonOut, decode};
+pub use pack_decoder::{DecodeError, JsonOut, JsonOutFull, SliceJsonOut, decode, decode_learned};
 pub use pack_dictionary::{Dictionary, DictionaryError, PACK_FORMAT_VERSION, PackStrings};
 #[cfg(feature = "alloc")]
 pub use pack_dictionary_builder::{DictionaryBuilder, OwnedDictionary};
 pub use pack_encoder::PackEncoder;
+pub use pack_learned::{HeaderMismatch, LearnMark, LearnStore, LearnedTable};
 #[cfg(feature = "lex")]
 pub use pack_lexer::PackLexer;
 

@@ -41,7 +41,8 @@ pub const DECIMAL_NEG: u8 = 0xA9;
 pub const STRING: u8 = 0xAA;
 /// Blob: LEB128 length, then raw bytes. Decodes to canonical padded base64.
 pub const BLOB: u8 = 0xAB;
-/// Value-dictionary string 64 and up: LEB128 (index − 64).
+/// Value-dictionary string [`VALUE_CODE_SHORT_COUNT`] and up: LEB128
+/// (index − [`VALUE_CODE_SHORT_COUNT`]).
 pub const VALUE_DICT: u8 = 0xAC;
 /// Back-reference: LEB128 n, the n-th inline text or blob of this frame,
 /// printed as a string.
@@ -51,6 +52,15 @@ pub const NUMBER_TEXT: u8 = 0xAE;
 /// Blob back-reference: LEB128 n, the n-th inline text or blob of this frame,
 /// printed as base64.
 pub const BLOB_BACKREF: u8 = 0xAF;
+/// `B0..=FF`: value-dictionary string 64..=143 (format 2). With the one-byte
+/// codes at `40..=7F`, every entry a learned table can hold
+/// ([`LEARN_VALUES_CAP`](crate::pack_learned::LEARN_VALUES_CAP)) has a
+/// one-byte code, so learning order stops deciding reply size.
+pub const VALUE_DICT_HIGH_BASE: u8 = 0xB0;
+/// How many value-dictionary entries the `B0..=FF` range codes.
+pub const VALUE_DICT_HIGH_COUNT: usize = 80;
+/// Value-dictionary entries with a one-byte code: `40..=7F` then `B0..=FF`.
+pub const VALUE_CODE_SHORT_COUNT: usize = VALUE_DICT_INLINE_COUNT + VALUE_DICT_HIGH_COUNT;
 
 // ---- key position ---------------------------------------------------------
 
@@ -90,5 +100,12 @@ mod tests {
             STR_INLINE_BASE as usize + STR_INLINE_MAX_LEN + 1,
             OBJECT as usize
         );
+        assert_eq!(BLOB_BACKREF + 1, VALUE_DICT_HIGH_BASE);
+        assert_eq!(VALUE_DICT_HIGH_BASE as usize + VALUE_DICT_HIGH_COUNT, 0x100);
+    }
+
+    #[test]
+    fn every_learned_value_has_a_one_byte_code() {
+        assert!(crate::pack_learned::LEARN_VALUES_CAP <= VALUE_CODE_SHORT_COUNT);
     }
 }

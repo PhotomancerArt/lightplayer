@@ -36,6 +36,7 @@ use crate::app::home::{HOME_NODE_ID, HomeOp, UiHomeView, home_view_builder};
 use crate::app::library::{CatalogOp, LibraryHost};
 use crate::app::project::device_bind::BindOutcome;
 use crate::app::studio::console_command::ConsoleCommand;
+use crate::app::studio::lens_reconnect::{LENS_RECONNECT_GRACE, LensReconnect, LensReconnectEdge};
 use crate::app::studio::refresh_cadence::RefreshCadence;
 use crate::app::studio::ui_console_view::UiConsoleView;
 use crate::core::log::{
@@ -230,6 +231,13 @@ pub struct StudioController {
     /// moment any open starts — a new gesture supersedes the question the
     /// page was asking, exactly as it supersedes an open in flight.
     open_mismatch: Option<Box<crate::UiOpenMismatch>>,
+    /// Every link's health (stalled, or reset and not yet heard from),
+    /// folded from the link events the model folds (plan D13).
+    link_health: crate::app::devices::LinkHealthMap,
+    /// The editor lens's link riding out a stall or a reset: the page
+    /// shows "Reconnecting…" and failed pulls do not close the editor
+    /// until [`LENS_RECONNECT_GRACE`] has passed.
+    lens_reconnect: Option<LensReconnect>,
     /// Injected randomness for uid minting. The web shell installs crypto
     /// randomness at startup; the default is a clock-derived fallback good
     /// enough for tests.
@@ -422,6 +430,8 @@ impl StudioController {
             library_refresh_pending: false,
             pending_open: None,
             open_mismatch: None,
+            link_health: crate::app::devices::LinkHealthMap::default(),
+            lens_reconnect: None,
             random: Rc::new(clock_fallback_random),
             local_stamp: {
                 let clock = Rc::clone(&now_secs_for_stamp);
@@ -1073,6 +1083,7 @@ impl StudioController {
     /// either a link command (queued on the link) or a spawned future.
     pub fn fold_device_input(&mut self, input: crate::DeviceInput) {
         let now = self.device_now();
+        self.link_health.observe(&input);
         for line in self.devices.handle(now, input) {
             self.record_device_event(
                 None,
@@ -1084,6 +1095,9 @@ impl StudioController {
             );
         }
         self.drop_device_lens_if_wireless();
+        self.link_health
+            .retain(|link| self.devices.link_is_routable(link));
+        self.observe_lens_link();
         // A forgotten device takes its feed (and last frame) with it.
         self.device_feeds.retain_devices(self.devices.roster());
         // A Bluetooth link that opened, said hello or dropped may need a
@@ -1575,6 +1589,14 @@ impl StudioController {
         self.device_events.borrow().to_jsonl()
     }
 
+    /// A recording handle onto the device event log, stamped by this
+    /// controller's clock — for producers outside the controller: the
+    /// actor's command feed and action outcomes, the open-stage observer,
+    /// and the web edge's route and toast records.
+    pub fn device_event_recorder(&self) -> crate::DeviceEventRecorder {
+        crate::DeviceEventRecorder::new(Rc::clone(&self.device_events), Rc::clone(&self.now_secs))
+    }
+
     /// Read access to the device event log (tests, diagnostics).
     pub fn device_events(&self) -> std::cell::Ref<'_, DeviceEventLog> {
         self.device_events.borrow()
@@ -1750,15 +1772,78 @@ impl StudioController {
         // the lens answers nothing, exactly like a wire with nobody on it,
         // and this is what closes the editor honestly instead of leaving a
         // mirror over a runtime that is gone.
-        let dead = session.consecutive_refresh_failures() >= LENS_DEAD_WIRE_FAILURES;
-        if dead {
+        let streak = session.consecutive_refresh_failures();
+        // …except while the lens's link is reconnecting (plan D13): a stall
+        // or a reset fails the pulls in flight, and the link comes back on
+        // its own. The pulls keep their backoff; the editor holds on until
+        // the grace runs out, and then the backstop is the backstop again.
+        self.observe_lens_link();
+        let now = (self.now_secs)();
+        let reconnect = self.lens_reconnect;
+        let holding = reconnect.is_some_and(|reconnect| reconnect.holding(now));
+        if streak >= LENS_DEAD_WIRE_FAILURES && !holding {
+            let message = match reconnect {
+                Some(_) => format!(
+                    "the device did not reconnect within {} s; the editor is closed",
+                    LENS_RECONNECT_GRACE.as_secs()
+                ),
+                None => "the device stopped answering the editor; the editor is closed".to_string(),
+            };
             self.push_log(UiLogDraft::new(
                 UiLogLevel::Warn,
                 UiLogOrigin::Studio,
-                "the device stopped answering the editor; the editor is closed".to_string(),
+                message,
             ));
             self.close_device_lens();
         }
+    }
+
+    /// Step the lens's reconnect state against its link's health (plan
+    /// D13). Trouble beginning is logged and shown; trouble ending clears
+    /// the lens's failure streak and backoff, so the next pull goes out at
+    /// once and the editor catches up instead of waiting out a backoff the
+    /// blip earned.
+    fn observe_lens_link(&mut self) {
+        let now = (self.now_secs)();
+        let trouble = self.pool.lens_session().and_then(|session| {
+            let link = session.attachment().link;
+            let health = self.link_health.get(link);
+            health
+                .trouble()
+                .map(|trouble| (link, trouble, health.episode()))
+        });
+        let (next, edge) = LensReconnect::step(self.lens_reconnect, trouble, now);
+        self.lens_reconnect = next;
+        match edge {
+            LensReconnectEdge::Same => {}
+            LensReconnectEdge::Began => {
+                self.push_log(UiLogDraft::new(
+                    UiLogLevel::Info,
+                    UiLogOrigin::Studio,
+                    "reconnecting to the board; the editor stays open meanwhile".to_string(),
+                ));
+                self.mark_dirty();
+            }
+            LensReconnectEdge::Ended => {
+                if let Ok(session) = self.pool.lens_session_mut() {
+                    session.record_refresh_success();
+                }
+                self.push_log(UiLogDraft::new(
+                    UiLogLevel::Info,
+                    UiLogOrigin::Studio,
+                    "the board is back; the editor catches up".to_string(),
+                ));
+                self.mark_dirty();
+            }
+        }
+    }
+
+    /// The "Reconnecting…" strip, while the lens's link is in trouble.
+    fn lens_reconnecting_view(&self) -> Option<crate::UiLensReconnecting> {
+        let reconnect = self.lens_reconnect?;
+        let session = self.pool.lens_session()?;
+        (session.attachment().link == reconnect.link)
+            .then(|| crate::UiLensReconnecting::new(&session.attachment().name, reconnect.trouble))
     }
 
     /// The lens session's current passive-refresh backoff delay (zero
@@ -2049,6 +2134,7 @@ impl StudioController {
                 self.access.access_added().cloned(),
             )
             .with_lens_access_line(self.lens_access_line())
+            .with_lens_reconnecting(self.lens_reconnecting_view())
             .with_dirty(dirty)
     }
 
@@ -2289,9 +2375,34 @@ impl StudioController {
     /// stamped entry.
     pub fn push_log(&mut self, draft: UiLogDraft) {
         let entry = draft.stamp((self.now_secs)());
+        self.record_log_error(&entry);
         self.notify_entry(&entry);
         self.logs.push(entry);
         self.mark_dirty();
+    }
+
+    /// Mirror a warn- or error-level Studio log entry into the device
+    /// event log as an `error` record (the session recorder), at the
+    /// entry's own stamp. Device console lines do not come through here —
+    /// they are the board's words, not Studio's.
+    fn record_log_error(&self, entry: &UiLogEntry) {
+        if entry.level < UiLogLevel::Warn {
+            return;
+        }
+        let source = match &entry.source.detail {
+            Some(detail) => format!("{}:{detail}", entry.source.origin.label()),
+            None => entry.source.origin.label().to_string(),
+        };
+        self.device_events.borrow_mut().record(DeviceEventRecord {
+            t: entry.timestamp,
+            session: None,
+            endpoint: None,
+            kind: DeviceEventKind::Error {
+                level: entry.level.label().to_string(),
+                source,
+                message: entry.message.clone(),
+            },
+        });
     }
 
     /// Stamp a batch of one SESSION's drained lines into that session's
@@ -2333,6 +2444,7 @@ impl StudioController {
         let timestamp = (self.now_secs)();
         for draft in drafts {
             let entry = draft.stamp(timestamp);
+            self.record_log_error(&entry);
             self.notify_entry(&entry);
             self.logs.push(entry);
         }
@@ -5118,6 +5230,7 @@ impl StudioController {
     /// there is none. The device keeps its card and its evidence.
     pub(crate) fn close_device_lens(&mut self) {
         self.pending_device_lens = None;
+        self.lens_reconnect = None;
         let Some(session) = self.pool.attached_session() else {
             return;
         };
@@ -7222,6 +7335,32 @@ mod tests {
         assert_eq!(logs[0].timestamp, 101.0);
         assert_eq!(logs[1].timestamp, 102.0);
         assert_eq!(logs[1].source.detail.as_deref(), Some("browser-serial"));
+    }
+
+    #[test]
+    fn warn_and_error_logs_are_mirrored_as_error_records_at_their_own_stamp() {
+        let mut studio = StudioController::new(|| 9.0);
+        studio.push_log(UiLogDraft::new(
+            UiLogLevel::Info,
+            UiLogOrigin::Studio,
+            "quiet",
+        ));
+        studio.push_log(UiLogDraft::new(
+            UiLogLevel::Error,
+            crate::UiLogSource::with_detail(UiLogOrigin::Link, "browser-serial"),
+            "port lost",
+        ));
+        let records: Vec<_> = studio.device_events().iter().cloned().collect();
+        assert_eq!(records.len(), 1, "info stays out of the event log");
+        assert_eq!(records[0].t, 9.0);
+        assert_eq!(
+            records[0].kind,
+            DeviceEventKind::Error {
+                level: "error".to_string(),
+                source: "link:browser-serial".to_string(),
+                message: "port lost".to_string(),
+            }
+        );
     }
 
     #[test]

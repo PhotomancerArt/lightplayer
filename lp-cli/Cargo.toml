@@ -15,6 +15,7 @@ env_logger = { workspace = true }
 async-trait = "0.1"
 serde = { workspace = true, features = ["derive"] }
 serde_json = "1"
+base64 = { workspace = true }
 tungstenite = { version = "0.21", features = ["native-tls"] }
 tokio = { version = "1", features = ["full"] }
 tokio-tungstenite = "0.21"
@@ -57,6 +58,11 @@ lp-perf = { path = "../lp-base/lp-perf", default-features = false }
 lp-riscv-elf = { path = "../lp-riscv/lp-riscv-elf", features = ["std"] }
 lp-riscv-inst = { path = "../lp-riscv/lp-riscv-inst" }
 serialport = "4.8"
+# `link lab --termios chrome`: set the tty's flags the way Chromium's Web
+# Serial does, which serialport does not expose.
+libc = "0.2"
+# `link lab`: the comms lab's host half and the link it drives.
+lp-link = { path = "../lp-base/lp-link", features = ["std", "lab"] }
 # fwcheck flashes locally built check ELFs in-process (M5: no espflash
 # subprocess). Library-only: the `cli` feature and its dep tree stay out.
 espflash = { version = "3.3", default-features = false, features = [
@@ -88,6 +94,11 @@ lp-emu-validate = { path = "../lp-emu/lp-emu-validate" }
 # reach a product crate — so a product crate reaching in is fine
 # (`just lint-emu-fence`).
 lp-emu-esp32c6 = { path = "../lp-emu/esp/lp-emu-esp32c6" }
+# `lp-cli emu run --chip esp32s3 --host-link`: since wire proto 30 the S3's
+# console IS an lp-link, and only a product crate may host one (the fence), so
+# the heap ratchet's S3 arm and the S3 host-side tests drive the machine from
+# here. Same direction as the C6 line above.
+lp-emu-esp32s3 = { path = "../lp-emu/esp/lp-emu-esp32s3" }
 # `lp-cli emu serve --air`: the `LPA1` air wire codec and `ParticipantId`,
 # which `lp-emu-esp32c6` uses but does not re-export. Same direction as the
 # line above — a product crate reaching INTO the fence, which is fine.
@@ -118,6 +129,11 @@ lpc-wire = { path = "../lp-core/lpc-wire", features = ["ser-write-json"] }
 # (tests/emu_usb_json_pack.rs).
 lp-json-pack = { workspace = true, features = ["alloc"] }
 serde_json = "1"
+# The host-side twins of the chip gates that need a link host since wire
+# proto 30 (tests/emu_usb_link_gates.rs): the figures record they pin, and
+# the strip order the pad decoder un-permutes by.
+lp-emu-esp-figures = { path = "../lp-emu/esp/lp-emu-esp-figures" }
+lp-ws281x = { path = "../lp-fw/lp-ws281x", default-features = false }
 
 [features]
 default = ["serial"]

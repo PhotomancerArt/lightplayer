@@ -29,6 +29,7 @@
 use lpc_wire::{ProjectReadEvent, WireServerMessage, WireServerMsgBody};
 
 use crate::client_event::ClientEvent;
+use crate::client_observer::observe_frame;
 use crate::protocol_session::{PendingAsk, ProtocolSession, ResponseDisposition};
 
 /// Failure while collecting a project-read stream.
@@ -51,9 +52,15 @@ pub enum ProjectReadStreamError {
 /// What the caller should do after feeding one received message.
 #[derive(Debug)]
 pub enum ProjectReadStreamStep {
-    /// Nothing to record; keep receiving.
+    /// Nothing to record; keep receiving. Not this read's own frame — a
+    /// caller driving a quiet-gap deadline must not treat it as progress.
     Continue,
-    /// Record this side-channel event, then keep receiving.
+    /// This read's own frame (`ResponseDisposition::Matched`) arrived and the
+    /// stream is not yet complete; keep receiving. Unlike [`Self::Continue`],
+    /// this is progress on *this* read: re-arm a quiet-gap deadline here.
+    MatchedContinue,
+    /// Record this side-channel event, then keep receiving. Not this read's
+    /// own frame, like [`Self::Continue`].
     Event(ClientEvent),
     /// The stream completed; stop receiving and return the ordered events.
     Complete(Vec<ProjectReadEvent>),
@@ -91,7 +98,15 @@ impl ProjectReadStream {
         // A read never asks for a hello, so a hello (or a heartbeat, or a
         // log) under this stream's id is another id space's frame, not a
         // batch of read events.
-        match protocol.response_disposition(&message, self.request_id, PendingAsk::Other) {
+        let disposition =
+            protocol.response_disposition(&message, self.request_id, PendingAsk::Other);
+        observe_frame(
+            protocol.conversation(),
+            self.request_id,
+            &message,
+            &disposition,
+        );
+        match disposition {
             ResponseDisposition::Matched => self.accept_matched(message),
             ResponseDisposition::ServerOriginated { .. } | ResponseDisposition::Unsolicited => {
                 Ok(ClientEvent::from_unsolicited_message(message).map_or(
@@ -157,7 +172,7 @@ impl ProjectReadStream {
                             "project read completed on a non-final frame (End without fin)".into(),
                         ));
                     }
-                    Ok(ProjectReadStreamStep::Continue)
+                    Ok(ProjectReadStreamStep::MatchedContinue)
                 }
             }
             other => Err(ProjectReadStreamError::Unexpected(format!("{other:?}"))),
@@ -190,7 +205,9 @@ mod tests {
         let mut stream = ProjectReadStream::new(1);
         for message in messages {
             match stream.accept(&protocol, message)? {
-                ProjectReadStreamStep::Continue | ProjectReadStreamStep::Event(_) => {}
+                ProjectReadStreamStep::Continue
+                | ProjectReadStreamStep::MatchedContinue
+                | ProjectReadStreamStep::Event(_) => {}
                 ProjectReadStreamStep::Complete(events) => return Ok(events),
             }
         }
@@ -357,7 +374,7 @@ mod tests {
                 ),
             )
             .unwrap();
-        assert!(matches!(step, ProjectReadStreamStep::Continue));
+        assert!(matches!(step, ProjectReadStreamStep::MatchedContinue));
 
         let log = WireServerMessage::new(
             0,

@@ -9,9 +9,9 @@
 //! things a real client needs around it:
 //!
 //! - a **single timeout owner** — the [`ProgressDeadline`], a *quiet-gap*
-//!   deadline that is reset on every received frame and fires only when no frame
-//!   arrives within its budget (so a slow-but-progressing multi-frame stream
-//!   never trips it);
+//!   deadline that is reset only by this read's own frames and fires only when
+//!   none of them arrives within its budget (a progressing multi-frame stream
+//!   never trips it, and unrelated traffic never masks a lost reply);
 //! - **explicit cancellation** — a [`CancelSignal`] checked between receives, so
 //!   the caller stops the loop cleanly (returning [`PullOutcome::Cancelled`])
 //!   rather than dropping a half-consumed frame stream; and
@@ -31,7 +31,7 @@
 //! `wasm32-unknown-unknown` and keeps `ClientIo`'s `?Send` contract.
 
 use core::future::Future;
-use core::pin::pin;
+use core::pin::{Pin, pin};
 use core::task::{Context, Poll};
 use core::time::Duration;
 
@@ -42,6 +42,7 @@ use lpc_wire::{
 use crate::client_error::ClientError;
 use crate::client_event::ClientEvent;
 use crate::client_io::ClientIo;
+use crate::client_observer::{ClientObservation, RequestOutcome, observe};
 use crate::project_read_stream::{
     ProjectReadStream, ProjectReadStreamError, ProjectReadStreamStep,
 };
@@ -50,10 +51,11 @@ use crate::protocol_session::ProtocolSession;
 /// Progress-based deadline for a single streamed request.
 ///
 /// This is a *quiet-gap* deadline, not a total-duration deadline: it measures
-/// the time since the last received frame and fires only when that gap exceeds
-/// `budget`. It is reset on every received frame, so a stream that keeps making
-/// progress — however many frames, however slowly overall — never trips it; only
-/// a genuinely stalled stream (no frame for `budget`) times out.
+/// the time since the last frame *this read matched its own* and fires only
+/// when that gap exceeds `budget`. It is reset only by such frames, so a
+/// stream that keeps making progress never trips it; only a genuinely stalled
+/// read (no frame of its own for `budget`, however much unrelated traffic
+/// arrives meanwhile) times out.
 ///
 /// It carries a **timer factory** rather than a concrete timer so the pull loop
 /// stays runtime-neutral: `make_timer(budget)` returns a fresh future that
@@ -248,13 +250,12 @@ impl<T: ClientIo + ?Sized> PullIo for T {
 ///
 /// 1. allocates a request id from `protocol` and sends the `ProjectRead`;
 /// 2. loops: check `cancel` (→ [`PullOutcome::Cancelled`] at the boundary);
-///    race `io.receive()` against a fresh [`ProgressDeadline`] timer (timer wins
-///    → [`PullOutcome::TimedOut`]); feed each received frame to
+///    race `io.receive()` against the current [`ProgressDeadline`] timer (timer
+///    wins → [`PullOutcome::TimedOut`]); feed each received frame to
 ///    [`ProjectReadStream`] until it completes;
 /// 3. returns the collected events plus the unsolicited events seen en route.
 ///
-/// The deadline resets every frame (a fresh timer is awaited per receive), so a
-/// slow multi-frame stream completes as long as each gap is under budget.
+/// The deadline resets only on this read's own frames; see [`ProgressDeadline`].
 pub async fn run_project_read<Io, MakeTimer, Timer, Cancel>(
     io: &mut Io,
     protocol: &mut ProtocolSession,
@@ -270,6 +271,8 @@ where
     Cancel: CancelSignal + ?Sized,
 {
     let request_id = protocol.next_request_id();
+    let conversation = protocol.conversation();
+    let budget = deadline.budget();
     if let Err(error) = io
         .send(ClientMessage {
             id: request_id,
@@ -277,16 +280,28 @@ where
         })
         .await
     {
-        return PullOutcome::Failed(ClientError::from(error));
+        let error = ClientError::from(error);
+        observe_outcome(conversation, request_id, failed(&error));
+        return PullOutcome::Failed(error);
     }
+    observe(|| ClientObservation::Sent {
+        conversation,
+        id: request_id,
+        kind: "project.read",
+    });
 
     let mut stream = ProjectReadStream::new(request_id);
     let mut observed = Vec::new();
     // Progress accounting so a stalled or failed pull says how far it got —
     // the difference between "device never answered" and "died at frame 40"
-    // used to be invisible (the 2026-08-26 sync-hang debugging).
+    // used to be invisible (the 2026-08-26 sync-hang debugging). Only this
+    // read's own (`Matched`) frames count here; unrelated traffic does not.
     let mut frames: usize = 0;
     let mut streamed_events: usize = 0;
+
+    // The quiet-gap timer, held across iterations and rebuilt only when this
+    // read's own frame progresses it — unrelated traffic must not reset it.
+    let mut timer: Option<Pin<Box<Timer>>> = None;
 
     loop {
         // Cancellation is observed at the frame boundary, before we commit to
@@ -296,36 +311,49 @@ where
         // those must classify as expected stale drops, not protocol warnings.
         if cancel.is_cancelled() {
             protocol.abandon_request(request_id);
+            observe_outcome(conversation, request_id, RequestOutcome::Cancelled);
             return PullOutcome::Cancelled;
         }
 
-        let timer = deadline.fresh_timer();
-        match receive_before_deadline(io, timer).await {
-            ReceiveOutcome::Received(Ok(message)) => {
-                frames += 1;
-                match stream.accept(protocol, message) {
-                    Ok(ProjectReadStreamStep::Continue) => {}
-                    Ok(ProjectReadStreamStep::Event(event)) => observed.push(event),
-                    Ok(ProjectReadStreamStep::Complete(events)) => {
-                        streamed_events += events.len();
-                        log::debug!(
-                            "project read id={request_id}: complete ({frames} frames, {streamed_events} events)"
-                        );
-                        return PullOutcome::Completed { events, observed };
-                    }
-                    Err(error) => {
-                        log::warn!(
-                            "project read id={request_id}: stream error after {frames} frames: {error:?}"
-                        );
-                        return PullOutcome::Failed(stream_error(error));
-                    }
+        if timer.is_none() {
+            timer = Some(Box::pin(deadline.fresh_timer()));
+        }
+        let active_timer = timer.as_mut().expect("just armed above").as_mut();
+        match receive_before_deadline(io, active_timer).await {
+            ReceiveOutcome::Received(Ok(message)) => match stream.accept(protocol, message) {
+                Ok(ProjectReadStreamStep::Continue) => {
+                    // Not this read's own frame; leave the timer ticking.
                 }
-            }
+                Ok(ProjectReadStreamStep::MatchedContinue) => {
+                    frames += 1;
+                    timer = None; // this read progressed: re-arm next iteration
+                }
+                Ok(ProjectReadStreamStep::Event(event)) => observed.push(event),
+                Ok(ProjectReadStreamStep::Complete(events)) => {
+                    frames += 1;
+                    streamed_events += events.len();
+                    log::debug!(
+                        "project read id={request_id}: complete ({frames} frames, {streamed_events} events)"
+                    );
+                    observe_outcome(conversation, request_id, RequestOutcome::Answered);
+                    return PullOutcome::Completed { events, observed };
+                }
+                Err(error) => {
+                    log::warn!(
+                        "project read id={request_id}: stream error after {frames} frames: {error:?}"
+                    );
+                    let error = stream_error(error);
+                    observe_outcome(conversation, request_id, failed(&error));
+                    return PullOutcome::Failed(error);
+                }
+            },
             ReceiveOutcome::Received(Err(error)) => {
                 log::warn!(
                     "project read id={request_id}: transport error after {frames} frames: {error}"
                 );
-                return PullOutcome::Failed(ClientError::from(error));
+                let error = ClientError::from(error);
+                observe_outcome(conversation, request_id, failed(&error));
+                return PullOutcome::Failed(error);
             }
             ReceiveOutcome::DeadlineElapsed => {
                 // Same contract as cancellation: the request is abandoned and
@@ -334,6 +362,11 @@ where
                     "project read id={request_id}: quiet-gap deadline elapsed after {frames} frames                      — the device stopped streaming (a device reset mid-read looks exactly like this;                      check the device console for a [RECOVERY] line)"
                 );
                 protocol.abandon_request(request_id);
+                observe_outcome(
+                    conversation,
+                    request_id,
+                    RequestOutcome::TimedOut { budget },
+                );
                 return PullOutcome::TimedOut;
             }
         }
@@ -345,19 +378,24 @@ enum ReceiveOutcome {
     DeadlineElapsed,
 }
 
-/// Race one `io.receive()` against a single (already-built) timer future.
+/// Race one `io.receive()` against an already-built, possibly-still-ticking
+/// timer future.
 ///
 /// Hand-rolled instead of an executor `select!` so the module stays free of any
 /// runtime dependency. The `receive` future is polled first each wake, so a
 /// frame that is ready at the same time as the timer counts as progress (the
-/// deadline is a quiet-gap, not a hard cut-off).
-async fn receive_before_deadline<Io, Timer>(io: &mut Io, timer: Timer) -> ReceiveOutcome
+/// deadline is a quiet-gap, not a hard cut-off). `timer` is borrowed, not
+/// owned, so the caller can keep polling the *same* timer across several calls
+/// whose frames must not re-arm it.
+async fn receive_before_deadline<Io, Timer>(
+    io: &mut Io,
+    mut timer: Pin<&mut Timer>,
+) -> ReceiveOutcome
 where
     Io: PullIo + ?Sized,
     Timer: Future<Output = ()>,
 {
     let mut receive = pin!(io.receive());
-    let mut timer = pin!(timer);
 
     core::future::poll_fn(move |cx: &mut Context<'_>| {
         if let Poll::Ready(result) = receive.as_mut().poll(cx) {
@@ -369,6 +407,21 @@ where
         Poll::Pending
     })
     .await
+}
+
+/// Report how project read `request_id` ended.
+fn observe_outcome(conversation: u64, request_id: u64, outcome: RequestOutcome) {
+    observe(|| ClientObservation::Outcome {
+        conversation,
+        id: request_id,
+        outcome,
+    });
+}
+
+fn failed(error: &ClientError) -> RequestOutcome {
+    RequestOutcome::Failed {
+        error: error.to_string(),
+    }
 }
 
 fn stream_error(error: ProjectReadStreamError) -> ClientError {
@@ -500,6 +553,88 @@ mod tests {
             queries: Vec::new(),
             probes: Vec::new(),
         }
+    }
+
+    /// An unsolicited (id 0) heartbeat frame, as the board sends periodically.
+    fn heartbeat_frame() -> WireServerMessage {
+        WireServerMessage::new(
+            0,
+            WireServerMsgBody::Heartbeat {
+                fps: lpc_wire::server::SampleStats {
+                    avg: 0.0,
+                    sdev: 0.0,
+                    min: 0.0,
+                    max: 0.0,
+                },
+                frame_count: 0,
+                loaded_projects: Vec::new(),
+                uptime_ms: 0,
+                memory: None,
+                recovery: None,
+                outputs: None,
+                link: None,
+                identity: None,
+            },
+        )
+    }
+
+    /// A `ClientIo` fake that only ever answers with a paced heartbeat —
+    /// a board whose reply was lost but keeps sending unrelated heartbeats.
+    struct HeartbeatingIo {
+        pace: Duration,
+    }
+
+    #[async_trait(?Send)]
+    impl ClientIo for HeartbeatingIo {
+        async fn send(&mut self, _msg: ClientMessage) -> Result<(), TransportError> {
+            Ok(())
+        }
+
+        async fn receive(&mut self) -> Result<WireServerMessage, TransportError> {
+            tokio::time::sleep(self.pace).await;
+            Ok(heartbeat_frame())
+        }
+
+        async fn close(&mut self) -> Result<(), TransportError> {
+            Ok(())
+        }
+    }
+
+    #[tokio::test]
+    async fn lost_reply_times_out_despite_heartbeats_every_half_budget() {
+        // Prod bug (2026-09-26 recording, finding F3): a lost reply never
+        // timed out because id-0 heartbeats re-armed the quiet-gap timer
+        // forever. Heartbeats arrive every half budget here and no reply ever
+        // comes; the outer `timeout` is a safety net so a regression fails
+        // the test instead of hanging the suite.
+        const BUDGET: Duration = Duration::from_millis(80);
+        let mut io = HeartbeatingIo { pace: BUDGET / 2 };
+        let mut protocol = ProtocolSession::new();
+        let deadline = ProgressDeadline::new(BUDGET, |d: Duration| {
+            Box::pin(tokio::time::sleep(d)) as Pin<Box<dyn Future<Output = ()>>>
+        });
+
+        let outcome = tokio::time::timeout(
+            Duration::from_secs(5),
+            run_project_read(
+                &mut io,
+                &mut protocol,
+                WireProjectHandle::new(3),
+                empty_request(),
+                deadline,
+                &NeverCancel,
+            ),
+        )
+        .await
+        .expect(
+            "the quiet-gap deadline must bound the read even with heartbeats \
+             arriving throughout — this used to hang forever on a lost reply",
+        );
+
+        assert!(
+            matches!(outcome, PullOutcome::TimedOut),
+            "expected TimedOut, got {outcome:?}"
+        );
     }
 
     #[tokio::test]

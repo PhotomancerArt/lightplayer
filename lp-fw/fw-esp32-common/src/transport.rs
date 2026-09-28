@@ -1,5 +1,9 @@
 //! Accountable transport: serializes in thread context, io_task writes bytes.
 //!
+//! The classic ESP32's (`fw-esp32v3`, UART0, `M!` lines) until its own lp-link
+//! milestone; the C6 and S3 USB link uses `crate::usb_link` instead (plan
+//! `lp-link-usb-cutover`, D3).
+//!
 //! `send` serializes the WireServerMessage HERE (thread context) into the
 //! shared static frame buffer, submits its length to io_task, and waits for
 //! io_task to report the write's outcome before returning — which is also
@@ -9,15 +13,17 @@
 //! `serial::server_msg`'s module docs and the 2026-08-25 ADR).
 //!
 //! It also holds the one piece of per-link wire state: the encoding a host
-//! opted into (`ClientRequest::SetEncoding`, plan `lp-json-pack`). The
-//! server decides the answer; the transport sees the answer it writes, and
-//! switches after it — which is why the state lives here, beside the link,
-//! and not in the IO-free server: only the transport knows when the link
-//! the answer was for has gone (see [`crate::serial::link_epoch`]).
+//! opted into (`ClientRequest::SetEncoding`, plan `lp-json-pack`) and the
+//! learned table a packed link codes against ([`PackedLink`]). The server
+//! decides the answer; the transport sees the answer it writes, and switches
+//! after it — which is why the state lives here, beside the link, and not in
+//! the IO-free server: only the transport knows when a frame it serialized was
+//! never written (the learned table rolls back). A UART link has no signal
+//! that its host went away: there, a host opening the port resets the board.
 
 use alloc::vec::Vec;
 
-use crate::serial::link_epoch;
+use crate::serial::packed_link::PackedLink;
 use crate::serial::server_msg::serialize_server_msg;
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::channel::Channel;
@@ -27,7 +33,7 @@ use lpc_wire::{ClientMessage, TransportError, json};
 
 /// Server transport that sends WireServerMessage to io_task for serialization.
 ///
-/// ONE link — the product's USB serial line — and it is trusted
+/// ONE link — the classic's UART0 serial line — and it is trusted
 /// ([`Link::PRIMARY`]): physical possession is the recovery path. A second
 /// (radio) link arrives as a separate transport behind a mux, never as a
 /// second id here.
@@ -43,11 +49,9 @@ pub struct StreamingMessageRouterTransport {
     /// result whose generation does not match, so a result orphaned by a
     /// cancelled send can never be misattributed to the next write.
     generation: u32,
-    /// The encoding this link's host opted into; `Json` until one does.
-    encoding: lpc_wire::WireEncoding,
-    /// The [`link_epoch`] `encoding` was negotiated in. A different epoch
-    /// means the host that asked is gone, and the link is JSON again.
-    encoding_epoch: u32,
+    /// The encoding this link's host opted into, and the learned table while
+    /// it is packed; JSON until a host opts in.
+    packed: PackedLink,
 }
 
 impl StreamingMessageRouterTransport {
@@ -67,23 +71,8 @@ impl StreamingMessageRouterTransport {
             server_write_request,
             server_write_result,
             generation: 0,
-            encoding: lpc_wire::WireEncoding::Json,
-            encoding_epoch: link_epoch::current(),
+            packed: PackedLink::new(),
         }
-    }
-
-    /// The encoding the next frame goes out in: the negotiated one, unless
-    /// the link it was negotiated on has closed since.
-    fn link_encoding(&mut self) -> lpc_wire::WireEncoding {
-        let epoch = link_epoch::current();
-        if epoch != self.encoding_epoch {
-            if self.encoding != lpc_wire::WireEncoding::Json {
-                log::info!("StreamingMessageRouterTransport: link closed; replies are JSON again");
-            }
-            self.encoding = lpc_wire::WireEncoding::Json;
-            self.encoding_epoch = epoch;
-        }
-        self.encoding
     }
 }
 
@@ -98,23 +87,22 @@ impl StreamingMessageRouterTransport {
     async fn write_once(&mut self, msg: WireServerMessage) -> Result<(), TransportError> {
         let id = msg.id;
         // The answer to an opt-in is always JSON (the host reads it before it
-        // knows the outcome); the switch it announces happens in `send`,
-        // after it is written.
-        let encoding = match msg.msg {
-            lpc_wire::server::ServerMsgBody::SetEncoding { .. } => lpc_wire::WireEncoding::Json,
-            _ => self.link_encoding(),
-        };
+        // knows the outcome; `table_for` gives it no table); the switch it
+        // announces happens in `send`, after it is written. A packed frame's
+        // learning is tentative until the io task reports it written.
+        self.packed.prepare_reply(&msg.msg);
+        let tentative = self.packed.tentative();
         // Fills the shared static frame buffer; sending the LENGTH hands the
         // buffer to the io task, and awaiting the matching result below is
         // what makes reusing it for the next message sound (see FRAME_BUF).
-        let len = serialize_server_msg(&msg, encoding)?;
+        let len = serialize_server_msg(&msg, self.packed.table_for(&msg.msg))?;
         let generation = self.generation;
         self.generation = self.generation.wrapping_add(1);
         self.server_write_request
             .sender()
             .send((generation, len))
             .await;
-        loop {
+        let result = loop {
             let (result_generation, result) = self.server_write_result.receiver().receive().await;
             if result_generation == generation {
                 break result;
@@ -123,16 +111,30 @@ impl StreamingMessageRouterTransport {
                 "StreamingMessageRouterTransport: discarding stale write result \
                  generation={result_generation} (awaiting {generation}) for id={id}"
             );
+        };
+        if result.is_err() {
+            // The io task abandoned the write (the connect-time "dropping
+            // message" case): the host never decoded this frame whole, so it
+            // learned nothing from it. Neither does the board.
+            self.packed.rolled_back(tentative);
         }
+        result
     }
 }
 
 impl ServerTransport for StreamingMessageRouterTransport {
-    async fn send(&mut self, _link: LinkId, msg: WireServerMessage) -> Result<(), TransportError> {
+    async fn send(
+        &mut self,
+        _link: LinkId,
+        mut msg: WireServerMessage,
+    ) -> Result<(), TransportError> {
         let id = msg.id;
         // Captured before the message moves: a failed Error notice must not
         // recurse into another notice.
         let is_error_frame = matches!(msg.msg, lpc_wire::server::ServerMsgBody::Error { .. });
+        // An opt-in answer `packed` needs a table first; with no heap for
+        // one it becomes `json` here, before it is written.
+        self.packed.prepare_answer(&mut msg.msg);
         let switch_to = match msg.msg {
             lpc_wire::server::ServerMsgBody::SetEncoding { encoding } => Some(encoding),
             _ => None,
@@ -144,17 +146,16 @@ impl ServerTransport for StreamingMessageRouterTransport {
                     "StreamingMessageRouterTransport: wrote message id={id} through io_task"
                 );
                 // The host has its answer; every frame after it is in the
-                // encoding it names, until this link closes.
+                // encoding it names (a packed one in a new table epoch),
+                // until this link closes.
                 if let Some(encoding) = switch_to {
-                    self.encoding = encoding;
-                    self.encoding_epoch = link_epoch::current();
-                    log::info!(
-                        "StreamingMessageRouterTransport: replies are now {}",
-                        encoding.as_str()
-                    );
+                    self.packed.answered(encoding);
                 }
             }
             Err(error) => {
+                if switch_to.is_some() {
+                    self.packed.answer_dropped();
+                }
                 // io_task has already retried per its link's write policy, so
                 // this drop is final — say so at error level, never as a
                 // debuggable-away warn (the debt entry's "no silent drop with
@@ -218,6 +219,10 @@ impl ServerTransport for StreamingMessageRouterTransport {
         Ok(())
     }
 }
+
+/// Its io task has written (or abandoned) every frame by the time `send`
+/// returns: it never holds the frame buffer between sends.
+impl crate::radio_link::FrameBufHolder for StreamingMessageRouterTransport {}
 
 /// The USB transport has one link, open for the life of the image: no hellos
 /// owed after the first, no deadline to keep.

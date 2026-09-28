@@ -22,14 +22,18 @@
 //! | close-vs-release semantics | [`a_closed_port_keeps_its_session_and_a_forgotten_one_does_not`] | `browser_serial.js:140-157` (`closePort` keeps the entry), `:159-181` (`forgetPort` deletes it) |
 //! | read-pump error paths | [`the_read_pump_reports_a_lost_device_and_the_port_reopens`] | `browser_esp32_device_controller.js` (`readPump`) |
 //!
-//! **Packed frames (plan `lp-json-pack`, P6).** The pump hands Rust BYTES and
-//! Rust splits them (`lpa_link::device_link::wire_reader::WireReader`, the
-//! same reader `browser_serial.rs` keeps per port), because a packed frame
-//! holds any byte and a `TextDecoder` would mangle it.
-//! [`a_packed_frame_split_across_reads_is_read_whole`],
-//! [`a_packed_frame_holding_a_newline_is_not_torn`] and
-//! [`console_text_between_packed_frames_stays_lines`] pin that through the
-//! shipped pump.
+//! **The link (plan `lp2025/2026-09-27-0215-lp-link-usb-cutover`, P4).** The
+//! pump hands Rust BYTES, and since `WIRE_PROTO_VERSION` 30 those bytes are an
+//! lp-link: each open port keeps one lp-link end (`LinkPortService`) and a
+//! loop in `browser_serial.rs`, and writes its frames with `writeBytes`. The
+//! link tests drive that production registry through
+//! `providers::browser_serial_esp32::web_serial_link` against a board-side
+//! `lp_link::Link` in Rust, on the scripted door:
+//! [`the_link_comes_up_and_the_boards_hello_arrives`],
+//! [`a_request_is_one_link_message_and_its_answer_comes_back_packed`],
+//! [`a_link_frame_split_across_reads_is_read_whole`],
+//! [`console_text_between_link_frames_stays_lines`] and
+//! [`a_board_restart_is_a_link_reset_then_a_new_hello`] (plan D9).
 //! | the flash bridge's port acquisition | [`the_flash_bridge_acquires_the_live_generation`] | `browser_serial.js:195-213` (`getPort`'s adoption pass) |
 //!
 //! **What re-enumerates, since plan two M5:** the CABLE, and nothing else.
@@ -51,7 +55,10 @@ use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::JsFuture;
 use wasm_bindgen_test::*;
 
-use lpa_link::device_link::wire_reader::{WireRead, WireReader};
+use lpa_link::device_link::link_port_service::LinkPortService;
+use lpa_link::device_link::wire_reader::{ReadFrame, WireRead};
+use lpa_link::providers::browser_serial_esp32::web_serial_link;
+use lpc_wire::lp_link::{CH_PROTO, Link, LinkConfig, LinkEvent, SelectiveRepeat};
 
 wasm_bindgen_test_configure!(run_in_browser);
 
@@ -107,8 +114,8 @@ extern "C" {
     #[wasm_bindgen(js_name = takeErrors)]
     fn js_take_errors(id: u32) -> Promise;
 
-    #[wasm_bindgen(js_name = writeLine)]
-    fn js_write_line(id: u32, line: &str) -> Promise;
+    #[wasm_bindgen(js_name = writeBytes)]
+    fn js_write_bytes(id: u32, bytes: &[u8]) -> Promise;
 
     #[wasm_bindgen(js_name = installScripted)]
     fn js_install_scripted(board_ids: &Array) -> Promise;
@@ -130,6 +137,9 @@ extern "C" {
 
     #[wasm_bindgen(js_name = receivedBytes)]
     fn js_received_bytes(board_id: &str) -> String;
+
+    #[wasm_bindgen(js_name = takeReceivedRaw)]
+    fn js_take_received_raw(board_id: &str) -> js_sys::Uint8Array;
 
     #[wasm_bindgen(js_name = rebootCount)]
     fn js_reboot_count(board_id: &str) -> i32;
@@ -1046,7 +1056,7 @@ async fn a_port_open_across_a_replug_reopens_on_the_new_generation() {
     shim_off().await;
 }
 
-/// The bytes go both ways through the real controller: `writeLine` reaches
+/// The bytes go both ways through the real controller: `writeBytes` reaches
 /// the board's byte channel unchanged, and what the board says comes back as
 /// lines.
 #[wasm_bindgen_test]
@@ -1067,9 +1077,9 @@ async fn bytes_travel_both_ways_through_the_controller() {
         "the board's greeting never reached the read pump: {greeting:?}"
     );
 
-    JsFuture::from(js_write_line(id, "M! {\"ping\":1}\n"))
+    JsFuture::from(js_write_bytes(id, b"{\"ping\":1}\n"))
         .await
-        .expect("writeLine");
+        .expect("writeBytes");
     yield_to_event_loop().await;
     let received = js_received_bytes(&board);
     assert!(
@@ -1115,126 +1125,154 @@ async fn the_production_rust_boundary_enumerates_the_shims_ports() {
 }
 
 // ---------------------------------------------------------------------------
-// Packed frames through the shipped pump (plan `lp-json-pack`, P6)
+// The port's lp-link end, through the production surface (plan
+// `lp2025/2026-09-27-0215-lp-link-usb-cutover`, P4)
 // ---------------------------------------------------------------------------
+//
+// These drive `browser_serial.rs`'s OWN registry and loop — the production
+// `web_serial_link` surface, over the production externs — against a
+// board-side `lp_link::Link` running here in Rust, whose frames the scripted
+// door delivers and whose input is what the host wrote (`takeReceivedRaw`).
+// The board double speaks as the P2 firmware does: hello on every `Up`, JSON
+// until the host opts in, a fresh learned table per session.
 
-/// A packed frame the board wrote in two halves, drained in between, comes
-/// out once and whole: the reader holds the first half across the drain.
+/// The link comes up on its own and the board's hello arrives as one whole
+/// message, with the session noted for the journal.
 #[wasm_bindgen_test]
-async fn a_packed_frame_split_across_reads_is_read_whole() {
-    if real_backing() {
-        log_skip("the scripted door is what can split a frame on purpose");
+async fn the_link_comes_up_and_the_boards_hello_arrives() {
+    let Some(mut bench) = LinkBench::open("link-up").await else {
         return;
-    }
-    shim_over(&["c6-a"]).await;
-    let board = board_ids().await.first().cloned().expect("a board");
-    let id = granted_sessions().await[0].id;
-    open_port(id, false).await.expect("openPort");
-    yield_to_event_loop().await;
-    let mut reader = PortReader::default();
-    reader.take(id).await; // the greeting
-
-    let message = unload_project(7);
-    let frame = packed_frame(&message);
-    let (first, second) = frame.split_at(frame.len() / 2);
-    js_deliver_raw_bytes(&board, first);
-    yield_to_event_loop().await;
-    // The frame's own leading `\n` ends an empty line; nothing else may
-    // come out of half a frame — not a frame, not a torn-frame error.
-    let half = reader.take(id).await;
+    };
+    let reads = bench.exchange_until(|reads| hello_count(reads) >= 1).await;
+    assert_eq!(hello_count(&reads), 1, "{reads:?}");
+    let notes = web_serial_link::take_wire_notes(bench.id);
     assert!(
-        half.iter()
-            .all(|read| matches!(read, WireRead::Line(line) if line.is_empty())),
+        notes.iter().any(|note| note.starts_with("link: up")),
+        "{notes:?}"
+    );
+    log(&format!("link: up, hello whole; notes {notes:?}"));
+    bench.close().await;
+}
+
+/// A request is one link message on the board's proto channel — not an `M!`
+/// line — and its answer comes back as a frame, packed once the port's own
+/// opt-in has been answered (D14: packed for every host).
+#[wasm_bindgen_test]
+async fn a_request_is_one_link_message_and_its_answer_comes_back_packed() {
+    let Some(mut bench) = LinkBench::open("link-request").await else {
+        return;
+    };
+    bench.exchange_until(|reads| hello_count(reads) >= 1).await;
+    // The port asks for packed replies on its own after the hello.
+    bench.exchange_until(|_| bench_board_packs()).await;
+
+    let request = lpc_wire::ClientMessage {
+        id: 41,
+        msg: lpc_wire::ClientRequest::StopAllProjects,
+    };
+    web_serial_link::send_client_json(
+        bench.id,
+        &lpc_wire::json::to_string(&request).expect("json"),
+    )
+    .expect("the link takes the request");
+    let reads = bench
+        .exchange_until(|reads| answer(reads, 41).is_some())
+        .await;
+
+    let frame = answer(&reads, 41).expect("the answer");
+    assert!(frame.packed, "the answer came packed: {frame:?}");
+    assert!(
+        BOARD.with(|board| board.borrow().requests.contains(&41)),
+        "the board saw the request as one proto message"
+    );
+    let raw = js_received_bytes(&bench.board);
+    assert!(
+        !raw.contains("M!"),
+        "nothing the host wrote is an M! line: {raw:?}"
+    );
+    bench.close().await;
+}
+
+/// A link frame the board wrote in two halves, drained in between, comes out
+/// once and whole: the port's link holds the first half across the drain.
+#[wasm_bindgen_test]
+async fn a_link_frame_split_across_reads_is_read_whole() {
+    let Some(mut bench) = LinkBench::open("link-split").await else {
+        return;
+    };
+    bench.exchange_until(|reads| hello_count(reads) >= 1).await;
+
+    let frames = BOARD.with(|board| {
+        let mut board = board.borrow_mut();
+        board.send(&unload_project(10));
+        board.frames_now()
+    });
+    let (first, second) = frames.split_at(frames.len() / 2);
+    js_deliver_raw_bytes(&bench.board, first);
+    yield_to_event_loop().await;
+    let half = web_serial_link::take_reads(bench.id);
+    assert!(
+        half.iter().all(|read| !matches!(read, WireRead::Frame(_))),
         "half a frame came out as something: {half:?}"
     );
-    js_deliver_raw_bytes(&board, second);
-    yield_to_event_loop().await;
-    let reads = reader.take(id).await;
-
-    let frames = packed_frames(&reads);
-    assert_eq!(frames, [json_of(&message)], "{reads:?}");
+    js_deliver_raw_bytes(&bench.board, second);
+    let reads = bench
+        .exchange_until(|reads| answer(reads, 10).is_some())
+        .await;
+    assert_eq!(
+        answer(&reads, 10).map(|frame| frame.json.clone()),
+        Some(json_of(&unload_project(10)))
+    );
     log(&format!(
-        "packed: a {} B frame split {}+{} across two drains came out once, whole",
-        frame.len(),
+        "link: a {} B frame split {}+{} across two drains came out once, whole",
+        frames.len(),
         first.len(),
         second.len()
     ));
-    shim_off().await;
+    bench.close().await;
 }
 
-/// A packed frame holding `0x0A` bytes — which a line splitter, or a
-/// TextDecoder-then-split pump, cuts in pieces — is one frame.
+/// Raw console text before, between and after link frames stays lines, in
+/// order; the frames between them stay messages.
 #[wasm_bindgen_test]
-async fn a_packed_frame_holding_a_newline_is_not_torn() {
-    if real_backing() {
-        log_skip("the scripted door is what writes a chosen frame");
+async fn console_text_between_link_frames_stays_lines() {
+    let Some(mut bench) = LinkBench::open("link-text").await else {
         return;
-    }
-    shim_over(&["c6-a"]).await;
-    let board = board_ids().await.first().cloned().expect("a board");
-    let id = granted_sessions().await[0].id;
-    open_port(id, false).await.expect("openPort");
-    yield_to_event_loop().await;
-    let mut reader = PortReader::default();
-    reader.take(id).await;
-
-    // Id 10 is a 0x0A byte inside the frame body, and COBS leaves every
-    // non-zero byte alone.
-    let message = unload_project(10);
-    let frame = packed_frame(&message);
-    assert!(
-        frame[1..].contains(&b'\n'),
-        "the frame body holds a 0x0A: {frame:02x?}"
-    );
-    js_deliver_raw_bytes(&board, &frame);
-    yield_to_event_loop().await;
-    let reads = reader.take(id).await;
-
-    assert_eq!(packed_frames(&reads), [json_of(&message)], "{reads:?}");
-    assert!(
-        !reads.iter().any(|read| matches!(read, WireRead::Error(_))),
-        "{reads:?}"
-    );
-    log("packed: a frame holding 0x0A came out as one frame");
-    shim_off().await;
-}
-
-/// Console text before, between and after packed frames stays lines, in
-/// order; the frames between them stay frames.
-#[wasm_bindgen_test]
-async fn console_text_between_packed_frames_stays_lines() {
-    if real_backing() {
-        log_skip("the scripted door is what interleaves on purpose");
-        return;
-    }
-    shim_over(&["c6-a"]).await;
-    let board = board_ids().await.first().cloned().expect("a board");
-    let id = granted_sessions().await[0].id;
-    open_port(id, false).await.expect("openPort");
-    yield_to_event_loop().await;
-    let mut reader = PortReader::default();
-    reader.take(id).await;
+    };
+    bench.exchange_until(|reads| hello_count(reads) >= 1).await;
 
     let (a, b) = (unload_project(3), unload_project(4));
-    let bytes = [
-        b"[INIT] boot\r\n".to_vec(),
-        packed_frame(&a),
-        b"[log] between\n".to_vec(),
-        packed_frame(&b),
-        b"[log] after\n".to_vec(),
-    ]
-    .concat();
-    js_deliver_raw_bytes(&board, &bytes);
-    yield_to_event_loop().await;
-    let reads = reader.take(id).await;
-
+    let bytes = BOARD.with(|board| {
+        let mut board = board.borrow_mut();
+        board.send(&a);
+        let first = board.frames_now();
+        board.send(&b);
+        let second = board.frames_now();
+        [
+            b"[INIT] boot\r\n".to_vec(),
+            first,
+            b"[log] between\n".to_vec(),
+            second,
+            b"[log] after\n".to_vec(),
+        ]
+        .concat()
+    });
+    js_deliver_raw_bytes(&bench.board, &bytes);
+    let reads = bench
+        .exchange_until(|reads| {
+            reads
+                .iter()
+                .any(|read| matches!(read, WireRead::Line(line) if line == "[log] after"))
+        })
+        .await;
     let order: Vec<String> = reads
         .iter()
         .filter_map(|read| match read {
-            WireRead::Line(line) if !line.is_empty() => Some(line.clone()),
-            WireRead::Frame(frame) if frame.packed => Some(frame.json.clone()),
-            WireRead::Line(_) => None,
-            other => Some(format!("unexpected {other:?}")),
+            WireRead::Line(line) if line.starts_with('[') => Some(line.clone()),
+            WireRead::Frame(frame) if frame.message.as_ref().is_ok_and(|m| m.id != 0) => {
+                Some(frame.json.clone())
+            }
+            _ => None,
         })
         .collect();
     assert_eq!(
@@ -1247,16 +1285,240 @@ async fn console_text_between_packed_frames_stays_lines() {
             "[log] after".to_string(),
         ]
     );
-    log("packed: console lines and packed frames came out interleaved, in order");
-    shim_off().await;
+    bench.close().await;
 }
 
-/// The Rust half of the pump, as `browser_serial.rs` keeps it per port: the
-/// shipped controller's bytes through one [`WireReader`], reset when the
-/// controller's buffer generation moves (a reopen).
+/// Plan D9: a board that restarts (a new nonce) ends the session, and a
+/// drainer hears it as a link reset at once — before the new session's
+/// hello — rather than waiting out a request's budget.
+#[wasm_bindgen_test]
+async fn a_board_restart_is_a_link_reset_then_a_new_hello() {
+    let Some(mut bench) = LinkBench::open("link-reset").await else {
+        return;
+    };
+    bench.exchange_until(|reads| hello_count(reads) >= 1).await;
+
+    BOARD.with(|board| *board.borrow_mut() = BoardDouble::new(0xB0A2_0002));
+    let reads = bench.exchange_until(|reads| hello_count(reads) >= 1).await;
+
+    let reset_at = reads
+        .iter()
+        .position(|read| matches!(read, WireRead::LinkReset(_)))
+        .unwrap_or_else(|| panic!("no link reset: {reads:?}"));
+    let hello_at = reads
+        .iter()
+        .position(is_hello)
+        .unwrap_or_else(|| panic!("no new hello: {reads:?}"));
+    assert!(reset_at < hello_at, "{reads:?}");
+    let WireRead::LinkReset(note) = &reads[reset_at] else {
+        unreachable!()
+    };
+    assert!(
+        lpa_link::device_link::port_read_map::is_link_reset_note(note),
+        "{note}"
+    );
+    log(&format!("link: a board restart read as {note:?}"));
+    bench.close().await;
+}
+
+/// One production port, opened through `web_serial_link`, and the board
+/// double ([`BOARD`]) at the other end of the scripted door.
+struct LinkBench {
+    id: u32,
+    board: String,
+    reads: Vec<WireRead>,
+}
+
+impl LinkBench {
+    /// `None` (and a skip line) on a live or tab backing: those boards speak
+    /// their own firmware's link, which is P2's to bring.
+    async fn open(name: &str) -> Option<Self> {
+        if real_backing() {
+            log_skip("the board end here is a Rust lp-link double on the scripted door");
+            return None;
+        }
+        shim_over(&["c6-a"]).await;
+        let board = board_ids().await.first().cloned().expect("a board");
+        let ports = lpa_link::providers::browser_serial_esp32::granted_ports()
+            .await
+            .expect("granted ports through the production externs");
+        let id = ports.first().expect("a port").id;
+        BOARD.with(|double| *double.borrow_mut() = BoardDouble::new(0xB0A2_0001));
+        web_serial_link::open(id, 921_600, None)
+            .await
+            .unwrap_or_else(|error| panic!("{name}: open: {error}"));
+        Some(Self {
+            id,
+            board,
+            reads: Vec::new(),
+        })
+    }
+
+    /// Run both ends until `done` holds for what the port read (bounded by
+    /// rounds, never by a clock), and hand back everything read.
+    async fn exchange_until(&mut self, done: impl Fn(&[WireRead]) -> bool) -> Vec<WireRead> {
+        for _ in 0..200 {
+            let written = js_take_received_raw(&self.board).to_vec();
+            let out = BOARD.with(|board| {
+                let mut board = board.borrow_mut();
+                board.on_bytes(&written);
+                board.frames_now()
+            });
+            if !out.is_empty() {
+                js_deliver_raw_bytes(&self.board, &out);
+            }
+            yield_once().await;
+            self.reads.extend(web_serial_link::take_reads(self.id));
+            if done(&self.reads) {
+                break;
+            }
+        }
+        std::mem::take(&mut self.reads)
+    }
+
+    async fn close(self) {
+        let _ = web_serial_link::release(self.id).await;
+        shim_off().await;
+    }
+}
+
+thread_local! {
+    /// The board end of the current link test.
+    static BOARD: std::cell::RefCell<BoardDouble> =
+        std::cell::RefCell::new(BoardDouble::new(0xB0A2_0001));
+}
+
+/// Whether the current board double has been asked to pack, and said yes.
+fn bench_board_packs() -> bool {
+    BOARD.with(|board| board.borrow().packed)
+}
+
+/// A board's end of the link, as P2's firmware runs it.
+struct BoardDouble {
+    link: Link<SelectiveRepeat>,
+    table: lpc_wire::LearnedTable,
+    packed: bool,
+    requests: Vec<u64>,
+}
+
+impl BoardDouble {
+    fn new(nonce: u32) -> Self {
+        Self {
+            link: Link::new(LinkConfig::usb(), nonce),
+            table: lpc_wire::LearnedTable::default(),
+            packed: false,
+            requests: Vec::new(),
+        }
+    }
+
+    fn now() -> u64 {
+        (js_sys::Date::now() * 1_000.0) as u64
+    }
+
+    fn on_bytes(&mut self, bytes: &[u8]) {
+        self.link.on_bytes(Self::now(), bytes);
+        while let Some(event) = self.link.recv() {
+            match event {
+                LinkEvent::Up { .. } => {
+                    self.packed = false;
+                    self.table = lpc_wire::LearnedTable::default();
+                    self.send(&hello());
+                }
+                LinkEvent::Reset { .. } => {
+                    self.packed = false;
+                    self.table = lpc_wire::LearnedTable::default();
+                }
+                LinkEvent::Message {
+                    channel: CH_PROTO,
+                    data,
+                } => {
+                    let request = lpc_wire::decode_client_payload(&data).expect("a request");
+                    match request.msg {
+                        lpc_wire::ClientRequest::SetEncoding { encoding, .. } => {
+                            self.send(&lpc_wire::WireServerMessage::new(
+                                request.id,
+                                lpc_wire::ServerMsgBody::SetEncoding { encoding },
+                            ));
+                            self.packed = encoding == lpc_wire::WireEncoding::Packed;
+                        }
+                        _ => {
+                            self.requests.push(request.id);
+                            self.send(&unload_project(request.id));
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
+    fn send(&mut self, message: &lpc_wire::WireServerMessage) {
+        let mut payload = Vec::new();
+        let table: Option<&mut dyn lpc_wire::LearnStore> = if self.packed {
+            Some(&mut self.table)
+        } else {
+            None
+        };
+        lpc_wire::encode_server_payload(message, table, &mut payload);
+        self.link.send(CH_PROTO, &payload).expect("board send");
+    }
+
+    /// Every frame the board's link has to write now, as one chunk.
+    fn frames_now(&mut self) -> Vec<u8> {
+        let now = Self::now();
+        let mut out = Vec::new();
+        while let Some(frame) = self.link.poll_transmit(now) {
+            out.extend_from_slice(frame);
+        }
+        out
+    }
+}
+
+fn hello() -> lpc_wire::WireServerMessage {
+    use lpc_wire::server::hello::{BuildFacts, HardwareFacts, ServerHello};
+    lpc_wire::WireServerMessage::new(
+        0,
+        lpc_wire::ServerMsgBody::Hello(ServerHello {
+            proto: lpc_wire::WIRE_PROTO_VERSION,
+            build: BuildFacts {
+                features: vec![],
+                package: "fw-esp32c6".to_string(),
+                commit: "unknown".to_string(),
+                dirty: false,
+                profile: "release-esp32".to_string(),
+            },
+            hardware: HardwareFacts::default(),
+            device_uid: None,
+            pack_format: lpc_wire::PACK_FORMAT_VERSION,
+            auth: lpc_wire::HelloAuth::TRUSTED,
+        }),
+    )
+}
+
+fn is_hello(read: &WireRead) -> bool {
+    matches!(read, WireRead::Frame(frame) if frame.json.contains("\"hello\""))
+}
+
+fn hello_count(reads: &[WireRead]) -> usize {
+    reads.iter().filter(|read| is_hello(read)).count()
+}
+
+fn answer(reads: &[WireRead], id: u64) -> Option<&ReadFrame> {
+    reads.iter().find_map(|read| match read {
+        WireRead::Frame(frame) if frame.message.as_ref().is_ok_and(|m| m.id == id) => Some(frame),
+        _ => None,
+    })
+}
+
+/// The Rust half of the pump for the tests that drive the SUPPORT module's
+/// sessions (a second instance of `browser_serial.js`, so not
+/// `browser_serial.rs`'s registry): the shipped controller's bytes through
+/// one production [`LinkPortService`], a new one when the controller's
+/// buffer generation moves (a reopen). What these tests read is the board's
+/// raw console text, which the link hands on as lines.
 #[derive(Default)]
 struct PortReader {
-    reader: Option<(u32, WireReader)>,
+    reader: Option<(u32, LinkPortService)>,
 }
 
 impl PortReader {
@@ -1267,15 +1529,14 @@ impl PortReader {
             .map(|value| js_sys::Uint8Array::new(&value).to_vec())
             .expect("bytes");
         if self.reader.as_ref().map(|(at, _)| *at) != Some(generation) {
-            self.reader = Some((generation, WireReader::new(false)));
+            self.reader = Some((generation, LinkPortService::new(1, false, None)));
         }
         let (_, reader) = self.reader.as_mut().expect("a reader");
-        let mut reads = Vec::new();
-        reader.push(&bytes, 0, |read| reads.push(read));
-        reads
+        reader.on_bytes((js_sys::Date::now() * 1_000.0) as u64, &bytes);
+        reader.take_reads()
     }
 
-    /// [`Self::take`] as the lines the pre-packing pump produced.
+    /// [`Self::take`] as lines.
     async fn take_lines(&mut self, id: u32) -> Vec<String> {
         self.take(id)
             .await
@@ -1297,22 +1558,16 @@ fn json_of(message: &lpc_wire::WireServerMessage) -> String {
     lpc_wire::json::to_string(message).expect("json")
 }
 
-/// `\n 0x00 'P' COBS 0x00`, with the firmware's own frame writer.
-fn packed_frame(message: &lpc_wire::WireServerMessage) -> Vec<u8> {
-    let mut framed = vec![0u8; 4096];
-    let n = lpc_wire::ser_packed_frame_to(&mut framed, message).expect("a packed frame");
-    framed.truncate(n);
-    framed
-}
-
-fn packed_frames(reads: &[WireRead]) -> Vec<String> {
-    reads
-        .iter()
-        .filter_map(|read| match read {
-            WireRead::Frame(frame) if frame.packed => Some(frame.json.clone()),
-            _ => None,
-        })
-        .collect()
+/// One turn of the event loop: the scripted socket's delivery, the stream
+/// callbacks and the controller's read pump.
+async fn yield_once() {
+    let promise = Promise::new(&mut |resolve, _reject| {
+        let window = web_sys::window().expect("window");
+        window
+            .set_timeout_with_callback_and_timeout_and_arguments_0(&resolve, 0)
+            .expect("set_timeout");
+    });
+    JsFuture::from(promise).await.expect("event loop turn");
 }
 
 /// Let queued microtasks, stream callbacks and the read pump run. Not a delay

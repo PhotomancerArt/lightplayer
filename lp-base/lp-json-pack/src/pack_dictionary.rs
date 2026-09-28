@@ -33,10 +33,15 @@ use crate::pack_tags;
 /// The value of an empty slot in a hash table.
 pub const HASH_EMPTY: u16 = 0xFFFF;
 
-/// The JSON Pack format revision. It is mixed into every
-/// [`Dictionary::fingerprint`], so two ends that disagree on the tag table
-/// disagree on the fingerprint too.
-pub const PACK_FORMAT_VERSION: u8 = 1;
+/// The JSON Pack format revision: the tag table, the learned table's
+/// capacities and learning rule, and the learned frame header
+/// ([`pack_learned`](crate::pack_learned)). Two ends that pack to each other
+/// must agree on it, and nothing else. It is also mixed into every
+/// [`Dictionary::fingerprint`].
+///
+/// 2: learned tables, their frame header, and value codes 64..=143 at
+/// `B0..=FF`.
+pub const PACK_FORMAT_VERSION: u8 = 2;
 
 /// An ordered string table: entry `i` is `text[offsets[i]..offsets[i + 1]]`.
 #[derive(Debug, Clone, Copy)]
@@ -260,7 +265,7 @@ mod tests {
 
     /// Pinned (checked by hand against the documented algorithm): if this
     /// moves, every dictionary's fingerprint moved.
-    const PINNED_TWO_FINGERPRINT: u32 = 0x0f5e_fe26;
+    const PINNED_TWO_FINGERPRINT: u32 = 0xa75b_0a5f;
 
     static TWO: Dictionary = Dictionary {
         keys: PackStrings {

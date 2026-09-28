@@ -220,6 +220,19 @@ where
     ) -> (Self, StudioHandle) {
         let (tx, commands) = command_channel();
         let (view_out, view) = studio_view_channel();
+        // The session recorder's command feed: every command, stamped as it
+        // is sent, into the device event log (skipped kinds and secret-safe
+        // details: `studio_command_summary`).
+        commands.set_send_observer({
+            let recorder = controller.device_event_recorder();
+            move |command| {
+                if let Some((name, detail)) =
+                    crate::app::studio::studio_command_summary::summarize_command(command)
+                {
+                    recorder.record(None, None, crate::DeviceEventKind::Command { name, detail });
+                }
+            }
+        });
         // Agent run futures report progress (and stage edits) through the
         // same command queue the UI feeds; hand the controller a sender
         // before it takes ownership.
@@ -429,7 +442,24 @@ where
                 }
             }
         });
+        let recorder = self.controller.device_event_recorder();
+        let name = crate::app::studio::studio_command_summary::action_name(&action);
+        let started = recorder.now();
         let result = self.controller.dispatch_with_updates(action, updates).await;
+        let elapsed_ms = (recorder.now() - started) * 1000.0;
+        recorder.record(
+            None,
+            None,
+            crate::DeviceEventKind::Action {
+                name,
+                outcome: if result.is_ok() { "ok" } else { "error" }.to_string(),
+                elapsed_ms,
+                error: result
+                    .as_ref()
+                    .err()
+                    .map(|error| error.message().to_string()),
+            },
+        );
         match result {
             Ok(outcome) => {
                 for notice in outcome.notices {

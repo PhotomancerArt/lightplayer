@@ -28,10 +28,16 @@ use std::rc::Rc;
 use crate::UiStudioView;
 use crate::app::studio::studio_command::StudioCommand;
 
+/// A hook that sees every command as it is SENT (the session recorder):
+/// at send time, not when the actor gets round to the batch, so a command
+/// queued behind a parked open is stamped when the user asked.
+type SendObserver<T> = Rc<dyn Fn(&T)>;
+
 struct QueueInner<T> {
     items: VecDeque<T>,
     waker: Option<Waker>,
     senders: usize,
+    on_send: Option<SendObserver<T>>,
 }
 
 impl<T> QueueInner<T> {
@@ -88,6 +94,12 @@ impl CommandSender {
         {
             crate::app::open_progress::note_open_requested();
         }
+        // The observer runs outside the queue borrow: it records into the
+        // device event log, whose own hook must never find the queue held.
+        let observer = self.inner.borrow().on_send.clone();
+        if let Some(observer) = observer {
+            observer(&command);
+        }
         let mut inner = self.inner.borrow_mut();
         inner.items.push_back(command);
         inner.wake();
@@ -116,6 +128,12 @@ impl CommandReceiver {
     /// a pull is in flight.
     pub fn peek_any(&self, predicate: impl Fn(&StudioCommand) -> bool) -> bool {
         self.inner.borrow().items.iter().any(predicate)
+    }
+
+    /// Install the send observer (the session recorder's command feed).
+    /// Every sender, including clones made earlier, reports through it.
+    pub fn set_send_observer(&self, observer: impl Fn(&StudioCommand) + 'static) {
+        self.inner.borrow_mut().on_send = Some(Rc::new(observer));
     }
 
     /// Register `waker` to be woken on the next send. Used by the actor's
@@ -158,6 +176,7 @@ pub fn command_channel() -> (CommandSender, CommandReceiver) {
         items: VecDeque::new(),
         waker: None,
         senders: 1,
+        on_send: None,
     }));
     (
         CommandSender {
@@ -318,5 +337,20 @@ mod tests {
         assert_eq!(batch.len(), 2);
         assert!(batch[0].is_refresh_tick());
         assert!(matches!(batch[1], StudioCommand::Shutdown));
+    }
+
+    #[test]
+    fn the_send_observer_sees_every_command_from_every_sender() {
+        let (tx, rx) = command_channel();
+        let early_clone = tx.clone();
+        let seen = Rc::new(RefCell::new(Vec::new()));
+        rx.set_send_observer({
+            let seen = Rc::clone(&seen);
+            move |command| seen.borrow_mut().push(command.is_refresh_tick())
+        });
+        tx.send(StudioCommand::RefreshTick);
+        early_clone.send(StudioCommand::Shutdown);
+        assert_eq!(*seen.borrow(), vec![true, false]);
+        assert_eq!(rx.try_recv_all_for_test().len(), 2);
     }
 }

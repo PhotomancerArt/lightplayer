@@ -499,17 +499,40 @@ impl OutputProvider for Esp32OutputProvider {
         unsafe { output.start(frame) }
     }
 
+    /// Close a port, leaving its strip dark.
+    ///
+    /// A WS281x holds the last frame it latched for as long as it has power,
+    /// so a closed port that is not blanked keeps glowing — through a project
+    /// stop, and through a power-button deep sleep on a board whose LED supply
+    /// stays up. One all-black frame goes out, and is waited out, before the
+    /// port is dropped. A gated channel whose rail is already down is left
+    /// alone: it is dark, and clocking data into an unpowered strip is what
+    /// the power-gate sequence exists to prevent.
     fn close(&self, handle: OutputPortHandle) -> Result<(), OutputError> {
         let handle_id = handle.as_i32();
-        self.ports
+        let mut port = self
+            .ports
             .borrow_mut()
             .remove(&handle_id)
             .ok_or_else(|| OutputError::InvalidHandle { handle: handle_id })?;
+        let powered = self
+            .power_gates
+            .as_ref()
+            .is_none_or(|gates| port.gate_mask == 0 || gates.borrow().all_asserted(port.gate_mask));
+        let blanked = if powered {
+            blank_port(&mut port)
+        } else {
+            Ok(())
+        };
+        if let Err(error) = &blanked {
+            log::warn!("Esp32OutputProvider::close: handle={handle_id} was not blanked: {error}");
+        }
+        drop(port);
         // The total just dropped: the tier is a function of the open set,
         // so the ports left may have a feature coming back.
         let tier = self.tier_for(self.total_open_lamps());
         self.retier_ports(tier);
-        Ok(())
+        blanked
     }
 
     fn port_smoothing(&self, handle: OutputPortHandle) -> Option<OutputPortSmoothing> {
@@ -596,6 +619,18 @@ impl OutputProvider for Esp32OutputProvider {
     fn hardware_generation(&self) -> u64 {
         self.hardware_system.registry().generation()
     }
+}
+
+/// Transmit one all-black frame on `port` and wait it out.
+fn blank_port(port: &mut PortState) -> Result<(), OutputError> {
+    port.output.wait_complete()?;
+    port.frame.clear();
+    port.frame.resize(((port.byte_count / 3) * 3) as usize, 0);
+    // SAFETY: `frame` is this port's own storage and is not touched again
+    // until the `wait_complete` below has returned, so the transmitter never
+    // reads freed or changing bytes.
+    unsafe { port.output.start(&port.frame) }?;
+    port.output.wait_complete()
 }
 
 fn capped_byte_count_for_len(data_len: usize) -> (u32, bool) {
@@ -971,6 +1006,8 @@ mod concurrent_flush_tests {
         /// Outputs with a started, un-waited frame — across ALL probe outputs,
         /// which is what makes concurrency observable.
         in_flight: usize,
+        /// The bytes of the most recent `start`, across all probe outputs.
+        last_started: Vec<u8>,
     }
 
     struct ProbeOutput {
@@ -995,13 +1032,14 @@ mod concurrent_flush_tests {
             Ok(())
         }
 
-        unsafe fn start(&mut self, _data: &[u8]) -> Result<(), OutputError> {
+        unsafe fn start(&mut self, data: &[u8]) -> Result<(), OutputError> {
             assert!(
                 !self.in_flight,
                 "start while a frame is in flight violates the wait-first contract"
             );
             let mut log = self.log.borrow_mut();
             log.events.push(ProbeEvent::Start);
+            log.last_started = data.to_vec();
             log.in_flight += 1;
             self.in_flight = true;
             Ok(())
@@ -1244,18 +1282,31 @@ mod concurrent_flush_tests {
             .count()
     }
 
-    /// Closing a handle mid-flight must reach the output's own drop (which on
-    /// hardware stops the transmitter) — the provider must not require a wait
-    /// before close.
+    /// Closing a handle mid-flight needs no wait from the caller: close
+    /// waits the frame out itself, then sends one all-black frame and waits
+    /// that out too, so the strip is dark and nothing is on the wire when
+    /// the output drops.
     #[test]
-    fn close_drops_the_output_with_a_frame_still_in_flight() {
+    fn close_blanks_the_strip_even_with_a_frame_still_in_flight() {
         let (provider, log) = probe_provider();
         let handle = open_probe(&provider, 0);
 
-        let frame = vec![0u16; 3];
+        let frame = vec![u16::MAX; 3];
         provider.write(handle, &frame).expect("write");
         assert_eq!(log.borrow().in_flight, 1);
         provider.close(handle).expect("close");
+
+        let log = log.borrow();
+        assert_eq!(log.in_flight, 0, "nothing left transmitting after close");
+        assert_eq!(
+            log.last_started,
+            vec![0u8; 3],
+            "the last frame out is black"
+        );
+        assert!(
+            !log.events.contains(&ProbeEvent::BlockingWrite),
+            "the blank rides start/wait like every other frame"
+        );
     }
 }
 

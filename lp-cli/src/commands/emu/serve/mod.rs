@@ -39,6 +39,7 @@ mod air;
 mod board;
 mod door;
 mod wire_tap;
+mod wire_tear;
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -51,7 +52,13 @@ use board::{Board, BoardKind, BoardOptions, BoardSpec, default_mac, format_mac};
 use door::Registry;
 
 pub fn serve(args: ServeArgs) -> Result<()> {
-    let EmuChip::Esp32C6 = args.chip;
+    // A bad fault spec is refused here, before any board starts.
+    wire_tear::WireTear::from_env()?;
+    if args.chip != EmuChip::Esp32C6 {
+        anyhow::bail!(
+            "`emu serve` holds C6 boards only; the S3 is `emu run --chip esp32s3 --host-link`"
+        );
+    }
 
     if args.board.is_empty() {
         bail!(

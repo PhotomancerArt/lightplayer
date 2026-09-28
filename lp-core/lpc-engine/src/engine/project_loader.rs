@@ -50,6 +50,8 @@ use crate::nodes::ControlRadioNode;
 #[cfg(feature = "node-fluid")]
 use crate::nodes::FluidNode;
 use crate::nodes::OutputNode;
+#[cfg(feature = "node-power-button")]
+use crate::nodes::PowerButtonNode;
 #[cfg(feature = "node-texture")]
 use crate::nodes::TextureNode;
 #[cfg(feature = "node-fixture")]
@@ -603,6 +605,46 @@ impl ProjectLoader {
                     .map_err(|e| ProjectLoadError::InvalidProjectReference {
                         path: node_label(node),
                         reason: format!("attach button placeholder runtime: {e}"),
+                    })?;
+            }
+        }
+
+        for node in projected_nodes {
+            if !should_attach_projected_node(node, targets) {
+                continue;
+            }
+            if node.kind != NodeKind::PowerButton {
+                continue;
+            }
+            // A demand root: a power button must be polled every frame
+            // whether or not anything binds its `click`, because powering
+            // off is its whole job.
+            #[cfg(feature = "node-power-button")]
+            {
+                let NodeDef::PowerButton(_) = projected_node_config(registry, node)? else {
+                    continue;
+                };
+                runtime
+                    .attach_runtime_node(node.id, Box::new(PowerButtonNode::new()), frame)
+                    .map_err(|e| ProjectLoadError::InvalidProjectReference {
+                        path: node_label(node),
+                        reason: format!("attach power button runtime: {e}"),
+                    })?;
+                runtime.add_demand_root(node.id);
+            }
+            #[cfg(not(feature = "node-power-button"))]
+            {
+                runtime
+                    .attach_runtime_node(
+                        node.id,
+                        Box::new(crate::nodes::CorePlaceholderNode::new_leaf(
+                            NodeKind::PowerButton,
+                        )),
+                        frame,
+                    )
+                    .map_err(|e| ProjectLoadError::InvalidProjectReference {
+                        path: node_label(node),
+                        reason: format!("attach power button placeholder runtime: {e}"),
                     })?;
             }
         }
@@ -1516,6 +1558,7 @@ fn kind_shapes(kind: NodeKind) -> (Option<SlotShape>, Option<SlotShape>) {
     use lpc_model::nodes::output::OutputDef;
     use lpc_model::nodes::playlist::PlaylistDef;
     use lpc_model::nodes::playlist::PlaylistState;
+    use lpc_model::nodes::power_button::{PowerButtonDef, PowerButtonState};
     use lpc_model::nodes::radio::ControlRadioDef;
     use lpc_model::nodes::radio::ControlRadioState;
     use lpc_model::nodes::shader::ShaderState;
@@ -1524,6 +1567,7 @@ fn kind_shapes(kind: NodeKind) -> (Option<SlotShape>, Option<SlotShape>) {
     use lpc_model::nodes::texture::TextureState;
     let def_shape = match kind {
         NodeKind::Button => Some(lpc_model::nodes::button::ButtonDef::slot_shape()),
+        NodeKind::PowerButton => Some(PowerButtonDef::slot_shape()),
         NodeKind::Clock => Some(ClockDef::slot_shape()),
         NodeKind::Fixture => Some(FixtureDef::slot_shape()),
         NodeKind::Fluid => Some(FluidDef::slot_shape()),
@@ -1537,6 +1581,7 @@ fn kind_shapes(kind: NodeKind) -> (Option<SlotShape>, Option<SlotShape>) {
     };
     let state_shape = match kind {
         NodeKind::Button => Some(ButtonState::slot_shape()),
+        NodeKind::PowerButton => Some(PowerButtonState::slot_shape()),
         NodeKind::Clock => Some(ClockState::slot_shape()),
         NodeKind::Fixture => Some(FixtureState::slot_shape()),
         NodeKind::Fluid => Some(FluidState::slot_shape()),
@@ -1783,6 +1828,7 @@ fn node_def_bindings(config: &NodeDef) -> &BindingDefs {
     match config {
         NodeDef::Module(config) => &config.bindings,
         NodeDef::Button(config) => &config.bindings,
+        NodeDef::PowerButton(config) => &config.bindings,
         NodeDef::Clock(config) => &config.bindings,
         NodeDef::Texture(config) => &config.bindings,
         NodeDef::Shader(config) => &config.bindings,
@@ -6121,6 +6167,7 @@ mod tests {
                 NodeKind::Module => "always-on",
                 NodeKind::Output => "always-on",
                 NodeKind::Button => "node-button",
+                NodeKind::PowerButton => "node-power-button",
                 NodeKind::Clock => "node-clock",
                 NodeKind::Texture => "node-texture",
                 NodeKind::Shader => "node-shader",
@@ -6135,6 +6182,7 @@ mod tests {
             NodeKind::Module,
             NodeKind::Output,
             NodeKind::Button,
+            NodeKind::PowerButton,
             NodeKind::Clock,
             NodeKind::Texture,
             NodeKind::Shader,

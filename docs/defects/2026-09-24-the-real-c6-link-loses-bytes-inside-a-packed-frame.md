@@ -197,3 +197,44 @@ test. A transcript that shows it is what would change either.
 
 **Evidence.** `~/.photomancer/planning/lp2025/2026-09-23-1701-lp-json-pack/g1-{150,75,33}.bin`
 (raw captures), with `.txt`/`.sizes` from `lp-cli wire unpack --sizes`.
+
+**Readers counted each such loss twice (fixed 2026-09-25).** The frame
+scanner's resync rule, built for a torn *write* (a start with no end), took
+the damaged frame's closing `0x00` as the next frame's start. With both
+delimiters intact, the wire's next `\n` lead became a kind byte and the next
+frame's opening `0x00` ended an empty phantom frame: a second `BadCobs` drop
+for one loss, in `WireStream`, `lp-cli wire unpack --sizes` and the emu wire
+tap alike. The scanner now holds a guessed start to account: a guessed frame
+that is not valid COBS and whose kind differs from the torn frame's comes out
+as text, byte for byte, not as a drop
+(`lp-base/lp-json-pack/src/frame_scanner.rs`,
+`a_frame_short_of_bytes_mid_body_is_one_drop`).
+
+## 2026-09-26 — seen again, on a second board, with the gate
+
+At the learned wire dictionary's hardware sitting (PR #835; a second XIAO
+ESP32-C6, MAC `10:bd:a3:b0:8e:30`, this branch's image with the IN-endpoint
+gate; Studio headless in Brave, lens at 75 ms, `?wire-capture=1`), two or
+three packed frames of ~1,140 arrived torn in the Web Serial capture,
+mid-connection, with no reset or reload near them (captures and analysis in
+`~/.photomancer/planning/lp2025/2026-09-25-0006-learned-wire-dictionary/wire-tap/scripts/rec/g1-hw-2/`).
+The gate's 0-of-1,327 on the choker's board does not hold on this one, or not
+under this load. With learned frames each tear was caught at the next
+frame's header and recovered within one or two opt-in round trips, with no
+frame decoded against a diverged table — the loss is survivable, but it is
+not gone. Whether the second board, the lens pace, or the host (a laptop on
+the road, not the bench Mac's hub) is the variable is not known.
+
+## 2026-09-26 — the tears seen with the gate are a different, host-side loss
+
+The gated-board tears above (and 11 in a prod session the same day) are
+not this defect coming back. They have a different shape — a run of
+hundreds of bytes starting ~1.2–1.5 KB into a big frame, mid-packet, and
+resuming on a packet boundary — and a different cause, found and
+reproduced on silicon: on macOS, Chromium's Web Serial termios (`PARMRK`)
+makes the tty store every `0xFF` twice, and IOSerialFamily's unsigned
+free-space count then overfills the 1,024-slot tty queue whenever the page
+reads late. JSON has no `0xFF` and is never lost that way, which is also the
+likeliest reading of "JSON lost 0 of 1,270" above. A native reader with raw
+termios lost 0 bytes of ~60 MB of soak frames on the same gated board.
+See `2026-09-26-web-serial-on-macos-drops-bytes-of-packed-frames.md`.

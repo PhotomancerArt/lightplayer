@@ -194,29 +194,28 @@ pub fn handle_client_message(
             project_manager.clear_faults();
             ServerMessagePayload::ClearFaults { ledger_cleared }
         }
-        lpc_wire::ClientRequest::SetEncoding {
-            encoding,
-            dictionary,
-        } => ServerMessagePayload::SetEncoding {
-            encoding: negotiate_encoding(encoding, dictionary, hello.pack_dictionary),
-        },
+        lpc_wire::ClientRequest::SetEncoding { encoding, format } => {
+            ServerMessagePayload::SetEncoding {
+                encoding: negotiate_encoding(encoding, format, hello.pack_format),
+            }
+        }
     };
 
     Ok(WireServerMessage::new(id, response))
 }
 
 /// The encoding a link gets for its `SetEncoding` ask: packed only when the
-/// host asked for it and named the dictionary this server packs with
-/// (`ours`, the hello's `pack_dictionary`; 0 when the embedder cannot pack).
-/// A host with another dictionary would decode a packed frame to wrong names,
-/// so it stays JSON (plan `lp-json-pack`, G6).
+/// host asked for it and named the pack format this server packs in (`ours`,
+/// the hello's `pack_format`; 0 when the embedder cannot pack). A host in
+/// another format would learn its table by other rules, so it stays JSON.
+/// Starting the new table epoch a `packed` answer means is the transport's.
 pub fn negotiate_encoding(
     asked: lpc_wire::WireEncoding,
-    dictionary: u32,
-    ours: u32,
+    format: u8,
+    ours: u8,
 ) -> lpc_wire::WireEncoding {
     match asked {
-        lpc_wire::WireEncoding::Packed if ours != 0 && dictionary == ours => {
+        lpc_wire::WireEncoding::Packed if ours != 0 && format == ours => {
             lpc_wire::WireEncoding::Packed
         }
         _ => lpc_wire::WireEncoding::Json,
@@ -689,11 +688,11 @@ mod tests {
     }
 
     #[test]
-    fn set_encoding_packs_only_on_a_matching_dictionary_and_a_packing_embedder() {
-        use lpc_wire::{WIRE_DICTIONARY_FINGERPRINT as FP, WireEncoding::*};
+    fn set_encoding_packs_only_on_a_matching_format_and_a_packing_embedder() {
+        use lpc_wire::{PACK_FORMAT_VERSION as FP, WireEncoding::*};
         assert_eq!(negotiate_encoding(Packed, FP, FP), Packed);
-        // A host with another dictionary would decode wrong names: JSON.
-        assert_eq!(negotiate_encoding(Packed, FP ^ 1, FP), Json);
+        // A host in another format learns by other rules: JSON.
+        assert_eq!(negotiate_encoding(Packed, FP + 1, FP), Json);
         // An embedder whose transport cannot pack (host, browser, fw-emu)
         // says 0 — even to a host that names 0.
         assert_eq!(negotiate_encoding(Packed, FP, 0), Json);

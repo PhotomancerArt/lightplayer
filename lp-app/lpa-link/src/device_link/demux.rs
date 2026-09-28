@@ -3,7 +3,7 @@
 //! ([`lpc_wire::WireStream`]).
 //!
 //! On a serial wire, protocol messages and console output share one byte
-//! stream: an `M!`-prefixed line IS a frame, a packed frame (`0x00 'P' COBS
+//! stream: an `M!`-prefixed line IS a frame, a packed frame (`0x00 'L' COBS
 //! 0x00`, on a link that opted in) is one too, and everything else is device
 //! output. Both matter to the model — frames are peer evidence, lines are how
 //! a blank chip or somebody else's firmware gets diagnosed — so neither is
@@ -59,17 +59,24 @@ pub fn demux_chunk(chunk: WireChunk) -> LinkEvent {
         WireChunk::Line(line) => LinkEvent::Line(line),
         WireChunk::Frame(frame) => demux_frame_json(&frame.json),
         WireChunk::Error(error) => LinkEvent::Error(error),
+        // This path does not opt in, so it cannot ask for a reset; a
+        // dropped reply is an anomaly like a torn one.
+        WireChunk::Desync(dropped) => LinkEvent::Error(format!(
+            "packed reply dropped ({} B): {}",
+            dropped.wire_len, dropped.reason
+        )),
     }
 }
 
-/// One [`WireRead`] → the event it is, or `None` for a request the caller
-/// must write ([`WireRead::Send`]) rather than hand to the model.
+/// One [`WireRead`] → the event it is. A link reset is a
+/// [`LinkEvent::WireNote`] (see
+/// [`crate::device_link::port_read_map::is_link_reset_note`]).
 ///
 /// A frame the reader already decoded is not decoded again; one that did not
 /// decode (console text spliced into a JSON line) takes [`demux_line`]'s
 /// resync.
-pub fn demux_read(read: WireRead) -> Option<LinkEvent> {
-    Some(match read {
+pub fn demux_read(read: WireRead) -> LinkEvent {
+    match read {
         WireRead::Line(line) => LinkEvent::Line(line),
         WireRead::Frame(ReadFrame {
             json,
@@ -79,8 +86,10 @@ pub fn demux_read(read: WireRead) -> Option<LinkEvent> {
         WireRead::Frame(ReadFrame { json, .. }) => demux_frame_json(&json),
         WireRead::Error(error) => LinkEvent::Error(error),
         WireRead::Note(note) => LinkEvent::WireNote(note),
-        WireRead::Send(_) => return None,
-    })
+        // A journal line for the fold; the effects layer also reads it as
+        // "fail the shared conversations now" (`is_link_reset_note`, D9).
+        WireRead::LinkReset(note) => LinkEvent::WireNote(note),
+    }
 }
 
 /// An `M!` body (or a decoded packed frame) → the event it is. See
@@ -185,7 +194,8 @@ mod tests {
                 lpc_wire::WireServerMessage::new(id, lpc_wire::ServerMsgBody::UnloadProject);
             let json = lpc_wire::json::to_string(&message).unwrap();
             let mut framed = vec![0u8; 256];
-            let n = lpc_wire::ser_packed_frame_to(&mut framed, &message).unwrap();
+            let mut table = lpc_wire::LearnedTable::default();
+            let n = lpc_wire::ser_learned_frame_to(&mut framed, &mut table, &message).unwrap();
 
             let mut stream = WireStream::new();
             let mut events = VecDeque::new();
@@ -275,6 +285,16 @@ mod tests {
                 line: "M!{\"id\":1073741826,\"msg\":\"unloadProject\"}".to_string(),
             }
         );
+    }
+
+    #[test]
+    fn a_link_reset_is_a_journal_note_the_effects_layer_can_recognise() {
+        let note = crate::device_link::port_read_map::link_reset_note(
+            lpc_wire::lp_link::ResetReason::RetryLimit,
+        );
+        let event = demux_read(WireRead::LinkReset(note.clone()));
+        assert_eq!(event, LinkEvent::WireNote(note.clone()));
+        assert!(crate::device_link::port_read_map::is_link_reset_note(&note));
     }
 
     #[test]

@@ -89,6 +89,17 @@ can abort `just test` before it is reached
   not close the hole (the local gate still runs no chip suite); it makes
   the CI-only check cheap to reproduce once CI has run.
 
+- 2026-09-25 — the **wasm32 residue** bit again (learned wire dictionary,
+  PR #835). A new `WireChunk` variant compiled clean through the whole
+  host workspace (`cargo check --workspace … --tests`, every reader crate's
+  tests green), and Studio's `dx serve` then failed on the one browser-only
+  match left (`lpa-link/src/providers/browser_ble/ble_wire.rs`, behind
+  `browser-ble`, never compiled for host). Caught only because the next
+  step needed a running Studio. Workaround that would have caught it in
+  ~a minute: `cargo check -p lpa-link --target wasm32-unknown-unknown
+  --features browser-ble,browser-serial-esp32,browser-worker,emulator-tab`
+  after touching a type `lpa-link`'s browser providers match on.
+
 **Exit criteria** — one recipe (`just check-studio`, or folding the four
 into `check-lint` when they are fast enough) that a Studio-touching
 change can run and be believed, plus the wasm build in whatever gate a

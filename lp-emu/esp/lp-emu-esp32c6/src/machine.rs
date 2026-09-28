@@ -1165,6 +1165,8 @@ pub struct Esp32C6Builder {
     rmt_logs: bool,
     /// USB-Serial-JTAG's free lag, in emulated nanoseconds (0 = off).
     usb_in_free_lag_ns: u64,
+    /// The USB host link's fault injector (`--usb-faults`), off by default.
+    usb_faults: Option<lp_emu_esp_common::link_faults::LinkFaults>,
 }
 
 impl Default for Esp32C6Builder {
@@ -1231,6 +1233,7 @@ impl Esp32C6Builder {
             strip: StripConfig::default(),
             rmt_logs: false,
             usb_in_free_lag_ns: 0,
+            usb_faults: None,
         }
     }
 
@@ -1669,6 +1672,13 @@ impl Esp32C6Builder {
         self
     }
 
+    /// Damage the USB host link's packets (`--usb-faults <spec>`) — a test
+    /// switch, off by default. See `lp_emu_esp_common::link_faults`.
+    pub fn usb_faults(mut self, faults: lp_emu_esp_common::link_faults::LinkFaults) -> Self {
+        self.usb_faults = Some(faults);
+        self
+    }
+
     pub fn seed(mut self, seed: u64) -> Self {
         self.seed = seed;
         self
@@ -1803,6 +1813,7 @@ impl Esp32C6Builder {
             strip,
             rmt_logs,
             usb_in_free_lag_ns,
+            usb_faults,
         } = self;
 
         let rom_image = match rom {
@@ -2036,6 +2047,21 @@ impl Esp32C6Builder {
             // The staging is what a flasher left behind, not a guest write:
             // the window has just been filled from it, so nothing is stale.
             flash_handle.lock().unwrap().take_written_blocks();
+        }
+
+        if let Some(faults) = usb_faults.filter(|f| !f.is_off()) {
+            let set = bus
+                .peripheral_index("USB_DEVICE")
+                .and_then(|i| {
+                    bus.with_peripheral::<UsbSerialJtag, _>(i, |u, _| u.set_faults(Some(faults)))
+                })
+                .is_some();
+            if !set {
+                return Err(BuildError::Io(
+                    "USB link faults were asked for and this machine has no USB_DEVICE block"
+                        .to_string(),
+                ));
+            }
         }
 
         if usb_in_free_lag_ns > 0 {
@@ -3966,6 +3992,35 @@ impl Esp32C6Machine {
         let index = self.bus.peripheral_index("USB_DEVICE")?;
         self.bus
             .with_peripheral::<UsbSerialJtag, _>(index, |u, _| u.in_wake_stats())
+    }
+
+    /// Set (or, with `None`, clear) the USB host link's fault injector
+    /// mid-run; `false` when the machine has no USB block.
+    pub fn set_usb_faults(
+        &mut self,
+        faults: Option<lp_emu_esp_common::link_faults::LinkFaults>,
+    ) -> bool {
+        let Some(index) = self.bus.peripheral_index("USB_DEVICE") else {
+            return false;
+        };
+        self.bus
+            .with_peripheral::<UsbSerialJtag, _>(index, |u, _| u.set_faults(faults))
+            .is_some()
+    }
+
+    /// What the USB link's fault injector did: (device → host, host → device).
+    pub fn usb_fault_counters(
+        &mut self,
+    ) -> Option<(
+        lp_emu_esp_common::link_faults::FaultCounters,
+        lp_emu_esp_common::link_faults::FaultCounters,
+    )> {
+        let index = self.bus.peripheral_index("USB_DEVICE")?;
+        self.bus
+            .with_peripheral::<UsbSerialJtag, _>(index, |u, _| {
+                u.faults().map(|f| (f.in_counters, f.out_counters))
+            })
+            .flatten()
     }
 
     /// The UART0 TCP listener, when `Uart0Sink::Tcp` was chosen.

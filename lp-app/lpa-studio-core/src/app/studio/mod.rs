@@ -1,4 +1,5 @@
 pub mod console_command;
+pub mod lens_reconnect;
 /// Studio-level decoration of output-node faces: board identity (device
 /// registry) and the incoming lamp extent (the upstream node's produced
 /// control product) — the facts the project walk cannot see.
@@ -11,6 +12,7 @@ pub mod studio_actor;
 #[cfg(test)]
 mod studio_agent_e2e_tests;
 pub mod studio_command;
+pub mod studio_command_summary;
 pub mod studio_controller;
 /// End-to-end device tests: the REAL effects layer driving the REAL model
 /// over the scripted fake device's bytes (host-only, like the edit e2e
@@ -58,6 +60,7 @@ pub mod studio_snapshot;
 mod studio_transient_open_e2e_tests;
 pub mod studio_view_channel;
 pub mod ui_console_view;
+pub mod ui_lens_reconnecting;
 pub mod ui_studio_view;
 pub mod unsaved_changes;
 pub mod ux_update;
@@ -88,6 +91,7 @@ pub use studio_view_channel::{
     StudioViewReceiver, StudioViewSender, ViewPublisher, studio_view_channel,
 };
 pub use ui_console_view::UiConsoleView;
+pub use ui_lens_reconnecting::UiLensReconnecting;
 pub use ui_studio_view::{
     UiChromeSessionControl, UiChromeSessionStatus, UiLensCard, UiLensRuntime, UiStudioView,
 };

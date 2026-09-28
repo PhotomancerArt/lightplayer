@@ -92,7 +92,10 @@ impl ProjectRegistry {
             }
         }
 
-        let mut issues = Vec::new();
+        // Keyed by (playlist, entry) so several broken nodes under the same
+        // entry are grouped into one issue naming the entry, with its
+        // reasons joined in order, rather than one issue per broken node.
+        let mut by_entry: VecMap<(ArtifactLocation, u32), EntryIssue> = VecMap::default();
         for (use_location, node) in inventory.tree.nodes.iter() {
             let Some(def_entry) = inventory.defs.get(&node.def_location) else {
                 continue;
@@ -105,14 +108,25 @@ impl ProjectRegistry {
             else {
                 continue;
             };
-            issues.push(EntryIssue {
-                playlist,
-                entry,
-                name,
-                message: describe_def_state(&def_entry.state),
-            });
+            let reason = describe_def_state(&def_entry.state);
+            match by_entry.get_mut(&(playlist.clone(), entry)) {
+                Some(issue) => {
+                    issue.message = format!("{}; {reason}", issue.message);
+                }
+                None => {
+                    by_entry.insert(
+                        (playlist.clone(), entry),
+                        EntryIssue {
+                            playlist,
+                            entry,
+                            name,
+                            message: reason,
+                        },
+                    );
+                }
+            }
         }
-        issues
+        by_entry.into_iter().map(|(_, issue)| issue).collect()
     }
 }
 

@@ -96,6 +96,24 @@ impl SerialEmuClientTransport {
                     log::warn!("SerialEmuClientTransport: {error}");
                     continue;
                 }
+                WireChunk::Desync(dropped) => {
+                    log::warn!(
+                        "SerialEmuClientTransport: packed reply dropped ({} B): {}",
+                        dropped.wire_len,
+                        dropped.reason
+                    );
+                    let now_ms =
+                        u64::try_from(self.started.elapsed().as_millis()).unwrap_or(u64::MAX);
+                    if let Some(ask) = self.opt_in.desynced(now_ms) {
+                        let line = json::to_serial_line(&ask)
+                            .map_err(|e| TransportError::Serialization(e.to_string()))?;
+                        self.emulator
+                            .lock()
+                            .map_err(|_| TransportError::ConnectionLost)?
+                            .serial_write(line.as_bytes());
+                    }
+                    continue;
+                }
                 WireChunk::Frame(frame) => frame,
             };
             let message = match json::from_str::<WireServerMessage>(&frame.json) {

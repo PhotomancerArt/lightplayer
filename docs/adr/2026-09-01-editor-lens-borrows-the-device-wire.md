@@ -1,6 +1,8 @@
 # ADR: The editor is a lens that borrows a device's wire; the tap keeps the fold live
 
-- **Status:** Accepted
+- **Status:** Accepted (amended 2026-09-27 — see the lp-link cut-over note
+  at the end: the borrow now sits above one lp-link per USB port, not above
+  raw bytes)
 - **Date:** 2026-09-01
 - **Deciders:** Photomancer
 - **Supersedes:** None (extends `2026-08-25-event-fold-device-model.md`'s
@@ -131,3 +133,34 @@ store (invariant I8) round 2 exists to end.
   (the tee), `runtime_pool/runtime_session.rs` (`RuntimePayload`),
   `studio_controller.rs` (`open_device_lens`, `close_device_lens`,
   `try_pending_device_lens`).
+
+## Amended 2026-09-27 — lp-link USB cut-over (PR #854)
+
+The borrow discipline above now sits **above one `lp-link` per port**, not
+above raw bytes. On USB (C6/S3 silicon, their emulators, Studio's Web
+Serial and emulator-tab providers) the provider owns one `lp-link` `Link`
+per port through a single link-port service (`lpc_wire::WireLinkPort` on
+native hosts; `LinkPortService` in Studio), and both the pump and the lens
+drain *decoded* proto-channel messages from that one link rather than
+splitting raw bytes between two readers. The failure mode item 1's "one
+wire, one owner" rule exists to prevent — two readers tearing frames
+between them — cannot happen below the link either way now: lp-link
+reassembles a whole message, resending what was lost, before anything
+above it (the pump, the tap, the lens) ever sees a byte.
+
+The exclusive borrow / pause-the-pump convention itself is **unchanged** by
+this PR — a deliberate deviation from the umbrella lp-link plan, which had
+asked this milestone to retire it (recorded as decision D2 of
+`lp2025/2026-09-27-0215-lp-link-usb-cutover/notes.md`). With the link doing
+reassembly, the torn-partial hazard this ADR's borrow rule guarded against
+is gone; rewriting `device_effects.rs` so conversations share the link by
+request id, the way `2026-09-06-shared-link-conversations-and-the-card-
+feed.md`'s app-conversation traffic class already does at the message
+level, is a larger Studio-core refactor with no further user-visible gain
+once the link itself is reliable. That refactor is deferred to a future
+milestone, **M2b**, which will retire `LinkBorrow` / pause-the-pump for
+USB for good. Until M2b, read every "borrows the wire" in this ADR as
+"borrows lp-link's decoded stream for the port", not raw bytes.
+
+See `lp-base/lp-link/README.md` and
+`docs/adr/2026-09-27-lp-link-one-comms-layer.md`.

@@ -1,10 +1,17 @@
-//! Wire-protocol server messages, serialized for a host link.
+//! Wire-protocol server messages, serialized for an `M!` host link.
 //!
-//! This is the chip-agnostic serialization half of every firmware's server
-//! write path: take a [`lpc_wire::WireServerMessage`] and produce one framed
+//! Two shapes share this file's static frame buffer: the lp-link proto
+//! payload (bare JSON or `L`+packed, no line framing) that the C6/S3 USB link
+//! sends ([`super::server_payload`]), and the `M!` framing here, which the BLE
+//! links and the classic's UART keep until their own lp-link milestones
+//! (plan `lp-link-usb-cutover`, D3).
+//!
+//! This is the chip-agnostic serialization half of every `M!` firmware's
+//! server write path: take a [`lpc_wire::WireServerMessage`] and produce one framed
 //! wire message in the static frame buffer — the JSON line `\nM!{json}\n`,
-//! or, on a link whose host opted in (the transport holds the choice), the
-//! packed frame `\n 0x00 'P' COBS(packed) 0x00` (`lpc_wire::packed_frame`,
+//! or, on a link whose host opted in (the transport holds the choice and the
+//! link's learned table, [`super::packed_link`]), the learned packed frame
+//! `\n 0x00 'L' COBS(header + packed) 0x00` (`lpc_wire::packed_frame`,
 //! feature `json-pack`). It runs in
 //! **thread context** (the
 //! transport), never in the io task: serialization recursion plus a
@@ -37,16 +44,23 @@ use super::chunked_write::ChunkedWriter;
 /// transport awaits the io task's result before serializing again), so the
 /// single writer (`serialize_server_msg`, thread context) and single reader
 /// (the io task, via [`frame_bytes`]) never overlap.
+///
+/// The USB link transport (`usb_link::usb_link_transport`, lp-link) is the
+/// same shape with no second task: it serializes a proto payload here
+/// ([`super::server_payload`]) and `Link::send` copies it out before its
+/// `send` returns. The one writer that shares the buffer with it — the BLE
+/// mux's radio send — runs in the same server task, one `send` at a time, so
+/// they never overlap either.
 static mut FRAME_BUF: [u8; SERVER_MSG_JSON_BUFFER_SIZE] = [0; SERVER_MSG_JSON_BUFFER_SIZE];
 
 /// A bounds-checked [`SerWrite`] sink over [`FRAME_BUF`].
-struct FrameBufWriter {
-    len: usize,
+pub(crate) struct FrameBufWriter {
+    pub(crate) len: usize,
 }
 
 /// The only way [`FrameBufWriter`] can fail: out of buffer.
 #[derive(Debug)]
-struct FrameBufFull;
+pub(crate) struct FrameBufFull;
 
 impl core::fmt::Display for FrameBufFull {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
@@ -84,6 +98,22 @@ pub fn frame_bytes(len: usize) -> &'static [u8] {
     unsafe { core::slice::from_raw_parts(core::ptr::addr_of!(FRAME_BUF) as *const u8, len) }
 }
 
+/// The whole frame buffer, writable, for a serializer.
+///
+/// # Safety
+///
+/// The caller must be the buffer's single writer by protocol (see
+/// [`FRAME_BUF`]) and must drop the slice before anyone reads the buffer.
+pub(crate) unsafe fn frame_buf_mut() -> &'static mut [u8] {
+    // SAFETY: exclusivity is the caller's contract (above).
+    unsafe {
+        core::slice::from_raw_parts_mut(
+            core::ptr::addr_of_mut!(FRAME_BUF) as *mut u8,
+            SERVER_MSG_JSON_BUFFER_SIZE,
+        )
+    }
+}
+
 /// The serialized-frame budget: the shared `ProjectRead` frame budget plus
 /// room for the `\nM!` prefix and trailing `\n` (4 bytes, padded to 16).
 ///
@@ -91,7 +121,7 @@ pub fn frame_bytes(len: usize) -> &'static [u8] {
 /// budget is in JSON bytes, and a message's packed frame is never longer than
 /// its JSON line (`lpc_wire::packed_frame`'s tests, on recorded traffic).
 const SERVER_MSG_FRAMING_BYTES: usize = 16;
-const SERVER_MSG_JSON_BUFFER_SIZE: usize =
+pub(crate) const SERVER_MSG_JSON_BUFFER_SIZE: usize =
     lpc_wire::PROJECT_READ_FRAME_SERIAL_BUFFER_BYTES + SERVER_MSG_FRAMING_BYTES;
 
 /// Whether this image can write packed frames: the `json-pack` feature.
@@ -99,45 +129,43 @@ const SERVER_MSG_JSON_BUFFER_SIZE: usize =
 /// the server answers a host's opt-in with what this transport can do.
 pub const PACKED_ENCODING_SUPPORTED: bool = cfg!(feature = "json-pack");
 
-/// Serialize `msg` into the static frame buffer in `encoding`, returning the
-/// framed length for the write request.
+/// Serialize `msg` into the static frame buffer, returning the framed length
+/// for the write request: packed against `table` when the link has one
+/// ([`super::packed_link::PackedLink::table_for`]), JSON otherwise.
 ///
-/// [`WireEncoding::Packed`](lpc_wire::WireEncoding::Packed) writes the packed
-/// frame with no measure pass (plan `lp-json-pack`, G-F2). If it does not
-/// fit or cannot be packed, that one message goes out as JSON instead,
-/// measure pass included — never dropped. Without the `json-pack` feature a
-/// packed request is JSON too.
+/// A packed frame is written with no measure pass (plan `lp-json-pack`,
+/// G-F2), and the table learns from it; the caller rolls that back if the
+/// write then fails. If it does not fit or cannot be packed, that one
+/// message goes out as JSON instead, measure pass included — never dropped —
+/// and the table is left as it was. Without the `json-pack` feature every
+/// message is JSON.
 pub fn serialize_server_msg(
     msg: &lpc_wire::WireServerMessage,
-    encoding: lpc_wire::WireEncoding,
+    table: Option<&mut dyn lp_json_pack::LearnStore>,
 ) -> Result<usize, lpc_wire::TransportError> {
     #[cfg(feature = "json-pack")]
-    if encoding == lpc_wire::WireEncoding::Packed {
-        match serialize_server_msg_packed(msg) {
+    if let Some(table) = table {
+        match serialize_server_msg_packed(msg, table) {
             Ok(len) => return Ok(len),
             Err(error) => note_packed_fallback(msg, error),
         }
     }
     #[cfg(not(feature = "json-pack"))]
-    let _ = encoding;
+    let _ = table;
     serialize_server_msg_json(msg)
 }
 
-/// Write `msg` as one packed frame into [`FRAME_BUF`].
+/// Write `msg` as one learned packed frame into [`FRAME_BUF`].
 #[cfg(feature = "json-pack")]
 fn serialize_server_msg_packed(
     msg: &lpc_wire::WireServerMessage,
+    table: &mut dyn lp_json_pack::LearnStore,
 ) -> Result<usize, lpc_wire::WireWriteError> {
     // SAFETY: single writer by protocol (see FRAME_BUF): the transport
     // serializes only between write requests, and the io task reads the
     // buffer only inside one. The slice is dropped before this returns.
-    let buf = unsafe {
-        core::slice::from_raw_parts_mut(
-            core::ptr::addr_of_mut!(FRAME_BUF) as *mut u8,
-            SERVER_MSG_JSON_BUFFER_SIZE,
-        )
-    };
-    let len = lpc_wire::ser_packed_frame_to(buf, msg)?;
+    let buf = unsafe { frame_buf_mut() };
+    let len = lpc_wire::ser_learned_frame_to(buf, table, msg)?;
     debug_assert!(
         len <= lpc_wire::ser_write_json_len(msg) + 4,
         "a packed frame outgrew its JSON line"
@@ -149,7 +177,10 @@ fn serialize_server_msg_packed(
 /// class that never packs cannot flood the link), and let the caller send
 /// JSON.
 #[cfg(feature = "json-pack")]
-fn note_packed_fallback(msg: &lpc_wire::WireServerMessage, error: lpc_wire::WireWriteError) {
+pub(crate) fn note_packed_fallback(
+    msg: &lpc_wire::WireServerMessage,
+    error: lpc_wire::WireWriteError,
+) {
     use core::sync::atomic::{AtomicBool, Ordering::Relaxed};
     static WARNED: AtomicBool = AtomicBool::new(false);
     if WARNED.swap(true, Relaxed) {
@@ -365,5 +396,20 @@ pub fn project_read_event_kind(event: &lpc_wire::ProjectReadEvent) -> &'static s
         },
         lpc_wire::ProjectReadEvent::End { .. } => "end",
         lpc_wire::ProjectReadEvent::Error { .. } => "error",
+    }
+}
+
+#[cfg(test)]
+pub(crate) use frame_buf_test_turn::frame_buf_turn;
+
+#[cfg(test)]
+mod frame_buf_test_turn {
+    extern crate std;
+
+    /// The frame buffer is one static: host tests that serialize into it
+    /// (the radio mux's, the USB link transport's, the payload's) take turns.
+    pub(crate) fn frame_buf_turn() -> std::sync::MutexGuard<'static, ()> {
+        static FRAME_BUF_TURN: std::sync::Mutex<()> = std::sync::Mutex::new(());
+        FRAME_BUF_TURN.lock().unwrap_or_else(|e| e.into_inner())
     }
 }

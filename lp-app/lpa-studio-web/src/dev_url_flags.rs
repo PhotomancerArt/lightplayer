@@ -5,11 +5,11 @@
 //! | flag | what it does |
 //! |---|---|
 //! | `?lens-pause-ms=N` | the editor lens's pause between device reads (`DEVICE_REFRESH_INTERVAL`, 150 ms), clamped to 0–1000 ms — the JSON Pack cadence probe (plan `lp-json-pack`, D2) |
-//! | `?wire=json` | this page does not ask boards to pack their replies, so JSON and packed can be measured on one build |
+//! | `?wire=json` / `?wire=packed` | whether this page asks boards to pack their replies (the default is packed, everywhere), so JSON and packed can be measured on one build |
 //! | `?wire-capture=1` | tee every raw byte the Web Serial read pump hands to Rust into a 16 MiB in-memory buffer; `lpWireCapture()` in the console downloads it as `wire-capture-<unix-ms>.bin` (`lpa_link::device_link::wire_capture`) |
 //! | `?device-log=<level>` | once per link, after the board's hello and the packed-reply opt-in, ask it for `trace`/`debug`/`info`/`warn`/`error` logging (`SetLogLevel`) |
 //!
-//! Validated the way `?capture-sink=` is (`device_events_io.rs`): a query is
+//! Validated the way `?record=` is (`device_events_io.rs`): a query is
 //! user input, a value that does not parse reads as no flag, and the page
 //! says so once in the console. Both are documented beside `?emu=` in
 //! `AGENTS.md` ("Studio against an emulated board").
@@ -28,8 +28,8 @@ use lpc_wire::server::api::LogLevel;
 pub struct DevUrlFlags {
     /// `?lens-pause-ms=N`, unclamped (core clamps).
     pub lens_pause_ms: Option<u64>,
-    /// `?wire=json`.
-    pub wire_json: bool,
+    /// `?wire=json` / `?wire=packed`; `None` takes the default (packed).
+    pub wire: Option<WireChoice>,
     /// `?wire-capture=1`.
     pub wire_capture: bool,
     /// `?device-log=<level>`.
@@ -58,9 +58,8 @@ impl DevUrlFlags {
                     Err(_) => flags.ignored.push(pair.to_string()),
                 },
                 "wire" => match value.trim() {
-                    "json" => flags.wire_json = true,
-                    // The default, spelled out: accepted, changes nothing.
-                    "packed" => flags.wire_json = false,
+                    "json" => flags.wire = Some(WireChoice::Json),
+                    "packed" => flags.wire = Some(WireChoice::Packed),
                     _ => flags.ignored.push(pair.to_string()),
                 },
                 "wire-capture" => match value.trim() {
@@ -77,6 +76,13 @@ impl DevUrlFlags {
         }
         flags
     }
+}
+
+/// A `?wire=` value: the reply encoding the page asks boards for.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum WireChoice {
+    Json,
+    Packed,
 }
 
 /// A `?device-log=` value, case-insensitive.
@@ -109,9 +115,16 @@ pub fn install() {
             pause.as_millis()
         );
     }
-    if flags.wire_json {
-        lpa_link::device_link::wire_reader::set_packed_replies_wanted(false);
-        log::info!("dev flag: this page does not ask boards for packed replies (?wire=json)");
+    match flags.wire {
+        Some(WireChoice::Json) => {
+            lpa_link::device_link::wire_reader::set_packed_replies_wanted(false);
+            log::info!("dev flag: this page does not ask boards for packed replies (?wire=json)");
+        }
+        // The default, spelled out: accepted, changes nothing.
+        Some(WireChoice::Packed) => {
+            lpa_link::device_link::wire_reader::set_packed_replies_wanted(true);
+        }
+        None => {}
     }
     if flags.wire_capture {
         install_wire_capture();
@@ -167,8 +180,11 @@ mod tests {
     fn both_flags_parse_beside_other_query_keys() {
         let flags = DevUrlFlags::parse("?emu=tab&lens-pause-ms=75&wire=json&on=emu");
         assert_eq!(flags.lens_pause_ms, Some(75));
-        assert!(flags.wire_json);
+        assert_eq!(flags.wire, Some(WireChoice::Json));
         assert!(flags.ignored.is_empty());
+
+        let flags = DevUrlFlags::parse("wire=packed");
+        assert_eq!(flags.wire, Some(WireChoice::Packed));
     }
 
     #[test]
@@ -187,6 +203,7 @@ mod tests {
     #[test]
     fn no_flags_is_the_shipped_page() {
         assert_eq!(DevUrlFlags::parse(""), DevUrlFlags::default());
+        assert_eq!(DevUrlFlags::parse("?on=mac:aa"), DevUrlFlags::default());
         assert_eq!(DevUrlFlags::parse("?emu=tab"), DevUrlFlags::default());
     }
 
@@ -194,7 +211,7 @@ mod tests {
     fn unreadable_values_are_ignored_and_named() {
         let flags = DevUrlFlags::parse("lens-pause-ms=fast&wire=ion");
         assert_eq!(flags.lens_pause_ms, None);
-        assert!(!flags.wire_json);
+        assert_eq!(flags.wire, None);
         assert_eq!(flags.ignored, ["lens-pause-ms=fast", "wire=ion"]);
     }
 }

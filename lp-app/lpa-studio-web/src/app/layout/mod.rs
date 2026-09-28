@@ -1,10 +1,16 @@
 pub mod cloud_account;
 #[cfg(feature = "stories")]
 pub(crate) mod cloud_account_stories;
+pub mod link_reconnecting_strip;
+#[cfg(feature = "stories")]
+pub(crate) mod link_reconnecting_strip_stories;
 pub mod local_store_banner;
 #[cfg(feature = "stories")]
 pub(crate) mod local_store_banner_stories;
 pub mod pane_frame;
+pub mod recording_badge;
+#[cfg(feature = "stories")]
+pub(crate) mod recording_badge_stories;
 pub mod rich_object_pane;
 pub mod session_control;
 pub mod site_chrome;
@@ -22,8 +28,10 @@ pub mod version_badge;
 pub(crate) mod version_badge_stories;
 
 pub use cloud_account::CloudAccountControl;
+pub use link_reconnecting_strip::LinkReconnectingStrip;
 pub use local_store_banner::LocalStoreBanner;
 pub use pane_frame::PaneFrame;
+pub use recording_badge::RecordingBadge;
 pub use rich_object_pane::RichObjectPane;
 pub use session_control::{
     ChromeSessionControl, ControlSegment, SessionChangesPanel, SessionDevicePanel,

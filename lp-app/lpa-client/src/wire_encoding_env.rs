@@ -3,12 +3,12 @@
 //! `transport_emu_serial`).
 //!
 //! Unset (or `packed`), a transport asks for JSON Pack (plan `lp-json-pack`)
-//! as soon as the board's hello says it can pack with this build's
-//! dictionary, and asks again when the board falls back to JSON
-//! ([`lpc_wire::PackOptIn`]). `LP_WIRE_ENCODING=json` never asks, so the
-//! board keeps writing today's `M!{json}` lines: for debugging a link with
-//! eyes, a serial monitor or a text capture. Either way the reader accepts
-//! both forms.
+//! as soon as the board's hello says it can pack with this build's pack
+//! format: once per lp-link session on a USB link ([`lpc_wire::WireLinkPort`]),
+//! and again after a fallback on fw-emu's `M!` pipe ([`lpc_wire::PackOptIn`]).
+//! `LP_WIRE_ENCODING=json` never asks, so the board keeps writing JSON
+//! messages: for debugging a link with eyes, or comparing the two forms.
+//! Either way the reader accepts both forms.
 //!
 //! ```text
 //! LP_WIRE_ENCODING=json lp-cli upload projects/test/basic serial:auto

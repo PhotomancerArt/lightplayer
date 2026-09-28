@@ -4,8 +4,10 @@
 // sits on, and it is deliberately NOT a Web Serial thing: it is the board's
 // two channels — bytes and control — plus the flash/snapshot/probe getters
 // the sibling effort's eight-point contract asks for. The polyfill turns it
-// into a `SerialPort`; a `ByteStreamLink` could turn the same object into a
-// device card without either side learning about the other.
+// into a `SerialPort`; a byte-pipe link could turn the same object into a
+// device card without either side learning about the other. The bytes are
+// the board's lp-link (COBS frames beside raw boot text) and pass through
+// untouched: whoever holds the port reads them with an lp-link end.
 //
 // TWO BACKINGS, ONE SHAPE — AND BOTH NOW EXIST. This file ships the
 // **native** one: `lp-cli emu serve`'s WebSocket door (`GET /boards`,

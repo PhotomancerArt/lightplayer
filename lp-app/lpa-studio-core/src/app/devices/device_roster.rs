@@ -495,6 +495,39 @@ mod tests {
         assert_eq!(scope_label(Scope::PendingLink(LinkId(1))), "pending-link:1");
     }
 
+    /// Ticket 2026-09-27-busy-port-blocks-identify: two granted ports, one
+    /// held by another process. The blocking half of this bug is already
+    /// fixed on main (each link gets its own executor and its own Identify,
+    /// so one that never opens cannot pause the other's) — this is its
+    /// regression guard, straight from the model that proves it, so no
+    /// future refactor can quietly re-couple the two links' identification.
+    #[test]
+    fn a_busy_ports_failed_open_does_not_delay_the_other_port() {
+        use lpa_devices::replay::{Expect, Replay, Script, Step};
+        use lpa_devices::roster::RosterConfig;
+
+        let script = Script::new()
+            .at(0, Step::attach(1, "usb-busy"))
+            .at(0, Step::attach(2, "usb-lab"))
+            // Link 1's port is held by another process: the open fails.
+            .at(
+                5,
+                Step::Error {
+                    link: 1,
+                    message: "port busy".to_string(),
+                },
+            )
+            // Link 2 opens and hellos cleanly, well inside identify's 5 s
+            // deadline.
+            .at(10, Step::opened(2))
+            .at(20, Step::hello(2).uid("dev_lab"))
+            .expect(Expect::new().devices(1).device_state("Ready").pending(1));
+
+        Replay::new(RosterConfig::default())
+            .run(&script.into_fixture("a busy port does not delay the other port"))
+            .expect("scenario");
+    }
+
     fn offline_view(id: u64, title: &str, board_id: Option<&str>) -> DeviceView {
         DeviceView {
             id: DeviceId(id),
@@ -511,6 +544,7 @@ mod tests {
             degraded: None,
             loaded_project: lpa_devices::view::LoadedProject::Unknown,
             engine_fps: None,
+            link_counters: None,
             can_receive_project: false,
             can_remove_project: false,
             activity: None,
@@ -538,6 +572,7 @@ mod tests {
             degraded: None,
             loaded_project: lpa_devices::view::LoadedProject::Empty,
             engine_fps: None,
+            link_counters: None,
             can_receive_project: true,
             can_remove_project: false,
             activity: None,

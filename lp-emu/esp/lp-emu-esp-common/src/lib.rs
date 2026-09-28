@@ -49,6 +49,7 @@ pub mod elf;
 pub mod engine;
 pub mod host;
 pub mod ip;
+pub mod link_faults;
 pub mod periph;
 pub mod pins;
 pub mod regfile;

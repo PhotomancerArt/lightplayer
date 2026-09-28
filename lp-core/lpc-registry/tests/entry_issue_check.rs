@@ -30,6 +30,62 @@ fn broken_entry_among_dormant_siblings_is_named() {
 }
 
 #[test]
+fn entry_with_two_broken_nodes_yields_one_issue_naming_both_reasons() {
+    let mut scenario = RegistryScenario::empty();
+    scenario.write_container_manifest();
+    scenario.write_file(
+        "/module.json",
+        r#"{
+  "kind": "Module",
+  "nodes": {
+    "playlist": { "ref": "./playlist.json" }
+  }
+}"#,
+    );
+    scenario.write_file(
+        "/playlist.json",
+        r#"{
+  "kind": "Playlist",
+  "idle_entry": 1,
+  "entries": {
+    "1": { "name": "broken", "node": { "ref": "./broken/module.json" } }
+  }
+}"#,
+    );
+    scenario.write_file(
+        "/broken/module.json",
+        r#"{
+  "kind": "Module",
+  "nodes": {
+    "a": { "ref": "./a.json" },
+    "b": { "ref": "./b.json" }
+  }
+}"#,
+    );
+    // Both children are broken (invalid JSON), so the entry has two broken
+    // descendant nodes.
+    scenario.write_file("/broken/a.json", "{ this is not valid json");
+    scenario.write_file("/broken/b.json", "{ also not valid json");
+
+    scenario.load_root("/module.json");
+    scenario.make_every_entry_resident();
+
+    let issues = scenario.registry().entry_issues();
+    assert_eq!(issues.len(), 1, "issues: {issues:?}");
+    let issue = &issues[0];
+    assert_eq!(issue.entry, 1);
+    assert_eq!(issue.name.as_deref(), Some("broken"));
+    assert!(
+        issue.message.contains("could not be parsed"),
+        "message: {}",
+        issue.message
+    );
+    // Both reasons are present, not just the last one seen.
+    let reason_count = issue.message.matches("could not be parsed").count();
+    assert_eq!(reason_count, 2, "message: {}", issue.message);
+}
+
+#[test]
 fn a_dormant_entry_left_dormant_is_not_reported() {
     let (scenario, _) = three_entry_project_with_broken_entry_two();
     // At load, only the idle entry (1) is resident; entries 2 (broken) and 3

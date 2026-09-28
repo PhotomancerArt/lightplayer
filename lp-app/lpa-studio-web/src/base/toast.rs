@@ -67,6 +67,15 @@ impl Toasts {
     }
 
     fn push(&mut self, text: String, tone: ToastTone) {
+        // Into the session recorder (a no-op where nothing installed one).
+        crate::device_events_io::record(lpa_studio_core::DeviceEventKind::Toast {
+            level: match tone {
+                ToastTone::Info => "info",
+                ToastTone::Warn => "warn",
+            }
+            .to_string(),
+            message: text.clone(),
+        });
         let seq = next_seq(self.slot.peek().as_ref());
         self.slot.set(Some(ToastMessage { text, tone, seq }));
     }

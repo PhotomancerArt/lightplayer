@@ -34,11 +34,14 @@ pub mod manifest;
 pub mod output_error;
 pub mod registry;
 pub mod resource;
+pub mod status_led;
 
 pub use output_error::OutputError;
 
 pub use drivers::button::button_debouncer::ButtonDebouncer;
-pub use drivers::button::button_driver::{ButtonConfig, ButtonDriver, ButtonInput};
+pub use drivers::button::button_driver::{
+    ButtonActive, ButtonConfig, ButtonDriver, ButtonInput, ButtonPull,
+};
 pub use drivers::button::button_event::{ButtonEvent, ButtonEventKind};
 pub use drivers::button::virtual_button::VirtualButton;
 pub use drivers::button::virtual_button_driver::VirtualButtonDriver;
@@ -83,3 +86,5 @@ pub use registry::hw_registry::HwRegistry;
 pub use resource::hw_address::HwAddress;
 pub use resource::hw_capability::HwCapability;
 pub use resource::hw_resource::HwResource;
+pub use status_led::board_status_led::{BoardStatusLed, board_status_led_for};
+pub use status_led::status_led_state::StatusLedState;

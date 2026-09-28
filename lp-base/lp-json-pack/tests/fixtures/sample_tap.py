@@ -36,8 +36,12 @@ for idx,(d,ln) in enumerate(lines):
 # quotas per class
 quota={('<','projectRead.events'):72,('>','projectRead.handle'):48,('<','heartbeat.fps'):24,('>','filesystem.writeChunk'):1,
        ('>','projectCommand.command.panel_write'):8,('<','projectCommand.response'):6}
+# Classes never sampled: they carry key material (a browser's access key rides
+# `accessAdd`'s entry as "k"), and a committed fixture holds no secrets.
+excluded={('>','accessAdd.entry')}
 chosen=[]
 for key,v in sorted(by.items()):
+    if key in excluded: continue
     q=quota.get(key,3)
     if len(v)<=q: pick=v
     else:

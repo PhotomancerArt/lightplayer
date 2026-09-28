@@ -261,6 +261,27 @@ test_ble = ["ble"]
 # src/tests/test_ble_coex.rs). Never shipped.
 test_ble_coex = ["test_ble", "esp-radio/coex"]
 
+# The comms lab (plan `reliable-device-link` M3): `lp-link` over this chip's
+# own pipes, outside the product — one embassy task per pipe runs the lab's
+# board half (echo, board stream, stats, stall/log/panic on command), and
+# `log`/printf ride the link's log channel. Host half: `lp-cli link lab`,
+# `lp-cli/tests/emu_link_lab.rs`, `spikes/serial-lab` and `spikes/ble-lab`.
+# See `src/tests/comms_lab/mod.rs`. Never shipped.
+#
+# `lpc-shared` for `recovery/panic_path.rs`, as `test_rmt` (M5 P1, DD37).
+test_comms_lab = ["dep:lp-link", "lpc-shared"]
+# The same with the BLE NUS pipe beside USB (datagram framing, one frame per
+# notification / write).
+test_comms_lab_ble = ["test_comms_lab", "ble"]
+# The same with a WiFi pipe beside USB: UDP datagrams, one frame each, on
+# the network named at BUILD time by LP_LAB_WIFI_SSID / LP_LAB_WIFI_PASS
+# (`option_env!`; never committed, never logged). See comms_lab/wifi_pipe.rs.
+test_comms_lab_wifi = ["test_comms_lab", "radio", "dep:embassy-net", "dep:static_cell", "dep:heapless"]
+# The A/B control for COBS-FF: USB frames in plain COBS, so 0xFF reaches the
+# wire (pair with `lp-cli link lab --plain-cobs`). Measures what Chromium's
+# macOS Web Serial path does to a link that does not escape 0xFF.
+test_comms_lab_plain_cobs = ["test_comms_lab"]
+
 # FIXTURE builds — test scaffolding, never shipped. Make this CURRENT
 # build misreport its hello so a current Studio classifies it Incompatible,
 # reproducing the s4 device scenario from source instead of from an
@@ -287,13 +308,13 @@ fixture-old-proto = ["lpa-server/fixture-old-proto"]
 #   cargo build --profile release-esp32 --features esp32c6,server,radio,spike_uart0_link
 spike_uart0_link = []
 fixture-no-hello = ["lpa-server/fixture-no-hello", "fw-core/fixture-no-hello"]
-# Emulator FIXTURE, never shipped: the io_task writes through esp-hal's raw
-# TX half, WITHOUT the USB-Serial-JTAG IN-endpoint gate
+# Emulator FIXTURE, never shipped: the USB link task writes through esp-hal's
+# raw TX half, WITHOUT the USB-Serial-JTAG IN-endpoint gate
 # (fw_esp32_common::serial::in_endpoint) — the write path as it was before
-# PR #795. Exists so the emulated C6 can show the packed-frame loss the gate
-# fixes, under the link model's free-lag hypothesis
-# (lp-cli/tests/emu_usb_free_lag.rs;
+# PR #795. Exists so the emulated C6 can show the loss the gate fixes, under
+# the link model's free-lag hypothesis (lp-cli/tests/emu_usb_free_lag.rs;
 # docs/defects/2026-09-24-the-real-c6-link-loses-bytes-inside-a-packed-frame.md).
+# Since the link runs lp-link that loss is resent and counted, not seen.
 # Not `test_*`: that prefix selects a harness entrypoint instead of the app.
 fixture-no-in-endpoint-gate = []
 
@@ -329,9 +350,16 @@ critical-section = "1"
 enumset = "1"
 
 fw-core = { path = "../fw-core", default-features = false }
-fw-esp32-common = { path = "../fw-esp32-common" }
+# `usb-link`: the host link on lp-link (plan `lp-link-usb-cutover`). Always
+# on: a harness that never spawns the link task links none of it.
+fw-esp32-common = { path = "../fw-esp32-common", features = ["usb-link"] }
 fw-checks = { path = "../fw-checks", default-features = false, features = ["check-shader-compile"], optional = true }
 lps-q32 = { path = "../../lp-shader/lps-q32", default-features = false }
+# The comms lab's link layer (`test_comms_lab`): no_std + alloc, with the lab
+# protocol and the `log` adapter for its log ring.
+lp-link = { path = "../../lp-base/lp-link", default-features = false, features = ["lab", "log"], optional = true }
+# The comms lab's WiFi pipe (`test_comms_lab_wifi`): IPv4, DHCP, UDP.
+embassy-net = { version = "0.9.1", default-features = false, features = ["proto-ipv4", "medium-ethernet", "dhcpv4", "udp"], optional = true }
 # The portable WS281x driver core. `default-features = false` drops its host
 # `mock` backend (and the `alloc` it needs) — firmware brings its own `RmtHw`.
 # `isr-in-ram`: the refill path lives in `.rwtext` (IRAM). Single-core, so not
@@ -359,7 +387,7 @@ libm = "0.2"
 # (RV32 → lpvm-native::rt_jit on this firmware). No Cargo feature.
 lp-gfx-lpvm = { path = "../../lp-gfx/lp-gfx-lpvm", default-features = false, optional = true }
 # fw-esp32c6 deliberately opts into every node kind it has today — all
-# eight `lpa-server` node-* gates (which forward to the matching
+# nine `lpa-server` node-* gates (which forward to the matching
 # `lpc-engine` gate) — on top of the real `lp-gfx-lpvm` compiler backend
 # selected below by target architecture.
 # This is not a constrained build; it exists so a genuinely constrained
@@ -368,6 +396,7 @@ lp-gfx-lpvm = { path = "../../lp-gfx/lp-gfx-lpvm", default-features = false, opt
 # `lpc-engine/README.md` for what each gate is worth in flash.
 lpa-server = { path = "../../lp-app/lpa-server", default-features = false, features = [
     "node-button",
+    "node-power-button",
     "node-radio",
     "node-fluid",
     "node-fixture",

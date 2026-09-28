@@ -1,0 +1,41 @@
+# What lp-link costs in flash on the ESP32-C6 target, measured honestly: a
+# tiny no_std riscv32imac binary, linked with LTO at opt-level z, once per
+# variant, against a baseline that already has alloc and core::fmt (as every
+# firmware image does). `just link-size` builds each and prints the deltas.
+#
+# Its own workspace: it targets riscv32 only and must not join the host build.
+[package]
+name = "lp-link-size-probe"
+version = "0.0.0"
+edition = "2024"
+license = "AGPL-3.0-or-later"
+publish = false
+
+[workspace]
+
+[features]
+base = []
+noarq = []
+sw = []
+gbn = []
+sr = []
+# The same variant with CRC-16 as the only checksum the probe uses.
+crc16 = []
+# Export the checksum functions as symbols, for reading their inner loops.
+crcfns = ["base"]
+
+[dependencies]
+lp-link = { path = ".." }
+
+[[bin]]
+name = "lp-link-size-probe"
+path = "src/main.rs"
+test = false
+bench = false
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+panic = "abort"
+debug = false
