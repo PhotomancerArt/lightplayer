@@ -1,16 +1,46 @@
-use std::cell::RefCell;
+//! The Rust side of `browser_serial.js`: Web Serial ports by id, and each
+//! open port's lp-link end.
+//!
+//! # One link per port, serviced by its own loop
+//!
+//! Since `WIRE_PROTO_VERSION` 30 the board's USB serial link is an lp-link
+//! (plan `lp2025/2026-09-27-0215-lp-link-usb-cutover`, P4). Every open port
+//! keeps ONE [`LinkPortService`] ([`PORTS`]) for as long as the controller's
+//! buffer generation lasts; a reopen is a new generation, so a new link with
+//! a new nonce, and the board starts a new session with it. A loop per port
+//! (`link_port_edge::spawn_service_loop`, at most every
+//! [`SERVICE_TICK_CAP`]) pulls the controller's bytes, feeds the link, and
+//! writes its frames with a BYTES write (`writeBytes`) — resends and
+//! acknowledgements happen whether or not anyone is reading. Every
+//! [`take_reads`] services the port once more on the way, and so does every
+//! chunk the read pump buffers (`onBytes`): a hidden tab throttles the loop's
+//! timer to a second or worse, but not a stream read, so the board's frames
+//! are still acknowledged promptly and it does not give up on the session.
+//!
+//! Above the link nothing changed shape (D1): [`take_reads`] hands out the
+//! same [`WireRead`]s the `M!` reader did, to whichever drainer holds the
+//! port (the model's pump, or a borrowed conversation — D2), and a request
+//! goes out as one link message ([`send_client_json`]) instead of an `M!`
+//! line. The capture tee (`?wire-capture=1`) and the recorder tap still see
+//! every raw byte, both ways.
+
+use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
+use std::rc::Rc;
 
 use js_sys::{Array, Promise, Reflect, Uint8Array};
 use lpa_devices::link::ResetKind;
+use lpc_wire::lp_link::Micros;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::{JsFuture, spawn_local};
 
 use crate::LinkError;
-use crate::device_link::wire_capture::capture_wire_bytes;
-use crate::device_link::wire_reader::{
-    WireRead, WireReader, device_log_level, packed_replies_wanted,
+use crate::device_link::link_port_edge::{
+    SERVICE_TICK_CAP, now_micros, random_nonce, spawn_service_loop,
 };
+use crate::device_link::link_port_service::LinkPortService;
+use crate::device_link::wire_capture::capture_wire_bytes;
+use crate::device_link::wire_reader::{WireRead, device_log_level, packed_replies_wanted};
 use crate::device_link::wire_tap::{WireTapDir, tap_wire};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -71,11 +101,14 @@ extern "C" {
     #[wasm_bindgen(js_name = openPort)]
     fn js_open(id: u32, baud_rate: u32, reset: bool, reset_kind: &str) -> Promise;
 
-    #[wasm_bindgen(js_name = writeLine)]
-    fn js_write_line(id: u32, line: &str) -> Promise;
+    #[wasm_bindgen(js_name = writeBytes, catch)]
+    fn js_write_bytes(id: u32, bytes: &[u8]) -> Result<Promise, JsValue>;
 
-    #[wasm_bindgen(js_name = takeBytes)]
-    fn js_take_bytes(id: u32) -> JsValue;
+    #[wasm_bindgen(js_name = takeBytes, catch)]
+    fn js_take_bytes(id: u32) -> Result<JsValue, JsValue>;
+
+    #[wasm_bindgen(js_name = onBytes, catch)]
+    fn js_on_bytes(id: u32, callback: &Closure<dyn FnMut()>) -> Result<js_sys::Function, JsValue>;
 
     #[wasm_bindgen(js_name = takeErrors)]
     fn js_take_errors(id: u32) -> Array;
@@ -190,18 +223,35 @@ pub async fn open(
     ))
     .await
     .map_err(js_error)?;
+    // The controller cleared its buffer (a new generation): this services
+    // the port once, which makes its link — a fresh nonce, so the board
+    // starts a new session — and starts the port's loop.
+    service(id);
     Ok(BrowserSerialProtocolOpenResult {
         logs: reflect_string_array(&value, "logs")?,
         progress: reflect_progress_array(&value, "progress")?,
     })
 }
 
-pub async fn write_line(id: u32, line: &str) -> Result<(), LinkError> {
-    tap_wire(WireTapDir::Tx, "serial", id, line.as_bytes());
-    JsFuture::from(js_write_line(id, line))
-        .await
-        .map(|_| ())
-        .map_err(js_error)
+/// Queue one request (its JSON, no `M!`, no newline) on the port's link and
+/// write what the link has to send now. Errors when the port is not open or
+/// the link will not take the message (its send budget is full, or the
+/// message is larger than a link message may be).
+pub fn send_client_json(id: u32, json: &str) -> Result<(), LinkError> {
+    if matches!(service(id), Serviced::Gone | Serviced::Closed) {
+        return Err(LinkError::other("Serial port is not open."));
+    }
+    PORTS
+        .with(|ports| {
+            ports
+                .borrow_mut()
+                .get_mut(&id)
+                .map(|port| port.service.send_client_json(json))
+        })
+        .unwrap_or_else(|| Err("Serial port is not open.".to_string()))
+        .map_err(LinkError::other)?;
+    service(id);
+    Ok(())
 }
 
 #[wasm_bindgen]
@@ -211,101 +261,202 @@ extern "C" {
 }
 
 thread_local! {
-    /// One reader per port session, shared by every drainer of that port —
-    /// the model's link pump and, while it holds the wire, a conversation
-    /// (the editor lens, a push). See `device_link::wire_reader`.
-    static PORT_READERS: RefCell<HashMap<u32, PortReader>> = RefCell::new(HashMap::new());
+    /// One link per open port, shared by every drainer of that port — the
+    /// model's link pump and, while it holds the wire, a conversation (the
+    /// editor lens, a push). See the module docs.
+    static PORTS: RefCell<HashMap<u32, ServedPort>> = RefCell::new(HashMap::new());
 }
 
-/// A port's reader, the controller buffer generation it is reading, and the
-/// notes it has made that the link pump has not yet taken.
-struct PortReader {
+/// A port's link, the controller buffer generation it is for, and whether
+/// its loop is running.
+struct ServedPort {
     generation: Option<u32>,
-    reader: WireReader,
-    notes: Vec<String>,
+    service: LinkPortService,
+    running: Rc<Cell<bool>>,
+    /// The read pump's "bytes arrived" subscription, once made.
+    wake: Option<WakeOnBytes>,
 }
 
-/// Everything the port has read since the last drain, split: console lines,
-/// wire messages (packed or not) and undeliverable frames, in order.
-///
-/// The JS read pump hands over bytes; this is the only place they become
-/// lines. The packed-reply opt-in rides along: when the port's reader asks
-/// for it (after a hello that says the board packs with this build's
-/// dictionary, and again after a fallback), the request is written from
-/// here, and what it concluded is queued for [`take_wire_notes`].
-pub fn take_reads(id: u32) -> Vec<WireRead> {
-    let taken = js_take_bytes(id);
+/// A subscription to the controller's read pump that services the port.
+struct WakeOnBytes {
+    callback: Option<Closure<dyn FnMut()>>,
+    stop: js_sys::Function,
+}
+
+impl Drop for WakeOnBytes {
+    /// Unsubscribe, and LEAK the closure rather than free it: the port can be
+    /// dropped from inside its own callback (a service pass that finds the
+    /// session gone), and freeing a closure JS is still running is undefined.
+    /// One small closure per port session.
+    fn drop(&mut self) {
+        let _ = self.stop.call0(&JsValue::NULL);
+        if let Some(callback) = self.callback.take() {
+            callback.forget();
+        }
+    }
+}
+
+/// A link for a newly opened port: a fresh nonce, and the page's wire flags
+/// as they are now.
+fn fresh_service() -> LinkPortService {
+    LinkPortService::new(random_nonce(), packed_replies_wanted(), device_log_level())
+}
+
+/// What one service pass found.
+enum Serviced {
+    /// No such session in the page (forgotten): the port's link is dropped.
+    Gone,
+    /// The session exists but the port is not open for traffic.
+    Closed,
+    /// Open; come back within this long.
+    Open(Micros),
+}
+
+/// One pass over a port: pull what the controller read, feed the link, and
+/// write the frames it has to send. See the module docs.
+fn service(id: u32) -> Serviced {
+    let Ok(taken) = js_take_bytes(id) else {
+        PORTS.with(|ports| ports.borrow_mut().remove(&id));
+        return Serviced::Gone;
+    };
     let generation = reflect_value(&taken, "generation")
         .ok()
         .and_then(|value| value.as_f64())
         .map(|value| value as u32);
+    let open = reflect_value(&taken, "open")
+        .ok()
+        .and_then(|value| value.as_bool())
+        .unwrap_or(false);
     let bytes = reflect_value(&taken, "bytes")
         .ok()
         .map(|value| Uint8Array::new(&value).to_vec())
         .unwrap_or_default();
-    // Dev-only tee (`?wire-capture=1`): every byte the pump read, before any
-    // splitting, in order. A no-op unless the page turned it on.
-    if capture_wire_bytes(&bytes) {
-        console_warn(&format!(
-            "wire capture is full ({} bytes); dropping what the port reads from here on",
-            crate::device_link::wire_capture::WIRE_CAPTURE_CAP
-        ));
+    if !bytes.is_empty() {
+        // Dev-only tee (`?wire-capture=1`): every byte the pump read, before
+        // the link sees it, in order. A no-op unless the page turned it on.
+        if capture_wire_bytes(&bytes) {
+            console_warn(&format!(
+                "wire capture is full ({} bytes); dropping what the port reads from here on",
+                crate::device_link::wire_capture::WIRE_CAPTURE_CAP
+            ));
+        }
+        tap_wire(WireTapDir::Rx, "serial", id, &bytes);
     }
-    tap_wire(WireTapDir::Rx, "serial", id, &bytes);
-    let now_ms = js_sys::Date::now() as u64;
-    let mut reads = Vec::new();
-    let mut sends = Vec::new();
-    PORT_READERS.with(|readers| {
-        let mut readers = readers.borrow_mut();
-        let port = readers.entry(id).or_insert_with(|| PortReader {
+    let now = now_micros();
+    let (frames, wake, running) = PORTS.with(|ports| {
+        let mut ports = ports.borrow_mut();
+        let port = ports.entry(id).or_insert_with(|| ServedPort {
             generation,
-            reader: WireReader::new(packed_replies_wanted())
-                .with_device_log_level(device_log_level()),
-            notes: Vec::new(),
+            service: fresh_service(),
+            running: Rc::default(),
+            wake: None,
         });
         if port.generation != generation {
-            // The controller cleared its buffer: a (re)open. What was half
-            // read, and what the board had agreed, belong to the previous
-            // port generation.
+            // The controller cleared its buffer: a (re)open. The session,
+            // what was half read and what the board had agreed belong to the
+            // previous port generation.
             port.generation = generation;
-            port.reader =
-                WireReader::new(packed_replies_wanted()).with_device_log_level(device_log_level());
+            port.service = fresh_service();
         }
-        let notes = &mut port.notes;
-        port.reader.push(&bytes, now_ms, |read| match read {
-            WireRead::Send(request) => sends.push(request),
-            WireRead::Note(note) => notes.push(note),
-            read => reads.push(read),
-        });
+        port.service.on_bytes(now, &bytes);
+        let mut frames = Vec::new();
+        if open {
+            port.service
+                .transmit(now, |frame| frames.push(frame.to_vec()));
+        }
+        (
+            frames,
+            port.service.wake_in(now, SERVICE_TICK_CAP),
+            Rc::clone(&port.running),
+        )
     });
-    for request in sends {
-        let Ok(json) = lpc_wire::json::to_string(&request) else {
-            continue;
-        };
-        // Fire and forget, like every write the pump does not own: a port
-        // that cannot take it is dying, and the read pump says so.
-        spawn_local(async move {
-            let _ = write_line(id, &format!("M!{json}\n")).await;
-        });
+    // No borrow is held past here: the writes and the loop call back into
+    // JS, and the loop into `service`.
+    for frame in frames {
+        write_frame(id, &frame);
     }
-    reads
+    if !open {
+        return Serviced::Closed;
+    }
+    wake_on_bytes(id);
+    spawn_service_loop(running, move || match service(id) {
+        Serviced::Open(wake) => Some(wake),
+        Serviced::Gone | Serviced::Closed => None,
+    });
+    Serviced::Open(wake)
 }
 
-/// What the port's reader has concluded about the link's encoding since the
-/// last ask (at most one note per change). Drained by the model's link pump.
-pub fn take_wire_notes(id: u32) -> Vec<String> {
-    PORT_READERS.with(|readers| {
-        readers
+/// Subscribe the port to its read pump's "bytes arrived", once per port
+/// session (see the module docs).
+fn wake_on_bytes(id: u32) {
+    let subscribed = PORTS.with(|ports| {
+        ports
+            .borrow()
+            .get(&id)
+            .is_none_or(|port| port.wake.is_some())
+    });
+    if subscribed {
+        return;
+    }
+    let callback = Closure::<dyn FnMut()>::new(move || {
+        service(id);
+    });
+    let Ok(stop) = js_on_bytes(id, &callback) else {
+        return;
+    };
+    let wake = WakeOnBytes {
+        callback: Some(callback),
+        stop,
+    };
+    PORTS.with(|ports| {
+        if let Some(port) = ports.borrow_mut().get_mut(&id) {
+            port.wake = Some(wake);
+        }
+    });
+}
+
+/// Write one link frame. Fire and forget: the controller's writer queues
+/// writes in call order, and a port that cannot take one is dying — the
+/// read pump says so (`takeErrors`), and the link resends what was lost.
+fn write_frame(id: u32, frame: &[u8]) {
+    tap_wire(WireTapDir::Tx, "serial", id, frame);
+    if let Ok(promise) = js_write_bytes(id, frame) {
+        spawn_local(async move {
+            let _ = JsFuture::from(promise).await;
+        });
+    }
+}
+
+/// Everything the port's link has read since the last drain, in order:
+/// console lines, wire messages (packed or not) and link resets. Services
+/// the port first, so a drainer never waits a tick for bytes already in the
+/// page.
+pub fn take_reads(id: u32) -> Vec<WireRead> {
+    service(id);
+    PORTS.with(|ports| {
+        ports
             .borrow_mut()
             .get_mut(&id)
-            .map(|port| std::mem::take(&mut port.notes))
+            .map(|port| port.service.take_reads())
             .unwrap_or_default()
     })
 }
 
-/// [`take_reads`], as the whole lines the pre-packing wire had: a message is
-/// its `M!{json}` line whichever form it came in, and an undeliverable frame
-/// is dropped (the model's link reports those; this is the legacy
+/// What the port's link has said about itself since the last ask (up, a
+/// stall, the packed opt-in's outcome — one note per change). Drained by the
+/// model's link pump, or by the editor lens's io while it holds the wire.
+pub fn take_wire_notes(id: u32) -> Vec<String> {
+    PORTS.with(|ports| {
+        ports
+            .borrow_mut()
+            .get_mut(&id)
+            .map(|port| port.service.take_notes())
+            .unwrap_or_default()
+    })
+}
+
+/// [`take_reads`], as whole lines: a message is its `M!{json}` line whichever
+/// form it came in, and a reset is dropped (this is the legacy
 /// `DeviceSession`'s line tap).
 pub fn take_lines(id: u32) -> Vec<String> {
     take_reads(id)
@@ -323,6 +474,8 @@ pub fn take_errors(id: u32) -> Vec<String> {
 }
 
 pub async fn release(id: u32) -> Result<(), LinkError> {
+    // The session ends with the port: whatever comes next opens a new one.
+    PORTS.with(|ports| ports.borrow_mut().remove(&id));
     JsFuture::from(js_release(id))
         .await
         .map(|_| ())
@@ -353,12 +506,13 @@ pub async fn reset_and_read(
 /// `Ok(false)` = the grant SURVIVES: the id is unknown, or the browser has
 /// no `forget()` — callers decide whether that deserves a warning.
 pub async fn forget(id: u32) -> Result<bool, LinkError> {
-    PORT_READERS.with(|readers| readers.borrow_mut().remove(&id));
+    PORTS.with(|ports| ports.borrow_mut().remove(&id));
     let value = JsFuture::from(js_forget_port(id)).await.map_err(js_error)?;
     Ok(value.as_bool().unwrap_or(false))
 }
 
 pub async fn close(id: u32) -> Result<(), LinkError> {
+    PORTS.with(|ports| ports.borrow_mut().remove(&id));
     JsFuture::from(js_close(id))
         .await
         .map(|_| ())

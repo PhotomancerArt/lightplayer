@@ -623,6 +623,24 @@ label:has(> input:not(:disabled)) {
     color: var(--studio-status-neutral-text);
 }
 
+/* The "Reconnecting…" strip's icon (plan D13): a slow turn, calm rather
+   than urgent; still for reduced motion. */
+.ux-reconnect-spin svg {
+    animation: ux-reconnect-turn 2.4s linear infinite;
+}
+
+@keyframes ux-reconnect-turn {
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .ux-reconnect-spin svg {
+        animation: none;
+    }
+}
+
 @keyframes ux-play-blink {
     50% {
         opacity: 0.35;

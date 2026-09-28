@@ -92,6 +92,10 @@ pub struct DeviceView {
     /// window (the card's live-feed pill: "live · N fps"). `None` until a
     /// heartbeat carried one; a window reset drops it, honestly.
     pub engine_fps: Option<u16>,
+    /// The board's link counters off the latest heartbeat this window (the
+    /// card's link section). `None` until a heartbeat carried them, and on
+    /// a link that reports none.
+    pub link_counters: Option<crate::LinkCounterFacts>,
     /// Whether a project could be sent to this board right now: a
     /// proto-compatible LightPlayer, on a link, with nothing else running.
     /// The empty face's primary verb is drawn only when this is true.
@@ -336,6 +340,7 @@ pub fn device_view(device: &Device, now: Millis) -> DeviceView {
             && device.activity.is_none(),
         loaded_project: loaded,
         engine_fps: device.evidence.engine_fps(),
+        link_counters: device.evidence.link_counters(),
         // An OPEN port, not merely an attached one: the push conversation
         // talks over this port, and a verb that could only fail is worse
         // than no verb. (The fold already implies it — closing a port
@@ -382,6 +387,10 @@ pub enum FirmwareFace {
     },
     /// Speaks the framing, never said hello (pre-hello firmware).
     NoHello,
+    /// LightPlayer firmware from before this Studio's link: it runs, but it
+    /// cannot say hello in a form Studio hears, so it needs a flash (which
+    /// keeps its project). `proto` is its boot marker's, when heard.
+    OlderLightPlayer { proto: Option<u32> },
     /// Blank or erased flash (the invalid-header boot loop).
     Blank,
     /// Parked in the ROM downloader.
@@ -411,7 +420,12 @@ impl FirmwareFace {
     pub fn wants_flash(&self) -> bool {
         matches!(
             self,
-            Self::NoHello | Self::Blank | Self::Bootloader | Self::Foreign { .. } | Self::Silent
+            Self::NoHello
+                | Self::OlderLightPlayer { .. }
+                | Self::Blank
+                | Self::Bootloader
+                | Self::Foreign { .. }
+                | Self::Silent
         )
     }
 
@@ -474,6 +488,9 @@ fn firmware_face(evidence: &Evidence) -> FirmwareFace {
         Classification::Incompatible {
             reason: IncompatibleReason::NoHello,
         } => FirmwareFace::NoHello,
+        Classification::OlderLightPlayer { proto } => {
+            FirmwareFace::OlderLightPlayer { proto: *proto }
+        }
         Classification::Blank => FirmwareFace::Blank,
         Classification::Bootloader => FirmwareFace::Bootloader,
         Classification::Foreign { label } => FirmwareFace::Foreign {
@@ -666,6 +683,7 @@ fn classification_label(classification: &Classification) -> String {
         Classification::Incompatible {
             reason: IncompatibleReason::NoHello,
         } => "No LightPlayer hello — pre-hello firmware".to_string(),
+        Classification::OlderLightPlayer { .. } => "Older LightPlayer firmware".to_string(),
         Classification::Blank => "Blank flash — needs firmware".to_string(),
         Classification::Bootloader => "Waiting in ROM download mode".to_string(),
         Classification::Foreign { label: Some(label) } => format!("Running {label}"),
@@ -791,6 +809,8 @@ mod tests {
             Classification::Incompatible {
                 reason: IncompatibleReason::NoHello,
             },
+            Classification::OlderLightPlayer { proto: None },
+            Classification::OlderLightPlayer { proto: Some(29) },
             Classification::Quiet { since: Millis(0) },
         ];
 

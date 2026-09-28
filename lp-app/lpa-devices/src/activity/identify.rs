@@ -137,6 +137,9 @@ impl IdentifyActivity {
             } => ActivityOutcome::Succeeded {
                 summary: "speaks the framing but never said hello (pre-hello firmware)".to_string(),
             },
+            Classification::OlderLightPlayer { .. } => ActivityOutcome::Succeeded {
+                summary: "older LightPlayer firmware, from before this Studio's link".to_string(),
+            },
             Classification::Blank => ActivityOutcome::Succeeded {
                 summary: "blank or erased flash".to_string(),
             },

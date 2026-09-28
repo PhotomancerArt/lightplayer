@@ -4,6 +4,8 @@
 //! The same file drives `lp-json-pack`'s codec tests, so there is one sample
 //! of real traffic.
 
+use alloc::string::String;
+
 /// The sample: one `<dir> M!{json}` line each, `<` board→host, `>` host→board.
 pub(crate) const TRAFFIC: &str =
     include_str!("../../../lp-base/lp-json-pack/tests/fixtures/choker-lens-sample.txt");
@@ -22,8 +24,8 @@ pub(crate) struct TrafficLine {
     /// Position in the sample, for failure messages.
     pub index: usize,
     pub direction: TrafficDirection,
-    /// The JSON after `M!`.
-    pub json: &'static str,
+    /// The JSON after `M!`, as recorded.
+    pub json: String,
 }
 
 /// Every `M!` line of the sample, in stream order.
@@ -41,7 +43,7 @@ pub(crate) fn traffic_lines() -> impl Iterator<Item = TrafficLine> {
         TrafficLine {
             index,
             direction,
-            json,
+            json: String::from(json),
         }
     })
 }

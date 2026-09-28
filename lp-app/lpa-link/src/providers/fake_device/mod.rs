@@ -4,13 +4,13 @@
 //! [`DeviceByteStream`](crate::stream::DeviceByteStream) seam and scripts
 //! what a real board does on the wire — ROM boot output for blank flash /
 //! download mode / foreign firmware, and for the `LightPlayer` state a REAL
-//! host `LpServer` over `LpFsMemory` behind REAL `M!` framing (reusing
+//! host `LpServer` over `LpFsMemory` behind a REAL board-side lp-link (reusing
 //! `fw-host`'s server-over-memory machinery), including the M2 boot line and
 //! the unsolicited wire hello.
 //!
 //! Every hardware bug so far (pull-before-readiness ordering, fresh-device
 //! missing storage dir) lived BELOW the record level: framing, boot-output
-//! classification, timing. Injecting at the byte stream makes the real `M!`
+//! classification, timing. Injecting at the byte stream makes the real link
 //! parser, the real readiness classifier, and the real orchestration run in
 //! tests. The `FakeProvider` exposes these devices through the real link
 //! provider path (see `providers::fake`).
@@ -22,6 +22,7 @@
 //! disconnect, garble/drop, mid-frame cut, log-flood interleave.
 
 pub mod failure_injection;
+pub(crate) mod fake_board_link;
 pub mod fake_device_core;
 pub mod fake_device_script;
 pub mod fake_device_stream;

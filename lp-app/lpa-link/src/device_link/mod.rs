@@ -20,11 +20,16 @@
 //! |---|---|
 //! | [`wire`] | `lpc_wire` frames ⇄ the model's minimal mirror (the ONE meeting point) |
 //! | [`demux`] | whole serial lines → `LinkEvent`s (the `M!` demux) |
-//! | [`wire_reader`] | one port's bytes → lines and messages, and the packed-reply opt-in |
+//! | [`wire_reader`] | what a port's reads are ([`wire_reader::WireRead`]), and the page-wide wire flags |
+//! | [`link_note`] | the link's own journal notes (up, stalled, answering, reset), named |
+//! | [`link_port_service`] | one browser port's lp-link end and its drainers' queues (sans-IO) |
+//! | [`port_read_map`] | a link port's reads → [`wire_reader::WireRead`]s and journal notes |
 //! | [`wire_capture`] | dev-only: a capped tee of every raw byte the browser port reads |
 //! | [`wire_tap`] | the session recorder's tap on every raw byte chunk a browser transport writes or reads |
-//! | `byte_stream` | the sync `DeviceByteStream` seam → `Link` (host) |
+//! | `byte_stream` | the sync `DeviceByteStream` seam → `Link` over one lp-link per open port (host) |
+//! | `link_nonce` | a fresh lp-link nonce per host port open |
 //! | `fake` | the scripted `FakeEsp32Device` → `Link` (host tests) |
+//! | `link_port_edge` | the page's clock, nonce and wake loop for a browser link port (wasm) |
 //! | `browser_serial` | the Web Serial provider → `Link` (wasm) |
 //! | `browser_ble` | a Web Bluetooth (NUS) session → `Link` (wasm) |
 //! | `browser_worker` | a `fw-browser` worker → `Link`, i.e. the sim as a device (wasm) |
@@ -36,6 +41,9 @@
 //! transports speak the contract.
 
 pub mod demux;
+pub mod link_note;
+pub mod link_port_service;
+pub mod port_read_map;
 pub mod wire;
 pub mod wire_capture;
 pub mod wire_reader;
@@ -44,16 +52,27 @@ pub mod wire_tap;
 #[cfg(any(
     feature = "host-process",
     feature = "host-serial-esp32",
-    feature = "fake-device",
-    // The tab emulator is the fourth byte pipe, and the first one in a
-    // browser: a board in a Worker is a byte stream with DTR/RTS, so it is
-    // hosted here rather than in a Link type of its own (D4).
-    feature = "emulator-tab"
+    feature = "fake-device"
 ))]
 pub mod byte_stream;
 
+#[cfg(any(
+    feature = "host-process",
+    feature = "host-serial-esp32",
+    feature = "fake-device"
+))]
+pub mod link_nonce;
+
 #[cfg(feature = "fake-device")]
 pub mod fake;
+
+/// The page's clock, nonce and wake loop for the browser link ports (Web
+/// Serial and the tab-hosted board).
+#[cfg(all(
+    any(feature = "browser-serial-esp32", feature = "emulator-tab"),
+    target_arch = "wasm32"
+))]
+pub mod link_port_edge;
 
 #[cfg(all(feature = "browser-serial-esp32", target_arch = "wasm32"))]
 pub mod browser_serial;

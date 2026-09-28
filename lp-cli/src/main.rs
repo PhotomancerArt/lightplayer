@@ -94,11 +94,11 @@ enum Cli {
     Pattern(pattern::PatternCli),
     /// Generate or verify the checked-in schemas/ tree (JSON Schemas + slot shape dumps).
     Schema(schema::SchemaCli),
-    /// Tools over a board's link bytes (`wire unpack`: packed frames → `M!` lines).
+    /// Tools over a board's link bytes (`wire unpack`: a link capture → `M!{json}` and console lines).
     Wire(wire::WireCli),
     /// Receive and read Studio session recordings (`?record=`): `record serve`, `record timeline`.
     Record(record::RecordCli),
-    /// Measure a board's host link: `link soak` against a `soak_link` image.
+    /// Measure a board's host link: `link lab` against a `test_comms_lab` image.
     Link(link::LinkCli),
     /// Compile a GLSL file to LPIR text (stdout). Uses the same Naga → LPIR path as the JIT.
     ShaderLpir {

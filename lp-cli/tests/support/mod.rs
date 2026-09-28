@@ -16,6 +16,8 @@ use std::time::{Duration, Instant};
 
 use tungstenite::{Message, WebSocket};
 
+pub mod door_link;
+
 /// The wall-clock net on everything here. Generous on purpose: a loaded box
 /// is slow, and a flake in a socket test costs more than a slow one.
 pub const NET: Duration = Duration::from_secs(60);

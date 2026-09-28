@@ -30,12 +30,35 @@ fn go_back_n_over_usb_allocates_only_delivered_messages() {
     exchange::<GoBackN<127>>(LinkConfig::usb());
 }
 
+/// One end sends its large messages as external messages (the caller keeps
+/// the bytes) over a send ring too small to hold them: cutting them from the
+/// caller's buffer allocates nothing either.
+#[test]
+fn external_messages_over_a_small_send_ring_allocate_only_delivered_messages() {
+    exchange_with::<SelectiveRepeat>(
+        LinkConfig {
+            send_budget: 3 * 1024,
+            ..LinkConfig::usb()
+        },
+        true,
+    );
+}
+
 /// Largest message the exchange sends.
 const BIG: usize = 12 * 1024;
 
 fn exchange<A: Arq>(cfg: LinkConfig) {
+    exchange_with::<A>(cfg, false);
+}
+
+fn exchange_with<A: Arq>(cfg: LinkConfig, external: bool) {
     let payload: Vec<u8> = (0..BIG).map(|i| (i * 7 + 3) as u8).collect();
     let mut w = World::<A>::new(cfg, &payload);
+    if external {
+        // Only `a` (the board) has the small ring; its peer is a host.
+        w.external = true;
+        w.b = Link::new(LinkConfig::usb(), 0x9ABC_DEF0);
+    }
     w.handshake();
 
     // Warm-up: the largest message on each reliable channel (the reassembly
@@ -43,6 +66,10 @@ fn exchange<A: Arq>(cfg: LinkConfig) {
     // while (the event queue reaches its).
     for chan in [CH_CONTROL, CH_PROTO] {
         w.send_both(chan, BIG);
+        if w.external {
+            // One external message at a time.
+            w.settle();
+        }
     }
     w.settle();
     for _ in 0..48 {
@@ -64,9 +91,14 @@ fn exchange<A: Arq>(cfg: LinkConfig) {
         "allocations besides delivered messages (cfg {:?})",
         w.a.config().framing
     );
-    let bound = Link::<A>::ram_bound(w.a.config());
-    assert!(w.peak_ram <= bound, "{} > {bound}", w.peak_ram);
+    for (peak, link) in [(w.peak_ram_a, &w.a), (w.peak_ram_b, &w.b)] {
+        let bound = Link::<A>::ram_bound(link.config());
+        assert!(peak <= bound, "{peak} > {bound}");
+    }
     assert_eq!(w.a.counters().resets + w.b.counters().resets, 0);
+    if external {
+        assert!(w.external_sent > 50, "external: {}", w.external_sent);
+    }
     assert!(w.dropped > 0 && w.a.counters().retransmits + w.b.counters().retransmits > 0);
 }
 
@@ -82,8 +114,13 @@ struct World<'p, A: Arq> {
     delivered: u64,
     delivered_nonempty: u64,
     dropped: u64,
-    peak_ram: usize,
+    peak_ram_a: usize,
+    peak_ram_b: usize,
     buf: [u8; 4096],
+    /// `a` sends reliable messages over 1 KiB as external ones.
+    external: bool,
+    /// External messages `a` queued during the run.
+    external_sent: u64,
 }
 
 impl<'p, A: Arq> World<'p, A> {
@@ -100,8 +137,11 @@ impl<'p, A: Arq> World<'p, A> {
             delivered: 0,
             delivered_nonempty: 0,
             dropped: 0,
-            peak_ram: 0,
+            peak_ram_a: 0,
+            peak_ram_b: 0,
             buf: [0; 4096],
+            external: false,
+            external_sent: 0,
         }
     }
 
@@ -118,8 +158,24 @@ impl<'p, A: Arq> World<'p, A> {
     }
 
     fn send_both(&mut self, chan: u8, len: usize) {
-        self.a.send(chan, &self.payload[..len]).unwrap();
+        if self.external && chan != CH_LOG && len > 1024 {
+            self.a.send_external(chan, len).unwrap();
+        } else {
+            self.a.send(chan, &self.payload[..len]).unwrap();
+        }
         self.b.send(chan, &self.payload[..len]).unwrap();
+    }
+
+    /// `a`'s send: external for a big reliable message when the world says so
+    /// (the source is always a prefix of `payload`).
+    fn send_a(&mut self, chan: u8, len: usize) {
+        if self.external && chan != CH_LOG && len > 1024 {
+            if self.a.send_external(chan, len).is_ok() {
+                self.external_sent += 1;
+            }
+        } else {
+            let _ = self.a.send(chan, &self.payload[..len]);
+        }
     }
 
     /// Run with no new traffic until both ends have nothing left to send.
@@ -147,10 +203,8 @@ impl<'p, A: Arq> World<'p, A> {
             if !hold {
                 self.read();
             }
-            self.peak_ram = self
-                .peak_ram
-                .max(self.a.ram_bytes())
-                .max(self.b.ram_bytes());
+            self.peak_ram_a = self.peak_ram_a.max(self.a.ram_bytes());
+            self.peak_ram_b = self.peak_ram_b.max(self.b.ram_bytes());
             self.now += 250;
         }
     }
@@ -163,7 +217,7 @@ impl<'p, A: Arq> World<'p, A> {
             _ => (r >> 8) as usize % 300,
         };
         let chan = if r % 11 == 0 { CH_CONTROL } else { CH_PROTO };
-        let _ = self.a.send(chan, &self.payload[..len]);
+        self.send_a(chan, len);
         let _ = self.b.send(chan, &self.payload[..len / 2]);
         if self.step % 8 == 0 {
             self.ring_a
@@ -177,6 +231,10 @@ impl<'p, A: Arq> World<'p, A> {
 
     /// Move every frame each way; about 2% are lost and 1% damaged.
     fn shuttle(&mut self) {
+        let payload = self.payload;
+        let mut source = |off: usize, out: &mut [u8]| {
+            out.copy_from_slice(&payload[off..off + out.len()]);
+        };
         for _ in 0..8 {
             let mut moved = false;
             for dir in 0..2 {
@@ -185,7 +243,7 @@ impl<'p, A: Arq> World<'p, A> {
                 } else {
                     (&mut self.b, &mut self.a)
                 };
-                while let Some(f) = from.poll_transmit(self.now) {
+                while let Some(f) = from.poll_transmit_with(self.now, &mut source) {
                     moved = true;
                     self.rng ^= self.rng << 13;
                     self.rng ^= self.rng >> 17;

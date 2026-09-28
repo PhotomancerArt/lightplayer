@@ -53,6 +53,7 @@ pub mod log_ring;
 mod rtt_estimator;
 mod send_queue;
 mod seq_num;
+pub mod sniffer;
 mod tx_queue;
 
 #[cfg(feature = "sim")]
@@ -60,7 +61,7 @@ pub mod sim;
 
 pub use arq::{Arq, GoBackN, NoArq, SelectiveRepeat, StopAndWait};
 pub use crc::CrcKind;
-pub use link::{Link, LinkState, SendError};
+pub use link::{ExternalStarted, Link, LinkState, SendError};
 pub use link_config::{CH_CONTROL, CH_LOG, CH_PROTO, Framing, LinkConfig, MAX_MESSAGE};
 pub use link_counters::LinkCounters;
 pub use link_event::{LinkEvent, ResetReason};

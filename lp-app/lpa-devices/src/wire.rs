@@ -34,6 +34,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::identity::PeerIdentity;
+use crate::link_counter_facts::LinkCounterFacts;
 
 /// One decoded frame from the peer.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -59,6 +60,7 @@ impl ServerFrame {
                 loaded: None,
                 recovery: None,
                 engine_fps: None,
+                link: None,
             },
         }
     }
@@ -90,6 +92,7 @@ impl ServerFrame {
                 loaded,
                 recovery,
                 engine_fps: None,
+                link: None,
             },
         }
     }
@@ -100,6 +103,16 @@ impl ServerFrame {
     pub fn with_engine_fps(mut self, fps: Option<u16>) -> Self {
         if let ServerFrameBody::Heartbeat { engine_fps, .. } = &mut self.body {
             *engine_fps = fps;
+        }
+        self
+    }
+
+    /// Stamp a heartbeat with the board's link counters. A no-op on any
+    /// other frame.
+    #[must_use]
+    pub fn with_link_counters(mut self, counters: Option<LinkCounterFacts>) -> Self {
+        if let ServerFrameBody::Heartbeat { link, .. } = &mut self.body {
+            *link = counters;
         }
         self
     }
@@ -218,6 +231,12 @@ pub enum ServerFrameBody {
         /// that does not report it.
         #[serde(default)]
         engine_fps: Option<u16>,
+        /// The board's link counters (proto 30, plan D7) — like
+        /// `engine_fps`, always changing and so never part of the terminal
+        /// line. `None` from a link that reports none (BLE, the classic
+        /// UART, the sim).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        link: Option<LinkCounterFacts>,
     },
     /// A `ListLoadedProjects` answer. The one non-hello response body the
     /// mirror decodes rather than labels, because the empty-vs-running face

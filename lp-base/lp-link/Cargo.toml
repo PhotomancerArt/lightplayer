@@ -5,7 +5,7 @@ authors.workspace = true
 edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
-description = "Prototype sans-IO link layer (framing, CRC, channels, ARQ) plus a fault-injecting simulator: an investigation crate, not wired into the product"
+description = "Sans-IO link layer (framing, CRC, channels, ARQ) plus a fault-injecting simulator; runs the product's USB link on the board, Studio, lp-cli and the emulator tools"
 
 [lints]
 workspace = true

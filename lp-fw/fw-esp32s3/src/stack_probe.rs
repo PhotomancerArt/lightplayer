@@ -129,7 +129,12 @@ pub fn log_if_grown(label: &str) {
     if used > last {
         HIGH_WATER_REPORTED.store(used, Ordering::Relaxed);
         let total = total_bytes();
-        esp_println::println!(
+        // Through `log`, not `esp_println`: since wire proto 30 the USB port
+        // is an lp-link, and raw text written while the link task has a
+        // frame in the endpoint tears the frame and is lost with it (the
+        // link resends the frame, not the text). The log ring rides the
+        // link's log channel, as the C6's own probe does.
+        log::info!(
             "[stack] {label}: high-water {used} B of {total} B ({} B headroom)",
             total.saturating_sub(used)
         );

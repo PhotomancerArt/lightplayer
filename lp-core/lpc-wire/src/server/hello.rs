@@ -35,6 +35,23 @@ use crate::server::hello_auth::HelloAuth;
 ///
 /// # History
 ///
+/// - 30: the USB device link moves onto lp-link (plan
+///   `lp2025/2026-09-27-0215-lp-link-usb-cutover`;
+///   `docs/adr/2026-09-27-lp-link-one-comms-layer.md`). On USB-Serial-JTAG
+///   (C6/S3 silicon and their emulators) frames are lp-link's — COBS-FF
+///   between `0x00` delimiters, CRC-32C, resent when lost, channels 0–2,
+///   a nonce handshake — instead of `M!{json}` lines and `0x00 'L'` COBS
+///   frames. One proto-channel message is one wire message: bare JSON
+///   (`{`), or `'L'` + a learned JSON Pack frame with no COBS
+///   (`lpc_wire::link_payload`); the board sends its hello after every link
+///   `Up`, and the learned table and the packed opt-in reset with every
+///   link `Up`/`Reset` (no resync marker, no re-ask). Logs ride the link's
+///   log channel. And the heartbeat's `link` object becomes lp-link's
+///   counters (`LinkCounters`: resends, damaged, stale-session, resets by
+///   reason, stalls, …) in place of the `M!` parse and not-draining-latch
+///   fields — a required-field reshape an old peer cannot decode. BLE, the
+///   classic's UART and fw-emu keep `M!` lines until their own milestones.
+///   `PACK_FORMAT_VERSION` is unchanged.
 /// - 29: the `PowerButton` node kind (deep-sleep power-off, PR #787) —
 ///   `NodeKind::PowerButton` / `"PowerButton"` in inventory frames and the
 ///   `node.power-button` build feature on the hello: an older peer rejects
@@ -288,7 +305,7 @@ use crate::server::hello_auth::HelloAuth;
 /// as `None` on new Studio and a new firmware's extra fields are ignored
 /// by old Studio. Bumping for those would mark every board running
 /// current firmware Incompatible in exchange for nothing.
-pub const WIRE_PROTO_VERSION: u32 = 29;
+pub const WIRE_PROTO_VERSION: u32 = 30;
 
 /// Unsolicited/boot-time server identity, version, and capability report.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -620,7 +637,7 @@ mod tests {
     #[test]
     fn the_proto_version_is_pinned_to_its_history() {
         assert_eq!(
-            WIRE_PROTO_VERSION, 29,
+            WIRE_PROTO_VERSION, 30,
             "if you meant to bump, add the History entry in this file's \
              doc comment and update this pin"
         );

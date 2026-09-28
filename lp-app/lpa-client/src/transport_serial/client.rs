@@ -6,6 +6,8 @@
 use crate::transport::ClientTransport;
 use lpc_wire::WireServerMessage;
 use lpc_wire::{TransportError, messages::ClientMessage};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 use tokio::sync::{mpsc, oneshot};
@@ -20,8 +22,15 @@ use tokio::sync::{mpsc, oneshot};
 pub struct AsyncSerialClientTransport {
     /// Sender for client messages (client -> backend thread)
     client_tx: Option<mpsc::UnboundedSender<ClientMessage>>,
-    /// Receiver for server messages (backend thread -> client)
-    server_rx: mpsc::UnboundedReceiver<WireServerMessage>,
+    /// Receiver for what the backend read (backend thread -> client)
+    server_rx: mpsc::UnboundedReceiver<SerialInbound>,
+    /// The backend's link session number, bumped by the backend on every
+    /// link reset (see [`SerialInbound::LinkReset`]). Always 0 for a backend
+    /// with no link (the fw-emu syscall pipe).
+    link_generation: Arc<AtomicU32>,
+    /// The link session the last request was sent in, until a reset has
+    /// failed it.
+    last_send_generation: Option<u32>,
     /// Shutdown signal sender (client -> backend thread)
     shutdown_tx: Option<oneshot::Sender<()>>,
     /// Handle to the backend thread
@@ -44,6 +53,20 @@ pub struct AsyncSerialClientTransport {
 /// see `docs/defects/2026-09-08-serial-close-leaks-the-port-on-a-wedged-device.md`.
 pub(crate) const CLOSE_JOIN_BUDGET: Duration = Duration::from_secs(2);
 
+/// What a backend thread hands the transport.
+#[derive(Debug)]
+pub(crate) enum SerialInbound {
+    /// One message from the board.
+    Message(WireServerMessage),
+    /// The link reset (now in session `generation`) with requests in flight:
+    /// they are lost. Fails a `receive` whose request went out before the
+    /// reset, and is skipped otherwise (D9, [`crate::link_reset`]).
+    LinkReset { generation: u32, detail: String },
+    /// One request could not be sent at all (too big for the link): fails
+    /// the `receive` waiting for its answer.
+    SendFailed(String),
+}
+
 impl AsyncSerialClientTransport {
     /// Create a new async serial client transport
     ///
@@ -53,14 +76,16 @@ impl AsyncSerialClientTransport {
     /// # Arguments
     ///
     /// * `client_tx` - Sender for client messages
-    /// * `server_rx` - Receiver for server messages
+    /// * `server_rx` - Receiver for what the backend read
+    /// * `link_generation` - The backend's link session number
     /// * `shutdown_tx` - Shutdown signal sender
     /// * `thread_handle` - Handle to the backend thread
     /// * `backend_label` - What the thread talks to, for close diagnostics
     #[cfg(any(feature = "serial", test))]
     pub(crate) fn new(
         client_tx: mpsc::UnboundedSender<ClientMessage>,
-        server_rx: mpsc::UnboundedReceiver<WireServerMessage>,
+        server_rx: mpsc::UnboundedReceiver<SerialInbound>,
+        link_generation: Arc<AtomicU32>,
         shutdown_tx: oneshot::Sender<()>,
         thread_handle: JoinHandle<()>,
         backend_label: impl Into<String>,
@@ -68,6 +93,8 @@ impl AsyncSerialClientTransport {
         Self {
             client_tx: Some(client_tx),
             server_rx,
+            link_generation,
+            last_send_generation: None,
             shutdown_tx: Some(shutdown_tx),
             thread_handle: Some(thread_handle),
             closed: false,
@@ -83,6 +110,7 @@ impl ClientTransport for AsyncSerialClientTransport {
             return Err(TransportError::ConnectionLost);
         }
 
+        self.last_send_generation = Some(self.link_generation.load(Ordering::SeqCst));
         match &self.client_tx {
             Some(tx) => tx.send(msg).map_err(|_| TransportError::ConnectionLost),
             None => Err(TransportError::ConnectionLost),
@@ -94,10 +122,27 @@ impl ClientTransport for AsyncSerialClientTransport {
             return Err(TransportError::ConnectionLost);
         }
 
-        self.server_rx
-            .recv()
-            .await
-            .ok_or(TransportError::ConnectionLost)
+        loop {
+            match self.server_rx.recv().await {
+                None => return Err(TransportError::ConnectionLost),
+                Some(SerialInbound::Message(message)) => return Ok(message),
+                Some(SerialInbound::SendFailed(detail)) => {
+                    return Err(TransportError::Other(detail));
+                }
+                // Only a request sent before the reset was lost with it; a
+                // reset nobody is waiting on is skipped, so it cannot fail a
+                // request sent after it.
+                Some(SerialInbound::LinkReset { generation, detail }) => {
+                    if self
+                        .last_send_generation
+                        .is_some_and(|sent| sent < generation)
+                    {
+                        self.last_send_generation = None;
+                        return Err(crate::link_reset::link_reset_error(&detail));
+                    }
+                }
+            }
+        }
     }
 
     /// Shut the backend thread down and WAIT for it to exit.
@@ -206,7 +251,7 @@ mod tests {
     async fn test_transport_creation() {
         // Create dummy channels and thread handle
         let (client_tx, _client_rx) = mpsc::unbounded_channel::<ClientMessage>();
-        let (_server_tx, server_rx) = mpsc::unbounded_channel::<WireServerMessage>();
+        let (_server_tx, server_rx) = mpsc::unbounded_channel::<SerialInbound>();
         let (shutdown_tx, _shutdown_rx) = oneshot::channel();
 
         // Create a dummy thread that just exits immediately
@@ -215,12 +260,64 @@ mod tests {
         let mut transport = AsyncSerialClientTransport::new(
             client_tx,
             server_rx,
+            Arc::new(AtomicU32::new(0)),
             shutdown_tx,
             thread_handle,
             "test",
         );
 
         // Verify we can call close
+        transport.close().await.unwrap();
+    }
+
+    /// A reset fails the request that went out before it, and only that one:
+    /// a reset nobody was waiting on does not fail the next request.
+    #[tokio::test]
+    async fn a_link_reset_fails_only_a_request_sent_before_it() {
+        let (client_tx, _client_rx) = mpsc::unbounded_channel::<ClientMessage>();
+        let (server_tx, server_rx) = mpsc::unbounded_channel::<SerialInbound>();
+        let (shutdown_tx, _shutdown_rx) = oneshot::channel();
+        let generation = Arc::new(AtomicU32::new(0));
+        let mut transport = AsyncSerialClientTransport::new(
+            client_tx,
+            server_rx,
+            Arc::clone(&generation),
+            shutdown_tx,
+            std::thread::spawn(|| {}),
+            "test",
+        );
+        let hello = |id| ClientMessage {
+            id,
+            msg: lpc_wire::ClientRequest::Hello,
+        };
+
+        transport.send(hello(1)).await.unwrap();
+        generation.store(1, Ordering::SeqCst);
+        server_tx
+            .send(SerialInbound::LinkReset {
+                generation: 1,
+                detail: "board restarted".to_string(),
+            })
+            .unwrap();
+        let error = transport.receive().await.unwrap_err();
+        assert!(crate::is_link_reset(&error), "{error}");
+
+        // The next request goes out in session 1; a late notice of the
+        // reset into session 1 is not its failure.
+        transport.send(hello(2)).await.unwrap();
+        server_tx
+            .send(SerialInbound::LinkReset {
+                generation: 1,
+                detail: "board restarted".to_string(),
+            })
+            .unwrap();
+        server_tx
+            .send(SerialInbound::Message(WireServerMessage::new(
+                2,
+                lpc_wire::ServerMsgBody::UnloadProject,
+            )))
+            .unwrap();
+        assert_eq!(transport.receive().await.unwrap().id, 2);
         transport.close().await.unwrap();
     }
 }

@@ -1,23 +1,25 @@
 //! Hardware serial transport factory
 //!
-//! Creates an async serial transport that speaks the `M!` line protocol over
-//! a [`DeviceByteStream`]. The byte-level I/O runs on a separate thread that
-//! loops continuously; port opening belongs to the caller (the
-//! `host-serial-esp32` link provider opens native ports, the fake device
-//! provides an in-memory stream).
+//! Creates an async serial transport that speaks lp-link over a
+//! [`DeviceByteStream`] (a board's USB-Serial-JTAG link since
+//! `WIRE_PROTO_VERSION` 30). The byte-level I/O runs on a separate thread
+//! ([`super::link_pump`]) that owns the stream and one
+//! [`lpc_wire::WireLinkPort`]; port opening belongs to the caller (the
+//! `host-serial-esp32` link provider opens native ports and emulated boards'
+//! TCP/WebSocket doors, the fake device provides an in-memory stream).
 //!
-//! Replies are read through [`WireStream`] (JSON lines and packed frames
-//! alike), and the thread asks the board to pack on its own (see the module
-//! docs of [`crate::transport_serial`], and `LP_WIRE_ENCODING`).
+//! The thread asks the board to pack its replies on each link session (see
+//! the module docs of [`crate::transport_serial`], and `LP_WIRE_ENCODING`).
 
 use log;
-use lpc_wire::{PackOptIn, WireChunk, WireEncoding, WireServerMessage, WireStream};
-use lpc_wire::{TransportError, messages::ClientMessage};
+use lpc_wire::{TransportError, WireEncoding};
 use std::sync::Arc;
+use std::sync::atomic::AtomicU32;
 use std::thread;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 use tokio::sync::{mpsc, oneshot};
 
+use super::link_pump::LinkPump;
 use crate::stream::{ByteStreamError, DeviceByteStream};
 
 /// Optional observer for complete serial lines.
@@ -31,183 +33,28 @@ pub struct HardwareSerialOptions {
     /// Reset the ESP32 after opening the serial port, so boot logs are captured
     /// by this transport.
     pub reset_after_open: bool,
-    /// Receives every complete serial line, including protocol lines. A
-    /// packed frame is observed as the `M!{json}` line it stands for.
+    /// Receives every console line (log records and text outside frames),
+    /// and every wire message as the `M!{json}` line it stands for.
     pub line_observer: Option<Arc<dyn SerialLineObserver>>,
     /// The encoding to ask the board for. `None` reads `LP_WIRE_ENCODING`
     /// ([`crate::wire_encoding_env`]): packed unless it says `json`.
     pub wire_encoding: Option<WireEncoding>,
 }
 
-/// Serial I/O thread loop
-///
-/// Runs continuously, reading from the byte stream and writing messages.
-/// Filters for M! prefix, logs non-M! lines, and parses JSON messages.
-fn serial_thread_loop(
-    mut stream: Box<dyn DeviceByteStream>,
-    stream_label: String,
-    mut client_rx: mpsc::UnboundedReceiver<ClientMessage>,
-    server_tx: mpsc::UnboundedSender<WireServerMessage>,
-    mut shutdown_rx: oneshot::Receiver<()>,
-    options: HardwareSerialOptions,
-) {
-    if options.reset_after_open {
+/// The I/O thread: the reset dance (when asked), then the link until
+/// shutdown or until the stream fails.
+fn serial_thread_loop(mut pump: LinkPump) {
+    let stream_label = pump.stream_label.clone();
+    if pump.options.reset_after_open {
         let style = detect_reset_style(&stream_label);
         log::debug!("Serial thread: resetting {stream_label} via {style:?}");
-        if let Err(e) = reset_after_open(stream.as_mut(), style) {
+        if let Err(e) = reset_after_open(pump.stream.as_mut(), style) {
             log::error!("Serial thread: Failed to reset device after opening {stream_label}: {e}");
-            drop(server_tx);
             return;
         }
     }
 
-    let mut wire = WireStream::new();
-    let mut opt_in = PackOptIn::wanting(
-        options
-            .wire_encoding
-            .unwrap_or_else(crate::wire_encoding_env::requested_wire_encoding),
-    );
-    // The opt-in's clock: any monotonic milliseconds will do.
-    let started = Instant::now();
-    let mut connection_lost = false;
-
-    'serial: loop {
-        // Check for shutdown signal (non-blocking)
-        if shutdown_rx.try_recv().is_ok() {
-            log::debug!("Serial thread: Shutdown signal received");
-            break;
-        }
-
-        // Check if connection was lost
-        if connection_lost {
-            break;
-        }
-
-        // Process incoming client messages (non-blocking)
-        while let Ok(msg) = client_rx.try_recv() {
-            match write_message(stream.as_mut(), &stream_label, &msg) {
-                WriteOutcome::Written => {}
-                // The device stopped draining its receive FIFO. The frame
-                // was dropped and the link kept: this is what an
-                // unresponsive board looks like from the write side, and
-                // the readiness engine's own deadline is what gets to
-                // classify it. Tearing the link down here reported a
-                // repairable board as `Gone`, a state management never runs
-                // from (bench, 2026-09-08).
-                //
-                // And stop draining. Everything queued behind this frame is
-                // equally undeliverable, and each attempt costs the port's
-                // full write timeout — readiness leaves ~30 of them behind a
-                // silent board, which is minutes of writes nobody will read,
-                // past any close's join budget. The outer pass re-checks the
-                // shutdown signal immediately.
-                //
-                // Deliberately keyed on the STALL and not on shutdown: a
-                // peer that is still accepting gets the queue it was already
-                // being handed (the studio device bench depends on a close
-                // mid-drain finishing what it started), and a peer that is
-                // not gets abandoned at the first frame it refused.
-                WriteOutcome::Stalled => break,
-                WriteOutcome::Lost => {
-                    connection_lost = true;
-                    break;
-                }
-            }
-        }
-
-        // Read available data from the stream (non-blocking / short timeout)
-        let mut temp_buf = [0u8; 256];
-        let chunks = match stream.read_available(&mut temp_buf) {
-            Ok(0) => {
-                // No data available - small delay to avoid busy loop
-                std::thread::sleep(Duration::from_millis(10));
-                continue;
-            }
-            Ok(n) => wire.push_collect(&temp_buf[..n]),
-            Err(e) => {
-                log::error!("Serial thread: Read error: {e}");
-                connection_lost = true;
-                break;
-            }
-        };
-
-        for chunk in chunks {
-            let frame = match chunk {
-                WireChunk::Line(line) => {
-                    if line.is_empty() {
-                        continue;
-                    }
-                    if let Some(observer) = &options.line_observer {
-                        observer.observe_line(&line);
-                    }
-                    eprintln!("[serial] {line}");
-                    continue;
-                }
-                WireChunk::Error(error) => {
-                    log::warn!("Serial thread: {error}");
-                    continue;
-                }
-                WireChunk::Desync(dropped) => {
-                    log::warn!(
-                        "Serial thread: packed reply dropped ({} B): {}",
-                        dropped.wire_len,
-                        dropped.reason
-                    );
-                    let now_ms = u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX);
-                    if let Some(ask) = opt_in.desynced(now_ms) {
-                        log::debug!("Serial thread: asking {stream_label} to reset its table");
-                        if let WriteOutcome::Lost =
-                            write_message(stream.as_mut(), &stream_label, &ask)
-                        {
-                            connection_lost = true;
-                            break;
-                        }
-                    }
-                    continue;
-                }
-                WireChunk::Frame(frame) => frame,
-            };
-            if let Some(observer) = &options.line_observer {
-                observer.observe_line(&frame.to_line());
-            }
-            let msg = match lpc_wire::json::from_str::<WireServerMessage>(&frame.json) {
-                Ok(msg) => msg,
-                Err(e) => {
-                    log::warn!(
-                        "Serial thread: Failed to parse JSON message: {e} | json: {}",
-                        frame.json
-                    );
-                    // Continue - don't crash on parse errors
-                    continue;
-                }
-            };
-            log::debug!(
-                "Serial thread: Parsed server message id={} ({} bytes, {})",
-                msg.id,
-                frame.json.len(),
-                if frame.is_packed() { "packed" } else { "json" }
-            );
-
-            let now_ms = u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX);
-            let step = opt_in.observe(&msg, frame.is_packed(), now_ms);
-            if let Some(ask) = step.send {
-                log::debug!("Serial thread: asking {stream_label} to pack its replies");
-                if let WriteOutcome::Lost = write_message(stream.as_mut(), &stream_label, &ask) {
-                    connection_lost = true;
-                    break;
-                }
-            }
-            if step.deliver && server_tx.send(msg).is_err() {
-                log::debug!("Serial thread: server_tx closed, exiting");
-                break 'serial;
-            }
-        }
-    }
-
-    // Signal connection lost if needed
-    if connection_lost {
-        drop(server_tx);
-    }
+    let stream = pump.run();
 
     // Explicit, and load-bearing: this thread is the ONLY owner of the byte
     // stream, so the OS serial port is released here and nowhere else.
@@ -218,50 +65,6 @@ fn serial_thread_loop(
     drop(stream);
 
     log::debug!("Serial thread: Exiting ({stream_label} released)");
-}
-
-/// How one write to the board went.
-enum WriteOutcome {
-    Written,
-    /// The board is not accepting input; the message was dropped.
-    Stalled,
-    /// The stream failed; the link is gone.
-    Lost,
-}
-
-/// Frame `msg` as one `M!{json}\n` line (the shared framer) and write it,
-/// bounded (see [`DeviceByteStream::write_all`]).
-fn write_message(
-    stream: &mut dyn DeviceByteStream,
-    stream_label: &str,
-    msg: &ClientMessage,
-) -> WriteOutcome {
-    let data = match lpc_wire::json::to_serial_line(msg) {
-        Ok(line) => line.into_bytes(),
-        Err(e) => {
-            log::warn!("Serial thread: Failed to serialize client message: {e}");
-            return WriteOutcome::Written;
-        }
-    };
-    log::debug!(
-        "Serial thread: Writing client message id={} ({} bytes) to serial",
-        msg.id,
-        data.len()
-    );
-    match stream.write_all(&data) {
-        Ok(()) => WriteOutcome::Written,
-        Err(ByteStreamError::WriteStalled) => {
-            log::warn!(
-                "Serial thread: {stream_label} is not accepting output; dropped message id={}",
-                msg.id
-            );
-            WriteOutcome::Stalled
-        }
-        Err(e) => {
-            log::error!("Serial thread: Write error: {e}");
-            WriteOutcome::Lost
-        }
-    }
 }
 
 /// How the DTR/RTS lines reach the chip's reset, which decides the dance.
@@ -395,8 +198,8 @@ pub fn create_hardware_serial_transport_pair(
 ///
 /// The caller owns port opening (the `host-serial-esp32` provider opens
 /// native ports; `lpa-link`'s fake device supplies a scripted stream). The
-/// returned transport speaks the `M!` JSON line protocol over the stream from
-/// a dedicated I/O thread. `stream_label` names the stream in logs and in
+/// returned transport speaks lp-link over the stream from a dedicated I/O
+/// thread. `stream_label` names the stream in logs and in
 /// the close-timeout error (where it is the held port's name).
 pub fn create_hardware_serial_transport_pair_with_options(
     stream: Box<dyn DeviceByteStream>,
@@ -413,23 +216,25 @@ pub fn create_hardware_serial_transport_pair_with_options(
     // Spawn serial thread
     let stream_label = stream_label.to_string();
     let label_for_error = stream_label.clone();
+    let link_generation = Arc::new(AtomicU32::new(0));
+    let pump = LinkPump {
+        stream,
+        stream_label,
+        client_rx,
+        server_tx,
+        shutdown_rx,
+        link_generation: Arc::clone(&link_generation),
+        options,
+    };
     let thread_handle = thread::Builder::new()
         .name("lp-hardware-serial".to_string())
-        .spawn(move || {
-            serial_thread_loop(
-                stream,
-                stream_label,
-                client_rx,
-                server_tx,
-                shutdown_rx,
-                options,
-            );
-        })
+        .spawn(move || serial_thread_loop(pump))
         .map_err(|e| TransportError::Other(format!("Failed to spawn serial thread: {e}")))?;
 
     Ok(AsyncSerialClientTransport::new(
         client_tx,
         server_rx,
+        link_generation,
         shutdown_tx,
         thread_handle,
         label_for_error,
@@ -444,6 +249,7 @@ mod tests {
     use super::*;
     use crate::transport::ClientTransport;
     use crate::transport_serial::client::CLOSE_JOIN_BUDGET;
+    use lpc_wire::ClientMessage;
 
     /// A byte stream that answers reads the way a silent device does and
     /// records the two things `close` is supposed to guarantee: that the
@@ -577,5 +383,251 @@ mod tests {
             writes.load(Ordering::SeqCst) < 60,
             "every queued frame was attempted against a peer that refused the first"
         );
+    }
+
+    /// A request crosses the link and its answer comes back, with the
+    /// board's console text on the side.
+    #[tokio::test]
+    async fn a_request_crosses_the_link_and_is_answered() {
+        let board = LinkBoard::new();
+        let mut transport = board.transport(HardwareSerialOptions::default());
+
+        let hello = receive_within(&mut transport, Duration::from_secs(3)).await;
+        assert!(
+            matches!(hello.msg, lpc_wire::ServerMsgBody::Hello(_)),
+            "the board says hello first on every link session: {hello:?}"
+        );
+        transport.send(hello_request(7)).await.unwrap();
+        let answer = receive_within(&mut transport, Duration::from_secs(3)).await;
+        assert_eq!(answer.id, 7);
+        transport.close().await.unwrap();
+        assert_eq!(board.requests(), vec![7]);
+    }
+
+    /// Damaged bytes on the way to the host are resent under the message:
+    /// the client sees its answer, not an error.
+    #[tokio::test]
+    async fn a_damaged_byte_is_resent_not_surfaced() {
+        let board = LinkBoard::new();
+        let mut transport = board.transport(HardwareSerialOptions::default());
+        receive_within(&mut transport, Duration::from_secs(3)).await;
+
+        board.garble_next_frame();
+        transport.send(hello_request(9)).await.unwrap();
+        let answer = receive_within(&mut transport, Duration::from_secs(3)).await;
+        assert_eq!(answer.id, 9);
+        transport.close().await.unwrap();
+    }
+
+    /// D9: a board that reboots under a request fails it at once, instead of
+    /// leaving it to an idle budget; the next request on the new session is
+    /// answered.
+    #[tokio::test]
+    async fn a_reboot_fails_the_request_in_flight_at_once() {
+        let board = LinkBoard::new();
+        let mut transport = board.transport(HardwareSerialOptions::default());
+        receive_within(&mut transport, Duration::from_secs(3)).await;
+
+        board.stop_answering();
+        transport.send(hello_request(11)).await.unwrap();
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        board.reboot();
+        let started = Instant::now();
+        let error = tokio::time::timeout(Duration::from_secs(3), transport.receive())
+            .await
+            .expect("the reset fails the request well before any idle budget")
+            .unwrap_err();
+        assert!(crate::is_link_reset(&error), "{error}");
+        assert!(started.elapsed() < Duration::from_secs(2));
+
+        // The new session's hello, then a request answered as usual.
+        let hello = receive_within(&mut transport, Duration::from_secs(3)).await;
+        assert!(matches!(hello.msg, lpc_wire::ServerMsgBody::Hello(_)));
+        transport.send(hello_request(12)).await.unwrap();
+        assert_eq!(
+            receive_within(&mut transport, Duration::from_secs(3))
+                .await
+                .id,
+            12
+        );
+        transport.close().await.unwrap();
+    }
+
+    fn hello_request(id: u64) -> ClientMessage {
+        ClientMessage {
+            id,
+            msg: lpc_wire::ClientRequest::Hello,
+        }
+    }
+
+    async fn receive_within(
+        transport: &mut impl ClientTransport,
+        budget: Duration,
+    ) -> lpc_wire::WireServerMessage {
+        tokio::time::timeout(budget, transport.receive())
+            .await
+            .expect("an answer inside the budget")
+            .expect("a message, not an error")
+    }
+
+    /// A board's end of an lp-link as a byte stream: hello on every `Up`,
+    /// an answer (with the request's id) to every request.
+    #[derive(Clone)]
+    struct LinkBoard(Arc<std::sync::Mutex<LinkBoardState>>);
+
+    struct LinkBoardState {
+        link: lpc_wire::lp_link::Link<lpc_wire::lp_link::SelectiveRepeat>,
+        born: Instant,
+        out: std::collections::VecDeque<u8>,
+        requests: Vec<u64>,
+        answering: bool,
+        garble_next: bool,
+        nonce: u32,
+    }
+
+    impl LinkBoard {
+        fn new() -> Self {
+            Self(Arc::new(std::sync::Mutex::new(LinkBoardState {
+                link: board_link(0xB0A2_0001),
+                born: Instant::now(),
+                out: Default::default(),
+                requests: Vec::new(),
+                answering: true,
+                garble_next: false,
+                nonce: 0xB0A2_0001,
+            })))
+        }
+
+        fn transport(
+            &self,
+            options: HardwareSerialOptions,
+        ) -> super::super::AsyncSerialClientTransport {
+            create_hardware_serial_transport_pair_with_options(
+                Box::new(self.clone()),
+                "/dev/test-link-board",
+                options,
+            )
+            .expect("transport")
+        }
+
+        fn requests(&self) -> Vec<u64> {
+            self.0.lock().unwrap().requests.clone()
+        }
+
+        fn stop_answering(&self) {
+            self.0.lock().unwrap().answering = false;
+        }
+
+        fn garble_next_frame(&self) {
+            self.0.lock().unwrap().garble_next = true;
+        }
+
+        /// A new boot: a new link with a new nonce, nothing buffered.
+        fn reboot(&self) {
+            let mut board = self.0.lock().unwrap();
+            board.nonce = board.nonce.wrapping_add(1);
+            board.link = board_link(board.nonce);
+            board.out.clear();
+            board.answering = true;
+        }
+    }
+
+    fn board_link(nonce: u32) -> lpc_wire::lp_link::Link<lpc_wire::lp_link::SelectiveRepeat> {
+        lpc_wire::lp_link::Link::new(lpc_wire::lp_link::LinkConfig::usb(), nonce)
+    }
+
+    impl LinkBoardState {
+        fn now(&self) -> u64 {
+            self.born.elapsed().as_micros() as u64
+        }
+
+        fn service(&mut self) {
+            use lpc_wire::lp_link::{CH_PROTO, LinkEvent};
+            while let Some(event) = self.link.recv() {
+                match event {
+                    LinkEvent::Up { .. } => {
+                        let hello = lpc_wire::WireServerMessage::new(
+                            0,
+                            lpc_wire::ServerMsgBody::Hello(lpc_wire::ServerHello {
+                                proto: lpc_wire::WIRE_PROTO_VERSION,
+                                build: lpc_wire::BuildFacts {
+                                    features: vec![],
+                                    package: "fw-esp32c6".to_string(),
+                                    commit: "unknown".to_string(),
+                                    dirty: false,
+                                    profile: "release-esp32".to_string(),
+                                },
+                                hardware: Default::default(),
+                                device_uid: None,
+                                pack_format: 0,
+                                auth: lpc_wire::HelloAuth::TRUSTED,
+                            }),
+                        );
+                        self.send(&hello);
+                    }
+                    LinkEvent::Message {
+                        channel: CH_PROTO,
+                        data,
+                    } => {
+                        let request = lpc_wire::decode_client_payload(&data).unwrap();
+                        self.requests.push(request.id);
+                        if self.answering {
+                            self.send(&lpc_wire::WireServerMessage::new(
+                                request.id,
+                                lpc_wire::ServerMsgBody::UnloadProject,
+                            ));
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            let now = self.now();
+            while let Some(frame) = self.link.poll_transmit(now) {
+                let mut frame = frame.to_vec();
+                if std::mem::take(&mut self.garble_next) && frame.len() > 8 {
+                    frame[6] ^= 0x10;
+                }
+                self.out.extend(frame);
+            }
+        }
+
+        fn send(&mut self, message: &lpc_wire::WireServerMessage) {
+            let json = lpc_wire::json::to_string(message).unwrap();
+            self.link
+                .send(lpc_wire::lp_link::CH_PROTO, json.as_bytes())
+                .unwrap();
+        }
+    }
+
+    impl DeviceByteStream for LinkBoard {
+        fn read_available(&mut self, buf: &mut [u8]) -> Result<usize, ByteStreamError> {
+            let mut board = self.0.lock().unwrap();
+            board.service();
+            let n = buf.len().min(board.out.len());
+            for (slot, byte) in buf.iter_mut().zip(board.out.drain(..n)) {
+                *slot = byte;
+            }
+            Ok(n)
+        }
+
+        fn write_all(&mut self, bytes: &[u8]) -> Result<(), ByteStreamError> {
+            let mut board = self.0.lock().unwrap();
+            let now = board.now();
+            board.link.on_bytes(now, bytes);
+            board.service();
+            Ok(())
+        }
+
+        fn set_signals(
+            &mut self,
+            _dtr: Option<bool>,
+            _rts: Option<bool>,
+        ) -> Result<(), ByteStreamError> {
+            Ok(())
+        }
+
+        fn reopen(&mut self, _baud_rate: u32) -> Result<(), ByteStreamError> {
+            Ok(())
+        }
     }
 }

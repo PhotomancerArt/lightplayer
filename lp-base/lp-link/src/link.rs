@@ -44,6 +44,11 @@ pub enum LinkState {
     Established,
 }
 
+/// [`Link::cancel_external`]: the external message's first fragment already
+/// went out.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ExternalStarted;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SendError {
     /// The send budget (or the datagram queue) is full; try after `recv`/
@@ -115,7 +120,7 @@ impl<A: Arq> Link<A> {
             generation: 0,
             arq: A::new(rx_window, max_payload),
             tx: TxQueue::new(shape.tx_window, max_payload),
-            inbox: Inbox::new(cfg.rx_budget, cfg.max_message),
+            inbox: Inbox::new(cfg.rx_budget, cfg.max_message, cfg.keep_reassembly),
             rtt: RttEstimator::new(cfg.initial_rto, cfg.min_rto, cfg.max_rto),
             backoff: 0,
             send_order: 0,
@@ -179,7 +184,7 @@ impl<A: Arq> Link<A> {
             return Err(SendError::BadChannel);
         }
         if self.cfg.is_reliable(channel) {
-            if payload.len() > self.cfg.max_message {
+            if payload.len() > self.cfg.max_message || payload.len() > self.cfg.send_budget {
                 return Err(SendError::TooBig);
             }
             if self.pending.live_bytes() + self.tx.bytes() + payload.len() > self.cfg.send_budget
@@ -201,6 +206,45 @@ impl<A: Arq> Link<A> {
             }
         }
         Ok(())
+    }
+
+    /// Queue a reliable message of `len` bytes that the caller keeps: an
+    /// **external** message. Its bytes are read from the caller's buffer, a
+    /// fragment at a time, by [`poll_transmit_with`](Self::poll_transmit_with)
+    /// and copied into the transmit window (which keeps them for resends);
+    /// nothing is copied into the send ring, and it does not count against
+    /// `send_budget`. The caller keeps the buffer unchanged while
+    /// [`external_in_flight`](Self::external_in_flight) is true.
+    ///
+    /// At most one at a time (`Full` while one is in flight). It keeps its
+    /// place in its channel's order, and a lower channel still overtakes it
+    /// at a frame boundary. A reset drops it like any queued message.
+    pub fn send_external(&mut self, channel: u8, len: usize) -> Result<(), SendError> {
+        if channel >= 8 || !self.cfg.is_reliable(channel) {
+            return Err(SendError::BadChannel);
+        }
+        if len > self.cfg.max_message {
+            return Err(SendError::TooBig);
+        }
+        self.pending
+            .push_external(channel, len)
+            .map_err(|_| SendError::Full)
+    }
+
+    /// An external message has bytes not yet cut into frames: its buffer is
+    /// still the link's to read. Once false the caller may reuse it; the
+    /// frames already cut are in the transmit window.
+    pub fn external_in_flight(&self) -> bool {
+        self.pending.external_untaken()
+    }
+
+    /// Withdraw the external message before any of it has been sent.
+    /// [`ExternalStarted`] once its first fragment has been cut: the peer may
+    /// hold part of it, so it can only be finished (wait for
+    /// [`external_in_flight`](Self::external_in_flight)) or abandoned with the
+    /// session ([`restart`](Self::restart)). `Ok` when none is queued.
+    pub fn cancel_external(&mut self) -> Result<(), ExternalStarted> {
+        self.pending.cancel_external().map_err(|()| ExternalStarted)
     }
 
     /// Move log records from `ring` into the log channel while there is room.
@@ -281,12 +325,35 @@ impl<A: Arq> Link<A> {
     /// The next frame to write, if any. Call until `None` whenever the
     /// transport can take more. Each returned slice is one whole frame (write
     /// it as one datagram, or as bytes on a stream).
+    ///
+    /// While an external message is queued ([`send_external`](Self::send_external))
+    /// call [`poll_transmit_with`](Self::poll_transmit_with) instead: without a
+    /// source its channel waits (lower channels still go).
     pub fn poll_transmit(&mut self, now: Micros) -> Option<&[u8]> {
+        self.poll_transmit_inner(now, None)
+    }
+
+    /// [`poll_transmit`](Self::poll_transmit), with `source(offset, out)`
+    /// filling `out` from the external message's bytes at `offset` whenever a
+    /// fragment of it is cut.
+    pub fn poll_transmit_with(
+        &mut self,
+        now: Micros,
+        source: &mut dyn FnMut(usize, &mut [u8]),
+    ) -> Option<&[u8]> {
+        self.poll_transmit_inner(now, Some(source))
+    }
+
+    fn poll_transmit_inner(
+        &mut self,
+        now: Micros,
+        mut source: Option<&mut dyn FnMut(usize, &mut [u8])>,
+    ) -> Option<&[u8]> {
         self.service_timers(now);
-        let mut sent = self.pick_and_emit(now);
+        let mut sent = self.pick_and_emit(now, &mut source);
         if !sent && self.state == LinkState::Connecting {
             // A reset inside pick_and_emit leaves a SYN due now.
-            sent = self.pick_and_emit(now);
+            sent = self.pick_and_emit(now, &mut source);
         }
         if !sent {
             return None;
@@ -301,7 +368,9 @@ impl<A: Arq> Link<A> {
     /// delayed ACK, keepalive, SYN, idle flush). New input and `send()` need a
     /// `poll_transmit` too; this does not cover them.
     pub fn poll_timeout(&self) -> Option<Micros> {
-        let mut t = self.deframer.idle_deadline(self.cfg.idle_flush);
+        let mut t = self
+            .deframer
+            .idle_deadline(self.cfg.idle_flush, self.cfg.frame_abandon);
         let mut min = |x: Option<Micros>| {
             if let Some(x) = x {
                 t = Some(t.map_or(x, |t| t.min(x)));
@@ -583,7 +652,7 @@ impl<A: Arq> Link<A> {
     fn service_timers(&mut self, now: Micros) {
         if self
             .deframer
-            .idle_deadline(self.cfg.idle_flush)
+            .idle_deadline(self.cfg.idle_flush, self.cfg.frame_abandon)
             .is_some_and(|t| t <= now)
         {
             match self.deframer.flush_idle() {
@@ -609,7 +678,11 @@ impl<A: Arq> Link<A> {
     }
 
     /// Choose the next frame and encode it into `out`.
-    fn pick_and_emit(&mut self, now: Micros) -> bool {
+    fn pick_and_emit(
+        &mut self,
+        now: Micros,
+        source: &mut Option<&mut dyn FnMut(usize, &mut [u8])>,
+    ) -> bool {
         if self.state == LinkState::Connecting {
             if self.syn_due.is_some_and(|t| t <= now) {
                 self.syn_due = Some(now + self.cfg.syn_interval);
@@ -645,7 +718,7 @@ impl<A: Arq> Link<A> {
             return true;
         }
         if self.can_send_new()
-            && let Some(seq) = self.next_fragment()
+            && let Some(seq) = self.next_fragment(source)
         {
             self.emit_data(now, seq);
             return true;
@@ -705,10 +778,16 @@ impl<A: Arq> Link<A> {
 
     /// Cut the next fragment of a queued message into the transmit window;
     /// its sequence number.
-    fn next_fragment(&mut self) -> Option<u8> {
+    fn next_fragment(
+        &mut self,
+        source: &mut Option<&mut dyn FnMut(usize, &mut [u8])>,
+    ) -> Option<u8> {
         let (pending, n) = (&mut self.pending, self.tx_payload);
         self.tx.push_with(|slot| {
-            let t = pending.take(&mut slot[..n])?;
+            let source = source
+                .as_mut()
+                .map(|f| &mut **f as &mut dyn FnMut(usize, &mut [u8]));
+            let t = pending.take(&mut slot[..n], source)?;
             Some((t.chan, t.first, t.fin, t.len))
         })
     }

@@ -1,11 +1,12 @@
 ---
-status: open
+status: open           # mitigated by lp-link resends (PR #854); fix = draft PR #855, awaiting Yona
 found: 2026-09-26      # emulator (lp-emu:esp32c6:t1), the comms lab's USB soak; code read in the fork
 area: third_party/esp-hal src/usb_serial_jtag.rs (`async_interrupt_handler`) × any task that reads and writes USB-Serial-JTAG at once
 class: assumed-context
 related:
   - docs/defects/2026-09-13-the-s3-link-drops-the-io-tasks-next-chunk-on-a-stale-serial-in-empty.md
   - lp-fw/fw-esp32-common/src/serial/in_endpoint.rs
+  - docs/adr/2026-09-27-lp-link-one-comms-layer.md
   - ~/.photomancer/planning/lp2025/2026-09-26-1720-reliable-device-link/reports/m3-on-target.md
   - ~/.photomancer/planning/lp2025/2026-09-26-1720-reliable-device-link/reports/m3-esp-hal-isr-clear-experiment.patch
 ---
@@ -47,7 +48,21 @@ and upstream.
 the board's `edge.write_timeouts`; an assertion of 0 there, with the fix,
 would pin it.
 
+**Mitigated (2026-09-27, PR #854, the lp-link USB cut-over).** This defect
+is not fixed by lp-link, but its user-visible cost is: a frame write that
+stalls on the missed edge now just resends once `lp-link`'s own retransmit
+timer fires, instead of surfacing as a 250 ms application-level stall (the
+comms lab's `not_draining` latch, deleted with the cut-over). It still costs
+latency — every stall this defect causes is still a real round trip lost —
+and the `docs/adr/2026-07-28-esp32c6-flash-budget.md`-adjacent D12 decision
+not to back-port esp-hal's own fix (esp-hal #6089/#6104, released in 1.2.0)
+in this PR stands. The actual fix, third_party's `int_clr` patch described
+above, is up as **draft PR #855, awaiting Yona** — this entry stays `open`
+until that lands.
+
 **Lesson.** A handler that services two sources off one status read must
 clear exactly what it read. The IN-endpoint gate fixed the *stale* raw bit
 (the 2026-09-13 defect); this is the opposite race, a *fresh* one cleared
-too early, and no gate in front of a write can see it.
+too early, and no gate in front of a write can see it. A reliable link atop
+a bug like this one turns a stall into a resend, but it does not make the
+stall free — the two are complementary, not substitutes.

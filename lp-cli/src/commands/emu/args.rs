@@ -25,6 +25,12 @@ pub enum EmuChip {
     #[default]
     #[value(name = "esp32c6")]
     Esp32C6,
+    /// The S3, for `run --host-link` only (`--elf` or `--merged`, `--console`,
+    /// `--request`, `--exit-on`, `--dump-frames`, `--strict-bus`): the rest of
+    /// this door's flags are the C6's, and the S3's own binary is the
+    /// workshop for everything else.
+    #[value(name = "esp32s3")]
+    Esp32S3,
 }
 
 /// Which link the socket is.
@@ -126,6 +132,42 @@ pub struct RunArgs {
     /// power-on and leaving the socket as bytes only.
     #[arg(long)]
     pub monitor: bool,
+
+    /// Be the host on the USB link, in this process: the product's own
+    /// lp-link host end (`lpc_wire::WireLinkPort`) serviced between slices of
+    /// emulated time, for the whole run.
+    ///
+    /// Since wire proto 30 the shipped image speaks lp-link on USB: its log
+    /// lines ride the link's log channel and its hello and heartbeats go out
+    /// only once a host has brought the link up, so a console read straight
+    /// off the port holds boot text and frames. With this flag `--console`
+    /// is the DECODED console instead — raw text and log records as the
+    /// board used to print them, every wire message as its `M!{json}` line,
+    /// and `[link] …` notes — and `--exit-on` matches those lines. The USB
+    /// host is attached and draining from power-on; no `--link` socket can
+    /// be the USB port.
+    #[arg(long = "host-link", conflicts_with_all = ["monitor", "usb_host"])]
+    pub host_link: bool,
+
+    /// With `--host-link`: upload this project directory over the link once
+    /// the board's hello arrives, exactly as `lp-cli upload` deploys it, and
+    /// keep hosting the link (and writing the console) to the deadline.
+    #[arg(long, requires = "host_link")]
+    pub upload: Option<PathBuf>,
+
+    /// With `--host-link`: do not ask the board to pack its replies (JSON
+    /// Pack), so the run measures a board that has no learned table — the
+    /// heap ratchet's state, and what a host with `LP_WIRE_ENCODING=json`
+    /// gets. Every product host asks by default, and so does this door.
+    #[arg(long = "json-replies", requires = "host_link")]
+    pub json_replies: bool,
+
+    /// With `--host-link`: send this client request once the board's hello
+    /// arrives — the JSON of a `ClientRequest`, for example
+    /// `"stopAllProjects"`. Repeatable; sent in order, each waiting for the
+    /// answer to the one before (after any `--upload`).
+    #[arg(long, requires = "host_link")]
+    pub request: Vec<String>,
 
     #[arg(long = "time-grade", value_enum, default_value_t = Grade::T1)]
     pub time_grade: Grade,

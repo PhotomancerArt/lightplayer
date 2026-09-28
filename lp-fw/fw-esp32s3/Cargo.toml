@@ -242,12 +242,13 @@ littlefs-rust = { version = "0.1.0", default-features = false, features = ["allo
 lpc-wire = { path = "../../lp-core/lpc-wire", default-features = false, optional = true, features = ["ser-write-json"] }
 lpc-model = { path = "../../lp-core/lpc-model", default-features = false, optional = true }
 
-# Chip-generic firmware layer: logger, time provider, output provider, the
-# chunked serial writer, and — behind `server` — the server loop, transport,
-# the io_task JSON-serialization half, littlefs `LpFs`, project auto-load, and
-# hardware-manifest loader. Consumed, never reimplemented; this
-# crate must stay free of chip code (ADR 2026-07-29-per-chip-fw-toolchains).
-fw-esp32-common = { path = "../fw-esp32-common", default-features = false }
+# Chip-generic firmware layer: the log ring, time provider, output provider,
+# the USB host link on lp-link (`usb-link`, plan `lp-link-usb-cutover`), and —
+# behind `server` — the server loop and its transport over that link,
+# littlefs `LpFs`, project auto-load, and hardware-manifest loader. Consumed,
+# never reimplemented; this crate must stay free of chip code
+# (ADR 2026-07-29-per-chip-fw-toolchains).
+fw-esp32-common = { path = "../fw-esp32-common", default-features = false, features = ["usb-link"] }
 
 # All eight node gates, matching fw-esp32c6. `default-features = false` means
 # no gate is implied — a kind not listed here loads as an inert placeholder

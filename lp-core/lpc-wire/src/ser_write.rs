@@ -667,11 +667,11 @@ mod token_hook_tests {
             let mut out = Vec::new();
             match line.direction {
                 TrafficDirection::BoardToHost => {
-                    let msg: WireServerMessage = crate::json::from_str(line.json).unwrap();
+                    let msg: WireServerMessage = crate::json::from_str(&line.json).unwrap();
                     ser_write_json_to(&mut out, &msg).unwrap();
                 }
                 TrafficDirection::HostToBoard => {
-                    let msg: ClientMessage = crate::json::from_str(line.json).unwrap();
+                    let msg: ClientMessage = crate::json::from_str(&line.json).unwrap();
                     ser_write_json_to(&mut out, &msg).unwrap();
                 }
             }

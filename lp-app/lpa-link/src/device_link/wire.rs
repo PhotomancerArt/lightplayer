@@ -107,13 +107,15 @@ pub fn server_frame(message: &WireServerMessage) -> ServerFrame {
             loaded_projects,
             recovery,
             fps,
+            link,
             ..
         } if message.id == 0 => ServerFrame::heartbeat_report(
             identity.as_ref().map(heartbeat_identity),
             Some(loaded_projects.iter().map(loaded_project_facts).collect()),
             recovery.as_ref().map(recovery_facts),
         )
-        .with_engine_fps(engine_fps(fps.avg)),
+        .with_engine_fps(engine_fps(fps.avg))
+        .with_link_counters(link.as_ref().map(link_counter_facts)),
         // The one non-hello RESPONSE body the mirror decodes rather than
         // labels: whether a board has a project on it is what the empty and
         // running faces are made of (M3), and a label cannot carry it.
@@ -138,6 +140,18 @@ pub fn server_frame(message: &WireServerMessage) -> ServerFrame {
 fn engine_fps(avg: f32) -> Option<u16> {
     let rounded = avg.round();
     (rounded.is_finite() && rounded >= 1.0).then(|| rounded.min(f32::from(u16::MAX)) as u16)
+}
+
+/// The board's link counters, as the card's link section says them (D13).
+fn link_counter_facts(link: &lpc_wire::server::LinkCounters) -> lpa_devices::LinkCounterFacts {
+    lpa_devices::LinkCounterFacts {
+        resends: link.resends,
+        damaged: link.damaged,
+        resets: link.resets.total,
+        stalls: link.stalls,
+        bytes_sent: link.bytes_tx,
+        bytes_received: link.bytes_rx,
+    }
 }
 
 fn loaded_project_facts(project: &lpc_wire::server::LoadedProject) -> LoadedProjectFacts {
@@ -487,6 +501,46 @@ mod tests {
         };
         assert!(recovery.is_none(), "silence is not green");
         assert!(loaded.as_ref().expect("loaded report")[0].fault.is_none());
+    }
+
+    #[test]
+    fn a_heartbeat_carries_the_boards_link_counters_into_the_mirror() {
+        let mut body = heartbeat_body(None);
+        if let ServerMsgBody::Heartbeat { link, .. } = &mut body {
+            *link = Some(lpc_wire::server::LinkCounters {
+                resends: 3,
+                damaged: 1,
+                stalls: 2,
+                bytes_tx: 40_000,
+                bytes_rx: 9_000,
+                resets: lpc_wire::server::LinkResets {
+                    total: 4,
+                    ..Default::default()
+                },
+                ..Default::default()
+            });
+        }
+        let frame = server_frame(&WireServerMessage::new(0, body));
+
+        let ServerFrameBody::Heartbeat { link, .. } = &frame.body else {
+            panic!("heartbeat");
+        };
+        assert_eq!(
+            *link,
+            Some(lpa_devices::LinkCounterFacts {
+                resends: 3,
+                damaged: 1,
+                resets: 4,
+                stalls: 2,
+                bytes_sent: 40_000,
+                bytes_received: 9_000,
+            })
+        );
+        let silent = server_frame(&WireServerMessage::new(0, heartbeat_body(None)));
+        assert!(
+            matches!(silent.body, ServerFrameBody::Heartbeat { link: None, .. }),
+            "a link that reports none mirrors none"
+        );
     }
 
     #[test]

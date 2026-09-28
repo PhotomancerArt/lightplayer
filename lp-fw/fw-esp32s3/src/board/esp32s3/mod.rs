@@ -52,6 +52,6 @@ pub mod fpu;
 // doc for the hazard that makes it the *only* one.
 #[cfg(not(fw_harness))]
 pub mod init;
-// Sole consumer is `serial::io_task`; keep this gate identical to its own.
+// Sole consumer is `serial::usb_link_task`; keep this gate identical to its own.
 #[cfg(not(fw_harness))]
 pub mod usb_connection;

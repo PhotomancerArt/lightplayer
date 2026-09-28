@@ -24,6 +24,11 @@ lpc-model = { path = "../lpc-model", default-features = false }
 # table (`WireStream`); nothing in it allocates on the encode path the device
 # uses.
 lp-json-pack = { workspace = true, features = ["alloc"] }
+# The link every USB device connection runs on (framing, CRC, resend,
+# channels, lifecycle): `WireLinkPort` is a host's end of one, the payload
+# codec is what rides its proto channel, and the heartbeat reports its
+# counters (plan `lp2025/2026-09-27-0215-lp-link-usb-cutover`).
+lp-link = { path = "../../lp-base/lp-link", default-features = false }
 # Floats print exactly as ser-write-json prints them (it depends on the same
 # crate), so a packed decimal decodes to the JSON text byte for byte.
 ryu-js = { version = "1.0", optional = true, default-features = false }

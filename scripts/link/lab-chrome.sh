@@ -6,7 +6,7 @@
 #
 # e.g. scripts/link/lab-chrome.sh captures/m3 chrome-30min 'echo=900&stream=900&logs=1000'
 #
-# soak-chrome.sh's shape (M1b): serves spikes/serial-lab (its /lab page) on a
+# the M1b soak page's shape: serves spikes/serial-lab (its /lab page) on a
 # bench-block port, which the serial-grant policy covers (`just serial-grant`;
 # Brave only), opens the page in headless Brave with a scratch profile, waits
 # for the page to post its report, and stops the browser and the server it

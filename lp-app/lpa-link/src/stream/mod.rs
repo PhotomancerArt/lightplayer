@@ -5,7 +5,7 @@
 //! dependency graph) and re-exported here as the link-side surface. Serial
 //! providers hand an opened stream to
 //! `lpa_client::transport_serial::create_hardware_serial_transport_pair_with_options`,
-//! which runs the real `M!` framing over it:
+//! which runs the real lp-link over it:
 //!
 //! - `host-serial-esp32` opens a [`SerialPortByteStream`] on a native port.
 //! - The `fake-device` feature's `FakeEsp32Device` implements the trait over

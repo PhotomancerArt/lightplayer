@@ -312,11 +312,11 @@ mod tests {
     fn serialize_line<W: SerWrite>(line: &TrafficLine, sink: &mut W) {
         match line.direction {
             TrafficDirection::BoardToHost => {
-                let msg: WireServerMessage = crate::json::from_str(line.json).unwrap();
+                let msg: WireServerMessage = crate::json::from_str(&line.json).unwrap();
                 ser_write_json_to(sink, &msg).unwrap();
             }
             TrafficDirection::HostToBoard => {
-                let msg: ClientMessage = crate::json::from_str(line.json).unwrap();
+                let msg: ClientMessage = crate::json::from_str(&line.json).unwrap();
                 ser_write_json_to(sink, &msg).unwrap();
             }
         }
@@ -329,11 +329,11 @@ mod tests {
     ) -> Result<usize, WireWriteError> {
         match line.direction {
             TrafficDirection::BoardToHost => {
-                let msg: WireServerMessage = crate::json::from_str(line.json).unwrap();
+                let msg: WireServerMessage = crate::json::from_str(&line.json).unwrap();
                 ser_learned_to(buf, table, &msg)
             }
             TrafficDirection::HostToBoard => {
-                let msg: ClientMessage = crate::json::from_str(line.json).unwrap();
+                let msg: ClientMessage = crate::json::from_str(&line.json).unwrap();
                 ser_learned_to(buf, table, &msg)
             }
         }
