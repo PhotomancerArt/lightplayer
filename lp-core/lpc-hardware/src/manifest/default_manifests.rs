@@ -131,7 +131,7 @@ fn normalize_resource_for_emu(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{HardwareSystem, HwCapability, HwEndpointSpec, HwRegistry};
+    use crate::{HardwareSystem, HwCapability, HwClaim, HwEndpointSpec, HwError, HwRegistry};
 
     #[test]
     fn default_esp32c6_manifest_loads_checked_in_board_profile() {
@@ -163,6 +163,34 @@ mod tests {
                 resource.supports(HwCapability::DeepSleepWake),
                 gpio <= 7,
                 "gpio{gpio}"
+            );
+        }
+    }
+
+    /// GPIO3 (RF switch power) and GPIO14 (antenna select) are the XIAO C6's
+    /// radio pins: `board_quirk.rs` drives them directly, so a project must
+    /// never be able to claim either one.
+    #[test]
+    fn default_esp32c6_manifest_reserves_rf_switch_gpios() {
+        let manifest = default_esp32c6_hardware_manifest();
+
+        for pin in [3, 14] {
+            assert!(
+                manifest
+                    .resource(&HwAddress::gpio(pin))
+                    .and_then(|resource| resource.reserved_reason())
+                    .is_some(),
+                "gpio{pin} must be reserved"
+            );
+        }
+
+        let registry = HwRegistry::new(default_esp32c6_hardware_manifest());
+        for pin in [3, 14] {
+            let result =
+                registry.claim_bundle(HwClaim::new("test", alloc::vec![HwAddress::gpio(pin)]));
+            assert!(
+                matches!(result, Err(HwError::ReservedResource { .. })),
+                "gpio{pin} must not be claimable"
             );
         }
     }
