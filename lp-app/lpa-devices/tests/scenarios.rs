@@ -980,6 +980,73 @@ fn flashing_a_blank_pending_link_adopts_joins_identity_and_lands_ready() {
     assert_eq!(count_notes(&replay, "ActivityEnded"), 2, "identify + flash");
 }
 
+/// 2026-09-28 queue ticket: the flash picker offers every board that fits
+/// the chip when the chip is unknown ("8 boards fit" on silicon) — picking
+/// the WRONG one must not overwrite the board's real `/hardware.json`. The
+/// device already knows its board ("dig-uno", from `ready_device_with`'s
+/// hello); flashing it with a *different* pick ("seeed-xiao-esp32c6")
+/// writes the firmware but the post-flash hello never starts the manifest
+/// stamp. Before the fix this test fails: the hello unconditionally
+/// started `WriteBoardManifest { board_id: "seeed-xiao-esp32c6" }`.
+#[test]
+fn flashing_a_known_board_with_a_different_pick_writes_firmware_but_not_the_manifest() {
+    let config = RosterConfig::default();
+    let mut replay = ready_device_with(config);
+    let device = first_device(&replay);
+    let commands = replay.step(
+        Millis(2_000),
+        Step::Flash {
+            device: device.0,
+            board: "seeed-xiao-esp32c6".to_string(),
+            build: "esp32c6-4mb".to_string(),
+            name: None,
+        },
+    );
+    assert!(
+        commands.iter().any(|command| matches!(
+            command,
+            lpa_devices::Command::RunEffect {
+                effect: lpa_devices::EffectRequest::Flash { .. },
+                ..
+            }
+        )),
+        "the firmware write still happens: {commands:?}"
+    );
+
+    replay.step(
+        Millis(30_000),
+        Step::EffectEnded {
+            device: device.0,
+            ok: true,
+            message: None,
+            effect: None,
+            kind: None,
+        },
+    );
+    replay.step(Millis(30_100), Step::opened(1));
+    let commands = replay.step(
+        Millis(30_200),
+        // The flashed firmware answers, still reporting the board it was
+        // built for before this reducer's flash — the manifest write is
+        // what would have changed it.
+        Step::hello(1).uid("dev_2f8a").board("dig-uno"),
+    );
+    assert!(
+        !commands.iter().any(|command| matches!(
+            command,
+            lpa_devices::Command::RunEffect {
+                effect: lpa_devices::EffectRequest::WriteBoardManifest { .. },
+                ..
+            }
+        )),
+        "a pick that disagrees with the known board must not restamp: {commands:?}"
+    );
+    let view = replay.view();
+    assert_eq!(view.devices[0].state_label, "Ready", "{:?}", view.devices[0]);
+    let outcome = view.devices[0].last_outcome.as_ref().expect("an outcome");
+    assert!(outcome.ok, "the flash still succeeds: {outcome:?}");
+}
+
 /// Scripted post-flash silence: the ladder escalates reopen → Normal →
 /// BothThenDrop and then fails with the honest replug/Reconnect guidance
 /// (V3/CH340: a replug kills the grant).

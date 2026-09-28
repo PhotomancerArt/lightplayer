@@ -194,10 +194,26 @@ pub struct FlashActivity {
     /// Cancel wind-down in progress: the port was asked to close.
     winding_down: bool,
     next_request_id: u32,
+    /// Whether the hello proving the flash landed should be followed by the
+    /// board-manifest stamp. `false` when the record already knew a
+    /// DIFFERENT board id at spawn time ([`Device::spawn_flash`]) — a
+    /// picker offering "8 boards fit" because the CHIP is unknown says
+    /// nothing about the BOARD, and a wrong pick used to overwrite the
+    /// right manifest (2026-09-28). A board the record has no id for yet
+    /// (a first flash), or a re-pick of the SAME board it already knows,
+    /// still gets stamped — this only guards a pick that would REPLACE a
+    /// different one.
+    write_manifest: bool,
 }
 
 impl FlashActivity {
-    pub fn new(device: DeviceId, board_id: String, build_id: String, park_first: bool) -> Self {
+    pub fn new(
+        device: DeviceId,
+        board_id: String,
+        build_id: String,
+        park_first: bool,
+        write_manifest: bool,
+    ) -> Self {
         Self {
             device,
             board_id,
@@ -208,6 +224,7 @@ impl FlashActivity {
             cancel_after_effect: false,
             winding_down: false,
             next_request_id: 1,
+            write_manifest,
         }
     }
 
@@ -291,6 +308,12 @@ impl FlashActivity {
     /// journaled the version and put the notice in the terminal; failing
     /// here would tell the user the flash broke when it did not.
     fn on_hello(&mut self, now: Millis, ctx: &ActivityCtx<'_>) -> ActivityStep {
+        if !self.write_manifest {
+            // The board already had a manifest before this flash: the
+            // picker's pick was for firmware, not for hardware facts, and a
+            // wrong pick must not overwrite the right ones (2026-09-28).
+            return ActivityStep::done(self.success(ctx));
+        }
         let Some(link) = ctx.link else {
             // The hello proves the board is alive, but the link vanished
             // under us in the same instant; the stamp cannot run.
@@ -700,6 +723,7 @@ mod tests {
             "seeed-xiao-esp32c6".to_string(),
             "esp32c6-4mb".to_string(),
             true,
+            true,
         );
         let evidence = Evidence::default();
         let config = RosterConfig::default();
@@ -777,11 +801,19 @@ mod tests {
     }
 
     fn flash() -> FlashActivity {
+        flash_with_manifest_write(true)
+    }
+
+    /// [`flash`], with control over whether the board already had a
+    /// manifest (`write_manifest: false`) — the 2026-09-28 fix's own
+    /// branch.
+    fn flash_with_manifest_write(write_manifest: bool) -> FlashActivity {
         FlashActivity::new(
             DeviceId(1),
             "seeed-xiao-esp32c6".to_string(),
             "esp32c6-4mb".to_string(),
             false,
+            write_manifest,
         )
     }
 
@@ -1035,6 +1067,56 @@ mod tests {
                 } if summary.contains("seeed-xiao-esp32c6")
             ),
             "{step:?}"
+        );
+    }
+
+    /// 2026-09-28 queue finding: a picked board that disagrees with the
+    /// one the record already knows keeps the board's existing
+    /// `/hardware.json` — the pick is used for firmware only. Before this
+    /// fix the hello unconditionally started the stamp, so a wrong pick
+    /// from the "8 boards fit" chip-only picker overwrote the right
+    /// manifest. `Device::spawn_flash` is what compares the pick against
+    /// `record.board_id` and sets `write_manifest` to `false`; this test
+    /// exercises the reducer's own end of that (the flag already decided).
+    #[test]
+    fn a_board_the_record_already_knows_keeps_its_manifest_instead_of_being_restamped() {
+        let config = RosterConfig::default();
+        let mut evidence = Evidence::default();
+        opened(&mut evidence, Millis(0), &config);
+        let mut activity = flash_with_manifest_write(false);
+        with_ctx(&evidence, &config, |ctx| {
+            activity.handle(
+                Millis(0),
+                &ended(ActivityOutcome::Succeeded {
+                    summary: "written".to_string(),
+                }),
+                ctx,
+            )
+        });
+
+        hello(&mut evidence, Millis(2_000), &config);
+        let frame = Input::link(
+            LinkId(1),
+            LinkEvent::Frame(ServerFrame::hello(
+                1,
+                HelloFacts {
+                    proto: config.expected_proto,
+                    ..Default::default()
+                },
+            )),
+        );
+        let step = with_ctx(&evidence, &config, |ctx| {
+            activity.handle(Millis(2_000), &frame, ctx)
+        });
+        assert!(
+            matches!(
+                step,
+                ActivityStep::Done {
+                    outcome: ActivityOutcome::Succeeded { .. },
+                    ..
+                }
+            ),
+            "the flash finishes on the hello alone, no manifest effect: {step:?}"
         );
     }
 

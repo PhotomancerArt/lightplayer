@@ -352,11 +352,29 @@ impl Device {
             return Vec::new();
         }
         let effect_id = self.mint_effect_id();
+        // Keep the board's existing `/hardware.json` unless the picked
+        // board disagrees with it: a board the picker offers because the
+        // CHIP was unknown ("8 boards fit") may already carry the right
+        // manifest, and picking the WRONG one must not overwrite it — the
+        // chip guard only checks the chip, not the board (2026-09-28 queue
+        // finding). A board the record has no board id for yet (a first
+        // flash) still gets the picked one stamped, and re-picking the SAME
+        // board the record already knows re-stamps as before — this only
+        // guards a picked board that would REPLACE a different one.
+        let write_manifest = match self
+            .record
+            .as_ref()
+            .and_then(|record| record.board_id.as_deref())
+        {
+            None => true,
+            Some(known) => known == board_id,
+        };
         let mut reducer = FlashActivity::new(
             self.id,
             board_id.to_string(),
             build_id.to_string(),
             park_first,
+            write_manifest,
         );
         let commands = {
             let activity_ctx = ActivityCtx {
