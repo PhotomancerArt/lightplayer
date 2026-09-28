@@ -176,7 +176,7 @@ fn text_after_a_stray_leading_zero_is_not_held_for_frame_abandon() {
         "an M!-line stream after a stray 0x00 must arrive as text without \
          waiting on frame_abandon, at time `now` with no idle at all"
     );
-    assert!(texts.concat().starts_with("M!00000\n"), "{:?}", texts);
+    assert!(texts.concat().starts_with("M!00000\n"), "{texts:?}");
     assert_eq!(
         b.counters().stale_partials,
         0,
