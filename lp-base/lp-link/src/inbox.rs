@@ -173,11 +173,17 @@ impl Inbox {
         self.partials[c].extend_from_slice(f.data);
         self.open |= bit;
         if f.fin {
-            let data = self.partials[c].as_slice().to_vec();
+            // Past `keep`, the buffer is released right after anyway: hand
+            // it over instead of copying it out first, so a large message
+            // never briefly needs both the reassembly buffer and its own
+            // copy. Within `keep`, the buffer stays allocated for the next
+            // message, so it must be copied out of, not taken.
+            let data = if self.partials[c].capacity() > self.keep {
+                core::mem::take(&mut self.partials[c])
+            } else {
+                self.partials[c].as_slice().to_vec()
+            };
             self.abort(f.chan);
-            if self.partials[c].capacity() > self.keep {
-                self.partials[c] = Vec::new();
-            }
             self.deliver(f.chan, data);
         }
         Ok(())
@@ -373,6 +379,42 @@ mod tests {
         // The next message on the channel is whole.
         inbox.push_fragment(frag(true, true, 5)).unwrap();
         assert!(matches!(inbox.pop(), Some(LinkEvent::Message { .. })));
+    }
+
+    #[test]
+    fn a_finished_message_past_keep_is_handed_over_without_a_copy() {
+        // `keep` is small, so the reassembly buffer is released at `fin`:
+        // the delivered message should be that same allocation (its pointer
+        // unchanged), not a fresh copy sitting next to it.
+        let mut inbox = Inbox::new(64 * 1024, 4096, 64);
+        inbox
+            .push_fragment(Fragment {
+                chan: 1,
+                first: true,
+                fin: false,
+                data: &[7; 200],
+            })
+            .unwrap();
+        let ptr_before = inbox.partials[1].as_ptr();
+        let cap_before = inbox.partials[1].capacity();
+        assert!(cap_before > 64, "test setup: the buffer must exceed keep");
+        // An empty fin fragment: nothing left to grow, so this call cannot
+        // reallocate the partial buffer on its own — any difference between
+        // `ptr_before` and the delivered data's pointer is the handover.
+        inbox
+            .push_fragment(Fragment {
+                chan: 1,
+                first: false,
+                fin: true,
+                data: &[],
+            })
+            .unwrap();
+        let Some(LinkEvent::Message { data, .. }) = inbox.pop() else {
+            panic!("no message");
+        };
+        assert_eq!(data.len(), 200);
+        assert_eq!(data.as_ptr(), ptr_before, "handed over, not copied");
+        assert_eq!(inbox.partials[1].capacity(), 0, "the buffer was taken");
     }
 
     #[test]
