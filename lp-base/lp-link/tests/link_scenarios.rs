@@ -177,7 +177,11 @@ fn text_after_a_stray_leading_zero_is_not_held_for_frame_abandon() {
          waiting on frame_abandon, at time `now` with no idle at all"
     );
     assert!(texts.concat().starts_with("M!00000\n"), "{:?}", texts);
-    assert_eq!(b.counters().stale_partials, 0, "flushed before it went stale");
+    assert_eq!(
+        b.counters().stale_partials,
+        0,
+        "flushed before it went stale"
+    );
 }
 
 /// The older board-side convention for a panic that interrupts a frame:
