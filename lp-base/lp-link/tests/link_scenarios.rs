@@ -148,6 +148,42 @@ fn text_outside_frames_passes_through() {
     );
 }
 
+/// main's (proto-29) firmware sends a short marker containing `0x00` when
+/// the port opens. Taken as a frame start, followed by an old board's
+/// continuous plain-text console (no quiet gap for `frame_abandon` to fire
+/// on), that must not hold the console text for 3 s: once the misread
+/// partial reaches `max_frame` it flushes as text at once.
+#[test]
+fn text_after_a_stray_leading_zero_is_not_held_for_frame_abandon() {
+    let (_a, mut b) = pair::<SelectiveRepeat>(LinkConfig::usb());
+    let now = 0;
+    // The stray 0x00, then an M!-line stream well past max_frame (531 B for
+    // the usb preset) with no gap, so frame_abandon never gets a chance.
+    let mut stream = vec![0u8];
+    for i in 0..100u32 {
+        stream.extend_from_slice(format!("M!{i:05}\n").as_bytes());
+    }
+    b.on_bytes(now, &stream);
+    let texts: Vec<String> = drain(&mut b)
+        .into_iter()
+        .filter_map(|e| match e {
+            LinkEvent::Text(t) => Some(String::from_utf8(t).unwrap()),
+            _ => None,
+        })
+        .collect();
+    assert!(
+        !texts.is_empty(),
+        "an M!-line stream after a stray 0x00 must arrive as text without \
+         waiting on frame_abandon, at time `now` with no idle at all"
+    );
+    assert!(texts.concat().starts_with("M!00000\n"), "{texts:?}");
+    assert_eq!(
+        b.counters().stale_partials,
+        0,
+        "flushed before it went stale"
+    );
+}
+
 /// The older board-side convention for a panic that interrupts a frame:
 /// write `0x00`, then the text. The torn frame fails, the text lands in the
 /// deframer's next "frame", and once that partial has been quiet for
