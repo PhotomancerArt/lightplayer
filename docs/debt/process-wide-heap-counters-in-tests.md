@@ -1,5 +1,5 @@
 ---
-status: paying-down
+status: retired
 since: 2026-08-28
 logged: 2026-09-25
 area: host heap-measurement tests (lpc-engine/tests, lpvm-native/tests)
@@ -66,8 +66,24 @@ process-wide counter.
   kept its `MEASURE_LOCK` mutex (no longer needed for correctness once the
   counters are per-thread, but harmless, and removing it was out of this
   ticket's scope). See the PR for per-test pass evidence.
+- 2026-09-28 — auto-queue ticket `2026-09-26-heap-counters-lpvm-native-peak-alloc`:
+  converted `lp-shader/lpvm-native/tests/support/peak_alloc.rs` (shared by
+  `#[path]` with `lpc-engine`'s `example_shader_compile_peak_memory` and
+  `lps-filetests`' `compile_peak_memory_corpus`) to `thread_local!`
+  `Cell<isize>` counters, never clamped. Confirmed the same class of
+  cross-thread event bites here even though the traced compile spawns no
+  threads: every fresh test thread frees a `Box<ThreadInit>` the parent
+  allocated to start it before any test code runs, underflowing a naive
+  per-thread `usize` counter (reproduced: "attempt to subtract with
+  overflow" on the first tracked `dealloc`). `live()`/`peak()` read
+  relative to a per-thread epoch latched on first read, so that one-time
+  noise never reaches a caller and the two other probe binaries' `usize`
+  `StepRecord`/`Summary` types stayed untouched. Assertion and ceiling
+  (37 KiB) unchanged; 26,971 B measured, matching the 2026-09-02 figure the
+  ceiling comment already recorded. Evidence: 20 sequential release runs
+  plus a 32-run parallel batch (4×8 concurrent processes), no failures.
 
 **Exit criteria** — no host heap test counts through a process-wide
-counter. Still process-wide on 2026-09-26:
-`lp-shader/lpvm-native/tests/support/peak_alloc.rs`. Retire when that is
-converted, or shown to measure only across threads it owns.
+counter. Met 2026-09-28: all six probes (four `lpc-engine/tests`, plus
+`lpvm-native`'s and, via the shared `peak_alloc.rs`, the other two probe
+binaries' counters) are per-thread.
