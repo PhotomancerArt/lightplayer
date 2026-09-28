@@ -111,7 +111,13 @@ impl UsbLinkTransport {
             };
             match event {
                 LinkEvent::Message { channel, data } if channel == lp_link::CH_PROTO => {
-                    if let Some(msg) = parse_request(&data) {
+                    let msg = parse_request(&data);
+                    // The request's bytes go before the inbox can grow: a
+                    // growth while they are still on the heap lands above
+                    // them and pins their hole (an upload's ~15 KB: the
+                    // largest free block −15 KB on the emulated C6).
+                    drop(data);
+                    if let Some(msg) = msg {
                         self.inbox.push_back(msg);
                     }
                 }
