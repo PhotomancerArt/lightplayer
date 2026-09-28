@@ -9,9 +9,28 @@
 //! (`lp-shader/lpvm-native/tests/support/peak_alloc.rs`).
 //!
 //! Each binary still declares its own `#[global_allocator] static ALLOC:
-//! TrackingAlloc`, and each binary holds exactly ONE `#[test]`: the counters
-//! are process-wide, so two tests in one binary would run on parallel threads
-//! and read each other's allocations as their own peak.
+//! TrackingAlloc`, and each binary holds exactly ONE `#[test]`.
+//!
+//! `LIVE`/`PEAK` are `thread_local!`, counting only the bytes this thread
+//! allocates and frees (`docs/debt/process-wide-heap-counters-in-tests.md`):
+//! a process-wide counter also sees the libtest harness's own main thread —
+//! its `running_tests`/`timeout_queue` bookkeeping lands inside the
+//! measurement window on a loaded runner and inflates the figure with
+//! nothing the compile under test did. `LIVE`/`PEAK` are signed (`isize`)
+//! and never clamped, same reason as `lpc-engine`'s per-thread counters: a
+//! thread may free what another thread allocated, and only the *difference*
+//! between two readings is meaningful, so rounding a negative reading up to
+//! zero would hide a real delta. Confirmed on this suite: every spawned
+//! thread frees a `Box<ThreadInit>` the parent thread allocated to start it
+//! (`std::thread::lifecycle::ThreadInit::init`) before any test code runs,
+//! so `LIVE` is negative before the test body begins even though the traced
+//! compile path itself (`trace_frontend`/`trace_backend`, the native
+//! frontend and JIT backend) spawns no threads of its own. `live()`/`peak()`
+//! read relative to [`EPOCH`], this thread's first reading, so that one-time
+//! bootstrap noise never reaches a caller and the public API stays `usize`
+//! (`StepRecord`/`Summary`, shared with the two other probe binaries, keep
+//! their existing types); a probe whose *traced* work spawned threads would
+//! need to name and join them inside the window instead.
 //!
 //! Host caveat: pointers here are 8 bytes and the device's are 4, so host
 //! figures overstate device DRAM roughly 1.5–2× for pointer-heavy structures.
@@ -24,6 +43,7 @@
 )]
 
 use std::alloc::{GlobalAlloc, Layout, System};
+use std::cell::Cell;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 use lpir::FloatMode;
@@ -34,15 +54,52 @@ use lpvm_native::native_options::NativeCompileOptions;
 
 pub struct TrackingAlloc;
 
-static LIVE: AtomicUsize = AtomicUsize::new(0);
-static PEAK: AtomicUsize = AtomicUsize::new(0);
+thread_local! {
+    /// This thread's live heap bytes since thread start: bytes allocated
+    /// minus bytes freed, on this thread only. Signed — see the module
+    /// docs — and never clamped. `const`-initialised with no destructor, so
+    /// reaching it from inside the allocator never allocates.
+    static LIVE: Cell<isize> = const { Cell::new(0) };
+    /// The highest `LIVE` this thread has reached since the last
+    /// [`reset_peak`]. Same signedness as `LIVE`, same reason.
+    static PEAK: Cell<isize> = const { Cell::new(0) };
+    /// `LIVE` the first time this thread's tracked work is read (lazily
+    /// latched). [`live`]/[`peak`] subtract this so a caller sees only this
+    /// thread's own work from that point on, never the one dealloc every
+    /// spawned thread makes before user code runs (see the module docs).
+    static EPOCH: Cell<Option<isize>> = const { Cell::new(None) };
+}
+
+/// This thread's `EPOCH`, latching it to the current raw `LIVE` on first
+/// call.
+fn epoch() -> isize {
+    EPOCH
+        .try_with(|cell| {
+            if let Some(e) = cell.get() {
+                e
+            } else {
+                let e = LIVE.try_with(Cell::get).unwrap_or(0);
+                cell.set(Some(e));
+                e
+            }
+        })
+        .unwrap_or(0)
+}
 
 unsafe impl GlobalAlloc for TrackingAlloc {
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
         let ptr = unsafe { System.alloc(layout) };
         if !ptr.is_null() {
-            let live = LIVE.fetch_add(layout.size(), Ordering::Relaxed) + layout.size();
-            PEAK.fetch_max(live, Ordering::Relaxed);
+            // `try_with`: a thread tearing down may still allocate or free.
+            let _ = LIVE.try_with(|live| {
+                let level = live.get() + layout.size() as isize;
+                live.set(level);
+                let _ = PEAK.try_with(|peak| {
+                    if level > peak.get() {
+                        peak.set(level);
+                    }
+                });
+            });
             if CENSUS.load(Ordering::Relaxed) {
                 census_count(layout.size());
             }
@@ -51,13 +108,20 @@ unsafe impl GlobalAlloc for TrackingAlloc {
     }
 
     unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
-        LIVE.fetch_sub(layout.size(), Ordering::Relaxed);
+        let _ = LIVE.try_with(|live| live.set(live.get() - layout.size() as isize));
         unsafe { System.dealloc(ptr, layout) }
     }
 }
 
+/// This thread's live heap since [`EPOCH`] was latched. Never clamped: the
+/// subtraction panics rather than saturating if `LIVE` ever drops below
+/// `EPOCH` (a second cross-thread event, not just thread bootstrap) — a
+/// bug this test needs to see, not a reading silently pinned to zero.
 pub fn live() -> usize {
-    LIVE.load(Ordering::Relaxed)
+    let raw = LIVE.try_with(Cell::get).unwrap_or(0);
+    (raw - epoch())
+        .try_into()
+        .expect("live() dropped below this thread's epoch: a second cross-thread free")
 }
 
 // --- Census mode --------------------------------------------------------
@@ -220,11 +284,17 @@ pub fn print_census(title: &str, census: &CensusRecord, watch_labels: &[(&str, u
 
 /// Reset the peak to the current live level.
 pub fn reset_peak() {
-    PEAK.store(live(), Ordering::Relaxed);
+    let level = LIVE.try_with(Cell::get).unwrap_or(0);
+    let _ = PEAK.try_with(|peak| peak.set(level));
 }
 
+/// This thread's peak live heap since [`reset_peak`], relative to
+/// [`EPOCH`] like [`live`]; never clamped, same reason.
 pub fn peak() -> usize {
-    PEAK.load(Ordering::Relaxed)
+    let raw = PEAK.try_with(Cell::get).unwrap_or(0);
+    (raw - epoch())
+        .try_into()
+        .expect("peak() dropped below this thread's epoch: a second cross-thread free")
 }
 
 /// One pipeline step's memory trace. `Copy` on purpose: records are written
