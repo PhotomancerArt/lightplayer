@@ -622,7 +622,10 @@ pub fn pending_link_view(entry: &PendingLink, now: Millis) -> PendingLinkView {
         // spoke before it fell silent, which is not what happened here.
         // `last_outcome` is how identify's settled Failed becomes visible.
         Some(Classification::Unknown | Classification::Quiet { .. })
-            if matches!(entry.evidence().last_outcome, Some(ActivityOutcome::Failed { .. })) =>
+            if matches!(
+                entry.evidence().last_outcome,
+                Some(ActivityOutcome::Failed { .. })
+            ) =>
         {
             "New device found — no response (is another app using this port?)".to_string()
         }
@@ -846,23 +849,27 @@ mod tests {
         use crate::replay::{Expect, Replay, Script, Step};
         use crate::roster::RosterConfig;
 
-        let script = Script::new()
-            .at(0, Step::attach(1, "usb-1"))
-            .at(5, Step::Error {
-                link: 1,
-                message: "port busy".to_string(),
-            })
-            .expect(
-                Expect::new()
-                    .pending(1)
-                    .pending_state("New device found — identifying…"),
-            )
-            // identify_deadline_ms defaults to 5_000; past it identify has
-            // settled Failed with no verdict ever reached.
-            .at(5_010, Step::Advance)
-            .expect(Expect::new().pending(1).pending_state(
-                "New device found — no response (is another app using this port?)",
-            ));
+        let script =
+            Script::new()
+                .at(0, Step::attach(1, "usb-1"))
+                .at(
+                    5,
+                    Step::Error {
+                        link: 1,
+                        message: "port busy".to_string(),
+                    },
+                )
+                .expect(
+                    Expect::new()
+                        .pending(1)
+                        .pending_state("New device found — identifying…"),
+                )
+                // identify_deadline_ms defaults to 5_000; past it identify has
+                // settled Failed with no verdict ever reached.
+                .at(5_010, Step::Advance)
+                .expect(Expect::new().pending(1).pending_state(
+                    "New device found — no response (is another app using this port?)",
+                ));
 
         Replay::new(RosterConfig::default())
             .run(&script.into_fixture("a busy port's identify gives up"))

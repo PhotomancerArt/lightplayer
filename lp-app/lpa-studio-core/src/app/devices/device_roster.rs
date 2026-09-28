@@ -510,20 +510,18 @@ mod tests {
             .at(0, Step::attach(1, "usb-busy"))
             .at(0, Step::attach(2, "usb-lab"))
             // Link 1's port is held by another process: the open fails.
-            .at(5, Step::Error {
-                link: 1,
-                message: "port busy".to_string(),
-            })
+            .at(
+                5,
+                Step::Error {
+                    link: 1,
+                    message: "port busy".to_string(),
+                },
+            )
             // Link 2 opens and hellos cleanly, well inside identify's 5 s
             // deadline.
             .at(10, Step::opened(2))
             .at(20, Step::hello(2).uid("dev_lab"))
-            .expect(
-                Expect::new()
-                    .devices(1)
-                    .device_state("Ready")
-                    .pending(1),
-            );
+            .expect(Expect::new().devices(1).device_state("Ready").pending(1));
 
         Replay::new(RosterConfig::default())
             .run(&script.into_fixture("a busy port does not delay the other port"))
