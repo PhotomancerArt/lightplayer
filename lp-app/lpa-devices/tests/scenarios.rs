@@ -1042,7 +1042,11 @@ fn flashing_a_known_board_with_a_different_pick_writes_firmware_but_not_the_mani
         "a pick that disagrees with the known board must not restamp: {commands:?}"
     );
     let view = replay.view();
-    assert_eq!(view.devices[0].state_label, "Ready", "{:?}", view.devices[0]);
+    assert_eq!(
+        view.devices[0].state_label, "Ready",
+        "{:?}",
+        view.devices[0]
+    );
     let outcome = view.devices[0].last_outcome.as_ref().expect("an outcome");
     assert!(outcome.ok, "the flash still succeeds: {outcome:?}");
 }
