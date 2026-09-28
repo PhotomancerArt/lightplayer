@@ -43,7 +43,10 @@ use lpa_link::providers::fake_device::{
 
 use lpfs::AsLpPath;
 
-use crate::app::library::{LibraryStore, MemoryLibraryHost};
+use crate::app::library::{
+    CatalogOp, CatalogOutcome, LibraryHost, LibraryHostError, LibraryStore, LocalBoxFuture,
+    MemoryLibraryHost, OpenedProject,
+};
 use crate::app::places::DeviceRegistry;
 use crate::{
     DeviceAction, DeviceEffectCall, DeviceEffectFacts, DeviceEffectProgress, DeviceInput,
@@ -653,6 +656,48 @@ struct DeviceBench {
     /// Where the access controller.s conversations report back (BLE M6):
     /// the actor.s queue, drained by [`Self::step`].
     access_rx: crate::app::studio::studio_view_channel::CommandReceiver,
+    /// How many `CatalogOp::RecordPush` ops the attached host has been
+    /// asked to run — the observable half of the mac:-keyed adoption skip,
+    /// since this test binary installs no `log::Logger` and the skip's own
+    /// `log::debug!`/`log::warn!` calls are unreachable no-ops here.
+    record_push_attempts: Rc<Cell<usize>>,
+}
+
+/// Wraps a [`MemoryLibraryHost`], counting `CatalogOp::RecordPush` attempts
+/// without changing what any op does or returns.
+struct RecordPushCountingHost {
+    inner: MemoryLibraryHost,
+    record_push_attempts: Rc<Cell<usize>>,
+}
+
+impl LibraryHost for RecordPushCountingHost {
+    fn catalog_snapshot(
+        &self,
+    ) -> LocalBoxFuture<'_, Result<Rc<RefCell<dyn lpfs::LpFs>>, LibraryHostError>> {
+        self.inner.catalog_snapshot()
+    }
+
+    fn catalog(&self, op: CatalogOp) -> LocalBoxFuture<'_, Result<CatalogOutcome, LibraryHostError>> {
+        if matches!(op, CatalogOp::RecordPush { .. }) {
+            self.record_push_attempts.set(self.record_push_attempts.get() + 1);
+        }
+        self.inner.catalog(op)
+    }
+
+    fn open_project<'a>(
+        &'a self,
+        key: &'a str,
+    ) -> LocalBoxFuture<'a, Result<OpenedProject, LibraryHostError>> {
+        self.inner.open_project(key)
+    }
+
+    fn close_project<'a>(&'a self, uid: &'a str) -> LocalBoxFuture<'a, ()> {
+        self.inner.close_project(uid)
+    }
+
+    fn open_elsewhere_uids(&self) -> LocalBoxFuture<'_, Vec<String>> {
+        self.inner.open_elsewhere_uids()
+    }
 }
 
 /// `Rc<RefCell<Vec<..>>>` spelled once.
@@ -741,10 +786,14 @@ impl DeviceBench {
         let chooser_grants = Rc::new(Cell::new(chooser_grants));
         let revoked = Rc::new(RefCell::new(Vec::new()));
 
-        let host = MemoryLibraryHost::new(memory_store_sharing(&store), {
-            let clock = Rc::clone(&clock);
-            Rc::new(move || clock.get())
-        });
+        let record_push_attempts = Rc::new(Cell::new(0));
+        let host = RecordPushCountingHost {
+            inner: MemoryLibraryHost::new(memory_store_sharing(&store), {
+                let clock = Rc::clone(&clock);
+                Rc::new(move || clock.get())
+            }),
+            record_push_attempts: Rc::clone(&record_push_attempts),
+        };
 
         let mut controller = StudioController::new({
             let clock = Rc::clone(&clock);
@@ -818,6 +867,7 @@ impl DeviceBench {
             sim_restarts: Rc::new(Cell::new(0)),
             started: std::time::Instant::now(),
             access_rx,
+            record_push_attempts,
         };
         (bench, tasks)
     }
@@ -955,6 +1005,12 @@ impl DeviceBench {
     /// What the library holds, as the gallery would list it.
     fn library(&self) -> Vec<crate::app::library::PackageSummary> {
         self.store.list().expect("the library reads back")
+    }
+
+    /// How many `CatalogOp::RecordPush` ops have been attempted since the
+    /// bench was built.
+    fn record_push_attempts(&self) -> usize {
+        self.record_push_attempts.get()
     }
 
     /// One library package's head content hash — what a bind compares the
@@ -3811,6 +3867,104 @@ fn opening_a_board_adopts_the_project_this_library_does_not_have() {
             .console_line_containing("adopted")
             .is_some_and(|line| line.contains(&board_title)),
         "the console says what happened and where it came from"
+    );
+}
+
+/// A LightPlayer with a project already loaded, but never stamped: its
+/// registry row is keyed on its base MAC (`mac:…`) rather than a `dev…`
+/// uid, exactly like the twin-row guard's board.
+fn light_player_running_unstamped(files: Vec<(String, Vec<u8>)>) -> FakeEsp32Device {
+    FakeEsp32Device::new(FakeDeviceScript::new(FakeBootState::LightPlayer(
+        FakeLightPlayerState::new()
+            .with_base_mac(BENCH_BOARD_MAC)
+            .with_heartbeat_interval(Duration::from_millis(20))
+            .with_project_files(files)
+            .with_loaded_project(),
+    )))
+}
+
+/// An unstamped board (registry key `mac:…`) adopts the project it is
+/// running exactly like a stamped one (D2/D3/D5) — but `RecordPush` is
+/// never attempted for it, because `library_host::record_push` refuses a
+/// device uid it cannot parse as a `dev…`/`prj…` `PrefixedUid` (`mac:…`
+/// never parses). Before the fix, `bank_adopted_association` attempted it
+/// anyway and logged the refusal at warn on every push off every unstamped
+/// board (over USB too, not just BLE). Asserting on the log level itself is
+/// impractical: this test binary never installs a `log::Logger`, so
+/// `log::warn!`/`log::debug!` are no-ops regardless of what the code does,
+/// and a failed `RecordPush` leaves identical persisted state (no history
+/// event, no association write — `record_push` fails atomically before any
+/// write) whether it was attempted or skipped. What the fix actually
+/// changes — and what this test pins — is whether `RecordPush` is
+/// attempted at all, counted at the host boundary.
+#[test]
+fn opening_an_unstamped_board_adopts_without_attempting_record_push() {
+    let (project_uid, files) = a_project_from_another_library(0x5b);
+    let device = light_player_running_unstamped(files);
+    let (mut bench, _tasks, device_uid) = running_board(&device, "usb-adopt-unstamped");
+    assert!(
+        device_uid.starts_with("mac:"),
+        "an unstamped board's registry key falls back to its MAC: {device_uid}"
+    );
+    assert!(bench.library().is_empty());
+    assert_eq!(bench.record_push_attempts(), 0);
+
+    bench
+        .open_lens(&device_uid)
+        .expect("the running board opens in the editor");
+
+    // The project was still pulled and adopted — the honest skip only
+    // changes whether RecordPush is attempted, not the adoption.
+    let library = bench.library();
+    assert_eq!(
+        library.len(),
+        1,
+        "the project was adopted despite the board being unstamped: {library:?}"
+    );
+    assert_eq!(library[0].uid.to_string(), project_uid);
+
+    let rows = bench.registry();
+    assert_eq!(rows.len(), 1, "{rows:?}");
+    assert_eq!(rows[0].uid, device_uid);
+    assert!(
+        rows[0].association.is_none(),
+        "record_push refuses a mac:-keyed device uid, so nothing bankable \
+         was ever written: {:?}",
+        rows[0].association
+    );
+    assert_eq!(
+        bench.record_push_attempts(),
+        0,
+        "the honest skip means RecordPush is never attempted for a mac:-keyed board"
+    );
+}
+
+/// The sibling case: a STAMPED board's adoption DOES attempt (and bank)
+/// `RecordPush` — the skip is specific to a `mac:`-keyed device uid, not a
+/// blanket "never try" the fix could have overshot into.
+#[test]
+fn opening_a_stamped_board_adopts_and_attempts_record_push() {
+    let (project_uid, files) = a_project_from_another_library(0x5c);
+    let device = light_player_running("dev000000daqf6dvvr7", files);
+    let (mut bench, _tasks, device_uid) = running_board(&device, "usb-adopt-stamped");
+    assert!(!device_uid.starts_with("mac:"), "{device_uid}");
+    assert_eq!(bench.record_push_attempts(), 0);
+
+    bench
+        .open_lens(&device_uid)
+        .expect("the running board opens in the editor");
+
+    assert_eq!(bench.library()[0].uid.to_string(), project_uid);
+    assert_eq!(
+        bench.record_push_attempts(),
+        1,
+        "a stamped board's adoption still attempts RecordPush"
+    );
+    let rows = bench.registry();
+    assert!(
+        rows[0].association.is_some(),
+        "and it still banks the association: {:?}",
+        rows[0].association
     );
 }
 
