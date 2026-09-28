@@ -360,6 +360,18 @@ time, no host randomness), so identical trees produce identical figures. If
 noise ever appears, that is itself a finding, not something to widen the
 margin over. **Never widen the margin to make the gate pass.**
 
+**Catalog project records get a 64 B absolute allowance per figure, on top of
+the percentage margin.** `CATALOG_ABS_MARGIN_B` in `heap-budget-check.sh`
+applies only to records under `scripts/heap-budget-record/engine/catalog/…`,
+in both directions the per-project check tests (growth, and the inverted
+`largest_free_at_close` shrink). Test records
+(`scripts/heap-budget-record/engine/projects/test/…`) stay at the bare
+percentage margin. It exists because a catalog project's JSON content moves
+its own footprint by a few bytes on a routine edit — #827 failed CI at
+`project-load.retained grew: 51468 > recorded 51463 (margin 0%)`, 5 B, from
+renaming a JSON key — while a real regression is hundreds of bytes; 64 B
+covers the first and still catches the second.
+
 ## Why deltas, not absolutes
 
 The guest heap (`lp-emu/lp-riscv-emu-guest/memory.ld`, `HEAP_SIZE`) is
