@@ -387,6 +387,10 @@ pub enum FirmwareFace {
     },
     /// Speaks the framing, never said hello (pre-hello firmware).
     NoHello,
+    /// LightPlayer firmware from before this Studio's link: it runs, but it
+    /// cannot say hello in a form Studio hears, so it needs a flash (which
+    /// keeps its project). `proto` is its boot marker's, when heard.
+    OlderLightPlayer { proto: Option<u32> },
     /// Blank or erased flash (the invalid-header boot loop).
     Blank,
     /// Parked in the ROM downloader.
@@ -416,7 +420,12 @@ impl FirmwareFace {
     pub fn wants_flash(&self) -> bool {
         matches!(
             self,
-            Self::NoHello | Self::Blank | Self::Bootloader | Self::Foreign { .. } | Self::Silent
+            Self::NoHello
+                | Self::OlderLightPlayer { .. }
+                | Self::Blank
+                | Self::Bootloader
+                | Self::Foreign { .. }
+                | Self::Silent
         )
     }
 
@@ -479,6 +488,9 @@ fn firmware_face(evidence: &Evidence) -> FirmwareFace {
         Classification::Incompatible {
             reason: IncompatibleReason::NoHello,
         } => FirmwareFace::NoHello,
+        Classification::OlderLightPlayer { proto } => {
+            FirmwareFace::OlderLightPlayer { proto: *proto }
+        }
         Classification::Blank => FirmwareFace::Blank,
         Classification::Bootloader => FirmwareFace::Bootloader,
         Classification::Foreign { label } => FirmwareFace::Foreign {
@@ -671,6 +683,7 @@ fn classification_label(classification: &Classification) -> String {
         Classification::Incompatible {
             reason: IncompatibleReason::NoHello,
         } => "No LightPlayer hello — pre-hello firmware".to_string(),
+        Classification::OlderLightPlayer { .. } => "Older LightPlayer firmware".to_string(),
         Classification::Blank => "Blank flash — needs firmware".to_string(),
         Classification::Bootloader => "Waiting in ROM download mode".to_string(),
         Classification::Foreign { label: Some(label) } => format!("Running {label}"),
@@ -796,6 +809,8 @@ mod tests {
             Classification::Incompatible {
                 reason: IncompatibleReason::NoHello,
             },
+            Classification::OlderLightPlayer { proto: None },
+            Classification::OlderLightPlayer { proto: Some(29) },
             Classification::Quiet { since: Millis(0) },
         ];
 

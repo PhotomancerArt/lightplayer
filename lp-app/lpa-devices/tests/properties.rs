@@ -104,6 +104,9 @@ fn the_view_says_no_less_than_the_fold_knows() {
                         Classification::Incompatible { .. } => {
                             matches!(card.firmware_face, FirmwareFace::NoHello)
                         }
+                        Classification::OlderLightPlayer { .. } => {
+                            matches!(card.firmware_face, FirmwareFace::OlderLightPlayer { .. })
+                        }
                         Classification::Blank => matches!(card.firmware_face, FirmwareFace::Blank),
                         Classification::Bootloader => {
                             matches!(card.firmware_face, FirmwareFace::Bootloader)

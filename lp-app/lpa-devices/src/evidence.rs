@@ -38,6 +38,15 @@ use crate::wire::{
 const BLANK_HEADER_SIGNATURE: &str = "invalid header: 0xffffffff";
 const ROM_DOWNLOAD_SIGNATURES: &[&str] = &["waiting for download", "(download("];
 const SERVER_STARTED_SIGNATURE: &str = "fw-esp32 initialized, starting server loop";
+/// How firmware from before the USB link moved onto lp-link (wire proto 30)
+/// spoke on USB: every protocol message as one `M!{json}` text line. Since
+/// then a message is a binary link frame, so such a line can only come from
+/// older LightPlayer firmware — which the new link reads as console text,
+/// never as a frame, so it never says a hello Studio can hear.
+const LEGACY_FRAME_LINE_PREFIX: &str = "M!{";
+/// The field of the boot marker (`[INIT] fw-esp32 initialized, starting
+/// server loop... proto=29 commit=… dirty=…`) that names its wire proto.
+const BOOT_MARKER_PROTO_FIELD: &str = "proto=";
 const KNOWN_FOREIGN_BOOT_STRINGS: &[(&str, &str)] = &[(
     "hello from seeed studio xiao esp32-c6",
     "Seeed XIAO factory firmware",
@@ -602,6 +611,12 @@ pub enum Classification {
     LightPlayer { hello: HelloFacts },
     /// An `M!`-speaking peer that is not a compatible LightPlayer server.
     Incompatible { reason: IncompatibleReason },
+    /// LightPlayer firmware too old to speak this Studio's link: it prints
+    /// its messages as `M!{json}` text lines, or its boot marker names a wire
+    /// proto older than Studio's, and no hello ever arrives. `proto` is the
+    /// boot marker's, when one was heard. A flash is the way forward, and the
+    /// project on the board survives it (the image stops short of `lpfs`).
+    OlderLightPlayer { proto: Option<u32> },
     /// Blank or erased flash (repeating invalid-header boot loop).
     Blank,
     /// Sitting in ROM download mode.
@@ -776,6 +791,13 @@ struct Observations {
     rom_download: usize,
     foreign_label: Option<String>,
     server_started: bool,
+    /// Lines in the pre-lp-link `M!{json}` form this window. See
+    /// [`LEGACY_FRAME_LINE_PREFIX`].
+    #[serde(default)]
+    legacy_frame_lines: usize,
+    /// The wire proto the boot marker named, when one was heard.
+    #[serde(default)]
+    boot_marker_proto: Option<u32>,
     detected_chip: Option<String>,
     frames_seen: usize,
     /// Count of `Saved PC:` boot lines this window that landed inside the
@@ -901,6 +923,12 @@ impl Observations {
         }
         if normalized.contains(SERVER_STARTED_SIGNATURE) {
             self.server_started = true;
+            if let Some(proto) = boot_marker_proto(&normalized) {
+                self.boot_marker_proto = Some(proto);
+            }
+        }
+        if line.trim_start().starts_with(LEGACY_FRAME_LINE_PREFIX) {
+            self.legacy_frame_lines += 1;
         }
         if let Some(pc) = saved_pc(&normalized) {
             let in_bootloader = self
@@ -935,6 +963,17 @@ impl Observations {
         }
         if self.blank_header > 0 {
             return Classification::Blank;
+        }
+        // Older LightPlayer outranks the foreign banners: its `M!` lines and
+        // its boot marker are LightPlayer's own words, and a hello (above)
+        // still wins the moment the board speaks this Studio's link.
+        let older_marker = self
+            .boot_marker_proto
+            .is_some_and(|proto| proto < self.expected_proto);
+        if self.legacy_frame_lines > 0 || older_marker {
+            return Classification::OlderLightPlayer {
+                proto: self.boot_marker_proto,
+            };
         }
         if let Some(label) = &self.foreign_label {
             return Classification::Foreign {
@@ -991,6 +1030,16 @@ fn chip_from_boot_line(normalized: &str) -> Option<String> {
         return Some("esp32".to_string());
     }
     None
+}
+
+/// The wire proto a (normalized) boot marker names: `… proto=29 commit=…`.
+fn boot_marker_proto(normalized: &str) -> Option<u32> {
+    let rest = normalized.split(BOOT_MARKER_PROTO_FIELD).nth(1)?;
+    let digits: String = rest
+        .chars()
+        .take_while(|character| character.is_ascii_digit())
+        .collect();
+    digits.parse().ok()
 }
 
 /// Parse a `Saved PC:0x<hex>` boot line (already lowercased), the ROM's own
@@ -1619,6 +1668,80 @@ mod tests {
 
         assert_eq!(evidence.detected_chip(), None);
         assert_eq!(evidence.bootloader_hung_resets(), 0);
+    }
+
+    /// A board still running firmware from before the USB link moved onto
+    /// lp-link (proto 29 and older) prints every message as an `M!{json}`
+    /// line, which the new link reads as console text. The card must call it
+    /// older LightPlayer firmware — it used to say "Unrecognized firmware" —
+    /// and a hello, once the board speaks this Studio's link, still wins.
+    #[test]
+    fn m_bang_text_lines_are_older_light_player_firmware_until_a_hello() {
+        let config = studio_config();
+        let mut evidence = Evidence::default();
+        let mut identity = IdentityChain::default();
+
+        evidence.fold(Millis(0), &opened(), &mut identity, &config);
+        evidence.fold(
+            Millis(10),
+            &line(r#"M!{"id":0,"msg":{"heartbeat":{"frame_count":4839,"loaded_projects":[]}}}"#),
+            &mut identity,
+            &config,
+        );
+        assert_eq!(
+            evidence.classification,
+            Classification::OlderLightPlayer { proto: None }
+        );
+        assert_eq!(
+            evidence.verdict_if_settled(Millis(5_000)),
+            Classification::OlderLightPlayer { proto: None },
+            "not Foreign, and not the pre-hello verdict"
+        );
+
+        let hello = frame(ServerFrame::hello(
+            1,
+            HelloFacts {
+                proto: config.expected_proto,
+                ..Default::default()
+            },
+        ));
+        evidence.fold(Millis(900), &hello, &mut identity, &config);
+        assert!(evidence.classification.is_light_player());
+    }
+
+    /// The boot marker names its proto; an older one is older LightPlayer
+    /// firmware, this build's own is not (its hello follows as a frame).
+    #[test]
+    fn a_boot_marker_older_than_studio_is_older_light_player_firmware() {
+        const MARKER_29: &str = "[INIT] fw-esp32 initialized, starting server loop... \
+                                 proto=29 commit=c5f9736643e1 dirty=false";
+        const MARKER_30: &str = "[INIT] fw-esp32 initialized, starting server loop... \
+                                 proto=30 commit=4caa5b658157 dirty=false";
+        let config = studio_config();
+
+        let mut older = Evidence::default();
+        let mut identity = IdentityChain::default();
+        older.fold(Millis(0), &opened(), &mut identity, &config);
+        older.fold(Millis(10), &line(MARKER_29), &mut identity, &config);
+        assert_eq!(
+            older.classification,
+            Classification::OlderLightPlayer { proto: Some(29) }
+        );
+
+        let mut current = Evidence::default();
+        let mut identity = IdentityChain::default();
+        current.fold(Millis(0), &opened(), &mut identity, &config);
+        current.fold(Millis(10), &line(MARKER_30), &mut identity, &config);
+        assert_eq!(current.classification, Classification::Unknown);
+    }
+
+    /// Studio's own roster config: this build's wire proto (30, the lp-link
+    /// cutover), not the model's placeholder default.
+    fn studio_config() -> RosterConfig {
+        RosterConfig {
+            expected_proto: 30,
+            ..RosterConfig::default()
+        }
     }
 
     fn fold(

@@ -604,6 +604,7 @@ mod tests {
             FirmwareFace::Blank,
             FirmwareFace::Bootloader,
             FirmwareFace::NoHello,
+            FirmwareFace::OlderLightPlayer { proto: None },
             FirmwareFace::Foreign { label: None },
         ] {
             let mut view = card();
