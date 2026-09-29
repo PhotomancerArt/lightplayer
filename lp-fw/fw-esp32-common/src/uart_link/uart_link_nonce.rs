@@ -56,7 +56,10 @@ mod tests {
     fn a_run_of_reboots_on_one_word_never_repeats_a_nonce() {
         let mut seen = std::collections::BTreeSet::new();
         for count in 0..4_096u32 {
-            assert!(seen.insert(session_nonce(0xB0A2_0001, count)), "boot {count}");
+            assert!(
+                seen.insert(session_nonce(0xB0A2_0001, count)),
+                "boot {count}"
+            );
         }
     }
 

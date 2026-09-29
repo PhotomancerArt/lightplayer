@@ -12,6 +12,7 @@
 //! shuttle on its own interrupt executor.
 
 pub mod io_task;
+pub mod link_boot_count;
 pub mod uart_link_task;
 
 pub use io_task::io_task;

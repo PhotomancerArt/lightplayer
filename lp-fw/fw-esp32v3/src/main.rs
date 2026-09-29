@@ -861,7 +861,15 @@ fn boot_firmware(spawner: embassy_executor::Spawner) -> FirmwareApp {
     // raw text outside frames, which a host sees as text; nothing of the
     // link goes out before io_task's first tick, and no host can have a
     // session before the link task runs, after `boot_firmware` returns.
-    let uart_link = UartLinkShared::leak(esp_hal::rng::Rng::new().random());
+    //
+    // The random word is salted with a boot count kept in RTC fast RAM
+    // (ruling DD28): with no radio feeding the RNG, nobody has shown its word
+    // differs after a software reset, and a repeated nonce would hide a
+    // Reboot from a host that stayed attached.
+    let uart_link = UartLinkShared::leak(fw_esp32_common::uart_link::session_nonce(
+        esp_hal::rng::Rng::new().random(),
+        serial::link_boot_count::next_boot_count(),
+    ));
 
     match uart0 {
         Ok(uart) => {
