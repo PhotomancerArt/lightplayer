@@ -6,6 +6,7 @@
 #   scripts/m4-hardware-walk.sh [port]                   # ESP32-S3   (M4 gate)
 #   scripts/m4-hardware-walk.sh --chip esp32 [port]      # classic ESP32 (M7 gate)
 #   scripts/m4-hardware-walk.sh --chip esp32c6 [port]    # ESP32-C6
+#   scripts/m4-hardware-walk.sh --chip esp32c6 tcp://127.0.0.1:5591   # TEST HOOK (below)
 #
 # Named for the S3's M4 gate, which it was written for; the classic ESP32's
 # M7 FINAL gate asks the identical question ("does the on-device JIT render
@@ -27,31 +28,84 @@
 # (`lp-fw/fw-esp32c6/src/output/rmt/frame_dump.rs`). Keep the two scripts'
 # comparison sections saying the same thing.
 #
-# The walk is in two flashes because espflash's `--monitor` HOLDS the port,
-# so `lp-cli` cannot open it at the same time. Round 1 flashes and pushes the
-# project; round 2 reflashes to watch the board boot, auto-load it, compile the
-# shader on device, and dump the frame. The app partition is rewritten by the
-# second flash but `lpfs` is not, so the project pushed in round 1 is still
-# there.
+# ## The board's console is an lp-link, so the reader is a link host
 #
-# The other hazard, inherited from M3: SIGTERM/SIGKILL on espflash wedges the
-# port until a human physically replugs the board. Always SIGINT.
+# Since wire proto 30 (C6, S3) and 32 (the classic, #884) the board's serial
+# port is an lp-link (`lp-base/lp-link`): its log lines — the `[OUT] dump`
+# this walk reads among them — go into a log ring and leave the board as
+# frames on the link's log channel, and ONLY while a host has brought the
+# link up. `espflash flash --monitor`, which this walk used to read, is not a
+# link host: it holds the port, never answers the board's SYN, and sees the
+# boot text before the link task starts and then nothing. (Measured on the
+# emulated C6 with the project already in flash and a raw reader on the port:
+# 2,078 bytes of console ending at `starting server loop`, zero `[OUT] dump`
+# lines.) So the walk reads the board through `lp-cli link capture`, which
+# opens the port the way lp-cli's own transports do (no reset dance), hosts
+# the link, and writes the DECODED console — raw text, log records, each wire
+# message as its `M!{json}` line, `[link] …` notes — to a file.
 #
-# ⚠️ Classic ESP32 only: a bare `espflash monitor` stub-halts that board. The
-# monitor is therefore only ever attached via `flash --monitor` (what the
-# `flash-fw-esp32v3` recipe does), under a `script` pty. If you need to watch
-# without reflashing, hold the fd open by hand instead:
-#   exec 3<> "$port"; stty -f "$port" 921600 raw -echo clocal; cat <&3
+# **One link host on the port at a time.** Each step below opens the port,
+# does its one thing and closes it before the next one starts:
+#
+#   1. flash, with NO monitor (the recipe's `no-monitor` argument), so espflash
+#      exits and lets go of the port the moment the write is done;
+#   2. `lp-cli upload` — a link host for as long as the upload takes;
+#   3. flash again, no monitor — the board reboots, auto-loads the project
+#      from `lpfs` (the second flash rewrites the app partition, not `lpfs`),
+#      compiles the shader on device and renders;
+#   4. `lp-cli link capture` for `LP_WALK_WATCH_SECS` (default 30) — the host
+#      that reads the boot, the compile and the frame dumps.
+#
+# The board's log ring keeps the newest lines while nobody hosts the link, so
+# what the board said between the flash's reset and the capture's open is
+# delivered when the capture brings the link up, not lost.
+#
+# Port discipline (from M3, the S3 walks and `scripts/emu/desk-flash-no-
+# monitor.sh`): the flash runs in the FOREGROUND, under script(1); a port
+# something else holds (`lsof`) is refused rather than taken; and the only
+# signal this script ever sends espflash is SIGINT, to the espflash that holds
+# OUR port — SIGTERM/SIGKILL on espflash wedges a native-USB port until a human
+# replugs the board, and `pkill -f espflash` takes out another lane's flash.
+#
+# ⚠️ Classic ESP32 only: a bare `espflash monitor` stub-halts that board. This
+# walk no longer attaches a monitor at all, and must not grow one. If you need
+# to watch without reflashing, host the link:
+#   lp-cli link capture /dev/cu.wchusbserialNNNN --console out.txt --seconds 30
+# ⚠️ The classic arm needs a board on lp-link firmware (wire proto 32, #884).
+# A pre-link classic image prints `M!` lines on a UART the capture cannot
+# host; walk it with this script as it was before the lp-link port.
 #
 # Both flashes carry the `frame-dump` feature (see FLASH_FEATURES below): the
 # RMT driver drives real LEDs, and an LED cannot be diffed against a host
-# render, so the walk needs the build that also prints each transmitted frame to
-# serial. A default `just flash-fw-esp32s3` / `just flash-fw-esp32v3` produces
-# no `[OUT]` lines at all and this walk would report "nothing rendered".
+# render, so the walk needs the build that also prints each transmitted frame.
+# A default `just flash-fw-esp32s3` / `just flash-fw-esp32v3` produces no
+# `[OUT]` lines at all and this walk would report "nothing rendered".
 #
 # The gate is the last section: the device's `[OUT] dump` hex must equal the
 # oracle's `[ORACLE] rgb` hex, byte for byte. `projects/test/shader-oracle` is
 # clock-free precisely so that comparison needs no time synchronisation.
+#
+# ## TEST HOOK: `tcp://host:port` in place of a serial port
+#
+# A port that starts `tcp://` is an EMULATED board's link socket, and the walk
+# runs its host side against it: no port resolution, no chip probe, NO FLASH
+# (the emulator already booted whatever image it was given — it must be a
+# `frame-dump` build), the upload over `serial:tcp://…`, and in place of the
+# second flash a `--request reboot` on the capture, which reboots the board
+# into the project it persisted. The board must be one that reboots rather
+# than ending on the reset and keeps its flash, e.g.:
+#
+#   lp-cli emu run --merged <frame-dump merged.bin> --link 127.0.0.1:5591 \
+#       --reboot-on-reset --timeout 120s --wall-timeout 900
+#
+# (No `--strict-bus`: the emulated C6 does not perform a software reset, so
+# the reboot arrives by the LP watchdog ~8 s later, after a fall-through that
+# writes to address 0 — docs/defects/2026-09-29-the-emulated-c6-does-not-
+# perform-a-software-reset.md.)
+#
+# It exists so the host half of this walk — the upload, the capture, the
+# parse and the comparison — can be proved with no board. It proves nothing
+# about espflash, the port's re-enumeration after a reset, or silicon.
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
@@ -62,9 +116,18 @@ PROJECT="${PROJECT:-projects/test/shader-oracle}"
 # lp-fw/fw-esp32v3/src/output/rmt/frame_dump.rs — the two print identical line
 # shapes so that everything below this point is chip-agnostic.
 FLASH_FEATURES="${FLASH_FEATURES:-frame-dump}"
+# How long the capture hosts the link after the second flash. The deferred
+# lit dump comes 30 frames after the first lit frame, which follows the boot,
+# the project load and the on-device compile; 30 s is several times that on
+# every chip the walk has run on.
+WATCH_SECS="${LP_WALK_WATCH_SECS:-30}"
+# Seconds to let a board's port settle after espflash's hard reset before
+# waiting for its device node: a native-USB board drops off the bus and comes
+# back under the same name.
+SETTLE_SECS="${LP_WALK_SETTLE_SECS:-2}"
 
 usage() {
-    sed -n '2,8p' "$0" | sed 's/^# \{0,1\}//'
+    sed -n '2,9p' "$0" | sed 's/^# \{0,1\}//'
 }
 
 # ------------------------------------------------------------ arguments
@@ -81,13 +144,16 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
+# The test hook (header): an emulated board's socket instead of a board.
+emulated=0
+[[ "$port" == tcp://* ]] && emulated=1
+
 # ------------------------------------------------------------ chip table
 # The whole of this script's chip knowledge. Four facts each:
 #
-#   FLASH_RECIPE    the just recipe that builds+flashes+monitors this chip. It
-#                   owns the partition table, the flash size and (on the
-#                   classic) `--monitor-baud 921600`; this script must not
-#                   duplicate any of them.
+#   FLASH_RECIPE    the just recipe that builds+flashes this chip (called with
+#                   `no-monitor`). It owns the partition table and the flash
+#                   size; this script must not duplicate either.
 #   ENDPOINT_LABEL  the board label the oracle project's output node must name.
 #                   `projects/test/shader-oracle` is authored for the XIAO S3's
 #                   `D10`; the DOM-Z-102 has no such pad and names its four
@@ -142,7 +208,12 @@ case "$chip" in
         ;;
 esac
 
-echo "==> chip=$chip recipe=just $FLASH_RECIPE endpoint=ws281x:local:$ENDPOINT_LABEL"
+if [[ $emulated == 1 ]]; then
+    echo "==> chip=$chip, EMULATED board at $port (test hook: no flash)" \
+        "endpoint=ws281x:local:$ENDPOINT_LABEL"
+else
+    echo "==> chip=$chip recipe=just $FLASH_RECIPE endpoint=ws281x:local:$ENDPOINT_LABEL"
+fi
 
 # ------------------------------------------------------------ port
 #
@@ -179,7 +250,7 @@ fi
 strip_ansi_stream() { sed 's/\x1b\[[0-9;]*m//g'; }
 strip_ansi() { strip_ansi_stream < "$1"; }
 
-if [[ "$VERIFY_CHIP" != 0 ]]; then
+if [[ "$VERIFY_CHIP" != 0 && $emulated == 0 ]]; then
     echo "==> confirming $port really is a $chip"
     probed="$(espflash board-info --port "$port" 2>&1 \
         | strip_ansi_stream \
@@ -202,16 +273,36 @@ if [[ "$VERIFY_CHIP" != 0 ]]; then
     echo "    confirmed: $probed"
 fi
 
+# ------------------------------------------------------------ lp-cli
+#
+# Built once, up front, so no compile sits between a flash's reset and the
+# upload or capture that follows it. `LP_CLI` names a binary to use instead.
+if [[ -z "${LP_CLI:-}" ]]; then
+    echo "==> building lp-cli"
+    cargo build -q -p lp-cli
+fi
+lp_cli() {
+    if [[ -n "${LP_CLI:-}" ]]; then
+        "$LP_CLI" "$@"
+    else
+        cargo run -q -p lp-cli -- "$@"
+    fi
+}
+
+# ------------------------------------------------------------ flashing
+#
 # Interrupt only the espflash that holds OUR port.
 #
 # The pattern carries `$port` on purpose. `pkill -f "espflash flash"` kills
 # every espflash on the machine, which on a desk running two boards means one
-# walk SIGINTs the other lane's flash mid-write — and the `flash_and_watch`
-# child below passes `--port` explicitly, so the port name is always on the
-# command line to match against. SIGINT, never TERM or KILL: a killed espflash
-# wedges the port until someone physically replugs the board (M3's lesson, at
-# the top of this file).
+# walk SIGINTs the other lane's flash mid-write — and the recipe passes
+# `--port` explicitly, so the port name is always on the command line to
+# match against. SIGINT, never TERM or KILL: a killed espflash wedges the port
+# until someone physically replugs the board (M3's lesson, in the header).
+# The flashes below run in the foreground and exit by themselves; this is the
+# net for a walk that is itself interrupted mid-flash.
 release_port() {
+    [[ $emulated == 1 ]] && return 0
     pkill -INT -f "espflash flash.*$port" 2>/dev/null || true
     for _ in $(seq 1 15); do
         pgrep -f "espflash flash.*$port" >/dev/null 2>&1 || return 0
@@ -221,18 +312,48 @@ release_port() {
 }
 trap release_port EXIT
 
-# Flash, then watch the monitor until `marker` appears or `secs` elapse.
-# Leaves the transcript in $LOG (ANSI-stripped by the readers below).
-flash_and_watch() {
-    local marker="$1" secs="$2"
-    script -q "$LOG" just "$FLASH_RECIPE" "$port" "$FLASH_FEATURES" >/dev/null 2>&1 &
-    local pid=$!
-    for _ in $(seq 1 "$secs"); do
-        grep -qa "$marker" "$LOG" 2>/dev/null && return 0
-        kill -0 "$pid" 2>/dev/null || return 1
+# One holder at a time: refuse a port another process has open (a browser's
+# Web Serial, another session's capture) rather than flash or read under it.
+refuse_if_held() {
+    local holders
+    holders="$(lsof -n "$port" 2>/dev/null | tail -n +2 || true)"
+    if [[ -n "$holders" ]]; then
+        echo "FAIL: $port is held by another process; refusing to take it:" >&2
+        echo "$holders" >&2
+        exit 1
+    fi
+}
+
+# Build and flash with no monitor, in the foreground, into the transcript
+# `$1`; espflash exits when the write is done and the board is reset.
+flash_no_monitor() {
+    local log="$1"
+    refuse_if_held
+    if ! script -q "$log" just "$FLASH_RECIPE" "$port" "$FLASH_FEATURES" no-monitor \
+        >/dev/null 2>&1; then
+        echo "FAIL: the flash did not complete. Tail of $log:" >&2
+        strip_ansi "$log" | tail -30 >&2
+        exit 1
+    fi
+    # A wedged C6 bootloader shows up as a clean exit with a TG0_WDT_HPSYS
+    # banner (docs/defects/2026-09-06-c6-analog-master-wedges-the-
+    # bootloader.md): stop, and do not retry — retrying makes it worse.
+    if grep -qa 'TG0_WDT_HPSYS' "$log" 2>/dev/null; then
+        echo "WEDGED: the flash log carries rst:0x7 (TG0_WDT_HPSYS) — replug the board." >&2
+        exit 1
+    fi
+}
+
+# After espflash's hard reset: let the port drop and come back, then wait for
+# its device node.
+wait_for_port() {
+    sleep "$SETTLE_SECS"
+    for _ in $(seq 1 30); do
+        [[ -e "$port" ]] && return 0
         sleep 1
     done
-    return 1
+    echo "FAIL: $port did not come back after the flash's reset." >&2
+    exit 1
 }
 
 # ------------------------------------------- the project this chip can open
@@ -273,25 +394,15 @@ prepare_project() {
 prepare_project
 
 # ------------------------------------------------------- round 1: push
-LOG="$LOG_DIR/m4-walk-push-$$.log"
-echo "==> flashing $port (features: $FLASH_FEATURES)"
-if ! flash_and_watch "starting server loop" 180; then
-    echo "Board did not reach the server loop. Tail of the log:" >&2
-    strip_ansi "$LOG" | tail -40 >&2
-    exit 1
+if [[ $emulated == 0 ]]; then
+    echo "==> flashing $port (features: $FLASH_FEATURES, no monitor)"
+    flash_no_monitor "$LOG_DIR/m4-walk-flash1-$$.log"
+    wait_for_port
 fi
 
 echo
-echo "===== BOOT ====="
-strip_ansi "$LOG" | grep -aE "INIT|RECOVERY|hardware manifest|proto=|Boot:" | head -20
-
-echo
-echo "==> detaching the monitor so lp-cli can open the port"
-release_port
-
-echo
 echo "===== UPLOAD ====="
-if ! cargo run -q -p lp-cli -- upload "$UPLOAD_DIR" "serial:$port"; then
+if ! lp_cli upload "$UPLOAD_DIR" "serial:$port"; then
     echo "upload: FAILED" >&2
     exit 1
 fi
@@ -299,21 +410,40 @@ echo "upload: OK"
 
 # --------------------------------------------- round 2: watch it render
 LOG="$LOG_DIR/m4-walk-render-$$.log"
+CAPTURE_ERR="$LOG_DIR/m4-walk-capture-$$.stderr"
+capture_args=(link capture "$port" --console "$LOG" --seconds "$WATCH_SECS")
 echo
-echo "==> reflashing to watch the device compile and render the pushed project"
-trap release_port EXIT
-flash_and_watch "\[OUT\] dump" 180 || true
-sleep 8
-release_port
-trap - EXIT
+if [[ $emulated == 0 ]]; then
+    echo "==> reflashing so the device boots, loads the pushed project, compiles and renders"
+    flash_no_monitor "$LOG_DIR/m4-walk-flash2-$$.log"
+    wait_for_port
+else
+    # The test hook's stand-in for the second flash: a software reboot, asked
+    # over the link the capture is hosting, into the project the board kept.
+    echo "==> asking the emulated board to reboot into the pushed project"
+    capture_args+=(--request reboot)
+fi
+echo "==> hosting the link for ${WATCH_SECS} s (lp-cli link capture) → $LOG"
+capture_ok=1
+lp_cli "${capture_args[@]}" 2>"$CAPTURE_ERR" || capture_ok=0
+
+echo
+echo "===== LINK ====="
+grep -a "^link capture:" "$CAPTURE_ERR" || true
+if [[ $capture_ok == 0 ]]; then
+    echo "FAIL: the capture did not complete. Its stderr:" >&2
+    tail -20 "$CAPTURE_ERR" >&2
+    exit 1
+fi
 
 echo
 echo "===== DEVICE ====="
 # `does not produce` is in the filter on purpose: its ABSENCE is the signal that
 # something now feeds the output node. It was M3's every-frame symptom.
 strip_ansi "$LOG" \
-    | grep -aE "INIT|RECOVERY|Boot:|Project|compilation|\[OUT\]|ERROR|heap|does not produce" \
-    | head -40
+    | grep -aE "INIT|RECOVERY|Boot:|Project|compilation|\[OUT\]|ERROR|heap|does not produce|^\[link\]" \
+    | cut -c1-200 \
+    | head -60
 
 echo
 echo "===== ORACLE ====="
@@ -361,9 +491,13 @@ if [[ -z "$device_hex" ]]; then
     echo "      (Or the image was built without '$FLASH_FEATURES', in which case" >&2
     echo "       it renders fine and simply says nothing about it. Or the output" >&2
     echo "       node's endpoint ws281x:local:$ENDPOINT_LABEL is not one this board" >&2
-    echo "       offers, in which case the DEVICE section above says so.)" >&2
+    echo "       offers, in which case the DEVICE section above says so. Or the" >&2
+    echo "       link never came up, in which case the LINK section has no 'up'.)" >&2
     exit 1
 fi
+echo "device:   $device_hex"
+echo "wasmtime: $oracle_hex"
+echo "rv32-emu: $rv32_hex"
 if [[ "$device_hex" == "$oracle_hex" ]]; then
     echo "PASS: $chip frame is byte-identical to the host oracle (${#device_hex} hex chars)."
     [[ "$device_hex" == "$rv32_hex" ]] || echo "  note: rv32-emu differs from both — investigate."
@@ -371,9 +505,6 @@ if [[ "$device_hex" == "$oracle_hex" ]]; then
 fi
 
 echo "FAIL: device and wasmtime frames differ."
-echo "  device:   $device_hex"
-echo "  wasmtime: $oracle_hex"
-echo "  rv32-emu: $rv32_hex"
 if [[ "$device_hex" == "$rv32_hex" ]]; then
     echo "  TRIAGE: the device agrees with rv32-emu, so this is a native-codegen"
     if [[ "$chip" == "esp32c6" ]]; then
