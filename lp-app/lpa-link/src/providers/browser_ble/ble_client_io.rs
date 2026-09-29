@@ -1,23 +1,38 @@
 //! `lpa-client`'s `ClientIo` over a Bluetooth session: what a push, a
 //! project removal, a manifest write and the editor lens speak through.
 //!
-//! The exclusive-borrow io, the same shape as the serial port's and the tab
-//! emulator's: the effects layer has paused the link's pump, so this is the
-//! only reader of the session for as long as it lives, and `close` is a
-//! no-op because the session belongs to the model's link. Every line it
-//! drains goes to the tap first, so the device fold keeps hearing the board
-//! (heartbeats, logs) while a conversation owns the wire.
+//! The exclusive-borrow io, the same shape as the serial port's
+//! (`port_client_io.rs`) and the tab emulator's: the effects layer has paused
+//! the link's pump, so this is the only drainer of the session's lp-link end
+//! for as long as it lives, and `close` is a no-op because the session
+//! belongs to the model's link. A request goes out as one link message, and
+//! every message comes back whole — the link already reassembled it.
+//!
+//! Everything it drains goes to the tap first, so the device fold keeps
+//! hearing the board (heartbeats, the link's own notes) while a
+//! conversation owns the wire.
+//!
+//! # Failing fast
+//!
+//! - **The GATT link dropped** (`bluetooth link lost: …`): both ends lost
+//!   the session, and the conversation fails now rather than after its
+//!   quiet budget.
+//! - **The link reset inside a connection** (the board's link gave up on a
+//!   frame): every request in flight is lost; `receive` fails at once with
+//!   the reset's note, in order behind any reply that beat it, and the tap
+//!   hears the note so the fold's journal says why (the USB cut-over's D9,
+//!   the same over Bluetooth).
 
+use std::collections::VecDeque;
 use std::rc::Rc;
 
 use async_trait::async_trait;
-use js_sys::{Function, Promise, Reflect};
 use lpa_client::ClientIo;
 use lpc_wire::{ClientMessage, TransportError, WireServerMessage};
-use wasm_bindgen::{JsCast, JsValue};
-use wasm_bindgen_futures::JsFuture;
 
 use super::ble_wire::{BleWire, is_link_lost};
+use crate::device_link::link_port_edge::sleep_ms;
+use crate::device_link::wire_reader::WireRead;
 
 /// How often the receive loop re-drains the session. The same 20 ms the
 /// serial io and the model's pump use.
@@ -27,18 +42,22 @@ const RECEIVE_POLL_MS: u32 = 20;
 /// measurement: a knob write's round trip over BLE was ~31–40 ms in Run F.
 const RESPONSE_BUDGET_MS: u32 = 5_000;
 
-/// What the io hands the tap: a whole line off the wire, or the session
+/// What the io hands the tap: a whole message as its `M!{json}` line, a
+/// journal note from the session's link (a reset, a stall), or the session
 /// reporting the link failed underneath it.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum BleTapLine {
     Line(String),
+    Note(String),
     PortError(String),
 }
 
 /// The io. Build one per borrow.
 pub struct BleClientIo {
     wire: Rc<BleWire>,
-    pending: Vec<WireServerMessage>,
+    /// Replies drained but not yet handed out, in order — with a link reset
+    /// among them as the error it hands out in its place.
+    pending: VecDeque<Result<WireServerMessage, String>>,
     tap: Option<Rc<dyn Fn(BleTapLine)>>,
 }
 
@@ -46,7 +65,7 @@ impl BleClientIo {
     pub fn new(wire: Rc<BleWire>, tap: Option<Rc<dyn Fn(BleTapLine)>>) -> Self {
         Self {
             wire,
-            pending: Vec::new(),
+            pending: VecDeque::new(),
             tap,
         }
     }
@@ -73,6 +92,41 @@ impl BleClientIo {
             None => Ok(()),
         }
     }
+
+    /// Drain the session once: the link's notes to the tap, then every read.
+    fn drain(&mut self) {
+        for note in self.wire.take_notes() {
+            self.tap(BleTapLine::Note(note));
+        }
+        for read in self.wire.take_reads() {
+            match read {
+                // The fold hears a message as the line it always read, in
+                // either form; the reader decoded it once.
+                WireRead::Frame(frame) => {
+                    self.tap(BleTapLine::Line(frame.to_line()));
+                    // A frame whose JSON did not decode is dropped here and
+                    // NOT lost: the tap carried it to the fold, whose demux
+                    // counts it as an anomaly.
+                    if let Ok(message) = frame.message {
+                        self.pending.push_back(Ok(message));
+                    }
+                }
+                WireRead::Line(line) => self.tap(BleTapLine::Line(line)),
+                // A journal line, not a dead port (a link port never reads
+                // one; kept so nothing is ever silence).
+                WireRead::Error(error) => {
+                    self.tap(BleTapLine::Note(format!("undeliverable frame: {error}")));
+                }
+                // Everything in flight is lost: fail it now (D9).
+                WireRead::LinkReset(note) => {
+                    self.tap(BleTapLine::Note(note.clone()));
+                    self.pending.push_back(Err(note));
+                }
+                // Notes come from `take_notes` (`take_reads` hands out none).
+                WireRead::Note(_) => {}
+            }
+        }
+    }
 }
 
 #[async_trait(?Send)]
@@ -81,36 +135,19 @@ impl ClientIo for BleClientIo {
         self.check_errors()?;
         let json = lpc_wire::json::to_string(&msg)
             .map_err(|error| TransportError::Other(format!("encode failed: {error}")))?;
-        match self.wire.write(format!("M!{json}\n").as_bytes()) {
-            Ok(true) => Ok(()),
-            Ok(false) => Err(TransportError::Other(
-                "the bluetooth link is not connected".to_string(),
-            )),
-            Err(error) => Err(TransportError::Other(error)),
-        }
+        self.wire
+            .send_client_json(&json)
+            .map_err(TransportError::Other)
     }
 
     async fn receive(&mut self) -> Result<WireServerMessage, TransportError> {
         let mut waited = 0_u32;
         loop {
-            if !self.pending.is_empty() {
-                return Ok(self.pending.remove(0));
+            if let Some(next) = self.pending.pop_front() {
+                return next.map_err(TransportError::Other);
             }
             self.check_errors()?;
-            let lines = self.wire.take_lines().map_err(TransportError::Other)?;
-            for line in lines {
-                self.tap(BleTapLine::Line(line.clone()));
-                // A non-`M!` line is the board talking (a log), not an
-                // answer; the tap above already carried it.
-                // A malformed frame is dropped here and NOT lost: the tap
-                // carried the raw line to the fold, whose demux counts it as
-                // an anomaly the way it counts every garbled frame.
-                if let Some(json) = line.strip_prefix("M!")
-                    && let Ok(message) = lpc_wire::json::from_str::<WireServerMessage>(json)
-                {
-                    self.pending.push(message);
-                }
-            }
+            self.drain();
             if !self.pending.is_empty() {
                 continue;
             }
@@ -129,23 +166,4 @@ impl ClientIo for BleClientIo {
         // The session belongs to the model's link.
         Ok(())
     }
-}
-
-/// One `setTimeout` tick, with no `web-sys` dependency.
-async fn sleep_ms(ms: u32) {
-    let promise = Promise::new(&mut |resolve, _reject| {
-        let global = js_sys::global();
-        let set_timeout = Reflect::get(&global, &JsValue::from_str("setTimeout"))
-            .ok()
-            .and_then(|value| value.dyn_into::<Function>().ok());
-        match set_timeout {
-            Some(set_timeout) => {
-                let _ = set_timeout.call2(&global, &resolve, &JsValue::from_f64(f64::from(ms)));
-            }
-            None => {
-                let _ = resolve.call0(&JsValue::NULL);
-            }
-        }
-    });
-    let _ = JsFuture::from(promise).await;
 }

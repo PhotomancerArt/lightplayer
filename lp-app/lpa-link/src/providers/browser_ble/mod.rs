@@ -1,18 +1,21 @@
-//! Web Bluetooth: the same `M!{json}` line protocol, over a Nordic UART
-//! (NUS) GATT service (M5 of the BLE remote-control plan).
+//! Web Bluetooth: the board's wire over lp-link, on a Nordic UART (NUS)
+//! GATT service (M5 of the BLE remote-control plan; on lp-link since
+//! `WIRE_PROTO_VERSION` 31, plan `lp2025/2026-09-28-1445-ble-on-lp-link`).
 //!
 //! BLE is *just another transport*. It follows the Web Serial adapter's
 //! shape: the JS module owns the device and its connection, a thin Rust
 //! binding reaches it through `#[wasm_bindgen(module = …)]` with no
 //! `web-sys` Bluetooth features, commands run in spawned futures, and
-//! events queue for `poll_event`. Bytes become lines through the SAME
-//! `LineSplitter` every byte transport uses.
+//! events queue for `poll_event`. Each connection runs the SAME
+//! `LinkPortService` Web Serial runs per port, on `LinkConfig::ble()`'s
+//! datagrams: one frame per notification, one frame per GATT write.
 //!
 //! | file | what it owns |
 //! |---|---|
-//! | `browser_ble.js` | the `BluetoothDevice`, the bounded connect, the awaited chunked writes, the reconnect loop, visibility re-checks, presence edges |
+//! | `browser_ble.js` | the `BluetoothDevice`, the bounded connect, one awaited GATT write per frame, the notifications kept one frame each, the reconnect loop, visibility re-checks, presence edges |
 //! | `browser_ble.rs` | the bindings and the session descriptor ([`BleDevice`]) |
-//! | `ble_wire.rs` | [`BleWire`] — a session's byte stream and its one `WireStream`, shared by the link and a borrowing conversation |
+//! | `ble_link_port.rs` | each session's lp-link end (`LinkPortService`, a new one per connection) and the loop that services it |
+//! | `ble_wire.rs` | [`BleWire`] — a handle on a session's wire, shared by the link and a borrowing conversation |
 //! | `ble_client_io.rs` | [`BleClientIo`] — `lpa-client`'s io over the wire, for push/remove/manifest writes and the editor lens |
 //!
 //! The model's `Link` over this lives in `device_link::browser_ble`.
@@ -27,6 +30,7 @@
 //! against the `?ble=emu` polyfill.
 
 mod ble_client_io;
+mod ble_link_port;
 mod ble_wire;
 mod browser_ble;
 

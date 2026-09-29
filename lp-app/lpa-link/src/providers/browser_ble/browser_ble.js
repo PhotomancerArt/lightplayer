@@ -1,12 +1,18 @@
-// Studio's Web Bluetooth link: the `M!{json}\n` line protocol over a Nordic
-// UART (NUS) GATT service, owned here the way `browser_serial.js` owns a
-// Web Serial port.
+// Studio's Web Bluetooth link: lp-link over a Nordic UART (NUS) GATT
+// service, owned here the way `browser_serial.js` owns a Web Serial port.
 //
-// BLE is *just another transport*. The board runs the same server over it
-// that it runs over USB, so this file knows nothing about frames: bytes go
-// out through the RX characteristic and come back as TX notifications, and
-// the Rust side (`browser_ble.rs`) re-joins them into lines with the SAME
-// `LineSplitter` the other byte transports use.
+// Since `WIRE_PROTO_VERSION` 31 a board's Bluetooth links run lp-link, as
+// its USB link does (plan `lp2025/2026-09-28-1445-ble-on-lp-link`): the
+// DATAGRAM framing, where one GATT value is one whole frame (a 4-byte
+// header, up to one payload, a 4-byte CRC-32C). This file does not read
+// frames, but it keeps their boundaries: every TX notification is handed to
+// Rust as it came (`takeFrames`), and every `write` is one frame from Rust,
+// written as one GATT value — never cut, never joined. The link itself (the
+// handshake, the checksum, resends, the session) is the Rust side's
+// (`ble_link_port.rs`, one `LinkPortService` per session), and so is the
+// payload size: the board's SYN carries it (`min(180, ATT MTU − 11)`), and
+// lp-link cuts the host's frames to it, so this file never needs the MTU
+// Web Bluetooth will not tell it.
 //
 // THE GATT SUBSET, in full — `?ble=emu`'s polyfill
 // (`lpa-studio-web/public/lpa-link/virtual_bluetooth.js`) implements exactly
@@ -23,19 +29,22 @@
 // FIVE RULES, each with a measurement behind it (M2 desk sitting, spike
 // Runs B and F):
 //
-//  1. **Every write is awaited, and every write asks for a response.** Knob
-//     turns are one ~190 B packet; write-with-response is plenty for
-//     control. Unpaced write-WITHOUT-response lost about two thirds of the
-//     bytes in Run B, so this file never issues one.
-//  2. **Writes are chunked to 180 B**, inside one ATT value at any MTU a
-//     central is likely to agree (iOS's common 185 → 182; the board's own is
-//     247 → 244), because Web Bluetooth does not expose the negotiated MTU.
-//     A chunk over MTU − 3 becomes an ATT *long write* (Prepare … Execute):
-//     the board handles one since 2026-09-25, but before that it acked the
-//     segments and dropped the bytes, so a request vanished and the editor's
-//     dead-wire backstop closed it with no error on screen
-//     (docs/defects/2026-09-25-a-long-bluetooth-write-is-acknowledged-and-lost.md).
-//     The same 180 the ble-lab used for every Bluefy measurement.
+//  1. **Every write is awaited, and every write asks for a response.** One
+//     at a time, in order (`session.writeChain`): Web Bluetooth refuses a
+//     second GATT operation while one is in flight, and unpaced
+//     write-WITHOUT-response lost about two thirds of the bytes in Run B, so
+//     this file never issues one. `writesPending` tells the Rust side how
+//     many frames are queued here, so it hands over a frame only when there
+//     is room and keeps the rest in the link, where a resend is still a
+//     choice rather than a duplicate queued behind the original.
+//  2. **One frame is one write, and no write is an ATT long write.** A frame
+//     is at most the board's payload + 8 B, and the board sizes its payload
+//     so that fits one ATT value at the connection's MTU (174 B payload on
+//     iOS's 185, 180 B on the 247 macOS and the board agree). The 180 B
+//     chunker this rule used to be is gone with the `M!` lines it cut, and so
+//     is every Prepare … Execute write: the board now refuses one
+//     (docs/defects/2026-09-25-a-long-bluetooth-write-is-acknowledged-and-lost.md
+//     is the bug that class of write was).
 //  3. **Every `gatt.connect()` is bounded (10 s).** Chrome's hung forever
 //     once in Run B and wedged the page with it.
 //  4. **A hidden page does not hear its link drop.** iOS suspends a hidden
@@ -48,11 +57,18 @@
 //     page its link is gone while iOS keeps the radio connection up (G4,
 //     2026-09-25: the board held the link for 20 minutes, until the tab
 //     closed). A reconnect then rides the OLD link, so the board never sees
-//     a new one and never sends the hello it owes a new link. Every drop
-//     therefore calls `gatt.disconnect()`, and so does a failed write (the
-//     rest of its line is lost, and a half line would poison the board's
-//     next one): the reconnect is always a fresh link.
+//     a new one and never starts the new session it owes a new link. Every
+//     drop therefore calls `gatt.disconnect()`, and so does a failed write:
+//     lp-link would resend a frame a write lost, but a write that fails on a
+//     link the page still calls up is how that phantom link shows itself.
+//     The reconnect is always a fresh connection, so a fresh lp-link session
+//     (each connection's `generation` is a new link on the Rust side).
 //
+// THE BOARD'S SESSION STARTS AT THE SUBSCRIBE. The board makes its end of
+// the link when the central enables TX notifications, and drops RX writes
+// that arrive before that; so `startNotifications()` comes before the
+// session counts as connected, and Rust writes nothing until it does.
+
 // RECONNECT NEEDS NO GESTURE (G1, Run F): Bluefy reconnected a held
 // `BluetoothDevice` after a page-caused drop in 954 ms and after a board
 // reboot in 803 ms, and `getDevices()` returns the granted board. So a drop
@@ -67,11 +83,9 @@ const NUS_TX = "6e400003-b5a3-f393-e0a9-e50e24dcca9e"; // board → central (not
 
 /// Rule 3.
 export const CONNECT_TIMEOUT_MS = 10_000;
-/// Rule 2.
-export const WRITE_CHUNK_BYTES = 180;
-/// Bytes a session holds for a reader that is not draining. A connected
-/// board heartbeats every 5 s whether anyone reads or not; this bounds what
-/// a link nobody has opened can pile up.
+/// Bytes of notified frames a session holds for a Rust side that is not
+/// draining. Its link drains on every notification (`onActivity`) and on a
+/// timer, so this only bounds a page that stopped running Rust at all.
 const MAX_BUFFERED_BYTES = 256 * 1024;
 /// The reconnect loop's delays, in order. A drop costs one fast retry
 /// (Bluefy's measured reconnects were under a second), then backs off; after
@@ -206,10 +220,15 @@ class BleSession {
     this.present = false;
     // Whether the link is wanted up: a drop reconnects only then.
     this.wanted = false;
-    this.buffer = [];
+    // Notified frames not yet taken, each as it arrived (rule 2).
+    this.frames = [];
     this.buffered = 0;
     this.errors = [];
     this.writeChain = Promise.resolve();
+    // Frames on the write chain: queued or being written (rule 1).
+    this.writesPending = 0;
+    // `onActivity` callbacks: something the Rust side should look at now.
+    this.listeners = new Set();
     this.generation = 0;
     this.connecting = null;
     this.reconnectTimer = null;
@@ -238,20 +257,41 @@ class BleSession {
     };
   }
 
+  /// One TX notification: one lp-link frame, kept whole (rule 2).
   receive(event) {
     const view = event?.target?.value ?? event?.value;
     if (!view) {
       return;
     }
     // Copied: the DataView's buffer is the browser's and may be reused.
-    const bytes = new Uint8Array(view.buffer, view.byteOffset, view.byteLength).slice();
-    this.buffer.push(bytes);
-    this.buffered += bytes.length;
-    while (this.buffered > MAX_BUFFERED_BYTES && this.buffer.length > 1) {
-      this.buffered -= this.buffer.shift().length;
+    const frame = new Uint8Array(view.buffer, view.byteOffset, view.byteLength).slice();
+    this.frames.push(frame);
+    this.buffered += frame.length;
+    while (this.buffered > MAX_BUFFERED_BYTES && this.frames.length > 1) {
+      this.buffered -= this.frames.shift().length;
       if (!this.overflowNoted) {
         this.overflowNoted = true;
-        this.errors.push("bluetooth receive buffer overflowed; the oldest bytes were dropped");
+        this.errors.push("bluetooth receive buffer overflowed; the oldest frames were dropped");
+      }
+    }
+    this.activity();
+  }
+
+  /// Forget notified frames: a new connection is a new lp-link session, and
+  /// the old one's frames mean nothing to it.
+  clearFrames() {
+    this.frames = [];
+    this.buffered = 0;
+  }
+
+  /// Tell the Rust side to look now (a frame came, a write finished, the
+  /// link came up or went away). A throwing listener is its own problem.
+  activity() {
+    for (const listener of [...this.listeners]) {
+      try {
+        listener();
+      } catch (error) {
+        console.warn("[ble] activity listener threw:", error);
       }
     }
   }
@@ -370,6 +410,8 @@ export async function disconnect(id) {
   session.state = "closed";
   session.rx = null;
   detachNotifications(session);
+  session.clearFrames();
+  session.activity();
   if (wasUp || session.device.gatt?.connected) {
     try {
       session.device.gatt?.disconnect();
@@ -404,62 +446,78 @@ export async function forget(id) {
   }
 }
 
-// --- bytes -----------------------------------------------------------------
+// --- frames ----------------------------------------------------------------
 
-/// Queue bytes for the board. Returns immediately; the writes go out one
-/// awaited chunk at a time (rules 1 and 2) behind whatever is already
-/// queued. A failure is reported through `takeErrors`.
-export function write(id, bytes) {
+/// Queue ONE lp-link frame for the board: one GATT write, awaited in turn
+/// behind whatever is already queued (rules 1 and 2). Returns immediately;
+/// `false` when the link is not connected (the frame never left, which the
+/// link on the Rust side treats like any lost frame). A failure is reported
+/// through `takeErrors`.
+export function write(id, frame) {
   const session = requireSession(id);
   if (session.state !== "connected" || !session.rx) {
     session.errors.push("write on a bluetooth link that is not connected");
     return false;
   }
-  const data = bytes instanceof Uint8Array ? bytes.slice() : new Uint8Array(bytes);
+  const data = frame instanceof Uint8Array ? frame.slice() : new Uint8Array(frame);
   const generation = session.generation;
   const rx = session.rx;
+  session.writesPending += 1;
   session.writeChain = session.writeChain.then(async () => {
-    for (let offset = 0; offset < data.length; offset += WRITE_CHUNK_BYTES) {
+    try {
       if (session.generation !== generation) {
         return;
       }
-      const chunk = data.subarray(offset, offset + WRITE_CHUNK_BYTES);
-      try {
-        if (typeof rx.writeValueWithResponse === "function") {
-          await rx.writeValueWithResponse(chunk);
-        } else {
-          await rx.writeValue(chunk);
-        }
-      } catch (error) {
-        if (session.generation !== generation) {
-          return;
-        }
-        session.errors.push(`bluetooth write failed: ${messageOf(error)}`);
-        // Rule 5: whether or not the browser still calls the link up, a
-        // line with a missing chunk cannot be finished — start clean.
-        handleDrop(
-          session,
-          session.device.gatt?.connected ? "a write failed" : "a write found the connection gone",
-        );
+      if (typeof rx.writeValueWithResponse === "function") {
+        await rx.writeValueWithResponse(data);
+      } else {
+        await rx.writeValue(data);
+      }
+    } catch (error) {
+      if (session.generation !== generation) {
         return;
       }
+      session.errors.push(`bluetooth write failed: ${messageOf(error)}`);
+      // Rule 5.
+      handleDrop(
+        session,
+        session.device.gatt?.connected ? "a write failed" : "a write found the connection gone",
+      );
+    } finally {
+      session.writesPending -= 1;
+      session.activity();
     }
   });
   return true;
 }
 
-/// Everything the board notified since the last call, as one array.
-export function takeBytes(id) {
+/// `{ generation, connected, frames, writesPending }`: every frame the board
+/// notified since the last call, each as the one notification it came in
+/// (rule 2); which connection they belong to (`generation` moves with every
+/// connect, drop and close — a new one is a new lp-link session); whether
+/// the link can be written now (connected AND subscribed); and how many
+/// frames are still queued on the write chain (rule 1).
+export function takeFrames(id) {
   const session = requireSession(id);
-  const out = new Uint8Array(session.buffered);
-  let at = 0;
-  for (const chunk of session.buffer) {
-    out.set(chunk, at);
-    at += chunk.length;
-  }
-  session.buffer = [];
-  session.buffered = 0;
-  return out;
+  const frames = session.frames;
+  session.clearFrames();
+  return {
+    generation: session.generation,
+    connected: session.state === "connected" && session.rx !== null,
+    frames,
+    writesPending: session.writesPending,
+  };
+}
+
+/// Call `callback` (no argument) whenever the Rust side should look at the
+/// session now: a notification came, a write finished, the link came up or
+/// went away. A hidden page throttles timers to a second or worse, but not
+/// these events, so the board's frames are still acknowledged promptly.
+/// Returns the unsubscribe function.
+export function onActivity(id, callback) {
+  const session = requireSession(id);
+  session.listeners.add(callback);
+  return () => session.listeners.delete(callback);
 }
 
 export function takeErrors(id) {
@@ -527,6 +585,10 @@ async function openGatt(session, generation) {
     return;
   }
   detachNotifications(session);
+  // Before the listener: the board starts the new session's SYNs the moment
+  // notifications are on, and none of the old connection's frames may
+  // precede them.
+  session.clearFrames();
   tx.addEventListener("characteristicvaluechanged", session.onValue);
   await tx.startNotifications();
   if (session.generation !== generation) {
@@ -541,6 +603,7 @@ async function openGatt(session, generation) {
   session.wanted = true;
   const wasPresent = session.present;
   session.present = true;
+  session.activity();
   if (!wasPresent) {
     announce("connect");
   }
@@ -568,6 +631,8 @@ function handleDrop(session, why) {
     // Already gone.
   }
   session.errors.push(`bluetooth link lost: ${why}`);
+  session.clearFrames();
+  session.activity();
   if (session.present) {
     session.present = false;
     announce("disconnect");
