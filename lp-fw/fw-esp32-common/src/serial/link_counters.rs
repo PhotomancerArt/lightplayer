@@ -1,7 +1,8 @@
 //! `M!`-link loss counters — the device-side end of "loss is never silent"
 //! (2026-08-26 inbound-loss defect: every drop used to vanish with zero
-//! evidence) on the transports that still speak `M!` lines: the BLE links and
-//! the classic's UART (plan `lp-link-usb-cutover`, D3).
+//! evidence) on the transport that still speaks `M!` lines: the classic's UART
+//! (plan `lp-link-usb-cutover`, D3; the BLE links moved to lp-link in plan
+//! `ble-on-lp-link`, and count per link in the mux).
 //!
 //! Each drop site bumps one relaxed atomic; the heartbeat attaches a
 //! `LinkCounters` snapshot every interval. Bumps are bare atomics only, so

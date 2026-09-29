@@ -2,9 +2,9 @@
 //!
 //! Two shapes share this file's static frame buffer: the lp-link proto
 //! payload (bare JSON or `L`+packed, no line framing) that the C6/S3 USB link
-//! sends ([`super::server_payload`]), and the `M!` framing here, which the BLE
-//! links and the classic's UART keep until their own lp-link milestones
-//! (plan `lp-link-usb-cutover`, D3).
+//! and the C6's radio links send ([`super::server_payload`]), and the `M!`
+//! framing here, which the classic's UART keeps until its own lp-link
+//! milestone (plans `lp-link-usb-cutover`, D3, and `ble-on-lp-link`).
 //!
 //! This is the chip-agnostic serialization half of every `M!` firmware's
 //! server write path: take a [`lpc_wire::WireServerMessage`] and produce one framed
@@ -45,12 +45,14 @@ use super::chunked_write::ChunkedWriter;
 /// single writer (`serialize_server_msg`, thread context) and single reader
 /// (the io task, via [`frame_bytes`]) never overlap.
 ///
-/// The USB link transport (`usb_link::usb_link_transport`, lp-link) is the
-/// same shape with no second task: it serializes a proto payload here
-/// ([`super::server_payload`]) and `Link::send` copies it out before its
-/// `send` returns. The one writer that shares the buffer with it — the BLE
-/// mux's radio send — runs in the same server task, one `send` at a time, so
-/// they never overlap either.
+/// The lp-link transports (the USB link, `usb_link::usb_link_transport`, and
+/// the radio links behind the link mux, `radio_link::link_mux_transport`)
+/// serialize a proto payload here ([`super::server_payload`]), all in the one
+/// server task, one `send` at a time. A long reply stays here as an lp-link
+/// external message that its link reads out, a fragment at a time, after
+/// `send` returned; so before anyone serializes again, every link still
+/// reading it lets go (`radio_link::FrameBufHolder`, and the mux's own wait
+/// on its radio links), and the reads and the next write never overlap.
 static mut FRAME_BUF: [u8; SERVER_MSG_JSON_BUFFER_SIZE] = [0; SERVER_MSG_JSON_BUFFER_SIZE];
 
 /// A bounds-checked [`SerWrite`] sink over [`FRAME_BUF`].
