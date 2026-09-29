@@ -26,9 +26,9 @@ pub enum EmuChip {
     #[value(name = "esp32c6")]
     Esp32C6,
     /// The S3, for `run --host-link` only (`--elf` or `--merged`, `--console`,
-    /// `--request`, `--exit-on`, `--dump-frames`, `--strict-bus`): the rest of
-    /// this door's flags are the C6's, and the S3's own binary is the
-    /// workshop for everything else.
+    /// `--request`, `--exit-on`, `--dump-frames`, `--strict-bus`,
+    /// `--usb-host`, `--usb-script`): the rest of this door's flags are the
+    /// C6's, and the S3's own binary is the workshop for everything else.
     #[value(name = "esp32s3")]
     Esp32S3,
 }

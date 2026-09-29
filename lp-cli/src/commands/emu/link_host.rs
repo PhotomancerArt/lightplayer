@@ -137,12 +137,17 @@ pub struct S3Board {
 }
 
 impl S3Board {
-    /// Install the host's queue on `builder` (with an attached, draining
-    /// host from power-on), build, and wrap.
-    pub fn build(builder: lp_emu_esp32s3::machine::Esp32S3Builder) -> Result<Self> {
+    /// Install the host's queue on `builder`, build, and wrap. `usb_host` is
+    /// the power-on USB host state — attached and draining
+    /// (`UsbHost::Attached { draining: true }`) is every caller's default
+    /// today; `run_s3`'s `--usb-host` is the one place that overrides it.
+    pub fn build(
+        builder: lp_emu_esp32s3::machine::Esp32S3Builder,
+        usb_host: lp_emu_esp32s3::machine::UsbHost,
+    ) -> Result<Self> {
         let (source, queue) = lp_emu_esp_common::QueueSource::new();
         let machine = builder
-            .usb_host(lp_emu_esp32s3::machine::UsbHost::Attached { draining: true })
+            .usb_host(usb_host)
             .usb_sj_source(Box::new(source))
             .build()
             .map_err(|e| anyhow::anyhow!("building the S3 machine: {e}"))?;
