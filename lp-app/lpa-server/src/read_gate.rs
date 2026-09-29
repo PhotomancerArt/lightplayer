@@ -105,13 +105,19 @@ impl ReadRefusal {
     /// advised narrowing it, which could not help: the editor's smallest read
     /// was refused as surely as its largest).
     pub fn message(&self) -> String {
+        let needs = if self.gate.min_free_bytes == 0 {
+            format!("a {} B block", self.gate.min_largest_block_bytes)
+        } else {
+            format!(
+                "{} B free and a {} B block",
+                self.gate.min_free_bytes, self.gate.min_largest_block_bytes
+            )
+        };
         format!(
-            "read refused: board memory busy (free {} B, largest block {} B; needs {} B free \
-             and a {} B block); retry shortly",
+            "read refused: board memory busy (free {} B, largest block {} B; needs {needs}); \
+             retry shortly",
             known(self.free_bytes),
             known(self.largest_block_bytes),
-            self.gate.min_free_bytes,
-            self.gate.min_largest_block_bytes,
         )
     }
 }
@@ -155,6 +161,18 @@ mod tests {
         assert_eq!(GATE.check(None, Some(20_000)), Ok(()));
         assert_eq!(GATE.check(Some(50_000), None), Ok(()));
         assert_eq!(GATE.check(None, None), Ok(()));
+    }
+
+    #[test]
+    fn a_block_only_message_asks_for_no_free_floor() {
+        let refusal = ReadGate::largest_block_only(32 * 1024)
+            .check(Some(87_388), Some(32_630))
+            .unwrap_err();
+        assert_eq!(
+            refusal.message(),
+            "read refused: board memory busy (free 87388 B, largest block 32630 B; needs a \
+             32768 B block); retry shortly"
+        );
     }
 
     #[test]
