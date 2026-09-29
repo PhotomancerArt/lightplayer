@@ -520,11 +520,13 @@ mod tests {
     }
 
     #[test]
-    fn the_software_system_reset_is_reported_not_performed() {
+    fn the_software_system_reset_is_noted_and_raised_for_the_machine() {
         let buf = lp_emu_esp_common::trace::SharedBuffer::new();
         let mut sb = Sandbox::new();
         sb.trace = lp_emu_esp_common::Trace::to_sink(Box::new(buf.clone()));
         let mut r = block();
+        let line = r.software_reset();
+        assert!(!line.take(), "nothing raised before the write");
         // What `_rtc_trigger_sw_system_reset` (0x4000FDC7) stores.
         sb.write(&mut r, OPTIONS0, 0x8000_0000);
         assert_eq!(buf.lines().len(), 1);
@@ -534,6 +536,20 @@ mod tests {
             0,
             "a write-only pulse, not remembered"
         );
+        assert!(sb.yield_now, "the slice ends at the store");
+        assert!(line.take(), "the machine's line is raised");
+        assert!(!line.take(), "and taken once");
+    }
+
+    #[test]
+    fn a_software_reset_leaves_reset_state_reading_sw_reset_in_both_halves() {
+        let mut sb = Sandbox::new();
+        let mut r = block();
+        r.set_reset_cause_code(SW_RESET_CODE);
+        let word = sb.read(&mut r, RESET_STATE);
+        assert_eq!(word & 0x3f, SW_RESET_CODE, "PRO");
+        assert_eq!((word >> 6) & 0x3f, SW_RESET_CODE, "APP");
+        assert_eq!(word & !0xfff, 0x0000_3000, "the rest as the PAC resets it");
     }
 
     #[test]

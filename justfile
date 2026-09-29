@@ -3058,6 +3058,21 @@ test-emu-c6-cli:
     LP_EMU_BUILD_FW=1 scripts/ci/ci-images.py with esp32c6 -- cargo test -p lp-cli --release --test emu_usb_link_gates -- --include-ignored --nocapture
     LP_EMU_BUILD_FW=1 scripts/ci/ci-images.py with esp32c6 -- cargo test -p lp-cli --release --test link_capture -- --include-ignored --nocapture
 
+# lp-cli's classic-emulator tests: the shipped `fw-esp32v3` on its UART0
+# lp-link (plan `classic-uart-on-lp-link`, P3) — hello and an upload, the
+# capture through `wire unpack`, a Reboot's new nonce (DD28), and the SYN
+# backoff with no host (DD27). Builds the image and names the copy it built
+# (`LP_EMU_ESP32V3_ELF`), as `test-emu-esp32v3-boot` does. Not in CI yet.
+test-emu-esp32v3-cli:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    just build-fw-esp32v3
+    out={{ justfile_directory() }}/target/lp-emu-esp32v3
+    mkdir -p "$out"
+    cp {{ justfile_directory() }}/target/xtensa-esp32-none-elf/release-esp32v3/fw-esp32v3 "$out/fw-esp32v3-cli.elf"
+    LP_EMU_ESP32V3_ELF="$out/fw-esp32v3-cli.elf" \
+        cargo test -p lp-cli --release --test emu_uart_link -- --include-ignored --nocapture
+
 # The classic ESP32 (v3) machine's own suite (plan three, M3).
 #
 # Nothing here builds firmware: a plain `cargo test --workspace` must never
