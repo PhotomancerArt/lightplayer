@@ -3690,17 +3690,18 @@ walk-esp32c6-emu *args: install-rv32-target build-rv32-builtins
 # The classic's UART0 link and CH340 cable verbs are what made a separate
 # script the honest shape there (DD69).
 #
-# Three differences from the C6 recipe, all in the script's header:
+# Two differences from the C6 recipe, both in the script's header — a third
+# used to be here (the runner) until `lp-cli emu run --host-link --chip
+# esp32s3` (M8) took over from the standalone `lp-emu-esp32s3` binary
+# (lp2025/2026-09-28-s3-walk-host-link):
 #
-#   the runner  the `lp-emu-esp32s3` binary, not `lp-cli emu run` — `emu run`
-#               knows one chip and teaching it a second is M8's.
 #   the image   8 MiB, not 4: this chip's partition table does not fit a 4 MB
 #               part (docs/adr/2026-07-30-esp32s3-partition-floor.md).
-#   the port    `--usb-sj-drain manual` + the control channel do what
-#               `--monitor` does on the C6: hold the port open after `lp-cli
-#               upload` disconnects, so the deferred lit dump thirty frames
-#               later still reaches a host. The walk then really does unplug
-#               the cable and asserts the state.
+#   the cable   a scripted `--usb-script` detach/attach/open, since the
+#               hosted-run door has no live control channel to unplug the
+#               cable and query its state the way the retired binary did —
+#               the walk's COMPARISON section reads the replug back from the
+#               console and the frame dump instead.
 #
 # ⚠️ **This walk is M6's only end-to-end exercise of D2's alias.** The oracle
 # project compiles a shader ON THE DEVICE; on the S3 that shader is written
