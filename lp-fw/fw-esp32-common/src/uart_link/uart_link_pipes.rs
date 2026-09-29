@@ -81,7 +81,7 @@ pub fn io_received(bytes: &[u8]) {
     if bytes.is_empty() {
         return;
     }
-    let taken = RX.try_write(bytes).unwrap_or(0);
+    let taken = write_all(&RX, bytes);
     if taken < bytes.len() {
         uart_link_counters::note_rx_pipe_overflow(bytes.len() - taken);
     }
@@ -121,7 +121,7 @@ pub(crate) fn put_frame(frame: &[u8]) -> bool {
     if TX.free_capacity() < frame.len() {
         return false;
     }
-    TX.try_write(frame).map(|n| n == frame.len()).unwrap_or(false)
+    write_all(&TX, frame) == frame.len()
 }
 
 /// **Thread executor only** (the link task's): one whole line of console
@@ -143,7 +143,7 @@ pub fn put_text_line(line: &[u8]) -> bool {
     if TX.free_capacity() < line.len() {
         return false;
     }
-    TX.try_write(line).map(|n| n == line.len()).unwrap_or(false)
+    write_all(&TX, line) == line.len()
 }
 
 /// Link task: sleep until the I/O task has news.
@@ -154,6 +154,24 @@ pub(crate) async fn wake() {
 /// Link task: how many passes the I/O task has made.
 pub(crate) fn io_passes() -> u32 {
     IO_PASSES.load(Relaxed)
+}
+
+/// As much of `bytes` as `pipe` has room for; how much that was.
+///
+/// A loop, not one `try_write`: `Pipe::try_write` copies only up to the end
+/// of its ring, so at the wrap it takes part of what fits and says so. Taken
+/// as "full", that dropped bytes from the middle of a frame with room to
+/// spare — the emulated classic showed it as a steady trickle of 4-byte RX
+/// drops (and damaged frames) under an idle host's keepalives.
+fn write_all<const N: usize>(pipe: &Pipe<CriticalSectionRawMutex, N>, bytes: &[u8]) -> usize {
+    let mut done = 0;
+    while done < bytes.len() {
+        match pipe.try_write(&bytes[done..]) {
+            Ok(n) if n > 0 => done += n,
+            _ => break,
+        }
+    }
+    done
 }
 
 #[cfg(test)]
@@ -182,17 +200,54 @@ mod tests {
         );
     }
 
-    /// A text line goes out whole, and a line that could be read as a frame
-    /// or a text mark does not go out at all. (The one test that touches the
-    /// TX pipe.)
+    /// Frames and text lines go through the TX pipe whole — across its wrap
+    /// too — and a line that could be read as a frame or a text mark does not
+    /// go out at all. (The one test that touches the TX pipe.)
     #[test]
-    fn a_text_line_is_queued_whole_or_refused() {
+    fn frames_and_text_lines_are_queued_whole_across_the_wrap() {
+        let mut out = [0u8; TX_PIPE_BYTES];
         assert!(!put_text_line(b"[WS281X] a\x00b\r\n"));
         assert!(!put_text_line(b"[WS281X] a\xffb\r\n"));
         assert!(put_text_line(b"[WS281X] t_ms=1 ch=0\r\n"));
-        let mut out = [0u8; 64];
         let n = io_take_tx(&mut out);
         assert_eq!(&out[..n], b"[WS281X] t_ms=1 ch=0\r\n");
         assert_eq!(io_take_tx(&mut out), 0, "nothing else was queued");
+
+        // Walk the ring round so the next frame straddles its end.
+        for step in 0..8 {
+            let frame = alloc::vec![0x40 + step; 300];
+            assert!(room_for_frame());
+            assert!(put_frame(&frame), "frame {step} queued whole");
+            let mut got = alloc::vec::Vec::new();
+            loop {
+                let n = io_take_tx(&mut out);
+                if n == 0 {
+                    break;
+                }
+                got.extend_from_slice(&out[..n]);
+            }
+            assert_eq!(got, frame, "frame {step} came out whole");
+        }
+    }
+
+    /// Bytes from the RX FIFO reach the link task whole across the RX pipe's
+    /// wrap. (The one test that touches the RX pipe.)
+    #[test]
+    fn received_bytes_arrive_whole_across_the_wrap() {
+        let mut out = [0u8; RX_PIPE_BYTES];
+        for step in 0..8u8 {
+            let bytes = alloc::vec![step; 400];
+            io_received(&bytes);
+            let mut got = alloc::vec::Vec::new();
+            loop {
+                let n = take_rx(&mut out);
+                if n == 0 {
+                    break;
+                }
+                got.extend_from_slice(&out[..n]);
+            }
+            assert_eq!(got, bytes, "step {step}");
+        }
+        assert_eq!(super::super::uart_link_counters::edge().rx_pipe_overflow_bytes, 0);
     }
 }
