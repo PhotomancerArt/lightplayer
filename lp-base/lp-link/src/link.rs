@@ -428,6 +428,14 @@ impl<A: Arq> Link<A> {
         self.state == LinkState::Established && self.peer_silent_for(now) >= self.cfg.stall_after
     }
 
+    /// Best-effort messages [`send`](Self::send) would queue right now (free
+    /// datagram slots). A caller that takes each message out of its own
+    /// buffer (a firmware log ring) asks first, so a message the link would
+    /// refuse stays where it was instead of being taken and lost.
+    pub fn datagram_room(&self) -> usize {
+        self.datagrams.free_slots()
+    }
+
     /// Nothing queued, nothing unacknowledged.
     pub fn is_idle(&self) -> bool {
         self.pending.is_empty() && self.tx.is_empty() && self.datagrams.is_empty()

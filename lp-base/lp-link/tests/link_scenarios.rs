@@ -576,6 +576,31 @@ fn logs_keep_flowing_beside_a_busy_proto_stream() {
     );
 }
 
+/// `datagram_room` is what `send` would take: a caller that pops each log
+/// record out of its own ring asks it first, so a record the link would
+/// refuse is never taken (the classic's `[OUT] dump` lost parts that way —
+/// docs/defects/2026-09-29-the-classics-log-ring-drops-records-under-a-project-load-burst.md).
+#[test]
+fn datagram_room_counts_the_slots_send_would_fill() {
+    let cfg = LinkConfig {
+        datagram_queue: 2,
+        ..LinkConfig::uart()
+    };
+    let (mut a, mut b) = pair::<SelectiveRepeat>(cfg);
+    let mut now = 0;
+    handshake(&mut a, &mut b, &mut now);
+    assert_eq!(a.datagram_room(), 2);
+    a.send(CH_LOG, b"one").unwrap();
+    assert_eq!(a.datagram_room(), 1);
+    a.send(CH_LOG, b"two").unwrap();
+    assert_eq!(a.datagram_room(), 0);
+    assert_eq!(a.send(CH_LOG, b"three"), Err(SendError::Full));
+    assert_eq!(a.counters().datagrams_dropped, 1, "a refusal is counted");
+    let f = a.poll_transmit(now).expect("the oldest datagram").to_vec();
+    b.on_bytes(now, &f);
+    assert_eq!(a.datagram_room(), 1, "sending one frees its slot");
+}
+
 /// The message budget: the wire's 16 KiB frame budget plus slack. Longer is
 /// refused at `send`.
 #[test]
