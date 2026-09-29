@@ -49,7 +49,8 @@ pub struct LinkPortService {
 
 impl LinkPortService {
     /// A port on a link tuned by `config` (the transport's preset:
-    /// `LinkConfig::usb()` for a USB-Serial-JTAG board), with a fresh `nonce`
+    /// `LinkConfig::usb()` for a USB-Serial-JTAG board, `LinkConfig::uart()`
+    /// for a classic ESP32 behind a USB-UART bridge), with a fresh `nonce`
     /// (random per open: it is how the board tells this open from the last
     /// one). `want_packed` asks the board to pack its replies; `device_log`
     /// is the dev log-level rider.
@@ -131,6 +132,11 @@ impl LinkPortService {
     /// This end's link counters.
     pub fn counters(&self) -> LinkCounters {
         self.port.counters()
+    }
+
+    /// The preset this port's link was built with.
+    pub fn config(&self) -> &LinkConfig {
+        self.port.link().config()
     }
 
     /// Sort what the port has read onto the two queues, and note a stall's
@@ -278,6 +284,112 @@ mod tests {
         );
     }
 
+    /// The classic's pair (plan `classic-uart-on-lp-link`, P4): a Web Serial
+    /// port behind the CH340 runs `uart()`, the board its own cut of it. The
+    /// port above the link is the one every other board gets.
+    #[test]
+    fn a_classic_board_comes_up_and_answers_on_the_uart_preset() {
+        let mut bench = Bench::classic();
+        assert_eq!(
+            format!("{:?}", bench.host.config()),
+            format!("{:?}", LinkConfig::uart())
+        );
+        bench.run(40);
+        assert!(bench.host.is_up());
+        let reads = bench.host.take_reads();
+        assert!(
+            matches!(reads.as_slice(), [WireRead::Frame(frame)] if frame.json.contains("\"hello\"")),
+            "{reads:?}"
+        );
+
+        let json = lpc_wire::json::to_string(&ClientMessage {
+            id: 9,
+            msg: ClientRequest::StopAllProjects,
+        })
+        .unwrap();
+        bench.host.send_client_json(&json).expect("queued");
+        bench.run(40);
+        assert_eq!(bench.board.requests, [9]);
+        let reads = bench.host.take_reads();
+        assert!(
+            matches!(
+                reads.as_slice(),
+                [WireRead::Frame(frame)] if frame.message.as_ref().is_ok_and(|m| m.id == 9)
+            ),
+            "{reads:?}"
+        );
+    }
+
+    /// Plan D9 is not a USB rule: a classic that restarts (a Reboot request,
+    /// its new nonce salted by the boot count) is a link reset the drainer
+    /// hears before the new hello, over the classic's own preset.
+    #[test]
+    fn a_classic_board_restart_is_a_link_reset_then_a_new_hello() {
+        let mut bench = Bench::classic();
+        bench.run(40);
+        bench.host.take_reads();
+        bench.host.take_notes();
+
+        bench.board = BoardDouble::with_config(classic_board(), 0xB0A2_0002);
+        bench.run(60);
+
+        let reads = bench.host.take_reads();
+        let reset_at = reads
+            .iter()
+            .position(
+                |read| matches!(read, WireRead::LinkReset(note) if note.contains("restarted")),
+            )
+            .unwrap_or_else(|| panic!("no reset read: {reads:?}"));
+        let hello_at = reads
+            .iter()
+            .position(
+                |read| matches!(read, WireRead::Frame(frame) if frame.json.contains("\"hello\"")),
+            )
+            .unwrap_or_else(|| panic!("no new hello: {reads:?}"));
+        assert!(reset_at < hello_at, "{reads:?}");
+    }
+
+    /// What D9 exists for: a request in flight when the classic restarts
+    /// is never answered, and the drainer reads a reset in its place — so
+    /// the lens io (`port_client_io`) fails it at once instead of waiting
+    /// out its budget.
+    #[test]
+    fn a_request_in_flight_when_a_classic_restarts_reads_as_a_reset() {
+        let mut bench = Bench::classic();
+        bench.run(40);
+        bench.host.take_reads();
+
+        let json = lpc_wire::json::to_string(&ClientMessage {
+            id: 11,
+            msg: ClientRequest::StopAllProjects,
+        })
+        .unwrap();
+        bench.host.send_client_json(&json).expect("queued");
+        // The board goes down before it hears the request, and comes back as
+        // a new session.
+        bench.board = BoardDouble::with_config(classic_board(), 0xB0A2_0003);
+        bench.run(60);
+
+        let reads = bench.host.take_reads();
+        assert!(
+            reads
+                .iter()
+                .any(|read| matches!(read, WireRead::LinkReset(_))),
+            "{reads:?}"
+        );
+        assert!(
+            !reads.iter().any(
+                |read| matches!(read, WireRead::Frame(frame) if frame.message.as_ref().is_ok_and(|m| m.id == 11))
+            ),
+            "the lost request was answered: {reads:?}"
+        );
+        assert!(
+            bench.board.requests.is_empty(),
+            "the new session carried the old request: {:?}",
+            bench.board.requests
+        );
+    }
+
     #[test]
     fn the_wake_is_capped() {
         let bench = Bench::new();
@@ -296,6 +408,16 @@ mod tests {
             Self {
                 host: LinkPortService::new(LinkConfig::usb(), 0xAAAA_0001, false, None),
                 board: BoardDouble::new(0xB0A2_0001),
+                now: 0,
+            }
+        }
+
+        /// A classic behind a CH340: the port's `uart()` host, the board's own
+        /// cut ([`classic_board`]).
+        fn classic() -> Self {
+            Self {
+                host: LinkPortService::new(LinkConfig::uart(), 0xAAAA_0002, false, None),
+                board: BoardDouble::with_config(classic_board(), 0xB0A2_0001),
                 now: 0,
             }
         }
@@ -324,8 +446,12 @@ mod tests {
 
     impl BoardDouble {
         fn new(nonce: u32) -> Self {
+            Self::with_config(LinkConfig::usb(), nonce)
+        }
+
+        fn with_config(config: LinkConfig, nonce: u32) -> Self {
             Self {
-                link: Link::new(LinkConfig::usb(), nonce),
+                link: Link::new(config, nonce),
                 requests: Vec::new(),
             }
         }
@@ -354,6 +480,18 @@ mod tests {
             let mut payload = Vec::new();
             lpc_wire::encode_server_payload(message, None, &mut payload);
             self.link.send(CH_PROTO, &payload).expect("board send");
+        }
+    }
+
+    /// The classic board's link timings on the `uart()` preset — what
+    /// `fw_esp32_common::uart_link::uart_board_link_config` sets (a 200 ms
+    /// resend floor, SYNs backed off to 1.6 s), which this crate cannot
+    /// depend on. The same double as the fake board's classic test.
+    fn classic_board() -> LinkConfig {
+        LinkConfig {
+            min_rto: 200_000,
+            syn_backoff: 4,
+            ..LinkConfig::uart()
         }
     }
 

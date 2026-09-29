@@ -102,6 +102,11 @@ pub fn take_notes(port: EmulatorTabPort) -> Vec<String> {
     })
 }
 
+/// A link for a newly opened board. `usb()`, because the tab holds C6 boards
+/// only (`emu_esp32c6_wasm`, a board record's `link: "usb-serial-jtag"`): the
+/// preset is the board's, as Web Serial picks it from the port's vendor id
+/// (`usb_vendors::link_config_for_usb_vendor`). A classic in the tab would
+/// run `uart()` here.
 fn fresh_service() -> LinkPortService {
     LinkPortService::new(
         LinkConfig::usb(),
