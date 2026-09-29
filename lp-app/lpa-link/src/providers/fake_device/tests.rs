@@ -141,6 +141,42 @@ fn hard_reset_replays_the_current_boot() {
     );
 }
 
+/// A classic-shaped double (plan `classic-uart-on-lp-link`): the board end on
+/// the UART preset with the classic board's own timings (a 200 ms resend
+/// floor, SYN backoff to 1 s). The real transport talks to it on `uart()`,
+/// which it takes for a CH340 port, and on `usb()`, which it takes for a
+/// socket it cannot identify: the board advertises its four-frame window,
+/// so both work.
+#[tokio::test]
+async fn a_classic_shaped_board_speaks_uart_link_to_either_host_preset() {
+    use lpc_wire::lp_link::LinkConfig;
+    let classic_board = LinkConfig {
+        min_rto: 200_000,
+        syn_backoff_max: 1_000_000,
+        ..LinkConfig::uart()
+    };
+    for host in [Some(LinkConfig::uart()), None] {
+        let device = FakeEsp32Device::new(FakeDeviceScript::new(FakeBootState::LightPlayer(
+            FakeLightPlayerState::new().with_link_config(classic_board.clone()),
+        )));
+        let transport = create_hardware_serial_transport_pair_with_options(
+            Box::new(FakeDeviceByteStream::new(device)),
+            "fake-classic-test",
+            lpa_client::transport_serial::HardwareSerialOptions {
+                link_config: host.clone(),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let transport: Box<dyn lpa_client::ClientTransport> = Box::new(transport);
+        let client =
+            lpa_client::TokioLpClient::new_shared(Arc::new(tokio::sync::Mutex::new(transport)));
+        let hello = client.hello().await.unwrap();
+        assert_eq!(hello.proto, lpc_wire::WIRE_PROTO_VERSION, "host {host:?}");
+        client.project_list_available().await.unwrap();
+    }
+}
+
 #[tokio::test]
 async fn light_player_state_speaks_real_frames_through_the_real_transport() {
     let identity = FakeDeviceIdentity::new("devfakefakefakefake", "Bench fake");
