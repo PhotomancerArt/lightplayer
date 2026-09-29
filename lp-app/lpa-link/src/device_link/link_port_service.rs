@@ -2,12 +2,17 @@
 //!
 //! A Web Serial port and a tab-hosted board each keep ONE of these for as
 //! long as the port is open (plan `lp2025/2026-09-27-0215-lp-link-usb-cutover`,
-//! D1/D2). It is the sans-IO half of the provider's per-port loop: the edge
+//! D1/D2), and so does each Web Bluetooth connection (plan
+//! `lp2025/2026-09-28-1445-ble-on-lp-link`, D1 — the same type, on
+//! [`LinkConfig::ble`]'s datagrams). It is the sans-IO half of the
+//! provider's per-port loop: the edge
 //! (`providers/browser_serial_esp32/browser_serial.rs`,
-//! `providers/emulator_tab/emulator_tab_link_port.rs`) pulls bytes from the
-//! page, hands them to [`on_bytes`](LinkPortService::on_bytes), writes what
-//! [`transmit`](LinkPortService::transmit) hands back, and wakes it again
-//! within [`wake_in`](LinkPortService::wake_in). Everything else — the
+//! `providers/emulator_tab/emulator_tab_link_port.rs`,
+//! `providers/browser_ble/ble_link_port.rs`) pulls what the page read — bytes
+//! for [`on_bytes`](LinkPortService::on_bytes), or one whole frame per
+//! notification for [`on_datagram`](LinkPortService::on_datagram) — writes
+//! what [`transmit`](LinkPortService::transmit) hands back, and wakes it
+//! again within [`wake_in`](LinkPortService::wake_in). Everything else — the
 //! handshake, resends, acknowledgements, the packed-reply opt-in, the dev
 //! log-level rider — is the [`WireLinkPort`]'s.
 //!
@@ -29,7 +34,7 @@
 
 use std::collections::VecDeque;
 
-use lpc_wire::lp_link::{LinkState, Micros};
+use lpc_wire::lp_link::{LinkConfig, LinkState, Micros};
 use lpc_wire::server::api::LogLevel;
 use lpc_wire::{ClientMessage, LinkCounters, WireLinkPort};
 
@@ -60,11 +65,38 @@ impl LinkPortService {
         }
     }
 
+    /// [`Self::new`] on a link tuned by `config` rather than
+    /// [`LinkConfig::usb`] — a Web Bluetooth connection's
+    /// ([`LinkConfig::ble`]: datagram framing, fed by
+    /// [`Self::on_datagram`]).
+    pub fn with_config(
+        config: LinkConfig,
+        nonce: u32,
+        want_packed: bool,
+        device_log: Option<LogLevel>,
+    ) -> Self {
+        Self {
+            port: WireLinkPort::with_config(config, nonce, want_packed)
+                .with_device_log_level(device_log),
+            reads: VecDeque::new(),
+            notes: Vec::new(),
+            stalled: false,
+        }
+    }
+
     /// Bytes the page read from the port at `now`, in any split.
     pub fn on_bytes(&mut self, now: Micros, bytes: &[u8]) {
         if !bytes.is_empty() {
             self.port.on_bytes(now, bytes);
         }
+        self.collect(now);
+    }
+
+    /// One whole frame the page read at `now` from a datagram transport (one
+    /// Bluetooth notification). A notification that is not a whole, intact
+    /// frame is dropped and counted by the link, like any damaged frame.
+    pub fn on_datagram(&mut self, now: Micros, frame: &[u8]) {
+        self.port.on_datagram(now, frame);
         self.collect(now);
     }
 
@@ -74,6 +106,29 @@ impl LinkPortService {
             write(frame);
         }
         self.collect(now);
+    }
+
+    /// [`Self::transmit`], but at most `room` frames: for a transport that
+    /// takes one awaited write at a time (a GATT write), where a frame handed
+    /// over is a frame queued in the page, not one on the air. What is left
+    /// stays in the link, where a resend or a newer acknowledgement can
+    /// still replace it. Answers how many frames went to `write`.
+    pub fn transmit_up_to(
+        &mut self,
+        now: Micros,
+        room: usize,
+        mut write: impl FnMut(&[u8]),
+    ) -> usize {
+        let mut written = 0;
+        while written < room {
+            let Some(frame) = self.port.poll_transmit(now) else {
+                break;
+            };
+            write(frame);
+            written += 1;
+        }
+        self.collect(now);
+        written
     }
 
     /// Queue a request already serialized as JSON (no `M!`, no newline).
@@ -277,6 +332,173 @@ mod tests {
         assert!(bench.host.wake_in(0, 10_000) <= 10_000);
     }
 
+    // ---- Web Bluetooth: the same service on `LinkConfig::ble()` datagrams --
+    //
+    // The board end is sized the way the C6 sizes a radio link
+    // (`fw-esp32-common/src/radio_link/radio_link_config.rs`): the `ble()`
+    // preset with `max_payload` cut to the connection's ATT MTU. 174 B is an
+    // iOS central's (MTU 185); the host never learns the MTU — the board's
+    // SYN carries its payload size and the host's frames shrink to it.
+
+    /// The board's `max_payload` at an iOS central's ATT MTU (185 − 11).
+    const IOS_PAYLOAD: u16 = 174;
+
+    #[test]
+    fn a_bluetooth_link_comes_up_over_datagrams_and_the_hello_is_a_frame() {
+        let mut bench = DatagramBench::new(IOS_PAYLOAD);
+        bench.run(1_500);
+
+        let notes = bench.host.take_notes();
+        assert!(
+            notes.iter().any(|note| note.starts_with("link: up")),
+            "{notes:?}"
+        );
+        let reads = bench.host.take_reads();
+        assert!(
+            matches!(
+                reads.as_slice(),
+                [WireRead::Frame(frame)] if frame.json.contains("\"hello\"") && !frame.packed
+            ),
+            "{reads:?}"
+        );
+        assert!(bench.host.is_up());
+    }
+
+    /// One frame per write: every frame the host hands the page fits the
+    /// board's advertised payload (header and CRC on top), a request larger
+    /// than many frames arrives whole, and so does its answer.
+    #[test]
+    fn a_bluetooth_request_goes_out_in_frames_the_board_can_take() {
+        let mut bench = DatagramBench::new(IOS_PAYLOAD);
+        bench.run(1_500);
+        bench.host.take_reads();
+
+        let json = big_write(9, 2_000);
+        bench.host.send_client_json(&json).expect("queued");
+        bench.run(3_000);
+
+        assert_eq!(bench.board.requests, [9]);
+        assert!(
+            bench.largest_host_frame <= usize::from(IOS_PAYLOAD) + 8,
+            "a host frame of {} B does not fit a {IOS_PAYLOAD} B payload",
+            bench.largest_host_frame
+        );
+        let reads = bench.host.take_reads();
+        assert!(
+            matches!(
+                reads.as_slice(),
+                [WireRead::Frame(frame)] if frame.message.as_ref().is_ok_and(|m| m.id == 9)
+            ),
+            "{reads:?}"
+        );
+    }
+
+    /// A notification that is not an intact frame is counted and dropped —
+    /// never read as a message — and the board's resend delivers the reply.
+    #[test]
+    fn a_damaged_notification_is_counted_and_the_resend_delivers() {
+        let mut bench = DatagramBench::new(IOS_PAYLOAD);
+        bench.run(1_500);
+        bench.host.take_reads();
+        let bad_before = bench.host.counters().damaged;
+
+        bench.damage_next_board_frame = true;
+        let json = lpc_wire::json::to_string(&ClientMessage {
+            id: 11,
+            msg: ClientRequest::StopAllProjects,
+        })
+        .unwrap();
+        bench.host.send_client_json(&json).expect("queued");
+        bench.run(2_000);
+
+        assert!(!bench.damage_next_board_frame, "a frame was damaged");
+        assert_eq!(bench.host.counters().damaged, bad_before + 1);
+        let reads = bench.host.take_reads();
+        assert!(
+            matches!(
+                reads.as_slice(),
+                [WireRead::Frame(frame)] if frame.message.as_ref().is_ok_and(|m| m.id == 11)
+            ),
+            "{reads:?}"
+        );
+    }
+
+    /// Plan D9 over Bluetooth: a session that ends while the GATT connection
+    /// stays up (the board's link gave up on a frame, or restarted its end) is
+    /// a link reset the drainer hears at once, before the new hello.
+    #[test]
+    fn a_bluetooth_session_reset_is_a_link_reset_then_a_new_hello() {
+        let mut bench = DatagramBench::new(IOS_PAYLOAD);
+        bench.run(1_500);
+        bench.host.take_reads();
+
+        bench.board.link.restart(bench.now);
+        bench.run(3_000);
+
+        let reads = bench.host.take_reads();
+        let reset_at = reads
+            .iter()
+            .position(|read| matches!(read, WireRead::LinkReset(_)))
+            .unwrap_or_else(|| panic!("no reset read: {reads:?}"));
+        let hello_at = reads
+            .iter()
+            .position(
+                |read| matches!(read, WireRead::Frame(frame) if frame.json.contains("\"hello\"")),
+            )
+            .unwrap_or_else(|| panic!("no new hello: {reads:?}"));
+        assert!(reset_at < hello_at, "{reads:?}");
+    }
+
+    /// A GATT write is awaited, so the page takes a frame only when it has
+    /// room; what it cannot take waits in the link, not in the page.
+    #[test]
+    fn transmit_up_to_hands_over_no_more_than_the_room() {
+        let mut bench = DatagramBench::new(IOS_PAYLOAD);
+        bench.run(1_500);
+        bench.host.take_reads();
+
+        let json = big_write(12, 1_000);
+        bench.host.send_client_json(&json).expect("queued");
+        let mut handed = Vec::new();
+        let written = bench
+            .host
+            .transmit_up_to(bench.now, 1, |frame| handed.push(frame.to_vec()));
+        assert_eq!((written, handed.len()), (1, 1));
+        let more = bench.host.transmit_up_to(bench.now, 8, |_| {});
+        assert!(more > 1, "the rest was still in the link: {more}");
+    }
+
+    /// Bluetooth's own stall time (`ble()`'s 3.5 s, not USB's 1 s): a quiet
+    /// connection interval or two is not a stall, three and a half silent
+    /// seconds is, and the board's return is news.
+    #[test]
+    fn a_silent_bluetooth_board_is_a_stall_only_past_its_stall_time() {
+        let mut bench = DatagramBench::new(IOS_PAYLOAD);
+        bench.run(1_500);
+        bench.host.take_notes();
+
+        let mut stalled_at = None;
+        for ms in 0..5_000 {
+            bench.host.transmit(bench.now, |_| {});
+            if stalled_at.is_none() && bench.host.is_stalled(bench.now) {
+                stalled_at = Some(ms);
+            }
+            bench.now += 1_000;
+        }
+        let stalled_at = stalled_at.expect("a stall");
+        assert!(stalled_at >= 3_000, "stalled after only {stalled_at} ms");
+        bench.run(1_500);
+        let notes = bench.host.take_notes();
+        assert!(
+            notes.iter().any(|note| note.contains("stalled")),
+            "{notes:?}"
+        );
+        assert!(
+            notes.iter().any(|note| note.contains("answering again")),
+            "{notes:?}"
+        );
+    }
+
     /// Both ends, a millisecond at a time.
     struct Bench {
         host: LinkPortService,
@@ -309,6 +531,74 @@ mod tests {
         }
     }
 
+    /// Both ends over datagrams (one frame per GATT write or notification),
+    /// a millisecond at a time, with the page's write room modelled as
+    /// Bluetooth's: two frames queued, the board's side unbounded.
+    struct DatagramBench {
+        host: LinkPortService,
+        board: BoardDouble,
+        now: Micros,
+        largest_host_frame: usize,
+        damage_next_board_frame: bool,
+    }
+
+    impl DatagramBench {
+        fn new(board_payload: u16) -> Self {
+            let board = LinkConfig {
+                max_payload: board_payload,
+                ..LinkConfig::ble()
+            };
+            Self {
+                host: LinkPortService::with_config(LinkConfig::ble(), 0xAAAA_0001, false, None),
+                board: BoardDouble::on(board, 0xB0A2_0001),
+                now: 0,
+                largest_host_frame: 0,
+                damage_next_board_frame: false,
+            }
+        }
+
+        fn run(&mut self, steps: u32) {
+            for _ in 0..steps {
+                let now = self.now;
+                let mut sent = Vec::new();
+                self.host
+                    .transmit_up_to(now, 2, |frame| sent.push(frame.to_vec()));
+                for frame in sent {
+                    self.largest_host_frame = self.largest_host_frame.max(frame.len());
+                    self.board.link.on_datagram(now, &frame);
+                }
+                self.board.serve();
+                let mut out = Vec::new();
+                while let Some(frame) = self.board.link.poll_transmit(now) {
+                    out.push(frame.to_vec());
+                }
+                for mut frame in out {
+                    // Damage a data frame (one long enough to carry the
+                    // reply), never a bare acknowledgement.
+                    if self.damage_next_board_frame && frame.len() > 40 {
+                        self.damage_next_board_frame = false;
+                        let middle = frame.len() / 2;
+                        frame[middle] ^= 0x5A;
+                    }
+                    self.host.on_datagram(now, &frame);
+                }
+                self.now += 1_000;
+            }
+        }
+    }
+
+    /// A request carrying `bytes` of file data: many frames' worth.
+    fn big_write(id: u64, bytes: usize) -> String {
+        lpc_wire::json::to_string(&ClientMessage {
+            id,
+            msg: ClientRequest::Filesystem(lpc_wire::server::FsRequest::Write {
+                path: "/big.txt".into(),
+                data: vec![b'z'; bytes],
+            }),
+        })
+        .unwrap()
+    }
+
     /// A board's end: hello on every `Up`, and a reply to every request.
     struct BoardDouble {
         link: Link<SelectiveRepeat>,
@@ -317,8 +607,12 @@ mod tests {
 
     impl BoardDouble {
         fn new(nonce: u32) -> Self {
+            Self::on(LinkConfig::usb(), nonce)
+        }
+
+        fn on(config: LinkConfig, nonce: u32) -> Self {
             Self {
-                link: Link::new(LinkConfig::usb(), nonce),
+                link: Link::new(config, nonce),
                 requests: Vec::new(),
             }
         }

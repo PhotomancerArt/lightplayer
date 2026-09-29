@@ -6,7 +6,10 @@
 //! checksum, resent when lost, on channels, with a lifecycle both ends share.
 //! [`WireLinkPort`] is what every host keeps **one of per port**, for the
 //! port's whole life (Studio's Web Serial provider and emulator tab, lp-cli's
-//! serial and emulated-board transports, the fake board's host side). It
+//! serial and emulated-board transports, the fake board's host side) — and,
+//! since `WIRE_PROTO_VERSION` 31, one per Web Bluetooth connection, on
+//! [`LinkConfig::ble`]'s datagrams ([`with_config`](WireLinkPort::with_config),
+//! [`on_datagram`](WireLinkPort::on_datagram)). It
 //! replaces the `M!`-era `WireStream` + `PackOptIn` pair for those links:
 //!
 //! - bytes from the port go in ([`on_bytes`](WireLinkPort::on_bytes)), frames
@@ -134,12 +137,43 @@ impl WireLinkPort {
         self
     }
 
+    /// A port on a link tuned by `config` instead of [`LinkConfig::usb`]:
+    /// Studio's Web Bluetooth link runs [`LinkConfig::ble`] (datagram
+    /// framing, one frame per GATT write or notification — feed it with
+    /// [`on_datagram`](Self::on_datagram), not [`on_bytes`](Self::on_bytes)).
+    /// Everything above the link — the hello, the opt-in, the reads — is the
+    /// same whatever the transport.
+    pub fn with_config(config: LinkConfig, nonce: u32, want_packed: bool) -> Self {
+        WireLinkPort {
+            link: Link::new(config, nonce),
+            table: LearnedTable::boxed(),
+            want_packed,
+            device_log: None,
+            opt_in: OptIn::WaitingForHello,
+            device_log_sent: false,
+            reads: VecDeque::new(),
+            text: TextLines::new(),
+            tally: LinkCounterTally::new(),
+            now: 0,
+        }
+    }
+
     // ---- Transport side --------------------------------------------------
 
     /// Bytes read from the port at `now` (any split).
     pub fn on_bytes(&mut self, now: Micros, bytes: &[u8]) {
         self.now = now;
         self.link.on_bytes(now, bytes);
+        self.note_stall(now);
+        self.pump_events();
+    }
+
+    /// One whole frame from a datagram transport at `now` (a Bluetooth
+    /// notification): the port's link must be a datagram one
+    /// ([`with_config`](Self::with_config)).
+    pub fn on_datagram(&mut self, now: Micros, frame: &[u8]) {
+        self.now = now;
+        self.link.on_datagram(now, frame);
         self.note_stall(now);
         self.pump_events();
     }
