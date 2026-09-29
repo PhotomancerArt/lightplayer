@@ -4055,6 +4055,13 @@ impl StudioController {
             log::debug!("adoption not banked: the lens device has no persisted record");
             return;
         };
+        if row.uid.starts_with("mac:") {
+            log::debug!(
+                "adoption not banked: {:?} is still keyed on its MAC, which record_push refuses",
+                row.uid
+            );
+            return;
+        }
         if let Err(error) = self
             .run_catalog_op(CatalogOp::RecordPush {
                 project_uid: project_uid.to_string(),

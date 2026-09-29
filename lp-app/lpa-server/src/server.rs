@@ -906,9 +906,8 @@ impl LpServer {
                         );
                         let message = format!(
                             "read refused: heap headroom too low (largest free block \
-                             {headroom} B < {PROJECT_READ_MIN_HEADROOM_BYTES} B); narrow \
-                             the query (include_slots:false, one probe per read, or page \
-                             nodes by id) and retry",
+                             {headroom} B < {PROJECT_READ_MIN_HEADROOM_BYTES} B); retry \
+                             once the board has freed memory",
                         );
                         log::warn!("tick_and_send: {message}");
                         if let Err(send_error) = sink.send_terminal_error(message).await {

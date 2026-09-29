@@ -67,8 +67,8 @@ fn starved_heap_refuses_the_read_and_stays_alive() {
         panic!("expected a single terminal Error event, got {events:?}");
     };
     assert!(
-        message.contains("read refused") && message.contains("narrow the query"),
-        "refusal message names the remedy: {message}"
+        message.contains("read refused") && !message.contains("narrow the query"),
+        "refusal message drops the unpassable remedy: {message}"
     );
 
     // The connection survives: with the probe healthy again, the same server
