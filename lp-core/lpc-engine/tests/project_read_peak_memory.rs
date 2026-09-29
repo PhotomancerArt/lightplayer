@@ -14,9 +14,9 @@
 //! prints both numbers so a bench session can quote them.
 
 use std::alloc::{GlobalAlloc, Layout, System};
+use std::cell::Cell;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicUsize, Ordering};
 
 use lpc_engine::{Engine, EngineProjectReadSource, EngineServices, ProjectLoader};
 use lpc_model::TreePath;
@@ -30,21 +30,39 @@ use lpfs::LpFsStd;
 
 struct TrackingAlloc;
 
-static LIVE: AtomicUsize = AtomicUsize::new(0);
-static PEAK: AtomicUsize = AtomicUsize::new(0);
+thread_local! {
+    /// Net bytes this thread allocated minus the bytes it freed. Signed: a
+    /// thread may free what another allocated. `const`-initialised with no
+    /// destructor, so reaching it from inside the allocator never allocates.
+    static LIVE: Cell<isize> = const { Cell::new(0) };
+    /// The highest `LIVE` this thread has reached since the last reset.
+    static PEAK: Cell<isize> = const { Cell::new(0) };
+}
+
+fn add_live(delta: isize) {
+    // `try_with`: a thread tearing down may still allocate or free.
+    let _ = LIVE.try_with(|live| {
+        let level = live.get() + delta;
+        live.set(level);
+        let _ = PEAK.try_with(|peak| {
+            if level > peak.get() {
+                peak.set(level);
+            }
+        });
+    });
+}
 
 unsafe impl GlobalAlloc for TrackingAlloc {
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
         let ptr = unsafe { System.alloc(layout) };
         if !ptr.is_null() {
-            let live = LIVE.fetch_add(layout.size(), Ordering::Relaxed) + layout.size();
-            PEAK.fetch_max(live, Ordering::Relaxed);
+            add_live(layout.size() as isize);
         }
         ptr
     }
 
     unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
-        LIVE.fetch_sub(layout.size(), Ordering::Relaxed);
+        add_live(-(layout.size() as isize));
         unsafe { System.dealloc(ptr, layout) }
     }
 }
@@ -52,9 +70,10 @@ unsafe impl GlobalAlloc for TrackingAlloc {
 #[global_allocator]
 static ALLOC: TrackingAlloc = TrackingAlloc;
 
-/// The LIVE/PEAK counters are process-global, so concurrently running tests
-/// would corrupt each other's baselines. Every test holds this for its whole
-/// body.
+/// The LIVE/PEAK counters are thread-local (each `#[test]` runs on its own
+/// libtest thread), so this lock is no longer needed to keep tests from
+/// corrupting each other's baselines. It stays so `--nocapture` output from
+/// concurrent tests never interleaves mid measurement.
 static MEASURE_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 fn measure_lock() -> std::sync::MutexGuard<'static, ()> {
@@ -63,15 +82,21 @@ fn measure_lock() -> std::sync::MutexGuard<'static, ()> {
         .unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
-/// Reset the peak to the current live level; returns that baseline.
-fn reset_peak() -> usize {
-    let live = LIVE.load(Ordering::Relaxed);
-    PEAK.store(live, Ordering::Relaxed);
-    live
+/// Reset the peak to the current live level; returns that baseline. Signed
+/// (see [`LIVE`]): the absolute level can be negative if this thread has,
+/// net, freed more than it allocated. Only the *difference*
+/// [`peak_above`] takes from it is meaningful — do not clamp this to zero,
+/// or two negative readings collapse to an identical zero and hide a real
+/// difference between them.
+fn reset_peak() -> i64 {
+    let level = LIVE.try_with(Cell::get).unwrap_or(0) as i64;
+    let _ = PEAK.try_with(|peak| peak.set(level as isize));
+    level
 }
 
-fn peak_above(baseline: usize) -> usize {
-    PEAK.load(Ordering::Relaxed).saturating_sub(baseline)
+fn peak_above(baseline: i64) -> i64 {
+    let peak = PEAK.try_with(Cell::get).unwrap_or(0) as i64;
+    peak - baseline
 }
 
 /// Keeps every event alive for the duration of the stream.
@@ -292,7 +317,7 @@ fn studio_shaped_read_streams_below_materialized() {
     // at ~2.3x. Peak is O(largest atom), NOT O(project) — if this trips,
     // some producer regressed to materialize-first (or a genuinely bigger
     // atom appeared; raise deliberately, with a measurement, never casually).
-    const STUDIO_SHAPED_STREAMED_PEAK_CEILING_BYTES: usize = 32 * 1024;
+    const STUDIO_SHAPED_STREAMED_PEAK_CEILING_BYTES: i64 = 32 * 1024;
     let baseline = reset_peak();
     let mut sink = DroppingSink::default();
     block_on(async {

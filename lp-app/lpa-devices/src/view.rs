@@ -612,6 +612,23 @@ fn recovery_line(recovery: &RecoveryFacts) -> String {
 pub fn pending_link_view(entry: &PendingLink, now: Millis) -> PendingLinkView {
     let state_label = match entry.verdict() {
         None => "New device found — identifying…".to_string(),
+        // Identify settled having heard nothing at all — the window's
+        // classify() cascade bottoms out at `Unknown` (forced, if presence
+        // ever lost attachment) or its own `Quiet` fallback, and either one
+        // is reached the moment identify ends Failed ("no response from the
+        // device", `activity/identify.rs`). `classification_label` alone
+        // would read "Identifying…" for `Unknown` — indistinguishable from
+        // still running — and `Quiet`'s "Not responding" implies the board
+        // spoke before it fell silent, which is not what happened here.
+        // `last_outcome` is how identify's settled Failed becomes visible.
+        Some(Classification::Unknown | Classification::Quiet { .. })
+            if matches!(
+                entry.evidence().last_outcome,
+                Some(ActivityOutcome::Failed { .. })
+            ) =>
+        {
+            "New device found — no response (is another app using this port?)".to_string()
+        }
         Some(classification) => format!(
             "New device found — {}",
             classification_label(classification)
@@ -818,5 +835,44 @@ mod tests {
             let label = classification_label(&classification);
             assert!(!label.is_empty(), "{classification:?} rendered nothing");
         }
+    }
+
+    /// Ticket 2026-09-27-busy-port-blocks-identify: a port that never opens
+    /// (another app holds it) hears nothing at all, so identify still
+    /// settles Failed at its deadline with the classification cascade's
+    /// `Quiet` fallback — whose ordinary "Not responding" label implies the
+    /// board spoke and then fell silent, which is not what happened. Before
+    /// the deadline the card must still say "identifying…"; once identify
+    /// has given up, it must say so plainly instead.
+    #[test]
+    fn a_pending_link_whose_identify_gave_up_says_so_instead_of_identifying_forever() {
+        use crate::replay::{Expect, Replay, Script, Step};
+        use crate::roster::RosterConfig;
+
+        let script =
+            Script::new()
+                .at(0, Step::attach(1, "usb-1"))
+                .at(
+                    5,
+                    Step::Error {
+                        link: 1,
+                        message: "port busy".to_string(),
+                    },
+                )
+                .expect(
+                    Expect::new()
+                        .pending(1)
+                        .pending_state("New device found — identifying…"),
+                )
+                // identify_deadline_ms defaults to 5_000; past it identify has
+                // settled Failed with no verdict ever reached.
+                .at(5_010, Step::Advance)
+                .expect(Expect::new().pending(1).pending_state(
+                    "New device found — no response (is another app using this port?)",
+                ));
+
+        Replay::new(RosterConfig::default())
+            .run(&script.into_fixture("a busy port's identify gives up"))
+            .expect("scenario");
     }
 }
