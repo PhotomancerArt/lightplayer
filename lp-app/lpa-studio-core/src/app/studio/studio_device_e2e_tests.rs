@@ -1759,6 +1759,60 @@ fn a_link_reset_under_the_lens_keeps_the_editor_and_says_reconnecting() {
     assert_eq!(session, 0, "the blip's failures are forgiven");
 }
 
+/// DD1 (2026-09-28, the lp-link comms-layer director): Studio's own Reset
+/// used to send the editor to Devices, while a board that reset itself (a
+/// replug, a self-reboot) kept the editor open behind the reconnecting
+/// strip — an inconsistency Yona found "a bit odd" reviewing the USB
+/// cut-over. The cause was [`StudioController::yield_lens_wire_for`]'s
+/// "one wire, one owner" policy closing the lens BEFORE the reset command
+/// even reached the link, for every wire-touching gesture including this
+/// one — so the strip's own machinery never got a chance to run. A hardware
+/// reset does not need the wire yielded the way Flash or Push do (the
+/// fold's own words: "a direct gesture, not an activity"), so Reset is
+/// exempted: the board reboots under the SAME wire and rides out the SAME
+/// grace an outside reset gets, and the editor stays attached throughout.
+#[test]
+fn studios_own_reset_keeps_the_editor_open() {
+    let (mut bench, tasks, _device) = lens_on_a_running_board("dev000000daqf6dvvrz", "usb-lens-z");
+    let card = bench.view().devices[0].clone();
+    let identifies_before = identify_count(&card);
+
+    bench.gesture(DeviceAction::ResetBoard { device: card.id });
+    assert!(
+        bench.lens_device_uid().is_some(),
+        "the reset command reaching the link must not close the lens on its own"
+    );
+
+    // Ride the reboot out: the fake board genuinely restarts under the
+    // DTR/RTS pulse and re-identifies on its own, exactly like the outside
+    // reset `a_link_reset_under_the_lens_keeps_the_editor_and_says_reconnecting`
+    // covers — the editor must never be routed to Devices along the way.
+    bench.run_until(&tasks, "the board to reboot and re-identify", |bench| {
+        assert!(
+            bench.controller.view().home.is_none(),
+            "studio's own reset must never route the editor to Devices"
+        );
+        bench
+            .view()
+            .devices
+            .first()
+            .is_some_and(|card| identify_count(card) > identifies_before)
+    });
+    assert!(
+        bench.lens_device_uid().is_some(),
+        "the editor is still on the board once it has rebooted"
+    );
+}
+
+/// How many times the card's terminal has narrated "Identifying" — a fresh
+/// count each time the board reboots and the model asks it what it is again.
+fn identify_count(card: &lpa_devices::view::DeviceView) -> usize {
+    card.terminal
+        .iter()
+        .filter(|line| line.text == "Identifying")
+        .count()
+}
+
 /// Plan D13: a stall (the link is up, the board silent past the link's
 /// stall time) shows the strip too, and the link's own "answering again"
 /// note ends it.

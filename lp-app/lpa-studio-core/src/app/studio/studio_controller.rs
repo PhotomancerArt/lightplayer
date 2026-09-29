@@ -4616,10 +4616,22 @@ impl StudioController {
     /// for it (direct-control doctrine — the card's verbs always work; the
     /// editor is the thing that yields). Gestures that never touch the wire
     /// (a rename, the autoconnect toggle) leave the lens alone.
+    ///
+    /// Reset is exempted too (DD1, plan D13's follow-up): a hardware reset
+    /// is "a direct gesture, not an activity" (the fold's own words — one
+    /// command, then identify reads whatever boots), and the link already
+    /// rides out the reboot on its own — the SAME wire note and
+    /// `LinkTrouble` that cover a board resetting itself. Closing the
+    /// editor here used to run ahead of that: the lens was gone before the
+    /// reset command even reached the link, so the reconnecting strip never
+    /// got a chance to show. Studio's own Reset now reads exactly like an
+    /// outside one — the strip appears, the grace applies, the editor stays.
     fn yield_lens_wire_for(&mut self, action: &crate::DeviceAction) {
         let touches_wire = !matches!(
             action,
-            crate::DeviceAction::SetName { .. } | crate::DeviceAction::SetAutoconnect { .. }
+            crate::DeviceAction::SetName { .. }
+                | crate::DeviceAction::SetAutoconnect { .. }
+                | crate::DeviceAction::ResetBoard { .. }
         );
         let Some(target) = action.device() else {
             return;
