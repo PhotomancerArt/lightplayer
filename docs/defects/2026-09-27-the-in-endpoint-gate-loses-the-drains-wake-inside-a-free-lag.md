@@ -76,6 +76,31 @@ to be dropped as a stale partial, so the test holds damaged to at most the
 board's own count of abandoned writes. When the fix lands that assertion flips to "every reply answered, no
 write timeout" — the test says so where it asserts.
 
+**The stall has an onset band, not an edge** (2026-09-29, PR #880). The
+test used to run ONE lag, 1 µs past the later of the two images' soonest
+post-drain touches. On #880's CI image the gated image's soonest `ep1_conf`
+read came out at 7,062 ns (a local build of the same tree: 9,537 ns — the
+minimum moves with code layout), the lag landed at 8,062 ns, and there the
+ungated image lost the wake on 2 packets only: the link resent, all 40
+Hellos were answered, and the assertion read the defect as fixed. A sweep of
+0–20 µs in 250 ns steps (`lp-emu:esp32c6:t1`, lp-emu at #880's `4f55d5eb2`):
+
+| image | no timeout up to | 40 of 40 answered, 1–7 write timeouts | 0 of 40, 9 write timeouts |
+|---|---:|---:|---:|
+| main (`ca0b3dbd9`) ungated, local build | 7,000 ns | 7,250–9,250 ns | 9,500–20,000 ns |
+| main gated, local build | 7,500 ns | 7,750–9,500 ns | 9,750–20,000 ns |
+| #880 ungated, local build | 6,500 ns | 6,750–9,250 ns | 9,500–20,000 ns |
+| #880 gated, local build | 9,500 ns | — | 9,750–20,000 ns |
+| #880 gated, CI's image | 7,000 ns | 7,250–9,500 ns | 9,750–20,000 ns |
+
+Nothing was written into the lag, and no damage exceeded the board's own
+timeouts, anywhere in the sweep. Every image stalls outright from
+9.5–9.75 µs; where the band starts, and where the soonest touch sits inside
+it, is what a firmware change moves (main's local gated build would have put
+the old single lag at 8,618 ns, inside its band, too). So the test now climbs
+a ladder of lags, 1.25–3× the later soonest touch, and requires the stall on
+at least one rung; the defect reads as fixed only when no rung shows it.
+
 **Lesson.** Moving the writer onto a different task moved WHEN the gate's
 check lands relative to the drain, and that ordering was the whole reason the
 gate was safe under the hypothesis. A gate that clears an edge it then waits
