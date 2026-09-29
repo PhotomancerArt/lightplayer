@@ -42,7 +42,7 @@ impl Capture {
 /// A session: `boot_text` raw first, the handshake, the hello, the opt-in
 /// when `packed`, then `replies` (after one request the host sends, id 1).
 pub fn capture(boot_text: &str, replies: &[WireServerMessage], packed: bool) -> Capture {
-    let mut host = WireLinkPort::new(0xC0DE_0001, packed);
+    let mut host = WireLinkPort::new(LinkConfig::usb(), 0xC0DE_0001, packed);
     let mut board = Board::new(packed);
     let mut chunks = vec![(Direction::BoardToHost, boot_text.as_bytes().to_vec())];
     host.on_bytes(0, boot_text.as_bytes());

@@ -136,7 +136,7 @@ sequence space is future work if a measurement ever calls for it).
 3. **Both ends reset together.** A reboot, reload, replug or give-up gives one
    `Reset` on each side, and per-link state above (the learned dictionary,
    pending requests) resets in step.
-4. **One design, tuned per transport.** Presets in `link_config.rs`: `usb()`,
+4. **One design, tuned per transport.** Presets in `link_config.rs`: `usb()`, `uart()`,
    `ble()`, `udp()`, `ws()`. WS/TCP use `NoArq` (channels and lifecycle
    only).
 5. **Logs are traffic.** `LogRing` + `link_log!` + a `log` adapter. The ring

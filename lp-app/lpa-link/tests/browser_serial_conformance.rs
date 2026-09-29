@@ -1529,7 +1529,10 @@ impl PortReader {
             .map(|value| js_sys::Uint8Array::new(&value).to_vec())
             .expect("bytes");
         if self.reader.as_ref().map(|(at, _)| *at) != Some(generation) {
-            self.reader = Some((generation, LinkPortService::new(1, false, None)));
+            self.reader = Some((
+                generation,
+                LinkPortService::new(LinkConfig::usb(), 1, false, None),
+            ));
         }
         let (_, reader) = self.reader.as_mut().expect("a reader");
         reader.on_bytes((js_sys::Date::now() * 1_000.0) as u64, &bytes);

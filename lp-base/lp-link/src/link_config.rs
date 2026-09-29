@@ -214,6 +214,46 @@ impl LinkConfig {
         }
     }
 
+    /// A plain UART through a USB-serial bridge (the classic ESP32's UART0
+    /// behind a CH340 at 921,600 baud): `usb()`'s framing on a slower wire
+    /// with no flow control.
+    ///
+    /// Only the windows differ from `usb()`, and both ends use this preset
+    /// (the board cuts its buffers further, like the C6's cut of `usb()`):
+    ///
+    /// - **Framing, CRC, `escape_ff`, payload: `usb()`'s.** The same COBS-FF
+    ///   stream, so one sniffer (`LinkSniffer::usb`) reads both links, and
+    ///   `0xFF` stays off this wire too: a UART host is still a Web Serial
+    ///   page on macOS, the tty path the 0xFF loss was found on. A 256-byte
+    ///   payload is ~2.9 ms of line time; the UART's 128-byte FIFO is the
+    ///   board's writer's concern (it drains RX between chunks), not the
+    ///   frame size's.
+    /// - **Windows 4, not 8.** Four frames are ~1 KiB, ~11.6 ms of line time
+    ///   each way, which covers a round trip over a bridge whose board side
+    ///   is serviced every 1 ms; eight only doubles the transmit and reorder
+    ///   buffers, and on a board whose heap is its tightest budget that is
+    ///   ~2 KB for nothing. The window is the flow-control ceiling the board
+    ///   advertises, so this also bounds what a host has in flight to it.
+    /// - **Budgets: `usb()`'s.** A host builds its end from this preset and
+    ///   queues each request with `send()`, which refuses a message longer
+    ///   than `send_budget`; an upload's ~5.5 KB chunk must fit. The board
+    ///   sends its replies external and sets its own small ring.
+    /// - **`min_rto`: `usb()`'s 40 ms, a hypothesis.** The C6's board had to
+    ///   raise its own floor to 200 ms because its link task yields to an
+    ///   ~80 ms render tick between packets; a UART link task serviced every
+    ///   1 ms whatever the engine is doing should not need that. Unproven on
+    ///   silicon (plan `lp2025/2026-09-28-2015-classic-uart-on-lp-link`, D4):
+    ///   the C6's simulator numbers were wrong twice on the board.
+    /// - **`frame_abandon`: `usb()`'s 3 s**, for the same reason: a busy
+    ///   writer's split frame must not be abandoned and resent in a loop.
+    pub fn uart() -> Self {
+        LinkConfig {
+            tx_window: 4,
+            rx_window: 4,
+            ..Self::usb()
+        }
+    }
+
     pub fn is_reliable(&self, channel: u8) -> bool {
         channel < 8 && self.reliable_channels & (1 << channel) != 0
     }
@@ -246,6 +286,7 @@ mod tests {
     fn every_preset_holds_together() {
         for (name, cfg) in [
             ("usb", LinkConfig::usb()),
+            ("uart", LinkConfig::uart()),
             ("ble", LinkConfig::ble()),
             ("udp", LinkConfig::udp()),
             ("ws", LinkConfig::ws()),
@@ -253,5 +294,15 @@ mod tests {
             assert_eq!(cfg.validate(), Ok(()), "{name}");
             assert_eq!(cfg.max_message, MAX_MESSAGE, "{name}");
         }
+    }
+
+    /// Tools read a UART link with the USB sniffer (`LinkSniffer::usb`), so
+    /// the two presets must frame alike.
+    #[test]
+    fn uart_frames_like_usb() {
+        let (usb, uart) = (LinkConfig::usb(), LinkConfig::uart());
+        assert_eq!(uart.framing, usb.framing);
+        assert_eq!(uart.crc, usb.crc);
+        assert_eq!(uart.escape_ff, usb.escape_ff);
     }
 }

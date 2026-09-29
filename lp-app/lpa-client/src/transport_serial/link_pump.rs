@@ -22,7 +22,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::{Duration, Instant};
 
-use lpc_wire::lp_link::SendError;
+use lpc_wire::lp_link::{LinkConfig, SendError};
 use lpc_wire::messages::ClientMessage;
 use lpc_wire::{PortRead, WireEncoding, WireLinkPort};
 use tokio::sync::{mpsc, oneshot};
@@ -69,7 +69,7 @@ impl LinkPump {
             .unwrap_or_else(crate::wire_encoding_env::requested_wire_encoding)
             == WireEncoding::Packed;
         let mut state = PumpState {
-            port: WireLinkPort::new(fresh_link_nonce(), want_packed),
+            port: WireLinkPort::new(LinkConfig::usb(), fresh_link_nonce(), want_packed),
             started: Instant::now(),
             backlog: VecDeque::new(),
             outstanding: BTreeSet::new(),

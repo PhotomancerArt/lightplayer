@@ -29,7 +29,7 @@
 
 use std::collections::VecDeque;
 
-use lpc_wire::lp_link::{LinkState, Micros};
+use lpc_wire::lp_link::{LinkConfig, LinkState, Micros};
 use lpc_wire::server::api::LogLevel;
 use lpc_wire::{ClientMessage, LinkCounters, WireLinkPort};
 
@@ -48,12 +48,19 @@ pub struct LinkPortService {
 }
 
 impl LinkPortService {
-    /// A port with a fresh `nonce` (random per open: it is how the board
-    /// tells this open from the last one). `want_packed` asks the board to
-    /// pack its replies; `device_log` is the dev log-level rider.
-    pub fn new(nonce: u32, want_packed: bool, device_log: Option<LogLevel>) -> Self {
+    /// A port on a link tuned by `config` (the transport's preset:
+    /// `LinkConfig::usb()` for a USB-Serial-JTAG board), with a fresh `nonce`
+    /// (random per open: it is how the board tells this open from the last
+    /// one). `want_packed` asks the board to pack its replies; `device_log`
+    /// is the dev log-level rider.
+    pub fn new(
+        config: LinkConfig,
+        nonce: u32,
+        want_packed: bool,
+        device_log: Option<LogLevel>,
+    ) -> Self {
         Self {
-            port: WireLinkPort::new(nonce, want_packed).with_device_log_level(device_log),
+            port: WireLinkPort::new(config, nonce, want_packed).with_device_log_level(device_log),
             reads: VecDeque::new(),
             notes: Vec::new(),
             stalled: false,
@@ -287,7 +294,7 @@ mod tests {
     impl Bench {
         fn new() -> Self {
             Self {
-                host: LinkPortService::new(0xAAAA_0001, false, None),
+                host: LinkPortService::new(LinkConfig::usb(), 0xAAAA_0001, false, None),
                 board: BoardDouble::new(0xB0A2_0001),
                 now: 0,
             }

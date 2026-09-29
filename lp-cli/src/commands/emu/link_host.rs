@@ -243,7 +243,7 @@ impl<B: EmuUsbBoard> EmuLinkHost<B> {
         let start = board.micros();
         Self {
             board,
-            port: WireLinkPort::new(nonce, want_packed),
+            port: WireLinkPort::new(lpc_wire::lp_link::LinkConfig::usb(), nonce, want_packed),
             start,
             pending: VecDeque::new(),
             queue_messages: true,

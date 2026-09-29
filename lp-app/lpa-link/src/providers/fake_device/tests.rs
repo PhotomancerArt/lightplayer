@@ -571,6 +571,7 @@ impl HostPeer {
     fn new() -> Self {
         Self {
             port: lpc_wire::WireLinkPort::new(
+                lpc_wire::lp_link::LinkConfig::usb(),
                 lpa_client::transport_serial::fresh_link_nonce(),
                 false,
             ),

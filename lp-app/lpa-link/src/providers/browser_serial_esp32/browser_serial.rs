@@ -30,7 +30,7 @@ use std::rc::Rc;
 
 use js_sys::{Array, Promise, Reflect, Uint8Array};
 use lpa_devices::link::ResetKind;
-use lpc_wire::lp_link::Micros;
+use lpc_wire::lp_link::{LinkConfig, Micros};
 use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::{JsFuture, spawn_local};
 
@@ -299,7 +299,12 @@ impl Drop for WakeOnBytes {
 /// A link for a newly opened port: a fresh nonce, and the page's wire flags
 /// as they are now.
 fn fresh_service() -> LinkPortService {
-    LinkPortService::new(random_nonce(), packed_replies_wanted(), device_log_level())
+    LinkPortService::new(
+        LinkConfig::usb(),
+        random_nonce(),
+        packed_replies_wanted(),
+        device_log_level(),
+    )
 }
 
 /// What one service pass found.

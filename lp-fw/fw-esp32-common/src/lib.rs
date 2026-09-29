@@ -34,5 +34,7 @@ pub mod radio_link;
 pub mod server_loop;
 #[cfg(feature = "server")]
 pub mod transport;
+#[cfg(feature = "uart-link")]
+pub mod uart_link;
 #[cfg(feature = "usb-link")]
 pub mod usb_link;

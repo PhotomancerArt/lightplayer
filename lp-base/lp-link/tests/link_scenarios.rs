@@ -78,6 +78,23 @@ fn torn_tails_are_detected_and_resent() {
 }
 
 #[test]
+fn the_uart_preset_recovers_loss_with_its_narrower_windows() {
+    // A stream pipe (the USB model: the framing is the same) with uart()'s
+    // four-frame windows on both ends: loss is found and resent, nothing is
+    // delivered twice, out of order or damaged.
+    let mut sc = Scenario::new(Transport::Usb, 0.02, random(), 3_000_000, 17);
+    sc.host_cfg = LinkConfig::uart();
+    sc.board_cfg = LinkConfig::uart();
+    let r = run::<SelectiveRepeat>(&sc);
+    assert_clean(&r, Transport::Usb);
+    assert!(
+        r.host.retransmits + r.board.retransmits > 0,
+        "loss was resent"
+    );
+    assert!(r.down.delivered > 0 && r.up.delivered > 0);
+}
+
+#[test]
 fn a_board_reboot_resets_both_sides_and_the_new_session_works() {
     let mut sc = Scenario::new(Transport::Usb, 0.0, random(), 3_000_000, 5);
     sc.board_reboots = vec![1_000_000, 2_000_000];
