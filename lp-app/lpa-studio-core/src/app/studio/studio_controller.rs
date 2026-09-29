@@ -1754,6 +1754,15 @@ impl StudioController {
         }
     }
 
+    /// A passive pull the board ANSWERED with a failure (a refused read, a
+    /// torn reply): backoff applies, but it is proof the wire is alive, so
+    /// it never counts toward — and restarts — the dead-wire streak below.
+    pub fn record_passive_refresh_answered_failure(&mut self) {
+        if let Ok(session) = self.pool.lens_session_mut() {
+            session.record_refresh_answered_failure();
+        }
+    }
+
     /// See [`Self::record_passive_refresh_success`].
     ///
     /// The device lens's dead-wire backstop lives here: a board whose wire

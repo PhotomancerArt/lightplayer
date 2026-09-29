@@ -6185,7 +6185,10 @@ impl ProjectController {
         if let Some(sync) = &mut self.sync {
             sync.fail(error.to_string());
         }
-        ProjectSyncRun::failed(logs)
+        // A server refusal or a reply that arrived malformed (both map to
+        // `Protocol`) is the board answering; a transport error is not.
+        let board_answered = matches!(error, UiError::Protocol(_));
+        ProjectSyncRun::failed_after(logs, board_answered)
     }
 
     // --- Slot edit ops (P5): buffer, mutate, save, revert --------------------

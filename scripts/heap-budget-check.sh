@@ -116,6 +116,11 @@ MAX_CYCLES=400000000
 # record zeros.
 STEADY_WINDOWS='["frame"]'
 DEFAULT_PROJECTS=(projects/test/basic catalog/patterns/meteor)
+# Absolute allowance, per figure, for catalog project records only (`check`'s
+# per-project loop, engine records under scripts/heap-budget-record/engine/
+# catalog/…) — on top of the percentage margin, in both directions the check
+# tests. A renamed JSON key costs a few bytes; a real regression is hundreds.
+CATALOG_ABS_MARGIN_B=64
 
 command -v jq >/dev/null 2>&1 || {
     echo "jq not found. Install it (brew install jq / apt-get install jq) to run the heap-budget gate."
@@ -828,6 +833,12 @@ check)
     fail=0
     for project in $projects; do
         rec_file="$(engine_record "$project")"
+        # Catalog project records only — test records (engine/projects/test/…)
+        # stay at the bare percentage margin.
+        abs_margin_b=0
+        case "$project" in
+        catalog/*) abs_margin_b="$CATALOG_ABS_MARGIN_B" ;;
+        esac
         for pmode in $(jq -r '.modes | keys[]' "$rec_file"); do
             echo "heap-budget: profiling ${project} (${pmode})..."
             budget="$(budget_for "$project" "$pmode")"
@@ -862,7 +873,7 @@ check)
                     # Inverted direction: a bigger largest-free-block is the
                     # improvement here, so the ratchet fails on SHRINKING
                     # below the record, not on growth.
-                    allowed=$(awk -v r="$rec" -v m="$margin" 'BEGIN { printf "%d", r * (1 - m / 100) }')
+                    allowed=$(awk -v r="$rec" -v m="$margin" -v a="$abs_margin_b" 'BEGIN { printf "%d", r * (1 - m / 100) - a }')
                     if [ "$meas" -lt "$allowed" ]; then
                         echo "::error::heap-budget: ${project} (${pmode}) ${w}.${f} shrank: ${meas} < recorded ${rec} (margin ${margin}%). Intentional? Re-baseline with 'just heap-budget-baseline ${project}' in this PR."
                         fail=1
@@ -873,7 +884,7 @@ check)
                     fi
                     continue
                 fi
-                allowed=$(awk -v r="$rec" -v m="$margin" 'BEGIN { printf "%d", r * (1 + m / 100) }')
+                allowed=$(awk -v r="$rec" -v m="$margin" -v a="$abs_margin_b" 'BEGIN { printf "%d", r * (1 + m / 100) + a }')
                 if [ "$meas" -gt "$allowed" ]; then
                     echo "::error::heap-budget: ${project} (${pmode}) ${w}.${f} grew: ${meas} > recorded ${rec} (margin ${margin}%). Intentional? Re-baseline with 'just heap-budget-baseline ${project}' in this PR."
                     fail=1
