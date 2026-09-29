@@ -576,7 +576,12 @@ mod tests {
             "{messages:?}"
         );
         assert!(
-            messages.contains(&(Direction::HostToBoard, CH_PROTO, b"a request".to_vec(), true)),
+            messages.contains(&(
+                Direction::HostToBoard,
+                CH_PROTO,
+                b"a request".to_vec(),
+                true
+            )),
             "{messages:?}"
         );
 
@@ -593,9 +598,7 @@ mod tests {
             frame
         };
         let mut damage_events = Vec::new();
-        sniffer.push_datagram(Direction::BoardToHost, &mangled, |e| {
-            damage_events.push(e)
-        });
+        sniffer.push_datagram(Direction::BoardToHost, &mangled, |e| damage_events.push(e));
         assert_eq!(
             damage_events,
             vec![SniffEvent::Damaged {
