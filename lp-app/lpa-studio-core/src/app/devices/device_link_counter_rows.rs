@@ -86,7 +86,13 @@ fn count_row(label: &'static str, count: u32, one: &str, many: &str) -> UiLinkCo
 /// A resend or a damaged-frame count: notable only once it clears
 /// [`is_notable_rate`]'s floor (DD2) — otherwise plain, however small a
 /// share of `total_frames` it already is.
-fn rate_row(label: &'static str, count: u32, total_frames: u32, one: &str, many: &str) -> UiLinkCounterRow {
+fn rate_row(
+    label: &'static str,
+    count: u32,
+    total_frames: u32,
+    one: &str,
+    many: &str,
+) -> UiLinkCounterRow {
     let unit = if count == 1 { one } else { many };
     UiLinkCounterRow {
         label,
@@ -183,7 +189,10 @@ mod tests {
             ..Default::default()
         });
         assert_eq!(rows[0].value, "1 frame");
-        assert!(!rows[0].notable, "2 frames of traffic is not enough to judge");
+        assert!(
+            !rows[0].notable,
+            "2 frames of traffic is not enough to judge"
+        );
         assert_eq!(rows[1].value, "5 frames");
         assert!(!rows[1].notable, "19 is one short of the 20-frame floor");
     }
@@ -197,7 +206,10 @@ mod tests {
             frames_sent: 20,
             ..Default::default()
         });
-        assert!(!at_five_percent[0].notable, "exactly 5 % is not \"above\" it");
+        assert!(
+            !at_five_percent[0].notable,
+            "exactly 5 % is not \"above\" it"
+        );
 
         let above_five_percent = link_counter_rows(&DeviceLinkCounters {
             resends: 2,
