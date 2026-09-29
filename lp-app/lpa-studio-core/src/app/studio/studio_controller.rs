@@ -1243,6 +1243,13 @@ impl StudioController {
             );
             return;
         };
+        if row.uid.starts_with("mac:") {
+            log::debug!(
+                "push not banked: {:?} is still keyed on its MAC, which record_push refuses",
+                row.uid
+            );
+            return;
+        }
         let version: lpc_history::ContentHash = match push.version.parse() {
             Ok(version) => version,
             Err(error) => {
