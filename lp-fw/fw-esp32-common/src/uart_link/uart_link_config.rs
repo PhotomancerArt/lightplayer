@@ -44,14 +44,25 @@ const SEND_BUDGET: usize = 1280;
 /// 1,024 B: every request that is not an upload is well under it.
 const KEEP_REASSEMBLY: usize = 512;
 
-/// The board's link configuration. See the module docs.
+/// The board's resend-timer floor: the C6's 200 ms, not the preset's 40 ms.
 ///
-/// `min_rto` stays at the preset's 40 ms, not the C6's 200 ms: the C6's link
-/// task yields to an ~80 ms render tick between packets, and the classic's
-/// UART is serviced from an interrupt executor every 1 ms whatever the engine
-/// is doing. That holds only if the link itself is driven from there (P2);
-/// until an emulated soak and a desk sitting say otherwise it is a
-/// hypothesis, not a measurement (plan D4).
+/// The preset's floor assumed the link would be driven from the classic's
+/// interrupt executor, which services UART0 every 1 ms whatever the engine is
+/// doing (plan D4). It is not: that executor only moves bytes, and the
+/// `Link` runs on the thread executor beside the server transport (ruling
+/// DD20 — `super::uart_link_pipes`), so its timers and ACKs are serviced only
+/// between engine ticks, 41–114 ms on a dome-scale project
+/// (`docs/adr/2026-08-25-classic-uart-io-task-executor-isolation.md`'s bench)
+/// — longer than the ~80 ms tick that made the C6 raise its own floor to
+/// 200 ms (`crate::usb_link::UsbLinkShared::config`: every frame sent twice
+/// through a palette cross-fade at 40 ms, rehearsal `silicon:esp32c6`,
+/// 2026-09-27). Real losses are still found early by SACK and the tail
+/// probe; this timer is only the backstop. Not yet measured on this chip: an
+/// emulated soak (P5) and the desk sitting are what can move it.
+const MIN_RTO_US: u64 = 200_000;
+
+/// The board's link configuration. See the module docs, and [`MIN_RTO_US`]
+/// for the one timing change from the preset.
 pub fn uart_board_link_config() -> LinkConfig {
     let mut cfg = LinkConfig::uart();
     cfg.max_message = MAX_MESSAGE;
@@ -61,6 +72,7 @@ pub fn uart_board_link_config() -> LinkConfig {
     cfg.keep_reassembly = KEEP_REASSEMBLY;
     cfg.send_queue = SEND_QUEUE;
     cfg.datagram_queue = LOG_DATAGRAMS;
+    cfg.min_rto = MIN_RTO_US;
     cfg
 }
 

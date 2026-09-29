@@ -204,7 +204,8 @@ use {
     flash_storage::{LpFlashStorage, LpfsPartition, lpfs_config},
     fw_esp32_common::hardware::manifest_loader::load_hardware_manifest,
     fw_esp32_common::time::Esp32TimeProvider,
-    fw_esp32_common::{boot, logger, lp_fs, transport},
+    fw_esp32_common::uart_link::{UartLinkShared, UartLinkTransport},
+    fw_esp32_common::{boot, lp_fs},
     lp_gfx_lpvm::TargetLpvmGraphics,
     lpa_server::{LpGraphics, LpServer},
     lpc_hardware::{HardwareSystem, HwRegistry},
@@ -212,7 +213,7 @@ use {
     lpfs::LpFsMemory,
     lpfs::lp_path::AsLpPath,
     output::{Esp32OutputProvider, Esp32V3RmtWs281xDriver},
-    serial::io_task,
+    serial::{io_task, uart_link_task},
 };
 
 // The unbounded loop is the product's entry point; the benchmark image calls
@@ -326,6 +327,10 @@ const HEAP_SIZE: usize = 72 * 1024;
 fn panic(info: &core::panic::PanicInfo) -> ! {
     recovery::panic_path::stage_and_reset(info)
 }
+
+// The lp-link text mark (`0xFF \r \n`) a dying board writes before its raw
+// text lives in `recovery::panic_path`, after the interrupts are masked, so
+// io_task cannot put a frame's bytes between the mark and the text.
 
 /// Allocation failure: record it as an `Oom` with the heap counters attached.
 ///
@@ -476,7 +481,7 @@ fn panic(info: &core::panic::PanicInfo) -> ! {
 /// Heap free/used for the heartbeat. A chip fact `fw-esp32-common` must not
 /// know, so it is injected.
 ///
-/// It also prints `[MEM]`, which the heartbeat's own `memory` field cannot
+/// It also logs `[MEM]`, which the heartbeat's own `memory` field cannot
 /// carry: the wire type is two numbers, and the third one — the largest block
 /// the heap could actually hand out — is the one that matters on a 110 KB arena.
 /// A board with 12 KB free in 400-byte pieces cannot compile a shader, and from
@@ -514,8 +519,10 @@ fn read_headroom_probe() -> Option<u32> {
 /// The `ClientRequest::Reboot` action: the chip reset the chip-agnostic
 /// server cannot perform itself.
 ///
-/// Called only after the ack frame is written (`LpServer::tick_and_send`),
-/// so the client reads its answer and then this board's boot banner. On
+/// Called after the ack is queued (`LpServer::tick_and_send`); on the lp-link
+/// host link queued is not yet delivered, so the reset is left to the link
+/// task, which does it once the host has acknowledged everything (or after a
+/// second) — the client reads its answer, then this board's boot banner. On
 /// this board it is also the ONLY restart a browser can still cause once a
 /// CH340 replug has killed the Web Serial grant. Not a crash path: the boot
 /// was marked complete on the first served frame, long before any request
@@ -524,6 +531,12 @@ fn read_headroom_probe() -> Option<u32> {
 #[cfg(all(feature = "server", not(feature = "radio_ram_probe"), not(fw_harness)))]
 fn reboot_now() {
     log::info!("[REBOOT] client requested a restart");
+    fw_esp32_common::uart_link::when_drained(reset_now);
+}
+
+/// The reboot itself, run by the link task once the answer is out.
+#[cfg(all(feature = "server", not(feature = "radio_ram_probe"), not(fw_harness)))]
+fn reset_now() -> ! {
     esp_hal::system::software_reset()
 }
 
@@ -538,9 +551,12 @@ fn esp32_memory_stats() -> Option<(u32, u32)> {
     let used = esp_alloc::HEAP.used();
     let largest = recovery::panic_path::largest_free_block();
     let retry_saves = OOM_RETRY_SAVES.load(core::sync::atomic::Ordering::Relaxed);
-    esp_println::println!(
-        "[MEM] free={free} used={used} largest_free={largest} retry_saves={retry_saves}"
-    );
+    // Through `log`, never `esp_println`: since wire proto 32 UART0 carries
+    // lp-link frames, and a raw line written from here, between the link's
+    // frames or inside one, was the interleaving defect's own trigger
+    // (`docs/defects/2026-08-02-serial-line-interleaving.md`). The S3 made the
+    // same move when its link went onto lp-link (its stack probe's comment).
+    log::info!("[MEM] free={free} used={used} largest_free={largest} retry_saves={retry_saves}");
     // The JIT code region is NOT part of the heap above — it is a separate
     // fixed SRAM0 reservation (memory no heap can use), and its residency is
     // the number that decides how big it has to be. `peak` is the high-water mark of
@@ -548,7 +564,7 @@ fn esp32_memory_stats() -> Option<(u32, u32)> {
     // board sits idle is a span leak, which must be read before any figure
     // here is used to justify a smaller region.
     if let Some((jit, jit_largest)) = lpvm_native::codemem_esp32::global::stats() {
-        esp_println::println!(
+        log::info!(
             "[JIT] used={} peak={} cap={} spans={} peak_spans={} allocs={} frees={} fails={} largest_free={jit_largest}",
             jit.used,
             jit.peak_used,
@@ -776,7 +792,7 @@ fn assert_jit_region_clear_of_rwtext(region: &lpvm_native::codemem_esp32::CodeRe
 #[cfg(all(feature = "server", not(feature = "radio_ram_probe"), not(fw_harness)))]
 struct FirmwareApp {
     server: LpServer,
-    transport: transport::StreamingMessageRouterTransport,
+    transport: UartLinkTransport,
     time_provider: Esp32TimeProvider,
     /// What `auto_load_project` cost, in cycles. See the bracket in
     /// [`boot_firmware`].
@@ -786,7 +802,7 @@ struct FirmwareApp {
 
 #[cfg(all(feature = "server", not(feature = "radio_ram_probe"), not(fw_harness)))]
 #[inline(never)]
-fn boot_firmware() -> FirmwareApp {
+fn boot_firmware(spawner: embassy_executor::Spawner) -> FirmwareApp {
     // ⚠️ `init_board` takes the `esp_hal` peripheral singleton, and taking it
     // twice panics. This is the app path's ONLY call to `esp_hal::init`.
     let (sw_int, timg0, uart0, flash, rmt_peripheral, cpu_ctrl) = init_board();
@@ -838,6 +854,15 @@ fn boot_firmware() -> FirmwareApp {
     let (sw_int1, io_pacer_timer) = start_runtime(timg0, sw_int);
     esp_println::println!("[INIT] runtime started");
 
+    // The host link runs lp-link (plan `classic-uart-on-lp-link`): the link
+    // task below owns it on this (thread) executor, and io_task only moves
+    // its bytes. The session nonce is random per boot, so a host learns the
+    // board restarted. The `esp_println!` lines before and around this are
+    // raw text outside frames, which a host sees as text; nothing of the
+    // link goes out before io_task's first tick, and no host can have a
+    // session before the link task runs, after `boot_firmware` returns.
+    let uart_link = UartLinkShared::leak(esp_hal::rng::Rng::new().random());
+
     match uart0 {
         Ok(uart) => {
             // io_task runs on its own interrupt executor (swi2, Priority2 —
@@ -882,6 +907,10 @@ fn boot_firmware() -> FirmwareApp {
             esp_println::println!(
                 "[INIT] I/O task spawned (uart0 921600 8N1, swi2 executor prio2, timg0t1 pacer 1ms)"
             );
+            // The link itself, on THIS executor, beside the server transport
+            // that shares it — never on io_task's (ruling DD20).
+            spawner.spawn(uart_link_task(uart_link).unwrap());
+            esp_println::println!("[INIT] UART link task spawned (lp-link, thread executor)");
         }
         Err(error) => {
             // The board keeps booting: `esp_println` writes UART0's FIFO
@@ -893,9 +922,10 @@ fn boot_firmware() -> FirmwareApp {
         }
     }
 
-    // From here on `log::*` reaches the host over the same serial link; the
-    // `esp_println!` lines above are the pre-transport ones.
-    logger::init(serial::io_task::log_write_to_outgoing);
+    // From here on `log::*` goes into the log ring, and rides the link's log
+    // channel once a host has it up; the `esp_println!` lines above are raw
+    // boot text.
+    fw_esp32_common::log_ring_logger::init();
 
     // The transcript header, before any record and as early as the logger
     // allows — the same sink-agnostic entry point every other classic payload
@@ -903,10 +933,9 @@ fn boot_firmware() -> FirmwareApp {
     #[cfg(feature = "bench_render_loop")]
     bench::render_loop::write_header();
 
-    let (incoming, _) = serial::io_task::get_message_channels();
-    let (write_request, write_result) = serial::io_task::get_server_write_channels();
-    let transport =
-        transport::StreamingMessageRouterTransport::new(incoming, write_request, write_result);
+    // The server's side of the host link: whole wire messages on the link's
+    // proto channel.
+    let transport = UartLinkTransport::new(uart_link);
 
     let base_fs = mount_filesystem(flash);
 
@@ -1176,10 +1205,11 @@ fn mount_filesystem(flash: esp_hal::peripherals::FLASH<'static>) -> Box<dyn lpfs
 
 #[cfg(all(feature = "server", not(feature = "radio_ram_probe"), not(fw_harness)))]
 #[esp_rtos::main]
-// The thread executor's spawner goes unused: the server loop runs as this
-// main task itself, and io_task lives on the swi2 interrupt executor.
-async fn main(_spawner: embassy_executor::Spawner) {
-    let app = boot_firmware();
+// The server loop runs as this main task itself; the thread executor's
+// spawner starts the link task beside it (io_task lives on the swi2
+// interrupt executor).
+async fn main(spawner: embassy_executor::Spawner) {
+    let app = boot_firmware(spawner);
 
     // ⚠️ The substring "fw-esp32 initialized, starting server loop" is matched
     // literally by `lpa_link::device_session::device_readiness` (and by lp-cli

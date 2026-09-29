@@ -74,10 +74,10 @@ json-pack = ["server"]
 # The server transport over it (`usb_link::usb_link_transport`) also needs
 # `server`.
 usb-link = ["dep:lp-link", "dep:critical-section"]
-# The classic's UART0 host link on lp-link (`uart_link`; plan
-# `classic-uart-on-lp-link`). So far only the board's link configuration and
-# its RAM test (P1); the task and transport follow with the firmware (P2).
-uart-link = ["dep:lp-link"]
+# The classic's UART0 host link on lp-link (`uart_link`, `log_ring_logger`;
+# plan `classic-uart-on-lp-link`): the classic (v3) turns it on. The server
+# transport over it (`uart_link::uart_link_transport`) also needs `server`.
+uart-link = ["dep:lp-link", "dep:critical-section"]
 server = ["dep:littlefs-rust", "dep:lp-json-pack", "dep:lp-recovery", "dep:lpa-server", "dep:lpc-model", "dep:lpc-wire", "dep:lpfs", "dep:ser-write-json"]
 
 [dev-dependencies]
