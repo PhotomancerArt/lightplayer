@@ -12,6 +12,10 @@
 //! sitting in `lp2025/2026-09-27-validate-driver-link-host/desk-recapture.md`
 //! is its first.
 //!
+//! The second test is `--request`: a `reboot` the board answers and restarts
+//! on, and a `hello` the capture holds back until the rebooted board has said
+//! its own.
+//!
 //! `#[ignore]`d: it needs a built `fw-esp32c6` ELF (`LP_EMU_BUILD_FW=1`, or
 //! `LP_CI_IMAGES`), and `just test-emu-c6-cli` runs it.
 
@@ -73,6 +77,16 @@ fn a_capture_over_the_boards_socket_reaches_the_boot_idle_sentinel() {
 /// comes back under a new session nonce (the host sees `PeerRestarted`), and
 /// the hello goes to the REBOOTED board and is answered there. The desk's
 /// way to reboot a board with nothing else on its port.
+///
+/// ⚠️ On this machine the restart is the LP watchdog's, not the software
+/// reset's: the emulated C6 stores the ROM's `LP_AON.sys_cfg.hpsys_sw_reset`
+/// write without acting on it, `esp_hal::system::software_reset` returns into
+/// the next function, and the RWDT reboots the chip seconds later
+/// (`docs/defects/2026-09-29-the-emulated-c6-does-not-perform-a-software-
+/// reset.md`). So no `--strict-bus` here — the fall-through writes to
+/// address 0 — and what this test proves is the capture's side: the request
+/// order, the restart seen as `PeerRestarted`, and the next request asked of
+/// the new session. How fast a board restarts is not in it.
 #[test]
 #[ignore = "needs a built fw-esp32c6 ELF; `just test-emu-c6-cli` runs it"]
 fn a_reboot_request_restarts_the_board_and_the_next_request_goes_to_the_new_session() {
@@ -82,14 +96,7 @@ fn a_reboot_request_restarts_the_board_and_the_next_request_goes_to_the_new_sess
         Command::new(env!("CARGO_BIN_EXE_lp-cli"))
             .args(["emu", "run", "--elf"])
             .arg(&elf)
-            .args([
-                "--link",
-                &addr,
-                "--reboot-on-reset",
-                "--timeout",
-                "60s",
-                "--strict-bus",
-            ])
+            .args(["--link", &addr, "--reboot-on-reset", "--timeout", "60s"])
             .stdout(Stdio::null())
             .stderr(Stdio::null())
             .spawn()

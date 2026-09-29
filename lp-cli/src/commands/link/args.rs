@@ -48,10 +48,10 @@ pub enum LinkSubcommand {
     ///
     /// `--request` sends a client request once the board has said hello:
     /// the desk's way to ask a board something with nothing else on its
-    /// port. Each waits for its answer (or for the link to reset under it)
-    /// before the next goes, and a request sent into a session goes after
-    /// that session's hello, so a reboot followed by a hello asks the
-    /// rebooted board:
+    /// port. Each waits for the one before to be done — answered, or for a
+    /// `reboot`, the board restarted (a `[link] reset (PeerRestarted)` and a
+    /// new session) — and goes after its session's hello, so a reboot
+    /// followed by a hello asks the rebooted board:
     ///
     ///   lp-cli link capture /dev/cu.usbmodem1101 --console boot.txt \
     ///       --request reboot --request hello --seconds 20
@@ -84,9 +84,10 @@ pub struct CaptureArgs {
     /// Send this client request once the board's hello arrives — the JSON
     /// of a `ClientRequest` (`'"reboot"'`, `'{"setLogLevel":{…}}'`), or a
     /// unit request's bare name (`reboot`). Repeatable; sent in order, each
-    /// after the answer to the one before, or after the new session's hello
-    /// when the link reset instead (a reboot's answer can be lost with the
-    /// session it was sent in).
+    /// once the one before is done: answered, or — for a `reboot` — the
+    /// board restarted and said hello again. A request whose session resets
+    /// under it is done unanswered. The run fails if one is never sent,
+    /// never answered, or a `reboot` never restarts the board.
     #[arg(long)]
     pub request: Vec<String>,
 }

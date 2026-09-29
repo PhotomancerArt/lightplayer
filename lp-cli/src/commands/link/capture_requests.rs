@@ -1,11 +1,15 @@
 //! `lp-cli link capture --request`: the requests a capture sends, and when.
 //!
 //! A request goes only into a session the board has said hello in, one at a
-//! time, each after the answer to the one before. A link reset ends the
-//! request in flight instead of its answer — a `reboot` is answered and then
-//! resets the board, and the answer can be lost with the session it was sent
-//! in — and the next request waits for the new session's hello. That order
-//! is what makes `--request reboot --request hello` ask the REBOOTED board.
+//! time, each after the one before is done. A request is done when its answer
+//! arrives — except a `reboot`, which is done when the board has RESTARTED:
+//! the board answers it and resets a moment later (once the host has
+//! acknowledged the answer, or after a second), so a request sent on the
+//! answer would reach the old boot or be lost with it. After a restart the
+//! next request waits for the new session's hello. That order is what makes
+//! `--request reboot --request hello` ask the REBOOTED board. Any other
+//! request whose session resets under it is done too, unanswered, and says
+//! so.
 //!
 //! The queue reads the capture's console lines, not typed messages, the same
 //! way `lp-cli emu run --host-link --request` does: a board on another proto
@@ -24,12 +28,27 @@ pub struct CaptureRequests {
     requests: Vec<(String, ClientMessage)>,
     /// How many have been sent.
     sent: usize,
-    /// The id of the request sent and not yet answered.
-    in_flight: Option<u64>,
+    /// The request sent and not yet done.
+    in_flight: Option<InFlight>,
     /// The current session's hello has arrived.
     hello: bool,
-    /// Requests whose session reset before they were answered, by text.
-    ended_by_reset: Vec<String>,
+    /// How each finished request ended.
+    done: Vec<Done>,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct InFlight {
+    index: usize,
+    answered: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Done {
+    Answered,
+    /// A `reboot` whose board restarted (a new session under a new nonce).
+    Restarted,
+    /// Any other request whose session reset before it was answered.
+    EndedByReset,
 }
 
 impl CaptureRequests {
@@ -47,7 +66,7 @@ impl CaptureRequests {
             sent: 0,
             in_flight: None,
             hello: false,
-            ended_by_reset: Vec::new(),
+            done: Vec::new(),
         })
     }
 
@@ -64,7 +83,10 @@ impl CaptureRequests {
     pub fn sent(&mut self) {
         let (text, message) = &self.requests[self.sent];
         eprintln!("link capture: sent --request `{text}` as id {}", message.id);
-        self.in_flight = Some(message.id);
+        self.in_flight = Some(InFlight {
+            index: self.sent,
+            answered: false,
+        });
         self.sent += 1;
     }
 
@@ -77,34 +99,59 @@ impl CaptureRequests {
         if json.contains("\"hello\":{") {
             self.hello = true;
         }
-        if let Some(id) = self.in_flight
-            && json.starts_with(&format!("{{\"id\":{id},"))
-        {
-            self.in_flight = None;
+        let Some(flight) = self.in_flight else {
+            return;
+        };
+        let (text, message) = &self.requests[flight.index];
+        if flight.answered || !json.starts_with(&format!("{{\"id\":{},", message.id)) {
+            return;
+        }
+        if is_reboot(message) {
+            eprintln!(
+                "link capture: the board answered --request `{text}`; \
+                 the next request waits for it to restart"
+            );
+            self.in_flight = Some(InFlight {
+                answered: true,
+                ..flight
+            });
+        } else {
+            self.finish(Done::Answered);
         }
     }
 
-    /// The link came up or reset: a new session, with no hello yet, and
-    /// nothing in flight any more.
+    /// The link came up or reset: a new session, with no hello yet. A
+    /// `reboot` in flight is done (the board restarted); any other request
+    /// in flight was lost with the old session.
     pub fn on_session_change(&mut self) {
         self.hello = false;
-        if let Some(id) = self.in_flight.take() {
-            let text = self.text_of(id);
+        let Some(flight) = self.in_flight else {
+            return;
+        };
+        let (text, message) = &self.requests[flight.index];
+        if is_reboot(message) {
+            self.finish(Done::Restarted);
+        } else {
             eprintln!(
                 "link capture: the link reset before --request `{text}` was answered; \
                  the next request waits for the new session's hello"
             );
-            self.ended_by_reset.push(text);
+            self.finish(Done::EndedByReset);
         }
     }
 
     /// Why the run's requests are not all done, if they are not.
     pub fn unfinished(&self) -> Option<String> {
-        if let Some(id) = self.in_flight {
-            return Some(format!(
-                "no answer to --request `{}` before the capture ended",
-                self.text_of(id)
-            ));
+        if let Some(flight) = self.in_flight {
+            let text = &self.requests[flight.index].0;
+            return Some(if flight.answered {
+                format!(
+                    "the board answered --request `{text}` but did not restart before the \
+                     capture ended"
+                )
+            } else {
+                format!("no answer to --request `{text}` before the capture ended")
+            });
         }
         if self.sent < self.requests.len() {
             let unsent: Vec<&str> = self.requests[self.sent..]
@@ -120,28 +167,32 @@ impl CaptureRequests {
         None
     }
 
-    /// One line for the run's summary: how many were sent and answered.
+    /// One line for the run's summary: how many were sent, and how each
+    /// ended.
     pub fn describe(&self) -> Option<String> {
         if self.requests.is_empty() {
             return None;
         }
-        let answered =
-            self.sent - usize::from(self.in_flight.is_some()) - self.ended_by_reset.len();
+        let count = |kind: Done| self.done.iter().filter(|d| **d == kind).count();
         Some(format!(
-            "{} of {} request(s) sent, {answered} answered, {} ended by a link reset",
+            "{} of {} request(s) sent: {} answered, {} restarted the board, {} ended by a \
+             link reset",
             self.sent,
             self.requests.len(),
-            self.ended_by_reset.len()
+            count(Done::Answered),
+            count(Done::Restarted),
+            count(Done::EndedByReset),
         ))
     }
 
-    fn text_of(&self, id: u64) -> String {
-        self.requests
-            .iter()
-            .find(|(_, message)| message.id == id)
-            .map(|(text, _)| text.clone())
-            .unwrap_or_default()
+    fn finish(&mut self, how: Done) {
+        self.in_flight = None;
+        self.done.push(how);
     }
+}
+
+fn is_reboot(message: &ClientMessage) -> bool {
+    matches!(message.msg, ClientRequest::Reboot)
 }
 
 /// A `ClientRequest`'s JSON, or a unit request's bare name (`reboot` for
@@ -206,18 +257,25 @@ mod tests {
         assert_eq!(q.unfinished(), None);
         assert_eq!(
             q.describe().unwrap(),
-            "2 of 2 request(s) sent, 2 answered, 0 ended by a link reset"
+            "2 of 2 request(s) sent: 2 answered, 0 restarted the board, 0 ended by a link reset"
         );
     }
 
     #[test]
-    fn a_reset_ends_the_request_in_flight_and_the_next_waits_for_the_new_hello() {
+    fn after_a_reboot_the_next_request_waits_for_the_restart_and_the_new_hello() {
         let mut q = CaptureRequests::parse(&["reboot".into(), "hello".into()]).unwrap();
         q.on_line(HELLO);
         q.sent();
-        q.on_session_change();
+        // The answer alone is not enough: the old boot is still up for a
+        // moment, and a request sent now would reach it.
+        q.on_line("M!{\"id\":1000000,\"msg\":\"reboot\"}");
+        assert!(
+            q.due().is_none(),
+            "a reboot is done when the board restarts"
+        );
+        q.on_session_change(); // reset (PeerRestarted)
+        q.on_session_change(); // up (session 1)
         assert!(q.due().is_none(), "no hello in the new session yet");
-        q.on_session_change();
         q.on_line(HELLO);
         assert_eq!(q.due().unwrap().id, REQUEST_ID_BASE + 1);
         q.sent();
@@ -225,7 +283,40 @@ mod tests {
         assert_eq!(q.unfinished(), None);
         assert_eq!(
             q.describe().unwrap(),
-            "2 of 2 request(s) sent, 1 answered, 1 ended by a link reset"
+            "2 of 2 request(s) sent: 1 answered, 1 restarted the board, 0 ended by a link reset"
+        );
+    }
+
+    #[test]
+    fn a_reboot_whose_answer_was_lost_with_the_session_still_restarted_the_board() {
+        let mut q = CaptureRequests::parse(&["reboot".into()]).unwrap();
+        q.on_line(HELLO);
+        q.sent();
+        q.on_session_change();
+        assert_eq!(q.unfinished(), None);
+    }
+
+    #[test]
+    fn a_reboot_answered_but_never_followed_by_a_restart_is_unfinished() {
+        let mut q = CaptureRequests::parse(&["reboot".into()]).unwrap();
+        q.on_line(HELLO);
+        q.sent();
+        q.on_line("M!{\"id\":1000000,\"msg\":\"reboot\"}");
+        assert!(q.unfinished().unwrap().contains("did not restart"));
+    }
+
+    #[test]
+    fn any_other_request_whose_session_resets_under_it_ends_unanswered() {
+        let mut q = CaptureRequests::parse(&["hello".into(), "hello".into()]).unwrap();
+        q.on_line(HELLO);
+        q.sent();
+        q.on_session_change();
+        assert!(q.due().is_none());
+        q.on_line(HELLO);
+        assert_eq!(q.due().unwrap().id, REQUEST_ID_BASE + 1);
+        assert_eq!(
+            q.describe().unwrap(),
+            "1 of 2 request(s) sent: 0 answered, 0 restarted the board, 1 ended by a link reset"
         );
     }
 
