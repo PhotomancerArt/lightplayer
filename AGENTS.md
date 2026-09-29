@@ -175,25 +175,30 @@ The core is IO-free state machines; async belongs to platform edges. See
   nothing done for packing. What both ends must agree on is
   `lp_json_pack::PACK_FORMAT_VERSION` (the tag table, the learning rule and
   the table's capacities): **bump it, and `WIRE_PROTO_VERSION`, when you
-  change any of those**. On the **remaining `M!` transports** (BLE, the
-  classic ESP32's UART, `fw-emu`) every host reader keeps **one**
-  `WireStream` per link for the link's whole life, and answers a
-  `WireChunk::Desync` with `PackOptIn::desynced` (the board's reset). See
+  change any of those**. On the **remaining `M!` transports** (the classic
+  ESP32's UART, `fw-emu`) every host reader keeps **one** `WireStream` per
+  link for the link's whole life, and answers a `WireChunk::Desync` with
+  `PackOptIn::desynced` (the board's reset). See
   `docs/adr/2026-09-25-learned-wire-dictionary.md`.
-- **USB is `lp-link` now, not `M!`.** The C6/S3 silicon and their emulators,
-  Studio's Web Serial and emulator-tab providers, and `lp-cli`'s native
-  serial/`serial:tcp`/`serial:ws` all frame the wire with `lp-link`
-  (`lp-base/lp-link`) instead: a 4-byte header, CRC-32C, selective-repeat
-  ARQ and a session handshake, with the wire's own JSON/packed message as
-  channel 1's payload — one whole message per link message, tagged `{` for
-  JSON or `L` for a learned-dictionary packed frame (never `0x00 'L'` COBS
-  framing; the link already delimits it). Because both ends of a link reset
-  together, the learned table resets **with the link**, not with an epoch:
-  there is no cross-session dictionary, no `Desync`/`PackOptIn::desynced`
-  path and no `R` resync marker on USB — a payload that fails to decode
-  restarts the link instead. That machinery (above) still applies, unchanged,
-  to BLE, the classic UART and `fw-emu`. See `lp-base/lp-link/README.md` and
-  `docs/adr/2026-09-27-lp-link-one-comms-layer.md`.
+- **USB and BLE are `lp-link` now, not `M!`.** The C6/S3 silicon and their
+  emulators, Studio's Web Serial, emulator-tab and Web Bluetooth providers,
+  and `lp-cli`'s native serial/`serial:tcp`/`serial:ws` all frame the wire
+  with `lp-link` (`lp-base/lp-link`) instead: a 4-byte header, CRC-32C,
+  selective-repeat ARQ and a session handshake, with the wire's own
+  JSON/packed message as channel 1's payload — one whole message per link
+  message, tagged `{` for JSON or `L` for a learned-dictionary packed frame
+  (never `0x00 'L'` COBS framing; the link already delimits it). USB frames
+  a byte stream (COBS-FF); BLE frames Datagrams — one lp-link frame is one
+  GATT write or one notification, capped to the connection's negotiated size
+  (`min(180, ATT_MTU − 11)`), with no ATT long-write reassembly path at all.
+  Because both ends of a link reset together (on USB, an idle/stall reset;
+  on BLE, a GATT disconnect), the learned table resets **with the link**, not
+  with an epoch: there is no cross-session dictionary, no
+  `Desync`/`PackOptIn::desynced` path and no `R` resync marker on either.
+  That machinery (above) still applies, unchanged, to the classic UART and
+  `fw-emu`. See `lp-base/lp-link/README.md`,
+  `docs/adr/2026-09-27-lp-link-one-comms-layer.md` and
+  `docs/adr/2026-09-24-ble-transport.md`'s dated Amendment.
 
 ## Persisted-format compatibility (the wire rule does NOT apply here)
 
@@ -261,7 +266,7 @@ runtime.
 | `lpc-access`     | Access core: secrets, tiers, HMAC login, backoff (sans-IO) | yes |
 | `lp-server`      | Project management, client connections | yes              |
 | `lp-json-pack`   | JSON Pack: a compact binary form of JSON that decodes back to byte-identical JSON text (`lp-base/`, generic; names coded against an injected seed and a per-connection learned table) | yes |
-| `lp-link`        | Sans-IO link layer under the device wire: framing, CRC-32C, channels, selective-repeat ARQ, session handshake (`lp-base/`, generic; one crate on both ends). Runs the product's USB link (board, host, Studio, tools); BLE/classic-UART/fw-emu are still the pre-lp-link `M!` framing | yes |
+| `lp-link`        | Sans-IO link layer under the device wire: framing, CRC-32C, channels, selective-repeat ARQ, session handshake (`lp-base/`, generic; one crate on both ends). Runs the product's USB and BLE links (board, host, Studio, tools); the classic UART and fw-emu are still the pre-lp-link `M!` framing | yes |
 | `lpa-devices`    | Device model: event fold, no IO, no UI | no (host + wasm) |
 | `fw-esp32c6`       | ESP32 firmware                         | yes (bare metal) |
 | `fw-emu`         | RISC-V emulator firmware (CI)          | yes (bare metal) |
@@ -618,20 +623,33 @@ per `emu serve`, and use `?on=` (a different, orthogonal flag) if you want a
 second lens on the same session.
 
 **`?ble=emu`** (beside `?emu=`) does the same for Bluetooth: it replaces
-`navigator.bluetooth` with `public/lpa-link/virtual_bluetooth.js`, the NUS
-GATT subset over the same emulated boards, so Studio's `ble:` link, the
-device card and Play run unchanged; `just walk-ble-emu` is its walk. It
-models the firmware's link rules as far as the page can see them: the link
-opens when the central subscribes, each link gets its own hello, an
-unauthenticated link is dropped after 10 s, and Bluefy's phantom
-drop, where the page hears a disconnect while the radio link stays
-up. **Trust caveat: it proves the transport, the UI and Play, not access.**
-The emulated board sees its trusted USB link, so every request is answered
-at the edit tier, and it never runs the C6's BLE controller or trouble-host:
-the two faults the real walks found (a chained ACL packet cut short, a long
-write acknowledged and dropped) were invisible to it. Access enforcement is
+`navigator.bluetooth` with `public/lpa-link/virtual_bluetooth.js`, so
+Studio's `ble:` link, the device card and Play run unchanged; `just
+walk-ble-emu` is its walk. Underneath, the polyfill still proxies the
+emulated board's real USB lp-link **Stream** session (the same `EmulatorPort`
+`navigator.serial` uses) — it does not open a genuine BLE Datagram session —
+but it now translates the framing rather than piping raw bytes: a page write
+becomes one COBS-FF-wrapped stream chunk in, and the board's stream is cut
+back into one frame per notification on the way out, byte-identical to
+`lp_link::frame::wrap_stream` on a 200-vector check. It models the
+firmware's link rules as far as the page can see them: the link opens when
+the central subscribes, each link gets its own hello, an unauthenticated
+link is dropped after 10 s, and Bluefy's phantom drop, where the page hears
+a disconnect while the radio link stays up. **Trust caveat: it proves the
+transport, the UI and Play, not access.** The emulated board sees its
+trusted USB link, so every request is answered at the edit tier, and it
+never runs the C6's BLE controller or trouble-host — access enforcement is
 proven by `lpa-server/tests/access_gate.rs` and the desk check
-(`spikes/ble-lab`). See `docs/adr/2026-09-24-ble-transport.md`, S5.
+(`spikes/ble-lab`). Since BLE moved onto lp-link (D3/D7 of
+`lp2025/2026-09-28-1445-ble-on-lp-link`), the ATT long-write path this
+walk's older caveat named is gone from the product entirely, board and
+polyfill alike — there is no reassembly path left to miss. **Known emu-path
+artifact:** the emulated board's USB link stalls at 1 s idle
+(`stall_after`) against Studio's BLE keepalive, also 1 s; a hermetic idle
+run saw a handful of stall edges out of hundreds of polls. This is a
+timing coincidence of the emulator's *USB* config standing in for BLE, not
+a BLE defect — a real board runs BLE's own timers on both ends. See
+`docs/adr/2026-09-24-ble-transport.md`, S5 and its dated Amendment.
 
 Two more dev-only flags tune the device wire for a measurement (read once at
 page load by `lpa-studio-web/src/dev_url_flags.rs`; no UI, no persistence):
@@ -653,9 +671,11 @@ Rust (`browser_serial::take_reads`, before any splitting) into an in-memory
 buffer capped at 16 MiB (one console warning at the cap, then it drops). Run
 `lpWireCapture()` in the page's console to download it as
 `wire-capture-<unix-ms>.bin`; the capture keeps running, and the file is
-exactly what arrived — a board's USB link is `lp-link` bytes now, and
+exactly what arrived — a board's USB or BLE link is `lp-link` bytes now, and
 `lp-cli wire unpack --sizes < file` decodes them by default (`--lines` reads
-the old `M!`-line framing instead, for a BLE/classic-UART/`fw-emu` capture).
+the old `M!`-line framing instead, for a classic-UART/`fw-emu` capture). This
+flag itself only taps Web Serial ports, not a GATT session; there is no BLE
+equivalent of it.
 `?device-log=<trace|debug|info|warn|error>` asks each board for that log
 level (`SetLogLevel`) once per link, after its hello and the packed-reply
 opt-in; the answer is a `dev: …` `WireNote` line, never a frame. Both cover

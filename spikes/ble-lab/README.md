@@ -46,7 +46,24 @@ curl -s localhost:$P/log?n=40                      # page telemetry + server lif
 The product firmware carries the wire itself over the same NUS service, and
 advertises as `LP-<project>` (or `LP-<last 4 MAC hex>`), so **Join** now
 accepts any `LP-…` name or any board advertising NUS. It starts BLE only when
-its device store says so, so provision the board over USB first:
+its device store says so, so provision the board over USB first.
+
+> **Framing gap, still open as of `lp2025/2026-09-28-1445-ble-on-lp-link`.**
+> Since that plan the board no longer speaks `M!{json}\n` lines over BLE at
+> all — see `docs/adr/2026-09-24-ble-transport.md`'s 2026-09-29 Amendment.
+> Every GATT write and notification is now exactly one lp-link Datagram
+> frame (a 4-byte header, the JSON/packed payload, a 4-byte CRC-32C), the
+> ATT long-write path is gone, and a Prepare Write on RX is refused
+> outright. **This spike's own wire-mode code was not ported in that
+> plan's P5 phase** — `index.html`'s `wireWrite`/`onWireBytes` (join on
+> newline, write in raw 180-byte chunks) and the `M!`-string builders below
+> in `lab.py`, `m4-desk-check.py` and `nus-probe.py`, plus `tapstat.py`'s
+> `M!`-vs-console classifier, all still assume the old line framing and
+> will not talk to current firmware. Porting them (reference
+> implementation: `lpa-link/src/providers/browser_ble/browser_ble.js` and
+> `ble_wire.rs`, already conformance-tested) is the **first step** of any
+> future rehearsal or soak session here — see that plan's P5 phase file,
+> "Silicon soak (pending the board)".
 
 ```bash
 curl -s -X DELETE localhost:$P/serial                       # release the console

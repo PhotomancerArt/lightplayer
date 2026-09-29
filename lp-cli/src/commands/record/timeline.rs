@@ -645,18 +645,23 @@ mod tests {
 
     #[test]
     fn kinds_and_since_filter_but_wire_still_reassembles() {
-        // `M!{"id":1,"msg":"hello"}\n` split across two chunks, on an `M!`-line
-        // transport (BLE; a USB port is an lp-link, read by `wire_streams`).
+        // `M!{"id":1,"msg":"hello"}\n` split across two chunks, on an
+        // `M!`-line transport (the classic UART / `fw-emu` shape, still not
+        // on lp-link; BLE joined lp-link — one already-delimited frame per
+        // chunk, no `M!` lines at all — in
+        // `lp2025/2026-09-28-1445-ble-on-lp-link`, and is read by
+        // `wire_streams`'s `push_datagram` path, same as a USB port's
+        // `push`).
         let a = STANDARD.encode(br#"M!{"id":1,"#);
         let b = STANDARD.encode(b"\"msg\":\"hello\"}\n");
         let text = format!(
             "{}\n{}\n{}\n",
             r#"{"seq":0,"t":0.0,"kind":"session","recording":"r"}"#,
             format_args!(
-                r#"{{"seq":1,"t":1.0,"kind":"wire","dir":"rx","transport":"ble","port":"3","len":10,"b64":"{a}"}}"#
+                r#"{{"seq":1,"t":1.0,"kind":"wire","dir":"rx","transport":"classic-uart","port":"3","len":10,"b64":"{a}"}}"#
             ),
             format_args!(
-                r#"{{"seq":2,"t":3.0,"kind":"wire","dir":"rx","transport":"ble","port":"3","len":15,"b64":"{b}"}}"#
+                r#"{{"seq":2,"t":3.0,"kind":"wire","dir":"rx","transport":"classic-uart","port":"3","len":15,"b64":"{b}"}}"#
             ),
         );
         let options = TimelineOptions {
@@ -666,7 +671,7 @@ mod tests {
         };
         assert_eq!(
             render_timeline(&text, &options),
-            "  +3.000s  WIRE  ←  ble:3  hello id=1 25 B\n"
+            "  +3.000s  WIRE  ←  classic-uart:3  hello id=1 25 B\n"
         );
         let raw = TimelineOptions {
             wire: WireView::Raw,
@@ -675,7 +680,7 @@ mod tests {
         };
         assert_eq!(
             render_timeline(&text, &raw).lines().next().unwrap(),
-            r#"  +1.000s  WIRE  ←  ble:3  10 B  "M!{\"id\":1,""#
+            r#"  +1.000s  WIRE  ←  classic-uart:3  10 B  "M!{\"id\":1,""#
         );
     }
 
