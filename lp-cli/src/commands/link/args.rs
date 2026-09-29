@@ -33,6 +33,43 @@ pub enum LinkSubcommand {
     ///       --faults in-drop=1%,in-tail=1%,in-run=0.1%,out-drop=1%,seed=7
     #[command(verbatim_doc_comment)]
     Lab(LabArgs),
+    /// Open a board's port as the host of its link and write what the board
+    /// says as a console — raw text, log records, each wire message as its
+    /// `M!{json}` line, `[link] …` notes — until a line contains `--exit-on`
+    /// or `--seconds` pass.
+    ///
+    /// The port is opened the way lp-cli's own transports open it: no reset
+    /// dance, so a board that is already running keeps running. This is the
+    /// silicon half of `lp-cli validate`'s link host; the emulated half is
+    /// `lp-cli emu run --host-link`, and both write the same lines.
+    ///
+    /// Targets: a serial device, or `tcp://host:port` (an emulated board's
+    /// link, `lp-cli emu run --link`).
+    #[command(verbatim_doc_comment)]
+    Capture(CaptureArgs),
+}
+
+#[derive(Debug, Args)]
+pub struct CaptureArgs {
+    /// A serial device, or `tcp://host:port`.
+    pub target: String,
+
+    /// Write the console here, a line at a time.
+    #[arg(long)]
+    pub console: PathBuf,
+
+    /// Stop at the end of the first console line containing this text; a run
+    /// that ends without one fails.
+    #[arg(long = "exit-on")]
+    pub exit_on: Option<String>,
+
+    /// Wall-clock seconds to host the link for.
+    #[arg(long, default_value_t = 120)]
+    pub seconds: u64,
+
+    /// Do not ask the board to pack its replies (JSON Pack).
+    #[arg(long = "json-replies")]
+    pub json_replies: bool,
 }
 
 #[derive(Debug, Args)]
