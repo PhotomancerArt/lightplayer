@@ -368,6 +368,12 @@ jobs:
               # `lp-core/**` (director ruling DD77): that closure is wider
               # than what the two chips' `fw-esp32-common` actually shares.
               - 'lp-fw/fw-esp32-common/**'
+              # The vendored forks (esp-hal, esp-radio, esp-alloc, naga, …)
+              # are in the C6 image's link closure, so a change there moves
+              # the bytes every gate below boots. Missing until 2026-09-27:
+              # esp-hal's USB-Serial-JTAG ISR back-port (#855) would have run
+              # no emulator gate had it not also touched fw-esp32-common.
+              - 'third_party/**'
               # The tab host's WASI shim, which `scripts/emu/tab-smoke.mjs`
               # IMPORTS rather than copies (C6-in-tab P2): a change to it
               # changes what this job runs, so it must trigger this job. Since
