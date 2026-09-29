@@ -161,10 +161,12 @@ fn a_free_lag_tears_neither_image_once_esp_hal_checks_the_free_bit() {
     //    came out at 8,062 ns, and there the image lost the wake on only a
     //    couple of packets, the link's resends recovered every reply, and this
     //    assertion read the defect as fixed. Swept 0–20 µs in 250 ns steps
-    //    (lp-emu:esp32c6:t1, five images of main and #880's trees): a few
-    //    write timeouts and every reply from ~7 µs, every image stalling
-    //    outright (0 of 40, 9 write timeouts) from 9.5–9.75 µs up to 20 µs.
-    //    So the ladder climbs from 1.25 to 3 times the later soonest touch:
+    //    (lp-emu:esp32c6:t1; main's and #880's images, each on its own
+    //    tree): every image stalls outright (0 of 40, 9 write timeouts) from
+    //    9.5–9.75 µs up to 20 µs, and the two #880 images whose soonest touch
+    //    fell to ~7 µs lose the wake on 1–2 packets, every reply answered,
+    //    in between. The defect entry has the table. So the ladder climbs
+    //    from 1.25 to 3 times the later soonest touch:
     //    the invariants below must hold on every rung, and the stall must
     //    show on at least one.
     let base = write.max(check);
