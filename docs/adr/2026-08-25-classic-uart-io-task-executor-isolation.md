@@ -1,6 +1,6 @@
 # Classic ESP32: io_task executor isolation — interrupt executor + hardware pacer + byte shuttling
 
-- Status: accepted
+- Status: accepted (amended 2026-09-29 — the host link above io_task is lp-link now; see the end)
 - Date: 2026-08-25
 - Plan: `lp2025/2026-08-24-1823-uart-io-task-starvation` (PR #448)
 - Fixes: `docs/debt/shared-uart-io-task-starvation.md`
@@ -218,3 +218,56 @@ frame doorbells died under the executor. The fix is swi2; the lesson is
   divisor setup; under diagnosis — the rig, not the fix, is what is
   broken). Until it runs clean, finding 1's isolation stands untested
   and the pacer stays on its current evidence.
+
+## Amended 2026-09-29 — the classic's UART0 on lp-link (PR #884)
+
+Plan `lp2025/2026-09-28-2015-classic-uart-on-lp-link` put `lp-link` under
+the classic's host link (wire proto 32). **The three mechanisms above hold
+unchanged for io_task**, and that was the constraint the design was built
+around (P2's hand-back, ruling DD20):
+
+1. io_task is still on the swi2 `InterruptExecutor` at `Priority2`;
+2. its only clock is still the 1 ms TIMG0-timer1 pacer (`IO_TICK`,
+   `TickDelay` for `ChunkedWriter`) — no embassy-time await, no
+   `esp_println!`, no `log`;
+3. it still only shuttles bytes, and more strictly than before: RX FIFO →
+   a static RX pipe, a static TX pipe → `ChunkedWriter` with
+   `WritePolicy::UART_921600` and the RX drain between 64-byte chunks.
+   `into_async()` and `SendUart` stay thread-side. Its poll frame fell from
+   320 B to 208 B.
+
+**What moved is everything this ADR's "outbound half is made honest"
+paragraph and its session-boundary rules described.** The `Link` itself
+runs on the **thread** executor, beside the server transport, in its own
+link task (`fw-esp32-common/src/uart_link/`); it is not on swi2, because
+a `Link` shared across the preemption boundary needs a lock (a `RefCell`
+there is a panic) and link work on the interrupt executor would run on the
+interrupted task's stack (finding 2). The two executors meet only at two
+`embassy_sync` pipes and a `Signal`. So:
+
+- the write retry, the leading-`\n` resync, the dropped-frame `Error`
+  frame, the hello-drains-backlog rule and the 1 s stale-partial flush are
+  **gone** for this link — lp-link's CRC, selective-repeat resend and
+  session handshake replace all of them. A write that fails in io_task is
+  counted (`note_write_failure`) and costs a frame the link resends;
+  `ChunkedWriter::try_write_link_bytes` sends no resync marker and owes
+  none. The `M!` machinery (`RESYNC_OWED`, the retrying writer) stays in
+  `fw-esp32-common` for the links still on `M!`.
+- **The link's timers and ACKs are serviced only between engine ticks**
+  (41–114 ms on this ADR's bench project), exactly the gap mechanism 1
+  closed for *bytes*. Bytes are still never starved — the FIFO is drained
+  every 1 ms — but a resend decision waits for the thread. That is why the
+  board's resend floor is **200 ms** (`uart_board_link_config`), not the
+  `uart()` preset's 40 ms; the plan had hoped the link would inherit this
+  ADR's 1 ms service, and it cannot without giving up mechanism 3.
+- The consequence named under "Consequences" — the pacer's ticks collapse
+  (~40 Hz) during flash-heavy phases — now also stretches io_task's shuttle
+  during an upload's lpfs writes; the link tolerates it (a late frame is a
+  resend, counted), and the desk walk reads `resends` across an upload to
+  see how often.
+
+Evidence is emulated only (`lp-emu:esp32v3:t1`): the walk's three readings
+agree over the link with 0 resends, and a `--uart-faults` soak finishes five
+project loads with 0 app errors. The desk walk (`hardware-walk-protocol.md`
+in the plan directory) is what checks the pacer and the thread-side link
+under silicon's own interrupt latency.
