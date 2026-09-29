@@ -33,7 +33,23 @@
 //! [`a_request_is_one_link_message_and_its_answer_comes_back_packed`],
 //! [`a_link_frame_split_across_reads_is_read_whole`],
 //! [`console_text_between_link_frames_stays_lines`] and
-//! [`a_board_restart_is_a_link_reset_then_a_new_hello`] (plan D9).
+//! [`a_board_restart_is_a_link_reset_then_a_new_hello`] (plan D9), and
+//! [`a_request_in_flight_when_the_board_restarts_fails_the_lens_at_once`]
+//! takes D9 up to the editor lens's io.
+//!
+//! **The classic ESP32 (plan `lp2025/2026-09-28-2015-classic-uart-on-lp-link`,
+//! P4).** Each of those six claims runs twice: once against a C6 on native
+//! USB, once against a classic ESP32 behind its CH340K — the port enumerating
+//! as `1a86:7522` (`presentBehindBridge`, on the port object only), the board
+//! double on the classic's own cut of `uart()`. The bench checks the port's
+//! link picked the board's preset from the vendor id
+//! (`usb_vendors::link_config_for_usb_vendor`) every time:
+//! [`a_classic_link_comes_up_and_its_hello_arrives`],
+//! [`a_classic_request_is_one_link_message_and_its_answer_comes_back_packed`],
+//! [`a_classic_link_frame_split_across_reads_is_read_whole`],
+//! [`a_classics_console_text_between_link_frames_stays_lines`],
+//! [`a_classic_restart_is_a_link_reset_then_a_new_hello`] and
+//! [`a_request_in_flight_when_a_classic_restarts_fails_the_lens_at_once`].
 //! | the flash bridge's port acquisition | [`the_flash_bridge_acquires_the_live_generation`] | `browser_serial.js:195-213` (`getPort`'s adoption pass) |
 //!
 //! **What re-enumerates, since plan two M5:** the CABLE, and nothing else.
@@ -55,10 +71,18 @@ use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::JsFuture;
 use wasm_bindgen_test::*;
 
+use std::cell::{Cell, RefCell};
+use std::rc::Rc;
+
+use lpa_client::ClientIo;
+use lpa_link::LinkManagementEventSink;
 use lpa_link::device_link::link_port_service::LinkPortService;
 use lpa_link::device_link::wire_reader::{ReadFrame, WireRead};
-use lpa_link::providers::browser_serial_esp32::web_serial_link;
+use lpa_link::providers::browser_serial_esp32::{
+    BrowserSerialEsp32Provider, LensTapLine, web_serial_link,
+};
 use lpc_wire::lp_link::{CH_PROTO, Link, LinkConfig, LinkEvent, SelectiveRepeat};
+use wasm_bindgen_futures::spawn_local;
 
 wasm_bindgen_test_configure!(run_in_browser);
 
@@ -170,6 +194,10 @@ extern "C" {
 
     #[wasm_bindgen(js_name = livePortFor)]
     fn js_live_port_for(board_id: &str) -> Promise;
+
+    #[wasm_bindgen(js_name = presentBehindBridge)]
+    fn js_present_behind_bridge(board_id: &str, usb_vendor_id: u16, usb_product_id: u16)
+    -> Promise;
 
     #[wasm_bindgen(js_name = portReadableIsNull)]
     fn js_port_readable_is_null(port: &JsValue) -> bool;
@@ -1140,7 +1168,17 @@ async fn the_production_rust_boundary_enumerates_the_shims_ports() {
 /// message, with the session noted for the journal.
 #[wasm_bindgen_test]
 async fn the_link_comes_up_and_the_boards_hello_arrives() {
-    let Some(mut bench) = LinkBench::open("link-up").await else {
+    the_link_comes_up_and_the_boards_hello_arrives_on(Board::C6).await;
+}
+
+/// The same claim for a classic ESP32 behind its CH340 (the port on `uart()`).
+#[wasm_bindgen_test]
+async fn a_classic_link_comes_up_and_its_hello_arrives() {
+    the_link_comes_up_and_the_boards_hello_arrives_on(Board::Classic).await;
+}
+
+async fn the_link_comes_up_and_the_boards_hello_arrives_on(board: Board) {
+    let Some(mut bench) = LinkBench::open("link-up", board).await else {
         return;
     };
     let reads = bench.exchange_until(|reads| hello_count(reads) >= 1).await;
@@ -1159,7 +1197,17 @@ async fn the_link_comes_up_and_the_boards_hello_arrives() {
 /// opt-in has been answered (D14: packed for every host).
 #[wasm_bindgen_test]
 async fn a_request_is_one_link_message_and_its_answer_comes_back_packed() {
-    let Some(mut bench) = LinkBench::open("link-request").await else {
+    a_request_is_one_link_message_and_its_answer_comes_back_packed_on(Board::C6).await;
+}
+
+/// The same claim for a classic ESP32 behind its CH340 (the port on `uart()`).
+#[wasm_bindgen_test]
+async fn a_classic_request_is_one_link_message_and_its_answer_comes_back_packed() {
+    a_request_is_one_link_message_and_its_answer_comes_back_packed_on(Board::Classic).await;
+}
+
+async fn a_request_is_one_link_message_and_its_answer_comes_back_packed_on(board: Board) {
+    let Some(mut bench) = LinkBench::open("link-request", board).await else {
         return;
     };
     bench.exchange_until(|reads| hello_count(reads) >= 1).await;
@@ -1182,7 +1230,7 @@ async fn a_request_is_one_link_message_and_its_answer_comes_back_packed() {
     let frame = answer(&reads, 41).expect("the answer");
     assert!(frame.packed, "the answer came packed: {frame:?}");
     assert!(
-        BOARD.with(|board| board.borrow().requests.contains(&41)),
+        BOARD.with(|double| double.borrow().requests.contains(&41)),
         "the board saw the request as one proto message"
     );
     let raw = js_received_bytes(&bench.board);
@@ -1197,15 +1245,25 @@ async fn a_request_is_one_link_message_and_its_answer_comes_back_packed() {
 /// once and whole: the port's link holds the first half across the drain.
 #[wasm_bindgen_test]
 async fn a_link_frame_split_across_reads_is_read_whole() {
-    let Some(mut bench) = LinkBench::open("link-split").await else {
+    a_link_frame_split_across_reads_is_read_whole_on(Board::C6).await;
+}
+
+/// The same claim for a classic ESP32 behind its CH340 (the port on `uart()`).
+#[wasm_bindgen_test]
+async fn a_classic_link_frame_split_across_reads_is_read_whole() {
+    a_link_frame_split_across_reads_is_read_whole_on(Board::Classic).await;
+}
+
+async fn a_link_frame_split_across_reads_is_read_whole_on(board: Board) {
+    let Some(mut bench) = LinkBench::open("link-split", board).await else {
         return;
     };
     bench.exchange_until(|reads| hello_count(reads) >= 1).await;
 
-    let frames = BOARD.with(|board| {
-        let mut board = board.borrow_mut();
-        board.send(&unload_project(10));
-        board.frames_now()
+    let frames = BOARD.with(|double| {
+        let mut double = double.borrow_mut();
+        double.send(&unload_project(10));
+        double.frames_now()
     });
     let (first, second) = frames.split_at(frames.len() / 2);
     js_deliver_raw_bytes(&bench.board, first);
@@ -1236,24 +1294,35 @@ async fn a_link_frame_split_across_reads_is_read_whole() {
 /// order; the frames between them stay messages.
 #[wasm_bindgen_test]
 async fn console_text_between_link_frames_stays_lines() {
-    let Some(mut bench) = LinkBench::open("link-text").await else {
+    console_text_between_link_frames_stays_lines_on(Board::C6).await;
+}
+
+/// The same claim for a classic ESP32 behind its CH340 (the port on `uart()`).
+#[wasm_bindgen_test]
+async fn a_classics_console_text_between_link_frames_stays_lines() {
+    console_text_between_link_frames_stays_lines_on(Board::Classic).await;
+}
+
+async fn console_text_between_link_frames_stays_lines_on(board: Board) {
+    let Some(mut bench) = LinkBench::open("link-text", board).await else {
         return;
     };
     bench.exchange_until(|reads| hello_count(reads) >= 1).await;
 
     let (a, b) = (unload_project(3), unload_project(4));
-    let bytes = BOARD.with(|board| {
-        let mut board = board.borrow_mut();
-        board.send(&a);
-        let first = board.frames_now();
-        board.send(&b);
-        let second = board.frames_now();
+    let [boot, between, after] = board.console_lines();
+    let bytes = BOARD.with(|double| {
+        let mut double = double.borrow_mut();
+        double.send(&a);
+        let first = double.frames_now();
+        double.send(&b);
+        let second = double.frames_now();
         [
-            b"[INIT] boot\r\n".to_vec(),
+            format!("{boot}\r\n").into_bytes(),
             first,
-            b"[log] between\n".to_vec(),
+            format!("{between}\n").into_bytes(),
             second,
-            b"[log] after\n".to_vec(),
+            format!("{after}\n").into_bytes(),
         ]
         .concat()
     });
@@ -1262,7 +1331,7 @@ async fn console_text_between_link_frames_stays_lines() {
         .exchange_until(|reads| {
             reads
                 .iter()
-                .any(|read| matches!(read, WireRead::Line(line) if line == "[log] after"))
+                .any(|read| matches!(read, WireRead::Line(line) if line == after))
         })
         .await;
     let order: Vec<String> = reads
@@ -1278,11 +1347,11 @@ async fn console_text_between_link_frames_stays_lines() {
     assert_eq!(
         order,
         [
-            "[INIT] boot".to_string(),
+            boot.to_string(),
             json_of(&a),
-            "[log] between".to_string(),
+            between.to_string(),
             json_of(&b),
-            "[log] after".to_string(),
+            after.to_string(),
         ]
     );
     bench.close().await;
@@ -1293,12 +1362,22 @@ async fn console_text_between_link_frames_stays_lines() {
 /// hello — rather than waiting out a request's budget.
 #[wasm_bindgen_test]
 async fn a_board_restart_is_a_link_reset_then_a_new_hello() {
-    let Some(mut bench) = LinkBench::open("link-reset").await else {
+    a_board_restart_is_a_link_reset_then_a_new_hello_on(Board::C6).await;
+}
+
+/// The same claim for a classic ESP32 behind its CH340 (the port on `uart()`).
+#[wasm_bindgen_test]
+async fn a_classic_restart_is_a_link_reset_then_a_new_hello() {
+    a_board_restart_is_a_link_reset_then_a_new_hello_on(Board::Classic).await;
+}
+
+async fn a_board_restart_is_a_link_reset_then_a_new_hello_on(board: Board) {
+    let Some(mut bench) = LinkBench::open("link-reset", board).await else {
         return;
     };
     bench.exchange_until(|reads| hello_count(reads) >= 1).await;
 
-    BOARD.with(|board| *board.borrow_mut() = BoardDouble::new(0xB0A2_0002));
+    bench.restart_board(0xB0A2_0002);
     let reads = bench.exchange_until(|reads| hello_count(reads) >= 1).await;
 
     let reset_at = reads
@@ -1321,37 +1400,220 @@ async fn a_board_restart_is_a_link_reset_then_a_new_hello() {
     bench.close().await;
 }
 
+/// Plan D9 where a user meets it: a request in flight when the board
+/// restarts FAILS the editor lens's io at once — it reads the link reset in
+/// its answer's place, and tees it to the lens tap — instead of waiting out
+/// its 5 s budget. Nothing on that path knows which chip is on the cable.
+#[wasm_bindgen_test]
+async fn a_request_in_flight_when_the_board_restarts_fails_the_lens_at_once() {
+    a_request_in_flight_when_the_board_restarts_fails_the_lens_at_once_on(Board::C6).await;
+}
+
+/// The same claim for a classic ESP32 behind its CH340 (the port on `uart()`).
+#[wasm_bindgen_test]
+async fn a_request_in_flight_when_a_classic_restarts_fails_the_lens_at_once() {
+    a_request_in_flight_when_the_board_restarts_fails_the_lens_at_once_on(Board::Classic).await;
+}
+
+async fn a_request_in_flight_when_the_board_restarts_fails_the_lens_at_once_on(board: Board) {
+    let Some(mut bench) = LinkBench::open("lens-reset", board).await else {
+        return;
+    };
+    bench.exchange_until(|reads| hello_count(reads) >= 1).await;
+
+    let provider = BrowserSerialEsp32Provider::new();
+    let endpoint = provider.create_granted_endpoint("lens bench", bench.id);
+    let taps: Rc<RefCell<Vec<LensTapLine>>> = Rc::default();
+    let tap = {
+        let taps = Rc::clone(&taps);
+        Rc::new(move |line: LensTapLine| taps.borrow_mut().push(line))
+    };
+    let mut io = provider
+        .lens_client_io(&endpoint, tap, LinkManagementEventSink::noop())
+        .expect("a lens io over the open port");
+    io.send(lpc_wire::ClientMessage {
+        id: 51,
+        msg: lpc_wire::ClientRequest::StopAllProjects,
+    })
+    .await
+    .expect("the link takes the request");
+    // The board goes down before it hears the request, and comes back as a
+    // new session. Only the board half is pumped: the lens is the drainer.
+    bench.restart_board(0xB0A2_0003);
+    let pumping = Rc::new(Cell::new(true));
+    spawn_local(pump_board(bench.board.clone(), Rc::clone(&pumping)));
+    let answer = io.receive().await;
+    pumping.set(false);
+
+    let error = match answer {
+        Err(error) => error.to_string(),
+        Ok(message) => panic!("the lost request was answered: {message:?}"),
+    };
+    assert!(error.contains("link: reset"), "{error}");
+    assert!(
+        BOARD.with(|double| !double.borrow().requests.contains(&51)),
+        "the new session carried the old request"
+    );
+    assert!(
+        taps.borrow().iter().any(|line| matches!(
+            line,
+            LensTapLine::Note(note)
+                if lpa_link::device_link::port_read_map::is_link_reset_note(note)
+        )),
+        "the lens tap heard no reset: {:?}",
+        taps.borrow()
+    );
+    log(&format!(
+        "lens ({board:?}): the request in flight failed with {error:?}"
+    ));
+    bench.close().await;
+}
+
+/// Run the board half of the link until `pumping` is cleared: what the host
+/// wrote in, what the board has to say out. Leaves the host's reads alone.
+async fn pump_board(board: String, pumping: Rc<Cell<bool>>) {
+    for _ in 0..2_000 {
+        if !pumping.get() {
+            break;
+        }
+        let written = js_take_received_raw(&board).to_vec();
+        let out = BOARD.with(|double| {
+            let mut double = double.borrow_mut();
+            double.on_bytes(&written);
+            double.frames_now()
+        });
+        if !out.is_empty() {
+            js_deliver_raw_bytes(&board, &out);
+        }
+        yield_once().await;
+    }
+}
+
+/// Which board is at the other end of a link test.
+#[derive(Clone, Copy, Debug)]
+enum Board {
+    /// A C6 on its native USB-Serial-JTAG: `303a:1001`, both ends on
+    /// `usb()` — what the polyfill's ports are.
+    C6,
+    /// A classic ESP32 (v3) on UART0 behind its CH340K, `1a86:7522` (plan
+    /// `lp2025/2026-09-28-2015-classic-uart-on-lp-link`): the port on
+    /// `uart()`, the board on its own cut of it.
+    Classic,
+}
+
+impl Board {
+    /// The USB ids the port enumerates with.
+    fn usb_ids(self) -> (u16, u16) {
+        match self {
+            Board::C6 => (0x303a, 0x1001),
+            Board::Classic => (0x1a86, 0x7522),
+        }
+    }
+
+    /// The preset the page's end must pick for this board's port.
+    fn host_preset(self) -> LinkConfig {
+        match self {
+            Board::C6 => LinkConfig::usb(),
+            Board::Classic => LinkConfig::uart(),
+        }
+    }
+
+    /// The board's own end: the C6's preset, or the classic's timings on the
+    /// `uart()` preset — a 200 ms resend floor and SYNs backed off to 1.6 s,
+    /// as `fw_esp32_common::uart_link::uart_board_link_config` sets them
+    /// (which this crate cannot depend on; the fake board's classic test uses
+    /// the same double).
+    fn board_config(self) -> LinkConfig {
+        match self {
+            Board::C6 => LinkConfig::usb(),
+            Board::Classic => LinkConfig {
+                min_rto: 200_000,
+                syn_backoff: 4,
+                ..LinkConfig::uart()
+            },
+        }
+    }
+
+    fn package(self) -> &'static str {
+        match self {
+            Board::C6 => "fw-esp32c6",
+            Board::Classic => "fw-esp32v3",
+        }
+    }
+
+    /// Raw console text a board writes outside its link frames: before, between
+    /// and after. The classic's are its own — its boot banner, and the
+    /// WS281x telemetry lines it queues between frames (P2) — and each starts
+    /// with `[`, as the order check below expects.
+    fn console_lines(self) -> [&'static str; 3] {
+        match self {
+            Board::C6 => ["[INIT] boot", "[log] between", "[log] after"],
+            Board::Classic => [
+                "[INIT] fw-esp32 initialized, starting server loop...",
+                "[WS281X] telemetry between frames",
+                "[WS281X-WIRE] after",
+            ],
+        }
+    }
+}
+
 /// One production port, opened through `web_serial_link`, and the board
 /// double ([`BOARD`]) at the other end of the scripted door.
 struct LinkBench {
     id: u32,
     board: String,
+    profile: Board,
     reads: Vec<WireRead>,
 }
 
 impl LinkBench {
     /// `None` (and a skip line) on a live or tab backing: those boards speak
     /// their own firmware's link, which is P2's to bring.
-    async fn open(name: &str) -> Option<Self> {
+    ///
+    /// A [`Board::Classic`] port enumerates as the classic's CH340K before the
+    /// page describes it; either way the bench checks the port's link took the
+    /// board's preset, through the production vendor-id rule.
+    async fn open(name: &str, profile: Board) -> Option<Self> {
         if real_backing() {
             log_skip("the board end here is a Rust lp-link double on the scripted door");
             return None;
         }
         shim_over(&["c6-a"]).await;
         let board = board_ids().await.first().cloned().expect("a board");
+        if let Board::Classic = profile {
+            let (vendor, product) = profile.usb_ids();
+            JsFuture::from(js_present_behind_bridge(&board, vendor, product))
+                .await
+                .expect("the port presents as a bridge");
+        }
         let ports = lpa_link::providers::browser_serial_esp32::granted_ports()
             .await
             .expect("granted ports through the production externs");
-        let id = ports.first().expect("a port").id;
-        BOARD.with(|double| *double.borrow_mut() = BoardDouble::new(0xB0A2_0001));
+        let port = ports.first().expect("a port");
+        assert_eq!(port.usb_vid_pid(), Some(profile.usb_ids()), "{name}");
+        let id = port.id;
+        BOARD.with(|double| *double.borrow_mut() = BoardDouble::new(profile, 0xB0A2_0001));
         web_serial_link::open(id, 921_600, None)
             .await
             .unwrap_or_else(|error| panic!("{name}: open: {error}"));
+        let preset = web_serial_link::link_config(id).expect("the open port has a link");
+        assert_eq!(
+            format!("{preset:?}"),
+            format!("{:?}", profile.host_preset()),
+            "{name}: the port's link runs the {profile:?} board's preset"
+        );
         Some(Self {
             id,
             board,
+            profile,
             reads: Vec::new(),
         })
+    }
+
+    /// The board restarts: a board of the same kind, under a new nonce.
+    fn restart_board(&self, nonce: u32) {
+        let profile = self.profile;
+        BOARD.with(|double| *double.borrow_mut() = BoardDouble::new(profile, nonce));
     }
 
     /// Run both ends until `done` holds for what the port read (bounded by
@@ -1385,7 +1647,7 @@ impl LinkBench {
 thread_local! {
     /// The board end of the current link test.
     static BOARD: std::cell::RefCell<BoardDouble> =
-        std::cell::RefCell::new(BoardDouble::new(0xB0A2_0001));
+        std::cell::RefCell::new(BoardDouble::new(Board::C6, 0xB0A2_0001));
 }
 
 /// Whether the current board double has been asked to pack, and said yes.
@@ -1393,8 +1655,10 @@ fn bench_board_packs() -> bool {
     BOARD.with(|board| board.borrow().packed)
 }
 
-/// A board's end of the link, as P2's firmware runs it.
+/// A board's end of the link, as the firmware runs it (the C6's since the
+/// USB cut-over, the classic's since its UART one).
 struct BoardDouble {
+    profile: Board,
     link: Link<SelectiveRepeat>,
     table: lpc_wire::LearnedTable,
     packed: bool,
@@ -1402,9 +1666,10 @@ struct BoardDouble {
 }
 
 impl BoardDouble {
-    fn new(nonce: u32) -> Self {
+    fn new(profile: Board, nonce: u32) -> Self {
         Self {
-            link: Link::new(LinkConfig::usb(), nonce),
+            profile,
+            link: Link::new(profile.board_config(), nonce),
             table: lpc_wire::LearnedTable::default(),
             packed: false,
             requests: Vec::new(),
@@ -1422,7 +1687,7 @@ impl BoardDouble {
                 LinkEvent::Up { .. } => {
                     self.packed = false;
                     self.table = lpc_wire::LearnedTable::default();
-                    self.send(&hello());
+                    self.send(&hello(self.profile));
                 }
                 LinkEvent::Reset { .. } => {
                     self.packed = false;
@@ -1474,7 +1739,7 @@ impl BoardDouble {
     }
 }
 
-fn hello() -> lpc_wire::WireServerMessage {
+fn hello(board: Board) -> lpc_wire::WireServerMessage {
     use lpc_wire::server::hello::{BuildFacts, HardwareFacts, ServerHello};
     lpc_wire::WireServerMessage::new(
         0,
@@ -1482,7 +1747,7 @@ fn hello() -> lpc_wire::WireServerMessage {
             proto: lpc_wire::WIRE_PROTO_VERSION,
             build: BuildFacts {
                 features: vec![],
-                package: "fw-esp32c6".to_string(),
+                package: board.package().to_string(),
                 commit: "unknown".to_string(),
                 dirty: false,
                 profile: "release-esp32".to_string(),
