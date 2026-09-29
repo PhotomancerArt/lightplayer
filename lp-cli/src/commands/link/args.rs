@@ -45,6 +45,16 @@ pub enum LinkSubcommand {
     ///
     /// Targets: a serial device, or `tcp://host:port` (an emulated board's
     /// link, `lp-cli emu run --link`).
+    ///
+    /// `--request` sends a client request once the board has said hello:
+    /// the desk's way to ask a board something with nothing else on its
+    /// port. Each waits for its answer (or for the link to reset under it)
+    /// before the next goes, and a request sent into a session goes after
+    /// that session's hello, so a reboot followed by a hello asks the
+    /// rebooted board:
+    ///
+    ///   lp-cli link capture /dev/cu.usbmodem1101 --console boot.txt \
+    ///       --request reboot --request hello --seconds 20
     #[command(verbatim_doc_comment)]
     Capture(CaptureArgs),
 }
@@ -70,6 +80,15 @@ pub struct CaptureArgs {
     /// Do not ask the board to pack its replies (JSON Pack).
     #[arg(long = "json-replies")]
     pub json_replies: bool,
+
+    /// Send this client request once the board's hello arrives — the JSON
+    /// of a `ClientRequest` (`'"reboot"'`, `'{"setLogLevel":{…}}'`), or a
+    /// unit request's bare name (`reboot`). Repeatable; sent in order, each
+    /// after the answer to the one before, or after the new session's hello
+    /// when the link reset instead (a reboot's answer can be lost with the
+    /// session it was sent in).
+    #[arg(long)]
+    pub request: Vec<String>,
 }
 
 #[derive(Debug, Args)]

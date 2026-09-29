@@ -401,6 +401,14 @@ impl<A: Arq> Link<A> {
         self.generation
     }
 
+    /// The nonce the peer opened its session with, once a SYN has been heard
+    /// (a peer that restarts draws a new one, which is what
+    /// [`ResetReason::PeerRestarted`] means). For diagnostics: a desk tool
+    /// prints it so two boots of one board can be told apart.
+    pub fn peer_nonce(&self) -> Option<u32> {
+        self.peer_nonce
+    }
+
     pub fn counters(&self) -> &LinkCounters {
         &self.counters
     }
