@@ -43,6 +43,7 @@ use lpa_server::LpServer;
 use lpc_shared::transport::{Incoming, Link, LinkId, ServerTransport};
 use lpc_wire::{TransportError, WireServerMessage};
 
+use super::frame_buf_holder::FrameBufHolder;
 use super::radio_link_port::{RADIO_LINK_SLOTS, RadioLinkEvent, RadioLinkPort, RadioWriteRequest};
 use crate::link_upkeep::LinkUpkeep;
 use crate::serial::packed_link::PackedLink;
@@ -90,7 +91,7 @@ pub struct LinkMuxTransport<U, D> {
     upkeep_hook: Option<fn(&LpServer, u64)>,
 }
 
-impl<U: ServerTransport, D: DelayNs> LinkMuxTransport<U, D> {
+impl<U: ServerTransport + FrameBufHolder, D: DelayNs> LinkMuxTransport<U, D> {
     /// Wrap `primary` (the USB transport) and serve the radio links that
     /// `port` announces. `delay` bounds a radio write.
     pub fn new(primary: U, port: &'static RadioLinkPort, delay: D) -> Self {
@@ -207,8 +208,14 @@ impl<U: ServerTransport, D: DelayNs> LinkMuxTransport<U, D> {
         link: LinkId,
         mut msg: WireServerMessage,
     ) -> Result<(), TransportError> {
-        let Some(radio) = self.radio.iter_mut().find(|l| l.id == link) else {
+        if !self.radio.iter().any(|l| l.id == link) {
             log::debug!("radio link {link}: gone, skipping frame id={}", msg.id);
+            return Ok(());
+        }
+        // The frame buffer is the USB transport's too: it may still be reading
+        // its last reply out of it (see `FrameBufHolder`).
+        self.primary.release_frame_buf().await;
+        let Some(radio) = self.radio.iter_mut().find(|l| l.id == link) else {
             return Ok(());
         };
         let slot = radio.slot;
@@ -277,7 +284,7 @@ impl<U: ServerTransport, D: DelayNs> LinkMuxTransport<U, D> {
     }
 }
 
-impl<U: ServerTransport, D: DelayNs> ServerTransport for LinkMuxTransport<U, D> {
+impl<U: ServerTransport + FrameBufHolder, D: DelayNs> ServerTransport for LinkMuxTransport<U, D> {
     async fn send(&mut self, link: LinkId, msg: WireServerMessage) -> Result<(), TransportError> {
         if link == LinkId::PRIMARY {
             self.primary.send(link, msg).await
@@ -334,12 +341,19 @@ impl<U: ServerTransport, D: DelayNs> ServerTransport for LinkMuxTransport<U, D> 
     }
 }
 
-impl<U: ServerTransport, D: DelayNs> LinkUpkeep for LinkMuxTransport<U, D> {
+impl<U: ServerTransport + FrameBufHolder + LinkUpkeep, D: DelayNs> LinkUpkeep
+    for LinkMuxTransport<U, D>
+{
+    /// The primary's owed hello first (the USB link owes one on every
+    /// session `Up`), then the radio links'.
     fn take_opened_links(&mut self) -> Vec<Link> {
-        core::mem::take(&mut self.opened)
+        let mut opened = self.primary.take_opened_links();
+        opened.append(&mut self.opened);
+        opened
     }
 
     fn upkeep(&mut self, server: &LpServer, now_ms: u64) {
+        self.primary.upkeep(server, now_ms);
         self.expire_unauthenticated(
             now_ms,
             |link| server.link_tier(link).is_some(),
@@ -361,13 +375,7 @@ mod tests {
 
     extern crate std;
 
-    /// The frame buffer is one static; tests that serialize into it take
-    /// turns.
-    static FRAME_BUF_TURN: std::sync::Mutex<()> = std::sync::Mutex::new(());
-
-    fn frame_buf_turn() -> std::sync::MutexGuard<'static, ()> {
-        FRAME_BUF_TURN.lock().unwrap_or_else(|e| e.into_inner())
-    }
+    use crate::serial::server_msg::frame_buf_turn;
 
     #[test]
     fn a_radio_link_opens_carries_a_request_and_closes() {
@@ -393,6 +401,26 @@ mod tests {
         assert!(block(mux.receive()).unwrap().is_none());
         assert_eq!(mux.take_closed_links(), vec![link]);
         assert_eq!(mux.links(), vec![Link::PRIMARY]);
+    }
+
+    /// The USB link owes a hello on every session `Up`; behind the mux the
+    /// server loop must still hear about it, before any radio link's.
+    #[test]
+    fn the_primarys_owed_hello_is_passed_on_first() {
+        let port = leak_port();
+        let usb = Usb {
+            opened: vec![Link::PRIMARY],
+            ..Usb::default()
+        };
+        let mut mux = LinkMuxTransport::new(usb, port, NeverDelay);
+        let link = port.mint_link();
+        block(port.announce(RadioLinkEvent::Opened { link, slot: 0 }));
+        assert!(block(mux.receive()).unwrap().is_none());
+        assert_eq!(
+            mux.take_opened_links(),
+            vec![Link::PRIMARY, RadioLinkPort::link(link)]
+        );
+        assert!(mux.take_opened_links().is_empty(), "owed once");
     }
 
     #[test]
@@ -597,6 +625,15 @@ mod tests {
     struct Usb {
         inbox: Vec<Incoming>,
         sent: Vec<u64>,
+        opened: Vec<Link>,
+    }
+
+    impl FrameBufHolder for Usb {}
+
+    impl LinkUpkeep for Usb {
+        fn take_opened_links(&mut self) -> Vec<Link> {
+            core::mem::take(&mut self.opened)
+        }
     }
 
     impl ServerTransport for Usb {

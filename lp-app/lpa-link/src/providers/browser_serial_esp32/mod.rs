@@ -52,6 +52,17 @@ pub use browser_esp32_flash::{
     BrowserEsp32FlashProgress, BrowserEsp32FlashResult, BrowserEsp32ProbeResult,
 };
 pub use browser_serial::{BrowserSerialPortHandle, granted_ports, install_serial_events};
+
+/// One port's lp-link surface by port id, below the provider's sessions:
+/// open, send a request, drain what the link decoded, release. Studio goes
+/// through [`BrowserSerialEsp32Provider`]; this is what the conformance suite
+/// (`tests/browser_serial_conformance.rs`) drives, so it tests the port's
+/// real link and loop rather than a copy.
+pub mod web_serial_link {
+    pub use super::browser_serial::{
+        open, release, send_client_json, take_errors, take_reads, take_wire_notes,
+    };
+}
 pub use port_client_io::LensTapLine;
 pub use provider::{BrowserSerialEsp32Provider, GrantedSerialEndpoint, descriptor};
 

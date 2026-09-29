@@ -77,6 +77,14 @@ const REPORT_EVERY_FRAMES: u32 = 60;
 /// to exactly this so its dump is the *whole* frame.
 pub const MAX_DUMP_LEDS: usize = 64;
 
+/// LEDs per dump line. The full dump goes out as `part=i/n` lines of this
+/// many LEDs each, because one log record on an lp-link board (C6, S3) is cut
+/// at 200 bytes (`lp_link::log_ring::MAX_RECORD_TEXT`) and the module path
+/// and the line's prefix take ~115 of them. 12 LEDs is 72 hex characters,
+/// which fits with room to spare at any frame number. Parsers join the
+/// parts' `rgb=` in order.
+pub const DUMP_LEDS_PER_PART: usize = 12;
+
 /// How many leading pixels each summary line carries.
 const SUMMARY_PIXELS: usize = 4;
 
@@ -169,12 +177,18 @@ impl FrameDump {
     fn dump(&self, data: &[u8]) {
         let leds = data.len() / 3;
         let shown = leds.min(MAX_DUMP_LEDS);
-        log::info!(
-            "[OUT] dump frame={} leds={leds} shown={shown} crc={:#010x} rgb={}",
-            self.frame,
-            frame_checksum(data),
-            HexPixels(&data[..shown * 3]),
-        );
+        let parts = shown.div_ceil(DUMP_LEDS_PER_PART).max(1);
+        let crc = frame_checksum(data);
+        for part in 0..parts {
+            let from = part * DUMP_LEDS_PER_PART;
+            let to = (from + DUMP_LEDS_PER_PART).min(shown);
+            log::info!(
+                "[OUT] dump frame={} leds={leds} shown={shown} crc={crc:#010x} part={}/{parts} rgb={}",
+                self.frame,
+                part + 1,
+                HexPixels(&data[from * 3..to * 3]),
+            );
+        }
     }
 }
 

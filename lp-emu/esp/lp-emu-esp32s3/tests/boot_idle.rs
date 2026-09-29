@@ -66,12 +66,26 @@
 //! The `[INIT]` chain itself (esp-println, polled) is delivered whole and
 //! is still pinned byte for byte as the stream's prefix.
 //!
+//! # Since wire proto 30: lp-link on the USB port
+//!
+//! The image speaks lp-link on USB-Serial-JTAG (plan
+//! `lp2025/2026-09-27-0215-lp-link-usb-cutover`): the `[INIT]` chain up to
+//! the server loop's boot marker is still raw esp-println text, but the
+//! board's `log` lines (the hardware manifest, the `[FS]` format lines,
+//! `[RECOVERY] boot complete`) ride the link's log channel, and the hello
+//! and every reply go out only once a host has brought the link up. Nothing
+//! under `lp-emu/` may host a link (the MIT fence), so this file now pins
+//! what the PORT shows — the raw chain, the boot marker, the one-buffer
+//! mechanism, determinism — and the elicited ledger triple, which needs a
+//! request on the wire, moved to the host side:
+//! `lp-cli/tests/emu_s3_link_gates.rs` (`the_ledger_triple_is_elicited_…`,
+//! with the `stack_total_bytes` figure).
+//!
 //! The tests that need a built `fw-esp32s3` are `#[ignore]`d and run by
 //! `just test-emu-esp32s3-boot`.
 
 use std::path::PathBuf;
 
-use lp_emu_esp_figures::Figures;
 use lp_emu_esp32s3::flash::FlashBacking;
 use lp_emu_esp32s3::machine::{
     AppSource, Esp32S3Builder, Machine, Outcome, StopCondition, UsbHost,
@@ -107,22 +121,15 @@ const GATE_US: u64 = 2_000_000;
 /// The defect entry for the link's stale-`serial_in_empty` drop (module docs).
 const LINK_DEFECT: &str = "docs/defects/2026-09-13-the-s3-link-drops-the-io-tasks-next-chunk-on-a-stale-serial-in-empty.md";
 
-/// The three lines P05 pinned as absent and P06 delivers (DD86), plus the
-/// wire's own two.
+/// The lines P05 pinned as absent and P06 delivers (DD86) that are still raw
+/// text on the port since proto 30 (the hardware manifest, the hello and
+/// `[RECOVERY] boot complete` ride the link now).
 const PAST_P05: &[&str] = &[
     "[INIT] flash filesystem mounted",
-    "hardware manifest",
     // The line `lpa_link::device_session::device_readiness` matches, and
     // which is chip-agnostic on purpose — never "fw-esp32s3".
-    "[INIT] fw-esp32 initialized, starting server loop",
-    "\"id\":0,\"msg\":{\"hello\"",
-    "[RECOVERY] boot complete (first frame served)",
+    "[INIT] fw-esp32 initialized, starting server loop... proto=",
 ];
-
-/// The packet of the `hello`'s feature list [`LINK_DEFECT`] dropped before
-/// the firmware's gate (module docs). Asserted **present**.
-const ONCE_DROPPED: &str =
-    ".button\",\"node.clock\",\"node.fluid\",\"node.fixture\",\"node.playlist";
 
 /// The mechanism, on any path: the guest never wrote into a pending or
 /// full IN buffer ([`LINK_DEFECT`], module docs).
@@ -135,22 +142,19 @@ fn assert_nothing_was_refused(machine: &mut Machine) {
     );
 }
 
-/// With a draining host attached from power-on, the io_task's first framed
-/// write — the `hello` — reaches the host whole, and nothing is merely
-/// tried. See [`LINK_DEFECT`].
-fn assert_the_hello_is_delivered_whole(machine: &mut Machine, delivered: &[u8]) {
+/// With a draining host attached from power-on nothing the guest wrote is
+/// merely tried, and it never wrote into a pending buffer. See
+/// [`LINK_DEFECT`]. (Until proto 30 this also found the `M!` hello's
+/// feature-list packet the defect once dropped; the hello rides the link
+/// now, and a host must bring the link up to see it.)
+fn assert_the_hello_is_delivered_whole(machine: &mut Machine, _delivered: &[u8]) {
     assert_nothing_was_refused(machine);
     let tried = machine.usb_sj_tried();
-    let text = String::from_utf8_lossy(delivered).into_owned();
     assert_eq!(
         tried.len(),
         0,
         "nothing is merely tried with a draining host ({LINK_DEFECT}): {:?}",
         String::from_utf8_lossy(&tried)
-    );
-    assert!(
-        text.contains(ONCE_DROPPED),
-        "the packet the defect used to drop is on the delivered stream ({LINK_DEFECT}):\n{text}"
     );
 }
 
@@ -162,13 +166,13 @@ const HELLO: &str = "\
 [RECOVERY] boot: cause=power-on level=green safe_mode=false prior_boot_complete=true
 [RECOVERY] RWDT armed: boot 30000 ms, runtime 8000 ms
 [INIT] runtime started
-[INIT] I/O task spawned
+[INIT] USB link task spawned
 ";
 
 /// [`HELLO`]'s length and sha256, so a change to any byte of it is a failure
 /// that names the diff rather than a diff a reader has to spot.
-const HELLO_BYTES: usize = 253;
-const HELLO_SHA: &str = "da070ac01e73ee4bca64cdf8f18984e8fd377ee91501f2fb019d2aeb7c326e8a";
+const HELLO_BYTES: usize = 258;
+const HELLO_SHA: &str = "373e7a52efe39079977dd7397208d35241e5e8870a94867d07556f2b2f570995";
 
 fn sha(bytes: &[u8]) -> String {
     let mut h = Sha256::new();
@@ -233,15 +237,12 @@ fn the_shipped_image_prints_its_init_chain_out_of_the_link() {
     assert_eq!(&delivered[..HELLO_BYTES], HELLO.as_bytes());
     assert_eq!(sha(&delivered[..HELLO_BYTES]), HELLO_SHA);
     // …and P06's continuation behind it: the flash is real, so the boot
-    // mounts, starts the server loop, says hello on the wire and serves a
-    // frame.
+    // mounts and starts the server loop. (Its hello, the `[FS]` format
+    // lines and the first frame served ride the link since proto 30; the
+    // format itself is `rom_up_boot.rs`'s flash-census claim.)
     for line in PAST_P05 {
         assert!(text.contains(line), "P06's boot prints `{line}`:\n{text}");
     }
-    assert!(
-        text.contains("[FS] Mount failed (filesystem corrupt), formatting partition..."),
-        "a fresh copy of the chip is formatted on its first boot:\n{text}"
-    );
     // A draining host took every byte, the io_task's hello included, and
     // the guest never wrote into a pending buffer (module docs).
     assert_the_hello_is_delivered_whole(&mut machine, &delivered);
@@ -454,10 +455,9 @@ fn the_boot_goes_past_where_p05_stopped() {
     let text = String::from_utf8_lossy(&machine.usb_sj()).into_owned();
     for present in [
         // The `lpfs` mount line (`main.rs`'s `[INIT] flash filesystem
-        // mounted`), mounted this time — the flash is real.
+        // mounted`), mounted this time — the flash is real. (The hardware
+        // manifest line after it is a log line, on the link since proto 30.)
         "[INIT] flash filesystem mounted",
-        // The hardware manifest, printed straight after the mount.
-        "hardware manifest",
         // The line `lpa_link::device_session::device_readiness` matches, and
         // which is chip-agnostic on purpose — never "fw-esp32s3".
         "fw-esp32 initialized, starting server loop",
@@ -531,7 +531,7 @@ fn a_usb_script_resolves_its_walk_forms_and_two_runs_are_the_same_run() {
     const SCRIPT: &str = "\
 1   attach
 2   open
-after \"[INIT] I/O task spawned\" +1ms \"M!{\\\"id\\\":1}\\n\"
+after \"[INIT] USB link task spawned\" +1ms \"M!{\\\"id\\\":1}\\n\"
 then +2ms 4d 21 0a
 ";
     let build = || {
@@ -573,11 +573,11 @@ then +2ms 4d 21 0a
 
     // **Both walk forms resolved.** The `after` step waited on a line the
     // device printed on this link and the `then` step on its own predecessor,
-    // so 11 + 3 host bytes crossed — and since P06 the server loop **reads**
-    // them: nothing is left queued, and both lines are refused by name on
-    // the wire, because neither is a request (`M!{"id":1}` has no `msg`,
-    // `M!` has nothing). That is a request answered, one request before
-    // the ledger test's real one.
+    // so 11 + 3 host bytes crossed, and the link task **read** them: nothing
+    // is left queued. (Until proto 30 the server loop then refused both
+    // lines by name on the wire, `dropping unparseable … M! line`; the link
+    // task reads them as text outside frames and drops them, and says so
+    // only on its log channel, which a host must bring up to read.)
     let reply = a.apply_control_now(&lp_emu_esp32s3::control::ControlCommand::State);
     let lp_emu_esp32s3::control::ControlReply::State { host, .. } = reply else {
         panic!("`state` answers a HostReport: {reply}");
@@ -586,14 +586,6 @@ then +2ms 4d 21 0a
     assert_eq!(
         host.out_queued, 0,
         "`after \"…\"` delivered 11 bytes and `then +2ms` three more, and the guest read them"
-    );
-    assert!(
-        text.contains("dropping unparseable 8 B M! line (missing field `msg`"),
-        "the first line is refused by name:\n{text}"
-    );
-    assert!(
-        text.contains("dropping unparseable 0 B M! line"),
-        "and the second:\n{text}"
     );
 
     let (b, _) = build();
@@ -606,177 +598,5 @@ then +2ms 4d 21 0a
         a.usb_sj_tried().len(),
         a.control_lines(),
         a.cycles()
-    );
-}
-
-/// **The ledger triple, elicited** (DD86's last two deliverables: an answered
-/// request on the wire, and the triple).
-///
-/// P04b (PR #742) gave this image the classic's `[stack]` / `[MEM]` / `[JIT]`
-/// lines at the classic's elicitation points — project load, unload,
-/// stop-all, `runtime_status`, either side of a shader compile — and
-/// **never** on the five-second heartbeat. So a bare boot prints none of
-/// them, exactly as the classic's bare boot does, and eliciting one needs a
-/// request on the wire: `stopAllProjects`, the smallest request that reaches
-/// `handlers::handle_stop_all_projects`'s `log_memory`, sent one millisecond
-/// after `[INIT] I/O task spawned` — the same directive, on the same
-/// trigger line, as P08's `walks/s3-stop-all.script` and the classic's
-/// `walks/v3-stop-all.script`.
-///
-/// Two facts about the triple are structural rather than measured, and are
-/// asserted as such:
-///
-/// - `[MEM] … retry_saves=0` — this image has no OOM retry allocator, so the
-///   counter is a constant zero rather than a number that happened to be
-///   zero on this run;
-/// - the whole `[JIT]` line is zeros — the S3 has **no reserved code
-///   region**: it JITs out of the `esp_alloc` heap through SRAM1's I-bus
-///   alias, so `cap=0` is literally true and JIT residency is inside
-///   `[MEM] used`.
-///
-/// Neither may ever be graded `measured`: nobody has read this chip.
-///
-/// **The reply is delivered.** The server answers the request (`Stopping
-/// all projects (0 loaded)` … `Stopped all projects` are on the wire, and
-/// the triple is printed twice — `log_memory` before and after the stop),
-/// and the io_task writes the reply line `M!{"id":1,"msg":"stopAllProjects"}`
-/// straight after the triple's last `esp_println` packet commits. Before the
-/// firmware's gate that write went into the pending packet and was refused —
-/// the reply was on the **tried** stream ([`LINK_DEFECT`]); the gate waits
-/// for the buffer, so it reaches the host and nothing is refused.
-#[test]
-#[ignore = "needs LP_EMU_ESP32S3_ELF; run through `just test-emu-esp32s3-boot`"]
-fn the_ledger_triple_is_elicited_by_a_stop_all_on_the_wire() {
-    let Some((elf, merged)) = images() else {
-        test_support::skip_notice(
-            "the_ledger_triple_is_elicited_by_a_stop_all_on_the_wire",
-            SKIP,
-        );
-        return;
-    };
-    const STOP_ALL: &str = "M!{\"id\":1,\"msg\":\"stopAllProjects\"}\n";
-    const SCRIPT: &str = "after \"[INIT] I/O task spawned\" +1ms \
-                          \"M!{\\\"id\\\":1,\\\"msg\\\":\\\"stopAllProjects\\\"}\\n\"\n";
-    let script = lp_emu_esp32s3::control::parse_usb_script(SCRIPT).expect("the script parses");
-    assert!(
-        script.commands.is_empty(),
-        "bytes only: the host is attached from power-on"
-    );
-    let mut machine = Esp32S3Builder::new()
-        .app(AppSource::Path(elf))
-        .flash(FlashBacking::Copy(merged))
-        .strict(true)
-        .usb_host(UsbHost::Attached { draining: true })
-        .usb_script_source(script.bytes)
-        .build()
-        .expect("the shipped image direct-loads");
-    let outcome = machine.run_until(&StopCondition {
-        stop_cycle: Some(GATE_US * memmap::CYCLES_PER_US),
-        ..Default::default()
-    });
-    assert!(matches!(outcome, Outcome::Deadline { .. }), "{outcome:?}");
-    assert!(machine.first_strict_violation().is_none());
-    let delivered = machine.usb_sj();
-    let text = String::from_utf8_lossy(&delivered).into_owned();
-
-    // The request reached the server loop and was handled.
-    assert!(
-        text.contains("Stopping all projects (0 loaded)"),
-        "the request was read and handled:\n{text}"
-    );
-    assert!(text.contains("Stopped all projects"), "{text}");
-
-    // The triple, twice (before and after the stop), in the shapes P05
-    // named — with the numbers read rather than pinned, and the structural
-    // zeros asserted as constants.
-    let stack: Vec<&str> = text
-        .lines()
-        .filter(|l| l.starts_with("[stack] heartbeat: high-water "))
-        .collect();
-    let mem: Vec<&str> = text
-        .lines()
-        .filter(|l| l.starts_with("[MEM] free="))
-        .collect();
-    let jit: Vec<&str> = text
-        .lines()
-        .filter(|l| l.starts_with("[JIT] used="))
-        .collect();
-    assert_eq!(stack.len(), 1, "one [stack] line per stop-all:\n{text}");
-    assert_eq!(mem.len(), 2, "[MEM] before and after the stop:\n{text}");
-    assert_eq!(jit.len(), 2, "[JIT] before and after the stop:\n{text}");
-    // `[stack] heartbeat: high-water <used> B of <total> B (<headroom> B headroom)`
-    //
-    // `<total>` is the main stack's size, `_stack_start − _stack_end`: the
-    // residual of RWDATA after `.data`/`.bss`, so it moves with every byte
-    // of statics the image gains or loses — four times on main between 2026-09-23
-    // and 2026-09-24 (37,280 → 37,272 → 37,296 → 37,280 → 37,256), none of
-    // them a change to the stop-all path. It is a **figure**:
-    // `stack_total_bytes` in `lp-emu/esp/figures/esp32s3.json`, exactly as
-    // strict as the literal it replaced, re-recorded by
-    // `just bless-chips esp32s3`.
-    let words: Vec<&str> = stack[0].split_whitespace().collect();
-    let used: u32 = words[3].parse().expect("high-water bytes");
-    assert_eq!(&words[4..6], &["B", "of"], "{}", stack[0]);
-    let total: u32 = words[6].parse().expect("the stack's total");
-    let headroom: u32 = words[8]
-        .trim_start_matches('(')
-        .parse()
-        .expect("headroom bytes");
-    assert_eq!(used + headroom, total, "{}", stack[0]);
-    assert!(used > 0 && used < total, "{}", stack[0]);
-    let mut figures = Figures::new(
-        "esp32s3",
-        "boot_idle::the_ledger_triple_is_elicited_by_a_stop_all_on_the_wire",
-    );
-    figures.int("stack_total_bytes", total);
-    figures.verify();
-    for line in &mem {
-        assert!(
-            line.contains(" used=") && line.contains(" largest_free="),
-            "{line}"
-        );
-        assert!(
-            line.ends_with(" retry_saves=0"),
-            "structural: no OOM retry allocator in this image: {line}"
-        );
-    }
-    for line in &jit {
-        assert_eq!(
-            *line,
-            "[JIT] used=0 peak=0 cap=0 spans=0 peak_spans=0 allocs=0 frees=0 fails=0 \
-             largest_free=0",
-            "structural: no reserved code region; JIT residency is inside [MEM] used"
-        );
-    }
-    // And the one boot line P04b's note fixes: a single-number heap, where
-    // the classic prints a four-region sum. Anything comparing the two
-    // chips' boot captures must not expect the same line.
-    assert!(
-        text.contains("[INIT] chip=esp32s3 arch=xtensa heap=245760"),
-        "HEAP_SIZE = 240 * 1024, one number: {text}"
-    );
-    assert!(
-        !text.contains("[INIT] main stack"),
-        "the S3 prints no `main stack` line; its total is in every `[stack]` line's \
-         `of <total> B` instead"
-    );
-
-    // The reply reached the host, and nothing was refused on the way
-    // (module docs, [`LINK_DEFECT`]).
-    assert!(
-        text.contains(STOP_ALL.trim_end()),
-        "the reply is on the delivered stream ({LINK_DEFECT}):\n{text}"
-    );
-    let tried = String::from_utf8_lossy(&machine.usb_sj_tried()).into_owned();
-    assert!(tried.is_empty(), "nothing merely tried: {tried:?}");
-    assert_nothing_was_refused(&mut machine);
-
-    println!(
-        "LEDGER TRIPLE, elicited by a stop-all at +1 ms after `I/O task spawned`:\n  {}\n  {}\n  {}\n\
-         reply: delivered ({} tried bytes; {LINK_DEFECT})",
-        stack[0],
-        mem[1],
-        jit[1],
-        machine.usb_sj_tried().len()
     );
 }

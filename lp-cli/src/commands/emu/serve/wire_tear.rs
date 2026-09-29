@@ -1,23 +1,24 @@
 //! The wire tear: a test-only fault the door can put on a board's byte
-//! stream, so a host reader's handling of a packed frame lost in flight can
-//! be exercised against the shipped image.
+//! stream, so a host's handling of a frame damaged in flight can be
+//! exercised against the shipped image.
 //!
 //! The emulated C6 link never loses bytes (its single writer makes the
 //! IN-endpoint gate a no-op), but a real one did: frames arriving a few
 //! bytes short with no sign on the board
 //! (`docs/defects/2026-09-24-the-real-c6-link-loses-bytes-inside-a-packed-frame.md`).
-//! With learned packed frames (plan
-//! `lp2025/2026-09-25-0006-learned-wire-dictionary`) such a loss leaves the
-//! host's table behind the board's, and the host must notice, drop what it
-//! cannot read, and ask for a reset. This is how to make that happen on
-//! purpose.
+//! Since the USB link is an lp-link (plan
+//! `lp2025/2026-09-27-0215-lp-link-usb-cutover`) such a frame fails its
+//! checksum and is resent: the host must count it and deliver the message
+//! anyway, never surface the loss. This is how to make that happen on
+//! purpose. (The emulator's own `--usb-faults` injector is the finer tool
+//! for soaks; this one tears exactly the frames you name.)
 //!
 //! Set `LP_EMU_WIRE_TEAR=<k>[,<k>…][:<n>]` before starting `emu serve`: on
-//! every board→host byte connection, the k-th packed frame (1-based, counted
-//! from the connection's first byte) loses `n` bytes (default 5) from the
-//! middle of its body. Unset, the tear is off and costs one branch per
-//! chunk. It is a fault injector, never a model: the link model's own loss
-//! is the fidelity defect's follow-up.
+//! every board→host byte connection, the k-th `0x00`-delimited frame
+//! (1-based, counted from the connection's first byte) loses `n` bytes
+//! (default 5) from the middle of its body. Unset, the tear is off and costs
+//! one branch per chunk. It is a fault injector, never a model: the link
+//! model's own loss is the fidelity defect's follow-up.
 
 /// The environment variable that turns the tear on.
 pub const WIRE_TEAR_ENV: &str = "LP_EMU_WIRE_TEAR";
@@ -31,7 +32,7 @@ pub struct WireTear(Option<Tearing>);
 
 /// A tear that is armed.
 struct Tearing {
-    /// Which packed frames to tear, 1-based.
+    /// Which frames to tear, 1-based.
     frames: Vec<usize>,
     /// Bytes each loses.
     bytes: usize,
@@ -80,8 +81,8 @@ impl WireTear {
     }
 
     /// The bytes to pass on for `bytes` read from the board. Text passes
-    /// through at once; a packed frame is held until it closes, then passed
-    /// on whole, or torn.
+    /// through at once; a frame is held until it closes, then passed on
+    /// whole, or torn.
     pub fn filter(&mut self, bytes: &[u8]) -> Vec<u8> {
         let Some(t) = self.0.as_mut() else {
             return bytes.to_vec();
@@ -99,7 +100,7 @@ impl WireTear {
                         if t.frames.contains(&t.seen) {
                             tear(&mut frame, t.bytes);
                             eprintln!(
-                                "emu serve: {WIRE_TEAR_ENV}: tore packed frame {} ({} B lost)",
+                                "emu serve: {WIRE_TEAR_ENV}: tore frame {} ({} B lost)",
                                 t.seen, t.bytes
                             );
                         }
@@ -112,9 +113,9 @@ impl WireTear {
     }
 }
 
-/// Remove `n` bytes from the middle of a framed `0x00 kind COBS 0x00`,
-/// keeping both delimiters and the kind byte, so the damage is inside the
-/// body where the real link's was.
+/// Remove `n` bytes from the middle of a frame `0x00 … 0x00`, keeping both
+/// delimiters and the first byte, so the damage is inside the body where the
+/// real link's was.
 fn tear(frame: &mut Vec<u8>, n: usize) {
     let body = frame.len().saturating_sub(3);
     let n = n.min(body.saturating_sub(1));

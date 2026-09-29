@@ -282,6 +282,7 @@ impl DeviceTransport for BrowserSerialTransport {
                 use lpa_link::providers::browser_serial_esp32::LensTapLine;
                 tap(match line {
                     LensTapLine::Line(line) => LensTapEvent::Line(line),
+                    LensTapLine::Note(note) => LensTapEvent::Note(note),
                     LensTapLine::PortError(error) => LensTapEvent::PortError(error),
                 })
             });

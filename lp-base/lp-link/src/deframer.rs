@@ -10,9 +10,16 @@
 //! - A frame that decodes and verifies: the next byte is text or a new `0x00`.
 //! - A frame that fails: its closing `0x00` may really have been the *opening*
 //!   of the next frame (the tail of this one was lost), so stay inside a frame.
-//! - A frame longer than the maximum is discarded up to the next `0x00`.
-//! - A partial frame that goes quiet for the idle time is flushed: as text if
-//!   it is all printable (it was text after all), else dropped and counted.
+//! - A frame that reaches the maximum length is flushed at once, without
+//!   waiting for a closing `0x00` or the frame-abandon idle: as text, in
+//!   `max_frame`-sized chunks, if it is all printable so far (stream framing
+//!   opening on stray `0x00`s from a plain-text peer must not hold that text
+//!   for the abandon time); otherwise it is discarded up to the next `0x00`,
+//!   counted.
+//! - A partial frame that goes quiet for the frame-abandon time (seconds, not
+//!   the text idle time: a busy peer writes one frame in pieces) is flushed:
+//!   as text if it is all printable (it was text after all), else dropped and
+//!   counted.
 //!
 //! **The text mark** (COBS-FF framing only): `0xFF` never occurs inside a
 //! COBS-FF frame, so a raw `0xFF` means "text follows": whatever frame was in
@@ -47,6 +54,15 @@ pub enum Deframed {
 
 /// The raw byte that starts text (COBS-FF framing; module docs).
 pub const TEXT_MARK: u8 = 0xFF;
+
+/// Whether every byte could plausibly be printed console text (used to
+/// decide, once a partial frame is abandoned, whether to hand it up as text
+/// or drop it as binary garbage).
+fn is_printable(bytes: &[u8]) -> bool {
+    bytes
+        .iter()
+        .all(|&b| matches!(b, 0x20..=0x7E | b'\t' | b'\r' | b'\n'))
+}
 
 /// What an idle flush did.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -129,13 +145,24 @@ impl Deframer {
             };
         }
         if self.in_frame {
-            if !self.discarding {
-                if self.buf.len() == self.max_frame {
-                    self.discarding = true;
-                } else {
-                    self.buf.push(b);
-                }
+            if self.discarding {
+                return Deframed::Nothing;
             }
+            if self.buf.len() == self.max_frame {
+                // Too long to be a real frame. Flush now, in `max_frame`
+                // chunks, rather than wait for a closing `0x00` that a
+                // misread stray `0x00` (an old board's plain-text boot)
+                // never sends, or for `frame_abandon`'s idle timer.
+                if is_printable(&self.buf) {
+                    self.text.append(&mut self.buf);
+                    self.buf.push(b);
+                    return Deframed::Text;
+                }
+                self.discarding = true;
+                self.buf.clear();
+                return Deframed::Overflow;
+            }
+            self.buf.push(b);
             return Deframed::Nothing;
         }
         self.text.push(b);
@@ -172,11 +199,16 @@ impl Deframer {
         self.text.clear();
     }
 
-    /// When an idle flush is due, if anything is pending.
-    pub fn idle_deadline(&self, idle: Micros) -> Option<Micros> {
-        let pending =
-            !self.text.is_empty() || (self.in_frame && (!self.buf.is_empty() || self.discarding));
-        pending.then_some(self.last_byte_at + idle)
+    /// When an idle flush is due, if anything is pending: pending text after
+    /// `text_idle` of quiet, a partial frame after `frame_idle` (see
+    /// [`LinkConfig::frame_abandon`](crate::LinkConfig::frame_abandon) for why
+    /// the two differ).
+    pub fn idle_deadline(&self, text_idle: Micros, frame_idle: Micros) -> Option<Micros> {
+        if !self.text.is_empty() {
+            return Some(self.last_byte_at + text_idle);
+        }
+        let partial = self.in_frame && (!self.buf.is_empty() || self.discarding);
+        partial.then_some(self.last_byte_at + frame_idle)
     }
 
     pub fn flush_idle(&mut self) -> IdleFlush {
@@ -188,11 +220,7 @@ impl Deframer {
         }
         self.in_frame = false;
         self.discarding = false;
-        if self
-            .buf
-            .iter()
-            .all(|&b| matches!(b, 0x20..=0x7E | b'\t' | b'\r' | b'\n'))
-        {
+        if is_printable(&self.buf) {
             self.text.extend_from_slice(&self.buf);
             self.buf.clear();
             IdleFlush::Text
@@ -269,10 +297,55 @@ mod tests {
     fn overflow_is_discarded() {
         let mut d = Deframer::new(4, false);
         d.push(0, 0);
+        // Non-printable, so it's binary garbage, not text: the 5th byte (the
+        // buffer is already at max_frame) flushes it as Overflow at once,
+        // and the rest is discarded up to the next 0x00.
+        let mut out = vec![];
         for _ in 0..10 {
-            d.push(0, 7);
+            out.push(d.push(0, 7));
         }
+        assert_eq!(out[4], Deframed::Overflow);
+        assert!(out[..4].iter().all(|r| *r == Deframed::Nothing));
+        assert!(out[5..].iter().all(|r| *r == Deframed::Nothing));
+        // The closing 0x00, whenever it eventually arrives, ends the
+        // discard run (a second, harmless Overflow) rather than being held
+        // up waiting.
         assert_eq!(d.push(0, 0), Deframed::Overflow);
+    }
+
+    #[test]
+    fn overlong_printable_partial_flushes_as_text_in_chunks() {
+        // A stray 0x00 (an old board's plain-text boot banner opening a
+        // "frame" that never closes) must not hold the text for
+        // frame_abandon: it flushes in max_frame-sized chunks as soon as
+        // the buffer is full, still printable throughout.
+        let mut d = Deframer::new(4, false);
+        d.push(0, 0);
+        let mut out = vec![];
+        for &b in b"M!12345\n" {
+            out.push(d.push(0, b));
+        }
+        // "M!12" fills the 4-byte buffer; '3' (the 5th data byte) triggers
+        // the immediate flush and starts the next chunk.
+        assert_eq!(
+            out,
+            [
+                Deframed::Nothing,
+                Deframed::Nothing,
+                Deframed::Nothing,
+                Deframed::Nothing,
+                Deframed::Text,
+                Deframed::Nothing,
+                Deframed::Nothing,
+                Deframed::Nothing,
+            ]
+        );
+        assert_eq!(d.take_text(), b"M!12");
+        // The rest ("345\n") is still buffered in the (still in-frame) next
+        // chunk, unflushed, no closing 0x00 or idle needed to prove it's
+        // text: an M!-line stream after a stray 0x00 still arrives as text
+        // without waiting on frame_abandon.
+        assert_eq!(d.frame(), b"345\n");
     }
 
     #[test]
@@ -303,8 +376,19 @@ mod tests {
         for &b in b"panic!" {
             d.push(5, b);
         }
-        assert_eq!(d.idle_deadline(10), Some(15));
+        // A partial frame waits for the frame-abandon time, not the text one.
+        assert_eq!(d.idle_deadline(10, 1000), Some(1005));
         assert_eq!(d.flush_idle(), IdleFlush::Text);
         assert_eq!(d.take_text(), b"panic!");
+    }
+
+    #[test]
+    fn pending_text_flushes_on_the_short_idle() {
+        let mut d = Deframer::new(64, false);
+        for &b in b"boot" {
+            d.push(5, b);
+        }
+        assert_eq!(d.idle_deadline(10, 1000), Some(15));
+        assert_eq!(d.flush_idle(), IdleFlush::Text);
     }
 }

@@ -380,13 +380,26 @@ chip_measure() {
     # to reach a heartbeat that release reaches in seconds. A gate nobody will
     # wait for is a gate nobody runs.
     #
-    # No link socket on either arm: nothing needs to talk to the C6, the
-    # classic is driven by a deterministic script rather than by a client, and
-    # a gate that binds a port collides with whatever is already using one.
+    # No link socket on any arm: a gate that binds a port collides with
+    # whatever is already using one. The classic is driven by a deterministic
+    # script on UART0.
+    #
+    # ⚠️ The C6 and the S3 need a HOST, in process (`--host-link`), since the
+    # wire went onto lp-link at proto 30 (plan lp-link-usb-cutover): their
+    # log lines ride the link's log channel and their hello and heartbeats go
+    # out only once a host has brought the link up, so a console read straight
+    # off the port holds boot text and nothing this gate greps for. The host
+    # writes the DECODED console — log lines as the board used to print them,
+    # every wire message as its `M!{json}` line — so the greps below are
+    # unchanged. `--json-replies`: the host does not ask for packed replies,
+    # so the board holds no learned table and the figure is the link's cost
+    # alone (a packing host adds ~6.9 KB, the table, which the `M!` path paid
+    # too when asked).
     local ok=0
     case "$CHIP_ID" in
     esp32c6)
         cargo run -q --release -p lp-cli -- emu run --elf "$elf" \
+            --host-link --json-replies \
             --timeout "$CHIP_TIMEOUT" --console "$dir/console.txt" \
             >"$dir/emu.out" 2>"$dir/emu.err" && ok=1
         ;;
@@ -405,14 +418,11 @@ chip_measure() {
             >"$dir/emu.out" 2>"$dir/emu.err" && ok=1
         ;;
     esp32s3)
-        # The machine binary, for the classic's reason: `lp-cli emu run`
-        # knows one chip and teaching it a third is M8's.
-        #
-        # ⚠️ `--usb-host attached`, and it is not optional on this chip: the
-        # console IS the link, and with no host at power-on the first packet
-        # commits, `free` never comes back, esp-println latches TIMED_OUT and
-        # the console is EMPTY — a gate that left it out would fail with "no
-        # first heartbeat" on a perfectly healthy boot.
+        # `lp-cli emu run --chip esp32s3`, which is the hosted run only: this
+        # chip's console IS the link, and since proto 30 that link is lp-link,
+        # which only a product crate may host (the lp-emu fence). The host is
+        # attached and draining from power-on, as a XIAO S3 powered through
+        # its cable always is.
         #
         # `--console` rather than the classic's `--uart0 file:`: on this chip
         # the ROM talks on UART0 and the app talks on the USB link, and it is
@@ -423,12 +433,17 @@ chip_measure() {
         # different allocator load from a flashed board's and the record says
         # it in full — see `boot_shape` there before comparing these figures
         # with a transcript or with silicon.
-        cargo run -q --release -p lp-emu-esp32s3 -- --elf "$elf" \
-            --usb-host attached \
-            --usb-script "$S3_STOP_ALL_SCRIPT" \
+        #
+        # Since proto 30 the asking is a request over the hosted link
+        # (`--request`, sent once the board's hello arrives) rather than the
+        # `M!` bytes of `$S3_STOP_ALL_SCRIPT`, which the lp-link image no
+        # longer reads: the same request, sent a little later in the boot.
+        cargo run -q --release -p lp-cli -- emu run --chip esp32s3 --elf "$elf" \
+            --host-link --json-replies \
+            --request '"stopAllProjects"' \
             --console "$dir/console.txt" \
             --exit-on '[JIT] used=' \
-            --strict-bus --core-quantum 256 --time-grade t1 \
+            --strict-bus \
             --timeout "$CHIP_TIMEOUT" --wall-timeout 600 \
             >"$dir/emu.out" 2>"$dir/emu.err" && ok=1
         ;;

@@ -54,7 +54,11 @@ use door::Registry;
 pub fn serve(args: ServeArgs) -> Result<()> {
     // A bad fault spec is refused here, before any board starts.
     wire_tear::WireTear::from_env()?;
-    let EmuChip::Esp32C6 = args.chip;
+    if args.chip != EmuChip::Esp32C6 {
+        anyhow::bail!(
+            "`emu serve` holds C6 boards only; the S3 is `emu run --chip esp32s3 --host-link`"
+        );
+    }
 
     if args.board.is_empty() {
         bail!(

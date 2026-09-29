@@ -503,8 +503,11 @@ rv32_hex="$(hex_of "$oracle_out" ORACLE-RV32)"
 # hardware walk. The first frame after a project load is the compile-window
 # black fallback (ADR 2026-08-03-memory-pressure-at-compile-safe-points), and
 # `frame_dump` dumps it at open before re-arming for the first lit frame.
-device_hex="$(grep -ao 'rgb=[0-9a-f]*' "$console" | tail -1 | cut -d= -f2 || true)"
-dumps="$(grep -ac '\[OUT\] dump frame=' "$console" || true)"
+# A dump is several `part=i/n` lines (the three chips share one
+# `frame_dump`, and on the lp-link chips a log record is cut at 200 bytes);
+# scripts/frame-dump-hex.sh joins the last whole one.
+device_hex="$("$REPO/scripts/frame-dump-hex.sh" < "$console")"
+dumps="$("$REPO/scripts/frame-dump-hex.sh" --count < "$console")"
 
 pad_hex="$(jq -r --argjson pad "$PAD" -s '
     [ .[] | select(.kind == "ws281x-frame" and .pad == $pad and .complete

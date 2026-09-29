@@ -10,6 +10,9 @@
   are gone; each packed link learns its names (JSON Pack format 2, proto
   28). The sections below that describe the dictionary are kept as the
   record of what shipped first, each marked where it no longer holds.
+  Amended again 2026-09-27 (see the note at the end): on USB the framing
+  and per-connection re-ask below are superseded by `lp-link`; they still
+  hold for BLE, the classic ESP32's UART and `fw-emu`.
 
 ## Context
 
@@ -387,3 +390,31 @@ real C6.
   shows the link itself, not the pull loop, is the constraint again.
 - Structural slot values (G-F4), if flash gets tight enough to be worth
   dropping the device's text lexer.
+
+## Amended 2026-09-27 — lp-link USB cut-over (PR #854)
+
+On USB (C6/S3 silicon, their emulators, Studio's Web Serial and
+emulator-tab providers, `lp-cli`'s native serial/`serial:tcp`/`serial:ws`)
+the "Framing beside console text" section above no longer applies: there
+is no `0x00 'P'` COBS frame riding beside `M!` lines. A packed reply is one
+whole `lp-link` proto-channel message tagged `L`
+(`lpc_wire::PAYLOAD_TAG_PACKED`, the same byte as the frame-kind byte
+above), written without a COBS layer of its own — `lp-link`'s own COBS-FF
+stream framing already delimits it. A JSON reply is tagged `{`.
+
+The opt-in is unchanged in spirit — `SetEncoding` is still an ordinary
+request the host sends, and the board still switches its write path only
+after answering it — but "The host re-asks at most once per 3 s"
+(`PackOptIn`, `PACK_REASK_INTERVAL_MS`) does not run on a USB link. The
+opt-in happens once per link `Up` instead: a link session boundary is
+already the boundary that resets the learned table (see the 2026-09-25
+ADR's amendment below), and unlike the old wire, a USB link no longer
+silently reverts to JSON mid-session — that was the not-draining latch's
+job, which `lp-link`'s stall/reset states now cover. A board that has not
+opted in yet this session simply answers JSON, as before.
+
+This section, and the framing and re-ask machinery it describes, is
+**unchanged** for BLE, the classic ESP32's UART and `fw-emu`, which still
+ride the pre-`lp-link` `M!` / `0x00 'P'` wire. See
+`lp-base/lp-link/README.md` and
+`docs/adr/2026-09-27-lp-link-one-comms-layer.md`.

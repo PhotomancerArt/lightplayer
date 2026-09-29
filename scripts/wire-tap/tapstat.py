@@ -12,15 +12,18 @@ chunk the byte pump carried: `<unix_us> <'>'|'<'> <len>\\n<len bytes>\\n`,
 `>` host -> board and `<` board -> host. This script reassembles lines per
 direction and classifies each `M!{json}` line by message kind.
 
-A board that was asked to pack (JSON Pack) writes packed frames
-(`\\n 0x00 'L' COBS 0x00`) into the `<` chunks, and the tap annotates each
-one with a `P` record carrying the `M!{json}` line it stands for and the
-frame's size on the wire (`E` for one that did not decode). This script
-strips the frames out of `<` (they are 0x00-delimited) and reads the `P`
-records in their place, so a packed message is classified by its JSON and
-sized by its packed bytes: every size below is WIRE bytes, and the summary
-adds a `json` column with what the same messages take as `M!` lines. The
-ledger slices the JSON, so its paths are JSON bytes either way.
+A C6's USB link is an lp-link: both directions carry frames
+(`0x00 COBS-FF 0x00`) holding the wire messages (JSON, or packed replies
+once the host opted in), with the board's console text between them. The
+tap annotates each message with a `P` (board -> host) or `Q` (host ->
+board) record carrying the `M!{json}` line it stands for and its size on
+the link's proto channel (`E` for what could not be read). This script
+strips the frames out of both directions (they are 0x00-delimited) and
+reads the `P`/`Q` records in their place, so a message is classified by its
+JSON and sized by its payload bytes (packed or not); the link's own framing
+and acknowledgements are in the chunk totals only. The summary adds a `json`
+column with what the same messages take as `M!` lines. The ledger slices the
+JSON, so its paths are JSON bytes either way.
 
 Project reads are labelled by their request's shape, so the two that
 interleave on a live link (the lens and the device card) are kept apart:
@@ -108,8 +111,8 @@ def parse_args():
 
 def read_records(path):
     """[(unix_us, dir, bytes, wire_len)] in tap order. `dir` is `>`, `<`, or
-    an annotation: `P` (a packed frame's `M!` line; `wire_len` is the
-    frame's own size) or `E` (a packed frame that did not decode)."""
+    an annotation: `P` / `Q` (a board / host message's `M!` line; `wire_len`
+    is its payload size) or `E` (something that could not be read)."""
     data = open(path, "rb").read()
     records = []
     i = 0
@@ -128,28 +131,28 @@ def read_records(path):
 
 def reassemble_lines(records):
     """[(unix_us, dir, line_bytes_with_newline, wire_bytes)]: a line is
-    stamped with the chunk that completed it. A packed frame's line comes
-    from its `P` record and is sized by the frame; every other line's wire
-    size is its length."""
+    stamped with the chunk that completed it. A message's line comes from its
+    `P`/`Q` record and is sized by its payload; every other line (console
+    text) is sized by its length."""
     pending = {">": b"", "<": b""}
-    in_frame = False
+    in_frame = {">": False, "<": False}
     lines = []
     for us, direction, chunk, wire_len in records:
         if direction == "P":
             lines.append((us, "<", chunk, wire_len))
             continue
-        if direction == "E":
+        if direction == "Q":
+            lines.append((us, ">", chunk, wire_len))
             continue
-        if direction == "<":
-            # Every 0x00 opens or closes a packed frame; keep what is outside.
-            parts = chunk.split(b"\x00")
-            for n, part in enumerate(parts):
-                if not in_frame:
-                    pending["<"] += part
-                if n < len(parts) - 1:
-                    in_frame = not in_frame
-        else:
-            pending[direction] += chunk
+        if direction not in "<>":
+            continue
+        # Every 0x00 opens or closes a link frame; keep what is outside.
+        parts = chunk.split(b"\x00")
+        for n, part in enumerate(parts):
+            if not in_frame[direction]:
+                pending[direction] += part
+            if n < len(parts) - 1:
+                in_frame[direction] = not in_frame[direction]
         while b"\n" in pending[direction]:
             line, pending[direction] = pending[direction].split(b"\n", 1)
             lines.append((us, direction, line + b"\n", len(line) + 1))
@@ -263,11 +266,11 @@ def print_summary(records, lines, labels, args):
         wire = sum(r[3] for r in packed)
         json = sum(len(r[2]) for r in packed)
         print(
-            f"{len(packed)} packed frames in the whole tap: {wire} B on the wire, "
+            f"{len(packed)} board messages in the whole tap: {wire} B of payload, "
             f"{json} B as M! lines ({wire / max(json, 1):.1%})"
         )
     if errors:
-        print(f"{len(errors)} packed frames did not decode (E records)")
+        print(f"{len(errors)} unreadable messages or damaged frames (E records)")
     print_read_units(lines, labels)
     if args.timeline:
         per_second = collections.defaultdict(lambda: [0, 0])

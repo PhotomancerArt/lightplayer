@@ -1,5 +1,9 @@
 //! Accountable transport: serializes in thread context, io_task writes bytes.
 //!
+//! The classic ESP32's (`fw-esp32v3`, UART0, `M!` lines) until its own lp-link
+//! milestone; the C6 and S3 USB link uses `crate::usb_link` instead (plan
+//! `lp-link-usb-cutover`, D3).
+//!
 //! `send` serializes the WireServerMessage HERE (thread context) into the
 //! shared static frame buffer, submits its length to io_task, and waits for
 //! io_task to report the write's outcome before returning — which is also
@@ -13,13 +17,12 @@
 //! learned table a packed link codes against ([`PackedLink`]). The server
 //! decides the answer; the transport sees the answer it writes, and switches
 //! after it — which is why the state lives here, beside the link, and not in
-//! the IO-free server: only the transport knows when the link the answer was
-//! for has gone (see [`crate::serial::link_epoch`]), and when a frame it
-//! serialized was never written (the learned table rolls back).
+//! the IO-free server: only the transport knows when a frame it serialized was
+//! never written (the learned table rolls back). A UART link has no signal
+//! that its host went away: there, a host opening the port resets the board.
 
 use alloc::vec::Vec;
 
-use crate::serial::link_epoch;
 use crate::serial::packed_link::PackedLink;
 use crate::serial::server_msg::serialize_server_msg;
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
@@ -30,7 +33,7 @@ use lpc_wire::{ClientMessage, TransportError, json};
 
 /// Server transport that sends WireServerMessage to io_task for serialization.
 ///
-/// ONE link — the product's USB serial line — and it is trusted
+/// ONE link — the classic's UART0 serial line — and it is trusted
 /// ([`Link::PRIMARY`]): physical possession is the recovery path. A second
 /// (radio) link arrives as a separate transport behind a mux, never as a
 /// second id here.
@@ -49,9 +52,6 @@ pub struct StreamingMessageRouterTransport {
     /// The encoding this link's host opted into, and the learned table while
     /// it is packed; JSON until a host opts in.
     packed: PackedLink,
-    /// The [`link_epoch`] `packed` was negotiated in. A different epoch
-    /// means the host that asked is gone, and the link is JSON again.
-    encoding_epoch: u32,
 }
 
 impl StreamingMessageRouterTransport {
@@ -72,17 +72,6 @@ impl StreamingMessageRouterTransport {
             server_write_result,
             generation: 0,
             packed: PackedLink::new(),
-            encoding_epoch: link_epoch::current(),
-        }
-    }
-
-    /// Back to JSON (and the table freed) if the link the encoding was
-    /// negotiated on has closed since.
-    fn check_link_epoch(&mut self) {
-        let epoch = link_epoch::current();
-        if epoch != self.encoding_epoch {
-            self.packed.back_to_json();
-            self.encoding_epoch = epoch;
         }
     }
 }
@@ -97,7 +86,6 @@ impl StreamingMessageRouterTransport {
     /// produced for this request.
     async fn write_once(&mut self, msg: WireServerMessage) -> Result<(), TransportError> {
         let id = msg.id;
-        self.check_link_epoch();
         // The answer to an opt-in is always JSON (the host reads it before it
         // knows the outcome; `table_for` gives it no table); the switch it
         // announces happens in `send`, after it is written. A packed frame's
@@ -162,7 +150,6 @@ impl ServerTransport for StreamingMessageRouterTransport {
                 // until this link closes.
                 if let Some(encoding) = switch_to {
                     self.packed.answered(encoding);
-                    self.encoding_epoch = link_epoch::current();
                 }
             }
             Err(error) => {
@@ -232,6 +219,10 @@ impl ServerTransport for StreamingMessageRouterTransport {
         Ok(())
     }
 }
+
+/// Its io task has written (or abandoned) every frame by the time `send`
+/// returns: it never holds the frame buffer between sends.
+impl crate::radio_link::FrameBufHolder for StreamingMessageRouterTransport {}
 
 /// The USB transport has one link, open for the life of the image: no hellos
 /// owed after the first, no deadline to keep.

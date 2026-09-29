@@ -15,30 +15,33 @@
 //! where `<dir>` is `>` for host → board and `<` for board → host. Chunks are
 //! whatever the pump read, not lines; the reader reassembles lines.
 //!
-//! A board that was asked to pack (plan `lp-json-pack`) writes learned packed
-//! frames (`\n 0x00 'L' COBS 0x00`) into the `<` chunks, recorded as they
-//! came. So
-//! that a table can set each message's packed bytes beside its JSON ones,
-//! the tap also decodes the board's stream as it goes and, after the chunk
-//! that completed a packed frame, appends an annotation:
+//! A C6 board's USB link is an lp-link (plan
+//! `lp2025/2026-09-27-0215-lp-link-usb-cutover`): both directions carry
+//! frames (`0x00 COBS-FF 0x00`) holding wire messages (JSON, or learned
+//! packed replies once the host opted in), and the board's console text runs
+//! between them. The chunks are recorded as they came. So that a table can
+//! set each message beside its JSON, the tap also reads the link passively as
+//! it goes ([`WireLinkSniffer`], one per board connection from its first
+//! byte, as a host does) and, after the chunk that completed a message,
+//! appends an annotation:
 //!
 //! ```text
-//! <unix_us> P <len> <wire_len>\n<len bytes: M!{json}\n>\n
-//! <unix_us> E <len>\n<len bytes: why a packed frame did not decode>\n
+//! <unix_us> P <len> <payload_len>\n<len bytes: M!{json}\n>\n   board → host
+//! <unix_us> Q <len> <payload_len>\n<len bytes: M!{json}\n>\n   host → board
+//! <unix_us> E <len>\n<len bytes: what could not be read>\n
 //! ```
 //!
-//! `P` carries the `M!{json}\n` line the frame stands for and the frame's
-//! own `wire_len` (`0x00 'L' COBS 0x00`); `E` is a frame that could not be
-//! delivered, never dropped silently — torn, or dropped because the tap's
-//! learned table lost step with the board's (`desync: …`). The tap decodes
-//! with one table per board connection, from its first byte, as a host
-//! does: a door reconnect is a new link, and a new tap stream. The `<` chunks stay the exact wire
-//! bytes, so a byte count over them is still exact; a reader that wants
-//! JSON strips the frames from `<` (they are `0x00`-delimited) and reads the
-//! `P` records in their place, which is what `scripts/wire-tap/tapstat.py`
-//! does. A tool that knows only `<` and `>` reads the tap after
-//! `lp-cli wire unpack --tap`, which rewrites `<` chunks as JSON and drops
-//! the annotations.
+//! `P`/`Q` carry the `M!{json}\n` line a message stands for and its size on
+//! the link's proto channel (`payload_len`; the link's own framing,
+//! checksums and acknowledgements are not attributed to messages, but the
+//! raw chunks still count them); `E` is a message that could not be read or
+//! a frame that arrived damaged (the link resent it), never dropped
+//! silently. The `<`/`>` chunks stay the exact wire bytes, so a byte count
+//! over them is still exact; a reader that wants JSON strips the frames from
+//! both directions (they are `0x00`-delimited) and reads the `P`/`Q` records
+//! in their place, which is what `scripts/wire-tap/tapstat.py` does. A tool
+//! that knows only `<` and `>` reads the tap after `lp-cli wire unpack
+//! --tap`, which rewrites both as lines and drops the annotations.
 //!
 //! Two properties this instrument keeps:
 //!
@@ -54,7 +57,8 @@ use std::io::Write;
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use lpc_wire::{WireChunk, WireForm, WireStream};
+use lpc_wire::lp_link::sniffer::Direction;
+use lpc_wire::{SniffedWire, WireLinkSniffer};
 
 /// The environment variable that turns the tap on: a directory to write into.
 pub const WIRE_TAP_ENV: &str = "LP_EMU_WIRE_TAP";
@@ -83,8 +87,8 @@ pub struct WireTap(Option<OpenTap>);
 /// A tap that is recording.
 struct OpenTap {
     file: File,
-    /// The board's stream, decoded as it goes to annotate packed frames.
-    to_host: WireStream,
+    /// The link, read as it goes to annotate its messages.
+    link: WireLinkSniffer,
 }
 
 impl WireTap {
@@ -103,12 +107,12 @@ impl WireTap {
         let file = OpenOptions::new().create(true).append(true).open(path).ok();
         Self(file.map(|file| OpenTap {
             file,
-            to_host: WireStream::new(),
+            link: WireLinkSniffer::new(),
         }))
     }
 
     /// Record one chunk with the current wall-clock time, and annotate
-    /// every packed frame it completed.
+    /// every message it completed.
     pub fn record(&mut self, direction: TapDirection, bytes: &[u8]) {
         let Some(tap) = self.0.as_mut() else { return };
         let unix_us = SystemTime::now()
@@ -116,43 +120,60 @@ impl WireTap {
             .map(|d| d.as_micros())
             .unwrap_or(0);
         let _ = write_record(&mut tap.file, unix_us, direction, bytes);
-        if direction == TapDirection::ToHost {
-            let OpenTap { file, to_host } = tap;
-            to_host.push(bytes, |chunk| {
-                let _ = annotate(file, unix_us, &chunk);
-            });
-        }
+        let dir = match direction {
+            TapDirection::ToBoard => Direction::HostToBoard,
+            TapDirection::ToHost => Direction::BoardToHost,
+        };
+        let OpenTap { file, link } = tap;
+        link.push(dir, 0, bytes, |item| {
+            let _ = annotate(file, unix_us, &item);
+        });
     }
 }
 
-/// The annotation for one chunk of the board's stream: `P` for a packed
-/// frame, `E` for one that could not be delivered, nothing otherwise (a
-/// console line or an `M!` line is already in the `<` chunks as it is).
-fn annotate(out: &mut impl Write, unix_us: u128, chunk: &WireChunk) -> std::io::Result<()> {
-    match chunk {
-        WireChunk::Frame(frame) => {
-            let WireForm::Packed { wire_len } = frame.form else {
-                return Ok(());
-            };
-            let line = format!("{}\n", frame.to_line());
-            writeln!(out, "{unix_us} P {} {wire_len}", line.len())?;
-            out.write_all(line.as_bytes())?;
-            out.write_all(b"\n")
+/// The annotation for one thing read off the link: `P`/`Q` for a message,
+/// `E` for what could not be read, nothing for console text (it is in the
+/// chunks as it is) or a new session.
+fn annotate(out: &mut impl Write, unix_us: u128, item: &SniffedWire) -> std::io::Result<()> {
+    match item {
+        SniffedWire::Server { payload, .. } => {
+            write_message(out, unix_us, 'P', &payload.json, payload.wire_len)
         }
-        WireChunk::Error(error) => write_error(out, unix_us, error),
-        WireChunk::Desync(dropped) => write_error(
+        SniffedWire::Client { json, .. } => write_message(out, unix_us, 'Q', json, json.len()),
+        SniffedWire::Unreadable { len, reason, .. } => write_error(
             out,
             unix_us,
-            &format!(
-                "desync: a {} B packed frame dropped: {}",
-                dropped.wire_len, dropped.reason
-            ),
+            &format!("unreadable: a {len} B message: {reason}"),
         ),
-        WireChunk::Line(_) => Ok(()),
+        SniffedWire::Damaged { dir } => write_error(
+            out,
+            unix_us,
+            &format!("damaged: a frame {dir:?} failed its check (the link resent it)"),
+        ),
+        SniffedWire::Gap { dir, skipped } => write_error(
+            out,
+            unix_us,
+            &format!("gap: {skipped} frame(s) {dir:?} never seen"),
+        ),
+        SniffedWire::Console { .. } | SniffedWire::Session { .. } => Ok(()),
     }
 }
 
-/// An `E` record: a packed frame that could not be delivered, and why.
+/// A `P` or `Q` record: one message's `M!{json}` line and its payload size.
+fn write_message(
+    out: &mut impl Write,
+    unix_us: u128,
+    kind: char,
+    json: &str,
+    payload_len: usize,
+) -> std::io::Result<()> {
+    let line = format!("M!{json}\n");
+    writeln!(out, "{unix_us} {kind} {} {payload_len}", line.len())?;
+    out.write_all(line.as_bytes())?;
+    out.write_all(b"\n")
+}
+
+/// An `E` record: something on the link that could not be read, and why.
 fn write_error(out: &mut impl Write, unix_us: u128, error: &str) -> std::io::Result<()> {
     writeln!(out, "{unix_us} E {}", error.len())?;
     out.write_all(error.as_bytes())?;
@@ -183,35 +204,42 @@ mod tests {
         assert_eq!(out, b"42 < 5\nM!{}\n\n43 > 2\nab\n");
     }
 
-    /// A packed frame is recorded as it came, then annotated with the JSON
-    /// line it stands for and its size on the wire, even when it arrives in
-    /// two chunks.
+    /// Link frames are recorded as they came, then each message is
+    /// annotated with the JSON line it stands for and its payload size, in
+    /// both directions, however the frames were split into chunks.
     #[test]
-    fn a_packed_frame_is_recorded_raw_and_annotated() {
-        let message = lpc_wire::WireServerMessage::new(7, lpc_wire::ServerMsgBody::UnloadProject);
-        let json = lpc_wire::json::to_string(&message).unwrap();
-        let mut framed = vec![0u8; 256];
-        let mut table = lpc_wire::LearnedTable::default();
-        let n = lpc_wire::ser_learned_frame_to(&mut framed, &mut table, &message).unwrap();
-        let framed = &framed[..n];
+    fn link_messages_are_recorded_raw_and_annotated_both_ways() {
+        let (to_board, to_host, hello_json) = two_way_session();
 
         let dir = tempfile::tempdir().unwrap();
         let mut tap = WireTap::open_in(dir.path(), "c6-a");
-        tap.record(TapDirection::ToHost, &framed[..4]);
-        tap.record(TapDirection::ToHost, &framed[4..]);
+        for chunk in to_board {
+            tap.record(TapDirection::ToBoard, &chunk);
+        }
+        for chunk in to_host {
+            let (a, b) = chunk.split_at(chunk.len() / 2);
+            tap.record(TapDirection::ToHost, a);
+            tap.record(TapDirection::ToHost, b);
+        }
         drop(tap);
 
         let body = std::fs::read(dir.path().join("c6-a.tap")).unwrap();
-        let line = format!("M!{json}\n");
-        let annotation = format!(" P {} {}\n{line}\n", line.len(), n - 1);
         let text = String::from_utf8_lossy(&body);
-        assert!(text.ends_with(&annotation), "{text:?}");
-        // Both raw chunks are there, byte for byte, before it.
-        let raw: Vec<u8> = [&framed[..4], &framed[4..]].concat();
+        let line = format!("M!{hello_json}\n");
         assert!(
-            body.windows(framed.len() - 4).any(|w| w == &raw[4..]),
-            "the second chunk is recorded raw"
+            text.contains(&format!(" P {} {}\n{line}\n", line.len(), hello_json.len())),
+            "{text:?}"
         );
+        let request = "M!{\"id\":3,\"msg\":\"hello\"}\n";
+        assert!(
+            text.contains(&format!(
+                " Q {} {}\n{request}\n",
+                request.len(),
+                request.len() - 3
+            )),
+            "{text:?}"
+        );
+        assert!(!text.contains(" E "), "{text:?}");
     }
 
     #[test]
@@ -230,5 +258,43 @@ mod tests {
         let body = std::fs::read(dir.path().join("c6-a.tap")).unwrap();
         let text = String::from_utf8(body).unwrap();
         assert!(text.ends_with(" > 2\nhi\n"), "{text:?}");
+    }
+
+    /// A host and a board end over a lossless pipe: the handshake, the
+    /// board's hello, one request (id 3) and its answer. The frames each end
+    /// wrote, in order, and the hello's JSON.
+    fn two_way_session() -> (Vec<Vec<u8>>, Vec<Vec<u8>>, String) {
+        use lpc_wire::lp_link::{CH_PROTO, Link, LinkConfig, LinkEvent, SelectiveRepeat};
+        let mut host: Link<SelectiveRepeat> = Link::new(LinkConfig::usb(), 0x4057_0001);
+        let mut board: Link<SelectiveRepeat> = Link::new(LinkConfig::usb(), 0xB0A2_0001);
+        let hello = lpc_wire::WireServerMessage::new(7, lpc_wire::ServerMsgBody::UnloadProject);
+        let hello_json = lpc_wire::json::to_string(&hello).unwrap();
+        let (mut to_board, mut to_host) = (Vec::new(), Vec::new());
+        let mut asked = false;
+        for step in 0..100u64 {
+            let now = step * 1_000;
+            while let Some(frame) = host.poll_transmit(now) {
+                let frame = frame.to_vec();
+                board.on_bytes(now, &frame);
+                to_board.push(frame);
+            }
+            while let Some(event) = board.recv() {
+                if let LinkEvent::Up { .. } = event {
+                    board.send(CH_PROTO, hello_json.as_bytes()).unwrap();
+                }
+            }
+            while let Some(frame) = board.poll_transmit(now) {
+                let frame = frame.to_vec();
+                host.on_bytes(now, &frame);
+                to_host.push(frame);
+            }
+            while let Some(event) = host.recv() {
+                if matches!(event, LinkEvent::Message { .. }) && !asked {
+                    host.send(CH_PROTO, br#"{"id":3,"msg":"hello"}"#).unwrap();
+                    asked = true;
+                }
+            }
+        }
+        (to_board, to_host, hello_json)
     }
 }

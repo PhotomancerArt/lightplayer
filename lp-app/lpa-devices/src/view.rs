@@ -92,6 +92,10 @@ pub struct DeviceView {
     /// window (the card's live-feed pill: "live · N fps"). `None` until a
     /// heartbeat carried one; a window reset drops it, honestly.
     pub engine_fps: Option<u16>,
+    /// The board's link counters off the latest heartbeat this window (the
+    /// card's link section). `None` until a heartbeat carried them, and on
+    /// a link that reports none.
+    pub link_counters: Option<crate::LinkCounterFacts>,
     /// Whether a project could be sent to this board right now: a
     /// proto-compatible LightPlayer, on a link, with nothing else running.
     /// The empty face's primary verb is drawn only when this is true.
@@ -336,6 +340,7 @@ pub fn device_view(device: &Device, now: Millis) -> DeviceView {
             && device.activity.is_none(),
         loaded_project: loaded,
         engine_fps: device.evidence.engine_fps(),
+        link_counters: device.evidence.link_counters(),
         // An OPEN port, not merely an attached one: the push conversation
         // talks over this port, and a verb that could only fail is worse
         // than no verb. (The fold already implies it — closing a port
@@ -382,6 +387,10 @@ pub enum FirmwareFace {
     },
     /// Speaks the framing, never said hello (pre-hello firmware).
     NoHello,
+    /// LightPlayer firmware from before this Studio's link: it runs, but it
+    /// cannot say hello in a form Studio hears, so it needs a flash (which
+    /// keeps its project). `proto` is its boot marker's, when heard.
+    OlderLightPlayer { proto: Option<u32> },
     /// Blank or erased flash (the invalid-header boot loop).
     Blank,
     /// Parked in the ROM downloader.
@@ -411,7 +420,12 @@ impl FirmwareFace {
     pub fn wants_flash(&self) -> bool {
         matches!(
             self,
-            Self::NoHello | Self::Blank | Self::Bootloader | Self::Foreign { .. } | Self::Silent
+            Self::NoHello
+                | Self::OlderLightPlayer { .. }
+                | Self::Blank
+                | Self::Bootloader
+                | Self::Foreign { .. }
+                | Self::Silent
         )
     }
 
@@ -474,6 +488,9 @@ fn firmware_face(evidence: &Evidence) -> FirmwareFace {
         Classification::Incompatible {
             reason: IncompatibleReason::NoHello,
         } => FirmwareFace::NoHello,
+        Classification::OlderLightPlayer { proto } => {
+            FirmwareFace::OlderLightPlayer { proto: *proto }
+        }
         Classification::Blank => FirmwareFace::Blank,
         Classification::Bootloader => FirmwareFace::Bootloader,
         Classification::Foreign { label } => FirmwareFace::Foreign {
@@ -595,6 +612,23 @@ fn recovery_line(recovery: &RecoveryFacts) -> String {
 pub fn pending_link_view(entry: &PendingLink, now: Millis) -> PendingLinkView {
     let state_label = match entry.verdict() {
         None => "New device found — identifying…".to_string(),
+        // Identify settled having heard nothing at all — the window's
+        // classify() cascade bottoms out at `Unknown` (forced, if presence
+        // ever lost attachment) or its own `Quiet` fallback, and either one
+        // is reached the moment identify ends Failed ("no response from the
+        // device", `activity/identify.rs`). `classification_label` alone
+        // would read "Identifying…" for `Unknown` — indistinguishable from
+        // still running — and `Quiet`'s "Not responding" implies the board
+        // spoke before it fell silent, which is not what happened here.
+        // `last_outcome` is how identify's settled Failed becomes visible.
+        Some(Classification::Unknown | Classification::Quiet { .. })
+            if matches!(
+                entry.evidence().last_outcome,
+                Some(ActivityOutcome::Failed { .. })
+            ) =>
+        {
+            "New device found — no response (is another app using this port?)".to_string()
+        }
         Some(classification) => format!(
             "New device found — {}",
             classification_label(classification)
@@ -666,6 +700,7 @@ fn classification_label(classification: &Classification) -> String {
         Classification::Incompatible {
             reason: IncompatibleReason::NoHello,
         } => "No LightPlayer hello — pre-hello firmware".to_string(),
+        Classification::OlderLightPlayer { .. } => "Older LightPlayer firmware".to_string(),
         Classification::Blank => "Blank flash — needs firmware".to_string(),
         Classification::Bootloader => "Waiting in ROM download mode".to_string(),
         Classification::Foreign { label: Some(label) } => format!("Running {label}"),
@@ -791,6 +826,8 @@ mod tests {
             Classification::Incompatible {
                 reason: IncompatibleReason::NoHello,
             },
+            Classification::OlderLightPlayer { proto: None },
+            Classification::OlderLightPlayer { proto: Some(29) },
             Classification::Quiet { since: Millis(0) },
         ];
 
@@ -798,5 +835,44 @@ mod tests {
             let label = classification_label(&classification);
             assert!(!label.is_empty(), "{classification:?} rendered nothing");
         }
+    }
+
+    /// Ticket 2026-09-27-busy-port-blocks-identify: a port that never opens
+    /// (another app holds it) hears nothing at all, so identify still
+    /// settles Failed at its deadline with the classification cascade's
+    /// `Quiet` fallback — whose ordinary "Not responding" label implies the
+    /// board spoke and then fell silent, which is not what happened. Before
+    /// the deadline the card must still say "identifying…"; once identify
+    /// has given up, it must say so plainly instead.
+    #[test]
+    fn a_pending_link_whose_identify_gave_up_says_so_instead_of_identifying_forever() {
+        use crate::replay::{Expect, Replay, Script, Step};
+        use crate::roster::RosterConfig;
+
+        let script =
+            Script::new()
+                .at(0, Step::attach(1, "usb-1"))
+                .at(
+                    5,
+                    Step::Error {
+                        link: 1,
+                        message: "port busy".to_string(),
+                    },
+                )
+                .expect(
+                    Expect::new()
+                        .pending(1)
+                        .pending_state("New device found — identifying…"),
+                )
+                // identify_deadline_ms defaults to 5_000; past it identify has
+                // settled Failed with no verdict ever reached.
+                .at(5_010, Step::Advance)
+                .expect(Expect::new().pending(1).pending_state(
+                    "New device found — no response (is another app using this port?)",
+                ));
+
+        Replay::new(RosterConfig::default())
+            .run(&script.into_fixture("a busy port's identify gives up"))
+            .expect("scenario");
     }
 }

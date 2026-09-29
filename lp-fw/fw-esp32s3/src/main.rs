@@ -119,7 +119,8 @@ use {
     fw_esp32_common::hardware::manifest_loader::load_hardware_manifest,
     fw_esp32_common::server_loop::run_server_loop,
     fw_esp32_common::time::Esp32TimeProvider,
-    fw_esp32_common::{boot, logger, lp_fs, transport},
+    fw_esp32_common::usb_link::{UsbLinkShared, UsbLinkTransport},
+    fw_esp32_common::{boot, log_ring_logger, lp_fs},
     hardware::button::Esp32GpioButtonDriver,
     lp_gfx_lpvm::TargetLpvmGraphics,
     lpa_server::{ButtonService, LpGraphics, LpServer},
@@ -128,7 +129,7 @@ use {
     lpfs::LpFsMemory,
     lpfs::lp_path::AsLpPath,
     output::{Esp32OutputProvider, Esp32S3RmtWs281xDriver},
-    serial::io_task,
+    serial::usb_link_task,
 };
 
 esp_bootloader_esp_idf::esp_app_desc!();
@@ -182,7 +183,13 @@ fn panic(info: &core::panic::PanicInfo) -> ! {
         esp_hal::system::software_reset()
     }
     #[cfg(not(fw_harness))]
-    recovery::panic_path::stage_and_reset(info)
+    {
+        // lp-link's text mark (the C6's twin): `0xFF` never occurs inside a
+        // COBS-FF frame, so it abandons whatever frame the panic interrupted
+        // on the host's side, and the report after it arrives as text.
+        esp_println::Printer::write_bytes(&[0xFF, b'\r', b'\n']);
+        recovery::panic_path::stage_and_reset(info)
+    }
 }
 
 /// Harness entrypoint. Harnesses own the peripheral singleton themselves
@@ -307,16 +314,18 @@ fn esp32_memory_stats() -> Option<(u32, u32)> {
     // Structural — see this function's doc comment. No OOM retry allocator on
     // this chip, so the honest count of retries that saved an allocation is 0.
     let retry_saves = 0u32;
-    esp_println::println!(
-        "[MEM] free={free} used={used} largest_free={largest} retry_saves={retry_saves}"
-    );
+    // Through `log`, not `esp_println`: since wire proto 30 the USB port is
+    // an lp-link, and raw text written while the link task has a frame in
+    // the endpoint tears the frame and is lost with it. The log ring rides
+    // the link's log channel.
+    log::info!("[MEM] free={free} used={used} largest_free={largest} retry_saves={retry_saves}");
     // Structural — see this function's doc comment. The S3 JITs into the heap,
     // not into a reserved code region, so there is no arena to report and the
     // residency these fields would carry is already in `used` above. Printed
     // anyway, and unconditionally, because the triple is the unit the replay
     // comparator reads: a chip that prints two lines where another prints
     // three is a diff in the transcript, not a gap in the data.
-    esp_println::println!(
+    log::info!(
         "[JIT] used=0 peak=0 cap=0 spans=0 peak_spans=0 allocs=0 frees=0 fails=0 largest_free=0"
     );
     Some((
@@ -328,14 +337,22 @@ fn esp32_memory_stats() -> Option<(u32, u32)> {
 /// The `ClientRequest::Reboot` action: the chip reset the chip-agnostic
 /// server cannot perform itself.
 ///
-/// Called only after the ack frame is written (`LpServer::tick_and_send`),
-/// so the client reads its answer and then this board's boot banner. Not a
-/// crash path: the boot was marked complete on the first served frame, long
-/// before any request could arrive, so this reset never counts toward the
-/// boot-loop safe-mode gate.
+/// Called after the ack is queued (`LpServer::tick_and_send`); on the lp-link
+/// host link queued is not yet delivered, so the reset is left to the link
+/// task, which does it once the host has acknowledged everything (or after a
+/// second) — the client reads its answer, then this board's boot banner.
+/// Not a crash path: the boot was marked complete on the first served frame,
+/// long before any request could arrive, so this reset never counts toward
+/// the boot-loop safe-mode gate.
 #[cfg(not(fw_harness))]
 fn reboot_now() {
     log::info!("[REBOOT] client requested a restart");
+    fw_esp32_common::usb_link::when_drained(reset_now);
+}
+
+/// The reboot itself, run by the link task once the answer is out.
+#[cfg(not(fw_harness))]
+fn reset_now() -> ! {
     esp_hal::system::software_reset()
 }
 
@@ -371,7 +388,7 @@ fn heartbeat_memory_stats() -> Option<lpc_wire::server::MemoryStats> {
 #[cfg(not(fw_harness))]
 struct FirmwareApp {
     server: LpServer,
-    transport: transport::StreamingMessageRouterTransport,
+    transport: UsbLinkTransport,
     time_provider: Esp32TimeProvider,
     watchdog: recovery::watchdog::WatchdogFeeder,
 }
@@ -406,24 +423,25 @@ fn boot_firmware(spawner: embassy_executor::Spawner) -> FirmwareApp {
     // whenever the I/O task has gone silent, so arming it before there is an
     // I/O task to spawn would reset the board every `BOOT_TIMEOUT_MS` forever.
     // Baseline 0 matches the server loop's time provider, which also starts at
-    // ~0; the first io_task tick re-baselines within milliseconds.
+    // ~0; the first link-task tick re-baselines within milliseconds.
     let watchdog = recovery::watchdog::WatchdogFeeder::start(rwdt, 0);
     let boot_guard = lp_recovery::enter(lp_recovery::FrameKind::Boot, "boot").ok();
 
     start_runtime(timg0, sw_int);
     esp_println::println!("[INIT] runtime started");
 
-    spawner.spawn(io_task(usb_device).unwrap());
-    esp_println::println!("[INIT] I/O task spawned");
+    // The host link runs lp-link over USB-Serial-JTAG (plan
+    // `lp-link-usb-cutover`): a random session nonce per boot, so a host
+    // learns the board restarted.
+    let usb_link = UsbLinkShared::leak(esp_hal::rng::Rng::new().random());
+    spawner.spawn(usb_link_task(usb_device, usb_link).unwrap());
+    esp_println::println!("[INIT] USB link task spawned");
 
-    // From here on `log::*` reaches the host over the same serial link; the
-    // `esp_println!` lines above are the pre-transport ones.
-    logger::init(serial::io_task::log_write_to_outgoing);
+    // From here on `log::*` rides the link's log channel; the `esp_println!`
+    // lines above are raw text outside frames.
+    log_ring_logger::init();
 
-    let (incoming, _) = serial::io_task::get_message_channels();
-    let (write_request, write_result) = serial::io_task::get_server_write_channels();
-    let transport =
-        transport::StreamingMessageRouterTransport::new(incoming, write_request, write_result);
+    let transport = UsbLinkTransport::new(usb_link);
 
     let base_fs = mount_filesystem(flash);
 

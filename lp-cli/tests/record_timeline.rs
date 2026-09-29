@@ -1,12 +1,14 @@
 //! `lp-cli record timeline` over a real recording: the shipped binary on
 //! `fixtures/record/emulated-c6-session.jsonl`, trimmed (by `seq`, lines
-//! kept verbatim) from a `?record=` session against an emulated ESP32-C6
-//! (`just studio-dev-emu`, headless Chrome, 2026-09-26, wire proto 28 with
-//! the learned dictionary): connect and identify, push and open the PLAYFUL
-//! choker, home and back (which reopens it), Play, back to Devices. Wire
-//! lines are kept only from the link's start through its first heartbeat: a
-//! learned-dictionary stream decodes only from its beginning, so a later
-//! chunk without the ones before it would not read.
+//! kept verbatim, with `fixtures/record/trim_session.py <rec> 165 141 37.4 37.6`)
+//! from a `?record=` session against an emulated ESP32-C6 on `lp-cli emu
+//! serve` (headless Chrome, 2026-09-27, wire proto 30: the USB link is an
+//! lp-link, replies packed): connect and identify, push the PLAYFUL choker,
+//! open it in the editor, then the cable pulled at ~37 s and put back at
+//! ~44 s. Wire lines are kept from the link's first chunk through the access
+//! requests' answers (the host's stop before its `accessAdd`, which carries
+//! the browser's key): a link's frames (and its learned table) decode only
+//! from its start.
 
 use std::path::Path;
 use std::process::Command;
@@ -17,48 +19,59 @@ fn a_real_recording_reads_as_a_timeline() {
     let lines: Vec<&str> = out.lines().collect();
 
     assert!(
-        lines[0].starts_with("  +0.000s  SESSION  cddf7c3ee003561a · "),
+        lines[0].starts_with("  +0.000s  SESSION  4cd98d52a7be79e7 · "),
         "{out}"
     );
     for expected in [
-        // The page's hello, over its Web Serial write…
-        "  +5.193s  WIRE  →  serial:1  hello id=1 25 B",
-        // …the board's boot text, torn across chunks and put back together…
-        "  +5.257s  WIRE  ←  serial:1  | [INIT] Initializing board...",
-        // …and, once it packs its replies, a learned JSON Pack frame decoded.
-        "  +5.279s  WIRE  ←  serial:1  accessList id=1073741824 71 B packed",
-        "  +5.264s  REQ      c11#1073741824 access.list sent",
-        "  +5.286s  REQ      c11#1073741824 access.list answered in 22.0 ms",
-        " +15.506s  ROUTE    /device/mac:a0:f2:62:87:b4:8c → \
-         /p/playful-choker-prjk73kh54gdkdrj608?on=mac:a0:f2:62:87:b4:8c   (slug-heal)",
-        " +26.527s  OPEN     on-device:uploading",
-        " +40.599s  TOAST    [info] Closed XIAO ESP32-C6 · Sep 26 — the board keeps running",
-        " +40.746s  REQ      c15#1090519058 project.read failed in 64.0 ms: \
-         server error: Project not found: handle 1",
+        // Both ends open a link session (the handshake's two SYNs)…
+        "  +0.124s  WIRE  →  serial:1  ~ link session 0xf8d6c9a1 (a reboot, reload or reconnect)",
+        "  +0.126s  WIRE  ←  serial:1  ~ link session 0x0d83b3e2 (a reboot, reload or reconnect)",
+        // …the board's log lines ride the link's log channel…
+        "  +0.130s  WIRE  ←  serial:1  | [WARN] fw_esp32_common::lp_fs: [FS] Mount failed \
+         (filesystem corrupt), formatting partition...",
+        // …its hello is the first message of the session, and the page opts in…
+        "  +0.132s  WIRE  ←  serial:1  hello id=0 579 B",
+        "  +0.133s  WIRE  →  serial:1  setEncoding id=9007199254740991 81 B",
+        // …after which replies come as learned JSON Pack payloads, decoded.
+        "  +0.145s  WIRE  ←  serial:1  hello id=1 489 B packed",
+        "  +0.161s  WIRE  ←  serial:1  accessList id=1073741824 61 B packed",
+        "  +0.159s  REQ      c2#1073741824 access.list sent",
+        "  +0.180s  REQ      c2#1073741824 access.list answered in 21.0 ms",
+        " +18.160s  ROUTE    /device/mac:a0:f2:62:87:b4:8c → \
+         /p/playful-choker-prjb64m0s0r1sya5ke3?on=mac:a0:f2:62:87:b4:8c   (slug-heal)",
+        // The cable pull: the read in flight fails at once, and Studio goes
+        // back to Devices.
+        " +37.442s  CMD      DeviceHotplug/Disconnected",
+        " +37.489s  REQ      c10#4311744602 project.read failed in 0.0 ms: transport error: \
+         Transport error: The emulated board was detached.",
+        " +43.729s  CMD      DeviceHotplug/Connected",
     ] {
         assert!(lines.contains(&expected), "missing {expected:?} in:\n{out}");
     }
     assert!(!out.contains("undecodable"), "{out}");
+    assert!(!out.contains("unreadable"), "{out}");
 }
 
 #[test]
 fn kinds_since_and_raw_narrow_the_same_recording() {
-    let out = timeline(&["--kinds", "route,error", "--since", "40"]);
+    let out = timeline(&["--kinds", "route,error", "--since", "37"]);
     assert_eq!(
         out.lines().collect::<Vec<_>>(),
         [
-            " +40.573s  ROUTE    /p/playful-choker-prjk73kh54gdkdrj608/play?on=mac:a0:f2:62:87:b4:8c \
-             → /p/playful-choker-prjk73kh54gdkdrj608?on=mac:a0:f2:62:87:b4:8c   (browser-nav)",
-            " +40.615s  ROUTE    /p/playful-choker-prjk73kh54gdkdrj608?on=mac:a0:f2:62:87:b4:8c \
-             → /devices   (browser-nav)",
-            " +40.746s  ERROR    [warn/studio:lpa_client::pull_loop] project read id=1090519058: \
-             stream error after 1 frames: Server(\"Project not found: handle 1\")",
+            " +37.490s  ERROR    [warn/studio:lpa_client::pull_loop] project read id=4311744602: \
+             transport error after 0 frames: Transport error: The emulated board was detached.",
+            " +37.493s  ERROR    [warn/studio] the board under the editor went away; the editor \
+             is closed",
+            " +37.511s  ROUTE    /p/playful-choker-prjb64m0s0r1sya5ke3?on=mac:a0:f2:62:87:b4:8c \
+             → /devices   (open-ended: home view shown, no open in flight, open stage idle, no \
+             mismatch, saw_opening, no route open pending)",
         ]
     );
 
     let raw = timeline(&["--kinds", "wire", "--wire", "raw"]);
+    // The host's first chunk is a link frame: `0x00`-delimited, COBS inside.
     assert!(
-        raw.contains("  +5.193s  WIRE  →  serial:1  25 B  \"M!{\\\"id\\\":1,"),
+        raw.contains("  +0.124s  WIRE  →  serial:1  23 B  00 02 03 01 01 05 a1 c9 d6 f8"),
         "{raw}"
     );
 }

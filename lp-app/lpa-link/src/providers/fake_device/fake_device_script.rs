@@ -53,7 +53,7 @@ pub enum FakeBootState {
     ForeignFirmware,
     /// LightPlayer firmware: scripted boot output, the real M2-shaped
     /// server-start line, then a REAL host `LpServer` over `LpFsMemory`
-    /// speaking `M!` frames (including the unsolicited wire hello).
+    /// speaking lp-link (a hello first on every link session).
     LightPlayer(FakeLightPlayerState),
 }
 
@@ -91,6 +91,11 @@ pub struct FakeLightPlayerState {
     /// shared-UART starvation debt). Combined with
     /// [`heartbeat_interval`](Self::heartbeat_interval) this reproduces the
     /// wire that defeats any frame-gap timeout: alive, but never answering.
+    ///
+    /// The hello a board says first on every lp-link session is an answer
+    /// too (to the host's handshake), so it is swallowed as well: a starved
+    /// board identifies itself only once it heals and a hello request is
+    /// answered.
     pub drop_responses: bool,
     /// Emit synthetic unsolicited id-0 heartbeat frames on this cadence,
     /// like real firmware's server loop (every 5 s on hardware). The fake's

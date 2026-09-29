@@ -165,6 +165,10 @@ pub struct UiStudioView {
     /// The editor lens's login line when its board is reached over
     /// Bluetooth ("Unlocked by Yona's MacBook"), for Play's header.
     pub lens_access_line: Option<String>,
+    /// The editor's board is riding out a link stall or reset (plan D13):
+    /// the page keeps the project and shows this strip instead of leaving
+    /// for Devices. `None` while the link is healthy.
+    pub lens_reconnecting: Option<crate::app::studio::UiLensReconnecting>,
     /// What the last USB connect added to a device on its own (plan D6),
     /// for the toast with Undo (`AccessCommand::UndoAutoAdd`). A new
     /// `generation` is a new toast.
@@ -190,6 +194,7 @@ impl UiStudioView {
             dirty: crate::DirtySummary::clean(),
             login_prompt: None,
             lens_access_line: None,
+            lens_reconnecting: None,
             access_added: None,
         }
     }
@@ -197,6 +202,15 @@ impl UiStudioView {
     /// The lens board's login line (BLE M6).
     pub fn with_lens_access_line(mut self, line: Option<String>) -> Self {
         self.lens_access_line = line;
+        self
+    }
+
+    /// The "Reconnecting…" strip (plan D13).
+    pub fn with_lens_reconnecting(
+        mut self,
+        reconnecting: Option<crate::app::studio::UiLensReconnecting>,
+    ) -> Self {
+        self.lens_reconnecting = reconnecting;
         self
     }
 

@@ -1,56 +1,37 @@
-//! The USB-Serial-JTAG link's connection state machine, without the chip.
+//! Whether a USB host enumerates the board, without the chip.
 //!
-//! Two independent signals decide whether protocol writes should be
-//! attempted:
-//!
-//! 1. **Cable/enumeration** — SOF (Start of Frame) packets. USB full-speed
-//!    hosts send SOF every 1 ms; if they stop, the cable is unplugged or the
-//!    device de-enumerated. (Same approach as ESP-IDF's
-//!    `usb_serial_jtag_connection_monitor.c`.)
-//! 2. **Host application draining** — SOF keeps arriving as long as the
-//!    cable is plugged, even when no application has the port open. In that
-//!    state the TX FIFO fills and every write times out; unchecked, those
-//!    timeouts stall the io task (frame stutter) and once starved the
-//!    recovery watchdog reboots the device. Consecutive write timeouts
-//!    therefore latch "not draining" and writes are dropped fast until the
-//!    host proves itself again (incoming bytes, or a periodic probe write
-//!    succeeding).
+//! USB full-speed hosts send a SOF (Start of Frame) packet every 1 ms; if they
+//! stop, the cable is out or the device de-enumerated. (Same approach as
+//! ESP-IDF's `usb_serial_jtag_connection_monitor.c`.) A charger or power bank
+//! sends none, so it does not count as a host.
 //!
 //! Reading the SOF bit is a chip fact and stays in each chip's
-//! `board::<chip>::usb_connection`; deciding what it *means* is not, and
-//! lives here — where it can be driven by a host test rather than only by a
-//! board. Both native-USB firmwares (C6, S3) held byte-identical copies of
-//! this logic before M6 P1b, and adding the timestamps to both copies is
-//! exactly the duplication that would have drifted.
+//! `board::<chip>::usb_connection`; deciding what it *means* is not, and lives
+//! here, where a host test can drive it. Two readers use the answer: the USB
+//! link task (a frame is not written while nothing enumerates the board —
+//! it would only time out) and the C6's power platform (switch-mode power-off
+//! must not drop a board a computer is talking to).
 //!
-//! Every transition also stamps [`crate::serial::link_counters`], which is
-//! the part that makes the state machine *observable*: both `log::info!`
-//! lines below are written to the outgoing queue and then dropped by the
-//! latch they report, because that queue is gated on `is_connected()`. On a
-//! USB link they are self-erasing. The stamps are not — they ride the next
-//! heartbeat after the host comes back, on the device's own clock, and they
-//! are readable from outside a running image as symbols (the emulator's
-//! `--probe`).
+//! Until the USB link moved onto lp-link (plan `lp-link-usb-cutover`) this
+//! also held a "host not draining" latch that dropped replies after two write
+//! timeouts, and a link epoch that reset the packed encoding when the host
+//! went away. lp-link's session does both jobs now (D4, D8): its stall
+//! detection and its `Reset`, on both ends at once.
 
-/// Missed-poll threshold before declaring disconnected.
-/// io_task polls every ~2 ms, so 3 misses ≈ 6 ms without SOF — enough to
-/// avoid false disconnects from tick jitter while still detecting quickly.
+/// Missed polls before declaring the host gone. The link task samples SOF at
+/// most every 2 ms and at least every 10 ms, and the bit is latched between
+/// samples, so three samples without one is at least 6 ms without SOF —
+/// enough to ride out tick jitter while still noticing an unplug quickly.
+/// (Sampling faster than the 1 ms SOF period would count misses that are not
+/// there; the task's rate limit is what makes this threshold mean time.)
 pub const DISCONNECT_THRESHOLD: u8 = 3;
 
-/// Consecutive write timeouts before latching "host not draining".
-/// One timeout can be a hiccup; two in a row (each a full write timeout)
-/// means nobody is reading.
-pub const NOT_DRAINING_THRESHOLD: u8 = 2;
-
-/// The chip-free half of a USB-Serial-JTAG connection monitor.
+/// The chip-free half of a USB-Serial-JTAG cable monitor.
 ///
-/// The caller supplies the two chip facts: whether a SOF arrived since the
-/// last poll, and what the device clock reads. Nothing here touches a
-/// register or a timer.
+/// The caller supplies the chip fact: whether a SOF arrived since the last
+/// poll. Nothing here touches a register or a timer.
 pub struct UsbLinkState {
     no_sof_count: u8,
-    write_timeouts: u8,
-    host_draining: bool,
     /// `true` when the link is not really USB at all and SOF must not gate
     /// writes — the `spike_uart0_link` build, where the host link is UART0
     /// and no cable exists to detect.
@@ -61,8 +42,6 @@ impl UsbLinkState {
     pub const fn new(always_enumerated: bool) -> Self {
         Self {
             no_sof_count: 0,
-            write_timeouts: 0,
-            host_draining: true,
             always_enumerated,
         }
     }
@@ -76,197 +55,51 @@ impl UsbLinkState {
             self.no_sof_count = 0;
         } else {
             self.no_sof_count = self.no_sof_count.saturating_add(1);
-            if !self.always_enumerated && self.no_sof_count == DISCONNECT_THRESHOLD {
-                // The cable just went: a new link starts at the next
-                // enumeration (see `link_epoch`).
-                crate::serial::link_epoch::bump();
-            }
-            if !self.is_enumerated() {
-                // Physical disconnect resets the draining latch: the next
-                // enumeration starts from a clean slate. Deliberately NOT a
-                // "draining again" stamp — nobody drained anything; the
-                // question simply stopped being asked.
-                self.write_timeouts = 0;
-                self.host_draining = true;
-            }
         }
     }
 
-    /// A serial write timed out or failed: evidence nobody is draining.
-    /// `now_ms` is the device clock, milliseconds since boot.
-    pub fn note_write_timeout(&mut self, now_ms: u32) {
-        self.write_timeouts = self.write_timeouts.saturating_add(1);
-        if self.write_timeouts >= NOT_DRAINING_THRESHOLD && self.host_draining {
-            self.host_draining = false;
-            crate::serial::link_counters::note_host_not_draining(now_ms);
-            // On USB-Serial-JTAG this is how a closed port looks: whoever
-            // opens it next is a new link (see `link_epoch`).
-            crate::serial::link_epoch::bump();
-            log::info!("[io_task] host not draining; dropping protocol writes");
-        }
-    }
-
-    /// A serial write completed, or bytes arrived from the host: the host
-    /// application is provably alive and draining.
-    pub fn note_host_active(&mut self, now_ms: u32) {
-        self.write_timeouts = 0;
-        if !self.host_draining {
-            self.host_draining = true;
-            crate::serial::link_counters::note_host_draining_again(now_ms);
-            log::info!("[io_task] host draining again; resuming protocol writes");
-        }
-    }
-
-    /// Should a probe write be attempted? True while enumerated but latched
-    /// not-draining — the probe is the self-healing path for hosts that
-    /// reopen the port without ever sending bytes (e.g. a passive monitor).
-    pub fn needs_probe(&self) -> bool {
-        self.is_enumerated() && !self.host_draining
-    }
-
+    /// A USB host enumerates the board (or the link is not USB at all).
     pub fn is_enumerated(&self) -> bool {
         self.always_enumerated || self.no_sof_count < DISCONNECT_THRESHOLD
-    }
-
-    /// Attempt protocol writes only when the cable is enumerated AND the
-    /// host application is draining the port.
-    pub fn is_connected(&self) -> bool {
-        self.is_enumerated() && self.host_draining
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::serial::{link_counters, link_epoch};
 
-    /// The whole negative control, on the host — and deliberately **one**
-    /// test function.
-    ///
-    /// The stamps ride module-global counters (the ones the heartbeat reads
-    /// and the ones the emulator's `--probe` resolves by symbol), so two test
-    /// functions driving two `UsbLinkState`s would race for them under the
-    /// harness's threads. One function, three phases, in order.
     #[test]
-    fn the_monitor_latches_resumes_and_stamps_each_transition() {
-        assert_eq!(
-            link_counters::host_not_draining_ms(),
-            None,
-            "nothing may have latched before this test runs"
-        );
-
-        // The link epoch rides a module global too; only this test moves it.
-        let epoch_at_start = link_epoch::current();
-
-        // --- phase 1: attached, nobody reading -----------------------------
+    fn the_cable_is_gone_after_three_polls_without_sof_and_back_with_one() {
         let mut link = UsbLinkState::new(false);
-        assert!(link.is_connected(), "a fresh link is optimistic");
-
-        // Attached: SOF every poll, so enumeration never lapses.
+        assert!(link.is_enumerated(), "a fresh monitor is optimistic");
         for _ in 0..10 {
             link.poll_with(true);
         }
         assert!(link.is_enumerated());
-        assert!(link.is_connected());
-        assert!(!link.needs_probe(), "nothing to probe while it looks fine");
 
-        // One timeout is a hiccup, not a verdict.
-        link.note_write_timeout(1_100);
-        assert!(link.is_connected(), "one timeout must not latch");
-        assert_eq!(
-            link_counters::not_draining_count(),
-            0,
-            "one timeout is not a silence"
-        );
-
-        // Two in a row is.
-        assert_eq!(link_epoch::current(), epoch_at_start, "no link lost yet");
-        link.note_write_timeout(1_350);
-        assert!(!link.is_connected(), "latched");
-        assert_eq!(
-            link_epoch::current(),
-            epoch_at_start + 1,
-            "a host that stopped draining closed its link"
-        );
-        assert!(link.needs_probe(), "and the probe path opens");
-        assert_eq!(link_counters::host_not_draining_ms(), Some(1_350));
-        assert_eq!(
-            link_counters::host_draining_again_ms(),
-            None,
-            "not recovered yet — and `None` means exactly that on the wire"
-        );
-        assert_eq!(link_counters::not_draining_count(), 1);
-
-        // Further timeouts while latched must not re-latch: the count is
-        // "how many silences", not "how many failed writes".
-        link.note_write_timeout(1_600);
-        link.note_write_timeout(1_850);
-        assert!(!link.is_connected());
-        assert_eq!(link_counters::not_draining_count(), 1);
-        assert_eq!(link_counters::host_not_draining_ms(), Some(1_350));
-
-        // The host opens the port; the next probe write completes.
-        link.note_host_active(8_120);
-        assert!(link.is_connected(), "resumed");
-        assert!(!link.needs_probe());
-        assert_eq!(link_counters::host_not_draining_ms(), Some(1_350));
-        assert_eq!(link_counters::host_draining_again_ms(), Some(8_120));
-        assert_eq!(link_counters::not_draining_count(), 1);
-        assert!(
-            link_counters::host_not_draining_ms() < link_counters::host_draining_again_ms(),
-            "the order is the claim: silence, then recovery"
-        );
-
-        // --- phase 2: the cable, not the application -----------------------
-        // A physical disconnect clears the latch without claiming a recovery:
-        // re-enumeration starts optimistic, and the next two timeouts are a
-        // new silence rather than a continuation of the old one.
-        link.note_write_timeout(9_000);
-        link.note_write_timeout(9_250);
-        assert!(!link.is_connected());
-        assert_eq!(link_counters::not_draining_count(), 2);
-        assert_eq!(link_counters::host_not_draining_ms(), Some(9_250));
-        assert_eq!(
-            link_counters::host_draining_again_ms(),
-            Some(8_120),
-            "the earlier recovery stamp stands until it is superseded — the \
-             pair is read together, never as a duration on its own"
-        );
-
-        assert_eq!(link_epoch::current(), epoch_at_start + 2);
-        for _ in 0..DISCONNECT_THRESHOLD + 5 {
+        for _ in 0..DISCONNECT_THRESHOLD - 1 {
             link.poll_with(false);
         }
+        assert!(link.is_enumerated(), "a missed SOF or two is jitter");
+        link.poll_with(false);
         assert!(!link.is_enumerated(), "cable gone");
-        assert_eq!(
-            link_epoch::current(),
-            epoch_at_start + 3,
-            "losing the cable ends the link, once however long it stays out"
-        );
-        assert!(!link.needs_probe(), "no cable, no probe");
-        assert_eq!(
-            link_counters::host_draining_again_ms(),
-            Some(8_120),
-            "losing the cable is not a recovery: nobody drained anything, the \
-             question simply stopped being asked"
-        );
+        for _ in 0..300 {
+            link.poll_with(false);
+        }
+        assert!(!link.is_enumerated(), "and stays gone, however long");
 
         link.poll_with(true);
-        assert!(link.is_connected(), "re-attach starts optimistic");
+        assert!(link.is_enumerated(), "one SOF and it is back");
+    }
 
-        // --- phase 3: the link that is not USB -----------------------------
-        // The `spike_uart0_link` build: the host link is UART0, there is no
-        // cable, and SOF must never gate a write.
+    /// The `spike_uart0_link` build: the host link is UART0, there is no
+    /// cable, and SOF must never gate a write.
+    #[test]
+    fn a_link_that_is_not_usb_is_always_enumerated() {
         let mut uart = UsbLinkState::new(true);
         for _ in 0..100 {
             uart.poll_with(false);
         }
         assert!(uart.is_enumerated());
-        assert!(uart.is_connected());
-        assert_eq!(
-            link_epoch::current(),
-            epoch_at_start + 3,
-            "no cable, no cable loss"
-        );
     }
 }

@@ -319,6 +319,7 @@ pub(crate) fn DeviceRosterCard(
                             DeviceCardMenu {
                                 device,
                                 title: card.title.clone(),
+                                link_counters: card.link_counters,
                                 initially_open: menu_initially_open,
                                 on_action,
                             }
@@ -663,6 +664,12 @@ pub(crate) fn DeviceRosterCard(
 /// today that is one: Rename. Every board verb keeps its zone (P9), which
 /// is why this is a menu and not a fourth verb row.
 ///
+/// It is also the card's detail view: under Rename, the board's link
+/// counters off its heartbeat (plan D13) — resends, damaged frames,
+/// restarts, stalls and traffic. Details on demand, in a panel that floats,
+/// so they cost the fixed-height card nothing; absent on a link that
+/// reports none.
+///
 /// Not on the pending card: a link that has not identified itself has no
 /// intent to write a name into — its name rides the Flash gesture instead
 /// (the board pick's name field).
@@ -671,14 +678,19 @@ pub(crate) fn DeviceRosterCard(
 fn DeviceCardMenu(
     device: DeviceId,
     title: String,
+    #[props(default)] link_counters: Option<lpa_studio_core::DeviceLinkCounters>,
     #[props(default = false)] initially_open: bool,
     on_action: EventHandler<UiAction>,
 ) -> Element {
+    let menu_title = match link_counters.is_some() {
+        true => "Rename this device, or see how its link is doing.",
+        false => "Rename this device.",
+    };
     rsx! {
         DetailPopover {
             icon: StudioIconName::More,
             label: "Device menu".to_string(),
-            title: "Rename this device.".to_string(),
+            title: menu_title.to_string(),
             placement: PopoverPlacement::BottomEnd,
             initially_open,
             trigger: rsx! {
@@ -689,9 +701,46 @@ fn DeviceCardMenu(
                 "{HEADER_MENU_TRIGGER_CLASS} tw:bg-white/10 tw:text-strong-foreground"
             ),
             DeviceRenameSection { device, title, on_action }
+            if let Some(counters) = link_counters {
+                DeviceLinkSection { counters }
+            }
         }
     }
 }
+
+/// The ⋯ menu's link section: the board's counters as label/value rows,
+/// words and units from core (`link_counter_rows`). A count the link had
+/// to recover from wears the warning tone; a clean link reads as zeros.
+#[component]
+#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
+fn DeviceLinkSection(counters: lpa_studio_core::DeviceLinkCounters) -> Element {
+    let rows = lpa_studio_core::link_counter_rows(&counters);
+    rsx! {
+        DetailSection { title: Some("Link".to_string()),
+            dl { class: "tw:m-0 tw:grid tw:grid-cols-[auto_1fr] tw:gap-x-4 tw:gap-y-1 tw:text-xs tw:leading-snug",
+                for row in rows {
+                    // A `div` per pair is valid inside `dl`, and gives the
+                    // pair one key; `contents` keeps the grid flat.
+                    div { key: "{row.label}", class: "tw:contents",
+                        dt { class: "tw:m-0 tw:text-muted-foreground", "{row.label}" }
+                        dd { class: if row.notable { LINK_VALUE_NOTABLE_CLASS } else { LINK_VALUE_CLASS },
+                            "{row.value}"
+                        }
+                    }
+                }
+            }
+            p { class: "tw:m-0 tw:text-[11px] tw:leading-snug tw:text-dim-foreground",
+                "{lpa_studio_core::LINK_COUNTERS_CAPTION}"
+            }
+        }
+    }
+}
+
+/// A link counter's value: tabular, selectable, the card's strong ink.
+const LINK_VALUE_CLASS: &str = "tw:m-0 tw:font-mono tw:tabular-nums tw:text-strong-foreground";
+/// …and one the link had to recover from.
+const LINK_VALUE_NOTABLE_CLASS: &str =
+    "tw:m-0 tw:font-mono tw:tabular-nums tw:text-status-warning-foreground";
 
 /// The "Rename" section: one form, on the project card's Rename precedent
 /// (a form in the menu, never a dialog). Prefilled with what the card says
@@ -1373,6 +1422,11 @@ fn preview_slot_sentence(card: &DeviceView, feed: Option<&DeviceCardFeedView>) -
         ),
         None => Some(match feed.liveness {
             FeedLiveness::Waiting => "Waiting for the first frame…".to_string(),
+            // The editor lens holds this board's wire, so the feed does not
+            // pull (ADR 2026-09-06, "never pull under a borrow") — there is
+            // no last frame yet to dim, but "the live feed is coming" would
+            // still be a promise the editor is actively blocking.
+            FeedLiveness::Lens => "Picture paused while the editor is open.".to_string(),
             _ => preview_sentence(card),
         }),
     }
@@ -1636,6 +1690,7 @@ mod tests {
             degraded: None,
             loaded_project: DeviceLoadedProject::Unknown,
             engine_fps: None,
+            link_counters: None,
             can_receive_project: false,
             can_remove_project: false,
             activity: None,
@@ -1885,6 +1940,19 @@ mod tests {
         assert_eq!(
             preview_slot_sentence(&card, Some(&feed_fixture(FeedLiveness::Waiting, true))),
             Some("Waiting for the first frame…".to_string())
+        );
+        // Editor lens, no frame pulled yet (the feed never pulls under the
+        // borrow — ADR 2026-09-06): says why there is no picture rather
+        // than the never-fed card's "the live feed is coming".
+        let lens_no_frame = DeviceCardFeedView {
+            frame: None,
+            liveness: FeedLiveness::Lens,
+            frame_age_secs: None,
+            engine_fps: None,
+        };
+        assert_eq!(
+            preview_slot_sentence(&card, Some(&lens_no_frame)),
+            Some("Picture paused while the editor is open.".to_string())
         );
         assert_eq!(
             preview_slot_sentence(&card, None),

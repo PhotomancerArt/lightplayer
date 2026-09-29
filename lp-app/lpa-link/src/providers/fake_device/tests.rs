@@ -4,6 +4,8 @@ use std::time::{Duration, Instant};
 use lpa_client::stream::DeviceByteStream;
 use lpa_client::transport_serial::create_hardware_serial_transport_pair_with_options;
 
+use lpc_wire::ClientMessage;
+
 use crate::provider::endpoint::LinkEndpointId;
 use crate::providers::fake::FakeProvider;
 use crate::{LinkManagementRequest, LinkManagementResult, LinkProvider};
@@ -15,13 +17,14 @@ fn blank_flash_repeats_the_invalid_header_line() {
     let device = FakeEsp32Device::new(FakeDeviceScript::new(FakeBootState::BlankFlash));
     let mut stream = FakeDeviceByteStream::new(device);
 
-    let lines = read_lines_until(&mut stream, Duration::from_millis(500), |lines| {
-        lines
-            .iter()
-            .filter(|line| line.contains("invalid header: 0xffffffff"))
-            .count()
-            >= 2
-    });
+    let lines =
+        HostPeer::new().read_lines_until(&mut stream, Duration::from_millis(500), |lines| {
+            lines
+                .iter()
+                .filter(|line| line.contains("invalid header: 0xffffffff"))
+                .count()
+                >= 2
+        });
 
     assert!(
         lines
@@ -38,11 +41,12 @@ fn rom_download_mode_announces_waiting_for_download_once() {
     let device = FakeEsp32Device::new(FakeDeviceScript::new(FakeBootState::RomDownloadMode));
     let mut stream = FakeDeviceByteStream::new(device);
 
-    let lines = read_lines_until(&mut stream, Duration::from_millis(300), |lines| {
-        lines
-            .iter()
-            .any(|line| line.contains("waiting for download"))
-    });
+    let lines =
+        HostPeer::new().read_lines_until(&mut stream, Duration::from_millis(300), |lines| {
+            lines
+                .iter()
+                .any(|line| line.contains("waiting for download"))
+        });
 
     assert_eq!(
         lines
@@ -58,9 +62,10 @@ fn foreign_firmware_announces_its_known_boot_string() {
     let device = FakeEsp32Device::new(FakeDeviceScript::new(FakeBootState::ForeignFirmware));
     let mut stream = FakeDeviceByteStream::new(device);
 
-    let lines = read_lines_until(&mut stream, Duration::from_millis(300), |lines| {
-        !lines.is_empty()
-    });
+    let lines =
+        HostPeer::new().read_lines_until(&mut stream, Duration::from_millis(300), |lines| {
+            !lines.is_empty()
+        });
 
     assert!(
         lines
@@ -92,11 +97,12 @@ fn usb_jtag_download_sequence_drops_into_rom_download_mode() {
         stream.set_signals(dtr, rts).unwrap();
     }
 
-    let lines = read_lines_until(&mut stream, Duration::from_millis(300), |lines| {
-        lines
-            .iter()
-            .any(|line| line.contains("waiting for download"))
-    });
+    let lines =
+        HostPeer::new().read_lines_until(&mut stream, Duration::from_millis(300), |lines| {
+            lines
+                .iter()
+                .any(|line| line.contains("waiting for download"))
+        });
     assert!(
         lines
             .iter()
@@ -110,9 +116,10 @@ fn hard_reset_replays_the_current_boot() {
     let device = FakeEsp32Device::new(FakeDeviceScript::new(FakeBootState::ForeignFirmware));
     let mut stream = FakeDeviceByteStream::new(device);
 
-    let first = read_lines_until(&mut stream, Duration::from_millis(300), |lines| {
-        !lines.is_empty()
-    });
+    let first =
+        HostPeer::new().read_lines_until(&mut stream, Duration::from_millis(300), |lines| {
+            !lines.is_empty()
+        });
     assert!(!first.is_empty());
 
     // The hardware transport's reset-after-open dance (RTS pulse, DTR low).
@@ -122,9 +129,10 @@ fn hard_reset_replays_the_current_boot() {
     stream.set_signals(None, Some(true)).unwrap();
     stream.set_signals(None, Some(false)).unwrap();
 
-    let replay = read_lines_until(&mut stream, Duration::from_millis(300), |lines| {
-        !lines.is_empty()
-    });
+    let replay =
+        HostPeer::new().read_lines_until(&mut stream, Duration::from_millis(300), |lines| {
+            !lines.is_empty()
+        });
     assert!(
         replay
             .iter()
@@ -155,8 +163,8 @@ async fn light_player_state_speaks_real_frames_through_the_real_transport() {
     let client =
         lpa_client::TokioLpClient::new_shared(Arc::new(tokio::sync::Mutex::new(transport)));
 
-    // The explicit hello round-trips through the real M! framing; the
-    // unsolicited boot hello is also observed by the client wrapper.
+    // The explicit hello round-trips through the real link; the unsolicited
+    // boot hello is also observed by the client wrapper.
     let hello = client.hello().await.unwrap();
     assert_eq!(hello.proto, lpc_wire::WIRE_PROTO_VERSION);
     assert_eq!(hello.build.package, "fw-esp32c6");
@@ -223,9 +231,10 @@ fn a_heartbeat_carries_identity_so_a_mid_stream_attach_resolves_without_a_hello(
     )));
     let mut stream = FakeDeviceByteStream::new(device);
 
-    let lines = read_lines_until(&mut stream, Duration::from_millis(700), |lines| {
-        lines.iter().any(|line| heartbeat_frame(line).is_some())
-    });
+    let lines =
+        HostPeer::new().read_lines_until(&mut stream, Duration::from_millis(700), |lines| {
+            lines.iter().any(|line| heartbeat_frame(line).is_some())
+        });
 
     let identity = lines
         .iter()
@@ -257,18 +266,21 @@ fn a_reboot_request_is_answered_before_the_device_resets() {
         FakeLightPlayerState::new(),
     )));
     let mut stream = FakeDeviceByteStream::new(device.clone());
+    let mut peer = HostPeer::new();
 
-    // Let the first boot finish so the reboot's banner is unambiguous.
-    read_lines_until(&mut stream, Duration::from_millis(500), |lines| {
-        lines.iter().any(|line| line.contains(BANNER))
+    // Let the first boot finish and the link come up, so the reboot's
+    // banner is unambiguous.
+    peer.read_lines_until(&mut stream, Duration::from_millis(500), |lines| {
+        lines.iter().any(|line| line.contains("\"hello\""))
     });
-    stream
-        .write_all(b"M!{\"id\":7,\"msg\":\"reboot\"}\n")
-        .unwrap();
+    peer.send(ClientMessage {
+        id: 7,
+        msg: lpc_wire::ClientRequest::Reboot,
+    });
 
-    // Each read window starts a fresh byte buffer, so these lines are the
+    // Each read window starts a fresh line list, so these lines are the
     // ones that arrived AFTER the request: the ack, then the second boot.
-    let lines = read_lines_until(&mut stream, Duration::from_millis(1500), |lines| {
+    let lines = peer.read_lines_until(&mut stream, Duration::from_millis(1500), |lines| {
         lines.iter().any(|line| line.contains(BANNER))
     });
 
@@ -310,13 +322,59 @@ fn premature_writes_during_boot_are_discarded_and_counted() {
     )));
     let mut stream = FakeDeviceByteStream::new(device.clone());
 
+    // A request from a host whose session was with the board's previous
+    // boot: a data frame arriving while nothing serves.
     stream
-        .write_all(b"M!{\"id\":1,\"msg\":\"Hello\"}\n")
+        .write_all(&stale_session_request_frame(r#"{"id":1,"msg":"hello"}"#))
         .unwrap();
 
     assert!(
         device.premature_input_bytes() > 0,
-        "bytes written before the server loop runs are dropped, like real hardware"
+        "requests written before the server loop runs are dropped, like real hardware"
+    );
+    assert_eq!(device.premature_input(), "M!{\"id\":1,\"msg\":\"hello\"}\n");
+}
+
+/// A host handshaking with a board that is not serving is not talking
+/// before readiness: its link frames are not requests.
+#[test]
+fn a_host_handshake_before_boot_is_not_premature_input() {
+    let device = FakeEsp32Device::new(FakeDeviceScript::new(FakeBootState::BlankFlash));
+    let mut stream = FakeDeviceByteStream::new(device.clone());
+
+    HostPeer::new().read_lines_until(&mut stream, Duration::from_millis(300), |_| false);
+
+    assert_eq!(device.premature_input_bytes(), 0);
+}
+
+/// A byte lost on the way to the host is resent by the link: the host reads
+/// the hello anyway, and never a damaged message.
+#[test]
+fn a_dropped_byte_is_resent_under_the_messages() {
+    let device = FakeEsp32Device::new(FakeDeviceScript::new(FakeBootState::LightPlayer(
+        FakeLightPlayerState::new(),
+    )));
+    let mut stream = FakeDeviceByteStream::new(device.clone());
+    let mut peer = HostPeer::new();
+    // Let the boot text through, then lose one byte inside the link's frames.
+    peer.read_lines_until(&mut stream, Duration::from_millis(300), |lines| {
+        lines
+            .iter()
+            .any(|line| line.contains("starting server loop"))
+    });
+    device.set_failure_plan(FakeFailurePlan::none().with_drop_byte_at(device.served_bytes() + 40));
+
+    let lines = peer.read_lines_until(&mut stream, Duration::from_millis(2000), |lines| {
+        lines.iter().any(|line| line.contains("\"hello\""))
+    });
+
+    assert!(
+        lines.iter().any(|line| line.contains("\"hello\"")),
+        "the hello arrives whole: {lines:?}"
+    );
+    assert!(
+        peer.port.counters().damaged + peer.port.counters().stale_partials > 0,
+        "the lost byte damaged a frame the link then resent"
     );
 }
 
@@ -364,27 +422,24 @@ async fn mid_frame_cut_truncates_a_frame_then_stalls() {
     let device = FakeEsp32Device::new(FakeDeviceScript::new(FakeBootState::LightPlayer(
         FakeLightPlayerState::new(),
     )));
-    // Cut the very first protocol frame (the unsolicited hello) in half.
+    // Cut the frame carrying the very first reply (the hello) in half.
     device.set_failure_plan(FakeFailurePlan::none().with_cut_mid_frame_after_frames(0));
-    let mut stream = FakeDeviceByteStream::new(device);
+    let mut stream = FakeDeviceByteStream::new(device.clone());
+    let mut peer = HostPeer::new();
 
-    let mut collected = Vec::new();
-    let deadline = Instant::now() + Duration::from_millis(700);
-    while Instant::now() < deadline {
-        let mut buf = [0u8; 256];
-        match stream.read_available(&mut buf) {
-            Ok(n) => collected.extend_from_slice(&buf[..n]),
-            Err(error) => panic!("mid-frame cut must stall, not error: {error}"),
-        }
-        std::thread::sleep(Duration::from_millis(5));
-    }
+    let lines = peer.read_lines_until(&mut stream, Duration::from_millis(700), |_| false);
 
-    let text = String::from_utf8_lossy(&collected);
-    let frame_start = text.find("M!").expect("a frame starts");
     assert!(
-        !text[frame_start..].contains('\n'),
-        "the cut frame never completes its line: {text:?}"
+        lines
+            .iter()
+            .any(|line| line.contains("starting server loop")),
+        "the board booted: {lines:?}"
     );
+    assert!(
+        !lines.iter().any(|line| line.starts_with("M!")),
+        "the cut reply never completes, and the board says nothing after it: {lines:?}"
+    );
+    assert!(peer.saw_up, "the link came up before the board hung");
 }
 
 #[tokio::test]
@@ -397,9 +452,10 @@ async fn log_flood_interleaves_device_lines_between_frames() {
     );
     let mut stream = FakeDeviceByteStream::new(device);
 
-    let lines = read_lines_until(&mut stream, Duration::from_millis(700), |lines| {
-        lines.iter().any(|line| line.starts_with("M!"))
-    });
+    let lines =
+        HostPeer::new().read_lines_until(&mut stream, Duration::from_millis(700), |lines| {
+            lines.iter().any(|line| line.starts_with("M!"))
+        });
 
     let frame_index = lines
         .iter()
@@ -436,11 +492,12 @@ async fn provider_manage_runs_scripted_flash_and_erase_transitions() {
     // Flashed device boots as LightPlayer: its stream announces the M2
     // server-start line.
     let mut stream = FakeDeviceByteStream::new(device.clone());
-    let lines = read_lines_until(&mut stream, Duration::from_millis(700), |lines| {
-        lines
-            .iter()
-            .any(|line| line.contains("fw-esp32 initialized, starting server loop"))
-    });
+    let lines =
+        HostPeer::new().read_lines_until(&mut stream, Duration::from_millis(700), |lines| {
+            lines
+                .iter()
+                .any(|line| line.contains("fw-esp32 initialized, starting server loop"))
+        });
     assert!(
         lines.iter().any(|line| line.contains(&format!(
             "proto={} commit={FAKE_IMAGE_IDENTITY}",
@@ -454,11 +511,12 @@ async fn provider_manage_runs_scripted_flash_and_erase_transitions() {
         .await
         .unwrap();
     assert!(matches!(erased, LinkManagementResult::EraseDeviceFlash(_)));
-    let lines = read_lines_until(&mut stream, Duration::from_millis(500), |lines| {
-        lines
-            .iter()
-            .any(|line| line.contains("invalid header: 0xffffffff"))
-    });
+    let lines =
+        HostPeer::new().read_lines_until(&mut stream, Duration::from_millis(500), |lines| {
+            lines
+                .iter()
+                .any(|line| line.contains("invalid header: 0xffffffff"))
+        });
     assert!(
         lines
             .iter()
@@ -500,26 +558,96 @@ async fn scripted_manage_failure_fails_the_next_operation_once() {
     provider.close(session.id()).await.unwrap();
 }
 
-/// Poll the stream, splitting output into lines, until `done` or timeout.
-fn read_lines_until(
-    stream: &mut FakeDeviceByteStream,
-    timeout: Duration,
-    done: impl Fn(&[String]) -> bool,
-) -> Vec<String> {
-    let deadline = Instant::now() + timeout;
-    let mut bytes = Vec::new();
-    loop {
-        let mut buf = [0u8; 256];
-        if let Ok(n) = stream.read_available(&mut buf) {
-            bytes.extend_from_slice(&buf[..n]);
+/// A host's end of the fake board's link, driven by hand: what it reads
+/// comes out as lines, console text as it is and each wire message as its
+/// `M!{json}` line.
+struct HostPeer {
+    port: lpc_wire::WireLinkPort,
+    started: Instant,
+    saw_up: bool,
+}
+
+impl HostPeer {
+    fn new() -> Self {
+        Self {
+            port: lpc_wire::WireLinkPort::new(
+                lpa_client::transport_serial::fresh_link_nonce(),
+                false,
+            ),
+            started: Instant::now(),
+            saw_up: false,
         }
-        let lines: Vec<String> = String::from_utf8_lossy(&bytes)
-            .lines()
-            .map(str::to_string)
-            .collect();
-        if done(&lines) || Instant::now() >= deadline {
-            return lines;
-        }
-        std::thread::sleep(Duration::from_millis(5));
     }
+
+    fn now(&self) -> u64 {
+        self.started.elapsed().as_micros() as u64
+    }
+
+    fn send(&mut self, message: ClientMessage) {
+        self.port.send_client(&message).unwrap();
+    }
+
+    /// Run the link over `stream`, collecting lines, until `done` or timeout.
+    fn read_lines_until(
+        &mut self,
+        stream: &mut FakeDeviceByteStream,
+        timeout: Duration,
+        done: impl Fn(&[String]) -> bool,
+    ) -> Vec<String> {
+        let deadline = Instant::now() + timeout;
+        let mut lines = Vec::new();
+        loop {
+            let now = self.now();
+            while let Some(frame) = self.port.poll_transmit(now) {
+                stream.write_all(frame).unwrap();
+            }
+            let mut buf = [0u8; 256];
+            if let Ok(n) = stream.read_available(&mut buf) {
+                let now = self.now();
+                self.port.on_bytes(now, &buf[..n]);
+            }
+            while let Some(read) = self.port.poll_read() {
+                match read {
+                    lpc_wire::PortRead::Message(payload) => {
+                        lines.push(format!("M!{}", payload.json))
+                    }
+                    lpc_wire::PortRead::Log(line) => lines.push(line),
+                    lpc_wire::PortRead::Up { .. } => self.saw_up = true,
+                    _ => {}
+                }
+            }
+            if done(&lines) || Instant::now() >= deadline {
+                return lines;
+            }
+            std::thread::sleep(Duration::from_millis(2));
+        }
+    }
+}
+
+/// The bytes of a data frame carrying `json` from a host whose session was
+/// with some other board end (the board's previous boot).
+fn stale_session_request_frame(json: &str) -> Vec<u8> {
+    use lpc_wire::lp_link::{CH_PROTO, Link, LinkConfig, SelectiveRepeat};
+    let mut host: Link<SelectiveRepeat> = Link::new(LinkConfig::usb(), 0x1111_0001);
+    let mut board: Link<SelectiveRepeat> = Link::new(LinkConfig::usb(), 0x2222_0001);
+    for step in 0..20u64 {
+        let now = step * 1_000;
+        while let Some(frame) = host.poll_transmit(now) {
+            let frame = frame.to_vec();
+            board.on_bytes(now, &frame);
+        }
+        while let Some(frame) = board.poll_transmit(now) {
+            let frame = frame.to_vec();
+            host.on_bytes(now, &frame);
+        }
+        while host.recv().is_some() {}
+        while board.recv().is_some() {}
+    }
+    assert_eq!(host.state(), lpc_wire::lp_link::LinkState::Established);
+    host.send(CH_PROTO, json.as_bytes()).unwrap();
+    let mut bytes = Vec::new();
+    while let Some(frame) = host.poll_transmit(30_000) {
+        bytes.extend_from_slice(frame);
+    }
+    bytes
 }

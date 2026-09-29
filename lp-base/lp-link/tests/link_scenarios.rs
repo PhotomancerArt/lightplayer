@@ -148,9 +148,47 @@ fn text_outside_frames_passes_through() {
     );
 }
 
-/// The board-side convention for a panic that interrupts a frame: write
-/// `0x00`, then the text. The torn frame fails, the text lands in the
-/// deframer's next "frame", and the idle flush hands it up as console text.
+/// main's (proto-29) firmware sends a short marker containing `0x00` when
+/// the port opens. Taken as a frame start, followed by an old board's
+/// continuous plain-text console (no quiet gap for `frame_abandon` to fire
+/// on), that must not hold the console text for 3 s: once the misread
+/// partial reaches `max_frame` it flushes as text at once.
+#[test]
+fn text_after_a_stray_leading_zero_is_not_held_for_frame_abandon() {
+    let (_a, mut b) = pair::<SelectiveRepeat>(LinkConfig::usb());
+    let now = 0;
+    // The stray 0x00, then an M!-line stream well past max_frame (531 B for
+    // the usb preset) with no gap, so frame_abandon never gets a chance.
+    let mut stream = vec![0u8];
+    for i in 0..100u32 {
+        stream.extend_from_slice(format!("M!{i:05}\n").as_bytes());
+    }
+    b.on_bytes(now, &stream);
+    let texts: Vec<String> = drain(&mut b)
+        .into_iter()
+        .filter_map(|e| match e {
+            LinkEvent::Text(t) => Some(String::from_utf8(t).unwrap()),
+            _ => None,
+        })
+        .collect();
+    assert!(
+        !texts.is_empty(),
+        "an M!-line stream after a stray 0x00 must arrive as text without \
+         waiting on frame_abandon, at time `now` with no idle at all"
+    );
+    assert!(texts.concat().starts_with("M!00000\n"), "{texts:?}");
+    assert_eq!(
+        b.counters().stale_partials,
+        0,
+        "flushed before it went stale"
+    );
+}
+
+/// The older board-side convention for a panic that interrupts a frame:
+/// write `0x00`, then the text. The torn frame fails, the text lands in the
+/// deframer's next "frame", and once that partial has been quiet for
+/// `frame_abandon` it is handed up as console text. (The product writes the
+/// `0xFF` text mark instead, which needs no timeout at all.)
 #[test]
 fn panic_text_after_a_torn_frame_survives_when_it_starts_with_a_delimiter() {
     let (mut a, mut b) = pair::<SelectiveRepeat>(LinkConfig::usb());
@@ -161,7 +199,7 @@ fn panic_text_after_a_torn_frame_survives_when_it_starts_with_a_delimiter() {
     let frame = a.poll_transmit(now).unwrap().to_vec();
     b.on_bytes(now, &frame[..frame.len() / 2]);
     b.on_bytes(now, b"\x00panicked at src/main.rs:10: boom\r\n");
-    now += 100_000;
+    now += LinkConfig::usb().frame_abandon + 1_000;
     let _ = b.poll_transmit(now);
     let texts: Vec<String> = drain(&mut b)
         .into_iter()
@@ -172,6 +210,37 @@ fn panic_text_after_a_torn_frame_survives_when_it_starts_with_a_delimiter() {
         .collect();
     assert_eq!(texts.concat(), "panicked at src/main.rs:10: boom\r\n");
     assert_eq!(b.counters().bad_frames, 1, "the torn frame is counted");
+}
+
+/// A busy board writes one frame in 64-byte USB packets with a render tick
+/// (~80 ms) between them. The receiver must wait for the rest, not abandon
+/// the partial at the text idle time: the 2026-09-27 rehearsal
+/// (`silicon:esp32c6 10:bd:a3:b0:8e:30`) saw every palette cross-fade stall
+/// the link for 4 s while each resend was split and abandoned again.
+#[test]
+fn a_frame_written_in_slow_pieces_is_received_whole() {
+    let (mut a, mut b) = pair::<SelectiveRepeat>(LinkConfig::usb());
+    let mut now = 0;
+    handshake(&mut a, &mut b, &mut now);
+    let _ = drain(&mut b);
+    a.send(CH_PROTO, &[7; 200]).unwrap();
+    let frame = a.poll_transmit(now).unwrap().to_vec();
+    for piece in frame.chunks(64) {
+        b.on_bytes(now, piece);
+        now += 80_000;
+        // The receiver's timers run between pieces, as they do on a host.
+        while b.poll_transmit(now).is_some() {}
+    }
+    let msgs: Vec<Vec<u8>> = drain(&mut b)
+        .into_iter()
+        .filter_map(|e| match e {
+            LinkEvent::Message { data, .. } => Some(data),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(msgs, vec![vec![7; 200]]);
+    assert_eq!(b.counters().stale_partials, 0, "no partial was abandoned");
+    assert_eq!(b.counters().bad_frames, 0);
 }
 
 #[test]
@@ -431,6 +500,171 @@ fn an_oversize_message_is_dropped_without_a_reset() {
     assert_eq!(b.counters().oversize_messages, 1);
     assert_eq!(a.counters().resets + b.counters().resets, 0);
     assert!(a.is_idle(), "everything was acknowledged");
+}
+
+/// External messages (the caller keeps the bytes) under loss and damage in
+/// both directions: each arrives whole and in its channel's order among ring
+/// messages, a control message still overtakes, and the caller's buffer is
+/// read only while `external_in_flight` says so (it is scribbled over the
+/// moment that turns false, and the resends still carry the right bytes).
+#[test]
+fn external_messages_arrive_whole_under_faults() {
+    let board_cfg = LinkConfig {
+        send_budget: 3 * 1024,
+        ..LinkConfig::usb()
+    };
+    let mut a = Link::<SelectiveRepeat>::new(board_cfg, 0x1111_2222);
+    let mut b = Link::<SelectiveRepeat>::new(LinkConfig::usb(), 0x3333_4444);
+    let mut now = 0;
+    handshake(&mut a, &mut b, &mut now);
+    let _ = drain(&mut b);
+    let mut rng = 0x2545_f491_u64;
+    let mut buf = vec![0u8; MAX_MESSAGE];
+    let mut want: Vec<Vec<u8>> = vec![];
+    let mut got: Vec<Vec<u8>> = vec![];
+    let mut controls = 0;
+    let mut round = 0usize;
+    while round < 12 || a.external_in_flight() || !a.is_idle() {
+        assert!(
+            now < 600_000_000,
+            "stuck: {} of {} delivered",
+            got.len(),
+            want.len()
+        );
+        if round < 12 && !a.external_in_flight() {
+            // The caller's next big reply, in its own buffer.
+            let len = 1 + (round * 1_531) % (16 * 1024);
+            for (i, x) in buf[..len].iter_mut().enumerate() {
+                *x = (i + round * 31) as u8;
+            }
+            a.send_external(CH_PROTO, len).unwrap();
+            assert_eq!(a.send_external(CH_PROTO, 1), Err(SendError::Full));
+            want.push(buf[..len].to_vec());
+            // A small ring message behind it keeps its place.
+            let small = vec![round as u8; 40];
+            a.send(CH_PROTO, &small).unwrap();
+            want.push(small);
+            if round % 3 == 0 {
+                a.send(CH_CONTROL, b"ctl").unwrap();
+                controls += 1;
+            }
+            round += 1;
+        }
+        now += 1_000;
+        for _ in 0..16 {
+            let mut moved = false;
+            while let Some(f) = a.poll_transmit_with(now, &mut |off, out| {
+                out.copy_from_slice(&buf[off..off + out.len()])
+            }) {
+                let f = f.to_vec();
+                moved = true;
+                if let Some(f) = mangle(&mut rng, f) {
+                    b.on_bytes(now, &f);
+                }
+            }
+            if !a.external_in_flight() {
+                // Every byte is cut: the buffer is the caller's again.
+                buf.fill(0xEE);
+            }
+            while let Some(f) = b.poll_transmit(now) {
+                let f = f.to_vec();
+                moved = true;
+                if let Some(f) = mangle(&mut rng, f) {
+                    a.on_bytes(now, &f);
+                }
+            }
+            if !moved {
+                break;
+            }
+        }
+        for ev in drain(&mut b) {
+            match ev {
+                LinkEvent::Message {
+                    channel: CH_PROTO,
+                    data,
+                } => got.push(data),
+                LinkEvent::Message {
+                    channel: CH_CONTROL,
+                    ..
+                } => controls -= 1,
+                other => panic!("unexpected {other:?}"),
+            }
+        }
+    }
+    assert_eq!(got.len(), want.len());
+    assert!(got == want, "every message whole and in order");
+    assert_eq!(controls, 0);
+    assert_eq!(a.counters().resets + b.counters().resets, 0);
+    assert!(a.counters().retransmits > 0, "the faults cost resends");
+}
+
+/// Withdrawing an external message: only before its first fragment; a reset
+/// drops one in flight and hands the buffer back.
+#[test]
+fn an_external_message_is_withdrawn_only_before_it_starts() {
+    let (mut a, mut b) = pair::<SelectiveRepeat>(LinkConfig::usb());
+    let mut now = 0;
+    handshake(&mut a, &mut b, &mut now);
+    let _ = drain(&mut b);
+    assert_eq!(a.send_external(CH_LOG, 10), Err(SendError::BadChannel));
+    assert_eq!(
+        a.send_external(CH_PROTO, MAX_MESSAGE + 1),
+        Err(SendError::TooBig)
+    );
+
+    a.send_external(CH_PROTO, 4_000).unwrap();
+    assert_eq!(a.cancel_external(), Ok(()));
+    assert!(!a.external_in_flight());
+    shuttle(&mut a, &mut b, now);
+    assert!(drain(&mut b).is_empty(), "nothing of it went out");
+
+    a.send_external(CH_PROTO, 4_000).unwrap();
+    let f = a
+        .poll_transmit_with(now, &mut |_, out| out.fill(1))
+        .map(<[u8]>::to_vec);
+    assert!(f.is_some());
+    assert_eq!(a.cancel_external(), Err(lp_link::ExternalStarted));
+    assert!(a.external_in_flight());
+    a.restart(now);
+    assert!(!a.external_in_flight(), "the reset dropped it");
+}
+
+/// Without a source an external message waits; the send ring alone is
+/// bounded by `send_budget`, which may be below `max_message`.
+#[test]
+fn a_small_send_budget_refuses_big_ring_messages_but_not_external_ones() {
+    let cfg = LinkConfig {
+        send_budget: 2 * 1024,
+        ..LinkConfig::usb()
+    };
+    assert_eq!(cfg.validate(), Ok(()));
+    let (mut a, mut b) = pair::<SelectiveRepeat>(cfg);
+    let mut now = 0;
+    handshake(&mut a, &mut b, &mut now);
+    assert_eq!(a.send(CH_PROTO, &[0; 3 * 1024]), Err(SendError::TooBig));
+    a.send_external(CH_PROTO, 12 * 1024).unwrap();
+    now += 10_000;
+    while let Some(f) = a.poll_transmit(now) {
+        assert!(f.len() < 64, "no data frame without a source");
+    }
+    assert!(a.external_in_flight());
+}
+
+/// A lossy, damaging wire for the external-message scenario: drop 3%, flip a
+/// byte in 2%.
+fn mangle(rng: &mut u64, mut f: Vec<u8>) -> Option<Vec<u8>> {
+    *rng ^= *rng << 13;
+    *rng ^= *rng >> 7;
+    *rng ^= *rng << 17;
+    match *rng % 100 {
+        0..=2 => None,
+        3..=4 => {
+            let at = (*rng as usize / 100) % f.len();
+            f[at] ^= 0x5A;
+            Some(f)
+        }
+        _ => Some(f),
+    }
 }
 
 fn interactive() -> Workload {

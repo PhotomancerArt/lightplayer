@@ -312,6 +312,7 @@ mod tests {
             degraded: None,
             loaded_project: LoadedProject::Empty,
             engine_fps: None,
+            link_counters: None,
             can_receive_project: true,
             can_remove_project: false,
             activity: None,
@@ -603,6 +604,7 @@ mod tests {
             FirmwareFace::Blank,
             FirmwareFace::Bootloader,
             FirmwareFace::NoHello,
+            FirmwareFace::OlderLightPlayer { proto: None },
             FirmwareFace::Foreign { label: None },
         ] {
             let mut view = card();

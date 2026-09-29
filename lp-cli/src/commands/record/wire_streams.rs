@@ -1,18 +1,27 @@
 //! Reassembles a recording's raw `wire` chunks into the messages they carry.
 //!
 //! A recording holds each transport chunk as it crossed the page's byte
-//! chokepoint: a Web Serial write is a whole `M!{json}\n` line, but a read
-//! is whatever the port delivered — half a line, three packed frames, a
-//! board log line torn in two. So the chunks of each (transport, port,
-//! direction) stream are concatenated and decoded the way `lp-cli wire
-//! unpack` decodes a capture ([`WireUnpacker`]): JSON Pack frames become
-//! their `M!{json}` line, JSON lines are read as they are, and everything
-//! else is the board's own text. A frame that does not decode is reported,
-//! never dropped.
+//! chokepoint: whatever the port delivered — half a frame, three frames, a
+//! board log line torn in two. So the chunks are concatenated and decoded
+//! the way `lp-cli wire unpack` decodes a capture:
+//!
+//! - **USB ports (`serial`, `emu-tab`) are lp-links** since
+//!   `WIRE_PROTO_VERSION` 30 (plan `lp2025/2026-09-27-0215-lp-link-usb-cutover`,
+//!   D10): both directions of one port go through one [`WireLinkSniffer`],
+//!   messages (JSON or packed) come out as their `M!{json}` JSON, console
+//!   text as text, and the link's own recoveries (a new session, a damaged
+//!   frame it resent) as link notes.
+//! - **Other transports (`ble`) still carry `M!` lines** (plan D3): each
+//!   (transport, port, direction) stream is read with [`WireUnpacker`]:
+//!   JSON Pack frames become their `M!{json}` line, JSON lines are read as
+//!   they are, and everything else is the board's own text.
+//!
+//! A message that does not decode is reported, never dropped.
 
 use std::collections::HashMap;
 
-use lpc_wire::{UnpackEvent, WireUnpacker};
+use lpc_wire::lp_link::sniffer::Direction;
+use lpc_wire::{SniffedWire, UnpackEvent, WireLinkSniffer, WireUnpacker};
 use serde_json::Value;
 
 /// One (transport, port, direction) byte stream.
@@ -39,12 +48,18 @@ pub enum WireItem {
     Text(String),
     /// A frame that could not be decoded, and why.
     Undecodable(String),
+    /// The link's own account (lp-link ports): a new session, a damaged
+    /// frame it resent, frames the recording never saw.
+    Link(String),
 }
 
-/// Every stream of one recording, each with its own unpacker.
+/// Every stream of one recording, each with its own reader.
 #[derive(Default)]
 pub struct WireStreams {
+    /// `M!`-line streams, one per (transport, port, direction).
     streams: HashMap<WireStreamKey, StreamState>,
+    /// lp-link ports, one per (transport, port), both directions.
+    links: HashMap<(String, String), WireLinkSniffer>,
 }
 
 impl WireStreams {
@@ -54,7 +69,20 @@ impl WireStreams {
 
     /// Feed one chunk; returns what it completed, in order.
     pub fn push(&mut self, key: &WireStreamKey, bytes: &[u8]) -> Vec<WireItem> {
-        self.streams.entry(key.clone()).or_default().push(bytes)
+        if !is_link_transport(&key.transport) {
+            return self.streams.entry(key.clone()).or_default().push(bytes);
+        }
+        let dir = match key.dir.as_str() {
+            "tx" => Direction::HostToBoard,
+            _ => Direction::BoardToHost,
+        };
+        let sniffer = self
+            .links
+            .entry((key.transport.clone(), key.port.clone()))
+            .or_default();
+        let mut items = Vec::new();
+        sniffer.push(dir, 0, bytes, |item| items.extend(link_item(item)));
+        items
     }
 
     /// What the streams still hold when the recording ends: a torn packed
@@ -69,7 +97,82 @@ impl WireStreams {
                 items.push((key.clone(), item));
             }
         }
+        let mut ports: Vec<_> = self.links.keys().cloned().collect();
+        ports.sort();
+        for (transport, port) in ports {
+            let sniffer = self
+                .links
+                .get_mut(&(transport.clone(), port.clone()))
+                .expect("key from the map");
+            sniffer.flush(|item| {
+                let key = WireStreamKey {
+                    transport: transport.clone(),
+                    port: port.clone(),
+                    dir: match item_direction(&item) {
+                        Direction::HostToBoard => "tx",
+                        Direction::BoardToHost => "rx",
+                    }
+                    .to_string(),
+                };
+                if let Some(item) = link_item(item) {
+                    items.push((key, item));
+                }
+            });
+        }
         items
+    }
+}
+
+/// The transports whose bytes are an lp-link: a board's USB port, in the
+/// browser (`serial`) and in the tab emulator (`emu-tab`).
+fn is_link_transport(transport: &str) -> bool {
+    matches!(transport, "serial" | "emu-tab")
+}
+
+/// What one thing read off a link is on the timeline.
+fn link_item(item: SniffedWire) -> Option<WireItem> {
+    Some(match item {
+        SniffedWire::Server { payload, .. } => WireItem::Message {
+            line_len: payload.json.len() + "M!\n".len(),
+            packed: payload.packed.then_some(payload.wire_len),
+            json: payload.json,
+        },
+        SniffedWire::Client { json, .. } => WireItem::Message {
+            line_len: json.len() + "M!\n".len(),
+            packed: None,
+            json,
+        },
+        SniffedWire::Console { line, .. } => {
+            let line = line.trim_end();
+            if line.is_empty() {
+                return None;
+            }
+            WireItem::Text(line.to_string())
+        }
+        SniffedWire::Unreadable { len, reason, .. } => {
+            WireItem::Undecodable(format!("{len} B message: {reason}"))
+        }
+        SniffedWire::Session { nonce, .. } => WireItem::Link(format!(
+            "link session {nonce:#010x} (a reboot, reload or reconnect)"
+        )),
+        SniffedWire::Damaged { .. } => {
+            WireItem::Link("a damaged frame (the link resent it)".to_string())
+        }
+        SniffedWire::Gap { skipped, .. } => {
+            WireItem::Link(format!("{skipped} frame(s) missing from the recording"))
+        }
+    })
+}
+
+fn item_direction(item: &SniffedWire) -> Direction {
+    match item {
+        SniffedWire::Server { .. } => Direction::BoardToHost,
+        SniffedWire::Client { .. } => Direction::HostToBoard,
+        SniffedWire::Console { dir, .. }
+        | SniffedWire::Unreadable { dir, .. }
+        | SniffedWire::Session { dir, .. }
+        | SniffedWire::Damaged { dir }
+        | SniffedWire::Gap { dir, .. } => *dir,
     }
 }
 
@@ -232,14 +335,89 @@ fn message_kind(msg: Option<&Value>) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::commands::wire::handler::tests::packed_and_json;
+    use crate::commands::wire::line_unpack::tests::packed_and_json;
 
+    /// An `M!`-line stream (BLE).
     fn key(dir: &str) -> WireStreamKey {
+        WireStreamKey {
+            transport: "ble".into(),
+            port: "3".into(),
+            dir: dir.into(),
+        }
+    }
+
+    /// A USB port's stream (an lp-link).
+    fn serial(dir: &str) -> WireStreamKey {
         WireStreamKey {
             transport: "serial".into(),
             port: "3".into(),
             dir: dir.into(),
         }
+    }
+
+    /// A USB port's recording, both ways, chunk by chunk: the session, the
+    /// hello, the opt-in, a request and its packed answer, all read as the
+    /// messages they are, however the chunks split the frames.
+    #[test]
+    fn a_usb_recording_reads_as_the_link_messages_both_ways() {
+        use crate::commands::wire::test_capture::{capture, log_reply};
+        let session = capture("boot ok\n", &[log_reply(4)], true);
+        let mut streams = WireStreams::new();
+        let mut items = Vec::new();
+        for (dir, bytes) in &session.chunks {
+            let key = match dir {
+                Direction::BoardToHost => serial("rx"),
+                Direction::HostToBoard => serial("tx"),
+            };
+            for half in bytes.chunks(bytes.len().div_ceil(2).max(1)) {
+                for item in streams.push(&key, half) {
+                    items.push((key.dir.clone(), item));
+                }
+            }
+        }
+        items.extend(
+            streams
+                .finish()
+                .into_iter()
+                .map(|(key, item)| (key.dir, item)),
+        );
+
+        assert_eq!(
+            items[0],
+            ("rx".to_string(), WireItem::Text("boot ok".into()))
+        );
+        let described: Vec<(String, String)> = items
+            .iter()
+            .filter_map(|(dir, item)| match item {
+                WireItem::Message { json, .. } => Some((dir.clone(), describe_message(json))),
+                _ => None,
+            })
+            .collect();
+        assert!(
+            described.contains(&("rx".to_string(), "hello id=0".to_string())),
+            "{described:?}"
+        );
+        assert!(
+            described.contains(&("tx".to_string(), "hello id=1".to_string())),
+            "{described:?}"
+        );
+        assert!(
+            described.contains(&("rx".to_string(), "log id=4".to_string())),
+            "{described:?}"
+        );
+        assert!(
+            items.iter().any(|(_, item)| matches!(
+                item,
+                WireItem::Message { json, packed: Some(_), .. } if json.contains("number 4")
+            )),
+            "the reply went packed and reads as its JSON: {items:?}"
+        );
+        assert!(
+            !items
+                .iter()
+                .any(|(_, item)| matches!(item, WireItem::Undecodable(_))),
+            "{items:?}"
+        );
     }
 
     #[test]

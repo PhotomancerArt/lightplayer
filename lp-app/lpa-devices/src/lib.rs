@@ -49,6 +49,7 @@ pub mod identity;
 pub mod intent;
 pub mod journal;
 pub mod link;
+pub mod link_counter_facts;
 pub mod record;
 pub mod replay;
 pub mod roster;
@@ -67,6 +68,7 @@ pub use identity::{DeviceId, DeviceUid, EndpointKey, IdentityChain, MacAddress, 
 pub use intent::{ConnectionIntent, Intent};
 pub use journal::{Journal, JournalEntry, JournalNote, Scope};
 pub use link::{Link, LinkCommand, LinkEvent, LinkId, LinkInfo, ResetKind};
+pub use link_counter_facts::LinkCounterFacts;
 pub use record::DeviceRecord;
 pub use roster::{PendingLink, Roster, RosterConfig};
 pub use time::{Millis, TimerId};

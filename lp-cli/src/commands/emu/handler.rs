@@ -114,7 +114,9 @@ pub(super) fn apply_image(
 }
 
 fn run(args: RunArgs) -> Result<()> {
-    let EmuChip::Esp32C6 = args.chip;
+    if args.chip == EmuChip::Esp32S3 {
+        return super::run_s3::run_s3(&args, parse_duration_us(&args.timeout)?);
+    }
 
     let micros = parse_duration_us(&args.timeout)?;
     let grade = args.time_grade.time_grade();
@@ -212,6 +214,26 @@ fn run(args: RunArgs) -> Result<()> {
             script.steps_left()
         );
         builder = builder.pin_script(script);
+    }
+
+    if args.host_link {
+        if args.link.is_some() && args.link_kind == LinkKind::Usb {
+            bail!(
+                "--host-link makes this process the host on the USB link; a --link socket \
+                 cannot be that port too (a UART0 --link is fine)"
+            );
+        }
+        builder = builder.usb_sj_queue_source();
+        let machine = builder
+            .build()
+            .map_err(|e| anyhow::anyhow!("building the machine: {e}"))?;
+        let boot = format!(
+            "esp32c6 {} boot, grade {}",
+            machine.boot_mode().as_str(),
+            grade.configuration()
+        );
+        let board = super::link_host::C6Board::new(machine)?;
+        return super::run_hosted::run_hosted(board, boot, &args, micros);
     }
 
     let mut machine = builder
@@ -320,6 +342,10 @@ fn usb_host_at_power_on(args: &RunArgs) -> UsbHost {
     if let Some(host) = args.usb_host {
         return host.usb_host();
     }
+    // The in-process host holds the port from power-on.
+    if args.host_link {
+        return UsbHostArg::Attached.usb_host();
+    }
     let port_is_the_socket = args.link.is_some() && args.link_kind == LinkKind::Usb;
     if port_is_the_socket && !args.monitor {
         UsbHostArg::AttachedIdle.usb_host()
@@ -350,6 +376,23 @@ pub(super) fn describe(outcome: &Outcome) -> String {
         }
         Outcome::Breakpoint { pc, .. } => format!("stopped at a breakpoint, pc {pc:#010x}"),
     }
+}
+
+/// One line for a host link's counters: what it sent and read, and what it
+/// had to recover from.
+pub(super) fn describe_link_counters(c: &lpc_wire::LinkCounters) -> String {
+    format!(
+        "{} frames out / {} in, {} resent, {} damaged, {} stale partials, {} duplicates, \
+         {} resets, {} payload errors",
+        c.frames_tx,
+        c.frames_rx,
+        c.resends,
+        c.damaged,
+        c.stale_partials,
+        c.duplicates,
+        c.resets.total,
+        c.payload_errors
+    )
 }
 
 pub(super) fn check_file(path: &Path, flag: &str) -> Result<()> {

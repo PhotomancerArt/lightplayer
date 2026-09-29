@@ -42,6 +42,9 @@ pub fn device_firmware_line(face: &FirmwareFace, board: Option<&str>) -> String 
             line
         }
         FirmwareFace::NoHello => "Pre-hello firmware — needs firmware".to_string(),
+        FirmwareFace::OlderLightPlayer { .. } => {
+            "Older LightPlayer firmware — flash to update; the project stays".to_string()
+        }
         FirmwareFace::Blank => "Blank flash — needs firmware".to_string(),
         FirmwareFace::Bootloader => "Waiting in ROM download mode — needs firmware".to_string(),
         FirmwareFace::Foreign { label: Some(label) } => {
@@ -71,6 +74,9 @@ pub fn firmware_face_preview_sentence(face: &FirmwareFace) -> Option<String> {
     let sentence = match face {
         FirmwareFace::Unknown | FirmwareFace::LightPlayer { .. } => return None,
         FirmwareFace::NoHello => "No picture — this firmware is too old to say what it runs.",
+        FirmwareFace::OlderLightPlayer { .. } => {
+            "No picture — this LightPlayer firmware is too old for this Studio."
+        }
         FirmwareFace::Blank => "Nothing running — a blank chip has no picture.",
         FirmwareFace::Bootloader => "Nothing running — the board is waiting in its bootloader.",
         FirmwareFace::Foreign { .. } => "No picture — this board is not running LightPlayer.",
@@ -154,6 +160,7 @@ mod tests {
     fn every_flash_face_has_its_own_words() {
         let faces = [
             FirmwareFace::NoHello,
+            FirmwareFace::OlderLightPlayer { proto: Some(29) },
             FirmwareFace::Blank,
             FirmwareFace::Bootloader,
             FirmwareFace::Foreign {
@@ -183,6 +190,23 @@ mod tests {
         assert_eq!(
             device_firmware_line(&FirmwareFace::Unknown, Some("XIAO ESP32-C6")),
             "No firmware reported yet"
+        );
+    }
+
+    /// A board still on firmware from before the USB link moved onto
+    /// lp-link: the card names it LightPlayer, asks for a flash, and says
+    /// the project survives it — it used to read "Unrecognized firmware".
+    #[test]
+    fn older_light_player_firmware_asks_for_a_flash_that_keeps_the_project() {
+        let face = FirmwareFace::OlderLightPlayer { proto: None };
+        assert!(face.wants_flash());
+        assert_eq!(
+            pending_firmware_line(&face),
+            "Older LightPlayer firmware — flash to update; the project stays"
+        );
+        assert_eq!(
+            firmware_face_preview_sentence(&face).as_deref(),
+            Some("No picture — this LightPlayer firmware is too old for this Studio.")
         );
     }
 

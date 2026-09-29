@@ -1,6 +1,8 @@
 # ADR: App conversations ride the shared device link; frames are not evidence
 
-- **Status:** Accepted
+- **Status:** Accepted (amended 2026-09-27 — see the lp-link cut-over note
+  at the end: the wire under this ADR's traffic classes is now lp-link on
+  USB)
 - **Date:** 2026-09-06
 - **Deciders:** Photomancer
 - **Supersedes:** the "synthesized client-side" display-layout clause of
@@ -142,3 +144,28 @@ and fold borrow churn straight into freshness.
   device_card_feed_view.rs, device_feed_op.rs}`, `app/frame_feed/`,
   `lp-app/lpa-studio-web/src/app/home/device_roster_card.rs`
   (`preview_slot`).
+
+## Amended 2026-09-27 — lp-link USB cut-over (PR #854)
+
+Decision 1's reserved request-id range and passthrough classification are
+unchanged in shape, but the wire underneath it changed. On USB the
+transport's demux still classifies a `LinkPortService`/`WireLinkPort`
+proto-channel message by request id **before** the mirror, exactly as
+before — app conversations still surface as `LinkEvent::Passthrough` and
+the model's fold arm for them still does nothing — except that message is
+now one whole lp-link message, decoded (JSON or learned-packed) by lp-link
+rather than a raw `M!` line read straight off the port. What lp-link adds
+underneath: a request lost to a bad USB edge is resent by the link itself,
+not left for a conversation's own idle budget to notice, and a link
+`Reset` now fails an in-flight app conversation **at once** (surfaced as a
+link-reset note) instead of waiting an idle timeout out.
+
+"Never pull under a borrow" (decision 3) is unchanged: the feed still
+checks the same borrow token before every pull, and that borrow — per the
+amendment to `2026-09-01-editor-lens-borrows-the-device-wire.md` above —
+now sits above one lp-link per port rather than above raw bytes. Retiring
+the borrow so the feed's pulls, the lens and effects all share the link by
+request id with no pause is the same deferred milestone, **M2b**.
+
+See `docs/adr/2026-09-27-lp-link-one-comms-layer.md` and the cut-over
+plan's notes.md (D2, D9).

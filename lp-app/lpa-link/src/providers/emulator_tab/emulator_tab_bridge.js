@@ -8,22 +8,22 @@
 // `/lpa-link/emulator_tab.js` rather than by a bundler edge — the same shape
 // `browser_serial.js` uses for the device controller it loads.
 //
-// `EmulatorTabStream` / `EmulatorTabControl` (`mod.rs` in this directory) are
+// `EmulatorTabLink` / `EmulatorTabControl` (`mod.rs` in this directory) are
 // the Rust side of this handle; `docs/adr/2026-09-10-the-c6-emulator-runs-in-the-tab.md`
 // is the decision record for the shape (rule 1 and its Consequences on why a
 // handle rather than the port object).
 //
 // # Why a numeric handle and not the port object
 //
-// `DeviceByteStream` (lpa-client) is `Send` and synchronous. A Rust struct
-// holding a `JsValue` is neither, so the port lives HERE, in a registry keyed
-// by a small integer, and Rust holds the integer — exactly what
-// `browser_serial.js` does with its port ids, and for the same two reasons.
+// The link, the board's lp-link end and the control handle all hold the
+// board at once, and a plain integer is what they can share: the port lives
+// HERE, in a registry keyed by a small integer, and Rust holds the integer —
+// exactly what `browser_serial.js` does with its port ids.
 //
 // # Why writes and control lines go through one chain
 //
-// The stream's verbs (`reopen`, `write_all`, `set_signals`) must return
-// without awaiting: `Link::poll_event` may not block. Every one of them is
+// The link's verbs (`reopen`, `write`, `signals`) must return without
+// awaiting: `Link::poll_event` may not block. Every one of them is
 // therefore enqueued on the entry's single promise chain and applied in the
 // order it was submitted, so a reset dance reaches the machine pin-write for
 // pin-write and a frame written before the byte channel finishes opening is
@@ -31,15 +31,14 @@
 // handed to Rust by `takeError`, which is how an IO failure becomes a
 // `LinkEvent::Error` instead of an unhandled rejection.
 //
-// # The bytes buffer has exactly one drainer at a time
+// # The bytes buffer has exactly one reader
 //
-// Two consumers read it: the model's pump (`takeBytes`, raw) and an
-// `lpa-client` conversation (`takeBytes` too, handing back what it could not
-// finish with `returnEmuBytes`, so the pump reads the remainder). Nothing here
-// decodes text: a link that opted in carries packed frames, which hold any
-// byte, and the one splitter for them is Rust's (`lpc_wire::WireStream`). They never run together — the effects layer pauses
-// the pump for the duration of a coarse effect, which is the same
-// exclusive-borrow discipline the serial provider's `PortLineIo` documents.
+// The board's USB link is an lp-link (`WIRE_PROTO_VERSION` 30), and the one
+// reader of its bytes is the board's lp-link end in Rust
+// (`emulator_tab_link_port.rs`), which decodes whole messages for whoever
+// holds the wire — the model's pump, or a conversation while the pump is
+// paused (the exclusive borrow the serial provider's `PortLineIo` documents).
+// Nothing here decodes anything, and nothing is ever handed back.
 
 /** Ports this page has opened, by the id Rust holds. */
 const ports = new Map();
@@ -318,15 +317,6 @@ export function signalsEmuPort(id, dtr, rts) {
 /** Everything the board has said since the last drain. */
 export function takeEmuBytes(id) {
   return drain(entry(id));
-}
-
-/**
- * Put bytes a drainer took but could not finish (a partial line, a partial
- * packed frame) back at the FRONT of the buffer, for whoever drains next.
- */
-export function returnEmuBytes(id, bytes) {
-  if (bytes.length === 0) return;
-  entry(id).chunks.unshift(bytes.slice());
 }
 
 /** The first failure since the last ask, or `null`. */
