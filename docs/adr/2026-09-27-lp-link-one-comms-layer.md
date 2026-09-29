@@ -248,8 +248,11 @@ What was decided, and what resolved:
   project load.
 
 Evidence (all `lp-emu:esp32v3:t1`): `just walk-esp32v3-emu`'s three
-readings of the frame agree over the link with 0 resends and 0 damaged
-frames; a `--uart-faults` soak (new: the C6's `--usb-faults` cut into
+readings of the frame agree over the link with 0 damaged frames and 0 or 1
+resends (0 in P5's run; 1 on 2026-09-29 at `6134f415f`, counted by the host
+with nothing damaged, so a resend timer rather than line damage — most
+likely the host's 40 ms floor running out while a long server pass held the
+board's link task off, the case P2 described; not traced); a `--uart-faults` soak (new: the C6's `--usb-faults` cut into
 64-byte windows over the UART's byte stream) of five project loads at the
 C6's 1 % mix, at ~2.5 %, and with 1 KiB damage runs finishes with **0 app
 errors** each time, both ends counting the damage that reached them and

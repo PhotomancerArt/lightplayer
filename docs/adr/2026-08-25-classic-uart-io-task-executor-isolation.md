@@ -267,7 +267,8 @@ interrupted task's stack (finding 2). The two executors meet only at two
   see how often.
 
 Evidence is emulated only (`lp-emu:esp32v3:t1`): the walk's three readings
-agree over the link with 0 resends, and a `--uart-faults` soak finishes five
+agree over the link with 0 damaged frames and at most one resend (a timer,
+not line damage), and a `--uart-faults` soak finishes five
 project loads with 0 app errors. The desk walk (`hardware-walk-protocol.md`
 in the plan directory) is what checks the pacer and the thread-side link
 under silicon's own interrupt latency.
