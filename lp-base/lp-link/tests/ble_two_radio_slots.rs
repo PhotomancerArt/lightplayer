@@ -237,9 +237,7 @@ fn two_occupied_radio_slots_cost_this_much_ram() {
     std::println!(
         "  worst case (ram_bound): one slot {bound_each} B, two slots {bound_combined} B"
     );
-    std::println!(
-        "  region-1 floor (BLE on, idle, before this plan): {REGION_1_FLOOR_BYTES} B"
-    );
+    std::println!("  region-1 floor (BLE on, idle, before this plan): {REGION_1_FLOOR_BYTES} B");
     for (label, combined) in [
         ("at-rest", at_rest),
         ("mid-traffic", mid_traffic),
@@ -255,7 +253,10 @@ fn two_occupied_radio_slots_cost_this_much_ram() {
     }
 
     assert!(at_rest > 0 && mid_traffic > 0 && peak_write > 0);
-    assert!(peak_write <= bound_combined, "{peak_write} > {bound_combined}");
+    assert!(
+        peak_write <= bound_combined,
+        "{peak_write} > {bound_combined}"
+    );
     assert!(
         after_release <= at_rest + 512,
         "the reassembly growth released back down: {after_release} vs at-rest {at_rest}"
