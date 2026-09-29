@@ -169,6 +169,24 @@ pub struct RunArgs {
     #[arg(long = "usb-script", requires = "host_link")]
     pub usb_script: Option<PathBuf>,
 
+    /// With `--host-link --chip esp32v3`: the CH340 cable's schedule, in
+    /// `lp-emu-esp32v3 --control-script`'s grammar — `<ms> attach`,
+    /// `reset`, `open`, `close`, `detach`, `signals …`, `wait`. The
+    /// classic's reset circuit is on the carrier board, so `reset`'s release
+    /// reboots the machine (the hosted board is built to reboot on reset)
+    /// and the host sees a new session. The run's report ends with the
+    /// cable's state, as the `state` verb reports it.
+    #[arg(long = "control-script", requires = "host_link")]
+    pub control_script: Option<PathBuf>,
+
+    /// With `--host-link --chip esp32v3`: a TEST switch, off by default —
+    /// damage UART0's host link, in `lp-emu-esp32v3 --uart-faults`'s spec
+    /// (`in-drop=1%,in-tail=0.5%,in-corrupt=0.5%,in-run=0.1%,out-drop=1%,
+    /// seed=7`; each 64-byte window of the wire is one packet). The link
+    /// resends what it loses; the run's report counts both sides.
+    #[arg(long = "uart-faults", requires = "host_link")]
+    pub uart_faults: Option<String>,
+
     /// With `--host-link`: upload this project directory over the link once
     /// the board's hello arrives, exactly as `lp-cli upload` deploys it, and
     /// keep hosting the link (and writing the console) to the deadline.

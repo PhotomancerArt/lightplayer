@@ -286,6 +286,19 @@ impl EmuUsbBoard for V3Board {
         if m.reboots() > 0 {
             lines.push(format!("{} reboot(s)", m.reboots()));
         }
+        if m.control_lines() > 0 {
+            // The cable's side, in the `state` verb's own words.
+            let state = lp_emu_esp32v3::control::ControlReply::State {
+                cycle: m.cycles(),
+                report: m.cable_report(),
+            };
+            lines.push(format!("cable: {state}"));
+        }
+        if let Some((to_host, to_device)) = m.uart0_fault_counters() {
+            lines.push(format!(
+                "uart-faults: device→host {to_host}; host→device {to_device}"
+            ));
+        }
         lines
     }
 }

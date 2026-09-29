@@ -3746,10 +3746,16 @@ walk-esp32s3-emu *args: install-rv32-target build-rv32-builtins
 #              ESP-IDF second-stage bootloader espflash bundles, the real
 #              partition table — instead of a direct load. `LP_WALK_BOOT=direct`
 #              still takes the fast path when something is being bisected.
-#   the cable  the CH340's own verbs over `--control tcp:`: attach, the
-#              classic-reset dance (whose RELEASE is the reboot), open, upload,
-#              then close / detach / `state` — and the final `state` reply is
-#              asserted, so "the port was released" is a gate and not a habit.
+#   the cable  the CH340's own verbs on a scripted schedule
+#              (`--control-script`): attach, the classic-reset dance (whose
+#              RELEASE is the reboot), open, upload, then close / detach — and
+#              the cable's final state is asserted, so "the port was released"
+#              is a gate and not a habit.
+#
+# Since wire proto 32 the classic's UART0 is an lp-link, so the run is `lp-cli
+# emu run --chip esp32v3 --host-link --upload`: one process boots the image,
+# hosts the link in emulated time, uploads over it and keeps hosting, so the
+# `[OUT] dump` (a log record now) reaches the console.
 #
 # It does NOT run the heap gate. That is `just heap-budget-check-chips-v3`,
 # for the reason the C6 keeps its own ratchet out of `walk-esp32c6-emu`: the
@@ -3762,9 +3768,10 @@ walk-esp32s3-emu *args: install-rv32-target build-rv32-builtins
 # `D10` -> `IO18` into a scratch copy, because the DOM-Z-102 has no D10.
 #
 # NOT in any CI job, for the C6 recipe's reason: it builds a firmware image, a
-# merged flash image and a release `lp-cli`, and then runs the machine for tens
-# of emulated seconds. What it proves per-tick lives in `tests/
-# shader_oracle_pin.rs` and `tests/five_wires.rs`, which do run there.
+# merged flash image and a release `lp-cli`, and then runs the machine for
+# seconds of emulated time. What it proves per-tick lives in `lp-cli/tests/
+# emu_v3_link_gates.rs` (moved from `lp-emu-esp32v3`'s `shader_oracle_pin.rs`
+# and `five_wires.rs` when the image went onto lp-link), which does run there.
 walk-esp32v3-emu *args: install-rv32-target build-rv32-builtins
     scripts/emu/m4-walk-esp32v3.sh {{ args }}
 
@@ -3774,9 +3781,10 @@ walk-esp32v3-emu *args: install-rv32-target build-rv32-builtins
 # it asks exactly the same question of the frame: is the first lit frame off
 # IO18 the host oracle's frame, three ways?
 #
-# It reaches all three readings and exits 0: 2,438 frames on IO18, one distinct
-# lit byte string, equal to the guest's own deferred `[OUT] dump` and to
-# `[ORACLE] rgb=` — 384 hex characters, three ways. It reached only two until
+# It reaches all three readings and exits 0: on lp-link (2026-09-29) 1,562
+# frames on IO18 in its 4 s, one distinct lit byte string, equal to the guest's
+# own deferred `[OUT] dump` and to `[ORACLE] rgb=` — 384 hex characters, three
+# ways. It reached only two until
 # M4 P4b (PR #711) fixed the window-spill defect that killed the guest before
 # the deferred dump; `lp-emu/esp/lp-emu-esp32v3/README.md`'s "The window,
 # across a context save" is that trace. The script prints every reading it got

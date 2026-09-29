@@ -14,6 +14,8 @@
 //! fast memory kept — and the host sees the new session.
 
 use anyhow::{Result, bail};
+use lp_emu_esp_common::link_faults::LinkFaults;
+use lp_emu_esp32v3::control::parse_control_script;
 use lp_emu_esp32v3::flash::FlashBacking;
 use lp_emu_esp32v3::machine::{AppSource, BootMode, Esp32V3Builder, FrameSink, TimeGrade};
 
@@ -72,6 +74,17 @@ pub(super) fn run_v3(args: &RunArgs, micros: u64) -> Result<()> {
     }
     if let Some(path) = &args.dump_frames {
         builder = builder.dump_frames(FrameSink::File(path.clone()));
+    }
+    if let Some(path) = &args.control_script {
+        let text = std::fs::read_to_string(path)
+            .map_err(|e| anyhow::anyhow!("--control-script {}: {e}", path.display()))?;
+        let script = parse_control_script(&text)
+            .map_err(|e| anyhow::anyhow!("--control-script {}: {e}", path.display()))?;
+        builder = builder.control_script(script);
+    }
+    if let Some(spec) = &args.uart_faults {
+        let faults = LinkFaults::parse(spec).map_err(|e| anyhow::anyhow!("--uart-faults: {e}"))?;
+        builder = builder.uart0_faults(faults);
     }
     let board = V3Board::build(builder)?;
     let boot = format!(

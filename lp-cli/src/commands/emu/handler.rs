@@ -116,6 +116,15 @@ pub(super) fn apply_image(
 }
 
 fn run(args: RunArgs) -> Result<()> {
+    if args.chip != EmuChip::Esp32V3 {
+        let classic_only = [
+            (args.control_script.is_some(), "--control-script"),
+            (args.uart_faults.is_some(), "--uart-faults"),
+        ];
+        if let Some((_, flag)) = classic_only.iter().find(|(set, _)| *set) {
+            bail!("{flag} is the classic's (--chip esp32v3): its host link is UART0");
+        }
+    }
     if args.chip == EmuChip::Esp32S3 {
         return super::run_s3::run_s3(&args, parse_duration_us(&args.timeout)?);
     }
