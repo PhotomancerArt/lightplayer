@@ -144,10 +144,24 @@ pub struct RunArgs {
     /// is the DECODED console instead — raw text and log records as the
     /// board used to print them, every wire message as its `M!{json}` line,
     /// and `[link] …` notes — and `--exit-on` matches those lines. The USB
-    /// host is attached and draining from power-on; no `--link` socket can
-    /// be the USB port.
-    #[arg(long = "host-link", conflicts_with_all = ["monitor", "usb_host"])]
+    /// host is attached and draining from power-on unless `--usb-host` says
+    /// otherwise; no `--link` socket can be the USB port.
+    #[arg(long = "host-link", conflicts_with = "monitor")]
     pub host_link: bool,
+
+    /// With `--host-link`: the link nonce the host opens with, in hex. A
+    /// product host draws a fresh one per open, and so does this door by
+    /// default; a recording states one so that two runs of one image are the
+    /// same run (`lp-cli validate`'s link host).
+    #[arg(long = "link-nonce", value_name = "HEX", value_parser = parse_hex_u32, requires = "host_link")]
+    pub link_nonce: Option<u32>,
+
+    /// With `--host-link`: the cable's schedule, in `lp-emu-esp32c6
+    /// --usb-script`'s grammar — control words only (`<ms> detach`,
+    /// `attach`, `open`, `close`, `wait`). The host IS the link, so a line of
+    /// bytes is refused rather than injected under it.
+    #[arg(long = "usb-script", requires = "host_link")]
+    pub usb_script: Option<PathBuf>,
 
     /// With `--host-link`: upload this project directory over the link once
     /// the board's hello arrives, exactly as `lp-cli upload` deploys it, and
@@ -235,6 +249,21 @@ pub struct RunArgs {
     /// board's, which is what every transcript was captured against.
     #[arg(long = "efuse-mac")]
     pub efuse_mac: Option<String>,
+
+    /// The chip's wafer revision, `<major>.<minor>`. Defaults to the desk
+    /// board's `0.2`.
+    #[arg(long = "efuse-rev")]
+    pub efuse_rev: Option<String>,
+
+    /// What `LP_CLKRST.reset_cause` says at power-on, and so what a ROM-up
+    /// boot's banner prints: `poweron` (default), `usb-uart` or `tg0-wdt`.
+    #[arg(long = "reset-cause")]
+    pub reset_cause: Option<String>,
+
+    /// Where the strapping pins were at reset: `app` (default) or
+    /// `download`.
+    #[arg(long, value_parser = ["app", "download"])]
+    pub strap: Option<String>,
 
     /// The rate a host on UART0 sends at, default 115200. UART0 carries no
     /// clock, so the pulse-width counters the mask ROM's baud auto-detection

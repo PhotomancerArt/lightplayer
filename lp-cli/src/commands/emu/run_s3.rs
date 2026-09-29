@@ -31,6 +31,11 @@ pub(super) fn run_s3(args: &RunArgs, micros: u64) -> Result<()> {
         (!args.pin_script.is_empty(), "--pin-script"),
         (!args.wire.is_empty(), "--wire"),
         (args.efuse_mac.is_some(), "--efuse-mac"),
+        (args.efuse_rev.is_some(), "--efuse-rev"),
+        (args.reset_cause.is_some(), "--reset-cause"),
+        (args.strap.is_some(), "--strap"),
+        (args.usb_host.is_some(), "--usb-host"),
+        (args.usb_script.is_some(), "--usb-script"),
         (args.uart0_baud.is_some(), "--uart0-baud"),
         (args.lpperi_clk_en.is_some(), "--lpperi-clk-en"),
     ];

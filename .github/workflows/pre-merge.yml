@@ -413,6 +413,15 @@ jobs:
               # (`emu run --host-link`, `tests/emu_usb_link_gates.rs`).
               - 'lp-cli/src/commands/emu/**'
               - 'lp-cli/tests/emu_*.rs'
+              # The validation runner's link host (`lp-cli validate`'s
+              # `--link-host`, plan lp2025/2026-09-27-validate-driver-link-host):
+              # its board half is `link capture`, tested against an emulated
+              # board in `tests/link_capture.rs`, and its contract with
+              # lp-emu-validate in `tests/validate_link_host_parity.rs`.
+              - 'lp-cli/src/commands/link/**'
+              - 'lp-cli/src/commands/validate/**'
+              - 'lp-cli/tests/link_capture.rs'
+              - 'lp-cli/tests/validate_*.rs'
               - 'justfile'
               - '.github/workflows/pre-merge.yml'
             # emu_esp32v3 is the same shape for the CLASSIC ESP32's machine

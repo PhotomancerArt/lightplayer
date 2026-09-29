@@ -3051,11 +3051,12 @@ test-emu-c6-boot:
 # `cargo build`, not a reference image, so no espflash and no git history.
 # CI's `Heap budget (esp32c6 chip)` job runs this half.
 test-emu-c6-cli:
-    cargo test -p lp-cli --test validate_registry_parity
+    cargo test -p lp-cli --test validate_registry_parity --test validate_link_host_parity
     LP_EMU_BUILD_FW=1 scripts/ci/ci-images.py with esp32c6 -- cargo test -p lp-cli --release --test emu_usb_link_pack -- --include-ignored --nocapture
     LP_EMU_BUILD_FW=1 scripts/ci/ci-images.py with esp32c6 -- cargo test -p lp-cli --release --test emu_usb_free_lag -- --include-ignored --nocapture
     LP_EMU_BUILD_FW=1 scripts/ci/ci-images.py with esp32c6 -- cargo test -p lp-cli --release --test emu_usb_link -- --include-ignored --nocapture
     LP_EMU_BUILD_FW=1 scripts/ci/ci-images.py with esp32c6 -- cargo test -p lp-cli --release --test emu_usb_link_gates -- --include-ignored --nocapture
+    LP_EMU_BUILD_FW=1 scripts/ci/ci-images.py with esp32c6 -- cargo test -p lp-cli --release --test link_capture -- --include-ignored --nocapture
 
 # The classic ESP32 (v3) machine's own suite (plan three, M3).
 #
@@ -3136,7 +3137,7 @@ test-emu-esp32v3-reference:
     just lint-emu-fence
     just lint-emu-regnames
     cargo test -p lp-emu-validate
-    cargo test -p lp-cli --test validate_registry_parity
+    cargo test -p lp-cli --test validate_registry_parity --test validate_link_host_parity
     commit="$(git rev-parse --short HEAD)"
     if [[ -n "${LP_CI_IMAGES:-}" ]]; then
         # The reference image IS this half's firmware build, and its claim
@@ -3382,7 +3383,7 @@ test-emu-esp32s3-gate: test-emu-esp32s3-boot
     just lint-emu-fence
     just lint-emu-regnames
     cargo test -p lp-emu-validate
-    cargo test -p lp-cli --test validate_registry_parity
+    cargo test -p lp-cli --test validate_registry_parity --test validate_link_host_parity
 
 # Run an image on the ESP32-S3 machine.
 emu-esp32s3 elf *args:
