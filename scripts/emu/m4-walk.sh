@@ -40,9 +40,10 @@
 #
 # ## Why one run where the hardware walk needs two flashes
 #
-# The hardware walk flashes twice because espflash's `--monitor` HOLDS the
-# port, so `lp-cli` cannot open it at the same time; round 1 pushes the
-# project, round 2 reflashes to watch it render. This walk needs one run on
+# The hardware walk flashes twice and hosts the board's link in two separate
+# processes, one at a time: round 1 flashes and `lp-cli upload`s the project,
+# round 2 reflashes so the board boots into it while `lp-cli link capture`
+# hosts the link and reads the dump. This walk needs one run on
 # either chip: `lp-cli emu run --host-link --upload` (since the image went
 # onto lp-link at wire proto 30, and M8 taught the same door the S3) makes
 # this process the host on the board's own link, in process — one run
@@ -468,7 +469,7 @@ echo "===== ORACLE ====="
 # with wasmtime has an engine finding, not a machine finding. On the S3 the
 # guest JITs **Xtensa**, so rv32-emu shares neither the ISA nor the backend
 # with it and agreement is worth no more than wasmtime's.
-# `scripts/m4-hardware-walk.sh:377-390` says the same thing to a human holding
+# `scripts/m4-hardware-walk.sh`'s TRIAGE lines say the same thing to a human holding
 # the board.
 #
 # `set +e` around it deliberately: a failing `cargo test` inside a command

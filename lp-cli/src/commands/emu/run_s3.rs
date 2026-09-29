@@ -27,6 +27,7 @@ pub(super) fn run_s3(args: &RunArgs, micros: u64) -> Result<()> {
     let unsupported = [
         (args.link.is_some(), "--link"),
         (args.flash.is_some(), "--flash"),
+        (args.reboot_on_reset, "--reboot-on-reset"),
         (args.pin_log.is_some(), "--pin-log"),
         (args.tx_log.is_some(), "--tx-log"),
         (!args.pin_script.is_empty(), "--pin-script"),
