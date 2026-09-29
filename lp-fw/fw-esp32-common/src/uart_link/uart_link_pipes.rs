@@ -137,7 +137,10 @@ pub(crate) fn put_frame(frame: &[u8]) -> bool {
 /// executor, and neither awaits in the middle. Not for anything a log line
 /// can carry: log records are what a host's console and recorder expect.
 pub fn put_text_line(line: &[u8]) -> bool {
-    if line.iter().any(|&b| b == 0x00 || b == lp_link::deframer::TEXT_MARK) {
+    if line
+        .iter()
+        .any(|&b| b == 0x00 || b == lp_link::deframer::TEXT_MARK)
+    {
         return false;
     }
     if TX.free_capacity() < line.len() {
@@ -248,6 +251,9 @@ mod tests {
             }
             assert_eq!(got, bytes, "step {step}");
         }
-        assert_eq!(super::super::uart_link_counters::edge().rx_pipe_overflow_bytes, 0);
+        assert_eq!(
+            super::super::uart_link_counters::edge().rx_pipe_overflow_bytes,
+            0
+        );
     }
 }
