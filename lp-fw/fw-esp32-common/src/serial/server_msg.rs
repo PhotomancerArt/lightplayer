@@ -401,15 +401,16 @@ pub fn project_read_event_kind(event: &lpc_wire::ProjectReadEvent) -> &'static s
     }
 }
 
-#[cfg(test)]
+// Only the lp-link transports' tests serialize into the buffer.
+#[cfg(all(test, any(feature = "usb-link", feature = "radio-link")))]
 pub(crate) use frame_buf_test_turn::frame_buf_turn;
 
-#[cfg(test)]
+#[cfg(all(test, any(feature = "usb-link", feature = "radio-link")))]
 mod frame_buf_test_turn {
     extern crate std;
 
     /// The frame buffer is one static: host tests that serialize into it
-    /// (the radio mux's, the USB link transport's, the payload's) take turns.
+    /// (the radio mux's, the USB link transport's) take turns.
     pub(crate) fn frame_buf_turn() -> std::sync::MutexGuard<'static, ()> {
         static FRAME_BUF_TURN: std::sync::Mutex<()> = std::sync::Mutex::new(());
         FRAME_BUF_TURN.lock().unwrap_or_else(|e| e.into_inner())
