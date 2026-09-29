@@ -152,7 +152,7 @@ async fn a_classic_shaped_board_speaks_uart_link_to_either_host_preset() {
     use lpc_wire::lp_link::LinkConfig;
     let classic_board = LinkConfig {
         min_rto: 200_000,
-        syn_backoff_max: 1_000_000,
+        syn_backoff: 4,
         ..LinkConfig::uart()
     };
     for host in [Some(LinkConfig::uart()), None] {

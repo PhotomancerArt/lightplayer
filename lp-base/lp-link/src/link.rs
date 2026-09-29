@@ -92,8 +92,8 @@ pub struct Link<A: Arq> {
     unacked_rx: u8,
     last_adv_win: u8,
     syn_due: Option<Micros>,
-    /// The gap after the next unanswered SYN (`syn_backoff_max`).
-    syn_gap: Micros,
+    /// Unanswered SYNs the gap has doubled for so far (`syn_backoff`).
+    syn_doublings: u8,
     syn_owed: bool,
     /// A tail-loss probe may fire for the current flight.
     probe_armed: bool,
@@ -144,7 +144,7 @@ impl<A: Arq> Link<A> {
             unacked_rx: 0,
             last_adv_win: 0,
             syn_due: Some(0),
-            syn_gap: cfg.syn_interval,
+            syn_doublings: 0,
             syn_owed: false,
             probe_armed: false,
             last_data_tx: 0,
@@ -692,9 +692,9 @@ impl<A: Arq> Link<A> {
     ) -> bool {
         if self.state == LinkState::Connecting {
             if self.syn_due.is_some_and(|t| t <= now) {
-                self.syn_due = Some(now + self.syn_gap);
-                if self.cfg.syn_backoff_max > self.cfg.syn_interval {
-                    self.syn_gap = (self.syn_gap * 2).min(self.cfg.syn_backoff_max);
+                self.syn_due = Some(now + (self.cfg.syn_interval << self.syn_doublings));
+                if self.syn_doublings < self.cfg.syn_backoff {
+                    self.syn_doublings += 1;
                 }
                 self.emit_syn();
                 return true;
@@ -957,12 +957,12 @@ impl<A: Arq> Link<A> {
     // ---- Lifecycle -------------------------------------------------------
 
     /// Something arrived while handshaking: somebody may be listening, so a
-    /// backed-off SYN gap (`syn_backoff_max`) goes back to `syn_interval`.
+    /// backed-off SYN gap (`syn_backoff`) goes back to `syn_interval`.
     fn heard_while_connecting(&mut self, now: Micros) {
-        if self.state != LinkState::Connecting || self.syn_gap == self.cfg.syn_interval {
+        if self.state != LinkState::Connecting || self.syn_doublings == 0 {
             return;
         }
-        self.syn_gap = self.cfg.syn_interval;
+        self.syn_doublings = 0;
         let soon = now + self.cfg.syn_interval;
         if self.syn_due.is_none_or(|t| t > soon) {
             self.syn_due = Some(soon);
@@ -1005,7 +1005,7 @@ impl<A: Arq> Link<A> {
         self.syn_owed = false;
         self.probe_armed = false;
         self.syn_due = Some(now);
-        self.syn_gap = self.cfg.syn_interval;
+        self.syn_doublings = 0;
         self.counters.resets += 1;
         self.inbox.push_lifecycle(LinkEvent::Reset {
             reason,

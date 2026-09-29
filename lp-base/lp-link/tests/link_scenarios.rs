@@ -103,21 +103,21 @@ fn a_board_reboot_resets_both_sides_and_the_new_session_works() {
     assert_eq!(r.host_resets, 2, "the host sees each reboot as a reset");
 }
 
-/// `syn_backoff_max` (ruling DD27 of the classic-UART plan): a board nobody
-/// answers doubles its SYN gap to the ceiling instead of writing a SYN every
-/// `syn_interval` forever. Ten seconds with nobody there: 100, 200, 400,
-/// 800 ms, then one a second.
+/// `syn_backoff` (ruling DD27 of the classic-UART plan): a board nobody
+/// answers doubles its SYN gap up to its ceiling instead of writing a SYN
+/// every `syn_interval` forever. Ten seconds with nobody there, four
+/// doublings: 100, 200, 400, 800 ms, then one every 1.6 s.
 #[test]
 fn an_unanswered_link_backs_off_its_syns_to_the_ceiling() {
     let backed_off = LinkConfig {
-        syn_backoff_max: 1_000_000,
+        syn_backoff: 4,
         ..LinkConfig::uart()
     };
     let at = syn_times(&mut Link::<SelectiveRepeat>::new(backed_off, 7), 10_000_000);
     let gaps: Vec<u64> = at.windows(2).map(|w| (w[1] - w[0]) / 1_000).collect();
-    assert_eq!(&gaps[..5], &[100, 200, 400, 800, 1_000], "{gaps:?}");
-    assert!(gaps[4..].iter().all(|&g| g == 1_000), "{gaps:?}");
-    assert_eq!(at.len(), 13, "SYNs in ten seconds: {at:?}");
+    assert_eq!(&gaps[..5], &[100, 200, 400, 800, 1_600], "{gaps:?}");
+    assert!(gaps[4..].iter().all(|&g| g == 1_600), "{gaps:?}");
+    assert_eq!(at.len(), 10, "SYNs in ten seconds: {at:?}");
 }
 
 /// The knob defaults to off: every preset keeps today's fixed interval.
@@ -128,7 +128,7 @@ fn without_the_knob_syns_stay_one_interval_apart() {
         ("uart", LinkConfig::uart()),
         ("ble", LinkConfig::ble()),
     ] {
-        assert_eq!(cfg.syn_backoff_max, 0, "{name}");
+        assert_eq!(cfg.syn_backoff, 0, "{name}");
         let interval = cfg.syn_interval;
         let at = syn_times(&mut Link::<SelectiveRepeat>::new(cfg, 7), 2_000_000);
         assert!(
@@ -143,13 +143,13 @@ fn without_the_knob_syns_stay_one_interval_apart() {
 #[test]
 fn any_byte_heard_snaps_the_syn_gap_back() {
     let cfg = LinkConfig {
-        syn_backoff_max: 1_000_000,
+        syn_backoff: 4,
         ..LinkConfig::uart()
     };
     let mut board = Link::<SelectiveRepeat>::new(cfg, 7);
     let backed_off = syn_times(&mut board, 5_000_000);
     let last = *backed_off.last().unwrap();
-    // Well inside a one-second gap: a stray byte of text.
+    // Well inside a 1.6 s gap: a stray byte of text.
     let heard = last + 50_000;
     board.on_bytes(heard, b"x");
     let mut after = Vec::new();
@@ -175,7 +175,7 @@ fn any_byte_heard_snaps_the_syn_gap_back() {
 #[test]
 fn a_backed_off_board_answers_a_late_host_at_once() {
     let cfg = LinkConfig {
-        syn_backoff_max: 1_000_000,
+        syn_backoff: 4,
         ..LinkConfig::uart()
     };
     let mut board = Link::<SelectiveRepeat>::new(cfg, 0x3333_4444);
@@ -195,7 +195,7 @@ fn a_backed_off_board_stays_clean_across_reboots_and_an_outage() {
     let mut sc = Scenario::new(Transport::Usb, 0.02, random(), 6_000_000, 23);
     sc.host_cfg = LinkConfig::uart();
     sc.board_cfg = LinkConfig {
-        syn_backoff_max: 1_000_000,
+        syn_backoff: 4,
         ..LinkConfig::uart()
     };
     sc.board_reboots = vec![1_500_000, 4_000_000];

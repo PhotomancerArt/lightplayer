@@ -149,7 +149,7 @@ impl FakeLightPlayerState {
 
     /// The board end of the link on `config` rather than the USB preset: a
     /// classic-shaped double is `LinkConfig::uart()`, or the classic board's
-    /// own timings on top of it (`min_rto` 200 ms, `syn_backoff_max` 1 s;
+    /// own timings on top of it (`min_rto` 200 ms, `syn_backoff` 4;
     /// `fw_esp32_common::uart_link::uart_board_link_config`).
     pub fn with_link_config(mut self, config: lpc_wire::lp_link::LinkConfig) -> Self {
         self.link_config = config;

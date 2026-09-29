@@ -17,10 +17,11 @@
 //!   nonce, and the host sees it as `PeerRestarted` (ruling DD28): the
 //!   emulator restores the RNG with the rest of power-on, so the random word
 //!   repeats and only the boot-count salt tells the two boots apart;
-//! - a board nobody answers backs its SYNs off to one a second (ruling
-//!   DD27), instead of ten; and one whose host went quiet mid-session gets
-//!   there too, once its resend limit resets the link (printed: how long
-//!   that takes is the Established state's, not the backoff's).
+//! - a board nobody answers backs its SYNs off to one every 1.6 s (ruling
+//!   DD27: at least a second), instead of ten a second; and one whose host
+//!   went quiet mid-session gets there too, once its resend limit resets
+//!   the link (printed: how long that takes is the Established state's, not
+//!   the backoff's).
 //!
 //! It lives in lp-cli because nothing under `lp-emu/` may depend on lp-link
 //! or a product crate (the MIT fence). `#[ignore]`d: it needs the shipped
@@ -215,14 +216,13 @@ fn a_reboot_is_a_new_session_under_a_new_board_nonce() {
     );
 }
 
-/// DD27: a board nobody answers backs its SYNs off to one a second.
+/// DD27: a board nobody answers backs its SYNs off, four doublings from
+/// 100 ms to one every 1.6 s.
 #[test]
 #[ignore = "needs LP_EMU_ESP32V3_ELF; run through `just test-emu-esp32v3-cli`"]
-fn a_classic_nobody_answers_backs_its_syns_off_to_one_a_second() {
+fn a_classic_nobody_answers_backs_its_syns_off() {
     const WATCH_US: u64 = 12_000_000;
-    let Some(mut board) =
-        sniffed_board("a_classic_nobody_answers_backs_its_syns_off_to_one_a_second")
-    else {
+    let Some(mut board) = sniffed_board("a_classic_nobody_answers_backs_its_syns_off") else {
         return;
     };
     // A mute host: it reads what the board writes and never answers, so it
@@ -277,12 +277,12 @@ fn a_classic_nobody_answers_backs_its_syns_off_to_one_a_second() {
         );
     }
     assert!(
-        gaps_ms[4..].iter().all(|&g| g.abs_diff(1_000) <= 15),
-        "then one a second: {gaps_ms:?}"
+        gaps_ms[4..].iter().all(|&g| g.abs_diff(1_600) <= 15),
+        "then one every 1.6 s: {gaps_ms:?}"
     );
     assert!(
-        window.len() <= 14,
-        "at most 14 SYNs in ten seconds, not ~100: {}",
+        window.len() <= 10,
+        "at most 10 SYNs in ten seconds, not ~100: {}",
         window.len()
     );
 }
@@ -292,13 +292,13 @@ fn a_classic_nobody_answers_backs_its_syns_off_to_one_a_second() {
 /// keeps talking — keepalives, and its heartbeat resent — until its resend
 /// limit resets the link; only then does the SYN backoff apply. This prints
 /// the board's frames per second after the host goes quiet and holds the
-/// tail to the backoff's one a second.
+/// tail to the backoff's one SYN every 1.6 s.
 #[test]
 #[ignore = "needs LP_EMU_ESP32V3_ELF; run through `just test-emu-esp32v3-cli`"]
-fn after_its_host_goes_quiet_the_classic_falls_back_to_one_frame_a_second() {
+fn after_its_host_goes_quiet_the_classic_falls_back_to_its_syn_backoff() {
     const WATCH_US: u64 = 60_000_000;
     let Some(board) =
-        sniffed_board("after_its_host_goes_quiet_the_classic_falls_back_to_one_frame_a_second")
+        sniffed_board("after_its_host_goes_quiet_the_classic_falls_back_to_its_syn_backoff")
     else {
         return;
     };
@@ -334,8 +334,8 @@ fn after_its_host_goes_quiet_the_classic_falls_back_to_one_frame_a_second() {
     );
     let tail_rate = &per_second[per_second.len() - 10..];
     assert!(
-        tail_rate.iter().all(|&n| n <= 2),
-        "the last ten seconds are the backoff's one SYN a second: {per_second:?}"
+        tail_rate.iter().all(|&n| n <= 1) && tail_rate.iter().sum::<u32>() <= 7,
+        "the last ten seconds are the backoff's one SYN every 1.6 s: {per_second:?}"
     );
 }
 

@@ -122,7 +122,7 @@ mod tests {
 
         let board = LinkConfig {
             min_rto: 200_000,
-            syn_backoff_max: 1_000_000,
+            syn_backoff: 4,
             ..LinkConfig::uart()
         };
         let replies: Vec<_> = (30..40).map(log_reply).collect();
