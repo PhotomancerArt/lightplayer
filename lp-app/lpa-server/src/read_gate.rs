@@ -144,7 +144,10 @@ mod tests {
 
     #[test]
     fn low_total_free_refuses_even_with_a_big_block() {
-        assert!(GATE.check(Some(40 * 1024 - 1), Some(40 * 1024 - 1)).is_err());
+        assert!(
+            GATE.check(Some(40 * 1024 - 1), Some(40 * 1024 - 1))
+                .is_err()
+        );
     }
 
     #[test]
