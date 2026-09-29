@@ -200,6 +200,10 @@ impl<U: ServerTransport + FrameBufHolder, D: DelayNs> LinkMuxTransport<U, D> {
         self.radio.len()
     }
 
+    // Out of line (this and the pump below): their locals — a delivered
+    // message, a decoded request — stay in their own frames and never join
+    // the server loop future's, which every deep call stacks on.
+    #[inline(never)]
     fn drain_events(&mut self) {
         while let Some(event) = self.port.try_event() {
             match event {
@@ -240,6 +244,7 @@ impl<U: ServerTransport + FrameBufHolder, D: DelayNs> LinkMuxTransport<U, D> {
     /// Take each radio link's events: client messages into the inbox,
     /// lifecycle into the link's state. A link whose session just came up
     /// is taken no further until its hello is handed out (rule 3).
+    #[inline(never)]
     fn pump_radio(&mut self) {
         let port = self.port;
         let now = now_us();

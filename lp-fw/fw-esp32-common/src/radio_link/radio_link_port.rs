@@ -82,7 +82,9 @@ struct SlotLink {
 
 /// One connection slot: its link, and the signals both halves wait on.
 pub struct RadioLinkSlot {
-    link: RefCell<Option<SlotLink>>,
+    /// Boxed: an idle slot costs a pointer, not a whole `Link` struct (the
+    /// port is on the heap of every BLE image, connected or not).
+    link: RefCell<Option<Box<SlotLink>>>,
     /// Mux → radio side: something was queued; transmit now rather than at
     /// the link's next timer.
     doorbell: Signal<CriticalSectionRawMutex, ()>,
@@ -120,10 +122,10 @@ impl RadioLinkSlot {
     pub fn open(&self, id: LinkId, att_mtu: u16, nonce: u32) -> Result<u16, MtuTooSmall> {
         let cfg = radio_link_config(att_mtu)?;
         let max_payload = cfg.max_payload;
-        *self.link.borrow_mut() = Some(SlotLink {
+        *self.link.borrow_mut() = Some(Box::new(SlotLink {
             id,
             link: LpLink::new(cfg, nonce),
-        });
+        }));
         Ok(max_payload)
     }
 
