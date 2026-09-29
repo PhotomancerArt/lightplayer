@@ -1114,7 +1114,22 @@ impl ConfigurationDriver for SiliconDriver {
                     .into(),
             ],
             notes,
-            tools: BTreeMap::new(),
+            // A hosted capture's reader is the caller's command, from this
+            // checkout; a raw one's is espflash or tty-capture.py, named in
+            // `source`.
+            tools: hosted
+                .iter()
+                .map(|host| {
+                    (
+                        "link-host".to_string(),
+                        format!(
+                            "{} ({})",
+                            host.port.join(" "),
+                            git_description(&req.repo_root)
+                        ),
+                    )
+                })
+                .collect(),
             image: Some(image),
         })
     }
@@ -1821,7 +1836,22 @@ impl ConfigurationDriver for LpEmuDriver {
             cwd: req.repo_root.clone(),
             warnings: Vec::new(),
             notes,
-            tools: emulator_tools(spec, &req.repo_root),
+            tools: {
+                let mut tools = emulator_tools(spec, &req.repo_root);
+                // The host ran the machine, so it is a tool of this capture
+                // too: the caller's command, from this same checkout.
+                if let Some(host) = &hosted {
+                    tools.insert(
+                        "link-host".to_string(),
+                        format!(
+                            "{} ({})",
+                            host.emulated.join(" "),
+                            git_description(&req.repo_root)
+                        ),
+                    );
+                }
+                tools
+            },
             image: Some(image),
         })
     }
@@ -2837,6 +2867,13 @@ mod tests {
         assert!(
             plan.notes.iter().any(|n| n.contains("LINK HOST")),
             "the sidecar's note says how it was captured"
+        );
+        assert!(
+            plan.tools
+                .get("link-host")
+                .is_some_and(|t| t.starts_with("host-under-test emulated")),
+            "the sidecar's tools name the host: {:?}",
+            plan.tools
         );
     }
 
