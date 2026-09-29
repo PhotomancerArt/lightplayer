@@ -238,12 +238,13 @@ impl LinkConfig {
     ///   queues each request with `send()`, which refuses a message longer
     ///   than `send_budget`; an upload's ~5.5 KB chunk must fit. The board
     ///   sends its replies external and sets its own small ring.
-    /// - **`min_rto`: `usb()`'s 40 ms, a hypothesis.** The C6's board had to
-    ///   raise its own floor to 200 ms because its link task yields to an
-    ///   ~80 ms render tick between packets; a UART link task serviced every
-    ///   1 ms whatever the engine is doing should not need that. Unproven on
-    ///   silicon (plan `lp2025/2026-09-28-2015-classic-uart-on-lp-link`, D4):
-    ///   the C6's simulator numbers were wrong twice on the board.
+    /// - **`min_rto`: `usb()`'s 40 ms, for a host.** A host services its end
+    ///   promptly. The classic's board raises its own floor to the C6's
+    ///   200 ms: its UART is serviced every 1 ms by an interrupt-executor
+    ///   task that only moves bytes, but the link itself runs between engine
+    ///   ticks on the thread executor, as the C6's does (plan
+    ///   `lp2025/2026-09-28-2015-classic-uart-on-lp-link`, D4 and ruling
+    ///   DD20; `fw_esp32_common::uart_link::uart_board_link_config`).
     /// - **`frame_abandon`: `usb()`'s 3 s**, for the same reason: a busy
     ///   writer's split frame must not be abandoned and resent in a loop.
     pub fn uart() -> Self {
