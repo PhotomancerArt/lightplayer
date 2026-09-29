@@ -27,6 +27,7 @@
 
 pub mod uart_link_config;
 pub mod uart_link_counters;
+pub mod uart_link_nonce;
 pub mod uart_link_pipes;
 pub mod uart_link_shared;
 pub mod uart_link_task;
@@ -34,6 +35,7 @@ pub mod uart_link_task;
 pub mod uart_link_transport;
 
 pub use uart_link_config::uart_board_link_config;
+pub use uart_link_nonce::session_nonce;
 pub use uart_link_shared::UartLinkShared;
 pub use uart_link_task::{run_uart_link, when_drained};
 #[cfg(feature = "server")]

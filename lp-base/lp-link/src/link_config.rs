@@ -87,6 +87,16 @@ pub struct LinkConfig {
     /// Sends of one frame before the link gives up and restarts.
     pub max_retries: u8,
     pub syn_interval: Micros,
+    /// While a SYN goes unanswered, double the gap to the next one, up to
+    /// this ceiling; any byte received snaps the gap back to
+    /// `syn_interval`. `0` (every preset): SYNs stay `syn_interval` apart.
+    ///
+    /// For a transport with no cable signal, where a board cannot tell that
+    /// nobody is listening (a UART behind a USB bridge): its SYNs are binary
+    /// that a plain serial monitor prints. The handshake does not wait on it
+    /// — a host's SYN is answered at once whatever the gap — so only an
+    /// unheard board slows down.
+    pub syn_backoff_max: Micros,
     /// Send an empty ACK after this much transmit silence.
     pub keepalive: Micros,
     /// Nothing heard for this long: the peer is stalled (a cable out, a hung
@@ -150,6 +160,7 @@ impl LinkConfig {
             max_rto: 1_000_000,
             max_retries: 20,
             syn_interval: 100_000,
+            syn_backoff_max: 0,
             keepalive: 250_000,
             stall_after: 1_000_000,
             idle_flush: 50_000,

@@ -61,8 +61,20 @@ const KEEP_REASSEMBLY: usize = 512;
 /// emulated soak (P5) and the desk sitting are what can move it.
 const MIN_RTO_US: u64 = 200_000;
 
+/// The ceiling on the gap between SYNs while no host answers: one a second,
+/// not the preset's ten (ruling DD27 of the classic-UART plan).
+///
+/// A UART has no cable signal, so a board with nobody on the other end of
+/// its CH340 cannot tell and keeps handshaking; at `syn_interval` that is a
+/// ~25-byte binary frame ten times a second into whatever is listening, which
+/// a plain serial monitor prints as noise. The gap doubles from 100 ms to
+/// this and snaps back on any byte heard (`LinkConfig::syn_backoff_max`); a
+/// host's own SYN is answered at once whatever the gap, so connecting is not
+/// slower.
+const SYN_BACKOFF_MAX_US: u64 = 1_000_000;
+
 /// The board's link configuration. See the module docs, and [`MIN_RTO_US`]
-/// for the one timing change from the preset.
+/// and [`SYN_BACKOFF_MAX_US`] for the two timing changes from the preset.
 pub fn uart_board_link_config() -> LinkConfig {
     let mut cfg = LinkConfig::uart();
     cfg.max_message = MAX_MESSAGE;
@@ -73,6 +85,7 @@ pub fn uart_board_link_config() -> LinkConfig {
     cfg.send_queue = SEND_QUEUE;
     cfg.datagram_queue = LOG_DATAGRAMS;
     cfg.min_rto = MIN_RTO_US;
+    cfg.syn_backoff_max = SYN_BACKOFF_MAX_US;
     cfg
 }
 
