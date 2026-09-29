@@ -42,8 +42,26 @@ impl Capture {
 /// A session: `boot_text` raw first, the handshake, the hello, the opt-in
 /// when `packed`, then `replies` (after one request the host sends, id 1).
 pub fn capture(boot_text: &str, replies: &[WireServerMessage], packed: bool) -> Capture {
-    let mut host = WireLinkPort::new(LinkConfig::usb(), 0xC0DE_0001, packed);
-    let mut board = Board::new(packed);
+    capture_over(
+        LinkConfig::usb(),
+        LinkConfig::usb(),
+        boot_text,
+        replies,
+        packed,
+    )
+}
+
+/// [`capture`] with each end's link configuration named: a classic's UART
+/// link is `LinkConfig::uart()` on the host and the board's own cut of it.
+pub fn capture_over(
+    host_config: LinkConfig,
+    board_config: LinkConfig,
+    boot_text: &str,
+    replies: &[WireServerMessage],
+    packed: bool,
+) -> Capture {
+    let mut host = WireLinkPort::new(host_config, 0xC0DE_0001, packed);
+    let mut board = Board::new(board_config, packed);
     let mut chunks = vec![(Direction::BoardToHost, boot_text.as_bytes().to_vec())];
     host.on_bytes(0, boot_text.as_bytes());
     let mut asked = false;
@@ -91,9 +109,9 @@ struct Board {
 }
 
 impl Board {
-    fn new(packs: bool) -> Self {
+    fn new(config: LinkConfig, packs: bool) -> Self {
         Self {
-            link: Link::new(LinkConfig::usb(), 0xB0A2_0001),
+            link: Link::new(config, 0xB0A2_0001),
             table: LearnedTable::default(),
             packs,
             packed: false,

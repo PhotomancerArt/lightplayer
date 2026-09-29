@@ -15,7 +15,6 @@ use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, bail};
 use lpc_wire::WireLinkPort;
-use lpc_wire::lp_link::LinkConfig;
 
 use super::args::CaptureArgs;
 use super::lab_port::{LabPort, TermiosMode};
@@ -25,7 +24,10 @@ use crate::commands::emu::link_host::{console_lines, describe_link_counters, fre
 /// the deadline.
 pub fn capture(args: &CaptureArgs) -> Result<()> {
     let mut port = LabPort::open(&args.target, TermiosMode::Raw)?;
-    let mut link = WireLinkPort::new(LinkConfig::usb(), fresh_nonce(), !args.json_replies);
+    // A CH340-bridged classic takes the UART preset, a C6 or S3 the USB one:
+    // the vendor id the product's own serial host reads (a socket is `usb()`).
+    let config = lpa_client::transport_serial::link_config_for_port(&args.target);
+    let mut link = WireLinkPort::new(config, fresh_nonce(), !args.json_replies);
     let file = std::fs::File::create(&args.console)
         .with_context(|| format!("creating the console {}", args.console.display()))?;
     let mut console = std::io::LineWriter::new(file);

@@ -31,6 +31,12 @@ pub enum EmuChip {
     /// C6's, and the S3's own binary is the workshop for everything else.
     #[value(name = "esp32s3")]
     Esp32S3,
+    /// The classic ESP32 (v3), for `run --host-link` only, with the S3's
+    /// subset of flags: its UART0 host link is an lp-link since wire proto
+    /// 32. The classic's own binary (`lp-emu-esp32v3`) is the workshop for
+    /// everything else.
+    #[value(name = "esp32v3")]
+    Esp32V3,
 }
 
 /// Which link the socket is.

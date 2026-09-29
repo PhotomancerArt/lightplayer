@@ -119,6 +119,9 @@ fn run(args: RunArgs) -> Result<()> {
     if args.chip == EmuChip::Esp32S3 {
         return super::run_s3::run_s3(&args, parse_duration_us(&args.timeout)?);
     }
+    if args.chip == EmuChip::Esp32V3 {
+        return super::run_v3::run_v3(&args, parse_duration_us(&args.timeout)?);
+    }
 
     let micros = parse_duration_us(&args.timeout)?;
     let grade = args.time_grade.time_grade();
