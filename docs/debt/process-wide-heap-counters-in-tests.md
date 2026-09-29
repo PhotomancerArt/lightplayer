@@ -82,6 +82,29 @@ process-wide counter.
   (37 KiB) unchanged; 26,971 B measured, matching the 2026-09-02 figure the
   ceiling comment already recorded. Evidence: 20 sequential release runs
   plus a 32-run parallel batch (4×8 concurrent processes), no failures.
+  **Incomplete**: CI on the PR's own diff (run 36490651838) failed
+  `lpc-engine --test example_shader_compile_peak_memory` with the same
+  underflow, one call later — the one-time latch only accounted for the
+  spawned-thread bootstrap free, not this probe's own warm-up-pass-then-drop
+  shape (see the next entry).
+- 2026-09-28 — same ticket, reworked: `lpc-engine`'s
+  `example_shader_compile_peaks` runs a warm-up compile pass and drops it
+  *before* its first reading of the measured pass; dropping the warm-up
+  frees memory allocated before that reading, on the same thread, so the
+  very next reading legitimately sits below it — a second, distinct source
+  of the same underflow shape, not a bug. A one-time latch (the previous
+  entry) cannot absorb a dip that happens *after* the latch. Replaced the
+  one-time epoch with a `FLOOR` that ratchets down (never up, never clamped
+  to zero) the moment a reading would otherwise go negative, in one helper
+  both `live()` and `peak()` route through — so the subtraction is always
+  well-defined and no longer needs a fallible conversion or a panic.
+  Assertions, ceilings and the two other probe binaries unchanged.
+  Reproduced the failure locally (`cargo test -p lpc-engine --test
+  example_shader_compile_peak_memory --features node-shader`, panicked in
+  0.04 s at the post-warm-up reading) and confirmed it green after the fix,
+  peak figures unchanged from the recorded ones in all three consumers;
+  each run 20 sequential plus a parallel batch, no failures. See the PR for
+  per-test pass evidence.
 
 **Exit criteria** — no host heap test counts through a process-wide
 counter. Met 2026-09-28: all six probes (four `lpc-engine/tests`, plus
