@@ -334,6 +334,22 @@ impl Device {
             Reducer::Identify(reducer),
         );
         self.install_activity(now, cell, effect_id, &commands, ctx);
+        // `spawn_identify` is called directly by the roster's routing paths
+        // (a hotplug connect, a fresh grant), not only from `handle`, whose
+        // own `rearm` a caller here never reaches. Without this, a freshly
+        // spawned identify's settle deadline is never armed, and if its
+        // opening `Open` command is lost to the same-tick link-registration
+        // race (`DeviceEffects::settle` vs `apply`), the card is stranded on
+        // "Identifying" with no timer left to recover it
+        // (2026-09-28, `a_replug_under_the_lens_comes_back_ready_and_opens_again`).
+        //
+        // When `spawn_identify` is instead reached through `handle` (whose
+        // own call to `rearm` follows every `handle_action`/`handle_event`),
+        // this second `rearm` is a no-op: `armed_timer` already holds the
+        // deadline this call would compute, so the `armed_at == at` guard in
+        // `rearm` returns an empty `Vec` rather than a duplicate `StartTimer`.
+        let mut commands = commands;
+        commands.extend(self.rearm(now, ctx));
         commands
     }
 
