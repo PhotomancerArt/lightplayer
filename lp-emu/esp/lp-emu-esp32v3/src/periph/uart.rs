@@ -977,6 +977,22 @@ impl Uart {
     pub fn tx_dropped(&self) -> u64 {
         self.engine.tx_dropped()
     }
+
+    /// Damage what crosses between this block's wire and its host stream —
+    /// `--uart-faults`, **a test switch, off by default**
+    /// (`lp_emu_esp_common::link_faults`). The block's own behaviour is
+    /// unchanged: every byte the shifter sent still left it, and the
+    /// injector decides what the host then got, the same for the host's
+    /// bytes on their way in. The C6's `usb_faults` hooks its USB model at
+    /// the same boundary (`UsbSerialJtag::set_faults`).
+    pub fn set_faults(&mut self, faults: Option<lp_emu_esp_common::link_faults::LinkFaults>) {
+        self.engine.set_faults(faults);
+    }
+
+    /// The injector and its counters, when one is set.
+    pub fn faults(&self) -> Option<&lp_emu_esp_common::link_faults::LinkFaults> {
+        self.engine.faults()
+    }
 }
 
 impl Peripheral for Uart {
@@ -1259,6 +1275,68 @@ mod tests {
             sb.read(&mut u, STATUS) >> STATUS_ST_UTX_OUT_SHIFT & 0xf,
             TX_IDLE
         );
+    }
+
+    /// `--uart-faults` stands between the wire and the host, not inside the
+    /// block: with every window dropped the shifter still sends each byte
+    /// and raises `tx_done`, and the host gets nothing; with every window
+    /// flipped the host gets one bit wrong per window. Off, the host gets
+    /// what the guest wrote.
+    #[test]
+    fn the_fault_injector_damages_what_the_host_gets_and_nothing_the_block_does() {
+        let send = |spec: &str, n: usize| -> (Vec<u8>, Uart) {
+            let (mut sb, mut u, log) = rig(ScriptedSource::new());
+            u.set_faults(Some(
+                lp_emu_esp_common::link_faults::LinkFaults::parse(spec).expect("a spec"),
+            ));
+            for i in 0..n {
+                sb.write(&mut u, FIFO, u32::from(b'a' + (i % 26) as u8));
+                sb.run_to(&mut u, (i as u64 + 1) * SYMBOL_ROM);
+            }
+            (log.bytes(), u)
+        };
+        let (got, u) = send("in-drop=100%", 70);
+        assert!(got.is_empty(), "every window dropped: {got:?}");
+        assert!(u.engine.sticky().tx_done, "and the block sent every byte");
+        let c = u.faults().expect("an injector").in_counters;
+        assert_eq!((c.packets_seen, c.packets_dropped), (2, 2), "{c}");
+        assert_eq!(
+            c.bytes_dropped, 128,
+            "two whole windows, counted when planned"
+        );
+
+        let (got, _) = send("in-corrupt=100%", 64);
+        let sent: Vec<u8> = (0..64).map(|i| b'a' + (i % 26) as u8).collect();
+        let flipped: u32 = got
+            .iter()
+            .zip(&sent)
+            .map(|(a, b)| (a ^ b).count_ones())
+            .sum();
+        assert_eq!(
+            (got.len(), flipped),
+            (64, 1),
+            "one bit of noise in the window"
+        );
+
+        let (got, u) = send("", 5);
+        assert_eq!(got, b"abcde");
+        assert!(u.faults().is_none(), "an empty spec is no injector");
+    }
+
+    /// The injector on the way in: a dropped window never reaches the RX
+    /// FIFO, and the bytes after it still arrive a symbol apart.
+    #[test]
+    fn a_dropped_host_window_never_reaches_the_rx_fifo() {
+        let bytes: Vec<u8> = (0..70u8).collect();
+        // Arriving after the rig's first poll, so the injector is in place.
+        let (mut sb, mut u, _) = rig(ScriptedSource::new().at(SYMBOL_ROM, &bytes));
+        u.set_faults(Some(
+            lp_emu_esp_common::link_faults::LinkFaults::parse("out-drop=100%").expect("a spec"),
+        ));
+        sb.run_to(&mut u, 80 * SYMBOL_ROM);
+        assert_eq!(u.engine.rx_len(), 0, "every window dropped on the way in");
+        let c = u.faults().expect("an injector").out_counters;
+        assert_eq!(c.packets_dropped, 2, "{c}");
     }
 
     /// The ROM's own spin: `uart_tx_one_char` waits while `status` bit 23 is

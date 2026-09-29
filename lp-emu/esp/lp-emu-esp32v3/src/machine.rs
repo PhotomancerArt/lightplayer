@@ -1045,6 +1045,8 @@ pub struct Esp32V3Builder {
     uart0_source: Option<Box<dyn ByteSource>>,
     uart0_script: Option<lp_emu_esp_common::ScriptedSource>,
     uart0_baud: Option<u64>,
+    /// UART0's host-link fault injector (`--uart-faults`), off by default.
+    uart0_faults: Option<lp_emu_esp_common::link_faults::LinkFaults>,
     control: Option<String>,
     control_script: Vec<(Cycles, ControlCommand)>,
     reboot_on_reset: bool,
@@ -1101,6 +1103,7 @@ impl Default for Esp32V3Builder {
             uart0_source: None,
             uart0_script: None,
             uart0_baud: None,
+            uart0_faults: None,
             control: None,
             control_script: Vec::new(),
             reboot_on_reset: false,
@@ -1209,6 +1212,7 @@ impl fmt::Debug for Esp32V3Builder {
             .field("uart0_source", &self.uart0_source.is_some())
             .field("uart0_script", &self.uart0_script.is_some())
             .field("uart0_baud", &self.uart0_baud)
+            .field("uart0_faults", &self.uart0_faults)
             .field("control", &self.control)
             .field("control_script", &self.control_script.len())
             .field("reboot_on_reset", &self.reboot_on_reset)
@@ -1498,6 +1502,15 @@ impl Esp32V3Builder {
     /// guest programs into `clkdiv`.
     pub fn uart0_baud(mut self, baud: u64) -> Self {
         self.uart0_baud = Some(baud);
+        self
+    }
+
+    /// Damage UART0's host link (`--uart-faults <spec>`) — a test switch,
+    /// off by default: the C6's `usb_faults`, over a byte stream. See
+    /// `lp_emu_esp_common::link_faults` (the spec, and `StreamFaults` for
+    /// what a "packet" is on a UART).
+    pub fn uart0_faults(mut self, faults: lp_emu_esp_common::link_faults::LinkFaults) -> Self {
+        self.uart0_faults = Some(faults);
         self
     }
 
@@ -1889,6 +1902,17 @@ impl Esp32V3Builder {
             machine
                 .bus
                 .with_peripheral::<crate::periph::uart::Uart, _>(i, |u, _| u.set_host_baud(baud));
+        }
+        // Not in the save-state blob (the host's side of the cable, like the
+        // baud above), so a reboot keeps it.
+        if let Some(faults) = self.uart0_faults.filter(|f| !f.is_off())
+            && let Some(i) = machine.bus.peripheral_index("UART0")
+        {
+            machine
+                .bus
+                .with_peripheral::<crate::periph::uart::Uart, _>(i, |u, _| {
+                    u.set_faults(Some(faults))
+                });
         }
 
         // Guest time is zero and everything is placed: the one moment a
@@ -3128,6 +3152,35 @@ impl Machine {
     /// here yet.
     pub fn uart0(&self) -> &ByteLog {
         &self.uart0_log
+    }
+
+    /// Set (or, with `None`, clear) UART0's host-link fault injector
+    /// mid-run; `false` when the machine has no UART0.
+    pub fn set_uart0_faults(
+        &mut self,
+        faults: Option<lp_emu_esp_common::link_faults::LinkFaults>,
+    ) -> bool {
+        let Some(index) = self.bus.peripheral_index("UART0") else {
+            return false;
+        };
+        self.bus
+            .with_peripheral::<crate::periph::uart::Uart, _>(index, |u, _| u.set_faults(faults))
+            .is_some()
+    }
+
+    /// What UART0's fault injector did: (device → host, host → device).
+    pub fn uart0_fault_counters(
+        &mut self,
+    ) -> Option<(
+        lp_emu_esp_common::link_faults::FaultCounters,
+        lp_emu_esp_common::link_faults::FaultCounters,
+    )> {
+        let index = self.bus.peripheral_index("UART0")?;
+        self.bus
+            .with_peripheral::<crate::periph::uart::Uart, _>(index, |u, _| {
+                u.faults().map(|f| (f.in_counters, f.out_counters))
+            })
+            .flatten()
     }
 
     /// The UART0 TCP listener, when `Uart0Sink::Tcp` was chosen.
