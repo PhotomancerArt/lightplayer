@@ -595,7 +595,6 @@ fn the_frame_dump_walk_reads_the_oracles_frame_three_ways() {
         frames.len(),
         dumped.len()
     );
-
     // 7. Two runs are the same run, down to the dump file's bytes.
     let b = oracle_run(&elf, &dir.join("b.jsonl"));
     assert_eq!((a.cycles, a.instructions), (b.cycles, b.instructions));
@@ -609,6 +608,115 @@ fn the_frame_dump_walk_reads_the_oracles_frame_three_ways() {
     assert_eq!(sa, sb, "the two dump files differ");
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// After a reboot the board brings its saved project up by itself, with the
+/// host already holding the link: the desk walk's round 2 (a `reboot` asked
+/// over the link into the project `lp-cli upload` saved —
+/// `scripts/m4-hardware-walk.sh`), and the load burst that cost the classic
+/// its `[OUT] dump` (docs/defects/2026-09-29-the-classics-log-ring-drops-
+/// records-under-a-project-load-burst.md).
+///
+/// The boot, the auto-load, the compile and both dumps land in the log ring
+/// together while the UART drains it at line rate. The link task used to take
+/// records off the ring that the link's two-slot datagram queue then refused
+/// — each one lost with no notice a host could see — and the socket-hosted
+/// walk lost the lit dump that way, three runs of three. A record now waits in
+/// the ring until the link has a slot, so every dump of the second boot
+/// arrives whole: the open-time black one and the deferred lit one, which is
+/// the oracle's frame. What the ring itself drops while nothing drains it (the
+/// boot's burst runs ahead of the first link-task pass) it drops oldest-first
+/// and says so in-band; the count is printed, not gated.
+///
+/// Direct load with the merged chip image as the flash, so the project lands
+/// in a real `lpfs` and survives the reboot.
+#[test]
+#[ignore = "needs LP_EMU_ESP32V3_FRAME_DUMP_ELF and LP_EMU_ESP32V3_MERGED; run through `just test-emu-esp32v3-boot`"]
+fn a_reboot_into_the_saved_project_delivers_every_dump_whole() {
+    let test = "a_reboot_into_the_saved_project_delivers_every_dump_whole";
+    let (Some(elf), Some(merged)) = (frame_dump(test), merged(test)) else {
+        return;
+    };
+    let len = std::fs::metadata(&merged).expect("the merged image").len() as u32;
+    let board = V3Board::build(
+        Esp32V3Builder::new()
+            .boot_mode(BootMode::Direct)
+            .app(AppSource::Path(elf))
+            .flash(FlashBacking::Copy(merged))
+            .flash_len(len)
+            .strict(true)
+            .time_grade(TimeGrade::T1),
+    )
+    .expect("the frame-dump image builds a machine");
+    let mut host = EmuLinkHost::new(board, NONCE, true);
+    deploy(&mut host, &oracle_project("reboot"));
+    host.send(&ClientMessage {
+        id: 9,
+        msg: ClientRequest::Reboot,
+    })
+    .unwrap();
+    let asked = host.board.machine.micros();
+    let restarted = host
+        .wait_for_line("[link] reset (PeerRestarted)", HELLO_BUDGET_US)
+        .expect("the reboot");
+    assert!(
+        restarted.is_some(),
+        "the host never saw the board restart:\n{}",
+        tail(host.console())
+    );
+    let second_boot = host.console().len();
+    host.run_until(asked + REBOOT_WATCH_US, None)
+        .expect("the run reaches its deadline");
+    assert_eq!(host.board.machine.reboots(), 1, "one software reboot");
+    assert!(
+        host.board.machine.first_strict_violation().is_none(),
+        "a strict refusal: {:?}",
+        host.board.machine.first_strict_violation()
+    );
+    // The reboot's own `PeerRestarted` is the one reset the host counts.
+    assert_eq!(host.link_errors, 1, "{}", tail(host.console()));
+    assert_eq!(host.counters().payload_errors, 0);
+
+    let after = &host.console()[second_boot..];
+    let text = after.join("\n");
+    assert!(
+        text.contains("Boot: auto-loaded project"),
+        "the second boot did not load the saved project:\n{text}"
+    );
+    let dumps = dump_parts(&text);
+    let ring_drops: Vec<&str> = after
+        .iter()
+        .filter(|l| l.contains(" log records dropped"))
+        .map(String::as_str)
+        .collect();
+    println!(
+        "reboot (lp-emu:esp32v3:t1): dumps after it (frame, parts arrived, of) {dumps:?}; \
+         the ring's own notices {ring_drops:?}"
+    );
+    assert!(
+        dumps.len() >= 2,
+        "the black dump and the lit one after the reboot: {dumps:?}\n{text}"
+    );
+    for (frame, got, of) in &dumps {
+        assert_eq!(
+            got,
+            of,
+            "the frame={frame} dump lost parts on the way to the host ({got} of {of}) — a log \
+             record taken off the ring and refused by the link: {dumps:?}\n{}",
+            tail(host.console())
+        );
+    }
+    assert_eq!(
+        last_dump_rgb(&text).as_deref(),
+        Some(ORACLE_RGB),
+        "the second boot's lit dump is the oracle's frame"
+    );
+    let _ = std::fs::remove_dir_all(scratch("project-reboot"));
+}
+
+/// How long the host watches after asking for the reboot: the boot, the
+/// auto-load, the compile and the deferred lit dump land in the first
+/// ~0.2 s emulated; a run parameter, not a tolerance.
+const REBOOT_WATCH_US: u64 = 1_500_000;
 
 struct OracleRun {
     console: Vec<String>,
@@ -703,6 +811,41 @@ fn last_dump_rgb(text: &str) -> Option<String> {
         }
     }
     last
+}
+
+/// Every `[OUT] dump` in a console, in order: its `frame=`, how many of its
+/// distinct `part=i/n` lines arrived, and `n`.
+fn dump_parts(text: &str) -> Vec<(u64, u32, u32)> {
+    let mut dumps: Vec<(u64, Vec<u32>, u32)> = Vec::new();
+    for line in text.lines().filter(|l| l.contains("[OUT] dump frame=")) {
+        let word = |key: &str| {
+            line.split_whitespace()
+                .find_map(|w| w.strip_prefix(key))
+                .map(str::to_string)
+        };
+        let (Some(frame), Some(part)) = (word("frame="), word("part=")) else {
+            continue;
+        };
+        let (Ok(frame), Some((Ok(i), Ok(n)))) = (
+            frame.parse::<u64>(),
+            part.split_once('/')
+                .map(|(i, n)| (i.parse::<u32>(), n.parse::<u32>())),
+        ) else {
+            continue;
+        };
+        match dumps.last_mut() {
+            Some((f, parts, _)) if *f == frame => {
+                if !parts.contains(&i) {
+                    parts.push(i);
+                }
+            }
+            _ => dumps.push((frame, vec![i], n)),
+        }
+    }
+    dumps
+        .into_iter()
+        .map(|(f, parts, n)| (f, parts.len() as u32, n))
+        .collect()
 }
 
 // ---------------------------------------------------------------------------
@@ -882,6 +1025,13 @@ fn five_wires_are_routed_over_four_slots(r: &FiveWireRun) {
     // the line is asserted, or the loss is: never silently absent. That the
     // output really opened on IO18 is the routing and the frames below,
     // which do not ride the log.
+    println!(
+        "five_wires (lp-emu:esp32v3:t1): IO18's open line arrived: {}; the ring's own notices {:?}",
+        text.contains(FIVE_OPEN_LINE),
+        text.lines()
+            .filter(|l| l.contains(" log records dropped"))
+            .collect::<Vec<_>>()
+    );
     assert!(
         text.contains(FIVE_OPEN_LINE) || text.contains(" log records dropped"),
         "IO18's open line is missing and the log ring did not report dropping it:\n{text}"
@@ -1366,6 +1516,17 @@ fn the_summary_parser_reads_the_line_the_firmware_prints() {
             },
         ]
     );
+}
+
+/// The dump-parts reader, on the shape the socket-hosted walk lost: the
+/// black dump whole, the lit one missing its first part.
+#[test]
+fn the_dump_parts_reader_counts_each_dumps_arrived_parts() {
+    let console = "[INFO] f: [OUT] dump frame=1 leds=64 shown=64 crc=0x75a104c5 part=1/2 rgb=00\n\
+         [INFO] f: [OUT] dump frame=1 leds=64 shown=64 crc=0x75a104c5 part=2/2 rgb=00\n\
+         [INFO] f: [OUT] frame=60 leds=64 crc=0x55772254 lit=64 first=(50,74,2)\n\
+         [INFO] f: [OUT] dump frame=31 leds=64 shown=64 crc=0x55772254 part=2/2 rgb=4c2d05\n";
+    assert_eq!(dump_parts(console), vec![(1, 2, 2), (31, 1, 2)]);
 }
 
 /// **The defect's own stream**: the deadline lands inside frame 1980's
