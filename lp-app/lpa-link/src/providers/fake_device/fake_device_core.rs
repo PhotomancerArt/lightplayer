@@ -58,10 +58,15 @@ impl FakeEsp32Device {
             FakeBootState::LightPlayer(lp) => lp.base_mac.clone(),
             _ => None,
         };
+        let board_link = match &script.boot {
+            FakeBootState::LightPlayer(lp) => lp.link_config.clone(),
+            _ => lpc_wire::lp_link::LinkConfig::usb(),
+        };
         Self {
             inner: Arc::new(Mutex::new(FakeDeviceCore {
                 script,
                 efuse_mac,
+                board_link,
                 phase,
                 out: VecDeque::new(),
                 out_since: None,
@@ -172,13 +177,16 @@ impl FakeEsp32Device {
     ///
     /// The base MAC is NOT fresh: it is burned into efuse, so it survives
     /// every flash and erase this fake can script. The new firmware
-    /// reports the same one the board always had.
+    /// reports the same one the board always had, and speaks the board's
+    /// own link (its `link_config`).
     pub fn fake_flash(&self, image_identity: &str) {
         let mut core = self.lock();
         let base_mac = core.efuse_mac.clone();
+        let link_config = core.board_link.clone();
         core.script.boot = FakeBootState::LightPlayer(FakeLightPlayerState {
             provenance: fake_provenance(image_identity),
             base_mac,
+            link_config,
             ..FakeLightPlayerState::new()
         });
         core.reset_current();
@@ -285,6 +293,10 @@ pub(crate) struct FakeDeviceCore {
     /// where the real one lives: efuse outlives every boot state, so a
     /// flash or an erase must not be able to change it.
     efuse_mac: Option<String>,
+    /// The board's host link configuration, held at device level for the
+    /// same reason: the transport (USB-Serial-JTAG, or a classic's UART
+    /// behind a bridge) is the board's, and a flash does not change it.
+    board_link: lpc_wire::lp_link::LinkConfig,
     phase: FakePhase,
     /// Device→host bytes not yet served to the reader.
     out: VecDeque<u8>,
