@@ -50,15 +50,27 @@
 #   1. flash, with NO monitor (the recipe's `no-monitor` argument), so espflash
 #      exits and lets go of the port the moment the write is done;
 #   2. `lp-cli upload` — a link host for as long as the upload takes;
-#   3. flash again, no monitor — the board reboots, auto-loads the project
-#      from `lpfs` (the second flash rewrites the app partition, not `lpfs`),
-#      compiles the shader on device and renders;
-#   4. `lp-cli link capture` for `LP_WALK_WATCH_SECS` (default 30) — the host
-#      that reads the boot, the compile and the frame dumps.
+#   3. `lp-cli link capture --request reboot` for `LP_WALK_WATCH_SECS`
+#      (default 30): the capture brings the link up, asks the board to reboot,
+#      and is already the host when the board comes back, auto-loads the
+#      project from `lpfs`, compiles the shader on device and renders. So the
+#      capture reads the boot, the compile and the frame dumps as they happen.
 #
-# The board's log ring keeps the newest lines while nobody hosts the link, so
-# what the board said between the flash's reset and the capture's open is
-# delivered when the capture brings the link up, not lost.
+# Step 3 used to be a second flash (the app partition is rewritten, `lpfs` is
+# not, so the board boots into the pushed project either way). A reboot
+# asked over the link replaces it because the capture then hosts the link
+# for the whole boot: after a flash the capture can only open once espflash
+# has exited and the port has settled, and until then the board's log lines
+# wait in a 4 KiB ring that keeps the NEWEST of them — a dump followed by a
+# few seconds of per-frame summary lines is gone before anyone reads it. The
+# reboot also leaves its evidence in the LINK section: the board's session
+# nonce before and after (`[link] reset (PeerRestarted)`), which is the
+# classic's DD28 check. It assumes the board's port survives a SOFTWARE
+# reset without re-enumerating (ADR 2026-09-09's ruling for a chip reset on
+# the C6's USB-Serial-JTAG; a CH340 bridge is not reset at all); if a port
+# ever does drop, the capture fails loudly with a read error.
+# `LP_WALK_ROUND2=reflash` takes the old second flash instead, followed by a
+# plain capture, with the ring caveat above.
 #
 # Port discipline (from M3, the S3 walks and `scripts/emu/desk-flash-no-
 # monitor.sh`): the flash runs in the FOREGROUND, under script(1); a port
@@ -75,7 +87,7 @@
 # A pre-link classic image prints `M!` lines on a UART the capture cannot
 # host; walk it with this script as it was before the lp-link port.
 #
-# Both flashes carry the `frame-dump` feature (see FLASH_FEATURES below): the
+# The flash carries the `frame-dump` feature (see FLASH_FEATURES below): the
 # RMT driver drives real LEDs, and an LED cannot be diffed against a host
 # render, so the walk needs the build that also prints each transmitted frame.
 # A default `just flash-fw-esp32s3` / `just flash-fw-esp32v3` produces no
@@ -90,13 +102,16 @@
 # A port that starts `tcp://` is an EMULATED board's link socket, and the walk
 # runs its host side against it: no port resolution, no chip probe, NO FLASH
 # (the emulator already booted whatever image it was given — it must be a
-# `frame-dump` build), the upload over `serial:tcp://…`, and in place of the
-# second flash a `--request reboot` on the capture, which reboots the board
-# into the project it persisted. The board must be one that reboots rather
-# than ending on the reset and keeps its flash, e.g.:
+# `frame-dump` build), then exactly what a board gets — the upload over
+# `serial:tcp://…`, and the capture's `--request reboot` into the project
+# the board persisted (`LP_WALK_ROUND2=reflash` is refused: there is nothing
+# to flash). The board must be one that reboots rather than ending on the
+# reset and keeps its flash, e.g.:
 #
 #   lp-cli emu run --merged <frame-dump merged.bin> --link 127.0.0.1:5591 \
 #       --reboot-on-reset --timeout 120s --wall-timeout 900
+#   lp-emu-esp32v3 --merged <frame-dump merged.bin> --uart0 tcp:127.0.0.1:5592 \
+#       --reboot-on-reset --timeout 400s        # the classic, wire proto 32
 #
 # (No `--strict-bus`: the emulated C6 does not perform a software reset, so
 # the reboot arrives by the LP watchdog ~8 s later, after a fall-through that
@@ -121,6 +136,14 @@ FLASH_FEATURES="${FLASH_FEATURES:-frame-dump}"
 # the project load and the on-device compile; 30 s is several times that on
 # every chip the walk has run on.
 WATCH_SECS="${LP_WALK_WATCH_SECS:-30}"
+# How round 2 restarts the board into the pushed project: `reboot` (a
+# `--request reboot` on the capture) or `reflash` (a second flash, then the
+# capture). See the header's step 3.
+ROUND2="${LP_WALK_ROUND2:-reboot}"
+case "$ROUND2" in
+    reboot|reflash) ;;
+    *) echo "LP_WALK_ROUND2='$ROUND2': expected reboot or reflash" >&2; exit 2 ;;
+esac
 # Seconds to let a board's port settle after espflash's hard reset before
 # waiting for its device node: a native-USB board drops off the bus and comes
 # back under the same name.
@@ -147,6 +170,10 @@ done
 # The test hook (header): an emulated board's socket instead of a board.
 emulated=0
 [[ "$port" == tcp://* ]] && emulated=1
+if [[ $emulated == 1 && "$ROUND2" == reflash ]]; then
+    echo "LP_WALK_ROUND2=reflash: the tcp:// test hook has nothing to flash" >&2
+    exit 2
+fi
 
 # ------------------------------------------------------------ chip table
 # The whole of this script's chip knowledge. Four facts each:
@@ -413,14 +440,14 @@ LOG="$LOG_DIR/m4-walk-render-$$.log"
 CAPTURE_ERR="$LOG_DIR/m4-walk-capture-$$.stderr"
 capture_args=(link capture "$port" --console "$LOG" --seconds "$WATCH_SECS")
 echo
-if [[ $emulated == 0 ]]; then
+if [[ "$ROUND2" == reflash ]]; then
     echo "==> reflashing so the device boots, loads the pushed project, compiles and renders"
     flash_no_monitor "$LOG_DIR/m4-walk-flash2-$$.log"
     wait_for_port
 else
-    # The test hook's stand-in for the second flash: a software reboot, asked
-    # over the link the capture is hosting, into the project the board kept.
-    echo "==> asking the emulated board to reboot into the pushed project"
+    # A software reboot, asked over the link the capture is hosting, into the
+    # project the board kept (header, step 3).
+    echo "==> asking the board to reboot into the pushed project"
     capture_args+=(--request reboot)
 fi
 echo "==> hosting the link for ${WATCH_SECS} s (lp-cli link capture) → $LOG"

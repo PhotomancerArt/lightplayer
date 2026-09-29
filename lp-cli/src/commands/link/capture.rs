@@ -113,6 +113,14 @@ pub fn capture(args: &CaptureArgs) -> Result<()> {
         clock.elapsed().as_secs_f64(),
         describe_link_counters(&link.counters()),
     );
+    // Log records ride a best-effort channel: one lost on the wire is never
+    // resent, so a console missing a line says here whether the WIRE lost
+    // it (a sequence gap this end saw) or the board never sent it (its own
+    // `[LINK] n log records dropped` line, when its ring overflowed).
+    eprintln!(
+        "link capture: {} log record(s) lost on the wire",
+        link.counters().datagrams_lost
+    );
     if let Some(summary) = requests.describe() {
         eprintln!("link capture: {summary}");
     }
