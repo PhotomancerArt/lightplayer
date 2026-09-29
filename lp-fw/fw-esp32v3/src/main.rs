@@ -1232,15 +1232,21 @@ async fn main(spawner: embassy_executor::Spawner) {
     // The watchdog feed is a no-op: no RWDT is armed (see the module docs),
     // and the server loop takes the feeder as a closure precisely so a chip
     // without one pays nothing.
+    //
+    // Polled from a frame of its own (`poll_in_own_frame`), not inlined into
+    // this task's poll: see that function for the 3.5 KB it keeps off the
+    // boot's deepest path.
     #[cfg(not(feature = "bench_render_loop"))]
-    run_server_loop(
-        app.server,
-        app.transport,
-        app.time_provider,
-        heartbeat_memory_stats,
-        |_now_ms| {},
-    )
-    .await;
+    {
+        let mut server_loop = core::pin::pin!(run_server_loop(
+            app.server,
+            app.transport,
+            app.time_provider,
+            heartbeat_memory_stats,
+            |_now_ms| {},
+        ));
+        core::future::poll_fn(|cx| poll_in_own_frame(server_loop.as_mut(), cx)).await;
+    }
 
     // The render-loop benchmark's whole firmware difference, part two: the
     // same loop, with an end. `run_server_loop` is the same body with
@@ -1284,6 +1290,41 @@ async fn main(spawner: embassy_executor::Spawner) {
             embassy_time::Timer::after(embassy_time::Duration::from_millis(100)).await;
         }
     }
+}
+
+/// Poll the server loop from a stack frame of its own.
+///
+/// `main` is one embassy task whose poll runs the whole boot
+/// (`boot_firmware`, on its first poll) and then the server loop forever. When
+/// LLVM inlines the server loop's poll into `main`'s, that one frame is sized
+/// for the loop's locals too — and the boot's deepest chain
+/// (`boot_firmware` → the hardware manifest's serde read → the allocator lock,
+/// with the 1 ms pacer's ISR and the swi2 io_task poll nested on top) stacks
+/// on it before the loop has even started. It did exactly that when the
+/// classic moved onto lp-link (plan `classic-uart-on-lp-link`, P5's DD29
+/// probe): `main`'s poll went from 992 B plus a separate 3,584 B loop frame to
+/// one 4,528 B frame, and the idle stack high-water rose 3,856 B. An
+/// `#[inline(never)]` on the `async fn` itself would not undo it — that
+/// attribute reaches the function that builds the future, not the `poll` the
+/// `.await` calls (see `fw_esp32_common::server_loop::run_server_loop`'s docs,
+/// where the C6 learned this). This function is the out-of-line `poll`.
+///
+/// Measured with it (plan P6, `lp-emu:esp32v3:t1`, the frame-dump image
+/// direct-loaded): `main`'s poll 544 B, this frame 3,488 B; idle high-water
+/// 16,600 → 12,616 B (origin/main read 12,744), and the shader-oracle
+/// project's load 29,536 → 29,040 B (origin/main 29,952).
+#[cfg(all(
+    feature = "server",
+    not(feature = "bench_render_loop"),
+    not(feature = "radio_ram_probe"),
+    not(fw_harness)
+))]
+#[inline(never)]
+fn poll_in_own_frame<F: core::future::Future>(
+    future: core::pin::Pin<&mut F>,
+    cx: &mut core::task::Context<'_>,
+) -> core::task::Poll<F::Output> {
+    future.poll(cx)
 }
 
 /// Harness entrypoint. Replaces the app entirely — a `test_*` build is a rig,
