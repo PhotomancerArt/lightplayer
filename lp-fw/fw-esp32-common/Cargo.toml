@@ -70,7 +70,7 @@ default = []
 # answers every opt-in "json". On by default in all three chip crates (Q4).
 json-pack = ["server"]
 # The USB-Serial-JTAG host link on lp-link (`usb_link`, `log_ring_logger`):
-# the C6 and S3 turn it on; the classic (UART, `M!` lines until M5) does not.
+# the C6 and S3 turn it on. The classic's UART0 link is `uart-link`.
 # The server transport over it (`usb_link::usb_link_transport`) also needs
 # `server`.
 usb-link = ["dep:lp-link", "dep:critical-section"]
