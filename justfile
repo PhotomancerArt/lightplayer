@@ -3058,11 +3058,14 @@ test-emu-c6-cli:
     LP_EMU_BUILD_FW=1 scripts/ci/ci-images.py with esp32c6 -- cargo test -p lp-cli --release --test emu_usb_link_gates -- --include-ignored --nocapture
     LP_EMU_BUILD_FW=1 scripts/ci/ci-images.py with esp32c6 -- cargo test -p lp-cli --release --test link_capture -- --include-ignored --nocapture
 
-# lp-cli's classic-emulator tests: the shipped `fw-esp32v3` on its UART0
-# lp-link (plan `classic-uart-on-lp-link`, P3) — hello and an upload, the
-# capture through `wire unpack`, a Reboot's new nonce (DD28), and the SYN
-# backoff with no host (DD27). Builds the image and names the copy it built
-# (`LP_EMU_ESP32V3_ELF`), as `test-emu-esp32v3-boot` does. Not in CI yet.
+# lp-cli's classic-emulator conversation tests: the shipped `fw-esp32v3` on
+# its UART0 lp-link (plan `classic-uart-on-lp-link`, P3/P5) — hello and an
+# upload, the capture through `wire unpack`, a Reboot's new nonce (DD28), the
+# SYN backoff with no host (DD27), and the fault soak under `--uart-faults`.
+# Builds the image and names the copy it built (`LP_EMU_ESP32V3_ELF`). The
+# shortcut for iterating on them: CI runs the same file inside
+# `test-emu-esp32v3-boot` (DD33), beside the link gates that need the
+# merged and frame-dump images too.
 test-emu-esp32v3-cli:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -3206,7 +3209,13 @@ test-emu-esp32v3-boot:
     if [[ -n "${LP_CI_IMAGES:-}" ]]; then
       ci_env="$(scripts/ci/ci-images.py env esp32v3)"
       eval "$ci_env"
-      exec cargo test -p lp-emu-esp32v3 --no-fail-fast -- --include-ignored
+      status=0
+      cargo test -p lp-emu-esp32v3 --no-fail-fast -- --include-ignored || status=$?
+      # The classic's gates that need a link host since wire proto 32
+      # (lp-cli's: a link host is a product crate, which the lp-emu fence
+      # keeps out), and its conversation tests (DD33).
+      cargo test -p lp-cli --release --test emu_v3_link_gates --test emu_uart_link -- --include-ignored --nocapture || status=$?
+      exit "$status"
     fi
     just build-fw-esp32v3
     built={{ justfile_directory() }}/target/xtensa-esp32-none-elf/release-esp32v3/fw-esp32v3
@@ -3280,7 +3289,18 @@ test-emu-esp32v3-boot:
     export -p | grep ' LP_EMU_ESP32V3_' > "$out/images.env"
     # `--no-fail-fast`: every test binary runs, so one red run names every
     # moved figure rather than the first binary's.
-    cargo test -p lp-emu-esp32v3 --no-fail-fast -- --include-ignored
+    status=0
+    cargo test -p lp-emu-esp32v3 --no-fail-fast -- --include-ignored || status=$?
+    # Since wire proto 32 the classic's UART0 is an lp-link, and the gates
+    # that need a request, an upload or a log record on it — G2's idle
+    # heartbeat on both boot paths, R6, the project load, the frame three
+    # ways, the five wires — are lp-cli's (`tests/emu_v3_link_gates.rs`: a
+    # link host is a product crate, which the lp-emu fence keeps out). With
+    # them, the classic's conversation tests and fault soak
+    # (`tests/emu_uart_link.rs`, DD33), so the product's transport on this
+    # chip is covered wherever this recipe runs.
+    cargo test -p lp-cli --release --test emu_v3_link_gates --test emu_uart_link -- --include-ignored --nocapture || status=$?
+    exit "$status"
 
 # Run an image on the classic ESP32 (v3) machine.
 #

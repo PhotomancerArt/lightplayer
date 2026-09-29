@@ -21,7 +21,13 @@
 //!   DD27: at least a second), instead of ten a second; and one whose host
 //!   went quiet mid-session gets there too, once its resend limit resets
 //!   the link (printed: how long that takes is the Established state's, not
-//!   the backoff's).
+//!   the backoff's);
+//! - **the fault soak** (P5, the plan's acceptance bar): with the emulator's
+//!   UART fault injector damaging the wire both ways (`--uart-faults`, the
+//!   C6's `--usb-faults` over a byte stream, a 64-byte window per "packet"),
+//!   five upload-and-list rounds see **zero app errors**: every loss is
+//!   resent under the messages, and each end counts the damage that reached
+//!   it.
 //!
 //! It lives in lp-cli because nothing under `lp-emu/` may depend on lp-link
 //! or a product crate (the MIT fence). `#[ignore]`d: it needs the shipped
@@ -36,11 +42,12 @@ use std::sync::Arc;
 use std::task::{Context, Poll, Wake, Waker};
 
 use lp_cli::commands::emu::link_host::{EmuLinkHost, EmuUsbBoard, V3Board};
+use lp_emu_esp_common::link_faults::{FaultCounters, LinkFaults};
 use lp_emu_esp32v3::machine::{AppSource, BootMode, Esp32V3Builder};
 use lp_emu_esp32v3::test_support;
 use lpc_wire::lp_link::sniffer::{Direction, LinkSniffer, SniffEvent};
 use lpc_wire::lp_link::{Link, LinkConfig, SelectiveRepeat};
-use lpc_wire::{ClientMessage, ClientRequest};
+use lpc_wire::{ClientMessage, ClientRequest, LinkCounters};
 
 /// Emulated microseconds the hello may take: the boot reaches the server
 /// loop at ~0.12 s on a direct load.
@@ -337,6 +344,214 @@ fn after_its_host_goes_quiet_the_classic_falls_back_to_its_syn_backoff() {
         tail_rate.iter().all(|&n| n <= 1) && tail_rate.iter().sum::<u32>() <= 7,
         "the last ten seconds are the backoff's one SYN every 1.6 s: {per_second:?}"
     );
+}
+
+// ---------------------------------------------------------------------------
+// The fault soak
+// ---------------------------------------------------------------------------
+
+/// Upload-and-list rounds per soak: the C6's `emu_usb_link.rs` count, enough
+/// traffic (~a thousand 64-byte windows each way) that a percent-level rate
+/// injects a handful of faults per run, not one or none.
+const SOAK_ROUNDS: usize = 5;
+
+/// **The acceptance bar, at the C6's own mix**: ~1 % of 64-byte windows
+/// damaged each way (a quarter dropped, a quarter cut short, half with a
+/// bit of line noise) — `emu_usb_link.rs`'s spec, seed and all, so the two
+/// chips' soaks are the same question.
+#[test]
+#[ignore = "needs LP_EMU_ESP32V3_ELF; run through `just test-emu-esp32v3-cli`"]
+fn an_upload_under_one_percent_uart_faults_sees_no_app_errors() {
+    soak(
+        "an_upload_under_one_percent_uart_faults_sees_no_app_errors",
+        "in-drop=0.25%,in-tail=0.25%,in-corrupt=0.5%,out-drop=0.25%,out-tail=0.25%,\
+         out-corrupt=0.5%,seed=31",
+    );
+}
+
+/// **The same at two and a half times the rate** — ~2.5 % of windows each
+/// way, the top of the plan's "1–2.5 %" — so a desk sitting on a noisy cable
+/// has an emulated number to read against.
+#[test]
+#[ignore = "needs LP_EMU_ESP32V3_ELF; run through `just test-emu-esp32v3-cli`"]
+fn an_upload_under_two_and_a_half_percent_uart_faults_sees_no_app_errors() {
+    soak(
+        "an_upload_under_two_and_a_half_percent_uart_faults_sees_no_app_errors",
+        "in-drop=0.75%,in-tail=0.5%,in-corrupt=1.25%,out-drop=0.75%,out-tail=0.5%,\
+         out-corrupt=1.25%,seed=53",
+    );
+}
+
+/// **Kilobyte runs of loss** on top of the 1 % mix, board to host: a run
+/// starts inside 1 % of windows and swallows the next sixteen (1 KiB) — the
+/// shape of a host tty overflowing, the C6's `in-run` arm on this wire.
+#[test]
+#[ignore = "needs LP_EMU_ESP32V3_ELF; run through `just test-emu-esp32v3-cli`"]
+fn an_upload_through_kilobyte_runs_of_uart_loss_sees_no_app_errors() {
+    let run = soak(
+        "an_upload_through_kilobyte_runs_of_uart_loss_sees_no_app_errors",
+        "in-drop=0.25%,in-tail=0.25%,in-corrupt=0.25%,in-run=1%,run-packets=16,\
+         out-drop=0.25%,out-tail=0.25%,out-corrupt=0.5%,seed=47",
+    );
+    if let Some(run) = run {
+        assert!(
+            run.to_host.runs_started > 0,
+            "no run of loss was injected: {}",
+            run.summary
+        );
+    }
+}
+
+/// What a soak found, for the tests that assert more.
+struct Soak {
+    to_host: FaultCounters,
+    summary: String,
+}
+
+/// Hello, then [`SOAK_ROUNDS`] of the whole `projects/test/basic` upload and
+/// the list of loaded projects, over a UART0 the injector damages both ways;
+/// then on to the board's next heartbeat, for its own counters. Asserts the
+/// bar — zero app errors, zero payload errors, one session — that both
+/// directions were damaged, that each end counted the damage that reached
+/// it, and that the link resent.
+fn soak(test: &str, spec: &str) -> Option<Soak> {
+    let elf = match test_support::fw_esp32v3_image() {
+        Ok(elf) => elf,
+        Err(reason) => {
+            test_support::skip_notice(test, &reason);
+            return None;
+        }
+    };
+    let faults = LinkFaults::parse(spec).expect("a fault spec");
+    let builder = Esp32V3Builder::new()
+        .boot_mode(BootMode::Direct)
+        .app(AppSource::Path(elf))
+        .uart0_faults(faults);
+    let board = V3Board::build(builder).expect("the shipped image direct-loads");
+    let mut host = EmuLinkHost::new(board, 0x5E55_0350, true);
+    host.answer_budget_s = 120.0;
+    let mut app_errors = 0u32;
+    let files = project_files("projects/test/basic");
+    {
+        let mut client = lpa_client::LpClient::new(&mut host);
+        if let Err(error) = block_on(client.hello()) {
+            eprintln!("{test}: hello failed: {error}");
+            app_errors += 1;
+        }
+        for round in 0..SOAK_ROUNDS {
+            if let Err(error) = block_on(client.replace_and_load_project("emu-uart-soak", &files)) {
+                eprintln!("{test}: round {round}: the upload failed: {error}");
+                app_errors += 1;
+            }
+            match block_on(client.project_list_loaded()) {
+                Ok(loaded) => assert!(
+                    loaded
+                        .value
+                        .iter()
+                        .any(|project| project.path.as_str().contains("emu-uart-soak")),
+                    "round {round}: the uploaded project is loaded: {:?}",
+                    loaded.value
+                ),
+                Err(error) => {
+                    eprintln!("{test}: round {round}: listing loaded projects failed: {error}");
+                    app_errors += 1;
+                }
+            }
+        }
+    }
+    let soak_s = host.board_seconds();
+    // The board's own counters ride its heartbeat (every 5 s of uptime):
+    // wait for the next one, so they cover the whole conversation.
+    host.set_queue_messages(false);
+    let seen = host.console().len();
+    let deadline = host.board.micros() + 6_000_000;
+    while host.board.micros() < deadline
+        && !host.console()[seen..]
+            .iter()
+            .any(|l| l.contains("\"msg\":{\"heartbeat\":{"))
+    {
+        host.step().expect("the run");
+    }
+    let board = host.console()[seen..]
+        .iter()
+        .rev()
+        .find_map(|l| heartbeat_link(l))
+        .unwrap_or_else(|| {
+            panic!(
+                "{test}: no heartbeat after the soak:\n{}",
+                tail(host.console())
+            )
+        });
+    let host_c = host.counters();
+    let (to_host, to_board) = host
+        .board
+        .machine
+        .uart0_fault_counters()
+        .expect("the injector was configured");
+    app_errors += host.link_errors;
+    let summary = format!(
+        "lp-emu:esp32v3:t1, `{spec}`, {SOAK_ROUNDS} rounds in {soak_s:.1} s emulated: \
+         {app_errors} app errors ({} link errors); \
+         host: {} frames out / {} in, {} resent, {} damaged, {} stale partials, {} duplicates, \
+         {} resets, {} payload errors; \
+         board: {} frames out / {} in, {} resent, {} damaged, {} stale partials, {} duplicates, \
+         {} resets; injected → host: {to_host}; injected → board: {to_board}",
+        host.link_errors,
+        host_c.frames_tx,
+        host_c.frames_rx,
+        host_c.resends,
+        host_c.damaged,
+        host_c.stale_partials,
+        host_c.duplicates,
+        host_c.resets.total,
+        host_c.payload_errors,
+        board.frames_tx,
+        board.frames_rx,
+        board.resends,
+        board.damaged,
+        board.stale_partials,
+        board.duplicates,
+        board.resets.total,
+    );
+    eprintln!("{test}:\n  {summary}");
+    assert_eq!(app_errors, 0, "{summary}\n{}", tail(host.console()));
+    assert_eq!(host_c.payload_errors, 0, "{summary}");
+    assert_eq!(
+        host_c.resets.total, 0,
+        "one session, start to end: {summary}"
+    );
+    let damaging =
+        |c: &FaultCounters| c.packets_dropped + c.tails_cut + c.bits_flipped + c.runs_started;
+    assert!(
+        damaging(&to_host) > 0 && damaging(&to_board) > 0,
+        "the injector must damage both directions: {summary}"
+    );
+    // Each direction's damage is counted by the end it reached: a damaged or
+    // cut frame is dropped there (its sender resends it when it was a data
+    // frame; an acknowledgement, a keepalive or a log datagram is not
+    // resent, which is why a sender's resends are not held to the other
+    // end's damage one for one). And something was resent: the recovery
+    // happened under the messages rather than never being needed.
+    assert!(
+        host_c.damaged + host_c.stale_partials > 0,
+        "damage on the way to the host is counted by the host: {summary}"
+    );
+    assert!(
+        board.damaged + board.stale_partials > 0,
+        "damage on the way to the board is counted by the board: {summary}"
+    );
+    assert!(
+        host_c.resends + board.resends > 0,
+        "the link resent what it lost: {summary}"
+    );
+    Some(Soak { to_host, summary })
+}
+
+/// The `link` counters of a heartbeat console line (`M!{…"heartbeat":{…
+/// "link":{…}}}`), when `line` is one.
+fn heartbeat_link(line: &str) -> Option<LinkCounters> {
+    let json: serde_json::Value = serde_json::from_str(line.strip_prefix("M!")?).ok()?;
+    serde_json::from_value(json.get("msg")?.get("heartbeat")?.get("link")?.clone()).ok()
 }
 
 /// The classic's hosted board, with what it wrote kept (a serial capture)
