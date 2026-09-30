@@ -3085,6 +3085,7 @@ test-emu-c6-cli:
     LP_EMU_BUILD_FW=1 scripts/ci/ci-images.py with esp32c6 -- cargo test -p lp-cli --release --test emu_usb_link -- --include-ignored --nocapture
     LP_EMU_BUILD_FW=1 scripts/ci/ci-images.py with esp32c6 -- cargo test -p lp-cli --release --test emu_usb_link_gates -- --include-ignored --nocapture
     LP_EMU_BUILD_FW=1 scripts/ci/ci-images.py with esp32c6 -- cargo test -p lp-cli --release --test link_capture -- --include-ignored --nocapture
+    LP_EMU_BUILD_FW=1 scripts/ci/ci-images.py with esp32c6 -- cargo test -p lp-cli --release --test emu_frag_reads -- --include-ignored --nocapture
 
 # lp-cli's classic-emulator conversation tests: the shipped `fw-esp32v3` on
 # its UART0 lp-link (plan `classic-uart-on-lp-link`, P3/P5) — hello and an

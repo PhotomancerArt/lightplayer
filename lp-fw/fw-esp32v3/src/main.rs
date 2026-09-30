@@ -1132,6 +1132,13 @@ fn boot_firmware(spawner: embassy_executor::Spawner) -> FirmwareApp {
     // and the pusher's mailboxes.
     server.set_total_led_budget(total_led_budget);
     server.set_read_headroom_probe(Some(read_headroom_probe));
+    // The classic keeps the 2026-08-29 single floor (a 32 KiB block, no
+    // total-free floor): with a project loaded its heap is ≈34 KB free with a
+    // 25.5 KB largest block, against a 23.7 KB read, so there is no room for
+    // the C6's looser two-number gate until reads' working set comes down.
+    server.set_read_gate(Some(lpa_server::ReadGate::largest_block_only(
+        lpa_server::PROJECT_READ_MIN_HEADROOM_BYTES,
+    )));
     server.set_reboot_hook(Some(Rc::new(reboot_now)));
     // JSON Pack: answer a host's opt-in with what this image's transport
     // can write (`fw-esp32-common/json-pack`).

@@ -26,6 +26,7 @@ mod power_off;
 pub mod project;
 pub mod project_manager;
 mod project_read_source;
+pub mod read_gate;
 pub mod recovery_report;
 pub mod server;
 
@@ -50,6 +51,7 @@ pub use lpc_engine::features::{ENGINE_FEATURE_FRAGMENT, supported_features};
 pub use power_off::{PowerOffQueue, PowerPlatform};
 pub use project::Project;
 pub use project_manager::{ProjectManager, is_project_dir};
+pub use read_gate::{ReadGate, ReadRefusal};
 pub use server::{
     LpServer, MemoryStatsFn, PROJECT_LOAD_MIN_HEADROOM_BYTES, PROJECT_READ_MIN_HEADROOM_BYTES,
     ReadHeadroomProbe, RebootHook,
