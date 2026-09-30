@@ -5,16 +5,24 @@
 //! board log line torn in two. So the chunks are concatenated and decoded
 //! the way `lp-cli wire unpack` decodes a capture:
 //!
-//! - **USB ports (`serial`, `emu-tab`) are lp-links** since
+//! - **USB ports (`serial`, `emu-tab`) are lp-links, Stream framing** since
 //!   `WIRE_PROTO_VERSION` 30 (plan `lp2025/2026-09-27-0215-lp-link-usb-cutover`,
-//!   D10): both directions of one port go through one [`WireLinkSniffer`],
-//!   messages (JSON or packed) come out as their `M!{json}` JSON, console
-//!   text as text, and the link's own recoveries (a new session, a damaged
-//!   frame it resent) as link notes.
-//! - **Other transports (`ble`) still carry `M!` lines** (plan D3): each
-//!   (transport, port, direction) stream is read with [`WireUnpacker`]:
-//!   JSON Pack frames become their `M!{json}` line, JSON lines are read as
-//!   they are, and everything else is the board's own text.
+//!   D10): both directions of one port go through one [`WireLinkSniffer`]
+//!   fed with [`WireLinkSniffer::push`], messages (JSON or packed) come out
+//!   as their `M!{json}` JSON, console text as text, and the link's own
+//!   recoveries (a new session, a damaged frame it resent) as link notes.
+//! - **`ble` is an lp-link too, Datagram framing** since `WIRE_PROTO_VERSION`
+//!   31 (plan `lp2025/2026-09-28-1445-ble-on-lp-link`, D3/D7): each tapped
+//!   chunk is already exactly one whole frame (one GATT write or
+//!   notification — see `lpa-link`'s `wire_tap`), so it goes through the
+//!   same [`WireLinkSniffer`] but fed with
+//!   [`WireLinkSniffer::push_datagram`], one call per chunk, no
+//!   reassembly.
+//! - **The classic UART and `fw-emu` still carry `M!` lines** (unaffected
+//!   by either cut-over): each (transport, port, direction) stream is read
+//!   with [`WireUnpacker`]: JSON Pack frames become their `M!{json}` line,
+//!   JSON lines are read as they are, and everything else is the board's
+//!   own text.
 //!
 //! A message that does not decode is reported, never dropped.
 
@@ -76,12 +84,17 @@ impl WireStreams {
             "tx" => Direction::HostToBoard,
             _ => Direction::BoardToHost,
         };
+        let transport = key.transport.clone();
         let sniffer = self
             .links
             .entry((key.transport.clone(), key.port.clone()))
-            .or_default();
+            .or_insert_with(|| new_link_sniffer(&transport));
         let mut items = Vec::new();
-        sniffer.push(dir, 0, bytes, |item| items.extend(link_item(item)));
+        if is_datagram_transport(&transport) {
+            sniffer.push_datagram(dir, bytes, |item| items.extend(link_item(item)));
+        } else {
+            sniffer.push(dir, 0, bytes, |item| items.extend(link_item(item)));
+        }
         items
     }
 
@@ -124,9 +137,23 @@ impl WireStreams {
 }
 
 /// The transports whose bytes are an lp-link: a board's USB port, in the
-/// browser (`serial`) and in the tab emulator (`emu-tab`).
+/// browser (`serial`) and in the tab emulator (`emu-tab`), and BLE (`ble`).
 fn is_link_transport(transport: &str) -> bool {
-    matches!(transport, "serial" | "emu-tab")
+    matches!(transport, "serial" | "emu-tab" | "ble")
+}
+
+/// The lp-link transports tapped as whole datagrams (one frame per chunk)
+/// rather than a byte stream — today, only `ble`.
+fn is_datagram_transport(transport: &str) -> bool {
+    transport == "ble"
+}
+
+fn new_link_sniffer(transport: &str) -> WireLinkSniffer {
+    if is_datagram_transport(transport) {
+        WireLinkSniffer::ble()
+    } else {
+        WireLinkSniffer::new()
+    }
 }
 
 /// What one thing read off a link is on the timeline.
@@ -337,19 +364,31 @@ mod tests {
     use super::*;
     use crate::commands::wire::line_unpack::tests::packed_and_json;
 
-    /// An `M!`-line stream (BLE).
+    /// An `M!`-line stream — the classic UART / `fw-emu` shape, not yet on
+    /// lp-link (BLE joined lp-link in `lp2025/2026-09-28-1445-ble-on-lp-link`;
+    /// this exercises the fallback path any future non-lp-link transport
+    /// still takes).
     fn key(dir: &str) -> WireStreamKey {
         WireStreamKey {
-            transport: "ble".into(),
+            transport: "classic-uart".into(),
             port: "3".into(),
             dir: dir.into(),
         }
     }
 
-    /// A USB port's stream (an lp-link).
+    /// A USB port's stream (an lp-link, Stream framing).
     fn serial(dir: &str) -> WireStreamKey {
         WireStreamKey {
             transport: "serial".into(),
+            port: "3".into(),
+            dir: dir.into(),
+        }
+    }
+
+    /// A BLE link's stream (an lp-link, Datagram framing).
+    fn ble(dir: &str) -> WireStreamKey {
+        WireStreamKey {
+            transport: "ble".into(),
             port: "3".into(),
             dir: dir.into(),
         }
@@ -411,6 +450,88 @@ mod tests {
                 WireItem::Message { json, packed: Some(_), .. } if json.contains("number 4")
             )),
             "the reply went packed and reads as its JSON: {items:?}"
+        );
+        assert!(
+            !items
+                .iter()
+                .any(|(_, item)| matches!(item, WireItem::Undecodable(_))),
+            "{items:?}"
+        );
+    }
+
+    /// A BLE recording: every tapped chunk is already exactly one whole
+    /// lp-link frame (one GATT write or notification — never split across
+    /// two `push` calls, unlike USB's byte stream above), and it reads as
+    /// the same kind of message either way.
+    #[test]
+    fn a_ble_recording_reads_one_frame_per_tapped_chunk() {
+        use lpc_wire::lp_link::{CH_PROTO, Link, LinkConfig, SelectiveRepeat};
+
+        let mut board: Link<SelectiveRepeat> = Link::new(LinkConfig::ble(), 0xB0A2_0001);
+        let mut host: Link<SelectiveRepeat> = Link::new(LinkConfig::ble(), 0x4051_0002);
+        let mut chunks: Vec<(Direction, Vec<u8>)> = Vec::new();
+        let mut now = 0u64;
+        for _ in 0..500 {
+            while let Some(frame) = board.poll_transmit(now) {
+                let frame = frame.to_vec();
+                host.on_datagram(now, &frame);
+                chunks.push((Direction::BoardToHost, frame));
+            }
+            while let Some(frame) = host.poll_transmit(now) {
+                let frame = frame.to_vec();
+                board.on_datagram(now, &frame);
+                chunks.push((Direction::HostToBoard, frame));
+            }
+            while board.recv().is_some() {}
+            while host.recv().is_some() {}
+            now += 1_000;
+        }
+        board.send(CH_PROTO, br#"{"id":0,"msg":"hello"}"#).unwrap();
+        host.send(CH_PROTO, br#"{"id":1,"msg":"hello"}"#).unwrap();
+        for _ in 0..500 {
+            while let Some(frame) = board.poll_transmit(now) {
+                let frame = frame.to_vec();
+                host.on_datagram(now, &frame);
+                chunks.push((Direction::BoardToHost, frame));
+            }
+            while let Some(frame) = host.poll_transmit(now) {
+                let frame = frame.to_vec();
+                board.on_datagram(now, &frame);
+                chunks.push((Direction::HostToBoard, frame));
+            }
+            while board.recv().is_some() {}
+            while host.recv().is_some() {}
+            now += 1_000;
+        }
+
+        let mut streams = WireStreams::new();
+        let mut items = Vec::new();
+        for (dir, frame) in &chunks {
+            let key = match dir {
+                Direction::BoardToHost => ble("rx"),
+                Direction::HostToBoard => ble("tx"),
+            };
+            // One `push` call per frame: a GATT notification or write is
+            // never torn across two tapped chunks.
+            for item in streams.push(&key, frame) {
+                items.push((key.dir.clone(), item));
+            }
+        }
+
+        let described: Vec<(String, String)> = items
+            .iter()
+            .filter_map(|(dir, item)| match item {
+                WireItem::Message { json, .. } => Some((dir.clone(), describe_message(json))),
+                _ => None,
+            })
+            .collect();
+        assert!(
+            described.contains(&("rx".to_string(), "hello id=0".to_string())),
+            "{described:?}"
+        );
+        assert!(
+            described.contains(&("tx".to_string(), "hello id=1".to_string())),
+            "{described:?}"
         );
         assert!(
             !items

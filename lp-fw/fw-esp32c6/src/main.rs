@@ -534,6 +534,11 @@ fn boot_firmware(spawner: embassy_executor::Spawner) -> FirmwareApp {
     // order M2's Run G proved), after the board quirks (the token), before
     // the server exists. A board whose store says off never touches the BLE
     // controller.
+    // The radio links' shared slots: the BLE task opens a connection's link
+    // there and the link mux (below) serves it. On the heap, not `.bss`: its
+    // slots hold `RefCell`s (one thread executor), which a `static` cannot.
+    #[cfg(feature = "ble")]
+    let radio_port = fw_esp32_common::radio_link::RadioLinkPort::leak();
     #[cfg(feature = "ble")]
     let ble_started = {
         let store = lpa_server::access_store::read_device_store(base_fs.as_ref());
@@ -544,7 +549,7 @@ fn boot_firmware(spawner: embassy_executor::Spawner) -> FirmwareApp {
         match (store.ble_enabled, board::esp32c6::init::take_bt()) {
             (true, Some(bt)) => {
                 log::info!("[ble] enabled (device store, or none: on by default) — starting");
-                ble::start(spawner, bt, quirks_applied);
+                ble::start(spawner, bt, radio_port, quirks_applied);
                 true
             }
             (true, None) => {
@@ -703,7 +708,7 @@ fn boot_firmware(spawner: embassy_executor::Spawner) -> FirmwareApp {
     let transport = {
         let mux = fw_esp32_common::radio_link::LinkMuxTransport::new(
             transport,
-            &fw_esp32_common::radio_link::RADIO_LINK_PORT,
+            radio_port,
             embassy_time::Delay,
         );
         if ble_started {

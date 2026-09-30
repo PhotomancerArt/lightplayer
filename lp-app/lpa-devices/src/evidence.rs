@@ -1715,8 +1715,8 @@ mod tests {
     fn a_boot_marker_older_than_studio_is_older_light_player_firmware() {
         const MARKER_30: &str = "[INIT] fw-esp32 initialized, starting server loop... \
                                  proto=30 commit=4caa5b658157 dirty=false";
-        const MARKER_32: &str = "[INIT] fw-esp32 initialized, starting server loop... \
-                                 proto=32 commit=4caa5b658157 dirty=false";
+        const MARKER_33: &str = "[INIT] fw-esp32 initialized, starting server loop... \
+                                 proto=33 commit=4caa5b658157 dirty=false";
         let config = studio_config();
 
         let mut older = Evidence::default();
@@ -1731,15 +1731,16 @@ mod tests {
         let mut current = Evidence::default();
         let mut identity = IdentityChain::default();
         current.fold(Millis(0), &opened(), &mut identity, &config);
-        current.fold(Millis(10), &line(MARKER_32), &mut identity, &config);
+        current.fold(Millis(10), &line(MARKER_33), &mut identity, &config);
         assert_eq!(current.classification, Classification::Unknown);
     }
 
-    /// Studio's own roster config: this build's wire proto (32, the classic's
-    /// UART onto lp-link), not the model's placeholder default.
+    /// Studio's own roster config: this build's wire proto (33, BLE moves
+    /// onto lp-link after the classic's UART took 32), not the model's
+    /// placeholder default.
     fn studio_config() -> RosterConfig {
         RosterConfig {
-            expected_proto: 32,
+            expected_proto: 33,
             ..RosterConfig::default()
         }
     }

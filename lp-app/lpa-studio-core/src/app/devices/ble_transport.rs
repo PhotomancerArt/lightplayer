@@ -2,7 +2,8 @@
 //! link to a LightPlayer board (M5 of the BLE remote-control plan).
 //!
 //! Studio reaches a board over BLE exactly as it reaches one over USB — the
-//! same `M!{json}` lines, the same device fold, the same identity merge by
+//! same wire messages over the same lp-link (since `WIRE_PROTO_VERSION` 33),
+//! the same device fold, the same identity merge by
 //! base MAC — with one difference the card has to be honest about: there is
 //! no reset line and no ROM downloader on the far side of a GATT service, so
 //! **firmware cannot be written over it**. Flash and factory reset are
@@ -52,8 +53,9 @@ pub trait BleLinkSource {
     fn forget(&self, device_id: &str) -> DeviceTransportFuture<Result<(), String>>;
 
     /// An `lpa-client` io on this device's link, for a borrowing
-    /// conversation. `tap` receives every whole line (and every link error)
-    /// the io drains, so the fold keeps hearing the board.
+    /// conversation. `tap` receives every message (as its `M!` line), every
+    /// link note and every link error the io drains, so the fold keeps hearing
+    /// the board — and a link reset fails the shared conversations.
     fn client_io(
         &self,
         device_id: &str,

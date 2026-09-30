@@ -64,6 +64,34 @@ pub fn serialize_server_payload(
     }
 }
 
+/// One proto-channel payload from a host → the client message it carries:
+/// always JSON (hosts never pack), first byte `{`. Every lp-link transport on
+/// the board (the USB link, the classic's UART link, the radio links) decodes
+/// through here.
+///
+/// Out of line on purpose: the deserializer's frame stays its own, and never
+/// joins the server loop future's.
+///
+/// `lpc_wire::decode_client_payload` reads the same bytes, but through
+/// `json::from_slice`: a second instantiation of the whole `ClientMessage`
+/// deserializer beside the `from_str` one the image already links, measured at
+/// +102 KB on the C6 image. Same contract (bare JSON, first byte `{`), one
+/// deserializer.
+#[inline(never)]
+pub fn decode_client_payload(
+    data: &[u8],
+) -> Result<lpc_wire::ClientMessage, lpc_wire::PayloadError> {
+    match (data.first(), core::str::from_utf8(data)) {
+        (Some(&lpc_wire::PAYLOAD_TAG_JSON), Ok(text)) => lpc_wire::json::from_str::<
+            lpc_wire::ClientMessage,
+        >(text)
+        .map_err(|e| lpc_wire::PayloadError::BadClientJson(alloc::string::ToString::to_string(&e))),
+        (Some(&lpc_wire::PAYLOAD_TAG_JSON), Err(_)) => Err(lpc_wire::PayloadError::NotUtf8),
+        (Some(&tag), _) => Err(lpc_wire::PayloadError::UnknownTag(tag)),
+        (None, _) => Err(lpc_wire::PayloadError::Empty),
+    }
+}
+
 /// A packed link's message went as JSON: say so once per boot, then at
 /// debug, so a message class that never packs cannot flood the log.
 fn note_sent_as_json(msg: &lpc_wire::WireServerMessage) {

@@ -21,7 +21,22 @@
 //! - **A drop is a departure.** The JS reports it as `bluetooth link lost: …`,
 //!   which the effects layer's pump reads as the link being gone (like an
 //!   unplug); the session's reconnect loop then announces the device again
-//!   through the presence edge, and the sweep re-attaches it.
+//!   through the presence edge, and the sweep re-attaches it. A GATT
+//!   disconnect is also the lp-link session's end, on both sides at once —
+//!   Bluetooth's link reset — so the reconnect is a new session with a new
+//!   hello.
+//!
+//! # The wire is lp-link, as over Web Serial
+//!
+//! Since `WIRE_PROTO_VERSION` 33 each connection is an lp-link on
+//! `LinkConfig::ble()`'s datagrams, serviced by the provider
+//! (`providers/browser_ble/ble_link_port.rs`, the same `LinkPortService`
+//! Web Serial runs per port). A request is one link message
+//! (`BleWire::send_client_json`); what the board said comes back as
+//! [`WireRead`](crate::device_link::wire_reader::WireRead)s, demuxed exactly
+//! as Web Serial's are; the link's own notes (up, a stall, the opt-in's
+//! outcome) and a reset within a connection reach the journal as
+//! `LinkEvent::WireNote`s (the USB cut-over's D9).
 
 use std::cell::{Cell, RefCell};
 use std::collections::VecDeque;
@@ -31,8 +46,8 @@ use lpa_devices::identity::{BLE_ENDPOINT_PREFIX, EndpointKey};
 use lpa_devices::link::{Link, LinkCommand, LinkEvent, LinkInfo};
 use wasm_bindgen_futures::spawn_local;
 
-use crate::device_link::demux::demux_line;
-use crate::device_link::wire::encode_client_frame;
+use crate::device_link::demux::demux_read;
+use crate::device_link::wire::client_message;
 use crate::providers::browser_ble::{BleDevice, BleWire, is_link_lost};
 
 /// The [`LinkInfo`] a Bluetooth device's link wears: its advertised name,
@@ -132,11 +147,25 @@ impl BleLinkInner {
                 ));
                 self.push(LinkEvent::ResetOutcome { kind, ok: false });
             }
-            LinkCommand::SendFrame(frame) => match encode_client_frame(&frame) {
-                Ok(line) => self.write(line.as_bytes()),
+            LinkCommand::SendFrame(frame) => match client_message(&frame) {
+                Ok(message) => match lpc_wire::json::to_string(&message) {
+                    Ok(json) => self.send_json(&json),
+                    Err(error) => self.push(LinkEvent::Error(format!(
+                        "failed to encode {:?}: {error}",
+                        frame.body
+                    ))),
+                },
                 Err(error) => self.push(LinkEvent::Error(error)),
             },
-            LinkCommand::SendLine(line) => self.write(format!("{line}\n").as_bytes()),
+            // A conversation's request, still spelled as the line it was
+            // (`M!{json}`): on the link it is one message. Anything else is
+            // not a request, and the link carries no raw text to the board.
+            LinkCommand::SendLine(line) => match line.trim_end().strip_prefix("M!") {
+                Some(json) => self.send_json(json),
+                None => self.push(LinkEvent::Error(format!(
+                    "not a request, and the link carries no raw text to the board: {line:?}"
+                ))),
+            },
         }
     }
 
@@ -151,10 +180,9 @@ impl BleLinkInner {
             )));
             return;
         }
-        // Bytes the board sent since the connect stay buffered in JS (its
-        // hello among them); only a partial line from an earlier
-        // connection is dropped.
-        self.wire.clear_partial();
+        // What the board said since the connect waits, read, in the
+        // session's link (its hello among them); an earlier connection's
+        // reads went with that connection's link.
         self.open.set(true);
         self.push(LinkEvent::Opened {
             info: self.info.clone(),
@@ -171,21 +199,20 @@ impl BleLinkInner {
         });
     }
 
-    fn write(&self, bytes: &[u8]) {
+    /// Queue one request on the session's link (written by its loop).
+    fn send_json(&self, json: &str) {
         if !self.open.get() {
             return self.push(LinkEvent::Error(
                 "write on a link that is not open".to_string(),
             ));
         }
-        if let Err(error) = self.wire.write(bytes) {
+        if let Err(error) = self.wire.send_client_json(json) {
             self.push(LinkEvent::Error(format!("bluetooth write failed: {error}")));
         }
-        // `Ok(false)` — the link was not up — is reported by the session's
-        // own error, drained by the next pump.
     }
 
     /// Drain the session: errors first (in the order they happened), then
-    /// whole lines.
+    /// what the link read, then the link's own notes.
     fn pump(&self) {
         if !self.open.get() {
             return;
@@ -200,15 +227,13 @@ impl BleLinkInner {
                 }
             }
         }
-        match self.wire.take_lines() {
-            Ok(lines) => {
-                for line in lines {
-                    self.push(demux_line(&line));
-                }
-            }
-            Err(error) => {
-                self.push(LinkEvent::Error(format!("bluetooth read failed: {error}")));
-            }
+        for read in self.wire.take_reads() {
+            self.push(demux_read(read));
+        }
+        // After the reads: a note (the board's answer to the opt-in, say) is
+        // made while reading, and belongs after what it was read beside.
+        for note in self.wire.take_notes() {
+            self.push(LinkEvent::WireNote(note));
         }
     }
 

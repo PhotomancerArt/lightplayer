@@ -164,6 +164,14 @@ impl LinkSniffer {
         Self::new(CrcKind::Crc32c, true)
     }
 
+    /// A sniffer for [`LinkConfig::ble`](crate::LinkConfig::ble)'s Datagram
+    /// framing. `escape_ff` is meaningless here (no byte-stream deframer is
+    /// ever used — see [`push_datagram`](Self::push_datagram)); passed as
+    /// `false` for a config that would otherwise be inert.
+    pub fn ble() -> Self {
+        Self::new(CrcKind::Crc32c, false)
+    }
+
     /// Whether frames are being verified (a handshake has named both nonces).
     pub fn is_verifying(&self) -> bool {
         self.key().is_some()
@@ -205,6 +213,18 @@ impl LinkSniffer {
                 }
             }
         }
+    }
+
+    /// Feed one already-delimited datagram frame — a GATT write or
+    /// notification, a UDP/WebSocket message
+    /// ([`Framing::Datagram`](crate::Framing::Datagram)) — calling `on` for
+    /// what it completes. No COBS, no reassembly across calls: `bytes` is
+    /// exactly one frame, the way
+    /// [`Link::on_datagram`](crate::Link::on_datagram) reads it. A frame
+    /// that fails to parse or verify is reported [`SniffEvent::Damaged`] by
+    /// [`Self::on_frame`] itself; nothing else to report here.
+    pub fn push_datagram(&mut self, dir: Direction, bytes: &[u8], mut on: impl FnMut(SniffEvent)) {
+        self.on_frame(dir, bytes, &mut on);
     }
 
     /// The capture ended (or went quiet): hand up text still waiting for a
@@ -526,6 +546,67 @@ mod tests {
         assert!(messages.iter().all(|m| m.3), "verified in both sessions");
     }
 
+    /// BLE's shape (`lp2025/2026-09-28-1445-ble-on-lp-link`): each captured
+    /// chunk is exactly one already-delimited datagram frame (a GATT write
+    /// or notification), fed one call per frame — no COBS, no byte-stream
+    /// reassembly. `push_datagram` reads a whole session's messages the same
+    /// way `push` does for a byte stream, and reports a single mangled frame
+    /// as damaged without losing the messages around it.
+    #[test]
+    fn a_datagram_capture_reads_one_frame_per_call() {
+        let mut run = DatagramPair::new();
+        run.settle();
+        run.board.send(CH_PROTO, b"{\"hello\":1}").unwrap();
+        run.host.send(CH_PROTO, b"a request").unwrap();
+        run.settle();
+
+        let mut sniffer = LinkSniffer::ble();
+        let mut events = Vec::new();
+        for (dir, frame) in &run.capture {
+            sniffer.push_datagram(*dir, frame, |e| events.push(e));
+        }
+        let messages = messages_of(&events);
+        assert!(
+            messages.contains(&(
+                Direction::BoardToHost,
+                CH_PROTO,
+                b"{\"hello\":1}".to_vec(),
+                true
+            )),
+            "{messages:?}"
+        );
+        assert!(
+            messages.contains(&(
+                Direction::HostToBoard,
+                CH_PROTO,
+                b"a request".to_vec(),
+                true
+            )),
+            "{messages:?}"
+        );
+
+        // One mangled frame, fed to the SAME (already-keyed) sniffer: damaged,
+        // and nothing else about it.
+        let mangled = {
+            let mut frame = run
+                .capture
+                .iter()
+                .find(|(dir, f)| *dir == Direction::BoardToHost && f.len() > HEADER_LEN)
+                .map(|(_, f)| f.clone())
+                .expect("at least one data frame");
+            frame[5] ^= 0x40;
+            frame
+        };
+        let mut damage_events = Vec::new();
+        sniffer.push_datagram(Direction::BoardToHost, &mangled, |e| damage_events.push(e));
+        assert_eq!(
+            damage_events,
+            vec![SniffEvent::Damaged {
+                dir: Direction::BoardToHost
+            }]
+        );
+    }
+
     type Msg = (Direction, u8, Vec<u8>, bool);
 
     fn messages_of(events: &[SniffEvent]) -> Vec<Msg> {
@@ -589,6 +670,48 @@ mod tests {
                 while let Some(frame) = self.host.poll_transmit(self.now) {
                     let frame = frame.to_vec();
                     self.board.on_bytes(self.now, &frame);
+                    self.capture.push((Direction::HostToBoard, frame));
+                }
+                while let Some(ev) = self.board.recv() {
+                    drop::<LinkEvent>(ev);
+                }
+                while self.host.recv().is_some() {}
+                self.now += 1_000;
+            }
+        }
+    }
+
+    /// Two [`LinkConfig::ble`]-shaped links wired back to back, captured as
+    /// discrete datagrams (`on_datagram`/`poll_transmit`) rather than a byte
+    /// stream — every element is already exactly one frame, matching how a
+    /// GATT write or notification is tapped (see [`push_datagram`]).
+    struct DatagramPair {
+        board: Link<SelectiveRepeat>,
+        host: Link<SelectiveRepeat>,
+        now: Micros,
+        capture: Vec<(Direction, Vec<u8>)>,
+    }
+
+    impl DatagramPair {
+        fn new() -> Self {
+            DatagramPair {
+                board: Link::new(LinkConfig::ble(), 0xB0A2_0001),
+                host: Link::new(LinkConfig::ble(), 0x4051_0002),
+                now: 0,
+                capture: Vec::new(),
+            }
+        }
+
+        fn settle(&mut self) {
+            for _ in 0..500 {
+                while let Some(frame) = self.board.poll_transmit(self.now) {
+                    let frame = frame.to_vec();
+                    self.host.on_datagram(self.now, &frame);
+                    self.capture.push((Direction::BoardToHost, frame));
+                }
+                while let Some(frame) = self.host.poll_transmit(self.now) {
+                    let frame = frame.to_vec();
+                    self.board.on_datagram(self.now, &frame);
                     self.capture.push((Direction::HostToBoard, frame));
                 }
                 while let Some(ev) = self.board.recv() {

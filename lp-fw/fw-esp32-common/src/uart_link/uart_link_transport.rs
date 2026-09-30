@@ -354,27 +354,13 @@ impl LinkUpkeep for UartLinkTransport {
 /// (logged and counted: over a checked link a bad message is a host bug, not
 /// line noise).
 ///
-/// Out of line on purpose: the deserializer's frame stays its own, and never
-/// joins the server loop future's.
+/// The body is the shared decoder
+/// ([`crate::serial::server_payload::decode_client_payload`], out of line so
+/// the deserializer's frame stays its own), the one the USB and radio links
+/// read with too.
 #[inline(never)]
 fn parse_request(data: &[u8]) -> Option<ClientMessage> {
-    // `lpc_wire::decode_client_payload` reads the same bytes, but through
-    // `json::from_slice`: a second instantiation of the whole `ClientMessage`
-    // deserializer beside the `from_str` one, measured at +102 KB on the C6
-    // image. Same contract (bare JSON, first byte `{`), one deserializer. The
-    // USB transport's `parse_request`, verbatim: one copy per link type until
-    // the shared payload decoder lands (the Bluetooth plan moves both there).
-    let decoded = match (data.first(), core::str::from_utf8(data)) {
-        (Some(&lpc_wire::PAYLOAD_TAG_JSON), Ok(text)) => {
-            lpc_wire::json::from_str::<ClientMessage>(text).map_err(|e| {
-                lpc_wire::PayloadError::BadClientJson(alloc::string::ToString::to_string(&e))
-            })
-        }
-        (Some(&lpc_wire::PAYLOAD_TAG_JSON), Err(_)) => Err(lpc_wire::PayloadError::NotUtf8),
-        (Some(&tag), _) => Err(lpc_wire::PayloadError::UnknownTag(tag)),
-        (None, _) => Err(lpc_wire::PayloadError::Empty),
-    };
-    match decoded {
+    match crate::serial::server_payload::decode_client_payload(data) {
         Ok(msg) => {
             log::debug!("[uart_link] received message id={}", msg.id);
             Some(msg)

@@ -52,6 +52,7 @@ ble = [
     "dep:static_cell",
     "dep:embassy-sync-07",
     "dep:embedded-io-07",
+    "fw-esp32-common/radio-link",
 ]
 naga = ["lpa-server/naga"]
 # NOTE: the former `ws281x_2blocks` feature is gone: the RMT block plan is now

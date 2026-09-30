@@ -30,7 +30,7 @@ use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::signal::Signal;
 use embassy_time::Timer;
 use esp_radio::ble::controller::BleConnector;
-use fw_esp32_common::radio_link::RADIO_LINK_SLOTS;
+use fw_esp32_common::radio_link::{RADIO_LINK_SLOTS, RadioLinkPort};
 use trouble_host::prelude::*;
 
 use super::advertising;
@@ -57,17 +57,24 @@ const L2CAP_CHANNELS_MAX: usize = 2 * RADIO_LINK_SLOTS;
 // the heap, only a board that starts BLE pays for them (~3.5 KB).
 
 /// Which connection slots hold a connection.
-static SLOT_BUSY: [AtomicBool; RADIO_LINK_SLOTS] = [AtomicBool::new(false), AtomicBool::new(false)];
+static SLOT_BUSY: [AtomicBool; RADIO_LINK_SLOTS] =
+    [const { AtomicBool::new(false) }; RADIO_LINK_SLOTS];
 /// A connection task ended and gave its slot back.
 static SLOT_FREED: Signal<CriticalSectionRawMutex, ()> = Signal::new();
 /// The host runner failed and is being run again: the controller has been
 /// reset, so whatever the advertiser was doing is gone.
 static HOST_RESTARTED: Signal<CriticalSectionRawMutex, ()> = Signal::new();
 
-/// Bring BLE up and start serving it. Needs the RF-switch quirk to have run
-/// first (`_quirks` is the proof). A controller that fails to start is
+/// Bring BLE up and start serving it, each connection a radio link on
+/// `port` (the one the link mux serves). Needs the RF-switch quirk to have
+/// run first (`_quirks` is the proof). A controller that fails to start is
 /// logged and leaves the board USB-only.
-pub fn start(spawner: Spawner, bt: esp_hal::peripherals::BT<'static>, _quirks: BoardQuirksApplied) {
+pub fn start(
+    spawner: Spawner,
+    bt: esp_hal::peripherals::BT<'static>,
+    port: &'static RadioLinkPort,
+    _quirks: BoardQuirksApplied,
+) {
     let heap_before = esp_alloc::HEAP.used();
     let connector = match BleConnector::new(bt, Default::default()) {
         Ok(connector) => connector,
@@ -113,7 +120,7 @@ pub fn start(spawner: Spawner, bt: esp_hal::peripherals::BT<'static>, _quirks: B
     );
 
     spawner.spawn(runner_task(runner).unwrap());
-    spawner.spawn(advertise_task(spawner, peripheral, server, stack).unwrap());
+    spawner.spawn(advertise_task(spawner, peripheral, port, server, stack).unwrap());
 }
 
 #[embassy_executor::task]
@@ -136,6 +143,7 @@ async fn runner_task(mut runner: Runner<'static, BleController, DefaultPacketPoo
 async fn advertise_task(
     spawner: Spawner,
     mut peripheral: Peripheral<'static, BleController, DefaultPacketPool>,
+    port: &'static RadioLinkPort,
     server: &'static NusServer<'static>,
     stack: &'static BleStack,
 ) {
@@ -155,7 +163,7 @@ async fn advertise_task(
         {
             Either3::First(Ok(conn)) => {
                 SLOT_BUSY[slot].store(true, Ordering::Relaxed);
-                match connection_task(conn, slot, server, stack) {
+                match connection_task(conn, slot, port, server, stack) {
                     Ok(token) => spawner.spawn(token),
                     Err(_) => {
                         // The pool is sized to the slots, so this is a bug;
@@ -179,10 +187,11 @@ async fn advertise_task(
 async fn connection_task(
     conn: GattConnection<'static, 'static, DefaultPacketPool>,
     slot: usize,
+    port: &'static RadioLinkPort,
     server: &'static NusServer<'static>,
     stack: &'static BleStack,
 ) {
-    ble_connection::serve(conn, slot, server, stack).await;
+    ble_connection::serve(conn, slot, port, server, stack).await;
     SLOT_BUSY[slot].store(false, Ordering::Relaxed);
     SLOT_FREED.signal(());
 }

@@ -3,8 +3,9 @@
 // `just walk-ble-emu`).
 //
 // One Studio session, headless, against an emulated ESP32-C6 reached over
-// `?ble=emu` — the `navigator.bluetooth` polyfill whose NUS service pipes
-// bytes to the SAME board `?emu=` holds:
+// `?ble=emu` — the `navigator.bluetooth` polyfill whose NUS service reaches
+// the SAME board `?emu=` holds (its USB lp-link, with Studio's one-frame-per-
+// write datagrams translated to and from the board's stream framing):
 //
 //     add over Bluetooth → identify (flash disabled, with its reason)
 //       → clear + push a project over Bluetooth → the editor (authoring,

@@ -7,18 +7,23 @@ and the emulator tools run the same crate.
 
 > **Status: in the product on USB** (C6 and S3 silicon and their
 > emulators, Studio's Web Serial and emulator-tab providers, `lp-cli`'s
-> native serial and `serial:tcp`/`serial:ws`) **and on the classic ESP32's
+> native serial and `serial:tcp`/`serial:ws`), **on the classic ESP32's
 > UART0** (the DOM-Z-102's CH340 link, its emulator, Studio's Web Serial and
-> `lp-cli`'s native serial behind a USB-UART bridge — wire proto 32). It was
-> built and measured in the investigation
-> `lp2025/2026-09-26-1720-reliable-device-link`, proven on a C6 in the
-> `test_comms_lab` firmware, cut over on USB in
-> `lp2025/2026-09-27-0215-lp-link-usb-cutover`, and on the classic's UART in
+> `lp-cli`'s native serial behind a USB-UART bridge — wire proto 32) **and on
+> BLE** (the C6's radio links, `fw-esp32-common`'s `radio_link/`, and
+> Studio's Web Bluetooth provider — wire proto 33). It was built and measured
+> in the investigation `lp2025/2026-09-26-1720-reliable-device-link`, proven
+> on a C6 in the `test_comms_lab` firmware, cut over on USB in
+> `lp2025/2026-09-27-0215-lp-link-usb-cutover`, on the classic's UART in
 > `lp2025/2026-09-28-2015-classic-uart-on-lp-link` (emulator-validated; its
-> desk walk is still open). BLE and `fw-emu` still speak the old `M!`-line
-> framing until their own milestones (M3, and a future one) bring them onto
-> lp-link too. The decision is
-> `docs/adr/2026-09-27-lp-link-one-comms-layer.md`.
+> desk walk is still open), and on BLE in
+> `lp2025/2026-09-28-1445-ble-on-lp-link` — Datagram framing (one frame per
+> GATT write/notification, `max_payload` capped to the connection's
+> negotiated MTU), with no ATT long-write reassembly path. Only `fw-emu`
+> still speaks the old `M!`-line framing, until a future milestone brings it
+> onto lp-link too. The decision is
+> `docs/adr/2026-09-27-lp-link-one-comms-layer.md`; BLE's own is
+> `docs/adr/2026-09-24-ble-transport.md`'s dated Amendment.
 
 ## Why it exists
 
@@ -58,6 +63,14 @@ wire's messages over channel 1 lives at each edge:
   for ~19 s at `lp-emu:esp32v3:t1` — until `max_retries` resets the link;
   only then does it back off. A plain serial monitor attached in that
   window sees binary frames, not silence.
+- **Board, BLE (C6 only):** `lp-fw/fw-esp32-common/src/radio_link/` — one
+  `Link<SelectiveRepeat>` per open GATT connection (Datagram framing), owned
+  by `RadioLinkPort` (heap-leaked, one slot per `RADIO_LINK_SLOTS`) and
+  driven by `ble_connection.rs`'s per-connection loop, with replies
+  serialized by `link_mux_transport.rs` (`LinkMuxTransport`, wrapping the USB
+  transport and sharing its `FRAME_BUF` lease for any reply too big for the
+  send ring). Behind `fw-esp32-common`'s `radio-link` feature, pulled in by
+  `fw-esp32c6`'s `ble` feature (which also brings up the BT stack itself).
 - **Native host:** `lpc_wire::WireLinkPort` — the one type every native
   reader drives (a real serial port, `serial:tcp`, `serial:ws`, the fake
   board double). `lpa-client`'s `transport_serial/link_pump.rs` and `lp-cli`'s
@@ -67,23 +80,27 @@ wire's messages over channel 1 lives at each edge:
   is `uart()`; a socket carries no vendor and stays on `usb()`, which a
   classic answers just as well because each end sends at most the window the
   other advertised. `lp-cli emu run --chip esp32v3 --host-link` hosts an
-  emulated classic's UART0 in process, on the board's own `uart()`.
+  emulated classic's UART0 in process, on the board's own `uart()`. No
+  native BLE transport exists (only Studio and `spikes/ble-lab` speak BLE).
 - **Studio (wasm):** `lpa-link`'s `LinkPortService` (`device_link/
   link_port_service.rs`) — one per open port, wrapping the same
-  `WireLinkPort`, for both the Web Serial provider
-  (`providers/browser_serial_esp32/`) and the emulator-tab provider
-  (`emulator_tab_link.rs`). The Web Serial provider picks the preset by the
-  same vendor rule as native (`provider/usb_vendors.rs`,
-  `link_config_for_usb_vendor`). Neither `lp-cli emu serve` nor the tab
-  backing holds an emulated classic yet.
+  `WireLinkPort`, for the Web Serial provider
+  (`providers/browser_serial_esp32/`), the emulator-tab provider
+  (`emulator_tab_link.rs`), and the Web Bluetooth provider
+  (`providers/browser_ble/`, on `LinkConfig::ble()`). The Web Serial
+  provider picks the preset by the same vendor rule as native
+  (`provider/usb_vendors.rs`, `link_config_for_usb_vendor`). Neither
+  `lp-cli emu serve` nor the tab backing holds an emulated classic yet.
 - **Tools:** `lpc_wire::WireLinkSniffer` — a passive decoder with no session
   of its own, for `lp-cli wire unpack`, the emulator's wire tap, and
   `lp-cli record timeline`.
 
-BLE and `fw-emu` still run the pre-lp-link `M!`-line framing
-(`lp-fw/fw-esp32-common`'s `server_msg.rs`) and their own hosts
+Only `fw-emu` still runs the pre-lp-link `M!`-line framing (its own, in
+`lp-fw/fw-core`'s `transport/serial.rs`) and its hosts
 (`lpc_wire::WireStream`), unaffected by anything below. The classic's
-`StreamingMessageRouterTransport` — the `M!` transport only it used — is gone.
+`StreamingMessageRouterTransport` — the `M!` transport only it used — is
+gone, and so are `fw-esp32-common`'s `M!` line decoder and loss counters,
+which the BLE links read with until they moved.
 
 ### The proto channel's payload
 
@@ -358,7 +375,31 @@ After the hardening (plan `lp2025/2026-09-27-0155-lp-link-hardening`):
   now held for the link's life instead of allocated per message; the
   allocator no longer sees link traffic at all.
 
-## Running it
+BLE (plan `lp2025/2026-09-28-1445-ble-on-lp-link`), host-test and emulator
+figures only — **not yet silicon-validated** (the lab board was unavailable
+this phase; the runbook is that plan's P5 phase file, "Silicon soak (pending
+the board)"):
+
+- RAM, per open GATT connection, host test at the real firmware config
+  (`radio_link::link_mux_transport`'s `two_open_radio_links_cost_this_much_ram`
+  and `the_board_config_holds_one_largest_reply_and_costs_less_than_the_preset`,
+  `--nocapture`; 64-bit host figures, so a 32-bit target's descriptors and
+  event queue are roughly half — never measured on silicon): 7,672 B at rest
+  (session up, hello sent) for one link, 15,344 B for two; peak during a
+  6 KiB upload on each link, 13,880 B / 27,760 B; worst case (`ram_bound`),
+  74,664 B / 149,328 B. The unmodified `ble()` preset costs 33,344 B at rest
+  for comparison — BLE's own board config (`radio_link_config.rs`) narrows
+  `max_payload`, `send_budget`, `keep_reassembly` and `datagram_queue`
+  well below it, the same discipline USB's heap follow-up used.
+- Flash, `just fw-esp32c6-size-check` (image / 3,145,728 B): the BLE cut-over
+  landed the image 96 B *smaller* than before it (2,949,984 → 2,949,888 B;
+  deleting `line_joiner.rs`/`line_chunker.rs`/`prepared_write.rs` slightly
+  outweighs the new radio-link-port and payload-codec code).
+- Emulator idle heap (`lp-emu:esp32c6:t1`, BLE on, no connection — the
+  emulator has no BLE air, so this is the closest an emulator gets):
+  usedBytes 96,628 → 96,824 (+196 B, a leaked `RadioLinkPort` replacing
+  432 B of what had been static `.bss` — net saving), largestFreeBlock
+  185,172 → 184,932 (−240 B).
 
 ```bash
 cargo test -p lp-link --features sim,lab   # unit tests, scenarios, proptests (CI runs this)

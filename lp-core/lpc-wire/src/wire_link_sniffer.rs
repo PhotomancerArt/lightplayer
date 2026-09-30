@@ -7,7 +7,9 @@
 //! for the board's packed replies, reset with every session), log records and
 //! raw text as console lines ([`crate::console_line`]). For `lp-cli wire
 //! unpack`, the emulator's wire tap and `lp-cli record timeline` (plan
-//! `lp2025/2026-09-27-0215-lp-link-usb-cutover`, D10).
+//! `lp2025/2026-09-27-0215-lp-link-usb-cutover`, D10; BLE joined this in
+//! `lp2025/2026-09-28-1445-ble-on-lp-link` — [`Self::ble`] +
+//! [`Self::push_datagram`], one already-delimited frame per call, no COBS).
 //!
 //! A capture decodes packed replies from its session's start. One that starts
 //! mid-session reads frames **unverified** (the checksum key is not known yet)
@@ -82,6 +84,16 @@ impl WireLinkSniffer {
         }
     }
 
+    /// A sniffer for a BLE link ([`lp_link::LinkConfig::ble`]): Datagram
+    /// framing, fed with [`Self::push_datagram`] instead of [`Self::push`].
+    pub fn ble() -> Self {
+        WireLinkSniffer {
+            link: LinkSniffer::ble(),
+            table: LearnedTable::boxed(),
+            text: [TextLines::new(), TextLines::new()],
+        }
+    }
+
     /// Feed bytes that went `dir` at `now` (any split; `now` only matters to
     /// the deframer's idle flush, so a tool without timestamps may pass 0).
     pub fn push(
@@ -93,6 +105,16 @@ impl WireLinkSniffer {
     ) {
         let Self { link, table, text } = self;
         link.push(dir, now, bytes, |event| {
+            read_event(table, text, event, &mut on);
+        });
+    }
+
+    /// Feed one already-delimited datagram frame — a GATT write or
+    /// notification — the way a BLE link is tapped (see
+    /// [`lp_link::sniffer::LinkSniffer::push_datagram`]).
+    pub fn push_datagram(&mut self, dir: Direction, bytes: &[u8], mut on: impl FnMut(SniffedWire)) {
+        let Self { link, table, text } = self;
+        link.push_datagram(dir, bytes, |event| {
             read_event(table, text, event, &mut on);
         });
     }

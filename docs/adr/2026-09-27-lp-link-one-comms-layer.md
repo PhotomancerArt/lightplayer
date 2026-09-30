@@ -174,7 +174,7 @@ Milestone M5 (plan `lp2025/2026-09-28-2015-classic-uart-on-lp-link`) moved
 the classic ESP32's UART0 host link onto `lp-link`: `fw-esp32v3` on the
 DOM-Z-102's CH340 and its emulator, Studio's Web Serial path and `lp-cli`'s
 native serial behind a USB-UART bridge, and `lp-cli emu run --chip esp32v3
---host-link`. `WIRE_PROTO_VERSION` moved 30 → **32** (31 is held for the
+--host-link`. `WIRE_PROTO_VERSION` moved 30 → **32** (31 was held for the
 Bluetooth milestone, PR #880). After it, BLE and `fw-emu` are the only `M!`
 board links. D1 (layering) and D2 (pause-the-pump kept) apply unchanged:
 the classic's Web Serial port is one more `LinkPortService`. The lens and
@@ -269,3 +269,17 @@ validation arms stay pinned to pre-lp-link images), and Studio cannot reach
 an emulated classic (`lp-cli emu serve` and the tab backing hold C6s only),
 so the classic's Studio path is proven by the Web Serial conformance
 suite's board double, not the firmware.
+
+## Amendment 2026-09-30: implemented on BLE (M3, PR #880)
+
+Milestone M3 (plan `lp2025/2026-09-28-1445-ble-on-lp-link`) moved the C6's
+Bluetooth links onto `lp-link`, on `LinkConfig::ble()`'s Datagram framing
+(one frame per GATT write or notification). It was built beside M5 and
+merged after it, so it took `WIRE_PROTO_VERSION` 32 → **33**; 31, held for
+it above, was never carried by a `main` build. After it, `fw-emu` is the
+only `M!` board link. With both in, the `M!` line decoder and loss counters
+`fw-esp32-common` kept for BLE and the classic (`transport.rs`,
+`serial/link_counters.rs`) had no caller and were deleted, and the classic's
+UART transport reads requests through the shared payload decoder the USB and
+radio links use. The decisions, the MTU arithmetic and the measured RAM are
+`docs/adr/2026-09-24-ble-transport.md`'s 2026-09-29 (D8) Amendment.
