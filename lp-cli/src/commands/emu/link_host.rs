@@ -137,12 +137,17 @@ pub struct S3Board {
 }
 
 impl S3Board {
-    /// Install the host's queue on `builder` (with an attached, draining
-    /// host from power-on), build, and wrap.
-    pub fn build(builder: lp_emu_esp32s3::machine::Esp32S3Builder) -> Result<Self> {
+    /// Install the host's queue on `builder`, build, and wrap. `usb_host` is
+    /// the power-on USB host state — attached and draining
+    /// (`UsbHost::Attached { draining: true }`) is every caller's default
+    /// today; `run_s3`'s `--usb-host` is the one place that overrides it.
+    pub fn build(
+        builder: lp_emu_esp32s3::machine::Esp32S3Builder,
+        usb_host: lp_emu_esp32s3::machine::UsbHost,
+    ) -> Result<Self> {
         let (source, queue) = lp_emu_esp_common::QueueSource::new();
         let machine = builder
-            .usb_host(lp_emu_esp32s3::machine::UsbHost::Attached { draining: true })
+            .usb_host(usb_host)
             .usb_sj_source(Box::new(source))
             .build()
             .map_err(|e| anyhow::anyhow!("building the S3 machine: {e}"))?;
@@ -329,40 +334,28 @@ impl<B: EmuUsbBoard> EmuLinkHost<B> {
             self.board.push_usb_input(&frame);
         }
         while let Some(read) = self.port.poll_read() {
+            for line in console_lines(&read) {
+                self.line(line);
+            }
             match read {
-                PortRead::Message(payload) => {
-                    self.line(format!("M!{}", payload.json));
-                    match payload.message {
-                        Ok(message) => {
-                            self.messages.push(HostedMessage {
-                                id: message.id,
-                                packed: payload.packed,
-                                wire_len: payload.wire_len,
-                                json_len: payload.json.len(),
-                                at_us: self.board.micros(),
-                            });
-                            if self.queue_messages {
-                                self.pending.push_back(message);
-                            }
-                        }
-                        Err(error) => {
-                            self.link_errors += 1;
-                            self.line(format!("[link] a message did not parse: {error}"));
+                PortRead::Message(payload) => match payload.message {
+                    Ok(message) => {
+                        self.messages.push(HostedMessage {
+                            id: message.id,
+                            packed: payload.packed,
+                            wire_len: payload.wire_len,
+                            json_len: payload.json.len(),
+                            at_us: self.board.micros(),
+                        });
+                        if self.queue_messages {
+                            self.pending.push_back(message);
                         }
                     }
-                }
-                PortRead::Log(line) => self.line(line),
-                PortRead::Up { generation } => {
-                    self.line(format!("[link] up (session {generation})"));
-                }
-                PortRead::Reset { reason } => {
-                    self.link_errors += 1;
-                    self.line(format!("[link] reset ({reason:?})"));
-                }
-                PortRead::Note(note) => {
-                    self.line(format!("[link] {note}"));
-                    self.notes.push(note);
-                }
+                    Err(_) => self.link_errors += 1,
+                },
+                PortRead::Log(_) | PortRead::Up { .. } => {}
+                PortRead::Reset { .. } => self.link_errors += 1,
+                PortRead::Note(note) => self.notes.push(note),
             }
         }
         Ok(())
@@ -453,6 +446,47 @@ impl<B: EmuUsbBoard> lpa_client::ClientIo for &mut EmuLinkHost<B> {
     async fn close(&mut self) -> Result<(), TransportError> {
         Ok(())
     }
+}
+
+/// What one read off a host's link port looks like on a console: the line(s)
+/// the board used to print before lp-link. Raw text and log records as they
+/// came, each wire message as its `M!{json}` line (and a note when it did not
+/// parse), and the link's own events as `[link] …`.
+///
+/// One renderer for every host that writes a console — this one, and `lp-cli
+/// link capture` on a real port — so an emulated capture and a board's read
+/// the same way, which is what lets `validate replay` compare them.
+pub fn console_lines(read: &PortRead) -> Vec<String> {
+    match read {
+        PortRead::Message(payload) => {
+            let mut lines = vec![format!("M!{}", payload.json)];
+            if let Err(error) = &payload.message {
+                lines.push(format!("[link] a message did not parse: {error}"));
+            }
+            lines
+        }
+        PortRead::Log(line) => vec![line.clone()],
+        PortRead::Up { generation } => vec![format!("[link] up (session {generation})")],
+        PortRead::Reset { reason } => vec![format!("[link] reset ({reason:?})")],
+        PortRead::Note(note) => vec![format!("[link] {note}")],
+    }
+}
+
+/// One line for a host link's counters: what it sent and read, and what it
+/// had to recover from.
+pub fn describe_link_counters(c: &LinkCounters) -> String {
+    format!(
+        "{} frames out / {} in, {} resent, {} damaged, {} stale partials, {} duplicates, \
+         {} resets, {} payload errors",
+        c.frames_tx,
+        c.frames_rx,
+        c.resends,
+        c.damaged,
+        c.stale_partials,
+        c.duplicates,
+        c.resets.total,
+        c.payload_errors
+    )
 }
 
 /// A random link nonce, as every product host draws one per port open.

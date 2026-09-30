@@ -1362,16 +1362,26 @@ _s3-payload-sentinel payload:
 # `flash --monitor`, as this recipe does, or hold the fd open by hand
 # (`exec 3<> $port; stty -f $port 921600 raw -echo clocal; cat <&3`).
 #
+# The third argument, `no-monitor`, flashes and lets go of the port: what the
+# hardware walk does since the classic's UART went onto lp-link (proto 32),
+# because a board on lp-link says its log lines only to a link host
+# (`lp-cli link capture`), never to espflash's monitor.
+#
 # The optional second argument is passed straight to `build-fw-esp32v3`. The one
 # that matters is `frame-dump`, which makes the board print every transmitted
 # frame — `scripts/m4-hardware-walk.sh --chip esp32` flashes with it because an
 # LED cannot be diffed against a host render:
 #
 #   just flash-fw-esp32v3 /dev/cu.wchusbserial1140 frame-dump
-flash-fw-esp32v3 port="" features="": (build-fw-esp32v3 features)
+flash-fw-esp32v3 port="" features="" monitor="monitor": (build-fw-esp32v3 features)
     #!/usr/bin/env bash
     set -euo pipefail
-    args=(--chip esp32 --partition-table {{ fw_esp32v3_dir }}/partitions.csv --flash-size {{ v3_flash_size }} --monitor --monitor-baud 921600 --after hard-reset)
+    args=(--chip esp32 --partition-table {{ fw_esp32v3_dir }}/partitions.csv --flash-size {{ v3_flash_size }} --after hard-reset)
+    case "{{ monitor }}" in
+      monitor) args+=(--monitor --monitor-baud 921600) ;;
+      no-monitor) ;;
+      *) echo "monitor must be 'monitor' or 'no-monitor', not '{{ monitor }}'" >&2; exit 2 ;;
+    esac
     if [[ -n "{{ port }}" ]]; then
       args+=(--port "{{ port }}")
     fi
@@ -1418,16 +1428,25 @@ _xt-gcc-dir bin="xtensa-esp32s3-elf-gcc":
 
 # Flash fw-esp32s3 to a connected ESP32-S3 and open the serial monitor.
 #
+# The third argument, `no-monitor`, flashes and lets go of the port: since
+# wire proto 30 the board's log lines leave it only over lp-link, to a link
+# host (`lp-cli link capture`), and the hardware walk reads them that way.
+#
 # The optional second argument is passed straight to `build-fw-esp32s3`. The
 # one that matters is `frame-dump`, which makes the board print every
 # transmitted frame — `scripts/m4-hardware-walk.sh` flashes with it because an
 # LED cannot be diffed against a host render:
 #
 #   just flash-fw-esp32s3 /dev/cu.usbmodemXXXX frame-dump
-flash-fw-esp32s3 port="" features="": (build-fw-esp32s3 features)
+flash-fw-esp32s3 port="" features="" monitor="monitor": (build-fw-esp32s3 features)
     #!/usr/bin/env bash
     set -euo pipefail
-    args=(--chip esp32s3 --partition-table lp-fw/fw-esp32s3/partitions.csv --flash-size {{ s3_flash_size }} --monitor --after hard-reset)
+    args=(--chip esp32s3 --partition-table lp-fw/fw-esp32s3/partitions.csv --flash-size {{ s3_flash_size }} --after hard-reset)
+    case "{{ monitor }}" in
+      monitor) args+=(--monitor) ;;
+      no-monitor) ;;
+      *) echo "monitor must be 'monitor' or 'no-monitor', not '{{ monitor }}'" >&2; exit 2 ;;
+    esac
     if [[ -n "{{ port }}" ]]; then
       args+=(--port "{{ port }}")
     fi
@@ -1436,9 +1455,13 @@ flash-fw-esp32s3 port="" features="": (build-fw-esp32s3 features)
 # Flash fw-esp32c6 to a connected ESP32-C6 and open the serial monitor.
 #
 # The S3 recipe above, one chip over, and it exists for the same caller:
-# `scripts/m4-hardware-walk.sh --chip esp32c6` needs one command that builds,
-# flashes and monitors, and owns the partition table and flash size so the
-# walk script duplicates neither. The optional second argument is passed to
+# `scripts/m4-hardware-walk.sh --chip esp32c6` needs one command that builds
+# and flashes, and owns the partition table and flash size so the walk script
+# duplicates neither. The walk passes the third argument, `no-monitor`: since
+# wire proto 30 the board's log lines leave it only over lp-link, to a link
+# host (`lp-cli link capture`), not to espflash's monitor. With the default
+# `monitor` you see the boot text and then link frames, nothing readable.
+# The optional second argument is passed to
 # `build-fw-esp32c6`; the one that matters is `frame-dump`, which makes the
 # board print every transmitted frame, because an LED cannot be diffed against
 # a host render:
@@ -1449,10 +1472,15 @@ flash-fw-esp32s3 port="" features="": (build-fw-esp32s3 features)
 # `303a:1001` and both come up as `/dev/cu.usbmodem14332xx`. Resolve by MAC
 # first (`scripts/emu/board-port.py A0:F2:62:87:B4:8C`) and pass the port
 # explicitly rather than letting espflash pick.
-flash-fw-esp32c6 port="" features="": (build-fw-esp32c6 features)
+flash-fw-esp32c6 port="" features="" monitor="monitor": (build-fw-esp32c6 features)
     #!/usr/bin/env bash
     set -euo pipefail
-    args=(--chip esp32c6 --partition-table lp-fw/fw-esp32c6/partitions.csv --flash-size {{ c6_flash_size }} --monitor --after hard-reset)
+    args=(--chip esp32c6 --partition-table lp-fw/fw-esp32c6/partitions.csv --flash-size {{ c6_flash_size }} --after hard-reset)
+    case "{{ monitor }}" in
+      monitor) args+=(--monitor) ;;
+      no-monitor) ;;
+      *) echo "monitor must be 'monitor' or 'no-monitor', not '{{ monitor }}'" >&2; exit 2 ;;
+    esac
     if [[ -n "{{ port }}" ]]; then
       args+=(--port "{{ port }}")
     fi
@@ -3051,11 +3079,12 @@ test-emu-c6-boot:
 # `cargo build`, not a reference image, so no espflash and no git history.
 # CI's `Heap budget (esp32c6 chip)` job runs this half.
 test-emu-c6-cli:
-    cargo test -p lp-cli --test validate_registry_parity
+    cargo test -p lp-cli --test validate_registry_parity --test validate_link_host_parity
     LP_EMU_BUILD_FW=1 scripts/ci/ci-images.py with esp32c6 -- cargo test -p lp-cli --release --test emu_usb_link_pack -- --include-ignored --nocapture
     LP_EMU_BUILD_FW=1 scripts/ci/ci-images.py with esp32c6 -- cargo test -p lp-cli --release --test emu_usb_free_lag -- --include-ignored --nocapture
     LP_EMU_BUILD_FW=1 scripts/ci/ci-images.py with esp32c6 -- cargo test -p lp-cli --release --test emu_usb_link -- --include-ignored --nocapture
     LP_EMU_BUILD_FW=1 scripts/ci/ci-images.py with esp32c6 -- cargo test -p lp-cli --release --test emu_usb_link_gates -- --include-ignored --nocapture
+    LP_EMU_BUILD_FW=1 scripts/ci/ci-images.py with esp32c6 -- cargo test -p lp-cli --release --test link_capture -- --include-ignored --nocapture
     LP_EMU_BUILD_FW=1 scripts/ci/ci-images.py with esp32c6 -- cargo test -p lp-cli --release --test emu_frag_reads -- --include-ignored --nocapture
 
 # The classic ESP32 (v3) machine's own suite (plan three, M3).
@@ -3137,7 +3166,7 @@ test-emu-esp32v3-reference:
     just lint-emu-fence
     just lint-emu-regnames
     cargo test -p lp-emu-validate
-    cargo test -p lp-cli --test validate_registry_parity
+    cargo test -p lp-cli --test validate_registry_parity --test validate_link_host_parity
     commit="$(git rev-parse --short HEAD)"
     if [[ -n "${LP_CI_IMAGES:-}" ]]; then
         # The reference image IS this half's firmware build, and its claim
@@ -3383,7 +3412,7 @@ test-emu-esp32s3-gate: test-emu-esp32s3-boot
     just lint-emu-fence
     just lint-emu-regnames
     cargo test -p lp-emu-validate
-    cargo test -p lp-cli --test validate_registry_parity
+    cargo test -p lp-cli --test validate_registry_parity --test validate_link_host_parity
 
 # Run an image on the ESP32-S3 machine.
 emu-esp32s3 elf *args:
@@ -3690,17 +3719,18 @@ walk-esp32c6-emu *args: install-rv32-target build-rv32-builtins
 # The classic's UART0 link and CH340 cable verbs are what made a separate
 # script the honest shape there (DD69).
 #
-# Three differences from the C6 recipe, all in the script's header:
+# Two differences from the C6 recipe, both in the script's header — a third
+# used to be here (the runner) until `lp-cli emu run --host-link --chip
+# esp32s3` (M8) took over from the standalone `lp-emu-esp32s3` binary
+# (lp2025/2026-09-28-s3-walk-host-link):
 #
-#   the runner  the `lp-emu-esp32s3` binary, not `lp-cli emu run` — `emu run`
-#               knows one chip and teaching it a second is M8's.
 #   the image   8 MiB, not 4: this chip's partition table does not fit a 4 MB
 #               part (docs/adr/2026-07-30-esp32s3-partition-floor.md).
-#   the port    `--usb-sj-drain manual` + the control channel do what
-#               `--monitor` does on the C6: hold the port open after `lp-cli
-#               upload` disconnects, so the deferred lit dump thirty frames
-#               later still reaches a host. The walk then really does unplug
-#               the cable and asserts the state.
+#   the cable   a scripted `--usb-script` detach/attach/open, since the
+#               hosted-run door has no live control channel to unplug the
+#               cable and query its state the way the retired binary did —
+#               the walk's COMPARISON section reads the replug back from the
+#               console and the frame dump instead.
 #
 # ⚠️ **This walk is M6's only end-to-end exercise of D2's alias.** The oracle
 # project compiles a shader ON THE DEVICE; on the S3 that shader is written

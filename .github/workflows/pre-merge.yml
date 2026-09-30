@@ -368,6 +368,12 @@ jobs:
               # `lp-core/**` (director ruling DD77): that closure is wider
               # than what the two chips' `fw-esp32-common` actually shares.
               - 'lp-fw/fw-esp32-common/**'
+              # The vendored forks (esp-hal, esp-radio, esp-alloc, naga, …)
+              # are in the C6 image's link closure, so a change there moves
+              # the bytes every gate below boots. Missing until 2026-09-27:
+              # esp-hal's USB-Serial-JTAG ISR back-port (#855) would have run
+              # no emulator gate had it not also touched fw-esp32-common.
+              - 'third_party/**'
               # The tab host's WASI shim, which `scripts/emu/tab-smoke.mjs`
               # IMPORTS rather than copies (C6-in-tab P2): a change to it
               # changes what this job runs, so it must trigger this job. Since
@@ -407,6 +413,15 @@ jobs:
               # (`emu run --host-link`, `tests/emu_usb_link_gates.rs`).
               - 'lp-cli/src/commands/emu/**'
               - 'lp-cli/tests/emu_*.rs'
+              # The validation runner's link host (`lp-cli validate`'s
+              # `--link-host`, plan lp2025/2026-09-27-validate-driver-link-host):
+              # its board half is `link capture`, tested against an emulated
+              # board in `tests/link_capture.rs`, and its contract with
+              # lp-emu-validate in `tests/validate_link_host_parity.rs`.
+              - 'lp-cli/src/commands/link/**'
+              - 'lp-cli/src/commands/validate/**'
+              - 'lp-cli/tests/link_capture.rs'
+              - 'lp-cli/tests/validate_*.rs'
               - 'justfile'
               - '.github/workflows/pre-merge.yml'
             # emu_esp32v3 is the same shape for the CLASSIC ESP32's machine
