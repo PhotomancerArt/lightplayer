@@ -138,6 +138,7 @@ fn run(args: RunArgs) -> Result<()> {
     let mut builder = Esp32C6Builder::new()
         .time_grade(grade)
         .strict(args.strict_bus)
+        .reboot_on_reset(args.reboot_on_reset)
         .usb_host(usb_host_at_power_on(&args))
         // `--monitor` takes the socket out of the port's open/close story:
         // the host is declared attached and draining from power-on and stays

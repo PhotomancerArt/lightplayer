@@ -210,7 +210,7 @@ rm -f "$console" "$frames"
 
 # ------------------------------------------- the project this board can open
 #
-# `scripts/m4-hardware-walk.sh:244-267`, kept in step with it. The copy keeps
+# `scripts/m4-hardware-walk.sh:391-417`, kept in step with it. The copy keeps
 # the directory basename, because that is the project's on-device name.
 prepare_project() {
     local authored

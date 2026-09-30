@@ -264,6 +264,16 @@ pub struct RunArgs {
     #[arg(long)]
     pub flash: Option<PathBuf>,
 
+    /// Reboot the chip when something asks it to reset — a `reboot`
+    /// request's software reset, a watchdog, a host's DTR/RTS dance — and
+    /// carry on, the way a board does, instead of ending the run there. The
+    /// flash part keeps what the guest wrote, so a project uploaded before
+    /// the reboot is loaded again after it. Off by default: a run that ends
+    /// on the reset, with the reset as its outcome, is what the scenarios
+    /// that read the exit code were captured against.
+    #[arg(long = "reboot-on-reset")]
+    pub reboot_on_reset: bool,
+
     /// Refuse any access to an address no peripheral claims, instead of
     /// reading zero and carrying on.
     #[arg(long = "strict-bus")]
